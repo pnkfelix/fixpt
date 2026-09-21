@@ -156,6 +156,18 @@ fn put_string(out: &mut String, s: &str) {
     out.push('"');
 }
 
+/// Render a symbol name the way `write` does, adding `|…|` when the bare text
+/// would not read back as the same symbol.
+///
+/// Exposed because the FX front ends print symbols through their own
+/// unparsers, and their goldens were produced by Racket's `write`: a `productof`
+/// label is the symbol `1`, which must print as `|1|`.
+pub fn escape_symbol(name: &str) -> String {
+    let mut out = String::new();
+    put_symbol(&mut out, name);
+    out
+}
+
 /// Whether `name` would read back as the same symbol, or needs `|…|`.
 fn symbol_needs_bars(name: &str) -> bool {
     if name.is_empty() {

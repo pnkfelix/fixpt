@@ -58,6 +58,31 @@ place.
 `input-stream` and `output-stream` are declared by the reference but not
 implemented in either port. `fixpt` will implement them against real files.
 
+### Reference bugs deliberately *reproduced*
+
+A separate category, and the one place this project's rule inverts.
+
+For a *checker*, the reference implementation is what defines which programs
+FX-91 accepts. Correcting a bug in it would produce disagreements with the
+182-case corpus that are indistinguishable from our own mistakes, and would
+destroy the only independent signal the project has. So these are reproduced —
+but with the intended behaviour named, a test pinning the actual behaviour
+(`reference_bugs_are_reproduced_deliberately`), and an entry here. Reproducing
+a bug knowingly and in writing is not the same as conforming to one silently.
+
+| where | what it does | what was intended |
+|---|---|---|
+| `unify-poly?` (`unify.scm:2532`) | compares `(poly-body dexp1)` with **itself**, so two `poly` types unify whenever arity and kinds agree, whatever their bodies say | compare `dexp1`'s body with `dexp2`'s |
+| `dlambda<=?` | recurses with `dlambda<=?` on the bodies; a body is a type, not a dlambda, so the recursion fails immediately and two dlambdas essentially never compare | recurse with `description<=-1?` |
+| `expression=-1?` | dispatches `sum=?` and `product=?` with `(exp1 exp1)` — each compares a node with itself | `(exp1 exp2)` |
+| `product=?` | tests `(sum? exp2)` rather than `(product? exp2)` | `product?` |
+| `begin=?` | uses `map` rather than `every?`, so it returns a non-empty list — always true — and compares nothing | `every?` |
+
+Three *other* bugs in the same file the Racket port already corrected, and this
+follows the port: `unify.scm:102` reads `exp1` for `dexp1`, and `plambda=?` and
+`proj=?` both read `dexp2` for `exp2` — in each case the correct form is visible
+on the adjacent line.
+
 ---
 
 ## FX-87

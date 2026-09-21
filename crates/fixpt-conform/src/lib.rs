@@ -15,6 +15,20 @@
 //! preserves sharing: two occurrences of one variable stay equal, and two
 //! distinct variables stay distinct. So a normalised comparison still fails if
 //! the structure differs, which is the whole point.
+//!
+//! There is a third, subtler case. A unification variable that generalisation
+//! turns into a `poly` binder keeps its *bare* alpha number as its name, so a
+//! type can read `(poly ((|687| effect)) (-> |687| …))`. That number is the
+//! allocation counter at one moment during checking, so it shifts if anything
+//! upstream allocates one more or one fewer variable — and under
+//! alpha-renaming the name carries no meaning at all. It is therefore
+//! normalised too.
+//!
+//! But *not* everywhere: a `productof` field label is also a bare numeric
+//! symbol, and there the number is the field's position — structural, and a
+//! real distinction to preserve. So the rule is scoped by the enclosing form,
+//! which is why this needs a paren-tracking scan rather than a regular
+//! expression.
 
 use std::collections::HashMap;
 
@@ -194,11 +208,27 @@ fn unquote(s: &str) -> String {
 pub fn normalize(text: &str) -> String {
     let mut unif: HashMap<u32, u32> = HashMap::new();
     let mut gensym: HashMap<u32, u32> = HashMap::new();
+    let mut bare: HashMap<u32, u32> = HashMap::new();
+    // The head word of each currently-open list, so a `productof` label can be
+    // told apart from a generalised binder that happens to be numeric.
+    let mut heads: Vec<Option<String>> = Vec::new();
     let mut out = String::with_capacity(text.len());
     let bytes: Vec<char> = text.chars().collect();
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
+        if c == '(' || c == '[' {
+            heads.push(None);
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == ')' || c == ']' {
+            heads.pop();
+            out.push(c);
+            i += 1;
+            continue;
+        }
         if !is_symbol_char(c) {
             out.push(c);
             i += 1;
@@ -209,7 +239,19 @@ pub fn normalize(text: &str) -> String {
             i += 1;
         }
         let token: String = bytes[start..i].iter().collect();
-        out.push_str(&rename(&token, &mut unif, &mut gensym));
+        let first_in_list = heads.last().is_some_and(|h| h.is_none());
+        if first_in_list
+            && let Some(slot) = heads.last_mut()
+        {
+            *slot = Some(token.clone());
+        }
+        // `productof` and `sumof` tags are positions and names, not counters.
+        let structural = heads
+            .iter()
+            .rev()
+            .take(2)
+            .any(|h| matches!(h.as_deref(), Some("productof") | Some("sumof")));
+        out.push_str(&rename(&token, &mut unif, &mut gensym, &mut bare, structural));
     }
     out
 }
@@ -218,7 +260,28 @@ fn is_symbol_char(c: char) -> bool {
     !matches!(c, '(' | ')' | '[' | ']' | ' ' | '\t' | '\n' | '\r' | '"' | '\'' | '`' | ',')
 }
 
-fn rename(token: &str, unif: &mut HashMap<u32, u32>, gensym: &mut HashMap<u32, u32>) -> String {
+fn rename(
+    token: &str,
+    unif: &mut HashMap<u32, u32>,
+    gensym: &mut HashMap<u32, u32>,
+    bare: &mut HashMap<u32, u32>,
+    structural: bool,
+) -> String {
+    // A bare number, written `|687|` by `write`: a generalised binder's alpha
+    // name, unless we are inside a form where numbers mean positions.
+    if let Some(inner) = token.strip_prefix('|').and_then(|t| t.strip_suffix('|'))
+        && !inner.is_empty()
+        && inner.bytes().all(|b| b.is_ascii_digit())
+    {
+        if structural {
+            return token.to_string();
+        }
+        if let Ok(n) = inner.parse::<u32>() {
+            let next = bare.len() as u32;
+            let id = *bare.entry(n).or_insert(next);
+            return format!("|#b{id}|");
+        }
+    }
     let Some(dash) = token.rfind('-') else { return token.to_string() };
     let (prefix, digits) = token.split_at(dash);
     let digits = &digits[1..];
@@ -330,6 +393,24 @@ mod tests {
                    normalize("(-> *UNIF*-1 (*UNIF*-2) *UNIF*-2)"));
         // The two counters are independent: t-5 and *UNIF*-5 are unrelated.
         assert_eq!(normalize("(t-5 *UNIF*-5)"), "(t-#0 *UNIF*-#0)");
+    }
+
+    #[test]
+    fn generalised_binders_normalise_but_field_labels_do_not() {
+        // A binder's alpha number is an allocation artifact.
+        assert_eq!(
+            normalize("(poly ((|687| effect)) (-> |687| () int))"),
+            normalize("(poly ((|686| effect)) (-> |686| () int))")
+        );
+        // …but a productof label is the field's position.
+        assert_eq!(
+            normalize("(productof (|1| int) (|2| bool))"),
+            "(productof (|1| int) (|2| bool))"
+        );
+        assert_ne!(
+            normalize("(productof (|1| int) (|2| bool))"),
+            normalize("(productof (|2| int) (|1| bool))")
+        );
     }
 
     #[test]

@@ -463,7 +463,11 @@ impl<'a> Parser<'a> {
                     user_types.push(true);
                 }
                 None => {
-                    let user_name = self.interner.intern("?");
+                    // Named after its own alpha number, as
+                    // `make-unification-variable` does: the name becomes
+                    // visible if generalisation later turns it into a binder.
+                    let next = self.arena.alpha_counter;
+                    let user_name = self.interner.intern(&next.to_string());
                     types.push(self.arena.unification_variable(b.span, user_name, true, Kind::Type));
                     user_types.push(false);
                 }
@@ -758,7 +762,7 @@ impl<'a> Parser<'a> {
                 typed_ids,
                 typed_types,
                 typed_exps,
-                text: s.clone(),
+                text: Some(s.clone()),
             },
         ))
     }

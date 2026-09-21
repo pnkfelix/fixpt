@@ -177,8 +177,11 @@ pub enum Fx {
         typed_ids: Vec<FxId>,
         typed_types: Vec<FxId>,
         typed_exps: Vec<FxId>,
-        /// The original source, kept for error messages.
-        text: Syntax,
+        /// The original source. `None` once the module has been rebuilt by
+        /// substitution — `substitute-module` passes `unknown` for it, and the
+        /// unparser then prints the reconstructed form instead of the text the
+        /// user wrote.
+        text: Option<Syntax>,
     },
     With { module: FxId, body: FxId, text: Syntax },
     Extend { module: FxId, body: FxId, text: Syntax },
@@ -395,6 +398,11 @@ impl Arena {
 
     /// A unification variable. `weak` marks one that stands only for an
     /// inferable effect.
+    ///
+    /// `user_name` should be the variable's own alpha number rendered as a
+    /// symbol — that is what `make-unification-variable` does, and it becomes
+    /// visible when generalisation turns the variable into a `poly` binder, so
+    /// it is part of the printed output rather than a debugging detail.
     pub fn unification_variable(
         &mut self,
         span: Span,
@@ -480,6 +488,23 @@ impl Arena {
             cursor = frame.parent;
         }
         self.fresh_name()
+    }
+
+    /// Mutate a `with`/`extend` body in place, as `set-with-body!` does.
+    /// Replacing the node instead would leave the expression-side info cache
+    /// (which deliberately does not follow forwarding) attached to the old one.
+    pub fn set_body(&mut self, id: FxId, new_body: FxId) {
+        match &mut self.nodes[id.index()].fx {
+            Fx::With { body, .. } | Fx::Extend { body, .. } => *body = new_body,
+            _ => {}
+        }
+    }
+
+    /// Record a `load`'s parsed contents in place.
+    pub fn set_load_parsed(&mut self, id: FxId, node: FxId) {
+        if let Fx::Load { parsed, .. } = &mut self.nodes[id.index()].fx {
+            *parsed = Some(node);
+        }
     }
 
     pub fn alpha_bindings(&self, env: AlphaId) -> &[(Sym, u32)] {

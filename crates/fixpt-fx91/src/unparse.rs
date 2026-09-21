@@ -15,7 +15,24 @@
 //! as itself, which is why `3` appears in a type context rather than `an-int`.
 
 use crate::ast::{Arena, Fx, FxId, Kind, LiteralValue};
-use fixpt_read::{Datum, Interner, Span, Syntax};
+use fixpt_read::{Interner, Span, Syntax};
+
+/// The unparser's own output tree.
+///
+/// Not [`Syntax`]: building one would need a mutable interner just to name
+/// `->` or `moduleof`, and — the reason this exists — `Syntax` gives no way to
+/// distinguish a bare word from a string *literal*, so a `(load "file")` path
+/// printed without its quotes.
+#[derive(Clone, Debug)]
+pub enum Out {
+    /// Printed as-is.
+    Word(String),
+    /// Printed with quotes, as source.
+    Str(String),
+    /// Copied verbatim from the user's own syntax.
+    Datum(Syntax),
+    List(Vec<Out>),
+}
 
 pub struct Unparser<'a> {
     pub arena: &'a Arena,
@@ -38,40 +55,34 @@ impl<'a> Unparser<'a> {
         self.arena.span(id)
     }
 
-    fn sym(&self, span: Span, name: &str) -> Syntax {
-        // The interner is shared and immutable here, so printed-only names are
-        // built as raw data rather than interned.
-        Syntax::new(span, Datum::Str(name.to_string()))
+    /// A bare word in the output. Symbol names go through the same escaping
+    /// `write` applies, so a numeric tag such as a `productof` label prints as
+    /// `|1|` rather than `1`.
+    fn word(&self, _span: Span, name: &str) -> Out {
+        Out::Word(fixpt_read::escape_symbol(name))
     }
 
-    fn word(&self, span: Span, name: &str) -> Syntax {
-        // Words are emitted through a private datum so that printing does not
-        // require mutating the interner; `render` turns them back into bare
-        // text.
-        self.sym(span, name)
+    fn list(&self, _span: Span, items: Vec<Out>) -> Out {
+        Out::List(items)
     }
 
-    fn list(&self, span: Span, items: Vec<Syntax>) -> Syntax {
-        if items.is_empty() { Syntax::new(span, Datum::Nil) } else { Syntax::list(span, items) }
-    }
-
-    pub fn kind(&self, span: Span, k: &Kind) -> Syntax {
+    pub fn kind(&self, span: Span, k: &Kind) -> Out {
         match k {
             Kind::Type => self.word(span, "type"),
             Kind::Effect => self.word(span, "effect"),
             Kind::DFunc(ks) => {
-                let mut items = vec![self.word(span, "->>")];
+                let mut items: Vec<Out> = vec![self.word(span, "->>")];
                 items.extend(ks.iter().map(|k| self.kind(span, k)));
                 self.list(span, items)
             }
         }
     }
 
-    pub fn dexp(&self, id: FxId) -> Syntax {
+    pub fn dexp(&self, id: FxId) -> Out {
         let span = self.span(id);
         match self.arena.get(id) {
             Fx::Variable(_) => self.variable(id),
-            Fx::Unparsed { syntax, .. } => syntax.clone(),
+            Fx::Unparsed { syntax, .. } => Out::Datum(syntax.clone()),
             Fx::DLambda { ids, kinds, body } => {
                 let bindings = self.kind_bindings(span, ids, kinds);
                 self.list(
@@ -88,13 +99,13 @@ impl<'a> Unparser<'a> {
                 ],
             ),
             Fx::MaxEff(effects) => {
-                let mut items = vec![self.word(span, "maxeff")];
+                let mut items: Vec<Out> = vec![self.word(span, "maxeff")];
                 items.extend(effects.iter().map(|e| self.dexp(*e)));
                 self.list(span, items)
             }
             // `subr` prints as `->`.
             Fx::Subr { effect, ids, types, body } => {
-                let bindings: Vec<Syntax> = ids
+                let bindings: Vec<Out> = ids
                     .iter()
                     .zip(types)
                     .map(|(i, t)| self.list(span, vec![self.dexp(*i), self.dexp(*t)]))
@@ -123,7 +134,7 @@ impl<'a> Unparser<'a> {
                 ],
             ),
             Fx::ModuleOf { abs_ids, abs_kinds, desc_ids, desc_descs, val_ids, val_types } => {
-                let mut items = vec![self.word(span, "moduleof")];
+                let mut items: Vec<Out> = vec![self.word(span, "moduleof")];
                 for (i, k) in abs_ids.iter().zip(abs_kinds) {
                     items.push(self.list(
                         span,
@@ -147,7 +158,7 @@ impl<'a> Unparser<'a> {
             Fx::SumOf { tags, types } => self.tagged(span, "sumof", tags, types),
             Fx::ProductOf { tags, types } => self.tagged(span, "productof", tags, types),
             Fx::DApp { rator, rands } => {
-                let mut items = vec![self.dexp(*rator)];
+                let mut items: Vec<Out> = vec![self.dexp(*rator)];
                 items.extend(rands.iter().map(|r| self.dexp(*r)));
                 self.list(span, items)
             }
@@ -161,8 +172,8 @@ impl<'a> Unparser<'a> {
         head: &str,
         tags: &[fixpt_read::Sym],
         types: &[FxId],
-    ) -> Syntax {
-        let mut items = vec![self.word(span, head)];
+    ) -> Out {
+        let mut items: Vec<Out> = vec![self.word(span, head)];
         for (t, ty) in tags.iter().zip(types) {
             items.push(self.list(
                 span,
@@ -172,8 +183,8 @@ impl<'a> Unparser<'a> {
         self.list(span, items)
     }
 
-    fn kind_bindings(&self, span: Span, ids: &[FxId], kinds: &[Kind]) -> Syntax {
-        let bindings: Vec<Syntax> = ids
+    fn kind_bindings(&self, span: Span, ids: &[FxId], kinds: &[Kind]) -> Out {
+        let bindings: Vec<Out> = ids
             .iter()
             .zip(kinds)
             .map(|(i, k)| self.list(span, vec![self.dexp(*i), self.kind(span, k)]))
@@ -183,7 +194,7 @@ impl<'a> Unparser<'a> {
 
     /// A unification variable has no source syntax, so it prints under a name
     /// that could not be written: `*UNIF*-<n>`.
-    fn variable(&self, id: FxId) -> Syntax {
+    fn variable(&self, id: FxId) -> Out {
         let span = self.span(id);
         let Some(v) = self.arena.var(id) else {
             return self.word(span, "#<not-a-variable>");
@@ -197,22 +208,22 @@ impl<'a> Unparser<'a> {
         self.word(span, self.interner.name(v.user_name))
     }
 
-    pub fn exp(&self, id: FxId) -> Syntax {
+    pub fn exp(&self, id: FxId) -> Out {
         let span = self.span(id);
         // A literal prints as its value, not as the witness variable it parses
         // into.
         if let Some(lit) = &self.arena.exp_info(id).literal {
             return match lit {
-                LiteralValue::SelfEvaluating(s) | LiteralValue::Sexp(s) => s.clone(),
+                LiteralValue::SelfEvaluating(s) | LiteralValue::Sexp(s) => Out::Datum(s.clone()),
             };
         }
         match self.arena.get(id) {
             Fx::Variable(_) => self.variable(id),
             Fx::Unparsed { syntax, .. } => {
-                self.list(span, vec![self.word(span, "*unparsed*"), syntax.clone()])
+                self.list(span, vec![self.word(span, "*unparsed*"), Out::Datum(syntax.clone())])
             }
             Fx::Lambda { ids, types, user_types, body } => {
-                let bindings: Vec<Syntax> = ids
+                let bindings: Vec<Out> = ids
                     .iter()
                     .zip(types)
                     .zip(user_types)
@@ -230,7 +241,7 @@ impl<'a> Unparser<'a> {
                 )
             }
             Fx::Let { ids, exps, body } => {
-                let bindings: Vec<Syntax> = ids
+                let bindings: Vec<Out> = ids
                     .iter()
                     .zip(exps)
                     .map(|(i, e)| self.list(span, vec![self.exp(*i), self.exp(*e)]))
@@ -245,12 +256,64 @@ impl<'a> Unparser<'a> {
                 self.list(span, vec![self.word(span, "plambda"), bindings, self.exp(*body)])
             }
             Fx::Proj { exp, descs } => {
-                let mut items = vec![self.word(span, "proj"), self.exp(*exp)];
+                let mut items: Vec<Out> = vec![self.word(span, "proj"), self.exp(*exp)];
                 items.extend(descs.iter().map(|d| self.dexp(*d)));
                 self.list(span, items)
             }
-            Fx::Module { text, .. } if self.original_module_text => text.clone(),
-            Fx::Module { .. } => self.word(span, "(module ...)"),
+            Fx::Module { text: Some(text), .. } if self.original_module_text => Out::Datum(text.clone()),
+            // No source text: rebuild the module from its parts, which is
+            // what makes a substituted module print `->` where the user wrote
+            // `subr`.
+            Fx::Module {
+                abs_ids,
+                abs_kinds,
+                abs_descs,
+                desc_ids,
+                desc_descs,
+                define_ids,
+                define_exps,
+                typed_ids,
+                typed_types,
+                typed_exps,
+                ..
+            } => {
+                let mut items = vec![self.word(span, "module")];
+                for ((i, k), d) in abs_ids.iter().zip(abs_kinds).zip(abs_descs) {
+                    items.push(self.list(
+                        span,
+                        vec![
+                            self.word(span, "define-abstraction"),
+                            self.dexp(*i),
+                            self.kind(span, k),
+                            self.dexp(*d),
+                        ],
+                    ));
+                }
+                for (i, d) in desc_ids.iter().zip(desc_descs) {
+                    items.push(self.list(
+                        span,
+                        vec![self.word(span, "define-description"), self.dexp(*i), self.dexp(*d)],
+                    ));
+                }
+                for (i, e) in define_ids.iter().zip(define_exps) {
+                    items.push(self.list(
+                        span,
+                        vec![self.word(span, "define"), self.exp(*i), self.exp(*e)],
+                    ));
+                }
+                for ((i, t), e) in typed_ids.iter().zip(typed_types).zip(typed_exps) {
+                    items.push(self.list(
+                        span,
+                        vec![
+                            self.word(span, "define-typed"),
+                            self.exp(*i),
+                            self.dexp(*t),
+                            self.exp(*e),
+                        ],
+                    ));
+                }
+                self.list(span, items)
+            }
             Fx::With { module, body, .. } => self.list(
                 span,
                 vec![self.word(span, "with"), self.exp(*module), self.exp(*body)],
@@ -271,14 +334,13 @@ impl<'a> Unparser<'a> {
             Fx::Open(e) => self.list(span, vec![self.word(span, "open"), self.exp(*e)]),
             Fx::Close(e) => self.list(span, vec![self.word(span, "close"), self.exp(*e)]),
             Fx::Begin(exps) => {
-                let mut items = vec![self.word(span, "begin")];
+                let mut items: Vec<Out> = vec![self.word(span, "begin")];
                 items.extend(exps.iter().map(|e| self.exp(*e)));
                 self.list(span, items)
             }
-            Fx::Load { path, .. } => self.list(
-                span,
-                vec![self.word(span, "load"), Syntax::new(span, Datum::Str(path.clone()))],
-            ),
+            Fx::Load { path, .. } => {
+                self.list(span, vec![self.word(span, "load"), Out::Str(path.clone())])
+            }
             Fx::The { ty, exp } => self.list(
                 span,
                 vec![self.word(span, "the"), self.dexp(*ty), self.exp(*exp)],
@@ -297,7 +359,7 @@ impl<'a> Unparser<'a> {
                 ],
             ),
             Fx::Product { ty, exps } => {
-                let mut items = vec![self.word(span, "product"), self.dexp(*ty)];
+                let mut items: Vec<Out> = vec![self.word(span, "product"), self.dexp(*ty)];
                 items.extend(exps.iter().map(|e| self.exp(*e)));
                 self.list(span, items)
             }
@@ -322,7 +384,7 @@ impl<'a> Unparser<'a> {
                 ],
             ),
             Fx::App { rator, rands } => {
-                let mut items = vec![self.exp(*rator)];
+                let mut items: Vec<Out> = vec![self.exp(*rator)];
                 items.extend(rands.iter().map(|r| self.exp(*r)));
                 self.list(span, items)
             }
@@ -333,22 +395,26 @@ impl<'a> Unparser<'a> {
     }
 
     /// Render to the text the goldens contain.
-    ///
-    /// Words are carried as string data so that printing needs no mutable
-    /// interner; this is where they lose their quotes again. Genuine strings
-    /// in the source — `load`'s path — keep theirs, which is why they are
-    /// marked rather than guessed at.
-    pub fn render(&self, s: &Syntax) -> String {
+    pub fn render(&self, s: &Out) -> String {
         let mut out = String::new();
         self.put(s, &mut out);
         out
     }
 
-    fn put(&self, s: &Syntax, out: &mut String) {
-        match &s.datum {
-            Datum::Str(text) => out.push_str(text),
-            Datum::Nil => out.push_str("()"),
-            Datum::List { items, tail } => {
+    fn put(&self, s: &Out, out: &mut String) {
+        match s {
+            Out::Word(text) => out.push_str(text),
+            Out::Str(text) => {
+                out.push('"');
+                out.push_str(text);
+                out.push('"');
+            }
+            Out::Datum(d) => out.push_str(&fixpt_read::write_syntax(d, self.interner)),
+            Out::List(items) => {
+                if items.is_empty() {
+                    out.push_str("()");
+                    return;
+                }
                 out.push('(');
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
@@ -356,13 +422,8 @@ impl<'a> Unparser<'a> {
                     }
                     self.put(item, out);
                 }
-                if let Some(t) = tail {
-                    out.push_str(" . ");
-                    self.put(t, out);
-                }
                 out.push(')');
             }
-            _ => out.push_str(&fixpt_read::write_syntax(s, self.interner)),
         }
     }
 }

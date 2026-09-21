@@ -27,6 +27,10 @@ echo "==> FX-91"
     "$root/tests/conformance/fx91/cases/tests.fx" \
     "$root/tests/conformance/fx91/tests.expected"
 
+echo "==> FX-91 built-in module signature"
+"$RACKET" "$here/fx91-stdmodule.rkt" \
+    "$root/crates/fixpt-fx91/src/fx-module.fx"
+
 echo "==> FX-87"
 "$RACKET" "$here/fx87-golden.rkt" \
     "$root/tests/conformance/fx87/cases/kernel.fx" \

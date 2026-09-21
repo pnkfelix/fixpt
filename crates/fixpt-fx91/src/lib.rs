@@ -10,11 +10,21 @@
 //! then localise to the same place the reference would put them.
 
 pub mod ast;
+pub mod check;
+pub mod constraints;
+pub mod env;
+pub mod evaluate;
+pub mod kind;
+pub mod unify;
 pub mod error;
+pub mod free;
 pub mod matching;
+pub mod modules;
 pub mod parse;
+pub mod subtype;
 pub mod sugar;
 pub mod syms;
+pub mod typecheck;
 pub mod unparse;
 
 pub use ast::{Arena, Fx, FxId, Kind};

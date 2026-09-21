@@ -19,13 +19,13 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list.
 | **M1** heap, Cheney collector, heap images | done |
 | **M2** reader with three syntax profiles | done |
 | **M3** Core IR, Scheme expander, AST engine | done |
-| **M4** bytecode compiler and VM | next |
+| **M4** bytecode compiler and VM | |
 | **M5** heap dumping and single-binary builds | |
 | **M6** FX-87 front end | |
-| **M7** FX-91 front end | |
+| **M7** FX-91 front end | reader → checker done: **182/182** types and effects match the reference; lowering to Core IR next |
 
 ```
-$ cargo test              # 56 tests
+$ cargo test              # 67 tests
 $ cargo run -p fixpt-cli -- repl
 fixpt 0.1.0 — scheme reader, AST engine
 > (define (count-to n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc i)))))
@@ -48,6 +48,8 @@ fixpt 0.1.0 — scheme reader, AST engine
 | `fixpt-engine` | the AST machine (and, from M4, the bytecode VM) |
 | `fixpt-scheme` | the Scheme front end: expander, prelude, session |
 | `fixpt-cli` | the `fixpt` binary |
+| `fixpt-conform` | golden reading and normalisation |
+| `fixpt-fx91` | the FX-91 front end |
 
 ## Three things worth knowing about the design
 
@@ -74,7 +76,7 @@ the interpreter and the compiler agree on every case.
 implementations:
 
 * **FX-91** — all 182 top-level forms of the original `tests.fx`, with type,
-  effect and evaluated value for each.
+  effect and evaluated value for each. **All 182 types and effects now match.**
 * **FX-87** — 155 authored expressions covering the kernel, regions, effect
   masking, subtyping and the standard types, with type and effect for each.
 
