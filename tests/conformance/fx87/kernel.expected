@@ -1,71 +1,84 @@
 ;;; fixpt FX-87 conformance goldens -- GENERATED, do not edit.
 ;;; regenerate with: reference/regenerate.sh
-;;; source:    /Users/pnkfelix/Dev/Rust/fixpt/tests/conformance/fx87/cases/kernel.fx
+;;; source:    tests/conformance/fx87/cases/kernel.fx
 ;;; reference: GiffordHistory fx-lang/fx87/private/impl.rkt
 #case 1
 #src 3
 #type int
 #effect pure
+#value "3"
 #end
 #case 2
 #src -17
 #type int
 #effect pure
+#value "-17"
 #end
 #case 3
 #src 3.5
 #type float
 #effect pure
+#value "3.5"
 #end
 #case 4
 #src #\a
 #type char
 #effect pure
+#value "#\\a"
 #end
 #case 5
 #src "hello"
 #type (string @=)
 #effect pure
+#value "\"hello\""
 #end
 #case 6
 #src |#t|
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 7
 #src |#f|
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 8
 #src |#u|
 #type unit
 #effect pure
+#value "|#u|"
 #end
 #case 9
 #src (quote ())
 #type symbol
 #effect pure
+#value "()"
 #end
 #case 10
 #src (the pure int 3)
 #type int
 #effect pure
+#value "3"
 #end
 #case 11
 #src (the int 3)
 #type int
 #effect pure
+#value "3"
 #end
 #case 12
 #src (the pure bool |#t|)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 13
 #src (the pure unit |#u|)
 #type unit
 #effect pure
+#value "|#u|"
 #end
 #case 14
 #src (the pure bool 3)
@@ -75,6 +88,7 @@
 #src (if |#t| 1 2)
 #type int
 #effect pure
+#value "1"
 #end
 #case 16
 #src (if |#t| 1 #\a)
@@ -88,26 +102,31 @@
 #src (begin 1 2 3)
 #type int
 #effect pure
+#value "3"
 #end
 #case 19
 #src (begin |#t|)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 20
 #src (lambda ((x int)) x)
 #type (subr pure (int) int)
 #effect pure
+#value "#<procedure:...361790010636781.rkt:2:0>"
 #end
 #case 21
 #src (lambda ((x int) (y int)) (+ x y))
 #type (subr pure (int int) int)
 #effect pure
+#value "#<procedure:...361790010636940.rkt:2:0>"
 #end
 #case 22
 #src ((lambda ((x int)) x) 3)
 #type int
 #effect pure
+#value "3"
 #end
 #case 23
 #src ((lambda ((x int)) x) |#t|)
@@ -117,41 +136,49 @@
 #src (lambda ((f (subr pure (int) int)) (x int)) (f x))
 #type (subr pure ((subr pure (int) int) int) int)
 #effect pure
+#value "#<procedure:...371790010637258.rkt:2:0>"
 #end
 #case 25
 #src (lambda ((x int)) (lambda ((y int)) x))
 #type (subr pure (int) (subr pure (int) int))
 #effect pure
+#value "#<procedure:...371790010637417.rkt:2:0>"
 #end
 #case 26
 #src ((lambda () 3))
 #type int
 #effect pure
+#value "3"
 #end
 #case 27
 #src (let ((x 3)) x)
 #type int
 #effect pure
+#value "3"
 #end
 #case 28
 #src (let ((x 3) (y 4)) (+ x y))
 #type int
 #effect pure
+#value "7"
 #end
 #case 29
 #src (let* ((x 3) (y x)) (+ x y))
 #type int
 #effect pure
+#value "6"
 #end
 #case 30
 #src (let ((x 3)) (let ((x |#t|)) x))
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 31
 #src (letrec ((f (lambda ((n int)) (the pure int (if (= n 0) 1 (f (- n 1))))))) (f 5))
 #type int
 #effect pure
+#value "1"
 #end
 #case 32
 #src (let ((x 3 @!)) (set! x 4))
@@ -162,41 +189,49 @@
 #src (lambda ((x int @!)) (begin (set! x 4) x))
 #type (subr pure (int) int)
 #effect pure
+#value "#<procedure:...381790010638689.rkt:2:0>"
 #end
 #case 34
 #src (and |#t| |#f|)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 35
 #src (or |#f| |#t|)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 36
 #src (and)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 37
 #src (or)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 38
 #src (cond (|#t| 1) (else 2))
 #type int
 #effect pure
+#value "1"
 #end
 #case 39
 #src (cond ((= 1 2) 1) (else 2))
 #type int
 #effect pure
+#value "2"
 #end
 #case 40
 #src (do ((i 0 (+ i 1))) ((>= i 10) i))
 #type int
 #effect pure
+#value "10"
 #end
 #case 41
 #src (do ((i 0 (+ i 1)) (h 0 h @acc)) ((>= i 10) h) (set! h (+ h i)))
@@ -207,71 +242,85 @@
 #src (new 3)
 #type (ref int @=)
 #effect pure
+#value "#&3"
 #end
 #case 43
 #src (get (new 3))
 #type int
 #effect pure
+#value "3"
 #end
 #case 44
 #src (set ((proj (proj new @!) int) 3) 4)
 #type unit
 #effect pure
+#value "|#u|"
 #end
 #case 45
 #src (lambda ((r (ref int @=))) (get r))
 #type (subr pure ((ref int @=)) int)
 #effect pure
+#value "#<procedure:...401790010640596.rkt:2:0>"
 #end
 #case 46
 #src (lambda ((r (ref int @!))) (get r))
 #type (subr (read @!) ((ref int @!)) int)
 #effect pure
+#value "#<procedure:...401790010640756.rkt:2:0>"
 #end
 #case 47
 #src (lambda ((r (ref int @!))) (set r 1))
 #type (subr (write @!) ((ref int @!)) unit)
 #effect pure
+#value "#<procedure:...401790010640917.rkt:2:0>"
 #end
 #case 48
 #src ((proj (proj new @!) int) 3)
 #type (ref int @!)
 #effect (alloc @!)
+#value "#&3"
 #end
 #case 49
 #src ((proj (proj get @!) int) ((proj (proj new @!) int) 3))
 #type int
 #effect pure
+#value "3"
 #end
 #case 50
 #src (lambda ((x int)) (new x))
 #type (subr pure (int) (ref int @=))
 #effect pure
+#value "#<procedure:...411790010641407.rkt:2:0>"
 #end
 #case 51
 #src (let ((r ((proj (proj new @private) int) 3))) 3)
 #type int
 #effect pure
+#value "3"
 #end
 #case 52
 #src (lambda ((x int)) (let ((r ((proj (proj new @private) int) x))) (get r)))
 #type (subr pure (int) int)
 #effect pure
+#value "#<procedure:...411790010641725.rkt:2:0>"
 #end
 #case 53
 #src (plambda ((t type)) (lambda ((x t)) x))
 #type (poly ((t type)) (subr pure (t) t))
 #effect pure
+#value "#<procedure:...411790010641884.rkt:2:20>"
 #end
 #case 54
 #src (proj (plambda ((t type)) (lambda ((x t)) x)) int)
 #type (subr pure (int) int)
 #effect pure
+#value "#<procedure:...421790010642045.rkt:2:26>"
 #end
 #case 55
 #src ((proj (plambda ((t type)) (lambda ((x t)) x)) int) 3)
 #type int
 #effect pure
+#value "3"
 #end
 #case 56
 #src ((proj (plambda ((t type)) (lambda ((x t)) x)) bool) 3)
@@ -281,96 +330,115 @@
 #src (plambda ((r region)) (lambda ((x (ref int r))) (get x)))
 #type (poly ((r region)) (subr (read r) ((ref int r)) int))
 #effect pure
+#value "#<procedure:...421790010642380.rkt:2:22>"
 #end
 #case 58
 #src (plambda ((e effect) (t type)) (lambda ((f (subr e () t))) (f)))
 #type (poly ((e effect) (t type)) (subr e ((subr e () t)) t))
 #effect pure
+#value "#<procedure:...421790010642618.rkt:2:31>"
 #end
 #case 59
 #src (plet ((s int)) (lambda ((x s)) x))
 #type (subr pure (int) int)
 #effect pure
+#value "#<procedure:...421790010642797.rkt:2:16>"
 #end
 #case 60
 #src (lambda ((x (dlet ((t int)) t))) x)
 #type (subr pure (int) int)
 #effect pure
+#value "#<procedure:...421790010642965.rkt:2:0>"
 #end
 #case 61
 #src (lambda ((x ((dlambda ((t type)) t) int))) x)
 #type (subr pure (int) int)
 #effect pure
+#value "#<procedure:...431790010643130.rkt:2:0>"
 #end
 #case 62
 #src (the pure (poly ((t type)) (subr pure (t) t)) (plambda ((t type)) (lambda ((x t)) x)))
 #type (poly ((t type)) (subr pure (t) t))
 #effect pure
+#value "#<procedure:...431790010643291.rkt:2:66>"
 #end
 #case 63
 #src (+ 1 2)
 #type int
 #effect pure
+#value "3"
 #end
 #case 64
 #src (- 1 2)
 #type int
 #effect pure
+#value "-1"
 #end
 #case 65
 #src (* 3 4)
 #type int
 #effect pure
+#value "12"
 #end
 #case 66
 #src (/ 7 2)
 #type int
 #effect pure
+#value "3"
 #end
 #case 67
 #src (modulo 7 2)
 #type int
 #effect pure
+#value "1"
 #end
 #case 68
 #src (remainder 7 2)
 #type int
 #effect pure
+#value "1"
 #end
 #case 69
 #src (abs -3)
 #type int
 #effect pure
+#value "3"
 #end
 #case 70
 #src (expt 2 10)
 #type int
 #effect pure
+#value "1024"
 #end
 #case 71
 #src (= 1 2)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 72
 #src (< 1 2)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 73
 #src (<= 1 2)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 74
 #src (> 1 2)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 75
 #src (>= 1 2)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 76
 #src (+ 1 |#t|)
@@ -380,31 +448,37 @@
 #src (fl+ 1.5 2.5)
 #type float
 #effect pure
+#value "4.0"
 #end
 #case 78
 #src (fl* 1.5 2.5)
 #type float
 #effect pure
+#value "3.75"
 #end
 #case 79
 #src (fl< 1.5 2.5)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 80
 #src (sqrt 2.5)
 #type float
 #effect pure
+#value "1.5811388300841898"
 #end
 #case 81
 #src (floor 3.7)
 #type int
 #effect pure
+#value "3.0"
 #end
 #case 82
 #src (int->float 3)
 #type float
 #effect pure
+#value "3"
 #end
 #case 83
 #src (fl+ 1 2.5)
@@ -414,6 +488,7 @@
 #src 1.0
 #type int
 #effect pure
+#value "1.0"
 #end
 #case 85
 #src (fl+ 1.0 2.5)
@@ -423,46 +498,55 @@
 #src (char=? #\a #\b)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 87
 #src (char-upcase #\a)
 #type char
 #effect pure
+#value "#\\A"
 #end
 #case 88
 #src (char->int #\a)
 #type int
 #effect pure
+#value "97"
 #end
 #case 89
 #src (int->char 97)
 #type char
 #effect pure
+#value "#\\a"
 #end
 #case 90
 #src (char-alphabetic? #\a)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 91
 #src (not? |#t|)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 92
 #src (and? |#t| |#f|)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 93
 #src (or? |#t| |#f|)
 #type bool
 #effect pure
+#value "#t"
 #end
 #case 94
 #src (equiv? |#t| |#f|)
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 95
 #src (unique 3)
@@ -483,36 +567,43 @@
 #src (cons 1 2)
 #type (pairof int int @=)
 #effect pure
+#value "(1 . 2)"
 #end
 #case 99
 #src (car (cons 1 2))
 #type int
 #effect pure
+#value "1"
 #end
 #case 100
 #src (cdr (cons 1 2))
 #type int
 #effect pure
+#value "2"
 #end
 #case 101
 #src (null? (cons 1 2))
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 102
 #src (cons 1 (cons 2 (quote ())))
 #type (pairof int (pairof int symbol @=) @=)
 #effect pure
+#value "(1 2)"
 #end
 #case 103
 #src (lambda ((p (pairof int bool @=))) (car p))
 #type (subr pure ((pairof int bool @=)) int)
 #effect pure
+#value "#<procedure:...491790010649431.rkt:2:0>"
 #end
 #case 104
 #src (lambda ((p (pairof int bool @!))) (cdr p))
 #type (subr (read @!) ((pairof int bool @!)) bool)
 #effect pure
+#value "#<procedure:...491790010649594.rkt:2:0>"
 #end
 #case 105
 #src (list 1 2 3)
@@ -523,6 +614,7 @@
 #src (length (list 1 2 3))
 #type int
 #effect pure
+#value "3"
 #end
 #case 107
 #src (append (list 1) (list 2))
@@ -538,6 +630,7 @@
 #src (list-ref (list 1 2 3) 0)
 #type int
 #effect pure
+#value "1"
 #end
 #case 110
 #src (map (lambda ((x int)) (+ x 1)) (list 1 2 3))
@@ -553,6 +646,7 @@
 #src (for-each (lambda ((x int)) x) (list 1 2 3))
 #type unit
 #effect pure
+#value "#<void>"
 #end
 #case 113
 #src (lambda ((l (listof int @=))) (length l))
@@ -563,16 +657,19 @@
 #src (string-length "abc")
 #type int
 #effect pure
+#value "3"
 #end
 #case 115
 #src (string-ref "abc" 0)
 #type char
 #effect pure
+#value "#\\a"
 #end
 #case 116
 #src (string=? "a" "b")
 #type bool
 #effect pure
+#value "#f"
 #end
 #case 117
 #src (string->list "abc")
@@ -583,36 +680,43 @@
 #src (list->string (string->list "abc"))
 #type (string @=)
 #effect pure
+#value "\"abc\""
 #end
 #case 119
 #src (make-vector 3 0)
 #type (vectorof int @=)
 #effect pure
+#value "#(0 0 0)"
 #end
 #case 120
 #src (vector-length (make-vector 3 0))
 #type int
 #effect pure
+#value "3"
 #end
 #case 121
 #src (vector-ref (make-vector 3 0) 0)
 #type int
 #effect pure
+#value "0"
 #end
 #case 122
 #src (vector-set! ((proj (proj make-vector @!) int) 3 0) 0 1)
 #type unit
 #effect pure
+#value "#<void>"
 #end
 #case 123
 #src (lambda ((v (vectorof int @!))) (vector-set! v 0 1))
 #type (subr (write @!) ((vectorof int @!)) unit)
 #effect pure
+#value "#<procedure:...181790011118404.rkt:2:0>"
 #end
 #case 124
 #src (lambda ((v (vectorof int @!))) (vector-ref v 0))
 #type (subr (read @!) ((vectorof int @!)) int)
 #effect pure
+#value "#<procedure:...181790011118653.rkt:2:0>"
 #end
 #case 125
 #src (record ((a 1) (b |#t|)))
@@ -682,6 +786,7 @@
 #src (quote a)
 #type symbol
 #effect pure
+#value "a"
 #end
 #case 139
 #src (quote (1 2 3))
@@ -691,76 +796,91 @@
 #src (the (maxeff (read @!) (write @!)) int (the (read @!) int 3))
 #type int
 #effect (maxeff (read @!) (write @!))
+#value "3"
 #end
 #case 141
 #src (the (maxeff (read @=)) int (the pure int 3))
 #type int
 #effect pure
+#value "3"
 #end
 #case 142
 #src (lambda ((f (subr (maxeff) (int) int))) (the (subr (read @=) (int) int) f))
 #type (subr pure ((subr pure (int) int)) (subr pure (int) int))
 #effect pure
+#value "#<procedure:...241790011124757.rkt:2:0>"
 #end
 #case 143
 #src (lambda ((f (subr (read @=) (int) int))) (the (subr (maxeff) (int) int) f))
 #type (subr pure ((subr pure (int) int)) (subr pure (int) int))
 #effect pure
+#value "#<procedure:...251790011125391.rkt:2:0>"
 #end
 #case 144
 #src (lambda ((r (ref int @red))) (get r))
 #type (subr (read @red) ((ref int @red)) int)
 #effect pure
+#value "#<procedure:...261790011126042.rkt:2:0>"
 #end
 #case 145
 #src (lambda ((r (ref int @red)) (s (ref int @blue))) (+ (get r) (get s)))
 #type (subr (read (runion @red @blue)) ((ref int @red) (ref int @blue)) int)
 #effect pure
+#value "#<procedure:...261790011126686.rkt:2:0>"
 #end
 #case 146
 #src (the (read (runion @red @blue)) int ((lambda ((r (ref int @red)) (s (ref int @blue))) (+ (get r) (get s))) ((proj (proj new @red) int) 1) ((proj (proj new @blue) int) 2)))
 #type int
 #effect (read (runion @blue @red))
+#value "3"
 #end
 #case 147
 #src (plambda ((r region)) (lambda ((x (ref int r))) (set x 1)))
 #type (poly ((r region)) (subr (write r) ((ref int r)) unit))
 #effect pure
+#value "#<procedure:...271790011127840.rkt:2:22>"
 #end
 #case 148
 #src (lambda ((x int)) ((proj (proj new @red) int) x))
 #type (subr (alloc @red) (int) (ref int @red))
 #effect pure
+#value "#<procedure:...281790011128307.rkt:2:0>"
 #end
 #case 149
 #src (let ((v ((proj (proj make-vector @scratch) int) 3 0))) (begin (vector-set! v 0 1) (vector-ref v 0)))
 #type int
 #effect pure
+#value "1"
 #end
 #case 150
 #src (lambda ((x ((dlambda ((r region)) (ref int r)) @!))) (get x))
 #type (subr (read @!) ((ref int @!)) int)
 #effect pure
+#value "#<procedure:...291790011129116.rkt:2:0>"
 #end
 #case 151
 #src (plambda ((f (dfunc (type) type))) (lambda ((x (f int))) x))
 #type (poly ((f (dfunc (type) type))) (subr pure ((f int)) (f int)))
 #effect pure
+#value "#<procedure:...291790011129506.rkt:2:35>"
 #end
 #case 152
 #src (plambda ((e effect) (t type) (u type)) (lambda ((f (subr e (t) u)) (x t)) (f x)))
 #type (poly ((e effect) (t type) (u type)) (subr e ((subr e (t) u) t) u))
 #effect pure
+#value "#<procedure:...291790011129915.rkt:2:40>"
 #end
 #case 153
 #src (lambda ((f (subr (read @red) (int) int))) (f 1))
 #type (subr (read @red) ((subr (read @red) (int) int)) int)
 #effect pure
+#value "#<procedure:...301790011130302.rkt:2:0>"
 #end
 #case 154
 #src (lambda ((f (subr (maxeff (read @red) (write @blue)) (int) int))) (f 1))
 #type (subr (maxeff (read @red) (write @blue)) ((subr (maxeff (read @red) (write @blue)) (int) int)) int)
 #effect pure
+#value "#<procedure:...301790011130688.rkt:2:0>"
 #end
 #case 155
 #src (lambda ((l (dletrec ((il (oneof ((nil unit) (cons (pairof int il @=))) @=))) il))) l)

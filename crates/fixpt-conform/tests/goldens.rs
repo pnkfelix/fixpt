@@ -30,8 +30,22 @@ fn reads_the_fx87_corpus() {
     assert_eq!(cases.len(), 155);
     let errors = cases.iter().filter(|c| matches!(c.outcome, Outcome::StaticError { .. })).count();
     assert_eq!(errors, 10, "ten cases are deliberately ill-typed or pin a quirk");
-    // No values: the FX-87 port installs no evaluator.
-    assert!(cases.iter().all(|c| c.value.is_none()));
+    // Values do exist, but not for every case. `impl.rkt` installs no
+    // evaluator, so they come from `#lang fx87-hashlang` — which does not
+    // implement FX-87's standard forms (`record`, `one`, `tagcase`, `delay`,
+    // `vlambda`) and hangs on a form whose type is recursive. Those 25 cases
+    // carry no `#value` and are checked separately, in
+    // `fixpt-fx87/tests/beyond_reference.rs`, against this implementation
+    // rather than against the reference.
+    let values = cases.iter().filter(|c| c.value.is_some()).count();
+    assert_eq!(values, 120, "the evaluating path reaches 120 of the 155");
+    assert!(
+        cases
+            .iter()
+            .filter(|c| matches!(c.outcome, Outcome::StaticError { .. }))
+            .all(|c| c.value.is_none()),
+        "an ill-typed form never has a value"
+    );
 }
 
 #[test]

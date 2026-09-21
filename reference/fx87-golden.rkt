@@ -9,13 +9,21 @@
 ;;; is not optional: FX-87 builds genuinely CIRCULAR type structures with
 ;;; SET-CAR!, and it is what re-finitises them into DLETREC form.
 ;;;
-;;; Values are not produced here.  The FX-87 port installs no evaluator
-;;; (machdep.rkt's FX-EVAL-HOOK errors by design); `#lang fx87-hashlang` is
-;;; the archive's evaluating path and is driven separately.
+;;; VALUES come from a second source.  The FX-87 port installs no evaluator
+;;; (machdep.rkt's FX-EVAL-HOOK errors by design), so each well-typed form is
+;;; also written to a temporary `#lang fx87-hashlang` module and run -- the
+;;; archive's evaluating path, and the one its own test-cross-validate.rkt
+;;; uses.  That path shares the checker with impl.rkt but has its own pair
+;;; conversion, hygiene handling and runtime primitives, so a value produced
+;;; there is evidence about the language rather than a restatement of the
+;;; type.
+;;;
+;;; This makes regeneration slow -- one Racket module compile per case -- which
+;;; is why the goldens are committed and this script is run deliberately.
 ;;;
 ;;; Usage: racket fx87-golden.rkt <input.fx-cases> <output.expected>
 
-(require racket/port "common.rkt")
+(require racket/port racket/file racket/string racket/sandbox "common.rkt")
 
 (define ref (make-ref 'fx87))
 (define parse-exp            (ref 'parse-exp))
@@ -75,13 +83,63 @@
                  (deep->immutable (unparse-d-node (create-finite-dexp (desc->effect desc)))))
            (list 'type-error (trim-error (get-output-string log))))])))
 
+;; Run one form through `#lang fx87-hashlang` and return its printed value,
+;; or #f if it does not produce one.  The module prints
+;;   "  FORM\n      => DESC  (value: VAL)\n"
+;; and we want only the VAL.
+;;
+;; Each case runs in a SEPARATE Racket process.  Sharing one turned out to
+;; degrade badly: `#lang fx87-hashlang` calls into the very same impl.rkt
+;; instance this script is driving, and after eighty-odd dynamically required
+;; temporary modules the run wedged on a form that completes instantly on its
+;; own.  A process per case costs a second and removes the whole class of
+;; problem -- and it makes the deadline below real, since a subprocess can
+;; simply be killed.
+(define value-time-limit-seconds 25)
+(define racket-exe (find-system-path 'exec-file))
+
+(define (hashlang-value form)
+  (define tmp (make-temporary-file "fixpt-fx87-~a.rkt"))
+  (define result
+    (with-handlers ([(lambda (e) #t) (lambda (e) #f)])
+      (call-with-output-file tmp #:exists 'truncate
+        (lambda (out)
+          (displayln "#lang fx87-hashlang" out)
+          (parameterize ([current-output-port out]) (write form))
+          (newline out)))
+      (define-values (proc stdout stdin stderr)
+        (subprocess #f #f #f racket-exe (path->string tmp)))
+      (define finished (sync/timeout value-time-limit-seconds proc))
+      (unless finished (subprocess-kill proc #t))
+      (define text (port->string stdout))
+      (close-input-port stdout)
+      (close-output-port stdin)
+      (close-input-port stderr)
+      (and finished
+           ;; Bounded to one line: the module prints the value again on the
+           ;; next, and `.` in a pregexp does match a newline, so an unbounded
+           ;; match ran past the end of the record and captured both.
+           (let ([m (regexp-match #px"\\(value: ([^\n]*)\\)" text)])
+             (and m (string-trim (cadr m)))))))
+  (with-handlers ([(lambda (e) #t) void]) (delete-file tmp))
+  result)
+
 (define (emit port n form)
   (define r (check form))
   (fprintf port "#case ~a\n" n)
   (fprintf port "#src ~s\n" form)
   (case (car r)
-    [(ok)      (fprintf port "#type ~s\n#effect ~s\n" (cadr r) (caddr r))]
-    [else      (fprintf port "#static-error ~s\n" (cadr r))])
+    [(ok)
+     (fprintf port "#type ~s\n#effect ~s\n" (cadr r) (caddr r))
+     ;; A well-typed form should also run. If the evaluating path cannot
+     ;; produce a value -- a procedure, or a form it rejects for its own
+     ;; reasons -- the case simply carries no #value and the Rust harness
+     ;; counts it as having no dynamic golden rather than as a failure.
+     (define v (hashlang-value form))
+     (when v (fprintf port "#value ~s\n" v))]
+    ;; One line per record: a message with a newline in it would otherwise
+    ;; corrupt the format, and at least one case has one.
+    [else      (fprintf port "#static-error ~s\n" (normalize-space (cadr r)))])
   (fprintf port "#end\n"))
 
 (define forms (read-forms in-file))

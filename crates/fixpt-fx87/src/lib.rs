@@ -32,10 +32,12 @@
 pub mod ast;
 pub mod check;
 pub mod env;
+pub mod erase;
 pub mod error;
 pub mod eval;
 pub mod mask;
 pub mod parse;
+pub mod session;
 pub mod standard;
 pub mod subtype;
 pub mod syms;
@@ -44,3 +46,4 @@ pub mod unparse;
 pub use ast::{Arena, Desc, DescId, Exp, ExpId, Kind};
 pub use error::{FxError, R};
 pub use parse::{DScope, Parser};
+pub use session::Fx87Session;

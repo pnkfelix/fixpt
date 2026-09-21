@@ -185,6 +185,30 @@ both renderings denote it; only the choice of where to unroll differs. Recorded
 here rather than chased, and pinned by the conformance floor so it cannot
 silently become two cases.
 
+### The dynamic reference does not reach every form
+
+FX-87's value goldens come from `#lang fx87-hashlang`, because `impl.rkt` — the
+source of every other FX-87 answer here — installs no evaluator at all
+(`machdep.rkt`'s `FX-EVAL-HOOK` errors by design). That path covers **120 of the
+155** corpus forms. The other 25 are not skipped for convenience; the archive
+cannot produce answers for them:
+
+* **The standard forms are unimplemented there.** `record`, `select`, `one`,
+  `tagcase`, `one-set!`, `delay` and `vlambda` are unbound identifiers in the
+  hashlang, which never grew them.
+* **A recursive type hangs it.** `(list 1 2 3)` does not finish: its type
+  contains itself, and the hashlang's display path does not re-finitise it the
+  way `create-finite-dexp` does for `impl.rkt`. The golden generator gives each
+  case its own process and a deadline, so this shows up as a missing value
+  rather than as a wedged run.
+
+`fixpt` runs all 25. They are checked in
+`crates/fixpt-fx87/tests/beyond_reference.rs`, and that file is explicit that
+its expected values are **this implementation's own**, recorded to catch a
+regression — not evidence of agreement with anything. The distinction matters:
+120/155 is the conformance figure, and the remaining 25 are covered by a weaker
+claim that is labelled as weaker.
+
 ### The ADT cluster stays stubbed
 
 Nine identifiers in the `struct`/`structof`/`convert`/`abstract`/`extract`

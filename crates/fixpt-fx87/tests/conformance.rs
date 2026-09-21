@@ -9,6 +9,7 @@
 
 use fixpt_conform::{normalize, parse_goldens, Case, Outcome, Report, Verdict};
 use fixpt_fx87::check::Checker;
+use fixpt_fx87::Fx87Session;
 use fixpt_fx87::unparse::unparse;
 use fixpt_fx87::Parser;
 use fixpt_read::{Interner, Reader, SourceMap, Syntax, SyntaxProfile};
@@ -134,6 +135,98 @@ fn types_and_effects_match_the_reference() {
     assert!(
         report.matched.len() >= FLOOR,
         "fx87 type/effect regressed below {FLOOR}\n{}",
+        report.detail(14)
+    );
+}
+
+
+/// Canonicalise a printed value.
+///
+/// The goldens come from Racket, this engine prints its own way, and a few
+/// shapes differ without anything about FX-87 differing:
+///
+/// * a procedure's printed name carries the temporary file it was compiled
+///   from, which is not even stable between runs of the generator;
+/// * Racket writes a box `#&3` where this prints `#<box 3>`;
+/// * Racket's `#<void>` is this engine's unspecified value;
+/// * FX-87's unit is the symbol `#u`, which Racket `write`s with bars.
+///
+/// Everything else is compared literally.
+fn normalize_value(v: &str) -> String {
+    let mut out = String::with_capacity(v.len());
+    let mut rest = v;
+    while let Some(i) = rest.find("#<procedure") {
+        out.push_str(&rest[..i]);
+        out.push_str("#<procedure>");
+        match rest[i..].find('>') {
+            Some(j) => rest = &rest[i + j + 1..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    let out = out
+        .replace("#<void>", "#<unspecified>")
+        .replace("|#u|", "#u");
+    // `#&x` and `#<box x>` are the same box.
+    let out = if let Some(i) = out.find("#&") {
+        format!("{}#<box {}>", &out[..i], &out[i + 2..])
+    } else {
+        out
+    };
+    normalize(&out)
+}
+
+/// Values, against the archive's evaluating path.
+///
+/// The stronger of the two levels, and the reason it was worth generating:
+/// static conformance exercises the checker, while this exercises erasure, the
+/// run-time representations those types were hiding, and the Scheme engine
+/// underneath. The goldens come from `#lang fx87-hashlang` rather than from
+/// `impl.rkt`, whose driver installs no evaluator at all — so a value here is
+/// evidence about the language rather than a restatement of its type.
+#[test]
+fn values_match_the_reference() {
+    let mut session = Fx87Session::new().expect("the standard environment and runtime load");
+    let mut interner = std::mem::take(&mut session.checker.p.interner);
+    let forms = read_forms(&mut interner);
+    session.checker.p.interner = interner;
+
+    let cases = cases();
+    let mut report = Report::default();
+    for (form, case) in forms.iter().zip(&cases) {
+        let verdict = match session.run(form) {
+            Err(e) => match case.expected_value() {
+                // A case with no dynamic golden cannot fail here.
+                None => Verdict::Unsupported { reason: "no value golden".into() },
+                Some(_) => Verdict::Error { message: e.to_string() },
+            },
+            Ok(outcome) => match (&outcome.value, case.expected_value()) {
+                (_, None) => Verdict::Unsupported { reason: "no value golden".into() },
+                (Ok(got), Some(want)) => {
+                    let (got, want) = (normalize_value(got), normalize_value(want));
+                    if got == want {
+                        Verdict::Match
+                    } else {
+                        Verdict::Mismatch { expected: want, got }
+                    }
+                }
+                (Err(e), Some(_)) => {
+                    Verdict::Error { message: format!("{e}\n    code: {}", outcome.code) }
+                }
+            },
+        };
+        report.record(case, verdict);
+    }
+    println!("{}", report.summary("fx87 value"));
+    print!("{}", report.detail(14));
+
+    const FLOOR: usize = 120;
+    assert!(
+        report.matched.len() >= FLOOR,
+        "fx87 value regressed below {FLOOR}\n{}",
         report.detail(14)
     );
 }

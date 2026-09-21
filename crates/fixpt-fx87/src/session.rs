@@ -1,0 +1,95 @@
+//! Running FX-87 programs: check, erase, evaluate.
+//!
+//! `type-and-eval` in the reference is `desc-of-exp` followed by
+//! `(fx-eval (erase-type node))`, and this is the same two steps onto this
+//! project's engines. Nothing about FX-87 reaches the evaluator: by the time
+//! the Scheme session sees anything, the types have been erased and what is
+//! left is a Scheme program.
+//!
+//! The erased form goes across as *text* and is re-read, for the reason FX-91's
+//! does: the FX-87 checker and the Scheme session intern symbols separately, so
+//! passing syntax directly would mix two symbol spaces silently. Writing and
+//! re-reading also makes the generated code inspectable, which is most of
+//! debugging a code generator.
+
+use crate::check::Checker;
+use crate::erase::erase;
+use crate::error::{FxError, R};
+use crate::unparse::unparse;
+use fixpt_read::Syntax;
+use fixpt_runtime::write_value;
+use fixpt_scheme::Session;
+
+/// The FX-87 run-time environment, as Scheme.
+pub const RUNTIME: &str = include_str!("runtime.scm");
+
+/// Default evaluation budget for one form.
+///
+/// FX-87 is Turing-complete, and a corpus written to exercise the *type* system
+/// has no reason to avoid a loop. A budget turns a non-terminating case into
+/// one reported failure rather than a wedged test run — a lesson this project
+/// has now learned in three places.
+pub const DEFAULT_STEP_LIMIT: u64 = 20_000_000;
+
+pub struct Fx87Session {
+    pub checker: Checker,
+    pub scheme: Session,
+    /// Whatever the last form printed while it ran.
+    pub printed: String,
+}
+
+/// What checking and running one form produced.
+pub struct Outcome {
+    pub ty: String,
+    pub effect: String,
+    /// The erased Scheme, kept for inspection.
+    pub code: String,
+    pub value: Result<String, String>,
+}
+
+impl Fx87Session {
+    pub fn new() -> R<Fx87Session> {
+        Fx87Session::with_backend(fixpt_engine::Backend::Ast)
+    }
+
+    pub fn with_backend(backend: fixpt_engine::Backend) -> R<Fx87Session> {
+        let checker = Checker::new()?;
+        let mut scheme = Session::with_backend(backend);
+        scheme.eval_str("<fx87-runtime>", RUNTIME).map_err(|e| {
+            FxError::internal(
+                fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0),
+                format!("fx87 runtime: {e}"),
+            )
+        })?;
+        scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        Ok(Fx87Session { checker, scheme, printed: String::new() })
+    }
+
+    /// Check a form, erase it, and run it.
+    ///
+    /// The checker is reset to the initial environment each time, matching the
+    /// reference's own top level.
+    pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
+        let env = self.checker.env.clone();
+        let exp = self.checker.p.parse_exp(form, &Default::default())?;
+        let desc = self.checker.check(exp, &env)?;
+        let ty = unparse(&self.checker.p.arena, &self.checker.p.interner, desc.ty);
+        let effect = unparse(&self.checker.p.arena, &self.checker.p.interner, desc.effect);
+
+        let code = erase(&self.checker.p.arena, &self.checker.p.interner, exp);
+        // A program's own output is captured rather than let loose: the value
+        // is what is being compared.
+        let saved = self.scheme.rt.capture();
+        let result = self.scheme.eval_str("<fx87>", &code);
+        self.printed = self.scheme.rt.restore(saved);
+        let value = match result {
+            // `write`, not `display`: the archive's evaluating path prints a
+            // result with Racket's `print`, so a character comes out `#\a` and
+            // a string keeps its quotes. (FX-91's driver uses `~a` and so
+            // needs `display` — the two references differ here.)
+            Ok(v) => Ok(write_value(&self.scheme.rt.heap, v)),
+            Err(e) => Err(e.to_string()),
+        };
+        Ok(Outcome { ty, effect, code, value })
+    }
+}
