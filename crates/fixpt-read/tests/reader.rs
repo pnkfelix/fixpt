@@ -285,7 +285,7 @@ fn reads_the_whole_fx91_test_suite() {
 #[test]
 fn reads_the_whole_fx87_corpus() {
     let (forms, _) = read(SyntaxProfile::FX87, FX87_CASES);
-    assert_eq!(forms.len(), 155, "the FX-87 corpus has 155 forms");
+    assert_eq!(forms.len(), 161, "the FX-87 corpus has 161 forms");
 }
 
 #[test]

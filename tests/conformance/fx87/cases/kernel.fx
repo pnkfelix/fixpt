@@ -231,3 +231,16 @@
 
 ;;; ---- recursive types via dletrec ----
 (lambda ((l (dletrec ((il (oneof ((nil unit) (cons (pairof int il @=))) @=))) il))) l)
+
+;;; ---- mutability of a binding is a static property ----
+;;; Appended after the original 155 so earlier case numbers do not move.
+;;; These pin the rule that makes FX-87 safe to compile more aggressively than
+;;; Scheme: a binding with no explicit region lives in the immutable region and
+;;; cannot be assigned at all, so a standard binding's meaning is fixed for
+;;; every call site.
+(let ((x 1)) (set! x 2))                ; ill-typed: @= is not writable
+(set! + -)                              ; ill-typed: a standard binding is immutable
+(lambda ((x int)) (set! x 4))           ; ill-typed: parameter has no mutable region
+(lambda ((x int @!)) (set! x 4))        ; well-typed, and the write is masked
+(let ((f +)) (f 1 2))                   ; a standard binding can still be aliased
+(let ((+ 3)) +)                         ; ...and shadowed, which the checker sees

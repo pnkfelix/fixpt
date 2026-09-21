@@ -27,9 +27,9 @@ fn reads_the_fx91_corpus() {
 #[test]
 fn reads_the_fx87_corpus() {
     let cases = parse_goldens(FX87).expect("fx87 goldens parse");
-    assert_eq!(cases.len(), 155);
+    assert_eq!(cases.len(), 161);
     let errors = cases.iter().filter(|c| matches!(c.outcome, Outcome::StaticError { .. })).count();
-    assert_eq!(errors, 10, "ten cases are deliberately ill-typed or pin a quirk");
+    assert_eq!(errors, 13, "deliberately ill-typed cases, or ones pinning a quirk");
     // Values do exist, but not for every case. `impl.rkt` installs no
     // evaluator, so they come from `#lang fx87-hashlang` — which does not
     // implement FX-87's standard forms (`record`, `one`, `tagcase`, `delay`,
@@ -38,7 +38,7 @@ fn reads_the_fx87_corpus() {
     // `fixpt-fx87/tests/beyond_reference.rs`, against this implementation
     // rather than against the reference.
     let values = cases.iter().filter(|c| c.value.is_some()).count();
-    assert_eq!(values, 120, "the evaluating path reaches 120 of the 155");
+    assert_eq!(values, 123, "the evaluating path reaches 123 of the 161");
     assert!(
         cases
             .iter()

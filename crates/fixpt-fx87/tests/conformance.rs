@@ -35,7 +35,7 @@ fn the_corpus_and_the_goldens_line_up() {
     let forms = read_forms(&mut interner);
     let cases = cases();
     assert_eq!(forms.len(), cases.len(), "one golden per form");
-    assert_eq!(cases.len(), 155, "the corpus is 155 forms");
+    assert_eq!(cases.len(), 161, "the corpus is 161 forms");
 }
 
 /// Every form in the corpus reaches the abstract syntax.
@@ -62,7 +62,7 @@ fn forms_parse() {
     println!("{}", report.summary("fx87 parse"));
     print!("{}", report.detail(12));
 
-    const FLOOR: usize = 155;
+    const FLOOR: usize = 161;
     assert!(
         report.matched.len() >= FLOOR,
         "fx87 parse regressed below {FLOOR}\n{}",
@@ -131,7 +131,7 @@ fn types_and_effects_match_the_reference() {
     println!("{}", report.summary("fx87 type/effect"));
     print!("{}", report.detail(14));
 
-    const FLOOR: usize = 154;
+    const FLOOR: usize = 160;
     assert!(
         report.matched.len() >= FLOOR,
         "fx87 type/effect regressed below {FLOOR}\n{}",
@@ -223,7 +223,7 @@ fn values_match_the_reference() {
     println!("{}", report.summary("fx87 value"));
     print!("{}", report.detail(14));
 
-    const FLOOR: usize = 120;
+    const FLOOR: usize = 123;
     assert!(
         report.matched.len() >= FLOOR,
         "fx87 value regressed below {FLOOR}\n{}",

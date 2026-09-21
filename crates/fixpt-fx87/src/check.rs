@@ -446,6 +446,20 @@ impl Checker {
                         ),
                     ));
                 };
+                // A variable can only be assigned if its binding lives in a
+                // region that can be written. Everything bound without an
+                // explicit region — which is every standard binding — lives in
+                // `@=`, so this is what makes `(set! + -)` a *static error* in
+                // FX-87 where it is ordinary Scheme.
+                if self.is_immutable(binding.region) {
+                    return Err(self.raised(
+                        exp,
+                        format!(
+                            "Use SET! only mutable variable: {}",
+                            self.p.interner.name(name)
+                        ),
+                    ));
+                }
                 let d = self.desc_of_exp(value, env)?;
                 let ok = {
                     let rel = self.rel();
