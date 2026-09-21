@@ -11,6 +11,38 @@ Each entry says what the reference does, what `fixpt` does, and why.
 
 ---
 
+## Which reference?
+
+Worth stating plainly, because "the reference" is ambiguous and the answer
+differs in kind from "the original".
+
+Every golden in `tests/conformance/` is generated from the **Racket ports** in
+[`GiffordHistory`](https://github.com/pnkfelix/GiffordHistory) —
+`fx-lang/fx91/private/impl.rkt` and `fx-lang/fx87/private/impl.rkt` — and each
+`.expected` file records that in its header. The checking rules implemented here
+were read from those same files. So goldens and implementation are consistent
+with each other by construction.
+
+The ports are not the originals. Those are also in the archive —
+`extracted/fx91/*.scm` for 1991 and `mit-psrg-fx/fx87/old-impl/*.lisp` for 1987
+— and they cannot be run here: the 1987 sources are Symbolics Common Lisp over
+Pseudoscheme. So **"conformant" in this project means "agrees with the port"**,
+which is a weaker claim than agreeing with the 1987 or 1991 system, and it is
+the strongest claim anything runnable can support.
+
+Where the two are known to differ, it is recorded below and attributed. The
+clearest case is FX-87's `'()`, which types as `symbol` because of the port's
+NIL emulation; whether the original behaved the same under Pseudoscheme is a
+question about `pseudo.lisp` that this corpus cannot answer, and the entry says
+so rather than implying it was checked.
+
+Where a detail has been checked against the original, the entry says that too.
+FX-87's checking-failure messages are an example: the port reports
+`Cannot type-check` for a rule that declines and a specific message —
+`Subtyping rule violation`, `Uncomparable types`, `Wrong arguments types` — for
+one that raises, and all four strings appear in `old-impl/type-check.lisp`, so
+that behaviour is original rather than introduced.
+
 ## FX-91
 
 ### `[e dx1 … dxn]` projection sugar is implemented
