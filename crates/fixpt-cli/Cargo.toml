@@ -1,0 +1,20 @@
+[package]
+name = "fixpt-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fixpt"
+path = "src/main.rs"
+
+[dependencies]
+fixpt-heap = { path = "../fixpt-heap" }
+fixpt-read = { path = "../fixpt-read" }
+fixpt-core = { path = "../fixpt-core" }
+fixpt-runtime = { path = "../fixpt-runtime" }
+fixpt-engine = { path = "../fixpt-engine" }
+fixpt-scheme = { path = "../fixpt-scheme" }
+
+[lints]
+workspace = true

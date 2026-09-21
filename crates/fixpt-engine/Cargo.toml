@@ -1,0 +1,18 @@
+[package]
+name = "fixpt-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fixpt-heap = { path = "../fixpt-heap" }
+fixpt-read = { path = "../fixpt-read" }
+fixpt-core = { path = "../fixpt-core" }
+fixpt-runtime = { path = "../fixpt-runtime" }
+
+[features]
+default = []
+gc-stress = ["fixpt-heap/gc-stress"]
+
+[lints]
+workspace = true

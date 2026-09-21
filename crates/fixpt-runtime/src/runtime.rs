@@ -1,0 +1,110 @@
+//! Session-wide state: the heap, the interners, and the handful of well-known
+//! objects the primitives need to reach.
+
+use crate::error::{Outcome, Thrown};
+use fixpt_heap::{Heap, ObjType, Value};
+use fixpt_read::{Interner, SourceMap};
+
+/// Where `display` and `write` go.
+pub enum Sink {
+    /// Straight to the process's standard output — the REPL.
+    Stdout,
+    /// Accumulated in a buffer — tests, and `with-output-to-string`.
+    Buffer(String),
+}
+
+pub struct Runtime {
+    pub heap: Heap,
+    /// Compile-time symbol names. Distinct from the heap's symbol table, which
+    /// holds runtime symbol *objects*; this one is unaffected by collection.
+    pub interner: Interner,
+    pub sources: SourceMap,
+    pub out: Sink,
+
+    /// Root index of the record type used for R7RS error objects. Held as a
+    /// root index rather than a `Value` so it survives collection.
+    error_rtd_root: usize,
+}
+
+impl Runtime {
+    pub fn new() -> Runtime {
+        let mut heap = Heap::new();
+        let mut interner = Interner::new();
+        interner.intern("error-object");
+
+        // `[name:Symbol, field-names:Vector]`
+        let name = heap.intern("error-object");
+        let msg = heap.intern("message");
+        let irritants = heap.intern("irritants");
+        let fields = heap.vector_from(&[msg, irritants]);
+        let rtd = heap.alloc(ObjType::RecordType, 2, Value::UNSPECIFIED);
+        heap.obj_set(rtd, 0, name);
+        heap.obj_set(rtd, 1, fields);
+        let error_rtd_root = heap.push_root(rtd);
+
+        Runtime { heap, interner, sources: SourceMap::new(), out: Sink::Stdout, error_rtd_root }
+    }
+
+    pub fn error_rtd(&self) -> Value {
+        self.heap.root_at(self.error_rtd_root)
+    }
+
+    /// Build an R7RS error object: `[rtd, message:String, irritants:list]`.
+    pub fn error_object(&mut self, message: &str, irritants: &[Value]) -> Value {
+        let msg = self.heap.make_string(message);
+        let irr = self.heap.list_from(irritants);
+        let rtd = self.error_rtd();
+        let obj = self.heap.alloc(ObjType::Record, 3, Value::UNSPECIFIED);
+        self.heap.obj_set(obj, 0, rtd);
+        self.heap.obj_set(obj, 1, msg);
+        self.heap.obj_set(obj, 2, irr);
+        obj
+    }
+
+    pub fn is_error_object(&self, v: Value) -> bool {
+        self.heap.is_a(v, ObjType::Record)
+            && self.heap.obj_len(v) == 3
+            && self.heap.obj_ref(v, 0) == self.error_rtd()
+    }
+
+    /// Signal an error, as a primitive would.
+    pub fn fail<T>(&mut self, message: &str, irritants: &[Value]) -> Outcome<T> {
+        let obj = self.error_object(message, irritants);
+        Err(Thrown::raise(obj))
+    }
+
+    /// The common shape: "`what` expected, got `v`".
+    pub fn type_error<T>(&mut self, what: &str, v: Value) -> Outcome<T> {
+        self.fail(&format!("expected {what}"), &[v])
+    }
+
+    // --------------------------------------------------------------- output
+    pub fn emit(&mut self, s: &str) {
+        match &mut self.out {
+            Sink::Stdout => {
+                use std::io::Write as _;
+                let mut so = std::io::stdout().lock();
+                let _ = so.write_all(s.as_bytes());
+                let _ = so.flush();
+            }
+            Sink::Buffer(b) => b.push_str(s),
+        }
+    }
+
+    /// Redirect output to a buffer and return the previous sink.
+    pub fn capture(&mut self) -> Sink {
+        std::mem::replace(&mut self.out, Sink::Buffer(String::new()))
+    }
+    pub fn restore(&mut self, sink: Sink) -> String {
+        match std::mem::replace(&mut self.out, sink) {
+            Sink::Buffer(b) => b,
+            Sink::Stdout => String::new(),
+        }
+    }
+}
+
+impl Default for Runtime {
+    fn default() -> Runtime {
+        Runtime::new()
+    }
+}

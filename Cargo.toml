@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/fixpt-heap",
+    "crates/fixpt-read",
+    "crates/fixpt-core",
+    "crates/fixpt-runtime",
+    "crates/fixpt-scheme",
+    "crates/fixpt-engine",
+    "crates/fixpt-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pnkfelix/fixpt"
+
+[workspace.lints.rust]
+unsafe_code = "deny"

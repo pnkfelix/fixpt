@@ -1,0 +1,13 @@
+[package]
+name = "fixpt-heap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+## Collect at every safepoint, to shake out stale-`Value`-across-GC bugs.
+gc-stress = []
