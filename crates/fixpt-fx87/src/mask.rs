@@ -141,17 +141,17 @@ fn collect_region(arena: &Arena, id: DescId, out: &mut Vec<DescId>) {
                 collect_region(arena, p, out);
             }
         }
-        Desc::Con(_, args) if args.is_empty() => {
-            if !out.contains(&id) {
-                out.push(id);
-            }
-        }
-        Desc::Var(_) => {
-            if !out.contains(&id) {
-                out.push(id);
-            }
-        }
+        // A bare constructor (`@!`, `@red`) or a description variable. Both
+        // are region-shaped; which one it is does not matter here.
+        Desc::Con(_, args) if args.is_empty() => push_unique(out, id),
+        Desc::Var(_) => push_unique(out, id),
         _ => {}
+    }
+}
+
+fn push_unique(out: &mut Vec<DescId>, id: DescId) {
+    if !out.contains(&id) {
+        out.push(id);
     }
 }
 
