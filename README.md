@@ -9,7 +9,10 @@ Scheme engine, two front ends that lower onto it. Conformance is checked
 against the recovered originals, running under Racket, in
 [`GiffordHistory`](https://github.com/pnkfelix/GiffordHistory).
 
-See [`PLAN.md`](PLAN.md) for the design and the milestone list.
+See [`PLAN.md`](PLAN.md) for the design and the milestone list,
+[`TODO.md`](TODO.md) for work deliberately deferred, and
+[`docs/divergences.md`](docs/divergences.md) for every intentional difference
+from the references.
 
 ## Status
 
@@ -92,7 +95,8 @@ back out of the recursive descent when the user hits backspace. `fixpt` re-reads
 the buffer from scratch instead, which is microseconds for a REPL-sized form and
 needs no parser state kept between keystrokes. The continuation-based version is
 what you want when re-reading is not affordable — and it would be a fitting use
-of this engine's own re-entrant `call/cc`.
+of this engine's own re-entrant `call/cc`. [`TODO.md`](TODO.md) §1 records what
+it would take and when it would start to matter.
 
 ## Trying FX-91
 
