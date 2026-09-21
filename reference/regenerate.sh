@@ -36,4 +36,8 @@ echo "==> FX-87"
     "$root/tests/conformance/fx87/cases/kernel.fx" \
     "$root/tests/conformance/fx87/kernel.expected"
 
+echo "==> FX-87 standard environment"
+"$RACKET" "$here/fx87-stdenv.rkt" \
+    "$root/crates/fixpt-fx87/src/standard.fx"
+
 echo "done"

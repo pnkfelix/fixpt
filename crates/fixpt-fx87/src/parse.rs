@@ -18,7 +18,7 @@
 //! given nodes of their own, as `sugar.lisp` does — so the checker sees only
 //! the kernel, and there is one place to look when a derived form is wrong.
 
-use crate::ast::{Arena, Binder, Desc, DescId, Exp, ExpId, Kind, Param};
+use crate::ast::{Arena, Binder, Binding, Desc, DescId, Exp, ExpId, Kind, Param};
 use crate::error::{FxError, R};
 use crate::syms::Syms;
 use fixpt_read::{Datum, Interner, Num, Span, Sym, Syntax};
@@ -423,7 +423,7 @@ impl Parser {
                     }
                     let name = self.sym_of(&parts[0]).ok_or_else(|| self.bad(p, "name"))?;
                     let value = self.parse_exp(&parts[1], scope)?;
-                    bindings.push((name, value));
+                    bindings.push(Binding { name, value, region: None });
                 }
                 let body = self.parse_body(&a[1..], scope)?;
                 return Ok(self.arena.exp(span, Exp::Letrec { bindings, body }));
@@ -503,14 +503,14 @@ impl Parser {
                 return Err(self.bad(item, "parameter"));
             }
             let name = self.sym_of(&parts[0]).ok_or_else(|| self.bad(item, "parameter name"))?;
-            let mut ty = self.parse_desc(&parts[1], scope)?;
-            if parts.len() == 3 {
-                // `(x int @!)` — the value lives in a region, so the parameter
-                // is a reference to it.
-                let region = self.parse_desc(&parts[2], scope)?;
-                ty = self.arena.desc(Desc::Con(self.syms.ref_, vec![ty, region]));
-            }
-            out.push(Param { name, ty });
+            let ty = self.parse_desc(&parts[1], scope)?;
+            // A third element names the region the binding lives in. It does
+            // *not* change the parameter's type.
+            let region = match parts.len() {
+                3 => Some(self.parse_desc(&parts[2], scope)?),
+                _ => None,
+            };
+            out.push(Param { name, ty, region });
         }
         Ok(out)
     }
@@ -548,12 +548,11 @@ impl Parser {
             return self.expand_let(s, false, &[outer_bindings, inner], scope);
         }
 
-        // `(let ((x e) …) body)` ⇒ `((lambda ((x <type of e>) …) body) e …)`
-        // is not available, because a `lambda` parameter needs a written type
-        // and `let` does not have one. So `let` is its own kernel form as far
-        // as checking goes: bind, then check the body. It is expressed here as
-        // a `letrec` whose bindings cannot see one another, which is what
-        // `sugar.lisp` does.
+        // `let` cannot be `((lambda ((x <type>) …) body) e …)`, because a
+        // `lambda` parameter needs a written type and `let` has none to give.
+        // So it stays its own form: check the initialisers outside the scope,
+        // bind, then check the body. That is also why it is not `letrec` — the
+        // initialisers must not see the bindings.
         let mut bindings = Vec::with_capacity(pairs.len());
         for p in &pairs {
             let parts = self.list(p).ok_or_else(|| self.bad(p, "let binding"))?.to_vec();
@@ -561,19 +560,17 @@ impl Parser {
                 return Err(self.bad(p, "let binding"));
             }
             let name = self.sym_of(&parts[0]).ok_or_else(|| self.bad(p, "let name"))?;
-            let mut value = self.parse_exp(&parts[1], scope)?;
-            if parts.len() == 3 {
-                // `(x 3 @!)` — a mutable binding, which is a reference cell.
-                let region = self.parse_desc(&parts[2], scope)?;
-                let new = self.arena.exp(parts[2].span, Exp::Var(self.interner.intern("new")));
-                let projected =
-                    self.arena.exp(parts[2].span, Exp::Proj { body: new, args: vec![region] });
-                value = self.arena.exp(p.span, Exp::App { fun: projected, args: vec![value] });
-            }
-            bindings.push((name, value));
+            let value = self.parse_exp(&parts[1], scope)?;
+            // `(x 3 @!)` — a mutable binding. As with a parameter, the region
+            // belongs to the binding rather than to the value's type.
+            let region = match parts.len() {
+                3 => Some(self.parse_desc(&parts[2], scope)?),
+                _ => None,
+            };
+            bindings.push(Binding { name, value, region });
         }
         let body = self.parse_body(&a[1..], scope)?;
-        Ok(self.arena.exp(s.span, Exp::Letrec { bindings, body }))
+        Ok(self.arena.exp(s.span, Exp::Let { bindings, body }))
     }
 
     fn expand_and(&mut self, span: Span, a: &[Syntax], scope: &DScope) -> R<ExpId> {

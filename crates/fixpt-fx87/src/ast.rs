@@ -165,8 +165,10 @@ pub enum Exp {
     /// `(lambda ((x type)…) body)`; a parameter may name the region it lives
     /// in, as `(x type @!)`.
     Lambda { params: Vec<Param>, body: ExpId },
-    /// `(letrec ((f exp)…) body)`
-    Letrec { bindings: Vec<(Sym, ExpId)>, body: ExpId },
+    /// `(let ((x exp)…) body)` — the initialisers cannot see the bindings.
+    Let { bindings: Vec<Binding>, body: ExpId },
+    /// `(letrec ((f exp)…) body)` — they can.
+    Letrec { bindings: Vec<Binding>, body: ExpId },
     /// `(plambda ((v kind)…) body)`
     PLambda { binders: Vec<Binder>, body: ExpId },
     /// `(proj exp d…)` — instantiate a `poly`.
@@ -179,6 +181,21 @@ pub enum Exp {
 pub struct Param {
     pub name: Sym,
     pub ty: DescId,
+    /// `(x int @!)` — the region the *binding* lives in, which is what makes it
+    /// mutable. Not part of the parameter's type: the reference takes the
+    /// subroutine's argument type from the second element alone, so
+    /// `(lambda ((x int @!)) …)` is a `(subr … (int) …)`. The region instead
+    /// contributes `(alloc r)` to the body's effect, and is what `set!` needs
+    /// in order to charge a `(write r)`.
+    pub region: Option<DescId>,
+}
+
+/// One binding of a `let` or `letrec`, which may also name a region.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Binding {
+    pub name: Sym,
+    pub value: ExpId,
+    pub region: Option<DescId>,
 }
 
 /// Descriptions and expressions, each in their own arena.
