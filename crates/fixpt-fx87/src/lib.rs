@@ -30,10 +30,13 @@
 //! `tests/conformance/fx87/`.
 
 pub mod ast;
+pub mod check;
 pub mod env;
 pub mod error;
+pub mod eval;
 pub mod mask;
 pub mod parse;
+pub mod standard;
 pub mod subtype;
 pub mod syms;
 pub mod unparse;

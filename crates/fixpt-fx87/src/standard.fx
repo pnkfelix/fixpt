@@ -6,6 +6,9 @@
 ;;;   *standard-initial-dstore* description values, each (name desc)
 
 (k-env
+ (bool type)
+ (unit type)
+ (ref (dfunc (type region) type))
  (void type)
  (char type)
  (int type)
@@ -26,6 +29,9 @@
 )
 
 (d-store
+ (bool bool)
+ (unit unit)
+ (ref ref)
  (default-region @=)
  (void void)
  (char char)
@@ -46,6 +52,13 @@
 )
 
 (t-env
+ (equiv? (subr pure (bool bool) bool) @=)
+ (and? (subr pure (bool bool) bool) @=)
+ (or? (subr pure (bool bool) bool) @=)
+ (not? (subr pure (bool) bool) @=)
+ (new (poly ((r region)) (poly ((t type)) (subr (alloc r) (t) (ref t r)))) @=)
+ (get (poly ((r region)) (poly ((t type)) (subr (read r) ((ref t r)) t))) @=)
+ (set (poly ((r region)) (poly ((t type)) (subr (write r) ((ref t r) t) unit))) @=)
  (error (poly ((r region)) (subr pure ((string r)) void)) @=)
  (char=? (subr pure (char char) bool) @=)
  (char<? (subr pure (char char) bool) @=)
