@@ -24,9 +24,16 @@ fn closures_and_recursion() {
 
 #[test]
 fn tail_calls_are_proper() {
+    // Volume is the point: a leaked frame per call shows up as memory, not as a
+    // wrong answer. Under `gc-stress` each call also collects, so 200_000 calls
+    // means 200_000 full collections — minutes of work to re-establish
+    // something the ordinary run already covers at full size.
+    let n = if cfg!(feature = "gc-stress") { 2_000 } else { 200_000 };
     assert_eq!(
-        ev("(define (loop n acc) (if (= n 0) acc (loop (- n 1) (+ acc 1)))) (loop 200000 0)"),
-        "200000"
+        ev(&format!(
+            "(define (loop n acc) (if (= n 0) acc (loop (- n 1) (+ acc 1)))) (loop {n} 0)"
+        )),
+        n.to_string()
     );
 }
 

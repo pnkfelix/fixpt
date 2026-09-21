@@ -17,6 +17,24 @@ use fixpt_scheme::Session;
 /// enough that a runaway is a diagnosis rather than a wedged CI job.
 const STEP_LIMIT: u64 = 20_000_000;
 
+/// Scale a workload down when every safepoint collects.
+///
+/// Under `gc-stress` a collection happens at every single safepoint, so a loop
+/// of *n* iterations performs *n* full collections — and a case like
+/// `(build 50000)`, whose live heap grows as it goes, copies billions of words
+/// before it finishes. None of that volume adds evidence: what `gc-stress`
+/// tests is whether each safepoint hands the collector a complete root set, and
+/// that shows up in the first dozen collections or not at all. The *shapes*
+/// stay identical; only the counts shrink.
+const fn work(n: usize) -> usize {
+    if cfg!(feature = "gc-stress") { if n > 2_000 { 2_000 } else { n } } else { n }
+}
+
+/// Likewise for the exponential case, where the cost is in the branching.
+const fn depth(n: usize) -> usize {
+    if cfg!(feature = "gc-stress") { 12 } else { n }
+}
+
 fn ast() -> Session {
     let mut s = Session::new();
     s.engine.set_step_limit(Some(STEP_LIMIT));
@@ -86,13 +104,23 @@ fn arithmetic_and_numbers() {
 
 #[test]
 fn closures_and_tail_calls() {
+    // Sized here so the loop counts can shrink under `gc-stress` without the
+    // programs themselves changing shape.
+    let count = format!(
+        "(define (count n) (if (= n 0) 'done (count (- n 1)))) (count {})",
+        work(300_000)
+    );
+    let build = format!(
+        "(define (build n) (if (= n 0) '() (cons n (build (- n 1))))) (length (build {}))",
+        work(50_000)
+    );
     for src in [
         "(define (adder n) (lambda (x) (+ x n))) ((adder 3) 4)",
         "(define (compose f g) (lambda (x) (f (g x)))) ((compose car cdr) '(1 2 3))",
         // Deep enough that anything but a proper tail call would be noticed.
-        "(define (count n) (if (= n 0) 'done (count (- n 1)))) (count 300000)",
+        count.as_str(),
         // Non-tail recursion deep enough to overflow a native stack.
-        "(define (build n) (if (= n 0) '() (cons n (build (- n 1))))) (length (build 50000))",
+        build.as_str(),
         "(define (make-counter) (let ((n 0)) (lambda () (set! n (+ n 1)) n)))
          (define c (make-counter)) (c) (c) (list (c) ((make-counter)))",
         // A closure capturing a closure capturing a mutable binding.
@@ -108,6 +136,10 @@ fn closures_and_tail_calls() {
 
 #[test]
 fn recursion_shapes() {
+    let fib = format!(
+        "(define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))) (fib {})",
+        depth(20)
+    );
     for src in [
         "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1)))))
                   (odd?  (lambda (n) (if (= n 0) #f (even? (- n 1))))))
@@ -115,7 +147,7 @@ fn recursion_shapes() {
         // letrec* order: a later initialiser reads an earlier binding.
         "(letrec ((a 1) (b (+ a 1)) (c (+ b 1))) (list a b c))",
         "(let loop ((i 0) (acc '())) (if (= i 6) (reverse acc) (loop (+ i 1) (cons (* i i) acc))))",
-        "(define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))) (fib 20)",
+        fib.as_str(),
         "(define (ack m n)
            (cond ((= m 0) (+ n 1))
                  ((= n 0) (ack (- m 1) 1))

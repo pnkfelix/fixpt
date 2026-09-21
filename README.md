@@ -25,7 +25,7 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list.
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
 
 ```
-$ cargo test              # 93 tests
+$ cargo test              # 99 tests
 $ cargo run -p fixpt-cli -- repl
 fixpt 0.1.0 — scheme reader, bytecode engine
 > (define (count-to n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc i)))))
@@ -134,6 +134,28 @@ removes the classic embedding hazard — a `Value` in a Rust local going stale
 because some unrelated allocation triggered a collection — by construction
 rather than by discipline. `--features gc-stress` collects at *every* safepoint;
 the whole suite runs green that way.
+
+That feature answers one narrow question, though — whether every safepoint hands
+the collector a complete root set — using whatever allocation the suite happens
+to do. `crates/fixpt-scheme/tests/gc_workloads.rs` covers the rest, with
+workloads ported from Larceny's `test/GC`, turned from benchmarks into
+assertions:
+
+| from | what it pins down |
+|---|---|
+| `gcbench0.sch` (Boehm's GCBench) | a long-lived tree and a long-lived array of boxed flonums survive heavy churn *intact* |
+| `grow.sch` | repeatedly-doubled vectors are reclaimed — heap occupancy returns to baseline, and the workload swings it by 32,768 words, so a retained generation could not hide |
+| `permsort.sch` perm8 | 40320 permutations, correct checksum, under allocation that produces no garbage at all |
+| `permsort.sch` Tenperm8 | allocate-and-reclaim: occupancy returns to baseline every round |
+| `permsort.sch` mergesort! | destructive `set-cdr!` over data that has already survived several collections |
+
+The perm8 case carries an external check worth calling out. `permsort.sch`
+documents the benchmark as allocating **149912 pairs** — a figure that only
+comes out right if the grey-code construction shares tails exactly as Larceny's
+does *and* the copying collector preserves that sharing. Both engines land
+within 64 pairs of it. Losing the sharing would give 322560, so this is the one
+test that would catch a forwarding-pointer bug that duplicated shared structure:
+every answer would still be correct, and only the pair count would betray it.
 
 **Both engines are explicit-stack machines.** Neither uses the Rust call stack
 for Scheme recursion, so proper tail calls, unbounded recursion depth and
