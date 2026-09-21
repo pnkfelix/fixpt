@@ -8,6 +8,8 @@ members = [
     "crates/fixpt-scheme",
     "crates/fixpt-engine",
     "crates/fixpt-cli",
+    "crates/fixpt-conform",
+    "crates/fixpt-fx91",
 ]
 
 [workspace.package]

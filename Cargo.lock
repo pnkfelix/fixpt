@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixpt-conform"
+version = "0.1.0"
+
+[[package]]
 name = "fixpt-core"
 version = "0.1.0"
 dependencies = [
@@ -36,6 +40,16 @@ dependencies = [
  "fixpt-heap",
  "fixpt-read",
  "fixpt-runtime",
+]
+
+[[package]]
+name = "fixpt-fx91"
+version = "0.1.0"
+dependencies = [
+ "fixpt-conform",
+ "fixpt-core",
+ "fixpt-heap",
+ "fixpt-read",
 ]
 
 [[package]]
