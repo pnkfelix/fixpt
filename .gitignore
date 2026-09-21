@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+
+# The FX-91 reference implementation caches the type and effect of a LOADed
+# file next to it, keyed by the source's write date (typecheck.scm's
+# *in-file-load-cache*, via T's file-write-date). Running the golden generator
+# therefore drops .fxt files into the corpus directory. They are derived, and
+# committing them would let a stale cache mask a real change.
+*.fxt

@@ -1,0 +1,1097 @@
+;;; fixpt FX-91 conformance goldens -- GENERATED, do not edit.
+;;; regenerate with: reference/regenerate.sh
+;;; source:    /Users/pnkfelix/Dev/Rust/fixpt/tests/conformance/fx91/cases/tests.fx
+;;; reference: GiffordHistory fx-lang/fx91/private/impl.rkt
+#case 1
+#src (module (define-abstraction t type int) (define x (up-t 3)))
+#type (moduleof (abs t type) (val x t))
+#effect (maxeff)
+#value "(*module* ((x 3)))"
+#end
+#case 2
+#src (with (module (define f 3)) f)
+#type int
+#effect (maxeff)
+#value "3"
+#end
+#case 3
+#src (with (module (define f (lambda () (f)))) f)
+#type (-> *UNIF*-591 () *UNIF*-592)
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 4
+#src (with (module (define f (lambda () 3)) (define g (lambda () (f)))) f)
+#type (-> (maxeff) () int)
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 5
+#src (with (module (define f (lambda () 3)) (define g (lambda () (f)))) (begin f))
+#type (-> (maxeff) () int)
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 6
+#src (let ((m (module (define f (lambda () 3)) (define g (lambda () (f)))))) (let ((f (with m f)) (g (with m g))) (begin f)))
+#type (-> (maxeff) () int)
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 7
+#src (with (module (define-abstraction t type bool) (define f (lambda (x) (up-t x)))) (f #t))
+#type (select (module (define-abstraction t type bool) (define f (lambda (x) (up-t x)))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 8
+#src (with (module (define-abstraction t type bool) (define x (up-t #t)) (define f (lambda (x) (up-t x)))) (if #t x (f #t)))
+#type (select (module (define-abstraction t type bool) (define x (up-t #t)) (define f (lambda (x) (up-t x)))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 9
+#src (lambda ((w bool)) (with (module (define-abstraction t type bool) (define g (lambda (x) (down-t x)))) (if w g (lambda ((x t)) w))))
+#type (-> (maxeff) ((w bool)) (-> (maxeff) ((x (select (module (define-abstraction t type bool) (define g (lambda (x) (down-t x)))) t))) bool))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 10
+#src (with (module (define-abstraction t type bool) (define f (lambda (x) (up-t x))) (define g (lambda (x) (if #t (down-t x) (down-t (f #f)))))) (f #t))
+#type (select (module (define-abstraction t type bool) (define f (lambda (x) (up-t x))) (define g (lambda (x) (if #t (down-t x) (down-t (f #f)))))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 11
+#src (with (module (define-abstraction pairof (dfunc type) (dlambda ((t type)) (subr (maxeff) ((pair (subr (maxeff) ((car t) (cdr t)) t))) t))) (define-description impl (poly ((t type)) (subr (maxeff) ((pair (subr (maxeff) ((car t) (cdr t)) t))) t))) (define ({proj cons {t type}} (x t) (y t)) (up-pairof (lambda (f) (f x y)))) (define ({proj car {t type}} p) (((proj down-pairof t) p) (lambda ((x t) (y t)) x))) (define ({proj cdr {t type}} p) ((down-pairof p) (lambda ((x t) (y t)) y)))) (cdr (cons #t #f)))
+#type bool
+#effect (maxeff)
+#value "#f"
+#end
+#case 12
+#src (with (module (define m (module (define-abstraction t type bool) (define f (lambda (x) (up-t x)))))) (with m (if #t (with m f) (with m f))))
+#type (-> (maxeff) ((x bool)) (select (with (module (define m (module (define-abstraction t type bool) (define f (lambda (x) (up-t x)))))) (with (module (define m (module (define-abstraction t type bool) (define f (lambda (x) (up-t x)))))) m)) t))
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 13
+#src (with (module (define-abstraction t type bool) (define-description u (subr (maxeff) ((x t)) t)) (define f (lambda ((x u) (z bool)) (x (up-t z))))) f)
+#type (-> (maxeff) ((x (-> (maxeff) ((x (select (module (define-abstraction t type bool) (define-description u (subr (maxeff) ((x t)) t)) (define f (lambda ((x u) (z bool)) (x (up-t z))))) t))) (select (module (define-abstraction t type bool) (define-description u (subr (maxeff) ((x t)) t)) (define f (lambda ((x u) (z bool)) (x (up-t z))))) t))) (z bool)) (select (module (define-abstraction t type bool) (define-description u (subr (maxeff) ((x t)) t)) (define f (lambda ((x u) (z bool)) (x (up-t z))))) t))
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 14
+#src (with (module (define-description u bool)) (lambda ((x u)) x))
+#type (-> (maxeff) ((x bool)) bool)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 15
+#src (with (module (define m (module (define-description u bool)))) (with m (lambda ((x u)) (if x #t #t))))
+#type (-> (maxeff) ((x bool)) bool)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 16
+#src (lambda ((m (moduleof (val x bool)))) (with m x))
+#type (-> (maxeff) ((m (moduleof (val x bool)))) bool)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 17
+#src ((lambda ((m (moduleof (abs (t u) type) (val x t)))) (with m x)) (module (define-abstraction t type bool) (define-abstraction u type unit) (define x (up-t #t))))
+#type (select (module (define-abstraction t type bool) (define-abstraction u type unit) (define x (up-t #t))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 18
+#src (with (module (define not (lambda (x) (if x #t #f))) (define flip (lambda (x) (not x)))) flip)
+#type (-> (maxeff) ((x bool)) bool)
+#effect (maxeff)
+#value "#<procedure:flip>"
+#end
+#case 19
+#src (lambda ((m (moduleof (abs t type))) (x (select m t))) x)
+#type (-> (maxeff) ((m (moduleof (abs t type))) (x (select m t))) (select m t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 20
+#src (let ((m (load "tests.fx"))) (with m x))
+#type (select (load "tests.fx") t)
+#effect (maxeff)
+#value "3"
+#end
+#case 21
+#src (lambda ((m (moduleof (desc t bool)))) (lambda ((x (select m t))) (if x m m)))
+#type (-> (maxeff) ((m (moduleof (desc t bool)))) (-> (maxeff) ((x bool)) (moduleof (desc t bool))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 22
+#src (let ((m (close (letrec ((f (lambda (x) x))) f)))) (m #t))
+#type bool
+#effect (maxeff)
+#value "#t"
+#end
+#case 23
+#src (let ((x (new #t))) (begin (get x) (set! x #f)))
+#type unit
+#effect (maxeff read write init)
+#value "#U"
+#end
+#case 24
+#src (lambda ((ints (moduleof (abs int type) (val zero int) (val one int) (val = (subr pure ((x int) (y int)) bool)) (val + (subr pure ((x int) (y int)) int)) (val * (subr pure ((x int) (y int)) int)) (val - (subr pure ((x int) (y int)) int))))) (with ints (let ((dec (lambda (n) (do (i n (- n one)) ((= i one) n) |#U|)))) (dec one))))
+#type (-> *UNIF*-639 ((ints (moduleof (abs int type) (val zero int) (val one int) (val = (-> (maxeff) ((x int) (y int)) bool)) (val + (-> (maxeff) ((x int) (y int)) int)) (val * (-> (maxeff) ((x int) (y int)) int)) (val - (-> (maxeff) ((x int) (y int)) int))))) (select ints int))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 25
+#src ((lambda ((ints (moduleof (abs newint type) (val == (subr pure ((x newint)) bool))))) 2) (module (define-abstraction newint type int) (define (== (x newint)) #t)))
+#type int
+#effect (maxeff)
+#value "2"
+#end
+#case 26
+#src ((lambda ((ints (moduleof (abs newint type) (val zero newint) (val one newint) (val == (subr pure ((x newint) (y newint)) bool)) (val ** (subr pure ((x newint) (y newint)) newint)) (val -- (subr pure ((x newint) (y newint)) newint))))) (with ints (letrec ((fact (lambda (n) (if (== n zero) one (** n (fact (-- n one)))))) (id (close (lambda (x) x))) (even? (lambda (n) (or (== n zero) (odd? (-- n one))))) (odd? (lambda (n) (or (== n one) (even? (-- n one)))))) (if (odd? one) (fact one) one)))) (module (define-abstraction newint type int) (define zero (up-newint 0)) (define one (up-newint 1)) (define (== x y) (= (down-newint x) (down-newint y))) (define (** x y) (up-newint (* (down-newint x) (down-newint y)))) (define (-- x y) (up-newint (- (down-newint x) (down-newint y))))))
+#type (select (module (define-abstraction newint type int) (define zero (up-newint 0)) (define one (up-newint 1)) (define (== x y) (= (down-newint x) (down-newint y))) (define (** x y) (up-newint (* (down-newint x) (down-newint y)))) (define (-- x y) (up-newint (- (down-newint x) (down-newint y))))) newint)
+#effect (maxeff *UNIF*-691 *UNIF*-695)
+#value "1"
+#end
+#case 27
+#src (if #t (set! ((let ((x (lambda () (new #t)))) (begin (get (x)) x))) #t) |#U|)
+#type unit
+#effect (maxeff write read init)
+#value "#U"
+#end
+#case 28
+#src (close (lambda ((ints (moduleof (abs int type) (val one int) (val = (subr pure ((x int) (y int)) bool))))) (with ints (letrec ((fact (lambda (n) (if (= n one) one (fact n))))) fact))))
+#type (poly ((|610| effect)) (-> (maxeff) ((ints (moduleof (abs int type) (val one int) (val = (-> (maxeff) ((x int) (y int)) bool))))) (-> |610| ((n (select ints int))) (select ints int))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 29
+#src (plambda ((t type)) (with (module (define x (lambda ((x t)) x)) (define h (lambda ((y t)) y))) (if #t x h)))
+#type (poly ((t type)) (-> (maxeff) ((x t)) t))
+#effect (maxeff)
+#value "#<procedure:x>"
+#end
+#case 30
+#src (with (module (define-typed f (subr init ((x bool)) int) (lambda (x) (begin (new #t) (f #t))))) f)
+#type (-> init ((x bool)) int)
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 31
+#src (with (module (define f (lambda (x) (begin (f #t))))) f)
+#type (-> *UNIF*-594 ((x bool)) *UNIF*-595)
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 32
+#src (let ((y (new 3))) (with (module (define-typed f (subr init () (refof (refof int))) (lambda () (new y)))) f))
+#type (-> init () (refof (refof int)))
+#effect init
+#value "#<procedure:f>"
+#end
+#case 33
+#src (plambda ((t type)) (lambda (x (u t)) (let ((y (lambda ((z t)) (begin x z)))) (begin (if #t u x) (y x)))))
+#type (poly ((t type)) (-> (maxeff) ((x t) (u t)) t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 34
+#src (with (module (define-description t ((dlambda ((t type)) bool) bool))) (lambda ((x t)) (if x #t #f)))
+#type (-> (maxeff) ((x bool)) bool)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 35
+#src (module (define-description f (sumof (a bool))) (define g (lambda ((x f)) x)))
+#type (moduleof (desc f (sumof (a bool))) (val g (-> (maxeff) ((x (sumof (a bool)))) (sumof (a bool)))))
+#effect (maxeff)
+#value "(*module* ((g #<procedure:g>)))"
+#end
+#case 36
+#src (with (module (define-abstraction t type (sumof (a bool) (b t))) (define-description o (sumof (a ((dlambda ((t type)) bool) t)) (b t))) (define x (up-t (sum o a #t)))) (lambda ((x o)) x))
+#type (-> (maxeff) ((x (sumof (a bool) (b (select (module (define-abstraction t type (sumof (a bool) (b t))) (define-description o (sumof (a ((dlambda ((t type)) bool) t)) (b t))) (define x (up-t (sum o a #t)))) t))))) (sumof (a bool) (b (select (module (define-abstraction t type (sumof (a bool) (b t))) (define-description o (sumof (a ((dlambda ((t type)) bool) t)) (b t))) (define x (up-t (sum o a #t)))) t))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 37
+#src (with (module (define-abstraction t type (sumof (a bool) (b t))) (define-description o (sumof (a ((dlambda ((t type)) bool) t)) (b t))) (define x (up-t (sum o a #t)))) (sum o b x))
+#type (sumof (a bool) (b (select (module (define-abstraction t type (sumof (a bool) (b t))) (define-description o (sumof (a ((dlambda ((t type)) bool) t)) (b t))) (define x (up-t (sum o a #t)))) t)))
+#effect (maxeff)
+#value "(*sum* b (*sum* a #t))"
+#end
+#case 38
+#src (with (module (define-abstraction t type (sumof (a bool) (b t))) (define-description o (sumof (a ((dlambda ((t type)) bool) t)) (b t))) (define f (lambda ((x t)) (let ((y (down-t x))) (if #t #f (g y))))) (define x (up-t (sum o a #t))) (define-typed g (subr write ((z o)) bool) (lambda ((z o)) (tagcase o z a (lambda (z1) z1) (lambda (z) (tagcase o z b (lambda (z1) (f (up-t z))) (lambda (x) (error "Unknown tag")))))))) (if #t (f x) (g (sum o b x))))
+#type bool
+#effect write
+#value "#f"
+#end
+#case 39
+#src (with (module (define-abstraction int type (sumof (zero unit) (succ int))) (define-description rep (sumof (zero unit) (succ int))) (define zero (up-int (sum rep zero |#U|))) (define one (up-int (sum rep succ zero))) (define (minus x) (tagcase rep (down-int x) zero (lambda (x) zero) (lambda (x) (tagcase rep x succ (lambda (x) x) (lambda (x) zero))))) (define (add x y) (tagcase rep (down-int x) zero (lambda (x) (minus y)) (lambda (x) (tagcase rep x succ (lambda (x) (add (add x y) one)) (lambda (x) zero)))))) ((if #t add (lambda (x y) (minus x))) one one))
+#type (select (module (define-abstraction int type (sumof (zero unit) (succ int))) (define-description rep (sumof (zero unit) (succ int))) (define zero (up-int (sum rep zero |#U|))) (define one (up-int (sum rep succ zero))) (define (minus x) (tagcase rep (down-int x) zero (lambda (x) zero) (lambda (x) (tagcase rep x succ (lambda (x) x) (lambda (x) zero))))) (define (add x y) (tagcase rep (down-int x) zero (lambda (x) (minus y)) (lambda (x) (tagcase rep x succ (lambda (x) (add (add x y) one)) (lambda (x) zero)))))) int)
+#effect (maxeff)
+#value "(*sum* zero #U)"
+#end
+#case 40
+#src (let ((m (module (define-abstraction u type bool) (define-abstraction v type bool) (define x (up-u #t)) (define y (up-v #f))))) ((lambda ((m (moduleof (abs (u v) type) (val x u) (val y v))) (x m..u) (y m..v)) (if #t x x)) m m.x m.y))
+#type (select (module (define-abstraction u type bool) (define-abstraction v type bool) (define x (up-u #t)) (define y (up-v #f))) u)
+#effect (maxeff)
+#value "#t"
+#end
+#case 41
+#src (lambda ((m (moduleof (abs u type) (val x u))) (x m..u)) (if #t x x))
+#type (-> (maxeff) ((m (moduleof (abs u type) (val x u))) (x (select m u))) (select m u))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 42
+#src (let ((m (module (define-abstraction u type bool) (define x (up-u #t))))) ((lambda ((m (moduleof (abs u type) (val x u))) (x m..u)) (begin (if #t x x) 3)) m m.x))
+#type int
+#effect (maxeff)
+#value "3"
+#end
+#case 43
+#src (let ((m1 (module (define-abstraction u type bool) (define x (up-u #t))))) ((lambda ((m (moduleof (abs u type) (val x u))) (x m..u)) (if #t x x)) m1 m1.x))
+#type (select (module (define-abstraction u type bool) (define x (up-u #t))) u)
+#effect (maxeff)
+#value "#t"
+#end
+#case 44
+#src (lambda ((m (moduleof (abs t (dfunc type)) (val x (t bool)))) (y (m..t bool))) (if #t m.x y))
+#type (-> (maxeff) ((m (moduleof (abs t (->> type)) (val x (t bool)))) (y ((select m t) bool))) ((select m t) bool))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 45
+#src (let ((x (module (define-abstraction t type bool) (define z (up-t #t)))) (y (module (define-abstraction t type bool) (define z (up-t #t))))) (if #t x.z x.z))
+#type (select (module (define-abstraction t type bool) (define z (up-t #t))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 46
+#src (with (module (define id (with (module (define (f x) x)) (f f)))) (id 3))
+#type int
+#effect (maxeff)
+#value "3"
+#end
+#case 47
+#src (let ((f (lambda () (module (define-abstraction t type bool) (define x (up-t #t)))))) ((lambda ((m (subr pure () (moduleof (abs t type) (val x t)))) (x (select (m) t))) x) f (with (f) x)))
+#type (select ((lambda () (module (define-abstraction t type bool) (define x (up-t #t))))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 48
+#src (let ((m (module (define-abstraction u type bool) (define x (up-u #t))))) ((lambda ((mm (moduleof (abs u type) (val x u))) (x mm..u)) (if #t x x)) m m.x))
+#type (select (module (define-abstraction u type bool) (define x (up-u #t))) u)
+#effect (maxeff)
+#value "#t"
+#end
+#case 49
+#src (lambda ((f (poly ((t type)) (poly ((u type)) u))) (g (poly ((u type)) (poly ((t type)) t)))) (if #t f g))
+#type (-> (maxeff) ((f (poly ((t type)) (poly ((u type)) u))) (g (poly ((u type)) (poly ((t type)) t)))) (poly ((t type)) (poly ((u type)) u)))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 50
+#src (let ((f (lambda () (lambda () (module (define-abstraction t type bool) (define x (up-t #t))))))) ((lambda ((m (subr pure () (moduleof (abs t type) (val x t)))) (x (select (m) t))) x) (f) (with ((f)) x)))
+#type (select (((lambda () (lambda () (module (define-abstraction t type bool) (define x (up-t #t))))))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 51
+#src (with (module) (with (module (define f (lambda () (lambda () (module (define-abstraction t type bool) (define x (up-t #t))))))) ((lambda ((m (subr pure () (moduleof (abs t type) (val x t)))) (x (select (m) t))) x) (f) (with ((f)) x))))
+#type (select (((with (module (define f (lambda () (lambda () (module (define-abstraction t type bool) (define x (up-t #t))))))) (with (module (define f (lambda () (lambda () (module (define-abstraction t type bool) (define x (up-t #t))))))) f)))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 52
+#src (with (module) (with (module (define (f) (lambda () (module (define-abstraction t type bool) (define x (up-t #t)))))) ((lambda ((m (moduleof (abs t type) (val x t))) (x (select m t))) x) ((f)) (with ((f)) x))))
+#type (select (((with (module (define f (lambda () (lambda () (module (define-abstraction t type bool) (define x (up-t #t))))))) (with (module (define f (lambda () (lambda () (module (define-abstraction t type bool) (define x (up-t #t))))))) f)))) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 53
+#src (lambda ((m (moduleof (val f (subr pure ((t int)) int))))) (let ((m1 (module (define (f x) x)))) (begin (if #t m m1) (if #t (module (define (f (c char)) c)) m1) (if #t (module (define (f y) y)) m1))))
+#type (-> (maxeff) ((m (moduleof (val f (-> (maxeff) ((t int)) int))))) (moduleof (val f (-> (maxeff) ((y *UNIF*-606)) *UNIF*-606))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 54
+#src (let ((+ fl+)) (+ 1.2 1.3))
+#type float
+#effect (maxeff)
+#value "2.5"
+#end
+#case 55
+#src (lambda ((m (moduleof (abs listof (dfunc type)) (val nill (poly ((t type)) (listof t))) (val last (poly ((t type)) (subr pure ((l (listof t))) t)))))) (with m (last {proj nill bool})))
+#type (-> (maxeff) ((m (moduleof (abs listof (->> type)) (val nill (poly ((t type)) (listof t))) (val last (poly ((t type)) (-> (maxeff) ((l (listof t))) t)))))) bool)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 56
+#src (let* ((pairs (module (define-abstraction pairof (dfunc type type) (dlambda ((t1 type) (t2 type)) (moduleof (val car t1) (val cdr t2)))) (define-description rep (dlambda ((t1 type) (t2 type)) (moduleof (val car t1) (val cdr t2)))) (define cons (close (lambda (x y) (up-pairof (module (define car x) (define cdr y)))))) (define car (plambda ((t1 type) (t2 type)) (lambda ((p (pairof t1 t2))) (with (down-pairof p) car)))) (define cdr (plambda ((t1 type) (t2 type)) (lambda (p) (with ({proj down-pairof t1 t2} p) cdr))))))) (with pairs (lambda ((l (rep int int))) l.cdr)))
+#type (-> (maxeff) ((l (moduleof (val car int) (val cdr int)))) int)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 57
+#src (lambda ((u unit)) (let* ((pairs (module (define-abstraction pairof (dfunc type type) (dlambda ((t1 type) (t2 type)) (moduleof (val car t1) (val cdr t2)))) (define cons (close (lambda (x y) (up-pairof (module (define car x) (define cdr y)))))) (define car (plambda ((t1 type) (t2 type)) (lambda ((p (pairof t1 t2))) (with (down-pairof p) car)))) (define cdr (plambda ((t1 type) (t2 type)) (lambda (p) (with ({proj down-pairof t1 t2} p) cdr))))))) (let ((lists (with pairs (module (define-abstraction listof (dfunc type) (dlambda ((t type)) (sumof (nil unit) (cons (pairof t (listof t)))))) (define-description rep (dlambda ((t type)) (sumof (nil unit) (cons (pairof t (listof t)))))) (define nill (plambda ((t type)) (up-listof (sum (rep t) nil u)))) (define one-two (cons 1 (cons 2 (null)))) (define last (close (lambda (x default) (letrec ((last (lambda ((l (rep bool)) pred) (tagcase (rep bool) l nil (lambda (x) pred) (lambda (l) (tagcase (rep bool) l cons (lambda (l) (last (down-listof (cdr l)) (car l))) (lambda (l) pred))))))) (last (down-listof x) default))))))))) (with lists (if #t (lambda () (last {proj nill bool} #f)) (lambda () #t))))))
+#type (-> (maxeff) ((u unit)) (-> (maxeff) () bool))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 58
+#src (lambda ((u unit)) (let* ((pairs (module (define-abstraction pairof (dfunc type type) (dlambda ((t1 type) (t2 type)) (moduleof (val car t1) (val cdr t2)))) (define car (plambda ((t1 type) (t2 type)) (lambda ((p (pairof t1 t2))) (with (down-pairof p) car)))) (define cdr (plambda ((t1 type) (t2 type)) (lambda (p) (with ({proj down-pairof t1 t2} p) cdr))))))) (with pairs (module (define-abstraction listof (dfunc type) (dlambda ((t type)) (sumof (nil unit) (cons (pairof t (listof t)))))) (define-description rep (dlambda ((t type)) (sumof (nil unit) (cons (pairof t (listof t)))))) (define last (close (lambda (x default) (letrec ((last (lambda ((l (rep int)) pred) (tagcase (rep int) l cons (lambda (l) (last (down-listof (cdr l)) (car l))) (lambda (l) pred))))) (last (down-listof x) default)))))))))
+#type (-> (maxeff) ((u unit)) (moduleof (abs listof (->> type)) (desc rep (dlambda ((t type)) (sumof (nil unit) (cons (pairof t (listof t)))))) (val last (poly ((|687| effect) (int type)) (-> |687| ((x (listof int)) (default int)) int)))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 59
+#src (let* ((pairs (module (define-abstraction pairof (dfunc type type) (dlambda ((t1 type) (t2 type)) (moduleof (val car t1) (val cdr t2)))) (define cons (close (lambda (x y) (up-pairof (module (define car x) (define cdr y))))))))) (let ((lists (with pairs (module (define-abstraction listof (dfunc type) (dlambda ((t type)) (sumof (nil unit) (cons (pairof t (listof t)))))) (define-description rep (dlambda ((t type)) (sumof (nil unit) (cons (pairof t (listof t)))))) (define nil (plambda ((t type)) (up-listof (sum (rep t) nil |#U|)))) (define end {proj nil int}) (define one-two (cons 1 (cons 2 {proj nil int}))))))) lists))
+#type (moduleof (abs listof (->> type)) (desc rep (dlambda ((t type)) (sumof (nil unit) (cons (pairof t (listof t)))))) (val nil (poly ((t type)) (listof t))) (val end (listof int)) (val one-two ((select (module (define-abstraction pairof (dfunc type type) (dlambda ((t1 type) (t2 type)) (moduleof (val car t1) (val cdr t2)))) (define cons (close (lambda (x y) (up-pairof (module (define car x) (define cdr y))))))) pairof) int ((select (module (define-abstraction pairof (dfunc type type) (dlambda ((t1 type) (t2 type)) (moduleof (val car t1) (val cdr t2)))) (define cons (close (lambda (x y) (up-pairof (module (define car x) (define cdr y))))))) pairof) int (listof int)))))
+#effect (maxeff)
+#value "(*module* ((nil (*sum* nil #U)) (end (*sum* nil #U)) (one-two (*module* ((car 1) (cdr (*module* ((car 2) (cdr (*sum* nil #U))))))))))"
+#end
+#case 60
+#src (let* ((f (open-input-stream "tests.fx")) (expr (stream-read-sexp f))) (if (sexp=? expr (quote (module (define-abstraction t type int) (define x (up-t 3))))) (begin (stream-write-sexp standard-output expr) (close-stream f)) (error "Incorrect read operation")))
+#type unit
+#effect (maxeff read init write)
+#value "#U"
+#end
+#case 61
+#src (let* ((v (scan + (make-vector 10 1))) (u (list->vector (cons #f (cons #f (cons #f (cons #t (cons #t (cons #f (cons #t (cons #f (cons #f (cons #t (null)))))))))))))) (begin (permute (cshift 3 1) (segmented-scan + u v)) (compress u v)))
+#type (vectorof int)
+#effect (maxeff read init)
+#value "#(4 5 7 10)"
+#end
+#case 62
+#src (module (define-abstraction pair (dfunc type type) (dlambda ((x type) (y type)) (poly ((z type)) (subr pure ((p (subr pure ((car x) (cdr y)) z))) z)))) (define ({proj mk-pair {x type} {y type}} (a x) (b y)) (up-pair (plambda ((z type)) (lambda ((p (subr pure ((car x) (cdr y)) z))) (p a b))))) (define ({proj car {x type} {y type}} (p (pair x y))) ((down-pair p) (lambda (x y) x))))
+#type (moduleof (abs pair (->> type type)) (val mk-pair (poly ((x type) (y type)) (-> (maxeff) ((a x) (b y)) (pair *UNIF*-628 *UNIF*-629)))) (val car (poly ((x type) (y type)) (-> (maxeff) ((p (pair x y))) x))))
+#effect (maxeff)
+#value "(*module* ((mk-pair #<procedure:mk-pair>) (car #<procedure:car>)))"
+#end
+#case 63
+#src (close (with (if #t (module (define (f x) x)) (module (define (f x) x))) (begin (f #t) (f 3))))
+#type (poly () int)
+#effect (maxeff)
+#value "3"
+#end
+#case 64
+#src (the (moduleof (val f (subr pure ((x int)) int))) (module (define (f x) x)))
+#type (moduleof (val f (-> (maxeff) ((x int)) int)))
+#effect (maxeff)
+#value "(*module* ((f #<procedure:f>)))"
+#end
+#case 65
+#src (with (if #f (module (define (f x) x)) (module (define (f (x int)) (+ x 1)))) (f 2))
+#type int
+#effect (maxeff)
+#value "3"
+#end
+#case 66
+#src (if #f (module (define (f x y) (+ (y x) 1))) (module (define (f x y) (begin (not? x) 1))))
+#type (moduleof (val f (-> (maxeff) ((x bool) (y (-> (maxeff) ((rand-351 bool)) int))) int)))
+#effect (maxeff)
+#value "(*module* ((f #<procedure:f>)))"
+#end
+#case 67
+#src (let ((m (module (define (f x) x)))) (begin (with m (f #t)) (if #t m (module (define (f (x int)) 2))) (with m (f #t))))
+#type bool
+#effect (maxeff)
+#value "#t"
+#end
+#case 68
+#src (if #t (module (define (f x) x) (define y (module (define (g x) x)))) (module (define (f x) x) (define y (module (define (g x) (if #t (f x) x))))))
+#type (moduleof (val f (-> (maxeff) ((x *UNIF*-599)) *UNIF*-599)) (val y (moduleof (val g (-> (maxeff) ((x *UNIF*-599)) *UNIF*-599)))))
+#effect (maxeff)
+#value "(*module* ((f #<procedure:f>) (y (*module* ((g #<procedure:g>))))))"
+#end
+#case 69
+#src (if #t (module (define (y x) (module (define (g y) y)))) (module (define (y x) (module (define (g y) (if #t (x y) y))))))
+#type (moduleof (val y (-> (maxeff) ((x (-> (maxeff) ((rand-360 *UNIF*-600)) *UNIF*-600))) (moduleof (val g (-> (maxeff) ((y *UNIF*-600)) *UNIF*-600))))))
+#effect (maxeff)
+#value "(*module* ((y #<procedure:y>)))"
+#end
+#case 70
+#src (the (moduleof (abs t type) (val x (subr (maxeff init read) () t))) (module (define-abstraction t type bool) (define x (lambda () (let ((u (new 3))) (begin (get u) (up-t #t)))))))
+#type (moduleof (abs t type) (val x (-> (maxeff init read) () t)))
+#effect (maxeff)
+#value "(*module* ((x #<procedure:x>)))"
+#end
+#case 71
+#src (plambda ((channelof (dfunc type)) (pairof (dfunc type type))) (lambda ((cobegin (poly ((t1 type) (t2 type)) (subr pure ((x t1) (x t2)) (pairof t1 t2)))) (channel (poly ((t type)) (subr pure () (channelof t)))) (from (poly ((t type)) (subr pure ((c (channelof t))) t))) (to (poly ((t type)) (subr pure ((c (channelof t))) (subr pure ((x t)) unit))))) (module (define (f cont n) (if (<= n 1) (cont n) (let ((local (channel))) (begin (cobegin (cont (+ (from local) (from local))) (cobegin (f (to local) (- n 1)) (f (to local) (- n 2)))) |#U|)))))))
+#type (poly ((channelof (->> type)) (pairof (->> type type))) (-> (maxeff) ((cobegin (poly ((t1 type) (t2 type)) (-> (maxeff) ((x t1) (x t2)) (pairof t1 t2)))) (channel (poly ((t type)) (-> (maxeff) () (channelof t)))) (from (poly ((t type)) (-> (maxeff) ((c (channelof t))) t))) (to (poly ((t type)) (-> (maxeff) ((c (channelof t))) (-> (maxeff) ((x t)) unit))))) (moduleof (val f (-> *UNIF*-673 ((cont (-> (maxeff) ((rand-366 int)) unit)) (n int)) unit)))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 72
+#src (if #f (if #t (module (define (f x) x) (define y (module (define (g x) x)))) (module (define (f x) x) (define y (module (define (g x) (if #t (f x) x)))))) (module (define (f (x int)) x) (define y (module (define (g (x int)) x)))))
+#type (moduleof (val f (-> (maxeff) ((x int)) int)) (val y (moduleof (val g (-> (maxeff) ((x int)) int)))))
+#effect (maxeff)
+#value "(*module* ((f #<procedure:f>) (y (*module* ((g #<procedure:g>))))))"
+#end
+#case 73
+#src (module (define-description f (productof (t int) (u bool))) (define-abstraction fg type (productof (t int) (u fg))) (define-description ft (dlambda ((t type)) (productof (one int) (two t)))) (define x (product (ft bool) 1 #f)) (define y (extract (ft bool) (product (ft bool) 1 #f) one)))
+#type (moduleof (abs fg type) (desc f (productof (t int) (u bool))) (desc ft (dlambda ((t type)) (productof (one int) (two t)))) (val x (productof (one int) (two bool))) (val y int))
+#effect (maxeff)
+#value "(*module* ((x (*product* #(1 #f))) (y 1)))"
+#end
+#case 74
+#src (match 1 (1 2) (_ 3))
+#type int
+#effect (maxeff)
+#value "2"
+#end
+#case 75
+#src (match 1 (2 2) (_ 3))
+#type int
+#effect (maxeff)
+#value "3"
+#end
+#case 76
+#src (with (module (define-abstraction t type int) (define z up-t)) (z 3))
+#type (select (module (define-abstraction t type int) (define z up-t)) t)
+#effect (maxeff)
+#value "3"
+#end
+#case 77
+#src (with (module (define-datatype i (z unit) (s int))) z)
+#type (-> (maxeff) ((z-403 unit)) (select (module (define-datatype i (z unit) (s int))) i))
+#effect (maxeff)
+#value "#<procedure:z>"
+#end
+#case 78
+#src (with (module (define-datatype i (z unit) (s int))) (z |#U|))
+#type (select (module (define-datatype i (z unit) (s int))) i)
+#effect (maxeff)
+#value "(*sum* z (*product* #(#U)))"
+#end
+#case 79
+#src (with (module (define-datatype i (z int))) (z 3))
+#type (select (module (define-datatype i (z int))) i)
+#effect (maxeff)
+#value "(*sum* z (*product* #(3)))"
+#end
+#case 80
+#src (with (module (define-datatype i (z int))) (match (z 3) (_ 2)))
+#type int
+#effect (maxeff)
+#value "2"
+#end
+#case 81
+#src (with (module (define-datatype i (z int))) (match (z 3) ((z~ x) 2)))
+#type int
+#effect (maxeff)
+#value "2"
+#end
+#case 82
+#src (with (module (define-datatype i (z int))) (match (z 3) ((z~ x) (z 2))))
+#type (select (module (define-datatype i (z int))) i)
+#effect (maxeff)
+#value "(*sum* z (*product* #(2)))"
+#end
+#case 83
+#src (with (module (define-datatype i (z unit) (s int))) z~)
+#type (poly ((e-544 effect) (e-545 effect) (t-546 type)) (-> (maxeff e-544 e-545) ((val-547 (select (module (define-datatype i (z unit) (s int))) i)) (s-549 (-> e-544 ((z-543 unit)) t-546)) (f-550 (-> e-545 ((val-547 (select (module (define-datatype i (z unit) (s int))) i))) t-546))) t-546))
+#effect (maxeff)
+#value "#<procedure:z~>"
+#end
+#case 84
+#src (with (module (define-datatype i (z unit) (s int))) (z |#U|))
+#type (select (module (define-datatype i (z unit) (s int))) i)
+#effect (maxeff)
+#value "(*sum* z (*product* #(#U)))"
+#end
+#case 85
+#src (with (module (define-datatype i (z unit) (s int))) (match (z |#U|) ((s~ x) (s x)) (_ (s 3))))
+#type (select (module (define-datatype i (z unit) (s int))) i)
+#effect (maxeff)
+#value "(*sum* s (*product* #(3)))"
+#end
+#case 86
+#src (with (module (define-datatype num (zero unit) (succ num))) (letrec ((two (succ (succ (zero |#U|)))) (one (succ (zero |#U|))) (add (lambda (x y) (match x ((zero~ _) y) ((succ~ x) (succ (add x y))))))) (add two one)))
+#type (select (module (define-datatype num (zero unit) (succ num))) num)
+#effect *UNIF*-779
+#value "(*sum* succ (*product* #({*sum* succ {*product* #({*sum* succ {*product* #({*sum* zero {*product* #(#U)}})}})}})))"
+#end
+#case 87
+#src (with (module (define-abstraction ft (dfunc type) (dlambda ((t type)) t)) (define down down-ft)) (letrec ((num (lambda (x) (down x)))) num))
+#type (-> (maxeff) ((x ((select (module (define-abstraction ft (dfunc type) (dlambda ((t type)) t)) (define down down-ft)) ft) *UNIF*-610))) *UNIF*-610)
+#effect (maxeff)
+#value "#<procedure:num>"
+#end
+#case 88
+#src (with (module (define-datatype (tree (t type)) (leaf t) (node (tree t)))) (letrec ((numbers (lambda (x) (match x ((leaf~ y) (leaf y)))))) (numbers (leaf #t))))
+#type ((select (module (define-datatype (tree (t type)) (leaf t) (node (tree t)))) tree) bool)
+#effect (maxeff)
+#value "(*sum* leaf (*product* #(#t)))"
+#end
+#case 89
+#src (with (module (define-datatype (tree (t type)) (leaf t) (node (tree t)))) (letrec ((numbers (lambda (x) (match x ((node~ lhs) (numbers lhs)))))) numbers))
+#type (-> *UNIF*-755 ((x ((select (module (define-datatype (tree (t type)) (leaf t) (node (tree t)))) tree) *UNIF*-756))) *UNIF*-757)
+#effect (maxeff)
+#value "#<procedure:numbers>"
+#end
+#case 90
+#src (with (module (define-datatype (tree (t type)) (node (tree t)))) (letrec ((numbers (lambda (x) (match x ((node~ lhs) (+ (numbers lhs) 1)))))) numbers))
+#type (-> *UNIF*-705 ((x ((select (module (define-datatype (tree (t type)) (node (tree t)))) tree) *UNIF*-706))) int)
+#effect (maxeff)
+#value "#<procedure:numbers>"
+#end
+#case 91
+#src (with (module (define-datatype tree (leaf int) (node tree))) (letrec ((numbers (lambda (x) (match x ((leaf~ _) 1) ((node~ lhs) (numbers lhs)))))) (numbers (node (leaf 0)))))
+#type int
+#effect *UNIF*-759
+#value "1"
+#end
+#case 92
+#src (with (module (define-datatype (tree (t type)) (leaf t))) (letrec ((numbers (lambda (x) (match x ((leaf~ y) (numbers (leaf y))))))) numbers))
+#type (-> *UNIF*-705 ((x ((select (module (define-datatype (tree (t type)) (leaf t))) tree) *UNIF*-706))) *UNIF*-707)
+#effect (maxeff)
+#value "#<procedure:numbers>"
+#end
+#case 93
+#src (with (module (define-datatype (tree (t type)) (node (tree t)))) (letrec ((numbers (lambda (x) (match x ((node~ y) (numbers (node y))))))) numbers))
+#type (-> *UNIF*-705 ((x ((select (module (define-datatype (tree (t type)) (node (tree t)))) tree) *UNIF*-706))) *UNIF*-707)
+#effect (maxeff)
+#value "#<procedure:numbers>"
+#end
+#case 94
+#src (with (module (define-datatype (tree (t type)) (leaf int) (node (tree t)))) (lambda (x z) (match x ((node~ y) (if #t x (node y))) ((leaf~ _) z))))
+#type (-> (maxeff) ((x ((select (module (define-datatype (tree (t type)) (leaf int) (node (tree t)))) tree) *UNIF*-756)) (z ((select (module (define-datatype (tree (t type)) (leaf int) (node (tree t)))) tree) *UNIF*-756))) ((select (module (define-datatype (tree (t type)) (leaf int) (node (tree t)))) tree) *UNIF*-756))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 95
+#src (with (module (define-datatype (tree (t type)) (node t))) (lambda (x z) (match x ((node~ y) (if #t x (node y))) ((node~ _) z))))
+#type (-> (maxeff) ((x ((select (module (define-datatype (tree (t type)) (node t))) tree) *UNIF*-673)) (z ((select (module (define-datatype (tree (t type)) (node t))) tree) *UNIF*-673))) ((select (module (define-datatype (tree (t type)) (node t))) tree) *UNIF*-673))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 96
+#src (with (module (define-datatype (tree (t type)) (node int))) (lambda (x) (match x ((node~ _) x) ((node~ y) (node y)))))
+#type (-> (maxeff) ((x ((select (module (define-datatype (tree (t type)) (node int))) tree) *UNIF*-708))) ((select (module (define-datatype (tree (t type)) (node int))) tree) *UNIF*-708))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 97
+#src (let ((m (module (define-abstraction tree (dfunc type) (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-description tree-rep (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-typed node (poly ((t type)) (subr pure ((i int)) (tree t))) (plambda ((t type)) (lambda ((i int)) (up-tree (sum (tree-rep t) l (product (productof (i int)) i))))))))) (with m (lambda ((x (tree bool))) (if #t (node 3) x))))
+#type (-> (maxeff) ((x ((select (module (define-abstraction tree (dfunc type) (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-description tree-rep (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-typed node (poly ((t type)) (subr pure ((i int)) (tree t))) (plambda ((t type)) (lambda ((i int)) (up-tree (sum (tree-rep t) l (product (productof (i int)) i))))))) tree) bool))) ((select (module (define-abstraction tree (dfunc type) (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-description tree-rep (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-typed node (poly ((t type)) (subr pure ((i int)) (tree t))) (plambda ((t type)) (lambda ((i int)) (up-tree (sum (tree-rep t) l (product (productof (i int)) i))))))) tree) bool))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 98
+#src (with (module (define-abstraction tree (dfunc type) (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-description tree-rep (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-typed node (poly ((t type)) (subr pure ((i int)) (tree t))) (plambda ((t type)) (lambda ((i int)) (up-tree (sum (tree-rep t) l (product (productof (i int)) i))))))) (lambda ((x (tree bool))) (if #t (node 3) x)))
+#type (-> (maxeff) ((x ((select (module (define-abstraction tree (dfunc type) (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-description tree-rep (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-typed node (poly ((t type)) (subr pure ((i int)) (tree t))) (plambda ((t type)) (lambda ((i int)) (up-tree (sum (tree-rep t) l (product (productof (i int)) i))))))) tree) bool))) ((select (module (define-abstraction tree (dfunc type) (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-description tree-rep (dlambda ((t type)) (sumof (l (productof (i int)))))) (define-typed node (poly ((t type)) (subr pure ((i int)) (tree t))) (plambda ((t type)) (lambda ((i int)) (up-tree (sum (tree-rep t) l (product (productof (i int)) i))))))) tree) bool))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 99
+#src (with (module (define-datatype (tree (t type)) (leaf t) (node t))) (lambda ((z (tree int))) (letrec ((numbers (lambda (x) (match x ((leaf~ y) 0) ((node~ lhs) (numbers z)))))) numbers)))
+#type (-> (maxeff) ((z ((select (module (define-datatype (tree (t type)) (leaf t) (node t))) tree) int))) (-> *UNIF*-777 ((x ((select (module (define-datatype (tree (t type)) (leaf t) (node t))) tree) int))) int))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 100
+#src (with (module (define-datatype (tree (t type)) (leaf t) (node (tree t)))) (letrec ((numbers (lambda (x) (match x ((leaf~ _) 1) ((node~ lhs) (numbers (node lhs))))))) numbers))
+#type (-> *UNIF*-779 ((x ((select (module (define-datatype (tree (t type)) (leaf t) (node (tree t)))) tree) *UNIF*-780))) int)
+#effect (maxeff)
+#value "#<procedure:numbers>"
+#end
+#case 101
+#src (let ((m (module (define-datatype (tree (t type)) (leaf t) (node (tree t)))))) (with m (letrec ((numbers (lambda (x) (match x ((leaf~ _) 1) ((node~ lhs) (numbers (node lhs))))))) numbers)))
+#type (-> *UNIF*-780 ((x ((select (module (define-datatype (tree (t type)) (leaf t) (node (tree t)))) tree) *UNIF*-781))) int)
+#effect (maxeff)
+#value "#<procedure:numbers>"
+#end
+#case 102
+#src (with (module (define-datatype (tree (t type)) (leaf t) (node (tree t) (tree t)))) (letrec ((numbers (lambda (x) (match x ((leaf~ _) 1) ((node~ lhs rhs) (+ (numbers lhs) (numbers rhs))))))) (numbers (node (leaf #t) (node (leaf #f) (leaf #t))))))
+#type int
+#effect *UNIF*-818
+#value "3"
+#end
+#case 103
+#src (match 1 (1 (append (cons 1 (null)) (null))))
+#type (listof int)
+#effect (maxeff read init)
+#value "(1)"
+#end
+#case 104
+#src (with (module (define-abstraction tree (dfunc type) listof)) (with (module (define-typed fringe (subr (maxeff) ((x (tree int))) (listof int)) (lambda (x) (fringe x)))) fringe))
+#type (-> (maxeff) ((x ((select (module (define-abstraction tree (dfunc type) listof)) tree) int))) (listof int))
+#effect (maxeff)
+#value "#<procedure:fringe>"
+#end
+#case 105
+#src (let ((m (module (define-datatype (tree (t type)) (leaf t) (node (tree t) (tree t)))))) (with m (let ((m1 (module (define (fringe x) (match x ((leaf~ x) (cons x (null))) ((node~ lhs rhs) (append (fringe lhs) (fringe rhs)))))))) (with m1 (fringe (node (leaf 1) (leaf 2)))))))
+#type (listof int)
+#effect (maxeff *UNIF*-804 read init)
+#value "(1 2)"
+#end
+#case 106
+#src (with (module (define-abstraction tree type int) (define-description num int) (define leaf up-tree)) (the (subr (maxeff) ((x num)) tree) leaf))
+#type (-> (maxeff) ((x int)) (select (module (define-abstraction tree type int) (define-description num int) (define leaf up-tree)) tree))
+#effect (maxeff)
+#value "#<procedure:up-tree>"
+#end
+#case 107
+#src (with (module (define-datatype (tree (t type)) (leaf int) (node (tree int) (tree int)))) (with (module (define-typed fringe (subr (maxeff init read) ((x (tree int))) (listof int)) (lambda (x) (match x ((leaf~ x) (cons x (null))) ((node~ lhs rhs) (append (fringe lhs) (fringe rhs))))))) (fringe (node (leaf 1) (leaf 2)))))
+#type (listof int)
+#effect (maxeff init read)
+#value "(1 2)"
+#end
+#case 108
+#src (extend (module (define x 1) (define y 2)) (module (define x 3.4) (define z #\c)))
+#type (moduleof (val x float) (val z char) (val y int))
+#effect (maxeff)
+#value "(*module* ((x 3.4) (z c) ((y 2))))"
+#end
+#case 109
+#src (extend (module (define x 1) (define y 2)) (module (define x (+ y 3)) (define z #\c)))
+#type (moduleof (val x int) (val z char) (val y int))
+#effect (maxeff)
+#value "(*module* ((x 5) (z c) ((y 2))))"
+#end
+#case 110
+#src (with (module (define-datatype i (z unit))) (module (define zero (z |#U|))))
+#type (moduleof (val zero (select (module (define-datatype i (z unit))) i)))
+#effect (maxeff)
+#value "(*module* ((zero (*sum* z (*product* #(#U))))))"
+#end
+#case 111
+#src (module (define-datatype i (z unit)) (define zero (lambda () (z |#U|))))
+#type (moduleof (abs i type) (desc i-rep (sumof (z (productof (|1| unit))))) (val zero (-> (maxeff) () i)) (val z (-> (maxeff) ((z-1396 unit)) i)) (val z~ (poly ((e-1397 effect) (e-1398 effect) (t-1399 type)) (-> (maxeff e-1397 e-1398) ((val-1400 i) (s-1402 (-> e-1397 ((z-1396 unit)) t-1399)) (f-1403 (-> e-1398 ((val-1400 i)) t-1399))) t-1399))))
+#effect (maxeff)
+#value "(*module* ((zero #<procedure:zero>) (z #<procedure:z>) (z~ #<procedure:z~>)))"
+#end
+#case 112
+#src (match (car (match (quote (q w)) ((list->sexp~ x) x))) ((sym->sexp~ x) x))
+#type sym
+#effect read
+#value "q"
+#end
+#case 113
+#src (match (quote (1 3)) ((list->sexp~ l) (+ (match (car l) ((int->sexp~ i) i)) (match (car (cdr l)) ((int->sexp~ i) i)))))
+#type int
+#effect read
+#value "4"
+#end
+#case 114
+#src (let ((s (open-input-stream "tests.list.fx"))) (letrec ((loop (lambda () (if (stream-char-eof? s) |#U| (begin (stream-write-char standard-output (stream-read-char s)) (loop)))))) (loop)))
+#type unit
+#effect (maxeff *UNIF*-611 init write)
+#value "#U"
+#end
+#case 115
+#src (let ((cons~ (plambda ((t type) (u type) (e1 effect) (e2 effect)) (lambda ((x (listof u)) (s (subr e1 ((fst u) (rest (listof u))) t)) (f (subr e2 ((x (listof u))) t))) (if (null? x) (f x) (s (car x) (cdr x)))))) (nil~ (plambda ((t type) (u type) (e1 effect) (e2 effect)) (lambda ((x (listof u)) (s (subr e1 () t)) (f (subr e2 ((x (listof u))) t))) (if (null? x) (s) (f x)))))) (sexp=? (match (quote (b s)) ((list->sexp~ (nil~)) (quote d)) ((list->sexp~ (cons~ x (cons~ y _))) x)) (match (quote (c)) ((list->sexp~ (cons~ x (nil~))) (quote b)) ((list->sexp~ (cons~ x (cons~ y _))) x))))
+#type bool
+#effect read
+#value "#t"
+#end
+#case 116
+#src (lambda ((x (select (module (define-abstraction t type int) (define-description d (listof t)) (define x (up-t 0))) d))) x)
+#type (-> (maxeff) ((x (listof (select (module (define-abstraction t type int) (define-description d (listof t)) (define x (up-t 0))) t)))) (listof (select (module (define-abstraction t type int) (define-description d (listof t)) (define x (up-t 0))) t)))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 117
+#src (let ((m (module (define-abstraction t type int) (define x (up-t 0)))) (f (lambda ((m (moduleof (abs t type) (val x t))) (y m..t)) y))) (f m m.x))
+#type (select (module (define-abstraction t type int) (define x (up-t 0))) t)
+#effect (maxeff)
+#value "0"
+#end
+#case 118
+#src (module (define-datatype fl-def (make-fl-def int fl-exp)) (define-abstraction fl-exp type int) (define (fl-def-var def) (match def ((make-fl-def~ var _) var))))
+#type (moduleof (abs fl-def type) (abs fl-exp type) (desc fl-def-rep (sumof (make-fl-def (productof (|1| int) (|2| fl-exp))))) (val fl-def-var (-> (maxeff) ((def fl-def)) int)) (val make-fl-def (-> (maxeff) ((make-fl-def-1558 int) (make-fl-def-1559 fl-exp)) fl-def)) (val make-fl-def~ (poly ((e-1560 effect) (e-1561 effect) (t-1562 type)) (-> (maxeff e-1560 e-1561) ((val-1563 fl-def) (s-1565 (-> e-1560 ((make-fl-def-1558 int) (make-fl-def-1559 fl-exp)) t-1562)) (f-1566 (-> e-1561 ((val-1563 fl-def)) t-1562))) t-1562))))
+#effect (maxeff)
+#value "(*module* ((fl-def-var #<procedure:fl-def-var>) (make-fl-def #<procedure:make-fl-def>) (make-fl-def~ #<procedure:make-fl-def~>)))"
+#end
+#case 119
+#src (let ((^ get) (:= set!) (ref new) (cons~ (plambda ((t type) (u type) (e1 effect) (e2 effect)) (lambda ((x (listof u)) (s (subr e1 ((fst u) (rest (listof u))) t)) (f (subr e2 ((x (listof u))) t))) (if (null? x) (f x) (s (car x) (cdr x)))))) (nil~ (plambda ((t type) (u type) (e1 effect) (e2 effect)) (lambda ((x (listof u)) (s (subr e1 () t)) (f (subr e2 ((x (listof u))) t))) (if (null? x) (s) (f x)))))) (with (module (define-description flk-unary-prim string) (define-description flk-binary-prim string)) (module (define-datatype fl-program (make-fl-program fl-exp (listof fl-def))) (define-datatype fl-def (make-fl-def var fl-exp)) (define-datatype var (make-var sym int)) (define-abstraction fl-exp type int) (define fl-def-var (lambda (def) (match def ((make-fl-def~ var _) var)))) (define-datatype fl-exp (numeric-literal->fl-exp int) (boolean-literal->fl-exp bool) (symbolic-literal->fl-exp sym) (var->fl-exp var) (if->fl-exp fl-exp fl-exp fl-exp) (abstraction->fl-exp (listof var) fl-exp) (application->fl-exp fl-exp (listof fl-exp)) (let->fl-exp (listof var) (listof fl-exp) fl-exp) (letrec->fl-exp (listof var) (listof fl-exp) fl-exp) (pair->fl-exp fl-exp fl-exp)) (define fl-def-exp (lambda (def) (match def ((make-fl-def~ _ exp) exp)))) (define sym->var (lambda (sym) (make-var sym 0))) (define var-name (lambda (var) (match var ((make-var~ name num) name)))) (define same-var? (lambda (var1 var2) (match var1 ((make-var~ name1 num1) (match var2 ((make-var~ name2 num2) (and (sym=? name1 name2) (= num1 num2)))))))) (define fresh-var (let ((counter (ref 1))) (lambda () (let ((value (^ counter))) (begin (:= counter (+ (^ counter) 1)) (make-var (symbol fresh) value)))))) (define parse-fl-program (lambda (sexpr) (match sexpr ((list->sexp~ (cons~ (sym->sexp~ (symbol program)) (cons~ body defs))) (make-fl-program (parse-fl-exp body) (map parse-fl-def defs))) (_ (error "PARSE-FL-PROGRAM: Syntax error - not a program"))))) (define parse-fl-def (lambda (sexpr) (match sexpr ((list->sexp~ (cons~ (sym->sexp~ (symbol define)) (cons~ (sym->sexp~ name) (cons~ body (nil~))))) (make-fl-def (sym->var name) (parse-fl-exp body))) (_ (error "PARSE-FL-DEF: Syntax error - not a definition"))))) (define parse-fl-var (lambda (sexpr) (match sexpr ((sym->sexp~ s) (sym->var s)) (_ (error "PARSE-FL-VAR: not a variable!"))))) (define parse-fl-binding-name (lambda (sexpr) (match sexpr ((list->sexp~ (cons~ name _)) (parse-fl-var name)) (_ (error "PARSE-FL-BINDING-NAME: Malformed binding"))))) (define parse-fl-binding-exp (lambda (sexpr) (match sexpr ((list->sexp~ (cons~ _ (cons~ exp (nil~)))) (parse-fl-exp exp)) (_ (error "PARSE-FL-BINDING-EXP: Malformed binding"))))) (define parse-fl-exp (lambda (sexpr) (match sexpr ((int->sexp~ n) (numeric-literal->fl-exp n)) ((bool->sexp~ b) (boolean-literal->fl-exp b)) ((sym->sexp~ s) (var->fl-exp (parse-fl-var (sym->sexp s)))) ((list->sexp~ (cons~ (sym->sexp~ (symbol symbol)) (cons~ (sym->sexp~ s) (nil~)))) (symbolic-literal->fl-exp s)) ((list->sexp~ (cons~ (sym->sexp~ (symbol if)) (cons~ test (cons~ con (cons~ alt (nil~)))))) (if->fl-exp (parse-fl-exp test) (parse-fl-exp con) (parse-fl-exp alt))) ((list->sexp~ (cons~ (sym->sexp~ (symbol lambda)) (cons~ (list->sexp~ vars) (cons~ body (nil~))))) (abstraction->fl-exp (map parse-fl-var vars) (parse-fl-exp body))) ((list->sexp~ (cons~ (sym->sexp~ (symbol let)) (cons~ (list->sexp~ bindings) (cons~ body (nil~))))) (let->fl-exp (map parse-fl-binding-name bindings) (map parse-fl-binding-exp bindings) (parse-fl-exp body))) ((list->sexp~ (cons~ (sym->sexp~ (symbol letrec)) (cons~ (list->sexp~ bindings) (cons~ body (nil~))))) (letrec->fl-exp (map parse-fl-binding-name bindings) (map parse-fl-binding-exp bindings) (parse-fl-exp body))) ((list->sexp~ (cons~ (sym->sexp~ (symbol pair)) (cons~ left (cons~ right (nil~))))) (pair->fl-exp (parse-fl-exp left) (parse-fl-exp right))) ((list->sexp~ (cons~ operator operands)) (application->fl-exp (parse-fl-exp operator) (map parse-fl-exp operands))) (_ (error "PARSE-FL-EXP: Unknown FL expression!"))))) (define-datatype flk-exp (numeric-literal->flk-exp int) (boolean-literal->flk-exp bool) (symbolic-literal->flk-exp sym) (var->flk-exp var) (unary-call->flk-exp flk-unary-prim fl-exp) (binary-call->flk-exp flk-binary-prim fl-exp fl-exp) (abstraction->flk-exp var flk-exp) (application->flk-exp flk-exp flk-exp) (conditional->flk-exp flk-exp flk-exp flk-exp) (recursion->flk-exp var flk-exp) (pair->flk-exp flk-exp flk-exp)) (define desugar-fl-program (lambda (fl-program) (match fl-program ((make-fl-program~ body defs) (desugar-letrec (map fl-def-var defs) (map fl-def-exp defs) body))))) (define desugar-fl-exp (lambda (fl-exp) (match fl-exp ((numeric-literal->fl-exp~ n) (numeric-literal->flk-exp n)) ((boolean-literal->fl-exp~ b) (boolean-literal->flk-exp b)) ((symbolic-literal->fl-exp~ s) (symbolic-literal->flk-exp s)) ((var->fl-exp~ var) (var->flk-exp var)) ((if->fl-exp~ test con alt) (conditional->flk-exp (desugar-fl-exp test) (desugar-fl-exp con) (desugar-fl-exp alt))) ((abstraction->fl-exp~ syms body) (if (null? syms) (abstraction->flk-exp (fresh-var) (desugar-fl-exp body)) (letrec ((recur (lambda (vars) (if (null? vars) (desugar-fl-exp body) (abstraction->flk-exp (car vars) (recur (cdr vars))))))) (recur syms)))) ((application->fl-exp~ rator rands) (if (null? rands) (application->flk-exp (desugar-fl-exp rator) (numeric-literal->flk-exp 0)) (letrec ((loop (lambda (desugared-rator unsugared-rands) (if (null? unsugared-rands) desugared-rator (loop (application->flk-exp desugared-rator (desugar-fl-exp (car unsugared-rands))) (cdr unsugared-rands)))))) (loop (desugar-fl-exp rator) rands)))) ((let->fl-exp~ vars exps body) (desugar-fl-exp (application->fl-exp (abstraction->fl-exp vars body) exps))) ((letrec->fl-exp~ vars exps body) (desugar-letrec vars exps body)) ((pair->fl-exp~ left right) (pair->flk-exp (desugar-fl-exp left) (desugar-fl-exp right)))))) (define desugar-letrec (lambda (vars exps body) (let ((church-var (fresh-var)) (selector-var (fresh-var))) (let ((church-fl (var->fl-exp church-var)) (selector-fl (var->fl-exp selector-var))) (application->flk-exp (recursion->flk-exp church-var (abstraction->flk-exp selector-var (desugar-fl-exp (let->fl-exp vars (map (lambda (var) (application->fl-exp church-fl (cons (abstraction->fl-exp vars (var->fl-exp var)) ({proj null fl-exp})))) vars) (application->fl-exp selector-fl exps))))) (desugar-fl-exp (abstraction->fl-exp vars body))))))))))
+#type (moduleof (abs fl-program type) (abs fl-def type) (abs var type) (abs fl-exp type) (abs fl-exp type) (abs flk-exp type) (desc fl-program-rep (sumof (make-fl-program (productof (|1| fl-exp) (|2| (listof fl-def)))))) (desc fl-def-rep (sumof (make-fl-def (productof (|1| var) (|2| fl-exp))))) (desc var-rep (sumof (make-var (productof (|1| sym) (|2| int))))) (desc fl-exp-rep (sumof (numeric-literal->fl-exp (productof (|1| int))) (boolean-literal->fl-exp (productof (|1| bool))) (symbolic-literal->fl-exp (productof (|1| sym))) (var->fl-exp (productof (|1| var))) (if->fl-exp (productof (|1| fl-exp) (|2| fl-exp) (|3| fl-exp))) (abstraction->fl-exp (productof (|1| (listof var)) (|2| fl-exp))) (application->fl-exp (productof (|1| fl-exp) (|2| (listof fl-exp)))) (let->fl-exp (productof (|1| (listof var)) (|2| (listof fl-exp)) (|3| fl-exp))) (letrec->fl-exp (productof (|1| (listof var)) (|2| (listof fl-exp)) (|3| fl-exp))) (pair->fl-exp (productof (|1| fl-exp) (|2| fl-exp))))) (desc flk-exp-rep (sumof (numeric-literal->flk-exp (productof (|1| int))) (boolean-literal->flk-exp (productof (|1| bool))) (symbolic-literal->flk-exp (productof (|1| sym))) (var->flk-exp (productof (|1| var))) (unary-call->flk-exp (productof (|1| flk-unary-prim) (|2| fl-exp))) (binary-call->flk-exp (productof (|1| flk-binary-prim) (|2| fl-exp) (|3| fl-exp))) (abstraction->flk-exp (productof (|1| var) (|2| flk-exp))) (application->flk-exp (productof (|1| flk-exp) (|2| flk-exp))) (conditional->flk-exp (productof (|1| flk-exp) (|2| flk-exp) (|3| flk-exp))) (recursion->flk-exp (productof (|1| var) (|2| flk-exp))) (pair->flk-exp (productof (|1| flk-exp) (|2| flk-exp))))) (val fl-def-var (-> (maxeff) ((def fl-def)) var)) (val fl-def-exp (-> (maxeff) ((def fl-def)) fl-exp)) (val sym->var (-> (maxeff) ((sym sym)) var)) (val var-name (-> (maxeff) ((var var)) sym)) (val same-var? (-> (maxeff) ((var1 var) (var2 var)) bool)) (val fresh-var (-> (maxeff write read) () var)) (val parse-fl-program (-> (maxeff *UNIF*-4099 init read write) ((sexpr sexp)) fl-program)) (val parse-fl-def (-> (maxeff *UNIF*-4099 init read write) ((sexpr sexp)) fl-def)) (val parse-fl-var (-> write ((sexpr sexp)) var)) (val parse-fl-binding-name (-> (maxeff read write) ((sexpr sexp)) var)) (val parse-fl-binding-exp (-> (maxeff *UNIF*-4099 init read write) ((sexpr sexp)) fl-exp)) (val parse-fl-exp (-> (maxeff *UNIF*-4099 init read write) ((sexpr sexp)) fl-exp)) (val desugar-fl-program (-> (maxeff *UNIF*-4101 *UNIF*-4100 *UNIF*-3640 *UNIF*-3641 write init read) ((fl-program fl-program)) flk-exp)) (val desugar-fl-exp (-> (maxeff *UNIF*-4101 init *UNIF*-4100 *UNIF*-3640 *UNIF*-3641 write read) ((fl-exp fl-exp)) flk-exp)) (val desugar-letrec (-> (maxeff *UNIF*-4101 init *UNIF*-4100 *UNIF*-3640 *UNIF*-3641 write read) ((vars (listof var)) (exps (listof fl-exp)) (body fl-exp)) flk-exp)) (val make-fl-program (-> (maxeff) ((make-fl-program-1592 fl-exp) (make-fl-program-1593 (listof fl-def))) fl-program)) (val make-fl-program~ (poly ((e-1594 effect) (e-1595 effect) (t-1596 type)) (-> (maxeff e-1594 e-1595) ((val-1597 fl-program) (s-1599 (-> e-1594 ((make-fl-program-1592 fl-exp) (make-fl-program-1593 (listof fl-def))) t-1596)) (f-1600 (-> e-1595 ((val-1597 fl-program)) t-1596))) t-1596))) (val make-fl-def (-> (maxeff) ((make-fl-def-1601 var) (make-fl-def-1602 fl-exp)) fl-def)) (val make-fl-def~ (poly ((e-1603 effect) (e-1604 effect) (t-1605 type)) (-> (maxeff e-1603 e-1604) ((val-1606 fl-def) (s-1608 (-> e-1603 ((make-fl-def-1601 var) (make-fl-def-1602 fl-exp)) t-1605)) (f-1609 (-> e-1604 ((val-1606 fl-def)) t-1605))) t-1605))) (val make-var (-> (maxeff) ((make-var-1610 sym) (make-var-1611 int)) var)) (val make-var~ (poly ((e-1612 effect) (e-1613 effect) (t-1614 type)) (-> (maxeff e-1612 e-1613) ((val-1615 var) (s-1617 (-> e-1612 ((make-var-1610 sym) (make-var-1611 int)) t-1614)) (f-1618 (-> e-1613 ((val-1615 var)) t-1614))) t-1614))) (val numeric-literal->fl-exp (-> (maxeff) ((numeric-literal->fl-exp-1619 int)) fl-exp)) (val numeric-literal->fl-exp~ (poly ((e-1620 effect) (e-1621 effect) (t-1622 type)) (-> (maxeff e-1620 e-1621) ((val-1623 fl-exp) (s-1625 (-> e-1620 ((numeric-literal->fl-exp-1619 int)) t-1622)) (f-1626 (-> e-1621 ((val-1623 fl-exp)) t-1622))) t-1622))) (val boolean-literal->fl-exp (-> (maxeff) ((boolean-literal->fl-exp-1627 bool)) fl-exp)) (val boolean-literal->fl-exp~ (poly ((e-1628 effect) (e-1629 effect) (t-1630 type)) (-> (maxeff e-1628 e-1629) ((val-1631 fl-exp) (s-1633 (-> e-1628 ((boolean-literal->fl-exp-1627 bool)) t-1630)) (f-1634 (-> e-1629 ((val-1631 fl-exp)) t-1630))) t-1630))) (val symbolic-literal->fl-exp (-> (maxeff) ((symbolic-literal->fl-exp-1635 sym)) fl-exp)) (val symbolic-literal->fl-exp~ (poly ((e-1636 effect) (e-1637 effect) (t-1638 type)) (-> (maxeff e-1636 e-1637) ((val-1639 fl-exp) (s-1641 (-> e-1636 ((symbolic-literal->fl-exp-1635 sym)) t-1638)) (f-1642 (-> e-1637 ((val-1639 fl-exp)) t-1638))) t-1638))) (val var->fl-exp (-> (maxeff) ((var->fl-exp-1643 var)) fl-exp)) (val var->fl-exp~ (poly ((e-1644 effect) (e-1645 effect) (t-1646 type)) (-> (maxeff e-1644 e-1645) ((val-1647 fl-exp) (s-1649 (-> e-1644 ((var->fl-exp-1643 var)) t-1646)) (f-1650 (-> e-1645 ((val-1647 fl-exp)) t-1646))) t-1646))) (val if->fl-exp (-> (maxeff) ((if->fl-exp-1651 fl-exp) (if->fl-exp-1652 fl-exp) (if->fl-exp-1653 fl-exp)) fl-exp)) (val if->fl-exp~ (poly ((e-1654 effect) (e-1655 effect) (t-1656 type)) (-> (maxeff e-1654 e-1655) ((val-1657 fl-exp) (s-1659 (-> e-1654 ((if->fl-exp-1651 fl-exp) (if->fl-exp-1652 fl-exp) (if->fl-exp-1653 fl-exp)) t-1656)) (f-1660 (-> e-1655 ((val-1657 fl-exp)) t-1656))) t-1656))) (val abstraction->fl-exp (-> (maxeff) ((abstraction->fl-exp-1661 (listof var)) (abstraction->fl-exp-1662 fl-exp)) fl-exp)) (val abstraction->fl-exp~ (poly ((e-1663 effect) (e-1664 effect) (t-1665 type)) (-> (maxeff e-1663 e-1664) ((val-1666 fl-exp) (s-1668 (-> e-1663 ((abstraction->fl-exp-1661 (listof var)) (abstraction->fl-exp-1662 fl-exp)) t-1665)) (f-1669 (-> e-1664 ((val-1666 fl-exp)) t-1665))) t-1665))) (val application->fl-exp (-> (maxeff) ((application->fl-exp-1670 fl-exp) (application->fl-exp-1671 (listof fl-exp))) fl-exp)) (val application->fl-exp~ (poly ((e-1672 effect) (e-1673 effect) (t-1674 type)) (-> (maxeff e-1672 e-1673) ((val-1675 fl-exp) (s-1677 (-> e-1672 ((application->fl-exp-1670 fl-exp) (application->fl-exp-1671 (listof fl-exp))) t-1674)) (f-1678 (-> e-1673 ((val-1675 fl-exp)) t-1674))) t-1674))) (val let->fl-exp (-> (maxeff) ((let->fl-exp-1679 (listof var)) (let->fl-exp-1680 (listof fl-exp)) (let->fl-exp-1681 fl-exp)) fl-exp)) (val let->fl-exp~ (poly ((e-1682 effect) (e-1683 effect) (t-1684 type)) (-> (maxeff e-1682 e-1683) ((val-1685 fl-exp) (s-1687 (-> e-1682 ((let->fl-exp-1679 (listof var)) (let->fl-exp-1680 (listof fl-exp)) (let->fl-exp-1681 fl-exp)) t-1684)) (f-1688 (-> e-1683 ((val-1685 fl-exp)) t-1684))) t-1684))) (val letrec->fl-exp (-> (maxeff) ((letrec->fl-exp-1689 (listof var)) (letrec->fl-exp-1690 (listof fl-exp)) (letrec->fl-exp-1691 fl-exp)) fl-exp)) (val letrec->fl-exp~ (poly ((e-1692 effect) (e-1693 effect) (t-1694 type)) (-> (maxeff e-1692 e-1693) ((val-1695 fl-exp) (s-1697 (-> e-1692 ((letrec->fl-exp-1689 (listof var)) (letrec->fl-exp-1690 (listof fl-exp)) (letrec->fl-exp-1691 fl-exp)) t-1694)) (f-1698 (-> e-1693 ((val-1695 fl-exp)) t-1694))) t-1694))) (val pair->fl-exp (-> (maxeff) ((pair->fl-exp-1699 fl-exp) (pair->fl-exp-1700 fl-exp)) fl-exp)) (val pair->fl-exp~ (poly ((e-1701 effect) (e-1702 effect) (t-1703 type)) (-> (maxeff e-1701 e-1702) ((val-1704 fl-exp) (s-1706 (-> e-1701 ((pair->fl-exp-1699 fl-exp) (pair->fl-exp-1700 fl-exp)) t-1703)) (f-1707 (-> e-1702 ((val-1704 fl-exp)) t-1703))) t-1703))) (val numeric-literal->flk-exp (-> (maxeff) ((numeric-literal->flk-exp-1708 int)) flk-exp)) (val numeric-literal->flk-exp~ (poly ((e-1709 effect) (e-1710 effect) (t-1711 type)) (-> (maxeff e-1709 e-1710) ((val-1712 flk-exp) (s-1714 (-> e-1709 ((numeric-literal->flk-exp-1708 int)) t-1711)) (f-1715 (-> e-1710 ((val-1712 flk-exp)) t-1711))) t-1711))) (val boolean-literal->flk-exp (-> (maxeff) ((boolean-literal->flk-exp-1716 bool)) flk-exp)) (val boolean-literal->flk-exp~ (poly ((e-1717 effect) (e-1718 effect) (t-1719 type)) (-> (maxeff e-1717 e-1718) ((val-1720 flk-exp) (s-1722 (-> e-1717 ((boolean-literal->flk-exp-1716 bool)) t-1719)) (f-1723 (-> e-1718 ((val-1720 flk-exp)) t-1719))) t-1719))) (val symbolic-literal->flk-exp (-> (maxeff) ((symbolic-literal->flk-exp-1724 sym)) flk-exp)) (val symbolic-literal->flk-exp~ (poly ((e-1725 effect) (e-1726 effect) (t-1727 type)) (-> (maxeff e-1725 e-1726) ((val-1728 flk-exp) (s-1730 (-> e-1725 ((symbolic-literal->flk-exp-1724 sym)) t-1727)) (f-1731 (-> e-1726 ((val-1728 flk-exp)) t-1727))) t-1727))) (val var->flk-exp (-> (maxeff) ((var->flk-exp-1732 var)) flk-exp)) (val var->flk-exp~ (poly ((e-1733 effect) (e-1734 effect) (t-1735 type)) (-> (maxeff e-1733 e-1734) ((val-1736 flk-exp) (s-1738 (-> e-1733 ((var->flk-exp-1732 var)) t-1735)) (f-1739 (-> e-1734 ((val-1736 flk-exp)) t-1735))) t-1735))) (val unary-call->flk-exp (-> (maxeff) ((unary-call->flk-exp-1740 string) (unary-call->flk-exp-1741 fl-exp)) flk-exp)) (val unary-call->flk-exp~ (poly ((e-1742 effect) (e-1743 effect) (t-1744 type)) (-> (maxeff e-1742 e-1743) ((val-1745 flk-exp) (s-1747 (-> e-1742 ((unary-call->flk-exp-1740 string) (unary-call->flk-exp-1741 fl-exp)) t-1744)) (f-1748 (-> e-1743 ((val-1745 flk-exp)) t-1744))) t-1744))) (val binary-call->flk-exp (-> (maxeff) ((binary-call->flk-exp-1749 string) (binary-call->flk-exp-1750 fl-exp) (binary-call->flk-exp-1751 fl-exp)) flk-exp)) (val binary-call->flk-exp~ (poly ((e-1752 effect) (e-1753 effect) (t-1754 type)) (-> (maxeff e-1752 e-1753) ((val-1755 flk-exp) (s-1757 (-> e-1752 ((binary-call->flk-exp-1749 string) (binary-call->flk-exp-1750 fl-exp) (binary-call->flk-exp-1751 fl-exp)) t-1754)) (f-1758 (-> e-1753 ((val-1755 flk-exp)) t-1754))) t-1754))) (val abstraction->flk-exp (-> (maxeff) ((abstraction->flk-exp-1759 var) (abstraction->flk-exp-1760 flk-exp)) flk-exp)) (val abstraction->flk-exp~ (poly ((e-1761 effect) (e-1762 effect) (t-1763 type)) (-> (maxeff e-1761 e-1762) ((val-1764 flk-exp) (s-1766 (-> e-1761 ((abstraction->flk-exp-1759 var) (abstraction->flk-exp-1760 flk-exp)) t-1763)) (f-1767 (-> e-1762 ((val-1764 flk-exp)) t-1763))) t-1763))) (val application->flk-exp (-> (maxeff) ((application->flk-exp-1768 flk-exp) (application->flk-exp-1769 flk-exp)) flk-exp)) (val application->flk-exp~ (poly ((e-1770 effect) (e-1771 effect) (t-1772 type)) (-> (maxeff e-1770 e-1771) ((val-1773 flk-exp) (s-1775 (-> e-1770 ((application->flk-exp-1768 flk-exp) (application->flk-exp-1769 flk-exp)) t-1772)) (f-1776 (-> e-1771 ((val-1773 flk-exp)) t-1772))) t-1772))) (val conditional->flk-exp (-> (maxeff) ((conditional->flk-exp-1777 flk-exp) (conditional->flk-exp-1778 flk-exp) (conditional->flk-exp-1779 flk-exp)) flk-exp)) (val conditional->flk-exp~ (poly ((e-1780 effect) (e-1781 effect) (t-1782 type)) (-> (maxeff e-1780 e-1781) ((val-1783 flk-exp) (s-1785 (-> e-1780 ((conditional->flk-exp-1777 flk-exp) (conditional->flk-exp-1778 flk-exp) (conditional->flk-exp-1779 flk-exp)) t-1782)) (f-1786 (-> e-1781 ((val-1783 flk-exp)) t-1782))) t-1782))) (val recursion->flk-exp (-> (maxeff) ((recursion->flk-exp-1787 var) (recursion->flk-exp-1788 flk-exp)) flk-exp)) (val recursion->flk-exp~ (poly ((e-1789 effect) (e-1790 effect) (t-1791 type)) (-> (maxeff e-1789 e-1790) ((val-1792 flk-exp) (s-1794 (-> e-1789 ((recursion->flk-exp-1787 var) (recursion->flk-exp-1788 flk-exp)) t-1791)) (f-1795 (-> e-1790 ((val-1792 flk-exp)) t-1791))) t-1791))) (val pair->flk-exp (-> (maxeff) ((pair->flk-exp-1796 flk-exp) (pair->flk-exp-1797 flk-exp)) flk-exp)) (val pair->flk-exp~ (poly ((e-1798 effect) (e-1799 effect) (t-1800 type)) (-> (maxeff e-1798 e-1799) ((val-1801 flk-exp) (s-1803 (-> e-1798 ((pair->flk-exp-1796 flk-exp) (pair->flk-exp-1797 flk-exp)) t-1800)) (f-1804 (-> e-1799 ((val-1801 flk-exp)) t-1800))) t-1800))))
+#effect init
+#value "(*module* ((fl-def-var #<procedure:fl-def-var>) (fl-def-exp #<procedure:fl-def-exp>) (sym->var #<procedure:sym->var>) (var-name #<procedure:var-name>) (same-var? #<procedure:same-var?>) (fresh-var #<procedure:fresh-var>) (parse-fl-program #<procedure:parse-fl-program>) (parse-fl-def #<procedure:parse-fl-def>) (parse-fl-var #<procedure:parse-fl-var>) (parse-fl-binding-name #<procedure:parse-fl-binding-name>) (parse-fl-binding-exp #<procedure:parse-fl-binding-exp>) (parse-fl-exp #<procedure:parse-fl-exp>) (desugar-fl-program #<procedure:desugar-fl-program>) (desugar-fl-exp #<procedure:desugar-fl-exp>) (desugar-letrec #<procedure:desugar-letrec>) (make-fl-program #<procedure:make-fl-program>) (make-fl-program~ #<procedure:make-fl-program~>) (make-fl-def #<procedure:make-fl-def>) (make-fl-def~ #<procedure:make-fl-def~>) (make-var #<procedure:make-var>) (make-var~ #<procedure:make-var~>) (numeric-literal->fl-exp #<procedure:numeric-literal->fl-exp>) (numeric-literal->fl-exp~ #<procedure:numeric-literal->fl-exp~>) (boolean-literal->fl-exp #<procedure:boolean-literal->fl-exp>) (boolean-literal->fl-exp~ #<procedure:boolean-literal->fl-exp~>) (symbolic-literal->fl-exp #<procedure:symbolic-literal->fl-exp>) (symbolic-literal->fl-exp~ #<procedure:symbolic-literal->fl-exp~>) (var->fl-exp #<procedure:var->fl-exp>) (var->fl-exp~ #<procedure:var->fl-exp~>) (if->fl-exp #<procedure:if->fl-exp>) (if->fl-exp~ #<procedure:if->fl-exp~>) (abstraction->fl-exp #<procedure:abstraction->fl-exp>) (abstraction->fl-exp~ #<procedure:abstraction->fl-exp~>) (application->fl-exp #<procedure:application->fl-exp>) (application->fl-exp~ #<procedure:application->fl-exp~>) (let->fl-exp #<procedure:let->fl-exp>) (let->fl-exp~ #<procedure:let->fl-exp~>) (letrec->fl-exp #<procedure:letrec->fl-exp>) (letrec->fl-exp~ #<procedure:letrec->fl-exp~>) (pair->fl-exp #<procedure:pair->fl-exp>) (pair->fl-exp~ #<procedure:pair->fl-exp~>) (numeric-literal->flk-exp #<procedure:numeric-literal->flk-exp>) (numeric-literal->flk-exp~ #<procedure:numeric-literal->flk-exp~>) (boolean-literal->flk-exp #<procedure:boolean-literal->flk-exp>) (boolean-literal->flk-exp~ #<procedure:boolean-literal->flk-exp~>) (symbolic-literal->flk-exp #<procedure:symbolic-literal->flk-exp>) (symbolic-literal->flk-exp~ #<procedure:symbolic-literal->flk-exp~>) (var->flk-exp #<procedure:var->flk-exp>) (var->flk-exp~ #<procedure:var->flk-exp~>) (unary-call->flk-exp #<procedure:unary-call->flk-exp>) (unary-call->flk-exp~ #<procedure:unary-call->flk-exp~>) (binary-call->flk-exp #<procedure:binary-call->flk-exp>) (binary-call->flk-exp~ #<procedure:binary-call->flk-exp~>) (abstraction->flk-exp #<procedure:abstraction->flk-exp>) (abstraction->flk-exp~ #<procedure:abstraction->flk-exp~>) (application->flk-exp #<procedure:application->flk-exp>) (application->flk-exp~ #<procedure:application->flk-exp~>) (conditional->flk-exp #<procedure:conditional->flk-exp>) (conditional->flk-exp~ #<procedure:conditional->flk-exp~>) (recursion->flk-exp #<procedure:recursion->flk-exp>) (recursion->flk-exp~ #<procedure:recursion->flk-exp~>) (pair->flk-exp #<procedure:pair->flk-exp>) (pair->flk-exp~ #<procedure:pair->flk-exp~>)))"
+#end
+#case 120
+#src (module (define-datatype tree (leaf int) (node tree tree)) (define my-tree (lambda () (node (leaf 1) (leaf 0)))))
+#type (moduleof (abs tree type) (desc tree-rep (sumof (leaf (productof (|1| int))) (node (productof (|1| tree) (|2| tree))))) (val my-tree (-> (maxeff) () tree)) (val leaf (-> (maxeff) ((leaf-2663 int)) tree)) (val leaf~ (poly ((e-2664 effect) (e-2665 effect) (t-2666 type)) (-> (maxeff e-2664 e-2665) ((val-2667 tree) (s-2669 (-> e-2664 ((leaf-2663 int)) t-2666)) (f-2670 (-> e-2665 ((val-2667 tree)) t-2666))) t-2666))) (val node (-> (maxeff) ((node-2671 tree) (node-2672 tree)) tree)) (val node~ (poly ((e-2673 effect) (e-2674 effect) (t-2675 type)) (-> (maxeff e-2673 e-2674) ((val-2676 tree) (s-2678 (-> e-2673 ((node-2671 tree) (node-2672 tree)) t-2675)) (f-2679 (-> e-2674 ((val-2676 tree)) t-2675))) t-2675))))
+#effect (maxeff)
+#value "(*module* ((my-tree #<procedure:my-tree>) (leaf #<procedure:leaf>) (leaf~ #<procedure:leaf~>) (node #<procedure:node>) (node~ #<procedure:node~>)))"
+#end
+#case 121
+#src (lambda (f) (lambda ((w (subr write ((x bool)) bool))) (if #t f (lambda (x) (begin (f x) (w x))))))
+#type (-> (maxeff) ((f (-> (maxeff *UNIF*-601 write) ((rand-2695 bool)) bool))) (-> (maxeff) ((w (-> write ((x bool)) bool))) (-> (maxeff *UNIF*-601 write) ((rand-2695 bool)) bool)))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 122
+#src (lambda (f) (lambda ((w (subr write ((x bool)) bool)) (r (subr read ((x bool)) bool))) (if #t (lambda (x) (begin (f x) (r x))) (lambda (x) (begin (f x) (w x))))))
+#type (-> (maxeff) ((f (-> *UNIF*-606 ((rand-2697 bool)) *UNIF*-607))) (-> (maxeff) ((w (-> write ((x bool)) bool)) (r (-> read ((x bool)) bool))) (-> (maxeff *UNIF*-606 read) ((x bool)) bool)))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 123
+#src (lambda (f3461 f3449 f3515 f3504) (lambda ((w (subr write ((x bool)) bool)) (r (subr read ((x bool)) bool))) (begin (if #t f3515 (lambda (x) (begin (f3504 x) (f3515 x) (r x)))) (if #t f3461 (lambda (x) (begin (f3461 x) (f3504 x) (r x)))))))
+#type (-> (maxeff) ((f3461 (-> (maxeff *UNIF*-624 *UNIF*-619 read) ((rand-2704 bool)) bool)) (f3449 *UNIF*-592) (f3515 (-> (maxeff *UNIF*-614 *UNIF*-619 read) ((rand-2702 bool)) bool)) (f3504 (-> *UNIF*-619 ((rand-2701 bool)) *UNIF*-620))) (-> (maxeff) ((w (-> write ((x bool)) bool)) (r (-> read ((x bool)) bool))) (-> (maxeff *UNIF*-624 *UNIF*-619 read) ((rand-2704 bool)) bool)))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 124
+#src (lambda (f) (lambda ((w (subr write ((x bool)) bool)) (r (subr read ((x bool)) bool))) (begin (if #t (lambda (x) (begin (f x) (r x))) r) (if #t (lambda (x) (begin (f x) (w x))) w))))
+#type (-> (maxeff) ((f (-> *UNIF*-606 ((rand-2707 bool)) *UNIF*-607))) (-> (maxeff) ((w (-> write ((x bool)) bool)) (r (-> read ((x bool)) bool))) (-> (maxeff *UNIF*-606 write) ((x bool)) bool)))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 125
+#src (plambda ((e1 effect) (e2 effect)) (lambda (f) (lambda ((w (subr e1 ((x bool)) bool)) (r (subr e2 ((x bool)) bool))) (if #t (lambda (x) (begin (f x) (r x))) (lambda (x) (begin (f x) (w x)))))))
+#type (poly ((e1 effect) (e2 effect)) (-> (maxeff) ((f (-> *UNIF*-608 ((rand-2711 bool)) *UNIF*-609))) (-> (maxeff) ((w (-> e1 ((x bool)) bool)) (r (-> e2 ((x bool)) bool))) (-> (maxeff *UNIF*-608 e2) ((x bool)) bool))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 126
+#src (let ((m (module (define-abstraction t type bool) (define f (lambda (x) (up-t x)))))) (if #t (with m f) (with m f)))
+#type (-> (maxeff) ((x bool)) (select (module (define-abstraction t type bool) (define f (lambda (x) (up-t x)))) t))
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 127
+#src (with (module (define m (module (define-abstraction t type bool) (define f up-t)))) (with m (with m f)))
+#type (-> (maxeff) ((up1 bool)) (select (with (module (define m (module (define-abstraction t type bool) (define f up-t)))) (with (module (define m (module (define-abstraction t type bool) (define f up-t)))) m)) t))
+#effect (maxeff)
+#value "#<procedure:up-t>"
+#end
+#case 128
+#src (let ((m (module (define-abstraction t type bool) (define f up-t)))) (with m (with m f)))
+#type (-> (maxeff) ((up1 bool)) (select (module (define-abstraction t type bool) (define f up-t)) t))
+#effect (maxeff)
+#value "#<procedure:up-t>"
+#end
+#case 129
+#src (with (module (define m (module (define-abstraction t type bool) (define f up-t)))) (with m f))
+#type (-> (maxeff) ((up1 bool)) (select (with (module (define m (module (define-abstraction t type bool) (define f up-t)))) (with (module (define m (module (define-abstraction t type bool) (define f up-t)))) m)) t))
+#effect (maxeff)
+#value "#<procedure:up-t>"
+#end
+#case 130
+#src (with (module (define-typed m (moduleof (abs t type) (val f (subr (maxeff) ((x bool)) t))) (module (define-abstraction t type bool) (define f up-t)))) (with m f))
+#type (-> (maxeff) ((up1 bool)) (select (with (module (define-typed m (moduleof (abs t type) (val f (-> (maxeff) ((x bool)) t))) (module (define-abstraction t type bool) (define f up-t)))) (with (module (define-typed m (moduleof (abs t type) (val f (subr (maxeff) ((x bool)) t))) (module (define-abstraction t type bool) (define f up-t)))) m)) t))
+#effect (maxeff)
+#value "#<procedure:up-t>"
+#end
+#case 131
+#src (let ((mod (module (define m (module (define-abstraction t type bool) (define f (up-t #t))))))) (let ((m1 (with mod m))) (with m1 f)))
+#type (select (with (module (define m (module (define-abstraction t type bool) (define f (up-t #t))))) m) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 132
+#src (let ((m1 (with (module (define m (module (define-abstraction t type bool) (define f (up-t #t))))) m))) (with m1 f))
+#type (select (with (module (define m (module (define-abstraction t type bool) (define f (up-t #t))))) m) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 133
+#src (with (with (module (define m (module (define-abstraction t type bool) (define f (up-t #t))))) m) f)
+#type (select (with (module (define m (module (define-abstraction t type bool) (define f (up-t #t))))) m) t)
+#effect (maxeff)
+#value "#t"
+#end
+#case 134
+#src (lambda ((f (select (module (define-description t (subr read () int))) t))) (f))
+#type (-> read ((f (-> read () int))) int)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 135
+#src (lambda ((f (select (with (module (define-description r read)) (module (define-description t (subr r () int)))) t))) (f))
+#type (-> read ((f (-> read () int))) int)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 136
+#src (if #t (lambda ((x (select ((lambda ((x bool)) (module (define-abstraction t type int))) #t) t))) x) (lambda ((x (select ((lambda ((x bool)) (module (define-abstraction t type int))) #t) t))) x))
+#type (-> (maxeff) ((x (select ((lambda ((x bool)) (module (define-abstraction t type int))) #t) t))) (select ((lambda ((x bool)) (module (define-abstraction t type int))) #t) t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 137
+#src (if #t (lambda ((x (select ((lambda (x) (module (define-abstraction t type int))) #t) t))) x) (lambda ((x (select ((lambda (x) (module (define-abstraction t type int))) #t) t))) x))
+#type (-> (maxeff) ((x (select ((lambda (x) (module (define-abstraction t type int))) #t) t))) (select ((lambda (x) (module (define-abstraction t type int))) #t) t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 138
+#src (plambda ((e1 effect) (e2 effect)) (lambda (x1 x2) (plambda ((f1 effect) (f2 effect)) (lambda ((y1 (subr f1 () bool)) (y2 (subr f2 () bool))) (if #t (lambda () (begin (x1) (y1))) (lambda () (begin (x2) (y2))))))))
+#type (poly ((e1 effect) (e2 effect)) (-> (maxeff) ((x1 (-> *UNIF*-599 () *UNIF*-600)) (x2 (-> *UNIF*-603 () *UNIF*-604))) (poly ((f1 effect) (f2 effect)) (-> (maxeff) ((y1 (-> f1 () bool)) (y2 (-> f2 () bool))) (-> (maxeff *UNIF*-599 f1) () bool)))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 139
+#src (plambda ((e1 effect) (e2 effect)) (lambda ((y1 (subr e1 () bool)) x2) (plambda ((f1 effect) (f2 effect)) (lambda (x1 (y2 (subr f2 () bool))) (if #t (lambda () (begin (x1) (y1))) (lambda () (begin (x2) (y2))))))))
+#type (poly ((e1 effect) (e2 effect)) (-> (maxeff) ((y1 (-> e1 () bool)) (x2 (-> *UNIF*-603 () *UNIF*-604))) (poly ((f1 effect) (f2 effect)) (-> (maxeff) ((x1 (-> *UNIF*-599 () *UNIF*-600)) (y2 (-> f2 () bool))) (-> (maxeff *UNIF*-599 e1) () bool)))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 140
+#src (proj (plambda ((e1 effect) (e2 effect)) (lambda ((y1 (subr e1 () bool)) x2) (plambda ((f1 effect) (f2 effect)) (lambda (x1 (y2 (subr f2 () bool))) (if #t (lambda () (begin (x1) (y1))) (lambda () (begin (x2) (y2)))))))) write read)
+#type (-> (maxeff) ((y1 (-> write () bool)) (x2 (-> *UNIF*-603 () *UNIF*-604))) (poly ((f1 effect) (f2 effect)) (-> (maxeff) ((x1 (-> *UNIF*-599 () *UNIF*-600)) (y2 (-> f2 () bool))) (-> (maxeff *UNIF*-599 write) () bool))))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 141
+#src ((proj (plambda ((e1 effect) (e2 effect)) (lambda ((y1 (subr e1 () bool)) x2) (plambda ((f1 effect) (f2 effect)) (lambda (x1 (y2 (subr f2 () bool))) (if #t (lambda () (begin (x1) (y1))) (lambda () (begin (x2) (y2)))))))) write read) (the (subr write () bool) (lambda () #t)) (lambda () 3))
+#type (poly ((f1 effect) (f2 effect)) (-> (maxeff) ((x1 (-> *UNIF*-599 () *UNIF*-600)) (y2 (-> f2 () bool))) (-> (maxeff *UNIF*-599 write) () bool)))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 142
+#src (proj ((proj (plambda ((e1 effect) (e2 effect)) (lambda ((y1 (subr e1 () bool)) x2) (plambda ((f1 effect) (f2 effect)) (lambda (x1 (y2 (subr f2 () bool))) (if #t (lambda () (begin (x1) (y1))) (lambda () (begin (x2) (y2)))))))) write read) (the (subr write () bool) (lambda () #t)) (lambda () 3)) read write)
+#type (-> (maxeff) ((x1 (-> *UNIF*-599 () *UNIF*-600)) (y2 (-> write () bool))) (-> (maxeff *UNIF*-599 write) () bool))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 143
+#src (proj ((proj (plambda ((e1 effect) (e2 effect)) (lambda ((y1 (subr e1 () bool)) x2) (plambda ((f1 effect) (f2 effect)) (lambda (x1 (y2 (subr f2 () bool))) (if #t (lambda () (begin (x1) (y1))) (lambda () (begin (x2) (y2)))))))) write read) (the (subr write () bool) (lambda () #t)) (lambda () 3)) read read)
+#type (-> (maxeff) ((x1 (-> *UNIF*-599 () *UNIF*-600)) (y2 (-> read () bool))) (-> (maxeff *UNIF*-599 write) () bool))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 144
+#src (with (module (define f (lambda (x) x))) (begin (f 1) (f #t)))
+#type bool
+#effect (maxeff)
+#value "#t"
+#end
+#case 145
+#src (with (module (define f (lambda (x) x))) f)
+#type (-> (maxeff) ((x *UNIF*-591)) *UNIF*-591)
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 146
+#src (with (module (define-abstraction t type int) (define f (lambda ((x t)) x))) (lambda (x) (f x)))
+#type (-> (maxeff) ((x (select (module (define-abstraction t type int) (define f (lambda ((x t)) x))) t))) (select (module (define-abstraction t type int) (define f (lambda ((x t)) x))) t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 147
+#src (let ((x (get (new (module (define f (lambda (x) x))))))) (with x (f 2)))
+#type int
+#effect (maxeff read init)
+#value "2"
+#end
+#case 148
+#src (letrec ((f (get (new (lambda () (g))))) (g (lambda () 3))) (f))
+#type int
+#effect (maxeff read init)
+#value "3"
+#end
+#case 149
+#src (with (module (define-abstraction t type bool) (define x up-t)) (lambda ((y (select (module (define-abstraction t type bool) (define x up-t)) t))) y))
+#type (-> (maxeff) ((y (select (module (define-abstraction t type bool) (define x up-t)) t))) (select (module (define-abstraction t type bool) (define x up-t)) t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 150
+#src (+ (with fx 1) 2)
+#type int
+#effect (maxeff)
+#value "3"
+#end
+#case 151
+#src (with (module (define-abstraction t type bool) (define x (up-t #f))) (lambda ((y (select (module (define-abstraction t type bool) (define x (up-t #f))) t))) y))
+#type (-> (maxeff) ((y (select (module (define-abstraction t type bool) (define x (up-t #f))) t))) (select (module (define-abstraction t type bool) (define x (up-t #f))) t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 152
+#src (with (module (define-abstraction t type bool) (define x (up-t #f))) (lambda ((y (select (module (define-abstraction t type bool) (define x (up-t #f))) t))) (if #t x y)))
+#type (-> (maxeff) ((y (select (module (define-abstraction t type bool) (define x (up-t #f))) t))) (select (module (define-abstraction t type bool) (define x (up-t #f))) t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 153
+#src (with (load "tests.load.fx") f)
+#type (-> (maxeff) ((x *UNIF*-596)) *UNIF*-596)
+#effect (maxeff)
+#value "#<procedure:f>"
+#end
+#case 154
+#src (if #t (load "tests.load.fx") (load "tests.load.fx"))
+#type (moduleof (abs t type) (val up (-> (maxeff) ((x t)) t)) (val f (-> (maxeff) ((x *UNIF*-611)) *UNIF*-611)))
+#effect (maxeff)
+#value "(*module* ((up #<procedure:up>) (f #<procedure:f>)))"
+#end
+#case 155
+#src (with (load "tests.load.fx") (lambda ((w (select (load "tests.load.fx") t))) (if (f #t) (f w) (up w))))
+#type (-> (maxeff) ((w (select (load "tests.load.fx") t))) (select (load "tests.load.fx") t))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 156
+#src (with (load "tests.load.fx") (begin (f #f) (f 0) (f 3.2)))
+#type float
+#effect (maxeff)
+#value "3.2"
+#end
+#case 157
+#src (with (load "tests.load.fx") (begin (f #f) (with (load "tests.load.fx") (f 0))))
+#type int
+#effect (maxeff)
+#value "0"
+#end
+#case 158
+#src (with (load "tests.load.fx") (match (f (quote u)) ((quasiquote u) (f 2))))
+#type int
+#effect read
+#value "2"
+#end
+#case 159
+#src (with (load "tests.load.fx") (if (f #f) (f 0) (with (load "tests.load.fx") (match (f (quote u)) ((quasiquote u) (f 2))))))
+#type int
+#effect read
+#value "2"
+#end
+#case 160
+#src (lambda ((x unit)) (if #t (the fx..unit x) (the fx..unit |#U|)))
+#type (-> (maxeff) ((x unit)) (select fx unit))
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 161
+#src (with (module (define x 1) (define y (+ x 1)) (define-typed z int (+ y 1)) (define-typed w int (+ z y))) (if (not? (= w 5)) (error "weird") w))
+#type int
+#effect write
+#value "5"
+#end
+#case 162
+#src (cond ((= 1 2) (error "Major error")) (else 4))
+#type int
+#effect write
+#value "4"
+#end
+#case 163
+#src (let ((m1 (module (define-typed m (moduleof (val x int)) (module (define x 3)))))) (+ m1.m.x 2))
+#type int
+#effect (maxeff)
+#value "5"
+#end
+#case 164
+#src (and #t #t #f (error "Short circuit"))
+#type bool
+#effect write
+#value "#f"
+#end
+#case 165
+#src {proj {plambda {{t type}} {lambda {{x t}} x}} int}
+#type (-> (maxeff) ((x int)) int)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 166
+#src (if (sexp=? (unit->sexp (vector-fill! (make-vector 10 0) 1)) (unit->sexp |#U|)) (quote fine) (error "Major error in sexp=?"))
+#type sexp
+#effect (maxeff read init write)
+#value "(*sum* sym->sexp (*product* #(fine)))"
+#end
+#case 167
+#src (match (quote 1) ((quasiquote 1) 3))
+#type int
+#effect read
+#value "3"
+#end
+#case 168
+#src (with (load "tests.list.fx") (match (quote (1)) ((quasiquote (1)) 3)))
+#type int
+#effect read
+#value-error "nil~: undefined;\n cannot reference an identifier before its definition\n  in module: \"/Users/pnkfelix/Dev/LangPlay/GiffordHistory/fx-lang/fx91/private/impl.rkt\""
+#value-aug "3"
+#end
+#case 169
+#src (with (load "tests.list.fx") (match (quote (fx91 0)) ((quasiquote (fx91 0)) 3)))
+#type int
+#effect read
+#value "3"
+#end
+#case 170
+#src (with (load "tests.list.fx") (match (quote (1)) ((quasiquote ((unquote x))) x)))
+#type sexp
+#effect read
+#value "(*sum* int->sexp (*product* #(1)))"
+#end
+#case 171
+#src (with (load "tests.list.fx") (match (quote (x)) ((quasiquote ((unquote x))) x)))
+#type sexp
+#effect read
+#value "(*sum* sym->sexp (*product* #(x)))"
+#end
+#case 172
+#src (with (load "tests.list.fx") (match (quote (x)) ((quasiquote ((unquote (sym->sexp~ x)))) x)))
+#type sym
+#effect read
+#value "x"
+#end
+#case 173
+#src (with (load "tests.list.fx") (match (quote (x)) ((quasiquote ((unquote (sym->sexp~ x)))) (sym=? x (symbol x)))))
+#type bool
+#effect read
+#value "#t"
+#end
+#case 174
+#src (with (load "tests.list.fx") (match (quote (x)) ((quasiquote (x)) 2)))
+#type int
+#effect read
+#value "2"
+#end
+#case 175
+#src (with (load "tests.list.fx") (match (quote (1)) ((quasiquote ((unquote (int->sexp~ x)))) (+ x 1))))
+#type int
+#effect read
+#value "2"
+#end
+#case 176
+#src (with (load "tests.list.fx") (match (quote (1 2)) ((quasiquote ((unquote (int->sexp~ x)) (unquote (int->sexp~ y)))) (= (+ x y) 3))))
+#type bool
+#effect read
+#value "#t"
+#end
+#case 177
+#src (with (load "tests.list.fx") (letrec ((add (lambda (s) (match s ((quasiquote (unquote (sym->sexp~ _))) 0) ((quasiquote (unquote (int->sexp~ x))) x) ((quasiquote ((unquote x) (unquote y))) (+ (add x) (add y))))))) (add (quote (1 ((2 s) 3))))))
+#type int
+#effect (maxeff *UNIF*-767 read)
+#value "6"
+#end
+#case 178
+#src (with (load "tests.list.fx") (if #t (match (quote (|#U|)) ((quasiquote (|#U|)) |#U|)) |#U|))
+#type unit
+#effect read
+#value "#U"
+#end
+#case 179
+#src (with (load "tests.list.fx") (let ((tail (lambda (l) (match l ((quasiquote ((unquote a) (unquote-splicing d))) d))))) tail))
+#type (-> read ((l sexp)) (listof sexp))
+#effect (maxeff)
+#value "#<procedure:tail>"
+#end
+#case 180
+#src (lambda ((f (poly ((t type)) (subr pure ((x t)) t)))) (let ((y (f 3))) (f #t)))
+#type (-> (maxeff) ((f (poly ((t type)) (-> (maxeff) ((x t)) t)))) bool)
+#effect (maxeff)
+#value "#<procedure:...s-lib/r5rs/main.rkt:262:23>"
+#end
+#case 181
+#src (with (load "tests.list.fx") (let ((tail (lambda (l) (match l ((quasiquote ((unquote a) (unquote-splicing d))) d))))) tail))
+#type (-> read ((l sexp)) (listof sexp))
+#effect (maxeff)
+#value "#<procedure:tail>"
+#end
+#case 182
+#src (+ (with (load "tests.list.fx") (match (quote (1)) ((quasiquote ((unquote (int->sexp~ x)))) (+ x 1)))) (with (load "tests.list.fx") (match (quote (2)) ((quasiquote ((unquote (int->sexp~ x)))) (+ x 1)))))
+#type int
+#effect read
+#value "5"
+#end

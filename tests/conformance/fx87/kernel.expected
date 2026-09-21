@@ -1,0 +1,769 @@
+;;; fixpt FX-87 conformance goldens -- GENERATED, do not edit.
+;;; regenerate with: reference/regenerate.sh
+;;; source:    tests/conformance/fx87/cases/kernel.fx
+;;; reference: GiffordHistory fx-lang/fx87/private/impl.rkt
+#case 1
+#src 3
+#type int
+#effect pure
+#end
+#case 2
+#src -17
+#type int
+#effect pure
+#end
+#case 3
+#src 3.5
+#type float
+#effect pure
+#end
+#case 4
+#src #\a
+#type char
+#effect pure
+#end
+#case 5
+#src "hello"
+#type (string @=)
+#effect pure
+#end
+#case 6
+#src |#t|
+#type bool
+#effect pure
+#end
+#case 7
+#src |#f|
+#type bool
+#effect pure
+#end
+#case 8
+#src |#u|
+#type unit
+#effect pure
+#end
+#case 9
+#src (quote ())
+#type symbol
+#effect pure
+#end
+#case 10
+#src (the pure int 3)
+#type int
+#effect pure
+#end
+#case 11
+#src (the int 3)
+#type int
+#effect pure
+#end
+#case 12
+#src (the pure bool |#t|)
+#type bool
+#effect pure
+#end
+#case 13
+#src (the pure unit |#u|)
+#type unit
+#effect pure
+#end
+#case 14
+#src (the pure bool 3)
+#static-error "Subtyping rule violation int bool"
+#end
+#case 15
+#src (if |#t| 1 2)
+#type int
+#effect pure
+#end
+#case 16
+#src (if |#t| 1 #\a)
+#static-error "Uncomparable types char int"
+#end
+#case 17
+#src (if 1 2 3)
+#static-error "Cannot type-check (if 1 2 3)"
+#end
+#case 18
+#src (begin 1 2 3)
+#type int
+#effect pure
+#end
+#case 19
+#src (begin |#t|)
+#type bool
+#effect pure
+#end
+#case 20
+#src (lambda ((x int)) x)
+#type (subr pure (int) int)
+#effect pure
+#end
+#case 21
+#src (lambda ((x int) (y int)) (+ x y))
+#type (subr pure (int int) int)
+#effect pure
+#end
+#case 22
+#src ((lambda ((x int)) x) 3)
+#type int
+#effect pure
+#end
+#case 23
+#src ((lambda ((x int)) x) |#t|)
+#static-error "Wrong arguments types (actuals formals): (bool) (int) in ((lambda ((x int)) x) #t)"
+#end
+#case 24
+#src (lambda ((f (subr pure (int) int)) (x int)) (f x))
+#type (subr pure ((subr pure (int) int) int) int)
+#effect pure
+#end
+#case 25
+#src (lambda ((x int)) (lambda ((y int)) x))
+#type (subr pure (int) (subr pure (int) int))
+#effect pure
+#end
+#case 26
+#src ((lambda () 3))
+#type int
+#effect pure
+#end
+#case 27
+#src (let ((x 3)) x)
+#type int
+#effect pure
+#end
+#case 28
+#src (let ((x 3) (y 4)) (+ x y))
+#type int
+#effect pure
+#end
+#case 29
+#src (let* ((x 3) (y x)) (+ x y))
+#type int
+#effect pure
+#end
+#case 30
+#src (let ((x 3)) (let ((x |#t|)) x))
+#type bool
+#effect pure
+#end
+#case 31
+#src (letrec ((f (lambda ((n int)) (the pure int (if (= n 0) 1 (f (- n 1))))))) (f 5))
+#type int
+#effect pure
+#end
+#case 32
+#src (let ((x 3 @!)) (set! x 4))
+#type unit
+#effect pure
+#end
+#case 33
+#src (lambda ((x int @!)) (begin (set! x 4) x))
+#type (subr pure (int) int)
+#effect pure
+#end
+#case 34
+#src (and |#t| |#f|)
+#type bool
+#effect pure
+#end
+#case 35
+#src (or |#f| |#t|)
+#type bool
+#effect pure
+#end
+#case 36
+#src (and)
+#type bool
+#effect pure
+#end
+#case 37
+#src (or)
+#type bool
+#effect pure
+#end
+#case 38
+#src (cond (|#t| 1) (else 2))
+#type int
+#effect pure
+#end
+#case 39
+#src (cond ((= 1 2) 1) (else 2))
+#type int
+#effect pure
+#end
+#case 40
+#src (do ((i 0 (+ i 1))) ((>= i 10) i))
+#type int
+#effect pure
+#end
+#case 41
+#src (do ((i 0 (+ i 1)) (h 0 h @acc)) ((>= i 10) h) (set! h (+ h i)))
+#type int
+#effect pure
+#end
+#case 42
+#src (new 3)
+#type (ref int @=)
+#effect pure
+#end
+#case 43
+#src (get (new 3))
+#type int
+#effect pure
+#end
+#case 44
+#src (set ((proj (proj new @!) int) 3) 4)
+#type unit
+#effect pure
+#end
+#case 45
+#src (lambda ((r (ref int @=))) (get r))
+#type (subr pure ((ref int @=)) int)
+#effect pure
+#end
+#case 46
+#src (lambda ((r (ref int @!))) (get r))
+#type (subr (read @!) ((ref int @!)) int)
+#effect pure
+#end
+#case 47
+#src (lambda ((r (ref int @!))) (set r 1))
+#type (subr (write @!) ((ref int @!)) unit)
+#effect pure
+#end
+#case 48
+#src ((proj (proj new @!) int) 3)
+#type (ref int @!)
+#effect (alloc @!)
+#end
+#case 49
+#src ((proj (proj get @!) int) ((proj (proj new @!) int) 3))
+#type int
+#effect pure
+#end
+#case 50
+#src (lambda ((x int)) (new x))
+#type (subr pure (int) (ref int @=))
+#effect pure
+#end
+#case 51
+#src (let ((r ((proj (proj new @private) int) 3))) 3)
+#type int
+#effect pure
+#end
+#case 52
+#src (lambda ((x int)) (let ((r ((proj (proj new @private) int) x))) (get r)))
+#type (subr pure (int) int)
+#effect pure
+#end
+#case 53
+#src (plambda ((t type)) (lambda ((x t)) x))
+#type (poly ((t type)) (subr pure (t) t))
+#effect pure
+#end
+#case 54
+#src (proj (plambda ((t type)) (lambda ((x t)) x)) int)
+#type (subr pure (int) int)
+#effect pure
+#end
+#case 55
+#src ((proj (plambda ((t type)) (lambda ((x t)) x)) int) 3)
+#type int
+#effect pure
+#end
+#case 56
+#src ((proj (plambda ((t type)) (lambda ((x t)) x)) bool) 3)
+#static-error "Wrong arguments types (actuals formals): (int) (bool) in ((proj (plambda ((t type)) (lambda ((x t)) x)) bool) 3)"
+#end
+#case 57
+#src (plambda ((r region)) (lambda ((x (ref int r))) (get x)))
+#type (poly ((r region)) (subr (read r) ((ref int r)) int))
+#effect pure
+#end
+#case 58
+#src (plambda ((e effect) (t type)) (lambda ((f (subr e () t))) (f)))
+#type (poly ((e effect) (t type)) (subr e ((subr e () t)) t))
+#effect pure
+#end
+#case 59
+#src (plet ((s int)) (lambda ((x s)) x))
+#type (subr pure (int) int)
+#effect pure
+#end
+#case 60
+#src (lambda ((x (dlet ((t int)) t))) x)
+#type (subr pure (int) int)
+#effect pure
+#end
+#case 61
+#src (lambda ((x ((dlambda ((t type)) t) int))) x)
+#type (subr pure (int) int)
+#effect pure
+#end
+#case 62
+#src (the pure (poly ((t type)) (subr pure (t) t)) (plambda ((t type)) (lambda ((x t)) x)))
+#type (poly ((t type)) (subr pure (t) t))
+#effect pure
+#end
+#case 63
+#src (+ 1 2)
+#type int
+#effect pure
+#end
+#case 64
+#src (- 1 2)
+#type int
+#effect pure
+#end
+#case 65
+#src (* 3 4)
+#type int
+#effect pure
+#end
+#case 66
+#src (/ 7 2)
+#type int
+#effect pure
+#end
+#case 67
+#src (modulo 7 2)
+#type int
+#effect pure
+#end
+#case 68
+#src (remainder 7 2)
+#type int
+#effect pure
+#end
+#case 69
+#src (abs -3)
+#type int
+#effect pure
+#end
+#case 70
+#src (expt 2 10)
+#type int
+#effect pure
+#end
+#case 71
+#src (= 1 2)
+#type bool
+#effect pure
+#end
+#case 72
+#src (< 1 2)
+#type bool
+#effect pure
+#end
+#case 73
+#src (<= 1 2)
+#type bool
+#effect pure
+#end
+#case 74
+#src (> 1 2)
+#type bool
+#effect pure
+#end
+#case 75
+#src (>= 1 2)
+#type bool
+#effect pure
+#end
+#case 76
+#src (+ 1 |#t|)
+#static-error "Wrong arguments types (actuals formals): (int bool) (int int) in (+ 1 #t)"
+#end
+#case 77
+#src (fl+ 1.5 2.5)
+#type float
+#effect pure
+#end
+#case 78
+#src (fl* 1.5 2.5)
+#type float
+#effect pure
+#end
+#case 79
+#src (fl< 1.5 2.5)
+#type bool
+#effect pure
+#end
+#case 80
+#src (sqrt 2.5)
+#type float
+#effect pure
+#end
+#case 81
+#src (floor 3.7)
+#type int
+#effect pure
+#end
+#case 82
+#src (int->float 3)
+#type float
+#effect pure
+#end
+#case 83
+#src (fl+ 1 2.5)
+#static-error "Wrong arguments types (actuals formals): (int float) (float float) in (fl+ 1 2.5)"
+#end
+#case 84
+#src 1.0
+#type int
+#effect pure
+#end
+#case 85
+#src (fl+ 1.0 2.5)
+#static-error "Wrong arguments types (actuals formals): (int float) (float float) in (fl+ 1.0 2.5)"
+#end
+#case 86
+#src (char=? #\a #\b)
+#type bool
+#effect pure
+#end
+#case 87
+#src (char-upcase #\a)
+#type char
+#effect pure
+#end
+#case 88
+#src (char->int #\a)
+#type int
+#effect pure
+#end
+#case 89
+#src (int->char 97)
+#type char
+#effect pure
+#end
+#case 90
+#src (char-alphabetic? #\a)
+#type bool
+#effect pure
+#end
+#case 91
+#src (not? |#t|)
+#type bool
+#effect pure
+#end
+#case 92
+#src (and? |#t| |#f|)
+#type bool
+#effect pure
+#end
+#case 93
+#src (or? |#t| |#f|)
+#type bool
+#effect pure
+#end
+#case 94
+#src (equiv? |#t| |#f|)
+#type bool
+#effect pure
+#end
+#case 95
+#src (unique 3)
+#type (uniqueof int)
+#effect (alloc @uniqueof)
+#end
+#case 96
+#src (value (unique 3))
+#type int
+#effect (alloc @uniqueof)
+#end
+#case 97
+#src (eq? (unique 3) (unique 4))
+#type bool
+#effect (alloc @uniqueof)
+#end
+#case 98
+#src (cons 1 2)
+#type (pairof int int @=)
+#effect pure
+#end
+#case 99
+#src (car (cons 1 2))
+#type int
+#effect pure
+#end
+#case 100
+#src (cdr (cons 1 2))
+#type int
+#effect pure
+#end
+#case 101
+#src (null? (cons 1 2))
+#type bool
+#effect pure
+#end
+#case 102
+#src (cons 1 (cons 2 (quote ())))
+#type (pairof int (pairof int symbol @=) @=)
+#effect pure
+#end
+#case 103
+#src (lambda ((p (pairof int bool @=))) (car p))
+#type (subr pure ((pairof int bool @=)) int)
+#effect pure
+#end
+#case 104
+#src (lambda ((p (pairof int bool @!))) (cdr p))
+#type (subr (read @!) ((pairof int bool @!)) bool)
+#effect pure
+#end
+#case 105
+#src (list 1 2 3)
+#type (dletrec ((|#1| (pairof int |#1| @=))) (pairof int |#1| @=))
+#effect pure
+#end
+#case 106
+#src (length (list 1 2 3))
+#type int
+#effect pure
+#end
+#case 107
+#src (append (list 1) (list 2))
+#type (dletrec ((|#1| (pairof int |#1| @=))) (pairof int |#1| @=))
+#effect pure
+#end
+#case 108
+#src (reverse (list 1 2 3))
+#type (poly ((r2 region)) (dletrec ((|#1| (pairof int |#1| r2))) (subr (alloc r2) () (pairof int |#1| r2))))
+#effect pure
+#end
+#case 109
+#src (list-ref (list 1 2 3) 0)
+#type int
+#effect pure
+#end
+#case 110
+#src (map (lambda ((x int)) (+ x 1)) (list 1 2 3))
+#type (dletrec ((|#1| (pairof int |#1| @=))) (pairof int |#1| @=))
+#effect pure
+#end
+#case 111
+#src (reduce (lambda ((x int) (y int)) (+ x y)) (list 1 2 3) 0)
+#type int
+#effect pure
+#end
+#case 112
+#src (for-each (lambda ((x int)) x) (list 1 2 3))
+#type unit
+#effect pure
+#end
+#case 113
+#src (lambda ((l (listof int @=))) (length l))
+#type (dletrec ((|#1| (pairof int |#1| @=))) (subr pure ((pairof int |#1| @=)) int))
+#effect pure
+#end
+#case 114
+#src (string-length "abc")
+#type int
+#effect pure
+#end
+#case 115
+#src (string-ref "abc" 0)
+#type char
+#effect pure
+#end
+#case 116
+#src (string=? "a" "b")
+#type bool
+#effect pure
+#end
+#case 117
+#src (string->list "abc")
+#type (dletrec ((|#1| (pairof char |#1| @=))) (pairof char |#1| @=))
+#effect pure
+#end
+#case 118
+#src (list->string (string->list "abc"))
+#type (string @=)
+#effect pure
+#end
+#case 119
+#src (make-vector 3 0)
+#type (vectorof int @=)
+#effect pure
+#end
+#case 120
+#src (vector-length (make-vector 3 0))
+#type int
+#effect pure
+#end
+#case 121
+#src (vector-ref (make-vector 3 0) 0)
+#type int
+#effect pure
+#end
+#case 122
+#src (vector-set! ((proj (proj make-vector @!) int) 3 0) 0 1)
+#type unit
+#effect pure
+#end
+#case 123
+#src (lambda ((v (vectorof int @!))) (vector-set! v 0 1))
+#type (subr (write @!) ((vectorof int @!)) unit)
+#effect pure
+#end
+#case 124
+#src (lambda ((v (vectorof int @!))) (vector-ref v 0))
+#type (subr (read @!) ((vectorof int @!)) int)
+#effect pure
+#end
+#case 125
+#src (record ((a 1) (b |#t|)))
+#type (recordof ((a int) (b bool)) @=)
+#effect pure
+#end
+#case 126
+#src (select (record ((a 1) (b |#t|))) a)
+#type int
+#effect pure
+#end
+#case 127
+#src (select (record ((a 1) (b |#t|))) c)
+#static-error "Cannot type-check (select (record ((a 1) (b #t))) c)"
+#end
+#case 128
+#src (lambda ((r (recordof ((a int) (b bool)) @=))) (select r a))
+#type (subr pure ((recordof ((a int) (b bool)) @=)) int)
+#effect pure
+#end
+#case 129
+#src (record-set! (record ((a 1)) @!) a 2)
+#type unit
+#effect (maxeff (alloc @!) (write @!))
+#end
+#case 130
+#src (lambda ((r (recordof ((a int)) @!))) (record-set! r a 2))
+#type (subr (write @!) ((recordof ((a int)) @!)) unit)
+#effect pure
+#end
+#case 131
+#src (one (oneof ((a int) (b bool)) @=) a 1)
+#type (oneof ((a int) (b bool)) @=)
+#effect pure
+#end
+#case 132
+#src (the pure (oneof ((a int) (b bool)) @=) (one (oneof ((a int) (b bool)) @=) a 1))
+#type (oneof ((a int) (b bool)) @=)
+#effect pure
+#end
+#case 133
+#src (tagcase (v (one (oneof ((a int) (b bool)) @=) a 1)) (a 1) (b 2))
+#type int
+#effect pure
+#end
+#case 134
+#src (tagcase (v (one (oneof ((a int) (b bool)) @=) a 1)) (a v) (b 0))
+#type int
+#effect pure
+#end
+#case 135
+#src (one-set! (one (oneof ((a int) (b bool)) @!) a 1) b |#t|)
+#type unit
+#effect (maxeff (alloc @!) (write @!))
+#end
+#case 136
+#src (delay 3)
+#type (promise pure int)
+#effect pure
+#end
+#case 137
+#src (vlambda (xs int) 3)
+#type (vsubr pure int int)
+#effect pure
+#end
+#case 138
+#src (quote a)
+#type symbol
+#effect pure
+#end
+#case 139
+#src (quote (1 2 3))
+#static-error "This variable has no type quote"
+#end
+#case 140
+#src (the (maxeff (read @!) (write @!)) int (the (read @!) int 3))
+#type int
+#effect (maxeff (read @!) (write @!))
+#end
+#case 141
+#src (the (maxeff (read @=)) int (the pure int 3))
+#type int
+#effect pure
+#end
+#case 142
+#src (lambda ((f (subr (maxeff) (int) int))) (the (subr (read @=) (int) int) f))
+#type (subr pure ((subr pure (int) int)) (subr pure (int) int))
+#effect pure
+#end
+#case 143
+#src (lambda ((f (subr (read @=) (int) int))) (the (subr (maxeff) (int) int) f))
+#type (subr pure ((subr pure (int) int)) (subr pure (int) int))
+#effect pure
+#end
+#case 144
+#src (lambda ((r (ref int @red))) (get r))
+#type (subr (read @red) ((ref int @red)) int)
+#effect pure
+#end
+#case 145
+#src (lambda ((r (ref int @red)) (s (ref int @blue))) (+ (get r) (get s)))
+#type (subr (read (runion @red @blue)) ((ref int @red) (ref int @blue)) int)
+#effect pure
+#end
+#case 146
+#src (the (read (runion @red @blue)) int ((lambda ((r (ref int @red)) (s (ref int @blue))) (+ (get r) (get s))) ((proj (proj new @red) int) 1) ((proj (proj new @blue) int) 2)))
+#type int
+#effect (read (runion @blue @red))
+#end
+#case 147
+#src (plambda ((r region)) (lambda ((x (ref int r))) (set x 1)))
+#type (poly ((r region)) (subr (write r) ((ref int r)) unit))
+#effect pure
+#end
+#case 148
+#src (lambda ((x int)) ((proj (proj new @red) int) x))
+#type (subr (alloc @red) (int) (ref int @red))
+#effect pure
+#end
+#case 149
+#src (let ((v ((proj (proj make-vector @scratch) int) 3 0))) (begin (vector-set! v 0 1) (vector-ref v 0)))
+#type int
+#effect pure
+#end
+#case 150
+#src (lambda ((x ((dlambda ((r region)) (ref int r)) @!))) (get x))
+#type (subr (read @!) ((ref int @!)) int)
+#effect pure
+#end
+#case 151
+#src (plambda ((f (dfunc (type) type))) (lambda ((x (f int))) x))
+#type (poly ((f (dfunc (type) type))) (subr pure ((f int)) (f int)))
+#effect pure
+#end
+#case 152
+#src (plambda ((e effect) (t type) (u type)) (lambda ((f (subr e (t) u)) (x t)) (f x)))
+#type (poly ((e effect) (t type) (u type)) (subr e ((subr e (t) u) t) u))
+#effect pure
+#end
+#case 153
+#src (lambda ((f (subr (read @red) (int) int))) (f 1))
+#type (subr (read @red) ((subr (read @red) (int) int)) int)
+#effect pure
+#end
+#case 154
+#src (lambda ((f (subr (maxeff (read @red) (write @blue)) (int) int))) (f 1))
+#type (subr (maxeff (read @red) (write @blue)) ((subr (maxeff (read @red) (write @blue)) (int) int)) int)
+#effect pure
+#end
+#case 155
+#src (lambda ((l (dletrec ((il (oneof ((nil unit) (cons (pairof int il @=))) @=))) il))) l)
+#type (dletrec ((|#1| (oneof ((nil unit) (cons (pairof int |#1| @=))) @=)) (|#2| (oneof ((nil unit) (cons (pairof int |#2| @=))) @=))) (subr pure (|#1|) |#2|))
+#effect pure
+#end

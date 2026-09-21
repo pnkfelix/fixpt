@@ -1,0 +1,471 @@
+# `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
+
+**Status: approved 2026-09-20; M0–M3 implemented. See the milestone table in
+§8 and `README.md` for what runs today.**
+
+## 0. What this is
+
+Three deliverables, in dependency order:
+
+1. **A core Scheme engine in pure Rust.** Not a complete RnRS, but every feature
+   it *does* have is spelled the RnRS way (target: R7RS-small flavour, with
+   R5RS influence where it simplifies, notably mutable pairs).
+2. **Two distinct extensions of that engine**: an FX-87 implementation and an
+   FX-91 implementation, each a front end that type/effect-checks its own
+   language and lowers to the core engine — exactly the architecture the
+   originals used (`erase.lisp` for FX-87, `code.scm` for FX-91 both emit
+   Scheme and hand it to `eval`).
+3. **Both interpreted and compiled execution**, shared by all three languages:
+   an AST machine and a bytecode compiler + VM over one common runtime.
+
+Semantic conformance is checked against `~/Dev/LangPlay/GiffordHistory/`'s
+Racket ports of the original implementations (verified working on this machine).
+
+### Naming
+
+`fixpt` — the binary and workspace. Crates are `fixpt-*`.
+
+---
+
+## 1. Findings from the archive that drive the design
+
+Read before planning; these are the constraints that actually shaped it.
+
+| Source | What it tells us |
+|---|---|
+| `extracted/fx91/{abstract,token,sugar,kind,typecheck,unify,constraints,eval,free,substitution,standard,code,top}.scm` | FX-91's complete structure: mutation-based unification with `forward!` union-find nodes, ACUI effect constraints solved as Horn-clause satisfiability (Dowling–Gallier), `poly~` type schemes, value-restriction via `expansive?`, first-class modules with `up-`/`down-` coercions, `select` dependent types, `rename-moduleof` alpha-renaming. |
+| `mit-psrg-fx/fx87/old-impl/{syntax,type-check,inequal,kind-check,erase,sugar,standard}.lisp` | FX-87 is *checking*, not inference — but has **more** description machinery: three kinds (`type`/`effect`/`region`), subtyping/subeffecting (`type-less?`/`effect-less?`/`region-less?`), effect masking (`erase-effect`), circular types built with `set-car!` and compared with a cycle `trail`, and a bigger standard library (`oneof`/`recordof`/`vsubr`/`promise`/`port`/`sexp`). |
+| `extracted/fx91/tests.fx` | 182 top-level forms. The live reference processes 168 and then dies evaluating form 168 — `nil~: undefined`, a genuine gap in the plain port's runtime (the `fx91-hashlang` runtime supplies `fx-nil~`). Types/effects are fine for all 182. |
+| `HISTORY.md` §"Coverage audit" | Known reference gaps to plan around: `[e d1 d2]` proj-sugar is real FX-91 but unreachable through the port's reader; multi-segment dot-notation `a.b.c` is recursive (`(with a (with b c))`), not a literal field name; `(define (f (x int)) ...)` shorthand; `input`; `does` is gated off by default. |
+| `fx91-hashlang/lang/reader.rkt`, `fx87-hashlang/lang/reader.rkt` | Both dialects case-fold symbols; FX-87 reads `#t`/`#f`/`#u` as *symbols*; FX-91 reads `#u` as the symbol `#U` but `#t`/`#f` as real booleans. The reader is genuinely per-dialect. |
+| `larceny/src/Compiler/pass{1,2,3,4}*.sch` | Pass structure worth borrowing: alpha-renamed core grammar, nodes annotated in place with free/assigned/referenced sets. Worth *not* borrowing: fifteen passes and four native back ends. |
+| `larceny/src/Rts/Sys/heapio.{c,h}` | Heap image format: version word, roots, word count, data — all pointers base-0 relative so load needs no relocation. We take this idea and drop the split/dumped variants. |
+
+### Reference implementations are runnable here
+
+```
+/Applications/Racket v9.3/bin/racket    # v9.3, fx-lang linked as a user package
+$ racket fx87/typecheck.rkt   →  3 => (int . pure);  (the pure bool 3) => USER ERROR
+$ racket fx91/check.rkt       →  ": <type>  ! <effect>  = <value>" per form
+```
+
+This is the single most important fact for the project: **every conformance
+answer can be generated, not guessed.**
+
+---
+
+## 2. Architecture
+
+```
+                   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+  front ends       │ Scheme       │  │ FX-87        │  │ FX-91        │
+                   │ expander     │  │ check+erase  │  │ infer+codegen│
+                   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+                          │                 │                 │
+  reader (per-dialect syntax profiles) ─────┴─────────────────┘
+                          │
+                   ┌──────▼────────────────────────────────┐
+  shared middle    │  Core IR  (arena of nodes + passes)   │
+                   └──────┬───────────────────┬────────────┘
+                          │                   │
+                 ┌────────▼──────┐   ┌────────▼─────────┐
+  engines        │ AST machine   │   │ bytecode compiler│
+                 │ (interpreted) │   │  + VM (compiled) │
+                 └────────┬──────┘   └────────┬─────────┘
+                          └─────────┬─────────┘
+                   ┌────────────────▼──────────────────────┐
+  runtime          │ values · heap · Cheney GC · primitives │
+                   │ symbols · globals · ports · images     │
+                   └───────────────────────────────────────┘
+```
+
+Key property: **FX-87 and FX-91 are front ends, not interpreters.** They
+produce Core IR, so both automatically get the interpreter, the bytecode
+compiler, heap dumping and single-binary builds — which is how requirement 3
+("interpreted and compiled") is satisfied for all three languages without
+writing three of everything.
+
+### Crates
+
+| Crate | Contents | Rough size |
+|---|---|---|
+| `fixpt-heap` | `Value`, tagged-word heap, object layouts, Cheney GC, image dump/load/verify | 2.5k |
+| `fixpt-runtime` | symbols, globals, numerics, strings/vectors, ports, errors, primitive table | 3k |
+| `fixpt-read` | syntax profiles, lexer, reader, spans, `write`/`display` | 1.2k |
+| `fixpt-core` | Core IR arena, binding/env, pass framework, standard passes | 1.5k |
+| `fixpt-engine` | `interp` (AST machine) + `vm` (compiler + bytecode VM) | 4.5k |
+| `fixpt-scheme` | Scheme dialect: special forms, `syntax-rules`, prelude | 2.5k |
+| `fixpt-fx87` | FX-87 front end | 5k |
+| `fixpt-fx91` | FX-91 front end | 6k |
+| `fixpt-cli` | the `fixpt` binary | 0.8k |
+
+Dependencies kept deliberately thin: `num-bigint`/`num-integer` for exact
+integer arithmetic, `clap` in the CLI crate only. The heap, GC, reader, engines
+and both type checkers are dependency-free.
+
+---
+
+## 3. The core runtime (requirement: no ref-counting, heap-dumpable)
+
+### 3.1 Value representation
+
+A `Value` is a `u64` with a 3-bit low tag. Object references are **word offsets
+into a `Vec<u64>` heap, never Rust pointers** — this is what makes ref-counting
+unnecessary, makes a moving collector possible, and makes a heap dump a
+`write_all` of the vector.
+
+```
+tag 000  fixnum            i61, value = (w as i64) >> 3
+tag 001  pair              (w >> 3) = word index of a 2-word car/cdr cell
+tag 010  object            (w >> 3) = word index of a header word
+tag 011  immediate         subtag in bits 3..8: #f #t () #u eof unspecified char
+tag 100  reserved
+tag 101  reserved
+tag 110  reserved
+tag 111  forwarding        GC-internal only
+```
+
+Object header: `len:32 | typecode:8 | flags:8 | HDR:8`. Object types: `String`,
+`Symbol`, `Vector`, `Bytevector`, `Flonum`, `Bignum`, `Ratnum`, `Closure`,
+`Code`, `Box`, `Record`, `RecordType`, `Port`, `Continuation`, `Values`,
+`Promise`, `HashTable`, `Environment`. FX's runtime shapes (`*module*`,
+`*sum*`, `*product*`) are ordinary `Record`s — no new object kinds.
+
+### 3.2 Collector
+
+**Cheney semispace copying collector.** Chosen over mark-sweep because it
+compacts, which makes a dumped image contiguous and relocation-free. Roots are
+the VM/interpreter stack, the globals vector, the interned-symbol table, and an
+explicit shadow root stack. Not generational — the user said not to bother, and
+the object model above admits a generational upgrade later without changing
+`Value` or the image format.
+
+### 3.3 GC safety in Rust — the one real hazard
+
+A `Value` sitting in a Rust local is stale after a collection. Two mechanisms,
+both explicit:
+
+* **Safepoints.** Collection can only happen at declared safepoints (procedure
+  entry, backward branches, explicit `gc_check`), where every live value is
+  already in a rooted structure.
+* **Root scopes.** Primitives that allocate more than a bounded amount take a
+  `&mut Ctx` and use `let r = ctx.root(v);` RAII guards. `#[must_use]`, so
+  forgetting one is a compile-time nag rather than a Tuesday-afternoon
+  heisenbug.
+
+A debug feature (`gc-stress`) collects at *every* safepoint; the whole test
+suite runs under it in CI.
+
+### 3.4 Heap images — all three shipping modes the user asked for
+
+Format (deliberately simpler than Larceny's three variants — one variant):
+
+```
+magic "FIXPTHP\0" | version u32 | flags u32 | word_count u64 | root_count u32
+[ heap words, all references base-0 relative ]
+[ root words ]
+[ crc32 ]
+```
+
+Because Cheney already compacted to a contiguous region and every reference is
+base-relative, **dump = write, load = read**. No relocation pass exists.
+
+| Mode | Command | Mechanism |
+|---|---|---|
+| Decoupled runtime + heap | `fixpt run --heap prelude.heap prog.scm` | separate `.heap` file |
+| Coupled single binary | `fixpt build prog.scm -o prog` | copy the runtime binary, append the image + an 16-byte trailer (`magic`,`len`); `./prog` self-loads by reading its own trailer |
+| Statically embedded | `FIXPT_EMBED_HEAP=x.heap cargo build -p fixpt-cli --features embed` | `build.rs` + `include_bytes!` |
+
+Compiled code objects live *in the heap*, so a `.fasl` is just a heap image
+whose root is a top-level thunk. "Compile a program" and "dump a heap" are the
+same operation with different roots — the thing Larceny got right, minus the
+thing it never shipped (the appended-trailer single binary).
+
+---
+
+## 4. The core Scheme engine
+
+### 4.1 Reader with pluggable syntax profiles
+
+Requirement: *"you'll need to support other reader syntaxes."* The reader is
+parameterised by a `SyntaxProfile`:
+
+```rust
+pub struct SyntaxProfile {
+    case_fold: CaseFold,               // None | Down
+    brackets: BracketMode,             // Paren | SymbolConstituent | ProjSugar
+    dispatch: HashMap<char, Dispatch>, // '#' macros
+    symbol_extra: &'static str,        // e.g. '@' leading for FX-87 regions
+    datum_labels: bool, block_comments: bool, datum_comments: bool,
+}
+```
+
+Three profiles ship:
+
+| Profile | Case | `#t`/`#f` | `#u` | `[ … ]` | Notes |
+|---|---|---|---|---|---|
+| `scheme` | sensitive | booleans | — | parentheses | R7RS: `#\c`, `#u8(`, `#;`, `#\|…\|#`, labels |
+| `fx87` | folded | **symbols** `\|#t\|`/`\|#f\|` | symbol `\|#u\|` | symbol constituents | `@region` symbols |
+| `fx91` | folded | booleans | symbol `#U` | **`(proj …)` sugar** | reconstructs the reader macro the archive lost |
+
+The reader produces Rust-side spanned `Syntax` values (so error messages have
+real source locations and the compiler never touches the GC heap), with a
+`Syntax → Value` conversion used by `quote` and a `Value → Syntax` conversion
+used by runtime `eval`.
+
+### 4.2 Core IR — built for static analysis
+
+An arena (`Vec<Node>` + `NodeId`), not a tree of boxes, so passes can annotate
+in place and analyses can use dense side tables:
+
+```
+E ::= Const(Value) | Ref(Var) | Set(Var,E) | If(E,E,E) | Seq(E*)
+    | Let(Var*, E*, E) | LetRec(Var*, Lambda*, E)
+    | Lambda(Formals, Body) | App(E, E*)
+```
+
+Alpha-renamed at expansion time (unique `VarId`s). Side tables hold free
+variables, assigned variables, arity, source spans, and — this is the hook FX
+uses — arbitrary per-node analysis results.
+
+Passes (four, not Larceny's fifteen): free-variable/assignment analysis →
+assignment conversion (box mutated variables) → lexical addressing / closure
+conversion → primitive inlining + constant folding.
+
+### 4.3 Two engines, one calling convention
+
+Both are **explicit-stack machines**. Neither uses the Rust call stack for
+Scheme recursion, so both get proper tail calls, unbounded recursion depth,
+identical `call/cc` semantics, and precise stack scanning for free.
+
+* **`interp`** — walks Core IR nodes with an explicit control stack; chained
+  heap environment frames (O(lexical depth) variable lookup).
+* **`vm`** — Core IR → stack bytecode (~50 ops), flat closures (O(1) lookup),
+  code objects allocated in the heap.
+
+`call/cc` in both is "copy the machine stack slice into a heap object"; invoking
+restores it. Full re-entrant continuations, `dynamic-wind`, `values`. Each
+engine restores only its own continuations; that's the sole documented
+difference and it is not observable from Scheme.
+
+Every conformance test runs under **both** engines and the results must agree —
+differential testing is the main defence against engine-specific bugs.
+
+### 4.4 RnRS scope — explicit in/out
+
+**In.** Proper tail calls; `lambda` with rest args; `define` incl. internal
+defines; `set!`; `quote`/`quasiquote`; `let`/`let*`/`letrec`/`letrec*`/named
+`let`; `do`; `cond` (incl. `=>`); `case`; `and`/`or`/`when`/`unless`/`begin`;
+`delay`/`force`/`make-promise`;
+`define-record-type`; `call/cc`; `dynamic-wind`; `values`/`call-with-values`;
+`apply`; `eval` + environment specifiers; `raise`/`with-exception-handler`/
+`guard`/`error` + error-object accessors; textual string and file ports;
+`read`/`write`/`display`; the list/char/string/symbol/vector/bytevector
+libraries; exact integers (fixnum + bignum + ratnum) and inexact `f64`.
+
+**Also in, though R7RS dropped it:** `set-car!`/`set-cdr!` and mutable pairs —
+because **FX-91's `listof` is genuinely mutable-pair-based** and the reference
+implementation depends on it. Documented as an R5RS-compatible extension.
+
+**Deferred (M9), not abandoned.** `define-syntax`/`let-syntax`/`letrec-syntax`
+with hygienic `syntax-rules`. Neither FX dialect needs it, so it does not block
+anything; but the expander is built with a macro-transformer seam from day one
+so adding it later is an addition, not a rewrite. Until then the derived forms
+(`let`, `cond`, `case`, `do`, `when`, …) are native expander forms rather than
+library macros — which is what most Schemes do for them anyway.
+
+**Out, and documented as such.** Complex numbers; the full exactness-contagion
+corner cases; `syntax-case`/`er-macro-transformer`; R6RS libraries and
+`define-library`; full Unicode normalisation/`char-ready?`; threads.
+
+---
+
+## 5. FX-87 front end
+
+Mirrors `old-impl/`'s own decomposition so that divergences are easy to localise
+against the reference.
+
+* **Reader**: `fx87` profile.
+* **Syntax** (`syntax.rs`): kinds `type`/`effect`/`region`; descriptions —
+  regions (`@x`, `runion`), effects (`pure`, `read r`, `write r`, `alloc r`,
+  `maxeff`), types (`bool`, `unit`, `subr`, `poly`, `ref t r`, plus the standard
+  library's `int`/`char`/`float`/`string`/`symbol`/`null`/`uniqueof`/`pairof`/
+  `listof`/`vectorof`/`oneof`/`recordof`/`promise`/`vsubr`/`port`/`sexp`),
+  `dfunc`/`dlambda`/application/`dlet`/`dletrec`.
+* **Expressions**: literals, variables, `begin`, `the`, `lambda`, application,
+  `letrec`, `plambda`, `proj`, `plet`, `pletrec`, `if`, `set!`, plus the
+  standard special forms (`record`/`record-set!`/`select`, `oneof`/`tagcase`/
+  `one`/`one-set!`, `delay`, `vlambda`, `new`). Sugars: `and or let let* cond
+  do plet* dlet*`.
+* **Descriptions are an arena too** (`Vec<DescNode>` + `DescId`) — the original
+  builds *circular* types with `set-car!` and compares them with a cycle
+  `trail`; an arena of indices reproduces that exactly without `Rc<RefCell<…>>`.
+* **Static analysis**: kind checking; then type/effect *checking* against
+  explicit ascriptions, with subtyping (`type-less?`), subeffecting
+  (`effect-less?`), region containment (`region-less?`), and **effect masking**
+  (`erase-effect`: drop effects on regions not free in the result type or
+  environment) — FX-87's signature feature.
+* **Lowering**: type erasure → Core IR, mirroring `erase.lisp`.
+* **Top level**: `define`, `pdefine`, `load`, expression.
+
+**Known-incomplete in the original, therefore stubbed here too, loudly:** the
+`struct`/`structof`/`convert`/`abstract`/`extract` ADT cluster (nine
+identifiers called but never defined; `*support-adts*` defaults off).
+
+## 6. FX-91 front end
+
+* **Reader**: `fx91` profile, *including* the `[e d1 … dn]` → `(proj e d1 … dn)`
+  reader sugar. The original reader macro is lost and the Racket port can't
+  reach the feature at all; we control our reader, so we implement it properly
+  and gain a case the reference can't check — flagged as a documented,
+  intentional divergence with the report's §2.4.9 grammar as the authority.
+* **Syntax**: kinds `type`/`effect`/`(dfunc k…)`; descriptions — variables,
+  `dlambda`, application, `select`, `maxeff`, `subr`/`->`, `poly`, `poly~`
+  (internal type schemes), `moduleof`, `sumof`, `productof`; effect constants
+  `read`/`write`/`init`, `pure` = `(maxeff)`.
+* **Expressions**: literals, variables, `lambda`, `let`, `plambda`, `proj`,
+  `module`, `with`, `extend`, application, `if`, `open`, `close`, `begin`,
+  `load`, `the`, `does`, `sum`, `product`, `tagcase`, `extract`.
+* **Desugaring**: `and or let* letrec cond do match`; dot-notation, implemented
+  **recursively** per §2.4.7 (`a.b.c` → `(with a (with b c))`) — the bug the
+  Racket `#lang` has and the original doesn't; `match` with constructor and
+  quasiquote patterns; `define`/`define-typed` shorthands incl. the
+  `(define (f (x int)) …)` and `(define [f (t type)] …)` forms; `define-datatype`
+  expanding to `define-abstraction` + `define-description` + per-tag
+  constructor/destructor pairs; `moduleof`'s `abs`/`desc`/`val` grouping sugar.
+* **Static analysis** — the substantial piece, ported structurally from
+  `typecheck.scm`/`unify.scm`/`constraints.scm`:
+  * kind checking (`kind.scm`);
+  * mutation-based unification with union-find `forward!` nodes — an arena of
+    description nodes with a `parent` field, path-compressed;
+  * generalisation to `poly~` schemes with the value restriction (`expansive?`);
+  * **ACUI effect constraints** solved as propositional Horn satisfiability
+    (Dowling–Gallier), per Jouvelot & Gifford POPL'91;
+  * dependent `select` types and `rename-moduleof` alpha-renaming;
+  * inferability (`inferability.scm`) and description normalisation with beta/eta
+    reduction (`eval.scm`).
+* **Lowering**: → Core IR, mirroring `code.scm`'s `*module*`/`*sum*`/`*product*`
+  runtime shapes (as `Record`s) and the `up-`/`down-` identity coercions.
+* **Runtime**: the `fx` module's primitives — `bool`, `unit`, `refof`, `int`,
+  `float`, `char`, `string`, `sym`, `permutation`, `uniqueof`, `listof`
+  (mutable pairs!), `vectorof`, `sexp`. `input-stream`/`output-stream` get real
+  I/O here, which the Racket port explicitly doesn't have.
+
+---
+
+## 7. Conformance harness
+
+### 7.1 Golden generation (offline, needs Racket)
+
+`reference/` holds small Racket drivers run by `cargo xtask goldens`:
+
+* `fx87-golden.rkt` — mirrors `erase.lisp`'s `top-level` dispatch
+  (`pdefine`/`define`/expression), prints one normalised `type . effect` record
+  per form.
+* `fx91-golden.rkt` — mirrors `top.scm`'s `fx91` loop: parse → typecheck →
+  `unparse-dexp` type and effect → evaluate, with the evaluation in a handler so
+  the 14 forms the port can't evaluate record `<eval-error: nil~ undefined>`
+  instead of killing the run. The missing `nil~`/`cons~` bindings are supplied
+  from the `fx91-hashlang` runtime so we can get values for those too, recorded
+  separately as `augmented` goldens.
+
+Outputs are checked into `tests/conformance/{fx87,fx91}/*.expected`, so the Rust
+test suite runs with no Racket installed. Regenerating is an explicit,
+reviewable diff.
+
+### 7.2 Normalisation
+
+Both sides go through the same canonicaliser before comparison — the reference
+prints gensym counters (`fail-2877`, `letrec-2036`) and unification-variable
+numbers (`*UNIF*-123`) that are run-dependent:
+
+* renumber gensyms and unification variables by order of first appearance;
+* sort `maxeff` operands by canonical printed form;
+* canonicalise alpha-renamed description variables;
+* `#<procedure:…>` → `#<procedure>`; sort `*module*` association lists.
+
+### 7.3 Corpora
+
+| Suite | Source | Size |
+|---|---|---|
+| FX-91 static | `extracted/fx91/tests.fx` | 182 forms × (type, effect) |
+| FX-91 dynamic | same | 168 values + 14 augmented |
+| FX-87 | `mit-psrg-fx/fx87/library/*.fx` (tak, complex, church-numerals, deriv, dna, polynm, hash, takl, symbol-tab) + an authored expression suite run through the reference | ~13 programs + ~200 expressions |
+| Scheme | authored R7RS assertion suite | ~400 assertions |
+| Differential | every case above | interp vs. vm must agree |
+| GC stress | every case above | `--features gc-stress` |
+| Image round-trip | every case above | dump → load → rerun → identical |
+
+### 7.4 Divergences are a deliverable
+
+`docs/divergences.md` records, with evidence, every place we intentionally
+differ from the reference — the recursive dot-notation, `[]`-projection,
+`nil~`, real stream I/O, the FX-87 ADT stubs, and the archive bugs listed in
+`HISTORY.md`. A conformance case may be marked `expected-divergence`, which
+requires *both* outputs to be recorded. No silent disagreements.
+
+---
+
+## 8. Milestones
+
+Each ends with a working, tested, demoable artifact. I'd like to check in with
+you at each boundary rather than disappear for the whole thing.
+
+| # | Milestone | Demo at the end |
+|---|---|---|
+| M0 ✅ | Workspace, golden generators | `reference/regenerate.sh` produces the checked-in `.expected` files: 182 FX-91 cases (type, effect, value), 155 FX-87 cases (type, effect) |
+| M1 ✅ | `fixpt-heap`: values, heap, Cheney GC, image dump/load/verify | `fixpt image info/verify`; 22 tests, green under `gc-stress` |
+| M2 ✅ | `fixpt-read`: profiles, reader, writer, spans | 21 tests; all 182 FX-91 and 155 FX-87 forms read and round-trip |
+| M3 ✅ | `fixpt-core` + `fixpt-runtime` + `fixpt-scheme` + `interp` | `fixpt repl` works: bignums, rationals, proper tail calls, re-entrant `call/cc`, `dynamic-wind`, `guard`, records, promises. Green under `gc-stress` |
+| M4 | `vm`: bytecode compiler + VM | same suite passes compiled; differential tests green |
+| M5 | Images & shipping | `fixpt compile`, `fixpt dump-heap`, `fixpt build` → single binary |
+| M6 | `fixpt-fx87` | `fixpt fx87 check` matches reference on the FX-87 corpus; `library/*.fx` run |
+| M7 | `fixpt-fx91` | `fixpt fx91 check` matches reference on all 182 `tests.fx` forms, types + effects + values |
+| M8 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks |
+| M9 | *(deferred)* hygienic `syntax-rules` | derived forms re-expressible as library macros |
+| M10 | *(future)* native code generation | the bytecode/heap-image design is kept amenable to it; not scheduled |
+
+Rough total ~26k lines of Rust. M6 and M7 are each comparable in size to
+everything before them; M7 is the hardest (inference + ACUI + modules).
+
+---
+
+## 9. Risks, and what I'd do about them
+
+1. **FX-91 inference exactness.** Generalisation × ACUI × dependent `select`
+   types × module renaming is where the subtlety lives.
+   *Mitigation:* port the algorithm **structurally** — same function
+   decomposition and same names as `typecheck.scm`/`unify.scm`/`constraints.scm`
+   — rather than reinventing it. The Racket port proved that strategy works.
+   Conformance is per-form, so failures localise to one of 182 expressions.
+2. **FX-87 circular types + effect masking.** Cycle-safe comparison and region
+   liveness are both easy to get subtly wrong.
+   *Mitigation:* arena + explicit `trail`, mirroring `inequal.lisp`; the authored
+   expression suite targets masking specifically.
+3. **GC/Rust value staleness.** Addressed by safepoints + `#[must_use]` root
+   guards + a `gc-stress` CI job that collects at every safepoint.
+4. **Reference bugs.** Several are documented in `HISTORY.md` and one (`nil~`) I
+   hit directly.
+   *Mitigation:* implement correct behaviour, record the divergence with
+   evidence, keep both outputs in the golden file. Never silently "conform" to a
+   bug or silently deviate from one.
+5. **Scope.** This is a large build.
+   *Mitigation:* the milestone boundaries above are real check-in points; M0–M5
+   stand on their own as a usable Scheme even if you want to re-scope M6/M7.
+
+---
+
+## 10. Decisions (confirmed by the user, 2026-09-20)
+
+1. **`syntax-rules` — deferred.** Not in the critical path; scheduled as M9.
+   The expander keeps a macro-transformer seam so it lands as an addition.
+2. **Compiled story confirmed** as bytecode + heap images + single binary. No
+   C-source back end. Native code generation is a later project (M10); the
+   Core IR, code-object layout and heap-image format are all designed to admit
+   it without redesign.
+3. **Exact rationals kept**, so `/` behaves per R7RS.
+4. **Correctness over bug-fidelity confirmed.** We implement the correct
+   behaviour and record every intentional difference from the reference in
+   `docs/divergences.md`, with evidence and both outputs. This is deliberately
+   the opposite of the Racket port's "preserve the original, bugs included"
+   rule, and it is what "conformance" means in this project.
