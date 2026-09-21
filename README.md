@@ -25,7 +25,7 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list.
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
 
 ```
-$ cargo test              # 99 tests
+$ cargo test              # 103 tests
 $ cargo run -p fixpt-cli -- repl
 fixpt 0.1.0 — scheme reader, bytecode engine
 > (define (count-to n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc i)))))
@@ -55,6 +55,44 @@ hello
 runs on a machine with no `fixpt` on it. An image records which engine made it —
 compiled code carries a constants vector where interpreted code has `#f` — so
 `run-image` never has to be told.
+
+## The REPL
+
+Arrow keys, history that persists between sessions, `^A`/`^E`/`^K`/`^U`/`^W`,
+and `Tab` completion over the names the session has actually bound. The editor
+is about 450 lines in `crates/fixpt-cli/src/lineedit.rs` and adds no
+dependencies — deliberately, because `fixpt build` appends a heap image to a
+copy of this binary, so a line-editing library would ride along in every
+shipped program. Raw mode comes from `stty`, saved and restored on `Drop`,
+which keeps the workspace's `unsafe_code = "deny"` intact.
+
+**`Enter` submits only when the form is complete, and the *reader* decides.**
+That is the part worth stating. The REPL used to count parentheses for itself,
+which meant it did not know that the `)` in `#| ) |#` closes nothing, or that
+the `(` in `|a(b|` opens nothing:
+
+```
+> (define (f x)
+    #| ) |#          ← counting stops here and submits a truncated form
+    x)
+read error: unterminated list, expected `)`
+read error: unbalanced `)`
+error: unbound variable: f
+```
+
+`fixpt_read::form_status` now answers the question instead, classifying text as
+`Complete`, `Incomplete` or `Invalid` — a distinction the reader can make and a
+paren counter cannot. `Incomplete` opens a continuation line; anything else goes
+to the reader to succeed or to report properly.
+
+The prompt for this came from [Olin Shivers' "Eager parsing and user
+interaction with `call/cc`"](https://programming-musings.org/2010/08/23/at_the_workshop/index.html),
+which goes further: parse *as each character arrives*, and use continuations to
+back out of the recursive descent when the user hits backspace. `fixpt` re-reads
+the buffer from scratch instead, which is microseconds for a REPL-sized form and
+needs no parser state kept between keystrokes. The continuation-based version is
+what you want when re-reading is not affordable — and it would be a fitting use
+of this engine's own re-entrant `call/cc`.
 
 ## Trying FX-91
 

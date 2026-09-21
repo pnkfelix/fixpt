@@ -10,11 +10,52 @@ use std::collections::HashMap;
 pub struct ReadError {
     pub span: Span,
     pub message: String,
+    /// The input simply stopped in the middle of a datum, rather than being
+    /// wrong.
+    ///
+    /// The distinction is what lets an interactive reader tell "keep typing"
+    /// from "that is a mistake" — and it has to come from the reader, because
+    /// only the reader knows that the `)` inside `#| ) |#` or `|a(b|` is not a
+    /// delimiter. A separate paren-counter in the REPL would have to duplicate
+    /// every one of those rules, and would get them wrong.
+    pub incomplete: bool,
 }
 
 impl ReadError {
     fn at(span: Span, message: impl Into<String>) -> ReadError {
-        ReadError { span, message: message.into() }
+        ReadError { span, message: message.into(), incomplete: false }
+    }
+
+    /// An error that more input could still fix.
+    fn truncated(span: Span, message: impl Into<String>) -> ReadError {
+        ReadError { span, message: message.into(), incomplete: true }
+    }
+}
+
+/// Whether a piece of text is a whole form yet.
+#[derive(Debug)]
+pub enum FormStatus {
+    /// Reads as zero or more complete data.
+    Complete,
+    /// Ran out in the middle of something; more input could complete it.
+    Incomplete,
+    /// Wrong in a way more input cannot fix.
+    Invalid(ReadError),
+}
+
+/// Ask the real reader whether `text` is a complete form.
+///
+/// Used by the REPL to decide whether `Enter` submits or opens a new line. It
+/// re-reads from the start each time, which is why no parser state has to be
+/// kept between keystrokes: for a REPL-sized form that costs microseconds.
+/// Symbols are interned into a scratch table so that probing half-typed input
+/// leaves nothing behind.
+pub fn form_status(text: &str, profile: SyntaxProfile) -> FormStatus {
+    let mut interner = crate::Interner::new();
+    match Reader::new(text, FileId(0), profile, &mut interner).read_all() {
+        Ok(_) => FormStatus::Complete,
+        Err(e) if e.incomplete => FormStatus::Incomplete,
+        Err(e) => FormStatus::Invalid(e),
     }
 }
 
@@ -147,7 +188,7 @@ impl<'a> Reader<'a> {
         let mut depth = 1;
         while depth > 0 {
             match self.bump() {
-                None => return Err(ReadError::at(self.span_from(start), "unterminated `#|` comment")),
+                None => return Err(ReadError::truncated(self.span_from(start), "unterminated `#|` comment")),
                 Some('|') if self.peek() == Some('#') => {
                     self.bump();
                     depth -= 1;
@@ -167,7 +208,7 @@ impl<'a> Reader<'a> {
         self.skip_atmosphere()?;
         let start = self.pos;
         let c = match self.peek() {
-            None => return Err(ReadError::at(self.here(), "unexpected end of input")),
+            None => return Err(ReadError::truncated(self.here(), "unexpected end of input")),
             Some(c) => c,
         };
         match c {
@@ -233,7 +274,7 @@ impl<'a> Reader<'a> {
             self.skip_atmosphere()?;
             match self.peek() {
                 None => {
-                    return Err(ReadError::at(
+                    return Err(ReadError::truncated(
                         self.span_from(start),
                         format!("unterminated list, expected `{close}`"),
                     ));
@@ -307,12 +348,12 @@ impl<'a> Reader<'a> {
         loop {
             match self.bump() {
                 None => {
-                    return Err(ReadError::at(self.span_from(start), "unterminated string"));
+                    return Err(ReadError::truncated(self.span_from(start), "unterminated string"));
                 }
                 Some('"') => break,
                 Some('\\') => match self.bump() {
                     None => {
-                        return Err(ReadError::at(self.span_from(start), "unterminated string escape"));
+                        return Err(ReadError::truncated(self.span_from(start), "unterminated string escape"));
                     }
                     Some('n') => s.push('\n'),
                     Some('t') => s.push('\t'),
@@ -372,7 +413,7 @@ impl<'a> Reader<'a> {
         self.bump(); // '#'
         let c = self
             .peek()
-            .ok_or_else(|| ReadError::at(self.span_from(start), "`#` at end of input"))?;
+            .ok_or_else(|| ReadError::truncated(self.span_from(start), "`#` at end of input"))?;
         match c {
             '(' => {
                 self.bump();
@@ -493,7 +534,7 @@ impl<'a> Reader<'a> {
         self.bump(); // '\'
         let first = self
             .bump()
-            .ok_or_else(|| ReadError::at(self.span_from(start), "`#\\` at end of input"))?;
+            .ok_or_else(|| ReadError::truncated(self.span_from(start), "`#\\` at end of input"))?;
         // A single character followed by a delimiter is that character, even
         // when it also starts a longer name (`#\s` is `s`, `#\space` is ` `).
         let rest = self.take_while(|c, r| !r.is_delimiter(c));
@@ -555,7 +596,7 @@ impl<'a> Reader<'a> {
                     loop {
                         match self.bump() {
                             None => {
-                                return Err(ReadError::at(
+                                return Err(ReadError::truncated(
                                     self.span_from(start),
                                     "unterminated `|…|` symbol",
                                 ));

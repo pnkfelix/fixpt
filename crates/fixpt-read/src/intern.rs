@@ -41,6 +41,11 @@ impl Interner {
     pub fn len(&self) -> usize {
         self.names.len()
     }
+    /// Every name interned so far, in the order they were first seen.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        (0..self.len()).map(|i| self.name(Sym(i as u32)))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.names.is_empty()
     }

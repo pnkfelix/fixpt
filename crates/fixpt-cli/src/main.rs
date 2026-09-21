@@ -3,15 +3,17 @@
 //! Argument parsing is hand-rolled rather than pulled from a crate: the command
 //! surface is small and fixed, and a runtime whose whole point is a
 //! self-contained, dumpable image is better off with a dependency list this
-//! short.
+//! short. The same reasoning produced [`lineedit`], which is why this binary
+//! has no external dependencies at all.
 
 mod fx91;
 mod image_run;
+mod lineedit;
 
+use crate::lineedit::{Line, LineReader};
 use fixpt_engine::Backend;
 use fixpt_heap::image;
 use fixpt_scheme::Session;
-use std::io::{BufRead, Write};
 
 const USAGE: &str = "\
 fixpt — a Scheme engine with FX-87 and FX-91 front ends
@@ -291,84 +293,40 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
         Backend::Ast => "AST engine",
         Backend::Bytecode => "bytecode engine",
     };
-    println!(
-        "fixpt {} — {} reader, {engine}",
-        env!("CARGO_PKG_VERSION"),
-        profile.name
-    );
-    println!("(type an expression, or ^D to leave)");
+    println!("fixpt {} — {} reader, {engine}", env!("CARGO_PKG_VERSION"), profile.name);
+    println!("(an expression, or ^D to leave)");
 
-    let stdin = std::io::stdin();
-    let mut pending = String::new();
+    let mut reader = LineReader::new(".fixpt_history", profile);
     loop {
-        let prompt = if pending.is_empty() { "> " } else { "| " };
-        print!("{prompt}");
-        let _ = std::io::stdout().flush();
-        let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
-            Ok(0) => {
-                println!();
+        reader.set_completions(bound_names(&session));
+        match reader.read("> ", "| ") {
+            Line::Eof => {
+                reader.save();
                 return 0;
             }
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("fixpt: {e}");
-                return 1;
-            }
-        }
-        pending.push_str(&line);
-        // Keep reading while the input is obviously incomplete, so a
-        // multi-line definition can be pasted or typed out.
-        if !balanced(&pending) {
-            continue;
-        }
-        let text = std::mem::take(&mut pending);
-        if text.trim().is_empty() {
-            continue;
-        }
-        match session.eval_to_string("<repl>", &text) {
-            Ok(v) => println!("{v}"),
-            Err(e) => eprintln!("{e}"),
+            Line::Interrupted => continue,
+            Line::Form(text) => match session.eval_to_string("<repl>", &text) {
+                Ok(v) => println!("{v}"),
+                Err(e) => eprintln!("{e}"),
+            },
         }
     }
 }
 
-/// A cheap completeness test: are the delimiters balanced outside strings and
-/// comments? Wrong only for inputs that are already syntax errors, which the
-/// reader will report anyway.
-pub fn balanced(text: &str) -> bool {
-    let mut depth: i32 = 0;
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            ';' => {
-                for c in chars.by_ref() {
-                    if c == '\n' {
-                        break;
-                    }
-                }
-            }
-            '"' => {
-                while let Some(c) = chars.next() {
-                    match c {
-                        '\\' => {
-                            chars.next();
-                        }
-                        '"' => break,
-                        _ => {}
-                    }
-                }
-            }
-            '#' if chars.peek() == Some(&'\\') => {
-                chars.next();
-                chars.next();
-            }
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth -= 1,
-            _ => {}
-        }
-    }
-    depth <= 0
+/// Every name the session has actually bound, for completion.
+///
+/// Read out of the heap's symbol table rather than kept alongside it, so a
+/// procedure defined a moment ago can be completed immediately and one that was
+/// never defined never appears.
+pub fn bound_names(session: &Session) -> Vec<String> {
+    let heap = &session.rt.heap;
+    let symbols: Vec<fixpt_heap::Value> = heap.symbols_slice().to_vec();
+    symbols
+        .into_iter()
+        .filter(|s| !heap.global(heap.symbol_global_slot(*s)).is_unbound())
+        .map(|s| heap.symbol_name(s))
+        .filter(|n| !n.starts_with('%'))
+        .collect()
 }
 
 fn image_command(args: &[String]) -> i32 {

@@ -17,10 +17,10 @@
 //! introduced with a module, as `(with (module (define f 3)) f)`. That is the
 //! language, not a gap in this driver.
 
+use crate::lineedit::{Line, LineReader};
 use fixpt_engine::Backend;
 use fixpt_fx91::session::{Fx91Session, Outcome};
 use fixpt_read::{Reader, Syntax, SyntaxProfile};
-use std::io::{BufRead, Write};
 
 /// Read FX-91 source into forms, using the checker's own interner.
 ///
@@ -75,43 +75,31 @@ pub fn repl(backend: Backend) -> i32 {
     println!(" `(with (module (define f 3)) f)`. `,code` shows the generated");
     println!(" Scheme; ^D leaves.)");
 
-    let stdin = std::io::stdin();
-    let mut pending = String::new();
+    let mut reader = LineReader::new(".fixpt_fx91_history", SyntaxProfile::FX91);
     let mut show_code = false;
     let mut n = 0usize;
     loop {
-        print!("{}", if pending.is_empty() { "fx91> " } else { "    | " });
-        let _ = std::io::stdout().flush();
-        let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
-            Ok(0) => {
-                println!();
+        reader.set_completions(known_names(&session));
+        let text = match reader.read("fx91> ", "    | ") {
+            Line::Eof => {
+                reader.save();
                 return 0;
             }
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("fixpt: {e}");
-                return 1;
+            Line::Interrupted => continue,
+            Line::Form(text) => text,
+        };
+        match text.trim() {
+            "" => continue,
+            ",code" => {
+                show_code = !show_code;
+                println!("; generated Scheme: {}", if show_code { "on" } else { "off" });
+                continue;
             }
-        }
-        if pending.is_empty() {
-            match line.trim() {
-                ",code" => {
-                    show_code = !show_code;
-                    println!(";; generated Scheme: {}", if show_code { "on" } else { "off" });
-                    continue;
-                }
-                ",quit" => return 0,
-                _ => {}
+            ",quit" => {
+                reader.save();
+                return 0;
             }
-        }
-        pending.push_str(&line);
-        if !crate::balanced(&pending) {
-            continue;
-        }
-        let text = std::mem::take(&mut pending);
-        if text.trim().is_empty() {
-            continue;
+            _ => {}
         }
         n += 1;
         let forms = match read(&mut session, &format!("<fx91:{n}>"), &text) {
@@ -131,6 +119,22 @@ pub fn repl(backend: Backend) -> i32 {
             }
         }
     }
+}
+
+/// Names FX-91 knows, for completion.
+///
+/// The checker's interner holds every name the `fx` module introduced along
+/// with anything the session has parsed. Unification variables are filtered
+/// out: they are internal and arrive named after their own alpha number.
+fn known_names(session: &Fx91Session) -> Vec<String> {
+    session
+        .checker
+        .p
+        .interner
+        .names()
+        .filter(|n| !n.contains('*') && !n.starts_with('%') && n.len() > 1)
+        .map(str::to_string)
+        .collect()
 }
 
 /// Run FX-91 files. Each form is checked and evaluated in turn, and a form's

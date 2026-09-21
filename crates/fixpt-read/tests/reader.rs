@@ -301,3 +301,90 @@ fn every_fx91_form_survives_write_then_read() {
         assert_eq!(*a, write_syntax(b, &interner2), "form {} differs on re-read", i + 1);
     }
 }
+
+/// Telling "keep typing" from "that is wrong".
+///
+/// An interactive REPL has to decide, at every `Enter`, whether the form is
+/// finished. Counting parentheses is the obvious way and it is wrong: the `)`
+/// in `#| ) |#` and in `|a(b|` is not a delimiter, and only the reader knows
+/// that. The REPL used to count for itself and would truncate both of these.
+mod completeness {
+    use fixpt_read::{form_status, FormStatus, SyntaxProfile};
+
+    #[track_caller]
+    fn status(text: &str) -> &'static str {
+        match form_status(text, SyntaxProfile::SCHEME) {
+            FormStatus::Complete => "complete",
+            FormStatus::Incomplete => "incomplete",
+            FormStatus::Invalid(_) => "invalid",
+        }
+    }
+
+    #[test]
+    fn whole_forms_are_complete() {
+        for text in [
+            "(+ 1 2)",
+            "'(1 2 3)",
+            "42",
+            "\"a string\"",
+            "#\\(",
+            "(list 1\n      2)",
+            "",
+            "   \n  ",
+            "; just a comment\n",
+            "(a) (b) (c)",
+            "#(1 2 3)",
+            "`(1 ,x ,@ys)",
+        ] {
+            assert_eq!(status(text), "complete", "{text:?}");
+        }
+    }
+
+    #[test]
+    fn truncated_forms_want_more_input() {
+        for text in [
+            "(+ 1 2",
+            "(a (b (c",
+            "\"unterminated",
+            "#| a block comment",
+            "|a symbol",
+            "'",
+            "#",
+            "#\\",
+            "(list 1\n      2",
+        ] {
+            assert_eq!(status(text), "incomplete", "{text:?}");
+        }
+    }
+
+    #[test]
+    fn genuinely_wrong_input_is_not_merely_unfinished() {
+        // More typing will not rescue these, so the REPL should hand them to
+        // the reader and let it report, rather than waiting forever.
+        for text in [")", "(a) )", "#(1 2))"] {
+            assert_eq!(status(text), "invalid", "{text:?}");
+        }
+    }
+
+    /// The two cases a parenthesis counter gets wrong, in both directions.
+    #[test]
+    fn delimiters_inside_comments_and_symbols_do_not_count() {
+        // A `)` that closes nothing: counting would call this complete after
+        // the comment and submit `(define (f x)\n  #| )`.
+        assert_eq!(status("(define (f x)\n  #| ) |#"), "incomplete");
+        assert_eq!(status("(define (f x)\n  #| ) |#\n  x)"), "complete");
+
+        // A `(` that opens nothing: counting would wait forever for a closing
+        // parenthesis that is never coming.
+        assert_eq!(status("(define |a(b| 42)"), "complete");
+        assert_eq!(status("|a(b|"), "complete");
+
+        // …and the same for a string and a character literal. Note that
+        // `(display #\()` is *complete*: `#\(` is the character, and the `)`
+        // after it closes the call.
+        assert_eq!(status("(display \"a ) b\")"), "complete");
+        assert_eq!(status("(display #\\))"), "complete");
+        assert_eq!(status("(display #\\()"), "complete");
+        assert_eq!(status("(display #\\("), "incomplete");
+    }
+}
