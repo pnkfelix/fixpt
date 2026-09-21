@@ -210,6 +210,14 @@ pub struct Arena {
     descs: Vec<Desc>,
     exps: Vec<Exp>,
     exp_spans: Vec<Span>,
+    /// The source form each expression came from.
+    ///
+    /// Kept because FX-87's checking-failure messages *quote* the offending
+    /// form — `Cannot type-check (if 1 2 3)` — and those messages are recorded
+    /// in the conformance goldens, so reproducing them is not decoration. A
+    /// span would not do: sugar is expanded during parsing, so several nodes
+    /// share one span and a synthesized node has none of its own.
+    exp_source: Vec<Option<fixpt_read::Syntax>>,
 }
 
 impl Arena {
@@ -245,7 +253,17 @@ impl Arena {
     pub fn exp(&mut self, span: Span, e: Exp) -> ExpId {
         self.exps.push(e);
         self.exp_spans.push(span);
+        self.exp_source.push(None);
         ExpId(self.exps.len() as u32 - 1)
+    }
+
+    /// Remember the source form an expression was read from.
+    pub fn set_source(&mut self, id: ExpId, source: fixpt_read::Syntax) {
+        self.exp_source[id.index()] = Some(source);
+    }
+
+    pub fn source(&self, id: ExpId) -> Option<&fixpt_read::Syntax> {
+        self.exp_source[id.index()].as_ref()
     }
 
     #[inline]

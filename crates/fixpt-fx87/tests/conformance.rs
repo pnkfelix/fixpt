@@ -130,7 +130,7 @@ fn types_and_effects_match_the_reference() {
     println!("{}", report.summary("fx87 type/effect"));
     print!("{}", report.detail(14));
 
-    const FLOOR: usize = 99;
+    const FLOOR: usize = 129;
     assert!(
         report.matched.len() >= FLOOR,
         "fx87 type/effect regressed below {FLOOR}\n{}",

@@ -16,7 +16,8 @@ pub fn write_syntax(s: &Syntax, interner: &Interner) -> String {
     out
 }
 
-/// `display`-style: strings and characters rendered as their contents.
+/// `display`-style: strings, characters and symbols rendered as their
+/// contents, with no escaping.
 pub fn display_syntax(s: &Syntax, interner: &Interner) -> String {
     let mut out = String::new();
     put(&mut out, s, interner, false);
@@ -43,7 +44,17 @@ fn put(out: &mut String, s: &Syntax, interner: &Interner, write: bool) {
                 out.push_str(text)
             }
         }
-        Datum::Symbol(sym) => put_symbol(out, interner.name(*sym)),
+        // `write` escapes a symbol that would not read back; `display` does
+        // not, matching Scheme — `(display '|a b|)` prints `a b`. FX-87 leans
+        // on this: its checking-failure messages render the offending form with
+        // `princ`, so `#t` appears bare there while `write` would give `|#t|`.
+        Datum::Symbol(sym) => {
+            if write {
+                put_symbol(out, interner.name(*sym))
+            } else {
+                out.push_str(interner.name(*sym))
+            }
+        }
         Datum::List { items, tail } => {
             out.push('(');
             for (i, item) in items.iter().enumerate() {

@@ -134,18 +134,31 @@ impl Checker {
     /// the supertype, or an error. FX-87 computes no joins — two types that are
     /// merely compatible are simply incomparable, which is why
     /// `(if #t 1 #\a)` does not check.
-    fn max_of_types(&mut self, span: Span, types: &[DescId], what: &str) -> R<DescId> {
+    fn max_of_types(&mut self, exp: ExpId, types: &[DescId]) -> R<DescId> {
         let mut best = types[0];
         for t in &types[1..] {
             let (a, b) = (*t, best);
-            best = {
+            let ordered = {
                 let rel = self.rel();
                 if rel.type_less(a, b, &Default::default(), &Default::default()) {
-                    b
+                    Some(b)
                 } else if rel.type_less(b, a, &Default::default(), &Default::default()) {
-                    a
+                    Some(a)
                 } else {
-                    return Err(FxError::cannot_type_check(span, what));
+                    None
+                }
+            };
+            best = match ordered {
+                Some(x) => x,
+                None => {
+                    // Raised, not declined — and note the argument order the
+                    // reference prints: the incoming type first.
+                    let msg = format!(
+                        "Uncomparable types {} {}",
+                        self.show_desc(a),
+                        self.show_desc(b)
+                    );
+                    return Err(self.raised(exp, msg));
                 }
             };
         }
@@ -161,7 +174,6 @@ impl Checker {
     // --------------------------------------------------------------- main
     pub fn desc_of_exp(&mut self, exp: ExpId, env: &TkEnv) -> R<Desc2> {
         let span = self.p.arena.span(exp);
-        let what = || String::from("this expression");
         match self.p.arena.exp_at(exp).clone() {
             Exp::Int(_) => self.literal(self.p.syms.int),
             Exp::Float(_) => self.literal(self.p.syms.float),
@@ -181,9 +193,12 @@ impl Checker {
 
             Exp::Var(name) => {
                 let Some(binding) = env.value(name).cloned() else {
-                    return Err(FxError::syntax(
-                        span,
-                        format!("This variable has no type {}", self.p.interner.name(name)),
+                    return Err(self.raised(
+                        exp,
+                        format!(
+                            "This variable has no type {}",
+                            self.p.interner.name(name)
+                        ),
                     ));
                 };
                 let effect = self.effect_on(span, EffectKind::Read, binding.region)?;
@@ -201,18 +216,34 @@ impl Checker {
                     // `(the type exp)` keeps whatever effect the body had.
                     None => inner.effect,
                 };
-                let ok = {
+                let type_ok = {
                     let rel = self.rel();
                     rel.type_less(inner.ty, want_ty, &Default::default(), &Default::default())
-                        && rel.effect_less(
-                            inner.effect,
-                            want_effect,
-                            &Default::default(),
-                            &Default::default(),
-                        )
                 };
-                if !ok {
-                    return Err(FxError::cannot_type_check(span, &what()));
+                if !type_ok {
+                    let msg = format!(
+                        "Subtyping rule violation {} {}",
+                        self.show_desc(inner.ty),
+                        self.show_desc(want_ty)
+                    );
+                    return Err(self.raised(exp, msg));
+                }
+                let effect_ok = {
+                    let rel = self.rel();
+                    rel.effect_less(
+                        inner.effect,
+                        want_effect,
+                        &Default::default(),
+                        &Default::default(),
+                    )
+                };
+                if !effect_ok {
+                    let msg = format!(
+                        "Subeffecting rule violation {} {}",
+                        self.show_desc(inner.effect),
+                        self.show_desc(want_effect)
+                    );
+                    return Err(self.raised(exp, msg));
                 }
                 Ok(Desc2 { ty: want_ty, effect: want_effect })
             }
@@ -224,11 +255,13 @@ impl Checker {
                     Desc::Con(n, a) if a.is_empty() && *n == self.p.syms.bool
                 );
                 if !is_bool {
-                    return Err(FxError::cannot_type_check(span, &what()));
+                    // `desc-of-if` returns falsy here rather than raising, so
+                    // this is the generic message with the form quoted.
+                    return Err(self.declined(exp));
                 }
                 let a = self.desc_of_exp(then, env)?;
                 let b = self.desc_of_exp(els, env)?;
-                let ty = self.max_of_types(span, &[a.ty, b.ty], &what())?;
+                let ty = self.max_of_types(exp, &[a.ty, b.ty])?;
                 let effect = self.arena().maxeff(vec![t.effect, a.effect, b.effect]);
                 Ok(Desc2 { ty, effect })
             }
@@ -275,13 +308,19 @@ impl Checker {
                 Ok(Desc2 { ty: d.ty, effect: masked })
             }
 
-            Exp::Letrec { bindings, body } => self.letrec(exp, span, &bindings, body, env),
+            Exp::Letrec { bindings, body } => self.letrec(exp, &bindings, body, env),
 
-            Exp::App { fun, args } => self.app(exp, span, fun, &args, env),
+            Exp::App { fun, args } => self.app(exp, fun, &args, env),
 
             Exp::SetBang { name, value } => {
                 let Some(binding) = env.value(name).cloned() else {
-                    return Err(FxError::cannot_type_check(span, &what()));
+                    return Err(self.raised(
+                        exp,
+                        format!(
+                            "This variable has no type {}",
+                            self.p.interner.name(name)
+                        ),
+                    ));
                 };
                 let d = self.desc_of_exp(value, env)?;
                 let ok = {
@@ -289,7 +328,12 @@ impl Checker {
                     rel.type_less(d.ty, binding.ty, &Default::default(), &Default::default())
                 };
                 if !ok {
-                    return Err(FxError::cannot_type_check(span, &what()));
+                    let msg = format!(
+                        "Subtyping rule violation {} {}",
+                        self.show_desc(d.ty),
+                        self.show_desc(binding.ty)
+                    );
+                    return Err(self.raised(exp, msg));
                 }
                 let w = self.effect_on(span, EffectKind::Write, binding.region)?;
                 let effect = self.arena().maxeff(vec![d.effect, w]);
@@ -314,6 +358,35 @@ impl Checker {
                 Ok(Desc2 { ty, effect: d.effect })
             }
         }
+    }
+
+    /// The offending form, rendered the way the reference's messages render it.
+    ///
+    /// `display` rather than `write`, so a symbol appears bare: the goldens say
+    /// `Cannot type-check (select (record ((a 1) (b #t))) c)`, not `|#t|`.
+    fn show(&self, exp: ExpId) -> String {
+        match self.p.arena.source(exp) {
+            Some(syntax) => fixpt_read::display_syntax(syntax, &self.p.interner),
+            None => "this expression".to_string(),
+        }
+    }
+
+    fn show_desc(&self, d: DescId) -> String {
+        unparse(&self.p.arena, &self.p.interner, d)
+    }
+
+    /// A rule *declined*: `desc-of-exp-1` returned falsy, and `desc-of-exp`
+    /// reports it generically with the form quoted. Distinct from a rule that
+    /// raises its own message — the difference tells you which happened.
+    fn declined(&self, exp: ExpId) -> FxError {
+        let span = self.p.arena.span(exp);
+        FxError::cannot_type_check(span, &self.show(exp))
+    }
+
+    /// A rule *raised*, with its own wording.
+    fn raised(&self, exp: ExpId, message: impl Into<String>) -> FxError {
+        let span = self.p.arena.span(exp);
+        FxError { span, message: message.into(), user: true }
     }
 
     fn literal(&mut self, name: Sym) -> R<Desc2> {
@@ -359,7 +432,6 @@ impl Checker {
     fn letrec(
         &mut self,
         exp: ExpId,
-        span: Span,
         bindings: &[Binding],
         body: ExpId,
         env: &TkEnv,
@@ -385,7 +457,6 @@ impl Checker {
         effects.push(d.effect);
         let effect = self.arena().maxeff(effects);
         let masked = self.mask(exp, env, effect, d.ty);
-        let _ = span;
         Ok(Desc2 { ty: d.ty, effect: masked })
     }
 
@@ -403,50 +474,65 @@ impl Checker {
         }
     }
 
-    fn app(
-        &mut self,
-        exp: ExpId,
-        span: Span,
-        fun: ExpId,
-        args: &[ExpId],
-        env: &TkEnv,
-    ) -> R<Desc2> {
+    fn app(&mut self, exp: ExpId, fun: ExpId, args: &[ExpId], env: &TkEnv) -> R<Desc2> {
         let f = self.desc_of_exp(fun, env)?;
         let mut arg_descs = Vec::with_capacity(args.len());
         for a in args {
             arg_descs.push(self.desc_of_exp(*a, env)?);
         }
-        let what = unparse(&self.p.arena, &self.p.interner, f.ty);
-
         let mut fun_ty = self.eval(f.ty);
         // Implicit projection: a `poly` operator applied directly is
         // instantiated by matching its argument types against the actual ones,
         // so `(new 3)` need not be written `((proj (proj new @=) int) 3)`.
         if matches!(self.p.arena.get(fun_ty), Desc::Poly { .. }) {
             let actuals: Vec<DescId> = arg_descs.iter().map(|d| d.ty).collect();
-            fun_ty = self.implicit_projection(span, fun_ty, &actuals, &what)?;
+            fun_ty = self.implicit_projection(exp, fun_ty, &actuals)?;
+        }
+        // `(vsubr effect t result)` takes any number of arguments, all of type
+        // `t` — which is how `list` is declared. Expanding it to a `subr` of
+        // the right arity here means the checks below need no second form.
+        if let Desc::Vsubr { effect, args, rest, result } = self.p.arena.get(fun_ty).clone() {
+            let mut formals = args;
+            while formals.len() < arg_descs.len() {
+                formals.push(rest);
+            }
+            fun_ty = self.arena().desc(Desc::Subr { effect, args: formals, result });
         }
         let Desc::Subr { effect: latent, args: formals, result } =
             self.p.arena.get(fun_ty).clone()
         else {
-            return Err(FxError::cannot_type_check(span, &what));
+            return Err(self.declined(exp));
         };
         if formals.len() != arg_descs.len() {
-            return Err(FxError::cannot_type_check(span, &what));
+            return Err(self.raised(
+                exp,
+                format!("Incorrect number of args in {}", self.show(exp)),
+            ));
         }
-        for (actual, formal) in arg_descs.iter().zip(&formals) {
-            let ok = {
-                let rel = self.rel();
-                rel.type_less(actual.ty, *formal, &Default::default(), &Default::default())
-            };
-            if !ok {
-                return Err(FxError::cannot_type_check(span, &what));
-            }
+        let formals: Vec<DescId> = formals.iter().map(|f| self.eval(*f)).collect();
+        let mismatched = arg_descs.iter().zip(&formals).any(|(actual, formal)| {
+            let rel = self.rel();
+            !rel.type_less(actual.ty, *formal, &Default::default(), &Default::default())
+        });
+        if mismatched {
+            let actuals: Vec<String> = arg_descs.iter().map(|d| self.show_desc(d.ty)).collect();
+            let wanted: Vec<String> = formals.iter().map(|f| self.show_desc(*f)).collect();
+            let msg = format!(
+                "Wrong arguments types (actuals formals): ({}) ({}) in {}",
+                actuals.join(" "),
+                wanted.join(" "),
+                self.show(exp)
+            );
+            return Err(self.raised(exp, msg));
         }
         let latent = self.purify_effect(latent)?;
         let mut effects = vec![f.effect, latent];
         effects.extend(arg_descs.iter().map(|d| d.effect));
         let effect = self.arena().maxeff(effects);
+        // The result as written may still be a constructor that denotes
+        // something else — `string->list` returns `(listof char @=)`, which
+        // *is* a recursive pair type.
+        let result = self.eval(result);
         let masked = self.mask(exp, env, effect, result);
         Ok(Desc2 { ty: result, effect: masked })
     }
@@ -465,10 +551,9 @@ impl Checker {
     /// `(ref int @=)` and therefore pure; anything else is genuinely ambiguous.
     fn implicit_projection(
         &mut self,
-        span: Span,
+        exp: ExpId,
         ty: DescId,
         actuals: &[DescId],
-        what: &str,
     ) -> R<DescId> {
         let mut binders = Vec::new();
         let mut head = ty;
@@ -480,16 +565,25 @@ impl Checker {
             Desc::Subr { args, .. } => args,
             // A `vsubr` takes every argument at the same type.
             Desc::Vsubr { rest, .. } => vec![rest; actuals.len()],
-            _ => return Err(FxError::cannot_type_check(span, what)),
+            _ => return Err(self.declined(exp)),
         };
         if formals.len() != actuals.len() {
-            return Err(FxError::cannot_type_check(span, what));
+            return Err(self.declined(exp));
         }
         let names: HashSet<Sym> = binders.iter().map(|b| b.name).collect();
         let mut solution = std::collections::HashMap::new();
+        // The formals have to be evaluated before they can be matched: `length`
+        // expects `(listof t r)`, while the actual from `(list 1 2 3)` is
+        // already the recursive pair type that denotes. Matching one against
+        // the other without expanding first compares a constructor with its own
+        // meaning and fails.
+        let formals: Vec<DescId> = formals.iter().map(|f| self.eval(*f)).collect();
         for (formal, actual) in formals.iter().zip(actuals) {
             if !self.match_desc(*formal, *actual, &names, &mut solution, &mut Vec::new()) {
-                return Err(FxError::cannot_type_check(span, what));
+                // The reference reports this as an ordinary argument-type
+                // failure once the projection has been chosen, so the message
+                // is built by the caller rather than here.
+                return Err(self.declined(exp));
             }
         }
         for b in &binders {
@@ -500,7 +594,10 @@ impl Checker {
                 let r = self.con(self.immutable);
                 solution.insert(b.name, r);
             } else {
-                return Err(FxError::cannot_type_check(span, what));
+                return Err(self.raised(
+                    exp,
+                    format!("ambiguous implicit projection {}", self.show(exp)),
+                ));
             }
         }
         let instantiated = eval::substitute(&mut self.p.arena, head, &solution);
@@ -589,6 +686,7 @@ impl Checker {
             let Desc::Poly { binders, body } = self.p.arena.get(current).clone() else {
                 return Err(FxError::cannot_type_check(span, "projection of a non-poly"));
             };
+            let _ = &span;
             if binders.len() != 1 {
                 // Several binders at once are supplied by several `proj`
                 // arguments in order, which is how the corpus writes them.
@@ -620,14 +718,22 @@ impl Checker {
         let mut free = HashSet::new();
         self.free_vars(exp, &mut free);
         let mut visible = Vec::new();
+        let immutable = self.con(self.immutable);
         for name in free {
-            if bound.contains(&name) {
-                continue;
-            }
-            if let Some(b) = env.value(name) {
-                visible.push(b.region);
-                visible.push(b.ty);
-            }
+            let Some(b) = env.value(name) else { continue };
+            // A free variable's *type* always contributes its regions, even
+            // when the variable is one this scope binds: a parameter of type
+            // `(ref int @!)` was handed in by the caller, who can therefore
+            // observe what is done to `@!`. Note *regions within* the type —
+            // the type itself is not a region and would never compare equal to
+            // one.
+            let (ty, region) = (b.ty, b.region);
+            visible.extend(crate::mask::regions_in(&self.p.arena, ty));
+            // `dont-count` in the reference does not drop the variable — it
+            // substitutes the immutable region for its *binding* region, so
+            // merely being bound here does not make the binding observable.
+            let effective = if bound.contains(&name) { immutable } else { region };
+            visible.extend(crate::mask::regions_in(&self.p.arena, effective));
         }
         let (imm, rf) = (self.immutable, self.ref_name);
         erase_effect(&mut self.p.arena, imm, rf, effect, result, &visible)

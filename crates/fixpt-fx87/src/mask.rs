@@ -77,6 +77,17 @@ pub fn erase_effect(
 }
 
 /// Every region mentioned anywhere in `id`.
+///
+/// Public because the checker needs it too: what makes a region observable is
+/// its appearing in the *type* of something free, and the caller has types
+/// rather than regions to offer.
+pub fn regions_in(arena: &Arena, id: DescId) -> Vec<DescId> {
+    let mut out = Vec::new();
+    regions_of(arena, id, &mut HashSet::new(), &mut out);
+    out
+}
+
+/// Every region mentioned anywhere in `id`.
 fn regions_of(arena: &Arena, id: DescId, seen: &mut HashSet<DescId>, out: &mut Vec<DescId>) {
     if !seen.insert(id) {
         return;

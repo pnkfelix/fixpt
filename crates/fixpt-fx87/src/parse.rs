@@ -323,6 +323,14 @@ impl Parser {
 
     // ------------------------------------------------------- expressions
     pub fn parse_exp(&mut self, s: &Syntax, scope: &DScope) -> R<ExpId> {
+        let id = self.parse_exp_inner(s, scope)?;
+        // Every node keeps the form it was read from, so a checking failure can
+        // quote it the way the reference does.
+        self.arena.set_source(id, s.clone());
+        Ok(id)
+    }
+
+    fn parse_exp_inner(&mut self, s: &Syntax, scope: &DScope) -> R<ExpId> {
         let span = s.span;
         match &s.datum {
             Datum::Number(n) => {
