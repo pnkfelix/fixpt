@@ -157,6 +157,34 @@ conformance rather than bug-compatibility. Whether the 1987 original behaved the
 same way under Pseudoscheme is a separate question about `pseudo.lisp`, and one
 this corpus cannot answer; it is recorded here so the distinction is not lost.
 
+### One recursive type prints differently, because cycles are found over
+### different objects
+
+Corpus case 155 —
+`(lambda ((l (dletrec ((il (oneof ((nil unit) (cons (pairof int il @=))) @=))) il))) l)`
+— is the single case in 155 where `fixpt`'s printed type differs from the
+reference's. The reference gives two bindings and refers to them by name:
+
+```text
+(dletrec ((|#1| (oneof …)) (|#2| (oneof …))) (subr pure (|#1|) |#2|))
+```
+
+`fixpt` gives one binding and expands it in place.
+
+The cause is representational rather than a bug in the printer.
+`create-finite-dexp` finds cycles by walking **cons cells** and testing `memv`
+against a trail of them, so what counts as "the same object" is a pair. Here a
+type is one arena node: `(pairof int X @=)` is a single `Desc::Con`, where the
+reference has a chain of four cells. The two therefore disagree about which
+occurrences are shared, and about how many distinct cycles a type contains.
+
+Matching it exactly would mean giving descriptions a cons-cell representation
+purely so that cycle detection agrees — paying for the 1987 memory layout in
+order to reproduce an artifact of it. The type is the same type either way, and
+both renderings denote it; only the choice of where to unroll differs. Recorded
+here rather than chased, and pinned by the conformance floor so it cannot
+silently become two cases.
+
 ### The ADT cluster stays stubbed
 
 Nine identifiers in the `struct`/`structof`/`convert`/`abstract`/`extract`

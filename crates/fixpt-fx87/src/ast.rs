@@ -175,6 +175,51 @@ pub enum Exp {
     Proj { body: ExpId, args: Vec<DescId> },
     App { fun: ExpId, args: Vec<ExpId> },
     SetBang { name: Sym, value: ExpId },
+
+    // ---------------------------------------------------- standard forms
+    // `standard.lisp` gives these their own checking rules rather than types
+    // in the environment, because each needs its own relationship between the
+    // region it lives in and the effect it costs.
+    /// `(record ((field exp)…) [region])`
+    Record { fields: Vec<(Sym, ExpId)>, region: Option<DescId> },
+    /// `(select rec field)`
+    Select { rec: ExpId, field: Sym },
+    /// `(record-set! rec field value)`
+    RecordSet { rec: ExpId, field: Sym, value: ExpId },
+    /// `(one oneof-type tag exp)`
+    One { ty: DescId, tag: Sym, value: ExpId },
+    /// `(tagcase (v exp [region]) (tag body…)… [(else body…)])`
+    TagCase { var: Sym, scrutinee: ExpId, region: Option<DescId>, clauses: Vec<TagClause> },
+    /// `(one-set! exp tag value)`
+    OneSet { target: ExpId, tag: Sym, value: ExpId },
+    /// `(delay exp)`
+    Delay(ExpId),
+    /// `(vlambda (name type [region]) body…)` — variable arity.
+    VLambda { name: Sym, ty: DescId, region: Option<DescId>, body: ExpId },
+    /// `(do ((var init [step] [region])…) (test result…) body…)`
+    ///
+    /// Not expanded into a `letrec` loop the way Scheme's is, because FX-87's
+    /// `lambda` needs written parameter types and `do` writes none: the loop
+    /// variables take their types from their *initialisers*, which only the
+    /// checker knows. So it stays a form of its own, as it does in the
+    /// reference.
+    Do { bindings: Vec<DoBinding>, test: ExpId, result: ExpId, body: Option<ExpId> },
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct DoBinding {
+    pub name: Sym,
+    pub init: ExpId,
+    /// Absent when the variable does not change each time round.
+    pub step: Option<ExpId>,
+    pub region: Option<DescId>,
+}
+
+/// One arm of a `tagcase`. `tag` is `None` for `else`.
+#[derive(Clone, PartialEq, Debug)]
+pub struct TagClause {
+    pub tag: Option<Sym>,
+    pub body: ExpId,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -286,11 +331,25 @@ impl Arena {
         self.desc(Desc::Con(name, Vec::new()))
     }
 
-    /// Build a `maxeff` in the normal form the subeffecting rule assumes:
-    /// flattened, `pure` dropped, duplicates removed, and a single member
-    /// unwrapped.
+    /// Build a `maxeff` in the normal form `eval-maxeff` produces:
+    ///
+    /// ```text
+    /// (maxeff (alloc (runion …)) (read (runion …)) (write (runion …)) …)
+    /// ```
+    ///
+    /// One atom per constructor, each over the union of its regions, in that
+    /// order, with anything else — effect variables — last. `pure` is dropped
+    /// and a single member is unwrapped.
+    ///
+    /// This is not tidiness. `effect-less-1?` states that it assumes a
+    /// flattened, redundancy-free argument, and the conformance goldens record
+    /// the normalised form exactly, down to the order of the union's members.
     pub fn maxeff(&mut self, parts: Vec<DescId>) -> DescId {
-        let mut flat: Vec<DescId> = Vec::new();
+        let mut allocs = Vec::new();
+        let mut reads = Vec::new();
+        let mut writes = Vec::new();
+        let mut others: Vec<DescId> = Vec::new();
+
         let mut stack = parts;
         stack.reverse();
         while let Some(p) = stack.pop() {
@@ -301,18 +360,65 @@ impl Arena {
                         stack.push(x);
                     }
                 }
+                Desc::Alloc(r) => self.add_region(&mut allocs, r),
+                Desc::Read(r) => self.add_region(&mut reads, r),
+                Desc::Write(r) => self.add_region(&mut writes, r),
                 _ => {
-                    if !flat.iter().any(|q| self.same(*q, p)) {
-                        flat.push(p);
+                    if !others.iter().any(|q| self.same(*q, p)) {
+                        others.push(p);
                     }
                 }
             }
         }
-        match flat.len() {
-            0 => self.desc(Desc::Pure),
-            1 => flat[0],
-            _ => self.desc(Desc::MaxEff(flat)),
+
+        let mut out = Vec::new();
+        for (regions, make) in [
+            (allocs, Desc::Alloc as fn(DescId) -> Desc),
+            (reads, Desc::Read as fn(DescId) -> Desc),
+            (writes, Desc::Write as fn(DescId) -> Desc),
+        ] {
+            if regions.is_empty() {
+                continue;
+            }
+            let r = self.runion(regions);
+            out.push(self.desc(make(r)));
         }
+        out.extend(others);
+        match out.len() {
+            0 => self.desc(Desc::Pure),
+            1 => out[0],
+            _ => self.desc(Desc::MaxEff(out)),
+        }
+    }
+
+    /// Add a region to a group, flattening a union and skipping duplicates.
+    fn add_region(&mut self, group: &mut Vec<DescId>, r: DescId) {
+        match self.get(r).clone() {
+            Desc::RUnion(parts) => {
+                for p in parts {
+                    self.add_region(group, p);
+                }
+            }
+            _ => {
+                if !group.iter().any(|q| self.same(*q, r)) {
+                    group.push(r);
+                }
+            }
+        }
+    }
+
+    /// One region, or the union of several, in the order given.
+    ///
+    /// Order matters and is not arbitrary. An effect the checker *gathers*
+    /// keeps the order its regions were met in, while a union written in source
+    /// is flattened by `eval-rexp`, whose right fold prepends and therefore
+    /// reverses it — so `(runion @red @blue)` as an ascription reports as
+    /// `(runion @blue @red)`. The reversal belongs to evaluation, not here.
+    pub fn runion(&mut self, mut regions: Vec<DescId>) -> DescId {
+        if regions.len() == 1 {
+            return regions.pop().expect("length checked");
+        }
+        self.desc(Desc::RUnion(regions))
     }
 
     /// Structural equality, cycle-safe.

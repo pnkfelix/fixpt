@@ -64,6 +64,16 @@ syms! {
     cond => "cond",
     else_ => "else",
     do_ => "do",
+    // standard forms
+    record => "record",
+    select => "select",
+    record_set => "record-set!",
+    one => "one",
+    tagcase => "tagcase",
+    one_set => "one-set!",
+    delay => "delay",
+    vlambda => "vlambda",
+    promise => "promise",
     // literals that the FX-87 reader delivers as symbols
     true_ => "#t",
     false_ => "#f",

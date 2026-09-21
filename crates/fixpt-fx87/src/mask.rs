@@ -176,7 +176,14 @@ fn has_alloc_of(arena: &Arena, effect: DescId, region: DescId, rel: &Rel<'_>) ->
     }
 }
 
-/// Drop every atom of `effect` whose region is exactly `region`.
+/// Remove `region` from every atom of `effect`.
+///
+/// `del-r-in-region`: an atom over a *union* loses just that member and keeps
+/// the rest, and only disappears when nothing is left. Dropping whole atoms
+/// instead would leave `(alloc (runion @red @blue))` standing when both of its
+/// regions are private — which is exactly the case where masking matters most,
+/// since the whole point is that a computation allocating several local cells
+/// is still pure.
 fn delete_region(
     arena: &mut Arena,
     effect: DescId,
@@ -190,20 +197,52 @@ fn delete_region(
     };
     let mut kept = Vec::new();
     for atom in atoms {
-        let r = match arena.get(atom) {
-            Desc::Read(r) | Desc::Write(r) | Desc::Alloc(r) => Some(*r),
-            _ => None,
-        };
-        let drop = match r {
-            Some(r) => {
-                let rel = Rel::new(arena, immutable, ref_name);
-                rel.region_equal(r, region, &Default::default(), &Default::default())
+        let (rebuild, r): (fn(DescId) -> Desc, DescId) = match arena.get(atom) {
+            Desc::Read(r) => (Desc::Read, *r),
+            Desc::Write(r) => (Desc::Write, *r),
+            Desc::Alloc(r) => (Desc::Alloc, *r),
+            _ => {
+                kept.push(atom);
+                continue;
             }
-            None => false,
         };
-        if !drop {
-            kept.push(atom);
+        // `None` means nothing is left to act on, so the atom goes entirely.
+        if let Some(remaining) = remove_from_region(arena, r, region, immutable, ref_name) {
+            kept.push(arena.desc(rebuild(remaining)));
         }
     }
     arena.maxeff(kept)
+}
+
+/// `region` with `victim` taken out, or `None` if that empties it.
+fn remove_from_region(
+    arena: &mut Arena,
+    region: DescId,
+    victim: DescId,
+    immutable: fixpt_read::Sym,
+    ref_name: fixpt_read::Sym,
+) -> Option<DescId> {
+    match arena.get(region).clone() {
+        Desc::RUnion(parts) => {
+            let kept: Vec<DescId> = parts
+                .into_iter()
+                .filter(|p| {
+                    let rel = Rel::new(arena, immutable, ref_name);
+                    !rel.region_equal(*p, victim, &Default::default(), &Default::default())
+                })
+                .collect();
+            match kept.len() {
+                0 => None,
+                _ => Some(arena.runion(kept)),
+            }
+        }
+        _ => {
+            let rel = Rel::new(arena, immutable, ref_name);
+            if rel.region_equal(region, victim, &Default::default(), &Default::default()) {
+                None
+            } else {
+                Some(region)
+            }
+        }
+    }
 }

@@ -20,7 +20,9 @@
 //! escape is dropped. `purify` handles the region that is immutable by nature;
 //! masking handles the region that happens to be private.
 
-use crate::ast::{Arena, Binder, Binding, Desc, DescId, Exp, ExpId, Kind, Param};
+use crate::ast::{
+    Arena, Binder, Binding, Desc, DescId, DoBinding, Exp, ExpId, Kind, Param, TagClause,
+};
 use crate::env::{TkEnv, ValueBinding};
 use crate::error::{FxError, R};
 use crate::eval::{self, DStore};
@@ -166,9 +168,118 @@ impl Checker {
     }
 
     /// Evaluate a written description into the description it denotes.
+    ///
+    /// Head expansion only: the arguments are expanded as they are reached, and
+    /// forcing a whole recursive type eagerly would not terminate.
     fn eval(&mut self, d: DescId) -> DescId {
         let store = self.store.clone();
         eval::eval(&mut self.p.arena, &store, d)
+    }
+
+    /// Evaluate a description *throughout*, so that what is printed is what it
+    /// means at every level.
+    ///
+    /// Head expansion is enough to compare two descriptions, because comparison
+    /// expands as it descends. It is not enough to *print* one: `reverse`
+    /// returns `(listof int r2)` nested inside a `poly`, and the goldens record
+    /// the recursive pair type that denotes. The same walk purifies effects
+    /// buried in a type, which is why `(subr (read @=) (int) int)` prints as
+    /// `(subr pure (int) int)`.
+    ///
+    /// Cycle-safe by the same means as substitution: a hole is allocated before
+    /// the children are walked, so a recursive occurrence finds it.
+    fn eval_deep(&mut self, d: DescId) -> DescId {
+        let mut memo = std::collections::HashMap::new();
+        self.eval_deep_memo(d, &mut memo)
+    }
+
+    fn eval_deep_memo(
+        &mut self,
+        d: DescId,
+        memo: &mut std::collections::HashMap<DescId, DescId>,
+    ) -> DescId {
+        if let Some(done) = memo.get(&d) {
+            return *done;
+        }
+        let expanded = self.eval(d);
+        if let Some(done) = memo.get(&expanded) {
+            return *done;
+        }
+        let hole = self.arena().hole();
+        memo.insert(d, hole);
+        memo.insert(expanded, hole);
+        let rebuilt = match self.p.arena.get(expanded).clone() {
+            Desc::Var(v) => Desc::Var(v),
+            Desc::Pure => Desc::Pure,
+            Desc::Hole => Desc::Hole,
+            Desc::Con(n, args) => {
+                Desc::Con(n, args.iter().map(|a| self.eval_deep_memo(*a, memo)).collect())
+            }
+            Desc::Subr { effect, args, result } => Desc::Subr {
+                effect: self.eval_deep_memo(effect, memo),
+                args: args.iter().map(|a| self.eval_deep_memo(*a, memo)).collect(),
+                result: self.eval_deep_memo(result, memo),
+            },
+            Desc::Vsubr { effect, args, rest, result } => Desc::Vsubr {
+                effect: self.eval_deep_memo(effect, memo),
+                args: args.iter().map(|a| self.eval_deep_memo(*a, memo)).collect(),
+                rest: self.eval_deep_memo(rest, memo),
+                result: self.eval_deep_memo(result, memo),
+            },
+            Desc::Poly { binders, body } => {
+                Desc::Poly { binders, body: self.eval_deep_memo(body, memo) }
+            }
+            Desc::DAbs { binders, body } => {
+                Desc::DAbs { binders, body: self.eval_deep_memo(body, memo) }
+            }
+            Desc::RecordOf { fields, region } => Desc::RecordOf {
+                fields: fields.iter().map(|(n, t)| (*n, self.eval_deep_memo(*t, memo))).collect(),
+                region: self.eval_deep_memo(region, memo),
+            },
+            Desc::OneOf { variants, region } => Desc::OneOf {
+                variants: variants
+                    .iter()
+                    .map(|(n, t)| (*n, self.eval_deep_memo(*t, memo)))
+                    .collect(),
+                region: self.eval_deep_memo(region, memo),
+            },
+            // An effect on the immutable region is `pure` wherever it appears,
+            // not only at the top of a description.
+            Desc::Read(r) | Desc::Write(r) | Desc::Alloc(r) if self.is_immutable(r) => Desc::Pure,
+            Desc::Read(r) => Desc::Read(self.eval_deep_memo(r, memo)),
+            Desc::Write(r) => Desc::Write(self.eval_deep_memo(r, memo)),
+            Desc::Alloc(r) => Desc::Alloc(self.eval_deep_memo(r, memo)),
+            Desc::MaxEff(parts) => {
+                let walked: Vec<DescId> =
+                    parts.iter().map(|p| self.eval_deep_memo(*p, memo)).collect();
+                let merged = self.arena().maxeff(walked);
+                self.p.arena.get(merged).clone()
+            }
+            Desc::RUnion(parts) => {
+                let walked: Vec<DescId> =
+                    parts.iter().map(|p| self.eval_deep_memo(*p, memo)).collect();
+                let merged = self.arena().runion(walked);
+                self.p.arena.get(merged).clone()
+            }
+            Desc::DApp { fun, args } => Desc::DApp {
+                fun: self.eval_deep_memo(fun, memo),
+                args: args.iter().map(|a| self.eval_deep_memo(*a, memo)).collect(),
+            },
+        };
+        self.arena().fill(hole, rebuilt);
+        hole
+    }
+
+    /// Check a top-level expression and report its description.
+    ///
+    /// The difference from [`desc_of_exp`](Checker::desc_of_exp) is the deep
+    /// evaluation: internally a description need only be expanded far enough to
+    /// compare, but what is *reported* has to be what it means throughout.
+    pub fn check(&mut self, exp: ExpId, env: &TkEnv) -> R<Desc2> {
+        let d = self.desc_of_exp(exp, env)?;
+        let ty = self.eval_deep(d.ty);
+        let effect = self.eval_deep(d.effect);
+        Ok(Desc2 { ty, effect })
     }
 
     // --------------------------------------------------------------- main
@@ -176,7 +287,17 @@ impl Checker {
         let span = self.p.arena.span(exp);
         match self.p.arena.exp_at(exp).clone() {
             Exp::Int(_) => self.literal(self.p.syms.int),
-            Exp::Float(_) => self.literal(self.p.syms.float),
+            // `literal-int?` tests Scheme's `integer?`, which is true of
+            // `1.0`, and it is checked *before* `literal-float?`. So `1.0` is
+            // an `int` and `(fl+ 1.0 2.5)` is a type error — a property of
+            // Scheme's `integer?` rather than of the port, and therefore
+            // faithful to 1987. See docs/divergences.md.
+            Exp::Float(bits) => {
+                let f = f64::from_bits(bits);
+                let name =
+                    if f.is_finite() && f.fract() == 0.0 { self.p.syms.int } else { self.p.syms.float };
+                self.literal(name)
+            }
             Exp::Char(_) => self.literal(self.p.syms.char),
             Exp::Bool(_) => self.literal(self.p.syms.bool),
             Exp::Unit => self.literal(self.p.syms.unit_type),
@@ -207,7 +328,10 @@ impl Checker {
 
             Exp::The { effect, ty, body } => {
                 let inner = self.desc_of_exp(body, env)?;
-                let want_ty = self.eval(ty);
+                // Fully, not just at the head: the ascription may bury an
+                // effect on the immutable region, and `(subr (read @=) …)` has
+                // to compare equal to `(subr pure …)`.
+                let want_ty = self.eval_deep(ty);
                 let want_effect = match effect {
                     Some(e) => {
                         let e = self.eval(e);
@@ -352,6 +476,169 @@ impl Checker {
                 Ok(Desc2 { ty, effect })
             }
 
+            // ------------------------------------------- standard forms
+            Exp::Record { fields, region } => {
+                let region = self.binding_region(region);
+                let mut effects = Vec::with_capacity(fields.len() + 1);
+                let mut types = Vec::with_capacity(fields.len());
+                for (name, value) in &fields {
+                    let d = self.desc_of_exp(*value, env)?;
+                    effects.push(d.effect);
+                    types.push((*name, d.ty));
+                }
+                // A record is allocated, so building one costs `(alloc r)` —
+                // purified away when it lives in the immutable region.
+                let alloc = self.effect_on(span, EffectKind::Alloc, region)?;
+                effects.push(alloc);
+                let ty = self.arena().desc(Desc::RecordOf { fields: types, region });
+                let effect = self.arena().maxeff(effects);
+                Ok(Desc2 { ty, effect })
+            }
+
+            Exp::Select { rec, field } => {
+                let d = self.desc_of_exp(rec, env)?;
+                let rec_ty = self.eval(d.ty);
+                let Desc::RecordOf { fields, region } = self.p.arena.get(rec_ty).clone() else {
+                    return Err(self.declined(exp));
+                };
+                let Some((_, ty)) = fields.iter().find(|(n, _)| *n == field).copied() else {
+                    // No such field: the rule declines, so this is the generic
+                    // message — which is what the corpus records.
+                    return Err(self.declined(exp));
+                };
+                let read = self.effect_on(span, EffectKind::Read, region)?;
+                let effect = self.arena().maxeff(vec![read, d.effect]);
+                Ok(Desc2 { ty, effect })
+            }
+
+            Exp::RecordSet { rec, field, value } => {
+                let d = self.desc_of_exp(rec, env)?;
+                let v = self.desc_of_exp(value, env)?;
+                let rec_ty = self.eval(d.ty);
+                let Desc::RecordOf { fields, region } = self.p.arena.get(rec_ty).clone() else {
+                    return Err(self.declined(exp));
+                };
+                if self.is_immutable(region) {
+                    return Err(self.raised(exp, "Use RECORD-SET! on mutable region only"));
+                }
+                let Some((_, want)) = fields.iter().find(|(n, _)| *n == field).copied() else {
+                    return Err(self.declined(exp));
+                };
+                let ok = {
+                    let rel = self.rel();
+                    rel.type_less(v.ty, want, &Default::default(), &Default::default())
+                };
+                if !ok {
+                    return Err(self.declined(exp));
+                }
+                let write = self.effect_on(span, EffectKind::Write, region)?;
+                let effect = self.arena().maxeff(vec![write, d.effect, v.effect]);
+                let ty = self.con(self.p.syms.unit_type);
+                Ok(Desc2 { ty, effect })
+            }
+
+            Exp::One { ty, tag, value } => {
+                let d = self.desc_of_exp(value, env)?;
+                let one_ty = self.eval(ty);
+                let Desc::OneOf { variants, region } = self.p.arena.get(one_ty).clone() else {
+                    return Err(self.raised(exp, "Not a ONEOF type:"));
+                };
+                let Some((_, want)) = variants.iter().find(|(n, _)| *n == tag).copied() else {
+                    return Err(self.raised(
+                        exp,
+                        format!("Incompatible tag {}", self.p.interner.name(tag)),
+                    ));
+                };
+                let ok = {
+                    let rel = self.rel();
+                    rel.type_less(d.ty, want, &Default::default(), &Default::default())
+                };
+                if !ok {
+                    return Err(self.declined(exp));
+                }
+                let alloc = self.effect_on(span, EffectKind::Alloc, region)?;
+                let effect = self.arena().maxeff(vec![alloc, d.effect]);
+                Ok(Desc2 { ty: one_ty, effect })
+            }
+
+            Exp::OneSet { target, tag, value } => {
+                let d = self.desc_of_exp(target, env)?;
+                let v = self.desc_of_exp(value, env)?;
+                let one_ty = self.eval(d.ty);
+                let Desc::OneOf { variants, region } = self.p.arena.get(one_ty).clone() else {
+                    return Err(self.declined(exp));
+                };
+                if self.is_immutable(region) {
+                    return Err(self.raised(exp, "Use ONE-SET! on mutable region only"));
+                }
+                let Some((_, want)) = variants.iter().find(|(n, _)| *n == tag).copied() else {
+                    return Err(self.declined(exp));
+                };
+                let ok = {
+                    let rel = self.rel();
+                    rel.type_less(v.ty, want, &Default::default(), &Default::default())
+                };
+                if !ok {
+                    return Err(self.declined(exp));
+                }
+                let write = self.effect_on(span, EffectKind::Write, region)?;
+                let effect = self.arena().maxeff(vec![write, d.effect, v.effect]);
+                let ty = self.con(self.p.syms.unit_type);
+                Ok(Desc2 { ty, effect })
+            }
+
+            Exp::TagCase { var, scrutinee, region, clauses } => {
+                self.tagcase(exp, span, var, scrutinee, region, &clauses, env)
+            }
+
+            Exp::Delay(body) => {
+                let d = self.desc_of_exp(body, env)?;
+                // The body's effect becomes latent in the promise; forcing it
+                // is what pays. Building the promise costs an allocation only
+                // when there is something to defer.
+                let promise = self.p.syms.promise;
+                let ty = self.arena().desc(Desc::Con(promise, vec![d.effect, d.ty]));
+                let effect = if matches!(self.p.arena.get(d.effect), Desc::Pure) {
+                    self.pure()
+                } else {
+                    let r = self.con(self.immutable);
+                    self.effect_on(span, EffectKind::Alloc, r)?
+                };
+                Ok(Desc2 { ty, effect })
+            }
+
+            Exp::VLambda { name, ty, region, body } => {
+                // A `vlambda` is a `lambda` whose one parameter is a *list* of
+                // the declared type, and whose type is a `vsubr`.
+                let element = self.eval(ty);
+                let listof = self.p.interner.intern("listof");
+                let imm = self.con(self.immutable);
+                let list_ty = self.arena().desc(Desc::Con(listof, vec![element, imm]));
+                let list_ty = self.eval(list_ty);
+                let mut inner = env.child();
+                let binding_region = self.binding_region(region);
+                inner.bind_value(name, ValueBinding { ty: list_ty, region: binding_region });
+                let d = self.desc_of_exp(body, &inner)?;
+                let mut effects = vec![d.effect];
+                if region.is_some() {
+                    effects.push(self.effect_on(span, EffectKind::Alloc, binding_region)?);
+                }
+                let raw = self.arena().maxeff(effects);
+                let latent = self.mask_with(body, &inner, raw, d.ty, &[name]);
+                let ty = self.arena().desc(Desc::Vsubr {
+                    effect: latent,
+                    args: Vec::new(),
+                    rest: element,
+                    result: d.ty,
+                });
+                let effect = self.pure();
+                Ok(Desc2 { ty, effect })
+            }
+
+            Exp::Do { bindings, test, result, body } => {
+                self.check_do(exp, span, &bindings, test, result, body, env)
+            }
+
             Exp::Proj { body, args } => {
                 let d = self.desc_of_exp(body, env)?;
                 let ty = self.project(span, d.ty, &args)?;
@@ -389,6 +676,129 @@ impl Checker {
         FxError { span, message: message.into(), user: true }
     }
 
+    /// `(tagcase (v e) (tag body)… )` — each arm sees `v` at that tag's type.
+    ///
+    /// The `else` arm sees the *remaining* variants, but only when the value is
+    /// immutable: if it can be written through, another tag could be stored
+    /// behind the binding's back, so the arm has to assume the whole type.
+    #[allow(clippy::too_many_arguments)]
+    fn tagcase(
+        &mut self,
+        exp: ExpId,
+        span: Span,
+        var: Sym,
+        scrutinee: ExpId,
+        region: Option<DescId>,
+        clauses: &[TagClause],
+        env: &TkEnv,
+    ) -> R<Desc2> {
+        let d = self.desc_of_exp(scrutinee, env)?;
+        let one_ty = self.eval(d.ty);
+        let Desc::OneOf { variants, region: one_region } = self.p.arena.get(one_ty).clone() else {
+            return Err(self.declined(exp));
+        };
+        let binding_region = match region {
+            Some(r) => r,
+            None => one_region,
+        };
+        let named: Vec<Sym> = clauses.iter().filter_map(|c| c.tag).collect();
+        let mut effects = vec![d.effect];
+        let mut types = Vec::with_capacity(clauses.len());
+        for clause in clauses {
+            let arm_ty = match clause.tag {
+                Some(tag) => match variants.iter().find(|(n, _)| *n == tag).copied() {
+                    Some((_, t)) => t,
+                    None => return Err(self.declined(exp)),
+                },
+                None => {
+                    let rest: Vec<(Sym, DescId)> = variants
+                        .iter()
+                        .filter(|(n, _)| !named.contains(n))
+                        .copied()
+                        .collect();
+                    if self.is_immutable(one_region) {
+                        self.arena().desc(Desc::OneOf { variants: rest, region: one_region })
+                    } else {
+                        one_ty
+                    }
+                }
+            };
+            let mut inner = env.child();
+            inner.bind_value(var, ValueBinding { ty: arm_ty, region: binding_region });
+            let arm = self.desc_of_exp(clause.body, &inner)?;
+            effects.push(arm.effect);
+            types.push(arm.ty);
+        }
+        if types.is_empty() {
+            return Err(self.declined(exp));
+        }
+        let read = self.effect_on(span, EffectKind::Read, one_region)?;
+        effects.push(read);
+        let ty = self.max_of_types(exp, &types)?;
+        let effect = self.arena().maxeff(effects);
+        Ok(Desc2 { ty, effect })
+    }
+
+    /// `do`, whose loop variables take their types from their initialisers.
+    #[allow(clippy::too_many_arguments)]
+    fn check_do(
+        &mut self,
+        exp: ExpId,
+        span: Span,
+        bindings: &[DoBinding],
+        test: ExpId,
+        result: ExpId,
+        body: Option<ExpId>,
+        env: &TkEnv,
+    ) -> R<Desc2> {
+        let mut effects = Vec::new();
+        let mut inner = env.child();
+        for b in bindings {
+            // The initialiser is checked *outside* the loop's scope.
+            let d = self.desc_of_exp(b.init, env)?;
+            effects.push(d.effect);
+            let region = self.binding_region(b.region);
+            if b.region.is_some() {
+                effects.push(self.effect_on(span, EffectKind::Alloc, region)?);
+            }
+            inner.bind_value(b.name, ValueBinding { ty: d.ty, region });
+        }
+        let t = self.desc_of_exp(test, &inner)?;
+        let is_bool = matches!(
+            self.p.arena.get(t.ty),
+            Desc::Con(n, a) if a.is_empty() && *n == self.p.syms.bool
+        );
+        if !is_bool {
+            return Err(self.declined(exp));
+        }
+        effects.push(t.effect);
+        // Each step has to stay within its variable's type, since it becomes
+        // that variable's value next time round.
+        for b in bindings {
+            let Some(step) = b.step else { continue };
+            let d = self.desc_of_exp(step, &inner)?;
+            effects.push(d.effect);
+            let want = inner.value(b.name).expect("just bound").ty;
+            let ok = {
+                let rel = self.rel();
+                rel.type_less(d.ty, want, &Default::default(), &Default::default())
+            };
+            if !ok {
+                return Err(self.declined(exp));
+            }
+        }
+        if let Some(body) = body {
+            let d = self.desc_of_exp(body, &inner)?;
+            effects.push(d.effect);
+        }
+        let r = self.desc_of_exp(result, &inner)?;
+        effects.push(r.effect);
+        let effect = self.arena().maxeff(effects);
+        let names: Vec<Sym> = bindings.iter().map(|b| b.name).collect();
+        let masked = self.mask_with(exp, &inner, effect, r.ty, &names);
+        Ok(Desc2 { ty: r.ty, effect: masked })
+    }
+
     fn literal(&mut self, name: Sym) -> R<Desc2> {
         let ty = self.con(name);
         let effect = self.pure();
@@ -408,7 +818,7 @@ impl Checker {
         let mut arg_types = Vec::with_capacity(params.len());
         let mut allocs = Vec::new();
         for p in params {
-            let ty = self.eval(p.ty);
+            let ty = self.eval_deep(p.ty);
             arg_types.push(ty);
             let region = self.binding_region(p.region);
             if p.region.is_some() {
@@ -460,16 +870,29 @@ impl Checker {
         Ok(Desc2 { ty: d.ty, effect: masked })
     }
 
-    /// The type a `letrec` initialiser announces without being checked.
+    /// The type a `letrec` initialiser announces without needing to be checked.
     ///
-    /// A `lambda` states its argument types, and its result type is whatever
-    /// its body turns out to be — which is not known yet. So only a `the`
-    /// gives a complete answer here; a plain `lambda` is left to the second
-    /// pass, which is enough for the self-recursive case the corpus uses,
-    /// where the recursive call sits under a `the`.
+    /// Checking is what makes recursion tractable here: a recursive binding has
+    /// to state its own type, and in FX-87 it does. A `lambda` writes its
+    /// argument types, and when its body is a `the` it writes its result and
+    /// effect too — which between them give the whole `subr`, so the recursive
+    /// call inside can be checked against it.
     fn written_type(&mut self, exp: ExpId, _env: &TkEnv) -> R<Option<DescId>> {
         match self.p.arena.exp_at(exp).clone() {
-            Exp::The { ty, .. } => Ok(Some(self.eval(ty))),
+            Exp::The { ty, .. } => Ok(Some(self.eval_deep(ty))),
+            Exp::Lambda { params, body } => {
+                let Exp::The { ty, effect, .. } = self.p.arena.exp_at(body).clone() else {
+                    return Ok(None);
+                };
+                let Some(effect) = effect else { return Ok(None) };
+                let effect = self.eval_deep(effect);
+                let result = self.eval_deep(ty);
+                let mut args = Vec::with_capacity(params.len());
+                for p in &params {
+                    args.push(self.eval_deep(p.ty));
+                }
+                Ok(Some(self.arena().desc(Desc::Subr { effect, args, result })))
+            }
             _ => Ok(None),
         }
     }
@@ -783,6 +1206,49 @@ impl Checker {
                 for a in args {
                     self.free_vars(*a, out);
                 }
+            }
+            Exp::Record { fields, .. } => {
+                for (_, e) in fields {
+                    self.free_vars(*e, out);
+                }
+            }
+            Exp::Select { rec, .. } => self.free_vars(*rec, out),
+            Exp::RecordSet { rec, value, .. } | Exp::OneSet { target: rec, value, .. } => {
+                self.free_vars(*rec, out);
+                self.free_vars(*value, out);
+            }
+            Exp::One { value, .. } => self.free_vars(*value, out),
+            Exp::Delay(e) => self.free_vars(*e, out),
+            Exp::TagCase { var, scrutinee, clauses, .. } => {
+                self.free_vars(*scrutinee, out);
+                let mut inner = HashSet::new();
+                for c in clauses {
+                    self.free_vars(c.body, &mut inner);
+                }
+                inner.remove(var);
+                out.extend(inner);
+            }
+            Exp::VLambda { name, body, .. } => {
+                let mut inner = HashSet::new();
+                self.free_vars(*body, &mut inner);
+                inner.remove(name);
+                out.extend(inner);
+            }
+            Exp::Do { bindings, test, result, body } => {
+                let mut inner = HashSet::new();
+                self.free_vars(*test, &mut inner);
+                self.free_vars(*result, &mut inner);
+                if let Some(b) = body {
+                    self.free_vars(*b, &mut inner);
+                }
+                for b in bindings {
+                    self.free_vars(b.init, out);
+                    if let Some(step) = b.step {
+                        self.free_vars(step, &mut inner);
+                    }
+                    inner.remove(&b.name);
+                }
+                out.extend(inner);
             }
             _ => {}
         }

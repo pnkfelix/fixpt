@@ -50,10 +50,19 @@ pub fn unparse(arena: &Arena, interner: &Interner, root: DescId) -> String {
         names.insert(*id, format!("#{}", i + 1));
     }
     let mut p = Printer { arena, interner, names, expanding: HashSet::new() };
-    let body = p.print(root);
     if order.is_empty() {
-        return body;
+        return p.print(root);
     }
+    // The bindings go *inside* any enclosing binder, because a recursive type
+    // may mention a variable that binder introduces: `reverse` has type
+    // `(poly ((r2 region)) (dletrec ((|#1| (pairof int |#1| r2))) …))`, and
+    // hoisting the `dletrec` out would put `r2` out of scope.
+    if let Desc::Poly { binders, body } = arena.get(root).clone() {
+        let bs = p.binders(&binders);
+        let inner = unparse(arena, interner, body);
+        return format!("(poly ({bs}) {inner})");
+    }
+    let body = p.print(root);
     let bindings: Vec<String> = order
         .iter()
         .map(|id| {
@@ -227,7 +236,7 @@ impl Printer<'_> {
             .join(" ")
     }
 
-    fn binders(&mut self, binders: &[crate::ast::Binder]) -> String {
+    pub(crate) fn binders(&mut self, binders: &[crate::ast::Binder]) -> String {
         binders
             .iter()
             .map(|b| format!("({} {})", self.sym(b.name), print_kind(&b.kind)))

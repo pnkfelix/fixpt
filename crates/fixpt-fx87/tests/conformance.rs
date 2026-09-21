@@ -87,7 +87,7 @@ fn types_and_effects_match_the_reference() {
         let env = checker.env.clone();
         let verdict = match checker.p.parse_exp(form, &Default::default()) {
             Err(e) => Verdict::Error { message: format!("parse: {e}") },
-            Ok(exp) => match checker.desc_of_exp(exp, &env) {
+            Ok(exp) => match checker.check(exp, &env) {
                 Ok(d) => {
                     let got = (
                         normalize(&unparse(&checker.p.arena, &checker.p.interner, d.ty)),
@@ -130,7 +130,7 @@ fn types_and_effects_match_the_reference() {
     println!("{}", report.summary("fx87 type/effect"));
     print!("{}", report.detail(14));
 
-    const FLOOR: usize = 129;
+    const FLOOR: usize = 154;
     assert!(
         report.matched.len() >= FLOOR,
         "fx87 type/effect regressed below {FLOOR}\n{}",

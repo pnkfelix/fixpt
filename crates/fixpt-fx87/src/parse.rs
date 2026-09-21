@@ -18,7 +18,9 @@
 //! given nodes of their own, as `sugar.lisp` does — so the checker sees only
 //! the kernel, and there is one place to look when a derived form is wrong.
 
-use crate::ast::{Arena, Binder, Binding, Desc, DescId, Exp, ExpId, Kind, Param};
+use crate::ast::{
+    Arena, Binder, Binding, Desc, DescId, DoBinding, Exp, ExpId, Kind, Param, TagClause,
+};
 use crate::error::{FxError, R};
 use crate::syms::Syms;
 use fixpt_read::{Datum, Interner, Num, Span, Sym, Syntax};
@@ -247,8 +249,15 @@ impl Parser {
             return Ok(self.arena.maxeff(parts));
         }
         if h == self.syms.runion {
-            let parts = self.parse_desc_seq(&a, scope)?;
-            return Ok(self.arena.desc(Desc::RUnion(parts)));
+            // `eval-rexp` flattens a written union with a right fold that
+            // prepends, so its members end up reversed — `(runion @red @blue)`
+            // written in an ascription is reported as `(runion @blue @red)`.
+            // Reversing here rather than during evaluation matters: masking
+            // rebuilds effects, so an evaluation-time reversal would be applied
+            // a varying number of times, while a union is *written* once.
+            let mut parts = self.parse_desc_seq(&a, scope)?;
+            parts.reverse();
+            return Ok(self.arena.runion(parts));
         }
 
         let args = self.parse_desc_seq(&a, scope)?;
@@ -377,10 +386,15 @@ impl Parser {
         let a = &items[1..];
 
         if let Some(h) = head {
-            if h == self.syms.quote {
-                if a.len() != 1 {
-                    return Err(self.bad(s, "quote"));
-                }
+            // `quote` is only half a form in FX-87. A quoted *symbol* — and
+            // `'()`, which the port's NIL emulation delivers as one — is a
+            // literal of type `symbol`. A quoted list is not: `quote` stays an
+            // ordinary variable there, and the corpus records the resulting
+            // "This variable has no type quote". See docs/divergences.md.
+            if h == self.syms.quote
+                && a.len() == 1
+                && matches!(a[0].datum, Datum::Nil | Datum::Symbol(_))
+            {
                 return Ok(self.arena.exp(span, Exp::Quote(a[0].clone())));
             }
             if h == self.syms.the {
@@ -462,6 +476,141 @@ impl Parser {
                 let value = self.parse_exp(&a[1], scope)?;
                 return Ok(self.arena.exp(span, Exp::SetBang { name, value }));
             }
+            // ---- standard forms ----
+            if h == self.syms.record {
+                // `(record ((f e)…) [region])`
+                if a.is_empty() {
+                    return Err(self.bad(s, "record"));
+                }
+                let pairs = self.list(&a[0]).ok_or_else(|| self.bad(s, "record"))?.to_vec();
+                let mut fields = Vec::with_capacity(pairs.len());
+                for pair in &pairs {
+                    let parts = self.list(pair).ok_or_else(|| self.bad(pair, "field"))?.to_vec();
+                    if parts.len() != 2 {
+                        return Err(self.bad(pair, "field"));
+                    }
+                    let name = self.sym_of(&parts[0]).ok_or_else(|| self.bad(pair, "field"))?;
+                    fields.push((name, self.parse_exp(&parts[1], scope)?));
+                }
+                let region = match a.len() {
+                    1 => None,
+                    2 => Some(self.parse_desc(&a[1], scope)?),
+                    _ => return Err(self.bad(s, "record")),
+                };
+                return Ok(self.arena.exp(span, Exp::Record { fields, region }));
+            }
+            if h == self.syms.select {
+                if a.len() != 2 {
+                    return Err(self.bad(s, "select"));
+                }
+                let rec = self.parse_exp(&a[0], scope)?;
+                let field = self.sym_of(&a[1]).ok_or_else(|| self.bad(s, "select field"))?;
+                return Ok(self.arena.exp(span, Exp::Select { rec, field }));
+            }
+            if h == self.syms.record_set {
+                if a.len() != 3 {
+                    return Err(self.bad(s, "record-set!"));
+                }
+                let rec = self.parse_exp(&a[0], scope)?;
+                let field = self.sym_of(&a[1]).ok_or_else(|| self.bad(s, "field"))?;
+                let value = self.parse_exp(&a[2], scope)?;
+                return Ok(self.arena.exp(span, Exp::RecordSet { rec, field, value }));
+            }
+            if h == self.syms.one {
+                if a.len() != 3 {
+                    return Err(self.bad(s, "one"));
+                }
+                let ty = self.parse_desc(&a[0], scope)?;
+                let tag = self.sym_of(&a[1]).ok_or_else(|| self.bad(s, "tag"))?;
+                let value = self.parse_exp(&a[2], scope)?;
+                return Ok(self.arena.exp(span, Exp::One { ty, tag, value }));
+            }
+            if h == self.syms.one_set {
+                if a.len() != 3 {
+                    return Err(self.bad(s, "one-set!"));
+                }
+                let target = self.parse_exp(&a[0], scope)?;
+                let tag = self.sym_of(&a[1]).ok_or_else(|| self.bad(s, "tag"))?;
+                let value = self.parse_exp(&a[2], scope)?;
+                return Ok(self.arena.exp(span, Exp::OneSet { target, tag, value }));
+            }
+            if h == self.syms.tagcase {
+                if a.len() < 2 {
+                    return Err(self.bad(s, "tagcase"));
+                }
+                let binding = self.list(&a[0]).ok_or_else(|| self.bad(s, "tagcase"))?.to_vec();
+                if binding.len() < 2 {
+                    return Err(self.bad(s, "tagcase binding"));
+                }
+                let var = self.sym_of(&binding[0]).ok_or_else(|| self.bad(s, "tagcase var"))?;
+                let scrutinee = self.parse_exp(&binding[1], scope)?;
+                let region = match binding.len() {
+                    2 => None,
+                    3 => Some(self.parse_desc(&binding[2], scope)?),
+                    _ => return Err(self.bad(s, "tagcase binding")),
+                };
+                let mut clauses = Vec::new();
+                for clause in &a[1..] {
+                    let parts =
+                        self.list(clause).ok_or_else(|| self.bad(clause, "tagcase clause"))?.to_vec();
+                    if parts.is_empty() {
+                        return Err(self.bad(clause, "tagcase clause"));
+                    }
+                    let tag = self.sym_of(&parts[0]).ok_or_else(|| self.bad(clause, "tag"))?;
+                    let tag = if tag == self.syms.else_ { None } else { Some(tag) };
+                    let body = self.parse_body(&parts[1..], scope)?;
+                    clauses.push(TagClause { tag, body });
+                }
+                return Ok(self.arena.exp(
+                    span,
+                    Exp::TagCase { var, scrutinee, region, clauses },
+                ));
+            }
+            if h == self.syms.delay {
+                if a.len() != 1 {
+                    return Err(self.bad(s, "delay"));
+                }
+                let body = self.parse_exp(&a[0], scope)?;
+                return Ok(self.arena.exp(span, Exp::Delay(body)));
+            }
+            if h == self.syms.vlambda {
+                if a.len() < 2 {
+                    return Err(self.bad(s, "vlambda"));
+                }
+                let arg = self.list(&a[0]).ok_or_else(|| self.bad(s, "vlambda arg"))?.to_vec();
+                if arg.len() < 2 {
+                    return Err(self.bad(s, "vlambda arg"));
+                }
+                let name = self.sym_of(&arg[0]).ok_or_else(|| self.bad(s, "vlambda name"))?;
+                let ty = self.parse_desc(&arg[1], scope)?;
+                let region = match arg.len() {
+                    2 => None,
+                    3 => Some(self.parse_desc(&arg[2], scope)?),
+                    _ => return Err(self.bad(s, "vlambda arg")),
+                };
+                let body = self.parse_body(&a[1..], scope)?;
+                return Ok(self.arena.exp(span, Exp::VLambda { name, ty, region, body }));
+            }
+            if h == self.syms.plet {
+                // `(plet ((v d)…) body)` binds *description* variables to
+                // descriptions, so it is handled by extending the scope rather
+                // than by a node of its own — exactly as `dlet` is.
+                if a.len() < 2 {
+                    return Err(self.bad(s, "plet"));
+                }
+                let pairs = self.list(&a[0]).ok_or_else(|| self.bad(s, "plet"))?.to_vec();
+                let mut inner = scope.clone();
+                for pair in &pairs {
+                    let parts = self.list(pair).ok_or_else(|| self.bad(pair, "plet binding"))?.to_vec();
+                    if parts.len() != 2 {
+                        return Err(self.bad(pair, "plet binding"));
+                    }
+                    let name = self.sym_of(&parts[0]).ok_or_else(|| self.bad(pair, "plet name"))?;
+                    let value = self.parse_desc(&parts[1], scope)?;
+                    inner.subst.insert(name, value);
+                }
+                return self.parse_body(&a[1..], &inner);
+            }
             // ---- sugar ----
             if h == self.syms.let_ || h == self.syms.let_star {
                 return self.expand_let(s, h == self.syms.let_star, a, scope);
@@ -474,6 +623,43 @@ impl Parser {
             }
             if h == self.syms.cond {
                 return self.expand_cond(span, a, scope);
+            }
+            if h == self.syms.do_ {
+                if a.len() < 2 {
+                    return Err(self.bad(s, "do"));
+                }
+                let inits = self.list(&a[0]).ok_or_else(|| self.bad(s, "do"))?.to_vec();
+                let mut bindings = Vec::with_capacity(inits.len());
+                for init in &inits {
+                    let parts = self.list(init).ok_or_else(|| self.bad(init, "do binding"))?.to_vec();
+                    if parts.len() < 2 || parts.len() > 4 {
+                        return Err(self.bad(init, "do binding"));
+                    }
+                    let name = self.sym_of(&parts[0]).ok_or_else(|| self.bad(init, "do name"))?;
+                    let value = self.parse_exp(&parts[1], scope)?;
+                    let step = match parts.len() {
+                        2 => None,
+                        _ => Some(self.parse_exp(&parts[2], scope)?),
+                    };
+                    // A fourth element names the region, as it does everywhere
+                    // else a binding can be mutable.
+                    let region = match parts.len() {
+                        4 => Some(self.parse_desc(&parts[3], scope)?),
+                        _ => None,
+                    };
+                    bindings.push(DoBinding { name, init: value, step, region });
+                }
+                let test_clause = self.list(&a[1]).ok_or_else(|| self.bad(s, "do test"))?.to_vec();
+                if test_clause.is_empty() {
+                    return Err(self.bad(s, "do test"));
+                }
+                let test = self.parse_exp(&test_clause[0], scope)?;
+                let result = self.parse_body(&test_clause[1..], scope)?;
+                let body = match a.len() {
+                    2 => None,
+                    _ => Some(self.parse_body(&a[2..], scope)?),
+                };
+                return Ok(self.arena.exp(span, Exp::Do { bindings, test, result, body }));
             }
         }
 
