@@ -147,3 +147,56 @@ missed:
 * **No bracketed paste**, so pasting a large form is processed a keystroke at a
   time and echoes messily.
 * **Unix only.** Raw mode is `stty`.
+
+## 8. Syntax highlighting in the REPL
+
+Live colouring as you type: tokens, paren matching, and — the part worth the
+most — identifiers coloured by whether they are actually bound, so a typo shows
+up before `Enter` rather than after.
+
+**The enabling fact, verified rather than assumed.** `render` in
+`crates/fixpt-cli/src/lineedit.rs` computes `target_row` and `target_col` from
+the *logical* character buffer, entirely separately from the string it draws.
+So SGR escapes inserted into the drawn text cannot disturb the cursor
+arithmetic. Colour is close to free; the separation is already there.
+
+**In rough order of value for effort:**
+
+* **Unbound identifiers.** `bound_names()` already exists, for `Tab`
+  completion. Dim or redden a name that is not bound, live. Catches typos at the
+  keystroke, and costs almost nothing.
+* **Paren matching** — highlight the partner of the delimiter at the cursor.
+  **This must come from the reader.** The `)` in `#| ) |#` and the `(` in
+  `|a(b|` are not delimiters, and a matcher that counted for itself would
+  repeat the bug that §1 describes. It needs a token-level API out of
+  `fixpt-read`: the lexing is all there, just not exposed.
+* **Token colour** — strings, characters, numbers, comments, `|symbols|`. Same
+  token API.
+* **The unclosed delimiter.** `form_status` already runs, and `ReadError`
+  carries a `Span`. Underlining the offender is nearly free once colour exists.
+* **Binding sites.** Underline where the identifier at the cursor is bound, when
+  the binder is on screen — a scope walk over the current form's datum tree
+  recognising `lambda`, `let`, `let*`, `letrec`, `define`, `do` and named `let`.
+  Bounded work, since the "view" is one form. It cannot reach binders from
+  earlier REPL forms, which are not on screen; for those, "bound global" versus
+  "unknown" is the honest signal.
+
+**Prerequisite.** Fix the long-line redraw first (§7). The row arithmetic counts
+newlines rather than screen rows, so a wrapped line already confuses the cursor,
+and highlighting encourages looking at longer forms. `stty size` gives the
+width, in keeping with how raw mode is already done.
+
+**Also needed:** honour `NO_COLOR`, detect `TERM=dumb`, and stay monochrome when
+not a terminal — the `Plain` reader must be untouched, since the test suite
+drives both REPLs through pipes.
+
+**Cost.** Re-parsing per keystroke is O(n), so O(n²) over a line. Fine at REPL
+sizes, as §1 says — but highlighting is what makes per-keystroke parsing routine
+rather than occasional, which is the condition under which §1's
+continuation-checkpoint reader stops being a luxury. The two entries are
+related: doing this one is the strongest argument for doing that one.
+
+**Falls out for free:** the FX-91 REPL gets all of the above, since both drive
+`LineReader`. Further out, FX-91 could colour by *kind* — the checker knows what
+is a type, an effect and a region, and nothing else in either language makes
+that distinction visible.
