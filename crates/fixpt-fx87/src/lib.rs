@@ -32,6 +32,7 @@
 pub mod ast;
 pub mod error;
 pub mod parse;
+pub mod subtype;
 pub mod syms;
 pub mod unparse;
 
