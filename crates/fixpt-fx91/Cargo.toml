@@ -9,6 +9,7 @@ fixpt-heap = { path = "../fixpt-heap" }
 fixpt-read = { path = "../fixpt-read" }
 fixpt-core = { path = "../fixpt-core" }
 fixpt-scheme = { path = "../fixpt-scheme" }
+fixpt-engine = { path = "../fixpt-engine" }
 fixpt-runtime = { path = "../fixpt-runtime" }
 
 [dev-dependencies]

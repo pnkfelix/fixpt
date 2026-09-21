@@ -67,21 +67,42 @@ pub const TAG_FIX: i64 = 8;
 pub const TAG_LAMBDA: i64 = 9;
 pub const TAG_APP: i64 = 10;
 
-/// `Code` payload layout.
+/// `Code` payload layout, shared by both engines.
+///
+/// `CODE_BODY` holds a `Vector` of nodes for the AST engine and a
+/// `Bytevector` of instructions for the compiler; `CODE_ENTRY` is an index
+/// into whichever it is. Keeping one shape means a closure is `[code, …]`
+/// whoever made it, and the printer, the verifier and the image format do not
+/// need to know which engine produced a procedure.
 pub const CODE_NAME: usize = 0;
 pub const CODE_ARITY: usize = 1;
 pub const CODE_HAS_REST: usize = 2;
-/// The flat node vector.
-pub const CODE_NODES: usize = 3;
-/// Index of the body's root node within `CODE_NODES`.
+/// A node `Vector` (interpreted) or a bytecode `Bytevector` (compiled).
+pub const CODE_BODY: usize = 3;
+/// Node offset, or bytecode entry offset.
 pub const CODE_ENTRY: usize = 4;
-pub const CODE_FIELDS: usize = 5;
+/// Compiled code only: the constants it refers to. `#f` for interpreted code,
+/// whose constants sit inline in the node vector.
+pub const CODE_CONSTS: usize = 5;
+/// Compiled code only: how many stack slots one activation needs.
+pub const CODE_FRAME: usize = 6;
+/// Compiled code only: how many values the closure captures.
+pub const CODE_FREE: usize = 7;
+pub const CODE_FIELDS: usize = 8;
+
+/// Kept as the old name so the AST engine reads the way it always did.
+pub const CODE_NODES: usize = CODE_BODY;
 
 /// Lower a whole program, returning its top-level `Code` object.
 ///
 /// The result is a thunk of no arguments: applying it runs the program.
 pub fn lower(heap: &mut Heap, interner: &Interner, program: &Program) -> Value {
-    let mut l = Lowerer { heap, interner, program, scopes: Vec::new() };
+    let mut l = Lowerer {
+        heap,
+        interner,
+        program,
+        scopes: Vec::new(),
+    };
     l.code_for(None, &[], None, program.body)
 }
 
@@ -120,10 +141,18 @@ impl Lowerer<'_> {
         };
         let code = self.heap.alloc(ObjType::Code, CODE_FIELDS, Value::FALSE);
         self.heap.obj_set(code, CODE_NAME, name_value);
-        self.heap.obj_set(code, CODE_ARITY, Value::fixnum(params.len() as i64));
-        self.heap.obj_set(code, CODE_HAS_REST, Value::boolean(rest.is_some()));
-        self.heap.obj_set(code, CODE_NODES, nodes);
-        self.heap.obj_set(code, CODE_ENTRY, Value::fixnum(entry as i64));
+        self.heap
+            .obj_set(code, CODE_ARITY, Value::fixnum(params.len() as i64));
+        self.heap
+            .obj_set(code, CODE_HAS_REST, Value::boolean(rest.is_some()));
+        self.heap.obj_set(code, CODE_BODY, nodes);
+        self.heap
+            .obj_set(code, CODE_ENTRY, Value::fixnum(entry as i64));
+        // The compiled-only fields stay `#f`/0, which is how a reader tells
+        // interpreted code from compiled without a separate tag.
+        self.heap.obj_set(code, CODE_CONSTS, Value::FALSE);
+        self.heap.obj_set(code, CODE_FRAME, Value::fixnum(0));
+        self.heap.obj_set(code, CODE_FREE, Value::fixnum(0));
         code
     }
 
@@ -136,7 +165,10 @@ impl Lowerer<'_> {
         }
         // Only reachable from a malformed program; a panic here names the
         // variable rather than silently producing a wrong address.
-        panic!("unbound local {:?} during lowering", self.program.var(v).name)
+        panic!(
+            "unbound local {:?} during lowering",
+            self.program.var(v).name
+        )
     }
 
     fn name_of(&mut self, v: VarId) -> Value {
@@ -209,8 +241,7 @@ impl Lowerer<'_> {
                 at
             }
             Node::Seq(items) => {
-                let offsets: Vec<usize> =
-                    items.iter().map(|n| self.emit(words, *n)).collect();
+                let offsets: Vec<usize> = items.iter().map(|n| self.emit(words, *n)).collect();
                 let at = words.len();
                 words.push(Value::fixnum(TAG_SEQ));
                 words.push(Value::fixnum(offsets.len() as i64));
@@ -221,8 +252,7 @@ impl Lowerer<'_> {
             }
             Node::Let { vars, inits, body } => {
                 // Initialisers are outside the new scope.
-                let init_offsets: Vec<usize> =
-                    inits.iter().map(|n| self.emit(words, *n)).collect();
+                let init_offsets: Vec<usize> = inits.iter().map(|n| self.emit(words, *n)).collect();
                 self.scopes.push(vars.to_vec());
                 let body_offset = self.emit(words, body);
                 self.scopes.pop();
@@ -238,8 +268,7 @@ impl Lowerer<'_> {
             Node::Fix { vars, inits, body } => {
                 // …but in `letrec*` they are inside it.
                 self.scopes.push(vars.to_vec());
-                let init_offsets: Vec<usize> =
-                    inits.iter().map(|n| self.emit(words, *n)).collect();
+                let init_offsets: Vec<usize> = inits.iter().map(|n| self.emit(words, *n)).collect();
                 let body_offset = self.emit(words, body);
                 self.scopes.pop();
                 let at = words.len();
@@ -260,8 +289,7 @@ impl Lowerer<'_> {
             }
             Node::App { rator, rands } => {
                 let rator_offset = self.emit(words, rator);
-                let rand_offsets: Vec<usize> =
-                    rands.iter().map(|n| self.emit(words, *n)).collect();
+                let rand_offsets: Vec<usize> = rands.iter().map(|n| self.emit(words, *n)).collect();
                 let at = words.len();
                 words.push(Value::fixnum(TAG_APP));
                 words.push(Value::fixnum(rand_offsets.len() as i64));

@@ -615,6 +615,20 @@ prims! {
         rt.heap.obj_set(a[0], 1, a[1]);
         Ok(Value::UNSPECIFIED)
     });
+
+    // ---- boxes ----
+    // Assignment conversion's cells. Reached only through `Node::PrimCall`,
+    // never through a global, so redefining `vector-ref` cannot break `set!`.
+    "%make-box", 1, Some(1), simple!(|rt, a| {
+        let b = rt.heap.alloc(ObjType::Box, 1, Value::UNSPECIFIED);
+        rt.heap.obj_set(b, 0, a[0]);
+        Ok(b)
+    });
+    "%box-ref", 1, Some(1), simple!(|rt, a| Ok(rt.heap.obj_ref(a[0], 0)));
+    "%box-set!", 2, Some(2), simple!(|rt, a| {
+        rt.heap.obj_set(a[0], 0, a[1]);
+        Ok(Value::UNSPECIFIED)
+    });
 }
 
 /// Promise states. `[state, payload]`.
@@ -648,7 +662,10 @@ fn string_chain(
 
 /// Index of a primitive by name, for the expander to resolve against.
 pub fn lookup(name: &str) -> Option<u16> {
-    PRIMITIVES.iter().position(|p| p.name == name).map(|i| i as u16)
+    PRIMITIVES
+        .iter()
+        .position(|p| p.name == name)
+        .map(|i| i as u16)
 }
 
 pub fn def(index: u16) -> &'static PrimDef {

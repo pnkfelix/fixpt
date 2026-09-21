@@ -22,16 +22,16 @@
 //! and each frame saves the environment *and* the code so the pair can be
 //! restored on resume.
 
-use crate::frame::{Frame, FRAME_WORDS, SAVED_SLOTS};
+use crate::frame::{FRAME_WORDS, Frame, SAVED_SLOTS};
 use crate::prepare::Prepared;
 use fixpt_core::lower::{
     CODE_ARITY, CODE_ENTRY, CODE_HAS_REST, CODE_NAME, CODE_NODES, TAG_APP, TAG_CONST, TAG_FIX,
     TAG_GLOBAL, TAG_IF, TAG_LAMBDA, TAG_LET, TAG_LOCAL, TAG_SEQ, TAG_SET_GLOBAL, TAG_SET_LOCAL,
 };
 use fixpt_heap::{ObjType, Value};
+use fixpt_runtime::Runtime;
 use fixpt_runtime::error::{Outcome, Thrown};
 use fixpt_runtime::prim::{self, EngineOp, PrimKind};
-use fixpt_runtime::Runtime;
 
 /// Register file. Kept as one slice so the root set is two contiguous ranges.
 const REG_ACC: usize = 0;
@@ -191,7 +191,9 @@ impl Interp {
         if t.fatal {
             return Ok(None);
         }
-        let Some(raise) = p.raise_procedure(&mut rt.heap) else { return Ok(None) };
+        let Some(raise) = p.raise_procedure(&mut rt.heap) else {
+            return Ok(None);
+        };
         let saved = self.save(rt);
         let base = saved as usize + SAVED_SLOTS;
         self.stack.push(raise);
@@ -271,7 +273,11 @@ impl Interp {
             }
             TAG_SEQ => {
                 let saved = self.save(rt);
-                self.frames.push(Frame::SeqNext { seq: at, index: 1, saved });
+                self.frames.push(Frame::SeqNext {
+                    seq: at,
+                    index: 1,
+                    saved,
+                });
                 Ok(Control::Eval(self.offset(rt, at + 2)))
             }
             TAG_LET => {
@@ -282,7 +288,11 @@ impl Interp {
                     return Ok(Control::Eval(self.offset(rt, at + 2)));
                 }
                 let saved = self.save(rt);
-                self.frames.push(Frame::LetInit { let_: at, collected: 0, saved });
+                self.frames.push(Frame::LetInit {
+                    let_: at,
+                    collected: 0,
+                    saved,
+                });
                 Ok(Control::Eval(self.offset(rt, at + 3)))
             }
             TAG_FIX => {
@@ -295,7 +305,11 @@ impl Interp {
                 // `saved` holds the NEW environment: `letrec*` initialisers are
                 // evaluated inside the scope they define.
                 let saved = self.save(rt);
-                self.frames.push(Frame::FixInit { fix: at, index: 0, saved });
+                self.frames.push(Frame::FixInit {
+                    fix: at,
+                    index: 0,
+                    saved,
+                });
                 Ok(Control::Eval(self.offset(rt, at + 3)))
             }
             TAG_LAMBDA => {
@@ -309,7 +323,11 @@ impl Interp {
             }
             TAG_APP => {
                 let saved = self.save(rt);
-                self.frames.push(Frame::AppArg { app: at, collected: 0, saved });
+                self.frames.push(Frame::AppArg {
+                    app: at,
+                    collected: 0,
+                    saved,
+                });
                 Ok(Control::Eval(self.offset(rt, at + 2)))
             }
             other => rt.fail(&format!("unknown node tag {other}"), &[]),
@@ -344,7 +362,11 @@ impl Interp {
                     self.stack.truncate(saved as usize);
                     return Ok(Control::Eval(self.offset(rt, seq + 2 + i)));
                 }
-                self.frames.push(Frame::SeqNext { seq, index: i + 1, saved });
+                self.frames.push(Frame::SeqNext {
+                    seq,
+                    index: i + 1,
+                    saved,
+                });
                 Ok(Control::Eval(self.offset(rt, seq + 2 + i)))
             }
             Frame::AssignLocal { node, saved } => {
@@ -363,13 +385,21 @@ impl Interp {
                 self.set_acc(Value::UNSPECIFIED);
                 Ok(Control::Return)
             }
-            Frame::LetInit { let_, collected, saved } => {
+            Frame::LetInit {
+                let_,
+                collected,
+                saved,
+            } => {
                 let n = self.offset(rt, let_ + 1);
                 let acc = self.acc();
                 self.stack.push(acc);
                 let done = collected + 1;
                 if done < n {
-                    self.frames.push(Frame::LetInit { let_, collected: done, saved });
+                    self.frames.push(Frame::LetInit {
+                        let_,
+                        collected: done,
+                        saved,
+                    });
                     return Ok(Control::Eval(self.offset(rt, let_ + 3 + done)));
                 }
                 let base = saved as usize + SAVED_SLOTS;
@@ -389,20 +419,32 @@ impl Interp {
                 rt.heap.obj_set(e, index as usize + 1, v);
                 let done = index + 1;
                 if done < n {
-                    self.frames.push(Frame::FixInit { fix, index: done, saved });
+                    self.frames.push(Frame::FixInit {
+                        fix,
+                        index: done,
+                        saved,
+                    });
                     return Ok(Control::Eval(self.offset(rt, fix + 3 + done)));
                 }
                 self.stack.truncate(saved as usize);
                 self.set_env(e);
                 Ok(Control::Eval(self.offset(rt, fix + 2)))
             }
-            Frame::AppArg { app, collected, saved } => {
+            Frame::AppArg {
+                app,
+                collected,
+                saved,
+            } => {
                 let n = self.offset(rt, app + 1);
                 let acc = self.acc();
                 self.stack.push(acc);
                 let done = collected + 1;
                 if done <= n {
-                    self.frames.push(Frame::AppArg { app, collected: done, saved });
+                    self.frames.push(Frame::AppArg {
+                        app,
+                        collected: done,
+                        saved,
+                    });
                     return Ok(Control::Eval(self.offset(rt, app + 2 + done)));
                 }
                 self.apply(rt, p, saved as usize + SAVED_SLOTS)
@@ -410,10 +452,15 @@ impl Interp {
             Frame::Consume { saved } => {
                 let consumer = self.stack[saved as usize + SAVED_SLOTS];
                 let produced = self.acc();
-                let base = saved as usize + SAVED_SLOTS + 1;
-                self.stack.truncate(base);
-                let inner = self.save(rt);
-                let call_base = inner as usize + SAVED_SLOTS;
+                // The consumer call goes where the consumer was parked, so that
+                // `apply` — which reclaims `base - SAVED_SLOTS` — takes this
+                // frame's own slots with it. Starting the call any higher would
+                // strand `[env, code, consumer]` on the stack, and since no
+                // frame is pushed for a consumer call, nothing later would
+                // reclaim them: they would be read as extra arguments by
+                // whatever application was still pending underneath.
+                let call_base = saved as usize + SAVED_SLOTS;
+                self.stack.truncate(call_base);
                 self.stack.push(consumer);
                 self.spread_values(rt, produced);
                 self.apply(rt, p, call_base)
@@ -459,12 +506,16 @@ impl Interp {
                     } else {
                         nparams.to_string()
                     };
-                    return rt
-                        .fail(&format!("{label} expects {expected} argument(s), got {argc}"), &[]);
+                    return rt.fail(
+                        &format!("{label} expects {expected} argument(s), got {argc}"),
+                        &[],
+                    );
                 }
                 let closure_env = rt.heap.obj_ref(f, 1);
                 let slots = nparams + usize::from(has_rest);
-                let e = rt.heap.alloc(ObjType::Vector, slots + 1, Value::UNSPECIFIED);
+                let e = rt
+                    .heap
+                    .alloc(ObjType::Vector, slots + 1, Value::UNSPECIFIED);
                 rt.heap.obj_set(e, 0, closure_env);
                 for i in 0..nparams {
                     let v = self.stack[base + 1 + i];
@@ -611,7 +662,8 @@ impl Interp {
             for (i, word) in chunk.chunks_exact(8).enumerate() {
                 w[i] = u64::from_le_bytes(word.try_into().expect("8 bytes"));
             }
-            self.frames.push(Frame::decode(w).expect("frames we encoded ourselves"));
+            self.frames
+                .push(Frame::decode(w).expect("frames we encoded ourselves"));
         }
         self.set_acc(value);
     }
@@ -620,7 +672,9 @@ impl Interp {
         if vals.len() == 1 {
             return vals[0];
         }
-        let v = rt.heap.alloc(ObjType::Values, vals.len(), Value::UNSPECIFIED);
+        let v = rt
+            .heap
+            .alloc(ObjType::Values, vals.len(), Value::UNSPECIFIED);
         for (i, x) in vals.iter().enumerate() {
             rt.heap.obj_set(v, i, *x);
         }
@@ -657,6 +711,7 @@ impl Interp {
     /// and from the heap roots, so there is no third root set to remember.
     fn safepoint(&mut self, rt: &mut Runtime) {
         self.regs[REG_SCRATCH] = Value::UNSPECIFIED;
-        rt.heap.maybe_collect(&mut [&mut self.stack, &mut self.regs]);
+        rt.heap
+            .maybe_collect(&mut [&mut self.stack, &mut self.regs]);
     }
 }

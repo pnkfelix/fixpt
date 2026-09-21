@@ -48,6 +48,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-conform",
  "fixpt-core",
+ "fixpt-engine",
  "fixpt-heap",
  "fixpt-read",
  "fixpt-runtime",

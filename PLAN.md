@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-**Status: approved 2026-09-20; M0–M3 and M7 complete. See the milestone table in
+**Status: approved 2026-09-20; M0–M5 and M7 complete. See the milestone table in
 §8 and `README.md` for what runs today.**
 
 ## 0. What this is
@@ -417,11 +417,11 @@ you at each boundary rather than disappear for the whole thing.
 | M1 ✅ | `fixpt-heap`: values, heap, Cheney GC, image dump/load/verify | `fixpt image info/verify`; 22 tests, green under `gc-stress` |
 | M2 ✅ | `fixpt-read`: profiles, reader, writer, spans | 21 tests; all 182 FX-91 and 155 FX-87 forms read and round-trip |
 | M3 ✅ | `fixpt-core` + `fixpt-runtime` + `fixpt-scheme` + `interp` | `fixpt repl` works: bignums, rationals, proper tail calls, re-entrant `call/cc`, `dynamic-wind`, `guard`, records, promises. Green under `gc-stress` |
-| M4 | `vm`: bytecode compiler + VM | same suite passes compiled; differential tests green |
-| M5 🔶 | Images & shipping | Core IR moved into the heap, so an image is resumable (tested). Still to do: `fixpt compile`, `fixpt dump-heap`, `fixpt build` → single binary |
+| M4 ✅ | `vm`: bytecode compiler + VM | flat closures, assignment conversion, 19 opcodes. FX-91's 182 cases pass **compiled as well as interpreted**; 9 differential tests require both engines to agree on values, output *and* error text; ~1.6× faster |
+| M5 ✅ | Images & shipping | Core IR lives in the heap, so an image is resumable. `fixpt dump-heap` (image beside the runtime), `fixpt build` (one standalone executable, no `fixpt` needed on the target), `fixpt run-image` (either). An image records which engine made it, so nothing has to be told |
 | M6 | `fixpt-fx87` | `fixpt fx87 check` matches reference on the FX-87 corpus; `library/*.fx` run |
 | M7 ✅ | `fixpt-fx91` | **182/182 on all three levels** — parse, type and effect, and evaluated value |
-| M8 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks |
+| M8 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks (`cargo run --release --example engines` is the start) |
 | M9 | *(deferred)* hygienic `syntax-rules` | derived forms re-expressible as library macros |
 | M10 | *(future)* native code generation | the bytecode/heap-image design is kept amenable to it; not scheduled |
 

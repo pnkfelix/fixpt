@@ -9,13 +9,16 @@
 //! turn into a single binary.
 
 use fixpt_engine::{Interp, Prepared};
-use fixpt_heap::{image, Value};
-use fixpt_runtime::{display_value, Runtime};
+use fixpt_heap::{Value, image};
+use fixpt_runtime::{Runtime, display_value};
 use fixpt_scheme::Session;
 
 /// Find a global by name in a heap that was loaded from an image.
 fn global(rt: &Runtime, name: &str) -> Value {
-    let sym = rt.heap.intern_existing(name).unwrap_or_else(|| panic!("{name} is interned"));
+    let sym = rt
+        .heap
+        .intern_existing(name)
+        .unwrap_or_else(|| panic!("{name} is interned"));
     rt.heap.global(rt.heap.symbol_global_slot(sym))
 }
 
@@ -71,7 +74,9 @@ fn a_dumped_heap_still_runs() {
     // Mutable global state survives, and `set!` still works against it.
     let bump = global(&rt, "bump!");
     for expected in ["1", "2", "3"] {
-        let r = interp.call(&mut rt, &mut prepared, bump, &[]).expect("bump! runs");
+        let r = interp
+            .call(&mut rt, &mut prepared, bump, &[])
+            .expect("bump! runs");
         assert_eq!(display_value(&rt.heap, r), expected);
     }
 }
@@ -81,7 +86,12 @@ fn a_resumed_heap_can_be_dumped_again() {
     // Round-tripping twice catches anything that survives one pass by accident
     // — a root that happens to still be reachable, say.
     let mut session = Session::new();
-    session.eval_str("<setup>", "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))").unwrap();
+    session
+        .eval_str(
+            "<setup>",
+            "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))",
+        )
+        .unwrap();
     session.rt.heap.collect(&mut []);
 
     let first = image::dump(&session.rt.heap);
@@ -97,4 +107,69 @@ fn a_resumed_heap_can_be_dumped_again() {
         .expect("fact runs");
     assert_eq!(display_value(&rt2.heap, r), "3628800");
     let _ = &mut rt;
+}
+
+/// The same property for the compiled engine.
+///
+/// The bytecode is a `Bytevector` and the constants a `Vector`, both ordinary
+/// heap objects, so a compiled heap travels exactly as the interpreted one
+/// does. This is the half that `fixpt build` actually needs: a shipped binary
+/// carries compiled code, and it has to come back as something the VM can enter
+/// without recompiling — or indeed without the compiler being present at all.
+#[test]
+fn a_dumped_compiled_heap_still_runs() {
+    let mut session = Session::compiled();
+    session
+        .eval_str(
+            "<setup>",
+            "(define (twice x) (* 2 x))
+             (define (compose f g) (lambda (x) (f (g x))))
+             (define quadruple (compose twice twice))
+             (define counter 0)
+             (define (bump!) (set! counter (+ counter 1)) counter)
+             (define (sum-to n) (let loop ((i 0) (acc 0)) (if (> i n) acc (loop (+ i 1) (+ acc i)))))",
+        )
+        .expect("setup runs");
+
+    session.rt.heap.collect(&mut []);
+    session.rt.heap.verify().expect("sound before dumping");
+    let bytes = image::dump(&session.rt.heap);
+
+    let heap = image::load(&bytes).expect("image loads");
+    heap.verify().expect("sound after loading");
+    let mut rt = Runtime::from_heap(heap);
+    let mut vm = fixpt_engine::Vm::new();
+    let mut prepared = Prepared::resumed_with(fixpt_engine::Backend::Bytecode);
+
+    // A flat closure that captured two other closures.
+    let quadruple = global(&rt, "quadruple");
+    let r = vm
+        .call(&mut rt, &mut prepared, quadruple, &[Value::fixnum(5)])
+        .expect("runs");
+    assert_eq!(display_value(&rt.heap, r), "20");
+
+    // A boxed global mutated after the round trip.
+    let bump = global(&rt, "bump!");
+    vm.call(&mut rt, &mut prepared, bump, &[]).expect("runs");
+    let r = vm.call(&mut rt, &mut prepared, bump, &[]).expect("runs");
+    assert_eq!(display_value(&rt.heap, r), "2");
+
+    // A tail-recursive loop, which is where the frame layout would show up if
+    // the image had disturbed it.
+    let sum = global(&rt, "sum-to");
+    let r = vm
+        .call(&mut rt, &mut prepared, sum, &[Value::fixnum(100)])
+        .expect("runs");
+    assert_eq!(display_value(&rt.heap, r), "5050");
+
+    // And the prelude survived: `map` is a compiled closure like any other.
+    let map = global(&rt, "map");
+    let list = rt
+        .heap
+        .list_from(&[Value::fixnum(1), Value::fixnum(2), Value::fixnum(3)]);
+    let twice = global(&rt, "twice");
+    let r = vm
+        .call(&mut rt, &mut prepared, map, &[twice, list])
+        .expect("runs");
+    assert_eq!(display_value(&rt.heap, r), "(2 4 6)");
 }

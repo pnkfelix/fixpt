@@ -3,7 +3,7 @@
 //! Two engines over one Core IR and one runtime:
 //!
 //! * [`interp`] walks the heap-resident Core IR with an explicit control stack.
-//! * `vm` (M4) compiles it to bytecode.
+//! * [`vm`] runs bytecode that [`compile`] emits from the same IR.
 //!
 //! Both execute code that lives *in the heap*, so a dumped image can be resumed
 //! by either — nothing they run is held in Rust.
@@ -12,9 +12,13 @@
 //! tail calls, unbounded recursion depth and re-entrant `call/cc` hold in both,
 //! and the conformance suite can require that they agree on every case.
 
+pub mod compile;
 pub mod frame;
 pub mod interp;
 pub mod prepare;
+pub mod vm;
 
+pub use compile::compile;
 pub use interp::Interp;
-pub use prepare::Prepared;
+pub use prepare::{Backend, Prepared};
+pub use vm::Vm;

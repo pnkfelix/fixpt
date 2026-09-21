@@ -49,13 +49,26 @@ pub struct Outcome {
 
 impl Fx91Session {
     pub fn new() -> R<Fx91Session> {
+        Fx91Session::with_backend(fixpt_engine::Backend::Ast)
+    }
+
+    /// An FX-91 session on a chosen Scheme engine.
+    ///
+    /// FX-91 is a front end onto the Core IR, so it inherits whichever engine
+    /// the Scheme session runs — which is what lets the conformance suite be
+    /// replayed against the compiler without a second code generator.
+    pub fn with_backend(backend: fixpt_engine::Backend) -> R<Fx91Session> {
         let checker = Checker::new()?;
-        let mut scheme = Session::new();
+        let mut scheme = Session::with_backend(backend);
         scheme
             .eval_str("<fx91-runtime>", RUNTIME)
             .map_err(|e| FxError::fatal(fx91_span(), format!("fx91 runtime: {e}")))?;
-        scheme.interp.step_limit = Some(DEFAULT_STEP_LIMIT);
-        Ok(Fx91Session { checker, scheme, printed: String::new() })
+        scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        Ok(Fx91Session {
+            checker,
+            scheme,
+            printed: String::new(),
+        })
     }
 
     /// Where `(load "…")` and `open-input-stream` resolve from. Both need it:
@@ -92,7 +105,12 @@ impl Fx91Session {
             Ok(v) => Ok(display_value(&self.scheme.rt.heap, v)),
             Err(e) => Err(e.to_string()),
         };
-        Ok(Outcome { ty, effect, code, value })
+        Ok(Outcome {
+            ty,
+            effect,
+            code,
+            value,
+        })
     }
 }
 

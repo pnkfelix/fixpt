@@ -10,7 +10,7 @@
 //! one: a `Sym` is an index into a specific table, so a form read against one
 //! table means nothing to another.
 
-use fixpt_conform::{normalize, parse_goldens, Case, Outcome, Report, Verdict};
+use fixpt_conform::{Case, Outcome, Report, Verdict, normalize, parse_goldens};
 use fixpt_fx91::check::Checker;
 use fixpt_fx91::{Fx91Session, Parser};
 use fixpt_read::{Interner, Reader, SourceMap, Syntax, SyntaxProfile};
@@ -50,22 +50,35 @@ fn every_form_parses() {
         let alpha = parser.init_alpha;
         let verdict = match parser.parse_exp(alpha, form) {
             Ok(_) => Verdict::Match,
-            Err(e) => Verdict::Error { message: e.to_string() },
+            Err(e) => Verdict::Error {
+                message: e.to_string(),
+            },
         };
         report.record(case, verdict);
     }
     println!("{}", report.summary("fx91 parse"));
     print!("{}", report.detail(8));
-    assert_eq!(report.matched.len(), 182, "all 182 forms must parse\n{}", report.detail(8));
+    assert_eq!(
+        report.matched.len(),
+        182,
+        "all 182 forms must parse\n{}",
+        report.detail(8)
+    );
 }
 
 /// The built-in `fx` module has to load before anything else can be checked.
 #[test]
 fn the_fx_module_bootstraps() {
     let checker = Checker::new().expect("the fx module loads");
-    assert!(checker.p.arena.len() > 500, "the fx signature builds a substantial arena");
+    assert!(
+        checker.p.arena.len() > 500,
+        "the fx signature builds a substantial arena"
+    );
     for name in ["int", "bool", "listof", "sexp", "refof"] {
-        assert!(checker.p.interner.get(name).is_some(), "{name} should be interned");
+        assert!(
+            checker.p.interner.get(name).is_some(),
+            "{name} should be interned"
+        );
     }
 }
 
@@ -83,7 +96,9 @@ fn types_and_effects_match_the_reference() {
         checker.reset();
         let alpha = checker.p.init_alpha;
         let verdict = match checker.p.parse_exp(alpha, form) {
-            Err(e) => Verdict::Error { message: format!("parse: {e}") },
+            Err(e) => Verdict::Error {
+                message: format!("parse: {e}"),
+            },
             Ok(node) => match checker.type_effect_of_exp(node) {
                 Ok((ty, effect)) => {
                     let got = (
@@ -108,7 +123,9 @@ fn types_and_effects_match_the_reference() {
                         },
                     }
                 }
-                Err(e) => Verdict::Error { message: e.to_string() },
+                Err(e) => Verdict::Error {
+                    message: e.to_string(),
+                },
             },
         };
         report.record(case, verdict);
@@ -125,7 +142,24 @@ fn types_and_effects_match_the_reference() {
 
 #[test]
 fn values_match_the_reference() {
-    let mut session = Fx91Session::new().expect("the fx module and runtime load");
+    values_match_on(fixpt_engine::Backend::Ast, "fx91 value");
+}
+
+/// The same 182 forms, run by the bytecode engine.
+///
+/// FX-91 is a front end onto the Core IR, so this shares every line of the
+/// checker and the code generator with the test above; what it re-checks is the
+/// compiler and the VM, against the one corpus whose answers were *generated*
+/// from the 1991 sources rather than written by hand. A compiler bug that
+/// survives 182 typed, effect-checked programs — modules, streams, references,
+/// higher-order code and all — is not hiding in the easy cases.
+#[test]
+fn values_match_the_reference_compiled() {
+    values_match_on(fixpt_engine::Backend::Bytecode, "fx91 value (compiled)");
+}
+
+fn values_match_on(backend: fixpt_engine::Backend, label: &str) {
+    let mut session = Fx91Session::with_backend(backend).expect("the fx module and runtime load");
     session.set_load_base(corpus_dir());
     let mut interner = std::mem::take(&mut session.checker.p.interner);
     let forms = read_forms(&mut interner);
@@ -135,25 +169,33 @@ fn values_match_the_reference() {
     let mut report = Report::default();
     for (form, case) in forms.iter().zip(&cases) {
         let verdict = match session.run(form) {
-            Err(e) => Verdict::Error { message: e.to_string() },
+            Err(e) => Verdict::Error {
+                message: e.to_string(),
+            },
             Ok(outcome) => match (&outcome.value, case.expected_value()) {
                 (Ok(got), Some(want)) => {
                     let (got, want) = (normalize_value(got), normalize_value(want));
                     if got == want {
                         Verdict::Match
                     } else {
-                        Verdict::Mismatch { expected: want, got }
+                        Verdict::Mismatch {
+                            expected: want,
+                            got,
+                        }
                     }
                 }
-                (Err(e), _) => Verdict::Error { message: format!("{e}\n    code: {}", outcome.code) },
-                (Ok(got), None) => {
-                    Verdict::Mismatch { expected: "<no golden>".into(), got: got.clone() }
-                }
+                (Err(e), _) => Verdict::Error {
+                    message: format!("{e}\n    code: {}", outcome.code),
+                },
+                (Ok(got), None) => Verdict::Mismatch {
+                    expected: "<no golden>".into(),
+                    got: got.clone(),
+                },
             },
         };
         report.record(case, verdict);
     }
-    println!("{}", report.summary("fx91 value"));
+    println!("{}", report.summary(label));
     print!("{}", report.detail(10));
 
     // Full dynamic conformance: every form evaluates to the same value the
@@ -161,7 +203,7 @@ fn values_match_the_reference() {
     assert_eq!(
         report.matched.len(),
         182,
-        "regression from full value conformance\n{}",
+        "regression from full value conformance ({label})\n{}",
         report.detail(10)
     );
 }
@@ -217,7 +259,10 @@ fn reference_bugs_are_reproduced_deliberately() {
     // types unify whenever arity and kinds agree — whatever their bodies say.
     // Intended: compare dexp1's body with dexp2's.
     let a = parse(&mut checker, "(poly ((t type)) (subr (maxeff) ((x t)) t))");
-    let b = parse(&mut checker, "(poly ((u type)) (subr (maxeff) ((y u)) bool))");
+    let b = parse(
+        &mut checker,
+        "(poly ((u type)) (subr (maxeff) ((y u)) bool))",
+    );
     assert!(
         checker.unify(a, b).expect("no error"),
         "unify-poly?'s self-comparison makes these unify; see docs/divergences.md"

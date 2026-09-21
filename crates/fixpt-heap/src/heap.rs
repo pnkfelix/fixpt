@@ -292,7 +292,11 @@ impl Heap {
     pub fn string_ref(&self, o: Value, i: usize) -> char {
         debug_assert!(i < self.string_len(o));
         let w = self.obj_word(o, 1 + i / 2);
-        let half = if i.is_multiple_of(2) { w & 0xffff_ffff } else { w >> 32 };
+        let half = if i.is_multiple_of(2) {
+            w & 0xffff_ffff
+        } else {
+            w >> 32
+        };
         char::from_u32(half as u32).expect("string holds valid code points")
     }
     pub fn string_set(&mut self, o: Value, i: usize, c: char) {
@@ -307,7 +311,9 @@ impl Heap {
         self.obj_set_word(o, wi, w);
     }
     pub fn string_to_rust(&self, o: Value) -> String {
-        (0..self.string_len(o)).map(|i| self.string_ref(o, i)).collect()
+        (0..self.string_len(o))
+            .map(|i| self.string_ref(o, i))
+            .collect()
     }
 
     pub fn make_bytevector(&mut self, bytes: &[u8]) -> Value {
@@ -336,8 +342,19 @@ impl Heap {
         let w = (self.obj_word(o, wi) & !(0xffu64 << shift)) | ((b as u64) << shift);
         self.obj_set_word(o, wi, w);
     }
+    /// Read the `i`th 32-bit word. Bytecode is stored in a bytevector, and a
+    /// word read is on the VM's hottest path, so it goes straight at the heap
+    /// word rather than through four byte reads.
+    #[inline]
+    pub fn bytevector_u32(&self, o: Value, i: usize) -> u32 {
+        debug_assert!(4 * i + 4 <= self.bytevector_len(o));
+        (self.obj_word(o, 1 + i / 2) >> ((i % 2) * 32)) as u32
+    }
+
     pub fn bytevector_to_vec(&self, o: Value) -> Vec<u8> {
-        (0..self.bytevector_len(o)).map(|i| self.bytevector_ref(o, i)).collect()
+        (0..self.bytevector_len(o))
+            .map(|i| self.bytevector_ref(o, i))
+            .collect()
     }
 
     pub fn make_box(&mut self, v: Value) -> Value {
@@ -377,7 +394,9 @@ impl Heap {
     /// Look up an already-interned symbol without allocating. Useful when a
     /// `&Heap` is all that is available, e.g. after loading an image.
     pub fn intern_existing(&self, name: &str) -> Option<Value> {
-        self.symbol_index.get(name).map(|&i| self.symbols[i as usize])
+        self.symbol_index
+            .get(name)
+            .map(|&i| self.symbols[i as usize])
     }
 
     pub fn symbol_name(&self, sym: Value) -> String {
@@ -441,7 +460,11 @@ impl Heap {
         macro_rules! fwd {
             ($v:expr) => {{
                 let v = $v;
-                if v.is_ref() { Self::copy_out(&mut self.mem, from, to, &mut free, v) } else { v }
+                if v.is_ref() {
+                    Self::copy_out(&mut self.mem, from, to, &mut free, v)
+                } else {
+                    v
+                }
             }};
         }
 
@@ -516,14 +539,22 @@ impl Heap {
                 Value::object(first.index())
             };
         }
-        let (words, dst_rel) = if v.is_pair() { (2, *free) } else { (1 + header_len(mem[src]), *free) };
+        let (words, dst_rel) = if v.is_pair() {
+            (2, *free)
+        } else {
+            (1 + header_len(mem[src]), *free)
+        };
         let dst = to + dst_rel;
         for i in 0..words {
             mem[dst + i] = mem[src + i];
         }
         *free += words;
         mem[src] = Value::forward(dst_rel).raw();
-        if v.is_pair() { Value::pair(dst_rel) } else { Value::object(dst_rel) }
+        if v.is_pair() {
+            Value::pair(dst_rel)
+        } else {
+            Value::object(dst_rel)
+        }
     }
 
     // ------------------------------------------------------- image support
@@ -593,7 +624,8 @@ impl Heap {
             }
         }
         for (i, g) in self.globals.iter().enumerate() {
-            self.check_ref(*g, i).map_err(|e| format!("global {i}: {e}"))?;
+            self.check_ref(*g, i)
+                .map_err(|e| format!("global {i}: {e}"))?;
         }
         for (i, s) in self.symbols.iter().enumerate() {
             if !self.is_a(*s, ObjType::Symbol) {
@@ -605,17 +637,23 @@ impl Heap {
 
     fn check_ref(&self, v: Value, at: usize) -> Result<(), String> {
         if v.is_forward() {
-            return Err(format!("forwarding pointer survived a collection, at word {at}"));
+            return Err(format!(
+                "forwarding pointer survived a collection, at word {at}"
+            ));
         }
         if v.is_ref() {
             if v.index() >= self.top {
                 return Err(format!("dangling reference {v:?} at word {at}"));
             }
             if v.is_object() && !is_header(self.word(v.index())) {
-                return Err(format!("object reference {v:?} at word {at} misses its header"));
+                return Err(format!(
+                    "object reference {v:?} at word {at} misses its header"
+                ));
             }
             if v.is_pair() && is_header(self.word(v.index())) {
-                return Err(format!("pair reference {v:?} at word {at} lands on a header"));
+                return Err(format!(
+                    "pair reference {v:?} at word {at} lands on a header"
+                ));
             }
         }
         Ok(())

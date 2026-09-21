@@ -19,15 +19,15 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list.
 | **M1** heap, Cheney collector, heap images | done |
 | **M2** reader with three syntax profiles | done |
 | **M3** Core IR, Scheme expander, AST engine | done |
-| **M4** bytecode compiler and VM | |
-| **M5** heap dumping and single-binary builds | heap dumping works: an image loads into a fresh runtime and its procedures still run |
+| **M4** bytecode compiler and VM | **done: the FX-91 corpus passes compiled as well as interpreted** |
+| **M5** heap dumping and single-binary builds | **done: image beside the runtime, or one standalone executable** |
 | **M6** FX-87 front end | |
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** |
 
 ```
-$ cargo test              # 70 tests
+$ cargo test              # 86 tests
 $ cargo run -p fixpt-cli -- repl
-fixpt 0.1.0 — scheme reader, AST engine
+fixpt 0.1.0 — scheme reader, bytecode engine
 > (define (count-to n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc i)))))
 > (count-to 1000000)
 499999500000
@@ -37,6 +37,25 @@ fixpt 0.1.0 — scheme reader, AST engine
 355/113
 ```
 
+Shipping a program, all three ways the design allows:
+
+```
+$ cat greet.scm
+(define (main args) (display "hello") (newline) 0)
+
+$ fixpt run greet.scm                      # just run it
+$ fixpt dump-heap -o greet.heap greet.scm  # an image beside the runtime
+$ fixpt run-image greet.heap
+$ fixpt build -o greet greet.scm           # one file, nothing else needed
+$ ./greet
+hello
+```
+
+`build` appends the heap image to a copy of the `fixpt` binary, so the result
+runs on a machine with no `fixpt` on it. An image records which engine made it —
+compiled code carries a constants vector where interpreted code has `#f` — so
+`run-image` never has to be told.
+
 ## Layout
 
 | crate | what it is |
@@ -45,7 +64,7 @@ fixpt 0.1.0 — scheme reader, AST engine
 | `fixpt-read` | one reader, three lexical syntaxes |
 | `fixpt-core` | the Core IR every front end targets |
 | `fixpt-runtime` | numeric tower, equality, printing, primitives |
-| `fixpt-engine` | the AST machine (and, from M4, the bytecode VM) |
+| `fixpt-engine` | the AST machine, the bytecode compiler and the VM |
 | `fixpt-scheme` | the Scheme front end: expander, prelude, session |
 | `fixpt-cli` | the `fixpt` binary |
 | `fixpt-conform` | golden reading and normalisation |
@@ -67,8 +86,11 @@ the whole suite runs green that way.
 
 **Both engines are explicit-stack machines.** Neither uses the Rust call stack
 for Scheme recursion, so proper tail calls, unbounded recursion depth and
-re-entrant `call/cc` hold in both, and the conformance suite can require that
-the interpreter and the compiler agree on every case.
+re-entrant `call/cc` hold in both — and the conformance suite *does* require
+that they agree: the 182-case FX-91 corpus runs twice, once per engine, and
+`crates/fixpt-scheme/tests/differential.rs` compares values, printed output and
+error messages across the two. That test is what found a frame-reclamation bug
+in the interpreter's `call-with-values`, which had been there since M3.
 
 **The Core IR lives in the heap.** A closure is `[code, env]`, `code` holds a
 flat vector of nodes, and constants sit inline — so nothing the engine executes
@@ -76,6 +98,15 @@ lives in Rust, and a dumped image can be *resumed*. Larceny's interpreter
 survives a heap dump because it is written in Scheme, which makes what it
 interprets ordinary heap objects; this gets the same property by the same
 means.
+
+**The compiler and the interpreter share a code object.** `Code` is
+`[name, arity, rest?, body, entry, consts, frame, free]` either way; `body` is a
+node vector for the AST engine and a bytecode bytevector for the VM. One shape
+means `apply`, the printer and the image format need no case analysis, and a
+front end gets both engines for free. The compiler adds flat closures and
+assignment conversion — a captured variable is copied, so anything shared is
+shared through a box — which buys about 1.6× (`cargo run --release --example
+engines`) and a smaller image, since bytecode is denser than a node tree.
 
 ## Conformance
 

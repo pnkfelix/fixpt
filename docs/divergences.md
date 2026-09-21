@@ -154,3 +154,53 @@ name, and that is on the `Code` object.
 Derived forms (`let`, `cond`, `case`, `do`, `when`, `and`, `or`, `guard`, …) are
 native expander forms rather than library macros. Hygienic `syntax-rules` is
 scheduled for M9; the expander already has the binding class it will occupy.
+
+### The two engines differ in closure representation, and that is visible
+
+The AST engine's closures are `[code, env]` over a chain of environment
+vectors; the bytecode engine's are `[code, v₀ … vₙ₋₁]`, flat. Both are
+`ObjType::Closure` and both print the same way, so nothing user-visible depends
+on it — but one consequence is worth stating plainly: **a heap holds code for
+one engine or the other.** `Session::compiled()` compiles the prelude too, and
+`fixpt run-image` reads which engine an image was made with rather than being
+told. There is no mixed mode, and no attempt to make a compiled closure
+callable from the AST engine.
+
+This is a deliberate simplification, not a limitation discovered late. Larceny
+supports mixing because it loads compiled `.fasl` files into an interpreted
+heap; `fixpt` has no separate load step, because the heap *is* the program.
+
+### Compiled `letrec` boxes more than `set!` requires
+
+Assignment conversion boxes every assigned variable, which is standard. `fixpt`
+also boxes every binding of a `letrec*` whose own initialisers capture one of
+them — including bindings that are never assigned, and including the ones in
+that group that are not themselves captured.
+
+The first part is forced: a flat closure captures *values*, so
+`(letrec ((f (lambda (n) (f (- n 1))))) …)` would capture `f`'s slot while it is
+still unbound. The second part — taking the whole group rather than just the
+captured members — is to preserve evaluation order. `letrec*` runs its
+initialisers left to right, and FX-91's own test suite depends on it (Peano
+numbers, where `one`'s initialiser reads the already-computed `zero`), so
+`code.scm`'s `letrec` output makes that order a conformance requirement. Boxing
+only some of a group would move the others' initialisers past them.
+
+The cost is one indirection per recursive call. Patching the closures' capture
+slots after building them all would remove it for the common case where every
+initialiser is syntactically a lambda; that is a real optimisation to make
+later, and nothing in the encoding stands in its way.
+
+### `call-with-values` is not a tail call in either engine
+
+R7RS calls the consumer in the tail position of `call-with-values`. Neither
+`fixpt` engine does: both push a frame that holds the consumer while the
+producer runs, and return through it. A loop written as a tail-recursive
+`call-with-values` therefore grows the control stack.
+
+Both engines behaving the same way is the point — it is what lets the
+differential tests treat a disagreement as a bug rather than as a known
+difference — and no corpus in `tests/conformance/` exercises the shape. Making
+it properly tail-recursive means giving the consumer call the *enclosing*
+frame's continuation, which both engines are structured to allow; it is
+unfinished work, not a design decision.
