@@ -116,9 +116,14 @@ the corpus meaningless; it is recorded here so nobody "fixes" it by accident.
 
 `literal-null?` tests `(eqv? (caddr node) '())`, but under the port's NIL
 emulation the quoted empty list reaches the checker as a symbol, so `(cons 1
-(cons 2 '()))` gets type `(pairof int (pairof int symbol @=) @=)`. Pinned in the
-corpus; under review for whether the 1987 original behaved the same way under
-Pseudoscheme.
+(cons 2 '()))` gets type `(pairof int (pairof int symbol @=) @=)`.
+
+**Not, in fact, a divergence — `fixpt` reproduces it.** This was marked "under
+review" pending M6. The goldens settle it: case 9 is `(quote ())` with
+`#type symbol`, so the behaviour *is* the reference's, and matching it is
+conformance rather than bug-compatibility. Whether the 1987 original behaved the
+same way under Pseudoscheme is a separate question about `pseudo.lisp`, and one
+this corpus cannot answer; it is recorded here so the distinction is not lost.
 
 ### The ADT cluster stays stubbed
 

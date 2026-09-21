@@ -10,6 +10,7 @@ members = [
     "crates/fixpt-cli",
     "crates/fixpt-conform",
     "crates/fixpt-fx91",
+    "crates/fixpt-fx87",
 ]
 
 [workspace.package]

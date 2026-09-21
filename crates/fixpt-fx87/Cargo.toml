@@ -1,0 +1,18 @@
+[package]
+name = "fixpt-fx87"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fixpt-read = { path = "../fixpt-read" }
+fixpt-heap = { path = "../fixpt-heap" }
+fixpt-runtime = { path = "../fixpt-runtime" }
+fixpt-engine = { path = "../fixpt-engine" }
+fixpt-scheme = { path = "../fixpt-scheme" }
+
+[dev-dependencies]
+fixpt-conform = { path = "../fixpt-conform" }
+
+[lints]
+workspace = true

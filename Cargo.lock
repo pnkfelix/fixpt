@@ -44,6 +44,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixpt-fx87"
+version = "0.1.0"
+dependencies = [
+ "fixpt-conform",
+ "fixpt-engine",
+ "fixpt-heap",
+ "fixpt-read",
+ "fixpt-runtime",
+ "fixpt-scheme",
+]
+
+[[package]]
 name = "fixpt-fx91"
 version = "0.1.0"
 dependencies = [
