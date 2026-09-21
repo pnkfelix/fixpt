@@ -12,6 +12,23 @@
 
 use fixpt_scheme::Session;
 
+/// A budget, so that a program which fails to terminate fails the test instead
+/// of hanging it. Generous enough for the deep-recursion cases below; small
+/// enough that a runaway is a diagnosis rather than a wedged CI job.
+const STEP_LIMIT: u64 = 20_000_000;
+
+fn ast() -> Session {
+    let mut s = Session::new();
+    s.engine.set_step_limit(Some(STEP_LIMIT));
+    s
+}
+
+fn compiled() -> Session {
+    let mut s = Session::compiled();
+    s.engine.set_step_limit(Some(STEP_LIMIT));
+    s
+}
+
 /// What one program produced: what it printed, and what it evaluated to or how
 /// it failed. Errors are compared as text on purpose — an engine that reports
 /// a different message for the same mistake has diverged.
@@ -26,9 +43,9 @@ fn outcome(session: &mut Session, src: &str) -> String {
 
 #[track_caller]
 fn agree(src: &str) {
-    let mut ast = Session::new();
-    let mut vm = Session::compiled();
-    let a = outcome(&mut ast, src);
+    let mut a_session = ast();
+    let mut vm = compiled();
+    let a = outcome(&mut a_session, src);
     let b = outcome(&mut vm, src);
     assert_eq!(a, b, "engines disagree on: {src}");
     assert!(!a.contains("|!"), "both engines failed on {src}: {a}");
@@ -37,9 +54,9 @@ fn agree(src: &str) {
 /// For cases where failing is the point.
 #[track_caller]
 fn agree_failing(src: &str) {
-    let mut ast = Session::new();
-    let mut vm = Session::compiled();
-    let a = outcome(&mut ast, src);
+    let mut a_session = ast();
+    let mut vm = compiled();
+    let a = outcome(&mut a_session, src);
     let b = outcome(&mut vm, src);
     assert_eq!(a, b, "engines disagree on: {src}");
     assert!(a.contains("|!"), "expected a failure from {src}: {a}");
@@ -181,6 +198,13 @@ fn errors_report_alike() {
         "(letrec ((a b) (b 1)) a)",
         "(string-ref \"abc\" 10)",
         "(/ 1 0)",
+        // Both engines park the consumer in a control frame while the producer
+        // runs, so a producer that is not applicable at all leaves that frame
+        // pending. Pinned here because the two get there by different routes.
+        "(call-with-values 5 list)",
+        "(call-with-values (lambda () (values 1 2)) 7)",
+        "(apply + 1 2)",
+        "(vector-ref '(1 2) 0)",
     ] {
         agree_failing(src);
     }
@@ -242,11 +266,89 @@ fn state_across_forms_in_one_session() {
         "(set! acc (reverse acc))",
         "acc",
     ];
-    let mut ast = Session::new();
-    let mut vm = Session::compiled();
+    let mut a_session = ast();
+    let mut vm = compiled();
     for src in forms {
-        let a = outcome(&mut ast, src);
+        let a = outcome(&mut a_session, src);
         let b = outcome(&mut vm, src);
         assert_eq!(a, b, "engines disagree on: {src}");
     }
+}
+
+/// Generators built from `call/cc`.
+///
+/// The hardest thing either engine has to get right. A generator captures a
+/// continuation, returns *past* it so the stack shrinks, then re-enters it —
+/// so a captured continuation has to survive the frames it was captured under
+/// being gone, and the two engines have to agree on what "the rest of the
+/// computation" was even though one keeps it in environment chains and the
+/// other in stack frames.
+#[test]
+fn coroutines() {
+    // Same-fringe: two trees with different shapes but the same leaves, walked
+    // lazily in lockstep. Nothing else in the suite makes control jump between
+    // two suspended computations.
+    let same_fringe = r#"
+      (define (make-walker tree)
+        (define return #f)
+        (define (walk t)
+          (cond ((null? t) 'skip)
+                ((pair? t) (walk (car t)) (walk (cdr t)))
+                (else (call/cc (lambda (resume)
+                        (set! walk-state resume)
+                        (return t))))))
+        (define walk-state #f)
+        (lambda ()
+          (call/cc (lambda (caller)
+            (set! return caller)
+            (if walk-state
+                (walk-state 'again)
+                (begin (walk tree) (return 'done)))))))
+      (define (same-fringe? a b)
+        (let ((wa (make-walker a)) (wb (make-walker b)))
+          (let loop ()
+            (let ((x (wa)) (y (wb)))
+              (cond ((and (eq? x 'done) (eq? y 'done)) #t)
+                    ((or (eq? x 'done) (eq? y 'done)) #f)
+                    ((eqv? x y) (loop))
+                    (else #f))))))
+      (list (same-fringe? '(1 (2 3)) '((1 2) 3))
+            (same-fringe? '(1 (2 3)) '((1 2) 4))
+            (same-fringe? '(1 2 3) '(1 2)))
+    "#;
+    agree(same_fringe);
+
+    // A continuation captured inside a loop and re-entered after the loop has
+    // finished: the frames it was captured under are long gone.
+    //
+    // The re-entry counter is defined *before* the capture on purpose. All of
+    // these forms are one top-level body, so anything defined after the capture
+    // is inside the captured continuation and gets re-initialised on re-entry —
+    // a guard declared there would reset itself and loop forever. (It did, in
+    // an earlier draft of this test; both engines looped identically, which is
+    // its own small piece of evidence.)
+    agree(
+        "(define saved #f)
+         (define log '())
+         (define entries 0)
+         (define (run)
+           (let loop ((i 0))
+             (if (< i 3)
+                 (begin
+                   (if (= i 1) (call/cc (lambda (k) (set! saved k))))
+                   (set! log (cons i log))
+                   (loop (+ i 1)))
+                 'end)))
+         (run)
+         (set! entries (+ entries 1))
+         (if (< entries 2) (saved 'reentry))
+         (list entries (reverse log))",
+    );
+
+    // A continuation used as a value: stored, passed around, applied by `apply`.
+    agree(
+        "(define ks '())
+         (define (collect x) (call/cc (lambda (k) (set! ks (cons k ks)) x)))
+         (list (collect 1) (collect 2) (length ks))",
+    );
 }

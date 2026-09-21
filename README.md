@@ -22,10 +22,10 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list.
 | **M4** bytecode compiler and VM | **done: the FX-91 corpus passes compiled as well as interpreted** |
 | **M5** heap dumping and single-binary builds | **done: image beside the runtime, or one standalone executable** |
 | **M6** FX-87 front end | |
-| **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** |
+| **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
 
 ```
-$ cargo test              # 86 tests
+$ cargo test              # 93 tests
 $ cargo run -p fixpt-cli -- repl
 fixpt 0.1.0 — scheme reader, bytecode engine
 > (define (count-to n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc i)))))
@@ -55,6 +55,57 @@ hello
 runs on a machine with no `fixpt` on it. An image records which engine made it —
 compiled code carries a constants vector where interpreted code has `#f` — so
 `run-image` never has to be told.
+
+## Trying FX-91
+
+`--dialect fx91` selects the *language*, not just its reader: each form is
+parsed, its type and effect are inferred, and it is lowered to Scheme and run on
+the same engine. The REPL prints results the way the 1991 top level did — `:`
+type, `!` effect, `=` value:
+
+```
+$ fixpt --dialect fx91 repl
+fx91> (+ 3 4)
+: int
+! (maxeff)
+= 7
+
+fx91> (lambda ((r (refof int))) (^ r))
+: (-> read ((r (refof int))) int)
+! (maxeff)
+= #<procedure>
+
+fx91> (let ((r (new 0))) (begin (set! r 5) (^ r)))
+: int
+! (maxeff write read init)
+= 5
+```
+
+The second one is the point of the language: the lambda is itself *pure*
+(`! (maxeff)`), and the `read` it will perform when applied is latent in its
+type. The third allocates, writes and reads, and says so.
+
+Like the reference, the REPL is expression-oriented and re-checks each form in
+the initial environment (`extracted/fx91/top.scm:159` resets `*tk-env*`,
+`*store*` and the alpha counter every line). FX-91 has no top-level `define`;
+bindings come from modules:
+
+```
+fx91> (with (module (define (square (n int)) (* n n)))
+    |   (square 12))
+: int
+! (maxeff)
+= 144
+
+fx91> ([ (plambda ((t type)) (lambda ((x t)) x)) int ] 42)
+: int
+! (maxeff)
+= 42
+```
+
+`,code` in the REPL shows the Scheme each form lowers to. `fixpt --dialect fx91
+run FILE` runs a program without the annotations. FX-87 is not wired up yet
+(M6) and says so rather than doing something misleading.
 
 ## Layout
 

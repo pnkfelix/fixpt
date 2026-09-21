@@ -15,6 +15,7 @@ fixpt-core = { path = "../fixpt-core" }
 fixpt-runtime = { path = "../fixpt-runtime" }
 fixpt-engine = { path = "../fixpt-engine" }
 fixpt-scheme = { path = "../fixpt-scheme" }
+fixpt-fx91 = { path = "../fixpt-fx91" }
 
 [lints]
 workspace = true

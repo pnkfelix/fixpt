@@ -5,6 +5,7 @@
 //! self-contained, dumpable image is better off with a dependency list this
 //! short.
 
+mod fx91;
 mod image_run;
 
 use fixpt_engine::Backend;
@@ -27,9 +28,14 @@ usage:
   fixpt help                     show this
 
 options:
-  --dialect scheme|fx87|fx91     reader syntax (default: scheme)
+  --dialect scheme|fx91          source language (default: scheme)
   --engine bytecode|ast          execution engine (default: bytecode)
   --main NAME                    an image's entry point (default: main)
+
+`--dialect fx91` selects the FX-91 language, not merely its reader: a form is
+type- and effect-checked, lowered to Scheme and run on the same engine, and the
+REPL shows the inferred type and effect above each value. FX-87 is not wired up
+yet.
 
 An image built with `build` is a program in its own right: it carries its own
 heap, needs no `fixpt` on the target, and runs its entry point when invoked.
@@ -51,16 +57,25 @@ fn main() {
 
 fn run(args: &[String]) -> i32 {
     let (flags, rest) = split_flags(args);
-    let profile = match flags.dialect.as_deref() {
-        None | Some("scheme") => fixpt_read::SyntaxProfile::SCHEME,
-        Some(name) => match fixpt_read::SyntaxProfile::by_name(name) {
-            Some(p) => p,
-            None => {
-                eprintln!("fixpt: unknown dialect `{name}`");
-                return 2;
-            }
-        },
+    // The dialect picks a *language*, which is a front end, not just a set of
+    // lexical rules: FX-91 forms go through the checker and the code generator
+    // before any of this runs them.
+    let dialect = match flags.dialect.as_deref() {
+        None | Some("scheme") => Dialect::Scheme,
+        Some("fx91") => Dialect::Fx91,
+        Some("fx87") => {
+            eprintln!(
+                "fixpt: the FX-87 front end is not implemented yet (M6); \
+                 `--dialect fx91` and the default Scheme both work"
+            );
+            return 2;
+        }
+        Some(name) => {
+            eprintln!("fixpt: unknown dialect `{name}` (want scheme or fx91)");
+            return 2;
+        }
     };
+    let profile = fixpt_read::SyntaxProfile::SCHEME;
 
     let backend = match flags.engine.as_deref() {
         None | Some("bytecode") | Some("vm") | Some("compiled") => Backend::Bytecode,
@@ -77,24 +92,33 @@ fn run(args: &[String]) -> i32 {
             print!("{USAGE}");
             0
         }
-        Some("repl") => repl(profile, backend),
+        Some("repl") => match dialect {
+            Dialect::Scheme => repl(profile, backend),
+            Dialect::Fx91 => fx91::repl(backend),
+        },
         Some("run") => {
             if rest.len() < 2 {
                 eprintln!("fixpt run: needs at least one file");
                 return 2;
             }
-            match run_files(profile, backend, &rest[1..]) {
-                Ok(_) => 0,
-                Err(e) => {
-                    eprintln!("fixpt: {e}");
-                    1
-                }
+            match dialect {
+                Dialect::Fx91 => fx91::run_files(backend, &rest[1..]),
+                Dialect::Scheme => match run_files(profile, backend, &rest[1..]) {
+                    Ok(_) => 0,
+                    Err(e) => {
+                        eprintln!("fixpt: {e}");
+                        1
+                    }
+                },
             }
         }
         Some("eval") => {
             if rest.len() < 2 {
                 eprintln!("fixpt eval: needs an expression");
                 return 2;
+            }
+            if dialect == Dialect::Fx91 {
+                return fx91::eval(backend, &rest[1..].join(" "));
             }
             let mut session = Session::with_backend(backend);
             session.profile = profile;
@@ -110,6 +134,10 @@ fn run(args: &[String]) -> i32 {
             }
         }
         Some("dump-heap") | Some("build") => {
+            if dialect != Dialect::Scheme {
+                eprintln!("fixpt: {} is Scheme-only for now", rest[0]);
+                return 2;
+            }
             let standalone = rest[0] == "build";
             let Some(out) = flags.out.clone() else {
                 eprintln!("fixpt {}: needs -o OUT", rest[0]);
@@ -136,6 +164,13 @@ fn run(args: &[String]) -> i32 {
             2
         }
     }
+}
+
+/// Which language the source is in.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum Dialect {
+    Scheme,
+    Fx91,
 }
 
 struct Flags {
@@ -301,7 +336,7 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
 /// A cheap completeness test: are the delimiters balanced outside strings and
 /// comments? Wrong only for inputs that are already syntax errors, which the
 /// reader will report anyway.
-fn balanced(text: &str) -> bool {
+pub fn balanced(text: &str) -> bool {
     let mut depth: i32 = 0;
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
