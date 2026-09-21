@@ -40,6 +40,11 @@ impl std::error::Error for SessionError {}
 pub struct Session {
     pub rt: Runtime,
     pub interp: Interp,
+    /// The compiler-side arena, carried across inputs. What actually *runs* is
+    /// the lowered copy in the heap; this is kept because each new input is
+    /// expanded into the same arena, and because the bytecode compiler will
+    /// want it too.
+    program: Program,
     prepared: Prepared,
     parts: Option<ExpanderParts>,
     pub profile: SyntaxProfile,
@@ -56,10 +61,11 @@ impl Session {
         let body = expander.expand_forms(&[]).expect("an empty program expands");
         let (program, parts) = expander.into_parts(body);
         let _ = empty;
-        let prepared = Prepared::new(&mut rt, program);
+        let prepared = Prepared::new(&mut rt.heap, &rt.interner, &program);
         Session {
             rt,
             interp: Interp::new(),
+            program,
             prepared,
             parts: Some(parts),
             profile: SyntaxProfile::SCHEME,
@@ -86,7 +92,7 @@ impl Session {
 
     pub fn eval_forms(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Value, SessionError> {
         let parts = self.parts.take().expect("expander state is always returned");
-        let program = std::mem::replace(&mut self.prepared.program, Program::empty());
+        let program = std::mem::replace(&mut self.program, Program::empty());
         let mut expander =
             Expander::resume(&mut self.rt, ExpanderParts { builder: Builder::from_program(program), ..parts });
         let expanded = expander.expand_forms(forms);
@@ -96,7 +102,7 @@ impl Session {
                 // Keep the arena even on failure: earlier definitions in the
                 // same session must survive a syntax error in a later one.
                 let (program, parts) = expander.into_parts(fixpt_core::ir::NodeId(0));
-                self.prepared.update(&mut self.rt, program);
+                self.program = program;
                 self.parts = Some(parts);
                 let msg = self.describe(e.span, &e.message);
                 return Err(SessionError::Expand(msg));
@@ -105,7 +111,8 @@ impl Session {
         self.parts = Some(parts);
         let mut program = program;
         fixpt_core::analyze(&mut program);
-        self.prepared.update(&mut self.rt, program);
+        self.prepared.update(&mut self.rt.heap, &self.rt.interner, &program);
+        self.program = program;
         match self.interp.run(&mut self.rt, &mut self.prepared) {
             Ok(v) => Ok(v),
             Err(t) => {
@@ -133,7 +140,7 @@ impl Session {
         (printed, result)
     }
 
-    pub fn debug_node_count(&self) -> usize { self.prepared.program.nodes.len() }
+    pub fn debug_node_count(&self) -> usize { self.program.nodes.len() }
 
     fn condition_message(&self, obj: Value) -> String {
         if self.rt.is_error_object(obj) {

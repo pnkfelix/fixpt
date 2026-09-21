@@ -137,6 +137,18 @@ R7RS dropped `set-car!` and `set-cdr!`. `fixpt` keeps them, as an R5RS-compatibl
 extension, because **FX-91's `listof` is genuinely mutable-pair-based** and the
 reference implementation depends on it.
 
+### The Core IR lives in the heap, and per-node spans do not
+
+`fixpt`'s Core IR is encoded as heap objects rather than held in a Rust arena,
+so that a dumped image is self-contained and can be resumed. The cost is that
+per-node source spans are not carried: an image would pay for them on every
+node, to improve a message that is rarely better for it.
+
+Nothing is lost where it matters. Expansion-time errors — the ones that want a
+precise span — still have full spans, because the expander works on `Syntax`
+and runs before lowering. What a *run-time* error needs is the procedure's
+name, and that is on the `Code` object.
+
 ### `syntax-rules` is deferred
 
 Derived forms (`let`, `cond`, `case`, `do`, `when`, `and`, `or`, `guard`, …) are

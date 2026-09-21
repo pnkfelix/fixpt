@@ -24,9 +24,18 @@ pub struct Runtime {
     pub file_base: std::path::PathBuf,
 
     /// Root index of the record type used for R7RS error objects. Held as a
-    /// root index rather than a `Value` so it survives collection.
+    /// root index rather than a `Value` so it survives collection — and so it
+    /// survives a heap image, since roots are dumped in order and indices stay
+    /// valid.
     error_rtd_root: usize,
 }
+
+/// Root 0 of any runtime's heap is the error-object record type.
+///
+/// Positional, and therefore a real invariant rather than a coincidence:
+/// [`Runtime::new`] pushes it first, and [`Runtime::from_heap`] relies on that
+/// to resume a heap loaded from an image.
+pub const ERROR_RTD_ROOT: usize = 0;
 
 impl Runtime {
     pub fn new() -> Runtime {
@@ -43,6 +52,7 @@ impl Runtime {
         heap.obj_set(rtd, 0, name);
         heap.obj_set(rtd, 1, fields);
         let error_rtd_root = heap.push_root(rtd);
+        debug_assert_eq!(error_rtd_root, ERROR_RTD_ROOT, "root order is part of the image format");
 
         Runtime {
             heap,
@@ -108,6 +118,25 @@ impl Runtime {
         match std::mem::replace(&mut self.out, sink) {
             Sink::Buffer(b) => b,
             Sink::Stdout => String::new(),
+        }
+    }
+}
+
+impl Runtime {
+    /// Resume a heap loaded from an image.
+    ///
+    /// The interner is *not* part of an image — it is compile-time state — so a
+    /// resumed runtime starts with an empty one. That is enough to call the
+    /// procedures the image already holds; expanding new source needs a fresh
+    /// front end on top.
+    pub fn from_heap(heap: fixpt_heap::Heap) -> Runtime {
+        Runtime {
+            heap,
+            interner: Interner::new(),
+            sources: SourceMap::new(),
+            out: Sink::Stdout,
+            file_base: std::path::PathBuf::from("."),
+            error_rtd_root: ERROR_RTD_ROOT,
         }
     }
 }

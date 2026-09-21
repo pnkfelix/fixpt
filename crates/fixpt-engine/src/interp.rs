@@ -1,29 +1,33 @@
 //! The AST machine — the interpreted engine.
 //!
-//! An explicit-stack machine over the Core IR, not a recursive tree walk. Three
-//! things follow from that choice, and all three are requirements rather than
+//! An explicit-stack machine over the **heap-resident** Core IR. Three
+//! properties follow from that, and all three are requirements rather than
 //! refinements:
 //!
 //! * **Proper tail calls.** Applying a procedure never pushes a frame — the
-//!   caller's pending work is already a frame, or there is none. So a tail call
-//!   is simply "build the new environment and keep going", and a loop written
-//!   as tail recursion runs in constant space, as R7RS requires.
+//!   caller's pending work is already a frame, or there is none — so a loop
+//!   written as tail recursion runs in constant space.
 //! * **Unbounded recursion depth.** Scheme recursion consumes the machine's own
-//!   `Vec`s, not the Rust call stack, so a deeply recursive program reports out
-//!   of memory rather than segfaulting.
+//!   `Vec`s, not the Rust call stack.
 //! * **Re-entrant `call/cc`.** A continuation is a copy of the value stack and
-//!   an encoding of the frame stack. Because frames hold no heap references,
-//!   that encoding is just words, and a captured continuation is an ordinary
-//!   heap object that survives collection and heap dumping.
+//!   an encoding of the frame stack; because frames hold no heap references,
+//!   that encoding is plain words.
 //!
-//! Collection happens only at [`Interp::safepoint`], which is reached on every
-//! procedure application. Everything live at that moment is in `stack`, in
-//! `regs`, or in the program's constant pool, and all three are handed to the
-//! collector explicitly.
+//! And one that follows from the IR living in the heap: a closure is
+//! `[code, env]` where everything reachable is a heap object, so **a dumped
+//! heap can be resumed by this engine** — nothing it executes lives in Rust.
+//!
+//! The current `Code` object is a register, and a node is an offset into that
+//! code's flat node vector. Frames therefore hold offsets, never references,
+//! and each frame saves the environment *and* the code so the pair can be
+//! restored on resume.
 
-use crate::frame::{Frame, FRAME_WORDS};
+use crate::frame::{Frame, FRAME_WORDS, SAVED_SLOTS};
 use crate::prepare::Prepared;
-use fixpt_core::ir::{LambdaId, Node, NodeId};
+use fixpt_core::lower::{
+    CODE_ARITY, CODE_ENTRY, CODE_HAS_REST, CODE_NAME, CODE_NODES, TAG_APP, TAG_CONST, TAG_FIX,
+    TAG_GLOBAL, TAG_IF, TAG_LAMBDA, TAG_LET, TAG_LOCAL, TAG_SEQ, TAG_SET_GLOBAL, TAG_SET_LOCAL,
+};
 use fixpt_heap::{ObjType, Value};
 use fixpt_runtime::error::{Outcome, Thrown};
 use fixpt_runtime::prim::{self, EngineOp, PrimKind};
@@ -32,11 +36,13 @@ use fixpt_runtime::Runtime;
 /// Register file. Kept as one slice so the root set is two contiguous ranges.
 const REG_ACC: usize = 0;
 const REG_ENV: usize = 1;
-const REG_SCRATCH: usize = 2;
-const N_REGS: usize = 3;
+const REG_CODE: usize = 2;
+const REG_SCRATCH: usize = 3;
+const N_REGS: usize = 4;
 
 enum Control {
-    Eval(NodeId),
+    /// Evaluate the node at this offset in the current code.
+    Eval(u32),
     /// `acc` holds a value; resume the top frame.
     Return,
 }
@@ -84,28 +90,53 @@ impl Interp {
     fn set_env(&mut self, v: Value) {
         self.regs[REG_ENV] = v;
     }
+    #[inline]
+    fn code(&self) -> Value {
+        self.regs[REG_CODE]
+    }
+    #[inline]
+    fn set_code(&mut self, v: Value) {
+        self.regs[REG_CODE] = v;
+    }
+
+    /// One word of the current code's node vector.
+    #[inline]
+    fn word(&self, rt: &Runtime, at: u32) -> Value {
+        let nodes = rt.heap.obj_ref(self.code(), CODE_NODES);
+        rt.heap.obj_ref(nodes, at as usize)
+    }
+    #[inline]
+    fn offset(&self, rt: &Runtime, at: u32) -> u32 {
+        self.word(rt, at).as_fixnum() as u32
+    }
+
+    fn reset(&mut self) {
+        self.stack.clear();
+        self.frames.clear();
+        self.frames.push(Frame::Halt);
+        self.set_env(Value::FALSE);
+        self.set_code(Value::FALSE);
+        self.set_acc(Value::UNSPECIFIED);
+        self.steps = 0;
+    }
 
     /// Run a prepared program to completion.
     pub fn run(&mut self, rt: &mut Runtime, p: &mut Prepared) -> Outcome<Value> {
-        self.stack.clear();
-        self.frames.clear();
-        self.frames.push(Frame::Halt);
-        self.set_env(Value::FALSE);
-        self.set_acc(Value::UNSPECIFIED);
-        self.steps = 0;
-        let body = p.program.body;
-        self.drive(rt, p, Control::Eval(body))
+        let thunk = p.thunk(&rt.heap);
+        self.call(rt, p, thunk, &[])
     }
 
     /// Apply a procedure from native code, running it to completion.
-    pub fn call(&mut self, rt: &mut Runtime, p: &mut Prepared, f: Value, args: &[Value]) -> Outcome<Value> {
-        self.stack.clear();
-        self.frames.clear();
-        self.frames.push(Frame::Halt);
-        self.set_env(Value::FALSE);
-        self.steps = 0;
-        self.save_env();
-        let base = self.stack.len();
+    pub fn call(
+        &mut self,
+        rt: &mut Runtime,
+        p: &mut Prepared,
+        f: Value,
+        args: &[Value],
+    ) -> Outcome<Value> {
+        self.reset();
+        let saved = self.save(rt);
+        let base = saved as usize + SAVED_SLOTS;
         self.stack.push(f);
         self.stack.extend_from_slice(args);
         let control = self.apply(rt, p, base)?;
@@ -147,10 +178,10 @@ impl Interp {
         }
     }
 
-    /// A primitive raised. Unless the condition is already past the handler
-    /// chain, hand it to the prelude's `raise`, so user handlers installed with
-    /// `with-exception-handler` get their chance. This is the only place the
-    /// engine knows anything at all about the condition system.
+    /// A primitive raised. Unless the condition has already been through the
+    /// handler chain, hand it to the prelude's `raise`, so user handlers get
+    /// their chance. This is the only place the engine knows anything about the
+    /// condition system.
     fn dispatch_condition(
         &mut self,
         rt: &mut Runtime,
@@ -160,202 +191,232 @@ impl Interp {
         if t.fatal {
             return Ok(None);
         }
-        let Some(raise) = p.raise_procedure(rt) else { return Ok(None) };
-        // Same reason as in `CallWithValues`: `apply` reclaims `base - 1`.
-        self.save_env();
-        let base = self.stack.len();
+        let Some(raise) = p.raise_procedure(&mut rt.heap) else { return Ok(None) };
+        let saved = self.save(rt);
+        let base = saved as usize + SAVED_SLOTS;
         self.stack.push(raise);
         self.stack.push(t.obj);
         Ok(Some(self.apply(rt, p, base)?))
     }
 
+    /// Push the environment and code, returning the slot they start at.
+    fn save(&mut self, _rt: &Runtime) -> u32 {
+        let slot = self.stack.len() as u32;
+        let e = self.env();
+        let c = self.code();
+        self.stack.push(e);
+        self.stack.push(c);
+        slot
+    }
+
+    fn restore(&mut self, saved: u32) {
+        let e = self.stack[saved as usize];
+        let c = self.stack[saved as usize + 1];
+        self.set_env(e);
+        self.set_code(c);
+    }
+
     // ------------------------------------------------------------ evaluation
-    fn eval(&mut self, rt: &mut Runtime, p: &mut Prepared, node: NodeId) -> Outcome<Control> {
-        match p.program.node(node).clone() {
-            Node::Const(c) => {
-                let v = p.program.constant(c);
+    fn eval(&mut self, rt: &mut Runtime, _p: &mut Prepared, at: u32) -> Outcome<Control> {
+        let tag = self.word(rt, at).as_fixnum();
+        match tag {
+            TAG_CONST => {
+                let v = self.word(rt, at + 1);
                 self.set_acc(v);
                 Ok(Control::Return)
             }
-            Node::Ref(_) => {
-                let a = p.addressing.get(node);
-                let v = self.lookup(rt, a.depth, a.index);
+            TAG_LOCAL => {
+                let depth = self.offset(rt, at + 1);
+                let index = self.offset(rt, at + 2);
+                let v = self.lookup(rt, depth, index);
                 if v.is_unbound() {
-                    let name = p.var_name(rt, node);
-                    return rt.fail(&format!("{name} is used before it is defined"), &[]);
+                    let name = self.word(rt, at + 3);
+                    return self.unbound_local(rt, name);
                 }
                 self.set_acc(v);
                 Ok(Control::Return)
             }
-            Node::GlobalRef(g) => {
-                let v = rt.heap.global(g.index());
+            TAG_GLOBAL => {
+                let slot = self.offset(rt, at + 1) as usize;
+                let v = rt.heap.global(slot);
                 if v.is_unbound() {
-                    let name = p.global_name(rt, g);
-                    return rt.fail(&format!("unbound variable: {name}"), &[]);
+                    let name = self.word(rt, at + 2);
+                    let text = if rt.heap.is_a(name, ObjType::Symbol) {
+                        rt.heap.symbol_name(name)
+                    } else {
+                        format!("#<global {slot}>")
+                    };
+                    return rt.fail(&format!("unbound variable: {text}"), &[]);
                 }
                 self.set_acc(v);
                 Ok(Control::Return)
             }
-            Node::Set(_, e) => {
-                let env_slot = self.save_env();
-                self.frames.push(Frame::AssignLocal { node, env_slot });
-                Ok(Control::Eval(e))
+            TAG_SET_LOCAL => {
+                let saved = self.save(rt);
+                self.frames.push(Frame::AssignLocal { node: at, saved });
+                Ok(Control::Eval(self.offset(rt, at + 4)))
             }
-            Node::GlobalSet(g, e) => {
-                let env_slot = self.save_env();
-                self.frames.push(Frame::AssignGlobal { slot: g.0, env_slot });
-                Ok(Control::Eval(e))
+            TAG_SET_GLOBAL => {
+                let slot = self.offset(rt, at + 1);
+                let saved = self.save(rt);
+                self.frames.push(Frame::AssignGlobal { slot, saved });
+                Ok(Control::Eval(self.offset(rt, at + 3)))
             }
-            Node::If(test, then, els) => {
-                let env_slot = self.save_env();
-                self.frames.push(Frame::Branch { then, els, env_slot });
-                Ok(Control::Eval(test))
+            TAG_IF => {
+                let then = self.offset(rt, at + 2);
+                let els = self.offset(rt, at + 3);
+                let saved = self.save(rt);
+                self.frames.push(Frame::Branch { then, els, saved });
+                Ok(Control::Eval(self.offset(rt, at + 1)))
             }
-            Node::Seq(items) => {
-                let env_slot = self.save_env();
-                self.frames.push(Frame::SeqNext { seq: node, index: 1, env_slot });
-                Ok(Control::Eval(items[0]))
+            TAG_SEQ => {
+                let saved = self.save(rt);
+                self.frames.push(Frame::SeqNext { seq: at, index: 1, saved });
+                Ok(Control::Eval(self.offset(rt, at + 2)))
             }
-            Node::Let { vars, inits, body } => {
-                if inits.is_empty() {
-                    let e = self.new_env(rt, vars.len());
+            TAG_LET => {
+                let n = self.offset(rt, at + 1) as usize;
+                if n == 0 {
+                    let e = self.new_env(rt, 0);
                     self.set_env(e);
-                    return Ok(Control::Eval(body));
+                    return Ok(Control::Eval(self.offset(rt, at + 2)));
                 }
-                let env_slot = self.save_env();
-                self.frames.push(Frame::LetInit { let_: node, collected: 0, env_slot });
-                Ok(Control::Eval(inits[0]))
+                let saved = self.save(rt);
+                self.frames.push(Frame::LetInit { let_: at, collected: 0, saved });
+                Ok(Control::Eval(self.offset(rt, at + 3)))
             }
-            Node::Fix { vars, inits, body } => {
-                let e = self.new_env(rt, vars.len());
+            TAG_FIX => {
+                let n = self.offset(rt, at + 1) as usize;
+                let e = self.new_env(rt, n);
                 self.set_env(e);
-                if inits.is_empty() {
-                    return Ok(Control::Eval(body));
+                if n == 0 {
+                    return Ok(Control::Eval(self.offset(rt, at + 2)));
                 }
-                // `env_slot` holds the NEW environment: `letrec*` initialisers
-                // are evaluated inside the scope they define.
-                let env_slot = self.save_env();
-                self.frames.push(Frame::FixInit { fix: node, index: 0, env_slot });
-                Ok(Control::Eval(inits[0]))
+                // `saved` holds the NEW environment: `letrec*` initialisers are
+                // evaluated inside the scope they define.
+                let saved = self.save(rt);
+                self.frames.push(Frame::FixInit { fix: at, index: 0, saved });
+                Ok(Control::Eval(self.offset(rt, at + 3)))
             }
-            Node::Lambda(l) => {
-                let v = self.make_closure(rt, p, l);
-                self.set_acc(v);
+            TAG_LAMBDA => {
+                let code = self.word(rt, at + 1);
+                let env = self.env();
+                let c = rt.heap.alloc(ObjType::Closure, 2, Value::UNSPECIFIED);
+                rt.heap.obj_set(c, 0, code);
+                rt.heap.obj_set(c, 1, env);
+                self.set_acc(c);
                 Ok(Control::Return)
             }
-            Node::App { rator, .. } => {
-                let env_slot = self.save_env();
-                self.frames.push(Frame::AppArg { app: node, collected: 0, env_slot });
-                Ok(Control::Eval(rator))
+            TAG_APP => {
+                let saved = self.save(rt);
+                self.frames.push(Frame::AppArg { app: at, collected: 0, saved });
+                Ok(Control::Eval(self.offset(rt, at + 2)))
             }
-            Node::PrimCall { .. } => {
-                // Produced only by an optimisation pass the interpreter does
-                // not run; the compiler is where it belongs.
-                rt.fail("PrimCall is not used by the AST engine", &[])
-            }
+            other => rt.fail(&format!("unknown node tag {other}"), &[]),
         }
     }
 
+    fn unbound_local(&mut self, rt: &mut Runtime, name: Value) -> Outcome<Control> {
+        let text = if rt.heap.is_a(name, ObjType::Symbol) {
+            rt.heap.symbol_name(name)
+        } else {
+            "a variable".to_string()
+        };
+        rt.fail(&format!("{text} is used before it is defined"), &[])
+    }
+
     fn resume(&mut self, rt: &mut Runtime, p: &mut Prepared, frame: Frame) -> Outcome<Control> {
-        if let Some(slot) = frame.env_slot() {
-            let e = self.stack[slot as usize];
-            self.set_env(e);
+        if let Some(slot) = frame.saved() {
+            self.restore(slot);
         }
         match frame {
             Frame::Halt => unreachable!("handled in drive"),
-            Frame::Branch { then, els, env_slot } => {
-                self.stack.truncate(env_slot as usize);
+            Frame::Branch { then, els, saved } => {
+                self.stack.truncate(saved as usize);
                 Ok(Control::Eval(if self.acc().is_true() { then } else { els }))
             }
-            Frame::SeqNext { seq, index, env_slot } => {
-                let Node::Seq(items) = p.program.node(seq).clone() else {
-                    unreachable!("SeqNext refers to a Seq node")
-                };
-                let i = index as usize;
-                if i + 1 >= items.len() {
-                    // Last element is a tail position: drop our stack slot so a
+            Frame::SeqNext { seq, index, saved } => {
+                let n = self.offset(rt, seq + 1);
+                let i = index;
+                if i + 1 >= n {
+                    // The last element is a tail position: drop our slots so a
                     // loop through `begin` does not grow the value stack.
-                    self.stack.truncate(env_slot as usize);
-                    return Ok(Control::Eval(items[i]));
+                    self.stack.truncate(saved as usize);
+                    return Ok(Control::Eval(self.offset(rt, seq + 2 + i)));
                 }
-                self.frames.push(Frame::SeqNext { seq, index: index + 1, env_slot });
-                Ok(Control::Eval(items[i]))
+                self.frames.push(Frame::SeqNext { seq, index: i + 1, saved });
+                Ok(Control::Eval(self.offset(rt, seq + 2 + i)))
             }
-            Frame::AssignLocal { node, env_slot } => {
-                let a = p.addressing.get(node);
+            Frame::AssignLocal { node, saved } => {
+                let depth = self.offset(rt, node + 1);
+                let index = self.offset(rt, node + 2);
                 let v = self.acc();
-                self.assign(rt, a.depth, a.index, v);
-                self.stack.truncate(env_slot as usize);
+                self.assign(rt, depth, index, v);
+                self.stack.truncate(saved as usize);
                 self.set_acc(Value::UNSPECIFIED);
                 Ok(Control::Return)
             }
-            Frame::AssignGlobal { slot, env_slot } => {
+            Frame::AssignGlobal { slot, saved } => {
                 let v = self.acc();
                 rt.heap.set_global(slot as usize, v);
-                self.stack.truncate(env_slot as usize);
+                self.stack.truncate(saved as usize);
                 self.set_acc(Value::UNSPECIFIED);
                 Ok(Control::Return)
             }
-            Frame::LetInit { let_, collected, env_slot } => {
-                let Node::Let { vars, inits, body } = p.program.node(let_).clone() else {
-                    unreachable!("LetInit refers to a Let node")
-                };
+            Frame::LetInit { let_, collected, saved } => {
+                let n = self.offset(rt, let_ + 1);
                 let acc = self.acc();
                 self.stack.push(acc);
-                let n = collected as usize + 1;
-                if n < inits.len() {
-                    self.frames.push(Frame::LetInit { let_, collected: n as u32, env_slot });
-                    return Ok(Control::Eval(inits[n]));
+                let done = collected + 1;
+                if done < n {
+                    self.frames.push(Frame::LetInit { let_, collected: done, saved });
+                    return Ok(Control::Eval(self.offset(rt, let_ + 3 + done)));
                 }
-                let base = env_slot as usize + 1;
-                let e = self.new_env(rt, vars.len());
-                for i in 0..vars.len() {
+                let base = saved as usize + SAVED_SLOTS;
+                let e = self.new_env(rt, n as usize);
+                for i in 0..n as usize {
                     let v = self.stack[base + i];
                     rt.heap.obj_set(e, i + 1, v);
                 }
-                self.stack.truncate(env_slot as usize);
+                self.stack.truncate(saved as usize);
                 self.set_env(e);
-                Ok(Control::Eval(body))
+                Ok(Control::Eval(self.offset(rt, let_ + 2)))
             }
-            Frame::FixInit { fix, index, env_slot } => {
-                let Node::Fix { inits, body, .. } = p.program.node(fix).clone() else {
-                    unreachable!("FixInit refers to a Fix node")
-                };
-                let e = self.stack[env_slot as usize];
+            Frame::FixInit { fix, index, saved } => {
+                let n = self.offset(rt, fix + 1);
+                let e = self.stack[saved as usize];
                 let v = self.acc();
                 rt.heap.obj_set(e, index as usize + 1, v);
-                let n = index as usize + 1;
-                if n < inits.len() {
-                    self.frames.push(Frame::FixInit { fix, index: n as u32, env_slot });
-                    return Ok(Control::Eval(inits[n]));
+                let done = index + 1;
+                if done < n {
+                    self.frames.push(Frame::FixInit { fix, index: done, saved });
+                    return Ok(Control::Eval(self.offset(rt, fix + 3 + done)));
                 }
-                self.stack.truncate(env_slot as usize);
+                self.stack.truncate(saved as usize);
                 self.set_env(e);
-                Ok(Control::Eval(body))
+                Ok(Control::Eval(self.offset(rt, fix + 2)))
             }
-            Frame::AppArg { app, collected, env_slot } => {
-                let (rator, rands) = match p.program.node(app).clone() {
-                    Node::App { rator, rands } => (rator, rands),
-                    _ => unreachable!("AppArg refers to an App node"),
-                };
-                let _ = rator;
+            Frame::AppArg { app, collected, saved } => {
+                let n = self.offset(rt, app + 1);
                 let acc = self.acc();
                 self.stack.push(acc);
-                let n = collected as usize + 1;
-                if n <= rands.len() {
-                    self.frames.push(Frame::AppArg { app, collected: n as u32, env_slot });
-                    return Ok(Control::Eval(rands[n - 1]));
+                let done = collected + 1;
+                if done <= n {
+                    self.frames.push(Frame::AppArg { app, collected: done, saved });
+                    return Ok(Control::Eval(self.offset(rt, app + 2 + done)));
                 }
-                self.apply(rt, p, env_slot as usize + 1)
+                self.apply(rt, p, saved as usize + SAVED_SLOTS)
             }
-            Frame::Consume { env_slot } => {
-                let consumer = self.stack[env_slot as usize + 1];
+            Frame::Consume { saved } => {
+                let consumer = self.stack[saved as usize + SAVED_SLOTS];
                 let produced = self.acc();
-                let base = env_slot as usize + 2;
+                let base = saved as usize + SAVED_SLOTS + 1;
                 self.stack.truncate(base);
+                let inner = self.save(rt);
+                let call_base = inner as usize + SAVED_SLOTS;
                 self.stack.push(consumer);
                 self.spread_values(rt, produced);
-                self.apply(rt, p, base)
+                self.apply(rt, p, call_base)
             }
         }
     }
@@ -374,35 +435,33 @@ impl Interp {
 
     // ------------------------------------------------------------- apply
     /// `stack[base]` is the operator; `stack[base+1..]` the arguments. On
-    /// return the stack is truncated to `base - 1` (the caller's saved-env
-    /// slot), because no frame is pushed: that is what makes tail calls proper.
+    /// return the stack is truncated to the caller's saved slots, because no
+    /// frame is pushed: that is what makes tail calls proper.
     fn apply(&mut self, rt: &mut Runtime, p: &mut Prepared, base: usize) -> Outcome<Control> {
-        self.safepoint(rt, p);
+        self.safepoint(rt);
+        let drop_to = base.saturating_sub(SAVED_SLOTS);
         let f = self.stack[base];
         let argc = self.stack.len() - base - 1;
         match rt.heap.obj_type(f) {
             Some(ObjType::Closure) => {
                 let code = rt.heap.obj_ref(f, 0);
-                let lambda = LambdaId(rt.heap.obj_ref(code, 3).as_fixnum() as u32);
-                let info = p.program.lambda(lambda);
-                let nparams = info.params.len();
-                let has_rest = info.rest.is_some();
+                let nparams = rt.heap.obj_ref(code, CODE_ARITY).as_fixnum() as usize;
+                let has_rest = rt.heap.obj_ref(code, CODE_HAS_REST).is_true();
                 if !(argc == nparams || (has_rest && argc >= nparams)) {
-                    let name = info
-                        .name
-                        .map(|s| rt.interner.name(s).to_string())
-                        .unwrap_or_else(|| "procedure".into());
+                    let name = rt.heap.obj_ref(code, CODE_NAME);
+                    let label = if rt.heap.is_a(name, ObjType::Symbol) {
+                        rt.heap.symbol_name(name)
+                    } else {
+                        "procedure".to_string()
+                    };
                     let expected = if has_rest {
                         format!("at least {nparams}")
                     } else {
                         nparams.to_string()
                     };
-                    return rt.fail(
-                        &format!("{name} expects {expected} argument(s), got {argc}"),
-                        &[],
-                    );
+                    return rt
+                        .fail(&format!("{label} expects {expected} argument(s), got {argc}"), &[]);
                 }
-                let body = info.body;
                 let closure_env = rt.heap.obj_ref(f, 1);
                 let slots = nparams + usize::from(has_rest);
                 let e = rt.heap.alloc(ObjType::Vector, slots + 1, Value::UNSPECIFIED);
@@ -416,25 +475,22 @@ impl Interp {
                     let rest = rt.heap.list_from(&extra);
                     rt.heap.obj_set(e, nparams + 1, rest);
                 }
-                // Drop the operator, the arguments and the caller's saved env:
-                // nothing after this point refers to them.
-                self.stack.truncate(base.saturating_sub(1));
+                let entry = rt.heap.obj_ref(code, CODE_ENTRY).as_fixnum() as u32;
+                self.stack.truncate(drop_to);
                 self.set_env(e);
-                Ok(Control::Eval(body))
+                self.set_code(code);
+                Ok(Control::Eval(entry))
             }
             Some(ObjType::Primitive) => {
                 let index = rt.heap.obj_ref(f, 1).as_fixnum() as u16;
                 let def = prim::def(index);
                 if !def.accepts(argc) {
-                    return rt.fail(
-                        &format!("{} got {argc} argument(s)", def.name),
-                        &[],
-                    );
+                    return rt.fail(&format!("{} got {argc} argument(s)", def.name), &[]);
                 }
                 match def.kind {
                     PrimKind::Simple(func) => {
                         let result = func(rt, &mut self.stack[base + 1..]);
-                        self.stack.truncate(base.saturating_sub(1));
+                        self.stack.truncate(drop_to);
                         self.set_acc(result?);
                         Ok(Control::Return)
                     }
@@ -452,7 +508,7 @@ impl Interp {
                 Ok(Control::Return)
             }
             _ => {
-                self.stack.truncate(base.saturating_sub(1));
+                self.stack.truncate(drop_to);
                 rt.fail("attempt to call a non-procedure", &[f])
             }
         }
@@ -465,6 +521,7 @@ impl Interp {
         op: EngineOp,
         base: usize,
     ) -> Outcome<Control> {
+        let drop_to = base.saturating_sub(SAVED_SLOTS);
         match op {
             // (apply f a b … list)
             EngineOp::Apply => {
@@ -488,7 +545,7 @@ impl Interp {
             // prelude wraps this to add winding.
             EngineOp::CallCC => {
                 let f = self.stack[base + 1];
-                let k = self.capture(rt, base);
+                let k = self.capture(rt, drop_to);
                 self.stack.truncate(base);
                 self.stack.push(f);
                 self.stack.push(k);
@@ -496,7 +553,7 @@ impl Interp {
             }
             EngineOp::Values => {
                 let vals: Vec<Value> = self.stack[base + 1..].to_vec();
-                self.stack.truncate(base.saturating_sub(1));
+                self.stack.truncate(drop_to);
                 let v = self.make_values(rt, &vals);
                 self.set_acc(v);
                 Ok(Control::Return)
@@ -504,17 +561,17 @@ impl Interp {
             EngineOp::CallWithValues => {
                 let producer = self.stack[base + 1];
                 let consumer = self.stack[base + 2];
-                self.stack.truncate(base.saturating_sub(1));
-                let env_slot = self.save_env();
+                self.stack.truncate(drop_to);
+                let saved = self.save(rt);
                 self.stack.push(consumer);
-                self.frames.push(Frame::Consume { env_slot });
-                // `apply` truncates to `base - 1`, so the producer call needs
-                // its own sacrificial saved-env slot; without it the truncation
-                // would take the consumer with it.
-                self.save_env();
-                let inner = self.stack.len();
+                self.frames.push(Frame::Consume { saved });
+                // `apply` reclaims the caller's saved slots, so the producer
+                // call needs its own; without them the truncation would take
+                // the consumer with it.
+                let inner = self.save(rt);
+                let call_base = inner as usize + SAVED_SLOTS;
                 self.stack.push(producer);
-                self.apply(rt, p, inner)
+                self.apply(rt, p, call_base)
             }
         }
     }
@@ -523,10 +580,8 @@ impl Interp {
     /// Capture the machine state. The value stack is copied into a heap vector
     /// and the frame stack into a bytevector — frames hold no references, so
     /// this is a straight word copy and the result is an ordinary heap object.
-    fn capture(&mut self, rt: &mut Runtime, base: usize) -> Value {
-        // Everything below `base` is the continuation; the operator and its
-        // argument at `base`… belong to the `%call/cc` call itself.
-        let live = &self.stack[..base.saturating_sub(1)];
+    fn capture(&mut self, rt: &mut Runtime, upto: usize) -> Value {
+        let live = &self.stack[..upto];
         let saved_stack = rt.heap.vector_from(live);
         let mut bytes = Vec::with_capacity(self.frames.len() * FRAME_WORDS * 8);
         for f in &self.frames {
@@ -573,13 +628,6 @@ impl Interp {
     }
 
     // ------------------------------------------------------- environments
-    fn save_env(&mut self) -> u32 {
-        let slot = self.stack.len() as u32;
-        let e = self.env();
-        self.stack.push(e);
-        slot
-    }
-
     fn new_env(&mut self, rt: &mut Runtime, slots: usize) -> Value {
         let parent = self.env();
         let e = rt.heap.alloc(ObjType::Vector, slots + 1, Value::UNBOUND);
@@ -603,25 +651,12 @@ impl Interp {
         rt.heap.obj_set(e, index as usize + 1, v);
     }
 
-    fn make_closure(&mut self, rt: &mut Runtime, p: &Prepared, l: LambdaId) -> Value {
-        let code = p.code_for(rt, l);
-        let env = self.env();
-        let c = rt.heap.alloc(ObjType::Closure, 2, Value::UNSPECIFIED);
-        rt.heap.obj_set(c, 0, code);
-        rt.heap.obj_set(c, 1, env);
-        c
-    }
-
     // ---------------------------------------------------------- safepoint
-    /// The only place a collection can happen. Every live value is in `stack`,
-    /// in `regs`, or in the constant pool; nothing is in a Rust local across
-    /// this call.
-    fn safepoint(&mut self, rt: &mut Runtime, p: &mut Prepared) {
+    /// The only place a collection can happen. Every live value is in `stack`
+    /// or in `regs` — the program's code is reachable from the code register
+    /// and from the heap roots, so there is no third root set to remember.
+    fn safepoint(&mut self, rt: &mut Runtime) {
         self.regs[REG_SCRATCH] = Value::UNSPECIFIED;
-        rt.heap.maybe_collect(&mut [
-            &mut self.stack,
-            &mut self.regs,
-            &mut p.program.consts,
-        ]);
+        rt.heap.maybe_collect(&mut [&mut self.stack, &mut self.regs]);
     }
 }

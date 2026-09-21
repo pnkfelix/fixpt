@@ -5,8 +5,10 @@
 
 pub mod analyze;
 pub mod ir;
+pub mod lower;
 
 pub use analyze::analyze;
+pub use lower::lower;
 pub use ir::{
     Builder, ConstId, GlobalId, LambdaId, LambdaInfo, Node, NodeId, Program, VarId, VarInfo,
 };

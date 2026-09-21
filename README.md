@@ -20,12 +20,12 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list.
 | **M2** reader with three syntax profiles | done |
 | **M3** Core IR, Scheme expander, AST engine | done |
 | **M4** bytecode compiler and VM | |
-| **M5** heap dumping and single-binary builds | |
+| **M5** heap dumping and single-binary builds | heap dumping works: an image loads into a fresh runtime and its procedures still run |
 | **M6** FX-87 front end | |
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** |
 
 ```
-$ cargo test              # 68 tests
+$ cargo test              # 70 tests
 $ cargo run -p fixpt-cli -- repl
 fixpt 0.1.0 — scheme reader, AST engine
 > (define (count-to n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc i)))))
@@ -69,6 +69,13 @@ the whole suite runs green that way.
 for Scheme recursion, so proper tail calls, unbounded recursion depth and
 re-entrant `call/cc` hold in both, and the conformance suite can require that
 the interpreter and the compiler agree on every case.
+
+**The Core IR lives in the heap.** A closure is `[code, env]`, `code` holds a
+flat vector of nodes, and constants sit inline — so nothing the engine executes
+lives in Rust, and a dumped image can be *resumed*. Larceny's interpreter
+survives a heap dump because it is written in Scheme, which makes what it
+interprets ordinary heap objects; this gets the same property by the same
+means.
 
 ## Conformance
 
