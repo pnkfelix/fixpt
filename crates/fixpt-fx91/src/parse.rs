@@ -13,9 +13,9 @@ use crate::syms::{Syms, KEYWORD_FIELDS};
 use fixpt_read::{Datum, Interner, Num, Span, Sym, Syntax};
 use std::collections::HashSet;
 
-pub struct Parser<'a> {
-    pub arena: &'a mut Arena,
-    pub interner: &'a mut Interner,
+pub struct Parser {
+    pub arena: Arena,
+    pub interner: Interner,
     pub syms: Syms,
     keywords: HashSet<Sym>,
     /// The environment the built-in `fx` module's names live in.
@@ -25,9 +25,17 @@ pub struct Parser<'a> {
     pub initializing: bool,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(arena: &'a mut Arena, interner: &'a mut Interner) -> Parser<'a> {
-        let syms = Syms::new(interner);
+impl Default for Parser {
+    fn default() -> Parser {
+        Parser::new()
+    }
+}
+
+impl Parser {
+    pub fn new() -> Parser {
+        let mut interner = Interner::new();
+        let mut arena = Arena::new();
+        let syms = Syms::new(&mut interner);
         let keywords: HashSet<Sym> =
             KEYWORD_FIELDS.iter().map(|n| interner.intern(n)).collect();
         let init_alpha = arena.empty_alpha();

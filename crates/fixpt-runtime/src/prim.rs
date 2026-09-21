@@ -533,6 +533,41 @@ prims! {
         Ok(Value::UNSPECIFIED)
     });
 
+    // ---- ports ----
+    "%open-input-file", 1, Some(1), simple!(|rt, a| {
+        let name = get_string(rt, a[0])?;
+        let path = rt.file_base.join(&name);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Ok(crate::port::make_input_port(rt, &name, &text)),
+            Err(e) => rt.fail(&format!("cannot open {}: {e}", path.display()), &[a[0]]),
+        }
+    });
+    "%standard-output", 0, Some(0), simple!(|rt, a| { let _ = &a; Ok(crate::port::make_stdout_port(rt)) });
+    "%port?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.is_a(a[0], ObjType::Port))));
+    "%port-read-char", 1, Some(1), simple!(|rt, a| crate::port::read_char(rt, a[0], true));
+    "%port-peek-char", 1, Some(1), simple!(|rt, a| crate::port::read_char(rt, a[0], false));
+    "%port-at-eof?", 1, Some(1), simple!(|rt, a| {
+        let eof = crate::port::at_eof(rt, a[0])?;
+        Ok(Value::boolean(eof))
+    });
+    "%port-read-datum", 1, Some(2), simple!(|rt, a| {
+        let fold = a.len() > 1 && a[1].is_true();
+        crate::port::read_datum(rt, a[0], fold)
+    });
+    "%port-write-string", 2, Some(2), simple!(|rt, a| {
+        let text = get_string(rt, a[1])?;
+        crate::port::write_string(rt, a[0], &text)
+    });
+    "%datum->string", 1, Some(1), simple!(|rt, a| {
+        let text = display_value(&rt.heap, a[0]);
+        Ok(rt.heap.make_string(&text))
+    });
+    "%close-port", 1, Some(1), simple!(|rt, a| {
+        let _ = &rt;
+        let _ = &a;
+        Ok(Value::UNSPECIFIED)
+    });
+
     // ---- output ----
     "display", 1, Some(2), simple!(|rt, a| { let s = display_value(&rt.heap, a[0]); rt.emit(&s); Ok(Value::UNSPECIFIED) });
     "write",   1, Some(2), simple!(|rt, a| { let s = write_value(&rt.heap, a[0]); rt.emit(&s); Ok(Value::UNSPECIFIED) });

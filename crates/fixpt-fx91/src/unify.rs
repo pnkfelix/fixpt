@@ -28,7 +28,7 @@ pub enum Mode {
     VariableEq,
 }
 
-impl Checker<'_> {
+impl Checker {
     /// `unify?`
     pub fn unify(&mut self, a: FxId, b: FxId) -> R<bool> {
         self.unify_env_clear();
@@ -167,7 +167,7 @@ impl Checker<'_> {
         if dexp_is_unif && !dexp_weak && unif_weak {
             return self.unify_on_unification(dexp, unif);
         }
-        let frees = free_dvars_of_dexp(self.p.arena, dexp);
+        let frees = free_dvars_of_dexp(&mut self.p.arena, dexp);
         let occurs = frees.iter().any(|f| self.p.arena.same_variable(unif, *f));
         if !occurs {
             return Ok(self.normal_unify(unif, dexp));
@@ -204,8 +204,8 @@ impl Checker<'_> {
     /// directly; everything else becomes a constraint elsewhere.
     fn unify_effect(&mut self, mode: Mode, a: FxId, b: FxId) -> R<bool> {
         if mode == Mode::VariableEq {
-            let fa = free_dvars_of_dexp(self.p.arena, a);
-            let fb = free_dvars_of_dexp(self.p.arena, b);
+            let fa = free_dvars_of_dexp(&mut self.p.arena, a);
+            let fb = free_dvars_of_dexp(&mut self.p.arena, b);
             let same = fa.iter().all(|x| fb.iter().any(|y| self.p.arena.same_variable(*x, *y)))
                 && fb.iter().all(|y| fa.iter().any(|x| self.p.arena.same_variable(*x, *y)));
             return Ok(same);
@@ -405,8 +405,8 @@ impl Checker<'_> {
             Fx::ProductOf { tags, types } if !is_sum => Some((tags.clone(), types.clone())),
             _ => None,
         };
-        let Some((tags1, types1)) = get(self.p.arena, a) else { return Ok(false) };
-        let Some((tags2, types2)) = get(self.p.arena, b) else { return Ok(false) };
+        let Some((tags1, types1)) = get(&self.p.arena, a) else { return Ok(false) };
+        let Some((tags2, types2)) = get(&self.p.arena, b) else { return Ok(false) };
         if tags1.len() != tags2.len() {
             return Ok(false);
         }

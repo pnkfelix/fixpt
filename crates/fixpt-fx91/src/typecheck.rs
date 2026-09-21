@@ -21,7 +21,7 @@ use crate::free::{free_dvars_of_dexp, free_dvars_of_free_vars, free_dvars_of_exp
 /// A type paired with the effect of producing it.
 pub type TypeEffect = (FxId, FxId);
 
-impl Checker<'_> {
+impl Checker {
     /// The type alone.
     ///
     /// Keyed on the *type* cache only, deliberately: `evaluate_select` records
@@ -310,8 +310,8 @@ impl Checker<'_> {
         let span = self.p.arena.span(id);
         let Fx::Close(inner) = self.p.arena.get(id).clone() else { unreachable!() };
         let (ty, effect) = self.type_effect_of_exp(inner)?;
-        let env_dvars = free_dvars_of_free_vars(self.p.arena, id);
-        let type_dvars = free_dvars_of_dexp(self.p.arena, ty);
+        let env_dvars = free_dvars_of_free_vars(&mut self.p.arena, id);
+        let type_dvars = free_dvars_of_dexp(&mut self.p.arena, ty);
         let poly_vars: Vec<FxId> = type_dvars
             .into_iter()
             .filter(|v| !env_dvars.iter().any(|e| self.p.arena.same_variable(*v, *e)))
@@ -562,7 +562,7 @@ impl Checker<'_> {
         effects: &[FxId],
     ) -> R<()> {
         let span = self.p.arena.span(body);
-        let frees = crate::free::free_vars_of_dexp(self.p.arena, body);
+        let frees = crate::free::free_vars_of_dexp(&mut self.p.arena, body);
         for (i, e) in ids.iter().zip(effects) {
             let mentioned = frees.iter().any(|f| self.p.arena.same_variable(*i, *f));
             if !mentioned {
@@ -589,16 +589,16 @@ impl Checker<'_> {
         let gen_vars: Vec<FxId> = if self.algebraic && self.expansive(exp)? {
             Vec::new()
         } else {
-            let env_dvars = free_dvars_of_free_vars(self.p.arena, exp);
-            let exp_dvars: Vec<FxId> = free_dvars_of_exp(self.p.arena, exp)
+            let env_dvars = free_dvars_of_free_vars(&mut self.p.arena, exp);
+            let exp_dvars: Vec<FxId> = free_dvars_of_exp(&mut self.p.arena, exp)
                 .into_iter()
                 .filter(|v| self.p.arena.var(*v).is_some_and(|d| !d.is_unification()))
                 .collect();
-            let mut candidates = free_dvars_of_dexp(self.p.arena, ty);
+            let mut candidates = free_dvars_of_dexp(&mut self.p.arena, ty);
             if self.algebraic {
                 for c in constraints {
-                    candidates.extend(free_dvars_of_dexp(self.p.arena, c.lhs));
-                    candidates.extend(free_dvars_of_dexp(self.p.arena, c.rhs));
+                    candidates.extend(free_dvars_of_dexp(&mut self.p.arena, c.lhs));
+                    candidates.extend(free_dvars_of_dexp(&mut self.p.arena, c.rhs));
                 }
             }
             let mut out: Vec<FxId> = Vec::new();

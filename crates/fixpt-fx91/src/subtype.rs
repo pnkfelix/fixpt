@@ -11,7 +11,7 @@ use crate::check::{kind_eq, Checker};
 use crate::error::R;
 use crate::unify::Mode;
 
-impl Checker<'_> {
+impl Checker {
     /// `description<=?`
     pub fn description_leq(&mut self, a: FxId, b: FxId) -> R<bool> {
         self.unify_env.clear();
@@ -95,8 +95,8 @@ impl Checker<'_> {
         // require containment outright.
         let span = self.p.arena.span(a);
         let empty = self.pure(span);
-        let mut frees = crate::free::free_dvars_of_dexp(self.p.arena, a);
-        frees.extend(crate::free::free_dvars_of_dexp(self.p.arena, b));
+        let mut frees = crate::free::free_dvars_of_dexp(&mut self.p.arena, a);
+        frees.extend(crate::free::free_dvars_of_dexp(&mut self.p.arena, b));
         for f in frees {
             if self.p.arena.var(f).is_some_and(|v| v.is_unification())
                 && !self.unify_1(Mode::Unify, f, empty)?
@@ -104,8 +104,8 @@ impl Checker<'_> {
                 return Ok(false);
             }
         }
-        let fa = crate::free::free_dvars_of_dexp(self.p.arena, a);
-        let fb = crate::free::free_dvars_of_dexp(self.p.arena, b);
+        let fa = crate::free::free_dvars_of_dexp(&mut self.p.arena, a);
+        let fb = crate::free::free_dvars_of_dexp(&mut self.p.arena, b);
         Ok(fa.iter().all(|x| fb.iter().any(|y| self.p.arena.same_variable(*x, *y))))
     }
 

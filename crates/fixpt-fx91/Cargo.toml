@@ -8,6 +8,8 @@ license.workspace = true
 fixpt-heap = { path = "../fixpt-heap" }
 fixpt-read = { path = "../fixpt-read" }
 fixpt-core = { path = "../fixpt-core" }
+fixpt-scheme = { path = "../fixpt-scheme" }
+fixpt-runtime = { path = "../fixpt-runtime" }
 
 [dev-dependencies]
 fixpt-conform = { path = "../fixpt-conform" }

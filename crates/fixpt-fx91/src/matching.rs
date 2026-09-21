@@ -37,7 +37,7 @@ enum Mode {
     UnquoteSplicing,
 }
 
-impl Parser<'_> {
+impl Parser {
     pub(crate) fn expand_match(&mut self, s: &Syntax, items: &[Syntax]) -> R<Syntax> {
         if items.len() < 2 {
             return Err(FxError::user(s.span, "match needs a subject"));

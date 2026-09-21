@@ -9,7 +9,7 @@ use crate::check::{kind_eq, Checker};
 use crate::env::TkEntry;
 use crate::error::{FxError, R};
 
-impl Checker<'_> {
+impl Checker {
     pub fn kind_of_dexp(&mut self, id: FxId) -> R<Kind> {
         if let Some(k) = self.p.arena.info(id).kind.clone() {
             return Ok(k);

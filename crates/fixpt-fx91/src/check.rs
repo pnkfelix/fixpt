@@ -12,14 +12,14 @@ use crate::ast::{Arena, Constraint, Fx, FxId, Kind};
 use crate::env::{TkEntry, VarEnv};
 use crate::error::{FxError, R};
 use crate::parse::Parser;
-use fixpt_read::{Interner, Reader, SourceMap, Span, SyntaxProfile};
+use fixpt_read::{Reader, SourceMap, Span, SyntaxProfile};
 
 /// The built-in `fx` module's signature, extracted from `standard.scm` rather
 /// than transcribed. See `reference/fx91-stdmodule.rkt`.
 pub const FX_MODULE: &str = include_str!("fx-module.fx");
 
-pub struct Checker<'a> {
-    pub p: Parser<'a>,
+pub struct Checker {
+    pub p: Parser,
 
     /// Description variables to kinds, value variables to types.
     pub tk_env: VarEnv<TkEntry>,
@@ -59,10 +59,10 @@ pub struct Checker<'a> {
     pub load_base: std::path::PathBuf,
 }
 
-impl<'a> Checker<'a> {
+impl Checker {
     /// Build a checker with the `fx` module installed.
-    pub fn new(arena: &'a mut Arena, interner: &'a mut Interner) -> R<Checker<'a>> {
-        let p = Parser::new(arena, interner);
+    pub fn new() -> R<Checker> {
+        let p = Parser::new();
         let mut c = Checker {
             p,
             tk_env: VarEnv::new(),
@@ -106,9 +106,12 @@ impl<'a> Checker<'a> {
         let signature = {
             let mut sources = SourceMap::new();
             let file = sources.add("fx-module.fx", FX_MODULE);
-            let forms = Reader::new(FX_MODULE, file, SyntaxProfile::FX91, self.p.interner)
+            let mut interner = std::mem::take(&mut self.p.interner);
+            let forms = Reader::new(FX_MODULE, file, SyntaxProfile::FX91, &mut interner)
                 .read_all()
-                .map_err(|e| FxError::fatal(e.span, format!("fx module: {}", e.message)))?;
+                .map_err(|e| FxError::fatal(e.span, format!("fx module: {}", e.message)));
+            self.p.interner = interner;
+            let forms = forms?;
             if forms.len() != 1 {
                 return Err(FxError::fatal(span, "fx-module.fx must hold exactly one form"));
             }
@@ -203,7 +206,7 @@ impl<'a> Checker<'a> {
 
     // ------------------------------------------------------------ shortcuts
     pub fn arena(&mut self) -> &mut Arena {
-        self.p.arena
+        &mut self.p.arena
     }
 
     /// A fresh unification variable, named after its own alpha number.
@@ -250,11 +253,11 @@ impl<'a> Checker<'a> {
 
     /// Render a description the way the conformance goldens do.
     pub fn render_dexp(&self, id: FxId) -> String {
-        let u = crate::unparse::Unparser::new(self.p.arena, self.p.interner);
+        let u = crate::unparse::Unparser::new(&self.p.arena, &self.p.interner);
         u.render(&u.dexp(id))
     }
     pub fn render_exp(&self, id: FxId) -> String {
-        let u = crate::unparse::Unparser::new(self.p.arena, self.p.interner);
+        let u = crate::unparse::Unparser::new(&self.p.arena, &self.p.interner);
         u.render(&u.exp(id))
     }
 }

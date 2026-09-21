@@ -8,6 +8,7 @@
 pub mod equal;
 pub mod error;
 pub mod num;
+pub mod port;
 pub mod prim;
 pub mod print;
 pub mod runtime;

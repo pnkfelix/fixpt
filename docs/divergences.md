@@ -55,8 +55,20 @@ place.
 
 ### Real stream I/O
 
-`input-stream` and `output-stream` are declared by the reference but not
-implemented in either port. `fixpt` will implement them against real files.
+`input-stream` and `output-stream` are declared by the reference but left
+unimplemented in the Racket ports (`fx91-hashlang`'s runtime says so
+explicitly). `fixpt` implements them against real files, so the two corpus
+cases that read `tests.fx` and `tests.list.fx` actually run.
+
+An input port holds the whole file as a heap string with a cursor, rather than
+an OS file handle. That is deliberate: a port is then an ordinary heap object,
+so it survives collection and will survive being written into a heap image
+without carrying a dangling descriptor.
+
+One small extension while implementing it: `quoted-to-sexp` has no case for
+`'()` and would call `fatal` on it, since `(pair? '())` and `(symbol? '())` are
+both false. `fixpt` converts it to an empty `list->sexp`. No corpus case
+reaches the difference.
 
 ### Reference bugs deliberately *reproduced*
 

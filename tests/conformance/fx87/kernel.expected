@@ -1,6 +1,6 @@
 ;;; fixpt FX-87 conformance goldens -- GENERATED, do not edit.
 ;;; regenerate with: reference/regenerate.sh
-;;; source:    tests/conformance/fx87/cases/kernel.fx
+;;; source:    /Users/pnkfelix/Dev/Rust/fixpt/tests/conformance/fx87/cases/kernel.fx
 ;;; reference: GiffordHistory fx-lang/fx87/private/impl.rkt
 #case 1
 #src 3

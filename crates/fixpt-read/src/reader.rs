@@ -55,6 +55,19 @@ impl<'a> Reader<'a> {
         Ok(out)
     }
 
+    /// How far the reader has consumed, in bytes.
+    ///
+    /// A port needs this: reading one datum from a buffered file has to know
+    /// where the next one starts.
+    pub fn position(&self) -> usize {
+        self.pos
+    }
+
+    /// Start reading at `offset` rather than at the beginning.
+    pub fn seek(&mut self, offset: usize) {
+        self.pos = offset;
+    }
+
     /// Read one datum, or `None` at end of input.
     pub fn read(&mut self) -> ReadResult<Option<Syntax>> {
         self.skip_atmosphere()?;

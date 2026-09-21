@@ -37,8 +37,15 @@
            p))
   (lambda (name) (dynamic-require p name)))
 
+;; Must descend into vectors too. FX-91's runtime values nest lists inside
+;; vectors -- `(*sum* tag (*product* #(…)))` -- and a mutable pair left
+;; unconverted there prints in Racket's `{…}` style while its converted
+;; siblings print as `(…)`, which looks like a structural difference and is
+;; not.
 (define (deep->immutable x)
   (cond [(mpair? x) (cons (deep->immutable (mcar x)) (deep->immutable (mcdr x)))]
+        [(pair? x) (cons (deep->immutable (car x)) (deep->immutable (cdr x)))]
+        [(vector? x) (list->vector (map deep->immutable (vector->list x)))]
         [else x]))
 (define (deep->mutable x)
   (cond [(pair? x) (mcons (deep->mutable (car x)) (deep->mutable (cdr x)))]

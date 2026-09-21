@@ -28,41 +28,62 @@ fn print(heap: &Heap, v: Value, write: bool) -> String {
     out
 }
 
-/// Find the nodes that are reachable more than once, so only those get labels.
+/// Find the nodes that lie on a cycle, so only those get datum labels.
+///
+/// R7RS asks for labels where they are needed for the output to be finite, not
+/// wherever structure happens to be shared. Labelling mere sharing is legal but
+/// surprising — a value built twice from the same constant would print as
+/// `#0=…` and `#0#` — so this looks for a node reachable from itself, which is
+/// a depth-first search with the current path marked, not a visit count.
 fn find_shared(heap: &Heap, root: Value) -> Vec<Value> {
-    let mut seen: HashMap<Value, u32> = HashMap::new();
-    let mut shared = Vec::new();
-    let mut stack = vec![root];
+    #[derive(Copy, Clone)]
+    enum Step {
+        Enter(Value),
+        Leave(Value),
+    }
+    let mut on_path: HashMap<Value, ()> = HashMap::new();
+    let mut finished: HashMap<Value, ()> = HashMap::new();
+    let mut cyclic = Vec::new();
+    let mut stack = vec![Step::Enter(root)];
     // A bound on total work, so a pathological structure cannot hang the
-    // printer even if the sharing analysis is somehow defeated.
+    // printer even if the analysis is somehow defeated.
     let mut budget = 1_000_000u32;
-    while let Some(v) = stack.pop() {
+    while let Some(step) = stack.pop() {
         if budget == 0 {
             break;
         }
         budget -= 1;
-        let interesting = v.is_pair() || matches!(heap.obj_type(v), Some(ObjType::Vector));
-        if !interesting {
-            continue;
-        }
-        let count = seen.entry(v).or_insert(0);
-        *count += 1;
-        if *count > 1 {
-            if *count == 2 {
-                shared.push(v);
+        match step {
+            Step::Leave(v) => {
+                on_path.remove(&v);
+                finished.insert(v, ());
             }
-            continue;
-        }
-        if v.is_pair() {
-            stack.push(heap.cdr(v));
-            stack.push(heap.car(v));
-        } else {
-            for i in (0..heap.obj_len(v)).rev() {
-                stack.push(heap.obj_ref(v, i));
+            Step::Enter(v) => {
+                let interesting =
+                    v.is_pair() || matches!(heap.obj_type(v), Some(ObjType::Vector));
+                if !interesting || finished.contains_key(&v) {
+                    continue;
+                }
+                if on_path.contains_key(&v) {
+                    if !cyclic.contains(&v) {
+                        cyclic.push(v);
+                    }
+                    continue;
+                }
+                on_path.insert(v, ());
+                stack.push(Step::Leave(v));
+                if v.is_pair() {
+                    stack.push(Step::Enter(heap.cdr(v)));
+                    stack.push(Step::Enter(heap.car(v)));
+                } else {
+                    for i in (0..heap.obj_len(v)).rev() {
+                        stack.push(Step::Enter(heap.obj_ref(v, i)));
+                    }
+                }
             }
         }
     }
-    shared
+    cyclic
 }
 
 fn put(

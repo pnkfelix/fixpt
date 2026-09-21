@@ -516,7 +516,7 @@
 #src (with (module (define-datatype num (zero unit) (succ num))) (letrec ((two (succ (succ (zero |#U|)))) (one (succ (zero |#U|))) (add (lambda (x y) (match x ((zero~ _) y) ((succ~ x) (succ (add x y))))))) (add two one)))
 #type (select (module (define-datatype num (zero unit) (succ num))) num)
 #effect *UNIF*-779
-#value "(*sum* succ (*product* #({*sum* succ {*product* #({*sum* succ {*product* #({*sum* zero {*product* #(#U)}})}})}})))"
+#value "(*sum* succ (*product* #((*sum* succ (*product* #((*sum* succ (*product* #((*sum* zero (*product* #(#U))))))))))))"
 #end
 #case 87
 #src (with (module (define-abstraction ft (dfunc type) (dlambda ((t type)) t)) (define down down-ft)) (letrec ((num (lambda (x) (down x)))) num))

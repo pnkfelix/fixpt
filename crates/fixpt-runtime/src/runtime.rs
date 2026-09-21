@@ -20,6 +20,8 @@ pub struct Runtime {
     pub interner: Interner,
     pub sources: SourceMap,
     pub out: Sink,
+    /// Where `%open-input-file` resolves a relative path.
+    pub file_base: std::path::PathBuf,
 
     /// Root index of the record type used for R7RS error objects. Held as a
     /// root index rather than a `Value` so it survives collection.
@@ -42,7 +44,14 @@ impl Runtime {
         heap.obj_set(rtd, 1, fields);
         let error_rtd_root = heap.push_root(rtd);
 
-        Runtime { heap, interner, sources: SourceMap::new(), out: Sink::Stdout, error_rtd_root }
+        Runtime {
+            heap,
+            interner,
+            sources: SourceMap::new(),
+            out: Sink::Stdout,
+            file_base: std::path::PathBuf::from("."),
+            error_rtd_root,
+        }
     }
 
     pub fn error_rtd(&self) -> Value {

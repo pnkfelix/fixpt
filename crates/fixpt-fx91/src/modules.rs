@@ -23,7 +23,7 @@ use fixpt_read::{Reader, SourceMap, SyntaxProfile};
 /// descriptions with their definitions, and values with their types.
 type ModuleOfParts = (Vec<FxId>, Vec<Kind>, Vec<FxId>, Vec<FxId>, Vec<FxId>, Vec<FxId>);
 
-impl Checker<'_> {
+impl Checker {
     pub(crate) fn type_of_module(&mut self, id: FxId) -> R<(FxId, FxId)> {
         let span = self.p.arena.span(id);
         let Fx::Module {
@@ -333,6 +333,12 @@ impl Checker<'_> {
         // The extension is checked as an ordinary `with` over the same module.
         let as_with = self.p.arena.add(span, Fx::With { module, body, text });
         let (body_type, body_effect) = self.type_effect_of_exp(as_with)?;
+        // `with` parses its body in place; copy the parsed form back onto the
+        // `extend` node, as `set-extend-body!` does. Without this the code
+        // generator meets an unparsed body and has nothing to emit.
+        if let Fx::With { body: parsed, .. } = self.p.arena.get(as_with).clone() {
+            self.p.arena.set_body(id, parsed);
+        }
         self.require(
             matches!(self.p.arena.get(body_type), Fx::ModuleOf { .. }),
             span,
@@ -413,10 +419,10 @@ impl Checker<'_> {
         let form = {
             let mut sources = SourceMap::new();
             let file = sources.add(path.clone(), text.as_str());
-            let mut reader =
-                Reader::new(&text, file, SyntaxProfile::FX91, self.p.interner);
-            reader
-                .read()
+            let mut interner = std::mem::take(&mut self.p.interner);
+            let result = Reader::new(&text, file, SyntaxProfile::FX91, &mut interner).read();
+            self.p.interner = interner;
+            result
                 .map_err(|e| FxError::user(e.span, format!("{}: {}", path, e.message)))?
                 .ok_or_else(|| FxError::user(span, format!("{path} is empty")))?
         };

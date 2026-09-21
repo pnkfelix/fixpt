@@ -20,7 +20,7 @@ use crate::check::Checker;
 use crate::error::R;
 use crate::free::free_dvars_of_dexp;
 
-impl Checker<'_> {
+impl Checker {
     /// The cached normal form of a description.
     pub fn value_of_dexp(&mut self, id: FxId) -> R<FxId> {
         if let Some(n) = self.p.arena.info(id).norm {
@@ -194,7 +194,7 @@ impl Checker<'_> {
         if !ids.iter().zip(&rands).all(|(i, r)| self.p.arena.same_variable(*i, *r)) {
             return Ok(built);
         }
-        let frees = free_dvars_of_dexp(self.p.arena, rator);
+        let frees = free_dvars_of_dexp(&mut self.p.arena, rator);
         let captures =
             ids.iter().any(|i| frees.iter().any(|f| self.p.arena.same_variable(*i, *f)));
         if captures { Ok(built) } else { Ok(rator) }

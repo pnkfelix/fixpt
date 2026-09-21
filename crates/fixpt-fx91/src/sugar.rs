@@ -33,7 +33,7 @@ fn list(span: Span, items: Vec<Syntax>) -> Syntax {
     if items.is_empty() { Syntax::new(span, Datum::Nil) } else { Syntax::list(span, items) }
 }
 
-impl Parser<'_> {
+impl Parser {
     /// `sugar?`: the symbol `pure`, any symbol containing a dot, or a list
     /// headed by one of the seven sugar forms.
     pub(crate) fn is_sugar(&self, s: &Syntax) -> bool {
@@ -564,7 +564,7 @@ impl Parser<'_> {
 }
 
 /// Free helper so `expand_define_datatype`'s closures can reach it.
-impl Parser<'_> {
+impl Parser {
     pub(crate) fn symbol_pub(&self, s: &Syntax) -> R<Sym> {
         s.as_symbol().ok_or_else(|| FxError::user(s.span, "expected a symbol"))
     }

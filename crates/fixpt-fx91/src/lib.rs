@@ -11,6 +11,7 @@
 
 pub mod ast;
 pub mod check;
+pub mod code;
 pub mod constraints;
 pub mod env;
 pub mod evaluate;
@@ -21,6 +22,7 @@ pub mod free;
 pub mod matching;
 pub mod modules;
 pub mod parse;
+pub mod session;
 pub mod subtype;
 pub mod sugar;
 pub mod syms;
@@ -30,3 +32,4 @@ pub mod unparse;
 pub use ast::{Arena, Fx, FxId, Kind};
 pub use error::{ErrorKind, FxError};
 pub use parse::Parser;
+pub use session::{Fx91Session, Outcome};

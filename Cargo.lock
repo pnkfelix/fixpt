@@ -50,6 +50,8 @@ dependencies = [
  "fixpt-core",
  "fixpt-heap",
  "fixpt-read",
+ "fixpt-runtime",
+ "fixpt-scheme",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-**Status: approved 2026-09-20; M0–M3 implemented, M7 static half complete. See the milestone table in
+**Status: approved 2026-09-20; M0–M3 and M7 complete. See the milestone table in
 §8 and `README.md` for what runs today.**
 
 ## 0. What this is
@@ -420,7 +420,7 @@ you at each boundary rather than disappear for the whole thing.
 | M4 | `vm`: bytecode compiler + VM | same suite passes compiled; differential tests green |
 | M5 | Images & shipping | `fixpt compile`, `fixpt dump-heap`, `fixpt build` → single binary |
 | M6 | `fixpt-fx87` | `fixpt fx87 check` matches reference on the FX-87 corpus; `library/*.fx` run |
-| M7 🔶 | `fixpt-fx91` | **types and effects: 182/182 matching.** Lowering to Core IR, and value conformance, still to do |
+| M7 ✅ | `fixpt-fx91` | **182/182 on all three levels** — parse, type and effect, and evaluated value |
 | M8 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks |
 | M9 | *(deferred)* hygienic `syntax-rules` | derived forms re-expressible as library macros |
 | M10 | *(future)* native code generation | the bytecode/heap-image design is kept amenable to it; not scheduled |

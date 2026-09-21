@@ -24,7 +24,7 @@ use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::free::free_dvars_of_dexp;
 
-impl Checker<'_> {
+impl Checker {
     /// `add-constraint!`
     pub fn add_constraint(&mut self, lhs: FxId, rhs: FxId) -> R<bool> {
         let c = Constraint { lhs, rhs };
@@ -93,8 +93,8 @@ impl Checker<'_> {
         }
         // Two compound effects over the same variables cannot constrain each
         // other further; otherwise they must go to the solver.
-        let fl = free_dvars_of_dexp(self.p.arena, lhs);
-        let fr = free_dvars_of_dexp(self.p.arena, rhs);
+        let fl = free_dvars_of_dexp(&mut self.p.arena, lhs);
+        let fr = free_dvars_of_dexp(&mut self.p.arena, rhs);
         let l_covers = fr.iter().all(|y| fl.iter().any(|x| self.p.arena.same_variable(*x, *y)));
         let r_covers = fl.iter().all(|x| fr.iter().any(|y| self.p.arena.same_variable(*x, *y)));
         Ok(l_covers && r_covers)
@@ -107,7 +107,7 @@ impl Checker<'_> {
     /// with the rest, which records "at least those, possibly more".
     fn obvious_var(&mut self, var: FxId, other: FxId) -> R<bool> {
         let span = self.p.arena.span(var);
-        let frees = free_dvars_of_dexp(self.p.arena, other);
+        let frees = free_dvars_of_dexp(&mut self.p.arena, other);
         let occurs = frees.iter().any(|f| self.p.arena.same_variable(var, *f));
         if !occurs {
             return Ok(self.p.arena.forward(var, other));
@@ -155,8 +155,8 @@ impl Checker<'_> {
         // is exactly the set of constants and variables it mentions.
         let mut normalized: Vec<(Vec<FxId>, Vec<FxId>)> = Vec::with_capacity(cs.len());
         for c in cs {
-            let l = free_dvars_of_dexp(self.p.arena, c.lhs);
-            let r = free_dvars_of_dexp(self.p.arena, c.rhs);
+            let l = free_dvars_of_dexp(&mut self.p.arena, c.lhs);
+            let r = free_dvars_of_dexp(&mut self.p.arena, c.rhs);
             normalized.push((l, r));
         }
         let mut frees: Vec<FxId> = Vec::new();
