@@ -266,3 +266,30 @@ impl Checker {
 pub fn kind_eq(a: &Kind, b: &Kind) -> bool {
     a == b
 }
+
+// ------------------------------------------------------------ enquiry
+
+impl Checker {
+    /// What type belongs at argument `position` of an expression of this type?
+    ///
+    /// Answering it needs the *operator's* type and nothing else — peel the
+    /// `poly` binders, take the formal at that position — so it does not
+    /// require the environment to be enumerable, only checkable. That
+    /// distinction matters: FX-91's environment is keyed by alpha-renamed
+    /// variables, which rules out *searching* by name but not this.
+    ///
+    /// A formal that is still a unification variable is returned as it is.
+    /// Unconstrained is a real answer, and inventing a type for it would not be.
+    pub fn argument_type(&mut self, fun_ty: FxId, position: usize) -> Option<FxId> {
+        let mut head = self.p.arena.resolve(fun_ty);
+        // Peel every layer of polymorphism; the binders stay free, which is
+        // exactly what "this argument could be any type" looks like.
+        while let Fx::Poly { body, .. } = self.p.arena.get(head).clone() {
+            head = self.p.arena.resolve(body);
+        }
+        match self.p.arena.get(head).clone() {
+            Fx::Subr { types, .. } => types.get(position).copied(),
+            _ => None,
+        }
+    }
+}

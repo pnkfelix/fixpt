@@ -166,13 +166,29 @@ fn the_overview_advertises_only_what_works() {
     }
 }
 
-/// A dialect without hole search says so, rather than reporting whatever its
-/// checker makes of the bare `unquote` that `,help` reads as.
+/// FX-91 answers a hole too, and answers it about *its own* language.
+///
+/// The two dialects disagree about `car`: FX-87's takes a pair, FX-91's takes a
+/// list. Help that reported a shared approximation would be wrong for both.
 #[test]
-fn a_dialect_without_hole_search_explains_itself() {
-    let out = repl(Some("fx91"), "(car ,help)\n");
-    assert!(out.contains("searched by name"), "{out}");
+fn fx91_answers_a_hole_about_its_own_types() {
+    let out = repl(Some("fx91"), "(vector-ref (make-vector 3 0) ,help)\n");
+    assert!(out.contains("the hole wants: int"), "{out}");
     assert!(!out.contains("unbound value variable unquote"), "raw error leaked:\n{out}");
+
+    let fx91 = repl(Some("fx91"), "(car ,help)\n");
+    assert!(fx91.contains("(listof t)"), "FX-91's car takes a list:\n{fx91}");
+    let fx87 = repl(Some("fx87"), "(car ,help)\n");
+    assert!(fx87.contains("(pairof t1 t2 r)"), "FX-87's takes a pair:\n{fx87}");
+}
+
+/// What FX-91 *cannot* do is the second half — listing what produces the type —
+/// and it declines exactly that rather than the whole question.
+#[test]
+fn fx91_declines_only_the_half_it_cannot_do() {
+    let out = repl(Some("fx91"), "(cons 1 ,help)\n");
+    assert!(out.contains("the hole wants:"), "the first half works:\n{out}");
+    assert!(out.contains("cannot yet list what produces one"), "{out}");
 }
 
 /// …and `,help` in a *string* is not a hole.

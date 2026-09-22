@@ -20,7 +20,7 @@
 use crate::lineedit::{Line, LineReader};
 use fixpt_engine::Backend;
 use fixpt_fx91::session::{Fx91Session, Outcome};
-use fixpt_read::{Reader, Syntax, SyntaxProfile};
+use fixpt_read::{Datum, Reader, Syntax, SyntaxProfile};
 
 /// Read FX-91 source into forms, using the checker's own interner.
 ///
@@ -114,15 +114,12 @@ pub fn repl(backend: Backend) -> i32 {
             }
         };
         for form in &forms {
-            // FX-91 has no hole search yet — its environment is keyed by
-            // alpha-renamed variables rather than source names. Say that,
-            // rather than letting the checker report a bare `unquote`.
+            // A `,help` hole asks what belongs at that position.
             let names = |s: fixpt_read::Sym| session.checker.p.interner.name(s).to_string();
             if crate::help::mentions_hole(form, &names) {
-                println!(
-                    "; a `,help` hole needs an environment that can be searched by \
-                     name — `--dialect fx87` has one"
-                );
+                for line in answer_hole(&mut session, form) {
+                    println!("{line}");
+                }
                 continue;
             }
             match session.run(form) {
@@ -182,15 +179,12 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
             }
         };
         for form in &forms {
-            // FX-91 has no hole search yet — its environment is keyed by
-            // alpha-renamed variables rather than source names. Say that,
-            // rather than letting the checker report a bare `unquote`.
+            // A `,help` hole asks what belongs at that position.
             let names = |s: fixpt_read::Sym| session.checker.p.interner.name(s).to_string();
             if crate::help::mentions_hole(form, &names) {
-                println!(
-                    "; a `,help` hole needs an environment that can be searched by \
-                     name — `--dialect fx87` has one"
-                );
+                for line in answer_hole(&mut session, form) {
+                    println!("{line}");
+                }
                 continue;
             }
             match session.run(form) {
@@ -259,6 +253,12 @@ impl crate::help::Helpful for Fx91Session {
         "FX-91"
     }
 
+    /// Holes work, though only the first half of the answer: FX-91 can say
+    /// what a position wants, not yet what produces one.
+    fn holes(&self) -> bool {
+        true
+    }
+
     fn describe(&mut self, name: &str) -> Vec<String> {
         let file = self.scheme.rt.sources.add("<help>", name);
         let mut interner = std::mem::take(&mut self.checker.p.interner);
@@ -285,4 +285,55 @@ impl crate::help::Helpful for Fx91Session {
         out.dedup();
         out
     }
+}
+
+
+// ----------------------------------------------- help inside an expression
+
+/// `,help` written inside a form, asking what belongs there.
+///
+/// FX-91 can say *what the hole wants*, because that needs only the operator's
+/// type — peel the `poly` binders, take the formal at that position. What it
+/// cannot yet do is the second half, listing what produces such a value: that
+/// needs the environment enumerated by source name, and FX-91's is keyed by
+/// alpha-renamed variables. The two halves are genuinely different questions
+/// and only the second is blocked, so only the second is declined.
+fn answer_hole(session: &mut Fx91Session, form: &Syntax) -> Vec<String> {
+    let names = |s: fixpt_read::Sym| session.checker.p.interner.name(s).to_string();
+    let Datum::List { items, tail: None } = &form.datum else {
+        return vec!["; a hole makes sense inside an application".into()];
+    };
+    let Some(at) = items.iter().position(|i| crate::help::mentions_hole(i, &names)) else {
+        return vec!["; no hole found".into()];
+    };
+    if at == 0 {
+        return vec![
+            "; FX-91 cannot yet search for an operator by argument type — \
+             `--dialect fx87` can"
+                .into(),
+        ];
+    }
+    let items = items.clone();
+    session.checker.reset();
+    let alpha = session.checker.p.init_alpha;
+    let Ok(node) = session.checker.p.parse_exp(alpha, &items[0]) else {
+        return vec![format!("; cannot work out the type of {}", render(session, &items[0]))];
+    };
+    let Ok(ty) = session.checker.type_of_exp(node) else {
+        return vec![format!("; cannot work out the type of {}", render(session, &items[0]))];
+    };
+    match session.checker.argument_type(ty, at - 1) {
+        Some(want) => vec![
+            format!("; the hole wants: {}", session.checker.render_dexp(want)),
+            "; (FX-91 cannot yet list what produces one — `--dialect fx87` can)".into(),
+        ],
+        None => vec![format!(
+            "; {} takes no argument in that position",
+            render(session, &items[0])
+        )],
+    }
+}
+
+fn render(session: &Fx91Session, form: &Syntax) -> String {
+    fixpt_read::write_syntax(form, &session.checker.p.interner)
 }
