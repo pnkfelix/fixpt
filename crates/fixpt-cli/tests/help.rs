@@ -145,3 +145,39 @@ fn a_form_without_a_hole_is_evaluated_normally() {
     assert!(out.contains("3 : int ! pure"), "{out}");
     assert!(!out.contains("the hole"), "{out}");
 }
+
+/// The overview must describe what the dialect can actually do.
+///
+/// It used to list `,fits` everywhere, including in the two dialects that
+/// decline it — a menu advertising a dish the kitchen does not serve.
+#[test]
+fn the_overview_advertises_only_what_works() {
+    let fx87 = repl(Some("fx87"), ",help\n");
+    assert!(fx87.contains(",fits TYPE"), "FX-87 can search by type:\n{fx87}");
+    assert!(fx87.contains("inside a form"), "and answer holes:\n{fx87}");
+
+    for d in [None, Some("fx91")] {
+        let out = repl(d, ",help\n");
+        assert!(!out.contains(",fits TYPE "), "{d:?} cannot do this:\n{out}");
+        assert!(
+            out.contains("which `--dialect fx87` has"),
+            "{d:?} should say where it lives:\n{out}"
+        );
+    }
+}
+
+/// A dialect without hole search says so, rather than reporting whatever its
+/// checker makes of the bare `unquote` that `,help` reads as.
+#[test]
+fn a_dialect_without_hole_search_explains_itself() {
+    let out = repl(Some("fx91"), "(car ,help)\n");
+    assert!(out.contains("searched by name"), "{out}");
+    assert!(!out.contains("unbound value variable unquote"), "raw error leaked:\n{out}");
+}
+
+/// …and `,help` in a *string* is not a hole.
+#[test]
+fn a_comma_help_inside_a_string_is_just_text() {
+    let out = repl(Some("fx91"), "\",help\"\n");
+    assert!(!out.contains("searched by name"), "text was mistaken for a hole:\n{out}");
+}

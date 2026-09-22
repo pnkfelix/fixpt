@@ -114,6 +114,17 @@ pub fn repl(backend: Backend) -> i32 {
             }
         };
         for form in &forms {
+            // FX-91 has no hole search yet — its environment is keyed by
+            // alpha-renamed variables rather than source names. Say that,
+            // rather than letting the checker report a bare `unquote`.
+            let names = |s: fixpt_read::Sym| session.checker.p.interner.name(s).to_string();
+            if crate::help::mentions_hole(form, &names) {
+                println!(
+                    "; a `,help` hole needs an environment that can be searched by \
+                     name — `--dialect fx87` has one"
+                );
+                continue;
+            }
             match session.run(form) {
                 Ok(outcome) => {
                     let printed = std::mem::take(&mut session.printed);
@@ -171,6 +182,17 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
             }
         };
         for form in &forms {
+            // FX-91 has no hole search yet — its environment is keyed by
+            // alpha-renamed variables rather than source names. Say that,
+            // rather than letting the checker report a bare `unquote`.
+            let names = |s: fixpt_read::Sym| session.checker.p.interner.name(s).to_string();
+            if crate::help::mentions_hole(form, &names) {
+                println!(
+                    "; a `,help` hole needs an environment that can be searched by \
+                     name — `--dialect fx87` has one"
+                );
+                continue;
+            }
             match session.run(form) {
                 Ok(outcome) => {
                     print!("{}", std::mem::take(&mut session.printed));

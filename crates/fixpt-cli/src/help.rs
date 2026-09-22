@@ -56,6 +56,31 @@ pub fn parse(line: &str) -> Option<Ask> {
     }
 }
 
+/// Does this form contain a `,help` hole?
+///
+/// Shared so that a dialect which does not support holes can say so, rather
+/// than reporting whatever its checker makes of the bare `unquote` that
+/// `,help` reads as. Structural rather than a text search: `",help"` can appear
+/// inside a string perfectly legitimately.
+pub fn mentions_hole(form: &fixpt_read::Syntax, name_of: &dyn Fn(fixpt_read::Sym) -> String) -> bool {
+    use fixpt_read::Datum;
+    match &form.datum {
+        Datum::List { items, tail } => {
+            if items.len() == 2
+                && let (Datum::Symbol(u), Datum::Symbol(h)) = (&items[0].datum, &items[1].datum)
+                && name_of(*u) == "unquote"
+                && matches!(name_of(*h).as_str(), "help" | "?")
+            {
+                return true;
+            }
+            items.iter().any(|i| mentions_hole(i, name_of))
+                || tail.as_ref().is_some_and(|t| mentions_hole(t, name_of))
+        }
+        Datum::Vector(items) => items.iter().any(|i| mentions_hole(i, name_of)),
+        _ => false,
+    }
+}
+
 /// What a dialect can tell you.
 ///
 /// Every method returns lines to print. An empty result and an unsupported
@@ -65,6 +90,16 @@ pub fn parse(line: &str) -> Option<Ask> {
 pub trait Helpful {
     /// The dialect's name, for the overview.
     fn dialect(&self) -> &'static str;
+    /// Whether the dialect has an environment of types to search, so that
+    /// `,fits` and `,returns` mean anything. Listing a command that cannot
+    /// work is worse than not having it.
+    fn typed(&self) -> bool {
+        false
+    }
+    /// Whether `,help` may be written inside a form to ask about that position.
+    fn holes(&self) -> bool {
+        false
+    }
     fn describe(&mut self, name: &str) -> Vec<String>;
     fn apropos(&mut self, pattern: &str) -> Vec<String>;
     /// `None` when the dialect has no types to search.
@@ -128,14 +163,27 @@ fn show(header: &str, lines: Vec<String>, empty: &str) {
 
 fn overview(h: &dyn Helpful) {
     println!("; {} — commands", h.dialect());
-    for (cmd, what) in [
+    let mut rows: Vec<(&str, &str)> = vec![
         (",help NAME", "what a name is"),
         (",apropos TEXT", "names containing TEXT"),
-        (",fits TYPE", "what accepts a value of that type"),
-        (",returns TYPE", "what produces one"),
-        (",quit", "leave"),
-    ] {
+    ];
+    if h.typed() {
+        rows.push((",fits TYPE", "what accepts a value of that type"));
+        rows.push((",returns TYPE", "what produces one"));
+    }
+    rows.push((",quit", "leave"));
+    for (cmd, what) in rows {
         println!("  {cmd:<16} {what}");
+    }
+    if h.holes() {
+        println!("; `,help` inside a form asks what belongs at that position:");
+        println!("    (vector-ref (make-vector 3 0) ,help)");
+    }
+    if !h.typed() {
+        println!(
+            "; `,fits` and `,returns` search an environment of types, which \
+             `--dialect fx87` has."
+        );
     }
     println!("; anything else is evaluated.");
 }

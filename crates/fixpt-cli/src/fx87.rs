@@ -211,6 +211,14 @@ impl crate::help::Helpful for Fx87Session {
         "FX-87"
     }
 
+    fn typed(&self) -> bool {
+        true
+    }
+
+    fn holes(&self) -> bool {
+        true
+    }
+
     fn describe(&mut self, name: &str) -> Vec<String> {
         let Some(sym) = self.checker.p.interner.get(name) else { return Vec::new() };
         match self.checker.describe(sym) {
