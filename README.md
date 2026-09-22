@@ -24,7 +24,7 @@ from the references.
 | **M3** Core IR, Scheme expander, AST engine | done |
 | **M4** bytecode compiler and VM | **done: the FX-91 corpus passes compiled as well as interpreted** |
 | **M5** heap dumping and single-binary builds | **done: image beside the runtime, or one standalone executable** |
-| **M6** FX-87 front end | |
+| **M6** FX-87 front end | **done: 161/161 parse, 160/161 types and effects, 123/123 values** |
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
 
 ```
@@ -146,8 +146,27 @@ fx91> ([ (plambda ((t type)) (lambda ((x t)) x)) int ] 42)
 ```
 
 `,code` in the REPL shows the Scheme each form lowers to. `fixpt --dialect fx91
-run FILE` runs a program without the annotations. FX-87 is not wired up yet
-(M6) and says so rather than doing something misleading.
+run FILE` runs a program without the annotations.
+
+`--dialect fx87` works the same way, reporting in the 1987 top level's layout —
+value first, then ` : type ! effect`:
+
+```
+$ fixpt --dialect fx87 repl
+fx87> (+ 3 4)
+7 : int ! pure
+
+fx87> (lambda ((r (ref int @!))) (get r))
+#<procedure> : (subr (read @!) ((ref int @!)) int) ! pure
+
+fx87> (let ((x 3 @!)) (set! x 4))
+#u : unit ! pure
+```
+
+The last one is effect masking: the cell really is allocated and written, but
+nothing outside can observe it, so the effect is `pure`. The middle one is the
+same idea from the other side — the lambda is pure, and the `read` it will
+perform lives in its *type*.
 
 ## Layout
 

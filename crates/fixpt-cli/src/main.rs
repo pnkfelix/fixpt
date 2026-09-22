@@ -6,6 +6,7 @@
 //! short. The same reasoning produced [`lineedit`], which is why this binary
 //! has no external dependencies at all.
 
+mod fx87;
 mod fx91;
 mod image_run;
 mod lineedit;
@@ -30,14 +31,14 @@ usage:
   fixpt help                     show this
 
 options:
-  --dialect scheme|fx91          source language (default: scheme)
+  --dialect scheme|fx87|fx91     source language (default: scheme)
   --engine bytecode|ast          execution engine (default: bytecode)
   --main NAME                    an image's entry point (default: main)
 
-`--dialect fx91` selects the FX-91 language, not merely its reader: a form is
-type- and effect-checked, lowered to Scheme and run on the same engine, and the
-REPL shows the inferred type and effect above each value. FX-87 is not wired up
-yet.
+`--dialect fx87` and `--dialect fx91` select a *language*, not merely its
+reader: a form is type- and effect-checked, erased to Scheme and run on the same
+engine. Each REPL reports in its own reference's layout — FX-91 puts the type
+and effect above the value, FX-87 after it.
 
 An image built with `build` is a program in its own right: it carries its own
 heap, needs no `fixpt` on the target, and runs its entry point when invoked.
@@ -65,13 +66,7 @@ fn run(args: &[String]) -> i32 {
     let dialect = match flags.dialect.as_deref() {
         None | Some("scheme") => Dialect::Scheme,
         Some("fx91") => Dialect::Fx91,
-        Some("fx87") => {
-            eprintln!(
-                "fixpt: the FX-87 front end is not implemented yet (M6); \
-                 `--dialect fx91` and the default Scheme both work"
-            );
-            return 2;
-        }
+        Some("fx87") => Dialect::Fx87,
         Some(name) => {
             eprintln!("fixpt: unknown dialect `{name}` (want scheme or fx91)");
             return 2;
@@ -96,6 +91,7 @@ fn run(args: &[String]) -> i32 {
         }
         Some("repl") => match dialect {
             Dialect::Scheme => repl(profile, backend),
+            Dialect::Fx87 => fx87::repl(backend),
             Dialect::Fx91 => fx91::repl(backend),
         },
         Some("run") => {
@@ -104,6 +100,7 @@ fn run(args: &[String]) -> i32 {
                 return 2;
             }
             match dialect {
+                Dialect::Fx87 => fx87::run_files(backend, &rest[1..]),
                 Dialect::Fx91 => fx91::run_files(backend, &rest[1..]),
                 Dialect::Scheme => match run_files(profile, backend, &rest[1..]) {
                     Ok(_) => 0,
@@ -119,8 +116,10 @@ fn run(args: &[String]) -> i32 {
                 eprintln!("fixpt eval: needs an expression");
                 return 2;
             }
-            if dialect == Dialect::Fx91 {
-                return fx91::eval(backend, &rest[1..].join(" "));
+            match dialect {
+                Dialect::Fx87 => return fx87::eval(backend, &rest[1..].join(" ")),
+                Dialect::Fx91 => return fx91::eval(backend, &rest[1..].join(" ")),
+                Dialect::Scheme => {}
             }
             let mut session = Session::with_backend(backend);
             session.profile = profile;
@@ -172,6 +171,7 @@ fn run(args: &[String]) -> i32 {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Dialect {
     Scheme,
+    Fx87,
     Fx91,
 }
 

@@ -72,15 +72,59 @@ fn polymorphism_and_projection_work() {
     assert!(out.contains(": int") && out.contains("= 42"), "{out}");
 }
 
+fn fx87(args: &[&str], stdin: &str) -> (bool, String, String) {
+    use std::io::Write as _;
+    let mut child = Command::new(FIXPT)
+        .args(["--dialect", "fx87"])
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    child.stdin.take().expect("stdin is piped").write_all(stdin.as_bytes()).expect("can write");
+    let out = child.wait_with_output().expect("fixpt finishes");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// FX-87 reports in its own reference's layout — value first, then
+/// ` : type ! effect` — which is not FX-91's, and the difference is kept.
 #[test]
-fn fx87_says_it_is_not_ready_rather_than_misbehaving() {
-    let out = Command::new(FIXPT)
-        .args(["--dialect", "fx87", "eval", "1"])
-        .output()
-        .expect("fixpt runs");
-    assert!(!out.status.success());
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("not implemented yet"), "unclear message: {err}");
+fn fx87_checks_types_and_effects() {
+    let (ok, out, err) = fx87(&["eval", "(+ 1 2)"], "");
+    assert!(ok, "{err}");
+    assert_eq!(out.trim(), "3 : int ! pure");
+
+    // A latent effect: the lambda is pure, the `read` is in its type.
+    let (_, out, _) = fx87(&["eval", "(lambda ((r (ref int @!))) (get r))"], "");
+    assert!(out.contains("(subr (read @!) ((ref int @!)) int) ! pure"), "{out}");
+
+    // And masking: a private mutable cell costs nothing observable.
+    let (_, out, _) = fx87(&["eval", "(let ((x 3 @!)) (set! x 4))"], "");
+    assert!(out.contains("unit ! pure"), "{out}");
+}
+
+/// The rule that licenses compiling FX more aggressively than Scheme.
+#[test]
+fn fx87_rejects_assigning_a_standard_binding() {
+    let (ok, _, err) = fx87(&["eval", "(set! + -)"], "");
+    assert!(!ok, "assigning a standard binding should fail");
+    assert!(err.contains("mutable variable"), "{err}");
+}
+
+/// `,code` shows the erased Scheme *with* the metadata the checker proved —
+/// which is the point of carrying it as inert data: it is inspectable.
+#[test]
+fn fx87_shows_the_metadata_it_emits() {
+    let (ok, out, err) = fx87(&["repl"], ",code\n(+ 1 2)\n");
+    assert!(ok, "{err}");
+    assert!(out.contains("%fx-note"), "no metadata in the erased code:\n{out}");
+    assert!(out.contains("integrable"), "{out}");
+    assert!(out.contains("basis checked"), "the basis should be recorded:\n{out}");
 }
 
 #[test]

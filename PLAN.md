@@ -1,6 +1,7 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-**Status: approved 2026-09-20; M0–M5 and M7 complete. See the milestone table in
+**Status: approved 2026-09-20; M0–M7 complete — the three deliverables of §0 are
+done. See the milestone table in
 §8 and `README.md` for what runs today.**
 
 ## 0. What this is
@@ -419,7 +420,7 @@ you at each boundary rather than disappear for the whole thing.
 | M3 ✅ | `fixpt-core` + `fixpt-runtime` + `fixpt-scheme` + `interp` | `fixpt repl` works: bignums, rationals, proper tail calls, re-entrant `call/cc`, `dynamic-wind`, `guard`, records, promises. Green under `gc-stress` |
 | M4 ✅ | `vm`: bytecode compiler + VM | flat closures, assignment conversion, 19 opcodes. FX-91's 182 cases pass **compiled as well as interpreted**; 9 differential tests require both engines to agree on values, output *and* error text; ~1.6× faster |
 | M5 ✅ | Images & shipping | Core IR lives in the heap, so an image is resumable. `fixpt dump-heap` (image beside the runtime), `fixpt build` (one standalone executable, no `fixpt` needed on the target), `fixpt run-image` (either). An image records which engine made it, so nothing has to be told |
-| M6 | `fixpt-fx87` | `fixpt fx87 check` matches reference on the FX-87 corpus; `library/*.fx` run |
+| M6 ✅ | `fixpt-fx87` | 161 cases: **161/161 parse, 160/161 type and effect, 123/123 value** of those the archive's evaluating path can answer. Driven from the CLI as `fixpt --dialect fx87 repl\|run\|eval` |
 | M7 ✅ | `fixpt-fx91` | **182/182 on all three levels** — parse, type and effect, and evaluated value. Driven from the CLI: `fixpt --dialect fx91 repl\|run\|eval`, presenting results in the 1991 top level's `:`/`!`/`=` notation |
 | M8 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks (`cargo run --release --example engines` is the start). Collector workloads from Larceny's `test/GC` already landed in `tests/gc_workloads.rs` |
 | M9 | *(deferred)* hygienic `syntax-rules` | derived forms re-expressible as library macros |
