@@ -170,6 +170,31 @@ saying so alongside `not?` and `and?` would bury the answer.
 Scheme declines `,fits` rather than returning nothing — "no results" and "I
 cannot ask that" are different answers, and only one of them is true.
 
+`,help` can also be written *inside* a form, asking what belongs at that
+position rather than what a name means:
+
+```
+fx87> (vector-ref (make-vector 3 0) ,help)
+; the hole wants: int
+; what produces one:
+  abs : (subr pure (int) int)
+  string-length : (poly ((r region)) (subr pure ((string r)) int))
+  …
+
+fx87> (,help (cons 1 2))
+; the hole is applied to a (pairof int int @=)
+  car : …   cdr : …   set-car! : …
+```
+
+The first argument pins the element type, so the *second* is asked about as an
+index rather than as "anything". A hole nothing constrains says so —
+`(car ,help)` reports `(pairof t1 t2 r)` rather than inventing something.
+
+This needs the form to be syntactically complete, which is not how anyone types
+it: `(vector-ref v ,help` — asking while still writing — cannot be read at all.
+The information wanted is in the *parser's stack* rather than in the text, which
+is [`TODO.md`](TODO.md) §1's third and sharpest motivation.
+
 ## Trying FX-91
 
 `--dialect fx91` selects the *language*, not just its reader: each form is

@@ -70,6 +70,40 @@ through, and it is what `form_status` answers with, so the two can be
 differentially tested against each other on the same inputs, exactly as the two
 engines are.
 
+**Why it keeps coming up.** Three separate features have now wanted the
+parser's state *mid-input*, which is the thing a checkpointing reader has and a
+batch reader does not:
+
+1. deciding where a form ends (§8's prerequisite, solved instead by re-reading);
+2. per-keystroke highlighting, which makes re-reading routine rather than
+   occasional;
+3. **contextual help at a hole**, which is the sharpest of the three.
+
+`,help` written inside a form asks what belongs there:
+
+```text
+fx87> (vector-ref (make-vector 3 0) ,help)
+; the hole wants: int
+```
+
+That works because the parentheses balance, so the form can be read and
+checked. But nobody types it that way. The natural gesture is
+
+```text
+fx87> (vector-ref (make-vector 3 0) ,help
+```
+
+— ask while still writing, before the form is finished — and that cannot be
+read at all: `unterminated list, expected ')'`. The information needed is not
+in the text, it is in the *parser's stack*: "argument 2 of `vector-ref`, whose
+first argument was a `(vectorof int r)`". An eager reader holding a continuation
+per checkpoint has exactly that at the cursor, for nothing. Re-reading a
+complete form recovers it only when a complete form exists.
+
+So the entry is no longer only about backspace. The interaction it enables —
+asking what goes here, *here* being wherever the cursor is — is not available
+any other way.
+
 **Why this came up.** The REPL used to decide where a form ended by counting
 parentheses in `fixpt-cli`, in a helper that was a second, ad-hoc s-expression
 scanner sitting beside the real one. It did not know that the `)` in `#| ) |#`

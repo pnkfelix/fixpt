@@ -11,7 +11,7 @@
 use crate::lineedit::{Line, LineReader};
 use fixpt_engine::Backend;
 use fixpt_fx87::session::{Fx87Session, Outcome};
-use fixpt_read::{Reader, Syntax, SyntaxProfile};
+use fixpt_read::{Datum, Reader, Syntax, SyntaxProfile};
 
 /// Read FX-87 source into forms, using the checker's own interner.
 fn read(session: &mut Fx87Session, name: &str, text: &str) -> Result<Vec<Syntax>, String> {
@@ -99,6 +99,14 @@ pub fn repl(backend: Backend) -> i32 {
             }
         };
         for form in &forms {
+            // A `,help` written inside the form asks about the hole rather
+            // than about the whole expression.
+            if let Some(lines) = answer_hole(&mut session, form) {
+                for l in lines {
+                    println!("{l}");
+                }
+                continue;
+            }
             match session.run(form) {
                 Ok(outcome) => {
                     let printed = std::mem::take(&mut session.printed);
@@ -291,4 +299,87 @@ fn render(s: &Fx87Session, found: Vec<fixpt_fx87::check::Found>) -> Vec<String> 
         ));
     }
     out
+}
+
+// ----------------------------------------------- help inside an expression
+
+/// A `,help` written *inside* a form, asking what belongs there.
+///
+/// ```text
+/// fx87> (vector-ref (make-vector 3 0) ,help)
+/// ; the hole wants: int
+/// ```
+///
+/// This is the contextual version of `,fits`, and the difference matters: the
+/// hole is not "anything at all", it is one particular argument of one
+/// particular subroutine, and the arguments already written have often pinned
+/// down what the rest must be. The checker answers that question directly —
+/// see [`Checker::expected_argument`].
+///
+/// The marker is `(unquote help)`, which is what `,help` reads as. That costs
+/// nothing in the reader and collides only with someone writing `,help` inside
+/// a quasiquote, which FX-87 does not have.
+fn hole_position(session: &Fx87Session, form: &Syntax) -> Option<(Vec<Syntax>, usize)> {
+    let Datum::List { items, tail: None } = &form.datum else { return None };
+    let is_hole = |s: &Syntax| match &s.datum {
+        Datum::List { items, tail: None } if items.len() == 2 => {
+            matches!((&items[0].datum, &items[1].datum),
+                (Datum::Symbol(u), Datum::Symbol(h))
+                    if session.checker.p.interner.name(*u) == "unquote"
+                        && matches!(session.checker.p.interner.name(*h), "help" | "?"))
+        }
+        _ => false,
+    };
+    let at = items.iter().position(is_hole)?;
+    Some((items.clone(), at))
+}
+
+/// Answer a hole, or `None` if this form has none.
+fn answer_hole(session: &mut Fx87Session, form: &Syntax) -> Option<Vec<String>> {
+    let (items, at) = hole_position(session, form)?;
+    if at == 0 {
+        // `(,help x y)` — the hole is the operator. What takes these?
+        let Some(first) = items.get(1) else {
+            return Some(vec!["; a hole in operator position needs an argument to go on".into()]);
+        };
+        let ty = type_of(session, first)?;
+        let found = session.checker.accepting(ty, 0);
+        let mut out = vec![format!("; the hole is applied to a {}", show(session, ty))];
+        out.extend(render(session, found));
+        return Some(out);
+    }
+
+    // `(f a … ,help … )` — the hole is an argument.
+    let fun_ty = type_of(session, &items[0])?;
+    let mut known = Vec::new();
+    for (i, arg) in items.iter().enumerate().skip(1) {
+        if i == at {
+            continue;
+        }
+        if let Some(t) = type_of(session, arg) {
+            known.push((i - 1, t));
+        }
+    }
+    let want = session.checker.expected_argument(fun_ty, &known, at - 1)?;
+    let mut out = vec![format!("; the hole wants: {}", show(session, want))];
+    let found = session.checker.returning(want);
+    let lines = render(session, found);
+    if lines.is_empty() {
+        out.push("(nothing in the environment produces one)".into());
+    } else {
+        out.push("; what produces one:".into());
+        out.extend(lines);
+    }
+    Some(out)
+}
+
+/// The type of one subexpression, or `None` if it does not check.
+fn type_of(session: &mut Fx87Session, form: &Syntax) -> Option<fixpt_fx87::DescId> {
+    let env = session.checker.env.clone();
+    let exp = session.checker.p.parse_exp(form, &Default::default()).ok()?;
+    session.checker.check(exp, &env).ok().map(|d| d.ty)
+}
+
+fn show(session: &Fx87Session, ty: fixpt_fx87::DescId) -> String {
+    fixpt_fx87::unparse::unparse(&session.checker.p.arena, &session.checker.p.interner, ty)
 }

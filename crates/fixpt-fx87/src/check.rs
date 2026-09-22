@@ -1089,6 +1089,39 @@ impl Checker {
         matches!(self.p.arena.get(d), Desc::Var(v) if unknowns.contains(v))
     }
 
+    /// What type belongs at argument `position` of something of type `fun_ty`,
+    /// given the types of the arguments that *are* written.
+    ///
+    /// This is what makes help contextual rather than a lookup. In
+    /// `(vector-ref v ,help)` the hole is not "anything an `int` could be" — it
+    /// is the second argument of `vector-ref`, and the first argument has
+    /// already pinned the element type. So the known arguments are matched
+    /// first, and their solution substituted into the formal being asked about.
+    /// Whatever stays a variable really is unconstrained, and says so.
+    pub fn expected_argument(
+        &mut self,
+        fun_ty: DescId,
+        known: &[(usize, DescId)],
+        position: usize,
+    ) -> Option<DescId> {
+        let (vars, formals, _) = self.open_subr(fun_ty)?;
+        let unknowns: HashSet<Sym> = vars.into_iter().collect();
+        let mut solution = std::collections::HashMap::new();
+        for (i, actual) in known {
+            let Some(formal) = formals.get(*i).copied() else { continue };
+            let formal = self.eval_deep(formal);
+            let actual = self.eval_deep(*actual);
+            // A failure here is not fatal: the argument may itself be wrong,
+            // and the hole is still worth describing as best it can be.
+            self.match_desc(formal, actual, &unknowns, &mut solution, &mut Vec::new());
+        }
+        // `vsubr` takes every argument at one type, so any position asks the
+        // same question.
+        let formal = formals.get(position).or_else(|| formals.last()).copied()?;
+        let filled = eval::substitute(&mut self.p.arena, formal, &solution);
+        Some(self.eval_deep(filled))
+    }
+
     /// Bindings whose result is a value of type `ty`.
     pub fn returning(&mut self, ty: DescId) -> Vec<Found> {
         let ty = self.eval_deep(ty);

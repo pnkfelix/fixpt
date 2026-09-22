@@ -107,3 +107,41 @@ fn only_real_commands_are_intercepted() {
     let out = repl(None, "(define x 5)\n`(1 ,x)\n");
     assert!(out.contains("(1 5)"), "unquote was swallowed:\n{out}");
 }
+
+/// `,help` written *inside* a form asks about that position rather than about
+/// the whole expression.
+#[test]
+fn a_hole_reports_what_belongs_in_it() {
+    // The first argument pins the element type, so the *second* is an index.
+    let out = repl(Some("fx87"), "(vector-ref (make-vector 3 0) ,help)\n");
+    assert!(out.contains("the hole wants: int"), "{out}");
+    // And it goes on to say what produces one.
+    assert!(out.contains("string-length :"), "{out}");
+}
+
+#[test]
+fn an_unconstrained_hole_says_so_rather_than_guessing() {
+    // `car` constrains its argument only to be some pair, and the answer
+    // reports exactly that rather than inventing a type.
+    let out = repl(Some("fx87"), "(car ,help)\n");
+    assert!(out.contains("(pairof t1 t2 r)"), "{out}");
+}
+
+/// A hole in operator position asks the other question: what can be applied to
+/// the arguments that are written?
+#[test]
+fn a_hole_in_operator_position_searches_by_argument() {
+    let out = repl(Some("fx87"), "(,help (cons 1 2))\n");
+    assert!(out.contains("applied to a (pairof int int @=)"), "{out}");
+    for name in ["car", "cdr", "set-car!"] {
+        assert!(out.contains(&format!("{name} :")), "{name} missing:\n{out}");
+    }
+}
+
+/// A form with no hole is still a program.
+#[test]
+fn a_form_without_a_hole_is_evaluated_normally() {
+    let out = repl(Some("fx87"), "(+ 1 2)\n");
+    assert!(out.contains("3 : int ! pure"), "{out}");
+    assert!(!out.contains("the hole"), "{out}");
+}
