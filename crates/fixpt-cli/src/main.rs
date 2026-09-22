@@ -6,6 +6,7 @@
 //! short. The same reasoning produced [`lineedit`], which is why this binary
 //! has no external dependencies at all.
 
+mod help;
 mod fx87;
 mod fx91;
 mod image_run;
@@ -294,7 +295,7 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
         Backend::Bytecode => "bytecode engine",
     };
     println!("fixpt {} — {} reader, {engine}", env!("CARGO_PKG_VERSION"), profile.name);
-    println!("(an expression, or ^D to leave)");
+    println!("(an expression, `,help` for commands, or ^D to leave)");
 
     let mut reader = LineReader::new(".fixpt_history", profile);
     loop {
@@ -305,12 +306,89 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
                 return 0;
             }
             Line::Interrupted => continue,
+            Line::Form(text) if help::parse(&text).is_some() => {
+                let ask = help::parse(&text).expect("just checked");
+                help::answer(&mut SchemeHelp(&session), &ask);
+            }
             Line::Form(text) => match session.eval_to_string("<repl>", &text) {
                 Ok(v) => println!("{v}"),
                 Err(e) => eprintln!("{e}"),
             },
         }
     }
+}
+
+/// Scheme's answer to the same questions.
+///
+/// Less than FX can say, and the difference is the point: without types there
+/// is no way to ask what accepts a value, so `,fits` reports that it needs a
+/// typed dialect rather than returning nothing. What Scheme *does* know is the
+/// primitive table — every name with its arity — and which globals are bound.
+struct SchemeHelp<'a>(&'a Session);
+
+impl help::Helpful for SchemeHelp<'_> {
+    fn dialect(&self) -> &'static str {
+        "Scheme"
+    }
+
+    fn describe(&mut self, name: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(i) = fixpt_runtime::prim::lookup(name) {
+            let d = fixpt_runtime::prim::def(i);
+            out.push(format!("{name} — a primitive, {}", arity(d.min, d.max)));
+        }
+        let heap = &self.0.rt.heap;
+        if let Some(sym) = heap.intern_existing(name) {
+            let v = heap.global(heap.symbol_global_slot(sym));
+            if !v.is_unbound() && out.is_empty() {
+                out.push(match arity_of_closure(self.0, v) {
+                    Some(text) => format!("{name} — a procedure, {text}"),
+                    None => format!("{name} = {}", fixpt_runtime::write_value(heap, v)),
+                });
+            }
+        }
+        out
+    }
+
+    fn apropos(&mut self, pattern: &str) -> Vec<String> {
+        let mut out: Vec<String> = bound_names(self.0)
+            .into_iter()
+            .filter(|n| n.contains(pattern))
+            .map(|n| match fixpt_runtime::prim::lookup(&n) {
+                Some(i) => {
+                    let d = fixpt_runtime::prim::def(i);
+                    format!("{n} — a primitive, {}", arity(d.min, d.max))
+                }
+                None => n,
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+fn arity(min: usize, max: Option<usize>) -> String {
+    match max {
+        Some(m) if m == min => format!("{min} argument(s)"),
+        Some(m) => format!("{min} to {m} arguments"),
+        None => format!("{min} or more arguments"),
+    }
+}
+
+/// A compiled or interpreted closure's arity, read off its code object.
+fn arity_of_closure(session: &Session, v: fixpt_heap::Value) -> Option<String> {
+    let heap = &session.rt.heap;
+    if !heap.is_a(v, fixpt_heap::ObjType::Closure) {
+        return None;
+    }
+    let code = heap.obj_ref(v, 0);
+    if !heap.is_a(code, fixpt_heap::ObjType::Code) {
+        return None;
+    }
+    let n = heap.obj_ref(code, fixpt_core::lower::CODE_ARITY).as_fixnum() as usize;
+    let rest = heap.obj_ref(code, fixpt_core::lower::CODE_HAS_REST).is_true();
+    Some(arity(n, if rest { None } else { Some(n) }))
 }
 
 /// Every name the session has actually bound, for completion.

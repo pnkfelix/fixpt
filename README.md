@@ -138,6 +138,38 @@ Here a fact is `Checked` by a type system, `Inferred` by a pass, or merely
 `Asserted` — and **only `Checked` licenses removing code**. The test suite pins
 that: the same claim marked `inferred` compiles back to a global load.
 
+## Asking the REPL what to do
+
+`,help` in any dialect. Most of it is what you would expect — `,help NAME`,
+`,apropos TEXT` — answered from the running system rather than from a written
+manual: Scheme reads the primitive table, and the FX dialects read a standard
+environment generated from the 1987 and 1991 sources.
+
+The one worth having is `,fits`, and it only works where there are types:
+
+```
+fx87> ,fits (pairof int bool @=)
+; what accepts a value of type (pairof int bool @=):
+  car : (poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((pairof t1 t2 r)) t1)))
+  cdr : (poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((pairof t1 t2 r)) t2)))
+  null? : (poly ((r region)) (poly ((t1 type) (t2 type)) (subr pure ((pairof t1 t2 r)) bool)))
+  set-car! : (poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) t1) unit)))
+  set-cdr! : (poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) t2) unit)))
+  (5 more that fit anything: cons list new unique vector)
+```
+
+*I have one of these; what accepts it?* Polymorphic bindings are matched with
+their binders left as unknowns — the same matching implicit projection does at a
+real call site — so `car` is found without anyone instantiating it first, and
+subtyping decides the rest. `,returns TYPE` asks the other direction.
+
+A binding whose result is a bare type variable matches *every* question, so
+those are counted rather than listed: `car` genuinely can produce a `bool`, and
+saying so alongside `not?` and `and?` would bury the answer.
+
+Scheme declines `,fits` rather than returning nothing — "no results" and "I
+cannot ask that" are different answers, and only one of them is true.
+
 ## Trying FX-91
 
 `--dialect fx91` selects the *language*, not just its reader: each form is

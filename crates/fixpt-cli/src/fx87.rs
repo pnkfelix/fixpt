@@ -57,8 +57,8 @@ pub fn repl(backend: Backend) -> i32 {
         Backend::Bytecode => "bytecode engine",
     };
     println!("fixpt {} — FX-87, {engine}", env!("CARGO_PKG_VERSION"));
-    println!("(every type is written down and checked; `,code` shows the erased");
-    println!(" Scheme, with the metadata the checker proved. ^D leaves.)");
+    println!("(every type is written down and checked. `,help` for commands,");
+    println!(" `,code` to show the erased Scheme. ^D leaves.)");
 
     let mut reader = LineReader::new(".fixpt_fx87_history", SyntaxProfile::FX87);
     let mut show_code = false;
@@ -73,6 +73,10 @@ pub fn repl(backend: Backend) -> i32 {
             Line::Interrupted => continue,
             Line::Form(text) => text,
         };
+        if let Some(ask) = crate::help::parse(&text) {
+            crate::help::answer(&mut session, &ask);
+            continue;
+        }
         match text.trim() {
             "" => continue,
             ",code" => {
@@ -187,4 +191,104 @@ pub fn eval(backend: Backend, text: &str) -> i32 {
         }
     }
     status
+}
+
+// ------------------------------------------------------------------- help
+
+/// FX-87 can answer the interesting questions, because its standard
+/// environment carries a type for all 190 of its bindings — generated from the
+/// 1987 sources, not transcribed — and subtyping decides what fits what.
+impl crate::help::Helpful for Fx87Session {
+    fn dialect(&self) -> &'static str {
+        "FX-87"
+    }
+
+    fn describe(&mut self, name: &str) -> Vec<String> {
+        let Some(sym) = self.checker.p.interner.get(name) else { return Vec::new() };
+        match self.checker.describe(sym) {
+            Some((ty, region)) => {
+                let mut out = vec![format!("{name} : {ty}")];
+                // The region is why `(set! + -)` is a type error, so it is
+                // worth saying rather than hiding.
+                out.push(format!("  bound in region {region}{}", immutability(&region)));
+                out
+            }
+            None => Vec::new(),
+        }
+    }
+
+    fn apropos(&mut self, pattern: &str) -> Vec<String> {
+        let names: Vec<_> = self.checker.env.value_names().collect();
+        let mut out = Vec::new();
+        for sym in names {
+            let name = self.checker.p.interner.name(sym).to_string();
+            if !name.contains(pattern) {
+                continue;
+            }
+            if let Some((ty, _)) = self.checker.describe(sym) {
+                out.push(format!("{name} : {ty}"));
+            }
+        }
+        out.sort();
+        out
+    }
+
+    fn fits(&mut self, type_text: &str) -> Option<Vec<String>> {
+        let ty = read_type(self, type_text)?;
+        let found = self.checker.accepting(ty, 0);
+        Some(render(self, found))
+    }
+
+    fn returns(&mut self, type_text: &str) -> Option<Vec<String>> {
+        let ty = read_type(self, type_text)?;
+        let found = self.checker.returning(ty);
+        Some(render(self, found))
+    }
+}
+
+fn immutability(region: &str) -> &'static str {
+    if region == "@=" { " (immutable, so it cannot be assigned)" } else { "" }
+}
+
+/// Read a type written at the prompt.
+///
+/// Free functions rather than inherent methods: `Fx87Session` belongs to
+/// another crate, so this one cannot add to it.
+fn read_type(s: &mut Fx87Session, text: &str) -> Option<fixpt_fx87::DescId> {
+    let unused = |_: &mut Fx87Session| ();
+    let _ = unused;
+    {
+        let self_ = s;
+        let file = self_.scheme.rt.sources.add("<help>", text);
+        let mut interner = std::mem::take(&mut self_.checker.p.interner);
+        let forms = Reader::new(text, file, SyntaxProfile::FX87, &mut interner).read_all();
+        self_.checker.p.interner = interner;
+        let forms = forms.ok()?;
+        let first = forms.first()?;
+        self_.checker.p.parse_desc(first, &Default::default()).ok()
+    }
+}
+
+/// Specific answers first; the ones that would match any question are counted
+/// rather than listed, since they are true and unhelpful.
+fn render(s: &Fx87Session, found: Vec<fixpt_fx87::check::Found>) -> Vec<String> {
+    let line = |f: fixpt_fx87::check::Found| {
+        format!(
+            "{} : {}",
+            s.checker.p.interner.name(f.name),
+            fixpt_fx87::unparse::unparse(&s.checker.p.arena, &s.checker.p.interner, f.ty)
+        )
+    };
+    let (generic, specific): (Vec<_>, Vec<_>) = found.iter().partition(|f| f.generic);
+    let mut out: Vec<String> = specific.iter().copied().map(line).collect();
+    if !generic.is_empty() {
+        let names: Vec<&str> =
+            generic.iter().map(|f| s.checker.p.interner.name(f.name)).collect();
+        out.push(format!(
+            "({} more that fit anything: {})",
+            generic.len(),
+            names.join(" ")
+        ));
+    }
+    out
 }

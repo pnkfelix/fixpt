@@ -73,7 +73,7 @@ pub fn repl(backend: Backend) -> i32 {
     println!("fixpt {} — FX-91, {engine}", env!("CARGO_PKG_VERSION"));
     println!("(expressions only, as in the 1991 top level: bind with");
     println!(" `(with (module (define f 3)) f)`. `,code` shows the generated");
-    println!(" Scheme; ^D leaves.)");
+    println!(" Scheme; `,help` for commands; ^D leaves.)");
 
     let mut reader = LineReader::new(".fixpt_fx91_history", SyntaxProfile::FX91);
     let mut show_code = false;
@@ -88,6 +88,10 @@ pub fn repl(backend: Backend) -> i32 {
             Line::Interrupted => continue,
             Line::Form(text) => text,
         };
+        if let Some(ask) = crate::help::parse(&text) {
+            crate::help::answer(&mut session, &ask);
+            continue;
+        }
         match text.trim() {
             "" => continue,
             ",code" => {
@@ -215,4 +219,48 @@ pub fn eval(backend: Backend, text: &str) -> i32 {
         }
     }
     status
+}
+
+// ------------------------------------------------------------------- help
+
+/// FX-91 answers `,help` by *checking* the name, which is both the simplest
+/// implementation and the most honest one: the answer is the type the session
+/// would give that expression right now, not a separate description that might
+/// have drifted.
+///
+/// `,fits` and `,returns` are not offered. FX-91's environment is keyed by
+/// alpha-renamed variables rather than by source names, so enumerating it takes
+/// more than a lookup — the same search FX-87 supports is possible here and is
+/// simply not built yet. Saying so beats returning nothing.
+impl crate::help::Helpful for Fx91Session {
+    fn dialect(&self) -> &'static str {
+        "FX-91"
+    }
+
+    fn describe(&mut self, name: &str) -> Vec<String> {
+        let file = self.scheme.rt.sources.add("<help>", name);
+        let mut interner = std::mem::take(&mut self.checker.p.interner);
+        let read = Reader::new(name, file, SyntaxProfile::FX91, &mut interner).read_all();
+        self.checker.p.interner = interner;
+        let Ok(forms) = read else { return Vec::new() };
+        let Some(form) = forms.first() else { return Vec::new() };
+        match self.run(form) {
+            Ok(o) => vec![format!("{name} : {} ! {}", o.ty, o.effect)],
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn apropos(&mut self, pattern: &str) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .checker
+            .p
+            .interner
+            .names()
+            .filter(|n| n.contains(pattern) && !n.contains('*') && !n.starts_with('%'))
+            .map(str::to_string)
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
 }

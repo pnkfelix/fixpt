@@ -33,6 +33,16 @@ use crate::unparse::unparse;
 use fixpt_read::{Span, Sym};
 use std::collections::HashSet;
 
+/// One answer to a type-directed question.
+#[derive(Copy, Clone, Debug)]
+pub struct Found {
+    pub name: Sym,
+    pub ty: DescId,
+    /// The position that matched was a bare type variable, so this binding
+    /// would have matched any question. True of `car`, whose result is `t1`.
+    pub generic: bool,
+}
+
 /// A type and the effect of producing it.
 #[derive(Copy, Clone, Debug)]
 pub struct Desc2 {
@@ -1012,6 +1022,106 @@ impl Checker {
         let result = self.eval(result);
         let masked = self.mask(exp, env, effect, result);
         Ok(Desc2 { ty: result, effect: masked })
+    }
+
+    // ------------------------------------------------------------ enquiry
+    /// Peel every `poly` binder, returning the binders and the `subr` beneath.
+    fn open_subr(&mut self, ty: DescId) -> Option<(Vec<Sym>, Vec<DescId>, DescId)> {
+        let mut names = Vec::new();
+        let mut head = self.eval(ty);
+        while let Desc::Poly { binders: bs, body } = self.p.arena.get(head).clone() {
+            names.extend(bs.iter().map(|b| b.name));
+            head = self.eval(body);
+        }
+        match self.p.arena.get(head).clone() {
+            Desc::Subr { args, result, .. } => Some((names, args, result)),
+            // A `vsubr` takes any number of arguments, all of one type.
+            Desc::Vsubr { rest, result, .. } => Some((names, vec![rest], result)),
+            _ => None,
+        }
+    }
+
+    /// Bindings that would accept a value of type `ty` as their *n*th argument.
+    ///
+    /// The question a REPL cannot usually answer: "I have one of these — what
+    /// can I do with it?" Here the environment carries a type for every
+    /// binding, and subtyping decides the rest, so the answer is a search
+    /// rather than a guess. Polymorphic bindings are matched with their binders
+    /// as unknowns — exactly as implicit projection does at a call site — so
+    /// `car` is found for a `pairof` without anyone having to instantiate it.
+    pub fn accepting(&mut self, ty: DescId, position: usize) -> Vec<Found> {
+        let ty = self.eval_deep(ty);
+        let names: Vec<Sym> = self.env.value_names().collect();
+        let mut out = Vec::new();
+        for name in names {
+            let Some(binding) = self.env.value(name).cloned() else { continue };
+            let Some((vars, formals, _)) = self.open_subr(binding.ty) else { continue };
+            let Some(formal) = formals.get(position).copied() else { continue };
+            let formal = self.eval_deep(formal);
+            let unknowns: HashSet<Sym> = vars.into_iter().collect();
+            let mut solution = std::collections::HashMap::new();
+            let matched =
+                self.match_desc(formal, ty, &unknowns, &mut solution, &mut Vec::new());
+            // A monomorphic formal is accepted on subtyping instead, so
+            // `(subr pure (float) float)` is offered for an `int` argument
+            // wherever that coercion is legal.
+            let subtypes = unknowns.is_empty() && {
+                let rel = self.rel();
+                rel.type_less(ty, formal, &Default::default(), &Default::default())
+            };
+            if matched || subtypes {
+                let generic = self.is_bare_unknown(formal, &unknowns);
+                out.push(Found { name, ty: binding.ty, generic });
+            }
+        }
+        out.sort_by_key(|f| self.p.interner.name(f.name).to_string());
+        out
+    }
+
+    /// Is this position simply a type variable — that is, does it accept
+    /// *anything*?
+    ///
+    /// Such a binding matches every query and tells you nothing about the one
+    /// you asked. `car`'s result really is a way to obtain a `bool`, but
+    /// listing it alongside `<` and `and?` when you asked what produces a
+    /// `bool` buries the answer. They are kept and marked rather than dropped.
+    fn is_bare_unknown(&self, d: DescId, unknowns: &HashSet<Sym>) -> bool {
+        matches!(self.p.arena.get(d), Desc::Var(v) if unknowns.contains(v))
+    }
+
+    /// Bindings whose result is a value of type `ty`.
+    pub fn returning(&mut self, ty: DescId) -> Vec<Found> {
+        let ty = self.eval_deep(ty);
+        let names: Vec<Sym> = self.env.value_names().collect();
+        let mut out = Vec::new();
+        for name in names {
+            let Some(binding) = self.env.value(name).cloned() else { continue };
+            let Some((vars, _, result)) = self.open_subr(binding.ty) else { continue };
+            let result = self.eval_deep(result);
+            let unknowns: HashSet<Sym> = vars.into_iter().collect();
+            let mut solution = std::collections::HashMap::new();
+            let matched =
+                self.match_desc(result, ty, &unknowns, &mut solution, &mut Vec::new());
+            let subtypes = unknowns.is_empty() && {
+                let rel = self.rel();
+                rel.type_less(result, ty, &Default::default(), &Default::default())
+            };
+            if matched || subtypes {
+                let generic = self.is_bare_unknown(result, &unknowns);
+                out.push(Found { name, ty: binding.ty, generic });
+            }
+        }
+        out.sort_by_key(|f| self.p.interner.name(f.name).to_string());
+        out
+    }
+
+    /// The type and region a name is bound to, rendered.
+    pub fn describe(&self, name: Sym) -> Option<(String, String)> {
+        let b = self.env.value(name)?;
+        Some((
+            unparse(&self.p.arena, &self.p.interner, b.ty),
+            unparse(&self.p.arena, &self.p.interner, b.region),
+        ))
     }
 
     /// Instantiate a `poly` operator from the types of its actual arguments.
