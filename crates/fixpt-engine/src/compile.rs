@@ -374,10 +374,18 @@ impl Compiler<'_> {
                 for (i, n) in items.iter().enumerate() {
                     if i == last {
                         self.expr(s, *n, tail)?;
-                    } else {
-                        self.expr(s, *n, false)?;
-                        s.emit(&[op::POP]);
+                        continue;
                     }
+                    // A non-final element's value is discarded. If the front
+                    // end proved the expression has no observable effect, then
+                    // evaluating it is unobservable too, and it can go
+                    // entirely. Scheme can never say this about a call; FX
+                    // says it about most of them.
+                    if self.is_pure(*n) {
+                        continue;
+                    }
+                    self.expr(s, *n, false)?;
+                    s.emit(&[op::POP]);
                 }
             }
             Node::Let { vars, inits, body } => {
@@ -488,6 +496,19 @@ impl Compiler<'_> {
         let k = s.constant(code);
         s.emit(&[op::CLOSURE, k]);
         Ok(())
+    }
+
+    /// Did the front end *prove* this expression has no observable effect?
+    ///
+    /// Only a `Checked` claim counts. An inferred one is worth keeping — a
+    /// debug build could test it — but removing code on the strength of a guess
+    /// is how a wrong analysis becomes a wrong program, which is exactly the
+    /// failure mode Twobit's untraceable `.+:fix:fix` invites.
+    fn is_pure(&self, node: NodeId) -> bool {
+        self.program
+            .facts(node)
+            .trusted()
+            .any(|f| f.claim == fixpt_core::facts::Claim::Pure)
     }
 
     /// The primitive this application may be compiled as, if the front end

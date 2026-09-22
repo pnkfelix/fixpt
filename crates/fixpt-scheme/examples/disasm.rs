@@ -75,6 +75,16 @@ fn main() {
         show(&mut s, f);
     }
 
+    // Does a checked purity claim reach the compiler?
+    let mut t = Session::with_backend(Backend::Bytecode);
+    t.eval_str(
+        "<p>",
+        "(define (g) (begin (begin '(%fx-note (pure) (basis checked)) (display \"x\")) 1))",
+    )
+    .expect("compiles");
+    println!("--- purity claim ---");
+    show(&mut t, "g");
+
     let (hist, words, procs) = histogram(&s);
     let total: usize = hist.iter().map(|(_, n)| n).sum();
     println!("--- across {procs} compiled procedures, {words} instruction words ---");

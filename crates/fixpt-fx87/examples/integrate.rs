@@ -28,6 +28,18 @@ fn main() {
     println!("FX-87 source : {src}");
     println!("erased to    : {}\n", out.code);
 
+    // The erased form is itself a top-level `begin`, which R7RS splices — so
+    // the annotation has to be recognised before that happens, or the metadata
+    // is destroyed exactly where FX delivers it.
+    println!("=== the erased form, compiled as FX-87 emits it ===");
+    {
+        let mut s = Session::with_backend(Backend::Bytecode);
+        s.eval_str("<x>", &format!("(define (fx) {})", out.code)).expect("compiles");
+        let sym = s.rt.heap.intern_existing("fx").expect("defined");
+        let v = s.rt.heap.global(s.rt.heap.symbol_global_slot(sym));
+        print!("{}", disassemble(&s.rt.heap, s.rt.heap.obj_ref(v, 0)));
+    }
+
     println!("=== compiled WITHOUT the annotation (what Scheme gets) ===");
     print!("{}", disasm("(+ a b)"));
     println!("=== compiled WITH it (what FX-87 now emits) ===");

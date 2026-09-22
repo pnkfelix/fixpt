@@ -91,3 +91,55 @@ fn a_claim_about_an_unknown_primitive_is_ignored() {
         "42"
     );
 }
+
+
+/// A proved-pure expression whose value is discarded is not evaluated at all.
+///
+/// The observable consequence: if the dropped expression would have printed,
+/// nothing is printed. That is only sound because the claim is `checked` — a
+/// `display` is *not* pure, and annotating it as such is a lie the compiler is
+/// entitled to believe. So the test asserts both halves: the lie is obeyed, and
+/// the same lie marked `inferred` is not.
+#[test]
+fn a_pure_unused_expression_is_dropped() {
+    fn printed(src: &str) -> String {
+        let mut s = Session::with_backend(Backend::Bytecode);
+        let (out, r) = s.eval_capturing("<t>", src);
+        r.unwrap_or_else(|e| panic!("{e}"));
+        out
+    }
+
+    // Without a claim, the call happens.
+    assert_eq!(printed("(begin (display \"x\") 1)"), "x");
+
+    // With a checked claim that it is pure, it does not.
+    assert_eq!(
+        printed(
+            "(begin (begin '(%fx-note (pure) (basis checked) (because \"effect pure\")) \
+             (display \"x\")) 1)"
+        ),
+        "",
+        "a checked purity claim should let the call be dropped"
+    );
+
+    // Marked as a guess, it is kept.
+    assert_eq!(
+        printed(
+            "(begin (begin '(%fx-note (pure) (basis inferred)) (display \"x\")) 1)"
+        ),
+        "x",
+        "an inferred claim must not license removing code"
+    );
+}
+
+/// The value of the sequence is unaffected either way.
+#[test]
+fn dropping_a_pure_expression_keeps_the_answer() {
+    for note in ["(basis checked)", "(basis inferred)"] {
+        let src = format!(
+            "(begin (begin '(%fx-note (pure) {note}) (+ 1 1)) (* 6 7))"
+        );
+        assert_eq!(eval(Backend::Bytecode, &src), "42");
+        assert_eq!(eval(Backend::Ast, &src), "42");
+    }
+}

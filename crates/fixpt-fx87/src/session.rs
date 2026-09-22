@@ -13,6 +13,7 @@
 //! debugging a code generator.
 
 use crate::check::Checker;
+use crate::erase::Purity;
 use crate::erase::erase_with;
 use crate::error::{FxError, R};
 use crate::unparse::unparse;
@@ -80,8 +81,16 @@ impl Fx87Session {
         let ty = unparse(&self.checker.p.arena, &self.checker.p.interner, desc.ty);
         let effect = unparse(&self.checker.p.arena, &self.checker.p.interner, desc.effect);
 
-        let code =
-            erase_with(&self.checker.p.arena, &self.checker.p.interner, exp, &self.standard);
+        // The checker's own per-node descriptions become the justification the
+        // emitted metadata carries.
+        let purity = PurityOf(&self.checker);
+        let code = erase_with(
+            &self.checker.p.arena,
+            &self.checker.p.interner,
+            exp,
+            &self.standard,
+            Some(&purity),
+        );
         // A program's own output is captured rather than let loose: the value
         // is what is being compared.
         let saved = self.scheme.rt.capture();
@@ -96,5 +105,17 @@ impl Fx87Session {
             Err(e) => Err(e.to_string()),
         };
         Ok(Outcome { ty, effect, code, value })
+    }
+}
+
+/// Adapts the checker's recorded descriptions to what erasure asks for.
+struct PurityOf<'a>(&'a Checker);
+
+impl Purity for PurityOf<'_> {
+    fn is_pure(&self, exp: crate::ast::ExpId) -> bool {
+        self.0.is_pure(exp)
+    }
+    fn effect_text(&self, exp: crate::ast::ExpId) -> Option<String> {
+        self.0.effect_text(exp)
     }
 }

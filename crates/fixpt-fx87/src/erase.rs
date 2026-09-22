@@ -35,6 +35,9 @@ pub struct Eraser<'a> {
     /// Names bound by the standard environment, which live in the immutable
     /// region and therefore cannot be reassigned.
     standard: &'a HashSet<Sym>,
+    /// Which expressions the checker proved to have no observable effect, and
+    /// the effect it derived for each. `None` when erasing without a checker.
+    purity: Option<&'a dyn Purity>,
     /// Names the program has rebound around the expression being erased.
     /// A standard name shadowed here is an ordinary variable.
     shadowed: Vec<Sym>,
@@ -43,8 +46,17 @@ pub struct Eraser<'a> {
 /// The unit value. `#u` is not Scheme syntax, so the runtime binds a name.
 pub const UNIT: &str = "%fx-unit";
 
+/// What the checker proved about each expression, as the eraser needs it.
+///
+/// A trait rather than a concrete table so that `erase` stays usable without a
+/// checker at all — the metadata is an enrichment, never a requirement.
+pub trait Purity {
+    fn is_pure(&self, exp: ExpId) -> bool;
+    fn effect_text(&self, exp: ExpId) -> Option<String>;
+}
+
 pub fn erase(arena: &Arena, interner: &Interner, exp: ExpId) -> String {
-    erase_with(arena, interner, exp, &HashSet::new())
+    erase_with(arena, interner, exp, &HashSet::new(), None)
 }
 
 /// Erase, annotating what the checker proved.
@@ -55,14 +67,21 @@ pub fn erase(arena: &Arena, interner: &Interner, exp: ExpId) -> String {
 /// the indirection through a global. The claim rides along in the emitted
 /// Scheme as an inert quoted constant, exactly as Twobit carries `R F G decls`
 /// in a lambda's body, so the output remains a program any Scheme can run.
-pub fn erase_with(
-    arena: &Arena,
-    interner: &Interner,
+pub fn erase_with<'a>(
+    arena: &'a Arena,
+    interner: &'a Interner,
     exp: ExpId,
-    standard: &HashSet<Sym>,
+    standard: &'a HashSet<Sym>,
+    purity: Option<&'a dyn Purity>,
 ) -> String {
-    let mut e =
-        Eraser { arena, interner, gensym: 0, standard, shadowed: Vec::new() };
+    let mut e = Eraser {
+        arena,
+        interner,
+        gensym: 0,
+        standard,
+        purity,
+        shadowed: Vec::new(),
+    };
     e.go(exp)
 }
 
@@ -175,18 +194,32 @@ impl Eraser<'_> {
                 } else {
                     format!("({f} {})", self.seq(&args))
                 };
-                match integrable {
-                    Some(v) => {
-                        let name = self.name(v);
-                        self.note(
-                            &format!("(integrable {name})"),
-                            "standard binding: lives in @=, the immutable region, \
-                             so `set!` on it is a type error",
-                            call,
-                        )
-                    }
-                    None => call,
+                // Two independent claims, and either may be absent. The
+                // effect is the checker's own derivation, carried verbatim as
+                // the justification.
+                let mut claims = String::new();
+                if let Some(v) = integrable {
+                    claims.push_str(&format!("(integrable {}) ", self.name(v)));
                 }
+                let pure = self.purity.is_some_and(|p| p.is_pure(exp));
+                if pure {
+                    claims.push_str("(pure) ");
+                }
+                if claims.is_empty() {
+                    return call;
+                }
+                let because = match (integrable, self.purity.and_then(|p| p.effect_text(exp))) {
+                    (Some(_), Some(e)) => format!(
+                        "standard binding in @=, the immutable region; effect {e}"
+                    ),
+                    (Some(_), None) => {
+                        "standard binding in @=, the immutable region, so `set!` on it \
+                         is a type error".to_string()
+                    }
+                    (None, Some(e)) => format!("effect {e}"),
+                    (None, None) => String::new(),
+                };
+                self.note(claims.trim_end(), &because, call)
             }
             // `set!` yields unit in FX-87, where Scheme's is unspecified.
             Exp::SetBang { name, value } => {

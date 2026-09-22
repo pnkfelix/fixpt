@@ -261,6 +261,19 @@ impl<'a> Expander<'a> {
             && let Some(head) = items.first().and_then(|h| h.as_symbol())
             && self.env.lookup(head) == Some(Binding::Special(Special::Begin))
         {
+            // An annotated expression is *not* a sequence, so it must be
+            // recognised before the splice — otherwise a top-level
+            // `(begin '(%fx-note …) e)` is torn into two top-level forms and
+            // the metadata is discarded. That is exactly where it matters: an
+            // FX front end's erased forms arrive at the top level.
+            let args = &items[1..];
+            if let Some(facts) = self.read_note(args)
+                && args.len() == 2
+            {
+                let node = self.top_level(&args[1])?;
+                self.b.set_facts(node, facts);
+                return Ok(node);
+            }
             // `(begin ...)` at top level splices, so its `define`s are also
             // top-level definitions rather than internal ones.
             let mut nodes = Vec::new();

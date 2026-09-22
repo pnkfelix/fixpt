@@ -46,6 +46,13 @@ pub struct Checker {
     pub store: DStore,
     immutable: Sym,
     ref_name: Sym,
+    /// The description found for each expression, kept rather than discarded.
+    ///
+    /// `desc-of-exp` computes a type and an effect for *every* node and the
+    /// reference then throws all but the top one away. Erasure is where that
+    /// loss used to become permanent; keeping the table lets the front end tell
+    /// the compiler what it proved about each subexpression.
+    pub descs: Vec<Option<Desc2>>,
 }
 
 impl Checker {
@@ -54,7 +61,14 @@ impl Checker {
         let std = crate::standard::load(&mut p)?;
         let immutable = p.syms.region_eq;
         let ref_name = p.syms.ref_;
-        Ok(Checker { p, env: std.env, store: std.store, immutable, ref_name })
+        Ok(Checker {
+            p,
+            env: std.env,
+            store: std.store,
+            immutable,
+            ref_name,
+            descs: Vec::new(),
+        })
     }
 
     fn rel(&self) -> Rel<'_> {
@@ -284,6 +298,32 @@ impl Checker {
 
     // --------------------------------------------------------------- main
     pub fn desc_of_exp(&mut self, exp: ExpId, env: &TkEnv) -> R<Desc2> {
+        let d = self.desc_of_exp_inner(exp, env)?;
+        // Remember it. The reference keeps only the outermost description; the
+        // rest is what a compiler would have to re-derive, or do without.
+        if self.descs.len() <= exp.index() {
+            self.descs.resize(exp.index() + 1, None);
+        }
+        self.descs[exp.index()] = Some(d);
+        Ok(d)
+    }
+
+    /// Whether this expression was proved to have no observable effect.
+    pub fn is_pure(&self, exp: ExpId) -> bool {
+        match self.descs.get(exp.index()).copied().flatten() {
+            Some(d) => matches!(self.p.arena.get(d.effect), Desc::Pure),
+            None => false,
+        }
+    }
+
+    /// The effect proved for an expression, rendered — the justification a
+    /// claim about it should carry.
+    pub fn effect_text(&self, exp: ExpId) -> Option<String> {
+        let d = self.descs.get(exp.index()).copied().flatten()?;
+        Some(unparse(&self.p.arena, &self.p.interner, d.effect))
+    }
+
+    fn desc_of_exp_inner(&mut self, exp: ExpId, env: &TkEnv) -> R<Desc2> {
         let span = self.p.arena.span(exp);
         match self.p.arena.exp_at(exp).clone() {
             Exp::Int(_) => self.literal(self.p.syms.int),
