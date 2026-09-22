@@ -27,6 +27,9 @@ from the references.
 | **M6** FX-87 front end | **done: 161/161 parse, 160/161 types and effects, 123/123 values** |
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
 
+All three deliverables of the brief are done. What follows is
+[`TODO.md`](TODO.md).
+
 ```
 $ cargo test              # 103 tests
 $ cargo run -p fixpt-cli -- repl
@@ -97,6 +100,43 @@ needs no parser state kept between keystrokes. The continuation-based version is
 what you want when re-reading is not affordable — and it would be a fitting use
 of this engine's own re-entrant `call/cc`. [`TODO.md`](TODO.md) §1 records what
 it would take and when it would start to matter.
+
+## What a front end proves, the compiler uses
+
+FX-87 and FX-91 know things Scheme cannot. Their checkers resolve every name to
+a binding, compute an effect for every expression, and prove — by rejecting the
+programs where it fails — that a standard binding can never be reassigned:
+`(set! + -)` is a *type error* there, because standard bindings live in `@=`,
+the immutable region.
+
+That used to be discarded at erasure. It is now carried the way Twobit carries
+its analyses (`pass2.aux.sch`) — as a quoted constant in a position where the
+value is thrown away, so the emitted program is still ordinary Scheme:
+
+```scheme
+(begin '(%fx-note (integrable +) (basis checked)
+                  (because "lives in @=, the immutable region"))
+  (+ 1 2))
+```
+
+An engine that has never heard of `%fx-note` runs this correctly and merely
+compiles it less well. One that has removes the global load and the generic
+call:
+
+```
+global 26 / local / local / tail-call     ← what Scheme gets
+const 1 / const 2 / prim 2 23             ← what FX-87 emits
+```
+
+Measured on FX-87, best of five: **1.21× over the compiled engine, 1.77× over
+the AST engine**.
+
+Beyond Twobit, a claim records its **basis**. `lambda.F` says a variable is free
+and nothing can ask why; `.+:fix:fix` asserts its arguments are fixnums and
+cannot be interrogated, so a wrong inference reaches unchecked code silently.
+Here a fact is `Checked` by a type system, `Inferred` by a pass, or merely
+`Asserted` — and **only `Checked` licenses removing code**. The test suite pins
+that: the same claim marked `inferred` compiles back to a global load.
 
 ## Trying FX-91
 
