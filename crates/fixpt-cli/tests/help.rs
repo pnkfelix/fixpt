@@ -10,9 +10,22 @@ use std::process::{Command, Stdio};
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
 fn repl(dialect: Option<&str>, input: &str) -> String {
+    repl_with(dialect, None, input)
+}
+
+/// The same, on a named engine. The two engines learn what is around a hole by
+/// different means, so both are asked.
+fn repl_engine(dialect: Option<&str>, engine: &str, input: &str) -> String {
+    repl_with(dialect, Some(engine), input)
+}
+
+fn repl_with(dialect: Option<&str>, engine: Option<&str>, input: &str) -> String {
     let mut cmd = Command::new(FIXPT);
     if let Some(d) = dialect {
         cmd.args(["--dialect", d]);
+    }
+    if let Some(e) = engine {
+        cmd.args(["--engine", e]);
     }
     let mut child = cmd
         .arg("repl")
@@ -196,4 +209,90 @@ fn fx91_declines_only_the_half_it_cannot_do() {
 fn a_comma_help_inside_a_string_is_just_text() {
     let out = repl(Some("fx91"), "\",help\"\n");
     assert!(!out.contains("searched by name"), "text was mistaken for a hole:\n{out}");
+}
+
+// ------------------------------------------------ `,help` as a running program
+
+/// The dynamic half of a hole, on both engines.
+///
+/// Scheme has no types, so evaluating up to the hole is the *only* way it can
+/// say anything about a position — and what it says is made of values.
+#[test]
+fn scheme_answers_a_hole_with_values() {
+    for engine in ["ast", "bytecode"] {
+        let out = repl_engine(None, engine, "(vector-ref (make-vector 3 0) ,help)\n");
+        assert!(out.contains("argument 2 of 2"), "{engine}:\n{out}");
+        assert!(out.contains("vector-ref"), "{engine}:\n{out}");
+        // The point: a *value*, not a type.
+        assert!(out.contains("#(0 0 0)"), "{engine}:\n{out}");
+    }
+}
+
+/// A hole the program never reaches is answered by saying so, not by inventing
+/// a context that never existed.
+#[test]
+fn scheme_reports_a_hole_that_is_never_reached() {
+    let out = repl(None, "(if #f ,help 7)\n");
+    assert!(out.contains("never reached"), "{out}");
+    assert!(out.contains('7'), "{out}");
+}
+
+/// Both engines answer, and they agree on the part they can both see.
+///
+/// They reach it differently: the AST machine reads its frame stack, while the
+/// compiled one has no frame saying "argument 2 of 3" and segments its operand
+/// stack using the position the reader recorded in the `%hole` call. Nested
+/// calls are where a wrong segmentation shows up, so that is what is asked.
+#[test]
+fn both_engines_segment_nested_calls_the_same_way() {
+    let src = "(define (f a b) (+ a b))\n(f 1 (f 2 ,help))\n";
+    for engine in ["ast", "bytecode"] {
+        let out = repl_engine(None, engine, src);
+        assert!(out.contains("argument 2 of 2"), "{engine}:\n{out}");
+        // The inner call's argument, not the outer one's: reporting `1` here
+        // would mean the operand stack had been read as a single flat call.
+        assert!(out.contains("argument 1 evaluated to 2"), "{engine}:\n{out}");
+    }
+}
+
+/// A form that only *looks* like an application is not described as one.
+///
+/// `(b ,help)` in a `let` binding list reads exactly like a call, so the
+/// reader's position is a guess. The run disproves it — nothing was pushed for
+/// such a call — and the report follows the run.
+#[test]
+fn a_binding_clause_is_not_reported_as_a_call() {
+    let out = repl(None, "(let ((a 1) (b ,help)) a)\n");
+    assert!(
+        out.contains("not an application") || out.contains("initialiser 2 of 2"),
+        "{out}"
+    );
+}
+
+/// FX keeps the static answer and gains the dynamic one.
+#[test]
+fn fx_answers_a_hole_both_ways() {
+    for d in ["fx87", "fx91"] {
+        let out = repl(Some(d), "(vector-ref (make-vector 3 0) ,help)\n");
+        assert!(out.contains("the hole wants"), "{d} lost the static half:\n{out}");
+        assert!(out.contains("int"), "{d}:\n{out}");
+        assert!(out.contains("#(0 0 0)"), "{d} lost the dynamic half:\n{out}");
+    }
+}
+
+/// The effect system licenses the speculation, and refuses it when it should.
+///
+/// Showing what an argument evaluates to means running it, which the user did
+/// not ask for. That is only defensible when nothing can tell — so an argument
+/// that may *write* is described rather than run. This is the assertion that
+/// makes the gate a guarantee rather than a comment.
+#[test]
+fn fx_will_not_run_an_argument_that_writes() {
+    let src = "(+ (begin (vector-set! (make-vector 1 0) 0 7) 5) ,help)\n";
+    let out = repl(Some("fx91"), src);
+    assert!(out.contains("not evaluated"), "the write gate did not fire:\n{out}");
+    assert!(out.contains("write"), "{out}");
+    // The pure operator beside it still is evaluated, so the refusal is about
+    // the effect and not about having given up on the form.
+    assert!(out.contains("the operator +"), "{out}");
 }

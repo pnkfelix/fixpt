@@ -378,7 +378,45 @@ fn answer_hole(session: &mut Fx87Session, form: &Syntax) -> Option<Vec<String>> 
         out.push("; what produces one:".into());
         out.extend(lines);
     }
+    out.extend(dynamic_hole(session, &items, at));
     Some(out)
+}
+
+/// What the run says is around the hole.
+///
+/// The static half above answers from types; this one answers from values, and
+/// the two are worth having together — a type says `int` where a value says
+/// `3`, and only the value shows that the vector really does have three slots.
+///
+/// An argument is evaluated only when the checker calls it pure. That is not a
+/// new rule invented for the REPL: `purify` already treats an effect confined
+/// to a private region as no effect, which is exactly the question — can
+/// anything outside tell that this ran early?
+fn dynamic_hole(session: &mut Fx87Session, items: &[Syntax], at: usize) -> Vec<String> {
+    let mut out = vec![format!("; at the hole — argument {at} of {}:", items.len() - 1)];
+    for (i, arg) in items[..at].iter().enumerate() {
+        let what = if i == 0 { "the operator".to_string() } else { format!("argument {i}") };
+        let src = fixpt_read::write_syntax(arg, &session.checker.p.interner);
+        let checked = match session.check(arg) {
+            Ok(c) => c,
+            Err(e) => {
+                out.push(format!("  {what} {src} does not check: {e}"));
+                continue;
+            }
+        };
+        if !checked.safe {
+            out.push(format!(
+                "  {what} {src} not evaluated — its effect is {}",
+                checked.effect
+            ));
+            continue;
+        }
+        match session.run_code(&checked.code) {
+            Ok(v) => out.push(format!("  {what} {src} = {v}")),
+            Err(e) => out.push(format!("  {what} {src} fails: {e}")),
+        }
+    }
+    out
 }
 
 /// The type of one subexpression, or `None` if it does not check.

@@ -31,6 +31,14 @@ use fixpt_heap::{ObjType, Value};
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum EngineOp {
     Apply,
+    /// `(%hole POSITION TOTAL)` — describe the evaluation context and stop.
+    ///
+    /// Not a computation but a question: *what is going on here?* It needs the
+    /// engine because the answer is the engine's own pending work — which
+    /// application is collecting arguments, what the earlier ones evaluated to,
+    /// what the result would have been used for. A `Simple` primitive sees its
+    /// arguments and nothing else.
+    Hole,
     /// Raw continuation capture: no `dynamic-wind` awareness at all.
     CallCC,
     Values,
@@ -629,6 +637,11 @@ prims! {
         rt.heap.obj_set(a[0], 0, a[1]);
         Ok(Value::UNSPECIFIED)
     });
+
+    // ---- the REPL's hole ----
+    // What `,help` inside a form becomes. Evaluating it reports the context it
+    // was reached in, with the values that were actually computed on the way.
+    "%hole", 2, Some(2), PrimKind::Engine(EngineOp::Hole);
 }
 
 /// Promise states. `[state, payload]`.

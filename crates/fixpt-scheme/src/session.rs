@@ -126,14 +126,25 @@ impl Session {
 
     /// Read, expand and run `text`, returning the value of its last form.
     pub fn eval_str(&mut self, name: &str, text: &str) -> Result<Value, SessionError> {
-        let file = self.rt.sources.add(name, text);
-        let forms = {
-            let mut interner = std::mem::take(&mut self.rt.interner);
-            let result = Reader::new(text, file, self.profile, &mut interner).read_all();
-            self.rt.interner = interner;
-            result.map_err(|e| SessionError::Read(self.describe(e.span, &e.message)))?
-        };
+        let forms = self.read_forms(name, text)?;
         self.eval_forms(&forms)
+    }
+
+    /// Read `text` without running it.
+    ///
+    /// Separate from [`eval_str`](Self::eval_str) because a caller may want to
+    /// rewrite what it read — the REPL's `,help` hole does, replacing the hole
+    /// with a primitive before handing the form back to be run.
+    pub fn read_forms(
+        &mut self,
+        name: &str,
+        text: &str,
+    ) -> Result<Vec<fixpt_read::Syntax>, SessionError> {
+        let file = self.rt.sources.add(name, text);
+        let mut interner = std::mem::take(&mut self.rt.interner);
+        let result = Reader::new(text, file, self.profile, &mut interner).read_all();
+        self.rt.interner = interner;
+        result.map_err(|e| SessionError::Read(self.describe(e.span, &e.message)))
     }
 
     pub fn eval_forms(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Value, SessionError> {

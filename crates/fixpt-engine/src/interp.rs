@@ -609,6 +609,16 @@ impl Interp {
                 self.set_acc(v);
                 Ok(Control::Return)
             }
+            // `(%hole)` — report the pending work rather than computing.
+            EngineOp::Hole => {
+                let report = self.describe_context(rt);
+                self.stack.truncate(drop_to);
+                let obj = rt.error_object(&report, &[]);
+                // Fatal, so it escapes any handler: a question should not be
+                // caught by the program's own error handling and turned into a
+                // value.
+                Err(Thrown { obj, fatal: true })
+            }
             EngineOp::CallWithValues => {
                 let producer = self.stack[base + 1];
                 let consumer = self.stack[base + 2];
@@ -625,6 +635,126 @@ impl Interp {
                 self.apply(rt, p, call_base)
             }
         }
+    }
+
+    // ------------------------------------------------------------- the hole
+    /// Describe what the machine was in the middle of doing.
+    ///
+    /// This is what a *dynamic* answer buys over a static one. The static
+    /// version can say the hole wants an `int`; this one can say that the
+    /// operator is `vector-ref`, that its first argument already evaluated to
+    /// `#(0 0 0)`, and that the result was going to be the test of an `if` —
+    /// facts about values, not about types, and therefore available in Scheme,
+    /// which has no types to consult.
+    ///
+    /// The frames are read from the innermost outwards, which is the order the
+    /// work will resume in.
+    fn describe_context(&mut self, rt: &mut Runtime) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::from("evaluation reached a hole");
+        let mut depth = 0usize;
+        for frame in self.frames.clone().iter().rev() {
+            if depth >= 6 {
+                out.push_str("\n  …");
+                break;
+            }
+            // A node offset is only meaningful against the code object it came
+            // from, and the frames below the innermost one belong to *callers*,
+            // with node vectors of their own. The frame convention already
+            // saves that code on the value stack, so read each frame's nodes
+            // through its own `saved + 1` rather than through the register.
+            let code = match frame.saved() {
+                Some(saved) => match self.stack.get(saved as usize + 1) {
+                    Some(&c) if rt.heap.is_a(c, ObjType::Code) => c,
+                    _ => continue,
+                },
+                None => break,
+            };
+            let line = match *frame {
+                Frame::Halt => break,
+                Frame::AppArg { app, collected, saved } => {
+                    Some(self.describe_application(rt, code, app, collected, saved))
+                }
+                Frame::Branch { .. } => {
+                    Some("the value is the test of an `if`".to_string())
+                }
+                Frame::SeqNext { .. } => {
+                    Some("the value is discarded by a `begin`".to_string())
+                }
+                Frame::LetInit { let_, collected, saved: _ } => {
+                    let n = self.offset_in(rt, code, let_ + 1);
+                    Some(format!(
+                        "the value is initialiser {} of {n} in a `let`",
+                        collected + 1
+                    ))
+                }
+                Frame::FixInit { fix, index, saved: _ } => {
+                    let n = self.offset_in(rt, code, fix + 1);
+                    Some(format!(
+                        "the value is initialiser {} of {n} in a `letrec`",
+                        index + 1
+                    ))
+                }
+                Frame::AssignLocal { .. } | Frame::AssignGlobal { .. } => {
+                    Some("the value is being assigned to a variable".to_string())
+                }
+                Frame::Consume { .. } => {
+                    Some("the value is produced for `call-with-values`".to_string())
+                }
+            };
+            if let Some(line) = line {
+                let _ = write!(out, "\n  {line}");
+                depth += 1;
+            }
+        }
+        out
+    }
+
+    /// A node word read against a given code object rather than the register.
+    fn offset_in(&self, rt: &Runtime, code: Value, at: u32) -> u32 {
+        let nodes = rt.heap.obj_ref(code, CODE_NODES);
+        if at as usize >= rt.heap.obj_len(nodes) {
+            return 0;
+        }
+        rt.heap.obj_ref(nodes, at as usize).as_fixnum() as u32
+    }
+
+    /// The application the hole is an argument of, with the arguments that have
+    /// already been evaluated.
+    fn describe_application(
+        &self,
+        rt: &Runtime,
+        code: Value,
+        app: u32,
+        collected: u32,
+        saved: u32,
+    ) -> String {
+        use std::fmt::Write as _;
+        let total = self.offset_in(rt, code, app + 1);
+        let base = saved as usize + SAVED_SLOTS;
+        // `collected` counts the operator, so the hole is argument `collected`.
+        let position = collected;
+        let mut out = String::new();
+        if position == 0 {
+            let _ = write!(out, "the hole is the operator of a call of {total} argument(s)");
+            return out;
+        }
+        let operator = self.stack.get(base).copied().unwrap_or(Value::UNSPECIFIED);
+        let _ = write!(
+            out,
+            "the hole is argument {position} of {total} to {}",
+            fixpt_runtime::write_value(&rt.heap, operator)
+        );
+        for i in 1..position as usize {
+            if let Some(v) = self.stack.get(base + i) {
+                let _ = write!(
+                    out,
+                    "\n    argument {i} evaluated to {}",
+                    fixpt_runtime::write_value(&rt.heap, *v)
+                );
+            }
+        }
+        out
     }
 
     // -------------------------------------------------------- continuations

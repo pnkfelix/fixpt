@@ -75,11 +75,34 @@ impl Fx87Session {
     /// The checker is reset to the initial environment each time, matching the
     /// reference's own top level.
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
+        let checked = self.check(form)?;
+        let value = self.run_code(&checked.code);
+        Ok(Outcome {
+            ty: checked.ty,
+            effect: checked.effect,
+            code: checked.code,
+            value,
+        })
+    }
+
+    /// Check and erase a form without running it.
+    ///
+    /// Separate from [`run`](Self::run) so that a caller can decide whether to
+    /// run it *after* seeing the effect. The REPL's `,help` hole is the caller
+    /// that needs this: showing what the arguments beside a hole evaluate to
+    /// means evaluating them, which is only defensible when the effect system
+    /// says the evaluation cannot be noticed.
+    pub fn check(&mut self, form: &Syntax) -> R<Checked> {
         let env = self.checker.env.clone();
         let exp = self.checker.p.parse_exp(form, &Default::default())?;
         let desc = self.checker.check(exp, &env)?;
         let ty = unparse(&self.checker.p.arena, &self.checker.p.interner, desc.ty);
         let effect = unparse(&self.checker.p.arena, &self.checker.p.interner, desc.effect);
+        // FX-87's own notion, not a new one: `purify` already collapses any
+        // effect confined to a private (`@=`) region to `pure`, which is
+        // exactly the question being asked — can anyone outside tell that this
+        // ran?
+        let safe = self.checker.is_pure(exp);
 
         // The checker's own per-node descriptions become the justification the
         // emitted metadata carries.
@@ -91,21 +114,34 @@ impl Fx87Session {
             &self.standard,
             Some(&purity),
         );
+        Ok(Checked { ty, effect, code, safe })
+    }
+
+    /// Run already-erased Scheme, capturing what it printed.
+    pub fn run_code(&mut self, code: &str) -> Result<String, String> {
         // A program's own output is captured rather than let loose: the value
         // is what is being compared.
         let saved = self.scheme.rt.capture();
-        let result = self.scheme.eval_str("<fx87>", &code);
+        let result = self.scheme.eval_str("<fx87>", code);
         self.printed = self.scheme.rt.restore(saved);
-        let value = match result {
+        match result {
             // `write`, not `display`: the archive's evaluating path prints a
             // result with Racket's `print`, so a character comes out `#\a` and
             // a string keeps its quotes. (FX-91's driver uses `~a` and so
             // needs `display` — the two references differ here.)
             Ok(v) => Ok(write_value(&self.scheme.rt.heap, v)),
             Err(e) => Err(e.to_string()),
-        };
-        Ok(Outcome { ty, effect, code, value })
+        }
     }
+}
+
+/// A form that has been checked and erased, but not run.
+pub struct Checked {
+    pub ty: String,
+    pub effect: String,
+    pub code: String,
+    /// Whether running this form early would be undetectable.
+    pub safe: bool,
 }
 
 /// Adapts the checker's recorded descriptions to what erasure asks for.

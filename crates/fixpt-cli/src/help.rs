@@ -19,6 +19,27 @@
 //! a real call site, so `car` is found without anyone having to instantiate it
 //! first.
 //!
+//! A hole — `,help` written *inside* a form — is answered twice, because there
+//! are two different things to know and neither subsumes the other.
+//!
+//! *Statically*, from the types: the hole is one argument of one subroutine,
+//! and the arguments already written often pin down what the rest must be, so
+//! FX can say `the hole wants: int` and then list what produces one.
+//!
+//! *Dynamically*, by running the program: the form is evaluated as written
+//! except at the hole, which becomes `(%hole POSITION TOTAL)` — a primitive
+//! that reports the machine's pending work instead of computing. That answer is
+//! made of values rather than types (`#(0 0 0)`, not `(vectorof int r)`), it
+//! notices things no type can (the branch that means the hole is never reached
+//! at all), and it is the *only* answer available in Scheme, which has no types
+//! to consult.
+//!
+//! The dynamic half costs something the static half does not: evaluating an
+//! argument the user only asked *about*. In FX that cost is priced by the
+//! effect system — an argument is run only when its inferred effect says no one
+//! could tell, and otherwise the effect itself is reported. So the static
+//! analysis is what licenses the dynamic one.
+//!
 //! The commands are the same in every dialect; what each can answer differs,
 //! and a dialect that cannot answer one says so rather than staying silent.
 
@@ -66,11 +87,7 @@ pub fn mentions_hole(form: &fixpt_read::Syntax, name_of: &dyn Fn(fixpt_read::Sym
     use fixpt_read::Datum;
     match &form.datum {
         Datum::List { items, tail } => {
-            if items.len() == 2
-                && let (Datum::Symbol(u), Datum::Symbol(h)) = (&items[0].datum, &items[1].datum)
-                && name_of(*u) == "unquote"
-                && matches!(name_of(*h).as_str(), "help" | "?")
-            {
+            if is_hole(form, name_of) {
                 return true;
             }
             items.iter().any(|i| mentions_hole(i, name_of))
@@ -176,7 +193,8 @@ fn overview(h: &dyn Helpful) {
         println!("  {cmd:<16} {what}");
     }
     if h.holes() {
-        println!("; `,help` inside a form asks what belongs at that position:");
+        println!("; `,help` inside a form asks about that position — the form is");
+        println!("  run up to the hole, and what is around it is reported:");
         println!("    (vector-ref (make-vector 3 0) ,help)");
     }
     if !h.typed() {
@@ -186,4 +204,73 @@ fn overview(h: &dyn Helpful) {
         );
     }
     println!("; anything else is evaluated.");
+}
+
+/// Replace every `,help` hole with `(with)`, leaving the rest of the form alone.
+///
+/// The dynamic half of answering a hole: the form is run as written except at
+/// the hole, which becomes a call to a primitive that reports the evaluation
+/// context instead of computing. Everything the language already does —
+/// argument order, macros, the operator's own evaluation — happens for real,
+/// so the report describes the program the user actually typed rather than a
+/// static reconstruction of it.
+pub fn plug_hole(
+    form: &fixpt_read::Syntax,
+    name_of: &dyn Fn(fixpt_read::Sym) -> String,
+    with: fixpt_read::Sym,
+) -> fixpt_read::Syntax {
+    use fixpt_read::{Datum, Num, Syntax};
+    let span = form.span;
+    // `(%hole POSITION TOTAL)`. The two constants are what the *reader* knows
+    // and the machine may not: which argument of how many the hole is. The AST
+    // engine can work that out from its frames, but the compiled engine cannot
+    // — a call is push-operator, push-arguments, `CALL n`, so until the `CALL`
+    // runs the arity lives only in the instruction stream. Handing the static
+    // fact to the dynamic report is what lets the compiled engine segment its
+    // operand stack into "this call" and "the calls waiting beneath it".
+    let hole = |span, position: i64, total: i64| Syntax {
+        span,
+        datum: Datum::List {
+            items: vec![
+                Syntax { span, datum: Datum::Symbol(with) },
+                Syntax { span, datum: Datum::Number(Num::Int(position)) },
+                Syntax { span, datum: Datum::Number(Num::Int(total)) },
+            ],
+            tail: None,
+        },
+    };
+    let datum = match &form.datum {
+        Datum::List { items, tail } => {
+            if is_hole(form, name_of) {
+                return hole(span, 0, 0);
+            }
+            let total = items.len().saturating_sub(1) as i64;
+            let at = |i: usize, s: &Syntax| {
+                if is_hole(s, name_of) {
+                    hole(s.span, i as i64, total)
+                } else {
+                    plug_hole(s, name_of, with)
+                }
+            };
+            Datum::List {
+                items: items.iter().enumerate().map(|(i, s)| at(i, s)).collect(),
+                tail: tail.as_ref().map(|t| Box::new(plug_hole(t, name_of, with))),
+            }
+        }
+        Datum::Vector(items) => {
+            Datum::Vector(items.iter().map(|i| plug_hole(i, name_of, with)).collect())
+        }
+        _ => form.datum.clone(),
+    };
+    Syntax { span, datum }
+}
+
+/// Is this form itself the hole — `(unquote help)`, as `,help` reads?
+fn is_hole(form: &fixpt_read::Syntax, name_of: &dyn Fn(fixpt_read::Sym) -> String) -> bool {
+    use fixpt_read::Datum;
+    let Datum::List { items, tail: None } = &form.datum else { return false };
+    items.len() == 2
+        && matches!((&items[0].datum, &items[1].datum),
+            (Datum::Symbol(u), Datum::Symbol(h))
+                if name_of(*u) == "unquote" && matches!(name_of(*h).as_str(), "help" | "?"))
 }

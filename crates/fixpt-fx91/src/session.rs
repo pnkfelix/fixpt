@@ -47,6 +47,16 @@ pub struct Outcome {
     pub value: Result<String, String>,
 }
 
+/// A form that has been checked and lowered, but not run.
+pub struct Checked {
+    pub ty: String,
+    pub effect: String,
+    pub code: String,
+    /// Whether running this form early would be undetectable — see
+    /// [`Fx91Session::speculation_safe`].
+    pub safe: bool,
+}
+
 impl Fx91Session {
     pub fn new() -> R<Fx91Session> {
         Fx91Session::with_backend(fixpt_engine::Backend::Ast)
@@ -84,33 +94,73 @@ impl Fx91Session {
     /// The checker is reset first, matching the reference's REPL loop: each
     /// top-level form is checked in the initial environment.
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
+        let checked = self.check(form)?;
+        let value = self.run_code(&checked.code);
+        Ok(Outcome {
+            ty: checked.ty,
+            effect: checked.effect,
+            code: checked.code,
+            value,
+        })
+    }
+
+    /// Check and lower a form without running it.
+    ///
+    /// Separate from [`run`](Self::run) because the effect is known here and
+    /// the decision to run can depend on it. The REPL's `,help` hole uses
+    /// that: to show what a sibling argument evaluates to it must evaluate it,
+    /// and evaluating something the user did not ask to evaluate is only
+    /// defensible when the effect system says it cannot be noticed.
+    pub fn check(&mut self, form: &Syntax) -> R<Checked> {
         self.checker.reset();
         let alpha = self.checker.p.init_alpha;
         let node = self.checker.p.parse_exp(alpha, form)?;
         let (ty, effect) = self.checker.type_effect_of_exp(node)?;
+        let safe = self.speculation_safe(effect);
         let ty = self.checker.render_dexp(ty);
         let effect = self.checker.render_dexp(effect);
-
         let generated = self.checker.code_of_exp(node)?;
         let code = fixpt_read::write_syntax(&generated, &self.checker.p.interner);
+        Ok(Checked { ty, effect, code, safe })
+    }
+
+    /// May this form be evaluated when the user only asked *about* it?
+    ///
+    /// The effect system answers. `read` and `init` leave nothing behind that
+    /// a later run could notice — a read changes no store, and an allocation
+    /// in a fresh region produces garbage and nothing else. `write` does, so
+    /// an expression that may write is described rather than run. Anything
+    /// whose effect is not one of those constants, including an effect
+    /// variable that inference left open, is treated as unsafe: the point of
+    /// asking is to be sure, and an unknown effect is not a guarantee.
+    ///
+    /// `read`, `write` and `init` are the abstract effects the standard module
+    /// declares (`fx-module.fx:7`), so this is a check on the effect term's
+    /// structure and not on how it happens to print.
+    fn speculation_safe(&self, effect: crate::ast::FxId) -> bool {
+        let p = &self.checker.p;
+        p.arena.effect_list(effect).into_iter().all(|c| {
+            p.arena
+                .var(c)
+                .map(|v| matches!(p.interner.name(v.user_name), "read" | "init"))
+                .unwrap_or(false)
+        })
+    }
+
+    /// Run already-lowered Scheme, capturing what it printed.
+    pub fn run_code(&mut self, code: &str) -> Result<String, String> {
         // A program's own output is captured rather than let loose: the value
         // is what is being compared, and the reference's driver discards
         // printed output the same way.
         let saved = self.scheme.rt.capture();
-        let result = self.scheme.eval_str("<fx91>", &code);
+        let result = self.scheme.eval_str("<fx91>", code);
         self.printed = self.scheme.rt.restore(saved);
-        let value = match result {
+        match result {
             // `display`, not `write`: the reference prints a result with
             // Racket's `~a`, so a character shows as `c` rather than `#\c`.
             Ok(v) => Ok(display_value(&self.scheme.rt.heap, v)),
             Err(e) => Err(e.to_string()),
-        };
-        Ok(Outcome {
-            ty,
-            effect,
-            code,
-            value,
-        })
+        }
     }
 }
 

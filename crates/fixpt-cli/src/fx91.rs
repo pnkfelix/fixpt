@@ -306,6 +306,15 @@ fn answer_hole(session: &mut Fx91Session, form: &Syntax) -> Vec<String> {
     let Some(at) = items.iter().position(|i| crate::help::mentions_hole(i, &names)) else {
         return vec!["; no hole found".into()];
     };
+    let items = items.clone();
+    let mut out = Vec::new();
+    out.extend(static_hole(session, &items, at));
+    out.extend(dynamic_hole(session, &items, at));
+    out
+}
+
+/// What the types say belongs in the hole.
+fn static_hole(session: &mut Fx91Session, items: &[Syntax], at: usize) -> Vec<String> {
     if at == 0 {
         return vec![
             "; FX-91 cannot yet search for an operator by argument type — \
@@ -313,7 +322,6 @@ fn answer_hole(session: &mut Fx91Session, form: &Syntax) -> Vec<String> {
                 .into(),
         ];
     }
-    let items = items.clone();
     session.checker.reset();
     let alpha = session.checker.p.init_alpha;
     let Ok(node) = session.checker.p.parse_exp(alpha, &items[0]) else {
@@ -332,6 +340,42 @@ fn answer_hole(session: &mut Fx91Session, form: &Syntax) -> Vec<String> {
             render(session, &items[0])
         )],
     }
+}
+
+/// What the run says is around the hole.
+///
+/// The operator and the arguments before the hole are evaluated and shown, so
+/// the answer is made of values rather than of types. FX pays for this: an
+/// argument is only evaluated when its **inferred effect is `pure`**, because
+/// evaluating something the user did not ask to evaluate is defensible exactly
+/// when the effect system guarantees no one can tell. An impure argument is
+/// reported with the effect that stopped it — which is itself worth knowing,
+/// since it says what will happen when the form is finally run.
+fn dynamic_hole(session: &mut Fx91Session, items: &[Syntax], at: usize) -> Vec<String> {
+    let mut out = vec![format!("; at the hole — argument {at} of {}:", items.len() - 1)];
+    for (i, arg) in items[..at].iter().enumerate() {
+        let what = if i == 0 { "the operator".to_string() } else { format!("argument {i}") };
+        let src = render(session, arg);
+        let checked = match session.check(arg) {
+            Ok(c) => c,
+            Err(e) => {
+                out.push(format!("  {what} {src} does not check: {e}"));
+                continue;
+            }
+        };
+        if !checked.safe {
+            out.push(format!(
+                "  {what} {src} not evaluated — its effect is {}",
+                checked.effect
+            ));
+            continue;
+        }
+        match session.run_code(&checked.code) {
+            Ok(v) => out.push(format!("  {what} {src} = {v}")),
+            Err(e) => out.push(format!("  {what} {src} fails: {e}")),
+        }
+    }
+    out
 }
 
 fn render(session: &Fx91Session, form: &Syntax) -> String {

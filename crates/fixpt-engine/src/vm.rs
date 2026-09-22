@@ -606,6 +606,23 @@ impl Vm {
                     }
                 }
             }
+            // `(%hole)` — report the pending work rather than computing.
+            //
+            // The compiled engine knows less about this than the AST one, and
+            // the difference is instructive. There is no frame saying "argument
+            // 2 of 3": a call is push-operator, push-arguments, `CALL n`, so
+            // until the `CALL` executes the arity is only in the instruction
+            // stream. What *is* known, and is the useful part, is the operand
+            // stack — the operator and every argument already evaluated, as
+            // values.
+            EngineOp::Hole => {
+                let position = self.stack[base + 1].as_fixnum() as usize;
+                let total = self.stack[base + 2].as_fixnum() as usize;
+                let report = self.describe_context(rt, base, position, total);
+                self.stack.truncate(base);
+                let obj = rt.error_object(&report, &[]);
+                Err(Thrown { obj, fatal: true })
+            }
             EngineOp::CallWithValues => {
                 let producer = self.stack[base + 1];
                 let consumer = self.stack[base + 2];
@@ -700,6 +717,80 @@ impl Vm {
         // top frame truncates nothing and lands in the right place.
         self.fp = self.stack.len() as u32;
         self.ret(rt, p, value)
+    }
+
+    // ------------------------------------------------------------- the hole
+    /// Describe what the machine was in the middle of doing.
+    ///
+    /// `position`/`total` come from the reader: the hole is argument
+    /// `position` of `total`. That is the static half, and the compiled engine
+    /// needs it — its frames record no such thing, and the enclosing `CALL`
+    /// has not run yet. Given it, the operand stack segments exactly: the top
+    /// `position` values are this call's operator and the arguments already
+    /// evaluated, and anything below belongs to calls still waiting.
+    fn describe_context(
+        &mut self,
+        rt: &mut Runtime,
+        base: usize,
+        position: usize,
+        total: usize,
+    ) -> String {
+        use std::fmt::Write as _;
+        let code = self.regs[REG_CODE];
+        let frame = if rt.heap.is_a(code, ObjType::Code) {
+            rt.heap.obj_ref(code, CODE_FRAME).as_fixnum() as usize
+        } else {
+            0
+        };
+        let floor = (self.fp as usize + 1 + frame).min(base);
+        let pending = &self.stack[floor..base];
+
+        let mut out = String::from("evaluation reached a hole");
+        if position == 0 || position > pending.len() {
+            // The reader thought the hole sat in argument `position`, and the
+            // machine disagrees: a call pushes its operator and arguments into
+            // the *same* activation as the hole, so if they are not on this
+            // operand stack there is no such call. The enclosing form looked
+            // like an application and is not one — a binding clause, a `cond`
+            // clause, a macro that consumed it. Saying that is more use than
+            // repeating the reader's guess as though the run confirmed it.
+            out.push_str(if position == 0 {
+                "\n  the hole is not in argument position"
+            } else {
+                "\n  the enclosing form is not an application — no operator or \n                   earlier argument was evaluated for it"
+            });
+        } else {
+            let call = &pending[pending.len() - position..];
+            let _ = write!(
+                out,
+                "\n  the hole is argument {position} of {total} to {}",
+                fixpt_runtime::write_value(&rt.heap, call[0])
+            );
+            for (i, v) in call[1..].iter().enumerate() {
+                let _ = write!(
+                    out,
+                    "\n    argument {} evaluated to {}",
+                    i + 1,
+                    fixpt_runtime::write_value(&rt.heap, *v)
+                );
+            }
+            let beneath = pending.len() - position;
+            if beneath > 0 {
+                let _ = write!(
+                    out,
+                    "\n  {beneath} value(s) beneath it belong to calls still waiting"
+                );
+            }
+        }
+        let name = rt.heap.obj_ref(code, CODE_NAME);
+        if rt.heap.is_a(name, ObjType::Symbol) {
+            let _ = write!(out, "\n  inside the procedure `{}`", rt.heap.symbol_name(name));
+        }
+        let depth = self.frames.len().saturating_sub(1);
+        if depth > 0 {
+            let _ = write!(out, "\n  with {depth} call(s) pending beneath it");
+        }
+        out
     }
 
     // ------------------------------------------------------------ conditions

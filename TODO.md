@@ -264,3 +264,50 @@ related: doing this one is the strongest argument for doing that one.
 `LineReader`. Further out, FX-91 could colour by *kind* — the checker knows what
 is a type, an effect and a region, and nothing else in either language makes
 that distinction visible.
+
+---
+
+## 9. A hole that resumes instead of stopping
+
+**What is there.** `,help` inside a form is answered twice: statically from the
+types (FX only), and dynamically by running the form with the hole replaced by
+`(%hole POSITION TOTAL)`, a primitive that describes the machine's pending work.
+See `crates/fixpt-cli/src/help.rs`.
+
+**What is missing.** The dynamic half *stops*. `%hole` raises a fatal condition,
+so the run is thrown away and asking twice about the same form re-runs it from
+the beginning. Everything already computed — the operator, the arguments, the
+enclosing frames — is discarded at the moment it becomes interesting.
+
+It need not be. The machine at that point is a value the engine can already
+copy: `call/cc` captures the value stack and an encoding of the frame stack, and
+frames hold no heap references precisely so that encoding is plain words. So
+`%hole` could *capture* rather than raise, and the REPL could hold the
+continuation and offer to resume it with a value the user then supplies:
+
+```text
+> (vector-ref (make-vector 3 0) ,help)
+; at the hole — argument 2 of 2 to #<primitive:vector-ref>
+    argument 1 evaluated to #(0 0 0)
+; `,resume EXPR` to continue with a value
+> ,resume 1
+0
+```
+
+That turns the hole from a question into a breakpoint, which is the same
+mechanism a debugger wants, and it makes the "what fits here?" search directly
+testable: try a candidate, resume, see whether it works.
+
+**Where to start.** `EngineOp::Hole` in `crates/fixpt-engine/src/interp.rs` and
+`vm.rs`; `EngineOp::CallCC` beside it already does the capture. The REPL side is
+`run_line` in `crates/fixpt-cli/src/main.rs`, which would keep the captured
+continuation in the session rather than formatting the report and dropping it.
+
+**Why not now.** A held continuation is a root the collector has to know about
+between REPL lines, and resuming one whose session has since had definitions
+added is a question the reference implementations never had to answer. Neither
+is hard; both are more than the reporting version needed.
+
+**Related.** The same capture-per-checkpoint idea as [§1](#1-a-self-correcting-reader-built-on-callcc),
+one level up: §1 saves continuations while *reading* a form, this one saves one
+while *running* it.

@@ -310,12 +310,66 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
                 let ask = help::parse(&text).expect("just checked");
                 help::answer(&mut SchemeHelp(&session), &ask);
             }
-            Line::Form(text) => match session.eval_to_string("<repl>", &text) {
+            Line::Form(text) => match run_line(&mut session, &text) {
                 Ok(v) => println!("{v}"),
                 Err(e) => eprintln!("{e}"),
             },
         }
     }
+}
+
+/// Run one REPL line, answering a `,help` hole rather than evaluating past it.
+///
+/// Scheme is where the dynamic half of `,help` earns its keep. The FX dialects
+/// can answer a hole statically, from the operator's type; Scheme has no types
+/// to consult, so the only way to say anything about a position is to *get
+/// there* — run the program as written, with the hole replaced by a primitive
+/// that reports the machine's pending work instead of computing a value. The
+/// answer is then made of things that actually happened: this operator, these
+/// arguments, these values.
+fn run_line(session: &mut Session, text: &str) -> Result<String, String> {
+    let forms = session.read_forms("<repl>", text).map_err(|e| e.to_string())?;
+    let has_hole = {
+        let names = |s: fixpt_read::Sym| session.rt.interner.name(s).to_string();
+        forms.iter().any(|f| help::mentions_hole(f, &names))
+    };
+    if has_hole {
+        let with = session.rt.interner.intern("%hole");
+        let names = |s: fixpt_read::Sym| session.rt.interner.name(s).to_string();
+        let plugged: Vec<_> =
+            forms.iter().map(|f| help::plug_hole(f, &names, with)).collect();
+        return match session.eval_forms(&plugged) {
+            // Reaching the hole raises, so a value means the hole was never
+            // reached: the program took a branch around it, which is itself
+            // the answer.
+            Ok(v) => Ok(format!(
+                "; the hole was never reached — the form evaluated to {}",
+                fixpt_runtime::write_value(&session.rt.heap, v)
+            )),
+            Err(e) => Ok(hole_report(&e.to_string())),
+        };
+    }
+    session
+        .eval_forms(&forms)
+        .map(|v| fixpt_runtime::write_value(&session.rt.heap, v))
+        .map_err(|e| e.to_string())
+}
+
+/// Print the engine's report as help rather than as a failure.
+fn hole_report(raised: &str) -> String {
+    let body = raised
+        .split_once("evaluation reached a hole")
+        .map(|(_, rest)| rest.trim_start_matches([':', ' ']))
+        .unwrap_or(raised);
+    let mut out = String::from("; at the hole:");
+    for line in body.lines() {
+        let line = line.trim();
+        if !line.is_empty() {
+            out.push_str("\n  ");
+            out.push_str(line);
+        }
+    }
+    out
 }
 
 /// Scheme's answer to the same questions.
@@ -329,6 +383,10 @@ struct SchemeHelp<'a>(&'a Session);
 impl help::Helpful for SchemeHelp<'_> {
     fn dialect(&self) -> &'static str {
         "Scheme"
+    }
+
+    fn holes(&self) -> bool {
+        true
     }
 
     fn describe(&mut self, name: &str) -> Vec<String> {
