@@ -26,18 +26,43 @@
 
 use crate::ast::{Arena, DoBinding, Exp, ExpId, TagClause};
 use fixpt_read::{Interner, Sym};
+use std::collections::HashSet;
 
 pub struct Eraser<'a> {
     arena: &'a Arena,
     interner: &'a Interner,
     gensym: usize,
+    /// Names bound by the standard environment, which live in the immutable
+    /// region and therefore cannot be reassigned.
+    standard: &'a HashSet<Sym>,
+    /// Names the program has rebound around the expression being erased.
+    /// A standard name shadowed here is an ordinary variable.
+    shadowed: Vec<Sym>,
 }
 
 /// The unit value. `#u` is not Scheme syntax, so the runtime binds a name.
 pub const UNIT: &str = "%fx-unit";
 
 pub fn erase(arena: &Arena, interner: &Interner, exp: ExpId) -> String {
-    let mut e = Eraser { arena, interner, gensym: 0 };
+    erase_with(arena, interner, exp, &HashSet::new())
+}
+
+/// Erase, annotating what the checker proved.
+///
+/// `standard` names the bindings that came from the initial environment.
+/// Because those live in the immutable region — and `(set! + -)` is therefore a
+/// *type error*, not a program — an application of one can be compiled without
+/// the indirection through a global. The claim rides along in the emitted
+/// Scheme as an inert quoted constant, exactly as Twobit carries `R F G decls`
+/// in a lambda's body, so the output remains a program any Scheme can run.
+pub fn erase_with(
+    arena: &Arena,
+    interner: &Interner,
+    exp: ExpId,
+    standard: &HashSet<Sym>,
+) -> String {
+    let mut e =
+        Eraser { arena, interner, gensym: 0, standard, shadowed: Vec::new() };
     e.go(exp)
 }
 
@@ -49,6 +74,21 @@ impl Eraser<'_> {
     fn fresh(&mut self, tag: &str) -> String {
         self.gensym += 1;
         format!("%fx-{tag}-{}", self.gensym)
+    }
+
+    /// Is `name` still the standard binding here?
+    fn is_standard(&self, name: Sym) -> bool {
+        self.standard.contains(&name) && !self.shadowed.contains(&name)
+    }
+
+    /// Wrap `code` in the annotation the claim deserves.
+    ///
+    /// `(begin '(%fx-note …) code)` — an ordinary two-expression `begin`, so
+    /// the annotation is evaluated for effect and discarded. A Scheme that has
+    /// never heard of `%fx-note` runs this correctly and merely compiles it
+    /// less well, which is what makes the encoding safe to adopt.
+    fn note(&self, claims: &str, because: &str, code: String) -> String {
+        format!("(begin '(%fx-note {claims} (basis checked) (because {because:?})) {code})")
     }
 
     fn seq(&mut self, ids: &[ExpId]) -> String {
@@ -93,27 +133,59 @@ impl Eraser<'_> {
             Exp::Begin(items) => format!("(begin {})", self.seq(&items)),
             Exp::Lambda { params, body } => {
                 let names: Vec<String> = params.iter().map(|p| self.name(p.name)).collect();
-                format!("(lambda ({}) {})", names.join(" "), self.go(body))
+                let depth = self.shadowed.len();
+                self.shadowed.extend(params.iter().map(|p| p.name));
+                let b = self.go(body);
+                self.shadowed.truncate(depth);
+                format!("(lambda ({}) {})", names.join(" "), b)
             }
             Exp::VLambda { name, body, .. } => {
                 // One rest parameter: the arguments arrive as a list, which is
                 // exactly what the `vsubr` type said.
-                format!("(lambda {} {})", self.name(name), self.go(body))
+                let depth = self.shadowed.len();
+                self.shadowed.push(name);
+                let b = self.go(body);
+                self.shadowed.truncate(depth);
+                format!("(lambda {} {b})", self.name(name))
             }
             Exp::Let { bindings, body } => {
                 let bs = self.bindings(&bindings);
-                format!("(let ({bs}) {})", self.go(body))
+                let depth = self.shadowed.len();
+                self.shadowed.extend(bindings.iter().map(|b| b.name));
+                let b = self.go(body);
+                self.shadowed.truncate(depth);
+                format!("(let ({bs}) {b})")
             }
             Exp::Letrec { bindings, body } => {
+                let depth = self.shadowed.len();
+                self.shadowed.extend(bindings.iter().map(|b| b.name));
                 let bs = self.bindings(&bindings);
-                format!("(letrec ({bs}) {})", self.go(body))
+                let b = self.go(body);
+                self.shadowed.truncate(depth);
+                format!("(letrec ({bs}) {b})")
             }
             Exp::App { fun, args } => {
+                let integrable = match self.arena.exp_at(fun) {
+                    Exp::Var(v) if self.is_standard(*v) => Some(*v),
+                    _ => None,
+                };
                 let f = self.go(fun);
-                if args.is_empty() {
+                let call = if args.is_empty() {
                     format!("({f})")
                 } else {
                     format!("({f} {})", self.seq(&args))
+                };
+                match integrable {
+                    Some(v) => {
+                        let name = self.name(v);
+                        self.note(
+                            &format!("(integrable {name})"),
+                            "standard binding: lives in @=, the immutable region, \
+                             so `set!` on it is a type error",
+                            call,
+                        )
+                    }
+                    None => call,
                 }
             }
             // `set!` yields unit in FX-87, where Scheme's is unspecified.

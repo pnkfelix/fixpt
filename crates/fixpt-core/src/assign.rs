@@ -266,6 +266,18 @@ impl Converter<'_> {
     }
 
     fn convert(&mut self, id: NodeId) -> NodeId {
+        let out = self.convert_inner(id);
+        // Facts travel with the node they describe. Boxing rewrites the tree,
+        // and a claim the front end proved about an expression is still true of
+        // the expression after its variables are boxed.
+        let facts = self.program.facts(id).clone();
+        if !facts.is_empty() {
+            self.b.set_facts(out, facts);
+        }
+        out
+    }
+
+    fn convert_inner(&mut self, id: NodeId) -> NodeId {
         let span = self.program.span(id);
         match self.program.node(id).clone() {
             Node::Const(c) => {
@@ -386,6 +398,7 @@ fn clone_program(p: &Program) -> Program {
     Program {
         nodes: p.nodes.clone(),
         spans: p.spans.clone(),
+        facts: p.facts.clone(),
         vars: p.vars.clone(),
         lambdas: p.lambdas.clone(),
         consts: p.consts.clone(),

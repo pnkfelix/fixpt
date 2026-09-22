@@ -4,6 +4,7 @@
 //! single pass that fills the side tables the engines depend on.
 
 pub mod analyze;
+pub mod facts;
 pub mod assign;
 pub mod ir;
 pub mod lower;

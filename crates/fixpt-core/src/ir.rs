@@ -144,6 +144,13 @@ pub struct Program {
     pub nodes: Vec<Node>,
     /// Parallel to `nodes`.
     pub spans: Vec<Span>,
+    /// What a front end proved about each node. Parallel to `nodes`, and empty
+    /// for almost all of them.
+    ///
+    /// A side table rather than a field on `Node`, for the reason the other
+    /// analyses are: it costs nothing when unused, and a front end that knows
+    /// nothing — Scheme — simply leaves it empty and behaves exactly as before.
+    pub facts: Vec<crate::facts::Facts>,
     pub vars: Vec<VarInfo>,
     pub lambdas: Vec<LambdaInfo>,
     /// Quoted data and literals. **Traced**: pass `&mut program.consts` to the
@@ -160,6 +167,7 @@ impl Program {
         Program {
             nodes: Vec::new(),
             spans: Vec::new(),
+            facts: Vec::new(),
             vars: Vec::new(),
             lambdas: Vec::new(),
             consts: Vec::new(),
@@ -174,6 +182,10 @@ impl Program {
     #[inline]
     pub fn span(&self, id: NodeId) -> Span {
         self.spans[id.index()]
+    }
+    #[inline]
+    pub fn facts(&self, id: NodeId) -> &crate::facts::Facts {
+        &self.facts[id.index()]
     }
     #[inline]
     pub fn var(&self, id: VarId) -> &VarInfo {
@@ -202,6 +214,7 @@ impl Program {
 pub struct Builder {
     nodes: Vec<Node>,
     spans: Vec<Span>,
+    facts: Vec<crate::facts::Facts>,
     vars: Vec<VarInfo>,
     lambdas: Vec<LambdaInfo>,
     consts: Vec<Value>,
@@ -216,6 +229,7 @@ impl Builder {
         Builder {
             nodes: p.nodes,
             spans: p.spans,
+            facts: p.facts,
             vars: p.vars,
             lambdas: p.lambdas,
             consts: p.consts,
@@ -226,6 +240,7 @@ impl Builder {
         Builder {
             nodes: Vec::new(),
             spans: Vec::new(),
+            facts: Vec::new(),
             vars: Vec::new(),
             lambdas: Vec::new(),
             consts: Vec::new(),
@@ -235,7 +250,13 @@ impl Builder {
     pub fn node(&mut self, span: Span, node: Node) -> NodeId {
         self.nodes.push(node);
         self.spans.push(span);
+        self.facts.push(crate::facts::Facts::default());
         NodeId(self.nodes.len() as u32 - 1)
+    }
+
+    /// Attach what the front end proved about a node it has just built.
+    pub fn set_facts(&mut self, id: NodeId, facts: crate::facts::Facts) {
+        self.facts[id.index()] = facts;
     }
 
     pub fn var(&mut self, name: Sym, span: Span) -> VarId {
@@ -273,6 +294,7 @@ impl Builder {
         Program {
             nodes: self.nodes,
             spans: self.spans,
+            facts: self.facts,
             vars: self.vars,
             lambdas: self.lambdas,
             consts: self.consts,

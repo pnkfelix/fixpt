@@ -410,6 +410,19 @@ impl Compiler<'_> {
             }
             Node::Lambda(l) => self.closure(s, l)?,
             Node::App { rator, rands } => {
+                // A front end may have proved that the operator is a primitive
+                // that cannot be rebound. That licenses skipping the global
+                // load and the generic call — the two instructions that
+                // dominate this compiler's output — and it is a claim only a
+                // language with an immutable standard environment can make.
+                // Scheme cannot: `(set! + -)` is an ordinary program there.
+                if let Some(prim) = self.integrable_primitive(node, rands.len()) {
+                    for r in rands.iter() {
+                        self.expr(s, *r, false)?;
+                    }
+                    s.emit(&[op::PRIM, rands.len() as u32, prim as u32]);
+                    return Ok(());
+                }
                 self.expr(s, rator, false)?;
                 for r in rands.iter() {
                     self.expr(s, *r, false)?;
@@ -475,6 +488,28 @@ impl Compiler<'_> {
         let k = s.constant(code);
         s.emit(&[op::CLOSURE, k]);
         Ok(())
+    }
+
+    /// The primitive this application may be compiled as, if the front end
+    /// proved one and this engine has it.
+    ///
+    /// Three conditions, all necessary: the claim must be present, it must be
+    /// `Checked` rather than guessed (`Facts::trusted`), and the primitive must
+    /// accept this many arguments. The last is not paranoia — the front end's
+    /// notion of a primitive's arity is its own, and a mismatch here would
+    /// compile a call that cannot be made.
+    fn integrable_primitive(&self, node: NodeId, argc: usize) -> Option<u16> {
+        let facts = self.program.facts(node);
+        let name = facts.trusted().find_map(|f| match f.claim {
+            fixpt_core::facts::Claim::Integrable(s) => Some(s),
+            _ => None,
+        })?;
+        let index = prim::lookup(self.interner.name(name))?;
+        let def = prim::def(index);
+        if !matches!(def.kind, PrimKind::Simple(_)) || !def.accepts(argc) {
+            return None;
+        }
+        Some(index)
     }
 
     fn place(&self, s: &Scope, v: VarId) -> Result<Loc, CompileError> {

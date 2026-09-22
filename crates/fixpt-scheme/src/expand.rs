@@ -674,3 +674,95 @@ impl Expander<'_> {
         Ok(out)
     }
 }
+
+// ------------------------------------------------------ front-end metadata
+
+/// Reading what another front end proved, out of the Scheme it emitted.
+///
+/// The encoding is Twobit's: a quoted constant in a position where its value is
+/// discarded. `pass2.aux.sch` builds every lambda node as literal Scheme with
+/// `'(R F G decls doc)` sitting in the body, so the analyses travel with the
+/// code and any conforming evaluator ignores them. Here the same trick is
+/// spelled
+///
+/// ```scheme
+/// (begin '(%fx-note (pure) (because "int ! pure")) (+ x 1))
+/// ```
+///
+/// which is an ordinary two-expression `begin`: the annotation is evaluated for
+/// effect and thrown away. Three consequences, all of them the point:
+///
+/// * the emitted program stays runnable by **any** Scheme, so an FX front end
+///   can be tested against a stock implementation;
+/// * the metadata survives being written to text and read back, because it is
+///   data rather than a side table someone has to remember to carry;
+/// * a compiler that does not know about `%fx-note` produces correct code and
+///   merely slower code, so adopting it is never a correctness risk.
+///
+/// What is added beyond Twobit is `because` and the basis. `lambda.F` says a
+/// variable is free and nothing can ask why; a claim here records the evidence
+/// and whether it was *checked* by a type system or merely inferred.
+impl Expander<'_> {
+    /// If `args[0]` is an annotation, the facts it asserts.
+    pub(crate) fn read_note(&mut self, args: &[Syntax]) -> Option<fixpt_core::facts::Facts> {
+        use fixpt_core::facts::{Basis, Claim, Fact, Facts};
+        let quoted = self.quoted_datum(args.first()?)?;
+        let Datum::List { items, tail: None } = quoted else { return None };
+        let head = match items.first().map(|s| &s.datum) {
+            Some(Datum::Symbol(s)) => *s,
+            _ => return None,
+        };
+        if self.rt.interner.name(head) != "%fx-note" {
+            return None;
+        }
+        let mut facts = Vec::new();
+        let mut because: Option<String> = None;
+        let mut basis = Basis::Checked;
+        for item in &items[1..] {
+            let Datum::List { items: parts, tail: None } = &item.datum else { continue };
+            let Some(Datum::Symbol(tag)) = parts.first().map(|s| &s.datum) else { continue };
+            match self.rt.interner.name(*tag) {
+                "because" => {
+                    because = parts.get(1).map(|s| {
+                        fixpt_read::write_syntax(s, &self.rt.interner)
+                    });
+                }
+                "basis" => {
+                    if let Some(Datum::Symbol(b)) = parts.get(1).map(|s| &s.datum) {
+                        basis = match self.rt.interner.name(*b) {
+                            "inferred" => Basis::Inferred,
+                            "asserted" => Basis::Asserted,
+                            _ => Basis::Checked,
+                        };
+                    }
+                }
+                "pure" => facts.push(Claim::Pure),
+                "no-escape" => facts.push(Claim::NoEscape),
+                "integrable" => {
+                    if let Some(Datum::Symbol(n)) = parts.get(1).map(|s| &s.datum) {
+                        facts.push(Claim::Integrable(*n));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Some(Facts(
+            facts
+                .into_iter()
+                .map(|claim| Fact { claim, basis, because: because.clone() })
+                .collect(),
+        ))
+    }
+
+    /// The datum inside `(quote x)`, if this is one.
+    fn quoted_datum<'a>(&self, s: &'a Syntax) -> Option<&'a Datum> {
+        let Datum::List { items, tail: None } = &s.datum else { return None };
+        if items.len() != 2 {
+            return None;
+        }
+        match &items[0].datum {
+            Datum::Symbol(q) if self.rt.interner.name(*q) == "quote" => Some(&items[1].datum),
+            _ => None,
+        }
+    }
+}

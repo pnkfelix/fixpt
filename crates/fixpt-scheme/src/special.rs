@@ -82,6 +82,16 @@ impl Expander<'_> {
                 }
             }
             Special::Begin => {
+                // A `begin` whose first element is an inert annotation is not a
+                // sequence: it is one expression carrying what a front end
+                // proved about it. See `Expander::read_note`.
+                if let Some(facts) = self.read_note(args)
+                    && args.len() == 2
+                {
+                    let node = self.expr(&args[1])?;
+                    self.b.set_facts(node, facts);
+                    return Ok(node);
+                }
                 let mut nodes = Vec::with_capacity(args.len());
                 for a in args {
                     nodes.push(self.expr(a)?);

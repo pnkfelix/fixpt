@@ -13,7 +13,7 @@
 //! debugging a code generator.
 
 use crate::check::Checker;
-use crate::erase::erase;
+use crate::erase::erase_with;
 use crate::error::{FxError, R};
 use crate::unparse::unparse;
 use fixpt_read::Syntax;
@@ -36,6 +36,9 @@ pub struct Fx87Session {
     pub scheme: Session,
     /// Whatever the last form printed while it ran.
     pub printed: String,
+    /// The names the initial environment bound. They live in the immutable
+    /// region, so an application of one can be annotated as integrable.
+    standard: std::collections::HashSet<fixpt_read::Sym>,
 }
 
 /// What checking and running one form produced.
@@ -62,7 +65,8 @@ impl Fx87Session {
             )
         })?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
-        Ok(Fx87Session { checker, scheme, printed: String::new() })
+        let standard = checker.env.value_names().collect();
+        Ok(Fx87Session { checker, scheme, printed: String::new(), standard })
     }
 
     /// Check a form, erase it, and run it.
@@ -76,7 +80,8 @@ impl Fx87Session {
         let ty = unparse(&self.checker.p.arena, &self.checker.p.interner, desc.ty);
         let effect = unparse(&self.checker.p.arena, &self.checker.p.interner, desc.effect);
 
-        let code = erase(&self.checker.p.arena, &self.checker.p.interner, exp);
+        let code =
+            erase_with(&self.checker.p.arena, &self.checker.p.interner, exp, &self.standard);
         // A program's own output is captured rather than let loose: the value
         // is what is being compared.
         let saved = self.scheme.rt.capture();
