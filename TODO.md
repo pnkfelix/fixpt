@@ -158,9 +158,11 @@ Worth solving deliberately rather than discovering.
 `crates/fixpt-cli/src/lineedit.rs`, in rough order of how much they would be
 missed:
 
-* **Long lines redraw wrong.** The row arithmetic counts newlines, not screen
-  rows, so a line the terminal wraps confuses the cursor. Needs the terminal
-  width — `stty size`, since there is no `libc` here.
+* ~~**Long lines redraw wrong.**~~ Done: the arithmetic is in screen rows now,
+  with the width from `stty size`. Pulled out of `render` as a pure function so
+  it could be tested — which immediately caught an off-by-one at exact
+  multiples of the width, where `n` characters occupy `1 + (n-1)/w` rows rather
+  than `1 + n/w`.
 * **No `^R`** reverse history search.
 * **No bracketed paste**, so pasting a large form is processed a keystroke at a
   time and echoes messily.
@@ -177,6 +179,16 @@ up before `Enter` rather than after.
 the *logical* character buffer, entirely separately from the string it draws.
 So SGR escapes inserted into the drawn text cannot disturb the cursor
 arithmetic. Colour is close to free; the separation is already there.
+
+**Landed:** unbound identifiers, paren matching, token colour, `NO_COLOR` and
+`TERM=dumb`, and the wrapping prerequisite. All of it reads
+`fixpt_read::tokens`, which lives in the reader so that a `)` inside `#| … |#`
+or `|a(b|` is not mistaken for a delimiter.
+
+**Still open:** binding-site highlighting (the scope walk), marking the
+*unclosed* delimiter using the span `form_status` already returns, and — for
+FX-91 and FX-87 — colouring by *kind*, since their checkers know what is a
+type, an effect and a region.
 
 **In rough order of value for effort:**
 

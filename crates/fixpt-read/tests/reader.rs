@@ -388,3 +388,109 @@ mod completeness {
         assert_eq!(status("(display #\\("), "incomplete");
     }
 }
+
+/// Tokenising, for the highlighter.
+///
+/// The property that matters is the one `balanced()` got wrong: a delimiter
+/// inside a string, a comment or a `|symbol|` is not a delimiter. A highlighter
+/// that reproduced the scan for itself would repeat the mistake quietly —
+/// colouring the wrong parenthesis instead of submitting the wrong form.
+mod tokenising {
+    use fixpt_read::{match_delimiter, tokens, SyntaxProfile, TokenKind};
+
+    fn kinds(text: &str) -> Vec<(TokenKind, String)> {
+        tokens(text, SyntaxProfile::SCHEME)
+            .into_iter()
+            .filter(|t| t.kind != TokenKind::Whitespace)
+            .map(|t| (t.kind, text[t.start..t.end].to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn ordinary_forms() {
+        assert_eq!(
+            kinds("(+ 1 \"s\")"),
+            vec![
+                (TokenKind::Open, "(".into()),
+                (TokenKind::Symbol, "+".into()),
+                (TokenKind::Number, "1".into()),
+                (TokenKind::Str, "\"s\"".into()),
+                (TokenKind::Close, ")".into()),
+            ]
+        );
+        assert_eq!(kinds("#\\a")[0].0, TokenKind::Char);
+        assert_eq!(kinds("#t")[0].0, TokenKind::Boolean);
+        assert_eq!(kinds("'x")[0].0, TokenKind::Quote);
+        assert_eq!(kinds(",@y")[0].0, TokenKind::Quote);
+        assert_eq!(kinds("-3/4")[0].0, TokenKind::Number);
+    }
+
+    #[test]
+    fn delimiters_inside_other_things_are_not_delimiters() {
+        // The block comment is one token, parenthesis and all.
+        let t = kinds("(a #| ) |# b)");
+        assert_eq!(t.iter().filter(|(k, _)| *k == TokenKind::Close).count(), 1);
+        assert!(t.iter().any(|(k, s)| *k == TokenKind::Comment && s.contains(')')));
+
+        // So is the pipe symbol.
+        let t = kinds("(f |a(b|)");
+        assert_eq!(t.iter().filter(|(k, _)| *k == TokenKind::Open).count(), 1);
+        assert!(t.iter().any(|(k, s)| *k == TokenKind::Symbol && s == "|a(b|"));
+
+        // And the string, and the character literal.
+        assert_eq!(kinds("\"a ) b\"").len(), 1);
+        let t = kinds("(display #\\))");
+        assert_eq!(t.iter().filter(|(k, _)| *k == TokenKind::Close).count(), 1);
+    }
+
+    #[test]
+    fn a_line_being_typed_never_fails_to_scan() {
+        // Every one of these is mid-edit, and none may panic or stall.
+        for text in ["(", "\"", "#|", "|", "#\\", "'", "#", ",", "(a (b", "#| ) "] {
+            let t = tokens(text, SyntaxProfile::SCHEME);
+            assert!(!t.is_empty(), "{text:?} produced nothing");
+            assert_eq!(t.last().expect("non-empty").end, text.len(), "{text:?} lost input");
+        }
+    }
+
+    #[test]
+    fn matching_a_delimiter_skips_the_ones_that_are_not() {
+        let text = "(a #| ) |# (b) c)";
+        let t = tokens(text, SyntaxProfile::SCHEME);
+        // The `(` at 0 matches the final `)`, not the one in the comment.
+        let (open, close) = match_delimiter(&t, 0).expect("matches");
+        assert_eq!(open.start, 0);
+        assert_eq!(close.start, text.len() - 1);
+
+        // And from the other end.
+        let (open, close) = match_delimiter(&t, text.len() - 1).expect("matches");
+        assert_eq!(open.start, 0);
+        assert_eq!(close.start, text.len() - 1);
+
+        // The inner pair matches itself.
+        let inner = text.find("(b)").expect("present");
+        let (o, c) = match_delimiter(&t, inner).expect("matches");
+        assert_eq!((o.start, c.start), (inner, inner + 2));
+    }
+
+    #[test]
+    fn an_unmatched_delimiter_has_no_partner() {
+        let t = tokens("(a (b", SyntaxProfile::SCHEME);
+        assert!(match_delimiter(&t, 0).is_none());
+        let t = tokens("a)", SyntaxProfile::SCHEME);
+        assert!(match_delimiter(&t, 1).is_none());
+    }
+
+    /// FX-87 makes brackets symbol constituents, so `free-[d]vars` is one
+    /// symbol rather than three tokens.
+    #[test]
+    fn the_profile_decides_what_a_bracket_is() {
+        let fx = tokens("free-[d]vars", SyntaxProfile::FX87);
+        let real: Vec<_> = fx.iter().filter(|t| t.kind != TokenKind::Whitespace).collect();
+        assert_eq!(real.len(), 1, "FX-87 reads this as one symbol");
+        assert_eq!(real[0].kind, TokenKind::Symbol);
+
+        let scheme = tokens("[a]", SyntaxProfile::SCHEME);
+        assert_eq!(scheme[0].kind, TokenKind::Open);
+    }
+}

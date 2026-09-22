@@ -731,3 +731,241 @@ fn to_f64(n: &Num) -> Option<f64> {
         }
     })
 }
+
+// --------------------------------------------------------------- tokenising
+
+/// What a stretch of source is, for the purpose of showing it to someone.
+///
+/// Coarser than the reader's own distinctions, because it exists to be given a
+/// colour rather than a meaning.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum TokenKind {
+    Open,
+    Close,
+    /// `'`, `` ` ``, `,`, `,@`
+    Quote,
+    Str,
+    Char,
+    Number,
+    Boolean,
+    Symbol,
+    /// `;…`, `#|…|#`, `#;`
+    Comment,
+    /// `#(`, `#u8(` and other dispatches that are not any of the above.
+    Hash,
+    Whitespace,
+}
+
+/// One token: a half-open byte range and what it is.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Token {
+    pub start: usize,
+    pub end: usize,
+    pub kind: TokenKind,
+}
+
+/// Scan `text` into tokens.
+///
+/// This lives in the reader, with the reader's own notion of what a delimiter
+/// is, because getting that wrong is how the REPL used to truncate
+/// `(define (f x) #| ) |# x)`. A highlighter that counted for itself would
+/// repeat the mistake in a quieter form — colouring the wrong parenthesis
+/// rather than submitting the wrong form.
+///
+/// Unlike [`Reader::read`], this never fails: unterminated anything simply runs
+/// to the end of the input, which is the normal state of a line being typed.
+pub fn tokens(text: &str, profile: SyntaxProfile) -> Vec<Token> {
+    let bytes: Vec<(usize, char)> = text.char_indices().collect();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    let at = |i: usize| bytes.get(i).map(|(_, c)| *c);
+    let offset = |i: usize| bytes.get(i).map_or(text.len(), |(o, _)| *o);
+
+    let bracket_is_paren = profile.brackets != Brackets::SymbolChars;
+    let is_delim = |c: char| match c {
+        c if c.is_whitespace() => true,
+        '(' | ')' | '"' | ';' | '\'' | '`' | ',' => true,
+        '[' | ']' => bracket_is_paren,
+        _ => false,
+    };
+
+    while i < bytes.len() {
+        let start = i;
+        let c = at(i).expect("in range");
+        let kind = match c {
+            c if c.is_whitespace() => {
+                while at(i).is_some_and(|c| c.is_whitespace()) {
+                    i += 1;
+                }
+                TokenKind::Whitespace
+            }
+            ';' => {
+                while at(i).is_some_and(|c| c != '\n') {
+                    i += 1;
+                }
+                TokenKind::Comment
+            }
+            '#' if profile.block_comments && at(i + 1) == Some('|') => {
+                // Nested, as the reader nests them.
+                i += 2;
+                let mut depth = 1usize;
+                while depth > 0 && i < bytes.len() {
+                    if at(i) == Some('#') && at(i + 1) == Some('|') {
+                        depth += 1;
+                        i += 2;
+                    } else if at(i) == Some('|') && at(i + 1) == Some('#') {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                TokenKind::Comment
+            }
+            '#' if profile.datum_comments && at(i + 1) == Some(';') => {
+                i += 2;
+                TokenKind::Comment
+            }
+            '"' => {
+                i += 1;
+                while let Some(c) = at(i) {
+                    i += 1;
+                    match c {
+                        '\\' => i += 1,
+                        '"' => break,
+                        _ => {}
+                    }
+                }
+                TokenKind::Str
+            }
+            '#' if at(i + 1) == Some('\\') => {
+                i += 2;
+                // At least one character, then constituents.
+                if at(i).is_some() {
+                    i += 1;
+                }
+                while at(i).is_some_and(|c| !is_delim(c)) {
+                    i += 1;
+                }
+                TokenKind::Char
+            }
+            '(' => {
+                i += 1;
+                TokenKind::Open
+            }
+            ')' => {
+                i += 1;
+                TokenKind::Close
+            }
+            '[' if bracket_is_paren => {
+                i += 1;
+                TokenKind::Open
+            }
+            ']' if bracket_is_paren => {
+                i += 1;
+                TokenKind::Close
+            }
+            '\'' | '`' => {
+                i += 1;
+                TokenKind::Quote
+            }
+            ',' => {
+                i += 1;
+                if at(i) == Some('@') {
+                    i += 1;
+                }
+                TokenKind::Quote
+            }
+            '|' => {
+                // `|a symbol|`, inside which a parenthesis is not a delimiter.
+                i += 1;
+                while let Some(c) = at(i) {
+                    i += 1;
+                    if c == '|' {
+                        break;
+                    }
+                }
+                TokenKind::Symbol
+            }
+            '#' => {
+                i += 1;
+                while at(i).is_some_and(|c| !is_delim(c)) {
+                    i += 1;
+                }
+                let text = &text[offset(start)..offset(i)];
+                if profile.booleans_are_symbols {
+                    TokenKind::Symbol
+                } else if matches!(text, "#t" | "#f" | "#true" | "#false") {
+                    TokenKind::Boolean
+                } else {
+                    TokenKind::Hash
+                }
+            }
+            _ => {
+                while at(i).is_some_and(|c| !is_delim(c)) {
+                    i += 1;
+                }
+                let word = &text[offset(start)..offset(i)];
+                if parse_number(word, 10, None).is_some() {
+                    TokenKind::Number
+                } else {
+                    TokenKind::Symbol
+                }
+            }
+        };
+        if i == start {
+            // Never stall, whatever the input.
+            i += 1;
+        }
+        out.push(Token { start: offset(start), end: offset(i), kind });
+    }
+    out
+}
+
+/// The token that closes or opens the one at `cursor`, if the text balances
+/// there.
+///
+/// Only real delimiters count — a `)` inside a string, a comment or a
+/// `|symbol|` is not one, which is precisely the knowledge a highlighter
+/// cannot be trusted to reproduce for itself.
+pub fn match_delimiter(toks: &[Token], cursor: usize) -> Option<(Token, Token)> {
+    let here = toks.iter().position(|t| {
+        matches!(t.kind, TokenKind::Open | TokenKind::Close) && t.start == cursor
+    })?;
+    let t = toks[here];
+    match t.kind {
+        TokenKind::Open => {
+            let mut depth = 0i32;
+            for u in &toks[here..] {
+                match u.kind {
+                    TokenKind::Open => depth += 1,
+                    TokenKind::Close => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some((t, *u));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        TokenKind::Close => {
+            let mut depth = 0i32;
+            for u in toks[..=here].iter().rev() {
+                match u.kind {
+                    TokenKind::Close => depth += 1,
+                    TokenKind::Open => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some((*u, t));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}

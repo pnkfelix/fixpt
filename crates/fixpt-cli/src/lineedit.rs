@@ -108,6 +108,53 @@ impl LineReader {
     }
 }
 
+/// Where the cursor is on screen, and how far down the form reaches.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Layout {
+    pub cursor_screen_row: usize,
+    pub cursor_screen_col: usize,
+    pub last_screen_row: usize,
+}
+
+/// Lay out a form in **screen rows**.
+///
+/// A logical line wider than the terminal occupies several rows, so counting
+/// newlines — which this used to do — puts the cursor in the wrong place for
+/// the rest of the session as soon as one line wraps. Pulled out of `render` so
+/// it can be tested directly: it is pure arithmetic, and it is the part most
+/// likely to be quietly wrong.
+///
+/// `line_widths` are in characters, one per logical line. `prompt` prefixes the
+/// first, `continuation` the rest.
+pub fn layout(
+    line_widths: &[usize],
+    prompt: usize,
+    continuation: usize,
+    width: usize,
+    cursor_line: usize,
+    cursor_col: usize,
+) -> Layout {
+    let width = width.max(1);
+    let prefix = |i: usize| if i == 0 { prompt } else { continuation };
+    // How many screen rows a logical line occupies. `n` characters fill
+    // columns `0..n-1`, so the last one sits on row `(n-1)/width` — not
+    // `n/width`, which overcounts by one whenever the line ends exactly at the
+    // right margin.
+    let rows_of = |i: usize| {
+        let used = prefix(i) + line_widths[i];
+        1 + used.saturating_sub(1) / width
+    };
+
+    let before: usize = (0..cursor_line).map(rows_of).sum();
+    let used = prefix(cursor_line) + cursor_col;
+    let total: usize = (0..line_widths.len()).map(rows_of).sum();
+    Layout {
+        cursor_screen_row: before + used / width,
+        cursor_screen_col: used % width,
+        last_screen_row: total.saturating_sub(1),
+    }
+}
+
 /// Accumulate lines until the form is balanced. The prompts are still printed,
 /// so a transcript of a piped session reads the way the session looked.
 fn read_plain(prompt: &str, continuation: &str, profile: SyntaxProfile) -> Line {
@@ -137,6 +184,7 @@ mod raw {
     //! The editor proper.
 
     use super::Line;
+    use super::Layout;
     use fixpt_read::SyntaxProfile;
     use std::io::{Read, Write};
     use std::path::PathBuf;
@@ -215,9 +263,47 @@ mod raw {
         history: Vec<String>,
         path: Option<PathBuf>,
         pub words: Vec<String>,
-        /// Rows between the top of the rendered form and the cursor, as of the
-        /// last redraw. The next redraw starts by moving back up that many.
+        /// Screen rows between the top of the rendered form and the cursor, as
+        /// of the last redraw. The next redraw starts by moving back up that
+        /// many.
         cursor_row: usize,
+        /// Terminal width, for the wrapping arithmetic.
+        width: usize,
+        /// Whether to emit colour at all.
+        pub(crate) colour: bool,
+    }
+
+    /// The terminal's width, from `stty size`.
+    ///
+    /// Same route as raw mode, for the same reason: no `libc`, no `unsafe`.
+    /// A terminal that will not say falls back to 80, which is wrong only for
+    /// lines that would have wrapped anyway.
+    fn terminal_width() -> usize {
+        let out = Command::new("stty")
+            .arg("size")
+            .stdin(Stdio::inherit())
+            .stderr(Stdio::null())
+            .output()
+            .ok();
+        out.and_then(|o| {
+            let text = String::from_utf8(o.stdout).ok()?;
+            text.split_whitespace().nth(1)?.parse::<usize>().ok()
+        })
+        .filter(|w| *w > 0)
+        .unwrap_or(80)
+    }
+
+    /// Should anything be coloured?
+    ///
+    /// `NO_COLOR` is honoured because it is the convention, and `TERM=dumb`
+    /// because a terminal that says it cannot should be believed. Neither costs
+    /// anything to check and both are the difference between a tool that
+    /// behaves in a pipeline and one that does not.
+    fn colour_wanted() -> bool {
+        if std::env::var_os("NO_COLOR").is_some() {
+            return false;
+        }
+        !matches!(std::env::var("TERM").as_deref(), Ok("dumb") | Err(_))
     }
 
     fn history_path(name: &str) -> Option<PathBuf> {
@@ -262,7 +348,14 @@ mod raw {
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .map(|text| text.lines().filter(|l| !l.is_empty()).map(unescape).collect())
                 .unwrap_or_default();
-            Editor { history, path, words: Vec::new(), cursor_row: 0 }
+            Editor {
+                history,
+                path,
+                words: Vec::new(),
+                cursor_row: 0,
+                width: terminal_width(),
+                colour: colour_wanted(),
+            }
         }
 
         pub fn save(&mut self) {
@@ -313,7 +406,7 @@ mod raw {
             let mut pending: Vec<char> = Vec::new();
 
             self.cursor_row = 0;
-            self.render(prompt, continuation, &buf, cursor);
+            self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone());
             loop {
                 let key = match read_key() {
                     Some(k) => k,
@@ -422,7 +515,7 @@ mod raw {
                     }
                     Key::Ignored => {}
                 }
-                self.render(prompt, continuation, &buf, cursor);
+                self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone());
             }
         }
 
@@ -464,12 +557,27 @@ mod raw {
         /// Repaint the whole form.
         ///
         /// Everything is written in one `write_all`, so the terminal never
-        /// shows a half-drawn line. Long lines that the terminal wraps are the
-        /// known weakness: the row arithmetic here counts newlines, not screen
-        /// rows.
-        fn render(&mut self, prompt: &str, continuation: &str, buf: &[char], cursor: usize) {
+        /// shows a half-drawn line.
+        ///
+        /// The arithmetic is in **screen rows**, not logical lines. A line
+        /// wider than the terminal occupies several rows, and counting
+        /// newlines instead — which this used to do — leaves the cursor in the
+        /// wrong place for the rest of the session. `stty size` supplies the
+        /// width, in keeping with how raw mode is already obtained.
+        fn render(
+            &mut self,
+            prompt: &str,
+            continuation: &str,
+            buf: &[char],
+            cursor: usize,
+            profile: SyntaxProfile,
+            words: &[String],
+        ) {
+            let width = self.width.max(8);
             let text: String = buf.iter().collect();
             let lines: Vec<&str> = text.split('\n').collect();
+            let painted = self.paint(&text, cursor, profile, words);
+
             let mut out = String::new();
             if self.cursor_row > 0 {
                 out.push_str(&format!("\x1b[{}A", self.cursor_row));
@@ -477,28 +585,38 @@ mod raw {
             out.push('\r');
             // Erase downwards: the form may have got shorter.
             out.push_str("\x1b[J");
-            for (i, line) in lines.iter().enumerate() {
+
+            // Emit the coloured text, line by line, with its prompt.
+            let mut painted_lines = painted.split('\n');
+            for i in 0..lines.len() {
                 if i > 0 {
                     out.push_str("\r\n");
                 }
                 out.push_str(if i == 0 { prompt } else { continuation });
-                out.push_str(line);
+                out.push_str(painted_lines.next().unwrap_or(""));
             }
 
-            let target_row = row_of(buf, cursor);
-            let start = line_start(buf, cursor);
-            let target_col =
-                if target_row == 0 { prompt.chars().count() } else { continuation.chars().count() }
-                    + (cursor - start);
-            let last_row = lines.len() - 1;
-            if last_row > target_row {
-                out.push_str(&format!("\x1b[{}A", last_row - target_row));
+            // Where the cursor belongs, and where printing left it — both in
+            // screen rows, both computed from the *logical* buffer so that the
+            // colour escapes above cannot affect them.
+            let widths: Vec<usize> = lines.iter().map(|l| l.chars().count()).collect();
+            let Layout { cursor_screen_row, cursor_screen_col, last_screen_row } = super::layout(
+                &widths,
+                prompt.chars().count(),
+                continuation.chars().count(),
+                width,
+                row_of(buf, cursor),
+                cursor - line_start(buf, cursor),
+            );
+
+            if last_screen_row > cursor_screen_row {
+                out.push_str(&format!("\x1b[{}A", last_screen_row - cursor_screen_row));
             }
             out.push('\r');
-            if target_col > 0 {
-                out.push_str(&format!("\x1b[{target_col}C"));
+            if cursor_screen_col > 0 {
+                out.push_str(&format!("\x1b[{cursor_screen_col}C"));
             }
-            self.cursor_row = target_row;
+            self.cursor_row = cursor_screen_row;
 
             let mut stdout = std::io::stdout();
             let _ = stdout.write_all(out.as_bytes());
@@ -637,5 +755,153 @@ mod raw {
             bytes.push(read_byte()?);
         }
         std::str::from_utf8(&bytes).ok()?.chars().next()
+    }
+}
+
+// ------------------------------------------------------------- highlighting
+
+/// Colouring the form as it is typed.
+///
+/// Three things are shown, in rough order of how much they are worth:
+///
+/// * **an identifier that is not bound**, dimmed — so a typo is visible at the
+///   keystroke that makes it, rather than after `Enter`. The list of bound
+///   names is the same one `Tab` completes from;
+/// * **the matching delimiter** for the one under the cursor, brightened;
+/// * **strings, characters, numbers and comments**, so the shape of a form is
+///   readable.
+///
+/// All of it comes from [`fixpt_read::tokens`] rather than from a scan written
+/// here. That is the same discipline `form_status` imposed and for the same
+/// reason: a `)` inside `#| … |#` or `|a(b|` is not a delimiter, and a
+/// highlighter that decided otherwise would brighten the wrong one.
+///
+/// Cursor arithmetic is unaffected by any of this, because `render` computes
+/// the cursor's position from the *logical* buffer and never from the string it
+/// draws — a separation that was already there and is what makes colour nearly
+/// free.
+mod paint {
+    pub const RESET: &str = "\x1b[0m";
+    pub const DIM: &str = "\x1b[2m";
+    pub const STRING: &str = "\x1b[32m";
+    pub const NUMBER: &str = "\x1b[36m";
+    pub const COMMENT: &str = "\x1b[90m";
+    pub const UNBOUND: &str = "\x1b[31m";
+    pub const MATCH: &str = "\x1b[1;33m";
+}
+
+impl raw::Editor {
+    /// The buffer with colour escapes inserted.
+    pub(crate) fn paint(
+        &self,
+        text: &str,
+        cursor: usize,
+        profile: fixpt_read::SyntaxProfile,
+        words: &[String],
+    ) -> String {
+        use fixpt_read::TokenKind;
+        if !self.colour {
+            return text.to_string();
+        }
+        let toks = fixpt_read::tokens(text, profile);
+        // `cursor` is a character index; the tokens speak in bytes.
+        let cursor_byte = text
+            .char_indices()
+            .nth(cursor)
+            .map_or(text.len(), |(b, _)| b);
+        // A delimiter is matched whether the cursor sits on it or just after
+        // it, which is where it lands having typed one.
+        let pair = fixpt_read::match_delimiter(&toks, cursor_byte).or_else(|| {
+            let before = text[..cursor_byte].char_indices().next_back().map(|(b, _)| b)?;
+            fixpt_read::match_delimiter(&toks, before)
+        });
+
+        let mut out = String::with_capacity(text.len() * 2);
+        for t in &toks {
+            let body = &text[t.start..t.end];
+            let highlighted = pair.is_some_and(|(o, c)| o.start == t.start || c.start == t.start);
+            let colour = if highlighted {
+                Some(paint::MATCH)
+            } else {
+                match t.kind {
+                    TokenKind::Str => Some(paint::STRING),
+                    TokenKind::Char | TokenKind::Number | TokenKind::Boolean => {
+                        Some(paint::NUMBER)
+                    }
+                    TokenKind::Comment => Some(paint::COMMENT),
+                    TokenKind::Quote | TokenKind::Hash => Some(paint::DIM),
+                    // The one worth having: a name nothing has bound.
+                    TokenKind::Symbol if !words.iter().any(|w| w == body) => {
+                        Some(paint::UNBOUND)
+                    }
+                    _ => None,
+                }
+            };
+            match colour {
+                Some(c) => {
+                    out.push_str(c);
+                    out.push_str(body);
+                    out.push_str(paint::RESET);
+                }
+                None => out.push_str(body),
+            }
+        }
+        out
+    }
+}
+
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{layout, Layout};
+
+    /// Nothing wraps: a screen row is a logical line, which is what the old
+    /// arithmetic assumed and the only case it got right.
+    #[test]
+    fn short_lines_are_one_row_each() {
+        let l = layout(&[5, 5, 5], 2, 2, 80, 1, 3);
+        assert_eq!(
+            l,
+            Layout { cursor_screen_row: 1, cursor_screen_col: 5, last_screen_row: 2 }
+        );
+    }
+
+    /// A line wider than the terminal occupies several rows, and everything
+    /// after it moves down.
+    #[test]
+    fn a_wrapped_line_pushes_what_follows_down() {
+        // Width 10, prompt 2. The first line is 18 characters, so with the
+        // prompt it fills columns 0..19 — exactly two rows, not three.
+        let l = layout(&[18, 3], 2, 2, 10, 1, 0);
+        assert_eq!(l.cursor_screen_row, 2, "the second line starts on row 2");
+        assert_eq!(l.cursor_screen_col, 2, "just past the continuation prompt");
+        assert_eq!(l.last_screen_row, 2);
+    }
+
+    /// The cursor inside a wrapped line lands on the right row and column.
+    #[test]
+    fn the_cursor_follows_the_wrap() {
+        // Width 10, prompt 2: columns 0..7 of the text are on row 0, and the
+        // 8th character begins row 1.
+        let at = |col| layout(&[30], 2, 2, 10, 0, col);
+        assert_eq!(at(0).cursor_screen_row, 0);
+        assert_eq!(at(7).cursor_screen_col, 9);
+        assert_eq!(at(8).cursor_screen_row, 1, "column 8 has wrapped");
+        assert_eq!(at(8).cursor_screen_col, 0);
+        assert_eq!(at(18).cursor_screen_row, 2);
+    }
+
+    /// Degenerate inputs must not panic or produce nonsense, because they
+    /// happen: a terminal that will not report its size, and an empty buffer.
+    #[test]
+    fn degenerate_cases() {
+        assert_eq!(layout(&[0], 2, 2, 80, 0, 0).last_screen_row, 0);
+        // A width of zero would divide by zero; it is clamped to one, so every
+        // character is its own row: 2 of prompt plus 5 of text is 7 rows,
+        // numbered 0..6.
+        let l = layout(&[5], 2, 2, 0, 0, 3);
+        assert_eq!(l.last_screen_row, 6);
+        // An empty form has no rows below the first.
+        assert_eq!(layout(&[0], 6, 6, 10, 0, 0).cursor_screen_col, 6);
     }
 }
