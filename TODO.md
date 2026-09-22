@@ -85,17 +85,35 @@ where a datum ends has to be the reader.**
 
 ## 2. Integrate known primitives
 
-The bytecode engine is only ~1.6× the AST engine, and the reason is visible in
-the disassembly: `(+ a b)` compiles to a `GLOBAL` load of `+`, then a `CALL`
-that dispatches through a `Primitive` heap object into the primitive table.
-Both engines pay it, so arithmetic dominates and the compiled engine's real
-advantages — flat closures, resolved slots, no environment chain — are diluted.
+**Done for FX, still open for Scheme.** An FX front end can prove a standard
+binding is immutable — `(set! + -)` is a *type error* there, since standard
+bindings live in `@=` — so it annotates the call and the compiler emits a direct
+`prim`. Measured on FX-87, best of five:
 
-The fix is Larceny's: recognise calls to primitives that have not been
-redefined and emit a direct opcode. The hazard is that Scheme permits
-`(set! + -)`, so it needs either a "integrate primitives" switch, or a guard
-that de-optimises on redefinition. `Node::PrimCall` already exists for exactly
-this and is currently produced only by assignment conversion.
+| | ast | bytecode | + metadata |
+|---|---|---|---|
+| loop 1e6 | 0.112s | 0.075s | 0.062s |
+| fib 24 | 0.014s | 0.011s | 0.009s |
+| sum of squares | 0.058s | 0.040s | 0.033s |
+
+**1.21× from the metadata alone, 1.77× over the AST engine.**
+
+Scheme still cannot do this, and that part of the entry stands: it needs an
+"integrate primitives" switch or a guard that de-optimises on redefinition.
+
+### What the 1.21× does not cover
+
+The 42.5% of instructions that were call plumbing did not all go, because only
+*standard* bindings are integrable. A program's own procedures — `loop`, `fib`,
+`go` in the benchmark — are `letrec`-bound, so a recursive call still costs a
+global load and a generic call.
+
+Those are immutable too. A `letrec` binding with no explicit region lives in
+`@=` exactly as a standard one does, so `(set! loop …)` is the same type error,
+and a self-call could compile to a direct jump rather than a dispatch. That is
+the obvious next win and it is the same mechanism: one more claim through the
+same channel. `fib 24` gains least from what is there now (1.17×) precisely
+because it is dominated by exactly this call.
 
 ## 3. Patch closures instead of boxing `letrec`
 
