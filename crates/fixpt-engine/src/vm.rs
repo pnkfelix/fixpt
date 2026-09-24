@@ -39,6 +39,7 @@ use fixpt_core::lower::{
 };
 use fixpt_heap::{ObjType, Value};
 use fixpt_runtime::Runtime;
+use fixpt_runtime::cmarks::{self, Marks};
 use fixpt_runtime::error::{Outcome, Thrown};
 use fixpt_runtime::prim::{self, EngineOp, PrimKind};
 
@@ -85,6 +86,22 @@ impl VmFrame {
             }
         }
     }
+    /// Move the frame's stack positions from a segment based at `from` to one
+    /// based at `to` — how a composable continuation is stored relative to its
+    /// own bottom and reinstated wherever it is called.
+    fn rebase(self, from: u32, to: u32) -> VmFrame {
+        let r = |x: u32| x - from + to;
+        match self {
+            VmFrame::Halt => VmFrame::Halt,
+            VmFrame::Return { pc, fp } => VmFrame::Return { pc, fp: r(fp) },
+            VmFrame::Consume { pc, fp, consumer } => VmFrame::Consume {
+                pc,
+                fp: r(fp),
+                consumer: r(consumer),
+            },
+        }
+    }
+
     fn decode(w: [u64; FRAME_WORDS]) -> Option<VmFrame> {
         Some(match w[0] {
             TAG_HALT => VmFrame::Halt,
@@ -123,6 +140,8 @@ enum Call {
 pub struct Vm {
     stack: Vec<Value>,
     frames: Vec<VmFrame>,
+    /// Continuation marks, prompts and winders — see [`cmarks`].
+    marks: Marks,
     regs: Vec<Value>,
     fp: u32,
     pc: u32,
@@ -143,6 +162,7 @@ impl Vm {
         Vm {
             stack: Vec::with_capacity(256),
             frames: Vec::with_capacity(64),
+            marks: Marks::default(),
             regs: vec![Value::UNSPECIFIED; N_REGS],
             fp: 0,
             pc: 0,
@@ -155,6 +175,7 @@ impl Vm {
         self.stack.clear();
         self.frames.clear();
         self.frames.push(VmFrame::Halt);
+        self.marks.clear();
         self.fp = 0;
         self.pc = 0;
         self.steps = 0;
@@ -420,6 +441,7 @@ impl Vm {
             VmFrame::Halt => Ok(Some(v)),
             VmFrame::Return { pc, fp } => {
                 self.frames.pop();
+                self.marks.trim(self.frames.len());
                 self.stack.truncate(self.fp as usize);
                 self.fp = fp;
                 self.pc = pc;
@@ -431,6 +453,7 @@ impl Vm {
                 // The producer has finished. Swap its frame for the consumer's
                 // and give the consumer the values it produced.
                 self.frames.pop();
+                self.marks.trim(self.frames.len());
                 let f = self.stack[consumer as usize];
                 self.stack.truncate(consumer as usize);
                 // Where the whole `call-with-values` expression's value goes.
@@ -541,13 +564,18 @@ impl Vm {
                 }
             }
             Some(ObjType::Continuation) => {
-                let value = if argc == 1 {
-                    self.stack[base + 1]
-                } else {
-                    let vals: Vec<Value> = self.stack[base + 1..].to_vec();
-                    make_values(rt, &vals)
-                };
-                self.restore_continuation(rt, p, f, value)
+                let vals: Vec<Value> = self.stack[base + 1..].to_vec();
+                // Winding is the prelude's: see the AST engine.
+                if let Some(hook) = p.global(&mut rt.heap, "%continuation-apply") {
+                    let list = rt.heap.list_from(&vals);
+                    self.stack.truncate(base);
+                    self.stack.push(hook);
+                    self.stack.push(f);
+                    self.stack.push(list);
+                    return self.apply(rt, p, base, call);
+                }
+                let value = if argc == 1 { vals[0] } else { make_values(rt, &vals) };
+                self.throw(rt, p, f, value, base, call)
             }
             _ => {
                 self.stack.truncate(base);
@@ -618,10 +646,92 @@ impl Vm {
             EngineOp::Hole => {
                 let position = self.stack[base + 1].as_fixnum() as usize;
                 let total = self.stack[base + 2].as_fixnum() as usize;
-                let report = self.describe_context(rt, base, position, total);
+                let top = p.global(&mut rt.heap, "%toplevel-tag");
+                let step = p.global(&mut rt.heap, "%abort-step");
+                let prompt = top.and_then(|t| self.marks.find_prompt(t));
+                let floor = prompt.map_or(0, |i| self.marks.meta[i].depth as usize);
+                let report = self.describe_context(rt, base, position, total, floor);
+                if let (Some(tag), Some(step), Some(pi)) = (top, step, prompt) {
+                    let k = self.capture_composable(rt, base, call, pi);
+                    let (pos, tot) = (self.stack[base + 1], self.stack[base + 2]);
+                    let hole = cmarks::make_hole(&mut rt.heap, tag, k, &report, pos, tot);
+                    let vals = rt.heap.list_from(&[hole]);
+                    return self.abort_to(rt, p, pi, tag, vals, step);
+                }
                 self.stack.truncate(base);
                 let obj = rt.error_object(&report, &[]);
                 Err(Thrown { obj, fatal: true })
+            }
+            // ---- marks, prompts, composable continuations ----
+            EngineOp::WithMark => {
+                let (key, val, thunk) = (self.stack[base + 1], self.stack[base + 2], self.stack[base + 3]);
+                let (depth, height) = self.continuation_of(base, call);
+                self.marks.set_mark(depth, height, key, val);
+                self.call_thunk(rt, p, base, call, thunk)
+            }
+            EngineOp::Wind => {
+                let (winder, thunk) = (self.stack[base + 1], self.stack[base + 2]);
+                let (depth, height) = self.continuation_of(base, call);
+                self.marks.push_winder(depth, height, winder);
+                self.call_thunk(rt, p, base, call, thunk)
+            }
+            EngineOp::Prompt => {
+                let (tag, handler, thunk) = (self.stack[base + 1], self.stack[base + 2], self.stack[base + 3]);
+                let (depth, height) = self.continuation_of(base, call);
+                self.marks.push_prompt(depth, height, tag, handler);
+                self.call_thunk(rt, p, base, call, thunk)
+            }
+            EngineOp::CurrentMarks => {
+                let from = self.marks.visible_from(self.stack[base + 1]);
+                let v = self.marks.mark_list(&mut rt.heap, from);
+                self.give(rt, p, base, call, v)
+            }
+            EngineOp::FirstMark => {
+                let (key, default, tag) = (self.stack[base + 1], self.stack[base + 2], self.stack[base + 3]);
+                let from = self.marks.visible_from(tag);
+                let v = self.marks.first(from, key).unwrap_or(default);
+                self.give(rt, p, base, call, v)
+            }
+            EngineOp::CurrentWinders => {
+                let v = self.marks.winder_list(&mut rt.heap);
+                self.give(rt, p, base, call, v)
+            }
+            EngineOp::PromptAvailable => {
+                let v = Value::boolean(self.marks.find_prompt(self.stack[base + 1]).is_some());
+                self.give(rt, p, base, call, v)
+            }
+            EngineOp::Abort => {
+                let (tag, vals, step) = (self.stack[base + 1], self.stack[base + 2], self.stack[base + 3]);
+                let Some(pi) = self.marks.find_prompt(tag) else {
+                    self.stack.truncate(base);
+                    return rt.fail("abort-current-continuation: no prompt with that tag", &[tag]);
+                };
+                self.abort_to(rt, p, pi, tag, vals, step)
+            }
+            EngineOp::CallComposable => {
+                let (f, tag) = (self.stack[base + 1], self.stack[base + 2]);
+                let Some(pi) = self.marks.find_prompt(tag) else {
+                    self.stack.truncate(base);
+                    return rt.fail("call-with-composable-continuation: no prompt with that tag", &[tag]);
+                };
+                let k = self.capture_composable(rt, base, call, pi);
+                self.stack.truncate(base);
+                self.stack.push(f);
+                self.stack.push(k);
+                self.apply(rt, p, base, call)
+            }
+            EngineOp::Throw => {
+                let (k, vals) = (self.stack[base + 1], self.stack[base + 2]);
+                if !rt.heap.is_a(k, ObjType::Continuation) {
+                    self.stack.truncate(base);
+                    return rt.type_error("a continuation", k);
+                }
+                let Some(items) = rt.heap.list_to_vec(vals) else {
+                    self.stack.truncate(base);
+                    return rt.type_error("a list of values", vals);
+                };
+                let value = make_values(rt, &items);
+                self.throw(rt, p, k, value, base, call)
             }
             EngineOp::CallWithValues => {
                 let producer = self.stack[base + 1];
@@ -683,10 +793,170 @@ impl Vm {
             }
         }
         let saved_frames = rt.heap.make_bytevector(&bytes);
-        let k = rt.heap.alloc(ObjType::Continuation, 2, Value::UNSPECIFIED);
-        rt.heap.obj_set(k, 0, saved_stack);
-        rt.heap.obj_set(k, 1, saved_frames);
-        k
+        let marks = self.marks.encode(&mut rt.heap, 0, 0, 0);
+        cmarks::make_continuation(&mut rt.heap, saved_stack, saved_frames, marks, false)
+    }
+
+    /// Where the continuation of an application at `base` stands, as the
+    /// (depth, height) a mark records.
+    ///
+    /// Unlike the AST engine this depends on the call mode. A `Next` call's
+    /// continuation is the frame the call is about to push, one deeper than
+    /// now, and the callee's activation will start at `base`. A tail call's
+    /// continuation is this activation's own — the top frame, with the stack
+    /// cut back to `fp` — which is exactly why a mark set in tail position
+    /// lands on the same entry as the one before it. `Framed` has its frame
+    /// already.
+    fn continuation_of(&self, base: usize, call: Call) -> (u32, u32) {
+        let depth = self.frames.len() as u32;
+        match call {
+            Call::Next => (depth + 1, base as u32),
+            Call::Tail => (depth, self.fp),
+            Call::Framed => (depth, base as u32),
+        }
+    }
+
+    /// Call `thunk` as the continuation of the application at `base`, then
+    /// drop any mark whose continuation never came to exist — a `Next` call
+    /// to a primitive pushes no frame.
+    fn call_thunk(
+        &mut self,
+        rt: &mut Runtime,
+        p: &mut Prepared,
+        base: usize,
+        call: Call,
+        thunk: Value,
+    ) -> Outcome<Option<Value>> {
+        self.stack.truncate(base);
+        self.stack.push(thunk);
+        let r = self.apply(rt, p, base, call);
+        self.marks.trim(self.frames.len());
+        r
+    }
+
+    /// Deliver a value from an engine op, in whichever way `call` says.
+    fn give(&mut self, rt: &mut Runtime, p: &mut Prepared, base: usize, call: Call, v: Value) -> Outcome<Option<Value>> {
+        self.stack.truncate(base);
+        match call {
+            Call::Next => {
+                self.stack.push(v);
+                Ok(None)
+            }
+            Call::Tail => self.ret(rt, p, v),
+            Call::Framed => {
+                self.fp = base as u32;
+                self.ret(rt, p, v)
+            }
+        }
+    }
+
+    /// Capture from the prompt at mark entry `pi` up to the continuation of the
+    /// application at `base`, as a composable continuation — a segment stored
+    /// relative to its own bottom.
+    ///
+    /// The cut follows [`capture`](Self::capture): a tail call's own activation
+    /// is dead, and a `Next` call's resume point is appended as a frame so that
+    /// reinstating is an ordinary return.
+    fn capture_composable(&mut self, rt: &mut Runtime, base: usize, call: Call, pi: usize) -> Value {
+        let m = self.marks.meta[pi];
+        let (depth, height) = (m.depth as usize, m.height);
+        let cut = if call == Call::Tail { self.fp as usize } else { base };
+        let saved_stack = rt.heap.vector_from(&self.stack[height as usize..cut]);
+        let mut frames: Vec<VmFrame> = self.frames[depth..].iter().map(|f| f.rebase(height, 0)).collect();
+        if call == Call::Next {
+            frames.push(VmFrame::Return { pc: self.pc, fp: self.fp }.rebase(height, 0));
+        }
+        let mut bytes = Vec::with_capacity(frames.len() * FRAME_WORDS * 8);
+        for f in &frames {
+            for w in f.encode() {
+                bytes.extend_from_slice(&w.to_le_bytes());
+            }
+        }
+        let saved_frames = rt.heap.make_bytevector(&bytes);
+        let marks = self.marks.encode(&mut rt.heap, pi + 1, m.depth, m.height);
+        cmarks::make_continuation(&mut rt.heap, saved_stack, saved_frames, marks, true)
+    }
+
+    /// Deliver `value` to continuation `k` from an application at `base`.
+    ///
+    /// A full continuation replaces the machine. A composable one is laid on
+    /// top of this application's continuation — which is where `call` says —
+    /// and then, like a full one, reached by an ordinary return.
+    fn throw(
+        &mut self,
+        rt: &mut Runtime,
+        p: &mut Prepared,
+        k: Value,
+        value: Value,
+        base: usize,
+        call: Call,
+    ) -> Outcome<Option<Value>> {
+        if !cmarks::is_composable(&rt.heap, k) {
+            return self.restore_continuation(rt, p, k, value);
+        }
+        let at = if call == Call::Tail { self.fp } else { base as u32 };
+        if call == Call::Next {
+            self.frames.push(VmFrame::Return { pc: self.pc, fp: self.fp });
+        }
+        let depth = self.frames.len() as u32;
+        self.stack.truncate(at as usize);
+        let seg = rt.heap.obj_ref(k, cmarks::K_STACK);
+        for i in 0..rt.heap.obj_len(seg) {
+            let v = rt.heap.obj_ref(seg, i);
+            self.stack.push(v);
+        }
+        let bytes = rt.heap.bytevector_to_vec(rt.heap.obj_ref(k, cmarks::K_FRAMES));
+        for chunk in bytes.chunks_exact(FRAME_WORDS * 8) {
+            let mut w = [0u64; FRAME_WORDS];
+            for (i, word) in chunk.chunks_exact(8).enumerate() {
+                w[i] = u64::from_le_bytes(word.try_into().expect("8 bytes"));
+            }
+            let f = VmFrame::decode(w).expect("frames we encoded ourselves");
+            self.frames.push(f.rebase(0, at));
+        }
+        let (vals, meta) = (rt.heap.obj_ref(k, cmarks::K_MARK_VALS), rt.heap.obj_ref(k, cmarks::K_MARK_META));
+        self.marks.append_encoded(&rt.heap, vals, meta, depth, at);
+        self.fp = self.stack.len() as u32;
+        self.ret(rt, p, value)
+    }
+
+    /// Cut the machine back to where mark entry `entry` was made.
+    fn cut_to(&mut self, entry: usize) {
+        let m = self.marks.meta[entry];
+        self.frames.truncate(m.depth as usize);
+        self.stack.truncate(m.height as usize);
+        self.marks.truncate(entry);
+        self.fp = m.height;
+    }
+
+    /// Abort to the prompt at entry `pi`; see the AST engine's `abort_to`,
+    /// which this mirrors. After a cut the value belongs to the frame now on
+    /// top, so the call is `Framed`.
+    fn abort_to(
+        &mut self,
+        rt: &mut Runtime,
+        p: &mut Prepared,
+        pi: usize,
+        tag: Value,
+        vals: Value,
+        step: Value,
+    ) -> Outcome<Option<Value>> {
+        if let Some(wi) = self.marks.innermost_winder_above(pi) {
+            let after = rt.heap.cdr(self.marks.val(wi));
+            self.cut_to(wi);
+            let base = self.stack.len();
+            self.stack.extend_from_slice(&[step, after, tag, vals, step]);
+            return self.apply(rt, p, base, Call::Framed);
+        }
+        let handler = self.marks.val(pi);
+        let Some(items) = rt.heap.list_to_vec(vals) else {
+            return rt.type_error("a list of values", vals);
+        };
+        self.cut_to(pi);
+        let base = self.stack.len();
+        self.stack.push(handler);
+        self.stack.extend_from_slice(&items);
+        self.apply(rt, p, base, Call::Framed)
     }
 
     fn restore_continuation(
@@ -696,8 +966,11 @@ impl Vm {
         k: Value,
         value: Value,
     ) -> Outcome<Option<Value>> {
-        let saved_stack = rt.heap.obj_ref(k, 0);
-        let saved_frames = rt.heap.obj_ref(k, 1);
+        let saved_stack = rt.heap.obj_ref(k, cmarks::K_STACK);
+        let saved_frames = rt.heap.obj_ref(k, cmarks::K_FRAMES);
+        self.marks.clear();
+        let (vals, meta) = (rt.heap.obj_ref(k, cmarks::K_MARK_VALS), rt.heap.obj_ref(k, cmarks::K_MARK_META));
+        self.marks.append_encoded(&rt.heap, vals, meta, 0, 0);
         self.stack.clear();
         for i in 0..rt.heap.obj_len(saved_stack) {
             let v = rt.heap.obj_ref(saved_stack, i);
@@ -734,6 +1007,7 @@ impl Vm {
         base: usize,
         position: usize,
         total: usize,
+        outer_frames: usize,
     ) -> String {
         use std::fmt::Write as _;
         let code = self.regs[REG_CODE];
@@ -786,7 +1060,8 @@ impl Vm {
         if rt.heap.is_a(name, ObjType::Symbol) {
             let _ = write!(out, "\n  inside the procedure `{}`", rt.heap.symbol_name(name));
         }
-        let depth = self.frames.len().saturating_sub(1);
+        // The first `outer_frames` frames are the top level's own machinery.
+        let depth = self.frames.len().saturating_sub(outer_frames.max(1));
         if depth > 0 {
             let _ = write!(out, "\n  with {depth} call(s) pending beneath it");
         }
@@ -827,7 +1102,7 @@ impl Vm {
     fn safepoint(&mut self, rt: &mut Runtime) {
         self.regs[REG_SCRATCH] = Value::UNSPECIFIED;
         rt.heap
-            .maybe_collect(&mut [&mut self.stack, &mut self.regs]);
+            .maybe_collect(&mut [&mut self.stack, &mut self.regs, &mut self.marks.vals]);
     }
 }
 

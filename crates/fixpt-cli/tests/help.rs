@@ -296,3 +296,47 @@ fn fx_will_not_run_an_argument_that_writes() {
     // the effect and not about having given up on the form.
     assert!(out.contains("the operator +"), "{out}");
 }
+
+// -------------------------------------------------------- holding a hole
+
+/// In Scheme a hole is held, not just reported: `,resume` continues the form
+/// from the hole with a value, and can do so again with another.
+#[test]
+fn scheme_resumes_a_hole_with_a_value_more_than_once() {
+    for engine in ["ast", "bytecode"] {
+        let out = repl_engine(
+            None,
+            engine,
+            "(list 'got (vector-ref (vector 10 20 30) ,help))\n,resume 0\n,resume 2\n",
+        );
+        assert!(out.contains("(got 10)"), "{engine}:\n{out}");
+        assert!(out.contains("(got 30)"), "{engine}:\n{out}");
+    }
+}
+
+/// A value supplied to `,resume` may itself contain a hole; answering that one
+/// finishes both.
+#[test]
+fn a_resumed_value_can_itself_ask() {
+    let out = repl(
+        None,
+        "(list 'got (vector-ref (vector 10 20 30) ,help))\n,resume (+ 1 ,help)\n,resume 1\n",
+    );
+    assert!(out.contains("argument 1 evaluated to 1"), "{out}");
+    assert!(out.contains("(got 30)"), "{out}");
+}
+
+#[test]
+fn where_repeats_the_held_hole_and_says_when_there_is_none() {
+    let out = repl(None, ",where\n(+ 1 ,help)\n,where\n");
+    assert!(out.contains("no hole is held"), "{out}");
+    assert_eq!(out.matches("argument 1 evaluated to 1").count(), 2, "{out}");
+}
+
+#[test]
+fn only_scheme_advertises_resume() {
+    assert!(repl(None, ",help\n").contains(",resume"));
+    for d in ["fx87", "fx91"] {
+        assert!(!repl(Some(d), ",help\n").contains(",resume"), "{d}");
+    }
+}

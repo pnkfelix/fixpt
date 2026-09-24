@@ -5,6 +5,7 @@
 //! VM use the same primitives, the same `equal?`, the same printer, so a
 //! difference between them cannot come from this layer.
 
+pub mod cmarks;
 pub mod equal;
 pub mod error;
 pub mod num;

@@ -33,8 +33,11 @@ use crate::value::Value;
 pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// Bumped when the *contents* change shape, not just the envelope: version 2
 /// carries the Core IR as heap objects, so a version-1 image's `Code` objects
-/// would be read with the wrong layout.
-pub const VERSION: u32 = 2;
+/// would be read with the wrong layout. Version 3 gives a continuation its
+/// marks (`[stack, frames, mark-vals, mark-meta, flags]` rather than
+/// `[stack, frames]`), and its prelude keeps handlers and `dynamic-wind`
+/// extents in marks rather than globals.
+pub const VERSION: u32 = 3;
 const HEADER_BYTES: usize = 40;
 
 /// Trailer written after an image appended to an executable.

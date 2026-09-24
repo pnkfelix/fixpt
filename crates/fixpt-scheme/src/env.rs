@@ -38,6 +38,7 @@ pub enum Special {
     Delay,
     DelayForce,
     Guard,
+    WithMark,
     Else,
     Arrow,
 }

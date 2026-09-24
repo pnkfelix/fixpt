@@ -3,11 +3,11 @@
 ;;; Everything here could have been a primitive and deliberately is not. Two
 ;;; groups are worth pointing at:
 ;;;
-;;; * `call/cc`, `dynamic-wind`, `with-exception-handler`, `raise` and
-;;;   `raise-continuable` are Kent Dybvig's classic arrangement: the engine
-;;;   provides a raw `%call/cc` that knows nothing about winding, and the
-;;;   winding and handler discipline is expressed here, in Scheme, where it is
-;;;   short enough to check against the report by eye.
+;;; * `call/cc`, `dynamic-wind`, prompts, continuation marks,
+;;;   `with-exception-handler`, `raise` and `raise-continuable`: the engine
+;;;   provides raw mechanism that knows nothing about winding or handlers, and
+;;;   the discipline is expressed here, in Scheme, where it is short enough to
+;;;   check against R7RS and SRFI 226 by eye.
 ;;;
 ;;; * `map`, `for-each`, `assoc`, `member` and the `caar` family are ordinary
 ;;;   list code. Written here they automatically get proper tail calls and
@@ -213,81 +213,173 @@
                    r))))))))
 
 ;;; -------------------------------------------- continuations and winding
-;;; Dybvig's arrangement. `%call/cc` is the raw, winding-unaware primitive.
+;;; SRFI 226's arrangement, on the engine's mark stack (`cmarks.rs`).
+;;;
+;;; A prompt, a `dynamic-wind` extent and an exception handler are each
+;;; *attached to the continuation* rather than kept in a global. So capturing a
+;;; continuation captures them, reinstating one reinstates them, and abandoning
+;;; one discards them -- which is what makes an abandoned computation unable to
+;;; leave a handler installed for whatever runs next. The engine supplies the
+;;; mechanism (`%wcm`, `%prompt`, `%wind`, `%abort`, `%call/comp`, `%throw`);
+;;; the policy -- which thunks run, in what order -- is written here.
 
-(define %winders '())
+(define-record-type %prompt-tag
+  (%make-prompt-tag name)
+  continuation-prompt-tag?
+  (name %prompt-tag-name))
 
-(define (%common-tail x y)
-  (let ((lx (length x)) (ly (length y)))
-    (let loop ((x (if (> lx ly) (list-tail x (- lx ly)) x))
-               (y (if (> ly lx) (list-tail y (- ly lx)) y)))
-      (if (eq? x y) x (loop (cdr x) (cdr y))))))
+(define (make-continuation-prompt-tag . name)
+  (%make-prompt-tag (if (pair? name) (car name) #f)))
 
-(define (%do-wind new)
-  (let ((tail (%common-tail new %winders)))
-    ;; Leaving: run `after` thunks from the inside out.
-    (let unwind ((l %winders))
-      (if (not (eq? l tail))
-          (begin (set! %winders (cdr l))
-                 ((cdar l))
-                 (unwind (cdr l)))))
-    ;; Entering: run `before` thunks from the outside in.
-    (let rewind ((l new))
-      (if (not (eq? l tail))
-          (begin (rewind (cdr l))
-                 ((caar l))
-                 (set! %winders l))))))
+(define %default-prompt-tag (make-continuation-prompt-tag 'default))
+(define (default-continuation-prompt-tag) %default-prompt-tag)
 
-(define (call-with-current-continuation f)
-  (%call/cc
-   (lambda (k)
-     (f (let ((saved %winders))
-          (lambda vals
-            (if (not (eq? saved %winders)) (%do-wind saved))
-            (apply k vals)))))))
+;; The top level's own prompt. Holes and uncaught conditions abort to it; no
+;; program has a reason to name it.
+(define %toplevel-tag (make-continuation-prompt-tag 'toplevel))
 
+(define (call-with-continuation-prompt thunk . rest)
+  (let ((tag (if (pair? rest) (car rest) %default-prompt-tag))
+        (handler (if (and (pair? rest) (pair? (cdr rest)))
+                     (cadr rest)
+                     (lambda (th) (th)))))
+    ;; In argument position, so the prompt gets a frame of its own.
+    (%prompt-result (%prompt tag handler thunk))))
+
+(define (continuation-prompt-available? tag) (%prompt-available? tag))
+
+(define (abort-current-continuation tag . vals)
+  (%abort tag vals %abort-step))
+
+;; One `dynamic-wind` extent left on the way out to a prompt. The engine has
+;; already cut back to the extent's own frame, so `after` runs with exactly the
+;; marks, handlers and outer extents that were live around the `dynamic-wind`.
+(define (%abort-step after tag vals step)
+  (after)
+  (%abort tag vals step))
+
+(define (call-with-composable-continuation f . tag)
+  (%call/comp f (if (pair? tag) (car tag) %default-prompt-tag)))
+
+(define (call-with-current-continuation f) (%call/cc f))
 (define call/cc call-with-current-continuation)
 
 (define (dynamic-wind before thunk after)
   (before)
-  (set! %winders (cons (cons before after) %winders))
-  (let ((result (thunk)))
-    (set! %winders (cdr %winders))
+  (let ((result (%wind (cons before after) thunk)))
     (after)
     result))
 
+;; Every application of a continuation comes here first -- the engine calls
+;; it -- so that leaving an extent runs its `after` and entering one runs its
+;; `before`, before the continuation is reinstated raw by `%throw`. A full
+;; continuation's extents are its own; a composable one's are added to the
+;; ones already live where it is called.
+(define (%continuation-apply k vals)
+  (%wind-to (%current-winders)
+            (if (%composable? k)
+                (append (%continuation-winders k) (%current-winders))
+                (%continuation-winders k)))
+  (%throw k vals))
+
+;; Both lists are innermost first and share their outermost extents.
+(define (%wind-to from to)
+  (let* ((shared (%shared-outer from to))
+         (leaving (- (length from) shared))
+         (entering (- (length to) shared)))
+    (let unwind ((l from) (n leaving))
+      (if (> n 0)
+          (begin ((cdar l)) (unwind (cdr l) (- n 1)))))
+    (let rewind ((l to) (n entering))
+      (if (> n 0)
+          (begin (rewind (cdr l) (- n 1)) ((caar l)))))))
+
+(define (%shared-outer a b)
+  (let loop ((a (reverse a)) (b (reverse b)) (n 0))
+    (if (and (pair? a) (pair? b) (eq? (car a) (car b)))
+        (loop (cdr a) (cdr b) (+ n 1))
+        n)))
+
+;;; ------------------------------------------------------ continuation marks
+
+(define-record-type %mark-set
+  (%make-mark-set pairs)
+  continuation-mark-set?
+  (pairs %mark-set-pairs))
+
+(define (current-continuation-marks . tag)
+  (%make-mark-set (%current-marks (if (pair? tag) (car tag) %default-prompt-tag))))
+
+(define (continuation-marks k . tag)
+  (%make-mark-set (%continuation-marks k (if (pair? tag) (car tag) %default-prompt-tag))))
+
+(define (continuation-mark-set->list set key)
+  (let loop ((l (%mark-set-pairs set)))
+    (cond ((null? l) '())
+          ((eq? (caar l) key) (cons (cdar l) (loop (cdr l))))
+          (else (loop (cdr l))))))
+
+(define (continuation-mark-set-first set key . rest)
+  (let ((default (if (pair? rest) (car rest) #f))
+        (tag (if (and (pair? rest) (pair? (cdr rest))) (cadr rest) %default-prompt-tag)))
+    (if set
+        (let ((l (continuation-mark-set->list set key)))
+          (if (pair? l) (car l) default))
+        (%first-mark key default tag))))
+
 ;;; ---------------------------------------------------------- conditions
+;;; The handler stack is a continuation mark. Each mark holds the whole list,
+;;; so installing a handler in tail position of another's thunk -- which
+;;; replaces that frame's mark -- loses nothing.
 
-(define %handlers '())
+(define %handler-key (list 'exception-handler))
 
-(define (%with-handlers hs thunk)
-  (let ((saved %handlers))
-    (dynamic-wind
-     (lambda () (set! %handlers hs))
-     thunk
-     (lambda () (set! %handlers saved)))))
+(define (%handlers) (%first-mark %handler-key '() #f))
 
 (define (with-exception-handler handler thunk)
-  (%with-handlers (cons handler %handlers) thunk))
+  (%wcm %handler-key (cons handler (%handlers)) thunk))
 
 (define (raise obj)
-  (if (null? %handlers)
-      (%raise-uncaught obj)
-      ;; The handler and the outer list must be read BEFORE %with-handlers
-      ;; rebinds %handlers -- otherwise the thunk would look up `car` on the
-      ;; already-shortened list.
-      (let ((handler (car %handlers)) (outer (cdr %handlers)))
-        ;; The handler runs with itself removed, so a handler that raises does
-        ;; not immediately re-enter itself.
-        (%with-handlers outer (lambda () (handler obj)))
-        ;; R7RS: a handler invoked by `raise` must not return.
-        (%raise-uncaught obj))))
+  (let ((hs (%handlers)))
+    (if (null? hs)
+        (%uncaught obj)
+        (begin
+          ;; The handler runs with itself removed, so a handler that raises
+          ;; does not immediately re-enter itself.
+          (%wcm %handler-key (cdr hs) (lambda () ((car hs) obj)))
+          ;; R7RS: a handler invoked by `raise` must not return.
+          (%uncaught obj)))))
 
 (define (raise-continuable obj)
-  (if (null? %handlers)
-      (%raise-uncaught obj)
-      (let ((handler (car %handlers)) (outer (cdr %handlers)))
-        (%with-handlers outer (lambda () (handler obj))))))
+  (let ((hs (%handlers)))
+    (if (null? hs)
+        (%uncaught obj)
+        (%wcm %handler-key (cdr hs) (lambda () ((car hs) obj))))))
+
+;; Nothing will handle `obj`. Leave through the top level's prompt, so every
+;; `after` thunk on the way out runs, and let the top level report it.
+(define (%uncaught obj)
+  (if (%prompt-available? %toplevel-tag)
+      (abort-current-continuation %toplevel-tag (lambda () (%raise-uncaught obj)))
+      (%raise-uncaught obj)))
+
+;;; ------------------------------------------------------------- top level
+;;; The session runs every top-level input through this. Two prompts: the
+;;; default one, where `current-continuation-marks` and composable captures
+;;; stop unless told otherwise, and inside it the top level's own, which holes
+;;; and uncaught conditions abort to. The top level's is the *inner* one so that
+;;; a hole captures the form and nothing of this machinery.
+
+(define (%toplevel-run thunk)
+  (call-with-continuation-prompt
+   (lambda ()
+     (call-with-continuation-prompt
+      thunk
+      %toplevel-tag
+      (lambda (outcome) (if (procedure? outcome) (outcome) outcome))))))
+
+;; `,resume` -- deliver a value to a held hole.
+(define (%resume k v) (k v))
 
 ;;; ------------------------------------------------------------ utilities
 

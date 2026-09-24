@@ -86,6 +86,20 @@ impl Frame {
         }
     }
 
+    /// The same frame with its stack position moved from a segment based at
+    /// `from` to one based at `to`. A composable continuation is stored
+    /// relative to its own bottom (`from` = its prompt's height, `to` = 0) and
+    /// reinstated wherever it is called (`from` = 0, `to` = the call's height).
+    /// Every frame but `Halt` keeps that position in the last word.
+    pub fn rebase(self, from: u32, to: u32) -> Frame {
+        if matches!(self, Frame::Halt) {
+            return self;
+        }
+        let mut w = self.encode();
+        w[3] = w[3] - from as u64 + to as u64;
+        Frame::decode(w).expect("rebasing keeps the tag")
+    }
+
     pub fn decode(w: [u64; FRAME_WORDS]) -> Option<Frame> {
         let a = w[1] as u32;
         let b = w[2] as u32;

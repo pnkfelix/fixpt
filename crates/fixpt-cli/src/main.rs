@@ -306,6 +306,19 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
                 return 0;
             }
             Line::Interrupted => continue,
+            Line::Form(text) if hole_command(&text).is_some() => {
+                match hole_command(&text).expect("just checked") {
+                    HoleCommand::Where => match session.held_hole_report() {
+                        Some(r) => println!("{}", hole_report(&r)),
+                        None => println!("; no hole is held — write `,help` inside a form to make one"),
+                    },
+                    HoleCommand::Resume(expr) => match resume_line(&mut session, expr) {
+                        Ok(v) => println!("{}", fixpt_runtime::write_value(&session.rt.heap, v)),
+                        Err(fixpt_scheme::SessionError::Hole(r)) => println!("{}", hole_report(&r)),
+                        Err(e) => eprintln!("{e}"),
+                    },
+                }
+            }
             Line::Form(text) if help::parse(&text).is_some() => {
                 let ask = help::parse(&text).expect("just checked");
                 help::answer(&mut SchemeHelp(&session), &ask);
@@ -346,6 +359,10 @@ fn run_line(session: &mut Session, text: &str) -> Result<String, String> {
                 "; the hole was never reached — the form evaluated to {}",
                 fixpt_runtime::write_value(&session.rt.heap, v)
             )),
+            Err(e @ fixpt_scheme::SessionError::Hole(_)) => Ok(format!(
+                "{}\n; `,resume EXPR` continues from the hole with EXPR's value; `,where` repeats this",
+                hole_report(&e.to_string())
+            )),
             Err(e) => Ok(hole_report(&e.to_string())),
         };
     }
@@ -353,6 +370,36 @@ fn run_line(session: &mut Session, text: &str) -> Result<String, String> {
         .eval_forms(&forms)
         .map(|v| fixpt_runtime::write_value(&session.rt.heap, v))
         .map_err(|e| e.to_string())
+}
+
+/// `,resume EXPR`. The expression may itself contain a hole — continuing
+/// with a value that is still being worked out — so it is plugged exactly as
+/// an ordinary line is.
+fn resume_line(session: &mut Session, text: &str) -> Result<fixpt_heap::Value, fixpt_scheme::SessionError> {
+    let forms = session.read_forms("<resume>", text)?;
+    let with = session.rt.interner.intern("%hole");
+    let names = |s: fixpt_read::Sym| session.rt.interner.name(s).to_string();
+    let plugged: Vec<_> = forms.iter().map(|f| help::plug_hole(f, &names, with)).collect();
+    session.resume_forms(&plugged)
+}
+
+enum HoleCommand<'a> {
+    /// `,where` — describe the held hole again.
+    Where,
+    /// `,resume EXPR` — continue the held hole with a value.
+    Resume(&'a str),
+}
+
+fn hole_command(line: &str) -> Option<HoleCommand<'_>> {
+    let line = line.trim();
+    if line == ",where" {
+        return Some(HoleCommand::Where);
+    }
+    let rest = line.strip_prefix(",resume")?;
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    Some(HoleCommand::Resume(rest.trim()))
 }
 
 /// Print the engine's report as help rather than as a failure.
@@ -386,6 +433,10 @@ impl help::Helpful for SchemeHelp<'_> {
     }
 
     fn holes(&self) -> bool {
+        true
+    }
+
+    fn resumable(&self) -> bool {
         true
     }
 

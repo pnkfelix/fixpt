@@ -72,6 +72,7 @@ pub struct Syms {
     pub(crate) let_star: Sym,
     pub(crate) let_values: Sym,
     pub(crate) make_promise_thunk: Sym,
+    pub(crate) wcm: Sym,
     pub(crate) make_promise_lazy: Sym,
     pub(crate) list_ref: Sym,
     pub(crate) tmp_rest: Sym,
@@ -112,6 +113,7 @@ impl Syms {
             let_star: i.intern("let*"),
             let_values: i.intern("let-values"),
             make_promise_thunk: i.intern("%make-promise-thunk"),
+            wcm: i.intern("%wcm"),
             make_promise_lazy: i.intern("%make-promise-lazy"),
             list_ref: i.intern("list-ref"),
             tmp_rest: i.intern(" values-rest"),
@@ -168,6 +170,7 @@ const SPECIAL_FORMS: &[(&str, Special)] = &[
     ("delay-force", Special::DelayForce),
     ("make-promise", Special::Delay),
     ("guard", Special::Guard),
+    ("with-continuation-mark", Special::WithMark),
     ("else", Special::Else),
     ("=>", Special::Arrow),
 ];

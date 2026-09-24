@@ -24,6 +24,9 @@ pub enum SessionError {
     /// A condition escaped to the top level.
     Raised(String),
     Compile(String),
+    /// Evaluation reached a `,help` hole. Not a failure: the rest of the form
+    /// is held, and [`Session::resume`] continues it.
+    Hole(String),
 }
 
 impl std::fmt::Display for SessionError {
@@ -33,6 +36,7 @@ impl std::fmt::Display for SessionError {
             SessionError::Expand(m) => write!(f, "syntax error: {m}"),
             SessionError::Raised(m) => write!(f, "error: {m}"),
             SessionError::Compile(m) => write!(f, "{m}"),
+            SessionError::Hole(m) => write!(f, "{m}"),
         }
     }
 }
@@ -67,6 +71,10 @@ pub struct Session {
     prepared: Prepared,
     parts: Option<ExpanderParts>,
     pub profile: SyntaxProfile,
+    /// Heap root holding the most recent hole, `#f` when there is none. A
+    /// root, not a Rust field, because the continuation in it must survive
+    /// collections between inputs.
+    hole_root: usize,
 }
 
 impl Session {
@@ -89,6 +97,7 @@ impl Session {
         let _ = empty;
         let prepared = Prepared::for_backend(backend, &mut rt.heap, &rt.interner, &program)
             .expect("an empty program compiles");
+        let hole_root = rt.heap.push_root(Value::FALSE);
         let engine = match backend {
             Backend::Ast => Engine::Ast(Box::new(Interp::new())),
             Backend::Bytecode => Engine::Bytecode(Box::new(Vm::new())),
@@ -100,6 +109,7 @@ impl Session {
             prepared,
             parts: Some(parts),
             profile: SyntaxProfile::SCHEME,
+            hole_root,
         }
     }
 
@@ -183,17 +193,140 @@ impl Session {
         if let Err(e) = compiled {
             return Err(SessionError::Compile(e.to_string()));
         }
-        let outcome = match &mut self.engine {
-            Engine::Ast(i) => i.run(&mut self.rt, &mut self.prepared),
-            Engine::Bytecode(v) => v.run(&mut self.rt, &mut self.prepared),
-        };
+        let outcome = self.run_prepared();
         match outcome {
+            Ok(v) if self.is_hole(v) => {
+                self.rt.heap.set_root_at(self.hole_root, v);
+                Err(SessionError::Hole(self.hole_report(v)))
+            }
             Ok(v) => Ok(v),
             Err(t) => {
                 let msg = self.condition_message(t.obj);
                 Err(SessionError::Raised(msg))
             }
         }
+    }
+
+    /// Run the prepared program under the top level's prompts, once the
+    /// prelude has defined them; the prelude itself runs bare.
+    fn run_prepared(&mut self) -> fixpt_runtime::Outcome<Value> {
+        let wrapper = self.prepared.global(&mut self.rt.heap, "%toplevel-run");
+        match (wrapper, &mut self.engine) {
+            (Some(w), Engine::Ast(i)) => {
+                let thunk = self.prepared.thunk(&self.rt.heap);
+                i.call(&mut self.rt, &mut self.prepared, w, &[thunk])
+            }
+            (Some(w), Engine::Bytecode(v)) => {
+                let thunk = self.prepared.thunk(&self.rt.heap);
+                v.call(&mut self.rt, &mut self.prepared, w, &[thunk])
+            }
+            (None, Engine::Ast(i)) => i.run(&mut self.rt, &mut self.prepared),
+            (None, Engine::Bytecode(v)) => v.run(&mut self.rt, &mut self.prepared),
+        }
+    }
+
+    // ------------------------------------------------------------------ holes
+    /// A hole is `#(tag k report position total)` whose tag is the top level's
+    /// own prompt tag — see `cmarks::make_hole`.
+    fn is_hole(&mut self, v: Value) -> bool {
+        let heap = &self.rt.heap;
+        if !(heap.is_a(v, ObjType::Vector) && heap.obj_len(v) == 5) {
+            return false;
+        }
+        let tag = heap.obj_ref(v, 0);
+        self.prepared.global(&mut self.rt.heap, "%toplevel-tag") == Some(tag)
+    }
+
+    /// Whether a hole is held for [`resume`](Self::resume).
+    pub fn has_hole(&self) -> bool {
+        !self.rt.heap.root_at(self.hole_root).is_false()
+    }
+
+    /// The held hole's report, or `None` if there is none.
+    pub fn held_hole_report(&mut self) -> Option<String> {
+        let h = self.rt.heap.root_at(self.hole_root);
+        if h.is_false() { None } else { Some(self.hole_report(h)) }
+    }
+
+    /// What the engine saw at the hole, then the marks between the hole and
+    /// the top level — the part a *program* chose to expose, read from the
+    /// captured continuation itself.
+    fn hole_report(&mut self, hole: Value) -> String {
+        let text = self.rt.heap.string_to_rust(self.rt.heap.obj_ref(hole, 2));
+        let k = self.rt.heap.obj_ref(hole, 1);
+        let handler_key = self.prepared.global(&mut self.rt.heap, "%handler-key");
+        let marks = fixpt_runtime::cmarks::continuation_mark_list(&mut self.rt.heap, k, Value::FALSE);
+        let mut lines = Vec::new();
+        let mut handlers = false;
+        for pair in self.rt.heap.list_to_vec(marks).unwrap_or_default() {
+            let (key, val) = (self.rt.heap.car(pair), self.rt.heap.cdr(pair));
+            if Some(key) == handler_key {
+                // The prelude's own mark. Its value is the whole handler list,
+                // innermost first, so only the innermost mark says anything.
+                if !handlers && !val.is_null() {
+                    let n = self.rt.heap.list_to_vec(val).map_or(0, |l| l.len());
+                    lines.push(format!("{n} exception handler(s) installed around it"));
+                }
+                handlers = true;
+                continue;
+            }
+            lines.push(format!(
+                "marked {} = {}",
+                write_value(&self.rt.heap, key),
+                write_value(&self.rt.heap, val)
+            ));
+        }
+        let mut out = text;
+        for l in lines {
+            out.push_str("\n  ");
+            out.push_str(&l);
+        }
+        out
+    }
+
+    /// Continue the held hole with the value of `text`, as though the hole had
+    /// evaluated to it.
+    ///
+    /// The value is computed first, in a fresh top-level context, and then
+    /// delivered to the hole's continuation — which is composable, so it runs
+    /// *on top of* this input's continuation and is delimited by this input's
+    /// prompt. That is what makes a second hole reached after resuming come
+    /// back here like the first. The hole is kept, so it can be resumed again
+    /// with a different value; the heap, though, is shared, so whatever the
+    /// first resumption mutated, the second sees.
+    pub fn resume(&mut self, name: &str, text: &str) -> Result<Value, SessionError> {
+        let forms = self.read_forms(name, text)?;
+        self.resume_forms(&forms)
+    }
+
+    /// [`resume`](Self::resume) with the expression already read — so that a
+    /// caller can rewrite it first, as the REPL does to let the value itself
+    /// contain a hole.
+    pub fn resume_forms(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Value, SessionError> {
+        let hole = self.rt.heap.root_at(self.hole_root);
+        if hole.is_false() {
+            return Err(SessionError::Raised("no hole to resume".into()));
+        }
+        let [value] = forms else {
+            return Err(SessionError::Raised("`,resume` takes one expression".into()));
+        };
+        let k = self.rt.heap.obj_ref(hole, 1);
+        let slot_sym = self.rt.heap.intern("%resuming");
+        let slot = self.rt.heap.symbol_global_slot(slot_sym);
+        self.rt.heap.set_global(slot, k);
+        let span = value.span;
+        let sym = |s: &mut Session, name: &str| fixpt_read::Syntax {
+            span,
+            datum: fixpt_read::Datum::Symbol(s.rt.interner.intern(name)),
+        };
+        let call = fixpt_read::Syntax {
+            span,
+            datum: fixpt_read::Datum::List {
+                items: vec![sym(self, "%resume"), sym(self, "%resuming"), value.clone()],
+                tail: None,
+            },
+        };
+        self.eval_forms(&[call])
     }
 
     /// Evaluate and render the result the way a REPL would.

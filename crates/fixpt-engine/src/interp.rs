@@ -30,6 +30,7 @@ use fixpt_core::lower::{
 };
 use fixpt_heap::{ObjType, Value};
 use fixpt_runtime::Runtime;
+use fixpt_runtime::cmarks::{self, Marks};
 use fixpt_runtime::error::{Outcome, Thrown};
 use fixpt_runtime::prim::{self, EngineOp, PrimKind};
 
@@ -50,6 +51,9 @@ enum Control {
 pub struct Interp {
     stack: Vec<Value>,
     frames: Vec<Frame>,
+    /// Continuation marks, prompts and winders, beside the frames — see
+    /// [`cmarks`]. A third root slice for the collector.
+    marks: Marks,
     regs: Vec<Value>,
     /// Bounds a runaway program so tests fail rather than hang. `None` is
     /// unlimited.
@@ -68,6 +72,7 @@ impl Interp {
         Interp {
             stack: Vec::with_capacity(256),
             frames: Vec::with_capacity(64),
+            marks: Marks::default(),
             regs: vec![Value::UNSPECIFIED; N_REGS],
             step_limit: None,
             steps: 0,
@@ -114,6 +119,7 @@ impl Interp {
         self.stack.clear();
         self.frames.clear();
         self.frames.push(Frame::Halt);
+        self.marks.clear();
         self.set_env(Value::FALSE);
         self.set_code(Value::FALSE);
         self.set_acc(Value::UNSPECIFIED);
@@ -166,6 +172,9 @@ impl Interp {
                         return Ok(self.acc());
                     }
                     self.frames.pop();
+                    // Whatever was attached to the continuation that just
+                    // returned goes with it.
+                    self.marks.trim(self.frames.len());
                     match self.resume(rt, p, frame) {
                         Ok(c) => c,
                         Err(t) => match self.dispatch_condition(rt, p, t)? {
@@ -549,14 +558,21 @@ impl Interp {
                 }
             }
             Some(ObjType::Continuation) => {
-                let value = if argc == 1 {
-                    self.stack[base + 1]
-                } else {
-                    let vals: Vec<Value> = self.stack[base + 1..].to_vec();
-                    self.make_values(rt, &vals)
-                };
-                self.restore_continuation(rt, f, value);
-                Ok(Control::Return)
+                let vals: Vec<Value> = self.stack[base + 1..].to_vec();
+                // Winding is the prelude's business: it knows which extents
+                // are being left and entered, and runs their thunks before
+                // handing back to `%throw`. Until the prelude has defined the
+                // hook, a continuation is reinstated raw.
+                if let Some(hook) = p.global(&mut rt.heap, "%continuation-apply") {
+                    let list = rt.heap.list_from(&vals);
+                    self.stack.truncate(base);
+                    self.stack.push(hook);
+                    self.stack.push(f);
+                    self.stack.push(list);
+                    return self.apply(rt, p, base);
+                }
+                let value = if argc == 1 { vals[0] } else { self.make_values(rt, &vals) };
+                self.throw(rt, f, value, base)
             }
             _ => {
                 self.stack.truncate(drop_to);
@@ -602,6 +618,86 @@ impl Interp {
                 self.stack.push(k);
                 self.apply(rt, p, base)
             }
+            // ---- marks, prompts, composable continuations ----
+            //
+            // In this engine the continuation of an application is always the
+            // top frame with the value stack at `drop_to`, so that is the
+            // (depth, height) a mark or prompt records.
+            EngineOp::WithMark => {
+                let (key, val, thunk) = (self.stack[base + 1], self.stack[base + 2], self.stack[base + 3]);
+                self.marks.set_mark(self.frames.len() as u32, drop_to as u32, key, val);
+                self.call_thunk(rt, p, base, thunk)
+            }
+            EngineOp::Wind => {
+                let (winder, thunk) = (self.stack[base + 1], self.stack[base + 2]);
+                self.marks.push_winder(self.frames.len() as u32, drop_to as u32, winder);
+                self.call_thunk(rt, p, base, thunk)
+            }
+            EngineOp::Prompt => {
+                let (tag, handler, thunk) = (self.stack[base + 1], self.stack[base + 2], self.stack[base + 3]);
+                self.marks.push_prompt(self.frames.len() as u32, drop_to as u32, tag, handler);
+                self.call_thunk(rt, p, base, thunk)
+            }
+            EngineOp::CurrentMarks => {
+                let from = self.marks.visible_from(self.stack[base + 1]);
+                let v = self.marks.mark_list(&mut rt.heap, from);
+                self.stack.truncate(drop_to);
+                self.set_acc(v);
+                Ok(Control::Return)
+            }
+            EngineOp::FirstMark => {
+                let (key, default, tag) = (self.stack[base + 1], self.stack[base + 2], self.stack[base + 3]);
+                let from = self.marks.visible_from(tag);
+                let v = self.marks.first(from, key).unwrap_or(default);
+                self.stack.truncate(drop_to);
+                self.set_acc(v);
+                Ok(Control::Return)
+            }
+            EngineOp::CurrentWinders => {
+                let v = self.marks.winder_list(&mut rt.heap);
+                self.stack.truncate(drop_to);
+                self.set_acc(v);
+                Ok(Control::Return)
+            }
+            EngineOp::PromptAvailable => {
+                let v = Value::boolean(self.marks.find_prompt(self.stack[base + 1]).is_some());
+                self.stack.truncate(drop_to);
+                self.set_acc(v);
+                Ok(Control::Return)
+            }
+            EngineOp::Abort => {
+                let (tag, vals, step) = (self.stack[base + 1], self.stack[base + 2], self.stack[base + 3]);
+                let Some(pi) = self.marks.find_prompt(tag) else {
+                    self.stack.truncate(drop_to);
+                    return rt.fail("abort-current-continuation: no prompt with that tag", &[tag]);
+                };
+                self.abort_to(rt, p, pi, tag, vals, step)
+            }
+            EngineOp::CallComposable => {
+                let (f, tag) = (self.stack[base + 1], self.stack[base + 2]);
+                let Some(pi) = self.marks.find_prompt(tag) else {
+                    self.stack.truncate(drop_to);
+                    return rt.fail("call-with-composable-continuation: no prompt with that tag", &[tag]);
+                };
+                let k = self.capture_composable(rt, drop_to, pi);
+                self.stack.truncate(base);
+                self.stack.push(f);
+                self.stack.push(k);
+                self.apply(rt, p, base)
+            }
+            EngineOp::Throw => {
+                let (k, vals) = (self.stack[base + 1], self.stack[base + 2]);
+                if !rt.heap.is_a(k, ObjType::Continuation) {
+                    self.stack.truncate(drop_to);
+                    return rt.type_error("a continuation", k);
+                }
+                let Some(items) = rt.heap.list_to_vec(vals) else {
+                    self.stack.truncate(drop_to);
+                    return rt.type_error("a list of values", vals);
+                };
+                let value = self.make_values(rt, &items);
+                self.throw(rt, k, value, base)
+            }
             EngineOp::Values => {
                 let vals: Vec<Value> = self.stack[base + 1..].to_vec();
                 self.stack.truncate(drop_to);
@@ -609,9 +705,24 @@ impl Interp {
                 self.set_acc(v);
                 Ok(Control::Return)
             }
-            // `(%hole)` — report the pending work rather than computing.
+            // `(%hole POSITION TOTAL)` — describe the pending work, capture
+            // it, and hand both to the top level instead of computing.
             EngineOp::Hole => {
-                let report = self.describe_context(rt);
+                let top = p.global(&mut rt.heap, "%toplevel-tag");
+                let step = p.global(&mut rt.heap, "%abort-step");
+                let prompt = top.and_then(|t| self.marks.find_prompt(t));
+                let floor = prompt.map_or(0, |i| self.marks.meta[i].depth as usize);
+                let report = self.describe_context(rt, floor);
+                if let (Some(tag), Some(step), Some(pi)) = (top, step, prompt) {
+                    // A composable continuation up to the top level's prompt:
+                    // exactly the rest of this form, and nothing of the REPL.
+                    let k = self.capture_composable(rt, drop_to, pi);
+                    let hole = cmarks::make_hole(&mut rt.heap, tag, k, &report, self.stack[base + 1], self.stack[base + 2]);
+                    let vals = rt.heap.list_from(&[hole]);
+                    return self.abort_to(rt, p, pi, tag, vals, step);
+                }
+                // No top-level prompt — the prelude is still loading, or this
+                // is a bare session. Report and stop, as before.
                 self.stack.truncate(drop_to);
                 let obj = rt.error_object(&report, &[]);
                 // Fatal, so it escapes any handler: a question should not be
@@ -649,11 +760,13 @@ impl Interp {
     ///
     /// The frames are read from the innermost outwards, which is the order the
     /// work will resume in.
-    fn describe_context(&mut self, rt: &mut Runtime) -> String {
+    fn describe_context(&mut self, rt: &mut Runtime, floor: usize) -> String {
         use std::fmt::Write as _;
         let mut out = String::from("evaluation reached a hole");
         let mut depth = 0usize;
-        for frame in self.frames.clone().iter().rev() {
+        // Frames below `floor` belong to the top level's own machinery, which
+        // is not part of the form being asked about.
+        for frame in self.frames[floor.min(self.frames.len())..].to_vec().iter().rev() {
             if depth >= 6 {
                 out.push_str("\n  …");
                 break;
@@ -761,41 +874,127 @@ impl Interp {
     /// Capture the machine state. The value stack is copied into a heap vector
     /// and the frame stack into a bytevector — frames hold no references, so
     /// this is a straight word copy and the result is an ordinary heap object.
+    /// The marks go with it: they are as much a part of the continuation as
+    /// the frames they are attached to.
     fn capture(&mut self, rt: &mut Runtime, upto: usize) -> Value {
         let live = &self.stack[..upto];
         let saved_stack = rt.heap.vector_from(live);
-        let mut bytes = Vec::with_capacity(self.frames.len() * FRAME_WORDS * 8);
-        for f in &self.frames {
-            for w in f.encode() {
-                bytes.extend_from_slice(&w.to_le_bytes());
-            }
-        }
-        let saved_frames = rt.heap.make_bytevector(&bytes);
-        let k = rt.heap.alloc(ObjType::Continuation, 2, Value::UNSPECIFIED);
-        rt.heap.obj_set(k, 0, saved_stack);
-        rt.heap.obj_set(k, 1, saved_frames);
-        k
+        let saved_frames = encode_frames(rt, self.frames.iter().copied());
+        let marks = self.marks.encode(&mut rt.heap, 0, 0, 0);
+        cmarks::make_continuation(&mut rt.heap, saved_stack, saved_frames, marks, false)
     }
 
-    fn restore_continuation(&mut self, rt: &mut Runtime, k: Value, value: Value) {
-        let saved_stack = rt.heap.obj_ref(k, 0);
-        let saved_frames = rt.heap.obj_ref(k, 1);
+    /// Capture the continuation from the prompt at mark entry `pi` up to here,
+    /// as a composable continuation: a segment stored relative to its own
+    /// bottom, so that it can be reinstated on top of any other continuation.
+    ///
+    /// The prompt's frame is not part of it. Its depth and height say where the
+    /// continuation *outside* the prompt stood, and everything above them —
+    /// frames, stack and marks — is what the prompt delimits.
+    fn capture_composable(&mut self, rt: &mut Runtime, upto: usize, pi: usize) -> Value {
+        let m = self.marks.meta[pi];
+        let (depth, height) = (m.depth as usize, m.height as usize);
+        let saved_stack = rt.heap.vector_from(&self.stack[height..upto]);
+        let frames = self.frames[depth..].iter().map(|f| f.rebase(height as u32, 0));
+        let saved_frames = encode_frames(rt, frames);
+        let marks = self.marks.encode(&mut rt.heap, pi + 1, m.depth, m.height);
+        cmarks::make_continuation(&mut rt.heap, saved_stack, saved_frames, marks, true)
+    }
+
+    /// Deliver `value` to continuation `k`, from an application at `base`.
+    ///
+    /// A full continuation *replaces* the machine. A composable one is laid on
+    /// top of the continuation of this application — which in this engine is
+    /// the top frame with the stack at `drop_to` — with every recorded position
+    /// moved to where it now sits. After that both are an ordinary return.
+    fn throw(&mut self, rt: &mut Runtime, k: Value, value: Value, base: usize) -> Outcome<Control> {
+        if cmarks::is_composable(&rt.heap, k) {
+            let at = base.saturating_sub(SAVED_SLOTS);
+            self.stack.truncate(at);
+            let depth = self.frames.len() as u32;
+            let seg = rt.heap.obj_ref(k, cmarks::K_STACK);
+            for i in 0..rt.heap.obj_len(seg) {
+                let v = rt.heap.obj_ref(seg, i);
+                self.stack.push(v);
+            }
+            for f in decode_frames(rt, rt.heap.obj_ref(k, cmarks::K_FRAMES)) {
+                self.frames.push(f.rebase(0, at as u32));
+            }
+            let (vals, meta) = (rt.heap.obj_ref(k, cmarks::K_MARK_VALS), rt.heap.obj_ref(k, cmarks::K_MARK_META));
+            self.marks.append_encoded(&rt.heap, vals, meta, depth, at as u32);
+        } else {
+            self.restore_continuation(rt, k);
+        }
+        self.set_acc(value);
+        Ok(Control::Return)
+    }
+
+    fn restore_continuation(&mut self, rt: &mut Runtime, k: Value) {
+        let saved_stack = rt.heap.obj_ref(k, cmarks::K_STACK);
         self.stack.clear();
         for i in 0..rt.heap.obj_len(saved_stack) {
             let v = rt.heap.obj_ref(saved_stack, i);
             self.stack.push(v);
         }
-        self.frames.clear();
-        let bytes = rt.heap.bytevector_to_vec(saved_frames);
-        for chunk in bytes.chunks_exact(FRAME_WORDS * 8) {
-            let mut w = [0u64; FRAME_WORDS];
-            for (i, word) in chunk.chunks_exact(8).enumerate() {
-                w[i] = u64::from_le_bytes(word.try_into().expect("8 bytes"));
-            }
-            self.frames
-                .push(Frame::decode(w).expect("frames we encoded ourselves"));
+        self.frames = decode_frames(rt, rt.heap.obj_ref(k, cmarks::K_FRAMES));
+        self.marks.clear();
+        let (vals, meta) = (rt.heap.obj_ref(k, cmarks::K_MARK_VALS), rt.heap.obj_ref(k, cmarks::K_MARK_META));
+        self.marks.append_encoded(&rt.heap, vals, meta, 0, 0);
+    }
+
+    /// Call `thunk` with no arguments as the continuation of the application at
+    /// `base` — a tail call, so a mark just attached to that continuation is
+    /// the one the thunk's body sees.
+    fn call_thunk(&mut self, rt: &mut Runtime, p: &mut Prepared, base: usize, thunk: Value) -> Outcome<Control> {
+        self.stack.truncate(base);
+        self.stack.push(thunk);
+        self.apply(rt, p, base)
+    }
+
+    /// Cut the machine back to where mark entry `entry` was made, dropping it
+    /// and everything above.
+    fn cut_to(&mut self, entry: usize) {
+        let m = self.marks.meta[entry];
+        self.frames.truncate(m.depth as usize);
+        self.stack.truncate(m.height as usize);
+        self.marks.truncate(entry);
+    }
+
+    /// Abort to the prompt at entry `pi`, delivering `vals` to its handler.
+    ///
+    /// `dynamic-wind` extents between here and the prompt are left one at a
+    /// time, innermost first: cut to the extent's own frame, then call
+    /// `(step after tag vals step)` there, whose job is to run `after` and
+    /// abort again. So each `after` thunk runs in exactly the dynamic context
+    /// of its `dynamic-wind` — with the marks, handlers and outer extents that
+    /// were live there, and none of the inner ones.
+    fn abort_to(
+        &mut self,
+        rt: &mut Runtime,
+        p: &mut Prepared,
+        pi: usize,
+        tag: Value,
+        vals: Value,
+        step: Value,
+    ) -> Outcome<Control> {
+        if let Some(wi) = self.marks.innermost_winder_above(pi) {
+            let after = rt.heap.cdr(self.marks.val(wi));
+            self.cut_to(wi);
+            let saved = self.save(rt);
+            let base = saved as usize + SAVED_SLOTS;
+            self.stack.extend_from_slice(&[step, after, tag, vals, step]);
+            return self.apply(rt, p, base);
         }
-        self.set_acc(value);
+        let handler = self.marks.val(pi);
+        let Some(items) = rt.heap.list_to_vec(vals) else {
+            return rt.type_error("a list of values", vals);
+        };
+        self.cut_to(pi);
+        let saved = self.save(rt);
+        let base = saved as usize + SAVED_SLOTS;
+        self.stack.push(handler);
+        self.stack.extend_from_slice(&items);
+        self.apply(rt, p, base)
     }
 
     fn make_values(&mut self, rt: &mut Runtime, vals: &[Value]) -> Value {
@@ -842,6 +1041,30 @@ impl Interp {
     fn safepoint(&mut self, rt: &mut Runtime) {
         self.regs[REG_SCRATCH] = Value::UNSPECIFIED;
         rt.heap
-            .maybe_collect(&mut [&mut self.stack, &mut self.regs]);
+            .maybe_collect(&mut [&mut self.stack, &mut self.regs, &mut self.marks.vals]);
     }
+}
+
+fn encode_frames(rt: &mut Runtime, frames: impl Iterator<Item = Frame>) -> Value {
+    let mut bytes = Vec::new();
+    for f in frames {
+        for w in f.encode() {
+            bytes.extend_from_slice(&w.to_le_bytes());
+        }
+    }
+    rt.heap.make_bytevector(&bytes)
+}
+
+fn decode_frames(rt: &Runtime, v: Value) -> Vec<Frame> {
+    rt.heap
+        .bytevector_to_vec(v)
+        .chunks_exact(FRAME_WORDS * 8)
+        .map(|chunk| {
+            let mut w = [0u64; FRAME_WORDS];
+            for (i, word) in chunk.chunks_exact(8).enumerate() {
+                w[i] = u64::from_le_bytes(word.try_into().expect("8 bytes"));
+            }
+            Frame::decode(w).expect("frames we encoded ourselves")
+        })
+        .collect()
 }

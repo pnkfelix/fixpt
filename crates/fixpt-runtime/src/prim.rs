@@ -22,7 +22,7 @@ use fixpt_heap::{ObjType, Value};
 
 /// Operations the engine implements itself, because they re-enter evaluation.
 ///
-/// Deliberately only four. `dynamic-wind`, `call/cc`'s winding wrapper,
+/// Deliberately few. `dynamic-wind`, `call/cc`'s winding,
 /// `with-exception-handler`, `raise`, `raise-continuable` and `force` are all
 /// *prelude Scheme* built on top of a raw, winding-unaware `%call/cc` — the
 /// classic Dybvig arrangement. Written that way they are a dozen readable lines
@@ -43,6 +43,37 @@ pub enum EngineOp {
     CallCC,
     Values,
     CallWithValues,
+
+    // ---- continuation marks, prompts and composable continuations ----
+    //
+    // SRFI 226's control features, in the engine because each one either
+    // attaches something to the *current continuation* or cuts it. The winding
+    // and handler disciplines built on them stay in the prelude, as before.
+    /// `(%wcm key val thunk)` — mark the current continuation, then call
+    /// `thunk` in it. `with-continuation-mark` expands to this; the thunk is
+    /// called in tail position, so a mark in tail position replaces rather
+    /// than accumulates.
+    WithMark,
+    /// `(%wind (before . after) thunk)` — enter a `dynamic-wind` extent.
+    Wind,
+    /// `(%prompt tag handler thunk)` — install a prompt, then call `thunk`.
+    Prompt,
+    /// `(%current-marks tag)` — this continuation's marks, delimited by `tag`.
+    CurrentMarks,
+    /// `(%first-mark key default tag)` — the innermost value for `key`.
+    FirstMark,
+    /// `(%current-winders)` — every live `(before . after)`, innermost first.
+    CurrentWinders,
+    /// `(%prompt-available? tag)`.
+    PromptAvailable,
+    /// `(%abort tag vals step)` — cut to the prompt for `tag`, running the
+    /// `after` thunk of each extent on the way out through `step`.
+    Abort,
+    /// `(%call/comp f tag)` — capture the continuation up to the prompt for
+    /// `tag`, as a composable continuation, and call `f` with it.
+    CallComposable,
+    /// `(%throw k vals)` — reinstate a continuation raw, with no winding.
+    Throw,
 }
 
 pub enum PrimKind {
@@ -637,6 +668,43 @@ prims! {
         rt.heap.obj_set(a[0], 0, a[1]);
         Ok(Value::UNSPECIFIED)
     });
+
+    // ---- continuation marks, prompts, composable continuations ----
+    "%wcm",               3, Some(3), PrimKind::Engine(EngineOp::WithMark);
+    "%wind",              2, Some(2), PrimKind::Engine(EngineOp::Wind);
+    "%prompt",            3, Some(3), PrimKind::Engine(EngineOp::Prompt);
+    "%current-marks",     1, Some(1), PrimKind::Engine(EngineOp::CurrentMarks);
+    "%first-mark",        3, Some(3), PrimKind::Engine(EngineOp::FirstMark);
+    "%current-winders",   0, Some(0), PrimKind::Engine(EngineOp::CurrentWinders);
+    "%prompt-available?", 1, Some(1), PrimKind::Engine(EngineOp::PromptAvailable);
+    "%abort",             3, Some(3), PrimKind::Engine(EngineOp::Abort);
+    "%call/comp",         2, Some(2), PrimKind::Engine(EngineOp::CallComposable);
+    "%throw",             2, Some(2), PrimKind::Engine(EngineOp::Throw);
+    // A captured continuation carries its marks, so reading them needs no
+    // engine: the encoding is shared (`cmarks`).
+    "%continuation?", 1, Some(1), simple!(|rt, a| {
+        Ok(Value::boolean(rt.heap.is_a(a[0], ObjType::Continuation)))
+    });
+    "%continuation-marks", 2, Some(2), simple!(|rt, a| {
+        if !rt.heap.is_a(a[0], ObjType::Continuation) {
+            return rt.type_error("a continuation", a[0]);
+        }
+        Ok(crate::cmarks::continuation_mark_list(&mut rt.heap, a[0], a[1]))
+    });
+    "%continuation-winders", 1, Some(1), simple!(|rt, a| {
+        if !rt.heap.is_a(a[0], ObjType::Continuation) {
+            return rt.type_error("a continuation", a[0]);
+        }
+        Ok(crate::cmarks::continuation_winder_list(&mut rt.heap, a[0]))
+    });
+    "%composable?", 1, Some(1), simple!(|rt, a| {
+        Ok(Value::boolean(rt.heap.is_a(a[0], ObjType::Continuation)
+            && crate::cmarks::is_composable(&rt.heap, a[0])))
+    });
+    // The identity. A prompt is installed by calling `%prompt` in *argument*
+    // position of this, which guarantees it a frame of its own: a prompt that
+    // shared its caller's frame would be removed by that frame's tail calls.
+    "%prompt-result", 1, Some(1), simple!(|rt, a| { let _ = &rt; Ok(a[0]) });
 
     // ---- the REPL's hole ----
     // What `,help` inside a form becomes. Evaluating it reports the context it

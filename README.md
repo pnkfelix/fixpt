@@ -190,6 +190,33 @@ The first argument pins the element type, so the *second* is asked about as an
 index rather than as "anything". A hole nothing constrains says so —
 `(car ,help)` reports `(pairof t1 t2 r)` rather than inventing something.
 
+A hole is also answered by *running* the form up to it, so the answer is made
+of values rather than types — and in Scheme, which has no types, that is the
+only answer there is. In Scheme the hole is then **held**: reaching it captures
+the rest of the form as a composable continuation, and `,resume` carries on
+from the hole with a value, as many times as you like.
+
+```
+> (define v (vector 10 20 30))
+> (list 'got (vector-ref v ,help))
+; at the hole:
+  the hole is argument 2 of 2 to #<primitive:vector-ref>
+  argument 1 evaluated to #(10 20 30)
+> ,resume 0
+(got 10)
+> ,resume 2
+(got 30)
+```
+
+This is built on SRFI 226's control features — continuation marks, tagged
+prompts, composable continuations — which the engines now provide. Each input
+runs under the top level's own prompt, so the hole's continuation is the form
+and nothing of the REPL. A hole reports the continuation marks around it,
+which is how a program says what it wants a paused computation to show. And
+exception handlers and `dynamic-wind` extents are marks too, not globals, so an
+input abandoned at a hole or an uncaught error cannot leave either behind for
+the next one.
+
 This needs the form to be syntactically complete, which is not how anyone types
 it: `(vector-ref v ,help` — asking while still writing — cannot be read at all.
 The information wanted is in the *parser's stack* rather than in the text, which

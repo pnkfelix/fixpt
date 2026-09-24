@@ -120,6 +120,7 @@ impl Expander<'_> {
             Special::Delay => self.expand_delay(span, args, false),
             Special::DelayForce => self.expand_delay(span, args, true),
             Special::Guard => self.expand_guard(span, args),
+            Special::WithMark => self.expand_with_mark(span, args),
         }
     }
 
@@ -612,6 +613,20 @@ impl Expander<'_> {
         let maker = if lazy { self.syms.make_promise_lazy } else { self.syms.make_promise_thunk };
         let form = form(span, maker, vec![thunk]);
         self.expr(&form)
+    }
+
+    /// `(with-continuation-mark key val body)` → `(%wcm key val (lambda () body))`.
+    ///
+    /// Syntax rather than a procedure because `body` is in tail position with
+    /// respect to the whole form: `%wcm` attaches the mark to the continuation
+    /// of its own call and then *tail-calls* the thunk, so a
+    /// `with-continuation-mark` in tail position marks the same frame each
+    /// time round a loop and replaces the mark instead of stacking it.
+    fn expand_with_mark(&mut self, span: Span, args: &[Syntax]) -> R<NodeId> {
+        self.need(span, args, 3, "with-continuation-mark")?;
+        let thunk = form(span, self.syms.lambda, vec![nil(span), args[2].clone()]);
+        let call = form(span, self.syms.wcm, vec![args[0].clone(), args[1].clone(), thunk]);
+        self.expr(&call)
     }
 
     // ---------------------------------------------------------------- guard

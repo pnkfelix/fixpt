@@ -34,6 +34,11 @@
 //! at all), and it is the *only* answer available in Scheme, which has no types
 //! to consult.
 //!
+//! In Scheme the hole is also *held*: reaching it captures the rest of the
+//! form as a composable continuation, delimited by the top level's prompt, so
+//! `,resume EXPR` carries on from the hole with a value — as many times as you
+//! like, which is how a candidate from the static half gets tried.
+//!
 //! The dynamic half costs something the static half does not: evaluating an
 //! argument the user only asked *about*. In FX that cost is priced by the
 //! effect system — an argument is run only when its inferred effect says no one
@@ -117,6 +122,13 @@ pub trait Helpful {
     fn holes(&self) -> bool {
         false
     }
+    /// Whether a hole is *held* when reached, so that `,resume` can continue
+    /// it. Only where the hole is really run to — Scheme; the FX dialects
+    /// answer a hole by checking it, and speculative evaluation there stops
+    /// at the siblings the effect system allows, so there is nothing to hold.
+    fn resumable(&self) -> bool {
+        false
+    }
     fn describe(&mut self, name: &str) -> Vec<String>;
     fn apropos(&mut self, pattern: &str) -> Vec<String>;
     /// `None` when the dialect has no types to search.
@@ -196,6 +208,10 @@ fn overview(h: &dyn Helpful) {
         println!("; `,help` inside a form asks about that position — the form is");
         println!("  run up to the hole, and what is around it is reported:");
         println!("    (vector-ref (make-vector 3 0) ,help)");
+        if h.resumable() {
+            println!("  ,resume EXPR     continue from the hole as though it gave EXPR's value");
+            println!("  ,where           describe the held hole again");
+        }
     }
     if !h.typed() {
         println!(

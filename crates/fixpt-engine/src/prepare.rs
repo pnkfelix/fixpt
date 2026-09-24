@@ -35,8 +35,9 @@ pub struct Prepared {
     /// `None` for a heap resumed from an image, which has no pending
     /// top-level form — only procedures to call.
     thunk_root: Option<usize>,
-    /// Cached global slot of the prelude's `raise`.
-    raise_slot: Option<usize>,
+    /// Cached global slots of the prelude procedures the engines call back
+    /// into — `raise`, the continuation-application hook, and so on.
+    slots: Vec<(&'static str, usize)>,
 }
 
 impl Prepared {
@@ -56,7 +57,7 @@ impl Prepared {
         Ok(Prepared {
             backend,
             thunk_root: Some(thunk_root),
-            raise_slot: None,
+            slots: Vec::new(),
         })
     }
 
@@ -92,7 +93,7 @@ impl Prepared {
         Prepared {
             backend,
             thunk_root: None,
-            raise_slot: None,
+            slots: Vec::new(),
         }
     }
 
@@ -104,12 +105,19 @@ impl Prepared {
     /// The prelude's `raise`, if it has been defined yet. Looked up lazily,
     /// because the prelude itself is a program that runs before it exists.
     pub fn raise_procedure(&mut self, heap: &mut Heap) -> Option<Value> {
-        let slot = match self.raise_slot {
-            Some(s) => s,
+        self.global(heap, "raise")
+    }
+
+    /// A prelude global the engine calls back into, or `None` while it is
+    /// still unbound. The slot is cached; the value is not, since the prelude
+    /// may still be defining it.
+    pub fn global(&mut self, heap: &mut Heap, name: &'static str) -> Option<Value> {
+        let slot = match self.slots.iter().find(|(n, _)| *n == name) {
+            Some(&(_, s)) => s,
             None => {
-                let sym = heap.intern("raise");
+                let sym = heap.intern(name);
                 let s = heap.symbol_global_slot(sym);
-                self.raise_slot = Some(s);
+                self.slots.push((name, s));
                 s
             }
         };
