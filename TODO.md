@@ -271,43 +271,96 @@ that distinction visible.
 
 **What is there.** `,help` inside a form is answered twice: statically from the
 types (FX only), and dynamically by running the form with the hole replaced by
-`(%hole POSITION TOTAL)`, a primitive that describes the machine's pending work.
-See `crates/fixpt-cli/src/help.rs`.
+`(%hole POSITION TOTAL)`, which describes the machine's pending work and then
+raises a fatal condition. The run is discarded, so asking again re-runs the
+form, and there is no way to supply a value and carry on.
 
-**What is missing.** The dynamic half *stops*. `%hole` raises a fatal condition,
-so the run is thrown away and asking twice about the same form re-runs it from
-the beginning. Everything already computed — the operator, the arguments, the
-enclosing frames — is discarded at the moment it becomes interesting.
+**The design, settled by investigation (2026-09-24): a delimited continuation,
+`shift0`/`reset0` in kind — equivalently a *deep effect handler* — with a private
+prompt tag, multi-shot, and a capture that includes the dynamic environment.**
+Each part of that has a specific reason.
 
-It need not be. The machine at that point is a value the engine can already
-copy: `call/cc` captures the value stack and an encoding of the frame stack, and
-frames hold no heap references precisely so that encoding is plain words. So
-`%hole` could *capture* rather than raise, and the REPL could hold the
-continuation and offer to resume it with a value the user then supplies:
+*Delimited, not undelimited — and "undelimited" is not actually on offer.* An
+undelimited continuation of the hole would include the REPL loop, which is Rust
+and cannot be captured. What `%call/cc` really captures is everything down to
+the `Halt` frame that `run()` pushes after `reset()`, so every continuation here
+is *already* delimited, at the REPL line. The choice is only whether that
+delimiter is left implicit or made a real prompt. It has to be made real,
+because of the next point.
+
+*The prompt must delimit the dynamic environment, not just the control stack —
+and today nothing does.* `%winders` and `%handlers` are heap globals (Dybvig's
+arrangement, `prelude.scm`), outside the machine state that capture copies.
+The `Halt` frame delimits control, but nothing delimits them, which is a live
+bug with or without holes:
 
 ```text
-> (vector-ref (make-vector 3 0) ,help)
-; at the hole — argument 2 of 2 to #<primitive:vector-ref>
-    argument 1 evaluated to #(0 0 0)
-; `,resume EXPR` to continue with a value
-> ,resume 1
-0
+> (with-exception-handler (lambda (e) 'HANDLED) (lambda () (+ 1 ,help)))
+; at the hole: …
+> (raise-continuable 5)          ; a later, unrelated line
+HANDLED                          ; caught by the abandoned line's handler
 ```
 
-That turns the hole from a question into a breakpoint, which is the same
-mechanism a debugger wants, and it makes the "what fits here?" search directly
-testable: try a candidate, resume, see whether it works.
+The same happens to any uncaught error inside `dynamic-wind` (the `after` thunk
+never runs, and `%winders` stays non-empty for every later line). A prompt at
+the REPL line that records the winders list on entry, and winds back to it on
+any abort, fixes both. `%handlers` is installed through `dynamic-wind`, so
+winding restores it too: one mechanism, not two.
 
-**Where to start.** `EngineOp::Hole` in `crates/fixpt-engine/src/interp.rs` and
-`vm.rs`; `EngineOp::CallCC` beside it already does the capture. The REPL side is
-`run_line` in `crates/fixpt-cli/src/main.rs`, which would keep the captured
-continuation in the session rather than formatting the report and dropping it.
+*Composable, with the REPL as handler — which makes it the `0` variants.* On
+reaching the hole, what should run is "show the context and return to the
+prompt" — code that belongs *outside* the delimiter, since the REPL is the thing
+answering. And `,resume V` should behave like a function from `V` to the form's
+answer: the REPL calls it and gets a value back, rather than having its own
+continuation replaced. That is a composable continuation whose handler runs
+without the prompt in place: `control0`/`shift0`, not `shift`/`control`
+(which would run the handler *inside* the delimiter). Between the two `0`s,
+`shift0` reinstates the prompt around the captured continuation when it is
+resumed, so a second hole reached after `,resume` is caught at the same place as
+the first. That is the deep-handler reading, and it is the one wanted: a
+resumed hole is still a REPL form.
 
-**Why not now.** A held continuation is a root the collector has to know about
-between REPL lines, and resuming one whose session has since had definitions
-added is a question the reference implementations never had to answer. Neither
-is hard; both are more than the reporting version needed.
+*Private tag.* The program's own `call/cc`, `guard` and (later) any user prompts
+must not be able to catch a hole. The current hole achieves that by being
+fatal; the continuation version needs a prompt tag only the REPL holds, as
+Racket's `call-with-continuation-prompt` does.
 
-**Related.** The same capture-per-checkpoint idea as [§1](#1-a-self-correcting-reader-built-on-callcc),
-one level up: §1 saves continuations while *reading* a form, this one saves one
-while *running* it.
+*Multi-shot.* The obvious use of a resumable hole is to *try* candidates —
+`,resume 0`, then `,resume 1`, from the same point — which is also what turns
+`,fits` suggestions into something testable. Capture is already a copy, so
+multi-shot costs nothing mechanically. What it costs semantically is that the
+heap is shared: the second resume sees the first one's mutations. For FX the
+effect system can say whether the rest of the form writes, and so whether
+repeated resumes are independent; Scheme can only warn.
+
+*Unwind on abort, rewind on resume.* With the winders list in the continuation,
+reaching the hole leaves the `dynamic-wind` extent (the `after` thunks run) and
+`,resume` re-enters it (the `before` thunks run). The alternative — pause
+without unwinding, as a debugger breakpoint does — keeps a file open while you
+look at it, but it has no sound story for a hole that is never resumed, and with
+multi-shot there is no moment at which "never" is known. Unwinding is also what
+R7RS and Racket do when control leaves an extent, so it is the unsurprising
+choice.
+
+**What the implementation can skip.** General composable continuations need
+relocation: frames store *absolute* stack positions (`saved` in the AST
+engine's frames, `fp`/`consumer` in the VM's), so splicing a captured segment
+onto a stack of a different depth means adjusting them. A hole is only ever
+resumed by the REPL, from an empty machine at the same base it was captured
+from, so the existing `restore_continuation` reinstates it correctly without
+relocation. The design is `shift0`; the implementation only needs the case
+where the prompt is the bottom of the machine.
+
+**Where to start.**
+1. The REPL prompt: in `Session::eval_forms`, record `%winders` before running,
+   and on *any* error, wind back to it. This fixes the leak on its own and is
+   worth doing first.
+2. `EngineOp::Hole` captures (as `EngineOp::CallCC` does, in both
+   `interp.rs` and `vm.rs`) together with the current `%winders`, winds out to
+   the prompt, and returns the continuation to the REPL instead of raising.
+3. The REPL stores held holes in a heap global, so the collector sees them
+   without a new kind of root, and `,resume EXPR` evaluates `EXPR`, rewinds to
+   the saved winders, and reinstates the continuation with the value.
+
+**Related.** [§1](#1-a-self-correcting-reader-built-on-callcc) saves
+continuations while *reading* a form; this saves one while *running* it.
