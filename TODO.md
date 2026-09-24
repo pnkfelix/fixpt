@@ -351,16 +351,84 @@ from, so the existing `restore_continuation` reinstates it correctly without
 relocation. The design is `shift0`; the implementation only needs the case
 where the prompt is the bottom of the machine.
 
-**Where to start.**
-1. The REPL prompt: in `Session::eval_forms`, record `%winders` before running,
-   and on *any* error, wind back to it. This fixes the leak on its own and is
-   worth doing first.
-2. `EngineOp::Hole` captures (as `EngineOp::CallCC` does, in both
-   `interp.rs` and `vm.rs`) together with the current `%winders`, winds out to
-   the prompt, and returns the continuation to the REPL instead of raising.
-3. The REPL stores held holes in a heap global, so the collector sees them
-   without a new kind of root, and `,resume EXPR` evaluates `EXPR`, rewinds to
-   the saved winders, and reinstates the continuation with the value.
+**Revision: build it on continuation marks, not on frame-walking or globals.**
+Racket's answer to "introspect the continuation in a controlled way" is
+continuation marks, and they fix two things in the plan above at once. The
+claims below were checked against Racket 9.3; the checks are in
+`reference/continuation-marks.rkt`.
+
+- *Introspection becomes a protocol instead of an engine feature.* Today the
+  hole report walks raw frames, and the two engines see different things —
+  which is why the compiled engine needed the reader to pass `POSITION TOTAL`.
+  With marks, code *declares* what it exposes (`with-continuation-mark key
+  value body`) and the report reads `(current-continuation-marks tag)`. Both
+  engines then give the same answer by construction, and nothing is visible
+  unless something chose to mark it: that is the "controllable" part.
+- *Introspection is delimited.* `current-continuation-marks` takes a prompt
+  tag and stops there (check 2), so a hole report sees exactly the marks
+  between the hole and the REPL prompt, and never the REPL's own.
+- *A held continuation can be inspected without being run.* `continuation-marks`
+  of a captured composable continuation returns its marks (check 5). A `,where`
+  command on a held hole comes for free.
+- *Proper tail calls survive.* A mark set in tail position replaces the
+  frame's mark rather than stacking a new one (check 1). That is the whole
+  contribution of Clements & Felleisen's CM machine, and it matters here
+  because both engines promise constant-space tail loops.
+- *The leak goes away structurally.* Racket keeps exception handlers and
+  parameterizations **in marks** (`exception-handler-key`,
+  `parameterization-key`, check 3). The frames that hold them are discarded
+  on abort, so nothing needs restoring (check 4). The fix planned above
+  (record `%winders` and wind back on abort) patches globals that should not
+  exist. `%handlers` should become a mark. `%winders` still needs winding,
+  because `after` thunks are real effects, but *which* winders to run can be
+  read from the marks of the discarded segment instead of from a global.
+
+Cost: marks are `Value`s, and frames here deliberately hold none. Flatt &
+Dybvig's Chez implementation keeps marks in a separate *attachments* stack
+beside the frames. Here that would be a third traced slice (entries of frame
+depth, key, value) alongside the value stack and the registers, copied by
+capture like the value stack. The tail-position rule becomes "the top entry
+has the current frame depth and the same key: overwrite it".
+
+A cheap first use that marks nothing in ordinary code: `plug_hole` knows the
+path from the form's root to the hole, so it can wrap just those ancestors in
+`with-continuation-mark` and nothing else is annotated.
+
+**Specification to follow rather than invent.** SRFI 226 (*Control Features*,
+Nieper-Wißkirchen, final 2023) is an R7RS-style specification of exactly this
+set, derived from Racket: prompts with tags, composable and non-composable
+continuations, `abort-current-continuation`, continuation marks, and
+`parameterize` defined through marks. The `shift0`/deep-handler design above is
+built from its pieces the same way check 5 builds it in Racket:
+`call-with-continuation-prompt` with the REPL's handler,
+`call-with-composable-continuation` to capture, and `abort-current-continuation`
+to reach the handler.
+
+**References.**
+- J. Clements, M. Felleisen. *A Tail-Recursive Machine with Stack
+  Inspection.* TOPLAS 26(6), 2004. The CM machine; marks without losing tail
+  calls.
+- M. Flatt, G. Yu, R. B. Findler, M. Felleisen. *Adding Delimited and
+  Composable Control to a Production Programming Environment.* ICFP 2007.
+  Prompts, composable continuations, `dynamic-wind`, dynamic binding and
+  exceptions together, and how they interact.
+- M. Flatt, R. K. Dybvig. *Compiler and Runtime Support for Continuation
+  Marks.* PLDI 2020. The attachments-stack implementation in Chez, the
+  design to copy.
+- SRFI 226, *Control Features*. The specification.
+
+**Where to start (revised).**
+1. The mark stack in both engines: `with-continuation-mark` as a Core IR form
+   (it has tail-position semantics, so it cannot be a procedure),
+   `current-continuation-marks` and `continuation-mark-set-first` as engine
+   ops, and capture/restore copying the mark stack.
+2. Prompts with tags, and `abort-current-continuation`. A REPL line runs
+   under the REPL's own prompt.
+3. Move `%handlers` into a mark. This fixes the handler half of the leak. Then
+   make the prompt wind back `%winders` on abort, which fixes the other half.
+4. `%hole` captures a composable continuation up to the REPL's tag and aborts
+   to it. The report reads marks, not frames. `,resume EXPR` and `,where` work
+   on held holes, which are kept in a heap global so the collector sees them.
 
 **Related.** [§1](#1-a-self-correcting-reader-built-on-callcc) saves
 continuations while *reading* a form; this saves one while *running* it.
