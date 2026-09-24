@@ -326,3 +326,179 @@ fn r7rs_derived_forms_as_macros_agree_with_the_built_ins() {
         "mine"
     );
 }
+
+// ------------------------------------------- procedural macros (SRFI 211)
+
+const ER_SWAP: &str = "(define-syntax swap!
+  (er-macro-transformer
+   (lambda (form rename compare)
+     (let ((a (cadr form)) (b (caddr form)))
+       `(,(rename 'let) ((,(rename 'tmp) ,a))
+          (,(rename 'set!) ,a ,b)
+          (,(rename 'set!) ,b ,(rename 'tmp)))))))";
+
+#[test]
+fn explicit_renaming_is_hygienic_where_it_renames() {
+    assert_eq!(
+        both(&format!("{ER_SWAP} (define tmp 1) (define other 2) (swap! tmp other) (list tmp other)")),
+        "(2 1)"
+    );
+    // What it renames means what it meant at the definition, whatever the use
+    // site has rebound.
+    assert_eq!(
+        both(&format!("{ER_SWAP} (define x 1) (define y 2) (let ((let 0) (set! 0)) (swap! x y)) (list x y)")),
+        "(2 1)"
+    );
+}
+
+#[test]
+fn explicit_renaming_captures_what_it_leaves_bare() {
+    assert_eq!(
+        both(
+            "(define-syntax aif
+               (er-macro-transformer
+                (lambda (form rename compare)
+                  `(,(rename 'let) ((it ,(cadr form)))
+                     (,(rename 'if) it ,(caddr form) ,(cadddr form))))))
+             (aif (assq 'b '((a 1) (b 2))) (cadr it) 'no)"
+        ),
+        "2"
+    );
+}
+
+#[test]
+fn implicit_renaming_renames_everything_but_what_it_injects() {
+    let def = "(define-syntax aif
+                 (ir-macro-transformer
+                  (lambda (form inject compare)
+                    `(let ((,(inject 'it) ,(cadr form)))
+                       (if ,(inject 'it) ,(caddr form) ,(cadddr form))))))";
+    assert_eq!(both(&format!("{def} (aif (assq 'b '((a 1) (b 2))) (cadr it) 'no)")), "2");
+    assert_eq!(both(&format!("{def} (let ((if list) (let 'x)) (aif #f 1 2))")), "2");
+    // Nothing the template inserts can capture: `tmp` here is the template's.
+    assert_eq!(
+        both(
+            "(define-syntax ir-swap!
+               (ir-macro-transformer
+                (lambda (form inject compare)
+                  `(let ((tmp ,(cadr form))) (set! ,(cadr form) ,(caddr form)) (set! ,(caddr form) tmp)))))
+             (define tmp 1) (define other 2) (ir-swap! tmp other) (list tmp other)"
+        ),
+        "(2 1)"
+    );
+}
+
+/// IR's input identifiers are marked, so `eq?` against a bare symbol fails —
+/// `compare` or `strip-syntax` is how to look at them.
+#[test]
+fn implicit_renaming_input_is_marked_and_strip_syntax_unmarks_it() {
+    assert_eq!(
+        both(
+            "(define-syntax look
+               (ir-macro-transformer
+                (lambda (form inject compare)
+                  `(quote ,(list (eq? (cadr form) 'x) (symbol? (cadr form)) (strip-syntax (cadr form)))))))
+             (look x)"
+        ),
+        "(#f #t x)"
+    );
+}
+
+#[test]
+fn compare_matches_by_binding() {
+    let def = "(define-syntax which
+                 (er-macro-transformer
+                  (lambda (form rename compare)
+                    (if (compare (cadr form) (rename 'else)) ''else-literal ''something-else))))";
+    assert_eq!(
+        both(&format!("{def} (list (which else) (which other) (let ((else 1)) (which else)))")),
+        "(else-literal something-else something-else)"
+    );
+}
+
+#[test]
+fn a_transformer_can_compute() {
+    assert_eq!(
+        both(
+            "(define-syntax unroll
+               (er-macro-transformer
+                (lambda (form rename compare)
+                  (let loop ((i (cadr form)) (acc '()))
+                    (if (= i 0) (cons (rename 'begin) acc) (loop (- i 1) (cons (caddr form) acc)))))))
+             (define n 0)
+             (unroll 4 (set! n (+ n 1)))
+             n"
+        ),
+        "4"
+    );
+}
+
+#[test]
+fn begin_for_syntax_defines_helpers_for_transformers() {
+    assert_eq!(
+        both(
+            "(begin-for-syntax (define (twice x) (list x x)))
+             (define-syntax dup (er-macro-transformer (lambda (f r c) `(,(r 'quote) ,(twice (cadr f))))))
+             (dup hello)"
+        ),
+        "(hello hello)"
+    );
+}
+
+/// A procedural macro whose input another macro produced: the input's
+/// identifiers keep their identity through the trip into Scheme and back. The
+/// `syntax-rules` template's `tmp` is not the global `tmp`, and the ER
+/// macro's own renamed `tmp` is neither.
+#[test]
+fn hygiene_survives_layering_macro_systems() {
+    assert_eq!(
+        both(&format!(
+            "{ER_SWAP}
+             (define-syntax use-tmp (syntax-rules () ((_ x) (let ((tmp 'inner)) (swap! tmp x)))))
+             (define tmp 'global) (define outer 'outer)
+             (use-tmp outer)
+             (list outer tmp)"
+        )),
+        "(inner global)"
+    );
+}
+
+#[test]
+fn procedural_macros_in_scoped_forms() {
+    assert_eq!(
+        both(
+            "(let-syntax ((ten (er-macro-transformer (lambda (f r c) 10))))
+               (+ (ten) 1))"
+        ),
+        "11"
+    );
+}
+
+#[test]
+fn procedural_macro_errors_say_what_went_wrong() {
+    // A transformer runs before the input around it: a local is not there.
+    let out = both("(let ((k 3)) (let-syntax ((m (er-macro-transformer (lambda (f r c) k)))) (m)))");
+    assert!(out.contains("unbound variable: k"), "{out}");
+    let out = both("(define-syntax m (er-macro-transformer (lambda (f r c) (error \"bad use\" f)))) (m 1)");
+    assert!(out.contains("bad use"), "{out}");
+    let out = both("(define-syntax m (er-macro-transformer (lambda (f r c) car))) (m)");
+    assert!(out.contains("`m` produced #<primitive:car>, which is not syntax"), "{out}");
+    let out = both("(define-syntax m 42)");
+    assert!(out.contains("must be `syntax-rules`, `er-macro-transformer` or `ir-macro-transformer`"), "{out}");
+}
+
+#[test]
+fn procedural_macros_persist_across_inputs() {
+    let big = move || {
+        for backend in [Backend::Ast, Backend::Bytecode] {
+            let mut s = Session::with_backend(backend);
+            s.eval_to_string("<1>", ER_SWAP).expect("defines");
+            s.eval_to_string("<2>", "(define a 1) (define b 2)").expect("defines");
+            // Collections between inputs must not lose the transformer.
+            s.eval_to_string("<3>", "(let loop ((i 0)) (if (< i 20000) (begin (cons i i) (loop (+ i 1)))))")
+                .expect("runs");
+            assert_eq!(s.eval_to_string("<4>", "(begin (swap! a b) (list a b))").ok().as_deref(), Some("(2 1)"));
+        }
+    };
+    std::thread::Builder::new().stack_size(STACK).spawn(big).expect("spawns").join().expect("passes");
+}

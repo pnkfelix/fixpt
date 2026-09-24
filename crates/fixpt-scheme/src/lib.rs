@@ -3,6 +3,7 @@
 pub mod env;
 pub mod expand;
 pub mod macros;
+pub mod procmacro;
 pub mod session;
 pub mod special;
 

@@ -41,6 +41,7 @@ pub enum Special {
     DelayForce,
     Guard,
     WithMark,
+    BeginForSyntax,
     DefineSyntax,
     LetSyntax,
     LetrecSyntax,
@@ -65,6 +66,12 @@ pub struct Env {
 impl Env {
     pub fn new() -> Env {
         Env { scopes: vec![HashMap::new()] }
+    }
+
+    /// Just the top-level scope — what a macro transformer's expression sees,
+    /// since it runs before any local binding around it exists.
+    pub fn top_only(&self) -> Env {
+        Env { scopes: vec![self.scopes[0].clone()] }
     }
 
     pub fn push(&mut self) {

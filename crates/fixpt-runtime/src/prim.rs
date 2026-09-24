@@ -74,6 +74,11 @@ pub enum EngineOp {
     CallComposable,
     /// `(%throw k vals)` — reinstate a continuation raw, with no winding.
     Throw,
+    /// `(%host request …)` — pause the machine and hand `(request …)` to the
+    /// native code that called it, which answers by resuming. How a macro
+    /// transformer's `rename` and `compare` reach the expander, whose
+    /// environment a primitive cannot see.
+    Host,
 }
 
 pub enum PrimKind {
@@ -680,6 +685,7 @@ prims! {
     "%abort",             3, Some(3), PrimKind::Engine(EngineOp::Abort);
     "%call/comp",         2, Some(2), PrimKind::Engine(EngineOp::CallComposable);
     "%throw",             2, Some(2), PrimKind::Engine(EngineOp::Throw);
+    "%host",              1, None,    PrimKind::Engine(EngineOp::Host);
     // A captured continuation carries its marks, so reading them needs no
     // engine: the encoding is shared (`cmarks`).
     "%continuation?", 1, Some(1), simple!(|rt, a| {

@@ -125,6 +125,10 @@ impl Expander<'_> {
                 span,
                 "`define-syntax` is only allowed at the top level or at the start of a body",
             )),
+            Special::BeginForSyntax => Err(ExpandError::at(
+                span,
+                "`begin-for-syntax` is only allowed at the top level",
+            )),
             Special::SyntaxRules => Err(ExpandError::at(
                 span,
                 "`syntax-rules` is only valid as the transformer of a macro definition",

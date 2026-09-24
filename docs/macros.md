@@ -10,7 +10,10 @@ cases as regressions, the classic hygiene cases, and R7RS §7.3's own
 `syntax-rules` definitions of `cond`, `case`, `and`, `or`, `let`, `let*` and
 `do`, checked against the built-ins.
 
-Not yet: ER and IR (step 3), syntax parameters (step 4).
+Step 3 is done too: SRFI 211's `er-macro-transformer` and
+`ir-macro-transformer` (`crates/fixpt-scheme/src/procmacro.rs`), with
+`begin-for-syntax` for helpers that transformers need. Not yet: syntax
+parameters (step 4).
 
 Choices made, and behaviour worth knowing:
 
@@ -29,6 +32,26 @@ Choices made, and behaviour worth knowing:
   debug build, 0.6 KB in release — so `fixpt` runs its command on a 256 MB
   stack. A program that embeds `Session` on a smaller thread should do the
   same.
+- **A transformer runs during expansion**, before anything in its input has
+  run. Its expression is expanded against the top-level environment only, so
+  it can use the prelude, earlier inputs, and whatever `begin-for-syntax`
+  defined, but not locals around the `define-syntax`, which don't exist yet.
+  There is one global environment, not separate phases: what
+  `begin-for-syntax` defines is also there at run time.
+- **Collection is held off while a transformer runs**, because the expander
+  holds heap values outside any root set: the constants of the program it is
+  building. The heap grows instead, which never moves anything.
+- **`rename`, `inject` and `compare` pause the machine.** They call `%host`,
+  which suspends the engine mid-call and hands the request to the expander,
+  which answers and resumes it. No primitive calls back into the expander.
+- **Identifiers cross as symbols, so `symbol?`, `eq?` and `case` work on a
+  transformer's input.** One whose identity is more than its name (an alias
+  from an enclosing macro, a renamed identifier, and every IR input
+  identifier) crosses as an uninterned symbol. That makes it `eq?` only to
+  itself, and it maps back to exactly the identifier it came from. So a
+  procedural macro's input keeps its hygiene when another macro produced it,
+  which is the case the R7RS-large draft's ER and IR get wrong. IR
+  authors who want plain names use `strip-syntax`, as in CHICKEN.
 - **Bodies are scanned one form at a time.** A macro use, a `begin` or a
   `define-values` may produce definitions, each name is bound when it is
   found, and a `define-syntax` in a body is in scope for the rest of it.

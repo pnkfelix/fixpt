@@ -142,6 +142,8 @@ pub struct Vm {
     frames: Vec<VmFrame>,
     /// Continuation marks, prompts and winders — see [`cmarks`].
     marks: Marks,
+    /// Where a `%host` request's answer goes; `Some` while paused.
+    pending_host: Option<(usize, Call)>,
     regs: Vec<Value>,
     fp: u32,
     pc: u32,
@@ -163,6 +165,7 @@ impl Vm {
             stack: Vec::with_capacity(256),
             frames: Vec::with_capacity(64),
             marks: Marks::default(),
+            pending_host: None,
             regs: vec![Value::UNSPECIFIED; N_REGS],
             fp: 0,
             pc: 0,
@@ -176,6 +179,7 @@ impl Vm {
         self.frames.clear();
         self.frames.push(VmFrame::Halt);
         self.marks.clear();
+        self.pending_host = None;
         self.fp = 0;
         self.pc = 0;
         self.steps = 0;
@@ -205,6 +209,22 @@ impl Vm {
         // value is the answer, so there is nothing to return to.
         self.fp = 0;
         match self.apply(rt, p, 0, Call::Tail) {
+            Ok(Some(v)) => return Ok(v),
+            Ok(None) => {}
+            Err(t) => {
+                if let Some(v) = self.dispatch_condition(rt, p, t)? {
+                    return Ok(v);
+                }
+            }
+        }
+        self.drive(rt, p)
+    }
+
+    /// Continue a machine paused by `%host`, with `answer` as the value of the
+    /// `%host` call.
+    pub fn answer_host(&mut self, rt: &mut Runtime, p: &mut Prepared, answer: Value) -> Outcome<Value> {
+        let (base, call) = self.pending_host.take().expect("resume without a paused machine");
+        match self.give(rt, p, base, call, answer) {
             Ok(Some(v)) => return Ok(v),
             Ok(None) => {}
             Err(t) => {
@@ -660,7 +680,7 @@ impl Vm {
                 }
                 self.stack.truncate(base);
                 let obj = rt.error_object(&report, &[]);
-                Err(Thrown { obj, fatal: true })
+                Err(Thrown::fatal(obj))
             }
             // ---- marks, prompts, composable continuations ----
             EngineOp::WithMark => {
@@ -719,6 +739,12 @@ impl Vm {
                 self.stack.push(f);
                 self.stack.push(k);
                 self.apply(rt, p, base, call)
+            }
+            EngineOp::Host => {
+                let request: Vec<Value> = self.stack[base + 1..].to_vec();
+                let request = rt.heap.list_from(&request);
+                self.pending_host = Some((base, call));
+                Err(Thrown::suspend(request))
             }
             EngineOp::Throw => {
                 let (k, vals) = (self.stack[base + 1], self.stack[base + 2]);

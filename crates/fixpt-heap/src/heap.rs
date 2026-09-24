@@ -43,6 +43,12 @@ pub struct Heap {
 
     /// Explicit roots held by native code across a safepoint.
     roots: Vec<Value>,
+    /// While positive, [`maybe_collect`](Heap::maybe_collect) does nothing and
+    /// the heap grows instead. For native code that holds `Value`s outside any
+    /// root set across a call into Scheme — the macro expander, calling a
+    /// transformer while its half-built program holds constants. Growing
+    /// never moves anything, so those `Value`s stay valid.
+    inhibited: u32,
     /// Global variable slots, indexed by a symbol's global-slot field.
     globals: Vec<Value>,
     /// Interned symbols. Position is the symbol's identity; the `Value`s here
@@ -75,6 +81,7 @@ impl Heap {
             semi,
             top: 0,
             roots: Vec::new(),
+            inhibited: 0,
             globals: Vec::new(),
             symbols: Vec::new(),
             symbol_index: HashMap::new(),
@@ -391,6 +398,23 @@ impl Heap {
         sym
     }
 
+    /// A symbol with this name that is `eq?` to no other — not even to the
+    /// interned symbol of the same name. It has no global slot: it exists to
+    /// carry an identifier's identity into Scheme code (a procedural macro's
+    /// input) and back, never to name a variable at run time.
+    pub fn make_uninterned_symbol(&mut self, name: &str) -> Value {
+        let s = self.make_string(name);
+        let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
+        self.obj_set(sym, 0, s);
+        self.obj_set(sym, 1, Value::fixnum(fnv1a(name) as i64 & i64::MAX));
+        self.obj_set(sym, 2, Value::fixnum(-1));
+        sym
+    }
+
+    pub fn is_interned_symbol(&self, sym: Value) -> bool {
+        self.is_a(sym, ObjType::Symbol) && self.obj_ref(sym, 2).as_fixnum() >= 0
+    }
+
     /// Look up an already-interned symbol without allocating. Useful when a
     /// `&Heap` is all that is available, e.g. after loading an image.
     pub fn intern_existing(&self, name: &str) -> Option<Value> {
@@ -418,6 +442,17 @@ impl Heap {
         self.globals[slot] = v;
     }
 
+    /// Hold off collection until the matching [`allow_collection`].
+    ///
+    /// [`allow_collection`]: Heap::allow_collection
+    pub fn inhibit_collection(&mut self) {
+        self.inhibited += 1;
+    }
+
+    pub fn allow_collection(&mut self) {
+        self.inhibited -= 1;
+    }
+
     // ------------------------------------------------------------ native roots
     /// Root `v` for the duration of a native operation that spans a safepoint.
     /// Returns the depth to unwind to.
@@ -439,6 +474,9 @@ impl Heap {
     /// Collect if the heap warrants it. Call only at an engine safepoint, with
     /// every live `Value` reachable from `extra_roots` or the heap's own roots.
     pub fn maybe_collect(&mut self, extra_roots: &mut [&mut [Value]]) {
+        if self.inhibited > 0 {
+            return;
+        }
         let full = self.top as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
         if cfg!(feature = "gc-stress") || full {
             self.collect(extra_roots);

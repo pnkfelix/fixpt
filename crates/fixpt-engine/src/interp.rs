@@ -54,6 +54,9 @@ pub struct Interp {
     /// Continuation marks, prompts and winders, beside the frames — see
     /// [`cmarks`]. A third root slice for the collector.
     marks: Marks,
+    /// Where a `%host` request's answer goes: the stack height of the
+    /// application that asked. `Some` exactly while the machine is paused.
+    pending_host: Option<usize>,
     regs: Vec<Value>,
     /// Bounds a runaway program so tests fail rather than hang. `None` is
     /// unlimited.
@@ -73,6 +76,7 @@ impl Interp {
             stack: Vec::with_capacity(256),
             frames: Vec::with_capacity(64),
             marks: Marks::default(),
+            pending_host: None,
             regs: vec![Value::UNSPECIFIED; N_REGS],
             step_limit: None,
             steps: 0,
@@ -120,6 +124,7 @@ impl Interp {
         self.frames.clear();
         self.frames.push(Frame::Halt);
         self.marks.clear();
+        self.pending_host = None;
         self.set_env(Value::FALSE);
         self.set_code(Value::FALSE);
         self.set_acc(Value::UNSPECIFIED);
@@ -147,6 +152,15 @@ impl Interp {
         self.stack.extend_from_slice(args);
         let control = self.apply(rt, p, base)?;
         self.drive(rt, p, control)
+    }
+
+    /// Continue a machine paused by `%host`, with `answer` as the value of the
+    /// `%host` call.
+    pub fn answer_host(&mut self, rt: &mut Runtime, p: &mut Prepared, answer: Value) -> Outcome<Value> {
+        let at = self.pending_host.take().expect("resume without a paused machine");
+        self.stack.truncate(at);
+        self.set_acc(answer);
+        self.drive(rt, p, Control::Return)
     }
 
     fn drive(&mut self, rt: &mut Runtime, p: &mut Prepared, start: Control) -> Outcome<Value> {
@@ -685,6 +699,12 @@ impl Interp {
                 self.stack.push(k);
                 self.apply(rt, p, base)
             }
+            EngineOp::Host => {
+                let request: Vec<Value> = self.stack[base + 1..].to_vec();
+                let request = rt.heap.list_from(&request);
+                self.pending_host = Some(drop_to);
+                Err(Thrown::suspend(request))
+            }
             EngineOp::Throw => {
                 let (k, vals) = (self.stack[base + 1], self.stack[base + 2]);
                 if !rt.heap.is_a(k, ObjType::Continuation) {
@@ -728,7 +748,7 @@ impl Interp {
                 // Fatal, so it escapes any handler: a question should not be
                 // caught by the program's own error handling and turned into a
                 // value.
-                Err(Thrown { obj, fatal: true })
+                Err(Thrown::fatal(obj))
             }
             EngineOp::CallWithValues => {
                 let producer = self.stack[base + 1];

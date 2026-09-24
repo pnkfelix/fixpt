@@ -171,7 +171,7 @@ pub struct ExpanderParts {
     pub gensym_counter: u32,
     pub aliases: HashMap<Sym, Alias>,
     pub core: HashMap<Sym, Binding>,
-    pub macros: Vec<std::rc::Rc<crate::macros::Macro>>,
+    pub macros: Vec<crate::macros::MacroDef>,
 }
 
 pub struct Expander<'a> {
@@ -189,7 +189,10 @@ pub struct Expander<'a> {
     /// The core environment: the special forms, by their plain names.
     pub(crate) core: HashMap<Sym, Binding>,
     /// Macros, indexed by [`Binding::Macro`].
-    pub(crate) macros: Vec<std::rc::Rc<crate::macros::Macro>>,
+    pub(crate) macros: Vec<crate::macros::MacroDef>,
+    /// The engine, for running procedural macros during expansion. Only a
+    /// session has one.
+    pub(crate) host: Option<crate::procmacro::Host<'a>>,
     /// How many macro uses are being expanded inside one another.
     pub(crate) macro_depth: u32,
 }
@@ -225,6 +228,7 @@ const SPECIAL_FORMS: &[(&str, Special)] = &[
     ("guard", Special::Guard),
     ("with-continuation-mark", Special::WithMark),
     ("define-syntax", Special::DefineSyntax),
+    ("begin-for-syntax", Special::BeginForSyntax),
     ("let-syntax", Special::LetSyntax),
     ("letrec-syntax", Special::LetrecSyntax),
     ("syntax-rules", Special::SyntaxRules),
@@ -260,6 +264,7 @@ impl<'a> Expander<'a> {
             core,
             macros: Vec::new(),
             macro_depth: 0,
+            host: None,
         }
     }
 
@@ -276,7 +281,14 @@ impl<'a> Expander<'a> {
             core: parts.core,
             macros: parts.macros,
             macro_depth: 0,
+            host: None,
         }
+    }
+
+    /// Give the expander an engine, so that it can run procedural macros.
+    pub fn with_host(mut self, host: crate::procmacro::Host<'a>) -> Expander<'a> {
+        self.host = Some(host);
+        self
     }
 
     pub fn into_parts(self, body: NodeId) -> (Program, ExpanderParts) {
@@ -324,6 +336,17 @@ impl<'a> Expander<'a> {
         // form in its own right, so a macro can expand into definitions.
         if let Some(out) = self.expand_head_macro(form)? {
             return self.nested(|e| e.top_level(&out));
+        }
+        if let Some(items) = form.as_proper_list()
+            && let Some(head) = items.first().and_then(|h| h.as_symbol())
+            && self.resolve(head) == Some(Binding::Special(Special::BeginForSyntax))
+        {
+            // Run now, at expansion time — so that what it defines is there
+            // for the transformers of macros defined later in the same input.
+            for f in &items[1..] {
+                self.eval_now(f, false)?;
+            }
+            return self.constant(form.span, Value::UNSPECIFIED);
         }
         if let Some(items) = form.as_proper_list()
             && let Some(head) = items.first().and_then(|h| h.as_symbol())

@@ -97,6 +97,18 @@ impl Prepared {
         }
     }
 
+    /// A closure over `program`'s body, built for this backend without
+    /// replacing the pending top-level program — how the expander runs a
+    /// macro transformer's expression in the middle of expanding an input.
+    pub fn thunk_for(
+        &self,
+        heap: &mut Heap,
+        interner: &Interner,
+        program: &Program,
+    ) -> Result<Value, CompileError> {
+        build_thunk(self.backend, heap, interner, program)
+    }
+
     pub fn thunk(&self, heap: &Heap) -> Value {
         let root = self.thunk_root.expect("no program has been prepared");
         heap.root_at(root)

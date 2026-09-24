@@ -52,6 +52,28 @@ pub enum Engine {
 }
 
 impl Engine {
+    /// Apply a procedure from native code, running it to completion — or to a
+    /// `%host` request, which [`answer_host`](Engine::answer_host) continues.
+    pub fn call(
+        &mut self,
+        rt: &mut Runtime,
+        p: &mut Prepared,
+        f: Value,
+        args: &[Value],
+    ) -> fixpt_runtime::Outcome<Value> {
+        match self {
+            Engine::Ast(i) => i.call(rt, p, f, args),
+            Engine::Bytecode(v) => v.call(rt, p, f, args),
+        }
+    }
+
+    pub fn answer_host(&mut self, rt: &mut Runtime, p: &mut Prepared, v: Value) -> fixpt_runtime::Outcome<Value> {
+        match self {
+            Engine::Ast(i) => i.answer_host(rt, p, v),
+            Engine::Bytecode(vm) => vm.answer_host(rt, p, v),
+        }
+    }
+
     pub fn set_step_limit(&mut self, limit: Option<u64>) {
         match self {
             Engine::Ast(i) => i.step_limit = limit,
@@ -169,7 +191,11 @@ impl Session {
                 builder: Builder::from_program(program),
                 ..parts
             },
-        );
+        )
+        .with_host(crate::procmacro::Host {
+            engine: &mut self.engine,
+            prepared: &mut self.prepared,
+        });
         let expanded = expander.expand_forms(forms);
         let (program, parts) = match expanded {
             Ok(body) => expander.into_parts(body),
@@ -200,6 +226,11 @@ impl Session {
                 Err(SessionError::Hole(self.hole_report(v)))
             }
             Ok(v) => Ok(v),
+            // `%host` paused the machine with no native caller waiting for the
+            // question — it only means something inside a macro transformer.
+            Err(t) if t.suspended => Err(SessionError::Raised(
+                "`%host` asks the macro expander a question, and is only meaningful inside a transformer".into(),
+            )),
             Err(t) => {
                 let msg = self.condition_message(t.obj);
                 Err(SessionError::Raised(msg))

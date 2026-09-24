@@ -29,6 +29,13 @@ type R<T> = Result<T, ExpandError>;
 /// until the Rust stack ran out.
 pub(crate) const MAX_EXPANSION_DEPTH: u32 = 2_000;
 
+/// What a macro keyword is bound to.
+#[derive(Clone)]
+pub enum MacroDef {
+    Rules(Rc<Macro>),
+    Proc(Rc<crate::procmacro::ProcMacro>),
+}
+
 pub struct Macro {
     name: Sym,
     /// A custom ellipsis (`(syntax-rules ::: (…) …)`), or `None` for `...`.
@@ -58,16 +65,17 @@ impl Expander<'_> {
     /// Turn a transformer spec into a macro, defined in the outermost `scope`
     /// scopes.
     pub(crate) fn make_macro(&mut self, name: Sym, spec: &Syntax, scope: u32) -> R<u32> {
-        let items = spec
-            .as_proper_list()
-            .filter(|it| {
-                it.first()
-                    .and_then(|h| h.as_symbol())
-                    .is_some_and(|h| self.resolve(h) == Some(Binding::Special(Special::SyntaxRules)))
-            })
-            .ok_or_else(|| {
-                ExpandError::at(spec.span, "a macro's transformer must be a `syntax-rules` form")
-            })?;
+        let rules = spec.as_proper_list().filter(|it| {
+            it.first()
+                .and_then(|h| h.as_symbol())
+                .is_some_and(|h| self.resolve(h) == Some(Binding::Special(Special::SyntaxRules)))
+        });
+        let Some(items) = rules else {
+            // Anything else is a procedural transformer: an expression to run.
+            let pm = self.make_proc_macro(name, spec, scope)?;
+            self.macros.push(MacroDef::Proc(Rc::new(pm)));
+            return Ok(self.macros.len() as u32 - 1);
+        };
         let mut args = &items[1..];
         let ellipsis = match args.first().map(|a| &a.datum) {
             Some(Datum::Symbol(e)) => {
@@ -106,7 +114,7 @@ impl Expander<'_> {
             self.check_pattern(&m, pattern, &mut Vec::new())?;
             m.rules.push((pattern.clone(), parts[1].clone()));
         }
-        self.macros.push(Rc::new(m));
+        self.macros.push(MacroDef::Rules(Rc::new(m)));
         Ok(self.macros.len() as u32 - 1)
     }
 
@@ -180,14 +188,22 @@ impl Expander<'_> {
     }
 
     pub(crate) fn expand_macro(&mut self, id: u32, form: &Syntax) -> R<Syntax> {
-        let m = Rc::clone(&self.macros[id as usize]);
+        let def = self.macros[id as usize].clone();
+        let name = match &def {
+            MacroDef::Rules(m) => m.name,
+            MacroDef::Proc(p) => p.name,
+        };
         if self.macro_depth >= MAX_EXPANSION_DEPTH {
-            let n = self.rt.interner.name(m.name).to_string();
+            let n = self.rt.interner.name(name).to_string();
             return Err(ExpandError::at(
                 form.span,
                 format!("macro expansion nested more than {MAX_EXPANSION_DEPTH} deep, in `{n}`: does its expansion always contain another use of it?"),
             ));
         }
+        let m = match def {
+            MacroDef::Rules(m) => m,
+            MacroDef::Proc(p) => return self.expand_proc_macro(&p, form),
+        };
         for (pattern, template) in &m.rules {
             let mut binds = HashMap::new();
             if self.match_top(&m, pattern, form, &mut binds) {
@@ -347,6 +363,17 @@ impl Expander<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Do two identifiers, each resolved where it now stands, name the same
+    /// binding? What a procedural macro's `compare` asks.
+    pub(crate) fn same_binding(&self, a: Sym, b: Sym) -> bool {
+        let same_name = || self.rt.interner.name(a) == self.rt.interner.name(b);
+        match (self.resolve(a), self.resolve(b)) {
+            (Some(x), Some(y)) if x == y => true,
+            (None | Some(Binding::Global(_)), None | Some(Binding::Global(_))) => same_name(),
+            _ => false,
         }
     }
 

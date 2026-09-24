@@ -381,6 +381,39 @@
 ;; `,resume` -- deliver a value to a held hole.
 (define (%resume k v) (k v))
 
+;;; ------------------------------------------------------ procedural macros
+;;; SRFI 211's low-level transformers. The expander recognises the record,
+;;; calls the procedure at each use, and answers `rename`, `inject` and
+;;; `compare` itself: each is a `%host` request, which pauses this machine
+;;; until the expander resumes it with the answer (`procmacro.rs`).
+
+(define-record-type %transformer
+  (%make-transformer kind proc)
+  %transformer?
+  (kind %transformer-kind)
+  (proc %transformer-proc))
+
+;; (lambda (form rename compare) ...): what the template inserts is renamed
+;; by hand; anything left bare means what it means where the macro is used.
+(define (er-macro-transformer f) (%make-transformer 'er f))
+
+;; (lambda (form inject compare) ...): everything the template inserts is
+;; renamed automatically; `inject` is how to capture on purpose.
+(define (ir-macro-transformer f) (%make-transformer 'ir f))
+
+(define (%macro-rename s) (%host 'rename s))
+(define (%macro-inject s) (%host 'inject s))
+(define (%macro-compare a b) (%host 'compare a b))
+
+;; An IR transformer's input identifiers are marked -- `eq?` only to
+;; themselves -- so that its output can be told apart from its template.
+;; This gives back plain symbols, for code that wants to look at names.
+(define (strip-syntax x)
+  (cond ((symbol? x) (string->symbol (symbol->string x)))
+        ((pair? x) (cons (strip-syntax (car x)) (strip-syntax (cdr x))))
+        ((vector? x) (list->vector (strip-syntax (vector->list x))))
+        (else x)))
+
 ;;; ------------------------------------------------------------ utilities
 
 (define (void . ignored) (if #f #f))

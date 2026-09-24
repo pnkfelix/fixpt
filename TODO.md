@@ -336,3 +336,21 @@ The cost on code that uses none of it, measured against the previous commit
 
 **Related.** [§1](#1-a-self-correcting-reader-built-on-callcc) saves
 continuations while *reading* a form; this saves one while *running* it.
+
+---
+
+## 10. Syntax parameters
+
+**What.** SRFI 139's `define-syntax-parameter` and `syntax-parameterize`. They
+are the way to write an anaphoric macro with no capture at all: `it` is defined
+once, and `aif` rebinds what it means for the extent of its body. Racket
+prefers them to both `datum->syntax` and `inject` (`docs/macros.md` §2 shows
+all three).
+
+**Why not yet.** It is the last step of the M9 plan and the least urgent: ER and
+IR already cover deliberate capture.
+
+**Where to start.** A syntax parameter is a keyword whose meaning
+`syntax-parameterize` changes *by binding*, not by name. In the alias design
+that is a new `Binding` that resolves through a per-expansion override table,
+consulted by `Expander::resolve` before the scope chain.
