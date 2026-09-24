@@ -113,6 +113,23 @@ side. ER's hygiene is by discipline: forget to rename one inserted `if` and the
 macro silently captures, which is exactly the bug `cond` has today. IR inverts
 that default, which is why it is the more comfortable of the two.
 
+**IR is harder to implement than it looks.** It promises that whatever the
+template inserts is renamed and whatever came from the input is left as the
+user wrote it. But the transformer's output is a list of symbols, and a user's
+`if` and a template's `if` are the same interned symbol. A correct IR therefore
+has to *mark the input* before the transformer sees it. Afterwards it renames
+the unmarked symbols in the output, as template-inserted, and strips the marks
+from the rest. That is `syntax-case`'s mark-and-flip, done on plain lists. The
+fascicle's non-normative IR skips the marking: it unwraps the input to bare
+datums and gives `inject` the use-site context. That goes wrong when the input
+itself came from another macro's expansion, since an identifier that meant
+something at *that* macro's definition site is re-read at the use site. Under
+the alias design of §5, identifiers inserted by an enclosing macro are already
+distinct aliases and survive untouched. Only the user's plain symbols need
+marking, as use-site aliases that resolve to themselves. The cost is a walk
+over the input and a walk over the output per expansion: linear, but more than
+ER pays, and the honest price of hygiene by default.
+
 Racket's own answer to `aif` is neither form of capture. It is a *syntax
 parameter* (SRFI 139): `it` is defined once, and `aif` rebinds its meaning
 for the extent of the body. Nothing is captured, so there is nothing to get
