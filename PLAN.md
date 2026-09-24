@@ -278,15 +278,15 @@ libraries; exact integers (fixnum + bignum + ratnum) and inexact `f64`.
 because **FX-91's `listof` is genuinely mutable-pair-based** and the reference
 implementation depends on it. Documented as an R5RS-compatible extension.
 
-**Deferred (M9), not abandoned.** `define-syntax`/`let-syntax`/`letrec-syntax`
-with hygienic `syntax-rules`. Neither FX dialect needs it, so it does not block
-anything; but the expander is built with a macro-transformer seam from day one
-so adding it later is an addition, not a rewrite. Until then the derived forms
-(`let`, `cond`, `case`, `do`, `when`, …) are native expander forms rather than
-library macros — which is what most Schemes do for them anyway.
+**Added in M9.** `define-syntax`/`let-syntax`/`letrec-syntax` with hygienic
+`syntax-rules`, by Clinger & Rees renaming. The expander's scope chain made it
+an addition rather than a rewrite, as intended. The derived forms (`let`,
+`cond`, `case`, `do`, `when`, …) stay native expander forms, which is what most
+Schemes do, but they are now hygienic, and R7RS §7.3's `syntax-rules`
+definitions of them run and agree. See [`docs/macros.md`](docs/macros.md).
 
 **Out, and documented as such.** Complex numbers; the full exactness-contagion
-corner cases; `syntax-case`/`er-macro-transformer`; R6RS libraries and
+corner cases; `syntax-case` (ER/IR are planned, see `docs/macros.md`); R6RS libraries and
 `define-library`; full Unicode normalisation/`char-ready?`; threads.
 
 ---
@@ -433,7 +433,7 @@ you at each boundary rather than disappear for the whole thing.
 | M6 ✅ | `fixpt-fx87` | 161 cases: **161/161 parse, 160/161 type and effect, 123/123 value** of those the archive's evaluating path can answer. Driven from the CLI as `fixpt --dialect fx87 repl\|run\|eval` |
 | M7 ✅ | `fixpt-fx91` | **182/182 on all three levels** — parse, type and effect, and evaluated value. Driven from the CLI: `fixpt --dialect fx91 repl\|run\|eval`, presenting results in the 1991 top level's `:`/`!`/`=` notation |
 | M8 🔶 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks (`cargo run --release --example engines` is the start). Collector workloads from Larceny's `test/GC` already landed in `tests/gc_workloads.rs` |
-| M9 | *(next)* hygienic `syntax-rules` | derived forms re-expressible as library macros. Design survey and plan: [`docs/macros.md`](docs/macros.md) — renaming with aliases (Clinger & Rees), then `syntax-rules`, then ER/IR |
+| M9 🔶 | hygienic `syntax-rules` | **done:** `define-syntax`/`let-syntax`/`letrec-syntax`/`syntax-rules`, hygienic by renaming (Clinger & Rees); the built-in derived forms hygienic too; R7RS §7.3's own macro definitions of the derived forms pass against the built-ins. **Next:** SRFI 211 ER/IR, syntax parameters. See [`docs/macros.md`](docs/macros.md) |
 | M10 | *(future)* native code generation | the bytecode/heap-image design is kept amenable to it; not scheduled |
 
 Rough total ~26k lines of Rust. M6 and M7 are each comparable in size to

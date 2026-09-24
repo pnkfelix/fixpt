@@ -30,6 +30,16 @@ impl Interner {
         s
     }
 
+    /// A symbol no source text can produce: it has a name, for printing, but
+    /// it is not in the index, so reading that name — even spelled with `|…|`
+    /// and escapes — yields a *different* symbol. This is what a hygienic
+    /// rename needs, and what a leading space in a gensym only approximates.
+    pub fn uninterned(&mut self, name: &str) -> Sym {
+        let s = Sym(self.names.len() as u32);
+        self.names.push(name.to_string());
+        s
+    }
+
     pub fn get(&self, name: &str) -> Option<Sym> {
         self.index.get(name).copied()
     }

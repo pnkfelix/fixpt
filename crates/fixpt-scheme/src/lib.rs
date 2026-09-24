@@ -2,6 +2,7 @@
 
 pub mod env;
 pub mod expand;
+pub mod macros;
 pub mod session;
 pub mod special;
 

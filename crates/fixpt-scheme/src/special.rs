@@ -70,7 +70,7 @@ impl Expander<'_> {
                     .as_symbol()
                     .ok_or_else(|| ExpandError::at(args[0].span, "`set!` needs a variable"))?;
                 let value = self.expr(&args[1])?;
-                match self.env.lookup(target) {
+                match self.resolve(target) {
                     Some(Binding::Local(v)) => Ok(self.b.node(span, Node::Set(v, value))),
                     Some(Binding::Special(_)) => {
                         Err(ExpandError::at(args[0].span, "cannot `set!` a syntactic keyword"))
@@ -121,6 +121,16 @@ impl Expander<'_> {
             Special::DelayForce => self.expand_delay(span, args, true),
             Special::Guard => self.expand_guard(span, args),
             Special::WithMark => self.expand_with_mark(span, args),
+            Special::DefineSyntax => Err(ExpandError::at(
+                span,
+                "`define-syntax` is only allowed at the top level or at the start of a body",
+            )),
+            Special::SyntaxRules => Err(ExpandError::at(
+                span,
+                "`syntax-rules` is only valid as the transformer of a macro definition",
+            )),
+            Special::LetSyntax => self.expand_let_syntax(span, args, false),
+            Special::LetrecSyntax => self.expand_let_syntax(span, args, true),
         }
     }
 
@@ -382,7 +392,7 @@ impl Expander<'_> {
         }
         let is_else = clause[0]
             .as_symbol()
-            .is_some_and(|s| self.env.lookup(s) == Some(Binding::Special(Special::Else)));
+            .is_some_and(|s| self.resolve(s) == Some(Binding::Special(Special::Else)));
         if is_else {
             if args.len() > 1 {
                 return Err(ExpandError::at(args[1].span, "`else` must be the last `cond` clause"));
@@ -400,7 +410,7 @@ impl Expander<'_> {
         let is_arrow = clause.len() == 3
             && clause[1]
                 .as_symbol()
-                .is_some_and(|s| self.env.lookup(s) == Some(Binding::Special(Special::Arrow)));
+                .is_some_and(|s| self.resolve(s) == Some(Binding::Special(Special::Arrow)));
         if is_arrow {
             let t = self.gensym(span, "cond");
             let binding = Syntax::list(span, vec![t.clone(), clause[0].clone()]);
@@ -449,7 +459,7 @@ impl Expander<'_> {
             }
             let is_else = parts[0]
                 .as_symbol()
-                .is_some_and(|s| self.env.lookup(s) == Some(Binding::Special(Special::Else)));
+                .is_some_and(|s| self.resolve(s) == Some(Binding::Special(Special::Else)));
             let test = if is_else {
                 sym(span, self.syms.else_)
             } else {
@@ -460,7 +470,7 @@ impl Expander<'_> {
             let is_arrow = parts.len() == 3
                 && parts[1]
                     .as_symbol()
-                    .is_some_and(|s| self.env.lookup(s) == Some(Binding::Special(Special::Arrow)));
+                    .is_some_and(|s| self.resolve(s) == Some(Binding::Special(Special::Arrow)));
             let mut out = vec![test];
             if is_arrow {
                 out.push(Syntax::list(span, vec![parts[2].clone(), key.clone()]));
@@ -615,6 +625,39 @@ impl Expander<'_> {
         self.expr(&form)
     }
 
+    /// `(let-syntax ((name spec) …) body…)` and `letrec-syntax`.
+    ///
+    /// The only difference is where the transformers' free identifiers are
+    /// looked up: outside the new scope for `let-syntax`, inside it — so the
+    /// macros can refer to one another — for `letrec-syntax`.
+    fn expand_let_syntax(&mut self, span: Span, args: &[Syntax], rec: bool) -> R<NodeId> {
+        let what = if rec { "letrec-syntax" } else { "let-syntax" };
+        let Some((bindings, body)) = args.split_first() else {
+            return Err(ExpandError::at(span, format!("`{what}` needs bindings and a body")));
+        };
+        let pairs = bindings
+            .as_proper_list()
+            .or(matches!(bindings.datum, Datum::Nil).then_some(&[][..]))
+            .ok_or_else(|| ExpandError::at(bindings.span, format!("`{what}` needs a list of bindings")))?
+            .to_vec();
+        let outer = self.env.depth() as u32;
+        self.env.push();
+        let scope = if rec { outer + 1 } else { outer };
+        let result = (|| {
+            for pair in &pairs {
+                let (name, spec) = match pair.as_proper_list() {
+                    Some([n, spec]) if n.as_symbol().is_some() => (n.as_symbol().expect("checked"), spec.clone()),
+                    _ => return Err(ExpandError::at(pair.span, format!("a `{what}` binding is `(name transformer)`"))),
+                };
+                let id = self.make_macro(name, &spec, scope)?;
+                self.env.bind(name, Binding::Macro(id));
+            }
+            self.body(span, body)
+        })();
+        self.env.pop();
+        result
+    }
+
     /// `(with-continuation-mark key val body)` → `(%wcm key val (lambda () body))`.
     ///
     /// Syntax rather than a procedure because `body` is in tail position with
@@ -655,7 +698,7 @@ impl Expander<'_> {
             c.as_proper_list()
                 .and_then(|p| p.first())
                 .and_then(|h| h.as_symbol())
-                .is_some_and(|s| self.env.lookup(s) == Some(Binding::Special(Special::Else)))
+                .is_some_and(|s| self.resolve(s) == Some(Binding::Special(Special::Else)))
         });
 
         // (handler-k (lambda () (raise-continuable condition)))

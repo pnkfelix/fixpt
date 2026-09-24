@@ -1,9 +1,11 @@
 //! The compile-time environment.
 //!
-//! A scope chain from symbol to [`Binding`]. Deliberately simple, because there
-//! are no macros yet — but the shape is already the one a hygienic expander
-//! needs (a chain of frames, with a distinguished `Special` binding class), so
-//! `syntax-rules` lands in M9 as an addition rather than a rewrite.
+//! A scope chain from symbol to [`Binding`]. Hygiene is layered on top rather
+//! than built in: a renamed identifier is just another symbol that can be bound
+//! here, and what it means when it is *not* bound is the expander's business
+//! (`Expander::resolve`). All this module adds for that is
+//! [`lookup_within`](Env::lookup_within) — looking a name up in the scopes that
+//! were visible where a macro was defined.
 
 use fixpt_core::{GlobalId, VarId};
 use fixpt_read::Sym;
@@ -39,6 +41,10 @@ pub enum Special {
     DelayForce,
     Guard,
     WithMark,
+    DefineSyntax,
+    LetSyntax,
+    LetrecSyntax,
+    SyntaxRules,
     Else,
     Arrow,
 }
@@ -48,6 +54,8 @@ pub enum Binding {
     Local(VarId),
     Global(GlobalId),
     Special(Special),
+    /// A macro, by index into the expander's macro table.
+    Macro(u32),
 }
 
 pub struct Env {
@@ -85,6 +93,15 @@ impl Env {
 
     pub fn lookup(&self, name: Sym) -> Option<Binding> {
         self.scopes.iter().rev().find_map(|s| s.get(&name).copied())
+    }
+
+    /// Look `name` up in the outermost `limit` scopes only — the ones that
+    /// were in view where a macro was defined.
+    pub fn lookup_within(&self, name: Sym, limit: usize) -> Option<Binding> {
+        self.scopes[..limit.min(self.scopes.len())]
+            .iter()
+            .rev()
+            .find_map(|s| s.get(&name).copied())
     }
 }
 

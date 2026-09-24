@@ -1,6 +1,41 @@
 # Macros: what to build for M9, and why
 
-Written 2026-09-24, before any of it is implemented. It surveys the design
+## Status (2026-09-24)
+
+Steps 1 and 2 of §5 are done: `define-syntax`, `let-syntax`, `letrec-syntax`
+and R7RS `syntax-rules` (`crates/fixpt-scheme/src/macros.rs`), hygienic by
+renaming (`expand.rs`, "Hygiene"). The built-in derived forms are hygienic too,
+so the bug in §0 is fixed. `crates/fixpt-scheme/tests/macros.rs` holds the §0
+cases as regressions, the classic hygiene cases, and R7RS §7.3's own
+`syntax-rules` definitions of `cond`, `case`, `and`, `or`, `let`, `let*` and
+`do`, checked against the built-ins.
+
+Not yet: ER and IR (step 3), syntax parameters (step 4).
+
+Choices made, and behaviour worth knowing:
+
+- **An alias is an uninterned symbol with its original's name.** No source
+  text can produce it, even written with `|…|` and escapes. And everything
+  that works by name — `quote`, globals, error messages, procedure names —
+  sees the original without a stripping pass.
+- **A top-level definition that a macro introduces binds the plain name.**
+  `(define-syntax d (syntax-rules () ((_ v) (define helper v))))` makes a
+  global `helper` that the program can refer to. That is Twobit's behaviour,
+  not fully hygienic; Racket would make the binding unreachable. Inside a body,
+  an introduced definition *is* hygienic.
+- **Nesting limit.** Macro uses may nest 2 000 deep; a macro whose expansion
+  always contains another use of itself stops there with an error, not a stack
+  overflow. The expander recurses on the Rust stack — about 3.5 KB a level in a
+  debug build, 0.6 KB in release — so `fixpt` runs its command on a 256 MB
+  stack. A program that embeds `Session` on a smaller thread should do the
+  same.
+- **Bodies are scanned one form at a time.** A macro use, a `begin` or a
+  `define-values` may produce definitions, each name is bound when it is
+  found, and a `define-syntax` in a body is in scope for the rest of it.
+
+---
+
+Written 2026-09-24, before any of it was implemented. It surveys the design
 space, says what is wrong today, and recommends a plan. Everything claimed about
 another system was checked against a source (cited at the end), or run in Racket
 9.3 where Racket has the feature.

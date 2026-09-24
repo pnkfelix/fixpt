@@ -55,9 +55,24 @@ fn main() {
         std::process::exit(image_run::run_entry(heap, "main", &argv));
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let code = run(&args);
+    // The reader, the expander and the IR passes recurse on the Rust stack —
+    // one level per nested form, and per nested macro use — so the work runs
+    // on a thread with room for it. The size is only reserved address space;
+    // pages are committed as they are touched. At about 3.5 KB a level in a
+    // debug build, the expander's own limit of 2 000 nested macro uses needs
+    // ~7 MB, more than the main thread is given.
+    let code = std::thread::Builder::new()
+        .name("fixpt".into())
+        .stack_size(STACK)
+        .spawn(move || run(&args))
+        .expect("the main thread can be spawned")
+        .join()
+        .unwrap_or_else(|e| std::panic::resume_unwind(e));
     std::process::exit(code);
 }
+
+/// The stack the whole command runs on.
+const STACK: usize = 256 << 20;
 
 fn run(args: &[String]) -> i32 {
     let (flags, rest) = split_flags(args);

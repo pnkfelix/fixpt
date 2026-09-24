@@ -7,11 +7,26 @@
 //! each derived form to a few lines, keeps its semantics visibly equal to its
 //! definition in the report, and means a bug fixed in `if` is fixed everywhere.
 //!
-//! There are no user macros yet (M9). Derived forms are native, which is what
-//! most Schemes do for them in practice anyway; [`Binding::Special`] is already
-//! the slot a macro binding will occupy.
+//! Derived forms are native, which is what most Schemes do for them in
+//! practice anyway. User macros are `syntax-rules` ([`crate::macros`]).
+//!
+//! # Hygiene
+//!
+//! Clinger & Rees's renaming, as in Larceny's Twobit. When syntax is
+//! *constructed* — by a derived form here, or by a macro's template — the
+//! identifiers it inserts are **aliases**: fresh symbols that no source text
+//! can spell ([`Interner::uninterned`]), each recording the identifier it
+//! stands for and the scopes in which that identifier should be looked up.
+//! [`Expander::resolve`] looks an alias up as itself first — a binding form in
+//! the same expansion may have bound it — and otherwise as its original, in
+//! the scopes where the construct that inserted it was defined.
+//!
+//! An alias has its original's *name*. So everything that works by name —
+//! `quote`, global variables, error messages, procedure names — sees the
+//! original with no stripping pass, and only resolution sees the difference.
 
 use crate::env::{Binding, Env, Special};
+use std::collections::HashMap;
 use fixpt_core::ir::{Builder, Node, NodeId, Program};
 use fixpt_core::{GlobalId, VarId};
 use fixpt_heap::Value;
@@ -38,7 +53,26 @@ impl std::fmt::Display for ExpandError {
 
 type R<T> = Result<T, ExpandError>;
 
+/// Where an alias resolves when nothing in its own expansion bound it.
+#[derive(Copy, Clone, Debug)]
+pub struct Alias {
+    /// The identifier it stands for — itself possibly an alias, when a macro's
+    /// template came from another macro's expansion.
+    pub original: Sym,
+    /// How many scopes, from the outermost, were visible where the inserting
+    /// construct was defined; or [`CORE_SCOPE`].
+    pub scope: u32,
+}
+
+/// The scope of the expander's own derived forms: a fixed table in which `if`
+/// is always the special form, whatever a program has rebound.
+pub const CORE_SCOPE: u32 = u32::MAX;
+
 /// Symbols the expander needs to *construct*, cached once.
+///
+/// Every one is an alias resolved in the core environment, which is what makes
+/// the derived forms hygienic: `cond`'s `if` is the special form even inside
+/// `(let ((if list)) …)`.
 pub struct Syms {
     pub(crate) quote: Sym,
     pub(crate) quasiquote: Sym,
@@ -79,44 +113,51 @@ pub struct Syms {
 }
 
 impl Syms {
-    fn new(i: &mut Interner) -> Syms {
+    fn new(i: &mut Interner, aliases: &mut HashMap<Sym, Alias>) -> Syms {
+        let mut core = |name: &str| {
+            let original = i.intern(name);
+            let a = i.uninterned(name);
+            aliases.insert(a, Alias { original, scope: CORE_SCOPE });
+            a
+        };
+        let i = &mut core;
         Syms {
-            quote: i.intern("quote"),
-            quasiquote: i.intern("quasiquote"),
-            unquote: i.intern("unquote"),
-            if_: i.intern("if"),
-            lambda: i.intern("lambda"),
-            begin: i.intern("begin"),
-            let_: i.intern("let"),
-            letrec_star: i.intern("letrec*"),
-            cond: i.intern("cond"),
-            else_: i.intern("else"),
-            define: i.intern("define"),
-            and: i.intern("and"),
-            or: i.intern("or"),
-            cons: i.intern("cons"),
-            append: i.intern("append"),
-            list: i.intern("list"),
-            list_to_vector: i.intern("list->vector"),
-            memv: i.intern("memv"),
-            apply: i.intern("apply"),
-            values: i.intern("values"),
-            call_with_values: i.intern("call-with-values"),
-            call_cc: i.intern("call-with-current-continuation"),
-            with_exception_handler: i.intern("with-exception-handler"),
-            raise_continuable: i.intern("raise-continuable"),
-            make_record_type: i.intern("%make-record-type"),
-            record: i.intern("%record"),
-            record_of_type: i.intern("%record-of-type?"),
-            record_ref: i.intern("%record-ref"),
-            record_set: i.intern("%record-set!"),
-            let_star: i.intern("let*"),
-            let_values: i.intern("let-values"),
-            make_promise_thunk: i.intern("%make-promise-thunk"),
-            wcm: i.intern("%wcm"),
-            make_promise_lazy: i.intern("%make-promise-lazy"),
-            list_ref: i.intern("list-ref"),
-            tmp_rest: i.intern(" values-rest"),
+            quote: i("quote"),
+            quasiquote: i("quasiquote"),
+            unquote: i("unquote"),
+            if_: i("if"),
+            lambda: i("lambda"),
+            begin: i("begin"),
+            let_: i("let"),
+            letrec_star: i("letrec*"),
+            cond: i("cond"),
+            else_: i("else"),
+            define: i("define"),
+            and: i("and"),
+            or: i("or"),
+            cons: i("cons"),
+            append: i("append"),
+            list: i("list"),
+            list_to_vector: i("list->vector"),
+            memv: i("memv"),
+            apply: i("apply"),
+            values: i("values"),
+            call_with_values: i("call-with-values"),
+            call_cc: i("call-with-current-continuation"),
+            with_exception_handler: i("with-exception-handler"),
+            raise_continuable: i("raise-continuable"),
+            make_record_type: i("%make-record-type"),
+            record: i("%record"),
+            record_of_type: i("%record-of-type?"),
+            record_ref: i("%record-ref"),
+            record_set: i("%record-set!"),
+            let_star: i("let*"),
+            let_values: i("let-values"),
+            make_promise_thunk: i("%make-promise-thunk"),
+            wcm: i("%wcm"),
+            make_promise_lazy: i("%make-promise-lazy"),
+            list_ref: i("list-ref"),
+            tmp_rest: i(" values-rest"),
         }
     }
 }
@@ -128,6 +169,9 @@ pub struct ExpanderParts {
     pub env: Env,
     pub syms: Syms,
     pub gensym_counter: u32,
+    pub aliases: HashMap<Sym, Alias>,
+    pub core: HashMap<Sym, Binding>,
+    pub macros: Vec<std::rc::Rc<crate::macros::Macro>>,
 }
 
 pub struct Expander<'a> {
@@ -139,6 +183,15 @@ pub struct Expander<'a> {
     /// capture risk is an expansion shadowing a user binding, which unique
     /// names rule out.
     pub(crate) gensym_counter: u32,
+    /// Every alias made so far. Kept across inputs: an alias defined at the top
+    /// level by one input can be referred to by the next.
+    pub(crate) aliases: HashMap<Sym, Alias>,
+    /// The core environment: the special forms, by their plain names.
+    pub(crate) core: HashMap<Sym, Binding>,
+    /// Macros, indexed by [`Binding::Macro`].
+    pub(crate) macros: Vec<std::rc::Rc<crate::macros::Macro>>,
+    /// How many macro uses are being expanded inside one another.
+    pub(crate) macro_depth: u32,
 }
 
 const SPECIAL_FORMS: &[(&str, Special)] = &[
@@ -171,14 +224,20 @@ const SPECIAL_FORMS: &[(&str, Special)] = &[
     ("make-promise", Special::Delay),
     ("guard", Special::Guard),
     ("with-continuation-mark", Special::WithMark),
+    ("define-syntax", Special::DefineSyntax),
+    ("let-syntax", Special::LetSyntax),
+    ("letrec-syntax", Special::LetrecSyntax),
+    ("syntax-rules", Special::SyntaxRules),
     ("else", Special::Else),
     ("=>", Special::Arrow),
 ];
 
 impl<'a> Expander<'a> {
     pub fn new(rt: &'a mut Runtime) -> Expander<'a> {
-        let syms = Syms::new(&mut rt.interner);
+        let mut aliases = HashMap::new();
+        let syms = Syms::new(&mut rt.interner, &mut aliases);
         let mut env = Env::new();
+        let mut core = HashMap::new();
         for (name, s) in SPECIAL_FORMS {
             // `make-promise` is both a primitive and, here, a special form: the
             // primitive is what `delay` ultimately calls, and binding the name
@@ -189,8 +248,19 @@ impl<'a> Expander<'a> {
             }
             let sym = rt.interner.intern(name);
             env.bind_top(sym, Binding::Special(*s));
+            core.insert(sym, Binding::Special(*s));
         }
-        Expander { rt, b: Builder::new(), env, syms, gensym_counter: 0 }
+        Expander {
+            rt,
+            b: Builder::new(),
+            env,
+            syms,
+            gensym_counter: 0,
+            aliases,
+            core,
+            macros: Vec::new(),
+            macro_depth: 0,
+        }
     }
 
     /// Resume expansion with state carried over from an earlier call — how a
@@ -202,13 +272,20 @@ impl<'a> Expander<'a> {
             env: parts.env,
             syms: parts.syms,
             gensym_counter: parts.gensym_counter,
+            aliases: parts.aliases,
+            core: parts.core,
+            macros: parts.macros,
+            macro_depth: 0,
         }
     }
 
     pub fn into_parts(self, body: NodeId) -> (Program, ExpanderParts) {
-        let Expander { b, env, syms, gensym_counter, .. } = self;
+        let Expander { b, env, syms, gensym_counter, aliases, core, macros, .. } = self;
         let program = b.finish(body);
-        (program, ExpanderParts { builder: Builder::new(), env, syms, gensym_counter })
+        (
+            program,
+            ExpanderParts { builder: Builder::new(), env, syms, gensym_counter, aliases, core, macros },
+        )
     }
 
     /// Expand top-level forms into the current arena and return the body node.
@@ -243,6 +320,22 @@ impl<'a> Expander<'a> {
 
     /// A top-level form. `define` here creates a global, not a local binding.
     pub(crate) fn top_level(&mut self, form: &Syntax) -> R<NodeId> {
+        // A macro use is expanded first and its result treated as a top-level
+        // form in its own right, so a macro can expand into definitions.
+        if let Some(out) = self.expand_head_macro(form)? {
+            return self.nested(|e| e.top_level(&out));
+        }
+        if let Some(items) = form.as_proper_list()
+            && let Some(head) = items.first().and_then(|h| h.as_symbol())
+            && self.resolve(head) == Some(Binding::Special(Special::DefineSyntax))
+        {
+            let (name, spec) = self.split_define_syntax(form, items)?;
+            // Visible at the top level only: a top-level macro's free
+            // identifiers mean what they mean at the top level.
+            let id = self.make_macro(name, &spec, 1)?;
+            self.env.bind_top(name, Binding::Macro(id));
+            return self.constant(form.span, Value::UNSPECIFIED);
+        }
         // `define-record-type` and `define-values` are definition *groups*:
         // they stand for several `define`s. Rewriting them before the
         // define-scan is what lets them work identically at the top level and
@@ -256,13 +349,13 @@ impl<'a> Expander<'a> {
         }
         if let Some(items) = form.as_proper_list()
             && let Some(head) = items.first().and_then(|h| h.as_symbol())
-            && self.env.lookup(head) == Some(Binding::Special(Special::Define))
+            && self.resolve(head) == Some(Binding::Special(Special::Define))
         {
             return self.top_level_define(form, items);
         }
         if let Some(items) = form.as_proper_list()
             && let Some(head) = items.first().and_then(|h| h.as_symbol())
-            && self.env.lookup(head) == Some(Binding::Special(Special::Begin))
+            && self.resolve(head) == Some(Binding::Special(Special::Begin))
         {
             // An annotated expression is *not* a sequence, so it must be
             // recognised before the splice — otherwise a top-level
@@ -286,6 +379,19 @@ impl<'a> Expander<'a> {
             return Ok(self.seq(form.span, nodes));
         }
         self.expr(form)
+    }
+
+    /// `(define-syntax name spec)`.
+    pub(crate) fn split_define_syntax(&self, form: &Syntax, items: &[Syntax]) -> R<(Sym, Syntax)> {
+        match items {
+            [_, name, spec] => {
+                let name = name
+                    .as_symbol()
+                    .ok_or_else(|| ExpandError::at(name.span, "`define-syntax` needs a name"))?;
+                Ok((name, spec.clone()))
+            }
+            _ => Err(ExpandError::at(form.span, "`define-syntax` takes a name and a transformer")),
+        }
     }
 
     fn top_level_define(&mut self, form: &Syntax, items: &[Syntax]) -> R<NodeId> {
@@ -366,10 +472,15 @@ impl<'a> Expander<'a> {
         if items.is_empty() {
             return Err(ExpandError::at(s.span, "`()` is not an expression"));
         }
-        if let Some(head) = items[0].as_symbol()
-            && let Some(Binding::Special(sp)) = self.env.lookup(head)
-        {
-            return self.special(s, sp, items, name);
+        if let Some(head) = items[0].as_symbol() {
+            match self.resolve(head) {
+                Some(Binding::Special(sp)) => return self.special(s, sp, items, name),
+                Some(Binding::Macro(id)) => {
+                    let out = self.expand_macro(id, s)?;
+                    return self.nested(|e| e.named_expr(&out, name));
+                }
+                _ => {}
+            }
         }
         let rator = self.expr(&items[0])?;
         let mut rands = Vec::with_capacity(items.len() - 1);
@@ -380,10 +491,10 @@ impl<'a> Expander<'a> {
     }
 
     pub(crate) fn variable(&mut self, span: Span, sym: Sym) -> R<NodeId> {
-        match self.env.lookup(sym) {
+        match self.resolve(sym) {
             Some(Binding::Local(v)) => Ok(self.b.node(span, Node::Ref(v))),
             Some(Binding::Global(g)) => Ok(self.b.node(span, Node::GlobalRef(g))),
-            Some(Binding::Special(_)) => {
+            Some(Binding::Special(_) | Binding::Macro(_)) => {
                 let name = self.rt.interner.name(sym).to_string();
                 Err(ExpandError::at(span, format!("`{name}` is syntax, not a variable")))
             }
@@ -395,6 +506,35 @@ impl<'a> Expander<'a> {
                 Ok(self.b.node(span, Node::GlobalRef(g)))
             }
         }
+    }
+
+    /// What an identifier means here. See the module docs on hygiene.
+    pub(crate) fn resolve(&self, sym: Sym) -> Option<Binding> {
+        self.resolve_within(sym, usize::MAX)
+    }
+
+    /// What an identifier means in the outermost `limit` scopes: how a macro
+    /// looks up its literals in the environment it was defined in.
+    pub(crate) fn resolve_within(&self, mut sym: Sym, mut limit: usize) -> Option<Binding> {
+        loop {
+            if let Some(b) = self.env.lookup_within(sym, limit) {
+                return Some(b);
+            }
+            let a = *self.aliases.get(&sym)?;
+            if a.scope == CORE_SCOPE {
+                return self.core.get(&a.original).copied();
+            }
+            sym = a.original;
+            limit = a.scope as usize;
+        }
+    }
+
+    /// A fresh alias for `original`, resolving in the outermost `scope` scopes.
+    pub(crate) fn alias(&mut self, original: Sym, scope: u32) -> Sym {
+        let name = self.rt.interner.name(original).to_string();
+        let a = self.rt.interner.uninterned(&name);
+        self.aliases.insert(a, Alias { original, scope });
+        a
     }
 
     pub(crate) fn global(&mut self, sym: Sym) -> GlobalId {
@@ -425,68 +565,106 @@ impl<'a> Expander<'a> {
     // --------------------------------------------------------------- bodies
     /// A `<body>`: internal definitions, then expressions. R7RS says the
     /// definitions are `letrec*`-scoped, so that is literally what this builds.
+    ///
+    /// The leading forms are scanned one at a time, because whether a form is a
+    /// definition can depend on expanding it: a macro use may produce a
+    /// `define`, a `begin` of definitions, or another macro use. Each name is
+    /// bound as it is found, and a `define-syntax` is in scope for the rest of
+    /// the body. The first form that is none of these ends the definitions.
     pub(crate) fn body(&mut self, span: Span, forms: &[Syntax]) -> R<NodeId> {
         if forms.is_empty() {
             return Err(ExpandError::at(span, "an empty body has no value"));
         }
-        // Expand any definition groups first, so the scan below sees only
-        // plain `define`s.
-        let mut flat: Vec<Syntax> = Vec::with_capacity(forms.len());
-        for form in forms {
-            match self.definition_group(form)? {
-                Some(group) => flat.extend(group),
-                None => flat.push(form.clone()),
-            }
-        }
-        let forms: &[Syntax] = &flat;
+        self.env.push();
+        let result = self.body_in_scope(span, forms);
+        self.env.pop();
+        result
+    }
 
-        let mut defs: Vec<(Sym, Syntax)> = Vec::new();
-        let mut rest_start = 0;
-        for (i, form) in forms.iter().enumerate() {
-            let is_define = form
+    fn body_in_scope(&mut self, span: Span, forms: &[Syntax]) -> R<NodeId> {
+        let mut queue: std::collections::VecDeque<Syntax> = forms.iter().cloned().collect();
+        let mut defs: Vec<(Sym, Syntax, VarId)> = Vec::new();
+        let mut exprs: Vec<Syntax> = Vec::new();
+        let mut expansions = 0u32;
+        while let Some(form) = queue.pop_front() {
+            if let Some(out) = self.expand_head_macro(&form)? {
+                expansions += 1;
+                if expansions > crate::macros::MAX_EXPANSION_DEPTH {
+                    return Err(ExpandError::at(form.span, "macro expansion in a body does not terminate"));
+                }
+                queue.push_front(out);
+                continue;
+            }
+            if let Some(group) = self.definition_group(&form)? {
+                for f in group.into_iter().rev() {
+                    queue.push_front(f);
+                }
+                continue;
+            }
+            let head = form
                 .as_proper_list()
                 .and_then(|it| it.first())
                 .and_then(|h| h.as_symbol())
-                .is_some_and(|h| self.env.lookup(h) == Some(Binding::Special(Special::Define)));
-            if !is_define {
-                rest_start = i;
-                break;
+                .and_then(|h| self.resolve(h));
+            match head {
+                Some(Binding::Special(Special::Define)) => {
+                    let items = form.as_proper_list().expect("checked above");
+                    let (name, value) = self.split_define(&form, items)?;
+                    let v = self.b.var(name, span);
+                    self.env.bind(name, Binding::Local(v));
+                    defs.push((name, value, v));
+                }
+                Some(Binding::Special(Special::DefineSyntax)) => {
+                    let items = form.as_proper_list().expect("checked above");
+                    let (name, spec) = self.split_define_syntax(&form, items)?;
+                    // In scope in its own definition, like `letrec-syntax`.
+                    let id = self.make_macro(name, &spec, self.env.depth() as u32)?;
+                    self.env.bind(name, Binding::Macro(id));
+                }
+                // `(begin def …)` in a body splices its definitions — unless it
+                // is an annotated expression, which is one form, not a group.
+                Some(Binding::Special(Special::Begin))
+                    if {
+                        let args = &form.as_proper_list().expect("checked above")[1..];
+                        !(args.len() == 2 && self.read_note(args).is_some())
+                    } =>
+                {
+                    let items = form.as_proper_list().expect("checked above").to_vec();
+                    for f in items[1..].iter().rev() {
+                        queue.push_front(f.clone());
+                    }
+                }
+                _ => {
+                    exprs.push(form);
+                    exprs.extend(queue.drain(..));
+                    break;
+                }
             }
-            let items = form.as_proper_list().expect("checked above");
-            defs.push(self.split_define(form, items)?);
-            rest_start = i + 1;
+            expansions = 0;
         }
         if defs.is_empty() {
-            let mut nodes = Vec::with_capacity(forms.len());
-            for f in forms {
+            if exprs.is_empty() {
+                return Err(ExpandError::at(span, "a body of only syntax definitions has no value"));
+            }
+            let mut nodes = Vec::with_capacity(exprs.len());
+            for f in &exprs {
                 nodes.push(self.expr(f)?);
             }
             return Ok(self.seq(span, nodes));
         }
-
-        self.env.push();
-        let vars: Vec<VarId> = defs
-            .iter()
-            .map(|(name, _)| {
-                let v = self.b.var(*name, span);
-                self.env.bind(*name, Binding::Local(v));
-                v
-            })
-            .collect();
         let mut inits = Vec::with_capacity(defs.len());
-        for (i, (name, value)) in defs.iter().enumerate() {
-            let _ = i;
+        for (name, value, _) in &defs {
             inits.push(self.named_expr(value, Some(*name))?);
         }
         let mut nodes = Vec::new();
-        for f in &forms[rest_start..] {
+        for f in &exprs {
             nodes.push(self.expr(f)?);
         }
         if nodes.is_empty() {
             return Err(ExpandError::at(span, "a body of only definitions has no value"));
         }
         let inner = self.seq(span, nodes);
-        self.env.pop();
+        let vars: Vec<VarId> = defs.iter().map(|(_, _, v)| *v).collect();
         Ok(self.b.node(
             span,
             Node::Fix {
@@ -578,7 +756,7 @@ impl Expander<'_> {
                     && let Some(head) = items[0].as_symbol()
                 {
                     {
-                        let b = self.env.lookup(head);
+                        let b = self.resolve(head);
                         if b == Some(Binding::Special(Special::Unquote)) {
                             if level == 1 {
                                 return Ok(items[1].clone());
@@ -601,7 +779,7 @@ impl Expander<'_> {
                     let splice = item.as_proper_list().and_then(|p| {
                         if p.len() == 2
                             && p[0].as_symbol().is_some_and(|h| {
-                                self.env.lookup(h)
+                                self.resolve(h)
                                     == Some(Binding::Special(Special::UnquoteSplicing))
                             })
                         {
@@ -644,7 +822,7 @@ impl Expander<'_> {
     pub(crate) fn definition_group(&mut self, form_syn: &Syntax) -> R<Option<Vec<Syntax>>> {
         let Some(items) = form_syn.as_proper_list() else { return Ok(None) };
         let Some(head) = items.first().and_then(|h| h.as_symbol()) else { return Ok(None) };
-        match self.env.lookup(head) {
+        match self.resolve(head) {
             Some(Binding::Special(Special::DefineRecordType)) => {
                 Ok(Some(self.record_type_defines(form_syn.span, &items[1..])?))
             }

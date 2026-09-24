@@ -26,6 +26,7 @@ from the references.
 | **M5** heap dumping and single-binary builds | **done: image beside the runtime, or one standalone executable** |
 | **M6** FX-87 front end | **done: 161/161 parse, 160/161 types and effects, 123/123 values** |
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
+| **M9** hygienic macros | **`syntax-rules` done**, with `define-syntax`, `let-syntax`, `letrec-syntax`; low-level ER/IR next — [`docs/macros.md`](docs/macros.md) |
 
 All three deliverables of the brief are done. What follows is
 [`TODO.md`](TODO.md).
