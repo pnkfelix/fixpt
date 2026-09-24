@@ -172,6 +172,7 @@ pub struct ExpanderParts {
     pub aliases: HashMap<Sym, Alias>,
     pub core: HashMap<Sym, Binding>,
     pub macros: Vec<crate::macros::MacroDef>,
+    pub params: std::collections::HashSet<u32>,
 }
 
 pub struct Expander<'a> {
@@ -190,6 +191,11 @@ pub struct Expander<'a> {
     pub(crate) core: HashMap<Sym, Binding>,
     /// Macros, indexed by [`Binding::Macro`].
     pub(crate) macros: Vec<crate::macros::MacroDef>,
+    /// Macros defined with `define-syntax-parameter`.
+    pub(crate) params: std::collections::HashSet<u32>,
+    /// While a `syntax-parameterize` body is being expanded: which transformer
+    /// a parameter currently stands for.
+    pub(crate) param_overrides: HashMap<u32, u32>,
     /// The engine, for running procedural macros during expansion. Only a
     /// session has one.
     pub(crate) host: Option<crate::procmacro::Host<'a>>,
@@ -228,6 +234,10 @@ const SPECIAL_FORMS: &[(&str, Special)] = &[
     ("guard", Special::Guard),
     ("with-continuation-mark", Special::WithMark),
     ("define-syntax", Special::DefineSyntax),
+    ("define-syntax-parameter", Special::DefineSyntaxParameter),
+    ("syntax-parameterize", Special::SyntaxParameterize),
+    ("identifier-syntax", Special::IdentifierSyntax),
+    ("syntax-error", Special::SyntaxError),
     ("begin-for-syntax", Special::BeginForSyntax),
     ("let-syntax", Special::LetSyntax),
     ("letrec-syntax", Special::LetrecSyntax),
@@ -263,6 +273,8 @@ impl<'a> Expander<'a> {
             aliases,
             core,
             macros: Vec::new(),
+            params: Default::default(),
+            param_overrides: HashMap::new(),
             macro_depth: 0,
             host: None,
         }
@@ -280,6 +292,8 @@ impl<'a> Expander<'a> {
             aliases: parts.aliases,
             core: parts.core,
             macros: parts.macros,
+            params: parts.params,
+            param_overrides: HashMap::new(),
             macro_depth: 0,
             host: None,
         }
@@ -292,11 +306,11 @@ impl<'a> Expander<'a> {
     }
 
     pub fn into_parts(self, body: NodeId) -> (Program, ExpanderParts) {
-        let Expander { b, env, syms, gensym_counter, aliases, core, macros, .. } = self;
+        let Expander { b, env, syms, gensym_counter, aliases, core, macros, params, .. } = self;
         let program = b.finish(body);
         (
             program,
-            ExpanderParts { builder: Builder::new(), env, syms, gensym_counter, aliases, core, macros },
+            ExpanderParts { builder: Builder::new(), env, syms, gensym_counter, aliases, core, macros, params },
         )
     }
 
@@ -350,12 +364,16 @@ impl<'a> Expander<'a> {
         }
         if let Some(items) = form.as_proper_list()
             && let Some(head) = items.first().and_then(|h| h.as_symbol())
-            && self.resolve(head) == Some(Binding::Special(Special::DefineSyntax))
+            && let Some(Binding::Special(sp @ (Special::DefineSyntax | Special::DefineSyntaxParameter))) =
+                self.resolve(head)
         {
             let (name, spec) = self.split_define_syntax(form, items)?;
             // Visible at the top level only: a top-level macro's free
             // identifiers mean what they mean at the top level.
             let id = self.make_macro(name, &spec, 1)?;
+            if sp == Special::DefineSyntaxParameter {
+                self.params.insert(id);
+            }
             self.env.bind_top(name, Binding::Macro(id));
             return self.constant(form.span, Value::UNSPECIFIED);
         }
@@ -481,7 +499,16 @@ impl<'a> Expander<'a> {
                 let v = self.datum_to_value(s);
                 self.constant(s.span, v)
             }
-            Datum::Symbol(sym) => self.variable(s.span, *sym),
+            Datum::Symbol(sym) => {
+                // A macro keyword on its own is a use only of an identifier
+                // macro — one with a rule for a bare identifier.
+                if let Some(Binding::Macro(id)) = self.resolve(*sym)
+                    && let Some(out) = self.expand_identifier_macro(id, s)?
+                {
+                    return self.nested(|e| e.named_expr(&out, name));
+                }
+                self.variable(s.span, *sym)
+            }
             Datum::List { items, tail } => {
                 if tail.is_some() {
                     return Err(ExpandError::at(s.span, "a dotted list is not an expression"));
@@ -637,11 +664,14 @@ impl<'a> Expander<'a> {
                     self.env.bind(name, Binding::Local(v));
                     defs.push((name, value, v));
                 }
-                Some(Binding::Special(Special::DefineSyntax)) => {
+                Some(Binding::Special(sp @ (Special::DefineSyntax | Special::DefineSyntaxParameter))) => {
                     let items = form.as_proper_list().expect("checked above");
                     let (name, spec) = self.split_define_syntax(&form, items)?;
                     // In scope in its own definition, like `letrec-syntax`.
                     let id = self.make_macro(name, &spec, self.env.depth() as u32)?;
+                    if sp == Special::DefineSyntaxParameter {
+                        self.params.insert(id);
+                    }
                     self.env.bind(name, Binding::Macro(id));
                 }
                 // `(begin def …)` in a body splices its definitions — unless it

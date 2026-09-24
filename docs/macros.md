@@ -12,8 +12,9 @@ cases as regressions, the classic hygiene cases, and R7RS §7.3's own
 
 Step 3 is done too: SRFI 211's `er-macro-transformer` and
 `ir-macro-transformer` (`crates/fixpt-scheme/src/procmacro.rs`), with
-`begin-for-syntax` for helpers that transformers need. Not yet: syntax
-parameters (step 4).
+`begin-for-syntax` for helpers that transformers need. And step 4: SRFI 139's
+`define-syntax-parameter` and `syntax-parameterize`, with `identifier-syntax`
+and R7RS's `syntax-error`. The whole plan of §5 is implemented.
 
 Choices made, and behaviour worth knowing:
 
@@ -52,6 +53,17 @@ Choices made, and behaviour worth knowing:
   procedural macro's input keeps its hygiene when another macro produced it,
   which is the case the R7RS-large draft's ER and IR get wrong. IR
   authors who want plain names use `strip-syntax`, as in CHICKEN.
+- **A syntax parameter is overridden by binding, not by name.** Inside a
+  `syntax-parameterize` body, every identifier that *resolves to* the
+  parameter uses the new transformer, whether it is a template's alias or the
+  user's plain `it`. A user's own local binding of the name is lexical and
+  wins. The override is dynamic over the body's expansion, as SRFI 139
+  specifies, so a macro used in the body whose template mentions the
+  parameter sees it too.
+- **Identifier macros are an extension.** A `syntax-rules` rule whose pattern
+  is a bare identifier matches a use of the keyword on its own.
+  `identifier-syntax` (R6RS, and the R7RS-large draft) is built on it; it is
+  what lets `it` stand for a hidden variable.
 - **Bodies are scanned one form at a time.** A macro use, a `begin` or a
   `define-values` may produce definitions, each name is bound when it is
   found, and a `define-syntax` in a body is in scope for the rest of it.

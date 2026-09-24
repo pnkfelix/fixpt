@@ -65,6 +65,15 @@ impl Expander<'_> {
     /// Turn a transformer spec into a macro, defined in the outermost `scope`
     /// scopes.
     pub(crate) fn make_macro(&mut self, name: Sym, spec: &Syntax, scope: u32) -> R<u32> {
+        if let Some(items) = spec.as_proper_list()
+            && items.first().and_then(|h| h.as_symbol()).is_some_and(|h| {
+                self.resolve(h) == Some(Binding::Special(Special::IdentifierSyntax))
+            })
+        {
+            let m = self.identifier_syntax(name, spec.span, items, scope)?;
+            self.macros.push(MacroDef::Rules(Rc::new(m)));
+            return Ok(self.macros.len() as u32 - 1);
+        }
         let rules = spec.as_proper_list().filter(|it| {
             it.first()
                 .and_then(|h| h.as_symbol())
@@ -105,10 +114,12 @@ impl Expander<'_> {
                 ExpandError::at(rule.span, "a `syntax-rules` rule is `(pattern template)`")
             })?;
             let pattern = &parts[0];
-            if !matches!(pattern.datum, Datum::List { .. }) {
+            // A bare identifier is an extension: the rule for a use of the
+            // keyword on its own, which makes the macro an identifier macro.
+            if !matches!(pattern.datum, Datum::List { .. } | Datum::Symbol(_)) {
                 return Err(ExpandError::at(
                     pattern.span,
-                    "a `syntax-rules` pattern must be a list starting with the keyword",
+                    "a `syntax-rules` pattern must be a list starting with the keyword, or an identifier",
                 ));
             }
             self.check_pattern(&m, pattern, &mut Vec::new())?;
@@ -162,6 +173,34 @@ impl Expander<'_> {
         }
     }
 
+    /// `(identifier-syntax template)`: a macro whose every use — `k` alone, or
+    /// `(k arg …)` — stands for `template`, applied to the arguments if any.
+    /// As R6RS and the R7RS-large draft define it; `syntax-parameterize` is
+    /// where it earns its keep, making `it` stand for a hidden variable.
+    fn identifier_syntax(&mut self, name: Sym, span: Span, items: &[Syntax], scope: u32) -> R<Macro> {
+        let [_, template] = items else {
+            return Err(ExpandError::at(span, "`identifier-syntax` takes one template"));
+        };
+        let under = Syntax::symbol(span, self.rt.interner.intern("_"));
+        // A pattern variable the template cannot mention.
+        let args = Syntax::symbol(span, self.rt.interner.uninterned("args"));
+        let applied = Syntax::new(
+            span,
+            Datum::List { items: vec![under.clone()], tail: Some(Box::new(args.clone())) },
+        );
+        let with_args = Syntax::new(
+            span,
+            Datum::List { items: vec![template.clone()], tail: Some(Box::new(args)) },
+        );
+        Ok(Macro {
+            name,
+            ellipsis: None,
+            literals: Vec::new(),
+            rules: vec![(applied, with_args), (under, template.clone())],
+            scope,
+        })
+    }
+
     fn is_ellipsis(&self, m: &Macro, s: Sym) -> bool {
         match m.ellipsis {
             Some(e) => s == e,
@@ -187,7 +226,25 @@ impl Expander<'_> {
         }
     }
 
+    /// The transformer a macro keyword currently stands for: itself, unless it
+    /// is a syntax parameter inside a `syntax-parameterize` of it.
+    fn effective(&self, id: u32) -> u32 {
+        self.param_overrides.get(&id).copied().unwrap_or(id)
+    }
+
+    /// A keyword used on its own, as an expression. `None` unless the macro
+    /// has a rule for that — an identifier macro.
+    pub(crate) fn expand_identifier_macro(&mut self, id: u32, form: &Syntax) -> R<Option<Syntax>> {
+        let id = self.effective(id);
+        let MacroDef::Rules(m) = &self.macros[id as usize] else { return Ok(None) };
+        if !m.rules.iter().any(|(p, _)| matches!(p.datum, Datum::Symbol(_))) {
+            return Ok(None);
+        }
+        self.expand_macro(id, form).map(Some)
+    }
+
     pub(crate) fn expand_macro(&mut self, id: u32, form: &Syntax) -> R<Syntax> {
+        let id = self.effective(id);
         let def = self.macros[id as usize].clone();
         let name = match &def {
             MacroDef::Rules(m) => m.name,
@@ -237,6 +294,17 @@ impl Expander<'_> {
     // -------------------------------------------------------------- matching
     /// The keyword position is not matched: R7RS ignores it.
     fn match_top(&self, m: &Macro, pattern: &Syntax, form: &Syntax, out: &mut HashMap<Sym, M>) -> bool {
+        // An identifier pattern matches the keyword used on its own, and
+        // nothing else.
+        if let Datum::Symbol(p) = pattern.datum {
+            if !matches!(form.datum, Datum::Symbol(_)) {
+                return false;
+            }
+            if !self.is_underscore(m, p) {
+                out.insert(p, M::One(form.clone()));
+            }
+            return true;
+        }
         let Datum::List { items: pitems, tail: ptail } = &pattern.datum else { return false };
         let Some((pi, it)) = list_parts(form) else { return false };
         if pitems.is_empty() || pi.is_empty() {

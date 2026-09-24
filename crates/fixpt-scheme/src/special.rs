@@ -72,7 +72,7 @@ impl Expander<'_> {
                 let value = self.expr(&args[1])?;
                 match self.resolve(target) {
                     Some(Binding::Local(v)) => Ok(self.b.node(span, Node::Set(v, value))),
-                    Some(Binding::Special(_)) => {
+                    Some(Binding::Special(_) | Binding::Macro(_)) => {
                         Err(ExpandError::at(args[0].span, "cannot `set!` a syntactic keyword"))
                     }
                     _ => {
@@ -125,6 +125,31 @@ impl Expander<'_> {
                 span,
                 "`define-syntax` is only allowed at the top level or at the start of a body",
             )),
+            Special::DefineSyntaxParameter => Err(ExpandError::at(
+                span,
+                "`define-syntax-parameter` is only allowed at the top level or at the start of a body",
+            )),
+            Special::SyntaxParameterize => self.expand_syntax_parameterize(span, args),
+            Special::IdentifierSyntax => Err(ExpandError::at(
+                span,
+                "`identifier-syntax` is only valid as the transformer of a macro definition",
+            )),
+            Special::SyntaxError => {
+                // R7RS 4.3.3: report at expansion time, usually from a
+                // template, with the message and the offending forms.
+                let msg = match args.first().map(|a| &a.datum) {
+                    Some(Datum::Str(m)) => m.clone(),
+                    _ => return Err(ExpandError::at(span, "`syntax-error` needs a message string")),
+                };
+                let rest: Vec<String> = args[1..]
+                    .iter()
+                    .map(|a| fixpt_read::write_syntax(a, &self.rt.interner))
+                    .collect();
+                Err(ExpandError::at(
+                    span,
+                    if rest.is_empty() { msg } else { format!("{msg}: {}", rest.join(" ")) },
+                ))
+            }
             Special::BeginForSyntax => Err(ExpandError::at(
                 span,
                 "`begin-for-syntax` is only allowed at the top level",
@@ -659,6 +684,52 @@ impl Expander<'_> {
             self.body(span, body)
         })();
         self.env.pop();
+        result
+    }
+
+    /// `(syntax-parameterize ((keyword transformer) …) body…)` — SRFI 139.
+    ///
+    /// For the expansion of the body, every identifier that *resolves to* one
+    /// of these parameters stands for the new transformer instead: a template's
+    /// renamed `it` and a user's plain `it` alike, since both mean the
+    /// parameter. That is the difference from capture — nothing is bound by
+    /// name, so nothing can be captured by accident. It is dynamic over
+    /// expansion, as SRFI 139 specifies: a macro used in the body whose
+    /// template mentions the parameter sees the new meaning too.
+    fn expand_syntax_parameterize(&mut self, span: Span, args: &[Syntax]) -> R<NodeId> {
+        let Some((bindings, body)) = args.split_first() else {
+            return Err(ExpandError::at(span, "`syntax-parameterize` needs bindings and a body"));
+        };
+        let pairs = bindings
+            .as_proper_list()
+            .or(matches!(bindings.datum, Datum::Nil).then_some(&[][..]))
+            .ok_or_else(|| ExpandError::at(bindings.span, "`syntax-parameterize` needs a list of bindings"))?
+            .to_vec();
+        let mut installed = Vec::new();
+        let result = (|| {
+            for pair in &pairs {
+                let (name, spec) = match pair.as_proper_list() {
+                    Some([n, spec]) if n.as_symbol().is_some() => (n.as_symbol().expect("checked"), spec.clone()),
+                    _ => return Err(ExpandError::at(pair.span, "a `syntax-parameterize` binding is `(keyword transformer)`")),
+                };
+                let param = match self.resolve(name) {
+                    Some(Binding::Macro(id)) if self.params.contains(&id) => id,
+                    _ => {
+                        let n = self.rt.interner.name(name).to_string();
+                        return Err(ExpandError::at(pair.span, format!("`{n}` is not a syntax parameter")));
+                    }
+                };
+                let id = self.make_macro(name, &spec, self.env.depth() as u32)?;
+                installed.push((param, self.param_overrides.insert(param, id)));
+            }
+            self.body(span, body)
+        })();
+        for (param, previous) in installed.into_iter().rev() {
+            match previous {
+                Some(p) => self.param_overrides.insert(param, p),
+                None => self.param_overrides.remove(&param),
+            };
+        }
         result
     }
 

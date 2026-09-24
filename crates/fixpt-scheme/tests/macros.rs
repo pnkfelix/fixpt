@@ -502,3 +502,86 @@ fn procedural_macros_persist_across_inputs() {
     };
     std::thread::Builder::new().stack_size(STACK).spawn(big).expect("spawns").join().expect("passes");
 }
+
+// ------------------------------------------------ syntax parameters (SRFI 139)
+
+/// SRFI 139's own example.
+#[test]
+fn srfi_139_abort_from_forever() {
+    assert_eq!(
+        both(
+            "(define-syntax-parameter abort
+               (syntax-rules () ((_ . _) (syntax-error \"abort used outside of a loop\"))))
+             (define-syntax forever
+               (syntax-rules ()
+                 ((forever body1 body2 ...)
+                  (call-with-current-continuation
+                   (lambda (escape)
+                     (syntax-parameterize
+                         ((abort (syntax-rules () ((abort value (... ...)) (escape value (... ...))))))
+                       (let loop () body1 body2 ... (loop))))))))
+             (define i 0)
+             (forever (set! i (+ i 1)) (if (= i 5) (abort i)))"
+        ),
+        "5"
+    );
+    let out = both(
+        "(define-syntax-parameter abort
+           (syntax-rules () ((_ . _) (syntax-error \"abort used outside of a loop\"))))
+         (abort 1)",
+    );
+    assert!(out.contains("abort used outside of a loop"), "{out}");
+}
+
+const PARAM_AIF: &str = "
+  (define-syntax-parameter it
+    (syntax-rules () (_ (syntax-error \"`it` is only meaningful inside aif\"))))
+  (define-syntax aif
+    (syntax-rules ()
+      ((_ test then else)
+       (let ((t test))
+         (syntax-parameterize ((it (identifier-syntax t)))
+           (if t then else))))))";
+
+/// The anaphoric `if` with nothing captured: `it` is defined once, and `aif`
+/// rebinds what it means for the extent of its body.
+#[test]
+fn a_syntax_parameter_gives_aif_without_capture() {
+    assert_eq!(both(&format!("{PARAM_AIF} (aif (assq 'b '((a 1) (b 2))) (cadr it) 'no)")), "2");
+    assert_eq!(both(&format!("{PARAM_AIF} (aif 1 (aif 2 (list it) 'no) 'no)")), "(2)");
+    // A binding the user writes is lexical, and wins.
+    assert_eq!(both(&format!("{PARAM_AIF} (aif 1 (let ((it 'mine)) it) 'no)")), "mine");
+    // `(it x)` applies what `it` stands for.
+    assert_eq!(both(&format!("{PARAM_AIF} (aif car (it '(9 8)) 'no)")), "9");
+    let out = both(&format!("{PARAM_AIF} it"));
+    assert!(out.contains("only meaningful inside aif"), "{out}");
+}
+
+/// SRFI 139 parameters are dynamic over expansion: a macro whose template
+/// mentions the parameter sees the rebinding when used inside the body. That
+/// is exactly what name capture could not do safely.
+#[test]
+fn a_syntax_parameter_reaches_macros_used_in_the_body() {
+    assert_eq!(
+        both(&format!("{PARAM_AIF} (define-syntax show-it (syntax-rules () ((_) it))) (aif 42 (show-it) 'no)")),
+        "42"
+    );
+}
+
+#[test]
+fn identifier_syntax_on_its_own() {
+    assert_eq!(
+        both("(define hidden 7) (define-syntax seven (identifier-syntax hidden)) (list seven (+ seven 1))"),
+        "(7 8)"
+    );
+}
+
+#[test]
+fn syntax_parameter_errors() {
+    let out = both("(syntax-parameterize ((car (syntax-rules () ((_) 1)))) (car))");
+    assert!(out.contains("`car` is not a syntax parameter"), "{out}");
+    let out = both("(define-syntax m (syntax-rules () ((_) 1))) (set! m 5)");
+    assert!(out.contains("cannot `set!` a syntactic keyword"), "{out}");
+    let out = both("(syntax-error \"custom failure\" (a b))");
+    assert!(out.contains("custom failure: (a b)"), "{out}");
+}

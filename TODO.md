@@ -339,18 +339,12 @@ continuations while *reading* a form; this saves one while *running* it.
 
 ---
 
-## 10. Syntax parameters
+## 10. Syntax parameters — done (2026-09-24)
 
-**What.** SRFI 139's `define-syntax-parameter` and `syntax-parameterize`. They
-are the way to write an anaphoric macro with no capture at all: `it` is defined
-once, and `aif` rebinds what it means for the extent of its body. Racket
-prefers them to both `datum->syntax` and `inject` (`docs/macros.md` §2 shows
-all three).
+SRFI 139's `define-syntax-parameter` and `syntax-parameterize`, with
+`identifier-syntax` and R7RS `syntax-error`. See `docs/macros.md`. SRFI 139's
+own `forever`/`abort` example and a capture-free `aif` are in
+`crates/fixpt-scheme/tests/macros.rs`.
 
-**Why not yet.** It is the last step of the M9 plan and the least urgent: ER and
-IR already cover deliberate capture.
-
-**Where to start.** A syntax parameter is a keyword whose meaning
-`syntax-parameterize` changes *by binding*, not by name. In the alias design
-that is a new `Binding` that resolves through a per-expansion override table,
-consulted by `Expander::resolve` before the scope chain.
+Not done, and not needed yet: `identifier-syntax`'s two-clause form with a
+`set!` rule (R6RS), which would let `(set! it v)` mean something.
