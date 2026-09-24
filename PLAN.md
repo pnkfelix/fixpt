@@ -433,7 +433,7 @@ you at each boundary rather than disappear for the whole thing.
 | M6 ✅ | `fixpt-fx87` | 161 cases: **161/161 parse, 160/161 type and effect, 123/123 value** of those the archive's evaluating path can answer. Driven from the CLI as `fixpt --dialect fx87 repl\|run\|eval` |
 | M7 ✅ | `fixpt-fx91` | **182/182 on all three levels** — parse, type and effect, and evaluated value. Driven from the CLI: `fixpt --dialect fx91 repl\|run\|eval`, presenting results in the 1991 top level's `:`/`!`/`=` notation |
 | M8 🔶 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks (`cargo run --release --example engines` is the start). Collector workloads from Larceny's `test/GC` already landed in `tests/gc_workloads.rs` |
-| M9 | *(deferred)* hygienic `syntax-rules` | derived forms re-expressible as library macros |
+| M9 | *(next)* hygienic `syntax-rules` | derived forms re-expressible as library macros. Design survey and plan: [`docs/macros.md`](docs/macros.md) — renaming with aliases (Clinger & Rees), then `syntax-rules`, then ER/IR |
 | M10 | *(future)* native code generation | the bytecode/heap-image design is kept amenable to it; not scheduled |
 
 Rough total ~26k lines of Rust. M6 and M7 are each comparable in size to
