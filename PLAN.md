@@ -249,6 +249,14 @@ restores it. Full re-entrant continuations, `dynamic-wind`, `values`. Each
 engine restores only its own continuations; that's the sole documented
 difference and it is not observable from Scheme.
 
+Beside the frames, both engines keep a **mark stack** (Flatt & Dybvig's
+attachments, `fixpt-runtime/src/cmarks.rs`): continuation marks, tagged prompts
+and `dynamic-wind` extents, each recorded as the frame depth and stack height it
+belongs to. That is what supports SRFI 226's composable continuations and
+aborts, and it keeps exception handlers out of globals. The representation is
+shared, so the two engines agree on it by construction. Added 2026-09-24,
+after M7; `TODO.md` §9 has the details and what is still approximate.
+
 Every conformance test runs under **both** engines and the results must agree —
 differential testing is the main defence against engine-specific bugs.
 
@@ -259,6 +267,8 @@ defines; `set!`; `quote`/`quasiquote`; `let`/`let*`/`letrec`/`letrec*`/named
 `let`; `do`; `cond` (incl. `=>`); `case`; `and`/`or`/`when`/`unless`/`begin`;
 `delay`/`force`/`make-promise`;
 `define-record-type`; `call/cc`; `dynamic-wind`; `values`/`call-with-values`;
+SRFI 226's continuation marks, tagged prompts, `abort-current-continuation` and
+`call-with-composable-continuation`;
 `apply`; `eval` + environment specifiers; `raise`/`with-exception-handler`/
 `guard`/`error` + error-object accessors; textual string and file ports;
 `read`/`write`/`display`; the list/char/string/symbol/vector/bytevector
