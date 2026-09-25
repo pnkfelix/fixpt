@@ -153,6 +153,7 @@ pub enum Exp {
     Int(i64),
     Bool(bool),
     Str(String),
+    Char(char),
     Unit,
     /// A parameter's type may be left out when the `lambda` is checked
     /// against a type that supplies it.

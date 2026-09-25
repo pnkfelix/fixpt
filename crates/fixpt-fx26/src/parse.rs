@@ -12,11 +12,13 @@ use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
 
 /// What a description name means where it is used.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum DScope {
     Var(DVar, Kind),
     /// A name bound by `dletrec`: a type.
     Rec(TyId),
+    /// A name bound by `define-effect`: an effect.
+    Eff(crate::ast::Effect),
 }
 
 impl Checker {
@@ -25,7 +27,7 @@ impl Checker {
     }
 
     fn lookup_desc(&self, s: Sym) -> Option<DScope> {
-        self.dscope.iter().rev().find(|(n, _)| *n == s).map(|(_, d)| *d)
+        self.dscope.iter().rev().find(|(n, _)| *n == s).map(|(_, d)| d.clone())
     }
 
     fn items<'s>(&self, s: &'s Syntax, what: &str) -> R<&'s [Syntax]> {
@@ -85,6 +87,7 @@ impl Checker {
             }
             return match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Effect)) => Ok(Effect::atom(Atom::Var(v))),
+                Some(DScope::Eff(e)) => Ok(e),
                 _ => Err(FxError::at(s.span, format!("`{}` is not an effect", self.name(sym)))),
             };
         }
@@ -301,6 +304,7 @@ impl Checker {
             return match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Region)) => Ok(D::Region(Region::Var(v))),
                 Some(DScope::Var(v, Kind::Effect)) => Ok(D::Effect(Effect::atom(Atom::Var(v)))),
+                Some(DScope::Eff(e)) => Ok(D::Effect(e)),
                 _ => Ok(D::Type(self.parse_type(s)?)),
             };
         }
@@ -320,6 +324,7 @@ impl Checker {
             Datum::Number(fixpt_read::Num::Int(n)) => return Ok(self.arena.exp(span, Exp::Int(*n))),
             Datum::Str(t) => return Ok(self.arena.exp(span, Exp::Str(t.clone()))),
             Datum::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
+            Datum::Char(c) => return Ok(self.arena.exp(span, Exp::Char(*c))),
             Datum::Symbol(sym) => {
                 // FX-87's reader delivers `#t`, `#f` and `#u` as symbols.
                 let e = match self.name(*sym) {
@@ -428,6 +433,59 @@ impl Checker {
                 Ok(self.arena.exp(span, Exp::Let { bindings: out, body }))
             }
             "begin" => self.parse_body(span, &items[1..]),
+            "cond" => self.parse_cond(span, &items[1..]),
+            "and" => {
+                // `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
+                let mut out = self.arena.exp(span, Exp::Bool(true));
+                for (i, x) in items[1..].iter().enumerate().rev() {
+                    let x = self.parse_exp(x)?;
+                    out = if i == items.len() - 2 {
+                        x
+                    } else {
+                        let f = self.arena.exp(span, Exp::Bool(false));
+                        self.arena.exp(span, Exp::If { test: x, then: out, els: f })
+                    };
+                }
+                Ok(out)
+            }
+            "or" => {
+                // `(or a b …)`: `(if a #t (or b …))`, and `(or)` is `#f`. On
+                // booleans only, so `#t` loses nothing.
+                let mut out = self.arena.exp(span, Exp::Bool(false));
+                for (i, x) in items[1..].iter().enumerate().rev() {
+                    let x = self.parse_exp(x)?;
+                    out = if i == items.len() - 2 {
+                        x
+                    } else {
+                        let t = self.arena.exp(span, Exp::Bool(true));
+                        self.arena.exp(span, Exp::If { test: x, then: t, els: out })
+                    };
+                }
+                Ok(out)
+            }
+            "let*" => {
+                let [_, bindings, body @ ..] = &items[..] else {
+                    return Err(FxError::at(span, "`(let* ((name expression) …) body …)`"));
+                };
+                let bs = match &bindings.datum {
+                    Datum::Nil => Vec::new(),
+                    _ => self.items(bindings, "let* bindings")?.to_vec(),
+                };
+                let mut parsed = Vec::new();
+                for b in &bs {
+                    let parts = self.items(b, "a let* binding")?.to_vec();
+                    let [name, init] = &parts[..] else {
+                        return Err(FxError::at(b.span, "a let* binding is `(name expression)`"));
+                    };
+                    let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+                    parsed.push((name, self.parse_exp(init)?, b.span));
+                }
+                let mut out = self.parse_body(span, body)?;
+                for (name, init, bspan) in parsed.into_iter().rev() {
+                    out = self.arena.exp(bspan, Exp::Let { bindings: vec![(name, init)], body: out });
+                }
+                Ok(out)
+            }
             "the" => {
                 let [_, ty, exp] = &items[..] else {
                     return Err(FxError::at(span, "`(the type expression)`"));
@@ -449,6 +507,29 @@ impl Checker {
                 Ok(self.arena.exp(span, Exp::App { fun, args }))
             }
         }
+    }
+
+    /// `(cond (test e …) … (else e …))`: nested `if`s. FX has no unspecified
+    /// value, so the `else` is required.
+    fn parse_cond(&mut self, span: fixpt_read::Span, clauses: &[Syntax]) -> R<ExpId> {
+        let Some((last, init)) = clauses.split_last() else {
+            return Err(FxError::at(span, "a `cond` needs at least an `else` clause"));
+        };
+        let parts = self.items(last, "a cond clause")?.to_vec();
+        if parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) != Some("else") {
+            return Err(FxError::at(last.span, "a `cond` must end with an `else` clause: FX has no unspecified value"));
+        }
+        let mut out = self.parse_body(last.span, &parts[1..])?;
+        for c in init.iter().rev() {
+            let parts = self.items(c, "a cond clause")?.to_vec();
+            let [test, body @ ..] = &parts[..] else {
+                return Err(FxError::at(c.span, "a cond clause is `(test expression …)`"));
+            };
+            let test = self.parse_exp(test)?;
+            let then = self.parse_body(c.span, body)?;
+            out = self.arena.exp(c.span, Exp::If { test, then, els: out });
+        }
+        Ok(out)
     }
 
     /// One or more expressions: an implicit `begin`.

@@ -281,9 +281,21 @@ impl Checker {
         }
         let mut u = Unknowns { kinds, solved: HashMap::new() };
         let mut done: Vec<Synthesised> = vec![None; args.len()];
+        // What the whole is expected to be, first: it often fixes enough that
+        // an argument can be told its type rather than asked — which is what
+        // puts every pair of `(cons a (cons b nil))` in the expected region.
+        if let Some(want) = expected {
+            self.unify(result, want, &mut u, &mut HashSet::new());
+        }
         // What the arguments are, except the ones that need to be told.
         for (i, a) in args.iter().enumerate() {
             if self.needs_telling(*a) {
+                continue;
+            }
+            let p = self.subst(params[i], &u.solved);
+            if !self.mentions_any_unknown(p, &u) {
+                let eff = self.check(*a, p)?;
+                done[i] = Some((p, eff));
                 continue;
             }
             let (t, eff) = self.synth(*a)?;
@@ -292,10 +304,6 @@ impl Checker {
             }
             self.unify(params[i], t, &mut u, &mut HashSet::new());
             done[i] = Some((t, eff));
-        }
-        // What the whole is expected to be.
-        if let Some(want) = expected {
-            self.unify(result, want, &mut u, &mut HashSet::new());
         }
         // The arguments that needed telling: each is checked against its
         // parameter as solved so far, and what it turns out to be solves more.
@@ -446,6 +454,56 @@ impl Checker {
         }
     }
 
+    /// Whether `t` mentions a binder of any kind not yet solved.
+    fn mentions_any_unknown(&self, t: TyId, u: &Unknowns) -> bool {
+        let open = |v: DVar| u.is_unknown(v) && !u.solved.contains_key(&v);
+        let region = |r: Region| matches!(r, Region::Var(v) if open(v));
+        let effect = |e: &Effect| {
+            e.0.iter().any(|a| match *a {
+                Atom::Var(v) => open(v),
+                a => a.region().is_some_and(region),
+            })
+        };
+        let mut seen = HashSet::new();
+        let mut stack = vec![t];
+        while let Some(t) = stack.pop() {
+            let t = self.arena.resolve(t);
+            if !seen.insert(t) {
+                continue;
+            }
+            let hit = match self.arena.get(t).clone() {
+                Ty::Var(v) => open(v),
+                Ty::Subr { effect: e, params, result } => {
+                    stack.extend(params);
+                    stack.push(result);
+                    effect(&e)
+                }
+                Ty::Poly { body, .. } => {
+                    stack.push(body);
+                    false
+                }
+                Ty::Ref(x, r) | Ty::MarkKey(x, r) => {
+                    stack.push(x);
+                    region(r)
+                }
+                Ty::Pair(x, y, r) => {
+                    stack.extend([x, y]);
+                    region(r)
+                }
+                Ty::PromptTag { answer: x, payload: y, effect: e, region: r }
+                | Ty::Composable { arg: x, answer: y, effect: e, region: r } => {
+                    stack.extend([x, y]);
+                    region(r) || effect(&e)
+                }
+                Ty::Base(_) | Ty::Void | Ty::Link(_) => false,
+            };
+            if hit {
+                return true;
+            }
+        }
+        false
+    }
+
     fn mentions_unknown_type(&self, t: TyId, u: &Unknowns) -> bool {
         let mut seen = HashSet::new();
         self.walk_vars(t, &mut seen, &mut |v| u.is_unknown(v) && !u.solved.contains_key(&v))
@@ -481,8 +539,10 @@ impl Checker {
             return;
         }
         let (pt, at) = (self.arena.get(p).clone(), self.arena.get(a).clone());
-        if matches!(at, Ty::Void) {
-            // The bottom type says nothing about what fits.
+        if matches!(at, Ty::Void) && !matches!(pt, Ty::Var(v) if u.is_unknown(v) && !u.solved.contains_key(&v)) {
+            // The bottom type fits anything, so it says nothing about what
+            // fits — unless nothing else will: a binder only a `void` can
+            // solve, such as the result of a loop that never returns.
             return;
         }
         match (pt, at) {

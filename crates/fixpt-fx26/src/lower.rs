@@ -34,8 +34,9 @@ use crate::check::Checker;
 use fixpt_read::Sym;
 use std::collections::HashMap;
 
-/// How each standard FX-26 name is lowered, and whether that is a Scheme
-/// primitive of exactly the same meaning (and so may be `integrable`).
+/// How each standard FX-26 name is lowered, and whether it means exactly what
+/// the Scheme name does — in which case, if the engine has it as a
+/// primitive, an application may be claimed `integrable`.
 pub const STANDARD: &[(&str, &str, bool)] = &[
     ("+", "+", true),
     ("-", "-", true),
@@ -51,6 +52,51 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("get", "%fx26-get", false),
     ("set", "%fx26-set", false),
     ("cwcc", "call/cc", false),
+    ("<", "<", true),
+    (">", ">", true),
+    ("<=", "<=", true),
+    (">=", ">=", true),
+    ("*", "*", true),
+    ("not", "not", true),
+    ("char=?", "char=?", true),
+    ("char-whitespace?", "char-whitespace?", true),
+    ("char-numeric?", "char-numeric?", true),
+    ("char-alphabetic?", "char-alphabetic?", true),
+    ("char-downcase", "char-downcase", true),
+    ("char->integer", "char->integer", true),
+    ("integer->char", "integer->char", true),
+    ("char-in?", "%fx26-char-in?", false),
+    ("string-append", "string-append", true),
+    ("string-length", "string-length", true),
+    ("string-ref", "string-ref", true),
+    ("substring", "substring", true),
+    ("string=?", "string=?", true),
+    ("string-ci=?", "string-ci=?", true),
+    ("string-downcase", "string-downcase", true),
+    ("char->string", "string", false),
+    ("list->string", "list->string", true),
+    ("string->list", "string->list", true),
+    ("reverse", "reverse", true),
+    ("parse-number", "%fx26-parse-number", false),
+    ("parse-int", "%fx26-parse-int", false),
+    ("datum-char", "%fx26-identity", false),
+    ("datum-string", "string-copy", false),
+    ("datum-symbol", "string->symbol", false),
+    ("datum-bool", "%fx26-identity", false),
+    ("datum-int", "%fx26-identity", false),
+    ("datum-list", "list-copy", false),
+    ("datum-dotted", "append", false),
+    ("datum-list->vector", "list->vector", false),
+    ("datum-list->bytevector", "%fx26-bytevector", false),
+    ("datum-char-value", "%fx26-identity", false),
+    ("datum-byte?", "%fx26-byte?", false),
+    ("datum-proper-list?", "list?", false),
+    ("datum-pair?", "pair?", false),
+    ("datum-null?", "null?", false),
+    ("datum-car", "car", false),
+    ("datum-cdr", "cdr", false),
+    ("datum-symbol?", "symbol?", false),
+    ("datum-symbol-name", "symbol->string", false),
     ("make-continuation-prompt-tag", "%fx26-make-prompt-tag", false),
     ("abort-current-continuation", "%fx26-abort", false),
     ("call-with-composable-continuation", "%fx26-call/comp", false),
@@ -68,18 +114,37 @@ pub struct Globals {
     current: HashMap<Sym, String>,
     /// How many times each name has been defined.
     defined: HashMap<Sym, usize>,
+    /// Names declared ahead of a definition still to come.
+    declared: Vec<Sym>,
 }
 
 impl Globals {
     /// The global a new definition of `name` gets, which becomes the one
     /// later uses of `name` refer to.
     pub fn define(&mut self, c: &Checker, name: Sym) -> String {
+        if let Some(i) = self.declared.iter().position(|n| *n == name) {
+            self.declared.remove(i);
+            *self.defined.entry(name).or_insert(0) += 1;
+            return self.current[&name].clone();
+        }
         let n = self.defined.entry(name).or_insert(0);
         *n += 1;
         let base = format!("fx:{}", fixpt_read::escape_symbol(c.interner.name(name)));
         let global = if *n == 1 { base } else { format!("{base}:{n}") };
         self.current.insert(name, global.clone());
         global
+    }
+
+    /// Name the global a definition still to come will have, so that code
+    /// before it can refer to it. The definition then takes that name.
+    pub fn declare(&mut self, c: &Checker, name: Sym) {
+        if !self.current.contains_key(&name) {
+            let n = self.defined.entry(name).or_insert(0);
+            let base = format!("fx:{}", fixpt_read::escape_symbol(c.interner.name(name)));
+            let global = if *n == 0 { base } else { format!("{base}:{}", *n + 1) };
+            self.current.insert(name, global);
+            self.declared.push(name);
+        }
     }
 
     pub fn get(&self, name: Sym) -> Option<&str> {
@@ -133,6 +198,8 @@ impl Lowerer<'_> {
             Exp::Int(n) => n.to_string(),
             Exp::Bool(b) => (if b { "#t" } else { "#f" }).into(),
             Exp::Str(s) => scheme_string(&s),
+            Exp::Char(c) if c.is_ascii_alphanumeric() => format!("#\\{c}"),
+            Exp::Char(c) => format!("#\\x{:x}", c as u32),
             Exp::Unit => "%fx26-unit".into(),
             Exp::Lambda { params, body } => {
                 let names: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();

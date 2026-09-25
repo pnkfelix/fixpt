@@ -44,6 +44,7 @@ pub struct Checker {
     bool_: TyId,
     string: TyId,
     unit: TyId,
+    char_: TyId,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -110,7 +111,10 @@ impl Checker {
         let bool_ = basic("bool");
         let string = basic("string");
         let unit = basic("unit");
-        basic("char");
+        let char_ = basic("char");
+        // A Scheme datum, as a reader produces: opaque, and immutable, so
+        // building one is no effect.
+        basic("datum");
         let void = arena.ty(Ty::Void);
         let mut c = Checker {
             arena,
@@ -123,6 +127,7 @@ impl Checker {
             bool_,
             string,
             unit,
+            char_,
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -219,6 +224,7 @@ impl Checker {
             Exp::Int(_) => Ok((self.int, Effect::pure())),
             Exp::Bool(_) => Ok((self.bool_, Effect::pure())),
             Exp::Str(_) => Ok((self.string, Effect::pure())),
+            Exp::Char(_) => Ok((self.char_, Effect::pure())),
             Exp::Unit => Ok((self.unit, Effect::pure())),
             Exp::Lambda { .. } => self.synth_lambda(e, None),
             Exp::App { fun, args } => self.synth_app(e, fun, &args, None),
@@ -374,7 +380,7 @@ impl Checker {
                     out.push(s);
                 }
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Unit => {}
             Exp::Lambda { params, body } => {
                 let depth = bound.len();
                 bound.extend(params.iter().map(|(n, _)| *n));

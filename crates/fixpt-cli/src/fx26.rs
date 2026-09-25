@@ -34,6 +34,7 @@ fn report(c: &Checker, top: &Top) -> String {
             format!("{} : {} ! {}", c.interner.name(*name), c.show_ty(*ty), c.show_effect(effect))
         }
         Top::DefineType { name, ty } => format!("{} = {}", c.interner.name(*name), c.show_definition(*ty)),
+        Top::DefineEffect { name, effect } => format!("{} = {}", c.interner.name(*name), c.show_effect(effect)),
     }
 }
 
@@ -155,8 +156,16 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
                 return 1;
             }
         };
-        for form in &forms {
-            match session.run(form) {
+        // A file is a whole program: its definitions may come in any order.
+        let outs = match session.run_forms(&forms) {
+            Ok(outs) => outs,
+            Err(e) => {
+                eprintln!("fixpt: {}", located(f, &text, &e));
+                return 1;
+            }
+        };
+        for out in outs {
+            match out {
                 Ok(out) => {
                     print!("{}", out.printed);
                     if let Err(e) = out.value {

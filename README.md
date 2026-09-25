@@ -27,7 +27,7 @@ from the references.
 | **M6** FX-87 front end | **done: 161/161 parse, 160/161 types and effects, 123/123 values** |
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
 | **M9** hygienic macros | **done:** `syntax-rules`; SRFI 211's `er-macro-transformer` and `ir-macro-transformer`; SRFI 139 syntax parameters — [`docs/macros.md`](docs/macros.md) |
-| **M11** FX-26, the tooling's own language | **in progress:** a declared kernel with PLDI '89's control effects and typed delimited control, bidirectional checking, and lowering to Scheme that carries the checker's proofs — [`docs/fx26.md`](docs/fx26.md) |
+| **M11** FX-26, the tooling's own language | **in progress:** a declared kernel with PLDI '89's control effects and typed delimited control, bidirectional checking, lowering to Scheme that carries the checker's proofs, and the eager reader ported to it — [`docs/fx26.md`](docs/fx26.md) |
 
 All three deliverables of the brief are done. What follows is
 [`TODO.md`](TODO.md).
@@ -328,6 +328,13 @@ and what is expected of them. Written out, it is all `proj`s.
 Definitions persist between inputs. As in the other FX REPLs, errors in
 finished subforms are underlined as you type, and a hint says what the
 argument at the cursor must be.
+
+The eager reader (see "The REPL" above) has been ported to FX-26
+(`crates/fixpt-fx26/src/eager-reader.fx`). It is checked, lowered and run
+like any FX-26 program, and it reads the same inputs to the same data, errors
+and parse stacks as the Scheme and Rust readers. Its control and allocation
+effects are all on regions it owns. That is what makes it safe to run
+speculatively.
 
 The lowering is not an erasure. What the checker proved travels with the
 code as `%fx-note` claims, so the compiler can use it. `,code` shows it:

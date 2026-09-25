@@ -19,6 +19,10 @@ pub struct EagerReader {
     /// characters, so there is always one more state than characters.
     root: usize,
     fed: Vec<char>,
+    /// What the reader's procedures are called: `eager-start` and the rest,
+    /// behind this prefix. Empty for the Scheme reader; `fx:` for the FX-26
+    /// one, whose globals are lowered that way.
+    prefix: String,
 }
 
 /// What the reader makes of the text.
@@ -40,11 +44,23 @@ impl EagerReader {
         if session.global_value("eager-start").is_none() {
             session.eval_str("<eager-reader>", SOURCE)?;
         }
-        let start = session.global_value("eager-start").expect("just loaded");
+        EagerReader::attach(session, "")
+    }
+
+    /// Drive a reader already loaded into `session` whose procedures have the
+    /// Scheme reader's names and meanings, behind `prefix`: the FX-26 reader
+    /// (`fixpt_fx26::EAGER_READER`) is `fx:eager-start` and so on.
+    pub fn attach(session: &mut Session, prefix: &str) -> Result<EagerReader, SessionError> {
+        let start = session.global_value(&format!("{prefix}eager-start")).expect("the reader is loaded");
         let st = session.call(start, &[])?;
         let list = session.rt.heap.cons(st, Value::NULL);
         let root = session.rt.heap.push_root(list);
-        Ok(EagerReader { root, fed: Vec::new() })
+        Ok(EagerReader { root, fed: Vec::new(), prefix: prefix.to_string() })
+    }
+
+    /// One of the reader's procedures.
+    fn proc(&self, session: &Session, name: &str) -> Value {
+        session.global_value(&format!("{}{name}", self.prefix)).expect("the reader is loaded")
     }
 
     /// Bring the checkpoints in line with `text`, feeding what is new.
@@ -58,8 +74,11 @@ impl EagerReader {
         }
         session.rt.heap.set_root_at(self.root, list);
         self.fed.truncate(same);
-        let feed = session.global_value("eager-feed").expect("the reader is loaded");
         for &c in &chars[same..] {
+            // Looked up afresh each time round: a call may collect, and the
+            // collector moves objects, so a procedure held across a call is
+            // a dangling pointer after it.
+            let feed = self.proc(session, "eager-feed");
             let st = session.rt.heap.car(session.rt.heap.root_at(self.root));
             let next = session.call(feed, &[st, Value::char(c)])?;
             // The call may have collected: re-read the root, don't reuse `list`.
@@ -78,12 +97,12 @@ impl EagerReader {
         self.sync(session, text)?;
         let mut st = session.rt.heap.car(session.rt.heap.root_at(self.root));
         if at_enter {
-            let feed = session.global_value("eager-feed").expect("the reader is loaded");
+            let feed = self.proc(session, "eager-feed");
             st = session.call(feed, &[st, Value::char('\n')])?;
         }
         // Everything below takes `st` as an argument to a Scheme call, which
         // roots it; nothing holds it across a call except that way.
-        let status = session.global_value("eager-status").expect("the reader is loaded");
+        let status = self.proc(session, "eager-status");
         let status = session.call(status, &[st])?;
         let status = session.rt.heap.symbol_name(status);
         match status.as_str() {
@@ -91,8 +110,8 @@ impl EagerReader {
             "error" => {
                 // Re-read `st`: the status call may have moved it.
                 let st = self.latest(session, text, at_enter)?;
-                let msg = session.global_value("eager-state-message").expect("loaded");
-                let pos = session.global_value("eager-state-position").expect("loaded");
+                let msg = self.proc(session, "eager-state-message");
+                let pos = self.proc(session, "eager-state-position");
                 let at = session.call(pos, &[st])?.as_fixnum() as usize;
                 let st = self.latest(session, text, at_enter)?;
                 let m = session.call(msg, &[st])?;
@@ -100,7 +119,7 @@ impl EagerReader {
             }
             _ => {
                 let st = self.latest(session, text, at_enter)?;
-                let closers = session.global_value("eager-hole-closers").expect("loaded");
+                let closers = self.proc(session, "eager-hole-closers");
                 let c = session.call(closers, &[st])?;
                 if c.is_false() {
                     Ok(EagerStatus::Incomplete)
@@ -120,7 +139,7 @@ impl EagerReader {
         if !at_enter {
             return Ok(st);
         }
-        let feed = session.global_value("eager-feed").expect("the reader is loaded");
+        let feed = self.proc(session, "eager-feed");
         session.call(feed, &[st, Value::char('\n')])
     }
 }

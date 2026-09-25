@@ -12,6 +12,8 @@
 //!   (a top-level one-binding `dletrec`). Without it, a recursive type such as
 //!   a continuation that is its own argument has to be written out in full at
 //!   every use.
+//! * `(define-effect name effect)` — an effect abbreviation, for the effect
+//!   a group of procedures share.
 //! * anything else is an expression, checked in the environment so far.
 
 use crate::ast::{Effect, TyId};
@@ -27,6 +29,8 @@ pub enum Top {
     Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, recursive: bool },
     /// `(define-type name …)`.
     DefineType { name: Sym, ty: TyId },
+    /// `(define-effect name …)`: an abbreviation for an effect.
+    DefineEffect { name: Sym, effect: Effect },
     /// An expression.
     Exp(Checked),
 }
@@ -47,6 +51,15 @@ impl Checker {
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
         match head {
             Some("define") => self.define(form.span, items),
+            Some("define-effect") => {
+                let [_, name, def] = items else {
+                    return Err(FxError::at(form.span, "`(define-effect name effect)`"));
+                };
+                let name = self.binder_name(name)?;
+                let effect = self.parse_effect(def)?;
+                self.dscope.push((name, crate::parse::DScope::Eff(effect.clone())));
+                Ok(Top::DefineEffect { name, effect })
+            }
             Some("define-type") => {
                 let [_, name, def] = items else {
                     return Err(FxError::at(form.span, "`(define-type name type)`"));
@@ -139,13 +152,45 @@ impl Checker {
     /// return what its last expression checked to.
     pub fn check_program(&mut self, text: &str) -> R<Checked> {
         let forms = self.read_in(FileId(0), text)?;
+        let done = self.declare_ahead(&forms)?;
         let mut last = None;
-        for f in &forms {
+        for (f, done) in forms.iter().zip(done) {
+            if done {
+                continue;
+            }
             if let Top::Exp(c) = self.top(f)? {
                 last = Some(c);
             }
         }
         last.ok_or_else(|| FxError::at(Span::new(FileId(0), 0, 0), "the program has no expression"))
+    }
+
+    /// The first of a whole program's two passes: every `define-type` and
+    /// `define-effect` is processed, and every `define` with a signature is
+    /// declared, so that the definitions can refer to each other in any
+    /// order — which is what a signature is for. Returns, for each form,
+    /// whether it is finished with (the abbreviations are). The second pass
+    /// is `top` on the rest, in order.
+    pub fn declare_ahead(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
+        let mut done = Vec::new();
+        for f in forms {
+            let items = f.as_proper_list().unwrap_or(&[]);
+            let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
+            match (head.as_deref(), items) {
+                (Some("define-type" | "define-effect"), _) => {
+                    self.top(f)?;
+                    done.push(true);
+                }
+                (Some("define"), [_, name, ty, _]) => {
+                    let name = self.binder_name(name)?;
+                    let ty = self.parse_type(ty)?;
+                    self.env.push((name, ty));
+                    done.push(false);
+                }
+                _ => done.push(false),
+            }
+        }
+        Ok(done)
     }
 
     /// The names a program may use: every value and every type abbreviation
@@ -224,5 +269,5 @@ pub const KEYWORDS: &[&str] = &[
     "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define-type",
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
-    "composable", "mark-key", "listof",
+    "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "the",
 ];

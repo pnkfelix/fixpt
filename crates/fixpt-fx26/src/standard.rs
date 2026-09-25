@@ -17,6 +17,12 @@
 //! syntax, and `first-mark`, `current-marks` and `marks-of` read marks.
 //! Delimiting is the `prompt` form, not a constant: see `Checker`'s rule for
 //! it.
+//!
+//! Characters, strings and comparisons are what the eager reader needs, with
+//! Scheme's names. Strings are immutable here — nothing is given that could
+//! change one — so making one is no effect. `datum` is a Scheme datum, as a
+//! reader produces: opaque, built by the `datum-` operations and taken apart
+//! by their inspectors, and immutable too, so building one is pure.
 
 pub const ENTRIES: &[(&str, &str)] = &[
     ("new", "(poly ((r region)) (poly ((t type)) (subr (alloc r) (t) (ref t r))))"),
@@ -39,6 +45,51 @@ pub const ENTRIES: &[(&str, &str)] = &[
                  ((subr e ((subr (goto r) (t) void)) t))
                  t))))",
     ),
+    ("<", "(subr pure (int int) bool)"),
+    (">", "(subr pure (int int) bool)"),
+    ("<=", "(subr pure (int int) bool)"),
+    (">=", "(subr pure (int int) bool)"),
+    ("*", "(subr pure (int int) int)"),
+    ("not", "(subr pure (bool) bool)"),
+    ("char=?", "(subr pure (char char) bool)"),
+    ("char-whitespace?", "(subr pure (char) bool)"),
+    ("char-numeric?", "(subr pure (char) bool)"),
+    ("char-alphabetic?", "(subr pure (char) bool)"),
+    ("char-downcase", "(subr pure (char) char)"),
+    ("char->integer", "(subr pure (char) int)"),
+    ("integer->char", "(subr pure (int) char)"),
+    ("char-in?", "(subr pure (char string) bool)"),
+    ("string-append", "(subr pure (string string) string)"),
+    ("string-length", "(subr pure (string) int)"),
+    ("string-ref", "(subr pure (string int) char)"),
+    ("substring", "(subr pure (string int int) string)"),
+    ("string=?", "(subr pure (string string) bool)"),
+    ("string-ci=?", "(subr pure (string string) bool)"),
+    ("string-downcase", "(subr pure (string) string)"),
+    ("char->string", "(subr pure (char) string)"),
+    ("list->string", "(poly ((r region)) (subr (read r) ((listof char r)) string))"),
+    ("string->list", "(poly ((r region)) (subr (alloc r) (string) (listof char r)))"),
+    ("reverse", "(poly ((r1 region) (r2 region)) (poly ((t type)) (subr (maxeff (read r1) (alloc r2)) ((listof t r1)) (listof t r2))))"),
+    ("parse-number", "(poly ((r region)) (subr (alloc r) (string int) (listof datum r)))"),
+    ("parse-int", "(subr pure (string int) int)"),
+    ("datum-char", "(subr pure (char) datum)"),
+    ("datum-string", "(subr pure (string) datum)"),
+    ("datum-symbol", "(subr pure (string) datum)"),
+    ("datum-bool", "(subr pure (bool) datum)"),
+    ("datum-int", "(subr pure (int) datum)"),
+    ("datum-list", "(poly ((r region)) (subr (read r) ((listof datum r)) datum))"),
+    ("datum-dotted", "(poly ((r region)) (subr (read r) ((listof datum r) datum) datum))"),
+    ("datum-list->vector", "(subr pure (datum) datum)"),
+    ("datum-list->bytevector", "(subr pure (datum) datum)"),
+    ("datum-char-value", "(subr pure (datum) char)"),
+    ("datum-byte?", "(subr pure (datum) bool)"),
+    ("datum-proper-list?", "(subr pure (datum) bool)"),
+    ("datum-pair?", "(subr pure (datum) bool)"),
+    ("datum-null?", "(subr pure (datum) bool)"),
+    ("datum-car", "(subr pure (datum) datum)"),
+    ("datum-cdr", "(subr pure (datum) datum)"),
+    ("datum-symbol?", "(subr pure (datum) bool)"),
+    ("datum-symbol-name", "(subr pure (datum) string)"),
     (
         "make-continuation-prompt-tag",
         "(poly ((r region)) (poly ((a type) (h type) (d effect))

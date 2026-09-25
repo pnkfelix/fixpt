@@ -17,6 +17,10 @@
 //! does says where from.
 
 pub mod ast;
+
+/// The eager reader, written in FX-26: see the file's own header.
+pub const EAGER_READER: &str = include_str!("eager-reader.fx");
+
 pub mod check;
 pub mod infer;
 pub mod lower;

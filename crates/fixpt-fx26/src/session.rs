@@ -57,7 +57,7 @@ impl Fx26Session {
     pub fn compile(&mut self, form: &Syntax) -> R<(Top, String)> {
         let top = self.checker.top(form)?;
         let code = match &top {
-            Top::DefineType { .. } => String::new(),
+            Top::DefineType { .. } | Top::DefineEffect { .. } => String::new(),
             Top::Define { name, exp, recursive, .. } => {
                 // A recursive definition refers to itself; a plain one to
                 // whatever the name meant before it.
@@ -75,6 +75,33 @@ impl Fx26Session {
         Ok((top, code))
     }
 
+    /// Run the forms of a whole program, declaring its definitions first.
+    /// One outcome per form still to run; the abbreviations are done in the
+    /// first pass and have none.
+    pub fn run_forms(&mut self, forms: &[Syntax]) -> R<Vec<R<Outcome>>> {
+        let done = self.checker.declare_ahead(forms)?;
+        for (f, _) in forms.iter().zip(&done) {
+            if let Some([_, name, _, _]) = f.as_proper_list()
+                && let Some(name) = name.as_symbol()
+                && f.as_proper_list().and_then(|i| i[0].as_symbol()).is_some_and(|h| self.checker.interner.name(h) == "define")
+            {
+                self.globals.declare(&self.checker, name);
+            }
+        }
+        let mut outs = Vec::new();
+        for (f, done) in forms.iter().zip(done) {
+            if !done {
+                let out = self.run(f);
+                let failed = out.is_err();
+                outs.push(out);
+                if failed {
+                    break;
+                }
+            }
+        }
+        Ok(outs)
+    }
+
     /// Check, lower and run one top-level form.
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
         let (top, code) = self.compile(form)?;
@@ -90,12 +117,14 @@ impl Fx26Session {
         Ok(Outcome { top, code, printed, value })
     }
 
-    /// Run a whole program, and the value of its last expression.
+    /// Run a whole program, and the value of its last expression. Its
+    /// definitions may refer to each other in any order: see
+    /// `Checker::declare_ahead`.
     pub fn run_program(&mut self, text: &str) -> R<Result<String, String>> {
         let forms = self.checker.read_in(FileId(0), text)?;
         let mut last = Ok(String::new());
-        for f in &forms {
-            let out = self.run(f)?;
+        for out in self.run_forms(&forms)? {
+            let out = out?;
             match out.value {
                 Ok(Some(v)) => last = Ok(v),
                 Ok(None) => {}

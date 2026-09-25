@@ -37,3 +37,22 @@
 (define (%fx26-current-marks key)
   (continuation-mark-set->list (current-continuation-marks) key))
 (define (%fx26-marks-of k key) (continuation-mark-set->list (continuation-marks k) key))
+
+;;; ---- characters, strings, numbers ----
+(define (%fx26-char-in? c s)
+  (let loop ((i 0))
+    (and (< i (string-length s)) (or (char=? c (string-ref s i)) (loop (+ i 1))))))
+;; A number in `radix`, as a list of none or one.
+(define (%fx26-parse-number s radix)
+  (let ((n (string->number s radix))) (if n (list n) '())))
+;; An exact non-negative integer in `radix`, or -1.
+(define (%fx26-parse-int s radix)
+  (let ((n (string->number s radix)))
+    (if (and n (exact-integer? n) (>= n 0)) n -1)))
+
+;;; ---- data ----
+;;; A datum is the Scheme value itself; these build and test ones the
+;;; ordinary procedures do not.
+(define (%fx26-identity x) x)
+(define (%fx26-bytevector items) (apply bytevector items))
+(define (%fx26-byte? d) (and (exact-integer? d) (<= 0 d 255)))
