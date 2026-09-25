@@ -100,9 +100,40 @@ pub enum Ty {
     Poly { binders: Vec<(DVar, Kind)>, body: TyId },
     Ref(TyId, Region),
     Pair(TyId, TyId, Region),
+    /// `(prompt-tag A H D R)`: a tag in region `R` whose prompts deliver an
+    /// `A`, whose aborts carry an `H`, and whose delimited computations have
+    /// effect at most `D`, besides their control effects on `R`.
+    PromptTag { answer: TyId, payload: TyId, effect: Effect, region: Region },
+    /// `(composable T A D R)`: a composable continuation captured up to a
+    /// prompt for a tag of type `(prompt-tag A H D R)`, waiting for a `T`.
+    /// It is a subroutine — see [`Ty::as_subr`] — and also a value whose marks
+    /// can be read.
+    Composable { arg: TyId, answer: TyId, effect: Effect, region: Region },
+    /// `(mark-key T R)`: a continuation-mark key in region `R` for marks of
+    /// type `T`.
+    MarkKey(TyId, Region),
     /// A forwarding slot, for building recursive types: `dletrec` allocates
     /// one per name, parses the bodies against them, then fills them in.
     Link(Option<TyId>),
+}
+
+impl Ty {
+    /// What calling a value of this type does, if it can be called: its
+    /// latent effect, parameters and result. A composable continuation runs
+    /// the rest of its prompt's body, so its latent effect is the tag's bound
+    /// together with the control effects on the tag's region.
+    pub fn as_subr(&self) -> Option<(Effect, Vec<TyId>, TyId)> {
+        match self {
+            Ty::Subr { effect, params, result } => Some((effect.clone(), params.clone(), *result)),
+            Ty::Composable { arg, answer, effect, region } => {
+                let mut e = effect.clone();
+                e.0.insert(Atom::Goto(*region));
+                e.0.insert(Atom::Comefrom(*region));
+                Some((e, vec![*arg], *answer))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// A description in argument position — what `proj` supplies.
@@ -134,6 +165,9 @@ pub enum Exp {
     Let { bindings: Vec<(Sym, ExpId)>, body: ExpId },
     /// Derived: a sequence, each value but the last discarded.
     Begin(Vec<ExpId>),
+    /// `(prompt tag body handler)`: evaluate `body` delimited by a prompt for
+    /// `tag`; an abort to `tag` inside it calls `handler` with the value.
+    Prompt { tag: ExpId, body: ExpId, handler: ExpId },
 }
 
 #[derive(Default)]

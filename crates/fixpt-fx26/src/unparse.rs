@@ -92,6 +92,25 @@ impl Checker {
                 format!("(poly ({}) {})", bs.join(" "), self.show_ty_on(body, path))
             }
             Ty::Ref(a, r) => format!("(ref {} {})", self.show_ty_on(a, path), self.show_region(r)),
+            // FX-87's `listof`: a pair whose tail is itself.
+            Ty::Pair(a, b, r) if self.arena.resolve(b) == t => {
+                format!("(listof {} {})", self.show_ty_on(a, path), self.show_region(r))
+            }
+            Ty::PromptTag { answer, payload, effect, region } => format!(
+                "(prompt-tag {} {} {} {})",
+                self.show_ty_on(answer, path),
+                self.show_ty_on(payload, path),
+                self.show_effect(&effect),
+                self.show_region(region)
+            ),
+            Ty::Composable { arg, answer, effect, region } => format!(
+                "(composable {} {} {} {})",
+                self.show_ty_on(arg, path),
+                self.show_ty_on(answer, path),
+                self.show_effect(&effect),
+                self.show_region(region)
+            ),
+            Ty::MarkKey(x, r) => format!("(mark-key {} {})", self.show_ty_on(x, path), self.show_region(r)),
             Ty::Pair(a, b, r) => format!(
                 "(pairof {} {} {})",
                 self.show_ty_on(a, path),

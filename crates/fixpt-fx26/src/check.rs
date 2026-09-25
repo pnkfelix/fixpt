@@ -21,6 +21,9 @@
 //!   only if the expression neither imports variables nor returns values whose
 //!   types mention `r` — stricter than FX-87's rule for reads and writes, and
 //!   p. 7 shows why).
+//!
+//! **Prompts** delimit control on their tag's region, under a condition of
+//! their own: see `synth_prompt`.
 
 use crate::ast::{Arena, Atom, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::error::{FxError, R};
@@ -190,14 +193,15 @@ impl Checker {
                     effect = effect.union(&eff);
                     arg_tys.push(t);
                 }
-                let (latent, params, result) = match self.arena.get(ft).clone() {
-                    Ty::Subr { effect, params, result } => (effect, params, result),
-                    Ty::Poly { .. } => {
-                        return Err(FxError::at(span, "a polymorphic value must be instantiated with `proj` before it is applied"));
-                    }
-                    _ => {
-                        return Err(FxError::at(span, format!("not a subroutine: {}", self.show_ty(ft))));
-                    }
+                let callee = self.arena.get(ft).clone();
+                let Some((latent, params, result)) = callee.as_subr() else {
+                    return Err(FxError::at(
+                        span,
+                        match callee {
+                            Ty::Poly { .. } => "a polymorphic value must be instantiated with `proj` before it is applied".into(),
+                            _ => format!("not a subroutine: {}", self.show_ty(ft)),
+                        },
+                    ));
                 };
                 if params.len() != args.len() {
                     return Err(FxError::at(span, format!("expected {} argument(s), got {}", params.len(), args.len())));
@@ -294,6 +298,7 @@ impl Checker {
                 let eff = self.mask(e, &eff.union(&be), t);
                 Ok((t, eff))
             }
+            Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
             Exp::Begin(items) => {
                 let mut eff = Effect::pure();
                 let mut last = self.unit;
@@ -395,6 +400,11 @@ impl Checker {
                     self.free_into(i, bound, out);
                 }
             }
+            Exp::Prompt { tag, body, handler } => {
+                for x in [tag, body, handler] {
+                    self.free_into(x, bound, out);
+                }
+            }
         }
     }
 
@@ -429,6 +439,17 @@ impl Checker {
                 self.regions_walk(a, seen, out);
                 self.regions_walk(b, seen, out);
             }
+            Ty::PromptTag { answer: a, payload: b, effect, region: r }
+            | Ty::Composable { arg: b, answer: a, effect, region: r } => {
+                out.insert(r);
+                out.extend(effect.0.iter().filter_map(|x| x.region()));
+                self.regions_walk(a, seen, out);
+                self.regions_walk(b, seen, out);
+            }
+            Ty::MarkKey(t, r) => {
+                out.insert(r);
+                self.regions_walk(t, seen, out);
+            }
         }
     }
 
@@ -445,7 +466,18 @@ impl Checker {
         if a == b || !trail.insert((a, b)) {
             return true;
         }
-        match (self.arena.get(a).clone(), self.arena.get(b).clone()) {
+        let (ta, tb) = (self.arena.get(a).clone(), self.arena.get(b).clone());
+        // A composable continuation can be called, so it can stand where a
+        // subroutine is wanted.
+        if let (Ty::Composable { .. }, Ty::Subr { .. }) = (&ta, &tb) {
+            let (ea, pa, ra) = ta.as_subr().expect("callable");
+            let (eb, pb, rb) = tb.as_subr().expect("callable");
+            return pa.len() == pb.len()
+                && ea.within(&eb)
+                && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, trail))
+                && self.sub(ra, rb, trail);
+        }
+        match (ta, tb) {
             // `void` is the bottom type: nothing is ever returned as one.
             (Ty::Void, _) => true,
             (Ty::Base(x), Ty::Base(y)) => x == y,
@@ -469,6 +501,26 @@ impl Checker {
                     && self.sub(x2, y2, trail)
                     && self.sub(y2, x2, trail)
             }
+            // A tag both delivers and receives values of its types, so it is
+            // invariant in all of them, as a reference is in its contents.
+            (
+                Ty::PromptTag { answer: a1, payload: h1, effect: d1, region: r1 },
+                Ty::PromptTag { answer: a2, payload: h2, effect: d2, region: r2 },
+            ) => {
+                r1 == r2
+                    && d1 == d2
+                    && self.sub(a1, a2, trail)
+                    && self.sub(a2, a1, trail)
+                    && self.sub(h1, h2, trail)
+                    && self.sub(h2, h1, trail)
+            }
+            // Called like a subroutine: contravariant in what it takes,
+            // covariant in what it gives and does.
+            (
+                Ty::Composable { arg: t1, answer: a1, effect: d1, region: r1 },
+                Ty::Composable { arg: t2, answer: a2, effect: d2, region: r2 },
+            ) => r1 == r2 && d1.within(&d2) && self.sub(t2, t1, trail) && self.sub(a1, a2, trail),
+            (Ty::MarkKey(x, r), Ty::MarkKey(y, s)) => r == s && self.sub(x, y, trail) && self.sub(y, x, trail),
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
                     return false;
@@ -536,6 +588,19 @@ impl Checker {
             Ty::Poly { binders, body } => Ty::Poly { binders, body: self.subst_memo(body, map, memo) },
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),
             Ty::Pair(a, b, r) => Ty::Pair(self.subst_memo(a, map, memo), self.subst_memo(b, map, memo), region(r)),
+            Ty::PromptTag { answer, payload, effect, region: r } => Ty::PromptTag {
+                answer: self.subst_memo(answer, map, memo),
+                payload: self.subst_memo(payload, map, memo),
+                effect: subst_effect(&effect, map),
+                region: region(r),
+            },
+            Ty::Composable { arg, answer, effect, region: r } => Ty::Composable {
+                arg: self.subst_memo(arg, map, memo),
+                answer: self.subst_memo(answer, map, memo),
+                effect: subst_effect(&effect, map),
+                region: region(r),
+            },
+            Ty::MarkKey(t, r) => Ty::MarkKey(self.subst_memo(t, map, memo), region(r)),
             other => other,
         };
         let id = self.arena.ty(new);
@@ -568,4 +633,84 @@ fn subst_effect(e: &Effect, map: &HashMap<DVar, D>) -> Effect {
         out = out.union(&piece);
     }
     out
+}
+
+// ---------------------------------------------------------------- prompts
+impl Checker {
+    /// `(prompt tag body handler)`.
+    ///
+    /// The tag's type fixes what crosses the prompt: the body must produce
+    /// the answer type `A`, the handler must take the payload `H` to an `A`,
+    /// and the body's effect must be within the tag's bound `D` apart from
+    /// control on the tag's region `R` — the bound is what a continuation
+    /// captured up to this prompt is said to do when it is called.
+    ///
+    /// Then the prompt delimits: `(goto R)` and `(comefrom R)` are removed
+    /// from the body's effect, but only if the body can reach no tag in `R`
+    /// other than this one. A region can hold many tags, and an abort to
+    /// another of them passes straight through this prompt. So the condition
+    /// is on the body's free variables: none may have a type mentioning `R`,
+    /// except the tag itself when `tag` is a variable. A tag the body makes
+    /// for itself is fine: an abort to it with no prompt of its own inside
+    /// the body is an error, not a jump past this one.
+    fn synth_prompt(&mut self, e: ExpId, tag: ExpId, body: ExpId, handler: ExpId) -> R<(TyId, Effect)> {
+        let (tt, te) = self.synth(tag)?;
+        let Ty::PromptTag { answer, payload, effect: bound, region } = self.arena.get(tt).clone() else {
+            return Err(FxError::at(
+                self.arena.span_of(tag),
+                format!("a prompt needs a prompt tag, not a {}", self.show_ty(tt)),
+            ));
+        };
+        let (bt, be) = self.synth(body)?;
+        if !self.subtype(bt, answer) {
+            return Err(FxError::at(
+                self.arena.span_of(body),
+                format!("the tag's prompts deliver a {}, and this body is a {}", self.show_ty(answer), self.show_ty(bt)),
+            ));
+        }
+        let own = Effect([Atom::Goto(region), Atom::Comefrom(region)].into_iter().collect());
+        let beyond = Effect(be.0.iter().copied().filter(|a| !bound.contains(*a) && !own.contains(*a)).collect());
+        if !beyond.is_pure() {
+            return Err(FxError::at(
+                self.arena.span_of(body),
+                format!(
+                    "the tag allows its delimited computations {}, and this body also has {}",
+                    self.show_effect(&bound),
+                    self.show_effect(&beyond)
+                ),
+            ));
+        }
+        let (ht, he) = self.synth(handler)?;
+        let Some((latent, params, result)) = self.arena.get(ht).as_subr() else {
+            return Err(FxError::at(self.arena.span_of(handler), format!("a handler is a subroutine, not a {}", self.show_ty(ht))));
+        };
+        if params.len() != 1 || !self.subtype(payload, params[0]) || !self.subtype(result, answer) {
+            return Err(FxError::at(
+                self.arena.span_of(handler),
+                format!("the handler must take a {} to a {}; it is a {}", self.show_ty(payload), self.show_ty(answer), self.show_ty(ht)),
+            ));
+        }
+        let delimited = if self.reaches_only(body, tag, region) {
+            Effect(be.0.iter().copied().filter(|a| !own.contains(*a)).collect())
+        } else {
+            be
+        };
+        let eff = te.union(&he).union(&latent).union(&delimited);
+        Ok((answer, self.mask(e, &eff, answer)))
+    }
+
+    /// Whether the only way `body` can name anything in region `r` is the
+    /// variable `tag` (if `tag` is one).
+    fn reaches_only(&self, body: ExpId, tag: ExpId, r: Region) -> bool {
+        let tag_var = match self.arena.exp_at(tag) {
+            Exp::Var(s) => Some(*s),
+            _ => None,
+        };
+        self.free_vars(body).into_iter().filter(|v| Some(*v) != tag_var).all(|v| {
+            let Some(t) = self.lookup(v) else { return true };
+            let mut rs = HashSet::new();
+            self.regions_in(t, &mut rs);
+            !rs.contains(&r)
+        })
+    }
 }

@@ -176,6 +176,47 @@ impl Checker {
                 Ok(self.arena.ty(Ty::Pair(a, b, r)))
             }
             "dletrec" => self.parse_dletrec(s, &items),
+            "listof" => {
+                // FX-87's `listof`: a pair whose tail is the list itself.
+                // Every `pairof` type also has the empty list, `nil`.
+                let [_, t, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(listof type region)`"));
+                };
+                let t = self.parse_type(t)?;
+                let r = self.parse_region(r)?;
+                let slot = self.arena.ty(Ty::Link(None));
+                let pair = self.arena.ty(Ty::Pair(t, slot, r));
+                self.arena.set_link(slot, pair);
+                Ok(slot)
+            }
+            "prompt-tag" => {
+                let [_, a, h, d, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(prompt-tag answer payload effect region)`"));
+                };
+                let answer = self.parse_type(a)?;
+                let payload = self.parse_type(h)?;
+                let effect = self.parse_effect(d)?;
+                let region = self.parse_region(r)?;
+                Ok(self.arena.ty(Ty::PromptTag { answer, payload, effect, region }))
+            }
+            "composable" => {
+                let [_, t, a, d, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(composable argument answer effect region)`"));
+                };
+                let arg = self.parse_type(t)?;
+                let answer = self.parse_type(a)?;
+                let effect = self.parse_effect(d)?;
+                let region = self.parse_region(r)?;
+                Ok(self.arena.ty(Ty::Composable { arg, answer, effect, region }))
+            }
+            "mark-key" => {
+                let [_, t, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(mark-key type region)`"));
+                };
+                let t = self.parse_type(t)?;
+                let r = self.parse_region(r)?;
+                Ok(self.arena.ty(Ty::MarkKey(t, r)))
+            }
             _ => Err(FxError::at(s.span, "expected a type")),
         }
     }
@@ -383,6 +424,13 @@ impl Checker {
                 Ok(self.arena.exp(span, Exp::Let { bindings: out, body }))
             }
             "begin" => self.parse_body(span, &items[1..]),
+            "prompt" => {
+                let [_, tag, body, handler] = &items[..] else {
+                    return Err(FxError::at(span, "`(prompt tag body handler)`"));
+                };
+                let (tag, body, handler) = (self.parse_exp(tag)?, self.parse_exp(body)?, self.parse_exp(handler)?);
+                Ok(self.arena.exp(span, Exp::Prompt { tag, body, handler }))
+            }
             _ => {
                 let fun = self.parse_exp(&items[0])?;
                 let args = items[1..].iter().map(|a| self.parse_exp(a)).collect::<R<Vec<_>>>()?;

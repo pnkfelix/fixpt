@@ -200,5 +200,6 @@ impl Checker {
 pub const KEYWORDS: &[&str] = &[
     "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define-type",
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
-    "alloc", "goto", "comefrom", "region", "effect", "type",
+    "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
+    "composable", "mark-key", "listof",
 ];
