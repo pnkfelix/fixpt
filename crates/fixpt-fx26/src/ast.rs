@@ -192,4 +192,26 @@ impl Arena {
     pub fn dvar_name(&self, v: DVar) -> Sym {
         self.dvar_names[v.0 as usize]
     }
+
+    /// How much has been allocated, to [`reset`](Self::reset) to later.
+    pub fn mark(&self) -> ArenaMark {
+        ArenaMark { tys: self.tys.len(), exps: self.exps.len(), dvars: self.dvar_names.len() }
+    }
+
+    /// Forget everything allocated since `mark`. Sound only if nothing older
+    /// was changed to point at it since, which holds for a check that is
+    /// being thrown away: links are only ever set on slots made in the same
+    /// parse.
+    pub fn reset(&mut self, mark: ArenaMark) {
+        self.tys.truncate(mark.tys);
+        self.exps.truncate(mark.exps);
+        self.dvar_names.truncate(mark.dvars);
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ArenaMark {
+    tys: usize,
+    exps: usize,
+    dvars: usize,
 }

@@ -27,6 +27,7 @@ from the references.
 | **M6** FX-87 front end | **done: 161/161 parse, 160/161 types and effects, 123/123 values** |
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
 | **M9** hygienic macros | **done:** `syntax-rules`; SRFI 211's `er-macro-transformer` and `ir-macro-transformer`; SRFI 139 syntax parameters — [`docs/macros.md`](docs/macros.md) |
+| **M11** FX-26, the tooling's own language | **in progress:** a declared kernel with PLDI '89's control effects, and a checking REPL — [`docs/fx26.md`](docs/fx26.md) |
 
 All three deliverables of the brief are done. What follows is
 [`TODO.md`](TODO.md).
@@ -293,6 +294,35 @@ nothing outside can observe it, so the effect is `pure`. The middle one is the
 same idea from the other side — the lambda is pure, and the `read` it will
 perform lives in its *type*.
 
+## Trying FX-26
+
+FX-26 is this project's own continuation of FX, and the language the tooling
+is meant to be rewritten in ([`docs/fx26.md`](docs/fx26.md)). So far it
+checks and does not run. Each form's type and effect are printed in FX-87's
+layout, with the value left out until there is one:
+
+```
+$ fixpt --dialect fx26 repl
+fx26> (define-type k (subr (goto @k) (k) void))
+k = (subr (goto @k) (k) void)
+
+fx26> ((proj (proj (proj cwcc @k) int) (goto @k))
+    |  (lambda ((f (subr (goto @k) (int) void))) (+ 1 (f 0))))
+ : int ! pure
+
+fx26> (define count (subr pure (int) int)
+    |   (lambda ((n int)) (if (= n 0) 0 (count (- n 1)))))
+count : (subr pure (int) int) ! pure
+```
+
+The middle one is PLDI '89's control effects. Calling `cwcc` has
+`(comefrom @k)`, and calling the continuation has `(goto @k)`. Nothing outside
+can reach `@k`, so both are masked, and the whole expression is `pure`.
+
+Definitions persist between inputs. As in the other FX REPLs, errors in
+finished subforms are underlined as you type, and a hint says what the
+argument at the cursor must be.
+
 ## Layout
 
 | crate | what it is |
@@ -306,6 +336,8 @@ perform lives in its *type*.
 | `fixpt-cli` | the `fixpt` binary |
 | `fixpt-conform` | golden reading and normalisation |
 | `fixpt-fx91` | the FX-91 front end |
+| `fixpt-fx87` | the FX-87 front end |
+| `fixpt-fx26` | FX-26, the tooling's own language |
 | `fixpt-tidy` | checks on the repository itself, run by `cargo test` |
 
 Test programs of more than four lines or 240 characters live in files beside

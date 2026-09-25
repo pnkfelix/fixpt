@@ -204,21 +204,43 @@ impl Checker {
                 let t = self.parse_type(def)?;
                 self.arena.set_link(*slot, t);
             }
-            // A name defined as another name, round a loop, describes nothing.
             for (slot, _) in &slots {
-                let mut seen = std::collections::HashSet::new();
-                let mut id = *slot;
-                while let Ty::Link(Some(next)) = self.arena.get_raw(id) {
-                    if !seen.insert(id) {
-                        return Err(FxError::at(s.span, "a `dletrec` type must be built from a constructor, not only from names"));
-                    }
-                    id = *next;
-                }
+                self.grounded(*slot, s.span)?;
             }
             self.parse_type(body)
         })();
         self.dscope.truncate(depth);
         result
+    }
+
+    /// A name defined as another name, round a loop, describes nothing.
+    fn grounded(&self, slot: TyId, span: fixpt_read::Span) -> R<()> {
+        let mut seen = std::collections::HashSet::new();
+        let mut id = slot;
+        while let Ty::Link(Some(next)) = self.arena.get_raw(id) {
+            if !seen.insert(id) {
+                return Err(FxError::at(span, "a recursive type must be built from a constructor, not only from names"));
+            }
+            id = *next;
+        }
+        Ok(())
+    }
+
+    /// `(define-type name type)`: `name` stands for the type from here on,
+    /// and may appear in its own definition — a one-binding `dletrec` that
+    /// stays in scope.
+    pub(crate) fn define_type(&mut self, name: Sym, def: &Syntax, span: fixpt_read::Span) -> R<TyId> {
+        let slot = self.arena.ty(Ty::Link(None));
+        let depth = self.dscope.len();
+        self.dscope.push((name, DScope::Rec(slot)));
+        let r = self.parse_type(def).and_then(|t| {
+            self.arena.set_link(slot, t);
+            self.grounded(slot, span)
+        });
+        if r.is_err() {
+            self.dscope.truncate(depth);
+        }
+        r.map(|()| slot)
     }
 
     /// A `proj` argument. Which kind it is shows in its shape — `@x` is a

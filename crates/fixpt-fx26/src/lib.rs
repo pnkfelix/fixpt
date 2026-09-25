@@ -19,9 +19,11 @@ pub mod ast;
 pub mod check;
 pub mod parse;
 pub mod standard;
+pub mod top;
 pub mod unparse;
 
 pub use check::{Checker, Checked};
+pub use top::Top;
 pub use error::{FxError, R};
 
 pub mod error {

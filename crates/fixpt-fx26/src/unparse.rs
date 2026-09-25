@@ -34,14 +34,36 @@ impl Checker {
         }
     }
 
-    /// A type. A recursive type prints as far as its first repetition, which
-    /// is shown as `…` — enough to read, and it always terminates.
+    /// A type. A type that `define-type` named prints as its name. Any other
+    /// recursive type prints as far as its first repetition, which is shown
+    /// as `…` — enough to read, and it always terminates.
     pub fn show_ty(&self, t: TyId) -> String {
         self.show_ty_on(t, &mut HashSet::new())
     }
 
+    /// A type written out one level, even if it has a name: what a
+    /// `define-type` defined the name as.
+    pub fn show_definition(&self, t: TyId) -> String {
+        self.show_ty_body(self.arena.resolve(t), &mut HashSet::new())
+    }
+
+    fn abbreviation(&self, t: TyId) -> Option<&str> {
+        self.type_names()
+            .into_iter()
+            .rev()
+            .find(|n| self.type_named(*n).is_some_and(|d| self.arena.resolve(d) == t))
+            .map(|n| self.interner.name(n))
+    }
+
     fn show_ty_on(&self, t: TyId, path: &mut HashSet<TyId>) -> String {
         let t = self.arena.resolve(t);
+        if let Some(name) = self.abbreviation(t) {
+            return name.to_string();
+        }
+        self.show_ty_body(t, path)
+    }
+
+    fn show_ty_body(&self, t: TyId, path: &mut HashSet<TyId>) -> String {
         if !path.insert(t) {
             return "…".into();
         }

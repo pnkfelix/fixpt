@@ -12,17 +12,6 @@ use fixpt_fx26::Checker;
 /// `K`: a continuation returned as its own result (C4, C5).
 const K: &str = "(dletrec ((k (subr (goto @k) (k) void))) k)";
 
-/// A program from `programs/pldi89/` with its `{name}` holes filled in. The
-/// kernel has no way to name a type, so the long recursive ones are spliced.
-fn fill(template: &str, holes: &[(&str, &str)]) -> String {
-    let mut out = template.to_string();
-    for (name, text) in holes {
-        out = out.replace(&format!("{{{name}}}"), text);
-    }
-    assert!(!out.contains('{'), "an unfilled hole in:\n{out}");
-    out
-}
-
 fn atom(c: &mut Checker, text: &str) -> Atom {
     let e = c.effect_of_str(text).expect("an effect");
     *e.0.iter().next().expect("one atom")
@@ -133,7 +122,7 @@ fn c4_the_argument_keeps_both_control_effects() {
     // TRANSCRIBED: only the outer `cwcc`'s argument (the whole `let` does not
     // type — it passes `0` to a continuation).
     let got = c
-        .check_str(&fill(include_str!("programs/pldi89/c4-argument.fx"), &[("K", K)]))
+        .check_program(include_str!("programs/pldi89/c4-argument.fx"))
         .expect("checks");
     let fixpt_fx26::ast::Ty::Subr { effect, .. } = c.arena.get(got.ty).clone() else {
         panic!("a subroutine: {}", c.show_ty(got.ty));
@@ -202,11 +191,10 @@ fn c6_a_stored_continuation_keeps_its_comefrom() {
 /// transcription before the checker.
 #[test]
 fn c7_goto_not_masked_without_free_variables() {
-    let p = "(dletrec ((p (pairof k k @p)) (k (subr (goto @k) (p) void))) p)";
-    let k = "(dletrec ((p (pairof k k @p)) (k (subr (goto @k) (p) void))) k)";
-    let src = fill(include_str!("programs/pldi89/c7.fx"), &[("p", p), ("k", k)]);
     let mut c = Checker::new();
-    let got = c.check_str(&src).unwrap_or_else(|e| panic!("C7 does not check: {e}"));
+    let got = c
+        .check_program(include_str!("programs/pldi89/c7.fx"))
+        .unwrap_or_else(|e| panic!("C7 does not check: {e}"));
     // STATED (p. 7): not maskable. The condition that blocks it is the result
     // type, which mentions `@k` (p. 6) — there are no free variables to blame.
     assert!(has(&mut c, &got.effect, "(goto @k)"), "{}", c.show_effect(&got.effect));
