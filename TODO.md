@@ -422,7 +422,12 @@ criterion to aim for is no `read` or `write` on a region the REPL shares with
 the user's program.
 
 **Order.**
-1. Speculative checking in the FX REPLs first. The checkers are pure Rust, so
+1. **Done (2026-09-24):** speculative checking in the FX REPLs
+   (`crates/fixpt-cli/src/speculate.rs`, and each dialect's `Oracle`). As a
+   form is typed, errors in subforms already finished are underlined, with
+   the checker's message under the form. With no error, a hint says what the
+   argument at the cursor must be. Original plan: speculative checking in the
+   FX REPLs first. The checkers are pure Rust, so
    this needs none of the above: re-read, close off the unfinished form with
    holes, check, and report only errors that lie wholly inside subforms the user
    has already closed. The static `,help` answer ("the hole wants: int") can

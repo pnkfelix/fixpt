@@ -40,6 +40,20 @@ impl Interner {
         s
     }
 
+    /// Forget every symbol interned since the table had `len` entries.
+    ///
+    /// For work that must leave no trace — checking a form while it is still
+    /// being typed — whose symbols nothing will refer to afterwards. A later
+    /// `intern` reuses the slots, so nothing that outlives the work may hold
+    /// one of the forgotten symbols.
+    pub fn truncate(&mut self, len: usize) {
+        if len >= self.names.len() {
+            return;
+        }
+        self.names.truncate(len);
+        self.index.retain(|_, s| (s.0 as usize) < len);
+    }
+
     pub fn get(&self, name: &str) -> Option<Sym> {
         self.index.get(name).copied()
     }

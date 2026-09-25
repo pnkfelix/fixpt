@@ -65,7 +65,11 @@ pub fn repl(backend: Backend) -> i32 {
     let mut n = 0usize;
     loop {
         reader.set_completions(known_names(&session));
-        let text = match reader.read("fx87> ", "     | ") {
+        let line = {
+            let mut oracle = Oracle { session: &mut session };
+            reader.read_with("fx87> ", "     | ", &mut oracle, "")
+        };
+        let text = match line {
             Line::Eof => {
                 reader.save();
                 return 0;
@@ -129,7 +133,9 @@ fn known_names(session: &Fx87Session) -> Vec<String> {
         .p
         .interner
         .names()
-        .filter(|n| !n.starts_with('%') && n.len() > 1)
+        .filter(|n| !n.starts_with('%') && !n.chars().all(|c| c.is_ascii_digit()))
+        // Unification variables are named by their alpha numbers; `+` is one
+        // character long and a real name.
         .map(str::to_string)
         .collect()
 }
@@ -361,17 +367,7 @@ fn answer_hole(session: &mut Fx87Session, form: &Syntax) -> Option<Vec<String>> 
     }
 
     // `(f a … ,help … )` — the hole is an argument.
-    let fun_ty = type_of(session, &items[0])?;
-    let mut known = Vec::new();
-    for (i, arg) in items.iter().enumerate().skip(1) {
-        if i == at {
-            continue;
-        }
-        if let Some(t) = type_of(session, arg) {
-            known.push((i - 1, t));
-        }
-    }
-    let want = session.checker.expected_argument(fun_ty, &known, at - 1)?;
+    let want = hole_want(session, &items, at)?;
     let mut out = vec![format!("; the hole wants: {}", show(session, want))];
     let found = session.checker.returning(want);
     let lines = render(session, found);
@@ -422,6 +418,99 @@ fn dynamic_hole(session: &mut Fx87Session, items: &[Syntax], at: usize) -> Vec<S
     out
 }
 
+/// What the argument at `at` of the application `items` must be — given the
+/// operator's type and whatever the other arguments already pin down.
+fn hole_want(session: &mut Fx87Session, items: &[Syntax], at: usize) -> Option<fixpt_fx87::DescId> {
+    let fun_ty = type_of(session, &items[0])?;
+    let mut known = Vec::new();
+    for (i, arg) in items.iter().enumerate().skip(1) {
+        if i == at {
+            continue;
+        }
+        if let Some(t) = type_of(session, arg) {
+            known.push((i - 1, t));
+        }
+    }
+    session.checker.expected_argument(fun_ty, &known, at - 1)
+}
+
+// ------------------------------------------------ checking while typing
+
+/// The FX-87 REPL's oracle: the Rust reader decides what `Enter` does, and the
+/// checker comments on the form as it is typed — see [`crate::speculate`].
+struct Oracle<'a> {
+    session: &'a mut Fx87Session,
+}
+
+impl crate::lineedit::Oracle for Oracle<'_> {
+    fn status(&mut self, text: &str, at_enter: bool) -> crate::lineedit::Status {
+        crate::lineedit::Reread(SyntaxProfile::FX87).status(text, at_enter)
+    }
+
+    fn notes(&mut self, text: &str) -> Vec<crate::lineedit::Note> {
+        let Some(p) = crate::speculate::partial(text, SyntaxProfile::FX87) else {
+            return Vec::new();
+        };
+        // Leave no trace: symbols read here are forgotten afterwards, so a
+        // typo never turns up as a completion.
+        let mark = self.session.checker.p.interner.len();
+        let notes = speculative_notes(self.session, text, &p);
+        self.session.checker.p.interner.truncate(mark);
+        notes
+    }
+}
+
+fn speculative_notes(
+    session: &mut Fx87Session,
+    text: &str,
+    p: &crate::speculate::Partial,
+) -> Vec<crate::lineedit::Note> {
+    use crate::lineedit::Note;
+    let Some(forms) = read_quietly(session, &p.closed) else { return Vec::new() };
+    for form in &forms {
+        let env = session.checker.env.clone();
+        let checked = session
+            .checker
+            .p
+            .parse_exp(form, &Default::default())
+            .and_then(|e| session.checker.check(e, &env));
+        if let Err(e) = checked {
+            // A finished text's errors are all about what was typed; an
+            // unfinished one's only when they lie inside a finished subform.
+            let (start, end) = (e.span.start as usize, e.span.end as usize);
+            if p.finished(text) || p.believe(start, end) {
+                return vec![Note { span: char_span(text, start, end), message: e.message, error: true }];
+            }
+        }
+    }
+    // Nothing wrong with what is finished: say what the argument at the
+    // cursor should be.
+    let hint = p.hole_form.as_ref().and_then(|h| {
+        let form = read_quietly(session, h)?.into_iter().next()?;
+        let (items, at) = hole_position(session, &form)?;
+        let want = hole_want(session, &items, at)?;
+        let op = fixpt_read::write_syntax(&items[0], &session.checker.p.interner);
+        Some(format!("argument {at} of {op} wants {}", show(session, want)))
+    });
+    hint.map(|message| vec![Note { span: None, message, error: false }]).unwrap_or_default()
+}
+
+/// Read without recording a source or reporting anything.
+fn read_quietly(session: &mut Fx87Session, text: &str) -> Option<Vec<Syntax>> {
+    let mut interner = std::mem::take(&mut session.checker.p.interner);
+    let result = Reader::new(text, fixpt_read::FileId(0), SyntaxProfile::FX87, &mut interner).read_all();
+    session.checker.p.interner = interner;
+    result.ok()
+}
+
+/// A byte span of `text` as characters, if it is a real one.
+fn char_span(text: &str, start: usize, end: usize) -> Option<(usize, usize)> {
+    if start >= end || end > text.len() {
+        return None;
+    }
+    Some((text[..start].chars().count(), text[..end].chars().count()))
+}
+
 /// The type of one subexpression, or `None` if it does not check.
 fn type_of(session: &mut Fx87Session, form: &Syntax) -> Option<fixpt_fx87::DescId> {
     let env = session.checker.env.clone();
@@ -431,4 +520,65 @@ fn type_of(session: &mut Fx87Session, form: &Syntax) -> Option<fixpt_fx87::DescI
 
 fn show(session: &Fx87Session, ty: fixpt_fx87::DescId) -> String {
     fixpt_fx87::unparse::unparse(&session.checker.p.arena, &session.checker.p.interner, ty)
+}
+
+
+#[cfg(test)]
+mod speculative {
+    use super::*;
+    use crate::lineedit::{Note, Oracle as _};
+
+    fn notes(text: &str) -> Vec<Note> {
+        let mut session = Fx87Session::with_backend(Backend::Ast).expect("starts");
+        let before = session.checker.p.interner.len();
+        let notes = Oracle { session: &mut session }.notes(text);
+        assert_eq!(session.checker.p.interner.len(), before, "checking left symbols behind");
+        notes
+    }
+
+    #[test]
+    fn an_error_in_a_finished_subform_is_reported_while_typing() {
+        let n = notes("(+ 1 (car 5) ");
+        assert_eq!(n.len(), 1, "{n:?}");
+        assert!(n[0].error);
+        assert_eq!(n[0].span, Some((5, 12)), "{n:?}");
+    }
+
+    #[test]
+    fn what_closing_off_would_break_is_not_reported() {
+        for text in ["(if", "(if #t", "(+ 1", "(car"] {
+            assert!(notes(text).iter().all(|n| !n.error), "{text:?}: {:?}", notes(text));
+        }
+    }
+
+    #[test]
+    fn a_name_nothing_binds_is_reported_once_it_is_finished() {
+        assert!(notes("(+ 1 nosuchname").iter().all(|n| !n.error), "still being typed");
+        let n = notes("(+ 1 nosuchname ");
+        assert!(n.first().is_some_and(|n| n.error), "{n:?}");
+    }
+
+    #[test]
+    fn a_finished_form_is_judged_whole() {
+        let n = notes("(+ 1 \"s\")");
+        assert!(n.first().is_some_and(|n| n.error), "{n:?}");
+        assert!(notes("(+ 1 2)").is_empty());
+    }
+
+    #[test]
+    #[ignore = "prints what the notes say, for a person to read"]
+    fn show_notes() {
+        for t in ["(+ 1 (car 5) ", "(+ 1 nosuchname ", "(+ 1 \"s\")", "(vector-ref (make-vector 3 0) ", "(vector-ref (make-vector 3 0) 1"] {
+            println!("{t:<34} => {:?}", notes(t));
+        }
+    }
+
+    #[test]
+    fn the_argument_at_the_cursor_is_described() {
+        let n = notes("(vector-ref (make-vector 3 0) ");
+        assert_eq!(n.len(), 1, "{n:?}");
+        assert!(!n[0].error);
+        assert!(n[0].message.contains("argument 2 of vector-ref wants"), "{n:?}");
+        assert!(n[0].message.contains("int"), "{n:?}");
+    }
 }

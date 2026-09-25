@@ -53,6 +53,22 @@ pub enum Status {
 /// whether to submit.
 pub trait Oracle {
     fn status(&mut self, text: &str, at_enter: bool) -> Status;
+
+    /// What a checker has to say about the text so far — advisory only, so it
+    /// never changes what `Enter` does. Asked on every keystroke.
+    fn notes(&mut self, _text: &str) -> Vec<Note> {
+        Vec::new()
+    }
+}
+
+/// A checker's remark about text still being typed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Note {
+    /// The characters it is about, if it is about particular ones.
+    pub span: Option<(usize, usize)>,
+    pub message: String,
+    /// An error rather than a hint.
+    pub error: bool,
 }
 
 /// The Rust reader, re-reading from the start each time.
@@ -129,14 +145,9 @@ impl LineReader {
     }
 
     /// Read one complete form. `prompt` starts it; `continuation` prefixes the
-    /// remaining lines of a form that is not finished yet.
-    pub fn read(&mut self, prompt: &str, continuation: &str) -> Line {
-        let mut oracle = Reread(self.profile);
-        self.read_with(prompt, continuation, &mut oracle, "")
-    }
-
-    /// Read one form, asking `oracle` what the text is, starting from
-    /// `initial` — the form being given back after a hole was answered.
+    /// remaining lines of a form that is not finished yet. `oracle` says what
+    /// the text is, and `initial` is where to start — the form being given
+    /// back after a hole was answered.
     pub fn read_with(
         &mut self,
         prompt: &str,
@@ -472,8 +483,8 @@ mod raw {
             let mut pending: Vec<char> = Vec::new();
 
             self.cursor_row = 0;
-            let status = oracle.status(&buf.iter().collect::<String>(), false);
-            self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone(), &status);
+            let (status, notes) = super::consult(oracle, &buf);
+            self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone(), &status, &notes);
             loop {
                 let key = match read_key() {
                     Some(k) => k,
@@ -594,8 +605,8 @@ mod raw {
                 // Asked on every keystroke: with the eager reader this is one
                 // character's worth of parsing, and it is what lets a mistake
                 // be marked at the moment it is typed.
-                let status = oracle.status(&buf.iter().collect::<String>(), false);
-                self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone(), &status);
+                let (status, notes) = super::consult(oracle, &buf);
+                self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone(), &status, &notes);
             }
         }
 
@@ -656,15 +667,27 @@ mod raw {
             profile: SyntaxProfile,
             words: &[String],
             status: &super::Status,
+            notes: &[super::Note],
         ) {
             let width = self.width.max(8);
             let text: String = buf.iter().collect();
             let lines: Vec<&str> = text.split('\n').collect();
-            let error_at = match status {
-                super::Status::Invalid { at, .. } => Some(*at),
-                _ => None,
+            // One thing to say under the form: a read error if there is one —
+            // it is the reader's, and blocks — else the first checker error,
+            // else a hint.
+            let (marks, below_note) = match status {
+                super::Status::Invalid { at, message } => {
+                    (vec![(*at, *at + 1, super::paint::ERROR)], Some((message.clone(), super::paint::DIM)))
+                }
+                _ => match notes.iter().find(|n| n.error).or_else(|| notes.first()) {
+                    Some(n) => (
+                        n.span.map(|(a, b)| vec![(a, b, super::paint::UNDERLINE)]).unwrap_or_default(),
+                        Some((n.message.clone(), if n.error { super::paint::NOTE_ERROR } else { super::paint::DIM })),
+                    ),
+                    None => (Vec::new(), None),
+                },
             };
-            let painted = self.paint(&text, cursor, profile, words, error_at);
+            let painted = self.paint(&text, cursor, profile, words, &marks);
 
             let mut out = String::new();
             if self.cursor_row > 0 {
@@ -701,10 +724,10 @@ mod raw {
             // form, now, rather than when `Enter` is pressed. Cut to fit one
             // row, so it cannot wrap and throw the arithmetic off.
             let mut below = last_screen_row;
-            if let super::Status::Invalid { message, .. } = status {
+            if let Some((message, style)) = below_note {
                 let note: String = format!("; {message}").chars().take(width - 1).collect();
                 out.push_str("\r\n");
-                out.push_str(super::paint::DIM);
+                out.push_str(style);
                 out.push_str(&note);
                 out.push_str(super::paint::RESET);
                 below += 1;
@@ -890,23 +913,39 @@ mod paint {
     pub const MATCH: &str = "\x1b[1;33m";
     /// The character the reader rejected.
     pub const ERROR: &str = "\x1b[1;37;41m";
+    /// What a checker objects to.
+    pub const UNDERLINE: &str = "\x1b[4;31m";
+    /// A checker's objection, under the form.
+    pub const NOTE_ERROR: &str = "\x1b[31m";
+}
+
+/// Ask the oracle about the buffer: its status, and its notes.
+fn consult(oracle: &mut dyn Oracle, buf: &[char]) -> (Status, Vec<Note>) {
+    let text: String = buf.iter().collect();
+    let status = oracle.status(&text, false);
+    let notes = if matches!(status, Status::Invalid { .. }) { Vec::new() } else { oracle.notes(&text) };
+    (status, notes)
 }
 
 impl raw::Editor {
     /// The buffer with colour escapes inserted.
+    ///
+    /// Each character gets a style — from its token, then overridden by
+    /// `marks`, which are `(start, end, style)` in characters — and runs of
+    /// the same style are emitted together. Styling per character rather than
+    /// per token is what lets a mark cover part of a token, or several.
     pub(crate) fn paint(
         &self,
         text: &str,
         cursor: usize,
         profile: fixpt_read::SyntaxProfile,
         words: &[String],
-        error_at: Option<usize>,
+        marks: &[(usize, usize, &'static str)],
     ) -> String {
         use fixpt_read::TokenKind;
         if !self.colour {
             return text.to_string();
         }
-        let error_byte = error_at.and_then(|i| text.char_indices().nth(i).map(|(b, _)| b));
         let toks = fixpt_read::tokens(text, profile);
         // `cursor` is a character index; the tokens speak in bytes.
         let cursor_byte = text
@@ -920,7 +959,9 @@ impl raw::Editor {
             fixpt_read::match_delimiter(&toks, before)
         });
 
-        let mut out = String::with_capacity(text.len() * 2);
+        let chars: Vec<(usize, char)> = text.char_indices().collect();
+        let mut style: Vec<Option<&'static str>> = vec![None; chars.len()];
+        let mut ci = 0usize;
         for t in &toks {
             let body = &text[t.start..t.end];
             let highlighted = pair.is_some_and(|(o, c)| o.start == t.start || c.start == t.start);
@@ -941,26 +982,36 @@ impl raw::Editor {
                     _ => None,
                 }
             };
-            let emit = |out: &mut String, piece: &str| match colour {
-                Some(c) if !piece.is_empty() => {
-                    out.push_str(c);
-                    out.push_str(piece);
-                    out.push_str(paint::RESET);
-                }
-                _ => out.push_str(piece),
-            };
-            match error_byte {
-                // The rejected character sits in this token: mark just it.
-                Some(e) if (t.start..t.end).contains(&e) => {
-                    let len = text[e..].chars().next().map_or(1, char::len_utf8);
-                    emit(&mut out, &text[t.start..e]);
-                    out.push_str(paint::ERROR);
-                    out.push_str(&text[e..e + len]);
-                    out.push_str(paint::RESET);
-                    emit(&mut out, &text[e + len..t.end]);
-                }
-                _ => emit(&mut out, body),
+            while ci < chars.len() && chars[ci].0 < t.end {
+                style[ci] = colour;
+                ci += 1;
             }
+        }
+        for &(a, b, m) in marks {
+            for s in style.iter_mut().take(b.min(chars.len())).skip(a) {
+                *s = Some(m);
+            }
+        }
+
+        let mut out = String::with_capacity(text.len() * 2);
+        let mut i = 0;
+        while i < chars.len() {
+            let st = style[i];
+            let mut j = i;
+            while j < chars.len() && style[j] == st {
+                j += 1;
+            }
+            let from = chars[i].0;
+            let to = chars.get(j).map_or(text.len(), |(b, _)| *b);
+            match st {
+                Some(c) => {
+                    out.push_str(c);
+                    out.push_str(&text[from..to]);
+                    out.push_str(paint::RESET);
+                }
+                None => out.push_str(&text[from..to]),
+            }
+            i = j;
         }
         out
     }

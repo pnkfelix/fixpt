@@ -11,6 +11,7 @@ mod fx87;
 mod fx91;
 mod image_run;
 mod lineedit;
+mod speculate;
 
 use crate::lineedit::{Line, LineReader};
 use fixpt_engine::Backend;
