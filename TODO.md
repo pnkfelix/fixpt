@@ -370,3 +370,66 @@ own `forever`/`abort` example and a capture-free `aif` are in
 
 Not done, and not needed yet: `identifier-syntax`'s two-clause form with a
 `set!` rule (R6RS), which would let `(set! it v)` mean something.
+
+---
+
+## 11. Speculative analysis as you type, and moving the tooling into FX
+
+**The idea.** The eager reader reports *read* errors as they are typed. The
+same should hold for expansion errors and, in FX, type and effect errors, by
+analysing each form speculatively while it is still being written. Anything run
+speculatively must have no effects anyone could notice, and the language that
+can *check* that is FX. So the REPL's own machinery — the eager reader, and
+eventually the expander — should move from Scheme into FX, where the effect
+system says what may be run on every keystroke.
+
+**The prerequisite: control effects.** The eager reader is built on first-class
+continuations, and FX-87 as archived has none. Jouvelot & Gifford, *Reasoning
+about Continuations with Control Effects* (PLDI '89), gives them. It is not in
+the archive — the crawler never fetched it — but it is still served at
+<https://groups.csail.mit.edu/cgs/pubs/pldi89-jouvelot.pdf>. The paper:
+
+- adds two control effects on regions: `(goto r)`, for an expression that may
+  not return to its continuation, and `(comefrom r)`, for one that may keep its
+  continuation for later use;
+- types `cwcc` as
+  `(poly (r region) (poly (t type) (poly (e effect)
+    (subr (maxeff (comefrom r) e) ((subr e ((subr (goto r) (t) void)) t)) t))))`;
+- masks both when the expression neither imports variables nor returns values
+  whose types mention `r`. The `goto` rule is stricter than FX-87's memory
+  masking, and the paper has a contrived program showing why.
+- notes that masked control effects make continuations stack-allocatable,
+  and compares that to prompts and `shift`/`reset`, which "have to be
+  introduced by the programmer".
+
+It says the system was implemented as an extension of FX-87, but no
+implementation survives in the archive (`grep` finds no `goto`/`comefrom`
+effects in `mit-psrg-fx`). The paper is the specification, and its examples are
+the conformance cases.
+
+**What it does not cover, and has to be designed.** Our tooling uses delimited
+control — tagged prompts, composable continuations, continuation marks — not
+just `cwcc`. A hypothesis to test: a prompt tag plays the part of a region, and
+`call-with-continuation-prompt` is where control effects on it are masked,
+under the paper's conditions. Marks look like reads and writes on a dynamic
+context. None of this is in the paper.
+
+**What "safe to speculate" should mean.** It is not "pure". The eager reader
+returns its checkpoint continuation to its caller, so its `comefrom` effect
+cannot be masked. What makes it safe is that its effects are confined to
+regions the caller owns: allocation, and control on its own prompt. The
+criterion to aim for is no `read` or `write` on a region the REPL shares with
+the user's program.
+
+**Order.**
+1. Speculative checking in the FX REPLs first. The checkers are pure Rust, so
+   this needs none of the above: re-read, close off the unfinished form with
+   holes, check, and report only errors that lie wholly inside subforms the user
+   has already closed. The static `,help` answer ("the hole wants: int") can
+   become a live hint at the cursor.
+2. Speculative `syntax-rules` expansion for Scheme, against a throwaway copy
+   of the expander state. Stop at procedural macros, which run arbitrary
+   Scheme.
+3. Control effects in the FX-87 checker, with the paper's examples as tests.
+4. Delimited control and marks in FX: the design work above.
+5. The eager reader in FX-87, then as much of the expander as makes sense.
