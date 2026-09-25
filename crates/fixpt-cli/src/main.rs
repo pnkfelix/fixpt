@@ -37,6 +37,7 @@ options:
   --dialect scheme|fx87|fx91|fx26  source language (default: scheme)
   --engine bytecode|ast          execution engine (default: bytecode)
   --main NAME                    an image's entry point (default: main)
+  --reader scheme|fx26           the Scheme REPL's eager reader (default: scheme)
 
 `--dialect fx87` and `--dialect fx91` select a *language*, not merely its
 reader: a form is type- and effect-checked, erased to Scheme and run on the same
@@ -44,6 +45,11 @@ engine. Each REPL reports in its own reference's layout — FX-91 puts the type
 and effect above the value, FX-87 after it. `--dialect fx26` reports as FX-87
 does; its lowered Scheme carries what the checker proved, as `%fx-note`
 claims the compiler acts on.
+
+`--reader fx26` reads the Scheme REPL's input with the eager reader written in
+FX-26 rather than the one written in Scheme. It runs on every keystroke, so it
+is loaded only after its licence is checked: every entry point's effect must
+stay within the reader's own regions.
 
 An image built with `build` is a program in its own right: it carries its own
 heap, needs no `fixpt` on the target, and runs its entry point when invoked.
@@ -111,7 +117,7 @@ fn run(args: &[String]) -> i32 {
             0
         }
         Some("repl") => match dialect {
-            Dialect::Scheme => repl(profile, backend),
+            Dialect::Scheme => repl(profile, backend, flags.reader.as_deref() == Some("fx26")),
             Dialect::Fx87 => fx87::repl(backend),
             Dialect::Fx91 => fx91::repl(backend),
             Dialect::Fx26 => fx26::repl(backend),
@@ -205,6 +211,7 @@ struct Flags {
     engine: Option<String>,
     out: Option<String>,
     main: Option<String>,
+    reader: Option<String>,
 }
 
 fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
@@ -213,13 +220,15 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         engine: None,
         out: None,
         main: None,
+        reader: None,
     };
     let mut rest = Vec::new();
     let mut i = 0;
     // Each flag takes a value, spelled either `--flag v` or `--flag=v`.
     type Setter = fn(&mut Flags, String);
-    let named: [(&str, Setter); 4] = [
+    let named: [(&str, Setter); 5] = [
         ("--dialect", |f, v| f.dialect = Some(v)),
+        ("--reader", |f, v| f.reader = Some(v)),
         ("--engine", |f, v| f.engine = Some(v)),
         ("--main", |f, v| f.main = Some(v)),
         ("-o", |f, v| f.out = Some(v)),
@@ -311,7 +320,7 @@ fn dump_command(
     }
 }
 
-fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
+fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend, fx26_reader: bool) -> i32 {
     let mut session = Session::with_backend(backend);
     session.profile = profile;
     let engine = match backend {
@@ -322,12 +331,23 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
     println!("(an expression, `,help` for commands, or ^D to leave)");
 
     let mut reader = LineReader::new(".fixpt_history", profile);
-    // The eager reader is Scheme and reads the Scheme profile; if it cannot
-    // be loaded, the REPL still works, re-reading with the Rust reader.
-    let mut eager = if profile.name == "scheme" {
-        fixpt_scheme::eager::EagerReader::new(&mut session).ok()
-    } else {
+    // The eager reader reads the Scheme profile; if it cannot be loaded, the
+    // REPL still works, re-reading with the Rust reader.
+    let mut eager = if profile.name != "scheme" {
         None
+    } else if fx26_reader {
+        match load_fx26_reader(&mut session) {
+            Ok(r) => {
+                println!("(reading with the eager reader written in FX-26; its licence checked)");
+                Some(r)
+            }
+            Err(why) => {
+                println!("(the FX-26 reader is not used: {why}; reading with the Scheme one)");
+                fixpt_scheme::eager::EagerReader::new(&mut session).ok()
+            }
+        }
+    } else {
+        fixpt_scheme::eager::EagerReader::new(&mut session).ok()
     };
     // What to give back for further editing after a mid-form hole.
     let mut initial = String::new();
@@ -478,6 +498,17 @@ fn hole_report(raised: &str) -> String {
         }
     }
     out
+}
+
+/// The eager reader written in FX-26, checked, licensed and loaded into this
+/// session. Nothing of it runs until the licence is checked: it runs on every
+/// keystroke, so every entry point's effect must stay within the regions the
+/// reader owns — allocation, and its own state, prompt and marks.
+fn load_fx26_reader(session: &mut Session) -> Result<fixpt_scheme::eager::EagerReader, String> {
+    let mut compiled = fixpt_fx26::session::compile_program(fixpt_fx26::EAGER_READER).map_err(|e| e.to_string())?;
+    compiled.checker.reader_licence()?;
+    compiled.load_into(session)?;
+    fixpt_scheme::eager::EagerReader::attach(session, "fx:").map_err(|e| e.to_string())
 }
 
 /// The eager reader as the line editor's oracle: one checkpoint per character,

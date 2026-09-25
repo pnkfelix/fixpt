@@ -82,7 +82,7 @@ pub fn repl(backend: Backend) -> i32 {
     loop {
         reader.set_completions(known_names(&session.checker));
         let line = {
-            let mut oracle = Oracle { checker: &mut session.checker };
+            let mut oracle = Oracle { session: &mut session };
             reader.read_with("fx26> ", "     | ", &mut oracle, "")
         };
         let text = match line {
@@ -347,9 +347,11 @@ fn answer_hole(c: &mut Checker, form: &Syntax) -> Option<Vec<String>> {
 // ------------------------------------------------ checking while typing
 
 /// Reads with the Rust reader, and checks the form as it is typed — see
-/// [`crate::speculate`].
+/// [`crate::speculate`]. A finished expression is also *run* as it is typed,
+/// when its effect is licensed (`fixpt_fx26::licence`): its value is shown
+/// before `Enter`, and nothing it could do is visible to the program.
 struct Oracle<'a> {
-    checker: &'a mut Checker,
+    session: &'a mut Fx26Session,
 }
 
 impl crate::lineedit::Oracle for Oracle<'_> {
@@ -363,14 +365,15 @@ impl crate::lineedit::Oracle for Oracle<'_> {
         };
         // Leave no trace: symbols read here are forgotten afterwards, so a
         // typo never turns up as a completion.
-        let mark = self.checker.interner.len();
-        let notes = speculative_notes(self.checker, text, &p);
-        self.checker.interner.truncate(mark);
+        let mark = self.session.checker.interner.len();
+        let notes = speculative_notes(self.session, text, &p);
+        self.session.checker.interner.truncate(mark);
         notes
     }
 }
 
-fn speculative_notes(c: &mut Checker, text: &str, p: &crate::speculate::Partial) -> Vec<Note> {
+fn speculative_notes(session: &mut Fx26Session, text: &str, p: &crate::speculate::Partial) -> Vec<Note> {
+    let c = &mut session.checker;
     let Ok(forms) = c.read_in(FileId(0), &p.closed) else { return Vec::new() };
     // Each form is tried in the environment the ones before it would make,
     // and all of it is forgotten afterwards.
@@ -385,6 +388,20 @@ fn speculative_notes(c: &mut Checker, text: &str, p: &crate::speculate::Partial)
     if let Some(note) = error {
         return vec![note];
     }
+    // One finished expression: run it early, if the licence allows.
+    if p.finished(text)
+        && let [form] = &forms[..]
+    {
+        use fixpt_fx26::session::Speculation;
+        let message = match session.speculate(form) {
+            Speculation::Value(v) => Some(format!("= {v}")),
+            Speculation::Failed(e) => Some(format!("running it fails: {e}")),
+            Speculation::NotLicensed(atom) => Some(format!("not run early: it may {atom}")),
+            Speculation::Rejected(_) | Speculation::NotAnExpression => None,
+        };
+        return message.map(|message| vec![Note { span: None, message, error: false }]).unwrap_or_default();
+    }
+    let c = &mut session.checker;
     let hint = p.hole_form.as_ref().and_then(|h| {
         let form = c.read_in(FileId(0), h).ok()?.into_iter().next()?;
         let (items, at) = hole_position(c, &form)?;
@@ -422,15 +439,19 @@ mod speculative {
     use super::*;
     use crate::lineedit::Oracle as _;
 
-    fn notes_in(c: &mut Checker, text: &str) -> Vec<Note> {
-        let before = c.interner.len();
-        let notes = Oracle { checker: c }.notes(text);
-        assert_eq!(c.interner.len(), before, "checking left symbols behind");
+    fn notes_in(s: &mut Fx26Session, text: &str) -> Vec<Note> {
+        let before = s.checker.interner.len();
+        let notes = Oracle { session: s }.notes(text);
+        assert_eq!(s.checker.interner.len(), before, "checking left symbols behind");
         notes
     }
 
+    fn session() -> Fx26Session {
+        Fx26Session::with_backend(Backend::Ast).expect("starts")
+    }
+
     fn notes(text: &str) -> Vec<Note> {
-        notes_in(&mut Checker::new(), text)
+        notes_in(&mut session(), text)
     }
 
     #[test]
@@ -453,7 +474,27 @@ mod speculative {
     #[test]
     fn a_finished_form_is_judged_whole() {
         assert!(notes("(+ 1 #t)").first().is_some_and(|n| n.error));
-        assert!(notes("(+ 1 2)").is_empty());
+    }
+
+    /// A finished expression whose effect is licensed runs as it is typed,
+    /// and its value is the hint.
+    #[test]
+    fn a_licensed_expression_shows_its_value_before_enter() {
+        assert_eq!(notes("(+ 1 2)")[0].message, "= 3");
+        assert_eq!(notes("(car (cons 1 #t))")[0].message, "= 1");
+    }
+
+    /// One that is not licensed says why, and does not run.
+    #[test]
+    fn an_unlicensed_expression_says_why_it_was_not_run() {
+        let mut s = session();
+        let forms = s.checker.read_in(FileId(0), "(define c (ref int @c) (new 1))").expect("reads");
+        s.run(&forms[0]).expect("runs");
+        assert_eq!(notes_in(&mut s, "(set c 5)")[0].message, "not run early: it may (write @c)");
+        let forms = s.checker.read_in(FileId(0), "(define peek (subr (read @c) () int) (lambda () (get c)))").expect("reads");
+        s.run(&forms[0]).expect("runs");
+        let forms = s.checker.read_in(FileId(0), "(peek)").expect("reads");
+        assert_eq!(s.run(&forms[0]).expect("runs").value, Ok(Some("1".into())));
     }
 
     #[test]
@@ -474,10 +515,10 @@ mod speculative {
 
     #[test]
     fn a_definition_being_typed_is_not_kept() {
-        let mut c = Checker::new();
-        assert!(notes_in(&mut c, "(define z 4) (+ z 1)").is_empty());
-        let x = c.read_in(FileId(0), "z").expect("reads");
-        assert!(c.top(&x[0]).is_err(), "a definition typed but not entered was kept");
+        let mut s = session();
+        assert!(notes_in(&mut s, "(define z 4) (+ z 1)").is_empty());
+        let x = s.checker.read_in(FileId(0), "z").expect("reads");
+        assert!(s.checker.top(&x[0]).is_err(), "a definition typed but not entered was kept");
     }
 }
 

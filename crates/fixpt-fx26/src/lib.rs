@@ -23,6 +23,7 @@ pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 
 pub mod check;
 pub mod infer;
+pub mod licence;
 pub mod lower;
 pub mod parse;
 pub mod session;

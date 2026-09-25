@@ -30,6 +30,95 @@ pub struct Fx26Session {
     pub globals: Globals,
 }
 
+/// The budget for one speculative run: enough for a REPL-sized
+/// computation, small enough that a loop costs a keystroke nothing noticeable.
+pub const SPECULATION_STEP_LIMIT: u64 = 200_000;
+
+/// What running a form early came to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Speculation {
+    /// It ran, to this value.
+    Value(String),
+    /// It ran, and failed — `(car nil)` is well typed.
+    Failed(String),
+    /// It does not check.
+    Rejected(String),
+    /// It was not run: its effect has this atom, which the licence does not
+    /// cover.
+    NotLicensed(String),
+    /// A definition: running one early would define it.
+    NotAnExpression,
+}
+
+/// Check and lower one top-level form, keeping what it defines.
+pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(Top, String)> {
+    let top = checker.top(form)?;
+    let code = match &top {
+        Top::DefineType { .. } | Top::DefineEffect { .. } => String::new(),
+        Top::Define { name, exp, recursive, .. } => {
+            // A recursive definition refers to itself; a plain one to
+            // whatever the name meant before it.
+            let (global, body) = if *recursive {
+                let g = globals.define(checker, *name);
+                (g, lower(checker, globals, *exp))
+            } else {
+                let body = lower(checker, globals, *exp);
+                (globals.define(checker, *name), body)
+            };
+            format!("(define {global} {body})")
+        }
+        Top::Exp(k) => lower(checker, globals, k.exp),
+    };
+    Ok((top, code))
+}
+
+/// A whole program, checked and lowered but not run: the checker that
+/// checked it, and the Scheme for each form, in order.
+pub struct Compiled {
+    pub checker: Checker,
+    pub code: Vec<String>,
+}
+
+/// Check and lower the program `text`, whose definitions may come in any
+/// order.
+pub fn compile_program(text: &str) -> R<Compiled> {
+    let mut checker = Checker::new();
+    let mut globals = Globals::default();
+    let forms = checker.read_in(FileId(0), text)?;
+    let done = checker.declare_ahead(&forms)?;
+    for f in &forms {
+        if let Some([head, name, _, _]) = f.as_proper_list()
+            && head.as_symbol().is_some_and(|h| checker.interner.name(h) == "define")
+            && let Some(name) = name.as_symbol()
+        {
+            globals.declare(&checker, name);
+        }
+    }
+    let mut code = Vec::new();
+    for (f, done) in forms.iter().zip(done) {
+        if !done {
+            let (_, c) = compile_form(&mut checker, &mut globals, f)?;
+            if !c.is_empty() {
+                code.push(c);
+            }
+        }
+    }
+    Ok(Compiled { checker, code })
+}
+
+impl Compiled {
+    /// Load into `scheme`: the FX-26 runtime, then the program.
+    pub fn load_into(&self, scheme: &mut Session) -> Result<(), String> {
+        if scheme.global_value("%fx26-unit").is_none() {
+            scheme.eval_str("<fx26-runtime>", RUNTIME).map_err(|e| e.to_string())?;
+        }
+        for c in &self.code {
+            scheme.eval_str("<fx26>", c).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
 /// What one form did.
 pub struct Outcome {
     /// What checking found, as the REPL prints it after the value.
@@ -55,24 +144,35 @@ impl Fx26Session {
 
     /// Check one top-level form and lower it, without running it.
     pub fn compile(&mut self, form: &Syntax) -> R<(Top, String)> {
-        let top = self.checker.top(form)?;
-        let code = match &top {
-            Top::DefineType { .. } | Top::DefineEffect { .. } => String::new(),
-            Top::Define { name, exp, recursive, .. } => {
-                // A recursive definition refers to itself; a plain one to
-                // whatever the name meant before it.
-                let (global, body) = if *recursive {
-                    let g = self.globals.define(&self.checker, *name);
-                    (g, lower(&self.checker, &self.globals, *exp))
-                } else {
-                    let body = lower(&self.checker, &self.globals, *exp);
-                    (self.globals.define(&self.checker, *name), body)
-                };
-                format!("(define {global} {body})")
-            }
-            Top::Exp(k) => lower(&self.checker, &self.globals, k.exp),
+        compile_form(&mut self.checker, &mut self.globals, form)
+    }
+
+    /// Run `form` early, if the licence allows: check it without keeping
+    /// anything, and run it only if it is an expression whose effect is
+    /// licensed for a driver that owns no region of the program's. That
+    /// leaves allocation, and effects on regions inference made fresh for
+    /// this form alone, which masking has already removed. The run has a
+    /// budget of its own, since speculation must not hang the editor.
+    pub fn speculate(&mut self, form: &Syntax) -> Speculation {
+        let code = self.checker.try_top(form, |c, r| match r {
+            Err(e) => Err(Speculation::Rejected(e.message)),
+            Ok(Top::Exp(k)) => match crate::licence::unlicensed(&k.effect, &[]) {
+                Some(a) => Err(Speculation::NotLicensed(c.show_atom(a))),
+                None => Ok(lower(c, &self.globals, k.exp)),
+            },
+            Ok(_) => Err(Speculation::NotAnExpression),
+        });
+        let code = match code {
+            Ok(code) => code,
+            Err(s) => return s,
         };
-        Ok((top, code))
+        self.scheme.engine.set_step_limit(Some(SPECULATION_STEP_LIMIT));
+        let (_, result) = self.scheme.eval_capturing("<fx26-speculative>", &code);
+        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        match result {
+            Ok(v) => Speculation::Value(write_value(&self.scheme.rt.heap, v)),
+            Err(e) => Speculation::Failed(e.to_string()),
+        }
     }
 
     /// Run the forms of a whole program, declaring its definitions first.

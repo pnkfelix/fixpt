@@ -447,9 +447,11 @@ the user's program.
 2. Speculative `syntax-rules` expansion for Scheme, against a throwaway copy
    of the expander state. Stop at procedural macros, which run arbitrary
    Scheme.
-3. onward: now the plan for FX-26, the tooling's own language. See
-   [`docs/fx26.md`](docs/fx26.md). Its declared kernel and PLDI '89's control
-   effects are done, in a fresh checker (`crates/fixpt-fx26`) that does not
-   depend on FX-87's. Next: a checking REPL, then typed prompts, composable
-   continuations and marks, then bidirectional checking, then erasure to
-   Scheme so that FX-26 runs, and then the eager reader ported to it.
+3. **Done (2026-09-25): the plan for FX-26, the tooling's own language**
+   ([`docs/fx26.md`](docs/fx26.md)). The eager reader now exists in FX-26,
+   and the Scheme REPL can read with it (`--reader fx26`) once its licence is
+   checked. The FX-26 REPL runs licensed expressions as they are typed.
+   Next, beyond that plan: the expander and the speculative checker in
+   FX-26. Also still open: the shape loss in FX-87's eraser (§2), and
+   carrying more of FX-26's facts (region and control claims) through the
+   lowering.
