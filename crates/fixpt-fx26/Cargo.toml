@@ -1,0 +1,11 @@
+[package]
+name = "fixpt-fx26"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fixpt-read = { path = "../fixpt-read" }
+
+[lints]
+workspace = true

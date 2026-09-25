@@ -1,4 +1,8 @@
-# PLDI '89 control effects: the cases, for review
+# PLDI '89 control effects: the cases
+
+**Status (2026-09-25):** reviewed, then implemented. All seven pass as
+`crates/fixpt-fx26/tests/pldi89.rs`, each assertion marked with the basis
+given here.
 
 Jouvelot & Gifford, *Reasoning about Continuations with Control Effects*,
 PLDI '89. The file is `GiffordHistory/papers/pldi89-jouvelot.pdf`. Page
