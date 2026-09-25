@@ -1,0 +1,6 @@
+(define (f)
+  (define-syntax twice (syntax-rules () ((_ e) (begin e e))))
+  (define n 0)
+  (twice (set! n (+ n 1)))
+  n)
+(f)

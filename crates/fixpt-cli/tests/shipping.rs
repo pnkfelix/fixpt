@@ -10,21 +10,7 @@ use std::process::Command;
 
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
-const PROGRAM: &str = r#"
-(define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
-(define (sum-to n) (let loop ((i 0) (acc 0)) (if (> i n) acc (loop (+ i 1) (+ acc i)))))
-(define greeting "shipped")
-(define (main args)
-  (display greeting)
-  (display " ")
-  (display (fact 15))
-  (display " ")
-  (display (sum-to 1000))
-  (display " ")
-  (write args)
-  (newline)
-  0)
-"#;
+const PROGRAM: &str = include_str!("programs/shipping/prog.scm");
 
 /// A directory of this test's own, named after the case so parallel tests do
 /// not collide.

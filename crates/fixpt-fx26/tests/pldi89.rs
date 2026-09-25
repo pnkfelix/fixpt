@@ -12,6 +12,17 @@ use fixpt_fx26::Checker;
 /// `K`: a continuation returned as its own result (C4, C5).
 const K: &str = "(dletrec ((k (subr (goto @k) (k) void))) k)";
 
+/// A program from `programs/pldi89/` with its `{name}` holes filled in. The
+/// kernel has no way to name a type, so the long recursive ones are spliced.
+fn fill(template: &str, holes: &[(&str, &str)]) -> String {
+    let mut out = template.to_string();
+    for (name, text) in holes {
+        out = out.replace(&format!("{{{name}}}"), text);
+    }
+    assert!(!out.contains('{'), "an unfilled hole in:\n{out}");
+    out
+}
+
 fn atom(c: &mut Checker, text: &str) -> Atom {
     let e = c.effect_of_str(text).expect("an effect");
     *e.0.iter().next().expect("one atom")
@@ -122,13 +133,7 @@ fn c4_the_argument_keeps_both_control_effects() {
     // TRANSCRIBED: only the outer `cwcc`'s argument (the whole `let` does not
     // type — it passes `0` to a continuation).
     let got = c
-        .check_str(&format!(
-            "(lambda ((f {K}))
-               ((proj (proj (proj cwcc @k) {K}) (goto @k))
-                (lambda ((g {K})) (f g)))
-               (h)
-               f)"
-        ))
+        .check_str(&fill(include_str!("programs/pldi89/c4-argument.fx"), &[("K", K)]))
         .expect("checks");
     let fixpt_fx26::ast::Ty::Subr { effect, .. } = c.arena.get(got.ty).clone() else {
         panic!("a subroutine: {}", c.show_ty(got.ty));
@@ -156,12 +161,7 @@ fn c5_cwcc_calls_are_not_pure() {
 
 // ------------------------------------------------------------------- C6
 
-const C6: &str = "(begin ((proj (proj (proj cwcc @k) unit) (write @x))
-                          (lambda ((f (subr (goto @k) (unit) void)))
-                            ((proj (proj set @x) (subr pure () (subr (goto @k) (unit) void)))
-                             x
-                             (lambda () f))))
-                         (h))";
+const C6: &str = include_str!("programs/pldi89/c6.fx");
 
 fn c6_checker(masking: bool) -> Checker {
     let mut c = Checker::new();
@@ -204,17 +204,7 @@ fn c6_a_stored_continuation_keeps_its_comefrom() {
 fn c7_goto_not_masked_without_free_variables() {
     let p = "(dletrec ((p (pairof k k @p)) (k (subr (goto @k) (p) void))) p)";
     let k = "(dletrec ((p (pairof k k @p)) (k (subr (goto @k) (p) void))) k)";
-    let src = format!(
-        "((proj (proj (proj cwcc @k) {p})
-                (maxeff (alloc @p) (comefrom @k) (write @p) (read @p) (goto @k)))
-          (lambda ((f {k}))
-            (let ((y ((proj (proj cons @p) {k} {k}) f f)))
-              ((proj (proj (proj cwcc @k) {p}) (maxeff (write @p) (goto @k)))
-               (lambda ((g {k}))
-                 ((proj (proj set-cdr! @p) {k} {k}) y g)
-                 (f y)))
-              (((proj (proj car @p) {k} {k}) y) y))))"
-    );
+    let src = fill(include_str!("programs/pldi89/c7.fx"), &[("p", p), ("k", k)]);
     let mut c = Checker::new();
     let got = c.check_str(&src).unwrap_or_else(|e| panic!("C7 does not check: {e}"));
     // STATED (p. 7): not maskable. The condition that blocks it is the result

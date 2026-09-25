@@ -59,12 +59,7 @@ fn call_cc_escapes() {
 #[test]
 fn dynamic_wind_runs_after_on_escape() {
     assert_eq!(
-        ev("(let ((log '()))
-              (call/cc (lambda (k)
-                (dynamic-wind (lambda () (set! log (cons 'in log)))
-                              (lambda () (k 'escaped))
-                              (lambda () (set! log (cons 'out log))))))
-              (reverse log))"),
+        ev(include_str!("programs/smoke/wind-on-escape.scm")),
         "(in out)"
     );
 }

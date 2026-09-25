@@ -124,11 +124,7 @@ fn closures_and_tail_calls() {
         "(define (make-counter) (let ((n 0)) (lambda () (set! n (+ n 1)) n)))
          (define c (make-counter)) (c) (c) (list (c) ((make-counter)))",
         // A closure capturing a closure capturing a mutable binding.
-        "(define (outer)
-           (let ((total 0))
-             (lambda (x) (let ((step (lambda (d) (set! total (+ total d)))))
-                           (step x) total))))
-         (define f (outer)) (f 1) (f 2) (f 3)",
+        include_str!("programs/differential/closure-over-closure.scm"),
     ] {
         agree(src);
     }
@@ -148,11 +144,7 @@ fn recursion_shapes() {
         "(letrec ((a 1) (b (+ a 1)) (c (+ b 1))) (list a b c))",
         "(let loop ((i 0) (acc '())) (if (= i 6) (reverse acc) (loop (+ i 1) (cons (* i i) acc))))",
         fib.as_str(),
-        "(define (ack m n)
-           (cond ((= m 0) (+ n 1))
-                 ((= n 0) (ack (- m 1) 1))
-                 (else (ack (- m 1) (ack m (- n 1))))))
-         (ack 2 3)",
+        include_str!("programs/differential/ackermann.scm"),
     ] {
         agree(src);
     }
@@ -164,30 +156,16 @@ fn continuations() {
         "(+ 1 (call/cc (lambda (k) (k 1) 99)))",
         "(call/cc (lambda (k) (+ 1 (k 41))))",
         // Escaping from inside a fold.
-        "(define (find-first p xs)
-           (call/cc (lambda (return)
-             (for-each (lambda (x) (if (p x) (return x))) xs)
-             #f)))
-         (list (find-first even? '(1 3 4 5)) (find-first even? '(1 3 5)))",
+        include_str!("programs/differential/escape-from-fold.scm"),
         // Re-entrant: the continuation is called again after it has returned.
-        "(define k #f)
-         (define n 0)
-         (define r (+ 1 (call/cc (lambda (c) (set! k c) 1))))
-         (set! n (+ n 1))
-         (if (< n 3) (k n))
-         (list n r)",
+        include_str!("programs/differential/reentrant-continuation.scm"),
         // Winding.
         "(define trace '())
          (define (note x) (set! trace (cons x trace)))
          (dynamic-wind (lambda () (note 'in)) (lambda () (note 'body) 'v) (lambda () (note 'out)))
          (reverse trace)",
         // Escaping through a dynamic-wind runs the after thunk.
-        "(define trace '())
-         (call/cc (lambda (k)
-           (dynamic-wind (lambda () (set! trace (cons 'in trace)))
-                         (lambda () (k 'escaped))
-                         (lambda () (set! trace (cons 'out trace))))))
-         (reverse trace)",
+        include_str!("programs/differential/escape-through-wind.scm"),
         "(call-with-values (lambda () (values 1 2 3)) list)",
         "(call-with-values (lambda () (values)) (lambda args args))",
         "(+ 1 (call-with-values (lambda () (values 2)) (lambda (x) x)))",
@@ -207,11 +185,7 @@ fn conditions() {
         "(call/cc (lambda (k) (with-exception-handler (lambda (e) (k (list 'escaped e)))
                                 (lambda () (raise 'bad)))))",
         // Unwinding out of a guard still runs after-thunks.
-        "(define trace '())
-         (guard (e (#t (reverse (cons e trace))))
-           (dynamic-wind (lambda () (set! trace (cons 'in trace)))
-                         (lambda () (raise 'x))
-                         (lambda () (set! trace (cons 'out trace)))))",
+        include_str!("programs/differential/guard-unwinds.scm"),
     ] {
         agree(src);
     }
@@ -320,34 +294,7 @@ fn coroutines() {
     // Same-fringe: two trees with different shapes but the same leaves, walked
     // lazily in lockstep. Nothing else in the suite makes control jump between
     // two suspended computations.
-    let same_fringe = r#"
-      (define (make-walker tree)
-        (define return #f)
-        (define (walk t)
-          (cond ((null? t) 'skip)
-                ((pair? t) (walk (car t)) (walk (cdr t)))
-                (else (call/cc (lambda (resume)
-                        (set! walk-state resume)
-                        (return t))))))
-        (define walk-state #f)
-        (lambda ()
-          (call/cc (lambda (caller)
-            (set! return caller)
-            (if walk-state
-                (walk-state 'again)
-                (begin (walk tree) (return 'done)))))))
-      (define (same-fringe? a b)
-        (let ((wa (make-walker a)) (wb (make-walker b)))
-          (let loop ()
-            (let ((x (wa)) (y (wb)))
-              (cond ((and (eq? x 'done) (eq? y 'done)) #t)
-                    ((or (eq? x 'done) (eq? y 'done)) #f)
-                    ((eqv? x y) (loop))
-                    (else #f))))))
-      (list (same-fringe? '(1 (2 3)) '((1 2) 3))
-            (same-fringe? '(1 (2 3)) '((1 2) 4))
-            (same-fringe? '(1 2 3) '(1 2)))
-    "#;
+    let same_fringe = include_str!("programs/differential/same-fringe.scm");
     agree(same_fringe);
 
     // A continuation captured inside a loop and re-entered after the loop has
@@ -359,23 +306,7 @@ fn coroutines() {
     // a guard declared there would reset itself and loop forever. (It did, in
     // an earlier draft of this test; both engines looped identically, which is
     // its own small piece of evidence.)
-    agree(
-        "(define saved #f)
-         (define log '())
-         (define entries 0)
-         (define (run)
-           (let loop ((i 0))
-             (if (< i 3)
-                 (begin
-                   (if (= i 1) (call/cc (lambda (k) (set! saved k))))
-                   (set! log (cons i log))
-                   (loop (+ i 1)))
-                 'end)))
-         (run)
-         (set! entries (+ entries 1))
-         (if (< entries 2) (saved 'reentry))
-         (list entries (reverse log))",
-    );
+    agree(include_str!("programs/differential/reenter-finished-loop.scm"));
 
     // A continuation used as a value: stored, passed around, applied by `apply`.
     agree(

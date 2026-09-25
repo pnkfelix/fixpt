@@ -28,13 +28,7 @@ fn a_dumped_heap_still_runs() {
     session
         .eval_str(
             "<setup>",
-            "(define (twice x) (* 2 x))
-             (define (compose f g) (lambda (x) (f (g x))))
-             (define quadruple (compose twice twice))
-             (define greeting \"hello\")
-             (define numbers '(1 2 3))
-             (define counter 0)
-             (define (bump!) (set! counter (+ counter 1)) counter)",
+            include_str!("programs/image/setup.scm"),
         )
         .expect("setup runs");
 
@@ -122,12 +116,7 @@ fn a_dumped_compiled_heap_still_runs() {
     session
         .eval_str(
             "<setup>",
-            "(define (twice x) (* 2 x))
-             (define (compose f g) (lambda (x) (f (g x))))
-             (define quadruple (compose twice twice))
-             (define counter 0)
-             (define (bump!) (set! counter (+ counter 1)) counter)
-             (define (sum-to n) (let loop ((i 0) (acc 0)) (if (> i n) acc (loop (+ i 1) (+ acc i)))))",
+            include_str!("programs/image/compiled-setup.scm"),
         )
         .expect("setup runs");
 

@@ -1,0 +1,5 @@
+(define (outer)
+  (let ((total 0))
+    (lambda (x) (let ((step (lambda (d) (set! total (+ total d)))))
+                  (step x) total))))
+(define f (outer)) (f 1) (f 2) (f 3)

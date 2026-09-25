@@ -1,0 +1,7 @@
+(define (twice x) (* 2 x))
+(define (compose f g) (lambda (x) (f (g x))))
+(define quadruple (compose twice twice))
+(define greeting "hello")
+(define numbers '(1 2 3))
+(define counter 0)
+(define (bump!) (set! counter (+ counter 1)) counter)

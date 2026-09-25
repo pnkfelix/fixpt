@@ -1,0 +1,6 @@
+(define (twice x) (* 2 x))
+(define (compose f g) (lambda (x) (f (g x))))
+(define quadruple (compose twice twice))
+(define counter 0)
+(define (bump!) (set! counter (+ counter 1)) counter)
+(define (sum-to n) (let loop ((i 0) (acc 0)) (if (> i n) acc (loop (+ i 1) (+ acc i)))))

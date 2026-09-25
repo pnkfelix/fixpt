@@ -15,12 +15,7 @@ fn session(backend: Backend) -> Session {
     s.eval_str("<eager>", SOURCE).expect("the reader loads");
     s.eval_str(
         "<helper>",
-        "(define (eager-read-all text)
-           (let loop ((st (eager-start)) (i 0))
-             (cond ((not (eq? (eager-state-kind st) 'need)) st)
-                   ((= i (string-length text)) (eager-feed st #\\newline))
-                   (else (loop (eager-feed st (string-ref text i)) (+ i 1))))))
-         (define (eager-data text) (eager-state-data (eager-read-all text)))",
+        include_str!("programs/eager/read-all.scm"),
     )
     .expect("the helper loads");
     s
@@ -198,11 +193,7 @@ fn the_context_is_the_parse_stack() {
         let out = s
             .eval_to_string(
                 "<ctx>",
-                "(let loop ((st (eager-start)) (cs (string->list \"(vector-ref (make-vector 3 0) \")))
-                   (if (null? cs)
-                       (map (lambda (c) (if (eq? (car c) 'list) (list 'list (reverse (list-ref c 3))) c))
-                            (eager-context st))
-                       (loop (eager-feed st (car cs)) (cdr cs))))",
+                include_str!("programs/eager/parse-stack.scm"),
             )
             .expect("runs");
         assert_eq!(out, "((list (vector-ref (make-vector 3 0))) (top))", "{backend:?}");

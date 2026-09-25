@@ -1,0 +1,25 @@
+(define (permutations start)
+  (let ((x start) (perms (list start)))
+    (letrec ((revloop
+              (lambda (l n y)
+                (if (= n 0) y (revloop (cdr l) (- n 1) (cons (car l) y)))))
+             (drop
+              (lambda (l n) (if (= n 0) l (drop (cdr l) (- n 1)))))
+             (flip!
+              (lambda (n)
+                (set! x (revloop x n (drop x n)))
+                (set! perms (cons x perms))))
+             (walk
+              (lambda (n)
+                (if (> n 1)
+                    (do ((j (- n 1) (- j 1)))
+                        ((= j 0) (walk (- n 1)))
+                      (walk (- n 1))
+                      (flip! n))))))
+      (walk (length x))
+      perms)))
+(define (sum-list l) (if (null? l) 0 (+ (car l) (sum-list (cdr l)))))
+(define (sum-lists ls) (if (null? ls) 0 (+ (sum-list (car ls)) (sum-lists (cdr ls)))))
+(define (copy-list l) (if (null? l) '() (cons (car l) (copy-list (cdr l)))))
+(define (copy-all ls) (if (null? ls) '() (cons (copy-list (car ls)) (copy-all (cdr ls)))))
+(define (upto n) (let loop ((i n) (acc '())) (if (= i 0) acc (loop (- i 1) (cons i acc)))))

@@ -1,0 +1,6 @@
+(define (eager-read-all text)
+  (let loop ((st (eager-start)) (i 0))
+    (cond ((not (eq? (eager-state-kind st) 'need)) st)
+          ((= i (string-length text)) (eager-feed st #\newline))
+          (else (loop (eager-feed st (string-ref text i)) (+ i 1))))))
+(define (eager-data text) (eager-state-data (eager-read-all text)))

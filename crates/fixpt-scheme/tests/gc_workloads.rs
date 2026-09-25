@@ -69,55 +69,7 @@ const fn small(stressed: usize, normal: usize) -> usize {
 /// Flonums are boxed here, so the array is also a few thousand small heap
 /// objects reachable only from one vector: exactly the pattern that catches a
 /// collector that forwards a slot without forwarding what it points at.
-const GCBENCH: &str = r#"
-(define (make-node) (make-vector 4 0))
-(define (populate! depth node)
-  (if (> depth 0)
-      (begin
-        (vector-set! node 0 (make-node))
-        (vector-set! node 1 (make-node))
-        (populate! (- depth 1) (vector-ref node 0))
-        (populate! (- depth 1) (vector-ref node 1)))))
-(define (make-tree depth)
-  (if (<= depth 0)
-      (make-node)
-      (let ((v (make-node)))
-        (vector-set! v 0 (make-tree (- depth 1)))
-        (vector-set! v 1 (make-tree (- depth 1)))
-        v)))
-(define (tree-size depth) (- (expt 2 (+ depth 1)) 1))
-(define (count-nodes t)
-  (if (vector? t)
-      (+ 1 (count-nodes (vector-ref t 0)) (count-nodes (vector-ref t 1)))
-      0))
-
-(define stretch-depth STRETCH)
-(define long-lived-depth (- stretch-depth 2))
-(define array-size (* 4 (tree-size long-lived-depth)))
-(define half (quotient array-size 2))
-
-;; Stretch the heap with a tree that is dropped immediately.
-(make-tree stretch-depth)
-
-;; The data that must survive everything below.
-(define long-lived (make-node))
-(populate! long-lived-depth long-lived)
-(define array (make-vector array-size 0.0))
-(do ((i 0 (+ i 1))) ((>= i half))
-  (vector-set! array i (/ 1.0 (exact->inexact (+ i 1)))))
-
-;; Churn: transient trees at increasing depths, both ways of building them.
-(do ((d 4 (+ d 2))) ((> d long-lived-depth))
-  (let ((iters (quotient (* 2 (tree-size stretch-depth)) (tree-size d))))
-    (do ((i 0 (+ i 1))) ((>= i iters))
-      (populate! d (make-node))
-      (make-tree d))))
-
-(list (count-nodes long-lived)
-      (vector-length array)
-      (= (vector-ref array 0) 1.0)
-      (= (vector-ref array (- half 1)) (/ 1.0 (exact->inexact half))))
-"#;
+const GCBENCH: &str = include_str!("programs/gc/gcbench.scm");
 
 #[test]
 fn gcbench_long_lived_data_survives_the_churn() {
@@ -129,7 +81,8 @@ fn gcbench_long_lived_data_survives_the_churn() {
 
     for backend in [Backend::Ast, Backend::Bytecode] {
         let mut s = session(backend);
-        let got = eval(&mut s, &GCBENCH.replace("STRETCH", &stretch.to_string()));
+        eval(&mut s, &format!("(define stretch-depth {stretch})"));
+        let got = eval(&mut s, GCBENCH);
         assert_eq!(got, expected, "{backend:?} lost or corrupted long-lived data");
     }
 }
@@ -146,26 +99,7 @@ fn gcbench_long_lived_data_survives_the_churn() {
 /// these vectors would show up immediately, and no amount of
 /// collect-at-every-safepoint would have noticed, because the answer would
 /// still be right.
-const GROW: &str = r#"
-(define (make-seq) (cons 0 (make-vector 8 0)))
-(define (seq-add! s x)
-  (let ((next (car s)) (v (cdr s)))
-    (if (= next (vector-length v))
-        (let ((w (make-vector (* (vector-length v) 2) 0)))
-          (do ((i 0 (+ i 1))) ((= i (vector-length v)))
-            (vector-set! w i (vector-ref v i)))
-          (set-cdr! s w)
-          (seq-add! s x))
-        (begin (vector-set! v next x)
-               (set-car! s (+ next 1))))))
-(define (build n)
-  (let ((s (make-seq)))
-    (do ((i 0 (+ i 1))) ((= i n) (car s))
-      (seq-add! s i))))
-(define (run reps n)
-  (do ((i 0 (+ i 1))) ((= i reps) 'done)
-    (build n)))
-"#;
+const GROW: &str = include_str!("programs/gc/grow.scm");
 
 #[test]
 fn large_objects_are_reclaimed() {
@@ -201,33 +135,7 @@ fn large_objects_are_reclaimed() {
 /// prefix. Each flip conses a fresh prefix onto the *shared* tail of the
 /// previous permutation, so the 40320 permutations of eight elements occupy
 /// 149912 pairs rather than the 322560 an unshared representation would need.
-const PERMS: &str = r#"
-(define (permutations start)
-  (let ((x start) (perms (list start)))
-    (letrec ((revloop
-              (lambda (l n y)
-                (if (= n 0) y (revloop (cdr l) (- n 1) (cons (car l) y)))))
-             (drop
-              (lambda (l n) (if (= n 0) l (drop (cdr l) (- n 1)))))
-             (flip!
-              (lambda (n)
-                (set! x (revloop x n (drop x n)))
-                (set! perms (cons x perms))))
-             (walk
-              (lambda (n)
-                (if (> n 1)
-                    (do ((j (- n 1) (- j 1)))
-                        ((= j 0) (walk (- n 1)))
-                      (walk (- n 1))
-                      (flip! n))))))
-      (walk (length x))
-      perms)))
-(define (sum-list l) (if (null? l) 0 (+ (car l) (sum-list (cdr l)))))
-(define (sum-lists ls) (if (null? ls) 0 (+ (sum-list (car ls)) (sum-lists (cdr ls)))))
-(define (copy-list l) (if (null? l) '() (cons (car l) (copy-list (cdr l)))))
-(define (copy-all ls) (if (null? ls) '() (cons (copy-list (car ls)) (copy-all (cdr ls)))))
-(define (upto n) (let loop ((i n) (acc '())) (if (= i 0) acc (loop (- i 1) (cons i acc)))))
-"#;
+const PERMS: &str = include_str!("programs/gc/permutations.scm");
 
 /// perm8: allocation with *no* garbage — every pair produced stays live.
 ///
@@ -358,34 +266,7 @@ fn destructive_sorting_of_survived_data() {
         eval(&mut s, PERMS);
         eval(
             &mut s,
-            r#"
-            (define (less? a b)
-              (cond ((null? a) #f)
-                    ((null? b) #f)
-                    ((< (car a) (car b)) #t)
-                    ((> (car a) (car b)) #f)
-                    (else (less? (cdr a) (cdr b)))))
-            (define (merge! a b)
-              (cond ((null? a) b)
-                    ((null? b) a)
-                    ((less? (car b) (car a))
-                     (set-cdr! b (merge! a (cdr b))) b)
-                    (else (set-cdr! a (merge! (cdr a) b)) a)))
-            (define (halve l)
-              (let loop ((slow l) (fast (cdr l)))
-                (if (or (null? fast) (null? (cdr fast)))
-                    (let ((rest (cdr slow))) (set-cdr! slow '()) rest)
-                    (loop (cdr slow) (cddr fast)))))
-            (define (sort! l)
-              (if (or (null? l) (null? (cdr l)))
-                  l
-                  (let ((back (halve l))) (merge! (sort! l) (sort! back)))))
-            (define (sorted? l)
-              (cond ((null? l) #t)
-                    ((null? (cdr l)) #t)
-                    ((less? (cadr l) (car l)) #f)
-                    (else (sorted? (cdr l)))))
-            "#,
+            include_str!("programs/gc/merge-sort.scm"),
         );
         eval(&mut s, &format!("(define perms (permutations (upto {n})))"));
         // Collect between building and sorting, so the sort is rewriting

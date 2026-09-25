@@ -1,0 +1,6 @@
+(define trace '())
+(call/cc (lambda (k)
+  (dynamic-wind (lambda () (set! trace (cons 'in trace)))
+                (lambda () (k 'escaped))
+                (lambda () (set! trace (cons 'out trace))))))
+(reverse trace)

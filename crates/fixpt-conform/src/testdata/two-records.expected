@@ -1,0 +1,11 @@
+;;; header
+#case 3
+#src (with (module (define f 3)) f)
+#type int
+#effect (maxeff)
+#value "3"
+#end
+#case 4
+#src (bad)
+#static-error "unbound value variable f"
+#end

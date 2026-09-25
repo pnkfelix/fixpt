@@ -1,0 +1,6 @@
+(define k #f)
+(define n 0)
+(define r (+ 1 (call/cc (lambda (c) (set! k c) 1))))
+(set! n (+ n 1))
+(if (< n 3) (k n))
+(list n r)

@@ -33,14 +33,7 @@ fn a_mark_in_tail_position_replaces_rather_than_accumulates() {
     // constant space.
     let n = if cfg!(feature = "gc-stress") { 50 } else { 5_000 };
     assert_eq!(
-        both(&format!(
-            "(define (loop n)
-               (with-continuation-mark 'depth n
-                 (if (= n 0)
-                     (continuation-mark-set->list (current-continuation-marks) 'depth)
-                     (loop (- n 1)))))
-             (loop {n})"
-        )),
+        both(&format!("{} (loop {n})", include_str!("programs/control/tail-mark-loop.scm"))),
         "(0)"
     );
 }
@@ -48,14 +41,7 @@ fn a_mark_in_tail_position_replaces_rather_than_accumulates() {
 #[test]
 fn marks_on_distinct_frames_accumulate_innermost_first() {
     assert_eq!(
-        both(
-            "(define (nontail n)
-               (with-continuation-mark 'depth n
-                 (if (= n 0)
-                     (continuation-mark-set->list (current-continuation-marks) 'depth)
-                     (car (list (nontail (- n 1)))))))
-             (nontail 3)"
-        ),
+        both(include_str!("programs/control/nontail-marks.scm")),
         "(0 1 2 3)"
     );
 }
@@ -75,17 +61,7 @@ fn a_mark_is_gone_once_its_frame_returns() {
 #[test]
 fn introspection_stops_at_the_prompt() {
     assert_eq!(
-        both(
-            "(define tag (make-continuation-prompt-tag 'p))
-             (with-continuation-mark 'k 'outside
-               (car (list
-                 (call-with-continuation-prompt
-                   (lambda ()
-                     (with-continuation-mark 'k 'inside
-                       (car (list (continuation-mark-set->list
-                                    (current-continuation-marks tag) 'k)))))
-                   tag))))"
-        ),
+        both(include_str!("programs/control/introspection-stops-at-prompt.scm")),
         "(inside)"
     );
 }
@@ -95,13 +71,7 @@ fn introspection_stops_at_the_prompt() {
 #[test]
 fn abort_delivers_values_to_the_handler() {
     assert_eq!(
-        both(
-            "(define tag (make-continuation-prompt-tag))
-             (call-with-continuation-prompt
-               (lambda () (+ 1 (abort-current-continuation tag 10 20)))
-               tag
-               (lambda (a b) (list 'handled a b)))"
-        ),
+        both(include_str!("programs/control/abort-to-handler.scm")),
         "(handled 10 20)"
     );
 }
@@ -123,22 +93,7 @@ fn abort_without_a_matching_prompt_is_an_error() {
 #[test]
 fn aborting_runs_after_thunks_innermost_first() {
     assert_eq!(
-        both(
-            "(define tag (make-continuation-prompt-tag))
-             (define log '())
-             (define (note x) (set! log (cons x log)))
-             (call-with-continuation-prompt
-               (lambda ()
-                 (dynamic-wind (lambda () (note 'in1))
-                   (lambda ()
-                     (dynamic-wind (lambda () (note 'in2))
-                       (lambda () (abort-current-continuation tag 'gone))
-                       (lambda () (note 'out2))))
-                   (lambda () (note 'out1))))
-               tag
-               (lambda (v) (note v)))
-             (reverse log)"
-        ),
+        both(include_str!("programs/control/abort-runs-afters.scm")),
         "(in1 in2 out2 out1 gone)"
     );
 }
@@ -150,28 +105,7 @@ fn aborting_runs_after_thunks_innermost_first() {
 #[test]
 fn an_after_thunk_sees_the_context_of_its_dynamic_wind() {
     assert_eq!(
-        both(
-            "(define tag (make-continuation-prompt-tag))
-             (define seen '())
-             (call-with-continuation-prompt
-               (lambda ()
-                 (with-exception-handler (lambda (e) 'outer-handler)
-                   (lambda ()
-                     (with-continuation-mark 'm 'outer-mark
-                       (dynamic-wind
-                         (lambda () #f)
-                         (lambda ()
-                           (with-exception-handler (lambda (e) 'inner-handler)
-                             (lambda ()
-                               (with-continuation-mark 'm 'inner-mark
-                                 (car (list (abort-current-continuation tag 'x)))))))
-                         (lambda ()
-                           (set! seen (list (raise-continuable 'probe)
-                                            (continuation-mark-set-first #f 'm)))))))))
-               tag
-               (lambda (v) v))
-             seen"
-        ),
+        both(include_str!("programs/control/after-thunk-context.scm")),
         "(outer-handler outer-mark)"
     );
 }
@@ -181,22 +115,7 @@ fn an_after_thunk_sees_the_context_of_its_dynamic_wind() {
 #[test]
 fn a_composable_continuation_can_be_inspected_and_resumed_repeatedly() {
     assert_eq!(
-        both(
-            "(define tag (make-continuation-prompt-tag))
-             (define held #f)
-             (call-with-continuation-prompt
-               (lambda ()
-                 (with-continuation-mark 'ctx 'here
-                   (+ 100 (call-with-composable-continuation
-                            (lambda (k) (set! held k) (abort-current-continuation tag 0))
-                            tag))))
-               tag
-               (lambda (v) v))
-             (list (continuation-mark-set->list (continuation-marks held tag) 'ctx)
-                   (held 1)
-                   (held 2)
-                   (* 2 (held 3)))"
-        ),
+        both(include_str!("programs/control/composable-resumed-repeatedly.scm")),
         "((here) 101 102 206)"
     );
 }
@@ -206,24 +125,7 @@ fn a_composable_continuation_can_be_inspected_and_resumed_repeatedly() {
 #[test]
 fn resuming_a_composable_continuation_re_enters_its_extents() {
     assert_eq!(
-        both(
-            "(define tag (make-continuation-prompt-tag))
-             (define log '())
-             (define (note x) (set! log (cons x log)))
-             (define held #f)
-             (call-with-continuation-prompt
-               (lambda ()
-                 (dynamic-wind (lambda () (note 'in))
-                   (lambda ()
-                     (call-with-composable-continuation
-                       (lambda (k) (set! held k) (abort-current-continuation tag 'stop))
-                       tag))
-                   (lambda () (note 'out))))
-               tag
-               (lambda (v) (note v)))
-             (note (held 'again))
-             (reverse log)"
-        ),
+        both(include_str!("programs/control/composable-rewinds.scm")),
         "(in out stop in out again)"
     );
 }
@@ -231,17 +133,7 @@ fn resuming_a_composable_continuation_re_enters_its_extents() {
 #[test]
 fn call_cc_still_winds_on_escape_and_reentry() {
     assert_eq!(
-        both(
-            "(define log '())
-             (define (note x) (set! log (cons x log)))
-             (define k #f)
-             (define n 0)
-             (dynamic-wind (lambda () (note 'in))
-                           (lambda () (call/cc (lambda (c) (set! k c))) (set! n (+ n 1)))
-                           (lambda () (note 'out)))
-             (if (< n 2) (k 'again))
-             (list n (reverse log))"
-        ),
+        both(include_str!("programs/control/call-cc-winds.scm")),
         "(2 (in out in out))"
     );
 }
@@ -385,14 +277,7 @@ fn a_hole_reached_after_resuming_comes_back_to_the_top_level() {
 #[test]
 fn call_with_values_in_tail_position_is_a_tail_call() {
     assert_eq!(
-        both(
-            "(define (loop n)
-               (with-continuation-mark 'k n
-                 (if (= n 0)
-                     (continuation-mark-set->list (current-continuation-marks) 'k)
-                     (let-values (((a b) (values (- n 1) 0))) (loop a)))))
-             (loop 4)"
-        ),
+        both(include_str!("programs/control/let-values-tail-loop.scm")),
         "(0)"
     );
     let n = if cfg!(feature = "gc-stress") { 2_000 } else { 200_000 };

@@ -422,19 +422,7 @@ mod tests {
 
     #[test]
     fn reads_a_record() {
-        let text = "\
-;;; header
-#case 3
-#src (with (module (define f 3)) f)
-#type int
-#effect (maxeff)
-#value \"3\"
-#end
-#case 4
-#src (bad)
-#static-error \"unbound value variable f\"
-#end
-";
+        let text = include_str!("testdata/two-records.expected");
         let cases = parse_goldens(text).unwrap();
         assert_eq!(cases.len(), 2);
         assert_eq!(cases[0].number, 3);

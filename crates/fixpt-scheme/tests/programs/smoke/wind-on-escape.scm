@@ -1,0 +1,6 @@
+(let ((log '()))
+  (call/cc (lambda (k)
+    (dynamic-wind (lambda () (set! log (cons 'in log)))
+                  (lambda () (k 'escaped))
+                  (lambda () (set! log (cons 'out log))))))
+  (reverse log))

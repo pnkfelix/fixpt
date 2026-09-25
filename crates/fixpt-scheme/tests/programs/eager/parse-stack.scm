@@ -1,0 +1,5 @@
+(let loop ((st (eager-start)) (cs (string->list "(vector-ref (make-vector 3 0) ")))
+  (if (null? cs)
+      (map (lambda (c) (if (eq? (car c) 'list) (list 'list (reverse (list-ref c 3))) c))
+           (eager-context st))
+      (loop (eager-feed st (car cs)) (cdr cs))))

@@ -106,11 +106,7 @@ fn a_template_means_what_it_meant_where_the_macro_was_defined() {
 
 #[test]
 fn a_literal_matches_by_binding_not_by_name() {
-    let def = "(define-syntax my-cond
-                 (syntax-rules (else)
-                   ((_) 'none)
-                   ((_ (else e)) e)
-                   ((_ (c e) rest ...) (if c e (my-cond rest ...)))))";
+    let def = include_str!("programs/macros/my-cond.scm");
     assert_eq!(both(&format!("{def} (my-cond (#f 1) (else 2))")), "2");
     // Bound locally, `else` is an ordinary variable — here true — and the
     // clause an ordinary clause.
@@ -167,14 +163,7 @@ fn custom_and_escaped_ellipses() {
 #[test]
 fn macros_in_bodies_and_scoped_forms() {
     assert_eq!(
-        both(
-            "(define (f)
-               (define-syntax twice (syntax-rules () ((_ e) (begin e e))))
-               (define n 0)
-               (twice (set! n (+ n 1)))
-               n)
-             (f)"
-        ),
+        both(include_str!("programs/macros/macro-in-body.scm")),
         "2"
     );
     assert_eq!(both("(let-syntax ((foo (syntax-rules () ((_ x) (* x 10))))) (foo 4))"), "40");
@@ -242,62 +231,7 @@ fn errors_say_what_went_wrong() {
 /// built-ins, and checked against them — the M9 demonstration that the derived
 /// forms are re-expressible as library macros. `do` exercises string-literal
 /// patterns (`"step"`), and `case` the `=>` literal.
-const R7RS_DERIVED: &str = r#"
-(define-syntax r-cond
-  (syntax-rules (else =>)
-    ((r-cond (else result1 result2 ...)) (begin result1 result2 ...))
-    ((r-cond (test => result)) (let ((temp test)) (if temp (result temp))))
-    ((r-cond (test => result) clause1 clause2 ...)
-     (let ((temp test)) (if temp (result temp) (r-cond clause1 clause2 ...))))
-    ((r-cond (test)) test)
-    ((r-cond (test) clause1 clause2 ...)
-     (let ((temp test)) (if temp temp (r-cond clause1 clause2 ...))))
-    ((r-cond (test result1 result2 ...)) (if test (begin result1 result2 ...)))
-    ((r-cond (test result1 result2 ...) clause1 clause2 ...)
-     (if test (begin result1 result2 ...) (r-cond clause1 clause2 ...)))))
-
-(define-syntax r-case
-  (syntax-rules (else =>)
-    ((r-case (key ...) clauses ...) (let ((atom-key (key ...))) (r-case atom-key clauses ...)))
-    ((r-case key (else => result)) (result key))
-    ((r-case key (else result1 result2 ...)) (begin result1 result2 ...))
-    ((r-case key ((atoms ...) => result)) (if (memv key '(atoms ...)) (result key)))
-    ((r-case key ((atoms ...) => result) clause clauses ...)
-     (if (memv key '(atoms ...)) (result key) (r-case key clause clauses ...)))
-    ((r-case key ((atoms ...) result1 result2 ...)) (if (memv key '(atoms ...)) (begin result1 result2 ...)))
-    ((r-case key ((atoms ...) result1 result2 ...) clause clauses ...)
-     (if (memv key '(atoms ...)) (begin result1 result2 ...) (r-case key clause clauses ...)))))
-
-(define-syntax r-and
-  (syntax-rules () ((r-and) #t) ((r-and test) test) ((r-and test1 test2 ...) (if test1 (r-and test2 ...) #f))))
-
-(define-syntax r-or
-  (syntax-rules () ((r-or) #f) ((r-or test) test)
-    ((r-or test1 test2 ...) (let ((x test1)) (if x x (r-or test2 ...))))))
-
-(define-syntax r-let
-  (syntax-rules ()
-    ((r-let ((name val) ...) body1 body2 ...) ((lambda (name ...) body1 body2 ...) val ...))
-    ((r-let tag ((name val) ...) body1 body2 ...)
-     ((letrec ((tag (lambda (name ...) body1 body2 ...))) tag) val ...))))
-
-(define-syntax r-let*
-  (syntax-rules ()
-    ((r-let* () body1 body2 ...) (let () body1 body2 ...))
-    ((r-let* ((name1 val1) (name2 val2) ...) body1 body2 ...)
-     (let ((name1 val1)) (r-let* ((name2 val2) ...) body1 body2 ...)))))
-
-(define-syntax r-do
-  (syntax-rules ()
-    ((r-do ((var init step ...) ...) (test expr ...) command ...)
-     (letrec ((loop (lambda (var ...)
-                      (if test
-                          (begin (if #f #f) expr ...)
-                          (begin command ... (loop (r-do "step" var step ...) ...))))))
-       (loop init ...)))
-    ((r-do "step" x) x)
-    ((r-do "step" x y) y)))
-"#;
+const R7RS_DERIVED: &str = include_str!("programs/macros/r7rs-derived.scm");
 
 #[test]
 fn r7rs_derived_forms_as_macros_agree_with_the_built_ins() {
@@ -329,13 +263,7 @@ fn r7rs_derived_forms_as_macros_agree_with_the_built_ins() {
 
 // ------------------------------------------- procedural macros (SRFI 211)
 
-const ER_SWAP: &str = "(define-syntax swap!
-  (er-macro-transformer
-   (lambda (form rename compare)
-     (let ((a (cadr form)) (b (caddr form)))
-       `(,(rename 'let) ((,(rename 'tmp) ,a))
-          (,(rename 'set!) ,a ,b)
-          (,(rename 'set!) ,b ,(rename 'tmp)))))))";
+const ER_SWAP: &str = include_str!("programs/macros/er-swap.scm");
 
 #[test]
 fn explicit_renaming_is_hygienic_where_it_renames() {
@@ -354,36 +282,19 @@ fn explicit_renaming_is_hygienic_where_it_renames() {
 #[test]
 fn explicit_renaming_captures_what_it_leaves_bare() {
     assert_eq!(
-        both(
-            "(define-syntax aif
-               (er-macro-transformer
-                (lambda (form rename compare)
-                  `(,(rename 'let) ((it ,(cadr form)))
-                     (,(rename 'if) it ,(caddr form) ,(cadddr form))))))
-             (aif (assq 'b '((a 1) (b 2))) (cadr it) 'no)"
-        ),
+        both(include_str!("programs/macros/er-aif.scm")),
         "2"
     );
 }
 
 #[test]
 fn implicit_renaming_renames_everything_but_what_it_injects() {
-    let def = "(define-syntax aif
-                 (ir-macro-transformer
-                  (lambda (form inject compare)
-                    `(let ((,(inject 'it) ,(cadr form)))
-                       (if ,(inject 'it) ,(caddr form) ,(cadddr form))))))";
+    let def = include_str!("programs/macros/ir-aif.scm");
     assert_eq!(both(&format!("{def} (aif (assq 'b '((a 1) (b 2))) (cadr it) 'no)")), "2");
     assert_eq!(both(&format!("{def} (let ((if list) (let 'x)) (aif #f 1 2))")), "2");
     // Nothing the template inserts can capture: `tmp` here is the template's.
     assert_eq!(
-        both(
-            "(define-syntax ir-swap!
-               (ir-macro-transformer
-                (lambda (form inject compare)
-                  `(let ((tmp ,(cadr form))) (set! ,(cadr form) ,(caddr form)) (set! ,(caddr form) tmp)))))
-             (define tmp 1) (define other 2) (ir-swap! tmp other) (list tmp other)"
-        ),
+        both(include_str!("programs/macros/ir-swap.scm")),
         "(2 1)"
     );
 }
@@ -393,13 +304,7 @@ fn implicit_renaming_renames_everything_but_what_it_injects() {
 #[test]
 fn implicit_renaming_input_is_marked_and_strip_syntax_unmarks_it() {
     assert_eq!(
-        both(
-            "(define-syntax look
-               (ir-macro-transformer
-                (lambda (form inject compare)
-                  `(quote ,(list (eq? (cadr form) 'x) (symbol? (cadr form)) (strip-syntax (cadr form)))))))
-             (look x)"
-        ),
+        both(include_str!("programs/macros/ir-look.scm")),
         "(#f #t x)"
     );
 }
@@ -419,16 +324,7 @@ fn compare_matches_by_binding() {
 #[test]
 fn a_transformer_can_compute() {
     assert_eq!(
-        both(
-            "(define-syntax unroll
-               (er-macro-transformer
-                (lambda (form rename compare)
-                  (let loop ((i (cadr form)) (acc '()))
-                    (if (= i 0) (cons (rename 'begin) acc) (loop (- i 1) (cons (caddr form) acc)))))))
-             (define n 0)
-             (unroll 4 (set! n (+ n 1)))
-             n"
-        ),
+        both(include_str!("programs/macros/er-unroll.scm")),
         "4"
     );
 }
@@ -509,20 +405,7 @@ fn procedural_macros_persist_across_inputs() {
 #[test]
 fn srfi_139_abort_from_forever() {
     assert_eq!(
-        both(
-            "(define-syntax-parameter abort
-               (syntax-rules () ((_ . _) (syntax-error \"abort used outside of a loop\"))))
-             (define-syntax forever
-               (syntax-rules ()
-                 ((forever body1 body2 ...)
-                  (call-with-current-continuation
-                   (lambda (escape)
-                     (syntax-parameterize
-                         ((abort (syntax-rules () ((abort value (... ...)) (escape value (... ...))))))
-                       (let loop () body1 body2 ... (loop))))))))
-             (define i 0)
-             (forever (set! i (+ i 1)) (if (= i 5) (abort i)))"
-        ),
+        both(include_str!("programs/macros/srfi-139-forever.scm")),
         "5"
     );
     let out = both(
@@ -533,15 +416,7 @@ fn srfi_139_abort_from_forever() {
     assert!(out.contains("abort used outside of a loop"), "{out}");
 }
 
-const PARAM_AIF: &str = "
-  (define-syntax-parameter it
-    (syntax-rules () (_ (syntax-error \"`it` is only meaningful inside aif\"))))
-  (define-syntax aif
-    (syntax-rules ()
-      ((_ test then else)
-       (let ((t test))
-         (syntax-parameterize ((it (identifier-syntax t)))
-           (if t then else))))))";
+const PARAM_AIF: &str = include_str!("programs/macros/param-aif.scm");
 
 /// The anaphoric `if` with nothing captured: `it` is defined once, and `aif`
 /// rebinds what it means for the extent of its body.

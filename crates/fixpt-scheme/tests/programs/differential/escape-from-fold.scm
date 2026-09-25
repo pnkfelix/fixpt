@@ -1,0 +1,5 @@
+(define (find-first p xs)
+  (call/cc (lambda (return)
+    (for-each (lambda (x) (if (p x) (return x))) xs)
+    #f)))
+(list (find-first even? '(1 3 4 5)) (find-first even? '(1 3 5)))

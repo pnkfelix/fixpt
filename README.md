@@ -306,6 +306,13 @@ perform lives in its *type*.
 | `fixpt-cli` | the `fixpt` binary |
 | `fixpt-conform` | golden reading and normalisation |
 | `fixpt-fx91` | the FX-91 front end |
+| `fixpt-tidy` | checks on the repository itself, run by `cargo test` |
+
+Test programs of more than four lines or 240 characters live in files beside
+their tests — `crates/*/tests/programs/<suite>/` — and come in with
+`include_str!`, not as string literals. Shorter ones stay inline, next to what
+they should produce. `fixpt-tidy` fails the build on a long one; the limit is
+measured on the program as it would stand in a file, without the Rust around it.
 
 ## Three things worth knowing about the design
 

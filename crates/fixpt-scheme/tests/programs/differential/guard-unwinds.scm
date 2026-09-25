@@ -1,0 +1,5 @@
+(define trace '())
+(guard (e (#t (reverse (cons e trace))))
+  (dynamic-wind (lambda () (set! trace (cons 'in trace)))
+                (lambda () (raise 'x))
+                (lambda () (set! trace (cons 'out trace)))))
