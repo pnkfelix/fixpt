@@ -30,10 +30,15 @@ recur:
 2. **One example (C4) is not well typed as written.** It calls a continuation
    of one type with `0`. That is fine in Scheme; the typed transcription keeps
    only the part that types.
-3. **The paper states masking conditions but not where masking is applied.**
-   I read it as applying to the whole expression under test, which is how
-   FX-87's checker reports a top-level form's effect. Expected results say
-   "after masking" when they mean that.
+3. **Masking applies at every subexpression that combines effects** (settled
+   in review, 2026-09-25). The paper's masking theorems are about "an
+   expression E" in general (p. 6). FX-87's reference applies memory masking
+   the same way: `erase-effect` is called from `desc-of-begin`,
+   `desc-of-lambda` (on the body, giving the latent effect), `desc-of-letrec`
+   and `desc-of-app` (`mit-psrg-fx/fx87/old-impl/type-check.lisp`, lines 132,
+   176, 208, 371). Every expected result below was re-checked under this
+   reading and none changed. "After masking" means the effect the checker
+   reports.
 
 Region constants such as `@k` stand in for the paper's "some region r". Free
 variables an example needs are listed with the types I give them.
@@ -114,8 +119,10 @@ Transcription:
 
 The projections are `r = @k`, `t = int`, and `e = (goto @k)`, the latent
 effect of the argument, whose body `(f 0)` calls the continuation. `(f 0)` has
-type `void`, and the argument must return `int`: this needs `void ≤ int`
-(kernel note on `void`).
+type `void`, and the argument must return `int`: this needs `void ≤ int`.
+`void` is the bottom type, a subtype of every type (settled in review). It is
+the type usually given to divergence. Here it types a call that never returns
+because control has gone elsewhere, and the effect `(goto r)` says where.
 
 Expected:
 
@@ -126,9 +133,11 @@ Expected:
   effect `(maxeff (comefrom @k) (goto @k))`, and the `proj`s, the `lambda`, the
   literals and `+` are pure.
 - after masking, effect `pure`. **STATED** ("its control effects can thus be
-  masked", p. 5). Checked against the conditions (p. 6): the expression
-  imports only `cwcc` and `+`, and neither type mentions `@k`, because `cwcc`
-  binds its region. The result type `int` does not mention `@k`.
+  masked", p. 5). With masking at each subexpression, it happens at the
+  `cwcc` application itself. That application imports only `cwcc`, whose type
+  binds its region, so `@k` is not mentioned. Its result type is `int`. The
+  lambda argument's own latent effect keeps `(goto @k)`, because its body
+  imports `f`, whose type mentions `@k`.
 
 ---
 
@@ -299,8 +308,20 @@ The outer argument's latent effect covers everything its body does:
 are projected at once (`(proj E D1 D2)`, as FX-87 parses it). `cwcc` has one
 binder per `poly`, so one `proj` each.
 
-**This is the transcription I am least sure of.** The paper does not type
-it, and the latent effects I projected for `e` are my own accounting. Two
+<!--
+  REVIEWER'S SKEPTICISM, kept deliberately (review, 2026-09-25): this case
+  stays, but its transcription may be wrong. The paper gives it as untyped
+  Scheme and never types it. The mutually recursive `P`/`K`, the choice to
+  project both `cwcc`s on the same `@k`, and every projected latent effect
+  are my reconstruction, not the paper's. The paper's *claim* is STATED
+  (p. 7): `goto` not maskable though there are no free variables. The typed
+  form that exercises it is TRANSCRIBED. If the checker disagrees with this
+  case, suspect the transcription first.
+-->
+
+**This is the transcription I am least sure of** (see the comment above). The
+paper does not type it, and the latent effects I projected for `e` are my own
+accounting. Two
 things are meant to hold regardless: both `cwcc`s share `@k`, because
 `set-cdr!` puts `g` where `f` was; and the continuation argument type is `P`.
 
@@ -316,12 +337,9 @@ Expected:
 
 ---
 
-## Questions for the reviewer
+## Review (2026-09-25)
 
-1. **Where is masking applied?** I assume at the whole expression under test
-   (note 3 above). If you read the paper, or FX-87, as masking at every
-   subexpression that meets the conditions, C4's "the body's effect includes
-   `(comefrom @k)`" needs rechecking.
-2. **`void` as a subtype of every type.** It is needed for C3 to type, and
-   the paper does not state it.
-3. **C7's projected latent effects.** Right, or too much?
+1. **Where masking applies:** at every subexpression that combines effects,
+   as FX-87's reference does (note 3 above). No expected result changed.
+2. **`void`:** the bottom type, a subtype of every type. It is what C3 needs.
+3. **C7:** kept, with the doubt recorded in a comment beside it.
