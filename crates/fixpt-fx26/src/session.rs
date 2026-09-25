@@ -54,7 +54,7 @@ pub enum Speculation {
 pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(Top, String)> {
     let top = checker.top(form)?;
     let code = match &top {
-        Top::DefineType { .. } | Top::DefineEffect { .. } => String::new(),
+        Top::DefineType { .. } | Top::DefineEffect { .. } | Top::PrivateRegions { .. } => String::new(),
         Top::Define { name, exp, recursive, .. } => {
             // A recursive definition refers to itself; a plain one to
             // whatever the name meant before it.

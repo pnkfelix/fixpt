@@ -19,11 +19,23 @@ pub enum DScope {
     Rec(TyId),
     /// A name bound by `define-effect`: an effect.
     Eff(crate::ast::Effect),
+    /// A region constant `private-regions` made the program's own: `@s` in
+    /// the program is this fresh region, which nothing else can name.
+    Private(Region),
 }
 
 impl Checker {
     fn name(&self, s: Sym) -> &str {
         self.interner.name(s)
+    }
+
+    /// The region `@name` stands for: the program's own, if `private-regions`
+    /// declared it, and otherwise the constant of that name.
+    fn region_constant(&self, sym: Sym) -> Region {
+        match self.lookup_desc(sym) {
+            Some(DScope::Private(r)) => r,
+            _ => Region::Const(sym),
+        }
     }
 
     fn lookup_desc(&self, s: Sym) -> Option<DScope> {
@@ -71,7 +83,7 @@ impl Checker {
             return Err(FxError::at(s.span, "expected a region"));
         };
         if self.name(sym).starts_with('@') {
-            return Ok(Region::Const(sym));
+            return Ok(self.region_constant(sym));
         }
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Region)) => Ok(Region::Var(v)),
@@ -296,7 +308,7 @@ impl Checker {
         if let Some(sym) = s.as_symbol() {
             let name = self.name(sym);
             if name.starts_with('@') {
-                return Ok(D::Region(Region::Const(sym)));
+                return Ok(D::Region(self.region_constant(sym)));
             }
             if name == "pure" {
                 return Ok(D::Effect(Effect::pure()));

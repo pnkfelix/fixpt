@@ -406,8 +406,15 @@ impl Checker {
     /// A region no value so far is in, named after the binder it stands for.
     /// Uninterned, so the program cannot name it by accident.
     fn fresh_region(&mut self, v: DVar) -> Region {
+        let base = format!("@{}", self.interner.name(self.arena.dvar_name(v)));
+        self.fresh_region_named(&base)
+    }
+
+    /// A region no value so far is in, and no program can name: `base`
+    /// with a number, uninterned.
+    pub(crate) fn fresh_region_named(&mut self, base: &str) -> Region {
         self.fresh_regions += 1;
-        let name = format!("@{}.{}", self.interner.name(self.arena.dvar_name(v)), self.fresh_regions);
+        let name = format!("{base}.{}", self.fresh_regions);
         Region::Const(self.interner.uninterned(&name))
     }
 

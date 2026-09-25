@@ -8,10 +8,11 @@
 ;;; what differs is what the types make explicit.
 ;;;
 ;;; * **Regions.** The reader's own lists and pairs are in @s, its prompt
-;;;   tag in @e and its mark key in @m. Its control effects are on @e, and
-;;;   are never masked: a checkpoint is handed back to the caller. That is
-;;;   what the licence in `docs/fx26.md` is about — every effect here is on
-;;;   a region the reader owns.
+;;;   tag in @e and its mark key in @m, and all of them are private to this
+;;;   program (`private-regions`). Its control effects are on @e, and are
+;;;   never masked: a checkpoint is handed back to the caller. That is what
+;;;   the licence in `docs/fx26.md` is about — every effect here is on a
+;;;   region no other program can name.
 ;;; * **Data.** What is read is a `datum`, an opaque Scheme datum. The cursor
 ;;;   and the state, which the Scheme version keeps in lists and a record,
 ;;;   are pairs with a declared type each.
@@ -25,6 +26,11 @@
 ;;; (lowered, each is the Scheme global `fx:<name>`).
 
 ;;; ------------------------------------------------------------------ types
+
+;; The reader's own regions: its data, its prompt tag, its mark key, and the
+;; lists it hands back. Each is fresh for this program, and nothing outside
+;; it can name one — which is what licenses running it on every keystroke.
+(private-regions @s @e @m @c)
 
 ;; What a reading procedure may do: allocate and read its own data, mark,
 ;; and suspend or fail through its prompt.

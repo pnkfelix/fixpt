@@ -14,6 +14,10 @@
 //!   every use.
 //! * `(define-effect name effect)` — an effect abbreviation, for the effect
 //!   a group of procedures share.
+//! * `(private-regions @r …)` — from here on, each `@r` is a fresh region no
+//!   other program can name: the program is instantiated at regions of its
+//!   own, as a `plambda` over them would be. What it does to them is masked
+//!   from everything outside it, by construction (`crate::licence`).
 //! * anything else is an expression, checked in the environment so far.
 
 use crate::ast::{Effect, TyId};
@@ -31,6 +35,8 @@ pub enum Top {
     DefineType { name: Sym, ty: TyId },
     /// `(define-effect name …)`: an abbreviation for an effect.
     DefineEffect { name: Sym, effect: Effect },
+    /// `(private-regions @r …)`: the regions these names now stand for.
+    PrivateRegions { regions: Vec<crate::ast::Region> },
     /// An expression.
     Exp(Checked),
 }
@@ -51,6 +57,21 @@ impl Checker {
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
         match head {
             Some("define") => self.define(form.span, items),
+            Some("private-regions") => {
+                let mut regions = Vec::new();
+                for r in &items[1..] {
+                    let name = self.binder_name(r)?;
+                    if !self.interner.name(name).starts_with('@') {
+                        return Err(FxError::at(r.span, "a region constant is written `@name`"));
+                    }
+                    let base = self.interner.name(name).to_string();
+                    let fresh = self.fresh_region_named(&base);
+                    self.dscope.push((name, crate::parse::DScope::Private(fresh)));
+                    self.private_regions.push(fresh);
+                    regions.push(fresh);
+                }
+                Ok(Top::PrivateRegions { regions })
+            }
             Some("define-effect") => {
                 let [_, name, def] = items else {
                     return Err(FxError::at(form.span, "`(define-effect name effect)`"));
@@ -177,7 +198,7 @@ impl Checker {
             let items = f.as_proper_list().unwrap_or(&[]);
             let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
             match (head.as_deref(), items) {
-                (Some("define-type" | "define-effect"), _) => {
+                (Some("define-type" | "define-effect" | "private-regions"), _) => {
                     self.top(f)?;
                     done.push(true);
                 }
@@ -236,9 +257,11 @@ impl Checker {
     /// description scope and the arena. The caller restores the interner.
     pub fn scratch<T>(&mut self, f: impl FnOnce(&mut Checker) -> T) -> T {
         let (env, dscope, arena) = (self.env.len(), self.dscope.len(), self.arena.mark());
+        let private = self.private_regions.len();
         let out = f(self);
         self.env.truncate(env);
         self.dscope.truncate(dscope);
+        self.private_regions.truncate(private);
         self.facts.forget_from(arena.exps());
         self.arena.reset(arena);
         out
@@ -269,5 +292,5 @@ pub const KEYWORDS: &[&str] = &[
     "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define-type",
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
-    "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "the",
+    "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
 ];

@@ -51,6 +51,8 @@ pub struct Checker {
     pub(crate) standard_len: usize,
     /// What checking proved about each expression, for lowering to carry.
     pub facts: NodeFacts,
+    /// The regions `private-regions` made this program's own.
+    pub private_regions: Vec<Region>,
     /// Mask at every expression, as the rules say. Off only to observe an
     /// effect *before* masking, which is what some of the paper's claims are
     /// about.
@@ -131,6 +133,7 @@ impl Checker {
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
+            private_regions: Vec::new(),
             masking: true,
         };
         for (name, ty) in crate::standard::ENTRIES {

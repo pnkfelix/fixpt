@@ -114,7 +114,34 @@ fn a_reader_that_reaches_outside_is_refused() {
     );
     let mut compiled = compile_program(&doctored).expect("checks");
     let err = compiled.checker.reader_licence().expect_err("refused");
-    assert_eq!(err, "`eager-feed` may (write @user), on a region the driver does not own");
+    assert_eq!(err, "`eager-feed` may (write @user), which is not the program's own to touch");
+}
+
+/// The reader's regions are its own only because it says so, and the check
+/// does not take the driver's word for it: without `private-regions`, `@s`
+/// is a region any program can name, and the same reader is refused.
+#[test]
+fn a_reader_whose_regions_are_public_is_refused() {
+    let public = fixpt_fx26::EAGER_READER.replace("(private-regions @s @e @m @c)", "");
+    assert_ne!(public, fixpt_fx26::EAGER_READER, "the declaration moved");
+    let mut compiled = compile_program(&public).expect("checks");
+    let err = compiled.checker.reader_licence().expect_err("refused");
+    assert!(err.contains("which is not the program's own to touch"), "{err}");
+}
+
+/// A private region is fresh: another program writing `@s` means another
+/// region, and cannot touch the reader's.
+#[test]
+fn a_private_region_is_not_the_one_another_program_names() {
+    let mut c = Checker::new();
+    let theirs = c.region_named("@s");
+    c.check_program("(private-regions @s) 0").expect("checks");
+    let ours = c.private_regions[0];
+    assert_ne!(ours, theirs);
+    assert!(c.show_region(ours).starts_with("@s."), "{}", c.show_region(ours));
+    // And within the program, `@s` is the private one.
+    let t = c.type_of_str("(ref int @s)").expect("a type");
+    assert_eq!(c.show_ty(t), format!("(ref int {})", c.show_region(ours)));
 }
 
 /// Loaded into an ordinary Scheme session — the Scheme REPL's — the FX-26

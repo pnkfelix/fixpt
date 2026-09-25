@@ -1,18 +1,40 @@
 //! Effects as licences: what a speculation driver may let run.
 //!
-//! "Pure" is the wrong test for running something before it is asked for.
-//! The eager reader hands its checkpoint continuation back to its caller, so
-//! its control effects are never masked, and every character it reads
-//! allocates. It is safe to run on each keystroke all the same, because
-//! everything it does is to regions its driver owns. So the licence is
-//! relative to the regions the driver owns (`docs/fx26.md`, "What licence to
-//! speculate means"). An effect is licensed when every atom of it is
+//! A licence is effect masking, relative to an observer. Masking asks what
+//! anything outside *an expression* can observe, and answers from types:
+//! whatever the free variables and the result can reach. A licence asks what
+//! the *user's program* can observe of code a driver runs early, repeatedly,
+//! or not at all. The answer has the same shape. Effects on regions the
+//! program cannot name are invisible to it.
+//!
+//! So an effect is licensed when, masked for that observer, nothing is left
+//! but allocation. Every atom must be
 //!
 //! * an allocation, anywhere — a new object is invisible until something
-//!   that can see it is handed it, and that would be a read or a write;
-//! * a read, a write or a control effect on a region the driver owns.
+//!   that can see it is handed it, and that would be a read or a write; or
+//! * a read, a write or a control effect on a region the observer cannot
+//!   name.
 //!
 //! An effect variable is never licensed: it could be anything.
+//!
+//! Which regions the observer cannot name is not asserted by the driver. It
+//! is established by construction, in either of two ways:
+//!
+//! * **Fresh regions.** Inference instantiates a region nothing constrains
+//!   with a fresh, uninterned one, and masking then removes effects on it.
+//!   The REPL's speculation relies on this: it owns no region, and runs an
+//!   expression early only if masking left nothing but allocation.
+//! * **Private regions.** A program that says `(private-regions @s …)` is
+//!   instantiated at regions of its own: each `@s` in it is a fresh region,
+//!   uninterned, which no other program can write. The eager reader does
+//!   this, so a driver can check its entry points against exactly those
+//!   regions (`Checker::private_licence`). Its effects stay visible in its
+//!   types, as they must, because the driver holds its states. But nothing
+//!   the user writes can reach them.
+//!
+//! Two things a licence needs that masking does not: running early may not
+//! terminate, and may fail, and neither is an effect. So a speculative run
+//! has a step budget of its own, and a failure is shown, not raised.
 
 use crate::ast::{Atom, Effect, Region};
 use crate::check::Checker;
@@ -40,10 +62,6 @@ pub const READER_ENTRY_POINTS: &[&str] = &[
     "eager-hole-closers",
 ];
 
-/// The regions the eager reader's driver owns: the reader's data, its
-/// prompt tag, its mark key, and the lists it hands back.
-pub const READER_REGIONS: &[&str] = &["@s", "@e", "@m", "@c"];
-
 impl Checker {
     /// The region constant written `name`.
     pub fn region_named(&mut self, name: &str) -> Region {
@@ -63,19 +81,25 @@ impl Checker {
         match unlicensed(&effect, owned) {
             None => Ok(()),
             Some(a) => Err(format!(
-                "`{name}` may {}, on a region the driver does not own",
+                "`{name}` may {}, which is not the program's own to touch",
                 self.show_atom(a)
             )),
         }
     }
 
-    /// Check that every entry point of the eager reader, once loaded into
-    /// this checker, is licensed for a driver that owns the reader's regions.
-    pub fn reader_licence(&mut self) -> Result<(), String> {
-        let owned: Vec<Region> = READER_REGIONS.iter().map(|r| self.region_named(r)).collect();
-        for name in READER_ENTRY_POINTS {
+    /// Check that every one of `entry_points` is licensed when the only
+    /// regions it may touch are the program's own private ones: that is,
+    /// that the program's effects are invisible to any other program.
+    pub fn private_licence(&mut self, entry_points: &[&str]) -> Result<(), String> {
+        let owned = self.private_regions.clone();
+        for name in entry_points {
             self.licensed_call(name, &owned)?;
         }
         Ok(())
+    }
+
+    /// The eager reader's licence: `private_licence` of its entry points.
+    pub fn reader_licence(&mut self) -> Result<(), String> {
+        self.private_licence(READER_ENTRY_POINTS)
     }
 }
