@@ -12,3 +12,11 @@
     (if (null? cs) st (loop (feed st (car cs)) (cdr cs)))))
 (define (fx-context text) (fx:eager-context (feed-all fx:eager-start fx:eager-feed text)))
 (define (scheme-context text) (eager-context (feed-all eager-start eager-feed text)))
+
+;;; The same, for the FX-26 reader reading FX-26's own lexical syntax.
+(define (fx26-read-all text)
+  (let loop ((st (fx:eager-start-fx26)) (i 0))
+    (cond ((not (eq? (fx:eager-state-kind st) 'need)) st)
+          ((= i (string-length text)) (fx:eager-feed st #\newline))
+          (else (loop (fx:eager-feed st (string-ref text i)) (+ i 1))))))
+(define (fx26-data text) (fx:eager-state-data (fx26-read-all text)))

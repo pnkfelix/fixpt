@@ -80,13 +80,32 @@ pub fn repl(backend: Backend) -> i32 {
     println!("(each form is checked, lowered to Scheme and run. `,help` for commands,");
     println!(" `,code` to show the lowered Scheme. ^D leaves.)");
 
-    let mut reader = LineReader::new(".fixpt_fx26_history", SyntaxProfile::FX87);
+    // FX-26 code reads FX-26 input: the eager reader written in FX-26, once
+    // its licence is checked. Without it, the Rust reader.
+    let mut eager = match fixpt_fx26::session::load_eager_reader(&mut session.scheme).and_then(|()| {
+        fixpt_scheme::eager::EagerReader::attach_starting(
+            &mut session.scheme,
+            fixpt_fx26::session::READER_PREFIX,
+            "eager-start-fx26",
+        )
+        .map_err(|e| e.to_string())
+    }) {
+        Ok(r) => {
+            println!("(read as you type by the eager reader written in FX-26; its licence checked)");
+            Some(r)
+        }
+        Err(why) => {
+            println!("(the FX-26 eager reader is not used: {why})");
+            None
+        }
+    };
+    let mut reader = LineReader::new(".fixpt_fx26_history", SyntaxProfile::FX26);
     let mut show_code = false;
     let mut n = 0usize;
     loop {
         reader.set_completions(known_names(&session.checker));
         let line = {
-            let mut oracle = Oracle { session: &mut session };
+            let mut oracle = Oracle { session: &mut session, reader: eager.as_mut() };
             reader.read_with("fx26> ", "     | ", &mut oracle, "")
         };
         let text = match line {
@@ -356,15 +375,22 @@ fn answer_hole(c: &mut Checker, form: &Syntax) -> Option<Vec<String>> {
 /// before `Enter`, and nothing it could do is visible to the program.
 struct Oracle<'a> {
     session: &'a mut Fx26Session,
+    /// The eager reader written in FX-26, deciding what `Enter` does.
+    reader: Option<&'a mut fixpt_scheme::eager::EagerReader>,
 }
 
 impl crate::lineedit::Oracle for Oracle<'_> {
     fn status(&mut self, text: &str, at_enter: bool) -> crate::lineedit::Status {
-        crate::lineedit::Reread(SyntaxProfile::FX87).status(text, at_enter)
+        match self.reader.as_deref_mut() {
+            // A `,help` hole in FX-26 is answered once the form is entered,
+            // so a hole mid-form is just an unfinished form.
+            Some(r) => crate::eager_status(r, &mut self.session.scheme, text, at_enter, SyntaxProfile::FX26, false),
+            None => crate::lineedit::Reread(SyntaxProfile::FX26).status(text, at_enter),
+        }
     }
 
     fn notes(&mut self, text: &str) -> Vec<Note> {
-        let Some(p) = crate::speculate::partial(text, SyntaxProfile::FX87) else {
+        let Some(p) = crate::speculate::partial(text, SyntaxProfile::FX26) else {
             return Vec::new();
         };
         // Leave no trace: symbols read here are forgotten afterwards, so a
@@ -445,7 +471,7 @@ mod speculative {
 
     fn notes_in(s: &mut Fx26Session, text: &str) -> Vec<Note> {
         let before = s.checker.interner.len();
-        let notes = Oracle { session: s }.notes(text);
+        let notes = Oracle { session: s, reader: None }.notes(text);
         assert_eq!(s.checker.interner.len(), before, "checking left symbols behind");
         notes
     }

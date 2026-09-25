@@ -19,6 +19,9 @@
 ;;; * **No `values`.** A reading procedure returns a `result`: the datum and
 ;;;   the cursor after it, in a pair.
 ;;;
+;;; It reads Scheme, from `eager-start`, or FX-26's own lexical syntax, from
+;;; `eager-start-fx26`.
+;;;
 ;;; The procedures a caller uses keep the Scheme version's names and
 ;;; meanings — `eager-start`, `eager-feed`, `eager-status`,
 ;;; `eager-state-position`, `eager-state-message`, `eager-state-data`,
@@ -34,9 +37,9 @@
 
 ;; What a reading procedure may do: allocate and read its own data, mark,
 ;; and suspend or fail through its prompt.
-(define-effect reads (maxeff (alloc @s) (read @s) (write @m) (goto @e) (comefrom @e)))
+(define-effect reads (maxeff (alloc @s) (read @s) (write @m) (read @m) (goto @e) (comefrom @e)))
 ;; The same, less the control on @e: what a delimited parse does.
-(define-effect parsing (maxeff (alloc @s) (read @s) (write @m)))
+(define-effect parsing (maxeff (alloc @s) (read @s) (write @m) (read @m)))
 
 (define-type chars (listof char @s))
 (define-type data (listof datum @s))
@@ -63,6 +66,14 @@
 
 (define eager-tag (prompt-tag state state parsing @e) (make-continuation-prompt-tag))
 (define eager-key (mark-key datum @m) (make-continuation-mark-key))
+
+;; Which dialect is being read: #f for Scheme, #t for FX-26 (the profile
+;; `fixpt_read::SyntaxProfile::FX26`, which differs in two places: `#u` alone
+;; is the unit value, and `[` and `]` are reserved). A mark rather than an
+;; argument: it is set once, around the whole parse, and a checkpoint carries
+;; it along, since the marks of a captured continuation are part of it.
+(define dialect-key (mark-key bool @m) (make-continuation-mark-key))
+(define fx26? (subr reads () bool) (lambda () (first-mark dialect-key #f)))
 
 ;;; ------------------------------------------------------------- the states
 
@@ -162,9 +173,15 @@
                        (loop (make-cursor (cur-look after) (cur-pos after) (cons (car r) (cur-data after)) nil))))))))
       (loop cur))))
 
-;; A reader with nothing read yet.
-(define eager-start (subr reads () state)
-  (lambda () (eager-run (lambda () (read-top (make-cursor (cons (next-char 0 nil) nil) 0 nil nil))))))
+;; A reader with nothing read yet, for Scheme or for FX-26.
+(define start-reading (subr reads (bool) state)
+  (lambda (fx26)
+    (eager-run
+     (lambda ()
+       (with-mark dialect-key fx26
+         (lambda () (read-top (make-cursor (cons (next-char 0 nil) nil) 0 nil nil))))))))
+(define eager-start (subr reads () state) (lambda () (start-reading #f)))
+(define eager-start-fx26 (subr reads () state) (lambda () (start-reading #t)))
 
 ;; Feed one character to a waiting state, giving the next state.
 (define eager-feed (subr reads (state char) state)
@@ -292,6 +309,8 @@
           (read-hash (cur-pos cur) (car (cur-pending cur)))
           (let ((c (cur-char cur)) (start (cur-pos cur)))
             (cond ((char=? c #\() (read-list (advance cur) start #\)))
+                  ((and (char-in? c "[]") (fx26?))
+                   (fail cur (str3 "`" (char-string c) "` is reserved: it has no meaning yet")))
                   ((char=? c #\[) (read-list (advance cur) start #\]))
                   ((char-in? c ")]") (fail cur (str3 "unbalanced `" (char-string c) "`")))
                   ((char=? c #\") (read-string (advance cur) start))
@@ -327,6 +346,8 @@
                             (plain (not (hash-pending? cur))))
                        (cond ((and plain (char=? c close))
                               (cons (datum-list (the data (reverse items))) (consumed cur)))
+                             ((and plain (char=? c #\]) (fx26?))
+                              (fail cur "`]` is reserved: it has no meaning yet"))
                              ((and plain (char-in? c ")]"))
                               (fail cur (str5 "expected `" (char-string close) "` but found `" (char-string c) "`")))
                              ((and plain (char=? c #\.))
@@ -423,7 +444,10 @@
                          (else (fail-at (cdr w) start (str3 "unknown `#` syntax: `#" word "`"))))))
                 ((char-in? c "uU")
                  (let* ((w (read-word cur)) (word (car w)) (cur (cdr w)))
-                   (cond ((not (string-ci=? word "u8"))
+                   (cond ((and (string-ci=? word "u") (fx26?))
+                          ;; FX-26's unit value, beside `#u8(`.
+                          (cons (datum-symbol "#u") cur))
+                         ((not (string-ci=? word "u8"))
                           (fail-at cur start (str3 "unknown `#` syntax: `#" word "`")))
                          ((not (char=? (cur-char cur) #\())
                           (fail cur "expected `(` after `#u8`"))

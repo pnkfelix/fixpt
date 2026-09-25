@@ -108,8 +108,12 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
 ];
 
 /// The Scheme names of a program's top-level definitions.
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Globals {
+    /// What every one of them starts with: `fx:`, unless the program is to
+    /// share a Scheme session with another FX-26 program and keep out of its
+    /// way — the eager reader loaded beside the REPL's user program.
+    prefix: String,
     /// The current global for each name.
     current: HashMap<Sym, String>,
     /// How many times each name has been defined.
@@ -118,7 +122,17 @@ pub struct Globals {
     declared: Vec<Sym>,
 }
 
+impl Default for Globals {
+    fn default() -> Globals {
+        Globals::with_prefix("fx:")
+    }
+}
+
 impl Globals {
+    pub fn with_prefix(prefix: &str) -> Globals {
+        Globals { prefix: prefix.to_string(), current: HashMap::new(), defined: HashMap::new(), declared: Vec::new() }
+    }
+
     /// The global a new definition of `name` gets, which becomes the one
     /// later uses of `name` refer to.
     pub fn define(&mut self, c: &Checker, name: Sym) -> String {
@@ -129,7 +143,7 @@ impl Globals {
         }
         let n = self.defined.entry(name).or_insert(0);
         *n += 1;
-        let base = format!("fx:{}", fixpt_read::escape_symbol(c.interner.name(name)));
+        let base = format!("{}{}", self.prefix, fixpt_read::escape_symbol(c.interner.name(name)));
         let global = if *n == 1 { base } else { format!("{base}:{n}") };
         self.current.insert(name, global.clone());
         global
@@ -140,7 +154,7 @@ impl Globals {
     pub fn declare(&mut self, c: &Checker, name: Sym) {
         if !self.current.contains_key(&name) {
             let n = self.defined.entry(name).or_insert(0);
-            let base = format!("fx:{}", fixpt_read::escape_symbol(c.interner.name(name)));
+            let base = format!("{}{}", self.prefix, fixpt_read::escape_symbol(c.interner.name(name)));
             let global = if *n == 0 { base } else { format!("{base}:{}", *n + 1) };
             self.current.insert(name, global);
             self.declared.push(name);
@@ -180,7 +194,7 @@ impl Lowerer<'_> {
         match STANDARD.iter().find(|(n, _, _)| *n == name) {
             Some((_, scheme, _)) => scheme.to_string(),
             // Checked code names nothing else; keep it visible if it does.
-            None => format!("fx:{}", fixpt_read::escape_symbol(name)),
+            None => format!("{}{}", self.globals.prefix, fixpt_read::escape_symbol(name)),
         }
     }
 

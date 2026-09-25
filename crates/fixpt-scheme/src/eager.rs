@@ -51,7 +51,14 @@ impl EagerReader {
     /// Scheme reader's names and meanings, behind `prefix`: the FX-26 reader
     /// (`fixpt_fx26::EAGER_READER`) is `fx:eager-start` and so on.
     pub fn attach(session: &mut Session, prefix: &str) -> Result<EagerReader, SessionError> {
-        let start = session.global_value(&format!("{prefix}eager-start")).expect("the reader is loaded");
+        EagerReader::attach_starting(session, prefix, "eager-start")
+    }
+
+    /// The same, starting the reader with `start` rather than `eager-start`:
+    /// the FX-26 reader reads FX-26's own lexical syntax from
+    /// `eager-start-fx26`.
+    pub fn attach_starting(session: &mut Session, prefix: &str, start: &str) -> Result<EagerReader, SessionError> {
+        let start = session.global_value(&format!("{prefix}{start}")).expect("the reader is loaded");
         let st = session.call(start, &[])?;
         let list = session.rt.heap.cons(st, Value::NULL);
         let root = session.rt.heap.push_root(list);

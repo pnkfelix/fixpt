@@ -42,11 +42,11 @@ pub enum Top {
 }
 
 impl Checker {
-    /// Read `text` in FX-26's lexical syntax, which is FX-87's, recording
-    /// spans against `file`.
+    /// Read `text` in FX-26's lexical syntax (`SyntaxProfile::FX26`),
+    /// recording spans against `file`.
     pub fn read_in(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
         let mut interner = std::mem::take(&mut self.interner);
-        let r = Reader::new(text, file, SyntaxProfile::FX87, &mut interner).read_all();
+        let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
         self.interner = interner;
         r.map_err(|e| FxError::at(e.span, e.message))
     }

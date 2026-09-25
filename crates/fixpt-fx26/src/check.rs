@@ -145,7 +145,7 @@ impl Checker {
 
     fn read(&mut self, text: &str) -> R<Vec<Syntax>> {
         let mut interner = std::mem::take(&mut self.interner);
-        let r = Reader::new(text, fixpt_read::FileId(0), SyntaxProfile::FX87, &mut interner).read_all();
+        let r = Reader::new(text, fixpt_read::FileId(0), SyntaxProfile::FX26, &mut interner).read_all();
         self.interner = interner;
         r.map_err(|e| FxError::at(e.span, e.message))
     }

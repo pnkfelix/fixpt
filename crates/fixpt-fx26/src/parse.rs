@@ -1,8 +1,8 @@
 //! Syntax to the kernel.
 //!
-//! The surface is FX-87's (`docs/fx26.md`, "The kernel"): n-ary forms, binder
+//! The forms are FX-87's (`docs/fx26.md`, "The kernel"): n-ary forms, binder
 //! lists in parentheses — `(plambda ((t type)) …)` — and `@name` for a region
-//! constant. `let` and `begin` are derived forms, and `lambda` and `letrec`
+//! constant. The lexical syntax is FX-26's own, `SyntaxProfile::FX26`. `let` and `begin` are derived forms, and `lambda` and `letrec`
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
@@ -338,7 +338,8 @@ impl Checker {
             Datum::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
             Datum::Char(c) => return Ok(self.arena.exp(span, Exp::Char(*c))),
             Datum::Symbol(sym) => {
-                // FX-87's reader delivers `#t`, `#f` and `#u` as symbols.
+                // `#u` reads as a symbol; `#t` and `#f` did too in FX-87's
+                // profile, which FX-26 used to be read with.
                 let e = match self.name(*sym) {
                     "#t" => Exp::Bool(true),
                     "#f" => Exp::Bool(false),

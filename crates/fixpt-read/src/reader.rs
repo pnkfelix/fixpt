@@ -228,7 +228,15 @@ impl<'a> Reader<'a> {
                     self.read_list(start, ']', Some(proj))
                 }
                 Brackets::SymbolChars => self.read_atom(),
+                Brackets::Reserved => {
+                    self.bump();
+                    Err(ReadError::at(self.span_from(start), "`[` is reserved: it has no meaning yet"))
+                }
             },
+            ']' if self.profile.brackets == Brackets::Reserved => {
+                self.bump();
+                Err(ReadError::at(self.span_from(start), "`]` is reserved: it has no meaning yet"))
+            }
             ')' | ']' => {
                 self.bump();
                 Err(ReadError::at(self.span_from(start), format!("unbalanced `{c}`")))
@@ -282,6 +290,11 @@ impl<'a> Reader<'a> {
                 Some(c) if c == close => {
                     self.bump();
                     break;
+                }
+                Some(']') if self.profile.brackets == Brackets::Reserved => {
+                    let at = self.here();
+                    self.bump();
+                    return Err(ReadError::at(at, "`]` is reserved: it has no meaning yet"));
                 }
                 Some(c @ (')' | ']')) => {
                     let at = self.here();
@@ -478,47 +491,57 @@ impl<'a> Reader<'a> {
     }
 
     fn read_u(&mut self, start: usize) -> ReadResult<Syntax> {
+        let lone_u = {
+            let mut ahead = self.src[self.pos..].chars();
+            ahead.next();
+            ahead.next().is_none_or(|c| self.is_delimiter(c))
+        };
         match self.profile.unit {
-            UnitSyntax::Symbol => {
-                self.bump(); // 'u'
-                let span = self.span_from(start);
-                // The exact spelling matters: FX-91 needs `#U`, FX-87 `#u`.
-                let s = self.interner.intern(self.profile.unit_name);
-                Ok(Syntax::symbol(span, s))
-            }
-            UnitSyntax::Bytevector => {
-                let word = self.take_while(|c, _| c == 'u' || c == 'U' || c.is_ascii_digit());
-                if !word.eq_ignore_ascii_case("u8") {
+            UnitSyntax::Symbol => self.read_unit(start),
+            UnitSyntax::SymbolOrBytevector if lone_u => self.read_unit(start),
+            UnitSyntax::Bytevector | UnitSyntax::SymbolOrBytevector => self.read_bytevector(start),
+        }
+    }
+
+    fn read_unit(&mut self, start: usize) -> ReadResult<Syntax> {
+        self.bump(); // 'u'
+        let span = self.span_from(start);
+        // The exact spelling matters: FX-91 needs `#U`, FX-87 `#u`.
+        let s = self.interner.intern(self.profile.unit_name);
+        Ok(Syntax::symbol(span, s))
+    }
+
+    fn read_bytevector(&mut self, start: usize) -> ReadResult<Syntax> {
+        let word = self.take_while(|c, _| c == 'u' || c == 'U' || c.is_ascii_digit());
+        if !word.eq_ignore_ascii_case("u8") {
+            return Err(ReadError::at(
+                self.span_from(start),
+                format!("unknown `#` syntax: `#{word}`"),
+            ));
+        }
+        if self.peek() != Some('(') {
+            return Err(ReadError::at(self.here(), "expected `(` after `#u8`"));
+        }
+        self.bump();
+        let inner = self.read_list(start, ')', None)?;
+        let items: Vec<Syntax> = match inner.datum {
+            Datum::Nil => Vec::new(),
+            Datum::List { items, tail: None } => items,
+            _ => return Err(ReadError::at(inner.span, "a bytevector cannot be dotted")),
+        };
+        let mut bytes = Vec::with_capacity(items.len());
+        for item in items {
+            match item.as_i64() {
+                Some(n) if (0..=255).contains(&n) => bytes.push(n as u8),
+                _ => {
                     return Err(ReadError::at(
-                        self.span_from(start),
-                        format!("unknown `#` syntax: `#{word}`"),
+                        item.span,
+                        "bytevector elements must be exact integers in 0..=255",
                     ));
                 }
-                if self.peek() != Some('(') {
-                    return Err(ReadError::at(self.here(), "expected `(` after `#u8`"));
-                }
-                self.bump();
-                let inner = self.read_list(start, ')', None)?;
-                let items: Vec<Syntax> = match inner.datum {
-                    Datum::Nil => Vec::new(),
-                    Datum::List { items, tail: None } => items,
-                    _ => return Err(ReadError::at(inner.span, "a bytevector cannot be dotted")),
-                };
-                let mut bytes = Vec::with_capacity(items.len());
-                for item in items {
-                    match item.as_i64() {
-                        Some(n) if (0..=255).contains(&n) => bytes.push(n as u8),
-                        _ => {
-                            return Err(ReadError::at(
-                                item.span,
-                                "bytevector elements must be exact integers in 0..=255",
-                            ));
-                        }
-                    }
-                }
-                Ok(Syntax::new(self.span_from(start), Datum::Bytevector(bytes)))
             }
         }
+        Ok(Syntax::new(self.span_from(start), Datum::Bytevector(bytes)))
     }
 
     fn read_label(&mut self, start: usize) -> ReadResult<Syntax> {

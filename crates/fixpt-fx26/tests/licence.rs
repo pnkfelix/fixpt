@@ -156,3 +156,18 @@ fn the_fx26_reader_loads_into_a_scheme_session() {
     assert_eq!(r.status(&mut scheme, "(a b)", false).expect("reads"), EagerStatus::Complete);
     assert!(matches!(r.status(&mut scheme, "(a b]", false).expect("reads"), EagerStatus::Invalid { at: 4, .. }));
 }
+
+/// Loaded beside a user's program, as the FX-26 REPL loads it, the reader
+/// keeps to its own globals: a user who defines `need` and `advance` — the
+/// reader's own names — does not replace the reader's.
+#[test]
+fn the_reader_beside_a_program_keeps_its_own_names() {
+    let mut s = session();
+    fixpt_fx26::session::load_eager_reader(&mut s.scheme).expect("licensed and loaded");
+    let mut r = EagerReader::attach_starting(&mut s.scheme, fixpt_fx26::session::READER_PREFIX, "eager-start-fx26")
+        .expect("starts");
+    run(&mut s, "(define need 0)");
+    run(&mut s, "(define advance (subr pure (int) int) (lambda (n) n))");
+    assert_eq!(r.status(&mut s.scheme, "(f #u", false).expect("reads"), EagerStatus::Incomplete);
+    assert_eq!(r.status(&mut s.scheme, "(f #u)", false).expect("reads"), EagerStatus::Complete);
+}

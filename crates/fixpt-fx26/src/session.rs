@@ -82,8 +82,14 @@ pub struct Compiled {
 /// Check and lower the program `text`, whose definitions may come in any
 /// order.
 pub fn compile_program(text: &str) -> R<Compiled> {
+    compile_program_as(text, "fx:")
+}
+
+/// The same, with every global the program defines named `<prefix><name>`,
+/// so that it can share a Scheme session with another FX-26 program.
+pub fn compile_program_as(text: &str, prefix: &str) -> R<Compiled> {
     let mut checker = Checker::new();
-    let mut globals = Globals::default();
+    let mut globals = Globals::with_prefix(prefix);
     let forms = checker.read_in(FileId(0), text)?;
     let done = checker.declare_ahead(&forms)?;
     for f in &forms {
@@ -104,6 +110,20 @@ pub fn compile_program(text: &str) -> R<Compiled> {
         }
     }
     Ok(Compiled { checker, code })
+}
+
+/// The global prefix the eager reader is loaded under when it shares a
+/// Scheme session with other code, so that a user's `(define need …)` —
+/// `fx:need` — cannot replace the reader's `need`.
+pub const READER_PREFIX: &str = "fx26-reader:";
+
+/// Check the eager reader written in FX-26, check its licence, and only
+/// then load it into `scheme`, under [`READER_PREFIX`]. It runs on every
+/// keystroke, so nothing of it may run before the licence says it can.
+pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
+    let mut compiled = compile_program_as(crate::EAGER_READER, READER_PREFIX).map_err(|e| e.to_string())?;
+    compiled.checker.reader_licence()?;
+    compiled.load_into(scheme)
 }
 
 impl Compiled {

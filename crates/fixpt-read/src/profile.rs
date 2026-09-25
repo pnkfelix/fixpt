@@ -21,6 +21,11 @@
 //!   `(e d)` the identical datum. Here the reader is ours, so it works.
 //!
 //! * Both dialects fold symbol case; Scheme does not.
+//!
+//! * FX-26, this project's own dialect, has a profile of its own rather than
+//!   borrowing one: Scheme's, except that `#u` is also the unit value and
+//!   `[`/`]` are reserved — FX-91 used them for projection sugar, and FX-26
+//!   has not yet decided what they are for.
 
 /// How `[` and `]` are treated.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -32,6 +37,9 @@ pub enum Brackets {
     SymbolChars,
     /// `[e d…]` reads as `(proj e d…)` — FX-91's projection sugar.
     ProjSugar,
+    /// Delimiters that mean nothing yet: using one is an error. FX-26's, so
+    /// that giving them a meaning later breaks no program.
+    Reserved,
 }
 
 /// How `#u` reads.
@@ -46,6 +54,10 @@ pub enum UnitSyntax {
     Bytevector,
     /// `#u` reads as the symbol named by [`SyntaxProfile::unit_name`].
     Symbol,
+    /// Both: `#u` on its own is the unit symbol, and `#u8(` opens a
+    /// bytevector. They do not collide, since R7RS spells bytevectors with
+    /// the `8`.
+    SymbolOrBytevector,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -112,11 +124,28 @@ impl SyntaxProfile {
         quote_sugar: true,
     };
 
+    /// FX-26: Scheme's lexical syntax, with `#u` as unit beside `#u8(`, and
+    /// `[`/`]` reserved.
+    pub const FX26: SyntaxProfile = SyntaxProfile {
+        name: "fx26",
+        case_fold: false,
+        brackets: Brackets::Reserved,
+        booleans_are_symbols: false,
+        unit: UnitSyntax::SymbolOrBytevector,
+        unit_name: "#u",
+        datum_comments: true,
+        block_comments: true,
+        // Nothing in FX-26 is a cyclic datum to label.
+        datum_labels: false,
+        quote_sugar: true,
+    };
+
     pub fn by_name(name: &str) -> Option<SyntaxProfile> {
         match name {
             "scheme" | "r7rs" => Some(SyntaxProfile::SCHEME),
             "fx87" => Some(SyntaxProfile::FX87),
             "fx91" => Some(SyntaxProfile::FX91),
+            "fx26" => Some(SyntaxProfile::FX26),
             _ => None,
         }
     }

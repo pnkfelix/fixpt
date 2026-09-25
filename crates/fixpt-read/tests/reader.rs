@@ -511,3 +511,35 @@ fn a_truncated_dotted_list_is_unfinished() {
     // …while a `.` with nothing before the close really is an error.
     assert!(matches!(form_status("(g . )", SyntaxProfile::SCHEME), FormStatus::Invalid(_)));
 }
+
+// ------------------------------------------------------------------ FX-26
+
+/// FX-26's own profile: Scheme's, with `#u` beside `#u8(`, and brackets
+/// reserved until FX-26 decides what they are for.
+mod fx26_profile {
+    use super::*;
+    const P: SyntaxProfile = SyntaxProfile::FX26;
+
+    #[test]
+    fn unit_and_bytevectors_both_read() {
+        // The unit symbol, which the writer escapes.
+        assert_eq!(show(P, "#u"), "|#u|");
+        assert_eq!(show(P, "(f #u)"), "(f |#u|)");
+        assert_eq!(show(P, "#u8(1 2)"), "#u8(1 2)");
+        assert!(err(P, "#uv").contains("unknown `#` syntax"), "{}", err(P, "#uv"));
+    }
+
+    #[test]
+    fn brackets_are_reserved() {
+        assert!(err(P, "[a]").contains("`[` is reserved"), "{}", err(P, "[a]"));
+        assert!(err(P, "(a ]").contains("`]` is reserved"), "{}", err(P, "(a ]"));
+        assert!(err(P, "a]").contains("`]` is reserved"), "{}", err(P, "a]"));
+        // A delimiter still: `a[` is not one symbol.
+        assert!(err(P, "a[b").contains("`[` is reserved"), "{}", err(P, "a[b"));
+    }
+
+    #[test]
+    fn it_is_otherwise_schemes() {
+        assert_eq!(show(P, "Foo #t #f #| c |# #;(x) y"), "Foo #t #f y");
+    }
+}

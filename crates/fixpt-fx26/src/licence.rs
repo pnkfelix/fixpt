@@ -52,6 +52,7 @@ pub fn unlicensed(effect: &Effect, owned: &[Region]) -> Option<Atom> {
 /// The eager reader's entry points: what a driver calls.
 pub const READER_ENTRY_POINTS: &[&str] = &[
     "eager-start",
+    "eager-start-fx26",
     "eager-feed",
     "eager-status",
     "eager-state-kind",

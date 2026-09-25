@@ -189,3 +189,68 @@ fn the_context_is_the_parse_stack() {
         assert_eq!(fx.ok(), scheme.ok(), "{backend:?}");
     }
 }
+
+// ------------------------------------------------- reading FX-26 itself
+
+/// What the Rust reader reads `text` to in the FX-26 profile, written.
+fn rust_fx26(text: &str) -> String {
+    let mut interner = fixpt_read::Interner::new();
+    let forms = fixpt_read::Reader::new(text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner)
+        .read_all()
+        .expect("reads");
+    let written: Vec<String> = forms.iter().map(|f| fixpt_read::write_syntax(f, &interner)).collect();
+    // The same datum both ways; the two writers differ on escaping it. The
+    // Rust writer's `|#u|` is the careful one — in Scheme syntax a bare `#u`
+    // would not read back as a symbol — but the run-time writer prints `#u`.
+    format!("({})", written.join(" ")).replace("|#u|", "#u")
+}
+
+/// The FX-26 reader, reading FX-26, agrees with the Rust reader in the
+/// FX-26 profile — on FX-26 programs, this reader's own source among them.
+#[test]
+fn it_reads_fx26_as_the_rust_reader_does() {
+    let mut s = session(Backend::Bytecode);
+    let sources = [
+        "(f #u #u8(1 2) #t #f Foo) #| c |# #;(gone) (g #\\a)",
+        include_str!("programs/bidirectional/twice.fx"),
+        include_str!("programs/run/marks-of.fx"),
+        include_str!("programs/pldi89/c7.fx"),
+        fixpt_fx26::EAGER_READER,
+    ];
+    for text in sources {
+        let got = s.scheme.eval_to_string("<fx26>", &format!("(fx26-data {})", scheme_string(text)));
+        assert_eq!(got.as_deref().ok(), Some(rust_fx26(text).as_str()), "on:\n{text}");
+    }
+}
+
+/// Where FX-26's lexical syntax differs from Scheme's, it says so where the
+/// Rust reader does, and every prefix of an FX-26 program is unfinished or
+/// complete exactly when the Rust reader says so.
+#[test]
+fn it_knows_fx26s_differences() {
+    let mut s = session(Backend::Bytecode);
+    let mut r = EagerReader::attach_starting(&mut s.scheme, "fx:", "eager-start-fx26").expect("starts");
+    for text in ["[a]", "(a ]", "a]", "(a [b"] {
+        let rust = fixpt_read::form_status(text, fixpt_read::SyntaxProfile::FX26);
+        let fixpt_read::FormStatus::Invalid(e) = rust else { panic!("{text:?}: Rust says {rust:?}") };
+        match r.status(&mut s.scheme, text, false).expect("reads") {
+            EagerStatus::Invalid { at, message } => {
+                assert_eq!(at, e.span.start as usize, "{text:?}");
+                assert_eq!(message, e.message, "{text:?}");
+            }
+            other => panic!("{text:?}: {other:?}"),
+        }
+    }
+    let text = "(define x (the unit #u)) (g #u8(1) #| ) |#)";
+    let chars: Vec<char> = text.chars().collect();
+    for n in 0..=chars.len() {
+        let prefix: String = chars[..n].iter().collect();
+        let eager = r.status(&mut s.scheme, &prefix, true).expect("reads");
+        let rust = fixpt_read::form_status(&format!("{prefix}\n"), fixpt_read::SyntaxProfile::FX26);
+        assert_eq!(
+            matches!(eager, EagerStatus::Incomplete),
+            matches!(rust, fixpt_read::FormStatus::Incomplete),
+            "{prefix:?}: FX-26 {eager:?}, Rust {rust:?}"
+        );
+    }
+}

@@ -332,7 +332,9 @@ argument at the cursor must be.
 The eager reader (see "The REPL" above) has been ported to FX-26
 (`crates/fixpt-fx26/src/eager-reader.fx`). It is checked, lowered and run
 like any FX-26 program, and it reads the same inputs to the same data, errors
-and parse stacks as the Scheme and Rust readers. Its control and allocation
+and parse stacks as the Scheme and Rust readers. It also reads FX-26's own
+lexical syntax, and the FX-26 REPL uses it to read what you type: FX-26 code
+reading FX-26 code. Its control and allocation
 effects are all on regions it owns. That is what makes it safe to run
 speculatively. `fixpt --reader fx26 repl` checks exactly that, and then
 reads the Scheme REPL's input with it.

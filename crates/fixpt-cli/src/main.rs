@@ -505,10 +505,8 @@ fn hole_report(raised: &str) -> String {
 /// keystroke, so every entry point's effect must stay within the regions the
 /// reader owns — allocation, and its own state, prompt and marks.
 fn load_fx26_reader(session: &mut Session) -> Result<fixpt_scheme::eager::EagerReader, String> {
-    let mut compiled = fixpt_fx26::session::compile_program(fixpt_fx26::EAGER_READER).map_err(|e| e.to_string())?;
-    compiled.checker.reader_licence()?;
-    compiled.load_into(session)?;
-    fixpt_scheme::eager::EagerReader::attach(session, "fx:").map_err(|e| e.to_string())
+    fixpt_fx26::session::load_eager_reader(session)?;
+    fixpt_scheme::eager::EagerReader::attach(session, fixpt_fx26::session::READER_PREFIX).map_err(|e| e.to_string())
 }
 
 /// The eager reader as the line editor's oracle: one checkpoint per character,
@@ -521,21 +519,35 @@ struct EagerOracle<'a> {
 
 impl lineedit::Oracle for EagerOracle<'_> {
     fn status(&mut self, text: &str, at_enter: bool) -> lineedit::Status {
-        use fixpt_scheme::eager::EagerStatus;
-        use lineedit::Status;
-        match self.reader.status(self.session, text, at_enter) {
-            Ok(EagerStatus::Complete) => Status::Complete,
-            Ok(EagerStatus::Incomplete) => Status::Incomplete,
-            Ok(EagerStatus::Invalid { at, message }) => Status::Invalid { at, message },
-            Ok(EagerStatus::Hole { closers }) if at_enter => Status::Ask {
-                closed: format!("{text}{closers}"),
-                keep: without_trailing_hole(text),
-            },
-            Ok(EagerStatus::Hole { .. }) => Status::Incomplete,
-            // The Scheme reader failing is a bug in it, not the user's
-            // problem: fall back to the Rust reader for this answer.
-            Err(_) => lineedit::Reread(fixpt_read::SyntaxProfile::SCHEME).status(text, at_enter),
-        }
+        eager_status(self.reader, self.session, text, at_enter, fixpt_read::SyntaxProfile::SCHEME, true)
+    }
+}
+
+/// What an eager reader says of `text`, as the line editor wants it. With
+/// `holes`, a `,help` hole at `Enter` asks for the form to be answered while
+/// still unfinished; without, it is simply unfinished.
+pub(crate) fn eager_status(
+    reader: &mut fixpt_scheme::eager::EagerReader,
+    session: &mut Session,
+    text: &str,
+    at_enter: bool,
+    profile: fixpt_read::SyntaxProfile,
+    holes: bool,
+) -> lineedit::Status {
+    use fixpt_scheme::eager::EagerStatus;
+    use lineedit::Status;
+    match reader.status(session, text, at_enter) {
+        Ok(EagerStatus::Complete) => Status::Complete,
+        Ok(EagerStatus::Incomplete) => Status::Incomplete,
+        Ok(EagerStatus::Invalid { at, message }) => Status::Invalid { at, message },
+        Ok(EagerStatus::Hole { closers }) if at_enter && holes => Status::Ask {
+            closed: format!("{text}{closers}"),
+            keep: without_trailing_hole(text),
+        },
+        Ok(EagerStatus::Hole { .. }) => Status::Incomplete,
+        // The eager reader failing is a bug in it, not the user's problem:
+        // fall back to the Rust reader for this answer.
+        Err(_) => lineedit::Oracle::status(&mut lineedit::Reread(profile), text, at_enter),
     }
 }
 
@@ -550,7 +562,7 @@ fn without_trailing_hole(text: &str) -> String {
     text.to_string()
 }
 
-/// Scheme's answer to the same questions./// Scheme's answer to the same questions.
+/// Scheme's answer to the same questions.
 ///
 /// Less than FX can say, and the difference is the point: without types there
 /// is no way to ask what accepts a value, so `,fits` reports that it needs a
