@@ -300,7 +300,12 @@ impl<'a> Reader<'a> {
                     let dot = self.here();
                     self.bump();
                     self.skip_atmosphere()?;
-                    if self.peek().is_none_or(|c| c == close) {
+                    // Running out here is unfinished, not wrong: `(a .` can
+                    // still become `(a . b)`.
+                    if self.peek().is_none() {
+                        return Err(ReadError::truncated(dot, "expected a datum after `.`"));
+                    }
+                    if self.peek() == Some(close) {
                         return Err(ReadError::at(dot, "expected a datum after `.`"));
                     }
                     tail = Some(Box::new(self.read_datum()?));
@@ -309,6 +314,12 @@ impl<'a> Reader<'a> {
                         Some(c) if c == close => {
                             self.bump();
                             break;
+                        }
+                        None => {
+                            return Err(ReadError::truncated(
+                                self.here(),
+                                format!("expected `{close}` after the tail of a dotted list"),
+                            ));
                         }
                         _ => {
                             return Err(ReadError::at(

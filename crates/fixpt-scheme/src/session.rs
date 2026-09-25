@@ -256,6 +256,23 @@ impl Session {
         }
     }
 
+    /// A global's value, or `None` while it is unbound.
+    pub fn global_value(&self, name: &str) -> Option<Value> {
+        let sym = self.rt.heap.intern_existing(name)?;
+        let v = self.rt.heap.global(self.rt.heap.symbol_global_slot(sym));
+        if v.is_unbound() { None } else { Some(v) }
+    }
+
+    /// Apply a procedure from Rust. Unlike an input, this runs with no
+    /// top-level prompt around it: it is for calling library code — the eager
+    /// reader — not for running a user's program.
+    pub fn call(&mut self, f: Value, args: &[Value]) -> Result<Value, SessionError> {
+        match self.engine.call(&mut self.rt, &mut self.prepared, f, args) {
+            Ok(v) => Ok(v),
+            Err(t) => Err(SessionError::Raised(self.condition_message(t.obj))),
+        }
+    }
+
     // ------------------------------------------------------------------ holes
     /// A hole is `#(tag k report position total)` whose tag is the top level's
     /// own prompt tag — see `cmarks::make_hole`.

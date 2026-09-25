@@ -9,7 +9,28 @@ stale first.
 
 ---
 
-## 1. A self-correcting reader, built on `call/cc`
+## 1. A self-correcting reader, built on `call/cc` — done (2026-09-24)
+
+**Done.** `crates/fixpt-scheme/src/eager-reader.scm` is an R7RS reader written
+in Scheme and fed one character at a time. When it needs a character it
+captures a *composable* continuation up to its own prompt and hands it back,
+so every state is a checkpoint and backspace returns to the previous one.
+Its parse stack is read out of continuation marks. `fixpt_scheme::eager`
+drives it from Rust, feeding only what changed since the last call. The
+Scheme REPL uses it through the line editor's new `Oracle`:
+- a mistake is marked at the character that makes it, with the message under
+  the form;
+- `,help` written before a form is finished is answered straight away, and
+  the form is given back to carry on typing.
+
+`tests/eager.rs` checks it against the Rust reader on corpora including the
+whole prelude and the reader's own source. That found two bugs, both fixed:
+the Rust reader called a cut-off dotted list an error, and the bytecode
+engine did not tail-call a `call-with-values` consumer (§4).
+
+**Not done.** FX profiles, so the FX REPLs still re-read with the Rust
+reader. Datum labels. A position for a bad bytevector element. The original
+plan follows.
 
 **The idea.** Olin Shivers, *"Eager parsing and user interaction with
 `call/cc`"* ([write-up][shivers]):
@@ -158,13 +179,14 @@ capture one of them, costing an indirection on every recursive call — see
 capture slots empty and patched once all of them exist. Nothing in the encoding
 stands in the way.
 
-## 4. `call-with-values` is not a tail call
+## 4. `call-with-values` is not a tail call — fixed (2026-09-24)
 
-Neither engine calls the consumer in tail position, so a loop written as a
-tail-recursive `call-with-values` grows the control stack. Both engines agree,
-which is what makes the differential tests meaningful, but R7RS asks for the
-tail call. Both are structured to allow it: the consumer call needs the
-*enclosing* frame's continuation rather than the call site's.
+It was, in the AST engine, which pops its `Consume` frame before calling the
+consumer. The bytecode engine returned through the call site, so a loop
+through `let-values` grew the stack and its continuation marks stacked
+instead of replacing. `VmFrame::Consume` now records how `call-with-values`
+was called, and in tail position the consumer call is a tail call.
+`tests/control.rs` covers it.
 
 ## 5. The larger Larceny GC workloads
 

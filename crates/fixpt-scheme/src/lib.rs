@@ -1,5 +1,6 @@
 //! `fixpt-scheme` — the Scheme front end: reader profile, expander, prelude.
 
+pub mod eager;
 pub mod env;
 pub mod expand;
 pub mod macros;

@@ -52,7 +52,7 @@ const N_REGS: usize = 5;
 
 /// A pending return. Holds no `Value`s — see the module docs.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum VmFrame {
+enum VmFrame {
     /// The value returned here is the answer.
     Halt,
     Return {
@@ -60,18 +60,25 @@ pub enum VmFrame {
         fp: u32,
     },
     /// `call-with-values`: the producer is running; the consumer waits at stack
-    /// slot `consumer`, and `(pc, fp)` is where the whole expression's value
-    /// goes once the consumer has produced it.
+    /// slot `consumer`. `mode` is how `call-with-values` itself was called,
+    /// which decides where the consumer's value goes: for `Next`, to `(pc, fp)`,
+    /// the call site; for `Tail`, to whatever the activation at `fp` would
+    /// have returned to — the consumer call is then a tail call, so a loop
+    /// through `let-values` runs in constant space; for `Framed`, to the frame
+    /// already beneath this one.
     Consume {
         pc: u32,
         fp: u32,
         consumer: u32,
+        mode: Call,
     },
 }
 
 const TAG_HALT: u64 = 0;
 const TAG_RETURN: u64 = 1;
 const TAG_CONSUME: u64 = 2;
+const TAG_CONSUME_TAIL: u64 = 3;
+const TAG_CONSUME_FRAMED: u64 = 4;
 
 /// Words per encoded frame.
 pub const FRAME_WORDS: usize = 4;
@@ -81,8 +88,13 @@ impl VmFrame {
         match self {
             VmFrame::Halt => [TAG_HALT, 0, 0, 0],
             VmFrame::Return { pc, fp } => [TAG_RETURN, pc as u64, fp as u64, 0],
-            VmFrame::Consume { pc, fp, consumer } => {
-                [TAG_CONSUME, pc as u64, fp as u64, consumer as u64]
+            VmFrame::Consume { pc, fp, consumer, mode } => {
+                let tag = match mode {
+                    Call::Next => TAG_CONSUME,
+                    Call::Tail => TAG_CONSUME_TAIL,
+                    Call::Framed => TAG_CONSUME_FRAMED,
+                };
+                [tag, pc as u64, fp as u64, consumer as u64]
             }
         }
     }
@@ -94,10 +106,11 @@ impl VmFrame {
         match self {
             VmFrame::Halt => VmFrame::Halt,
             VmFrame::Return { pc, fp } => VmFrame::Return { pc, fp: r(fp) },
-            VmFrame::Consume { pc, fp, consumer } => VmFrame::Consume {
+            VmFrame::Consume { pc, fp, consumer, mode } => VmFrame::Consume {
                 pc,
                 fp: r(fp),
                 consumer: r(consumer),
+                mode,
             },
         }
     }
@@ -109,10 +122,15 @@ impl VmFrame {
                 pc: w[1] as u32,
                 fp: w[2] as u32,
             },
-            TAG_CONSUME => VmFrame::Consume {
+            TAG_CONSUME | TAG_CONSUME_TAIL | TAG_CONSUME_FRAMED => VmFrame::Consume {
                 pc: w[1] as u32,
                 fp: w[2] as u32,
                 consumer: w[3] as u32,
+                mode: match w[0] {
+                    TAG_CONSUME => Call::Next,
+                    TAG_CONSUME_TAIL => Call::Tail,
+                    _ => Call::Framed,
+                },
             },
             _ => return None,
         })
@@ -469,19 +487,31 @@ impl Vm {
                 self.stack.push(v);
                 Ok(None)
             }
-            VmFrame::Consume { pc, fp, consumer } => {
-                // The producer has finished. Swap its frame for the consumer's
-                // and give the consumer the values it produced.
+            VmFrame::Consume { pc, fp, consumer, mode } => {
+                // The producer has finished: call the consumer with the values
+                // it produced, as the continuation `mode` says.
                 self.frames.pop();
                 self.marks.trim(self.frames.len());
                 let f = self.stack[consumer as usize];
                 self.stack.truncate(consumer as usize);
-                // Where the whole `call-with-values` expression's value goes.
-                self.frames.push(VmFrame::Return { pc, fp });
                 let call_base = self.stack.len();
                 self.stack.push(f);
                 self.spread_values(rt, v);
-                self.apply(rt, p, call_base, Call::Framed)
+                match mode {
+                    Call::Next => {
+                        // To the call site, like any other call.
+                        self.frames.push(VmFrame::Return { pc, fp });
+                        self.apply(rt, p, call_base, Call::Framed)
+                    }
+                    // A tail call from the activation that called
+                    // `call-with-values`, whose only remaining business was to
+                    // return this value.
+                    Call::Tail => {
+                        self.fp = fp;
+                        self.apply(rt, p, call_base, Call::Tail)
+                    }
+                    Call::Framed => self.apply(rt, p, call_base, Call::Framed),
+                }
             }
         }
     }
@@ -769,15 +799,16 @@ impl Vm {
                 self.stack.push(consumer);
                 let call_base = self.stack.len();
                 self.stack.push(producer);
-                // Where the expression's value goes. Like the AST engine, this
-                // is the call site rather than the enclosing frame's own
-                // continuation: neither engine makes the consumer call a tail
-                // call, so both behave the same and the differential tests mean
-                // something.
+                // Where the expression's value goes depends on how this was
+                // called; the frame records it (see `VmFrame::Consume`). In tail
+                // position the consumer call is a tail call, as it is in the AST
+                // engine, whose `Consume` frame is simply popped before the
+                // consumer runs.
                 self.frames.push(VmFrame::Consume {
                     pc: self.pc,
                     fp: self.fp,
                     consumer: consumer_slot,
+                    mode: call,
                 });
                 self.apply(rt, p, call_base, Call::Framed)
             }

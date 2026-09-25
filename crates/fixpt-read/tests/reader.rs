@@ -494,3 +494,20 @@ mod tokenising {
         assert_eq!(scheme[0].kind, TokenKind::Open);
     }
 }
+
+/// A dotted list cut off after its `.`, or after its tail, is unfinished,
+/// not wrong: more input can still complete it. The eager reader's
+/// differential tests found both — typing `(g .` and pressing Enter used to
+/// submit a broken form instead of continuing onto the next line.
+#[test]
+fn a_truncated_dotted_list_is_unfinished() {
+    use fixpt_read::{form_status, FormStatus, SyntaxProfile};
+    for text in ["(g .", "(g . ", "(g . h", "(g . h "] {
+        assert!(
+            matches!(form_status(text, SyntaxProfile::SCHEME), FormStatus::Incomplete),
+            "{text:?}"
+        );
+    }
+    // …while a `.` with nothing before the close really is an error.
+    assert!(matches!(form_status("(g . )", SyntaxProfile::SCHEME), FormStatus::Invalid(_)));
+}

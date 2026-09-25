@@ -340,3 +340,20 @@ fn only_scheme_advertises_resume() {
         assert!(!repl(Some(d), ",help\n").contains(",resume"), "{d}");
     }
 }
+
+// ----------------------------------------------- `,help` before the form ends
+
+/// `,help` written while the form is still open: the eager reader sees the
+/// hole as the newest element of an open list, the REPL answers it as though
+/// the form were closed there, and gives the form back — without the hole — to
+/// carry on typing.
+#[test]
+fn a_hole_can_be_asked_about_before_the_form_is_finished() {
+    let out = repl(None, "(define v (vector 10 20 30))\n(list 'got (vector-ref v ,help\n2))\n");
+    assert!(out.contains("argument 1 evaluated to #(10 20 30)"), "{out}");
+    assert!(out.contains("carry on typing"), "{out}");
+    assert!(out.contains("(got 30)"), "{out}");
+    // The form being typed is not the one that was closed off, so resuming
+    // it is not offered.
+    assert!(!out.contains("`,resume EXPR`"), "{out}");
+}

@@ -376,3 +376,31 @@ fn a_hole_reached_after_resuming_comes_back_to_the_top_level() {
         assert_eq!(fixpt_runtime::write_value(&s.rt.heap, v), "(a 1 2)", "{backend:?}");
     }
 }
+
+/// A `call-with-values` in tail position calls its consumer as a tail call —
+/// so a loop through `let-values` runs in constant space and its marks
+/// replace rather than stack. The AST engine always did this; the bytecode
+/// engine returned through the call site, and the eager reader's list loop
+/// is what showed it.
+#[test]
+fn call_with_values_in_tail_position_is_a_tail_call() {
+    assert_eq!(
+        both(
+            "(define (loop n)
+               (with-continuation-mark 'k n
+                 (if (= n 0)
+                     (continuation-mark-set->list (current-continuation-marks) 'k)
+                     (let-values (((a b) (values (- n 1) 0))) (loop a)))))
+             (loop 4)"
+        ),
+        "(0)"
+    );
+    let n = if cfg!(feature = "gc-stress") { 2_000 } else { 200_000 };
+    assert_eq!(
+        both(&format!(
+            "(define (count n) (if (= n 0) 'done (let-values (((a b) (values (- n 1) 0))) (count a))))
+             (count {n})"
+        )),
+        "done"
+    );
+}

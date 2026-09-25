@@ -72,6 +72,9 @@ pub fn repl(backend: Backend) -> i32 {
             }
             Line::Interrupted => continue,
             Line::Form(text) => text,
+            // Only the eager reader asks mid-form, and this dialect re-reads
+            // with the Rust one.
+            Line::Ask { .. } => continue,
         };
         if let Some(ask) = crate::help::parse(&text) {
             crate::help::answer(&mut session, &ask);

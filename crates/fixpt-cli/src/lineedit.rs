@@ -35,22 +35,60 @@
 use fixpt_read::{FormStatus, SyntaxProfile};
 use std::io::{BufRead, Write};
 
-/// Is this text a whole form yet?
+/// What a reader makes of the text typed so far.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Status {
+    Complete,
+    Incomplete,
+    /// Wrong at character `at`, in a way more typing will not fix.
+    Invalid { at: usize, message: String },
+    /// A `,help` hole was just written inside a form that is not finished:
+    /// `closed` is the form closed off after it, to answer the hole with, and
+    /// `keep` the text to carry on editing once it has been answered.
+    Ask { closed: String, keep: String },
+}
+
+/// Who decides what the typed text is. The editor asks on every keystroke,
+/// to mark a mistake where it is made, and on `Enter` — `at_enter` — to decide
+/// whether to submit.
+pub trait Oracle {
+    fn status(&mut self, text: &str, at_enter: bool) -> Status;
+}
+
+/// The Rust reader, re-reading from the start each time.
 ///
 /// Asked of the *real* reader, never of a paren counter kept here. The REPL
 /// used to count parentheses itself, which meant it did not know that the `)`
 /// in `#| ) |#` or in `|a(b|` is not a delimiter — it would submit a truncated
 /// form and report a syntax error for input that was perfectly good. Anything
 /// that has to decide where a datum ends has to be the reader, because that is
-/// where the rules live.
-fn complete(text: &str, profile: SyntaxProfile) -> bool {
-    !matches!(fixpt_read::form_status(text, profile), FormStatus::Incomplete)
+/// where the rules live. The eager reader (`fixpt_scheme::eager`) is the other
+/// implementation, for the Scheme REPL.
+pub struct Reread(pub SyntaxProfile);
+
+impl Oracle for Reread {
+    fn status(&mut self, text: &str, at_enter: bool) -> Status {
+        match fixpt_read::form_status(text, self.0) {
+            FormStatus::Complete => Status::Complete,
+            FormStatus::Incomplete => Status::Incomplete,
+            // Only reported when submitting: re-reading from scratch on every
+            // keystroke is fine for a form this size, but the messages were
+            // written for a whole form, not a half-typed one.
+            FormStatus::Invalid(_) if !at_enter => Status::Incomplete,
+            FormStatus::Invalid(e) => {
+                let at = text[..(e.span.start as usize).min(text.len())].chars().count();
+                Status::Invalid { at, message: e.message }
+            }
+        }
+    }
 }
 
 /// What one read produced.
 pub enum Line {
     /// A complete, balanced form.
     Form(String),
+    /// A `,help` hole in an unfinished form — see [`Status::Ask`].
+    Ask { closed: String, keep: String },
     /// `^C`: abandon what was typed and start again.
     Interrupted,
     /// `^D` on an empty line, or end of input.
@@ -93,9 +131,22 @@ impl LineReader {
     /// Read one complete form. `prompt` starts it; `continuation` prefixes the
     /// remaining lines of a form that is not finished yet.
     pub fn read(&mut self, prompt: &str, continuation: &str) -> Line {
+        let mut oracle = Reread(self.profile);
+        self.read_with(prompt, continuation, &mut oracle, "")
+    }
+
+    /// Read one form, asking `oracle` what the text is, starting from
+    /// `initial` — the form being given back after a hole was answered.
+    pub fn read_with(
+        &mut self,
+        prompt: &str,
+        continuation: &str,
+        oracle: &mut dyn Oracle,
+        initial: &str,
+    ) -> Line {
         match &mut self.inner {
-            Inner::Plain => read_plain(prompt, continuation, self.profile),
-            Inner::Raw(e) => e.read(prompt, continuation, self.profile),
+            Inner::Plain => read_plain(prompt, continuation, oracle, initial),
+            Inner::Raw(e) => e.read(prompt, continuation, self.profile, oracle, initial),
         }
     }
 
@@ -157,9 +208,9 @@ pub fn layout(
 
 /// Accumulate lines until the form is balanced. The prompts are still printed,
 /// so a transcript of a piped session reads the way the session looked.
-fn read_plain(prompt: &str, continuation: &str, profile: SyntaxProfile) -> Line {
+fn read_plain(prompt: &str, continuation: &str, oracle: &mut dyn Oracle, initial: &str) -> Line {
     let stdin = std::io::stdin();
-    let mut pending = String::new();
+    let mut pending = initial.to_string();
     loop {
         print!("{}", if pending.is_empty() { prompt } else { continuation });
         let _ = std::io::stdout().flush();
@@ -174,8 +225,14 @@ fn read_plain(prompt: &str, continuation: &str, profile: SyntaxProfile) -> Line 
         pending.push_str(&line);
         if pending.trim().is_empty() {
             pending.clear();
-        } else if complete(&pending, profile) {
-            return Line::Form(pending);
+            continue;
+        }
+        // The line's own newline is what `Enter` means.
+        let text = pending.strip_suffix('\n').unwrap_or(&pending);
+        match oracle.status(text, true) {
+            Status::Incomplete => {}
+            Status::Ask { closed, keep } => return Line::Ask { closed, keep },
+            Status::Complete | Status::Invalid { .. } => return Line::Form(pending),
         }
     }
 }
@@ -373,13 +430,15 @@ mod raw {
             prompt: &str,
             continuation: &str,
             profile: SyntaxProfile,
+            oracle: &mut dyn super::Oracle,
+            initial: &str,
         ) -> Line {
             let Some(_raw) = RawMode::enable() else {
                 // No terminal control available: fall back rather than
                 // pretending, so the session still works.
-                return super::read_plain(prompt, continuation, profile);
+                return super::read_plain(prompt, continuation, oracle, initial);
             };
-            let result = self.edit(prompt, continuation, profile);
+            let result = self.edit(prompt, continuation, profile, oracle, initial);
             // The prompt line is finished with; move off it before the
             // terminal goes back to cooked mode.
             let mut out = std::io::stdout();
@@ -395,9 +454,16 @@ mod raw {
             result
         }
 
-        fn edit(&mut self, prompt: &str, continuation: &str, profile: SyntaxProfile) -> Line {
-            let mut buf: Vec<char> = Vec::new();
-            let mut cursor = 0usize;
+        fn edit(
+            &mut self,
+            prompt: &str,
+            continuation: &str,
+            profile: SyntaxProfile,
+            oracle: &mut dyn super::Oracle,
+            initial: &str,
+        ) -> Line {
+            let mut buf: Vec<char> = initial.chars().collect();
+            let mut cursor = buf.len();
             // `history.len()` means "editing something new"; anything less is a
             // recalled entry.
             let mut hist = self.history.len();
@@ -406,7 +472,8 @@ mod raw {
             let mut pending: Vec<char> = Vec::new();
 
             self.cursor_row = 0;
-            self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone());
+            let status = oracle.status(&buf.iter().collect::<String>(), false);
+            self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone(), &status);
             loop {
                 let key = match read_key() {
                     Some(k) => k,
@@ -422,14 +489,23 @@ mod raw {
                         if text.trim().is_empty() {
                             buf.clear();
                             cursor = 0;
-                        } else if super::complete(&text, profile) {
-                            // Complete, or wrong in a way more typing will not
-                            // fix: either way the reader should have its say.
-                            return Line::Form(text);
                         } else {
-                            // Unfinished: keep editing, one line further down.
-                            buf.insert(cursor, '\n');
-                            cursor += 1;
+                            match oracle.status(&text, true) {
+                                // Complete, or wrong in a way more typing will
+                                // not fix: either way the reader should have
+                                // its say.
+                                super::Status::Complete | super::Status::Invalid { .. } => {
+                                    return Line::Form(text);
+                                }
+                                super::Status::Ask { closed, keep } => {
+                                    return Line::Ask { closed, keep };
+                                }
+                                // Unfinished: keep editing, one line further down.
+                                super::Status::Incomplete => {
+                                    buf.insert(cursor, '\n');
+                                    cursor += 1;
+                                }
+                            }
                         }
                     }
                     Key::Backspace => {
@@ -515,7 +591,11 @@ mod raw {
                     }
                     Key::Ignored => {}
                 }
-                self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone());
+                // Asked on every keystroke: with the eager reader this is one
+                // character's worth of parsing, and it is what lets a mistake
+                // be marked at the moment it is typed.
+                let status = oracle.status(&buf.iter().collect::<String>(), false);
+                self.render(prompt, continuation, &buf, cursor, profile, &self.words.clone(), &status);
             }
         }
 
@@ -564,6 +644,9 @@ mod raw {
         /// newlines instead — which this used to do — leaves the cursor in the
         /// wrong place for the rest of the session. `stty size` supplies the
         /// width, in keeping with how raw mode is already obtained.
+        // Every argument is a separate input to one redraw; bundling them
+        // would only move the list somewhere else.
+        #[allow(clippy::too_many_arguments)]
         fn render(
             &mut self,
             prompt: &str,
@@ -572,11 +655,16 @@ mod raw {
             cursor: usize,
             profile: SyntaxProfile,
             words: &[String],
+            status: &super::Status,
         ) {
             let width = self.width.max(8);
             let text: String = buf.iter().collect();
             let lines: Vec<&str> = text.split('\n').collect();
-            let painted = self.paint(&text, cursor, profile, words);
+            let error_at = match status {
+                super::Status::Invalid { at, .. } => Some(*at),
+                _ => None,
+            };
+            let painted = self.paint(&text, cursor, profile, words, error_at);
 
             let mut out = String::new();
             if self.cursor_row > 0 {
@@ -609,8 +697,20 @@ mod raw {
                 cursor - line_start(buf, cursor),
             );
 
-            if last_screen_row > cursor_screen_row {
-                out.push_str(&format!("\x1b[{}A", last_screen_row - cursor_screen_row));
+            // A mistake the reader has already found is reported under the
+            // form, now, rather than when `Enter` is pressed. Cut to fit one
+            // row, so it cannot wrap and throw the arithmetic off.
+            let mut below = last_screen_row;
+            if let super::Status::Invalid { message, .. } = status {
+                let note: String = format!("; {message}").chars().take(width - 1).collect();
+                out.push_str("\r\n");
+                out.push_str(super::paint::DIM);
+                out.push_str(&note);
+                out.push_str(super::paint::RESET);
+                below += 1;
+            }
+            if below > cursor_screen_row {
+                out.push_str(&format!("\x1b[{}A", below - cursor_screen_row));
             }
             out.push('\r');
             if cursor_screen_col > 0 {
@@ -788,6 +888,8 @@ mod paint {
     pub const COMMENT: &str = "\x1b[90m";
     pub const UNBOUND: &str = "\x1b[31m";
     pub const MATCH: &str = "\x1b[1;33m";
+    /// The character the reader rejected.
+    pub const ERROR: &str = "\x1b[1;37;41m";
 }
 
 impl raw::Editor {
@@ -798,11 +900,13 @@ impl raw::Editor {
         cursor: usize,
         profile: fixpt_read::SyntaxProfile,
         words: &[String],
+        error_at: Option<usize>,
     ) -> String {
         use fixpt_read::TokenKind;
         if !self.colour {
             return text.to_string();
         }
+        let error_byte = error_at.and_then(|i| text.char_indices().nth(i).map(|(b, _)| b));
         let toks = fixpt_read::tokens(text, profile);
         // `cursor` is a character index; the tokens speak in bytes.
         let cursor_byte = text
@@ -837,13 +941,25 @@ impl raw::Editor {
                     _ => None,
                 }
             };
-            match colour {
-                Some(c) => {
+            let emit = |out: &mut String, piece: &str| match colour {
+                Some(c) if !piece.is_empty() => {
                     out.push_str(c);
-                    out.push_str(body);
+                    out.push_str(piece);
                     out.push_str(paint::RESET);
                 }
-                None => out.push_str(body),
+                _ => out.push_str(piece),
+            };
+            match error_byte {
+                // The rejected character sits in this token: mark just it.
+                Some(e) if (t.start..t.end).contains(&e) => {
+                    let len = text[e..].chars().next().map_or(1, char::len_utf8);
+                    emit(&mut out, &text[t.start..e]);
+                    out.push_str(paint::ERROR);
+                    out.push_str(&text[e..e + len]);
+                    out.push_str(paint::RESET);
+                    emit(&mut out, &text[e + len..t.end]);
+                }
+                _ => emit(&mut out, body),
             }
         }
         out

@@ -313,14 +313,51 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend) -> i32 {
     println!("(an expression, `,help` for commands, or ^D to leave)");
 
     let mut reader = LineReader::new(".fixpt_history", profile);
+    // The eager reader is Scheme and reads the Scheme profile; if it cannot
+    // be loaded, the REPL still works, re-reading with the Rust reader.
+    let mut eager = if profile.name == "scheme" {
+        fixpt_scheme::eager::EagerReader::new(&mut session).ok()
+    } else {
+        None
+    };
+    // What to give back for further editing after a mid-form hole.
+    let mut initial = String::new();
     loop {
         reader.set_completions(bound_names(&session));
-        match reader.read("> ", "| ") {
+        let line = match eager.as_mut() {
+            Some(r) => {
+                let mut oracle = EagerOracle { session: &mut session, reader: r };
+                reader.read_with("> ", "| ", &mut oracle, &initial)
+            }
+            None => {
+                let mut oracle = lineedit::Reread(profile);
+                reader.read_with("> ", "| ", &mut oracle, &initial)
+            }
+        };
+        initial.clear();
+        match line {
             Line::Eof => {
                 reader.save();
                 return 0;
             }
             Line::Interrupted => continue,
+            // `,help` written before the form is finished: answer it as though
+            // the form had been closed right after the hole, then hand the
+            // form back — minus the hole — to carry on typing.
+            Line::Ask { closed, keep } => {
+                match run_line(&mut session, &closed) {
+                    // `,resume` would continue the form as it was closed off to
+                    // answer the hole — not the one being typed — so it is not
+                    // offered here.
+                    Ok(v) => {
+                        let report: Vec<&str> = v.lines().filter(|l| !l.contains("`,resume EXPR`")).collect();
+                        println!("{}", report.join("\n"));
+                        println!("; the form is given back without the hole: carry on typing");
+                    }
+                    Err(e) => eprintln!("{e}"),
+                }
+                initial = keep;
+            }
             Line::Form(text) if hole_command(&text).is_some() => {
                 match hole_command(&text).expect("just checked") {
                     HoleCommand::Where => match session.held_hole_report() {
@@ -434,7 +471,46 @@ fn hole_report(raised: &str) -> String {
     out
 }
 
-/// Scheme's answer to the same questions.
+/// The eager reader as the line editor's oracle: one checkpoint per character,
+/// so each keystroke is one character's worth of parsing, and a mistake is
+/// reported where it is made.
+struct EagerOracle<'a> {
+    session: &'a mut Session,
+    reader: &'a mut fixpt_scheme::eager::EagerReader,
+}
+
+impl lineedit::Oracle for EagerOracle<'_> {
+    fn status(&mut self, text: &str, at_enter: bool) -> lineedit::Status {
+        use fixpt_scheme::eager::EagerStatus;
+        use lineedit::Status;
+        match self.reader.status(self.session, text, at_enter) {
+            Ok(EagerStatus::Complete) => Status::Complete,
+            Ok(EagerStatus::Incomplete) => Status::Incomplete,
+            Ok(EagerStatus::Invalid { at, message }) => Status::Invalid { at, message },
+            Ok(EagerStatus::Hole { closers }) if at_enter => Status::Ask {
+                closed: format!("{text}{closers}"),
+                keep: without_trailing_hole(text),
+            },
+            Ok(EagerStatus::Hole { .. }) => Status::Incomplete,
+            // The Scheme reader failing is a bug in it, not the user's
+            // problem: fall back to the Rust reader for this answer.
+            Err(_) => lineedit::Reread(fixpt_read::SyntaxProfile::SCHEME).status(text, at_enter),
+        }
+    }
+}
+
+/// The text with the `,help` it ends with taken off.
+fn without_trailing_hole(text: &str) -> String {
+    let trimmed = text.trim_end();
+    for hole in [",help", ",?"] {
+        if let Some(rest) = trimmed.strip_suffix(hole) {
+            return rest.to_string();
+        }
+    }
+    text.to_string()
+}
+
+/// Scheme's answer to the same questions./// Scheme's answer to the same questions.
 ///
 /// Less than FX can say, and the difference is the point: without types there
 /// is no way to ask what accepts a value, so `,fits` reports that it needs a

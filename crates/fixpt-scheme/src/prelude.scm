@@ -194,6 +194,14 @@
 (define (string->vector s) (list->vector (string->list s)))
 (define (vector->string v) (list->string (vector->list v)))
 
+(define (string-downcase s) (list->string (map char-downcase (string->list s))))
+(define (string-upcase s) (list->string (map char-upcase (string->list s))))
+(define (string-foldcase s) (string-downcase s))
+(define (string-ci=? a b . rest)
+  (let loop ((a a) (b b) (rest rest))
+    (and (string=? (string-foldcase a) (string-foldcase b))
+         (or (null? rest) (loop b (car rest) (cdr rest))))))
+
 ;;; ----------------------------------------------------------- promises
 
 (define (force p)
