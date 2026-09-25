@@ -435,6 +435,7 @@ the user's program.
 2. Speculative `syntax-rules` expansion for Scheme, against a throwaway copy
    of the expander state. Stop at procedural macros, which run arbitrary
    Scheme.
-3. Control effects in the FX-87 checker, with the paper's examples as tests.
-4. Delimited control and marks in FX: the design work above.
-5. The eager reader in FX-87, then as much of the expander as makes sense.
+3. onward: now the plan for FX-26, the tooling's own language. See
+   [`docs/fx26.md`](docs/fx26.md): control effects over FX-87's checker, then
+   typed prompts, composable continuations and marks, bidirectional checking,
+   and the eager reader ported to it.
