@@ -44,6 +44,8 @@ pub struct Checker {
     bool_: TyId,
     string: TyId,
     unit: TyId,
+    /// How many fresh regions inference has made, for naming the next.
+    pub(crate) fresh_regions: u32,
     /// Mask at every expression, as the rules say. Off only to observe an
     /// effect *before* masking, which is what some of the paper's claims are
     /// about.
@@ -92,6 +94,7 @@ impl Checker {
             bool_,
             string,
             unit,
+            fresh_regions: 0,
             masking: true,
         };
         for (name, ty) in crate::standard::ENTRIES {
@@ -153,7 +156,11 @@ impl Checker {
         self.parse_region(&forms[0])
     }
 
-    fn lookup(&self, s: Sym) -> Option<TyId> {
+    pub(crate) fn bool_ty(&self) -> TyId {
+        self.bool_
+    }
+
+    pub(crate) fn lookup(&self, s: Sym) -> Option<TyId> {
         self.env.iter().rev().find(|(n, _)| *n == s).map(|(_, t)| *t)
     }
 
@@ -169,54 +176,11 @@ impl Checker {
             Exp::Bool(_) => Ok((self.bool_, Effect::pure())),
             Exp::Str(_) => Ok((self.string, Effect::pure())),
             Exp::Unit => Ok((self.unit, Effect::pure())),
-            Exp::Lambda { params, body } => {
-                let depth = self.env.len();
-                self.env.extend(params.iter().copied());
-                // The body's effect is masked *with the parameters in scope*:
-                // they are free in the body, so what reaches them stays.
-                let r = self.synth(body).map(|(t, eff)| (t, self.mask(body, &eff, t)));
-                self.env.truncate(depth);
-                let (result, latent) = r?;
-                let t = self.arena.ty(Ty::Subr {
-                    effect: latent,
-                    params: params.iter().map(|(_, t)| *t).collect(),
-                    result,
-                });
-                Ok((t, Effect::pure()))
-            }
-            Exp::App { fun, args } => {
-                let (ft, fe) = self.synth(fun)?;
-                let mut effect = fe;
-                let mut arg_tys = Vec::new();
-                for a in &args {
-                    let (t, eff) = self.synth(*a)?;
-                    effect = effect.union(&eff);
-                    arg_tys.push(t);
-                }
-                let callee = self.arena.get(ft).clone();
-                let Some((latent, params, result)) = callee.as_subr() else {
-                    return Err(FxError::at(
-                        span,
-                        match callee {
-                            Ty::Poly { .. } => "a polymorphic value must be instantiated with `proj` before it is applied".into(),
-                            _ => format!("not a subroutine: {}", self.show_ty(ft)),
-                        },
-                    ));
-                };
-                if params.len() != args.len() {
-                    return Err(FxError::at(span, format!("expected {} argument(s), got {}", params.len(), args.len())));
-                }
-                for (i, (a, p)) in arg_tys.iter().zip(&params).enumerate() {
-                    if !self.subtype(*a, *p) {
-                        return Err(FxError::at(
-                            self.arena.span_of(args[i]),
-                            format!("argument {} is a {}, where a {} is expected", i + 1, self.show_ty(*a), self.show_ty(*p)),
-                        ));
-                    }
-                }
-                let effect = effect.union(&latent);
-                let effect = self.mask(e, &effect, result);
-                Ok((result, effect))
+            Exp::Lambda { .. } => self.synth_lambda(e, None),
+            Exp::App { fun, args } => self.synth_app(e, fun, &args, None),
+            Exp::The { ty, exp } => {
+                let eff = self.check(exp, ty)?;
+                Ok((ty, eff))
             }
             Exp::PLambda { binders, body } => {
                 let (t, eff) = self.synth(body)?;
@@ -345,7 +309,7 @@ impl Checker {
     }
 
     /// The value variables free in `e`.
-    fn free_vars(&self, e: ExpId) -> Vec<Sym> {
+    pub(crate) fn free_vars(&self, e: ExpId) -> Vec<Sym> {
         let mut out = Vec::new();
         self.free_into(e, &mut Vec::new(), &mut out);
         out
@@ -405,6 +369,7 @@ impl Checker {
                     self.free_into(x, bound, out);
                 }
             }
+            Exp::The { exp, .. } => self.free_into(exp, bound, out),
         }
     }
 
@@ -680,7 +645,12 @@ impl Checker {
                 ),
             ));
         }
-        let (ht, he) = self.synth(handler)?;
+        // A handler written without its parameter's type takes the payload.
+        let (ht, he) = if matches!(self.arena.exp_at(handler), Exp::Lambda { params, .. } if params.iter().any(|(_, t)| t.is_none())) {
+            self.synth_lambda(handler, Some(&[payload]))?
+        } else {
+            self.synth(handler)?
+        };
         let Some((latent, params, result)) = self.arena.get(ht).as_subr() else {
             return Err(FxError::at(self.arena.span_of(handler), format!("a handler is a subroutine, not a {}", self.show_ty(ht))));
         };

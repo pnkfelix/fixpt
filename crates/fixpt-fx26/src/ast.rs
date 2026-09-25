@@ -154,7 +154,9 @@ pub enum Exp {
     Bool(bool),
     Str(String),
     Unit,
-    Lambda { params: Vec<(Sym, TyId)>, body: ExpId },
+    /// A parameter's type may be left out when the `lambda` is checked
+    /// against a type that supplies it.
+    Lambda { params: Vec<(Sym, Option<TyId>)>, body: ExpId },
     App { fun: ExpId, args: Vec<ExpId> },
     PLambda { binders: Vec<(DVar, Kind)>, body: ExpId },
     Proj { body: ExpId, args: Vec<D> },
@@ -168,6 +170,8 @@ pub enum Exp {
     /// `(prompt tag body handler)`: evaluate `body` delimited by a prompt for
     /// `tag`; an abort to `tag` inside it calls `handler` with the value.
     Prompt { tag: ExpId, body: ExpId, handler: ExpId },
+    /// `(the type expression)`: check the expression against the type.
+    The { ty: TyId, exp: ExpId },
 }
 
 #[derive(Default)]

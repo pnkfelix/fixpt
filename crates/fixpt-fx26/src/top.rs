@@ -63,6 +63,18 @@ impl Checker {
         }
     }
 
+    /// Put the binders of every `poly` at the top of `t` in scope for parsing.
+    fn bind_signature(&mut self, t: TyId) {
+        let mut t = self.arena.resolve(t);
+        while let crate::ast::Ty::Poly { binders, body } = self.arena.get(t).clone() {
+            for (v, k) in binders {
+                let name = self.arena.dvar_name(v);
+                self.dscope.push((name, crate::parse::DScope::Var(v, k)));
+            }
+            t = self.arena.resolve(body);
+        }
+    }
+
     fn binder_name(&self, s: &Syntax) -> R<Sym> {
         s.as_symbol().ok_or_else(|| FxError::at(s.span, "expected a name"))
     }
@@ -74,20 +86,24 @@ impl Checker {
                 let ty = self.parse_type(ty)?;
                 // In scope in its own initialiser, as a `letrec` binding is.
                 self.env.push((name, ty));
-                let r = self.parse_exp(init).and_then(|e| {
-                    let (it, effect) = self.synth(e)?;
-                    if !self.subtype(it, ty) {
-                        return Err(FxError::at(
-                            init.span,
-                            format!(
-                                "`{}` is declared a {}, and its definition is a {}",
-                                self.interner.name(name),
-                                self.show_ty(ty),
-                                self.show_ty(it)
-                            ),
-                        ));
-                    }
-                    Ok(effect)
+                // A signature's binders are in scope in the definition, which
+                // is checked against it: `(define id (poly ((t type)) …)
+                // (lambda ((x t)) x))` means what a `plambda` would.
+                let depth = self.dscope.len();
+                self.bind_signature(ty);
+                let r = self.parse_exp(init);
+                self.dscope.truncate(depth);
+                let r = r.and_then(|e| {
+                    self.check(e, ty).map_err(|err| {
+                        if err.span == self.arena.span_of(e) {
+                            FxError::at(
+                                err.span,
+                                format!("`{}` is declared a {}: {}", self.interner.name(name), self.show_ty(ty), err.message),
+                            )
+                        } else {
+                            err
+                        }
+                    })
                 });
                 match r {
                     Ok(effect) => Ok(Top::Define { name, ty, effect }),
@@ -113,13 +129,10 @@ impl Checker {
     /// What checking-as-you-type needs, since a form half typed is not a form
     /// submitted. The caller restores the interner, which it owns.
     pub fn try_top<T>(&mut self, form: &Syntax, then: impl FnOnce(&mut Checker, R<Top>) -> T) -> T {
-        let (env, dscope, arena) = (self.env.len(), self.dscope.len(), self.arena.mark());
-        let r = self.top(form);
-        let out = then(self, r);
-        self.env.truncate(env);
-        self.dscope.truncate(dscope);
-        self.arena.reset(arena);
-        out
+        self.scratch(|c| {
+            let r = c.top(form);
+            then(c, r)
+        })
     }
 
     /// Check a whole program written as text, keeping its definitions, and
@@ -174,25 +187,34 @@ impl Checker {
         self.base.keys().copied().collect()
     }
 
-    /// What argument `index` (from 0) of the operator written `op` must be,
-    /// when the operator checks and is a subroutine.
-    pub fn argument_type(&mut self, op: &Syntax, index: usize) -> Option<TyId> {
-        let mark = self.arena.mark();
-        let found = self.parse_exp(op).ok().and_then(|e| self.synth(e).ok()).and_then(|(t, _)| {
-            match self.arena.get(t) {
-                crate::ast::Ty::Subr { params, .. } => params.get(index).copied(),
-                _ => None,
-            }
-        });
-        // The answer is a type that already existed or a parameter of one
-        // just made; keep the arena only in the second case.
-        match found {
-            Some(t) => Some(t),
-            None => {
-                self.arena.reset(mark);
-                None
-            }
-        }
+    /// Run `f`, then forget everything it added to the environment, the
+    /// description scope and the arena. The caller restores the interner.
+    pub fn scratch<T>(&mut self, f: impl FnOnce(&mut Checker) -> T) -> T {
+        let (env, dscope, arena) = (self.env.len(), self.dscope.len(), self.arena.mark());
+        let out = f(self);
+        self.env.truncate(env);
+        self.dscope.truncate(dscope);
+        self.arena.reset(arena);
+        out
+    }
+
+    /// What the argument at `index` (from 1) of the application written
+    /// `items` must be, given the operator and the other arguments — as
+    /// text, since the type is forgotten with the rest of the scratch work.
+    /// A binder nothing has fixed yet shows as its own name.
+    pub fn describe_argument(&mut self, items: &[Syntax], index: usize) -> Option<String> {
+        self.scratch(|c| {
+            let op = c.parse_exp(items.first()?).ok()?;
+            let others: Vec<(usize, crate::ast::ExpId)> = items
+                .iter()
+                .enumerate()
+                .skip(1)
+                .filter(|(i, _)| *i != index)
+                .filter_map(|(i, s)| Some((i - 1, c.parse_exp(s).ok()?)))
+                .collect();
+            let t = c.argument_want(op, &others, index - 1)?;
+            Some(c.show_ty(t))
+        })
     }
 }
 

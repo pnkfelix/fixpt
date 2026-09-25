@@ -270,8 +270,8 @@ fn answer_hole(c: &mut Checker, form: &Syntax) -> Option<Vec<String>> {
         return Some(vec!["; FX-26 answers a hole in argument position, not as the operator".into()]);
     }
     let op = fixpt_read::write_syntax(&items[0], &c.interner);
-    Some(match c.argument_type(&items[0], at - 1) {
-        Some(t) => vec![format!("; the hole wants: {}  (argument {at} of {op})", c.show_ty(t))],
+    Some(match c.describe_argument(&items, at) {
+        Some(t) => vec![format!("; the hole wants: {t}  (argument {at} of {op})")],
         None => vec![format!("; `{op}` is not a subroutine whose argument {at} can be known here")],
     })
 }
@@ -320,9 +320,9 @@ fn speculative_notes(c: &mut Checker, text: &str, p: &crate::speculate::Partial)
     let hint = p.hole_form.as_ref().and_then(|h| {
         let form = c.read_in(FileId(0), h).ok()?.into_iter().next()?;
         let (items, at) = hole_position(c, &form)?;
-        let want = c.argument_type(&items[0], at - 1)?;
+        let want = c.describe_argument(&items, at)?;
         let op = fixpt_read::write_syntax(&items[0], &c.interner);
-        Some(format!("argument {at} of {op} wants {}", c.show_ty(want)))
+        Some(format!("argument {at} of {op} wants {want}"))
     });
     hint.map(|message| vec![Note { span: None, message, error: false }]).unwrap_or_default()
 }
@@ -370,7 +370,9 @@ mod speculative {
         let n = notes("(+ 1 (car 5) ");
         assert_eq!(n.len(), 1, "{n:?}");
         assert!(n[0].error);
-        assert_eq!(n[0].span, Some((5, 12)), "{n:?}");
+        // The argument itself, and the pair `+` needs one element of.
+        assert_eq!(n[0].span, Some((10, 11)), "{n:?}");
+        assert_eq!(n[0].message, "argument 1 is a int, where a (pairof int t2 r) is expected");
     }
 
     #[test]
@@ -392,6 +394,14 @@ mod speculative {
         assert_eq!(n.len(), 1, "{n:?}");
         assert!(!n[0].error);
         assert_eq!(n[0].message, "argument 2 of + wants int");
+    }
+
+    /// The hint infers from the arguments already written: once `cons` has
+    /// an int, its pair's first element is known, and the second is not.
+    #[test]
+    fn the_hint_solves_what_the_arguments_so_far_determine() {
+        assert_eq!(notes("(car ")[0].message, "argument 1 of car wants (pairof t1 t2 r)");
+        assert_eq!(notes("(set-car! (cons 1 #t) ")[0].message.split(" wants ").nth(1), Some("int"));
     }
 
     #[test]

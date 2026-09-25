@@ -78,7 +78,9 @@ fn trying_a_form_leaves_nothing_behind() {
 #[test]
 fn the_argument_a_subroutine_wants() {
     let mut c = Checker::new();
-    let forms = c.read_in(FileId(0), "+").expect("reads");
-    let t = c.argument_type(&forms[0], 1).expect("a subroutine");
-    assert_eq!(c.show_ty(t), "int");
+    let forms = c.read_in(FileId(0), "(+ 1 2) (cons 1 2)").expect("reads");
+    let items = |f: &fixpt_read::Syntax| f.as_proper_list().expect("a list").to_vec();
+    assert_eq!(c.describe_argument(&items(&forms[0]), 2).as_deref(), Some("int"));
+    // Only what the other arguments determine is filled in.
+    assert_eq!(c.describe_argument(&items(&forms[1]), 2).as_deref(), Some("t2"));
 }

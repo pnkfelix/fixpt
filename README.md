@@ -303,21 +303,28 @@ layout, with the value left out until there is one:
 
 ```
 $ fixpt --dialect fx26 repl
-fx26> (define-type k (subr (goto @k) (k) void))
-k = (subr (goto @k) (k) void)
-
-fx26> ((proj (proj (proj cwcc @k) int) (goto @k))
-    |  (lambda ((f (subr (goto @k) (int) void))) (+ 1 (f 0))))
+fx26> (+ 1 (cwcc (lambda (k) (k 0))))
  : int ! pure
 
 fx26> (define count (subr pure (int) int)
-    |   (lambda ((n int)) (if (= n 0) 0 (count (- n 1)))))
+    |   (lambda (n) (if (= n 0) 0 (count (- n 1)))))
 count : (subr pure (int) int) ! pure
+
+fx26> (define t (prompt-tag int int pure @p) (make-continuation-prompt-tag))
+t : (prompt-tag int int pure @p) ! (alloc @p)
+
+fx26> (prompt t (+ 1 (abort-current-continuation t 5)) (lambda (v) v))
+ : int ! pure
 ```
 
-The middle one is PLDI '89's control effects. Calling `cwcc` has
-`(comefrom @k)`, and calling the continuation has `(goto @k)`. Nothing outside
-can reach `@k`, so both are masked, and the whole expression is `pure`.
+The first one is PLDI '89's control effects. Calling `cwcc` has a
+`comefrom` effect, and calling the continuation has a `goto`. Nothing outside
+can reach the continuation's region, so both are masked, and the whole
+expression is `pure`. The last is delimited control: the abort has a `goto`,
+and the prompt for its tag catches it. Checking is bidirectional. The
+signature supplies `count`'s parameter type. `cwcc`, `abort-current-continuation`
+and the handler have their types worked out from what they are applied to
+and what is expected of them. Written out, it is all `proj`s.
 
 Definitions persist between inputs. As in the other FX REPLs, errors in
 finished subforms are underlined as you type, and a hint says what the

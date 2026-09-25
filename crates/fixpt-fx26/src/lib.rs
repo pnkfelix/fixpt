@@ -7,9 +7,10 @@
 //! continuation for later (PLDI '89, §3). `cwcc` carries them in its type, and
 //! masking removes them under the paper's conditions (§5).
 //!
-//! Checking is synthesis, FX-87 style, for now: parameters carry their types
-//! and polymorphism is explicit (`plambda`, `proj`). Bidirectional checking is
-//! step 4.
+//! Checking is bidirectional (`infer`): an expression is checked against a
+//! type when one is expected, which supplies `lambda` parameter types and
+//! solves the binders of a polymorphic operator, so that most `proj`s and
+//! `plambda`s need not be written. Written out, they mean the same thing.
 //!
 //! This crate depends on neither FX-87 nor FX-91. It borrows FX-87's
 //! algorithms — regions, subtyping, masking — by reading them; each place that
@@ -17,6 +18,7 @@
 
 pub mod ast;
 pub mod check;
+pub mod infer;
 pub mod parse;
 pub mod standard;
 pub mod top;

@@ -3,7 +3,8 @@
 //! The surface is FX-87's (`docs/fx26.md`, "The kernel"): n-ary forms, binder
 //! lists in parentheses — `(plambda ((t type)) …)` — and `@name` for a region
 //! constant. `let` and `begin` are derived forms, and `lambda` and `letrec`
-//! bodies are implicit `begin`s.
+//! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
+//! the `lambda` is checked against a type that says what it is.
 
 use crate::ast::{Atom, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::check::Checker;
@@ -345,12 +346,15 @@ impl Checker {
                         .to_vec()
                         .iter()
                         .map(|p| {
+                            if let Some(name) = p.as_symbol() {
+                                return Ok((name, None));
+                            }
                             let pair = self.items(p, "a parameter")?.to_vec();
                             let [name, ty] = &pair[..] else {
-                                return Err(FxError::at(p.span, "a parameter is `(name type)`"));
+                                return Err(FxError::at(p.span, "a parameter is `name` or `(name type)`"));
                             };
                             let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-                            Ok((name, self.parse_type(ty)?))
+                            Ok((name, Some(self.parse_type(ty)?)))
                         })
                         .collect::<R<Vec<_>>>()?,
                 };
@@ -424,6 +428,14 @@ impl Checker {
                 Ok(self.arena.exp(span, Exp::Let { bindings: out, body }))
             }
             "begin" => self.parse_body(span, &items[1..]),
+            "the" => {
+                let [_, ty, exp] = &items[..] else {
+                    return Err(FxError::at(span, "`(the type expression)`"));
+                };
+                let ty = self.parse_type(ty)?;
+                let exp = self.parse_exp(exp)?;
+                Ok(self.arena.exp(span, Exp::The { ty, exp }))
+            }
             "prompt" => {
                 let [_, tag, body, handler] = &items[..] else {
                     return Err(FxError::at(span, "`(prompt tag body handler)`"));
