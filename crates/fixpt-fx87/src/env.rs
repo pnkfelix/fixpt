@@ -58,6 +58,11 @@ impl TkEnv {
         self.values.iter().map(|(n, _)| *n)
     }
 
+    /// The names bound as descriptions: types, effects and regions.
+    pub fn desc_names(&self) -> impl Iterator<Item = Sym> + '_ {
+        self.descs.iter().map(|(n, _)| *n)
+    }
+
     /// A scope entered on top of this one.
     pub fn child(&self) -> TkEnv {
         self.clone()

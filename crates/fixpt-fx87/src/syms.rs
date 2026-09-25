@@ -15,6 +15,11 @@ macro_rules! syms {
             pub fn new(interner: &mut Interner) -> Syms {
                 Syms { $($field: interner.intern($text),)* }
             }
+
+            /// Every reserved word.
+            pub fn all(&self) -> Vec<Sym> {
+                vec![$(self.$field,)*]
+            }
         }
     };
 }

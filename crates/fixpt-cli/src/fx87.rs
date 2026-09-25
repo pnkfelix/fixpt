@@ -125,19 +125,25 @@ pub fn repl(backend: Backend) -> i32 {
     }
 }
 
-/// Names FX-87 knows, for completion: everything the standard environment
-/// bound, plus whatever the session has parsed.
+/// Names FX-87 knows, for completion and for not colouring as unbound: what
+/// the environment binds, as values and as descriptions, and the reserved
+/// words. Taken from the environment rather than from the checker's symbol
+/// table, which also holds every name ever read — type variables named by
+/// number, typos from forms already submitted — and would need filtering to
+/// be any use.
 fn known_names(session: &Fx87Session) -> Vec<String> {
-    session
-        .checker
-        .p
-        .interner
-        .names()
-        .filter(|n| !n.starts_with('%') && !n.chars().all(|c| c.is_ascii_digit()))
-        // Unification variables are named by their alpha numbers; `+` is one
-        // character long and a real name.
-        .map(str::to_string)
-        .collect()
+    let c = &session.checker;
+    let mut names: Vec<String> = c
+        .env
+        .value_names()
+        .chain(c.env.desc_names())
+        .chain(c.p.syms.all())
+        .map(|s| c.p.interner.name(s).to_string())
+        .filter(|n| !n.starts_with('%'))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 pub fn run_files(backend: Backend, files: &[String]) -> i32 {
@@ -580,5 +586,26 @@ mod speculative {
         assert!(!n[0].error);
         assert!(n[0].message.contains("argument 2 of vector-ref wants"), "{n:?}");
         assert!(n[0].message.contains("int"), "{n:?}");
+    }
+}
+
+#[cfg(test)]
+mod completion {
+    use super::*;
+
+    #[test]
+    fn known_names_are_what_is_bound_and_what_is_reserved() {
+        let mut session = Fx87Session::with_backend(Backend::Ast).expect("starts");
+        // Leave a typo and a type variable behind in the symbol table.
+        let forms = read(&mut session, "<t>", "(car nosuchname) (lambda ((x int)) x)").expect("reads");
+        for f in &forms {
+            let _ = session.run(f);
+        }
+        let names = known_names(&session);
+        for want in ["+", "-", "*", "car", "vector-ref", "int", "pairof", "lambda", "if", "let"] {
+            assert!(names.iter().any(|n| n == want), "missing {want:?}");
+        }
+        assert!(!names.iter().any(|n| n == "nosuchname"), "a typo became a completion");
+        assert!(!names.iter().any(|n| n.chars().all(|c| c.is_ascii_digit())), "a numbered name leaked");
     }
 }
