@@ -170,6 +170,18 @@ the obvious next win and it is the same mechanism: one more claim through the
 same channel. `fib 24` gains least from what is there now (1.17×) precisely
 because it is dominated by exactly this call.
 
+### Shape, not just annotations
+
+The 2026-09-21 diagnosis found three things lost at erasure: annotations,
+resolution and **shape**. The first two now travel as `%fx-note` claims. Shape
+does not. FX-87's eraser still lowers `(select r a)` to `(cadr (assv 'a r))`,
+an assoc-list walk (`crates/fixpt-fx87/src/erase.rs`), although the checker
+knows the field's offset. The reference's own default,
+`*order-independent-records* = #f`, has `desc-of-select` stash that offset
+and emit `(vector-ref r N)`. `tagcase` likewise becomes a linear `case`,
+though the checker knows the full set of tags. The fix is in the eraser, not
+the channel: lower records to vectors at checked offsets.
+
 ## 3. Patch closures instead of boxing `letrec`
 
 Assignment conversion boxes every binding of a `letrec*` whose initialisers
@@ -436,6 +448,8 @@ the user's program.
    of the expander state. Stop at procedural macros, which run arbitrary
    Scheme.
 3. onward: now the plan for FX-26, the tooling's own language. See
-   [`docs/fx26.md`](docs/fx26.md): control effects over FX-87's checker, then
-   typed prompts, composable continuations and marks, bidirectional checking,
-   and the eager reader ported to it.
+   [`docs/fx26.md`](docs/fx26.md). Its declared kernel and PLDI '89's control
+   effects are done, in a fresh checker (`crates/fixpt-fx26`) that does not
+   depend on FX-87's. Next: a checking REPL, then typed prompts, composable
+   continuations and marks, then bidirectional checking, then erasure to
+   Scheme so that FX-26 runs, and then the eager reader ported to it.

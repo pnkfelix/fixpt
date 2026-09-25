@@ -9,7 +9,7 @@
 //!
 //! Checking is synthesis, FX-87 style, for now: parameters carry their types
 //! and polymorphism is explicit (`plambda`, `proj`). Bidirectional checking is
-//! step 3.
+//! step 4.
 //!
 //! This crate depends on neither FX-87 nor FX-91. It borrows FX-87's
 //! algorithms — regions, subtyping, masking — by reading them; each place that
