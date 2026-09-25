@@ -67,11 +67,30 @@ fn it_agrees_with_the_rust_reader_on_data() {
 }
 
 /// The largest inputs to hand: the Scheme reader's source, and this reader's.
+///
+/// Under `gc-stress`, which collects at every safepoint, only their first few
+/// top-level forms: feeding a whole file one character at a time performs a
+/// collection for every step of every character. The shape of the check is
+/// the same.
 #[test]
 fn it_agrees_on_whole_files() {
     let mut s = session(Backend::Bytecode);
-    agree(&mut s, fixpt_scheme::eager::SOURCE);
-    agree(&mut s, fixpt_fx26::EAGER_READER);
+    let forms = if cfg!(feature = "gc-stress") { 4 } else { usize::MAX };
+    agree(&mut s, leading_forms(fixpt_scheme::eager::SOURCE, forms));
+    agree(&mut s, leading_forms(fixpt_fx26::EAGER_READER, forms));
+}
+
+/// `text` up to the end of its `n`th top-level form, as the Rust reader
+/// reads it.
+fn leading_forms(text: &str, n: usize) -> &str {
+    let mut interner = fixpt_read::Interner::new();
+    let forms = fixpt_read::Reader::new(text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::SCHEME, &mut interner)
+        .read_all()
+        .expect("reads");
+    match forms.get(n.saturating_sub(1)) {
+        Some(f) if n < forms.len() => &text[..f.span.end as usize],
+        _ => text,
+    }
 }
 
 /// Every prefix is unfinished or complete, never an error, and the FX-26

@@ -10,6 +10,11 @@ fixpt-runtime = { path = "../fixpt-runtime" }
 fixpt-engine = { path = "../fixpt-engine" }
 fixpt-scheme = { path = "../fixpt-scheme" }
 
+[features]
+default = []
+# Collect at every safepoint: see `fixpt-heap`.
+gc-stress = ["fixpt-scheme/gc-stress"]
+
 [dev-dependencies]
 fixpt-heap = { path = "../fixpt-heap" }
 
