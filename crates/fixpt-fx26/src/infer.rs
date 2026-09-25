@@ -45,6 +45,12 @@ impl Checker {
 
     /// Check `e` against `expected`, returning its effect.
     pub fn check(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let eff = self.check_node(e, expected)?;
+        self.facts.effects.insert(e, eff.clone());
+        Ok(eff)
+    }
+
+    fn check_node(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
         let span = self.arena.span_of(e);
         let expected_ty = self.arena.get(expected).clone();
         match self.arena.exp_at(e).clone() {
@@ -140,7 +146,7 @@ impl Checker {
     }
 
     /// The same, with the body checked against `result` when it is known.
-    fn synth_lambda_as(&mut self, e: ExpId, hint: Option<&[TyId]>, result: Option<TyId>) -> R<(TyId, Effect)> {
+    pub(crate) fn synth_lambda_as(&mut self, e: ExpId, hint: Option<&[TyId]>, result: Option<TyId>) -> R<(TyId, Effect)> {
         let Exp::Lambda { params, body } = self.arena.exp_at(e).clone() else { unreachable!() };
         let mut typed = Vec::new();
         for (i, (n, t)) in params.iter().enumerate() {
@@ -177,6 +183,13 @@ impl Checker {
         matches!(self.arena.exp_at(e), Exp::Lambda { params, .. } if params.iter().any(|(_, t)| t.is_none()))
     }
 
+    /// An argument that is better told what it is than asked: a `lambda`
+    /// missing parameter types, or a thunk, whose body may need to know the
+    /// result it must produce.
+    fn needs_telling(&self, e: ExpId) -> bool {
+        self.unannotated_lambda(e) || matches!(self.arena.exp_at(e), Exp::Lambda { params, .. } if params.is_empty())
+    }
+
     // ----------------------------------------------------------- application
 
     /// An application, with the operator instantiated first if it is
@@ -184,6 +197,11 @@ impl Checker {
     /// that is known; it helps solve the operator's binders.
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
+        if let Exp::Var(s) = self.arena.exp_at(fun)
+            && self.is_standard(*s)
+        {
+            self.facts.standard_operator.insert(e, *s);
+        }
         let (mut ft, fe) = self.synth(fun)?;
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         if matches!(self.arena.get(ft), Ty::Poly { .. }) {
@@ -265,7 +283,7 @@ impl Checker {
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         // What the arguments are, except the ones that need to be told.
         for (i, a) in args.iter().enumerate() {
-            if self.unannotated_lambda(*a) {
+            if self.needs_telling(*a) {
                 continue;
             }
             let (t, eff) = self.synth(*a)?;
@@ -288,21 +306,31 @@ impl Checker {
             self.default_regions(&mut u);
             let map = self.partial_map(&u);
             let p = self.subst(params[i], &map);
-            if self.mentions_unknown_type(p, &u) {
-                return Err(FxError::at(
-                    self.arena.span_of(*a),
+            let not_known = |c: &Checker, t: TyId| {
+                FxError::at(
+                    c.arena.span_of(*a),
                     format!(
                         "argument {} must be a {}, which is not yet known here; give the other arguments first, or `proj` the operator",
                         i + 1,
-                        self.show_ty(p)
+                        c.show_ty(t)
                     ),
-                ));
-            }
-            if self.unannotated_lambda(*a) {
-                let hint = self.arena.get(p).as_subr().map(|(_, ps, _)| ps);
-                let (t, eff) = self.synth_lambda(*a, hint.as_deref())?;
+                )
+            };
+            if self.needs_telling(*a) {
+                // The parameter types must be known; the result helps if it
+                // is, and otherwise the body says what it is.
+                let Some((_, ps, res)) = self.arena.get(p).as_subr() else {
+                    return Err(not_known(self, p));
+                };
+                if ps.iter().any(|t| self.mentions_unknown_type(*t, &u)) {
+                    return Err(not_known(self, p));
+                }
+                let res = (!self.mentions_unknown_type(res, &u)).then_some(res);
+                let (t, eff) = self.synth_lambda_as(*a, Some(&ps), res)?;
                 self.unify(params[i], t, &mut u, &mut HashSet::new());
                 done[i] = Some((t, eff));
+            } else if self.mentions_unknown_type(p, &u) {
+                return Err(not_known(self, p));
             } else {
                 let eff = self.check(*a, p)?;
                 done[i] = Some((p, eff));

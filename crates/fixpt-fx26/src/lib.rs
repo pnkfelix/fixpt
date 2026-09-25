@@ -19,7 +19,9 @@
 pub mod ast;
 pub mod check;
 pub mod infer;
+pub mod lower;
 pub mod parse;
+pub mod session;
 pub mod standard;
 pub mod top;
 pub mod unparse;

@@ -1,14 +1,15 @@
-//! FX-26 at the command line: checking only, for now.
+//! FX-26 at the command line.
 //!
-//! Until FX-26 lowers to Scheme (`docs/fx26.md`, plan step 5), a form is
-//! checked and its type and effect reported, and nothing runs. The layout is
-//! FX-87's, less the value: ` : <type> ! <effect>`, so that when evaluation
-//! arrives the value goes in front and nothing else moves.
+//! A form is checked, lowered to Scheme that carries what the checker proved
+//! (`fixpt_fx26::lower`), and run. The REPL prints what FX-87's did — the
+//! value, then ` : <type> ! <effect>` — and `,code` shows the lowered Scheme.
 //!
 //! Definitions persist between inputs: `(define name type expression)`,
 //! `(define name expression)` and `(define-type name type)`.
 
 use crate::lineedit::{Line, LineReader, Note};
+use fixpt_engine::Backend;
+use fixpt_fx26::session::{Fx26Session, Outcome};
 use fixpt_fx26::{Checker, Top};
 use fixpt_read::{Datum, FileId, Syntax, SyntaxProfile};
 
@@ -25,29 +26,62 @@ fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
     format!("{name}:{line}:{col}: {}", e.message)
 }
 
-/// What one top-level form did, as the REPL prints it.
+/// What checking found, as the REPL prints it after the value.
 fn report(c: &Checker, top: &Top) -> String {
     match top {
         Top::Exp(k) => format!(" : {} ! {}", c.show_ty(k.ty), c.show_effect(&k.effect)),
-        Top::Define { name, ty, effect } => {
+        Top::Define { name, ty, effect, .. } => {
             format!("{} : {} ! {}", c.interner.name(*name), c.show_ty(*ty), c.show_effect(effect))
         }
         Top::DefineType { name, ty } => format!("{} = {}", c.interner.name(*name), c.show_definition(*ty)),
     }
 }
 
-pub fn repl() -> i32 {
-    let mut checker = Checker::new();
-    println!("fixpt {} — FX-26, checking only (nothing runs yet)", env!("CARGO_PKG_VERSION"));
-    println!("(each form is checked and its type and effect shown. `,help` for");
-    println!(" commands; ^D leaves.)");
+/// One result: what it printed, its value and what checking found — or why
+/// running it failed.
+fn show(session: &Fx26Session, out: &Outcome, show_code: bool) {
+    if show_code && !out.code.is_empty() {
+        println!("; {}", out.code);
+    }
+    print!("{}", out.printed);
+    let found = report(&session.checker, &out.top);
+    match &out.value {
+        Ok(Some(v)) => println!("{v}{found}"),
+        Ok(None) => println!("{found}"),
+        Err(e) => {
+            println!("{found}");
+            eprintln!("! evaluation failed: {e}");
+        }
+    }
+}
+
+fn start(backend: Backend) -> Result<Fx26Session, i32> {
+    Fx26Session::with_backend(backend).map_err(|e| {
+        eprintln!("fixpt: {e}");
+        1
+    })
+}
+
+pub fn repl(backend: Backend) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let engine = match backend {
+        Backend::Ast => "AST engine",
+        Backend::Bytecode => "bytecode engine",
+    };
+    println!("fixpt {} — FX-26, {engine}", env!("CARGO_PKG_VERSION"));
+    println!("(each form is checked, lowered to Scheme and run. `,help` for commands,");
+    println!(" `,code` to show the lowered Scheme. ^D leaves.)");
 
     let mut reader = LineReader::new(".fixpt_fx26_history", SyntaxProfile::FX87);
+    let mut show_code = false;
     let mut n = 0usize;
     loop {
-        reader.set_completions(known_names(&checker));
+        reader.set_completions(known_names(&session.checker));
         let line = {
-            let mut oracle = Oracle { checker: &mut checker };
+            let mut oracle = Oracle { checker: &mut session.checker };
             reader.read_with("fx26> ", "     | ", &mut oracle, "")
         };
         let text = match line {
@@ -59,11 +93,16 @@ pub fn repl() -> i32 {
             Line::Form(text) => text,
         };
         if let Some(ask) = crate::help::parse(&text) {
-            crate::help::answer(&mut checker, &ask);
+            crate::help::answer(&mut session.checker, &ask);
             continue;
         }
         match text.trim() {
             "" => continue,
+            ",code" => {
+                show_code = !show_code;
+                println!("; lowered Scheme: {}", if show_code { "on" } else { "off" });
+                continue;
+            }
             ",quit" => {
                 reader.save();
                 return 0;
@@ -72,7 +111,7 @@ pub fn repl() -> i32 {
         }
         n += 1;
         let name = format!("<fx26:{n}>");
-        let forms = match checker.read_in(FileId(0), &text) {
+        let forms = match session.checker.read_in(FileId(0), &text) {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("read error: {}", located(&name, &text, &e));
@@ -80,24 +119,27 @@ pub fn repl() -> i32 {
             }
         };
         for form in &forms {
-            if let Some(lines) = answer_hole(&mut checker, form) {
+            if let Some(lines) = answer_hole(&mut session.checker, form) {
                 for l in lines {
                     println!("{l}");
                 }
                 continue;
             }
-            match checker.top(form) {
-                Ok(top) => println!("{}", report(&checker, &top)),
+            match session.run(form) {
+                Ok(out) => show(&session, &out, show_code),
                 Err(e) => eprintln!("{}", located(&name, &text, &e)),
             }
         }
     }
 }
 
-/// Check every form of `files` in one environment. Prints nothing when all
-/// is well — this is `run` until FX-26 runs — and the first error otherwise.
-pub fn run_files(files: &[String]) -> i32 {
-    let mut checker = Checker::new();
+/// Run every form of `files` in one session, printing only what the program
+/// prints. The first error, static or dynamic, stops it.
+pub fn run_files(backend: Backend, files: &[String]) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
     for f in files {
         let text = match std::fs::read_to_string(f) {
             Ok(t) => t,
@@ -106,7 +148,7 @@ pub fn run_files(files: &[String]) -> i32 {
                 return 1;
             }
         };
-        let forms = match checker.read_in(FileId(0), &text) {
+        let forms = match session.checker.read_in(FileId(0), &text) {
             Ok(forms) => forms,
             Err(e) => {
                 eprintln!("fixpt: read error: {}", located(f, &text, &e));
@@ -114,19 +156,31 @@ pub fn run_files(files: &[String]) -> i32 {
             }
         };
         for form in &forms {
-            if let Err(e) = checker.top(form) {
-                eprintln!("fixpt: {}", located(f, &text, &e));
-                return 1;
+            match session.run(form) {
+                Ok(out) => {
+                    print!("{}", out.printed);
+                    if let Err(e) = out.value {
+                        eprintln!("fixpt: {e}");
+                        return 1;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("fixpt: {}", located(f, &text, &e));
+                    return 1;
+                }
             }
         }
     }
     0
 }
 
-/// Check the forms of `text` and print what each is.
-pub fn eval(text: &str) -> i32 {
-    let mut checker = Checker::new();
-    let forms = match checker.read_in(FileId(0), text) {
+/// Run the forms of `text` and print what each is.
+pub fn eval(backend: Backend, text: &str) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let forms = match session.checker.read_in(FileId(0), text) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("fixpt: read error: {}", located("<argument>", text, &e));
@@ -134,8 +188,13 @@ pub fn eval(text: &str) -> i32 {
         }
     };
     for form in &forms {
-        match checker.top(form) {
-            Ok(top) => println!("{}", report(&checker, &top)),
+        match session.run(form) {
+            Ok(out) => {
+                show(&session, &out, false);
+                if out.value.is_err() {
+                    return 1;
+                }
+            }
             Err(e) => {
                 eprintln!("fixpt: {}", located("<argument>", text, &e));
                 return 1;

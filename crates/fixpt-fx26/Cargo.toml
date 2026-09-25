@@ -6,6 +6,12 @@ license.workspace = true
 
 [dependencies]
 fixpt-read = { path = "../fixpt-read" }
+fixpt-runtime = { path = "../fixpt-runtime" }
+fixpt-engine = { path = "../fixpt-engine" }
+fixpt-scheme = { path = "../fixpt-scheme" }
+
+[dev-dependencies]
+fixpt-heap = { path = "../fixpt-heap" }
 
 [lints]
 workspace = true

@@ -41,9 +41,9 @@ options:
 `--dialect fx87` and `--dialect fx91` select a *language*, not merely its
 reader: a form is type- and effect-checked, erased to Scheme and run on the same
 engine. Each REPL reports in its own reference's layout — FX-91 puts the type
-and effect above the value, FX-87 after it. `--dialect fx26` checks and does
-not yet run: `repl` and `eval` print each form's type and effect, and `run`
-checks its files and reports the first error.
+and effect above the value, FX-87 after it. `--dialect fx26` reports as FX-87
+does; its lowered Scheme carries what the checker proved, as `%fx-note`
+claims the compiler acts on.
 
 An image built with `build` is a program in its own right: it carries its own
 heap, needs no `fixpt` on the target, and runs its entry point when invoked.
@@ -114,7 +114,7 @@ fn run(args: &[String]) -> i32 {
             Dialect::Scheme => repl(profile, backend),
             Dialect::Fx87 => fx87::repl(backend),
             Dialect::Fx91 => fx91::repl(backend),
-            Dialect::Fx26 => fx26::repl(),
+            Dialect::Fx26 => fx26::repl(backend),
         },
         Some("run") => {
             if rest.len() < 2 {
@@ -124,7 +124,7 @@ fn run(args: &[String]) -> i32 {
             match dialect {
                 Dialect::Fx87 => fx87::run_files(backend, &rest[1..]),
                 Dialect::Fx91 => fx91::run_files(backend, &rest[1..]),
-                Dialect::Fx26 => fx26::run_files(&rest[1..]),
+                Dialect::Fx26 => fx26::run_files(backend, &rest[1..]),
                 Dialect::Scheme => match run_files(profile, backend, &rest[1..]) {
                     Ok(_) => 0,
                     Err(e) => {
@@ -142,7 +142,7 @@ fn run(args: &[String]) -> i32 {
             match dialect {
                 Dialect::Fx87 => return fx87::eval(backend, &rest[1..].join(" ")),
                 Dialect::Fx91 => return fx91::eval(backend, &rest[1..].join(" ")),
-                Dialect::Fx26 => return fx26::eval(&rest[1..].join(" ")),
+                Dialect::Fx26 => return fx26::eval(backend, &rest[1..].join(" ")),
                 Dialect::Scheme => {}
             }
             let mut session = Session::with_backend(backend);

@@ -46,10 +46,37 @@ pub struct Checker {
     unit: TyId,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
+    /// How many entries of `env` are the initial environment's.
+    pub(crate) standard_len: usize,
+    /// What checking proved about each expression, for lowering to carry.
+    pub facts: NodeFacts,
     /// Mask at every expression, as the rules say. Off only to observe an
     /// effect *before* masking, which is what some of the paper's claims are
     /// about.
     pub masking: bool,
+}
+
+/// What checking proved about expressions, keyed by expression. Lowering
+/// turns these into `%fx-note` claims (`crate::lower`).
+#[derive(Clone, Debug, Default)]
+pub struct NodeFacts {
+    /// Each expression's effect, after masking.
+    pub effects: HashMap<ExpId, Effect>,
+    /// Applications whose operator is a standard binding, by name. The
+    /// initial environment cannot be assigned, so the operator is known.
+    pub standard_operator: HashMap<ExpId, Sym>,
+    /// Expressions that allocate, where masking removed every allocation:
+    /// nothing they allocate outlives them.
+    pub no_escape: HashSet<ExpId>,
+}
+
+impl NodeFacts {
+    /// Forget everything about expressions from `first` on.
+    pub(crate) fn forget_from(&mut self, first: u32) {
+        self.effects.retain(|e, _| e.0 < first);
+        self.standard_operator.retain(|e, _| e.0 < first);
+        self.no_escape.retain(|e| e.0 < first);
+    }
 }
 
 /// What checking an expression found.
@@ -57,6 +84,8 @@ pub struct Checker {
 pub struct Checked {
     pub ty: TyId,
     pub effect: Effect,
+    /// The expression checked, for lowering.
+    pub exp: ExpId,
 }
 
 impl Default for Checker {
@@ -95,11 +124,14 @@ impl Checker {
             string,
             unit,
             fresh_regions: 0,
+            standard_len: 0,
+            facts: NodeFacts::default(),
             masking: true,
         };
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
         }
+        c.standard_len = c.env.len();
         c
     }
 
@@ -132,7 +164,7 @@ impl Checker {
         };
         let e = self.parse_exp(form)?;
         let (ty, effect) = self.synth(e)?;
-        Ok(Checked { ty, effect })
+        Ok(Checked { ty, effect, exp: e })
     }
 
     /// A type written as text, for comparing against.
@@ -165,7 +197,19 @@ impl Checker {
     }
 
     // ------------------------------------------------------------ synthesis
+    /// What `e` is, and what evaluating it does.
     pub fn synth(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let r = self.synth_node(e)?;
+        self.facts.effects.insert(e, r.1.clone());
+        Ok(r)
+    }
+
+    /// Whether `s`, where it is used, is the initial environment's binding.
+    pub(crate) fn is_standard(&self, s: Sym) -> bool {
+        self.env.iter().rposition(|(n, _)| *n == s).is_some_and(|i| i < self.standard_len)
+    }
+
+    fn synth_node(&mut self, e: ExpId) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         match self.arena.exp_at(e).clone() {
             Exp::Var(s) => match self.lookup(s) {
@@ -232,10 +276,13 @@ impl Checker {
                 let r = (|| {
                     let mut eff = Effect::pure();
                     for (n, t, init) in &bindings {
-                        let (it, ie) = self.synth(*init)?;
-                        if !self.subtype(it, *t) {
-                            return Err(FxError::at(self.arena.span_of(*init), format!("`{}` is declared a {}, and its initialiser is a {}", self.interner.name(*n), self.show_ty(*t), self.show_ty(it))));
-                        }
+                        let ie = self.check(*init, *t).map_err(|err| {
+                            if err.span == self.arena.span_of(*init) {
+                                FxError::at(err.span, format!("`{}` is declared a {}: {}", self.interner.name(*n), self.show_ty(*t), err.message))
+                            } else {
+                                err
+                            }
+                        })?;
                         eff = eff.union(&ie);
                     }
                     let (bt, be) = self.synth(body)?;
@@ -280,7 +327,7 @@ impl Checker {
     // --------------------------------------------------------------- masking
     /// Remove from `effect` what cannot be observed outside expression `e`,
     /// whose type is `result`. See the module docs for the rule.
-    pub(crate) fn mask(&self, e: ExpId, effect: &Effect, result: TyId) -> Effect {
+    pub(crate) fn mask(&mut self, e: ExpId, effect: &Effect, result: TyId) -> Effect {
         if !self.masking || effect.is_pure() {
             return effect.clone();
         }
@@ -305,7 +352,12 @@ impl Checker {
                 Some(_) => false,
             })
             .collect();
-        Effect(kept)
+        let kept = Effect(kept);
+        let allocates = |x: &Effect| x.0.iter().any(|a| matches!(a, Atom::Alloc(_)));
+        if allocates(effect) && !allocates(&kept) {
+            self.facts.no_escape.insert(e);
+        }
+        kept
     }
 
     /// The value variables free in `e`.
@@ -626,13 +678,17 @@ impl Checker {
                 format!("a prompt needs a prompt tag, not a {}", self.show_ty(tt)),
             ));
         };
-        let (bt, be) = self.synth(body)?;
-        if !self.subtype(bt, answer) {
-            return Err(FxError::at(
-                self.arena.span_of(body),
-                format!("the tag's prompts deliver a {}, and this body is a {}", self.show_ty(answer), self.show_ty(bt)),
-            ));
-        }
+        // Checked against the answer type, so that what the body needs to
+        // know — an operator's binders, a `nil` — it is told.
+        let be = self.check(body, answer).map_err(|err| {
+            match err.message.strip_prefix("a ").and_then(|m| m.split_once(" is expected here, and this is a ")) {
+                Some((want, got)) if err.span == self.arena.span_of(body) => FxError::at(
+                    err.span,
+                    format!("the tag's prompts deliver a {want}, and this body is a {got}"),
+                ),
+                _ => err,
+            }
+        })?;
         let own = Effect([Atom::Goto(region), Atom::Comefrom(region)].into_iter().collect());
         let beyond = Effect(be.0.iter().copied().filter(|a| !bound.contains(*a) && !own.contains(*a)).collect());
         if !beyond.is_pure() {
@@ -645,9 +701,22 @@ impl Checker {
                 ),
             ));
         }
-        // A handler written without its parameter's type takes the payload.
-        let (ht, he) = if matches!(self.arena.exp_at(handler), Exp::Lambda { params, .. } if params.iter().any(|(_, t)| t.is_none())) {
-            self.synth_lambda(handler, Some(&[payload]))?
+        // A handler written as a `lambda` is told what it takes and gives.
+        let (ht, he) = if matches!(self.arena.exp_at(handler), Exp::Lambda { params, .. } if params.len() == 1) {
+            let Exp::Lambda { body: hbody, .. } = self.arena.exp_at(handler).clone() else { unreachable!() };
+            self.synth_lambda_as(handler, Some(&[payload]), Some(answer)).map_err(|err| {
+                match err.message.strip_prefix("a ").and_then(|m| m.split_once(" is expected here, and this is a ")) {
+                    Some((_, got)) if err.span == self.arena.span_of(hbody) => FxError::at(
+                        err.span,
+                        format!(
+                            "the handler must take a {} to a {}, and this gives a {got}",
+                            self.show_ty(payload),
+                            self.show_ty(answer)
+                        ),
+                    ),
+                    _ => err,
+                }
+            })?
         } else {
             self.synth(handler)?
         };

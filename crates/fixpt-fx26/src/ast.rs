@@ -253,3 +253,10 @@ pub struct ArenaMark {
     exps: usize,
     dvars: usize,
 }
+
+impl ArenaMark {
+    /// The first expression id allocated after the mark.
+    pub fn exps(&self) -> u32 {
+        self.exps as u32
+    }
+}

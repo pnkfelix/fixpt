@@ -24,7 +24,7 @@ use fixpt_read::{FileId, Reader, Span, Sym, Syntax, SyntaxProfile};
 pub enum Top {
     /// `(define name …)`: `name` is bound to a value of this type, and
     /// computing it has this effect.
-    Define { name: Sym, ty: TyId, effect: Effect },
+    Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, recursive: bool },
     /// `(define-type name …)`.
     DefineType { name: Sym, ty: TyId },
     /// An expression.
@@ -58,7 +58,7 @@ impl Checker {
             _ => {
                 let e = self.parse_exp(form)?;
                 let (ty, effect) = self.synth(e)?;
-                Ok(Top::Exp(Checked { ty, effect }))
+                Ok(Top::Exp(Checked { ty, effect, exp: e }))
             }
         }
     }
@@ -94,7 +94,7 @@ impl Checker {
                 let r = self.parse_exp(init);
                 self.dscope.truncate(depth);
                 let r = r.and_then(|e| {
-                    self.check(e, ty).map_err(|err| {
+                    self.check(e, ty).map(|eff| (eff, e)).map_err(|err| {
                         if err.span == self.arena.span_of(e) {
                             FxError::at(
                                 err.span,
@@ -106,7 +106,7 @@ impl Checker {
                     })
                 });
                 match r {
-                    Ok(effect) => Ok(Top::Define { name, ty, effect }),
+                    Ok((effect, exp)) => Ok(Top::Define { name, ty, effect, exp, recursive: true }),
                     Err(e) => {
                         self.env.pop();
                         Err(e)
@@ -118,7 +118,7 @@ impl Checker {
                 let e = self.parse_exp(init)?;
                 let (ty, effect) = self.synth(e)?;
                 self.env.push((name, ty));
-                Ok(Top::Define { name, ty, effect })
+                Ok(Top::Define { name, ty, effect, exp: e, recursive: false })
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),
         }
@@ -194,6 +194,7 @@ impl Checker {
         let out = f(self);
         self.env.truncate(env);
         self.dscope.truncate(dscope);
+        self.facts.forget_from(arena.exps());
         self.arena.reset(arena);
         out
     }

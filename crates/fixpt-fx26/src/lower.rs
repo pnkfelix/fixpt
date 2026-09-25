@@ -1,0 +1,223 @@
+//! Lowering to Scheme that keeps what the checker proved.
+//!
+//! Not erasure. FX-87's eraser threw the checker's knowledge away, and adding
+//! it back as `%fx-note` claims was an afterthought (README, "What a front end
+//! proves, the compiler uses"). Here the claims are the point: the output is
+//! ordinary Scheme, runnable by any Scheme, and wherever the checker proved
+//! something the compiler can use, the expression carries it as an inert
+//! quoted note —
+//!
+//! ```scheme
+//! (begin '(%fx-note (integrable car) (pure) (basis checked) (because "pure"))
+//!        (car fx:p))
+//! ```
+//!
+//! — which the expander reads into the Core IR's facts table. Three claims:
+//!
+//! * `(integrable P)` — the operator is the standard binding for the Scheme
+//!   primitive `P`. The initial environment cannot be assigned (a later
+//!   `define` of the same name *shadows* it, and is lowered to another
+//!   global), so the call may skip the global.
+//! * `(pure)` — the application's effect, after masking, is `pure`, so its
+//!   value may be dropped when unused.
+//! * `(no-escape)` — the expression allocates, and masking removed every
+//!   allocation: nothing it allocates outlives it.
+//!
+//! Descriptions go: `plambda` lowers to its body, `proj` to its operand, `the`
+//! to its expression, and parameter types are dropped. A program's own names
+//! are prefixed `fx:`, so they can neither capture nor clobber a Scheme name,
+//! and a top-level name defined twice becomes two globals, since the second
+//! `define` shadows the first rather than assigning it.
+
+use crate::ast::{Exp, ExpId};
+use crate::check::Checker;
+use fixpt_read::Sym;
+use std::collections::HashMap;
+
+/// How each standard FX-26 name is lowered, and whether that is a Scheme
+/// primitive of exactly the same meaning (and so may be `integrable`).
+pub const STANDARD: &[(&str, &str, bool)] = &[
+    ("+", "+", true),
+    ("-", "-", true),
+    ("=", "=", true),
+    ("cons", "cons", true),
+    ("car", "car", true),
+    ("cdr", "cdr", true),
+    ("null?", "null?", true),
+    ("nil", "'()", false),
+    ("set-car!", "%fx26-set-car!", false),
+    ("set-cdr!", "%fx26-set-cdr!", false),
+    ("new", "%fx26-new", false),
+    ("get", "%fx26-get", false),
+    ("set", "%fx26-set", false),
+    ("cwcc", "call/cc", false),
+    ("make-continuation-prompt-tag", "%fx26-make-prompt-tag", false),
+    ("abort-current-continuation", "%fx26-abort", false),
+    ("call-with-composable-continuation", "%fx26-call/comp", false),
+    ("make-continuation-mark-key", "%fx26-make-mark-key", false),
+    ("with-mark", "%fx26-with-mark", false),
+    ("first-mark", "%fx26-first-mark", false),
+    ("current-marks", "%fx26-current-marks", false),
+    ("marks-of", "%fx26-marks-of", false),
+];
+
+/// The Scheme names of a program's top-level definitions.
+#[derive(Default, Debug, Clone)]
+pub struct Globals {
+    /// The current global for each name.
+    current: HashMap<Sym, String>,
+    /// How many times each name has been defined.
+    defined: HashMap<Sym, usize>,
+}
+
+impl Globals {
+    /// The global a new definition of `name` gets, which becomes the one
+    /// later uses of `name` refer to.
+    pub fn define(&mut self, c: &Checker, name: Sym) -> String {
+        let n = self.defined.entry(name).or_insert(0);
+        *n += 1;
+        let base = format!("fx:{}", fixpt_read::escape_symbol(c.interner.name(name)));
+        let global = if *n == 1 { base } else { format!("{base}:{n}") };
+        self.current.insert(name, global.clone());
+        global
+    }
+
+    pub fn get(&self, name: Sym) -> Option<&str> {
+        self.current.get(&name).map(String::as_str)
+    }
+}
+
+pub struct Lowerer<'a> {
+    c: &'a Checker,
+    globals: &'a Globals,
+    /// Names bound by an enclosing `lambda`, `let` or `letrec`.
+    locals: Vec<Sym>,
+}
+
+/// Lower one checked expression.
+pub fn lower(c: &Checker, globals: &Globals, e: ExpId) -> String {
+    Lowerer { c, globals, locals: Vec::new() }.go(e)
+}
+
+impl Lowerer<'_> {
+    fn local(&self, s: Sym) -> String {
+        format!("fx:{}", fixpt_read::escape_symbol(self.c.interner.name(s)))
+    }
+
+    fn var(&self, s: Sym) -> String {
+        if self.locals.contains(&s) {
+            return self.local(s);
+        }
+        if let Some(g) = self.globals.get(s) {
+            return g.to_string();
+        }
+        let name = self.c.interner.name(s);
+        match STANDARD.iter().find(|(n, _, _)| *n == name) {
+            Some((_, scheme, _)) => scheme.to_string(),
+            // Checked code names nothing else; keep it visible if it does.
+            None => format!("fx:{}", fixpt_read::escape_symbol(name)),
+        }
+    }
+
+    fn body(&mut self, bound: &[Sym], e: ExpId) -> String {
+        let depth = self.locals.len();
+        self.locals.extend_from_slice(bound);
+        let out = self.go(e);
+        self.locals.truncate(depth);
+        out
+    }
+
+    fn go(&mut self, e: ExpId) -> String {
+        let code = match self.c.arena.exp_at(e).clone() {
+            Exp::Var(s) => self.var(s),
+            Exp::Int(n) => n.to_string(),
+            Exp::Bool(b) => (if b { "#t" } else { "#f" }).into(),
+            Exp::Str(s) => scheme_string(&s),
+            Exp::Unit => "%fx26-unit".into(),
+            Exp::Lambda { params, body } => {
+                let names: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
+                let ps: Vec<String> = names.iter().map(|n| self.local(*n)).collect();
+                format!("(lambda ({}) {})", ps.join(" "), self.body(&names, body))
+            }
+            Exp::App { fun, args } => {
+                let mut parts = vec![self.go(fun)];
+                parts.extend(args.iter().map(|a| self.go(*a)));
+                format!("({})", parts.join(" "))
+            }
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.go(body),
+            Exp::The { exp, .. } => self.go(exp),
+            Exp::If { test, then, els } => {
+                format!("(if {} {} {})", self.go(test), self.go(then), self.go(els))
+            }
+            Exp::Letrec { bindings, body } => {
+                let names: Vec<Sym> = bindings.iter().map(|(n, _, _)| *n).collect();
+                let depth = self.locals.len();
+                self.locals.extend_from_slice(&names);
+                let bs: Vec<String> =
+                    bindings.iter().map(|(n, _, init)| format!("({} {})", self.local(*n), self.go(*init))).collect();
+                let b = self.go(body);
+                self.locals.truncate(depth);
+                format!("(letrec* ({}) {b})", bs.join(" "))
+            }
+            Exp::Let { bindings, body } => {
+                let bs: Vec<String> =
+                    bindings.iter().map(|(n, init)| format!("({} {})", self.local(*n), self.go(*init))).collect();
+                let names: Vec<Sym> = bindings.iter().map(|(n, _)| *n).collect();
+                format!("(let ({}) {})", bs.join(" "), self.body(&names, body))
+            }
+            Exp::Begin(items) => {
+                let parts: Vec<String> = items.iter().map(|i| self.go(*i)).collect();
+                format!("(begin {})", parts.join(" "))
+            }
+            Exp::Prompt { tag, body, handler } => format!(
+                "(call-with-continuation-prompt (lambda () {}) {} {})",
+                self.go(body),
+                self.go(tag),
+                self.go(handler)
+            ),
+        };
+        self.annotate(e, code)
+    }
+
+    /// Wrap `code` in the claims the checker proved about `e`, if any.
+    fn annotate(&self, e: ExpId, code: String) -> String {
+        let facts = &self.c.facts;
+        let mut claims = Vec::new();
+        let is_app = matches!(self.c.arena.exp_at(e), Exp::App { .. });
+        if is_app
+            && let Some(s) = facts.standard_operator.get(&e)
+        {
+            let name = self.c.interner.name(*s);
+            if let Some((_, scheme, true)) = STANDARD.iter().find(|(n, _, _)| *n == name) {
+                claims.push(format!("(integrable {scheme})"));
+            }
+        }
+        let effect = facts.effects.get(&e);
+        if is_app && effect.is_some_and(|x| x.is_pure()) {
+            claims.push("(pure)".into());
+        }
+        if facts.no_escape.contains(&e) {
+            claims.push("(no-escape)".into());
+        }
+        if claims.is_empty() {
+            return code;
+        }
+        let because = effect.map(|x| self.c.show_effect(x)).unwrap_or_default();
+        format!("(begin '(%fx-note {} (basis checked) (because {because:?})) {code})", claims.join(" "))
+    }
+}
+
+/// A string literal in Scheme's syntax.
+fn scheme_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}

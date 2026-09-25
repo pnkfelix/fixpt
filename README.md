@@ -27,7 +27,7 @@ from the references.
 | **M6** FX-87 front end | **done: 161/161 parse, 160/161 types and effects, 123/123 values** |
 | **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
 | **M9** hygienic macros | **done:** `syntax-rules`; SRFI 211's `er-macro-transformer` and `ir-macro-transformer`; SRFI 139 syntax parameters — [`docs/macros.md`](docs/macros.md) |
-| **M11** FX-26, the tooling's own language | **in progress:** a declared kernel with PLDI '89's control effects, and a checking REPL — [`docs/fx26.md`](docs/fx26.md) |
+| **M11** FX-26, the tooling's own language | **in progress:** a declared kernel with PLDI '89's control effects and typed delimited control, bidirectional checking, and lowering to Scheme that carries the checker's proofs — [`docs/fx26.md`](docs/fx26.md) |
 
 All three deliverables of the brief are done. What follows is
 [`TODO.md`](TODO.md).
@@ -297,14 +297,13 @@ perform lives in its *type*.
 ## Trying FX-26
 
 FX-26 is this project's own continuation of FX, and the language the tooling
-is meant to be rewritten in ([`docs/fx26.md`](docs/fx26.md)). So far it
-checks and does not run. Each form's type and effect are printed in FX-87's
-layout, with the value left out until there is one:
+is meant to be rewritten in ([`docs/fx26.md`](docs/fx26.md)). Each form is
+checked, lowered to Scheme, and run, and the REPL prints in FX-87's layout:
 
 ```
 $ fixpt --dialect fx26 repl
-fx26> (+ 1 (cwcc (lambda (k) (k 0))))
- : int ! pure
+fx26> (+ 1 (cwcc (lambda (k) (k 41))))
+42 : int ! pure
 
 fx26> (define count (subr pure (int) int)
     |   (lambda (n) (if (= n 0) 0 (count (- n 1)))))
@@ -314,7 +313,7 @@ fx26> (define t (prompt-tag int int pure @p) (make-continuation-prompt-tag))
 t : (prompt-tag int int pure @p) ! (alloc @p)
 
 fx26> (prompt t (+ 1 (abort-current-continuation t 5)) (lambda (v) v))
- : int ! pure
+5 : int ! pure
 ```
 
 The first one is PLDI '89's control effects. Calling `cwcc` has a
@@ -329,6 +328,16 @@ and what is expected of them. Written out, it is all `proj`s.
 Definitions persist between inputs. As in the other FX REPLs, errors in
 finished subforms are underlined as you type, and a hint says what the
 argument at the cursor must be.
+
+The lowering is not an erasure. What the checker proved travels with the
+code as `%fx-note` claims, so the compiler can use it. `,code` shows it:
+
+```
+fx26> ,code
+fx26> (+ 1 2)
+; (begin '(%fx-note (integrable +) (pure) (basis checked) (because "pure")) (+ 1 2))
+3 : int ! pure
+```
 
 ## Layout
 
