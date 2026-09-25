@@ -42,6 +42,11 @@ impl Parser {
         Parser { arena, interner, syms, keywords, init_alpha, initializing: false }
     }
 
+    /// The reserved words.
+    pub fn keywords(&self) -> impl Iterator<Item = Sym> + '_ {
+        self.keywords.iter().copied()
+    }
+
     // ----------------------------------------------------------- utilities
     fn items<'s>(&self, s: &'s Syntax) -> R<&'s [Syntax]> {
         s.as_proper_list()

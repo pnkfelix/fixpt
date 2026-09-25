@@ -467,6 +467,19 @@ impl Arena {
         AlphaId(self.alpha.len() as u32 - 1)
     }
 
+    /// The source names an alpha environment binds, innermost frame first —
+    /// the index from what a user writes to what the checker calls it.
+    pub fn alpha_names(&self, env: AlphaId) -> Vec<Sym> {
+        let mut out = Vec::new();
+        let mut cursor = Some(env);
+        while let Some(id) = cursor {
+            let frame = &self.alpha[id.0 as usize];
+            out.extend(frame.bindings.iter().map(|(s, _)| *s));
+            cursor = frame.parent;
+        }
+        out
+    }
+
     pub fn extend_alpha(&mut self, parent: AlphaId, bindings: Vec<(Sym, u32)>) -> AlphaId {
         self.alpha.push(AlphaFrame { bindings, parent: Some(parent) });
         AlphaId(self.alpha.len() as u32 - 1)

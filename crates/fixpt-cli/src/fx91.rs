@@ -140,22 +140,25 @@ pub fn repl(backend: Backend) -> i32 {
     }
 }
 
-/// Names FX-91 knows, for completion.
+/// Names FX-91 knows, for completion and for not colouring as unbound: what
+/// the initial environment binds — `fx` and every identifier of its module,
+/// values and descriptions alike — and the reserved words.
 ///
-/// The checker's interner holds every name the `fx` module introduced along
-/// with anything the session has parsed. Unification variables are filtered
-/// out: they are internal and arrive named after their own alpha number.
+/// Taken from the environment's own index of source names, not from the
+/// checker's symbol table, which also holds unification variables (named by
+/// their alpha numbers) and every name ever read, typos included.
 fn known_names(session: &Fx91Session) -> Vec<String> {
-    session
-        .checker
-        .p
-        .interner
-        .names()
-        .filter(|n| !n.contains('*') && !n.starts_with('%') && !n.chars().all(|c| c.is_ascii_digit()))
-        // Unification variables are named by their alpha numbers; `+` is one
-        // character long and a real name.
-        .map(str::to_string)
-        .collect()
+    let p = &session.checker.p;
+    let mut names: Vec<String> = p
+        .arena
+        .alpha_names(p.init_alpha)
+        .into_iter()
+        .chain(p.keywords())
+        .map(|s| p.interner.name(s).to_string())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Run FX-91 files. Each form is checked and evaluated in turn, and a form's
@@ -253,10 +256,11 @@ pub fn eval(backend: Backend, text: &str) -> i32 {
 /// would give that expression right now, not a separate description that might
 /// have drifted.
 ///
-/// `,fits` and `,returns` are not offered. FX-91's environment is keyed by
-/// alpha-renamed variables rather than by source names, so enumerating it takes
-/// more than a lookup — the same search FX-87 supports is possible here and is
-/// simply not built yet. Saying so beats returning nothing.
+/// `,fits` and `,returns` are not offered yet. The environment *can* be
+/// enumerated by source name — the initial alpha frame is exactly that index
+/// (`Arena::alpha_names`) — so what is missing is the search itself: matching
+/// each binding's type against the one asked about, under FX-91's inference
+/// rather than FX-87's subtyping. Saying so beats returning nothing.
 impl crate::help::Helpful for Fx91Session {
     fn dialect(&self) -> &'static str {
         "FX-91"
@@ -303,10 +307,11 @@ impl crate::help::Helpful for Fx91Session {
 ///
 /// FX-91 can say *what the hole wants*, because that needs only the operator's
 /// type — peel the `poly` binders, take the formal at that position. What it
-/// cannot yet do is the second half, listing what produces such a value: that
-/// needs the environment enumerated by source name, and FX-91's is keyed by
-/// alpha-renamed variables. The two halves are genuinely different questions
-/// and only the second is blocked, so only the second is declined.
+/// cannot yet do is the second half, listing what produces such a value. The
+/// names are enumerable (`Arena::alpha_names`); the matching of each one's
+/// result type against the hole, under FX-91's inference, is not built. The
+/// two halves are genuinely different questions and only the second is
+/// missing, so only the second is declined.
 fn answer_hole(session: &mut Fx91Session, form: &Syntax) -> Vec<String> {
     let names = |s: fixpt_read::Sym| session.checker.p.interner.name(s).to_string();
     let Datum::List { items, tail: None } = &form.datum else {
@@ -527,5 +532,27 @@ mod speculative {
         assert!(!n[0].error);
         assert!(n[0].message.contains("argument 2 of vector-ref wants"), "{n:?}");
         assert!(n[0].message.contains("int"), "{n:?}");
+    }
+}
+
+
+#[cfg(test)]
+mod completion {
+    use super::*;
+
+    #[test]
+    fn known_names_are_what_is_bound_and_what_is_reserved() {
+        let mut session = Fx91Session::with_backend(Backend::Ast).expect("starts");
+        // Leave a typo and some unification variables behind.
+        let forms = read(&mut session, "<t>", "(car nosuchname) (lambda (x) x)").expect("reads");
+        for f in &forms {
+            let _ = session.run(f);
+        }
+        let names = known_names(&session);
+        for want in ["+", "car", "fx", "lambda", "with", "module"] {
+            assert!(names.iter().any(|n| n == want), "missing {want:?}");
+        }
+        assert!(!names.iter().any(|n| n == "nosuchname"), "a typo became a completion");
+        assert!(!names.iter().any(|n| n.chars().all(|c| c.is_ascii_digit())), "a numbered name leaked");
     }
 }
