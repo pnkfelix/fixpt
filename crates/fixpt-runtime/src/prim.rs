@@ -1072,6 +1072,18 @@ prims! {
     // What `,help` inside a form becomes. Evaluating it reports the context it
     // was reached in, with the values that were actually computed on the way.
     "%hole", 2, Some(2), PrimKind::Engine(EngineOp::Hole);
+
+    // ---- regions (`letrena`): the heap's, by handle ----
+    "%region-enter", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.region_enter() as i64)));
+    "%region-exit", 1, Some(1), simple!(|rt, a| {
+        let h = int(rt, a[0])? as usize;
+        rt.heap.region_exit(h);
+        Ok(Value::UNSPECIFIED)
+    });
+    "%region-cons", 3, Some(3), simple!(|rt, a| {
+        let h = int(rt, a[0])? as usize;
+        Ok(rt.heap.in_region(h, |heap| heap.cons(a[1], a[2])))
+    });
 }
 
 /// Promise states. `[state, payload]`.

@@ -1086,6 +1086,41 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
   4. The collector scans arenas as roots, collects reaps, and scans reaps
      as roots when it collects the heap.
 
+  *(Arenas, first cut, 2026-09-26: `heap/regions.rs`, and register code.)*
+  One arena as a stack, marked on entry and reset on exit, is **not
+  sound**, even with no polymorphism: in
+  `(letrena r0 (letrec ((f (lambda (n) (letrena r1 … (cons-in-r0 …) … (f …))))) …))`
+  the `cons` in `r0` happens while `r1`, newer, is live, so it lands
+  above `r1`'s mark and is freed when `r1` ends, though `r0` may hold it.
+  So each region has chunks of its own (64 KiB, reused once it ends), as
+  Tofte and Talpin's do, and an allocation names its region by a handle.
+  Regions still end newest first, so a handle is a position in a stack of
+  live regions, and ending one ends any newer an escape left behind.
+  - The heap: `region_enter`, `region_exit`, and `in_region(h, f)`, under
+    which a primitive's allocation goes to region `h`; too big for a
+    chunk, it goes to the heap. The collector scans the live regions'
+    words as roots, before the Cheney scan; `verify` walks them.
+  - Register code: a `letrena` calls out to `%region-enter`, keeps the
+    handle in a frame slot, runs the body not in tail position, and calls
+    `%region-exit`. A `cons` whose recorded region is that `letrena`'s,
+    in the same procedure, calls `%region-cons`.
+  - Everything else is the heap's, which is always sound: sites in a
+    lambda inside the body (its closure does not capture the handle), the
+    other allocating operations, `letreap`, and every other back end.
+
+  Next, in order:
+  1. The handle captured by the closures made inside the body, as a free
+     variable, so that a loop or helper in the body allocates in the region
+     too. Without this, a region serves only straight-line code.
+  2. The other allocating operations (`new`, arrays, bloblets, products
+     and sums), by the same call-out.
+  3. `cons` in a region inline, as the heap's is, with the region's fill
+     and limit where machine code can reach them.
+  4. A prompt that records how many regions are live, and an abort that
+     ends the newer ones. Until then, the regions an escape leaves live
+     only until the next ending of an older region.
+  5. `letreap`.
+
 - **Responsiveness as an effect.** (Raised 2026-09-26.) Distinguish "may
   diverge without reaching a poll" from "every unbounded path polls, and
   every callee does too". A poll (the native machine's fuel and limit

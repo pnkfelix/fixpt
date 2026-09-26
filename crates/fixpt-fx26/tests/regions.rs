@@ -1,8 +1,10 @@
 //! `letrena` and `letreap` (PLAN.md, "Regions that end"): a region that
 //! lives while its body runs, as an arena or as a heap of its own. The two
 //! share their typing rule, which both checkers apply (`tests/checker.rs`
-//! reads these programs and compares them); for now a region's allocation
-//! is the heap's, so every back end just runs the body.
+//! reads these programs and compares them). Register code makes a
+//! `letrena`'s allocations in a region of the heap's where it can
+//! (`tests/register_code.rs`); otherwise, and in every other back end, a
+//! region's allocation is the heap's, and the body just runs.
 
 use fixpt_fx26::Checker;
 use fixpt_read::FileId;

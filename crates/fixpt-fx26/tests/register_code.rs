@@ -134,3 +134,37 @@ fn runs_as_lowered(gc_every: Option<u64>) {
     assert!(report.is_empty(), "{}", report.join("\n"));
     assert!(ran >= 15, "only {ran}");
 }
+
+/// A `letrena`'s `cons`s, in the procedure that enters it, are made in the
+/// heap's regions, which are all ended when the program is done; and the
+/// same, collecting at every safepoint, when the regions are roots.
+#[test]
+fn a_letrena_allocates_in_its_region() {
+    use fixpt_heap::Value;
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/run/arena.fx")).unwrap();
+    for gc_every in [None, Some(1)] {
+        let mut c = Checker::new();
+        let forms = c.read_in(FileId(0), &text).expect("reads");
+        let done = c.declare_ahead(&forms).expect("declares");
+        let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        let (got, words, live) = s.scheme.scope(|sc| {
+            let w = sc.make(|m| {
+                let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                comp.registers = true;
+                comp.program(&tops).expect("compiles")
+            });
+            sc.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+            if let Some(n) = gc_every {
+                sc.set_gc_every(n);
+            }
+            let none = sc.make(|_| Value::NULL);
+            let got = sc.call_global("%run-word", &[w, none]).map(|v| sc.write(v)).unwrap_or_else(|e| format!("!! {e}"));
+            let h = &sc.runtime_unrooted().heap;
+            (got, h.region_words(), h.live_regions())
+        });
+        assert_eq!(got, (3 * 500_500 + 3 * 1000).to_string());
+        assert_eq!(words, 1000 * 6, "three pairs each call, in a region");
+        assert_eq!(live, 0);
+    }
+}

@@ -11,13 +11,19 @@
 //! (`letrec`, `prompt`, `tagcase`, products, sums, arrays and bloblets
 //! made, standard operations as values, more than `REGS` values), it
 //! declines: the lambda keeps its stack code alone.
+//!
+//! A `letrena`'s region is the heap's (`Heap::region_enter`), its handle in
+//! the frame while the body runs; a `cons` the checker says is in that
+//! region, in the same procedure, is made there. One in a lambda inside is
+//! made in the heap, as is anything else the region holds: the lambda does
+//! not capture the handle, yet.
 
 use super::{find, Compiler, Env, Loc, This};
 
 fn two() -> Value {
     Value::fixnum(2)
 }
-use crate::ast::{BlobletOp, Exp, ExpId};
+use crate::ast::{BlobletOp, DVar, Exp, ExpId, Region};
 use fixpt_heap::layout::regcode::{op, REGS};
 use fixpt_heap::layout::threaded::routine;
 use fixpt_heap::Value;
@@ -35,13 +41,15 @@ enum RLoc {
     Pending(usize),
 }
 
-/// An operand of a call-out: an expression, a constant, or a procedure of
-/// no arguments whose body is an expression (a `prompt`'s).
+/// An operand of a call-out: an expression, a constant, a procedure of
+/// no arguments whose body is an expression (a `prompt`'s), or a frame
+/// slot's value.
 #[derive(Clone, Copy)]
 enum Arg {
     E(ExpId),
     V(Value),
     Thunk(ExpId),
+    Slot(usize),
 }
 
 enum RItem {
@@ -79,6 +87,9 @@ struct Gen {
     max_slot: usize,
     labels: usize,
     this: Option<(This, usize)>,
+    /// The `letrena`s around, innermost last: each region, and the frame
+    /// slot of its handle.
+    regions: Vec<(DVar, usize)>,
 }
 
 type O<T> = Option<T>;
@@ -172,7 +183,7 @@ impl Compiler<'_> {
             return self.decline("more than REGS parameters");
         }
         let leaf = !self.r_collects(body, inner, this);
-        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None };
+        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, regions: Vec::new() };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
         for (n, l) in inner {
@@ -289,6 +300,8 @@ impl Compiler<'_> {
                 bindings.iter().any(|(_, y)| self.r_collects(*y, e, this)) || self.r_collects(body, e, this)
             }
             Exp::Begin(items) => items.iter().any(|y| self.r_collects(*y, e, this)),
+            // A `letrena` calls out to enter and leave its region.
+            Exp::LetRegion { arena: true, .. } => true,
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
                 self.r_collects(body, e, this)
             }
@@ -368,6 +381,23 @@ impl Compiler<'_> {
             Exp::Unit => {
                 let u = self.unit();
                 g.op("const", &[u]);
+                g.done(tail);
+            }
+            // The region entered, its handle kept; the body, not in tail
+            // position; the region left, the value kept meanwhile.
+            Exp::LetRegion { arena: true, region, body } if !g.leaf => {
+                let slots = g.next_slot;
+                self.r_prim(g, "%region-enter", &[], env, te)?;
+                let h = g.slot();
+                g.op("setstk", &[Gen::n(h)]);
+                g.regions.push((region, h));
+                self.r_exp(g, body, env, te, false)?;
+                g.regions.pop();
+                let v = g.slot();
+                g.op("setstk", &[Gen::n(v)]);
+                self.r_prim(g, "%region-exit", &[Arg::Slot(h)], env, te)?;
+                g.op("stack", &[Gen::n(v)]);
+                g.next_slot = slots;
                 g.done(tail);
             }
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
@@ -513,12 +543,20 @@ impl Compiler<'_> {
                 te.truncate(tdepth);
                 g.next_slot = slots;
             }
-            Exp::App { fun, args } => self.r_app(g, fun, &args, env, te, tail)?,
+            Exp::App { fun, args } => self.r_app(g, x, fun, &args, env, te, tail)?,
         }
         Some(())
     }
 
-    fn r_app(&mut self, g: &mut Gen, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+    /// The frame slot of the handle of the region application `x` allocates
+    /// in, if that is a `letrena`'s around it in this procedure.
+    fn r_region_of(&self, g: &Gen, x: ExpId) -> O<usize> {
+        let Region::Var(d) = *self.c.facts.alloc_region.get(&x)? else { return None };
+        g.regions.iter().rev().find(|(r, _)| *r == d).map(|(_, s)| *s)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn r_app(&mut self, g: &mut Gen, x: ExpId, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         if self.r_self_call(g, f, args.len(), te, tail) {
             return self.r_loop(g, args, env, te);
         }
@@ -553,6 +591,10 @@ impl Compiler<'_> {
                 // In tail position a mark replaces this frame's, which is
                 // stack code's way (`withmark-tail`); left to it.
                 Std::Threaded("withmark") if tail => return self.decline("with-mark in tail position"),
+                Std::Threaded("cons") if self.r_region_of(g, x).is_some() => {
+                    let h = self.r_region_of(g, x)?;
+                    self.r_prim(g, "%region-cons", &[Arg::Slot(h), Arg::E(args[0]), Arg::E(args[1])], env, te)?;
+                }
                 Std::Threaded(r) => {
                     let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
                     self.r_call_out(g, "threaded", routine(r) as i64, &es, env, te)?;
@@ -687,7 +729,7 @@ impl Compiler<'_> {
         let mut kept = Vec::new();
         let simple = |c: &Self, a: &Arg| match a {
             Arg::E(x) => c.r_simple(*x),
-            Arg::V(_) => true,
+            Arg::V(_) | Arg::Slot(_) => true,
             Arg::Thunk(_) => false,
         };
         // The last argument that is not simple goes straight to its
@@ -707,7 +749,7 @@ impl Compiler<'_> {
                 Arg::Thunk(body) => {
                     self.r_lambda(g, &[], *body, env, te, None)?;
                 }
-                Arg::V(_) => unreachable!(),
+                Arg::V(_) | Arg::Slot(_) => unreachable!(),
             }
             if Some(i) == direct {
                 g.op("setreg", &[Gen::n(i + 1)]);
@@ -736,6 +778,7 @@ impl Compiler<'_> {
                     g.op("const", &[*v]);
                     g.op("setreg", &[Gen::n(i + 1)]);
                 }
+                (None, Arg::Slot(s)) => g.op("load", &[Gen::n(i + 1), Gen::n(*s)]),
                 (None, Arg::Thunk(_)) => unreachable!(),
             }
         }

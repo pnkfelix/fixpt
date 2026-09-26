@@ -1,7 +1,8 @@
 ;;; `letrena` and `letreap`: data made in a region that lives while the
 ;;; body runs, and only what does not mention the region given back. The
-;;; two differ only in how the region's memory is managed; for now both
-;;; allocate in the heap, and the checker's rule is what is tested.
+;;; two differ only in how the region's memory is managed (for now only
+;;; register code gives a `letrena` a region of its own, and a `letreap`
+;;; allocates in the heap); the checker's rule is what is tested.
 (define add-to (subr pure (int) int)
   (lambda (n)
     (letrena r
