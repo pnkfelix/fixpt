@@ -3,13 +3,13 @@
 //! segmented heap (PLAN.md, "Regions that end"), which reserves one large
 //! range up front and makes segments of it usable as it grows.
 //!
-//!     cargo test --release -p fixpt-native --test reserve -- --ignored --nocapture
+//!     cargo test --release -p fixpt-memmgmt --test reserve -- --ignored --nocapture
 //!
 //! It writes at most `TOUCH_BUDGET` bytes' worth of pages in any one phase,
 //! and frees each range before the next, so as not to push the machine
 //! into swapping.
 
-use fixpt_native::reserve::{Reservation, probe};
+use fixpt_memmgmt::reserve::{Reservation, probe};
 use std::time::Instant;
 
 const GB: usize = 1 << 30;
@@ -40,7 +40,7 @@ fn human(n: usize) -> String {
 }
 
 #[test]
-#[ignore = "a probe: cargo test --release -p fixpt-native --test reserve -- --ignored --nocapture"]
+#[ignore = "a probe: cargo test --release -p fixpt-memmgmt --test reserve -- --ignored --nocapture"]
 fn reserve() {
     let pg = probe::page();
     eprintln!("page size {pg} bytes; resident at start {:.1} MB", resident() as f64 / 1e6);

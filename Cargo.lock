@@ -86,6 +86,16 @@ dependencies = [
 [[package]]
 name = "fixpt-heap"
 version = "0.1.0"
+dependencies = [
+ "fixpt-memmgmt",
+]
+
+[[package]]
+name = "fixpt-memmgmt"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "fixpt-native"

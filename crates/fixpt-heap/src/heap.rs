@@ -129,6 +129,9 @@ impl std::fmt::Display for BlobletError {
 
 /// Words in each semispace at startup. Grows on demand; never shrinks.
 const DEFAULT_SEMI_WORDS: usize = 1 << 16;
+/// The most words a semispace may grow to: each has this much address space
+/// of its own, reserved when the heap is made, so it grows in place.
+const MAX_SEMI_WORDS: usize = 1 << 31;
 
 /// Collect when the active semispace is at least this full at a safepoint.
 const COLLECT_THRESHOLD: f64 = 0.75;
@@ -137,9 +140,11 @@ const COLLECT_THRESHOLD: f64 = 0.75;
 const LIVE_RATIO: usize = 3;
 
 pub struct Heap {
-    /// `2 * semi` words: the two semispaces back to back.
-    mem: Vec<u64>,
-    /// Base of the active semispace within `mem` — `0` or `semi`.
+    /// The two semispaces, `MAX_SEMI_WORDS` apart, at an address that never
+    /// changes: each grows in place, up to that (`fixpt_memmgmt::Words`,
+    /// committed by the system as it is first written).
+    mem: fixpt_memmgmt::Words,
+    /// Base of the active semispace within `mem` — `0` or `MAX_SEMI_WORDS`.
     active: usize,
     semi: usize,
     /// Next free word, *relative to `active`*. Also the live-data size.
@@ -191,7 +196,7 @@ impl Heap {
     pub fn with_semispace(semi: usize) -> Heap {
         let semi = semi.max(1024);
         Heap {
-            mem: vec![0; semi * 2],
+            mem: fixpt_memmgmt::Words::new(2 * MAX_SEMI_WORDS).expect("address space for the heap"),
             active: 0,
             semi,
             top: 0,
@@ -232,11 +237,11 @@ impl Heap {
     // ------------------------------------------------------------ raw word I/O
     #[inline]
     pub(crate) fn word(&self, rel: usize) -> u64 {
-        self.mem[self.active + rel]
+        self.mem.words()[self.active + rel]
     }
     #[inline]
     fn set_word(&mut self, rel: usize, w: u64) {
-        self.mem[self.active + rel] = w;
+        self.mem.words_mut()[self.active + rel] = w;
     }
     #[inline]
     pub fn slot(&self, rel: usize) -> Value {
@@ -253,7 +258,7 @@ impl Heap {
     /// holds until the next allocation, which may grow the heap, or
     /// collection, which flips the semispaces.
     pub fn active_words(&self) -> *const u64 {
-        self.mem[self.active..].as_ptr()
+        self.mem.words()[self.active..].as_ptr()
     }
 
     // ------------------------------------------------------------- allocation
@@ -267,17 +272,14 @@ impl Heap {
         at
     }
 
-    /// Grow both semispaces to hold at least `need` words, preserving every
-    /// existing `Value` — relative offsets are unchanged by construction.
+    /// Grow both semispaces to hold at least `need` words: in place, since
+    /// each has its own address space, so nothing moves.
     fn grow(&mut self, need: usize) {
         let mut semi = self.semi;
         while semi < need {
             semi *= 2;
         }
-        let mut fresh = vec![0u64; semi * 2];
-        fresh[..self.top].copy_from_slice(&self.mem[self.active..self.active + self.top]);
-        self.mem = fresh;
-        self.active = 0;
+        assert!(semi <= MAX_SEMI_WORDS, "the heap is full: it would need {need} words live, and holds at most {MAX_SEMI_WORDS}");
         self.semi = semi;
     }
 
@@ -427,7 +429,7 @@ impl Heap {
     /// Payload length in words.
     #[inline]
     pub fn obj_len(&self, o: Value) -> usize {
-        let words = read_head(&self.mem, self.active + self.main_of(o)).payload_words();
+        let words = read_head(self.mem.words(), self.active + self.main_of(o)).payload_words();
         // A trailer is the runtime's, not part of the object's contents.
         if o.is_bloblet() && self.word(o.index() - 1) & TAG_MASK == TAG_TRAILER { words - 1 } else { words }
     }
@@ -676,7 +678,7 @@ impl Heap {
     /// bloblet's pointer, which has moved `fields` words forward.
     pub fn bloblet_publish(&mut self, v: Value, fields: usize, trailer: bool) -> Value {
         let main = v.index() - 1;
-        let head = read_head(&self.mem, self.active + main);
+        let head = read_head(self.mem.words(), self.active + main);
         assert_eq!(head.fields, 0, "only a reserved bloblet can be published");
         let total = fields + trailer as usize;
         assert!(head.bytes >= total * 8, "more fields than were reserved");
@@ -694,12 +696,12 @@ impl Heap {
     /// The main header's index, relative to the active space.
     fn bloblet_main(&self, v: Value) -> usize {
         debug_assert!(v.is_bloblet(), "{v:?} is not a bloblet");
-        find_main(&self.mem, self.active + v.index()).expect("no forwarding pointers outside a collection") - self.active
+        find_main(self.mem.words(), self.active + v.index()).expect("no forwarding pointers outside a collection") - self.active
     }
 
     /// What a bloblet's header says.
     pub fn bloblet_head(&self, v: Value) -> Head {
-        read_head(&self.mem, self.active + self.bloblet_main(v))
+        read_head(self.mem.words(), self.active + self.bloblet_main(v))
     }
 
     pub fn bloblet_kind(&self, v: Value) -> u8 {
@@ -1001,7 +1003,8 @@ impl Heap {
         let started = std::time::Instant::now();
         self.words_allocated += self.top.saturating_sub(self.top_after_gc) as u64;
         let from = self.active;
-        let to = if self.active == 0 { self.semi } else { 0 };
+        let to = if self.active == 0 { MAX_SEMI_WORDS } else { 0 };
+        let mem = self.mem.words_mut();
 
         // `scan` and `free` are relative to `to`.
         let mut scan = 0usize;
@@ -1016,9 +1019,9 @@ impl Heap {
             let pad = 1 + (self.gc_count as usize % 7);
             if self.top + pad <= self.semi {
                 // A raw bloblet: a header, then a suffix the scan skips.
-                self.mem[to] = make_header(layout::kind("bloblet"), 0, (pad - 1) * 8);
+                mem[to] = make_header(layout::kind("bloblet"), 0, (pad - 1) * 8);
                 for i in 1..pad {
-                    self.mem[to + i] = 0;
+                    mem[to + i] = 0;
                 }
                 free = pad;
                 scan = pad;
@@ -1031,7 +1034,7 @@ impl Heap {
             ($v:expr) => {{
                 let v = $v;
                 if v.is_ref() {
-                    Self::copy_out(&mut self.mem, from, to, &mut free, v)
+                    Self::copy_out(mem, from, to, &mut free, v)
                 } else {
                     v
                 }
@@ -1057,28 +1060,28 @@ impl Heap {
         // header (an object follows) or an ordinary Value (a pair cell follows);
         // see `value.rs` on why tag 110 is reserved to make this unambiguous.
         while scan < free {
-            let w = self.mem[to + scan];
+            let w = mem[to + scan];
             if is_header(w) {
                 // The collector needs only `F` and `B`: trace the fields, skip
                 // the suffix. It never asks what kind of object this is.
                 let main = to + scan + is_extension(w) as usize;
-                let head = read_head(&self.mem, main);
+                let head = read_head(mem, main);
                 for i in 0..head.fields {
                     let at = main + 1 + i;
-                    let v = Value(self.mem[at]);
+                    let v = Value(mem[at]);
                     if v.is_ref() {
-                        let n = Self::copy_out(&mut self.mem, from, to, &mut free, v);
-                        self.mem[at] = n.raw();
+                        let n = Self::copy_out(mem, from, to, &mut free, v);
+                        mem[at] = n.raw();
                     }
                 }
                 scan += head.size();
             } else {
                 for i in 0..2 {
                     let at = to + scan + i;
-                    let v = Value(self.mem[at]);
+                    let v = Value(mem[at]);
                     if v.is_ref() {
-                        let n = Self::copy_out(&mut self.mem, from, to, &mut free, v);
-                        self.mem[at] = n.raw();
+                        let n = Self::copy_out(mem, from, to, &mut free, v);
+                        mem[at] = n.raw();
                     }
                 }
                 scan += 2;
@@ -1197,7 +1200,7 @@ impl Heap {
     }
 
     pub fn live_words(&self) -> &[u64] {
-        &self.mem[self.active..self.active + self.top]
+        &self.mem.words()[self.active..self.active + self.top]
     }
     pub fn globals_slice(&self) -> &[Value] {
         &self.globals
@@ -1219,7 +1222,7 @@ impl Heap {
             semi *= 2;
         }
         let mut heap = Heap::with_semispace(semi);
-        heap.mem[..words.len()].copy_from_slice(words);
+        heap.mem.words_mut()[..words.len()].copy_from_slice(words);
         heap.top = words.len();
         heap.globals = globals;
         heap.symbols = symbols;
@@ -1247,7 +1250,7 @@ impl Heap {
                 if is_extension(w) != header_is_large(self.word(main)) {
                     return Err(format!("the header at {main} disagrees with its extension word"));
                 }
-                let head = read_head(&self.mem, self.active + main);
+                let head = read_head(self.mem.words(), self.active + main);
                 if scan + head.size() > self.top {
                     return Err(format!("object at {scan} runs past the end of the heap"));
                 }
@@ -1304,9 +1307,9 @@ impl Heap {
             }
             if v.is_bloblet() {
                 let p = self.active + v.index();
-                let main = find_main(&self.mem, p)
+                let main = find_main(self.mem.words(), p)
                     .map_err(|_| format!("bloblet reference {v:?} at word {at} meets a forwarding pointer"))?;
-                let head = read_head(&self.mem, main);
+                let head = read_head(self.mem.words(), main);
                 if main + 1 + head.fields != p {
                     return Err(format!(
                         "bloblet reference {v:?} at word {at} is not at the start of its suffix"

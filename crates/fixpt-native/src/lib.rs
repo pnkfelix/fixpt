@@ -1,5 +1,6 @@
-//! The native core: the one crate in the workspace where `unsafe` is allowed
-//! (`PLAN.md` §11, decision 11).
+//! The native core: one of the two crates in the workspace where `unsafe` is
+//! allowed (`PLAN.md` §11, decision 11); the other is `fixpt-memmgmt`, below
+//! the heap, which gives it its memory.
 //!
 //! Everything that maps executable memory, writes machine code, or jumps into
 //! it is here, behind interfaces that are safe to call: a code space mapped
@@ -16,7 +17,6 @@ pub mod codespace;
 mod control;
 pub mod stencil;
 pub mod faults;
-pub mod reserve;
 pub mod threaded;
 
 pub use codespace::CodeSpace;

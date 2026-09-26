@@ -2,6 +2,8 @@
 //! the segmented heap (PLAN.md, "Regions that end") takes its memory from,
 //! so that a Value's index is from a base that never moves. And, for
 //! finding out what the system allows, the probes `tests/reserve.rs` runs.
+//! The heap itself holds [`Words`](crate::Words), which are readable and
+//! writable throughout.
 
 /// A range of address space, reserved with no access; parts of it are made
 /// readable and writable by [`commit`](Reservation::commit).
