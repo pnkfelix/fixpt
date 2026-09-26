@@ -12,7 +12,7 @@
 use crate::compile::{CompileError, compile};
 use fixpt_core::ir::Program;
 use fixpt_core::lower::lower;
-use fixpt_heap::{Heap, ObjType, Value};
+use fixpt_heap::{Heap, Value};
 use fixpt_read::Interner;
 
 /// Which engine the prepared code is for.
@@ -151,17 +151,12 @@ fn build_thunk(
             let code = lower(heap, interner, program);
             // `[code, env]`: the AST engine's closures carry an environment
             // chain, and the top level's is empty.
-            let closure = heap.alloc(ObjType::Closure, 2, Value::FALSE);
-            heap.obj_set(closure, 0, code);
-            heap.obj_set(closure, 1, Value::FALSE);
-            Ok(closure)
+            Ok(heap.make_closure(code, &[Value::FALSE]))
         }
         Backend::Bytecode => {
             let code = compile(heap, interner, program)?;
             // `[code, captures…]`, and a thunk captures nothing.
-            let closure = heap.alloc(ObjType::Closure, 1, Value::FALSE);
-            heap.obj_set(closure, 0, code);
-            Ok(closure)
+            Ok(heap.make_closure(code, &[]))
         }
     }
 }

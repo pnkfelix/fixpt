@@ -31,7 +31,10 @@ use core::fmt;
 pub const TAG_MASK: u64 = 0b111;
 pub const TAG_FIXNUM: u64 = 0b000;
 pub const TAG_PAIR: u64 = 0b001;
-pub const TAG_OBJECT: u64 = 0b010;
+/// Retired: it pointed at an object's header, before every object was a
+/// bloblet pointed at its suffix. Nothing produces it; a word with it is a
+/// verification error.
+pub const TAG_UNUSED: u64 = 0b010;
 pub const TAG_IMMEDIATE: u64 = 0b011;
 pub const TAG_BLOBLET: u64 = 0b100;
 pub const TAG_TRAILER: u64 = 0b101;
@@ -102,14 +105,6 @@ impl Value {
     pub const fn is_pair(self) -> bool {
         self.tag() == TAG_PAIR
     }
-    #[inline]
-    pub const fn object(index: usize) -> Value {
-        Value(((index as u64) << 3) | TAG_OBJECT)
-    }
-    #[inline]
-    pub const fn is_object(self) -> bool {
-        self.tag() == TAG_OBJECT
-    }
     /// A pointer to a bloblet: the index of the start of its suffix, which is
     /// where every tagged pointer to a bloblet points (`docs/object-model.md`).
     #[inline]
@@ -129,7 +124,7 @@ impl Value {
     /// True for anything the collector must trace.
     #[inline]
     pub const fn is_ref(self) -> bool {
-        matches!(self.tag(), TAG_PAIR | TAG_OBJECT | TAG_BLOBLET)
+        matches!(self.tag(), TAG_PAIR | TAG_BLOBLET)
     }
 
     // ------------------------------------------------------------- immediates
@@ -228,7 +223,7 @@ impl fmt::Debug for Value {
         match self.tag() {
             TAG_FIXNUM => write!(f, "{}", self.as_fixnum()),
             TAG_PAIR => write!(f, "#<pair @{}>", self.index()),
-            TAG_OBJECT => write!(f, "#<obj @{}>", self.index()),
+            TAG_UNUSED => write!(f, "#<retired-tag {:#x}>", self.0),
             TAG_BLOBLET => write!(f, "#<bloblet @{}>", self.index()),
             TAG_TRAILER => write!(f, "#<trailer {:#x}>", self.0 >> 3),
             TAG_IMMEDIATE => match self.subtag() {
@@ -440,7 +435,7 @@ mod tests {
             Value::fixnum(-1),
             Value::fixnum(i64::MAX >> 3),
             Value::pair(usize::MAX >> 3),
-            Value::object(usize::MAX >> 3),
+            Value::bloblet(usize::MAX >> 3),
             Value::TRUE,
             Value::char('\u{10FFFF}'),
             Value::UNBOUND,
@@ -472,7 +467,7 @@ mod tests {
         for (name, bits) in [
             ("fixnum", TAG_FIXNUM),
             ("pair", TAG_PAIR),
-            ("object", TAG_OBJECT),
+            ("unused", TAG_UNUSED),
             ("immediate", TAG_IMMEDIATE),
             ("bloblet", TAG_BLOBLET),
             ("trailer", TAG_TRAILER),

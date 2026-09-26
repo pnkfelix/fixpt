@@ -41,8 +41,10 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// suffix length rather than one payload length, and bloblet pointers and
 /// trailers may appear. Version 5 points at raw data (strings, bytevectors,
 /// numbers' bits) with bloblet pointers, and gives code its nodes or
-/// constants as its own fields.
-pub const VERSION: u32 = 5;
+/// constants as its own fields. Version 6 has every object a bloblet, pointed
+/// at its suffix (tag `010` retired); objects with fields have trailers, and
+/// closures and environment frames their own fixed layouts.
+pub const VERSION: u32 = 6;
 const HEADER_BYTES: usize = 40;
 
 /// Trailer written after an image appended to an executable.

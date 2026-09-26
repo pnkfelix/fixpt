@@ -56,7 +56,7 @@ fn only_a_checked_claim_is_acted_on() {
         s.eval_str("<t>", &format!("(define (f a b) {src})")).expect("compiles");
         let sym = s.rt.heap.intern_existing("f").expect("defined");
         let v = s.rt.heap.global(s.rt.heap.symbol_global_slot(sym));
-        let code = s.rt.heap.obj_ref(v, 0);
+        let code = s.rt.heap.closure_code(v);
         assert!(s.rt.heap.is_a(code, ObjType::Code));
         disassemble(&s.rt.heap, code)
     }

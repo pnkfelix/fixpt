@@ -30,5 +30,9 @@ ranges 0.028–0.041 s), so only the totals are compared.
 | A2–A4 (every object a bloblet header; code as bloblets) | 0.636 | 0.393 | no measurable change |
 | A5a, first try (raw types as bloblets; the accessors check the pointer style) | 0.667 | 0.392 | AST ~5% slower: a branch on every node read |
 | A5a (code's nodes and constants as its own fields) | 0.634 | 0.393 | back to baseline: a node or constant is one load at a fixed offset from the code |
+| A5, first try (every object with fields a trailered bloblet, read through the generic accessor) | 0.689 | 0.416 | 6–8% slower: the trailer decoded out of line on every field read |
+| A5, trailer read inline | 0.656 | 0.404 | |
+| A5, closures and AST frames at fixed offsets | 0.642 | 0.400 | |
+| A5 done (boxes and symbols at fixed offsets; tag `010` retired) | 0.628 | 0.394 | at baseline |
 
 The per-piece table fills in as each piece moves.

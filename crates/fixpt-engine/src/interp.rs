@@ -339,9 +339,7 @@ impl Interp {
             TAG_LAMBDA => {
                 let code = self.word(rt, at + 1);
                 let env = self.env();
-                let c = rt.heap.alloc(ObjType::Closure, 2, Value::UNSPECIFIED);
-                rt.heap.obj_set(c, 0, code);
-                rt.heap.obj_set(c, 1, env);
+                let c = rt.heap.make_closure(code, &[env]);
                 self.set_acc(c);
                 Ok(Control::Return)
             }
@@ -430,7 +428,7 @@ impl Interp {
                 let e = self.new_env(rt, n as usize);
                 for i in 0..n as usize {
                     let v = self.stack[base + i];
-                    rt.heap.obj_set(e, i + 1, v);
+                    env_set(&mut rt.heap, e, i, v);
                 }
                 self.stack.truncate(saved as usize);
                 self.set_env(e);
@@ -440,7 +438,7 @@ impl Interp {
                 let n = self.offset(rt, fix + 1);
                 let e = self.stack[saved as usize];
                 let v = self.acc();
-                rt.heap.obj_set(e, index as usize + 1, v);
+                env_set(&mut rt.heap, e, index as usize, v);
                 let done = index + 1;
                 if done < n {
                     self.frames.push(Frame::FixInit {
@@ -515,7 +513,7 @@ impl Interp {
         let argc = self.stack.len() - base - 1;
         match rt.heap.obj_type(f) {
             Some(ObjType::Closure) => {
-                let code = rt.heap.obj_ref(f, 0);
+                let code = rt.heap.closure_code(f);
                 let nparams = rt.heap.bloblet_slot(code, CODE_ARITY).as_fixnum() as usize;
                 let has_rest = rt.heap.bloblet_slot(code, CODE_HAS_REST).is_true();
                 if !(argc == nparams || (has_rest && argc >= nparams)) {
@@ -535,20 +533,17 @@ impl Interp {
                         &[],
                     );
                 }
-                let closure_env = rt.heap.obj_ref(f, 1);
+                let closure_env = rt.heap.closure_ref(f, 0);
                 let slots = nparams + usize::from(has_rest);
-                let e = rt
-                    .heap
-                    .alloc(ObjType::Vector, slots + 1, Value::UNSPECIFIED);
-                rt.heap.obj_set(e, 0, closure_env);
+                let e = make_env(&mut rt.heap, closure_env, slots, Value::UNSPECIFIED);
                 for i in 0..nparams {
                     let v = self.stack[base + 1 + i];
-                    rt.heap.obj_set(e, i + 1, v);
+                    env_set(&mut rt.heap, e, i, v);
                 }
                 if has_rest {
                     let extra: Vec<Value> = self.stack[base + 1 + nparams..].to_vec();
                     let rest = rt.heap.list_from(&extra);
-                    rt.heap.obj_set(e, nparams + 1, rest);
+                    env_set(&mut rt.heap, e, nparams, rest);
                 }
                 let entry = rt.heap.bloblet_slot(code, CODE_ENTRY).as_fixnum() as u32;
                 self.stack.truncate(drop_to);
@@ -1033,25 +1028,23 @@ impl Interp {
     // ------------------------------------------------------- environments
     fn new_env(&mut self, rt: &mut Runtime, slots: usize) -> Value {
         let parent = self.env();
-        let e = rt.heap.alloc(ObjType::Vector, slots + 1, Value::UNBOUND);
-        rt.heap.obj_set(e, 0, parent);
-        e
+        make_env(&mut rt.heap, parent, slots, Value::UNBOUND)
     }
 
     fn lookup(&self, rt: &Runtime, depth: u32, index: u32) -> Value {
         let mut e = self.env();
         for _ in 0..depth {
-            e = rt.heap.obj_ref(e, 0);
+            e = rt.heap.bloblet_slot(e, FRAME_PARENT);
         }
-        rt.heap.obj_ref(e, index as usize + 1)
+        rt.heap.bloblet_slot(e, FRAME_SLOT0 + index as usize)
     }
 
     fn assign(&mut self, rt: &mut Runtime, depth: u32, index: u32, v: Value) {
         let mut e = self.env();
         for _ in 0..depth {
-            e = rt.heap.obj_ref(e, 0);
+            e = rt.heap.bloblet_slot(e, FRAME_PARENT);
         }
-        rt.heap.obj_set(e, index as usize + 1, v);
+        env_set(&mut rt.heap, e, index as usize, v);
     }
 
     // ---------------------------------------------------------- safepoint
@@ -1087,4 +1080,24 @@ fn decode_frames(rt: &Runtime, v: Value) -> Vec<Frame> {
             Frame::decode(w).expect("frames we encoded ourselves")
         })
         .collect()
+}
+
+// ------------------------------------------------------ environment frames
+// An environment frame is a bloblet laid out `[slot…][parent][trailer]`
+// (`fixpt_heap::layout::frame`): the parent and every slot at a fixed offset
+// from the pointer, so a variable reference is one load per step.
+use fixpt_heap::layout::frame::{FRAME_PARENT, FRAME_SLOT0};
+
+fn make_env(heap: &mut fixpt_heap::Heap, parent: Value, slots: usize, fill: Value) -> Value {
+    let e = heap.make_bloblet(fixpt_heap::layout::frame::KIND, 1 + slots, 0, true);
+    heap.set_bloblet_slot(e, FRAME_PARENT, parent);
+    for i in 0..slots {
+        heap.set_bloblet_slot(e, FRAME_SLOT0 + i, fill);
+    }
+    e
+}
+
+#[inline]
+fn env_set(heap: &mut fixpt_heap::Heap, e: Value, i: usize, v: Value) {
+    heap.set_bloblet_slot(e, FRAME_SLOT0 + i, v);
 }

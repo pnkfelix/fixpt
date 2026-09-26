@@ -634,7 +634,7 @@ fn arity_of_closure(session: &Session, v: fixpt_heap::Value) -> Option<String> {
     if !heap.is_a(v, fixpt_heap::ObjType::Closure) {
         return None;
     }
-    let code = heap.obj_ref(v, 0);
+    let code = heap.closure_code(v);
     if !heap.is_a(code, fixpt_heap::ObjType::Code) {
         return None;
     }

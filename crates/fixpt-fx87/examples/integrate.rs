@@ -9,7 +9,7 @@ fn disasm(src: &str) -> String {
     s.eval_str("<x>", &format!("(define (f a b) {src})")).expect("compiles");
     let sym = s.rt.heap.intern_existing("f").expect("defined");
     let v = s.rt.heap.global(s.rt.heap.symbol_global_slot(sym));
-    let code = s.rt.heap.obj_ref(v, 0);
+    let code = s.rt.heap.closure_code(v);
     assert!(s.rt.heap.is_a(code, ObjType::Code));
     disassemble(&s.rt.heap, code)
 }
@@ -37,7 +37,7 @@ fn main() {
         s.eval_str("<x>", &format!("(define (fx) {})", out.code)).expect("compiles");
         let sym = s.rt.heap.intern_existing("fx").expect("defined");
         let v = s.rt.heap.global(s.rt.heap.symbol_global_slot(sym));
-        print!("{}", disassemble(&s.rt.heap, s.rt.heap.obj_ref(v, 0)));
+        print!("{}", disassemble(&s.rt.heap, s.rt.heap.closure_code(v)));
     }
 
     println!("=== compiled WITHOUT the annotation (what Scheme gets) ===");

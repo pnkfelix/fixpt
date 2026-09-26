@@ -9,7 +9,7 @@ fn show(s: &mut Session, name: &str) {
     let slot = s.rt.heap.symbol_global_slot(sym);
     let v = s.rt.heap.global(slot);
     assert!(s.rt.heap.is_a(v, ObjType::Closure), "{name} is not a closure");
-    let code = s.rt.heap.obj_ref(v, 0);
+    let code = s.rt.heap.closure_code(v);
     println!("{}", disassemble(&s.rt.heap, code));
 }
 
@@ -24,7 +24,7 @@ fn histogram(s: &Session) -> (Vec<(String, usize)>, usize, usize) {
     for sym in heap.symbols_slice().to_vec() {
         let v = heap.global(heap.symbol_global_slot(sym));
         if heap.is_a(v, ObjType::Closure) {
-            todo.push(heap.obj_ref(v, 0));
+            todo.push(heap.closure_code(v));
         }
     }
     let mut seen: Vec<fixpt_heap::Value> = Vec::new();

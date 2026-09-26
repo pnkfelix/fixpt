@@ -186,7 +186,7 @@ fn put(
             out.push(')');
         }
         Some(ObjType::Closure) => {
-            let code = heap.obj_ref(v, 0);
+            let code = heap.closure_code(v);
             let name = heap.bloblet_slot(code, fixpt_heap::layout::code::CODE_NAME);
             if heap.is_a(name, ObjType::Symbol) {
                 let _ = write!(out, "#<procedure:{}>", heap.symbol_name(name));

@@ -6,7 +6,7 @@
 ;;; Tags: the low three bits of every word.
 (define tag-fixnum int 0)  ; 61-bit signed integer; also what a zeroed word is
 (define tag-pair int 1)  ; index of a two-word car/cdr cell, which has no header
-(define tag-object int 2)  ; index of an object's header (the older pointer style)
+(define tag-unused int 2)  ; retired: pointed at an object's header, before every object was a bloblet
 (define tag-immediate int 3)  ; #f, #t, (), unit, eof, characters, …
 (define tag-bloblet int 4)  ; index of the start of a bloblet's suffix
 (define tag-trailer int 5)  ; the last field of a bloblet that has one; runtime-reserved payload
@@ -55,7 +55,14 @@
 (define kind-bloblet int 32)
 (define kind-threaded-code int 33)
 (define kind-compiled-code int 34)
+(define kind-env-frame int 35)
 (define kind-extension int 255)
+
+;;; A closure's fields, and an environment frame's, by negative offset.
+(define closure-code int 2)
+(define closure-extra0 int 3)
+(define frame-parent int 2)
+(define frame-slot0 int 3)
 
 ;;; A code bloblet's fields, by negative offset from its code. 1 is the trailer.
 (define code-entry int 2)

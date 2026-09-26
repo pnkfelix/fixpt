@@ -26,7 +26,7 @@ pub const TAG_MASK: u64 = (1 << TAG_BITS) - 1;
 pub const TAGS: &[Tag] = &[
     Tag { name: "fixnum", bits: 0b000, meaning: "61-bit signed integer; also what a zeroed word is" },
     Tag { name: "pair", bits: 0b001, meaning: "index of a two-word car/cdr cell, which has no header" },
-    Tag { name: "object", bits: 0b010, meaning: "index of an object's header (the older pointer style)" },
+    Tag { name: "unused", bits: 0b010, meaning: "retired: pointed at an object's header, before every object was a bloblet" },
     Tag { name: "immediate", bits: 0b011, meaning: "#f, #t, (), unit, eof, characters, …" },
     Tag { name: "bloblet", bits: 0b100, meaning: "index of the start of a bloblet's suffix" },
     Tag { name: "trailer", bits: 0b101, meaning: "the last field of a bloblet that has one; runtime-reserved payload" },
@@ -138,9 +138,33 @@ pub const KINDS: &[Kind] = &[
     Kind { name: "bloblet", code: 32, traced: true },
     Kind { name: "threaded-code", code: 33, traced: true },
     Kind { name: "compiled-code", code: 34, traced: true },
+    // The AST engine's environment frames: `layout::frame`.
+    Kind { name: "env-frame", code: 35, traced: true },
 ];
 
 pub const KIND_EXTENSION: u8 = 255;
+
+/// A closure (kind `closure`): its code and what it closed over. Laid out
+/// `[extra…][code][trailer]`, so that the code, read on every call, and
+/// extra value `i`, read on every free-variable reference, are each at a
+/// fixed offset from the suffix: one load, whatever the closure's size. The
+/// AST engine's one extra value is the environment chain; the bytecode
+/// engine's are the captured values.
+pub mod closure {
+    pub const CLOSURE_CODE: usize = 2;
+    /// Extra value `i` is at `CLOSURE_EXTRA0 + i`.
+    pub const CLOSURE_EXTRA0: usize = 3;
+}
+
+/// An AST-engine environment frame (kind `env-frame`), laid out like a
+/// closure: `[slot…][parent][trailer]`, so a variable reference reads the
+/// parent and a slot at fixed offsets, one load each.
+pub mod frame {
+    pub const FRAME_PARENT: usize = 2;
+    /// Slot `i` is at `FRAME_SLOT0 + i`.
+    pub const FRAME_SLOT0: usize = 3;
+    pub const KIND: u8 = 35;
+}
 
 /// The fields of a code bloblet (kind `code`), named by their negative offset
 /// from the suffix, which is the code itself. Field 1 is the trailer, then
@@ -224,6 +248,11 @@ pub fn fx26_module() -> String {
         out.push_str(&format!("(define kind-{} int {})\n", k.name, k.code));
     }
     out.push_str(&format!("(define kind-extension int {KIND_EXTENSION})\n\n"));
+    out.push_str(";;; A closure's fields, and an environment frame's, by negative offset.\n");
+    out.push_str(&format!("(define closure-code int {})\n", closure::CLOSURE_CODE));
+    out.push_str(&format!("(define closure-extra0 int {})\n", closure::CLOSURE_EXTRA0));
+    out.push_str(&format!("(define frame-parent int {})\n", frame::FRAME_PARENT));
+    out.push_str(&format!("(define frame-slot0 int {})\n\n", frame::FRAME_SLOT0));
     out.push_str(";;; A code bloblet's fields, by negative offset from its code. 1 is the trailer.\n");
     for (name, k) in code::ALL {
         out.push_str(&format!("(define code-{name} int {k})\n"));

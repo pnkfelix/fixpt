@@ -1,6 +1,7 @@
 # The object model: bloblets
 
-Draft, 2026-09-25. Being implemented as M12 Phase A; see `PLAN.md` §11.
+Draft, 2026-09-25. Phase A of M12 is implemented (`PLAN.md` §11): every
+object is a bloblet.
 
 This document proposes one new kind of heap object, the **bloblet**. It could
 eventually represent almost every other kind. It is also the layout the FX-26
@@ -409,11 +410,30 @@ Almost nothing will ever be large.
 
 ## Tags, before and after
 
-| tag | now | during migration | after |
+| tag | before M12 | during migration | now (M12 A5, done) |
 |---|---|---|---|
-| `010` | object (points at header) | old-style object | free |
+| `010` | object (points at header) | old-style object | **reserved**, see below |
 | `100` | reserved | bloblet pointer (points at suffix) | bloblet pointer |
 | `101` | reserved | trailer | trailer |
+
+**Tag `010` is kept free, not reused.** Two uses are worth keeping open,
+and the invariants make both sound for the collector:
+- **A pointer to the header**, as `010` was. It would spare objects
+  indexed from the front the trailer read. Measured, that gain is nil
+  today: with the trailer read inline, the engines benchmark is at its
+  pre-M12 numbers (`docs/performance.md`).
+- **A pointer to a field: a locative**, as in T and on the Lisp Machines, a
+  first-class pointer to one cell inside an object. The backward scan
+  works from *any* field, not only from the suffix: scanning back over
+  tagged words reaches the object's own header. So the collector can
+  forward such a pointer by keeping its offset from the header. For
+  FX-26, a `(ref T R)` could then point straight at a record's field, with
+  no box allocated, under the same region discipline as any reference.
+  (Growing an object in place by moving its header backward is the other
+  use a field pointer would serve. It needs free space *before* the object,
+  and bump allocation leaves free space after, so it is the least likely.)
+
+A word with tag `010` is a verification error until one of these is chosen.
 
 ## What becomes a bloblet
 

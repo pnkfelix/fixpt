@@ -263,19 +263,25 @@ impl Heap {
     pub fn alloc(&mut self, ty: ObjType, len: usize, fill: Value) -> Value {
         let (fields, bytes) = if ty.payload_is_scanned() { (len, 0) } else { (0, len * 8) };
         assert!(bytes as u64 <= layout::H_BYTES.max(), "an object's suffix is limited to 4 GiB");
-        let main = self.put_header(ty as u8, fields, bytes);
+        if fields == 0 {
+            // Raw data — a string, a bytevector, a number's bits — is a bloblet
+            // with no fields, all suffix. Pointed at its suffix, its words are
+            // at `p + i`, and its header is the word just before.
+            let main = self.put_header(ty as u8, 0, bytes);
+            for i in 0..len {
+                self.set_word(main + 1 + i, fill.raw());
+            }
+            return Value::bloblet(main + 1);
+        }
+        // An object with fields gets a trailer, so that from its pointer the
+        // header is one load away whatever its size; the trailer is not part
+        // of what `obj_len` counts.
+        let main = self.put_header(ty as u8, fields + 1, 0);
         for i in 0..len {
             self.set_word(main + 1 + i, fill.raw());
         }
-        if fields == 0 {
-            // Raw data — a string, a bytevector, a number's bits — is already a
-            // bloblet in all but its pointer: no fields, all suffix. Pointed at
-            // its suffix, its words are at `p + i`, and its header, when it is
-            // wanted, is the word just before.
-            Value::bloblet(main + 1)
-        } else {
-            Value::object(main)
-        }
+        self.set_word(main + 1 + len, Self::trailer_word(len + 1));
+        Value::bloblet(main + 2 + len)
     }
 
     /// Reserve an object of `fields` fields and `bytes` suffix bytes and write
@@ -337,11 +343,20 @@ impl Heap {
     /// at the suffix after the fields.
     #[inline]
     fn main_of(&self, o: Value) -> usize {
-        if o.is_object() { o.index() } else { self.bloblet_main_cold(o) }
+        debug_assert!(o.is_bloblet(), "{o:?} is not an object");
+        // The common case, inline: a trailer just before the suffix says how
+        // far back the header is.
+        let p = o.index();
+        let w = self.word(p - 1);
+        if w & TAG_MASK == TAG_TRAILER {
+            return p - 1 - layout::T_DISTANCE.get(w) as usize;
+        }
+        self.bloblet_main_cold(o)
     }
 
-    /// Kept out of line, so that the older pointers' path through the
-    /// accessors stays straight-line code.
+    /// A bloblet without a trailer: its header is just before the suffix (no
+    /// fields) or found by the backward scan. Out of line, since the
+    /// accessors' common case is a trailer.
     #[cold]
     #[inline(never)]
     fn bloblet_main_cold(&self, o: Value) -> usize {
@@ -357,13 +372,26 @@ impl Heap {
     }
     /// The type of a heap object. `None` for anything that is not an object.
     pub fn obj_type(&self, v: Value) -> Option<ObjType> {
-        if v.is_bloblet() {
-            return ObjType::from_code(self.bloblet_kind(v) as u16);
-        }
-        if !v.is_object() {
+        if !v.is_bloblet() {
             return None;
         }
         ObjType::from_code(header_kind(self.header_of(v)) as u16)
+    }
+
+    /// Field `j` of an object `alloc` made with `n` fields, read at its fixed
+    /// offset from the pointer: `alloc` lays the fields out in order with a
+    /// trailer after them, so field `j` is at `n + 1 - j`. One load, with no
+    /// look at the trailer; for accessors of fixed-shape objects.
+    #[inline]
+    fn fixed(&self, o: Value, n: usize, j: usize) -> Value {
+        debug_assert!(self.obj_len(o) == n, "{o:?} does not have {n} fields");
+        self.slot(o.index() - (n + 1 - j))
+    }
+
+    #[inline]
+    fn set_fixed(&mut self, o: Value, n: usize, j: usize, v: Value) {
+        debug_assert!(self.obj_len(o) == n, "{o:?} does not have {n} fields");
+        self.set_slot(o.index() - (n + 1 - j), v)
     }
     pub fn is_a(&self, v: Value, ty: ObjType) -> bool {
         self.obj_type(v) == Some(ty)
@@ -371,7 +399,9 @@ impl Heap {
     /// Payload length in words.
     #[inline]
     pub fn obj_len(&self, o: Value) -> usize {
-        read_head(&self.mem, self.active + self.main_of(o)).payload_words()
+        let words = read_head(&self.mem, self.active + self.main_of(o)).payload_words();
+        // A trailer is the runtime's, not part of the object's contents.
+        if o.is_bloblet() && self.word(o.index() - 1) & TAG_MASK == TAG_TRAILER { words - 1 } else { words }
     }
     #[inline]
     pub fn obj_ref(&self, o: Value, i: usize) -> Value {
@@ -532,12 +562,12 @@ impl Heap {
     #[inline]
     pub fn unbox(&self, b: Value) -> Value {
         debug_assert!(self.is_a(b, ObjType::Box));
-        self.obj_ref(b, 0)
+        self.fixed(b, 1, 0)
     }
     #[inline]
     pub fn set_box(&mut self, b: Value, v: Value) {
         debug_assert!(self.is_a(b, ObjType::Box));
-        self.obj_set(b, 0, v);
+        self.set_fixed(b, 1, 0, v);
     }
 
     // ----------------------------------------------------------------- bloblets
@@ -776,6 +806,38 @@ impl Heap {
         self.set_word(main, h);
     }
 
+    // ----------------------------------------------------------------- closures
+
+    /// A closure over `code`, with `extra` its environment or captured values.
+    /// See `layout::closure` for why it is laid out back to front.
+    pub fn make_closure(&mut self, code: Value, extra: &[Value]) -> Value {
+        use layout::closure::{CLOSURE_CODE, CLOSURE_EXTRA0};
+        let c = self.make_bloblet(ObjType::Closure as u8, 1 + extra.len(), 0, true);
+        self.set_bloblet_slot(c, CLOSURE_CODE, code);
+        for (i, x) in extra.iter().enumerate() {
+            self.set_bloblet_slot(c, CLOSURE_EXTRA0 + i, *x);
+        }
+        c
+    }
+
+    /// A closure's code. One load.
+    #[inline]
+    pub fn closure_code(&self, c: Value) -> Value {
+        self.bloblet_slot(c, layout::closure::CLOSURE_CODE)
+    }
+
+    /// A closure's extra value `i`: its environment, or captured value `i`.
+    /// One load.
+    #[inline]
+    pub fn closure_ref(&self, c: Value, i: usize) -> Value {
+        self.bloblet_slot(c, layout::closure::CLOSURE_EXTRA0 + i)
+    }
+
+    #[inline]
+    pub fn set_closure_ref(&mut self, c: Value, i: usize, x: Value) {
+        self.set_bloblet_slot(c, layout::closure::CLOSURE_EXTRA0 + i, x)
+    }
+
     // ----------------------------------------------------------------- symbols
     /// Symbol payload: `[name:String, hash, global-slot]`. The global slot is
     /// allocated eagerly so a global reference is one array index, not a lookup.
@@ -810,7 +872,7 @@ impl Heap {
     }
 
     pub fn is_interned_symbol(&self, sym: Value) -> bool {
-        self.is_a(sym, ObjType::Symbol) && self.obj_ref(sym, 2).as_fixnum() >= 0
+        self.is_a(sym, ObjType::Symbol) && self.fixed(sym, 3, 2).as_fixnum() >= 0
     }
 
     /// Look up an already-interned symbol without allocating. Useful when a
@@ -823,12 +885,12 @@ impl Heap {
 
     pub fn symbol_name(&self, sym: Value) -> String {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
-        self.string_to_rust(self.obj_ref(sym, 0))
+        self.string_to_rust(self.fixed(sym, 3, 0))
     }
     #[inline]
     pub fn symbol_global_slot(&self, sym: Value) -> usize {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
-        self.obj_ref(sym, 2).as_fixnum() as usize
+        self.fixed(sym, 3, 2).as_fixnum() as usize
     }
 
     #[inline]
@@ -981,9 +1043,6 @@ impl Heap {
             mem[src] = Value::forward(dst_rel).raw();
             return Value::pair(dst_rel);
         }
-        if v.is_object() {
-            return Value::object(Self::copy_object(mem, from + v.index(), to, free));
-        }
         // A bloblet pointer, at the start of the suffix. Find the header, by
         // the trailer or the backward scan, and copy as any object. Leave a
         // second forward just before the suffix, so that the next pointer to
@@ -1118,17 +1177,15 @@ impl Heap {
                 "forwarding pointer survived a collection, at word {at}"
             ));
         }
+        if v.tag() == crate::value::TAG_UNUSED {
+            return Err(format!("a word with the retired tag 010, at word {at}"));
+        }
         if v.is_ref() {
             // A bloblet with no suffix is pointed at one past its last field,
             // which for the last object in the heap is the top itself.
             let beyond = if v.is_bloblet() { v.index() > self.top || v.index() == 0 } else { v.index() >= self.top };
             if beyond {
                 return Err(format!("dangling reference {v:?} at word {at}"));
-            }
-            if v.is_object() && (!is_header(self.word(v.index())) || is_extension(self.word(v.index()))) {
-                return Err(format!(
-                    "object reference {v:?} at word {at} misses its header"
-                ));
             }
             if v.is_bloblet() {
                 let p = self.active + v.index();

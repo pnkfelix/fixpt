@@ -102,7 +102,7 @@ fn the_compiler_uses_the_facts() {
     let heap = &s.scheme.rt.heap;
     let sym = heap.intern_existing("fx:f").expect("defined");
     let closure = heap.global(heap.symbol_global_slot(sym));
-    let code = heap.obj_ref(closure, 0);
+    let code = heap.closure_code(closure);
     assert!(heap.is_a(code, fixpt_heap::ObjType::Code));
     let listing = disassemble(heap, code);
     assert!(listing.contains("prim"), "{listing}");

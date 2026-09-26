@@ -299,7 +299,7 @@ impl Vm {
                 let i = self.word(rt, self.pc + 1);
                 let k = self.word(rt, self.pc + 2);
                 self.pc += 3;
-                let v = rt.heap.obj_ref(self.regs[REG_CLOSURE], 1 + i as usize);
+                let v = rt.heap.closure_ref(self.regs[REG_CLOSURE], i as usize);
                 if v.is_unbound() {
                     return self.unbound_local(rt, k);
                 }
@@ -381,13 +381,8 @@ impl Vm {
                 let m = rt.heap.bloblet_slot(code, CODE_FREE).as_fixnum() as usize;
                 // Allocation never moves anything, so the captured values can
                 // be read off the stack after the closure exists.
-                let c = rt.heap.alloc(ObjType::Closure, 1 + m, Value::UNSPECIFIED);
-                rt.heap.obj_set(c, 0, code);
                 let from = self.stack.len() - m;
-                for i in 0..m {
-                    let v = self.stack[from + i];
-                    rt.heap.obj_set(c, 1 + i, v);
-                }
+                let c = rt.heap.make_closure(code, &self.stack[from..]);
                 self.stack.truncate(from);
                 self.stack.push(c);
             }
@@ -457,7 +452,7 @@ impl Vm {
     /// Point the decoding registers at whatever `stack[fp]` now holds.
     fn load_code(&mut self, rt: &Runtime) {
         let closure = self.stack[self.fp as usize];
-        let code = rt.heap.obj_ref(closure, 0);
+        let code = rt.heap.closure_code(closure);
         self.regs[REG_CLOSURE] = closure;
         self.regs[REG_CODE] = code;
     }
@@ -546,7 +541,7 @@ impl Vm {
         let argc = self.stack.len() - base - 1;
         match rt.heap.obj_type(f) {
             Some(ObjType::Closure) => {
-                let code = rt.heap.obj_ref(f, 0);
+                let code = rt.heap.closure_code(f);
                 let nparams = rt.heap.bloblet_slot(code, CODE_ARITY).as_fixnum() as usize;
                 let has_rest = rt.heap.bloblet_slot(code, CODE_HAS_REST).is_true();
                 if !(argc == nparams || (has_rest && argc >= nparams)) {
