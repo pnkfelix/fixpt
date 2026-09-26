@@ -365,3 +365,29 @@ suite before M12; it now takes 11.45 s without B8. Tests have been added
 since, the largest reading the reader's own source, which has grown, so
 the two are not the same work; which part of the difference is slowdown
 has not been measured yet.
+
+## M13's benchmarks: the baseline (13b)
+
+`cargo test --release -p fixpt-fx26 --test bench -- --ignored --nocapture`.
+The programs are in `tests/programs/bench`:
+
+- `fib 30`: calls;
+- a letrec loop to 10 million;
+- lists built and summed, 3,000 rounds of 1,000;
+- closures through a higher-order map, 3,000 rounds of 1,000;
+- `tak 22 16 8`.
+
+Each is run lowered to Scheme, and compiled by the Rust compiler (13a) and
+run on each machine. Best of three, release, before any M13 optimization:
+
+| program  | lowered  | Rust machine | hand-encoded | stencils -O2 | words compiled |
+| -------- | -------- | ------------ | ------------ | ------------ | -------------- |
+| closures | 348.2 ms | 571.4 ms     | 70.2 ms      | 92.5 ms      | 62.6 ms        |
+| fib      | 180.6 ms | 176.6 ms     | 16.8 ms      | 24.5 ms      | 13.9 ms        |
+| lists    | 301.0 ms | 393.8 ms     | 52.6 ms      | 68.8 ms      | 46.3 ms        |
+| loop     | 743.6 ms | 766.3 ms     | 66.1 ms      | 119.6 ms     | 52.7 ms        |
+| tak      | 50.6 ms  | 65.9 ms      | 6.8 ms       | 11.3 ms      | 4.7 ms         |
+
+On whole FX-26 programs, words compiled to machine code (C11a) gain 10–30%
+over threaded code on the hand-encoded machine, more than the
+micro-benchmarks showed.

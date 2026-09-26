@@ -834,7 +834,8 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
 - **13b. Benchmarks.** A small suite in FX-26 (`fib`, loops, lists, a
   closure-heavy program), plus the bootstrap's stage 2. Each is run on
   every machine, and a harness compares a program with and without a
-  pass.
+  pass. *(Suite and baseline done 2026-09-26: `tests/programs/bench`,
+  `tests/bench.rs`, and the table in `docs/performance.md`.)*
 - **13c. Self tail calls become loops.** A tail call of the enclosing
   procedure, through a binding never assigned, becomes a jump back to the
   start of the word: frame slots rewritten, and no `tailcall`.
