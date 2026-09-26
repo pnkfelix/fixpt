@@ -28,6 +28,8 @@ pub struct Fx26Session {
     pub checker: Checker,
     pub scheme: Session,
     pub globals: Globals,
+    /// How checked forms run.
+    pub strategy: Strategy,
 }
 
 /// The budget for one speculative run: enough for a REPL-sized
@@ -154,6 +156,19 @@ pub struct Outcome {
     pub value: Result<Option<String>, String>,
 }
 
+/// How a checked form is run.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum Strategy {
+    /// Lowered to annotated Scheme and run on the session's engine.
+    #[default]
+    Lower,
+    /// Run by the evaluator written in FX-26 (`evaluator.fx`).
+    Evaluate,
+    /// Compiled to a threaded word by the compiler written in FX-26
+    /// (`compile.fx`) and run on the threaded machine.
+    Threaded,
+}
+
 impl Fx26Session {
     pub fn with_backend(backend: fixpt_engine::Backend) -> R<Fx26Session> {
         let mut scheme = Session::with_backend(backend);
@@ -161,7 +176,7 @@ impl Fx26Session {
             .eval_str("<fx26-runtime>", RUNTIME)
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
-        Ok(Fx26Session { checker: Checker::new(), scheme, globals: Globals::default() })
+        Ok(Fx26Session { checker: Checker::new(), scheme, globals: Globals::default(), strategy: Strategy::Lower })
     }
 
     /// Check one top-level form and lower it, without running it.
@@ -224,9 +239,26 @@ impl Fx26Session {
         Ok(outs)
     }
 
-    /// Check, lower and run one top-level form.
+    /// Check one top-level form, and run it as `strategy` says: lowered to
+    /// Scheme, or through the evaluator or the compiler written in FX-26,
+    /// which are given the form as text and read and parse it themselves.
+    /// Checking comes first either way, so a form that does not check does
+    /// not run.
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
         let (top, code) = self.compile(form)?;
+        if self.strategy != Strategy::Lower {
+            let text = fixpt_read::write_syntax(form, &self.checker.interner);
+            let out = match self.strategy {
+                Strategy::Evaluate => self.eval_with_own_evaluator(&text)?,
+                _ => self.compile_with_own_compiler(&text)?,
+            };
+            let value = match out.strip_prefix("!! ") {
+                Some(e) => Err(e.to_string()),
+                None if matches!(top, Top::Exp(_)) => Ok(Some(out)),
+                None => Ok(None),
+            };
+            return Ok(Outcome { top, code, printed: String::new(), value });
+        }
         if code.is_empty() {
             return Ok(Outcome { top, code, printed: String::new(), value: Ok(None) });
         }

@@ -38,6 +38,14 @@ options:
   --engine bytecode|ast          execution engine (default: bytecode)
   --main NAME                    an image's entry point (default: main)
   --reader scheme|fx26           the Scheme REPL's eager reader (default: scheme)
+  --fx26-run lower|evaluate|threaded
+                                 how FX-26 runs, once checked: lowered to Scheme
+                                 (default), by the evaluator written in FX-26, or
+                                 compiled to threaded words by the compiler
+                                 written in FX-26 and run on the threaded machine
+  --gc-every N                   also collect at every Nth safepoint, moving every
+                                 object each time, to shake out rooting bugs
+                                 (default: 0, only when the heap is full)
 
 `--dialect fx87` and `--dialect fx91` select a *language*, not merely its
 reader: a form is type- and effect-checked, erased to Scheme and run on the same
@@ -110,6 +118,27 @@ fn run(args: &[String]) -> i32 {
         }
     };
     let entry = flags.main.as_deref().unwrap_or("main");
+    let strategy = match flags.fx26_run.as_deref() {
+        None | Some("lower") => fixpt_fx26::session::Strategy::Lower,
+        Some("evaluate") => fixpt_fx26::session::Strategy::Evaluate,
+        Some("threaded") => fixpt_fx26::session::Strategy::Threaded,
+        Some(name) => {
+            eprintln!("fixpt: unknown --fx26-run `{name}` (want lower, evaluate or threaded)");
+            return 2;
+        }
+    };
+    let _ = FX26_RUN.set(strategy);
+    if let Some(n) = flags.gc_every.as_deref() {
+        match n.parse::<u64>() {
+            Ok(n) => {
+                let _ = GC_EVERY.set(n);
+            }
+            Err(_) => {
+                eprintln!("fixpt: --gc-every takes a count, 0 or more");
+                return 2;
+            }
+        }
+    }
 
     match rest.first().map(String::as_str) {
         None | Some("help") | Some("-h") | Some("--help") => {
@@ -152,6 +181,7 @@ fn run(args: &[String]) -> i32 {
                 Dialect::Scheme => {}
             }
             let mut session = Session::with_backend(backend);
+    apply_gc_policy(&mut session.rt.heap);
             session.profile = profile;
             match session.eval_to_string("<argument>", &rest[1..].join(" ")) {
                 Ok(v) => {
@@ -212,6 +242,20 @@ struct Flags {
     out: Option<String>,
     main: Option<String>,
     reader: Option<String>,
+    fx26_run: Option<String>,
+    gc_every: Option<String>,
+}
+
+/// `--fx26-run`, for every FX-26 session this process starts.
+pub(crate) static FX26_RUN: std::sync::OnceLock<fixpt_fx26::session::Strategy> = std::sync::OnceLock::new();
+/// `--gc-every`, for every heap this process starts.
+pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// Apply `--gc-every` to a session's heap.
+pub(crate) fn apply_gc_policy(heap: &mut fixpt_heap::Heap) {
+    if let Some(n) = GC_EVERY.get() {
+        heap.gc_every = *n;
+    }
 }
 
 fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
@@ -221,12 +265,16 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         out: None,
         main: None,
         reader: None,
+        fx26_run: None,
+        gc_every: None,
     };
     let mut rest = Vec::new();
     let mut i = 0;
     // Each flag takes a value, spelled either `--flag v` or `--flag=v`.
     type Setter = fn(&mut Flags, String);
-    let named: [(&str, Setter); 5] = [
+    let named: [(&str, Setter); 7] = [
+        ("--fx26-run", |f, v| f.fx26_run = Some(v)),
+        ("--gc-every", |f, v| f.gc_every = Some(v)),
         ("--dialect", |f, v| f.dialect = Some(v)),
         ("--reader", |f, v| f.reader = Some(v)),
         ("--engine", |f, v| f.engine = Some(v)),
@@ -259,6 +307,7 @@ fn run_files(
     files: &[String],
 ) -> Result<Session, String> {
     let mut session = Session::with_backend(backend);
+    apply_gc_policy(&mut session.rt.heap);
     session.profile = profile;
     for f in files {
         let text = std::fs::read_to_string(f).map_err(|e| format!("cannot read {f}: {e}"))?;
@@ -322,6 +371,7 @@ fn dump_command(
 
 fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend, fx26_reader: bool) -> i32 {
     let mut session = Session::with_backend(backend);
+    apply_gc_policy(&mut session.rt.heap);
     session.profile = profile;
     let engine = match backend {
         Backend::Ast => "AST engine",

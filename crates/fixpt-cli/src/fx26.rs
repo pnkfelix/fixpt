@@ -62,10 +62,13 @@ fn show(session: &Fx26Session, out: &Outcome, show_code: bool) {
 }
 
 fn start(backend: Backend) -> Result<Fx26Session, i32> {
-    Fx26Session::with_backend(backend).map_err(|e| {
+    let mut s = Fx26Session::with_backend(backend).map_err(|e| {
         eprintln!("fixpt: {e}");
         1
-    })
+    })?;
+    s.strategy = crate::FX26_RUN.get().copied().unwrap_or_default();
+    crate::apply_gc_policy(&mut s.scheme.rt.heap);
+    Ok(s)
 }
 
 pub fn repl(backend: Backend) -> i32 {
