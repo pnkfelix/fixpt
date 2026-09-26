@@ -346,6 +346,49 @@ fn comparison() {
         rows.push((format!("FX-26, compiled, {name}"), times));
     }
 
+    // Compiled to machine code as they run: stack code (C11a), and register
+    // code (PLAN.md 13h′), whose stage 1 the Rust compiler makes, since only
+    // it makes register code yet. Each is run once first, to compile what
+    // it runs; the second run is timed.
+    for (name, registers) in [("words compiled", false), ("register code", true)] {
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        load_eager_reader(&mut s.scheme).expect("loads");
+        s.scheme.engine.set_step_limit(None);
+        s.scheme.runtime_unrooted().run_word =
+            Some(if registers { fixpt_native::threaded::run_word_registers } else { fixpt_native::threaded::run_word_compiled });
+        let times = s.scheme.scope(|sc| {
+            let pieces = sc.make(|_| Value::NULL);
+            sc.scope(|inner| {
+                let stage1 = if registers {
+                    let mut c = fixpt_fx26::Checker::new();
+                    let forms = c.read_in(FileId(0), &text).expect("reads");
+                    let done = c.declare_ahead(&forms).expect("declares");
+                    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+                    inner.make(|m| {
+                        let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                        comp.registers = true;
+                        comp.program(&tops).expect("compiles")
+                    })
+                } else {
+                    let facts = fixpt_fx26::syn::rust_facts(inner, FileId(0), &text).expect("checks");
+                    fixpt_fx26::syn::compile_to_word(inner, FileId(0), &text, facts).expect("parses").expect("compiles")
+                };
+                let none = inner.make(|_| Value::NULL);
+                let made = inner.call_global("%run-word", &[stage1, none]).expect("runs");
+                inner.replace(pieces, |m| m.get(made));
+            });
+            sc.collect();
+            let run = |sc: &mut Session, i: usize, args: &[Handle]| {
+                let f = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2 + i) });
+                let list = sc.call_global("list", args).expect("a list");
+                sc.call_global("%run-word", &[f, list]).expect("runs")
+            };
+            phases(sc, &text, &standard, &run);
+            phases(sc, &text, &standard, &run)
+        });
+        rows.push((format!("FX-26, {name}"), times));
+    }
+
     eprintln!("| pieces | read | parse | check | compile |");
     for (name, t) in rows {
         let cell = |x: f64| if x.is_nan() { "—".to_string() } else { format!("{x:.2} s") };
