@@ -7,11 +7,11 @@ use fixpt_scheme::Session;
 fn disasm(src: &str) -> String {
     let mut s = Session::with_backend(Backend::Bytecode);
     s.eval_str("<x>", &format!("(define (f a b) {src})")).expect("compiles");
-    let sym = s.rt.heap.intern_existing("f").expect("defined");
-    let v = s.rt.heap.global(s.rt.heap.symbol_global_slot(sym));
-    let code = s.rt.heap.closure_code(v);
-    assert!(s.rt.heap.is_a(code, ObjType::Code));
-    disassemble(&s.rt.heap, code)
+    let sym = s.runtime_unrooted_ref().heap.intern_existing("f").expect("defined");
+    let v = s.runtime_unrooted_ref().heap.global(s.runtime_unrooted_ref().heap.symbol_global_slot(sym));
+    let code = s.runtime_unrooted_ref().heap.closure_code(v);
+    assert!(s.runtime_unrooted_ref().heap.is_a(code, ObjType::Code));
+    disassemble(&s.runtime_unrooted_ref().heap, code)
 }
 
 fn main() {
@@ -35,9 +35,9 @@ fn main() {
     {
         let mut s = Session::with_backend(Backend::Bytecode);
         s.eval_str("<x>", &format!("(define (fx) {})", out.code)).expect("compiles");
-        let sym = s.rt.heap.intern_existing("fx").expect("defined");
-        let v = s.rt.heap.global(s.rt.heap.symbol_global_slot(sym));
-        print!("{}", disassemble(&s.rt.heap, s.rt.heap.closure_code(v)));
+        let sym = s.runtime_unrooted_ref().heap.intern_existing("fx").expect("defined");
+        let v = s.runtime_unrooted_ref().heap.global(s.runtime_unrooted_ref().heap.symbol_global_slot(sym));
+        print!("{}", disassemble(&s.runtime_unrooted_ref().heap, s.runtime_unrooted_ref().heap.closure_code(v)));
     }
 
     println!("=== compiled WITHOUT the annotation (what Scheme gets) ===");

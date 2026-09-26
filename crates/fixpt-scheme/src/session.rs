@@ -83,7 +83,13 @@ impl Engine {
 }
 
 pub struct Session {
-    pub rt: Runtime,
+    /// Private: see `handles`. A Value from here is stale after anything
+    /// that may collect, so code driving a session gets handles, views and
+    /// `make` instead, and the machinery `runtime_unrooted`.
+    rt: Runtime,
+    /// For each explicit root that is a handle, the stamp it was made with.
+    handle_stamps: Vec<u32>,
+    next_stamp: u32,
     pub engine: Engine,
     /// The compiler-side arena, carried across inputs. What actually *runs* is
     /// the lowered copy in the heap; this is kept because each new input is
@@ -98,6 +104,9 @@ pub struct Session {
     /// collections between inputs.
     hole_root: usize,
 }
+
+mod handles;
+pub use handles::{Handle, Local, Maker, View};
 
 impl Session {
     /// A session with the primitives installed but no prelude — used to build
@@ -127,6 +136,8 @@ impl Session {
         };
         Session {
             rt,
+            handle_stamps: Vec::new(),
+            next_stamp: 0,
             engine,
             program,
             prepared,
@@ -148,7 +159,7 @@ impl Session {
 
     pub fn with_backend(backend: Backend) -> Session {
         let mut s = Session::bare_with(backend);
-        s.eval_str("<prelude>", PRELUDE)
+        s.eval_str_raw("<prelude>", PRELUDE)
             .expect("the prelude must load");
         s
     }
@@ -157,10 +168,15 @@ impl Session {
         self.prepared.backend()
     }
 
-    /// Read, expand and run `text`, returning the value of its last form.
-    pub fn eval_str(&mut self, name: &str, text: &str) -> Result<Value, SessionError> {
+    /// Read, expand and run `text`: the value of its last form.
+    pub fn eval_str(&mut self, name: &str, text: &str) -> Result<Handle, SessionError> {
+        let v = self.eval_str_raw(name, text)?;
+        Ok(self.root_value(v))
+    }
+
+    fn eval_str_raw(&mut self, name: &str, text: &str) -> Result<Value, SessionError> {
         let forms = self.read_forms(name, text)?;
-        self.eval_forms(&forms)
+        self.eval_forms_raw(&forms)
     }
 
     /// Read `text` without running it.
@@ -180,7 +196,12 @@ impl Session {
         result.map_err(|e| SessionError::Read(self.describe(e.span, &e.message)))
     }
 
-    pub fn eval_forms(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Value, SessionError> {
+    pub fn eval_forms(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Handle, SessionError> {
+        let v = self.eval_forms_raw(forms)?;
+        Ok(self.root_value(v))
+    }
+
+    fn eval_forms_raw(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Value, SessionError> {
         let parts = self
             .parts
             .take()
@@ -257,19 +278,47 @@ impl Session {
         }
     }
 
-    /// A global's value, or `None` while it is unbound.
-    pub fn global_value(&self, name: &str) -> Option<Value> {
+    /// A global's value, as a handle, or `None` while it is unbound.
+    pub fn global(&mut self, name: &str) -> Option<Handle> {
+        let v = self.global_value_raw(name)?;
+        Some(self.root_value(v))
+    }
+
+    /// Whether a global is bound.
+    pub fn is_bound(&self, name: &str) -> bool {
+        self.global_value_raw(name).is_some()
+    }
+
+    fn global_value_raw(&self, name: &str) -> Option<Value> {
         let sym = self.rt.heap.intern_existing(name)?;
         let v = self.rt.heap.global(self.rt.heap.symbol_global_slot(sym));
         if v.is_unbound() { None } else { Some(v) }
     }
 
+    /// Call the procedure a global holds, looked up at the moment of the
+    /// call. Prefer this to looking a procedure up and calling it later: a
+    /// procedure held across any call that may collect is a stale pointer
+    /// after it, and there is none to hold here.
+    pub fn call_global(&mut self, name: &str, args: &[Handle]) -> Result<Handle, SessionError> {
+        let f = self.global_value_raw(name).unwrap_or_else(|| panic!("`{name}` is not defined"));
+        let args: Vec<Value> = args.iter().map(|a| self.handle_value(*a)).collect();
+        self.call_raw(f, &args)
+    }
+
     /// Apply a procedure from Rust. Unlike an input, this runs with no
     /// top-level prompt around it: it is for calling library code — the eager
     /// reader — not for running a user's program.
-    pub fn call(&mut self, f: Value, args: &[Value]) -> Result<Value, SessionError> {
+    pub fn call(&mut self, f: Handle, args: &[Handle]) -> Result<Handle, SessionError> {
+        let f = self.handle_value(f);
+        let args: Vec<Value> = args.iter().map(|a| self.handle_value(*a)).collect();
+        self.call_raw(f, &args)
+    }
+
+    /// The engine's call, its arguments Values from this moment (the engine
+    /// roots them on its stack at once), its result rooted as it returns.
+    fn call_raw(&mut self, f: Value, args: &[Value]) -> Result<Handle, SessionError> {
         match self.engine.call(&mut self.rt, &mut self.prepared, f, args) {
-            Ok(v) => Ok(v),
+            Ok(v) => Ok(self.root_value(v)),
             Err(t) => Err(SessionError::Raised(self.condition_message(t.obj))),
         }
     }
@@ -343,7 +392,7 @@ impl Session {
     /// back here like the first. The hole is kept, so it can be resumed again
     /// with a different value; the heap, though, is shared, so whatever the
     /// first resumption mutated, the second sees.
-    pub fn resume(&mut self, name: &str, text: &str) -> Result<Value, SessionError> {
+    pub fn resume(&mut self, name: &str, text: &str) -> Result<Handle, SessionError> {
         let forms = self.read_forms(name, text)?;
         self.resume_forms(&forms)
     }
@@ -351,7 +400,7 @@ impl Session {
     /// [`resume`](Self::resume) with the expression already read — so that a
     /// caller can rewrite it first, as the REPL does to let the value itself
     /// contain a hole.
-    pub fn resume_forms(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Value, SessionError> {
+    pub fn resume_forms(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Handle, SessionError> {
         let hole = self.rt.heap.root_at(self.hole_root);
         if hole.is_false() {
             return Err(SessionError::Raised("no hole to resume".into()));
@@ -380,7 +429,7 @@ impl Session {
 
     /// Evaluate and render the result the way a REPL would.
     pub fn eval_to_string(&mut self, name: &str, text: &str) -> Result<String, SessionError> {
-        let v = self.eval_str(name, text)?;
+        let v = self.eval_str_raw(name, text)?;
         Ok(write_value(&self.rt.heap, v))
     }
 
@@ -389,7 +438,7 @@ impl Session {
         &mut self,
         name: &str,
         text: &str,
-    ) -> (String, Result<Value, SessionError>) {
+    ) -> (String, Result<Handle, SessionError>) {
         let saved = self.rt.capture();
         let result = self.eval_str(name, text);
         let printed = self.rt.restore(saved);

@@ -5,18 +5,18 @@ use fixpt_heap::ObjType;
 use fixpt_scheme::Session;
 
 fn show(s: &mut Session, name: &str) {
-    let sym = s.rt.heap.intern_existing(name).expect("defined");
-    let slot = s.rt.heap.symbol_global_slot(sym);
-    let v = s.rt.heap.global(slot);
-    assert!(s.rt.heap.is_a(v, ObjType::Closure), "{name} is not a closure");
-    let code = s.rt.heap.closure_code(v);
-    println!("{}", disassemble(&s.rt.heap, code));
+    let sym = s.runtime_unrooted_ref().heap.intern_existing(name).expect("defined");
+    let slot = s.runtime_unrooted_ref().heap.symbol_global_slot(sym);
+    let v = s.runtime_unrooted_ref().heap.global(slot);
+    assert!(s.runtime_unrooted_ref().heap.is_a(v, ObjType::Closure), "{name} is not a closure");
+    let code = s.runtime_unrooted_ref().heap.closure_code(v);
+    println!("{}", disassemble(&s.runtime_unrooted_ref().heap, code));
 }
 
 /// Count opcodes across every compiled procedure reachable from the globals.
 fn histogram(s: &Session) -> (Vec<(String, usize)>, usize, usize) {
     use fixpt_engine::compile::op;
-    let heap = &s.rt.heap;
+    let heap = &s.runtime_unrooted_ref().heap;
 
     // Every code object reachable from a global closure, plus the nested ones
     // in their constant vectors.

@@ -942,6 +942,10 @@ impl Heap {
         self.roots.push(v);
         self.roots.len() - 1
     }
+    /// How many explicit roots there are: the depth to pop back to.
+    pub fn root_count(&self) -> usize {
+        self.roots.len()
+    }
     pub fn root_at(&self, depth: usize) -> Value {
         self.roots[depth]
     }

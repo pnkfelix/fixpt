@@ -99,7 +99,7 @@ fn the_compiler_uses_the_facts() {
         .read_in(fixpt_read::FileId(0), "(define f (subr pure (int int) int) (lambda (a b) (+ a b)))")
         .expect("reads");
     s.run(&forms[0]).expect("runs");
-    let heap = &s.scheme.rt.heap;
+    let heap = &s.scheme.runtime_unrooted_ref().heap;
     let sym = heap.intern_existing("fx:f").expect("defined");
     let closure = heap.global(heap.symbol_global_slot(sym));
     let code = heap.closure_code(closure);

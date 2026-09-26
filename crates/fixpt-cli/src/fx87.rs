@@ -15,11 +15,11 @@ use fixpt_read::{Datum, Reader, Syntax, SyntaxProfile};
 
 /// Read FX-87 source into forms, using the checker's own interner.
 fn read(session: &mut Fx87Session, name: &str, text: &str) -> Result<Vec<Syntax>, String> {
-    let file = session.scheme.rt.sources.add(name, text);
+    let file = session.scheme.sources().add(name, text);
     let mut interner = std::mem::take(&mut session.checker.p.interner);
     let result = Reader::new(text, file, SyntaxProfile::FX87, &mut interner).read_all();
     session.checker.p.interner = interner;
-    result.map_err(|e| format!("{}: {}", session.scheme.rt.sources.describe(e.span), e.message))
+    result.map_err(|e| format!("{}: {}", session.scheme.sources().describe(e.span), e.message))
 }
 
 fn start(backend: Backend) -> Result<Fx87Session, i32> {
@@ -290,7 +290,7 @@ fn read_type(s: &mut Fx87Session, text: &str) -> Option<fixpt_fx87::DescId> {
     let _ = unused;
     {
         let self_ = s;
-        let file = self_.scheme.rt.sources.add("<help>", text);
+        let file = self_.scheme.sources().add("<help>", text);
         let mut interner = std::mem::take(&mut self_.checker.p.interner);
         let forms = Reader::new(text, file, SyntaxProfile::FX87, &mut interner).read_all();
         self_.checker.p.interner = interner;

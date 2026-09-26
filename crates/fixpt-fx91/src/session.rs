@@ -13,7 +13,6 @@
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::Syntax;
-use fixpt_runtime::display_value;
 use fixpt_scheme::Session;
 
 /// The FX-91 runtime environment, as Scheme.
@@ -86,7 +85,7 @@ impl Fx91Session {
     pub fn set_load_base(&mut self, base: impl Into<std::path::PathBuf>) {
         let base = base.into();
         self.checker.load_base = base.clone();
-        self.scheme.rt.file_base = base;
+        self.scheme.set_file_base(base);
     }
 
     /// Check a form, lower it, and run it.
@@ -152,13 +151,15 @@ impl Fx91Session {
         // A program's own output is captured rather than let loose: the value
         // is what is being compared, and the reference's driver discards
         // printed output the same way.
-        let saved = self.scheme.rt.capture();
-        let result = self.scheme.eval_str("<fx91>", code);
-        self.printed = self.scheme.rt.restore(saved);
+        let (printed, result) = self.scheme.scope(|s| {
+            let (printed, result) = s.eval_capturing("<fx91>", code);
+            (printed, result.map(|v| s.display(v)))
+        });
+        self.printed = printed;
         match result {
             // `display`, not `write`: the reference prints a result with
             // Racket's `~a`, so a character shows as `c` rather than `#\c`.
-            Ok(v) => Ok(display_value(&self.scheme.rt.heap, v)),
+            Ok(v) => Ok(v),
             Err(e) => Err(e.to_string()),
         }
     }

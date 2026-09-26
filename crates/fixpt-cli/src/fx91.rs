@@ -28,11 +28,11 @@ use fixpt_read::{Datum, Reader, Syntax, SyntaxProfile};
 /// have to be read against the checker's table — which is also why lowering
 /// goes back out through text before the Scheme session sees it.
 fn read(session: &mut Fx91Session, name: &str, text: &str) -> Result<Vec<Syntax>, String> {
-    let file = session.scheme.rt.sources.add(name, text);
+    let file = session.scheme.sources().add(name, text);
     let mut interner = std::mem::take(&mut session.checker.p.interner);
     let result = Reader::new(text, file, SyntaxProfile::FX91, &mut interner).read_all();
     session.checker.p.interner = interner;
-    result.map_err(|e| format!("{}: {}", session.scheme.rt.sources.describe(e.span), e.message))
+    result.map_err(|e| format!("{}: {}", session.scheme.sources().describe(e.span), e.message))
 }
 
 fn start(backend: Backend) -> Result<Fx91Session, i32> {
@@ -273,7 +273,7 @@ impl crate::help::Helpful for Fx91Session {
     }
 
     fn describe(&mut self, name: &str) -> Vec<String> {
-        let file = self.scheme.rt.sources.add("<help>", name);
+        let file = self.scheme.sources().add("<help>", name);
         let mut interner = std::mem::take(&mut self.checker.p.interner);
         let read = Reader::new(name, file, SyntaxProfile::FX91, &mut interner).read_all();
         self.checker.p.interner = interner;

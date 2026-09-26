@@ -181,7 +181,7 @@ fn run(args: &[String]) -> i32 {
                 Dialect::Scheme => {}
             }
             let mut session = Session::with_backend(backend);
-    apply_gc_policy(&mut session.rt.heap);
+    apply_gc_policy(&mut session);
             session.profile = profile;
             match session.eval_to_string("<argument>", &rest[1..].join(" ")) {
                 Ok(v) => {
@@ -252,9 +252,9 @@ pub(crate) static FX26_RUN: std::sync::OnceLock<fixpt_fx26::session::Strategy> =
 pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
 /// Apply `--gc-every` to a session's heap.
-pub(crate) fn apply_gc_policy(heap: &mut fixpt_heap::Heap) {
+pub(crate) fn apply_gc_policy(session: &mut Session) {
     if let Some(n) = GC_EVERY.get() {
-        heap.gc_every = *n;
+        session.set_gc_every(*n);
     }
 }
 
@@ -307,7 +307,7 @@ fn run_files(
     files: &[String],
 ) -> Result<Session, String> {
     let mut session = Session::with_backend(backend);
-    apply_gc_policy(&mut session.rt.heap);
+    apply_gc_policy(&mut session);
     session.profile = profile;
     for f in files {
         let text = std::fs::read_to_string(f).map_err(|e| format!("cannot read {f}: {e}"))?;
@@ -335,12 +335,12 @@ fn dump_command(
             return 1;
         }
     };
-    session.rt.heap.collect(&mut []);
-    if let Err(e) = session.rt.heap.verify() {
+    session.collect();
+    if let Err(e) = session.verify() {
         eprintln!("fixpt: refusing to write an unsound heap: {e}");
         return 1;
     }
-    let bytes = image::dump(&session.rt.heap);
+    let bytes = session.image();
     let result = if standalone {
         image_run::embed(&bytes, out)
     } else {
@@ -358,7 +358,7 @@ fn dump_command(
                 .unwrap_or(bytes.len() as u64);
             println!(
                 "wrote {out}: {kind}, {size} bytes ({} live words)",
-                session.rt.heap.used()
+                session.heap_used()
             );
             0
         }
@@ -371,7 +371,7 @@ fn dump_command(
 
 fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend, fx26_reader: bool) -> i32 {
     let mut session = Session::with_backend(backend);
-    apply_gc_policy(&mut session.rt.heap);
+    apply_gc_policy(&mut session);
     session.profile = profile;
     let engine = match backend {
         Backend::Ast => "AST engine",
@@ -444,7 +444,7 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend, fx26_reader: bool)
                         None => println!("; no hole is held — write `,help` inside a form to make one"),
                     },
                     HoleCommand::Resume(expr) => match resume_line(&mut session, expr) {
-                        Ok(v) => println!("{}", fixpt_runtime::write_value(&session.rt.heap, v)),
+                        Ok(v) => println!("{v}"),
                         Err(fixpt_scheme::SessionError::Hole(r)) => println!("{}", hole_report(&r)),
                         Err(e) => eprintln!("{e}"),
                     },
@@ -472,24 +472,26 @@ fn repl(profile: fixpt_read::SyntaxProfile, backend: Backend, fx26_reader: bool)
 /// answer is then made of things that actually happened: this operator, these
 /// arguments, these values.
 fn run_line(session: &mut Session, text: &str) -> Result<String, String> {
+    // Each line's handles are released when it is done.
+    session.scope(|session| run_line_in(session, text))
+}
+
+fn run_line_in(session: &mut Session, text: &str) -> Result<String, String> {
     let forms = session.read_forms("<repl>", text).map_err(|e| e.to_string())?;
     let has_hole = {
-        let names = |s: fixpt_read::Sym| session.rt.interner.name(s).to_string();
+        let names = |s: fixpt_read::Sym| session.interner_ref().name(s).to_string();
         forms.iter().any(|f| help::mentions_hole(f, &names))
     };
     if has_hole {
-        let with = session.rt.interner.intern("%hole");
-        let names = |s: fixpt_read::Sym| session.rt.interner.name(s).to_string();
+        let with = session.interner().intern("%hole");
+        let names = |s: fixpt_read::Sym| session.interner_ref().name(s).to_string();
         let plugged: Vec<_> =
             forms.iter().map(|f| help::plug_hole(f, &names, with)).collect();
         return match session.eval_forms(&plugged) {
             // Reaching the hole raises, so a value means the hole was never
             // reached: the program took a branch around it, which is itself
             // the answer.
-            Ok(v) => Ok(format!(
-                "; the hole was never reached — the form evaluated to {}",
-                fixpt_runtime::write_value(&session.rt.heap, v)
-            )),
+            Ok(v) => Ok(format!("; the hole was never reached — the form evaluated to {}", session.write(v))),
             Err(e @ fixpt_scheme::SessionError::Hole(_)) => Ok(format!(
                 "{}\n; `,resume EXPR` continues from the hole with EXPR's value; `,where` repeats this",
                 hole_report(&e.to_string())
@@ -499,19 +501,22 @@ fn run_line(session: &mut Session, text: &str) -> Result<String, String> {
     }
     session
         .eval_forms(&forms)
-        .map(|v| fixpt_runtime::write_value(&session.rt.heap, v))
+        .map(|v| session.write(v))
         .map_err(|e| e.to_string())
 }
 
 /// `,resume EXPR`. The expression may itself contain a hole — continuing
 /// with a value that is still being worked out — so it is plugged exactly as
 /// an ordinary line is.
-fn resume_line(session: &mut Session, text: &str) -> Result<fixpt_heap::Value, fixpt_scheme::SessionError> {
-    let forms = session.read_forms("<resume>", text)?;
-    let with = session.rt.interner.intern("%hole");
-    let names = |s: fixpt_read::Sym| session.rt.interner.name(s).to_string();
-    let plugged: Vec<_> = forms.iter().map(|f| help::plug_hole(f, &names, with)).collect();
-    session.resume_forms(&plugged)
+fn resume_line(session: &mut Session, text: &str) -> Result<String, fixpt_scheme::SessionError> {
+    session.scope(|session| {
+        let forms = session.read_forms("<resume>", text)?;
+        let with = session.interner().intern("%hole");
+        let names = |s: fixpt_read::Sym| session.interner_ref().name(s).to_string();
+        let plugged: Vec<_> = forms.iter().map(|f| help::plug_hole(f, &names, with)).collect();
+        let v = session.resume_forms(&plugged)?;
+        Ok(session.write(v))
+    })
 }
 
 enum HoleCommand<'a> {
@@ -639,7 +644,7 @@ impl help::Helpful for SchemeHelp<'_> {
             let d = fixpt_runtime::prim::def(i);
             out.push(format!("{name} — a primitive, {}", arity(d.min, d.max)));
         }
-        let heap = &self.0.rt.heap;
+        let heap = &self.0.runtime_unrooted_ref().heap;
         if let Some(sym) = heap.intern_existing(name) {
             let v = heap.global(heap.symbol_global_slot(sym));
             if !v.is_unbound() && out.is_empty() {
@@ -680,7 +685,7 @@ fn arity(min: usize, max: Option<usize>) -> String {
 
 /// A compiled or interpreted closure's arity, read off its code object.
 fn arity_of_closure(session: &Session, v: fixpt_heap::Value) -> Option<String> {
-    let heap = &session.rt.heap;
+    let heap = &session.runtime_unrooted_ref().heap;
     if !heap.is_a(v, fixpt_heap::ObjType::Closure) {
         return None;
     }
@@ -699,7 +704,7 @@ fn arity_of_closure(session: &Session, v: fixpt_heap::Value) -> Option<String> {
 /// procedure defined a moment ago can be completed immediately and one that was
 /// never defined never appears.
 pub fn bound_names(session: &Session) -> Vec<String> {
-    let heap = &session.rt.heap;
+    let heap = &session.runtime_unrooted_ref().heap;
     let symbols: Vec<fixpt_heap::Value> = heap.symbols_slice().to_vec();
     symbols
         .into_iter()

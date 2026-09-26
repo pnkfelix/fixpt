@@ -67,7 +67,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         1
     })?;
     s.strategy = crate::FX26_RUN.get().copied().unwrap_or_default();
-    crate::apply_gc_policy(&mut s.scheme.rt.heap);
+    crate::apply_gc_policy(&mut s.scheme);
     Ok(s)
 }
 

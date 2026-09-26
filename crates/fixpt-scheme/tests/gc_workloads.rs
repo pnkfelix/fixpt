@@ -41,8 +41,8 @@ fn session(backend: Backend) -> Session {
 /// Safe to collect with an empty root set here: between top-level forms the
 /// engine holds nothing, which is the same property the image tests rely on.
 fn live_words(s: &mut Session) -> usize {
-    s.rt.heap.collect(&mut []);
-    s.rt.heap.used()
+    s.collect();
+    s.heap_used()
 }
 
 fn eval(s: &mut Session, src: &str) -> String {
@@ -237,7 +237,7 @@ fn repeated_allocation_is_fully_reclaimed() {
         let mut peak = 0;
         for _ in 0..rounds {
             eval(&mut s, &format!("(define perms (permutations (upto {n})))"));
-            peak = peak.max(s.rt.heap.used());
+            peak = peak.max(s.heap_used());
             // Drop it and let the next round start clean.
             eval(&mut s, "(set! perms '())");
             let now = live_words(&mut s);
@@ -271,7 +271,7 @@ fn destructive_sorting_of_survived_data() {
         eval(&mut s, &format!("(define perms (permutations (upto {n})))"));
         // Collect between building and sorting, so the sort is rewriting
         // objects that have genuinely moved.
-        s.rt.heap.collect(&mut []);
+        s.collect();
         let got = eval(&mut s, "(set! perms (sort! perms)) (list (length perms) (sorted? perms))");
         assert_eq!(got, format!("({count} #t)"), "{backend:?} sorted wrongly");
     }

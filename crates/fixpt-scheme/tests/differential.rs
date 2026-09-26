@@ -53,7 +53,7 @@ fn compiled() -> Session {
 fn outcome(session: &mut Session, src: &str) -> String {
     let (printed, result) = session.eval_capturing("<diff>", src);
     let value = match result {
-        Ok(v) => fixpt_runtime::write_value(&session.rt.heap, v),
+        Ok(v) => session.write(v),
         Err(e) => format!("!{e}"),
     };
     format!("{printed}|{value}")

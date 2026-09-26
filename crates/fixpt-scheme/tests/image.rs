@@ -34,9 +34,9 @@ fn a_dumped_heap_still_runs() {
 
     // Collect first, so the image holds only what is live — and so the test
     // exercises a heap that has actually been compacted.
-    session.rt.heap.collect(&mut []);
-    session.rt.heap.verify().expect("sound before dumping");
-    let bytes = image::dump(&session.rt.heap);
+    session.collect();
+    session.verify().expect("sound before dumping");
+    let bytes = session.image();
 
     // A fresh runtime over the loaded heap. No expander, no interner, no
     // Rust-side program: only what the image carried.
@@ -89,9 +89,9 @@ fn a_resumed_heap_can_be_dumped_again() {
             "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))",
         )
         .unwrap();
-    session.rt.heap.collect(&mut []);
+    session.collect();
 
-    let first = image::dump(&session.rt.heap);
+    let first = session.image();
     let mut rt = Runtime::from_heap(image::load(&first).expect("loads"));
     let second = image::dump(&rt.heap);
     let mut rt2 = Runtime::from_heap(image::load(&second).expect("reloads"));
@@ -123,9 +123,9 @@ fn a_dumped_compiled_heap_still_runs() {
         )
         .expect("setup runs");
 
-    session.rt.heap.collect(&mut []);
-    session.rt.heap.verify().expect("sound before dumping");
-    let bytes = image::dump(&session.rt.heap);
+    session.collect();
+    session.verify().expect("sound before dumping");
+    let bytes = session.image();
 
     let heap = image::load(&bytes).expect("image loads");
     heap.verify().expect("sound after loading");

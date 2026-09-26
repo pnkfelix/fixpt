@@ -703,7 +703,15 @@ one.)*
   precedents. The engines keep raw Values, whose stacks are roots by
   construction. It is the region discipline, in Rust's types: the heap a
   region, a held Value a read of it, a call that may collect the effect
-  that ends it. To do after control (9c-2).
+  that ends it. *(Done 2026-09-26 as a handle API, at the user's urging
+  not to wait: `Session::rt` is private to its module, so no code driving
+  a session, `eager.rs` included, sees a raw Value. Results are
+  `Handle`s, rooted and stamped, released by `Session::scope`; contents
+  are read in `Session::view`, whose `Local`s cannot leave it or run
+  anything; Values are built in `Session::make`, which cannot call the
+  engine. The machinery (engines, the help system's inspection, tests of
+  internals) uses `runtime_unrooted`, a name that says what it gives up.
+  `gc-arena`'s compile-time brand remains possible on top.)*
 - **A collector without safepoints.** (Raised 2026-09-26, after Cliff
   Click's Pauseless GC at Azul, later C4.) The threaded machine's state is
   Values in root arrays and word-relative offsets, so it could be collected

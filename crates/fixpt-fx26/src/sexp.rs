@@ -11,54 +11,52 @@ use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
-use fixpt_heap::{Heap, ObjType, Value};
+use fixpt_scheme::Local;
 
 /// FX-26 data on the heap, as text.
-pub fn show_value(heap: &Heap, v: Value) -> String {
-    if v.is_fixnum() {
-        return v.as_fixnum().to_string();
+pub fn show_value(v: Local<'_>) -> String {
+    if let Some(n) = v.fixnum() {
+        return n.to_string();
     }
-    if v == Value::TRUE || v == Value::FALSE {
-        return (if v == Value::TRUE { "#t" } else { "#f" }).into();
+    if v.is_true() || v.is_false() {
+        return (if v.is_true() { "#t" } else { "#f" }).into();
     }
-    if v.is_char() {
-        return format!("{:?}", v.as_char());
+    if let Some(c) = v.char() {
+        return format!("{c:?}");
     }
-    if v == Value::NULL || v.is_pair() {
-        let items = heap.list_to_vec(v).expect("a proper list");
-        let parts: Vec<String> = items.iter().map(|x| show_value(heap, *x)).collect();
+    if let Some(items) = v.list() {
+        let parts: Vec<String> = items.into_iter().map(show_value).collect();
         return format!("({})", parts.join(" "));
     }
-    match heap.obj_type(v) {
-        Some(ObjType::Symbol) => return heap.symbol_name(v),
-        Some(ObjType::String) => return format!("{:?}", heap.string_to_rust(v)),
-        _ => {}
+    if let Some(n) = v.symbol_name() {
+        return n;
     }
-    if v.is_bloblet() && heap.bloblet_kind(v) == kind("sum") {
-        let tag = heap.symbol_name(heap.bloblet_slot(v, 2));
+    if let Some(s) = v.string() {
+        return format!("{s:?}");
+    }
+    if v.bloblet_kind() == Some(kind("sum")) {
+        let tag = v.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();
         if matches!(tag.as_str(), "atom" | "lst" | "dotted" | "vec") {
             return "_".into();
         }
-        let payload = heap.bloblet_slot(v, 3);
         let mut out = format!("({tag}");
-        for f in fields(heap, payload) {
+        for f in fields(v.field(3).expect("a sum's value")) {
             out.push(' ');
-            out.push_str(&show_value(heap, f));
+            out.push_str(&show_value(f));
         }
         out.push(')');
         return out;
     }
-    if v.is_bloblet() && heap.bloblet_kind(v) == kind("product") {
-        let parts: Vec<String> = fields(heap, v).into_iter().map(|x| show_value(heap, x)).collect();
+    if v.bloblet_kind() == Some(kind("product")) {
+        let parts: Vec<String> = fields(v).into_iter().map(show_value).collect();
         return format!("[{}]", parts.join(" "));
     }
-    format!("#<{:?}>", v)
+    v.write()
 }
 
 /// A product's fields, in order.
-fn fields(heap: &Heap, p: Value) -> Vec<Value> {
-    let n = heap.bloblet_head(p).fields - 1;
-    (0..n).map(|i| heap.bloblet_slot(p, i + 2)).collect()
+fn fields(p: Local<'_>) -> Vec<Local<'_>> {
+    (2..).map_while(|k| p.field(k)).collect()
 }
 
 /// Byte offset to character position, for text with non-ASCII in it.

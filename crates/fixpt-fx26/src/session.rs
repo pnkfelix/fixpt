@@ -15,7 +15,6 @@ use crate::error::{FxError, R};
 use crate::lower::{Globals, lower};
 use crate::top::Top;
 use fixpt_read::{FileId, Span, Syntax};
-use fixpt_runtime::write_value;
 use fixpt_scheme::Session;
 
 /// The FX-26 run-time environment, as Scheme.
@@ -133,7 +132,7 @@ pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
 impl Compiled {
     /// Load into `scheme`: the FX-26 runtime, then the program.
     pub fn load_into(&self, scheme: &mut Session) -> Result<(), String> {
-        if scheme.global_value("%fx26-unit").is_none() {
+        if !scheme.is_bound("%fx26-unit") {
             scheme.eval_str("<fx26-runtime>", RUNTIME).map_err(|e| e.to_string())?;
         }
         for c in &self.code {
@@ -204,10 +203,13 @@ impl Fx26Session {
             Err(s) => return s,
         };
         self.scheme.engine.set_step_limit(Some(SPECULATION_STEP_LIMIT));
-        let (_, result) = self.scheme.eval_capturing("<fx26-speculative>", &code);
+        let result = self.scheme.scope(|s| {
+            let (_, result) = s.eval_capturing("<fx26-speculative>", &code);
+            result.map(|v| s.write(v))
+        });
         self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
         match result {
-            Ok(v) => Speculation::Value(write_value(&self.scheme.rt.heap, v)),
+            Ok(v) => Speculation::Value(v),
             Err(e) => Speculation::Failed(e.to_string()),
         }
     }
@@ -262,12 +264,16 @@ impl Fx26Session {
         if code.is_empty() {
             return Ok(Outcome { top, code, printed: String::new(), value: Ok(None) });
         }
-        let (printed, result) = self.scheme.eval_capturing("<fx26>", &code);
-        let value = match result {
-            Ok(_) if matches!(top, Top::Define { .. }) => Ok(None),
-            Ok(v) => Ok(Some(write_value(&self.scheme.rt.heap, v))),
-            Err(e) => Err(e.to_string()),
-        };
+        let is_define = matches!(top, Top::Define { .. });
+        let (printed, value) = self.scheme.scope(|s| {
+            let (printed, result) = s.eval_capturing("<fx26>", &code);
+            let value = match result {
+                Ok(_) if is_define => Ok(None),
+                Ok(v) => Ok(Some(s.write(v))),
+                Err(e) => Err(e.to_string()),
+            };
+            (printed, value)
+        });
         Ok(Outcome { top, code, printed, value })
     }
 
@@ -276,7 +282,7 @@ impl Fx26Session {
     /// whole file is long work for it, so it reads with no step limit: it
     /// is licensed code, and a text ends.
     pub fn read_with_own_reader(&mut self, text: &str) -> R<Vec<Syntax>> {
-        if self.scheme.global_value(&format!("{READER_PREFIX}eager-start-fx26")).is_none() {
+        if !self.scheme.is_bound(&format!("{READER_PREFIX}eager-start-fx26")) {
             load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
         }
         self.scheme.engine.set_step_limit(None);
@@ -288,7 +294,7 @@ impl Fx26Session {
     /// Parse `text` with the parser written in FX-26 (and its reader),
     /// loading them the first time: each form's tree, as text.
     pub fn parse_with_own_parser(&mut self, text: &str) -> R<Vec<String>> {
-        if self.scheme.global_value(&format!("{READER_PREFIX}parse-program")).is_none() {
+        if !self.scheme.is_bound(&format!("{READER_PREFIX}parse-program")) {
             load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
         }
         self.scheme.engine.set_step_limit(None);
@@ -301,7 +307,7 @@ impl Fx26Session {
     /// it with the reader and the parser written in FX-26: its value as
     /// Scheme would write it, or `!! ` and its error.
     pub fn eval_with_own_evaluator(&mut self, text: &str) -> R<String> {
-        if self.scheme.global_value(&format!("{READER_PREFIX}run-program")).is_none() {
+        if !self.scheme.is_bound(&format!("{READER_PREFIX}run-program")) {
             load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
         }
         self.scheme.engine.set_step_limit(None);
@@ -314,7 +320,7 @@ impl Fx26Session {
     /// (read and parsed in FX-26 too), and run it on the threaded machine:
     /// its value as Scheme would write it, or `!! ` and why not.
     pub fn compile_with_own_compiler(&mut self, text: &str) -> R<String> {
-        if self.scheme.global_value(&format!("{READER_PREFIX}compile-program")).is_none() {
+        if !self.scheme.is_bound(&format!("{READER_PREFIX}compile-program")) {
             load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
         }
         self.scheme.engine.set_step_limit(None);

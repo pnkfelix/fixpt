@@ -207,7 +207,7 @@ fn a_hole_is_held_and_can_be_resumed_repeatedly() {
         assert!(report.contains("#(10 20 30)"), "{backend:?}: {report}");
         for (i, want) in [(0, "(got 10)"), (2, "(got 30)"), (1, "(got 20)")] {
             let v = s.resume("<resume>", &i.to_string()).expect("resumes");
-            assert_eq!(fixpt_runtime::write_value(&s.rt.heap, v), want, "{backend:?}");
+            assert_eq!(s.write(v), want, "{backend:?}");
         }
     }
 }
@@ -244,7 +244,7 @@ fn a_hole_unwinds_on_the_way_out_and_rewinds_on_resume() {
         assert!(matches!(reached, Err(fixpt_scheme::SessionError::Hole(_))), "{backend:?}");
         assert_eq!(s.eval_to_string("<3>", "(reverse log)").ok().as_deref(), Some("(in out)"));
         let v = s.resume("<resume>", "4").expect("resumes");
-        assert_eq!(fixpt_runtime::write_value(&s.rt.heap, v), "40", "{backend:?}");
+        assert_eq!(s.write(v), "40", "{backend:?}");
         assert_eq!(
             s.eval_to_string("<4>", "(reverse log)").ok().as_deref(),
             Some("(in out in out)"),
@@ -265,7 +265,7 @@ fn a_hole_reached_after_resuming_comes_back_to_the_top_level() {
         let second = s.resume("<resume>", "1");
         assert!(matches!(second, Err(fixpt_scheme::SessionError::Hole(_))), "{backend:?}: {second:?}");
         let v = s.resume("<resume>", "2").expect("resumes");
-        assert_eq!(fixpt_runtime::write_value(&s.rt.heap, v), "(a 1 2)", "{backend:?}");
+        assert_eq!(s.write(v), "(a 1 2)", "{backend:?}");
     }
 }
 

@@ -18,7 +18,6 @@ use crate::erase::erase_with;
 use crate::error::{FxError, R};
 use crate::unparse::unparse;
 use fixpt_read::Syntax;
-use fixpt_runtime::write_value;
 use fixpt_scheme::Session;
 
 /// The FX-87 run-time environment, as Scheme.
@@ -121,15 +120,17 @@ impl Fx87Session {
     pub fn run_code(&mut self, code: &str) -> Result<String, String> {
         // A program's own output is captured rather than let loose: the value
         // is what is being compared.
-        let saved = self.scheme.rt.capture();
-        let result = self.scheme.eval_str("<fx87>", code);
-        self.printed = self.scheme.rt.restore(saved);
+        let (printed, result) = self.scheme.scope(|s| {
+            let (printed, result) = s.eval_capturing("<fx87>", code);
+            (printed, result.map(|v| s.write(v)))
+        });
+        self.printed = printed;
         match result {
             // `write`, not `display`: the archive's evaluating path prints a
             // result with Racket's `print`, so a character comes out `#\a` and
             // a string keeps its quotes. (FX-91's driver uses `~a` and so
             // needs `display` — the two references differ here.)
-            Ok(v) => Ok(write_value(&self.scheme.rt.heap, v)),
+            Ok(v) => Ok(v),
             Err(e) => Err(e.to_string()),
         }
     }

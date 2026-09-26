@@ -277,7 +277,7 @@ fn the_driver_survives_collections_anywhere() {
     let text = "(define x (the unit #u)) (g #u8(1) #| ) |#) (h #";
     for every in [1, 2, 3, 5, 7, 11, 13, 17] {
         let mut s = session(Backend::Bytecode);
-        s.scheme.rt.heap.gc_every = every;
+        s.scheme.set_gc_every(every);
         let mut r = EagerReader::attach_starting(&mut s.scheme, "fx:", "eager-start-fx26").expect("starts");
         let chars: Vec<char> = text.chars().collect();
         for n in 0..=chars.len() {

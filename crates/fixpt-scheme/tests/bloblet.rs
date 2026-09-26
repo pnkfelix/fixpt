@@ -79,3 +79,24 @@ fn the_heap_observed() {
     // Every 3rd safepoint collects: the count rises.
     assert_eq!(same("(define g0 (%gc-count)) (%gc-every! 3) (define (loop n) (if (= n 0) 'done (loop (- n 1)))) (loop 300) (%gc-every! 0) (> (%gc-count) g0)"), "#t");
 }
+
+/// A handle survives collections: it is a root.
+#[test]
+fn a_handle_survives_collections() {
+    let mut s = fixpt_scheme::Session::with_backend(Backend::Bytecode);
+    let h = s.eval_str("<t>", "(list 1 2 3)").expect("runs");
+    for _ in 0..3 {
+        s.collect();
+    }
+    assert_eq!(s.write(h), "(1 2 3)");
+}
+
+/// A handle used after its scope has ended is refused, not misread.
+#[test]
+#[should_panic(expected = "after its scope ended")]
+fn a_handle_outliving_its_scope_is_refused() {
+    let mut s = fixpt_scheme::Session::with_backend(Backend::Bytecode);
+    let h = s.scope(|s| s.eval_str("<t>", "(list 1 2 3)").expect("runs"));
+    let _ = s.eval_str("<t>", "(vector 4 5)").expect("runs");
+    let _ = s.write(h);
+}
