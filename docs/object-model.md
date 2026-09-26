@@ -294,6 +294,45 @@ And afterwards, nothing a program does can break an invariant:
 - **Writing into the suffix cannot malform anything**, since it is never
   traced.
 
+### What this machine allows (measured 2026-09-25)
+
+Checked on the development machine: Apple Silicon, macOS 26.6.2, 16 KiB
+pages, an unsigned local binary without the Hardened Runtime. The
+experiment is a scratch program outside the repository.
+
+| approach | result |
+|---|---|
+| a page of fields beside a page made read+execute with `mprotect` | works, but per 16 KiB page: every code bloblet would be padded to a page boundary |
+| `MAP_JIT`, toggling write access (`pthread_jit_write_protect_np`) around each field write | works, at **32 ns per field write**, against about 1 ns for a plain store |
+| writing a `MAP_JIT` page while in execute mode | the process is killed (`SIGBUS`) |
+| **two mappings of the same memory** (`mach_vm_remap`): one read+write, one read+execute | **works**: bloblets pack anywhere; fields are written at full speed through the read+write view; code runs from the read+execute view, and can be rewritten in place with a flush |
+| costs | `mprotect` 0.3 µs; instruction-cache flush of 64 bytes 92 ns, of a page 0.67 µs |
+
+The consequences for the design:
+- **The MMU cannot give mutability per bloblet.** Its unit is a 16 KiB
+  page, and a code bloblet is almost always far smaller.
+- **"Mutable fields, immutable code" is real, one level up.** A code space
+  is mapped twice. Code executes only through the read+execute view, which
+  can never be written, so no address is ever both writable and
+  executable. Fields are written through the read+write view. Nothing is
+  padded, and nothing changes per page.
+- **The frozen bits are promises the runtime keeps**, not hardware
+  protection. The runtime refuses the writes, and FX-26's types say the
+  same thing statically. A frozen suffix also ends instruction-cache
+  obligations: nothing needs flushing again, and compiled code may be
+  cached or inlined against it. That is reason enough to keep the bits.
+  They are cheap, and they could be reassigned if they turn out not to be
+  worth it.
+- **Code does not live in the copying heap.** It goes in a separate,
+  non-moving code space, mapped twice. That settles "pinned code" for
+  native code, and raw return addresses into it become possible.
+  Addressing bloblets across the two spaces is decided when code moves
+  there (`PLAN.md` §11, Phase A′).
+- **Copy-and-patch** with Rust-compiled stencils also works on this machine,
+  offline and on stable rustc; see `docs/research/copy-and-patch.md`. The
+  hand-written encoder stays the plan for the native core, and
+  copy-and-patch comes later, once measurements call for it.
+
 ## The collector
 
 **Copying a bloblet reached by a bloblet pointer `p`.** The tag of the word at
