@@ -505,6 +505,220 @@ impl Heap {
         self.obj_set(b, 0, v);
     }
 
+    // ----------------------------------------------------------------- bloblets
+    //
+    // A bloblet pointer points at the start of the suffix, and a field is named
+    // by its negative offset from there: field `k` (k ≥ 1) is the word `k`
+    // before the suffix. A bloblet with a trailer has it as field 1, which only
+    // the runtime writes. See `docs/object-model.md`.
+
+    /// A new bloblet: `fields` fields, all the fixnum 0; `bytes` bytes of
+    /// suffix, all zero; and, if `trailer`, a trailer after them, as field 1.
+    /// Allocation never collects, so this is atomic as far as the collector is
+    /// concerned. Code that cannot rely on that uses the construction protocol,
+    /// [`bloblet_reserve`](Heap::bloblet_reserve) and after.
+    pub fn make_bloblet(&mut self, kind: u8, fields: usize, bytes: usize, trailer: bool) -> Value {
+        assert!(bytes as u64 <= layout::H_BYTES.max(), "a bloblet's suffix is limited to 4 GiB");
+        let total = fields + trailer as usize;
+        let main = self.put_header(kind, total, bytes);
+        for i in 0..total + bytes.div_ceil(8) {
+            self.set_word(main + 1 + i, 0);
+        }
+        if trailer {
+            self.set_word(main + total, Self::trailer_word(total));
+        }
+        Value::bloblet(main + 1 + total)
+    }
+
+    fn trailer_word(distance: usize) -> u64 {
+        layout::T_DISTANCE.put(TAG_TRAILER, distance as u64)
+    }
+
+    /// Construction protocol, step 1: reserve room for a bloblet of `fields`
+    /// fields, a trailer if `trailer`, and `bytes` suffix bytes, with a header
+    /// saying `F = 0` and the whole of it suffix. A trailer is a field, so it
+    /// is reserved, and zeroed in step 2, like the others. The room holds whatever it held, and that is
+    /// harmless, since a suffix is never traced. Returns a pointer to the
+    /// start of that suffix. Only ordinary headers: a large bloblet is made
+    /// with [`make_bloblet`](Heap::make_bloblet), since its header could not
+    /// change in one store.
+    pub fn bloblet_reserve(&mut self, kind: u8, fields: usize, bytes: usize, trailer: bool) -> Value {
+        let fields = fields + trailer as usize;
+        assert!(fields as u64 <= layout::H_FIELDS.max(), "the construction protocol is for ordinary headers");
+        let all = fields * 8 + bytes;
+        assert!(all as u64 <= layout::H_BYTES.max(), "a bloblet's suffix is limited to 4 GiB");
+        let main = self.put_header(kind, 0, all);
+        Value::bloblet(main + 1)
+    }
+
+    /// Construction protocol, step 2: zero the would-be fields `from..to`
+    /// (counted from the header, 0-based, the trailer's slot last) of a
+    /// bloblet reserved by
+    /// [`bloblet_reserve`](Heap::bloblet_reserve). May be done a piece at a
+    /// time, with collections in between: the words are still suffix.
+    pub fn bloblet_zero_reserved(&mut self, v: Value, from: usize, to: usize) {
+        let p = v.index();
+        for i in from..to {
+            self.set_word(p + i, 0);
+        }
+    }
+
+    /// Construction protocol, step 3: the one change of header, to `fields`
+    /// fields (and the trailer, if one was reserved) and what is left of the
+    /// suffix. Every would-be field, the trailer's slot included, must be the
+    /// fixnum 0 by now: the header change makes them traced. Returns the
+    /// bloblet's pointer, which has moved `fields` words forward.
+    pub fn bloblet_publish(&mut self, v: Value, fields: usize, trailer: bool) -> Value {
+        let main = v.index() - 1;
+        let head = read_head(&self.mem, self.active + main);
+        assert_eq!(head.fields, 0, "only a reserved bloblet can be published");
+        let total = fields + trailer as usize;
+        assert!(head.bytes >= total * 8, "more fields than were reserved");
+        for i in 0..total {
+            assert_eq!(self.word(main + 1 + i), 0, "would-be field {i} is not zeroed");
+        }
+        let h = make_header(head.kind, total, head.bytes - total * 8);
+        self.set_word(main, h);
+        if trailer {
+            self.set_word(main + total, Self::trailer_word(total));
+        }
+        Value::bloblet(main + 1 + total)
+    }
+
+    /// The main header's index, relative to the active space.
+    fn bloblet_main(&self, v: Value) -> usize {
+        debug_assert!(v.is_bloblet(), "{v:?} is not a bloblet");
+        find_main(&self.mem, self.active + v.index()).expect("no forwarding pointers outside a collection") - self.active
+    }
+
+    /// What a bloblet's header says.
+    pub fn bloblet_head(&self, v: Value) -> Head {
+        read_head(&self.mem, self.active + self.bloblet_main(v))
+    }
+
+    pub fn bloblet_kind(&self, v: Value) -> u8 {
+        self.bloblet_head(v).kind
+    }
+
+    /// Whether field 1 is a trailer.
+    pub fn bloblet_has_trailer(&self, v: Value) -> bool {
+        self.bloblet_head(v).fields > 0 && self.word(v.index() - 1) & TAG_MASK == TAG_TRAILER
+    }
+
+    fn field_slot(&self, v: Value, k: usize) -> Result<usize, BlobletError> {
+        let head = self.bloblet_head(v);
+        if k == 0 || k > head.fields {
+            return Err(BlobletError::NoSuchField(k));
+        }
+        let at = v.index() - k;
+        if self.word(at) & TAG_MASK == TAG_TRAILER {
+            return Err(BlobletError::Trailer);
+        }
+        Ok(at)
+    }
+
+    /// Field `k`, `k` words before the suffix.
+    pub fn bloblet_field(&self, v: Value, k: usize) -> Result<Value, BlobletError> {
+        Ok(self.slot(self.field_slot(v, k)?))
+    }
+
+    pub fn set_bloblet_field(&mut self, v: Value, k: usize, x: Value) -> Result<(), BlobletError> {
+        if matches!(x.tag(), TAG_TRAILER | TAG_HEADER | TAG_FORWARD) {
+            return Err(BlobletError::NotAValue);
+        }
+        let at = self.field_slot(v, k)?;
+        if self.bloblet_head(v).fields_frozen {
+            return Err(BlobletError::FieldsFrozen);
+        }
+        self.set_slot(at, x);
+        Ok(())
+    }
+
+    /// Byte `i` of the suffix.
+    pub fn bloblet_byte(&self, v: Value, i: usize) -> Result<u8, BlobletError> {
+        if i >= self.bloblet_head(v).bytes {
+            return Err(BlobletError::NoSuchByte(i));
+        }
+        Ok((self.word(v.index() + i / 8) >> ((i % 8) * 8)) as u8)
+    }
+
+    pub fn set_bloblet_byte(&mut self, v: Value, i: usize, b: u8) -> Result<(), BlobletError> {
+        let head = self.bloblet_head(v);
+        if i >= head.bytes {
+            return Err(BlobletError::NoSuchByte(i));
+        }
+        if head.suffix_frozen {
+            return Err(BlobletError::SuffixFrozen);
+        }
+        let wi = v.index() + i / 8;
+        let shift = (i % 8) * 8;
+        let w = (self.word(wi) & !(0xffu64 << shift)) | ((b as u64) << shift);
+        self.set_word(wi, w);
+        Ok(())
+    }
+
+    /// The whole suffix, as bytes.
+    pub fn bloblet_bytes(&self, v: Value) -> Vec<u8> {
+        let n = self.bloblet_head(v).bytes;
+        (0..n).map(|i| (self.word(v.index() + i / 8) >> ((i % 8) * 8)) as u8).collect()
+    }
+
+    /// Write `bytes` into the suffix starting at byte `at`.
+    pub fn set_bloblet_bytes(&mut self, v: Value, at: usize, bytes: &[u8]) -> Result<(), BlobletError> {
+        for (i, b) in bytes.iter().enumerate() {
+            self.set_bloblet_byte(v, at + i, *b)?;
+        }
+        Ok(())
+    }
+
+    /// The 32-bit word `i` of the suffix: an instruction, for code.
+    #[inline]
+    pub fn bloblet_u32(&self, v: Value, i: usize) -> u32 {
+        debug_assert!(4 * i + 4 <= self.bloblet_head(v).bytes);
+        (self.word(v.index() + i / 2) >> ((i % 2) * 32)) as u32
+    }
+
+    /// A new bloblet: `v`'s fields and suffix, with `new` prepended — in front
+    /// of the existing fields, `new[0]` furthest from the suffix. Every
+    /// existing field keeps its offset from the suffix, so code written
+    /// against `v`'s fields works on the extension. A trailer is renewed for
+    /// the new size. `v` is untouched, and the new bloblet is not frozen.
+    pub fn bloblet_extend(&mut self, v: Value, new: &[Value]) -> Value {
+        let head = self.bloblet_head(v);
+        let trailer = self.bloblet_has_trailer(v);
+        let old = head.fields - trailer as usize;
+        let n = self.make_bloblet(head.kind, new.len() + old, head.bytes, trailer);
+        let skip = trailer as usize;
+        // Old field k (counting from the suffix) is at the same k in the new.
+        for k in 1 + skip..=head.fields {
+            let x = self.slot(v.index() - k);
+            self.set_slot(n.index() - k, x);
+        }
+        for (i, x) in new.iter().enumerate() {
+            // `new[0]` is furthest from the suffix.
+            let k = head.fields + new.len() - i;
+            self.set_slot(n.index() - k, *x);
+        }
+        for w in 0..head.bytes.div_ceil(8) {
+            let x = self.word(v.index() + w);
+            self.set_word(n.index() + w, x);
+        }
+        n
+    }
+
+    /// Freeze a bloblet's fields, its suffix, or both. There is no thawing.
+    pub fn freeze_bloblet(&mut self, v: Value, fields: bool, suffix: bool) {
+        let main = self.bloblet_main(v);
+        let mut h = self.word(main);
+        if fields {
+            h = layout::H_FIELDS_FROZEN.put(h, 1);
+        }
+        if suffix {
+            h = layout::H_SUFFIX_FROZEN.put(h, 1);
+        }
+        self.set_word(main, h);
+    }
+
     // ----------------------------------------------------------------- symbols
     /// Symbol payload: `[name:String, hash, global-slot]`. The global slot is
     /// allocated eagerly so a global reference is one array index, not a lookup.
@@ -848,7 +1062,10 @@ impl Heap {
             ));
         }
         if v.is_ref() {
-            if v.index() >= self.top {
+            // A bloblet with no suffix is pointed at one past its last field,
+            // which for the last object in the heap is the top itself.
+            let beyond = if v.is_bloblet() { v.index() > self.top || v.index() == 0 } else { v.index() >= self.top };
+            if beyond {
                 return Err(format!("dangling reference {v:?} at word {at}"));
             }
             if v.is_object() && (!is_header(self.word(v.index())) || is_extension(self.word(v.index()))) {

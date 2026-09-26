@@ -18,6 +18,6 @@ pub mod image;
 pub mod layout;
 pub mod value;
 
-pub use heap::Heap;
+pub use heap::{BlobletError, Head, Heap};
 pub use image::ImageError;
 pub use value::{ObjType, Value};
