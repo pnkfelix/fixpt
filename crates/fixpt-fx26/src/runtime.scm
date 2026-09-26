@@ -37,6 +37,12 @@
 (define (%fx26-sum tag v) (%make-frozen 36 tag v))
 (define (%fx26-no-arm v) (error "tagcase: no arm for this value" v))
 
+;;; ---- threaded code ----
+(define (%fx26-unit-cell) %fx26-unit)
+(define (%fx26-nil-cell) '())
+;; A global's cell: a plain bloblet whose one field is the value.
+(define (%fx26-make-global name) (%make-bloblet 0 %fx26-unit))
+
 ;;; ---- arrays ----
 ;;; A bloblet with a field per element; element `i` is field `i + 2`.
 (define (%fx26-make-array n fill) (%make-bloblet-filled 0 n fill))

@@ -742,6 +742,20 @@ prims! {
             Err(e) => rt.fail(&format!("not a word: {e}"), &[a[0]]),
         }
     });
+    // ---- the collector, observed ----
+    // How many collections there have been, and how many words they copied:
+    // for tests and tools that want to see the collector at work.
+    "%gc-count", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.gc_count as i64)));
+    "%gc-words-copied", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.words_copied as i64)));
+    // The object that stands for the word being made in `%make-word`'s cells.
+    "%default-object", 0, Some(0), simple!(|_rt, _a| Ok(Value::DEFAULT));
+    // A primitive's number, for threaded code's `prim`, if it needs no
+    // engine; -1 otherwise.
+    "%runtime-primitive", 1, Some(1), simple!(|rt, a| {
+        let name = get_string(rt, a[0])?;
+        let n = PRIMITIVES.iter().position(|p| p.name == name && matches!(p.kind, PrimKind::Simple(_)));
+        Ok(Value::fixnum(n.map_or(-1, |n| n as i64)))
+    });
     // Run a word with the arguments in a list on its data stack; the value it
     // leaves on top.
     "%run-word", 2, Some(2), simple!(|rt, a| {

@@ -111,6 +111,25 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("array-ref", "(poly ((r region)) (poly ((t type)) (subr (read r) ((arrayof t r) int) t)))"),
     ("array-set!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((arrayof t r) int t) unit)))"),
     ("array-length", "(poly ((r region)) (poly ((t type)) (subr pure ((arrayof t r)) int)))"),
+    // Threaded code (`layout::threaded`), for the compiler written in
+    // FX-26. A word is immutable once made, so making one is pure; a word
+    // that is not one (`Heap::make_threaded_word`) is an error when run.
+    ("make-word", "(poly ((r region)) (subr (read r) (symbol (listof wcell r)) tword))"),
+    ("wcell-routine", "(subr pure (int) wcell)"),
+    ("wcell-int", "(subr pure (int) wcell)"),
+    ("wcell-bool", "(subr pure (bool) wcell)"),
+    ("wcell-string", "(subr pure (string) wcell)"),
+    ("wcell-char", "(subr pure (char) wcell)"),
+    ("wcell-symbol", "(subr pure (symbol) wcell)"),
+    ("wcell-unit", "(subr pure () wcell)"),
+    ("wcell-word", "(subr pure (tword) wcell)"),
+    ("wcell-global", "(subr pure (wglobal) wcell)"),
+    ("wcell-self", "(subr pure () wcell)"),
+    ("wcell-nil", "(subr pure () wcell)"),
+    // A global's cell, new: its value is the compiled program's to change.
+    ("make-global", "(subr pure (symbol) wglobal)"),
+    // A runtime primitive's number, for `prim`, or -1.
+    ("runtime-primitive", "(subr pure (string) int)"),
     (
         "make-continuation-prompt-tag",
         "(poly ((r region)) (poly ((a type) (h type) (d effect))

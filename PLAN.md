@@ -671,6 +671,11 @@ one.)*
    - **9d. A compiler in FX-26 from the AST to threaded words**, emitting
      bloblets. Checked three ways on the same programs: the evaluator, the
      lowering to Scheme, and the threaded words on the native machine.
+     *(First part done 2026-09-26: `src/compile.fx`, on the Rust threaded
+     machine. Every test program without `extract` or control gives the
+     same value compiled, evaluated and lowered. `extract` needs a
+     product's field order, which only its type says: it waits for step
+     10. Control waits for the machine's continuations.)*
 10. **The FX-26 checker written in FX-26**, over the 9a AST, checked against
     the Rust checker on every test program: FX-26 checking FX-26.
 11. **Native code from FX-26**: a word's cells compiled to machine code, by

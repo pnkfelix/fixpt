@@ -624,7 +624,7 @@ impl Vm {
             }
             _ => {
                 self.stack.truncate(base);
-                rt.fail("attempt to call a non-procedure", &[f])
+                rt.fail(&format!("attempt to call a non-procedure, with {argc} argument(s)"), &[f])
             }
         }
     }

@@ -70,6 +70,28 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Session, file: FileId, text: &str) 
     Ok(scheme.rt.heap.string_to_rust(out))
 }
 
+/// Read, parse and compile `text` with the reader, the parser and the
+/// compiler written in FX-26, and run the word it makes on the threaded
+/// machine: the value, as Scheme writes it; or `!! ` and why it failed.
+pub fn compile_with_fx26_compiler(scheme: &mut Session, file: FileId, text: &str) -> R<String> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let tops = parse_to_trees(scheme, file, text)?;
+    let compile = scheme.global_value(&format!("{READER_PREFIX}compile-program")).expect("loaded");
+    let result = scheme.call(compile, &[tops]).map_err(|e| fail(e.to_string()))?;
+    let heap = &scheme.rt.heap;
+    let tag = heap.symbol_name(heap.bloblet_slot(result, 2));
+    let payload = heap.bloblet_slot(result, 3);
+    let got = part(heap, payload, 0);
+    if tag == "c-err" {
+        return Ok(format!("!! compile: {}", heap.string_to_rust(got)));
+    }
+    let run = scheme.rt.run_word.expect("the session installs the threaded machine");
+    match run(&mut scheme.rt, got, &[]) {
+        Ok(v) => Ok(fixpt_runtime::write_value(&scheme.rt.heap, v)),
+        Err(e) => Ok(format!("!! {e}")),
+    }
+}
+
 /// The parser's trees for `text`: a list of `top`s, valid until the next
 /// call that may collect.
 fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Value> {

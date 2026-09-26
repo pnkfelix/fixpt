@@ -278,6 +278,19 @@ impl Fx26Session {
         r
     }
 
+    /// Compile `text` to a threaded word with the compiler written in FX-26
+    /// (read and parsed in FX-26 too), and run it on the threaded machine:
+    /// its value as Scheme would write it, or `!! ` and why not.
+    pub fn compile_with_own_compiler(&mut self, text: &str) -> R<String> {
+        if self.scheme.global_value(&format!("{READER_PREFIX}compile-program")).is_none() {
+            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
+        }
+        self.scheme.engine.set_step_limit(None);
+        let r = crate::syn::compile_with_fx26_compiler(&mut self.scheme, FileId(0), text);
+        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        r
+    }
+
     /// [`run_program`](Self::run_program), reading with the reader written
     /// in FX-26: nothing of the Rust reader on the way.
     pub fn run_program_read_by_fx26(&mut self, text: &str) -> R<Result<String, String>> {

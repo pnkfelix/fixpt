@@ -115,12 +115,17 @@ impl EagerReader {
         match status.as_str() {
             "complete" => Ok(EagerStatus::Complete),
             "error" => {
-                // Re-read `st`: the status call may have moved it.
+                // Re-read `st`: the status call may have moved it. And look
+                // each procedure up just before calling it, never before a
+                // call that may collect: a procedure held across one is a
+                // dangling pointer after it (the first `pos` call used to
+                // strand `msg` this way, found when a collection first
+                // landed between them).
                 let st = self.latest(session, text, at_enter)?;
-                let msg = self.proc(session, "eager-state-message");
                 let pos = self.proc(session, "eager-state-position");
                 let at = session.call(pos, &[st])?.as_fixnum() as usize;
                 let st = self.latest(session, text, at_enter)?;
+                let msg = self.proc(session, "eager-state-message");
                 let m = session.call(msg, &[st])?;
                 Ok(EagerStatus::Invalid { at, message: session.rt.heap.string_to_rust(m) })
             }
