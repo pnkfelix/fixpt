@@ -867,7 +867,65 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
   `slot` emit nothing until a value is needed, and the model is flushed at
   calls and control. Frame slots are kept in registers across calls that,
   by their effects, cannot capture a continuation or collect. Stack-limit
-  and fuel checks are hoisted to entries and back edges.
+  and fuel checks are hoisted to entries and back edges. *(Superseded 2026-09-26 by 13h′ below: the user asked for
+  values in registers the MacScheme machine's way, not a Forth stack
+  cached in registers.)*
+- **13h′. Register code: the MacScheme machine.** (Designed 2026-09-26.)
+  Larceny Note 13 (`doc/LarcenyNotes/note13-malcode.html`) defines the
+  machine:
+  - `RESULT`, an accumulator;
+  - `REG0`, the procedure running;
+  - `REG1`…`REGr`, general registers, the arguments on entry;
+  - frames on a stack, made by `save n` and used by `store k,n`,
+    `load k,n` and `stack n`;
+  - `setrtn`/`invoke n`/`return`: a call leaves the callee in `RESULT`,
+    the arguments in `REG1`…`REGn`, and a return address in the frame.
+
+  Values live in registers, and a frame holds only what must survive a
+  call. Our threaded machine already has `REG0` (`clo`) and frames, but
+  passes every value through the data stack. The plan:
+
+  1. **An IR, in Rust** (`fixpt_fx26::regcode`). Each lambda becomes
+     MacScheme instructions, made from the checker's trees as the threaded
+     compiler's are. Twobit's pass 4 is the model: register targeting, a
+     frame made lazily (only on paths that call), `store` only of what is
+     live across a call, `load` after. Primitives are `op1`/`op2`/`op2imm`,
+     typed as 13d made them. The IR can be shown (`,disassemble`) and has
+     an interpreter in Rust, the oracle, run against the lowering on every
+     test program.
+  2. **The moving collector decides where values may be.** A Value may be
+     in a machine register only between points that can collect. Anything
+     that can collect is a call-out, the same as the threaded machines:
+     allocation, a runtime primitive, control, a call. Before one,
+     everything live is stored to the frame; after it, loaded again. The
+     frame is on the data stack, the root the collector already scans, so
+     a continuation captured at a call-out holds it too. A return point
+     loads what it needs from the frame, which is what lets a captured
+     continuation resume there.
+  3. **Machine code, in `fixpt-native`.** Registers:
+     - `RESULT` in `x0`;
+     - `REG1`…`REG8` in `x1`…`x8`, with arguments past eight on the data
+       stack;
+     - `REG0` in `CLO`;
+     - the machine's other registers as they are now.
+
+     Calls between register procedures use the register convention.
+  4. **Two entries per compiled procedure,** so register code and
+     threaded code call each other. The *register entry* takes arguments in
+     registers. The *threaded entry*, the word's usual one, moves a
+     threaded frame's arguments into registers and continues. A register
+     call to a callee without register code pushes a threaded frame and
+     enters the word. A return entry says which convention returns to it.
+  5. **Checks where they are needed:** fuel and stack limits at entry and
+     on back edges, and an argument count never, since arities are static.
+  6. **Order:**
+     - (a) the IR and its interpreter, for all of FX-26;
+     - (b) machine code for the procedures the benchmarks need, with the
+       rest still threaded behind the two entries, and measured;
+     - (c) every form, until the bootstrap runs as register code;
+     - (d) known calls (`callk`, 13e) as direct branches;
+     - (e) the compiler written in FX-26 to match, instruction for
+       instruction, as for the threaded compilers.
 - **13i. Join points.** A local procedure used only in saturated tail
   calls becomes a label in its word.
 
