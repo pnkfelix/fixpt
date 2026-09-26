@@ -1,0 +1,612 @@
+;;; Words compiled to machine code, in FX-26 (PLAN.md §11, step 11c): the
+;;; hand-encoded machine's `assemble_word` (`fixpt-native/src/threaded.rs`),
+;;; routine for routine and instruction for instruction, over the encoder
+;;; written in FX-26 (`arm64.fx`) and what the machine's generator says of
+;;; it (`native-layout.fx`). The Rust compiler is this one's oracle: for
+;;; every word, the same instructions (`tests/native.rs`). Placing them, and
+;;; making the word's entry name them, is the loader's, in Rust.
+;;;
+;;; A word's code does what its cells do, routine for routine, with the ip
+;;; kept in step, so that it and threaded code mix freely; branches become
+;;; jumps, and the dispatch between cells goes.
+
+(define-effect assembles (maxeff (read @k) (write @k) (alloc @k)))
+
+;;; ------------------------------------------------------------ the assembler
+;;; Instructions, and labels patched when everything is placed. A label is
+;;; where it is, in instructions from the start: below zero for one in the
+;;; machine the code is placed after.
+
+(define n-code (ref (arrayof int @k) @k) (new (make-array 4096 0)))
+(define n-len (ref int @k) (new 0))
+(define n-labels (ref (arrayof int @k) @k) (new (make-array 1024 0)))
+(define n-bound (ref (arrayof bool @k) @k) (new (make-array 1024 #f)))
+(define n-nlabels (ref int @k) (new 0))
+
+;; A branch to patch: where it is, its label, and for a conditional one
+;; its condition or register.
+(define-datatype n-fix (fix-b int int) (fix-bcond int int int) (fix-cbz int int int) (fix-cbnz int int int))
+(define n-fixups (ref (listof n-fix @k) @k) (new nil))
+;; Traps raised in the code being emitted, placed after it: label, code,
+;; detail; newest first.
+(define-type n-stub-list (listof (productof (1 int) (2 int) (3 int)) @k))
+(define n-stubs (ref n-stub-list @k) (new nil))
+
+;; Compiling a word: where its next cell's code is, and a branch's
+;; target's; -1 for none.
+(define n-cont (ref int @k) (new -1))
+(define n-target (ref int @k) (new -1))
+(define n-trap-common (ref int @k) (new 0))
+(define n-exit-common (ref int @k) (new 0))
+
+(define n-copy-ints (subr (maxeff (read @k) (write @k)) ((arrayof int @k) (arrayof int @k) int) unit)
+  (lambda (from to i)
+    (if (= i (array-length from)) #u (begin (array-set! to i (array-ref from i)) (n-copy-ints from to (+ i 1))))))
+(define n-copy-bools (subr (maxeff (read @k) (write @k)) ((arrayof bool @k) (arrayof bool @k) int) unit)
+  (lambda (from to i)
+    (if (= i (array-length from)) #u (begin (array-set! to i (array-ref from i)) (n-copy-bools from to (+ i 1))))))
+
+(define n-here (subr (read @k) () int) (lambda () (get n-len)))
+
+(define n-e (subr assembles (int) unit)
+  (lambda (w)
+    (let ((n (get n-len)))
+      (begin
+        (if (= n (array-length (get n-code)))
+            (let ((bigger (the (arrayof int @k) (make-array (* 2 n) 0))))
+              (begin (n-copy-ints (get n-code) bigger 0) (set n-code bigger)))
+            #u)
+        (array-set! (get n-code) n w)
+        (set n-len (+ n 1))))))
+(define n-es (subr assembles ((listof int @k)) unit)
+  (lambda (ws) (if (null? ws) #u (begin (n-e (car ws)) (n-es (cdr ws))))))
+
+(define n-label (subr assembles () int)
+  (lambda ()
+    (let ((n (get n-nlabels)))
+      (begin
+        (if (= n (array-length (get n-labels)))
+            (let ((more (the (arrayof int @k) (make-array (* 2 n) 0)))
+                  (flags (the (arrayof bool @k) (make-array (* 2 n) #f))))
+              (begin (n-copy-ints (get n-labels) more 0) (n-copy-bools (get n-bound) flags 0)
+                     (set n-labels more) (set n-bound flags)))
+            #u)
+        (array-set! (get n-bound) n #f)
+        (set n-nlabels (+ n 1))
+        n))))
+(define n-bind-at (subr assembles (int int) unit)
+  (lambda (l at) (begin (array-set! (get n-labels) l at) (array-set! (get n-bound) l #t))))
+(define n-bind (subr assembles (int) unit) (lambda (l) (n-bind-at l (n-here))))
+
+(define n-fixup (subr assembles (n-fix) unit)
+  (lambda (f) (begin (set n-fixups (cons f (get n-fixups))) (n-e 0))))
+(define n-b (subr assembles (int) unit) (lambda (l) (n-fixup (fix-b (n-here) l))))
+(define n-b-cond (subr assembles (int int) unit) (lambda (c l) (n-fixup (fix-bcond (n-here) l c))))
+(define n-cbz (subr assembles (int int) unit) (lambda (r l) (n-fixup (fix-cbz (n-here) l r))))
+(define n-cbnz (subr assembles (int int) unit) (lambda (r l) (n-fixup (fix-cbnz (n-here) l r))))
+
+;; Trap with `code` and `detail` if condition `c` holds.
+(define n-trap-if (subr assembles (int int int) unit)
+  (lambda (c code detail)
+    (let ((l (n-label)))
+      (begin (n-b-cond c l) (set n-stubs (cons (product (1 l) (2 code) (3 detail)) (get n-stubs)))))))
+(define n-flush-stubs (subr assembles () unit)
+  (lambda ()
+    (let ((stubs (the n-stub-list (reverse (get n-stubs)))))
+      (begin (set n-stubs nil) (n-place-stubs stubs)))))
+(define n-place-stubs (subr assembles (n-stub-list) unit)
+  (lambda (ss)
+    (if (null? ss)
+        #u
+        (let ((st (car ss)))
+          (begin
+            (n-bind (extract st 1))
+            (n-e (arm-movz n-x13 (extract st 2) 0))
+            (n-e (arm-movz n-x14 (extract st 3) 0))
+            (n-b (get n-trap-common))
+            (n-place-stubs (cdr ss)))))))
+
+;; The code, every branch patched.
+(define n-finish (subr assembles () (listof int @k))
+  (lambda ()
+    (begin
+      (n-patch (get n-fixups))
+      (n-code-list 0))))
+(define n-patch (subr assembles ((listof n-fix @k)) unit)
+  (lambda (fs)
+    (if (null? fs)
+        #u
+        (begin
+          (tagcase (car fs)
+            (fix-b (at l) (array-set! (get n-code) at (arm-b (n-dist at l))))
+            (fix-bcond (at l c) (array-set! (get n-code) at (arm-b-cond c (n-dist at l))))
+            (fix-cbz (at l r) (array-set! (get n-code) at (arm-cbz r (n-dist at l))))
+            (fix-cbnz (at l r) (array-set! (get n-code) at (arm-cbnz r (n-dist at l)))))
+          (n-patch (cdr fs))))))
+;; From instruction `at` to label `l`, which must be bound: else an
+;; impossible distance, which no encoder takes.
+(define n-dist (subr (read @k) (int int) int)
+  (lambda (at l) (if (array-ref (get n-bound) l) (- (array-ref (get n-labels) l) at) (* 4 67108864))))
+(define n-code-list (subr (maxeff (read @k) (alloc @k)) (int) (listof int @k))
+  (lambda (i) (if (= i (get n-len)) nil (cons (array-ref (get n-code) i) (n-code-list (+ i 1))))))
+
+(define n-reset (subr assembles () unit)
+  (lambda ()
+    (begin
+      (set n-len 0) (set n-nlabels 0) (set n-fixups nil) (set n-stubs nil) (set n-cont -1) (set n-target -1)
+      (set n-trap-common (n-label))
+      (set n-exit-common (n-label)))))
+
+;;; ------------------------------------------------------------ machine sequences
+
+;; Field `k` of the bloblet whose `suffix + 4` is in a register.
+(define n-field-off (subr pure (int) int) (lambda (k) (- 0 (+ 4 (* 8 k)))))
+
+;; Dispatch on the cell in x9: the tail of `NEXT`.
+(define n-run-word-in-w (subr assembles () unit)
+  (lambda ()
+    (begin
+      (n-e (arm-add n-x11 n-base n-w))
+      (n-e (arm-ldur n-x10 n-x11 (n-field-off n-word-entry)))
+      (n-e (arm-ldr-reg n-x10 n-table n-x10))
+      (n-e (arm-br n-x10)))))
+
+(define n-next (subr assembles () unit)
+  (lambda ()
+    (begin
+      (n-e (arm-ldr-post n-w n-ip -8))
+      (n-e (arm-tst-low n-w 3))
+      (n-e (arm-b-cond 1 3))
+      (n-e (arm-ldr-reg n-x10 n-table n-w))
+      (n-e (arm-br n-x10))
+      (n-run-word-in-w))))
+
+;; On to the next cell of this word.
+(define n-cont-code (subr assembles () unit)
+  (lambda () (if (< (get n-cont) 0) (n-next) (n-b (get n-cont)))))
+
+;; On from where CUR and the ip now are, `d` in `dreg`.
+(define n-enter-cur (subr assembles (int) unit)
+  (lambda (dreg)
+    (let ((threaded (n-label)))
+      (begin
+        (n-e (arm-add n-x11 n-base n-cur))
+        (n-e (arm-ldur n-x10 n-x11 (n-field-off n-word-entry)))
+        (n-cbz n-x10 threaded)
+        (n-e (arm-ldr n-x16 n-st n-st-resume))
+        (n-e (arm-ldr-reg n-x16 n-x16 n-x10))
+        (n-cbz n-x16 threaded)
+        (n-e (arm-ldr-reg n-x16 n-x16 dreg))
+        (n-cbz n-x16 threaded)
+        (n-e (arm-br n-x16))
+        (n-bind threaded)
+        (n-next)))))
+
+(define n-fp-encode (subr assembles (int) unit)
+  (lambda (reg)
+    (begin (n-e (arm-ldr reg n-st n-st-ds-base)) (n-e (arm-sub-imm reg reg 8)) (n-e (arm-sub reg reg n-fp)))))
+(define n-fp-decode (subr assembles (int) unit)
+  (lambda (reg)
+    (begin (n-e (arm-ldr n-x16 n-st n-st-ds-base)) (n-e (arm-sub-imm n-x16 n-x16 8)) (n-e (arm-sub n-fp n-x16 reg)))))
+
+(define n-value (subr assembles (int int) unit) (lambda (reg v) (n-es (arm-mov-imm64 reg v))))
+
+(define n-push-return (subr assembles () unit)
+  (lambda ()
+    (begin
+      (n-e (arm-add n-x13 n-base n-cur))
+      (n-e (arm-sub-imm n-x13 n-x13 4))
+      (n-e (arm-sub n-x13 n-x13 n-ip))
+      (n-fp-encode n-x14)
+      (n-e (arm-stp-pre n-x14 n-clo n-rsp -16))
+      (n-e (arm-stp-pre n-cur n-x13 n-rsp -16)))))
+
+(define n-pop-return (subr assembles () unit)
+  (lambda ()
+    (let ((again (n-label)))
+      (begin
+        (n-bind again)
+        (n-e (arm-ldr n-x13 n-rsp 0))
+        (n-pass-mark n-prompt-mark again)
+        (n-pass-mark n-mark-mark again)
+        (n-e (arm-ldp-post n-cur n-x13 n-rsp 16))
+        (n-e (arm-ldp-post n-x14 n-clo n-rsp 16))
+        (n-value n-x15 n-false)
+        (n-e (arm-cmp n-cur n-x15))
+        (n-b-cond 0 (get n-exit-common))
+        (n-e (arm-add n-ip n-base n-cur))
+        (n-e (arm-sub-imm n-ip n-ip 4))
+        (n-e (arm-sub n-ip n-ip n-x13))
+        (n-fp-decode n-x14)
+        (n-enter-cur n-x13)))))
+(define n-pass-mark (subr assembles (int int) unit)
+  (lambda (mark again)
+    (let ((not-it (n-label)))
+      (begin
+        (n-value n-x15 mark)
+        (n-e (arm-cmp n-x13 n-x15))
+        (n-b-cond 1 not-it)
+        (n-e (arm-add-imm n-rsp n-rsp 32))
+        (n-b again)
+        (n-bind not-it)))))
+
+(define n-is-closure (subr assembles (int int) unit)
+  (lambda (reg not-it)
+    (begin
+      (n-e (arm-and-low n-x13 reg 3))
+      (n-e (arm-cmp-imm n-x13 n-tag-bloblet))
+      (n-b-cond 1 not-it)
+      (n-e (arm-add n-x11 n-base reg))
+      (n-e (arm-ldur n-x15 n-x11 (n-field-off 1)))
+      (n-e (arm-and-low n-x13 n-x15 3))
+      (n-e (arm-cmp-imm n-x13 n-tag-trailer))
+      (n-b-cond 1 not-it)
+      (n-e (arm-sub n-x14 n-x11 n-x15))
+      (n-e (arm-ldur n-x14 n-x14 -7))
+      (n-e (arm-ubfx n-x14 n-x14 3 8))
+      (n-e (arm-cmp-imm n-x14 n-kind-closure))
+      (n-b-cond 1 not-it))))
+
+(define n-save (subr assembles () unit)
+  (lambda ()
+    (begin
+      (n-e (arm-str n-cur n-st n-st-cur))
+      (n-e (arm-add n-x13 n-base n-cur))
+      (n-e (arm-sub-imm n-x13 n-x13 4))
+      (n-e (arm-sub n-x13 n-x13 n-ip))
+      (n-e (arm-str n-x13 n-st n-st-d))
+      (n-e (arm-str n-dsp n-st n-st-dsp))
+      (n-e (arm-str n-rsp n-st n-st-rsp))
+      (n-e (arm-str n-fuel n-st n-st-fuel))
+      (n-fp-encode n-x13)
+      (n-e (arm-str n-x13 n-st n-st-fp))
+      (n-e (arm-str n-clo n-st n-st-clo)))))
+
+(define n-load (subr assembles () unit)
+  (lambda ()
+    (begin
+      (n-e (arm-ldr n-base n-st n-st-base))
+      (n-e (arm-ldr n-cur n-st n-st-cur))
+      (n-e (arm-ldr n-x13 n-st n-st-d))
+      (n-e (arm-add n-ip n-base n-cur))
+      (n-e (arm-sub-imm n-ip n-ip 4))
+      (n-e (arm-sub n-ip n-ip n-x13))
+      (n-e (arm-ldr n-dsp n-st n-st-dsp))
+      (n-e (arm-ldr n-rsp n-st n-st-rsp))
+      (n-e (arm-ldr n-table n-st n-st-table))
+      (n-e (arm-ldr n-fuel n-st n-st-fuel))
+      (n-e (arm-ldr n-clo n-st n-st-clo))
+      (n-e (arm-ldr n-x14 n-st n-st-fp))
+      (n-fp-decode n-x14))))
+
+(define n-fuel-check (subr assembles () unit)
+  (lambda () (begin (n-e (arm-subs-imm n-fuel n-fuel 1)) (n-trap-if 0 n-trap-out-of-fuel 0))))
+(define n-ds-limit (subr assembles () unit)
+  (lambda ()
+    (begin (n-e (arm-ldr n-x13 n-st n-st-ds-limit)) (n-e (arm-cmp n-dsp n-x13)) (n-trap-if 3 n-trap-stack-overflow 0))))
+(define n-rs-limit (subr assembles () unit)
+  (lambda ()
+    (begin (n-e (arm-ldr n-x13 n-st n-st-rs-limit)) (n-e (arm-cmp n-rsp n-x13)) (n-trap-if 9 n-trap-too-deep 0))))
+
+(define n-callout (subr assembles (int) unit)
+  (lambda (n)
+    (begin
+      (n-save)
+      (n-e (arm-mov 0 n-st))
+      (n-e (arm-movz 1 n 0))
+      (n-e (arm-ldr n-x16 n-st n-st-callout))
+      (n-e (arm-blr n-x16))
+      (n-cbnz 0 (get n-exit-common))
+      (n-load)
+      (if (n-control? n) (n-enter-cur n-x13) (n-cont-code)))))
+
+(define n-two-fixnums (subr assembles (int) unit)
+  (lambda (n)
+    (begin
+      (n-e (arm-ldp n-x13 n-x14 n-dsp 0))
+      (n-e (arm-orr n-x15 n-x13 n-x14))
+      (n-e (arm-tst-low n-x15 3))
+      (n-trap-if 1 n-trap-type n))))
+
+(define n-check-tag (subr assembles (int int int int) unit)
+  (lambda (reg tag code detail)
+    (begin (n-e (arm-and-low n-x13 reg 3)) (n-e (arm-cmp-imm n-x13 tag)) (n-trap-if 1 code detail))))
+
+;;; ------------------------------------------------------------ routines
+
+;; Routine `n`'s code, going on to the next cell's.
+(define n-routine (subr assembles (int) unit)
+  (lambda (n)
+    (cond
+      ((= n routine-docol)
+       (begin
+         (n-fuel-check) (n-ds-limit) (n-rs-limit) (n-push-return)
+         (n-e (arm-mov n-cur n-w))
+         (n-e (arm-sub-imm n-ip n-x11 (+ 4 (* 8 n-word-cell0))))
+         (n-next)))
+      ((= n routine-exit) (n-pop-return))
+      ((= n routine-halt) (n-b (get n-exit-common)))
+      ((= n routine-lit)
+       (begin (n-e (arm-ldr-post n-x13 n-ip -8)) (n-e (arm-str-pre n-x13 n-dsp -8)) (n-cont-code)))
+      ((= n routine-branch)
+       (begin
+         (n-e (arm-ldr-post n-x13 n-ip -8)) (n-e (arm-sub n-ip n-ip n-x13)) (n-fuel-check) (n-ds-limit)
+         (if (< (get n-target) 0) (n-next) (n-b (get n-target)))))
+      ((= n routine-zbranch)
+       (let ((skip (n-label)))
+         (begin
+           (n-e (arm-ldr-post n-x14 n-dsp 8))
+           (n-e (arm-ldr-post n-x13 n-ip -8))
+           (n-value n-x15 n-false)
+           (n-e (arm-cmp n-x14 n-x15))
+           (n-b-cond 1 skip)
+           (n-e (arm-sub n-ip n-ip n-x13))
+           (n-fuel-check) (n-ds-limit)
+           (if (< (get n-target) 0)
+               (begin (n-bind skip) (n-next))
+               (begin (n-b (get n-target)) (n-bind skip) (n-cont-code))))))
+      ((= n routine-execute) (n-execute))
+      ((= n routine-dup) (begin (n-e (arm-ldr n-x13 n-dsp 0)) (n-e (arm-str-pre n-x13 n-dsp -8)) (n-cont-code)))
+      ((= n routine-drop) (begin (n-e (arm-add-imm n-dsp n-dsp 8)) (n-cont-code)))
+      ((= n routine-swap) (begin (n-e (arm-ldp n-x13 n-x14 n-dsp 0)) (n-e (arm-stp n-x14 n-x13 n-dsp 0)) (n-cont-code)))
+      ((= n routine-over) (begin (n-e (arm-ldr n-x13 n-dsp 8)) (n-e (arm-str-pre n-x13 n-dsp -8)) (n-cont-code)))
+      ((or (= n routine-add) (= n routine-sub))
+       (begin
+         (n-two-fixnums n)
+         (n-e (if (= n routine-add) (arm-adds n-x15 n-x14 n-x13) (arm-subs n-x15 n-x14 n-x13)))
+         (n-trap-if 6 n-trap-overflow n)
+         (n-e (arm-str-pre n-x15 n-dsp 8))
+         (n-cont-code)))
+      ((or (= n routine-less) (= n routine-eq))
+       (begin
+         (if (= n routine-less) (n-two-fixnums n) (n-e (arm-ldp n-x13 n-x14 n-dsp 0)))
+         (n-e (arm-cmp n-x14 n-x13))
+         (n-value n-x16 n-true)
+         (n-value n-x15 n-false)
+         (n-e (arm-csel n-x15 n-x16 n-x15 (if (= n routine-less) 11 0)))
+         (n-e (arm-str-pre n-x15 n-dsp 8))
+         (n-cont-code)))
+      ((or (= n routine-car) (= n routine-cdr))
+       (begin
+         (n-e (arm-ldr n-x15 n-dsp 0))
+         (n-check-tag n-x15 n-tag-pair n-trap-type n)
+         (n-e (arm-add n-x14 n-base n-x15))
+         (n-e (arm-ldur n-x15 n-x14 (if (= n routine-car) -1 7)))
+         (n-e (arm-str n-x15 n-dsp 0))
+         (n-cont-code)))
+      ((= n routine-field-ref) (n-field-ref n))
+      ((or (= n routine-slot) (= n routine-slot!))
+       (begin
+         (n-e (arm-ldr-post n-x13 n-ip -8))
+         (n-e (arm-sub n-x14 n-fp n-x13))
+         (if (= n routine-slot!) (n-e (arm-ldr-post n-x15 n-dsp 8)) #u)
+         (n-e (arm-cmp n-x14 n-dsp))
+         (n-trap-if 3 n-trap-field n)
+         (if (= n routine-slot)
+             (begin (n-e (arm-ldr n-x15 n-x14 0)) (n-e (arm-str-pre n-x15 n-dsp -8)))
+             (n-e (arm-str n-x15 n-x14 0)))
+         (n-cont-code)))
+      ((= n routine-free) (n-free n))
+      ((or (= n routine-global) (= n routine-global!))
+       (begin
+         (n-e (arm-ldr-post n-x13 n-ip -8))
+         (n-e (arm-add n-x11 n-base n-x13))
+         (if (= n routine-global)
+             (begin (n-e (arm-ldur n-x15 n-x11 (n-field-off 2))) (n-e (arm-str-pre n-x15 n-dsp -8)))
+             (begin (n-e (arm-ldr-post n-x15 n-dsp 8)) (n-e (arm-stur n-x15 n-x11 (n-field-off 2)))))
+         (n-cont-code)))
+      ((or (= n routine-call) (= n routine-tailcall)) (n-call n))
+      ((= n routine-return)
+       (begin
+         (n-e (arm-ldr-post n-x15 n-dsp 8))
+         (n-e (arm-add-imm n-x14 n-fp 8))
+         (n-e (arm-cmp n-dsp n-x14))
+         (n-trap-if 8 n-trap-underflow n)
+         (n-e (arm-mov n-dsp n-fp))
+         (n-e (arm-str n-x15 n-dsp 0))
+         (n-pop-return)))
+      (else (n-callout n)))))
+
+(define n-execute (subr assembles () unit)
+  (lambda ()
+    (let ((is-ref (n-label)) (bad (n-label)))
+      (begin
+        (n-e (arm-ldr-post n-w n-dsp 8))
+        (n-e (arm-tst-low n-w 3))
+        (n-b-cond 1 is-ref)
+        (n-cbz n-w bad)
+        (n-e (arm-cmp-imm n-w (* 8 n-primitives)))
+        (n-b-cond 2 bad)
+        (n-e (arm-ldr-reg n-x10 n-table n-w))
+        (n-e (arm-br n-x10))
+        (n-bind bad)
+        (n-e (arm-movz n-x13 n-trap-no-routine 0))
+        (n-e (arm-asr-imm n-x14 n-w 3))
+        (n-b (get n-trap-common))
+        (n-bind is-ref)
+        (n-check-tag n-w n-tag-bloblet n-trap-not-a-word 0)
+        (n-e (arm-add n-x11 n-base n-w))
+        (n-e (arm-ldur n-x15 n-x11 (n-field-off 1)))
+        (n-check-tag n-x15 n-tag-trailer n-trap-not-a-word 0)
+        (n-e (arm-sub n-x14 n-x11 n-x15))
+        (n-e (arm-ldur n-x14 n-x14 -7))
+        (n-e (arm-ubfx n-x14 n-x14 3 8))
+        (n-e (arm-cmp-imm n-x14 n-kind-word))
+        (n-trap-if 1 n-trap-not-a-word 0)
+        (n-run-word-in-w)))))
+
+(define n-field-ref (subr assembles (int) unit)
+  (lambda (n)
+    (let ((slow (n-label)))
+      (begin
+        (n-e (arm-ldp n-x15 n-x14 n-dsp 0))
+        (n-e (arm-tst-low n-x15 3))
+        (n-trap-if 1 n-trap-type n)
+        (n-check-tag n-x14 n-tag-bloblet n-trap-type n)
+        (n-e (arm-add n-x11 n-base n-x14))
+        (n-e (arm-ldur n-x16 n-x11 (n-field-off 1)))
+        (n-e (arm-and-low n-x13 n-x16 3))
+        (n-e (arm-cmp-imm n-x13 n-tag-trailer))
+        (n-b-cond 1 slow)
+        (n-e (arm-cmp-imm n-x15 16))
+        (n-trap-if 11 n-trap-field n)
+        (n-e (arm-sub-imm n-x16 n-x16 n-tag-trailer))
+        (n-e (arm-cmp n-x15 n-x16))
+        (n-trap-if 12 n-trap-field n)
+        (n-e (arm-sub n-x16 n-x11 n-x15))
+        (n-e (arm-ldur n-x15 n-x16 -4))
+        (n-e (arm-str-pre n-x15 n-dsp 8))
+        (n-cont-code)
+        (n-bind slow)
+        (n-callout n)))))
+
+(define n-free (subr assembles (int) unit)
+  (lambda (n)
+    (let ((bad (n-label)))
+      (begin
+        (n-e (arm-ldr-post n-x10 n-ip -8))
+        (n-is-closure n-clo bad)
+        (n-e (arm-add-imm n-x10 n-x10 (* 8 n-closure-free0)))
+        (n-e (arm-sub-imm n-x16 n-x15 n-tag-trailer))
+        (n-e (arm-cmp n-x10 n-x16))
+        (n-b-cond 12 bad)
+        (n-e (arm-sub n-x14 n-x11 n-x10))
+        (n-e (arm-ldur n-x15 n-x14 -4))
+        (n-e (arm-str-pre n-x15 n-dsp -8))
+        (n-cont-code)
+        (n-bind bad)
+        (n-e (arm-movz n-x13 n-trap-field 0))
+        (n-e (arm-movz n-x14 n 0))
+        (n-b (get n-trap-common))))))
+
+(define n-call (subr assembles (int) unit)
+  (lambda (n)
+    (let ((other (n-label)))
+      (begin
+        (n-e (arm-ldr n-w n-dsp 0))
+        (n-is-closure n-w other)
+        (n-fuel-check) (n-ds-limit) (n-rs-limit)
+        (n-e (arm-ldr-post n-x10 n-ip -8))
+        (n-e (arm-add-imm n-dsp n-dsp 8))
+        (if (= n routine-call)
+            (begin
+              (n-push-return)
+              (n-e (arm-add n-x14 n-dsp n-x10))
+              (n-e (arm-sub-imm n-fp n-x14 8)))
+            (let ((top (n-label)) (done (n-label)))
+              (begin
+                (n-e (arm-add n-x14 n-dsp n-x10))
+                (n-e (arm-sub-imm n-x14 n-x14 8))
+                (n-e (arm-mov n-x15 n-fp))
+                (n-e (arm-mov n-x16 n-x10))
+                (n-bind top)
+                (n-cbz n-x16 done)
+                (n-e (arm-ldr-post n-x10 n-x14 -8))
+                (n-e (arm-str-post n-x10 n-x15 -8))
+                (n-e (arm-sub-imm n-x16 n-x16 8))
+                (n-b top)
+                (n-bind done)
+                (n-e (arm-add-imm n-dsp n-x15 8)))))
+        (n-e (arm-mov n-clo n-w))
+        (n-e (arm-add n-x11 n-base n-w))
+        (n-e (arm-ldur n-cur n-x11 (n-field-off n-closure-word)))
+        (n-e (arm-add n-ip n-base n-cur))
+        (n-e (arm-sub-imm n-ip n-ip (+ 4 (* 8 n-word-cell0))))
+        (n-e (arm-movz n-x13 (* 8 n-word-cell0) 0))
+        (n-enter-cur n-x13)
+        (n-bind other)
+        (n-callout n)))))
+
+;;; ------------------------------------------------------------ words
+
+;; Where each instruction of `w`'s cells starts: for cell i, whether one
+;; does, as a list, first cell first. `n` cells from field `k`.
+(define n-starts (subr (alloc @k) (tword int int) (listof bool @k))
+  (lambda (w i n)
+    (if (>= i n)
+        nil
+        (let* ((k (+ n-word-cell0 i))
+               (step (if (tword-int? w k) (+ 1 (n-operands (tword-int w k))) 1)))
+          (cons #t (n-skip w (+ i 1) (- step 1) n))))))
+(define n-skip (subr (alloc @k) (tword int int int) (listof bool @k))
+  (lambda (w i left n)
+    (if (or (= left 0) (>= i n)) (n-starts w i n) (cons #f (n-skip w (+ i 1) (- left 1) n)))))
+
+;; `w`'s cells as machine code, for a place from which the machine's common
+;; trap and exit are `far-trap` and `far-exit` instructions away: the code,
+;; and where each cell's code starts, or -1. What `assemble_word` makes.
+(define native-assemble (subr assembles (tword int int) (productof (1 (listof int @k)) (2 (listof int @k))))
+  (lambda (w far-trap far-exit)
+    (begin
+      (n-reset)
+      (let* ((cells (- (+ (tword-fields w) 1) n-word-cell0))
+             (starts (the (arrayof bool @k) (n-list->array (n-starts w 0 cells) cells)))
+             (labels (n-labels-for (+ cells 1)))
+             (far-exit-label (get n-exit-common)))
+        (begin
+          (n-fuel-check) (n-ds-limit) (n-rs-limit) (n-push-return)
+          (n-e (arm-mov n-cur n-w))
+          (n-e (arm-sub-imm n-ip n-x11 (+ 4 (* 8 n-word-cell0))))
+          (n-b (array-ref labels 0))
+          (n-flush-stubs)
+          (n-cells w 0 cells starts labels far-exit-label)
+          (set n-exit-common far-exit-label)
+          (n-bind-at (get n-trap-common) far-trap)
+          (n-bind-at far-exit-label far-exit)
+          (let ((at (n-starts-at 0 cells starts labels)))
+            (product (1 (n-finish)) (2 at))))))))
+
+(define n-list->array (subr (maxeff (read @k) (write @k) (alloc @k)) ((listof bool @k) int) (arrayof bool @k))
+  (lambda (xs n)
+    (let ((a (the (arrayof bool @k) (make-array (+ n 1) #f))))
+      (begin (n-fill-bools a xs 0) a))))
+(define n-fill-bools (subr (maxeff (read @k) (write @k)) ((arrayof bool @k) (listof bool @k) int) unit)
+  (lambda (a xs i) (if (null? xs) #u (begin (array-set! a i (car xs)) (n-fill-bools a (cdr xs) (+ i 1))))))
+(define n-labels-for (subr assembles (int) (arrayof int @k))
+  (lambda (n)
+    (let ((a (the (arrayof int @k) (make-array n 0))))
+      (begin (n-fill-labels a 0) a))))
+(define n-fill-labels (subr assembles ((arrayof int @k) int) unit)
+  (lambda (a i) (if (= i (array-length a)) #u (begin (array-set! a i (n-label)) (n-fill-labels a (+ i 1))))))
+(define n-starts-at (subr (maxeff (read @k) (alloc @k)) (int int (arrayof bool @k) (arrayof int @k)) (listof int @k))
+  (lambda (i n starts labels)
+    (if (= i n)
+        nil
+        (cons (if (array-ref starts i) (array-ref (get n-labels) (array-ref labels i)) -1)
+              (n-starts-at (+ i 1) n starts labels)))))
+
+;; The cell after `i` where an instruction starts, or `n`.
+(define n-next-start (subr (read @k) (int int (arrayof bool @k)) int)
+  (lambda (i n starts) (if (or (>= i n) (array-ref starts i)) i (n-next-start (+ i 1) n starts))))
+
+(define n-cells (subr assembles (tword int int (arrayof bool @k) (arrayof int @k) int) unit)
+  (lambda (w i n starts labels far-exit)
+    (if (= i n)
+        #u
+        (begin
+          (if (array-ref starts i)
+              (let ((near-exit (n-label)) (k (+ n-word-cell0 i)))
+                (begin
+                  (n-bind (array-ref labels i))
+                  (set n-exit-common near-exit)
+                  (if (tword-int? w k)
+                      (let* ((r (tword-int w k))
+                             (next (n-next-start (+ i 1) n starts)))
+                        (begin
+                          (set n-cont (if (< next n) (array-ref labels next) -1))
+                          (set n-target
+                               (if (or (= r routine-branch) (= r routine-zbranch))
+                                   (array-ref labels (+ (+ i 2) (tword-int w (+ k 1))))
+                                   -1))
+                          (n-e (arm-sub-imm n-ip n-ip 8))
+                          (n-routine r)))
+                      (begin
+                        (set n-cont -1)
+                        (set n-target -1)
+                        (n-e (arm-ldr-post n-w n-ip -8))
+                        (n-run-word-in-w)))
+                  (n-flush-stubs)
+                  (n-bind near-exit)
+                  (n-b far-exit)))
+              #u)
+          (n-cells w (+ i 1) n starts labels far-exit)))))

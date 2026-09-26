@@ -799,6 +799,25 @@ prims! {
             if slow == fast { return Ok(Value::FALSE); }
         }
     });
+    // A threaded word's cells, looked at: for the compiler to machine code
+    // written in FX-26. Words are frozen, so these are pure.
+    "%tword-fields", 1, Some(1), simple!(|rt, a| {
+        if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
+        Ok(Value::fixnum(rt.heap.bloblet_head(a[0]).fields as i64))
+    });
+    "%tword-fixnum?", 2, Some(2), simple!(|rt, a| {
+        if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
+        let k = int(rt, a[1])?;
+        let fields = rt.heap.bloblet_head(a[0]).fields as i64;
+        Ok(Value::boolean((1..=fields).contains(&k) && rt.heap.bloblet_slot(a[0], k as usize).is_fixnum()))
+    });
+    "%tword-int", 2, Some(2), simple!(|rt, a| {
+        if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
+        let k = int(rt, a[1])?;
+        let fields = rt.heap.bloblet_head(a[0]).fields as i64;
+        let v = if (1..=fields).contains(&k) { rt.heap.bloblet_slot(a[0], k as usize) } else { Value::fixnum(0) };
+        Ok(if v.is_fixnum() { v } else { Value::fixnum(0) })
+    });
     "%string-hash", 1, Some(1), simple!(|rt, a| {
         let s = get_string(rt, a[0])?;
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;

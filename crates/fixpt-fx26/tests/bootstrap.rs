@@ -369,3 +369,101 @@ fn probe_read() {
         }
     });
 }
+
+/// The fixpoint once more, with every word of the front end compiled to
+/// machine code by the compiler written in FX-26 (`native.fx`), itself
+/// compiled and running on the native machine: stage 2 runs on code that
+/// FX-26 made, placed by the Rust side and nothing more (step 11c).
+#[test]
+#[cfg_attr(debug_assertions, ignore = "seconds in release, minutes in debug: run with --release, or --ignored")]
+fn fixpoint_with_words_compiled_by_fx26() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    load_eager_reader(&mut s.scheme).expect("loads");
+    s.scheme.engine.set_step_limit(None);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_as_is);
+    let text = fixpt_fx26::bootstrap_program();
+    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let t = std::time::Instant::now();
+    let lap = |what: &str| eprintln!("{what}: {:.1} s", t.elapsed().as_secs_f64());
+    s.scheme.scope(|sc| {
+        let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
+        let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
+        let none = sc.make(|_| Value::NULL);
+        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
+        let assemble = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 8) });
+        lap("stage 1, run: the compiler to machine code, compiled");
+        // Every word stage 1 reaches, rooted.
+        let mut raw = Vec::new();
+        sc.make(|m| {
+            let w = m.get(stage1);
+            raw = reachable_words(m.heap(), w);
+            Value::NULL
+        });
+        let words: Vec<_> = raw.into_iter().map(|w| sc.make(|_| w)).collect();
+        let mut instructions = 0;
+        for w in &words {
+            let code = |sc: &mut fixpt_scheme::Session, far: [i64; 2]| {
+                sc.scope(|one| {
+                    let (ft, fe) = (one.make(|_| Value::fixnum(far[0])), one.make(|_| Value::fixnum(far[1])));
+                    let args = one.call_global("list", &[*w, ft, fe]).expect("a list");
+                    let r = one.call_global("%run-word", &[assemble, args]).expect("assembles");
+                    one.view(|v| {
+                        let r = v.get(r);
+                        let ints = |l: fixpt_scheme::Local| l.list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>();
+                        (ints(r.field(2).expect("code")), ints(r.field(3).expect("starts")))
+                    })
+                })
+            };
+            // Once for the size, then for the place it goes.
+            let (sized, _) = code(sc, [0, 0]);
+            let (at, far) = fixpt_native::threaded::with_machine(|m| m.reserve(sized.len())).expect("room");
+            let (words32, starts) = code(sc, far);
+            assert!(words32.iter().all(|x| (0..1 << 32).contains(x)), "an instruction that could not be encoded");
+            let words32: Vec<u32> = words32.into_iter().map(|x| x as u32).collect();
+            instructions += words32.len();
+            sc.make(|m| {
+                let v = m.get(*w);
+                fixpt_native::threaded::with_machine(|n| n.install(m.heap(), v, at, &words32, &starts)).expect("installs");
+                Value::NULL
+            });
+        }
+        lap(&format!("{} words, {instructions} instructions, compiled by FX-26 and placed", words.len()));
+        let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
+        let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
+        let args = sc.call_global("list", &[std, prog]).expect("a list");
+        let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
+        lap("stage 2 compiled, on machine code FX-26 made");
+        let (mut same, mut why) = (false, String::new());
+        sc.make(|m| {
+            let a = m.get(stage1);
+            let r = m.get(result);
+            let h = m.heap();
+            let b = h.bloblet_slot(h.bloblet_slot(r, 3), 2);
+            same = same_code(h, a, b, &mut HashMap::new(), &mut why);
+            Value::NULL
+        });
+        assert!(same, "stage 1 and stage 2 differ: {why}");
+        lap("stage 1 and stage 2 are the same code");
+    });
+}
+
+/// Every word `word` reaches through its cells and operands.
+fn reachable_words(heap: &Heap, word: Value) -> Vec<Value> {
+    let closure = fixpt_heap::layout::kind("threaded-closure");
+    let (mut todo, mut seen, mut out) = (vec![word], std::collections::HashSet::new(), Vec::new());
+    while let Some(w) = todo.pop() {
+        if !seen.insert(w.raw()) {
+            continue;
+        }
+        out.push(w);
+        for k in fixpt_heap::layout::threaded::WORD_CELL0..=heap.bloblet_head(w).fields {
+            let v = heap.bloblet_slot(w, k);
+            if heap.is_threaded_word(v) {
+                todo.push(v);
+            } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
+                todo.push(heap.bloblet_slot(v, fixpt_heap::layout::threaded::CLOSURE_WORD));
+            }
+        }
+    }
+    out
+}

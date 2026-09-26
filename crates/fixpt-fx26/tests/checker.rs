@@ -16,6 +16,8 @@ fn locate(at: usize) -> String {
         ("standard.fx", fixpt_fx26::STANDARD_OPS),
         ("compile.fx", fixpt_fx26::COMPILER),
         ("arm64.fx", fixpt_fx26::ARM64),
+        ("native-layout.fx", fixpt_fx26::NATIVE_LAYOUT),
+        ("native.fx", fixpt_fx26::NATIVE),
     ];
     let mut start = 0;
     for (name, text) in parts {

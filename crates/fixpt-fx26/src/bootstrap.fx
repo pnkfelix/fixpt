@@ -39,4 +39,5 @@
                     (c-err (m) (b-fail (string-append "compile: " m)))))
                 (k-done (te) (b-fail "check: no result")))))))))
 
-(product (1 bootstrap) (2 b-read) (3 parse-program) (4 check-program) (5 compile-program) (6 checked-extracts))
+(product (1 bootstrap) (2 b-read) (3 parse-program) (4 check-program) (5 compile-program) (6 checked-extracts)
+         (7 native-assemble))

@@ -748,11 +748,24 @@ one.)*
       well here; see `docs/performance.md`.)*
     - **11b. The arm64 encoder in FX-26**, instruction by instruction the
       Rust one's (`fixpt-native/src/arm64.rs`), checked against it on
-      every instruction 11a emits.
+      every instruction 11a emits. *(Done 2026-09-26: `src/arm64.fx`, with
+      no bitwise operations: fields are added and shifted by
+      multiplying. 6,956 encodings agree with the Rust encoder, refusals
+      included.)*
     - **11c. Native words, from FX-26**: 11a's compiler written in FX-26
       over that encoder, making the same bytes as the Rust one for every
       word of the bootstrap. Installed through a runtime hook, as
       `%run-word` is, since `fixpt-runtime` sits below `fixpt-native`.
+      *(Done 2026-09-26: `src/native.fx`, over what the machine's
+      generator says of itself (`native-layout.fx`, generated). The
+      compiler reads words through three pure primitives; the Rust side
+      only reserves room and places the code
+      (`NativeMachine::reserve`, `install`). Every word of the front end,
+      817 of them, 1.1 million instructions, is the same from both
+      compilers (`tests/native.rs`). And the fixpoint holds once more with
+      every word compiled to machine code by the FX-26 compiler, itself
+      compiled and running natively: stage 2 runs on code FX-26 made
+      (`fixpoint_with_words_compiled_by_fx26`).)*
 12. **The comparison**, Rust pieces against FX-26 ones, with no piece
     retired (decision 8). *(First report 2026-09-26, in
     `docs/performance.md`: each piece alone on the bootstrap program, Rust,

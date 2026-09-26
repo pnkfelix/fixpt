@@ -39,3 +39,16 @@ fn standard_fx_is_generated_from_the_lowering() {
     let have = std::fs::read_to_string(path).unwrap_or_default();
     assert!(have == want, "src/standard.fx is not what the lowering's table generates; run `FIXPT_BLESS=1 cargo test -p fixpt-fx26 --test layout`");
 }
+
+/// And what the compiler written in FX-26 knows of the hand-encoded machine,
+/// `src/native-layout.fx`, generated from it.
+#[test]
+fn native_layout_fx_is_generated_from_the_machine() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/native-layout.fx");
+    let want = fixpt_native::threaded::fx26_module();
+    if std::env::var_os("FIXPT_BLESS").is_some() {
+        std::fs::write(path, &want).expect("writes native-layout.fx");
+    }
+    let have = std::fs::read_to_string(path).unwrap_or_default();
+    assert!(have == want, "src/native-layout.fx is not what the machine generates; run `FIXPT_BLESS=1 cargo test -p fixpt-fx26 --test layout`");
+}

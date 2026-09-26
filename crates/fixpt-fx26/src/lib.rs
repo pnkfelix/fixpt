@@ -38,6 +38,14 @@ pub const STANDARD_OPS: &str = include_str!("standard.fx");
 /// The arm64 encoder written in FX-26, the Rust one its oracle.
 pub const ARM64: &str = include_str!("arm64.fx");
 
+/// What the compiler to machine code written in FX-26 knows of the
+/// hand-encoded machine, generated from it.
+pub const NATIVE_LAYOUT: &str = include_str!("native-layout.fx");
+
+/// Words compiled to machine code, in FX-26: the hand-encoded machine's
+/// `assemble_word`, over [`ARM64`].
+pub const NATIVE: &str = include_str!("native.fx");
+
 /// The checker written in FX-26, over the parser's trees.
 pub const CHECKER: &str = include_str!("check.fx");
 
@@ -45,7 +53,7 @@ pub const CHECKER: &str = include_str!("check.fx");
 /// compiler written in FX-26, with the layout they share, as one program:
 /// each needs the types of the ones before.
 pub fn front_end() -> String {
-    format!("{EAGER_READER}\n{PARSER}\n{CHECKER}\n{TABLE}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}\n{ARM64}")
+    format!("{EAGER_READER}\n{PARSER}\n{CHECKER}\n{TABLE}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}\n{ARM64}\n{NATIVE_LAYOUT}\n{NATIVE}")
 }
 
 /// A driver for the front end, in FX-26: a text read, parsed, checked and

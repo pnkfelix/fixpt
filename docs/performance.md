@@ -278,6 +278,13 @@ way, the gain is 1.9 s to 1.4 s, and the fixpoint holds
 the top of the stack in registers, operands as immediates, the ip made
 only where something reads it.
 
+**Made by FX-26 (C11c).** The same compiler written in FX-26
+(`native.fx`), compiled and running on the hand-encoded machine, compiles
+all 817 words of the front end, 1.1 million instructions, in 2.7 s
+(release). The words are the same as the Rust compiler's, which takes
+milliseconds. Stage 2 on that code takes 1.7 s, and the fixpoint holds
+(`fixpoint_with_words_compiled_by_fx26`).
+
 ## The comparison: each piece, Rust and FX-26 (C12)
 
 `cargo test --release -p fixpt-fx26 --test bootstrap comparison --
