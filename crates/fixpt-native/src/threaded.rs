@@ -700,8 +700,21 @@ extern "C" fn callout(st: *mut State, n: u64) -> u64 {
     let rs = unsafe { std::slice::from_raw_parts_mut(st.rsp as *mut Value, nrs) };
     let name = ROUTINES[n as usize].0;
     CALLOUTS.with(|c| c.borrow_mut()[n as usize] += 1);
+    let started = TIMING.with(|t| *t).then(std::time::Instant::now);
+    let out = callout_on(st, n, name, heap, ds, rs);
+    if let Some(t) = started {
+        CALLOUT_NANOS.with(|c| c.borrow_mut()[n as usize] += t.elapsed().as_nanos() as u64);
+    }
+    out
+}
+
+fn callout_on(st: &mut State, n: u64, name: &'static str, heap: &mut Heap, ds: &mut [Value], rs: &mut [Value]) -> u64 {
     if !matches!(name, "field@" | "field!" | "cons") {
-        let result = if name == "prim" { prim(st) } else { round_trip(st, n) };
+        let result = match name {
+            "prim" => prim(st),
+            "closure" => closure(st),
+            _ => round_trip(st, n),
+        };
         // SAFETY: as above.
         let heap = unsafe { heap_of(st) };
         st.base = heap.active_words() as u64;
@@ -742,16 +755,29 @@ pub fn take_callout_counts() -> Vec<(&'static str, u64)> {
     ROUTINES.iter().zip(counts).filter(|(_, n)| *n > 0).map(|((name, _), n)| (*name, n)).collect()
 }
 
+/// And the time spent in each, in nanoseconds, when `FIXPT_CALLOUTS` is set.
+pub fn take_callout_nanos() -> Vec<(&'static str, u64)> {
+    let nanos = CALLOUT_NANOS.with(|c| std::mem::replace(&mut *c.borrow_mut(), [0; ROUTINES.len()]));
+    ROUTINES.iter().zip(nanos).filter(|(_, n)| *n > 0).map(|((name, _), n)| (*name, n)).collect()
+}
+
 /// With `FIXPT_CALLOUTS` set, write the callout counts to stderr: after
 /// each `run_word`, so from the command line too.
 pub fn report_callouts() {
-    if std::env::var_os("FIXPT_CALLOUTS").is_some() {
+    if TIMING.with(|t| *t) {
         eprintln!("callouts: {:?}", take_callout_counts());
+        let ms: Vec<(&str, u64)> = take_callout_nanos().into_iter().map(|(n, t)| (n, t / 1_000_000)).collect();
+        eprintln!("callout ms: {ms:?}");
+        eprintln!("round trips lifted {} words of stack", ROUND_TRIP_WORDS.with(|w| std::mem::take(&mut *w.borrow_mut())));
     }
 }
 
 thread_local! {
     static CALLOUTS: std::cell::RefCell<[u64; ROUTINES.len()]> = const { std::cell::RefCell::new([0; ROUTINES.len()]) };
+    static CALLOUT_NANOS: std::cell::RefCell<[u64; ROUTINES.len()]> = const { std::cell::RefCell::new([0; ROUTINES.len()]) };
+    static ROUND_TRIP_WORDS: std::cell::RefCell<u64> = const { std::cell::RefCell::new(0) };
+    /// Whether `FIXPT_CALLOUTS` is set, asked once.
+    static TIMING: bool = std::env::var_os("FIXPT_CALLOUTS").is_some();
     /// A runtime primitive's message, when one failed in a call-out: a
     /// trap's code cannot carry it.
     static LAST_MESSAGE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
@@ -788,6 +814,9 @@ fn round_trip(st: &mut State, n: u64) -> Result<(), Trap> {
         for j in 0..4 {
             rs.push(word(at + 8 * j));
         }
+    }
+    if TIMING.with(|t| *t) {
+        ROUND_TRIP_WORDS.with(|w| *w.borrow_mut() += (nds + 4 * nentries) as u64);
     }
     let mut at = Snapshot { cur: Value(st.cur), k: (st.d / 8) as usize, fp: (st.fp / 8) as usize, clo: Value(st.clo) };
     let mut m = Machine::from_stacks(ds, rs);
@@ -847,17 +876,7 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     if count < def.min || def.max.is_some_and(|m| count > m) {
         return Err(Trap::Prim(format!("`{}` given {count} argument(s)", def.name)));
     }
-    // A safepoint first, as in the Rust machine.
-    {
-        let nrs = (st.rs_base - st.rsp) as usize / 8;
-        // SAFETY: the machine's stacks, between their pointers and bases,
-        // every word a value.
-        let ds = unsafe { std::slice::from_raw_parts_mut(st.dsp as *mut Value, depth) };
-        let rs = unsafe { std::slice::from_raw_parts_mut(st.rsp as *mut Value, nrs) };
-        let mut regs = [Value(st.cur), Value(st.clo)];
-        rt.heap.maybe_collect(&mut [ds, rs, &mut regs]);
-        (st.cur, st.clo) = (regs[0].raw(), regs[1].raw());
-    }
+    safepoint(st, &mut rt.heap);
     // The top is at `dsp`; the arguments go deepest first.
     // SAFETY: as above.
     let word = |a: u64| unsafe { Value(*(a as *const u64)) };
@@ -867,6 +886,52 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     // SAFETY: the slot the arguments had, or one checked above.
     unsafe { *(st.dsp as *mut u64) = v.raw() };
     st.d += 16;
+    Ok(())
+}
+
+/// A safepoint, as in the Rust machine: the stacks are roots as they lie,
+/// with the word running and the closure.
+fn safepoint(st: &mut State, heap: &mut Heap) {
+    let (nds, nrs) = ((st.ds_base - st.dsp) as usize / 8, (st.rs_base - st.rsp) as usize / 8);
+    // SAFETY: the machine's stacks, between their pointers and bases, every
+    // word a value.
+    let ds = unsafe { std::slice::from_raw_parts_mut(st.dsp as *mut Value, nds) };
+    let rs = unsafe { std::slice::from_raw_parts_mut(st.rsp as *mut Value, nrs) };
+    let mut regs = [Value(st.cur), Value(st.clo)];
+    heap.maybe_collect(&mut [ds, rs, &mut regs]);
+    (st.cur, st.clo) = (regs[0].raw(), regs[1].raw());
+}
+
+/// `closure w n`: a closure of word `w` over the top `n` values, which it
+/// replaces. Needs only the top of the stack, so no round trip.
+fn closure(st: &mut State) -> Result<(), Trap> {
+    use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD};
+    // SAFETY: the heap the state's run holds.
+    let heap = unsafe { heap_of(st) };
+    safepoint(st, heap);
+    let k = (st.d / 8) as usize;
+    let w = heap.bloblet_slot(Value(st.cur), k);
+    let count = heap.bloblet_slot(Value(st.cur), k + 1).as_fixnum() as usize;
+    let depth = (st.ds_base - st.dsp) as usize / 8;
+    if depth < st.fp as usize / 8 + count {
+        return Err(Trap::Underflow { routine: "closure" });
+    }
+    if count == 0 && st.dsp - 8 < st.ds_limit {
+        return Err(Trap::StackOverflow);
+    }
+    let c = heap.make_bloblet(fixpt_heap::layout::kind("threaded-closure"), count + 1, 0, true);
+    heap.set_bloblet_slot(c, CLOSURE_WORD, w);
+    // SAFETY: the machine's data stack; the top is at `dsp`, the free
+    // values deepest first.
+    let word = |a: u64| unsafe { Value(*(a as *const u64)) };
+    for i in 0..count {
+        heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, word(st.dsp + 8 * (count - 1 - i) as u64));
+    }
+    st.dsp = st.dsp + 8 * count as u64 - 8;
+    // SAFETY: a slot the free values had, or one checked above.
+    unsafe { *(st.dsp as *mut u64) = c.raw() };
+    st.d += 16;
+    st.base = heap.active_words() as u64;
     Ok(())
 }
 

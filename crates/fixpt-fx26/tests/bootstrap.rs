@@ -118,7 +118,7 @@ fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, why: &
 /// compiles the front end again (stage 2), reading, parsing and checking
 /// it itself. The two words must be the same code.
 #[test]
-#[ignore = "minutes: cargo test -p fixpt-fx26 --test bootstrap fixpoint -- --ignored --nocapture"]
+#[cfg_attr(debug_assertions, ignore = "10 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
@@ -159,5 +159,45 @@ fn fixpoint() {
         });
         assert!(same, "stage 1 and stage 2 differ: {why}");
         lap("stage 1 and stage 2 are the same code");
+    });
+}
+
+/// The compiled driver on one program (`PROBE_FILE`, else `table.fx`), timed,
+/// with the native machine's call-outs (`FIXPT_CALLOUTS=1`).
+#[test]
+#[ignore = "a probe: FIXPT_CALLOUTS=1 cargo test -p fixpt-fx26 --test bootstrap probe_stage2 -- --ignored --nocapture"]
+fn probe_stage2() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    load_eager_reader(&mut s.scheme).expect("loads");
+    s.scheme.engine.set_step_limit(None);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word);
+    let text = fixpt_fx26::bootstrap_program();
+    let target = match std::env::var("PROBE_FILE") {
+        Ok(p) if p == "front-end" => text.clone(),
+        Ok(p) => std::fs::read_to_string(p).unwrap(),
+        Err(_) => fixpt_fx26::TABLE.to_string(),
+    };
+    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    s.scheme.scope(|sc| {
+        let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
+        let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
+        let none = sc.make(|_| Value::NULL);
+        let driver = sc.call_global("%run-word", &[stage1, none]).expect("runs");
+        let _ = fixpt_native::threaded::take_callout_counts();
+        let _ = fixpt_native::threaded::take_callout_nanos();
+        let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&target)));
+        let args = sc.call_global("list", &[std, prog]).expect("a list");
+        let gc = |sc: &mut fixpt_scheme::Session| {
+            let (n, w) = (sc.call_global("%gc-count", &[]).unwrap(), sc.call_global("%gc-words-copied", &[]).unwrap());
+            sc.view(|v| (v.get(n).fixnum().unwrap_or(0), v.get(w).fixnum().unwrap_or(0)))
+        };
+        let before = gc(sc);
+        let t = std::time::Instant::now();
+        let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
+        eprintln!("the compiled driver: {:.2} s", t.elapsed().as_secs_f64());
+        let after = gc(sc);
+        eprintln!("collections: {}, words copied: {}, heap in use: {} words", after.0 - before.0, after.1 - before.1, sc.heap_used());
+        let tag = sc.view(|v| v.get(result).field(2).and_then(|t| t.symbol_name()).unwrap_or_default());
+        assert_eq!(tag, "b-word");
     });
 }

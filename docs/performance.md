@@ -176,38 +176,52 @@ over. `table.fx` alone (110 lines) takes 0.86 s against 0.01 s.
 
 ## The bootstrap: the front end compiling itself (C11)
 
-`cargo test -p fixpt-fx26 --test bootstrap fixpoint -- --ignored
---nocapture`, debug build. The same work each time: read, parse, check and
-compile the front end with its driver, 4,700 lines.
+`cargo test --release -p fixpt-fx26 --test bootstrap fixpoint`. Each run
+does the same work: read, parse, check and compile the front end and its
+driver, 4,700 lines. Release build:
 
-| stage                                                           | time  |
-| --------------------------------------------------------------- | ----- |
-| stage 1: the Rust checker; FX-26 read, parse, compile, lowered  | 69 s  |
-| lowered: FX-26 read and parse 63 s, check 317 s (C10)           | 380 s |
-| stage 2: all of it compiled, on the hand-encoded native machine | 370 s |
+| what                                                              | time   |
+| ----------------------------------------------------------------- | ------ |
+| the Rust reader and checker                                       | 0.07 s |
+| FX-26 read, parse and check, lowered to Scheme (C10's checker)    | 7.8 s  |
+| stage 1: the Rust checker; FX-26 read, parse and compile, lowered | 1.7 s  |
+| stage 2: all of it compiled, on the hand-encoded native machine   | 8.4 s  |
+| the whole fixpoint test                                           | 10.5 s |
 
-Compiled and run natively, the front end is no faster than lowered to
-Scheme. The native machine's own per-routine counts of call-outs to Rust
-(`FIXPT_CALLOUTS=1`) say why. In stage 2:
+**The debug build misled.** It took 7 minutes, and a first profile of it
+blamed the round trips. `sample` showed the time in `Field::mask`, slice
+indexing and iterator `next`: unoptimised Rust in the heap and the Rust
+machine, which the native machine calls out to. The machine code is the
+same in both builds; everything it calls is not. Performance comparisons
+here are release builds from now on.
 
-| routine                       | call-outs    |
-| ----------------------------- | ------------ |
-| `prim` (a runtime primitive)  | 171,536,930  |
-| `cons`                        | 5,101,843    |
-| `closure` (round trip)        | 4,111,142    |
-| `prompt`, `abort`, `callcomp` | 260,000 each |
-| `tailcall` (round trip)       | 260,868      |
-| `withmark`                    | 90,035       |
+**The collector grew too late.** It grew a semispace only when the live
+data filled three quarters of it, and then collected again after a
+sliver. With 42 million words live, stage 2 in debug collected 117 times
+and copied 4.9 billion words. Keeping a semispace at least three times
+what is live brought that to 16 collections and 0.67 billion words. In
+debug, that took stage 2 from 315 s to 239 s.
 
-A round trip lifts both stacks into a Rust machine and puts them back, so
-its cost grows with the stacks. `closure` is one, and runs four million
-times. Next:
+Compiled and run natively, the front end is still no faster than lowered
+to Scheme. The native machine's call-out counts and times
+(`FIXPT_CALLOUTS=1`), in release, for stage 2 alone:
 
-- **`closure` in machine code:** it allocates, so it needs the heap's
-  allocation fast path, as `cons` would too.
-- **Fewer `prim`s:** `string=?`, `null?`, `not` and the like as routines.
-- **Continuations without round trips:** the reader captures one per
-  character.
+| routine                      | call-outs   | time   |
+| ---------------------------- | ----------- | ------ |
+| `prim` (a runtime primitive) | 171,536,930 | 4.08 s |
+| `callcomp` (round trip)      | 260,870     | 1.24 s |
+| `cons`                       | 5,101,843   | 0.97 s |
+| `tailcall` to a continuation | 260,868     | 0.96 s |
+| `abort` (round trip)         | 260,870     | 0.41 s |
+| `withmark` (round trip)      | 90,035      | 0.24 s |
+| `closure`                    | 4,111,142   | 0.09 s |
+
+`closure` was a round trip until the numbers above were taken, and is now
+a direct call-out like `prim`. Next:
+
+- **Fewer `prim`s:** the commonest primitives as routines, which needs
+  counts per primitive.
+- **Control without round trips:** each lifts about 2,000 words of stack.
 
 ## The eager reader in FX-26, building syntax with positions (B8)
 

@@ -132,6 +132,9 @@ const DEFAULT_SEMI_WORDS: usize = 1 << 16;
 
 /// Collect when the active semispace is at least this full at a safepoint.
 const COLLECT_THRESHOLD: f64 = 0.75;
+/// A semispace is kept at least this many times the data live after a
+/// collection.
+const LIVE_RATIO: usize = 3;
 
 pub struct Heap {
     /// `2 * semi` words: the two semispaces back to back.
@@ -1064,9 +1067,14 @@ impl Heap {
         self.gc_count += 1;
         self.words_copied += free as u64;
 
-        // Keep some headroom, so we are not collecting on every safepoint.
-        if self.top as f64 > self.semi as f64 * COLLECT_THRESHOLD {
-            self.grow(self.top * 2);
+        // Keep headroom in proportion to what is live: a semispace at least
+        // three times it, so that the next collection comes after at least
+        // 1.25 times the live data is allocated, and copying costs less than
+        // a word per word allocated. Growing only when the live data was
+        // three quarters of the space collected again after a sliver of it,
+        // copying everything each time.
+        if self.top * LIVE_RATIO > self.semi {
+            self.grow(self.top * LIVE_RATIO);
         }
     }
 

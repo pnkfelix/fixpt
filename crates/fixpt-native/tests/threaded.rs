@@ -76,6 +76,9 @@ fn cons_calls_out_and_survives_collection() {
     let during = heap.gc_count - before;
     eprintln!("collections while the native machine ran: {during}");
     assert!(during > 0, "the test is meant to collect under native code");
+    // By now the heap has grown to hold what is live three times over, so
+    // collect every 200 safepoints: the stencils must see collections too.
+    heap.gc_every = 200;
     for opt in opt_levels() {
         let mut m = StencilMachine::new(opt).expect("built");
         let before = heap.gc_count;
