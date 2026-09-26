@@ -29,6 +29,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("get", "(poly ((r region)) (poly ((t type)) (subr (read r) ((ref t r)) t)))"),
     ("set", "(poly ((r region)) (poly ((t type)) (subr (write r) ((ref t r) t) unit)))"),
     ("cons", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (alloc r) (t1 t2) (pairof t1 t2 r))))"),
+    // `cons` in a region given as a value, which a `letrena` or `letreap`
+    // binds: there, rather than in the heap.
+    ("rcons", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (alloc r) ((region r) t1 t2) (pairof t1 t2 r))))"),
     ("car", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((pairof t1 t2 r)) t1)))"),
     ("cdr", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((pairof t1 t2 r)) t2)))"),
     ("set-car!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) t1) unit)))"),

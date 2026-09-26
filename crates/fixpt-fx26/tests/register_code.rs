@@ -135,7 +135,7 @@ fn runs_as_lowered(gc_every: Option<u64>) {
     assert!(ran >= 15, "only {ran}");
 }
 
-/// A `letrena`'s `cons`s, in the procedure that enters it, are made in the
+/// A `letrena`'s `rcons`s, in the helpers its body makes, are made in the
 /// heap's regions, which are all ended when the program is done; and the
 /// same, collecting at every safepoint, when the regions are roots.
 #[test]
@@ -163,8 +163,8 @@ fn a_letrena_allocates_in_its_region() {
             let h = &sc.runtime_unrooted().heap;
             (got, h.region_words(), h.live_regions())
         });
-        assert_eq!(got, (3 * 500_500 + 3 * 1000).to_string());
-        assert_eq!(words, 1000 * 6, "three pairs each call, in a region");
+        assert_eq!(got, (1000 * 55).to_string());
+        assert_eq!(words, 1000 * 20, "ten pairs each call, in a region");
         assert_eq!(live, 0);
     }
 }

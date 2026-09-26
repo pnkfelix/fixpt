@@ -42,6 +42,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("-", "-", true),
     ("=", "=", true),
     ("cons", "cons", true),
+    ("rcons", "%region-cons", false),
     ("car", "car", true),
     ("cdr", "cdr", true),
     ("null?", "null?", true),
@@ -264,7 +265,19 @@ impl Lowerer<'_> {
                 format!("({})", parts.join(" "))
             }
             // Regions are erased: a `letrena`'s or `letreap`'s allocation is the heap's.
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::LetRegion { body, .. } => self.go(body),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.go(body),
+            // A `letrena`'s name is its region's handle, the region left
+            // with the body's value; a `letreap`'s is the heap's, `#f`.
+            Exp::LetRegion { arena, region, body } => {
+                let n = self.c.arena.dvar_name(region);
+                let l = self.local(n);
+                let b = self.body(&[n], body);
+                if arena {
+                    format!("(let (({l} (%region-enter))) (%region-exit {l} {b}))")
+                } else {
+                    format!("(let (({l} #f)) {b})")
+                }
+            }
             Exp::The { exp, .. } => self.go(exp),
             Exp::If { test, then, els } => {
                 format!("(if {} {} {})", self.go(test), self.go(then), self.go(els))

@@ -210,6 +210,13 @@ impl Checker {
                 let r = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::ICell(t, r)))
             }
+            "region" => {
+                let [_, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(region region)`"));
+                };
+                let r = self.parse_region(r)?;
+                Ok(self.arena.ty(Ty::Region(r)))
+            }
             "pairof" => {
                 let [_, a, b, r] = &items[..] else {
                     return Err(FxError::at(s.span, "`(pairof type type region)`"));

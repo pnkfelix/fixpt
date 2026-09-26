@@ -12,18 +12,16 @@
 //! made, standard operations as values, more than `REGS` values), it
 //! declines: the lambda keeps its stack code alone.
 //!
-//! A `letrena`'s region is the heap's (`Heap::region_enter`), its handle in
-//! the frame while the body runs; a `cons` the checker says is in that
-//! region, in the same procedure, is made there. One in a lambda inside is
-//! made in the heap, as is anything else the region holds: the lambda does
-//! not capture the handle, yet.
+//! A `letrena`'s region is the heap's (`Heap::region_enter`), and its name
+//! a variable whose value is the region's handle, for `rcons`; a closure
+//! that allocates in the region captures it like any other.
 
 use super::{find, Compiler, Env, Loc, This};
 
 fn two() -> Value {
     Value::fixnum(2)
 }
-use crate::ast::{BlobletOp, DVar, Exp, ExpId, Region};
+use crate::ast::{BlobletOp, Exp, ExpId};
 use fixpt_heap::layout::regcode::{op, REGS};
 use fixpt_heap::layout::threaded::routine;
 use fixpt_heap::Value;
@@ -87,9 +85,6 @@ struct Gen {
     max_slot: usize,
     labels: usize,
     this: Option<(This, usize)>,
-    /// The `letrena`s around, innermost last: each region, and the frame
-    /// slot of its handle.
-    regions: Vec<(DVar, usize)>,
 }
 
 type O<T> = Option<T>;
@@ -183,7 +178,7 @@ impl Compiler<'_> {
             return self.decline("more than REGS parameters");
         }
         let leaf = !self.r_collects(body, inner, this);
-        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, regions: Vec::new() };
+        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
         for (n, l) in inner {
@@ -383,25 +378,49 @@ impl Compiler<'_> {
                 g.op("const", &[u]);
                 g.done(tail);
             }
-            // The region entered, its handle kept; the body, not in tail
-            // position; the region left, the value kept meanwhile.
-            Exp::LetRegion { arena: true, region, body } if !g.leaf => {
-                let slots = g.next_slot;
-                self.r_prim(g, "%region-enter", &[], env, te)?;
-                let h = g.slot();
-                g.op("setstk", &[Gen::n(h)]);
-                g.regions.push((region, h));
-                self.r_exp(g, body, env, te, false)?;
-                g.regions.pop();
-                let v = g.slot();
-                g.op("setstk", &[Gen::n(v)]);
-                self.r_prim(g, "%region-exit", &[Arg::Slot(h)], env, te)?;
-                g.op("stack", &[Gen::n(v)]);
-                g.next_slot = slots;
-                g.done(tail);
-            }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => {
                 self.r_exp(g, body, env, te, tail)?
+            }
+            // The region's name bound, as a `let`'s: a `letrena`'s to a
+            // region entered (so never in a leaf), and left with the body's
+            // value, which is so not in tail position; a `letreap`'s to the
+            // heap's, `#f`.
+            Exp::LetRegion { arena, region, body } => {
+                let name = self.c.arena.dvar_name(region);
+                let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
+                if arena {
+                    if g.leaf {
+                        return None;
+                    }
+                    self.r_prim(g, "%region-enter", &[], env, te)?;
+                } else {
+                    g.op("const", &[Value::FALSE]);
+                }
+                let l = if g.leaf {
+                    let r = g.reg()?;
+                    g.op("setreg", &[Gen::n(r)]);
+                    RLoc::Reg(r)
+                } else {
+                    let s = g.slot();
+                    g.op("setstk", &[Gen::n(s)]);
+                    RLoc::Slot(s)
+                };
+                env.push((name, l));
+                te.push((name, Loc::Slot(usize::MAX)));
+                if arena {
+                    let RLoc::Slot(h) = l else { unreachable!() };
+                    self.r_exp(g, body, env, te, false)?;
+                    let v = g.slot();
+                    g.op("setstk", &[Gen::n(v)]);
+                    self.r_prim(g, "%region-exit", &[Arg::Slot(h), Arg::Slot(v)], env, te)?;
+                    g.done(tail);
+                } else {
+                    self.r_exp(g, body, env, te, tail)?;
+                }
+                env.truncate(depth);
+                te.truncate(tdepth);
+                g.next_reg = regs;
+                g.next_slot = slots;
             }
             Exp::If { test, then, els } => {
                 let (no, end) = (g.label(), g.label());
@@ -543,20 +562,12 @@ impl Compiler<'_> {
                 te.truncate(tdepth);
                 g.next_slot = slots;
             }
-            Exp::App { fun, args } => self.r_app(g, x, fun, &args, env, te, tail)?,
+            Exp::App { fun, args } => self.r_app(g, fun, &args, env, te, tail)?,
         }
         Some(())
     }
 
-    /// The frame slot of the handle of the region application `x` allocates
-    /// in, if that is a `letrena`'s around it in this procedure.
-    fn r_region_of(&self, g: &Gen, x: ExpId) -> O<usize> {
-        let Region::Var(d) = *self.c.facts.alloc_region.get(&x)? else { return None };
-        g.regions.iter().rev().find(|(r, _)| *r == d).map(|(_, s)| *s)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn r_app(&mut self, g: &mut Gen, x: ExpId, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+    fn r_app(&mut self, g: &mut Gen, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         if self.r_self_call(g, f, args.len(), te, tail) {
             return self.r_loop(g, args, env, te);
         }
@@ -591,10 +602,6 @@ impl Compiler<'_> {
                 // In tail position a mark replaces this frame's, which is
                 // stack code's way (`withmark-tail`); left to it.
                 Std::Threaded("withmark") if tail => return self.decline("with-mark in tail position"),
-                Std::Threaded("cons") if self.r_region_of(g, x).is_some() => {
-                    let h = self.r_region_of(g, x)?;
-                    self.r_prim(g, "%region-cons", &[Arg::Slot(h), Arg::E(args[0]), Arg::E(args[1])], env, te)?;
-                }
                 Std::Threaded(r) => {
                     let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
                     self.r_call_out(g, "threaded", routine(r) as i64, &es, env, te)?;

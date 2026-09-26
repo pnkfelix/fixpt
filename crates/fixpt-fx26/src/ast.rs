@@ -128,6 +128,9 @@ pub enum Ty {
     /// `(icell T R)`: an I-cell in region `R` (Arvind's I-structures): empty
     /// until its one write of a `T`, and never changed after.
     ICell(TyId, Region),
+    /// `(region R)`: region `R` itself, as a value: what `letrena` and
+    /// `letreap` bind their region's name to, and what `rcons` allocates in.
+    Region(Region),
     /// `(bloblet (fields T…) R)`: a bloblet in region `R` whose fields have
     /// the types `T…`, with a suffix of bytes (`docs/object-model.md`).
     /// `(bloblet (frozen T…) R)` is one whose fields have been frozen: they

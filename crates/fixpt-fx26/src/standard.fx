@@ -11,6 +11,7 @@
       ((string=? n "-") "-")
       ((string=? n "=") "=")
       ((string=? n "cons") "cons")
+      ((string=? n "rcons") "%region-cons")
       ((string=? n "car") "car")
       ((string=? n "cdr") "cdr")
       ((string=? n "null?") "null?")

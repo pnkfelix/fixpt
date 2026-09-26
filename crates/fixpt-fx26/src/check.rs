@@ -349,8 +349,16 @@ impl Checker {
                 Ok((t, eff))
             }
             Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
+            // The region's name is a variable too, of type `(region r)`:
+            // the region itself, to allocate in (`rcons`).
             Exp::LetRegion { arena, region, body } => {
-                let (t, eff) = self.synth(body)?;
+                let name = self.arena.dvar_name(region);
+                let rt = self.arena.ty(Ty::Region(Region::Var(region)));
+                let depth = self.env.len();
+                self.env.push((name, rt));
+                let r = self.synth(body);
+                self.env.truncate(depth);
+                let (t, eff) = r?;
                 self.close_region(e, if arena { "letrena" } else { "letreap" }, region, t, eff)
             }
             Exp::Bloblet { op, args } => self.synth_bloblet(e, op, &args, None),
@@ -494,7 +502,12 @@ impl Checker {
                     self.free_into(a, bound, out);
                 }
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::LetRegion { body, .. } => self.free_into(body, bound, out),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.free_into(body, bound, out),
+            Exp::LetRegion { region, body, .. } => {
+                bound.push(self.arena.dvar_name(region));
+                self.free_into(body, bound, out);
+                bound.pop();
+            }
             Exp::If { test, then, els } => {
                 for x in [test, then, els] {
                     self.free_into(x, bound, out);
@@ -583,6 +596,9 @@ impl Checker {
                 out.insert(r);
                 self.regions_walk(a, seen, out);
             }
+            Ty::Region(r) => {
+                out.insert(r);
+            }
             Ty::Pair(a, b, r) => {
                 out.insert(r);
                 self.regions_walk(a, seen, out);
@@ -653,6 +669,7 @@ impl Checker {
             }
             // References and pairs are mutable, so their contents are
             // invariant: FX-87's `ref` rule, and its pairs.
+            (Ty::Region(r), Ty::Region(s)) => r == s,
             (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 r == s && self.sub(x, y, trail) && self.sub(y, x, trail)
             }
@@ -773,6 +790,7 @@ impl Checker {
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),
             Ty::Array(a, r) => Ty::Array(self.subst_memo(a, map, memo), region(r)),
             Ty::ICell(a, r) => Ty::ICell(self.subst_memo(a, map, memo), region(r)),
+            Ty::Region(r) => Ty::Region(region(r)),
             Ty::Pair(a, b, r) => Ty::Pair(self.subst_memo(a, map, memo), self.subst_memo(b, map, memo), region(r)),
             Ty::PromptTag { answer, payload, effect, region: r } => Ty::PromptTag {
                 answer: self.subst_memo(answer, map, memo),

@@ -1087,8 +1087,9 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
      as roots when it collects the heap.
 
   *(Arenas, first cut, 2026-09-26: `heap/regions.rs`, and register code.)*
-  One arena as a stack, marked on entry and reset on exit, is **not
-  sound**, even with no polymorphism: in
+  Each `letrena` is its own arena; the question was only how to lay them
+  out. All of them in one stack of words, each marked on entry and reset
+  to its mark on exit, is **not sound**, even with no polymorphism: in
   `(letrena r0 (letrec ((f (lambda (n) (letrena r1 … (cons-in-r0 …) … (f …))))) …))`
   the `cons` in `r0` happens while `r1`, newer, is live, so it lands
   above `r1`'s mark and is freed when `r1` ends, though `r0` may hold it.
@@ -1100,26 +1101,42 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
     which a primitive's allocation goes to region `h`; too big for a
     chunk, it goes to the heap. The collector scans the live regions'
     words as roots, before the Cheney scan; `verify` walks them.
-  - Register code: a `letrena` calls out to `%region-enter`, keeps the
-    handle in a frame slot, runs the body not in tail position, and calls
-    `%region-exit`. A `cons` whose recorded region is that `letrena`'s,
-    in the same procedure, calls `%region-cons`.
-  - Everything else is the heap's, which is always sound: sites in a
-    lambda inside the body (its closure does not capture the handle), the
-    other allocating operations, `letreap`, and every other back end.
+  - Register code first, by the checker's record of each `cons`'s
+    region; replaced the same day (below).
+
+  *(Regions as values, 2026-09-26, the user's design.)* Which region an
+  allocation goes to is said in the program, not inferred: a
+  `letrena`'s or `letreap`'s name is also a variable of type
+  `(region r)`, and `(rcons r x y)` allocates in it. Plain `cons` is the
+  heap's, whatever its type says. So a closure that allocates in a
+  region captures it as it captures any variable, in every compiler
+  alike (the Rust stack compiler and `compile.fx`, which must agree
+  cell for cell, and register code); and a procedure may take a region
+  as an argument, Tofte and Talpin's region passing made explicit.
+  - Both checkers: the type `(region r)`, the name bound in the body.
+  - Every back end: a `letrena` is `%region-enter`, the body with the
+    handle bound (not in tail position), then `%region-exit h v`, which
+    gives back `v`; a `letreap` binds `#f`, which `%region-cons` takes as
+    the heap. The evaluator written in FX-26 erases regions.
+
+  The alternative the user raised: an allocator in a parameter, which a
+  body could point at a region, so that every allocation in its dynamic
+  extent goes there. Not now: explicit is simpler to trust.
 
   Next, in order:
-  1. The handle captured by the closures made inside the body, as a free
-     variable, so that a loop or helper in the body allocates in the region
-     too. Without this, a region serves only straight-line code.
-  2. The other allocating operations (`new`, arrays, bloblets, products
-     and sums), by the same call-out.
-  3. `cons` in a region inline, as the heap's is, with the region's fill
-     and limit where machine code can reach them.
+  1. `rmake-bloblet`, and region versions of the other allocating
+     operations (`new`, arrays, products and sums), by the same call-out.
+  2. Closures in a region: perhaps `rlambda` and `rplambda`.
+  3. `rcons` inline in register code, with the region's fill and limit
+     where machine code can reach them. For now it is a call-out, slower
+     per pair than the heap's inline `cons`; what a region saves is
+     collection.
   4. A prompt that records how many regions are live, and an abort that
      ends the newer ones. Until then, the regions an escape leaves live
      only until the next ending of an older region.
-  5. `letreap`.
+  5. `letreap`, a heap of its own.
+  6. The checker's record of each allocation's region
+     (`NodeFacts::alloc_region`) is no longer used to allocate; it may go.
 
 - **Responsiveness as an effect.** (Raised 2026-09-26.) Distinguish "may
   diverge without reaching a poll" from "every unbounded path polls, and

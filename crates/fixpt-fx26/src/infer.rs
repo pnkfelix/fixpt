@@ -555,6 +555,7 @@ impl Checker {
                     stack.push(x);
                     region(r)
                 }
+                Ty::Region(r) => region(r),
                 Ty::Pair(x, y, r) => {
                     stack.extend([x, y]);
                     region(r)
@@ -603,7 +604,7 @@ impl Checker {
             Ty::Pair(a, b, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Void | Ty::Link(_) => false,
+            Ty::Base(_) | Ty::Void | Ty::Link(_) | Ty::Region(_) => false,
         }
     }
 
@@ -655,6 +656,7 @@ impl Checker {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);
             }
+            (Ty::Region(r), Ty::Region(s)) => self.unify_region(r, s, u),
             (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) => {
                 self.unify_region(r, s, u);
                 self.unify(x1, y1, u, trail);

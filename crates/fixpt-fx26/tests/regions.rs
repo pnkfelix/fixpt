@@ -82,3 +82,22 @@ fn allocations_know_their_region() {
     assert_eq!(shown[0], "r");
     assert_ne!(shown[1], "r");
 }
+
+/// A region's name is also a value, `(region r)`, which `rcons` allocates
+/// in; like anything that mentions the region, it cannot leave the body,
+/// and a closure over it is as bound to the region as the region is.
+#[test]
+fn a_region_is_a_value_to_allocate_in() {
+    assert_eq!(check("(letrena r (car (the (listof int r) (rcons r 1 nil))))"), Ok(vec!["int ! pure".to_string()]));
+    assert_eq!(check("(letreap r (car (cdr (the (listof int r) (rcons r 1 (rcons r 2 nil))))))"), Ok(vec!["int ! pure".to_string()]));
+    assert_eq!(
+        check("(letrena r r)"),
+        Err("the value of `letrena r` would outlive its region: its type is (region r)".to_string())
+    );
+    let e = check("(letrena r (lambda ((x int)) (the (listof int r) (rcons r x nil))))");
+    assert!(e.as_ref().is_err_and(|m| m.contains("would outlive its region")), "{e:?}");
+    assert_eq!(
+        check("(define f (subr pure (int) int) (lambda (n) (letrena r (let ((k (lambda ((x int)) (the (listof int r) (rcons r x nil))))) (car (k n)))))) (f 3)"),
+        Ok(vec!["int ! pure".to_string()])
+    );
+}

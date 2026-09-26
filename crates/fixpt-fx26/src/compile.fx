@@ -204,7 +204,7 @@
         (e-lambda (ps body a b) (c-free body (c-bind-params ps bound) acc))
         (e-app (f args a b) (c-free f bound (c-free-all args bound acc)))
         (e-plambda (d body a b) (c-free body bound acc))
-        (e-letregion (k r body a b) (c-free body bound acc))
+        (e-letregion (k r body a b) (c-free body (cons r bound) acc))
         (e-proj (body ds a b) (c-free body bound acc))
         (e-the (d body a b) (c-free body bound acc))
         (e-if (t th el a b) (c-free t bound (c-free th bound (c-free el bound acc))))
@@ -313,7 +313,7 @@
                  (e-var (m a2 b2) (if (symbol=? m f) (and tail (= (c-count-exps args) n)) #t))
                  (else y (c-loops-only fun f n #f)))))
         (e-plambda (d body a b) (c-loops-only body f n tail))
-        (e-letregion (k r body a b) (c-loops-only body f n tail))
+        (e-letregion (k r body a b) (or (symbol=? r f) (c-loops-only body f n (and tail (not k)))))
         (e-proj (body ds a b) (c-loops-only body f n tail))
         (e-the (d body a b) (c-loops-only body f n tail))
         (e-if (t th el a b)
@@ -561,7 +561,21 @@
         (e-plambda (d body a b) (c-exp body e depth c tail))
         ;; Regions are erased, for now: a `letrena`'s or `letreap`'s allocation is the
         ;; heap's.
-        (e-letregion (k r body a b) (c-exp body e depth c tail))
+        ;; The region's name bound in a slot, as a `let`'s: a `letrena`'s to
+        ;; a region entered, and left with the body's value, which is so not
+        ;; in tail position; a `letreap`'s to the heap's, `#f`.
+        (e-letregion (k r body a b)
+          (let ((inner (the cenv (cons (cons r (at-slot depth)) e))))
+            (if k
+                (begin
+                  (c-prim c "%region-enter" 0)
+                  (c-exp body inner (+ depth 1) c #f)
+                  (c-prim c "%region-exit" 2)
+                  (c-done c tail))
+                (begin
+                  (c-lit c (wcell-bool #f))
+                  (c-exp body inner (+ depth 1) c tail)
+                  (c-unbind c depth 1 tail)))))
         (e-proj (body ds a b) (c-exp body e depth c tail))
         (e-the (d body a b) (c-exp body e depth c tail))
         (e-if (t th el a b)

@@ -114,7 +114,7 @@
 
 ;; The primitives the evaluator has, between spaces.
 (define primitive-names string
-  " + - * = < > <= >= not modulo quotient cons car cdr null? set-car! set-cdr! new get set make-icell icell-put! icell-get char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc ")
+  " + - * = < > <= >= not modulo quotient cons rcons car cdr null? set-car! set-cdr! new get set make-icell icell-put! icell-get char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc ")
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
 (define occurs? (subr pure (string string int) bool)
@@ -217,6 +217,7 @@
             ((string=? n ">=") (cmp2 xs (lambda (a b) (>= a b))))
             ((string=? n "not") (v-bool (not (as-bool (arg xs 0)))))
             ((string=? n "cons") (v-pair (make-bloblet 0 (arg xs 0) (arg xs 1))))
+            ((string=? n "rcons") (v-pair (make-bloblet 0 (arg xs 1) (arg xs 2))))
             ((string=? n "car") (bloblet-ref (as-pair (arg xs 0)) 0))
             ((string=? n "cdr") (bloblet-ref (as-pair (arg xs 0)) 1))
             ((string=? n "null?") (v-bool (tagcase (arg xs 0) (v-nil () #t) (else x #f))))
@@ -296,8 +297,9 @@
         (e-lambda (ps body a b) (v-clo ps body e))
         (e-app (f args a b) (let* ((fv (eval f e)) (xs (eval-all args e))) (apply-val fv xs)))
         (e-plambda (d body a b) (eval body e))
-        ;; Regions are erased: a `letrena`'s or `letreap`'s allocation is the heap's.
-        (e-letregion (k r body a b) (eval body e))
+        ;; Regions are erased: a `letrena`'s or `letreap`'s allocation is the
+        ;; heap's, and its name, the region as a value, is unit.
+        (e-letregion (k r body a b) (eval body (cons (cons r (cell (v-unit))) e)))
         (e-proj (body ds a b) (eval body e))
         (e-the (d body a b) (eval body e))
         (e-if (t th el a b) (if (as-bool (eval t e)) (eval th e) (eval el e)))
