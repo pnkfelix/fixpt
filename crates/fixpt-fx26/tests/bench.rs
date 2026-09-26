@@ -45,7 +45,7 @@ fn benchmarks() {
         // Last: compiling to machine code changes the words' entries.
         ("words compiled", fixpt_native::threaded::run_word_compiled),
     ];
-    println!("| program | lowered | {} |", machines.map(|m| m.0).join(" | "));
+    println!("| program | lowered | {} | register code |", machines.map(|m| m.0).join(" | "));
     for path in names {
         let text = std::fs::read_to_string(&path).unwrap();
         let name = path.file_stem().unwrap().to_string_lossy().to_string();
@@ -72,6 +72,23 @@ fn benchmarks() {
                 assert!(lowered.contains(&out), "{name}: {out} against {lowered}");
                 row.push(format!("{:.1} ms", 1e3 * t));
             }
+            // Register code (PLAN.md 13h′): the program compiled again, with
+            // each lambda's register code, and run as that.
+            let w = sc.make(|m| {
+                let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                comp.registers = true;
+                comp.program(&tops).expect("compiles")
+            });
+            sc.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+            let (out, t) = best(|| {
+                let none = sc.make(|_| Value::NULL);
+                match sc.call_global("%run-word", &[w, none]) {
+                    Ok(v) => sc.write(v),
+                    Err(e) => format!("!! {e}"),
+                }
+            });
+            assert!(lowered.contains(&out), "{name} as register code: {out} against {lowered}");
+            row.push(format!("{:.1} ms", 1e3 * t));
         });
         println!("| {name} | {} |", row.join(" | "));
     }

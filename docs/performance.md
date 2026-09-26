@@ -481,3 +481,35 @@ load its offset through the ip; the old tail call took its ip from the
 closure instead. That loss is kept for the gains elsewhere. `fib` and
 `tak` recur through globals, which are not yet known calls (a global can
 be defined again at the REPL), so they gain nothing here.
+
+## Register code, first version (13h′ a–b)
+
+Each lambda's register code (PLAN.md 13h′): MacScheme-machine
+instructions made by the Rust compiler from the same trees, compiled to
+arm64. `RESULT` is `x0`, the arguments are in `x1`…`x8`, and the closure
+running is `REG0`. A leaf keeps everything in registers. Any other
+procedure keeps its parameters and `let`s in a frame, since a call or
+call-out may collect. Calls between register procedures pass their
+arguments in registers; returns still go by the data stack, as threaded
+code's do, so either kind may return to the other. What the compiler
+does not do yet (`letrec`, `prompt`, `tagcase`, products and sums, among
+others) stays threaded, behind an adapter.
+
+Best of two runs, release, against the typed-primitive and loop figures
+(ms):
+
+| program  | hand-encoded | words compiled | register code | against words compiled |
+| -------- | ------------ | -------------- | ------------- | ---------------------- |
+| closures | 66.8         | 58.5           | 42.1          | 1.39×                  |
+| fib      | 15.7         | 12.2           | 7.2           | 1.69×                  |
+| lists    | 51.0         | 44.5           | 31.1          | 1.43×                  |
+| loop     | 65.3         | 38.9           | 6.6           | 5.9×                   |
+| tak      | 6.3          | 4.4            | 2.3           | 1.91×                  |
+
+Against the 13b baseline on the hand-encoded machine: `fib` 2.3×, `tak`
+3.0×, `loop` 10×. `loop` is a leaf: its counter and sum stay in `x1` and
+`x2`, and each iteration is a compare, two adds and a branch, with a fuel
+check. In `fib` and `tak` the arguments travel in registers, and only
+what lives across a call touches memory. `closures` and `lists` gain
+least: they allocate, which is still a call-out to Rust, and their
+procedures that use `letrec` or `tagcase` are still threaded.

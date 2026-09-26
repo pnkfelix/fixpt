@@ -144,6 +144,7 @@ impl Compiler<'_> {
         }
         let leaf = !self.r_collects(body, inner, this);
         let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None };
+        g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
         for (n, l) in inner {
             env.push((*n, match l {

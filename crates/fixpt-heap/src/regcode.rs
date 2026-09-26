@@ -53,6 +53,8 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
         let reg = |v: Value| count(v, REGS as i64) && v.as_fixnum() >= 1;
         let n = REGS as i64;
         let ok = match name {
+            "args" => i == 0 && count(o(0), n),
+            _ if i == 0 => return Err("register code begins `args n`".into()),
             "reg" => count(o(0), n),
             "setreg" => reg(o(0)),
             "movereg" => count(o(0), n) && reg(o(1)),

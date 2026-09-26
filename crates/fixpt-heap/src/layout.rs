@@ -399,6 +399,7 @@ pub mod regcode {
 
     /// The operations: name, operand count, and what each does.
     pub const OPS: &[(&str, usize, &str)] = &[
+        ("args", 1, "entered with n arguments in REG1…REGn; first, and only first (arities are static: nothing is checked)"),
         ("const", 1, "RESULT := x, the operand"),
         ("global", 1, "RESULT := the value in global cell g"),
         ("setglbl", 1, "global cell g := RESULT"),

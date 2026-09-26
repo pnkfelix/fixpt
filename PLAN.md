@@ -925,7 +925,11 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
      - (c) every form, until the bootstrap runs as register code;
      - (d) known calls (`callk`, 13e) as direct branches;
      - (e) the compiler written in FX-26 to match, instruction for
-       instruction, as for the threaded compilers.
+       instruction, as for the threaded compilers. *((a) and (b) done 2026-09-26, the IR made by the Rust compiler
+     and tested by running every test program as register code against
+     the lowering, with no separate interpreter. `fib` 1.7×, `tak` 1.9×
+     and `loop` 5.9× faster than compiled threaded words; see
+     `docs/performance.md`.)*
 - **13i. Join points.** A local procedure used only in saturated tail
   calls becomes a label in its word.
 

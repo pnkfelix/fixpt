@@ -1,0 +1,362 @@
+//! Register code (PLAN.md 13h′) as machine code, on the machine the
+//! threaded code runs on, so that each may call the other.
+//!
+//! `RESULT` is `x0`; `REG1`…`REG8` are `x1`…`x8`; `REG0` is `CLO`. While
+//! register code runs, `CUR` is its register word, and `IP`, which it has no
+//! use for as an ip, points at the word's last field, so that its constants
+//! and global cells are one load away (`cell`). Whatever may collect is a
+//! call-out, or a call, and everything live is in the frame by then (the
+//! compiler sees to it): afterwards the machine's registers are loaded from
+//! the state, `IP` made again, and `RESULT` taken from the data stack, where
+//! a call-out, or a return, leaves a value. Those resume points are what the
+//! word's resume table lists, so that a return, or a continuation captured
+//! in a call-out, comes back to them.
+//!
+//! A call whose callee's word has compiled register code jumps to it with
+//! the arguments in registers; any other pushes them as a threaded frame. A
+//! threaded caller enters a word with register code through the word's own
+//! entry, which moves the frame's arguments into registers.
+
+use super::*;
+use fixpt_heap::layout::regcode::{OPS, REGS};
+use fixpt_heap::layout::threaded::{routine, WORD_TWIN};
+
+const RESULT: Reg = 0;
+const X12: Reg = 12;
+
+/// `REGk`'s machine register.
+fn reg(k: usize) -> Reg {
+    if k == 0 { CLO } else { k as Reg }
+}
+
+impl Asm {
+    /// `IP` := the address of the running register word's field `fields`,
+    /// its last, from which field `f` is `8 × (fields − f)` bytes up.
+    fn pool(&mut self, fields: usize) {
+        self.e(add(IP, BASE, CUR));
+        self.sub_const(IP, IP, 4 + 8 * fields as u64);
+    }
+    /// `d := n − k`, for a constant `k` of any size (clobbers `X16`).
+    fn sub_const(&mut self, d: Reg, n: Reg, k: u64) {
+        if k < 4096 {
+            self.e(sub_imm(d, n, k as u32));
+        } else {
+            self.es(&mov_imm64(X16, k));
+            self.e(sub(d, n, X16));
+        }
+    }
+    /// `dst` := field `f` of the running register word.
+    fn cell(&mut self, dst: Reg, f: usize, fields: usize) {
+        let off = 8 * (fields - f) as u64;
+        if off < 32768 {
+            self.e(ldr(dst, IP, off as u32));
+        } else {
+            self.es(&mov_imm64(X16, off));
+            self.e(add(X16, IP, X16));
+            self.e(ldr(dst, X16, 0));
+        }
+    }
+    /// `dst` := field `f` of the bloblet whose `suffix + 4` is in `b`.
+    fn field_of(&mut self, dst: Reg, b: Reg, f: usize) {
+        let off = field_off(f);
+        if off >= -256 {
+            self.e(ldur(dst, b, off));
+        } else {
+            self.sub_const(X16, b, -off as u64);
+            self.e(ldr(dst, X16, 0));
+        }
+    }
+    /// Frame slot `n`: `8n` bytes below `FP`.
+    fn slot(&mut self, r: Reg, n: usize, store: bool) {
+        let off = 8 * n as i64;
+        if off <= 256 {
+            self.e(if store { stur(r, FP, -off) } else { ldur(r, FP, -off) });
+        } else {
+            self.sub_const(X16, FP, off as u64);
+            self.e(if store { str(r, X16, 0) } else { ldr(r, X16, 0) });
+        }
+    }
+    /// `IP` := the address of the running word's field `f`, as a threaded
+    /// ip is, for what reads the word from where the ip is (`save`).
+    fn ip_at(&mut self, f: usize) {
+        self.e(add(IP, BASE, CUR));
+        self.sub_const(IP, IP, 4 + 8 * f as u64);
+    }
+    /// Push `REG1`…`REGn`, `REG1` deepest.
+    fn push_regs(&mut self, n: usize) {
+        for k in 1..=n {
+            self.e(str_pre(reg(k), DSP, -8));
+        }
+    }
+    /// Back from somewhere that may have collected: the value on the data
+    /// stack into `RESULT`, and `IP` made again.
+    fn resumed(&mut self, fields: usize) {
+        self.e(ldr_post(RESULT, DSP, 8));
+        self.pool(fields);
+    }
+    /// A call-out to routine `n` with the ip at field `f`: as
+    /// [`callout`](Asm::callout), but on, whatever the routine, to the code
+    /// after it, or, for control, to the resume point `f` names.
+    fn r_callout(&mut self, n: u64, f: usize) {
+        self.ip_at(f);
+        self.save();
+        self.e(mov(0, ST));
+        self.e(movz(1, n as u32, 0));
+        self.e(ldr(X16, ST, off(offset_of!(State, callout))));
+        self.e(blr(X16));
+        let exit = self.exit_common;
+        self.cbnz(0, exit);
+        self.load();
+        if CONTROL_CALLOUTS.contains(&ROUTINES[n as usize].0) {
+            self.enter_cur(X13);
+        }
+    }
+}
+
+/// A register word's machine code: its register entry first, then an
+/// instruction's code after another; and where each cell's resume point
+/// is (`-1` for none), for [`NativeMachine::install`].
+pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(Vec<u32>, Vec<i64>), String> {
+    let fields = heap.bloblet_head(rw).fields;
+    let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(rw, k)).collect();
+    let mut starts = vec![false; cells.len() + 1];
+    let mut i = 0;
+    while i < cells.len() {
+        starts[i] = true;
+        i += 1 + OPS[cells[i].as_fixnum() as usize].1;
+    }
+    let mut a = Asm::new();
+    let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
+    let mut resume = vec![-1i64; cells.len()];
+    let far_exit = a.exit_common;
+    // The register entry.
+    a.fuel();
+    a.rs_limit();
+    a.pool(fields);
+    let mut i = 0;
+    while i < cells.len() {
+        a.bind(labels[i]);
+        let (name, n, _) = OPS[cells[i].as_fixnum() as usize];
+        let o = |j: usize| cells[i + 1 + j];
+        let f = |j: usize| WORD_CELL0 + i + 1 + j;
+        let next = i + 1 + n;
+        let k = |v: Value| v.as_fixnum() as usize;
+        match name {
+            "args" => {}
+            "const" => {
+                let v = o(0);
+                if v.is_fixnum() || v.raw() & 7 == 3 {
+                    a.es(&mov_imm64(RESULT, v.raw()));
+                } else {
+                    a.cell(RESULT, f(0), fields);
+                }
+            }
+            "global" | "setglbl" => {
+                a.cell(X16, f(0), fields);
+                a.e(add(X11, BASE, X16));
+                a.e(if name == "global" { ldur(RESULT, X11, field_off(2)) } else { stur(RESULT, X11, field_off(2)) });
+            }
+            "reg" => a.e(mov(RESULT, reg(k(o(0))))),
+            "setreg" => a.e(mov(reg(k(o(0))), RESULT)),
+            "movereg" => a.e(mov(reg(k(o(1))), reg(k(o(0))))),
+            "lexical" => {
+                a.e(add(X11, BASE, CLO));
+                a.field_of(RESULT, X11, CLOSURE_FREE0 + k(o(0)));
+            }
+            "save" => {
+                let m = k(o(0));
+                a.sub_const(DSP, DSP, 8 * m as u64);
+                a.value(X15, Value::FALSE);
+                for s in 0..m {
+                    a.e(str(X15, DSP, 8 * s as u32));
+                }
+                if m == 0 {
+                    a.e(sub_imm(FP, DSP, 8));
+                } else {
+                    a.e(add_imm(FP, DSP, 8 * (m as u32 - 1)));
+                }
+                a.ds_limit();
+            }
+            "pop" => {
+                let m = 8 * k(o(0)) as u32;
+                a.e(add_imm(DSP, DSP, m));
+            }
+            "stack" => a.slot(RESULT, k(o(0)), false),
+            "setstk" => a.slot(RESULT, k(o(0)), true),
+            "load" => a.slot(reg(k(o(0))), k(o(1)), false),
+            "store" => a.slot(reg(k(o(0))), k(o(1)), true),
+            "op1" => match ROUTINES[k(o(0))].0 {
+                r @ ("pair-car" | "pair-cdr") => {
+                    a.e(add(X14, BASE, RESULT));
+                    a.e(ldur(RESULT, X14, if r == "pair-car" { -1 } else { 7 }));
+                }
+                r => return Err(format!("op1 {r} in register code")),
+            },
+            "op2" | "op2imm" => {
+                let other = if name == "op2" {
+                    reg(k(o(1)))
+                } else {
+                    let v = o(1);
+                    if v.is_fixnum() || v.raw() & 7 == 3 {
+                        a.es(&mov_imm64(X13, v.raw()));
+                    } else {
+                        a.cell(X13, f(1), fields);
+                    }
+                    X13
+                };
+                match ROUTINES[k(o(0))].0 {
+                    r @ ("int-add" | "int-sub") => {
+                        a.e(if r == "int-add" { adds(RESULT, RESULT, other) } else { subs(RESULT, RESULT, other) });
+                        a.trap_if(Cond::Vs, Trap::Overflow { routine: if r == "int-add" { "int-add" } else { "int-sub" } });
+                    }
+                    r @ ("int-less" | "eq") => {
+                        a.e(cmp(RESULT, other));
+                        a.value(X16, Value::TRUE);
+                        a.value(X15, Value::FALSE);
+                        a.e(csel(RESULT, X16, X15, if r == "eq" { Cond::Eq } else { Cond::Lt }));
+                    }
+                    r => return Err(format!("{name} {r} in register code")),
+                }
+            }
+            "field" => {
+                a.e(add(X11, BASE, RESULT));
+                a.field_of(RESULT, X11, k(o(0)));
+            }
+            "prim" | "lambda" | "threaded" => {
+                let (count, routine_n, at) = match name {
+                    "prim" => (k(o(1)), routine("prim"), f(0)),
+                    "lambda" => (k(o(1)), routine("closure"), f(0)),
+                    _ => (k(o(1)), k(o(0)) as u64, WORD_CELL0 + next),
+                };
+                a.push_regs(count);
+                a.r_callout(routine_n, at);
+                resume[next] = a.here() as i64;
+                a.resumed(fields);
+            }
+            "invoke" | "tailinvoke" => {
+                let tail = name == "tailinvoke";
+                let count = k(o(0));
+                let threaded = a.label();
+                // The callee, its word, and the word's twin.
+                a.e(mov(W, RESULT));
+                a.e(add(X11, BASE, W));
+                a.e(ldur(X12, X11, field_off(CLOSURE_WORD)));
+                a.e(add(X11, BASE, X12));
+                a.e(ldur(X10, X11, field_off(WORD_TWIN)));
+                a.value(X15, Value::FALSE);
+                a.e(cmp(X10, X15));
+                a.b_cond(Cond::Eq, threaded);
+                a.e(add(X11, BASE, X10));
+                a.e(ldur(X15, X11, field_off(WORD_ENTRY)));
+                a.cbz(X15, threaded);
+                // Register code: the arguments stay where they are.
+                a.e(ldr_reg(X16, TABLE, X15));
+                if !tail {
+                    a.ip_at(WORD_CELL0 + next);
+                    a.push_return();
+                }
+                a.e(mov(CLO, W));
+                a.e(mov(CUR, X10));
+                a.e(br(X16));
+                // Threaded code: the arguments as its frame.
+                a.bind(threaded);
+                a.fuel();
+                a.push_regs(count);
+                a.ds_limit();
+                a.rs_limit();
+                if !tail {
+                    a.ip_at(WORD_CELL0 + next);
+                    a.push_return();
+                }
+                if count == 0 {
+                    a.e(sub_imm(FP, DSP, 8));
+                } else {
+                    a.e(add_imm(FP, DSP, 8 * (count as u32 - 1)));
+                }
+                a.e(mov(CLO, W));
+                a.e(mov(CUR, X12));
+                a.ip_at(WORD_CELL0);
+                a.e(movz(X13, (8 * WORD_CELL0) as u32, 0));
+                a.enter_cur(X13);
+                if !tail {
+                    resume[next] = a.here() as i64;
+                    a.resumed(fields);
+                }
+            }
+            "return" => {
+                a.e(str_pre(RESULT, DSP, -8));
+                a.pop_return();
+            }
+            "branch" | "branchf" => {
+                let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
+                if name == "branchf" {
+                    a.value(X16, Value::FALSE);
+                    a.e(cmp(RESULT, X16));
+                    a.b_cond(Cond::Eq, labels[to]);
+                } else {
+                    if to <= i {
+                        a.fuel();
+                    }
+                    a.b(labels[to]);
+                }
+            }
+            other => return Err(format!("`{other}` in register code")),
+        }
+        // Register code falls through to the next instruction: around the
+        // traps, when there are some.
+        if !a.stubs.is_empty() {
+            let past = a.label();
+            a.b(past);
+            a.flush_stubs();
+            a.bind(past);
+        }
+        i = next;
+    }
+    a.bind(labels[cells.len()]);
+    let [tc, ec] = [a.trap_common, a.exit_common];
+    a.bind_at(tc, far[0]);
+    a.bind_at(ec, far[1]);
+    let _ = (far_exit, starts, REGS);
+    Ok((a.finish(), resume))
+}
+
+/// The entry a threaded caller takes into a word with register code: the
+/// `n` arguments from its frame into registers, the frame dropped, and on
+/// to the register word's entry, native slot `slot`.
+pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u32> {
+    let mut a = Asm::new();
+    for i in 0..n {
+        a.e(ldur(reg(i + 1), FP, -8 * i as i64));
+    }
+    a.e(add_imm(DSP, FP, 8));
+    a.e(add(X11, BASE, CUR));
+    a.e(ldur(CUR, X11, field_off(WORD_TWIN)));
+    a.e(ldr(X16, TABLE, 8 * slot as u32));
+    a.e(br(X16));
+    a.finish()
+}
+
+impl NativeMachine {
+    /// Compile `word`'s register code, if it has some and it is not yet
+    /// compiled: the register word's code in a native slot of its own, and
+    /// `word` entered through an adapter to it. Whether it did.
+    pub fn compile_register_word(&mut self, heap: &mut Heap, word: Value) -> Result<bool, String> {
+        let rw = heap.bloblet_slot(word, WORD_TWIN);
+        if !heap.is_register_word(rw) || heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum() != 0 {
+            return Ok(false);
+        }
+        let (code, _) = assemble_register_word(heap, rw, [0, 0])?;
+        let (at, far) = self.reserve(code.len())?;
+        let (code, resume) = assemble_register_word(heap, rw, far)?;
+        self.install(heap, rw, at, &code, &resume)?;
+        let slot = heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum() as usize;
+        let n = heap.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;
+        let adapter = assemble_adapter(n, slot);
+        let (at, _) = self.reserve(adapter.len())?;
+        let cells = heap.bloblet_head(word).fields + 1 - WORD_CELL0;
+        let mut starts = vec![-1i64; cells];
+        starts[0] = 0;
+        self.install(heap, word, at, &adapter, &starts)?;
+        Ok(true)
+    }
+}

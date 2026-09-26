@@ -48,6 +48,8 @@ use std::mem::offset_of;
 mod state {
     include!("state.rs");
 }
+mod regcode;
+pub use regcode::{assemble_adapter, assemble_register_word};
 pub(crate) use state::{ROUTINE_SLOTS, State};
 
 // The registers the machine lives in: all callee-saved, so they survive a
@@ -1483,6 +1485,13 @@ impl NativeMachine {
     /// Compile `word` and every word it can reach through its cells and
     /// operands: words called, closures made, literals.
     pub fn compile_reachable(&mut self, heap: &mut Heap, word: Value) -> Result<usize, String> {
+        self.compile_reachable_as(heap, word, false)
+    }
+
+    /// [`compile_reachable`](Self::compile_reachable), with each word that
+    /// has register code (PLAN.md 13h′) run as register code when
+    /// `registers`, and everything its register code reaches compiled too.
+    pub fn compile_reachable_as(&mut self, heap: &mut Heap, word: Value, registers: bool) -> Result<usize, String> {
         let closure = kind("threaded-closure");
         let (mut todo, mut seen, mut n) = (vec![word], std::collections::HashSet::new(), 0);
         while let Some(w) = todo.pop() {
@@ -1502,7 +1511,18 @@ impl NativeMachine {
                 }
             }
             if entry == ROUTINE_DOCOL {
-                self.compile_word(heap, w)?;
+                let twin = heap.bloblet_slot(w, fixpt_heap::layout::threaded::WORD_TWIN);
+                if registers && heap.is_register_word(twin) {
+                    for k in WORD_CELL0..=heap.bloblet_head(twin).fields {
+                        let v = heap.bloblet_slot(twin, k);
+                        if heap.is_threaded_word(v) {
+                            todo.push(v);
+                        }
+                    }
+                    self.compile_register_word(heap, w)?;
+                } else {
+                    self.compile_word(heap, w)?;
+                }
                 n += 1;
             }
         }
@@ -1583,6 +1603,22 @@ pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value],
         if compile {
             m.compile_reachable(&mut rt.heap, word)?;
         }
+        let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+        report_callouts();
+        out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
+    })
+}
+
+/// [`run_word`], compiling what it runs, and running as register code
+/// (PLAN.md 13h′) each word that has some.
+pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    MACHINE.with(|m| {
+        let Ok(mut m) = m.try_borrow_mut() else {
+            let out = NativeMachine::new().run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+            return out?.last().copied().ok_or_else(|| "the word left nothing".to_string());
+        };
+        let m = m.get_or_insert_with(NativeMachine::new);
+        m.compile_reachable_as(&mut rt.heap, word, true)?;
         let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
         report_callouts();
         out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
