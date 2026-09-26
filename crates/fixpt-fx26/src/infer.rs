@@ -83,6 +83,11 @@ impl Checker {
                 self.expect(e, t, expected)?;
                 Ok(eff)
             }
+            Exp::Bloblet { op, args } => {
+                let (t, eff) = self.synth_bloblet(e, op, &args, Some(expected))?;
+                self.expect(e, t, expected)?;
+                Ok(eff)
+            }
             Exp::Var(s) if self.lookup(s).is_some_and(|t| matches!(self.arena.get(t), Ty::Poly { .. })) => {
                 let t = self.lookup(s).expect("bound");
                 let inst = self.instantiate_against(t, expected, span)?;
@@ -497,6 +502,10 @@ impl Checker {
                     stack.extend([x, y]);
                     region(r)
                 }
+                Ty::Bloblet { fields, region: r, .. } => {
+                    stack.extend(fields);
+                    region(r)
+                }
                 Ty::PromptTag { answer: x, payload: y, effect: e, region: r }
                 | Ty::Composable { arg: x, answer: y, effect: e, region: r } => {
                     stack.extend([x, y]);
@@ -528,6 +537,7 @@ impl Checker {
             }
             Ty::Poly { body, .. } => self.walk_vars(body, seen, hit),
             Ty::Ref(a, _) | Ty::MarkKey(a, _) => self.walk_vars(a, seen, hit),
+            Ty::Bloblet { fields, .. } => fields.iter().any(|f| self.walk_vars(*f, seen, hit)),
             Ty::Pair(a, b, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
@@ -584,6 +594,12 @@ impl Checker {
                 self.unify_region(r, s, u);
                 self.unify(x1, y1, u, trail);
                 self.unify(x2, y2, u, trail);
+            }
+            (Ty::Bloblet { fields: fp, region: r, .. }, Ty::Bloblet { fields: fa, region: s, .. }) if fp.len() == fa.len() => {
+                self.unify_region(r, s, u);
+                for (x, y) in fp.iter().zip(&fa) {
+                    self.unify(*x, *y, u, trail);
+                }
             }
             (
                 Ty::PromptTag { answer: a1, payload: h1, effect: d1, region: r1 },

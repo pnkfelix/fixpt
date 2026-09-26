@@ -25,7 +25,7 @@
 //! **Prompts** delimit control on their tag's region, under a condition of
 //! their own: see `synth_prompt`.
 
-use crate::ast::{Arena, Atom, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
+use crate::ast::{Arena, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::error::{FxError, R};
 use crate::parse::DScope;
 use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
@@ -319,6 +319,7 @@ impl Checker {
                 Ok((t, eff))
             }
             Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
+            Exp::Bloblet { op, args } => self.synth_bloblet(e, op, &args, None),
             Exp::Begin(items) => {
                 let mut eff = Effect::pure();
                 let mut last = self.unit;
@@ -431,6 +432,11 @@ impl Checker {
                 }
             }
             Exp::The { exp, .. } => self.free_into(exp, bound, out),
+            Exp::Bloblet { args, .. } => {
+                for a in args {
+                    self.free_into(a, bound, out);
+                }
+            }
         }
     }
 
@@ -475,6 +481,12 @@ impl Checker {
             Ty::MarkKey(t, r) => {
                 out.insert(r);
                 self.regions_walk(t, seen, out);
+            }
+            Ty::Bloblet { fields, region, .. } => {
+                out.insert(region);
+                for f in fields {
+                    self.regions_walk(f, seen, out);
+                }
             }
         }
     }
@@ -547,6 +559,20 @@ impl Checker {
                 Ty::Composable { arg: t2, answer: a2, effect: d2, region: r2 },
             ) => r1 == r2 && d1.within(&d2) && self.sub(t2, t1, trail) && self.sub(a1, a2, trail),
             (Ty::MarkKey(x, r), Ty::MarkKey(y, s)) => r == s && self.sub(x, y, trail) && self.sub(y, x, trail),
+            // A bloblet's fields are invariant, as a reference's contents
+            // are, unless they are frozen, when nothing can store into them.
+            // Freezing is a change of type, never a subtype: a bloblet seen
+            // as frozen through one name could still be written through
+            // another.
+            (
+                Ty::Bloblet { fields: fa, frozen: za, region: r },
+                Ty::Bloblet { fields: fb, frozen: zb, region: s },
+            ) => {
+                r == s
+                    && za == zb
+                    && fa.len() == fb.len()
+                    && fa.iter().zip(&fb).all(|(x, y)| self.sub(*x, *y, trail) && (za || self.sub(*y, *x, trail)))
+            }
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
                     return false;
@@ -627,6 +653,11 @@ impl Checker {
                 region: region(r),
             },
             Ty::MarkKey(t, r) => Ty::MarkKey(self.subst_memo(t, map, memo), region(r)),
+            Ty::Bloblet { fields, frozen, region: r } => Ty::Bloblet {
+                fields: fields.iter().map(|f| self.subst_memo(*f, map, memo)).collect(),
+                frozen,
+                region: region(r),
+            },
             other => other,
         };
         let id = self.arena.ty(new);
@@ -679,6 +710,97 @@ impl Checker {
     /// except the tag itself when `tag` is a variable. A tag the body makes
     /// for itself is fine: an abort to it with no prompt of its own inside
     /// the body is an error, not a jump past this one.
+    // --------------------------------------------------------------- bloblets
+    /// The bloblet forms. `expected`, when checking, supplies a new
+    /// bloblet's region and field types.
+    pub(crate) fn synth_bloblet(
+        &mut self,
+        e: ExpId,
+        op: BlobletOp,
+        args: &[ExpId],
+        expected: Option<TyId>,
+    ) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let int = self.int;
+        if op == BlobletOp::Make {
+            let (bytes, fields) = args.split_first().expect("parsed");
+            let mut eff = self.check(*bytes, int)?;
+            let want = expected.and_then(|t| match self.arena.get(t).clone() {
+                Ty::Bloblet { fields: fs, frozen: false, region } if fs.len() == fields.len() => Some((fs, region)),
+                _ => None,
+            });
+            let (tys, region) = match want {
+                Some((fs, region)) => {
+                    for (f, t) in fields.iter().zip(&fs) {
+                        eff = eff.union(&self.check(*f, *t)?);
+                    }
+                    (fs, region)
+                }
+                None => {
+                    let mut tys = Vec::new();
+                    for f in fields {
+                        let (t, fe) = self.synth(*f)?;
+                        eff = eff.union(&fe);
+                        tys.push(t);
+                    }
+                    (tys, self.fresh_region_named("bloblet"))
+                }
+            };
+            eff.0.insert(Atom::Alloc(region));
+            let t = self.arena.ty(Ty::Bloblet { fields: tys, frozen: false, region });
+            let eff = self.mask(e, &eff, t);
+            return Ok((t, eff));
+        }
+        let (b, rest) = args.split_first().expect("parsed");
+        let (bt, mut eff) = self.synth(*b)?;
+        let Ty::Bloblet { fields, frozen, region } = self.arena.get(bt).clone() else {
+            return Err(FxError::at(self.arena.span_of(*b), format!("a bloblet is expected here, and this is a {}", self.show_ty(bt))));
+        };
+        let field = |c: &Self, i: usize| -> R<TyId> {
+            fields.get(i).copied().ok_or_else(|| {
+                FxError::at(span, format!("a {} has no field {i}: its fields are 0 to {}", c.show_ty(bt), fields.len() as i64 - 1))
+            })
+        };
+        let t = match op {
+            BlobletOp::Make => unreachable!(),
+            BlobletOp::Ref(i) => {
+                let t = field(self, i)?;
+                if !frozen {
+                    eff.0.insert(Atom::Read(region));
+                }
+                t
+            }
+            BlobletOp::Set(i) => {
+                let t = field(self, i)?;
+                if frozen {
+                    return Err(FxError::at(span, format!("a {} cannot be changed: its fields are frozen", self.show_ty(bt))));
+                }
+                eff = eff.union(&self.check(rest[0], t)?);
+                eff.0.insert(Atom::Write(region));
+                self.unit
+            }
+            BlobletOp::Freeze => {
+                eff.0.insert(Atom::Write(region));
+                self.arena.ty(Ty::Bloblet { fields: fields.clone(), frozen: true, region })
+            }
+            BlobletOp::Byte => {
+                eff = eff.union(&self.check(rest[0], int)?);
+                eff.0.insert(Atom::Read(region));
+                int
+            }
+            BlobletOp::SetByte => {
+                eff = eff.union(&self.check(rest[0], int)?);
+                eff = eff.union(&self.check(rest[1], int)?);
+                eff.0.insert(Atom::Write(region));
+                self.unit
+            }
+            // The suffix's length never changes.
+            BlobletOp::Bytes => int,
+        };
+        let eff = self.mask(e, &eff, t);
+        Ok((t, eff))
+    }
+
     fn synth_prompt(&mut self, e: ExpId, tag: ExpId, body: ExpId, handler: ExpId) -> R<(TyId, Effect)> {
         let (tt, te) = self.synth(tag)?;
         let Ty::PromptTag { answer, payload, effect: bound, region } = self.arena.get(tt).clone() else {

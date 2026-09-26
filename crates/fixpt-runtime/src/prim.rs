@@ -116,6 +116,22 @@ fn int(rt: &mut Runtime, v: Value) -> Outcome<i64> {
     rt.type_error("an exact integer that fits a machine word", v)
 }
 
+/// The kind of a bloblet made by `%make-bloblet`.
+const PLAIN_BLOBLET: u8 = 32;
+
+fn bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
+    if v.is_bloblet() { Ok(v) } else { rt.type_error("a bloblet", v) }
+}
+
+/// A bloblet of kind `bloblet`: one the program made, so one it may change.
+fn plain_bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
+    if v.is_bloblet() && rt.heap.bloblet_kind(v) == PLAIN_BLOBLET {
+        Ok(v)
+    } else {
+        rt.type_error("a bloblet the program made", v)
+    }
+}
+
 fn index(rt: &mut Runtime, v: Value, len: usize, what: &str) -> Outcome<usize> {
     let i = int(rt, v)?;
     if i < 0 || i as usize >= len {
@@ -663,6 +679,82 @@ prims! {
     // ---- boxes ----
     // Assignment conversion's cells. Reached only through `Node::PrimCall`,
     // never through a global, so redefining `vector-ref` cannot break `set!`.
+    // ---- bloblets (`docs/object-model.md`) ----
+    // Fields are named by `k`, their negative offset from the suffix; field
+    // 1 is the trailer, so a bloblet made here has fields 2 through F. Any
+    // bloblet can be read; only plain ones (kind `bloblet`) written, so the
+    // engines' own objects cannot be changed from here.
+    "%make-bloblet", 1, None, simple!(|rt, a| {
+        let bytes = int(rt, a[0])?;
+        if !(0..=u32::MAX as i64).contains(&bytes) { return rt.fail("a bloblet's suffix is 0 to 4 GiB", &[a[0]]); }
+        let n = a.len() - 1;
+        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, n, bytes as usize, true);
+        for (i, v) in a[1..].iter().enumerate() {
+            rt.heap.set_bloblet_slot(b, i + 2, *v);
+        }
+        Ok(b)
+    });
+    "%bloblet?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_bloblet())));
+    "%bloblet-kind", 1, Some(1), simple!(|rt, a| {
+        let b = bloblet(rt, a[0])?;
+        Ok(Value::fixnum(rt.heap.bloblet_kind(b) as i64))
+    });
+    "%bloblet-fields", 1, Some(1), simple!(|rt, a| {
+        let b = bloblet(rt, a[0])?;
+        Ok(Value::fixnum(rt.heap.bloblet_head(b).fields as i64))
+    });
+    "%bloblet-bytes", 1, Some(1), simple!(|rt, a| {
+        let b = bloblet(rt, a[0])?;
+        Ok(Value::fixnum(rt.heap.bloblet_head(b).bytes as i64))
+    });
+    "%bloblet-ref", 2, Some(2), simple!(|rt, a| {
+        let b = bloblet(rt, a[0])?;
+        let k = int(rt, a[1])?;
+        match usize::try_from(k).ok().map(|k| rt.heap.bloblet_field(b, k)) {
+            Some(Ok(v)) => Ok(v),
+            Some(Err(e)) => rt.fail(&format!("bloblet field: {e}"), &[a[0], a[1]]),
+            None => rt.fail("bloblet field: no such field", &[a[0], a[1]]),
+        }
+    });
+    "%bloblet-set!", 3, Some(3), simple!(|rt, a| {
+        let b = plain_bloblet(rt, a[0])?;
+        let k = int(rt, a[1])?;
+        match usize::try_from(k).ok().map(|k| rt.heap.set_bloblet_field(b, k, a[2])) {
+            Some(Ok(())) => Ok(Value::UNSPECIFIED),
+            Some(Err(e)) => rt.fail(&format!("bloblet field: {e}"), &[a[0], a[1]]),
+            None => rt.fail("bloblet field: no such field", &[a[0], a[1]]),
+        }
+    });
+    "%bloblet-byte", 2, Some(2), simple!(|rt, a| {
+        let b = bloblet(rt, a[0])?;
+        let i = int(rt, a[1])?;
+        match usize::try_from(i).ok().map(|i| rt.heap.bloblet_byte(b, i)) {
+            Some(Ok(x)) => Ok(Value::fixnum(x as i64)),
+            _ => rt.fail("bloblet byte: out of range", &[a[0], a[1]]),
+        }
+    });
+    "%bloblet-set-byte!", 3, Some(3), simple!(|rt, a| {
+        let b = plain_bloblet(rt, a[0])?;
+        let i = int(rt, a[1])?;
+        let x = int(rt, a[2])?;
+        let Ok(x) = u8::try_from(x) else { return rt.fail("bloblet byte: not a byte", &[a[2]]) };
+        match usize::try_from(i).ok().map(|i| rt.heap.set_bloblet_byte(b, i, x)) {
+            Some(Ok(())) => Ok(Value::UNSPECIFIED),
+            Some(Err(e)) => rt.fail(&format!("bloblet byte: {e}"), &[a[0], a[1]]),
+            None => rt.fail("bloblet byte: out of range", &[a[0], a[1]]),
+        }
+    });
+    "%bloblet-freeze!", 3, Some(3), simple!(|rt, a| {
+        let b = plain_bloblet(rt, a[0])?;
+        rt.heap.freeze_bloblet(b, a[1].is_true(), a[2].is_true());
+        Ok(Value::UNSPECIFIED)
+    });
+    "%bloblet-frozen?", 1, Some(1), simple!(|rt, a| {
+        let b = bloblet(rt, a[0])?;
+        let h = rt.heap.bloblet_head(b);
+        Ok(rt.heap.cons(Value::boolean(h.fields_frozen), Value::boolean(h.suffix_frozen)))
+    });
+
     "%make-box", 1, Some(1), simple!(|rt, a| {
         let b = rt.heap.alloc(ObjType::Box, 1, Value::UNSPECIFIED);
         rt.heap.obj_set(b, 0, a[0]);

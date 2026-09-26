@@ -111,6 +111,12 @@ impl Checker {
                 self.show_region(region)
             ),
             Ty::MarkKey(x, r) => format!("(mark-key {} {})", self.show_ty_on(x, path), self.show_region(r)),
+            Ty::Bloblet { fields, frozen, region } => {
+                let fs: Vec<String> = fields.iter().map(|f| self.show_ty_on(*f, path)).collect();
+                let head = if frozen { "frozen" } else { "fields" };
+                let sep = if fs.is_empty() { "" } else { " " };
+                format!("(bloblet ({head}{sep}{}) {})", fs.join(" "), self.show_region(region))
+            }
             Ty::Pair(a, b, r) => format!(
                 "(pairof {} {} {})",
                 self.show_ty_on(a, path),

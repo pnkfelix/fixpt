@@ -230,6 +230,16 @@ fn put(
         Some(ObjType::HashTable) => out.push_str("#<hash-table>"),
         Some(ObjType::Environment) => out.push_str("#<environment>"),
         Some(ObjType::Code) => out.push_str("#<code>"),
+        None if v.is_bloblet() => {
+            let h = heap.bloblet_head(v);
+            let kind = fixpt_heap::layout::KINDS.iter().find(|k| k.code == h.kind).map_or("?", |k| k.name);
+            if h.kind == fixpt_heap::layout::threaded::KIND {
+                let name = heap.bloblet_slot(v, fixpt_heap::layout::threaded::WORD_NAME);
+                out.push_str(&format!("#<threaded-word {}>", write_value(heap, name)));
+            } else {
+                out.push_str(&format!("#<{kind} {} fields {} bytes>", h.fields, h.bytes));
+            }
+        }
         None => out.push_str("#<unknown>"),
     }
 }

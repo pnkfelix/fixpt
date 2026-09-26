@@ -29,7 +29,7 @@
 //! and a top-level name defined twice becomes two globals, since the second
 //! `define` shadows the first rather than assigning it.
 
-use crate::ast::{Exp, ExpId};
+use crate::ast::{BlobletOp, Exp, ExpId};
 use crate::check::Checker;
 use fixpt_read::Sym;
 use std::collections::HashMap;
@@ -249,6 +249,20 @@ impl Lowerer<'_> {
             Exp::Begin(items) => {
                 let parts: Vec<String> = items.iter().map(|i| self.go(*i)).collect();
                 format!("(begin {})", parts.join(" "))
+            }
+            Exp::Bloblet { op, args } => {
+                let a: Vec<String> = args.iter().map(|x| self.go(*x)).collect();
+                // Field `i` is the object model's field `i + 2`, after the
+                // trailer.
+                match op {
+                    BlobletOp::Make => format!("(%make-bloblet {})", a.join(" ")),
+                    BlobletOp::Ref(i) => format!("(%bloblet-ref {} {})", a[0], i + 2),
+                    BlobletOp::Set(i) => format!("(%fx26-bloblet-set! {} {} {})", a[0], i + 2, a[1]),
+                    BlobletOp::Freeze => format!("(%fx26-bloblet-freeze {})", a[0]),
+                    BlobletOp::Byte => format!("(%bloblet-byte {} {})", a[0], a[1]),
+                    BlobletOp::SetByte => format!("(%fx26-bloblet-set-byte! {} {} {})", a[0], a[1], a[2]),
+                    BlobletOp::Bytes => format!("(%bloblet-bytes {})", a[0]),
+                }
             }
             Exp::Prompt { tag, body, handler } => format!(
                 "(call-with-continuation-prompt (lambda () {}) {} {})",

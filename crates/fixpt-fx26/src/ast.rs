@@ -112,6 +112,11 @@ pub enum Ty {
     /// `(mark-key T R)`: a continuation-mark key in region `R` for marks of
     /// type `T`.
     MarkKey(TyId, Region),
+    /// `(bloblet (fields T…) R)`: a bloblet in region `R` whose fields have
+    /// the types `T…`, with a suffix of bytes (`docs/object-model.md`).
+    /// `(bloblet (frozen T…) R)` is one whose fields have been frozen: they
+    /// cannot change, so reading one is pure.
+    Bloblet { fields: Vec<TyId>, frozen: bool, region: Region },
     /// A forwarding slot, for building recursive types: `dletrec` allocates
     /// one per name, parses the bodies against them, then fills them in.
     Link(Option<TyId>),
@@ -173,6 +178,35 @@ pub enum Exp {
     Prompt { tag: ExpId, body: ExpId, handler: ExpId },
     /// `(the type expression)`: check the expression against the type.
     The { ty: TyId, exp: ExpId },
+    /// The bloblet forms, which are syntax because a field's index must be
+    /// known to know its type.
+    Bloblet { op: BlobletOp, args: Vec<ExpId> },
+}
+
+/// A bloblet form. Field `i` is the program's `i`th field, counted from 0;
+/// the object model calls it field `i + 2`, after the trailer.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum BlobletOp {
+    /// `(make-bloblet bytes e …)`: a new bloblet with these fields and a
+    /// suffix of `bytes` zero bytes.
+    Make,
+    /// `(bloblet-ref b i)`.
+    Ref(usize),
+    /// `(bloblet-set! b i e)`.
+    Set(usize),
+    /// `(bloblet-freeze b)`: the same bloblet, its fields frozen.
+    Freeze,
+    /// `(bloblet-byte b i)`.
+    Byte,
+    /// `(bloblet-set-byte! b i n)`.
+    SetByte,
+    /// `(bloblet-bytes b)`: how many bytes the suffix has.
+    Bytes,
+}
+
+impl BlobletOp {
+    pub const NAMES: &[&str] =
+        &["make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte", "bloblet-set-byte!", "bloblet-bytes"];
 }
 
 #[derive(Default)]

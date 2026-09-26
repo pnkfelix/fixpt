@@ -6,7 +6,7 @@
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
-use crate::ast::{Atom, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
+use crate::ast::{Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
@@ -44,6 +44,13 @@ impl Checker {
 
     fn items<'s>(&self, s: &'s Syntax, what: &str) -> R<&'s [Syntax]> {
         s.as_proper_list().ok_or_else(|| FxError::at(s.span, format!("{what}: expected a list")))
+    }
+
+    fn literal_int(&self, s: &Syntax) -> Option<i64> {
+        match &s.datum {
+            Datum::Number(fixpt_read::Num::Int(n)) => Some(*n),
+            _ => None,
+        }
     }
 
     fn head(&self, items: &[Syntax]) -> Option<&str> {
@@ -224,6 +231,20 @@ impl Checker {
                 let effect = self.parse_effect(d)?;
                 let region = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::Composable { arg, answer, effect, region }))
+            }
+            "bloblet" => {
+                let [_, fields, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(bloblet (fields type …) region)`, or `(frozen type …)`"));
+                };
+                let parts = self.items(fields, "`(fields type …)`")?.to_vec();
+                let frozen = match parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) {
+                    Some("fields") => false,
+                    Some("frozen") => true,
+                    _ => return Err(FxError::at(fields.span, "`(fields type …)` or `(frozen type …)`")),
+                };
+                let fields = parts[1..].iter().map(|t| self.parse_type(t)).collect::<R<Vec<_>>>()?;
+                let region = self.parse_region(r)?;
+                Ok(self.arena.ty(Ty::Bloblet { fields, frozen, region }))
             }
             "mark-key" => {
                 let [_, t, r] = &items[..] else {
@@ -507,6 +528,10 @@ impl Checker {
                 let exp = self.parse_exp(exp)?;
                 Ok(self.arena.exp(span, Exp::The { ty, exp }))
             }
+            name if BlobletOp::NAMES.contains(&name) => {
+                let name = name.to_string();
+                self.parse_bloblet(span, &name, &items[1..])
+            }
             "prompt" => {
                 let [_, tag, body, handler] = &items[..] else {
                     return Err(FxError::at(span, "`(prompt tag body handler)`"));
@@ -543,6 +568,43 @@ impl Checker {
             out = self.arena.exp(c.span, Exp::If { test, then, els: out });
         }
         Ok(out)
+    }
+
+    /// A bloblet form; see [`BlobletOp`].
+    fn parse_bloblet(&mut self, span: fixpt_read::Span, name: &str, args: &[Syntax]) -> R<ExpId> {
+        let index = |p: &Self, s: &Syntax| -> R<usize> {
+            match p.literal_int(s) {
+                Some(i) if i >= 0 => Ok(i as usize),
+                _ => Err(FxError::at(s.span, "a field index is a literal, non-negative integer")),
+            }
+        };
+        let (op, rest): (BlobletOp, &[Syntax]) = match (name, args) {
+            ("make-bloblet", [_, ..]) => (BlobletOp::Make, args),
+            ("bloblet-ref", [b, i]) => (BlobletOp::Ref(index(self, i)?), std::slice::from_ref(b)),
+            ("bloblet-set!", [b, i, v]) => {
+                let i = index(self, i)?;
+                let args = vec![self.parse_exp(b)?, self.parse_exp(v)?];
+                return Ok(self.arena.exp(span, Exp::Bloblet { op: BlobletOp::Set(i), args }));
+            }
+            ("bloblet-freeze", [_]) => (BlobletOp::Freeze, args),
+            ("bloblet-byte", [_, _]) => (BlobletOp::Byte, args),
+            ("bloblet-set-byte!", [_, _, _]) => (BlobletOp::SetByte, args),
+            ("bloblet-bytes", [_]) => (BlobletOp::Bytes, args),
+            _ => {
+                let shape = match name {
+                    "make-bloblet" => "(make-bloblet bytes field …)",
+                    "bloblet-ref" => "(bloblet-ref bloblet index)",
+                    "bloblet-set!" => "(bloblet-set! bloblet index value)",
+                    "bloblet-freeze" => "(bloblet-freeze bloblet)",
+                    "bloblet-byte" => "(bloblet-byte bloblet i)",
+                    "bloblet-set-byte!" => "(bloblet-set-byte! bloblet i byte)",
+                    _ => "(bloblet-bytes bloblet)",
+                };
+                return Err(FxError::at(span, format!("`{shape}`")));
+            }
+        };
+        let args = rest.iter().map(|a| self.parse_exp(a)).collect::<R<Vec<_>>>()?;
+        Ok(self.arena.exp(span, Exp::Bloblet { op, args }))
     }
 
     /// One or more expressions: an implicit `begin`.

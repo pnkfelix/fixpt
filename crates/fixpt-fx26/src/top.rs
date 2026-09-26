@@ -293,4 +293,6 @@ pub const KEYWORDS: &[&str] = &[
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
+    "bloblet", "fields", "frozen", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
+    "bloblet-set-byte!", "bloblet-bytes",
 ];

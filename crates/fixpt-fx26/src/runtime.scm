@@ -18,6 +18,13 @@
 (define (%fx26-get r) (%box-ref r))
 (define (%fx26-set r v) (%box-set! r v) %fx26-unit)
 
+;;; ---- bloblets ----
+;;; The forms lower to the `%bloblet` primitives; these are the ones whose
+;;; FX-26 result differs from Scheme's.
+(define (%fx26-bloblet-set! b k v) (%bloblet-set! b k v) %fx26-unit)
+(define (%fx26-bloblet-set-byte! b i n) (%bloblet-set-byte! b i n) %fx26-unit)
+(define (%fx26-bloblet-freeze b) (%bloblet-freeze! b #t #f) b)
+
 ;;; ---- pairs ----
 (define (%fx26-set-car! p v) (set-car! p v) %fx26-unit)
 (define (%fx26-set-cdr! p v) (set-cdr! p v) %fx26-unit)

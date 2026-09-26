@@ -593,6 +593,12 @@ A4. **Stencils**: primitives written in Rust with `become`, compiled by the
      effect, so a record's fields count as uninitialised until stored and
      frozen fields offer no writes;
    - the layout module generated in step 2.
+
+   *(Done 2026-09-26, but for the `init` effect and code-pointer types,
+   which wait for their first user, the compiler in step 11: construction
+   initialises every field at once, so nothing is seen uninitialised. See
+   `docs/fx26.md`, "Bloblets". Scheme has the same operations as `%bloblet`
+   primitives, which write only bloblets a program made.)*
 7. **The data types the tooling needs, built on bloblets:**
    - records and sum types (`oneof`/`tagcase`);
    - tables;
