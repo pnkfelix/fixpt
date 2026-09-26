@@ -28,7 +28,15 @@ pub struct Runtime {
     /// survives a heap image, since roots are dumped in order and indices stay
     /// valid.
     error_rtd_root: usize,
+
+    /// How `%run-word` runs a threaded word: the threaded machine lives in
+    /// `fixpt-engine`, above this crate, which installs it.
+    pub run_word: Option<RunWord>,
 }
+
+/// Run threaded word `word` with `args` on its data stack; its value, or
+/// why it stopped.
+pub type RunWord = fn(&mut Runtime, Value, &[Value]) -> Result<Value, String>;
 
 /// Root 0 of any runtime's heap is the error-object record type.
 ///
@@ -61,6 +69,7 @@ impl Runtime {
             out: Sink::Stdout,
             file_base: std::path::PathBuf::from("."),
             error_rtd_root,
+            run_word: None,
         }
     }
 
@@ -137,6 +146,7 @@ impl Runtime {
             out: Sink::Stdout,
             file_base: std::path::PathBuf::from("."),
             error_rtd_root: ERROR_RTD_ROOT,
+            run_word: None,
         }
     }
 }

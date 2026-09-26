@@ -652,7 +652,22 @@ one.)*
      `%make-word` (what `WordBuilder` checks, since the native machine
      trusts a word's cells) and a way for Scheme and FX-26 to run a word on
      the native machine, which needs a hook: `fixpt-runtime` sits below
-     `fixpt-native`.
+     `fixpt-native`. *(In the Rust machine, done 2026-09-26, after checking
+     the design against Larceny's MacScheme machine (`note13-malcode`), at
+     the user's suggestion: a first try that allocated a heap frame per
+     call and linked environments was replaced before anything was built on
+     it. A call's arguments stay on the data stack as its frame (`slot i`);
+     closures are flat (`free i`), the running one a register as
+     MacScheme's REG0; return entries are `(word, k, frame pointer,
+     closure)`; calls allocate nothing; `tailcall` slides the new frame
+     down. Globals are cells, as MacScheme's; `prim p n` calls the
+     runtime's primitives. Words are checked in one place,
+     `Heap::make_threaded_word`, for the builder, `%make-word` and FX-26
+     alike; `%run-word` runs one through `Runtime::run_word`. The native
+     machines trap on the new routines until 9c's native half. Still to
+     do: control (continuations by copying stack segments, which the
+     all-Values stacks allow) and boxing assigned captured variables, which
+     is the compiler's.)*
    - **9d. A compiler in FX-26 from the AST to threaded words**, emitting
      bloblets. Checked three ways on the same programs: the evaluator, the
      lowering to Scheme, and the threaded words on the native machine.
@@ -668,6 +683,17 @@ one.)*
 
 ### Kept open, deliberately
 
+- **A collector without safepoints.** (Raised 2026-09-26, after Cliff
+  Click's Pauseless GC at Azul, later C4.) The threaded machine's state is
+  Values in root arrays and word-relative offsets, so it could be collected
+  between any two cells; the native machine holds an absolute ip and the
+  heap's base in registers, rebuilt at call-outs, so it would need either
+  a map for every pc or a collector that never moves what a running
+  mutator holds. The Pauseless approach, a self-healing read barrier and a
+  not-marked-through bit, fits: indexes are 61 bits, so a Value has a
+  spare high bit, every bloblet field is tagged, suffixes are untraced,
+  and derived pointers are owner plus offset. Its payoff is concurrency,
+  which the system does not have yet.
 - **`letregion`: regions that end.** (Raised 2026-09-26.) Masking says
   effects on a region cannot be observed outside an expression; freeing
   the region needs more: that nothing in it is reachable after. For

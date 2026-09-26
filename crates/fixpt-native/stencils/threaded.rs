@@ -338,6 +338,12 @@ routine!(st_field_set, |base, ip, cur, dsp, rsp, st, fuel, w| {
     callout!(R_FIELD_SET, base, ip, cur, dsp, rsp, st, fuel)
 });
 
+// For a routine with no stencil of its own: a trap, as for a number that
+// is no routine. Reached through a cell, `w` is that number's fixnum.
+routine!(st_unsupported, |base, ip, cur, dsp, rsp, st, fuel, w| {
+    unsafe { trap(st, TRAP_NO_ROUTINE, w >> 3, base, ip, cur, dsp, rsp, fuel) }
+});
+
 routine!(st_cons, |base, ip, cur, dsp, rsp, st, fuel, w| {
     callout!(R_CONS, base, ip, cur, dsp, rsp, st, fuel)
 });

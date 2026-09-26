@@ -485,7 +485,14 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>) {
                 a.callout(n as u64);
             }
             "field!" | "cons" => a.callout(n as u64),
-            other => panic!("no native routine for {other}"),
+            // Not native yet (the routines for code compiled from FX-26):
+            // a trap, as for a number that is no routine.
+            _ => {
+                a.e(movz(X13, Trap::NoRoutine(0).code().0 as u32, 0));
+                a.e(movz(X14, n as u32, 0));
+                let tc = a.trap_common;
+                a.b(tc);
+            }
         }
         a.flush_stubs();
     }

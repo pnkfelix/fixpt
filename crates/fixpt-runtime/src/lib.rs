@@ -18,7 +18,7 @@ pub use error::{Outcome, Thrown};
 pub use num::N;
 pub use prim::{EngineOp, PrimDef, PrimKind, PRIMITIVES};
 pub use print::{display_value, write_value};
-pub use runtime::{Runtime, Sink};
+pub use runtime::{RunWord, Runtime, Sink};
 
 use fixpt_heap::Value;
 

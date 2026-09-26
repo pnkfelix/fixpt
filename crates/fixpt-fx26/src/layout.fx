@@ -58,6 +58,7 @@
 (define kind-env-frame int 35)
 (define kind-sum int 36)
 (define kind-product int 37)
+(define kind-threaded-closure int 38)
 (define kind-extension int 255)
 
 ;;; A closure's fields, and an environment frame's, by negative offset.
@@ -100,3 +101,13 @@
 (define routine-cons int 17)  ; ( a b -- pair )
 (define routine-car int 18)  ; ( pair -- a )
 (define routine-cdr int 19)  ; ( pair -- b )
+(define routine-slot int 20)  ; ( -- x ), slot i of this frame; i the next cell
+(define routine-slot! int 21)  ; ( x -- ), into slot i of this frame
+(define routine-free int 22)  ; ( -- x ), free value i of the closure running
+(define routine-global int 23)  ; ( -- x ), what the cell that is the next cell holds
+(define routine-global! int 24)  ; ( x -- ), into the cell that is the next cell
+(define routine-closure int 25)  ; ( v1 … vn -- c ), word w closed over the v's; w and n the next cells
+(define routine-call int 26)  ; ( x1 … xn c -- r ), n the next cell: the x's become the callee's frame
+(define routine-tailcall int 27)  ; ( x1 … xn c -- r ), the same, the x's replacing this frame
+(define routine-return int 28)  ; ( … r -- r ), leave this frame, keeping r, and return
+(define routine-prim int 29)  ; ( x1 … xn -- r ), the runtime's primitive p; p and n the next cells

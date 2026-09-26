@@ -144,6 +144,9 @@ pub const KINDS: &[Kind] = &[
     // its value; a product's fields, in order.
     Kind { name: "sum", code: 36, traced: true },
     Kind { name: "product", code: 37, traced: true },
+    // A closure made by threaded code: `layout::threaded::CLOSURE_WORD` and
+    // `CLOSURE_FRAME`. Its own kind, so no engine takes it for one of its.
+    Kind { name: "threaded-closure", code: 38, traced: true },
 ];
 
 pub const KIND_EXTENSION: u8 = 255;
@@ -263,8 +266,51 @@ pub mod threaded {
         ("cons", "( a b -- pair )"),
         ("car", "( pair -- a )"),
         ("cdr", "( pair -- b )"),
+        // For FX-26 compiled to threaded code, after the MacScheme machine
+        // (Larceny's `note13-malcode`): a call's arguments stay on the data
+        // stack as its frame, found from a frame pointer; closures are flat,
+        // their free values copied in; the closure running is a register,
+        // as MacScheme's REG0. A return entry keeps the word, `k`, the frame
+        // pointer and the closure.
+        ("slot", "( -- x ), slot i of this frame; i the next cell"),
+        ("slot!", "( x -- ), into slot i of this frame"),
+        ("free", "( -- x ), free value i of the closure running"),
+        ("global", "( -- x ), what the cell that is the next cell holds"),
+        ("global!", "( x -- ), into the cell that is the next cell"),
+        ("closure", "( v1 … vn -- c ), word w closed over the v's; w and n the next cells"),
+        ("call", "( x1 … xn c -- r ), n the next cell: the x's become the callee's frame"),
+        ("tailcall", "( x1 … xn c -- r ), the same, the x's replacing this frame"),
+        ("return", "( … r -- r ), leave this frame, keeping r, and return"),
+        ("prim", "( x1 … xn -- r ), the runtime's primitive p; p and n the next cells"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
+
+    /// How many cells after routine `name`'s cell are its operands, which
+    /// are data, not code.
+    pub const fn operands(name: &str) -> usize {
+        let one: &[&str] = &["lit", "branch", "0branch", "slot", "slot!", "free", "global", "global!", "call", "tailcall"];
+        let two: &[&str] = &["closure", "prim"];
+        let mut i = 0;
+        while i < one.len() {
+            if super::const_str_eq(one[i], name) {
+                return 1;
+            }
+            i += 1;
+        }
+        let mut i = 0;
+        while i < two.len() {
+            if super::const_str_eq(two[i], name) {
+                return 2;
+            }
+            i += 1;
+        }
+        0
+    }
+
+    /// A threaded closure's fields, `[free…][word][trailer]`: the word it
+    /// runs, then free value `i` at `CLOSURE_FREE0 + i`, each one load.
+    pub const CLOSURE_WORD: usize = 2;
+    pub const CLOSURE_FREE0: usize = 3;
 
     pub const fn routine(name: &str) -> u64 {
         let mut i = 0;

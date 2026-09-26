@@ -39,7 +39,8 @@ fn stencil_name(routine: &str) -> String {
         "field@" => "field_ref".into(),
         "field!" => "field_set".into(),
         "0branch" => "zbranch".into(),
-        n => n.into(),
+        // `local!` and the like: a Rust identifier has no `!`.
+        n => n.replace('!', "_set"),
     }
 }
 
@@ -59,10 +60,12 @@ impl StencilMachine {
     /// there are any.
     pub fn new(opt: &str) -> Option<StencilMachine> {
         let set = STENCIL_SETS.iter().find(|s| s.opt == opt)?;
+        // A routine with no stencil of its own traps (`st_unsupported`).
         let find = |name: &str| {
-            set.stencils.iter().find(|s| s.0 == name).unwrap_or_else(|| panic!("no stencil st_{name}")).1
+            let unsupported = set.stencils.iter().find(|s| s.0 == "unsupported").expect("st_unsupported").1;
+            set.stencils.iter().find(|s| s.0 == name).map_or(unsupported, |s| s.1)
         };
-        let total: usize = set.stencils.iter().map(|s| s.1.len().next_multiple_of(16)).sum();
+        let total: usize = ROUTINES.len() * 16 + set.stencils.iter().map(|s| s.1.len().next_multiple_of(16)).sum::<usize>();
         let mut space = CodeSpace::new(total).expect("a code space");
         let mut place = |code: &[u8]| {
             let at = space.alloc(code.len(), 16).expect("room");

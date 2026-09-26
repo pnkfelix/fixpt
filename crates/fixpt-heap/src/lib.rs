@@ -16,6 +16,7 @@
 pub mod heap;
 pub mod image;
 pub mod layout;
+mod threaded;
 pub mod value;
 
 pub use heap::{BlobletError, Head, Heap};

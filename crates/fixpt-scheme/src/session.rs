@@ -110,6 +110,7 @@ impl Session {
     pub fn bare_with(backend: Backend) -> Session {
         let mut rt = Runtime::new();
         install_primitives(&mut rt);
+        rt.run_word = Some(fixpt_engine::threaded::run_word);
         let empty = Builder::new();
         let mut expander = Expander::new(&mut rt);
         let body = expander

@@ -732,6 +732,27 @@ prims! {
         rt.heap.freeze_bloblet(b, true, true);
         Ok(b)
     });
+    // ---- threaded words (`layout::threaded`) ----
+    // A word of `cells` (a list), checked as every word is
+    // (`Heap::make_threaded_word`); `#!default` in a cell is the word itself.
+    "%make-word", 2, Some(2), simple!(|rt, a| {
+        let Some(cells) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of cells", a[1]) };
+        match rt.heap.make_threaded_word(a[0], &cells) {
+            Ok(w) => Ok(w),
+            Err(e) => rt.fail(&format!("not a word: {e}"), &[a[0]]),
+        }
+    });
+    // Run a word with the arguments in a list on its data stack; the value it
+    // leaves on top.
+    "%run-word", 2, Some(2), simple!(|rt, a| {
+        if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
+        let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
+        let Some(run) = rt.run_word else { return rt.fail("no threaded machine is installed", &[]) };
+        match run(rt, a[0], &args) {
+            Ok(v) => Ok(v),
+            Err(e) => rt.fail(&format!("threaded word: {e}"), &[a[0]]),
+        }
+    });
     "%bloblet?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_bloblet())));
     "%bloblet-kind", 1, Some(1), simple!(|rt, a| {
         let b = bloblet(rt, a[0])?;
