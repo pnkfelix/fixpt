@@ -490,10 +490,13 @@ arm64. `RESULT` is `x0`, the arguments are in `x1`…`x8`, and the closure
 running is `REG0`. A leaf keeps everything in registers. Any other
 procedure keeps its parameters and `let`s in a frame, since a call or
 call-out may collect. Calls between register procedures pass their
-arguments in registers; returns still go by the data stack, as threaded
+arguments in registers; returns still go by the data stack, as stack
 code's do, so either kind may return to the other. What the compiler
 does not do yet (`letrec`, `prompt`, `tagcase`, products and sums, among
-others) stays threaded, behind an adapter.
+others) stays stack code, behind an adapter. ("Words compiled" is
+compiled too: it is stack code, which keeps the ip and every value in
+memory as the interpreted machines do. The difference here is the
+machine model.)
 
 Best of two runs, release, against the typed-primitive and loop figures
 (ms):
@@ -512,4 +515,4 @@ Against the 13b baseline on the hand-encoded machine: `fib` 2.3×, `tak`
 check. In `fib` and `tak` the arguments travel in registers, and only
 what lives across a call touches memory. `closures` and `lists` gain
 least: they allocate, which is still a call-out to Rust, and their
-procedures that use `letrec` or `tagcase` are still threaded.
+procedures that use `letrec` or `tagcase` are still stack code.

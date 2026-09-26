@@ -1,5 +1,8 @@
-//! Register code (PLAN.md 13h′) as machine code, on the machine the
-//! threaded code runs on, so that each may call the other.
+//! Register code (PLAN.md 13h′) as machine code, on the machine stack code
+//! (threaded words, interpreted or compiled) runs on, so that each may call
+//! the other. The two differ in their machine model, not in being compiled:
+//! stack code passes and keeps every value on the data stack, register code
+//! in registers.
 //!
 //! `RESULT` is `x0`; `REG1`…`REG8` are `x1`…`x8`; `REG0` is `CLO`. While
 //! register code runs, `CUR` is its register word, and `IP`, which it has no
@@ -13,9 +16,9 @@
 //! in a call-out, comes back to them.
 //!
 //! A call whose callee's word has compiled register code jumps to it with
-//! the arguments in registers; any other pushes them as a threaded frame. A
-//! threaded caller enters a word with register code through the word's own
-//! entry, which moves the frame's arguments into registers.
+//! the arguments in registers; any other pushes them as a stack frame. A
+//! stack-code caller enters a word with register code through the word's
+//! own entry, which moves the frame's arguments into registers.
 
 use super::*;
 use fixpt_heap::layout::regcode::{OPS, REGS};
@@ -258,7 +261,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.e(mov(CLO, W));
                 a.e(mov(CUR, X10));
                 a.e(br(X16));
-                // Threaded code: the arguments as its frame.
+                // Stack code: the arguments as its frame.
                 a.bind(threaded);
                 a.fuel();
                 a.push_regs(count);
@@ -320,7 +323,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     Ok((a.finish(), resume))
 }
 
-/// The entry a threaded caller takes into a word with register code: the
+/// The entry a stack-code caller takes into a word with register code: the
 /// `n` arguments from its frame into registers, the frame dropped, and on
 /// to the register word's entry, native slot `slot`.
 pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u32> {

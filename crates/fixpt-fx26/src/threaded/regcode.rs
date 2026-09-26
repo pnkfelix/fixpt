@@ -10,7 +10,7 @@
 //! and arguments on their way to a call. What this compiler does not do yet
 //! (`letrec`, `prompt`, `tagcase`, products, sums, arrays and bloblets
 //! made, standard operations as values, more than `REGS` values), it
-//! declines: the lambda keeps its threaded code alone.
+//! declines: the lambda keeps its stack code alone.
 
 use super::{find, Compiler, Env, Loc, This};
 use crate::ast::{BlobletOp, Exp, ExpId};
