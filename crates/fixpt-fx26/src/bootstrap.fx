@@ -9,9 +9,7 @@
 
 (define b-feed (subr reads (state string int) state)
   (lambda (st text i)
-    (if (= i (string-length text))
-        (eager-feed st (integer->char 10))
-        (b-feed (eager-feed st (string-ref text i)) text (+ i 1)))))
+    (eager-feed (eager-feed-string st (substring text i (string-length text))) (integer->char 10))))
 
 ;; Every form of `text`, as the reader reads it, or none if it cannot.
 (define b-read (subr (maxeff reads (read @c) (alloc @c)) (string) (listof syns @s))

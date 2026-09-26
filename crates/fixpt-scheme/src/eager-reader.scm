@@ -46,10 +46,23 @@
   (data %eager-state-data)           ; complete top-level data, newest first
   (message eager-state-message))     ; for errors
 
-;; Suspend for the next character. `pos` is how many have been read, and
-;; `data` the complete top-level data so far, both threaded through from
-;; `eager-start` -- nothing is kept in a variable.
+;; Input given ahead (`eager-feed-string`), and where in it the next
+;; character is: the one thing kept in a variable, and only while a feed
+;; runs, so that states stay values.
+(define %ahead-text "")
+(define %ahead-at 0)
+
+;; The next character: the next one given ahead, or, if there is none,
+;; suspend for it. `pos` is how many have been read, and `data` the
+;; complete top-level data so far, both threaded through from
+;; `eager-start`.
 (define (%next-char pos data)
+  (if (< %ahead-at (string-length %ahead-text))
+      (let ((c (string-ref %ahead-text %ahead-at)))
+        (set! %ahead-at (+ %ahead-at 1))
+        c)
+      (%suspend pos data)))
+(define (%suspend pos data)
   (call-with-composable-continuation
    (lambda (k)
      (abort-current-continuation
@@ -109,8 +122,24 @@
 ;; values: feeding the same state twice gives two independent parses.
 (define (eager-feed state ch)
   (if (eq? (eager-state-kind state) 'need)
-      (%eager-run (lambda () ((%eager-state-k state) ch)))
+      (begin
+        (set! %ahead-text "")
+        (set! %ahead-at 0)
+        (%eager-run (lambda () ((%eager-state-k state) ch))))
       state))
+
+;; The same as feeding each of `text`'s characters in turn, but the reader
+;; suspends only when it has read them all, not after each.
+(define (eager-feed-string state text)
+  (if (or (not (eq? (eager-state-kind state) 'need)) (= (string-length text) 0))
+      state
+      (begin
+        (set! %ahead-text text)
+        (set! %ahead-at 1)
+        (let ((after (%eager-run (lambda () ((%eager-state-k state) (string-ref text 0))))))
+          (set! %ahead-text "")
+          (set! %ahead-at 0)
+          after))))
 
 ;; The complete top-level data read so far, in order.
 (define (eager-state-data state) (reverse (%eager-state-data state)))

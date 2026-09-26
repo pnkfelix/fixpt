@@ -570,3 +570,25 @@ address there. `FIXPT_FAULTS=1` (`fixpt_native::faults`) now reports such
 a fault: the pc, the installed code it is in, and the registers.
 `FIXPT_REG_RANGE` gives register code only to the lambdas in a range, for
 bisecting.
+
+## The reader suspends only when its input runs out
+
+The eager reader suspended for every character, capturing a composable
+continuation, for read-as-you-type. The self-compile fed it the whole
+text a character at a time, so it made a capture and a resume per
+character, 326,317 of each. `eager-feed-string` gives it a whole string.
+It takes characters from the string and suspends only when the string is
+used up; the REPL still feeds a character at a time, so that it can back
+up on an edit. The self-compile as register code, stage 2:
+
+| measure             | before  | after  |
+| ------------------- | ------- | ------ |
+| time                | 0.56 s  | 0.38 s |
+| continuations taken | 326,317 | 6      |
+| words allocated     | 74.6 M  | 17.5 M |
+| collections         | 43      | 9      |
+| time collecting     | 67 ms   | 23 ms  |
+
+Stage 2 as compiled stack code fell from about 0.7 s to 0.5–0.6 s. What
+is left is mostly call-outs to primitives (241 ms instrumented) and to
+`cons` (55 ms).

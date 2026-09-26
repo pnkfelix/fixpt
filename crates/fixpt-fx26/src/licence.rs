@@ -54,6 +54,7 @@ pub const READER_ENTRY_POINTS: &[&str] = &[
     "eager-start",
     "eager-start-fx26",
     "eager-feed",
+    "eager-feed-string",
     "eager-status",
     "eager-state-kind",
     "eager-state-position",

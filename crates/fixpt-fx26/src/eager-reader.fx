@@ -38,11 +38,11 @@
 ;; it can name one — which is what licenses running it on every keystroke.
 (private-regions @s @e @m @c)
 
-;; What a reading procedure may do: allocate and read its own data, mark,
-;; and suspend or fail through its prompt.
-(define-effect reads (maxeff (alloc @s) (read @s) (write @m) (read @m) (goto @e) (comefrom @e)))
+;; What a reading procedure may do: allocate, read and write its own data,
+;; mark, and suspend or fail through its prompt.
+(define-effect reads (maxeff (alloc @s) (read @s) (write @s) (write @m) (read @m) (goto @e) (comefrom @e)))
 ;; The same, less the control on @e: what a delimited parse does.
-(define-effect parsing (maxeff (alloc @s) (read @s) (write @m) (read @m)))
+(define-effect parsing (maxeff (alloc @s) (read @s) (write @s) (write @m) (read @m)))
 
 (define-type chars (listof char @s))
 (define-type data (listof datum @s))
@@ -109,12 +109,24 @@
 (define state-data (subr (read @s) (state) syns) (lambda (st) (car (cdr (cdr (cdr st))))))
 (define state-message (subr (read @s) (state) string) (lambda (st) (cdr (cdr (cdr (cdr st))))))
 
-;; Suspend for the next character.
+;; Input given ahead (`eager-feed-string`): a string, and where in it the
+;; next character is. While there is some, the reader takes its characters
+;; from here and runs on; only when there is none left does it suspend.
+;; The one thing kept in a variable, as in the Scheme reader, and only
+;; while a feed runs, so that states stay values.
+(define ahead-text (ref string @s) (new ""))
+(define ahead-at (ref int @s) (new 0))
+
+;; The next character: the next one given ahead, or, if there is none,
+;; suspend for it.
 (define next-char (subr reads (int syns) char)
   (lambda (pos data)
-    (call-with-composable-continuation
-     (lambda (k) (abort-current-continuation eager-tag (make-state #t (cons k nil) pos data "")))
-     eager-tag)))
+    (let ((i (get ahead-at)) (text (get ahead-text)))
+      (if (< i (string-length text))
+          (begin (set ahead-at (+ i 1)) (string-ref text i))
+          (call-with-composable-continuation
+           (lambda (k) (abort-current-continuation eager-tag (make-state #t (cons k nil) pos data "")))
+           eager-tag)))))
 
 (define eager-run (subr reads ((subr reads () state)) state)
   (lambda (thunk) (prompt eager-tag (thunk) (lambda (st) st))))
@@ -189,8 +201,21 @@
 (define eager-feed (subr reads (state char) state)
   (lambda (st ch)
     (if (state-need? st)
-        (eager-run (lambda () ((car (state-ks st)) ch)))
+        (begin (set ahead-text "") (set ahead-at 0) (eager-run (lambda () ((car (state-ks st)) ch))))
         st)))
+
+;; The same as feeding each of `text`'s characters in turn, but the reader
+;; suspends only when it has read them all, not after each: for text that
+;; is all there, such as a file's.
+(define eager-feed-string (subr reads (state string) state)
+  (lambda (st text)
+    (if (or (not (state-need? st)) (= (string-length text) 0))
+        st
+        (begin
+          (set ahead-text text)
+          (set ahead-at 1)
+          (let ((after (eager-run (lambda () ((car (state-ks st)) (string-ref text 0))))))
+            (begin (set ahead-text "") (set ahead-at 0) after))))))
 
 (define eager-state-kind (subr (read @s) (state) datum)
   (lambda (st) (if (state-need? st) (datum-symbol "need") (datum-symbol "error"))))
