@@ -351,7 +351,7 @@ impl<'a> Compiler<'a> {
                 self.done(code, tail);
             }
             Exp::App { fun, args } => self.app(fun, &args, e, depth, code, tail)?,
-            // Regions are erased, for now: a `letregion`'s allocation is the
+            // Regions are erased, for now: a `letrena`'s or `letreap`'s allocation is the
             // heap's.
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
                 self.exp(body, e, depth, code, tail)?

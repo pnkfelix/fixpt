@@ -204,7 +204,7 @@
         (e-lambda (ps body a b) (c-free body (c-bind-params ps bound) acc))
         (e-app (f args a b) (c-free f bound (c-free-all args bound acc)))
         (e-plambda (d body a b) (c-free body bound acc))
-        (e-letregion (r body a b) (c-free body bound acc))
+        (e-letregion (k r body a b) (c-free body bound acc))
         (e-proj (body ds a b) (c-free body bound acc))
         (e-the (d body a b) (c-free body bound acc))
         (e-if (t th el a b) (c-free t bound (c-free th bound (c-free el bound acc))))
@@ -313,7 +313,7 @@
                  (e-var (m a2 b2) (if (symbol=? m f) (and tail (= (c-count-exps args) n)) #t))
                  (else y (c-loops-only fun f n #f)))))
         (e-plambda (d body a b) (c-loops-only body f n tail))
-        (e-letregion (r body a b) (c-loops-only body f n tail))
+        (e-letregion (k r body a b) (c-loops-only body f n tail))
         (e-proj (body ds a b) (c-loops-only body f n tail))
         (e-the (d body a b) (c-loops-only body f n tail))
         (e-if (t th el a b)
@@ -559,9 +559,9 @@
         (e-lambda (ps body a b) (begin (c-lambda ps body e depth c nil) (c-done c tail)))
         (e-app (f args a b) (c-app f args e depth c tail))
         (e-plambda (d body a b) (c-exp body e depth c tail))
-        ;; Regions are erased, for now: a `letregion`'s allocation is the
+        ;; Regions are erased, for now: a `letrena`'s or `letreap`'s allocation is the
         ;; heap's.
-        (e-letregion (r body a b) (c-exp body e depth c tail))
+        (e-letregion (k r body a b) (c-exp body e depth c tail))
         (e-proj (body ds a b) (c-exp body e depth c tail))
         (e-the (d body a b) (c-exp body e depth c tail))
         (e-if (t th el a b)

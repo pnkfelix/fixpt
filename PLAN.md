@@ -1008,7 +1008,7 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
   spare high bit, every bloblet field is tagged, suffixes are untraced,
   and derived pointers are owner plus offset. Its payoff is concurrency,
   which the system does not have yet.
-- **`letregion`: regions that end.** (Raised 2026-09-26.) Masking says
+- **Regions that end: `letrena` and `letreap`.** (Raised 2026-09-26.) Masking says
   effects on a region cannot be observed outside an expression; freeing
   the region needs more: that nothing in it is reachable after. For
   `(letregion r body)`: `r` in no free variable's type (masking checks
@@ -1022,6 +1022,32 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
   the collector treats as roots while live and resets at exit, sound
   under those conditions (MLKit pairs regions with a collector). A kernel
   form, so written twice.
+
+  *(The checker rule done 2026-09-26, as two forms with the one typing
+  rule, differing only in how memory is managed, a hint of the lifetimes
+  the programmer expects.)*
+  - **`letrena r`**, an arena: bump allocation, reset in one step when the
+    body ends, never collected before then, though scanned as roots
+    (its objects may point into the heap).
+  - **`letreap r`**, a regional heap: collected as it runs, and dropped
+    whole at the end. Nothing outside a region can point into it, so a
+    reap can be collected from the stacks (and the regions nested inside
+    it) alone: a nursery whose "no old-to-young pointers" comes from the
+    types, with no write barrier.
+
+  The user chose the two explicit forms, with no `letregion` that lets
+  the implementation choose. For now both allocate in the heap, which is
+  always correct. The groundwork for either, in order:
+  1. The checker records each allocation site's region, so the compilers
+     know which allocations go to a region. Allocations made through
+     region-polymorphic procedures need regions passed at run time (Tofte
+     and Talpin); direct ones come first.
+  2. Somewhere for region objects to live, in the heap's index space, or
+     with a new kind of pointer.
+  3. Reset when control leaves the body by an abort, as well as by a
+     return. Continuations cannot come back in, which the rule forbids.
+  4. The collector scans arenas as roots, collects reaps, and scans reaps
+     as roots when it collects the heap.
 
 - **Responsiveness as an effect.** (Raised 2026-09-26.) Distinguish "may
   diverge without reaching a poll" from "every unbounded path polls, and

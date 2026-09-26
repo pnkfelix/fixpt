@@ -656,19 +656,20 @@ impl Checker {
                 [_, x] if x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
                 _ => Err(FxError::at(span, "only a symbol can be quoted: `'name`")),
             },
-            "letregion" => {
+            form @ ("letrena" | "letreap") => {
                 let [_, name, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(letregion name body …)`"));
+                    return Err(FxError::at(span, format!("`({form} name body …)`")));
                 };
                 let name = name.as_symbol().filter(|n| !self.name(*n).starts_with('@')).ok_or_else(|| {
-                    FxError::at(name.span, "a `letregion` binds a region variable's name, without `@`")
+                    FxError::at(name.span, format!("a `{form}` binds a region variable's name, without `@`"))
                 })?;
+                let arena = form == "letrena";
                 let depth = self.dscope.len();
                 let region = self.arena.dvar(name);
                 self.dscope.push((name, DScope::Var(region, Kind::Region)));
                 let body = self.parse_body(span, body);
                 self.dscope.truncate(depth);
-                Ok(self.arena.exp(span, Exp::LetRegion { region, body: body? }))
+                Ok(self.arena.exp(span, Exp::LetRegion { arena, region, body: body? }))
             }
             "prompt" => {
                 let [_, tag, body, handler] = &items[..] else {

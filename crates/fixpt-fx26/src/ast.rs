@@ -194,10 +194,13 @@ pub enum Exp {
     /// `(prompt tag body handler)`: evaluate `body` delimited by a prompt for
     /// `tag`; an abort to `tag` inside it calls `handler` with the value.
     Prompt { tag: ExpId, body: ExpId, handler: ExpId },
-    /// `(letregion r body …)`: a region that lives while `body` runs. `r`
-    /// is a region variable, in scope in the body's types; nothing that
-    /// outlives the body may mention it.
-    LetRegion { region: DVar, body: ExpId },
+    /// `(letrena r body …)` or `(letreap r body …)`: a region that lives
+    /// while `body` runs. `r` is a region variable, in scope in the body's
+    /// types; nothing that outlives the body may mention it. The two differ
+    /// only in how the region's memory is managed: an arena (`arena`),
+    /// reclaimed only when the body ends, or a heap of its own that the
+    /// collector may collect as it runs.
+    LetRegion { arena: bool, region: DVar, body: ExpId },
     /// `(the type expression)`: check the expression against the type.
     The { ty: TyId, exp: ExpId },
     /// The bloblet forms, which are syntax because a field's index must be

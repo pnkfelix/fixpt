@@ -87,8 +87,9 @@
   (x-lambda (listof (productof (1 symbol) (2 k-ids)) @t) kx int int)
   (x-app kx (listof kx @t) int int)
   (x-plambda k-binders kx int int)
-  ;; `letregion`: the region variable, and the body.
-  (x-letregion int kx int int)
+  ;; `letrena` or `letreap`: whether an arena, the region variable, and the
+  ;; body.
+  (x-letregion bool int kx int int)
   (x-proj kx (listof k-desc @t) int int)
   (x-if kx kx kx int int)
   (x-letrec (listof (productof (1 symbol) (2 int) (3 kx)) @t) kx int int)
@@ -813,7 +814,7 @@
       (x-plambda (bs e a b) a) (x-proj (e ds a b) a) (x-if (p c d a b) a) (x-letrec (bs e a b) a)
       (x-let (bs e a b) a) (x-begin (xs a b) a) (x-prompt (t e h a b) a) (x-the (t e a b) a)
       (x-bloblet (o i xs a b) a) (x-product (fs a b) a) (x-extract (e l a b) a) (x-sum (l e a b) a)
-      (x-tagcase (e arms els a b) a) (x-letregion (r e a b) a))))
+      (x-tagcase (e arms els a b) a) (x-letregion (k r e a b) a))))
 (define k-end (subr pure (kx) int)
   (lambda (x)
     (tagcase x
@@ -821,7 +822,7 @@
       (x-plambda (bs e a b) b) (x-proj (e ds a b) b) (x-if (p c d a b) b) (x-letrec (bs e a b) b)
       (x-let (bs e a b) b) (x-begin (xs a b) b) (x-prompt (t e h a b) b) (x-the (t e a b) b)
       (x-bloblet (o i xs a b) b) (x-product (fs a b) b) (x-extract (e l a b) b) (x-sum (l e a b) b)
-      (x-tagcase (e arms els a b) b) (x-letregion (r e a b) b))))
+      (x-tagcase (e arms els a b) b) (x-letregion (k r e a b) b))))
 (define k-same-span? (subr pure (kx int int) bool)
   (lambda (x a b) (and (= (k-start x) a) (= (k-end x) b))))
 
@@ -846,7 +847,7 @@
       (e-unit (a b) a) (e-lambda (ps x a b) a) (e-app (f xs a b) a) (e-plambda (bs x a b) a) (e-proj (x ds a b) a)
       (e-if (p c d a b) a) (e-letrec (bs x a b) a) (e-let (bs x a b) a) (e-begin (xs a b) a) (e-prompt (t x h a b) a)
       (e-the (t x a b) a) (e-bloblet (o i xs a b) a) (e-product (fs a b) a) (e-extract (x l a b) a) (e-sum (l x a b) a)
-      (e-tagcase (x arms els a b) a) (e-letregion (r x a b) a))))
+      (e-tagcase (x arms els a b) a) (e-letregion (k r x a b) a))))
 (define exp-end (subr pure (exp) int)
   (lambda (e)
     (tagcase e
@@ -854,7 +855,7 @@
       (e-unit (a b) b) (e-lambda (ps x a b) b) (e-app (f xs a b) b) (e-plambda (bs x a b) b) (e-proj (x ds a b) b)
       (e-if (p c d a b) b) (e-letrec (bs x a b) b) (e-let (bs x a b) b) (e-begin (xs a b) b) (e-prompt (t x h a b) b)
       (e-the (t x a b) b) (e-bloblet (o i xs a b) b) (e-product (fs a b) b) (e-extract (x l a b) b) (e-sum (l x a b) b)
-      (e-tagcase (x arms els a b) b) (e-letregion (r x a b) b))))
+      (e-tagcase (x arms els a b) b) (e-letregion (k r x a b) b))))
 
 (define-rec
   (k-resolve-all (subr checks ((listof exp @a)) kxs)
@@ -878,12 +879,12 @@
                  (bs (k-parse-binders binders))
                  (x (k-resolve-exp body)))
             (begin (set k-dscope saved) (x-plambda bs x a b))))
-        (e-letregion (name body a b)
+        (e-letregion (arena name body a b)
           (let* ((saved (get k-dscope))
                  (v (k-new-dvar name))
                  (pushed (k-push-desc name (ds-var v 0)))
                  (x (k-resolve-exp body)))
-            (begin (set k-dscope saved) (x-letregion v x a b))))
+            (begin (set k-dscope saved) (x-letregion arena v x a b))))
         (e-proj (body ds a b)
           (let* ((x (k-resolve-exp body)) (descs (k-resolve-descs ds))) (x-proj x descs a b)))
         (e-if (p c d a b)
@@ -1058,7 +1059,7 @@
         (x-lambda (ps body a b) (k-free-into body (k-param-names ps bound) out))
         (x-app (f args a b) (k-free-list args bound (k-free-into f bound out)))
         (x-plambda (bs body a b) (k-free-into body bound out))
-        (x-letregion (r body a b) (k-free-into body bound out))
+        (x-letregion (k r body a b) (k-free-into body bound out))
         (x-proj (body ds a b) (k-free-into body bound out))
         (x-if (p c d a b) (k-free-into d bound (k-free-into c bound (k-free-into p bound out))))
         (x-letrec (bs body a b)
@@ -1719,17 +1720,18 @@
 
 (define k-has-comefrom? (subr (read @t) (k-eff) bool)
   (lambda (e) (and (not (null? e)) (or (tagcase (car e) (a-comefrom (r) #t) (else y #f)) (k-has-comefrom? (cdr e))))))
-;; `(letregion r …)`'s body of type `t` and effect `e`, closed: its value
+;; `(letrena r …)`'s or `(letreap r …)`'s body, of type `t` and effect `e`,
+;; closed: its value
 ;; may not mention `r`, and no continuation captured in it may outlive it;
 ;; what it does to `r` is masked, as nothing outside can name `r`.
-(define k-close-region (subr checks (kx int int k-eff int int) k-te)
-  (lambda (x r t e a b)
-    (let ((name (symbol->string (k-dvar-name r))))
+(define k-close-region (subr checks (kx string int int k-eff int int) k-te)
+  (lambda (x form r t e a b)
+    (let ((name (k-cat3 form " " (symbol->string (k-dvar-name r)))))
       (if (k-has-region-in? (k-regions-in t) (r-var r))
-          (k-fail (k-cat4 "the value of `letregion " name "` would outlive its region: its type is " (k-show-ty t)) a b)
+          (k-fail (k-cat4 "the value of `" name "` would outlive its region: its type is " (k-show-ty t)) a b)
           (let ((masked (k-mask x e t)))
             (if (k-has-comefrom? masked)
-                (k-fail (k-cat4 "a continuation captured in `letregion " name "` could outlive its region: its effect is "
+                (k-fail (k-cat4 "a continuation captured in `" name "` could outlive its region: its effect is "
                                 (k-show-effect masked))
                         a b)
                 (k-te t masked)))))))
@@ -1787,8 +1789,8 @@
                   (k-unbind-to saved)
                   (k-te (extract rb 1) (k-mask x (k-union (extract inits 2) (extract rb 2)) (extract rb 1))))))))
         (x-prompt (t body h a b) (k-synth-prompt x t body h))
-        (x-letregion (r body a b)
-          (let ((rb (k-synth body))) (k-close-region x r (extract rb 1) (extract rb 2) a b)))
+        (x-letregion (arena r body a b)
+          (let ((rb (k-synth body))) (k-close-region x (if arena "letrena" "letreap") r (extract rb 1) (extract rb 2) a b)))
         (x-bloblet (op i args a b) (k-synth-bloblet x op i args -1))
         (x-product (fs a b)
           (let* ((r (k-synth-fields fs)) (t (k-ty-new (ty-product (extract r 1)))))

@@ -344,9 +344,9 @@ impl Checker {
                 Ok((t, eff))
             }
             Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
-            Exp::LetRegion { region, body } => {
+            Exp::LetRegion { arena, region, body } => {
                 let (t, eff) = self.synth(body)?;
-                self.close_region(e, region, t, eff)
+                self.close_region(e, if arena { "letrena" } else { "letreap" }, region, t, eff)
             }
             Exp::Bloblet { op, args } => self.synth_bloblet(e, op, &args, None),
             Exp::Product(fields) => {
@@ -398,21 +398,22 @@ impl Checker {
     // --------------------------------------------------------------- masking
     /// Remove from `effect` what cannot be observed outside expression `e`,
     /// whose type is `result`. See the module docs for the rule.
-    /// `(letregion r …)`'s body of type `t` and effect `eff`, closed: its
+    /// `(letrena r …)`'s or `(letreap r …)`'s body, of type `t` and effect
+    /// `eff`, closed: its
     /// value may not mention `r`, and no continuation captured in it may
     /// outlive it; what it does to `r` is masked, as nothing outside can
     /// name `r`.
-    pub(crate) fn close_region(&mut self, e: ExpId, r: DVar, t: TyId, eff: Effect) -> R<(TyId, Effect)> {
+    pub(crate) fn close_region(&mut self, e: ExpId, form: &str, r: DVar, t: TyId, eff: Effect) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let name = self.interner.name(self.arena.dvar_name(r)).to_string();
         let mut in_t = HashSet::new();
         self.regions_in(t, &mut in_t);
         if in_t.contains(&Region::Var(r)) {
-            return Err(FxError::at(span, letregion_escapes(&name, &self.show_ty(t))));
+            return Err(FxError::at(span, region_escapes(form, &name, &self.show_ty(t))));
         }
         let masked = self.mask(e, &eff, t);
         if masked.0.iter().any(|a| matches!(a, Atom::Comefrom(_))) {
-            return Err(FxError::at(span, letregion_captures(&name, &self.show_effect(&masked))));
+            return Err(FxError::at(span, region_captured(form, &name, &self.show_effect(&masked))));
         }
         Ok((t, masked))
     }
@@ -1099,12 +1100,13 @@ pub fn letrec_not_lambda(name: &str) -> String {
     format!("`{name}` is bound recursively, so it must be a lambda: nothing may run before every binding exists")
 }
 
-/// What a `letregion` whose value would outlive its region is told.
-pub fn letregion_escapes(r: &str, t: &str) -> String {
-    format!("the value of `letregion {r}` would outlive its region: its type is {t}")
+/// What a `letrena` or `letreap` whose value would outlive its region is
+/// told.
+pub fn region_escapes(form: &str, r: &str, t: &str) -> String {
+    format!("the value of `{form} {r}` would outlive its region: its type is {t}")
 }
 
-/// What a `letregion` whose body may capture a continuation is told.
-pub fn letregion_captures(r: &str, eff: &str) -> String {
-    format!("a continuation captured in `letregion {r}` could outlive its region: its effect is {eff}")
+/// What one whose body may capture a continuation is told.
+pub fn region_captured(form: &str, r: &str, eff: &str) -> String {
+    format!("a continuation captured in `{form} {r}` could outlive its region: its effect is {eff}")
 }
