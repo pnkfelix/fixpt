@@ -135,36 +135,55 @@ fn runs_as_lowered(gc_every: Option<u64>) {
     assert!(ran >= 15, "only {ran}");
 }
 
+/// `program` in `tests/programs/run`, compiled with register code and run
+/// as that, collecting at every `gc_every`th safepoint if asked: what it
+/// gives, the words allocated in regions, and how many are live after.
+fn run_in_registers(program: &str, gc_every: Option<u64>) -> (String, u64, usize) {
+    use fixpt_heap::Value;
+    let text = std::fs::read_to_string(format!("{}/tests/programs/run/{program}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let mut c = Checker::new();
+    let forms = c.read_in(FileId(0), &text).expect("reads");
+    let done = c.declare_ahead(&forms).expect("declares");
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.scheme.scope(|sc| {
+        let w = sc.make(|m| {
+            let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+            comp.registers = true;
+            comp.program(&tops).expect("compiles")
+        });
+        sc.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+        if let Some(n) = gc_every {
+            sc.set_gc_every(n);
+        }
+        let none = sc.make(|_| Value::NULL);
+        let got = sc.call_global("%run-word", &[w, none]).map(|v| sc.write(v)).unwrap_or_else(|e| format!("!! {e}"));
+        let h = &sc.runtime_unrooted().heap;
+        (got, h.region_words(), h.live_regions())
+    })
+}
+
 /// A `letrena`'s `rcons`s, in the helpers its body makes, are made in the
 /// heap's regions, which are all ended when the program is done; and the
 /// same, collecting at every safepoint, when the regions are roots.
 #[test]
 fn a_letrena_allocates_in_its_region() {
-    use fixpt_heap::Value;
-    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/run/arena.fx")).unwrap();
     for gc_every in [None, Some(1)] {
-        let mut c = Checker::new();
-        let forms = c.read_in(FileId(0), &text).expect("reads");
-        let done = c.declare_ahead(&forms).expect("declares");
-        let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        let (got, words, live) = s.scheme.scope(|sc| {
-            let w = sc.make(|m| {
-                let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
-                comp.registers = true;
-                comp.program(&tops).expect("compiles")
-            });
-            sc.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
-            if let Some(n) = gc_every {
-                sc.set_gc_every(n);
-            }
-            let none = sc.make(|_| Value::NULL);
-            let got = sc.call_global("%run-word", &[w, none]).map(|v| sc.write(v)).unwrap_or_else(|e| format!("!! {e}"));
-            let h = &sc.runtime_unrooted().heap;
-            (got, h.region_words(), h.live_regions())
-        });
+        let (got, words, live) = run_in_registers("arena.fx", gc_every);
         assert_eq!(got, (1000 * 55).to_string());
         assert_eq!(words, 1000 * 20, "ten pairs each call, in a region");
+        assert_eq!(live, 0);
+    }
+}
+
+/// Closures made by `rlambda`, a `letrec`'s and a list of them, are made
+/// in the region too.
+#[test]
+fn closures_are_made_in_a_region() {
+    for gc_every in [None, Some(1)] {
+        let (got, words, live) = run_in_registers("region-closures.fx", gc_every);
+        assert_eq!(got, "(55 42)");
+        assert!(words > 10 * 2 + 10 * 4, "ten pairs and ten closures, and the helpers: {words}");
         assert_eq!(live, 0);
     }
 }

@@ -126,6 +126,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
         }
         Exp::App { fun, args } => format!("(e-app {} {} {a} {b})", go(fun), list(args.iter().map(|x| go(*x)).collect())),
         Exp::PLambda { body, .. } => format!("(e-plambda _ {} {a} {b})", go(body)),
+        Exp::RLambda { region, lambda } => format!("(e-rlambda {} {} {a} {b})", go(region), go(lambda)),
         Exp::LetRegion { arena, region, body } => {
             format!("(e-letregion {} {} {} {a} {b})", if arena { "#t" } else { "#f" }, name(c.arena.dvar_name(region)), go(body))
         }

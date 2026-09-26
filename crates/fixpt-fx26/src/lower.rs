@@ -269,6 +269,8 @@ impl Lowerer<'_> {
             }
             // Regions are erased: a `letrena`'s or `letreap`'s allocation is the heap's.
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.go(body),
+            // Regions are erased here: the closure is the heap's.
+            Exp::RLambda { lambda, .. } => self.go(lambda),
             // A `letrena`'s name is its region's handle, the region left
             // with the body's value; a `letreap`'s is the heap's, `#f`.
             Exp::LetRegion { arena, region, body } => {

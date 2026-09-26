@@ -44,6 +44,8 @@
   ;; `(letrena name body …)` or `(letreap name body …)`: whether an arena,
   ;; the region variable's name, and the body.
   (e-letregion bool symbol exp int int)
+  ;; `(rlambda region (param …) body …)`: the region, and the `lambda`.
+  (e-rlambda exp exp int int)
   (e-the syn exp int int)
   ;; A bloblet form, by name, with its field index, or -1.
   (e-bloblet symbol int (listof exp @a) int int)
@@ -187,6 +189,10 @@
         ((string=? head "lambda")
          (begin (at-least items 3 "`(lambda ((name type) …) body …)`" a b)
                 (e-lambda (parse-params (nth items 1)) (parse-body (drop items 2) a b) a b)))
+        ((string=? head "rlambda")
+         (begin (at-least items 3 "`(rlambda region ((name type) …) body …)`" a b)
+                (let ((r (parse-exp (nth items 1))))
+                  (e-rlambda r (e-lambda (parse-params (nth items 2)) (parse-body (drop items 3) a b) a b) a b))))
         ((or (string=? head "letrena") (string=? head "letreap"))
          (begin (at-least items 2 (string-append "`(" (string-append head " name body …)`")) a b)
                 (let ((name (nth items 1)))

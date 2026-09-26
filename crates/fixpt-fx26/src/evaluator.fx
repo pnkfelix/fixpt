@@ -303,6 +303,7 @@
         ;; Regions are erased: a `letrena`'s or `letreap`'s allocation is the
         ;; heap's, and its name, the region as a value, is unit.
         (e-letregion (k r body a b) (eval body (cons (cons r (cell (v-unit))) e)))
+        (e-rlambda (r l a b) (eval l e))
         (e-proj (body ds a b) (eval body e))
         (e-the (d body a b) (eval body e))
         (e-if (t th el a b) (if (as-bool (eval t e)) (eval th e) (eval el e)))

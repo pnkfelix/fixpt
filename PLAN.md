@@ -1128,7 +1128,12 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
      form `(rmake-bloblet r bytes e …)`, each a primitive under
      `Heap::in_region`. Products and sums have no region (immutable,
      their types name none), so they stay the heap's.
-  2. Closures in a region: perhaps `rlambda` and `rplambda`.
+  2. *(Done 2026-09-26.)* Closures in a region: `(rlambda r ps body …)`,
+     whose latent effect has `(read r)` (calling it reads the closure, so
+     its type mentions the region), made by `%region-closure h fv … w`.
+     No `rplambda`: a `plambda` may generalize an `rlambda`, whose only
+     effect is allocating the closure; the value restriction is about
+     mutable data, and a closure holds only variables bound outside.
   3. *(Done 2026-09-26.)* `rcons` inline in register code: each region's
      current chunk, `[fill, end]`, in a table at a fixed address, which
      machine code bumps. `lists` in a region: 8.1 ms, against 12.4 ms in

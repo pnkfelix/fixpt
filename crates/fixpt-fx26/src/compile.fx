@@ -205,6 +205,7 @@
         (e-app (f args a b) (c-free f bound (c-free-all args bound acc)))
         (e-plambda (d body a b) (c-free body bound acc))
         (e-letregion (k r body a b) (c-free body (cons r bound) acc))
+        (e-rlambda (r l a b) (c-free r bound (c-free l bound acc)))
         (e-proj (body ds a b) (c-free body bound acc))
         (e-the (d body a b) (c-free body bound acc))
         (e-if (t th el a b) (c-free t bound (c-free th bound (c-free el bound acc))))
@@ -291,6 +292,7 @@
       (e-plambda (d body a b) (c-lambda-of body))
       (e-the (d body a b) (c-lambda-of body))
       (e-lambda (ps body a b) (the (listof exp @k) (cons x nil)))
+      (e-rlambda (r l a b) (the (listof exp @k) (cons x nil)))
       (else y nil))))
 
 (define c-mentions? (subr (maxeff (read @a) (read @k) (alloc @k)) (exp symbol) bool)
@@ -314,6 +316,7 @@
                  (else y (c-loops-only fun f n #f)))))
         (e-plambda (d body a b) (c-loops-only body f n tail))
         (e-letregion (k r body a b) (or (symbol=? r f) (c-loops-only body f n (and tail (not k)))))
+        (e-rlambda (r l a b) (and (c-loops-only r f n #f) (c-loops-only l f n #f)))
         (e-proj (body ds a b) (c-loops-only body f n tail))
         (e-the (d body a b) (c-loops-only body f n tail))
         (e-if (t th el a b)
@@ -556,11 +559,13 @@
         (e-char (ch a b) (begin (c-lit c (wcell-char ch)) (c-done c tail)))
         (e-sym (s a b) (begin (c-lit c (wcell-symbol s)) (c-done c tail)))
         (e-unit (a b) (begin (c-lit c (wcell-unit)) (c-done c tail)))
-        (e-lambda (ps body a b) (begin (c-lambda ps body e depth c nil) (c-done c tail)))
+        (e-lambda (ps body a b) (begin (c-lambda ps body e depth c nil nil) (c-done c tail)))
+        (e-rlambda (r l a b)
+          (tagcase l
+            (e-lambda (ps body la lb) (begin (c-lambda ps body e depth c nil (the (listof exp @k) (cons r nil))) (c-done c tail)))
+            (else y (c-fail "an rlambda's lambda"))))
         (e-app (f args a b) (c-app f args e depth c tail))
         (e-plambda (d body a b) (c-exp body e depth c tail))
-        ;; Regions are erased, for now: a `letrena`'s or `letreap`'s allocation is the
-        ;; heap's.
         ;; The region's name bound in a slot, as a `let`'s: a `letrena`'s to
         ;; a region entered, and left with the body's value, which is so not
         ;; in tail position; a `letreap`'s to the heap's, `#f`.
@@ -597,7 +602,7 @@
           (begin
             (c-exp t e depth c #f)
             (c-exp h e (+ depth 1) c #f)
-            (c-lambda (the (listof (productof (1 symbol) (2 syns-a)) @a) nil) body e (+ depth 2) c nil)
+            (c-lambda (the (listof (productof (1 symbol) (2 syns-a)) @a) nil) body e (+ depth 2) c nil nil)
             (c-op c routine-prompt)
             (c-done c tail)))
         (e-bloblet (op i args a b) (begin (c-bloblet (symbol->string op) i args e depth c) (c-done c tail)))
@@ -645,17 +650,24 @@
                  (made (tagcase (car lam)
                          (e-lambda (ps body a b)
                            (c-lambda ps body (c-letrec-own all e depth 0 i body (c-count-params ps)) (+ depth i) c
-                                     (the syms (cons (extract (car bs) 1) nil))))
+                                     (the syms (cons (extract (car bs) 1) nil)) nil))
+                         (e-rlambda (r l a b)
+                           (tagcase l
+                             (e-lambda (ps body la lb)
+                               (c-lambda ps body (c-letrec-own all e depth 0 i body (c-count-params ps)) (+ depth i) c
+                                         (the syms (cons (extract (car bs) 1) nil)) (the (listof exp @k) (cons r nil))))
+                             (else y (c-fail "an rlambda's lambda"))))
                          (else y (c-fail "a letrec binds only lambdas"))))
                  (rest (c-letrec-make all (cdr bs) e depth (+ i 1) c)))
             (cons made rest)))))
-  ;; A lambda: its free values pushed, then its word closed over them. `own`
-  ;; is the `letrec` name it is bound to, or none: its tail calls in its body
-  ;; are loops. What it gives: for each `letrec` sibling it captured before the
-  ;; sibling was made, its free value's index and the slot the sibling will be
-  ;; in.
-  (c-lambda (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv int code syms) patches)
-    (lambda (ps body e depth c own0)
+  ;; A lambda: its free values pushed, then its word closed over them; or,
+  ;; with a region (an `rlambda`'s, one or none), that region first, and the
+  ;; closure made there by `%region-closure h fv … w`. `own` is the `letrec`
+  ;; name it is bound to, or none: its tail calls in its body are loops. What
+  ;; it gives: for each `letrec` sibling it captured before the sibling was
+  ;; made, its free value's index and the slot the sibling will be in.
+  (c-lambda (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv int code syms (listof exp @k)) patches)
+    (lambda (ps body e depth c own0 region)
       (let* ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
              ;; A parameter of the same name hides the procedure.
              (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
@@ -665,7 +677,7 @@
              (body-code (the code (new nil)))
              (outer-name (get c-this-name)) (outer-loc (get c-this-loc))
              (outer-params (get c-this-params)) (outer-start (get c-this-start)))
-        (let ((patches (c-push-all fv e depth 0 c)))
+        (let ((patches (begin (if (null? region) #u (c-exp (car region) e depth c #f)) (c-push-all fv e depth 0 c))))
          (begin
           (if (null? own)
               (set c-this-params -1)
@@ -677,9 +689,10 @@
           (set c-this-name outer-name) (set c-this-loc outer-loc)
           (set c-this-params outer-params) (set c-this-start outer-start)
           ;; Named for where its body starts, so that a profile can say which.
-          (c-op1 c routine-closure
-                 (wcell-word (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body)))))))
-          (c-emit c (i-cell (wcell-int (c-length fv))))
+          (let ((w (wcell-word (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body))))))))
+            (if (null? region)
+                (begin (c-op1 c routine-closure w) (c-emit c (i-cell (wcell-int (c-length fv)))))
+                (begin (c-lit c w) (c-prim c "%region-closure" (+ 2 (c-length fv))))))
           patches)))))
   ;;; ------------------------------------------------------------ applications
   (c-app (subr compiles (exp (listof exp @a) cenv int code bool) unit)

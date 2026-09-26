@@ -225,6 +225,10 @@ impl<'a> Compiler<'a> {
             }
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.free(body, bound, acc),
             Exp::LetRegion { region, body, .. } => self.free(body, &with(bound, &[self.c.arena.dvar_name(region)]), acc),
+            Exp::RLambda { region, lambda } => {
+                self.free(lambda, bound, acc);
+                self.free(region, bound, acc);
+            }
             Exp::If { test, then, els } => {
                 self.free(els, bound, acc);
                 self.free(then, bound, acc);
@@ -346,7 +350,13 @@ impl<'a> Compiler<'a> {
             }
             Exp::Lambda { params, body } => {
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-                self.lambda(&ps, body, e, depth, code, None)?;
+                self.lambda(&ps, body, e, depth, code, None, None)?;
+                self.done(code, tail);
+            }
+            Exp::RLambda { region, lambda } => {
+                let Exp::Lambda { params, body } = self.c.arena.exp_at(lambda).clone() else { unreachable!("parsed") };
+                let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
+                self.lambda(&ps, body, e, depth, code, None, Some(region))?;
                 self.done(code, tail);
             }
             Exp::App { fun, args } => self.app(fun, &args, e, depth, code, tail)?,
@@ -403,13 +413,13 @@ impl<'a> Compiler<'a> {
                 let n = bindings.len();
                 let mut patches = Vec::new();
                 for (i, (name, _, init)) in bindings.iter().enumerate() {
-                    let (ps, lbody) = self.lambda_of(*init).ok_or("a letrec binds only lambdas")?;
+                    let (ps, lbody, region) = self.lambda_of(*init).ok_or("a letrec binds only lambdas")?;
                     let mut own = e.clone();
                     for (k, (g, _, _)) in bindings.iter().enumerate() {
                         let loops = k == i && self.loops_only(lbody, *g, ps.len(), true);
                         own.push((*g, if loops { Loc::Loop } else { Loc::Pending(depth + k) }));
                     }
-                    patches.push(self.lambda(&ps, lbody, &own, depth + i, code, Some(*name))?);
+                    patches.push(self.lambda(&ps, lbody, &own, depth + i, code, Some(*name), region)?);
                 }
                 for (i, ps) in patches.iter().enumerate() {
                     for &(j, sibling) in ps {
@@ -428,7 +438,7 @@ impl<'a> Compiler<'a> {
             Exp::Prompt { tag, body, handler } => {
                 self.exp(tag, e, depth, code, false)?;
                 self.exp(handler, e, depth + 1, code, false)?;
-                self.lambda(&[], body, e, depth + 2, code, None)?;
+                self.lambda(&[], body, e, depth + 2, code, None, None)?;
                 self.op(code, "prompt");
                 self.done(code, tail);
             }
@@ -485,12 +495,27 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    /// A lambda: its free values pushed, then its word closed over them.
-    /// `own` is the `letrec` name it is bound to, whose tail calls in its
-    /// body are loops. What it gives: for each `letrec` sibling it captured
-    /// before the sibling was made, its free value's index and the slot the
-    /// sibling will be in.
-    fn lambda(&mut self, params: &[Sym], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, own: Option<Sym>) -> R<Vec<(usize, usize)>> {
+    /// A lambda: its free values pushed, then its word closed over them;
+    /// or, with a `region` (an `rlambda`'s), that region first, and the
+    /// closure made there by `%region-closure h fv … w`. `own` is the
+    /// `letrec` name it is bound to, whose tail calls in its body are loops.
+    /// What it gives: for each `letrec` sibling it captured before the
+    /// sibling was made, its free value's index and the slot the sibling
+    /// will be in.
+    #[allow(clippy::too_many_arguments)]
+    fn lambda(
+        &mut self,
+        params: &[Sym],
+        body: ExpId,
+        e: &Env,
+        depth: usize,
+        code: &mut Vec<Item>,
+        own: Option<Sym>,
+        region: Option<ExpId>,
+    ) -> R<Vec<(usize, usize)>> {
+        if let Some(r) = region {
+            self.exp(r, e, depth, code, false)?;
+        }
         let (w, fv) = self.lambda_word(params, body, e, own)?;
         // Each captured value, as the closure will hold it.
         let mut patches = Vec::new();
@@ -505,9 +530,13 @@ impl<'a> Compiler<'a> {
                 Loc::Global(_) | Loc::Loop => return Err("a global is not captured".into()),
             }
         }
-        self.op1(code, "closure", w);
-        code.push(Item::Cell(Value::fixnum(fv.len() as i64)));
-        let _ = depth;
+        if region.is_some() {
+            self.lit(code, w);
+            self.prim(code, "%region-closure", fv.len() + 2)?;
+        } else {
+            self.op1(code, "closure", w);
+            code.push(Item::Cell(Value::fixnum(fv.len() as i64)));
+        }
         Ok(patches)
     }
 
@@ -574,12 +603,18 @@ impl<'a> Compiler<'a> {
     // ------------------------------------------------- known procedures
 
     /// The parameters and body of `x`, when it is a lambda under any type
-    /// abstractions and ascriptions, which compile to nothing.
-    fn lambda_of(&self, mut x: ExpId) -> Option<(Vec<Sym>, ExpId)> {
+    /// abstractions and ascriptions, which compile to nothing; and its
+    /// region, when it is an `rlambda`.
+    fn lambda_of(&self, mut x: ExpId) -> Option<(Vec<Sym>, ExpId, Option<ExpId>)> {
+        let mut region = None;
         loop {
             match self.c.arena.exp_at(x) {
                 Exp::PLambda { body, .. } | Exp::The { exp: body, .. } => x = *body,
-                Exp::Lambda { params, body } => return Some((params.iter().map(|(n, _)| *n).collect(), *body)),
+                Exp::RLambda { region: r, lambda } => {
+                    region = Some(*r);
+                    x = *lambda;
+                }
+                Exp::Lambda { params, body } => return Some((params.iter().map(|(n, _)| *n).collect(), *body, region)),
                 _ => return None,
             }
         }
@@ -609,6 +644,7 @@ impl<'a> Compiler<'a> {
             Exp::LetRegion { arena, region, body } => {
                 self.c.arena.dvar_name(region) == f || self.loops_only(body, f, n, tail && !arena)
             }
+            Exp::RLambda { region, lambda } => self.loops_only(region, f, n, false) && self.loops_only(lambda, f, n, false),
             Exp::If { test, then, els } => {
                 self.loops_only(test, f, n, false) && self.loops_only(then, f, n, tail) && self.loops_only(els, f, n, tail)
             }

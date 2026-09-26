@@ -204,6 +204,10 @@ pub enum Exp {
     /// reclaimed only when the body ends, or a heap of its own that the
     /// collector may collect as it runs.
     LetRegion { arena: bool, region: DVar, body: ExpId },
+    /// `(rlambda r (param …) body …)`: the `lambda`, its closure made in
+    /// the region `r` names (`region`, an expression of type `(region R)`).
+    /// Calling it reads the closure, so its latent effect has `(read R)`.
+    RLambda { region: ExpId, lambda: ExpId },
     /// `(the type expression)`: check the expression against the type.
     The { ty: TyId, exp: ExpId },
     /// The bloblet forms, which are syntax because a field's index must be

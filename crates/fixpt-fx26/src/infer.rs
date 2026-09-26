@@ -61,7 +61,7 @@ impl Checker {
             _ if matches!(expected_ty, Ty::Poly { .. }) && !matches!(self.arena.exp_at(e), Exp::PLambda { .. }) => {
                 let Ty::Poly { body, .. } = expected_ty else { unreachable!() };
                 let eff = self.check(e, body)?;
-                if !eff.is_pure() {
+                if !self.generalizable(e, &eff) {
                     return Err(FxError::at(span, format!("a polymorphic value must be pure, and this has {}", self.show_effect(&eff))));
                 }
                 Ok(eff)
@@ -88,7 +88,7 @@ impl Checker {
                     .collect();
                 let want = self.subst(want, &map);
                 let eff = self.check(body, want)?;
-                if !eff.is_pure() {
+                if !self.generalizable(body, &eff) {
                     return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
                 }
                 Ok(eff)
@@ -104,6 +104,11 @@ impl Checker {
             }
             Exp::Lambda { params, .. } if params.iter().any(|(_, t)| t.is_none()) => {
                 Err(FxError::at(span, format!("a `lambda` cannot be a {}", self.show_ty(expected))))
+            }
+            Exp::RLambda { region, lambda } if expected_ty.as_subr().is_some() => {
+                let (t, eff) = self.synth_rlambda(e, region, lambda, Some(expected))?;
+                self.expect(e, t, expected)?;
+                Ok(eff)
             }
             Exp::App { fun, args } => {
                 let (t, eff) = self.synth_app(e, fun, &args, Some(expected))?;

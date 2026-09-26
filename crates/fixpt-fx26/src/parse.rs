@@ -473,27 +473,15 @@ impl Checker {
                 let [_, params, body @ ..] = &items[..] else {
                     return Err(FxError::at(span, "`(lambda ((name type) …) body …)`"));
                 };
-                let params = match &params.datum {
-                    Datum::Nil => Vec::new(),
-                    _ => self
-                        .items(params, "parameters")?
-                        .to_vec()
-                        .iter()
-                        .map(|p| {
-                            if let Some(name) = p.as_symbol() {
-                                return Ok((name, None));
-                            }
-                            let pair = self.items(p, "a parameter")?.to_vec();
-                            let [name, ty] = &pair[..] else {
-                                return Err(FxError::at(p.span, "a parameter is `name` or `(name type)`"));
-                            };
-                            let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-                            Ok((name, Some(self.parse_type(ty)?)))
-                        })
-                        .collect::<R<Vec<_>>>()?,
+                self.parse_lambda(span, params, body)
+            }
+            "rlambda" => {
+                let [_, region, params, body @ ..] = &items[..] else {
+                    return Err(FxError::at(span, "`(rlambda region ((name type) …) body …)`"));
                 };
-                let body = self.parse_body(span, body)?;
-                Ok(self.arena.exp(span, Exp::Lambda { params, body }))
+                let region = self.parse_exp(region)?;
+                let lambda = self.parse_lambda(span, params, body)?;
+                Ok(self.arena.exp(span, Exp::RLambda { region, lambda }))
             }
             "plambda" => {
                 let [_, binders, body @ ..] = &items[..] else {
@@ -777,6 +765,31 @@ impl Checker {
     }
 
     /// A bloblet form; see [`BlobletOp`].
+    /// A `lambda`'s parameters and body, parsed.
+    fn parse_lambda(&mut self, span: fixpt_read::Span, params: &Syntax, body: &[Syntax]) -> R<ExpId> {
+        let params = match &params.datum {
+            Datum::Nil => Vec::new(),
+            _ => self
+                .items(params, "parameters")?
+                .to_vec()
+                .iter()
+                .map(|p| {
+                    if let Some(name) = p.as_symbol() {
+                        return Ok((name, None));
+                    }
+                    let pair = self.items(p, "a parameter")?.to_vec();
+                    let [name, ty] = &pair[..] else {
+                        return Err(FxError::at(p.span, "a parameter is `name` or `(name type)`"));
+                    };
+                    let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+                    Ok((name, Some(self.parse_type(ty)?)))
+                })
+                .collect::<R<Vec<_>>>()?,
+        };
+        let body = self.parse_body(span, body)?;
+        Ok(self.arena.exp(span, Exp::Lambda { params, body }))
+    }
+
     fn parse_bloblet(&mut self, span: fixpt_read::Span, name: &str, args: &[Syntax]) -> R<ExpId> {
         let index = |p: &Self, s: &Syntax| -> R<usize> {
             match p.literal_int(s) {

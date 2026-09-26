@@ -255,6 +255,7 @@ impl Checker {
             Exp::Symbol(_) => Ok((self.symbol, Effect::pure())),
             Exp::Unit => Ok((self.unit, Effect::pure())),
             Exp::Lambda { .. } => self.synth_lambda(e, None),
+            Exp::RLambda { region, lambda } => self.synth_rlambda(e, region, lambda, None),
             Exp::App { fun, args } => self.synth_app(e, fun, &args, None),
             Exp::The { ty, exp } => {
                 let eff = self.check(exp, ty)?;
@@ -262,10 +263,10 @@ impl Checker {
             }
             Exp::PLambda { binders, body } => {
                 let (t, eff) = self.synth(body)?;
-                if !eff.is_pure() {
+                if !self.generalizable(body, &eff) {
                     return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
                 }
-                Ok((self.arena.ty(Ty::Poly { binders, body: t }), Effect::pure()))
+                Ok((self.arena.ty(Ty::Poly { binders, body: t }), eff))
             }
             Exp::Proj { body, args } => {
                 let (t, eff) = self.synth(body)?;
@@ -431,12 +432,59 @@ impl Checker {
         Ok((t, masked))
     }
 
+    /// Whether a `plambda` body `x` with effect `eff` may be generalized:
+    /// pure, as the value restriction has it; or an `rlambda`, under
+    /// ascriptions and other `plambda`s, whose effect only allocates. Making
+    /// a closure makes no mutable data a type could be generalized over: it
+    /// holds only variables bound outside.
+    pub(crate) fn generalizable(&self, mut x: ExpId, eff: &Effect) -> bool {
+        if eff.is_pure() {
+            return true;
+        }
+        loop {
+            match self.arena.exp_at(x) {
+                Exp::PLambda { body, .. } | Exp::The { exp: body, .. } => x = *body,
+                Exp::RLambda { .. } => return eff.0.iter().all(|a| matches!(a, Atom::Alloc(_))),
+                _ => return false,
+            }
+        }
+    }
+
+    /// An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
+    /// result types if it is a subroutine's, with `(read R)` in its latent
+    /// effect, since calling it reads the closure; making it allocates in
+    /// `R`, the region `region` names.
+    pub(crate) fn synth_rlambda(&mut self, e: ExpId, region: ExpId, lambda: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
+        let (rt, reff) = self.synth(region)?;
+        let Ty::Region(g) = self.arena.get(rt).clone() else {
+            return Err(FxError::at(self.arena.span_of(region), format!("a region is expected here, and this is a {}", self.show_ty(rt))));
+        };
+        let hint = expected.and_then(|t| self.arena.get(t).as_subr());
+        let (lt, _) = match hint {
+            Some((_, want, result)) => {
+                let Exp::Lambda { params, .. } = self.arena.exp_at(lambda) else { unreachable!("parsed") };
+                if want.len() != params.len() {
+                    let span = self.arena.span_of(e);
+                    return Err(FxError::at(span, format!("a subroutine of {} parameter(s) is expected, and this `rlambda` has {}", want.len(), params.len())));
+                }
+                self.synth_lambda_as(lambda, Some(&want), Some(result))?
+            }
+            None => self.synth_lambda(lambda, None)?,
+        };
+        let Ty::Subr { mut effect, params, result } = self.arena.get(lt).clone() else { unreachable!("a lambda's type") };
+        effect.0.insert(Atom::Read(g));
+        let t = self.arena.ty(Ty::Subr { effect, params, result });
+        let eff = reff.union(&Effect::atom(Atom::Alloc(g)));
+        let eff = self.mask(e, &eff, t);
+        Ok((t, eff))
+    }
+
     /// Whether `x` is a lambda, under any type abstractions and ascriptions.
     pub fn is_lambda(&self, mut x: ExpId) -> bool {
         loop {
             match self.arena.exp_at(x) {
                 Exp::PLambda { body, .. } | Exp::The { exp: body, .. } => x = *body,
-                Exp::Lambda { .. } => return true,
+                Exp::Lambda { .. } | Exp::RLambda { .. } => return true,
                 _ => return false,
             }
         }
@@ -503,6 +551,10 @@ impl Checker {
                 }
             }
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.free_into(body, bound, out),
+            Exp::RLambda { region, lambda } => {
+                self.free_into(region, bound, out);
+                self.free_into(lambda, bound, out);
+            }
             Exp::LetRegion { region, body, .. } => {
                 bound.push(self.arena.dvar_name(region));
                 self.free_into(body, bound, out);

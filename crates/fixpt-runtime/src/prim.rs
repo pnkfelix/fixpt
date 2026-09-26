@@ -1118,6 +1118,21 @@ prims! {
             b
         }))
     });
+    // The `closure` routine's closure, in a region: `h`, the free values in
+    // order, then the word.
+    "%region-closure", 2, None, simple!(|rt, a| {
+        use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD};
+        let h = region_handle(a[0]);
+        let (w, free) = (a[a.len() - 1], &a[1..a.len() - 1]);
+        Ok(rt.heap.in_region(h, |heap| {
+            let c = heap.make_bloblet(fixpt_heap::layout::kind("threaded-closure"), free.len() + 1, 0, true);
+            heap.set_bloblet_slot(c, CLOSURE_WORD, w);
+            for (i, v) in free.iter().enumerate() {
+                heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, *v);
+            }
+            c
+        }))
+    });
     "%region-make-bloblet", 2, None, simple!(|rt, a| {
         let h = region_handle(a[0]);
         let bytes = int(rt, a[1])?;

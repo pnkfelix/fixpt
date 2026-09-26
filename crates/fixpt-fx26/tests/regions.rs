@@ -115,3 +115,23 @@ fn every_allocator_takes_a_region() {
     );
     assert_eq!(check("(rmake-bloblet 1 0 7)"), Err("a region is expected here, and this is a int".to_string()));
 }
+
+/// A closure made in a region reads the region when called, so its type
+/// mentions the region, and it cannot leave; a `plambda` may make one,
+/// its only effect allocating, though nothing else that allocates.
+#[test]
+fn closures_in_a_region() {
+    assert_eq!(check("(letrena r ((rlambda r ((x int)) (+ x 1)) 2))"), Ok(vec!["int ! pure".to_string()]));
+    assert_eq!(
+        check("(letrena r (rlambda r ((x int)) x))"),
+        Err("the value of `letrena r` would outlive its region: its type is (subr (read r) (int) int)".to_string())
+    );
+    let e = check("(letrena r (let ((f (the (subr pure (int) int) (rlambda r ((x int)) x)))) (f 1)))");
+    assert!(e.is_err(), "a closure in r is not pure to call: {e:?}");
+    assert_eq!(
+        check("(letrena r ((proj (plambda ((t type)) (rlambda r ((x t)) x)) int) 3))"),
+        Ok(vec!["int ! pure".to_string()])
+    );
+    let e = check("(letrena r (get (proj (plambda ((t type)) (rnew r 1)) int)))");
+    assert!(e.as_ref().is_err_and(|m| m.contains("a `plambda` body must be pure")), "{e:?}");
+}

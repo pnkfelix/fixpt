@@ -40,14 +40,15 @@ enum RLoc {
 }
 
 /// An operand of a call-out: an expression, a constant, a procedure of
-/// no arguments whose body is an expression (a `prompt`'s), or a frame
-/// slot's value.
+/// no arguments whose body is an expression (a `prompt`'s), a frame slot's
+/// value, or a free value of the closure running.
 #[derive(Clone, Copy)]
 enum Arg {
     E(ExpId),
     V(Value),
     Thunk(ExpId),
     Slot(usize),
+    Lexical(usize),
 }
 
 enum RItem {
@@ -485,7 +486,13 @@ impl Compiler<'_> {
             }
             Exp::Lambda { params, body } => {
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-                self.r_lambda(g, &ps, body, env, te, None)?;
+                self.r_lambda(g, &ps, body, env, te, None, None)?;
+                g.done(tail);
+            }
+            Exp::RLambda { region, lambda } => {
+                let Exp::Lambda { params, body } = self.c.arena.exp_at(lambda).clone() else { unreachable!("parsed") };
+                let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
+                self.r_lambda(g, &ps, body, env, te, None, Some(region))?;
                 g.done(tail);
             }
             Exp::Sum(t, v) => {
@@ -536,14 +543,14 @@ impl Compiler<'_> {
                 // sibling not made yet; then each placeholder patched.
                 let mut patches = Vec::new();
                 for (i, (name, _, init)) in bindings.iter().enumerate() {
-                    let (ps, lbody) = self.lambda_of(*init)?;
+                    let (ps, lbody, region) = self.lambda_of(*init)?;
                     let (mut own_env, mut own_te) = (env.clone(), te.clone());
                     for (k, (sib, _, _)) in bindings.iter().enumerate() {
                         let loops = k == i && self.loops_only(lbody, *sib, ps.len(), true);
                         own_env.push((*sib, if loops { RLoc::Loop } else { RLoc::Pending(at[k]) }));
                         own_te.push((*sib, if loops { Loc::Loop } else { Loc::Pending(at[k]) }));
                     }
-                    let p = self.r_lambda(g, &ps, lbody, &mut own_env, &mut own_te, Some(*name))?;
+                    let p = self.r_lambda(g, &ps, lbody, &mut own_env, &mut own_te, Some(*name), region)?;
                     g.op("setstk", &[Gen::n(at[i])]);
                     patches.push(p);
                 }
@@ -737,7 +744,7 @@ impl Compiler<'_> {
         let mut kept = Vec::new();
         let simple = |c: &Self, a: &Arg| match a {
             Arg::E(x) => c.r_simple(*x),
-            Arg::V(_) | Arg::Slot(_) => true,
+            Arg::V(_) | Arg::Slot(_) | Arg::Lexical(_) => true,
             Arg::Thunk(_) => false,
         };
         // The last argument that is not simple goes straight to its
@@ -755,9 +762,9 @@ impl Compiler<'_> {
             match a {
                 Arg::E(x) => self.r_exp(g, *x, env, te, false)?,
                 Arg::Thunk(body) => {
-                    self.r_lambda(g, &[], *body, env, te, None)?;
+                    self.r_lambda(g, &[], *body, env, te, None, None)?;
                 }
-                Arg::V(_) | Arg::Slot(_) => unreachable!(),
+                Arg::V(_) | Arg::Slot(_) | Arg::Lexical(_) => unreachable!(),
             }
             if Some(i) == direct {
                 g.op("setreg", &[Gen::n(i + 1)]);
@@ -787,6 +794,10 @@ impl Compiler<'_> {
                     g.op("setreg", &[Gen::n(i + 1)]);
                 }
                 (None, Arg::Slot(s)) => g.op("load", &[Gen::n(i + 1), Gen::n(*s)]),
+                (None, Arg::Lexical(k)) => {
+                    g.op("lexical", &[Gen::n(*k)]);
+                    g.op("setreg", &[Gen::n(i + 1)]);
+                }
                 (None, Arg::Thunk(_)) => unreachable!(),
             }
         }
@@ -812,14 +823,46 @@ impl Compiler<'_> {
     }
 
     /// A closure of a lambda into RESULT, its free values into REG1…REGn
-    /// first; `own` as for `lambda_word`. What it gives: for each sibling
-    /// not made yet (a `letrec`'s), the free value's index and the sibling's
-    /// frame slot.
-    fn r_lambda(&mut self, g: &mut Gen, ps: &[Sym], body: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, own: Option<Sym>) -> O<Vec<(usize, usize)>> {
+    /// first; `own` as for `lambda_word`. With a `region` (an `rlambda`'s),
+    /// the closure is made there, by `%region-closure h fv … w`. What it
+    /// gives: for each sibling not made yet (a `letrec`'s), the free value's
+    /// index and the sibling's frame slot.
+    #[allow(clippy::too_many_arguments)]
+    fn r_lambda(
+        &mut self,
+        g: &mut Gen,
+        ps: &[Sym],
+        body: ExpId,
+        env: &mut Vec<(Sym, RLoc)>,
+        te: &mut Env,
+        own: Option<Sym>,
+        region: Option<ExpId>,
+    ) -> O<Vec<(usize, usize)>> {
         if g.leaf {
             return None;
         }
         let (w, fv) = self.lambda_word(ps, body, te, own).ok()?;
+        if let Some(r) = region {
+            if fv.len() + 2 > REGS {
+                return self.decline("a closure in a region of more than REGS - 2 values");
+            }
+            let mut args = vec![Arg::E(r)];
+            let mut patches = Vec::new();
+            for (j, n) in fv.iter().enumerate() {
+                args.push(match self.r_where(env, *n)? {
+                    RLoc::Slot(s) => Arg::Slot(s),
+                    RLoc::Free(i) => Arg::Lexical(i),
+                    RLoc::Pending(s) => {
+                        patches.push((j, s));
+                        Arg::V(Value::FALSE)
+                    }
+                    _ => return None,
+                });
+            }
+            args.push(Arg::V(w));
+            self.r_prim(g, "%region-closure", &args, env, te)?;
+            return Some(patches);
+        }
         if fv.len() > REGS {
             return self.decline("a closure of more than REGS values");
         }

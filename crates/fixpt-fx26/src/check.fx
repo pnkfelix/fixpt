@@ -92,6 +92,8 @@
   ;; `letrena` or `letreap`: whether an arena, the region variable, and the
   ;; body.
   (x-letregion bool int kx int int)
+  ;; `rlambda`: the region, and the `lambda`.
+  (x-rlambda kx kx int int)
   (x-proj kx (listof k-desc @t) int int)
   (x-if kx kx kx int int)
   (x-letrec (listof (productof (1 symbol) (2 int) (3 kx)) @t) kx int int)
@@ -821,7 +823,7 @@
       (x-plambda (bs e a b) a) (x-proj (e ds a b) a) (x-if (p c d a b) a) (x-letrec (bs e a b) a)
       (x-let (bs e a b) a) (x-begin (xs a b) a) (x-prompt (t e h a b) a) (x-the (t e a b) a)
       (x-bloblet (o i xs a b) a) (x-product (fs a b) a) (x-extract (e l a b) a) (x-sum (l e a b) a)
-      (x-tagcase (e arms els a b) a) (x-letregion (k r e a b) a))))
+      (x-tagcase (e arms els a b) a) (x-letregion (k r e a b) a) (x-rlambda (r l a b) a))))
 (define k-end (subr pure (kx) int)
   (lambda (x)
     (tagcase x
@@ -829,7 +831,7 @@
       (x-plambda (bs e a b) b) (x-proj (e ds a b) b) (x-if (p c d a b) b) (x-letrec (bs e a b) b)
       (x-let (bs e a b) b) (x-begin (xs a b) b) (x-prompt (t e h a b) b) (x-the (t e a b) b)
       (x-bloblet (o i xs a b) b) (x-product (fs a b) b) (x-extract (e l a b) b) (x-sum (l e a b) b)
-      (x-tagcase (e arms els a b) b) (x-letregion (k r e a b) b))))
+      (x-tagcase (e arms els a b) b) (x-letregion (k r e a b) b) (x-rlambda (r l a b) b))))
 (define k-same-span? (subr pure (kx int int) bool)
   (lambda (x a b) (and (= (k-start x) a) (= (k-end x) b))))
 
@@ -854,7 +856,7 @@
       (e-unit (a b) a) (e-lambda (ps x a b) a) (e-app (f xs a b) a) (e-plambda (bs x a b) a) (e-proj (x ds a b) a)
       (e-if (p c d a b) a) (e-letrec (bs x a b) a) (e-let (bs x a b) a) (e-begin (xs a b) a) (e-prompt (t x h a b) a)
       (e-the (t x a b) a) (e-bloblet (o i xs a b) a) (e-product (fs a b) a) (e-extract (x l a b) a) (e-sum (l x a b) a)
-      (e-tagcase (x arms els a b) a) (e-letregion (k r x a b) a))))
+      (e-tagcase (x arms els a b) a) (e-letregion (k r x a b) a) (e-rlambda (r l a b) a))))
 (define exp-end (subr pure (exp) int)
   (lambda (e)
     (tagcase e
@@ -862,7 +864,7 @@
       (e-unit (a b) b) (e-lambda (ps x a b) b) (e-app (f xs a b) b) (e-plambda (bs x a b) b) (e-proj (x ds a b) b)
       (e-if (p c d a b) b) (e-letrec (bs x a b) b) (e-let (bs x a b) b) (e-begin (xs a b) b) (e-prompt (t x h a b) b)
       (e-the (t x a b) b) (e-bloblet (o i xs a b) b) (e-product (fs a b) b) (e-extract (x l a b) b) (e-sum (l x a b) b)
-      (e-tagcase (x arms els a b) b) (e-letregion (k r x a b) b))))
+      (e-tagcase (x arms els a b) b) (e-letregion (k r x a b) b) (e-rlambda (r l a b) b))))
 
 (define-rec
   (k-resolve-all (subr checks ((listof exp @a)) kxs)
@@ -886,6 +888,8 @@
                  (bs (k-parse-binders binders))
                  (x (k-resolve-exp body)))
             (begin (set k-dscope saved) (x-plambda bs x a b))))
+        (e-rlambda (r l a b)
+          (let* ((rx (k-resolve-exp r)) (lx (k-resolve-exp l))) (x-rlambda rx lx a b)))
         (e-letregion (arena name body a b)
           (let* ((saved (get k-dscope))
                  (v (k-new-dvar name))
@@ -1068,6 +1072,7 @@
         (x-app (f args a b) (k-free-list args bound (k-free-into f bound out)))
         (x-plambda (bs body a b) (k-free-into body bound out))
         (x-letregion (k r body a b) (k-free-into body (cons (k-dvar-name r) bound) out))
+        (x-rlambda (r l a b) (k-free-into l bound (k-free-into r bound out)))
         (x-proj (body ds a b) (k-free-into body bound out))
         (x-if (p c d a b) (k-free-into d bound (k-free-into c bound (k-free-into p bound out))))
         (x-letrec (bs body a b)
@@ -1364,9 +1369,26 @@
   (lambda (x)
     (tagcase x
       (x-lambda (ps body a b) #t)
+      (x-rlambda (r l a b) #t)
       (x-plambda (bs e a b) (k-lambda? e))
       (x-the (t e a b) (k-lambda? e))
       (else y #f))))
+;; Whether a `plambda` body `x` with effect `e` may be generalized: pure, as
+;; the value restriction has it; or an `rlambda`, under ascriptions and other
+;; `plambda`s, whose effect only allocates. Making a closure makes no mutable
+;; data a type could be generalized over: it holds only variables bound
+;; outside.
+(define k-rlambda-under? (subr pure (kx) bool)
+  (lambda (x)
+    (tagcase x
+      (x-rlambda (r l a b) #t)
+      (x-plambda (bs e a b) (k-rlambda-under? e))
+      (x-the (t e a b) (k-rlambda-under? e))
+      (else y #f))))
+(define k-only-alloc? (subr (read @t) (k-eff) bool)
+  (lambda (e) (or (null? e) (and (tagcase (car e) (a-alloc (r) #t) (else y #f)) (k-only-alloc? (cdr e))))))
+(define k-generalizable? (subr (read @t) (kx k-eff) bool)
+  (lambda (x e) (or (null? e) (and (k-rlambda-under? x) (k-only-alloc? e)))))
 (define k-letrec-not-lambda (subr pure (symbol) string)
   (lambda (n)
     (string-append (k-quote (symbol->string n))
@@ -1761,9 +1783,10 @@
         (x-the (t e a b) (k-te t (k-check e t)))
         (x-plambda (bs body a b)
           (let ((r (k-synth body)))
-            (if (null? (extract r 2))
-                (k-te (k-ty-new (ty-poly bs (extract r 1))) nil)
+            (if (k-generalizable? body (extract r 2))
+                (k-te (k-ty-new (ty-poly bs (extract r 1))) (extract r 2))
                 (k-fail (string-append "a `plambda` body must be pure, and this one has " (k-show-effect (extract r 2))) a b))))
+        (x-rlambda (r l a b) (k-synth-rlambda x r l -1))
         (x-proj (body ds a b)
           (let* ((r (k-synth body)) (t (extract r 1)))
             (tagcase (k-get t)
@@ -1885,6 +1908,31 @@
                   (k-unbind-to saved)
                   (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (extract r 1))) nil))))))
         (else y (k-fail "a lambda" (k-start x) (k-end x))))))
+  ;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
+  ;; result types if it is a subroutine's, with `(read R)` in its latent
+  ;; effect, since calling it reads the closure; making it allocates in `R`,
+  ;; the region `r` names.
+  (k-synth-rlambda (subr checks (kx kx kx int) k-te)
+    (lambda (x r l expected)
+      (let* ((rr (k-synth r))
+             (rt (extract rr 1))
+             (g (tagcase (k-get rt)
+                  (ty-region (g) g)
+                  (else y (k-fail (k-cat3 "a region is expected here, and this is a " (k-show-ty rt) "") (k-start r) (k-end r)))))
+             (c (if (< expected 0) (the (listof k-callable @t) nil) (k-as-subr expected)))
+             (n (tagcase l (x-lambda (ps body a b) (k-length ps)) (else y 0)))
+             (lt (cond
+                   ((null? c) (k-synth-lambda-as l nil -1))
+                   ((not (= (k-length (extract (car c) 2)) n))
+                    (k-fail (k-cat4 "a subroutine of " (int->string (k-length (extract (car c) 2))) " parameter(s) is expected, and this `rlambda` has "
+                                    (int->string n))
+                            (k-start x) (k-end x)))
+                   (else (k-synth-lambda-as l (extract (car c) 2) (extract (car c) 3)))))
+             (t (tagcase (k-get (extract lt 1))
+                  (ty-subr (e ps res) (k-ty-new (ty-subr (k-insert (a-read g) e) ps res)))
+                  (else y (k-fail "a lambda" (k-start x) (k-end x)))))
+             (e (k-insert (a-alloc g) (extract rr 2))))
+        (k-te t (k-mask x e t)))))
   ;;; ------------------------------------------------------------ application
   (k-synth-app (subr checks (kx kx kxs int) k-te)
     (lambda (x f args expected)
@@ -2002,7 +2050,7 @@
            (tagcase et
              (ty-poly (bs body)
                (let ((e (k-check x body)))
-                 (if (null? e) e (k-fail (string-append "a polymorphic value must be pure, and this has " (k-show-effect e)) (k-start x) (k-end x)))))
+                 (if (k-generalizable? x e) e (k-fail (string-append "a polymorphic value must be pure, and this has " (k-show-effect e)) (k-start x) (k-end x)))))
              (else y nil)))
           ((and poly? plambda? (k-plambda-matches? x et))
            (tagcase x
@@ -2010,7 +2058,7 @@
                (tagcase et
                  (ty-poly (bs want)
                    (let* ((want (k-subst want (k-rename bs binders))) (e (k-check body want)))
-                     (if (null? e) e (k-fail (string-append "a `plambda` body must be pure, and this one has " (k-show-effect e)) a b))))
+                     (if (k-generalizable? body e) e (k-fail (string-append "a `plambda` body must be pure, and this one has " (k-show-effect e)) a b))))
                  (else y nil)))
              (else y nil)))
           (else (k-check-node x expected et))))))
@@ -2033,6 +2081,10 @@
                          (begin (k-expect x (extract r 1) expected) (extract r 2))))))
                 ((k-some-untyped? ps) (k-fail (string-append "a `lambda` cannot be a " (k-show-ty expected)) a b))
                 (else (otherwise)))))
+          (x-rlambda (r l xa xb)
+            (if (null? (k-as-subr expected))
+                (otherwise)
+                (let ((rr (k-synth-rlambda x r l expected))) (begin (k-expect x (extract rr 1) expected) (extract rr 2)))))
           (x-app (f args xa xb)
             (let ((r (k-synth-app x f args expected))) (begin (k-expect x (extract r 1) expected) (extract r 2))))
           (x-bloblet (op i args xa xb)
