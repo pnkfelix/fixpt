@@ -694,6 +694,28 @@ prims! {
         }
         Ok(b)
     });
+    "%make-bloblet-filled", 3, Some(3), simple!(|rt, a| {
+        let bytes = int(rt, a[0])?;
+        let n = int(rt, a[1])?;
+        if !(0..=u32::MAX as i64).contains(&bytes) { return rt.fail("a bloblet's suffix is 0 to 4 GiB", &[a[0]]); }
+        if !(0..1 << 40).contains(&n) { return rt.fail("a bloblet's field count must be non-negative", &[a[1]]); }
+        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, n as usize, bytes as usize, true);
+        for k in 2..n as usize + 2 {
+            rt.heap.set_bloblet_slot(b, k, a[2]);
+        }
+        Ok(b)
+    });
+    // FNV-1a over the characters, kept to a non-negative fixnum: the same
+    // string always hashes the same, across runs and collections.
+    "%string-hash", 1, Some(1), simple!(|rt, a| {
+        let s = get_string(rt, a[0])?;
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for c in s.chars() {
+            h ^= c as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        Ok(Value::fixnum((h >> 4) as i64))
+    });
     "%bloblet?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_bloblet())));
     "%bloblet-kind", 1, Some(1), simple!(|rt, a| {
         let b = bloblet(rt, a[0])?;

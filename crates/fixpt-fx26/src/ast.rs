@@ -112,6 +112,16 @@ pub enum Ty {
     /// `(mark-key T R)`: a continuation-mark key in region `R` for marks of
     /// type `T`.
     MarkKey(TyId, Region),
+    /// FX-91's `(productof (label T) …)`: an immutable record. Immutable, so
+    /// in no region, and making one is pure; at run time a frozen bloblet
+    /// with a field per label, in order.
+    Product(Vec<(Sym, TyId)>),
+    /// FX-91's `(sumof (tag T) …)`: an immutable tagged union; at run time
+    /// a frozen bloblet of the tag, as a symbol, and the value.
+    Sum(Vec<(Sym, TyId)>),
+    /// `(arrayof T R)`: a bloblet in region `R` with any number of fields,
+    /// all of type `T`, read and written by index.
+    Array(TyId, Region),
     /// `(bloblet (fields T…) R)`: a bloblet in region `R` whose fields have
     /// the types `T…`, with a suffix of bytes (`docs/object-model.md`).
     /// `(bloblet (frozen T…) R)` is one whose fields have been frozen: they
@@ -159,6 +169,8 @@ pub enum Exp {
     Bool(bool),
     Str(String),
     Char(char),
+    /// `'name`: a symbol.
+    Symbol(Sym),
     Unit,
     /// A parameter's type may be left out when the `lambda` is checked
     /// against a type that supplies it.
@@ -181,6 +193,40 @@ pub enum Exp {
     /// The bloblet forms, which are syntax because a field's index must be
     /// known to know its type.
     Bloblet { op: BlobletOp, args: Vec<ExpId> },
+    /// `(product (label e) …)`.
+    Product(Vec<(Sym, ExpId)>),
+    /// `(extract e label)`.
+    Extract(ExpId, Sym),
+    /// `(sum tag e)`.
+    Sum(Sym, ExpId),
+    /// `(tagcase e (tag x body) … [(else y body)])`: each arm sees the
+    /// value its tag carries; `else` sees the sum of the tags not named.
+    TagCase { scrutinee: ExpId, arms: Vec<Arm>, els: Option<(Sym, ExpId)> },
+}
+
+/// One arm of a `tagcase`.
+#[derive(Clone, Debug)]
+pub struct Arm {
+    pub tag: Sym,
+    pub bind: ArmBind,
+    pub body: ExpId,
+}
+
+/// What an arm binds: the value, or, when the value is a product, its
+/// fields in order, `(tag (a b) body)`.
+#[derive(Clone, Debug)]
+pub enum ArmBind {
+    Value(Sym),
+    Fields(Vec<Sym>),
+}
+
+impl Arm {
+    pub fn names(&self) -> Vec<Sym> {
+        match &self.bind {
+            ArmBind::Value(x) => vec![*x],
+            ArmBind::Fields(xs) => xs.clone(),
+        }
+    }
 }
 
 /// A bloblet form. Field `i` is the program's `i`th field, counted from 0;

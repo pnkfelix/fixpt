@@ -86,3 +86,28 @@ fn bloblets_run() {
     // Frozen at run time as well: the flag is in the header.
     assert_eq!(run("(let ((b (make-bloblet 2 1))) (bloblet-freeze b))"), "#<bloblet 2 fields 2 bytes>");
 }
+
+#[test]
+fn symbols_are_values() {
+    assert_eq!(check("'abc"), "symbol ! pure");
+    assert_eq!(check("(symbol=? 'a (string->symbol \"a\"))"), "bool ! pure");
+    assert_eq!(run("(symbol=? 'a (string->symbol \"a\"))"), "#t");
+    assert_eq!(run("(symbol->string 'Hello)"), "\"Hello\"");
+    assert_eq!(run("'x"), "x");
+    let err = rejects("'(1 2)");
+    assert!(err.contains("only a symbol can be quoted"), "{err}");
+    // The same string hashes the same.
+    assert_eq!(run("(= (string-hash \"abc\") (string-hash (string-append \"a\" \"bc\")))"), "#t");
+}
+
+#[test]
+fn arrays_are_bloblets_indexed_at_run_time() {
+    assert_eq!(check("(the (arrayof int @r) (make-array 3 0))"), "(arrayof int @r) ! (alloc @r)");
+    let a = "(define a (arrayof string @r) (make-array 2 \"\"))";
+    assert_eq!(check(&format!("{a} (array-ref a 1)")), "string ! (read @r)");
+    assert_eq!(check(&format!("{a} (array-set! a 0 \"x\")")), "unit ! (write @r)");
+    assert_eq!(check(&format!("{a} (array-length a)")), "int ! pure");
+    assert_eq!(run(include_str!("programs/bloblet/array-sum.fx")), "285");
+    let out = run("(array-ref (make-array 2 0) 2)");
+    assert!(out.starts_with("!! "), "{out}");
+}

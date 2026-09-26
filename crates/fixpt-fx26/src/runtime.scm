@@ -25,6 +25,21 @@
 (define (%fx26-bloblet-set-byte! b i n) (%bloblet-set-byte! b i n) %fx26-unit)
 (define (%fx26-bloblet-freeze b) (%bloblet-freeze! b #t #f) b)
 
+;;; ---- products and sums ----
+;;; Immutable, so a bloblet frozen, fields and suffix, once made.
+(define (%fx26-frozen . fields)
+  (let ((b (apply %make-bloblet 0 fields)))
+    (%bloblet-freeze! b #t #t)
+    b))
+(define (%fx26-no-arm v) (error "tagcase: no arm for this value" v))
+
+;;; ---- arrays ----
+;;; A bloblet with a field per element; element `i` is field `i + 2`.
+(define (%fx26-make-array n fill) (%make-bloblet-filled 0 n fill))
+(define (%fx26-array-ref a i) (%bloblet-ref a (+ i 2)))
+(define (%fx26-array-set! a i v) (%bloblet-set! a (+ i 2) v) %fx26-unit)
+(define (%fx26-array-length a) (- (%bloblet-fields a) 1))
+
 ;;; ---- pairs ----
 (define (%fx26-set-car! p v) (set-car! p v) %fx26-unit)
 (define (%fx26-set-cdr! p v) (set-cdr! p v) %fx26-unit)

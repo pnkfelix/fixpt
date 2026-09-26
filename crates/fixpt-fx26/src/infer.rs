@@ -88,6 +88,27 @@ impl Checker {
                 self.expect(e, t, expected)?;
                 Ok(eff)
             }
+            Exp::TagCase { scrutinee, arms, els } => Ok(self.synth_tagcase(e, scrutinee, &arms, &els, Some(expected))?.1),
+            // A product checked against a product type of the same labels,
+            // and a sum against a sum with its tag: the parts are checked
+            // against theirs, so their lambdas and projections are inferred.
+            Exp::Product(fields)
+                if matches!(&expected_ty, Ty::Product(fs) if fs.len() == fields.len()
+                    && fs.iter().zip(&fields).all(|((a, _), (b, _))| a == b)) =>
+            {
+                let Ty::Product(fs) = expected_ty else { unreachable!() };
+                let mut eff = Effect::pure();
+                for ((_, x), (_, t)) in fields.iter().zip(&fs) {
+                    eff = eff.union(&self.check(*x, *t)?);
+                }
+                Ok(self.mask(e, &eff, expected))
+            }
+            Exp::Sum(tag, x) if matches!(&expected_ty, Ty::Sum(vs) if vs.iter().any(|(l, _)| *l == tag)) => {
+                let Ty::Sum(vs) = expected_ty else { unreachable!() };
+                let t = vs.iter().find(|(l, _)| *l == tag).expect("matched").1;
+                let eff = self.check(x, t)?;
+                Ok(self.mask(e, &eff, expected))
+            }
             Exp::Var(s) if self.lookup(s).is_some_and(|t| matches!(self.arena.get(t), Ty::Poly { .. })) => {
                 let t = self.lookup(s).expect("bound");
                 let inst = self.instantiate_against(t, expected, span)?;
@@ -494,7 +515,7 @@ impl Checker {
                     stack.push(body);
                     false
                 }
-                Ty::Ref(x, r) | Ty::MarkKey(x, r) => {
+                Ty::Ref(x, r) | Ty::MarkKey(x, r) | Ty::Array(x, r) => {
                     stack.push(x);
                     region(r)
                 }
@@ -505,6 +526,10 @@ impl Checker {
                 Ty::Bloblet { fields, region: r, .. } => {
                     stack.extend(fields);
                     region(r)
+                }
+                Ty::Product(parts) | Ty::Sum(parts) => {
+                    stack.extend(parts.iter().map(|(_, t)| *t));
+                    false
                 }
                 Ty::PromptTag { answer: x, payload: y, effect: e, region: r }
                 | Ty::Composable { arg: x, answer: y, effect: e, region: r } => {
@@ -536,8 +561,9 @@ impl Checker {
                 params.iter().any(|p| self.walk_vars(*p, seen, hit)) || self.walk_vars(result, seen, hit)
             }
             Ty::Poly { body, .. } => self.walk_vars(body, seen, hit),
-            Ty::Ref(a, _) | Ty::MarkKey(a, _) => self.walk_vars(a, seen, hit),
+            Ty::Ref(a, _) | Ty::MarkKey(a, _) | Ty::Array(a, _) => self.walk_vars(a, seen, hit),
             Ty::Bloblet { fields, .. } => fields.iter().any(|f| self.walk_vars(*f, seen, hit)),
+            Ty::Product(parts) | Ty::Sum(parts) => parts.iter().any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Pair(a, b, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
@@ -586,7 +612,9 @@ impl Checker {
                 self.unify(pr, ar, u, trail);
                 self.unify_effect(&pe, &ae, u);
             }
-            (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::MarkKey(x, r), Ty::MarkKey(y, s)) => {
+            (Ty::Ref(x, r), Ty::Ref(y, s))
+            | (Ty::MarkKey(x, r), Ty::MarkKey(y, s))
+            | (Ty::Array(x, r), Ty::Array(y, s)) => {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);
             }
@@ -594,6 +622,13 @@ impl Checker {
                 self.unify_region(r, s, u);
                 self.unify(x1, y1, u, trail);
                 self.unify(x2, y2, u, trail);
+            }
+            (Ty::Product(pp), Ty::Product(pa)) | (Ty::Sum(pp), Ty::Sum(pa)) => {
+                for (l, x) in &pp {
+                    if let Some((_, y)) = pa.iter().find(|(m, _)| m == l) {
+                        self.unify(*x, *y, u, trail);
+                    }
+                }
             }
             (Ty::Bloblet { fields: fp, region: r, .. }, Ty::Bloblet { fields: fa, region: s, .. }) if fp.len() == fa.len() => {
                 self.unify_region(r, s, u);

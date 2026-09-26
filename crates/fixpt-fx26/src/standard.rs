@@ -90,6 +90,16 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("datum-cdr", "(subr pure (datum) datum)"),
     ("datum-symbol?", "(subr pure (datum) bool)"),
     ("datum-symbol-name", "(subr pure (datum) string)"),
+    ("string->symbol", "(subr pure (string) symbol)"),
+    ("symbol->string", "(subr pure (symbol) string)"),
+    ("symbol=?", "(subr pure (symbol symbol) bool)"),
+    // A hash of a string's characters: the same string, the same hash.
+    ("string-hash", "(subr pure (string) int)"),
+    // Arrays: bloblets whose fields are all one type, read by index.
+    ("make-array", "(poly ((r region)) (poly ((t type)) (subr (alloc r) (int t) (arrayof t r))))"),
+    ("array-ref", "(poly ((r region)) (poly ((t type)) (subr (read r) ((arrayof t r) int) t)))"),
+    ("array-set!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((arrayof t r) int t) unit)))"),
+    ("array-length", "(poly ((r region)) (poly ((t type)) (subr pure ((arrayof t r)) int)))"),
     (
         "make-continuation-prompt-tag",
         "(poly ((r region)) (poly ((a type) (h type) (d effect))

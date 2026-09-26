@@ -92,6 +92,13 @@ impl Checker {
                 format!("(poly ({}) {})", bs.join(" "), self.show_ty_on(body, path))
             }
             Ty::Ref(a, r) => format!("(ref {} {})", self.show_ty_on(a, path), self.show_region(r)),
+            Ty::Product(parts) | Ty::Sum(parts) => {
+                let head = if matches!(self.arena.get(t), Ty::Product(_)) { "productof" } else { "sumof" };
+                let ps: Vec<String> =
+                    parts.iter().map(|(l, x)| format!(" ({} {})", self.interner.name(*l), self.show_ty_on(*x, path))).collect();
+                format!("({head}{})", ps.concat())
+            }
+            Ty::Array(a, r) => format!("(arrayof {} {})", self.show_ty_on(a, path), self.show_region(r)),
             // FX-87's `listof`: a pair whose tail is itself.
             Ty::Pair(a, b, r) if self.arena.resolve(b) == t => {
                 format!("(listof {} {})", self.show_ty_on(a, path), self.show_region(r))

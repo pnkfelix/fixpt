@@ -6,7 +6,7 @@
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
-use crate::ast::{Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
+use crate::ast::{Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
@@ -245,6 +245,30 @@ impl Checker {
                 let fields = parts[1..].iter().map(|t| self.parse_type(t)).collect::<R<Vec<_>>>()?;
                 let region = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::Bloblet { fields, frozen, region }))
+            }
+            "productof" | "sumof" => {
+                let mut parts = Vec::new();
+                for p in &items[1..] {
+                    let pair = self.items(p, "`(label type)`")?.to_vec();
+                    let [label, t] = &pair[..] else {
+                        return Err(FxError::at(p.span, "`(label type)`"));
+                    };
+                    let label = self.label(label)?;
+                    if parts.iter().any(|(l, _)| *l == label) {
+                        return Err(FxError::at(p.span, format!("`{}` appears twice", self.name(label))));
+                    }
+                    parts.push((label, self.parse_type(t)?));
+                }
+                let product = self.head(&items) == Some("productof");
+                Ok(self.arena.ty(if product { Ty::Product(parts) } else { Ty::Sum(parts) }))
+            }
+            "arrayof" => {
+                let [_, t, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(arrayof type region)`"));
+                };
+                let t = self.parse_type(t)?;
+                let r = self.parse_region(r)?;
+                Ok(self.arena.ty(Ty::Array(t, r)))
             }
             "mark-key" => {
                 let [_, t, r] = &items[..] else {
@@ -532,6 +556,42 @@ impl Checker {
                 let name = name.to_string();
                 self.parse_bloblet(span, &name, &items[1..])
             }
+            "product" => {
+                let mut fields = Vec::new();
+                for p in &items[1..] {
+                    let pair = self.items(p, "`(label expression)`")?.to_vec();
+                    let [label, e] = &pair[..] else {
+                        return Err(FxError::at(p.span, "`(product (label expression) …)`"));
+                    };
+                    let label = self.label(label)?;
+                    if fields.iter().any(|(l, _)| *l == label) {
+                        return Err(FxError::at(p.span, format!("`{}` appears twice", self.name(label))));
+                    }
+                    fields.push((label, self.parse_exp(e)?));
+                }
+                Ok(self.arena.exp(span, Exp::Product(fields)))
+            }
+            "extract" => {
+                let [_, e, label] = &items[..] else {
+                    return Err(FxError::at(span, "`(extract expression label)`"));
+                };
+                let label = self.label(label)?;
+                let e = self.parse_exp(e)?;
+                Ok(self.arena.exp(span, Exp::Extract(e, label)))
+            }
+            "sum" => {
+                let [_, tag, e] = &items[..] else {
+                    return Err(FxError::at(span, "`(sum tag expression)`"));
+                };
+                let tag = self.label(tag)?;
+                let e = self.parse_exp(e)?;
+                Ok(self.arena.exp(span, Exp::Sum(tag, e)))
+            }
+            "tagcase" => self.parse_tagcase(span, &items[1..]),
+            "quote" => match &items[..] {
+                [_, x] if x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
+                _ => Err(FxError::at(span, "only a symbol can be quoted: `'name`")),
+            },
             "prompt" => {
                 let [_, tag, body, handler] = &items[..] else {
                     return Err(FxError::at(span, "`(prompt tag body handler)`"));
@@ -568,6 +628,66 @@ impl Checker {
             out = self.arena.exp(c.span, Exp::If { test, then, els: out });
         }
         Ok(out)
+    }
+
+    /// A label or tag: a symbol, or a positive integer, as FX-91's
+    /// `define-datatype` numbers a variant's members.
+    fn label(&mut self, s: &Syntax) -> R<Sym> {
+        if let Some(x) = s.as_symbol() {
+            return Ok(x);
+        }
+        match self.literal_int(s) {
+            Some(n) if n > 0 => Ok(self.interner.intern(&n.to_string())),
+            _ => Err(FxError::at(s.span, "a label is a name or a positive integer")),
+        }
+    }
+
+    /// `(tagcase e (tag x body…) … [(else y body…)])`.
+    fn parse_tagcase(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let Some((scrutinee, clauses)) = items.split_first() else {
+            return Err(FxError::at(span, "`(tagcase expression (tag name body …) …)`"));
+        };
+        let scrutinee = self.parse_exp(scrutinee)?;
+        let mut arms: Vec<Arm> = Vec::new();
+        let mut els = None;
+        for (i, c) in clauses.iter().enumerate() {
+            let parts = self.items(c, "a tagcase arm")?.to_vec();
+            let [tag, bind, body @ ..] = &parts[..] else {
+                return Err(FxError::at(c.span, "a tagcase arm is `(tag name body …)`"));
+            };
+            if body.is_empty() {
+                return Err(FxError::at(c.span, "a tagcase arm needs a body"));
+            }
+            if tag.as_symbol().map(|t| self.name(t)) == Some("else") {
+                if i + 1 != clauses.len() {
+                    return Err(FxError::at(c.span, "`else` must be the last arm"));
+                }
+                let Some(y) = bind.as_symbol() else {
+                    return Err(FxError::at(bind.span, "`else` binds one name"));
+                };
+                els = Some((y, self.parse_body(c.span, body)?));
+                continue;
+            }
+            let tag = self.label(tag)?;
+            if arms.iter().any(|a| a.tag == tag) {
+                return Err(FxError::at(c.span, format!("`{}` has two arms", self.name(tag))));
+            }
+            let bind = match (bind.as_symbol(), &bind.datum) {
+                (Some(x), _) => ArmBind::Value(x),
+                (None, Datum::Nil) => ArmBind::Fields(Vec::new()),
+                _ => {
+                    let names = self.items(bind, "the names an arm binds")?;
+                    let names = names
+                        .iter()
+                        .map(|n| n.as_symbol().ok_or_else(|| FxError::at(n.span, "a name")))
+                        .collect::<R<Vec<_>>>()?;
+                    ArmBind::Fields(names)
+                }
+            };
+            let body = self.parse_body(c.span, body)?;
+            arms.push(Arm { tag, bind, body });
+        }
+        Ok(self.arena.exp(span, Exp::TagCase { scrutinee, arms, els }))
     }
 
     /// A bloblet form; see [`BlobletOp`].

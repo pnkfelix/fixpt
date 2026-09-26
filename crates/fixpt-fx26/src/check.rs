@@ -25,7 +25,7 @@
 //! **Prompts** delimit control on their tag's region, under a condition of
 //! their own: see `synth_prompt`.
 
-use crate::ast::{Arena, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
+use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::error::{FxError, R};
 use crate::parse::DScope;
 use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
@@ -45,6 +45,7 @@ pub struct Checker {
     string: TyId,
     unit: TyId,
     char_: TyId,
+    symbol: TyId,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -71,6 +72,9 @@ pub struct NodeFacts {
     /// Expressions that allocate, where masking removed every allocation:
     /// nothing they allocate outlives them.
     pub no_escape: HashSet<ExpId>,
+    /// Each `extract`'s field, by position: lowering needs it, and only the
+    /// product's type says it.
+    pub field_index: HashMap<ExpId, usize>,
 }
 
 impl NodeFacts {
@@ -79,6 +83,7 @@ impl NodeFacts {
         self.effects.retain(|e, _| e.0 < first);
         self.standard_operator.retain(|e, _| e.0 < first);
         self.no_escape.retain(|e| e.0 < first);
+        self.field_index.retain(|e, _| e.0 < first);
     }
 }
 
@@ -117,6 +122,8 @@ impl Checker {
         // A Scheme datum, as a reader produces: opaque, and immutable, so
         // building one is no effect.
         basic("datum");
+        // A symbol: interned, so compared by identity, and immutable.
+        let symbol = basic("symbol");
         let void = arena.ty(Ty::Void);
         let mut c = Checker {
             arena,
@@ -130,6 +137,7 @@ impl Checker {
             string,
             unit,
             char_,
+            symbol,
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -228,6 +236,7 @@ impl Checker {
             Exp::Bool(_) => Ok((self.bool_, Effect::pure())),
             Exp::Str(_) => Ok((self.string, Effect::pure())),
             Exp::Char(_) => Ok((self.char_, Effect::pure())),
+            Exp::Symbol(_) => Ok((self.symbol, Effect::pure())),
             Exp::Unit => Ok((self.unit, Effect::pure())),
             Exp::Lambda { .. } => self.synth_lambda(e, None),
             Exp::App { fun, args } => self.synth_app(e, fun, &args, None),
@@ -320,6 +329,38 @@ impl Checker {
             }
             Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
             Exp::Bloblet { op, args } => self.synth_bloblet(e, op, &args, None),
+            Exp::Product(fields) => {
+                let mut eff = Effect::pure();
+                let mut tys = Vec::new();
+                for (l, x) in &fields {
+                    let (t, xe) = self.synth(*x)?;
+                    eff = eff.union(&xe);
+                    tys.push((*l, t));
+                }
+                let t = self.arena.ty(Ty::Product(tys));
+                let eff = self.mask(e, &eff, t);
+                Ok((t, eff))
+            }
+            Exp::Extract(x, label) => {
+                let (pt, eff) = self.synth(x)?;
+                let Ty::Product(fields) = self.arena.get(pt).clone() else {
+                    return Err(FxError::at(self.arena.span_of(x), format!("a product is expected here, and this is a {}", self.show_ty(pt))));
+                };
+                let Some(i) = fields.iter().position(|(l, _)| *l == label) else {
+                    return Err(FxError::at(span, format!("a {} has no `{}`", self.show_ty(pt), self.interner.name(label))));
+                };
+                self.facts.field_index.insert(e, i);
+                let t = fields[i].1;
+                let eff = self.mask(e, &eff, t);
+                Ok((t, eff))
+            }
+            Exp::Sum(tag, x) => {
+                let (t, eff) = self.synth(x)?;
+                let t = self.arena.ty(Ty::Sum(vec![(tag, t)]));
+                let eff = self.mask(e, &eff, t);
+                Ok((t, eff))
+            }
+            Exp::TagCase { scrutinee, arms, els } => self.synth_tagcase(e, scrutinee, &arms, &els, None),
             Exp::Begin(items) => {
                 let mut eff = Effect::pure();
                 let mut last = self.unit;
@@ -384,7 +425,7 @@ impl Checker {
                     out.push(s);
                 }
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => {}
             Exp::Lambda { params, body } => {
                 let depth = bound.len();
                 bound.extend(params.iter().map(|(n, _)| *n));
@@ -437,6 +478,26 @@ impl Checker {
                     self.free_into(a, bound, out);
                 }
             }
+            Exp::Product(fields) => {
+                for (_, x) in fields {
+                    self.free_into(x, bound, out);
+                }
+            }
+            Exp::Extract(x, _) | Exp::Sum(_, x) => self.free_into(x, bound, out),
+            Exp::TagCase { scrutinee, arms, els } => {
+                self.free_into(scrutinee, bound, out);
+                for arm in &arms {
+                    let depth = bound.len();
+                    bound.extend(arm.names());
+                    self.free_into(arm.body, bound, out);
+                    bound.truncate(depth);
+                }
+                if let Some((y, body)) = els {
+                    bound.push(y);
+                    self.free_into(body, bound, out);
+                    bound.pop();
+                }
+            }
         }
     }
 
@@ -462,7 +523,7 @@ impl Checker {
                 self.regions_walk(result, seen, out);
             }
             Ty::Poly { body, .. } => self.regions_walk(body, seen, out),
-            Ty::Ref(a, r) => {
+            Ty::Ref(a, r) | Ty::Array(a, r) => {
                 out.insert(r);
                 self.regions_walk(a, seen, out);
             }
@@ -486,6 +547,11 @@ impl Checker {
                 out.insert(region);
                 for f in fields {
                     self.regions_walk(f, seen, out);
+                }
+            }
+            Ty::Product(parts) | Ty::Sum(parts) => {
+                for (_, t) in parts {
+                    self.regions_walk(t, seen, out);
                 }
             }
         }
@@ -531,7 +597,9 @@ impl Checker {
             }
             // References and pairs are mutable, so their contents are
             // invariant: FX-87's `ref` rule, and its pairs.
-            (Ty::Ref(x, r), Ty::Ref(y, s)) => r == s && self.sub(x, y, trail) && self.sub(y, x, trail),
+            (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) => {
+                r == s && self.sub(x, y, trail) && self.sub(y, x, trail)
+            }
             (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) => {
                 r == s
                     && self.sub(x1, y1, trail)
@@ -573,6 +641,14 @@ impl Checker {
                     && fa.len() == fb.len()
                     && fa.iter().zip(&fb).all(|(x, y)| self.sub(*x, *y, trail) && (za || self.sub(*y, *x, trail)))
             }
+            // Immutable, so covariant: a product in its fields, a sum in its
+            // variants, and a sum with fewer tags fits one with more.
+            (Ty::Product(pa), Ty::Product(pb)) => {
+                pa.len() == pb.len() && pa.iter().zip(&pb).all(|((la, x), (lb, y))| la == lb && self.sub(*x, *y, trail))
+            }
+            (Ty::Sum(sa), Ty::Sum(sb)) => sa.iter().all(|(la, x)| {
+                sb.iter().find(|(lb, _)| lb == la).is_some_and(|(_, y)| self.sub(*x, *y, trail))
+            }),
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
                     return false;
@@ -639,6 +715,7 @@ impl Checker {
             }
             Ty::Poly { binders, body } => Ty::Poly { binders, body: self.subst_memo(body, map, memo) },
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),
+            Ty::Array(a, r) => Ty::Array(self.subst_memo(a, map, memo), region(r)),
             Ty::Pair(a, b, r) => Ty::Pair(self.subst_memo(a, map, memo), self.subst_memo(b, map, memo), region(r)),
             Ty::PromptTag { answer, payload, effect, region: r } => Ty::PromptTag {
                 answer: self.subst_memo(answer, map, memo),
@@ -653,6 +730,8 @@ impl Checker {
                 region: region(r),
             },
             Ty::MarkKey(t, r) => Ty::MarkKey(self.subst_memo(t, map, memo), region(r)),
+            Ty::Product(parts) => Ty::Product(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),
+            Ty::Sum(parts) => Ty::Sum(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),
             Ty::Bloblet { fields, frozen, region: r } => Ty::Bloblet {
                 fields: fields.iter().map(|f| self.subst_memo(*f, map, memo)).collect(),
                 frozen,
@@ -710,6 +789,84 @@ impl Checker {
     /// except the tag itself when `tag` is a variable. A tag the body makes
     /// for itself is fine: an abort to it with no prompt of its own inside
     /// the body is an error, not a jump past this one.
+    // ------------------------------------------------------------- tagcase
+    /// `tagcase`. `expected`, when checking, is what every arm is checked
+    /// against; otherwise the result is the arms' types' least upper bound
+    /// among themselves.
+    pub(crate) fn synth_tagcase(
+        &mut self,
+        e: ExpId,
+        scrutinee: ExpId,
+        arms: &[Arm],
+        els: &Option<(Sym, ExpId)>,
+        expected: Option<TyId>,
+    ) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let (st, mut eff) = self.synth(scrutinee)?;
+        let Ty::Sum(variants) = self.arena.get(st).clone() else {
+            return Err(FxError::at(self.arena.span_of(scrutinee), format!("a sum is expected here, and this is a {}", self.show_ty(st))));
+        };
+        let mut types = Vec::new();
+        for arm in arms {
+            let Some((_, t)) = variants.iter().find(|(l, _)| *l == arm.tag) else {
+                return Err(FxError::at(self.arena.span_of(arm.body), format!("a {} has no tag `{}`", self.show_ty(st), self.interner.name(arm.tag))));
+            };
+            let bound: Vec<(Sym, TyId)> = match &arm.bind {
+                ArmBind::Value(x) => vec![(*x, *t)],
+                ArmBind::Fields(xs) => match self.arena.get(*t).clone() {
+                    Ty::Product(fs) if fs.len() == xs.len() => xs.iter().zip(&fs).map(|(x, (_, t))| (*x, *t)).collect(),
+                    _ => {
+                        return Err(FxError::at(self.arena.span_of(arm.body), format!("`{}` carries a {}, which cannot be taken apart into {} name(s)", self.interner.name(arm.tag), self.show_ty(*t), xs.len())));
+                    }
+                },
+            };
+            let (t, be) = self.in_scope(&bound, |c| match expected {
+                Some(x) => Ok((x, c.check(arm.body, x)?)),
+                None => c.synth(arm.body),
+            })?;
+            eff = eff.union(&be);
+            types.push(t);
+        }
+        let rest: Vec<(Sym, TyId)> = variants.iter().filter(|(l, _)| !arms.iter().any(|a| a.tag == *l)).cloned().collect();
+        match els {
+            Some((y, body)) => {
+                let rest_ty = self.arena.ty(Ty::Sum(rest));
+                let (t, be) = self.in_scope(&[(*y, rest_ty)], |c| match expected {
+                    Some(x) => Ok((x, c.check(*body, x)?)),
+                    None => c.synth(*body),
+                })?;
+                eff = eff.union(&be);
+                types.push(t);
+            }
+            None if !rest.is_empty() => {
+                let names: Vec<&str> = rest.iter().map(|(l, _)| self.interner.name(*l)).collect();
+                return Err(FxError::at(span, format!("this `tagcase` has no arm for {}", names.join(", "))));
+            }
+            None => {}
+        }
+        let t = match expected {
+            Some(x) => x,
+            None => {
+                let Some(t) = types.iter().copied().find(|t| types.clone().iter().all(|u| self.subtype(*u, *t))) else {
+                    let shown: Vec<String> = types.iter().map(|t| self.show_ty(*t)).collect();
+                    return Err(FxError::at(span, format!("the arms are {}", shown.join(", "))));
+                };
+                t
+            }
+        };
+        let eff = self.mask(e, &eff, t);
+        Ok((t, eff))
+    }
+
+    /// Run `f` with `bound` in scope.
+    fn in_scope<T>(&mut self, bound: &[(Sym, TyId)], f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        let depth = self.env.len();
+        self.env.extend_from_slice(bound);
+        let r = f(self);
+        self.env.truncate(depth);
+        r
+    }
+
     // --------------------------------------------------------------- bloblets
     /// The bloblet forms. `expected`, when checking, supplies a new
     /// bloblet's region and field types.

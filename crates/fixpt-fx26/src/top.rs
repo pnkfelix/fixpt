@@ -48,7 +48,72 @@ impl Checker {
         let mut interner = std::mem::take(&mut self.interner);
         let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
         self.interner = interner;
-        r.map_err(|e| FxError::at(e.span, e.message))
+        let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+        let mut out = Vec::new();
+        for f in forms {
+            self.expand_datatype(f, &mut out)?;
+        }
+        Ok(out)
+    }
+
+    /// FX-91's `(define-datatype name (tag type …) …)`: a sum of products,
+    /// each variant's members labelled from 1, and a constructor per tag,
+    /// `(tag e …)`. Taken apart with `tagcase`, whose arm `(tag (x …) body)`
+    /// names the members. Expanded as it is read, into the forms it stands
+    /// for, so every way of running a program sees them.
+    fn expand_datatype(&mut self, form: Syntax, out: &mut Vec<Syntax>) -> R<()> {
+        let items = form.as_proper_list().unwrap_or(&[]).to_vec();
+        if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) != Some("define-datatype") {
+            out.push(form);
+            return Ok(());
+        }
+        let span = form.span;
+        let [_, name, variants @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(define-datatype name (tag type …) …)`"));
+        };
+        if name.as_symbol().is_none() || variants.is_empty() {
+            return Err(FxError::at(span, "`(define-datatype name (tag type …) …)`"));
+        }
+        let mut sym = |s: &str| Syntax::symbol(span, self.interner.intern(s));
+        let (define_type, define, sumof, productof, subr, pure, lambda, sum, product) = (
+            sym("define-type"),
+            sym("define"),
+            sym("sumof"),
+            sym("productof"),
+            sym("subr"),
+            sym("pure"),
+            sym("lambda"),
+            sym("sum"),
+            sym("product"),
+        );
+        let int = |n: usize| Syntax::new(span, fixpt_read::Datum::Number(fixpt_read::Num::Int(n as i64)));
+        let list = |items: Vec<Syntax>| {
+            if items.is_empty() { Syntax::new(span, fixpt_read::Datum::Nil) } else { Syntax::list(span, items) }
+        };
+        let mut arms = vec![sumof];
+        let mut ctors = Vec::new();
+        for v in variants {
+            let parts = v.as_proper_list().unwrap_or(&[]).to_vec();
+            let Some((tag, members)) = parts.split_first().filter(|(t, _)| t.as_symbol().is_some()) else {
+                return Err(FxError::at(v.span, "a variant is `(tag type …)`"));
+            };
+            let mut prod = vec![productof.clone()];
+            let mut params = Vec::new();
+            let mut fields = vec![product.clone()];
+            for (i, m) in members.iter().enumerate() {
+                prod.push(list(vec![int(i + 1), m.clone()]));
+                let x = Syntax::symbol(span, self.interner.intern(&format!("%x{}", i + 1)));
+                params.push(x.clone());
+                fields.push(list(vec![int(i + 1), x]));
+            }
+            arms.push(list(vec![tag.clone(), list(prod)]));
+            let ty = list(vec![subr.clone(), pure.clone(), list(members.to_vec()), name.clone()]);
+            let body = list(vec![sum.clone(), tag.clone(), list(fields)]);
+            ctors.push(list(vec![define.clone(), tag.clone(), ty, list(vec![lambda.clone(), list(params), body])]));
+        }
+        out.push(list(vec![define_type, name.clone(), list(arms)]));
+        out.extend(ctors);
+        Ok(())
     }
 
     /// Check one top-level form, keeping what it defines.
@@ -293,6 +358,7 @@ pub const KEYWORDS: &[&str] = &[
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
-    "bloblet", "fields", "frozen", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
+    "bloblet", "fields", "frozen", "arrayof", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase",
+    "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes",
 ];

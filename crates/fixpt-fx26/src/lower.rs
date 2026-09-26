@@ -29,7 +29,7 @@
 //! and a top-level name defined twice becomes two globals, since the second
 //! `define` shadows the first rather than assigning it.
 
-use crate::ast::{BlobletOp, Exp, ExpId};
+use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::Checker;
 use fixpt_read::Sym;
 use std::collections::HashMap;
@@ -97,6 +97,14 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("datum-cdr", "cdr", false),
     ("datum-symbol?", "symbol?", false),
     ("datum-symbol-name", "symbol->string", false),
+    ("string->symbol", "string->symbol", true),
+    ("symbol->string", "symbol->string", true),
+    ("symbol=?", "eq?", false),
+    ("string-hash", "%string-hash", false),
+    ("make-array", "%fx26-make-array", false),
+    ("array-ref", "%fx26-array-ref", false),
+    ("array-set!", "%fx26-array-set!", false),
+    ("array-length", "%fx26-array-length", false),
     ("make-continuation-prompt-tag", "%fx26-make-prompt-tag", false),
     ("abort-current-continuation", "%fx26-abort", false),
     ("call-with-composable-continuation", "%fx26-call/comp", false),
@@ -212,6 +220,7 @@ impl Lowerer<'_> {
             Exp::Int(n) => n.to_string(),
             Exp::Bool(b) => (if b { "#t" } else { "#f" }).into(),
             Exp::Str(s) => scheme_string(&s),
+            Exp::Symbol(s) => format!("'{}", fixpt_read::escape_symbol(self.c.interner.name(s))),
             Exp::Char(c) if c.is_ascii_alphanumeric() => format!("#\\{c}"),
             Exp::Char(c) => format!("#\\x{:x}", c as u32),
             Exp::Unit => "%fx26-unit".into(),
@@ -263,6 +272,44 @@ impl Lowerer<'_> {
                     BlobletOp::SetByte => format!("(%fx26-bloblet-set-byte! {} {} {})", a[0], a[1], a[2]),
                     BlobletOp::Bytes => format!("(%bloblet-bytes {})", a[0]),
                 }
+            }
+            // Immutable data is a frozen bloblet: a product's fields in
+            // order; a sum's tag, as a symbol, and its value.
+            Exp::Product(fields) => {
+                let a: Vec<String> = fields.iter().map(|(_, x)| self.go(*x)).collect();
+                format!("(%fx26-frozen {})", a.join(" "))
+            }
+            Exp::Extract(x, _) => {
+                let i = self.c.facts.field_index[&e];
+                format!("(%bloblet-ref {} {})", self.go(x), i + 2)
+            }
+            Exp::Sum(tag, x) => {
+                format!("(%fx26-frozen '{} {})", fixpt_read::escape_symbol(self.c.interner.name(tag)), self.go(x))
+            }
+            Exp::TagCase { scrutinee, arms, els } => {
+                let s = self.go(scrutinee);
+                let mut out = match els {
+                    Some((y, body)) => format!("(let (({} %fx26-tc)) {})", self.local(y), self.body(&[y], body)),
+                    None => "(%fx26-no-arm %fx26-tc)".to_string(),
+                };
+                for arm in arms.iter().rev() {
+                    let names = arm.names();
+                    let binds: Vec<String> = match &arm.bind {
+                        ArmBind::Value(x) => vec![format!("({} (%bloblet-ref %fx26-tc 3))", self.local(*x))],
+                        ArmBind::Fields(xs) => xs
+                            .iter()
+                            .enumerate()
+                            .map(|(i, x)| format!("({} (%bloblet-ref (%bloblet-ref %fx26-tc 3) {}))", self.local(*x), i + 2))
+                            .collect(),
+                    };
+                    let body = self.body(&names, arm.body);
+                    out = format!(
+                        "(if (eq? (%bloblet-ref %fx26-tc 2) '{}) (let ({}) {body}) {out})",
+                        fixpt_read::escape_symbol(self.c.interner.name(arm.tag)),
+                        binds.join(" ")
+                    );
+                }
+                format!("(let ((%fx26-tc {s})) {out})")
             }
             Exp::Prompt { tag, body, handler } => format!(
                 "(call-with-continuation-prompt (lambda () {}) {} {})",

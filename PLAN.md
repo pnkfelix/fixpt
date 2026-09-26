@@ -603,6 +603,11 @@ A4. **Stencils**: primitives written in Rust with `become`, compiled by the
    - records and sum types (`oneof`/`tagcase`);
    - tables;
    - symbols as values.
+
+   *(Sums, products, `tagcase`, `define-datatype` (FX-91's), arrays and
+   symbols done 2026-09-26; see `docs/fx26.md`. Tables follow, written in
+   FX-26 over arrays. Modules are deferred until the checker in FX-26 spans
+   several files; reserved form names are the cost meanwhile.)*
 8. **Reader data with source positions**, so the FX-26 reader feeds the
    checker directly and the Rust reader leaves the FX-26 path.
 
