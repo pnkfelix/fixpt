@@ -457,7 +457,8 @@
             ((string=? name ">") (begin (c-op c routine-swap) (c-op c routine-less)))
             ((string=? name "<=") (begin (c-op c routine-swap) (c-op c routine-less) (c-prim c "not" 1)))
             ((string=? name ">=") (begin (c-op c routine-less) (c-prim c "not" 1)))
-            ((or (string=? name "=") (string=? name "symbol=?")) (c-op c routine-eq))
+            ;; Characters are immediates, so compared as symbols are.
+            ((or (string=? name "=") (string=? name "symbol=?") (string=? name "char=?")) (c-op c routine-eq))
             ((string=? name "cons") (c-op c routine-cons))
             ((string=? name "car") (c-op c routine-car))
             ((string=? name "cdr") (c-op c routine-cdr))
@@ -482,7 +483,7 @@
                     (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
             ((string=? name "array-length") (begin (c-prim c "%bloblet-fields" 1) (c-int c 1) (c-op c routine-sub)))
             ((or (string=? name "*") (string=? name "modulo") (string=? name "quotient") (string=? name "not")
-                 (string=? name "null?") (string=? name "char=?") (string=? name "char->integer")
+                 (string=? name "null?") (string=? name "char->integer")
                  (string=? name "integer->char") (string=? name "string-append") (string=? name "string-length")
                  (string=? name "string-ref") (string=? name "substring") (string=? name "string=?")
                  (string=? name "string->symbol") (string=? name "symbol->string"))

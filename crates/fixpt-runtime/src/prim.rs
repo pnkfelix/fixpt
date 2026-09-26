@@ -734,6 +734,71 @@ prims! {
     });
     // FNV-1a over the characters, kept to a non-negative fixnum: the same
     // string always hashes the same, across runs and collections.
+    // FX-26's standard operations that Scheme runs as procedures of its
+    // own: primitives here, so that threaded code can call them too.
+    "%fx26-char-in?", 2, Some(2), simple!(|rt, a| {
+        let c = get_char(rt, a[0])?;
+        let s = get_string(rt, a[1])?;
+        Ok(Value::boolean(s.contains(c)))
+    });
+    "%fx26-parse-number", 2, Some(2), simple!(|rt, a| {
+        let s = get_string(rt, a[0])?;
+        let radix = int(rt, a[1])? as u32;
+        match fixpt_read::reader::parse_number(&s, radix, None) {
+            Some(n) => { let v = crate::num_from_literal(rt, &n); Ok(rt.heap.cons(v, Value::NULL)) }
+            None => Ok(Value::NULL),
+        }
+    });
+    "%fx26-parse-int", 2, Some(2), simple!(|rt, a| {
+        let s = get_string(rt, a[0])?;
+        let radix = int(rt, a[1])? as u32;
+        let n = fixpt_read::reader::parse_number(&s, radix, None).map(|n| crate::num_from_literal(rt, &n));
+        Ok(match n { Some(v) if v.is_fixnum() && v.as_fixnum() >= 0 => v, _ => Value::fixnum(-1) })
+    });
+    "%fx26-bytevector", 1, Some(1), simple!(|rt, a| {
+        let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };
+        let mut bytes = Vec::with_capacity(items.len());
+        for x in items {
+            let b = int(rt, x)?;
+            if !(0..=255).contains(&b) { return rt.fail("byte out of range", &[x]); }
+            bytes.push(b as u8);
+        }
+        Ok(rt.heap.make_bytevector(&bytes))
+    });
+    "%fx26-byte?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_fixnum() && (0..=255).contains(&a[0].as_fixnum()))));
+    "%fx26-fixnum?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_fixnum())));
+    "%fx26-unit-cell", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.intern("#u")));
+    "%fx26-nil-cell", 0, Some(0), simple!(|_rt, _a| Ok(Value::NULL));
+    // A global's cell: a plain bloblet whose one field is the value.
+    "%fx26-make-global", 1, Some(1), simple!(|rt, _a| {
+        let unit = rt.heap.intern("#u");
+        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, 1, 0, true);
+        rt.heap.set_bloblet_slot(b, 2, unit);
+        Ok(b)
+    });
+    "%fx26-string-downcase", 1, Some(1), simple!(|rt, a| { let s = get_string(rt, a[0])?; Ok(rt.heap.make_string(&s.to_lowercase())) });
+    "%fx26-string-ci=?", 2, Some(2), simple!(|rt, a| {
+        let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?);
+        Ok(Value::boolean(x.to_lowercase() == y.to_lowercase()))
+    });
+    "%fx26-string-copy", 1, Some(1), simple!(|rt, a| { let s = get_string(rt, a[0])?; Ok(rt.heap.make_string(&s)) });
+    "%fx26-list-copy", 1, Some(1), simple!(|rt, a| {
+        let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };
+        Ok(rt.heap.list_from(&items))
+    });
+    // A proper list: ends in `()`, and has no cycle (tortoise and hare).
+    "%fx26-list?", 1, Some(1), simple!(|rt, a| {
+        let (mut slow, mut fast) = (a[0], a[0]);
+        loop {
+            for _ in 0..2 {
+                if fast.is_null() { return Ok(Value::TRUE); }
+                if !fast.is_pair() { return Ok(Value::FALSE); }
+                fast = rt.heap.cdr(fast);
+            }
+            slow = rt.heap.cdr(slow);
+            if slow == fast { return Ok(Value::FALSE); }
+        }
+    });
     "%string-hash", 1, Some(1), simple!(|rt, a| {
         let s = get_string(rt, a[0])?;
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -802,13 +867,28 @@ prims! {
     // Run a word with the arguments in a list on its data stack; the value it
     // leaves on top.
     "%run-word", 2, Some(2), simple!(|rt, a| {
-        if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
         let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
+        // A closure is called by a word of its own: `lit closure; call n;
+        // exit`, the arguments beneath. Allocation does not collect here.
+        let word = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("threaded-closure") {
+            use fixpt_heap::layout::threaded::routine;
+            let f = |n: u64| Value::fixnum(n as i64);
+            let cells = [f(routine("lit")), a[0], f(routine("call")), f(args.len() as u64), f(routine("exit"))];
+            let name = rt.heap.intern("call-closure");
+            match rt.heap.make_threaded_word(name, &cells) {
+                Ok(w) => w,
+                Err(e) => return rt.fail(&e, &[a[0]]),
+            }
+        } else if rt.heap.is_threaded_word(a[0]) {
+            a[0]
+        } else {
+            return rt.type_error("a threaded word or closure", a[0]);
+        };
         let Some(run) = rt.run_word else { return rt.fail("no threaded machine is installed", &[]) };
         // With `FIXPT_TIME_WORDS` set, how long each run took: the machine
         // alone, without the front end around it.
         let started = std::env::var_os("FIXPT_TIME_WORDS").map(|_| std::time::Instant::now());
-        let out = run(rt, a[0], &args);
+        let out = run(rt, word, &args);
         if let Some(t) = started {
             eprintln!("run-word: {:.6} s", t.elapsed().as_secs_f64());
         }

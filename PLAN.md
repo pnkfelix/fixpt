@@ -710,6 +710,16 @@ one.)*
 
     *With these, every program in the tests that checks (80) compiles and
     runs as it does lowered.)*
+    *(The bootstrap, 2026-09-26: the FX-26 compiler, run lowered to Scheme,
+    compiles the front end (reader, parser, checker, tables, evaluator,
+    compiler) and a driver, `src/bootstrap.fx`, to one threaded word:
+    stage 1. That word, run on the native machine, gives the driver. The
+    driver reads, parses, checks and compiles the same text, entirely by
+    compiled FX-26: stage 2. The two words are the same code, cell for cell
+    (`tests/bootstrap.rs`, `fixpoint`). On the way:*
+    - *the standard operations that Scheme ran as procedures of its own
+      became runtime primitives, so threaded code calls them too;*
+    - *`%run-word` calls a threaded closure as well as a word.)*
 11. **Native code from FX-26**: a word's cells compiled to machine code, by
     an encoder written in FX-26 (the Rust one its oracle) or by placing
     stencils, and installed as the word's entry routine, one word at a time,

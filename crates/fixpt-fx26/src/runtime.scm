@@ -25,10 +25,6 @@
 (define (%fx26-bloblet-set-byte! b i n) (%bloblet-set-byte! b i n) %fx26-unit)
 (define (%fx26-bloblet-freeze b) (%bloblet-freeze! b #t #f) b)
 
-;;; ---- data, looked into ----
-;;; An FX-26 `int` is a fixnum: 61 bits, signed.
-(define (%fx26-fixnum? x)
-  (and (exact-integer? x) (<= -1152921504606846976 x 1152921504606846975)))
 
 ;;; ---- products and sums ----
 ;;; Immutable, so bloblets frozen, fields and suffix, as they are made: of
@@ -37,11 +33,6 @@
 (define (%fx26-sum tag v) (%make-frozen 36 tag v))
 (define (%fx26-no-arm v) (error "tagcase: no arm for this value" v))
 
-;;; ---- threaded code ----
-(define (%fx26-unit-cell) %fx26-unit)
-(define (%fx26-nil-cell) '())
-;; A global's cell: a plain bloblet whose one field is the value.
-(define (%fx26-make-global name) (%make-bloblet 0 %fx26-unit))
 
 ;;; ---- arrays ----
 ;;; A bloblet with a field per element; element `i` is field `i + 2`.
@@ -70,21 +61,9 @@
   (continuation-mark-set->list (current-continuation-marks) key))
 (define (%fx26-marks-of k key) (continuation-mark-set->list (continuation-marks k) key))
 
-;;; ---- characters, strings, numbers ----
-(define (%fx26-char-in? c s)
-  (let loop ((i 0))
-    (and (< i (string-length s)) (or (char=? c (string-ref s i)) (loop (+ i 1))))))
-;; A number in `radix`, as a list of none or one.
-(define (%fx26-parse-number s radix)
-  (let ((n (string->number s radix))) (if n (list n) '())))
-;; An exact non-negative integer in `radix`, or -1.
-(define (%fx26-parse-int s radix)
-  (let ((n (string->number s radix)))
-    (if (and n (exact-integer? n) (>= n 0)) n -1)))
 
 ;;; ---- data ----
-;;; A datum is the Scheme value itself; these build and test ones the
-;;; ordinary procedures do not.
+;;; A datum is the Scheme value itself. The operations the ordinary
+;;; procedures do not cover are runtime primitives (`%fx26-…` in
+;;; `fixpt_runtime::prim`), so that threaded code can call them too.
 (define (%fx26-identity x) x)
-(define (%fx26-bytevector items) (apply bytevector items))
-(define (%fx26-byte? d) (and (exact-integer? d) (<= 0 d 255)))

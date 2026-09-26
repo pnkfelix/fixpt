@@ -45,6 +45,16 @@ pub fn front_end() -> String {
     format!("{EAGER_READER}\n{PARSER}\n{CHECKER}\n{TABLE}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}")
 }
 
+/// A driver for the front end, in FX-26: a text read, parsed, checked and
+/// compiled by the front end. See [`bootstrap_program`].
+pub const BOOTSTRAP: &str = include_str!("bootstrap.fx");
+
+/// The front end with its driver after it, as the last expression: compiled
+/// to a word and run, it gives the driver.
+pub fn bootstrap_program() -> String {
+    format!("{}\n{BOOTSTRAP}", front_end())
+}
+
 /// The object layout, generated from `fixpt_heap::layout`: tags, header
 /// fields and kinds, as FX-26 definitions.
 pub const LAYOUT: &str = include_str!("layout.fx");

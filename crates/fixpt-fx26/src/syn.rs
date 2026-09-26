@@ -175,6 +175,63 @@ pub fn read_to_syns(scheme: &mut Session, file: FileId, text: &str) -> R<Handle>
     scheme.call_global(&name("eager-state-syntax"), &[st]).map_err(|e| fail(e.to_string()))
 }
 
+/// What the Rust checker finds about `text` that the compiler written in
+/// FX-26 needs, as `checked-extracts` would give it: each `extract`'s
+/// field, keyed by where it is, in characters. A handle in the caller's
+/// scope; or the check's error.
+pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
+    let mut c = crate::Checker::new();
+    let forms = c.read_in(file, text)?;
+    let done = c.declare_ahead(&forms)?;
+    for (f, done) in forms.iter().zip(done) {
+        if !done {
+            c.top(f)?;
+        }
+    }
+    let offsets = byte_offsets(text);
+    let char_at = |byte: u32| offsets.partition_point(|&o| o < byte as usize) as i64;
+    let facts: Vec<(i64, i64, i64)> = c
+        .facts
+        .field_index
+        .iter()
+        .map(|(e, i)| {
+            let span = c.arena.span_of(*e);
+            (char_at(span.start), char_at(span.end), *i as i64)
+        })
+        .collect();
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let mut list = scheme.make(|_| Value::NULL);
+    for (a, b, i) in facts {
+        let args = [37, a, b, i].map(|n| scheme.make(|_| Value::fixnum(n)));
+        let fact = scheme.call_global("%make-frozen", &args).map_err(|e| fail(e.to_string()))?;
+        list = scheme.call_global("cons", &[fact, list]).map_err(|e| fail(e.to_string()))?;
+    }
+    Ok(list)
+}
+
+/// Compile `text` with the compiler written in FX-26, given what checking
+/// it found (`facts`, from `checked-extracts` or [`rust_facts`]): the word
+/// that runs the program, as a handle in the caller's scope, or why the
+/// compiler would not make one.
+pub fn compile_to_word(scheme: &mut Session, file: FileId, text: &str, facts: Handle) -> R<Result<Handle, String>> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let tops = parse_to_trees(scheme, file, text)?;
+    let result = scheme.call_global(&format!("{READER_PREFIX}compile-program"), &[tops, facts]).map_err(|e| fail(e.to_string()))?;
+    let err = scheme.view(|v| {
+        let r = v.get(result);
+        (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("c-err"))
+            .then(|| r.field(3).and_then(|p| p.field(2)).and_then(|m| m.string()).unwrap_or_default())
+    });
+    Ok(match err {
+        Some(m) => Err(m),
+        None => Ok(scheme.make(|m| {
+            let r = m.get(result);
+            let payload = m.heap().bloblet_slot(r, 3);
+            m.heap().bloblet_slot(payload, 2)
+        })),
+    })
+}
+
 /// The parser's trees for `text`: a list of `top`s, as a handle in the
 /// caller's scope.
 fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {

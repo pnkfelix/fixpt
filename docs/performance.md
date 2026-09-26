@@ -174,6 +174,41 @@ expression's free variables at every mask, with linear environments and
 lists for sets. On the Scheme VM, that is quadratic work paid many times
 over. `table.fx` alone (110 lines) takes 0.86 s against 0.01 s.
 
+## The bootstrap: the front end compiling itself (C11)
+
+`cargo test -p fixpt-fx26 --test bootstrap fixpoint -- --ignored
+--nocapture`, debug build. The same work each time: read, parse, check and
+compile the front end with its driver, 4,700 lines.
+
+| stage                                                           | time  |
+| --------------------------------------------------------------- | ----- |
+| stage 1: the Rust checker; FX-26 read, parse, compile, lowered  | 69 s  |
+| lowered: FX-26 read and parse 63 s, check 317 s (C10)           | 380 s |
+| stage 2: all of it compiled, on the hand-encoded native machine | 370 s |
+
+Compiled and run natively, the front end is no faster than lowered to
+Scheme. The native machine's own per-routine counts of call-outs to Rust
+(`FIXPT_CALLOUTS=1`) say why. In stage 2:
+
+| routine                       | call-outs    |
+| ----------------------------- | ------------ |
+| `prim` (a runtime primitive)  | 171,536,930  |
+| `cons`                        | 5,101,843    |
+| `closure` (round trip)        | 4,111,142    |
+| `prompt`, `abort`, `callcomp` | 260,000 each |
+| `tailcall` (round trip)       | 260,868      |
+| `withmark`                    | 90,035       |
+
+A round trip lifts both stacks into a Rust machine and puts them back, so
+its cost grows with the stacks. `closure` is one, and runs four million
+times. Next:
+
+- **`closure` in machine code:** it allocates, so it needs the heap's
+  allocation fast path, as `cons` would too.
+- **Fewer `prim`s:** `string=?`, `null?`, `not` and the like as routines.
+- **Continuations without round trips:** the reader captures one per
+  character.
+
 ## The eager reader in FX-26, building syntax with positions (B8)
 
 `cargo test -p fixpt-fx26 --test eager` (debug, whole suite, 9 tests),
