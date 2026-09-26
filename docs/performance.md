@@ -632,3 +632,23 @@ self-compile, stage 2, is 0.33 s as register code, with 9 collections
 (about 20 ms); the benchmarks are within noise of the previous section
 (`lists` 12.8 ms, `closures` 24.5 ms, `fib` 7.1 ms, `loop` 6.8 ms,
 `tak` 2.2 ms).
+
+## Lists in a region (`bench/lists-region.fx`)
+
+`lists`, with each round's list made by `rcons` in a `letrena` of its own
+and given back whole when the round ends, so the collector never sees it.
+Best of several runs, two runs of the benchmark:
+
+| machine        | `lists`      | `lists-region` |
+| -------------- | ------------ | -------------- |
+| lowered        | 293–295 ms   | 322–324 ms     |
+| Rust machine   | 384–392 ms   | 314–321 ms     |
+| hand-encoded   | 53–54 ms     | 97–110 ms      |
+| stencils -O2   | 55–63 ms     | 110–128 ms     |
+| words compiled | 46 ms        | 84–88 ms       |
+| register code  | 12.8–13.0 ms | 68–81 ms       |
+
+Where every `cons` calls into Rust anyway (the Rust machine), the region
+wins, by what the collector no longer copies. Where `cons` is inline, it
+loses badly: `rcons` is a call-out, about 20 ns each, 3 million of them.
+The next step for regions' speed is `rcons` inline, as `cons` is.
