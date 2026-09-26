@@ -60,3 +60,23 @@ fn a_region_is_named_without_at() {
     assert_eq!(check("(letrena @r 1)"), Err("a `letrena` binds a region variable's name, without `@`".to_string()));
     assert_eq!(check("(letreap @r 1)"), Err("a `letreap` binds a region variable's name, without `@`".to_string()));
 }
+
+/// The checker records where each allocation goes: a `letrena`'s `cons`s
+/// are in its region, and a `cons` elsewhere is not.
+#[test]
+fn allocations_know_their_region() {
+    let mut c = Checker::new();
+    let text = "(letrena r (let ((xs (the (listof int r) (cons 1 nil)))) (car xs))) (the (listof int @l) (cons 2 nil))";
+    let forms = c.read_in(FileId(0), text).unwrap();
+    for f in &forms {
+        c.top(f).unwrap();
+    }
+    let shown: Vec<String> = {
+        let mut v: Vec<_> = c.facts.alloc_region.iter().collect();
+        v.sort_by_key(|(e, _)| e.0);
+        v.iter().map(|(_, r)| c.show_region(**r)).collect()
+    };
+    assert_eq!(shown.len(), 2, "{shown:?}");
+    assert_eq!(shown[0], "r");
+    assert_ne!(shown[1], "r");
+}

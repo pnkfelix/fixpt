@@ -78,6 +78,10 @@ pub struct NodeFacts {
     /// Each `extract`'s field, by position: lowering needs it, and only the
     /// product's type says it.
     pub field_index: HashMap<ExpId, usize>,
+    /// Each expression that allocates, by the standard operation it applies
+    /// or by `make-bloblet`, and the region it allocates in: what a
+    /// compiler needs to put a `letrena`'s or `letreap`'s data there.
+    pub alloc_region: HashMap<ExpId, Region>,
 }
 
 impl NodeFacts {
@@ -87,6 +91,7 @@ impl NodeFacts {
         self.standard_operator.retain(|e, _| e.0 < first);
         self.no_escape.retain(|e| e.0 < first);
         self.field_index.retain(|e, _| e.0 < first);
+        self.alloc_region.retain(|e, _| e.0 < first);
     }
 }
 
@@ -957,6 +962,7 @@ impl Checker {
                 }
             };
             eff.0.insert(Atom::Alloc(region));
+            self.facts.alloc_region.insert(e, region);
             let t = self.arena.ty(Ty::Bloblet { fields: tys, frozen: false, region });
             let eff = self.mask(e, &eff, t);
             return Ok((t, eff));
