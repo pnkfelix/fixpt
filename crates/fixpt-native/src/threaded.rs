@@ -713,7 +713,14 @@ fn callout_on(st: &mut State, n: u64, name: &'static str, heap: &mut Heap, ds: &
         let result = match name {
             "prim" => prim(st),
             "closure" => closure(st),
-            _ => round_trip(st, n),
+            _ => {
+                // SAFETY: as for `heap` above; this is the only use of it now.
+                let heap = unsafe { heap_of(st) };
+                match crate::control::run(st, heap, name, safepoint) {
+                    Some(r) => r,
+                    None => round_trip(st, n),
+                }
+            }
         };
         // SAFETY: as above.
         let heap = unsafe { heap_of(st) };
@@ -769,6 +776,10 @@ pub fn report_callouts() {
         let ms: Vec<(&str, u64)> = take_callout_nanos().into_iter().map(|(n, t)| (n, t / 1_000_000)).collect();
         eprintln!("callout ms: {ms:?}");
         eprintln!("round trips lifted {} words of stack", ROUND_TRIP_WORDS.with(|w| std::mem::take(&mut *w.borrow_mut())));
+        let mut prims: Vec<(&str, u64)> = PRIM_COUNTS.with(|c| std::mem::take(&mut *c.borrow_mut())).into_iter().collect();
+        prims.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        prims.truncate(15);
+        eprintln!("commonest primitives: {prims:?}");
     }
 }
 
@@ -776,6 +787,7 @@ thread_local! {
     static CALLOUTS: std::cell::RefCell<[u64; ROUTINES.len()]> = const { std::cell::RefCell::new([0; ROUTINES.len()]) };
     static CALLOUT_NANOS: std::cell::RefCell<[u64; ROUTINES.len()]> = const { std::cell::RefCell::new([0; ROUTINES.len()]) };
     static ROUND_TRIP_WORDS: std::cell::RefCell<u64> = const { std::cell::RefCell::new(0) };
+    static PRIM_COUNTS: std::cell::RefCell<std::collections::HashMap<&'static str, u64>> = std::cell::RefCell::new(std::collections::HashMap::new());
     /// Whether `FIXPT_CALLOUTS` is set, asked once.
     static TIMING: bool = std::env::var_os("FIXPT_CALLOUTS").is_some();
     /// A runtime primitive's message, when one failed in a call-out: a
@@ -872,6 +884,9 @@ fn prim(st: &mut State) -> Result<(), Trap> {
         return Err(Trap::StackOverflow);
     }
     let Some(def) = fixpt_runtime::PRIMITIVES.get(p) else { return Err(Trap::Prim(format!("no primitive {p}"))) };
+    if TIMING.with(|t| *t) {
+        PRIM_COUNTS.with(|c| *c.borrow_mut().entry(def.name).or_insert(0) += 1);
+    }
     let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
     if count < def.min || def.max.is_some_and(|m| count > m) {
         return Err(Trap::Prim(format!("`{}` given {count} argument(s)", def.name)));

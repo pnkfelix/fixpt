@@ -144,8 +144,8 @@
       (at-slot (i) (c-op1 c routine-slot (wcell-int i)))
       (at-free (i) (c-op1 c routine-free (wcell-int i)))
       (at-global (g) (c-op1 c routine-global (wcell-global g)))
-      (boxed-slot (i) (begin (c-op1 c routine-slot (wcell-int i)) (c-prim c "%box-ref" 1)))
-      (boxed-free (i) (begin (c-op1 c routine-free (wcell-int i)) (c-prim c "%box-ref" 1))))))
+      (boxed-slot (i) (begin (c-op1 c routine-slot (wcell-int i)) (c-int c 2) (c-op c routine-field-ref)))
+      (boxed-free (i) (begin (c-op1 c routine-free (wcell-int i)) (c-int c 2) (c-op c routine-field-ref))))))
 
 ;;; ------------------------------------------------------------- free names
 ;;; The names a lambda's body uses that it does not bind: what its closure
@@ -284,7 +284,7 @@
         (let ((i (c-field-index (get c-facts) a b)))
           (if (< i 0)
               (c-fail "an extract the checker did not see")
-              (begin (c-exp p e depth c #f) (c-int c (+ i 2)) (c-prim c "%bloblet-ref" 2) (c-done c tail)))))
+              (begin (c-exp p e depth c #f) (c-int c (+ i 2)) (c-op c routine-field-ref) (c-done c tail)))))
       (e-sum (t v a b)
         (begin (c-int c 36) (c-lit c (wcell-symbol t)) (c-exp v e (+ depth 2) c #f)
                (c-prim c "%make-frozen" 3) (c-done c tail)))
@@ -327,8 +327,7 @@
                      #u
                      (begin (c-op1 c routine-slot (wcell-int d))
                             (c-exp (extract (car bs) 3) inner (+ depth (+ n 1)) c #f)
-                            (c-prim c "%box-set!" 2)
-                            (c-op c routine-drop)
+                            (c-op c routine-swap) (c-int c 2) (c-op c routine-field-set)
                             (fill (cdr bs) inner (+ d 1) n))))))
       (let* ((inner (boxes bs e depth)) (n (c-count-letrec bs)))
         (begin (fill bs inner depth n)
@@ -455,8 +454,8 @@
             ((string=? name "-") (c-op c routine-sub))
             ((string=? name "<") (c-op c routine-less))
             ((string=? name ">") (begin (c-op c routine-swap) (c-op c routine-less)))
-            ((string=? name "<=") (begin (c-op c routine-swap) (c-op c routine-less) (c-prim c "not" 1)))
-            ((string=? name ">=") (begin (c-op c routine-less) (c-prim c "not" 1)))
+            ((string=? name "<=") (begin (c-op c routine-swap) (c-op c routine-less) (c-lit c (wcell-bool #f)) (c-op c routine-eq)))
+            ((string=? name ">=") (begin (c-op c routine-less) (c-lit c (wcell-bool #f)) (c-op c routine-eq)))
             ;; Characters are immediates, so compared as symbols are.
             ((or (string=? name "=") (string=? name "symbol=?") (string=? name "char=?")) (c-op c routine-eq))
             ((string=? name "cons") (c-op c routine-cons))
@@ -464,8 +463,12 @@
             ((string=? name "cdr") (c-op c routine-cdr))
             ((or (string=? name "set-car!") (string=? name "set-cdr!")) (begin (c-prim c name 2) (c-unit-after c)))
             ((string=? name "new") (c-prim c "%make-box" 1))
-            ((string=? name "get") (c-prim c "%box-ref" 1))
-            ((string=? name "set") (begin (c-prim c "%box-set!" 2) (c-unit-after c)))
+            ;; A reference is a box: its value is field 2.
+            ((string=? name "get") (begin (c-int c 2) (c-op c routine-field-ref)))
+            ((string=? name "set")
+             (begin (c-op c routine-swap) (c-int c 2) (c-op c routine-field-set) (c-lit c (wcell-unit))))
+            ((string=? name "null?") (begin (c-lit c (wcell-nil)) (c-op c routine-eq)))
+            ((string=? name "not") (begin (c-lit c (wcell-bool #f)) (c-op c routine-eq)))
             ((string=? name "char->string") (c-prim c "string" 1))
             ;; A tag or a key: a fresh object, compared by identity.
             ((or (string=? name "make-continuation-prompt-tag") (string=? name "make-continuation-mark-key"))
@@ -477,13 +480,13 @@
             ((string=? name "first-mark") (c-op c routine-firstmark))
             ((string=? name "current-marks") (c-op c routine-currentmarks))
             ((string=? name "marks-of") (c-op c routine-marksof))
-            ((string=? name "array-ref") (begin (c-int c 2) (c-op c routine-add) (c-prim c "%bloblet-ref" 2)))
+            ((string=? name "array-ref") (begin (c-int c 2) (c-op c routine-add) (c-op c routine-field-ref)))
             ((string=? name "array-set!")
              (begin (c-op c routine-swap) (c-int c 2) (c-op c routine-add) (c-op c routine-swap)
                     (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
             ((string=? name "array-length") (begin (c-prim c "%bloblet-fields" 1) (c-int c 1) (c-op c routine-sub)))
-            ((or (string=? name "*") (string=? name "modulo") (string=? name "quotient") (string=? name "not")
-                 (string=? name "null?") (string=? name "char->integer")
+            ((or (string=? name "*") (string=? name "modulo") (string=? name "quotient")
+                 (string=? name "char->integer")
                  (string=? name "integer->char") (string=? name "string-append") (string=? name "string-length")
                  (string=? name "string-ref") (string=? name "substring") (string=? name "string=?")
                  (string=? name "string->symbol") (string=? name "symbol->string"))
@@ -500,7 +503,7 @@
   (lambda (op i args e depth c)
     (cond ((string=? op "make-bloblet") (c-prim c "%make-bloblet" (c-exps args e depth c)))
           ((string=? op "bloblet-ref")
-           (begin (c-exps args e depth c) (c-int c (+ i 2)) (c-prim c "%bloblet-ref" 2)))
+           (begin (c-exps args e depth c) (c-int c (+ i 2)) (c-op c routine-field-ref)))
           ((string=? op "bloblet-set!")
            (begin (c-exp (car args) e depth c #f) (c-int c (+ i 2)) (c-exp (car (cdr args)) e (+ depth 2) c #f)
                   (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
@@ -528,7 +531,7 @@
     (if (null? arms)
         (if (null? els)
             ;; A checked program covers every tag; this is never reached.
-            (begin (c-lit c (wcell-bool #f)) (c-int c 0) (c-prim c "%bloblet-ref" 2) (c-done c tail))
+            (begin (c-lit c (wcell-bool #f)) (c-int c 0) (c-op c routine-field-ref) (c-done c tail))
             (let ((inner (the cenv (cons (cons (extract (car els) 1) (at-slot depth)) e))))
               (begin (c-exp (extract (car els) 2) inner (+ depth 1) c tail)
                      (c-unbind c depth 1 tail))))
@@ -537,14 +540,14 @@
             ;; Is the tag this arm's?
             (c-op1 c routine-slot (wcell-int depth))
             (c-int c 2)
-            (c-prim c "%bloblet-ref" 2)
+            (c-op c routine-field-ref)
             (c-lit c (wcell-symbol (extract arm 1)))
             (c-op c routine-eq)
             (c-emit c (i-zbranch next))
             ;; The value, or its product's members, as slots after the sum.
             (c-op1 c routine-slot (wcell-int depth))
             (c-int c 3)
-            (c-prim c "%bloblet-ref" 2)
+            (c-op c routine-field-ref)
             (let ((bound (if (extract arm 2)
                              (c-members (extract arm 3) e depth (+ depth 2) 0 c)
                              (the cenv (cons (cons (car (extract arm 3)) (at-slot (+ depth 1))) e))))
@@ -566,7 +569,7 @@
         e
         (begin (c-op1 c routine-slot (wcell-int (+ sum-slot 1)))
                (c-int c (+ j 2))
-               (c-prim c "%bloblet-ref" 2)
+               (c-op c routine-field-ref)
                (c-members (cdr ns) (the cenv (cons (cons (car ns) (at-slot slot)) e)) sum-slot (+ slot 1) (+ j 1) c)))))
 
 ;;; ------------------------------------------------------------- programs

@@ -217,11 +217,32 @@ to Scheme. The native machine's call-out counts and times
 | `closure`                    | 4,111,142   | 0.09 s |
 
 `closure` was a round trip until the numbers above were taken, and is now
-a direct call-out like `prim`. Next:
+a direct call-out like `prim`.
 
-- **Fewer `prim`s:** the commonest primitives as routines, which needs
-  counts per primitive.
-- **Control without round trips:** each lifts about 2,000 words of stack.
+**Then, in order, each measured before and after** (stage 2, release):
+
+| change                                                              | stage 2 |
+| ------------------------------------------------------------------- | ------- |
+| as above                                                            | 8.4 s   |
+| `null?`, `not`, a field's read, a reference's get and set: routines | 5.3 s   |
+| control on the native stacks in place, no round trip                | 4.5 s   |
+
+- **Primitives as routines.** Counts per primitive (also under
+  `FIXPT_CALLOUTS`) showed `null?` 101 million times and `%bloblet-ref`
+  49 million, out of 171 million. The compiler now emits `lit () eq` for
+  `null?`, `lit #f eq` for `not`, and the `field@` and `field!` routines
+  for fields, references and `letrec`'s boxes. The native machine already
+  had machine code for those routines. `prim` call-outs fell to 9.7
+  million.
+- **Control in place** (`fixpt-native/src/control.rs`). Prompts, marks,
+  aborts, capture and reinstatement are the Rust machine's routines
+  transcribed to work on the native stacks directly. A native return entry
+  has the Rust machine's bits, so nothing is converted. Round trips now
+  lift 57 words in all.
+
+Stage 2 now takes 5 s against the lowering's 7.8 s for less work (no
+compiling). What remains is mostly the reader: a continuation captured
+and reinstated for every character, 3 to 4 µs each, and `cons`.
 
 ## The eager reader in FX-26, building syntax with positions (B8)
 

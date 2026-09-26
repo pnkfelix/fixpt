@@ -1,0 +1,331 @@
+//! Control on the native machines' own stacks: prompts, marks, aborts, and
+//! continuations captured and reinstated, without lifting the stacks into
+//! the Rust machine and back (the round trip).
+//!
+//! These are the Rust machine's routines (`fixpt_engine::threaded`), step
+//! for step, and it stays their oracle. They can work in place because a
+//! native return entry has the Rust machine's bits: `(word, 8k, 8fp,
+//! closure)` is `(word, fixnum k, fixnum fp, closure)`. So a stack index is
+//! the same number to both, and a continuation captured by one can be
+//! reinstated by the other.
+//!
+//! Every push checks the stack's room, where the Rust machine's stacks are
+//! vectors, so a deep reinstatement traps rather than writing past them.
+
+use fixpt_engine::threaded::{MARK_MARK, PROMPT_MARK, Trap};
+use fixpt_heap::layout::kind;
+use fixpt_heap::layout::threaded::{
+    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_WHOLE, WORD_CELL0,
+};
+use fixpt_heap::{Heap, Value};
+
+use crate::threaded::State;
+
+/// The stacks as the Rust machine sees them: the data stack's values and
+/// the return stack's words, each indexed from the bottom.
+struct Stacks<'s> {
+    st: &'s mut State,
+}
+
+impl Stacks<'_> {
+    fn ds_len(&self) -> usize {
+        (self.st.ds_base - self.st.dsp) as usize / 8
+    }
+    fn ds_at(&self, i: usize) -> u64 {
+        self.st.ds_base - 8 - 8 * i as u64
+    }
+    fn ds_get(&self, i: usize) -> Value {
+        // SAFETY: below `ds_len`, a word of the data stack.
+        unsafe { Value(*(self.ds_at(i) as *const u64)) }
+    }
+    fn ds_push(&mut self, v: Value) -> Result<(), Trap> {
+        if self.st.dsp - 8 < self.st.ds_limit {
+            return Err(Trap::StackOverflow);
+        }
+        self.st.dsp -= 8;
+        // SAFETY: within the data stack's room, checked above.
+        unsafe { *(self.st.dsp as *mut u64) = v.raw() };
+        Ok(())
+    }
+    fn ds_pop(&mut self, routine: &'static str) -> Result<Value, Trap> {
+        if self.ds_len() == 0 {
+            return Err(Trap::Underflow { routine });
+        }
+        let v = self.ds_get(self.ds_len() - 1);
+        self.st.dsp += 8;
+        Ok(v)
+    }
+    fn ds_truncate(&mut self, n: usize) {
+        self.st.dsp = self.st.ds_base - 8 * n as u64;
+    }
+
+    /// The return stack's length in words, four to an entry.
+    fn rs_len(&self) -> usize {
+        (self.st.rs_base - self.st.rsp) as usize / 8
+    }
+    fn rs_get(&self, i: usize) -> Value {
+        // Entry `i / 4` from the bottom, word `i % 4` within it.
+        let at = self.st.rs_base - 32 * (i as u64 / 4 + 1) + 8 * (i as u64 % 4);
+        // SAFETY: below `rs_len`, a word of the return stack.
+        unsafe { Value(*(at as *const u64)) }
+    }
+    fn rs_push_entry(&mut self, e: [Value; 4]) -> Result<(), Trap> {
+        if self.st.rsp - 32 <= self.st.rs_limit {
+            return Err(Trap::TooDeep);
+        }
+        self.st.rsp -= 32;
+        for (j, v) in e.iter().enumerate() {
+            // SAFETY: within the return stack's room, checked above.
+            unsafe { *((self.st.rsp + 8 * j as u64) as *mut u64) = v.raw() };
+        }
+        Ok(())
+    }
+    fn rs_truncate(&mut self, words: usize) {
+        self.st.rsp = self.st.rs_base - 8 * words as u64;
+    }
+
+    /// The registers as a return entry, and back.
+    fn push_return(&mut self) -> Result<(), Trap> {
+        let e = [Value(self.st.cur), Value(self.st.d), Value(self.st.fp), Value(self.st.clo)];
+        self.rs_push_entry(e)
+    }
+    fn fp(&self) -> usize {
+        self.st.fp as usize / 8
+    }
+    fn set_regs(&mut self, cur: Value, k: usize, fp: usize, clo: Value) {
+        (self.st.cur, self.st.d, self.st.fp, self.st.clo) = (cur.raw(), 8 * k as u64, 8 * fp as u64, clo.raw());
+    }
+
+    /// Return to the entry on top, leaving any prompt's marker or mark on
+    /// the way behind.
+    fn pop_return(&mut self) {
+        loop {
+            let n = self.rs_len();
+            let cur = self.rs_get(n - 4);
+            if cur == PROMPT_MARK || cur == MARK_MARK {
+                self.rs_truncate(n - 4);
+                continue;
+            }
+            let (d, fp, clo) = (self.rs_get(n - 3), self.rs_get(n - 2), self.rs_get(n - 1));
+            (self.st.cur, self.st.d, self.st.fp, self.st.clo) = (cur.raw(), d.raw(), fp.raw(), clo.raw());
+            self.rs_truncate(n - 4);
+            return;
+        }
+    }
+
+    /// Where the innermost entry marked `sentinel` for `key` starts.
+    fn find_marked(&self, sentinel: Value, key: Value) -> Option<usize> {
+        let mut i = self.rs_len();
+        while i >= 4 {
+            i -= 4;
+            if self.rs_get(i) == sentinel && self.rs_get(i + 1) == key {
+                return Some(i);
+            }
+        }
+        None
+    }
+}
+
+fn is_a(heap: &Heap, v: Value, k: &str) -> bool {
+    v.is_bloblet() && heap.bloblet_kind(v) == kind(k)
+}
+
+/// Run closure `thunk` with no arguments above a marker entry.
+fn enter_above(s: &mut Stacks, heap: &Heap, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
+    if !is_a(heap, thunk, "threaded-closure") {
+        return Err(Trap::Type { routine });
+    }
+    s.push_return()?;
+    s.rs_push_entry(marker)?;
+    let fp = s.ds_len();
+    s.set_regs(heap.bloblet_slot(thunk, CLOSURE_WORD), WORD_CELL0, fp, thunk);
+    Ok(())
+}
+
+/// Call the closure or continuation on top with the `n` values below it.
+fn call(s: &mut Stacks, heap: &Heap, n: usize, tail: bool, routine: &'static str) -> Result<(), Trap> {
+    if s.ds_len() < s.fp() + n + 1 {
+        return Err(Trap::Underflow { routine });
+    }
+    let c = s.ds_pop(routine)?;
+    if is_a(heap, c, "threaded-continuation") {
+        if n != 1 {
+            return Err(Trap::Prim(format!("a continuation takes one value, and was given {n}")));
+        }
+        let v = s.ds_pop(routine)?;
+        return reinstate(s, heap, c, v, tail);
+    }
+    if !is_a(heap, c, "threaded-closure") {
+        return Err(Trap::Type { routine });
+    }
+    let word = heap.bloblet_slot(c, CLOSURE_WORD);
+    let fp = if tail {
+        // Slide the new frame down over this one.
+        let (from, to) = (s.ds_len() - n, s.fp());
+        for i in 0..n {
+            let v = s.ds_get(from + i);
+            // SAFETY: `to + i` is below the stack's length.
+            unsafe { *(s.ds_at(to + i) as *mut u64) = v.raw() };
+        }
+        s.ds_truncate(to + n);
+        to
+    } else {
+        s.push_return()?;
+        s.ds_len() - n
+    };
+    s.set_regs(word, WORD_CELL0, fp, c);
+    Ok(())
+}
+
+/// A continuation of the stacks from word `rs_from` and value `ds_from` up.
+fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: bool) -> Value {
+    let dsv: Vec<Value> = (ds_from..s.ds_len()).map(|i| s.ds_get(i)).collect();
+    let rsv: Vec<Value> = (rs_from..s.rs_len()).map(|i| s.rs_get(i)).collect();
+    let ds = heap.vector_from(&dsv);
+    let rs = heap.vector_from(&rsv);
+    let k = heap.make_bloblet(kind("threaded-continuation"), CONT_FIELDS, 0, true);
+    let fields = [
+        (CONT_DS, ds),
+        (CONT_RS, rs),
+        (CONT_CUR, Value(s.st.cur)),
+        (CONT_K, Value(s.st.d)),
+        (CONT_FP, Value(s.st.fp)),
+        (CONT_CLO, Value(s.st.clo)),
+        (CONT_BASE, Value::fixnum(ds_from as i64)),
+        (CONT_WHOLE, Value::boolean(whole)),
+    ];
+    for (f, v) in fields {
+        heap.set_bloblet_slot(k, f, v);
+    }
+    k
+}
+
+/// Give continuation `k` the value `v`: composed onto these stacks, frame
+/// pointers and prompts' heights moved by the difference in depth; or,
+/// whole, replacing them.
+fn reinstate(s: &mut Stacks, heap: &Heap, k: Value, v: Value, tail: bool) -> Result<(), Trap> {
+    let ds = heap.bloblet_slot(k, CONT_DS);
+    let rs = heap.bloblet_slot(k, CONT_RS);
+    let whole = heap.bloblet_slot(k, CONT_WHOLE) == Value::TRUE;
+    let old_base = heap.bloblet_slot(k, CONT_BASE).as_fixnum();
+    if whole {
+        s.ds_truncate(0);
+        s.rs_truncate(0);
+    } else if tail {
+        let fp = s.fp();
+        s.ds_truncate(fp);
+    } else {
+        s.push_return()?;
+    }
+    let delta = s.ds_len() as i64 - old_base;
+    for i in 0..heap.obj_len(ds) {
+        s.ds_push(heap.obj_ref(ds, i))?;
+    }
+    for e in 0..heap.obj_len(rs) / 4 {
+        let mut entry = [0, 1, 2, 3].map(|j| heap.obj_ref(rs, 4 * e + j));
+        if entry[0] == PROMPT_MARK {
+            entry[3] = Value::fixnum(entry[3].as_fixnum() + delta);
+        } else if entry[0] != MARK_MARK {
+            entry[2] = Value::fixnum(entry[2].as_fixnum() + delta);
+        }
+        s.rs_push_entry(entry)?;
+    }
+    let cur = heap.bloblet_slot(k, CONT_CUR);
+    let kk = heap.bloblet_slot(k, CONT_K).as_fixnum() as usize;
+    let fp = (heap.bloblet_slot(k, CONT_FP).as_fixnum() + delta) as usize;
+    s.set_regs(cur, kk, fp, heap.bloblet_slot(k, CONT_CLO));
+    s.ds_push(v)
+}
+
+/// Routine `name`, if it is one done here; its operands, if any, start at
+/// the saved ip. `None` for the rest.
+pub(crate) fn run(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&mut State, &mut Heap)) -> Option<Result<(), Trap>> {
+    let r = match name {
+        "prompt" | "withmark" | "abort" | "callcomp" | "callcc" | "firstmark" | "call" | "tailcall" => {
+            routine(st, heap, name, safepoint)
+        }
+        _ => return None,
+    };
+    Some(r)
+}
+
+fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&mut State, &mut Heap)) -> Result<(), Trap> {
+    match name {
+        "call" | "tailcall" => {
+            let k = (st.d / 8) as usize;
+            let n = heap.bloblet_slot(Value(st.cur), k).as_fixnum() as usize;
+            st.d += 8;
+            call(&mut Stacks { st }, heap, n, name == "tailcall", name)
+        }
+        "prompt" => {
+            let mut s = Stacks { st };
+            let thunk = s.ds_pop(name)?;
+            let handler = s.ds_pop(name)?;
+            let tag = s.ds_pop(name)?;
+            let height = Value::fixnum(s.ds_len() as i64);
+            enter_above(&mut s, heap, thunk, [PROMPT_MARK, tag, handler, height], name)
+        }
+        "withmark" => {
+            let mut s = Stacks { st };
+            let thunk = s.ds_pop(name)?;
+            let v = s.ds_pop(name)?;
+            let key = s.ds_pop(name)?;
+            enter_above(&mut s, heap, thunk, [MARK_MARK, key, v, Value::fixnum(0)], name)
+        }
+        "abort" => {
+            let mut s = Stacks { st };
+            let v = s.ds_pop(name)?;
+            let tag = s.ds_pop(name)?;
+            let Some(at) = s.find_marked(PROMPT_MARK, tag) else {
+                return Err(Trap::Prim("abort: no prompt for this tag".into()));
+            };
+            let handler = s.rs_get(at + 2);
+            let height = s.rs_get(at + 3).as_fixnum() as usize;
+            s.rs_truncate(at);
+            s.pop_return();
+            s.ds_truncate(height);
+            s.ds_push(v)?;
+            s.ds_push(handler)?;
+            call(&mut s, heap, 1, false, name)
+        }
+        "callcomp" | "callcc" => {
+            let at = {
+                let mut s = Stacks { st: &mut *st };
+                if name == "callcomp" {
+                    let tag = s.ds_pop(name)?;
+                    let Some(at) = s.find_marked(PROMPT_MARK, tag) else {
+                        return Err(Trap::Prim("call-with-composable-continuation: no prompt for this tag".into()));
+                    };
+                    Some(at)
+                } else {
+                    None
+                }
+            };
+            // The procedure stays on the stack through the safepoint.
+            safepoint(st, heap);
+            let mut s = Stacks { st };
+            let proc_ = s.ds_pop(name)?;
+            let k = match at {
+                Some(at) => {
+                    let height = s.rs_get(at + 3).as_fixnum() as usize;
+                    capture(&s, heap, at + 4, height, false)
+                }
+                None => capture(&s, heap, 0, 0, true),
+            };
+            s.ds_push(k)?;
+            s.ds_push(proc_)?;
+            call(&mut s, heap, 1, false, name)
+        }
+        "firstmark" => {
+            let mut s = Stacks { st };
+            let default = s.ds_pop(name)?;
+            let key = s.ds_pop(name)?;
+            let v = match s.find_marked(MARK_MARK, key) {
+                Some(at) => s.rs_get(at + 2),
+                None => default,
+            };
+            s.ds_push(v)
+        }
+        _ => unreachable!("only the routines `run` takes"),
+    }
+}

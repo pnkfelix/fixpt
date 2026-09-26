@@ -13,6 +13,7 @@
 
 pub mod arm64;
 pub mod codespace;
+mod control;
 pub mod stencil;
 pub mod threaded;
 
