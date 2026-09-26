@@ -16,6 +16,7 @@ pub mod codespace;
 mod control;
 pub mod stencil;
 pub mod faults;
+pub mod reserve;
 pub mod threaded;
 
 pub use codespace::CodeSpace;

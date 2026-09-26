@@ -1042,8 +1042,26 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
      know which allocations go to a region. Allocations made through
      region-polymorphic procedures need regions passed at run time (Tofte
      and Talpin); direct ones come first.
-  2. Somewhere for region objects to live, in the heap's index space, or
-     with a new kind of pointer.
+  2. Somewhere for region objects to live. Chosen (2026-09-26): a
+     segmented heap in one address range reserved up front, in
+     `fixpt-native` (`reserve.rs`; the user's choice, since only it may
+     use `unsafe`). A Value is an index from a base that never moves;
+     segments have roles (to-space, arena, reap, later a nursery), and a
+     table indexed by `index >> segment bits` says each one's role.
+
+     What the system allows (`tests/reserve.rs`, 2026-09-26, 128 GB of
+     memory, 16 KB pages):
+     - it reserves, and even maps writable, 64 TB (2^46) without
+       complaint, about 500 times memory plus swap, so it commits nothing
+       until a page is touched;
+     - every page written becomes resident: a first touch costs about
+       0.5 µs per page close together, and 2–3 µs far apart, as page
+       tables are made too;
+     - past physical memory it would not refuse, but compress, swap and
+       at last kill the process.
+
+     So the heap sets its own limit, with an error of its own, and
+     reuses its segments rather than touching fresh ones.
   3. Reset when control leaves the body by an abort, as well as by a
      return. Continuations cannot come back in, which the rule forbids.
   4. The collector scans arenas as roots, collects reaps, and scans reaps
