@@ -598,4 +598,20 @@ made piece by piece.
 5. **Strings stay UTF-32.**
 6. **The bootstrap interpreter reads bloblets directly**, including threaded
    ones, and compiled forms replace them incrementally, as in Forth.
+7. **The FX-26 compiler written in FX-26 emits bloblets directly**: threaded
+   and bytecode code bloblets. The Scheme pipeline leaves the FX-26 path.
+   What the checker proved goes into the code's metadata fields. Annotated
+   Scheme remains how FX-87 and FX-91 run. This supersedes, for FX-26 only,
+   the 2026-09-21 choice to lower to annotated Scheme.
+8. **No Rust piece is retired during M12.** When it is done, the Rust and
+   FX-26 versions are compared together.
+9. **The Rust pieces are not a fixed specification.** A Rust subcomponent's
+   semantics may be revised where the overall design calls for it. The
+   FX-26 version of a piece may do more, or be more expressive, than its
+   Rust counterpart.
+10. **Native code may come before M10.** FX-26 pieces running on the Rust VM
+    may be very slow, as the eager reader already is. Their performance
+    against the Rust counterparts is tracked as M12 proceeds, in
+    [`docs/performance.md`](docs/performance.md). If it becomes the
+    bottleneck, starting on native code is on the table then, not deferred.
 
