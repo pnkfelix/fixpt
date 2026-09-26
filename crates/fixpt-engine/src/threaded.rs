@@ -341,11 +341,46 @@ pub struct Machine {
     /// Cells left to run before the machine traps with `OutOfFuel`, so that
     /// a program that runs away stops instead of hanging its host.
     pub fuel: u64,
+    /// When profiling: cells run in each word, by the word's name.
+    pub profile: Option<Profile>,
+}
+
+use std::collections::HashMap;
+
+/// Cells run per word, by name. A word's name is looked up once per word
+/// and collection (a collection moves words).
+#[derive(Default)]
+pub struct Profile {
+    pub cells: HashMap<String, u64>,
+    names: HashMap<u64, String>,
+    gc_count: u64,
+}
+
+impl Profile {
+    fn count(&mut self, heap: &Heap, word: Value) {
+        if heap.gc_count != self.gc_count {
+            self.names.clear();
+            self.gc_count = heap.gc_count;
+        }
+        let name = self.names.entry(word.raw()).or_insert_with(|| {
+            let sym = heap.bloblet_slot(word, WORD_NAME);
+            heap.symbol_name(sym)
+        });
+        *self.cells.entry(name.clone()).or_insert(0) += 1;
+    }
+
+    /// The `n` words that ran the most cells, with how many.
+    pub fn top(&self, n: usize) -> Vec<(String, u64)> {
+        let mut all: Vec<(String, u64)> = self.cells.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        all.sort_by_key(|(_, v)| std::cmp::Reverse(*v));
+        all.truncate(n);
+        all
+    }
 }
 
 impl Default for Machine {
     fn default() -> Machine {
-        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX }
+        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None }
     }
 }
 
@@ -380,6 +415,9 @@ impl Machine {
             let cell = cx.heap().bloblet_slot(r.cur, r.k);
             r.k += 1;
             self.steps += 1;
+            if let Some(p) = &mut self.profile {
+                p.count(cx.heap(), r.cur);
+            }
             if self.fuel == 0 {
                 return Err(Trap::OutOfFuel);
             }
@@ -932,7 +970,7 @@ impl Machine {
     /// return stack's entries oldest first, each `(word, fixnum k, fixnum
     /// frame pointer, closure)` or a marker, as this machine keeps them.
     pub fn from_stacks(ds: Vec<Value>, rs: Vec<Value>) -> Machine {
-        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX }
+        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None }
     }
 
     /// The stacks, as `from_stacks` takes them.
@@ -968,10 +1006,23 @@ impl Machine {
 
 /// Run `word` with `args` on the data stack in `rt`: the value left on top.
 /// What the runtime's `%run-word` calls (`Runtime::run_word`).
+/// With `FIXPT_PROFILE` set, the words that ran the most cells are written
+/// to stderr after each run.
 pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
     let mut m = Machine::new();
+    let profiling = std::env::var_os("FIXPT_PROFILE").is_some();
+    if profiling {
+        m.profile = Some(Profile::default());
+    }
     m.ds.extend_from_slice(args);
-    m.run_in_runtime(rt, word).map_err(|t| format!("{t:?}"))?;
+    let out = m.run_in_runtime(rt, word).map_err(|t| format!("{t:?}"));
+    if let Some(p) = &m.profile {
+        eprintln!("profile: {} cells", m.steps);
+        for (name, n) in p.top(40) {
+            eprintln!("profile: {n:>12} {name}");
+        }
+    }
+    out?;
     m.ds.pop().ok_or_else(|| "the word left nothing".to_string())
 }
 

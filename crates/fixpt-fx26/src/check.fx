@@ -202,6 +202,27 @@
   (lambda (slot to) (array-set! (get k-tys) slot (ty-link (cons to nil)))))
 (define k-slot (subr kstate () int) (lambda () (k-ty-new (ty-link nil))))
 
+;; Which types a walk has seen: a type is seen in walk `e` when its mark
+;; is `e`, so each walk takes a new epoch and nothing is cleared.
+(define k-marks (ref (arrayof int @t) @t) (new (make-array 512 0)))
+(define k-epoch (ref int @t) (new 0))
+(define k-new-epoch (subr kstate () int)
+  (lambda () (begin (set k-epoch (+ (get k-epoch) 1)) (get k-epoch))))
+;; Whether walk `e` has seen `t` already; if not, it has now.
+(define k-visit? (subr kstate (int int) bool)
+  (lambda (t e)
+    (begin
+      (if (>= t (array-length (get k-marks)))
+          (let ((bigger (the (arrayof int @t) (make-array (* 2 (array-length (get k-tys))) 0))))
+            (begin (n-copy-marks (get k-marks) bigger 0) (set k-marks bigger)))
+          #u)
+      (if (= (array-ref (get k-marks) t) e)
+          #t
+          (begin (array-set! (get k-marks) t e) #f)))))
+(define n-copy-marks (subr (maxeff (read @t) (write @t)) ((arrayof int @t) (arrayof int @t) int) unit)
+  (lambda (from to i)
+    (if (= i (array-length from)) #u (begin (array-set! to i (array-ref from i)) (n-copy-marks from to (+ i 1))))))
+
 ;; Description variables, newest first, for their names.
 (define k-dvars (ref k-names @t) (new nil))
 (define k-ndvars (ref int @t) (new 0))
@@ -226,16 +247,40 @@
     (let* ((s (string->symbol name)) (t (k-ty-new (ty-base s))))
       (set k-base (cons (cons s t) (get k-base))))))
 
-;; Value variables in scope, innermost first.
+;; Bindings, as lists of them are passed around.
 (define-type k-bindings (listof (pairof symbol int @t) @t))
-(define k-env (ref k-bindings @t) (new nil))
 (define k-find (subr (read @t) (k-bindings symbol) int)
   (lambda (bs s)
     (cond ((null? bs) -1) ((symbol=? (car (car bs)) s) (cdr (car bs))) (else (k-find (cdr bs) s)))))
+
+;; Value variables in scope: for each name, the types it is bound to,
+;; innermost first; and the names bound, newest first, so that a scope is
+;; left by unbinding back to a mark (`k-mark`, `k-unbind-to`). A lookup is
+;; a table's, not a walk down every binding in scope.
+(define-type k-stack (listof int @t))
+(define k-env (ref (table symbol k-stack @t) @t) (new (make-table symbol-hash symbol=?)))
+(define k-trail (ref k-names @t) (new nil))
+(define k-depth (ref int @t) (new 0))
 ;; The type `s` is bound to, or -1.
-(define k-lookup (subr (read @t) (symbol) int) (lambda (s) (k-find (get k-env) s)))
+(define k-lookup (subr (read @t) (symbol) int)
+  (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))
 (define k-bind (subr kstate (symbol int) unit)
-  (lambda (s t) (set k-env (cons (cons s t) (get k-env)))))
+  (lambda (s t)
+    (begin
+      (table-set! (get k-env) s (cons t (table-ref (get k-env) s nil)))
+      (set k-trail (cons s (get k-trail)))
+      (set k-depth (+ (get k-depth) 1)))))
+(define k-mark (subr (read @t) () int) (lambda () (get k-depth)))
+(define k-unbind-to (subr kstate (int) unit)
+  (lambda (m)
+    (if (<= (get k-depth) m)
+        #u
+        (let ((s (car (get k-trail))))
+          (begin
+            (table-set! (get k-env) s (cdr (table-ref (get k-env) s nil)))
+            (set k-trail (cdr (get k-trail)))
+            (set k-depth (- (get k-depth) 1))
+            (k-unbind-to m))))))
 
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) @t))
@@ -269,7 +314,8 @@
   (lambda ()
     (begin
       (set k-extracts nil)
-      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-env nil) (set k-dscope nil)
+      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
+      (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
@@ -920,21 +966,39 @@
           (else (k-add-eff-regions rs (cdr e))))))
 
 ;; Every region mentioned in type `t`, following recursive types once.
+;; Kept once found, by type: a type does not change once built.
+(define k-regions-memo (ref (arrayof (listof k-regions @t) @t) @t) (new (make-array 512 nil)))
 (define k-regions-in (subr (maxeff (read @t) (write @t) (alloc @t)) (int) k-regions)
   (lambda (t)
-    (let ((seen (the (ref k-ids @t) (new nil))) (out (the (ref k-regions @t) (new nil))))
-      (begin (k-regions-walk t seen out) (get out)))))
-(define k-regions-walk (subr (maxeff (read @t) (write @t) (alloc @t)) (int (ref k-ids @t) (ref k-regions @t)) unit)
+    (let* ((t (k-resolve t)) (memo (get k-regions-memo)))
+      (if (and (< t (array-length memo)) (not (null? (array-ref memo t))))
+          (car (array-ref memo t))
+          (let ((out (the (ref k-regions @t) (new nil))))
+            (begin
+              (k-regions-walk t (k-new-epoch) out)
+              (k-remember-regions t (get out))
+              (get out)))))))
+(define k-remember-regions (subr (maxeff (read @t) (write @t) (alloc @t)) (int k-regions) unit)
+  (lambda (t rs)
+    (begin
+      (if (>= t (array-length (get k-regions-memo)))
+          (let ((bigger (the (arrayof (listof k-regions @t) @t) (make-array (* 2 (array-length (get k-tys))) nil))))
+            (begin (n-copy-memo (get k-regions-memo) bigger 0) (set k-regions-memo bigger)))
+          #u)
+      (array-set! (get k-regions-memo) t (cons rs nil)))))
+(define n-copy-memo (subr (maxeff (read @t) (write @t)) ((arrayof (listof k-regions @t) @t) (arrayof (listof k-regions @t) @t) int) unit)
+  (lambda (from to i)
+    (if (= i (array-length from)) #u (begin (array-set! to i (array-ref from i)) (n-copy-memo from to (+ i 1))))))
+(define k-regions-walk (subr (maxeff (read @t) (write @t) (alloc @t)) (int int (ref k-regions @t)) unit)
   (lambda (t seen out)
     (let ((t (k-resolve t)))
-      (if (k-has-id? (get seen) t)
+      (if (k-visit? t seen)
           #u
           (letrec ((add (subr (maxeff (read @t) (write @t) (alloc @t)) (k-region) unit)
                        (lambda (r) (set out (k-add-region (get out) r))))
                 (walk (subr (maxeff (read @t) (write @t) (alloc @t)) (int) unit) (lambda (x) (k-regions-walk x seen out)))
                 (walks (subr (maxeff (read @t) (write @t) (alloc @t)) (k-ids) unit) (lambda (xs) (k-regions-walks xs seen out))))
             (begin
-              (set seen (cons t (get seen)))
               (tagcase (k-get t)
                 (ty-subr (e ps r) (begin (set out (k-add-eff-regions (get out) e)) (walks ps) (walk r)))
                 (ty-poly (bs body) (walk body))
@@ -948,9 +1012,9 @@
                 (ty-product (ps) (k-regions-parts ps seen out))
                 (ty-sum (ps) (k-regions-parts ps seen out))
                 (else x #u))))))))
-(define k-regions-walks (subr (maxeff (read @t) (write @t) (alloc @t)) (k-ids (ref k-ids @t) (ref k-regions @t)) unit)
+(define k-regions-walks (subr (maxeff (read @t) (write @t) (alloc @t)) (k-ids int (ref k-regions @t)) unit)
   (lambda (ts seen out) (if (null? ts) #u (begin (k-regions-walk (car ts) seen out) (k-regions-walks (cdr ts) seen out)))))
-(define k-regions-parts (subr (maxeff (read @t) (write @t) (alloc @t)) (k-parts (ref k-ids @t) (ref k-regions @t)) unit)
+(define k-regions-parts (subr (maxeff (read @t) (write @t) (alloc @t)) (k-parts int (ref k-regions @t)) unit)
   (lambda (ps seen out)
     (if (null? ps) #u (begin (k-regions-walk (extract (car ps) 2) seen out) (k-regions-parts (cdr ps) seen out)))))
 
@@ -1289,20 +1353,20 @@
                               (else (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
                 (k-te t (k-mask x (k-union (extract rp 2) (k-union (extract rc 2) (extract rd 2))) t))))))
       (x-letrec (bs body a b)
-        (let ((saved (get k-env)))
+        (let ((saved (k-mark)))
           (begin
             (k-bind-letrec bs)
             (let* ((ie (k-check-letrec bs)) (rb (k-synth body)))
               (begin
-                (set k-env saved)
+                (k-unbind-to saved)
                 (k-te (extract rb 1) (k-mask x (k-union ie (extract rb 2)) (extract rb 1))))))))
       (x-let (bs body a b)
-        (let* ((inits (k-synth-lets bs)) (saved (get k-env)))
+        (let* ((inits (k-synth-lets bs)) (saved (k-mark)))
           (begin
             (k-bind-all (extract inits 1))
             (let ((rb (k-synth body)))
               (begin
-                (set k-env saved)
+                (k-unbind-to saved)
                 (k-te (extract rb 1) (k-mask x (k-union (extract inits 2) (extract rb 2)) (extract rb 1))))))))
       (x-prompt (t body h a b) (k-synth-prompt x t body h))
       (x-bloblet (op i args a b) (k-synth-bloblet x op i args -1))
@@ -1385,14 +1449,14 @@
   (lambda (x hint result)
     (tagcase x
       (x-lambda (ps body a b)
-        (let* ((typed (k-param-types ps hint a b)) (saved (get k-env)))
+        (let* ((typed (k-param-types ps hint a b)) (saved (k-mark)))
           (begin
             (k-bind-all typed)
             (let* ((r (if (>= result 0)
                           (let ((e (k-check body result))) (k-te result (k-mask body e result)))
                           (let ((r (k-synth body))) (k-te (extract r 1) (k-mask body (extract r 2) (extract r 1)))))))
               (begin
-                (set k-env saved)
+                (k-unbind-to saved)
                 (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (extract r 1))) nil))))))
       (else y (k-fail "a lambda" (k-start x) (k-end x))))))
 (define k-param-types (subr checks ((listof (productof (1 symbol) (2 k-ids)) @t) k-ids int int) k-bindings)
@@ -1628,18 +1692,18 @@
     (cond ((null? e) #f)
           ((tagcase (car e) (a-var (v) (k-open? kinds solved v)) (else y (k-open-region? (k-atom-region (car e)) kinds solved))) #t)
           (else (k-open-effect? (cdr e) kinds solved)))))
-(define k-mentions-any-unknown? (subr (maxeff (read @t) (alloc @t)) (int k-binders k-solved) bool)
-  (lambda (t kinds solved) (k-any-walk (cons t nil) nil kinds solved)))
-(define k-any-walk (subr (maxeff (read @t) (alloc @t)) (k-ids k-ids k-binders k-solved) bool)
+(define k-mentions-any-unknown? (subr kstate (int k-binders k-solved) bool)
+  (lambda (t kinds solved) (k-any-walk (cons t nil) (k-new-epoch) kinds solved)))
+(define k-any-walk (subr kstate (k-ids int k-binders k-solved) bool)
   (lambda (stack seen kinds solved)
     (if (null? stack)
         #f
         (let ((t (k-resolve (car stack))) (rest (cdr stack)))
-          (if (k-has-id? seen t)
+          (if (k-visit? t seen)
               (k-any-walk rest seen kinds solved)
-              (let ((seen (the k-ids (cons t seen))))
+              (let ((seen seen))
                (letrec ((reg (subr (read @t) (k-region) bool) (lambda (r) (k-open-region? r kinds solved)))
-                        (go (subr (maxeff (read @t) (alloc @t)) (k-ids) bool) (lambda (s) (k-any-walk s seen kinds solved))))
+                        (go (subr kstate (k-ids) bool) (lambda (s) (k-any-walk s seen kinds solved))))
                 (tagcase (k-get t)
                   (ty-var (v) (or (k-open? kinds solved v) (go rest)))
                   (ty-subr (e ps r) (or (k-open-effect? e kinds solved) (go (k-push-ids ps (cons r rest)))))
@@ -1661,19 +1725,18 @@
 
 ;; Whether `t` mentions a type binder not yet solved.
 (define k-mentions-unknown-type? (subr (maxeff (read @t) (write @t) (alloc @t)) (int k-binders k-solved) bool)
-  (lambda (t kinds solved) (k-vars-walk t (the (ref k-ids @t) (new nil)) kinds solved)))
+  (lambda (t kinds solved) (k-vars-walk t (k-new-epoch) kinds solved)))
 (define k-any-unknown-type? (subr (maxeff (read @t) (write @t) (alloc @t)) (k-ids k-binders k-solved) bool)
   (lambda (ts kinds solved)
     (cond ((null? ts) #f) ((k-mentions-unknown-type? (car ts) kinds solved) #t) (else (k-any-unknown-type? (cdr ts) kinds solved)))))
-(define k-vars-walk (subr (maxeff (read @t) (write @t) (alloc @t)) (int (ref k-ids @t) k-binders k-solved) bool)
+(define k-vars-walk (subr (maxeff (read @t) (write @t) (alloc @t)) (int int k-binders k-solved) bool)
   (lambda (t seen kinds solved)
     (let ((t (k-resolve t)))
-      (if (k-has-id? (get seen) t)
+      (if (k-visit? t seen)
           #f
           (letrec ((w (subr (maxeff (read @t) (write @t) (alloc @t)) (int) bool) (lambda (x) (k-vars-walk x seen kinds solved)))
                 (ws (subr (maxeff (read @t) (write @t) (alloc @t)) (k-ids) bool) (lambda (xs) (k-vars-walks xs seen kinds solved))))
             (begin
-              (set seen (cons t (get seen)))
               (tagcase (k-get t)
                 (ty-var (v) (k-open? kinds solved v))
                 (ty-subr (e ps r) (or (ws ps) (w r)))
@@ -1688,7 +1751,7 @@
                 (ty-tag (a b e r) (or (w a) (w b)))
                 (ty-comp (a b e r) (or (w a) (w b)))
                 (else y #f))))))))
-(define k-vars-walks (subr (maxeff (read @t) (write @t) (alloc @t)) (k-ids (ref k-ids @t) k-binders k-solved) bool)
+(define k-vars-walks (subr (maxeff (read @t) (write @t) (alloc @t)) (k-ids int k-binders k-solved) bool)
   (lambda (ts seen kinds solved) (cond ((null? ts) #f) ((k-vars-walk (car ts) seen kinds solved) #t) (else (k-vars-walks (cdr ts) seen kinds solved)))))
 
 ;;; Matching: solve binders in `pattern` so that `actual` fits it. Never
@@ -1868,11 +1931,11 @@
           (let ((e (k-check-seq xs expected nil)))
             (k-mask x e expected)))
         (x-let (bs body xa xb)
-          (let* ((inits (k-synth-lets bs)) (saved (get k-env)))
+          (let* ((inits (k-synth-lets bs)) (saved (k-mark)))
             (begin
               (k-bind-all (extract inits 1))
               (let ((e (k-check body expected)))
-                (begin (set k-env saved) (k-mask x (k-union (extract inits 2) e) expected))))))
+                (begin (k-unbind-to saved) (k-mask x (k-union (extract inits 2) e) expected))))))
         (else y (otherwise))))))))
 (define k-check-seq (subr checks (kxs int k-eff) k-eff)
   (lambda (xs expected e)
@@ -1954,11 +2017,11 @@
                                         (k-cannot-take-apart tag t (extract arm 3) body)))
                                   (else y (k-cannot-take-apart tag t (extract arm 3) body)))
                                 (the k-bindings (cons (cons (car (extract arm 3)) t) nil))))
-                     (saved (get k-env))
+                     (saved (k-mark))
                      (r (begin
                           (k-bind-all bound)
                           (if (>= expected 0) (k-te expected (k-check body expected)) (k-synth body))))
-                     (restored (set k-env saved))
+                     (restored (k-unbind-to saved))
                      (rest (k-tagcase-arms (cdr arms) variants st expected)))
                 (product (1 (cons (extract r 1) (extract rest 1))) (2 (k-union (extract r 2) (extract rest 2))))))))))
 (define k-cannot-take-apart (subr checks (symbol int k-names kx) k-bindings)
@@ -1970,11 +2033,11 @@
   (lambda (ns fs) (if (null? ns) nil (cons (cons (car ns) (extract (car fs) 2)) (k-zip-fields (cdr ns) (cdr fs))))))
 (define k-in-scope-check (subr checks (symbol int kx int) k-te)
   (lambda (y t body expected)
-    (let ((saved (get k-env)))
+    (let ((saved (k-mark)))
       (begin
         (k-bind y t)
         (let ((r (if (>= expected 0) (k-te expected (k-check body expected)) (k-synth body))))
-          (begin (set k-env saved) r))))))
+          (begin (k-unbind-to saved) r))))))
 
 ;;; ------------------------------------------------------------ bloblets
 

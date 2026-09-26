@@ -773,6 +773,28 @@ one.)*
     FX-26 on the native machines now beats lowered FX-26 in every piece;
     the Rust checker is still 22 times faster than the FX-26 one.)*
 
+### After M12: what the user asked for next (2026-09-26)
+
+- **An optimizing compiler for FX-26, in Rust and in FX-26.** It takes
+  Twobit as a model, and Forth compilers and threaded-code VMs, since much
+  may be won on the threaded code itself (peephole optimization,
+  superinstructions, stack caching). It keeps Twobit's principle: each
+  transformed program is still a well-formed program of the source
+  language with the same meaning, carrying at most the analysis added.
+  Research on Twobit's passes and history, and on Forth and threaded-code
+  compilers, comes first.
+- **A printer for compiled forms**: the threaded code in a word's
+  bloblet, shown from the REPL, cell by cell, with routine names and
+  operands.
+- **Closures that carry their types** (a direction, not yet a task). A
+  threaded closure is a bloblet, so it could carry its type, or enough
+  for a checker to confirm the type from its fields and code:
+  foundational proof-carrying code. With heap images, and fragments of
+  them, loaded into other runtimes, that would let a runtime trust code it
+  did not compile.
+- **The FX-26 checker's free variables**, computed once rather than at
+  every mask (`docs/performance.md`).
+
 ### Kept open, deliberately
 
 - **Values held by Rust across calls, typed away.** (Raised 2026-09-26,

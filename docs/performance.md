@@ -285,6 +285,36 @@ all 817 words of the front end, 1.1 million instructions, in 2.7 s
 milliseconds. Stage 2 on that code takes 1.7 s, and the fixpoint holds
 (`fixpoint_with_words_compiled_by_fx26`).
 
+## The FX-26 checker's environment and sets (after C12)
+
+A per-word profile (`FIXPT_PROFILE`, or `probe_profile_check` in
+`tests/bootstrap.rs`: cells run per word on the Rust machine, each lambda
+named by where its body starts) showed where the FX-26 checker spent its
+1.88 billion cells checking the front end: 43% testing whether a type was
+in a walk's list of types seen, 21% looking a name up in the environment,
+a list of some 900 bindings.
+
+- **The environment is a table** (`table.fx`, now loaded before the
+  checker): each name's types, innermost first, and a trail of names
+  bound, so a scope is left by unbinding back to a mark.
+- **A walk's seen types are marks**, an array beside the type arena, with
+  a new epoch per walk: nothing to allocate or clear.
+- **Each type's regions are kept** once found, since a type does not change
+  once built.
+
+The checker says the same as before on every program the tests compare.
+Checking the front end now runs 0.35 billion cells:
+
+| checker, front end            | before | after  |
+| ----------------------------- | ------ | ------ |
+| FX-26, lowered to Scheme      | 6.65 s | 1.60 s |
+| FX-26, compiled, hand-encoded | 1.36 s | 0.37 s |
+| Rust                          | 0.06 s | 0.07 s |
+
+The next 47% is free variables: every mask recomputes them for its whole
+subexpression, testing membership in lists as it goes. The Rust checker
+does too. The fix is to compute them once, bottom-up, as synthesis goes.
+
 ## The comparison: each piece, Rust and FX-26 (C12)
 
 `cargo test --release -p fixpt-fx26 --test bootstrap comparison --

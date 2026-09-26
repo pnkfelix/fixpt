@@ -347,7 +347,9 @@
       (begin
         (c-push-all fv e depth c)
         (c-exp body inner n body-code #t)
-        (c-op1 c routine-closure (wcell-word (c-assemble body-code (string->symbol "lambda"))))
+        ;; Named for where its body starts, so that a profile can say which.
+        (c-op1 c routine-closure
+               (wcell-word (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body)))))))
         (c-emit c (i-cell (wcell-int (c-length fv))))))))
 
 (define c-count-params (subr (read @a) ((listof (productof (1 symbol) (2 syns-a)) @a)) int)

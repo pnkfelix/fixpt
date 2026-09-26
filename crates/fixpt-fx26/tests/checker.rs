@@ -9,8 +9,8 @@ fn locate(at: usize) -> String {
     let parts = [
         ("eager-reader.fx", fixpt_fx26::EAGER_READER),
         ("parser.fx", fixpt_fx26::PARSER),
-        ("check.fx", fixpt_fx26::CHECKER),
         ("table.fx", fixpt_fx26::TABLE),
+        ("check.fx", fixpt_fx26::CHECKER),
         ("evaluator.fx", fixpt_fx26::EVALUATOR),
         ("layout.fx", fixpt_fx26::LAYOUT),
         ("standard.fx", fixpt_fx26::STANDARD_OPS),

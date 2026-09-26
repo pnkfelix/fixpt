@@ -467,3 +467,83 @@ fn reachable_words(heap: &Heap, word: Value) -> Vec<Value> {
     }
     out
 }
+
+thread_local! {
+    static LAST_PROFILE: std::cell::RefCell<Vec<(String, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `%run-word`'s hook, on the Rust machine, keeping a profile of the run.
+fn profiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    let mut m = fixpt_engine::threaded::Machine::new();
+    m.profile = Some(Default::default());
+    m.ds.extend_from_slice(args);
+    let out = m.run_in_runtime(rt, word).map_err(|t| format!("{t:?}"));
+    let top = m.profile.as_ref().expect("profiling").top(usize::MAX);
+    LAST_PROFILE.with(|p| *p.borrow_mut() = top);
+    out?;
+    m.ds.pop().ok_or_else(|| "the word left nothing".into())
+}
+
+/// Where character `at` of the bootstrap program is, as `file:line`.
+fn locate_char(text: &str, at: usize) -> String {
+    let parts = [
+        ("eager-reader.fx", fixpt_fx26::EAGER_READER), ("parser.fx", fixpt_fx26::PARSER), ("table.fx", fixpt_fx26::TABLE),
+        ("check.fx", fixpt_fx26::CHECKER), ("evaluator.fx", fixpt_fx26::EVALUATOR), ("layout.fx", fixpt_fx26::LAYOUT),
+        ("standard.fx", fixpt_fx26::STANDARD_OPS), ("compile.fx", fixpt_fx26::COMPILER), ("arm64.fx", fixpt_fx26::ARM64),
+        ("native-layout.fx", fixpt_fx26::NATIVE_LAYOUT), ("native.fx", fixpt_fx26::NATIVE), ("bootstrap.fx", fixpt_fx26::BOOTSTRAP),
+    ];
+    let byte = text.char_indices().nth(at).map_or(text.len(), |(b, _)| b);
+    let mut start = 0;
+    for (name, part) in parts {
+        if byte < start + part.len() + 1 {
+            return format!("{name}:{}", part[..(byte - start).min(part.len())].matches('\n').count() + 1);
+        }
+        start += part.len() + 1;
+    }
+    format!("char {at}")
+}
+
+/// Where the checker written in FX-26, compiled, spends its cells checking
+/// the front end: by word, on the Rust machine, with each lambda named by
+/// where its body starts.
+#[test]
+#[ignore = "a probe: cargo test --release -p fixpt-fx26 --test bootstrap probe_profile_check -- --ignored --nocapture"]
+fn probe_profile_check() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    load_eager_reader(&mut s.scheme).expect("loads");
+    s.scheme.engine.set_step_limit(None);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_as_is);
+    let text = fixpt_fx26::bootstrap_program();
+    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    s.scheme.scope(|sc| {
+        let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
+        let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
+        let none = sc.make(|_| Value::NULL);
+        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("runs");
+        let piece = |sc: &mut fixpt_scheme::Session, i: usize| sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 1 + i) });
+        let run = |sc: &mut fixpt_scheme::Session, f: fixpt_scheme::Handle, args: &[fixpt_scheme::Handle]| {
+            let list = sc.call_global("list", args).expect("a list");
+            sc.call_global("%run-word", &[f, list]).expect("runs")
+        };
+        let (read, parse, check) = (piece(sc, 2), piece(sc, 3), piece(sc, 4));
+        let (tx, st) = (sc.make(|m| m.heap().make_string(&text)), sc.make(|m| m.heap().make_string(&standard)));
+        let syns = run(sc, read, &[tx]);
+        let syns = sc.make(|m| { let l = m.get(syns); m.heap().car(l) });
+        let std = run(sc, read, &[st]);
+        let std = sc.make(|m| { let l = m.get(std); m.heap().car(l) });
+        let parsed = run(sc, parse, &[syns]);
+        let tops = sc.make(|m| { let r = m.get(parsed); let p = m.heap().bloblet_slot(r, 3); m.heap().bloblet_slot(p, 2) });
+        sc.runtime_unrooted().run_word = Some(profiled);
+        let t = std::time::Instant::now();
+        run(sc, check, &[std, tops]);
+        eprintln!("checked, on the Rust machine, profiling: {:.1} s", t.elapsed().as_secs_f64());
+    });
+    let top = LAST_PROFILE.with(|p| p.borrow().clone());
+    let total: u64 = top.iter().map(|(_, n)| n).sum();
+    let in_checker: u64 = top.iter().filter(|(w, _)| w.strip_prefix("lambda@").is_some_and(|at| locate_char(&text, at.parse().unwrap_or(0)).starts_with("check.fx"))).map(|(_, n)| n).sum();
+    eprintln!("{total} cells in all, {in_checker} in check.fx's code");
+    for (w, n) in top.iter().take(40) {
+        let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();
+        eprintln!("{n:>12} {:>5.1}%  {w} {at}", 100.0 * *n as f64 / total as f64);
+    }
+}

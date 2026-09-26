@@ -49,11 +49,11 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// The checker written in FX-26, over the parser's trees.
 pub const CHECKER: &str = include_str!("check.fx");
 
-/// The reader, the parser, the checker, the tables, the evaluator and the
+/// The reader, the parser, the tables, the checker, the evaluator and the
 /// compiler written in FX-26, with the layout they share, as one program:
 /// each needs the types of the ones before.
 pub fn front_end() -> String {
-    format!("{EAGER_READER}\n{PARSER}\n{CHECKER}\n{TABLE}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}\n{ARM64}\n{NATIVE_LAYOUT}\n{NATIVE}")
+    format!("{EAGER_READER}\n{PARSER}\n{TABLE}\n{CHECKER}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}\n{ARM64}\n{NATIVE_LAYOUT}\n{NATIVE}")
 }
 
 /// A driver for the front end, in FX-26: a text read, parsed, checked and
