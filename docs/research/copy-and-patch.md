@@ -591,3 +591,40 @@ cargo run --offline --bin wx               # W^X probes
   - arm64e (pointer authentication);
   - BTI landing pads (a concern if JIT pages are mapped with BTI on Linux);
   - atomics lowering (`outline-atomics`) on Linux.
+
+## Addendum (2026-09-25): `become` on the installed nightly
+
+*Verified locally.* The machine has `nightly-aarch64-apple-darwin` installed
+(`rustc 1.97.0-nightly (82bee9650 2026-05-09)`), so this needed no download.
+`#![feature(explicit_tail_calls)]` and `become` work for exactly the shape a
+threaded-code inner interpreter needs: primitives as
+`extern "C" fn(ip, sp, acc) -> i64`, each ending in `become` to the next code
+pointer loaded from the program.
+
+- A direct-threaded program of `LIT 40, LIT 2, ADD, EXIT` computes 42.
+- A chain of 5,000,000 primitives runs without overflowing the stack. That
+  happens only if every `become` is a real tail jump.
+- At `-C opt-level=3`, `NEXT` is Forth's two instructions:
+  ```
+  _next:  ldr x3, [x0], #8
+          br  x3
+  ```
+  `ADD` is `ldr x8, [x1, #-8]!; ldr x3, [x0], #8; add x2, x8, x2; br x3`,
+  and `LIT` is six instructions ending in `br x3`. None has a frame or a
+  call.
+- At `-C opt-level=0` the tail call is **still** a tail call: the frame is
+  torn down and the function ends in `br x3`. Ordinary tail-call
+  optimisation never happens at `-O0`, so this is the language's promise,
+  not the optimiser's.
+
+The command was `rustc +nightly -C opt-level={0,3} -C panic=abort t.rs`,
+with the assembly read by `--emit asm`.
+
+**Consequence.** With `become`, the tail calls between stencils are
+guaranteed by the language, so the build-time machine-code check is a second
+line of defence rather than the only one. The recommendation is to confine
+nightly to the stencils: `fixpt-native`'s build script compiles the stencil
+sources with `rustc +nightly`, and the rest of the workspace stays on
+stable. Pinning an exact nightly date in `rust-toolchain.toml` would make
+rustup download that toolchain, so the stencil build uses the installed
+`nightly` and records the version it found.
