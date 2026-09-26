@@ -133,7 +133,8 @@ fn fixpoint() {
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
         lap("stage 1 compiled, by the compiler run lowered");
         let none = sc.make(|_| Value::NULL);
-        let driver = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
+        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
+        let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
         lap("the compiled front end ran, giving the driver");
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
         let args = sc.call_global("list", &[std, prog]).expect("a list");
@@ -182,7 +183,8 @@ fn probe_stage2() {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
         let none = sc.make(|_| Value::NULL);
-        let driver = sc.call_global("%run-word", &[stage1, none]).expect("runs");
+        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("runs");
+        let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
         let _ = fixpt_native::threaded::take_callout_counts();
         let _ = fixpt_native::threaded::take_callout_nanos();
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&target)));
@@ -199,5 +201,150 @@ fn probe_stage2() {
         eprintln!("collections: {}, words copied: {}, heap in use: {} words", after.0 - before.0, after.1 - before.1, sc.heap_used());
         let tag = sc.view(|v| v.get(result).field(2).and_then(|t| t.symbol_name()).unwrap_or_default());
         assert_eq!(tag, "b-word");
+    });
+}
+
+/// The pieces, each alone, on the same input (the bootstrap program): the
+/// Rust ones, the FX-26 ones lowered to Scheme, and the FX-26 ones compiled
+/// and run on each threaded machine. A table, for `docs/performance.md`.
+#[test]
+#[ignore = "a report: cargo test --release -p fixpt-fx26 --test bootstrap comparison -- --ignored --nocapture"]
+fn comparison() {
+    use fixpt_fx26::session::{BOOTSTRAP_PREFIX, load_bootstrap_program};
+    use fixpt_scheme::{Handle, Session};
+    let text = fixpt_fx26::bootstrap_program();
+    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let mut rows: Vec<(String, [f64; 4])> = Vec::new();
+
+    // Rust: reading, then checking, which parses as it goes.
+    let t = std::time::Instant::now();
+    let mut c = fixpt_fx26::Checker::new();
+    let forms = c.read_in(FileId(0), &text).expect("reads");
+    let read = t.elapsed().as_secs_f64();
+    let t = std::time::Instant::now();
+    let done = c.declare_ahead(&forms).expect("declares");
+    for (f, done) in forms.iter().zip(done) {
+        if !done {
+            c.top(f).expect("checks");
+        }
+    }
+    let check = t.elapsed().as_secs_f64();
+    rows.push(("Rust".into(), [read, f64::NAN, check, f64::NAN]));
+
+    // The four phases, through `run`: how one piece is called.
+    fn phases(sc: &mut Session, text: &str, standard: &str, run: &dyn Fn(&mut Session, usize, &[Handle]) -> Handle) -> [f64; 4] {
+        let (tx, st) = (sc.make(|m| m.heap().make_string(text)), sc.make(|m| m.heap().make_string(standard)));
+        let payload = |sc: &mut Session, h: Handle| sc.make(|m| { let r = m.get(h); let p = m.heap().bloblet_slot(r, 3); m.heap().bloblet_slot(p, 2) });
+        let first = |sc: &mut Session, h: Handle| sc.make(|m| { let l = m.get(h); m.heap().car(l) });
+        let copied = |sc: &mut Session| {
+            let w = sc.call_global("%gc-words-copied", &[]).unwrap();
+            sc.view(|v| v.get(w).fixnum().unwrap_or(0))
+        };
+        let c0 = copied(sc);
+        let t = std::time::Instant::now();
+        let syns = run(sc, 1, &[tx]);
+        let read = t.elapsed().as_secs_f64();
+        eprintln!("  reading: {:.0} M words copied by the collector, {} M words in use", (copied(sc) - c0) as f64 / 1e6, sc.heap_used() / 1_000_000);
+        let syns = first(sc, syns);
+        let std = run(sc, 1, &[st]);
+        let std = first(sc, std);
+        let t = std::time::Instant::now();
+        let parsed = run(sc, 2, &[syns]);
+        let parse = t.elapsed().as_secs_f64();
+        let tops = payload(sc, parsed);
+        let t = std::time::Instant::now();
+        run(sc, 3, &[std, tops]);
+        let check = t.elapsed().as_secs_f64();
+        let facts = run(sc, 5, &[]);
+        let t = std::time::Instant::now();
+        run(sc, 4, &[tops, facts]);
+        let compile = t.elapsed().as_secs_f64();
+        [read, parse, check, compile]
+    }
+    const NAMES: [&str; 6] = ["bootstrap", "b-read", "parse-program", "check-program", "compile-program", "checked-extracts"];
+
+    // Lowered to Scheme, on the bytecode VM.
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.scheme.engine.set_step_limit(None);
+    load_bootstrap_program(&mut s.scheme).expect("loads");
+    s.scheme.collect();
+    let lowered = s.scheme.scope(|sc| {
+        phases(sc, &text, &standard, &|sc, i, args| {
+            sc.call_global(&format!("{BOOTSTRAP_PREFIX}{}", NAMES[i]), args).expect("runs")
+        })
+    });
+    rows.push(("FX-26, lowered to Scheme".into(), lowered));
+
+    // Compiled, on each machine.
+    type Run = fn(&mut fixpt_runtime::Runtime, Value, &[Value]) -> Result<Value, String>;
+    let machines: [(&str, Run); 3] = [
+        ("Rust machine", fixpt_engine::threaded::run_word),
+        ("hand-encoded machine", fixpt_native::threaded::run_word),
+        ("stencils, -O2", fixpt_native::stencil::run_word),
+    ];
+    for (name, machine) in machines {
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        load_eager_reader(&mut s.scheme).expect("loads");
+        s.scheme.engine.set_step_limit(None);
+        s.scheme.runtime_unrooted().run_word = Some(machine);
+        let times = s.scheme.scope(|sc| {
+            // Stage 1 in a scope of its own, so that what it leaves (the Rust
+            // driver's reader states, above all) is garbage before timing.
+            let pieces = sc.make(|_| Value::NULL);
+            sc.scope(|inner| {
+                let facts = fixpt_fx26::syn::rust_facts(inner, FileId(0), &text).expect("checks");
+                let stage1 = fixpt_fx26::syn::compile_to_word(inner, FileId(0), &text, facts).expect("parses").expect("compiles");
+                let none = inner.make(|_| Value::NULL);
+                let made = inner.call_global("%run-word", &[stage1, none]).expect("runs");
+                inner.replace(pieces, |m| m.get(made));
+            });
+            sc.collect();
+            phases(sc, &text, &standard, &|sc, i, args| {
+                let f = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2 + i) });
+                let list = sc.call_global("list", args).expect("a list");
+                sc.call_global("%run-word", &[f, list]).expect("runs")
+            })
+        });
+        rows.push((format!("FX-26, compiled, {name}"), times));
+    }
+
+    eprintln!("| pieces | read | parse | check | compile |");
+    for (name, t) in rows {
+        let cell = |x: f64| if x.is_nan() { "—".to_string() } else { format!("{x:.2} s") };
+        eprintln!("| {name} | {} | {} | {} | {} |", cell(t[0]), cell(t[1]), cell(t[2]), cell(t[3]));
+    }
+}
+
+/// The compiled reader alone, on the hand-encoded machine, ten times over
+/// the bootstrap program: something to sample.
+#[test]
+#[ignore = "a probe: cargo test --release -p fixpt-fx26 --test bootstrap probe_read -- --ignored --nocapture"]
+fn probe_read() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    load_eager_reader(&mut s.scheme).expect("loads");
+    s.scheme.engine.set_step_limit(None);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word);
+    let text = fixpt_fx26::bootstrap_program();
+    s.scheme.scope(|sc| {
+        let pieces = sc.make(|_| Value::NULL);
+        sc.scope(|inner| {
+            let facts = fixpt_fx26::syn::rust_facts(inner, FileId(0), &text).expect("checks");
+            let stage1 = fixpt_fx26::syn::compile_to_word(inner, FileId(0), &text, facts).expect("parses").expect("compiles");
+            let none = inner.make(|_| Value::NULL);
+            let made = inner.call_global("%run-word", &[stage1, none]).expect("runs");
+            inner.replace(pieces, |m| m.get(made));
+        });
+        sc.collect();
+        let read = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 3) });
+        let tx = sc.make(|m| m.heap().make_string(&text));
+        let args = sc.call_global("list", &[tx]).expect("a list");
+        eprintln!("reading");
+        for _ in 0..10 {
+            let t = std::time::Instant::now();
+            sc.scope(|one| {
+                one.call_global("%run-word", &[read, args]).expect("reads");
+            });
+            eprintln!("read: {:.2} s", t.elapsed().as_secs_f64());
+        }
     });
 }

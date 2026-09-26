@@ -400,7 +400,11 @@
                    (if tail
                        (c-op1 c routine-tailcall (wcell-int n))
                        (c-op1 c routine-call (wcell-int n)))))
-          (begin (c-standard standard args e depth c) (c-done c tail))))))
+          (if (and tail (string=? standard "with-mark"))
+              ;; In tail position, the mark replaces this frame's: a loop
+              ;; that marks each iteration runs in constant space.
+              (begin (c-exps args e depth c) (c-op c routine-withmark-tail))
+              (begin (c-standard standard args e depth c) (c-done c tail)))))))
 
 ;; How many arguments a standard operation takes, or -1 if it is not one.
 (define c-arity (subr pure (string) int)

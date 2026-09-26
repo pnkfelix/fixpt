@@ -31,7 +31,7 @@ fn ident(name: &str) -> String {
         "field!" => "field_set".into(),
         "0branch" => "zbranch".into(),
         // `local!` and the like: a Rust identifier has no `!`.
-        n => n.replace('!', "_set"),
+        n => n.replace('!', "_set").replace('-', "_"),
     }
 }
 

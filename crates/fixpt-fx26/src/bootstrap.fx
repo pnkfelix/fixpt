@@ -1,8 +1,9 @@
 ;;; The front end driving itself (PLAN.md §11, step 11): a program's text
 ;;; read, parsed, checked and compiled, all by the pieces written in FX-26,
 ;;; to the word that runs it. Appended to the front end, whose last
-;;; expression it is, so that the front end compiled to a word gives, when
-;;; run, this driver: the compiler, compiled, ready to compile.
+;;; expression gives the driver and the pieces it drives, so that the front
+;;; end compiled to a word gives, when run, the compiler, compiled, ready to
+;;; compile; and each piece, to be timed alone (`tests/bootstrap.rs`).
 
 (define-datatype bresult (b-word tword) (b-fail string))
 
@@ -38,4 +39,4 @@
                     (c-err (m) (b-fail (string-append "compile: " m)))))
                 (k-done (te) (b-fail "check: no result")))))))))
 
-bootstrap
+(product (1 bootstrap) (2 b-read) (3 parse-program) (4 check-program) (5 compile-program) (6 checked-extracts))

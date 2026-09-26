@@ -450,11 +450,24 @@ impl Heap {
     }
 
     pub fn vector_from(&mut self, items: &[Value]) -> Value {
-        let v = self.alloc(ObjType::Vector, items.len(), Value::UNSPECIFIED);
-        for (i, x) in items.iter().enumerate() {
-            self.obj_set(v, i, *x);
+        self.vector_with(items.len(), |i| items[i])
+    }
+
+    /// A vector of `n` elements, element `i` being `f(i)`: for filling one
+    /// from somewhere that is not a slice, without making one first.
+    pub fn vector_with(&mut self, n: usize, mut f: impl FnMut(usize) -> Value) -> Value {
+        let v = self.alloc(ObjType::Vector, n, Value::UNSPECIFIED);
+        let base = self.payload_base(v);
+        for i in 0..n {
+            self.set_slot(base + i, f(i));
         }
         v
+    }
+
+    /// An object's payload, in order, with its base found once.
+    pub fn obj_iter(&self, o: Value) -> impl Iterator<Item = Value> + '_ {
+        let base = self.payload_base(o);
+        (0..self.obj_len(o)).map(move |i| self.slot(base + i))
     }
 
     pub fn list_from(&mut self, items: &[Value]) -> Value {

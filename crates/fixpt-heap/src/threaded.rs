@@ -81,8 +81,8 @@ impl Heap {
         }
         // Running past the last cell would take the header for a cell, so
         // the last instruction must be one that never falls through.
-        if !matches!(last, "exit" | "halt" | "branch" | "tailcall" | "return") {
-            return Err("a word must end with `exit`, `halt`, `branch`, `tailcall` or `return`".into());
+        if !matches!(last, "exit" | "halt" | "branch" | "tailcall" | "return" | "withmark-tail") {
+            return Err("a word must end with `exit`, `halt`, `branch`, `tailcall`, `return` or `withmark-tail`".into());
         }
         let w = self.make_bloblet(KIND, WORD_CELL0 - 2 + cells.len(), 0, true);
         self.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(ROUTINE_DOCOL as i64));

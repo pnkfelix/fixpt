@@ -816,6 +816,29 @@ impl Machine {
                 let key = self.pop(name)?;
                 self.enter_above(cx.heap(), r, thunk, [MARK_MARK, key, v, Value::fixnum(0)], name)?;
             }
+            // Scheme's `with-continuation-mark` in tail position: this frame
+            // is left, as by a tail call, and the mark goes on the
+            // continuation it returns to, replacing a mark for the same key
+            // already on top. A loop that marks each iteration so runs in
+            // constant space.
+            WITHMARK_TAIL => {
+                let thunk = self.pop(name)?;
+                let v = self.pop(name)?;
+                let key = self.pop(name)?;
+                let heap = cx.heap();
+                if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == kind("threaded-closure")) {
+                    return Err(Trap::Type { routine: name });
+                }
+                self.check_limits()?;
+                self.ds.truncate(r.fp);
+                let n = self.rs.len();
+                if n >= self.rs_floor + 4 && self.rs[n - 4] == MARK_MARK && self.rs[n - 3] == key {
+                    self.rs[n - 2] = v;
+                } else {
+                    self.rs.extend_from_slice(&[MARK_MARK, key, v, Value::fixnum(0)]);
+                }
+                (r.cur, r.k, r.fp, r.clo) = (heap.bloblet_slot(thunk, CLOSURE_WORD), WORD_CELL0, self.ds.len(), thunk);
+            }
             ABORT => {
                 let v = self.pop(name)?;
                 let tag = self.pop(name)?;
@@ -994,6 +1017,7 @@ const ABORT: i64 = routine("abort") as i64;
 const CALLCOMP: i64 = routine("callcomp") as i64;
 const CALLCC: i64 = routine("callcc") as i64;
 const WITHMARK: i64 = routine("withmark") as i64;
+const WITHMARK_TAIL: i64 = routine("withmark-tail") as i64;
 const FIRSTMARK: i64 = routine("firstmark") as i64;
 const CURRENTMARKS: i64 = routine("currentmarks") as i64;
 const MARKSOF: i64 = routine("marksof") as i64;

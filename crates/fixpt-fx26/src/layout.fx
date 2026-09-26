@@ -120,3 +120,4 @@
 (define routine-firstmark int 35)  ; ( key default -- v ), the innermost mark for key
 (define routine-currentmarks int 36)  ; ( key -- list ), every mark for key, innermost first
 (define routine-marksof int 37)  ; ( k key -- list ), the marks for key in continuation k
+(define routine-withmark-tail int 38)  ; ( key v thunk -- r ), withmark in tail position: the frame is left, and a mark for key on top replaced

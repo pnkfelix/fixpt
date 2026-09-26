@@ -126,13 +126,16 @@ impl Stacks<'_> {
     }
 }
 
-fn is_a(heap: &Heap, v: Value, k: &str) -> bool {
-    v.is_bloblet() && heap.bloblet_kind(v) == kind(k)
+const CLOSURE: u8 = kind("threaded-closure");
+const CONTINUATION: u8 = kind("threaded-continuation");
+
+fn is_a(heap: &Heap, v: Value, k: u8) -> bool {
+    v.is_bloblet() && heap.bloblet_kind(v) == k
 }
 
 /// Run closure `thunk` with no arguments above a marker entry.
 fn enter_above(s: &mut Stacks, heap: &Heap, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
-    if !is_a(heap, thunk, "threaded-closure") {
+    if !is_a(heap, thunk, CLOSURE) {
         return Err(Trap::Type { routine });
     }
     s.push_return()?;
@@ -148,14 +151,14 @@ fn call(s: &mut Stacks, heap: &Heap, n: usize, tail: bool, routine: &'static str
         return Err(Trap::Underflow { routine });
     }
     let c = s.ds_pop(routine)?;
-    if is_a(heap, c, "threaded-continuation") {
+    if is_a(heap, c, CONTINUATION) {
         if n != 1 {
             return Err(Trap::Prim(format!("a continuation takes one value, and was given {n}")));
         }
         let v = s.ds_pop(routine)?;
         return reinstate(s, heap, c, v, tail);
     }
-    if !is_a(heap, c, "threaded-closure") {
+    if !is_a(heap, c, CLOSURE) {
         return Err(Trap::Type { routine });
     }
     let word = heap.bloblet_slot(c, CLOSURE_WORD);
@@ -179,11 +182,19 @@ fn call(s: &mut Stacks, heap: &Heap, n: usize, tail: bool, routine: &'static str
 
 /// A continuation of the stacks from word `rs_from` and value `ds_from` up.
 fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: bool) -> Value {
-    let dsv: Vec<Value> = (ds_from..s.ds_len()).map(|i| s.ds_get(i)).collect();
-    let rsv: Vec<Value> = (rs_from..s.rs_len()).map(|i| s.rs_get(i)).collect();
-    let ds = heap.vector_from(&dsv);
-    let rs = heap.vector_from(&rsv);
-    let k = heap.make_bloblet(kind("threaded-continuation"), CONT_FIELDS, 0, true);
+    if crate::threaded::TIMING.with(|t| *t) {
+        let words = (s.ds_len() - ds_from + s.rs_len() - rs_from) as u64;
+        crate::threaded::CAPTURED.with(|c| {
+            let mut c = c.borrow_mut();
+            (c.0, c.1) = (c.0 + words, c.1 + 1);
+            if c.1.is_power_of_two() {
+                eprintln!("capture {}: {} data, {} return words", c.1, s.ds_len() - ds_from, s.rs_len() - rs_from);
+            }
+        });
+    }
+    let ds = heap.vector_with(s.ds_len() - ds_from, |i| s.ds_get(ds_from + i));
+    let rs = heap.vector_with(s.rs_len() - rs_from, |i| s.rs_get(rs_from + i));
+    let k = heap.make_bloblet(CONTINUATION, CONT_FIELDS, 0, true);
     let fields = [
         (CONT_DS, ds),
         (CONT_RS, rs),
@@ -218,11 +229,12 @@ fn reinstate(s: &mut Stacks, heap: &Heap, k: Value, v: Value, tail: bool) -> Res
         s.push_return()?;
     }
     let delta = s.ds_len() as i64 - old_base;
-    for i in 0..heap.obj_len(ds) {
-        s.ds_push(heap.obj_ref(ds, i))?;
+    for v in heap.obj_iter(ds) {
+        s.ds_push(v)?;
     }
-    for e in 0..heap.obj_len(rs) / 4 {
-        let mut entry = [0, 1, 2, 3].map(|j| heap.obj_ref(rs, 4 * e + j));
+    let mut words = heap.obj_iter(rs);
+    while let (Some(a), Some(b), Some(c), Some(d)) = (words.next(), words.next(), words.next(), words.next()) {
+        let mut entry = [a, b, c, d];
         if entry[0] == PROMPT_MARK {
             entry[3] = Value::fixnum(entry[3].as_fixnum() + delta);
         } else if entry[0] != MARK_MARK {
@@ -241,7 +253,7 @@ fn reinstate(s: &mut Stacks, heap: &Heap, k: Value, v: Value, tail: bool) -> Res
 /// the saved ip. `None` for the rest.
 pub(crate) fn run(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&mut State, &mut Heap)) -> Option<Result<(), Trap>> {
     let r = match name {
-        "prompt" | "withmark" | "abort" | "callcomp" | "callcc" | "firstmark" | "call" | "tailcall" => {
+        "prompt" | "withmark" | "withmark-tail" | "abort" | "callcomp" | "callcc" | "firstmark" | "call" | "tailcall" => {
             routine(st, heap, name, safepoint)
         }
         _ => return None,
@@ -271,6 +283,28 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
             let v = s.ds_pop(name)?;
             let key = s.ds_pop(name)?;
             enter_above(&mut s, heap, thunk, [MARK_MARK, key, v, Value::fixnum(0)], name)
+        }
+        "withmark-tail" => {
+            let mut s = Stacks { st };
+            let thunk = s.ds_pop(name)?;
+            let v = s.ds_pop(name)?;
+            let key = s.ds_pop(name)?;
+            if !is_a(heap, thunk, CLOSURE) {
+                return Err(Trap::Type { routine: name });
+            }
+            let fp = s.fp();
+            s.ds_truncate(fp);
+            let n = s.rs_len();
+            if n >= 4 && s.rs_get(n - 4) == MARK_MARK && s.rs_get(n - 3) == key {
+                // The value's word of the entry on top.
+                // SAFETY: word 2 of the top entry, within the return stack.
+                unsafe { *((s.st.rsp + 16) as *mut u64) = v.raw() };
+            } else {
+                s.rs_push_entry([MARK_MARK, key, v, Value::fixnum(0)])?;
+            }
+            let fp = s.ds_len();
+            s.set_regs(heap.bloblet_slot(thunk, CLOSURE_WORD), WORD_CELL0, fp, thunk);
+            Ok(())
         }
         "abort" => {
             let mut s = Stacks { st };

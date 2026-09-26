@@ -132,6 +132,18 @@ pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
     compiled.load_into(scheme)
 }
 
+/// The global prefix the bootstrap program is loaded under.
+pub const BOOTSTRAP_PREFIX: &str = "fx26-boot:";
+
+/// The bootstrap program ([`crate::bootstrap_program`]: the front end and
+/// its driver) lowered to Scheme and loaded into `scheme` under
+/// [`BOOTSTRAP_PREFIX`], so that each piece can be run and timed lowered,
+/// as the compiled ones are.
+pub fn load_bootstrap_program(scheme: &mut Session) -> Result<(), String> {
+    let compiled = compile_program_as(&crate::bootstrap_program(), BOOTSTRAP_PREFIX).map_err(|e| e.to_string())?;
+    compiled.load_into(scheme)
+}
+
 impl Compiled {
     /// Load into `scheme`: the FX-26 runtime, then the program.
     pub fn load_into(&self, scheme: &mut Session) -> Result<(), String> {

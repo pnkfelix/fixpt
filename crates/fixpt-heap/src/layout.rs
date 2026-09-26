@@ -296,6 +296,7 @@ pub mod threaded {
         ("firstmark", "( key default -- v ), the innermost mark for key"),
         ("currentmarks", "( key -- list ), every mark for key, innermost first"),
         ("marksof", "( k key -- list ), the marks for key in continuation k"),
+        ("withmark-tail", "( key v thunk -- r ), withmark in tail position: the frame is left, and a mark for key on top replaced"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 

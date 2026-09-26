@@ -160,3 +160,53 @@ fn primitives_collect_with_everything_moving() {
     });
     assert_eq!(out.unwrap(), ["(((1 (2 (3 ()))) #(1 2)) 9)"]);
 }
+
+#[test]
+fn a_loop_marking_in_tail_position_runs_in_constant_space() {
+    // loop(n): with-mark key n (λ. if n = 0 then first-mark key else loop(n-1)),
+    // the with-mark in tail position: 100,000 iterations, far past the
+    // return stack's limit if each stacked a mark, and the mark seen at the
+    // end is the last one.
+    let out = all(|rt| {
+        let key = cell(rt, Value::FALSE);
+        let g = cell(rt, Value::FALSE);
+        let mut body = WordBuilder::new();
+        let els = body.label();
+        body.free(0).lit(fx(0)).prim("eq").zbranch(els).global(key).lit(fx(-1)).prim("firstmark").ret();
+        body.place(els);
+        body.free(0).lit(fx(1)).prim("-").global(g).tailcall(1);
+        let body = body.build(&mut rt.heap, "body");
+        let mut lp = WordBuilder::new();
+        lp.global(key).slot(0).slot(0).closure(body, 1).prim("withmark-tail");
+        let lp = lp.build(&mut rt.heap, "loop");
+        let mut t = WordBuilder::new();
+        t.closure(lp, 0).global_set(g).lit(fx(100_000)).global(g).call_closure(1).prim("exit");
+        t.build(&mut rt.heap, "top")
+    });
+    assert_eq!(out.unwrap(), ["0"]);
+}
+
+#[test]
+fn continuations_captured_and_composed_with_everything_moving() {
+    // (prompt tag (+ 1 (callcomp (λ (k) (k (k 1))) tag)) handler): the
+    // continuation is "add one", composed twice, so 1 + (1 + (1 + 1)).
+    // Collecting at every safepoint, which moves every object, while the
+    // stacks are captured into a continuation and composed back.
+    let out = all(|rt| {
+        rt.heap.gc_every = 1;
+        let tag = cell(rt, Value::FALSE);
+        let mut procw = WordBuilder::new();
+        procw.lit(fx(1)).slot(0).call_closure(1).slot(0).call_closure(1).ret();
+        let procw = procw.build(&mut rt.heap, "twice-k");
+        let mut thunk = WordBuilder::new();
+        thunk.lit(fx(1)).closure(procw, 0).global(tag).prim("callcomp").prim("+").ret();
+        let thunk = thunk.build(&mut rt.heap, "body");
+        let mut handler = WordBuilder::new();
+        handler.slot(0).ret();
+        let handler = handler.build(&mut rt.heap, "handler");
+        let mut t = WordBuilder::new();
+        t.global(tag).closure(handler, 0).closure(thunk, 0).prim("prompt").prim("exit");
+        t.build(&mut rt.heap, "top")
+    });
+    assert_eq!(out.unwrap(), ["4"]);
+}

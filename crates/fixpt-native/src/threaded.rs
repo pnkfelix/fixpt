@@ -776,6 +776,8 @@ pub fn report_callouts() {
         let ms: Vec<(&str, u64)> = take_callout_nanos().into_iter().map(|(n, t)| (n, t / 1_000_000)).collect();
         eprintln!("callout ms: {ms:?}");
         eprintln!("round trips lifted {} words of stack", ROUND_TRIP_WORDS.with(|w| std::mem::take(&mut *w.borrow_mut())));
+        let (words, n) = CAPTURED.with(|c| std::mem::take(&mut *c.borrow_mut()));
+        eprintln!("continuations captured: {n}, {words} words of stack in all");
         let mut prims: Vec<(&str, u64)> = PRIM_COUNTS.with(|c| std::mem::take(&mut *c.borrow_mut())).into_iter().collect();
         prims.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
         prims.truncate(15);
@@ -787,9 +789,11 @@ thread_local! {
     static CALLOUTS: std::cell::RefCell<[u64; ROUTINES.len()]> = const { std::cell::RefCell::new([0; ROUTINES.len()]) };
     static CALLOUT_NANOS: std::cell::RefCell<[u64; ROUTINES.len()]> = const { std::cell::RefCell::new([0; ROUTINES.len()]) };
     static ROUND_TRIP_WORDS: std::cell::RefCell<u64> = const { std::cell::RefCell::new(0) };
+    /// Words of stack captured into continuations, and how many there were.
+    pub(crate) static CAPTURED: std::cell::RefCell<(u64, u64)> = const { std::cell::RefCell::new((0, 0)) };
     static PRIM_COUNTS: std::cell::RefCell<std::collections::HashMap<&'static str, u64>> = std::cell::RefCell::new(std::collections::HashMap::new());
     /// Whether `FIXPT_CALLOUTS` is set, asked once.
-    static TIMING: bool = std::env::var_os("FIXPT_CALLOUTS").is_some();
+    pub(crate) static TIMING: bool = std::env::var_os("FIXPT_CALLOUTS").is_some();
     /// A runtime primitive's message, when one failed in a call-out: a
     /// trap's code cannot carry it.
     static LAST_MESSAGE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };

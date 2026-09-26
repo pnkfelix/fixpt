@@ -868,19 +868,25 @@ prims! {
     // leaves on top.
     "%run-word", 2, Some(2), simple!(|rt, a| {
         let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
-        // A closure is called by a word of its own: `lit closure; call n;
-        // exit`, the arguments beneath. Allocation does not collect here.
-        let word = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("threaded-closure") {
+        // A closure is called by a word of its own, run with no arguments:
+        // `lit a1 … lit an lit closure call n exit`. A word's frame starts
+        // above what it is run on, so the arguments are the word's to push.
+        // Allocation does not collect here.
+        let (word, args) = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("threaded-closure") {
             use fixpt_heap::layout::threaded::routine;
             let f = |n: u64| Value::fixnum(n as i64);
-            let cells = [f(routine("lit")), a[0], f(routine("call")), f(args.len() as u64), f(routine("exit"))];
+            let mut cells = Vec::with_capacity(2 * args.len() + 5);
+            for x in &args {
+                cells.extend([f(routine("lit")), *x]);
+            }
+            cells.extend([f(routine("lit")), a[0], f(routine("call")), f(args.len() as u64), f(routine("exit"))]);
             let name = rt.heap.intern("call-closure");
             match rt.heap.make_threaded_word(name, &cells) {
-                Ok(w) => w,
+                Ok(w) => (w, Vec::new()),
                 Err(e) => return rt.fail(&e, &[a[0]]),
             }
         } else if rt.heap.is_threaded_word(a[0]) {
-            a[0]
+            (a[0], args)
         } else {
             return rt.type_error("a threaded word or closure", a[0]);
         };
