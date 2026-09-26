@@ -435,6 +435,7 @@ you at each boundary rather than disappear for the whole thing.
 | M8 🔶 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks (`cargo run --release --example engines` is the start). Collector workloads from Larceny's `test/GC` already landed in `tests/gc_workloads.rs` |
 | M9 ✅ | hygienic macros | `define-syntax`/`let-syntax`/`letrec-syntax`/`syntax-rules`, hygienic by renaming (Clinger & Rees); the built-in derived forms hygienic too; R7RS §7.3's own macro definitions of the derived forms pass against the built-ins. SRFI 211 `er-macro-transformer` and `ir-macro-transformer`, with `begin-for-syntax`. SRFI 139 syntax parameters, `identifier-syntax`, `syntax-error`. See [`docs/macros.md`](docs/macros.md) |
 | M11 ✅ | FX-26: the tooling's own language (the seven-step plan, done 2026-09-25) | effects as licences, bidirectional checking, typed delimited control; the eager reader ported to it first. Direction and plan: [`docs/fx26.md`](docs/fx26.md) |
+| M12 | FX-26, bootstrapped: its interpreter and compiler written in FX-26, over a new object model shared with Rust | three phases — bloblets, FX-26 over bloblets, bootstrapping. See §11 and [`docs/object-model.md`](docs/object-model.md) |
 | M10 | *(future)* native code generation | the bytecode/heap-image design is kept amenable to it; not scheduled |
 
 Rough total ~26k lines of Rust. M6 and M7 are each comparable in size to
@@ -481,3 +482,120 @@ everything before them; M7 is the hardest (inference + ACUI + modules).
    `docs/divergences.md`, with evidence and both outputs. This is deliberately
    the opposite of the Racket port's "preserve the original, bugs included"
    rule, and it is what "conformance" means in this project.
+
+---
+
+## 11. M12: bootstrapping FX-26 (planned 2026-09-25)
+
+**The goal.** The FX-26 interpreter and compiler are written in FX-26. What
+stays in Rust:
+- **A bootstrap interpreter**, for as long as there is FX-26 to bootstrap.
+- **The garbage collector.**
+
+Between them, the value representation is shared by both halves: the
+**bloblet**, specified in [`docs/object-model.md`](docs/object-model.md).
+
+**A bloblet** is a header, then tagged fields, then an untraced binary
+suffix, with every tagged pointer pointing at the start of the suffix.
+Fields are named by negative offset from there, so code can reach its own
+metadata at fixed offsets, and new fields can be prepended. Records,
+vectors, bytevectors, strings, numbers, closures and code all become
+bloblets, and the collector stops needing to know what anything is.
+
+**The method, taken from the eager reader.** Each piece moved into FX-26
+keeps its Rust version as the oracle it is checked against on the same
+inputs, and then as stage 0. Retiring a Rust piece is a separate decision,
+made piece by piece.
+
+### Phase A: the object model (`fixpt-heap`, in Rust)
+
+1. **`docs/object-model.md`**, reviewed and committed.
+2. **One specification table**: tags, header bits, kinds, and the reserved
+   trailer. The Rust constants are generated from it, and later an FX-26
+   module too, with a test that the two agree.
+3. **Bloblets in the heap, alongside today's objects:**
+   - allocation, through the layout/placement interface, with the default
+     placement;
+   - the four-step construction protocol, whose header changes once, before
+     publication;
+   - the two frozen flags;
+   - the trailer and the backward scan;
+   - bloblet pointers (tag `100`), and forwarding through them, including the
+     second forward for trailer-less bloblets;
+   - tracing, verification, and a new heap image version.
+
+   Tested under `gc-stress`, and with deliberately trailer-less bloblets so
+   the backward scan runs.
+4. **Code as bloblets, in both forms:**
+   - *compiled*: constants and metadata in fields, bytecode as the suffix;
+   - *threaded*: the program in the fields, run by the Rust bootstrap
+     interpreter as the inner interpreter.
+
+   Closures hold bloblet pointers, and frames hold a code pointer and an
+   offset.
+5. **The other types, one at a time**: vectors, bytevectors, strings (UTF-32),
+   flonums, bignums, records, boxes and the rest. At the end, the collector no
+   longer needs to know what anything is: `ObjType::payload_is_scanned` and
+   tag `010` are retired. Pairs stay as they are.
+
+### Phase B: FX-26 over bloblets
+
+6. **FX-26's view of bloblets:**
+   - a type along the lines of `(bloblet (fields T…) R)`;
+   - reads by field and by byte, and code-pointer types;
+   - the construction protocol and `seal` as primitives, with the `init`
+     effect, so a record's fields count as uninitialised until stored and
+     frozen fields offer no writes;
+   - the layout module generated in step 2.
+7. **The data types the tooling needs, built on bloblets:**
+   - records and sum types (`oneof`/`tagcase`);
+   - tables;
+   - symbols as values.
+8. **Reader data with source positions**, so the FX-26 reader feeds the
+   checker directly and the Rust reader leaves the FX-26 path.
+
+### Phase C: bootstrapping
+
+9. **An FX-26 interpreter written in FX-26**, running threaded bloblets.
+   Checked against the Rust bootstrap interpreter on the same programs.
+10. **The FX-26 checker written in FX-26**, checked against the Rust checker
+    on every test program: FX-26 checking FX-26.
+11. **The FX-26 compiler written in FX-26**, replacing threaded bloblets with
+    compiled ones one at a time. Checked by running the same programs
+    interpreted and compiled.
+12. **Retiring Rust pieces**, one at a time and deliberately. Each keeps its
+    Rust version as oracle and stage 0 until decided otherwise.
+
+### Kept open, deliberately
+
+- **Pinned code, with raw return addresses into it.** Possibly pinned only
+  speculatively, with moving still possible at the cost of rewriting return
+  addresses.
+- **Sealing into a code space, and page-aligned suffixes**, so that fields
+  stay writable while instructions are protected.
+- **What the trailer holds**, beyond its tag and its purpose.
+- **Native code (M10)**, which is where suffix alignment and pinning start to
+  matter.
+
+### Decisions (with the user, 2026-09-25)
+
+1. **The name is "bloblet"**, which is unique when searched for.
+2. **The trailer is the fast path, not an invariant.** The hard invariants
+   are:
+   - every bloblet starts with a header;
+   - every field is tagged;
+   - every tagged pointer points at the suffix start.
+
+   A backward scan finds the header when there is no trailer. The trailer's
+   contents are reserved.
+3. **Mutability is per bloblet, chosen at allocation**, for the fields and the
+   suffix independently. There is no global immutability; the effect system
+   allows immutability-based optimisations later.
+4. **Construction** allocates with `F = 0` and the whole size as suffix,
+   zeroes the would-be fields, then changes the header once to the final
+   field count, before the bloblet is published. The allocator is not
+   required to hand out zeroed memory.
+5. **Strings stay UTF-32.**
+6. **The bootstrap interpreter reads bloblets directly**, including threaded
+   ones, and compiled forms replace them incrementally, as in Forth.
+
