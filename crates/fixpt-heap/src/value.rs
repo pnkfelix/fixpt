@@ -10,8 +10,8 @@
 //! tag 001  pair         (w >> 3) = index of a 2-word car/cdr cell
 //! tag 010  object       (w >> 3) = index of a header word
 //! tag 011  immediate    subtag in bits 3..8, payload in bits 8..64
-//! tag 100  reserved
-//! tag 101  reserved
+//! tag 100  bloblet      (w >> 3) = index of the start of a bloblet's suffix
+//! tag 101  trailer      a bloblet's last field, if it has one; never traced
 //! tag 110  header       never a Value; marks an object header word (see below)
 //! tag 111  forwarding   GC-internal; never observable outside a collection
 //! ```
@@ -23,13 +23,18 @@
 //! reserved pattern, a pair whose car happened to look like a header would
 //! desynchronise the scan.
 
+use crate::layout;
 use core::fmt;
 
+// The tags are specified in `layout.rs`; these are the same numbers, as
+// constants for the hot paths, checked against the table in a test.
 pub const TAG_MASK: u64 = 0b111;
 pub const TAG_FIXNUM: u64 = 0b000;
 pub const TAG_PAIR: u64 = 0b001;
 pub const TAG_OBJECT: u64 = 0b010;
 pub const TAG_IMMEDIATE: u64 = 0b011;
+pub const TAG_BLOBLET: u64 = 0b100;
+pub const TAG_TRAILER: u64 = 0b101;
 pub const TAG_HEADER: u64 = 0b110;
 pub const TAG_FORWARD: u64 = 0b111;
 
@@ -105,7 +110,18 @@ impl Value {
     pub const fn is_object(self) -> bool {
         self.tag() == TAG_OBJECT
     }
-    /// Word index of the referent. Only meaningful for pairs and objects.
+    /// A pointer to a bloblet: the index of the start of its suffix, which is
+    /// where every tagged pointer to a bloblet points (`docs/object-model.md`).
+    #[inline]
+    pub const fn bloblet(index: usize) -> Value {
+        Value(((index as u64) << 3) | TAG_BLOBLET)
+    }
+    #[inline]
+    pub const fn is_bloblet(self) -> bool {
+        self.tag() == TAG_BLOBLET
+    }
+    /// Word index of the referent. Only meaningful for references: a pair's
+    /// cell, an object's header, a bloblet's suffix.
     #[inline]
     pub const fn index(self) -> usize {
         (self.0 >> 3) as usize
@@ -113,7 +129,7 @@ impl Value {
     /// True for anything the collector must trace.
     #[inline]
     pub const fn is_ref(self) -> bool {
-        matches!(self.tag(), TAG_PAIR | TAG_OBJECT)
+        matches!(self.tag(), TAG_PAIR | TAG_OBJECT | TAG_BLOBLET)
     }
 
     // ------------------------------------------------------------- immediates
@@ -213,6 +229,8 @@ impl fmt::Debug for Value {
             TAG_FIXNUM => write!(f, "{}", self.as_fixnum()),
             TAG_PAIR => write!(f, "#<pair @{}>", self.index()),
             TAG_OBJECT => write!(f, "#<obj @{}>", self.index()),
+            TAG_BLOBLET => write!(f, "#<bloblet @{}>", self.index()),
+            TAG_TRAILER => write!(f, "#<trailer {:#x}>", self.0 >> 3),
             TAG_IMMEDIATE => match self.subtag() {
                 IMM_FALSE => f.write_str("#f"),
                 IMM_TRUE => f.write_str("#t"),
@@ -233,26 +251,43 @@ impl fmt::Debug for Value {
 
 // ---------------------------------------------------------------------- header
 
-/// Object header word. `len` counts payload words, uniformly for every object
-/// type, so the collector can skip a non-scanned payload without knowing what
-/// it means.
-///
-/// ```text
-/// bits 24..64  len (payload words)
-/// bits  8..24  type code
-/// bits  0..8   TAG_HEADER
-/// ```
+/// The header word, laid out as `layout.rs` specifies: kind, `F` fields and `B`
+/// suffix bytes, and flags. The collector needs `F` and `B` only.
 #[inline]
-pub const fn make_header(ty: ObjType, len: usize) -> u64 {
-    ((len as u64) << 24) | ((ty as u64) << 8) | TAG_HEADER
+pub const fn make_header(kind: u8, fields: usize, bytes: usize) -> u64 {
+    let w = layout::H_TAG.put(0, TAG_HEADER);
+    let w = layout::H_KIND.put(w, kind as u64);
+    let w = layout::H_FIELDS.put(w, fields as u64);
+    layout::H_BYTES.put(w, bytes as u64)
+}
+/// A large header: `F` does not fit the main word, so it goes in an extension
+/// word *before* the main header. The payload then still starts one word
+/// after the main header, whatever the size, and a backward scan from the
+/// suffix still stops at the main header first. Returns (extension, main).
+#[inline]
+pub const fn make_large_header(kind: u8, fields: usize, bytes: usize) -> (u64, u64) {
+    let x = layout::H_TAG.put(0, TAG_HEADER);
+    let x = layout::X_KIND.put(x, layout::KIND_EXTENSION as u64);
+    let x = layout::X_FIELDS.put(x, fields as u64);
+    let main = make_header(kind, 0, bytes);
+    (x, layout::H_LARGE.put(main, 1))
 }
 #[inline]
-pub const fn header_len(h: u64) -> usize {
-    (h >> 24) as usize
+pub const fn header_kind(h: u64) -> u8 {
+    layout::H_KIND.get(h) as u8
 }
 #[inline]
-pub const fn header_type_code(h: u64) -> u16 {
-    ((h >> 8) & 0xffff) as u16
+pub const fn header_is_large(h: u64) -> bool {
+    layout::H_LARGE.get(h) != 0
+}
+/// Whether a header-tagged word is a large header's extension, not a header.
+#[inline]
+pub const fn is_extension(w: u64) -> bool {
+    is_header(w) && layout::X_KIND.get(w) == layout::KIND_EXTENSION as u64
+}
+#[inline]
+pub const fn header_bytes(h: u64) -> usize {
+    layout::H_BYTES.get(h) as usize
 }
 #[inline]
 pub const fn is_header(w: u64) -> bool {
@@ -418,12 +453,37 @@ mod tests {
     #[test]
     fn header_roundtrip() {
         for ty in [ObjType::String, ObjType::Vector, ObjType::Code, ObjType::Primitive] {
-            for len in [0usize, 1, 7, 1 << 20] {
-                let h = make_header(ty, len);
-                assert!(is_header(h));
-                assert_eq!(header_len(h), len);
-                assert_eq!(ObjType::from_code(header_type_code(h)), Some(ty));
+            for (fields, bytes) in [(0usize, 0usize), (1, 0), (0, 56), (7, 13), ((1 << 18) - 1, u32::MAX as usize)] {
+                let h = make_header(ty as u8, fields, bytes);
+                assert!(is_header(h) && !is_extension(h) && !header_is_large(h));
+                assert_eq!(layout::H_FIELDS.get(h) as usize, fields);
+                assert_eq!(header_bytes(h), bytes);
+                assert_eq!(ObjType::from_code(header_kind(h) as u16), Some(ty));
             }
+        }
+        let (x, h) = make_large_header(ObjType::Vector as u8, 1 << 30, 0);
+        assert!(is_extension(x) && header_is_large(h) && !is_extension(h));
+        assert_eq!(layout::X_FIELDS.get(x), 1 << 30);
+    }
+
+    /// The hot-path constants here are the table's.
+    #[test]
+    fn the_tags_are_the_layout_tables() {
+        for (name, bits) in [
+            ("fixnum", TAG_FIXNUM),
+            ("pair", TAG_PAIR),
+            ("object", TAG_OBJECT),
+            ("immediate", TAG_IMMEDIATE),
+            ("bloblet", TAG_BLOBLET),
+            ("trailer", TAG_TRAILER),
+            ("header", TAG_HEADER),
+            ("forward", TAG_FORWARD),
+        ] {
+            assert_eq!(layout::tag(name), bits, "{name}");
+        }
+        for k in layout::KINDS.iter().filter(|k| k.code < 32) {
+            let ty = ObjType::from_code(k.code as u16).unwrap_or_else(|| panic!("no ObjType for {}", k.name));
+            assert_eq!(ty.payload_is_scanned(), k.traced, "{}", k.name);
         }
     }
 

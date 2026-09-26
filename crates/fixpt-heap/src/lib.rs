@@ -15,6 +15,7 @@
 
 pub mod heap;
 pub mod image;
+pub mod layout;
 pub mod value;
 
 pub use heap::Heap;

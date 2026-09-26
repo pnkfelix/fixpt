@@ -36,8 +36,11 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// would be read with the wrong layout. Version 3 gives a continuation its
 /// marks (`[stack, frames, mark-vals, mark-meta, flags]` rather than
 /// `[stack, frames]`), and its prelude keeps handlers and `dynamic-wind`
-/// extents in marks rather than globals.
-pub const VERSION: u32 = 3;
+/// extents in marks rather than globals. Version 4 lays every object out as a
+/// bloblet (`docs/object-model.md`): the header gives the field count and the
+/// suffix length rather than one payload length, and bloblet pointers and
+/// trailers may appear.
+pub const VERSION: u32 = 4;
 const HEADER_BYTES: usize = 40;
 
 /// Trailer written after an image appended to an executable.

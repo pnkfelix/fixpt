@@ -1,6 +1,6 @@
 # The object model: bloblets
 
-Draft, 2026-09-25. Nothing here is implemented yet.
+Draft, 2026-09-25. Being implemented as M12 Phase A; see `PLAN.md` §11.
 
 This document proposes one new kind of heap object, the **bloblet**. It could
 eventually represent almost every other kind. It is also the layout the FX-26
@@ -87,7 +87,10 @@ when it is worth one: anything reached by a bloblet pointer often, and code
 above all.
 
 **Its contents are reserved.** All that is committed to is the tag, and the
-purpose: a bloblet's own trailer lets the header be found without a scan.
+purpose: a bloblet's own trailer lets the header be found without a scan. The contents are reserved *to the runtime*:
+the collector is the one reader, and today it stores the distance in words
+from the trailer back to the header (`layout.rs`, `T_DISTANCE`). No program
+may read or write a trailer.
 How it encodes that, and what else it holds, is deliberately left open. The
 distance back to the header, the kind, and a hash of the field layout are
 all candidates. Until something needs one of them, nothing may rely on any
@@ -336,15 +339,34 @@ One word, for all but enormous bloblets:
 ```text
 bit  0–2   110            header tag
 bit  3–10  kind           8 bits: what the bloblet is to the language
-bit  11    large          lengths are in the next word instead
+bit  11    large          F is in an extension word just before this one
 bit  12    fields frozen  the fields are immutable
 bit  13    suffix frozen  the suffix is immutable
 bit  14–31 F              18 bits: up to about 262,000 fields
 bit  32–63 B              32 bits: up to 4 GiB of suffix
 ```
 
-A `large` bloblet has a second header word holding *F* and *B* at full width.
-Almost nothing will need it.
+A `large` bloblet has *F* too big for 18 bits, so it goes in an
+**extension word placed just before the main header**. The extension is
+header-tagged, with the reserved kind 255, and holds *F* in 53 bits. *B*
+stays in the main header, so a suffix is limited to 4 GiB.
+
+```text
+ordinary:  [main header][fields…][suffix]
+large:     [extension][main header, large=1][fields…][suffix]
+```
+
+Before, not after, so that the fields always start one word after the main
+header. Accessors can then find a field without first reading the header's
+`large` bit. Both scans still work:
+- A linear scan meets the extension word first, sees kind 255, and knows the
+  main header follows.
+- A backward scan from the suffix stops at the first header-tagged word it
+  meets going backward, which is the main header. The main header's `large`
+  bit then says the extension is just before it.
+
+Invariant 1 holds, since the object still starts with a header-tagged word.
+Almost nothing will ever be large.
 
 ## Tags, before and after
 

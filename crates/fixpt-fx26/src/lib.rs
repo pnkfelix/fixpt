@@ -21,6 +21,10 @@ pub mod ast;
 /// The eager reader, written in FX-26: see the file's own header.
 pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 
+/// The object layout, generated from `fixpt_heap::layout`: tags, header
+/// fields and kinds, as FX-26 definitions.
+pub const LAYOUT: &str = include_str!("layout.fx");
+
 pub mod check;
 pub mod infer;
 pub mod licence;

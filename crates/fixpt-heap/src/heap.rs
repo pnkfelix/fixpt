@@ -21,10 +21,111 @@
 //! than checking a threshold first), so the moving path is exercised on every
 //! safepoint in the test suite rather than only when a heap happens to fill up.
 
+use crate::layout;
 use crate::value::{
-    ObjType, TAG_HEADER, Value, header_len, header_type_code, is_header, make_header,
+    ObjType, TAG_BLOBLET, TAG_FORWARD, TAG_HEADER, TAG_MASK, TAG_TRAILER, Value, header_bytes, header_is_large,
+    header_kind, is_extension, is_header, make_header, make_large_header,
 };
 use std::collections::HashMap;
+
+/// What a main header says, with a large header's extension read too.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Head {
+    pub kind: u8,
+    /// `F`, the number of tagged fields.
+    pub fields: usize,
+    /// `B`, the suffix length in bytes.
+    pub bytes: usize,
+    /// Words before the main header that belong to the object: 1 for a large
+    /// header's extension, else 0.
+    pub pre: usize,
+    pub fields_frozen: bool,
+    pub suffix_frozen: bool,
+}
+
+impl Head {
+    /// Words after the main header: fields, then the suffix padded to a word.
+    #[inline]
+    pub fn payload_words(&self) -> usize {
+        self.fields + self.bytes.div_ceil(8)
+    }
+    /// The whole object, extension and header included.
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.pre + 1 + self.payload_words()
+    }
+}
+
+/// Read the head of the object whose main header is at `at` in `mem`.
+#[inline]
+fn read_head(mem: &[u64], at: usize) -> Head {
+    let h = mem[at];
+    debug_assert!(is_header(h) && !is_extension(h), "no main header at {at}");
+    let large = header_is_large(h);
+    let fields = if large {
+        layout::X_FIELDS.get(mem[at - 1]) as usize
+    } else {
+        layout::H_FIELDS.get(h) as usize
+    };
+    Head {
+        kind: header_kind(h),
+        fields,
+        bytes: header_bytes(h),
+        pre: large as usize,
+        fields_frozen: layout::H_FIELDS_FROZEN.get(h) != 0,
+        suffix_frozen: layout::H_SUFFIX_FROZEN.get(h) != 0,
+    }
+}
+
+/// From a bloblet's suffix start `p` in `mem`, the index of its main header:
+/// by its trailer if it has one, else by the backward scan the invariants
+/// make sound (`docs/object-model.md`). A forwarding pointer at `p - 1`
+/// means the collector has been here already, and is returned as `Err` with
+/// its target: where the main header went, relative to to-space.
+#[inline]
+fn find_main(mem: &[u64], p: usize) -> Result<usize, usize> {
+    let w = mem[p - 1];
+    match w & TAG_MASK {
+        TAG_FORWARD => Err(Value(w).index()),
+        TAG_TRAILER => Ok(p - 1 - layout::T_DISTANCE.get(w) as usize),
+        TAG_HEADER => Ok(p - 1),
+        _ => {
+            let mut k = p - 1;
+            while mem[k] & TAG_MASK != TAG_HEADER {
+                k -= 1;
+            }
+            Ok(k)
+        }
+    }
+}
+
+/// Why a bloblet operation was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BlobletError {
+    NoSuchField(usize),
+    /// Field −1 of a bloblet with a trailer is the trailer, which only the
+    /// runtime writes.
+    Trailer,
+    FieldsFrozen,
+    SuffixFrozen,
+    NoSuchByte(usize),
+    /// Only a value may be stored in a field: never a trailer, header or
+    /// forwarding word.
+    NotAValue,
+}
+
+impl std::fmt::Display for BlobletError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlobletError::NoSuchField(k) => write!(f, "the bloblet has no field -{k}"),
+            BlobletError::Trailer => f.write_str("field -1 is the bloblet's trailer, which only the runtime writes"),
+            BlobletError::FieldsFrozen => f.write_str("the bloblet's fields are frozen"),
+            BlobletError::SuffixFrozen => f.write_str("the bloblet's suffix is frozen"),
+            BlobletError::NoSuchByte(i) => write!(f, "the bloblet's suffix has no byte {i}"),
+            BlobletError::NotAValue => f.write_str("only a value can be stored in a field"),
+        }
+    }
+}
 
 /// Words in each semispace at startup. Grows on demand; never shrinks.
 const DEFAULT_SEMI_WORDS: usize = 1 << 16;
@@ -153,13 +254,38 @@ impl Heap {
     }
 
     /// Allocate an object with `len` payload words, all initialised to `fill`.
+    ///
+    /// These are the older, header-pointed objects. Each is laid out as a
+    /// bloblet, but its pointer (tag `object`) points at the header rather
+    /// than the suffix. A traced type's payload is `len` fields, and a raw
+    /// type's is `8 * len` suffix bytes. Either way the payload starts one
+    /// word after the main header, which is all the accessors below rely on.
     pub fn alloc(&mut self, ty: ObjType, len: usize, fill: Value) -> Value {
-        let at = self.bump(len + 1);
-        self.set_word(at, make_header(ty, len));
+        let (fields, bytes) = if ty.payload_is_scanned() { (len, 0) } else { (0, len * 8) };
+        assert!(bytes as u64 <= layout::H_BYTES.max(), "an object's suffix is limited to 4 GiB");
+        let main = self.put_header(ty as u8, fields, bytes);
         for i in 0..len {
-            self.set_word(at + 1 + i, fill.raw());
+            self.set_word(main + 1 + i, fill.raw());
         }
-        Value::object(at)
+        Value::object(main)
+    }
+
+    /// Reserve an object of `fields` fields and `bytes` suffix bytes and write
+    /// its header, with an extension word first if `fields` needs one.
+    /// Returns the main header's index. The payload is left as it was.
+    fn put_header(&mut self, kind: u8, fields: usize, bytes: usize) -> usize {
+        let payload = fields + bytes.div_ceil(8);
+        if fields as u64 > layout::H_FIELDS.max() {
+            let at = self.bump(payload + 2);
+            let (x, h) = make_large_header(kind, fields, bytes);
+            self.set_word(at, x);
+            self.set_word(at + 1, h);
+            at + 1
+        } else {
+            let at = self.bump(payload + 1);
+            self.set_word(at, make_header(kind, fields, bytes));
+            at
+        }
     }
 
     pub fn cons(&mut self, car: Value, cdr: Value) -> Value {
@@ -203,7 +329,7 @@ impl Heap {
         if !v.is_object() {
             return None;
         }
-        ObjType::from_code(header_type_code(self.header_of(v)))
+        ObjType::from_code(header_kind(self.header_of(v)) as u16)
     }
     pub fn is_a(&self, v: Value, ty: ObjType) -> bool {
         self.obj_type(v) == Some(ty)
@@ -211,7 +337,8 @@ impl Heap {
     /// Payload length in words.
     #[inline]
     pub fn obj_len(&self, o: Value) -> usize {
-        header_len(self.header_of(o))
+        debug_assert!(is_header(self.header_of(o)));
+        read_head(&self.mem, self.active + o.index()).payload_words()
     }
     #[inline]
     pub fn obj_ref(&self, o: Value, i: usize) -> Value {
@@ -527,19 +654,19 @@ impl Heap {
         while scan < free {
             let w = self.mem[to + scan];
             if is_header(w) {
-                let len = header_len(w);
-                let ty = ObjType::from_code(header_type_code(w)).expect("valid type code");
-                if ty.payload_is_scanned() {
-                    for i in 0..len {
-                        let at = to + scan + 1 + i;
-                        let v = Value(self.mem[at]);
-                        if v.is_ref() {
-                            let n = Self::copy_out(&mut self.mem, from, to, &mut free, v);
-                            self.mem[at] = n.raw();
-                        }
+                // The collector needs only `F` and `B`: trace the fields, skip
+                // the suffix. It never asks what kind of object this is.
+                let main = to + scan + is_extension(w) as usize;
+                let head = read_head(&self.mem, main);
+                for i in 0..head.fields {
+                    let at = main + 1 + i;
+                    let v = Value(self.mem[at]);
+                    if v.is_ref() {
+                        let n = Self::copy_out(&mut self.mem, from, to, &mut free, v);
+                        self.mem[at] = n.raw();
                     }
                 }
-                scan += 1 + len;
+                scan += head.size();
             } else {
                 for i in 0..2 {
                     let at = to + scan + i;
@@ -566,33 +693,62 @@ impl Heap {
 
     /// Copy one object from from-space to to-space if it is not already there,
     /// leaving a forwarding pointer behind. Returns the to-space reference.
+    ///
+    /// A forwarding pointer always records where the object's *main header*
+    /// went, relative to `to`, whichever kind of pointer found it.
     fn copy_out(mem: &mut [u64], from: usize, to: usize, free: &mut usize, v: Value) -> Value {
-        let src = from + v.index();
-        let first = Value(mem[src]);
-        if first.is_forward() {
-            // Already copied; the forward records the to-space *relative* index.
-            return if v.is_pair() {
-                Value::pair(first.index())
-            } else {
-                Value::object(first.index())
-            };
-        }
-        let (words, dst_rel) = if v.is_pair() {
-            (2, *free)
-        } else {
-            (1 + header_len(mem[src]), *free)
-        };
-        let dst = to + dst_rel;
-        for i in 0..words {
-            mem[dst + i] = mem[src + i];
-        }
-        *free += words;
-        mem[src] = Value::forward(dst_rel).raw();
         if v.is_pair() {
-            Value::pair(dst_rel)
-        } else {
-            Value::object(dst_rel)
+            let src = from + v.index();
+            let first = Value(mem[src]);
+            if first.is_forward() {
+                return Value::pair(first.index());
+            }
+            let dst_rel = *free;
+            mem[to + dst_rel] = mem[src];
+            mem[to + dst_rel + 1] = mem[src + 1];
+            *free += 2;
+            mem[src] = Value::forward(dst_rel).raw();
+            return Value::pair(dst_rel);
         }
+        if v.is_object() {
+            return Value::object(Self::copy_object(mem, from + v.index(), to, free));
+        }
+        // A bloblet pointer, at the start of the suffix. Find the header, by
+        // the trailer or the backward scan, and copy as any object. Leave a
+        // second forward just before the suffix, so that the next pointer to
+        // this bloblet finds it in one step, trailer or not.
+        debug_assert!(v.tag() == TAG_BLOBLET);
+        let p = from + v.index();
+        let new_main = match find_main(mem, p) {
+            Err(done) => done,
+            Ok(main) => {
+                let new_main = Self::copy_object(mem, main, to, free);
+                if p - 1 != main {
+                    mem[p - 1] = Value::forward(new_main).raw();
+                }
+                new_main
+            }
+        };
+        let head = read_head(mem, to + new_main);
+        Value::bloblet(new_main + 1 + head.fields)
+    }
+
+    /// Copy the object whose main header is at `main` (in from-space), unless
+    /// it has been already. Returns its main header's new index, relative to
+    /// `to`.
+    fn copy_object(mem: &mut [u64], main: usize, to: usize, free: &mut usize) -> usize {
+        let first = Value(mem[main]);
+        if first.is_forward() {
+            return first.index();
+        }
+        let head = read_head(mem, main);
+        let start = main - head.pre;
+        let words = head.size();
+        mem.copy_within(start..start + words, to + *free);
+        let new_main = *free + head.pre;
+        *free += words;
+        mem[main] = Value::forward(new_main).raw();
+        new_main
     }
 
     // ------------------------------------------------------- image support
@@ -638,20 +794,32 @@ impl Heap {
         let mut scan = 0usize;
         while scan < self.top {
             let w = self.word(scan);
-            if w & crate::value::TAG_MASK == TAG_HEADER {
-                let len = header_len(w);
-                let code = header_type_code(w);
-                let ty = ObjType::from_code(code)
-                    .ok_or_else(|| format!("bad type code {code} at word {scan}"))?;
-                if scan + 1 + len > self.top {
+            if is_header(w) {
+                let main = scan + is_extension(w) as usize;
+                if main >= self.top || !is_header(self.word(main)) || is_extension(self.word(main)) {
+                    return Err(format!("the extension word at {scan} is not followed by a main header"));
+                }
+                if is_extension(w) != header_is_large(self.word(main)) {
+                    return Err(format!("the header at {main} disagrees with its extension word"));
+                }
+                let head = read_head(&self.mem, self.active + main);
+                if scan + head.size() > self.top {
                     return Err(format!("object at {scan} runs past the end of the heap"));
                 }
-                if ty.payload_is_scanned() {
-                    for i in 0..len {
-                        self.check_ref(self.slot(scan + 1 + i), scan)?;
+                for i in 0..head.fields {
+                    let v = self.slot(main + 1 + i);
+                    if v.tag() == TAG_TRAILER {
+                        if i + 1 != head.fields {
+                            return Err(format!("a trailer at word {} is not the last field", main + 1 + i));
+                        }
+                        let dist = layout::T_DISTANCE.get(v.raw()) as usize;
+                        if dist != head.fields {
+                            return Err(format!("the trailer of the object at {main} says {dist}, not {}", head.fields));
+                        }
                     }
+                    self.check_ref(v, main)?;
                 }
-                scan += 1 + len;
+                scan += head.size();
             } else {
                 if scan + 2 > self.top {
                     return Err(format!("pair at {scan} runs past the end of the heap"));
@@ -683,10 +851,21 @@ impl Heap {
             if v.index() >= self.top {
                 return Err(format!("dangling reference {v:?} at word {at}"));
             }
-            if v.is_object() && !is_header(self.word(v.index())) {
+            if v.is_object() && (!is_header(self.word(v.index())) || is_extension(self.word(v.index()))) {
                 return Err(format!(
                     "object reference {v:?} at word {at} misses its header"
                 ));
+            }
+            if v.is_bloblet() {
+                let p = self.active + v.index();
+                let main = find_main(&self.mem, p)
+                    .map_err(|_| format!("bloblet reference {v:?} at word {at} meets a forwarding pointer"))?;
+                let head = read_head(&self.mem, main);
+                if main + 1 + head.fields != p {
+                    return Err(format!(
+                        "bloblet reference {v:?} at word {at} is not at the start of its suffix"
+                    ));
+                }
             }
             if v.is_pair() && is_header(self.word(v.index())) {
                 return Err(format!(
