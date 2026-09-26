@@ -305,6 +305,11 @@ impl Checker {
                 let r = (|| {
                     let mut eff = Effect::pure();
                     for (n, t, init) in &bindings {
+                        // Only lambdas: then nothing runs before every
+                        // binding exists, and no one sees the knot tied.
+                        if !self.is_lambda(*init) {
+                            return Err(FxError::at(self.arena.span_of(*init), letrec_not_lambda(self.interner.name(*n))));
+                        }
                         let ie = self.check(*init, *t).map_err(|err| {
                             if err.span == self.arena.span_of(*init) {
                                 FxError::at(err.span, format!("`{}` is declared a {}: {}", self.interner.name(*n), self.show_ty(*t), err.message))
@@ -389,6 +394,17 @@ impl Checker {
     // --------------------------------------------------------------- masking
     /// Remove from `effect` what cannot be observed outside expression `e`,
     /// whose type is `result`. See the module docs for the rule.
+    /// Whether `x` is a lambda, under any type abstractions and ascriptions.
+    pub fn is_lambda(&self, mut x: ExpId) -> bool {
+        loop {
+            match self.arena.exp_at(x) {
+                Exp::PLambda { body, .. } | Exp::The { exp: body, .. } => x = *body,
+                Exp::Lambda { .. } => return true,
+                _ => return false,
+            }
+        }
+    }
+
     pub(crate) fn mask(&mut self, e: ExpId, effect: &Effect, result: TyId) -> Effect {
         if !self.masking || effect.is_pure() {
             return effect.clone();
@@ -1053,4 +1069,9 @@ impl Checker {
             !rs.contains(&r)
         })
     }
+}
+
+/// What a recursive binding that is not a lambda is told.
+pub fn letrec_not_lambda(name: &str) -> String {
+    format!("`{name}` is bound recursively, so it must be a lambda: nothing may run before every binding exists")
 }

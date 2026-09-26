@@ -1431,8 +1431,25 @@
     (if (null? bs)
         nil
         (let* ((n (extract (car bs) 1)) (t (extract (car bs) 2)) (init (extract (car bs) 3))
-               (e (k-check-declared n t init)) (rest (k-check-letrec (cdr bs))))
+               ;; Only lambdas: then nothing runs before every binding
+               ;; exists, and no one sees the knot tied.
+               (e (if (k-lambda? init)
+                      (k-check-declared n t init)
+                      (k-fail (k-letrec-not-lambda n) (k-start init) (k-end init))))
+               (rest (k-check-letrec (cdr bs))))
           (k-union e rest)))))
+;; Whether `x` is a lambda, under any type abstractions and ascriptions.
+(define k-lambda? (subr pure (kx) bool)
+  (lambda (x)
+    (tagcase x
+      (x-lambda (ps body a b) #t)
+      (x-plambda (bs e a b) (k-lambda? e))
+      (x-the (t e a b) (k-lambda? e))
+      (else y #f))))
+(define k-letrec-not-lambda (subr pure (symbol) string)
+  (lambda (n)
+    (string-append (k-quote (symbol->string n))
+                   " is bound recursively, so it must be a lambda: nothing may run before every binding exists")))
 ;; Check `init` against `t`, the type `n` is declared; an error at `init`
 ;; itself says so.
 (define k-check-declared (subr checks (symbol int kx) k-eff)
