@@ -33,9 +33,10 @@
 (define n-stubs (ref n-stub-list @k) (new nil))
 
 ;; Compiling a word: where its next cell's code is, and a branch's
-;; target's; -1 for none.
+;; target's, with the target's cell; -1 for none.
 (define n-cont (ref int @k) (new -1))
 (define n-target (ref int @k) (new -1))
+(define n-target-cell (ref int @k) (new -1))
 (define n-trap-common (ref int @k) (new 0))
 (define n-exit-common (ref int @k) (new 0))
 
@@ -133,7 +134,7 @@
 (define n-reset (subr assembles () unit)
   (lambda ()
     (begin
-      (set n-len 0) (set n-nlabels 0) (set n-fixups nil) (set n-stubs nil) (set n-cont -1) (set n-target -1)
+      (set n-len 0) (set n-nlabels 0) (set n-fixups nil) (set n-stubs nil) (set n-cont -1) (set n-target -1) (set n-target-cell -1)
       (set n-trap-common (n-label))
       (set n-exit-common (n-label)))))
 
@@ -190,6 +191,18 @@
     (begin (n-e (arm-ldr n-x16 n-st n-st-ds-base)) (n-e (arm-sub-imm n-x16 n-x16 8)) (n-e (arm-sub n-fp n-x16 reg)))))
 
 (define n-value (subr assembles (int int) unit) (lambda (reg v) (n-es (arm-mov-imm64 reg v))))
+
+;; A taken branch's new ip. In a compiled word it is made from the word,
+;; not from the ip, so that a loop's iterations do not wait on one chain of
+;; ip updates through them all.
+(define n-branch-ip (subr assembles () unit)
+  (lambda ()
+    (if (< (get n-target) 0)
+        (n-e (arm-sub n-ip n-ip n-x13))
+        (begin
+          (n-value n-x13 (+ 4 (* 8 (+ n-word-cell0 (get n-target-cell)))))
+          (n-e (arm-add n-ip n-base n-cur))
+          (n-e (arm-sub n-ip n-ip n-x13))))))
 
 (define n-push-return (subr assembles () unit)
   (lambda ()
@@ -330,7 +343,8 @@
        (begin (n-e (arm-ldr-post n-x13 n-ip -8)) (n-e (arm-str-pre n-x13 n-dsp -8)) (n-cont-code)))
       ((= n routine-branch)
        (begin
-         (n-e (arm-ldr-post n-x13 n-ip -8)) (n-e (arm-sub n-ip n-ip n-x13)) (n-fuel-check) (n-ds-limit)
+         (if (< (get n-target) 0) (n-e (arm-ldr-post n-x13 n-ip -8)) #u)
+         (n-branch-ip) (n-fuel-check) (n-ds-limit)
          (if (< (get n-target) 0) (n-next) (n-b (get n-target)))))
       ((= n routine-zbranch)
        (let ((skip (n-label)))
@@ -340,7 +354,7 @@
            (n-value n-x15 n-false)
            (n-e (arm-cmp n-x14 n-x15))
            (n-b-cond 1 skip)
-           (n-e (arm-sub n-ip n-ip n-x13))
+           (n-branch-ip)
            (n-fuel-check) (n-ds-limit)
            (if (< (get n-target) 0)
                (begin (n-bind skip) (n-next))
@@ -632,15 +646,18 @@
                              (next (n-next-start (+ i 1) n starts)))
                         (begin
                           (set n-cont (if (< next n) (array-ref labels next) -1))
-                          (set n-target
+                          (set n-target-cell
                                (if (or (= r routine-branch) (= r routine-zbranch))
-                                   (array-ref labels (+ (+ i 2) (tword-int w (+ k 1))))
+                                   (+ (+ i 2) (tword-int w (+ k 1)))
                                    -1))
+                          (set n-target
+                               (if (< (get n-target-cell) 0) -1 (array-ref labels (get n-target-cell))))
                           (n-e (arm-sub-imm n-ip n-ip 8))
                           (n-routine r)))
                       (begin
                         (set n-cont -1)
                         (set n-target -1)
+                        (set n-target-cell -1)
                         (n-e (arm-ldr-post n-w n-ip -8))
                         (n-run-word-in-w)))
                   (n-flush-stubs)

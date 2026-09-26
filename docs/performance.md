@@ -443,3 +443,41 @@ against the typed-call figures:
 loop's counter is read through a box, which `field 2` makes one cell. The
 rest are within a few percent, and some of that is noise: those
 benchmarks spend their time in calls and allocation, not in the checks.
+
+## Self tail calls as loops, and letrec without boxes (13e, first part)
+
+A tail call of a `letrec`-bound procedure to itself, while its name is
+still that binding, becomes `slot!` of each argument, `drop` of the rest
+of the frame, and a `branch` back to the word's start. A binding whose
+lambda names none of its group, and itself only in such calls, needs no
+box: its closure is made straight into its slot. The loop benchmark's
+procedure had read its own box on each iteration (`free 1; field 2`).
+
+The first measurement made compiled words *slower*: the loop went from 47
+to 57 ms. The dump of the word's machine code showed why. A compiled word
+keeps the threaded ip up to date: `sub ip, ip, #8` per cell, and a
+post-indexed load per operand. That chain runs through every cell. A tail
+call used to remake the ip from the callee's word, which cut the chain at
+each iteration, so iterations could overlap. `branch` instead made the new
+ip from the old one and a *loaded* offset, which joined the iterations
+into one chain, with a load's latency in it each time. So in a compiled
+word, a taken branch now remakes the ip from the word
+(`ip = base + cur − (4 + 8 × (cell0 + target))`), and the loop fell to
+38 ms. 13h's registers are expected to remove the chain altogether.
+
+Best of two runs, release, against the typed-primitive figures:
+
+| program  | Rust machine  | hand-encoded | stencils -O2 | words compiled |
+| -------- | ------------- | ------------ | ------------ | -------------- |
+| closures | 575.4 → 558.4 | 66.7 → 66.0  | 85.3 → 74.9  | 58.4 → 57.7    |
+| fib      | 177.3 → 172.4 | 15.6 → 15.1  | 22.2 → 21.8  | 13.1 → 12.8    |
+| lists    | 390.7 → 378.6 | 50.7 → 49.5  | 60.5 → 52.8  | 45.0 → 43.5    |
+| loop     | 728.4 → 443.9 | 59.3 → 63.0  | 84.1 → 68.6  | 47.0 → 37.9    |
+| tak      | 66.0 → 64.0   | 6.4 → 6.3    | 11.1 → 8.7   | 4.4 → 4.3      |
+
+(ms.) The loop: 39% faster on the Rust machine, 19% compiled. It is **6%
+slower on the hand-encoded machine**, which interprets `branch` and must
+load its offset through the ip; the old tail call took its ip from the
+closure instead. That loss is kept for the gains elsewhere. `fib` and
+`tak` recur through globals, which are not yet known calls (a global can
+be defined again at the REPL), so they gain nothing here.

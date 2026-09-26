@@ -100,9 +100,10 @@ struct Asm {
     trap_common: Label,
     exit_common: Label,
     /// Compiling a word: where its next cell's code is, and a branch's
-    /// target's. `None` in the machine's own routines, which `NEXT`.
+    /// target's, with the target's cell. `None` in the machine's own
+    /// routines, which `NEXT`.
     cont: Option<Label>,
-    target: Option<Label>,
+    target: Option<(Label, usize)>,
 }
 
 impl Asm {
@@ -276,6 +277,20 @@ impl Asm {
     /// `reg` = a constant Value.
     fn value(&mut self, reg: Reg, v: Value) {
         self.es(&mov_imm64(reg, v.raw()));
+    }
+
+    /// A taken branch's new ip. In a compiled word it is made from the
+    /// word, not from the ip, so that a loop's iterations do not wait on
+    /// one chain of ip updates through them all.
+    fn branch_ip(&mut self) {
+        match self.target {
+            Some((_, to)) => {
+                self.es(&mov_imm64(X13, (4 + 8 * (WORD_CELL0 + to)) as u64));
+                self.e(add(IP, BASE, CUR));
+                self.e(sub(IP, IP, X13));
+            }
+            None => self.e(sub(IP, IP, X13)),
+        }
     }
 
     /// Push a return entry, `(CUR, 8k, fp, CLO)`, from this word as it
@@ -489,12 +504,14 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.cont();
         }
         "branch" => {
-            a.e(ldr_post(X13, IP, -8));
-            a.e(sub(IP, IP, X13));
+            if a.target.is_none() {
+                a.e(ldr_post(X13, IP, -8));
+            }
+            a.branch_ip();
             a.fuel();
             a.ds_limit();
             match a.target {
-                Some(t) => a.b(t),
+                Some((t, _)) => a.b(t),
                 None => a.next(),
             }
         }
@@ -505,11 +522,11 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.value(X15, Value::FALSE);
             a.e(cmp(X14, X15));
             a.b_cond(Cond::Ne, skip);
-            a.e(sub(IP, IP, X13));
+            a.branch_ip();
             a.fuel();
             a.ds_limit();
             match a.target {
-                Some(t) => {
+                Some((t, _)) => {
                     a.b(t);
                     a.bind(skip);
                     a.cont();
@@ -832,7 +849,7 @@ pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32
             a.cont = (next < cells.len()).then_some(labels[next]);
             a.target = if matches!(name, "branch" | "0branch") {
                 let to = (i + 1) as i64 + 1 + cells[i + 1].as_fixnum();
-                Some(labels[to as usize])
+                Some((labels[to as usize], to as usize))
             } else {
                 None
             };

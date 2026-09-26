@@ -123,8 +123,32 @@
   (at-free int)
   (at-global wglobal)
   (boxed-slot int)
-  (boxed-free int))
+  (boxed-free int)
+  ;; A `letrec`-bound procedure, in its own body, where it is only called
+  ;; in tail position: each call is a jump back to its start. (The int is
+  ;; unused.)
+  (at-loop int))
 (define-type cenv (listof (pairof symbol loc @k) @k))
+
+(define c-loop? (subr pure (loc) bool)
+  (lambda (l) (tagcase l (at-loop (z) #t) (else y #f))))
+
+;; The word being compiled, when it is a `letrec`-bound procedure's: a tail
+;; call of `c-this-name`, still bound at `c-this-loc`, is a loop (13e).
+;; `c-this-params` is -1 when the word is no such procedure's.
+(define c-this-name (ref symbol @k) (new 'none))
+(define c-this-loc (ref loc @k) (new (at-loop 0)))
+(define c-this-params (ref int @k) (new -1))
+(define c-this-start (ref int @k) (new 0))
+
+;; Whether `l` is where the procedure being compiled is bound: its loop, or
+;; the free value holding its box.
+(define c-this-loc? (subr pure (loc loc) bool)
+  (lambda (l this)
+    (tagcase this
+      (at-loop (z) (c-loop? l))
+      (boxed-free (i) (tagcase l (boxed-free (j) (= i j)) (else y #f)))
+      (else y #f))))
 
 ;; The global environment as compiling has reached it, newest first, and the
 ;; names given a cell ahead of their typed definitions.
@@ -148,7 +172,8 @@
       (at-free (i) (c-op1 c routine-free (wcell-int i)))
       (at-global (g) (c-op1 c routine-global (wcell-global g)))
       (boxed-slot (i) (begin (c-op1 c routine-slot (wcell-int i)) (c-field c 2)))
-      (boxed-free (i) (begin (c-op1 c routine-free (wcell-int i)) (c-field c 2))))))
+      (boxed-free (i) (begin (c-op1 c routine-free (wcell-int i)) (c-field c 2)))
+      (at-loop (z) (c-fail "a loop is only ever called, in tail position")))))
 
 ;;; ------------------------------------------------------------- free names
 ;;; The names a lambda's body uses that it does not bind: what its closure
@@ -253,7 +278,7 @@
       (e-char (ch a b) (begin (c-lit c (wcell-char ch)) (c-done c tail)))
       (e-sym (s a b) (begin (c-lit c (wcell-symbol s)) (c-done c tail)))
       (e-unit (a b) (begin (c-lit c (wcell-unit)) (c-done c tail)))
-      (e-lambda (ps body a b) (begin (c-lambda ps body e depth c) (c-done c tail)))
+      (e-lambda (ps body a b) (begin (c-lambda ps body e depth c nil) (c-done c tail)))
       (e-app (f args a b) (c-app f args e depth c tail))
       (e-plambda (d body a b) (c-exp body e depth c tail))
       (e-proj (body ds a b) (c-exp body e depth c tail))
@@ -277,7 +302,7 @@
         (begin
           (c-exp t e depth c #f)
           (c-exp h e (+ depth 1) c #f)
-          (c-lambda (the (listof (productof (1 symbol) (2 syns-a)) @a) nil) body e (+ depth 2) c)
+          (c-lambda (the (listof (productof (1 symbol) (2 syns-a)) @a) nil) body e (+ depth 2) c nil)
           (c-op c routine-prompt)
           (c-done c tail)))
       (e-bloblet (op i args a b) (begin (c-bloblet (symbol->string op) i args e depth c) (c-done c tail)))
@@ -315,42 +340,178 @@
                (c-let-bind (cdr bs) outer (the cenv (cons (cons (extract (car bs) 1) (at-slot depth)) inner)) (+ depth 1) c)))))
 
 ;; `letrec`: a box per name first, so each closure can carry the box before
-;; it has its value; then each value into its box.
+;; it has its value; then each value into its box. A procedure that names
+;; none of the group, but for calls of itself that are loops, needs no box:
+;; its closure is made in its slot at once.
 (define c-letrec (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) exp cenv int code bool) unit)
   (lambda (bs body e depth c tail)
-    (letrec ((boxes (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int) cenv)
-               (lambda (bs inner d)
+    (letrec ((boxes (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) (listof bool @k) cenv int) cenv)
+               (lambda (bs direct inner d)
                  (if (null? bs)
                      inner
-                     ;; Until filled, a procedure that traps when called.
-                     (begin (c-prim c "%fx26-undefined" 0) (c-prim c "%make-box" 1)
-                            (boxes (cdr bs) (the cenv (cons (cons (extract (car bs) 1) (boxed-slot d)) inner)) (+ d 1))))))
-             (fill (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int int) unit)
-               (lambda (bs inner d n)
-                 (if (null? bs)
-                     #u
-                     (begin (c-op1 c routine-slot (wcell-int d))
-                            (c-exp (extract (car bs) 3) inner (+ depth (+ n 1)) c #f)
-                            (c-op c routine-swap) (c-int c 2) (c-op c routine-field-set)
-                            (fill (cdr bs) inner (+ d 1) n))))))
-      (let* ((inner (boxes bs e depth)) (n (c-count-letrec bs)))
-        (begin (fill bs inner depth n)
+                     (let ((f (extract (car bs) 1)))
+                       (if (car direct)
+                           (begin
+                             (c-lambda-bound (c-lambda-of (extract (car bs) 3)) (the cenv (cons (cons f (at-loop 0)) e)) d c f)
+                             (boxes (cdr bs) (cdr direct) (the cenv (cons (cons f (at-slot d)) inner)) (+ d 1)))
+                           ;; Until filled, a procedure that traps when called.
+                           (begin (c-prim c "%fx26-undefined" 0) (c-prim c "%make-box" 1)
+                                  (boxes (cdr bs) (cdr direct) (the cenv (cons (cons f (boxed-slot d)) inner)) (+ d 1))))))))
+             (fill (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) (listof bool @k) cenv int int) unit)
+               (lambda (bs direct inner d n)
+                 (cond ((null? bs) #u)
+                       ((car direct) (fill (cdr bs) (cdr direct) inner (+ d 1) n))
+                       (else
+                        (let ((lam (c-lambda-of (extract (car bs) 3))))
+                          (begin (c-op1 c routine-slot (wcell-int d))
+                                 (if (null? lam)
+                                     (c-exp (extract (car bs) 3) inner (+ depth (+ n 1)) c #f)
+                                     (c-lambda-bound lam inner (+ depth (+ n 1)) c (extract (car bs) 1)))
+                                 (c-op c routine-swap) (c-int c 2) (c-op c routine-field-set)
+                                 (fill (cdr bs) (cdr direct) inner (+ d 1) n))))))))
+      (let* ((direct (c-boxless-all bs (c-bind-letrec bs nil)))
+             (inner (boxes bs direct e depth))
+             (n (c-count-letrec bs)))
+        (begin (fill bs direct inner depth n)
                (c-exp body inner (+ depth n) c tail)
                (c-unbind c depth n tail))))))
+
+;; A lambda found by `c-lambda-of`, bound to `f` by a `letrec`.
+(define c-lambda-bound (subr compiles ((listof exp @k) cenv int code symbol) unit)
+  (lambda (lam e depth c f)
+    (tagcase (car lam)
+      (e-lambda (ps body a b) (c-lambda ps body e depth c (the syms (cons f nil))))
+      (else y (c-fail "not a lambda")))))
+
+;;; ------------------------------------------------------- known procedures
+
+;; `x`, when it is a lambda under any type abstractions and ascriptions,
+;; which compile to nothing; none otherwise.
+(define c-lambda-of (subr (maxeff (read @a) (alloc @k)) (exp) (listof exp @k))
+  (lambda (x)
+    (tagcase x
+      (e-plambda (d body a b) (c-lambda-of body))
+      (e-the (d body a b) (c-lambda-of body))
+      (e-lambda (ps body a b) (the (listof exp @k) (cons x nil)))
+      (else y nil))))
+
+(define c-mentions? (subr (maxeff (read @a) (read @k) (alloc @k)) (exp symbol) bool)
+  (lambda (x n) (c-member? (c-free x nil nil) n)))
+
+;; For each `letrec` binding, whether it needs no box.
+(define c-boxless-all (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) syms) (listof bool @k))
+  (lambda (bs group)
+    (if (null? bs)
+        nil
+        (cons (c-boxless? (extract (car bs) 1) (c-lambda-of (extract (car bs) 3)) group)
+              (c-boxless-all (cdr bs) group)))))
+
+;; Whether `letrec` binding `f`, of `lam`, needs no box: its body names no
+;; other of the `group`, and `f` only in calls that are loops.
+(define c-boxless? (subr (maxeff (read @a) (read @k) (alloc @k)) (symbol (listof exp @k) syms) bool)
+  (lambda (f lam group)
+    (if (null? lam)
+        #f
+        (tagcase (car lam)
+          (e-lambda (ps body a b)
+            (let ((bound (c-bind-params ps nil)))
+              (and (c-unmentioned? group f bound body)
+                   (or (c-member? bound f) (c-loops-only body f (c-count-params ps) #t)))))
+          (else y #f)))))
+
+(define c-unmentioned? (subr (maxeff (read @a) (read @k) (alloc @k)) (syms symbol syms exp) bool)
+  (lambda (group f bound body)
+    (or (null? group)
+        (and (or (symbol=? (car group) f) (or (c-member? bound (car group)) (not (c-mentions? body (car group)))))
+             (c-unmentioned? (cdr group) f bound body)))))
+
+;; Whether every use of `f` in `x` is a call with `n` arguments in tail
+;; position, which the compiler makes a loop.
+(define c-loops-only (subr (maxeff (read @a) (read @k) (alloc @k)) (exp symbol int bool) bool)
+  (lambda (x f n tail)
+    (tagcase x
+      (e-var (m a b) (not (symbol=? m f)))
+      (e-lambda (ps body a b) (or (c-member? (c-bind-params ps nil) f) (not (c-mentions? body f))))
+      (e-app (fun args a b)
+        (and (c-loops-only-all args f n)
+             (tagcase fun
+               (e-var (m a2 b2) (if (symbol=? m f) (and tail (= (c-count-exps args) n)) #t))
+               (else y (c-loops-only fun f n #f)))))
+      (e-plambda (d body a b) (c-loops-only body f n tail))
+      (e-proj (body ds a b) (c-loops-only body f n tail))
+      (e-the (d body a b) (c-loops-only body f n tail))
+      (e-if (t th el a b)
+        (and (c-loops-only t f n #f) (and (c-loops-only th f n tail) (c-loops-only el f n tail))))
+      (e-letrec (bs body a b)
+        (or (c-member? (c-bind-letrec bs nil) f)
+            (and (c-loops-only-letrec bs f n) (c-loops-only body f n tail))))
+      (e-let (bs body a b)
+        (and (c-loops-only-let bs f n)
+             (or (c-member? (c-bind-let bs nil) f) (c-loops-only body f n tail))))
+      (e-begin (es a b) (c-loops-only-begin es f n tail))
+      (e-prompt (t body h a b)
+        (and (c-loops-only t f n #f) (and (c-loops-only h f n #f) (not (c-mentions? body f)))))
+      (e-bloblet (op i args a b) (c-loops-only-all args f n))
+      (e-product (fs a b) (c-loops-only-fields fs f n))
+      (e-extract (p l a b) (c-loops-only p f n #f))
+      (e-sum (t v a b) (c-loops-only v f n #f))
+      (e-tagcase (s arms els a b)
+        (and (c-loops-only s f n #f) (and (c-loops-only-arms arms f n tail) (c-loops-only-else els f n tail))))
+      (else y #t))))
+
+(define c-loops-only-all (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) symbol int) bool)
+  (lambda (es f n) (or (null? es) (and (c-loops-only (car es) f n #f) (c-loops-only-all (cdr es) f n)))))
+(define c-loops-only-begin (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) symbol int bool) bool)
+  (lambda (es f n tail)
+    (cond ((null? es) #t)
+          ((null? (cdr es)) (c-loops-only (car es) f n tail))
+          (else (and (c-loops-only (car es) f n #f) (c-loops-only-begin (cdr es) f n tail))))))
+(define c-loops-only-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) symbol int) bool)
+  (lambda (bs f n) (or (null? bs) (and (c-loops-only (extract (car bs) 3) f n #f) (c-loops-only-letrec (cdr bs) f n)))))
+(define c-loops-only-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
+  (lambda (bs f n) (or (null? bs) (and (c-loops-only (extract (car bs) 2) f n #f) (c-loops-only-let (cdr bs) f n)))))
+(define c-loops-only-fields (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
+  (lambda (fs f n) (or (null? fs) (and (c-loops-only (extract (car fs) 2) f n #f) (c-loops-only-fields (cdr fs) f n)))))
+(define c-loops-only-arms
+  (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) symbol int bool) bool)
+  (lambda (arms f n tail)
+    (or (null? arms)
+        (and (or (c-member? (c-names (extract (car arms) 3) nil) f) (c-loops-only (extract (car arms) 4) f n tail))
+             (c-loops-only-arms (cdr arms) f n tail)))))
+(define c-loops-only-else (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int bool) bool)
+  (lambda (els f n tail)
+    (or (null? els) (or (symbol=? (extract (car els) 1) f) (c-loops-only (extract (car els) 2) f n tail)))))
+(define c-count-exps (subr (read @a) ((listof exp @a)) int)
+  (lambda (es) (if (null? es) 0 (+ 1 (c-count-exps (cdr es))))))
 
 (define c-count-letrec (subr (read @a) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-letrec (cdr bs))))))
 
-;; A lambda: its free values pushed, then its word closed over them.
-(define c-lambda (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv int code) unit)
-  (lambda (ps body e depth c)
+;; A lambda: its free values pushed, then its word closed over them. `own`
+;; is the `letrec` name it is bound to, or none: its tail calls in its body
+;; are loops.
+(define c-lambda (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv int code syms) unit)
+  (lambda (ps body e depth c own0)
     (let* ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
-           (inner (c-inner-env fv e (c-param-env ps 0 nil) 0))
+           ;; A parameter of the same name hides the procedure.
+           (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
+           (base (if (or (null? own) (c-member? fv (car own))) (the cenv nil) (the cenv (cons (cons (car own) (at-loop 0)) nil))))
+           (inner (c-inner-env fv e (c-param-env ps 0 base) 0))
            (n (c-count-params ps))
-           (body-code (the code (new nil))))
+           (body-code (the code (new nil)))
+           (outer-name (get c-this-name)) (outer-loc (get c-this-loc))
+           (outer-params (get c-this-params)) (outer-start (get c-this-start)))
       (begin
         (c-push-all fv e depth c)
+        (if (null? own)
+            (set c-this-params -1)
+            (let ((start (c-fresh)))
+              (begin (set c-this-name (car own)) (set c-this-loc (car (c-find inner (car own))))
+                     (set c-this-params n) (set c-this-start start)
+                     (c-emit body-code (i-label start)))))
         (c-exp body inner n body-code #t)
+        (set c-this-name outer-name) (set c-this-loc outer-loc)
+        (set c-this-params outer-params) (set c-this-start outer-start)
         ;; Named for where its body starts, so that a profile can say which.
         (c-op1 c routine-closure
                (wcell-word (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body)))))))
@@ -363,11 +524,13 @@
 (define c-length (subr (read @k) (syms) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (c-length (cdr xs))))))
 
-;; The free names that are locals here, not globals or standard names.
+;; The free names that are locals here, not globals or standard names, nor
+;; a loop, which is not a value.
 (define c-captured (subr (maxeff (read @k) (alloc @k)) (syms cenv) syms)
   (lambda (xs e)
     (cond ((null? xs) nil)
           ((null? (c-find e (car xs))) (c-captured (cdr xs) e))
+          ((c-loop? (car (c-find e (car xs)))) (c-captured (cdr xs) e))
           (else (cons (car xs) (c-captured (cdr xs) e))))))
 
 ;; Free value `i` for each captured name, boxed if it was boxed outside.
@@ -392,12 +555,41 @@
               (at-free (i) (c-op1 c routine-free (wcell-int i)))
               (boxed-slot (i) (c-op1 c routine-slot (wcell-int i)))
               (boxed-free (i) (c-op1 c routine-free (wcell-int i)))
-              (at-global (g) (c-fail "a global is not captured")))
+              (at-global (g) (c-fail "a global is not captured"))
+              (at-loop (z) (c-fail "a loop is not captured")))
             (c-push-all (cdr xs) e (+ depth 1) c))))))
 
 ;;; ------------------------------------------------------------ applications
 
 (define c-app (subr compiles (exp (listof exp @a) cenv int code bool) unit)
+  (lambda (f args e depth c tail)
+    (if (c-self-call? f args e tail)
+        ;; A loop: the arguments into the parameters' slots, the rest of
+        ;; the frame dropped, and back to the start.
+        (begin (c-exps args e depth c)
+               (c-loop-stores c (- (get c-this-params) 1))
+               (c-drops c (- depth (get c-this-params)))
+               (c-emit c (i-branch (get c-this-start))))
+        (c-app-other f args e depth c tail))))
+
+(define c-self-call? (subr (maxeff (read @a) (read @k) (alloc @k)) (exp (listof exp @a) cenv bool) bool)
+  (lambda (f args e tail)
+    (and tail
+         (and (>= (get c-this-params) 0)
+              (tagcase f
+                (e-var (n a b)
+                  (and (symbol=? n (get c-this-name))
+                       (let ((l (c-find e n)))
+                         (and (not (null? l))
+                              (and (c-this-loc? (car l) (get c-this-loc)) (= (c-count-exps args) (get c-this-params)))))))
+                (else y #f))))))
+
+(define c-loop-stores (subr (maxeff (read @k) (write @k) (alloc @k)) (code int) unit)
+  (lambda (c i) (if (< i 0) #u (begin (c-op1 c routine-slot! (wcell-int i)) (c-loop-stores c (- i 1))))))
+(define c-drops (subr (maxeff (read @k) (write @k) (alloc @k)) (code int) unit)
+  (lambda (c k) (if (<= k 0) #u (begin (c-op c routine-drop) (c-drops c (- k 1))))))
+
+(define c-app-other (subr compiles (exp (listof exp @a) cenv int code bool) unit)
   (lambda (f args e depth c tail)
     (let ((standard (tagcase f (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) "") ) (else y ""))))
       (if (string=? standard "")
@@ -641,6 +833,7 @@
       (let ((c (the code (new nil))))
         (begin
           (set c-facts facts)
+          (set c-this-params -1)
           (c-declare-ahead tops)
           (if (c-tops tops c #f) #u (c-lit c (wcell-unit)))
           (c-op c routine-exit)

@@ -27,13 +27,26 @@ enum Item {
 }
 
 /// Where a variable is.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Loc {
     Slot(usize),
     Free(usize),
     Global(Value),
     BoxedSlot(usize),
     BoxedFree(usize),
+    /// A `letrec`-bound procedure, in its own body, where it is only
+    /// called in tail position: each call is a jump back to its start.
+    Loop,
+}
+
+/// The word being compiled, when it is a `letrec`-bound procedure's: a
+/// tail call of `name`, still bound at `loc`, is a loop (13e).
+#[derive(Clone, Copy)]
+struct This {
+    name: Sym,
+    loc: Loc,
+    params: usize,
+    start: usize,
 }
 
 type Env = Vec<(Sym, Loc)>;
@@ -54,6 +67,7 @@ pub struct Compiler<'a> {
     /// ahead of their typed definitions.
     genv: Env,
     declared: Vec<Sym>,
+    this: Option<This>,
 }
 
 type R<T> = Result<T, String>;
@@ -69,7 +83,7 @@ impl<'a> Compiler<'a> {
             n += 1;
         }
         char_at[text.len()] = n;
-        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), declared: Vec::new() }
+        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), declared: Vec::new(), this: None }
     }
 
     fn name(&self, s: Sym) -> &str {
@@ -169,6 +183,7 @@ impl<'a> Compiler<'a> {
                 self.op1(code, if matches!(l, Loc::BoxedSlot(_)) { "slot" } else { "free" }, Value::fixnum(i as i64));
                 self.field(code, 2);
             }
+            Loc::Loop => unreachable!("a loop is only ever called, in tail position"),
         }
     }
 
@@ -325,7 +340,7 @@ impl<'a> Compiler<'a> {
             }
             Exp::Lambda { params, body } => {
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-                self.lambda(&ps, body, e, depth, code)?;
+                self.lambda(&ps, body, e, depth, code, None)?;
                 self.done(code, tail);
             }
             Exp::App { fun, args } => self.app(fun, &args, e, depth, code, tail)?,
@@ -356,17 +371,36 @@ impl<'a> Compiler<'a> {
             Exp::Letrec { bindings, body } => {
                 // A box per name first, so each closure can carry the box
                 // before it has its value; then each value into its box.
+                // A procedure that names none of the group, but for calls
+                // of itself that are loops, needs no box: its closure is
+                // made in its slot at once.
                 let n = bindings.len();
+                let names: Vec<Sym> = bindings.iter().map(|(f, _, _)| *f).collect();
+                let lambdas: Vec<Option<(Vec<Sym>, ExpId)>> = bindings.iter().map(|(_, _, init)| self.lambda_of(*init)).collect();
+                let direct: Vec<bool> = (0..n).map(|i| self.boxless(names[i], &lambdas[i], &names)).collect();
                 let mut inner = e.clone();
-                for (i, (name, _, _)) in bindings.iter().enumerate() {
-                    // Until filled, a procedure that traps when called.
-                    self.prim(code, "%fx26-undefined", 0)?;
-                    self.prim(code, "%make-box", 1)?;
-                    inner.push((*name, Loc::BoxedSlot(depth + i)));
+                for (i, name) in names.iter().enumerate() {
+                    if let (true, Some((ps, body))) = (direct[i], &lambdas[i]) {
+                        let mut own = e.clone();
+                        own.push((*name, Loc::Loop));
+                        self.lambda(ps, *body, &own, depth + i, code, Some(*name))?;
+                        inner.push((*name, Loc::Slot(depth + i)));
+                    } else {
+                        // Until filled, a procedure that traps when called.
+                        self.prim(code, "%fx26-undefined", 0)?;
+                        self.prim(code, "%make-box", 1)?;
+                        inner.push((*name, Loc::BoxedSlot(depth + i)));
+                    }
                 }
-                for (i, (_, _, init)) in bindings.iter().enumerate() {
+                for (i, (name, _, init)) in bindings.iter().enumerate() {
+                    if direct[i] {
+                        continue;
+                    }
                     self.op1(code, "slot", Value::fixnum((depth + i) as i64));
-                    self.exp(*init, &inner, depth + n + 1, code, false)?;
+                    match &lambdas[i] {
+                        Some((ps, body)) => self.lambda(ps, *body, &inner, depth + n + 1, code, Some(*name))?,
+                        None => self.exp(*init, &inner, depth + n + 1, code, false)?,
+                    }
                     self.op(code, "swap");
                     self.int(code, 2);
                     self.op(code, "field!");
@@ -378,7 +412,7 @@ impl<'a> Compiler<'a> {
             Exp::Prompt { tag, body, handler } => {
                 self.exp(tag, e, depth, code, false)?;
                 self.exp(handler, e, depth + 1, code, false)?;
-                self.lambda(&[], body, e, depth + 2, code)?;
+                self.lambda(&[], body, e, depth + 2, code, None)?;
                 self.op(code, "prompt");
                 self.done(code, tail);
             }
@@ -436,12 +470,21 @@ impl<'a> Compiler<'a> {
     }
 
     /// A lambda: its free values pushed, then its word closed over them.
-    fn lambda(&mut self, params: &[Sym], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>) -> R<()> {
+    /// `own` is the `letrec` name it is bound to, whose tail calls in its
+    /// body are loops.
+    fn lambda(&mut self, params: &[Sym], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, own: Option<Sym>) -> R<()> {
         let mut free = Vec::new();
         self.free(body, &params.iter().rev().copied().collect::<Vec<_>>(), &mut free);
-        // The free names that are locals here, not globals or standard ones.
-        let fv: Vec<Sym> = free.into_iter().filter(|n| find(e, *n).is_some()).collect();
-        let mut inner: Env = params.iter().enumerate().map(|(i, p)| (*p, Loc::Slot(i))).collect();
+        // The free names that are locals here, not globals or standard ones,
+        // nor a loop, which is not a value.
+        let fv: Vec<Sym> = free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop)).collect();
+        // A parameter of the same name hides the procedure.
+        let own = own.filter(|f| !params.contains(f));
+        let mut inner: Env = Vec::new();
+        if let Some(f) = own.filter(|f| !fv.contains(f)) {
+            inner.push((f, Loc::Loop));
+        }
+        inner.extend(params.iter().enumerate().map(|(i, p)| (*p, Loc::Slot(i))));
         for (i, n) in fv.iter().enumerate() {
             let l = match find(e, *n).expect("found") {
                 Loc::BoxedSlot(_) | Loc::BoxedFree(_) => Loc::BoxedFree(i),
@@ -454,11 +497,21 @@ impl<'a> Compiler<'a> {
             match find(e, *n).expect("found") {
                 Loc::Slot(i) | Loc::BoxedSlot(i) => self.op1(code, "slot", Value::fixnum(i as i64)),
                 Loc::Free(i) | Loc::BoxedFree(i) => self.op1(code, "free", Value::fixnum(i as i64)),
-                Loc::Global(_) => return Err("a global is not captured".into()),
+                Loc::Global(_) | Loc::Loop => return Err("a global is not captured".into()),
             }
         }
+        let this = match own {
+            Some(f) => Some(This { name: f, loc: find(&inner, f).expect("bound"), params: params.len(), start: self.fresh() }),
+            None => None,
+        };
         let mut body_code = Vec::new();
-        self.exp(body, &inner, params.len(), &mut body_code, true)?;
+        if let Some(t) = this {
+            body_code.push(Item::Label(t.start));
+        }
+        let outer = std::mem::replace(&mut self.this, this);
+        let compiled = self.exp(body, &inner, params.len(), &mut body_code, true);
+        self.this = outer;
+        compiled?;
         // Named for where its body starts, so that a profile can say which.
         let start = self.char_at[self.c.arena.span_of(body).start as usize];
         let w = self.assemble(&body_code, &format!("lambda@{start}"))?;
@@ -468,9 +521,96 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    // ------------------------------------------------- known procedures
+
+    /// The parameters and body of `x`, when it is a lambda under any type
+    /// abstractions and ascriptions, which compile to nothing.
+    fn lambda_of(&self, mut x: ExpId) -> Option<(Vec<Sym>, ExpId)> {
+        loop {
+            match self.c.arena.exp_at(x) {
+                Exp::PLambda { body, .. } | Exp::The { exp: body, .. } => x = *body,
+                Exp::Lambda { params, body } => return Some((params.iter().map(|(n, _)| *n).collect(), *body)),
+                _ => return None,
+            }
+        }
+    }
+
+    fn mentions(&self, x: ExpId, n: Sym) -> bool {
+        let mut acc = Vec::new();
+        self.free(x, &[], &mut acc);
+        acc.contains(&n)
+    }
+
+    /// Whether a `letrec` binding `f`, of `lambda`, needs no box: its body
+    /// names no other of the `group`, and `f` only in calls that are loops.
+    fn boxless(&self, f: Sym, lambda: &Option<(Vec<Sym>, ExpId)>, group: &[Sym]) -> bool {
+        let Some((ps, body)) = lambda else { return false };
+        let shadowed = |n: &Sym| ps.contains(n);
+        group.iter().all(|g| *g == f || shadowed(g) || !self.mentions(*body, *g))
+            && (shadowed(&f) || self.loops_only(*body, f, ps.len(), true))
+    }
+
+    /// Whether every use of `f` in `x` is a call with `n` arguments in tail
+    /// position, which the compiler makes a loop.
+    fn loops_only(&self, x: ExpId, f: Sym, n: usize, tail: bool) -> bool {
+        let all = |xs: &[ExpId]| xs.iter().all(|a| self.loops_only(*a, f, n, false));
+        match self.c.arena.exp_at(x).clone() {
+            Exp::Var(m) => m != f,
+            Exp::Lambda { params, body } => params.iter().any(|(p, _)| *p == f) || !self.mentions(body, f),
+            Exp::App { fun, args } => {
+                all(&args)
+                    && match self.c.arena.exp_at(fun) {
+                        Exp::Var(m) if *m == f => tail && args.len() == n,
+                        _ => self.loops_only(fun, f, n, false),
+                    }
+            }
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.loops_only(body, f, n, tail),
+            Exp::If { test, then, els } => {
+                self.loops_only(test, f, n, false) && self.loops_only(then, f, n, tail) && self.loops_only(els, f, n, tail)
+            }
+            Exp::Letrec { bindings, body } => {
+                bindings.iter().any(|(m, _, _)| *m == f)
+                    || (bindings.iter().all(|(_, _, i)| self.loops_only(*i, f, n, false)) && self.loops_only(body, f, n, tail))
+            }
+            Exp::Let { bindings, body } => {
+                bindings.iter().all(|(_, i)| self.loops_only(*i, f, n, false))
+                    && (bindings.iter().any(|(m, _)| *m == f) || self.loops_only(body, f, n, tail))
+            }
+            Exp::Begin(items) => match items.split_last() {
+                Some((last, rest)) => all(rest) && self.loops_only(*last, f, n, tail),
+                None => true,
+            },
+            Exp::Prompt { tag, body, handler } => all(&[tag, handler]) && !self.mentions(body, f),
+            Exp::Bloblet { args, .. } => all(&args),
+            Exp::Product(fields) => fields.iter().all(|(_, x)| self.loops_only(*x, f, n, false)),
+            Exp::Extract(x, _) | Exp::Sum(_, x) => self.loops_only(x, f, n, false),
+            Exp::TagCase { scrutinee, arms, els } => {
+                self.loops_only(scrutinee, f, n, false)
+                    && arms.iter().all(|a| a.names().contains(&f) || self.loops_only(a.body, f, n, tail))
+                    && els.is_none_or(|(y, b)| y == f || self.loops_only(b, f, n, tail))
+            }
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => true,
+        }
+    }
+
     // ---------------------------------------------------- applications
 
     fn app(&mut self, f: ExpId, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
+        if let (true, Some(t), Exp::Var(n)) = (tail, self.this, self.c.arena.exp_at(f)) {
+            if *n == t.name && find(e, *n) == Some(t.loc) && args.len() == t.params {
+                // A loop: the arguments into the parameters' slots, the
+                // rest of the frame dropped, and back to the start.
+                self.exps(args, e, depth, code)?;
+                for i in (0..t.params).rev() {
+                    self.op1(code, "slot!", Value::fixnum(i as i64));
+                }
+                for _ in t.params..depth {
+                    self.op(code, "drop");
+                }
+                code.push(Item::Branch(t.start));
+                return Ok(());
+            }
+        }
         let standard = match self.c.arena.exp_at(f) {
             Exp::Var(n) if self.where_is(e, *n).is_none() => Some(self.name(*n).to_string()),
             _ => None,

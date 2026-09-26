@@ -849,7 +849,13 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
 - **13e. Known calls.** A call whose callee is known (a `letrec`-bound
   lambda, or a global never assigned) calls the word directly: `callk w n`,
   with no closure fetched and no check. A lambda that does not escape
-  needs no closure (let-conversion).
+  needs no closure (let-conversion). *(First part done 2026-09-26: self tail calls of
+  `letrec`-bound procedures are loops, and a binding that names none of
+  its group but in such calls has no box; in both compilers, with
+  `tests/programs/run/loops.fx`. A compiled word's taken branch remakes
+  the ip from the word, which the loop needed. Open: globals, which the
+  REPL may define again, so known only under block compilation of a whole
+  program; `callk`; let-conversion of lambdas that do not escape.)*
 - **13f. Inlining and simplification.** Small known procedures are
   inlined, non-tail calls first (Twobit), with constant folding, copy
   propagation, and dead code removed where its effect allows.
