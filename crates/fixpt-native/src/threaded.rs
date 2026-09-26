@@ -1371,6 +1371,7 @@ impl Stacks {
             resume: 0,
             top: heap.top_address() as u64,
             alloc_limit: heap.inline_limit() as u64,
+            regions: heap.region_table_address() as u64,
         }
     }
 

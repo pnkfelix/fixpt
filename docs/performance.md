@@ -652,3 +652,19 @@ Where every `cons` calls into Rust anyway (the Rust machine), the region
 wins, by what the collector no longer copies. Where `cons` is inline, it
 loses badly: `rcons` is a call-out, about 20 ns each, 3 million of them.
 The next step for regions' speed is `rcons` inline, as `cons` is.
+
+### `rcons` inline
+
+Register code now does `rcons` as it does `cons`: the heap keeps each
+region's current chunk, `[fill, end]`, in a table at a fixed address
+(`Heap::region_table_address`, `REGION_SLOTS` of them), and machine code
+bumps the fill, calling in only for `#f`, a region with no chunk yet or a
+full one, or a handle past the table.
+
+| machine       | `lists` | `lists-region` |
+| ------------- | ------- | -------------- |
+| register code | 12.4 ms | 8.1 ms         |
+
+So in a region the same program takes two thirds of the time: nothing
+is copied, and the chunk, reused round after round, stays in cache. The
+other machines call in for every `rcons`, as before.

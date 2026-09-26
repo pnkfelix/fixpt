@@ -44,6 +44,9 @@ pub struct State {
     /// (`Heap::top_address`, `Heap::inline_limit`).
     pub top: u64,
     pub alloc_limit: u64,
+    /// The heap's table of each region's current chunk, `[fill, end]` by
+    /// handle, in words from the base (`Heap::region_table_address`).
+    pub regions: u64,
     /// The routines' addresses, by number, for machines that find them
     /// through the state rather than a register.
     pub routines: [u64; ROUTINE_SLOTS],

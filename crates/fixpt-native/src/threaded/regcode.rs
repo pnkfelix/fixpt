@@ -159,6 +159,28 @@ impl Asm {
                 self.value(X16, Value::char('\0'));
                 self.e(add_lsl(RESULT, X16, X15, 8));
             }
+            // A pair in a region's current chunk, if the handle has a slot
+            // in the heap's table and the chunk has room: its fill bumped
+            // by two words. Anything else calls in: `#f`, the heap's; a
+            // region with no chunk yet, or a full one (its fill and end
+            // are 0 when it has none).
+            "rcons" => {
+                self.e(tst_low(1, 3));
+                self.b_cond(Cond::Ne, slow);
+                self.e(cmp_imm(1, 8 * fixpt_heap::heap::REGION_SLOTS as u32));
+                self.b_cond(Cond::Hs, slow);
+                self.e(ldr(X13, ST, off(offset_of!(State, regions))));
+                self.e(add_lsl(X13, X13, 1, 1));
+                self.e(ldp(X14, X15, X13, 0));
+                self.e(add_imm(X16, X14, 2));
+                self.e(cmp(X16, X15));
+                self.b_cond(Cond::Hi, slow);
+                self.e(add_lsl(X11, BASE, X14, 3));
+                self.e(stp(2, 3, X11, 0));
+                self.e(str(X16, X13, 0));
+                self.e(movz(X15, TAG_PAIR as u32, 0));
+                self.e(add_lsl(RESULT, X15, X14, 3));
+            }
             other => unreachable!("{other} is not done inline"),
         }
     }
@@ -305,6 +327,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     ("threaded", 2) if ROUTINES[k(o(0))].0 == "cons" => Some("cons"),
                     ("prim", 1) if prim_named(k(o(0)), "string-length") => Some("string-length"),
                     ("prim", 2) if prim_named(k(o(0)), "string-ref") => Some("string-ref"),
+                    ("prim", 3) if prim_named(k(o(0)), "%region-cons") => Some("rcons"),
                     _ => None,
                 };
                 if let Some(what) = inline {

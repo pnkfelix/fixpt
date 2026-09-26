@@ -28,6 +28,7 @@ use crate::value::{
 use std::collections::HashMap;
 
 mod regions;
+pub use regions::REGION_SLOTS;
 
 /// What a main header says, with a large header's extension read too.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

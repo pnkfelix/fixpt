@@ -1127,10 +1127,10 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
   1. `rmake-bloblet`, and region versions of the other allocating
      operations (`new`, arrays, products and sums), by the same call-out.
   2. Closures in a region: perhaps `rlambda` and `rplambda`.
-  3. `rcons` inline in register code, with the region's fill and limit
-     where machine code can reach them. For now it is a call-out, slower
-     per pair than the heap's inline `cons`; what a region saves is
-     collection.
+  3. *(Done 2026-09-26.)* `rcons` inline in register code: each region's
+     current chunk, `[fill, end]`, in a table at a fixed address, which
+     machine code bumps. `lists` in a region: 8.1 ms, against 12.4 ms in
+     the heap.
   4. A prompt that records how many regions are live, and an abort that
      ends the newer ones. Until then, the regions an escape leaves live
      only until the next ending of an older region.

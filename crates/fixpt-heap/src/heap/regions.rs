@@ -23,36 +23,52 @@ use super::{Heap, ARENA_BASE, ARENA_WORDS};
 /// Words in a chunk: 64 KiB.
 pub(super) const CHUNK_WORDS: usize = 1 << 13;
 
-#[derive(Default)]
+/// The regions whose current chunk machine code can allocate in: those at
+/// handles below this. A region at a handle above it (regions nested
+/// deeper) allocates in the heap.
+pub const REGION_SLOTS: usize = 256;
+
 pub(super) struct Regions {
     /// The live regions, the newest last; a handle is a position here.
+    /// Each has the chunks it has filled, and how far.
     live: Vec<Vec<(usize, usize)>>,
+    /// For each handle below `REGION_SLOTS`, its current chunk: how far it
+    /// is filled, and where it ends; both 0 when it has none. At an
+    /// address that never changes, for machine code, which bumps the fill
+    /// itself (`Heap::region_table_address`).
+    table: Box<[[usize; 2]; REGION_SLOTS]>,
     /// Chunks given back, to be reused; and the start of the area not yet
     /// used at all.
     free: Vec<usize>,
     fresh: usize,
     /// The region allocation goes to, while a primitive allocates in one.
     pub(super) target: Option<usize>,
-    /// Words allocated in regions, ever.
-    pub(super) words: u64,
+    /// Words allocated in regions ended, and in chunks filled.
+    words: u64,
 }
 
 impl Regions {
     pub(super) fn new() -> Regions {
-        Regions { fresh: ARENA_BASE, ..Regions::default() }
+        Regions {
+            live: Vec::new(),
+            table: Box::new([[0; 2]; REGION_SLOTS]),
+            free: Vec::new(),
+            fresh: ARENA_BASE,
+            target: None,
+            words: 0,
+        }
     }
 
-    /// `n` words in region `h`, or none, if they do not fit a chunk or the
-    /// area is used up.
+    /// `n` words in region `h`, or none, if it has no slot, they do not
+    /// fit a chunk, or the area is used up.
     pub(super) fn bump(&mut self, h: usize, n: usize) -> Option<usize> {
-        let chunks = self.live.get_mut(h)?;
-        if let Some((start, fill)) = chunks.last_mut()
-            && *fill + n <= *start + CHUNK_WORDS
-        {
-            let at = *fill;
-            *fill += n;
-            self.words += n as u64;
-            return Some(at);
+        if h >= self.live.len() || h >= REGION_SLOTS {
+            return None;
+        }
+        let [fill, end] = self.table[h];
+        if fill + n <= end {
+            self.table[h][0] = fill + n;
+            return Some(fill);
         }
         if n > CHUNK_WORDS {
             return None;
@@ -65,15 +81,24 @@ impl Regions {
             }
             None => return None,
         };
-        chunks.push((chunk, chunk + n));
-        self.words += n as u64;
+        if end != 0 {
+            self.live[h].push((end - CHUNK_WORDS, fill));
+            self.words += (fill - (end - CHUNK_WORDS)) as u64;
+        }
+        self.table[h] = [chunk + n, chunk + CHUNK_WORDS];
         Some(chunk)
+    }
+
+    /// Region `h`'s current chunk, as a range in use, if it has one.
+    fn current(&self, h: usize) -> Option<(usize, usize)> {
+        let [fill, end] = *self.table.get(h)?;
+        (end != 0).then(|| (end - CHUNK_WORDS, fill))
     }
 
     /// The words in use in every live region, as ranges of the heap's
     /// memory: each a sequence of objects and pairs, as a semispace is.
     pub(super) fn ranges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
-        self.live.iter().flatten().copied()
+        self.live.iter().enumerate().flat_map(|(h, filled)| filled.iter().copied().chain(self.current(h)))
     }
 }
 
@@ -89,8 +114,15 @@ impl Heap {
     pub fn region_exit(&mut self, h: usize) {
         let r = &mut self.regions;
         let h = h.min(r.live.len());
-        for chunks in r.live.drain(h..) {
-            r.free.extend(chunks.iter().map(|(start, _)| *start));
+        for k in (h..r.live.len()).rev() {
+            if let Some((start, fill)) = r.current(k) {
+                r.words += (fill - start) as u64;
+                r.free.push(start);
+                r.table[k] = [0, 0];
+            }
+            for (start, _) in r.live.pop().expect("live") {
+                r.free.push(start);
+            }
         }
     }
 
@@ -111,7 +143,16 @@ impl Heap {
 
     /// Words allocated in regions since the heap was made.
     pub fn region_words(&self) -> u64 {
-        self.regions.words
+        let r = &self.regions;
+        r.words + (0..r.live.len()).filter_map(|h| r.current(h)).map(|(start, fill)| (fill - start) as u64).sum::<u64>()
+    }
+
+    /// Where the regions' table of current chunks is, for machine code
+    /// (`regions::REGION_SLOTS` of `[fill, end]`, in words from the base):
+    /// it may bump a region's fill up to its end, and must call in
+    /// otherwise. The address holds for the heap's life.
+    pub fn region_table_address(&mut self) -> *mut usize {
+        self.regions.table.as_mut_ptr() as *mut usize
     }
 
     /// Whether word `i` of the heap's memory is in the regions' area.
