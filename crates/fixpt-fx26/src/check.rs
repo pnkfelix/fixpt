@@ -46,6 +46,9 @@ pub struct Checker {
     unit: TyId,
     char_: TyId,
     symbol: TyId,
+    /// How deep in abbreviation expansions parsing is, to stop one that
+    /// mentions itself.
+    pub(crate) expanding: u32,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -138,6 +141,7 @@ impl Checker {
             unit,
             char_,
             symbol,
+            expanding: 0,
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),

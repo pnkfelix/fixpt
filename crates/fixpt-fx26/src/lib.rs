@@ -25,6 +25,9 @@ pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 /// fields and kinds, as FX-26 definitions.
 pub const LAYOUT: &str = include_str!("layout.fx");
 
+/// Hash tables, written in FX-26: prepend to a program that uses them.
+pub const TABLE: &str = include_str!("table.fx");
+
 pub mod check;
 pub mod infer;
 pub mod licence;

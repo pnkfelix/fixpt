@@ -1,0 +1,11 @@
+;;; A thousand string keys, through several doublings of the buckets.
+(define t (table string int @t) (make-table string-hash string=?))
+(define digit (subr pure (int) string) (lambda (d) (char->string (integer->char (+ 48 d)))))
+(define key (subr pure (int) string)
+  (lambda (i) (string-append "k" (string-append (digit (quotient i 100)) (string-append (digit (modulo (quotient i 10) 10)) (digit (modulo i 10)))))))
+(define fill (subr (maxeff (read @t) (write @t) (alloc @t)) (int) unit)
+  (lambda (i) (if (= i 1000) #u (begin (table-set! t (key i) i) (fill (+ i 1))))))
+(define sum-back (subr (read @t) (int int) int)
+  (lambda (i acc) (if (= i 1000) acc (sum-back (+ i 1) (+ acc (table-ref t (key i) -1))))))
+(fill 0)
+(the (listof int @o) (cons (table-count t) (cons (sum-back 0 0) (cons (if (table-has? t "nope") 1 0) nil))))

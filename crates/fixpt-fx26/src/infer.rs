@@ -66,6 +66,33 @@ impl Checker {
                 }
                 Ok(eff)
             }
+            // A `plambda` against a `poly` of the same binders: the body is
+            // checked against the `poly`'s body, its binders renamed to the
+            // `plambda`'s, so what the signature says reaches inside.
+            Exp::PLambda { binders, body }
+                if matches!(&expected_ty, Ty::Poly { binders: bs, .. } if bs.len() == binders.len()
+                    && bs.iter().zip(&binders).all(|((_, a), (_, b))| a == b)) =>
+            {
+                let Ty::Poly { binders: bs, body: want } = expected_ty else { unreachable!() };
+                let map: HashMap<DVar, D> = bs
+                    .iter()
+                    .zip(&binders)
+                    .map(|((vb, k), (va, _))| {
+                        let d = match k {
+                            Kind::Region => D::Region(Region::Var(*va)),
+                            Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
+                            Kind::Type => D::Type(self.arena.ty(Ty::Var(*va))),
+                        };
+                        (*vb, d)
+                    })
+                    .collect();
+                let want = self.subst(want, &map);
+                let eff = self.check(body, want)?;
+                if !eff.is_pure() {
+                    return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
+                }
+                Ok(eff)
+            }
             Exp::Lambda { params, .. } if expected_ty.as_subr().is_some() => {
                 let (_, want, result) = expected_ty.as_subr().expect("a subroutine");
                 if want.len() != params.len() {

@@ -66,3 +66,13 @@ fn define_datatype_makes_constructors_for_tagcase() {
     // A value is a frozen bloblet: the tag, then the product.
     assert_eq!(run("(define-datatype t (leaf int)) (leaf 1)"), "#<bloblet 3 fields 0 bytes>");
 }
+
+#[test]
+fn a_type_abbreviation_may_take_parameters() {
+    let d = "(define-type (pair-of (a type) (r region)) (pairof a a r))";
+    assert_eq!(check(&format!("{d} (the (pair-of int @p) (cons 1 2))")), "(pairof int int @p) ! (alloc @p)");
+    let err = rejects(&format!("{d} (the (pair-of int) (cons 1 2))"));
+    assert!(err.contains("takes 2 description(s), and has 1"), "{err}");
+    let err = rejects("(define-type (loop (a type)) (pairof (loop a) a @r)) (the (loop int) nil)");
+    assert!(err.contains("cannot mention itself"), "{err}");
+}

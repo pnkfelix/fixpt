@@ -33,6 +33,8 @@ pub enum Top {
     Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, recursive: bool },
     /// `(define-type name …)`.
     DefineType { name: Sym, ty: TyId },
+    /// `(define-type (name (param kind) …) …)`: a parametric abbreviation.
+    DefineTypeFamily { name: Sym },
     /// `(define-effect name …)`: an abbreviation for an effect.
     DefineEffect { name: Sym, effect: Effect },
     /// `(private-regions @r …)`: the regions these names now stand for.
@@ -150,6 +152,12 @@ impl Checker {
                 let [_, name, def] = items else {
                     return Err(FxError::at(form.span, "`(define-type name type)`"));
                 };
+                if let Some([n, params @ ..]) = name.as_proper_list() {
+                    let n = self.binder_name(n)?;
+                    let params = Syntax::list(name.span, params.to_vec());
+                    self.define_type_family(n, &params, def)?;
+                    return Ok(Top::DefineTypeFamily { name: n });
+                }
                 let name = self.binder_name(name)?;
                 let ty = self.define_type(name, def, form.span)?;
                 Ok(Top::DefineType { name, ty })

@@ -17,6 +17,12 @@ pub enum DScope {
     Var(DVar, Kind),
     /// A name bound by `dletrec`: a type.
     Rec(TyId),
+    /// A name bound by `define-type` with parameters: a type abbreviation
+    /// with holes, expanded at each use by parsing its body with the
+    /// parameters bound to the descriptions given.
+    Abbrev { params: Vec<(Sym, Kind)>, body: Syntax },
+    /// A region given for an abbreviation's region parameter.
+    Region(Region),
     /// A name bound by `define-effect`: an effect.
     Eff(crate::ast::Effect),
     /// A region constant `private-regions` made the program's own: `@s` in
@@ -94,6 +100,7 @@ impl Checker {
         }
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Region)) => Ok(Region::Var(v)),
+            Some(DScope::Region(r)) => Ok(r),
             _ => Err(FxError::at(s.span, format!("`{}` is not a region", self.name(sym)))),
         }
     }
@@ -152,6 +159,11 @@ impl Checker {
             };
         }
         let items = self.items(s, "a type")?.to_vec();
+        if let Some(head) = items.first().and_then(|h| h.as_symbol())
+            && let Some(DScope::Abbrev { params, body }) = self.lookup_desc(head)
+        {
+            return self.expand_abbrev(s, head, &params, &body, &items[1..]);
+        }
         match self.head(&items).unwrap_or("") {
             "subr" => {
                 let [_, effect, params, result] = &items[..] else {
@@ -326,6 +338,49 @@ impl Checker {
             id = *next;
         }
         Ok(())
+    }
+
+    /// `(define-type (name (param kind) …) type)`: bind a parametric
+    /// abbreviation. Nothing is parsed until it is used.
+    pub(crate) fn define_type_family(&mut self, name: Sym, params: &Syntax, body: &Syntax) -> R<()> {
+        let mut ps = Vec::new();
+        for p in self.items(params, "`(name kind)`")?.to_vec() {
+            let pair = self.items(&p, "`(name kind)`")?.to_vec();
+            let [n, k] = &pair[..] else {
+                return Err(FxError::at(p.span, "a parameter is `(name kind)`"));
+            };
+            let n = n.as_symbol().ok_or_else(|| FxError::at(n.span, "a parameter's name"))?;
+            ps.push((n, self.parse_kind(k)?));
+        }
+        self.dscope.push((name, DScope::Abbrev { params: ps, body: body.clone() }));
+        Ok(())
+    }
+
+    /// A use of a parametric abbreviation: its body, parsed with each
+    /// parameter bound to the description given for it.
+    fn expand_abbrev(&mut self, s: &Syntax, name: Sym, params: &[(Sym, Kind)], body: &Syntax, args: &[Syntax]) -> R<TyId> {
+        if args.len() != params.len() {
+            return Err(FxError::at(s.span, format!("`{}` takes {} description(s), and has {}", self.name(name), params.len(), args.len())));
+        }
+        if self.expanding > 64 {
+            return Err(FxError::at(s.span, format!("`{}` expands without end: an abbreviation with parameters cannot mention itself", self.name(name))));
+        }
+        let mut bound = Vec::new();
+        for ((p, k), a) in params.iter().zip(args) {
+            let d = match k {
+                Kind::Type => DScope::Rec(self.parse_type(a)?),
+                Kind::Region => DScope::Region(self.parse_region(a)?),
+                Kind::Effect => DScope::Eff(self.parse_effect(a)?),
+            };
+            bound.push((*p, d));
+        }
+        let depth = self.dscope.len();
+        self.dscope.extend(bound);
+        self.expanding += 1;
+        let r = self.parse_type(body);
+        self.expanding -= 1;
+        self.dscope.truncate(depth);
+        r
     }
 
     /// `(define-type name type)`: `name` stands for the type from here on,

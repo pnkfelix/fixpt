@@ -50,6 +50,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("<=", "(subr pure (int int) bool)"),
     (">=", "(subr pure (int int) bool)"),
     ("*", "(subr pure (int int) int)"),
+    ("modulo", "(subr pure (int int) int)"),
+    ("quotient", "(subr pure (int int) int)"),
     ("not", "(subr pure (bool) bool)"),
     ("char=?", "(subr pure (char char) bool)"),
     ("char-whitespace?", "(subr pure (char) bool)"),
