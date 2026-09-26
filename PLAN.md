@@ -958,6 +958,21 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
   the only ways to run unboundedly, so the check points are where the
   effect would be discharged.
 
+- **Redefinition at the REPL: shadowing or late binding.** (Raised by the
+  user 2026-09-26: "usual Scheme REPL semantics don't eagerly resolve the
+  global reference and keep it fixed forever … but we can work with
+  this.") Today a second `define` makes a new binding (ML's top level):
+  sound without re-checking, and it makes a global as fixed as a `letrec`
+  binding, which known calls use. Scheme's late binding could come back
+  without losing that. A redefinition at the same type assigns the old cell.
+  Typed calls depend only on the type, so they survive it untouched. Code
+  that assumed the old value (loops, `callk`) records which cell it
+  assumed, and the redefinition reverts that code to `global g; tcall n`.
+  Words are heap data, so the reversion patches cells in place, and
+  recompiles any word compiled to machine code. A redefinition at a new
+  type re-checks the forms that mention the name, and either recompiles
+  them or reports those that no longer check. So known calls should
+  carry their global's cell, so that they can be found.
 - **Time complexity as an effect.** (Raised by the user 2026-09-26, as a
   type-system direction for after M13's "type system first" work.) FX's
   own line did this:
