@@ -785,7 +785,13 @@ one.)*
   compilers, comes first.
 - **A printer for compiled forms**: the threaded code in a word's
   bloblet, shown from the REPL, cell by cell, with routine names and
-  operands.
+  operands. *(Done 2026-09-26: `fixpt_runtime::disasm`, `%disassemble`,
+  FX-26's `disassemble`, and `,disassemble E` in the FX-26 REPL under
+  `--fx26-run threaded`. Globals' cells now carry their names. The
+  threaded REPL keeps earlier definitions, so later forms can use
+  them.)*
+- **Research for the compiler**: `docs/research/twobit.md` and
+  `docs/research/threaded-compilers.md`.
 - **Closures that carry their types** (a direction, not yet a task). A
   threaded closure is a bloblet, so it could carry its type, or enough
   for a checker to confirm the type from its fields and code:

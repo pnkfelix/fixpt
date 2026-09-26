@@ -769,12 +769,19 @@ prims! {
     "%fx26-fixnum?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_fixnum())));
     "%fx26-unit-cell", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.intern("#u")));
     "%fx26-nil-cell", 0, Some(0), simple!(|_rt, _a| Ok(Value::NULL));
-    // A global's cell: a plain bloblet whose one field is the value.
-    "%fx26-make-global", 1, Some(1), simple!(|rt, _a| {
+    // A global's cell: a plain bloblet whose field 2 is the value and whose
+    // field 3 is its name, for showing (`%disassemble`).
+    "%fx26-make-global", 1, Some(1), simple!(|rt, a| {
         let unit = rt.heap.intern("#u");
-        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, 1, 0, true);
+        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, 2, 0, true);
         rt.heap.set_bloblet_slot(b, 2, unit);
+        rt.heap.set_bloblet_slot(b, 3, a[0]);
         Ok(b)
+    });
+    // A threaded word or closure's code, shown: every word it reaches.
+    "%disassemble", 1, Some(1), simple!(|rt, a| {
+        let s = crate::disasm::disassemble(&rt.heap, a[0]);
+        Ok(rt.heap.make_string(&s))
     });
     "%fx26-string-downcase", 1, Some(1), simple!(|rt, a| { let s = get_string(rt, a[0])?; Ok(rt.heap.make_string(&s.to_lowercase())) });
     "%fx26-string-ci=?", 2, Some(2), simple!(|rt, a| {

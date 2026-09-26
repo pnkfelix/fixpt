@@ -118,6 +118,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("array-length", "%fx26-array-length", false),
     ("make-word", "%make-word", false),
     ("tword-fields", "%tword-fields", false),
+    ("disassemble", "%disassemble", false),
     ("tword-int?", "%tword-fixnum?", false),
     ("tword-int", "%tword-int", false),
     ("wcell-routine", "%fx26-identity", false),

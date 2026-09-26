@@ -75,6 +75,7 @@
       ((string=? n "string-hash") "%string-hash")
       ((string=? n "make-word") "%make-word")
       ((string=? n "tword-fields") "%tword-fields")
+      ((string=? n "disassemble") "%disassemble")
       ((string=? n "tword-int?") "%tword-fixnum?")
       ((string=? n "tword-int") "%tword-int")
       ((string=? n "wcell-routine") "%fx26-identity")

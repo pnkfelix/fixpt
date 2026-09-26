@@ -200,6 +200,9 @@ fn overview(h: &dyn Helpful) {
         rows.push((",fits TYPE", "what accepts a value of that type"));
         rows.push((",returns TYPE", "what produces one"));
     }
+    if h.dialect() == "FX-26" {
+        rows.push((",disassemble E", "E's threaded code (under --fx26-run threaded)"));
+    }
     rows.push((",quit", "leave"));
     for (cmd, what) in rows {
         println!("  {cmd:<16} {what}");

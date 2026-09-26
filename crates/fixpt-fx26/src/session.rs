@@ -32,6 +32,10 @@ pub struct Fx26Session {
     /// The initial environment as the FX-26 reader read it, for the checker
     /// written in FX-26: read once, as it takes the reader a while.
     standard26: Option<fixpt_scheme::Handle>,
+    /// Under a strategy other than `Lower`, the definitions run so far, as
+    /// text: each form is given to the pieces written in FX-26 as a whole
+    /// program, so these go before it, and what it says can use them.
+    defined26: String,
 }
 
 /// The budget for one speculative run: enough for a REPL-sized
@@ -190,7 +194,7 @@ impl Fx26Session {
             .eval_str("<fx26-runtime>", RUNTIME)
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
-        Ok(Fx26Session { checker: Checker::new(), scheme, globals: Globals::default(), strategy: Strategy::Lower, standard26: None })
+        Ok(Fx26Session { checker: Checker::new(), scheme, globals: Globals::default(), strategy: Strategy::Lower, standard26: None, defined26: String::new() })
     }
 
     /// Check one top-level form and lower it, without running it.
@@ -264,11 +268,16 @@ impl Fx26Session {
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
         let (top, code) = self.compile(form)?;
         if self.strategy != Strategy::Lower {
-            let text = fixpt_read::write_syntax(form, &self.checker.interner);
+            let form_text = fixpt_read::write_syntax(form, &self.checker.interner);
+            let text = format!("{}{form_text}\n", self.defined26);
             let out = match self.strategy {
                 Strategy::Evaluate => self.eval_with_own_evaluator(&text)?,
                 _ => self.compile_with_own_compiler(&text)?,
             };
+            if !matches!(top, Top::Exp(_)) && !out.starts_with("!! ") {
+                self.defined26.push_str(&form_text);
+                self.defined26.push('\n');
+            }
             let value = match out.strip_prefix("!! ") {
                 Some(e) => Err(e.to_string()),
                 None if matches!(top, Top::Exp(_)) => Ok(Some(out)),

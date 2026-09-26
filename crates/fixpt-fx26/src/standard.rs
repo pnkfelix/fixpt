@@ -118,6 +118,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // A word's cells, looked at, for the compiler to machine code: how many
     // fields it has, and field k if it is an int.
     ("tword-fields", "(subr pure (tword) int)"),
+    // Any value's threaded code, shown, if it has some: for looking at what
+    // the compiler made.
+    ("disassemble", "(poly ((t type)) (subr pure (t) string))"),
     ("tword-int?", "(subr pure (tword int) bool)"),
     ("tword-int", "(subr pure (tword int) int)"),
     ("wcell-routine", "(subr pure (int) wcell)"),

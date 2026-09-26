@@ -108,6 +108,7 @@ pub fn repl(backend: Backend) -> i32 {
     };
     let mut reader = LineReader::new(".fixpt_fx26_history", SyntaxProfile::FX26);
     let mut show_code = false;
+    let mut disassembling;
     let mut n = 0usize;
     loop {
         reader.set_completions(known_names(&session.checker));
@@ -127,6 +128,18 @@ pub fn repl(backend: Backend) -> i32 {
             crate::help::answer(&mut session.checker, &ask);
             continue;
         }
+        // `,disassemble E`: E's threaded code, shown, as `disassemble` gives
+        // it (under `--fx26-run threaded`; lowered, there is none).
+        let text = match text.trim().strip_prefix(",disassemble") {
+            Some(e) if !e.trim().is_empty() => {
+                disassembling = true;
+                format!("(disassemble {e})")
+            }
+            _ => {
+                disassembling = false;
+                text
+            }
+        };
         match text.trim() {
             "" => continue,
             ",code" => {
@@ -157,11 +170,35 @@ pub fn repl(backend: Backend) -> i32 {
                 continue;
             }
             match session.run(form) {
+                Ok(out) if disassembling => match &out.value {
+                    Ok(Some(v)) => print!("{}", unwrite_string(v)),
+                    _ => show(&session, &out, show_code),
+                },
                 Ok(out) => show(&session, &out, show_code),
                 Err(e) => eprintln!("{}", located(&name, &text, &e)),
             }
         }
     }
+}
+
+/// A string as it was written, `"…"` with escapes, back to its text.
+fn unwrite_string(w: &str) -> String {
+    let Some(inner) = w.strip_prefix('"').and_then(|x| x.strip_suffix('"')) else { return format!("{w}\n") };
+    let mut out = String::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some(x) => out.push(x),
+            None => {}
+        }
+    }
+    out
 }
 
 /// Run every form of `files` in one session, printing only what the program

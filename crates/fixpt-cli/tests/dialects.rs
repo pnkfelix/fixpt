@@ -161,3 +161,23 @@ fn fx26_runs_threaded_on_each_machine() {
     let out = Command::new(FIXPT).args(["--threaded-machine", "forth", "eval", "1"]).output().expect("fixpt runs");
     assert!(!out.status.success(), "an unknown machine is refused");
 }
+
+#[test]
+fn the_fx26_repl_shows_threaded_code() {
+    use std::io::Write as _;
+    let mut child = Command::new(FIXPT)
+        .args(["--dialect", "fx26", "--fx26-run", "threaded", "repl"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    let input = "(define f (subr pure (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))\n(f 10)\n,disassemble f\n";
+    child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
+    let out = child.wait_with_output().expect("finishes");
+    let out = String::from_utf8_lossy(&out.stdout);
+    assert!(out.contains("55 : int"), "{out}");
+    for line in ["0branch", "global f", "call 1", "return"] {
+        assert!(out.contains(line), "no `{line}` in:\n{out}");
+    }
+}
