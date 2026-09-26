@@ -1002,6 +1002,7 @@ fn callout_on(st: &mut State, n: u64, name: &'static str, heap: &mut Heap, ds: &
         // SAFETY: as above.
         let heap = unsafe { heap_of(st) };
         st.base = heap.active_words() as u64;
+        st.alloc_limit = heap.inline_limit() as u64;
         return match result {
             Ok(()) => 0,
             Err(t) => {
@@ -1017,6 +1018,7 @@ fn callout_on(st: &mut State, n: u64, name: &'static str, heap: &mut Heap, ds: &
     }
     let result = callout_routine(heap, st, ds, rs, name);
     st.base = heap.active_words() as u64;
+    st.alloc_limit = heap.inline_limit() as u64;
     match result {
         Ok(pop) => {
             st.dsp += 8 * pop as u64;
@@ -1228,6 +1230,7 @@ fn closure(st: &mut State) -> Result<(), Trap> {
     unsafe { *(st.dsp as *mut u64) = c.raw() };
     st.d += 16;
     st.base = heap.active_words() as u64;
+    st.alloc_limit = heap.inline_limit() as u64;
     Ok(())
 }
 
@@ -1366,6 +1369,8 @@ impl Stacks {
             rs_limit: self.rs.base - 32 * (RS_LIMIT as u64 + 1),
             routines: [0; ROUTINE_SLOTS],
             resume: 0,
+            top: heap.top_address() as u64,
+            alloc_limit: heap.inline_limit() as u64,
         }
     }
 

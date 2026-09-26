@@ -116,6 +116,54 @@ impl Asm {
     }
 }
 
+/// Whether runtime primitive `p` is the one called `name`.
+fn prim_named(p: usize, name: &str) -> bool {
+    fixpt_runtime::PRIMITIVES.get(p).is_some_and(|d| d.name == name)
+}
+
+impl Asm {
+    /// `what` on `REG1`… into `RESULT`, without calling out; to `slow` when
+    /// it cannot be done so.
+    fn inline(&mut self, what: &str, slow: Label) {
+        match what {
+            // A pair from the heap's free space, if there is room short of
+            // where a collection is due: `top` bumped by two words.
+            "cons" => {
+                self.e(ldr(X13, ST, off(offset_of!(State, top))));
+                self.e(ldr(X14, X13, 0));
+                self.e(ldr(X15, ST, off(offset_of!(State, alloc_limit))));
+                self.e(add_imm(X16, X14, 2));
+                self.e(cmp(X16, X15));
+                self.b_cond(Cond::Hi, slow);
+                self.e(add_lsl(X11, BASE, X14, 3));
+                self.e(stp(1, 2, X11, 0));
+                self.e(str(X16, X13, 0));
+                self.e(movz(X15, TAG_PAIR as u32, 0));
+                self.e(add_lsl(RESULT, X15, X14, 3));
+            }
+            // A string's length is its suffix's first word; its characters
+            // follow, two to a word.
+            "string-length" => {
+                self.e(add(X11, BASE, 1));
+                self.e(ldur(X15, X11, -4));
+                self.e(add_lsl(RESULT, XZR, X15, 3));
+            }
+            "string-ref" => {
+                self.e(add(X11, BASE, 1));
+                self.e(ldur(X15, X11, -4));
+                self.e(asr_imm(X13, 2, 3));
+                self.e(cmp(X13, X15));
+                self.b_cond(Cond::Hs, slow);
+                self.e(add_lsl(X14, X11, X13, 2));
+                self.e(ldur_w(X15, X14, 4));
+                self.value(X16, Value::char('\0'));
+                self.e(add_lsl(RESULT, X16, X15, 8));
+            }
+            other => unreachable!("{other} is not done inline"),
+        }
+    }
+}
+
 /// A register word's machine code: its register entry first, then an
 /// instruction's code after another; and where each cell's resume point
 /// is (`-1` for none), for [`NativeMachine::install`].
@@ -248,10 +296,27 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     "lambda" => (k(o(1)), routine("closure"), f(0)),
                     _ => (k(o(1)), k(o(0)) as u64, WORD_CELL0 + next),
                 };
+                // Some are done here, when they can be: the call-out is then
+                // only the way for what cannot (a full heap, an index out of
+                // range, which it reports).
+                let slow = a.label();
+                let done = a.label();
+                let inline = match (name, count) {
+                    ("threaded", 2) if ROUTINES[k(o(0))].0 == "cons" => Some("cons"),
+                    ("prim", 1) if prim_named(k(o(0)), "string-length") => Some("string-length"),
+                    ("prim", 2) if prim_named(k(o(0)), "string-ref") => Some("string-ref"),
+                    _ => None,
+                };
+                if let Some(what) = inline {
+                    a.inline(what, slow);
+                    a.b(done);
+                }
+                a.bind(slow);
                 a.push_regs(count);
                 a.r_callout(routine_n, at);
                 resume[next] = a.here() as i64;
                 a.resumed(fields);
+                a.bind(done);
             }
             "invoke" | "tailinvoke" => {
                 let tail = name == "tailinvoke";

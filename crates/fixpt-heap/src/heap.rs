@@ -1103,6 +1103,21 @@ impl Heap {
         self.gc_nanos += started.elapsed().as_nanos() as u64;
     }
 
+    /// For machine code that allocates without calling in (`fixpt-native`):
+    /// where `top` is. The address holds while the heap does not move.
+    pub fn top_address(&mut self) -> *mut usize {
+        &mut self.top
+    }
+
+    /// How far machine code may take `top` before it must call in to
+    /// allocate: short of where a safepoint would collect, so that
+    /// collection comes when it would have. 0 while a policy collects at
+    /// every safepoint, or collection is inhibited: then every allocation
+    /// calls in.
+    pub fn inline_limit(&self) -> usize {
+        if self.gc_every > 0 || self.inhibited > 0 { 0 } else { (self.semi as f64 * COLLECT_THRESHOLD) as usize }
+    }
+
     /// Words allocated since the heap was made.
     pub fn allocated(&self) -> u64 {
         self.words_allocated + self.top.saturating_sub(self.top_after_gc) as u64

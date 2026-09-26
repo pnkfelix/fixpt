@@ -39,6 +39,11 @@ pub struct State {
     /// For each entry number, a word's table of where its machine code
     /// resumes at each cell, by `8k`, or 0 (`NativeMachine::compile_word`).
     pub resume: u64,
+    /// Where the heap's `top` is, in words from the base, and how far
+    /// machine code may take it before calling in to allocate
+    /// (`Heap::top_address`, `Heap::inline_limit`).
+    pub top: u64,
+    pub alloc_limit: u64,
     /// The routines' addresses, by number, for machines that find them
     /// through the state rather than a register.
     pub routines: [u64; ROUTINE_SLOTS],

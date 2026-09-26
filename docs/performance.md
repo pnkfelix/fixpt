@@ -592,3 +592,27 @@ up on an edit. The self-compile as register code, stage 2:
 Stage 2 as compiled stack code fell from about 0.7 s to 0.5–0.6 s. What
 is left is mostly call-outs to primitives (241 ms instrumented) and to
 `cons` (55 ms).
+
+## `cons`, `string-length` and `string-ref` in register code's machine code
+
+Register code does these inline, calling out only for what it cannot do:
+- `cons` bumps the heap's `top` itself, up to where a safepoint would
+  collect (`Heap::inline_limit`: 75% of the semispace, the collector's own
+  `COLLECT_THRESHOLD`). Past that, and always under the `gc_every`
+  stress policy, it calls in, and the collection comes where it did
+  before: the self-compile still makes 9 collections and allocates
+  exactly the same 17,517,161 words.
+- `string-length` reads the suffix's first word.
+- `string-ref` checks the index and loads 32 bits, calling out only when
+  the index is out of range, to report it.
+
+| measure                       | before  | after   |
+| ----------------------------- | ------- | ------- |
+| benchmark `lists`             | 31.1 ms | 11.9 ms |
+| benchmark `closures`          | 42.1 ms | 23.6 ms |
+| reading the bootstrap program | 0.12 s  | 0.09 s  |
+| checking it                   | 0.17 s  | 0.16 s  |
+| self-compile, stage 2         | 0.38 s  | 0.33 s  |
+
+(All register code.) `closures` gains only from `cons`: making a closure
+is still a call-out.

@@ -77,6 +77,10 @@ pub fn str(t: Reg, n: Reg, off: u32) -> u32 {
 pub fn ldur(t: Reg, n: Reg, imm: i64) -> u32 {
     0xF840_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
 }
+/// `ldur wt, [xn, #imm]`: 32 bits, zero-extended into `xt`.
+pub fn ldur_w(t: Reg, n: Reg, imm: i64) -> u32 {
+    0xB840_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
+}
 /// `stur xt, [xn, #imm]`.
 pub fn stur(t: Reg, n: Reg, imm: i64) -> u32 {
     0xF800_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
@@ -125,6 +129,11 @@ pub fn sub_imm(d: Reg, n: Reg, imm: u32) -> u32 {
 /// `add xd, xn, xm`.
 pub fn add(d: Reg, n: Reg, m: Reg) -> u32 {
     0x8B00_0000 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `add xd, xn, xm, lsl #s`.
+pub fn add_lsl(d: Reg, n: Reg, m: Reg, s: u32) -> u32 {
+    assert!(s < 64);
+    0x8B00_0000 | r(m) << 16 | s << 10 | r(n) << 5 | r(d)
 }
 /// `sub xd, xn, xm`.
 pub fn sub(d: Reg, n: Reg, m: Reg) -> u32 {
@@ -244,4 +253,19 @@ pub fn ret() -> u32 {
 /// Instructions as the bytes that go in memory: little-endian words.
 pub fn bytes(code: &[u32]) -> Vec<u8> {
     code.iter().flat_map(|w| w.to_le_bytes()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Encodings the system assembler gives (`as -arch arm64`), for the
+    /// instructions the FX-26 encoder does not have, which its test covers.
+    #[test]
+    fn as_the_system_assembler_encodes_them() {
+        assert_eq!(ldur_w(15, 14, 4), 0xb84041cf);
+        assert_eq!(ldur_w(1, 2, -8), 0xb85f8041);
+        assert_eq!(add_lsl(0, 16, 15, 8), 0x8b0f2200);
+        assert_eq!(add_lsl(14, 11, 13, 2), 0x8b0d096e);
+    }
 }
