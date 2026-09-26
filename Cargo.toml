@@ -13,6 +13,7 @@ members = [
     "crates/fixpt-fx87",
     "crates/fixpt-fx26",
     "crates/fixpt-tidy",
+    "crates/fixpt-native",
 ]
 
 [workspace.package]
