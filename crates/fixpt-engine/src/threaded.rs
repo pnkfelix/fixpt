@@ -15,6 +15,14 @@
 use fixpt_heap::layout::threaded::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine};
 use fixpt_heap::{Heap, Value};
 
+/// The most values the data stack may hold, and the most calls the return
+/// stack may hold, checked where a word is entered and where a branch is
+/// taken. Between those points a word runs straight-line code, at most one
+/// push per cell, so a machine needs only a word's worth of room beyond
+/// these (`fixpt-native` leaves that much, then a guard).
+pub const DS_LIMIT: usize = 1 << 17;
+pub const RS_LIMIT: usize = 1 << 16;
+
 /// A routine number as the fixnum a cell holds.
 pub fn prim(name: &str) -> Value {
     Value::fixnum(routine(name) as i64)
@@ -38,6 +46,10 @@ pub enum Trap {
     NotAWord,
     /// The machine's fuel ran out: a program ran longer than it was allowed.
     OutOfFuel,
+    /// More than `DS_LIMIT` values on the data stack.
+    StackOverflow,
+    /// More than `RS_LIMIT` calls deep.
+    TooDeep,
 }
 
 impl Trap {
@@ -52,6 +64,8 @@ impl Trap {
             Trap::NoRoutine(n) => (5, *n as u64),
             Trap::NotAWord => (6, 0),
             Trap::OutOfFuel => (7, 0),
+            Trap::StackOverflow => (8, 0),
+            Trap::TooDeep => (9, 0),
         }
     }
 
@@ -64,6 +78,8 @@ impl Trap {
             4 => Trap::Field { routine: name() },
             5 => Trap::NoRoutine(aux as i64),
             7 => Trap::OutOfFuel,
+            8 => Trap::StackOverflow,
+            9 => Trap::TooDeep,
             _ => Trap::NotAWord,
         }
     }
@@ -185,6 +201,7 @@ impl WordBuilder {
 /// A word whose entry is primitive `name`: the way to pass a primitive to
 /// something that wants a word.
 pub fn primitive_word(heap: &mut Heap, name: &str) -> Value {
+    assert!(routine(name) != ROUTINE_DOCOL, "docol runs cells, and this word has none");
     let sym = heap.intern(name);
     let w = heap.make_bloblet(KIND, WORD_CELL0 - 2, 0, true);
     heap.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(routine(name) as i64));
@@ -271,6 +288,7 @@ impl Machine {
     fn enter(&mut self, heap: &mut Heap, w: Value, cur: &mut Value, k: usize) -> Result<Option<(Value, usize)>, Trap> {
         let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
         if entry as u64 == ROUTINE_DOCOL {
+            self.check_limits()?;
             if cur.is_bloblet() {
                 self.rs.push(*cur);
                 self.rs.push(Value::fixnum(k as i64));
@@ -282,6 +300,16 @@ impl Machine {
             Flow::Next => Ok(None),
             Flow::Exit | Flow::Halt => Err(Trap::NoRoutine(entry)),
         }
+    }
+
+    fn check_limits(&self) -> Result<(), Trap> {
+        if self.ds.len() > DS_LIMIT {
+            return Err(Trap::StackOverflow);
+        }
+        if self.rs.len() / 2 >= RS_LIMIT {
+            return Err(Trap::TooDeep);
+        }
+        Ok(())
     }
 
     fn pop(&mut self, routine: &'static str) -> Result<Value, Trap> {
@@ -308,6 +336,7 @@ impl Machine {
             BRANCH => {
                 let off = heap.bloblet_slot(*cur, *k).as_fixnum();
                 *k = (*k as i64 + 1 + off) as usize;
+                self.check_limits()?;
             }
             ZBRANCH => {
                 let flag = self.pop(name)?;
@@ -315,6 +344,7 @@ impl Machine {
                 *k += 1;
                 if flag == Value::FALSE {
                     *k = (*k as i64 + off) as usize;
+                    self.check_limits()?;
                 }
             }
             EXECUTE => {

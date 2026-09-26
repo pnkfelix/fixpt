@@ -45,3 +45,27 @@ ranges 0.028–0.041 s), so only the totals are compared.
 | A5 done (boxes and symbols at fixed offsets; tag `010` retired) | 0.628 | 0.394 | at baseline |
 
 The per-piece table fills in as each piece moves.
+
+## Threaded code: the Rust inner interpreter and the native one (A′3)
+
+`cargo run --release -p fixpt-native --example threaded_bench`: the same
+threaded words on both machines, results checked equal, best of three.
+A *cell* is one step of the Rust machine; the native machine counts only
+word entries and taken branches (its fuel), shown for scale.
+
+| program | cells | Rust | native | native ns/cell | Rust / native |
+|---|---|---|---|---|---|
+| fib 25 | 2.31 M | 0.007 s | 0.0013 s | 0.55 | 5.4× |
+| fib 27 | 6.04 M | 0.018 s | 0.0033 s | 0.55 | 5.4× |
+| sum-to 10M (loop) | 110 M | 0.263 s | 0.077 s | 0.70 | 3.4× |
+| sum-by-list 60k (cons, 5 collections) | 1.38 M | 0.004 s | 0.0013 s | 0.96 | 3.0× |
+
+For scale only, not a comparison: the engines benchmark's `fib 25` takes
+0.027 s on the AST engine and 0.019 s on the bytecode VM, but that is Scheme,
+with closures, frames, and generic arithmetic, where the threaded `fib` is a
+hand-written Forth word on fixnums. What the table does say: the native
+`NEXT` costs about half a nanosecond per cell, the Rust `match` loop about
+three, and the machine's checks (fuel and stack limits at every word entry
+and taken branch, tags and overflow in every primitive) leave `NEXT` the
+dominant cost. `cons` calls out to Rust, which saves and reloads the
+machine's registers; that is the 0.96.

@@ -6,7 +6,11 @@ license.workspace = true
 
 [dependencies]
 fixpt-heap = { path = "../fixpt-heap" }
+fixpt-engine = { path = "../fixpt-engine" }
 libc = "0.2"
+
+[features]
+gc-stress = ["fixpt-heap/gc-stress"]
 
 [lints]
 workspace = true

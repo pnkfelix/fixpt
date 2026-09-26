@@ -551,15 +551,33 @@ A1. **`fixpt-native`**, the one crate where `unsafe` is allowed:
     - calls into a code bloblet's suffix, and back out to `extern "C"`
       runtime functions.
 
-    Every unsafe block states the rule it relies on.
+    Every unsafe block states the rule it relies on. *(Done 2026-09-26, with
+    one change: the code space is mapped twice, read+write and
+    read+execute, instead of toggling `MAP_JIT`, because the measurements
+    in `docs/object-model.md` showed that lets fields beside code change
+    with no flush and no re-protection.)*
 A2. **An arm64 encoder**, in Rust, covering only the instructions needed:
     loads, stores, arithmetic, branches, calls and returns. It is our own
     code generation, not copies of Rust-compiled code, whose position
     independence and extent Rust does not promise. It is the stage-0 oracle
-    for the FX-26 compiler's own encoder.
+    for the FX-26 compiler's own encoder. *(Done 2026-09-26; each encoding
+    is checked against the system assembler, which is used only as that
+    oracle.)*
 A3. **A native inner interpreter** (`NEXT`) as the suffix of threaded code
     bloblets, run beside the Rust bootstrap interpreter and checked against
-    it.
+    it. *(Done 2026-09-26, as `fixpt_engine::threaded` (the Rust machine,
+    and the word layout, `layout::threaded`) and `fixpt_native::threaded`.
+    A change from the text above: the heap is not executable and moves, so
+    a word's entry is a routine *number*, and the routines live in the code
+    space. That also keeps machine addresses out of heap images. Cells are
+    token-threaded primitives or words. Both machines check fuel and stack
+    limits at word entry and taken branches, and agree on every trap but
+    underflow, which the native machine turns into a guard-page fault.
+    Measured in `docs/performance.md`: about 0.55 ns per cell natively,
+    5× the Rust machine.)*
+A4. **Stencils**: primitives written in Rust with `become`, compiled by the
+    build script with the installed nightly, and copied into the code space
+    beside the hand-encoded ones; checked against them and measured.
 
 ### Phase B: FX-26 over bloblets
 
@@ -590,6 +608,16 @@ A3. **A native inner interpreter** (`NEXT`) as the suffix of threaded code
     Rust version as oracle and stage 0 until decided otherwise.
 
 ### Kept open, deliberately
+
+- **Responsiveness as an effect.** (Raised 2026-09-26.) Distinguish "may
+  diverge without reaching a poll" from "every unbounded path polls, and
+  every callee does too". A poll (the native machine's fuel and limit
+  check, or an interrupt check) discharges the effect, as a handler masks
+  one; Koka's `div` is the coarse version. It would let a word with no
+  backward branch that calls only such words skip the check at entry. The
+  threaded machines already check exactly at word entry and taken branches,
+  the only ways to run unboundedly, so the check points are where the
+  effect would be discharged.
 
 - **Pinned code, with raw return addresses into it.** Possibly pinned only
   speculatively, with moving still possible at the cost of rewriting return

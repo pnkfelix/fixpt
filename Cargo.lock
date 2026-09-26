@@ -89,6 +89,7 @@ version = "0.1.0"
 name = "fixpt-native"
 version = "0.1.0"
 dependencies = [
+ "fixpt-engine",
  "fixpt-heap",
  "libc",
 ]

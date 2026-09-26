@@ -96,7 +96,23 @@ fn traps() {
     assert_eq!(run(&mut heap, w, &[]), Err(Trap::NotAWord));
 
     let mut b = WordBuilder::new();
-    b.recurse().prim("exit");
+    let top = b.label();
+    b.place(top).branch(top);
     let w = b.build(&mut heap, "forever");
     assert_eq!(run(&mut heap, w, &[]), Err(Trap::OutOfFuel));
+}
+
+#[test]
+fn the_stacks_are_bounded() {
+    let mut heap = Heap::new();
+    let mut b = WordBuilder::new();
+    let top = b.label();
+    b.place(top).lit(Value::fixnum(1)).branch(top);
+    let w = b.build(&mut heap, "pusher");
+    assert_eq!(run(&mut heap, w, &[]), Err(Trap::StackOverflow));
+
+    let mut b = WordBuilder::new();
+    b.lit(Value::fixnum(1)).prim("drop").recurse().prim("exit");
+    let w = b.build(&mut heap, "deep");
+    assert_eq!(run(&mut heap, w, &[]), Err(Trap::TooDeep));
 }

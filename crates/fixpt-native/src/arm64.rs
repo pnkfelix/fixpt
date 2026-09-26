@@ -17,6 +17,16 @@ pub const XZR: Reg = 31;
 pub enum Cond {
     Eq = 0,
     Ne = 1,
+    /// Unsigned ≥.
+    Hs = 2,
+    /// Unsigned <.
+    Lo = 3,
+    Vs = 6,
+    Vc = 7,
+    /// Unsigned >.
+    Hi = 8,
+    /// Unsigned ≤.
+    Ls = 9,
     Lt = 11,
     Ge = 10,
     Gt = 12,
@@ -120,6 +130,43 @@ pub fn add(d: Reg, n: Reg, m: Reg) -> u32 {
 pub fn sub(d: Reg, n: Reg, m: Reg) -> u32 {
     0xCB00_0000 | r(m) << 16 | r(n) << 5 | r(d)
 }
+/// `adds xd, xn, xm`: add, setting the flags (`vs` on signed overflow).
+pub fn adds(d: Reg, n: Reg, m: Reg) -> u32 {
+    0xAB00_0000 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `subs xd, xn, xm`.
+pub fn subs(d: Reg, n: Reg, m: Reg) -> u32 {
+    0xEB00_0000 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `subs xd, xn, #imm` (0..4096).
+pub fn subs_imm(d: Reg, n: Reg, imm: u32) -> u32 {
+    assert!(imm < 4096);
+    0xF100_0000 | imm << 10 | r(n) << 5 | r(d)
+}
+/// `orr xd, xn, xm`.
+pub fn orr(d: Reg, n: Reg, m: Reg) -> u32 {
+    0xAA00_0000 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `and xd, xn, #(2^bits - 1)`: the low `bits` bits (1..64).
+pub fn and_low(d: Reg, n: Reg, bits: u32) -> u32 {
+    assert!((1..64).contains(&bits));
+    0x9240_0000 | (bits - 1) << 10 | r(n) << 5 | r(d)
+}
+/// `tst xn, #(2^bits - 1)`: are the low `bits` bits all zero?
+pub fn tst_low(n: Reg, bits: u32) -> u32 {
+    assert!((1..64).contains(&bits));
+    0xF240_001F | (bits - 1) << 10 | r(n) << 5
+}
+/// `ubfx xd, xn, #lsb, #width`: an unsigned bit field.
+pub fn ubfx(d: Reg, n: Reg, lsb: u32, width: u32) -> u32 {
+    assert!(lsb < 64 && width >= 1 && lsb + width <= 64);
+    0xD340_0000 | lsb << 16 | (lsb + width - 1) << 10 | r(n) << 5 | r(d)
+}
+/// `asr xd, xn, #s`: shift right, keeping the sign.
+pub fn asr_imm(d: Reg, n: Reg, s: u32) -> u32 {
+    assert!(s < 64);
+    0x9340_FC00 | s << 16 | r(n) << 5 | r(d)
+}
 /// `cmp xn, #imm` (0..4096).
 pub fn cmp_imm(n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
@@ -176,6 +223,10 @@ pub fn b_cond(c: Cond, words: i64) -> u32 {
 /// `cbz xt` by `words` instructions.
 pub fn cbz(t: Reg, words: i64) -> u32 {
     0xB400_0000 | simm(words, 19) << 5 | r(t)
+}
+/// `cbnz xt` by `words` instructions.
+pub fn cbnz(t: Reg, words: i64) -> u32 {
+    0xB500_0000 | simm(words, 19) << 5 | r(t)
 }
 /// `br xn`.
 pub fn br(n: Reg) -> u32 {
