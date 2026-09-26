@@ -866,6 +866,32 @@ Order: 13a and 13b, then 13c and 13d (cheap, and they help every
 machine), then 13e and 13f, then 13h, the largest win on the native
 machines, then 13g and 13i.
 
+**Revised 2026-09-26: the type system first.** The user's direction is to
+get what we can from the type and effect system we have before anything
+else, and before talking about extending it. So the first optimization is
+**typed calls (13c′)**, ahead of the self-call loops of 13c, which fold into
+known calls (13e).
+
+A call whose callee the checker typed as a subroutine needs no test that
+it is a closure, no fallback for continuations, and, in tail position, no
+stack-limit checks. Tracing what that assumes found two places where the
+type does not yet promise a closure:
+
+1. **A composable continuation is a subtype of `subr`**, so a `subr` value
+   can be a continuation object. Every callable becomes a closure:
+   `callcomp` and `callcc` give a closure whose word resumes the
+   continuation (a new `resume` routine), and `marks-of` unwraps it.
+2. **Procedures not yet defined.** A typed global has its cell before its
+   definition runs, and a `letrec` box has no value until it is filled;
+   both hold `#u`. When their type is a subroutine, they start instead as
+   a closure whose word traps: "called before it was defined".
+
+Then the compilers, in Rust and in FX-26, emit `tcall n` and
+`ttailcall n`: `call` and `tailcall` without those tests. Every machine has
+them: the Rust machine, the hand-encoded one, the stencils, and the
+machine-code compilers in Rust and FX-26. Measured against the 13b
+baseline. 13d, typed primitives, follows on the same principle.
+
 ### Kept open, deliberately
 
 - **Values held by Rust across calls, typed away.** (Raised 2026-09-26,
