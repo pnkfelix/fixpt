@@ -708,12 +708,14 @@ impl Machine {
                 }
                 self.ds.push(self.ds[len - 2]);
             }
-            ADD | SUB | LESS => {
+            // This machine is the oracle: the typed routines keep the
+            // checks their types make needless, so a wrong type traps here.
+            ADD | SUB | LESS | INT_ADD | INT_SUB | INT_LESS => {
                 let b = self.fix(name)?;
                 let a = self.fix(name)?;
                 let v = match n {
-                    ADD => Value::try_fixnum(a + b).ok_or(Trap::Overflow { routine: name })?,
-                    SUB => Value::try_fixnum(a - b).ok_or(Trap::Overflow { routine: name })?,
+                    ADD | INT_ADD => Value::try_fixnum(a + b).ok_or(Trap::Overflow { routine: name })?,
+                    SUB | INT_SUB => Value::try_fixnum(a - b).ok_or(Trap::Overflow { routine: name })?,
                     _ => Value::boolean(a < b),
                 };
                 self.ds.push(v);
@@ -753,13 +755,22 @@ impl Machine {
                 let p = cx.heap().cons(a, b);
                 self.ds.push(p);
             }
-            CAR | CDR => {
+            CAR | CDR | PAIR_CAR | PAIR_CDR => {
                 let p = self.pop(name)?;
                 if !p.is_pair() {
                     return Err(Trap::Type { routine: name });
                 }
                 let heap = cx.heap();
-                self.ds.push(if n == CAR { heap.car(p) } else { heap.cdr(p) });
+                self.ds.push(if matches!(n, CAR | PAIR_CAR) { heap.car(p) } else { heap.cdr(p) });
+            }
+            FIELD => {
+                let k = Self::operand(cx.heap(), r).as_fixnum() as usize;
+                let obj = self.pop(name)?;
+                if !obj.is_bloblet() {
+                    return Err(Trap::Type { routine: name });
+                }
+                let v = cx.heap().bloblet_field(obj, k).map_err(|_| Trap::Field { routine: name })?;
+                self.ds.push(v);
             }
             SLOT => {
                 let i = Self::operand(cx.heap(), r).as_fixnum() as usize;
@@ -1091,6 +1102,12 @@ const TCALL: i64 = routine("tcall") as i64;
 const TTAILCALL: i64 = routine("ttailcall") as i64;
 const RESUME: i64 = routine("resume") as i64;
 const UNDEFINED: i64 = routine("undefined") as i64;
+const INT_ADD: i64 = routine("int-add") as i64;
+const INT_SUB: i64 = routine("int-sub") as i64;
+const INT_LESS: i64 = routine("int-less") as i64;
+const PAIR_CAR: i64 = routine("pair-car") as i64;
+const PAIR_CDR: i64 = routine("pair-cdr") as i64;
+const FIELD: i64 = routine("field") as i64;
 const FIRSTMARK: i64 = routine("firstmark") as i64;
 const CURRENTMARKS: i64 = routine("currentmarks") as i64;
 const MARKSOF: i64 = routine("marksof") as i64;

@@ -604,6 +604,40 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(str(X15, DSP, 0));
             a.cont();
         }
+        // Typed: the checker has proved the operands' types.
+        "int-add" | "int-sub" => {
+            a.e(ldp(X13, X14, DSP, 0));
+            a.e(if name == "int-add" { adds(X15, X14, X13) } else { subs(X15, X14, X13) });
+            a.trap_if(Cond::Vs, Trap::Overflow { routine: name });
+            a.e(str_pre(X15, DSP, 8));
+            a.cont();
+        }
+        "int-less" => {
+            a.e(ldp(X13, X14, DSP, 0));
+            a.e(cmp(X14, X13));
+            a.value(X16, Value::TRUE);
+            a.value(X15, Value::FALSE);
+            a.e(csel(X15, X16, X15, Cond::Lt));
+            a.e(str_pre(X15, DSP, 8));
+            a.cont();
+        }
+        "pair-car" | "pair-cdr" => {
+            a.e(ldr(X15, DSP, 0));
+            a.e(add(X14, BASE, X15));
+            a.e(ldur(X15, X14, if name == "pair-car" { -1 } else { 7 }));
+            a.e(str(X15, DSP, 0));
+            a.cont();
+        }
+        "field" => {
+            // Field k is 8k bytes before the bloblet's suffix; x13 is 8k.
+            a.e(ldr_post(X13, IP, -8));
+            a.e(ldr(X14, DSP, 0));
+            a.e(add(X11, BASE, X14));
+            a.e(sub(X16, X11, X13));
+            a.e(ldur(X15, X16, -4));
+            a.e(str(X15, DSP, 0));
+            a.cont();
+        }
         "field@" => {
             // The fast path: a bloblet with a trailer, which says F.
             let slow = a.label();

@@ -125,3 +125,9 @@
 (define routine-ttailcall int 40)  ; ( x1 … xn c -- ), tail-call closure c; n the next cell
 (define routine-resume int 41)  ; ( v k -- ), give continuation k the value v, in this frame's place
 (define routine-undefined int 42)  ; ( -- ), trap: called before it was defined
+(define routine-int-add int 43)  ; ( a b -- a+b ), ints: overflow checked
+(define routine-int-sub int 44)  ; ( a b -- a-b ), ints: overflow checked
+(define routine-int-less int 45)  ; ( a b -- a<b ), ints
+(define routine-pair-car int 46)  ; ( pair -- a ), a pair
+(define routine-pair-cdr int 47)  ; ( pair -- b ), a pair
+(define routine-field int 48)  ; ( obj -- x ), field k of a bloblet that has it; k the next cell

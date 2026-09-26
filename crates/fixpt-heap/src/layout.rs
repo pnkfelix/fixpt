@@ -307,13 +307,22 @@ pub mod threaded {
         ("resume", "( v k -- ), give continuation k the value v, in this frame's place"),
         // A procedure called before its definition ran.
         ("undefined", "( -- ), trap: called before it was defined"),
+        // Typed primitives: operations whose operands the checker has typed,
+        // without the tests the types make needless. Overflow is still
+        // checked; a machine that is an oracle may check the rest too.
+        ("int-add", "( a b -- a+b ), ints: overflow checked"),
+        ("int-sub", "( a b -- a-b ), ints: overflow checked"),
+        ("int-less", "( a b -- a<b ), ints"),
+        ("pair-car", "( pair -- a ), a pair"),
+        ("pair-cdr", "( pair -- b ), a pair"),
+        ("field", "( obj -- x ), field k of a bloblet that has it; k the next cell"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 
     /// How many cells after routine `name`'s cell are its operands, which
     /// are data, not code.
     pub const fn operands(name: &str) -> usize {
-        let one: &[&str] = &["lit", "branch", "0branch", "slot", "slot!", "free", "global", "global!", "call", "tailcall", "tcall", "ttailcall"];
+        let one: &[&str] = &["lit", "branch", "0branch", "slot", "slot!", "free", "global", "global!", "call", "tailcall", "tcall", "ttailcall", "field"];
         let two: &[&str] = &["closure", "prim"];
         let mut i = 0;
         while i < one.len() {

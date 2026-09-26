@@ -842,7 +842,10 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
 - **13d. Typed primitives.** After checking, `+` at `int` becomes an
   unchecked primitive, and so do `car`, the field reads and the rest where
   types prove them. The machines get routines without the checks. Overflow
-  checks stay.
+  checks stay. *(Done 2026-09-26: `int-add`, `int-sub`, `int-less`,
+  `pair-car`, `pair-cdr` and `field k`, from both compilers, on every
+  machine. The Rust machine, as oracle, keeps the checks. The loop gains
+  6–20%; see `docs/performance.md`.)*
 - **13e. Known calls.** A call whose callee is known (a `letrec`-bound
   lambda, or a global never assigned) calls the word directly: `callk w n`,
   with no closure fetched and no check. A lambda that does not escape
@@ -890,7 +893,7 @@ Then the compilers, in Rust and in FX-26, emit `tcall n` and
 `ttailcall n`: `call` and `tailcall` without those tests. Every machine has
 them: the Rust machine, the hand-encoded one, the stencils, and the
 machine-code compilers in Rust and FX-26. Measured against the 13b
-baseline. 13d, typed primitives, follows on the same principle.
+baseline. 13d, typed primitives, follows on the same principle. *(Typed calls done 2026-09-26: 2–12% on the benchmarks.)*
 
 ### Kept open, deliberately
 

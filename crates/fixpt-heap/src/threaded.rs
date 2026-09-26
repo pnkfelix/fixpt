@@ -70,6 +70,10 @@ impl Heap {
                 "slot" | "slot!" | "free" | "call" | "tailcall" | "tcall" | "ttailcall" if !non_negative(op(0)) => {
                     return Err(format!("cell {i}: `{r}` takes a count"));
                 }
+                // Field 1 is the trailer, which no program reads.
+                "field" if !(op(0).is_fixnum() && op(0).as_fixnum() >= 2) => {
+                    return Err(format!("cell {i}: `field` takes a field number, 2 or more"));
+                }
                 _ => {}
             }
             i += 1 + ops;

@@ -96,6 +96,10 @@ impl<'a> Compiler<'a> {
     fn int(&self, code: &mut Vec<Item>, n: i64) {
         self.lit(code, Value::fixnum(n));
     }
+    /// Field `k` of a bloblet whose type says it has one.
+    fn field(&self, code: &mut Vec<Item>, k: i64) {
+        self.op1(code, "field", Value::fixnum(k));
+    }
     fn unit(&mut self) -> Value {
         self.heap.intern("#u")
     }
@@ -163,8 +167,7 @@ impl<'a> Compiler<'a> {
             Loc::Global(g) => self.op1(code, "global", g),
             Loc::BoxedSlot(i) | Loc::BoxedFree(i) => {
                 self.op1(code, if matches!(l, Loc::BoxedSlot(_)) { "slot" } else { "free" }, Value::fixnum(i as i64));
-                self.int(code, 2);
-                self.op(code, "field@");
+                self.field(code, 2);
             }
         }
     }
@@ -394,8 +397,7 @@ impl<'a> Compiler<'a> {
             Exp::Extract(p, _) => {
                 let i = *self.c.facts.field_index.get(&x).ok_or("an extract the checker did not see")?;
                 self.exp(p, e, depth, code, false)?;
-                self.int(code, i as i64 + 2);
-                self.op(code, "field@");
+                self.field(code, i as i64 + 2);
                 self.done(code, tail);
             }
             Exp::Sum(t, v) => {
@@ -548,37 +550,35 @@ impl<'a> Compiler<'a> {
     fn standard_on(&mut self, name: &str, n: usize, code: &mut Vec<Item>) -> R<()> {
         let f = Value::FALSE;
         match name {
-            "+" => self.op(code, "+"),
-            "-" => self.op(code, "-"),
-            "<" => self.op(code, "<"),
+            // Typed routines: the checker has proved the operands' types.
+            "+" => self.op(code, "int-add"),
+            "-" => self.op(code, "int-sub"),
+            "<" => self.op(code, "int-less"),
             ">" => {
                 self.op(code, "swap");
-                self.op(code, "<");
+                self.op(code, "int-less");
             }
             "<=" => {
                 self.op(code, "swap");
-                self.op(code, "<");
+                self.op(code, "int-less");
                 self.lit(code, f);
                 self.op(code, "eq");
             }
             ">=" => {
-                self.op(code, "<");
+                self.op(code, "int-less");
                 self.lit(code, f);
                 self.op(code, "eq");
             }
             "=" | "symbol=?" | "char=?" => self.op(code, "eq"),
             "cons" => self.op(code, "cons"),
-            "car" => self.op(code, "car"),
-            "cdr" => self.op(code, "cdr"),
+            "car" => self.op(code, "pair-car"),
+            "cdr" => self.op(code, "pair-cdr"),
             "set-car!" | "set-cdr!" => {
                 self.prim(code, name, 2)?;
                 self.unit_after(code);
             }
             "new" => self.prim(code, "%make-box", 1)?,
-            "get" => {
-                self.int(code, 2);
-                self.op(code, "field@");
-            }
+            "get" => self.field(code, 2),
             "set" => {
                 self.op(code, "swap");
                 self.int(code, 2);
@@ -609,13 +609,13 @@ impl<'a> Compiler<'a> {
             "marks-of" => self.op(code, "marksof"),
             "array-ref" => {
                 self.int(code, 2);
-                self.op(code, "+");
+                self.op(code, "int-add");
                 self.op(code, "field@");
             }
             "array-set!" => {
                 self.op(code, "swap");
                 self.int(code, 2);
-                self.op(code, "+");
+                self.op(code, "int-add");
                 self.op(code, "swap");
                 self.prim(code, "%bloblet-set!", 3)?;
                 self.unit_after(code);
@@ -623,7 +623,7 @@ impl<'a> Compiler<'a> {
             "array-length" => {
                 self.prim(code, "%bloblet-fields", 1)?;
                 self.int(code, 1);
-                self.op(code, "-");
+                self.op(code, "int-sub");
             }
             "*" | "modulo" | "quotient" | "char->integer" | "integer->char" | "string-append" | "string-length"
             | "string-ref" | "substring" | "string=?" | "string->symbol" | "symbol->string" => self.prim(code, name, n)?,
@@ -646,8 +646,7 @@ impl<'a> Compiler<'a> {
             }
             BlobletOp::Ref(i) => {
                 self.exps(args, e, depth, code)?;
-                self.int(code, i as i64 + 2);
-                self.op(code, "field@");
+                self.field(code, i as i64 + 2);
             }
             BlobletOp::Set(i) => {
                 self.exp(args[0], e, depth, code, false)?;
@@ -715,16 +714,14 @@ impl<'a> Compiler<'a> {
         let next = self.fresh();
         // Is the tag this arm's?
         self.op1(code, "slot", Value::fixnum(depth as i64));
-        self.int(code, 2);
-        self.op(code, "field@");
+        self.field(code, 2);
         let tag = self.heap.intern(self.c.interner.name(arm.tag));
         self.lit(code, tag);
         self.op(code, "eq");
         code.push(Item::ZBranch(next));
         // The value, or its product's members, as slots after the sum.
         self.op1(code, "slot", Value::fixnum(depth as i64));
-        self.int(code, 3);
-        self.op(code, "field@");
+        self.field(code, 3);
         let mut bound = e.clone();
         let n = match &arm.bind {
             ArmBind::Value(x) => {
@@ -734,8 +731,7 @@ impl<'a> Compiler<'a> {
             ArmBind::Fields(xs) => {
                 for (j, x) in xs.iter().enumerate() {
                     self.op1(code, "slot", Value::fixnum(depth as i64 + 1));
-                    self.int(code, j as i64 + 2);
-                    self.op(code, "field@");
+                    self.field(code, j as i64 + 2);
                     bound.push((*x, Loc::Slot(depth + 2 + j)));
                 }
                 1 + xs.len()

@@ -412,3 +412,34 @@ three, release:
 2–12%. The stencils gain most (the loop, 12%): their call path was the
 heaviest. Before `st_tcall`/`st_ttailcall` existed, every typed call on
 the stencil machine went out to Rust, and it ran 2–3 times slower.
+
+## Typed primitives (13d)
+
+The compilers emit routines without the tests the checker's types make
+needless:
+
+- `+`, `-` and `<` at `int` become `int-add`, `int-sub` and `int-less`,
+  which have no tag test. The overflow check stays.
+- `car` and `cdr` take a `pairof` in FX-26 (a list is a sum), so they
+  become `pair-car` and `pair-cdr`, one load each.
+- `lit k; field@` becomes `field k` wherever the type says the bloblet has
+  field k: boxes, records, sums, products, `bloblet-ref`. That is one
+  cell instead of two, one load, and no test of tag, trailer or bounds.
+
+The Rust machine is the oracle: it keeps every check in the typed
+routines, so a wrong type traps there instead of reading wild memory. It
+gains only from `field k` being one cell. Best of two runs, release,
+against the typed-call figures:
+
+| program  | Rust machine  | hand-encoded | stencils -O2 | words compiled |
+| -------- | ------------- | ------------ | ------------ | -------------- |
+| closures | 569.7 → 575.4 | 68.2 → 66.7  | 85.0 → 85.3  | 59.6 → 58.4    |
+| fib      | 174.7 → 177.3 | 16.6 → 15.6  | 22.7 → 22.2  | 13.0 → 13.1    |
+| lists    | 388.3 → 390.7 | 51.2 → 50.7  | 64.4 → 60.5  | 45.6 → 45.0    |
+| loop     | 774.4 → 728.4 | 65.5 → 59.3  | 105.0 → 84.1 | 51.0 → 47.0    |
+| tak      | 66.1 → 66.0   | 6.5 → 6.4    | 10.5 → 11.1  | 4.5 → 4.4      |
+
+(ms.) The loop gains 6–20%. It is arithmetic and comparison, and the
+loop's counter is read through a box, which `field 2` makes one cell. The
+rest are within a few percent, and some of that is noise: those
+benchmarks spend their time in calls and allocation, not in the checks.

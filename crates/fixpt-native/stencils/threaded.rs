@@ -521,6 +521,49 @@ routine!(st_field_ref, |base, ip, cur, dsp, rsp, st, fp, w| {
     next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
+// Typed: the checker has proved the operands' types.
+macro_rules! int_arith {
+    ($name:ident, $r:expr, |$a:ident, $b:ident| $op:expr) => {
+        routine!($name, |base, ip, cur, dsp, rsp, st, fp, w| {
+            let ($b, $a) = unsafe { (rd(dsp), rd(dsp + 8)) };
+            let (x, overflowed): (u64, bool) = $op;
+            if overflowed {
+                return unsafe { trap(st, TRAP_OVERFLOW, $r, base, ip, cur, dsp, rsp, fp) };
+            }
+            let dsp = dsp + 8;
+            unsafe { wr(dsp, x) };
+            next!(base, ip, cur, dsp, rsp, st, fp)
+        });
+    };
+}
+
+int_arith!(st_int_add, R_INT_ADD, |a, b| {
+    let (x, o) = core::intrinsics::add_with_overflow(a as i64, b as i64);
+    (x as u64, o)
+});
+int_arith!(st_int_sub, R_INT_SUB, |a, b| {
+    let (x, o) = core::intrinsics::sub_with_overflow(a as i64, b as i64);
+    (x as u64, o)
+});
+int_arith!(st_int_less, R_INT_LESS, |a, b| (if (a as i64) < (b as i64) { TRUE } else { FALSE }, false));
+
+routine!(st_pair_car, |base, ip, cur, dsp, rsp, st, fp, w| {
+    unsafe { wr(dsp, rd(base.wrapping_add(rd(dsp)).wrapping_sub(1))) };
+    next!(base, ip, cur, dsp, rsp, st, fp)
+});
+routine!(st_pair_cdr, |base, ip, cur, dsp, rsp, st, fp, w| {
+    unsafe { wr(dsp, rd(base.wrapping_add(rd(dsp)).wrapping_sub(1) + 8)) };
+    next!(base, ip, cur, dsp, rsp, st, fp)
+});
+
+routine!(st_field, |base, ip, cur, dsp, rsp, st, fp, w| {
+    let k = unsafe { rd(ip) };
+    let ip = ip - 8;
+    let obj = unsafe { rd(dsp) };
+    unsafe { wr(dsp, rd(base.wrapping_add(obj).wrapping_sub(4).wrapping_sub(k))) };
+    next!(base, ip, cur, dsp, rsp, st, fp)
+});
+
 routine!(st_field_set, |base, ip, cur, dsp, rsp, st, fp, w| {
     callout!(R_FIELD_SET, base, ip, cur, dsp, rsp, st, fp)
 });
