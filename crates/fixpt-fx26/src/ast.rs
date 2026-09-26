@@ -43,6 +43,9 @@ pub enum Atom {
     Goto(Region),
     /// May keep its continuation for later use.
     Comefrom(Region),
+    /// Reads an I-cell in this region, which waits for its one write: it
+    /// must stay after writes to the region, but commutes with other reads.
+    Await(Region),
     /// An effect variable.
     Var(DVar),
 }
@@ -50,7 +53,7 @@ pub enum Atom {
 impl Atom {
     pub fn region(self) -> Option<Region> {
         match self {
-            Atom::Read(r) | Atom::Write(r) | Atom::Alloc(r) | Atom::Goto(r) | Atom::Comefrom(r) => {
+            Atom::Read(r) | Atom::Write(r) | Atom::Alloc(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) => {
                 Some(r)
             }
             Atom::Var(_) => None,
@@ -122,6 +125,9 @@ pub enum Ty {
     /// `(arrayof T R)`: a bloblet in region `R` with any number of fields,
     /// all of type `T`, read and written by index.
     Array(TyId, Region),
+    /// `(icell T R)`: an I-cell in region `R` (Arvind's I-structures): empty
+    /// until its one write of a `T`, and never changed after.
+    ICell(TyId, Region),
     /// `(bloblet (fields T…) R)`: a bloblet in region `R` whose fields have
     /// the types `T…`, with a suffix of bytes (`docs/object-model.md`).
     /// `(bloblet (frozen T…) R)` is one whose fields have been frozen: they

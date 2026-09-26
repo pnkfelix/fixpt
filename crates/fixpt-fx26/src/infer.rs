@@ -542,7 +542,7 @@ impl Checker {
                     stack.push(body);
                     false
                 }
-                Ty::Ref(x, r) | Ty::MarkKey(x, r) | Ty::Array(x, r) => {
+                Ty::Ref(x, r) | Ty::MarkKey(x, r) | Ty::Array(x, r) | Ty::ICell(x, r) => {
                     stack.push(x);
                     region(r)
                 }
@@ -588,7 +588,7 @@ impl Checker {
                 params.iter().any(|p| self.walk_vars(*p, seen, hit)) || self.walk_vars(result, seen, hit)
             }
             Ty::Poly { body, .. } => self.walk_vars(body, seen, hit),
-            Ty::Ref(a, _) | Ty::MarkKey(a, _) | Ty::Array(a, _) => self.walk_vars(a, seen, hit),
+            Ty::Ref(a, _) | Ty::MarkKey(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) => self.walk_vars(a, seen, hit),
             Ty::Bloblet { fields, .. } => fields.iter().any(|f| self.walk_vars(*f, seen, hit)),
             Ty::Product(parts) | Ty::Sum(parts) => parts.iter().any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Pair(a, b, _)
@@ -641,7 +641,8 @@ impl Checker {
             }
             (Ty::Ref(x, r), Ty::Ref(y, s))
             | (Ty::MarkKey(x, r), Ty::MarkKey(y, s))
-            | (Ty::Array(x, r), Ty::Array(y, s)) => {
+            | (Ty::Array(x, r), Ty::Array(y, s))
+            | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);
             }

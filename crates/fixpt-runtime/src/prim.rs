@@ -783,6 +783,32 @@ prims! {
     // A procedure called before it was defined: what a `letrec` box holds
     // before its value, in compiled FX-26.
     "%fx26-undefined", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.undefined_closure()));
+    // An I-cell (Arvind's I-structures): a plain bloblet whose field 2 says
+    // whether it is full and whose field 3 is its value. Written once; read
+    // only when full. Nothing else can fill it in a sequential run, so a
+    // read of an empty cell, which would wait forever, is an error.
+    "%fx26-make-icell", 0, Some(0), simple!(|rt, _a| {
+        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, 2, 0, true);
+        rt.heap.set_bloblet_slot(b, 2, Value::FALSE);
+        rt.heap.set_bloblet_slot(b, 3, Value::FALSE);
+        Ok(b)
+    });
+    "%fx26-icell-put!", 2, Some(2), simple!(|rt, a| {
+        if !a[0].is_bloblet() { return rt.type_error("an i-cell", a[0]) }
+        if rt.heap.bloblet_slot(a[0], 2) != Value::FALSE {
+            return rt.fail("an i-cell written twice", &[a[1]]);
+        }
+        rt.heap.set_bloblet_slot(a[0], 3, a[1]);
+        rt.heap.set_bloblet_slot(a[0], 2, Value::TRUE);
+        Ok(rt.heap.intern("#u"))
+    });
+    "%fx26-icell-get", 1, Some(1), simple!(|rt, a| {
+        if !a[0].is_bloblet() { return rt.type_error("an i-cell", a[0]) }
+        if rt.heap.bloblet_slot(a[0], 2) == Value::FALSE {
+            return rt.fail("an i-cell read before it was written", &[]);
+        }
+        Ok(rt.heap.bloblet_slot(a[0], 3))
+    });
     // A threaded word or closure's code, shown: every word it reaches.
     "%disassemble", 1, Some(1), simple!(|rt, a| {
         let s = crate::disasm::disassemble(&rt.heap, a[0]);

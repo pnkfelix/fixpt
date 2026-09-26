@@ -968,7 +968,19 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
     `R` but commutes with other reads.
 
   Sequentially, a read of an empty cell traps and a second write is an
-  error. Concurrently, a read would suspend the reader on the cell.
+  error. Concurrently, a read would suspend the reader on the cell. *(Prototype done 2026-09-26:
+  - both checkers, the lowering, the evaluator written in FX-26, both
+    compilers, and runtime primitives, which every machine reaches
+    through `prim`;
+  - `docs/fx26.md`, `tests/icells.rs` and `tests/programs/run/icells.fx`.
+
+  A procedure can tie its knot with cells in a region nothing outside
+  names, and masking keeps it `pure`. Not yet:
+  - `letrec` and recursive `define` still backpatch implicitly;
+  - reads are not yet ordered by the optimizer, which moves nothing yet;
+  - a read of an empty cell does not suspend, since there are no
+    processes;
+  - calls through a filled cell are not known calls.)*
 - **Redefinition at the REPL: shadowing or late binding.** (Raised by the
   user 2026-09-26: "usual Scheme REPL semantics don't eagerly resolve the
   global reference and keep it fixed forever … but we can work with

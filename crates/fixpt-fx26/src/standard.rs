@@ -111,6 +111,12 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("array-ref", "(poly ((r region)) (poly ((t type)) (subr (read r) ((arrayof t r) int) t)))"),
     ("array-set!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((arrayof t r) int t) unit)))"),
     ("array-length", "(poly ((r region)) (poly ((t type)) (subr pure ((arrayof t r)) int)))"),
+    // I-cells: written once, read after (docs/research/recursion-and-initialization.md).
+    // A read waits for the write, so it is ordered after writes to the
+    // region (`await`), but not after other reads.
+    ("make-icell", "(poly ((r region)) (poly ((t type)) (subr (alloc r) () (icell t r))))"),
+    ("icell-put!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((icell t r) t) unit)))"),
+    ("icell-get", "(poly ((r region)) (poly ((t type)) (subr (await r) ((icell t r)) t)))"),
     // Threaded code (`layout::threaded`), for the compiler written in
     // FX-26. A word is immutable once made, so making one is pure; a word
     // that is not one (`Heap::make_threaded_word`) is an error when run.

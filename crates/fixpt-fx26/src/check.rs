@@ -534,7 +534,7 @@ impl Checker {
                 self.regions_walk(result, seen, out);
             }
             Ty::Poly { body, .. } => self.regions_walk(body, seen, out),
-            Ty::Ref(a, r) | Ty::Array(a, r) => {
+            Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) => {
                 out.insert(r);
                 self.regions_walk(a, seen, out);
             }
@@ -608,7 +608,7 @@ impl Checker {
             }
             // References and pairs are mutable, so their contents are
             // invariant: FX-87's `ref` rule, and its pairs.
-            (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) => {
+            (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 r == s && self.sub(x, y, trail) && self.sub(y, x, trail)
             }
             (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) => {
@@ -727,6 +727,7 @@ impl Checker {
             Ty::Poly { binders, body } => Ty::Poly { binders, body: self.subst_memo(body, map, memo) },
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),
             Ty::Array(a, r) => Ty::Array(self.subst_memo(a, map, memo), region(r)),
+            Ty::ICell(a, r) => Ty::ICell(self.subst_memo(a, map, memo), region(r)),
             Ty::Pair(a, b, r) => Ty::Pair(self.subst_memo(a, map, memo), self.subst_memo(b, map, memo), region(r)),
             Ty::PromptTag { answer, payload, effect, region: r } => Ty::PromptTag {
                 answer: self.subst_memo(answer, map, memo),
@@ -776,6 +777,7 @@ fn subst_effect(e: &Effect, map: &HashMap<DVar, D>) -> Effect {
             Atom::Alloc(r) => Effect::atom(Atom::Alloc(sub_r(r))),
             Atom::Goto(r) => Effect::atom(Atom::Goto(sub_r(r))),
             Atom::Comefrom(r) => Effect::atom(Atom::Comefrom(sub_r(r))),
+            Atom::Await(r) => Effect::atom(Atom::Await(sub_r(r))),
         };
         out = out.union(&piece);
     }

@@ -33,7 +33,7 @@
 
 (define-datatype k-atom
   (a-read k-region) (a-write k-region) (a-alloc k-region)
-  (a-goto k-region) (a-comefrom k-region) (a-var int))
+  (a-goto k-region) (a-comefrom k-region) (a-await k-region) (a-var int))
 (define-type k-eff (listof k-atom @t))
 
 (define-type k-ids (listof int @t))
@@ -58,6 +58,7 @@
   (ty-product k-parts)
   (ty-sum k-parts)
   (ty-array int k-region)
+  (ty-icell int k-region)
   (ty-bloblet k-ids bool k-region)
   ;; A forwarding slot: none or one.
   (ty-link k-ids))
@@ -338,12 +339,12 @@
 (define k-region=? (subr pure (k-region k-region) bool) (lambda (r s) (= (k-region-cmp r s) 0)))
 
 (define k-atom-rank (subr pure (k-atom) int)
-  (lambda (a) (tagcase a (a-read (r) 0) (a-write (r) 1) (a-alloc (r) 2) (a-goto (r) 3) (a-comefrom (r) 4) (a-var (v) 5))))
+  (lambda (a) (tagcase a (a-read (r) 0) (a-write (r) 1) (a-alloc (r) 2) (a-goto (r) 3) (a-comefrom (r) 4) (a-await (r) 5) (a-var (v) 6))))
 ;; The atom's region; a variable's is none, shown as a binder -1.
 (define k-atom-region (subr pure (k-atom) k-region)
   (lambda (a)
-    (tagcase a (a-read (r) r) (a-write (r) r) (a-alloc (r) r) (a-goto (r) r) (a-comefrom (r) r) (a-var (v) (r-var -1)))))
-(define k-has-region? (subr pure (k-atom) bool) (lambda (a) (< (k-atom-rank a) 5)))
+    (tagcase a (a-read (r) r) (a-write (r) r) (a-alloc (r) r) (a-goto (r) r) (a-comefrom (r) r) (a-await (r) r) (a-var (v) (r-var -1)))))
+(define k-has-region? (subr pure (k-atom) bool) (lambda (a) (< (k-atom-rank a) 6)))
 (define k-atom-cmp (subr pure (k-atom k-atom) int)
   (lambda (a b)
     (let ((c (k-int-cmp (k-atom-rank a) (k-atom-rank b))))
@@ -353,7 +354,7 @@
 (define k-atom-with (subr pure (k-atom k-region) k-atom)
   (lambda (a r)
     (tagcase a (a-read (x) (a-read r)) (a-write (x) (a-write r)) (a-alloc (x) (a-alloc r))
-      (a-goto (x) (a-goto r)) (a-comefrom (x) (a-comefrom r)) (a-var (v) a))))
+      (a-goto (x) (a-goto r)) (a-comefrom (x) (a-comefrom r)) (a-await (x) (a-await r)) (a-var (v) a))))
 
 (define k-insert (subr (maxeff (read @t) (alloc @t)) (k-atom k-eff) k-eff)
   (lambda (a e)
@@ -381,7 +382,7 @@
     (letrec ((one (subr (read @t) (string k-region) string) (lambda (op r) (k-cat5 "(" op " " (k-region-show r) ")"))))
       (tagcase a
         (a-read (r) (one "read" r)) (a-write (r) (one "write" r)) (a-alloc (r) (one "alloc" r))
-        (a-goto (r) (one "goto" r)) (a-comefrom (r) (one "comefrom" r))
+        (a-goto (r) (one "goto" r)) (a-comefrom (r) (one "comefrom" r)) (a-await (r) (one "await" r))
         (a-var (v) (symbol->string (k-dvar-name v)))))))
 (define k-atoms-show (subr (read @t) (k-eff) string)
   (lambda (e) (if (null? e) "" (string-append (string-append " " (k-atom-show (car e))) (k-atoms-show (cdr e))))))
@@ -451,6 +452,7 @@
             (ty-product (ps) (k-cat3 "(productof" (k-show-parts ps p) ")"))
             (ty-sum (ps) (k-cat3 "(sumof" (k-show-parts ps p) ")"))
             (ty-array (a r) (k-cat5 "(arrayof " (k-show-on a p) " " (k-region-show r) ")"))
+            (ty-icell (a r) (k-cat5 "(icell " (k-show-on a p) " " (k-region-show r) ")"))
             (ty-pair (a b r)
               (if (= (k-resolve b) t)
                   (k-cat5 "(listof " (k-show-on a p) " " (k-region-show r) ")")
@@ -548,11 +550,12 @@
         (let* ((items (k-items s "an effect")) (head (k-head items)))
           (cond ((string=? head "maxeff") (k-effects (cdr items)))
                 ((or (string=? head "read") (string=? head "write") (string=? head "alloc")
-                     (string=? head "goto") (string=? head "comefrom"))
+                     (string=? head "goto") (string=? head "comefrom") (string=? head "await"))
                  (if (= (k-length items) 2)
                      (let ((r (k-parse-region (k-nth items 1))))
                        (k-one (cond ((string=? head "read") (a-read r)) ((string=? head "write") (a-write r))
                                     ((string=? head "alloc") (a-alloc r)) ((string=? head "goto") (a-goto r))
+                                    ((string=? head "await") (a-await r))
                                     (else (a-comefrom r)))))
                      (k-sfail (k-cat3 "`(" head " region)`") s)))
                 (else (k-sfail "expected an effect" s)))))))
@@ -669,6 +672,11 @@
                    (k-shape (= n 3) "`(arrayof type region)`" s)
                    (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
                      (k-ty-new (ty-array t r)))))
+                ((string=? hd "icell")
+                 (begin
+                   (k-shape (= n 3) "`(icell type region)`" s)
+                   (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
+                     (k-ty-new (ty-icell t r)))))
                 ((string=? hd "mark-key")
                  (begin
                    (k-shape (= n 3) "`(mark-key type region)`" s)
@@ -800,7 +808,7 @@
                          (else x (dt (k-parse-type s)))))))))
         (let ((hd (k-head (k-items s "a description"))))
           (if (or (string=? hd "read") (string=? hd "write") (string=? hd "alloc") (string=? hd "goto")
-                  (string=? hd "comefrom") (string=? hd "maxeff"))
+                  (string=? hd "comefrom") (string=? hd "await") (string=? hd "maxeff"))
               (de (k-parse-effect s))
               (dt (k-parse-type s)))))))
 
@@ -1004,6 +1012,7 @@
                 (ty-poly (bs body) (walk body))
                 (ty-ref (a r) (begin (add r) (walk a)))
                 (ty-array (a r) (begin (add r) (walk a)))
+                (ty-icell (a r) (begin (add r) (walk a)))
                 (ty-pair (a b r) (begin (add r) (walk a) (walk b)))
                 (ty-tag (a h e r) (begin (add r) (set out (k-add-eff-regions (get out) e)) (walk a) (walk h)))
                 (ty-comp (b a e r) (begin (add r) (set out (k-add-eff-regions (get out) e)) (walk a) (walk b)))
@@ -1075,7 +1084,8 @@
 ;;; ------------------------------------------------------------ masking
 ;;; What cannot be observed outside `x`, whose type is `result`, is removed:
 ;;; everything on a region that no free variable's type mentions, except
-;;; that `alloc`, `goto` and `comefrom` on a region the result mentions stay.
+;;; that `alloc`, `goto` and `comefrom` on a region the result mentions stay
+;;; (ranks 2 to 4; `await`, like `read`, does not).
 
 (define k-visible (subr (maxeff (read @t) (write @t) (alloc @t)) (k-names k-regions) k-regions)
   (lambda (vs out)
@@ -1100,7 +1110,7 @@
         (let* ((a (car e)) (r (k-atom-region a)) (rest (k-keep (cdr e) visible in-result)))
           (cond ((not (k-has-region? a)) (cons a rest))
                 ((k-has-region-in? visible r) (cons a rest))
-                ((and (k-has-region-in? in-result r) (> (k-atom-rank a) 1)) (cons a rest))
+                ((and (k-has-region-in? in-result r) (and (> (k-atom-rank a) 1) (< (k-atom-rank a) 5))) (cons a rest))
                 (else rest))))))
 
 ;;; ------------------------------------------------------------ substitution
@@ -1154,6 +1164,7 @@
                             (ty-poly (bs body) (ty-poly bs (sub body)))
                             (ty-ref (a r) (ty-ref (sub a) (reg r)))
                             (ty-array (a r) (ty-array (sub a) (reg r)))
+                            (ty-icell (a r) (ty-icell (sub a) (reg r)))
                             (ty-pair (a b r) (let* ((a2 (sub a)) (b2 (sub b))) (ty-pair a2 b2 (reg r))))
                             (ty-tag (a h e r)
                               (let* ((a2 (sub a)) (h2 (sub h))) (ty-tag a2 h2 (k-subst-effect e m) (reg r))))
@@ -1231,6 +1242,7 @@
                    (ty-subr (e ps r) (tagcase tb (ty-subr (e2 ps2 r2) (k-sub-callable (car (k-as-subr a)) (car (k-as-subr b)) trail)) (else z #f)))
                    (ty-ref (x r) (tagcase tb (ty-ref (y s) (and (k-region=? r s) (k-inv x y trail))) (else z #f)))
                    (ty-array (x r) (tagcase tb (ty-array (y s) (and (k-region=? r s) (k-inv x y trail))) (else z #f)))
+                   (ty-icell (x r) (tagcase tb (ty-icell (y s) (and (k-region=? r s) (k-inv x y trail))) (else z #f)))
                    (ty-pair (x1 x2 r)
                      (tagcase tb (ty-pair (y1 y2 s) (and (k-region=? r s) (k-inv x1 y1 trail) (k-inv x2 y2 trail))) (else z #f)))
                    (ty-tag (a1 h1 d1 r1)
@@ -1675,7 +1687,7 @@
     (tagcase (k-get t)
       (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r) 3) (ty-poly (bs x) 4) (ty-ref (x r) 5)
       (ty-pair (x y r) 6) (ty-tag (x y e r) 7) (ty-comp (x y e r) 8) (ty-markkey (x r) 9) (ty-product (ps) 10)
-      (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14))))
+      (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 (define k-wrong-shape? (subr (maxeff (read @t) (alloc @t)) (int int) bool)
   (lambda (pattern actual)
@@ -1711,6 +1723,7 @@
                   (ty-ref (x r) (or (reg r) (go (cons x rest))))
                   (ty-markkey (x r) (or (reg r) (go (cons x rest))))
                   (ty-array (x r) (or (reg r) (go (cons x rest))))
+                  (ty-icell (x r) (or (reg r) (go (cons x rest))))
                   (ty-pair (x y r) (or (reg r) (go (cons x (cons y rest)))))
                   (ty-bloblet (fs z r) (or (reg r) (go (k-push-ids fs rest))))
                   (ty-product (ps) (go (k-push-parts ps rest)))
@@ -1744,6 +1757,7 @@
                 (ty-ref (a r) (w a))
                 (ty-markkey (a r) (w a))
                 (ty-array (a r) (w a))
+                (ty-icell (a r) (w a))
                 (ty-bloblet (fs z r) (ws fs))
                 (ty-product (ps) (ws (k-push-parts ps nil)))
                 (ty-sum (ps) (ws (k-push-parts ps nil)))
@@ -1794,6 +1808,7 @@
                       (ty-ref (x r) (tagcase at (ty-ref (y s) (begin (ur r s) (u x y))) (else z #u)))
                       (ty-markkey (x r) (tagcase at (ty-markkey (y s) (begin (ur r s) (u x y))) (else z #u)))
                       (ty-array (x r) (tagcase at (ty-array (y s) (begin (ur r s) (u x y))) (else z #u)))
+                      (ty-icell (x r) (tagcase at (ty-icell (y s) (begin (ur r s) (u x y))) (else z #u)))
                       (ty-pair (x1 x2 r) (tagcase at (ty-pair (y1 y2 s) (begin (ur r s) (u x1 y1) (u x2 y2))) (else z #u)))
                       (ty-product (pp) (tagcase at (ty-product (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
                       (ty-sum (pp) (tagcase at (ty-sum (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))

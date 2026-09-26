@@ -131,6 +131,7 @@ impl Checker {
             "alloc" => atom(Atom::Alloc),
             "goto" => atom(Atom::Goto),
             "comefrom" => atom(Atom::Comefrom),
+            "await" => atom(Atom::Await),
             "maxeff" => {
                 let mut e = Effect::pure();
                 for part in &items[1..] {
@@ -200,6 +201,14 @@ impl Checker {
                 let t = self.parse_type(t)?;
                 let r = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::Ref(t, r)))
+            }
+            "icell" => {
+                let [_, t, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(icell type region)`"));
+                };
+                let t = self.parse_type(t)?;
+                let r = self.parse_region(r)?;
+                Ok(self.arena.ty(Ty::ICell(t, r)))
             }
             "pairof" => {
                 let [_, a, b, r] = &items[..] else {

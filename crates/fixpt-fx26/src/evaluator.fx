@@ -35,6 +35,8 @@
   (v-pair (bloblet (fields val val) @v))
   (v-ref (bloblet (fields val) @v))
   (v-array (arrayof val @v))
+  ;; An I-cell: whether it is full, and its value, as the runtime has it.
+  (v-icell (bloblet (fields val val) @v))
   ;; A bloblet: its fields, and its suffix's bytes.
   (v-blob (arrayof val @v) (arrayof int @v))
   (v-product (listof (pairof symbol val @v) @v))
@@ -104,6 +106,10 @@
   (lambda (v) (tagcase v (v-ref (r) r) (else x (efail "a reference is expected")))))
 (define as-array (subr evals (val) (arrayof val @v))
   (lambda (v) (tagcase v (v-array (a) a) (else x (efail "an array is expected")))))
+(define as-icell (subr evals (val) (bloblet (fields val val) @v))
+  (lambda (v) (tagcase v (v-icell (c) c) (else x (efail "an i-cell is expected")))))
+(define icell-full? (subr (read @v) ((bloblet (fields val val) @v)) bool)
+  (lambda (c) (tagcase (bloblet-ref c 0) (v-bool (b) b) (else x #f))))
 
 (define as-tag (subr evals (val) (prompt-tag val val runs @x))
   (lambda (v) (tagcase v (v-tag (t) t) (else x (efail "a prompt tag is expected")))))
@@ -126,7 +132,7 @@
 
 ;; The primitives the evaluator has, between spaces.
 (define primitive-names string
-  " + - * = < > <= >= not modulo quotient cons car cdr null? set-car! set-cdr! new get set char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc ")
+  " + - * = < > <= >= not modulo quotient cons car cdr null? set-car! set-cdr! new get set make-icell icell-put! icell-get char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc ")
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
 (define occurs? (subr pure (string string int) bool)
@@ -165,6 +171,15 @@
           ((string=? n "new") (v-ref (cell (arg xs 0))))
           ((string=? n "get") (bloblet-ref (as-ref (arg xs 0)) 0))
           ((string=? n "set") (begin (bloblet-set! (as-ref (arg xs 0)) 0 (arg xs 1)) (v-unit)))
+          ((string=? n "make-icell") (v-icell (make-bloblet 0 (v-bool #f) (v-bool #f))))
+          ((string=? n "icell-put!")
+           (let ((c (as-icell (arg xs 0))))
+             (if (icell-full? c)
+                 (efail "an i-cell written twice")
+                 (begin (bloblet-set! c 1 (arg xs 1)) (bloblet-set! c 0 (v-bool #t)) (v-unit)))))
+          ((string=? n "icell-get")
+           (let ((c (as-icell (arg xs 0))))
+             (if (icell-full? c) (bloblet-ref c 1) (efail "an i-cell read before it was written"))))
           ((string=? n "char=?") (v-bool (char=? (as-char (arg xs 0)) (as-char (arg xs 1)))))
           ((string=? n "char->integer") (v-int (char->integer (as-char (arg xs 0)))))
           ((string=? n "integer->char") (v-char (integer->char (as-int (arg xs 0)))))
@@ -418,6 +433,7 @@
       (v-nil () "()")
       (v-pair (p) (string-append "(" (string-append (show-items p) ")")))
       (v-ref (r) "#<box>")
+      (v-icell (c) "#<bloblet 3 fields 0 bytes>")
       (v-array (a) (string-append "#<bloblet " (string-append (int->string (+ 1 (array-length a))) " fields 0 bytes>")))
       (v-blob (fs bs)
         (string-append "#<bloblet "
