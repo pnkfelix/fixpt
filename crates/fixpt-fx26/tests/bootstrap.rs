@@ -130,6 +130,13 @@ fn fixpoint_as_register_code() {
         let args = sc.call_global("list", &[std, prog]).expect("a list");
         let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
         lap("stage 2 compiled, by the compiler run as register code");
+        if std::env::var_os("FIXPT_GC_REPORT").is_some() {
+            let h = &sc.runtime_unrooted().heap;
+            eprintln!(
+                "collections {}, {:.1} ms; words allocated {}, copied {}; semispace now {} words",
+                h.gc_count, h.gc_nanos as f64 / 1e6, h.allocated(), h.words_copied, h.semispace_words()
+            );
+        }
         let (tag, stage2) = sc.view(|v| {
             let r = v.get(result);
             let tag = r.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();

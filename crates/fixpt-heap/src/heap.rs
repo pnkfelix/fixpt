@@ -170,6 +170,11 @@ pub struct Heap {
     pub gc_every: u64,
     safepoints: u64,
     pub words_copied: u64,
+    /// Time spent collecting, in nanoseconds; and the words allocated
+    /// before the last collection, and `top` after it, to count allocation.
+    pub gc_nanos: u64,
+    pub words_allocated: u64,
+    top_after_gc: usize,
 }
 
 impl Default for Heap {
@@ -199,6 +204,9 @@ impl Heap {
             gc_every: if cfg!(feature = "gc-stress") { 1 } else { 0 },
             safepoints: 0,
             words_copied: 0,
+            gc_nanos: 0,
+            words_allocated: 0,
+            top_after_gc: 0,
         }
     }
 
@@ -990,6 +998,8 @@ impl Heap {
     /// Cheney semispace copy. Compacts, which is also what makes a dumped image
     /// contiguous and relocation-free.
     pub fn collect(&mut self, extra_roots: &mut [&mut [Value]]) {
+        let started = std::time::Instant::now();
+        self.words_allocated += self.top.saturating_sub(self.top_after_gc) as u64;
         let from = self.active;
         let to = if self.active == 0 { self.semi } else { 0 };
 
@@ -1089,6 +1099,18 @@ impl Heap {
         if self.top * LIVE_RATIO > self.semi {
             self.grow(self.top * LIVE_RATIO);
         }
+        self.top_after_gc = self.top;
+        self.gc_nanos += started.elapsed().as_nanos() as u64;
+    }
+
+    /// Words allocated since the heap was made.
+    pub fn allocated(&self) -> u64 {
+        self.words_allocated + self.top.saturating_sub(self.top_after_gc) as u64
+    }
+
+    /// The semispace's size in words, for reports.
+    pub fn semispace_words(&self) -> usize {
+        self.semi
     }
 
     /// Copy one object from from-space to to-space if it is not already there,
