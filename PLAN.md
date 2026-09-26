@@ -1096,6 +1096,27 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
   the only ways to run unboundedly, so the check points are where the
   effect would be discharged.
 
+- **Values as addresses, not indices.** (Decided by the user, 2026-09-26,
+  for after the regions work.) A Value's upper 61 bits are a word index
+  from the heap's base, so machine code keeps `BASE` in a register and
+  adds it to every heap access. That pays for itself only when references
+  are compressed (32-bit fields, as the JVM's compressed pointers), and
+  ours are not: "we aren't a JVM here". The reasons it was an index
+  (images load anywhere, the heap used to move when it grew, the heap is
+  safe Rust indexing a slice) no longer need the machine code to use one:
+  - the heap is now at a fixed address (`fixpt-memmgmt`), so it no longer
+    moves;
+  - the heap never dereferences a Value, so it can turn an address into a
+    slice index, `(raw − base) / 8`, in safe code;
+  - an image is already rebased to word 0 as it is dumped, and loading it
+    would add the new base in one walk.
+
+  So a Value will hold the byte address, tag in its low bits. The heap
+  subtracts the base; machine code does not add it, and frees the `BASE`
+  register. Many `add …, BASE, …` sites change: in the hand-encoded
+  machine, the stencils, register code and `native.fx`. Measure first
+  what the add costs on the list-heavy benchmarks, where it sits between
+  dependent loads. Compressed references (32-bit fields) are not planned.
 - **Recursion made explicit: I-cells.** (Raised by the user 2026-09-26:
   "make the imperative nature of mutual recursion explicit".) Seven
   options are compared in `docs/research/recursion-and-initialization.md`.

@@ -145,9 +145,11 @@ pub struct Heap {
     /// committed by the system as it is first written).
     mem: fixpt_memmgmt::Words,
     /// Base of the active semispace within `mem` — `0` or `MAX_SEMI_WORDS`.
+    /// A Value's index is from the start of `mem`, whichever is active, so
+    /// that where a Value points does not depend on it.
     active: usize,
     semi: usize,
-    /// Next free word, *relative to `active`*. Also the live-data size.
+    /// Next free word, from the start of `mem`: `top - active` is in use.
     top: usize,
 
     /// Explicit roots held by native code across a safepoint.
@@ -219,7 +221,7 @@ impl Heap {
     /// Live words in the active semispace.
     #[inline]
     pub fn used(&self) -> usize {
-        self.top
+        self.top - self.active
     }
     #[inline]
     pub fn capacity(&self) -> usize {
@@ -237,11 +239,11 @@ impl Heap {
     // ------------------------------------------------------------ raw word I/O
     #[inline]
     pub(crate) fn word(&self, rel: usize) -> u64 {
-        self.mem.words()[self.active + rel]
+        self.mem.words()[rel]
     }
     #[inline]
     fn set_word(&mut self, rel: usize, w: u64) {
-        self.mem.words_mut()[self.active + rel] = w;
+        self.mem.words_mut()[rel] = w;
     }
     #[inline]
     pub fn slot(&self, rel: usize) -> Value {
@@ -258,14 +260,14 @@ impl Heap {
     /// holds until the next allocation, which may grow the heap, or
     /// collection, which flips the semispaces.
     pub fn active_words(&self) -> *const u64 {
-        self.mem.words()[self.active..].as_ptr()
+        self.mem.words().as_ptr()
     }
 
     // ------------------------------------------------------------- allocation
     /// Reserve `n` words. Never moves anything; grows the heap if needed.
     fn bump(&mut self, n: usize) -> usize {
-        if self.top + n > self.semi {
-            self.grow(self.top + n);
+        if self.top + n > self.active + self.semi {
+            self.grow(self.top - self.active + n);
         }
         let at = self.top;
         self.top += n;
@@ -429,7 +431,7 @@ impl Heap {
     /// Payload length in words.
     #[inline]
     pub fn obj_len(&self, o: Value) -> usize {
-        let words = read_head(self.mem.words(), self.active + self.main_of(o)).payload_words();
+        let words = read_head(self.mem.words(), self.main_of(o)).payload_words();
         // A trailer is the runtime's, not part of the object's contents.
         if o.is_bloblet() && self.word(o.index() - 1) & TAG_MASK == TAG_TRAILER { words - 1 } else { words }
     }
@@ -678,7 +680,7 @@ impl Heap {
     /// bloblet's pointer, which has moved `fields` words forward.
     pub fn bloblet_publish(&mut self, v: Value, fields: usize, trailer: bool) -> Value {
         let main = v.index() - 1;
-        let head = read_head(self.mem.words(), self.active + main);
+        let head = read_head(self.mem.words(), main);
         assert_eq!(head.fields, 0, "only a reserved bloblet can be published");
         let total = fields + trailer as usize;
         assert!(head.bytes >= total * 8, "more fields than were reserved");
@@ -696,12 +698,12 @@ impl Heap {
     /// The main header's index, relative to the active space.
     fn bloblet_main(&self, v: Value) -> usize {
         debug_assert!(v.is_bloblet(), "{v:?} is not a bloblet");
-        find_main(self.mem.words(), self.active + v.index()).expect("no forwarding pointers outside a collection") - self.active
+        find_main(self.mem.words(), v.index()).expect("no forwarding pointers outside a collection")
     }
 
     /// What a bloblet's header says.
     pub fn bloblet_head(&self, v: Value) -> Head {
-        read_head(self.mem.words(), self.active + self.bloblet_main(v))
+        read_head(self.mem.words(), self.bloblet_main(v))
     }
 
     pub fn bloblet_kind(&self, v: Value) -> u8 {
@@ -989,7 +991,7 @@ impl Heap {
         if self.inhibited > 0 {
             return;
         }
-        let full = self.top as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
+        let full = (self.top - self.active) as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
         self.safepoints += 1;
         let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
         if full || policy {
@@ -1017,7 +1019,7 @@ impl Heap {
         // across a collection still finds its object, and the bug hides.
         if self.gc_every > 0 {
             let pad = 1 + (self.gc_count as usize % 7);
-            if self.top + pad <= self.semi {
+            if self.top - self.active + pad <= self.semi {
                 // A raw bloblet: a header, then a suffix the scan skips.
                 mem[to] = make_header(layout::kind("bloblet"), 0, (pad - 1) * 8);
                 for i in 1..pad {
@@ -1089,7 +1091,7 @@ impl Heap {
         }
 
         self.active = to;
-        self.top = free;
+        self.top = to + free;
         self.gc_count += 1;
         self.words_copied += free as u64;
 
@@ -1099,8 +1101,8 @@ impl Heap {
         // a word per word allocated. Growing only when the live data was
         // three quarters of the space collected again after a sliver of it,
         // copying everything each time.
-        if self.top * LIVE_RATIO > self.semi {
-            self.grow(self.top * LIVE_RATIO);
+        if free * LIVE_RATIO > self.semi {
+            self.grow(free * LIVE_RATIO);
         }
         self.top_after_gc = self.top;
         self.gc_nanos += started.elapsed().as_nanos() as u64;
@@ -1121,7 +1123,7 @@ impl Heap {
     /// Rust machine.) 0 while a policy collects at every safepoint, or
     /// collection is inhibited: then every allocation calls in.
     pub fn inline_limit(&self) -> usize {
-        if self.gc_every > 0 || self.inhibited > 0 { 0 } else { (self.semi as f64 * COLLECT_THRESHOLD) as usize }
+        if self.gc_every > 0 || self.inhibited > 0 { 0 } else { self.active + (self.semi as f64 * COLLECT_THRESHOLD) as usize }
     }
 
     /// Words allocated since the heap was made.
@@ -1140,25 +1142,29 @@ impl Heap {
     /// A forwarding pointer always records where the object's *main header*
     /// went, relative to `to`, whichever kind of pointer found it.
     fn copy_out(mem: &mut [u64], from: usize, to: usize, free: &mut usize, v: Value) -> Value {
+        // Only what is in from-space moves.
+        if !(from..from + MAX_SEMI_WORDS).contains(&v.index()) {
+            return v;
+        }
         if v.is_pair() {
-            let src = from + v.index();
+            let src = v.index();
             let first = Value(mem[src]);
             if first.is_forward() {
                 return Value::pair(first.index());
             }
-            let dst_rel = *free;
-            mem[to + dst_rel] = mem[src];
-            mem[to + dst_rel + 1] = mem[src + 1];
+            let dst = to + *free;
+            mem[dst] = mem[src];
+            mem[dst + 1] = mem[src + 1];
             *free += 2;
-            mem[src] = Value::forward(dst_rel).raw();
-            return Value::pair(dst_rel);
+            mem[src] = Value::forward(dst).raw();
+            return Value::pair(dst);
         }
         // A bloblet pointer, at the start of the suffix. Find the header, by
         // the trailer or the backward scan, and copy as any object. Leave a
         // second forward just before the suffix, so that the next pointer to
         // this bloblet finds it in one step, trailer or not.
         debug_assert!(v.tag() == TAG_BLOBLET);
-        let p = from + v.index();
+        let p = v.index();
         let new_main = match find_main(mem, p) {
             Err(done) => done,
             Ok(main) => {
@@ -1169,13 +1175,12 @@ impl Heap {
                 new_main
             }
         };
-        let head = read_head(mem, to + new_main);
+        let head = read_head(mem, new_main);
         Value::bloblet(new_main + 1 + head.fields)
     }
 
     /// Copy the object whose main header is at `main` (in from-space), unless
-    /// it has been already. Returns its main header's new index, relative to
-    /// `to`.
+    /// it has been already. Returns its main header's new index.
     fn copy_object(mem: &mut [u64], main: usize, to: usize, free: &mut usize) -> usize {
         let first = Value(mem[main]);
         if first.is_forward() {
@@ -1185,7 +1190,7 @@ impl Heap {
         let start = main - head.pre;
         let words = head.size();
         mem.copy_within(start..start + words, to + *free);
-        let new_main = *free + head.pre;
+        let new_main = to + *free + head.pre;
         *free += words;
         mem[main] = Value::forward(new_main).raw();
         new_main
@@ -1193,6 +1198,34 @@ impl Heap {
 
     // ------------------------------------------------------- image support
     /// The live prefix of the active semispace, ready to be written out as-is.
+    /// The live words, globals, symbols and roots, with every reference
+    /// rebased as though the active semispace began at word 0: an image's
+    /// contents, which `from_image` loads at word 0. Raw suffix words are
+    /// left as they are.
+    pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
+        let shift = (self.active as u64) << 3;
+        let rebase = |v: Value| if v.is_ref() { Value(v.raw() - shift) } else { v };
+        let mut words = self.mem.words()[self.active..self.top].to_vec();
+        let mut scan = 0;
+        while scan < words.len() {
+            let w = words[scan];
+            if is_header(w) {
+                let main = scan + is_extension(w) as usize;
+                let head = read_head(&words, main);
+                for i in 0..head.fields {
+                    words[main + 1 + i] = rebase(Value(words[main + 1 + i])).raw();
+                }
+                scan += head.size();
+            } else {
+                words[scan] = rebase(Value(words[scan])).raw();
+                words[scan + 1] = rebase(Value(words[scan + 1])).raw();
+                scan += 2;
+            }
+        }
+        let all = |vs: &[Value]| vs.iter().map(|v| rebase(*v)).collect::<Vec<_>>();
+        (words, all(&self.globals), all(&self.symbols), all(&self.roots))
+    }
+
     /// The explicit roots, in order: part of an image, since a runtime
     /// finds its own by position (`fixpt_runtime::ERROR_RTD_ROOT`).
     pub fn roots_slice(&self) -> &[Value] {
@@ -1200,7 +1233,7 @@ impl Heap {
     }
 
     pub fn live_words(&self) -> &[u64] {
-        &self.mem.words()[self.active..self.active + self.top]
+        &self.mem.words()[self.active..self.top]
     }
     pub fn globals_slice(&self) -> &[Value] {
         &self.globals
@@ -1239,7 +1272,7 @@ impl Heap {
     /// `fixpt image verify`, after every collection under `gc-stress`, and in
     /// tests — it is the cheapest way to catch a scan that desynchronised.
     pub fn verify(&self) -> Result<(), String> {
-        let mut scan = 0usize;
+        let mut scan = self.active;
         while scan < self.top {
             let w = self.word(scan);
             if is_header(w) {
@@ -1250,7 +1283,7 @@ impl Heap {
                 if is_extension(w) != header_is_large(self.word(main)) {
                     return Err(format!("the header at {main} disagrees with its extension word"));
                 }
-                let head = read_head(self.mem.words(), self.active + main);
+                let head = read_head(self.mem.words(), main);
                 if scan + head.size() > self.top {
                     return Err(format!("object at {scan} runs past the end of the heap"));
                 }
@@ -1301,12 +1334,13 @@ impl Heap {
         if v.is_ref() {
             // A bloblet with no suffix is pointed at one past its last field,
             // which for the last object in the heap is the top itself.
-            let beyond = if v.is_bloblet() { v.index() > self.top || v.index() == 0 } else { v.index() >= self.top };
+            let (lo, hi) = (self.active, self.top);
+            let beyond = if v.is_bloblet() { v.index() > hi || v.index() <= lo } else { v.index() >= hi || v.index() < lo };
             if beyond {
                 return Err(format!("dangling reference {v:?} at word {at}"));
             }
             if v.is_bloblet() {
-                let p = self.active + v.index();
+                let p = v.index();
                 let main = find_main(self.mem.words(), p)
                     .map_err(|_| format!("bloblet reference {v:?} at word {at} meets a forwarding pointer"))?;
                 let head = read_head(self.mem.words(), main);

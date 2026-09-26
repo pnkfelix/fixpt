@@ -86,10 +86,9 @@ impl std::error::Error for ImageError {}
 /// Serialise the live heap. The collector has already compacted it, so this is
 /// a copy of a contiguous region plus the two root arrays.
 pub fn dump(heap: &Heap) -> Vec<u8> {
-    let words = heap.live_words();
-    let globals = heap.globals_slice();
-    let symbols = heap.symbols_slice();
-    let roots = heap.roots_slice();
+    // Rebased to word 0, whichever semispace is active: an image loads there.
+    let (words, globals, symbols, roots) = heap.image_parts();
+    let (words, globals, symbols, roots) = (&words[..], &globals[..], &symbols[..], &roots[..]);
 
     let mut out = Vec::with_capacity(
         HEADER_BYTES + (words.len() + globals.len() + symbols.len() + roots.len()) * 8 + 4,

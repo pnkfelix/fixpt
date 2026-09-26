@@ -620,3 +620,15 @@ Register code does these inline, calling out only for what it cannot do:
 
 (All register code.) `closures` gains only from `cons`: making a closure
 is still a call-out.
+
+## The heap's memory from the system, and indices from its start
+
+The heap's words are now one mapping from `fixpt-memmgmt`, each
+semispace at a fixed place within it, and a Value's index counts from
+the mapping's start rather than from the active semispace's. That
+avoids the indirection a trait object would have added (+12–47% on the
+benchmarks, measured and reverted). Nothing moved in the numbers: the
+self-compile, stage 2, is 0.33 s as register code, with 9 collections
+(about 20 ms); the benchmarks are within noise of the previous section
+(`lists` 12.8 ms, `closures` 24.5 ms, `fib` 7.1 ms, `loop` 6.8 ms,
+`tak` 2.2 ms).
