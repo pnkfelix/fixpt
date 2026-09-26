@@ -1110,14 +1110,15 @@ impl Heap {
     }
 
     /// How far machine code may take `top` before it must call in to
-    /// allocate: the whole semispace. Machine code checks at every
-    /// allocation, so it needs no headroom; calling in when it is full, it
-    /// meets a safepoint, which collects. (Rust collects at 75%, since a
-    /// primitive may allocate several objects after its one safepoint.)
-    /// 0 while a policy collects at every safepoint, or collection is
-    /// inhibited: then every allocation calls in.
+    /// allocate: short of where a safepoint would collect, so that
+    /// collection comes when it would have, whichever machine runs the
+    /// program, and runs compare. (Machine code needs no headroom, and could
+    /// go to the end of the semispace; a program that allocates mostly
+    /// inline would then collect less often, but at other points than the
+    /// Rust machine.) 0 while a policy collects at every safepoint, or
+    /// collection is inhibited: then every allocation calls in.
     pub fn inline_limit(&self) -> usize {
-        if self.gc_every > 0 || self.inhibited > 0 { 0 } else { self.semi }
+        if self.gc_every > 0 || self.inhibited > 0 { 0 } else { (self.semi as f64 * COLLECT_THRESHOLD) as usize }
     }
 
     /// Words allocated since the heap was made.
