@@ -1062,6 +1062,22 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
 
      So the heap sets its own limit, with an error of its own, and
      reuses its segments rather than touching fresh ones.
+
+     How the heap reaches that memory (measured 2026-09-26). `fixpt-heap`
+     may not use `unsafe`, and cannot depend on `fixpt-native`, so memory
+     that `fixpt-native` reserved would reach the heap through a trait
+     object. With the heap's words behind one (`Box<dyn HeapMemory>`),
+     everything that goes through the heap's accessors slowed:
+     - lowered to Scheme: `closures` +47%, `lists` +27%, checking the
+       bootstrap +43%;
+     - the Rust machine: +15%;
+     - the self-compile as register code, through its call-outs: +12%.
+
+     Compiled code (which addresses the heap directly) and the collector
+     (which takes its slice once) were unchanged. A large zero-filled
+     `Vec<u64>`, sized to the heap's maximum, is committed lazily just as
+     the reservation is (`crates/fixpt-heap/tests/lazy.rs`), and costs
+     nothing per access.
   3. Reset when control leaves the body by an abort, as well as by a
      return. Continuations cannot come back in, which the rule forbids.
   4. The collector scans arenas as roots, collects reaps, and scans reaps
