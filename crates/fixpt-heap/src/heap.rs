@@ -6,9 +6,8 @@
 //! **A `Value` stays valid across allocation, and only across allocation.**
 //!
 //! Allocation never moves an existing object. When the active semispace runs
-//! out, the heap *grows* — it reallocates the backing `Vec` and copies the
-//! active half to the new base — and because every reference is an offset
-//! *relative to the semispace base*, not an absolute index or a pointer, every
+//! out, the heap *grows*, in place: each semispace has address space of its
+//! own, reserved when the heap is made (`fixpt_memmgmt::Words`), so every
 //! live `Value` keeps its meaning. Nothing is traced, so no root set is needed.
 //!
 //! Objects move only in [`Heap::collect`], which the execution engine calls at
@@ -27,6 +26,8 @@ use crate::value::{
     header_kind, is_extension, is_header, make_header, make_large_header,
 };
 use std::collections::HashMap;
+
+mod regions;
 
 /// What a main header says, with a large header's extension read too.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -132,6 +133,9 @@ const DEFAULT_SEMI_WORDS: usize = 1 << 16;
 /// The most words a semispace may grow to: each has this much address space
 /// of its own, reserved when the heap is made, so it grows in place.
 const MAX_SEMI_WORDS: usize = 1 << 31;
+/// Past the two semispaces, the regions' area (`regions`), as large.
+const ARENA_BASE: usize = 2 * MAX_SEMI_WORDS;
+const ARENA_WORDS: usize = 1 << 31;
 
 /// Collect when the active semispace is at least this full at a safepoint.
 const COLLECT_THRESHOLD: f64 = 0.75;
@@ -140,10 +144,13 @@ const COLLECT_THRESHOLD: f64 = 0.75;
 const LIVE_RATIO: usize = 3;
 
 pub struct Heap {
-    /// The two semispaces, `MAX_SEMI_WORDS` apart, at an address that never
-    /// changes: each grows in place, up to that (`fixpt_memmgmt::Words`,
-    /// committed by the system as it is first written).
+    /// The two semispaces, `MAX_SEMI_WORDS` apart, and the regions' area
+    /// after them, at an address that never changes: each semispace grows
+    /// in place, up to that (`fixpt_memmgmt::Words`, committed by the
+    /// system as it is first written).
     mem: fixpt_memmgmt::Words,
+    /// The live regions, and their chunks.
+    regions: regions::Regions,
     /// Base of the active semispace within `mem` — `0` or `MAX_SEMI_WORDS`.
     /// A Value's index is from the start of `mem`, whichever is active, so
     /// that where a Value points does not depend on it.
@@ -198,7 +205,8 @@ impl Heap {
     pub fn with_semispace(semi: usize) -> Heap {
         let semi = semi.max(1024);
         Heap {
-            mem: fixpt_memmgmt::Words::new(2 * MAX_SEMI_WORDS).expect("address space for the heap"),
+            mem: fixpt_memmgmt::Words::new(ARENA_BASE + ARENA_WORDS).expect("address space for the heap"),
+            regions: regions::Regions::new(),
             active: 0,
             semi,
             top: 0,
@@ -266,6 +274,11 @@ impl Heap {
     // ------------------------------------------------------------- allocation
     /// Reserve `n` words. Never moves anything; grows the heap if needed.
     fn bump(&mut self, n: usize) -> usize {
+        if let Some(h) = self.regions.target
+            && let Some(at) = self.regions.bump(h, n)
+        {
+            return at;
+        }
         if self.top + n > self.active + self.semi {
             self.grow(self.top - self.active + n);
         }
@@ -1057,37 +1070,17 @@ impl Heap {
                 *v = fwd!(*v);
             }
         }
-
-        // Scan to-space linearly. The first word at a boundary is either a
-        // header (an object follows) or an ordinary Value (a pair cell follows);
-        // see `value.rs` on why tag 110 is reserved to make this unambiguous.
-        while scan < free {
-            let w = mem[to + scan];
-            if is_header(w) {
-                // The collector needs only `F` and `B`: trace the fields, skip
-                // the suffix. It never asks what kind of object this is.
-                let main = to + scan + is_extension(w) as usize;
-                let head = read_head(mem, main);
-                for i in 0..head.fields {
-                    let at = main + 1 + i;
-                    let v = Value(mem[at]);
-                    if v.is_ref() {
-                        let n = Self::copy_out(mem, from, to, &mut free, v);
-                        mem[at] = n.raw();
-                    }
-                }
-                scan += head.size();
-            } else {
-                for i in 0..2 {
-                    let at = to + scan + i;
-                    let v = Value(mem[at]);
-                    if v.is_ref() {
-                        let n = Self::copy_out(mem, from, to, &mut free, v);
-                        mem[at] = n.raw();
-                    }
-                }
-                scan += 2;
+        // What the live regions hold is live, and stays where it is.
+        for (lo, hi) in self.regions.ranges() {
+            let mut at = lo;
+            while at < hi {
+                at += Self::scan_one(mem, at, from, to, &mut free);
             }
+        }
+
+        // Scan to-space linearly.
+        while scan < free {
+            scan += Self::scan_one(mem, to + scan, from, to, &mut free);
         }
 
         self.active = to;
@@ -1134,6 +1127,36 @@ impl Heap {
     /// The semispace's size in words, for reports.
     pub fn semispace_words(&self) -> usize {
         self.semi
+    }
+
+    /// Forward the references in the object or pair that starts at `at`;
+    /// its size. The first word at a boundary is either a header (an object
+    /// follows) or an ordinary Value (a pair cell follows); see `value.rs` on
+    /// why tag 110 is reserved to make this unambiguous.
+    #[inline(always)]
+    fn scan_one(mem: &mut [u64], at: usize, from: usize, to: usize, free: &mut usize) -> usize {
+        let w = mem[at];
+        if is_header(w) {
+            // The collector needs only `F` and `B`: trace the fields, skip
+            // the suffix. It never asks what kind of object this is.
+            let main = at + is_extension(w) as usize;
+            let head = read_head(mem, main);
+            for i in 0..head.fields {
+                let v = Value(mem[main + 1 + i]);
+                if v.is_ref() {
+                    mem[main + 1 + i] = Self::copy_out(mem, from, to, free, v).raw();
+                }
+            }
+            head.size()
+        } else {
+            for i in 0..2 {
+                let v = Value(mem[at + i]);
+                if v.is_ref() {
+                    mem[at + i] = Self::copy_out(mem, from, to, free, v).raw();
+                }
+            }
+            2
+        }
     }
 
     /// Copy one object from from-space to to-space if it is not already there,
@@ -1203,6 +1226,7 @@ impl Heap {
     /// contents, which `from_image` loads at word 0. Raw suffix words are
     /// left as they are.
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
+        assert_eq!(self.live_regions(), 0, "an image is made with no region live");
         let shift = (self.active as u64) << 3;
         let rebase = |v: Value| if v.is_ref() { Value(v.raw() - shift) } else { v };
         let mut words = self.mem.words()[self.active..self.top].to_vec();
@@ -1272,19 +1296,37 @@ impl Heap {
     /// `fixpt image verify`, after every collection under `gc-stress`, and in
     /// tests — it is the cheapest way to catch a scan that desynchronised.
     pub fn verify(&self) -> Result<(), String> {
-        let mut scan = self.active;
-        while scan < self.top {
+        self.verify_range(self.active, self.top)?;
+        for (lo, hi) in self.regions.ranges() {
+            self.verify_range(lo, hi).map_err(|e| format!("in a region: {e}"))?;
+        }
+        for (i, g) in self.globals.iter().enumerate() {
+            self.check_ref(*g, i)
+                .map_err(|e| format!("global {i}: {e}"))?;
+        }
+        for (i, s) in self.symbols.iter().enumerate() {
+            if !self.is_a(*s, ObjType::Symbol) {
+                return Err(format!("symbol table entry {i} is not a symbol"));
+            }
+        }
+        Ok(())
+    }
+
+    /// The objects and pairs from `lo` up to `top`, walked and checked.
+    fn verify_range(&self, lo: usize, top: usize) -> Result<(), String> {
+        let mut scan = lo;
+        while scan < top {
             let w = self.word(scan);
             if is_header(w) {
                 let main = scan + is_extension(w) as usize;
-                if main >= self.top || !is_header(self.word(main)) || is_extension(self.word(main)) {
+                if main >= top || !is_header(self.word(main)) || is_extension(self.word(main)) {
                     return Err(format!("the extension word at {scan} is not followed by a main header"));
                 }
                 if is_extension(w) != header_is_large(self.word(main)) {
                     return Err(format!("the header at {main} disagrees with its extension word"));
                 }
                 let head = read_head(self.mem.words(), main);
-                if scan + head.size() > self.top {
+                if scan + head.size() > top {
                     return Err(format!("object at {scan} runs past the end of the heap"));
                 }
                 for i in 0..head.fields {
@@ -1302,21 +1344,12 @@ impl Heap {
                 }
                 scan += head.size();
             } else {
-                if scan + 2 > self.top {
+                if scan + 2 > top {
                     return Err(format!("pair at {scan} runs past the end of the heap"));
                 }
                 self.check_ref(self.slot(scan), scan)?;
                 self.check_ref(self.slot(scan + 1), scan)?;
                 scan += 2;
-            }
-        }
-        for (i, g) in self.globals.iter().enumerate() {
-            self.check_ref(*g, i)
-                .map_err(|e| format!("global {i}: {e}"))?;
-        }
-        for (i, s) in self.symbols.iter().enumerate() {
-            if !self.is_a(*s, ObjType::Symbol) {
-                return Err(format!("symbol table entry {i} is not a symbol"));
             }
         }
         Ok(())
@@ -1330,6 +1363,11 @@ impl Heap {
         }
         if v.tag() == crate::value::TAG_UNUSED {
             return Err(format!("a word with the retired tag 010, at word {at}"));
+        }
+        // A region's objects are checked as its chunks are walked; and a
+        // reference to one ended may linger, unused, in what is dead.
+        if v.is_ref() && Self::in_region_area(v.index()) {
+            return Ok(());
         }
         if v.is_ref() {
             // A bloblet with no suffix is pointed at one past its last field,
