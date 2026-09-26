@@ -91,12 +91,18 @@ struct Label(usize);
 /// Instructions with labels, patched when everything is placed.
 struct Asm {
     code: Vec<u32>,
-    labels: Vec<Option<usize>>,
+    /// Where each label is, in instructions from this code's start: below
+    /// zero for one in the machine this code is placed after.
+    labels: Vec<Option<i64>>,
     fixups: Vec<(usize, usize)>,
     /// Traps raised in the routine being emitted, placed after it.
     stubs: Vec<(Label, u64, u64)>,
     trap_common: Label,
     exit_common: Label,
+    /// Compiling a word: where its next cell's code is, and a branch's
+    /// target's. `None` in the machine's own routines, which `NEXT`.
+    cont: Option<Label>,
+    target: Option<Label>,
 }
 
 impl Asm {
@@ -108,6 +114,8 @@ impl Asm {
             stubs: Vec::new(),
             trap_common: Label(0),
             exit_common: Label(0),
+            cont: None,
+            target: None,
         };
         a.trap_common = a.label();
         a.exit_common = a.label();
@@ -128,7 +136,13 @@ impl Asm {
     }
     fn bind(&mut self, l: Label) {
         assert!(self.labels[l.0].is_none());
-        self.labels[l.0] = Some(self.here());
+        self.labels[l.0] = Some(self.here() as i64);
+    }
+    /// Bind `l` to instruction `at`, counted from this code's start, which
+    /// may be outside it.
+    fn bind_at(&mut self, l: Label, at: i64) {
+        assert!(self.labels[l.0].is_none());
+        self.labels[l.0] = Some(at);
     }
     fn to(&mut self, l: Label, w: u32) {
         self.fixups.push((self.here(), l.0));
@@ -165,7 +179,7 @@ impl Asm {
     fn finish(mut self) -> Vec<u32> {
         for (at, l) in std::mem::take(&mut self.fixups) {
             let to = self.labels[l].expect("label never bound");
-            let d = to as i64 - at as i64;
+            let d = to - at as i64;
             let w = self.code[at];
             self.code[at] = if w & 0xFC00_0000 == 0x1400_0000 {
                 b(d)
@@ -191,6 +205,33 @@ impl Asm {
         self.e(ldur(X10, X11, field_off(WORD_ENTRY)));
         self.e(ldr_reg(X10, TABLE, X10));
         self.e(br(X10));
+    }
+
+    /// On to the next cell of this word: `NEXT`, or, in a word compiled to
+    /// machine code, a jump to that cell's code.
+    fn cont(&mut self) {
+        match self.cont {
+            Some(l) => self.b(l),
+            None => self.next(),
+        }
+    }
+
+    /// On from where `CUR` and the ip now are, `d` (8k) in `dreg`: into the
+    /// word's machine code there, if it has some, else `NEXT`. Where
+    /// control lands in another word: a call, a return.
+    fn enter_cur(&mut self, dreg: Reg) {
+        let threaded = self.label();
+        self.e(add(X11, BASE, CUR));
+        self.e(ldur(X10, X11, field_off(WORD_ENTRY)));
+        self.cbz(X10, threaded);
+        self.e(ldr(X16, ST, off(offset_of!(State, resume))));
+        self.e(ldr_reg(X16, X16, X10));
+        self.cbz(X16, threaded);
+        self.e(ldr_reg(X16, X16, dreg));
+        self.cbz(X16, threaded);
+        self.e(br(X16));
+        self.bind(threaded);
+        self.next();
     }
 
     fn next(&mut self) {
@@ -274,7 +315,7 @@ impl Asm {
         self.e(sub_imm(IP, IP, 4));
         self.e(sub(IP, IP, X13));
         self.fp_decode(X14);
-        self.next();
+        self.enter_cur(X13);
     }
 
     /// Check that `reg` is a threaded closure, else go to `not`: its
@@ -330,7 +371,8 @@ impl Asm {
     }
 
     /// Leave machine code for the Rust side of routine `n`; carry on
-    /// unless it reports a trap.
+    /// unless it reports a trap: with this word's next cell if the routine
+    /// only computes, or from wherever it left the machine (control).
     fn callout(&mut self, n: u64) {
         self.save();
         self.e(mov(0, ST));
@@ -340,7 +382,11 @@ impl Asm {
         let exit = self.exit_common;
         self.cbnz(0, exit);
         self.load();
-        self.next();
+        if matches!(ROUTINES[n as usize].0, "prompt" | "abort" | "callcomp" | "callcc" | "withmark" | "withmark-tail" | "call" | "tailcall" | "execute" | "docol" | "exit" | "halt" | "return") {
+            self.enter_cur(X13);
+        } else {
+            self.cont();
+        }
     }
 
     /// `x13` = top, `x14` = the one below; trap unless both are fixnums.
@@ -369,7 +415,7 @@ fn cond_of(w: u32) -> Cond {
 
 /// The whole machine: an entry routine, the common exits, and one routine per
 /// routine number. Returns the code and where each routine starts.
-fn generate() -> (Vec<u32>, usize, Vec<usize>) {
+fn generate() -> (Vec<u32>, usize, Vec<usize>, [i64; 2]) {
     let mut a = Asm::new();
 
     // The entry, called from Rust with the state in x0.
@@ -411,271 +457,290 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>) {
             a.e(0xD503_201F); // nop: routines start 16-aligned
         }
         starts.push(a.here());
-        let name: &'static str = name;
-        match name {
-            "docol" => {
-                // x9 is the word and x11 its suffix + 4.
-                a.fuel();
-                a.ds_limit();
-                a.rs_limit();
-                a.push_return();
-                a.e(mov(CUR, W));
-                a.e(sub_imm(IP, X11, (4 + 8 * WORD_CELL0) as u32));
-                a.next();
-            }
-            "exit" => a.pop_return(),
-            "halt" => {
-                let ec = a.exit_common;
-                a.b(ec);
-            }
-            "lit" => {
-                a.e(ldr_post(X13, IP, -8));
-                a.e(str_pre(X13, DSP, -8));
-                a.next();
-            }
-            "branch" => {
-                a.e(ldr_post(X13, IP, -8));
-                a.e(sub(IP, IP, X13));
-                a.fuel();
-                a.ds_limit();
-                a.next();
-            }
-            "0branch" => {
-                let skip = a.label();
-                a.e(ldr_post(X14, DSP, 8));
-                a.e(ldr_post(X13, IP, -8));
-                a.value(X15, Value::FALSE);
-                a.e(cmp(X14, X15));
-                a.b_cond(Cond::Ne, skip);
-                a.e(sub(IP, IP, X13));
-                a.fuel();
-                a.ds_limit();
-                a.bind(skip);
-                a.next();
-            }
-            "execute" => {
-                let is_ref = a.label();
-                let bad = a.label();
-                a.e(ldr_post(W, DSP, 8));
-                a.e(tst_low(W, 3));
-                a.b_cond(Cond::Ne, is_ref);
-                // A primitive, by number: 1 ≤ n < PRIMITIVES.
-                a.cbz(W, bad);
-                a.e(cmp_imm(W, (8 * PRIMITIVES) as u32));
-                a.b_cond(Cond::Hs, bad);
-                a.e(ldr_reg(X10, TABLE, W));
-                a.e(br(X10));
-                a.bind(bad);
-                a.e(movz(X13, Trap::NoRoutine(0).code().0 as u32, 0));
-                a.e(asr_imm(X14, W, 3));
-                let tc = a.trap_common;
-                a.b(tc);
-                // A word: a bloblet with a trailer, whose header says kind 33.
-                a.bind(is_ref);
-                a.check_tag(W, TAG_BLOBLET, Trap::NotAWord);
-                a.e(add(X11, BASE, W));
-                a.e(ldur(X15, X11, field_off(1)));
-                a.check_tag(X15, TAG_TRAILER, Trap::NotAWord);
-                // The header is F + 1 words before the suffix, and the
-                // trailer is F << 3 | 5: header = x11 - 4 - 8 - 8F.
-                a.e(sub(X14, X11, X15));
-                a.e(ldur(X14, X14, -7));
-                a.e(ubfx(X14, X14, 3, 8));
-                a.e(cmp_imm(X14, KIND as u32));
-                a.trap_if(Cond::Ne, Trap::NotAWord);
-                a.run_word_in_w();
-            }
-            "dup" => {
-                a.e(ldr(X13, DSP, 0));
-                a.e(str_pre(X13, DSP, -8));
-                a.next();
-            }
-            "drop" => {
-                a.e(add_imm(DSP, DSP, 8));
-                a.next();
-            }
-            "swap" => {
-                a.e(ldp(X13, X14, DSP, 0));
-                a.e(stp(X14, X13, DSP, 0));
-                a.next();
-            }
-            "over" => {
-                a.e(ldr(X13, DSP, 8));
-                a.e(str_pre(X13, DSP, -8));
-                a.next();
-            }
-            "+" | "-" => {
-                a.two_fixnums(name);
-                a.e(if name == "+" { adds(X15, X14, X13) } else { subs(X15, X14, X13) });
-                a.trap_if(Cond::Vs, Trap::Overflow { routine: name });
-                a.e(str_pre(X15, DSP, 8));
-                a.next();
-            }
-            "<" => {
-                a.two_fixnums(name);
-                a.e(cmp(X14, X13));
-                a.value(X16, Value::TRUE);
-                a.value(X15, Value::FALSE);
-                a.e(csel(X15, X16, X15, Cond::Lt));
-                a.e(str_pre(X15, DSP, 8));
-                a.next();
-            }
-            "eq" => {
-                a.e(ldp(X13, X14, DSP, 0));
-                a.e(cmp(X14, X13));
-                a.value(X16, Value::TRUE);
-                a.value(X15, Value::FALSE);
-                a.e(csel(X15, X16, X15, Cond::Eq));
-                a.e(str_pre(X15, DSP, 8));
-                a.next();
-            }
-            "car" | "cdr" => {
-                a.e(ldr(X15, DSP, 0));
-                a.check_tag(X15, TAG_PAIR, Trap::Type { routine: name });
-                a.e(add(X14, BASE, X15));
-                a.e(ldur(X15, X14, if name == "car" { -1 } else { 7 }));
-                a.e(str(X15, DSP, 0));
-                a.next();
-            }
-            "field@" => {
-                // The fast path: a bloblet with a trailer, which says F.
-                let slow = a.label();
-                a.e(ldp(X15, X14, DSP, 0));
-                a.e(tst_low(X15, 3));
-                a.trap_if(Cond::Ne, Trap::Type { routine: name });
-                a.check_tag(X14, TAG_BLOBLET, Trap::Type { routine: name });
-                a.e(add(X11, BASE, X14));
-                a.e(ldur(X16, X11, field_off(1)));
-                a.e(and_low(X13, X16, 3));
-                a.e(cmp_imm(X13, TAG_TRAILER as u32));
-                a.b_cond(Cond::Ne, slow);
-                // 2 ≤ k ≤ F; 8k is x15 and 8F is the trailer less its tag.
-                a.e(cmp_imm(X15, 16));
-                a.trap_if(Cond::Lt, Trap::Field { routine: name });
-                a.e(sub_imm(X16, X16, TAG_TRAILER as u32));
-                a.e(cmp(X15, X16));
-                a.trap_if(Cond::Gt, Trap::Field { routine: name });
-                a.e(sub(X16, X11, X15));
-                a.e(ldur(X15, X16, -4));
-                a.e(str_pre(X15, DSP, 8));
-                a.next();
-                a.bind(slow);
-                a.callout(n as u64);
-            }
-            // Code compiled from FX-26: frames on the data stack, flat
-            // closures, globals, calls; as `fixpt_engine::threaded` has them.
-            "slot" | "slot!" => {
-                // Slot i is 8i bytes below FP, and must be on the stack.
-                a.e(ldr_post(X13, IP, -8));
-                a.e(sub(X14, FP, X13));
-                if name == "slot!" {
-                    a.e(ldr_post(X15, DSP, 8));
-                }
-                a.e(cmp(X14, DSP));
-                a.trap_if(Cond::Lo, Trap::Field { routine: name });
-                if name == "slot" {
-                    a.e(ldr(X15, X14, 0));
-                    a.e(str_pre(X15, DSP, -8));
-                } else {
-                    a.e(str(X15, X14, 0));
-                }
-                a.next();
-            }
-            "free" => {
-                // Field CLOSURE_FREE0 + i of the closure running, if it has it.
-                let bad = a.label();
-                a.e(ldr_post(X10, IP, -8));
-                a.is_closure(CLO, bad);
-                a.e(add_imm(X10, X10, (8 * CLOSURE_FREE0) as u32));
-                a.e(sub_imm(X16, X15, TAG_TRAILER as u32));
-                a.e(cmp(X10, X16));
-                a.b_cond(Cond::Gt, bad);
-                a.e(sub(X14, X11, X10));
-                a.e(ldur(X15, X14, -4));
-                a.e(str_pre(X15, DSP, -8));
-                a.next();
-                a.bind(bad);
-                let (code, aux) = Trap::Field { routine: name }.code();
-                a.e(movz(X13, code as u32, 0));
-                a.e(movz(X14, aux as u32, 0));
-                let tc = a.trap_common;
-                a.b(tc);
-            }
-            "global" | "global!" => {
-                // The cell's value is its field 2 (checked when the word was
-                // made).
-                a.e(ldr_post(X13, IP, -8));
-                a.e(add(X11, BASE, X13));
-                if name == "global" {
-                    a.e(ldur(X15, X11, field_off(2)));
-                    a.e(str_pre(X15, DSP, -8));
-                } else {
-                    a.e(ldr_post(X15, DSP, 8));
-                    a.e(stur(X15, X11, field_off(2)));
-                }
-                a.next();
-            }
-            "call" | "tailcall" => {
-                // A threaded closure on top: its word, over a frame of the n
-                // values below it. Anything else (a continuation, or not a
-                // procedure) goes the Rust machine's way.
-                let other = a.label();
-                a.e(ldr(W, DSP, 0));
-                a.is_closure(W, other);
-                a.fuel();
-                a.ds_limit();
-                a.rs_limit();
-                // The count, 8n, in X10: `push_return` uses X13 and X14.
-                a.e(ldr_post(X10, IP, -8));
-                a.e(add_imm(DSP, DSP, 8));
-                if name == "call" {
-                    a.push_return();
-                    // Slot 0 is the first argument, the deepest: DSP + 8n - 8.
-                    a.e(add(X14, DSP, X10));
-                    a.e(sub_imm(FP, X14, 8));
-                } else {
-                    // Slide the n arguments down over this frame, deepest
-                    // first; FP stays.
-                    let (top, done) = (a.label(), a.label());
-                    a.e(add(X14, DSP, X10));
-                    a.e(sub_imm(X14, X14, 8));
-                    a.e(mov(X15, FP));
-                    a.e(mov(X16, X10));
-                    a.bind(top);
-                    a.cbz(X16, done);
-                    a.e(ldr_post(X10, X14, -8));
-                    a.e(str_post(X10, X15, -8));
-                    a.e(sub_imm(X16, X16, 8));
-                    a.b(top);
-                    a.bind(done);
-                    a.e(add_imm(DSP, X15, 8));
-                }
-                a.e(mov(CLO, W));
-                a.e(add(X11, BASE, W));
-                a.e(ldur(CUR, X11, field_off(CLOSURE_WORD)));
-                a.e(add(IP, BASE, CUR));
-                a.e(sub_imm(IP, IP, (4 + 8 * WORD_CELL0) as u32));
-                a.next();
-                a.bind(other);
-                a.callout(n as u64);
-            }
-            "return" => {
-                // The value on top replaces the frame; then back.
-                a.e(ldr_post(X15, DSP, 8));
-                a.e(add_imm(X14, FP, 8));
-                a.e(cmp(DSP, X14));
-                a.trap_if(Cond::Hi, Trap::Underflow { routine: name });
-                a.e(mov(DSP, FP));
-                a.e(str(X15, DSP, 0));
-                a.pop_return();
-            }
-            // Everything else: the Rust machine runs it on these stacks
-            // (`callout`), so it means exactly what it means there.
-            _ => a.callout(n as u64),
-        }
+        routine_body(&mut a, n, name);
         a.flush_stubs();
     }
-    (a.finish(), entry, starts)
+    let commons = [a.trap_common, a.exit_common].map(|l| a.labels[l.0].expect("bound"));
+    (a.finish(), entry, starts, commons)
+}
+
+/// Routine `n`'s code: in the machine, ending in `NEXT`; or, in a word
+/// compiled to machine code (`a.cont` set), going on to the next cell's.
+fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
+    match name {
+        "docol" => {
+            // x9 is the word and x11 its suffix + 4.
+            a.fuel();
+            a.ds_limit();
+            a.rs_limit();
+            a.push_return();
+            a.e(mov(CUR, W));
+            a.e(sub_imm(IP, X11, (4 + 8 * WORD_CELL0) as u32));
+            a.next();
+        }
+        "exit" => a.pop_return(),
+        "halt" => {
+            let ec = a.exit_common;
+            a.b(ec);
+        }
+        "lit" => {
+            a.e(ldr_post(X13, IP, -8));
+            a.e(str_pre(X13, DSP, -8));
+            a.cont();
+        }
+        "branch" => {
+            a.e(ldr_post(X13, IP, -8));
+            a.e(sub(IP, IP, X13));
+            a.fuel();
+            a.ds_limit();
+            match a.target {
+                Some(t) => a.b(t),
+                None => a.next(),
+            }
+        }
+        "0branch" => {
+            let skip = a.label();
+            a.e(ldr_post(X14, DSP, 8));
+            a.e(ldr_post(X13, IP, -8));
+            a.value(X15, Value::FALSE);
+            a.e(cmp(X14, X15));
+            a.b_cond(Cond::Ne, skip);
+            a.e(sub(IP, IP, X13));
+            a.fuel();
+            a.ds_limit();
+            match a.target {
+                Some(t) => {
+                    a.b(t);
+                    a.bind(skip);
+                    a.cont();
+                }
+                None => {
+                    a.bind(skip);
+                    a.next();
+                }
+            }
+        }
+        "execute" => {
+            let is_ref = a.label();
+            let bad = a.label();
+            a.e(ldr_post(W, DSP, 8));
+            a.e(tst_low(W, 3));
+            a.b_cond(Cond::Ne, is_ref);
+            // A primitive, by number: 1 ≤ n < PRIMITIVES.
+            a.cbz(W, bad);
+            a.e(cmp_imm(W, (8 * PRIMITIVES) as u32));
+            a.b_cond(Cond::Hs, bad);
+            a.e(ldr_reg(X10, TABLE, W));
+            a.e(br(X10));
+            a.bind(bad);
+            a.e(movz(X13, Trap::NoRoutine(0).code().0 as u32, 0));
+            a.e(asr_imm(X14, W, 3));
+            let tc = a.trap_common;
+            a.b(tc);
+            // A word: a bloblet with a trailer, whose header says kind 33.
+            a.bind(is_ref);
+            a.check_tag(W, TAG_BLOBLET, Trap::NotAWord);
+            a.e(add(X11, BASE, W));
+            a.e(ldur(X15, X11, field_off(1)));
+            a.check_tag(X15, TAG_TRAILER, Trap::NotAWord);
+            // The header is F + 1 words before the suffix, and the
+            // trailer is F << 3 | 5: header = x11 - 4 - 8 - 8F.
+            a.e(sub(X14, X11, X15));
+            a.e(ldur(X14, X14, -7));
+            a.e(ubfx(X14, X14, 3, 8));
+            a.e(cmp_imm(X14, KIND as u32));
+            a.trap_if(Cond::Ne, Trap::NotAWord);
+            a.run_word_in_w();
+        }
+        "dup" => {
+            a.e(ldr(X13, DSP, 0));
+            a.e(str_pre(X13, DSP, -8));
+            a.cont();
+        }
+        "drop" => {
+            a.e(add_imm(DSP, DSP, 8));
+            a.cont();
+        }
+        "swap" => {
+            a.e(ldp(X13, X14, DSP, 0));
+            a.e(stp(X14, X13, DSP, 0));
+            a.cont();
+        }
+        "over" => {
+            a.e(ldr(X13, DSP, 8));
+            a.e(str_pre(X13, DSP, -8));
+            a.cont();
+        }
+        "+" | "-" => {
+            a.two_fixnums(name);
+            a.e(if name == "+" { adds(X15, X14, X13) } else { subs(X15, X14, X13) });
+            a.trap_if(Cond::Vs, Trap::Overflow { routine: name });
+            a.e(str_pre(X15, DSP, 8));
+            a.cont();
+        }
+        "<" => {
+            a.two_fixnums(name);
+            a.e(cmp(X14, X13));
+            a.value(X16, Value::TRUE);
+            a.value(X15, Value::FALSE);
+            a.e(csel(X15, X16, X15, Cond::Lt));
+            a.e(str_pre(X15, DSP, 8));
+            a.cont();
+        }
+        "eq" => {
+            a.e(ldp(X13, X14, DSP, 0));
+            a.e(cmp(X14, X13));
+            a.value(X16, Value::TRUE);
+            a.value(X15, Value::FALSE);
+            a.e(csel(X15, X16, X15, Cond::Eq));
+            a.e(str_pre(X15, DSP, 8));
+            a.cont();
+        }
+        "car" | "cdr" => {
+            a.e(ldr(X15, DSP, 0));
+            a.check_tag(X15, TAG_PAIR, Trap::Type { routine: name });
+            a.e(add(X14, BASE, X15));
+            a.e(ldur(X15, X14, if name == "car" { -1 } else { 7 }));
+            a.e(str(X15, DSP, 0));
+            a.cont();
+        }
+        "field@" => {
+            // The fast path: a bloblet with a trailer, which says F.
+            let slow = a.label();
+            a.e(ldp(X15, X14, DSP, 0));
+            a.e(tst_low(X15, 3));
+            a.trap_if(Cond::Ne, Trap::Type { routine: name });
+            a.check_tag(X14, TAG_BLOBLET, Trap::Type { routine: name });
+            a.e(add(X11, BASE, X14));
+            a.e(ldur(X16, X11, field_off(1)));
+            a.e(and_low(X13, X16, 3));
+            a.e(cmp_imm(X13, TAG_TRAILER as u32));
+            a.b_cond(Cond::Ne, slow);
+            // 2 ≤ k ≤ F; 8k is x15 and 8F is the trailer less its tag.
+            a.e(cmp_imm(X15, 16));
+            a.trap_if(Cond::Lt, Trap::Field { routine: name });
+            a.e(sub_imm(X16, X16, TAG_TRAILER as u32));
+            a.e(cmp(X15, X16));
+            a.trap_if(Cond::Gt, Trap::Field { routine: name });
+            a.e(sub(X16, X11, X15));
+            a.e(ldur(X15, X16, -4));
+            a.e(str_pre(X15, DSP, 8));
+            a.cont();
+            a.bind(slow);
+            a.callout(n as u64);
+        }
+        // Code compiled from FX-26: frames on the data stack, flat
+        // closures, globals, calls; as `fixpt_engine::threaded` has them.
+        "slot" | "slot!" => {
+            // Slot i is 8i bytes below FP, and must be on the stack.
+            a.e(ldr_post(X13, IP, -8));
+            a.e(sub(X14, FP, X13));
+            if name == "slot!" {
+                a.e(ldr_post(X15, DSP, 8));
+            }
+            a.e(cmp(X14, DSP));
+            a.trap_if(Cond::Lo, Trap::Field { routine: name });
+            if name == "slot" {
+                a.e(ldr(X15, X14, 0));
+                a.e(str_pre(X15, DSP, -8));
+            } else {
+                a.e(str(X15, X14, 0));
+            }
+            a.cont();
+        }
+        "free" => {
+            // Field CLOSURE_FREE0 + i of the closure running, if it has it.
+            let bad = a.label();
+            a.e(ldr_post(X10, IP, -8));
+            a.is_closure(CLO, bad);
+            a.e(add_imm(X10, X10, (8 * CLOSURE_FREE0) as u32));
+            a.e(sub_imm(X16, X15, TAG_TRAILER as u32));
+            a.e(cmp(X10, X16));
+            a.b_cond(Cond::Gt, bad);
+            a.e(sub(X14, X11, X10));
+            a.e(ldur(X15, X14, -4));
+            a.e(str_pre(X15, DSP, -8));
+            a.cont();
+            a.bind(bad);
+            let (code, aux) = Trap::Field { routine: name }.code();
+            a.e(movz(X13, code as u32, 0));
+            a.e(movz(X14, aux as u32, 0));
+            let tc = a.trap_common;
+            a.b(tc);
+        }
+        "global" | "global!" => {
+            // The cell's value is its field 2 (checked when the word was
+            // made).
+            a.e(ldr_post(X13, IP, -8));
+            a.e(add(X11, BASE, X13));
+            if name == "global" {
+                a.e(ldur(X15, X11, field_off(2)));
+                a.e(str_pre(X15, DSP, -8));
+            } else {
+                a.e(ldr_post(X15, DSP, 8));
+                a.e(stur(X15, X11, field_off(2)));
+            }
+            a.cont();
+        }
+        "call" | "tailcall" => {
+            // A threaded closure on top: its word, over a frame of the n
+            // values below it. Anything else (a continuation, or not a
+            // procedure) goes the Rust machine's way.
+            let other = a.label();
+            a.e(ldr(W, DSP, 0));
+            a.is_closure(W, other);
+            a.fuel();
+            a.ds_limit();
+            a.rs_limit();
+            // The count, 8n, in X10: `push_return` uses X13 and X14.
+            a.e(ldr_post(X10, IP, -8));
+            a.e(add_imm(DSP, DSP, 8));
+            if name == "call" {
+                a.push_return();
+                // Slot 0 is the first argument, the deepest: DSP + 8n - 8.
+                a.e(add(X14, DSP, X10));
+                a.e(sub_imm(FP, X14, 8));
+            } else {
+                // Slide the n arguments down over this frame, deepest
+                // first; FP stays.
+                let (top, done) = (a.label(), a.label());
+                a.e(add(X14, DSP, X10));
+                a.e(sub_imm(X14, X14, 8));
+                a.e(mov(X15, FP));
+                a.e(mov(X16, X10));
+                a.bind(top);
+                a.cbz(X16, done);
+                a.e(ldr_post(X10, X14, -8));
+                a.e(str_post(X10, X15, -8));
+                a.e(sub_imm(X16, X16, 8));
+                a.b(top);
+                a.bind(done);
+                a.e(add_imm(DSP, X15, 8));
+            }
+            a.e(mov(CLO, W));
+            a.e(add(X11, BASE, W));
+            a.e(ldur(CUR, X11, field_off(CLOSURE_WORD)));
+            a.e(add(IP, BASE, CUR));
+            a.e(sub_imm(IP, IP, (4 + 8 * WORD_CELL0) as u32));
+            a.e(movz(X13, (8 * WORD_CELL0) as u32, 0));
+            a.enter_cur(X13);
+            a.bind(other);
+            a.callout(n as u64);
+        }
+        "return" => {
+            // The value on top replaces the frame; then back.
+            a.e(ldr_post(X15, DSP, 8));
+            a.e(add_imm(X14, FP, 8));
+            a.e(cmp(DSP, X14));
+            a.trap_if(Cond::Hi, Trap::Underflow { routine: name });
+            a.e(mov(DSP, FP));
+            a.e(str(X15, DSP, 0));
+            a.pop_return();
+        }
+        // Everything else: the Rust machine runs it on these stacks
+        // (`callout`), so it means exactly what it means there.
+        _ => a.callout(n as u64),
+    }
 }
 
 // Invariants the generated code bakes in.
@@ -1055,11 +1120,8 @@ impl Stacks {
     /// ends.
     pub(crate) fn start(&mut self, heap: &mut Heap, word: Value, args: &[Value], fuel: u64) -> State {
         assert!(fixpt_engine::threaded::is_word(heap, word), "{word:?} is not a threaded word");
-        assert_eq!(
-            heap.bloblet_slot(word, WORD_ENTRY).as_fixnum() as u64,
-            ROUTINE_DOCOL,
-            "the machine starts with a word made of cells"
-        );
+        let entry = heap.bloblet_slot(word, WORD_ENTRY).as_fixnum() as u64;
+        assert!(entry == ROUTINE_DOCOL || entry >= PRIMITIVES as u64, "the machine starts with a word made of cells");
         assert!(args.len() <= DS_LIMIT);
         let dsp = self.ds.base - 8 * args.len() as u64;
         for (i, a) in args.iter().rev().enumerate() {
@@ -1091,6 +1153,7 @@ impl Stacks {
             rt: 0,
             rs_limit: self.rs.base - 32 * (RS_LIMIT as u64 + 1),
             routines: [0; ROUTINE_SLOTS],
+            resume: 0,
         }
     }
 
@@ -1113,11 +1176,28 @@ impl Stacks {
     }
 }
 
-/// The native machine: its code, generated once, and its stacks.
+/// Entry numbers from `PRIMITIVES` up name words compiled to machine code,
+/// numbered across every machine in the process, so that no two words share
+/// one. A machine that has no code for a word's number runs its cells.
+pub const NATIVE_SLOTS: usize = 1 << 16;
+static NEXT_SLOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(PRIMITIVES);
+
+/// Room for the machine and for the words compiled into it.
+const CODE_SPACE: usize = 32 << 20;
+
+/// The native machine: its code, generated once, the words compiled into
+/// it, and its stacks.
 pub struct NativeMachine {
     space: CodeSpace,
     entry: Offset,
+    /// Where the machine's code is, and in it the common trap and exit.
+    machine_at: Offset,
+    commons: [i64; 2],
+    /// Each entry number's code: a routine's, a compiled word's entry as a
+    /// cell, or, for a number this machine has no code for, `docol`'s.
     table: Vec<u64>,
+    /// Each entry number's table of where its code resumes, by `8k`, or 0.
+    resume: Vec<u64>,
     stacks: Stacks,
     /// Fuel left after the last run.
     pub fuel_left: u64,
@@ -1125,13 +1205,140 @@ pub struct NativeMachine {
 
 impl NativeMachine {
     pub fn new() -> NativeMachine {
-        let (code, entry, starts) = generate();
-        let mut space = CodeSpace::new(code.len() * 4).expect("a code space");
+        let (code, entry, starts, commons) = generate();
+        let mut space = CodeSpace::new(CODE_SPACE).expect("a code space");
         let at = space.alloc(code.len() * 4, 16).expect("room for the machine");
         space.write_code(at, &code);
         space.flush(at, code.len() * 4);
-        let table = starts.iter().map(|s| space.exec_addr(at + 4 * s) as u64).collect();
-        NativeMachine { entry: at + 4 * entry, space, table, stacks: Stacks::new(), fuel_left: 0 }
+        let mut table: Vec<u64> = starts.iter().map(|s| space.exec_addr(at + 4 * s) as u64).collect();
+        let docol = table[ROUTINE_DOCOL as usize];
+        table.resize(NATIVE_SLOTS, docol);
+        let resume = vec![0; NATIVE_SLOTS];
+        NativeMachine { entry: at + 4 * entry, machine_at: at, commons, space, table, resume, stacks: Stacks::new(), fuel_left: 0 }
+    }
+
+    /// Compile `word`'s cells to machine code in this machine, and make the
+    /// word's entry name it (step 11a). The code does what the cells do,
+    /// routine for routine, with the ip kept in step, so that it and
+    /// threaded code mix freely; branches become jumps, and the dispatch
+    /// between cells goes. A word already compiled is left alone.
+    pub fn compile_word(&mut self, heap: &mut Heap, word: Value) -> Result<(), String> {
+        let entry = heap.bloblet_slot(word, WORD_ENTRY).as_fixnum() as u64;
+        if entry != ROUTINE_DOCOL {
+            return if entry >= PRIMITIVES as u64 { Ok(()) } else { Err("not a word made of cells".into()) };
+        }
+        let fields = heap.bloblet_head(word).fields;
+        let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(word, k)).collect();
+        // Where each instruction starts, and its routine or word.
+        let mut starts = vec![false; cells.len() + 1];
+        let mut i = 0;
+        while i < cells.len() {
+            starts[i] = true;
+            i += if cells[i].is_fixnum() { 1 + fixpt_heap::layout::threaded::operands(ROUTINES[cells[i].as_fixnum() as usize].0) } else { 1 };
+        }
+        let mut a = Asm::new();
+        let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
+        // The machine's common exit is a conditional branch away from some
+        // routines, too far from a large word's code: each cell's goes to a
+        // jump of its own, placed after it.
+        let far_exit = a.exit_common;
+        // As a cell: `docol`'s work, then the first cell.
+        a.fuel();
+        a.ds_limit();
+        a.rs_limit();
+        a.push_return();
+        a.e(mov(CUR, W));
+        a.e(sub_imm(IP, X11, (4 + 8 * WORD_CELL0) as u32));
+        a.b(labels[0]);
+        a.flush_stubs();
+        for (i, cell) in cells.iter().enumerate() {
+            if !starts[i] {
+                continue;
+            }
+            a.bind(labels[i]);
+            let near_exit = a.label();
+            a.exit_common = near_exit;
+            if cell.is_fixnum() {
+                let n = cell.as_fixnum() as usize;
+                let name = ROUTINES[n].0;
+                let next = (i + 1..=cells.len()).find(|&j| starts[j] || j == cells.len()).expect("the end");
+                a.cont = (next < cells.len()).then_some(labels[next]);
+                a.target = if matches!(name, "branch" | "0branch") {
+                    let to = (i + 1) as i64 + 1 + cells[i + 1].as_fixnum();
+                    Some(labels[to as usize])
+                } else {
+                    None
+                };
+                // The cell is consumed, as `NEXT` would have.
+                a.e(sub_imm(IP, IP, 8));
+                routine_body(&mut a, n, name);
+            } else {
+                a.cont = None;
+                a.target = None;
+                a.e(ldr_post(W, IP, -8));
+                a.run_word_in_w();
+            }
+            a.flush_stubs();
+            a.bind(near_exit);
+            a.b(far_exit);
+        }
+        a.exit_common = far_exit;
+        // Placed after the machine, whose common trap and exit it jumps to.
+        let len = a.here() * 4;
+        let at = self.space.alloc(len, 16).ok_or("the code space is full")?;
+        let origin = (at - self.machine_at) as i64 / 4;
+        let [tc, ec] = [a.trap_common, a.exit_common];
+        a.bind_at(tc, self.commons[0] - origin);
+        a.bind_at(ec, self.commons[1] - origin);
+        let starts_at: Vec<Option<i64>> = labels.iter().map(|l| a.labels[l.0]).collect();
+        let code = a.finish();
+        self.space.write_code(at, &code);
+        self.space.flush(at, len);
+        // Where to resume, by k: each instruction's start.
+        let table_len = fields + 2;
+        let rt_at = self.space.alloc(8 * table_len, 8).ok_or("the code space is full")?;
+        for k in 0..table_len {
+            let addr = k.checked_sub(WORD_CELL0).and_then(|i| starts_at.get(i).copied().flatten().filter(|_| starts.get(i) == Some(&true)));
+            let v = addr.map_or(0, |ins| self.space.exec_addr(at + 4 * ins as usize) as u64);
+            self.space.write_u64(rt_at + 8 * k, v);
+        }
+        let slot = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if slot >= NATIVE_SLOTS {
+            return Err("no native slots left".into());
+        }
+        self.table[slot] = self.space.exec_addr(at) as u64;
+        self.resume[slot] = self.space.exec_addr(rt_at) as u64;
+        heap.set_bloblet_slot(word, WORD_ENTRY, Value::fixnum(slot as i64));
+        Ok(())
+    }
+
+    /// Compile `word` and every word it can reach through its cells and
+    /// operands: words called, closures made, literals.
+    pub fn compile_reachable(&mut self, heap: &mut Heap, word: Value) -> Result<usize, String> {
+        let closure = kind("threaded-closure");
+        let (mut todo, mut seen, mut n) = (vec![word], std::collections::HashSet::new(), 0);
+        while let Some(w) = todo.pop() {
+            if !seen.insert(w.raw()) {
+                continue;
+            }
+            let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum() as u64;
+            if entry != ROUTINE_DOCOL && entry < PRIMITIVES as u64 {
+                continue;
+            }
+            for k in WORD_CELL0..=heap.bloblet_head(w).fields {
+                let v = heap.bloblet_slot(w, k);
+                if heap.is_threaded_word(v) {
+                    todo.push(v);
+                } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
+                    todo.push(heap.bloblet_slot(v, CLOSURE_WORD));
+                }
+            }
+            if entry == ROUTINE_DOCOL {
+                self.compile_word(heap, w)?;
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     /// The machine code, for looking at.
@@ -1145,6 +1352,7 @@ impl NativeMachine {
     pub fn run(&mut self, heap: &mut Heap, word: Value, args: &[Value], fuel: u64) -> Result<Vec<Value>, Trap> {
         let mut st = self.stacks.start(heap, word, args, fuel);
         st.table = self.table.as_ptr() as u64;
+        st.resume = self.resume.as_ptr() as u64;
         // SAFETY: the entry follows the C convention and takes the state.
         // Everything the machine touches is valid while it runs: the state,
         // the table and the stacks here, and the heap, which `heap` holds
@@ -1169,6 +1377,7 @@ impl NativeMachine {
         let mut st = self.stacks.start(&mut rt.heap, word, args, fuel);
         st.rt = rt_ptr;
         st.table = self.table.as_ptr() as u64;
+        st.resume = self.resume.as_ptr() as u64;
         // SAFETY: as for `run`; the runtime, and so the heap, is reached
         // only through the state while the machine runs.
         unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };
@@ -1177,14 +1386,44 @@ impl NativeMachine {
     }
 }
 
+thread_local! {
+    /// The machine `run_word` uses: one per thread, kept, so that the words
+    /// compiled into it stay compiled.
+    static MACHINE: std::cell::RefCell<Option<NativeMachine>> = const { std::cell::RefCell::new(None) };
+    /// Whether `run_word` compiles what it runs to machine code first.
+    static COMPILE: bool = std::env::var_os("FIXPT_NATIVE_WORDS").is_some();
+}
+
 /// Run `word` with `args` on a native machine in `rt`: what the runtime's
 /// `%run-word` calls when a native machine is chosen (`Runtime::run_word`).
-/// A machine per run: its code is generated anew, which is quick.
+/// With `FIXPT_NATIVE_WORDS` set, every word it can reach is compiled to
+/// machine code first ([`NativeMachine::compile_reachable`]).
 pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
-    let mut m = NativeMachine::new();
-    let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
-    report_callouts();
-    out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
+    run_word_as(rt, word, args, COMPILE.with(|c| *c))
+}
+
+/// The same, compiling or not as `compile` says.
+pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value], compile: bool) -> Result<Value, String> {
+    MACHINE.with(|m| {
+        // A run within a run (a primitive running a word) gets a machine
+        // of its own, which compiles nothing.
+        let Ok(mut m) = m.try_borrow_mut() else {
+            let out = NativeMachine::new().run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+            return out?.last().copied().ok_or_else(|| "the word left nothing".to_string());
+        };
+        let m = m.get_or_insert_with(NativeMachine::new);
+        if compile {
+            m.compile_reachable(&mut rt.heap, word)?;
+        }
+        let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+        report_callouts();
+        out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
+    })
+}
+
+/// [`run_word`], always compiling what it runs: for `%run-word`'s hook.
+pub fn run_word_compiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    run_word_as(rt, word, args, true)
 }
 
 impl Default for NativeMachine {

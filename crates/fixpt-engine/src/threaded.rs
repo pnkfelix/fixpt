@@ -531,7 +531,9 @@ impl Machine {
     /// if it is made of cells (and say so), or run its routine.
     fn enter(&mut self, cx: &mut Ctx, w: Value, r: &mut Regs) -> Result<bool, Trap> {
         let entry = cx.heap().bloblet_slot(w, WORD_ENTRY).as_fixnum();
-        if entry as u64 == ROUTINE_DOCOL {
+        // A word compiled to machine code for a native machine is still its
+        // cells here.
+        if entry as u64 == ROUTINE_DOCOL || entry >= PRIMITIVES as i64 {
             self.check_limits()?;
             if r.cur.is_bloblet() {
                 self.push_return(r);

@@ -59,6 +59,18 @@ fn bench(label: &str, make: fn(&mut Heap) -> Value, args: &[i64]) {
     assert_eq!(out, expect);
     row("hand-encoded", s);
 
+    // The same machine with the words compiled to machine code (step 11a).
+    // Last: compiling changes the words' entries, which the others ignore.
+    let mut compiled = NativeMachine::new();
+    let w = heap.root_at(root);
+    compiled.compile_reachable(&mut heap, w).expect("compiles");
+    let (out, s) = best(|| {
+        let w = heap.root_at(root);
+        compiled.run(&mut heap, w, &args, FUEL).expect("runs")
+    });
+    assert_eq!(out, expect);
+    row("hand-encoded, words compiled", s);
+
     for opt in opt_levels() {
         let mut m = StencilMachine::new(opt).expect("built");
         let (out, s) = best(|| {

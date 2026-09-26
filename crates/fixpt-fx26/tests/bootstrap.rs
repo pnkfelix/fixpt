@@ -109,8 +109,17 @@ fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, why: &
         *why = format!("{} fields and {}", na, nb);
         return false;
     }
-    // Field 1 is the trailer; the rest are values.
-    (2..=na).all(|i| same_code(h, h.bloblet_slot(a, i), h.bloblet_slot(b, i), pairs, why))
+    // Field 1 is the trailer; the rest are values. A word's entry is
+    // `docol`, or a native machine's number for its compiled code: the same
+    // cells either way.
+    let entry = |w: Value, i: usize| {
+        let v = h.bloblet_slot(w, i);
+        let native = ka == Some(fixpt_heap::layout::kind("threaded-code"))
+            && i == fixpt_heap::layout::threaded::WORD_ENTRY
+            && v.as_fixnum() >= fixpt_heap::layout::threaded::PRIMITIVES as i64;
+        if native { Value::fixnum(0) } else { v }
+    };
+    (2..=na).all(|i| same_code(h, entry(a, i), entry(b, i), pairs, why))
 }
 
 /// The fixpoint: the front end, compiled by the compiler written in FX-26
@@ -118,12 +127,24 @@ fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, why: &
 /// compiles the front end again (stage 2), reading, parsing and checking
 /// it itself. The two words must be the same code.
 #[test]
-#[cfg_attr(debug_assertions, ignore = "10 s in release, 7 minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(debug_assertions, ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint() {
+    fixpoint_on(fixpt_native::threaded::run_word);
+}
+
+/// The same, with stage 2's words compiled to machine code (step 11a) as
+/// they run: it must make the same code.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
+fn fixpoint_with_words_compiled() {
+    fixpoint_on(fixpt_native::threaded::run_word_compiled);
+}
+
+fn fixpoint_on(machine: fixpt_runtime::RunWord) {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word);
+    s.scheme.runtime_unrooted().run_word = Some(machine);
     let text = fixpt_fx26::bootstrap_program();
     let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
     let t = std::time::Instant::now();

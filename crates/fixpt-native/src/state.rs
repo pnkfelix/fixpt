@@ -36,6 +36,9 @@ pub struct State {
     /// runs on a bare heap, in which case the routines it has no machine
     /// code for cannot call the runtime's primitives.
     pub rt: u64,
+    /// For each entry number, a word's table of where its machine code
+    /// resumes at each cell, by `8k`, or 0 (`NativeMachine::compile_word`).
+    pub resume: u64,
     /// The routines' addresses, by number, for machines that find them
     /// through the state rather than a register.
     pub routines: [u64; ROUTINE_SLOTS],

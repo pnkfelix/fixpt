@@ -254,6 +254,30 @@ a direct call-out like `prim`.
   routine `withmark-tail` has Scheme's meaning, and the compiler emits it
   for `with-mark` in tail position. Captures now average 88 words.
 
+## Words compiled to machine code (C11a)
+
+`NativeMachine::compile_word` places a word's routines' code inline in
+cell order, with the ip kept in step, branches as jumps, and no dispatch
+between cells. `cargo run --release -p fixpt-native --example
+threaded_bench`, ns per cell of the Rust machine:
+
+| program                | hand-encoded | its words compiled |
+| ---------------------- | ------------ | ------------------ |
+| fib 27                 | 0.57         | 0.57               |
+| sum-to 10M (loop)      | 0.69         | 0.68               |
+| sum-by-list 60k (cons) | 0.89         | 0.84               |
+
+No gain on these: the dispatch removed was already cheap on this CPU,
+whose branch predictor follows `NEXT`'s indirect jumps. The time is in
+the routines' own work, which inlining keeps. A temporary `brk` at a
+compiled word's entry confirmed the compiled code runs.
+
+On the bootstrap's stage 2, all 4,700 lines of the front end compiled that
+way, the gain is 1.9 s to 1.4 s, and the fixpoint holds
+(`fixpoint_with_words_compiled`). Real gains would need a real compiler:
+the top of the stack in registers, operands as immediates, the ip made
+only where something reads it.
+
 ## The comparison: each piece, Rust and FX-26 (C12)
 
 `cargo test --release -p fixpt-fx26 --test bootstrap comparison --

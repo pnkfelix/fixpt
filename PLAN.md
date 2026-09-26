@@ -740,7 +740,12 @@ one.)*
       into a native word resume in native code through a table of resume
       addresses per call site. Branches become direct jumps. Checked by
       running every compiled program, and the bootstrap, with every word
-      made native.
+      made native. *(Done 2026-09-26: `NativeMachine::compile_word`.
+      Every differential test and every compiled program agree with their
+      words compiled, and the bootstrap's fixpoint holds with stage 2's
+      words compiled. The gain is small, 1.9 s to 1.4 s on stage 2 and
+      none on the micro-benchmarks, since `NEXT`'s indirect jumps predict
+      well here; see `docs/performance.md`.)*
     - **11b. The arm64 encoder in FX-26**, instruction by instruction the
       Rust one's (`fixpt-native/src/arm64.rs`), checked against it on
       every instruction 11a emits.

@@ -104,8 +104,11 @@ fn every_program_compiled() {
 #[test]
 fn every_program_on_every_machine() {
     type Run = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, &[fixpt_heap::Value]) -> Result<fixpt_heap::Value, String>;
-    let machines: [(&str, Run); 2] =
-        [("native", fixpt_native::threaded::run_word), ("stencils", fixpt_native::stencil::run_word)];
+    let machines: [(&str, Run); 3] = [
+        ("native", fixpt_native::threaded::run_word),
+        ("native, words compiled", fixpt_native::threaded::run_word_compiled),
+        ("stencils", fixpt_native::stencil::run_word),
+    ];
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
     for sub in ["bidirectional", "control", "run", "pldi89", "bloblet"] {

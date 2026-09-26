@@ -60,10 +60,18 @@ macro_rules! next {
         if c & TAG_MASK == 0 {
             become unsafe { routine(st, c) }(base, ip, cur, dsp, rsp, st, fp, c)
         } else {
-            let e = unsafe { field(base, c, WORD_ENTRY) };
+            let e = unsafe { entry_of(base, c) };
             become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fp, c)
         }
     }};
+}
+
+/// A word's entry, `8n`: a routine's, or `docol`'s for a word compiled to
+/// machine code for the hand-encoded machine, whose cells run here.
+#[inline(always)]
+unsafe fn entry_of(base: u64, w: u64) -> u64 {
+    let e = unsafe { field(base, w, WORD_ENTRY) };
+    if e >= 8 * PRIMITIVES { 0 } else { e }
 }
 
 /// Store the machine into the state, the ip as `8k`.
@@ -140,7 +148,7 @@ macro_rules! routine {
 
 // Where the host starts: run the word in `w`.
 routine!(st_start, |base, ip, cur, dsp, rsp, st, fp, w| {
-    let e = unsafe { field(base, w, WORD_ENTRY) };
+    let e = unsafe { entry_of(base, w) };
     become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fp, w)
 });
 
@@ -334,7 +342,7 @@ routine!(st_return, |base, ip, cur, dsp, rsp, st, fp, w| {
 // call-out's round trip). Reached through a cell, `w` is its number's
 // fixnum; through a word, the word's entry is.
 routine!(st_other, |base, ip, cur, dsp, rsp, st, fp, w| {
-    let n8 = if w & TAG_MASK == 0 { w } else { unsafe { field(base, w, WORD_ENTRY) } };
+    let n8 = if w & TAG_MASK == 0 { w } else { unsafe { entry_of(base, w) } };
     callout!(n8 >> 3, base, ip, cur, dsp, rsp, st, fp)
 });
 
@@ -397,7 +405,7 @@ routine!(st_execute, |base, ip, cur, dsp, rsp, st, fp, w| {
     if (header >> 3) & 0xff != WORD_KIND {
         not_a_word!();
     }
-    let e = unsafe { field(base, w, WORD_ENTRY) };
+    let e = unsafe { entry_of(base, w) };
     become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fp, w)
 });
 

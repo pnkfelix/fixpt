@@ -35,6 +35,14 @@ fn all(setup: impl Fn(&mut Runtime) -> Value) -> Result<Vec<String>, Trap> {
     let w = setup(&mut rt);
     let r = NativeMachine::new().run_in_runtime(&mut rt, w, &[], FUEL);
     assert_eq!(show(&rt, r), rust, "the hand-encoded machine disagrees");
+    // And with every word it can reach compiled to machine code (step 11a).
+    let mut rt = Runtime::new();
+    let w = setup(&mut rt);
+    let mut m = NativeMachine::new();
+    let compiled = m.compile_reachable(&mut rt.heap, w).expect("compiles");
+    assert!(compiled > 0);
+    let r = m.run_in_runtime(&mut rt, w, &[], FUEL);
+    assert_eq!(show(&rt, r), rust, "the hand-encoded machine, its words compiled, disagrees");
     for opt in opt_levels() {
         let mut rt = Runtime::new();
         let w = setup(&mut rt);
