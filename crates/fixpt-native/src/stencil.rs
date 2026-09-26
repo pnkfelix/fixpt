@@ -30,6 +30,14 @@ pub fn opt_levels() -> Vec<&'static str> {
     STENCIL_SETS.iter().map(|s| s.opt).collect()
 }
 
+/// Run `word` with `args` on the stencil machine at `-O2`, in `rt`: for the
+/// runtime's `%run-word` (`Runtime::run_word`).
+pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    let mut m = StencilMachine::new("2").ok_or("no stencils: this build had no nightly compiler")?;
+    let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"))?;
+    out.last().copied().ok_or_else(|| "the word left nothing".to_string())
+}
+
 /// The stencil name for a routine.
 fn stencil_name(routine: &str) -> String {
     match routine {
@@ -60,10 +68,11 @@ impl StencilMachine {
     /// there are any.
     pub fn new(opt: &str) -> Option<StencilMachine> {
         let set = STENCIL_SETS.iter().find(|s| s.opt == opt)?;
-        // A routine with no stencil of its own traps (`st_unsupported`).
+        // A routine with no stencil of its own is run by the Rust machine
+        // (`st_other`, the call-out's round trip).
         let find = |name: &str| {
-            let unsupported = set.stencils.iter().find(|s| s.0 == "unsupported").expect("st_unsupported").1;
-            set.stencils.iter().find(|s| s.0 == name).map_or(unsupported, |s| s.1)
+            let other = set.stencils.iter().find(|s| s.0 == "other").expect("st_other").1;
+            set.stencils.iter().find(|s| s.0 == name).map_or(other, |s| s.1)
         };
         let total: usize = ROUTINES.len() * 16 + set.stencils.iter().map(|s| s.1.len().next_multiple_of(16)).sum::<usize>();
         let mut space = CodeSpace::new(total).expect("a code space");
@@ -88,7 +97,25 @@ impl StencilMachine {
 
     /// As [`NativeMachine::run`](crate::threaded::NativeMachine::run).
     pub fn run(&mut self, heap: &mut Heap, word: Value, args: &[Value], fuel: u64) -> Result<Vec<Value>, Trap> {
-        let mut st = self.stacks.start(heap, word, args, fuel);
+        let st = self.stacks.start(heap, word, args, fuel);
+        self.go(st, word)
+    }
+
+    /// As [`NativeMachine::run_in_runtime`](crate::threaded::NativeMachine::run_in_runtime).
+    pub fn run_in_runtime(
+        &mut self,
+        rt: &mut fixpt_runtime::Runtime,
+        word: Value,
+        args: &[Value],
+        fuel: u64,
+    ) -> Result<Vec<Value>, Trap> {
+        let rt_ptr = rt as *mut fixpt_runtime::Runtime as u64;
+        let mut st = self.stacks.start(&mut rt.heap, word, args, fuel);
+        st.rt = rt_ptr;
+        self.go(st, word)
+    }
+
+    fn go(&mut self, mut st: State, word: Value) -> Result<Vec<Value>, Trap> {
         st.routines = self.routines;
         let ip = st.base.wrapping_add(st.cur).wrapping_sub(4);
         let stp = &mut st as *mut State as u64;
@@ -97,7 +124,8 @@ impl StencilMachine {
         // checked); the argument registers are the machine's registers, set
         // as `State` would have them. The rest is as for `NativeMachine`.
         unsafe {
-            self.space.call8(self.start, [st.base, ip, st.cur, st.dsp, st.rsp, stp, st.fuel, word.raw()]);
+            let fp = st.ds_base - 8 - st.fp;
+            self.space.call8(self.start, [st.base, ip, st.cur, st.dsp, st.rsp, stp, fp, word.raw()]);
         }
         self.fuel_left = st.fuel;
         self.stacks.finish(&st)

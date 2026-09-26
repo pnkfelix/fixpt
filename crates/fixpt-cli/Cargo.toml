@@ -18,6 +18,7 @@ fixpt-scheme = { path = "../fixpt-scheme" }
 fixpt-fx91 = { path = "../fixpt-fx91" }
 fixpt-fx87 = { path = "../fixpt-fx87" }
 fixpt-fx26 = { path = "../fixpt-fx26" }
+fixpt-native = { path = "../fixpt-native" }
 
 [lints]
 workspace = true

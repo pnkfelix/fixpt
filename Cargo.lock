@@ -18,6 +18,7 @@ dependencies = [
  "fixpt-fx87",
  "fixpt-fx91",
  "fixpt-heap",
+ "fixpt-native",
  "fixpt-read",
  "fixpt-runtime",
  "fixpt-scheme",
@@ -51,6 +52,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-engine",
  "fixpt-heap",
+ "fixpt-native",
  "fixpt-read",
  "fixpt-runtime",
  "fixpt-scheme",
@@ -91,6 +93,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-engine",
  "fixpt-heap",
+ "fixpt-runtime",
  "libc",
 ]
 

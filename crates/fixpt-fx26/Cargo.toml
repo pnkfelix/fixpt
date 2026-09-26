@@ -17,6 +17,7 @@ default = []
 gc-stress = ["fixpt-scheme/gc-stress"]
 
 [dev-dependencies]
+fixpt-native = { path = "../fixpt-native" }
 fixpt-heap = { path = "../fixpt-heap" }
 
 [lints]

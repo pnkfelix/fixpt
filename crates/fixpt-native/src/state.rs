@@ -27,6 +27,15 @@ pub struct State {
     pub rs_base: u64,
     pub ds_limit: u64,
     pub rs_limit: u64,
+    /// The frame pointer, saved as `ds_base - 8 - fp`: the bits of the
+    /// fixnum index of the frame's slot 0 (`fixpt_engine::threaded`).
+    pub fp: u64,
+    /// The closure running (a Value), or `#f`.
+    pub clo: u64,
+    /// The runtime (`*mut fixpt_runtime::Runtime`), or 0 when the machine
+    /// runs on a bare heap, in which case the routines it has no machine
+    /// code for cannot call the runtime's primitives.
+    pub rt: u64,
     /// The routines' addresses, by number, for machines that find them
     /// through the state rather than a register.
     pub routines: [u64; ROUTINE_SLOTS],

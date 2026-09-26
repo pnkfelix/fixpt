@@ -67,6 +67,9 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         1
     })?;
     s.strategy = crate::FX26_RUN.get().copied().unwrap_or_default();
+    if let Some(m) = crate::THREADED_MACHINE.get() {
+        s.scheme.runtime_unrooted().run_word = Some(*m);
+    }
     crate::apply_gc_policy(&mut s.scheme);
     Ok(s)
 }

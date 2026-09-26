@@ -43,6 +43,10 @@ options:
                                  (default), by the evaluator written in FX-26, or
                                  compiled to threaded words by the compiler
                                  written in FX-26 and run on the threaded machine
+  --threaded-machine rust|native|stencils
+                                 which threaded machine runs compiled words: the
+                                 one written in Rust (default), the hand-encoded
+                                 arm64 one, or the stencils (built with nightly)
   --gc-every N                   also collect at every Nth safepoint, moving every
                                  object each time, to shake out rooting bugs
                                  (default: 0, only when the heap is full)
@@ -128,6 +132,20 @@ fn run(args: &[String]) -> i32 {
         }
     };
     let _ = FX26_RUN.set(strategy);
+    let machine: fixpt_runtime::RunWord = match flags.threaded_machine.as_deref() {
+        None | Some("rust") => fixpt_engine::threaded::run_word,
+        Some("native") => fixpt_native::threaded::run_word,
+        Some("stencils") if fixpt_native::stencil::opt_levels().is_empty() => {
+            eprintln!("fixpt: this build has no stencils (it found no nightly compiler)");
+            return 2;
+        }
+        Some("stencils") => fixpt_native::stencil::run_word,
+        Some(name) => {
+            eprintln!("fixpt: unknown --threaded-machine `{name}` (want rust, native or stencils)");
+            return 2;
+        }
+    };
+    let _ = THREADED_MACHINE.set(machine);
     if let Some(n) = flags.gc_every.as_deref() {
         match n.parse::<u64>() {
             Ok(n) => {
@@ -244,10 +262,13 @@ struct Flags {
     reader: Option<String>,
     fx26_run: Option<String>,
     gc_every: Option<String>,
+    threaded_machine: Option<String>,
 }
 
 /// `--fx26-run`, for every FX-26 session this process starts.
 pub(crate) static FX26_RUN: std::sync::OnceLock<fixpt_fx26::session::Strategy> = std::sync::OnceLock::new();
+/// `--threaded-machine`, for every FX-26 session this process starts.
+pub(crate) static THREADED_MACHINE: std::sync::OnceLock<fixpt_runtime::RunWord> = std::sync::OnceLock::new();
 /// `--gc-every`, for every heap this process starts.
 pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -267,12 +288,14 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         reader: None,
         fx26_run: None,
         gc_every: None,
+        threaded_machine: None,
     };
     let mut rest = Vec::new();
     let mut i = 0;
     // Each flag takes a value, spelled either `--flag v` or `--flag=v`.
     type Setter = fn(&mut Flags, String);
-    let named: [(&str, Setter); 7] = [
+    let named: [(&str, Setter); 8] = [
+        ("--threaded-machine", |f, v| f.threaded_machine = Some(v)),
         ("--fx26-run", |f, v| f.fx26_run = Some(v)),
         ("--gc-every", |f, v| f.gc_every = Some(v)),
         ("--dialect", |f, v| f.dialect = Some(v)),

@@ -53,37 +53,48 @@ unsafe fn field(base: u64, v: u64, k: u64) -> u64 {
 
 /// Run the next cell.
 macro_rules! next {
-    ($base:expr, $ip:expr, $cur:expr, $dsp:expr, $rsp:expr, $st:expr, $fuel:expr) => {{
-        let (base, ip, cur, dsp, rsp, st, fuel) = ($base, $ip, $cur, $dsp, $rsp, $st, $fuel);
+    ($base:expr, $ip:expr, $cur:expr, $dsp:expr, $rsp:expr, $st:expr, $fp:expr) => {{
+        let (base, ip, cur, dsp, rsp, st, fp) = ($base, $ip, $cur, $dsp, $rsp, $st, $fp);
         let c = unsafe { rd(ip) };
         let ip = ip.wrapping_sub(8);
         if c & TAG_MASK == 0 {
-            become unsafe { routine(st, c) }(base, ip, cur, dsp, rsp, st, fuel, c)
+            become unsafe { routine(st, c) }(base, ip, cur, dsp, rsp, st, fp, c)
         } else {
             let e = unsafe { field(base, c, WORD_ENTRY) };
-            become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fuel, c)
+            become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fp, c)
         }
     }};
 }
 
 /// Store the machine into the state, the ip as `8k`.
 #[inline(always)]
-unsafe fn save(st: *mut State, base: u64, ip: u64, cur: u64, dsp: u64, rsp: u64, fuel: u64) {
+unsafe fn save(st: *mut State, base: u64, ip: u64, cur: u64, dsp: u64, rsp: u64, fp: u64) {
     unsafe {
         (*st).cur = cur;
         (*st).d = base.wrapping_add(cur).wrapping_sub(4).wrapping_sub(ip);
         (*st).dsp = dsp;
         (*st).rsp = rsp;
-        (*st).fuel = fuel;
+        (*st).fp = fp_encode(st, fp);
     }
+}
+
+/// The frame pointer as a return entry and the state keep it:
+/// `ds_base - 8 - fp`, the bits of its fixnum index.
+#[inline(always)]
+unsafe fn fp_encode(st: *mut State, fp: u64) -> u64 {
+    unsafe { (*st).ds_base.wrapping_sub(8).wrapping_sub(fp) }
+}
+#[inline(always)]
+unsafe fn fp_decode(st: *mut State, enc: u64) -> u64 {
+    unsafe { (*st).ds_base.wrapping_sub(8).wrapping_sub(enc) }
 }
 
 /// Stop with a trap.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-unsafe fn trap(st: *mut State, code: u64, aux: u64, base: u64, ip: u64, cur: u64, dsp: u64, rsp: u64, fuel: u64) -> u64 {
+unsafe fn trap(st: *mut State, code: u64, aux: u64, base: u64, ip: u64, cur: u64, dsp: u64, rsp: u64, fp: u64) -> u64 {
     unsafe {
-        save(st, base, ip, cur, dsp, rsp, fuel);
+        save(st, base, ip, cur, dsp, rsp, fp);
         // Volatile, so that two constants are not merged into one vector
         // store from a constant pool, which would be a relocation.
         core::intrinsics::volatile_store(&raw mut (*st).status, code);
@@ -92,22 +103,24 @@ unsafe fn trap(st: *mut State, code: u64, aux: u64, base: u64, ip: u64, cur: u64
     0
 }
 
-/// Check fuel and the data stack's limit: where a word is entered and a
+/// Check fp and the data stack's limit: where a word is entered and a
 /// branch is taken.
 macro_rules! checks {
-    ($base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fuel:ident) => {
-        let $fuel = $fuel.wrapping_sub(1);
-        if $fuel == 0 {
-            return unsafe { trap($st, TRAP_OUT_OF_FUEL, 0, $base, $ip, $cur, $dsp, $rsp, $fuel) };
+    ($base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {
+        // Fuel is in the state: the argument registers are the frame's.
+        let fuel = unsafe { (*$st).fuel }.wrapping_sub(1);
+        unsafe { (*$st).fuel = fuel };
+        if fuel == 0 {
+            return unsafe { trap($st, TRAP_OUT_OF_FUEL, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
         }
         if $dsp < unsafe { (*$st).ds_limit } {
-            return unsafe { trap($st, TRAP_STACK_OVERFLOW, 0, $base, $ip, $cur, $dsp, $rsp, $fuel) };
+            return unsafe { trap($st, TRAP_STACK_OVERFLOW, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
         }
     };
 }
 
 macro_rules! routine {
-    ($name:ident, |$base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fuel:ident, $w:ident| $body:block) => {
+    ($name:ident, |$base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident, $w:ident| $body:block) => {
         #[unsafe(no_mangle)]
         #[allow(unused_variables, unused_mut)]
         pub unsafe extern "C" fn $name(
@@ -117,7 +130,7 @@ macro_rules! routine {
             $dsp: u64,
             $rsp: u64,
             $st: *mut State,
-            $fuel: u64,
+            $fp: u64,
             $w: u64,
         ) -> u64 {
             $body
@@ -126,81 +139,250 @@ macro_rules! routine {
 }
 
 // Where the host starts: run the word in `w`.
-routine!(st_start, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_start, |base, ip, cur, dsp, rsp, st, fp, w| {
     let e = unsafe { field(base, w, WORD_ENTRY) };
-    become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fuel, w)
+    become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fp, w)
 });
 
-routine!(st_docol, |base, ip, cur, dsp, rsp, st, fuel, w| {
-    checks!(base, ip, cur, dsp, rsp, st, fuel);
-    if rsp <= unsafe { (*st).rs_limit } {
-        return unsafe { trap(st, TRAP_TOO_DEEP, 0, base, ip, cur, dsp, rsp, fuel) };
-    }
-    let rsp = rsp - 16;
+/// Leave the machine for the Rust side of routine `r`, and carry on from
+/// the state it leaves, unless it reports a trap.
+macro_rules! callout {
+    ($r:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {{
+        unsafe { save($st, $base, $ip, $cur, $dsp, $rsp, $fp) };
+        let f = unsafe { core::mem::transmute::<u64, unsafe extern "C" fn(*mut State, u64) -> u64>((*$st).callout) };
+        if unsafe { f($st, $r) } != 0 {
+            return 0;
+        }
+        let s = unsafe { &*$st };
+        let (base, cur, dsp, rsp) = (s.base, s.cur, s.dsp, s.rsp);
+        let ip = base.wrapping_add(cur).wrapping_sub(4).wrapping_sub(s.d);
+        let fp = unsafe { fp_decode($st, s.fp) };
+        next!(base, ip, cur, dsp, rsp, $st, fp)
+    }};
+}
+
+/// Push a return entry `(cur, 8k, fp, closure)` for where this word is.
+#[inline(always)]
+unsafe fn push_return(st: *mut State, base: u64, ip: u64, cur: u64, rsp: u64, fp: u64) -> u64 {
+    let rsp = rsp - 32;
     unsafe {
         wr(rsp, cur);
         wr(rsp + 8, base.wrapping_add(cur).wrapping_sub(4).wrapping_sub(ip));
+        wr(rsp + 16, fp_encode(st, fp));
+        wr(rsp + 24, (*st).clo);
     }
+    rsp
+}
+
+/// Whether `v` is a threaded closure: a bloblet with a trailer, whose
+/// header says so.
+#[inline(always)]
+unsafe fn is_closure(base: u64, v: u64) -> bool {
+    if v & TAG_MASK != TAG_BLOBLET {
+        return false;
+    }
+    let t = unsafe { field(base, v, 1) };
+    if t & TAG_MASK != TAG_TRAILER {
+        return false;
+    }
+    let header = unsafe { rd(base.wrapping_add(v).wrapping_sub(4 + 8 * ((t >> 3) + 1))) };
+    (header >> 3) & 0xff == CLOSURE_KIND
+}
+
+routine!(st_docol, |base, ip, cur, dsp, rsp, st, fp, w| {
+    checks!(base, ip, cur, dsp, rsp, st, fp);
+    if rsp <= unsafe { (*st).rs_limit } {
+        return unsafe { trap(st, TRAP_TOO_DEEP, 0, base, ip, cur, dsp, rsp, fp) };
+    }
+    let rsp = unsafe { push_return(st, base, ip, cur, rsp, fp) };
     let ip = base.wrapping_add(w).wrapping_sub(4 + 8 * WORD_CELL0);
-    next!(base, ip, w, dsp, rsp, st, fuel)
+    next!(base, ip, w, dsp, rsp, st, fp)
 });
 
-routine!(st_exit, |base, ip, cur, dsp, rsp, st, fuel, w| {
-    let (cur, d) = unsafe { (rd(rsp), rd(rsp + 8)) };
-    let rsp = rsp + 16;
-    if cur == FALSE {
-        unsafe { save(st, base, ip, cur, dsp, rsp, fuel) };
-        return 0;
+/// Return to the entry on top of the return stack, or leave the machine at
+/// the bottom one (whose word is `#f`).
+macro_rules! pop_return {
+    ($base:ident, $ip:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {{
+        // Past the prompts' and marks' entries, which are not returns.
+        let mut rsp = $rsp;
+        while matches!(unsafe { rd(rsp) }, PROMPT_MARK | MARK_MARK) {
+            rsp += 32;
+        }
+        let (cur, d, enc, clo) = unsafe { (rd(rsp), rd(rsp + 8), rd(rsp + 16), rd(rsp + 24)) };
+        let rsp = rsp + 32;
+        if cur == FALSE {
+            unsafe { save($st, $base, $ip, cur, $dsp, rsp, $fp) };
+            return 0;
+        }
+        unsafe { (*$st).clo = clo };
+        let fp = unsafe { fp_decode($st, enc) };
+        let ip = $base.wrapping_add(cur).wrapping_sub(4).wrapping_sub(d);
+        next!($base, ip, cur, $dsp, rsp, $st, fp)
+    }};
+}
+
+routine!(st_exit, |base, ip, cur, dsp, rsp, st, fp, w| { pop_return!(base, ip, dsp, rsp, st, fp) });
+
+// Code compiled from FX-26: frames on the data stack, flat closures,
+// globals, calls; as `fixpt_engine::threaded` has them.
+
+routine!(st_slot, |base, ip, cur, dsp, rsp, st, fp, w| {
+    let i8 = unsafe { rd(ip) };
+    let at = fp.wrapping_sub(i8);
+    if at < dsp {
+        return unsafe { trap(st, TRAP_FIELD, R_SLOT, base, ip, cur, dsp, rsp, fp) };
     }
-    let ip = base.wrapping_add(cur).wrapping_sub(4).wrapping_sub(d);
-    next!(base, ip, cur, dsp, rsp, st, fuel)
+    let dsp = dsp - 8;
+    unsafe { wr(dsp, rd(at)) };
+    next!(base, ip - 8, cur, dsp, rsp, st, fp)
 });
 
-routine!(st_halt, |base, ip, cur, dsp, rsp, st, fuel, w| {
-    unsafe { save(st, base, ip, cur, dsp, rsp, fuel) };
+routine!(st_slot_set, |base, ip, cur, dsp, rsp, st, fp, w| {
+    let i8 = unsafe { rd(ip) };
+    let at = fp.wrapping_sub(i8);
+    let x = unsafe { rd(dsp) };
+    let dsp = dsp + 8;
+    if at < dsp {
+        return unsafe { trap(st, TRAP_FIELD, R_SLOT_SET, base, ip, cur, dsp, rsp, fp) };
+    }
+    unsafe { wr(at, x) };
+    next!(base, ip - 8, cur, dsp, rsp, st, fp)
+});
+
+routine!(st_free, |base, ip, cur, dsp, rsp, st, fp, w| {
+    let i8 = unsafe { rd(ip) };
+    let clo = unsafe { (*st).clo };
+    if !unsafe { is_closure(base, clo) } {
+        return unsafe { trap(st, TRAP_FIELD, R_FREE, base, ip, cur, dsp, rsp, fp) };
+    }
+    let k8 = i8 + 8 * CLOSURE_FREE0;
+    let t = unsafe { field(base, clo, 1) };
+    if k8 > t - TAG_TRAILER {
+        return unsafe { trap(st, TRAP_FIELD, R_FREE, base, ip, cur, dsp, rsp, fp) };
+    }
+    let x = unsafe { rd(base.wrapping_add(clo).wrapping_sub(4).wrapping_sub(k8)) };
+    let dsp = dsp - 8;
+    unsafe { wr(dsp, x) };
+    next!(base, ip - 8, cur, dsp, rsp, st, fp)
+});
+
+routine!(st_global, |base, ip, cur, dsp, rsp, st, fp, w| {
+    let g = unsafe { rd(ip) };
+    let dsp = dsp - 8;
+    unsafe { wr(dsp, field(base, g, 2)) };
+    next!(base, ip - 8, cur, dsp, rsp, st, fp)
+});
+
+routine!(st_global_set, |base, ip, cur, dsp, rsp, st, fp, w| {
+    let g = unsafe { rd(ip) };
+    unsafe { wr(base.wrapping_add(g).wrapping_sub(4 + 16), rd(dsp)) };
+    next!(base, ip - 8, cur, dsp + 8, rsp, st, fp)
+});
+
+/// `call` and `tailcall`: a threaded closure on top, over a frame of the n
+/// values below it. Anything else goes the Rust machine's way.
+macro_rules! call {
+    ($tail:expr, $r:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {{
+        let c = unsafe { rd($dsp) };
+        if !unsafe { is_closure($base, c) } {
+            callout!($r, $base, $ip, $cur, $dsp, $rsp, $st, $fp)
+        }
+        checks!($base, $ip, $cur, $dsp, $rsp, $st, $fp);
+        if $rsp <= unsafe { (*$st).rs_limit } {
+            return unsafe { trap($st, TRAP_TOO_DEEP, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
+        }
+        let n8 = unsafe { rd($ip) };
+        let ip = $ip - 8;
+        let dsp = $dsp + 8;
+        let (dsp, rsp, fp) = if $tail {
+            // Slide the n arguments down over this frame, deepest first.
+            let mut from = dsp + n8 - 8;
+            let mut to = $fp;
+            let mut left = n8;
+            while left > 0 {
+                unsafe { wr(to, rd(from)) };
+                from -= 8;
+                to -= 8;
+                left -= 8;
+            }
+            (to + 8, $rsp, $fp)
+        } else {
+            let rsp = unsafe { push_return($st, $base, ip, $cur, $rsp, $fp) };
+            (dsp, rsp, dsp + n8 - 8)
+        };
+        unsafe { (*$st).clo = c };
+        let cur = unsafe { field($base, c, CLOSURE_WORD) };
+        let ip = $base.wrapping_add(cur).wrapping_sub(4 + 8 * WORD_CELL0);
+        next!($base, ip, cur, dsp, rsp, $st, fp)
+    }};
+}
+
+routine!(st_call, |base, ip, cur, dsp, rsp, st, fp, w| { call!(false, R_CALL, base, ip, cur, dsp, rsp, st, fp) });
+routine!(st_tailcall, |base, ip, cur, dsp, rsp, st, fp, w| { call!(true, R_TAILCALL, base, ip, cur, dsp, rsp, st, fp) });
+
+routine!(st_return, |base, ip, cur, dsp, rsp, st, fp, w| {
+    let x = unsafe { rd(dsp) };
+    if dsp + 8 > fp + 8 {
+        return unsafe { trap(st, TRAP_UNDERFLOW, R_RETURN, base, ip, cur, dsp, rsp, fp) };
+    }
+    let dsp = fp;
+    unsafe { wr(dsp, x) };
+    pop_return!(base, ip, dsp, rsp, st, fp)
+});
+
+// Any other routine: the Rust machine runs it on these stacks (the
+// call-out's round trip). Reached through a cell, `w` is its number's
+// fixnum; through a word, the word's entry is.
+routine!(st_other, |base, ip, cur, dsp, rsp, st, fp, w| {
+    let n8 = if w & TAG_MASK == 0 { w } else { unsafe { field(base, w, WORD_ENTRY) } };
+    callout!(n8 >> 3, base, ip, cur, dsp, rsp, st, fp)
+});
+
+routine!(st_halt, |base, ip, cur, dsp, rsp, st, fp, w| {
+    unsafe { save(st, base, ip, cur, dsp, rsp, fp) };
     0
 });
 
-routine!(st_lit, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_lit, |base, ip, cur, dsp, rsp, st, fp, w| {
     let x = unsafe { rd(ip) };
     let dsp = dsp - 8;
     unsafe { wr(dsp, x) };
-    next!(base, ip - 8, cur, dsp, rsp, st, fuel)
+    next!(base, ip - 8, cur, dsp, rsp, st, fp)
 });
 
-routine!(st_branch, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_branch, |base, ip, cur, dsp, rsp, st, fp, w| {
     let off = unsafe { rd(ip) };
     let ip = ip.wrapping_sub(8).wrapping_sub(off);
-    checks!(base, ip, cur, dsp, rsp, st, fuel);
-    next!(base, ip, cur, dsp, rsp, st, fuel)
+    checks!(base, ip, cur, dsp, rsp, st, fp);
+    next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
-routine!(st_zbranch, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_zbranch, |base, ip, cur, dsp, rsp, st, fp, w| {
     let flag = unsafe { rd(dsp) };
     let dsp = dsp + 8;
     let off = unsafe { rd(ip) };
     let ip = ip.wrapping_sub(8);
     if flag == FALSE {
         let ip = ip.wrapping_sub(off);
-        checks!(base, ip, cur, dsp, rsp, st, fuel);
-        next!(base, ip, cur, dsp, rsp, st, fuel)
+        checks!(base, ip, cur, dsp, rsp, st, fp);
+        next!(base, ip, cur, dsp, rsp, st, fp)
     }
-    next!(base, ip, cur, dsp, rsp, st, fuel)
+    next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
-routine!(st_execute, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_execute, |base, ip, cur, dsp, rsp, st, fp, w| {
     let w = unsafe { rd(dsp) };
     let dsp = dsp + 8;
     if w & TAG_MASK == 0 {
         if w == 0 || w >= 8 * PRIMITIVES {
-            return unsafe { trap(st, TRAP_NO_ROUTINE, ((w as i64) >> 3) as u64, base, ip, cur, dsp, rsp, fuel) };
+            return unsafe { trap(st, TRAP_NO_ROUTINE, ((w as i64) >> 3) as u64, base, ip, cur, dsp, rsp, fp) };
         }
-        become unsafe { routine(st, w) }(base, ip, cur, dsp, rsp, st, fuel, w)
+        become unsafe { routine(st, w) }(base, ip, cur, dsp, rsp, st, fp, w)
     }
     // A word: a bloblet with a trailer, whose header says it is one.
     macro_rules! not_a_word {
         () => {
-            return unsafe { trap(st, TRAP_NOT_A_WORD, 0, base, ip, cur, dsp, rsp, fuel) }
+            return unsafe { trap(st, TRAP_NOT_A_WORD, 0, base, ip, cur, dsp, rsp, fp) }
         };
     }
     if w & TAG_MASK != TAG_BLOBLET {
@@ -216,52 +398,52 @@ routine!(st_execute, |base, ip, cur, dsp, rsp, st, fuel, w| {
         not_a_word!();
     }
     let e = unsafe { field(base, w, WORD_ENTRY) };
-    become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fuel, w)
+    become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fp, w)
 });
 
-routine!(st_dup, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_dup, |base, ip, cur, dsp, rsp, st, fp, w| {
     let a = unsafe { rd(dsp) };
     let dsp = dsp - 8;
     unsafe { wr(dsp, a) };
-    next!(base, ip, cur, dsp, rsp, st, fuel)
+    next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
-routine!(st_drop, |base, ip, cur, dsp, rsp, st, fuel, w| {
-    next!(base, ip, cur, dsp + 8, rsp, st, fuel)
+routine!(st_drop, |base, ip, cur, dsp, rsp, st, fp, w| {
+    next!(base, ip, cur, dsp + 8, rsp, st, fp)
 });
 
-routine!(st_swap, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_swap, |base, ip, cur, dsp, rsp, st, fp, w| {
     unsafe {
         let (b, a) = (rd(dsp), rd(dsp + 8));
         wr(dsp, a);
         wr(dsp + 8, b);
     }
-    next!(base, ip, cur, dsp, rsp, st, fuel)
+    next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
-routine!(st_over, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_over, |base, ip, cur, dsp, rsp, st, fp, w| {
     let a = unsafe { rd(dsp + 8) };
     let dsp = dsp - 8;
     unsafe { wr(dsp, a) };
-    next!(base, ip, cur, dsp, rsp, st, fuel)
+    next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
 /// A binary operation on two fixnums, the result replacing them; `$op`
 /// gives the result and whether it overflowed.
 macro_rules! arith {
     ($name:ident, $r:expr, |$a:ident, $b:ident| $op:expr) => {
-        routine!($name, |base, ip, cur, dsp, rsp, st, fuel, w| {
+        routine!($name, |base, ip, cur, dsp, rsp, st, fp, w| {
             let ($b, $a) = unsafe { (rd(dsp), rd(dsp + 8)) };
             if ($a | $b) & TAG_MASK != 0 {
-                return unsafe { trap(st, TRAP_TYPE, $r, base, ip, cur, dsp, rsp, fuel) };
+                return unsafe { trap(st, TRAP_TYPE, $r, base, ip, cur, dsp, rsp, fp) };
             }
             let (x, overflowed): (u64, bool) = $op;
             if overflowed {
-                return unsafe { trap(st, TRAP_OVERFLOW, $r, base, ip, cur, dsp, rsp, fuel) };
+                return unsafe { trap(st, TRAP_OVERFLOW, $r, base, ip, cur, dsp, rsp, fp) };
             }
             let dsp = dsp + 8;
             unsafe { wr(dsp, x) };
-            next!(base, ip, cur, dsp, rsp, st, fuel)
+            next!(base, ip, cur, dsp, rsp, st, fp)
         });
     };
 }
@@ -276,22 +458,22 @@ arith!(st_sub, R_SUB, |a, b| {
 });
 arith!(st_less, R_LESS, |a, b| (if (a as i64) < (b as i64) { TRUE } else { FALSE }, false));
 
-routine!(st_eq, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_eq, |base, ip, cur, dsp, rsp, st, fp, w| {
     let (b, a) = unsafe { (rd(dsp), rd(dsp + 8)) };
     let dsp = dsp + 8;
     unsafe { wr(dsp, if a == b { TRUE } else { FALSE }) };
-    next!(base, ip, cur, dsp, rsp, st, fuel)
+    next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
 macro_rules! pair_part {
     ($name:ident, $r:expr, $off:expr) => {
-        routine!($name, |base, ip, cur, dsp, rsp, st, fuel, w| {
+        routine!($name, |base, ip, cur, dsp, rsp, st, fp, w| {
             let p = unsafe { rd(dsp) };
             if p & TAG_MASK != TAG_PAIR {
-                return unsafe { trap(st, TRAP_TYPE, $r, base, ip, cur, dsp, rsp, fuel) };
+                return unsafe { trap(st, TRAP_TYPE, $r, base, ip, cur, dsp, rsp, fp) };
             }
             unsafe { wr(dsp, rd(base.wrapping_add(p).wrapping_sub(1) + $off)) };
-            next!(base, ip, cur, dsp, rsp, st, fuel)
+            next!(base, ip, cur, dsp, rsp, st, fp)
         });
     };
 }
@@ -299,51 +481,30 @@ macro_rules! pair_part {
 pair_part!(st_car, R_CAR, 0);
 pair_part!(st_cdr, R_CDR, 8);
 
-/// Leave the machine for the Rust side of routine `r`, and carry on from
-/// the state it leaves, unless it reports a trap.
-macro_rules! callout {
-    ($r:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fuel:ident) => {{
-        unsafe { save($st, $base, $ip, $cur, $dsp, $rsp, $fuel) };
-        let f = unsafe { core::mem::transmute::<u64, unsafe extern "C" fn(*mut State, u64) -> u64>((*$st).callout) };
-        if unsafe { f($st, $r) } != 0 {
-            return 0;
-        }
-        let s = unsafe { &*$st };
-        let (base, cur, dsp, rsp) = (s.base, s.cur, s.dsp, s.rsp);
-        let ip = base.wrapping_add(cur).wrapping_sub(4).wrapping_sub(s.d);
-        next!(base, ip, cur, dsp, rsp, $st, $fuel)
-    }};
-}
 
-routine!(st_field_ref, |base, ip, cur, dsp, rsp, st, fuel, w| {
+routine!(st_field_ref, |base, ip, cur, dsp, rsp, st, fp, w| {
     let (k, obj) = unsafe { (rd(dsp), rd(dsp + 8)) };
     if k & TAG_MASK != 0 || obj & TAG_MASK != TAG_BLOBLET {
-        return unsafe { trap(st, TRAP_TYPE, R_FIELD_REF, base, ip, cur, dsp, rsp, fuel) };
+        return unsafe { trap(st, TRAP_TYPE, R_FIELD_REF, base, ip, cur, dsp, rsp, fp) };
     }
     let t = unsafe { field(base, obj, 1) };
     if t & TAG_MASK != TAG_TRAILER {
-        callout!(R_FIELD_REF, base, ip, cur, dsp, rsp, st, fuel)
+        callout!(R_FIELD_REF, base, ip, cur, dsp, rsp, st, fp)
     }
     // 2 ≤ k ≤ F, as 8k against 8F.
     if (k as i64) < 16 || (k as i64) > (t - TAG_TRAILER) as i64 {
-        return unsafe { trap(st, TRAP_FIELD, R_FIELD_REF, base, ip, cur, dsp, rsp, fuel) };
+        return unsafe { trap(st, TRAP_FIELD, R_FIELD_REF, base, ip, cur, dsp, rsp, fp) };
     }
     let x = unsafe { rd(base.wrapping_add(obj).wrapping_sub(4).wrapping_sub(k)) };
     let dsp = dsp + 8;
     unsafe { wr(dsp, x) };
-    next!(base, ip, cur, dsp, rsp, st, fuel)
+    next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
-routine!(st_field_set, |base, ip, cur, dsp, rsp, st, fuel, w| {
-    callout!(R_FIELD_SET, base, ip, cur, dsp, rsp, st, fuel)
+routine!(st_field_set, |base, ip, cur, dsp, rsp, st, fp, w| {
+    callout!(R_FIELD_SET, base, ip, cur, dsp, rsp, st, fp)
 });
 
-// For a routine with no stencil of its own: a trap, as for a number that
-// is no routine. Reached through a cell, `w` is that number's fixnum.
-routine!(st_unsupported, |base, ip, cur, dsp, rsp, st, fuel, w| {
-    unsafe { trap(st, TRAP_NO_ROUTINE, w >> 3, base, ip, cur, dsp, rsp, fuel) }
-});
-
-routine!(st_cons, |base, ip, cur, dsp, rsp, st, fuel, w| {
-    callout!(R_CONS, base, ip, cur, dsp, rsp, st, fuel)
+routine!(st_cons, |base, ip, cur, dsp, rsp, st, fp, w| {
+    callout!(R_CONS, base, ip, cur, dsp, rsp, st, fp)
 });

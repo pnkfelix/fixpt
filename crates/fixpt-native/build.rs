@@ -44,7 +44,12 @@ fn consts() -> String {
     c("TAG_TRAILER", TAG_TRAILER);
     c("FALSE", Value::FALSE.raw());
     c("TRUE", Value::TRUE.raw());
+    c("PROMPT_MARK", fixpt_engine::threaded::PROMPT_MARK.raw());
+    c("MARK_MARK", fixpt_engine::threaded::MARK_MARK.raw());
     c("WORD_KIND", KIND as u64);
+    c("CLOSURE_KIND", fixpt_heap::layout::kind("threaded-closure") as u64);
+    c("CLOSURE_WORD", fixpt_heap::layout::threaded::CLOSURE_WORD as u64);
+    c("CLOSURE_FREE0", fixpt_heap::layout::threaded::CLOSURE_FREE0 as u64);
     c("WORD_ENTRY", WORD_ENTRY as u64);
     c("WORD_CELL0", WORD_CELL0 as u64);
     c("PRIMITIVES", PRIMITIVES as u64);
@@ -55,6 +60,7 @@ fn consts() -> String {
     for (name, t) in [
         ("TYPE", Trap::Type { routine: r }),
         ("OVERFLOW", Trap::Overflow { routine: r }),
+        ("UNDERFLOW", Trap::Underflow { routine: r }),
         ("FIELD", Trap::Field { routine: r }),
         ("NO_ROUTINE", Trap::NoRoutine(0)),
         ("NOT_A_WORD", Trap::NotAWord),
@@ -81,11 +87,15 @@ fn main() {
         let obj = out.join(format!("threaded-O{opt}.o"));
         match compile(&out, opt, &obj) {
             Ok(()) => {}
-            Err(e) => {
+            // No nightly at all: build without stencils, and say so.
+            Err(Compile::NoNightly(e)) => {
                 println!("cargo:warning=no stencils: {e}");
                 table = String::from("pub static STENCIL_SETS: &[StencilSet] = &[\n");
                 break;
             }
+            // A nightly that rejects the stencils: a bug here, not a missing
+            // tool, so the build stops and says what.
+            Err(Compile::Failed(e)) => panic!("the stencils do not compile at -O{opt}:\n{e}"),
         }
         let bytes = fs::read(&obj).unwrap();
         let stencils = read_stencils(&bytes).unwrap_or_else(|e| panic!("stencils at -O{opt}: {e}"));
@@ -102,7 +112,12 @@ fn main() {
     fs::write(out.join("stencils.txt"), listing).unwrap();
 }
 
-fn compile(dir: &Path, opt: &str, obj: &Path) -> Result<(), String> {
+enum Compile {
+    NoNightly(String),
+    Failed(String),
+}
+
+fn compile(dir: &Path, opt: &str, obj: &Path) -> Result<(), Compile> {
     let out = Command::new("rustup")
         .args(["run", "nightly", "rustc", "--edition", "2024", "--crate-type", "lib", "--emit", "obj"])
         .args(["--target", "aarch64-apple-darwin", "-C", &format!("opt-level={opt}")])
@@ -115,9 +130,14 @@ fn compile(dir: &Path, opt: &str, obj: &Path) -> Result<(), String> {
         .arg(obj)
         .arg(dir.join("threaded.rs"))
         .output()
-        .map_err(|e| format!("cannot run `rustup run nightly rustc`: {e}"))?;
+        .map_err(|e| Compile::NoNightly(format!("cannot run `rustup run nightly rustc`: {e}")))?;
     if !out.status.success() {
-        return Err(format!("the nightly compile failed:\n{}", String::from_utf8_lossy(&out.stderr)));
+        let err = String::from_utf8_lossy(&out.stderr).into_owned();
+        // rustup's own complaint, when no nightly is installed.
+        if err.contains("toolchain 'nightly") && err.contains("not installed") {
+            return Err(Compile::NoNightly(err));
+        }
+        return Err(Compile::Failed(err));
     }
     Ok(())
 }

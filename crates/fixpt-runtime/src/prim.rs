@@ -805,7 +805,14 @@ prims! {
         if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
         let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
         let Some(run) = rt.run_word else { return rt.fail("no threaded machine is installed", &[]) };
-        match run(rt, a[0], &args) {
+        // With `FIXPT_TIME_WORDS` set, how long each run took: the machine
+        // alone, without the front end around it.
+        let started = std::env::var_os("FIXPT_TIME_WORDS").map(|_| std::time::Instant::now());
+        let out = run(rt, a[0], &args);
+        if let Some(t) = started {
+            eprintln!("run-word: {:.6} s", t.elapsed().as_secs_f64());
+        }
+        match out {
             Ok(v) => Ok(v),
             Err(e) => rt.fail(&format!("threaded word: {e}"), &[a[0]]),
         }

@@ -673,6 +673,16 @@ one.)*
      rebases frame pointers and prompts' heights; `cwcc` takes everything;
      marks are return entries too. Every test program that checks without
      `extract` runs the same compiled as lowered, control ones included.)*
+     *(Native half done 2026-09-26: the hand-encoded machine and the
+     stencils run `slot`, `slot!`, `free`, `global`, `global!`, `call`,
+     `tailcall` and `return` in machine code, with return entries of the
+     same bits as the Rust machine's (`d` and the frame pointer are
+     fixnums), so the stacks are roots as they lie. `prim` calls the
+     runtime's primitive in place; the rest (closures, control, marks)
+     make a round trip, the stacks lifted into a Rust machine for one
+     routine and put back. Every compiled test program, control included,
+     gives the same value on all three machines; `fixpt --threaded-machine
+     rust|native|stencils` picks one.)*
    - **9d. A compiler in FX-26 from the AST to threaded words**, emitting
      bloblets. Checked three ways on the same programs: the evaluator, the
      lowering to Scheme, and the threaded words on the native machine.

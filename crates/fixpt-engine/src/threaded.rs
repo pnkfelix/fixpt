@@ -325,10 +325,10 @@ struct Regs {
 /// In a return entry's first place, where a word would be: this entry is a
 /// prompt's marker `(PROMPT_MARK, tag, handler, fixnum data stack height)`,
 /// just above the entry it resumes at when the prompt is left.
-const PROMPT_MARK: Value = Value::DEFAULT;
+pub const PROMPT_MARK: Value = Value::DEFAULT;
 /// ... or a continuation mark, `(MARK_MARK, key, value, 0)`, just above the
 /// entry it resumes at.
-const MARK_MARK: Value = Value::UNSPECIFIED;
+pub const MARK_MARK: Value = Value::UNSPECIFIED;
 
 /// The Rust inner interpreter's machine state.
 pub struct Machine {
@@ -890,6 +890,57 @@ impl Machine {
     }
 }
 
+/// Where a machine is between routines, as a native machine hands it over
+/// to have one routine run for it (`Machine::run_routine`): the word, the
+/// next cell (the routine's first operand, if it has one), the frame
+/// pointer, as an index into the data stack, and the closure running.
+#[derive(Copy, Clone, Debug)]
+pub struct Snapshot {
+    pub cur: Value,
+    pub k: usize,
+    pub fp: usize,
+    pub clo: Value,
+}
+
+impl Machine {
+    /// A machine over these stacks: the data stack bottom first, and the
+    /// return stack's entries oldest first, each `(word, fixnum k, fixnum
+    /// frame pointer, closure)` or a marker, as this machine keeps them.
+    pub fn from_stacks(ds: Vec<Value>, rs: Vec<Value>) -> Machine {
+        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX }
+    }
+
+    /// The stacks, as `from_stacks` takes them.
+    pub fn into_stacks(self) -> (Vec<Value>, Vec<Value>) {
+        (self.ds, self.rs)
+    }
+
+    /// `run_routine` on a bare heap: `prim` traps.
+    pub fn run_routine_on_heap(&mut self, heap: &mut Heap, n: i64, at: &mut Snapshot) -> Result<(), Trap> {
+        let mut r = Regs { cur: at.cur, k: at.k, fp: at.fp, clo: at.clo };
+        match self.prim(&mut Ctx::Heap(heap), n, &mut r)? {
+            Flow::Next => {}
+            Flow::Exit | Flow::Halt => return Err(Trap::NoRoutine(n)),
+        }
+        *at = Snapshot { cur: r.cur, k: r.k, fp: r.fp, clo: r.clo };
+        Ok(())
+    }
+
+    /// Run routine `n` once, from `at`, and leave `at` where the machine is
+    /// after it. This is how the native machines run the routines they have
+    /// no machine code for: this machine is their oracle, so those routines
+    /// mean exactly what they mean here.
+    pub fn run_routine(&mut self, rt: &mut Runtime, n: i64, at: &mut Snapshot) -> Result<(), Trap> {
+        let mut r = Regs { cur: at.cur, k: at.k, fp: at.fp, clo: at.clo };
+        match self.prim(&mut Ctx::Rt(rt), n, &mut r)? {
+            Flow::Next => {}
+            Flow::Exit | Flow::Halt => return Err(Trap::NoRoutine(n)),
+        }
+        *at = Snapshot { cur: r.cur, k: r.k, fp: r.fp, clo: r.clo };
+        Ok(())
+    }
+}
+
 /// Run `word` with `args` on the data stack in `rt`: the value left on top.
 /// What the runtime's `%run-word` calls (`Runtime::run_word`).
 pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
@@ -900,7 +951,8 @@ pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, 
 }
 
 /// A thrown value as a message.
-fn describe(rt: &Runtime, obj: Value) -> String {
+/// What a primitive raised, as a trap's message.
+pub fn describe(rt: &Runtime, obj: Value) -> String {
     if rt.is_error_object(obj) {
         fixpt_runtime::display_value(&rt.heap, rt.heap.obj_ref(obj, 1))
     } else {

@@ -37,8 +37,9 @@
 
 use crate::arm64::*;
 use crate::codespace::{CodeSpace, Offset};
-use fixpt_engine::threaded::{DS_LIMIT, RS_LIMIT, Trap};
-use fixpt_heap::layout::threaded::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY};
+use fixpt_engine::threaded::{DS_LIMIT, MARK_MARK, PROMPT_MARK, RS_LIMIT, Trap};
+use fixpt_heap::layout::kind;
+use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD, KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY};
 use fixpt_heap::layout::{H_FIELDS, T_DISTANCE};
 use fixpt_heap::value::{TAG_BLOBLET, TAG_PAIR, TAG_TRAILER};
 use fixpt_heap::{Heap, Value};
@@ -58,8 +59,10 @@ const DSP: Reg = 22;
 const RSP: Reg = 23;
 const ST: Reg = 24;
 const TABLE: Reg = 25;
-const FAL: Reg = 26;
-const TRU: Reg = 27;
+/// The frame pointer: the address of the running closure's slot 0.
+const FP: Reg = 26;
+/// The closure running.
+const CLO: Reg = 27;
 const FUEL: Reg = 28;
 // Scratch.
 const W: Reg = 9;
@@ -209,6 +212,87 @@ impl Asm {
         self.e(str(DSP, ST, off(offset_of!(State, dsp))));
         self.e(str(RSP, ST, off(offset_of!(State, rsp))));
         self.e(str(FUEL, ST, off(offset_of!(State, fuel))));
+        self.fp_encode(X13);
+        self.e(str(X13, ST, off(offset_of!(State, fp))));
+        self.e(str(CLO, ST, off(offset_of!(State, clo))));
+    }
+
+    /// `reg` = the frame pointer as a return entry keeps it:
+    /// `ds_base - 8 - FP`, the bits of its fixnum index.
+    fn fp_encode(&mut self, reg: Reg) {
+        self.e(ldr(reg, ST, off(offset_of!(State, ds_base))));
+        self.e(sub_imm(reg, reg, 8));
+        self.e(sub(reg, reg, FP));
+    }
+
+    /// `FP` from an encoded frame pointer in `reg` (clobbers `X16`).
+    fn fp_decode(&mut self, reg: Reg) {
+        self.e(ldr(X16, ST, off(offset_of!(State, ds_base))));
+        self.e(sub_imm(X16, X16, 8));
+        self.e(sub(FP, X16, reg));
+    }
+
+    /// `reg` = a constant Value.
+    fn value(&mut self, reg: Reg, v: Value) {
+        self.es(&mov_imm64(reg, v.raw()));
+    }
+
+    /// Push a return entry, `(CUR, 8k, fp, CLO)`, from this word as it
+    /// stands: the ip already past what this routine consumed.
+    fn push_return(&mut self) {
+        self.e(add(X13, BASE, CUR));
+        self.e(sub_imm(X13, X13, 4));
+        self.e(sub(X13, X13, IP));
+        self.fp_encode(X14);
+        self.e(stp_pre(X14, CLO, RSP, -16));
+        self.e(stp_pre(CUR, X13, RSP, -16));
+    }
+
+    /// Pop a return entry and return to it, or leave the machine at the
+    /// bottom one (whose word is `#f`). Prompts' and marks' entries are
+    /// not returns: pass them by.
+    fn pop_return(&mut self) {
+        let again = self.label();
+        self.bind(again);
+        self.e(ldr(X13, RSP, 0));
+        for mark in [PROMPT_MARK, MARK_MARK] {
+            let not = self.label();
+            self.value(X15, mark);
+            self.e(cmp(X13, X15));
+            self.b_cond(Cond::Ne, not);
+            self.e(add_imm(RSP, RSP, 32));
+            self.b(again);
+            self.bind(not);
+        }
+        self.e(ldp_post(CUR, X13, RSP, 16));
+        self.e(ldp_post(X14, CLO, RSP, 16));
+        self.value(X15, Value::FALSE);
+        self.e(cmp(CUR, X15));
+        let ec = self.exit_common;
+        self.b_cond(Cond::Eq, ec);
+        self.e(add(IP, BASE, CUR));
+        self.e(sub_imm(IP, IP, 4));
+        self.e(sub(IP, IP, X13));
+        self.fp_decode(X14);
+        self.next();
+    }
+
+    /// Check that `reg` is a threaded closure, else go to `not`: its
+    /// trailer says F, and its header, F + 1 words back, its kind.
+    fn is_closure(&mut self, reg: Reg, not: Label) {
+        self.e(and_low(X13, reg, 3));
+        self.e(cmp_imm(X13, TAG_BLOBLET as u32));
+        self.b_cond(Cond::Ne, not);
+        self.e(add(X11, BASE, reg));
+        self.e(ldur(X15, X11, field_off(1)));
+        self.e(and_low(X13, X15, 3));
+        self.e(cmp_imm(X13, TAG_TRAILER as u32));
+        self.b_cond(Cond::Ne, not);
+        self.e(sub(X14, X11, X15));
+        self.e(ldur(X14, X14, -7));
+        self.e(ubfx(X14, X14, 3, 8));
+        self.e(cmp_imm(X14, kind("threaded-closure") as u32));
+        self.b_cond(Cond::Ne, not);
     }
 
     /// Load them back, recomputing the ip from `cur`, `d` and the base.
@@ -222,9 +306,10 @@ impl Asm {
         self.e(ldr(DSP, ST, off(offset_of!(State, dsp))));
         self.e(ldr(RSP, ST, off(offset_of!(State, rsp))));
         self.e(ldr(TABLE, ST, off(offset_of!(State, table))));
-        self.e(ldr(FAL, ST, off(offset_of!(State, fal))));
-        self.e(ldr(TRU, ST, off(offset_of!(State, tru))));
         self.e(ldr(FUEL, ST, off(offset_of!(State, fuel))));
+        self.e(ldr(CLO, ST, off(offset_of!(State, clo))));
+        self.e(ldr(X14, ST, off(offset_of!(State, fp))));
+        self.fp_decode(X14);
     }
 
     fn fuel(&mut self) {
@@ -333,24 +418,12 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>) {
                 a.fuel();
                 a.ds_limit();
                 a.rs_limit();
-                a.e(add(X13, BASE, CUR));
-                a.e(sub_imm(X13, X13, 4));
-                a.e(sub(X13, X13, IP));
-                a.e(stp_pre(CUR, X13, RSP, -16));
+                a.push_return();
                 a.e(mov(CUR, W));
                 a.e(sub_imm(IP, X11, (4 + 8 * WORD_CELL0) as u32));
                 a.next();
             }
-            "exit" => {
-                a.e(ldp_post(CUR, X13, RSP, 16));
-                a.e(cmp(CUR, FAL));
-                let ec = a.exit_common;
-                a.b_cond(Cond::Eq, ec);
-                a.e(add(IP, BASE, CUR));
-                a.e(sub_imm(IP, IP, 4));
-                a.e(sub(IP, IP, X13));
-                a.next();
-            }
+            "exit" => a.pop_return(),
             "halt" => {
                 let ec = a.exit_common;
                 a.b(ec);
@@ -371,7 +444,8 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>) {
                 let skip = a.label();
                 a.e(ldr_post(X14, DSP, 8));
                 a.e(ldr_post(X13, IP, -8));
-                a.e(cmp(X14, FAL));
+                a.value(X15, Value::FALSE);
+                a.e(cmp(X14, X15));
                 a.b_cond(Cond::Ne, skip);
                 a.e(sub(IP, IP, X13));
                 a.fuel();
@@ -440,14 +514,18 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>) {
             "<" => {
                 a.two_fixnums(name);
                 a.e(cmp(X14, X13));
-                a.e(csel(X15, TRU, FAL, Cond::Lt));
+                a.value(X16, Value::TRUE);
+                a.value(X15, Value::FALSE);
+                a.e(csel(X15, X16, X15, Cond::Lt));
                 a.e(str_pre(X15, DSP, 8));
                 a.next();
             }
             "eq" => {
                 a.e(ldp(X13, X14, DSP, 0));
                 a.e(cmp(X14, X13));
-                a.e(csel(X15, TRU, FAL, Cond::Eq));
+                a.value(X16, Value::TRUE);
+                a.value(X15, Value::FALSE);
+                a.e(csel(X15, X16, X15, Cond::Eq));
                 a.e(str_pre(X15, DSP, 8));
                 a.next();
             }
@@ -484,15 +562,116 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>) {
                 a.bind(slow);
                 a.callout(n as u64);
             }
-            "field!" | "cons" => a.callout(n as u64),
-            // Not native yet (the routines for code compiled from FX-26):
-            // a trap, as for a number that is no routine.
-            _ => {
-                a.e(movz(X13, Trap::NoRoutine(0).code().0 as u32, 0));
-                a.e(movz(X14, n as u32, 0));
+            // Code compiled from FX-26: frames on the data stack, flat
+            // closures, globals, calls; as `fixpt_engine::threaded` has them.
+            "slot" | "slot!" => {
+                // Slot i is 8i bytes below FP, and must be on the stack.
+                a.e(ldr_post(X13, IP, -8));
+                a.e(sub(X14, FP, X13));
+                if name == "slot!" {
+                    a.e(ldr_post(X15, DSP, 8));
+                }
+                a.e(cmp(X14, DSP));
+                a.trap_if(Cond::Lo, Trap::Field { routine: name });
+                if name == "slot" {
+                    a.e(ldr(X15, X14, 0));
+                    a.e(str_pre(X15, DSP, -8));
+                } else {
+                    a.e(str(X15, X14, 0));
+                }
+                a.next();
+            }
+            "free" => {
+                // Field CLOSURE_FREE0 + i of the closure running, if it has it.
+                let bad = a.label();
+                a.e(ldr_post(X10, IP, -8));
+                a.is_closure(CLO, bad);
+                a.e(add_imm(X10, X10, (8 * CLOSURE_FREE0) as u32));
+                a.e(sub_imm(X16, X15, TAG_TRAILER as u32));
+                a.e(cmp(X10, X16));
+                a.b_cond(Cond::Gt, bad);
+                a.e(sub(X14, X11, X10));
+                a.e(ldur(X15, X14, -4));
+                a.e(str_pre(X15, DSP, -8));
+                a.next();
+                a.bind(bad);
+                let (code, aux) = Trap::Field { routine: name }.code();
+                a.e(movz(X13, code as u32, 0));
+                a.e(movz(X14, aux as u32, 0));
                 let tc = a.trap_common;
                 a.b(tc);
             }
+            "global" | "global!" => {
+                // The cell's value is its field 2 (checked when the word was
+                // made).
+                a.e(ldr_post(X13, IP, -8));
+                a.e(add(X11, BASE, X13));
+                if name == "global" {
+                    a.e(ldur(X15, X11, field_off(2)));
+                    a.e(str_pre(X15, DSP, -8));
+                } else {
+                    a.e(ldr_post(X15, DSP, 8));
+                    a.e(stur(X15, X11, field_off(2)));
+                }
+                a.next();
+            }
+            "call" | "tailcall" => {
+                // A threaded closure on top: its word, over a frame of the n
+                // values below it. Anything else (a continuation, or not a
+                // procedure) goes the Rust machine's way.
+                let other = a.label();
+                a.e(ldr(W, DSP, 0));
+                a.is_closure(W, other);
+                a.fuel();
+                a.ds_limit();
+                a.rs_limit();
+                // The count, 8n, in X10: `push_return` uses X13 and X14.
+                a.e(ldr_post(X10, IP, -8));
+                a.e(add_imm(DSP, DSP, 8));
+                if name == "call" {
+                    a.push_return();
+                    // Slot 0 is the first argument, the deepest: DSP + 8n - 8.
+                    a.e(add(X14, DSP, X10));
+                    a.e(sub_imm(FP, X14, 8));
+                } else {
+                    // Slide the n arguments down over this frame, deepest
+                    // first; FP stays.
+                    let (top, done) = (a.label(), a.label());
+                    a.e(add(X14, DSP, X10));
+                    a.e(sub_imm(X14, X14, 8));
+                    a.e(mov(X15, FP));
+                    a.e(mov(X16, X10));
+                    a.bind(top);
+                    a.cbz(X16, done);
+                    a.e(ldr_post(X10, X14, -8));
+                    a.e(str_post(X10, X15, -8));
+                    a.e(sub_imm(X16, X16, 8));
+                    a.b(top);
+                    a.bind(done);
+                    a.e(add_imm(DSP, X15, 8));
+                }
+                a.e(mov(CLO, W));
+                a.e(add(X11, BASE, W));
+                a.e(ldur(CUR, X11, field_off(CLOSURE_WORD)));
+                a.e(add(IP, BASE, CUR));
+                a.e(sub_imm(IP, IP, (4 + 8 * WORD_CELL0) as u32));
+                a.next();
+                a.bind(other);
+                a.callout(n as u64);
+            }
+            "return" => {
+                // The value on top replaces the frame; then back.
+                a.e(ldr_post(X15, DSP, 8));
+                a.e(add_imm(X14, FP, 8));
+                a.e(cmp(DSP, X14));
+                a.trap_if(Cond::Hi, Trap::Underflow { routine: name });
+                a.e(mov(DSP, FP));
+                a.e(str(X15, DSP, 0));
+                a.pop_return();
+            }
+            // Everything else: the Rust machine runs it on these stacks
+            // (`callout`), so it means exactly what it means there.
+            _ => a.callout(n as u64),
         }
         a.flush_stubs();
     }
@@ -514,12 +693,31 @@ extern "C" fn callout(st: *mut State, n: u64) -> u64 {
     // stacks are the machine's, between their pointers and bases. The
     // machine is stopped at a safepoint with every register saved.
     let st = unsafe { &mut *st };
-    let heap = unsafe { &mut *(st.heap as *mut Heap) };
+    let heap = unsafe { heap_of(st) };
     let nds = (st.ds_base - st.dsp) as usize / 8;
     let nrs = (st.rs_base - st.rsp) as usize / 8;
     let ds = unsafe { std::slice::from_raw_parts_mut(st.dsp as *mut Value, nds) };
     let rs = unsafe { std::slice::from_raw_parts_mut(st.rsp as *mut Value, nrs) };
     let name = ROUTINES[n as usize].0;
+    CALLOUTS.with(|c| c.borrow_mut()[n as usize] += 1);
+    if !matches!(name, "field@" | "field!" | "cons") {
+        let result = if name == "prim" { prim(st) } else { round_trip(st, n) };
+        // SAFETY: as above.
+        let heap = unsafe { heap_of(st) };
+        st.base = heap.active_words() as u64;
+        return match result {
+            Ok(()) => 0,
+            Err(t) => {
+                let (code, aux) = t.code();
+                if let Trap::Prim(m) = &t {
+                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m.clone()));
+                }
+                st.status = code;
+                st.aux = aux;
+                1
+            }
+        };
+    }
     let result = callout_routine(heap, st, ds, rs, name);
     st.base = heap.active_words() as u64;
     match result {
@@ -534,6 +732,142 @@ extern "C" fn callout(st: *mut State, n: u64) -> u64 {
             1
         }
     }
+}
+
+/// How many times this thread's machines have called out to Rust for
+/// each routine, by name, since the last call: where the machine code
+/// leaves the most to Rust.
+pub fn take_callout_counts() -> Vec<(&'static str, u64)> {
+    let counts = CALLOUTS.with(|c| std::mem::replace(&mut *c.borrow_mut(), [0; ROUTINES.len()]));
+    ROUTINES.iter().zip(counts).filter(|(_, n)| *n > 0).map(|((name, _), n)| (*name, n)).collect()
+}
+
+/// With `FIXPT_CALLOUTS` set, write the callout counts to stderr: after
+/// each `run_word`, so from the command line too.
+pub fn report_callouts() {
+    if std::env::var_os("FIXPT_CALLOUTS").is_some() {
+        eprintln!("callouts: {:?}", take_callout_counts());
+    }
+}
+
+thread_local! {
+    static CALLOUTS: std::cell::RefCell<[u64; ROUTINES.len()]> = const { std::cell::RefCell::new([0; ROUTINES.len()]) };
+    /// A runtime primitive's message, when one failed in a call-out: a
+    /// trap's code cannot carry it.
+    static LAST_MESSAGE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The heap the state's run holds: the runtime's, or the bare heap's.
+///
+/// # Safety
+/// `st` is a running machine's state (see `callout`).
+unsafe fn heap_of<'a>(st: &State) -> &'a mut Heap {
+    if st.rt != 0 {
+        // SAFETY: the runtime `run_in_runtime` holds exclusively.
+        unsafe { &mut (*(st.rt as *mut fixpt_runtime::Runtime)).heap }
+    } else {
+        // SAFETY: the heap `run` holds exclusively.
+        unsafe { &mut *(st.heap as *mut Heap) }
+    }
+}
+
+/// Run routine `n` with the Rust machine on these stacks: lift them into
+/// one (the words are laid out alike, so this is only reordering), run the
+/// routine, and put them back. Costs the stacks' size, so it is for the
+/// routines too rare, or too involved, to have machine code of their own.
+fn round_trip(st: &mut State, n: u64) -> Result<(), Trap> {
+    use fixpt_engine::threaded::{Machine, Snapshot};
+    let nds = (st.ds_base - st.dsp) as usize / 8;
+    let nentries = (st.rs_base - st.rsp) as usize / 32;
+    // SAFETY: the machine's stacks, between their pointers and bases.
+    let word = |a: u64| unsafe { Value(*(a as *const u64)) };
+    let ds: Vec<Value> = (0..nds).map(|i| word(st.ds_base - 8 - 8 * i as u64)).collect();
+    let mut rs = Vec::with_capacity(4 * nentries);
+    for e in 0..nentries {
+        let at = st.rs_base - 32 * (e as u64 + 1);
+        for j in 0..4 {
+            rs.push(word(at + 8 * j));
+        }
+    }
+    let mut at = Snapshot { cur: Value(st.cur), k: (st.d / 8) as usize, fp: (st.fp / 8) as usize, clo: Value(st.clo) };
+    let mut m = Machine::from_stacks(ds, rs);
+    let result = if st.rt != 0 {
+        // SAFETY: the runtime `run_in_runtime` holds exclusively.
+        let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
+        m.run_routine(rt, n as i64, &mut at)
+    } else {
+        // SAFETY: the heap `run` holds exclusively.
+        let heap = unsafe { &mut *(st.heap as *mut Heap) };
+        m.run_routine_on_heap(heap, n as i64, &mut at)
+    };
+    let (ds, rs) = m.into_stacks();
+    // SAFETY: within the stacks' room: the Rust machine checks the same
+    // limits the native one does.
+    let put = |a: u64, v: Value| unsafe { *(a as *mut u64) = v.raw() };
+    for (i, v) in ds.iter().enumerate() {
+        put(st.ds_base - 8 - 8 * i as u64, *v);
+    }
+    st.dsp = st.ds_base - 8 * ds.len() as u64;
+    for (e, chunk) in rs.chunks(4).enumerate() {
+        let at = st.rs_base - 32 * (e as u64 + 1);
+        for (j, v) in chunk.iter().enumerate() {
+            put(at + 8 * j as u64, *v);
+        }
+    }
+    st.rsp = st.rs_base - 8 * rs.len() as u64;
+    st.cur = at.cur.raw();
+    st.d = 8 * at.k as u64;
+    st.fp = 8 * at.fp as u64;
+    st.clo = at.clo.raw();
+    result
+}
+
+/// `prim p n`: runtime primitive `p` on the top `n` values, in place. The
+/// stacks are roots as they lie: a return entry's `d` and frame pointer
+/// have a fixnum's bits.
+fn prim(st: &mut State) -> Result<(), Trap> {
+    let name = "prim";
+    if st.rt == 0 {
+        return Err(Trap::Prim("no runtime to call a primitive in".into()));
+    }
+    // SAFETY: the runtime `run_in_runtime` holds exclusively.
+    let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
+    let k = (st.d / 8) as usize;
+    let p = rt.heap.bloblet_slot(Value(st.cur), k).as_fixnum() as usize;
+    let count = rt.heap.bloblet_slot(Value(st.cur), k + 1).as_fixnum() as usize;
+    let depth = (st.ds_base - st.dsp) as usize / 8;
+    if depth < count {
+        return Err(Trap::Underflow { routine: name });
+    }
+    if count == 0 && st.dsp - 8 < st.ds_limit {
+        return Err(Trap::StackOverflow);
+    }
+    let Some(def) = fixpt_runtime::PRIMITIVES.get(p) else { return Err(Trap::Prim(format!("no primitive {p}"))) };
+    let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
+    if count < def.min || def.max.is_some_and(|m| count > m) {
+        return Err(Trap::Prim(format!("`{}` given {count} argument(s)", def.name)));
+    }
+    // A safepoint first, as in the Rust machine.
+    {
+        let nrs = (st.rs_base - st.rsp) as usize / 8;
+        // SAFETY: the machine's stacks, between their pointers and bases,
+        // every word a value.
+        let ds = unsafe { std::slice::from_raw_parts_mut(st.dsp as *mut Value, depth) };
+        let rs = unsafe { std::slice::from_raw_parts_mut(st.rsp as *mut Value, nrs) };
+        let mut regs = [Value(st.cur), Value(st.clo)];
+        rt.heap.maybe_collect(&mut [ds, rs, &mut regs]);
+        (st.cur, st.clo) = (regs[0].raw(), regs[1].raw());
+    }
+    // The top is at `dsp`; the arguments go deepest first.
+    // SAFETY: as above.
+    let word = |a: u64| unsafe { Value(*(a as *const u64)) };
+    let mut args: Vec<Value> = (0..count).rev().map(|i| word(st.dsp + 8 * i as u64)).collect();
+    let v = f(rt, &mut args).map_err(|t| Trap::Prim(fixpt_engine::threaded::describe(rt, t.obj)))?;
+    st.dsp = st.dsp + 8 * count as u64 - 8;
+    // SAFETY: the slot the arguments had, or one checked above.
+    unsafe { *(st.dsp as *mut u64) = v.raw() };
+    st.d += 16;
+    Ok(())
 }
 
 /// The routine, on the stacks as slices (top first). Returns how many
@@ -562,9 +896,10 @@ fn callout_routine(heap: &mut Heap, st: &mut State, ds: &mut [Value], rs: &mut [
             if ds.len() < 2 {
                 return Err(underflow);
             }
-            let mut cur = [Value(st.cur)];
-            heap.maybe_collect(&mut [ds, rs, &mut cur]);
-            st.cur = cur[0].raw();
+            let mut regs = [Value(st.cur), Value(st.clo)];
+            heap.maybe_collect(&mut [ds, rs, &mut regs]);
+            st.cur = regs[0].raw();
+            st.clo = regs[1].raw();
             let p = heap.cons(ds[1], ds[0]);
             ds[1] = p;
             Ok(1)
@@ -628,7 +963,7 @@ const MAX_CELLS: usize = 1 << 18;
 
 impl Stacks {
     pub(crate) fn new() -> Stacks {
-        Stacks { ds: Stack::new(8 * (DS_LIMIT + MAX_CELLS), 8 * MAX_CELLS), rs: Stack::new(16 * (RS_LIMIT + 2), page()) }
+        Stacks { ds: Stack::new(8 * (DS_LIMIT + MAX_CELLS), 8 * MAX_CELLS), rs: Stack::new(32 * (RS_LIMIT + 2), page()) }
     }
 
     /// The state to start `word` in, with `args` on the data stack (the last
@@ -665,7 +1000,12 @@ impl Stacks {
             ds_base: self.ds.base,
             rs_base: self.rs.base,
             ds_limit: self.ds.base - 8 * DS_LIMIT as u64,
-            rs_limit: self.rs.base - 16 * (RS_LIMIT as u64 + 1),
+            // Slot 0 is where the next value will go: the frame the
+            // arguments are, as the Rust machine starts.
+            fp: 8 * args.len() as u64,
+            clo: Value::FALSE.raw(),
+            rt: 0,
+            rs_limit: self.rs.base - 32 * (RS_LIMIT as u64 + 1),
             routines: [0; ROUTINE_SLOTS],
         }
     }
@@ -674,7 +1014,13 @@ impl Stacks {
     /// first, or its trap.
     pub(crate) fn finish(&self, st: &State) -> Result<Vec<Value>, Trap> {
         if st.status != 0 {
-            return Err(Trap::from_code(st.status, st.aux));
+            let t = Trap::from_code(st.status, st.aux);
+            if let Trap::Prim(_) = t
+                && let Some(m) = LAST_MESSAGE.with(|c| c.borrow_mut().take())
+            {
+                return Err(Trap::Prim(m));
+            }
+            return Err(t);
         }
         let n = (self.ds.base - st.dsp) as usize / 8;
         // SAFETY: the machine's data stack, from its pointer to its base.
@@ -725,6 +1071,36 @@ impl NativeMachine {
         self.fuel_left = st.fuel;
         self.stacks.finish(&st)
     }
+
+    /// The same in a runtime, whose primitives the routines this machine
+    /// hands to the Rust machine (`prim` and the rest) call.
+    pub fn run_in_runtime(
+        &mut self,
+        rt: &mut fixpt_runtime::Runtime,
+        word: Value,
+        args: &[Value],
+        fuel: u64,
+    ) -> Result<Vec<Value>, Trap> {
+        let rt_ptr = rt as *mut fixpt_runtime::Runtime as u64;
+        let mut st = self.stacks.start(&mut rt.heap, word, args, fuel);
+        st.rt = rt_ptr;
+        st.table = self.table.as_ptr() as u64;
+        // SAFETY: as for `run`; the runtime, and so the heap, is reached
+        // only through the state while the machine runs.
+        unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };
+        self.fuel_left = st.fuel;
+        self.stacks.finish(&st)
+    }
+}
+
+/// Run `word` with `args` on a native machine in `rt`: what the runtime's
+/// `%run-word` calls when a native machine is chosen (`Runtime::run_word`).
+/// A machine per run: its code is generated anew, which is quick.
+pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    let mut m = NativeMachine::new();
+    let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+    report_callouts();
+    out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
 }
 
 impl Default for NativeMachine {

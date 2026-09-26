@@ -116,6 +116,45 @@ What it says:
   growth, at about the speed of the Rust machine built with `--release`,
   and 18× the Rust machine built without.
 
+## FX-26 compiled to threaded words, on each machine (C9c-3)
+
+`fixpt --dialect fx26 --fx26-run threaded --threaded-machine M run FILE`,
+release build, best of three. The programs are FX-26, compiled by the
+compiler written in FX-26 (`src/compile.fx`): `fib 27` (doubly recursive,
+`<`, `+` and `-` as the machine's primitives) and a `letrec` loop counting
+to one million (its `=` a runtime primitive, `prim`). "Run" is the word's
+own run, timed inside the process around `%run-word`
+(`FIXPT_TIME_WORDS=1`); the front end's loading, reading, checking and
+compiling come to 0.11 s before it, whatever the machine.
+
+| program      | lowered to Scheme (VM) | FX-26 evaluator | Rust machine | hand-encoded | stencils -O2 |
+| ------------ | ---------------------- | --------------- | ------------ | ------------ | ------------ |
+| fib 27       | 0.05 s                 | 17.1 s          | 0.041 s      | 0.0040 s     | 0.0056 s     |
+| count to 1 M | 0.08 s                 | 24.7 s          | 0.083 s      | 0.024 s      | 0.026 s      |
+
+The first two columns are wall time less startup (0.00 s lowered, 0.11 s
+evaluated); `run` rather than the REPL, whose step limit stops the lowered
+programs at 20 million steps.
+
+What it says:
+
+- **Compiled FX-26 on the native machines is as fast as hand-written
+  threaded code**: `fib 27` takes 4.0 ms here and 3.3 ms as the Forth word
+  of the table above, though this one has frames, closures and generic
+  calls. Ten times the Rust machine, twelve times the Scheme VM.
+- **A routine left to Rust costs what its way back costs.** The first
+  version sent `prim` through the round trip, which copies both stacks
+  each time: the loop took 0.14 s on the native machines, barely ahead of
+  the Rust machine. `FIXPT_CALLOUTS=1` (the native machines' per-routine
+  count of call-outs) showed two million `prim`s and nothing else; calling
+  the primitive in place, with the stacks as the collector's roots where
+  they lie, made it 0.024 s. The remaining cost is the call-out itself,
+  about 20 ns, and the primitive's generic `=`: a compiler that knew both
+  sides were fixnums could use the machine's own.
+- **The evaluator is 300–400× the lowering**: an interpreter written in
+  FX-26, lowered to Scheme, on the VM. It is the reference, not a way to
+  run things.
+
 ## The eager reader in FX-26, building syntax with positions (B8)
 
 `cargo test -p fixpt-fx26 --test eager` (debug, whole suite, 9 tests),

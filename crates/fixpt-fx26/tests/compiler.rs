@@ -95,3 +95,42 @@ fn every_program_compiled() {
     // test stopped finding them.
     assert!(ran >= 14, "only {ran} programs ran");
 }
+
+/// The same programs, compiled once more and run on each machine: the
+/// hand-encoded native machine, and the stencils at -O2. Control, and
+/// everything else a native machine has no code for, runs there through
+/// the Rust machine (the round trip).
+#[test]
+fn every_program_on_every_machine() {
+    type Run = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, &[fixpt_heap::Value]) -> Result<fixpt_heap::Value, String>;
+    let machines: [(&str, Run); 2] =
+        [("native", fixpt_native::threaded::run_word), ("stencils", fixpt_native::stencil::run_word)];
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let mut report = Vec::new();
+    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet"] {
+        let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
+        names.sort();
+        for path in names {
+            let program = std::fs::read_to_string(&path).unwrap();
+            if program.contains("(extract") || program.contains("define-datatype") {
+                continue;
+            }
+            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+            let lowered = match s.run_program(&program) {
+                Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
+                Err(_) => continue,
+            };
+            for (name, run) in machines {
+                eprintln!("RUNNING {name} {}", path.display());
+                let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+                s.scheme.runtime_unrooted().run_word = Some(run);
+                let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
+                if compiled.as_deref() != Ok(lowered.as_str()) {
+                    let file = path.file_name().unwrap().to_string_lossy().to_string();
+                    report.push(format!("{name} {sub}/{file}: {compiled:?}, lowered {lowered:?}"));
+                }
+            }
+        }
+    }
+    assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
+}
