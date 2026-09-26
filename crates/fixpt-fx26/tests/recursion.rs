@@ -64,3 +64,24 @@ fn a_group_is_checked_against_its_types() {
     let e = check("(define-rec (f (subr pure (int) int) (lambda (n) (g n))) (g (subr pure (int) bool) (lambda (n) #t))) 1");
     assert!(e.is_err(), "{e:?}");
 }
+
+/// Nothing is declared ahead: a definition sees only those before it, so a
+/// use before a definition is an unknown name. Procedures that call each
+/// other are a `define-rec`.
+#[test]
+fn a_definition_sees_only_those_before_it() {
+    let e = check("(define f (subr pure () int) (lambda () (g))) (define g (subr pure () int) (lambda () 1)) (f)");
+    assert!(e.as_ref().is_err_and(|m| m.contains("`g`")), "{e:?}");
+}
+
+/// A typed definition is in scope in itself only when it is a lambda; any
+/// other sees the name's binding before it.
+#[test]
+fn only_a_lambda_sees_itself() {
+    assert_eq!(check("(define x int 1) (define x int (+ x 1)) x"), Ok(()));
+    let program = "(define x int 1) (define x int (+ x 1)) x";
+    let session = || fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
+    assert_eq!(session().run_program(program).expect("checks"), Ok("2".to_string()));
+    assert_eq!(session().eval_with_own_evaluator(program).expect("checks"), "2");
+    assert_eq!(session().compile_with_own_compiler(program).expect("checks"), "2");
+}

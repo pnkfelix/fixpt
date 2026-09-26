@@ -85,8 +85,8 @@ impl Chars {
 pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span) -> String {
     let (a, b) = (chars.at(span.start), chars.at(span.end));
     match top {
-        Top::Define { name, exp, recursive, .. } => {
-            let ty = if *recursive { "(_)" } else { "()" };
+        Top::Define { name, exp, typed, .. } => {
+            let ty = if *typed { "(_)" } else { "()" };
             format!("(t-define {} {ty} {} {a} {b})", c.interner.name(*name), show_exp(c, chars, *exp))
         }
         Top::DefineRec { bindings } => {

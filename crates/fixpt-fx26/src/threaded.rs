@@ -64,10 +64,8 @@ pub struct Compiler<'a> {
     /// in characters, as the compiler written in FX-26 does.
     char_at: Vec<u32>,
     labels: usize,
-    /// The globals, as compiling has reached them, and those given a cell
-    /// ahead of their typed definitions.
+    /// The globals, as compiling has reached them.
     genv: Env,
-    declared: Vec<Sym>,
     this: Option<This>,
 }
 
@@ -84,7 +82,7 @@ impl<'a> Compiler<'a> {
             n += 1;
         }
         char_at[text.len()] = n;
-        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), declared: Vec::new(), this: None }
+        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), this: None }
     }
 
     fn name(&self, s: Sym) -> &str {
@@ -882,14 +880,6 @@ impl<'a> Compiler<'a> {
     /// A checked program's forms, as the checker found them, to one word
     /// that runs it and leaves its last expression's value (unit if none).
     pub fn program(&mut self, tops: &[Top]) -> R<Value> {
-        for t in tops {
-            if let Top::Define { name, recursive: true, .. } = t
-                && find(&self.genv, *name).is_none()
-            {
-                self.push_global(*name);
-                self.declared.push(*name);
-            }
-        }
         let mut code = Vec::new();
         let mut has_value = false;
         for t in tops {
@@ -898,20 +888,12 @@ impl<'a> Compiler<'a> {
                     if has_value {
                         self.op(&mut code, "drop");
                     }
+                    // A lambda's global first, so that it can call itself.
                     let g = if !recursive {
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
                         self.push_global(*name)
                     } else {
-                        let g = match self.declared.iter().position(|n| n == name) {
-                            Some(i) => {
-                                self.declared.remove(i);
-                                match find(&self.genv, *name) {
-                                    Some(Loc::Global(g)) => g,
-                                    _ => return Err("not a global".into()),
-                                }
-                            }
-                            None => self.push_global(*name),
-                        };
+                        let g = self.push_global(*name);
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
                         g
                     };

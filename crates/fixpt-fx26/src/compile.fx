@@ -10,8 +10,9 @@
 ;;; FX-26 has no assignment to variables, so nothing else is boxed.
 ;;;
 ;;; Globals follow the evaluator and the lowering to Scheme: a form sees the
-;;; definitions made before it, a second `define` shadows the first, and a
-;;; typed definition is given its cell ahead, so forms before it can call it.
+;;; definitions made before it, a second `define` shadows the first, a
+;;; lambda's definition sees itself, and a `define-rec` group sees all of
+;;; itself.
 ;;;
 ;;; Control is the machine's: a `prompt`'s body is compiled as a closure of
 ;;; no arguments, so that everything inside the prompt is above its marker
@@ -151,10 +152,8 @@
       (at-free (i) (tagcase l (at-free (j) (= i j)) (else y #f)))
       (else y #f))))
 
-;; The global environment as compiling has reached it, newest first, and the
-;; names given a cell ahead of their typed definitions.
+;; The global environment as compiling has reached it, newest first.
 (define c-genv (ref cenv @k) (new nil))
-(define c-declared (ref (listof symbol @k) @k) (new nil))
 
 (define c-find (subr (maxeff (read @k) (alloc @k)) (cenv symbol) (listof loc @k))
   (lambda (e n)
@@ -758,28 +757,8 @@
 (define c-push-global (subr (maxeff (read @k) (write @k) (alloc @k)) (symbol) wglobal)
   (lambda (n) (let ((g (make-global n))) (begin (set c-genv (the cenv (cons (cons n (at-global g)) (get c-genv)))) g))))
 
-(define c-without (subr (maxeff (read @k) (alloc @k)) (syms symbol) syms)
-  (lambda (ns n) (cond ((null? ns) nil) ((symbol=? (car ns) n) (cdr ns)) (else (cons (car ns) (c-without (cdr ns) n))))))
 
-(define c-global-of (subr compiles (symbol) wglobal)
-  (lambda (n)
-    (let ((l (c-find (get c-genv) n)))
-      (if (null? l)
-          (c-fail "no such global")
-          (tagcase (car l) (at-global (g) g) (else y (c-fail "not a global")))))))
 
-(define c-declare-ahead (subr (maxeff (read @a) (read @k) (write @k) (alloc @k)) ((listof top @a)) unit)
-  (lambda (ts)
-    (if (null? ts)
-        #u
-        (begin
-          (tagcase (car ts)
-            (t-define (n ty x a b)
-              (if (and (not (null? ty)) (null? (c-find (get c-genv) n)))
-                  (begin (c-push-global n) (set c-declared (cons n (get c-declared))))
-                  #u))
-            (else y #u))
-          (c-declare-ahead (cdr ts))))))
 
 (define c-rec-globals (subr (maxeff (read @a) (read @k) (write @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof wglobal @k))
   (lambda (bs) (if (null? bs) nil (let ((g (c-push-global (extract (car bs) 1)))) (cons g (c-rec-globals (cdr bs)))))))
@@ -803,11 +782,13 @@
               (if (null? ty)
                   (begin (c-exp x (the cenv nil) 0 c #f)
                          (c-op1 c routine-global! (wcell-global (c-push-global n))))
-                  (let ((g (if (c-member? (get c-declared) n)
-                               (begin (set c-declared (c-without (get c-declared) n)) (c-global-of n))
-                               (c-push-global n))))
-                    (begin (c-exp x (the cenv nil) 0 c #f)
-                           (c-op1 c routine-global! (wcell-global g)))))
+                  (if (null? (c-lambda-of x))
+                      (begin (c-exp x (the cenv nil) 0 c #f)
+                             (c-op1 c routine-global! (wcell-global (c-push-global n))))
+                      ;; A lambda: its global first, so that it can call itself.
+                      (let ((g (c-push-global n)))
+                        (begin (c-exp x (the cenv nil) 0 c #f)
+                               (c-op1 c routine-global! (wcell-global g))))))
               (c-tops (cdr ts) c #f)))
           ;; Every name's global first; then each lambda, which runs nothing.
           (t-define-rec (bs a b)
@@ -831,7 +812,6 @@
         (begin
           (set c-facts facts)
           (set c-this-params -1)
-          (c-declare-ahead tops)
           (if (c-tops tops c #f) #u (c-lit c (wcell-unit)))
           (c-op c routine-exit)
           (c-ok (c-assemble c (string->symbol "program")))))

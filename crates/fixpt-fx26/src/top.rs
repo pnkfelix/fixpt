@@ -3,9 +3,9 @@
 //! The kernel is expressions. A program is a sequence of top-level forms, each
 //! of which may add to the environment the rest of the program sees:
 //!
-//! * `(define name type expression)` — `name` is a `type`, and is in scope in
-//!   its own `expression`, so a definition may be recursive (a top-level
-//!   `letrec` binding).
+//! * `(define name type expression)` — `name` is a `type`. When the
+//!   expression is a lambda, `name` is in scope in it, so the procedure may
+//!   call itself (a one-binding `define-rec`); otherwise it is not.
 //! * `(define name expression)` — the type is the expression's own; not
 //!   recursive (a top-level `let`).
 //! * `(define-rec (name type lambda) …)` — procedures that may call each
@@ -33,7 +33,9 @@ use fixpt_read::{FileId, Reader, Span, Sym, Syntax, SyntaxProfile};
 pub enum Top {
     /// `(define name …)`: `name` is bound to a value of this type, and
     /// computing it has this effect.
-    Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, recursive: bool },
+    /// `typed` when the type was written; `recursive` when the name is in
+    /// scope in its expression, which is then a lambda.
+    Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, typed: bool, recursive: bool },
     /// `(define-rec (name type lambda) …)`: each name bound to its lambda.
     DefineRec { bindings: Vec<(Sym, TyId, crate::ast::ExpId)> },
     /// `(define-type name …)`.
@@ -203,21 +205,32 @@ impl Checker {
             [_, name, ty, init] => {
                 let name = self.binder_name(name)?;
                 let ty = self.parse_type(ty)?;
-                // In scope in its own initialiser, as a `letrec` binding is.
-                self.env.push((name, ty));
                 // A signature's binders are in scope in the definition, which
                 // is checked against it: `(define id (poly ((t type)) …)
                 // (lambda ((x t)) x))` means what a `plambda` would.
                 let depth = self.dscope.len();
                 self.bind_signature(ty);
-                let r = self.parse_exp(init);
+                let e = self.parse_exp(init);
                 self.dscope.truncate(depth);
-                let r = r.and_then(|e| self.check_declared(name, ty, e).map(|eff| (eff, e)));
-                match r {
-                    Ok((effect, exp)) => Ok(Top::Define { name, ty, effect, exp, recursive: true }),
-                    Err(e) => {
-                        self.env.pop();
-                        Err(e)
+                let e = e?;
+                // A lambda is in scope in itself, as a `letrec` binding is:
+                // making it runs nothing, so nothing sees it unmade.
+                let recursive = self.is_lambda(e);
+                if recursive {
+                    self.env.push((name, ty));
+                }
+                match self.check_declared(name, ty, e) {
+                    Ok(effect) => {
+                        if !recursive {
+                            self.env.push((name, ty));
+                        }
+                        Ok(Top::Define { name, ty, effect, exp: e, typed: true, recursive })
+                    }
+                    Err(err) => {
+                        if recursive {
+                            self.env.pop();
+                        }
+                        Err(err)
                     }
                 }
             }
@@ -226,7 +239,7 @@ impl Checker {
                 let e = self.parse_exp(init)?;
                 let (ty, effect) = self.synth(e)?;
                 self.env.push((name, ty));
-                Ok(Top::Define { name, ty, effect, exp: e, recursive: false })
+                Ok(Top::Define { name, ty, effect, exp: e, typed: false, recursive: false })
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),
         }
@@ -312,11 +325,11 @@ impl Checker {
     }
 
     /// The first of a whole program's two passes: every `define-type` and
-    /// `define-effect` is processed, and every `define` with a signature is
-    /// declared, so that the definitions can refer to each other in any
-    /// order — which is what a signature is for. Returns, for each form,
-    /// whether it is finished with (the abbreviations are). The second pass
-    /// is `top` on the rest, in order.
+    /// `define-effect` is processed, so that types can refer to each other in
+    /// any order. Values cannot: a definition sees only those before it, and
+    /// procedures that call each other are a `define-rec`. Returns, for each
+    /// form, whether it is finished with (the abbreviations are). The second
+    /// pass is `top` on the rest, in order.
     pub fn declare_ahead(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
         let mut done = Vec::new();
         for f in forms {
@@ -326,12 +339,6 @@ impl Checker {
                 (Some("define-type" | "define-effect" | "private-regions"), _) => {
                     self.top(f)?;
                     done.push(true);
-                }
-                (Some("define"), [_, name, ty, _]) => {
-                    let name = self.binder_name(name)?;
-                    let ty = self.parse_type(ty)?;
-                    self.env.push((name, ty));
-                    done.push(false);
                 }
                 _ => done.push(false),
             }

@@ -2246,17 +2246,13 @@
       (t-private-regions (rs a b) (k-private rs))
       (else y #u))))
 
-;; The first pass: abbreviations, and every signature declared.
+;; The first pass: abbreviations, so that types can refer to each other in
+;; any order. Values cannot: a definition sees only those before it.
 (define k-ahead (subr checks ((listof top @a)) unit)
   (lambda (forms)
     (if (null? forms)
         #u
-        (begin
-          (tagcase (car forms)
-            (t-define (name ty init a b)
-              (if (null? ty) #u (k-bind name (k-parse-type (car ty)))))
-            (else y (k-declare (car forms))))
-          (k-ahead (cdr forms))))))
+        (begin (k-declare (car forms)) (k-ahead (cdr forms))))))
 
 (define k-line (subr (maxeff (read @t) (alloc @t)) (int k-eff) string)
   (lambda (t e) (k-cat3 (k-show-ty t) " ! " (k-show-effect e))))
@@ -2302,15 +2298,16 @@
                        (let* ((x (k-resolve-exp init)) (r (k-synth x)))
                          (begin (k-bind name (extract r 1))
                                 (cons (k-cat4 "define " (symbol->string name) " : " (k-line (extract r 1) (extract r 2))) nil)))
+                       ;; A lambda is in scope in itself, as a `letrec`
+                       ;; binding is; anything else is not.
                        (let* ((t (k-parse-type (car ty)))
-                              (bound (k-bind name t))
                               (saved (get k-dscope))
                               (signed (k-bind-signature t))
                               (x (k-resolve-exp init))
                               (restored (set k-dscope saved))
-                              (e (extract (k-prefixing (lambda () (k-te t (k-check x t))) (k-start x) (k-end x)
-                                                       (k-cat4 (k-quote (symbol->string name)) " is declared a " (k-show-ty t) ": "))
-                                          2)))
+                              (bound (if (k-lambda? x) (k-bind name t) #u))
+                              (e (k-check-declared name t x))
+                              (after (if (k-lambda? x) #u (k-bind name t))))
                          (cons (k-cat4 "define " (symbol->string name) " : " (k-line t e)) nil))))
                  (t-define-rec (bs a b) (k-define-rec bs))
                  (t-exp (e)

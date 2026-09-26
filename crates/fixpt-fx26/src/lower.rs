@@ -174,8 +174,6 @@ pub struct Globals {
     current: HashMap<Sym, String>,
     /// How many times each name has been defined.
     defined: HashMap<Sym, usize>,
-    /// Names declared ahead of a definition still to come.
-    declared: Vec<Sym>,
 }
 
 impl Default for Globals {
@@ -186,35 +184,18 @@ impl Default for Globals {
 
 impl Globals {
     pub fn with_prefix(prefix: &str) -> Globals {
-        Globals { prefix: prefix.to_string(), current: HashMap::new(), defined: HashMap::new(), declared: Vec::new() }
+        Globals { prefix: prefix.to_string(), current: HashMap::new(), defined: HashMap::new() }
     }
 
     /// The global a new definition of `name` gets, which becomes the one
     /// later uses of `name` refer to.
     pub fn define(&mut self, c: &Checker, name: Sym) -> String {
-        if let Some(i) = self.declared.iter().position(|n| *n == name) {
-            self.declared.remove(i);
-            *self.defined.entry(name).or_insert(0) += 1;
-            return self.current[&name].clone();
-        }
         let n = self.defined.entry(name).or_insert(0);
         *n += 1;
         let base = format!("{}{}", self.prefix, fixpt_read::escape_symbol(c.interner.name(name)));
         let global = if *n == 1 { base } else { format!("{base}:{n}") };
         self.current.insert(name, global.clone());
         global
-    }
-
-    /// Name the global a definition still to come will have, so that code
-    /// before it can refer to it. The definition then takes that name.
-    pub fn declare(&mut self, c: &Checker, name: Sym) {
-        if !self.current.contains_key(&name) {
-            let n = self.defined.entry(name).or_insert(0);
-            let base = format!("{}{}", self.prefix, fixpt_read::escape_symbol(c.interner.name(name)));
-            let global = if *n == 0 { base } else { format!("{base}:{}", *n + 1) };
-            self.current.insert(name, global);
-            self.declared.push(name);
-        }
     }
 
     pub fn get(&self, name: Sym) -> Option<&str> {

@@ -64,11 +64,8 @@
 (define efail (subr evals (string) void)
   (lambda (message) (abort-current-continuation eval-tag (ev-err message))))
 
-;; The global environment, newest first; and the names given a cell ahead
-;; of their typed definitions, which then take it.
+;; The global environment, newest first.
 (define genv (ref env @v) (new nil))
-(define-type vnames (listof symbol @v))
-(define declared (ref vnames @v) (new nil))
 
 ;;; ---------------------------------------------------------------- values
 
@@ -362,28 +359,10 @@
 
 (define bound? (subr (read @v) (env symbol) bool)
   (lambda (e n) (and (not (null? e)) (or (symbol=? (car (car e)) n) (bound? (cdr e) n)))))
-(define member? (subr (read @v) (vnames symbol) bool)
-  (lambda (ns n) (and (not (null? ns)) (or (symbol=? (car ns) n) (member? (cdr ns) n)))))
-(define without (subr (maxeff (read @v) (alloc @v)) (vnames symbol) vnames)
-  (lambda (ns n) (cond ((null? ns) nil) ((symbol=? (car ns) n) (cdr ns)) (else (cons (car ns) (without (cdr ns) n))))))
 
 (define push-global (subr (maxeff (read @v) (write @v) (alloc @v)) (symbol) (bloblet (fields val) @v))
   (lambda (n) (let ((c (cell (v-unit)))) (begin (set genv (cons (cons n c) (get genv))) c))))
 
-;; Before anything runs: a cell for each typed definition whose name is not
-;; defined yet, so that the forms before it can refer to it.
-(define declare-ahead (subr (maxeff (read @a) (read @v) (write @v) (alloc @v)) ((listof top @a)) unit)
-  (lambda (ts)
-    (if (null? ts)
-        #u
-        (begin
-          (tagcase (car ts)
-            (t-define (n ty x a b)
-              (if (and (not (null? ty)) (not (bound? (get genv) n)))
-                  (begin (push-global n) (set declared (cons n (get declared))))
-                  #u))
-            (else y #u))
-          (declare-ahead (cdr ts))))))
 
 (define rec-cells (subr (maxeff (read @a) (read @v) (write @v) (alloc @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof (bloblet (fields val) @v) @v))
   (lambda (bs) (if (null? bs) nil (let ((c (push-global (extract (car bs) 1)))) (cons c (rec-cells (cdr bs)))))))
@@ -393,6 +372,15 @@
         #u
         (begin (bloblet-set! (car cells) 0 (eval (extract (car bs) 3) (get genv))) (rec-fill (cdr bs) (cdr cells))))))
 
+;; Whether `x` is a lambda, under any type abstractions and ascriptions.
+(define lambda-exp? (subr (read @a) (exp) bool)
+  (lambda (x)
+    (tagcase x
+      (e-lambda (ps body a b) #t)
+      (e-plambda (d body a b) (lambda-exp? body))
+      (e-the (d body a b) (lambda-exp? body))
+      (else y #f))))
+
 (define eval-top (subr evals (top) val)
   (lambda (t)
     (tagcase t
@@ -400,12 +388,10 @@
         (if (null? ty)
             ;; Not recursive: the value first, in the scope before it.
             (let ((v (eval x (get genv)))) (begin (bloblet-set! (push-global n) 0 v) (v-unit)))
-            ;; The cell first, so the definition can refer to itself: the
-            ;; one declared ahead, if there is one.
-            (let ((c (if (member? (get declared) n)
-                         (begin (set declared (without (get declared) n)) (find-cell (get genv) n))
-                         (push-global n))))
-              (begin (bloblet-set! c 0 (eval x (get genv))) (v-unit)))))
+            (if (lambda-exp? x)
+                ;; A lambda: the cell first, so that it can call itself.
+                (let ((c (push-global n))) (begin (bloblet-set! c 0 (eval x (get genv))) (v-unit)))
+                (let ((v (eval x (get genv)))) (begin (bloblet-set! (push-global n) 0 v) (v-unit))))))
       ;; Every name's cell first; then each lambda, which runs nothing.
       (t-define-rec (bs a b) (begin (rec-fill bs (rec-cells bs)) (v-unit)))
       (t-exp (x) (eval x (get genv)))
@@ -418,7 +404,7 @@
       (letrec ((go (subr evals ((listof top @a) val) val)
                  (lambda (ts last)
                    (if (null? ts) last (let ((v (eval-top (car ts)))) (go (cdr ts) (tagcase (car ts) (t-exp (x) v) (else y last))))))))
-        (begin (declare-ahead tops) (ev-ok (go tops (v-unit)))))
+        (ev-ok (go tops (v-unit))))
       (lambda (r) r))))
 
 (define length-pairs (subr (read @v) ((listof (pairof symbol val @v) @v)) int)
