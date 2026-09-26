@@ -69,3 +69,38 @@ three, and the machine's checks (fuel and stack limits at every word entry
 and taken branch, tags and overflow in every primitive) leave `NEXT` the
 dominant cost. `cons` calls out to Rust, which saves and reloads the
 machine's registers; that is the 0.96.
+
+## Threaded code: stencils at each optimisation level (A′4)
+
+The same words again, now also on the stencil machine: the routines written
+in Rust with `become` (`crates/fixpt-native/stencils/threaded.rs`), compiled
+by the build script with the installed nightly at `-C opt-level` 0, 1, 2, 3
+and `s` (debug assertions and overflow checks off at every level, since
+their calls into `core` could not be copied), and placed by copying. Best of
+three, ns per cell of the Rust machine:
+
+| program | Rust, release build | Rust, debug build | hand-encoded | stencils -O0 | -O1 | -O2 | -O3 | -Os |
+|---|---|---|---|---|---|---|---|---|
+| fib 27 | 3.85 | 78.6 | 0.57 | 4.28 | 0.63 | 0.62 | 0.64 | 0.65 |
+| sum-to 10M (loop) | 2.64 | 76.6 | 0.67 | 4.11 | 0.58 | 0.58 | 0.59 | 0.59 |
+| sum-by-list 60k (cons) | 2.80 | 76.4 | 0.86 | 4.20 | 0.92 | 0.90 | 0.84 | 0.89 |
+
+Machine code: hand-encoded 2.1 KB; stencils 9.3 KB at `-O0`, 2.5–2.7 KB
+otherwise. The Rust machine's release number for `fib` varies 2.9–3.9 ns
+between sessions; the native ones stay within a few percent. The native
+machines' own times do not depend on how the host was built, except where
+they call out into it: `cons` costs 3.3 ns/cell under a debug host, whose
+collector is unoptimised.
+
+What it says:
+
+- **Rust with `become` expresses the inner interpreter**, and optimised it
+  matches the hand-encoded machine: a little slower on `fib`, faster on the
+  loop. The four optimised levels are indistinguishable.
+- **Why the loop is faster**: LLVM's `0branch` tests the flag before loading
+  the branch offset, so the untaken path skips the offset cell with one
+  `ldur [ip, #-8]` and adjusts the ip once; ours loads the offset either
+  way. A scheduling lesson for our own encoder, not a different machine.
+- **At `-O0` the tail calls still hold**: 110 million cells with no stack
+  growth, at about the speed of the Rust machine built with `--release`,
+  and 18× the Rust machine built without.

@@ -38,37 +38,16 @@
 use crate::arm64::*;
 use crate::codespace::{CodeSpace, Offset};
 use fixpt_engine::threaded::{DS_LIMIT, RS_LIMIT, Trap};
-use fixpt_heap::layout::threaded::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, routine};
+use fixpt_heap::layout::threaded::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY};
 use fixpt_heap::layout::{H_FIELDS, T_DISTANCE};
 use fixpt_heap::value::{TAG_BLOBLET, TAG_PAIR, TAG_TRAILER};
 use fixpt_heap::{Heap, Value};
 use std::mem::offset_of;
 
-/// The machine's state while it is out of machine code. Shared with the
-/// generated code by offset.
-#[repr(C)]
-#[derive(Default)]
-struct State {
-    base: u64,
-    cur: u64,
-    /// The ip, saved as `8k`: bytes before the current word's suffix.
-    d: u64,
-    dsp: u64,
-    rsp: u64,
-    table: u64,
-    fal: u64,
-    tru: u64,
-    fuel: u64,
-    status: u64,
-    aux: u64,
-    callout: u64,
-    start: u64,
-    heap: u64,
-    ds_base: u64,
-    rs_base: u64,
-    ds_limit: u64,
-    rs_limit: u64,
+mod state {
+    include!("state.rs");
 }
+pub(crate) use state::{ROUTINE_SLOTS, State};
 
 // The registers the machine lives in: all callee-saved, so they survive a
 // call into Rust except for the heap's base, which is reloaded.
@@ -628,48 +607,26 @@ fn page() -> usize {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
 }
 
-/// The native machine: its code, generated once, and its stacks.
-pub struct NativeMachine {
-    space: CodeSpace,
-    entry: Offset,
-    table: Vec<u64>,
+/// A machine's two stacks, and how a run starts and ends on them: the part
+/// every native machine shares.
+pub(crate) struct Stacks {
     ds: Stack,
     rs: Stack,
-    /// Fuel left after the last run.
-    pub fuel_left: u64,
 }
 
 /// The most cells a word can have, so the most one word's straight-line code
 /// can push or pop between the machine's checks.
 const MAX_CELLS: usize = 1 << 18;
 
-impl NativeMachine {
-    pub fn new() -> NativeMachine {
-        let (code, entry, starts) = generate();
-        let mut space = CodeSpace::new(code.len() * 4).expect("a code space");
-        let at = space.alloc(code.len() * 4, 16).expect("room for the machine");
-        space.write_code(at, &code);
-        space.flush(at, code.len() * 4);
-        let table = starts.iter().map(|s| space.exec_addr(at + 4 * s) as u64).collect();
-        NativeMachine {
-            entry: at + 4 * entry,
-            space,
-            table,
-            ds: Stack::new(8 * (DS_LIMIT + MAX_CELLS), 8 * MAX_CELLS),
-            rs: Stack::new(16 * (RS_LIMIT + 2), page()),
-            fuel_left: 0,
-        }
+impl Stacks {
+    pub(crate) fn new() -> Stacks {
+        Stacks { ds: Stack::new(8 * (DS_LIMIT + MAX_CELLS), 8 * MAX_CELLS), rs: Stack::new(16 * (RS_LIMIT + 2), page()) }
     }
 
-    /// The machine code, for looking at.
-    pub fn code_bytes(&self) -> usize {
-        self.space.used()
-    }
-
-    /// Run `word`, which must be made of cells, with `args` on the data stack
-    /// (the last on top), for at most `fuel` word entries and taken
-    /// branches. Returns the data stack, bottom first.
-    pub fn run(&mut self, heap: &mut Heap, word: Value, args: &[Value], fuel: u64) -> Result<Vec<Value>, Trap> {
+    /// The state to start `word` in, with `args` on the data stack (the last
+    /// on top). The heap must stay exclusively the machine's until the run
+    /// ends.
+    pub(crate) fn start(&mut self, heap: &mut Heap, word: Value, args: &[Value], fuel: u64) -> State {
         assert!(fixpt_engine::threaded::is_word(heap, word), "{word:?} is not a threaded word");
         assert_eq!(
             heap.bloblet_slot(word, WORD_ENTRY).as_fixnum() as u64,
@@ -682,13 +639,13 @@ impl NativeMachine {
             // SAFETY: inside the data stack's room, just below its base.
             unsafe { *((dsp + 8 * i as u64) as *mut u64) = a.raw() };
         }
-        let mut st = State {
+        State {
             base: heap.active_words() as u64,
             cur: Value::FALSE.raw(),
             d: 0,
             dsp,
             rsp: self.rs.base,
-            table: self.table.as_ptr() as u64,
+            table: 0,
             fal: Value::FALSE.raw(),
             tru: Value::TRUE.raw(),
             fuel: fuel.max(1),
@@ -701,15 +658,13 @@ impl NativeMachine {
             rs_base: self.rs.base,
             ds_limit: self.ds.base - 8 * DS_LIMIT as u64,
             rs_limit: self.rs.base - 16 * (RS_LIMIT as u64 + 1),
-        };
-        // SAFETY: the entry follows the C convention and takes the state.
-        // Everything the machine touches is valid while it runs: the state,
-        // the table and the stacks here, and the heap, which `heap` holds
-        // exclusively and which the machine reaches only through the state.
-        // Words are frozen and their cells checked when built, so every cell
-        // it runs is a primitive or a word.
-        unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };
-        self.fuel_left = st.fuel;
+            routines: [0; ROUTINE_SLOTS],
+        }
+    }
+
+    /// What a run that stopped in `st` produced: the data stack, bottom
+    /// first, or its trap.
+    pub(crate) fn finish(&self, st: &State) -> Result<Vec<Value>, Trap> {
         if st.status != 0 {
             return Err(Trap::from_code(st.status, st.aux));
         }
@@ -720,13 +675,52 @@ impl NativeMachine {
     }
 }
 
+/// The native machine: its code, generated once, and its stacks.
+pub struct NativeMachine {
+    space: CodeSpace,
+    entry: Offset,
+    table: Vec<u64>,
+    stacks: Stacks,
+    /// Fuel left after the last run.
+    pub fuel_left: u64,
+}
+
+impl NativeMachine {
+    pub fn new() -> NativeMachine {
+        let (code, entry, starts) = generate();
+        let mut space = CodeSpace::new(code.len() * 4).expect("a code space");
+        let at = space.alloc(code.len() * 4, 16).expect("room for the machine");
+        space.write_code(at, &code);
+        space.flush(at, code.len() * 4);
+        let table = starts.iter().map(|s| space.exec_addr(at + 4 * s) as u64).collect();
+        NativeMachine { entry: at + 4 * entry, space, table, stacks: Stacks::new(), fuel_left: 0 }
+    }
+
+    /// The machine code, for looking at.
+    pub fn code_bytes(&self) -> usize {
+        self.space.used()
+    }
+
+    /// Run `word`, which must be made of cells, with `args` on the data stack
+    /// (the last on top), for at most `fuel` word entries and taken
+    /// branches. Returns the data stack, bottom first.
+    pub fn run(&mut self, heap: &mut Heap, word: Value, args: &[Value], fuel: u64) -> Result<Vec<Value>, Trap> {
+        let mut st = self.stacks.start(heap, word, args, fuel);
+        st.table = self.table.as_ptr() as u64;
+        // SAFETY: the entry follows the C convention and takes the state.
+        // Everything the machine touches is valid while it runs: the state,
+        // the table and the stacks here, and the heap, which `heap` holds
+        // exclusively and which the machine reaches only through the state.
+        // Words are frozen and their cells checked when built, so every cell
+        // it runs is a primitive or a word.
+        unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };
+        self.fuel_left = st.fuel;
+        self.stacks.finish(&st)
+    }
+}
+
 impl Default for NativeMachine {
     fn default() -> NativeMachine {
         NativeMachine::new()
     }
-}
-
-/// The routine number of a primitive, for tests.
-pub fn routine_number(name: &str) -> u64 {
-    routine(name)
 }

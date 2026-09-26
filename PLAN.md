@@ -578,6 +578,11 @@ A3. **A native inner interpreter** (`NEXT`) as the suffix of threaded code
 A4. **Stencils**: primitives written in Rust with `become`, compiled by the
     build script with the installed nightly, and copied into the code space
     beside the hand-encoded ones; checked against them and measured.
+    *(Done 2026-09-26: the whole machine as stencils, at `-O0` through
+    `-Os`, with no relocations, so placed by copying; every level checked
+    against the Rust machine by the same tests. Optimised, they match the
+    hand-encoded machine; see `docs/performance.md` and the addendum in
+    `docs/research/copy-and-patch.md`.)*
 
 ### Phase B: FX-26 over bloblets
 

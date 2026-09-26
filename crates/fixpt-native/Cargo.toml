@@ -9,6 +9,10 @@ fixpt-heap = { path = "../fixpt-heap" }
 fixpt-engine = { path = "../fixpt-engine" }
 libc = "0.2"
 
+[build-dependencies]
+fixpt-heap = { path = "../fixpt-heap" }
+fixpt-engine = { path = "../fixpt-engine" }
+
 [features]
 gc-stress = ["fixpt-heap/gc-stress"]
 

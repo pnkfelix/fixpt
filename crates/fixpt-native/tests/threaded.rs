@@ -1,9 +1,12 @@
-//! The native inner interpreter, checked against the Rust one on the same
-//! words: the same results, and the same traps.
+//! The native inner interpreters, checked against the Rust one on the same
+//! words: the same results, and the same traps. "Native" is the hand-encoded
+//! machine and the stencil machine at every optimisation level it was built
+//! at.
 
 use fixpt_engine::threaded::{Machine, Trap, WordBuilder, examples, prim, primitive_word};
 use fixpt_heap::layout::threaded::WORD_NAME;
 use fixpt_heap::{Heap, Value};
+use fixpt_native::stencil::{StencilMachine, opt_levels};
 use fixpt_native::threaded::NativeMachine;
 
 const FUEL: u64 = 10_000_000;
@@ -15,15 +18,27 @@ fn rust(heap: &mut Heap, word: Value, args: &[Value]) -> Result<Vec<Value>, Trap
     Ok(m.ds)
 }
 
-/// Both machines on the same word and arguments; they must agree.
+/// Every machine on the same word and arguments; they must agree.
 fn both(heap: &mut Heap, word: Value, args: &[Value]) -> Result<Vec<Value>, Trap> {
     let root = heap.push_root(word);
     let r = rust(heap, word, args);
     let word = heap.root_at(root);
     let n = NativeMachine::new().run(heap, word, args, FUEL);
+    assert_eq!(n, r, "the hand-encoded machine and the Rust machine disagree");
+    for opt in opt_levels() {
+        let word = heap.root_at(root);
+        let s = StencilMachine::new(opt).expect("built").run(heap, word, args, FUEL);
+        assert_eq!(s, r, "the stencil machine at -O{opt} and the Rust machine disagree");
+    }
     heap.pop_roots_to(root);
-    assert_eq!(n, r, "native and Rust machines disagree");
-    n
+    r
+}
+
+#[test]
+fn stencils_were_built_at_every_level() {
+    // The build script warns and carries on without a nightly compiler; on
+    // this project's machines there is one, so their absence is a failure.
+    assert_eq!(opt_levels(), ["0", "1", "2", "3", "s"]);
 }
 
 fn fx(n: i64) -> Value {
@@ -61,6 +76,13 @@ fn cons_calls_out_and_survives_collection() {
     let during = heap.gc_count - before;
     eprintln!("collections while the native machine ran: {during}");
     assert!(during > 0, "the test is meant to collect under native code");
+    for opt in opt_levels() {
+        let mut m = StencilMachine::new(opt).expect("built");
+        let before = heap.gc_count;
+        let w = heap.root_at(root);
+        assert_eq!(m.run(&mut heap, w, &[fx(3000)], FUEL).unwrap(), [fx(4501500)]);
+        assert!(heap.gc_count > before);
+    }
     let w = heap.root_at(root);
     both(&mut heap, w, &[fx(500)]).unwrap();
 }
@@ -156,4 +178,14 @@ fn halt_stops_in_the_middle() {
     b.call(&heap, inner).lit(fx(3)).prim("exit");
     let w = b.build(&mut heap, "outer");
     assert_eq!(both(&mut heap, w, &[]).unwrap(), [fx(1)]);
+}
+
+#[test]
+fn code_sizes() {
+    let hand = NativeMachine::new().code_bytes();
+    eprintln!("hand-encoded machine: {hand} bytes");
+    for opt in opt_levels() {
+        eprintln!("stencils -O{opt}: {} bytes", StencilMachine::new(opt).expect("built").code_bytes);
+    }
+    assert!(hand > 0);
 }

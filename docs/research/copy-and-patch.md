@@ -628,3 +628,27 @@ sources with `rustc +nightly`, and the rest of the workspace stays on
 stable. Pinning an exact nightly date in `rust-toolchain.toml` would make
 rustup download that toolchain, so the stencil build uses the installed
 `nightly` and records the version it found.
+
+## Addendum: stencils for the threaded machine (2026-09-26)
+
+Built as `fixpt-native`'s stencil machine (`src/stencil.rs`,
+`stencils/threaded.rs`, `build.rs`). What it took to get stencils that are
+placed by copying alone, at every optimisation level:
+
+- **No holes at all.** The machine lives in the eight argument registers;
+  `NEXT` is inlined into every routine; the routine table is in the state;
+  constants are generated from the layout table as immediates. The build
+  script fails on any relocation, and on any branch that leaves its
+  stencil, so position-independent code *and* data are checked, not hoped
+  for.
+- **At `-O0`**: debug assertions and overflow checks off (they call into
+  `core`); `core`'s methods (`checked_add`) replaced by the intrinsics
+  (`add_with_overflow`), and closures by macros, since neither is inlined
+  when unoptimised.
+- **At `-O3`**: two constant stores merged into one vector store from a
+  constant pool, which is PC-relative data; made volatile.
+- The machine outliner is off (`-enable-machine-outliner=never`), so no
+  code is shared between stencils.
+
+Measured in `docs/performance.md`: optimised stencils match the
+hand-encoded machine.

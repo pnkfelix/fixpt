@@ -216,6 +216,22 @@ impl CodeSpace {
     }
 }
 
+impl CodeSpace {
+    /// Call a routine of the stencil machines' kind: eight word arguments in
+    /// registers, one word out.
+    ///
+    /// # Safety
+    /// As for [`CodeSpace::call`], for a routine with that signature.
+    pub unsafe fn call8(&self, at: Offset, args: [u64; 8]) -> u64 {
+        self.check(at, 4);
+        type R8 = extern "C" fn(u64, u64, u64, u64, u64, u64, u64, u64) -> u64;
+        // SAFETY: the caller promises this is such a routine.
+        let f: R8 = unsafe { std::mem::transmute(self.rx.add(at)) };
+        let [a, b, c, d, e, g, h, i] = args;
+        f(a, b, c, d, e, g, h, i)
+    }
+}
+
 impl Drop for CodeSpace {
     fn drop(&mut self) {
         // SAFETY: both views were mapped by `new`, `size` long, and nothing
