@@ -949,6 +949,19 @@ baseline. 13d, typed primitives, follows on the same principle.
   the only ways to run unboundedly, so the check points are where the
   effect would be discharged.
 
+- **Time complexity as an effect.** (Raised by the user 2026-09-26, as a
+  type-system direction for after M13's "type system first" work.) FX's
+  own line did this:
+  - Dornic, Jouvelot and Gifford's polymorphic time systems for
+    estimating complexity (`GiffordHistory/papers/loplas.pdf`);
+  - Reistad and Gifford's static dependent costs
+    (`GiffordHistory/papers/lfp94.pdf`).
+
+  It is the quantitative form of the responsiveness effect above. Code
+  whose cost is statically bounded cannot run away, so it needs none of
+  the fuel checks the machines make at word entries and taken branches.
+  Bounds could also be declared and checked, as effects are.
+
 - **Pinned code, with raw return addresses into it.** Possibly pinned only
   speculatively, with moving still possible at the cost of rewriting return
   addresses.
