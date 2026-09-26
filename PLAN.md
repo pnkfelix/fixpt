@@ -826,7 +826,11 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
 - **13a. A Rust compiler to threaded words.** It makes the same words as
   `compile.fx` for every program, cell for cell. `compile.fx` has had only
   the Scheme lowering as its oracle, so there is nowhere yet to test a
-  pass in Rust end to end.
+  pass in Rust end to end. *(Done 2026-09-26:
+  `fixpt_fx26::threaded::Compiler`, over the Rust checker's forms. It
+  makes the same words as `compile.fx` for every test program and for the
+  whole bootstrap program, and its words run as the lowering does
+  (`tests/rust_compiler.rs`).)*
 - **13b. Benchmarks.** A small suite in FX-26 (`fib`, loops, lists, a
   closure-heavy program), plus the bootstrap's stage 2. Each is run on
   every machine, and a harness compares a program with and without a

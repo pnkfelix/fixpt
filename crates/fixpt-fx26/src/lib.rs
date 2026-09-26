@@ -81,6 +81,7 @@ pub mod parse;
 pub mod session;
 pub mod sexp;
 pub mod syn;
+pub mod threaded;
 pub mod standard;
 pub mod top;
 pub mod unparse;
