@@ -14,11 +14,8 @@
 //! environment at `saved` and the code object at `saved + 1`. Collected values
 //! start at `saved + 2`.
 
-use fixpt_core::lower::CODE_FIELDS;
-
 /// Slots each frame saves on the value stack: the environment and the code.
 pub const SAVED_SLOTS: usize = 2;
-const _: () = assert!(CODE_FIELDS >= 5, "code layout changed; revisit frames");
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Frame {

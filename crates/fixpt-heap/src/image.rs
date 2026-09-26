@@ -39,8 +39,10 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// extents in marks rather than globals. Version 4 lays every object out as a
 /// bloblet (`docs/object-model.md`): the header gives the field count and the
 /// suffix length rather than one payload length, and bloblet pointers and
-/// trailers may appear.
-pub const VERSION: u32 = 4;
+/// trailers may appear. Version 5 points at raw data (strings, bytevectors,
+/// numbers' bits) with bloblet pointers, and gives code its nodes or
+/// constants as its own fields.
+pub const VERSION: u32 = 5;
 const HEADER_BYTES: usize = 40;
 
 /// Trailer written after an image appended to an executable.

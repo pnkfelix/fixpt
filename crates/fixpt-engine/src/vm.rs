@@ -35,7 +35,7 @@
 use crate::compile::op;
 use crate::prepare::Prepared;
 use fixpt_core::lower::{
-    CODE_ARITY, CODE_CONSTS, CODE_ENTRY, CODE_FRAME, CODE_FREE, CODE_HAS_REST, CODE_NAME,
+    CODE_ARITY, CODE_ENTRY, CODE_FRAME, CODE_FREE, CODE_HAS_REST, CODE_NAME,
 };
 use fixpt_heap::{ObjType, Value};
 use fixpt_runtime::Runtime;
@@ -44,11 +44,11 @@ use fixpt_runtime::error::{Outcome, Thrown};
 use fixpt_runtime::prim::{self, EngineOp, PrimKind};
 
 const REG_CLOSURE: usize = 0;
+/// The current code bloblet: its instructions are its suffix, and its
+/// constants are its items, so this one register is all decoding needs.
 const REG_CODE: usize = 1;
-const REG_CONSTS: usize = 2;
-const REG_BODY: usize = 3;
-const REG_SCRATCH: usize = 4;
-const N_REGS: usize = 5;
+const REG_SCRATCH: usize = 2;
+const N_REGS: usize = 3;
 
 /// A pending return. Holds no `Value`s — see the module docs.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -445,11 +445,13 @@ impl Vm {
     // ---------------------------------------------------------------- decode
     #[inline]
     fn word(&self, rt: &Runtime, at: u32) -> u32 {
-        rt.heap.bloblet_u32(self.regs[REG_BODY], at as usize)
+        rt.heap.bloblet_u32(self.regs[REG_CODE], at as usize)
     }
     #[inline]
     fn konst(&self, rt: &Runtime, k: u32) -> Value {
-        rt.heap.obj_ref(self.regs[REG_CONSTS], k as usize)
+        // A constant is one of the code bloblet's own items, a fixed
+        // distance before its instructions.
+        fixpt_core::lower::code_item(&rt.heap, self.regs[REG_CODE], k as usize)
     }
 
     /// Point the decoding registers at whatever `stack[fp]` now holds.
@@ -458,9 +460,6 @@ impl Vm {
         let code = rt.heap.obj_ref(closure, 0);
         self.regs[REG_CLOSURE] = closure;
         self.regs[REG_CODE] = code;
-        self.regs[REG_CONSTS] = rt.heap.bloblet_slot(code, CODE_CONSTS);
-        // The instructions are the code bloblet's own suffix.
-        self.regs[REG_BODY] = code;
     }
 
     fn unbound_local(&mut self, rt: &mut Runtime, k: u32) -> Outcome<Option<Value>> {

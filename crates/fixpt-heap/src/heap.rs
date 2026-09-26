@@ -267,7 +267,15 @@ impl Heap {
         for i in 0..len {
             self.set_word(main + 1 + i, fill.raw());
         }
-        Value::object(main)
+        if fields == 0 {
+            // Raw data — a string, a bytevector, a number's bits — is already a
+            // bloblet in all but its pointer: no fields, all suffix. Pointed at
+            // its suffix, its words are at `p + i`, and its header, when it is
+            // wanted, is the word just before.
+            Value::bloblet(main + 1)
+        } else {
+            Value::object(main)
+        }
     }
 
     /// Reserve an object of `fields` fields and `bytes` suffix bytes and write
@@ -319,10 +327,33 @@ impl Heap {
 
     #[inline]
     fn header_of(&self, o: Value) -> u64 {
-        debug_assert!(o.is_object());
-        let h = self.word(o.index());
-        debug_assert!(is_header(h), "object {o:?} does not point at a header");
+        let h = self.word(self.main_of(o));
+        debug_assert!(is_header(h), "object {o:?} does not lead to a header");
         h
+    }
+
+    /// The main header's index, relative to the active space, for either
+    /// kind of object pointer: an older one points at it, a bloblet pointer
+    /// at the suffix after the fields.
+    #[inline]
+    fn main_of(&self, o: Value) -> usize {
+        if o.is_object() { o.index() } else { self.bloblet_main_cold(o) }
+    }
+
+    /// Kept out of line, so that the older pointers' path through the
+    /// accessors stays straight-line code.
+    #[cold]
+    #[inline(never)]
+    fn bloblet_main_cold(&self, o: Value) -> usize {
+        self.bloblet_main(o)
+    }
+
+    /// Where an object's payload starts: its first field, or for a bloblet
+    /// with no fields, its suffix. For a bloblet with no fields that is the
+    /// pointer itself, so its raw words are reached without a header read.
+    #[inline]
+    fn payload_base(&self, o: Value) -> usize {
+        self.main_of(o) + 1
     }
     /// The type of a heap object. `None` for anything that is not an object.
     pub fn obj_type(&self, v: Value) -> Option<ObjType> {
@@ -340,26 +371,27 @@ impl Heap {
     /// Payload length in words.
     #[inline]
     pub fn obj_len(&self, o: Value) -> usize {
-        debug_assert!(is_header(self.header_of(o)));
-        read_head(&self.mem, self.active + o.index()).payload_words()
+        read_head(&self.mem, self.active + self.main_of(o)).payload_words()
     }
     #[inline]
     pub fn obj_ref(&self, o: Value, i: usize) -> Value {
         debug_assert!(i < self.obj_len(o), "payload index {i} out of range");
-        self.slot(o.index() + 1 + i)
+        self.slot(self.payload_base(o) + i)
     }
     #[inline]
     pub fn obj_set(&mut self, o: Value, i: usize, v: Value) {
         debug_assert!(i < self.obj_len(o), "payload index {i} out of range");
-        self.set_slot(o.index() + 1 + i, v);
+        let at = self.payload_base(o) + i;
+        self.set_slot(at, v);
     }
     #[inline]
     fn obj_word(&self, o: Value, i: usize) -> u64 {
-        self.word(o.index() + 1 + i)
+        self.word(self.payload_base(o) + i)
     }
     #[inline]
     fn obj_set_word(&mut self, o: Value, i: usize, w: u64) {
-        self.set_word(o.index() + 1 + i, w)
+        let at = self.payload_base(o) + i;
+        self.set_word(at, w)
     }
 
     // ------------------------------------------------------------ constructors

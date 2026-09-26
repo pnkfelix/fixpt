@@ -37,7 +37,7 @@
 use fixpt_core::assign::{self, BoxPrims};
 use fixpt_core::ir::{LambdaId, Node, NodeId, Program, VarId};
 use fixpt_core::lower::{
-    CODE_ARITY, CODE_CONSTS, CODE_FRAME, CODE_FREE, CODE_HAS_REST,
+    CODE_ARITY, CODE_FRAME, CODE_FREE, CODE_HAS_REST,
     CODE_NAME,
 };
 use fixpt_heap::{Heap, ObjType, Value};
@@ -263,7 +263,6 @@ impl Compiler<'_> {
         self.expr(&mut scope, body, true)?;
         scope.emit(&[op::RETURN]);
 
-        let consts = self.heap.vector_from(&scope.consts);
         let name_value = match name {
             Some(s) => {
                 let text = self.interner.name(s).to_string();
@@ -279,11 +278,10 @@ impl Compiler<'_> {
                 name: name_value,
                 arity: params.len(),
                 has_rest: rest.is_some(),
-                body: Value::FALSE,
                 entry: 0,
-                consts,
                 frame: scope.frame as usize,
                 free: free.len(),
+                items: std::mem::take(&mut scope.consts),
                 bytecode: std::mem::take(&mut scope.code),
             },
         ))
@@ -546,7 +544,6 @@ pub fn disassemble(heap: &Heap, code: Value) -> String {
     if !fixpt_core::lower::is_compiled(heap, code) {
         return "<interpreted code>".to_string();
     }
-    let consts = heap.bloblet_slot(code, CODE_CONSTS);
     let bytes = heap.bloblet_bytes(code);
     let words: Vec<u32> = bytes
         .chunks_exact(4)
@@ -574,7 +571,7 @@ pub fn disassemble(heap: &Heap, code: Value) -> String {
             let _ = write!(out, " {w}");
         }
         if matches!(opcode, op::CONST | op::CLOSURE | op::BOX_REF) {
-            let v = heap.obj_ref(consts, words[pc + 1] as usize);
+            let v = fixpt_core::lower::code_item(heap, code, words[pc + 1] as usize);
             let _ = write!(out, "   ; {}", fixpt_runtime::write_value(heap, v));
         }
         out.push('\n');

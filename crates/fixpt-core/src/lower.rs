@@ -68,36 +68,28 @@ pub const TAG_LAMBDA: i64 = 9;
 pub const TAG_APP: i64 = 10;
 
 /// A `Code` object is a bloblet (`docs/object-model.md`), shared by both
-/// engines. Its metadata are fields, named here by their **negative offset
-/// from the suffix**, the canonical way a bloblet's field is named. For the
-/// bytecode engine, the instructions are the suffix. For the AST engine,
-/// whose program is a vector of nodes, the suffix is empty and the nodes are
-/// in `CODE_BODY`. So a procedure is `[code, …]` whoever made it, and the
-/// printer, the verifier and the image format do not need to know which engine
-/// made it.
-///
-/// The field offsets are part of the one layout specification,
-/// `fixpt_heap::layout::code`, since FX-26's compiler lays out code too.
+/// engines. Its metadata are fields at fixed negative offsets from the
+/// suffix, and so are its **items**: the nodes of interpreted code, or the
+/// constants of compiled code, whose instructions are the suffix. An engine
+/// reads either with one load at a fixed distance from the code. The offsets
+/// are part of the one layout specification, `fixpt_heap::layout::code`,
+/// since FX-26's compiler lays out code too. A procedure is `[code, …]`
+/// whoever made it, and the printer, the verifier and the image format need
+/// not know which engine made it.
 pub use fixpt_heap::layout::code::{
-    CODE_ARITY, CODE_BODY, CODE_CONSTS, CODE_ENTRY, CODE_FIELDS, CODE_FRAME, CODE_FREE, CODE_HAS_REST,
-    CODE_NAME,
+    CODE_ARITY, CODE_ENTRY, CODE_FIXED, CODE_FRAME, CODE_FREE, CODE_HAS_REST, CODE_ITEM0, CODE_ITEMS, CODE_NAME,
 };
-
-/// Kept as the old name so the AST engine reads the way it always did.
-pub const CODE_NODES: usize = CODE_BODY;
 
 /// What goes in a new `Code` bloblet.
 pub struct CodeParts {
     pub name: Value,
     pub arity: usize,
     pub has_rest: bool,
-    /// The node vector, for interpreted code; `#f` for compiled.
-    pub body: Value,
     pub entry: u32,
-    /// The constants, for compiled code; `#f` for interpreted.
-    pub consts: Value,
     pub frame: usize,
     pub free: usize,
+    /// The nodes, for interpreted code; the constants, for compiled.
+    pub items: Vec<Value>,
     /// The instructions, for compiled code; empty for interpreted.
     pub bytecode: Vec<u32>,
 }
@@ -105,15 +97,18 @@ pub struct CodeParts {
 /// Make a `Code` bloblet. Allocation never collects, so the values in
 /// `parts` stay valid while it is built.
 pub fn make_code(heap: &mut Heap, parts: &CodeParts) -> Value {
-    let code = heap.make_bloblet(ObjType::Code as u8, CODE_FIELDS, parts.bytecode.len() * 4, true);
+    let fields = CODE_FIXED + 1 + parts.items.len();
+    let code = heap.make_bloblet(ObjType::Code as u8, fields, parts.bytecode.len() * 4, true);
     heap.set_bloblet_slot(code, CODE_NAME, parts.name);
     heap.set_bloblet_slot(code, CODE_ARITY, Value::fixnum(parts.arity as i64));
     heap.set_bloblet_slot(code, CODE_HAS_REST, Value::boolean(parts.has_rest));
-    heap.set_bloblet_slot(code, CODE_BODY, parts.body);
     heap.set_bloblet_slot(code, CODE_ENTRY, Value::fixnum(parts.entry as i64));
-    heap.set_bloblet_slot(code, CODE_CONSTS, parts.consts);
     heap.set_bloblet_slot(code, CODE_FRAME, Value::fixnum(parts.frame as i64));
     heap.set_bloblet_slot(code, CODE_FREE, Value::fixnum(parts.free as i64));
+    heap.set_bloblet_slot(code, CODE_ITEMS, Value::fixnum(parts.items.len() as i64));
+    for (i, x) in parts.items.iter().enumerate() {
+        heap.set_bloblet_slot(code, CODE_ITEM0 + i, *x);
+    }
     let mut bytes = Vec::with_capacity(parts.bytecode.len() * 4);
     for w in &parts.bytecode {
         bytes.extend_from_slice(&w.to_le_bytes());
@@ -122,9 +117,20 @@ pub fn make_code(heap: &mut Heap, parts: &CodeParts) -> Value {
     code
 }
 
+/// Item `i` of `code`: a node, or a constant. One load.
+#[inline]
+pub fn code_item(heap: &Heap, code: Value, i: usize) -> Value {
+    heap.bloblet_slot(code, CODE_ITEM0 + i)
+}
+
+/// How many items `code` has.
+pub fn code_items(heap: &Heap, code: Value) -> usize {
+    heap.bloblet_slot(code, CODE_ITEMS).as_fixnum() as usize
+}
+
 /// Whether `code` is compiled: it has instructions, as its suffix.
 pub fn is_compiled(heap: &Heap, code: Value) -> bool {
-    heap.bloblet_slot(code, CODE_CONSTS).is_true()
+    heap.bloblet_head(code).bytes > 0
 }
 
 /// Lower a whole program, returning its top-level `Code` object.
@@ -165,7 +171,6 @@ impl Lowerer<'_> {
         let entry = self.emit(&mut words, body);
         self.scopes.pop();
 
-        let nodes = self.heap.vector_from(&words);
         let name_value = match name {
             Some(s) => {
                 let text = self.interner.name(s).to_string();
@@ -181,11 +186,10 @@ impl Lowerer<'_> {
                 name: name_value,
                 arity: params.len(),
                 has_rest: rest.is_some(),
-                body: nodes,
                 entry: entry as u32,
-                consts: Value::FALSE,
                 frame: 0,
                 free: 0,
+                items: words,
                 bytecode: Vec::new(),
             },
         )

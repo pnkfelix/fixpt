@@ -25,7 +25,7 @@
 use crate::frame::{FRAME_WORDS, Frame, SAVED_SLOTS};
 use crate::prepare::Prepared;
 use fixpt_core::lower::{
-    CODE_ARITY, CODE_ENTRY, CODE_HAS_REST, CODE_NAME, CODE_NODES, TAG_APP, TAG_CONST, TAG_FIX,
+    CODE_ARITY, CODE_ENTRY, CODE_HAS_REST, CODE_NAME, TAG_APP, TAG_CONST, TAG_FIX,
     TAG_GLOBAL, TAG_IF, TAG_LAMBDA, TAG_LET, TAG_LOCAL, TAG_SEQ, TAG_SET_GLOBAL, TAG_SET_LOCAL,
 };
 use fixpt_heap::{ObjType, Value};
@@ -111,8 +111,9 @@ impl Interp {
     /// One word of the current code's node vector.
     #[inline]
     fn word(&self, rt: &Runtime, at: u32) -> Value {
-        let nodes = rt.heap.bloblet_slot(self.code(), CODE_NODES);
-        rt.heap.obj_ref(nodes, at as usize)
+        // A node is one of the code bloblet's own items: one load, at a
+        // fixed distance before the code.
+        fixpt_core::lower::code_item(&rt.heap, self.code(), at as usize)
     }
     #[inline]
     fn offset(&self, rt: &Runtime, at: u32) -> u32 {
@@ -845,11 +846,10 @@ impl Interp {
 
     /// A node word read against a given code object rather than the register.
     fn offset_in(&self, rt: &Runtime, code: Value, at: u32) -> u32 {
-        let nodes = rt.heap.bloblet_slot(code, CODE_NODES);
-        if at as usize >= rt.heap.obj_len(nodes) {
+        if at as usize >= fixpt_core::lower::code_items(&rt.heap, code) {
             return 0;
         }
-        rt.heap.obj_ref(nodes, at as usize).as_fixnum() as u32
+        fixpt_core::lower::code_item(&rt.heap, code, at as usize).as_fixnum() as u32
     }
 
     /// The application the hole is an argument of, with the arguments that have

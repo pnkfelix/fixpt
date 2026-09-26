@@ -19,7 +19,7 @@
 //! compiled code has a constants vector where interpreted code has `#f`, and
 //! that is enough to pick the machine that can run it.
 
-use fixpt_core::lower::{CODE_ARITY, CODE_CONSTS, CODE_HAS_REST};
+use fixpt_core::lower::{CODE_ARITY, CODE_HAS_REST};
 use fixpt_engine::{Backend, Interp, Prepared, Vm};
 use fixpt_heap::{Heap, ObjType, Value, image};
 use fixpt_runtime::{Runtime, write_value};
@@ -46,7 +46,7 @@ pub fn backend_of(heap: &Heap, proc: Value) -> Option<Backend> {
     if !heap.is_a(code, ObjType::Code) {
         return None;
     }
-    Some(if heap.bloblet_slot(code, CODE_CONSTS).is_false() {
+    Some(if !fixpt_core::lower::is_compiled(heap, code) {
         Backend::Ast
     } else {
         Backend::Bytecode

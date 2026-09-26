@@ -28,5 +28,7 @@ ranges 0.028–0.041 s), so only the totals are compared.
 |---|---|---|---|
 | before M12 (dac418f) | 0.626 | 0.392 | |
 | A2–A4 (every object a bloblet header; code as bloblets) | 0.636 | 0.393 | no measurable change |
+| A5a, first try (raw types as bloblets; the accessors check the pointer style) | 0.667 | 0.392 | AST ~5% slower: a branch on every node read |
+| A5a (code's nodes and constants as its own fields) | 0.634 | 0.393 | back to baseline: a node or constant is one load at a fixed offset from the code |
 
 The per-piece table fills in as each piece moves.
