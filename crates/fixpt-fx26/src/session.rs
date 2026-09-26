@@ -265,6 +265,19 @@ impl Fx26Session {
         r
     }
 
+    /// Run `text` with the evaluator written in FX-26, reading and parsing
+    /// it with the reader and the parser written in FX-26: its value as
+    /// Scheme would write it, or `!! ` and its error.
+    pub fn eval_with_own_evaluator(&mut self, text: &str) -> R<String> {
+        if self.scheme.global_value(&format!("{READER_PREFIX}run-program")).is_none() {
+            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
+        }
+        self.scheme.engine.set_step_limit(None);
+        let r = crate::syn::eval_with_fx26_evaluator(&mut self.scheme, FileId(0), text);
+        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        r
+    }
+
     /// [`run_program`](Self::run_program), reading with the reader written
     /// in FX-26: nothing of the Rust reader on the way.
     pub fn run_program_read_by_fx26(&mut self, text: &str) -> R<Result<String, String>> {

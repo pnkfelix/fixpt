@@ -54,6 +54,25 @@ pub fn read_with_fx26_reader(scheme: &mut Session, interner: &mut Interner, file
 /// Parse `text` with the reader and the parser written in FX-26: each
 /// top-level form's tree, as [`crate::sexp::show_value`] prints it.
 pub fn parse_with_fx26_parser(scheme: &mut Session, file: FileId, text: &str) -> R<Vec<String>> {
+    let tops = parse_to_trees(scheme, file, text)?;
+    let heap = &scheme.rt.heap;
+    let tops = heap.list_to_vec(tops).expect("a list");
+    Ok(tops.into_iter().map(|t| crate::sexp::show_value(heap, t)).collect())
+}
+
+/// Read, parse, and run `text` with the evaluator written in FX-26: its
+/// value as Scheme would write it, or `!! ` and its error.
+pub fn eval_with_fx26_evaluator(scheme: &mut Session, file: FileId, text: &str) -> R<String> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let tops = parse_to_trees(scheme, file, text)?;
+    let run = scheme.global_value(&format!("{READER_PREFIX}run-program")).expect("loaded");
+    let out = scheme.call(run, &[tops]).map_err(|e| fail(e.to_string()))?;
+    Ok(scheme.rt.heap.string_to_rust(out))
+}
+
+/// The parser's trees for `text`: a list of `top`s, valid until the next
+/// call that may collect.
+fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Value> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut reader =
         EagerReader::attach_starting(scheme, READER_PREFIX, "eager-start-fx26").map_err(|e| fail(e.to_string()))?;
@@ -76,8 +95,7 @@ pub fn parse_with_fx26_parser(scheme: &mut Session, file: FileId, text: &str) ->
         let at = |v: Value| offsets.get(v.as_fixnum() as usize).copied().unwrap_or(text.len()) as u32;
         return Err(FxError::at(Span::new(file, at(part(heap, payload, 1)), at(part(heap, payload, 2))), msg));
     }
-    let tops = heap.list_to_vec(part(heap, payload, 0)).expect("a list");
-    Ok(tops.into_iter().map(|t| crate::sexp::show_value(heap, t)).collect())
+    Ok(part(heap, payload, 0))
 }
 
 /// The byte offset of each character, and of the end.

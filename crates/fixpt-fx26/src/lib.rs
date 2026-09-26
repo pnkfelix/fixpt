@@ -25,9 +25,13 @@ pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 /// compiled with it, as one program ([`front_end`]).
 pub const PARSER: &str = include_str!("parser.fx");
 
-/// The reader and the parser written in FX-26, as one program.
+/// The evaluator written in FX-26, which runs the parser's trees.
+pub const EVALUATOR: &str = include_str!("evaluator.fx");
+
+/// The reader, the parser, the tables and the evaluator written in FX-26,
+/// as one program: each needs the types of the one before.
 pub fn front_end() -> String {
-    format!("{EAGER_READER}\n{PARSER}")
+    format!("{EAGER_READER}\n{PARSER}\n{TABLE}\n{EVALUATOR}")
 }
 
 /// The object layout, generated from `fixpt_heap::layout`: tags, header

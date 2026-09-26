@@ -639,7 +639,12 @@ one.)*
      type.)*
    - **9b. An evaluator in FX-26** over that AST: FX-26's reference
      semantics, written in FX-26. Checked against the same programs lowered
-     to Scheme.
+     to Scheme. *(Done 2026-09-26: `src/evaluator.fx`, with control:
+     the program's prompt tags, continuations, mark keys and `cwcc`
+     escapes are the evaluator's own, one level up. Every test program that
+     checks runs to the same value both ways, read and parsed by the FX-26
+     front end; so do shadowing definitions. Not yet: bloblets' frozen
+     flags.)*
    - **9c. The threaded machine grows what FX-26 needs**: frames and
      locals, closures, calls with arguments, globals, and calls out to the
      runtime's primitives. In the Rust machine, the hand-encoded machine and
