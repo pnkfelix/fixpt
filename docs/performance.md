@@ -226,6 +226,8 @@ a direct call-out like `prim`.
 | as above                                                            | 8.4 s   |
 | `null?`, `not`, a field's read, a reference's get and set: routines | 5.3 s   |
 | control on the native stacks in place, no round trip                | 4.5 s   |
+| capture and reinstatement without intermediate copies               | 3.9 s   |
+| `with-mark` in tail position replaces the frame's mark              | 1.9 s   |
 
 - **Primitives as routines.** Counts per primitive (also under
   `FIXPT_CALLOUTS`) showed `null?` 101 million times and `%bloblet-ref`
@@ -240,9 +242,47 @@ a direct call-out like `prim`.
   has the Rust machine's bits, so nothing is converted. Round trips now
   lift 57 words in all.
 
-Stage 2 now takes 5 s against the lowering's 7.8 s for less work (no
-compiling). What remains is mostly the reader: a continuation captured
-and reinstated for every character, 3 to 4 µs each, and `cons`.
+- **Capture without copies.** A sample showed `vector_from` and `kind`
+  (a `const fn` comparing strings, run at run time) at the top. Capture
+  now writes the heap vector straight from the stack, and reinstatement
+  reads it with its base found once.
+- **Marks in tail position.** Counting the words captured showed 3,664 a
+  continuation, growing as the reader went on. The reader's top-level loop
+  marks each form in tail position, which in Scheme replaces the frame's
+  mark. The threaded machines stacked a new one each time, so the
+  reader's continuation carried one mark per form read so far. The new
+  routine `withmark-tail` has Scheme's meaning, and the compiler emits it
+  for `with-mark` in tail position. Captures now average 88 words.
+
+## The comparison: each piece, Rust and FX-26 (C12)
+
+`cargo test --release -p fixpt-fx26 --test bootstrap comparison --
+--ignored --nocapture`. Each piece alone, on the bootstrap program (the
+front end and its driver, 4,700 lines), release build. "Check" is the
+Rust checker's parsing and checking together, and FX-26's checking of
+trees already parsed. Each FX-26 piece runs in a session that has
+collected away stage 1's leftovers first.
+
+| pieces                                | read   | parse  | check  | compile |
+| ------------------------------------- | ------ | ------ | ------ | ------- |
+| Rust                                  | 0.00 s | —      | 0.06 s | —       |
+| FX-26, lowered to Scheme              | 1.15 s | 0.04 s | 6.65 s | 0.35 s  |
+| FX-26, compiled, Rust machine         | 0.54 s | 0.05 s | 9.02 s | 0.51 s  |
+| FX-26, compiled, hand-encoded machine | 0.20 s | 0.03 s | 1.36 s | 0.08 s  |
+| FX-26, compiled, stencils, -O2        | 0.21 s | 0.03 s | 1.47 s | 0.09 s  |
+
+- **Compiled and run natively, every FX-26 piece beats itself lowered:**
+  reading by 5.8 times, checking by 4.9, compiling by 4.4.
+- **The Rust machine is the slow one.** Compiled FX-26 on it checks more
+  slowly than lowered FX-26 on the bytecode VM. It is the oracle, written
+  for clarity: a `match` per cell, and a bounds-checked vector per stack.
+- **The Rust pieces are far ahead where the FX-26 ones copy their
+  algorithms loosely.** The FX-26 checker keeps sets as lists and
+  recomputes free variables at every mask, as the Rust one does with hash
+  sets. It checks the front end 22 times slower. Reading, which the Rust
+  reader does without checkpoints, is 50 times slower, since the eager
+  reader captures a continuation for every character, by design.
+- **The stencils match the hand-encoded machine** within 10%.
 
 ## The eager reader in FX-26, building syntax with positions (B8)
 

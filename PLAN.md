@@ -726,7 +726,11 @@ one.)*
     as decision 6 describes. Checked by running the same programs threaded
     and compiled.
 12. **The comparison**, Rust pieces against FX-26 ones, with no piece
-    retired (decision 8).
+    retired (decision 8). *(First report 2026-09-26, in
+    `docs/performance.md`: each piece alone on the bootstrap program, Rust,
+    FX-26 lowered, and FX-26 compiled on each threaded machine. Compiled
+    FX-26 on the native machines now beats lowered FX-26 in every piece;
+    the Rust checker is still 22 times faster than the FX-26 one.)*
 
 ### Kept open, deliberately
 
