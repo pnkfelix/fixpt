@@ -78,6 +78,18 @@ fn every_test_program_has_well_formed_register_code() {
 /// lowering gives.
 #[test]
 fn register_code_runs_as_lowered() {
+    runs_as_lowered(None);
+}
+
+/// The same, collecting at every allocation, so that every object moves
+/// under every call-out: what register code keeps in registers across one
+/// would be stale.
+#[test]
+fn register_code_runs_as_lowered_while_collecting() {
+    runs_as_lowered(Some(1));
+}
+
+fn runs_as_lowered(gc_every: Option<u64>) {
     use fixpt_heap::Value;
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let (mut report, mut ran) = (Vec::new(), 0);
@@ -103,6 +115,9 @@ fn register_code_runs_as_lowered() {
                     comp.program(&tops).expect("compiles")
                 });
                 sc.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+                if let Some(n) = gc_every {
+                    sc.set_gc_every(n);
+                }
                 let none = sc.make(|_| Value::NULL);
                 match sc.call_global("%run-word", &[w, none]) {
                     Ok(v) => sc.write(v),
