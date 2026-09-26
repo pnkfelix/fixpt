@@ -224,7 +224,8 @@ pub mod code {
 }
 
 /// A threaded word (kind `threaded-code`): Forth's threaded code, as a
-/// bloblet. Laid out `[cell…][name][entry][trailer]`. `entry` is the fixnum
+/// bloblet. Laid out `[cell…][twin][name][entry][trailer]`. `twin` is the
+/// word's register code (PLAN.md, 13h′), or `#f`. `entry` is the fixnum
 /// number of the routine that runs the word: `ROUTINE_DOCOL` for a word made
 /// of cells, which runs them in increasing `k` from `WORD_CELL0`. It is a
 /// number, not an address, so a heap image does not hold machine addresses.
@@ -242,8 +243,9 @@ pub mod threaded {
     pub const KIND: u8 = 33;
     pub const WORD_ENTRY: usize = 2;
     pub const WORD_NAME: usize = 3;
+    pub const WORD_TWIN: usize = 4;
     /// Cell `i` is at `WORD_CELL0 + i`.
-    pub const WORD_CELL0: usize = 4;
+    pub const WORD_CELL0: usize = 5;
 
     /// The routines, by number, with their stack effects. The first
     /// `PRIMITIVES` of them may appear as cells.
@@ -435,6 +437,7 @@ pub fn fx26_module() -> String {
     out.push_str("\n;;; A threaded word's fields, by negative offset, and its routines by number.\n");
     out.push_str(&format!("(define word-entry int {})\n", threaded::WORD_ENTRY));
     out.push_str(&format!("(define word-name int {})\n", threaded::WORD_NAME));
+    out.push_str(&format!("(define word-twin int {})\n", threaded::WORD_TWIN));
     out.push_str(&format!("(define word-cell0 int {})\n", threaded::WORD_CELL0));
     out.push_str(&format!("(define threaded-closure-word int {})\n", threaded::CLOSURE_WORD));
     out.push_str(&format!("(define threaded-closure-free0 int {})\n", threaded::CLOSURE_FREE0));

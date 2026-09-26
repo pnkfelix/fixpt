@@ -3,7 +3,7 @@
 //! because the native machines run a word's cells without looking at them
 //! twice, so every word must be checked as it is made.
 
-use crate::layout::threaded::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, operands};
+use crate::layout::threaded::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
 use crate::{Heap, Value};
 
 impl Heap {
@@ -91,6 +91,7 @@ impl Heap {
         let w = self.make_bloblet(KIND, WORD_CELL0 - 2 + cells.len(), 0, true);
         self.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(ROUTINE_DOCOL as i64));
         self.set_bloblet_slot(w, WORD_NAME, name);
+        self.set_bloblet_slot(w, WORD_TWIN, Value::FALSE);
         // `Value::DEFAULT`, never a value a program has, stands for the
         // word itself, which did not exist to be named.
         for (i, c) in cells.iter().enumerate() {

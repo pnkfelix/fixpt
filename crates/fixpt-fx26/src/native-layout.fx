@@ -44,7 +44,7 @@
 (define n-closure-word int 2)  ; a closure's field
 (define n-closure-free0 int 3)  ; a closure's field
 (define n-word-entry int 2)  ; a word's field
-(define n-word-cell0 int 4)  ; a word's field
+(define n-word-cell0 int 5)  ; a word's field
 (define n-primitives int 49)  ; routines that may be cells
 (define n-trap-type int 1)  ; a trap's code; a routine's number is its detail
 (define n-trap-overflow int 2)  ; a trap's code; a routine's number is its detail

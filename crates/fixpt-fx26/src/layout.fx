@@ -81,7 +81,8 @@
 ;;; A threaded word's fields, by negative offset, and its routines by number.
 (define word-entry int 2)
 (define word-name int 3)
-(define word-cell0 int 4)
+(define word-twin int 4)
+(define word-cell0 int 5)
 (define threaded-closure-word int 2)
 (define threaded-closure-free0 int 3)
 (define routine-docol int 0)  ; run a word's cells
