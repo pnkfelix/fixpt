@@ -34,6 +34,7 @@ pub mod licence;
 pub mod lower;
 pub mod parse;
 pub mod session;
+pub mod syn;
 pub mod standard;
 pub mod top;
 pub mod unparse;

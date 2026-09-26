@@ -239,6 +239,36 @@ impl Fx26Session {
         Ok(Outcome { top, code, printed, value })
     }
 
+    /// Read `text` with the reader written in FX-26, loading it into this
+    /// session the first time, rather than with the Rust reader. Reading a
+    /// whole file is long work for it, so it reads with no step limit: it
+    /// is licensed code, and a text ends.
+    pub fn read_with_own_reader(&mut self, text: &str) -> R<Vec<Syntax>> {
+        if self.scheme.global_value(&format!("{READER_PREFIX}eager-start-fx26")).is_none() {
+            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
+        }
+        self.scheme.engine.set_step_limit(None);
+        let forms = crate::syn::read_with_fx26_reader(&mut self.scheme, &mut self.checker.interner, FileId(0), text);
+        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        self.checker.expand_forms(forms?)
+    }
+
+    /// [`run_program`](Self::run_program), reading with the reader written
+    /// in FX-26: nothing of the Rust reader on the way.
+    pub fn run_program_read_by_fx26(&mut self, text: &str) -> R<Result<String, String>> {
+        let forms = self.read_with_own_reader(text)?;
+        let mut last = Ok(String::new());
+        for out in self.run_forms(&forms)? {
+            let out = out?;
+            match out.value {
+                Ok(Some(v)) => last = Ok(v),
+                Ok(None) => {}
+                Err(e) => return Ok(Err(e)),
+            }
+        }
+        Ok(last)
+    }
+
     /// Run a whole program, and the value of its last expression. Its
     /// definitions may refer to each other in any order: see
     /// `Checker::declare_ahead`.

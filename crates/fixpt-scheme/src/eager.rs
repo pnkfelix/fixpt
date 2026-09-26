@@ -140,6 +140,14 @@ impl EagerReader {
     /// The newest state for `text`, re-derived after a call that may have
     /// collected. With `at_enter` the newline is fed again: states are values,
     /// so feeding the same one twice gives the same answer.
+    /// The reader's state after `text` (and a newline, if `at_enter`): for
+    /// asking it things this type does not, by calling its procedures. Held
+    /// only until the next call that may collect.
+    pub fn state_after(&mut self, session: &mut Session, text: &str, at_enter: bool) -> Result<Value, SessionError> {
+        self.sync(session, text)?;
+        self.latest(session, text, at_enter)
+    }
+
     fn latest(&mut self, session: &mut Session, text: &str, at_enter: bool) -> Result<Value, SessionError> {
         debug_assert_eq!(self.fed.len(), text.chars().count());
         let st = session.rt.heap.car(session.rt.heap.root_at(self.root));

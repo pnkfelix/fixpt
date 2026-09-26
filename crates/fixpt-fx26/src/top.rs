@@ -51,6 +51,12 @@ impl Checker {
         let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
         self.interner = interner;
         let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+        self.expand_forms(forms)
+    }
+
+    /// What is expanded as it is read (`define-datatype`), for forms read
+    /// some other way: by the reader written in FX-26 (`crate::syn`).
+    pub fn expand_forms(&mut self, forms: Vec<Syntax>) -> R<Vec<Syntax>> {
         let mut out = Vec::new();
         for f in forms {
             self.expand_datatype(f, &mut out)?;

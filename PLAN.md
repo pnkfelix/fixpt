@@ -611,6 +611,10 @@ A4. **Stencils**: primitives written in Rust with `become`, compiled by the
    several files; reserved form names are the cost meanwhile.)*
 8. **Reader data with source positions**, so the FX-26 reader feeds the
    checker directly and the Rust reader leaves the FX-26 path.
+   *(Done 2026-09-26: the reader builds `syn` values with spans, equal to
+   the Rust reader's `Syntax` on every text tried; see `docs/fx26.md`. The
+   Rust reader stays the default for speed, and the FX-26 path is
+   `run_program_read_by_fx26`.)*
 
 ### Phase C: bootstrapping
 

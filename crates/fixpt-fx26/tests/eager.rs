@@ -219,7 +219,18 @@ fn it_reads_fx26_as_the_rust_reader_does() {
     ];
     for text in sources {
         let got = s.scheme.eval_to_string("<fx26>", &format!("(fx26-data {})", scheme_string(text)));
-        assert_eq!(got.as_deref().ok(), Some(rust_fx26(text).as_str()), "on:\n{text}");
+        let want = rust_fx26(text);
+        if let Err(e) = &got {
+            panic!("the FX-26 reader failed: {e}");
+        }
+        // Where they first differ, rather than both whole texts.
+        if let Ok(g) = &got
+            && let Some(i) = g.chars().zip(want.chars()).position(|(a, b)| a != b)
+        {
+            let at = |t: &str| t.chars().skip(i.saturating_sub(80)).take(160).collect::<String>();
+            panic!("first difference at {i}:\n got: {}\nwant: {}", at(g), at(&want));
+        }
+        assert_eq!(got.as_deref().ok(), Some(want.as_str()), "on:\n{text}");
     }
 }
 

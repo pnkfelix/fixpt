@@ -104,3 +104,24 @@ What it says:
 - **At `-O0` the tail calls still hold**: 110 million cells with no stack
   growth, at about the speed of the Rust machine built with `--release`,
   and 18× the Rust machine built without.
+
+## The eager reader in FX-26, building syntax with positions (B8)
+
+`cargo test -p fixpt-fx26 --test eager` (debug, whole suite, 9 tests),
+the same machine, the same day:
+
+| reader                                        | time    |
+| --------------------------------------------- | ------- |
+| before B8: data only                          | 11.45 s |
+| B8: `syn` with spans, each carrying its datum | 13.22 s |
+
+About 15% for the positions. A first try that made each list's datum by
+converting its elements' `syn`s again, at every level, ran out of the
+engine's step budget on the reader's own source; carrying each piece's
+datum from when it was read fixed that.
+
+**Open: the suite's baseline.** The table at the top says 5.5 s for this
+suite before M12; it now takes 11.45 s without B8. Tests have been added
+since, the largest reading the reader's own source, which has grown, so
+the two are not the same work; which part of the difference is slowdown
+has not been measured yet.
