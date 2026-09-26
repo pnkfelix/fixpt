@@ -284,6 +284,14 @@ impl Fx26Session {
     /// Checking comes first either way, so a form that does not check does
     /// not run.
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
+        let out = self.run_form(form);
+        // No body of a region runs once a form is done: any region still
+        // live was left by an error, or an escape no prompt ended.
+        self.scheme.scope(|s| s.runtime_unrooted().heap.region_exit(0));
+        out
+    }
+
+    fn run_form(&mut self, form: &Syntax) -> R<Outcome> {
         let (top, code) = self.compile(form)?;
         if self.strategy != Strategy::Lower {
             let form_text = fixpt_read::write_syntax(form, &self.checker.interner);

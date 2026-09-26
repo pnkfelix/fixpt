@@ -1138,9 +1138,18 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
      current chunk, `[fill, end]`, in a table at a fixed address, which
      machine code bumps. `lists` in a region: 8.1 ms, against 12.4 ms in
      the heap.
-  4. A prompt that records how many regions are live, and an abort that
-     ends the newer ones. Until then, the regions an escape leaves live
-     only until the next ending of an older region.
+  4. *(Done 2026-09-26.)* An escape ends the regions it leaves:
+     - the threaded machines (Rust and native): a prompt's entry keeps
+       how many regions were live, above the data stack's height in its
+       last word, and an abort to it ends any newer. A composable
+       continuation's prompts, reinstated, take the count live then: every
+       live region is older than they now are, and none entered in what
+       was captured is live, since the checker lets no region's body be
+       resumed (without that, an abort to one could end an older region
+       still in use). A whole continuation keeps its counts.
+     - lowered code: a `letrena` is a `dynamic-wind` whose after ends the
+       region, which the Scheme engine's aborts and escapes run.
+     - an error: the session ends every region when a form is done.
   5. `letreap`, a heap of its own.
   6. The checker's record of each allocation's region
      (`NodeFacts::alloc_region`) is no longer used to allocate; it may go.

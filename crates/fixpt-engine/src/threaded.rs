@@ -323,9 +323,34 @@ struct Regs {
 }
 
 /// In a return entry's first place, where a word would be: this entry is a
-/// prompt's marker `(PROMPT_MARK, tag, handler, fixnum data stack height)`,
-/// just above the entry it resumes at when the prompt is left.
+/// prompt's marker `(PROMPT_MARK, tag, handler, height)`, just above the
+/// entry it resumes at when the prompt is left. Its height is a fixnum, the
+/// data stack's height (`prompt_height`) and, above it, how many regions
+/// were live (`prompt_regions`): an abort to the prompt ends any newer.
 pub const PROMPT_MARK: Value = Value::DEFAULT;
+
+/// A reinstated prompt's height: its data stack height moved by `delta`;
+/// and, composed onto these stacks, the regions live now (`live`), since
+/// every region live is older than it now is, and none entered in what was
+/// captured is live (the checker lets no body of a region be resumed). A
+/// whole continuation keeps its count: the regions entered since it was
+/// captured are abandoned with the stacks it replaces.
+pub fn reinstated_prompt(w: Value, delta: i64, whole: bool, live: usize) -> Value {
+    let regions = if whole { prompt_regions(w) } else { live };
+    prompt_word((prompt_height(w) as i64 + delta) as usize, regions)
+}
+
+/// A prompt's height, as its entry keeps it: the data stack's height, and
+/// the regions live.
+pub fn prompt_word(height: usize, regions: usize) -> Value {
+    Value::fixnum((height as u64 & 0xffff_ffff | (regions as u64) << 32) as i64)
+}
+pub fn prompt_height(w: Value) -> usize {
+    (w.as_fixnum() as u64 & 0xffff_ffff) as usize
+}
+pub fn prompt_regions(w: Value) -> usize {
+    (w.as_fixnum() as u64 >> 32) as usize
+}
 /// ... or a continuation mark, `(MARK_MARK, key, value, 0)`, just above the
 /// entry it resumes at.
 pub const MARK_MARK: Value = Value::UNSPECIFIED;
@@ -544,6 +569,7 @@ impl Machine {
             self.push_return(r);
         }
         let delta = self.ds.len() as i64 - old_base;
+        let live = heap.live_regions();
         let n = heap.obj_len(ds);
         for i in 0..n {
             self.ds.push(heap.obj_ref(ds, i));
@@ -552,7 +578,7 @@ impl Machine {
         for e in 0..n / 4 {
             let mut entry = [heap.obj_ref(rs, 4 * e), heap.obj_ref(rs, 4 * e + 1), heap.obj_ref(rs, 4 * e + 2), heap.obj_ref(rs, 4 * e + 3)];
             if entry[0] == PROMPT_MARK {
-                entry[3] = Value::fixnum(entry[3].as_fixnum() + delta);
+                entry[3] = reinstated_prompt(entry[3], delta, whole, live);
             } else if entry[0] != MARK_MARK {
                 entry[2] = Value::fixnum(entry[2].as_fixnum() + delta);
             }
@@ -872,8 +898,9 @@ impl Machine {
                 let thunk = self.pop(name)?;
                 let handler = self.pop(name)?;
                 let tag = self.pop(name)?;
-                let height = Value::fixnum(self.ds.len() as i64);
-                self.enter_above(cx.heap(), r, thunk, [PROMPT_MARK, tag, handler, height], name)?;
+                let heap = cx.heap();
+                let height = prompt_word(self.ds.len(), heap.live_regions());
+                self.enter_above(heap, r, thunk, [PROMPT_MARK, tag, handler, height], name)?;
             }
             WITHMARK => {
                 let thunk = self.pop(name)?;
@@ -911,10 +938,13 @@ impl Machine {
                     return Err(Trap::Prim("abort: no prompt for this tag".into()));
                 };
                 let handler = self.rs[at + 2];
-                let height = self.rs[at + 3].as_fixnum() as usize;
+                let (height, regions) = (prompt_height(self.rs[at + 3]), prompt_regions(self.rs[at + 3]));
                 self.rs.truncate(at);
                 self.pop_return(r);
                 self.ds.truncate(height);
+                // What the regions entered inside the prompt held is gone
+                // with what was cut: no frame left can resume their bodies.
+                cx.heap().region_exit(regions);
                 self.ds.push(v);
                 self.ds.push(handler);
                 self.call(cx, r, 1, false, name)?;
@@ -936,7 +966,7 @@ impl Machine {
                 let heap = cx.heap();
                 let k = match at {
                     Some(at) => {
-                        let height = self.rs[at + 3].as_fixnum() as usize;
+                        let height = prompt_height(self.rs[at + 3]);
                         self.capture(heap, r, at + 4, height, false)
                     }
                     None => self.capture(heap, r, self.rs_floor, 0, true),

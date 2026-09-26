@@ -272,13 +272,16 @@ impl Lowerer<'_> {
             // Regions are erased here: the closure is the heap's.
             Exp::RLambda { lambda, .. } => self.go(lambda),
             // A `letrena`'s name is its region's handle, the region left
-            // with the body's value; a `letreap`'s is the heap's, `#f`.
+            // however the body is, by a return or an escape: a
+            // `dynamic-wind`'s after (the checker lets no body of a region be
+            // resumed, so its before never runs again). A `letreap`'s is the
+            // heap's, `#f`.
             Exp::LetRegion { arena, region, body } => {
                 let n = self.c.arena.dvar_name(region);
                 let l = self.local(n);
                 let b = self.body(&[n], body);
                 if arena {
-                    format!("(let (({l} (%region-enter))) (%region-exit {l} {b}))")
+                    format!("(let (({l} (%region-enter))) (dynamic-wind (lambda () #f) (lambda () {b}) (lambda () (%region-exit {l} #f))))")
                 } else {
                     format!("(let (({l} #f)) {b})")
                 }

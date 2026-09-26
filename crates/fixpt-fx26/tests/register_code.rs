@@ -187,3 +187,16 @@ fn closures_are_made_in_a_region() {
         assert_eq!(live, 0);
     }
 }
+
+/// An abort out of the bodies of regions, to a prompt around them, ends
+/// them: none is live when the program is done, though no form's end has
+/// ended them.
+#[test]
+fn an_abort_ends_the_regions_it_leaves() {
+    for gc_every in [None, Some(1)] {
+        let (got, words, live) = run_in_registers("region-escapes.fx", gc_every);
+        assert_eq!(got, (500 * 1001).to_string());
+        assert_eq!(words, 1000 * 4, "two pairs each round");
+        assert_eq!(live, 0);
+    }
+}

@@ -12,7 +12,7 @@
 //! Every push checks the stack's room, where the Rust machine's stacks are
 //! vectors, so a deep reinstatement traps rather than writing past them.
 
-use fixpt_engine::threaded::{MARK_MARK, PROMPT_MARK, Trap};
+use fixpt_engine::threaded::{prompt_height, prompt_regions, prompt_word, reinstated_prompt, MARK_MARK, PROMPT_MARK, Trap};
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::threaded::{
     CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_WHOLE, WORD_CELL0,
@@ -229,6 +229,7 @@ fn reinstate(s: &mut Stacks, heap: &Heap, k: Value, v: Value, tail: bool) -> Res
         s.push_return()?;
     }
     let delta = s.ds_len() as i64 - old_base;
+    let live = heap.live_regions();
     for v in heap.obj_iter(ds) {
         s.ds_push(v)?;
     }
@@ -236,7 +237,7 @@ fn reinstate(s: &mut Stacks, heap: &Heap, k: Value, v: Value, tail: bool) -> Res
     while let (Some(a), Some(b), Some(c), Some(d)) = (words.next(), words.next(), words.next(), words.next()) {
         let mut entry = [a, b, c, d];
         if entry[0] == PROMPT_MARK {
-            entry[3] = Value::fixnum(entry[3].as_fixnum() + delta);
+            entry[3] = reinstated_prompt(entry[3], delta, whole, live);
         } else if entry[0] != MARK_MARK {
             entry[2] = Value::fixnum(entry[2].as_fixnum() + delta);
         }
@@ -284,7 +285,7 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
             let thunk = s.ds_pop(name)?;
             let handler = s.ds_pop(name)?;
             let tag = s.ds_pop(name)?;
-            let height = Value::fixnum(s.ds_len() as i64);
+            let height = prompt_word(s.ds_len(), heap.live_regions());
             enter_above(&mut s, heap, thunk, [PROMPT_MARK, tag, handler, height], name)
         }
         "withmark" => {
@@ -324,10 +325,13 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
                 return Err(Trap::Prim("abort: no prompt for this tag".into()));
             };
             let handler = s.rs_get(at + 2);
-            let height = s.rs_get(at + 3).as_fixnum() as usize;
+            let (height, regions) = (prompt_height(s.rs_get(at + 3)), prompt_regions(s.rs_get(at + 3)));
             s.rs_truncate(at);
             s.pop_return();
             s.ds_truncate(height);
+            // What the regions entered inside the prompt held is gone with
+            // what was cut: no frame left can resume their bodies.
+            heap.region_exit(regions);
             s.ds_push(v)?;
             s.ds_push(handler)?;
             call(&mut s, heap, 1, false, name)
@@ -351,7 +355,7 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
             let proc_ = s.ds_pop(name)?;
             let k = match at {
                 Some(at) => {
-                    let height = s.rs_get(at + 3).as_fixnum() as usize;
+                    let height = prompt_height(s.rs_get(at + 3));
                     capture(&s, heap, at + 4, height, false)
                 }
                 None => capture(&s, heap, 0, 0, true),
