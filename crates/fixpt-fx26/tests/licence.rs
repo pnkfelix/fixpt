@@ -98,7 +98,7 @@ fn a_speculative_run_has_a_budget() {
 /// owns — so it may run on every keystroke.
 #[test]
 fn the_eager_reader_is_licensed() {
-    let mut compiled = compile_program(fixpt_fx26::EAGER_READER).expect("checks");
+    let mut compiled = compile_program(&fixpt_fx26::front_end()).expect("checks");
     compiled.checker.reader_licence().expect("licensed");
 }
 
@@ -110,7 +110,7 @@ fn a_reader_that_reaches_outside_is_refused() {
         "{}\n(define shared (ref int @user) (new 0))
          (define eager-feed (subr (write @user) (state char) state)
            (lambda (st ch) (begin (set shared 1) st)))",
-        fixpt_fx26::EAGER_READER
+        fixpt_fx26::front_end()
     );
     let mut compiled = compile_program(&doctored).expect("checks");
     let err = compiled.checker.reader_licence().expect_err("refused");
@@ -122,8 +122,9 @@ fn a_reader_that_reaches_outside_is_refused() {
 /// is a region any program can name, and the same reader is refused.
 #[test]
 fn a_reader_whose_regions_are_public_is_refused() {
-    let public = fixpt_fx26::EAGER_READER.replace("(private-regions @s @e @m @c)", "");
-    assert_ne!(public, fixpt_fx26::EAGER_READER, "the declaration moved");
+    let front = fixpt_fx26::front_end();
+    let public = front.replace("(private-regions @s @e @m @c)", "");
+    assert_ne!(public, front, "the declaration moved");
     let mut compiled = compile_program(&public).expect("checks");
     let err = compiled.checker.reader_licence().expect_err("refused");
     assert!(err.contains("which is not the program's own to touch"), "{err}");
@@ -148,7 +149,7 @@ fn a_private_region_is_not_the_one_another_program_names() {
 /// reader drives the line editor as the Scheme one does.
 #[test]
 fn the_fx26_reader_loads_into_a_scheme_session() {
-    let compiled = compile_program(fixpt_fx26::EAGER_READER).expect("checks");
+    let compiled = compile_program(&fixpt_fx26::front_end()).expect("checks");
     let mut scheme = fixpt_scheme::Session::with_backend(Backend::Bytecode);
     compiled.load_into(&mut scheme).expect("loads");
     let mut r = EagerReader::attach(&mut scheme, "fx:").expect("starts");

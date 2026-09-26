@@ -117,7 +117,9 @@ fn int(rt: &mut Runtime, v: Value) -> Outcome<i64> {
 }
 
 /// The kind of a bloblet made by `%make-bloblet`.
-const PLAIN_BLOBLET: u8 = 32;
+const PLAIN_BLOBLET: u8 = fixpt_heap::layout::kind("bloblet");
+const SUM_KIND: u8 = fixpt_heap::layout::kind("sum");
+const PRODUCT_KIND: u8 = fixpt_heap::layout::kind("product");
 
 fn bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
     if v.is_bloblet() { Ok(v) } else { rt.type_error("a bloblet", v) }
@@ -715,6 +717,20 @@ prims! {
             h = h.wrapping_mul(0x0000_0100_0000_01b3);
         }
         Ok(Value::fixnum((h >> 4) as i64))
+    });
+    // FX-26's immutable data: a bloblet of kind `sum` or `product` with these
+    // fields, frozen, fields and suffix, as it is made.
+    "%make-frozen", 1, None, simple!(|rt, a| {
+        let kind = int(rt, a[0])?;
+        if kind != SUM_KIND as i64 && kind != PRODUCT_KIND as i64 {
+            return rt.fail("%make-frozen makes sums and products", &[a[0]]);
+        }
+        let b = rt.heap.make_bloblet(kind as u8, a.len() - 1, 0, true);
+        for (i, v) in a[1..].iter().enumerate() {
+            rt.heap.set_bloblet_slot(b, i + 2, *v);
+        }
+        rt.heap.freeze_bloblet(b, true, true);
+        Ok(b)
     });
     "%bloblet?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_bloblet())));
     "%bloblet-kind", 1, Some(1), simple!(|rt, a| {

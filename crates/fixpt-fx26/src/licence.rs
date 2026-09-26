@@ -61,6 +61,8 @@ pub const READER_ENTRY_POINTS: &[&str] = &[
     "eager-state-data",
     "eager-context",
     "eager-hole-closers",
+    "eager-state-syntax",
+    "parse-program",
 ];
 
 impl Checker {

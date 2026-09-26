@@ -21,6 +21,15 @@ pub mod ast;
 /// The eager reader, written in FX-26: see the file's own header.
 pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 
+/// The parser written in FX-26, which needs the reader's types: it is
+/// compiled with it, as one program ([`front_end`]).
+pub const PARSER: &str = include_str!("parser.fx");
+
+/// The reader and the parser written in FX-26, as one program.
+pub fn front_end() -> String {
+    format!("{EAGER_READER}\n{PARSER}")
+}
+
 /// The object layout, generated from `fixpt_heap::layout`: tags, header
 /// fields and kinds, as FX-26 definitions.
 pub const LAYOUT: &str = include_str!("layout.fx");
@@ -34,6 +43,7 @@ pub mod licence;
 pub mod lower;
 pub mod parse;
 pub mod session;
+pub mod sexp;
 pub mod syn;
 pub mod standard;
 pub mod top;

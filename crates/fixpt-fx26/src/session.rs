@@ -123,7 +123,7 @@ pub const READER_PREFIX: &str = "fx26-reader:";
 /// then load it into `scheme`, under [`READER_PREFIX`]. It runs on every
 /// keystroke, so nothing of it may run before the licence says it can.
 pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
-    let mut compiled = compile_program_as(crate::EAGER_READER, READER_PREFIX).map_err(|e| e.to_string())?;
+    let mut compiled = compile_program_as(&crate::front_end(), READER_PREFIX).map_err(|e| e.to_string())?;
     compiled.checker.reader_licence()?;
     compiled.load_into(scheme)
 }
@@ -251,6 +251,18 @@ impl Fx26Session {
         let forms = crate::syn::read_with_fx26_reader(&mut self.scheme, &mut self.checker.interner, FileId(0), text);
         self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
         self.checker.expand_forms(forms?)
+    }
+
+    /// Parse `text` with the parser written in FX-26 (and its reader),
+    /// loading them the first time: each form's tree, as text.
+    pub fn parse_with_own_parser(&mut self, text: &str) -> R<Vec<String>> {
+        if self.scheme.global_value(&format!("{READER_PREFIX}parse-program")).is_none() {
+            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
+        }
+        self.scheme.engine.set_step_limit(None);
+        let r = crate::syn::parse_with_fx26_parser(&mut self.scheme, FileId(0), text);
+        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        r
     }
 
     /// [`run_program`](Self::run_program), reading with the reader written

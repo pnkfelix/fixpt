@@ -140,9 +140,25 @@ pub const KINDS: &[Kind] = &[
     Kind { name: "compiled-code", code: 34, traced: true },
     // The AST engine's environment frames: `layout::frame`.
     Kind { name: "env-frame", code: 35, traced: true },
+    // FX-26's immutable data, frozen once made: a sum's tag (a symbol) and
+    // its value; a product's fields, in order.
+    Kind { name: "sum", code: 36, traced: true },
+    Kind { name: "product", code: 37, traced: true },
 ];
 
 pub const KIND_EXTENSION: u8 = 255;
+
+/// A kind's code, by name.
+pub const fn kind(name: &str) -> u8 {
+    let mut i = 0;
+    while i < KINDS.len() {
+        if const_str_eq(KINDS[i].name, name) {
+            return KINDS[i].code;
+        }
+        i += 1;
+    }
+    panic!("no such kind")
+}
 
 /// A closure (kind `closure`): its code and what it closed over. Laid out
 /// `[extra…][code][trailer]`, so that the code, read on every call, and

@@ -629,7 +629,14 @@ one.)*
    - **9a. A parser in FX-26**: `syn` (step 8) to an AST, a
      `define-datatype`, with the Rust parser's desugarings. Checked by
      unparsing both ASTs on every test program. The compiler and the checker
-     both start from it.
+     both start from it. *(Done 2026-09-26: `src/parser.fx`, compiled with
+     the reader as one program and licensed with it. Its trees print, spans
+     included, exactly as the Rust parser's do, on test programs and on
+     `table.fx`. Descriptions stay as written, for step 10. Not yet:
+     `define-datatype`, which the Rust side expands as it reads and the
+     FX-26 side does not. Sums and products now have kinds of their own,
+     `sum` and `product`, so data can be printed and walked without its
+     type.)*
    - **9b. An evaluator in FX-26** over that AST: FX-26's reference
      semantics, written in FX-26. Checked against the same programs lowered
      to Scheme.
@@ -655,6 +662,21 @@ one.)*
     retired (decision 8).
 
 ### Kept open, deliberately
+
+- **`letregion`: regions that end.** (Raised 2026-09-26.) Masking says
+  effects on a region cannot be observed outside an expression; freeing
+  the region needs more: that nothing in it is reachable after. For
+  `(letregion r body)`: `r` in no free variable's type (masking checks
+  this already); `r` nowhere in the result type, latent effects included
+  (`regions_in` walks them); and, new with first-class control, no
+  continuation captured in the body escaping it, since a continuation's
+  type says nothing of the data its frames hold: the body's masked effect
+  must have no `comefrom`. Assignment needs nothing more: storing into a
+  longer-lived structure puts `r` in that structure's type. Two layers:
+  the checker rule (allocation still in the collected heap), then arenas
+  the collector treats as roots while live and resets at exit, sound
+  under those conditions (MLKit pairs regions with a collector). A kernel
+  form, so written twice.
 
 - **Responsiveness as an effect.** (Raised 2026-09-26.) Distinguish "may
   diverge without reaching a poll" from "every unbounded path polls, and

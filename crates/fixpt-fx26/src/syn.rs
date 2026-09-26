@@ -51,6 +51,35 @@ pub fn read_with_fx26_reader(scheme: &mut Session, interner: &mut Interner, file
     out
 }
 
+/// Parse `text` with the reader and the parser written in FX-26: each
+/// top-level form's tree, as [`crate::sexp::show_value`] prints it.
+pub fn parse_with_fx26_parser(scheme: &mut Session, file: FileId, text: &str) -> R<Vec<String>> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let mut reader =
+        EagerReader::attach_starting(scheme, READER_PREFIX, "eager-start-fx26").map_err(|e| fail(e.to_string()))?;
+    let st = reader.state_after(scheme, text, true).map_err(|e| fail(e.to_string()))?;
+    let get = |scheme: &Session, name: &str| scheme.global_value(&format!("{READER_PREFIX}{name}")).expect("loaded");
+    let status = scheme.call(get(scheme, "eager-status"), &[st]).map_err(|e| fail(e.to_string()))?;
+    if scheme.rt.heap.symbol_name(status) != "complete" {
+        return Err(fail("the FX-26 reader did not read the whole text".into()));
+    }
+    // Re-read the state: the call may have collected.
+    let st = reader.state_after(scheme, text, true).map_err(|e| fail(e.to_string()))?;
+    let syns = scheme.call(get(scheme, "eager-state-syntax"), &[st]).map_err(|e| fail(e.to_string()))?;
+    let result = scheme.call(get(scheme, "parse-program"), &[syns]).map_err(|e| fail(e.to_string()))?;
+    let heap = &scheme.rt.heap;
+    let tag = heap.symbol_name(heap.bloblet_slot(result, 2));
+    let payload = heap.bloblet_slot(result, 3);
+    if tag == "p-err" {
+        let msg = heap.string_to_rust(part(heap, payload, 0));
+        let offsets = byte_offsets(text);
+        let at = |v: Value| offsets.get(v.as_fixnum() as usize).copied().unwrap_or(text.len()) as u32;
+        return Err(FxError::at(Span::new(file, at(part(heap, payload, 1)), at(part(heap, payload, 2))), msg));
+    }
+    let tops = heap.list_to_vec(part(heap, payload, 0)).expect("a list");
+    Ok(tops.into_iter().map(|t| crate::sexp::show_value(heap, t)).collect())
+}
+
 /// The byte offset of each character, and of the end.
 fn byte_offsets(text: &str) -> Vec<usize> {
     let mut v: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();

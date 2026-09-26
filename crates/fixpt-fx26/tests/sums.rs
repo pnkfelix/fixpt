@@ -63,8 +63,9 @@ fn tagcase_covers_every_tag_or_has_an_else() {
 #[test]
 fn define_datatype_makes_constructors_for_tagcase() {
     assert_eq!(run(include_str!("programs/bloblet/expr.fx")), "42");
-    // A value is a frozen bloblet: the tag, then the product.
-    assert_eq!(run("(define-datatype t (leaf int)) (leaf 1)"), "#<bloblet 3 fields 0 bytes>");
+    // A value is a frozen bloblet of kind `sum`: the tag, then the product.
+    assert_eq!(run("(define-datatype t (leaf int)) (leaf 1)"), "#<sum leaf>");
+    assert_eq!(run("(product (a 1) (b 2))"), "#<product of 2>");
 }
 
 #[test]

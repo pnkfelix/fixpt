@@ -25,12 +25,16 @@
 (define (%fx26-bloblet-set-byte! b i n) (%bloblet-set-byte! b i n) %fx26-unit)
 (define (%fx26-bloblet-freeze b) (%bloblet-freeze! b #t #f) b)
 
+;;; ---- data, looked into ----
+;;; An FX-26 `int` is a fixnum: 61 bits, signed.
+(define (%fx26-fixnum? x)
+  (and (exact-integer? x) (<= -1152921504606846976 x 1152921504606846975)))
+
 ;;; ---- products and sums ----
-;;; Immutable, so a bloblet frozen, fields and suffix, once made.
-(define (%fx26-frozen . fields)
-  (let ((b (apply %make-bloblet 0 fields)))
-    (%bloblet-freeze! b #t #t)
-    b))
+;;; Immutable, so bloblets frozen, fields and suffix, as they are made: of
+;;; kind `product` (37) and `sum` (36), so that what one is can be told.
+(define (%fx26-product . fields) (apply %make-frozen 37 fields))
+(define (%fx26-sum tag v) (%make-frozen 36 tag v))
 (define (%fx26-no-arm v) (error "tagcase: no arm for this value" v))
 
 ;;; ---- arrays ----

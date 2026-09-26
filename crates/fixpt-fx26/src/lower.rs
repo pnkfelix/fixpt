@@ -99,6 +99,15 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("datum-cdr", "cdr", false),
     ("datum-symbol?", "symbol?", false),
     ("datum-symbol-name", "symbol->string", false),
+    ("datum-int?", "%fx26-fixnum?", false),
+    ("datum-int-value", "%fx26-identity", false),
+    ("datum-string?", "string?", false),
+    ("datum-string-value", "%fx26-identity", false),
+    ("datum-bool?", "boolean?", false),
+    ("datum-bool-value", "%fx26-identity", false),
+    ("datum-char?", "char?", false),
+    ("datum->symbol", "%fx26-identity", false),
+    ("int->string", "number->string", false),
     ("string->symbol", "string->symbol", true),
     ("symbol->string", "symbol->string", true),
     ("symbol=?", "eq?", false),
@@ -279,14 +288,14 @@ impl Lowerer<'_> {
             // order; a sum's tag, as a symbol, and its value.
             Exp::Product(fields) => {
                 let a: Vec<String> = fields.iter().map(|(_, x)| self.go(*x)).collect();
-                format!("(%fx26-frozen {})", a.join(" "))
+                format!("(%fx26-product {})", a.join(" "))
             }
             Exp::Extract(x, _) => {
                 let i = self.c.facts.field_index[&e];
                 format!("(%bloblet-ref {} {})", self.go(x), i + 2)
             }
             Exp::Sum(tag, x) => {
-                format!("(%fx26-frozen '{} {})", fixpt_read::escape_symbol(self.c.interner.name(tag)), self.go(x))
+                format!("(%fx26-sum '{} {})", fixpt_read::escape_symbol(self.c.interner.name(tag)), self.go(x))
             }
             Exp::TagCase { scrutinee, arms, els } => {
                 let s = self.go(scrutinee);
