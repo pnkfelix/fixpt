@@ -21,9 +21,12 @@
 //!     16     8  heap word count
 //!     24     8  global slot count
 //!     32     8  interned symbol count
-//!     40     -  heap words     (little-endian u64, references relative to 0)
+//!     40     8  explicit root count
+//!     48     -  heap words     (little-endian u64, references relative to 0)
 //!      -     -  global slots   (little-endian u64)
 //!      -     -  symbol table   (little-endian u64)
+//!      -     -  explicit roots (little-endian u64; root 0 is the runtime's
+//!                               error-object record type)
 //!      -     4  CRC-32 of everything above
 //! ```
 
@@ -44,8 +47,8 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// constants as its own fields. Version 6 has every object a bloblet, pointed
 /// at its suffix (tag `010` retired); objects with fields have trailers, and
 /// closures and environment frames their own fixed layouts.
-pub const VERSION: u32 = 6;
-const HEADER_BYTES: usize = 40;
+pub const VERSION: u32 = 7;
+const HEADER_BYTES: usize = 48;
 
 /// Trailer written after an image appended to an executable.
 pub const EMBED_MAGIC: &[u8; 8] = b"FIXPTEMB";
@@ -86,9 +89,10 @@ pub fn dump(heap: &Heap) -> Vec<u8> {
     let words = heap.live_words();
     let globals = heap.globals_slice();
     let symbols = heap.symbols_slice();
+    let roots = heap.roots_slice();
 
     let mut out = Vec::with_capacity(
-        HEADER_BYTES + (words.len() + globals.len() + symbols.len()) * 8 + 4,
+        HEADER_BYTES + (words.len() + globals.len() + symbols.len() + roots.len()) * 8 + 4,
     );
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&VERSION.to_le_bytes());
@@ -96,6 +100,7 @@ pub fn dump(heap: &Heap) -> Vec<u8> {
     out.extend_from_slice(&(words.len() as u64).to_le_bytes());
     out.extend_from_slice(&(globals.len() as u64).to_le_bytes());
     out.extend_from_slice(&(symbols.len() as u64).to_le_bytes());
+    out.extend_from_slice(&(roots.len() as u64).to_le_bytes());
     for w in words {
         out.extend_from_slice(&w.to_le_bytes());
     }
@@ -103,6 +108,9 @@ pub fn dump(heap: &Heap) -> Vec<u8> {
         out.extend_from_slice(&v.raw().to_le_bytes());
     }
     for v in symbols {
+        out.extend_from_slice(&v.raw().to_le_bytes());
+    }
+    for v in roots {
         out.extend_from_slice(&v.raw().to_le_bytes());
     }
     let crc = crc32(&out);
@@ -127,8 +135,9 @@ pub fn load(bytes: &[u8]) -> Result<Heap, ImageError> {
     let n_words = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
     let n_globals = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
     let n_symbols = u64::from_le_bytes(bytes[32..40].try_into().unwrap()) as usize;
+    let n_roots = u64::from_le_bytes(bytes[40..48].try_into().unwrap()) as usize;
 
-    let body = HEADER_BYTES + (n_words + n_globals + n_symbols) * 8;
+    let body = HEADER_BYTES + (n_words + n_globals + n_symbols + n_roots) * 8;
     let total = body + 4;
     if bytes.len() < total {
         return Err(ImageError::Truncated { expected: total, found: bytes.len() });
@@ -148,8 +157,9 @@ pub fn load(bytes: &[u8]) -> Result<Heap, ImageError> {
     let words: Vec<u64> = (0..n_words).map(|_| read_u64(&mut at)).collect();
     let globals: Vec<Value> = (0..n_globals).map(|_| Value(read_u64(&mut at))).collect();
     let symbols: Vec<Value> = (0..n_symbols).map(|_| Value(read_u64(&mut at))).collect();
+    let roots: Vec<Value> = (0..n_roots).map(|_| Value(read_u64(&mut at))).collect();
 
-    let heap = Heap::from_image(&words, globals, symbols).map_err(ImageError::Malformed)?;
+    let heap = Heap::from_image(&words, globals, symbols, roots).map_err(ImageError::Malformed)?;
     heap.verify().map_err(ImageError::Malformed)?;
     Ok(heap)
 }

@@ -747,6 +747,38 @@ prims! {
     // for tests and tools that want to see the collector at work.
     "%gc-count", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.gc_count as i64)));
     "%gc-words-copied", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.words_copied as i64)));
+    // Collect at every nth safepoint as well as when full; 0 for only when
+    // full. For sweeping collections through a program to find rooting bugs.
+    "%gc-every!", 1, Some(1), simple!(|rt, a| {
+        let n = int(rt, a[0])?;
+        if n < 0 { return rt.fail("%gc-every! takes a count, 0 or more", &[a[0]]); }
+        rt.heap.gc_every = n as u64;
+        Ok(Value::UNSPECIFIED)
+    });
+    // Larceny's SRO: a vector of every live object of a kind (a kind's name,
+    // `pair`, or #f for any) reached by 1 to `limit` references (#f: any
+    // number), traced from the heap's roots. An observer's tool: it sees
+    // every region, so no language's standard environment has it.
+    "%sro", 2, Some(2), simple!(|rt, a| {
+        let kind = if a[0].is_false() {
+            fixpt_heap::SroKind::Any
+        } else if rt.heap.is_a(a[0], ObjType::Symbol) {
+            let name = rt.heap.symbol_name(a[0]);
+            if name == "pair" {
+                fixpt_heap::SroKind::Pair
+            } else {
+                match fixpt_heap::layout::KINDS.iter().find(|k| k.name == name) {
+                    Some(k) => fixpt_heap::SroKind::Kind(k.code),
+                    None => return rt.fail("%sro: no such kind", &[a[0]]),
+                }
+            }
+        } else {
+            return rt.type_error("a kind's name, `pair`, or #f", a[0]);
+        };
+        let limit = if a[1].is_false() { None } else { Some(int(rt, a[1])?.max(1) as usize) };
+        let found = rt.heap.sro(kind, limit);
+        Ok(rt.heap.vector_from(&found))
+    });
     // The object that stands for the word being made in `%make-word`'s cells.
     "%default-object", 0, Some(0), simple!(|_rt, _a| Ok(Value::DEFAULT));
     // A primitive's number, for threaded code's `prim`, if it needs no

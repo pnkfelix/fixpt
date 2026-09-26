@@ -688,6 +688,17 @@ one.)*
 
 ### Kept open, deliberately
 
+- **Values held by Rust across calls, typed away.** (Raised 2026-09-26,
+  after two rooting bugs in `eager.rs` and one in a test.) At the
+  embedding boundary, a Value from `Session::global_value` or a call's
+  result gets a lifetime borrowed from the session (`Held<'s>`), and
+  whatever may collect takes `&mut Session`, so holding one across such a
+  call is a borrow error; keeping one means rooting it and fetching it
+  again. `gc-arena`'s `'gc` and V8's `Local<'s>`/`HandleScope` are the
+  precedents. The engines keep raw Values, whose stacks are roots by
+  construction. It is the region discipline, in Rust's types: the heap a
+  region, a held Value a read of it, a call that may collect the effect
+  that ends it. To do after control (9c-2).
 - **A collector without safepoints.** (Raised 2026-09-26, after Cliff
   Click's Pauseless GC at Azul, later C4.) The threaded machine's state is
   Values in root arrays and word-relative offsets, so it could be collected

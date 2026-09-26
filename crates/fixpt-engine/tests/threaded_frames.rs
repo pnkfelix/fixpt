@@ -98,8 +98,11 @@ fn calls_allocate_nothing() {
     let used = rt.heap.used();
     assert_eq!(run(&mut rt, top).unwrap(), [fx(0)]);
     // The one closure the top word makes: header, word, trailer. The
-    // 100,000 calls add nothing.
-    assert_eq!(rt.heap.used(), used + 3, "the calls allocated");
+    // 100,000 calls add nothing. (Unless a bug-finding collection policy
+    // is on, whose fillers change the count: see `Heap::gc_every`.)
+    if rt.heap.gc_every == 0 {
+        assert_eq!(rt.heap.used(), used + 3, "the calls allocated");
+    }
 }
 
 /// Runtime primitives, and their failures as traps.

@@ -67,3 +67,15 @@ fn threaded_words_from_scheme() {
     assert!(got.contains("not a word: a word must end"), "{got}");
     assert_eq!(same("(%make-word 'w (list 1))"), "#<threaded-word w>");
 }
+
+/// Looking at the heap from outside: SRO, and the collector's counters and
+/// policy.
+#[test]
+fn the_heap_observed() {
+    // Two bloblets reached once each, from a global list.
+    assert_eq!(same("(define keep (list (%make-bloblet 0 1) (%make-bloblet 0 2))) (vector-length (%sro 'bloblet 1))"), "2");
+    // Shared: one bloblet, reached twice, is not among those reached once.
+    assert_eq!(same("(define b (%make-bloblet 0 7)) (define both (cons b b)) (list (vector-length (%sro 'bloblet 1)) (vector-length (%sro 'bloblet 3)))"), "(0 1)");
+    // Every 3rd safepoint collects: the count rises.
+    assert_eq!(same("(define g0 (%gc-count)) (%gc-every! 3) (define (loop n) (if (= n 0) 'done (loop (- n 1)))) (loop 300) (%gc-every! 0) (> (%gc-count) g0)"), "#t");
+}

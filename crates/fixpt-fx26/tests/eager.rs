@@ -265,3 +265,24 @@ fn it_knows_fx26s_differences() {
         );
     }
 }
+
+/// The reader's driver under collections swept through it: every nth
+/// safepoint collects, for several n, so that a collection lands between
+/// any two calls the driver makes. A Value the driver held across a call
+/// would be stale in one of these runs (one was, until
+/// `EagerReader::status` stopped holding `eager-state-message` across the
+/// call for the position).
+#[test]
+fn the_driver_survives_collections_anywhere() {
+    let text = "(define x (the unit #u)) (g #u8(1) #| ) |#) (h #";
+    for every in [1, 2, 3, 5, 7, 11, 13, 17] {
+        let mut s = session(Backend::Bytecode);
+        s.scheme.rt.heap.gc_every = every;
+        let mut r = EagerReader::attach_starting(&mut s.scheme, "fx:", "eager-start-fx26").expect("starts");
+        let chars: Vec<char> = text.chars().collect();
+        for n in 0..=chars.len() {
+            let prefix: String = chars[..n].iter().collect();
+            r.status(&mut s.scheme, &prefix, true).unwrap_or_else(|e| panic!("every {every}, {prefix:?}: {e}"));
+        }
+    }
+}

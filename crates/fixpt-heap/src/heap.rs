@@ -160,6 +160,12 @@ pub struct Heap {
     symbol_index: HashMap<String, u32>,
 
     pub gc_count: u64,
+    /// Collect at every `gc_every`th safepoint whatever the heap's fill, as
+    /// well as when it is full: a policy for finding rooting bugs, swept
+    /// over many values so that a collection lands in every window. 0 is
+    /// off; the `gc-stress` feature makes it 1 from the start.
+    pub gc_every: u64,
+    safepoints: u64,
     pub words_copied: u64,
 }
 
@@ -187,6 +193,8 @@ impl Heap {
             symbols: Vec::new(),
             symbol_index: HashMap::new(),
             gc_count: 0,
+            gc_every: if cfg!(feature = "gc-stress") { 1 } else { 0 },
+            safepoints: 0,
             words_copied: 0,
         }
     }
@@ -212,7 +220,7 @@ impl Heap {
 
     // ------------------------------------------------------------ raw word I/O
     #[inline]
-    fn word(&self, rel: usize) -> u64 {
+    pub(crate) fn word(&self, rel: usize) -> u64 {
         self.mem[self.active + rel]
     }
     #[inline]
@@ -922,6 +930,11 @@ impl Heap {
         self.inhibited -= 1;
     }
 
+    /// Every Value the heap itself roots, for `sro`.
+    pub(crate) fn roots_for_sro(&self) -> Vec<Value> {
+        self.roots.iter().chain(&self.globals).chain(&self.symbols).copied().collect()
+    }
+
     // ------------------------------------------------------------ native roots
     /// Root `v` for the duration of a native operation that spans a safepoint.
     /// Returns the depth to unwind to.
@@ -947,7 +960,9 @@ impl Heap {
             return;
         }
         let full = self.top as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
-        if cfg!(feature = "gc-stress") || full {
+        self.safepoints += 1;
+        let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
+        if full || policy {
             self.collect(extra_roots);
         }
     }
@@ -961,6 +976,24 @@ impl Heap {
         // `scan` and `free` are relative to `to`.
         let mut scan = 0usize;
         let mut free = 0usize;
+
+        // Under the bug-finding policy, start to-space with a filler whose
+        // size changes from one collection to the next, so that every object
+        // moves at every collection. Otherwise a copying collector tends to
+        // put each object back where it was, and a stale Value someone held
+        // across a collection still finds its object, and the bug hides.
+        if self.gc_every > 0 {
+            let pad = 1 + (self.gc_count as usize % 7);
+            if self.top + pad <= self.semi {
+                // A raw bloblet: a header, then a suffix the scan skips.
+                self.mem[to] = make_header(layout::kind("bloblet"), 0, (pad - 1) * 8);
+                for i in 1..pad {
+                    self.mem[to + i] = 0;
+                }
+                free = pad;
+                scan = pad;
+            }
+        }
 
         // Forward every root. Done by hand rather than through a closure so the
         // borrow checker stays out of the way in the hot loop.
@@ -1092,6 +1125,12 @@ impl Heap {
 
     // ------------------------------------------------------- image support
     /// The live prefix of the active semispace, ready to be written out as-is.
+    /// The explicit roots, in order: part of an image, since a runtime
+    /// finds its own by position (`fixpt_runtime::ERROR_RTD_ROOT`).
+    pub fn roots_slice(&self) -> &[Value] {
+        &self.roots
+    }
+
     pub fn live_words(&self) -> &[u64] {
         &self.mem[self.active..self.active + self.top]
     }
@@ -1108,6 +1147,7 @@ impl Heap {
         words: &[u64],
         globals: Vec<Value>,
         symbols: Vec<Value>,
+        roots: Vec<Value>,
     ) -> Result<Heap, String> {
         let mut semi = DEFAULT_SEMI_WORDS;
         while semi < words.len() {
@@ -1118,6 +1158,7 @@ impl Heap {
         heap.top = words.len();
         heap.globals = globals;
         heap.symbols = symbols;
+        heap.roots = roots;
         heap.symbol_index = HashMap::with_capacity(heap.symbols.len());
         for i in 0..heap.symbols.len() {
             let name = heap.symbol_name(heap.symbols[i]);

@@ -6,6 +6,17 @@ This file keeps the record: what each piece costs in each form, measured the
 same way each time. If the FX-26 forms become the bottleneck, that is the
 signal to start on native code earlier than M10.
 
+**Collections that move everything.** Under a bug-finding policy
+(`Heap::gc_every`, which `gc-stress` sets to 1), every collection starts
+to-space with a filler of a size that changes each time, so that every
+object moves at every collection. Without it a copying collector tends to
+put each object back where it was, and a stale Value held across a
+collection still finds its object: a real rooting bug in the eager
+reader's driver survived the whole `gc-stress` suite that way, until one
+ordinary collection landed in its window. `(%gc-every! n)` sets the policy
+from Scheme; `%gc-count`, `%gc-words-copied` and `%sro` (after Larceny's)
+look at the heap from outside.
+
 **`gc-stress` is not a benchmark.** It collects at every safepoint to shake
 out rooting bugs, so it is a correctness check, and far too slow to time
 anything with. At a checkpoint that touches the collector, the routine check

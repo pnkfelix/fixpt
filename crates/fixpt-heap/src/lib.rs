@@ -16,7 +16,10 @@
 pub mod heap;
 pub mod image;
 pub mod layout;
+mod sro;
 mod threaded;
+
+pub use sro::SroKind;
 pub mod value;
 
 pub use heap::{BlobletError, Head, Heap};

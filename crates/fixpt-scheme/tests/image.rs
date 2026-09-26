@@ -66,8 +66,11 @@ fn a_dumped_heap_still_runs() {
     assert_eq!(display_value(&rt.heap, global(&rt, "numbers")), "(1 2 3)");
 
     // Mutable global state survives, and `set!` still works against it.
-    let bump = global(&rt, "bump!");
     for expected in ["1", "2", "3"] {
+        // Fetched each time round: a call may collect, and a procedure held
+        // across one is stale after it (caught by the shifting collections
+        // of the `gc-stress` policy).
+        let bump = global(&rt, "bump!");
         let r = interp
             .call(&mut rt, &mut prepared, bump, &[])
             .expect("bump! runs");
