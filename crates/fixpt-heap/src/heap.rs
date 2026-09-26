@@ -326,6 +326,9 @@ impl Heap {
     }
     /// The type of a heap object. `None` for anything that is not an object.
     pub fn obj_type(&self, v: Value) -> Option<ObjType> {
+        if v.is_bloblet() {
+            return ObjType::from_code(self.bloblet_kind(v) as u16);
+        }
         if !v.is_object() {
             return None;
         }
@@ -617,6 +620,27 @@ impl Heap {
         Ok(at)
     }
 
+    /// Field `k`, read in one load at `p - k`, without looking at the header:
+    /// the fixed-offset access the layout exists for. For code that knows its
+    /// bloblet's shape, as the engines know a code bloblet's. Checked only in
+    /// debug builds; [`bloblet_field`](Heap::bloblet_field) is the checked
+    /// form.
+    #[inline]
+    pub fn bloblet_slot(&self, v: Value, k: usize) -> Value {
+        debug_assert!(v.is_bloblet() && k >= 1 && k <= self.bloblet_head(v).fields, "{v:?} has no field -{k}");
+        self.slot(v.index() - k)
+    }
+
+    /// Set field `k` in one store. Unchecked but for debug builds, as
+    /// [`bloblet_slot`](Heap::bloblet_slot) is; it does not look at the frozen
+    /// flags, so it is for the runtime's own bloblets.
+    #[inline]
+    pub fn set_bloblet_slot(&mut self, v: Value, k: usize, x: Value) {
+        debug_assert!(v.is_bloblet() && k >= 1 && k <= self.bloblet_head(v).fields, "{v:?} has no field -{k}");
+        debug_assert!(self.word(v.index() - k) & TAG_MASK != TAG_TRAILER, "field -{k} is the trailer");
+        self.set_slot(v.index() - k, x);
+    }
+
     /// Field `k`, `k` words before the suffix.
     pub fn bloblet_field(&self, v: Value, k: usize) -> Result<Value, BlobletError> {
         Ok(self.slot(self.field_slot(v, k)?))
@@ -671,7 +695,8 @@ impl Heap {
         Ok(())
     }
 
-    /// The 32-bit word `i` of the suffix: an instruction, for code.
+    /// The 32-bit word `i` of the suffix: an instruction, for code. One load,
+    /// with no look at the header outside debug builds.
     #[inline]
     pub fn bloblet_u32(&self, v: Value, i: usize) -> u32 {
         debug_assert!(4 * i + 4 <= self.bloblet_head(v).bytes);

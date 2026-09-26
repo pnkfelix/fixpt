@@ -142,6 +142,41 @@ pub const KINDS: &[Kind] = &[
 
 pub const KIND_EXTENSION: u8 = 255;
 
+/// The fields of a code bloblet (kind `code`), named by their negative offset
+/// from the suffix, which is the code itself. Field 1 is the trailer. The
+/// fields the engines read most, the constants and the entry point, are
+/// nearest the code.
+pub mod code {
+    /// The constants, for compiled code; `#f` for interpreted code, whose
+    /// constants sit inline in its nodes.
+    pub const CODE_CONSTS: usize = 2;
+    /// Node offset, or bytecode entry offset (in 32-bit words).
+    pub const CODE_ENTRY: usize = 3;
+    /// Compiled code only: how many stack slots one activation needs.
+    pub const CODE_FRAME: usize = 4;
+    /// Compiled code only: how many values the closure captures.
+    pub const CODE_FREE: usize = 5;
+    /// Interpreted code: the node vector. `#f` for compiled code, whose
+    /// instructions are the suffix.
+    pub const CODE_BODY: usize = 6;
+    pub const CODE_HAS_REST: usize = 7;
+    pub const CODE_ARITY: usize = 8;
+    pub const CODE_NAME: usize = 9;
+    /// The fields other than the trailer.
+    pub const CODE_FIELDS: usize = 8;
+
+    pub const ALL: &[(&str, usize)] = &[
+        ("consts", CODE_CONSTS),
+        ("entry", CODE_ENTRY),
+        ("frame", CODE_FRAME),
+        ("free", CODE_FREE),
+        ("body", CODE_BODY),
+        ("has-rest", CODE_HAS_REST),
+        ("arity", CODE_ARITY),
+        ("name", CODE_NAME),
+    ];
+}
+
 const fn const_str_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() {
@@ -187,7 +222,11 @@ pub fn fx26_module() -> String {
     for k in KINDS {
         out.push_str(&format!("(define kind-{} int {})\n", k.name, k.code));
     }
-    out.push_str(&format!("(define kind-extension int {KIND_EXTENSION})\n"));
+    out.push_str(&format!("(define kind-extension int {KIND_EXTENSION})\n\n"));
+    out.push_str(";;; A code bloblet's fields, by negative offset from its code. 1 is the trailer.\n");
+    for (name, k) in code::ALL {
+        out.push_str(&format!("(define code-{name} int {k})\n"));
+    }
     out
 }
 

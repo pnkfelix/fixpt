@@ -56,3 +56,13 @@
 (define kind-threaded-code int 33)
 (define kind-compiled-code int 34)
 (define kind-extension int 255)
+
+;;; A code bloblet's fields, by negative offset from its code. 1 is the trailer.
+(define code-consts int 2)
+(define code-entry int 3)
+(define code-frame int 4)
+(define code-free int 5)
+(define code-body int 6)
+(define code-has-rest int 7)
+(define code-arity int 8)
+(define code-name int 9)

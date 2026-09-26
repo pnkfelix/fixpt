@@ -111,7 +111,7 @@ impl Interp {
     /// One word of the current code's node vector.
     #[inline]
     fn word(&self, rt: &Runtime, at: u32) -> Value {
-        let nodes = rt.heap.obj_ref(self.code(), CODE_NODES);
+        let nodes = rt.heap.bloblet_slot(self.code(), CODE_NODES);
         rt.heap.obj_ref(nodes, at as usize)
     }
     #[inline]
@@ -515,10 +515,10 @@ impl Interp {
         match rt.heap.obj_type(f) {
             Some(ObjType::Closure) => {
                 let code = rt.heap.obj_ref(f, 0);
-                let nparams = rt.heap.obj_ref(code, CODE_ARITY).as_fixnum() as usize;
-                let has_rest = rt.heap.obj_ref(code, CODE_HAS_REST).is_true();
+                let nparams = rt.heap.bloblet_slot(code, CODE_ARITY).as_fixnum() as usize;
+                let has_rest = rt.heap.bloblet_slot(code, CODE_HAS_REST).is_true();
                 if !(argc == nparams || (has_rest && argc >= nparams)) {
-                    let name = rt.heap.obj_ref(code, CODE_NAME);
+                    let name = rt.heap.bloblet_slot(code, CODE_NAME);
                     let label = if rt.heap.is_a(name, ObjType::Symbol) {
                         rt.heap.symbol_name(name)
                     } else {
@@ -549,7 +549,7 @@ impl Interp {
                     let rest = rt.heap.list_from(&extra);
                     rt.heap.obj_set(e, nparams + 1, rest);
                 }
-                let entry = rt.heap.obj_ref(code, CODE_ENTRY).as_fixnum() as u32;
+                let entry = rt.heap.bloblet_slot(code, CODE_ENTRY).as_fixnum() as u32;
                 self.stack.truncate(drop_to);
                 self.set_env(e);
                 self.set_code(code);
@@ -845,7 +845,7 @@ impl Interp {
 
     /// A node word read against a given code object rather than the register.
     fn offset_in(&self, rt: &Runtime, code: Value, at: u32) -> u32 {
-        let nodes = rt.heap.obj_ref(code, CODE_NODES);
+        let nodes = rt.heap.bloblet_slot(code, CODE_NODES);
         if at as usize >= rt.heap.obj_len(nodes) {
             return 0;
         }

@@ -638,8 +638,8 @@ fn arity_of_closure(session: &Session, v: fixpt_heap::Value) -> Option<String> {
     if !heap.is_a(code, fixpt_heap::ObjType::Code) {
         return None;
     }
-    let n = heap.obj_ref(code, fixpt_core::lower::CODE_ARITY).as_fixnum() as usize;
-    let rest = heap.obj_ref(code, fixpt_core::lower::CODE_HAS_REST).is_true();
+    let n = heap.bloblet_slot(code, fixpt_core::lower::CODE_ARITY).as_fixnum() as usize;
+    let rest = heap.bloblet_slot(code, fixpt_core::lower::CODE_HAS_REST).is_true();
     Some(arity(n, if rest { None } else { Some(n) }))
 }
 

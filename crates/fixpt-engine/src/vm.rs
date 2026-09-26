@@ -35,7 +35,7 @@
 use crate::compile::op;
 use crate::prepare::Prepared;
 use fixpt_core::lower::{
-    CODE_ARITY, CODE_BODY, CODE_CONSTS, CODE_ENTRY, CODE_FRAME, CODE_FREE, CODE_HAS_REST, CODE_NAME,
+    CODE_ARITY, CODE_CONSTS, CODE_ENTRY, CODE_FRAME, CODE_FREE, CODE_HAS_REST, CODE_NAME,
 };
 use fixpt_heap::{ObjType, Value};
 use fixpt_runtime::Runtime;
@@ -378,7 +378,7 @@ impl Vm {
                 let k = self.word(rt, self.pc + 1);
                 self.pc += 2;
                 let code = self.konst(rt, k);
-                let m = rt.heap.obj_ref(code, CODE_FREE).as_fixnum() as usize;
+                let m = rt.heap.bloblet_slot(code, CODE_FREE).as_fixnum() as usize;
                 // Allocation never moves anything, so the captured values can
                 // be read off the stack after the closure exists.
                 let c = rt.heap.alloc(ObjType::Closure, 1 + m, Value::UNSPECIFIED);
@@ -445,7 +445,7 @@ impl Vm {
     // ---------------------------------------------------------------- decode
     #[inline]
     fn word(&self, rt: &Runtime, at: u32) -> u32 {
-        rt.heap.bytevector_u32(self.regs[REG_BODY], at as usize)
+        rt.heap.bloblet_u32(self.regs[REG_BODY], at as usize)
     }
     #[inline]
     fn konst(&self, rt: &Runtime, k: u32) -> Value {
@@ -458,8 +458,9 @@ impl Vm {
         let code = rt.heap.obj_ref(closure, 0);
         self.regs[REG_CLOSURE] = closure;
         self.regs[REG_CODE] = code;
-        self.regs[REG_CONSTS] = rt.heap.obj_ref(code, CODE_CONSTS);
-        self.regs[REG_BODY] = rt.heap.obj_ref(code, CODE_BODY);
+        self.regs[REG_CONSTS] = rt.heap.bloblet_slot(code, CODE_CONSTS);
+        // The instructions are the code bloblet's own suffix.
+        self.regs[REG_BODY] = code;
     }
 
     fn unbound_local(&mut self, rt: &mut Runtime, k: u32) -> Outcome<Option<Value>> {
@@ -547,8 +548,8 @@ impl Vm {
         match rt.heap.obj_type(f) {
             Some(ObjType::Closure) => {
                 let code = rt.heap.obj_ref(f, 0);
-                let nparams = rt.heap.obj_ref(code, CODE_ARITY).as_fixnum() as usize;
-                let has_rest = rt.heap.obj_ref(code, CODE_HAS_REST).is_true();
+                let nparams = rt.heap.bloblet_slot(code, CODE_ARITY).as_fixnum() as usize;
+                let has_rest = rt.heap.bloblet_slot(code, CODE_HAS_REST).is_true();
                 if !(argc == nparams || (has_rest && argc >= nparams)) {
                     let msg = arity_message(rt, code, nparams, has_rest, argc);
                     self.stack.truncate(base);
@@ -577,10 +578,10 @@ impl Vm {
                     }
                     Call::Framed => self.fp = base as u32,
                 }
-                let frame = rt.heap.obj_ref(code, CODE_FRAME).as_fixnum() as usize;
+                let frame = rt.heap.bloblet_slot(code, CODE_FRAME).as_fixnum() as usize;
                 self.stack
                     .resize(self.fp as usize + 1 + frame, Value::UNBOUND);
-                self.pc = rt.heap.obj_ref(code, CODE_ENTRY).as_fixnum() as u32;
+                self.pc = rt.heap.bloblet_slot(code, CODE_ENTRY).as_fixnum() as u32;
                 self.load_code(rt);
                 Ok(None)
             }
@@ -1069,7 +1070,7 @@ impl Vm {
         use std::fmt::Write as _;
         let code = self.regs[REG_CODE];
         let frame = if rt.heap.is_a(code, ObjType::Code) {
-            rt.heap.obj_ref(code, CODE_FRAME).as_fixnum() as usize
+            rt.heap.bloblet_slot(code, CODE_FRAME).as_fixnum() as usize
         } else {
             0
         };
@@ -1113,7 +1114,7 @@ impl Vm {
                 );
             }
         }
-        let name = rt.heap.obj_ref(code, CODE_NAME);
+        let name = rt.heap.bloblet_slot(code, CODE_NAME);
         if rt.heap.is_a(name, ObjType::Symbol) {
             let _ = write!(out, "\n  inside the procedure `{}`", rt.heap.symbol_name(name));
         }
@@ -1177,7 +1178,7 @@ fn make_values(rt: &mut Runtime, vals: &[Value]) -> Value {
 }
 
 fn arity_message(rt: &Runtime, code: Value, nparams: usize, has_rest: bool, argc: usize) -> String {
-    let name = rt.heap.obj_ref(code, CODE_NAME);
+    let name = rt.heap.bloblet_slot(code, CODE_NAME);
     let label = if rt.heap.is_a(name, ObjType::Symbol) {
         rt.heap.symbol_name(name)
     } else {

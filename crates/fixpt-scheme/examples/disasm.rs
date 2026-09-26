@@ -15,7 +15,7 @@ fn show(s: &mut Session, name: &str) {
 
 /// Count opcodes across every compiled procedure reachable from the globals.
 fn histogram(s: &Session) -> (Vec<(String, usize)>, usize, usize) {
-    use fixpt_core::lower::{CODE_BODY, CODE_CONSTS};
+    use fixpt_core::lower::CODE_CONSTS;
     use fixpt_engine::compile::op;
     let heap = &s.rt.heap;
 
@@ -36,19 +36,19 @@ fn histogram(s: &Session) -> (Vec<(String, usize)>, usize, usize) {
             continue;
         }
         seen.push(code);
-        let body = heap.obj_ref(code, CODE_BODY);
-        if !heap.is_a(body, ObjType::Bytevector) {
+        if !fixpt_core::lower::is_compiled(heap, code) {
             continue;
         }
-        let n = heap.bytevector_len(body) / 4;
+        // The instructions are the code bloblet's suffix.
+        let n = heap.bloblet_head(code).bytes / 4;
         words += n;
         let mut pc = 0usize;
         while pc < n {
-            let opcode = heap.bytevector_u32(body, pc);
+            let opcode = heap.bloblet_u32(code, pc);
             *counts.entry(opcode).or_default() += 1;
             pc += op::len(opcode);
         }
-        let consts = heap.obj_ref(code, CODE_CONSTS);
+        let consts = heap.bloblet_slot(code, CODE_CONSTS);
         if heap.is_a(consts, ObjType::Vector) {
             for i in 0..heap.obj_len(consts) {
                 todo.push(heap.obj_ref(consts, i));

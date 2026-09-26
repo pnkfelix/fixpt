@@ -526,13 +526,12 @@ made piece by piece.
 
    Tested under `gc-stress`, and with deliberately trailer-less bloblets so
    the backward scan runs.
-4. **Code as bloblets, in both forms:**
-   - *compiled*: constants and metadata in fields, bytecode as the suffix;
-   - *threaded*: the program in the fields, run by the Rust bootstrap
-     interpreter as the inner interpreter.
-
-   Closures hold bloblet pointers, and frames hold a code pointer and an
-   offset.
+4. **Code as bloblets**, compiled form: constants and metadata in fields at
+   fixed negative offsets, which are part of the layout specification, and
+   bytecode as the suffix. Closures hold bloblet pointers. *(Done
+   2026-09-25.)* The *threaded* form, with the program in the fields, is a
+   new execution mode with an inner interpreter. It is built with the native
+   inner interpreter, A′3, where the Rust bootstrap version is its oracle.
 5. **The other types, one at a time**: vectors, bytevectors, strings (UTF-32),
    flonums, bignums, records, boxes and the rest. At the end, the collector no
    longer needs to know what anything is: `ObjType::payload_is_scanned` and

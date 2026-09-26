@@ -37,7 +37,7 @@
 use fixpt_core::assign::{self, BoxPrims};
 use fixpt_core::ir::{LambdaId, Node, NodeId, Program, VarId};
 use fixpt_core::lower::{
-    CODE_ARITY, CODE_CONSTS, CODE_ENTRY, CODE_FIELDS, CODE_FRAME, CODE_FREE, CODE_HAS_REST,
+    CODE_ARITY, CODE_CONSTS, CODE_FRAME, CODE_FREE, CODE_HAS_REST,
     CODE_NAME,
 };
 use fixpt_heap::{Heap, ObjType, Value};
@@ -263,11 +263,6 @@ impl Compiler<'_> {
         self.expr(&mut scope, body, true)?;
         scope.emit(&[op::RETURN]);
 
-        let mut bytes = Vec::with_capacity(scope.code.len() * 4);
-        for w in &scope.code {
-            bytes.extend_from_slice(&w.to_le_bytes());
-        }
-        let bytecode = self.heap.make_bytevector(&bytes);
         let consts = self.heap.vector_from(&scope.consts);
         let name_value = match name {
             Some(s) => {
@@ -276,21 +271,22 @@ impl Compiler<'_> {
             }
             None => Value::FALSE,
         };
-        let code = self.heap.alloc(ObjType::Code, CODE_FIELDS, Value::FALSE);
-        self.heap.obj_set(code, CODE_NAME, name_value);
-        self.heap
-            .obj_set(code, CODE_ARITY, Value::fixnum(params.len() as i64));
-        self.heap
-            .obj_set(code, CODE_HAS_REST, Value::boolean(rest.is_some()));
-        self.heap
-            .obj_set(code, fixpt_core::lower::CODE_BODY, bytecode);
-        self.heap.obj_set(code, CODE_ENTRY, Value::fixnum(0));
-        self.heap.obj_set(code, CODE_CONSTS, consts);
-        self.heap
-            .obj_set(code, CODE_FRAME, Value::fixnum(scope.frame as i64));
-        self.heap
-            .obj_set(code, CODE_FREE, Value::fixnum(free.len() as i64));
-        Ok(code)
+        // The instructions are the code bloblet's suffix, and its constants a
+        // field just before them.
+        Ok(fixpt_core::lower::make_code(
+            self.heap,
+            &fixpt_core::lower::CodeParts {
+                name: name_value,
+                arity: params.len(),
+                has_rest: rest.is_some(),
+                body: Value::FALSE,
+                entry: 0,
+                consts,
+                frame: scope.frame as usize,
+                free: free.len(),
+                bytecode: std::mem::take(&mut scope.code),
+            },
+        ))
     }
 
     fn name_value(&mut self, v: VarId) -> Value {
@@ -547,17 +543,16 @@ impl Compiler<'_> {
 /// and for making a compiler bug legible in a test failure.
 pub fn disassemble(heap: &Heap, code: Value) -> String {
     use std::fmt::Write as _;
-    let body = heap.obj_ref(code, fixpt_core::lower::CODE_BODY);
-    if !heap.is_a(body, ObjType::Bytevector) {
+    if !fixpt_core::lower::is_compiled(heap, code) {
         return "<interpreted code>".to_string();
     }
-    let consts = heap.obj_ref(code, CODE_CONSTS);
-    let bytes = heap.bytevector_to_vec(body);
+    let consts = heap.bloblet_slot(code, CODE_CONSTS);
+    let bytes = heap.bloblet_bytes(code);
     let words: Vec<u32> = bytes
         .chunks_exact(4)
         .map(|c| u32::from_le_bytes(c.try_into().expect("4 bytes")))
         .collect();
-    let name = heap.obj_ref(code, CODE_NAME);
+    let name = heap.bloblet_slot(code, CODE_NAME);
     let label = if heap.is_a(name, ObjType::Symbol) {
         heap.symbol_name(name)
     } else {
@@ -565,10 +560,10 @@ pub fn disassemble(heap: &Heap, code: Value) -> String {
     };
     let mut out = format!(
         "code {label} arity={} rest={} frame={} free={}\n",
-        heap.obj_ref(code, CODE_ARITY).as_fixnum(),
-        heap.obj_ref(code, CODE_HAS_REST).is_true(),
-        heap.obj_ref(code, CODE_FRAME).as_fixnum(),
-        heap.obj_ref(code, CODE_FREE).as_fixnum(),
+        heap.bloblet_slot(code, CODE_ARITY).as_fixnum(),
+        heap.bloblet_slot(code, CODE_HAS_REST).is_true(),
+        heap.bloblet_slot(code, CODE_FRAME).as_fixnum(),
+        heap.bloblet_slot(code, CODE_FREE).as_fixnum(),
     );
     let mut pc = 0usize;
     while pc < words.len() {

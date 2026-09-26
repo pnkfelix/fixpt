@@ -46,7 +46,7 @@ pub fn backend_of(heap: &Heap, proc: Value) -> Option<Backend> {
     if !heap.is_a(code, ObjType::Code) {
         return None;
     }
-    Some(if heap.obj_ref(code, CODE_CONSTS).is_false() {
+    Some(if heap.bloblet_slot(code, CODE_CONSTS).is_false() {
         Backend::Ast
     } else {
         Backend::Bytecode
@@ -106,8 +106,8 @@ pub fn run_entry(heap: Heap, entry: &str, argv: &[String]) -> i32 {
 
 fn wants_arguments(heap: &Heap, proc: Value) -> bool {
     let code = heap.obj_ref(proc, 0);
-    let arity = heap.obj_ref(code, CODE_ARITY).as_fixnum();
-    arity > 0 || heap.obj_ref(code, CODE_HAS_REST).is_true()
+    let arity = heap.bloblet_slot(code, CODE_ARITY).as_fixnum();
+    arity > 0 || heap.bloblet_slot(code, CODE_HAS_REST).is_true()
 }
 
 fn describe(rt: &Runtime, obj: Value) -> String {

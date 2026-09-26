@@ -67,31 +67,65 @@ pub const TAG_FIX: i64 = 8;
 pub const TAG_LAMBDA: i64 = 9;
 pub const TAG_APP: i64 = 10;
 
-/// `Code` payload layout, shared by both engines.
+/// A `Code` object is a bloblet (`docs/object-model.md`), shared by both
+/// engines. Its metadata are fields, named here by their **negative offset
+/// from the suffix**, the canonical way a bloblet's field is named. For the
+/// bytecode engine, the instructions are the suffix. For the AST engine,
+/// whose program is a vector of nodes, the suffix is empty and the nodes are
+/// in `CODE_BODY`. So a procedure is `[code, …]` whoever made it, and the
+/// printer, the verifier and the image format do not need to know which engine
+/// made it.
 ///
-/// `CODE_BODY` holds a `Vector` of nodes for the AST engine and a
-/// `Bytevector` of instructions for the compiler; `CODE_ENTRY` is an index
-/// into whichever it is. Keeping one shape means a closure is `[code, …]`
-/// whoever made it, and the printer, the verifier and the image format do not
-/// need to know which engine produced a procedure.
-pub const CODE_NAME: usize = 0;
-pub const CODE_ARITY: usize = 1;
-pub const CODE_HAS_REST: usize = 2;
-/// A node `Vector` (interpreted) or a bytecode `Bytevector` (compiled).
-pub const CODE_BODY: usize = 3;
-/// Node offset, or bytecode entry offset.
-pub const CODE_ENTRY: usize = 4;
-/// Compiled code only: the constants it refers to. `#f` for interpreted code,
-/// whose constants sit inline in the node vector.
-pub const CODE_CONSTS: usize = 5;
-/// Compiled code only: how many stack slots one activation needs.
-pub const CODE_FRAME: usize = 6;
-/// Compiled code only: how many values the closure captures.
-pub const CODE_FREE: usize = 7;
-pub const CODE_FIELDS: usize = 8;
+/// The field offsets are part of the one layout specification,
+/// `fixpt_heap::layout::code`, since FX-26's compiler lays out code too.
+pub use fixpt_heap::layout::code::{
+    CODE_ARITY, CODE_BODY, CODE_CONSTS, CODE_ENTRY, CODE_FIELDS, CODE_FRAME, CODE_FREE, CODE_HAS_REST,
+    CODE_NAME,
+};
 
 /// Kept as the old name so the AST engine reads the way it always did.
 pub const CODE_NODES: usize = CODE_BODY;
+
+/// What goes in a new `Code` bloblet.
+pub struct CodeParts {
+    pub name: Value,
+    pub arity: usize,
+    pub has_rest: bool,
+    /// The node vector, for interpreted code; `#f` for compiled.
+    pub body: Value,
+    pub entry: u32,
+    /// The constants, for compiled code; `#f` for interpreted.
+    pub consts: Value,
+    pub frame: usize,
+    pub free: usize,
+    /// The instructions, for compiled code; empty for interpreted.
+    pub bytecode: Vec<u32>,
+}
+
+/// Make a `Code` bloblet. Allocation never collects, so the values in
+/// `parts` stay valid while it is built.
+pub fn make_code(heap: &mut Heap, parts: &CodeParts) -> Value {
+    let code = heap.make_bloblet(ObjType::Code as u8, CODE_FIELDS, parts.bytecode.len() * 4, true);
+    heap.set_bloblet_slot(code, CODE_NAME, parts.name);
+    heap.set_bloblet_slot(code, CODE_ARITY, Value::fixnum(parts.arity as i64));
+    heap.set_bloblet_slot(code, CODE_HAS_REST, Value::boolean(parts.has_rest));
+    heap.set_bloblet_slot(code, CODE_BODY, parts.body);
+    heap.set_bloblet_slot(code, CODE_ENTRY, Value::fixnum(parts.entry as i64));
+    heap.set_bloblet_slot(code, CODE_CONSTS, parts.consts);
+    heap.set_bloblet_slot(code, CODE_FRAME, Value::fixnum(parts.frame as i64));
+    heap.set_bloblet_slot(code, CODE_FREE, Value::fixnum(parts.free as i64));
+    let mut bytes = Vec::with_capacity(parts.bytecode.len() * 4);
+    for w in &parts.bytecode {
+        bytes.extend_from_slice(&w.to_le_bytes());
+    }
+    heap.set_bloblet_bytes(code, 0, &bytes).expect("the suffix was made to fit");
+    code
+}
+
+/// Whether `code` is compiled: it has instructions, as its suffix.
+pub fn is_compiled(heap: &Heap, code: Value) -> bool {
+    heap.bloblet_slot(code, CODE_CONSTS).is_true()
+}
 
 /// Lower a whole program, returning its top-level `Code` object.
 ///
@@ -139,21 +173,22 @@ impl Lowerer<'_> {
             }
             None => Value::FALSE,
         };
-        let code = self.heap.alloc(ObjType::Code, CODE_FIELDS, Value::FALSE);
-        self.heap.obj_set(code, CODE_NAME, name_value);
-        self.heap
-            .obj_set(code, CODE_ARITY, Value::fixnum(params.len() as i64));
-        self.heap
-            .obj_set(code, CODE_HAS_REST, Value::boolean(rest.is_some()));
-        self.heap.obj_set(code, CODE_BODY, nodes);
-        self.heap
-            .obj_set(code, CODE_ENTRY, Value::fixnum(entry as i64));
         // The compiled-only fields stay `#f`/0, which is how a reader tells
         // interpreted code from compiled without a separate tag.
-        self.heap.obj_set(code, CODE_CONSTS, Value::FALSE);
-        self.heap.obj_set(code, CODE_FRAME, Value::fixnum(0));
-        self.heap.obj_set(code, CODE_FREE, Value::fixnum(0));
-        code
+        make_code(
+            self.heap,
+            &CodeParts {
+                name: name_value,
+                arity: params.len(),
+                has_rest: rest.is_some(),
+                body: nodes,
+                entry: entry as u32,
+                consts: Value::FALSE,
+                frame: 0,
+                free: 0,
+                bytecode: Vec::new(),
+            },
+        )
     }
 
     /// `(depth, index)` of a variable in the scope chain that will exist here.
