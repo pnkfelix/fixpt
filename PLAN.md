@@ -958,6 +958,17 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
   the only ways to run unboundedly, so the check points are where the
   effect would be discharged.
 
+- **Recursion made explicit: I-cells.** (Raised by the user 2026-09-26:
+  "make the imperative nature of mutual recursion explicit".) Seven
+  options are compared in `docs/research/recursion-and-initialization.md`.
+  The user chose I-cells (Arvind; Id, pH) to prototype first:
+  - a type `(icell T R)`, written once;
+  - `make-icell`, `icell-put!` and `icell-get`;
+  - a new effect `(await R)` for a read, which is ordered after writes to
+    `R` but commutes with other reads.
+
+  Sequentially, a read of an empty cell traps and a second write is an
+  error. Concurrently, a read would suspend the reader on the cell.
 - **Redefinition at the REPL: shadowing or late binding.** (Raised by the
   user 2026-09-26: "usual Scheme REPL semantics don't eagerly resolve the
   global reference and keep it fixed forever … but we can work with
