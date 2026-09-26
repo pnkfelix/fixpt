@@ -228,6 +228,15 @@ impl Heap {
         self.set_word(rel, v.raw());
     }
 
+    /// Where the active semispace starts in memory: word `i` of it, which a
+    /// Value with index `i` names, is at this address plus `8 * i`. For
+    /// machine code that reads the heap directly (`fixpt-native`). The address
+    /// holds until the next allocation, which may grow the heap, or
+    /// collection, which flips the semispaces.
+    pub fn active_words(&self) -> *const u64 {
+        self.mem[self.active..].as_ptr()
+    }
+
     // ------------------------------------------------------------- allocation
     /// Reserve `n` words. Never moves anything; grows the heap if needed.
     fn bump(&mut self, n: usize) -> usize {

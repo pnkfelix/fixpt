@@ -202,6 +202,68 @@ pub mod code {
     ];
 }
 
+/// A threaded word (kind `threaded-code`): Forth's threaded code, as a
+/// bloblet. Laid out `[cell…][name][entry][trailer]`. `entry` is the fixnum
+/// number of the routine that runs the word: `ROUTINE_DOCOL` for a word made
+/// of cells, which runs them in increasing `k` from `WORD_CELL0`. It is a
+/// number, not an address, so a heap image does not hold machine addresses.
+/// A compiled word gets a routine of its own and a new number.
+///
+/// A cell is a fixnum, which names a primitive routine directly (token
+/// threading, no word object needed), or a pointer to another word, which
+/// runs that word's entry routine. A primitive that takes an operand, such
+/// as `lit` or `branch`, takes it from the next cell.
+///
+/// The return stack holds pairs, the word and the fixnum `k` of the next
+/// cell to run in it, so every entry is a Value and the stack is a root like
+/// any other.
+pub mod threaded {
+    pub const KIND: u8 = 33;
+    pub const WORD_ENTRY: usize = 2;
+    pub const WORD_NAME: usize = 3;
+    /// Cell `i` is at `WORD_CELL0 + i`.
+    pub const WORD_CELL0: usize = 4;
+
+    /// The routines, by number, with their stack effects. The first
+    /// `PRIMITIVES` of them may appear as cells.
+    pub const ROUTINES: &[(&str, &str)] = &[
+        ("docol", "run a word's cells"),
+        ("exit", "return to the calling word"),
+        ("halt", "stop, leaving the data stack as the result"),
+        ("lit", "( -- x ), x the next cell"),
+        ("branch", "skip the next cell's fixnum of cells, counted after it"),
+        ("0branch", "( flag -- ), branch if flag is #f"),
+        ("execute", "( w -- ), run a word, or a primitive given as its fixnum"),
+        ("dup", "( a -- a a )"),
+        ("drop", "( a -- )"),
+        ("swap", "( a b -- b a )"),
+        ("over", "( a b -- a b a )"),
+        ("+", "( a b -- a+b ), fixnums"),
+        ("-", "( a b -- a-b ), fixnums"),
+        ("<", "( a b -- a<b ), fixnums"),
+        ("eq", "( a b -- flag ), the same Value"),
+        ("field@", "( obj k -- x ), field k of a bloblet"),
+        ("field!", "( x obj k -- ), field k of a bloblet"),
+        ("cons", "( a b -- pair )"),
+        ("car", "( pair -- a )"),
+        ("cdr", "( pair -- b )"),
+    ];
+    pub const PRIMITIVES: usize = ROUTINES.len();
+
+    pub const fn routine(name: &str) -> u64 {
+        let mut i = 0;
+        while i < ROUTINES.len() {
+            if super::const_str_eq(ROUTINES[i].0, name) {
+                return i as u64;
+            }
+            i += 1;
+        }
+        panic!("no such routine")
+    }
+
+    pub const ROUTINE_DOCOL: u64 = routine("docol");
+}
+
 const fn const_str_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() {
@@ -257,7 +319,27 @@ pub fn fx26_module() -> String {
     for (name, k) in code::ALL {
         out.push_str(&format!("(define code-{name} int {k})\n"));
     }
+    out.push_str("\n;;; A threaded word's fields, by negative offset, and its routines by number.\n");
+    out.push_str(&format!("(define word-entry int {})\n", threaded::WORD_ENTRY));
+    out.push_str(&format!("(define word-name int {})\n", threaded::WORD_NAME));
+    out.push_str(&format!("(define word-cell0 int {})\n", threaded::WORD_CELL0));
+    for (i, (name, effect)) in threaded::ROUTINES.iter().enumerate() {
+        out.push_str(&format!("(define routine-{} int {i})  ; {effect}\n", fx_name(name)));
+    }
     out
+}
+
+/// A routine's name as an FX-26 identifier.
+fn fx_name(name: &str) -> String {
+    match name {
+        "+" => "add".into(),
+        "-" => "sub".into(),
+        "<" => "less".into(),
+        "field@" => "field-ref".into(),
+        "field!" => "field-set".into(),
+        "0branch" => "zbranch".into(),
+        n => n.into(),
+    }
 }
 
 #[cfg(test)]

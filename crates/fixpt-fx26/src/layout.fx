@@ -73,3 +73,28 @@
 (define code-name int 7)
 (define code-items int 8)
 (define code-item0 int 9)
+
+;;; A threaded word's fields, by negative offset, and its routines by number.
+(define word-entry int 2)
+(define word-name int 3)
+(define word-cell0 int 4)
+(define routine-docol int 0)  ; run a word's cells
+(define routine-exit int 1)  ; return to the calling word
+(define routine-halt int 2)  ; stop, leaving the data stack as the result
+(define routine-lit int 3)  ; ( -- x ), x the next cell
+(define routine-branch int 4)  ; skip the next cell's fixnum of cells, counted after it
+(define routine-zbranch int 5)  ; ( flag -- ), branch if flag is #f
+(define routine-execute int 6)  ; ( w -- ), run a word, or a primitive given as its fixnum
+(define routine-dup int 7)  ; ( a -- a a )
+(define routine-drop int 8)  ; ( a -- )
+(define routine-swap int 9)  ; ( a b -- b a )
+(define routine-over int 10)  ; ( a b -- a b a )
+(define routine-add int 11)  ; ( a b -- a+b ), fixnums
+(define routine-sub int 12)  ; ( a b -- a-b ), fixnums
+(define routine-less int 13)  ; ( a b -- a<b ), fixnums
+(define routine-eq int 14)  ; ( a b -- flag ), the same Value
+(define routine-field-ref int 15)  ; ( obj k -- x ), field k of a bloblet
+(define routine-field-set int 16)  ; ( x obj k -- ), field k of a bloblet
+(define routine-cons int 17)  ; ( a b -- pair )
+(define routine-car int 18)  ; ( pair -- a )
+(define routine-cdr int 19)  ; ( pair -- b )
