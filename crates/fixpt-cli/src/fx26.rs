@@ -169,16 +169,30 @@ pub fn repl(backend: Backend) -> i32 {
                 }
                 continue;
             }
+            let known = session.checker.value_names();
             match session.run(form) {
                 Ok(out) if disassembling => match &out.value {
                     Ok(Some(v)) => print!("{}", unwrite_string(v)),
                     _ => show(&session, &out, show_code),
                 },
-                Ok(out) => show(&session, &out, show_code),
+                Ok(out) => {
+                    show(&session, &out, show_code);
+                    if let Top::Define { name, .. } = &out.top
+                        && known.contains(name)
+                    {
+                        println!("{}", shadowing_note(session.checker.interner.name(*name)));
+                    }
+                }
                 Err(e) => eprintln!("{}", located(&name, &text, &e)),
             }
         }
     }
+}
+
+/// A second `define` makes a new binding (ML's top level, not Scheme's):
+/// said at the REPL, where Scheme's habits would expect an assignment.
+fn shadowing_note(name: &str) -> String {
+    format!("; note: a new `{name}`. What was defined before keeps the old one: define it again to use this one.")
 }
 
 /// A string as it was written, `"…"` with escapes, back to its text.
