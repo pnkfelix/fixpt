@@ -596,12 +596,15 @@ is left is mostly call-outs to primitives (241 ms instrumented) and to
 ## `cons`, `string-length` and `string-ref` in register code's machine code
 
 Register code does these inline, calling out only for what it cannot do:
-- `cons` bumps the heap's `top` itself, up to where a safepoint would
-  collect (`Heap::inline_limit`: 75% of the semispace, the collector's own
-  `COLLECT_THRESHOLD`). Past that, and always under the `gc_every`
-  stress policy, it calls in, and the collection comes where it did
-  before: the self-compile still makes 9 collections and allocates
-  exactly the same 17,517,161 words.
+- `cons` bumps the heap's `top` itself, up to the end of the semispace
+  (`Heap::inline_limit`). Past that, and always under the `gc_every`
+  stress policy, it calls in, and the call-out's safepoint collects. The
+  self-compile still makes 9 collections and allocates exactly the same
+  17,517,161 words. First written with the limit at the collector's 75%
+  trigger (`COLLECT_THRESHOLD`): no different here, since the allocations
+  still made by call-outs reach 75% at their own safepoints first. The
+  75% exists for Rust, whose primitives may allocate several objects
+  after their one safepoint.
 - `string-length` reads the suffix's first word.
 - `string-ref` checks the index and loads 32 bits, calling out only when
   the index is out of range, to report it.
