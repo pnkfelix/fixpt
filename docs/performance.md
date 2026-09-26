@@ -17,4 +17,16 @@ Debug builds are what `cargo test` runs; release numbers come from
 | eager reader, `fixpt-fx26/tests/eager.rs` (debug, whole suite) | — | — | 5.5 s | Scheme and FX-26 readers, both engines |
 | eager reader, Scheme suite under `gc-stress` | — | 83 min | — | collects at every safepoint |
 
+## The engines benchmark, through the object-model changes
+
+`cargo run --release --example engines` (crates/fixpt-scheme/examples/engines.rs):
+six small programs on each engine, totals in seconds, best of three runs.
+Single programs vary by up to 40% run to run (`fib 25` on the AST engine
+ranges 0.028–0.041 s), so only the totals are compared.
+
+| after | AST | bytecode | notes |
+|---|---|---|---|
+| before M12 (dac418f) | 0.626 | 0.392 | |
+| A2–A4 (every object a bloblet header; code as bloblets) | 0.636 | 0.393 | no measurable change |
+
 The per-piece table fills in as each piece moves.
