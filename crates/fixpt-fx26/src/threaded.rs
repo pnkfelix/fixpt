@@ -13,7 +13,9 @@ use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{routine, CLOSURE_FREE0, ROUTINES};
+use fixpt_heap::layout::threaded::{routine, CLOSURE_FREE0, ROUTINES, WORD_TWIN};
+
+mod regcode;
 use fixpt_heap::{Heap, Value};
 use fixpt_read::Sym;
 
@@ -67,6 +69,9 @@ pub struct Compiler<'a> {
     /// The globals, as compiling has reached them.
     genv: Env,
     this: Option<This>,
+    /// Whether each lambda also gets register code (PLAN.md 13h′), as its
+    /// word's twin.
+    pub registers: bool,
 }
 
 type R<T> = Result<T, String>;
@@ -82,7 +87,7 @@ impl<'a> Compiler<'a> {
             n += 1;
         }
         char_at[text.len()] = n;
-        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), this: None }
+        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), this: None, registers: false }
     }
 
     fn name(&self, s: Sym) -> &str {
@@ -462,19 +467,7 @@ impl<'a> Compiler<'a> {
     /// before the sibling was made, its free value's index and the slot the
     /// sibling will be in.
     fn lambda(&mut self, params: &[Sym], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, own: Option<Sym>) -> R<Vec<(usize, usize)>> {
-        let mut free = Vec::new();
-        self.free(body, &params.iter().rev().copied().collect::<Vec<_>>(), &mut free);
-        // The free names that are locals here, not globals or standard ones,
-        // nor a loop, which is not a value.
-        let fv: Vec<Sym> = free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop)).collect();
-        // A parameter of the same name hides the procedure.
-        let own = own.filter(|f| !params.contains(f));
-        let mut inner: Env = Vec::new();
-        if let Some(f) = own.filter(|f| !fv.contains(f)) {
-            inner.push((f, Loc::Loop));
-        }
-        inner.extend(params.iter().enumerate().map(|(i, p)| (*p, Loc::Slot(i))));
-        inner.extend(fv.iter().enumerate().map(|(i, n)| (*n, Loc::Free(i))));
+        let (w, fv) = self.lambda_word(params, body, e, own)?;
         // Each captured value, as the closure will hold it.
         let mut patches = Vec::new();
         for (j, n) in fv.iter().enumerate() {
@@ -488,6 +481,28 @@ impl<'a> Compiler<'a> {
                 Loc::Global(_) | Loc::Loop => return Err("a global is not captured".into()),
             }
         }
+        self.op1(code, "closure", w);
+        code.push(Item::Cell(Value::fixnum(fv.len() as i64)));
+        let _ = depth;
+        Ok(patches)
+    }
+
+    /// A lambda's word, and the names its closure captures, in order; with
+    /// its register code as its twin when this compiler makes register code.
+    fn lambda_word(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
+        let mut free = Vec::new();
+        self.free(body, &params.iter().rev().copied().collect::<Vec<_>>(), &mut free);
+        // The free names that are locals here, not globals or standard ones,
+        // nor a loop, which is not a value.
+        let fv: Vec<Sym> = free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop)).collect();
+        // A parameter of the same name hides the procedure.
+        let own = own.filter(|f| !params.contains(f));
+        let mut inner: Env = Vec::new();
+        if let Some(f) = own.filter(|f| !fv.contains(f)) {
+            inner.push((f, Loc::Loop));
+        }
+        inner.extend(params.iter().enumerate().map(|(i, p)| (*p, Loc::Slot(i))));
+        inner.extend(fv.iter().enumerate().map(|(i, n)| (*n, Loc::Free(i))));
         let this = match own {
             Some(f) => Some(This { name: f, loc: find(&inner, f).expect("bound"), params: params.len(), start: self.fresh() }),
             None => None,
@@ -502,11 +517,16 @@ impl<'a> Compiler<'a> {
         compiled?;
         // Named for where its body starts, so that a profile can say which.
         let start = self.char_at[self.c.arena.span_of(body).start as usize];
-        let w = self.assemble(&body_code, &format!("lambda@{start}"))?;
-        self.op1(code, "closure", w);
-        code.push(Item::Cell(Value::fixnum(fv.len() as i64)));
-        let _ = depth;
-        Ok(patches)
+        let name = format!("lambda@{start}");
+        let w = self.assemble(&body_code, &name)?;
+        if self.registers
+            && let Some(cells) = self.register_code(params, body, &inner, this)
+        {
+            let sym = self.heap.intern(&name);
+            let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
+            self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
+        }
+        Ok((w, fv))
     }
 
     // ------------------------------------------------- known procedures

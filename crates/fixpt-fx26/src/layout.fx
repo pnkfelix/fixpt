@@ -60,6 +60,7 @@
 (define kind-product int 37)
 (define kind-threaded-closure int 38)
 (define kind-threaded-continuation int 39)
+(define kind-register-code int 40)
 (define kind-extension int 255)
 
 ;;; A closure's fields, and an environment frame's, by negative offset.

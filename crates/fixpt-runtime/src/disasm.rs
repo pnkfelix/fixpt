@@ -4,7 +4,7 @@
 
 use crate::print::write_value;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, operands};
+use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
 use fixpt_heap::{Heap, Value};
 use std::fmt::Write as _;
 
@@ -165,6 +165,43 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>) {
         };
         let _ = writeln!(out, "  {at:>4}: {name}{}{}", if shown.is_empty() { "" } else { " " }, shown.join(" "));
         k += 1 + ops.len();
+    }
+    let twin = heap.bloblet_slot(w, WORD_TWIN);
+    if heap.is_register_word(twin) {
+        register_word(heap, twin, out, todo);
+    }
+}
+
+/// A word's register code (PLAN.md 13h′): a line per instruction.
+fn register_word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>) {
+    use fixpt_heap::layout::regcode::OPS;
+    let fields = heap.bloblet_head(w).fields;
+    let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
+    let how = if entry == 0 { "not compiled".to_string() } else { format!("native slot {entry}") };
+    let _ = writeln!(out, "  its register code ({} cells, {how}):", fields + 1 - WORD_CELL0);
+    let mut k = WORD_CELL0;
+    while k <= fields {
+        let at = k - WORD_CELL0;
+        let (name, n, _) = OPS[heap.bloblet_slot(w, k).as_fixnum() as usize];
+        let ops: Vec<Value> = (1..=n).map(|i| heap.bloblet_slot(w, k + i)).collect();
+        let routine = |v: Value| ROUTINES.get(v.as_fixnum() as usize).map_or("?", |r| r.0).to_string();
+        let shown: Vec<String> = match name {
+            "branch" | "branchf" => vec![format!("→ {}", at as i64 + 2 + ops[0].as_fixnum())],
+            "global" | "setglbl" => vec![global(heap, ops[0])],
+            "op1" | "threaded" => std::iter::once(routine(ops[0])).chain(ops[1..].iter().map(|v| short(heap, *v))).collect(),
+            "op2" | "op2imm" => vec![routine(ops[0]), short(heap, ops[1])],
+            "prim" => {
+                let pname = crate::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name);
+                vec![pname.to_string(), ops[1].as_fixnum().to_string()]
+            }
+            "lambda" => {
+                todo.push(ops[0]);
+                vec![format!("word {}", name_of(heap, ops[0])), format!("over {}", ops[1].as_fixnum())]
+            }
+            _ => ops.iter().map(|v| short(heap, *v)).collect(),
+        };
+        let _ = writeln!(out, "  {at:>6}: {name}{}{}", if shown.is_empty() { "" } else { " " }, shown.join(" "));
+        k += 1 + n;
     }
 }
 

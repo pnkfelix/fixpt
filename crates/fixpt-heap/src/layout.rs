@@ -149,6 +149,8 @@ pub const KINDS: &[Kind] = &[
     Kind { name: "threaded-closure", code: 38, traced: true },
     // A continuation captured by threaded code: `layout::threaded::CONT_*`.
     Kind { name: "threaded-continuation", code: 39, traced: true },
+    // Register code (PLAN.md 13h′): `layout::regcode`.
+    Kind { name: "register-code", code: 40, traced: true },
 ];
 
 pub const KIND_EXTENSION: u8 = 255;
@@ -377,6 +379,63 @@ pub mod threaded {
     }
 
     pub const ROUTINE_DOCOL: u64 = routine("docol");
+}
+
+/// Register code (kind `register-code`, PLAN.md 13h′): a procedure for the
+/// MacScheme machine (Larceny Note 13), as a bloblet laid out as a threaded
+/// word is, `[cell…][twin][name][entry][trailer]`, `twin` being the threaded
+/// word it stands for. Its cells are instructions: an operation's number,
+/// then its operands.
+///
+/// The machine has an accumulator, `RESULT`; `REG0`, the closure running;
+/// general registers `REG1`…`REG{REGS}`, which hold the arguments on entry;
+/// and a frame on the data stack, made by `save`, whose slots hold what must
+/// outlive a call. Anything that may collect (the operations marked so)
+/// may move every object, so across one only the frame keeps values: the
+/// registers are dead after it, `RESULT` excepted.
+pub mod regcode {
+    /// The general registers.
+    pub const REGS: usize = 8;
+
+    /// The operations: name, operand count, and what each does.
+    pub const OPS: &[(&str, usize, &str)] = &[
+        ("const", 1, "RESULT := x, the operand"),
+        ("global", 1, "RESULT := the value in global cell g"),
+        ("setglbl", 1, "global cell g := RESULT"),
+        ("reg", 1, "RESULT := REGk"),
+        ("setreg", 1, "REGk := RESULT"),
+        ("movereg", 2, "REGk2 := REGk1"),
+        ("lexical", 1, "RESULT := free value i of the closure running (REG0)"),
+        ("save", 1, "push a frame of n slots, each #f"),
+        ("pop", 1, "pop the frame of n slots"),
+        ("stack", 1, "RESULT := frame slot n"),
+        ("setstk", 1, "frame slot n := RESULT"),
+        ("load", 2, "REGk := frame slot n"),
+        ("store", 2, "frame slot n := REGk"),
+        ("op1", 1, "RESULT := threaded routine r applied to RESULT"),
+        ("op2", 2, "RESULT := threaded routine r applied to RESULT and REGk"),
+        ("op2imm", 2, "RESULT := threaded routine r applied to RESULT and x"),
+        ("field", 1, "RESULT := field k of the bloblet in RESULT"),
+        ("prim", 2, "RESULT := runtime primitive p applied to REG1…REGn; may collect"),
+        ("lambda", 2, "RESULT := a closure of threaded word w over REG1…REGn; may collect"),
+        ("invoke", 1, "call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect"),
+        ("tailinvoke", 1, "the same in tail position, the frame popped: its value is this one's"),
+        ("return", 0, "return RESULT, the frame popped"),
+        ("branch", 1, "skip the operand's count of cells, counted after it"),
+        ("branchf", 1, "the same if RESULT is #f"),
+        ("threaded", 2, "threaded routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect"),
+    ];
+
+    pub const fn op(name: &str) -> usize {
+        let mut i = 0;
+        while i < OPS.len() {
+            if super::const_str_eq(OPS[i].0, name) {
+                return i;
+            }
+            i += 1;
+        }
+        panic!("no such register operation")
+    }
 }
 
 const fn const_str_eq(a: &str, b: &str) -> bool {

@@ -16,6 +16,7 @@
 pub mod heap;
 pub mod image;
 pub mod layout;
+mod regcode;
 mod sro;
 mod threaded;
 
