@@ -724,7 +724,30 @@ one.)*
     an encoder written in FX-26 (the Rust one its oracle) or by placing
     stencils, and installed as the word's entry routine, one word at a time,
     as decision 6 describes. Checked by running the same programs threaded
-    and compiled.
+    and compiled. *(Revised 2026-09-26, tracing each step's inputs. The
+    hand-encoded machine's routines read their operands through the ip,
+    and the ip walks the cells. So a word's native code can be its cells'
+    routines inlined in order, with the dispatch between them removed and
+    the ip kept exactly in step. Traps, call-outs, safepoints and return
+    entries then see the same state as threaded code, and the two mix
+    freely. Operands are still read from the cells, so a collection that
+    moves the word changes nothing.)*
+    - **11a. Native words, from Rust.** A word gets native code by having
+      its entry field set to a native slot above the ordinary routines;
+      any machine without that code runs the cells, so the Rust machine
+      stays the oracle. A native slot's code has two entries: as a cell
+      (`docol`'s work) and as a closure's body (after `call`). Returns
+      into a native word resume in native code through a table of resume
+      addresses per call site. Branches become direct jumps. Checked by
+      running every compiled program, and the bootstrap, with every word
+      made native.
+    - **11b. The arm64 encoder in FX-26**, instruction by instruction the
+      Rust one's (`fixpt-native/src/arm64.rs`), checked against it on
+      every instruction 11a emits.
+    - **11c. Native words, from FX-26**: 11a's compiler written in FX-26
+      over that encoder, making the same bytes as the Rust one for every
+      word of the bootstrap. Installed through a runtime hook, as
+      `%run-word` is, since `fixpt-runtime` sits below `fixpt-native`.
 12. **The comparison**, Rust pieces against FX-26 ones, with no piece
     retired (decision 8). *(First report 2026-09-26, in
     `docs/performance.md`: each piece alone on the bootstrap program, Rust,
