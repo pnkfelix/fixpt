@@ -67,7 +67,7 @@ impl Heap {
                 "closure" if !(op(0) == Value::DEFAULT || self.is_threaded_word(op(0))) || !non_negative(op(1)) => {
                     return Err(format!("cell {i}: a closure is of a word, over a count of values"));
                 }
-                "slot" | "slot!" | "free" | "call" | "tailcall" if !non_negative(op(0)) => {
+                "slot" | "slot!" | "free" | "call" | "tailcall" | "tcall" | "ttailcall" if !non_negative(op(0)) => {
                     return Err(format!("cell {i}: `{r}` takes a count"));
                 }
                 _ => {}
@@ -81,8 +81,8 @@ impl Heap {
         }
         // Running past the last cell would take the header for a cell, so
         // the last instruction must be one that never falls through.
-        if !matches!(last, "exit" | "halt" | "branch" | "tailcall" | "return" | "withmark-tail") {
-            return Err("a word must end with `exit`, `halt`, `branch`, `tailcall`, `return` or `withmark-tail`".into());
+        if !matches!(last, "exit" | "halt" | "branch" | "tailcall" | "ttailcall" | "return" | "withmark-tail" | "resume" | "undefined") {
+            return Err("a word must end with an instruction that does not fall through (`exit`, `return`, a tail call, …)".into());
         }
         let w = self.make_bloblet(KIND, WORD_CELL0 - 2 + cells.len(), 0, true);
         self.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(ROUTINE_DOCOL as i64));
@@ -99,6 +99,51 @@ impl Heap {
     /// A global's cell: a plain bloblet with its value in field 2.
     fn is_global_cell(&self, g: Value) -> bool {
         g.is_bloblet() && self.bloblet_kind(g) == crate::layout::kind("bloblet") && self.bloblet_head(g).fields >= 2
+    }
+
+    /// A continuation as a closure, so that everything callable is one: over
+    /// `k`, running the word `slot 0; free 0; resume`. Allocates; does not
+    /// collect.
+    pub fn continuation_closure(&mut self, k: Value) -> Value {
+        use crate::layout::threaded::{routine, CLOSURE_FREE0, CLOSURE_WORD};
+        let f = |n: u64| Value::fixnum(n as i64);
+        let cells = [f(routine("slot")), f(0), f(routine("free")), f(0), f(routine("resume"))];
+        let name = self.intern("continuation");
+        let word = self.make_threaded_word(name, &cells).expect("a well-formed word");
+        let c = self.make_bloblet(crate::layout::kind("threaded-closure"), 2, 0, true);
+        self.set_bloblet_slot(c, CLOSURE_WORD, word);
+        self.set_bloblet_slot(c, CLOSURE_FREE0, k);
+        c
+    }
+
+    /// The continuation `v` is, or wraps: a closure over exactly one
+    /// continuation whose word ends in `resume`, which only
+    /// `continuation_closure` makes.
+    pub fn continuation_of(&self, v: Value) -> Option<Value> {
+        use crate::layout::threaded::{routine, CLOSURE_FREE0, CLOSURE_WORD};
+        let k = crate::layout::kind("threaded-continuation");
+        if v.is_bloblet() && self.bloblet_kind(v) == k {
+            return Some(v);
+        }
+        if !(v.is_bloblet() && self.bloblet_kind(v) == crate::layout::kind("threaded-closure")) || self.bloblet_head(v).fields != CLOSURE_FREE0 {
+            return None;
+        }
+        let (word, x) = (self.bloblet_slot(v, CLOSURE_WORD), self.bloblet_slot(v, CLOSURE_FREE0));
+        let fields = self.bloblet_head(word).fields;
+        let last = self.bloblet_slot(word, fields);
+        (x.is_bloblet() && self.bloblet_kind(x) == k && last == Value::fixnum(routine("resume") as i64)).then_some(x)
+    }
+
+    /// A procedure not yet defined: a closure whose word traps when called
+    /// (`undefined`). What a subroutine's cell or box holds before its value.
+    pub fn undefined_closure(&mut self) -> Value {
+        use crate::layout::threaded::{routine, CLOSURE_WORD};
+        let cells = [Value::fixnum(routine("undefined") as i64)];
+        let name = self.intern("undefined");
+        let word = self.make_threaded_word(name, &cells).expect("a well-formed word");
+        let c = self.make_bloblet(crate::layout::kind("threaded-closure"), 1, 0, true);
+        self.set_bloblet_slot(c, CLOSURE_WORD, word);
+        c
     }
 
     pub fn is_threaded_word(&self, v: Value) -> bool {

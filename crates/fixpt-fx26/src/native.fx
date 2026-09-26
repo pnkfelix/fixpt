@@ -395,7 +395,7 @@
              (begin (n-e (arm-ldur n-x15 n-x11 (n-field-off 2))) (n-e (arm-str-pre n-x15 n-dsp -8)))
              (begin (n-e (arm-ldr-post n-x15 n-dsp 8)) (n-e (arm-stur n-x15 n-x11 (n-field-off 2)))))
          (n-cont-code)))
-      ((or (= n routine-call) (= n routine-tailcall)) (n-call n))
+      ((or (= n routine-call) (= n routine-tailcall) (= n routine-tcall) (= n routine-ttailcall)) (n-call n))
       ((= n routine-return)
        (begin
          (n-e (arm-ldr-post n-x15 n-dsp 8))
@@ -479,16 +479,21 @@
         (n-e (arm-movz n-x14 n 0))
         (n-b (get n-trap-common))))))
 
+;; A typed call's callee is a closure, so it is not tested; and a typed
+;; tail call, which grows neither stack, does not check them.
 (define n-call (subr assembles (int) unit)
   (lambda (n)
-    (let ((other (n-label)))
+    (let ((other (n-label))
+          (typed (or (= n routine-tcall) (= n routine-ttailcall)))
+          (tail (or (= n routine-tailcall) (= n routine-ttailcall))))
       (begin
         (n-e (arm-ldr n-w n-dsp 0))
-        (n-is-closure n-w other)
-        (n-fuel-check) (n-ds-limit) (n-rs-limit)
+        (if typed #u (n-is-closure n-w other))
+        (n-fuel-check)
+        (if (and typed tail) #u (begin (n-ds-limit) (n-rs-limit)))
         (n-e (arm-ldr-post n-x10 n-ip -8))
         (n-e (arm-add-imm n-dsp n-dsp 8))
-        (if (= n routine-call)
+        (if (not tail)
             (begin
               (n-push-return)
               (n-e (arm-add n-x14 n-dsp n-x10))
@@ -515,7 +520,7 @@
         (n-e (arm-movz n-x13 (* 8 n-word-cell0) 0))
         (n-enter-cur n-x13)
         (n-bind other)
-        (n-callout n)))))
+        (if typed #u (n-callout n))))))
 
 ;;; ------------------------------------------------------------ words
 

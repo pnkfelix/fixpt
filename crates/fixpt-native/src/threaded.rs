@@ -682,16 +682,25 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             }
             a.cont();
         }
-        "call" | "tailcall" => {
+        "call" | "tailcall" | "tcall" | "ttailcall" => {
             // A threaded closure on top: its word, over a frame of the n
             // values below it. Anything else (a continuation, or not a
-            // procedure) goes the Rust machine's way.
+            // procedure) goes the Rust machine's way. A typed call's callee
+            // is a closure (the checker says so), so it is not tested; and
+            // a tail call grows neither stack, so a typed one does not
+            // check them either.
+            let typed = matches!(name, "tcall" | "ttailcall");
+            let name = if typed { &name[1..] } else { name };
             let other = a.label();
             a.e(ldr(W, DSP, 0));
-            a.is_closure(W, other);
+            if !typed {
+                a.is_closure(W, other);
+            }
             a.fuel();
-            a.ds_limit();
-            a.rs_limit();
+            if !(typed && name == "tailcall") {
+                a.ds_limit();
+                a.rs_limit();
+            }
             // The count, 8n, in X10: `push_return` uses X13 and X14.
             a.e(ldr_post(X10, IP, -8));
             a.e(add_imm(DSP, DSP, 8));
@@ -725,7 +734,9 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(movz(X13, (8 * WORD_CELL0) as u32, 0));
             a.enter_cur(X13);
             a.bind(other);
-            a.callout(n as u64);
+            if !typed {
+                a.callout(n as u64);
+            }
         }
         "return" => {
             // The value on top replaces the frame; then back.
@@ -814,8 +825,10 @@ pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32
 
 /// Routines whose call-out leaves the machine somewhere other than the next
 /// cell: after them, the machine goes on from wherever it is (`enter_cur`).
-pub const CONTROL_CALLOUTS: &[&str] =
-    &["prompt", "abort", "callcomp", "callcc", "withmark", "withmark-tail", "call", "tailcall", "execute", "docol", "exit", "halt", "return"];
+pub const CONTROL_CALLOUTS: &[&str] = &[
+    "prompt", "abort", "callcomp", "callcc", "withmark", "withmark-tail", "call", "tailcall", "execute", "docol", "exit", "halt",
+    "return", "tcall", "ttailcall", "resume", "undefined",
+];
 
 /// What the compiler written in FX-26 needs to know of this machine to
 /// make the code [`NativeMachine::compile_word`] does, as FX-26

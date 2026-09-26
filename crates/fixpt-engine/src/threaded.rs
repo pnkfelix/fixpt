@@ -816,10 +816,24 @@ impl Machine {
                 }
                 self.ds.push(c);
             }
-            CALL | TAILCALL => {
+            // The typed calls check here as the untyped ones do: this
+            // machine is the oracle, and a well-typed program never fails
+            // them. The native machines leave the checks out.
+            CALL | TAILCALL | TCALL | TTAILCALL => {
                 let count = Self::operand(cx.heap(), r).as_fixnum() as usize;
-                self.call(cx, r, count, n == TAILCALL, name)?;
+                self.call(cx, r, count, n == TAILCALL || n == TTAILCALL, name)?;
             }
+            RESUME => {
+                let k = self.pop(name)?;
+                let v = self.pop(name)?;
+                let heap = cx.heap();
+                if !(k.is_bloblet() && heap.bloblet_kind(k) == kind("threaded-continuation")) {
+                    return Err(Trap::Type { routine: name });
+                }
+                self.check_limits()?;
+                self.reinstate(heap, r, k, v, true);
+            }
+            UNDEFINED => return Err(Trap::Prim("a procedure was called before it was defined".into())),
             PRIM => {
                 let p = Self::operand(cx.heap(), r).as_fixnum() as usize;
                 let count = Self::operand(cx.heap(), r).as_fixnum() as usize;
@@ -916,6 +930,8 @@ impl Machine {
                     }
                     None => self.capture(heap, r, self.rs_floor, 0, true),
                 };
+                // Given as a closure, so that everything callable is one.
+                let k = heap.continuation_closure(k);
                 self.ds.push(k);
                 self.ds.push(proc_);
                 self.call(cx, r, 1, false, name)?;
@@ -936,9 +952,9 @@ impl Machine {
                 } else {
                     let k = self.pop(name)?;
                     let heap = cx.heap();
-                    if !(k.is_bloblet() && heap.bloblet_kind(k) == kind("threaded-continuation")) {
+                    let Some(k) = heap.continuation_of(k) else {
                         return Err(Trap::Type { routine: name });
-                    }
+                    };
                     let rs = heap.bloblet_slot(k, CONT_RS);
                     let entries: Vec<Value> = (0..heap.obj_len(rs)).map(|i| heap.obj_ref(rs, i)).collect();
                     Self::marks_in(&entries, 0, key)
@@ -1071,6 +1087,10 @@ const CALLCOMP: i64 = routine("callcomp") as i64;
 const CALLCC: i64 = routine("callcc") as i64;
 const WITHMARK: i64 = routine("withmark") as i64;
 const WITHMARK_TAIL: i64 = routine("withmark-tail") as i64;
+const TCALL: i64 = routine("tcall") as i64;
+const TTAILCALL: i64 = routine("ttailcall") as i64;
+const RESUME: i64 = routine("resume") as i64;
+const UNDEFINED: i64 = routine("undefined") as i64;
 const FIRSTMARK: i64 = routine("firstmark") as i64;
 const CURRENTMARKS: i64 = routine("currentmarks") as i64;
 const MARKSOF: i64 = routine("marksof") as i64;

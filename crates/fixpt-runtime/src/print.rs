@@ -233,7 +233,8 @@ fn put(
         None if v.is_bloblet() => {
             let h = heap.bloblet_head(v);
             let kind = fixpt_heap::layout::KINDS.iter().find(|k| k.code == h.kind).map_or("?", |k| k.name);
-            if kind == "threaded-continuation" {
+            // A continuation, or the closure that stands for one.
+            if heap.continuation_of(v).is_some() {
                 out.push_str("#<continuation>");
             } else if kind == "sum" {
                 let tag = heap.bloblet_slot(v, 2);

@@ -770,14 +770,19 @@ prims! {
     "%fx26-unit-cell", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.intern("#u")));
     "%fx26-nil-cell", 0, Some(0), simple!(|_rt, _a| Ok(Value::NULL));
     // A global's cell: a plain bloblet whose field 2 is the value and whose
-    // field 3 is its name, for showing (`%disassemble`).
+    // field 3 is its name, for showing (`%disassemble`). Until its
+    // definition runs it holds a procedure that traps when called, so a
+    // typed call through it never meets anything but a closure.
     "%fx26-make-global", 1, Some(1), simple!(|rt, a| {
-        let unit = rt.heap.intern("#u");
+        let undefined = rt.heap.undefined_closure();
         let b = rt.heap.make_bloblet(PLAIN_BLOBLET, 2, 0, true);
-        rt.heap.set_bloblet_slot(b, 2, unit);
+        rt.heap.set_bloblet_slot(b, 2, undefined);
         rt.heap.set_bloblet_slot(b, 3, a[0]);
         Ok(b)
     });
+    // A procedure called before it was defined: what a `letrec` box holds
+    // before its value, in compiled FX-26.
+    "%fx26-undefined", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.undefined_closure()));
     // A threaded word or closure's code, shown: every word it reaches.
     "%disassemble", 1, Some(1), simple!(|rt, a| {
         let s = crate::disasm::disassemble(&rt.heap, a[0]);

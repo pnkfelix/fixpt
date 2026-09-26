@@ -12,6 +12,17 @@ use std::fmt::Write as _;
 pub fn disassemble(heap: &Heap, v: Value) -> String {
     let closure = kind("threaded-closure");
     let mut out = String::new();
+    if let Some(k) = heap.continuation_of(v) {
+        let mut todo = continuation(heap, k, &mut out);
+        let mut seen = Vec::new();
+        while let Some(w) = todo.pop() {
+            if !seen.contains(&w.raw()) {
+                seen.push(w.raw());
+                word(heap, w, &mut out, &mut todo);
+            }
+        }
+        return out;
+    }
     let start = if v.is_bloblet() && heap.bloblet_kind(v) == closure {
         let free = (heap.bloblet_head(v).fields + 1).saturating_sub(CLOSURE_FREE0);
         let _ = writeln!(out, "a closure over {free} value(s):");
@@ -33,6 +44,58 @@ pub fn disassemble(heap: &Heap, v: Value) -> String {
         word(heap, w, &mut out, &mut todo);
     }
     out
+}
+
+/// A continuation: where it resumes, and the stacks it carries, oldest
+/// first, as they will be when it is reinstated. Returns the words it
+/// reaches, to show after.
+fn continuation(heap: &Heap, k: Value, out: &mut String) -> Vec<Value> {
+    use fixpt_heap::layout::threaded::{CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FP, CONT_K, CONT_RS, CONT_WHOLE};
+    let mut words = Vec::new();
+    let whole = heap.bloblet_slot(k, CONT_WHOLE) == Value::TRUE;
+    let at = |w: Value, k: Value| {
+        let cell = k.as_fixnum() - WORD_CELL0 as i64;
+        if heap.is_threaded_word(w) { format!("word {} at cell {cell}", name_of(heap, w)) } else { short(heap, w) }
+    };
+    let cur = heap.bloblet_slot(k, CONT_CUR);
+    let _ = writeln!(
+        out,
+        "a {} continuation, resuming in {} (frame at {}, closure {}), captured above data stack depth {}:",
+        if whole { "whole" } else { "composable" },
+        at(cur, heap.bloblet_slot(k, CONT_K)),
+        heap.bloblet_slot(k, CONT_FP).as_fixnum(),
+        short(heap, heap.bloblet_slot(k, CONT_CLO)),
+        heap.bloblet_slot(k, CONT_BASE).as_fixnum(),
+    );
+    if heap.is_threaded_word(cur) {
+        words.push(cur);
+    }
+    let ds = heap.bloblet_slot(k, CONT_DS);
+    let _ = writeln!(out, "  data stack, {} value(s), oldest first:", heap.obj_len(ds));
+    for (i, x) in heap.obj_iter(ds).enumerate() {
+        let _ = writeln!(out, "    {i:>4}: {}", short(heap, x));
+    }
+    let rs: Vec<Value> = heap.obj_iter(heap.bloblet_slot(k, CONT_RS)).collect();
+    let _ = writeln!(out, "  return stack, {} entr(ies), oldest first:", rs.len() / 4);
+    // The markers' first words, as `fixpt_engine::threaded` has them.
+    let (prompt_mark, mark_mark) = (Value::DEFAULT, Value::UNSPECIFIED);
+    for (i, e) in rs.chunks(4).enumerate() {
+        let line = match e {
+            [m, tag, handler, height] if *m == prompt_mark => {
+                format!("prompt for {}, handler {}, data stack height {}", short(heap, *tag), short(heap, *handler), height.as_fixnum())
+            }
+            [m, key, v, _] if *m == mark_mark => format!("mark {} = {}", short(heap, *key), short(heap, *v)),
+            [w, k, fp, clo] => {
+                if heap.is_threaded_word(*w) {
+                    words.push(*w);
+                }
+                format!("return to {} (frame at {}, closure {})", at(*w, *k), fp.as_fixnum(), short(heap, *clo))
+            }
+            _ => "a partial entry".to_string(),
+        };
+        let _ = writeln!(out, "    {i:>4}: {line}");
+    }
+    words
 }
 
 /// A value as it is written, cut short.

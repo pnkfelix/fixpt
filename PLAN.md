@@ -962,6 +962,19 @@ baseline. 13d, typed primitives, follows on the same principle.
   the fuel checks the machines make at word entries and taken branches.
   Bounds could also be declared and checked, as effects are.
 
+- **Concurrency, and processes as distinct from functions.** (Raised by
+  the user 2026-09-26.) FX-26 has no concurrency story yet. It may want
+  its own forms for defining and declaring processes, apart from
+  functions. A process could be typed by what it communicates rather than
+  what it returns, which is where session types, which the user has also
+  raised, would come in. This is for when the type system is extended.
+
+- **The threaded REPL's state.** Under `--fx26-run threaded` or
+  `evaluate`, each form is compiled with the definitions before it re-run.
+  So a definition's state does not survive from one form to the next: a
+  reference set by an earlier expression is fresh again. A session that
+  keeps its compiled globals between forms would fix this.
+
 - **Pinned code, with raw return addresses into it.** Possibly pinned only
   speculatively, with moving still possible at the cost of rewriting return
   addresses.

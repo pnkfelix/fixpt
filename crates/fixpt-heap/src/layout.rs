@@ -297,13 +297,23 @@ pub mod threaded {
         ("currentmarks", "( key -- list ), every mark for key, innermost first"),
         ("marksof", "( k key -- list ), the marks for key in continuation k"),
         ("withmark-tail", "( key v thunk -- r ), withmark in tail position: the frame is left, and a mark for key on top replaced"),
+        // Calls whose callee the checker typed as a subroutine, which is
+        // then a closure: no test that it is one, no continuation's way,
+        // and in tail position no stack-limit checks (a tail call grows
+        // neither stack).
+        ("tcall", "( x1 … xn c -- r ), call closure c; n the next cell"),
+        ("ttailcall", "( x1 … xn c -- ), tail-call closure c; n the next cell"),
+        // A continuation as a closure: the word `slot 0; free 0; resume`.
+        ("resume", "( v k -- ), give continuation k the value v, in this frame's place"),
+        // A procedure called before its definition ran.
+        ("undefined", "( -- ), trap: called before it was defined"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 
     /// How many cells after routine `name`'s cell are its operands, which
     /// are data, not code.
     pub const fn operands(name: &str) -> usize {
-        let one: &[&str] = &["lit", "branch", "0branch", "slot", "slot!", "free", "global", "global!", "call", "tailcall"];
+        let one: &[&str] = &["lit", "branch", "0branch", "slot", "slot!", "free", "global", "global!", "call", "tailcall", "tcall", "ttailcall"];
         let two: &[&str] = &["closure", "prim"];
         let mut i = 0;
         while i < one.len() {

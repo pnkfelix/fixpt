@@ -356,8 +356,8 @@ impl<'a> Compiler<'a> {
                 let n = bindings.len();
                 let mut inner = e.clone();
                 for (i, (name, _, _)) in bindings.iter().enumerate() {
-                    let u = self.unit();
-                    self.lit(code, u);
+                    // Until filled, a procedure that traps when called.
+                    self.prim(code, "%fx26-undefined", 0)?;
                     self.prim(code, "%make-box", 1)?;
                     inner.push((*name, Loc::BoxedSlot(depth + i)));
                 }
@@ -477,7 +477,8 @@ impl<'a> Compiler<'a> {
             None => {
                 let n = self.exps(args, e, depth, code)?;
                 self.exp(f, e, depth + n, code, false)?;
-                self.op1(code, if tail { "tailcall" } else { "call" }, Value::fixnum(n as i64));
+                // The checker typed the callee a subroutine: a typed call.
+                self.op1(code, if tail { "ttailcall" } else { "tcall" }, Value::fixnum(n as i64));
             }
             // In tail position, the mark replaces this frame's: a loop that
             // marks each iteration runs in constant space.
@@ -752,10 +753,10 @@ impl<'a> Compiler<'a> {
     // -------------------------------------------------------- programs
 
     fn push_global(&mut self, n: Sym) -> Value {
-        let unit = self.unit();
+        let undefined = self.heap.undefined_closure();
         let name = self.heap.intern(self.c.interner.name(n));
         let g = self.heap.make_bloblet(kind("bloblet"), 2, 0, true);
-        self.heap.set_bloblet_slot(g, 2, unit);
+        self.heap.set_bloblet_slot(g, 2, undefined);
         self.heap.set_bloblet_slot(g, 3, name);
         self.genv.push((n, Loc::Global(g)));
         g

@@ -319,7 +319,8 @@
                (lambda (bs inner d)
                  (if (null? bs)
                      inner
-                     (begin (c-lit c (wcell-unit)) (c-prim c "%make-box" 1)
+                     ;; Until filled, a procedure that traps when called.
+                     (begin (c-prim c "%fx26-undefined" 0) (c-prim c "%make-box" 1)
                             (boxes (cdr bs) (the cenv (cons (cons (extract (car bs) 1) (boxed-slot d)) inner)) (+ d 1))))))
              (fill (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int int) unit)
                (lambda (bs inner d n)
@@ -399,9 +400,10 @@
       (if (string=? standard "")
           (let ((n (c-exps args e depth c)))
             (begin (c-exp f e (+ depth n) c #f)
+                   ;; The checker typed the callee a subroutine: a typed call.
                    (if tail
-                       (c-op1 c routine-tailcall (wcell-int n))
-                       (c-op1 c routine-call (wcell-int n)))))
+                       (c-op1 c routine-ttailcall (wcell-int n))
+                       (c-op1 c routine-tcall (wcell-int n)))))
           (if (and tail (string=? standard "with-mark"))
               ;; In tail position, the mark replaces this frame's: a loop
               ;; that marks each iteration runs in constant space.

@@ -45,7 +45,7 @@
 (define n-closure-free0 int 3)  ; a closure's field
 (define n-word-entry int 2)  ; a word's field
 (define n-word-cell0 int 4)  ; a word's field
-(define n-primitives int 39)  ; routines that may be cells
+(define n-primitives int 43)  ; routines that may be cells
 (define n-trap-type int 1)  ; a trap's code; a routine's number is its detail
 (define n-trap-overflow int 2)  ; a trap's code; a routine's number is its detail
 (define n-trap-underflow int 3)  ; a trap's code; a routine's number is its detail
@@ -72,9 +72,11 @@
       ((= n 26) 1)  ; call
       ((= n 27) 1)  ; tailcall
       ((= n 29) 2)  ; prim
+      ((= n 39) 1)  ; tcall
+      ((= n 40) 1)  ; ttailcall
       (else 0))))
 
 ;; Whether routine `n`'s call-out may leave the machine anywhere.
 (define n-control? (subr pure (int) bool)
   (lambda (n)
-    (or (= n 0) (= n 1) (= n 2) (= n 6) (= n 26) (= n 27) (= n 28) (= n 30) (= n 31) (= n 32) (= n 33) (= n 34) (= n 38))))
+    (or (= n 0) (= n 1) (= n 2) (= n 6) (= n 26) (= n 27) (= n 28) (= n 30) (= n 31) (= n 32) (= n 33) (= n 34) (= n 38) (= n 39) (= n 40) (= n 41) (= n 42))))

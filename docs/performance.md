@@ -391,3 +391,24 @@ run on each machine. Best of three, release, before any M13 optimization:
 On whole FX-26 programs, words compiled to machine code (C11a) gain 10–30%
 over threaded code on the hand-encoded machine, more than the
 micro-benchmarks showed.
+
+## Typed calls (13c′)
+
+The compilers emit `tcall`/`ttailcall` for every call: the checker has
+proved the callee a procedure, and a continuation is now a closure (a word
+ending in `resume`), so the machines skip the closure test and the
+continuation fallback. A typed tail call grows neither stack, so it skips
+the stack-limit checks too; only fuel is checked. Same benchmarks, best of
+three, release:
+
+| program  | hand-encoded   | stencils -O2     | words compiled |
+| -------- | -------------- | ---------------- | -------------- |
+| closures | 70.2 → 68.2 ms | 92.5 → 85.0 ms   | 62.6 → 59.6 ms |
+| fib      | 16.8 → 16.6 ms | 24.5 → 22.7 ms   | 13.9 → 13.0 ms |
+| lists    | 52.6 → 51.2 ms | 68.8 → 64.4 ms   | 46.3 → 45.6 ms |
+| loop     | 66.1 → 65.5 ms | 119.6 → 105.0 ms | 52.7 → 51.0 ms |
+| tak      | 6.8 → 6.5 ms   | 11.3 → 10.5 ms   | 4.7 → 4.5 ms   |
+
+2–12%. The stencils gain most (the loop, 12%): their call path was the
+heaviest. Before `st_tcall`/`st_ttailcall` existed, every typed call on
+the stencil machine went out to Rust, and it ran 2–3 times slower.

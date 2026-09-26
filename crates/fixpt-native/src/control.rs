@@ -253,7 +253,8 @@ fn reinstate(s: &mut Stacks, heap: &Heap, k: Value, v: Value, tail: bool) -> Res
 /// the saved ip. `None` for the rest.
 pub(crate) fn run(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&mut State, &mut Heap)) -> Option<Result<(), Trap>> {
     let r = match name {
-        "prompt" | "withmark" | "withmark-tail" | "abort" | "callcomp" | "callcc" | "firstmark" | "call" | "tailcall" => {
+        "prompt" | "withmark" | "withmark-tail" | "abort" | "callcomp" | "callcc" | "firstmark" | "call" | "tailcall"
+        | "tcall" | "ttailcall" | "resume" => {
             routine(st, heap, name, safepoint)
         }
         _ => return None,
@@ -263,11 +264,20 @@ pub(crate) fn run(st: &mut State, heap: &mut Heap, name: &'static str, safepoint
 
 fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&mut State, &mut Heap)) -> Result<(), Trap> {
     match name {
-        "call" | "tailcall" => {
+        "call" | "tailcall" | "tcall" | "ttailcall" => {
             let k = (st.d / 8) as usize;
             let n = heap.bloblet_slot(Value(st.cur), k).as_fixnum() as usize;
             st.d += 8;
-            call(&mut Stacks { st }, heap, n, name == "tailcall", name)
+            call(&mut Stacks { st }, heap, n, name.ends_with("tailcall"), name)
+        }
+        "resume" => {
+            let mut s = Stacks { st };
+            let k = s.ds_pop(name)?;
+            let v = s.ds_pop(name)?;
+            if !is_a(heap, k, CONTINUATION) {
+                return Err(Trap::Type { routine: name });
+            }
+            reinstate(&mut s, heap, k, v, true)
         }
         "prompt" => {
             let mut s = Stacks { st };
@@ -346,6 +356,8 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
                 }
                 None => capture(&s, heap, 0, 0, true),
             };
+            // Given as a closure, so that everything callable is one.
+            let k = heap.continuation_closure(k);
             s.ds_push(k)?;
             s.ds_push(proc_)?;
             call(&mut s, heap, 1, false, name)

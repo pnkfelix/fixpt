@@ -121,3 +121,7 @@
 (define routine-currentmarks int 36)  ; ( key -- list ), every mark for key, innermost first
 (define routine-marksof int 37)  ; ( k key -- list ), the marks for key in continuation k
 (define routine-withmark-tail int 38)  ; ( key v thunk -- r ), withmark in tail position: the frame is left, and a mark for key on top replaced
+(define routine-tcall int 39)  ; ( x1 … xn c -- r ), call closure c; n the next cell
+(define routine-ttailcall int 40)  ; ( x1 … xn c -- ), tail-call closure c; n the next cell
+(define routine-resume int 41)  ; ( v k -- ), give continuation k the value v, in this frame's place
+(define routine-undefined int 42)  ; ( -- ), trap: called before it was defined

@@ -290,13 +290,23 @@ routine!(st_global_set, |base, ip, cur, dsp, rsp, st, fp, w| {
 /// `call` and `tailcall`: a threaded closure on top, over a frame of the n
 /// values below it. Anything else goes the Rust machine's way.
 macro_rules! call {
-    ($tail:expr, $r:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {{
+    ($tail:expr, $typed:expr, $r:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {{
         let c = unsafe { rd($dsp) };
-        if !unsafe { is_closure($base, c) } {
+        // A typed call's callee is a closure, by the checker: no test, no call-out.
+        if !$typed && !unsafe { is_closure($base, c) } {
             callout!($r, $base, $ip, $cur, $dsp, $rsp, $st, $fp)
         }
-        checks!($base, $ip, $cur, $dsp, $rsp, $st, $fp);
-        if $rsp <= unsafe { (*$st).rs_limit } {
+        if $typed && $tail {
+            // A typed tail call grows neither stack: only fuel is checked.
+            let fuel = unsafe { (*$st).fuel }.wrapping_sub(1);
+            unsafe { (*$st).fuel = fuel };
+            if fuel == 0 {
+                return unsafe { trap($st, TRAP_OUT_OF_FUEL, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
+            }
+        } else {
+            checks!($base, $ip, $cur, $dsp, $rsp, $st, $fp);
+        }
+        if !($typed && $tail) && $rsp <= unsafe { (*$st).rs_limit } {
             return unsafe { trap($st, TRAP_TOO_DEEP, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
         }
         let n8 = unsafe { rd($ip) };
@@ -325,8 +335,10 @@ macro_rules! call {
     }};
 }
 
-routine!(st_call, |base, ip, cur, dsp, rsp, st, fp, w| { call!(false, R_CALL, base, ip, cur, dsp, rsp, st, fp) });
-routine!(st_tailcall, |base, ip, cur, dsp, rsp, st, fp, w| { call!(true, R_TAILCALL, base, ip, cur, dsp, rsp, st, fp) });
+routine!(st_call, |base, ip, cur, dsp, rsp, st, fp, w| { call!(false, false, R_CALL, base, ip, cur, dsp, rsp, st, fp) });
+routine!(st_tailcall, |base, ip, cur, dsp, rsp, st, fp, w| { call!(true, false, R_TAILCALL, base, ip, cur, dsp, rsp, st, fp) });
+routine!(st_tcall, |base, ip, cur, dsp, rsp, st, fp, w| { call!(false, true, R_TCALL, base, ip, cur, dsp, rsp, st, fp) });
+routine!(st_ttailcall, |base, ip, cur, dsp, rsp, st, fp, w| { call!(true, true, R_TTAILCALL, base, ip, cur, dsp, rsp, st, fp) });
 
 routine!(st_return, |base, ip, cur, dsp, rsp, st, fp, w| {
     let x = unsafe { rd(dsp) };
