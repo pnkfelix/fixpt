@@ -186,64 +186,55 @@
 (define c-adjoin (subr (maxeff (read @k) (alloc @k)) (syms symbol) syms)
   (lambda (xs n) (if (c-member? xs n) xs (cons n xs))))
 
-(define c-free-all (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) syms syms) syms)
-  (lambda (es bound acc) (if (null? es) acc (c-free-all (cdr es) bound (c-free (car es) bound acc)))))
-
-(define c-free (subr (maxeff (read @a) (read @k) (alloc @k)) (exp syms syms) syms)
-  (lambda (x bound acc)
-    (tagcase x
-      (e-var (n a b) (if (c-member? bound n) acc (c-adjoin acc n)))
-      (e-lambda (ps body a b) (c-free body (c-bind-params ps bound) acc))
-      (e-app (f args a b) (c-free f bound (c-free-all args bound acc)))
-      (e-plambda (d body a b) (c-free body bound acc))
-      (e-proj (body ds a b) (c-free body bound acc))
-      (e-the (d body a b) (c-free body bound acc))
-      (e-if (t th el a b) (c-free t bound (c-free th bound (c-free el bound acc))))
-      (e-letrec (bs body a b)
-        (let ((inner (c-bind-letrec bs bound)))
-          (c-free body inner (c-free-letrec bs inner acc))))
-      (e-let (bs body a b) (c-free body (c-bind-let bs bound) (c-free-let bs bound acc)))
-      (e-begin (es a b) (c-free-all es bound acc))
-      (e-prompt (t body h a b) (c-free t bound (c-free body bound (c-free h bound acc))))
-      (e-bloblet (op i args a b) (c-free-all args bound acc))
-      (e-product (fs a b) (c-free-fields fs bound acc))
-      (e-extract (p l a b) (c-free p bound acc))
-      (e-sum (t v a b) (c-free v bound acc))
-      (e-tagcase (s arms els a b) (c-free s bound (c-free-arms arms bound (c-free-else els bound acc))))
-      (else y acc))))
-
 (define c-bind-params (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syns-a)) @a) syms) syms)
   (lambda (ps bound) (if (null? ps) bound (c-bind-params (cdr ps) (cons (extract (car ps) 1) bound)))))
 (define c-bind-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) syms) syms)
   (lambda (bs bound) (if (null? bs) bound (c-bind-letrec (cdr bs) (cons (extract (car bs) 1) bound)))))
 (define c-bind-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms) syms)
   (lambda (bs bound) (if (null? bs) bound (c-bind-let (cdr bs) (cons (extract (car bs) 1) bound)))))
-(define c-free-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) syms syms) syms)
-  (lambda (bs bound acc) (if (null? bs) acc (c-free-letrec (cdr bs) bound (c-free (extract (car bs) 3) bound acc)))))
-(define c-free-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
-  (lambda (bs bound acc) (if (null? bs) acc (c-free-let (cdr bs) bound (c-free (extract (car bs) 2) bound acc)))))
-(define c-free-fields (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
-  (lambda (fs bound acc) (if (null? fs) acc (c-free-fields (cdr fs) bound (c-free (extract (car fs) 2) bound acc)))))
 (define c-names (subr (maxeff (read @a) (read @k) (alloc @k)) (names syms) syms)
   (lambda (ns bound) (if (null? ns) bound (c-names (cdr ns) (cons (car ns) bound)))))
-(define c-free-arms
-  (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) syms syms) syms)
-  (lambda (arms bound acc)
-    (if (null? arms)
-        acc
-        (c-free-arms (cdr arms) bound (c-free (extract (car arms) 4) (c-names (extract (car arms) 3) bound) acc)))))
-(define c-free-else (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
-  (lambda (els bound acc)
-    (if (null? els) acc (c-free (extract (car els) 2) (cons (extract (car els) 1) bound) acc))))
 
-;;; ---------------------------------------------------------- expressions
-;;; `depth` is how many values are on the frame above its start, so the next
-;;; value pushed is slot `depth`. In tail position, code ends the word: with
-;;; a `tailcall`, or with `return` after the value.
-
-(define c-exps (subr compiles ((listof exp @a) cenv int code) int)
-  (lambda (es e depth c)
-    (if (null? es) 0 (begin (c-exp (car es) e depth c #f) (+ 1 (c-exps (cdr es) e (+ depth 1) c))))))
+(define-rec
+  (c-free-all (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) syms syms) syms)
+    (lambda (es bound acc) (if (null? es) acc (c-free-all (cdr es) bound (c-free (car es) bound acc)))))
+  (c-free (subr (maxeff (read @a) (read @k) (alloc @k)) (exp syms syms) syms)
+    (lambda (x bound acc)
+      (tagcase x
+        (e-var (n a b) (if (c-member? bound n) acc (c-adjoin acc n)))
+        (e-lambda (ps body a b) (c-free body (c-bind-params ps bound) acc))
+        (e-app (f args a b) (c-free f bound (c-free-all args bound acc)))
+        (e-plambda (d body a b) (c-free body bound acc))
+        (e-proj (body ds a b) (c-free body bound acc))
+        (e-the (d body a b) (c-free body bound acc))
+        (e-if (t th el a b) (c-free t bound (c-free th bound (c-free el bound acc))))
+        (e-letrec (bs body a b)
+          (let ((inner (c-bind-letrec bs bound)))
+            (c-free body inner (c-free-letrec bs inner acc))))
+        (e-let (bs body a b) (c-free body (c-bind-let bs bound) (c-free-let bs bound acc)))
+        (e-begin (es a b) (c-free-all es bound acc))
+        (e-prompt (t body h a b) (c-free t bound (c-free body bound (c-free h bound acc))))
+        (e-bloblet (op i args a b) (c-free-all args bound acc))
+        (e-product (fs a b) (c-free-fields fs bound acc))
+        (e-extract (p l a b) (c-free p bound acc))
+        (e-sum (t v a b) (c-free v bound acc))
+        (e-tagcase (s arms els a b) (c-free s bound (c-free-arms arms bound (c-free-else els bound acc))))
+        (else y acc))))
+  (c-free-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) syms syms) syms)
+    (lambda (bs bound acc) (if (null? bs) acc (c-free-letrec (cdr bs) bound (c-free (extract (car bs) 3) bound acc)))))
+  (c-free-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
+    (lambda (bs bound acc) (if (null? bs) acc (c-free-let (cdr bs) bound (c-free (extract (car bs) 2) bound acc)))))
+  (c-free-fields (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
+    (lambda (fs bound acc) (if (null? fs) acc (c-free-fields (cdr fs) bound (c-free (extract (car fs) 2) bound acc)))))
+  (c-free-arms
+    (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) syms syms) syms)
+    (lambda (arms bound acc)
+      (if (null? arms)
+          acc
+          (c-free-arms (cdr arms) bound (c-free (extract (car arms) 4) (c-names (extract (car arms) 3) bound) acc)))))
+  (c-free-else (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
+    (lambda (els bound acc)
+      (if (null? els) acc (c-free (extract (car els) 2) (cons (extract (car els) 1) bound) acc)))))
 
 ;; What is left when the value is in hand: `return` in tail position.
 (define c-done (subr (maxeff (read @k) (write @k) (alloc @k)) (code bool) unit)
@@ -260,84 +251,8 @@
                    (lambda (k) (if (= k 0) #u (begin (c-op c routine-drop) (drops (- k 1)))))))
           (begin (c-op1 c routine-slot! (wcell-int slot)) (drops (- n 1)))))))
 
-(define c-exp (subr compiles (exp cenv int code bool) unit)
-  (lambda (x e depth c tail)
-    (tagcase x
-      (e-var (n a b)
-        (let ((l (c-where e n)))
-          (begin
-            (if (null? l)
-                (if (string=? (symbol->string n) "nil")
-                    (c-lit c (wcell-nil))
-                    (c-standard-value (symbol->string n) c))
-                (c-load c (car l)))
-            (c-done c tail))))
-      (e-int (n a b) (begin (c-int c n) (c-done c tail)))
-      (e-bool (v a b) (begin (c-lit c (wcell-bool v)) (c-done c tail)))
-      (e-str (s a b) (begin (c-lit c (wcell-string s)) (c-done c tail)))
-      (e-char (ch a b) (begin (c-lit c (wcell-char ch)) (c-done c tail)))
-      (e-sym (s a b) (begin (c-lit c (wcell-symbol s)) (c-done c tail)))
-      (e-unit (a b) (begin (c-lit c (wcell-unit)) (c-done c tail)))
-      (e-lambda (ps body a b) (begin (c-lambda ps body e depth c nil) (c-done c tail)))
-      (e-app (f args a b) (c-app f args e depth c tail))
-      (e-plambda (d body a b) (c-exp body e depth c tail))
-      (e-proj (body ds a b) (c-exp body e depth c tail))
-      (e-the (d body a b) (c-exp body e depth c tail))
-      (e-if (t th el a b)
-        (let ((no (c-fresh)) (end (c-fresh)))
-          (begin
-            (c-exp t e depth c #f)
-            (c-emit c (i-zbranch no))
-            (c-exp th e depth c tail)
-            (if tail #u (c-emit c (i-branch end)))
-            (c-emit c (i-label no))
-            (c-exp el e depth c tail)
-            (c-emit c (i-label end)))))
-      (e-let (bs body a b)
-        (let* ((inner (c-let-bind bs e e depth c)) (n (c-count-let bs)))
-          (begin (c-exp body inner (+ depth n) c tail) (c-unbind c depth n tail))))
-      (e-letrec (bs body a b) (c-letrec bs body e depth c tail))
-      (e-begin (es a b) (c-begin es e depth c tail))
-      (e-prompt (t body h a b)
-        (begin
-          (c-exp t e depth c #f)
-          (c-exp h e (+ depth 1) c #f)
-          (c-lambda (the (listof (productof (1 symbol) (2 syns-a)) @a) nil) body e (+ depth 2) c nil)
-          (c-op c routine-prompt)
-          (c-done c tail)))
-      (e-bloblet (op i args a b) (begin (c-bloblet (symbol->string op) i args e depth c) (c-done c tail)))
-      (e-product (fs a b)
-        (begin (c-int c 37) (c-prim c "%make-frozen" (+ 1 (c-fields fs e (+ depth 1) c))) (c-done c tail)))
-      (e-extract (p l a b)
-        (let ((i (c-field-index (get c-facts) a b)))
-          (if (< i 0)
-              (c-fail "an extract the checker did not see")
-              (begin (c-exp p e depth c #f) (c-field c (+ i 2)) (c-done c tail)))))
-      (e-sum (t v a b)
-        (begin (c-int c 36) (c-lit c (wcell-symbol t)) (c-exp v e (+ depth 2) c #f)
-               (c-prim c "%make-frozen" 3) (c-done c tail)))
-      (e-tagcase (s arms els a b) (c-tagcase s arms els e depth c tail)))))
-
-(define c-begin (subr compiles ((listof exp @a) cenv int code bool) unit)
-  (lambda (es e depth c tail)
-    (cond ((null? es) (begin (c-lit c (wcell-unit)) (c-done c tail)))
-          ((null? (cdr es)) (c-exp (car es) e depth c tail))
-          (else (begin (c-exp (car es) e depth c #f) (c-op c routine-drop) (c-begin (cdr es) e depth c tail))))))
-
-(define c-fields (subr compiles ((listof (productof (1 symbol) (2 exp)) @a) cenv int code) int)
-  (lambda (fs e depth c)
-    (if (null? fs) 0 (begin (c-exp (extract (car fs) 2) e depth c #f) (+ 1 (c-fields (cdr fs) e (+ depth 1) c))))))
-
 (define c-count-let (subr (read @a) ((listof (productof (1 symbol) (2 exp)) @a)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-let (cdr bs))))))
-
-;; Each value pushed, in the scope outside; the names are the slots.
-(define c-let-bind (subr compiles ((listof (productof (1 symbol) (2 exp)) @a) cenv cenv int code) cenv)
-  (lambda (bs outer inner depth c)
-    (if (null? bs)
-        inner
-        (begin (c-exp (extract (car bs) 2) outer depth c #f)
-               (c-let-bind (cdr bs) outer (the cenv (cons (cons (extract (car bs) 1) (at-slot depth)) inner)) (+ depth 1) c)))))
 
 ;; `letrec`: every binding is a lambda (the checker says so). Each closure
 ;; is made in its slot, with a placeholder for a sibling not made yet; then
@@ -345,52 +260,10 @@
 ;; no one sees the knot tied. A name used only in calls of itself that are
 ;; loops is not captured at all.
 (define-type patches (listof (pairof int int @k) @k))
-(define c-letrec (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) exp cenv int code bool) unit)
-  (lambda (bs body e depth c tail)
-    (let* ((made (c-letrec-make bs bs e depth 0 c)) (n (c-count-letrec bs)))
-      (begin
-        (c-letrec-patch made depth 0 c)
-        (c-exp body (c-letrec-slots bs e depth) (+ depth n) c tail)
-        (c-unbind c depth n tail)))))
-
-;; Each closure made, in order; what each must have patched.
-(define c-letrec-make
-  (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) (listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int int code)
-        (listof patches @k))
-  (lambda (all bs e depth i c)
-    (if (null? bs)
-        nil
-        (let* ((lam (c-lambda-of (extract (car bs) 3)))
-               (made (tagcase (car lam)
-                       (e-lambda (ps body a b)
-                         (c-lambda ps body (c-letrec-own all e depth 0 i body (c-count-params ps)) (+ depth i) c
-                                   (the syms (cons (extract (car bs) 1) nil))))
-                       (else y (c-fail "a letrec binds only lambdas"))))
-               (rest (c-letrec-make all (cdr bs) e depth (+ i 1) c)))
-          (cons made rest)))))
-
-;; Binding `i`'s scope while it is made: each sibling pending, and itself a
-;; loop if it only calls itself in loops.
-(define c-letrec-own
-  (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int int int exp int) cenv)
-  (lambda (bs e depth k i body nps)
-    (if (null? bs)
-        e
-        (let ((g (extract (car bs) 1)))
-          (c-letrec-own (cdr bs)
-                        (the cenv (cons (cons g (if (and (= k i) (c-loops-only body g nps #t)) (at-loop 0) (at-pending (+ depth k)))) e))
-                        depth (+ k 1) i body nps)))))
 
 (define c-letrec-slots (subr (maxeff (read @a) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int) cenv)
   (lambda (bs e d)
     (if (null? bs) e (c-letrec-slots (cdr bs) (the cenv (cons (cons (extract (car bs) 1) (at-slot d)) e)) (+ d 1)))))
-
-;; Each placeholder of closure `i` patched with its sibling.
-(define c-letrec-patch (subr compiles ((listof patches @k) int int code) unit)
-  (lambda (made depth i c)
-    (if (null? made)
-        #u
-        (begin (c-patch-one (car made) depth i c) (c-letrec-patch (cdr made) depth (+ i 1) c)))))
 (define c-patch-one (subr compiles (patches int int code) unit)
   (lambda (ps depth i c)
     (if (null? ps)
@@ -400,6 +273,13 @@
                (c-int c (+ threaded-closure-free0 (car (car ps))))
                (c-op c routine-field-set)
                (c-patch-one (cdr ps) depth i c)))))
+
+;; Each placeholder of closure `i` patched with its sibling.
+(define c-letrec-patch (subr compiles ((listof patches @k) int int code) unit)
+  (lambda (made depth i c)
+    (if (null? made)
+        #u
+        (begin (c-patch-one (car made) depth i c) (c-letrec-patch (cdr made) depth (+ i 1) c)))))
 
 ;;; ------------------------------------------------------- known procedures
 
@@ -415,101 +295,81 @@
 
 (define c-mentions? (subr (maxeff (read @a) (read @k) (alloc @k)) (exp symbol) bool)
   (lambda (x n) (c-member? (c-free x nil nil) n)))
-
-;; Whether every use of `f` in `x` is a call with `n` arguments in tail
-;; position, which the compiler makes a loop.
-(define c-loops-only (subr (maxeff (read @a) (read @k) (alloc @k)) (exp symbol int bool) bool)
-  (lambda (x f n tail)
-    (tagcase x
-      (e-var (m a b) (not (symbol=? m f)))
-      (e-lambda (ps body a b) (or (c-member? (c-bind-params ps nil) f) (not (c-mentions? body f))))
-      (e-app (fun args a b)
-        (and (c-loops-only-all args f n)
-             (tagcase fun
-               (e-var (m a2 b2) (if (symbol=? m f) (and tail (= (c-count-exps args) n)) #t))
-               (else y (c-loops-only fun f n #f)))))
-      (e-plambda (d body a b) (c-loops-only body f n tail))
-      (e-proj (body ds a b) (c-loops-only body f n tail))
-      (e-the (d body a b) (c-loops-only body f n tail))
-      (e-if (t th el a b)
-        (and (c-loops-only t f n #f) (and (c-loops-only th f n tail) (c-loops-only el f n tail))))
-      (e-letrec (bs body a b)
-        (or (c-member? (c-bind-letrec bs nil) f)
-            (and (c-loops-only-letrec bs f n) (c-loops-only body f n tail))))
-      (e-let (bs body a b)
-        (and (c-loops-only-let bs f n)
-             (or (c-member? (c-bind-let bs nil) f) (c-loops-only body f n tail))))
-      (e-begin (es a b) (c-loops-only-begin es f n tail))
-      (e-prompt (t body h a b)
-        (and (c-loops-only t f n #f) (and (c-loops-only h f n #f) (not (c-mentions? body f)))))
-      (e-bloblet (op i args a b) (c-loops-only-all args f n))
-      (e-product (fs a b) (c-loops-only-fields fs f n))
-      (e-extract (p l a b) (c-loops-only p f n #f))
-      (e-sum (t v a b) (c-loops-only v f n #f))
-      (e-tagcase (s arms els a b)
-        (and (c-loops-only s f n #f) (and (c-loops-only-arms arms f n tail) (c-loops-only-else els f n tail))))
-      (else y #t))))
-
-(define c-loops-only-all (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) symbol int) bool)
-  (lambda (es f n) (or (null? es) (and (c-loops-only (car es) f n #f) (c-loops-only-all (cdr es) f n)))))
-(define c-loops-only-begin (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) symbol int bool) bool)
-  (lambda (es f n tail)
-    (cond ((null? es) #t)
-          ((null? (cdr es)) (c-loops-only (car es) f n tail))
-          (else (and (c-loops-only (car es) f n #f) (c-loops-only-begin (cdr es) f n tail))))))
-(define c-loops-only-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) symbol int) bool)
-  (lambda (bs f n) (or (null? bs) (and (c-loops-only (extract (car bs) 3) f n #f) (c-loops-only-letrec (cdr bs) f n)))))
-(define c-loops-only-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
-  (lambda (bs f n) (or (null? bs) (and (c-loops-only (extract (car bs) 2) f n #f) (c-loops-only-let (cdr bs) f n)))))
-(define c-loops-only-fields (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
-  (lambda (fs f n) (or (null? fs) (and (c-loops-only (extract (car fs) 2) f n #f) (c-loops-only-fields (cdr fs) f n)))))
-(define c-loops-only-arms
-  (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) symbol int bool) bool)
-  (lambda (arms f n tail)
-    (or (null? arms)
-        (and (or (c-member? (c-names (extract (car arms) 3) nil) f) (c-loops-only (extract (car arms) 4) f n tail))
-             (c-loops-only-arms (cdr arms) f n tail)))))
-(define c-loops-only-else (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int bool) bool)
-  (lambda (els f n tail)
-    (or (null? els) (or (symbol=? (extract (car els) 1) f) (c-loops-only (extract (car els) 2) f n tail)))))
 (define c-count-exps (subr (read @a) ((listof exp @a)) int)
   (lambda (es) (if (null? es) 0 (+ 1 (c-count-exps (cdr es))))))
 
+;; Whether every use of `f` in `x` is a call with `n` arguments in tail
+;; position, which the compiler makes a loop.
+
+(define-rec
+  (c-loops-only (subr (maxeff (read @a) (read @k) (alloc @k)) (exp symbol int bool) bool)
+    (lambda (x f n tail)
+      (tagcase x
+        (e-var (m a b) (not (symbol=? m f)))
+        (e-lambda (ps body a b) (or (c-member? (c-bind-params ps nil) f) (not (c-mentions? body f))))
+        (e-app (fun args a b)
+          (and (c-loops-only-all args f n)
+               (tagcase fun
+                 (e-var (m a2 b2) (if (symbol=? m f) (and tail (= (c-count-exps args) n)) #t))
+                 (else y (c-loops-only fun f n #f)))))
+        (e-plambda (d body a b) (c-loops-only body f n tail))
+        (e-proj (body ds a b) (c-loops-only body f n tail))
+        (e-the (d body a b) (c-loops-only body f n tail))
+        (e-if (t th el a b)
+          (and (c-loops-only t f n #f) (and (c-loops-only th f n tail) (c-loops-only el f n tail))))
+        (e-letrec (bs body a b)
+          (or (c-member? (c-bind-letrec bs nil) f)
+              (and (c-loops-only-letrec bs f n) (c-loops-only body f n tail))))
+        (e-let (bs body a b)
+          (and (c-loops-only-let bs f n)
+               (or (c-member? (c-bind-let bs nil) f) (c-loops-only body f n tail))))
+        (e-begin (es a b) (c-loops-only-begin es f n tail))
+        (e-prompt (t body h a b)
+          (and (c-loops-only t f n #f) (and (c-loops-only h f n #f) (not (c-mentions? body f)))))
+        (e-bloblet (op i args a b) (c-loops-only-all args f n))
+        (e-product (fs a b) (c-loops-only-fields fs f n))
+        (e-extract (p l a b) (c-loops-only p f n #f))
+        (e-sum (t v a b) (c-loops-only v f n #f))
+        (e-tagcase (s arms els a b)
+          (and (c-loops-only s f n #f) (and (c-loops-only-arms arms f n tail) (c-loops-only-else els f n tail))))
+        (else y #t))))
+  (c-loops-only-all (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) symbol int) bool)
+    (lambda (es f n) (or (null? es) (and (c-loops-only (car es) f n #f) (c-loops-only-all (cdr es) f n)))))
+  (c-loops-only-begin (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) symbol int bool) bool)
+    (lambda (es f n tail)
+      (cond ((null? es) #t)
+            ((null? (cdr es)) (c-loops-only (car es) f n tail))
+            (else (and (c-loops-only (car es) f n #f) (c-loops-only-begin (cdr es) f n tail))))))
+  (c-loops-only-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) symbol int) bool)
+    (lambda (bs f n) (or (null? bs) (and (c-loops-only (extract (car bs) 3) f n #f) (c-loops-only-letrec (cdr bs) f n)))))
+  (c-loops-only-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
+    (lambda (bs f n) (or (null? bs) (and (c-loops-only (extract (car bs) 2) f n #f) (c-loops-only-let (cdr bs) f n)))))
+  (c-loops-only-fields (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
+    (lambda (fs f n) (or (null? fs) (and (c-loops-only (extract (car fs) 2) f n #f) (c-loops-only-fields (cdr fs) f n)))))
+  (c-loops-only-arms
+    (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) symbol int bool) bool)
+    (lambda (arms f n tail)
+      (or (null? arms)
+          (and (or (c-member? (c-names (extract (car arms) 3) nil) f) (c-loops-only (extract (car arms) 4) f n tail))
+               (c-loops-only-arms (cdr arms) f n tail)))))
+  (c-loops-only-else (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int bool) bool)
+    (lambda (els f n tail)
+      (or (null? els) (or (symbol=? (extract (car els) 1) f) (c-loops-only (extract (car els) 2) f n tail))))))
+
+;; Binding `i`'s scope while it is made: each sibling pending, and itself a
+;; loop if it only calls itself in loops.
+(define c-letrec-own
+  (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int int int exp int) cenv)
+  (lambda (bs e depth k i body nps)
+    (if (null? bs)
+        e
+        (let ((g (extract (car bs) 1)))
+          (c-letrec-own (cdr bs)
+                        (the cenv (cons (cons g (if (and (= k i) (c-loops-only body g nps #t)) (at-loop 0) (at-pending (+ depth k)))) e))
+                        depth (+ k 1) i body nps)))))
+
 (define c-count-letrec (subr (read @a) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-letrec (cdr bs))))))
-
-;; A lambda: its free values pushed, then its word closed over them. `own`
-;; is the `letrec` name it is bound to, or none: its tail calls in its body
-;; are loops. What it gives: for each `letrec` sibling it captured before the
-;; sibling was made, its free value's index and the slot the sibling will be
-;; in.
-(define c-lambda (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv int code syms) patches)
-  (lambda (ps body e depth c own0)
-    (let* ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
-           ;; A parameter of the same name hides the procedure.
-           (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
-           (base (if (or (null? own) (c-member? fv (car own))) (the cenv nil) (the cenv (cons (cons (car own) (at-loop 0)) nil))))
-           (inner (c-inner-env fv e (c-param-env ps 0 base) 0))
-           (n (c-count-params ps))
-           (body-code (the code (new nil)))
-           (outer-name (get c-this-name)) (outer-loc (get c-this-loc))
-           (outer-params (get c-this-params)) (outer-start (get c-this-start)))
-      (let ((patches (c-push-all fv e depth 0 c)))
-       (begin
-        (if (null? own)
-            (set c-this-params -1)
-            (let ((start (c-fresh)))
-              (begin (set c-this-name (car own)) (set c-this-loc (car (c-find inner (car own))))
-                     (set c-this-params n) (set c-this-start start)
-                     (c-emit body-code (i-label start)))))
-        (c-exp body inner n body-code #t)
-        (set c-this-name outer-name) (set c-this-loc outer-loc)
-        (set c-this-params outer-params) (set c-this-start outer-start)
-        ;; Named for where its body starts, so that a profile can say which.
-        (c-op1 c routine-closure
-               (wcell-word (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body)))))))
-        (c-emit c (i-cell (wcell-int (c-length fv))))
-        patches)))))
 
 (define c-count-params (subr (read @a) ((listof (productof (1 symbol) (2 syns-a)) @a)) int)
   (lambda (ps) (if (null? ps) 0 (+ 1 (c-count-params (cdr ps))))))
@@ -552,19 +412,6 @@
                (rest (c-push-all (cdr xs) e (+ depth 1) (+ j 1) c)))
           (if (< pending 0) rest (the patches (cons (cons j pending) rest)))))))
 
-;;; ------------------------------------------------------------ applications
-
-(define c-app (subr compiles (exp (listof exp @a) cenv int code bool) unit)
-  (lambda (f args e depth c tail)
-    (if (c-self-call? f args e tail)
-        ;; A loop: the arguments into the parameters' slots, the rest of
-        ;; the frame dropped, and back to the start.
-        (begin (c-exps args e depth c)
-               (c-loop-stores c (- (get c-this-params) 1))
-               (c-drops c (- depth (get c-this-params)))
-               (c-emit c (i-branch (get c-this-start))))
-        (c-app-other f args e depth c tail))))
-
 (define c-self-call? (subr (maxeff (read @a) (read @k) (alloc @k)) (exp (listof exp @a) cenv bool) bool)
   (lambda (f args e tail)
     (and tail
@@ -581,22 +428,6 @@
   (lambda (c i) (if (< i 0) #u (begin (c-op1 c routine-slot! (wcell-int i)) (c-loop-stores c (- i 1))))))
 (define c-drops (subr (maxeff (read @k) (write @k) (alloc @k)) (code int) unit)
   (lambda (c k) (if (<= k 0) #u (begin (c-op c routine-drop) (c-drops c (- k 1))))))
-
-(define c-app-other (subr compiles (exp (listof exp @a) cenv int code bool) unit)
-  (lambda (f args e depth c tail)
-    (let ((standard (tagcase f (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) "") ) (else y ""))))
-      (if (string=? standard "")
-          (let ((n (c-exps args e depth c)))
-            (begin (c-exp f e (+ depth n) c #f)
-                   ;; The checker typed the callee a subroutine: a typed call.
-                   (if tail
-                       (c-op1 c routine-ttailcall (wcell-int n))
-                       (c-op1 c routine-tcall (wcell-int n)))))
-          (if (and tail (string=? standard "with-mark"))
-              ;; In tail position, the mark replaces this frame's: a loop
-              ;; that marks each iteration runs in constant space.
-              (begin (c-exps args e depth c) (c-op c routine-withmark-tail))
-              (begin (c-standard standard args e depth c) (c-done c tail)))))))
 
 ;; How many arguments a standard operation takes, or -1 if it is not one.
 (define c-arity (subr pure (string) int)
@@ -616,33 +447,6 @@
                (string=? n "call-with-composable-continuation") (string=? n "first-mark") (string=? n "marks-of"))
            2)
           (else -1))))
-
-;; A standard operation as a value: a closure of its arity whose body
-;; applies it to its parameters.
-(define c-standard-value (subr compiles (string code) unit)
-  (lambda (name c)
-    (let ((n (c-arity name)) (body (the code (new nil))))
-      (if (< n 0)
-          (c-fail (string-append "not yet compiled as a value: " name))
-          (begin
-            (letrec ((params (subr (maxeff (read @k) (write @k) (alloc @k)) (int) unit)
-                       (lambda (i) (if (= i n) #u (begin (c-op1 body routine-slot (wcell-int i)) (params (+ i 1)))))))
-              (if (string=? name "make-array")
-                  (begin (c-int body 0) (params 0) (c-prim body "%make-bloblet-filled" 3))
-                  (begin (params 0) (c-standard-on name n body))))
-            (c-op body routine-return)
-            (c-op1 c routine-closure (wcell-word (c-assemble body (string->symbol name))))
-            (c-emit c (i-cell (wcell-int 0))))))))
-
-;; A standard operation, open-coded: a routine, or a runtime primitive, with
-;; FX-26's conventions made plain (mutators give unit; arrays skip the
-;; trailer's field).
-(define c-standard (subr compiles (string (listof exp @a) cenv int code) unit)
-  (lambda (name args e depth c)
-    (if (string=? name "make-array")
-        ;; (%make-bloblet-filled 0 n fill): the 0 first, under the others.
-        (begin (c-int c 0) (c-exps args e (+ depth 1) c) (c-prim c "%make-bloblet-filled" 3))
-        (c-standard-on name (c-exps args e depth c) c))))
 
 (define c-standard-on (subr compiles (string int code) unit)
   (lambda (name n c)
@@ -695,63 +499,22 @@
                      ((string=? p "") (c-fail (string-append "not yet compiled: " name)))
                      (else (c-prim c p n))))))))
 
-(define c-bloblet (subr compiles (string int (listof exp @a) cenv int code) unit)
-  (lambda (op i args e depth c)
-    (cond ((string=? op "make-bloblet") (c-prim c "%make-bloblet" (c-exps args e depth c)))
-          ((string=? op "bloblet-ref")
-           (begin (c-exps args e depth c) (c-field c (+ i 2))))
-          ((string=? op "bloblet-set!")
-           (begin (c-exp (car args) e depth c #f) (c-int c (+ i 2)) (c-exp (car (cdr args)) e (+ depth 2) c #f)
-                  (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
-          ((string=? op "bloblet-freeze")
-           (begin (c-exps args e depth c) (c-op c routine-dup) (c-lit c (wcell-bool #t)) (c-lit c (wcell-bool #f))
-                  (c-prim c "%bloblet-freeze!" 3) (c-op c routine-drop)))
-          ((string=? op "bloblet-byte") (c-prim c "%bloblet-byte" (c-exps args e depth c)))
-          ((string=? op "bloblet-set-byte!") (begin (c-prim c "%bloblet-set-byte!" (c-exps args e depth c)) (c-unit-after c)))
-          (else (c-prim c "%bloblet-bytes" (c-exps args e depth c))))))
-
-;;; ----------------------------------------------------------------- tagcase
-
-(define c-tagcase
-  (subr compiles (exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) (listof (productof (1 symbol) (2 exp)) @a) cenv int code bool) unit)
-  (lambda (s arms els e depth c tail)
-    (let ((end (c-fresh)))
-      (begin
-        (c-exp s e depth c #f)
-        (c-arms arms els e depth c tail end)
-        (c-emit c (i-label end))))))
-
-(define c-arms
-  (subr compiles ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) (listof (productof (1 symbol) (2 exp)) @a) cenv int code bool int) unit)
-  (lambda (arms els e depth c tail end)
-    (if (null? arms)
-        (if (null? els)
-            ;; A checked program covers every tag; this is never reached.
-            (begin (c-lit c (wcell-bool #f)) (c-int c 0) (c-op c routine-field-ref) (c-done c tail))
-            (let ((inner (the cenv (cons (cons (extract (car els) 1) (at-slot depth)) e))))
-              (begin (c-exp (extract (car els) 2) inner (+ depth 1) c tail)
-                     (c-unbind c depth 1 tail))))
-        (let* ((arm (car arms)) (next (c-fresh)))
+;; A standard operation as a value: a closure of its arity whose body
+;; applies it to its parameters.
+(define c-standard-value (subr compiles (string code) unit)
+  (lambda (name c)
+    (let ((n (c-arity name)) (body (the code (new nil))))
+      (if (< n 0)
+          (c-fail (string-append "not yet compiled as a value: " name))
           (begin
-            ;; Is the tag this arm's?
-            (c-op1 c routine-slot (wcell-int depth))
-            (c-field c 2)
-            (c-lit c (wcell-symbol (extract arm 1)))
-            (c-op c routine-eq)
-            (c-emit c (i-zbranch next))
-            ;; The value, or its product's members, as slots after the sum.
-            (c-op1 c routine-slot (wcell-int depth))
-            (c-field c 3)
-            (let ((bound (if (extract arm 2)
-                             (c-members (extract arm 3) e depth (+ depth 2) 0 c)
-                             (the cenv (cons (cons (car (extract arm 3)) (at-slot (+ depth 1))) e))))
-                  (n (if (extract arm 2) (+ 1 (c-count-names (extract arm 3))) 1)))
-              (begin
-                (c-exp (extract arm 4) bound (+ depth (+ 1 n)) c tail)
-                (c-unbind c depth (+ n 1) tail)
-                (if tail #u (c-emit c (i-branch end)))))
-            (c-emit c (i-label next))
-            (c-arms (cdr arms) els e depth c tail end))))))
+            (letrec ((params (subr (maxeff (read @k) (write @k) (alloc @k)) (int) unit)
+                       (lambda (i) (if (= i n) #u (begin (c-op1 body routine-slot (wcell-int i)) (params (+ i 1)))))))
+              (if (string=? name "make-array")
+                  (begin (c-int body 0) (params 0) (c-prim body "%make-bloblet-filled" 3))
+                  (begin (params 0) (c-standard-on name n body))))
+            (c-op body routine-return)
+            (c-op1 c routine-closure (wcell-word (c-assemble body (string->symbol name))))
+            (c-emit c (i-cell (wcell-int 0))))))))
 
 (define c-count-names (subr (read @a) (names) int)
   (lambda (ns) (if (null? ns) 0 (+ 1 (c-count-names (cdr ns))))))
@@ -764,6 +527,231 @@
         (begin (c-op1 c routine-slot (wcell-int (+ sum-slot 1)))
                (c-field c (+ j 2))
                (c-members (cdr ns) (the cenv (cons (cons (car ns) (at-slot slot)) e)) sum-slot (+ slot 1) (+ j 1) c)))))
+
+;;; ---------------------------------------------------------- expressions
+;;; `depth` is how many values are on the frame above its start, so the next
+;;; value pushed is slot `depth`. In tail position, code ends the word: with
+;;; a `tailcall`, or with `return` after the value.
+
+(define-rec
+  (c-exps (subr compiles ((listof exp @a) cenv int code) int)
+    (lambda (es e depth c)
+      (if (null? es) 0 (begin (c-exp (car es) e depth c #f) (+ 1 (c-exps (cdr es) e (+ depth 1) c))))))
+  (c-exp (subr compiles (exp cenv int code bool) unit)
+    (lambda (x e depth c tail)
+      (tagcase x
+        (e-var (n a b)
+          (let ((l (c-where e n)))
+            (begin
+              (if (null? l)
+                  (if (string=? (symbol->string n) "nil")
+                      (c-lit c (wcell-nil))
+                      (c-standard-value (symbol->string n) c))
+                  (c-load c (car l)))
+              (c-done c tail))))
+        (e-int (n a b) (begin (c-int c n) (c-done c tail)))
+        (e-bool (v a b) (begin (c-lit c (wcell-bool v)) (c-done c tail)))
+        (e-str (s a b) (begin (c-lit c (wcell-string s)) (c-done c tail)))
+        (e-char (ch a b) (begin (c-lit c (wcell-char ch)) (c-done c tail)))
+        (e-sym (s a b) (begin (c-lit c (wcell-symbol s)) (c-done c tail)))
+        (e-unit (a b) (begin (c-lit c (wcell-unit)) (c-done c tail)))
+        (e-lambda (ps body a b) (begin (c-lambda ps body e depth c nil) (c-done c tail)))
+        (e-app (f args a b) (c-app f args e depth c tail))
+        (e-plambda (d body a b) (c-exp body e depth c tail))
+        (e-proj (body ds a b) (c-exp body e depth c tail))
+        (e-the (d body a b) (c-exp body e depth c tail))
+        (e-if (t th el a b)
+          (let ((no (c-fresh)) (end (c-fresh)))
+            (begin
+              (c-exp t e depth c #f)
+              (c-emit c (i-zbranch no))
+              (c-exp th e depth c tail)
+              (if tail #u (c-emit c (i-branch end)))
+              (c-emit c (i-label no))
+              (c-exp el e depth c tail)
+              (c-emit c (i-label end)))))
+        (e-let (bs body a b)
+          (let* ((inner (c-let-bind bs e e depth c)) (n (c-count-let bs)))
+            (begin (c-exp body inner (+ depth n) c tail) (c-unbind c depth n tail))))
+        (e-letrec (bs body a b) (c-letrec bs body e depth c tail))
+        (e-begin (es a b) (c-begin es e depth c tail))
+        (e-prompt (t body h a b)
+          (begin
+            (c-exp t e depth c #f)
+            (c-exp h e (+ depth 1) c #f)
+            (c-lambda (the (listof (productof (1 symbol) (2 syns-a)) @a) nil) body e (+ depth 2) c nil)
+            (c-op c routine-prompt)
+            (c-done c tail)))
+        (e-bloblet (op i args a b) (begin (c-bloblet (symbol->string op) i args e depth c) (c-done c tail)))
+        (e-product (fs a b)
+          (begin (c-int c 37) (c-prim c "%make-frozen" (+ 1 (c-fields fs e (+ depth 1) c))) (c-done c tail)))
+        (e-extract (p l a b)
+          (let ((i (c-field-index (get c-facts) a b)))
+            (if (< i 0)
+                (c-fail "an extract the checker did not see")
+                (begin (c-exp p e depth c #f) (c-field c (+ i 2)) (c-done c tail)))))
+        (e-sum (t v a b)
+          (begin (c-int c 36) (c-lit c (wcell-symbol t)) (c-exp v e (+ depth 2) c #f)
+                 (c-prim c "%make-frozen" 3) (c-done c tail)))
+        (e-tagcase (s arms els a b) (c-tagcase s arms els e depth c tail)))))
+  (c-begin (subr compiles ((listof exp @a) cenv int code bool) unit)
+    (lambda (es e depth c tail)
+      (cond ((null? es) (begin (c-lit c (wcell-unit)) (c-done c tail)))
+            ((null? (cdr es)) (c-exp (car es) e depth c tail))
+            (else (begin (c-exp (car es) e depth c #f) (c-op c routine-drop) (c-begin (cdr es) e depth c tail))))))
+  (c-fields (subr compiles ((listof (productof (1 symbol) (2 exp)) @a) cenv int code) int)
+    (lambda (fs e depth c)
+      (if (null? fs) 0 (begin (c-exp (extract (car fs) 2) e depth c #f) (+ 1 (c-fields (cdr fs) e (+ depth 1) c))))))
+  ;; Each value pushed, in the scope outside; the names are the slots.
+  (c-let-bind (subr compiles ((listof (productof (1 symbol) (2 exp)) @a) cenv cenv int code) cenv)
+    (lambda (bs outer inner depth c)
+      (if (null? bs)
+          inner
+          (begin (c-exp (extract (car bs) 2) outer depth c #f)
+                 (c-let-bind (cdr bs) outer (the cenv (cons (cons (extract (car bs) 1) (at-slot depth)) inner)) (+ depth 1) c)))))
+  (c-letrec (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) exp cenv int code bool) unit)
+    (lambda (bs body e depth c tail)
+      (let* ((made (c-letrec-make bs bs e depth 0 c)) (n (c-count-letrec bs)))
+        (begin
+          (c-letrec-patch made depth 0 c)
+          (c-exp body (c-letrec-slots bs e depth) (+ depth n) c tail)
+          (c-unbind c depth n tail)))))
+  ;; Each closure made, in order; what each must have patched.
+  (c-letrec-make
+    (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) (listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int int code)
+          (listof patches @k))
+    (lambda (all bs e depth i c)
+      (if (null? bs)
+          nil
+          (let* ((lam (c-lambda-of (extract (car bs) 3)))
+                 (made (tagcase (car lam)
+                         (e-lambda (ps body a b)
+                           (c-lambda ps body (c-letrec-own all e depth 0 i body (c-count-params ps)) (+ depth i) c
+                                     (the syms (cons (extract (car bs) 1) nil))))
+                         (else y (c-fail "a letrec binds only lambdas"))))
+                 (rest (c-letrec-make all (cdr bs) e depth (+ i 1) c)))
+            (cons made rest)))))
+  ;; A lambda: its free values pushed, then its word closed over them. `own`
+  ;; is the `letrec` name it is bound to, or none: its tail calls in its body
+  ;; are loops. What it gives: for each `letrec` sibling it captured before the
+  ;; sibling was made, its free value's index and the slot the sibling will be
+  ;; in.
+  (c-lambda (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv int code syms) patches)
+    (lambda (ps body e depth c own0)
+      (let* ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
+             ;; A parameter of the same name hides the procedure.
+             (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
+             (base (if (or (null? own) (c-member? fv (car own))) (the cenv nil) (the cenv (cons (cons (car own) (at-loop 0)) nil))))
+             (inner (c-inner-env fv e (c-param-env ps 0 base) 0))
+             (n (c-count-params ps))
+             (body-code (the code (new nil)))
+             (outer-name (get c-this-name)) (outer-loc (get c-this-loc))
+             (outer-params (get c-this-params)) (outer-start (get c-this-start)))
+        (let ((patches (c-push-all fv e depth 0 c)))
+         (begin
+          (if (null? own)
+              (set c-this-params -1)
+              (let ((start (c-fresh)))
+                (begin (set c-this-name (car own)) (set c-this-loc (car (c-find inner (car own))))
+                       (set c-this-params n) (set c-this-start start)
+                       (c-emit body-code (i-label start)))))
+          (c-exp body inner n body-code #t)
+          (set c-this-name outer-name) (set c-this-loc outer-loc)
+          (set c-this-params outer-params) (set c-this-start outer-start)
+          ;; Named for where its body starts, so that a profile can say which.
+          (c-op1 c routine-closure
+                 (wcell-word (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body)))))))
+          (c-emit c (i-cell (wcell-int (c-length fv))))
+          patches)))))
+  ;;; ------------------------------------------------------------ applications
+  (c-app (subr compiles (exp (listof exp @a) cenv int code bool) unit)
+    (lambda (f args e depth c tail)
+      (if (c-self-call? f args e tail)
+          ;; A loop: the arguments into the parameters' slots, the rest of
+          ;; the frame dropped, and back to the start.
+          (begin (c-exps args e depth c)
+                 (c-loop-stores c (- (get c-this-params) 1))
+                 (c-drops c (- depth (get c-this-params)))
+                 (c-emit c (i-branch (get c-this-start))))
+          (c-app-other f args e depth c tail))))
+  (c-app-other (subr compiles (exp (listof exp @a) cenv int code bool) unit)
+    (lambda (f args e depth c tail)
+      (let ((standard (tagcase f (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) "") ) (else y ""))))
+        (if (string=? standard "")
+            (let ((n (c-exps args e depth c)))
+              (begin (c-exp f e (+ depth n) c #f)
+                     ;; The checker typed the callee a subroutine: a typed call.
+                     (if tail
+                         (c-op1 c routine-ttailcall (wcell-int n))
+                         (c-op1 c routine-tcall (wcell-int n)))))
+            (if (and tail (string=? standard "with-mark"))
+                ;; In tail position, the mark replaces this frame's: a loop
+                ;; that marks each iteration runs in constant space.
+                (begin (c-exps args e depth c) (c-op c routine-withmark-tail))
+                (begin (c-standard standard args e depth c) (c-done c tail)))))))
+  ;; A standard operation, open-coded: a routine, or a runtime primitive, with
+  ;; FX-26's conventions made plain (mutators give unit; arrays skip the
+  ;; trailer's field).
+  (c-standard (subr compiles (string (listof exp @a) cenv int code) unit)
+    (lambda (name args e depth c)
+      (if (string=? name "make-array")
+          ;; (%make-bloblet-filled 0 n fill): the 0 first, under the others.
+          (begin (c-int c 0) (c-exps args e (+ depth 1) c) (c-prim c "%make-bloblet-filled" 3))
+          (c-standard-on name (c-exps args e depth c) c))))
+  (c-bloblet (subr compiles (string int (listof exp @a) cenv int code) unit)
+    (lambda (op i args e depth c)
+      (cond ((string=? op "make-bloblet") (c-prim c "%make-bloblet" (c-exps args e depth c)))
+            ((string=? op "bloblet-ref")
+             (begin (c-exps args e depth c) (c-field c (+ i 2))))
+            ((string=? op "bloblet-set!")
+             (begin (c-exp (car args) e depth c #f) (c-int c (+ i 2)) (c-exp (car (cdr args)) e (+ depth 2) c #f)
+                    (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
+            ((string=? op "bloblet-freeze")
+             (begin (c-exps args e depth c) (c-op c routine-dup) (c-lit c (wcell-bool #t)) (c-lit c (wcell-bool #f))
+                    (c-prim c "%bloblet-freeze!" 3) (c-op c routine-drop)))
+            ((string=? op "bloblet-byte") (c-prim c "%bloblet-byte" (c-exps args e depth c)))
+            ((string=? op "bloblet-set-byte!") (begin (c-prim c "%bloblet-set-byte!" (c-exps args e depth c)) (c-unit-after c)))
+            (else (c-prim c "%bloblet-bytes" (c-exps args e depth c))))))
+  ;;; ----------------------------------------------------------------- tagcase
+  (c-tagcase
+    (subr compiles (exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) (listof (productof (1 symbol) (2 exp)) @a) cenv int code bool) unit)
+    (lambda (s arms els e depth c tail)
+      (let ((end (c-fresh)))
+        (begin
+          (c-exp s e depth c #f)
+          (c-arms arms els e depth c tail end)
+          (c-emit c (i-label end))))))
+  (c-arms
+    (subr compiles ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) (listof (productof (1 symbol) (2 exp)) @a) cenv int code bool int) unit)
+    (lambda (arms els e depth c tail end)
+      (if (null? arms)
+          (if (null? els)
+              ;; A checked program covers every tag; this is never reached.
+              (begin (c-lit c (wcell-bool #f)) (c-int c 0) (c-op c routine-field-ref) (c-done c tail))
+              (let ((inner (the cenv (cons (cons (extract (car els) 1) (at-slot depth)) e))))
+                (begin (c-exp (extract (car els) 2) inner (+ depth 1) c tail)
+                       (c-unbind c depth 1 tail))))
+          (let* ((arm (car arms)) (next (c-fresh)))
+            (begin
+              ;; Is the tag this arm's?
+              (c-op1 c routine-slot (wcell-int depth))
+              (c-field c 2)
+              (c-lit c (wcell-symbol (extract arm 1)))
+              (c-op c routine-eq)
+              (c-emit c (i-zbranch next))
+              ;; The value, or its product's members, as slots after the sum.
+              (c-op1 c routine-slot (wcell-int depth))
+              (c-field c 3)
+              (let ((bound (if (extract arm 2)
+                               (c-members (extract arm 3) e depth (+ depth 2) 0 c)
+                               (the cenv (cons (cons (car (extract arm 3)) (at-slot (+ depth 1))) e))))
+                    (n (if (extract arm 2) (+ 1 (c-count-names (extract arm 3))) 1)))
+                (begin
+                  (c-exp (extract arm 4) bound (+ depth (+ 1 n)) c tail)
+                  (c-unbind c depth (+ n 1) tail)
+                  (if tail #u (c-emit c (i-branch end)))))
+              (c-emit c (i-label next))
+              (c-arms (cdr arms) els e depth c tail end)))))))
 
 ;;; ------------------------------------------------------------- programs
 

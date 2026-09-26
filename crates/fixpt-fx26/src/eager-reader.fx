@@ -185,28 +185,6 @@
 (define hex-digit? (subr pure (char) bool)
   (lambda (c) (or (char-numeric? c) (char-in? (char-downcase c) "abcdef"))))
 
-;;; ------------------------------------------------------------- the driver
-
-(define read-top (subr reads (cursor) void)
-  (lambda (cur)
-    (letrec ((loop (subr reads (cursor) void)
-               (lambda (cur)
-                 (marking (top-entry)
-                   (lambda ()
-                     (let* ((cur (skip-atmosphere cur)) (r (read-datum cur)) (after (cdr r)))
-                       (loop (make-cursor (cur-look after) (cur-pos after) (cons (car r) (cur-data after)) nil))))))))
-      (loop cur))))
-
-;; A reader with nothing read yet, for Scheme or for FX-26.
-(define start-reading (subr reads (bool) state)
-  (lambda (fx26)
-    (eager-run
-     (lambda ()
-       (with-mark dialect-key fx26
-         (lambda () (read-top (make-cursor (cons (next-char 0 nil) nil) 0 nil nil))))))))
-(define eager-start (subr reads () state) (lambda () (start-reading #f)))
-(define eager-start-fx26 (subr reads () state) (lambda () (start-reading #t)))
-
 ;; Feed one character to a waiting state, giving the next state.
 (define eager-feed (subr reads (state char) state)
   (lambda (st ch)
@@ -281,25 +259,6 @@
           (closing ctx nil)
           (datum-bool #f)))))
 
-;;; -------------------------------------------------------------- atmosphere
-
-(define skip-atmosphere (subr reads (cursor) cursor)
-  (lambda (cur)
-    (let* ((cur (need cur)) (c (cur-char cur)))
-      (cond ((char-whitespace? c) (skip-atmosphere (advance cur)))
-            ((char=? c #\;) (skip-atmosphere (line-comment cur)))
-            ((char=? c #\#)
-             (let* ((start (cur-pos cur)) (next (advance cur)) (d (cur-char next)))
-               (cond ((char=? d #\|) (skip-atmosphere (block-comment (advance next) start 1)))
-                     ((char=? d #\;)
-                      (skip-atmosphere
-                       (marking (entry "datum-comment" start)
-                         (lambda () (cdr (read-datum (skip-atmosphere (advance next))))))))
-                     ;; Not atmosphere after all: the datum reader takes up
-                     ;; the `#` and what follows it.
-                     (else (make-cursor (cons #\# nil) start (cur-data cur) (cons next nil))))))
-            (else cur)))))
-
 (define line-comment (subr reads (cursor) cursor)
   (lambda (cur)
     (marking (entry "comment" (cur-pos cur))
@@ -326,91 +285,6 @@
                        (block-comment (advance next) start (+ depth 1))
                        (block-comment next start depth))))
                 (else (block-comment (advance cur) start depth))))))))
-
-;;; ------------------------------------------------------------------ datum
-
-(define read-datum (subr reads (cursor) result)
-  (lambda (cur)
-    (let ((cur (need cur)))
-      (if (hash-pending? cur)
-          (read-hash (cur-pos cur) (car (cur-pending cur)))
-          (let ((c (cur-char cur)) (start (cur-pos cur)))
-            (cond ((char=? c #\() (read-list (advance cur) start #\)))
-                  ((and (char-in? c "[]") (fx26?))
-                   (fail cur (str3 "`" (char-string c) "` is reserved: it has no meaning yet")))
-                  ((char=? c #\[) (read-list (advance cur) start #\]))
-                  ((char-in? c ")]") (fail cur (str3 "unbalanced `" (char-string c) "`")))
-                  ((char=? c #\") (read-string (advance cur) start))
-                  ((char=? c #\#) (read-hash start (advance cur)))
-                  ((char=? c #\') (read-abbrev (advance cur) start "quote"))
-                  ((char=? c #\`) (read-abbrev (advance cur) start "quasiquote"))
-                  ((char=? c #\,)
-                   (let ((next (advance cur)))
-                     (if (char=? (cur-char next) #\@)
-                         (read-abbrev (advance next) start "unquote-splicing")
-                         (read-abbrev next start "unquote"))))
-                  (else (read-atom-from cur start ""))))))))
-
-(define read-abbrev (subr reads (cursor int string) result)
-  (lambda (cur start name)
-    (marking (abbrev-entry start name)
-      (lambda ()
-        (let ((r (read-datum (skip-atmosphere cur))))
-          (cons (lst (the syns (cons (atom (datum-symbol name) start (+ start 1)) (cons (car r) nil)))
-                     (datum-list (the data (cons (datum-symbol name) (cons (syn->datum (car r)) nil))))
-                     start
-                     (cur-pos (cdr r)))
-                (cdr r)))))))
-
-;;; ------------------------------------------------------------------- lists
-
-(define read-list (subr reads (cursor int char) result)
-  (lambda (cur start close)
-    (letrec ((loop (subr reads (cursor data syns) result)
-               (lambda (cur items syns)
-                 ;; In tail position, so the mark is replaced each time
-                 ;; round: it always says what has been read so far.
-                 (marking (list-entry "list" start close items)
-                   (lambda ()
-                     (let* ((cur (skip-atmosphere cur))
-                            (c (cur-char cur))
-                            (plain (not (hash-pending? cur))))
-                       (cond ((and plain (char=? c close))
-                              (cons (lst (the syns (reverse syns)) (datum-list (the data (reverse items))) start (+ (cur-pos cur) 1))
-                                    (consumed cur)))
-                             ((and plain (char=? c #\]) (fx26?))
-                              (fail cur "`]` is reserved: it has no meaning yet"))
-                             ((and plain (char-in? c ")]"))
-                              (fail cur (str5 "expected `" (char-string close) "` but found `" (char-string c) "`")))
-                             ((and plain (char=? c #\.))
-                              (let ((next (advance cur)))
-                                (if (delimiter? (cur-char next))
-                                    (read-dotted next start close items syns (cur-pos cur))
-                                    (let ((r (read-atom-from next (cur-pos cur) ".")))
-                                      (loop (cdr r) (cons (syn->datum (car r)) items) (cons (car r) syns))))))
-                             (else
-                              (let ((r (read-datum cur)))
-                                (loop (cdr r) (cons (syn->datum (car r)) items) (cons (car r) syns)))))))))))
-      (loop cur nil nil))))
-
-(define read-dotted (subr reads (cursor int char data syns int) result)
-  (lambda (cur start close items syns dot)
-    (marking (list-entry "dotted" start close items)
-      (lambda ()
-        (if (null? items)
-            (fail-at cur dot "`.` must follow at least one element")
-            (let ((cur (skip-atmosphere cur)))
-              (if (and (not (hash-pending? cur)) (char=? (cur-char cur) close))
-                  (fail-at cur dot "expected a datum after `.`")
-                  (let* ((r (read-datum cur)) (cur (skip-atmosphere (cdr r))))
-                    (if (and (not (hash-pending? cur)) (char=? (cur-char cur) close))
-                        (cons (dotted (the syns (reverse syns))
-                                      (car r)
-                                      (datum-dotted (the data (reverse items)) (syn->datum (car r)))
-                                      start
-                                      (+ (cur-pos cur) 1))
-                              (consumed cur))
-                        (fail cur (str3 "expected `" (char-string close) "` after the tail of a dotted list")))))))))))
 
 ;;; ----------------------------------------------------------------- strings
 
@@ -460,45 +334,6 @@
                              (seen-newline (loop cur acc))
                              (else (loop cur (cons e acc))))))))
           (loop cur nil))))))
-
-;;; --------------------------------------------------------------- `#` syntax
-;;; `start` is where the `#` was; `cur` is at the character after it.
-
-(define read-hash (subr reads (int cursor) result)
-  (lambda (start cur)
-    (marking (entry "hash" start)
-      (lambda ()
-        (let ((c (cur-char cur)))
-          (cond ((char=? c #\()
-                 (let ((r (read-list (advance cur) start #\))))
-                   (tagcase (car r)
-                     (lst (items d a b) (cons (vec items (datum-list->vector d) start b) (cdr r)))
-                     (else x (fail-at (cdr r) start "a vector cannot be a dotted list")))))
-                ((char=? c #\\) (read-char (advance cur) start))
-                ((char-in? c "tfTF")
-                 (let* ((w (read-word cur)) (word (car w)) (lower (string-downcase word)))
-                   (cond ((or (string=? lower "t") (string=? lower "true")) (cons (atom (datum-bool #t) start (cur-pos (cdr w))) (cdr w)))
-                         ((or (string=? lower "f") (string=? lower "false")) (cons (atom (datum-bool #f) start (cur-pos (cdr w))) (cdr w)))
-                         (else (fail-at (cdr w) start (str3 "unknown `#` syntax: `#" word "`"))))))
-                ((char-in? c "uU")
-                 (let* ((w (read-word cur)) (word (car w)) (cur (cdr w)))
-                   (cond ((and (string-ci=? word "u") (fx26?))
-                          ;; FX-26's unit value, beside `#u8(`.
-                          (cons (atom (datum-symbol "#u") start (cur-pos cur)) cur))
-                         ((not (string-ci=? word "u8"))
-                          (fail-at cur start (str3 "unknown `#` syntax: `#" word "`")))
-                         ((not (char=? (cur-char cur) #\())
-                          (fail cur "expected `(` after `#u8`"))
-                         (else
-                          (let* ((r (read-list (advance cur) start #\))) (d (syn->datum (car r))))
-                            (if (bytes? d)
-                                (cons (atom (datum-list->bytevector d) start (cur-pos (cdr r))) (cdr r))
-                                ;; The Rust reader points at the element; elements
-                                ;; carry no positions here, so this points at `#u8`.
-                                (fail-at (cdr r) start "bytevector elements must be exact integers in 0..=255")))))))
-                ((char-in? c "bBoOdDxXeEiI") (read-atom-from cur start "#"))
-                ((char-numeric? c) (fail-at cur start "datum labels are not supported by the eager reader"))
-                (else (fail-at cur start (str3 "unknown `#` syntax: `#" (char-string c) "`")))))))))
 
 ;; A proper list of exact integers in 0..=255.
 (define bytes? (subr pure (datum) bool)
@@ -587,3 +422,161 @@
                                (cons (atom (datum-symbol text) start (cur-pos cur)) cur)
                                (cons (atom (car n) start (cur-pos cur)) cur)))))))
           (loop cur (the chars (reverse (the chars (string->list prefix)))) #f))))))
+
+;;; -------------------------------------------------------------- atmosphere
+
+(define-rec
+  (skip-atmosphere (subr reads (cursor) cursor)
+    (lambda (cur)
+      (let* ((cur (need cur)) (c (cur-char cur)))
+        (cond ((char-whitespace? c) (skip-atmosphere (advance cur)))
+              ((char=? c #\;) (skip-atmosphere (line-comment cur)))
+              ((char=? c #\#)
+               (let* ((start (cur-pos cur)) (next (advance cur)) (d (cur-char next)))
+                 (cond ((char=? d #\|) (skip-atmosphere (block-comment (advance next) start 1)))
+                       ((char=? d #\;)
+                        (skip-atmosphere
+                         (marking (entry "datum-comment" start)
+                           (lambda () (cdr (read-datum (skip-atmosphere (advance next))))))))
+                       ;; Not atmosphere after all: the datum reader takes up
+                       ;; the `#` and what follows it.
+                       (else (make-cursor (cons #\# nil) start (cur-data cur) (cons next nil))))))
+              (else cur)))))
+  ;;; ------------------------------------------------------------------ datum
+  (read-datum (subr reads (cursor) result)
+    (lambda (cur)
+      (let ((cur (need cur)))
+        (if (hash-pending? cur)
+            (read-hash (cur-pos cur) (car (cur-pending cur)))
+            (let ((c (cur-char cur)) (start (cur-pos cur)))
+              (cond ((char=? c #\() (read-list (advance cur) start #\)))
+                    ((and (char-in? c "[]") (fx26?))
+                     (fail cur (str3 "`" (char-string c) "` is reserved: it has no meaning yet")))
+                    ((char=? c #\[) (read-list (advance cur) start #\]))
+                    ((char-in? c ")]") (fail cur (str3 "unbalanced `" (char-string c) "`")))
+                    ((char=? c #\") (read-string (advance cur) start))
+                    ((char=? c #\#) (read-hash start (advance cur)))
+                    ((char=? c #\') (read-abbrev (advance cur) start "quote"))
+                    ((char=? c #\`) (read-abbrev (advance cur) start "quasiquote"))
+                    ((char=? c #\,)
+                     (let ((next (advance cur)))
+                       (if (char=? (cur-char next) #\@)
+                           (read-abbrev (advance next) start "unquote-splicing")
+                           (read-abbrev next start "unquote"))))
+                    (else (read-atom-from cur start ""))))))))
+  (read-abbrev (subr reads (cursor int string) result)
+    (lambda (cur start name)
+      (marking (abbrev-entry start name)
+        (lambda ()
+          (let ((r (read-datum (skip-atmosphere cur))))
+            (cons (lst (the syns (cons (atom (datum-symbol name) start (+ start 1)) (cons (car r) nil)))
+                       (datum-list (the data (cons (datum-symbol name) (cons (syn->datum (car r)) nil))))
+                       start
+                       (cur-pos (cdr r)))
+                  (cdr r)))))))
+  ;;; ------------------------------------------------------------------- lists
+  (read-list (subr reads (cursor int char) result)
+    (lambda (cur start close)
+      (letrec ((loop (subr reads (cursor data syns) result)
+                 (lambda (cur items syns)
+                   ;; In tail position, so the mark is replaced each time
+                   ;; round: it always says what has been read so far.
+                   (marking (list-entry "list" start close items)
+                     (lambda ()
+                       (let* ((cur (skip-atmosphere cur))
+                              (c (cur-char cur))
+                              (plain (not (hash-pending? cur))))
+                         (cond ((and plain (char=? c close))
+                                (cons (lst (the syns (reverse syns)) (datum-list (the data (reverse items))) start (+ (cur-pos cur) 1))
+                                      (consumed cur)))
+                               ((and plain (char=? c #\]) (fx26?))
+                                (fail cur "`]` is reserved: it has no meaning yet"))
+                               ((and plain (char-in? c ")]"))
+                                (fail cur (str5 "expected `" (char-string close) "` but found `" (char-string c) "`")))
+                               ((and plain (char=? c #\.))
+                                (let ((next (advance cur)))
+                                  (if (delimiter? (cur-char next))
+                                      (read-dotted next start close items syns (cur-pos cur))
+                                      (let ((r (read-atom-from next (cur-pos cur) ".")))
+                                        (loop (cdr r) (cons (syn->datum (car r)) items) (cons (car r) syns))))))
+                               (else
+                                (let ((r (read-datum cur)))
+                                  (loop (cdr r) (cons (syn->datum (car r)) items) (cons (car r) syns)))))))))))
+        (loop cur nil nil))))
+  (read-dotted (subr reads (cursor int char data syns int) result)
+    (lambda (cur start close items syns dot)
+      (marking (list-entry "dotted" start close items)
+        (lambda ()
+          (if (null? items)
+              (fail-at cur dot "`.` must follow at least one element")
+              (let ((cur (skip-atmosphere cur)))
+                (if (and (not (hash-pending? cur)) (char=? (cur-char cur) close))
+                    (fail-at cur dot "expected a datum after `.`")
+                    (let* ((r (read-datum cur)) (cur (skip-atmosphere (cdr r))))
+                      (if (and (not (hash-pending? cur)) (char=? (cur-char cur) close))
+                          (cons (dotted (the syns (reverse syns))
+                                        (car r)
+                                        (datum-dotted (the data (reverse items)) (syn->datum (car r)))
+                                        start
+                                        (+ (cur-pos cur) 1))
+                                (consumed cur))
+                          (fail cur (str3 "expected `" (char-string close) "` after the tail of a dotted list")))))))))))
+  ;;; --------------------------------------------------------------- `#` syntax
+  ;;; `start` is where the `#` was; `cur` is at the character after it.
+  (read-hash (subr reads (int cursor) result)
+    (lambda (start cur)
+      (marking (entry "hash" start)
+        (lambda ()
+          (let ((c (cur-char cur)))
+            (cond ((char=? c #\()
+                   (let ((r (read-list (advance cur) start #\))))
+                     (tagcase (car r)
+                       (lst (items d a b) (cons (vec items (datum-list->vector d) start b) (cdr r)))
+                       (else x (fail-at (cdr r) start "a vector cannot be a dotted list")))))
+                  ((char=? c #\\) (read-char (advance cur) start))
+                  ((char-in? c "tfTF")
+                   (let* ((w (read-word cur)) (word (car w)) (lower (string-downcase word)))
+                     (cond ((or (string=? lower "t") (string=? lower "true")) (cons (atom (datum-bool #t) start (cur-pos (cdr w))) (cdr w)))
+                           ((or (string=? lower "f") (string=? lower "false")) (cons (atom (datum-bool #f) start (cur-pos (cdr w))) (cdr w)))
+                           (else (fail-at (cdr w) start (str3 "unknown `#` syntax: `#" word "`"))))))
+                  ((char-in? c "uU")
+                   (let* ((w (read-word cur)) (word (car w)) (cur (cdr w)))
+                     (cond ((and (string-ci=? word "u") (fx26?))
+                            ;; FX-26's unit value, beside `#u8(`.
+                            (cons (atom (datum-symbol "#u") start (cur-pos cur)) cur))
+                           ((not (string-ci=? word "u8"))
+                            (fail-at cur start (str3 "unknown `#` syntax: `#" word "`")))
+                           ((not (char=? (cur-char cur) #\())
+                            (fail cur "expected `(` after `#u8`"))
+                           (else
+                            (let* ((r (read-list (advance cur) start #\))) (d (syn->datum (car r))))
+                              (if (bytes? d)
+                                  (cons (atom (datum-list->bytevector d) start (cur-pos (cdr r))) (cdr r))
+                                  ;; The Rust reader points at the element; elements
+                                  ;; carry no positions here, so this points at `#u8`.
+                                  (fail-at (cdr r) start "bytevector elements must be exact integers in 0..=255")))))))
+                  ((char-in? c "bBoOdDxXeEiI") (read-atom-from cur start "#"))
+                  ((char-numeric? c) (fail-at cur start "datum labels are not supported by the eager reader"))
+                  (else (fail-at cur start (str3 "unknown `#` syntax: `#" (char-string c) "`"))))))))))
+
+;;; ------------------------------------------------------------- the driver
+
+(define read-top (subr reads (cursor) void)
+  (lambda (cur)
+    (letrec ((loop (subr reads (cursor) void)
+               (lambda (cur)
+                 (marking (top-entry)
+                   (lambda ()
+                     (let* ((cur (skip-atmosphere cur)) (r (read-datum cur)) (after (cdr r)))
+                       (loop (make-cursor (cur-look after) (cur-pos after) (cons (car r) (cur-data after)) nil))))))))
+      (loop cur))))
+
+;; A reader with nothing read yet, for Scheme or for FX-26.
+(define start-reading (subr reads (bool) state)
+  (lambda (fx26)
+    (eager-run
+     (lambda ()
+       (with-mark dialect-key fx26
+         (lambda () (read-top (make-cursor (cons (next-char 0 nil) nil) 0 nil nil))))))))
+(define eager-start (subr reads () state) (lambda () (start-reading #f)))
+(define eager-start-fx26 (subr reads () state) (lambda () (start-reading #t)))
