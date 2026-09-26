@@ -828,6 +828,10 @@ impl<'a> Compiler<'a> {
                 let n = self.exps(args, e, depth, code)?;
                 self.prim(code, "%make-bloblet", n)?;
             }
+            BlobletOp::RMake => {
+                let n = self.exps(args, e, depth, code)?;
+                self.prim(code, "%region-make-bloblet", n)?;
+            }
             BlobletOp::Ref(i) => {
                 self.exps(args, e, depth, code)?;
                 self.field(code, i as i64 + 2);

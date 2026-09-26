@@ -1084,12 +1084,51 @@ prims! {
         Ok(a[1])
     });
     "%region-cons", 3, Some(3), simple!(|rt, a| {
-        if a[0].is_fixnum() {
-            let h = a[0].as_fixnum() as usize;
-            Ok(rt.heap.in_region(h, |heap| heap.cons(a[1], a[2])))
-        } else {
-            Ok(rt.heap.cons(a[1], a[2]))
-        }
+        let h = region_handle(a[0]);
+        Ok(rt.heap.in_region(h, |heap| heap.cons(a[1], a[2])))
+    });
+    // As `%make-box`, `%make-bloblet-filled 0 n fill`, `%fx26-make-icell`
+    // and `%make-bloblet`, in a region.
+    "%region-new", 2, Some(2), simple!(|rt, a| {
+        let h = region_handle(a[0]);
+        Ok(rt.heap.in_region(h, |heap| {
+            let b = heap.alloc(ObjType::Box, 1, Value::UNSPECIFIED);
+            heap.obj_set(b, 0, a[1]);
+            b
+        }))
+    });
+    "%region-make-array", 3, Some(3), simple!(|rt, a| {
+        let h = region_handle(a[0]);
+        let n = int(rt, a[1])?;
+        if !(0..1 << 40).contains(&n) { return rt.fail("a bloblet's field count must be non-negative", &[a[1]]); }
+        Ok(rt.heap.in_region(h, |heap| {
+            let b = heap.make_bloblet(PLAIN_BLOBLET, n as usize, 0, true);
+            for k in 2..n as usize + 2 {
+                heap.set_bloblet_slot(b, k, a[2]);
+            }
+            b
+        }))
+    });
+    "%region-make-icell", 1, Some(1), simple!(|rt, a| {
+        let h = region_handle(a[0]);
+        Ok(rt.heap.in_region(h, |heap| {
+            let b = heap.make_bloblet(PLAIN_BLOBLET, 2, 0, true);
+            heap.set_bloblet_slot(b, 2, Value::FALSE);
+            heap.set_bloblet_slot(b, 3, Value::FALSE);
+            b
+        }))
+    });
+    "%region-make-bloblet", 2, None, simple!(|rt, a| {
+        let h = region_handle(a[0]);
+        let bytes = int(rt, a[1])?;
+        if !(0..=u32::MAX as i64).contains(&bytes) { return rt.fail("a bloblet's suffix is 0 to 4 GiB", &[a[1]]); }
+        Ok(rt.heap.in_region(h, |heap| {
+            let b = heap.make_bloblet(PLAIN_BLOBLET, a.len() - 2, bytes as usize, true);
+            for (i, v) in a[2..].iter().enumerate() {
+                heap.set_bloblet_slot(b, i + 2, *v);
+            }
+            b
+        }))
     });
 }
 
@@ -1105,6 +1144,12 @@ pub fn make_promise(rt: &mut Runtime, state: i64, payload: Value) -> Value {
     rt.heap.obj_set(p, 0, Value::fixnum(state));
     rt.heap.obj_set(p, 1, payload);
     p
+}
+
+/// A region's handle, as `Heap::in_region` takes it: a fixnum's value, or,
+/// for anything else (`#f`, the heap's), none that is live.
+fn region_handle(v: Value) -> usize {
+    if v.is_fixnum() { v.as_fixnum() as usize } else { usize::MAX }
 }
 
 fn string_chain(

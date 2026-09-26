@@ -43,6 +43,9 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("=", "=", true),
     ("cons", "cons", true),
     ("rcons", "%region-cons", false),
+    ("rnew", "%region-new", false),
+    ("rmake-array", "%region-make-array", false),
+    ("rmake-icell", "%region-make-icell", false),
     ("car", "car", true),
     ("cdr", "cdr", true),
     ("null?", "null?", true),
@@ -308,6 +311,7 @@ impl Lowerer<'_> {
                 // trailer.
                 match op {
                     BlobletOp::Make => format!("(%make-bloblet {})", a.join(" ")),
+                    BlobletOp::RMake => format!("(%region-make-bloblet {})", a.join(" ")),
                     BlobletOp::Ref(i) => format!("(%bloblet-ref {} {})", a[0], i + 2),
                     BlobletOp::Set(i) => format!("(%fx26-bloblet-set! {} {} {})", a[0], i + 2, a[1]),
                     BlobletOp::Freeze => format!("(%fx26-bloblet-freeze {})", a[0]),

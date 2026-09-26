@@ -1124,8 +1124,10 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
   extent goes there. Not now: explicit is simpler to trust.
 
   Next, in order:
-  1. `rmake-bloblet`, and region versions of the other allocating
-     operations (`new`, arrays, products and sums), by the same call-out.
+  1. *(Done 2026-09-26.)* `rnew`, `rmake-array`, `rmake-icell` and the
+     form `(rmake-bloblet r bytes e …)`, each a primitive under
+     `Heap::in_region`. Products and sums have no region (immutable,
+     their types name none), so they stay the heap's.
   2. Closures in a region: perhaps `rlambda` and `rplambda`.
   3. *(Done 2026-09-26.)* `rcons` inline in register code: each region's
      current chunk, `[fill, end]`, in a table at a fixed address, which

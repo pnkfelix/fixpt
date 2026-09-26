@@ -503,6 +503,7 @@ impl Compiler<'_> {
                 let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
                 match op {
                     BlobletOp::Make => self.r_prim(g, "%make-bloblet", &es, env, te)?,
+                    BlobletOp::RMake => self.r_prim(g, "%region-make-bloblet", &es, env, te)?,
                     BlobletOp::Set(i) => {
                         self.r_prim(g, "%bloblet-set!", &[es[0], Arg::V(Value::fixnum(i as i64 + 2)), es[1]], env, te)?;
                         let u = self.unit();

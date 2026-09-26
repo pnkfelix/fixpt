@@ -145,6 +145,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
         Exp::Bloblet { op, args } => {
             let (n, i) = match op {
                 BlobletOp::Make => ("make-bloblet", -1),
+                BlobletOp::RMake => ("rmake-bloblet", -1),
                 BlobletOp::Ref(i) => ("bloblet-ref", i as i64),
                 BlobletOp::Set(i) => ("bloblet-set!", i as i64),
                 BlobletOp::Freeze => ("bloblet-freeze", -1),

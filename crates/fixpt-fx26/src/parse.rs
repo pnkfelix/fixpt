@@ -786,6 +786,7 @@ impl Checker {
         };
         let (op, rest): (BlobletOp, &[Syntax]) = match (name, args) {
             ("make-bloblet", [_, ..]) => (BlobletOp::Make, args),
+            ("rmake-bloblet", [_, _, ..]) => (BlobletOp::RMake, args),
             ("bloblet-ref", [b, i]) => (BlobletOp::Ref(index(self, i)?), std::slice::from_ref(b)),
             ("bloblet-set!", [b, i, v]) => {
                 let i = index(self, i)?;
@@ -799,6 +800,7 @@ impl Checker {
             _ => {
                 let shape = match name {
                     "make-bloblet" => "(make-bloblet bytes field …)",
+                    "rmake-bloblet" => "(rmake-bloblet region bytes field …)",
                     "bloblet-ref" => "(bloblet-ref bloblet index)",
                     "bloblet-set!" => "(bloblet-set! bloblet index value)",
                     "bloblet-freeze" => "(bloblet-freeze bloblet)",

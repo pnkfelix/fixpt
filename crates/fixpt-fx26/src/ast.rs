@@ -252,6 +252,8 @@ pub enum BlobletOp {
     /// `(make-bloblet bytes e …)`: a new bloblet with these fields and a
     /// suffix of `bytes` zero bytes.
     Make,
+    /// `(rmake-bloblet r bytes e …)`: the same, in the region `r` names.
+    RMake,
     /// `(bloblet-ref b i)`.
     Ref(usize),
     /// `(bloblet-set! b i e)`.
@@ -268,7 +270,7 @@ pub enum BlobletOp {
 
 impl BlobletOp {
     pub const NAMES: &[&str] =
-        &["make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte", "bloblet-set-byte!", "bloblet-bytes"];
+        &["make-bloblet", "rmake-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte", "bloblet-set-byte!", "bloblet-bytes"];
 }
 
 #[derive(Default)]

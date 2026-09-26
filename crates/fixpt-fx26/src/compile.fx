@@ -719,6 +719,7 @@
   (c-bloblet (subr compiles (string int (listof exp @a) cenv int code) unit)
     (lambda (op i args e depth c)
       (cond ((string=? op "make-bloblet") (c-prim c "%make-bloblet" (c-exps args e depth c)))
+            ((string=? op "rmake-bloblet") (c-prim c "%region-make-bloblet" (c-exps args e depth c)))
             ((string=? op "bloblet-ref")
              (begin (c-exps args e depth c) (c-field c (+ i 2))))
             ((string=? op "bloblet-set!")

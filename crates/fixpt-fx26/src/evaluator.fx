@@ -114,7 +114,7 @@
 
 ;; The primitives the evaluator has, between spaces.
 (define primitive-names string
-  " + - * = < > <= >= not modulo quotient cons rcons car cdr null? set-car! set-cdr! new get set make-icell icell-put! icell-get char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc ")
+  " + - * = < > <= >= not modulo quotient cons rcons rnew rmake-array rmake-icell car cdr null? set-car! set-cdr! new get set make-icell icell-put! icell-get char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc ")
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
 (define occurs? (subr pure (string string int) bool)
@@ -186,7 +186,8 @@
 
 (define eval-bloblet (subr evals (string int vals) val)
   (lambda (op i xs)
-    (cond ((string=? op "make-bloblet")
+    (cond ((string=? op "rmake-bloblet") (eval-bloblet "make-bloblet" i (cdr xs)))
+          ((string=? op "make-bloblet")
            (let* ((n (as-int (arg xs 0))) (fields (cdr xs)) (count (length-of fields))
                   (fs (the (arrayof val @v) (make-array count (v-unit)))))
              (begin (fill-array fs fields 0)
@@ -217,7 +218,9 @@
             ((string=? n ">=") (cmp2 xs (lambda (a b) (>= a b))))
             ((string=? n "not") (v-bool (not (as-bool (arg xs 0)))))
             ((string=? n "cons") (v-pair (make-bloblet 0 (arg xs 0) (arg xs 1))))
-            ((string=? n "rcons") (v-pair (make-bloblet 0 (arg xs 1) (arg xs 2))))
+            ;; Regions are erased: an allocation in one is the heap's.
+            ((or (string=? n "rcons") (string=? n "rnew") (string=? n "rmake-array") (string=? n "rmake-icell"))
+             (apply-prim (substring n 1 (string-length n)) (cdr xs)))
             ((string=? n "car") (bloblet-ref (as-pair (arg xs 0)) 0))
             ((string=? n "cdr") (bloblet-ref (as-pair (arg xs 0)) 1))
             ((string=? n "null?") (v-bool (tagcase (arg xs 0) (v-nil () #t) (else x #f))))

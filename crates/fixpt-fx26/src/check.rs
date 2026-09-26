@@ -955,11 +955,27 @@ impl Checker {
     ) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let int = self.int;
-        if op == BlobletOp::Make {
+        if matches!(op, BlobletOp::Make | BlobletOp::RMake) {
+            // `rmake-bloblet`'s region is its first operand's; `make-bloblet`'s
+            // the type it is checked against, or a fresh one.
+            let (given, mut eff, args) = if op == BlobletOp::RMake {
+                let (r, rest) = args.split_first().expect("parsed");
+                let (rt, re) = self.synth(*r)?;
+                let Ty::Region(g) = self.arena.get(rt).clone() else {
+                    return Err(FxError::at(span, format!("a region is expected here, and this is a {}", self.show_ty(rt))));
+                };
+                (Some(g), re, rest)
+            } else {
+                (None, Effect::pure(), args)
+            };
             let (bytes, fields) = args.split_first().expect("parsed");
-            let mut eff = self.check(*bytes, int)?;
+            eff = eff.union(&self.check(*bytes, int)?);
             let want = expected.and_then(|t| match self.arena.get(t).clone() {
-                Ty::Bloblet { fields: fs, frozen: false, region } if fs.len() == fields.len() => Some((fs, region)),
+                Ty::Bloblet { fields: fs, frozen: false, region }
+                    if fs.len() == fields.len() && given.is_none_or(|g| g == region) =>
+                {
+                    Some((fs, region))
+                }
                 _ => None,
             });
             let (tys, region) = match want {
@@ -976,7 +992,7 @@ impl Checker {
                         eff = eff.union(&fe);
                         tys.push(t);
                     }
-                    (tys, self.fresh_region_named("bloblet"))
+                    (tys, given.unwrap_or_else(|| self.fresh_region_named("bloblet")))
                 }
             };
             eff.0.insert(Atom::Alloc(region));
@@ -996,7 +1012,7 @@ impl Checker {
             })
         };
         let t = match op {
-            BlobletOp::Make => unreachable!(),
+            BlobletOp::Make | BlobletOp::RMake => unreachable!(),
             BlobletOp::Ref(i) => {
                 let t = field(self, i)?;
                 if !frozen {
