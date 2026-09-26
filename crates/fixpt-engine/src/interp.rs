@@ -648,6 +648,13 @@ impl Interp {
                 self.marks.push_prompt(self.frames.len() as u32, drop_to as u32, tag, handler);
                 self.call_thunk(rt, p, base, thunk)
             }
+            EngineOp::Sro => {
+                let (kind, limit) = (self.stack[base + 1], self.stack[base + 2]);
+                let v = fixpt_runtime::prim::sro(rt, kind, limit, &[&self.stack, &self.regs, &self.marks.vals])?;
+                self.stack.truncate(drop_to);
+                self.set_acc(v);
+                Ok(Control::Return)
+            }
             EngineOp::CurrentMarks => {
                 let from = self.marks.visible_from(self.stack[base + 1]);
                 let v = self.marks.mark_list(&mut rt.heap, from);

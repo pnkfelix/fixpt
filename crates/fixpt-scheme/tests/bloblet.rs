@@ -100,3 +100,11 @@ fn a_handle_outliving_its_scope_is_refused() {
     let _ = s.eval_str("<t>", "(vector 4 5)").expect("runs");
     let _ = s.write(h);
 }
+
+/// SRO sees what only the engine's stack holds: a bloblet made inside a
+/// procedure and not stored anywhere is found while the procedure runs.
+#[test]
+fn sro_sees_the_engines_stack() {
+    let src = "(define (probe b) (vector-length (%sro 'bloblet 1))) (probe (%make-bloblet 0 42))";
+    assert_eq!(same(src), "1");
+}

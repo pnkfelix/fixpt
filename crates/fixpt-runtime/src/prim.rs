@@ -54,6 +54,9 @@ pub enum EngineOp {
     /// called in tail position, so a mark in tail position replaces rather
     /// than accumulates.
     WithMark,
+    /// `(%sro kind limit)`: Larceny's SRO, which needs the engine's stacks
+    /// as roots.
+    Sro,
     /// `(%wind (before . after) thunk)` — enter a `dynamic-wind` extent.
     Wind,
     /// `(%prompt tag handler thunk)` — install a prompt, then call `thunk`.
@@ -114,6 +117,28 @@ fn int(rt: &mut Runtime, v: Value) -> Outcome<i64> {
         return Ok(v.as_fixnum());
     }
     rt.type_error("an exact integer that fits a machine word", v)
+}
+
+/// `%sro`'s work, given the engine's stacks as extra roots.
+pub fn sro(rt: &mut Runtime, kind: Value, limit: Value, extra: &[&[Value]]) -> Outcome<Value> {
+    let kind = if kind.is_false() {
+        fixpt_heap::SroKind::Any
+    } else if rt.heap.is_a(kind, ObjType::Symbol) {
+        let name = rt.heap.symbol_name(kind);
+        if name == "pair" {
+            fixpt_heap::SroKind::Pair
+        } else {
+            match fixpt_heap::layout::KINDS.iter().find(|k| k.name == name) {
+                Some(k) => fixpt_heap::SroKind::Kind(k.code),
+                None => return rt.fail("%sro: no such kind", &[kind]),
+            }
+        }
+    } else {
+        return rt.type_error("a kind's name, `pair`, or #f", kind);
+    };
+    let limit = if limit.is_false() { None } else { Some(int(rt, limit)?.max(1) as usize) };
+    let found = rt.heap.sro(kind, limit, extra);
+    Ok(rt.heap.vector_from(&found))
 }
 
 /// The kind of a bloblet made by `%make-bloblet`.
@@ -759,26 +784,12 @@ prims! {
     // `pair`, or #f for any) reached by 1 to `limit` references (#f: any
     // number), traced from the heap's roots. An observer's tool: it sees
     // every region, so no language's standard environment has it.
-    "%sro", 2, Some(2), simple!(|rt, a| {
-        let kind = if a[0].is_false() {
-            fixpt_heap::SroKind::Any
-        } else if rt.heap.is_a(a[0], ObjType::Symbol) {
-            let name = rt.heap.symbol_name(a[0]);
-            if name == "pair" {
-                fixpt_heap::SroKind::Pair
-            } else {
-                match fixpt_heap::layout::KINDS.iter().find(|k| k.name == name) {
-                    Some(k) => fixpt_heap::SroKind::Kind(k.code),
-                    None => return rt.fail("%sro: no such kind", &[a[0]]),
-                }
-            }
-        } else {
-            return rt.type_error("a kind's name, `pair`, or #f", a[0]);
-        };
-        let limit = if a[1].is_false() { None } else { Some(int(rt, a[1])?.max(1) as usize) };
-        let found = rt.heap.sro(kind, limit);
-        Ok(rt.heap.vector_from(&found))
-    });
+    // Larceny's SRO: a vector of every live object of a kind (a kind's name,
+    // `pair`, or #f for any) reached by 1 to `limit` references (#f: any
+    // number), traced from the heap's roots and the engine's own stacks. An
+    // observer's tool: it sees every region, so no language's standard
+    // environment has it. The engine's, because only it has its stacks.
+    "%sro", 2, Some(2), PrimKind::Engine(EngineOp::Sro);
     // The object that stands for the word being made in `%make-word`'s cells.
     "%default-object", 0, Some(0), simple!(|_rt, _a| Ok(Value::DEFAULT));
     // A primitive's number, for threaded code's `prim`, if it needs no

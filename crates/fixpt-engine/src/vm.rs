@@ -726,6 +726,11 @@ impl Vm {
                 self.marks.push_prompt(depth, height, tag, handler);
                 self.call_thunk(rt, p, base, call, thunk)
             }
+            EngineOp::Sro => {
+                let (kind, limit) = (self.stack[base + 1], self.stack[base + 2]);
+                let v = fixpt_runtime::prim::sro(rt, kind, limit, &[&self.stack, &self.regs, &self.marks.vals])?;
+                self.give(rt, p, base, call, v)
+            }
             EngineOp::CurrentMarks => {
                 let from = self.marks.visible_from(self.stack[base + 1]);
                 let v = self.marks.mark_list(&mut rt.heap, from);

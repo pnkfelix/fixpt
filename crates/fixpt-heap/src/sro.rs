@@ -4,9 +4,9 @@
 //! debugger does, and deliberately not part of any language's semantics: it
 //! sees every region, private ones included.
 //!
-//! It traces from the heap's own roots (explicit roots, globals, symbols).
-//! An engine's stack is not among them, so an object only a running
-//! procedure's frame holds is not found.
+//! It traces from the heap's own roots (explicit roots, globals, symbols)
+//! and whatever roots the caller adds: an engine's stacks, which only the
+//! engine has, so `%sro` is an engine operation.
 
 use crate::layout::TAG_MASK;
 use crate::value::TAG_TRAILER;
@@ -26,7 +26,7 @@ impl Heap {
     /// Every live object of `kind` reached by at least 1 and at most
     /// `limit` references (from roots or live objects), each once, in no
     /// particular order.
-    pub fn sro(&self, kind: SroKind, limit: Option<usize>) -> Vec<Value> {
+    pub fn sro(&self, kind: SroKind, limit: Option<usize>, extra_roots: &[&[Value]]) -> Vec<Value> {
         // Reference counts, by Value; each object's edges are followed once.
         let mut counts: HashMap<u64, usize> = HashMap::new();
         let mut todo: Vec<Value> = Vec::new();
@@ -42,6 +42,11 @@ impl Heap {
         };
         for v in self.roots_for_sro() {
             reach(v, &mut counts, &mut todo);
+        }
+        for slice in extra_roots {
+            for v in *slice {
+                reach(*v, &mut counts, &mut todo);
+            }
         }
         while let Some(v) = todo.pop() {
             if v.is_pair() {
