@@ -17,13 +17,22 @@
 ;;; no arguments, so that everything inside the prompt is above its marker
 ;;; on the stacks; the control operations are routines.
 ;;;
-;;; Not yet: `extract`, which needs a product's field order, which only its
-;;; type says, so it waits for the checker written in FX-26 (step 10).
+;;; `extract` needs a product's field order, which only its type says: the
+;;; checker written in FX-26 records it (`checked-extracts`), and a program
+;;; is compiled with what its check found.
 
 (private-regions @k @y)
 
 ;; What compiling may do: read the trees, build code on @k, and give up.
-(define-effect compiles (maxeff (read @a) (read @k) (write @k) (alloc @k) (goto @y)))
+(define-effect compiles (maxeff (read @a) (read @t) (read @k) (write @k) (alloc @k) (goto @y)))
+
+;; The checker's facts for the program being compiled.
+(define c-facts (ref k-facts @k) (new nil))
+(define c-field-index (subr (maxeff (read @t) (read @k)) (k-facts int int) int)
+  (lambda (fs a b)
+    (cond ((null? fs) -1)
+          ((and (= (extract (car fs) 1) a) (= (extract (car fs) 2) b)) (extract (car fs) 3))
+          (else (c-field-index (cdr fs) a b)))))
 
 ;;; ----------------------------------------------------------------- code
 
@@ -37,7 +46,7 @@
 (define-type code (ref items @k))
 
 (define-datatype cresult (c-ok tword) (c-err string))
-(define c-tag (prompt-tag cresult cresult (maxeff (read @a) (read @k) (write @k) (alloc @k)) @y)
+(define c-tag (prompt-tag cresult cresult (maxeff (read @a) (read @t) (read @k) (write @k) (alloc @k)) @y)
   (make-continuation-prompt-tag))
 (define c-fail (subr compiles (string) void)
   (lambda (message) (abort-current-continuation c-tag (c-err message))))
@@ -271,7 +280,11 @@
       (e-bloblet (op i args a b) (begin (c-bloblet (symbol->string op) i args e depth c) (c-done c tail)))
       (e-product (fs a b)
         (begin (c-int c 37) (c-prim c "%make-frozen" (+ 1 (c-fields fs e (+ depth 1) c))) (c-done c tail)))
-      (e-extract (p l a b) (c-fail "not yet compiled: extract, which needs the product's type"))
+      (e-extract (p l a b)
+        (let ((i (c-field-index (get c-facts) a b)))
+          (if (< i 0)
+              (c-fail "an extract the checker did not see")
+              (begin (c-exp p e depth c #f) (c-int c (+ i 2)) (c-prim c "%bloblet-ref" 2) (c-done c tail)))))
       (e-sum (t v a b)
         (begin (c-int c 36) (c-lit c (wcell-symbol t)) (c-exp v e (+ depth 2) c #f)
                (c-prim c "%make-frozen" 3) (c-done c tail)))
@@ -474,7 +487,13 @@
                  (string=? name "string-ref") (string=? name "substring") (string=? name "string=?")
                  (string=? name "string->symbol") (string=? name "symbol->string"))
              (c-prim c name n))
-            (else (c-fail (string-append "not yet compiled: " name))))))
+            ;; The rest, as the lowering runs them (`standard.fx`): a
+            ;; runtime primitive, or nothing at all.
+            (else
+             (let ((p (standard-primitive name)))
+               (cond ((string=? p "%fx26-identity") #u)
+                     ((string=? p "") (c-fail (string-append "not yet compiled: " name)))
+                     (else (c-prim c p n))))))))
 
 (define c-bloblet (subr compiles (string int (listof exp @a) cenv int code) unit)
   (lambda (op i args e depth c)
@@ -603,11 +622,13 @@
 
 ;; The entry point: a program's trees to one word that runs it and leaves
 ;; the value of its last expression (unit, if it has none).
-(define compile-program (subr (maxeff compiles (comefrom @y)) ((listof top @a)) cresult)
-  (lambda (tops)
+;; The entry point: a checked program's trees, and what checking found.
+(define compile-program (subr (maxeff compiles (comefrom @y)) ((listof top @a) k-facts) cresult)
+  (lambda (tops facts)
     (prompt c-tag
       (let ((c (the code (new nil))))
         (begin
+          (set c-facts facts)
           (c-declare-ahead tops)
           (if (c-tops tops c #f) #u (c-lit c (wcell-unit)))
           (c-op c routine-exit)

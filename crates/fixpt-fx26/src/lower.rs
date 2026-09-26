@@ -140,6 +140,22 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("marks-of", "%fx26-marks-of", false),
 ];
 
+/// The FX-26 copy of what [`STANDARD`] says the compiler written in FX-26
+/// can use: for each standard name the lowering runs as a runtime primitive
+/// the threaded machine can call (`prim`), that primitive; for one it runs
+/// as the identity, `%fx26-identity`. `src/standard.fx` is this, and a test
+/// keeps it so.
+pub fn standard_fx26_module() -> String {
+    let mut out = String::from(include_str!("standard-header.fx"));
+    for (fx, scheme, _) in STANDARD {
+        if *scheme == "%fx26-identity" || fixpt_engine::threaded::runtime_primitive(scheme).is_some() {
+            out.push_str(&format!("      ((string=? n {fx:?}) {scheme:?})\n"));
+        }
+    }
+    out.push_str("      (else \"\"))))\n");
+    out
+}
+
 /// The Scheme names of a program's top-level definitions.
 #[derive(Debug, Clone)]
 pub struct Globals {

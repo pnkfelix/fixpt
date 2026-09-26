@@ -74,11 +74,22 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Session, file: FileId, text: &str) 
 /// Read, parse and compile `text` with the reader, the parser and the
 /// compiler written in FX-26, and run the word it makes on the threaded
 /// machine: the value, as Scheme writes it; or `!! ` and why it failed.
-pub fn compile_with_fx26_compiler(scheme: &mut Session, file: FileId, text: &str) -> R<String> {
+pub fn compile_with_fx26_compiler(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
         let tops = parse_to_trees(s, file, text)?;
-        let result = s.call_global(&format!("{READER_PREFIX}compile-program"), &[tops]).map_err(|e| fail(e.to_string()))?;
+        // Checked first, by the checker written in FX-26, which says where
+        // each `extract`'s field is.
+        let checked = s.call_global(&format!("{READER_PREFIX}check-program"), &[standard, tops]).map_err(|e| fail(e.to_string()))?;
+        if let Some(m) = s.view(|v| {
+            let r = v.get(checked);
+            (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("k-err"))
+                .then(|| r.field(3).and_then(|p| p.field(2)).and_then(|m| m.string()).unwrap_or_default())
+        }) {
+            return Ok(format!("!! check: {m}"));
+        }
+        let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
+        let result = s.call_global(&format!("{READER_PREFIX}compile-program"), &[tops, facts]).map_err(|e| fail(e.to_string()))?;
         let (tag, word) = s.view(|v| {
             let r = v.get(result);
             let tag = r.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();
@@ -101,9 +112,57 @@ pub fn compile_with_fx26_compiler(scheme: &mut Session, file: FileId, text: &str
     })
 }
 
-/// The parser's trees for `text`: a list of `top`s, as a handle in the
-/// caller's scope.
-fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
+/// What the checker written in FX-26 made of a program: for each definition
+/// and expression, in order, `define name : type ! effect` or `type !
+/// effect`; or its first error.
+pub type Checked26 = Result<Vec<String>, FxError>;
+
+/// Read, parse and check `text` with the reader, the parser and the checker
+/// written in FX-26, in the initial environment of [`crate::standard`].
+/// The outer error is the front end failing to read or parse.
+pub fn check_with_fx26_checker(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<Checked26> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    // With `FIXPT_TIME_PHASES` set, how long each phase took.
+    let timing = std::env::var_os("FIXPT_TIME_PHASES").is_some();
+    let started = std::time::Instant::now();
+    let phase = |name: &str| {
+        if timing {
+            eprintln!("check-program: {name} at {:.3} s", started.elapsed().as_secs_f64());
+        }
+    };
+    scheme.scope(|s| {
+        let tops = parse_to_trees(s, file, text)?;
+        phase("program parsed");
+        let result = s.call_global(&format!("{READER_PREFIX}check-program"), &[standard, tops]).map_err(|e| fail(e.to_string()))?;
+        phase("checked");
+        let offsets = byte_offsets(text);
+        let at = |c: i64| offsets.get(c as usize).copied().unwrap_or(text.len()) as u32;
+        Ok(s.view(|v| {
+            let r = v.get(result);
+            let tag = r.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();
+            let p = r.field(3).expect("a sum");
+            if tag == "k-ok" {
+                let lines = p.field(2).and_then(|l| l.list()).unwrap_or_default();
+                Ok(lines.into_iter().map(|l| l.string().unwrap_or_default()).collect())
+            } else {
+                let message = p.field(2).and_then(|m| m.string()).unwrap_or_default();
+                let (a, b) = (p.field(3).and_then(|x| x.fixnum()).unwrap_or(0), p.field(4).and_then(|x| x.fixnum()).unwrap_or(0));
+                Err(FxError::at(Span::new(file, at(a), at(b)), message))
+            }
+        }))
+    })
+}
+
+/// The initial environment of [`crate::standard`], read by the FX-26
+/// reader, as `(name type)` for each binding: what `check-program` takes.
+pub fn read_standard(scheme: &mut Session) -> R<Handle> {
+    let text: String = crate::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    read_to_syns(scheme, FileId(0), &text)
+}
+
+/// What the FX-26 reader reads from `text`: a list of `syn`s, as a handle
+/// in the caller's scope.
+pub fn read_to_syns(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut reader =
         EagerReader::attach_starting(scheme, READER_PREFIX, "eager-start-fx26").map_err(|e| fail(e.to_string()))?;
@@ -113,8 +172,15 @@ fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     if scheme.view(|v| v.get(status).symbol_name()).as_deref() != Some("complete") {
         return Err(fail("the FX-26 reader did not read the whole text".into()));
     }
-    let syns = scheme.call_global(&name("eager-state-syntax"), &[st]).map_err(|e| fail(e.to_string()))?;
-    let result = scheme.call_global(&name("parse-program"), &[syns]).map_err(|e| fail(e.to_string()))?;
+    scheme.call_global(&name("eager-state-syntax"), &[st]).map_err(|e| fail(e.to_string()))
+}
+
+/// The parser's trees for `text`: a list of `top`s, as a handle in the
+/// caller's scope.
+fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let syns = read_to_syns(scheme, file, text)?;
+    let result = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[syns]).map_err(|e| fail(e.to_string()))?;
     let (tag, err) = scheme.view(|v| {
         let r = v.get(result);
         let tag = r.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();

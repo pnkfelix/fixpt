@@ -29,6 +29,9 @@ pub struct Fx26Session {
     pub globals: Globals,
     /// How checked forms run.
     pub strategy: Strategy,
+    /// The initial environment as the FX-26 reader read it, for the checker
+    /// written in FX-26: read once, as it takes the reader a while.
+    standard26: Option<fixpt_scheme::Handle>,
 }
 
 /// The budget for one speculative run: enough for a REPL-sized
@@ -175,7 +178,7 @@ impl Fx26Session {
             .eval_str("<fx26-runtime>", RUNTIME)
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
-        Ok(Fx26Session { checker: Checker::new(), scheme, globals: Globals::default(), strategy: Strategy::Lower })
+        Ok(Fx26Session { checker: Checker::new(), scheme, globals: Globals::default(), strategy: Strategy::Lower, standard26: None })
     }
 
     /// Check one top-level form and lower it, without running it.
@@ -316,6 +319,31 @@ impl Fx26Session {
         r
     }
 
+    /// The initial environment as the FX-26 reader reads it, read once.
+    fn standard26(&mut self) -> R<fixpt_scheme::Handle> {
+        if let Some(h) = self.standard26 {
+            return Ok(h);
+        }
+        // Outside any scope, so it lasts as the session does.
+        let h = crate::syn::read_standard(&mut self.scheme)?;
+        self.standard26 = Some(h);
+        Ok(h)
+    }
+
+    /// Check `text` with the checker written in FX-26 (read and parsed in
+    /// FX-26 too): see [`crate::syn::check_with_fx26_checker`].
+    pub fn check_with_own_checker(&mut self, text: &str) -> R<crate::syn::Checked26> {
+        if !self.scheme.is_bound(&format!("{READER_PREFIX}check-program")) {
+            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
+        }
+        // Generous, but a checker that loops is an error, not a hang.
+        self.scheme.engine.set_step_limit(Some(2_000_000_000));
+        let standard = self.standard26()?;
+        let r = crate::syn::check_with_fx26_checker(&mut self.scheme, standard, FileId(0), text);
+        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        r
+    }
+
     /// Compile `text` to a threaded word with the compiler written in FX-26
     /// (read and parsed in FX-26 too), and run it on the threaded machine:
     /// its value as Scheme would write it, or `!! ` and why not.
@@ -324,7 +352,8 @@ impl Fx26Session {
             load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
         }
         self.scheme.engine.set_step_limit(None);
-        let r = crate::syn::compile_with_fx26_compiler(&mut self.scheme, FileId(0), text);
+        let standard = self.standard26()?;
+        let r = crate::syn::compile_with_fx26_compiler(&mut self.scheme, standard, FileId(0), text);
         self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
         r
     }

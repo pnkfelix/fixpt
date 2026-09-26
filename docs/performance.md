@@ -155,6 +155,25 @@ What it says:
   FX-26, lowered to Scheme, on the VM. It is the reference, not a way to
   run things.
 
+## The checker written in FX-26, on the front end (C10)
+
+`PROBE_FILE=front-end FIXPT_TIME_PHASES=1 cargo test -p fixpt-fx26 --test
+checker probe_file -- --ignored --nocapture`: the whole front end (reader,
+parser, checker, tables, evaluator, compiler; 4,660 lines, 738 top-level
+forms), checked by each checker. Debug build, one run:
+
+| checker                                        | time   |
+| ---------------------------------------------- | ------ |
+| Rust (`Checker`, reading with the Rust reader) | 0.96 s |
+| FX-26: reading and parsing, in FX-26           | 63 s   |
+| FX-26: checking, lowered to Scheme, on the VM  | 317 s  |
+
+Both say the same about every form. The FX-26 checker is about 330 times
+slower. It takes after the Rust checker, which recomputes each
+expression's free variables at every mask, with linear environments and
+lists for sets. On the Scheme VM, that is quadratic work paid many times
+over. `table.fx` alone (110 lines) takes 0.86 s against 0.01 s.
+
 ## The eager reader in FX-26, building syntax with positions (B8)
 
 `cargo test -p fixpt-fx26 --test eager` (debug, whole suite, 9 tests),

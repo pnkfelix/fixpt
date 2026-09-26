@@ -692,7 +692,24 @@ one.)*
      product's field order, which only its type says: it waits for step
      10. Control waits for the machine's continuations.)*
 10. **The FX-26 checker written in FX-26**, over the 9a AST, checked against
-    the Rust checker on every test program: FX-26 checking FX-26.
+    the Rust checker on every test program: FX-26 checking FX-26. *(Done
+    2026-09-26: `src/check.fx`, the Rust checker's rules and messages,
+    with inference, prompts, bloblets, sums and the two-pass top level.
+    Descriptions are read from the parser's syntax in the Rust parser's
+    order, so the first error is the same. Compared, up to the order of
+    atoms in a `maxeff`, on every test program and on every program
+    written into the crate's tests: 170 agree, 90 of them rejections,
+    each with the same message at the same place. On the whole front end,
+    itself included, it agrees on all 738 forms, at about 330 times the
+    Rust checker's time (`docs/performance.md`). With it came:*
+    - *`define-datatype` in the FX-26 parser, expanded as `top.rs` does;*
+    - *`extract` in the FX-26 compiler, from the field positions the
+      checker records, so the compiler now compiles checked programs;*
+    - *the rest of the standard library in the compiler, from a table
+      generated from the lowering's (`src/standard.fx`).*
+
+    *With these, every program in the tests that checks (80) compiles and
+    runs as it does lowered.)*
 11. **Native code from FX-26**: a word's cells compiled to machine code, by
     an encoder written in FX-26 (the Rust one its oracle) or by placing
     stencils, and installed as the word's entry routine, one word at a time,

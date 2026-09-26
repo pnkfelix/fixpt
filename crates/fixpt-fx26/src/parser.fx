@@ -5,7 +5,7 @@
 ;;; node for node and span for span, so the two can be compared. Descriptions
 ;;; (types, effects, regions, binders) are kept as the syntax they were
 ;;; written in: the evaluator and the compiler do not need them, and the
-;;; checker written in FX-26 (step 10) will parse them.
+;;; checker written in FX-26 (`check.fx`) reads them itself.
 ;;;
 ;;; Compiled with the reader, as one program: `syn` is in the reader's region
 ;;; @s, which only this program can name. The trees are in @a, and a parse
@@ -15,7 +15,7 @@
 (private-regions @a @p)
 
 ;; What a parse may do: read what was read, build a tree, and give up.
-(define-effect parses (maxeff (read @s) (read @a) (alloc @a) (goto @p)))
+(define-effect parses (maxeff (read @s) (alloc @s) (read @a) (alloc @a) (goto @p)))
 
 (define-type syns-a (listof syn @a))
 (define-type names (listof symbol @a))
@@ -61,7 +61,7 @@
 
 (define-datatype presult (p-ok (listof top @a)) (p-err string int int))
 
-(define parse-tag (prompt-tag presult presult (maxeff (read @s) (read @a) (alloc @a)) @p)
+(define parse-tag (prompt-tag presult presult (maxeff (read @s) (alloc @s) (read @a) (alloc @a)) @p)
   (make-continuation-prompt-tag))
 
 ;;; -------------------------------------------------------- looking at syn
@@ -389,8 +389,80 @@
              (t-private-regions (keep (cdr (syn-items s "private-regions"))) (syn-start s) (syn-end s)))
             (else (t-exp (parse-exp s)))))))
 
+;;; FX-91's `(define-datatype name (tag type …) …)`, expanded as the Rust
+;;; reader expands it (`top.rs`): a sum of products, each variant's members
+;;; labelled from 1, and a constructor per tag, `(tag e …)`. What it makes
+;;; is written where the form is.
+
+(define datatype? (subr (read @s) (syn) bool)
+  (lambda (s) (tagcase s (lst (items d a b) (and (not (null? items)) (string=? (syn-name (car items)) "define-datatype"))) (else x #f))))
+
+(define mk-symbol (subr pure (string int int) syn) (lambda (n a b) (atom (datum-symbol n) a b)))
+(define mk-int (subr pure (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
+(define syn-datums (subr (maxeff (read @s) (alloc @a)) ((listof syn @s)) (listof datum @a))
+  (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
+(define mk-list (subr (maxeff (read @s) (read @a) (alloc @a)) ((listof syn @s) int int) syn)
+  (lambda (items a b) (lst items (datum-list (syn-datums items)) a b)))
+
+;; `(1 m1) (2 m2) …`, from `i`.
+(define dt-labelled (subr (maxeff (read @s) (alloc @s) (read @a) (alloc @a)) ((listof syn @s) int int int) (listof syn @s))
+  (lambda (ms i a b)
+    (if (null? ms)
+        nil
+        (let* ((pair (mk-list (cons (mk-int i a b) (cons (car ms) nil)) a b)) (rest (dt-labelled (cdr ms) (+ i 1) a b)))
+          (cons pair rest)))))
+(define dt-arms (subr parses ((listof syn @s) int int) (listof syn @s))
+  (lambda (vs a b)
+    (if (null? vs)
+        nil
+        (let* ((v (car vs)) (parts (syn-items v "a variant")))
+          (if (or (null? parts) (not (syn-symbol? (car parts))))
+              (pfail "a variant is `(tag type …)`" v)
+              (let* ((prod (mk-list (cons (mk-symbol "productof" a b) (dt-labelled (cdr parts) 1 a b)) a b))
+                     (arm (mk-list (cons (car parts) (cons prod nil)) a b))
+                     (rest (dt-arms (cdr vs) a b)))
+                (cons arm rest)))))))
+(define dt-params (subr (maxeff (read @s) (alloc @a)) ((listof syn @s) int) (listof (productof (1 symbol) (2 syns-a)) @a))
+  (lambda (ms i)
+    (if (null? ms)
+        nil
+        (cons (product (1 (string->symbol (string-append "%x" (int->string i)))) (2 (the syns-a nil))) (dt-params (cdr ms) (+ i 1))))))
+(define dt-fields (subr (maxeff (read @s) (alloc @a)) ((listof syn @s) int int int) (listof (productof (1 symbol) (2 exp)) @a))
+  (lambda (ms i a b)
+    (if (null? ms)
+        nil
+        (cons (product (1 (string->symbol (int->string i))) (2 (e-var (string->symbol (string-append "%x" (int->string i))) a b)))
+              (dt-fields (cdr ms) (+ i 1) a b)))))
+(define dt-constructors (subr parses (syn (listof syn @s) int int) (listof top @a))
+  (lambda (name vs a b)
+    (if (null? vs)
+        nil
+        (let* ((parts (syn-items (car vs) "a variant"))
+               (tag (car parts))
+               (members (cdr parts))
+               (ty (mk-list (cons (mk-symbol "subr" a b) (cons (mk-symbol "pure" a b) (cons (mk-list members a b) (cons name nil)))) a b))
+               (body (e-sum (syn-symbol tag) (e-product (dt-fields members 1 a b) a b) a b))
+               (ctor (t-define (syn-symbol tag) (the syns-a (cons ty nil)) (e-lambda (dt-params members 1) body a b) a b))
+               (rest (dt-constructors name (cdr vs) a b)))
+          (cons ctor rest)))))
+(define parse-datatype (subr parses (syn) (listof top @a))
+  (lambda (s)
+    (let* ((items (syn-items s "a datatype")) (a (syn-start s)) (b (syn-end s)))
+      (if (or (< (len items) 3) (not (syn-symbol? (nth items 1))))
+          (pfail "`(define-datatype name (tag type …) …)`" s)
+          (let* ((name (nth items 1))
+                 (sum (mk-list (cons (mk-symbol "sumof" a b) (dt-arms (drop items 2) a b)) a b))
+                 (ctors (dt-constructors name (drop items 2) a b)))
+            (cons (t-define-type name sum a b) ctors))))))
+
+(define append-tops (subr (maxeff (read @a) (alloc @a)) ((listof top @a) (listof top @a)) (listof top @a))
+  (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))
+
 (define parse-tops (subr parses ((listof syn @s)) (listof top @a))
-  (lambda (xs) (if (null? xs) nil (cons (parse-top (car xs)) (parse-tops (cdr xs))))))
+  (lambda (xs)
+    (cond ((null? xs) nil)
+          ((datatype? (car xs)) (let* ((made (parse-datatype (car xs))) (rest (parse-tops (cdr xs)))) (append-tops made rest)))
+          (else (let* ((t (parse-top (car xs))) (rest (parse-tops (cdr xs)))) (cons t rest))))))
 
 ;; The entry point: a program's forms, as read, to trees or an error. The
 ;; prompt catches every failure, but its tag is a global whose type names

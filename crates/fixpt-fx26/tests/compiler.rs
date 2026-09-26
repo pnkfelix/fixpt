@@ -50,19 +50,23 @@ fn test_programs() {
     }
 }
 
-/// What the compiler cannot do yet, it says, rather than miscompiling.
+/// `extract` takes its field from what the checker written in FX-26 found;
+/// a program that does not check is not compiled; a run-time error is
+/// reported as one.
 #[test]
-fn what_is_not_compiled_yet_says_so() {
+fn extract_and_errors() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    let out = s.compile_with_own_compiler("(extract (product (a 1)) a)").expect("parses");
-    assert!(out.starts_with("!! compile: not yet compiled: extract"), "{out}");
+    let out = s.compile_with_own_compiler("(extract (product (a 1) (b \"two\") (c #t)) b)").expect("parses");
+    assert_eq!(out, "\"two\"");
+    let out = s.compile_with_own_compiler("(extract (product (a 1)) b)").expect("parses");
+    assert!(out.starts_with("!! check: a (productof (a int)) has no `b`"), "{out}");
     let out = s.compile_with_own_compiler("(car (the (listof int @l) nil))").expect("parses");
     assert!(out.starts_with("!! "), "a run-time error is reported: {out}");
 }
 
 /// Every test program that checks, control ones included, compiled and run
 /// on the threaded machine against the lowering; disagreements reported
-/// together. Programs with `extract` wait for the checker written in FX-26.
+/// together.
 #[test]
 fn every_program_compiled() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
@@ -73,9 +77,6 @@ fn every_program_compiled() {
         names.sort();
         for path in names {
             let program = std::fs::read_to_string(&path).unwrap();
-            if program.contains("(extract") || program.contains("define-datatype") {
-                continue;
-            }
             let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
             let lowered = match s.run_program(&program) {
                 Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
@@ -91,9 +92,9 @@ fn every_program_compiled() {
         }
     }
     assert!(report.is_empty(), "{} of {ran} disagree:\n{}", report.len(), report.join("\n"));
-    // The corpus has 14 that check and need no `extract`; fewer means the
-    // test stopped finding them.
-    assert!(ran >= 14, "only {ran} programs ran");
+    // The corpus has 15 that check; fewer means the test stopped finding
+    // them.
+    assert!(ran >= 15, "only {ran} programs ran");
 }
 
 /// The same programs, compiled once more and run on each machine: the
@@ -112,9 +113,6 @@ fn every_program_on_every_machine() {
         names.sort();
         for path in names {
             let program = std::fs::read_to_string(&path).unwrap();
-            if program.contains("(extract") || program.contains("define-datatype") {
-                continue;
-            }
             let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
             let lowered = match s.run_program(&program) {
                 Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),

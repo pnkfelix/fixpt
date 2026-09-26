@@ -31,11 +31,18 @@ pub const EVALUATOR: &str = include_str!("evaluator.fx");
 /// The compiler from FX-26 to threaded words, written in FX-26.
 pub const COMPILER: &str = include_str!("compile.fx");
 
-/// The reader, the parser, the tables, the evaluator and the compiler
-/// written in FX-26, with the layout they share, as one program: each
-/// needs the types of the one before.
+/// The standard operations the compiler written in FX-26 runs as runtime
+/// primitives, generated from the lowering's table.
+pub const STANDARD_OPS: &str = include_str!("standard.fx");
+
+/// The checker written in FX-26, over the parser's trees.
+pub const CHECKER: &str = include_str!("check.fx");
+
+/// The reader, the parser, the checker, the tables, the evaluator and the
+/// compiler written in FX-26, with the layout they share, as one program:
+/// each needs the types of the ones before.
 pub fn front_end() -> String {
-    format!("{EAGER_READER}\n{PARSER}\n{TABLE}\n{EVALUATOR}\n{LAYOUT}\n{COMPILER}")
+    format!("{EAGER_READER}\n{PARSER}\n{CHECKER}\n{TABLE}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}")
 }
 
 /// The object layout, generated from `fixpt_heap::layout`: tags, header
