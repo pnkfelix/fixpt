@@ -147,6 +147,8 @@ pub const KINDS: &[Kind] = &[
     // A closure made by threaded code: `layout::threaded::CLOSURE_WORD` and
     // `CLOSURE_FRAME`. Its own kind, so no engine takes it for one of its.
     Kind { name: "threaded-closure", code: 38, traced: true },
+    // A continuation captured by threaded code: `layout::threaded::CONT_*`.
+    Kind { name: "threaded-continuation", code: 39, traced: true },
 ];
 
 pub const KIND_EXTENSION: u8 = 255;
@@ -282,6 +284,18 @@ pub mod threaded {
         ("tailcall", "( x1 … xn c -- r ), the same, the x's replacing this frame"),
         ("return", "( … r -- r ), leave this frame, keeping r, and return"),
         ("prim", "( x1 … xn -- r ), the runtime's primitive p; p and n the next cells"),
+        // Control, on the return stack: a prompt is two entries, where to
+        // resume and a marker (tag, handler, data stack height); a mark is
+        // one entry. A captured continuation copies the stacks above its
+        // prompt (`CONT_*`).
+        ("prompt", "( tag handler thunk -- r ), run the thunk under a prompt for tag"),
+        ("abort", "( tag v -- ), to the nearest prompt for tag, whose handler gets v"),
+        ("callcomp", "( proc tag -- r ), call proc with the continuation up to tag's prompt"),
+        ("callcc", "( proc -- r ), call proc with the whole continuation"),
+        ("withmark", "( key v thunk -- r ), run the thunk with key marked v"),
+        ("firstmark", "( key default -- v ), the innermost mark for key"),
+        ("currentmarks", "( key -- list ), every mark for key, innermost first"),
+        ("marksof", "( k key -- list ), the marks for key in continuation k"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 
@@ -311,6 +325,20 @@ pub mod threaded {
     /// runs, then free value `i` at `CLOSURE_FREE0 + i`, each one load.
     pub const CLOSURE_WORD: usize = 2;
     pub const CLOSURE_FREE0: usize = 3;
+
+    /// A threaded continuation's fields: the data stack's values and the
+    /// return stack's entries it took (vectors), where it was (word, `k`,
+    /// frame pointer, closure), the data stack's height it started at, and
+    /// whether it is the whole continuation (`callcc`) or delimited.
+    pub const CONT_DS: usize = 2;
+    pub const CONT_RS: usize = 3;
+    pub const CONT_CUR: usize = 4;
+    pub const CONT_K: usize = 5;
+    pub const CONT_FP: usize = 6;
+    pub const CONT_CLO: usize = 7;
+    pub const CONT_BASE: usize = 8;
+    pub const CONT_WHOLE: usize = 9;
+    pub const CONT_FIELDS: usize = 8;
 
     pub const fn routine(name: &str) -> u64 {
         let mut i = 0;

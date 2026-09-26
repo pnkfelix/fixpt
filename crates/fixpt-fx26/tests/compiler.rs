@@ -59,3 +59,39 @@ fn what_is_not_compiled_yet_says_so() {
     let out = s.compile_with_own_compiler("(car (the (listof int @l) nil))").expect("parses");
     assert!(out.starts_with("!! "), "a run-time error is reported: {out}");
 }
+
+/// Every test program that checks, control ones included, compiled and run
+/// on the threaded machine against the lowering; disagreements reported
+/// together. Programs with `extract` wait for the checker written in FX-26.
+#[test]
+fn every_program_compiled() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let mut report = Vec::new();
+    let mut ran = 0;
+    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet"] {
+        let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
+        names.sort();
+        for path in names {
+            let program = std::fs::read_to_string(&path).unwrap();
+            if program.contains("(extract") || program.contains("define-datatype") {
+                continue;
+            }
+            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+            let lowered = match s.run_program(&program) {
+                Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
+                Err(_) => continue, // written to be rejected
+            };
+            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+            let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
+            ran += 1;
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if compiled.as_deref() != Ok(lowered.as_str()) {
+                report.push(format!("{sub}/{name}: compiled {compiled:?}, lowered {lowered:?}"));
+            }
+        }
+    }
+    assert!(report.is_empty(), "{} of {ran} disagree:\n{}", report.len(), report.join("\n"));
+    // The corpus has 14 that check and need no `extract`; fewer means the
+    // test stopped finding them.
+    assert!(ran >= 14, "only {ran} programs ran");
+}

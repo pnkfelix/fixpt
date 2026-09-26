@@ -233,7 +233,9 @@ fn put(
         None if v.is_bloblet() => {
             let h = heap.bloblet_head(v);
             let kind = fixpt_heap::layout::KINDS.iter().find(|k| k.code == h.kind).map_or("?", |k| k.name);
-            if kind == "sum" {
+            if kind == "threaded-continuation" {
+                out.push_str("#<continuation>");
+            } else if kind == "sum" {
                 let tag = heap.bloblet_slot(v, 2);
                 out.push_str(&format!("#<sum {}>", write_value(heap, tag)));
             } else if kind == "product" {

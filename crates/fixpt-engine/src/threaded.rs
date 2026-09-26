@@ -20,7 +20,8 @@
 
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::threaded::{
-    CLOSURE_FREE0, CLOSURE_WORD, KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
+    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_WHOLE,
+    KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
 };
 use fixpt_heap::{Heap, Value};
 use fixpt_runtime::{PrimKind, Runtime};
@@ -321,10 +322,20 @@ struct Regs {
     clo: Value,
 }
 
+/// In a return entry's first place, where a word would be: this entry is a
+/// prompt's marker `(PROMPT_MARK, tag, handler, fixnum data stack height)`,
+/// just above the entry it resumes at when the prompt is left.
+const PROMPT_MARK: Value = Value::DEFAULT;
+/// ... or a continuation mark, `(MARK_MARK, key, value, 0)`, just above the
+/// entry it resumes at.
+const MARK_MARK: Value = Value::UNSPECIFIED;
+
 /// The Rust inner interpreter's machine state.
 pub struct Machine {
     pub ds: Vec<Value>,
     rs: Vec<Value>,
+    /// Where this run's return stack begins: control never reaches below.
+    rs_floor: usize,
     /// Cells run, for measurement.
     pub steps: u64,
     /// Cells left to run before the machine traps with `OutOfFuel`, so that
@@ -334,7 +345,7 @@ pub struct Machine {
 
 impl Default for Machine {
     fn default() -> Machine {
-        Machine { ds: Vec::new(), rs: Vec::new(), steps: 0, fuel: u64::MAX }
+        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX }
     }
 }
 
@@ -360,6 +371,7 @@ impl Machine {
 
     fn run_in(&mut self, cx: &mut Ctx, word: Value) -> Result<(), Trap> {
         let base = self.rs.len();
+        self.rs_floor = base;
         let mut r = Regs { cur: Value::FALSE, k: 0, fp: self.ds.len(), clo: Value::FALSE };
         if !self.enter(cx, word, &mut r)? {
             return Ok(());
@@ -396,11 +408,123 @@ impl Machine {
         self.rs.push(r.clo);
     }
 
+    /// Return to the entry on top; a prompt's marker or a mark on the way
+    /// is left behind, as its body is returning through it.
     fn pop_return(&mut self, r: &mut Regs) {
-        r.clo = self.rs.pop().expect("an entry");
-        r.fp = self.rs.pop().expect("an entry").as_fixnum() as usize;
-        r.k = self.rs.pop().expect("an entry").as_fixnum() as usize;
-        r.cur = self.rs.pop().expect("an entry");
+        loop {
+            let n = self.rs.len();
+            let cur = self.rs[n - 4];
+            if cur == PROMPT_MARK || cur == MARK_MARK {
+                self.rs.truncate(n - 4);
+                continue;
+            }
+            r.clo = self.rs.pop().expect("an entry");
+            r.fp = self.rs.pop().expect("an entry").as_fixnum() as usize;
+            r.k = self.rs.pop().expect("an entry").as_fixnum() as usize;
+            r.cur = self.rs.pop().expect("an entry");
+            return;
+        }
+    }
+
+    /// Where the innermost entry marked `sentinel` for `key` starts, above
+    /// `floor`.
+    fn find_marked(rs: &[Value], floor: usize, sentinel: Value, key: Value) -> Option<usize> {
+        let mut i = rs.len();
+        while i >= floor + 4 {
+            i -= 4;
+            if rs[i] == sentinel && rs[i + 1] == key {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Every value marked for `key` in `rs`, innermost first.
+    fn marks_in(rs: &[Value], floor: usize, key: Value) -> Vec<Value> {
+        let mut out = Vec::new();
+        let mut i = rs.len();
+        while i >= floor + 4 {
+            i -= 4;
+            if rs[i] == MARK_MARK && rs[i + 1] == key {
+                out.push(rs[i + 2]);
+            }
+        }
+        out
+    }
+
+    /// Run closure `thunk` with no arguments above a marker entry: its
+    /// frame, the marker's `(sentinel, a, b, c)`, and where to resume after.
+    fn enter_above(&mut self, heap: &Heap, r: &mut Regs, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
+        if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == kind("threaded-closure")) {
+            return Err(Trap::Type { routine });
+        }
+        self.check_limits()?;
+        self.push_return(r);
+        self.rs.extend_from_slice(&marker);
+        (r.cur, r.k, r.fp, r.clo) = (heap.bloblet_slot(thunk, CLOSURE_WORD), WORD_CELL0, self.ds.len(), thunk);
+        Ok(())
+    }
+
+    /// A continuation of the stacks from `rs_from` and `ds_from` up, and of
+    /// `r`; `whole` when it is everything (`callcc`).
+    fn capture(&mut self, heap: &mut Heap, r: &mut Regs, rs_from: usize, ds_from: usize, whole: bool) -> Value {
+        let ds = heap.vector_from(&self.ds[ds_from..]);
+        let rs = heap.vector_from(&self.rs[rs_from..]);
+        let k = heap.make_bloblet(kind("threaded-continuation"), CONT_FIELDS, 0, true);
+        let fields = [
+            (CONT_DS, ds),
+            (CONT_RS, rs),
+            (CONT_CUR, r.cur),
+            (CONT_K, Value::fixnum(r.k as i64)),
+            (CONT_FP, Value::fixnum(r.fp as i64)),
+            (CONT_CLO, r.clo),
+            (CONT_BASE, Value::fixnum(ds_from as i64)),
+            (CONT_WHOLE, Value::boolean(whole)),
+        ];
+        for (f, v) in fields {
+            heap.set_bloblet_slot(k, f, v);
+        }
+        k
+    }
+
+    /// Give continuation `k` the value `v`. A delimited one is composed: its
+    /// stacks go on top of these, frame pointers and prompts' heights moved
+    /// by the difference in depth, and it returns here; or, from a tail
+    /// call, to this frame's caller, this frame dropped, as a tail call of a
+    /// closure does. A whole one replaces these stacks.
+    fn reinstate(&mut self, heap: &Heap, r: &mut Regs, k: Value, v: Value, tail: bool) {
+        let ds = heap.bloblet_slot(k, CONT_DS);
+        let rs = heap.bloblet_slot(k, CONT_RS);
+        let whole = heap.bloblet_slot(k, CONT_WHOLE) == Value::TRUE;
+        let old_base = heap.bloblet_slot(k, CONT_BASE).as_fixnum();
+        if whole {
+            self.ds.clear();
+            self.rs.truncate(self.rs_floor);
+        } else if tail {
+            self.ds.truncate(r.fp);
+        } else {
+            self.push_return(r);
+        }
+        let delta = self.ds.len() as i64 - old_base;
+        let n = heap.obj_len(ds);
+        for i in 0..n {
+            self.ds.push(heap.obj_ref(ds, i));
+        }
+        let n = heap.obj_len(rs);
+        for e in 0..n / 4 {
+            let mut entry = [heap.obj_ref(rs, 4 * e), heap.obj_ref(rs, 4 * e + 1), heap.obj_ref(rs, 4 * e + 2), heap.obj_ref(rs, 4 * e + 3)];
+            if entry[0] == PROMPT_MARK {
+                entry[3] = Value::fixnum(entry[3].as_fixnum() + delta);
+            } else if entry[0] != MARK_MARK {
+                entry[2] = Value::fixnum(entry[2].as_fixnum() + delta);
+            }
+            self.rs.extend_from_slice(&entry);
+        }
+        r.cur = heap.bloblet_slot(k, CONT_CUR);
+        r.k = heap.bloblet_slot(k, CONT_K).as_fixnum() as usize;
+        r.fp = (heap.bloblet_slot(k, CONT_FP).as_fixnum() + delta) as usize;
+        r.clo = heap.bloblet_slot(k, CONT_CLO);
+        self.ds.push(v);
     }
 
     /// Run word `w` as a call from `r`: push the return entry and enter it
@@ -464,6 +588,15 @@ impl Machine {
         }
         let heap = cx.heap();
         let c = self.ds.pop().expect("counted");
+        if c.is_bloblet() && heap.bloblet_kind(c) == kind("threaded-continuation") {
+            if n != 1 {
+                return Err(Trap::Prim(format!("a continuation takes one value, and was given {n}")));
+            }
+            let v = self.ds.pop().expect("counted");
+            self.check_limits()?;
+            self.reinstate(heap, r, c, v, tail);
+            return Ok(());
+        }
         if !(c.is_bloblet() && heap.bloblet_kind(c) == kind("threaded-closure")) {
             return Err(Trap::Type { routine });
         }
@@ -670,6 +803,87 @@ impl Machine {
                     Err(t) => return Err(Trap::Prim(describe(rt, t.obj))),
                 }
             }
+            PROMPT => {
+                let thunk = self.pop(name)?;
+                let handler = self.pop(name)?;
+                let tag = self.pop(name)?;
+                let height = Value::fixnum(self.ds.len() as i64);
+                self.enter_above(cx.heap(), r, thunk, [PROMPT_MARK, tag, handler, height], name)?;
+            }
+            WITHMARK => {
+                let thunk = self.pop(name)?;
+                let v = self.pop(name)?;
+                let key = self.pop(name)?;
+                self.enter_above(cx.heap(), r, thunk, [MARK_MARK, key, v, Value::fixnum(0)], name)?;
+            }
+            ABORT => {
+                let v = self.pop(name)?;
+                let tag = self.pop(name)?;
+                let Some(at) = Self::find_marked(&self.rs, self.rs_floor, PROMPT_MARK, tag) else {
+                    return Err(Trap::Prim("abort: no prompt for this tag".into()));
+                };
+                let handler = self.rs[at + 2];
+                let height = self.rs[at + 3].as_fixnum() as usize;
+                self.rs.truncate(at);
+                self.pop_return(r);
+                self.ds.truncate(height);
+                self.ds.push(v);
+                self.ds.push(handler);
+                self.call(cx, r, 1, false, name)?;
+            }
+            CALLCOMP | CALLCC => {
+                let (proc_, at) = if n == CALLCOMP {
+                    let tag = self.pop(name)?;
+                    let proc_ = self.pop(name)?;
+                    let Some(at) = Self::find_marked(&self.rs, self.rs_floor, PROMPT_MARK, tag) else {
+                        return Err(Trap::Prim("call-with-composable-continuation: no prompt for this tag".into()));
+                    };
+                    (proc_, Some(at))
+                } else {
+                    (self.pop(name)?, None)
+                };
+                self.ds.push(proc_);
+                self.safepoint(cx.heap(), r);
+                let proc_ = self.ds.pop().expect("pushed");
+                let heap = cx.heap();
+                let k = match at {
+                    Some(at) => {
+                        let height = self.rs[at + 3].as_fixnum() as usize;
+                        self.capture(heap, r, at + 4, height, false)
+                    }
+                    None => self.capture(heap, r, self.rs_floor, 0, true),
+                };
+                self.ds.push(k);
+                self.ds.push(proc_);
+                self.call(cx, r, 1, false, name)?;
+            }
+            FIRSTMARK => {
+                let default = self.pop(name)?;
+                let key = self.pop(name)?;
+                let v = match Self::find_marked(&self.rs, self.rs_floor, MARK_MARK, key) {
+                    Some(at) => self.rs[at + 2],
+                    None => default,
+                };
+                self.ds.push(v);
+            }
+            CURRENTMARKS | MARKSOF => {
+                let key = self.pop(name)?;
+                let marks = if n == CURRENTMARKS {
+                    Self::marks_in(&self.rs, self.rs_floor, key)
+                } else {
+                    let k = self.pop(name)?;
+                    let heap = cx.heap();
+                    if !(k.is_bloblet() && heap.bloblet_kind(k) == kind("threaded-continuation")) {
+                        return Err(Trap::Type { routine: name });
+                    }
+                    let rs = heap.bloblet_slot(k, CONT_RS);
+                    let entries: Vec<Value> = (0..heap.obj_len(rs)).map(|i| heap.obj_ref(rs, i)).collect();
+                    Self::marks_in(&entries, 0, key)
+                };
+                let heap = cx.heap();
+                let list = heap.list_from(&marks);
+                self.ds.push(list);
+            }
             _ => return Err(Trap::NoRoutine(n)),
         }
         Ok(Flow::Next)
@@ -723,6 +937,14 @@ const CLOSURE: i64 = routine("closure") as i64;
 const CALL: i64 = routine("call") as i64;
 const TAILCALL: i64 = routine("tailcall") as i64;
 const PRIM: i64 = routine("prim") as i64;
+const PROMPT: i64 = routine("prompt") as i64;
+const ABORT: i64 = routine("abort") as i64;
+const CALLCOMP: i64 = routine("callcomp") as i64;
+const CALLCC: i64 = routine("callcc") as i64;
+const WITHMARK: i64 = routine("withmark") as i64;
+const FIRSTMARK: i64 = routine("firstmark") as i64;
+const CURRENTMARKS: i64 = routine("currentmarks") as i64;
+const MARKSOF: i64 = routine("marksof") as i64;
 
 enum Flow {
     Next,

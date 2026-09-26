@@ -59,6 +59,7 @@
 (define kind-sum int 36)
 (define kind-product int 37)
 (define kind-threaded-closure int 38)
+(define kind-threaded-continuation int 39)
 (define kind-extension int 255)
 
 ;;; A closure's fields, and an environment frame's, by negative offset.
@@ -111,3 +112,11 @@
 (define routine-tailcall int 27)  ; ( x1 … xn c -- r ), the same, the x's replacing this frame
 (define routine-return int 28)  ; ( … r -- r ), leave this frame, keeping r, and return
 (define routine-prim int 29)  ; ( x1 … xn -- r ), the runtime's primitive p; p and n the next cells
+(define routine-prompt int 30)  ; ( tag handler thunk -- r ), run the thunk under a prompt for tag
+(define routine-abort int 31)  ; ( tag v -- ), to the nearest prompt for tag, whose handler gets v
+(define routine-callcomp int 32)  ; ( proc tag -- r ), call proc with the continuation up to tag's prompt
+(define routine-callcc int 33)  ; ( proc -- r ), call proc with the whole continuation
+(define routine-withmark int 34)  ; ( key v thunk -- r ), run the thunk with key marked v
+(define routine-firstmark int 35)  ; ( key default -- v ), the innermost mark for key
+(define routine-currentmarks int 36)  ; ( key -- list ), every mark for key, innermost first
+(define routine-marksof int 37)  ; ( k key -- list ), the marks for key in continuation k

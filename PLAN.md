@@ -664,10 +664,15 @@ one.)*
      runtime's primitives. Words are checked in one place,
      `Heap::make_threaded_word`, for the builder, `%make-word` and FX-26
      alike; `%run-word` runs one through `Runtime::run_word`. The native
-     machines trap on the new routines until 9c's native half. Still to
-     do: control (continuations by copying stack segments, which the
-     all-Values stacks allow) and boxing assigned captured variables, which
-     is the compiler's.)*
+     machines trap on the new routines until 9c's native half. Boxing is
+     the compiler's, and only `letrec`'s need it.)* *(Control done
+     2026-09-26: a prompt is two return entries, where to resume and a
+     marker with its tag, handler and the data stack's height; the body runs
+     as a closure above them. A composable continuation copies the stacks
+     above its prompt into a `threaded-continuation`, and composing it
+     rebases frame pointers and prompts' heights; `cwcc` takes everything;
+     marks are return entries too. Every test program that checks without
+     `extract` runs the same compiled as lowered, control ones included.)*
    - **9d. A compiler in FX-26 from the AST to threaded words**, emitting
      bloblets. Checked three ways on the same programs: the evaluator, the
      lowering to Scheme, and the threaded words on the native machine.

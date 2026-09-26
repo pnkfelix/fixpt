@@ -13,10 +13,12 @@
 ;;; definitions made before it, a second `define` shadows the first, and a
 ;;; typed definition is given its cell ahead, so forms before it can call it.
 ;;;
+;;; Control is the machine's: a `prompt`'s body is compiled as a closure of
+;;; no arguments, so that everything inside the prompt is above its marker
+;;; on the stacks; the control operations are routines.
+;;;
 ;;; Not yet: `extract`, which needs a product's field order, which only its
-;;; type says, so it waits for the checker written in FX-26 (step 10); and
-;;; `prompt` and the control operations, which wait for the machine's
-;;; continuations (step 9c).
+;;; type says, so it waits for the checker written in FX-26 (step 10).
 
 (private-regions @k @y)
 
@@ -230,7 +232,7 @@
             (if (null? l)
                 (if (string=? (symbol->string n) "nil")
                     (c-lit c (wcell-nil))
-                    (c-fail (string-append "not yet compiled as a value: " (symbol->string n))))
+                    (c-standard-value (symbol->string n) c))
                 (c-load c (car l)))
             (c-done c tail))))
       (e-int (n a b) (begin (c-int c n) (c-done c tail)))
@@ -259,7 +261,13 @@
           (begin (c-exp body inner (+ depth n) c tail) (c-unbind c depth n tail))))
       (e-letrec (bs body a b) (c-letrec bs body e depth c tail))
       (e-begin (es a b) (c-begin es e depth c tail))
-      (e-prompt (t body h a b) (c-fail "not yet compiled: prompt"))
+      (e-prompt (t body h a b)
+        (begin
+          (c-exp t e depth c #f)
+          (c-exp h e (+ depth 1) c #f)
+          (c-lambda (the (listof (productof (1 symbol) (2 syns-a)) @a) nil) body e (+ depth 2) c)
+          (c-op c routine-prompt)
+          (c-done c tail)))
       (e-bloblet (op i args a b) (begin (c-bloblet (symbol->string op) i args e depth c) (c-done c tail)))
       (e-product (fs a b)
         (begin (c-int c 37) (c-prim c "%make-frozen" (+ 1 (c-fields fs e (+ depth 1) c))) (c-done c tail)))
@@ -382,6 +390,42 @@
                        (c-op1 c routine-call (wcell-int n)))))
           (begin (c-standard standard args e depth c) (c-done c tail))))))
 
+;; How many arguments a standard operation takes, or -1 if it is not one.
+(define c-arity (subr pure (string) int)
+  (lambda (n)
+    (cond ((or (string=? n "make-continuation-prompt-tag") (string=? n "make-continuation-mark-key")) 0)
+          ((or (string=? n "car") (string=? n "cdr") (string=? n "null?") (string=? n "not") (string=? n "new")
+               (string=? n "get") (string=? n "char->integer") (string=? n "integer->char") (string=? n "string-length")
+               (string=? n "symbol->string") (string=? n "string->symbol") (string=? n "char->string")
+               (string=? n "array-length") (string=? n "current-marks") (string=? n "cwcc"))
+           1)
+          ((or (string=? n "with-mark") (string=? n "array-set!") (string=? n "substring")) 3)
+          ((or (string=? n "+") (string=? n "-") (string=? n "*") (string=? n "<") (string=? n ">") (string=? n "<=")
+               (string=? n ">=") (string=? n "=") (string=? n "modulo") (string=? n "quotient") (string=? n "cons")
+               (string=? n "set-car!") (string=? n "set-cdr!") (string=? n "set") (string=? n "char=?")
+               (string=? n "string-append") (string=? n "string=?") (string=? n "symbol=?") (string=? n "array-ref")
+               (string=? n "string-ref") (string=? n "make-array") (string=? n "abort-current-continuation")
+               (string=? n "call-with-composable-continuation") (string=? n "first-mark") (string=? n "marks-of"))
+           2)
+          (else -1))))
+
+;; A standard operation as a value: a closure of its arity whose body
+;; applies it to its parameters.
+(define c-standard-value (subr compiles (string code) unit)
+  (lambda (name c)
+    (let ((n (c-arity name)) (body (the code (new nil))))
+      (if (< n 0)
+          (c-fail (string-append "not yet compiled as a value: " name))
+          (begin
+            (letrec ((params (subr (maxeff (read @k) (write @k) (alloc @k)) (int) unit)
+                       (lambda (i) (if (= i n) #u (begin (c-op1 body routine-slot (wcell-int i)) (params (+ i 1)))))))
+              (if (string=? name "make-array")
+                  (begin (c-int body 0) (params 0) (c-prim body "%make-bloblet-filled" 3))
+                  (begin (params 0) (c-standard-on name n body))))
+            (c-op body routine-return)
+            (c-op1 c routine-closure (wcell-word (c-assemble body (string->symbol name))))
+            (c-emit c (i-cell (wcell-int 0))))))))
+
 ;; A standard operation, open-coded: a routine, or a runtime primitive, with
 ;; FX-26's conventions made plain (mutators give unit; arrays skip the
 ;; trailer's field).
@@ -409,6 +453,16 @@
             ((string=? name "get") (c-prim c "%box-ref" 1))
             ((string=? name "set") (begin (c-prim c "%box-set!" 2) (c-unit-after c)))
             ((string=? name "char->string") (c-prim c "string" 1))
+            ;; A tag or a key: a fresh object, compared by identity.
+            ((or (string=? name "make-continuation-prompt-tag") (string=? name "make-continuation-mark-key"))
+             (begin (c-lit c (wcell-unit)) (c-prim c "%make-box" 1)))
+            ((string=? name "abort-current-continuation") (c-op c routine-abort))
+            ((string=? name "call-with-composable-continuation") (c-op c routine-callcomp))
+            ((string=? name "cwcc") (c-op c routine-callcc))
+            ((string=? name "with-mark") (c-op c routine-withmark))
+            ((string=? name "first-mark") (c-op c routine-firstmark))
+            ((string=? name "current-marks") (c-op c routine-currentmarks))
+            ((string=? name "marks-of") (c-op c routine-marksof))
             ((string=? name "array-ref") (begin (c-int c 2) (c-op c routine-add) (c-prim c "%bloblet-ref" 2)))
             ((string=? name "array-set!")
              (begin (c-op c routine-swap) (c-int c 2) (c-op c routine-add) (c-op c routine-swap)

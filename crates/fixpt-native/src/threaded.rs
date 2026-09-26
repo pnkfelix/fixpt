@@ -500,6 +500,7 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>) {
 }
 
 // Invariants the generated code bakes in.
+const _: () = assert!(PRIMITIVES <= ROUTINE_SLOTS, "State::routines has a slot for every routine");
 const _: () = assert!(T_DISTANCE.lo == 3 && H_FIELDS.lo > 10, "the trailer holds F << 3, the kind is bits 3..11");
 const _: () = assert!(ROUTINE_DOCOL == 0, "a zero cell is not a primitive");
 

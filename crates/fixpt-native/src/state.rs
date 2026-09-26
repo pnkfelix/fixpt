@@ -4,10 +4,9 @@
 // machine and the stencil machine cannot disagree about it.
 
 /// Room for this many routines in [`State::routines`].
-pub const ROUTINE_SLOTS: usize = 32;
+pub const ROUTINE_SLOTS: usize = 64;
 
 #[repr(C)]
-#[derive(Default)]
 pub struct State {
     pub base: u64,
     pub cur: u64,
