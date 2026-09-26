@@ -6,6 +6,15 @@ This file keeps the record: what each piece costs in each form, measured the
 same way each time. If the FX-26 forms become the bottleneck, that is the
 signal to start on native code earlier than M10.
 
+**`gc-stress` is not a benchmark.** It collects at every safepoint to shake
+out rooting bugs, so it is a correctness check, and far too slow to time
+anything with. At a checkpoint that touches the collector, the routine check
+is a subset, about a minute:
+`cargo test -p fixpt-heap --features gc-stress` and
+`cargo test -p fixpt-scheme --features gc-stress --test smoke --test control --test image --test macros`.
+The full `fixpt-scheme` suite under it takes well over an hour, mostly the
+eager-reader tests, and is run only at milestones.
+
 Measurements are on the development machine, as best of several runs.
 Debug builds are what `cargo test` runs; release numbers come from
 `cargo run --release`.
