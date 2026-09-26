@@ -296,6 +296,8 @@
         (e-lambda (ps body a b) (v-clo ps body e))
         (e-app (f args a b) (let* ((fv (eval f e)) (xs (eval-all args e))) (apply-val fv xs)))
         (e-plambda (d body a b) (eval body e))
+        ;; Regions are erased: a `letregion`'s allocation is the heap's.
+        (e-letregion (r body a b) (eval body e))
         (e-proj (body ds a b) (eval body e))
         (e-the (d body a b) (eval body e))
         (e-if (t th el a b) (if (as-bool (eval t e)) (eval th e) (eval el e)))

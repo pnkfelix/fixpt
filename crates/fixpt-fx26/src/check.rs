@@ -344,6 +344,10 @@ impl Checker {
                 Ok((t, eff))
             }
             Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
+            Exp::LetRegion { region, body } => {
+                let (t, eff) = self.synth(body)?;
+                self.close_region(e, region, t, eff)
+            }
             Exp::Bloblet { op, args } => self.synth_bloblet(e, op, &args, None),
             Exp::Product(fields) => {
                 let mut eff = Effect::pure();
@@ -394,6 +398,25 @@ impl Checker {
     // --------------------------------------------------------------- masking
     /// Remove from `effect` what cannot be observed outside expression `e`,
     /// whose type is `result`. See the module docs for the rule.
+    /// `(letregion r …)`'s body of type `t` and effect `eff`, closed: its
+    /// value may not mention `r`, and no continuation captured in it may
+    /// outlive it; what it does to `r` is masked, as nothing outside can
+    /// name `r`.
+    pub(crate) fn close_region(&mut self, e: ExpId, r: DVar, t: TyId, eff: Effect) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let name = self.interner.name(self.arena.dvar_name(r)).to_string();
+        let mut in_t = HashSet::new();
+        self.regions_in(t, &mut in_t);
+        if in_t.contains(&Region::Var(r)) {
+            return Err(FxError::at(span, letregion_escapes(&name, &self.show_ty(t))));
+        }
+        let masked = self.mask(e, &eff, t);
+        if masked.0.iter().any(|a| matches!(a, Atom::Comefrom(_))) {
+            return Err(FxError::at(span, letregion_captures(&name, &self.show_effect(&masked))));
+        }
+        Ok((t, masked))
+    }
+
     /// Whether `x` is a lambda, under any type abstractions and ascriptions.
     pub fn is_lambda(&self, mut x: ExpId) -> bool {
         loop {
@@ -465,7 +488,7 @@ impl Checker {
                     self.free_into(a, bound, out);
                 }
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.free_into(body, bound, out),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::LetRegion { body, .. } => self.free_into(body, bound, out),
             Exp::If { test, then, els } => {
                 for x in [test, then, els] {
                     self.free_into(x, bound, out);
@@ -1074,4 +1097,14 @@ impl Checker {
 /// What a recursive binding that is not a lambda is told.
 pub fn letrec_not_lambda(name: &str) -> String {
     format!("`{name}` is bound recursively, so it must be a lambda: nothing may run before every binding exists")
+}
+
+/// What a `letregion` whose value would outlive its region is told.
+pub fn letregion_escapes(r: &str, t: &str) -> String {
+    format!("the value of `letregion {r}` would outlive its region: its type is {t}")
+}
+
+/// What a `letregion` whose body may capture a continuation is told.
+pub fn letregion_captures(r: &str, eff: &str) -> String {
+    format!("a continuation captured in `letregion {r}` could outlive its region: its effect is {eff}")
 }

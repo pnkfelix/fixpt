@@ -223,7 +223,9 @@ impl<'a> Compiler<'a> {
                 }
                 self.free(fun, bound, acc);
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.free(body, bound, acc),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
+                self.free(body, bound, acc)
+            }
             Exp::If { test, then, els } => {
                 self.free(els, bound, acc);
                 self.free(then, bound, acc);
@@ -349,7 +351,11 @@ impl<'a> Compiler<'a> {
                 self.done(code, tail);
             }
             Exp::App { fun, args } => self.app(fun, &args, e, depth, code, tail)?,
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.exp(body, e, depth, code, tail)?,
+            // Regions are erased, for now: a `letregion`'s allocation is the
+            // heap's.
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
+                self.exp(body, e, depth, code, tail)?
+            }
             Exp::If { test, then, els } => {
                 let (no, end) = (self.fresh(), self.fresh());
                 self.exp(test, e, depth, code, false)?;
@@ -585,7 +591,9 @@ impl<'a> Compiler<'a> {
                         _ => self.loops_only(fun, f, n, false),
                     }
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.loops_only(body, f, n, tail),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
+                self.loops_only(body, f, n, tail)
+            }
             Exp::If { test, then, els } => {
                 self.loops_only(test, f, n, false) && self.loops_only(then, f, n, tail) && self.loops_only(els, f, n, tail)
             }

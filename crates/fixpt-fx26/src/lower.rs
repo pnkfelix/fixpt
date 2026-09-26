@@ -263,7 +263,8 @@ impl Lowerer<'_> {
                 parts.extend(args.iter().map(|a| self.go(*a)));
                 format!("({})", parts.join(" "))
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.go(body),
+            // Regions are erased: a `letregion`'s allocation is the heap's.
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::LetRegion { body, .. } => self.go(body),
             Exp::The { exp, .. } => self.go(exp),
             Exp::If { test, then, els } => {
                 format!("(if {} {} {})", self.go(test), self.go(then), self.go(els))

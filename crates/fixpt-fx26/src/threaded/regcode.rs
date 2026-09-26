@@ -289,7 +289,9 @@ impl Compiler<'_> {
                 bindings.iter().any(|(_, y)| self.r_collects(*y, e, this)) || self.r_collects(body, e, this)
             }
             Exp::Begin(items) => items.iter().any(|y| self.r_collects(*y, e, this)),
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_collects(body, e, this),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
+                self.r_collects(body, e, this)
+            }
             Exp::Extract(y, _) => self.r_collects(y, e, this),
             Exp::Bloblet { op: BlobletOp::Ref(_), args } => args.iter().any(|y| self.r_collects(*y, e, this)),
             Exp::TagCase { scrutinee, arms, els } => {
@@ -368,7 +370,9 @@ impl Compiler<'_> {
                 g.op("const", &[u]);
                 g.done(tail);
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_exp(g, body, env, te, tail)?,
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
+                self.r_exp(g, body, env, te, tail)?
+            }
             Exp::If { test, then, els } => {
                 let (no, end) = (g.label(), g.label());
                 self.r_exp(g, test, env, te, false)?;

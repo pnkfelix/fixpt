@@ -41,6 +41,8 @@
   (e-let (listof (productof (1 symbol) (2 exp)) @a) exp int int)
   (e-begin (listof exp @a) int int)
   (e-prompt exp exp exp int int)
+  ;; `(letregion name body …)`: the region variable's name, and the body.
+  (e-letregion symbol exp int int)
   (e-the syn exp int int)
   ;; A bloblet form, by name, with its field index, or -1.
   (e-bloblet symbol int (listof exp @a) int int)
@@ -184,6 +186,12 @@
         ((string=? head "lambda")
          (begin (at-least items 3 "`(lambda ((name type) …) body …)`" a b)
                 (e-lambda (parse-params (nth items 1)) (parse-body (drop items 2) a b) a b)))
+        ((string=? head "letregion")
+         (begin (at-least items 2 "`(letregion name body …)`" a b)
+                (let ((name (nth items 1)))
+                  (if (and (syn-symbol? name) (not (char=? (string-ref (syn-name name) 0) #\@)))
+                      (e-letregion (syn-symbol name) (parse-body (drop items 2) a b) a b)
+                      (pfail "a `letregion` binds a region variable's name, without `@`" name)))))
         ((string=? head "plambda")
          (begin (at-least items 3 "`(plambda ((name kind) …) body …)`" a b)
                 (e-plambda (nth items 1) (parse-body (drop items 2) a b) a b)))
