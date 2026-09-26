@@ -801,6 +801,66 @@ one.)*
 - **The FX-26 checker's free variables**, computed once rather than at
   every mask (`docs/performance.md`).
 
+### M13 plan: an optimizing compiler for FX-26, in Rust and in FX-26
+
+Drafted 2026-09-26 from `docs/research/twobit.md` and
+`docs/research/threaded-compilers.md`, tracing each step's inputs.
+
+**Principles**
+
+- **Every pass is source to source over the FX-26 kernel.** Its output is
+  a well-formed FX-26 program with the same meaning (Twobit's rule). What
+  a pass proves goes into the program as more specific names, for example
+  an unchecked primitive where the operands' types are known, or as
+  annotations the checker ignores. Tests re-run the checker on each pass's
+  output (GHC's Core Lint).
+- **Each pass is written in Rust first and then in FX-26**, the Rust one
+  its oracle, compared on the corpus as the checker and the machine-code
+  compiler were.
+- **Every optimization is measured before it stays**, with the figures in
+  `docs/performance.md`. Larceny kept fusions that turned out to be
+  slower.
+
+**Steps**
+
+- **13a. A Rust compiler to threaded words.** It makes the same words as
+  `compile.fx` for every program, cell for cell. `compile.fx` has had only
+  the Scheme lowering as its oracle, so there is nowhere yet to test a
+  pass in Rust end to end.
+- **13b. Benchmarks.** A small suite in FX-26 (`fib`, loops, lists, a
+  closure-heavy program), plus the bootstrap's stage 2. Each is run on
+  every machine, and a harness compares a program with and without a
+  pass.
+- **13c. Self tail calls become loops.** A tail call of the enclosing
+  procedure, through a binding never assigned, becomes a jump back to the
+  start of the word: frame slots rewritten, and no `tailcall`.
+- **13d. Typed primitives.** After checking, `+` at `int` becomes an
+  unchecked primitive, and so do `car`, the field reads and the rest where
+  types prove them. The machines get routines without the checks. Overflow
+  checks stay.
+- **13e. Known calls.** A call whose callee is known (a `letrec`-bound
+  lambda, or a global never assigned) calls the word directly: `callk w n`,
+  with no closure fetched and no check. A lambda that does not escape
+  needs no closure (let-conversion).
+- **13f. Inlining and simplification.** Small known procedures are
+  inlined, non-tail calls first (Twobit), with constant folding, copy
+  propagation, and dead code removed where its effect allows.
+- **13g. Superinstructions.** Sequences of cells are fused, chosen by
+  profiling the bootstrap: `slot; slot; <; 0branch`, `slot; lit; +`,
+  `global; call`. This helps the Rust machine and the stencils most.
+- **13h. Machine code: the stack in registers.** The machine-code compiler
+  models the stack over each basic block, as VFX Forth does: `lit` and
+  `slot` emit nothing until a value is needed, and the model is flushed at
+  calls and control. Frame slots are kept in registers across calls that,
+  by their effects, cannot capture a continuation or collect. Stack-limit
+  and fuel checks are hoisted to entries and back edges.
+- **13i. Join points.** A local procedure used only in saturated tail
+  calls becomes a label in its word.
+
+Order: 13a and 13b, then 13c and 13d (cheap, and they help every
+machine), then 13e and 13f, then 13h, the largest win on the native
+machines, then 13g and 13i.
+
 ### Kept open, deliberately
 
 - **Values held by Rust across calls, typed away.** (Raised 2026-09-26,
