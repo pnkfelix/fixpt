@@ -36,6 +36,13 @@ pub struct Fx26Session {
     /// text: each form is given to the pieces written in FX-26 as a whole
     /// program, so these go before it, and what it says can use them.
     defined26: String,
+    /// How many steps a form may take when run, or no limit: see
+    /// [`set_step_limit`](Fx26Session::set_step_limit).
+    step_limit: Option<u64>,
+    /// The same for a form run early, as it is typed ([`speculate`]
+    /// (Fx26Session::speculate)): small, so that a loop costs a keystroke
+    /// nothing noticeable. No limit lets a loop being typed hang the editor.
+    pub speculation_limit: Option<u64>,
 }
 
 /// The budget for one speculative run: enough for a REPL-sized
@@ -193,7 +200,27 @@ impl Fx26Session {
             .eval_str("<fx26-runtime>", RUNTIME)
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
-        Ok(Fx26Session { checker: Checker::new(), scheme, globals: Globals::default(), strategy: Strategy::Lower, standard26: None, defined26: String::new() })
+        Ok(Fx26Session {
+            checker: Checker::new(),
+            scheme,
+            globals: Globals::default(),
+            strategy: Strategy::Lower,
+            standard26: None,
+            defined26: String::new(),
+            step_limit: Some(DEFAULT_STEP_LIMIT),
+            speculation_limit: Some(SPECULATION_STEP_LIMIT),
+        })
+    }
+
+    /// How many steps a form may take when run (`DEFAULT_STEP_LIMIT` to
+    /// start with), or `None` for no limit.
+    pub fn set_step_limit(&mut self, limit: Option<u64>) {
+        self.step_limit = limit;
+        self.scheme.engine.set_step_limit(limit);
+    }
+
+    pub fn step_limit(&self) -> Option<u64> {
+        self.step_limit
     }
 
     /// Check one top-level form and lower it, without running it.
@@ -220,12 +247,12 @@ impl Fx26Session {
             Ok(code) => code,
             Err(s) => return s,
         };
-        self.scheme.engine.set_step_limit(Some(SPECULATION_STEP_LIMIT));
+        self.scheme.engine.set_step_limit(self.speculation_limit);
         let result = self.scheme.scope(|s| {
             let (_, result) = s.eval_capturing("<fx26-speculative>", &code);
             result.map(|v| s.write(v))
         });
-        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        self.scheme.engine.set_step_limit(self.step_limit);
         match result {
             Ok(v) => Speculation::Value(v),
             Err(e) => Speculation::Failed(e.to_string()),
@@ -302,7 +329,7 @@ impl Fx26Session {
         }
         self.scheme.engine.set_step_limit(None);
         let forms = crate::syn::read_with_fx26_reader(&mut self.scheme, &mut self.checker.interner, FileId(0), text);
-        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        self.scheme.engine.set_step_limit(self.step_limit);
         self.checker.expand_forms(forms?)
     }
 
@@ -314,7 +341,7 @@ impl Fx26Session {
         }
         self.scheme.engine.set_step_limit(None);
         let r = crate::syn::parse_with_fx26_parser(&mut self.scheme, FileId(0), text);
-        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        self.scheme.engine.set_step_limit(self.step_limit);
         r
     }
 
@@ -327,7 +354,7 @@ impl Fx26Session {
         }
         self.scheme.engine.set_step_limit(None);
         let r = crate::syn::eval_with_fx26_evaluator(&mut self.scheme, FileId(0), text);
-        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        self.scheme.engine.set_step_limit(self.step_limit);
         r
     }
 
@@ -352,7 +379,7 @@ impl Fx26Session {
         self.scheme.engine.set_step_limit(Some(2_000_000_000));
         let standard = self.standard26()?;
         let r = crate::syn::check_with_fx26_checker(&mut self.scheme, standard, FileId(0), text);
-        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        self.scheme.engine.set_step_limit(self.step_limit);
         r
     }
 
@@ -366,7 +393,7 @@ impl Fx26Session {
         self.scheme.engine.set_step_limit(None);
         let standard = self.standard26()?;
         let r = crate::syn::compile_with_fx26_compiler(&mut self.scheme, standard, FileId(0), text);
-        self.scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        self.scheme.engine.set_step_limit(self.step_limit);
         r
     }
 

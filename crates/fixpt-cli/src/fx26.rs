@@ -76,6 +76,12 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         s.scheme.runtime_unrooted().run_word = Some(*m);
     }
     crate::apply_gc_policy(&mut s.scheme);
+    if let Some(l) = crate::STEP_LIMIT.get() {
+        s.set_step_limit(*l);
+    }
+    if let Some(l) = crate::SPECULATION_STEP_LIMIT.get() {
+        s.speculation_limit = *l;
+    }
     Ok(s)
 }
 
@@ -145,6 +151,21 @@ pub fn repl(backend: Backend) -> i32 {
                 text
             }
         };
+        // `,step-limit [N|none]`: the limit on a form's steps, shown or set.
+        if let Some(arg) = text.trim().strip_prefix(",step-limit") {
+            let show = |l: Option<u64>| l.map_or("none".to_string(), |n| n.to_string());
+            match arg.trim() {
+                "" => println!("; step limit: {}", show(session.step_limit())),
+                v => match crate::parse_limit(v) {
+                    Some(l) => {
+                        session.set_step_limit(l);
+                        println!("; step limit: {}", show(l));
+                    }
+                    None => eprintln!("; `,step-limit` takes a count of steps, or none"),
+                },
+            }
+            continue;
+        }
         match text.trim() {
             "" => continue,
             ",code" => {

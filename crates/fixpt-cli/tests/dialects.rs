@@ -181,3 +181,22 @@ fn the_fx26_repl_shows_threaded_code() {
         assert!(out.contains(line), "no `{line}` in:\n{out}");
     }
 }
+
+/// `--step-limit`: a count stops a long run, `none` lets it finish, and
+/// anything else is refused; `,step-limit` shows and sets it in the REPL.
+#[test]
+fn the_step_limit_can_be_set_or_lifted() {
+    let long = "(letrec ((f (subr pure (int) int) (lambda (n) (if (< n 1) 0 (f (- n 1)))))) (f 30000000))";
+    let run = |args: &[&str]| {
+        let out = Command::new(FIXPT).args(args).output().expect("runs");
+        (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string(), String::from_utf8_lossy(&out.stderr).to_string())
+    };
+    let (code, _, err) = run(&["eval", "--dialect", "fx26", "--step-limit", "1000", long]);
+    assert!(code != Some(0) && err.contains("step limit"), "{err}");
+    let (code, out, err) = run(&["eval", "--dialect", "fx26", "--step-limit", "none", long]);
+    assert!(code == Some(0) && out.starts_with('0'), "{out}{err}");
+    let (code, _, err) = run(&["eval", "--step-limit", "lots", "1"]);
+    assert!(code == Some(2) && err.contains("--step-limit"), "{err}");
+    let (_, out, _) = fx91(&["repl", "--dialect", "fx26"], ",step-limit\n,step-limit none\n,step-limit\n");
+    assert!(out.contains("step limit: 20000000") && out.contains("step limit: none"), "{out}");
+}

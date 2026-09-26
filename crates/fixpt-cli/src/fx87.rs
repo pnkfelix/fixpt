@@ -24,7 +24,10 @@ fn read(session: &mut Fx87Session, name: &str, text: &str) -> Result<Vec<Syntax>
 
 fn start(backend: Backend) -> Result<Fx87Session, i32> {
     match Fx87Session::with_backend(backend) {
-        Ok(s) => Ok(s),
+        Ok(mut s) => {
+            crate::apply_gc_policy(&mut s.scheme);
+            Ok(s)
+        }
         Err(e) => {
             eprintln!("fixpt: the FX-87 environment failed to load: {e}");
             Err(1)

@@ -50,6 +50,13 @@ options:
   --gc-every N                   also collect at every Nth safepoint, moving every
                                  object each time, to shake out rooting bugs
                                  (default: 0, only when the heap is full)
+  --step-limit N|none            how many evaluation steps a form may take before
+                                 it is stopped, or no limit (default: 20000000
+                                 for FX-87, FX-91 and FX-26; none for Scheme)
+  --speculation-step-limit N|none
+                                 the same for the FX-26 REPL's run of a form as it
+                                 is typed (default: 200000); with none, typing a
+                                 loop can hang the editor
 
 `--dialect fx87` and `--dialect fx91` select a *language*, not merely its
 reader: a form is type- and effect-checked, erased to Scheme and run on the same
@@ -146,6 +153,22 @@ fn run(args: &[String]) -> i32 {
         }
     };
     let _ = THREADED_MACHINE.set(machine);
+    for (flag, value, cell) in [
+        ("--step-limit", &flags.step_limit, &STEP_LIMIT),
+        ("--speculation-step-limit", &flags.speculation_step_limit, &SPECULATION_STEP_LIMIT),
+    ] {
+        if let Some(v) = value.as_deref() {
+            match parse_limit(v) {
+                Some(l) => {
+                    let _ = cell.set(l);
+                }
+                None => {
+                    eprintln!("fixpt: {flag} takes a count of steps, or none");
+                    return 2;
+                }
+            }
+        }
+    }
     if let Some(n) = flags.gc_every.as_deref() {
         match n.parse::<u64>() {
             Ok(n) => {
@@ -263,6 +286,8 @@ struct Flags {
     fx26_run: Option<String>,
     gc_every: Option<String>,
     threaded_machine: Option<String>,
+    step_limit: Option<String>,
+    speculation_step_limit: Option<String>,
 }
 
 /// `--fx26-run`, for every FX-26 session this process starts.
@@ -272,10 +297,26 @@ pub(crate) static THREADED_MACHINE: std::sync::OnceLock<fixpt_runtime::RunWord> 
 /// `--gc-every`, for every heap this process starts.
 pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
-/// Apply `--gc-every` to a session's heap.
+/// `--step-limit` and `--speculation-step-limit`: `Some(limit)` when given,
+/// `limit` being `None` for no limit.
+pub(crate) static STEP_LIMIT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+pub(crate) static SPECULATION_STEP_LIMIT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+
+/// A step limit as written: a count, or `none` (also `off`).
+pub(crate) fn parse_limit(v: &str) -> Option<Option<u64>> {
+    match v {
+        "none" | "off" => Some(None),
+        n => n.parse::<u64>().ok().map(Some),
+    }
+}
+
+/// Apply `--gc-every` to a session's heap, and `--step-limit` to its engine.
 pub(crate) fn apply_gc_policy(session: &mut Session) {
     if let Some(n) = GC_EVERY.get() {
         session.set_gc_every(*n);
+    }
+    if let Some(l) = STEP_LIMIT.get() {
+        session.engine.set_step_limit(*l);
     }
 }
 
@@ -289,12 +330,16 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         fx26_run: None,
         gc_every: None,
         threaded_machine: None,
+        step_limit: None,
+        speculation_step_limit: None,
     };
     let mut rest = Vec::new();
     let mut i = 0;
     // Each flag takes a value, spelled either `--flag v` or `--flag=v`.
     type Setter = fn(&mut Flags, String);
-    let named: [(&str, Setter); 8] = [
+    let named: [(&str, Setter); 10] = [
+        ("--speculation-step-limit", |f, v| f.speculation_step_limit = Some(v)),
+        ("--step-limit", |f, v| f.step_limit = Some(v)),
         ("--threaded-machine", |f, v| f.threaded_machine = Some(v)),
         ("--fx26-run", |f, v| f.fx26_run = Some(v)),
         ("--gc-every", |f, v| f.gc_every = Some(v)),

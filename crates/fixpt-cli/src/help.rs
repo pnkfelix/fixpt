@@ -202,6 +202,7 @@ fn overview(h: &dyn Helpful) {
     }
     if h.dialect() == "FX-26" {
         rows.push((",disassemble E", "E's threaded code (under --fx26-run threaded)"));
+        rows.push((",step-limit [N|none]", "show or set how many steps a form may take"));
     }
     rows.push((",quit", "leave"));
     for (cmd, what) in rows {
