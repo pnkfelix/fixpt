@@ -213,9 +213,9 @@ write.
 
 So the allocator is given two things, kept apart:
 
-| | what it says | examples |
-|---|---|---|
-| **layout** | what the bloblet is | kind, *F*, *B*, trailer or not |
+|               | what it says           | examples                                                                                                       |
+| ------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **layout**    | what the bloblet is    | kind, *F*, *B*, trailer or not                                                                                 |
 | **placement** | where and how it lives | fields mutable or not; suffix writable, sealed or executable; suffix aligned to a word, a cache line or a page |
 
 The kind is the language's business, and the placement the memory manager's.
@@ -301,13 +301,13 @@ Checked on the development machine: Apple Silicon, macOS 26.6.2, 16 KiB
 pages, an unsigned local binary without the Hardened Runtime. The
 experiment is a scratch program outside the repository.
 
-| approach | result |
-|---|---|
-| a page of fields beside a page made read+execute with `mprotect` | works, but per 16 KiB page: every code bloblet would be padded to a page boundary |
-| `MAP_JIT`, toggling write access (`pthread_jit_write_protect_np`) around each field write | works, at **32 ns per field write**, against about 1 ns for a plain store |
-| writing a `MAP_JIT` page while in execute mode | the process is killed (`SIGBUS`) |
-| **two mappings of the same memory** (`mach_vm_remap`): one read+write, one read+execute | **works**: bloblets pack anywhere; fields are written at full speed through the read+write view; code runs from the read+execute view, and can be rewritten in place with a flush |
-| costs | `mprotect` 0.3 µs; instruction-cache flush of 64 bytes 92 ns, of a page 0.67 µs |
+| approach                                                                                  | result                                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a page of fields beside a page made read+execute with `mprotect`                          | works, but per 16 KiB page: every code bloblet would be padded to a page boundary                                                                                                 |
+| `MAP_JIT`, toggling write access (`pthread_jit_write_protect_np`) around each field write | works, at **32 ns per field write**, against about 1 ns for a plain store                                                                                                         |
+| writing a `MAP_JIT` page while in execute mode                                            | the process is killed (`SIGBUS`)                                                                                                                                                  |
+| **two mappings of the same memory** (`mach_vm_remap`): one read+write, one read+execute   | **works**: bloblets pack anywhere; fields are written at full speed through the read+write view; code runs from the read+execute view, and can be rewritten in place with a flush |
+| costs                                                                                     | `mprotect` 0.3 µs; instruction-cache flush of 64 bytes 92 ns, of a page 0.67 µs                                                                                                   |
 
 The consequences for the design:
 - **The MMU cannot give mutability per bloblet.** Its unit is a 16 KiB
@@ -410,11 +410,11 @@ Almost nothing will ever be large.
 
 ## Tags, before and after
 
-| tag | before M12 | during migration | now (M12 A5, done) |
-|---|---|---|---|
-| `010` | object (points at header) | old-style object | **reserved**, see below |
-| `100` | reserved | bloblet pointer (points at suffix) | bloblet pointer |
-| `101` | reserved | trailer | trailer |
+| tag   | before M12                | during migration                   | now (M12 A5, done)      |
+| ----- | ------------------------- | ---------------------------------- | ----------------------- |
+| `010` | object (points at header) | old-style object                   | **reserved**, see below |
+| `100` | reserved                  | bloblet pointer (points at suffix) | bloblet pointer         |
+| `101` | reserved                  | trailer                            | trailer                 |
 
 **Tag `010` is kept free, not reused.** Two uses are worth keeping open,
 and the invariants make both sound for the collector:
@@ -437,17 +437,17 @@ A word with tag `010` is a verification error until one of these is chosen.
 
 ## What becomes a bloblet
 
-| now | as a bloblet |
-|---|---|
-| vector | *F* elements, no suffix |
-| record | record-type descriptor + fields, no suffix |
-| bytevector | no fields, *B* bytes |
-| string | no fields (or a length field), UTF-32 suffix |
-| flonum | no fields, 8 bytes |
-| bignum | a sign field, limbs as suffix |
-| code | constants and metadata, trailer, code |
-| closure | code pointer + captured variables, no suffix |
-| box, symbol, port, … | fields, no suffix |
+| now                  | as a bloblet                                 |
+| -------------------- | -------------------------------------------- |
+| vector               | *F* elements, no suffix                      |
+| record               | record-type descriptor + fields, no suffix   |
+| bytevector           | no fields, *B* bytes                         |
+| string               | no fields (or a length field), UTF-32 suffix |
+| flonum               | no fields, 8 bytes                           |
+| bignum               | a sign field, limbs as suffix                |
+| code                 | constants and metadata, trailer, code        |
+| closure              | code pointer + captured variables, no suffix |
+| box, symbol, port, … | fields, no suffix                            |
 
 Pairs stay as they are: two words, no header. They are the most common
 object, and a header would cost them 50%.

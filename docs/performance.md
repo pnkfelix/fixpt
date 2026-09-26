@@ -21,10 +21,10 @@ Debug builds are what `cargo test` runs; release numbers come from
 
 ## Baselines, before M12
 
-| what | Rust | Scheme | FX-26 | notes |
-|---|---|---|---|---|
-| eager reader, `fixpt-fx26/tests/eager.rs` (debug, whole suite) | — | — | 5.5 s | Scheme and FX-26 readers, both engines |
-| eager reader, Scheme suite under `gc-stress` | — | 83 min | — | collects at every safepoint |
+| what                                                           | Rust | Scheme | FX-26 | notes                                  |
+| -------------------------------------------------------------- | ---- | ------ | ----- | -------------------------------------- |
+| eager reader, `fixpt-fx26/tests/eager.rs` (debug, whole suite) | —    | —      | 5.5 s | Scheme and FX-26 readers, both engines |
+| eager reader, Scheme suite under `gc-stress`                   | —    | 83 min | —     | collects at every safepoint            |
 
 ## The engines benchmark, through the object-model changes
 
@@ -33,16 +33,16 @@ six small programs on each engine, totals in seconds, best of three runs.
 Single programs vary by up to 40% run to run (`fib 25` on the AST engine
 ranges 0.028–0.041 s), so only the totals are compared.
 
-| after | AST | bytecode | notes |
-|---|---|---|---|
-| before M12 (dac418f) | 0.626 | 0.392 | |
-| A2–A4 (every object a bloblet header; code as bloblets) | 0.636 | 0.393 | no measurable change |
-| A5a, first try (raw types as bloblets; the accessors check the pointer style) | 0.667 | 0.392 | AST ~5% slower: a branch on every node read |
-| A5a (code's nodes and constants as its own fields) | 0.634 | 0.393 | back to baseline: a node or constant is one load at a fixed offset from the code |
-| A5, first try (every object with fields a trailered bloblet, read through the generic accessor) | 0.689 | 0.416 | 6–8% slower: the trailer decoded out of line on every field read |
-| A5, trailer read inline | 0.656 | 0.404 | |
-| A5, closures and AST frames at fixed offsets | 0.642 | 0.400 | |
-| A5 done (boxes and symbols at fixed offsets; tag `010` retired) | 0.628 | 0.394 | at baseline |
+| after                                                                                           | AST   | bytecode | notes                                                                            |
+| ----------------------------------------------------------------------------------------------- | ----- | -------- | -------------------------------------------------------------------------------- |
+| before M12 (dac418f)                                                                            | 0.626 | 0.392    |                                                                                  |
+| A2–A4 (every object a bloblet header; code as bloblets)                                         | 0.636 | 0.393    | no measurable change                                                             |
+| A5a, first try (raw types as bloblets; the accessors check the pointer style)                   | 0.667 | 0.392    | AST ~5% slower: a branch on every node read                                      |
+| A5a (code's nodes and constants as its own fields)                                              | 0.634 | 0.393    | back to baseline: a node or constant is one load at a fixed offset from the code |
+| A5, first try (every object with fields a trailered bloblet, read through the generic accessor) | 0.689 | 0.416    | 6–8% slower: the trailer decoded out of line on every field read                 |
+| A5, trailer read inline                                                                         | 0.656 | 0.404    |                                                                                  |
+| A5, closures and AST frames at fixed offsets                                                    | 0.642 | 0.400    |                                                                                  |
+| A5 done (boxes and symbols at fixed offsets; tag `010` retired)                                 | 0.628 | 0.394    | at baseline                                                                      |
 
 The per-piece table fills in as each piece moves.
 
@@ -53,12 +53,12 @@ threaded words on both machines, results checked equal, best of three.
 A *cell* is one step of the Rust machine; the native machine counts only
 word entries and taken branches (its fuel), shown for scale.
 
-| program | cells | Rust | native | native ns/cell | Rust / native |
-|---|---|---|---|---|---|
-| fib 25 | 2.31 M | 0.007 s | 0.0013 s | 0.55 | 5.4× |
-| fib 27 | 6.04 M | 0.018 s | 0.0033 s | 0.55 | 5.4× |
-| sum-to 10M (loop) | 110 M | 0.263 s | 0.077 s | 0.70 | 3.4× |
-| sum-by-list 60k (cons, 5 collections) | 1.38 M | 0.004 s | 0.0013 s | 0.96 | 3.0× |
+| program                               | cells  | Rust    | native   | native ns/cell | Rust / native |
+| ------------------------------------- | ------ | ------- | -------- | -------------- | ------------- |
+| fib 25                                | 2.31 M | 0.007 s | 0.0013 s | 0.55           | 5.4×          |
+| fib 27                                | 6.04 M | 0.018 s | 0.0033 s | 0.55           | 5.4×          |
+| sum-to 10M (loop)                     | 110 M  | 0.263 s | 0.077 s  | 0.70           | 3.4×          |
+| sum-by-list 60k (cons, 5 collections) | 1.38 M | 0.004 s | 0.0013 s | 0.96           | 3.0×          |
 
 For scale only, not a comparison: the engines benchmark's `fib 25` takes
 0.027 s on the AST engine and 0.019 s on the bytecode VM, but that is Scheme,
@@ -79,11 +79,11 @@ and `s` (debug assertions and overflow checks off at every level, since
 their calls into `core` could not be copied), and placed by copying. Best of
 three, ns per cell of the Rust machine:
 
-| program | Rust, release build | Rust, debug build | hand-encoded | stencils -O0 | -O1 | -O2 | -O3 | -Os |
-|---|---|---|---|---|---|---|---|---|
-| fib 27 | 3.85 | 78.6 | 0.57 | 4.28 | 0.63 | 0.62 | 0.64 | 0.65 |
-| sum-to 10M (loop) | 2.64 | 76.6 | 0.67 | 4.11 | 0.58 | 0.58 | 0.59 | 0.59 |
-| sum-by-list 60k (cons) | 2.80 | 76.4 | 0.86 | 4.20 | 0.92 | 0.90 | 0.84 | 0.89 |
+| program                | Rust, release build | Rust, debug build | hand-encoded | stencils -O0 | -O1  | -O2  | -O3  | -Os  |
+| ---------------------- | ------------------- | ----------------- | ------------ | ------------ | ---- | ---- | ---- | ---- |
+| fib 27                 | 3.85                | 78.6              | 0.57         | 4.28         | 0.63 | 0.62 | 0.64 | 0.65 |
+| sum-to 10M (loop)      | 2.64                | 76.6              | 0.67         | 4.11         | 0.58 | 0.58 | 0.59 | 0.59 |
+| sum-by-list 60k (cons) | 2.80                | 76.4              | 0.86         | 4.20         | 0.92 | 0.90 | 0.84 | 0.89 |
 
 Machine code: hand-encoded 2.1 KB; stencils 9.3 KB at `-O0`, 2.5–2.7 KB
 otherwise. The Rust machine's release number for `fib` varies 2.9–3.9 ns

@@ -32,15 +32,15 @@ Racket ports of the original implementations (verified working on this machine).
 
 Read before planning; these are the constraints that actually shaped it.
 
-| Source | What it tells us |
-|---|---|
-| `extracted/fx91/{abstract,token,sugar,kind,typecheck,unify,constraints,eval,free,substitution,standard,code,top}.scm` | FX-91's complete structure: mutation-based unification with `forward!` union-find nodes, ACUI effect constraints solved as Horn-clause satisfiability (Dowling–Gallier), `poly~` type schemes, value-restriction via `expansive?`, first-class modules with `up-`/`down-` coercions, `select` dependent types, `rename-moduleof` alpha-renaming. |
-| `mit-psrg-fx/fx87/old-impl/{syntax,type-check,inequal,kind-check,erase,sugar,standard}.lisp` | FX-87 is *checking*, not inference — but has **more** description machinery: three kinds (`type`/`effect`/`region`), subtyping/subeffecting (`type-less?`/`effect-less?`/`region-less?`), effect masking (`erase-effect`), circular types built with `set-car!` and compared with a cycle `trail`, and a bigger standard library (`oneof`/`recordof`/`vsubr`/`promise`/`port`/`sexp`). |
-| `extracted/fx91/tests.fx` | 182 top-level forms. The live reference processes 168 and then dies evaluating form 168 — `nil~: undefined`, a genuine gap in the plain port's runtime (the `fx91-hashlang` runtime supplies `fx-nil~`). Types/effects are fine for all 182. |
-| `HISTORY.md` §"Coverage audit" | Known reference gaps to plan around: `[e d1 d2]` proj-sugar is real FX-91 but unreachable through the port's reader; multi-segment dot-notation `a.b.c` is recursive (`(with a (with b c))`), not a literal field name; `(define (f (x int)) ...)` shorthand; `input`; `does` is gated off by default. |
-| `fx91-hashlang/lang/reader.rkt`, `fx87-hashlang/lang/reader.rkt` | Both dialects case-fold symbols; FX-87 reads `#t`/`#f`/`#u` as *symbols*; FX-91 reads `#u` as the symbol `#U` but `#t`/`#f` as real booleans. The reader is genuinely per-dialect. |
-| `larceny/src/Compiler/pass{1,2,3,4}*.sch` | Pass structure worth borrowing: alpha-renamed core grammar, nodes annotated in place with free/assigned/referenced sets. Worth *not* borrowing: fifteen passes and four native back ends. |
-| `larceny/src/Rts/Sys/heapio.{c,h}` | Heap image format: version word, roots, word count, data — all pointers base-0 relative so load needs no relocation. We take this idea and drop the split/dumped variants. |
+| Source                                                                                                                | What it tells us                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extracted/fx91/{abstract,token,sugar,kind,typecheck,unify,constraints,eval,free,substitution,standard,code,top}.scm` | FX-91's complete structure: mutation-based unification with `forward!` union-find nodes, ACUI effect constraints solved as Horn-clause satisfiability (Dowling–Gallier), `poly~` type schemes, value-restriction via `expansive?`, first-class modules with `up-`/`down-` coercions, `select` dependent types, `rename-moduleof` alpha-renaming.                                       |
+| `mit-psrg-fx/fx87/old-impl/{syntax,type-check,inequal,kind-check,erase,sugar,standard}.lisp`                          | FX-87 is *checking*, not inference — but has **more** description machinery: three kinds (`type`/`effect`/`region`), subtyping/subeffecting (`type-less?`/`effect-less?`/`region-less?`), effect masking (`erase-effect`), circular types built with `set-car!` and compared with a cycle `trail`, and a bigger standard library (`oneof`/`recordof`/`vsubr`/`promise`/`port`/`sexp`). |
+| `extracted/fx91/tests.fx`                                                                                             | 182 top-level forms. The live reference processes 168 and then dies evaluating form 168 — `nil~: undefined`, a genuine gap in the plain port's runtime (the `fx91-hashlang` runtime supplies `fx-nil~`). Types/effects are fine for all 182.                                                                                                                                           |
+| `HISTORY.md` §"Coverage audit"                                                                                        | Known reference gaps to plan around: `[e d1 d2]` proj-sugar is real FX-91 but unreachable through the port's reader; multi-segment dot-notation `a.b.c` is recursive (`(with a (with b c))`), not a literal field name; `(define (f (x int)) ...)` shorthand; `input`; `does` is gated off by default.                                                                                 |
+| `fx91-hashlang/lang/reader.rkt`, `fx87-hashlang/lang/reader.rkt`                                                      | Both dialects case-fold symbols; FX-87 reads `#t`/`#f`/`#u` as *symbols*; FX-91 reads `#u` as the symbol `#U` but `#t`/`#f` as real booleans. The reader is genuinely per-dialect.                                                                                                                                                                                                     |
+| `larceny/src/Compiler/pass{1,2,3,4}*.sch`                                                                             | Pass structure worth borrowing: alpha-renamed core grammar, nodes annotated in place with free/assigned/referenced sets. Worth *not* borrowing: fifteen passes and four native back ends.                                                                                                                                                                                              |
+| `larceny/src/Rts/Sys/heapio.{c,h}`                                                                                    | Heap image format: version word, roots, word count, data — all pointers base-0 relative so load needs no relocation. We take this idea and drop the split/dumped variants.                                                                                                                                                                                                             |
 
 ### Reference implementations are runnable here
 
@@ -88,17 +88,17 @@ writing three of everything.
 
 ### Crates
 
-| Crate | Contents | Rough size |
-|---|---|---|
-| `fixpt-heap` | `Value`, tagged-word heap, object layouts, Cheney GC, image dump/load/verify | 2.5k |
-| `fixpt-runtime` | symbols, globals, numerics, strings/vectors, ports, errors, primitive table | 3k |
-| `fixpt-read` | syntax profiles, lexer, reader, spans, `write`/`display` | 1.2k |
-| `fixpt-core` | Core IR arena, binding/env, pass framework, standard passes | 1.5k |
-| `fixpt-engine` | `interp` (AST machine) + `vm` (compiler + bytecode VM) | 4.5k |
-| `fixpt-scheme` | Scheme dialect: special forms, `syntax-rules`, prelude | 2.5k |
-| `fixpt-fx87` | FX-87 front end | 5k |
-| `fixpt-fx91` | FX-91 front end | 6k |
-| `fixpt-cli` | the `fixpt` binary | 0.8k |
+| Crate           | Contents                                                                     | Rough size |
+| --------------- | ---------------------------------------------------------------------------- | ---------- |
+| `fixpt-heap`    | `Value`, tagged-word heap, object layouts, Cheney GC, image dump/load/verify | 2.5k       |
+| `fixpt-runtime` | symbols, globals, numerics, strings/vectors, ports, errors, primitive table  | 3k         |
+| `fixpt-read`    | syntax profiles, lexer, reader, spans, `write`/`display`                     | 1.2k       |
+| `fixpt-core`    | Core IR arena, binding/env, pass framework, standard passes                  | 1.5k       |
+| `fixpt-engine`  | `interp` (AST machine) + `vm` (compiler + bytecode VM)                       | 4.5k       |
+| `fixpt-scheme`  | Scheme dialect: special forms, `syntax-rules`, prelude                       | 2.5k       |
+| `fixpt-fx87`    | FX-87 front end                                                              | 5k         |
+| `fixpt-fx91`    | FX-91 front end                                                              | 6k         |
+| `fixpt-cli`     | the `fixpt` binary                                                           | 0.8k       |
 
 Dependencies kept deliberately thin: `num-bigint`/`num-integer` for exact
 integer arithmetic, `clap` in the CLI crate only. The heap, GC, reader, engines
@@ -171,11 +171,11 @@ magic "FIXPTHP\0" | version u32 | flags u32 | word_count u64 | root_count u32
 Because Cheney already compacted to a contiguous region and every reference is
 base-relative, **dump = write, load = read**. No relocation pass exists.
 
-| Mode | Command | Mechanism |
-|---|---|---|
-| Decoupled runtime + heap | `fixpt run --heap prelude.heap prog.scm` | separate `.heap` file |
-| Coupled single binary | `fixpt build prog.scm -o prog` | copy the runtime binary, append the image + an 16-byte trailer (`magic`,`len`); `./prog` self-loads by reading its own trailer |
-| Statically embedded | `FIXPT_EMBED_HEAP=x.heap cargo build -p fixpt-cli --features embed` | `build.rs` + `include_bytes!` |
+| Mode                     | Command                                                             | Mechanism                                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Decoupled runtime + heap | `fixpt run --heap prelude.heap prog.scm`                            | separate `.heap` file                                                                                                          |
+| Coupled single binary    | `fixpt build prog.scm -o prog`                                      | copy the runtime binary, append the image + an 16-byte trailer (`magic`,`len`); `./prog` self-loads by reading its own trailer |
+| Statically embedded      | `FIXPT_EMBED_HEAP=x.heap cargo build -p fixpt-cli --features embed` | `build.rs` + `include_bytes!`                                                                                                  |
 
 Compiled code objects live *in the heap*, so a `.fasl` is just a heap image
 whose root is a top-level thunk. "Compile a program" and "dump a heap" are the
@@ -203,11 +203,11 @@ pub struct SyntaxProfile {
 
 Three profiles ship:
 
-| Profile | Case | `#t`/`#f` | `#u` | `[ … ]` | Notes |
-|---|---|---|---|---|---|
-| `scheme` | sensitive | booleans | — | parentheses | R7RS: `#\c`, `#u8(`, `#;`, `#\|…\|#`, labels |
-| `fx87` | folded | **symbols** `\|#t\|`/`\|#f\|` | symbol `\|#u\|` | symbol constituents | `@region` symbols |
-| `fx91` | folded | booleans | symbol `#U` | **`(proj …)` sugar** | reconstructs the reader macro the archive lost |
+| Profile  | Case      | `#t`/`#f`                     | `#u`            | `[ … ]`              | Notes                                          |
+| -------- | --------- | ----------------------------- | --------------- | -------------------- | ---------------------------------------------- |
+| `scheme` | sensitive | booleans                      | —               | parentheses          | R7RS: `#\c`, `#u8(`, `#;`, `#\|…\|#`, labels   |
+| `fx87`   | folded    | **symbols** `\|#t\|`/`\|#f\|` | symbol `\|#u\|` | symbol constituents  | `@region` symbols                              |
+| `fx91`   | folded    | booleans                      | symbol `#U`     | **`(proj …)` sugar** | reconstructs the reader macro the archive lost |
 
 The reader produces Rust-side spanned `Syntax` values (so error messages have
 real source locations and the compiler never touches the GC heap), with a
@@ -397,15 +397,15 @@ numbers (`*UNIF*-123`) that are run-dependent:
 
 ### 7.3 Corpora
 
-| Suite | Source | Size |
-|---|---|---|
-| FX-91 static | `extracted/fx91/tests.fx` | 182 forms × (type, effect) |
-| FX-91 dynamic | same | 168 values + 14 augmented |
-| FX-87 | `mit-psrg-fx/fx87/library/*.fx` (tak, complex, church-numerals, deriv, dna, polynm, hash, takl, symbol-tab) + an authored expression suite run through the reference | ~13 programs + ~200 expressions |
-| Scheme | authored R7RS assertion suite | ~400 assertions |
-| Differential | every case above | interp vs. vm must agree |
-| GC stress | every case above | `--features gc-stress` |
-| Image round-trip | every case above | dump → load → rerun → identical |
+| Suite            | Source                                                                                                                                                               | Size                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| FX-91 static     | `extracted/fx91/tests.fx`                                                                                                                                            | 182 forms × (type, effect)      |
+| FX-91 dynamic    | same                                                                                                                                                                 | 168 values + 14 augmented       |
+| FX-87            | `mit-psrg-fx/fx87/library/*.fx` (tak, complex, church-numerals, deriv, dna, polynm, hash, takl, symbol-tab) + an authored expression suite run through the reference | ~13 programs + ~200 expressions |
+| Scheme           | authored R7RS assertion suite                                                                                                                                        | ~400 assertions                 |
+| Differential     | every case above                                                                                                                                                     | interp vs. vm must agree        |
+| GC stress        | every case above                                                                                                                                                     | `--features gc-stress`          |
+| Image round-trip | every case above                                                                                                                                                     | dump → load → rerun → identical |
 
 ### 7.4 Divergences are a deliverable
 
@@ -422,21 +422,21 @@ requires *both* outputs to be recorded. No silent disagreements.
 Each ends with a working, tested, demoable artifact. I'd like to check in with
 you at each boundary rather than disappear for the whole thing.
 
-| # | Milestone | Demo at the end |
-|---|---|---|
-| M0 ✅ | Workspace, golden generators | `reference/regenerate.sh` produces the checked-in `.expected` files: 182 FX-91 cases (type, effect, value), 155 FX-87 cases (type, effect) |
-| M1 ✅ | `fixpt-heap`: values, heap, Cheney GC, image dump/load/verify | `fixpt image info/verify`; 22 tests, green under `gc-stress` |
-| M2 ✅ | `fixpt-read`: profiles, reader, writer, spans | 21 tests; all 182 FX-91 and 155 FX-87 forms read and round-trip |
-| M3 ✅ | `fixpt-core` + `fixpt-runtime` + `fixpt-scheme` + `interp` | `fixpt repl` works: bignums, rationals, proper tail calls, re-entrant `call/cc`, `dynamic-wind`, `guard`, records, promises. Green under `gc-stress` |
-| M4 ✅ | `vm`: bytecode compiler + VM | flat closures, assignment conversion, 19 opcodes. FX-91's 182 cases pass **compiled as well as interpreted**; 9 differential tests require both engines to agree on values, output *and* error text; ~1.6× faster |
-| M5 ✅ | Images & shipping | Core IR lives in the heap, so an image is resumable. `fixpt dump-heap` (image beside the runtime), `fixpt build` (one standalone executable, no `fixpt` needed on the target), `fixpt run-image` (either). An image records which engine made it, so nothing has to be told |
-| M6 ✅ | `fixpt-fx87` | 161 cases: **161/161 parse, 160/161 type and effect, 123/123 value** of those the archive's evaluating path can answer. Driven from the CLI as `fixpt --dialect fx87 repl\|run\|eval` |
-| M7 ✅ | `fixpt-fx91` | **182/182 on all three levels** — parse, type and effect, and evaluated value. Driven from the CLI: `fixpt --dialect fx91 repl\|run\|eval`, presenting results in the 1991 top level's `:`/`!`/`=` notation |
-| M8 🔶 | Docs & polish | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks (`cargo run --release --example engines` is the start). Collector workloads from Larceny's `test/GC` already landed in `tests/gc_workloads.rs` |
-| M9 ✅ | hygienic macros | `define-syntax`/`let-syntax`/`letrec-syntax`/`syntax-rules`, hygienic by renaming (Clinger & Rees); the built-in derived forms hygienic too; R7RS §7.3's own macro definitions of the derived forms pass against the built-ins. SRFI 211 `er-macro-transformer` and `ir-macro-transformer`, with `begin-for-syntax`. SRFI 139 syntax parameters, `identifier-syntax`, `syntax-error`. See [`docs/macros.md`](docs/macros.md) |
-| M11 ✅ | FX-26: the tooling's own language (the seven-step plan, done 2026-09-25) | effects as licences, bidirectional checking, typed delimited control; the eager reader ported to it first. Direction and plan: [`docs/fx26.md`](docs/fx26.md) |
-| M12 | FX-26, bootstrapped: its interpreter and compiler written in FX-26, over a new object model shared with Rust | three phases — bloblets, FX-26 over bloblets, bootstrapping. See §11 and [`docs/object-model.md`](docs/object-model.md) |
-| M10 | *(future)* native code generation | the bytecode/heap-image design is kept amenable to it; not scheduled |
+| #      | Milestone                                                                                                    | Demo at the end                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 ✅  | Workspace, golden generators                                                                                 | `reference/regenerate.sh` produces the checked-in `.expected` files: 182 FX-91 cases (type, effect, value), 155 FX-87 cases (type, effect)                                                                                                                                                                                                                                                                                   |
+| M1 ✅  | `fixpt-heap`: values, heap, Cheney GC, image dump/load/verify                                                | `fixpt image info/verify`; 22 tests, green under `gc-stress`                                                                                                                                                                                                                                                                                                                                                                 |
+| M2 ✅  | `fixpt-read`: profiles, reader, writer, spans                                                                | 21 tests; all 182 FX-91 and 155 FX-87 forms read and round-trip                                                                                                                                                                                                                                                                                                                                                              |
+| M3 ✅  | `fixpt-core` + `fixpt-runtime` + `fixpt-scheme` + `interp`                                                   | `fixpt repl` works: bignums, rationals, proper tail calls, re-entrant `call/cc`, `dynamic-wind`, `guard`, records, promises. Green under `gc-stress`                                                                                                                                                                                                                                                                         |
+| M4 ✅  | `vm`: bytecode compiler + VM                                                                                 | flat closures, assignment conversion, 19 opcodes. FX-91's 182 cases pass **compiled as well as interpreted**; 9 differential tests require both engines to agree on values, output *and* error text; ~1.6× faster                                                                                                                                                                                                            |
+| M5 ✅  | Images & shipping                                                                                            | Core IR lives in the heap, so an image is resumable. `fixpt dump-heap` (image beside the runtime), `fixpt build` (one standalone executable, no `fixpt` needed on the target), `fixpt run-image` (either). An image records which engine made it, so nothing has to be told                                                                                                                                                  |
+| M6 ✅  | `fixpt-fx87`                                                                                                 | 161 cases: **161/161 parse, 160/161 type and effect, 123/123 value** of those the archive's evaluating path can answer. Driven from the CLI as `fixpt --dialect fx87 repl\|run\|eval`                                                                                                                                                                                                                                        |
+| M7 ✅  | `fixpt-fx91`                                                                                                 | **182/182 on all three levels** — parse, type and effect, and evaluated value. Driven from the CLI: `fixpt --dialect fx91 repl\|run\|eval`, presenting results in the 1991 top level's `:`/`!`/`=` notation                                                                                                                                                                                                                  |
+| M8 🔶  | Docs & polish                                                                                                | `docs/` mapping every component to its 1987/1991 counterpart; benchmarks (`cargo run --release --example engines` is the start). Collector workloads from Larceny's `test/GC` already landed in `tests/gc_workloads.rs`                                                                                                                                                                                                      |
+| M9 ✅  | hygienic macros                                                                                              | `define-syntax`/`let-syntax`/`letrec-syntax`/`syntax-rules`, hygienic by renaming (Clinger & Rees); the built-in derived forms hygienic too; R7RS §7.3's own macro definitions of the derived forms pass against the built-ins. SRFI 211 `er-macro-transformer` and `ir-macro-transformer`, with `begin-for-syntax`. SRFI 139 syntax parameters, `identifier-syntax`, `syntax-error`. See [`docs/macros.md`](docs/macros.md) |
+| M11 ✅ | FX-26: the tooling's own language (the seven-step plan, done 2026-09-25)                                     | effects as licences, bidirectional checking, typed delimited control; the eager reader ported to it first. Direction and plan: [`docs/fx26.md`](docs/fx26.md)                                                                                                                                                                                                                                                                |
+| M12    | FX-26, bootstrapped: its interpreter and compiler written in FX-26, over a new object model shared with Rust | three phases — bloblets, FX-26 over bloblets, bootstrapping. See §11 and [`docs/object-model.md`](docs/object-model.md)                                                                                                                                                                                                                                                                                                      |
+| M10    | *(future)* native code generation                                                                            | the bytecode/heap-image design is kept amenable to it; not scheduled                                                                                                                                                                                                                                                                                                                                                         |
 
 Rough total ~26k lines of Rust. M6 and M7 are each comparable in size to
 everything before them; M7 is the hardest (inference + ACUI + modules).

@@ -400,15 +400,15 @@ The enum is from `mach-o/arm64/reloc.h` in xnu [read]:
 The patch rules are those of `Python/jit.c` and our patcher [verified for the
 first and third].
 
-| type | insn | patch |
-|---|---|---|
-| `BRANCH26` (2) | `B`/`BL` | `imm26 = (T − P) >> 2`, bits 0–25; ±128 MB, otherwise a veneer (x16/x17 only) |
-| `PAGE21` (3) | `ADRP` | `d = (T>>12) − (P>>12)`; `immlo = d & 3` in bits 29–30, `immhi = d >> 2` in bits 5–23; ±4 GB |
-| `PAGEOFF12` (4) | `ADD`/`LDR`/`STR` imm12 | `T & 0xfff`, scaled by the access size (bits 30–31 of LDR/STR; 128-bit SIMD needs `opc` too), in bits 10–21 |
-| `GOT_LOAD_PAGE21` (5) / `GOT_LOAD_PAGEOFF12` (6) | `ADRP` + `LDR Xt` | as above, but T is a slot holding the value; can be relaxed to `movz`/`movk`, `adrp+add` or `ldr literal` (CPython `patch_aarch64_33rx`) |
-| `ADDEND` (10) | — | precedes PAGE21/PAGEOFF12 and carries an addend in `r_symbolnum`; not seen here |
-| `UNSIGNED`/`SUBTRACTOR` (0/1) | data | only in data sections and `__compact_unwind`; not copied |
-| `POINTER_TO_GOT`, `TLVP_*` | — | not produced by stencils; reject |
+| type                                             | insn                    | patch                                                                                                                                    |
+| ------------------------------------------------ | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `BRANCH26` (2)                                   | `B`/`BL`                | `imm26 = (T − P) >> 2`, bits 0–25; ±128 MB, otherwise a veneer (x16/x17 only)                                                            |
+| `PAGE21` (3)                                     | `ADRP`                  | `d = (T>>12) − (P>>12)`; `immlo = d & 3` in bits 29–30, `immhi = d >> 2` in bits 5–23; ±4 GB                                             |
+| `PAGEOFF12` (4)                                  | `ADD`/`LDR`/`STR` imm12 | `T & 0xfff`, scaled by the access size (bits 30–31 of LDR/STR; 128-bit SIMD needs `opc` too), in bits 10–21                              |
+| `GOT_LOAD_PAGE21` (5) / `GOT_LOAD_PAGEOFF12` (6) | `ADRP` + `LDR Xt`       | as above, but T is a slot holding the value; can be relaxed to `movz`/`movk`, `adrp+add` or `ldr literal` (CPython `patch_aarch64_33rx`) |
+| `ADDEND` (10)                                    | —                       | precedes PAGE21/PAGEOFF12 and carries an addend in `r_symbolnum`; not seen here                                                          |
+| `UNSIGNED`/`SUBTRACTOR` (0/1)                    | data                    | only in data sections and `__compact_unwind`; not copied                                                                                 |
+| `POINTER_TO_GOT`, `TLVP_*`                       | —                       | not produced by stencils; reject                                                                                                         |
 
 `relocation_info` packs `r_symbolnum:24, r_pcrel:1, r_length:2, r_extern:1,
 r_type:4` [verified by parsing]. `LC_LINKER_OPTIMIZATION_HINT` can be ignored:

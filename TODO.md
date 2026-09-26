@@ -145,11 +145,11 @@ binding is immutable — `(set! + -)` is a *type error* there, since standard
 bindings live in `@=` — so it annotates the call and the compiler emits a direct
 `prim`. Measured on FX-87, best of five:
 
-| | ast | bytecode | + metadata |
-|---|---|---|---|
-| loop 1e6 | 0.112s | 0.075s | 0.062s |
-| fib 24 | 0.014s | 0.011s | 0.009s |
-| sum of squares | 0.058s | 0.040s | 0.033s |
+|                | ast    | bytecode | + metadata |
+| -------------- | ------ | -------- | ---------- |
+| loop 1e6       | 0.112s | 0.075s   | 0.062s     |
+| fib 24         | 0.014s | 0.011s   | 0.009s     |
+| sum of squares | 0.058s | 0.040s   | 0.033s     |
 
 **1.21× from the metadata alone, 1.77× over the AST engine.**
 

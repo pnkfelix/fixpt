@@ -104,26 +104,26 @@ that is hard to change later is the first.
 refers to after macros have moved it around. It is internal, it is the hard
 part, and it is expensive to change once built.
 
-| Mechanism | Idea | Who uses it |
-|---|---|---|
-| Timestamps / renaming by expansion history | Kohlbecker et al. 1986: rename everything introduced by a step | historical |
-| **Renaming with aliases** | Clinger & Rees, *Macros That Work* (POPL '91): each expansion renames the identifiers its template inserts to fresh, unforgeable names, and binds each fresh name to what the original meant *where the macro was defined* | Twobit/Larceny (`src/Compiler/syntaxenv.sch`, `lowlevel.sch`), CHICKEN |
-| Syntactic closures | Bawden & Rees 1988; Hanson 1991: a closure pairs a form with the environment to expand it in | MIT Scheme, Chibi |
-| Marks and substitutions ("wraps") | Dybvig, Hieb & Bruggeman 1992: identifiers carry marks and pending renames; `psyntax` | Chez, Guile, R6RS systems |
-| **Sets of scopes** | Flatt, POPL 2016: an identifier carries a *set* of scopes, and a binding is found by subset | Racket (since 2015), Klister |
+| Mechanism                                  | Idea                                                                                                                                                                                                                       | Who uses it                                                            |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Timestamps / renaming by expansion history | Kohlbecker et al. 1986: rename everything introduced by a step                                                                                                                                                             | historical                                                             |
+| **Renaming with aliases**                  | Clinger & Rees, *Macros That Work* (POPL '91): each expansion renames the identifiers its template inserts to fresh, unforgeable names, and binds each fresh name to what the original meant *where the macro was defined* | Twobit/Larceny (`src/Compiler/syntaxenv.sch`, `lowlevel.sch`), CHICKEN |
+| Syntactic closures                         | Bawden & Rees 1988; Hanson 1991: a closure pairs a form with the environment to expand it in                                                                                                                               | MIT Scheme, Chibi                                                      |
+| Marks and substitutions ("wraps")          | Dybvig, Hieb & Bruggeman 1992: identifiers carry marks and pending renames; `psyntax`                                                                                                                                      | Chez, Guile, R6RS systems                                              |
+| **Sets of scopes**                         | Flatt, POPL 2016: an identifier carries a *set* of scopes, and a binding is found by subset                                                                                                                                | Racket (since 2015), Klister                                           |
 
 **B. The macro-writer's interface** — what a macro author writes. Any of these
 can sit on (almost) any mechanism above.
 
-| Interface | Input is | Hygiene | Breaking hygiene |
-|---|---|---|---|
-| `syntax-rules` | patterns and templates | automatic | cannot, except by taking the name as an argument |
-| explicit renaming (ER) | plain lists; `rename`, `compare` | **opt-in**: rename every identifier you insert | don't rename it |
-| implicit renaming (IR) | plain lists; `inject`, `compare` | **automatic**: everything inserted is renamed | `inject` it |
-| syntactic closures (`sc-`/`rsc-`) | forms plus environments | by closing forms over an environment | close in the use environment |
-| `syntax-case` | opaque syntax objects | automatic | `datum->syntax` with a chosen context identifier |
-| `syntax-parse` | syntax objects, with *syntax classes* | automatic | as `syntax-case`; or syntax parameters |
-| binding specifications | a grammar annotated with what binds what | checked statically | (the point is that you don't) |
+| Interface                         | Input is                                 | Hygiene                                        | Breaking hygiene                                 |
+| --------------------------------- | ---------------------------------------- | ---------------------------------------------- | ------------------------------------------------ |
+| `syntax-rules`                    | patterns and templates                   | automatic                                      | cannot, except by taking the name as an argument |
+| explicit renaming (ER)            | plain lists; `rename`, `compare`         | **opt-in**: rename every identifier you insert | don't rename it                                  |
+| implicit renaming (IR)            | plain lists; `inject`, `compare`         | **automatic**: everything inserted is renamed  | `inject` it                                      |
+| syntactic closures (`sc-`/`rsc-`) | forms plus environments                  | by closing forms over an environment           | close in the use environment                     |
+| `syntax-case`                     | opaque syntax objects                    | automatic                                      | `datum->syntax` with a chosen context identifier |
+| `syntax-parse`                    | syntax objects, with *syntax classes*    | automatic                                      | as `syntax-case`; or syntax parameters           |
+| binding specifications            | a grammar annotated with what binds what | checked statically                             | (the point is that you don't)                    |
 
 ## 2. Why `syntax-case` is a bear, precisely
 

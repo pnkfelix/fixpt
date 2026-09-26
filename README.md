@@ -16,18 +16,18 @@ from the references.
 
 ## Status
 
-| | |
-|---|---|
-| **M0** conformance corpora and golden generators | done |
-| **M1** heap, Cheney collector, heap images | done |
-| **M2** reader with three syntax profiles | done |
-| **M3** Core IR, Scheme expander, AST engine | done |
-| **M4** bytecode compiler and VM | **done: the FX-91 corpus passes compiled as well as interpreted** |
-| **M5** heap dumping and single-binary builds | **done: image beside the runtime, or one standalone executable** |
-| **M6** FX-87 front end | **done: 161/161 parse, 160/161 types and effects, 123/123 values** |
-| **M7** FX-91 front end | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below |
-| **M9** hygienic macros | **done:** `syntax-rules`; SRFI 211's `er-macro-transformer` and `ir-macro-transformer`; SRFI 139 syntax parameters — [`docs/macros.md`](docs/macros.md) |
-| **M11** FX-26, the tooling's own language | **done, the seven-step plan:** a declared kernel with PLDI '89's control effects and typed delimited control, bidirectional checking, lowering to Scheme that carries the checker's proofs, the eager reader ported to it, and speculation licensed by effects — [`docs/fx26.md`](docs/fx26.md) |
+|                                                  |                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0** conformance corpora and golden generators | done                                                                                                                                                                                                                                                                                            |
+| **M1** heap, Cheney collector, heap images       | done                                                                                                                                                                                                                                                                                            |
+| **M2** reader with three syntax profiles         | done                                                                                                                                                                                                                                                                                            |
+| **M3** Core IR, Scheme expander, AST engine      | done                                                                                                                                                                                                                                                                                            |
+| **M4** bytecode compiler and VM                  | **done: the FX-91 corpus passes compiled as well as interpreted**                                                                                                                                                                                                                               |
+| **M5** heap dumping and single-binary builds     | **done: image beside the runtime, or one standalone executable**                                                                                                                                                                                                                                |
+| **M6** FX-87 front end                           | **done: 161/161 parse, 160/161 types and effects, 123/123 values**                                                                                                                                                                                                                              |
+| **M7** FX-91 front end                           | **done: 182/182 parse, 182/182 types and effects, 182/182 values** — and usable from the REPL, see below                                                                                                                                                                                        |
+| **M9** hygienic macros                           | **done:** `syntax-rules`; SRFI 211's `er-macro-transformer` and `ir-macro-transformer`; SRFI 139 syntax parameters — [`docs/macros.md`](docs/macros.md)                                                                                                                                         |
+| **M11** FX-26, the tooling's own language        | **done, the seven-step plan:** a declared kernel with PLDI '89's control effects and typed delimited control, bidirectional checking, lowering to Scheme that carries the checker's proofs, the eager reader ported to it, and speculation licensed by effects — [`docs/fx26.md`](docs/fx26.md) |
 
 All three deliverables of the brief are done. What follows is
 [`TODO.md`](TODO.md).
@@ -361,20 +361,20 @@ fx26> (+ 1 2)
 
 ## Layout
 
-| crate | what it is |
-|---|---|
-| `fixpt-heap` | `Value`, the heap, the collector, heap images |
-| `fixpt-read` | one reader, three lexical syntaxes |
-| `fixpt-core` | the Core IR every front end targets |
-| `fixpt-runtime` | numeric tower, equality, printing, primitives |
-| `fixpt-engine` | the AST machine, the bytecode compiler and the VM |
-| `fixpt-scheme` | the Scheme front end: expander, prelude, session |
-| `fixpt-cli` | the `fixpt` binary |
-| `fixpt-conform` | golden reading and normalisation |
-| `fixpt-fx91` | the FX-91 front end |
-| `fixpt-fx87` | the FX-87 front end |
-| `fixpt-fx26` | FX-26, the tooling's own language |
-| `fixpt-tidy` | checks on the repository itself, run by `cargo test` |
+| crate           | what it is                                           |
+| --------------- | ---------------------------------------------------- |
+| `fixpt-heap`    | `Value`, the heap, the collector, heap images        |
+| `fixpt-read`    | one reader, three lexical syntaxes                   |
+| `fixpt-core`    | the Core IR every front end targets                  |
+| `fixpt-runtime` | numeric tower, equality, printing, primitives        |
+| `fixpt-engine`  | the AST machine, the bytecode compiler and the VM    |
+| `fixpt-scheme`  | the Scheme front end: expander, prelude, session     |
+| `fixpt-cli`     | the `fixpt` binary                                   |
+| `fixpt-conform` | golden reading and normalisation                     |
+| `fixpt-fx91`    | the FX-91 front end                                  |
+| `fixpt-fx87`    | the FX-87 front end                                  |
+| `fixpt-fx26`    | FX-26, the tooling's own language                    |
+| `fixpt-tidy`    | checks on the repository itself, run by `cargo test` |
 
 Test programs of more than four lines or 240 characters live in files beside
 their tests — `crates/*/tests/programs/<suite>/` — and come in with
@@ -402,13 +402,13 @@ to do. `crates/fixpt-scheme/tests/gc_workloads.rs` covers the rest, with
 workloads ported from Larceny's `test/GC`, turned from benchmarks into
 assertions:
 
-| from | what it pins down |
-|---|---|
-| `gcbench0.sch` (Boehm's GCBench) | a long-lived tree and a long-lived array of boxed flonums survive heavy churn *intact* |
-| `grow.sch` | repeatedly-doubled vectors are reclaimed — heap occupancy returns to baseline, and the workload swings it by 32,768 words, so a retained generation could not hide |
-| `permsort.sch` perm8 | 40320 permutations, correct checksum, under allocation that produces no garbage at all |
-| `permsort.sch` Tenperm8 | allocate-and-reclaim: occupancy returns to baseline every round |
-| `permsort.sch` mergesort! | destructive `set-cdr!` over data that has already survived several collections |
+| from                             | what it pins down                                                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `gcbench0.sch` (Boehm's GCBench) | a long-lived tree and a long-lived array of boxed flonums survive heavy churn *intact*                                                                             |
+| `grow.sch`                       | repeatedly-doubled vectors are reclaimed — heap occupancy returns to baseline, and the workload swings it by 32,768 words, so a retained generation could not hide |
+| `permsort.sch` perm8             | 40320 permutations, correct checksum, under allocation that produces no garbage at all                                                                             |
+| `permsort.sch` Tenperm8          | allocate-and-reclaim: occupancy returns to baseline every round                                                                                                    |
+| `permsort.sch` mergesort!        | destructive `set-cdr!` over data that has already survived several collections                                                                                     |
 
 The perm8 case carries an external check worth calling out. `permsort.sch`
 documents the benchmark as allocating **149912 pairs** — a figure that only
