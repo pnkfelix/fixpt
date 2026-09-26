@@ -433,6 +433,8 @@ pub fn fx26_module() -> String {
     out.push_str(&format!("(define word-entry int {})\n", threaded::WORD_ENTRY));
     out.push_str(&format!("(define word-name int {})\n", threaded::WORD_NAME));
     out.push_str(&format!("(define word-cell0 int {})\n", threaded::WORD_CELL0));
+    out.push_str(&format!("(define threaded-closure-word int {})\n", threaded::CLOSURE_WORD));
+    out.push_str(&format!("(define threaded-closure-free0 int {})\n", threaded::CLOSURE_FREE0));
     for (i, (name, effect)) in threaded::ROUTINES.iter().enumerate() {
         out.push_str(&format!("(define routine-{} int {i})  ; {effect}\n", fx_name(name)));
     }

@@ -13,7 +13,7 @@ use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{routine, ROUTINES};
+use fixpt_heap::layout::threaded::{routine, CLOSURE_FREE0, ROUTINES};
 use fixpt_heap::{Heap, Value};
 use fixpt_read::Sym;
 
@@ -32,8 +32,9 @@ enum Loc {
     Slot(usize),
     Free(usize),
     Global(Value),
-    BoxedSlot(usize),
-    BoxedFree(usize),
+    /// A `letrec` sibling not made yet, to be in slot `i`: a closure that
+    /// captures it holds a placeholder, patched once every sibling is made.
+    Pending(usize),
     /// A `letrec`-bound procedure, in its own body, where it is only
     /// called in tail position: each call is a jump back to its start.
     Loop,
@@ -179,11 +180,8 @@ impl<'a> Compiler<'a> {
             Loc::Slot(i) => self.op1(code, "slot", Value::fixnum(i as i64)),
             Loc::Free(i) => self.op1(code, "free", Value::fixnum(i as i64)),
             Loc::Global(g) => self.op1(code, "global", g),
-            Loc::BoxedSlot(i) | Loc::BoxedFree(i) => {
-                self.op1(code, if matches!(l, Loc::BoxedSlot(_)) { "slot" } else { "free" }, Value::fixnum(i as i64));
-                self.field(code, 2);
-            }
             Loc::Loop => unreachable!("a loop is only ever called, in tail position"),
+            Loc::Pending(_) => unreachable!("a letrec sibling not made yet is only captured"),
         }
     }
 
@@ -369,42 +367,33 @@ impl<'a> Compiler<'a> {
                 self.unbind(code, depth, n, tail);
             }
             Exp::Letrec { bindings, body } => {
-                // A box per name first, so each closure can carry the box
-                // before it has its value; then each value into its box.
-                // A procedure that names none of the group, but for calls
-                // of itself that are loops, needs no box: its closure is
-                // made in its slot at once.
+                // Every binding is a lambda (the checker says so). Each
+                // closure is made in its slot, with a placeholder for a
+                // sibling not made yet; then each placeholder is patched
+                // with its sibling. Nothing runs in between, so no one sees
+                // the knot tied. A name used only in calls of itself that
+                // are loops is not captured at all.
                 let n = bindings.len();
-                let names: Vec<Sym> = bindings.iter().map(|(f, _, _)| *f).collect();
-                let lambdas: Vec<Option<(Vec<Sym>, ExpId)>> = bindings.iter().map(|(_, _, init)| self.lambda_of(*init)).collect();
-                let direct: Vec<bool> = (0..n).map(|i| self.boxless(names[i], &lambdas[i], &names)).collect();
-                let mut inner = e.clone();
-                for (i, name) in names.iter().enumerate() {
-                    if let (true, Some((ps, body))) = (direct[i], &lambdas[i]) {
-                        let mut own = e.clone();
-                        own.push((*name, Loc::Loop));
-                        self.lambda(ps, *body, &own, depth + i, code, Some(*name))?;
-                        inner.push((*name, Loc::Slot(depth + i)));
-                    } else {
-                        // Until filled, a procedure that traps when called.
-                        self.prim(code, "%fx26-undefined", 0)?;
-                        self.prim(code, "%make-box", 1)?;
-                        inner.push((*name, Loc::BoxedSlot(depth + i)));
-                    }
-                }
+                let mut patches = Vec::new();
                 for (i, (name, _, init)) in bindings.iter().enumerate() {
-                    if direct[i] {
-                        continue;
+                    let (ps, lbody) = self.lambda_of(*init).ok_or("a letrec binds only lambdas")?;
+                    let mut own = e.clone();
+                    for (k, (g, _, _)) in bindings.iter().enumerate() {
+                        let loops = k == i && self.loops_only(lbody, *g, ps.len(), true);
+                        own.push((*g, if loops { Loc::Loop } else { Loc::Pending(depth + k) }));
                     }
-                    self.op1(code, "slot", Value::fixnum((depth + i) as i64));
-                    match &lambdas[i] {
-                        Some((ps, body)) => self.lambda(ps, *body, &inner, depth + n + 1, code, Some(*name))?,
-                        None => self.exp(*init, &inner, depth + n + 1, code, false)?,
-                    }
-                    self.op(code, "swap");
-                    self.int(code, 2);
-                    self.op(code, "field!");
+                    patches.push(self.lambda(&ps, lbody, &own, depth + i, code, Some(*name))?);
                 }
+                for (i, ps) in patches.iter().enumerate() {
+                    for &(j, sibling) in ps {
+                        self.op1(code, "slot", Value::fixnum(sibling as i64));
+                        self.op1(code, "slot", Value::fixnum((depth + i) as i64));
+                        self.int(code, (CLOSURE_FREE0 + j) as i64);
+                        self.op(code, "field!");
+                    }
+                }
+                let mut inner = e.clone();
+                inner.extend(bindings.iter().enumerate().map(|(k, (g, _, _))| (*g, Loc::Slot(depth + k))));
                 self.exp(body, &inner, depth + n, code, tail)?;
                 self.unbind(code, depth, n, tail);
             }
@@ -471,8 +460,10 @@ impl<'a> Compiler<'a> {
 
     /// A lambda: its free values pushed, then its word closed over them.
     /// `own` is the `letrec` name it is bound to, whose tail calls in its
-    /// body are loops.
-    fn lambda(&mut self, params: &[Sym], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, own: Option<Sym>) -> R<()> {
+    /// body are loops. What it gives: for each `letrec` sibling it captured
+    /// before the sibling was made, its free value's index and the slot the
+    /// sibling will be in.
+    fn lambda(&mut self, params: &[Sym], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, own: Option<Sym>) -> R<Vec<(usize, usize)>> {
         let mut free = Vec::new();
         self.free(body, &params.iter().rev().copied().collect::<Vec<_>>(), &mut free);
         // The free names that are locals here, not globals or standard ones,
@@ -485,18 +476,17 @@ impl<'a> Compiler<'a> {
             inner.push((f, Loc::Loop));
         }
         inner.extend(params.iter().enumerate().map(|(i, p)| (*p, Loc::Slot(i))));
-        for (i, n) in fv.iter().enumerate() {
-            let l = match find(e, *n).expect("found") {
-                Loc::BoxedSlot(_) | Loc::BoxedFree(_) => Loc::BoxedFree(i),
-                _ => Loc::Free(i),
-            };
-            inner.push((*n, l));
-        }
-        // Each captured value, or its box, as the closure will hold it.
-        for n in &fv {
+        inner.extend(fv.iter().enumerate().map(|(i, n)| (*n, Loc::Free(i))));
+        // Each captured value, as the closure will hold it.
+        let mut patches = Vec::new();
+        for (j, n) in fv.iter().enumerate() {
             match find(e, *n).expect("found") {
-                Loc::Slot(i) | Loc::BoxedSlot(i) => self.op1(code, "slot", Value::fixnum(i as i64)),
-                Loc::Free(i) | Loc::BoxedFree(i) => self.op1(code, "free", Value::fixnum(i as i64)),
+                Loc::Slot(i) => self.op1(code, "slot", Value::fixnum(i as i64)),
+                Loc::Free(i) => self.op1(code, "free", Value::fixnum(i as i64)),
+                Loc::Pending(sibling) => {
+                    self.lit(code, Value::FALSE);
+                    patches.push((j, sibling));
+                }
                 Loc::Global(_) | Loc::Loop => return Err("a global is not captured".into()),
             }
         }
@@ -518,7 +508,7 @@ impl<'a> Compiler<'a> {
         self.op1(code, "closure", w);
         code.push(Item::Cell(Value::fixnum(fv.len() as i64)));
         let _ = depth;
-        Ok(())
+        Ok(patches)
     }
 
     // ------------------------------------------------- known procedures
@@ -539,15 +529,6 @@ impl<'a> Compiler<'a> {
         let mut acc = Vec::new();
         self.free(x, &[], &mut acc);
         acc.contains(&n)
-    }
-
-    /// Whether a `letrec` binding `f`, of `lambda`, needs no box: its body
-    /// names no other of the `group`, and `f` only in calls that are loops.
-    fn boxless(&self, f: Sym, lambda: &Option<(Vec<Sym>, ExpId)>, group: &[Sym]) -> bool {
-        let Some((ps, body)) = lambda else { return false };
-        let shadowed = |n: &Sym| ps.contains(n);
-        group.iter().all(|g| *g == f || shadowed(g) || !self.mentions(*body, *g))
-            && (shadowed(&f) || self.loops_only(*body, f, ps.len(), true))
     }
 
     /// Whether every use of `f` in `x` is a call with `n` arguments in tail
