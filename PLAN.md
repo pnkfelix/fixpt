@@ -618,15 +618,41 @@ A4. **Stencils**: primitives written in Rust with `become`, compiled by the
 
 ### Phase C: bootstrapping
 
-9. **An FX-26 interpreter written in FX-26**, running threaded bloblets.
-   Checked against the Rust bootstrap interpreter on the same programs.
-10. **The FX-26 checker written in FX-26**, checked against the Rust checker
-    on every test program: FX-26 checking FX-26.
-11. **The FX-26 compiler written in FX-26**, replacing threaded bloblets with
-    compiled ones one at a time. Checked by running the same programs
-    interpreted and compiled.
-12. **Retiring Rust pieces**, one at a time and deliberately. Each keeps its
-    Rust version as oracle and stage 0 until decided otherwise.
+*(Revised 2026-09-26, before starting it, by checking that every step's
+inputs come from an earlier step. The first version had no compiler from
+FX-26 to threaded code, which the user pointed out; checking the rest the
+same way found no FX-26 AST in FX-26, a threaded machine that knew only
+Forth's primitives, and no way for FX-26 code to make a threaded word or run
+one.)*
+
+9. **FX-26 in FX-26, up to running it:**
+   - **9a. A parser in FX-26**: `syn` (step 8) to an AST, a
+     `define-datatype`, with the Rust parser's desugarings. Checked by
+     unparsing both ASTs on every test program. The compiler and the checker
+     both start from it.
+   - **9b. An evaluator in FX-26** over that AST: FX-26's reference
+     semantics, written in FX-26. Checked against the same programs lowered
+     to Scheme.
+   - **9c. The threaded machine grows what FX-26 needs**: frames and
+     locals, closures, calls with arguments, globals, and calls out to the
+     runtime's primitives. In the Rust machine, the hand-encoded machine and
+     the stencils, each checked against the others as now. Plus a checked
+     `%make-word` (what `WordBuilder` checks, since the native machine
+     trusts a word's cells) and a way for Scheme and FX-26 to run a word on
+     the native machine, which needs a hook: `fixpt-runtime` sits below
+     `fixpt-native`.
+   - **9d. A compiler in FX-26 from the AST to threaded words**, emitting
+     bloblets. Checked three ways on the same programs: the evaluator, the
+     lowering to Scheme, and the threaded words on the native machine.
+10. **The FX-26 checker written in FX-26**, over the 9a AST, checked against
+    the Rust checker on every test program: FX-26 checking FX-26.
+11. **Native code from FX-26**: a word's cells compiled to machine code, by
+    an encoder written in FX-26 (the Rust one its oracle) or by placing
+    stencils, and installed as the word's entry routine, one word at a time,
+    as decision 6 describes. Checked by running the same programs threaded
+    and compiled.
+12. **The comparison**, Rust pieces against FX-26 ones, with no piece
+    retired (decision 8).
 
 ### Kept open, deliberately
 
