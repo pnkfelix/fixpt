@@ -405,8 +405,18 @@
                          (begin (set declared (without (get declared) n)) (find-cell (get genv) n))
                          (push-global n))))
               (begin (bloblet-set! c 0 (eval x (get genv))) (v-unit)))))
+      ;; Every name's cell first; then each lambda, which runs nothing.
+      (t-define-rec (bs a b) (begin (rec-fill bs (rec-cells bs)) (v-unit)))
       (t-exp (x) (eval x (get genv)))
       (else x (v-unit)))))
+
+(define rec-cells (subr (maxeff (read @a) (read @v) (write @v) (alloc @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof (bloblet (fields val) @v) @v))
+  (lambda (bs) (if (null? bs) nil (let ((c (push-global (extract (car bs) 1)))) (cons c (rec-cells (cdr bs)))))))
+(define rec-fill (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) (listof (bloblet (fields val) @v) @v)) unit)
+  (lambda (bs cells)
+    (if (null? bs)
+        #u
+        (begin (bloblet-set! (car cells) 0 (eval (extract (car bs) 3) (get genv))) (rec-fill (cdr bs) (cdr cells))))))
 
 ;; The value of the last form, or the first error.
 (define eval-program (subr evals ((listof top @a)) eresult)

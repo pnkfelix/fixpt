@@ -11,7 +11,7 @@ use crate::lineedit::{Line, LineReader, Note};
 use fixpt_engine::Backend;
 use fixpt_fx26::session::{Fx26Session, Outcome};
 use fixpt_fx26::{Checker, Top};
-use fixpt_read::{Datum, FileId, Syntax, SyntaxProfile};
+use fixpt_read::{Datum, FileId, Sym, Syntax, SyntaxProfile};
 
 /// Line and column (both from 1) of byte `at` in `text`.
 fn line_col(text: &str, at: usize) -> (usize, usize) {
@@ -32,6 +32,11 @@ fn report(c: &Checker, top: &Top) -> String {
         Top::Exp(k) => format!(" : {} ! {}", c.show_ty(k.ty), c.show_effect(&k.effect)),
         Top::Define { name, ty, effect, .. } => {
             format!("{} : {} ! {}", c.interner.name(*name), c.show_ty(*ty), c.show_effect(effect))
+        }
+        Top::DefineRec { bindings } => {
+            let lines: Vec<String> =
+                bindings.iter().map(|(n, t, _)| format!("{} : {} ! pure", c.interner.name(*n), c.show_ty(*t))).collect();
+            lines.join("\n")
         }
         Top::DefineType { name, ty } => format!("{} = {}", c.interner.name(*name), c.show_definition(*ty)),
         Top::DefineTypeFamily { name } => format!("{}: a type with parameters", c.interner.name(*name)),
@@ -177,9 +182,12 @@ pub fn repl(backend: Backend) -> i32 {
                 },
                 Ok(out) => {
                     show(&session, &out, show_code);
-                    if let Top::Define { name, .. } = &out.top
-                        && known.contains(name)
-                    {
+                    let defined: Vec<Sym> = match &out.top {
+                        Top::Define { name, .. } => vec![*name],
+                        Top::DefineRec { bindings } => bindings.iter().map(|(n, _, _)| *n).collect(),
+                        _ => Vec::new(),
+                    };
+                    for name in defined.iter().filter(|n| known.contains(n)) {
                         println!("{}", shadowing_note(session.checker.interner.name(*name)));
                     }
                 }

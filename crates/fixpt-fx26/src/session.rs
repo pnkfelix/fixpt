@@ -77,6 +77,13 @@ pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax)
             };
             format!("(define {global} {body})")
         }
+        Top::DefineRec { bindings } => {
+            // Every name first: each lambda refers to the group's globals.
+            let names: Vec<String> = bindings.iter().map(|(n, _, _)| globals.define(checker, *n)).collect();
+            let defs: Vec<String> =
+                bindings.iter().zip(&names).map(|((_, _, e), g)| format!("(define {g} {})", lower(checker, globals, *e))).collect();
+            format!("(begin {})", defs.join(" "))
+        }
         Top::Exp(k) => lower(checker, globals, k.exp),
     };
     Ok((top, code))
@@ -288,7 +295,7 @@ impl Fx26Session {
         if code.is_empty() {
             return Ok(Outcome { top, code, printed: String::new(), value: Ok(None) });
         }
-        let is_define = matches!(top, Top::Define { .. });
+        let is_define = matches!(top, Top::Define { .. } | Top::DefineRec { .. });
         let (printed, value) = self.scheme.scope(|s| {
             let (printed, result) = s.eval_capturing("<fx26>", &code);
             let value = match result {

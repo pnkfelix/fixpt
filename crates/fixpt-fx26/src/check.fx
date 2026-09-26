@@ -2286,11 +2286,41 @@
                                                        (k-cat4 (k-quote (symbol->string name)) " is declared a " (k-show-ty t) ": "))
                                           2)))
                          (cons (k-cat4 "define " (symbol->string name) " : " (k-line t e)) nil))))
+                 (t-define-rec (bs a b) (k-define-rec bs))
                  (t-exp (e)
                    (let* ((x (k-resolve-exp e)) (r (k-synth x)))
                      (cons (k-line (extract r 1) (extract r 2)) nil)))
                  (else y nil)))))
-          (k-forms (cdr forms) (if (null? line) out (cons (car line) out)))))))
+          (k-forms (cdr forms) (k-push-lines line out))))))
+(define k-push-lines (subr (maxeff (read @t) (alloc @t)) ((listof string @t) k-out) k-out)
+  (lambda (lines out) (if (null? lines) out (k-push-lines (cdr lines) (cons (car lines) out)))))
+
+;; `(define-rec (name type lambda) …)`: every name in scope first, then each
+;; lambda checked against its type. A line for each.
+(define k-define-rec (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof string @t))
+  (lambda (bs) (k-rec-check bs (k-rec-types bs))))
+(define k-rec-types (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) k-ids)
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (let* ((t (k-parse-type (extract (car bs) 2))) (bound (k-bind (extract (car bs) 1) t)))
+          (cons t (k-rec-types (cdr bs)))))))
+(define k-rec-check (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) k-ids) (listof string @t))
+  (lambda (bs ts)
+    (if (null? bs)
+        nil
+        (let* ((name (extract (car bs) 1))
+               (t (car ts))
+               (saved (get k-dscope))
+               (signed (k-bind-signature t))
+               (x (k-resolve-exp (extract (car bs) 3)))
+               (restored (set k-dscope saved))
+               (e (if (k-lambda? x)
+                      (k-check-declared name t x)
+                      (k-fail (k-letrec-not-lambda name) (k-start x) (k-end x))))
+               (line (k-cat4 "define " (symbol->string name) " : " (k-line t e)))
+               (rest (k-rec-check (cdr bs) (cdr ts))))
+          (cons line rest)))))
 
 ;; The entry point: check a program's trees, in the initial environment
 ;; written `standard`. What each definition and expression is, in order,

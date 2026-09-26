@@ -54,6 +54,8 @@
 ;; A top-level form. A definition's type is a list of none or one.
 (define-datatype top
   (t-define symbol syns-a exp int int)
+  ;; `(define-rec (name type lambda) …)`: a top-level `letrec`.
+  (t-define-rec (listof (productof (1 symbol) (2 syn) (3 exp)) @a) int int)
   (t-define-type syn syn int int)
   (t-define-effect syn syn int int)
   (t-private-regions syns-a int int)
@@ -234,6 +236,17 @@
                 (cons (product (1 name) (2 (nth parts 1)) (3 init)) (parse-letrec-bindings (cdr bs))))
               (pfail "a letrec binding is `(name type expression)`" (car bs)))))))
 
+;; A `define-rec`'s bindings, as a `letrec`'s are.
+(define parse-rec-bindings (subr parses ((listof syn @s)) (listof (productof (1 symbol) (2 syn) (3 exp)) @a))
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (let ((parts (syn-items (car bs) "a define-rec binding")))
+          (if (= (len parts) 3)
+              (let* ((name (syn-symbol (car parts))) (init (parse-exp (nth parts 2))))
+                (cons (product (1 name) (2 (nth parts 1)) (3 init)) (parse-rec-bindings (cdr bs))))
+              (pfail "a define-rec binding is `(name type lambda)`" (car bs)))))))
+
 ;; `(let ((name expression) …) …)`; `()` is no bindings.
 (define parse-let-bindings (subr parses ((listof syn @s)) (listof (productof (1 symbol) (2 exp)) @a))
   (lambda (bs)
@@ -375,6 +388,11 @@
                       (let ((name (syn-symbol (nth items 1))))
                         (t-define name (the syns-a nil) (parse-exp (nth items 2)) (syn-start s) (syn-end s))))
                      (else (pfail "`(define name type expression)` or `(define name expression)`" s)))))
+            ((string=? head "define-rec")
+             (let ((items (syn-items s "a group of definitions")))
+               (if (null? (cdr items))
+                   (pfail "`(define-rec (name type lambda) …)`" s)
+                   (t-define-rec (parse-rec-bindings (cdr items)) (syn-start s) (syn-end s)))))
             ((string=? head "define-type")
              (let ((items (syn-items s "a type definition")))
                (if (= (len items) 3)

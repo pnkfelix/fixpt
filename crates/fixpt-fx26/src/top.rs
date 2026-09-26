@@ -8,6 +8,9 @@
 //!   `letrec` binding).
 //! * `(define name expression)` — the type is the expression's own; not
 //!   recursive (a top-level `let`).
+//! * `(define-rec (name type lambda) …)` — procedures that may call each
+//!   other, each name in scope in every lambda (a top-level `letrec`). They
+//!   are lambdas, so nothing runs before every one of them exists.
 //! * `(define-type name type)` — a type abbreviation, which may mention itself
 //!   (a top-level one-binding `dletrec`). Without it, a recursive type such as
 //!   a continuation that is its own argument has to be written out in full at
@@ -31,6 +34,8 @@ pub enum Top {
     /// `(define name …)`: `name` is bound to a value of this type, and
     /// computing it has this effect.
     Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, recursive: bool },
+    /// `(define-rec (name type lambda) …)`: each name bound to its lambda.
+    DefineRec { bindings: Vec<(Sym, TyId, crate::ast::ExpId)> },
     /// `(define-type name …)`.
     DefineType { name: Sym, ty: TyId },
     /// `(define-type (name (param kind) …) …)`: a parametric abbreviation.
@@ -130,6 +135,7 @@ impl Checker {
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
         match head {
             Some("define") => self.define(form.span, items),
+            Some("define-rec") => self.define_rec(form.span, items),
             Some("private-regions") => {
                 let mut regions = Vec::new();
                 for r in &items[1..] {
@@ -206,18 +212,7 @@ impl Checker {
                 self.bind_signature(ty);
                 let r = self.parse_exp(init);
                 self.dscope.truncate(depth);
-                let r = r.and_then(|e| {
-                    self.check(e, ty).map(|eff| (eff, e)).map_err(|err| {
-                        if err.span == self.arena.span_of(e) {
-                            FxError::at(
-                                err.span,
-                                format!("`{}` is declared a {}: {}", self.interner.name(name), self.show_ty(ty), err.message),
-                            )
-                        } else {
-                            err
-                        }
-                    })
-                });
+                let r = r.and_then(|e| self.check_declared(name, ty, e).map(|eff| (eff, e)));
                 match r {
                     Ok((effect, exp)) => Ok(Top::Define { name, ty, effect, exp, recursive: true }),
                     Err(e) => {
@@ -235,6 +230,57 @@ impl Checker {
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),
         }
+    }
+
+    /// `(define-rec (name type lambda) …)`: every name in scope first, then
+    /// each lambda checked against its type.
+    fn define_rec(&mut self, span: Span, items: &[Syntax]) -> R<Top> {
+        let depth = self.env.len();
+        let r = (|| {
+            let mut parts = Vec::new();
+            for b in &items[1..] {
+                let Some([name, ty, init]) = b.as_proper_list() else {
+                    return Err(FxError::at(b.span, "a define-rec binding is `(name type lambda)`"));
+                };
+                let name = self.binder_name(name)?;
+                let ty = self.parse_type(ty)?;
+                self.env.push((name, ty));
+                parts.push((name, ty, init.clone()));
+            }
+            if parts.is_empty() {
+                return Err(FxError::at(span, "`(define-rec (name type lambda) …)`"));
+            }
+            let mut bindings = Vec::new();
+            for (name, ty, init) in parts {
+                let d = self.dscope.len();
+                self.bind_signature(ty);
+                let e = self.parse_exp(&init);
+                self.dscope.truncate(d);
+                let e = e?;
+                if !self.is_lambda(e) {
+                    return Err(FxError::at(self.arena.span_of(e), crate::check::letrec_not_lambda(self.interner.name(name))));
+                }
+                self.check_declared(name, ty, e)?;
+                bindings.push((name, ty, e));
+            }
+            Ok(Top::DefineRec { bindings })
+        })();
+        if r.is_err() {
+            self.env.truncate(depth);
+        }
+        r
+    }
+
+    /// Check `e` against `ty`, the type `name` is declared; an error at `e`
+    /// itself says so.
+    fn check_declared(&mut self, name: Sym, ty: TyId, e: crate::ast::ExpId) -> R<Effect> {
+        self.check(e, ty).map_err(|err| {
+            if err.span == self.arena.span_of(e) {
+                FxError::at(err.span, format!("`{}` is declared a {}: {}", self.interner.name(name), self.show_ty(ty), err.message))
+            } else {
+                err
+            }
+        })
     }
 
     /// Check `form` as [`top`](Self::top) would, then forget it: nothing it
@@ -372,7 +418,7 @@ pub const KEYWORDS: &[&str] = &[
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
-    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase",
+    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes",
 ];

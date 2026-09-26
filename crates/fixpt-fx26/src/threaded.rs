@@ -918,6 +918,19 @@ impl<'a> Compiler<'a> {
                     self.op1(&mut code, "global!", g);
                     has_value = false;
                 }
+                // Every name's global first; then each lambda, which runs
+                // nothing.
+                Top::DefineRec { bindings } => {
+                    if has_value {
+                        self.op(&mut code, "drop");
+                    }
+                    let gs: Vec<Value> = bindings.iter().map(|(n, _, _)| self.push_global(*n)).collect();
+                    for ((_, _, e), g) in bindings.iter().zip(gs) {
+                        self.exp(*e, &Vec::new(), 0, &mut code, false)?;
+                        self.op1(&mut code, "global!", g);
+                    }
+                    has_value = false;
+                }
                 Top::Exp(k) => {
                     if has_value {
                         self.op(&mut code, "drop");

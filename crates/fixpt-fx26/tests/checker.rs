@@ -92,6 +92,11 @@ fn rust_check(program: &str) -> Result<Vec<String>, (String, u32, u32)> {
             Top::Define { name, ty, effect, .. } => {
                 out.push(format!("define {} : {} ! {}", c.interner.name(name), c.show_ty(ty), c.show_effect(&effect)))
             }
+            Top::DefineRec { bindings } => {
+                for (name, ty, _) in bindings {
+                    out.push(format!("define {} : {} ! pure", c.interner.name(name), c.show_ty(ty)))
+                }
+            }
             Top::Exp(k) => out.push(format!("{} ! {}", c.show_ty(k.ty), c.show_effect(&k.effect))),
             _ => {}
         }

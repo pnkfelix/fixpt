@@ -793,6 +793,16 @@
             (else y #u))
           (c-declare-ahead (cdr ts))))))
 
+(define c-rec-globals (subr (maxeff (read @a) (read @k) (write @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof wglobal @k))
+  (lambda (bs) (if (null? bs) nil (let ((g (c-push-global (extract (car bs) 1)))) (cons g (c-rec-globals (cdr bs)))))))
+(define c-rec-fill (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) (listof wglobal @k) code) unit)
+  (lambda (bs gs c)
+    (if (null? bs)
+        #u
+        (begin (c-exp (extract (car bs) 3) (the cenv nil) 0 c #f)
+               (c-op1 c routine-global! (wcell-global (car gs)))
+               (c-rec-fill (cdr bs) (cdr gs) c)))))
+
 ;; Each form in turn; the last expression's value is left on the stack.
 (define c-tops (subr compiles ((listof top @a) code bool) bool)
   (lambda (ts c has-value)
@@ -810,6 +820,12 @@
                                (c-push-global n))))
                     (begin (c-exp x (the cenv nil) 0 c #f)
                            (c-op1 c routine-global! (wcell-global g)))))
+              (c-tops (cdr ts) c #f)))
+          ;; Every name's global first; then each lambda, which runs nothing.
+          (t-define-rec (bs a b)
+            (begin
+              (if has-value (c-op c routine-drop) #u)
+              (c-rec-fill bs (c-rec-globals bs) c)
               (c-tops (cdr ts) c #f)))
           (t-exp (x)
             (begin (if has-value (c-op c routine-drop) #u)

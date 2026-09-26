@@ -37,3 +37,30 @@ fn a_letrec_binding_that_is_not_a_lambda_is_rejected() {
     );
     assert_eq!(check("(letrec ((x int 1)) x)"), Err(why.to_string()));
 }
+
+#[test]
+fn a_group_defines_procedures_that_call_each_other() {
+    assert_eq!(
+        check(
+            "(define-rec
+               (ev (subr pure (int) bool) (lambda (n) (if (= n 0) #t (od (- n 1)))))
+               (od (subr pure (int) bool) (lambda (n) (if (= n 0) #f (ev (- n 1))))))
+             (ev 10)"
+        ),
+        Ok(())
+    );
+}
+
+#[test]
+fn a_group_binds_only_lambdas() {
+    assert_eq!(
+        check("(define-rec (f (subr pure () int) (lambda () x)) (x int (f))) x"),
+        Err("`x` is bound recursively, so it must be a lambda: nothing may run before every binding exists".to_string())
+    );
+}
+
+#[test]
+fn a_group_is_checked_against_its_types() {
+    let e = check("(define-rec (f (subr pure (int) int) (lambda (n) (g n))) (g (subr pure (int) bool) (lambda (n) #t))) 1");
+    assert!(e.is_err(), "{e:?}");
+}
