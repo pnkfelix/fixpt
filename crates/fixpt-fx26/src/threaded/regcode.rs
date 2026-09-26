@@ -13,6 +13,10 @@
 //! declines: the lambda keeps its stack code alone.
 
 use super::{find, Compiler, Env, Loc, This};
+
+fn two() -> Value {
+    Value::fixnum(2)
+}
 use crate::ast::{BlobletOp, Exp, ExpId};
 use fixpt_heap::layout::regcode::{op, REGS};
 use fixpt_heap::layout::threaded::routine;
@@ -27,6 +31,17 @@ enum RLoc {
     Free(usize),
     Global(Value),
     Loop,
+    /// A `letrec` sibling not made yet, to be in frame slot `s`.
+    Pending(usize),
+}
+
+/// An operand of a call-out: an expression, a constant, or a procedure of
+/// no arguments whose body is an expression (a `prompt`'s).
+#[derive(Clone, Copy)]
+enum Arg {
+    E(ExpId),
+    V(Value),
+    Thunk(ExpId),
 }
 
 enum RItem {
@@ -46,8 +61,14 @@ enum Std {
     Op2Imm(&'static str, Value),
     Field(i64),
     /// A call-out: a runtime primitive, or a threaded routine.
-    Prim(i64, usize),
-    Threaded(&'static str, usize),
+    Prim(i64),
+    Threaded(&'static str),
+    /// Its argument itself (`%fx26-identity`).
+    Identity,
+    /// A reference written: `setfield 2`, then unit.
+    Set,
+    /// Arrays, the tag and key makers: several instructions (`r_app`).
+    Special(&'static str),
 }
 
 struct Gen {
@@ -136,11 +157,19 @@ impl Gen {
 }
 
 impl Compiler<'_> {
+    /// None, remembering why, for [`Compiler::register_report`].
+    fn decline<T>(&mut self, why: &str) -> O<T> {
+        if self.declined.is_none() {
+            self.declined = Some(why.to_string());
+        }
+        None
+    }
+
     /// A lambda's register code, whose closure captures `inner`'s free
     /// values in order, or none where this compiler declines.
     pub(super) fn register_code(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>) -> O<Vec<Value>> {
         if params.len() > REGS {
-            return None;
+            return self.decline("more than REGS parameters");
         }
         let leaf = !self.r_collects(body, inner, this);
         let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None };
@@ -205,7 +234,20 @@ impl Compiler<'_> {
             ("car", 1) => Some(Std::Op1("pair-car")),
             ("cdr", 1) => Some(Std::Op1("pair-cdr")),
             ("get", 1) => Some(Std::Field(2)),
-            ("cons", 2) => Some(Std::Threaded("cons", 2)),
+            ("cons", 2) => Some(Std::Threaded("cons")),
+            ("set", 2) => Some(Std::Set),
+            ("abort-current-continuation", 2) => Some(Std::Threaded("abort")),
+            ("call-with-composable-continuation", 2) => Some(Std::Threaded("callcomp")),
+            ("cwcc", 1) => Some(Std::Threaded("callcc")),
+            ("with-mark", 3) => Some(Std::Threaded("withmark")),
+            ("first-mark", 2) => Some(Std::Threaded("firstmark")),
+            ("current-marks", 1) => Some(Std::Threaded("currentmarks")),
+            ("marks-of", 2) => Some(Std::Threaded("marksof")),
+            ("array-ref", 2) => Some(Std::Special("array-ref")),
+            ("array-set!", 3) => Some(Std::Special("array-set!")),
+            ("array-length", 1) => Some(Std::Special("array-length")),
+            ("make-array", 2) => Some(Std::Special("make-array")),
+            ("make-continuation-prompt-tag" | "make-continuation-mark-key", 0) => Some(Std::Special("make-box")),
             _ => {
                 // What the threaded compiler does with one runtime
                 // primitive, register code does too.
@@ -213,8 +255,9 @@ impl Compiler<'_> {
                 self.standard_on(name, n, &mut tmp).ok()?;
                 let prim = Value::fixnum(routine("prim") as i64);
                 match tmp[..] {
+                    [] if n == 1 => Some(Std::Identity),
                     [super::Item::Cell(r), super::Item::Cell(p), super::Item::Cell(k)] if r == prim => {
-                        Some(Std::Prim(p.as_fixnum(), k.as_fixnum() as usize))
+                        Some(Std::Prim(p.as_fixnum())).filter(|_| k.as_fixnum() as usize == n)
                     }
                     _ => None,
                 }
@@ -249,6 +292,11 @@ impl Compiler<'_> {
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_collects(body, e, this),
             Exp::Extract(y, _) => self.r_collects(y, e, this),
             Exp::Bloblet { op: BlobletOp::Ref(_), args } => args.iter().any(|y| self.r_collects(*y, e, this)),
+            Exp::TagCase { scrutinee, arms, els } => {
+                self.r_collects(scrutinee, e, this)
+                    || arms.iter().any(|a| self.r_collects(a.body, e, this))
+                    || els.is_some_and(|(_, b)| self.r_collects(b, e, this))
+            }
             Exp::App { fun, args } => {
                 let args_collect = args.iter().any(|y| self.r_collects(*y, e, this));
                 let loop_call = matches!((this, self.c.arena.exp_at(fun)), (Some(t), Exp::Var(n))
@@ -256,7 +304,10 @@ impl Compiler<'_> {
                 let inline = match self.c.arena.exp_at(fun) {
                     Exp::Var(n) if self.where_is(e, *n).is_none() => {
                         let name = self.name(*n).to_string();
-                        matches!(self.r_standard(&name, args.len()), Some(Std::Op1(_) | Std::Op2 { .. } | Std::Op2Imm(..) | Std::Field(_)))
+                        matches!(
+                            self.r_standard(&name, args.len()),
+                            Some(Std::Op1(_) | Std::Op2 { .. } | Std::Op2Imm(..) | Std::Field(_) | Std::Identity | Std::Set)
+                        )
                     }
                     _ => false,
                 };
@@ -284,9 +335,9 @@ impl Compiler<'_> {
                     Some(RLoc::Slot(s)) => g.op("stack", &[Gen::n(s)]),
                     Some(RLoc::Free(i)) => g.op("lexical", &[Gen::n(i)]),
                     Some(RLoc::Global(c)) => g.op("global", &[c]),
-                    Some(RLoc::Loop) => return None,
+                    Some(RLoc::Loop | RLoc::Pending(_)) => return None,
                     None if self.name(n) == "nil" => g.op("const", &[Value::NULL]),
-                    None => return None,
+                    None => return self.decline("a standard operation as a value"),
                 }
                 g.done(tail);
             }
@@ -380,29 +431,85 @@ impl Compiler<'_> {
                 g.done(tail);
             }
             Exp::Lambda { params, body } => {
+                let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
+                self.r_lambda(g, &ps, body, env, te, None)?;
+                g.done(tail);
+            }
+            Exp::Sum(t, v) => {
+                let tag = self.heap.intern(self.c.interner.name(t));
+                self.r_prim(g, "%make-frozen", &[Arg::V(Value::fixnum(36)), Arg::V(tag), Arg::E(v)], env, te)?;
+                g.done(tail);
+            }
+            Exp::Product(fields) => {
+                let mut args = vec![Arg::V(Value::fixnum(37))];
+                args.extend(fields.iter().map(|(_, f)| Arg::E(*f)));
+                self.r_prim(g, "%make-frozen", &args, env, te)?;
+                g.done(tail);
+            }
+            Exp::Bloblet { op, args } => {
+                let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+                match op {
+                    BlobletOp::Make => self.r_prim(g, "%make-bloblet", &es, env, te)?,
+                    BlobletOp::Set(i) => {
+                        self.r_prim(g, "%bloblet-set!", &[es[0], Arg::V(Value::fixnum(i as i64 + 2)), es[1]], env, te)?;
+                        let u = self.unit();
+                        g.op("const", &[u]);
+                    }
+                    BlobletOp::Byte => self.r_prim(g, "%bloblet-byte", &es, env, te)?,
+                    BlobletOp::SetByte => {
+                        self.r_prim(g, "%bloblet-set-byte!", &es, env, te)?;
+                        let u = self.unit();
+                        g.op("const", &[u]);
+                    }
+                    BlobletOp::Bytes => self.r_prim(g, "%bloblet-bytes", &es, env, te)?,
+                    BlobletOp::Freeze | BlobletOp::Ref(_) => return self.decline("bloblet-freeze"),
+                }
+                g.done(tail);
+            }
+            Exp::Prompt { tag, body, handler } => {
+                self.r_call_out(g, "threaded", routine("prompt") as i64, &[Arg::E(tag), Arg::E(handler), Arg::Thunk(body)], env, te)?;
+                g.done(tail);
+            }
+            Exp::TagCase { scrutinee, arms, els } => self.r_tagcase(g, scrutinee, &arms, els, env, te, tail)?,
+            Exp::Letrec { bindings, body } => {
                 if g.leaf {
                     return None;
                 }
-                let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-                let (w, fv) = self.lambda_word(&ps, body, te, None).ok()?;
-                if fv.len() > REGS {
-                    return None;
+                let (depth, tdepth, slots) = (env.len(), te.len(), g.next_slot);
+                let n = bindings.len();
+                let at: Vec<usize> = (0..n).map(|_| g.slot()).collect();
+                // Each closure made into its slot, a placeholder for a
+                // sibling not made yet; then each placeholder patched.
+                let mut patches = Vec::new();
+                for (i, (name, _, init)) in bindings.iter().enumerate() {
+                    let (ps, lbody) = self.lambda_of(*init)?;
+                    let (mut own_env, mut own_te) = (env.clone(), te.clone());
+                    for (k, (sib, _, _)) in bindings.iter().enumerate() {
+                        let loops = k == i && self.loops_only(lbody, *sib, ps.len(), true);
+                        own_env.push((*sib, if loops { RLoc::Loop } else { RLoc::Pending(at[k]) }));
+                        own_te.push((*sib, if loops { Loc::Loop } else { Loc::Pending(at[k]) }));
+                    }
+                    let p = self.r_lambda(g, &ps, lbody, &mut own_env, &mut own_te, Some(*name))?;
+                    g.op("setstk", &[Gen::n(at[i])]);
+                    patches.push(p);
                 }
-                for (j, n) in fv.iter().enumerate() {
-                    match self.r_where(env, *n)? {
-                        RLoc::Slot(s) => g.op("load", &[Gen::n(j + 1), Gen::n(s)]),
-                        RLoc::Free(i) => {
-                            g.op("lexical", &[Gen::n(i)]);
-                            g.op("setreg", &[Gen::n(j + 1)]);
-                        }
-                        _ => return None,
+                for (i, ps) in patches.iter().enumerate() {
+                    for &(j, sibling) in ps {
+                        g.op("load", &[Gen::n(1), Gen::n(sibling)]);
+                        g.op("stack", &[Gen::n(at[i])]);
+                        g.op("setfield", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64), Gen::n(1)]);
                     }
                 }
-                g.op("lambda", &[w, Gen::n(fv.len())]);
-                g.done(tail);
+                for (k, (name, _, _)) in bindings.iter().enumerate() {
+                    env.push((*name, RLoc::Slot(at[k])));
+                    te.push((*name, Loc::Slot(usize::MAX)));
+                }
+                self.r_exp(g, body, env, te, tail)?;
+                env.truncate(depth);
+                te.truncate(tdepth);
+                g.next_slot = slots;
             }
             Exp::App { fun, args } => self.r_app(g, fun, &args, env, te, tail)?,
-            _ => return None,
         }
         Some(())
     }
@@ -412,7 +519,10 @@ impl Compiler<'_> {
             return self.r_loop(g, args, env, te);
         }
         if let Some(name) = self.r_standard_name(env, f) {
-            match self.r_standard(&name, args.len())? {
+            let Some(std) = self.r_standard(&name, args.len()) else {
+                return self.decline(&format!("standard `{name}`"));
+            };
+            match std {
                 Std::Op2 { r, swap, not } => {
                     let (a, b) = if swap { (args[1], args[0]) } else { (args[0], args[1]) };
                     self.r_binary(g, r, a, b, env, te)?;
@@ -432,23 +542,35 @@ impl Compiler<'_> {
                     self.r_exp(g, args[0], env, te, false)?;
                     g.op("field", &[Value::fixnum(k)]);
                 }
-                Std::Prim(p, n) => {
-                    self.r_args(g, args, env, te, None)?;
-                    g.op("prim", &[Value::fixnum(p), Gen::n(n)]);
+                Std::Prim(p) => {
+                    let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+                    self.r_call_out(g, "prim", p, &es, env, te)?;
                 }
-                Std::Threaded(r, n) => {
-                    self.r_args(g, args, env, te, None)?;
-                    g.op("threaded", &[Value::fixnum(routine(r) as i64), Gen::n(n)]);
+                // In tail position a mark replaces this frame's, which is
+                // stack code's way (`withmark-tail`); left to it.
+                Std::Threaded("withmark") if tail => return self.decline("with-mark in tail position"),
+                Std::Threaded(r) => {
+                    let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+                    self.r_call_out(g, "threaded", routine(r) as i64, &es, env, te)?;
                 }
+                Std::Identity => self.r_exp(g, args[0], env, te, false)?,
+                Std::Set => {
+                    let k = self.r_operands(g, args[0], args[1], env, te, false)?.1?;
+                    g.op("setfield", &[Value::fixnum(2), Gen::n(k)]);
+                    let u = self.unit();
+                    g.op("const", &[u]);
+                }
+                Std::Special(what) => self.r_special(g, what, args, env, te)?,
             }
             g.done(tail);
             return Some(());
         }
         // A call: the arguments into REG1…REGn, the procedure in RESULT.
         if g.leaf || args.len() > REGS {
-            return None;
+            return self.decline("more than REGS arguments");
         }
-        self.r_args(g, args, env, te, Some(f))?;
+        let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+        self.r_args(g, &es, env, te, Some(f))?;
         if tail {
             g.leave();
             g.op("tailinvoke", &[Gen::n(args.len())]);
@@ -465,19 +587,32 @@ impl Compiler<'_> {
     /// frame.
     fn r_binary(&mut self, g: &mut Gen, r: &str, a: ExpId, b: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
         let r = Value::fixnum(routine(r) as i64);
+        match self.r_operands(g, a, b, env, te, true)? {
+            (Some(v), _) => g.op("op2imm", &[r, v]),
+            (None, Some(k)) => g.op("op2", &[r, Gen::n(k)]),
+            (None, None) => return None,
+        }
+        Some(())
+    }
+
+    /// `a` into RESULT and `b` into a register, `a` evaluated first; or, if
+    /// `imm` and `b` is a constant, `b` as an immediate. The register is
+    /// free again after: use it at once.
+    fn r_operands(&mut self, g: &mut Gen, a: ExpId, b: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, imm: bool) -> O<(O<Value>, O<usize>)> {
         let (regs, slots) = (g.next_reg, g.next_slot);
-        if let Some(v) = self.r_constant(b) {
+        let out;
+        if let (true, Some(v)) = (imm, self.r_constant(b)) {
             self.r_exp(g, a, env, te, false)?;
-            g.op("op2imm", &[r, v]);
+            out = (Some(v), None);
         } else if let Some(RLoc::Reg(k)) = self.r_var(env, b) {
             // `b` is in a register already.
             self.r_exp(g, a, env, te, false)?;
-            g.op("op2", &[r, Gen::n(k)]);
+            out = (None, Some(k));
         } else if self.r_simple(a) {
             let k = g.reg()?;
             self.r_into(g, b, k, env, te)?;
             self.r_exp(g, a, env, te, false)?;
-            g.op("op2", &[r, Gen::n(k)]);
+            out = (None, Some(k));
         } else {
             self.r_exp(g, a, env, te, false)?;
             let collects = !g.leaf && self.r_collects(b, te, g.this.map(|(t, _)| t));
@@ -497,11 +632,11 @@ impl Compiler<'_> {
                 RLoc::Reg(t) => g.op("reg", &[Gen::n(t)]),
                 _ => unreachable!(),
             }
-            g.op("op2", &[r, Gen::n(k)]);
+            out = (None, Some(k));
         }
         g.next_reg = regs;
         g.next_slot = slots;
-        Some(())
+        Some(out)
     }
 
     /// Where `x` is, if it is a variable.
@@ -540,28 +675,40 @@ impl Compiler<'_> {
     /// The arguments into REG1…REGn, in order, and then `f`, if a call's,
     /// into RESULT. Not in a leaf: an argument that is not simple is kept in
     /// the frame until all are made; a simple one is made last.
-    fn r_args(&mut self, g: &mut Gen, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, f: Option<ExpId>) -> O<()> {
-        if g.leaf {
-            return None;
+    fn r_args(&mut self, g: &mut Gen, args: &[Arg], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, f: Option<ExpId>) -> O<()> {
+        if g.leaf || args.len() > REGS {
+            return self.decline("more than REGS operands");
         }
         let slots = g.next_slot;
         let mut kept = Vec::new();
+        let simple = |c: &Self, a: &Arg| match a {
+            Arg::E(x) => c.r_simple(*x),
+            Arg::V(_) => true,
+            Arg::Thunk(_) => false,
+        };
         // The last argument that is not simple goes straight to its
         // register, when the procedure is simple too: all that follows it
         // is simple, and touches only RESULT and its own register.
         let direct = match f {
             Some(f) if !self.r_simple(f) => None,
-            _ => args.iter().rposition(|a| !self.r_simple(*a)),
+            _ => args.iter().rposition(|a| !simple(self, a)),
         };
         for (i, a) in args.iter().enumerate() {
-            if self.r_simple(*a) {
+            if simple(self, a) {
                 kept.push(None);
-            } else if Some(i) == direct {
-                self.r_exp(g, *a, env, te, false)?;
+                continue;
+            }
+            match a {
+                Arg::E(x) => self.r_exp(g, *x, env, te, false)?,
+                Arg::Thunk(body) => {
+                    self.r_lambda(g, &[], *body, env, te, None)?;
+                }
+                Arg::V(_) => unreachable!(),
+            }
+            if Some(i) == direct {
                 g.op("setreg", &[Gen::n(i + 1)]);
                 kept.push(Some(usize::MAX));
             } else {
-                self.r_exp(g, *a, env, te, false)?;
                 let s = g.slot();
                 g.op("setstk", &[Gen::n(s)]);
                 kept.push(Some(s));
@@ -577,10 +724,15 @@ impl Compiler<'_> {
             _ => None,
         };
         for (i, (a, k)) in args.iter().zip(&kept).enumerate() {
-            match k {
-                Some(usize::MAX) => {}
-                Some(s) => g.op("load", &[Gen::n(i + 1), Gen::n(*s)]),
-                None => self.r_into(g, *a, i + 1, env, te)?,
+            match (k, a) {
+                (Some(usize::MAX), _) => {}
+                (Some(s), _) => g.op("load", &[Gen::n(i + 1), Gen::n(*s)]),
+                (None, Arg::E(x)) => self.r_into(g, *x, i + 1, env, te)?,
+                (None, Arg::V(v)) => {
+                    g.op("const", &[*v]);
+                    g.op("setreg", &[Gen::n(i + 1)]);
+                }
+                (None, Arg::Thunk(_)) => unreachable!(),
             }
         }
         match (f, fun) {
@@ -588,6 +740,176 @@ impl Compiler<'_> {
             (Some(f), None) => self.r_exp(g, f, env, te, false)?,
             (None, None) => {}
         }
+        g.next_slot = slots;
+        Some(())
+    }
+
+    /// A call-out, `prim p n` or `threaded r n`, on `args` in REG1…REGn.
+    fn r_call_out(&mut self, g: &mut Gen, how: &str, what: i64, args: &[Arg], env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        self.r_args(g, args, env, te, None)?;
+        g.op(how, &[Value::fixnum(what), Gen::n(args.len())]);
+        Some(())
+    }
+
+    fn r_prim(&mut self, g: &mut Gen, name: &str, args: &[Arg], env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        let p = fixpt_engine::threaded::runtime_primitive(name)? as i64;
+        self.r_call_out(g, "prim", p, args, env, te)
+    }
+
+    /// A closure of a lambda into RESULT, its free values into REG1…REGn
+    /// first; `own` as for `lambda_word`. What it gives: for each sibling
+    /// not made yet (a `letrec`'s), the free value's index and the sibling's
+    /// frame slot.
+    fn r_lambda(&mut self, g: &mut Gen, ps: &[Sym], body: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, own: Option<Sym>) -> O<Vec<(usize, usize)>> {
+        if g.leaf {
+            return None;
+        }
+        let (w, fv) = self.lambda_word(ps, body, te, own).ok()?;
+        if fv.len() > REGS {
+            return self.decline("a closure of more than REGS values");
+        }
+        let mut patches = Vec::new();
+        for (j, n) in fv.iter().enumerate() {
+            match self.r_where(env, *n)? {
+                RLoc::Slot(s) => g.op("load", &[Gen::n(j + 1), Gen::n(s)]),
+                RLoc::Free(i) => {
+                    g.op("lexical", &[Gen::n(i)]);
+                    g.op("setreg", &[Gen::n(j + 1)]);
+                }
+                RLoc::Pending(s) => {
+                    g.op("const", &[Value::FALSE]);
+                    g.op("setreg", &[Gen::n(j + 1)]);
+                    patches.push((j, s));
+                }
+                _ => return None,
+            }
+        }
+        g.op("lambda", &[w, Gen::n(fv.len())]);
+        Some(patches)
+    }
+
+    /// Arrays, and the tag and key makers: as the stack compiler does them.
+    fn r_special(&mut self, g: &mut Gen, what: &str, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        let two = Value::fixnum(2);
+        let add = Value::fixnum(routine("int-add") as i64);
+        let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+        match what {
+            // Field i + 2, by index: checked, since i is any int.
+            "array-ref" => {
+                self.r_args(g, &es, env, te, None)?;
+                g.op("reg", &[Gen::n(2)]);
+                g.op("op2imm", &[add, two]);
+                g.op("setreg", &[Gen::n(2)]);
+                g.op("threaded", &[Value::fixnum(routine("field@") as i64), Gen::n(2)]);
+            }
+            "array-set!" => {
+                let p = fixpt_engine::threaded::runtime_primitive("%bloblet-set!")? as i64;
+                self.r_args(g, &es, env, te, None)?;
+                g.op("reg", &[Gen::n(2)]);
+                g.op("op2imm", &[add, two]);
+                g.op("setreg", &[Gen::n(2)]);
+                g.op("prim", &[Value::fixnum(p), Gen::n(3)]);
+                let u = self.unit();
+                g.op("const", &[u]);
+            }
+            "array-length" => {
+                self.r_prim(g, "%bloblet-fields", &es, env, te)?;
+                g.op("op2imm", &[Value::fixnum(routine("int-sub") as i64), Value::fixnum(1)]);
+            }
+            "make-array" => self.r_prim(g, "%make-bloblet-filled", &[Arg::V(Value::fixnum(0)), es[0], es[1]], env, te)?,
+            "make-box" => {
+                let u = self.unit();
+                self.r_prim(g, "%make-box", &[Arg::V(u)], env, te)?;
+            }
+            _ => return None,
+        }
+        Some(())
+    }
+
+    /// `tagcase`: the scrutinee kept; each arm's tag compared, the last's
+    /// not when there is no `else` (a checked program covers every tag);
+    /// the value, or its product's members, bound.
+    #[allow(clippy::too_many_arguments)]
+    fn r_tagcase(
+        &mut self,
+        g: &mut Gen,
+        scrutinee: ExpId,
+        arms: &[crate::ast::Arm],
+        els: Option<(Sym, ExpId)>,
+        env: &mut Vec<(Sym, RLoc)>,
+        te: &mut Env,
+        tail: bool,
+    ) -> O<()> {
+        let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
+        self.r_exp(g, scrutinee, env, te, false)?;
+        let place = |g: &mut Gen| -> O<RLoc> {
+            Some(if g.leaf {
+                let r = g.reg()?;
+                g.op("setreg", &[Gen::n(r)]);
+                RLoc::Reg(r)
+            } else {
+                let s = g.slot();
+                g.op("setstk", &[Gen::n(s)]);
+                RLoc::Slot(s)
+            })
+        };
+        let sc = place(g)?;
+        let get = |g: &mut Gen, l: RLoc| match l {
+            RLoc::Reg(r) => g.op("reg", &[Gen::n(r)]),
+            RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
+            _ => unreachable!(),
+        };
+        let end = g.label();
+        let eq = Value::fixnum(routine("eq") as i64);
+        for (i, arm) in arms.iter().enumerate() {
+            let last = i + 1 == arms.len() && els.is_none();
+            let next = g.label();
+            if !last {
+                get(g, sc);
+                g.op("field", &[two()]);
+                let tag = self.heap.intern(self.c.interner.name(arm.tag));
+                g.op("op2imm", &[eq, tag]);
+                g.items.push(RItem::Branch(true, next));
+            }
+            let (d, td, r, s) = (env.len(), te.len(), g.next_reg, g.next_slot);
+            match &arm.bind {
+                crate::ast::ArmBind::Value(x) => {
+                    get(g, sc);
+                    g.op("field", &[Value::fixnum(3)]);
+                    let l = place(g)?;
+                    env.push((*x, l));
+                    te.push((*x, Loc::Slot(usize::MAX)));
+                }
+                crate::ast::ArmBind::Fields(xs) => {
+                    for (j, x) in xs.iter().enumerate() {
+                        get(g, sc);
+                        g.op("field", &[Value::fixnum(3)]);
+                        g.op("field", &[Value::fixnum(j as i64 + 2)]);
+                        let l = place(g)?;
+                        env.push((*x, l));
+                        te.push((*x, Loc::Slot(usize::MAX)));
+                    }
+                }
+            }
+            self.r_exp(g, arm.body, env, te, tail)?;
+            env.truncate(d);
+            te.truncate(td);
+            g.next_reg = r;
+            g.next_slot = s;
+            if !tail {
+                g.items.push(RItem::Branch(false, end));
+            }
+            g.items.push(RItem::Label(next));
+        }
+        if let Some((y, body)) = els {
+            env.push((y, sc));
+            te.push((y, Loc::Slot(usize::MAX)));
+            self.r_exp(g, body, env, te, tail)?;
+        }
+        g.items.push(RItem::Label(end));
+        env.truncate(depth);
+        te.truncate(tdepth);
+        g.next_reg = regs;
         g.next_slot = slots;
         Some(())
     }

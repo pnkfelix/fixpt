@@ -417,6 +417,7 @@ pub mod regcode {
         ("op2", 2, "RESULT := threaded routine r applied to RESULT and REGk"),
         ("op2imm", 2, "RESULT := threaded routine r applied to RESULT and x"),
         ("field", 1, "RESULT := field k of the bloblet in RESULT"),
+        ("setfield", 2, "field k of the bloblet in RESULT := REGj"),
         ("prim", 2, "RESULT := runtime primitive p applied to REG1…REGn; may collect"),
         ("lambda", 2, "RESULT := a closure of threaded word w over REG1…REGn; may collect"),
         ("invoke", 1, "call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect"),

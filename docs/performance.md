@@ -516,3 +516,57 @@ check. In `fib` and `tak` the arguments travel in registers, and only
 what lives across a call touches memory. `closures` and `lists` gain
 least: they allocate, which is still a call-out to Rust, and their
 procedures that use `letrec` or `tagcase` are still stack code.
+
+## Register code for the whole front end (13h′ c)
+
+Register code now covers 966 of the bootstrap program's 972 lambdas:
+- `tagcase`, `letrec` (closures patched with a `setfield` instruction),
+  products, sums, bloblets, arrays, references (`setfield`), `prompt`, and
+  the control and mark operations, as call-outs.
+
+The 6 left are three `with-mark`s in tail position (their constant space
+depends on the stack frame), two standard operations used as values, and
+one `set-cdr!`.
+
+The fixpoint holds: the front end, compiled by the Rust compiler with
+register code and run as register code, compiles itself to the same code
+(`tests/bootstrap.rs`, `fixpoint_as_register_code`). Stage 2, the
+compiled compiler compiling the whole front end, on the native machine:
+
+| stage 2                | time   |
+| ---------------------- | ------ |
+| interpreted stack code | 0.8 s  |
+| compiled stack code    | 0.7 s  |
+| register code          | 0.56 s |
+
+That is only about 20% better, where the benchmarks gained 1.4–6×. The
+self-compile spends its time in call-outs to Rust, about 14 million of
+them. `FIXPT_CALLOUTS=1`, instrumented, so slower (ms):
+
+| call-out   | count     | time |
+| ---------- | --------- | ---- |
+| `prim`     | 3,950,860 | 226  |
+| `cons`     | 4,760,596 | 125  |
+| `callcomp` | 326,317   | 56   |
+| `closure`  | 1,828,755 | 47   |
+| `field@`   | 2,381,992 | 40   |
+| `resume`   | 326,315   | 23   |
+
+The commonest primitives:
+- `%make-frozen` (sums and products): 546k
+- `string=?`: 397k
+- `%bloblet-fields`: 389k
+- `char-whitespace?`: 343k
+- `string-length`: 328k
+- `string-ref`: 326k
+
+The 326k continuations captured copied 39 million words of stack. So for
+the real program the next lever is allocation and the common primitives
+in machine code, more than cheaper calls.
+
+The bug found on the way: in a large register word, making a return
+entry needed `x16` for a large offset, and overwrote the callee's entry
+address there. `FIXPT_FAULTS=1` (`fixpt_native::faults`) now reports such
+a fault: the pc, the installed code it is in, and the registers.
+`FIXPT_REG_RANGE` gives register code only to the lambdas in a range, for
+bisecting.

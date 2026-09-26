@@ -39,7 +39,7 @@ use crate::arm64::*;
 use crate::codespace::{CodeSpace, Offset};
 use fixpt_engine::threaded::{DS_LIMIT, MARK_MARK, PROMPT_MARK, RS_LIMIT, Trap};
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD, KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY};
+use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD, KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME};
 use fixpt_heap::layout::{H_FIELDS, T_DISTANCE};
 use fixpt_heap::value::{TAG_BLOBLET, TAG_PAIR, TAG_TRAILER};
 use fixpt_heap::{Heap, Value};
@@ -1464,6 +1464,8 @@ impl NativeMachine {
         }
         self.space.write_code(at, code);
         self.space.flush(at, 4 * code.len());
+        let what = format!("{} {}", if heap.is_register_word(word) { "register word" } else { "word" }, heap.symbol_name(heap.bloblet_slot(word, WORD_NAME)));
+        crate::faults::note(self.space.exec_addr(at), 4 * code.len(), what);
         // Where to resume, by k: each instruction's start.
         let table_len = fields + 2;
         let rt_at = self.space.alloc(8 * table_len, 8).ok_or("the code space is full")?;

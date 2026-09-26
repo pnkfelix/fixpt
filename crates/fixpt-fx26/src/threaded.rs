@@ -72,6 +72,10 @@ pub struct Compiler<'a> {
     /// Whether each lambda also gets register code (PLAN.md 13h′), as its
     /// word's twin.
     pub registers: bool,
+    /// For each lambda given register code or declined: its name, and why
+    /// it was declined (the first form the register compiler does not do).
+    pub register_report: Vec<(String, Option<String>)>,
+    declined: Option<String>,
 }
 
 type R<T> = Result<T, String>;
@@ -87,7 +91,7 @@ impl<'a> Compiler<'a> {
             n += 1;
         }
         char_at[text.len()] = n;
-        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), this: None, registers: false }
+        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), this: None, registers: false, register_report: Vec::new(), declined: None }
     }
 
     fn name(&self, s: Sym) -> &str {
@@ -519,12 +523,30 @@ impl<'a> Compiler<'a> {
         let start = self.char_at[self.c.arena.span_of(body).start as usize];
         let name = format!("lambda@{start}");
         let w = self.assemble(&body_code, &name)?;
-        if self.registers
-            && let Some(cells) = self.register_code(params, body, &inner, this)
-        {
-            let sym = self.heap.intern(&name);
-            let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
-            self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
+        // For bisecting a fault: with `FIXPT_REG_RANGE=lo-hi,…`, only the
+        // lambdas whose bodies start in those character ranges get register
+        // code.
+        let in_range = std::env::var("FIXPT_REG_RANGE").ok().map(|r| {
+            r.split(',').any(|part| {
+                part.split_once('-')
+                    .and_then(|(lo, hi)| Some((lo.parse::<u32>().ok()?..hi.parse::<u32>().ok()?).contains(&start)))
+                    .unwrap_or(false)
+            })
+        });
+        if self.registers && in_range != Some(false) {
+            self.declined = None;
+            match self.register_code(params, body, &inner, this) {
+                Some(cells) => {
+                    let sym = self.heap.intern(&name);
+                    let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
+                    self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
+                    self.register_report.push((name, None));
+                }
+                None => {
+                    let why = self.declined.take().unwrap_or_else(|| "?".into());
+                    self.register_report.push((name, Some(why)));
+                }
+            }
         }
         Ok((w, fv))
     }

@@ -62,6 +62,7 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
             "save" | "pop" | "stack" | "setstk" | "lexical" => count(o(0), i64::MAX),
             "op1" | "op2" | "op2imm" => count(o(0), PRIMITIVES as i64 - 1) && (name != "op2" || reg(o(1))),
             "field" => o(0).is_fixnum() && o(0).as_fixnum() >= 2,
+            "setfield" => o(0).is_fixnum() && o(0).as_fixnum() >= 2 && reg(o(1)),
             "prim" => count(o(0), i64::MAX) && count(o(1), n),
             "lambda" => heap.is_threaded_word(o(0)) && count(o(1), n),
             "invoke" | "tailinvoke" => count(o(0), n),

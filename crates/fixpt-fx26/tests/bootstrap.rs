@@ -95,6 +95,61 @@ fn fixpoint_with_words_compiled() {
     fixpoint_on(fixpt_native::threaded::run_word_compiled);
 }
 
+/// The same, with stage 1 made by the compiler written in Rust, register
+/// code and all (PLAN.md 13h′), and run as register code: the front end,
+/// run so, must compile itself to the same code.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "seconds in release: run with --release, or --ignored")]
+fn fixpoint_as_register_code() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    load_eager_reader(&mut s.scheme).expect("loads");
+    s.scheme.engine.set_step_limit(None);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+    if let Some(n) = std::env::var("FIXPT_GC_EVERY").ok().and_then(|n| n.parse().ok()) {
+        s.scheme.set_gc_every(n);
+    }
+    let text = fixpt_fx26::bootstrap_program();
+    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let mut c = fixpt_fx26::Checker::new();
+    let forms = c.read_in(FileId(0), &text).expect("reads");
+    let done = c.declare_ahead(&forms).expect("declares");
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let t = std::time::Instant::now();
+    let lap = |what: &str| eprintln!("{what}: {:.2} s", t.elapsed().as_secs_f64());
+    s.scheme.scope(|sc| {
+        let stage1 = sc.make(|m| {
+            let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+            comp.registers = true;
+            comp.program(&tops).expect("compiles")
+        });
+        lap("stage 1 compiled by the Rust compiler, with register code");
+        let none = sc.make(|_| Value::NULL);
+        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
+        let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
+        let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
+        let args = sc.call_global("list", &[std, prog]).expect("a list");
+        let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
+        lap("stage 2 compiled, by the compiler run as register code");
+        let (tag, stage2) = sc.view(|v| {
+            let r = v.get(result);
+            let tag = r.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();
+            let why = r.field(3).and_then(|p| p.field(2)).and_then(|x| x.string()).unwrap_or_default();
+            (tag, why)
+        });
+        assert_eq!(tag, "b-word", "stage 2 failed: {stage2:?}");
+        let (mut same, mut why) = (false, String::new());
+        sc.make(|m| {
+            let a = m.get(stage1);
+            let r = m.get(result);
+            let h = m.heap();
+            let b = h.bloblet_slot(h.bloblet_slot(r, 3), 2);
+            same = same_code(h, a, b, &mut HashMap::new(), &mut why);
+            Value::NULL
+        });
+        assert!(same, "stage 1 and stage 2 differ: {why}");
+    });
+}
+
 fn fixpoint_on(machine: fixpt_runtime::RunWord) {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");

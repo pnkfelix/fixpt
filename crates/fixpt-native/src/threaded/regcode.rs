@@ -140,6 +140,13 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     while i < cells.len() {
         a.bind(labels[i]);
         let (name, n, _) = OPS[cells[i].as_fixnum() as usize];
+        // The machine's exit may be too far for a conditional branch from
+        // here: those that leave go to a jump to it, placed after.
+        let near_exit = matches!(name, "prim" | "lambda" | "threaded" | "return").then(|| {
+            let l = a.label();
+            a.exit_common = l;
+            l
+        });
         let o = |j: usize| cells[i + 1 + j];
         let f = |j: usize| WORD_CELL0 + i + 1 + j;
         let next = i + 1 + n;
@@ -225,6 +232,16 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.e(add(X11, BASE, RESULT));
                 a.field_of(RESULT, X11, k(o(0)));
             }
+            "setfield" => {
+                a.e(add(X11, BASE, RESULT));
+                let off = field_off(k(o(0)));
+                if off >= -256 {
+                    a.e(stur(reg(k(o(1))), X11, off));
+                } else {
+                    a.sub_const(X16, X11, -off as u64);
+                    a.e(str(reg(k(o(1))), X16, 0));
+                }
+            }
             "prim" | "lambda" | "threaded" => {
                 let (count, routine_n, at) = match name {
                     "prim" => (k(o(1)), routine("prim"), f(0)),
@@ -252,12 +269,14 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.e(add(X11, BASE, X10));
                 a.e(ldur(X15, X11, field_off(WORD_ENTRY)));
                 a.cbz(X15, threaded);
-                // Register code: the arguments stay where they are.
-                a.e(ldr_reg(X16, TABLE, X15));
+                // Register code: the arguments stay where they are. The
+                // entry is loaded last: making the return entry may need
+                // X16 for a large offset.
                 if !tail {
                     a.ip_at(WORD_CELL0 + next);
                     a.push_return();
                 }
+                a.e(ldr_reg(X16, TABLE, X15));
                 a.e(mov(CLO, W));
                 a.e(mov(CUR, X10));
                 a.e(br(X16));
@@ -306,11 +325,16 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
             other => return Err(format!("`{other}` in register code")),
         }
         // Register code falls through to the next instruction: around the
-        // traps, when there are some.
-        if !a.stubs.is_empty() {
+        // traps and the near exit, when there are some.
+        if !a.stubs.is_empty() || near_exit.is_some() {
             let past = a.label();
             a.b(past);
             a.flush_stubs();
+            if let Some(l) = near_exit {
+                a.bind(l);
+                a.b(far_exit);
+                a.exit_common = far_exit;
+            }
             a.bind(past);
         }
         i = next;

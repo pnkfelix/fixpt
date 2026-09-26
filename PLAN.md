@@ -925,11 +925,24 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
      - (c) every form, until the bootstrap runs as register code;
      - (d) known calls (`callk`, 13e) as direct branches;
      - (e) the compiler written in FX-26 to match, instruction for
-       instruction, as for the threaded compilers. *((a) and (b) done 2026-09-26, the IR made by the Rust compiler
+       instruction, as for the threaded compilers.
+     - (f) *(The user, 2026-09-26: "support distinct calling conventions
+       for the two kinds of code, but allow calls between each other.")*
+       Calls already differ: registers or a stack frame, with an adapter
+       for stack code entering register code. Returns do not yet: every
+       return goes by the data stack and the resume table. Register code
+       should return in `x0`, straight to the caller's resume code, and
+       take the stack's way only when it returns to stack code; a return
+       entry or a captured continuation says which convention its resume
+       point expects. *((a) and (b) done 2026-09-26, the IR made by the Rust compiler
      and tested by running every test program as register code against
      the lowering, with no separate interpreter. `fib` 1.7×, `tak` 1.9×
      and `loop` 5.9× faster than compiled threaded words; see
-     `docs/performance.md`.)*
+     `docs/performance.md`. (c) done the same day: 966 of the bootstrap's
+     972 lambdas as register code, and the fixpoint holds as register
+     code. Stage 2 takes 0.56 s against 0.7 s as compiled stack code,
+     since call-outs dominate: allocation and the common primitives in
+     machine code come next.)*
 - **13i. Join points.** A local procedure used only in saturated tail
   calls becomes a label in its word.
 

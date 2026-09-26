@@ -15,6 +15,7 @@ pub mod arm64;
 pub mod codespace;
 mod control;
 pub mod stencil;
+pub mod faults;
 pub mod threaded;
 
 pub use codespace::CodeSpace;
