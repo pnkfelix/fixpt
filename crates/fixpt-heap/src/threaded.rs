@@ -139,7 +139,8 @@ impl Heap {
     }
 
     /// A procedure not yet defined: a closure whose word traps when called
-    /// (`undefined`). What a subroutine's cell or box holds before its value.
+    /// (`undefined`). What a global's cell holds before its definition runs,
+    /// which a checked program never sees.
     pub fn undefined_closure(&mut self) -> Value {
         use crate::layout::threaded::{routine, CLOSURE_WORD};
         let cells = [Value::fixnum(routine("undefined") as i64)];

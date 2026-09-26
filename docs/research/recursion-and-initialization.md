@@ -212,6 +212,26 @@ can become a known call once it is filled. The code can be patched when
 the cell is written, the same mechanism as the reversion for late
 binding.
 
+## What was done (2026-09-26)
+
+Options 2 and 6 together:
+
+- **I-cells** were prototyped: `(icell T R)` with `(await R)`. A procedure
+  that ties a knot in a private region stays `pure`.
+- **Implicit backpatching is gone** (the user: "remove the implicit
+  backpatching in both define and letrec").
+  - A `letrec` binds only lambdas, and compiles without boxes: each
+    closure is made with a placeholder for a sibling not yet made, then
+    patched.
+  - `define-rec` is a top-level group of the same kind.
+  - Nothing is declared ahead: a definition sees only those before it,
+    and a lambda's definition sees itself.
+
+  The FX-26 sources were reordered by a script, so that every definition
+  comes after what it uses. It found 260 uses before definition and 19
+  mutually recursive groups, which became `define-rec`s; the largest is
+  the checker's core, with 25 procedures.
+
 ## Chosen to prototype first: I-cells
 
 The user chose this, after the others were laid out. It:

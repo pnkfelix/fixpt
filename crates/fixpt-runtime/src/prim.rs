@@ -771,8 +771,9 @@ prims! {
     "%fx26-nil-cell", 0, Some(0), simple!(|_rt, _a| Ok(Value::NULL));
     // A global's cell: a plain bloblet whose field 2 is the value and whose
     // field 3 is its name, for showing (`%disassemble`). Until its
-    // definition runs it holds a procedure that traps when called, so a
-    // typed call through it never meets anything but a closure.
+    // definition runs it holds a procedure that traps when called. A checked
+    // program never calls it then; if a compiler's mistake did, a typed call
+    // would still meet a closure, and trap.
     "%fx26-make-global", 1, Some(1), simple!(|rt, a| {
         let undefined = rt.heap.undefined_closure();
         let b = rt.heap.make_bloblet(PLAIN_BLOBLET, 2, 0, true);
@@ -780,9 +781,6 @@ prims! {
         rt.heap.set_bloblet_slot(b, 3, a[0]);
         Ok(b)
     });
-    // A procedure called before it was defined: what a `letrec` box holds
-    // before its value, in compiled FX-26.
-    "%fx26-undefined", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.undefined_closure()));
     // An I-cell (Arvind's I-structures): a plain bloblet whose field 2 says
     // whether it is full and whose field 3 is its value. Written once; read
     // only when full. Nothing else can fill it in a sequential run, so a

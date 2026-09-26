@@ -976,7 +976,9 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
 
   A procedure can tie its knot with cells in a region nothing outside
   names, and masking keeps it `pure`. Not yet:
-  - `letrec` and recursive `define` still backpatch implicitly;
+  - ~~`letrec` and recursive `define` still backpatch implicitly~~:
+    gone. A `letrec` or `define-rec` binds only lambdas, and nothing is
+    declared ahead (2026-09-26);
   - reads are not yet ordered by the optimizer, which moves nothing yet;
   - a read of an empty cell does not suspend, since there are no
     processes;

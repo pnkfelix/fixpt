@@ -305,7 +305,10 @@ pub mod threaded {
         ("ttailcall", "( x1 … xn c -- ), tail-call closure c; n the next cell"),
         // A continuation as a closure: the word `slot 0; free 0; resume`.
         ("resume", "( v k -- ), give continuation k the value v, in this frame's place"),
-        // A procedure called before its definition ran.
+        // A procedure called before its definition ran. A checked program
+        // cannot do that (a definition sees only those before it, and a
+        // recursive one is a lambda); the trap guards against a compiler
+        // that gets it wrong.
         ("undefined", "( -- ), trap: called before it was defined"),
         // Typed primitives: operations whose operands the checker has typed,
         // without the tests the types make needless. Overflow is still
