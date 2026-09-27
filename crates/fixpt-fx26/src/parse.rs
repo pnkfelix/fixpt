@@ -383,7 +383,9 @@ impl Checker {
     fn grounded(&self, slot: TyId, span: fixpt_read::Span) -> R<()> {
         let mut seen = std::collections::HashSet::new();
         let mut id = slot;
-        while let Ty::Link(Some(next)) = self.arena.get_raw(id) {
+        // A `poly` is no constructor either: a cycle through `poly`s alone
+        // describes no type, and unfolding it would never end.
+        while let Ty::Link(Some(next)) | Ty::Poly { body: next, .. } = self.arena.get_raw(id) {
             if !seen.insert(id) {
                 return Err(FxError::at(span, "a recursive type must be built from a constructor, not only from names"));
             }

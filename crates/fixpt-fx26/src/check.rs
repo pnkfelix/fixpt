@@ -752,53 +752,70 @@ impl Checker {
     // ------------------------------------------------------------- subtyping
     /// `a ≤ b`. Recursive types are compared coinductively: a pair already
     /// being compared is assumed to hold, which is what makes comparing two
-    /// cycles terminate — FX-87's `trail`.
+    /// cycles terminate — FX-87's `trail`, Amadio and Cardelli's assumption
+    /// set. Every rule is a conjunction, so an assumption left behind by a
+    /// comparison that failed is never relied on: the failure is the answer.
     pub fn subtype(&mut self, a: TyId, b: TyId) -> bool {
-        self.sub(a, b, &mut HashSet::new())
+        let mut st = SubState::default();
+        self.sub(a, b, &BinderEnv::default(), &mut st)
     }
 
-    fn sub(&mut self, a: TyId, b: TyId, trail: &mut HashSet<(TyId, TyId)>) -> bool {
+    /// `a ≤ b` under `env`, which names each `poly` binder in scope on either
+    /// side by the pair of `poly` nodes that bound it, so their bodies are
+    /// compared as they are, not substituted: a cycle through a `poly` comes
+    /// back to a pair, and an environment, already on the trail.
+    fn sub(&mut self, a: TyId, b: TyId, env: &BinderEnv, st: &mut SubState) -> bool {
         let (a, b) = (self.arena.resolve(a), self.arena.resolve(b));
-        if a == b || !trail.insert((a, b)) {
+        if (a == b && env.is_empty()) || !st.trail.insert((a, b, env.clone())) {
             return true;
         }
         let (ta, tb) = (self.arena.get(a).clone(), self.arena.get(b).clone());
+        let ra = |r: Region| env.region(&env.a, r);
+        let rb = |r: Region| env.region(&env.b, r);
+        let ea = |e: &Effect| env.effect(&env.a, e);
+        let eb = |e: &Effect| env.effect(&env.b, e);
+        let flip = env.flip();
         // A composable continuation can be called, so it can stand where a
         // subroutine is wanted.
         if let (Ty::Composable { .. }, Ty::Subr { .. }) = (&ta, &tb) {
-            let (ea, pa, ra) = ta.as_subr().expect("callable");
-            let (eb, pb, rb) = tb.as_subr().expect("callable");
+            let (xa, pa, qa) = ta.as_subr().expect("callable");
+            let (xb, pb, qb) = tb.as_subr().expect("callable");
             return pa.len() == pb.len()
-                && ea.within(&eb)
-                && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, trail))
-                && self.sub(ra, rb, trail);
+                && ea(&xa).within(&eb(&xb))
+                && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
+                && self.sub(qa, qb, env, st);
         }
         match (ta, tb) {
             // `void` is the bottom type: nothing is ever returned as one.
             (Ty::Void, _) => true,
             (Ty::Base(x), Ty::Base(y)) => x == y,
-            (Ty::Var(x), Ty::Var(y)) => x == y,
+            (Ty::Var(x), Ty::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
             (
-                Ty::Subr { effect: ea, params: pa, result: ra },
-                Ty::Subr { effect: eb, params: pb, result: rb },
+                Ty::Subr { effect: xa, params: pa, result: qa },
+                Ty::Subr { effect: xb, params: pb, result: qb },
             ) => {
                 pa.len() == pb.len()
-                    && ea.within(&eb)
-                    && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, trail))
-                    && self.sub(ra, rb, trail)
+                    && ea(&xa).within(&eb(&xb))
+                    && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
+                    && self.sub(qa, qb, env, st)
             }
             // References and pairs are mutable, so their contents are
             // invariant: FX-87's `ref` rule, and its pairs.
-            (Ty::Place(r), Ty::Place(s)) => r == s,
+            (Ty::Place(r), Ty::Place(s)) => ra(r) == rb(s),
             (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
-                r == s && self.sub(x, y, trail) && self.sub(y, x, trail)
+                ra(r) == rb(s) && self.sub(x, y, env, st) && self.sub(y, x, &flip, st)
+            }
+            // Frozen pairs cannot be written, so, as a frozen bloblet's
+            // fields, their contents are covariant.
+            (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) if r.is_frozen() && ra(r) == rb(s) => {
+                self.sub(x1, y1, env, st) && self.sub(x2, y2, env, st)
             }
             (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) => {
-                r == s
-                    && self.sub(x1, y1, trail)
-                    && self.sub(y1, x1, trail)
-                    && self.sub(x2, y2, trail)
-                    && self.sub(y2, x2, trail)
+                ra(r) == rb(s)
+                    && self.sub(x1, y1, env, st)
+                    && self.sub(y1, x1, &flip, st)
+                    && self.sub(x2, y2, env, st)
+                    && self.sub(y2, x2, &flip, st)
             }
             // A tag both delivers and receives values of its types, so it is
             // invariant in all of them, as a reference is in its contents.
@@ -806,20 +823,20 @@ impl Checker {
                 Ty::PromptTag { answer: a1, payload: h1, effect: d1, region: r1 },
                 Ty::PromptTag { answer: a2, payload: h2, effect: d2, region: r2 },
             ) => {
-                r1 == r2
-                    && d1 == d2
-                    && self.sub(a1, a2, trail)
-                    && self.sub(a2, a1, trail)
-                    && self.sub(h1, h2, trail)
-                    && self.sub(h2, h1, trail)
+                ra(r1) == rb(r2)
+                    && ea(&d1) == eb(&d2)
+                    && self.sub(a1, a2, env, st)
+                    && self.sub(a2, a1, &flip, st)
+                    && self.sub(h1, h2, env, st)
+                    && self.sub(h2, h1, &flip, st)
             }
             // Called like a subroutine: contravariant in what it takes,
             // covariant in what it gives and does.
             (
                 Ty::Composable { arg: t1, answer: a1, effect: d1, region: r1 },
                 Ty::Composable { arg: t2, answer: a2, effect: d2, region: r2 },
-            ) => r1 == r2 && d1.within(&d2) && self.sub(t2, t1, trail) && self.sub(a1, a2, trail),
-            (Ty::MarkKey(x, r), Ty::MarkKey(y, s)) => r == s && self.sub(x, y, trail) && self.sub(y, x, trail),
+            ) => ra(r1) == rb(r2) && ea(&d1).within(&eb(&d2)) && self.sub(t2, t1, &flip, st) && self.sub(a1, a2, env, st),
+            (Ty::MarkKey(x, r), Ty::MarkKey(y, s)) => ra(r) == rb(s) && self.sub(x, y, env, st) && self.sub(y, x, &flip, st),
             // A bloblet's fields are invariant, as a reference's contents
             // are, unless they are frozen, when nothing can store into them.
             // Freezing is a change of type, never a subtype: a bloblet seen
@@ -829,38 +846,43 @@ impl Checker {
                 Ty::Bloblet { fields: fa, frozen: za, region: r },
                 Ty::Bloblet { fields: fb, frozen: zb, region: s },
             ) => {
-                r == s
+                ra(r) == rb(s)
                     && za == zb
                     && fa.len() == fb.len()
-                    && fa.iter().zip(&fb).all(|(x, y)| self.sub(*x, *y, trail) && (za || self.sub(*y, *x, trail)))
+                    && fa.iter().zip(&fb).all(|(x, y)| self.sub(*x, *y, env, st) && (za || self.sub(*y, *x, &flip, st)))
             }
             // Immutable, so covariant: a product in its fields, a sum in its
             // variants, and a sum with fewer tags fits one with more.
             (Ty::Product(pa), Ty::Product(pb)) => {
-                pa.len() == pb.len() && pa.iter().zip(&pb).all(|((la, x), (lb, y))| la == lb && self.sub(*x, *y, trail))
+                pa.len() == pb.len() && pa.iter().zip(&pb).all(|((la, x), (lb, y))| la == lb && self.sub(*x, *y, env, st))
             }
             (Ty::Sum(sa), Ty::Sum(sb)) => sa.iter().all(|(la, x)| {
-                sb.iter().find(|(lb, _)| lb == la).is_some_and(|(_, y)| self.sub(*x, *y, trail))
+                sb.iter().find(|(lb, _)| lb == la).is_some_and(|(_, y)| self.sub(*x, *y, env, st))
             }),
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
                     return false;
                 }
-                // Compare the bodies with `b`'s binders renamed to `a`'s.
-                let map: HashMap<DVar, D> = bb
-                    .iter()
-                    .zip(&ba)
-                    .map(|((vb, k), (va, _))| {
-                        let d = match k {
-                            Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
-                            Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
-                            Kind::Type => D::Type(self.arena.ty(Ty::Var(*va))),
-                        };
-                        (*vb, d)
-                    })
-                    .collect();
-                let xb = self.subst(xb, &map);
-                self.sub(xa, xb, trail)
+                // Each pair of binders is named by the pair of nodes and its
+                // position: entering the same pair again rebinds the same
+                // name, as re-entering a scope shadows it, so the
+                // environments stay finitely many.
+                let mut inner = env.clone();
+                for (i, ((va, _), (vb, _))) in ba.iter().zip(&bb).enumerate() {
+                    let n = st.labels.len() as u32;
+                    let l = *st.labels.entry((a, b, i)).or_insert(DVar(u32::MAX - n));
+                    inner.a.insert(*va, l);
+                    inner.b.insert(*vb, l);
+                }
+                // Bounded region binders must have the same bounds.
+                let bounds = ba.iter().zip(&bb).all(|((va, _), (vb, _))| {
+                    match (self.arena.bound(*va), self.arena.bound(*vb)) {
+                        (None, None) => true,
+                        (Some(x), Some(y)) => inner.region(&inner.a, x) == inner.region(&inner.b, y),
+                        _ => false,
+                    }
+                });
+                bounds && self.sub(xa, xb, &inner, st)
             }
             _ => false,
         }
@@ -1272,4 +1294,60 @@ pub fn region_escapes(form: &str, r: &str, t: &str) -> String {
 /// What one whose body may capture a continuation is told.
 pub fn region_captured(form: &str, r: &str, eff: &str) -> String {
     format!("a continuation captured in `{form} {r}` could outlive its region: its effect is {eff}")
+}
+
+/// What one subtype question remembers: the pairs assumed (FX-87's trail),
+/// each with the binder environment it was asked under, and the names given
+/// to pairs of `poly` binders.
+#[derive(Default)]
+struct SubState {
+    trail: HashSet<(TyId, TyId, BinderEnv)>,
+    labels: HashMap<(TyId, TyId, usize), DVar>,
+}
+
+/// For each side of a subtype question, the `poly` binders in scope, each
+/// mapped to the name its pair of binders was given.
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+struct BinderEnv {
+    a: std::collections::BTreeMap<DVar, DVar>,
+    b: std::collections::BTreeMap<DVar, DVar>,
+}
+
+impl BinderEnv {
+    fn is_empty(&self) -> bool {
+        self.a.is_empty() && self.b.is_empty()
+    }
+    /// The same environment, for the question asked the other way round.
+    fn flip(&self) -> BinderEnv {
+        BinderEnv { a: self.b.clone(), b: self.a.clone() }
+    }
+    fn var(&self, side: &std::collections::BTreeMap<DVar, DVar>, v: DVar) -> DVar {
+        side.get(&v).copied().unwrap_or(v)
+    }
+    fn region(&self, side: &std::collections::BTreeMap<DVar, DVar>, r: Region) -> Region {
+        match r {
+            Region::Var(v) => Region::Var(self.var(side, v)),
+            Region::Frozen(Some(p)) => Region::Frozen(Some(self.var(side, p))),
+            c => c,
+        }
+    }
+    fn effect(&self, side: &std::collections::BTreeMap<DVar, DVar>, e: &Effect) -> Effect {
+        if side.is_empty() {
+            return e.clone();
+        }
+        let r = |x: Region| self.region(side, x);
+        Effect(
+            e.0.iter()
+                .map(|a| match *a {
+                    Atom::Var(v) => Atom::Var(self.var(side, v)),
+                    Atom::Read(x) => Atom::Read(r(x)),
+                    Atom::Write(x) => Atom::Write(r(x)),
+                    Atom::Alloc(x) => Atom::Alloc(r(x)),
+                    Atom::Goto(x) => Atom::Goto(r(x)),
+                    Atom::Comefrom(x) => Atom::Comefrom(r(x)),
+                    Atom::Await(x) => Atom::Await(r(x)),
+                })
+                .collect(),
+        )
+    }
 }
