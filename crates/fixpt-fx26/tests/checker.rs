@@ -160,7 +160,7 @@ fn probe_helpers() {
 fn every_test_program() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let (mut report, mut unparsed, mut agreed) = (Vec::new(), Vec::new(), 0);
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive"] {
+    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {

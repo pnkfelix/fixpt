@@ -219,10 +219,14 @@ impl Checker {
                 if recursive {
                     self.env.push((name, ty));
                     self.known.insert((name, ty));
+                }
+                // A lambda whose every run ends needs no `spin`.
+                let spins = recursive && !self.terminates(&[(name, ty, e)]);
+                if spins {
                     self.recursive.push((name, ty));
                 }
                 let checked = self.check_declared(name, ty, e);
-                if recursive {
+                if spins {
                     self.recursive.pop();
                 }
                 match checked {
@@ -271,7 +275,6 @@ impl Checker {
                 self.known.insert((name, ty));
                 parts.push((name, ty, init.clone()));
             }
-            self.recursive.extend(parts.iter().map(|(n, t, _)| (*n, *t)));
             if parts.is_empty() {
                 return Err(FxError::at(span, "`(define-rec (name type lambda) …)`"));
             }
@@ -285,8 +288,14 @@ impl Checker {
                 if !self.is_lambda(e) {
                     return Err(FxError::at(self.arena.span_of(e), crate::check::letrec_not_lambda(self.interner.name(name))));
                 }
-                self.check_declared(name, ty, e)?;
                 bindings.push((name, ty, e));
+            }
+            // A group whose every run ends needs no `spin`.
+            if !self.terminates(&bindings) {
+                self.recursive.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
+            }
+            for (name, ty, e) in &bindings {
+                self.check_declared(*name, *ty, *e)?;
             }
             Ok(Top::DefineRec { bindings })
         })();

@@ -147,7 +147,7 @@ impl Checker {
                 let t = self.lookup(s).expect("bound");
                 let inst = self.instantiate_against(t, expected, span)?;
                 self.expect(e, inst, expected)?;
-                Ok(Effect::pure())
+                Ok(self.naming_effect(s, t))
             }
             Exp::If { test, then, els } => {
                 let te = self.check(test, self.bool_ty())?;

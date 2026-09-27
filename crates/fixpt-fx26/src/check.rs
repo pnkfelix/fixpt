@@ -54,7 +54,7 @@ pub struct Checker {
     pub(crate) recursive: Vec<(Sym, TyId)>,
     pub(crate) base: HashMap<Sym, TyId>,
     pub(crate) void: TyId,
-    int: TyId,
+    pub(crate) int: TyId,
     bool_: TyId,
     string: TyId,
     unit: TyId,
@@ -271,7 +271,7 @@ impl Checker {
         let span = self.arena.span_of(e);
         match self.arena.exp_at(e).clone() {
             Exp::Var(s) => match self.lookup(s) {
-                Some(t) => Ok((t, Effect::pure())),
+                Some(t) => Ok((t, self.naming_effect(s, t))),
                 None => Err(FxError::at(span, format!("unbound variable `{}`", self.interner.name(s)))),
             },
             Exp::Int(_) => Ok((self.int, Effect::pure())),
@@ -342,15 +342,19 @@ impl Checker {
                 self.env.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
                 self.known.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
                 let rdepth = self.recursive.len();
-                self.recursive.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
+                // Only lambdas: then nothing runs before every binding
+                // exists, and no one sees the knot tied.
+                if let Some((n, _, init)) = bindings.iter().find(|(_, _, init)| !self.is_lambda(*init)) {
+                    self.env.truncate(depth);
+                    return Err(FxError::at(self.arena.span_of(*init), letrec_not_lambda(self.interner.name(*n))));
+                }
+                // A group whose every run ends needs no `spin`.
+                if !self.terminates(&bindings) {
+                    self.recursive.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
+                }
                 let r = (|| {
                     let mut eff = Effect::pure();
                     for (n, t, init) in &bindings {
-                        // Only lambdas: then nothing runs before every
-                        // binding exists, and no one sees the knot tied.
-                        if !self.is_lambda(*init) {
-                            return Err(FxError::at(self.arena.span_of(*init), letrec_not_lambda(self.interner.name(*n))));
-                        }
                         let ie = self.check(*init, *t).map_err(|err| {
                             if err.span == self.arena.span_of(*init) {
                                 FxError::at(err.span, format!("`{}` is declared a {}: {}", self.interner.name(*n), self.show_ty(*t), err.message))
@@ -538,6 +542,17 @@ impl Checker {
     }
 
     /// Whether `x` is a lambda, under any type abstractions and ascriptions.
+    /// Naming `s`: pure, but for a member of a recursive group that may not
+    /// end, named in the group. Called, the call says `spin`; given away,
+    /// whoever calls it could loop through it, so naming it does.
+    pub(crate) fn naming_effect(&self, s: Sym, t: TyId) -> Effect {
+        let mut e = Effect::pure();
+        if self.recursive.contains(&(s, t)) {
+            e.0.insert(Atom::Spin);
+        }
+        e
+    }
+
     pub fn is_lambda(&self, mut x: ExpId) -> bool {
         loop {
             match self.arena.exp_at(x) {

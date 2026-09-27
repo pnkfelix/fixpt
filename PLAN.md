@@ -1125,6 +1125,12 @@ In the user's order:
    costs nothing measurable.
 4. **Concurrency and processes**, after the Actor model and Erlang, local
    and distributed (`docs/research/actors-and-distribution.md`, A1–N6).
+5. **A top effect** (raised by the user, 2026-09-27): `any`, for code
+   meant to grow with the language, as an interpreter's `eval` does.
+   Before it is useful: it can never be masked, so what regions does it
+   cover? Literally all of them would let it write frozen data and other
+   programs' private regions. More likely it means any effect on the
+   regions reachable from what it is given, plus `spin` and control.
 
 ### Kept open, deliberately
 
