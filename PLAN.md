@@ -1099,6 +1099,12 @@ the order it will be done. Each is committed when done, and marked here.
     effect", "Time complexity as an effect", "Concurrency, and processes
     as distinct from functions", "Closures that carry their types"):
     each explored, and concrete tasks drawn from it.
+    *(Done 2026-09-27: `docs/research/type-and-effect-directions.md`,
+    with tasks R1–R8, T1–T6, P1–P12 and C1–C12 and which to do first.
+    R1, a threaded run's fuel from the session's step limit, is done: a
+    looping form hung the threaded REPL. Found open: an image's words are
+    not checked as they load (C3); a resumed continuation charges no fuel
+    (R2).)*
 
 ### Kept open, deliberately
 
