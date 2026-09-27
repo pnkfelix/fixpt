@@ -188,6 +188,16 @@ impl Checker {
 
     // --------------------------------------------------------------- types
     pub fn parse_type(&mut self, s: &Syntax) -> R<TyId> {
+        let t = self.parse_type_node(s)?;
+        // Storage written: a procedure kept there may not reach itself
+        // unsaid (`spin`).
+        if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
+            self.no_knot(t, s.span)?;
+        }
+        Ok(t)
+    }
+
+    fn parse_type_node(&mut self, s: &Syntax) -> R<TyId> {
         if let Some(sym) = s.as_symbol() {
             let name = self.name(sym);
             if name == "void" {
@@ -395,6 +405,9 @@ impl Checker {
             }
             for (slot, _) in &slots {
                 self.grounded(*slot, s.span)?;
+            }
+            for (slot, _) in &slots {
+                self.no_knot(*slot, s.span)?;
             }
             self.parse_type(body)
         })();

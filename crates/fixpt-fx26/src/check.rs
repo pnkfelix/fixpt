@@ -316,6 +316,7 @@ impl Checker {
                 }
                 self.check_bounds(&binders, &map, span)?;
                 let result = self.subst(inner, &map);
+                self.no_knot(result, span)?;
                 let eff = self.mask(e, &eff, result);
                 Ok((result, eff))
             }
@@ -754,6 +755,72 @@ impl Checker {
         }
     }
 
+    /// `Ok`, unless `t` keeps, in storage at some region `r`, a procedure
+    /// whose latent effect reads or awaits `r` and does not say `spin`. Such
+    /// a procedure could be fetched from `r` by a procedure fetched from
+    /// `r`: a knot tied through the store, a loop with no recursive call,
+    /// which only its type can show (`docs/research/type-and-effect-directions.md`,
+    /// R6).
+    pub(crate) fn no_knot(&self, t: TyId, span: fixpt_read::Span) -> R<()> {
+        let mut seen = HashSet::new();
+        match self.knot_in(t, &[], &mut seen) {
+            None => Ok(()),
+            Some((r, p)) => {
+                let r = self.show_region(r);
+                Err(FxError::at(
+                    span,
+                    format!("a procedure kept in `{r}` reads `{r}`, so it could reach itself: it must say `spin`, and it is a {}", self.show_ty(p)),
+                ))
+            }
+        }
+    }
+
+    fn knot_in(&self, t: TyId, kept: &[Region], seen: &mut HashSet<(TyId, Vec<Region>)>) -> Option<(Region, TyId)> {
+        let t = self.arena.resolve(t);
+        if !seen.insert((t, kept.to_vec())) {
+            return None;
+        }
+        let with = |r: Region| -> Vec<Region> {
+            let mut k = kept.to_vec();
+            if !k.contains(&r) {
+                k.push(r);
+            }
+            k
+        };
+        let reads_kept = |e: &Effect| {
+            if e.0.contains(&Atom::Spin) {
+                return None;
+            }
+            e.0.iter().find_map(|a| match a {
+                Atom::Read(r) | Atom::Await(r) if kept.contains(r) => Some(*r),
+                _ => None,
+            })
+        };
+        match self.arena.get(t).clone() {
+            Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => self.knot_in(a, &with(r), seen),
+            Ty::Pair(a, b, r) => {
+                let k = if r.is_frozen() { kept.to_vec() } else { with(r) };
+                self.knot_in(a, &k, seen).or_else(|| self.knot_in(b, &k, seen))
+            }
+            Ty::Bloblet { fields, frozen, region } => {
+                let k = if frozen { kept.to_vec() } else { with(region) };
+                fields.iter().find_map(|f| self.knot_in(*f, &k, seen))
+            }
+            Ty::Product(parts) | Ty::Sum(parts) => parts.iter().find_map(|(_, x)| self.knot_in(*x, kept, seen)),
+            Ty::Poly { body, .. } => self.knot_in(body, kept, seen),
+            // A procedure: kept where it is, it may not read there unsaid;
+            // what it takes and gives is kept nowhere yet.
+            Ty::Subr { effect, params, result } => reads_kept(&effect)
+                .map(|r| (r, t))
+                .or_else(|| params.iter().chain([&result]).find_map(|x| self.knot_in(*x, &[], seen))),
+            Ty::Composable { arg, answer, effect, .. } => reads_kept(&effect)
+                .map(|r| (r, t))
+                .or_else(|| [arg, answer].iter().find_map(|x| self.knot_in(*x, &[], seen))),
+            Ty::PromptTag { answer, payload, .. } => [answer, payload].iter().find_map(|x| self.knot_in(*x, &[], seen)),
+            _ => None,
+        }
+    }
+
     /// Whether a latent effect anywhere in `t` writes `r`: what a
     /// `letfreeze`'s value may not do to its region.
     pub(crate) fn writes_in(&self, t: TyId, r: Region) -> bool {
@@ -1178,6 +1245,7 @@ impl Checker {
             };
             eff.0.insert(Atom::Alloc(region));
             let t = self.arena.ty(Ty::Bloblet { fields: tys, frozen: false, region });
+            self.no_knot(t, span)?;
             let eff = self.mask(e, &eff, t);
             return Ok((t, eff));
         }

@@ -266,10 +266,10 @@ impl Checker {
             self.facts.standard_operator.insert(e, *s);
         }
         let (mut ft, fe) = self.synth(fun)?;
-        let schema = ft;
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         if matches!(self.arena.get(ft), Ty::Poly { .. }) {
             let (inst, cached) = self.instantiate(ft, args, expected, span)?;
+            self.no_knot(inst, span)?;
             ft = inst;
             done = cached;
         }
@@ -297,43 +297,31 @@ impl Checker {
             effect = effect.union(&eff);
         }
         let mut effect = effect.union(&latent);
-        if self.may_spin(fun, args, schema, ft, &latent, &params) {
+        if self.may_spin(fun, ft) {
             effect.0.insert(Atom::Spin);
         }
         let effect = self.mask(e, &effect, result);
         Ok((result, effect))
     }
 
-    /// Whether a call of `fun` (of type `schema`, instantiated to `ft`, with
-    /// latent effect `latent` and parameters `params`) may run for an
-    /// unbounded time (`docs/research/type-and-effect-directions.md`, R6):
-    /// - a call, in a recursive group's lambdas, of the group;
-    /// - a standard operation's call of a function it is given, unless that
-    ///   is a `lambda` written there or a known procedure: otherwise it is
-    ///   as unknown as any closure;
-    /// - a call of anything but a known procedure (or a `lambda` applied
-    ///   where it is written), if what it does reads
-    ///   the store (where it could have been fetched from, which is how a
-    ///   knot is tied with no recursion), or is an effect variable (which may
-    ///   stand for such a read), or if its type is recursive (self-
-    ///   application).
-    fn may_spin(&self, fun: ExpId, args: &[ExpId], schema: TyId, ft: TyId, latent: &Effect, params: &[TyId]) -> bool {
+    /// Whether a call of `fun` (instantiated to `ft`) may run for an
+    /// unbounded time beyond what its latent effect says
+    /// (`docs/research/type-and-effect-directions.md`, R6):
+    /// - a call, in a recursive group's lambdas, of the group, whose types
+    ///   say `spin` only once checked;
+    /// - a call through a recursive type of anything but known code: a
+    ///   procedure can be given itself, and loop with no store at all.
+    ///
+    /// A knot tied through the store needs nothing here: a procedure kept
+    /// in storage whose latent effect reads that storage must say `spin`
+    /// (`no_knot`), so latent effects can be trusted.
+    fn may_spin(&self, fun: ExpId, ft: TyId) -> bool {
         let binding = self.callee_binding(fun);
         if let Some(b) = binding {
             if self.recursive.contains(&b) {
                 return true;
             }
-            if self.is_standard(b.0) {
-                let (_, inner) = self.binders_of(schema);
-                let Some((_, formals, _)) = self.arena.get(inner).as_subr() else { return false };
-                return formals.iter().zip(params).zip(args).any(|((f, p), a)| {
-                    matches!(self.arena.get(*f), Ty::Subr { .. })
-                        && !self.is_lambda(*a)
-                        && !self.callee_binding(*a).is_some_and(|b| self.known.contains(&b))
-                        && self.arena.get(*p).as_subr().is_some_and(|(l, _, _)| knots(&l) || self.cyclic(*p))
-                });
-            }
-            if self.known.contains(&b) {
+            if self.known.contains(&b) || self.is_standard(b.0) {
                 return false;
             }
         }
@@ -342,10 +330,7 @@ impl Checker {
         while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
             f = *body;
         }
-        if self.is_lambda(f) {
-            return false;
-        }
-        knots(latent) || self.cyclic(ft)
+        !self.is_lambda(f) && self.cyclic(ft)
     }
 
     /// The binding `f` names, under any projections and ascriptions: its
@@ -360,33 +345,38 @@ impl Checker {
         }
     }
 
-    /// Whether type `t` is recursive: a cycle runs through it.
+    /// Whether a procedure of type `t` could be given itself: a cycle in `t`
+    /// runs through a parameter of a procedure (or the argument of a
+    /// continuation). A type that is merely recursive, as a list is, does not
+    /// let anything loop.
     pub(crate) fn cyclic(&self, t: TyId) -> bool {
-        fn walk(c: &Checker, t: TyId, path: &mut Vec<TyId>, done: &mut HashSet<TyId>) -> bool {
+        // `path`: the nodes on the way down, each with whether it was
+        // reached through a parameter.
+        fn walk(c: &Checker, t: TyId, by_param: bool, path: &mut Vec<(TyId, bool)>) -> bool {
             let t = c.arena.resolve(t);
-            if path.contains(&t) {
-                return true;
+            if let Some(i) = path.iter().position(|(x, _)| *x == t) {
+                return by_param || path[i + 1..].iter().any(|(_, p)| *p);
             }
-            if !done.insert(t) {
+            if path.len() > 64 {
                 return false;
             }
-            path.push(t);
-            let kids: Vec<TyId> = match c.arena.get(t) {
-                Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).collect(),
-                Ty::PromptTag { answer, payload, .. } => vec![*answer, *payload],
-                Ty::Composable { arg, answer, .. } => vec![*arg, *answer],
-                Ty::Poly { body, .. } => vec![*body],
-                Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
-                Ty::Pair(a, b, _) => vec![*a, *b],
-                Ty::Bloblet { fields, .. } => fields.clone(),
-                Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| *t).collect(),
+            path.push((t, by_param));
+            let kids: Vec<(TyId, bool)> = match c.arena.get(t) {
+                Ty::Subr { params, result, .. } => params.iter().map(|p| (*p, true)).chain([(*result, false)]).collect(),
+                Ty::Composable { arg, answer, .. } => vec![(*arg, true), (*answer, false)],
+                Ty::PromptTag { answer, payload, .. } => vec![(*answer, false), (*payload, false)],
+                Ty::Poly { body, .. } => vec![(*body, false)],
+                Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![(*a, false)],
+                Ty::Pair(a, b, _) => vec![(*a, false), (*b, false)],
+                Ty::Bloblet { fields, .. } => fields.iter().map(|f| (*f, false)).collect(),
+                Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| (*t, false)).collect(),
                 _ => vec![],
             };
-            let r = kids.into_iter().any(|k| walk(c, k, path, done));
+            let r = kids.into_iter().any(|(k, p)| walk(c, k, p, path));
             path.pop();
             r
         }
-        walk(self, t, &mut Vec::new(), &mut HashSet::new())
+        walk(self, t, false, &mut Vec::new())
     }
 
     /// An argument that failed to check is reported as that argument.
@@ -544,7 +534,9 @@ impl Checker {
         self.default_regions(&mut u);
         let map = self.finish(&u, span, t)?;
         self.check_bounds(&u.kinds, &map, span)?;
-        Ok(self.subst(inner, &map))
+        let inst = self.subst(inner, &map);
+        self.no_knot(inst, span)?;
+        Ok(inst)
     }
 
     /// Give each region binder nothing has solved a fresh region of its own;
@@ -874,17 +866,4 @@ impl Checker {
             }
         }
     }
-}
-
-/// Whether an effect could fetch a closure from the store, or stands for
-/// what could: a read or an await of a region that is not finite (finite
-/// data was never written, so holds no closure put there after it was
-/// made, which a knot needs; merely frozen data may), or an effect
-/// variable.
-fn knots(e: &Effect) -> bool {
-    e.0.iter().any(|a| match a {
-        Atom::Read(r) | Atom::Await(r) => !matches!(r, Region::Frozen(_, true)),
-        Atom::Var(_) => true,
-        _ => false,
-    })
 }

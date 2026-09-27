@@ -91,41 +91,39 @@ could run a spin-free form with no budget.
    (docs/performance.md, "What a word's entry poll costs").
 5. **R5 (M). The poll analysis in both compilers.** *Dropped*: R4 shows
    nothing to gain.
-6. **R6 (M). A `spin` atom in both checkers**, and the licence reporting
-   it. The design, as settled with the user on 2026-09-27 up to one
-   choice:
-   - `spin` is one atom, written bare as `pure` is, with no region. So
-     masking never removes it, and no handler discharges it.
-   - It is introduced by three rules. Primitives never introduce it; the
-     standard operations that call a function argument (`with-mark`,
-     `prompt`'s handler, `cwcc`) apply rules 2 and 3 to it.
-     1. *Recursion*: a call within a `letrec` or `define-rec` group, or of
-        a definition's own name. Self tail loops count: a loop is
-        unbounded, though it polls.
-     2. *Knots through the store*: a call of a closure that is not a known
-        definition, whose latent effect reads or awaits a region, or is an
-        effect variable. Every cycle that is not recursion fetches a
-        closure from a `ref`, I-cell or array somewhere on it, and that
-        read is in the latent effect of every function on the cycle. A
-        bare effect variable counts, so that polymorphic code is sound.
-     3. *Recursive types*: a call through a function whose type involves
-        a `dletrec` type (self-application; a continuation given itself).
-   - Size-indexed data (`docs/research/confirmation.md`) is how recursion
-     over a decreasing size could later stop being `spin`.
-   - **The open choice, the user's:** how written types treat `spin`,
-     since a declared effect must cover the inferred one.
-     - *(a) Explicit, as Koka's `div`* (from memory): written effects mean
-       what they say, so a recursive definition's type says `spin`. The
-       front end mostly writes named effects (`checks`, `parses`,
-       `reads`), so adding `spin` to those `define-effect`s covers most of
-       it; a script driven by the checker's errors does the rest.
-       Recommended.
-     - *(b) Implicit*: a written effect means "may spin" unless marked
-       `(total …)`. Nothing existing changes, but nothing is spin-free
-       unless someone writes `total`, and every printed effect changes
-       meaning.
-   - A sibling atom, `nondet`, for a mailbox with several senders, comes
-     with actors (`docs/research/actors-and-distribution.md`, M3).
+6. **R6 (M). A `spin` atom in both checkers.** *Done 2026-09-27*, as settled
+   with the user:
+   - `spin` is one atom, written bare as `pure` is, with no region, so
+     masking never removes it and no handler discharges it. Written
+     effects mean what they say (explicit, as Koka's `div`, from memory):
+     a recursive definition's type says `spin`. Named effects keep that
+     short (the front end's `reads`, `parses`, `checks`, `compiles`,
+     `runs` and `assembles` include it).
+   - Latent effects are trusted. `spin` comes from only two rules at a
+     call:
+     1. *Recursion*: a call, in a `letrec`'s or `define-rec`'s lambdas or a
+        definition's own body, of the group.
+     2. *Self-application*: a call of anything but known code (a
+        definition, a `let` of a `lambda`, a `lambda` applied where
+        written), whose type has a cycle through a procedure's parameter,
+        as `(dletrec ((K (subr e (K) void))) K)` does. A type merely
+        recursive, as a list's, lets nothing loop.
+   - *Knots through the store* are caught where the knot is tied, not at
+     calls. On a cycle through the store, some procedure is fetched from
+     storage at a region `r` and fetched again; latent effects accumulate
+     along calls, so it reads `r` itself, however many regions the cycle
+     passes through. So a procedure type kept in mutable storage at `r`
+     (a `ref`, array, I-cell, mutable pair or bloblet), whose latent effect
+     reads or awaits `r`, must say `spin`. That is checked where storage
+     types come into being: annotations, and the instantiation of the
+     allocators and container operations. Procedures written into storage
+     that do not read it (a table of callbacks) need not say `spin`.
+   - The approximation left: a finite procedure that reads the region it
+     is kept in (an `rlambda`'s closures, which read their own region, kept
+     in a list there) must say `spin`, or be kept at a region of its own
+     (`tests/programs/run/region-closures.fx` does).
+   - Found on the way: the evaluator written in FX-26 printed a cyclic
+     list forever; its printer has fuel.
 7. **R7 (S). Speculation without a budget for spin-free forms.** After R6.
 8. **R8 (M, optional). Stack-depth checks hoisted.** *Dropped*, for R4's
    reason.

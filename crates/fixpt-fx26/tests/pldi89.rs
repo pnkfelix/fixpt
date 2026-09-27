@@ -41,10 +41,8 @@ fn c1_twice() {
                    (lambda ((x t)) (f (f x))))))",
         )
         .expect("checks");
-    // STATED, p. 3, but for `spin`, which the paper does not have: the inner
-    // lambda calls `f`, which is no known procedure and whose effect is a
-    // variable, so it may be a knot fetched from the store.
-    let want = "(poly ((t type)) (poly ((e effect)) (subr pure ((subr e (t) t)) (subr (maxeff spin e) (t) t))))";
+    // STATED, p. 3.
+    let want = "(poly ((t type)) (poly ((e effect)) (subr pure ((subr e (t) t)) (subr e (t) t))))";
     assert_eq!(c.show_ty(got.ty), want);
     let want_ty = c.type_of_str(want).expect("a type");
     assert!(c.subtype(got.ty, want_ty) && c.subtype(want_ty, got.ty));
