@@ -278,11 +278,14 @@ impl Lowerer<'_> {
             // body is, by a return or an escape: a `dynamic-wind`'s after
             // (the checker lets no body of a region be resumed, so its
             // before never runs again).
-            Exp::LetRegion { arena, region, body } => {
+            Exp::LetRegion { form, region, body } => {
                 let n = self.c.arena.dvar_name(region);
+                let Some(enter) = form.enter() else {
+                    // A region for analysis only: nothing at run time.
+                    return self.go(body);
+                };
                 let l = self.local(n);
                 let b = self.body(&[n], body);
-                let enter = if arena { "%region-enter" } else { "%reap-enter" };
                 format!("(let (({l} ({enter}))) (dynamic-wind (lambda () #f) (lambda () {b}) (lambda () (%region-exit {l} #f))))")
             }
             Exp::The { exp, .. } => self.go(exp),

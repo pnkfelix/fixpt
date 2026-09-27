@@ -25,7 +25,7 @@
 //! **Prompts** delimit control on their tag's region, under a condition of
 //! their own: see `synth_prompt`.
 
-use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
+use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Ty, TyId};
 use crate::error::{FxError, R};
 use crate::parse::DScope;
 use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
@@ -345,17 +345,19 @@ impl Checker {
                 Ok((t, eff))
             }
             Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
-            // The region's name is a variable too, of type `(region r)`:
-            // the region itself, to allocate in (`rcons`).
-            Exp::LetRegion { arena, region, body } => {
+            // The region's name is a variable too, of type `(place r)`,
+            // when the form makes a place: to allocate in (`rcons`).
+            Exp::LetRegion { form, region, body } => {
                 let name = self.arena.dvar_name(region);
-                let rt = self.arena.ty(Ty::Region(Region::Var(region)));
+                let rt = self.arena.ty(Ty::Place(Region::Var(region)));
                 let depth = self.env.len();
-                self.env.push((name, rt));
+                if form != RegionForm::Region {
+                    self.env.push((name, rt));
+                }
                 let r = self.synth(body);
                 self.env.truncate(depth);
                 let (t, eff) = r?;
-                self.close_region(e, if arena { "letrena" } else { "letreap" }, region, t, eff)
+                self.close_region(e, form.keyword(), region, t, eff)
             }
             Exp::Bloblet { op, args } => self.synth_bloblet(e, op, &args, None),
             Exp::Product(fields) => {
@@ -451,7 +453,7 @@ impl Checker {
     /// `R`, the region `region` names.
     pub(crate) fn synth_rlambda(&mut self, e: ExpId, region: ExpId, lambda: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
         let (rt, reff) = self.synth(region)?;
-        let Ty::Region(g) = self.arena.get(rt).clone() else {
+        let Ty::Place(g) = self.arena.get(rt).clone() else {
             return Err(FxError::at(self.arena.span_of(region), format!("a region is expected here, and this is a {}", self.show_ty(rt))));
         };
         let hint = expected.and_then(|t| self.arena.get(t).as_subr());
@@ -643,7 +645,7 @@ impl Checker {
                 out.insert(r);
                 self.regions_walk(a, seen, out);
             }
-            Ty::Region(r) => {
+            Ty::Place(r) => {
                 out.insert(r);
             }
             Ty::Pair(a, b, r) => {
@@ -716,7 +718,7 @@ impl Checker {
             }
             // References and pairs are mutable, so their contents are
             // invariant: FX-87's `ref` rule, and its pairs.
-            (Ty::Region(r), Ty::Region(s)) => r == s,
+            (Ty::Place(r), Ty::Place(s)) => r == s,
             (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 r == s && self.sub(x, y, trail) && self.sub(y, x, trail)
             }
@@ -837,7 +839,7 @@ impl Checker {
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),
             Ty::Array(a, r) => Ty::Array(self.subst_memo(a, map, memo), region(r)),
             Ty::ICell(a, r) => Ty::ICell(self.subst_memo(a, map, memo), region(r)),
-            Ty::Region(r) => Ty::Region(region(r)),
+            Ty::Place(r) => Ty::Place(region(r)),
             Ty::Pair(a, b, r) => Ty::Pair(self.subst_memo(a, map, memo), self.subst_memo(b, map, memo), region(r)),
             Ty::PromptTag { answer, payload, effect, region: r } => Ty::PromptTag {
                 answer: self.subst_memo(answer, map, memo),
@@ -1008,7 +1010,7 @@ impl Checker {
             let (given, mut eff, args) = if op == BlobletOp::RMake {
                 let (r, rest) = args.split_first().expect("parsed");
                 let (rt, re) = self.synth(*r)?;
-                let Ty::Region(g) = self.arena.get(rt).clone() else {
+                let Ty::Place(g) = self.arena.get(rt).clone() else {
                     return Err(FxError::at(span, format!("a region is expected here, and this is a {}", self.show_ty(rt))));
                 };
                 (Some(g), re, rest)

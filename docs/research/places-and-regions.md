@@ -156,6 +156,11 @@ writes. Pairs have no header, so lists could not be frozen that way.
 ## Tasks
 
 1. **PR1 (M). The terminology refactoring, with no change of meaning.**
+   *Begun 2026-09-27:* the type `(place r)` in place of `(region r)`, and
+   `letregion`, in both checkers, the lowering, both compilers, register
+   code from both, and the evaluator; `letrena` and `letreap` keep their
+   meaning. A place is still named by its region's name: place names of
+   their own, `arena` and `reap`, and `r in p` come with PR2.
    - `place` kind, `(place p)` type, `arena` and `reap` forms, and
      `letregion`, in both checkers.
    - `letrena` and `letreap` as sugar.

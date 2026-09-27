@@ -63,7 +63,7 @@ fn a_region_is_named_without_at() {
     assert_eq!(check("(letreap @r 1)"), Err("a `letreap` binds a region variable's name, without `@`".to_string()));
 }
 
-/// A region's name is also a value, `(region r)`, which `rcons` allocates
+/// A region's name is also a value, `(place r)`, which `rcons` allocates
 /// in; like anything that mentions the region, it cannot leave the body,
 /// and a closure over it is as bound to the region as the region is.
 #[test]
@@ -72,7 +72,7 @@ fn a_region_is_a_value_to_allocate_in() {
     assert_eq!(check("(letreap r (car (cdr (the (listof int r) (rcons r 1 (rcons r 2 nil))))))"), Ok(vec!["int ! pure".to_string()]));
     assert_eq!(
         check("(letrena r r)"),
-        Err("the value of `letrena r` would outlive its region: its type is (region r)".to_string())
+        Err("the value of `letrena r` would outlive its region: its type is (place r)".to_string())
     );
     let e = check("(letrena r (lambda ((x int)) (the (listof int r) (rcons r x nil))))");
     assert!(e.as_ref().is_err_and(|m| m.contains("would outlive its region")), "{e:?}");
@@ -114,4 +114,15 @@ fn closures_in_a_region() {
     );
     let e = check("(letrena r (get (proj (plambda ((t type)) (rnew r 1)) int)))");
     assert!(e.as_ref().is_err_and(|m| m.contains("a `plambda` body must be pure")), "{e:?}");
+}
+
+/// `letregion` binds a region for analysis only: its body is masked as a
+/// `letrena`'s is, nothing mentioning it may leave, and its name is no
+/// value, since it makes no place.
+#[test]
+fn a_letregion_is_a_region_with_no_place() {
+    assert_eq!(check("(letregion r (car (the (listof int r) (cons 1 nil))))"), Ok(vec!["int ! pure".to_string()]));
+    assert!(check("(letregion r (the (listof int r) (cons 1 nil)))").unwrap_err().contains("would outlive its region"));
+    assert!(check("(letregion r (car (the (listof int r) (rcons r 1 nil))))").unwrap_err().contains("unbound variable `r`"));
+    assert_eq!(check("(letrena r r)"), Err("the value of `letrena r` would outlive its region: its type is (place r)".to_string()));
 }

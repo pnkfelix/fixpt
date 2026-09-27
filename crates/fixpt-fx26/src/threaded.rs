@@ -366,10 +366,14 @@ impl<'a> Compiler<'a> {
             // The region's name bound in a slot, as a `let`'s, to a region
             // entered (an arena, or a reap), and left with the body's value,
             // which is so not in tail position.
-            Exp::LetRegion { arena, region, body } => {
+            Exp::LetRegion { form, region, body } => {
+                let Some(enter) = form.enter() else {
+                    // A region for analysis only: nothing at run time.
+                    return self.exp(body, e, depth, code, tail);
+                };
                 let mut inner = e.clone();
                 inner.push((self.c.arena.dvar_name(region), Loc::Slot(depth)));
-                self.prim(code, if arena { "%region-enter" } else { "%reap-enter" }, 0)?;
+                self.prim(code, enter, 0)?;
                 self.exp(body, &inner, depth + 1, code, false)?;
                 self.prim(code, "%region-exit", 2)?;
                 self.done(code, tail);

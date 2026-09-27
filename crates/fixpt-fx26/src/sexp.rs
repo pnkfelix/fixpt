@@ -7,7 +7,7 @@
 //! [`show_top`] prints the Rust parser's tree in exactly that shape, from the
 //! parser's datatypes in `parser.fx`, with spans in characters.
 
-use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
+use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, RegionForm};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
@@ -127,8 +127,13 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
         Exp::App { fun, args } => format!("(e-app {} {} {a} {b})", go(fun), list(args.iter().map(|x| go(*x)).collect())),
         Exp::PLambda { body, .. } => format!("(e-plambda _ {} {a} {b})", go(body)),
         Exp::RLambda { region, lambda } => format!("(e-rlambda {} {} {a} {b})", go(region), go(lambda)),
-        Exp::LetRegion { arena, region, body } => {
-            format!("(e-letregion {} {} {} {a} {b})", if arena { "#t" } else { "#f" }, name(c.arena.dvar_name(region)), go(body))
+        Exp::LetRegion { form, region, body } => {
+            let k = match form {
+                RegionForm::Region => 0,
+                RegionForm::Arena => 1,
+                RegionForm::Reap => 2,
+            };
+            format!("(e-letregion {k} {} {} {a} {b})", name(c.arena.dvar_name(region)), go(body))
         }
         Exp::Proj { body, args } => format!("(e-proj {} {} {a} {b})", go(body), list(vec!["_".into(); args.len()])),
         Exp::If { test, then, els } => format!("(e-if {} {} {} {a} {b})", go(test), go(then), go(els)),

@@ -59,8 +59,9 @@
   (ty-sum k-parts)
   (ty-array int k-region)
   (ty-icell int k-region)
-  ;; A region itself, as a value: what `letrena` and `letreap` bind.
-  (ty-region k-region)
+  ;; The place a region is allocated in, as a value: what `letrena` and
+  ;; `letreap` bind.
+  (ty-place k-region)
   (ty-bloblet k-ids bool k-region)
   ;; A forwarding slot: none or one.
   (ty-link k-ids))
@@ -89,9 +90,9 @@
   (x-lambda (listof (productof (1 symbol) (2 k-ids)) @t) kx int int)
   (x-app kx (listof kx @t) int int)
   (x-plambda k-binders kx int int)
-  ;; `letrena` or `letreap`: whether an arena, the region variable, and the
-  ;; body.
-  (x-letregion bool int kx int int)
+  ;; `letregion`, `letrena` or `letreap`: what it makes besides the region
+  ;; (0 nothing, 1 an arena, 2 a reap), the region variable, and the body.
+  (x-letregion int int kx int int)
   ;; `rlambda`: the region, and the `lambda`.
   (x-rlambda kx kx int int)
   (x-proj kx (listof k-desc @t) int int)
@@ -445,7 +446,7 @@
               (ty-sum (ps) (k-cat3 "(sumof" (k-show-parts ps p) ")"))
               (ty-array (a r) (k-cat5 "(arrayof " (k-show-on a p) " " (k-region-show r) ")"))
               (ty-icell (a r) (k-cat5 "(icell " (k-show-on a p) " " (k-region-show r) ")"))
-              (ty-region (r) (k-cat3 "(region " (k-region-show r) ")"))
+              (ty-place (r) (k-cat3 "(place " (k-region-show r) ")"))
               (ty-pair (a b r)
                 (if (= (k-resolve b) t)
                     (k-cat5 "(listof " (k-show-on a p) " " (k-region-show r) ")")
@@ -721,10 +722,10 @@
                      (k-shape (= n 3) "`(icell type region)`" s)
                      (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
                        (k-ty-new (ty-icell t r)))))
-                  ((symbol=? hd 'region)
+                  ((symbol=? hd 'place)
                    (begin
-                     (k-shape (= n 2) "`(region region)`" s)
-                     (k-ty-new (ty-region (k-parse-region (k-nth items 1))))))
+                     (k-shape (= n 2) "`(place region)`" s)
+                     (k-ty-new (ty-place (k-parse-region (k-nth items 1))))))
                   ((symbol=? hd 'mark-key)
                    (begin
                      (k-shape (= n 3) "`(mark-key type region)`" s)
@@ -890,12 +891,12 @@
             (begin (set k-dscope saved) (x-plambda bs x a b))))
         (e-rlambda (r l a b)
           (let* ((rx (k-resolve-exp r)) (lx (k-resolve-exp l))) (x-rlambda rx lx a b)))
-        (e-letregion (arena name body a b)
+        (e-letregion (k name body a b)
           (let* ((saved (get k-dscope))
                  (v (k-new-dvar name))
                  (pushed (k-push-desc name (ds-var v 0)))
                  (x (k-resolve-exp body)))
-            (begin (set k-dscope saved) (x-letregion arena v x a b))))
+            (begin (set k-dscope saved) (x-letregion k v x a b))))
         (e-proj (body ds a b)
           (let* ((x (k-resolve-exp body)) (descs (k-resolve-descs ds))) (x-proj x descs a b)))
         (e-if (p c d a b)
@@ -1025,7 +1026,7 @@
                   (ty-ref (a r) (begin (add r) (walk a)))
                   (ty-array (a r) (begin (add r) (walk a)))
                   (ty-icell (a r) (begin (add r) (walk a)))
-                  (ty-region (r) (add r))
+                  (ty-place (r) (add r))
                   (ty-pair (a b r) (begin (add r) (walk a) (walk b)))
                   (ty-tag (a h e r) (begin (add r) (set out (k-add-eff-regions (get out) e)) (walk a) (walk h)))
                   (ty-comp (b a e r) (begin (add r) (set out (k-add-eff-regions (get out) e)) (walk a) (walk b)))
@@ -1252,7 +1253,7 @@
                               (ty-ref (a r) (ty-ref (sub a) (reg r)))
                               (ty-array (a r) (ty-array (sub a) (reg r)))
                               (ty-icell (a r) (ty-icell (sub a) (reg r)))
-                              (ty-region (r) (ty-region (reg r)))
+                              (ty-place (r) (ty-place (reg r)))
                               (ty-pair (a b r) (let* ((a2 (sub a)) (b2 (sub b))) (ty-pair a2 b2 (reg r))))
                               (ty-tag (a h e r)
                                 (let* ((a2 (sub a)) (h2 (sub h))) (ty-tag a2 h2 (k-subst-effect e m) (reg r))))
@@ -1339,7 +1340,7 @@
                      (ty-ref (x r) (tagcase tb (ty-ref (y s) (and (k-region=? r s) (k-inv x y trail))) (else z #f)))
                      (ty-array (x r) (tagcase tb (ty-array (y s) (and (k-region=? r s) (k-inv x y trail))) (else z #f)))
                      (ty-icell (x r) (tagcase tb (ty-icell (y s) (and (k-region=? r s) (k-inv x y trail))) (else z #f)))
-                     (ty-region (r) (tagcase tb (ty-region (s) (k-region=? r s)) (else z #f)))
+                     (ty-place (r) (tagcase tb (ty-place (s) (k-region=? r s)) (else z #f)))
                      (ty-pair (x1 x2 r)
                        (tagcase tb (ty-pair (y1 y2 s) (and (k-region=? r s) (k-inv x1 y1 trail) (k-inv x2 y2 trail))) (else z #f)))
                      (ty-tag (a1 h1 d1 r1)
@@ -1550,7 +1551,7 @@
     (tagcase (k-get t)
       (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r) 3) (ty-poly (bs x) 4) (ty-ref (x r) 5)
       (ty-pair (x y r) 6) (ty-tag (x y e r) 7) (ty-comp (x y e r) 8) (ty-markkey (x r) 9) (ty-product (ps) 10)
-      (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-region (r) 16))))
+      (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 (define k-wrong-shape? (subr (maxeff (read @t) (alloc @t)) (int int) bool)
   (lambda (pattern actual)
@@ -1602,7 +1603,7 @@
                   (ty-markkey (x r) (or (reg r) (go (cons x rest))))
                   (ty-array (x r) (or (reg r) (go (cons x rest))))
                   (ty-icell (x r) (or (reg r) (go (cons x rest))))
-                  (ty-region (r) (or (reg r) (go rest)))
+                  (ty-place (r) (or (reg r) (go rest)))
                   (ty-pair (x y r) (or (reg r) (go (cons x (cons y rest)))))
                   (ty-bloblet (fs z r) (or (reg r) (go (k-push-ids fs rest))))
                   (ty-product (ps) (go (k-push-parts ps rest)))
@@ -1721,7 +1722,7 @@
                         (ty-markkey (x r) (tagcase at (ty-markkey (y s) (begin (ur r s) (u x y))) (else z #u)))
                         (ty-array (x r) (tagcase at (ty-array (y s) (begin (ur r s) (u x y))) (else z #u)))
                         (ty-icell (x r) (tagcase at (ty-icell (y s) (begin (ur r s) (u x y))) (else z #u)))
-                        (ty-region (r) (tagcase at (ty-region (s) (ur r s)) (else z #u)))
+                        (ty-place (r) (tagcase at (ty-place (s) (ur r s)) (else z #u)))
                         (ty-pair (x1 x2 r) (tagcase at (ty-pair (y1 y2 s) (begin (ur r s) (u x1 y1) (u x2 y2))) (else z #u)))
                         (ty-product (pp) (tagcase at (ty-product (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
                         (ty-sum (pp) (tagcase at (ty-sum (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
@@ -1887,14 +1888,15 @@
                   (k-unbind-to saved)
                   (k-te (extract rb 1) (k-mask x (k-union (extract inits 2) (extract rb 2)) (extract rb 1))))))))
         (x-prompt (t body h a b) (k-synth-prompt x t body h))
-        ;; The region's name is a variable too, of type `(region r)`.
-        (x-letregion (arena r body a b)
+        ;; The region's name is a variable too, of type `(place r)`, when
+        ;; the form makes a place.
+        (x-letregion (k r body a b)
           (let* ((saved (k-mark))
-                 (bound (k-bind (k-dvar-name r) (k-ty-new (ty-region (r-var r)))))
+                 (bound (if (= k 0) #u (k-bind (k-dvar-name r) (k-ty-new (ty-place (r-var r))))))
                  (rb (k-synth body)))
             (begin
               (k-unbind-to saved)
-              (k-close-region x (if arena "letrena" "letreap") r (extract rb 1) (extract rb 2) a b))))
+              (k-close-region x (cond ((= k 0) "letregion") ((= k 1) "letrena") (else "letreap")) r (extract rb 1) (extract rb 2) a b))))
         (x-bloblet (op i args a b) (k-synth-bloblet x op i args -1))
         (x-product (fs a b)
           (let* ((r (k-synth-fields fs)) (t (k-ty-new (ty-product (extract r 1)))))
@@ -1980,7 +1982,7 @@
       (let* ((rr (k-synth r))
              (rt (extract rr 1))
              (g (tagcase (k-get rt)
-                  (ty-region (g) g)
+                  (ty-place (g) g)
                   (else y (k-fail (k-cat3 "a region is expected here, and this is a " (k-show-ty rt) "") (k-start r) (k-end r)))))
              (c (if (< expected 0) (the (listof k-callable @t) nil) (k-as-subr expected)))
              (n (tagcase l (x-lambda (ps body a b) (k-length ps)) (else y 0)))
@@ -2264,7 +2266,7 @@
                    (given (the (listof k-region @t)
                             (if rm
                                 (tagcase (k-get (extract gr 1))
-                                  (ty-region (r) (cons r nil))
+                                  (ty-place (r) (cons r nil))
                                   (else y (k-fail (k-cat3 "a region is expected here, and this is a " (k-show-ty (extract gr 1)) "") a b)))
                                 nil)))
                    (args (if rm (cdr args) args))

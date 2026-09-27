@@ -311,7 +311,9 @@ impl Compiler<'_> {
                 Some((last, rest)) => rest.iter().any(|y| self.r_collects(*y, e, this, false)) || self.r_collects(*last, e, this, tail),
                 None => false,
             },
-            // A region is entered and left by calling out.
+            // A place is made and ended by calling out; a region for
+            // analysis only is nothing at run time.
+            Exp::LetRegion { form: crate::ast::RegionForm::Region, body, .. } => self.r_collects(body, e, this, tail),
             Exp::LetRegion { .. } => true,
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_collects(body, e, this, tail),
             Exp::Extract(y, _) => self.r_collects(y, e, this, false),
@@ -400,13 +402,17 @@ impl Compiler<'_> {
             // The region's name bound, as a `let`'s, to a region entered (an
             // arena, or a reap: never in a leaf), and left with the body's
             // value, which is so not in tail position.
-            Exp::LetRegion { arena, region, body } => {
+            Exp::LetRegion { form, region, body } => {
+                let Some(enter) = form.enter() else {
+                    // A region for analysis only: nothing at run time.
+                    return self.r_exp(g, body, env, te, tail);
+                };
                 if g.leaf {
                     return None;
                 }
                 let name = self.c.arena.dvar_name(region);
                 let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
-                self.r_prim(g, if arena { "%region-enter" } else { "%reap-enter" }, &[], env, te)?;
+                self.r_prim(g, enter, &[], env, te)?;
                 let h = g.slot();
                 g.op("setstk", &[Gen::n(h)]);
                 env.push((name, RLoc::Slot(h)));

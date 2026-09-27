@@ -300,8 +300,9 @@
         (e-lambda (ps body a b) (v-clo ps body e))
         (e-app (f args a b) (let* ((fv (eval f e)) (xs (eval-all args e))) (apply-val fv xs)))
         (e-plambda (d body a b) (eval body e))
-        ;; Regions are erased: a `letrena`'s or `letreap`'s allocation is the
-        ;; heap's, and its name, the region as a value, is unit.
+        ;; Regions and places are erased: a `letrena`'s or `letreap`'s
+        ;; allocation is the heap's, and its name, the place as a value, is
+        ;; unit.
         (e-letregion (k r body a b) (eval body (cons (cons r (cell (v-unit))) e)))
         (e-rlambda (r l a b) (eval l e))
         (e-proj (body ds a b) (eval body e))

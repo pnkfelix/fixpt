@@ -6,7 +6,7 @@
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
-use crate::ast::{Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
+use crate::ast::{Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Ty, TyId};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
@@ -210,12 +210,12 @@ impl Checker {
                 let r = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::ICell(t, r)))
             }
-            "region" => {
+            "place" => {
                 let [_, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(region region)`"));
+                    return Err(FxError::at(s.span, "`(place region)`"));
                 };
                 let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Region(r)))
+                Ok(self.arena.ty(Ty::Place(r)))
             }
             "pairof" => {
                 let [_, a, b, r] = &items[..] else {
@@ -651,20 +651,24 @@ impl Checker {
                 [_, x] if x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
                 _ => Err(FxError::at(span, "only a symbol can be quoted: `'name`")),
             },
-            form @ ("letrena" | "letreap") => {
+            form @ ("letregion" | "letrena" | "letreap") => {
                 let [_, name, body @ ..] = &items[..] else {
                     return Err(FxError::at(span, format!("`({form} name body …)`")));
                 };
                 let name = name.as_symbol().filter(|n| !self.name(*n).starts_with('@')).ok_or_else(|| {
                     FxError::at(name.span, format!("a `{form}` binds a region variable's name, without `@`"))
                 })?;
-                let arena = form == "letrena";
+                let form = match form {
+                    "letregion" => RegionForm::Region,
+                    "letrena" => RegionForm::Arena,
+                    _ => RegionForm::Reap,
+                };
                 let depth = self.dscope.len();
                 let region = self.arena.dvar(name);
                 self.dscope.push((name, DScope::Var(region, Kind::Region)));
                 let body = self.parse_body(span, body);
                 self.dscope.truncate(depth);
-                Ok(self.arena.exp(span, Exp::LetRegion { arena, region, body: body? }))
+                Ok(self.arena.exp(span, Exp::LetRegion { form, region, body: body? }))
             }
             "prompt" => {
                 let [_, tag, body, handler] = &items[..] else {

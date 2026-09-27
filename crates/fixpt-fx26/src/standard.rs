@@ -31,10 +31,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("cons", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (alloc r) (t1 t2) (pairof t1 t2 r))))"),
     // `cons` in a region given as a value, which a `letrena` or `letreap`
     // binds: there, rather than in the heap.
-    ("rcons", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (alloc r) ((region r) t1 t2) (pairof t1 t2 r))))"),
-    ("rnew", "(poly ((r region)) (poly ((t type)) (subr (alloc r) ((region r) t) (ref t r))))"),
-    ("rmake-array", "(poly ((r region)) (poly ((t type)) (subr (alloc r) ((region r) int t) (arrayof t r))))"),
-    ("rmake-icell", "(poly ((r region)) (poly ((t type)) (subr (alloc r) ((region r)) (icell t r))))"),
+    ("rcons", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (alloc r) ((place r) t1 t2) (pairof t1 t2 r))))"),
+    ("rnew", "(poly ((r region)) (poly ((t type)) (subr (alloc r) ((place r) t) (ref t r))))"),
+    ("rmake-array", "(poly ((r region)) (poly ((t type)) (subr (alloc r) ((place r) int t) (arrayof t r))))"),
+    ("rmake-icell", "(poly ((r region)) (poly ((t type)) (subr (alloc r) ((place r)) (icell t r))))"),
     ("car", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((pairof t1 t2 r)) t1)))"),
     ("cdr", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((pairof t1 t2 r)) t2)))"),
     ("set-car!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) t1) unit)))"),

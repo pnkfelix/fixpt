@@ -128,9 +128,10 @@ pub enum Ty {
     /// `(icell T R)`: an I-cell in region `R` (Arvind's I-structures): empty
     /// until its one write of a `T`, and never changed after.
     ICell(TyId, Region),
-    /// `(region R)`: region `R` itself, as a value: what `letrena` and
-    /// `letreap` bind their region's name to, and what `rcons` allocates in.
-    Region(Region),
+    /// `(place R)`: the memory that region `R` is allocated in, as a value:
+    /// what `letrena` and `letreap` bind their region's name to, and what
+    /// `rcons` allocates in (`docs/research/places-and-regions.md`).
+    Place(Region),
     /// `(bloblet (fields T…) R)`: a bloblet in region `R` whose fields have
     /// the types `T…`, with a suffix of bytes (`docs/object-model.md`).
     /// `(bloblet (frozen T…) R)` is one whose fields have been frozen: they
@@ -156,6 +157,36 @@ impl Ty {
                 Some((e, vec![*arg], *answer))
             }
             _ => None,
+        }
+    }
+}
+
+/// What a region form makes besides the region (`docs/research/places-and-regions.md`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum RegionForm {
+    /// `letregion`: nothing; a name for analysis only.
+    Region,
+    /// `letrena`: an arena, reclaimed only when the body ends.
+    Arena,
+    /// `letreap`: a heap of its own, which the collector collects too.
+    Reap,
+}
+
+impl RegionForm {
+    /// The form's keyword.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            RegionForm::Region => "letregion",
+            RegionForm::Arena => "letrena",
+            RegionForm::Reap => "letreap",
+        }
+    }
+    /// The primitive that makes its place, if it makes one.
+    pub fn enter(self) -> Option<&'static str> {
+        match self {
+            RegionForm::Region => None,
+            RegionForm::Arena => Some("%region-enter"),
+            RegionForm::Reap => Some("%reap-enter"),
         }
     }
 }
@@ -197,15 +228,15 @@ pub enum Exp {
     /// `(prompt tag body handler)`: evaluate `body` delimited by a prompt for
     /// `tag`; an abort to `tag` inside it calls `handler` with the value.
     Prompt { tag: ExpId, body: ExpId, handler: ExpId },
-    /// `(letrena r body …)` or `(letreap r body …)`: a region that lives
-    /// while `body` runs. `r` is a region variable, in scope in the body's
-    /// types; nothing that outlives the body may mention it. The two differ
-    /// only in how the region's memory is managed: an arena (`arena`),
-    /// reclaimed only when the body ends, or a heap of its own that the
-    /// collector may collect as it runs.
-    LetRegion { arena: bool, region: DVar, body: ExpId },
+    /// `(letregion r body …)`, `(letrena r body …)` or `(letreap r body
+    /// …)`: a region that lives while `body` runs. `r` is a region
+    /// variable, in scope in the body's types; nothing that outlives the
+    /// body may mention it. A `letregion`'s is for analysis only, its data
+    /// in the heap; the other two also make a place for it, whose value `r`
+    /// names in the body (`form`).
+    LetRegion { form: RegionForm, region: DVar, body: ExpId },
     /// `(rlambda r (param …) body …)`: the `lambda`, its closure made in
-    /// the region `r` names (`region`, an expression of type `(region R)`).
+    /// the region `r` names (`region`, an expression of type `(place R)`).
     /// Calling it reads the closure, so its latent effect has `(read R)`.
     RLambda { region: ExpId, lambda: ExpId },
     /// `(the type expression)`: check the expression against the type.
