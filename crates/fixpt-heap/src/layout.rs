@@ -426,6 +426,7 @@ pub mod regcode {
         ("branch", 1, "skip the operand's count of cells, counted after it"),
         ("branchf", 1, "the same if RESULT is #f"),
         ("threaded", 2, "threaded routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect"),
+        ("invokeself", 1, "call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may collect"),
     ];
 
     pub const fn op(name: &str) -> usize {

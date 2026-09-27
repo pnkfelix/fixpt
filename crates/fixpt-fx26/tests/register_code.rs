@@ -37,12 +37,13 @@ fn the_benchmarks_procedures_have_register_code() {
 }
 
 /// `fib`'s: one frame slot for `n` and one for the first call's value;
-/// arguments and the rest in registers.
+/// arguments and the rest in registers; its calls of itself by its own
+/// entry.
 #[test]
 fn fib_in_registers() {
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/bench/fib.fx")).unwrap();
     let out = shown(&text);
-    for want in ["save 2", "op2imm int-less 2", "invoke 1", "setstk 1", "op2 int-add 1", "pop 2"] {
+    for want in ["save 2", "op2imm int-less 2", "invokeself 1", "setstk 1", "op2 int-add 1", "pop 2"] {
         assert!(out.contains(want), "{want}:\n{out}");
     }
 }

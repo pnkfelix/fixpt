@@ -280,6 +280,15 @@ impl Compiler<'_> {
         }
     }
 
+    /// Whether `f` is the procedure running, called with its arity: its own
+    /// name, still bound where the procedure knows itself to be.
+    fn r_self_known(&self, g: &Gen, f: ExpId, nargs: usize, te: &Env) -> bool {
+        match (g.this, self.c.arena.exp_at(f)) {
+            (Some((t, _)), Exp::Var(n)) => *n == t.name && find(te, *n) == Some(t.loc) && nargs == t.params,
+            _ => false,
+        }
+    }
+
     fn r_self_call(&self, g: &Gen, f: ExpId, nargs: usize, te: &Env, tail: bool) -> bool {
         match (g.this, self.c.arena.exp_at(f)) {
             (Some((t, _)), Exp::Var(n)) => tail && *n == t.name && find(te, *n) == Some(t.loc) && nargs == t.params,
@@ -620,6 +629,13 @@ impl Compiler<'_> {
             return self.decline("more than REGS arguments");
         }
         let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+        // A call of the procedure itself, not in tail position: by its own
+        // entry, with no closure fetched.
+        if !tail && self.r_self_known(g, f, args.len(), te) {
+            self.r_args(g, &es, env, te, None)?;
+            g.op("invokeself", &[Gen::n(args.len())]);
+            return Some(());
+        }
         self.r_args(g, &es, env, te, Some(f))?;
         if tail {
             g.leave();

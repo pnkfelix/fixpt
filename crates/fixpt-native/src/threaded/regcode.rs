@@ -447,6 +447,8 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     let near_exit = a.label();
     a.exit_common = near_exit;
     // The register entry.
+    let entry = a.label();
+    a.bind(entry);
     a.fuel();
     a.rs_limit();
     a.pool(fields);
@@ -683,6 +685,24 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     a.pool(fields);
                     a.relink();
                 }
+            }
+            // A call of the procedure itself: its closure is the one running
+            // and its word this one, so a `bl` to this word's own entry, as
+            // `invoke` calls register code, with the same resume points.
+            "invokeself" => {
+                let back = a.label();
+                a.ip_at(WORD_CELL0 + next);
+                a.push_return_marked();
+                if a.here() % 2 == 0 {
+                    a.e(NOP);
+                }
+                a.bl_to(entry);
+                a.b(back);
+                resume[next] = a.here() as i64;
+                a.e(ldr_post(RESULT, DSP, 8));
+                a.bind(back);
+                a.pool(fields);
+                a.relink();
             }
             // To an entry a `blr` pushed: the caller's registers from it,
             // and back to the link. By `br`, not `ret`: `ret` is predicted

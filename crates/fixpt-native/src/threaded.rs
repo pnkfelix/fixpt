@@ -160,6 +160,9 @@ impl Asm {
     fn b(&mut self, l: Label) {
         self.to(l, b(0));
     }
+    fn bl_to(&mut self, l: Label) {
+        self.to(l, bl(0));
+    }
     fn b_cond(&mut self, c: Cond, l: Label) {
         self.to(l, b_cond(c, 0));
     }
@@ -192,6 +195,8 @@ impl Asm {
             let w = self.code[at];
             self.code[at] = if w & 0xFC00_0000 == 0x1400_0000 {
                 b(d)
+            } else if w & 0xFC00_0000 == 0x9400_0000 {
+                bl(d)
             } else if w & 0xFF00_0010 == 0x5400_0000 {
                 b_cond(cond_of(w), d)
             } else if w & 0xFF00_0000 == 0xB500_0000 {

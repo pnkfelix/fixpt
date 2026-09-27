@@ -856,3 +856,20 @@ have made `fib` a leaf.
 | `tak`                     | 1.9 ms  | 1.8 ms  |
 
 The self-compile, stage 2: 0.20 → 0.18 s.
+
+### A procedure's calls of itself, by its own entry
+
+A non-tail call of the procedure running, by its own name with its
+arity (a definition's, or a `letrec`'s that knows itself), needs no
+closure fetched and no word or twin checked: its closure is the one
+running and its word this one. Register code's new `invokeself n` is a
+`bl` to the word's own register entry, a direct call the processor
+predicts outright, with the same resume points as `invoke`.
+
+| benchmark (register code) | before  | after   |
+| ------------------------- | ------- | ------- |
+| `fib`                     | 5.7 ms  | 4.4 ms  |
+| `tak`                     | 1.8 ms  | 1.6 ms  |
+| `closures`                | 20.8 ms | 19.2 ms |
+
+Stage 2 stays at 0.18 s.

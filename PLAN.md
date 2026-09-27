@@ -1011,6 +1011,12 @@ the order it will be done. Each is committed when done, and marked here.
 4. **Known calls** (13e and 13h′ (d)): `callk`, a direct call of a known
    word with no closure fetched; let-conversion of lambdas that do not
    escape.
+   *(Done in part 2026-09-26: a definition's own name is known, its tail
+   self-calls loops; a non-tail self-call is `invokeself`, a `bl` to the
+   word's own entry. `lists` 13.9 → 8.8 ms, `fib` 5.7 → 4.4. Open: calls
+   of other known procedures, whose word is known when the program is
+   compiled (a later definition's call of an earlier one); and
+   let-conversion.)*
 5. **Register code from the compiler written in FX-26** (13h′ (e)).
 6. **A nursery, and a write barrier with a remembered set** (raised by
    the user 2026-09-26, "make it toggleable"): the nursery's size zero
