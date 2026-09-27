@@ -49,11 +49,11 @@
 (define-type k-names (listof symbol finite))
 
 ;; A description in argument position, what `proj` supplies.
-(define-datatype k-desc (dr k-region) (de k-eff) (dt int))
-
 ;; A list's length, as far as it is known: `finite`, some number; or a
 ;; constant and terms (variable . coefficient), in variable order.
 (define-datatype k-size (sz-finite) (sz-lin int (listof (pairof int int finite) finite)))
+
+(define-datatype k-desc (dr k-region) (de k-eff) (dt int) (dz k-size))
 
 (define-datatype k-ty
   (ty-base symbol)
@@ -92,6 +92,8 @@
 (define-datatype k-ds
   ;; A name `define-generative` bound: the `n`th generative type.
   (ds-gen int)
+  ;; A size given for a type family's size parameter.
+  (ds-size k-size)
   (ds-var int int)
   (ds-rec int)
   (ds-abbrev (listof (productof (1 symbol) (2 int)) finite) syn)
@@ -520,10 +522,10 @@
           (else (k-cat3 "(maxeff" (k-atoms-show e) ")")))))
 
 (define k-kind-name (subr pure (int) string)
-  (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") ((= k 4) "data") (else "type"))))
+  (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") ((= k 4) "data") ((= k 5) "size") (else "type"))))
 ;; As Rust's `{:?}` writes a kind.
 (define k-kind-debug (subr pure (int) string)
-  (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") ((= k 3) "Place") ((= k 4) "Data") (else "Type"))))
+  (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") ((= k 3) "Place") ((= k 4) "Data") ((= k 5) "Size") (else "Type"))))
 ;; Whether a region is a place: a variable bound as one.
 (define k-place? (subr (read @t) (k-region) bool)
   (lambda (r) (tagcase r (r-var (v) (k-place-var? v)) (r-heap () #t) (else x #f))))
@@ -568,10 +570,6 @@
   (lambda (z) (tagcase z (sz-lin (k ts) (if (null? ts) k -1)) (else y -1))))
 (define k-size-plus (subr pure (k-size int) k-size)
   (lambda (z d) (tagcase z (sz-lin (k ts) (sz-lin (+ k d) ts)) (else y z))))
-;; The size of the tail of a list of size `z`: one less where `z` is at
-;; least one; `finite` otherwise.
-(define k-tail-size (subr pure (k-size) k-size)
-  (lambda (z) (let ((k (k-size-as-lit z))) (if (>= k 1) (k-size-lit (- k 1)) (sz-finite)))))
 (define k-terms=? (subr pure ((listof (pairof int int finite) finite) (listof (pairof int int finite) finite)) bool)
   (lambda (xs ys)
     (if (null? xs)
@@ -582,9 +580,115 @@
     (tagcase a
       (sz-finite () (tagcase b (sz-finite () #t) (else y #f)))
       (sz-lin (k ts) (tagcase b (sz-lin (k2 ts2) (and (= k k2) (k-terms=? ts ts2))) (else y #f))))))
-;; Whether a list of size `m` is one of size `n`: the same, or `n` is `finite`.
-(define k-size-le? (subr pure (k-size k-size) bool)
-  (lambda (m n) (or (tagcase n (sz-finite () #t) (else y #f)) (k-size=? m n))))
+
+(define k-map-find (subr (read @t) (k-map int) k-map)
+  (lambda (m v) (cond ((null? m) nil) ((= (car (car m)) v) m) (else (k-map-find (cdr m) v)))))
+;; Linear sizes (`src/sizes.rs`): a variable; `a + c·b`; `v` replaced.
+(define-type k-terms (listof (pairof int int finite) finite))
+(define k-size-var (subr pure (int) k-size) (lambda (v) (sz-lin 0 (the k-terms (cons (cons v 1) nil)))))
+;; `xs + c·ys`, terms in variable order, none zero.
+(define k-terms-add (subr pure (k-terms k-terms int) k-terms)
+  (lambda (xs ys c)
+    (cond ((null? ys) xs)
+          ((null? xs) (let ((n (* c (cdr (car ys)))) (rest (k-terms-add xs (cdr ys) c)))
+                        (if (= n 0) rest (the k-terms (cons (cons (car (car ys)) n) rest)))))
+          ((< (car (car xs)) (car (car ys))) (the k-terms (cons (car xs) (k-terms-add (cdr xs) ys c))))
+          ((> (car (car xs)) (car (car ys)))
+           (let ((n (* c (cdr (car ys)))) (rest (k-terms-add xs (cdr ys) c)))
+             (if (= n 0) rest (the k-terms (cons (cons (car (car ys)) n) rest)))))
+          (else (let ((n (+ (cdr (car xs)) (* c (cdr (car ys))))) (rest (k-terms-add (cdr xs) (cdr ys) c)))
+                  (if (= n 0) rest (the k-terms (cons (cons (car (car xs)) n) rest))))))))
+(define k-size-add-scaled (subr pure (k-size k-size int) k-size)
+  (lambda (a b c)
+    (tagcase a
+      (sz-lin (k ts) (tagcase b (sz-lin (k2 ts2) (sz-lin (+ k (* c k2)) (k-terms-add ts ts2 c))) (else y (sz-finite))))
+      (else y (sz-finite)))))
+(define k-coef-of (subr pure (k-terms int) int)
+  (lambda (ts v) (cond ((null? ts) 0) ((= (car (car ts)) v) (cdr (car ts))) (else (k-coef-of (cdr ts) v)))))
+(define k-size-replace (subr pure (k-size int k-size) k-size)
+  (lambda (s v by)
+    (tagcase s
+      (sz-lin (k ts)
+        (let ((c (k-coef-of ts v)))
+          (if (= c 0) s (k-size-add-scaled (k-size-add-scaled s (k-size-var v) (- 0 c)) by c))))
+      (else y (sz-finite)))))
+;; What the branches being checked have learned about sizes: `lin = 0`
+;; (`#t`) or `lin ≥ 0`, newest first.
+(define-type k-size-fact (productof (1 k-size) (2 bool)))
+(define k-size-facts (ref (listof k-size-fact finite) @t) (new nil))
+;; `s` with each variable an equality determines rewritten away, oldest
+;; fact first.
+(define k-reduced (subr (read @t) (k-size) k-size)
+  (lambda (s)
+    (letrec ((go (subr pure (k-size (listof k-size-fact finite)) k-size)
+                   (lambda (s fs)
+                     (if (null? fs)
+                         s
+                         (go (let ((f (car fs)))
+                               (if (not (extract f 2))
+                                   s
+                                   (tagcase (extract f 1)
+                                     (sz-lin (k ts)
+                                       (letrec ((unit (subr pure (k-terms) k-terms)
+                                                      (lambda (xs) (cond ((null? xs) xs)
+                                                                         ((or (= (cdr (car xs)) 1) (= (cdr (car xs)) -1)) xs)
+                                                                         (else (unit (cdr xs)))))))
+                                         (let ((u (unit ts)))
+                                           (if (null? u)
+                                               s
+                                               (let* ((v (car (car u))) (c (cdr (car u)))
+                                                      (rest (k-size-add-scaled (extract f 1) (k-size-var v) (- 0 c)))
+                                                      (by (k-size-add-scaled (k-size-lit 0) rest (- 0 c))))
+                                                 (k-size-replace s v by))))))
+                                     (else y s))))
+                             (cdr fs))))))
+      (go s (the (listof k-size-fact finite) (reverse (get k-size-facts)))))))
+;; Whether a size is plainly non-negative: every size is a natural.
+(define k-plainly-nonneg? (subr pure (k-size) bool)
+  (lambda (s)
+    (tagcase s
+      (sz-lin (k ts) (and (>= k 0) (letrec ((all (subr pure (k-terms) bool) (lambda (xs) (or (null? xs) (and (>= (cdr (car xs)) 0) (all (cdr xs))))))) (all ts))))
+      (else y #f))))
+;; Whether the facts show `a ≥ 0`: plainly, or with a fact `f ≥ 0` to spare.
+(define k-size-nonneg? (subr (read @t) (k-size) bool)
+  (lambda (a0)
+    (let ((a (k-reduced a0)))
+      (or (k-plainly-nonneg? a)
+          (letrec ((any (subr (read @t) ((listof k-size-fact finite)) bool)
+                        (lambda (fs)
+                          (and (not (null? fs))
+                               (or (and (not (extract (car fs) 2))
+                                        (k-plainly-nonneg? (k-size-add-scaled a (k-reduced (extract (car fs) 1)) -1)))
+                                   (any (cdr fs)))))))
+            (any (the (listof k-size-fact finite) (reverse (get k-size-facts)))))))))
+;; Whether the facts show `a = b`.
+(define k-size-eq? (subr (read @t) (k-size k-size) bool)
+  (lambda (a b)
+    (tagcase a
+      (sz-finite () (tagcase b (sz-finite () #t) (else y #f)))
+      (else y (tagcase b (sz-finite () #f) (else w (k-size=? (k-reduced (k-size-add-scaled a b -1)) (k-size-lit 0))))))))
+;; The size of the tail of a list of size `n`: one less, where the facts
+;; show `n ≥ 1`; `finite` otherwise.
+(define k-tail-size (subr (read @t) (k-size) k-size)
+  (lambda (n) (tagcase n (sz-finite () n) (else y (if (k-size-nonneg? (k-size-plus n -1)) (k-size-plus n -1) (sz-finite))))))
+;; Whether a list of size `m` is one of size `n`: the facts show them
+;; equal, or `n` is `finite`.
+(define k-size-le? (subr (read @t) (k-size k-size) bool)
+  (lambda (m n) (or (tagcase n (sz-finite () #t) (else y #f)) (k-size-eq? m n))))
+;; `s` with `m`'s sizes for its variables.
+(define k-subst-size (subr (read @t) (k-size k-map) k-size)
+  (lambda (s m)
+    (tagcase s
+      (sz-lin (k ts)
+        (letrec ((go (subr (read @t) (k-size k-terms) k-size)
+                       (lambda (out xs)
+                         (if (null? xs)
+                             out
+                             (let ((f (k-map-find m (car (car xs)))))
+                               (go (if (null? f) out (tagcase (cdr (car f)) (dz (by) (k-size-replace out (car (car xs)) by)) (else y out)))
+                                   (cdr xs)))))))
+          (go s ts)))
+      (else y s))))
 (define k-show-terms (subr (maxeff (read @t) (alloc @t) spin) ((listof (pairof int int finite) finite)) (listof string finite))
   (lambda (ts)
     (if (null? ts)
@@ -627,7 +731,7 @@
     (lambda (ds p)
       (if (null? ds)
           nil
-          (let ((x (tagcase (car ds) (dt (t) (k-show-on t p)) (dr (r) (k-region-show r)) (de (e) (k-show-effect e)))))
+          (let ((x (tagcase (car ds) (dt (t) (k-show-on t p)) (dr (r) (k-region-show r)) (de (e) (k-show-effect e)) (dz (z) (k-show-size z)))))
             (cons x (k-show-descs (cdr ds) p))))))
   (k-show-body (subr (maxeff (read @t) (alloc @t) spin) (int k-ids) string)
     (lambda (t path)
@@ -703,7 +807,8 @@
     (let ((n (if (syn-symbol? s) (syn-name s) "")))
       (cond ((string=? n "region") 0) ((string=? n "place") 3) ((string=? n "effect") 1) ((string=? n "type") 2)
             ((string=? n "data") 4)
-            (else (k-sfail "a kind is `region`, `place`, `effect`, `type` or `data`" s))))))
+            ((string=? n "size") 5)
+            (else (k-sfail "a kind is `region`, `place`, `effect`, `type`, `data` or `size`" s))))))
 
 ;; The region `@name` stands for: the program's own, if `private-regions`
 ;; declared it, and otherwise the constant of that name.
@@ -1014,6 +1119,7 @@
       (ds-rec (a) (tagcase y (ds-rec (b) (= (k-resolve a) (k-resolve b))) (else z #f)))
       (ds-region (a) (tagcase y (ds-region (b) (k-region=? a b)) (else z #f)))
       (ds-eff (a) (tagcase y (ds-eff (b) (k-eff=? a b)) (else z #f)))
+      (ds-size (a) (tagcase y (ds-size (b) (k-size=? a b)) (else z #f)))
       (else z #f))))
 (define k-scope=? (subr (maxeff (read @t) spin) (k-scope k-scope) bool)
   (lambda (xs ys)
@@ -1058,9 +1164,28 @@
   ;; A size: a natural literal, or `finite`, some number not known.
   (k-parse-size (subr (maxeff checks spin) (syn) k-size)
     (lambda (s)
-      (cond ((>= (syn-int s) 0) (k-size-lit (syn-int s)))
-            ((and (syn-symbol? s) (string=? (syn-name s) "finite")) (sz-finite))
-            (else (k-sfail "a size is a natural number, or `finite`" s)))))
+      (let ((usage "a size is a natural number, `finite`, a size variable, `(+ size …)` or `(- size k)`"))
+        (cond ((>= (syn-int s) 0) (k-size-lit (syn-int s)))
+              ((syn-symbol? s)
+               (if (string=? (syn-name s) "finite")
+                   (sz-finite)
+                   (let ((d (k-lookup-desc (string->symbol (syn-name s)))))
+                     (if (null? d)
+                         (k-sfail usage s)
+                         (tagcase (car d)
+                           (ds-var (v k) (if (= k 5) (k-size-var v) (k-sfail usage s)))
+                           (ds-size (z) z)
+                           (else x (k-sfail usage s)))))))
+              (else
+               (let* ((items (k-items s "a size"))
+                      (hd (if (and (not (null? items)) (syn-symbol? (car items))) (syn-name (car items)) "")))
+                 (cond ((and (string=? hd "+") (not (null? (cdr items)))) (k-parse-size-sum (cdr items) (k-size-lit 0)))
+                       ((and (string=? hd "-") (= (k-length items) 3))
+                        (let ((a (k-parse-size (k-nth items 1))) (k (syn-int (k-nth items 2))))
+                          (if (>= k 0) (k-size-plus a (- 0 k)) (k-sfail usage (k-nth items 2)))))
+                       (else (k-sfail usage s)))))))))
+  (k-parse-size-sum (subr (maxeff checks spin) ((listof syn finite) k-size) k-size)
+    (lambda (xs out) (if (null? xs) out (k-parse-size-sum (cdr xs) (k-size-add-scaled out (k-parse-size (car xs)) 1)))))
   ;; What `(proves prop)` states: the type of its proof, with the lemma kept
   ;; pending for the definition it declares.
   (k-parse-proves (subr (maxeff checks spin) (syn string) int)
@@ -1114,6 +1239,7 @@
                  (d (cond ((or (= k 2) (= k 4)) (dt (k-parse-type (car args))))
                           ((= k 0) (dr (k-parse-region (car args))))
                           ((= k 3) (dr (k-parse-place (car args))))
+                          ((= k 5) (dz (k-parse-size (car args))))
                           (else (de (k-parse-effect (car args))))))
                  (rest (k-gen-args (cdr ps) (cdr args))))
             (cons d rest)))))
@@ -1304,6 +1430,7 @@
                  (d (cond ((or (= k 2) (= k 4)) (ds-rec (k-parse-type (car args))))
                           ((= k 0) (ds-region (k-parse-region (car args))))
                           ((= k 3) (ds-region (k-parse-place (car args))))
+                          ((= k 5) (ds-size (k-parse-size (car args))))
                           (else (ds-eff (k-parse-effect (car args))))))
                  (rest (k-abbrev-args (cdr ps) (cdr args))))
             (cons (cons (extract (car ps) 1) d) rest))))))
@@ -1374,7 +1501,8 @@
                 (dt (x) (k-polarity x v p seen found))
                 (dr (r) (if (k-reg-is? r v) (set found (cons 2 (get found))) #u))
                 (de (e) (begin (if (k-eff-var? e v) (set found (cons p (get found))) #u)
-                               (if (k-eff-region-var? e v) (set found (cons 2 (get found))) #u))))
+                               (if (k-eff-region-var? e v) (set found (cons 2 (get found))) #u)))
+                (dz (z) #u))
               (k-polarity-descs (cdr ds) (cdr ws) v at seen found)))))))
 (define k-all-ints? (subr pure (k-ids int) bool)
   (lambda (xs n) (or (null? xs) (and (= (car xs) n) (k-all-ints? (cdr xs) n)))))
@@ -1467,6 +1595,9 @@
 ;; name, in how the name is bound.
 (define k-parse-d (subr (maxeff checks spin) (syn) k-desc)
   (lambda (s)
+    (if (tagcase s (atom (d a b) (datum-int? d)) (else x #f))
+        ;; A natural number can only be a size.
+        (dz (k-parse-size s))
     (if (syn-symbol? s)
         (let* ((n (syn-name s)) (sym (string->symbol n)))
           (cond ((k-at-name? n) (dr (k-region-constant sym)))
@@ -1481,14 +1612,17 @@
                        (dt (k-parse-type s))
                        (tagcase (car d)
                          (ds-var (v k)
-                           (cond ((or (= k 0) (= k 3)) (dr (r-var v))) ((= k 1) (de (k-one (a-var v)))) (else (dt (k-parse-type s)))))
+                           (cond ((or (= k 0) (= k 3)) (dr (r-var v))) ((= k 1) (de (k-one (a-var v)))) ((= k 5) (dz (k-size-var v)))
+                                 (else (dt (k-parse-type s)))))
                          (ds-eff (e) (de e))
+                         (ds-size (z) (dz z))
                          (else x (dt (k-parse-type s)))))))))
         (let ((hd (k-head (k-items s "a description"))))
-          (if (or (string=? hd "read") (string=? hd "write") (string=? hd "alloc") (string=? hd "goto")
-                  (string=? hd "comefrom") (string=? hd "await") (string=? hd "maxeff"))
-              (de (k-parse-effect s))
-              (dt (k-parse-type s)))))))
+          (cond ((or (string=? hd "read") (string=? hd "write") (string=? hd "alloc") (string=? hd "goto")
+                     (string=? hd "comefrom") (string=? hd "await") (string=? hd "maxeff"))
+                 (de (k-parse-effect s)))
+                ((or (string=? hd "+") (string=? hd "-")) (dz (k-parse-size s)))
+                (else (dt (k-parse-type s))))))))) 
 
 ;;; ------------------------------------------------------------ resolving
 ;;; The parser's trees to `kx`, reading descriptions where the Rust parser
@@ -1723,7 +1857,7 @@
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
-      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil) (set k-certified-lengths nil)
+      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil) (set k-certified-lengths nil) (set k-size-facts nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
@@ -1781,7 +1915,8 @@
           (begin (tagcase (car ds)
                    (dt (x) (k-regions-walk x seen out))
                    (dr (r) (set out (k-add-region (get out) r)))
-                   (de (e) (set out (k-add-eff-regions (get out) e))))
+                   (de (e) (set out (k-add-eff-regions (get out) e)))
+                   (dz (z) #u))
                  (k-regions-descs (cdr ds) seen out)))))
   (k-regions-walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids int (ref k-regions @t)) unit)
     (lambda (ts seen out) (if (null? ts) #u (begin (k-regions-walk (car ts) seen out) (k-regions-walks (cdr ts) seen out)))))
@@ -1982,8 +2117,6 @@
 
 ;;; ------------------------------------------------------------ substitution
 
-(define k-map-find (subr (read @t) (k-map int) k-map)
-  (lambda (m v) (cond ((null? m) nil) ((= (car (car m)) v) m) (else (k-map-find (cdr m) v)))))
 (define k-subst-region (subr (read @t) (k-region k-map) k-region)
   (lambda (r m)
     (tagcase r
@@ -2073,7 +2206,7 @@
                               (ty-sum (ps) (ty-sum (k-subst-parts ps m memo)))
                               (ty-bloblet (fs z r) (ty-bloblet (subs fs) z (reg r)))
                               (ty-named (g ds) (ty-named g (k-subst-descs ds m memo)))
-                              (ty-vec (e z r) (ty-vec (sub e) z (reg r)))
+                              (ty-vec (e z r) (ty-vec (sub e) (k-subst-size z m) (reg r)))
                               (else z (k-get t))))
                            (id (k-ty-new new-ty)))
                       (begin (k-set-link slot id) slot)))))))))))
@@ -2084,7 +2217,8 @@
           (let* ((d (tagcase (car ds)
                       (dt (x) (dt (k-subst-memo x m memo)))
                       (dr (r) (dr (k-subst-region r m)))
-                      (de (e) (de (k-subst-effect e m)))))
+                      (de (e) (de (k-subst-effect e m)))
+                      (dz (z) (dz (k-subst-size z m)))))
                  (rest (k-subst-descs (cdr ds) m memo)))
             (cons d rest)))))
   (k-subst-list (subr (maxeff kstate spin) (k-ids k-map (ref (listof (pairof int int @t) finite) @t)) k-ids)
@@ -2116,7 +2250,8 @@
     (if (null? bs)
         nil
         (let* ((vb (extract (car bs) 1)) (k (extract (car bs) 2)) (va (extract (car as) 1))
-               (d (cond ((or (= k 0) (= k 3)) (dr (r-var va))) ((= k 1) (de (k-one (a-var va)))) (else (dt (k-ty-new (ty-var va))))))
+               (d (cond ((or (= k 0) (= k 3)) (dr (r-var va))) ((= k 1) (de (k-one (a-var va)))) ((= k 5) (dz (k-size-var va)))
+                        (else (dt (k-ty-new (ty-var va))))))
                (rest (k-rename (cdr bs) (cdr as))))
           (cons (cons vb d) rest)))))
 (define k-same-kinds? (subr (read @t) (k-binders k-binders) bool)
@@ -2344,7 +2479,8 @@
           (and (tagcase (car xs)
                  (dt (a) (tagcase (car ys) (dt (b) (k-match-ty l a b m seen)) (else z #f)))
                  (dr (r) (tagcase (car ys) (dr (q) (k-match-region (extract l 1) r q m)) (else z #f)))
-                 (de (d) (tagcase (car ys) (de (e) (k-match-effect (extract l 1) d e m)) (else z #f))))
+                 (de (d) (tagcase (car ys) (de (e) (k-match-effect (extract l 1) d e m)) (else z #f)))
+                 (dz (a) (tagcase (car ys) (dz (b) (k-size=? a b)) (else z #f))))
                (k-match-descs l (cdr xs) (cdr ys) m seen)))))
   (k-match-region (subr (maxeff kstate spin) (k-binders k-region k-region (ref k-map @t)) bool)
     (lambda (bs r q m)
@@ -2486,7 +2622,8 @@
                      (tagcase (car ys)
                        (de (e) (let ((d2 (k-benv-effect ea d)) (e2 (k-benv-effect eb e)))
                                  (cond ((= v 0) (k-within? d2 e2)) ((= v 1) (k-within? e2 d2)) (else (k-eff=? d2 e2)))))
-                       (else z #f)))))
+                       (else z #f)))
+                   (dz (m) (tagcase (car ys) (dz (n) (k-size-eq? m n)) (else z #f)))))
                (k-sub-descs (cdr xs) (cdr ys) (cdr vs) ea eb trail labels)))))
   (k-sub-fields (subr (maxeff kstate spin) (k-ids k-ids bool k-benv k-benv k-strail k-labels) bool)
     (lambda (fa fb frozen ea eb trail labels)
@@ -2599,8 +2736,12 @@
   (lambda (bs ds a b)
     (if (null? bs)
         nil
-        (let* ((v (extract (car bs) 1)) (k (extract (car bs) 2)) (d (car ds))
-               (ok (tagcase d (dr (r) (or (= k 0) (and (= k 3) (k-place? r)))) (de (e) (= k 1)) (dt (t) (or (= k 2) (= k 4))))))
+        (let* ((v (extract (car bs) 1)) (k (extract (car bs) 2))
+               ;; `finite` reads as a region; for a size binder it is the size `finite`.
+               (d (if (and (= k 5) (tagcase (car ds) (dr (r) (tagcase r (r-frozen (p f) (and (< p 0) f)) (else y #f))) (else y #f)))
+                      (dz (sz-finite))
+                      (car ds)))
+               (ok (tagcase d (dr (r) (or (= k 0) (and (= k 3) (k-place? r)))) (de (e) (= k 1)) (dt (t) (or (= k 2) (= k 4))) (dz (z) (= k 5)))))
           (if ok
               (cons (cons v d) (k-proj-map (cdr bs) (cdr ds) a b))
               (k-fail (k-cat4 (k-quote (symbol->string (k-dvar-name v))) " is bound as a " (k-kind-debug k)
@@ -2809,6 +2950,8 @@
         (let ((v (extract (car kinds) 1)) (k (extract (car kinds) 2)))
           (cond ((not (null? (k-map-find m v))) (k-finish-each (cdr kinds) m a b ft))
                 ((= k 1) (k-finish-each (cdr kinds) (cons (cons v (de nil)) m) a b ft))
+                ;; A size nothing says is some size.
+                ((= k 5) (k-finish-each (cdr kinds) (cons (cons v (dz (sz-finite))) m) a b ft))
                 (else (k-fail (k-cat5 (k-quote (symbol->string (k-dvar-name v))) " cannot be inferred for " (k-show-ty ft)
                                       ": nothing here says what it is. Use `proj`, or `the`" "")
                               a b)))))))
@@ -2817,6 +2960,19 @@
 (define k-finish (subr (maxeff checks spin) (k-binders k-solved int int int) k-map)
   (lambda (kinds solved a b ft) (k-finish-each kinds (get solved) a b ft)))
 
+;; Solve a size binder: a pattern `v + k` against a size `s` gives
+;; `v = s - k` (`finite` stays `finite`).
+(define k-unify-size (subr (maxeff kstate spin) (k-size k-size k-binders k-solved) unit)
+  (lambda (p a kinds solved)
+    (tagcase p
+      (sz-lin (k ts)
+        (if (and (not (null? ts)) (null? (cdr ts)) (= (cdr (car ts)) 1))
+            (let ((v (car (car ts))))
+              (if (and (k-unknown? kinds v) (null? (k-map-find (get solved) v)))
+                  (k-solve solved v (dz (k-size-plus a (- 0 k))))
+                  #u))
+            #u))
+      (else y #u))))
 (define k-wrong-shape? (subr (maxeff (read @t) (alloc @t) spin) (int int) bool)
   (lambda (pattern actual)
     (let ((p (k-ty-rank pattern)) (a (k-ty-rank actual)))
@@ -2884,7 +3040,13 @@
                   (ty-tag (x y e r) (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-comp (x y e r) (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-named (g ds) (or (k-descs-open? ds kinds solved) (go (k-push-ids (k-desc-types ds) rest))))
-                  (ty-vec (e z r) (or (reg r) (go (cons e rest))))
+                  (ty-vec (e z r)
+                    (or (reg r)
+                        (tagcase z (sz-lin (k ts) (letrec ((any (subr (maxeff kstate spin) (k-terms) bool)
+                                                              (lambda (xs) (and (not (null? xs)) (or (k-open? kinds solved (car (car xs))) (any (cdr xs)))))))
+                                                     (any ts)))
+                                   (else w #f))
+                        (go (cons e rest))))
                   (else y (go rest))))))))))
 (define k-mentions-any-unknown? (subr (maxeff kstate spin) (int k-binders k-solved) bool)
   (lambda (t kinds solved) (k-any-walk (cons t nil) (k-new-epoch) kinds solved)))
@@ -3008,7 +3170,7 @@
                               (begin (ur r s) (u x1 y)
                                      (u x2 (tagcase sz (sz-finite () a) (else w (k-ty-new (ty-vec y (k-tail-size sz) s)))))))
                             (else z #u)))
-                        (ty-vec (x sz r) (tagcase at (ty-vec (y sz2 s) (begin (ur r s) (u x y))) (else z #u)))
+                        (ty-vec (x sz r) (tagcase at (ty-vec (y sz2 s) (begin (ur r s) (u x y) (k-unify-size sz sz2 kinds solved))) (else z #u)))
                         (ty-product (pp) (tagcase at (ty-product (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
                         (ty-sum (pp) (tagcase at (ty-sum (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
                         (ty-bloblet (fp zp r)
@@ -3031,7 +3193,8 @@
             (tagcase (car xs)
               (dt (x) (tagcase (car ys) (dt (y) (k-unify x y kinds solved trail)) (else z #u)))
               (dr (r) (tagcase (car ys) (dr (q) (k-unify-region r q kinds solved)) (else z #u)))
-              (de (d) (tagcase (car ys) (de (e) (k-unify-effect d e kinds solved)) (else z #u))))
+              (de (d) (tagcase (car ys) (de (e) (k-unify-effect d e kinds solved)) (else z #u)))
+              (dz (m) #u))
             (k-unify-descs (cdr xs) (cdr ys) kinds solved trail)))))
   (k-unify-lists (subr (maxeff kstate spin) (k-ids k-ids k-binders k-solved k-trail) unit)
     (lambda (xs ys kinds solved trail)
@@ -3995,6 +4158,37 @@
                   nil)))
           (else y nil)))
       (else y nil))))
+;; What `p` shows about sizes when it holds, and when not (each none or
+;; one): `(null? xs)`, `xs : (vec T n)`, shows `n = 0`, or `n - 1 ≥ 0`.
+(define k-null-facts (subr (maxeff (read @t) (alloc @t) spin) (kx) (pairof (listof k-size-fact finite) (listof k-size-fact finite) finite))
+  (lambda (p)
+    (let ((none (the (pairof (listof k-size-fact finite) (listof k-size-fact finite) finite) (cons nil nil))))
+      (tagcase p
+        (x-app (f args a b)
+          (tagcase f
+            (x-var (op fa fb)
+              (let ((t (k-lookup op)))
+                (if (and (string=? (symbol->string op) "null?") (>= t 0) (k-named-has? (get k-std) op t) (k-sc-one-arg? args))
+                    (tagcase (car args)
+                      (x-var (v va vb)
+                        (let ((vt (k-lookup v)))
+                          (if (< vt 0)
+                              none
+                              (tagcase (k-get vt)
+                                (ty-vec (e z r)
+                                  (tagcase z
+                                    (sz-lin (k ts)
+                                      (the (pairof (listof k-size-fact finite) (listof k-size-fact finite) finite)
+                                           (cons (the (listof k-size-fact finite) (cons (product (1 z) (2 #t)) nil))
+                                                 (the (listof k-size-fact finite) (cons (product (1 (k-size-plus z -1)) (2 #f)) nil)))))
+                                    (else w none)))
+                                (else w none)))))
+                      (else y none))
+                    none)))
+            (else y none)))
+        (else y none)))))
+(define k-with-fact (subr (alloc @t) ((listof k-size-fact finite) (listof k-size-fact finite)) (listof k-size-fact finite))
+  (lambda (f fs) (if (null? f) fs (the (listof k-size-fact finite) (cons (car f) fs)))))
 ;; If `p` is `(acyclic? v)`, the variable, as the binding it is (none or one).
 (define k-acyclic-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
   (lambda (p)
@@ -4052,10 +4246,16 @@
                        (lens (k-length-test p))
                        (lsaved (get k-certified-lengths))
                        (lpushed (set k-certified-lengths (if (null? lens) lsaved (the (listof k-cert-len finite) (cons (car lens) lsaved)))))
+                       (facts (k-null-facts p))
+                       (fsaved (get k-size-facts))
+                       (fyes (set k-size-facts (k-with-fact (car facts) fsaved)))
                        (rc (k-synth c))
+                       (fpopped (set k-size-facts fsaved))
                        (popped (set k-certified saved))
                        (lpopped (set k-certified-lengths lsaved))
-                       (rd (k-synth d)) (tc (extract rc 1)) (td (extract rd 1))
+                       (fno (set k-size-facts (k-with-fact (cdr facts) fsaved)))
+                       (rd (k-synth d))
+                       (fdone (set k-size-facts fsaved)) (tc (extract rc 1)) (td (extract rd 1))
                        (t (cond ((k-subtype tc td) td)
                                 ((k-subtype td tc) tc)
                                 (else (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
@@ -4244,7 +4444,7 @@
             (let ((want (if (< expected 0) (ty-void) (k-get expected))))
               (tagcase want
                 (ty-vec (e z r)
-                  (if (= (k-size-as-lit z) 0)
+                  (if (not (or (tagcase z (sz-finite () #t) (else w #f)) (k-size-nonneg? (k-size-plus z -1))))
                       (k-vec-cons-tail hd tl)
                       (let* ((tail-ty (k-ty-new (ty-vec e (k-size-plus z -1) r)))
                              (xe (k-check hd e))
@@ -4455,7 +4655,7 @@
               (cond
                ;; `nil` is a `vec` of no elements, or of some.
                ((and (string=? (symbol->string s) "nil") (>= t 0) (k-named-has? (get k-std) s t)
-                     (tagcase et (ty-vec (e z r) (or (tagcase z (sz-finite () #t) (else w #f)) (= (k-size-as-lit z) 0))) (else w #f)))
+                     (tagcase et (ty-vec (e z r) (or (tagcase z (sz-finite () #t) (else w #f)) (k-size-eq? z (k-size-lit 0)))) (else w #f)))
                 nil)
                ((and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #t) (else y #f)))
                 (let ((inst (k-instantiate-against t expected a b)))
@@ -4469,10 +4669,16 @@
                    (lens (k-length-test p))
                    (lsaved (get k-certified-lengths))
                    (lpushed (set k-certified-lengths (if (null? lens) lsaved (the (listof k-cert-len finite) (cons (car lens) lsaved)))))
+                   (facts (k-null-facts p))
+                   (fsaved (get k-size-facts))
+                   (fyes (set k-size-facts (k-with-fact (car facts) fsaved)))
                    (ce (k-check c expected))
+                   (fpopped (set k-size-facts fsaved))
                    (popped (set k-certified saved))
                    (lpopped (set k-certified-lengths lsaved))
-                   (de (k-check d expected)))
+                   (fno (set k-size-facts (k-with-fact (cdr facts) fsaved)))
+                   (de (k-check d expected))
+                   (fdone (set k-size-facts fsaved)))
               (k-mask x (k-union pe (k-union ce de)) expected)))
           (x-begin (xs xa xb)
             (let ((e (k-check-seq xs expected nil)))

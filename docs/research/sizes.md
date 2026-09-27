@@ -82,6 +82,6 @@ test and a certifying conversion the checker accepts only in its branch.
 | stage | what                                                                                                                                  |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | N5a   | done: the `vec` type with literal sizes and `finite`; `cons`, `nil`; `vec finite` as `listof finite`; `confirm-length` with a literal |
-| N5b   | kind `size`, variables in `poly`; facts from `null?`; `cdr`; equalities                                                               |
+| N5b   | done: kind `size`, variables in `poly`; facts from `null?`; `cdr`; equalities                                                         |
 | N5c   | arithmetic and inequalities (Fourier–Motzkin); existentials for results such as `filter`'s; array bounds                              |
 | N5d   | `nat` and `(nat s)`; `length`; `confirm-length` with a run-time length                                                                |
