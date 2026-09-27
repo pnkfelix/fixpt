@@ -63,6 +63,10 @@ pub struct Checker {
     /// How deep in abbreviation expansions parsing is, to stop one that
     /// mentions itself.
     pub(crate) expanding: u32,
+    /// The type families being expanded, each with the descriptions given
+    /// it and the slot its type will fill: a use inside with the same
+    /// descriptions is that slot, a knot (regular recursion).
+    pub(crate) knots: Vec<(Sym, Vec<crate::parse::FamilyArg>, TyId)>,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -167,6 +171,7 @@ impl Checker {
             char_,
             symbol,
             expanding: 0,
+            knots: Vec::new(),
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),

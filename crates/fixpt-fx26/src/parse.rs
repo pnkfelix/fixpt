@@ -30,6 +30,14 @@ pub enum DScope {
     Private(Region),
 }
 
+/// A description given a type family, as a key for its knot.
+#[derive(Clone, PartialEq, Debug)]
+pub enum FamilyArg {
+    Ty(TyId),
+    Region(Region),
+    Eff(crate::ast::Effect),
+}
+
 impl Checker {
     fn name(&self, s: Sym) -> &str {
         self.interner.name(s)
@@ -446,32 +454,58 @@ impl Checker {
         Ok(())
     }
 
-    /// A use of a parametric abbreviation: its body, parsed with each
-    /// parameter bound to the description given for it.
+    /// A use of a type family: its body, parsed with each parameter bound
+    /// to the description given for it. A use inside the body with the same
+    /// descriptions, as `(tree r)` in `tree`'s own, is the type being made:
+    /// a knot, as `dletrec` ties. One with others expands again, so a
+    /// family whose descriptions grow as it recurses never ends, and is
+    /// stopped.
     fn expand_abbrev(&mut self, s: &Syntax, name: Sym, params: &[(Sym, Kind)], body: &Syntax, args: &[Syntax]) -> R<TyId> {
         if args.len() != params.len() {
             return Err(FxError::at(s.span, format!("`{}` takes {} description(s), and has {}", self.name(name), params.len(), args.len())));
         }
         if self.expanding > 64 {
-            return Err(FxError::at(s.span, format!("`{}` expands without end: an abbreviation with parameters cannot mention itself", self.name(name))));
+            return Err(FxError::at(
+                s.span,
+                format!("`{}` expands without end: a type family may mention itself only with the same descriptions", self.name(name)),
+            ));
         }
         let mut bound = Vec::new();
+        let mut key = Vec::new();
         for ((p, k), a) in params.iter().zip(args) {
-            let d = match k {
-                Kind::Type => DScope::Rec(self.parse_type(a)?),
-                Kind::Region => DScope::Region(self.parse_region(a)?),
-                Kind::Place => DScope::Region(self.parse_place(a)?),
-                Kind::Effect => DScope::Eff(self.parse_effect(a)?),
+            let (d, arg) = match k {
+                Kind::Type => {
+                    let t = self.parse_type(a)?;
+                    (DScope::Rec(t), crate::parse::FamilyArg::Ty(self.arena.resolve(t)))
+                }
+                Kind::Region | Kind::Place => {
+                    let r = if *k == Kind::Region { self.parse_region(a)? } else { self.parse_place(a)? };
+                    (DScope::Region(r), crate::parse::FamilyArg::Region(r))
+                }
+                Kind::Effect => {
+                    let e = self.parse_effect(a)?;
+                    (DScope::Eff(e.clone()), crate::parse::FamilyArg::Eff(e))
+                }
             };
             bound.push((*p, d));
+            key.push(arg);
         }
+        if let Some((_, _, slot)) = self.knots.iter().rev().find(|(n, k, _)| *n == name && *k == key) {
+            return Ok(*slot);
+        }
+        let slot = self.arena.ty(Ty::Link(None));
+        self.knots.push((name, key, slot));
         let depth = self.dscope.len();
         self.dscope.extend(bound);
         self.expanding += 1;
         let r = self.parse_type(body);
         self.expanding -= 1;
         self.dscope.truncate(depth);
-        r
+        self.knots.pop();
+        let t = r?;
+        self.arena.set_link(slot, t);
+        self.grounded(slot, s.span)?;
+        Ok(slot)
     }
 
     /// `(define-type name type)`: `name` stands for the type from here on,

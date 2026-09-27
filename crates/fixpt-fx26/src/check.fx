@@ -825,6 +825,30 @@
 (define k-push-all (subr kstate (k-scope) unit)
   (lambda (bs) (if (null? bs) #u (begin (k-push-desc (car (car bs)) (cdr (car bs))) (k-push-all (cdr bs))))))
 
+;; The type families being expanded, each with the descriptions given it
+;; and the slot its type will fill: a use inside with the same descriptions
+;; is that slot, a knot (regular recursion).
+(define-type k-family-knot (productof (1 symbol) (2 k-scope) (3 int)))
+(define k-knots (ref (listof k-family-knot finite) @t) (new nil))
+(define k-ds=? (subr (maxeff (read @t) spin) (k-ds k-ds) bool)
+  (lambda (x y)
+    (tagcase x
+      (ds-rec (a) (tagcase y (ds-rec (b) (= (k-resolve a) (k-resolve b))) (else z #f)))
+      (ds-region (a) (tagcase y (ds-region (b) (k-region=? a b)) (else z #f)))
+      (ds-eff (a) (tagcase y (ds-eff (b) (k-eff=? a b)) (else z #f)))
+      (else z #f))))
+(define k-scope=? (subr (maxeff (read @t) spin) (k-scope k-scope) bool)
+  (lambda (xs ys)
+    (if (null? xs)
+        (null? ys)
+        (and (not (null? ys)) (k-ds=? (cdr (car xs)) (cdr (car ys))) (k-scope=? (cdr xs) (cdr ys))))))
+;; The slot of the expansion of `name` with `bound` in progress, or -1.
+(define k-knot-of (subr (maxeff (read @t) spin) ((listof k-family-knot finite) symbol k-scope) int)
+  (lambda (ks name bound)
+    (cond ((null? ks) -1)
+          ((and (symbol=? (extract (car ks) 1) name) (k-scope=? (extract (car ks) 2) bound)) (extract (car ks) 3))
+          (else (k-knot-of (cdr ks) name bound)))))
+
 (define-rec
   (k-parse-types (subr (maxeff checks spin) ((listof syn finite)) k-ids)
     (lambda (xs) (if (null? xs) nil (let* ((t (k-parse-type (car xs))) (rest (k-parse-types (cdr xs)))) (cons t rest)))))
@@ -997,15 +1021,24 @@
                           (int->string (k-length args)))
                   s))
         ((> (get k-expanding) 64)
-         (k-sfail (string-append (k-quote (symbol->string name)) " expands without end: an abbreviation with parameters cannot mention itself") s))
+         (k-sfail (string-append (k-quote (symbol->string name)) " expands without end: a type family may mention itself only with the same descriptions") s))
         (else
          (let* ((bound (k-abbrev-args ps args))
-                (saved (get k-dscope)))
-           (begin
-             (k-push-all bound)
-             (set k-expanding (+ (get k-expanding) 1))
-             (let ((t (k-parse-type body)))
-               (begin (set k-expanding (- (get k-expanding) 1)) (set k-dscope saved) t))))))))
+                (knot (k-knot-of (get k-knots) name bound)))
+           (if (>= knot 0)
+               knot
+               (let* ((saved (get k-dscope)) (slot (k-slot)) (kept (get k-knots)))
+                 (begin
+                   (set k-knots (cons (product (1 name) (2 bound) (3 slot)) kept))
+                   (k-push-all bound)
+                   (set k-expanding (+ (get k-expanding) 1))
+                   (let ((t (k-parse-type body)))
+                     (begin (set k-expanding (- (get k-expanding) 1))
+                            (set k-dscope saved)
+                            (set k-knots kept)
+                            (k-set-link slot t)
+                            (k-grounded slot (syn-start s) (syn-end s))
+                            slot))))))))))
   (k-abbrev-args (subr (maxeff checks spin) ((listof (productof (1 symbol) (2 int)) finite) (listof syn finite)) k-scope)
     (lambda (ps args)
       (if (null? ps)
@@ -1280,7 +1313,7 @@
       (set k-extracts nil)
       (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-known nil) (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
-      (set k-fresh 0) (set k-base nil) (set k-expanding 0)
+      (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))

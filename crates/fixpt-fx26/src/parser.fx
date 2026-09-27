@@ -478,27 +478,51 @@
         nil
         (cons (product (1 (string->symbol (int->string i))) (2 (e-var (string->symbol (string-append "%x" (int->string i))) a b)))
               (dt-fields (cdr ms) (+ i 1) a b)))))
-(define dt-constructors (subr parses (syn (listof syn finite) int int) (listof top finite))
-  (lambda (name vs a b)
+;; Each constructor: of type `(subr pure (member …) used)`, where `used` is
+;; the type as it is used, `name` or `(name param …)`; polymorphic in the
+;; parameters if there are any (`family?`).
+(define dt-constructors (subr parses (syn bool (listof syn finite) (listof syn finite) int int) (listof top finite))
+  (lambda (used family? params vs a b)
     (if (null? vs)
         nil
         (let* ((parts (syn-items (car vs) "a variant"))
                (tag (car parts))
                (members (cdr parts))
-               (ty (mk-list (cons (mk-symbol "subr" a b) (cons (mk-symbol "pure" a b) (cons (mk-list members a b) (cons name nil)))) a b))
+               (mono (mk-list (cons (mk-symbol "subr" a b) (cons (mk-symbol "pure" a b) (cons (mk-list members a b) (cons used nil)))) a b))
+               (ty (if family? (mk-list (cons (mk-symbol "poly" a b) (cons (mk-list params a b) (cons mono nil))) a b) mono))
                (body (e-sum (syn-symbol tag) (e-product (dt-fields members 1 a b) a b) a b))
                (ctor (t-define (syn-symbol tag) (the syns-a (cons ty nil)) (e-lambda (dt-params members 1) body a b) a b))
-               (rest (dt-constructors name (cdr vs) a b)))
+               (rest (dt-constructors used family? params (cdr vs) a b)))
           (cons ctor rest)))))
+;; The parameters' names, from `(name kind) …`.
+(define dt-param-names (subr parses ((listof syn finite)) (listof syn finite))
+  (lambda (ps)
+    (if (null? ps)
+        nil
+        (let ((p (syn-items (car ps) "a parameter")))
+          (if (and (= (len p) 2) (syn-symbol? (car p)))
+              (cons (car p) (dt-param-names (cdr ps)))
+              (pfail "a parameter is `(name kind)`" (car ps)))))))
+;; `(define-datatype name (tag type …) …)`, or with parameters,
+;; `(define-datatype (name (param kind) …) …)`: a type family, which its
+;; variants may mention with the same parameters.
 (define parse-datatype (subr parses (syn) (listof top finite))
   (lambda (s)
-    (let* ((items (syn-items s "a datatype")) (a (syn-start s)) (b (syn-end s)))
-      (if (or (< (len items) 3) (not (syn-symbol? (nth items 1))))
-          (pfail "`(define-datatype name (tag type …) …)`" s)
-          (let* ((name (nth items 1))
+    (let* ((items (syn-items s "a datatype")) (a (syn-start s)) (b (syn-end s))
+           (usage "`(define-datatype name (tag type …) …)`"))
+      (if (< (len items) 3)
+          (pfail usage s)
+          (let* ((head (nth items 1))
+                 (family? (not (syn-symbol? head)))
+                 (hs (if family? (syn-items head "a datatype's name") (the (listof syn finite) nil)))
+                 (name (cond ((not family?) head)
+                             ((and (not (null? hs)) (syn-symbol? (car hs))) (car hs))
+                             (else (pfail usage s))))
+                 (params (if family? (cdr hs) (the (listof syn finite) nil)))
+                 (used (if family? (mk-list (cons name (dt-param-names params)) a b) name))
                  (sum (mk-list (cons (mk-symbol "sumof" a b) (dt-arms (drop items 2) a b)) a b))
-                 (ctors (dt-constructors name (drop items 2) a b)))
-            (cons (t-define-type name sum a b) ctors))))))
+                 (ctors (dt-constructors used family? params (drop items 2) a b)))
+            (cons (t-define-type head sum a b) ctors))))))
 
 (define append-tops (subr (maxeff (read @a) (alloc @a)) ((listof top finite) (listof top finite)) (listof top finite))
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))

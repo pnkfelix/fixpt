@@ -1131,12 +1131,16 @@ In the user's order:
    cover? Literally all of them would let it write frozen data and other
    programs' private regions. More likely it means any effect on the
    regions reachable from what it is given, plus `spin` and control.
+   R7 (no step budget for forms free of `spin`) is withdrawn, 2026-09-27:
+   free of `spin` means ends eventually, not soon (`(ack 4 2)` is `pure`).
+   Bounds known versus merely finite belong to cost analysis (Reistad and
+   Gifford, `GiffordHistory/papers/lfp94.pdf`), later.
 6. **GADTs** (raised by the user, 2026-09-27): sums whose variants refine
    their type's parameters, so that a `tagcase` arm learns them. They meet
    the size indices of `confirm` (CF3, CF4), where a variant's type would
    say its size, and the typed interpreter this repository keeps growing,
    whose `eval` could then be given a precise type.
-7. **Parametric datatypes** (with the user, 2026-09-27): `define-datatype`
+7. **Parametric datatypes** (done 2026-09-27; `docs/fx26.md`): `define-datatype`
    with parameters, and type families that mention themselves with the same
    parameters (regular, so tied as a knot, not expanded without end:
    today `(define-type (tree (r region)) … (tree r) …)` is refused). Needed

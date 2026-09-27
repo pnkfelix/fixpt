@@ -76,6 +76,10 @@ impl Checker {
     /// `(tag e …)`. Taken apart with `tagcase`, whose arm `(tag (x …) body)`
     /// names the members. Expanded as it is read, into the forms it stands
     /// for, so every way of running a program sees them.
+    ///
+    /// `(define-datatype (name (param kind) …) …)` has parameters: a type
+    /// family, which its variants may mention with the same parameters, and
+    /// constructors polymorphic in them.
     fn expand_datatype(&mut self, form: Syntax, out: &mut Vec<Syntax>) -> R<()> {
         let items = form.as_proper_list().unwrap_or(&[]).to_vec();
         if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) != Some("define-datatype") {
@@ -86,11 +90,29 @@ impl Checker {
         let [_, name, variants @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(define-datatype name (tag type …) …)`"));
         };
+        // The name, and the parameters, if it has any: `(name (param kind) …)`.
+        let (name, family) = match name.as_proper_list() {
+            Some([n, ps @ ..]) if n.as_symbol().is_some() => (n.clone(), Some(ps.to_vec())),
+            _ => (name.clone(), None),
+        };
+        let name = &name;
         if name.as_symbol().is_none() || variants.is_empty() {
             return Err(FxError::at(span, "`(define-datatype name (tag type …) …)`"));
         }
+        // What the type is called where it is used: `name`, or `(name param …)`.
+        let mut used = name.clone();
+        if let Some(ps) = &family {
+            let mut u = vec![name.clone()];
+            for p in ps {
+                match p.as_proper_list() {
+                    Some([n, _]) if n.as_symbol().is_some() => u.push(n.clone()),
+                    _ => return Err(FxError::at(p.span, "a parameter is `(name kind)`")),
+                }
+            }
+            used = Syntax::list(span, u);
+        }
         let mut sym = |s: &str| Syntax::symbol(span, self.interner.intern(s));
-        let (define_type, define, sumof, productof, subr, pure, lambda, sum, product) = (
+        let (define_type, define, sumof, productof, subr, pure, lambda, sum, product, poly) = (
             sym("define-type"),
             sym("define"),
             sym("sumof"),
@@ -100,6 +122,7 @@ impl Checker {
             sym("lambda"),
             sym("sum"),
             sym("product"),
+            sym("poly"),
         );
         let int = |n: usize| Syntax::new(span, fixpt_read::Datum::Number(fixpt_read::Num::Int(n as i64)));
         let list = |items: Vec<Syntax>| {
@@ -122,11 +145,22 @@ impl Checker {
                 fields.push(list(vec![int(i + 1), x]));
             }
             arms.push(list(vec![tag.clone(), list(prod)]));
-            let ty = list(vec![subr.clone(), pure.clone(), list(members.to_vec()), name.clone()]);
+            let mut ty = list(vec![subr.clone(), pure.clone(), list(members.to_vec()), used.clone()]);
+            if let Some(ps) = &family {
+                ty = list(vec![poly.clone(), list(ps.clone()), ty]);
+            }
             let body = list(vec![sum.clone(), tag.clone(), list(fields)]);
             ctors.push(list(vec![define.clone(), tag.clone(), ty, list(vec![lambda.clone(), list(params), body])]));
         }
-        out.push(list(vec![define_type, name.clone(), list(arms)]));
+        let head = match &family {
+            Some(ps) => {
+                let mut h = vec![name.clone()];
+                h.extend(ps.iter().cloned());
+                list(h)
+            }
+            None => name.clone(),
+        };
+        out.push(list(vec![define_type, head, list(arms)]));
         out.extend(ctors);
         Ok(())
     }
