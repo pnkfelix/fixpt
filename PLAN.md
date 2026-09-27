@@ -1033,6 +1033,15 @@ the order it will be done. Each is committed when done, and marked here.
    semispaces alone. A reap collected on its own, from the stacks and the
    regions nested in it, is the typed version of the same idea ("Regions
    that end").
+   *(Deferred 2026-09-26, pending the user's word: collection is about
+   20 ms of the self-compile's 180 ms, and the benchmarks keep little
+   live, so a nursery has little to save now; while the barrier must be on
+   every store of a reference, in the heap's API (which would have to keep
+   stores of Values apart from stores of raw words everywhere) and in
+   three machine-code paths (the hand-encoded machine's `field!`, register
+   code's `setfield` and inline `%bloblet-set!`). Reaps give the same for
+   what is typed as local to a region, with no barrier. Worth it when a
+   workload shows collection costing more.)*
 7. **Continuations cheaper to capture**: one-shot continuations, or a
    segmented stack (a stack cache, as Clinger, Hartheimer and Ost
    describe), measured on a benchmark that captures heavily (the
