@@ -9,7 +9,7 @@
 
 use crate::lineedit::{Line, LineReader, Note};
 use fixpt_engine::Backend;
-use fixpt_fx26::session::{Fx26Session, Outcome};
+use fixpt_fx26::session::{Fx26Session, Outcome, Strategy};
 use fixpt_fx26::{Checker, Top};
 use fixpt_read::{Datum, FileId, Sym, Syntax, SyntaxProfile};
 
@@ -95,8 +95,18 @@ pub fn repl(backend: Backend) -> i32 {
         Backend::Bytecode => "bytecode engine",
     };
     println!("fixpt {} — FX-26, {engine}", env!("CARGO_PKG_VERSION"));
-    println!("(each form is checked, lowered to Scheme and run. `,help` for commands,");
-    println!(" `,code` to show the lowered Scheme. ^D leaves.)");
+    // Say what runs each form: `--fx26-run` chooses.
+    let machine = crate::THREADED_MACHINE_NAME.get().copied().unwrap_or("the threaded machine written in Rust");
+    let how = match session.strategy {
+        Strategy::Lower => format!("lowered to Scheme and run on the {engine}"),
+        Strategy::Evaluate => "run by the evaluator written in FX-26".to_string(),
+        Strategy::Threaded => format!("compiled to threaded words by the compiler written in FX-26, and run on {machine}"),
+    };
+    println!("(each form is checked, {how}.");
+    match session.strategy {
+        Strategy::Lower => println!(" `,help` for commands, `,code` to show the lowered Scheme. ^D leaves.)"),
+        _ => println!(" `,help` for commands, `,code` to show the lowering to Scheme, which is not what runs. ^D leaves.)"),
+    }
 
     // FX-26 code reads FX-26 input: the eager reader written in FX-26, once
     // its licence is checked. Without it, the Rust reader.
@@ -142,6 +152,11 @@ pub fn repl(backend: Backend) -> i32 {
         // `,disassemble E`: E's threaded code, shown, as `disassemble` gives
         // it (under `--fx26-run threaded`; lowered, there is none).
         let text = match text.trim().strip_prefix(",disassemble") {
+            Some(e) if !e.trim().is_empty() && session.strategy == Strategy::Lower => {
+                println!("; lowered to Scheme, `{}` is a Scheme procedure, with no threaded code:", e.trim());
+                println!(";   `,code` shows a form's lowering; run with `--fx26-run threaded` to disassemble.");
+                continue;
+            }
             Some(e) if !e.trim().is_empty() => {
                 disassembling = true;
                 format!("(disassemble {e})")

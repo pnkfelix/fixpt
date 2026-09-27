@@ -1029,6 +1029,10 @@ the order it will be done. Each is committed when done, and marked here.
    allocation's region (`NodeFacts::alloc_region`), no longer used to
    allocate, removed from both checkers; the FX-26 checker's free
    variables computed once rather than at every mask.
+12. **The REPL's `,code` under `--fx26-run threaded`** (raised by the user
+    2026-09-26): it shows the form's lowering to Scheme, which is not what
+    runs there; it should show the words the compiler in FX-26 made, as
+    `,disassemble` does for a value.
 11. **A lint on the size of a lambda's body** (raised by the user
     2026-09-26): not a rule of FX-26, but a check that keeps a body from
     growing past what a reader can follow (`check.fx`'s `k-parse-type`,
