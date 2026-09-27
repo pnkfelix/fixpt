@@ -41,6 +41,10 @@ pub enum Region {
     /// `@name`.
     Const(Sym),
     Var(DVar),
+    /// `const`: the region of frozen data, which nothing may write; what a
+    /// `letfreeze` gives its region's data as it ends. Reading it, and
+    /// making data at it, are pure (`docs/research/places-and-regions.md`).
+    Frozen,
 }
 
 /// One indivisible piece of an effect.
@@ -177,6 +181,8 @@ impl Ty {
 pub enum RegionForm {
     /// `letregion`: nothing; a name for analysis only.
     Region,
+    /// `letfreeze`: nothing either; its region's data is frozen as it ends.
+    Freeze,
     /// `letrena`: an arena, reclaimed only when the body ends.
     Arena,
     /// `letreap`: a heap of its own, which the collector collects too.
@@ -188,6 +194,7 @@ impl RegionForm {
     pub fn keyword(self) -> &'static str {
         match self {
             RegionForm::Region => "letregion",
+            RegionForm::Freeze => "letfreeze",
             RegionForm::Arena => "letrena",
             RegionForm::Reap => "letreap",
         }
@@ -195,7 +202,7 @@ impl RegionForm {
     /// The primitive that makes its place, if it makes one.
     pub fn enter(self) -> Option<&'static str> {
         match self {
-            RegionForm::Region => None,
+            RegionForm::Region | RegionForm::Freeze => None,
             RegionForm::Arena => Some("%region-enter"),
             RegionForm::Reap => Some("%reap-enter"),
         }

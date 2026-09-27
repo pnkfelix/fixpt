@@ -46,6 +46,7 @@ impl Checker {
     /// Check `e` against `expected`, returning its effect.
     pub fn check(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
         let eff = self.check_node(e, expected)?;
+        let eff = self.frozen(e, eff)?;
         self.facts.effects.insert(e, eff.clone());
         Ok(eff)
     }

@@ -42,8 +42,9 @@
   (e-begin (listof exp @a) int int)
   (e-prompt exp exp exp int int)
   ;; `(letregion name body …)`, `(letrena name body …)` or `(letreap name
-  ;; body …)`: what it makes besides the region (0 nothing, 1 an arena, 2 a
-  ;; reap: `docs/research/places-and-regions.md`),
+  ;; body …)`, or `(letfreeze name body …)`: what it makes besides the
+  ;; region (0 nothing, 1 an arena, 2 a reap, 3 nothing, its region's data
+  ;; frozen as it ends: `docs/research/places-and-regions.md`),
   ;; the region variable's name, and the body.
   (e-letregion int symbol exp int int)
   ;; `(rlambda region (param …) body …)`: the region, and the `lambda`.
@@ -203,11 +204,11 @@
          (begin (at-least items 3 "`(rlambda region ((name type) …) body …)`" a b)
                 (let ((r (parse-exp (nth items 1))))
                   (e-rlambda r (e-lambda (parse-params (nth items 2)) (parse-body (drop items 3) a b) a b) a b))))
-        ((or (symbol=? head 'letregion) (or (symbol=? head 'letrena) (symbol=? head 'letreap)))
+        ((or (or (symbol=? head 'letregion) (symbol=? head 'letfreeze)) (or (symbol=? head 'letrena) (symbol=? head 'letreap)))
          (begin (at-least items 2 (string-append "`(" (string-append (symbol->string head) " name body …)`")) a b)
                 (let ((name (nth items 1)))
                   (if (and (syn-symbol? name) (not (char=? (string-ref (syn-name name) 0) #\@)))
-                      (e-letregion (cond ((symbol=? head 'letregion) 0) ((symbol=? head 'letrena) 1) (else 2)) (syn-symbol name) (parse-body (drop items 2) a b) a b)
+                      (e-letregion (cond ((symbol=? head 'letregion) 0) ((symbol=? head 'letrena) 1) ((symbol=? head 'letreap) 2) (else 3)) (syn-symbol name) (parse-body (drop items 2) a b) a b)
                       (pfail (string-append "a `" (string-append (symbol->string head) "` binds a region variable's name, without `@`")) name)))))
         ((symbol=? head 'plambda)
          (begin (at-least items 3 "`(plambda ((name kind) …) body …)`" a b)

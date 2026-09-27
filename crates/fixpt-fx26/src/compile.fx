@@ -586,7 +586,7 @@
         ;; entered (an arena, or a reap), and left with the body's value,
         ;; which is so not in tail position.
         (e-letregion (k r body a b)
-          (if (= k 0)
+          (if (or (= k 0) (= k 3))
               ;; A region for analysis only: nothing at run time.
               (c-exp body e depth c tail)
               (let ((inner (the cenv (cons (cons r (at-slot depth)) e))))

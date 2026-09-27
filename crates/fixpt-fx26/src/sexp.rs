@@ -132,6 +132,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
                 RegionForm::Region => 0,
                 RegionForm::Arena => 1,
                 RegionForm::Reap => 2,
+                RegionForm::Freeze => 3,
             };
             format!("(e-letregion {k} {} {} {a} {b})", name(c.arena.dvar_name(region)), go(body))
         }

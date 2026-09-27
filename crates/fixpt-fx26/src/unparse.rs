@@ -9,6 +9,7 @@ impl Checker {
         match r {
             Region::Const(s) => self.interner.name(s).to_string(),
             Region::Var(v) => self.interner.name(self.arena.dvar_name(v)).to_string(),
+            Region::Frozen => "const".to_string(),
         }
     }
 

@@ -226,9 +226,22 @@ impl Checker {
     // ------------------------------------------------------------ synthesis
     /// What `e` is, and what evaluating it does.
     pub fn synth(&mut self, e: ExpId) -> R<(TyId, Effect)> {
-        let r = self.synth_node(e)?;
-        self.facts.effects.insert(e, r.1.clone());
-        Ok(r)
+        let (t, eff) = self.synth_node(e)?;
+        let eff = self.frozen(e, eff)?;
+        self.facts.effects.insert(e, eff.clone());
+        Ok((t, eff))
+    }
+
+    /// `eff` with what it does to frozen data taken out, since reading it
+    /// and making it are pure; or an error, if it writes it.
+    pub(crate) fn frozen(&self, e: ExpId, eff: Effect) -> R<Effect> {
+        if !eff.0.iter().any(|a| a.region() == Some(Region::Frozen)) {
+            return Ok(eff);
+        }
+        if eff.0.iter().any(|a| matches!(a, Atom::Write(Region::Frozen))) {
+            return Err(FxError::at(self.arena.span_of(e), "this writes frozen data, whose region is `const`"));
+        }
+        Ok(Effect(eff.0.into_iter().filter(|a| !matches!(a, Atom::Read(Region::Frozen) | Atom::Alloc(Region::Frozen) | Atom::Await(Region::Frozen))).collect()))
     }
 
     /// Whether `s`, where it is used, is the initial environment's binding.
@@ -355,12 +368,23 @@ impl Checker {
                 let name = self.arena.dvar_name(region);
                 let rt = self.arena.ty(Ty::Place(Region::Var(region)));
                 let depth = self.env.len();
-                if form != RegionForm::Region {
+                if !matches!(form, RegionForm::Region | RegionForm::Freeze) {
                     self.env.push((name, rt));
                 }
                 let r = self.synth(body);
                 self.env.truncate(depth);
                 let (t, eff) = r?;
+                // A `letfreeze`'s value leaves with its region's data frozen:
+                // `r` made `const`, unless something in it could still write.
+                let t = if form == RegionForm::Freeze {
+                    if self.writes_in(t, Region::Var(region)) {
+                        let name = self.interner.name(name);
+                        return Err(FxError::at(span, format!("the value of `letfreeze {name}` could still write its region's data: its type is {}", self.show_ty(t))));
+                    }
+                    self.subst(t, &HashMap::from([(region, D::Region(Region::Frozen))]))
+                } else {
+                    t
+                };
                 self.close_region(e, form.keyword(), region, t, eff)
             }
             Exp::Bloblet { op, args } => self.synth_bloblet(e, op, &args, None),
@@ -509,6 +533,9 @@ impl Checker {
             .copied()
             .filter(|a| match a.region() {
                 None => true,
+                // What is done to frozen data is never masked: writing it is
+                // an error wherever it happens (`frozen`).
+                Some(Region::Frozen) => true,
                 Some(r) if visible.contains(&r) => true,
                 Some(r) if in_result.contains(&r) => {
                     matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_))
@@ -680,6 +707,35 @@ impl Checker {
                 }
             }
         }
+    }
+
+    /// Whether a latent effect anywhere in `t` writes `r`: what a
+    /// `letfreeze`'s value may not do to its region.
+    pub(crate) fn writes_in(&self, t: TyId, r: Region) -> bool {
+        let mut seen = HashSet::new();
+        let mut todo = vec![t];
+        while let Some(t) = todo.pop() {
+            let t = self.arena.resolve(t);
+            if !seen.insert(t) {
+                continue;
+            }
+            let (effects, kids): (Vec<&Effect>, Vec<TyId>) = match self.arena.get(t) {
+                Ty::Subr { effect, params, result } => (vec![effect], params.iter().copied().chain([*result]).collect()),
+                Ty::PromptTag { answer, payload, effect, .. } => (vec![effect], vec![*answer, *payload]),
+                Ty::Composable { arg, answer, effect, .. } => (vec![effect], vec![*arg, *answer]),
+                Ty::Poly { body, .. } => (vec![], vec![*body]),
+                Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => (vec![], vec![*a]),
+                Ty::Pair(a, b, _) => (vec![], vec![*a, *b]),
+                Ty::Bloblet { fields, .. } => (vec![], fields.clone()),
+                Ty::Product(parts) | Ty::Sum(parts) => (vec![], parts.iter().map(|(_, t)| *t).collect()),
+                _ => (vec![], vec![]),
+            };
+            if effects.iter().any(|e| e.0.contains(&Atom::Write(r))) {
+                return true;
+            }
+            todo.extend(kids);
+        }
+        false
     }
 
     // ------------------------------------------------------------- subtyping

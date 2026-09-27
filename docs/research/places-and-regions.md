@@ -200,7 +200,12 @@ check a size of.
    outside a place refused for it.
 4. **`heap` as a place name.**
 5. **`letfreeze` and `(const p)`**, into `heap` first, then into any place
-   in scope. Tests: a list built with `set-cdr!` inside and frozen, then
+   in scope. *Into the heap done 2026-09-27*, ahead of steps 2–4: the
+   allocators could only allocate at a place's own region, so a
+   `letfreeze`'s data could only be the heap's, and lower bound 1 held
+   with nothing to check. `const` is `Region::Frozen` (`r-frozen`); what is
+   done to it is never masked, so a write to it is refused wherever it
+   happens. Tests: a list built with `set-cdr!` inside and frozen, then
    `set-car!` on it refused; an allocation into a place that does not
    outlive the bound refused.
 6. **Later: written outlives constraints** between places, for places whose

@@ -126,3 +126,17 @@ fn a_letregion_is_a_region_with_no_place() {
     assert!(check("(letregion r (car (the (listof int r) (rcons r 1 nil))))").unwrap_err().contains("unbound variable `r`"));
     assert_eq!(check("(letrena r r)"), Err("the value of `letrena r` would outlive its region: its type is (place r)".to_string()));
 }
+
+/// `letfreeze` binds a region for analysis, as `letregion` does, and its
+/// value leaves with that region made `const`: frozen data, which reading is
+/// pure and nothing may write. What leaves may not keep a way to write it.
+#[test]
+fn a_letfreeze_freezes_its_regions_data() {
+    let build = "(letfreeze r (let ((xs (the (listof int r) (cons 1 nil)))) (begin (set-car! xs 2) xs)))";
+    assert_eq!(check(build), Ok(vec!["(listof int const) ! pure".to_string()]));
+    assert_eq!(check(&format!("(car {build})")), Ok(vec!["int ! pure".to_string()]));
+    assert_eq!(check(&format!("(set-car! {build} 3)")), Err("this writes frozen data, whose region is `const`".to_string()));
+    assert!(check("(letfreeze r (let ((xs (the (listof int r) (cons 1 nil)))) (lambda () (set-car! xs 2))))")
+        .unwrap_err()
+        .contains("could still write its region's data"));
+}

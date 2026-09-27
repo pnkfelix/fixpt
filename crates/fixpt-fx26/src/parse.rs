@@ -37,7 +37,7 @@ impl Checker {
 
     /// The region `@name` stands for: the program's own, if `private-regions`
     /// declared it, and otherwise the constant of that name.
-    fn region_constant(&self, sym: Sym) -> Region {
+    pub(crate) fn region_constant(&self, sym: Sym) -> Region {
         match self.lookup_desc(sym) {
             Some(DScope::Private(r)) => r,
             _ => Region::Const(sym),
@@ -98,6 +98,9 @@ impl Checker {
         };
         if self.name(sym).starts_with('@') {
             return Ok(self.region_constant(sym));
+        }
+        if self.name(sym) == "const" {
+            return Ok(Region::Frozen);
         }
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(Region::Var(v)),
@@ -440,6 +443,9 @@ impl Checker {
             if name == "pure" {
                 return Ok(D::Effect(Effect::pure()));
             }
+            if name == "const" {
+                return Ok(D::Region(Region::Frozen));
+            }
             return match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(D::Region(Region::Var(v))),
                 Some(DScope::Var(v, Kind::Effect)) => Ok(D::Effect(Effect::atom(Atom::Var(v)))),
@@ -662,7 +668,7 @@ impl Checker {
                 [_, x] if x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
                 _ => Err(FxError::at(span, "only a symbol can be quoted: `'name`")),
             },
-            form @ ("letregion" | "letrena" | "letreap") => {
+            form @ ("letregion" | "letfreeze" | "letrena" | "letreap") => {
                 let [_, name, body @ ..] = &items[..] else {
                     return Err(FxError::at(span, format!("`({form} name body …)`")));
                 };
@@ -671,13 +677,14 @@ impl Checker {
                 })?;
                 let form = match form {
                     "letregion" => RegionForm::Region,
+                    "letfreeze" => RegionForm::Freeze,
                     "letrena" => RegionForm::Arena,
                     _ => RegionForm::Reap,
                 };
                 let depth = self.dscope.len();
                 // `letrena` and `letreap` make a place (which is also a
                 // region), `letregion` a region only.
-                let kind = if form == RegionForm::Region { Kind::Region } else { Kind::Place };
+                let kind = if matches!(form, RegionForm::Region | RegionForm::Freeze) { Kind::Region } else { Kind::Place };
                 let region = self.arena.dvar_of(name, kind);
                 self.dscope.push((name, DScope::Var(region, kind)));
                 let body = self.parse_body(span, body);
