@@ -108,6 +108,8 @@ struct Asm {
     /// routines, which `NEXT`.
     cont: Option<Label>,
     target: Option<(Label, usize)>,
+    /// Compiling a word: the cell being compiled.
+    at: usize,
     /// Register code with a frame: how far below `FP` its link is, which
     /// `x30` is loaded from again after anything that may change it.
     link: Option<usize>,
@@ -124,6 +126,7 @@ impl Asm {
             exit_common: Label(0),
             cont: None,
             target: None,
+            at: 0,
             link: None,
         };
         a.trap_common = a.label();
@@ -425,6 +428,14 @@ impl Asm {
         self.trap_if(Cond::Eq, Trap::OutOfFuel);
     }
 
+    /// A taken branch's poll: only a backward one can make a loop, so a
+    /// branch known to go forward (in a compiled word) makes none.
+    fn fuel_unless_forward(&mut self) {
+        if !matches!(self.target, Some((_, to)) if to > self.at) {
+            self.fuel();
+        }
+    }
+
     fn ds_limit(&mut self) {
         self.e(ldr(X13, ST, off(offset_of!(State, ds_limit))));
         self.e(cmp(DSP, X13));
@@ -560,7 +571,7 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
                 a.e(ldr_post(X13, IP, -8));
             }
             a.branch_ip();
-            a.fuel();
+            a.fuel_unless_forward();
             a.ds_limit();
             match a.target {
                 Some((t, _)) => a.b(t),
@@ -575,7 +586,7 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(cmp(X14, X15));
             a.b_cond(Cond::Ne, skip);
             a.branch_ip();
-            a.fuel();
+            a.fuel_unless_forward();
             a.ds_limit();
             match a.target {
                 Some((t, _)) => {
@@ -905,6 +916,7 @@ pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32
             } else {
                 None
             };
+            a.at = i;
             // The cell is consumed, as `NEXT` would have.
             a.e(sub_imm(IP, IP, 8));
             routine_body(&mut a, n, name);

@@ -969,3 +969,18 @@ What is left of them is mostly the reader's, making each atom's text
 (`%make-box`, 46k), which register code now does in machine code as it
 does `rnew`: 336k → 296k (stage 2 stays 0.19 s; with a collection at
 every 997th safepoint it makes the same code).
+
+## Polls only on backward branches, in compiled stack code
+
+A word compiled to machine code as stack code checked its fuel on every
+taken `branch` and `0branch`, though only a backward one can make a loop;
+register code already polled only backward. Now stack code does the same
+(the responsiveness tasks' R3). Words compiled, best of three:
+
+| benchmark | before  | after   |
+| --------- | ------- | ------- |
+| `loop`    | 42.3 ms | 40.6 ms |
+| `fib`     | 13.7 ms | 13.3 ms |
+| `lists`   | 42.2 ms | 42.9 ms |
+
+Within noise but for `loop`: a poll that is never taken costs little.

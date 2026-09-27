@@ -84,9 +84,8 @@ could run a spin-free form with no budget.
    continuation again (`tests/programs/diverge/resume.fx`) stops at the
    step limit on every machine, since the resumed code passes a poll; the
    test keeps it so.
-3. **R3 (S). No fuel check on a forward branch in compiled stack code**
-   (`fixpt-native/src/threaded.rs`, `branch` and `0branch`), as register
-   code already does (`to <= i`). Test: a loop still runs out of fuel.
+3. **R3 (S). No fuel check on a forward branch in compiled stack code.**
+   *Done 2026-09-27*: `loop` 42.3 → 40.6 ms, the rest within noise.
 4. **R4 (S). Count word entries by class**, next to the cell counts in the
    engine's `Profile`: of the entries in the self-compile and the
    benchmarks, what share are words the call-graph rule says need no poll.
@@ -334,7 +333,7 @@ runtime's; a side table is a fine first prototype. A field shifts
 ## What to do first
 
 The small, informative first steps, across the four:
-- **R3** and **C3**: fixes of what the exploration found, each
+- **C3**: a fix of what the exploration found, each
   small, and none needing a type-system change;
 - **R4** and **T1**: measurements that decide whether R5, T3 and T5 are
   worth their size;
