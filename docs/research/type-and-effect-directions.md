@@ -86,19 +86,16 @@ could run a spin-free form with no budget.
    test keeps it so.
 3. **R3 (S). No fuel check on a forward branch in compiled stack code.**
    *Done 2026-09-27*: `loop` 42.3 → 40.6 ms, the rest within noise.
-4. **R4 (S). Count word entries by class**, next to the cell counts in the
-   engine's `Profile`: of the entries in the self-compile and the
-   benchmarks, what share are words the call-graph rule says need no poll.
-   This decides R5.
-5. **R5 (M). The poll analysis in both compilers**: a word in no cycle of
-   known calls (self tail loops aside) and making no unknown call omits
-   its entry poll. `threaded.rs` and `compile.fx`, and register code from
-   both, cell for cell. First step: the count, against 571 of 826.
+4. **R4 (S). Measure what entry polls cost.** *Done 2026-09-27*: with
+   none at all, unsafely, register code and stage 2 run no faster
+   (docs/performance.md, "What a word's entry poll costs").
+5. **R5 (M). The poll analysis in both compilers.** *Dropped*: R4 shows
+   nothing to gain.
 6. **R6 (M). A `spin` atom in both checkers**, with the knot rules above,
    declared types "may spin" unless total, and the licence reporting it.
 7. **R7 (S). Speculation without a budget for spin-free forms.** After R6.
-8. **R8 (M, optional). Stack-depth checks hoisted** out of the 223
-   transitively spin-free words into their callers.
+8. **R8 (M, optional). Stack-depth checks hoisted.** *Dropped*, for R4's
+   reason.
 
 ## 2. Time complexity as an effect
 

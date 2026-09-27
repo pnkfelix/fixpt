@@ -984,3 +984,20 @@ register code already polled only backward. Now stack code does the same
 | `lists`   | 42.2 ms | 42.9 ms |
 
 Within noise but for `loop`: a poll that is never taken costs little.
+
+## What a word's entry poll costs: nothing measurable
+
+Before building an analysis to leave out entry polls (the responsiveness
+tasks' R5), register code was run with no entry poll at all, unsafely, as
+an upper bound on what it could save:
+
+| register code | with entry polls | without |
+| ------------- | ---------------- | ------- |
+| `fib`         | 4.4 ms           | 4.4 ms  |
+| `tak`         | 1.6 ms           | 1.6 ms  |
+| `closures`    | 19.0 ms          | 18.7 ms |
+| `lists`       | 8.6 ms           | 8.6 ms  |
+| stage 2       | 0.18 s           | 0.18 s  |
+
+A poll never taken (a subtract and a branch) costs nothing measurable
+here, so R5, and R8 (stack checks hoisted), are not worth building.
