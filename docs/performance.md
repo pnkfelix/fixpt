@@ -944,3 +944,26 @@ them in machine code:
 
 `tests/programs/datum/` holds programs that use datums, which the
 evaluator written in FX-26 does not have; every other harness runs them.
+
+## Names as symbols, and messages made only for errors
+
+Of stage 2's calls of primitives that were the FX-26 code's own doing
+(PLAN.md's item 3′):
+- The checker made the message for a definition that does not check (its
+  type shown) for every definition that does, and the "is not a type",
+  "is not a region" and "is not an effect" messages for every name it
+  looked up. They are made now only for an error.
+- The parser and the checker's `k-parse-type` found which form or type
+  they had by comparing the head's name, as a copied string, with each
+  keyword in turn; they compare symbols (`syn-head`), as does every other
+  test of a name (`else`, `#t`), and take a name's symbol from the datum
+  with no string between.
+
+| stage 2, register code | before | after  |
+| ---------------------- | ------ | ------ |
+| calls of primitives    | 441k   | 336k   |
+| time                   | 0.22 s | 0.19 s |
+
+What is left of them is mostly the reader's, making each atom's text
+(`reverse`, `list->string`, `string->symbol`, 42k each), and `new`
+(`%make-box`, 46k).
