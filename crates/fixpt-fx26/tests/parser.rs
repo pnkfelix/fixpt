@@ -48,6 +48,7 @@ fn the_parsers_agree_on_small_programs() {
         "(bloblet-ref (make-bloblet 0 1 2) 1)",
         "(letrec ((f (subr pure (int) int) (lambda (n) n))) (f 1))",
         "(proj (plambda ((r region)) (lambda () 1)) @q)",
+        "(define-generative (box (t type +)) (productof (v t))) (down-box (up-box (product (v 1))))",
     ] {
         same_trees(&mut s, text);
     }

@@ -86,14 +86,14 @@ plain datatypes?":
 
 ## Stages
 
-| Stage | Size | What                                                                                   |
-| ----- | ---- | -------------------------------------------------------------------------------------- |
-| N1    | M    | nominal families: a type node, in both checkers; safety analyses look through (G1, G2) |
-| N2    | S    | variance declared or inferred, checked once; invariant by default                      |
-| N3    | M    | lemmas: `proves` types, checked as erased identity coercions                           |
-| N4    | L    | GADTs: constructor result types, existentials, refinement in `tagcase`                 |
-| N5    | L    | size indices as their own sort, for `confirm` (CF1, CF3)                               |
-| N6    | M    | the `data` kind, with `read` and `acyclic` (CF0)                                       |
+| Stage | Size | What                                                                                         |
+| ----- | ---- | -------------------------------------------------------------------------------------------- |
+| N1    | M    | nominal families: a type node, in both checkers; safety analyses look through (G1, G2), done |
+| N2    | S    | variance declared, checked once; invariant by default, done                                  |
+| N3    | M    | lemmas: `proves` types, checked as erased identity coercions                                 |
+| N4    | L    | GADTs: constructor result types, existentials, refinement in `tagcase`                       |
+| N5    | L    | size indices as their own sort, for `confirm` (CF1, CF3)                                     |
+| N6    | M    | the `data` kind, with `read` and `acyclic` (CF0)                                             |
 
 `define-datatype` stays transparent by default; a generative variant is
 `generative-types.md`'s G3, and hiding (G4) comes when wanted.

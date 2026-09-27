@@ -838,6 +838,53 @@ impl Checker {
         }
     }
 
+    /// The regions of everything in `t` that can be written: storage a
+    /// generative type's representation may keep what it was given in.
+    fn storage_regions(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<Region>) {
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return;
+        }
+        let add = |r: Region, out: &mut Vec<Region>| {
+            if !out.contains(&r) {
+                out.push(r);
+            }
+        };
+        let kids: Vec<TyId> = match self.arena.get(t).clone() {
+            Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => {
+                add(r, out);
+                vec![a]
+            }
+            Ty::Pair(a, b, r) => {
+                if !r.is_frozen() {
+                    add(r, out);
+                }
+                vec![a, b]
+            }
+            Ty::Bloblet { fields, frozen, region } => {
+                if !frozen {
+                    add(region, out);
+                }
+                fields
+            }
+            Ty::Subr { params, result, .. } => params.into_iter().chain([result]).collect(),
+            Ty::Poly { body, .. } => vec![body],
+            Ty::Product(ps) | Ty::Sum(ps) => ps.into_iter().map(|(_, x)| x).collect(),
+            Ty::PromptTag { answer: a, payload: b, .. } | Ty::Composable { arg: a, answer: b, .. } => vec![a, b],
+            Ty::Named { which, args } => [self.generatives[which as usize].rep]
+                .into_iter()
+                .chain(args.into_iter().filter_map(|d| match d {
+                    D::Type(x) => Some(x),
+                    _ => None,
+                }))
+                .collect(),
+            _ => vec![],
+        };
+        for k in kids {
+            self.storage_regions(k, seen, out);
+        }
+    }
+
     /// Whether `r` is, or is frozen into, a generative type's parameter.
     fn is_generative_param(&self, r: Region) -> bool {
         let v = match r {
@@ -1036,9 +1083,9 @@ impl Checker {
             Ty::Named { which, args } => {
                 let rep = self.generatives[which as usize].rep;
                 let mut k = kept.to_vec();
-                let mut inner = HashSet::new();
-                self.regions_walk(rep, &mut HashSet::new(), &mut inner);
-                for r in inner.into_iter().chain(args.iter().filter_map(|d| match d {
+                let mut storage = Vec::new();
+                self.storage_regions(rep, &mut HashSet::new(), &mut storage);
+                for r in storage.into_iter().chain(args.iter().filter_map(|d| match d {
                     D::Region(r) => Some(*r),
                     _ => None,
                 })) {

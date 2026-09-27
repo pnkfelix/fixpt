@@ -69,6 +69,9 @@
   (t-define-rec (listof (productof (1 symbol) (2 syn) (3 exp)) finite) int int)
   (t-define-type syn syn int int)
   (t-define-effect syn syn int int)
+  ;; `(define-generative head rep)`: read by the checker alone; its two
+  ;; conversions follow it as definitions.
+  (t-define-generative syn syn int int)
   (t-private-regions syns-a int int)
   (t-exp exp))
 
@@ -527,9 +530,51 @@
 (define append-tops (subr pure ((listof top finite) (listof top finite)) (listof top finite))
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))
 
+;; `(define-generative head rep)`: the form, and its two conversions, each
+;; the identity: `(define up-name (poly (param …) (subr pure (rep) (name p
+;; …))) (lambda (x) x))`, and `down-name` the other way.
+(define generative? (subr (read @s) (syn) bool)
+  (lambda (s) (tagcase s (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) 'define-generative))) (else x #f))))
+;; The parameters as binders, variance left out, and their names.
+(define gen-binders (subr parses ((listof syn finite) int int) (listof syn finite))
+  (lambda (ps a b)
+    (if (null? ps)
+        nil
+        (let ((p (syn-items (car ps) "a parameter")))
+          (if (>= (len p) 2)
+              (cons (mk-list (cons (car p) (cons (nth p 1) nil)) a b) (gen-binders (cdr ps) a b))
+              (pfail "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`" (car ps)))))))
+(define gen-names (subr parses ((listof syn finite)) (listof syn finite))
+  (lambda (bs) (if (null? bs) nil (cons (car (syn-items (car bs) "a parameter")) (gen-names (cdr bs))))))
+(define parse-generative (subr parses (syn) (listof top finite))
+  (lambda (s)
+    (let* ((items (syn-items s "a generative type")) (a (syn-start s)) (b (syn-end s))
+           (usage "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`"))
+      (if (not (= (len items) 3))
+          (pfail usage s)
+          (let* ((head (nth items 1))
+                 (rep (nth items 2))
+                 (family? (tagcase head (lst (hs d ha hb) (not (null? hs))) (else x #f)))
+                 (hs (if family? (syn-items head "a generative type's name") (the (listof syn finite) nil)))
+                 (name (if family? (car hs) head))
+                 (n (if (syn-symbol? name) (symbol->string (syn-symbol name)) (pfail usage s)))
+                 (binders (if family? (gen-binders (cdr hs) a b) (the (listof syn finite) nil)))
+                 (used (if family? (mk-list (cons name (gen-names binders)) a b) name))
+                 (conv (lambda ((from syn) (to syn))
+                         (let ((t (mk-list (cons (mk-symbol "subr" a b)
+                                                 (cons (mk-symbol "pure" a b) (cons (mk-list (cons from nil) a b) (cons to nil))))
+                                           a b)))
+                           (if family? (mk-list (cons (mk-symbol "poly" a b) (cons (mk-list binders a b) (cons t nil))) a b) t))))
+                 (identity (e-lambda (the (listof (productof (1 symbol) (2 syns-a)) finite) (cons (product (1 'x) (2 (the syns-a nil))) nil))
+                                     (e-var 'x a b) a b))
+                 (up (t-define (string->symbol (string-append "up-" n)) (the syns-a (cons (conv rep used) nil)) identity a b))
+                 (down (t-define (string->symbol (string-append "down-" n)) (the syns-a (cons (conv used rep) nil)) identity a b)))
+            (cons (t-define-generative head rep a b) (cons up (cons down nil))))))))
+
 (define parse-tops (subr (maxeff parses spin) ((listof syn finite)) (listof top finite))
   (lambda (xs)
     (cond ((null? xs) nil)
+          ((generative? (car xs)) (let* ((made (parse-generative (car xs))) (rest (parse-tops (cdr xs)))) (append-tops made rest)))
           ((datatype? (car xs)) (let* ((made (parse-datatype (car xs))) (rest (parse-tops (cdr xs)))) (append-tops made rest)))
           (else (let* ((t (parse-top (car xs))) (rest (parse-tops (cdr xs)))) (cons t rest))))))
 

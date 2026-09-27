@@ -48,6 +48,9 @@
 (define-type k-parts (listof (productof (1 symbol) (2 int)) finite))
 (define-type k-names (listof symbol finite))
 
+;; A description in argument position, what `proj` supplies.
+(define-datatype k-desc (dr k-region) (de k-eff) (dt int))
+
 (define-datatype k-ty
   (ty-base symbol)
   (ty-void)
@@ -70,14 +73,18 @@
   (ty-place k-region)
   (ty-bloblet k-ids bool k-region)
   ;; A forwarding slot: none or one.
-  (ty-link k-ids))
+  (ty-link k-ids)
+  ;; A generative type applied to its descriptions: the `n`th
+  ;; `define-generative`. Equal only to itself, by its variance; looked
+  ;; through by every analysis of what a value holds.
+  (ty-named int (listof k-desc finite)))
 
-;; A description in argument position, what `proj` supplies.
-(define-datatype k-desc (dr k-region) (de k-eff) (dt int))
 (define-type k-map (listof (pairof int k-desc @t) finite))
 
 ;; What a description name means where it is used.
 (define-datatype k-ds
+  ;; A name `define-generative` bound: the `n`th generative type.
+  (ds-gen int)
   (ds-var int int)
   (ds-rec int)
   (ds-abbrev (listof (productof (1 symbol) (2 int)) finite) syn)
@@ -279,6 +286,37 @@
 (define k-known (ref k-named @t) (new nil))
 (define k-recursive (ref k-named @t) (new nil))
 (define k-std (ref k-named @t) (new nil))
+;; Every `define-generative`, newest first: its name, parameters, their
+;; variance (0 covariant, 1 contravariant, 2 invariant), and representation.
+(define-type k-gen (productof (1 symbol) (2 k-binders) (3 k-ids) (4 int)))
+(define k-gens (ref (listof k-gen finite) @t) (new nil))
+(define k-ngens (ref int @t) (new 0))
+(define k-gen-of (subr (read @t) (int) k-gen) (lambda (g) (k-nth (get k-gens) (- (- (get k-ngens) 1) g))))
+;; The generative types whose insides the definition being checked may see;
+;; the definitions still to come that may see inside one; and the bindings
+;; of their conversions, which are the identity.
+(define k-transparent (ref k-ids @t) (new nil))
+(define k-inside (ref (listof (pairof symbol int @t) finite) @t) (new nil))
+(define k-conversions (ref k-named @t) (new nil))
+;; Whether `v` is a generative type's parameter, and `r` one or frozen into one.
+(define k-gen-param? (subr (read @t) (int) bool)
+  (lambda (v)
+    (letrec ((in-binders (subr (read @t) (k-binders) bool)
+                         (lambda (bs) (and (not (null? bs)) (or (= (extract (car bs) 1) v) (in-binders (cdr bs))))))
+             (in-gens (subr (read @t) ((listof k-gen finite)) bool)
+                      (lambda (gs) (and (not (null? gs)) (or (in-binders (extract (car gs) 2)) (in-gens (cdr gs)))))))
+      (in-gens (get k-gens)))))
+;; The types among descriptions, and the regions.
+(define k-desc-types (subr (alloc @t) ((listof k-desc finite)) k-ids)
+  (lambda (ds)
+    (if (null? ds) nil (let ((rest (k-desc-types (cdr ds)))) (tagcase (car ds) (dt (x) (the k-ids (cons x rest))) (else y rest))))))
+(define k-desc-regions (subr (alloc @t) ((listof k-desc finite)) (listof k-region finite))
+  (lambda (ds)
+    (if (null? ds)
+        nil
+        (let ((rest (k-desc-regions (cdr ds)))) (tagcase (car ds) (dr (r) (the (listof k-region finite) (cons r rest))) (else y rest))))))
+(define k-gen-region? (subr (read @t) (k-region) bool)
+  (lambda (r) (tagcase r (r-var (v) (k-gen-param? v)) (r-frozen (p f) (and (>= p 0) (k-gen-param? p))) (else x #f))))
 ;; Why each member of a recursive group that may not end may not.
 (define k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) finite) @t) (new nil))
 (define k-named-has? (subr (read @t) (k-named symbol int) bool)
@@ -515,6 +553,12 @@
                          (k-show-parts (cdr ps) path)))))
   ;; A node met again on the way down is a cycle: named by its depth, and
   ;; written `(mu %d …)` where the cycle starts.
+  (k-show-descs (subr (maxeff (read @t) (alloc @t) spin) ((listof k-desc finite) k-ids) (listof string finite))
+    (lambda (ds p)
+      (if (null? ds)
+          nil
+          (let ((x (tagcase (car ds) (dt (t) (k-show-on t p)) (dr (r) (k-region-show r)) (de (e) (k-show-effect e)))))
+            (cons x (k-show-descs (cdr ds) p))))))
   (k-show-body (subr (maxeff (read @t) (alloc @t) spin) (int k-ids) string)
     (lambda (t path)
       (if (k-has-id? path t)
@@ -548,7 +592,10 @@
               (ty-markkey (a r) (k-cat5 "(mark-key " (k-show-on a p) " " (k-region-show r) ")"))
               (ty-bloblet (fs z r)
                 (k-cat5 (if z "(bloblet (frozen" "(bloblet (fields") (if (null? fs) "" " ") (k-join (k-show-list fs p) " ")
-                        ") " (string-append (k-region-show r) ")"))))))))))
+                        ") " (string-append (k-region-show r) ")")))
+              (ty-named (g ds)
+                (let ((name (symbol->string (extract (k-gen-of g) 1))))
+                  (if (null? ds) name (k-cat5 "(" name " " (k-join (k-show-descs ds p) " ") ")")))))))))))
 
 ;; A type. One `define-type` named prints as its name; any other recursive
 ;; type as `(mu %d …)`, `%d` naming the cycle.
@@ -706,6 +753,47 @@
   (lambda (rs r) (and (not (null? rs)) (or (k-region=? (car rs) r) (k-kept-has? (cdr rs) r)))))
 (define k-kept-add (subr (maxeff (read @t) (alloc @t) spin) (k-kept k-region) k-kept)
   (lambda (rs r) (if (k-kept-has? rs r) rs (cons r rs))))
+;; The regions of everything in `t` that can be written: storage a
+;; generative type's representation may keep what it was given in.
+(define-rec
+  (k-storage-walk (subr (maxeff kstate spin) (int int (ref k-kept @t)) unit)
+    (lambda (t seen out)
+      (let ((t (k-resolve t)))
+        (if (k-visit? t seen)
+            #u
+            (letrec ((add (subr (maxeff kstate spin) (k-region) unit) (lambda (r) (set out (k-kept-add (get out) r))))
+                     (walk (subr (maxeff kstate spin) (int) unit) (lambda (x) (k-storage-walk x seen out)))
+                     (walks (subr (maxeff kstate spin) (k-ids) unit) (lambda (xs) (k-storage-walks xs seen out))))
+              (tagcase (k-get t)
+                (ty-ref (a r) (begin (add r) (walk a)))
+                (ty-array (a r) (begin (add r) (walk a)))
+                (ty-icell (a r) (begin (add r) (walk a)))
+                (ty-markkey (a r) (begin (add r) (walk a)))
+                (ty-pair (a b r) (begin (tagcase r (r-frozen (q f) #u) (else y (add r))) (walk a) (walk b)))
+                (ty-bloblet (fs z r) (begin (if z #u (add r)) (walks fs)))
+                (ty-subr (e ps r) (begin (walks ps) (walk r)))
+                (ty-poly (bs body) (walk body))
+                (ty-product (ps) (k-storage-parts ps seen out))
+                (ty-sum (ps) (k-storage-parts ps seen out))
+                (ty-tag (a h e r) (begin (walk a) (walk h)))
+                (ty-comp (b a e r) (begin (walk b) (walk a)))
+                (ty-named (g ds) (begin (walk (extract (k-gen-of g) 4)) (walks (k-desc-types ds))))
+                (else x #u)))))))
+  (k-storage-walks (subr (maxeff kstate spin) (k-ids int (ref k-kept @t)) unit)
+    (lambda (ts seen out) (if (null? ts) #u (begin (k-storage-walk (car ts) seen out) (k-storage-walks (cdr ts) seen out)))))
+  (k-storage-parts (subr (maxeff kstate spin) (k-parts int (ref k-kept @t)) unit)
+    (lambda (ps seen out) (if (null? ps) #u (begin (k-storage-walk (extract (car ps) 2) seen out) (k-storage-parts (cdr ps) seen out))))))
+(define k-storage-regions (subr (maxeff kstate spin) (int) k-kept)
+  (lambda (t) (let ((out (the (ref k-kept @t) (new nil)))) (begin (k-storage-walk t (k-new-epoch) out) (get out)))))
+;; `kept`, and each of `rs` that is not a generative type's parameter nor
+;; frozen.
+(define k-kept-extend (subr (maxeff (read @t) (alloc @t) spin) (k-kept (listof k-region finite)) k-kept)
+  (lambda (kept rs)
+    (cond ((null? rs) kept)
+          ((or (k-gen-region? (car rs)) (tagcase (car rs) (r-frozen (q f) #t) (else y #f))) (k-kept-extend kept (cdr rs)))
+          (else (k-kept-extend (k-kept-add kept (car rs)) (cdr rs))))))
+(define k-append-regions (subr (alloc @t) ((listof k-region finite) (listof k-region finite)) (listof k-region finite))
+  (lambda (xs ys) (if (null? xs) ys (the (listof k-region finite) (cons (car xs) (k-append-regions (cdr xs) ys))))))
 ;; Whether `t` keeps, in storage at some region `r`, a procedure whose
 ;; latent effect reads or awaits `r` and does not say `spin`: a knot tied
 ;; through the store, a loop with no recursive call, which only its type can
@@ -767,6 +855,14 @@
                         (let ((y (k-knot-in x nil seen))) (if (null? y) (k-knot-in a nil seen) y))
                         (the k-knot (cons (cons (car found) t) nil)))))
                 (ty-tag (a h e r) (let ((y (k-knot-in a nil seen))) (if (null? y) (k-knot-in h nil seen) y)))
+                ;; Transparent to safety: its representation, and what it
+                ;; was given, kept, cautiously, wherever its representation
+                ;; keeps anything and in every region it was given.
+                (ty-named (g ds)
+                  (let* ((rep (extract (k-gen-of g) 4))
+                         (k (k-kept-extend kept (k-append-regions (k-storage-regions rep) (k-desc-regions ds))))
+                         (x (k-knot-in rep kept seen)))
+                    (if (null? x) (k-knot-list (k-desc-types ds) k seen) x)))
                 (else y (the k-knot nil))))))))
   (k-knot-list (subr (maxeff kstate spin) (k-ids k-kept k-kseen) k-knot)
     (lambda (ts kept seen)
@@ -879,6 +975,28 @@
               (k-no-knot t (syn-start s) (syn-end s))
               #u)
           t))))
+  ;; `(name d …)` for the `g`th generative type: a node, never expanded.
+  (k-apply-gen (subr (maxeff checks spin) (syn int (listof syn finite)) int)
+    (lambda (s g args)
+      (let* ((gen (k-gen-of g)) (ps (extract gen 2)))
+        (if (not (= (k-length args) (k-length ps)))
+            (k-sfail (k-cat5 (k-quote (symbol->string (extract gen 1))) " takes " (int->string (k-length ps))
+                             " description(s), and has " (int->string (k-length args)))
+                     s)
+            (let ((t (k-ty-new (ty-named g (k-gen-args ps args)))))
+              ;; What it holds may keep a procedure that reaches itself.
+              (begin (k-no-knot t (syn-start s) (syn-end s)) t))))))
+  (k-gen-args (subr (maxeff checks spin) (k-binders (listof syn finite)) (listof k-desc finite))
+    (lambda (ps args)
+      (if (null? ps)
+          nil
+          (let* ((k (extract (car ps) 2))
+                 (d (cond ((= k 2) (dt (k-parse-type (car args))))
+                          ((= k 0) (dr (k-parse-region (car args))))
+                          ((= k 3) (dr (k-parse-place (car args))))
+                          (else (de (k-parse-effect (car args))))))
+                 (rest (k-gen-args (cdr ps) (cdr args))))
+            (cons d rest)))))
   (k-parse-type-node (subr (maxeff checks spin) (syn) int)
     (lambda (s)
       (if (syn-symbol? s)
@@ -892,14 +1010,16 @@
                          (tagcase (car d)
                            (ds-var (v k) (if (= k 2) (k-ty-new (ty-var v)) (k-sfail (no) s)))
                            (ds-rec (t) t)
+                           (ds-gen (g) (k-apply-gen s g nil))
                            (else x (k-sfail (no) s))))))))
           (let* ((items (k-items s "a type"))
                  (hd (if (null? items) '|()| (syn-head (car items))))
                  (abbrev (if (symbol=? hd '|()|) (the (listof k-ds finite) nil) (k-lookup-desc hd)))
                  (n (k-length items)))
-            (if (and (not (null? abbrev)) (tagcase (car abbrev) (ds-abbrev (ps body) #t) (else x #f)))
+            (if (and (not (null? abbrev)) (tagcase (car abbrev) (ds-abbrev (ps body) #t) (ds-gen (g) #t) (else x #f)))
                 (tagcase (car abbrev)
                   (ds-abbrev (ps body) (k-expand-abbrev s hd ps body (cdr items)))
+                  (ds-gen (g) (k-apply-gen s g (cdr items)))
                   (else x (k-sfail "an abbreviation" s)))
                 (cond
                   ((symbol=? hd 'subr)
@@ -1052,6 +1172,150 @@
                           (else (ds-eff (k-parse-effect (car args))))))
                  (rest (k-abbrev-args (cdr ps) (cdr args))))
             (cons (cons (extract (car ps) 1) d) rest))))))
+
+;; Each polarity (0 covariant, 1 contravariant, 2 invariant) at which `v`
+;; occurs in `t`, reached at polarity `at`.
+(define k-flip (subr pure (int) int) (lambda (p) (cond ((= p 0) 1) ((= p 1) 0) (else 2))))
+(define k-reg-is? (subr pure (k-region int) bool)
+  (lambda (r v) (tagcase r (r-var (x) (= x v)) (r-frozen (x f) (= x v)) (else y #f))))
+(define k-eff-var? (subr (read @t) (k-eff int) bool)
+  (lambda (e v) (and (not (null? e)) (or (tagcase (car e) (a-var (x) (= x v)) (else y #f)) (k-eff-var? (cdr e) v)))))
+(define k-eff-region-var? (subr (read @t) (k-eff int) bool)
+  (lambda (e v)
+    (and (not (null? e))
+         (or (tagcase (car e)
+               (a-read (r) (k-reg-is? r v)) (a-write (r) (k-reg-is? r v)) (a-alloc (r) (k-reg-is? r v))
+               (a-goto (r) (k-reg-is? r v)) (a-comefrom (r) (k-reg-is? r v)) (a-await (r) (k-reg-is? r v))
+               (else y #f))
+             (k-eff-region-var? (cdr e) v)))))
+(define k-pol-seen? (subr (read @t) ((listof (pairof int int @t) finite) int int) bool)
+  (lambda (xs t at) (and (not (null? xs)) (or (and (= (car (car xs)) t) (= (cdr (car xs)) at)) (k-pol-seen? (cdr xs) t at)))))
+(define-rec
+  (k-polarity (subr (maxeff kstate spin) (int int int (ref (listof (pairof int int @t) finite) @t) (ref k-ids @t)) unit)
+    (lambda (t v at seen found)
+      (let ((t (k-resolve t)))
+        (if (k-pol-seen? (get seen) t at)
+            #u
+            (letrec ((push (subr kstate (int) unit) (lambda (p) (set found (cons p (get found)))))
+                     (reg (subr kstate (k-region) unit) (lambda (r) (if (k-reg-is? r v) (push 2) #u)))
+                     (eff (subr kstate (k-eff int) unit)
+                          (lambda (e p) (begin (if (k-eff-var? e v) (push p) #u) (if (k-eff-region-var? e v) (push 2) #u))))
+                     (go (subr (maxeff kstate spin) (int int) unit) (lambda (x p) (k-polarity x v p seen found)))
+                     (gos (subr (maxeff kstate spin) (k-ids int) unit) (lambda (xs p) (k-polarities xs v p seen found))))
+              (begin
+                (set seen (cons (cons t at) (get seen)))
+                (tagcase (k-get t)
+                  (ty-var (x) (if (= x v) (push at) #u))
+                  (ty-subr (e ps r) (begin (eff e at) (gos ps (k-flip at)) (go r at)))
+                  (ty-poly (bs body) (go body at))
+                  (ty-ref (a r) (begin (reg r) (go a 2)))
+                  (ty-array (a r) (begin (reg r) (go a 2)))
+                  (ty-icell (a r) (begin (reg r) (go a 2)))
+                  (ty-markkey (a r) (begin (reg r) (go a 2)))
+                  (ty-pair (a b r)
+                    (let ((p (tagcase r (r-frozen (q f) at) (else y 2)))) (begin (reg r) (go a p) (go b p))))
+                  (ty-bloblet (fs z r) (begin (reg r) (gos fs (if z at 2))))
+                  (ty-product (ps) (k-polarity-parts ps v at seen found))
+                  (ty-sum (ps) (k-polarity-parts ps v at seen found))
+                  (ty-tag (a h e r) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
+                  (ty-comp (a h e r) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
+                  (ty-place (r) (reg r))
+                  (ty-named (g ds) (k-polarity-descs ds (extract (k-gen-of g) 3) v at seen found))
+                  (else y #u))))))))
+  (k-polarities (subr (maxeff kstate spin) (k-ids int int (ref (listof (pairof int int @t) finite) @t) (ref k-ids @t)) unit)
+    (lambda (ts v at seen found) (if (null? ts) #u (begin (k-polarity (car ts) v at seen found) (k-polarities (cdr ts) v at seen found)))))
+  (k-polarity-parts (subr (maxeff kstate spin) (k-parts int int (ref (listof (pairof int int @t) finite) @t) (ref k-ids @t)) unit)
+    (lambda (ps v at seen found)
+      (if (null? ps) #u (begin (k-polarity (extract (car ps) 2) v at seen found) (k-polarity-parts (cdr ps) v at seen found)))))
+  (k-polarity-descs (subr (maxeff kstate spin) ((listof k-desc finite) k-ids int int (ref (listof (pairof int int @t) finite) @t) (ref k-ids @t)) unit)
+    (lambda (ds ws v at seen found)
+      (if (null? ds)
+          #u
+          (let* ((w (car ws))
+                 (p (cond ((or (= w 2) (= at 2)) 2) ((= w 0) at) (else (k-flip at)))))
+            (begin
+              (tagcase (car ds)
+                (dt (x) (k-polarity x v p seen found))
+                (dr (r) (if (k-reg-is? r v) (set found (cons 2 (get found))) #u))
+                (de (e) (begin (if (k-eff-var? e v) (set found (cons p (get found))) #u)
+                               (if (k-eff-region-var? e v) (set found (cons 2 (get found))) #u))))
+              (k-polarity-descs (cdr ds) (cdr ws) v at seen found)))))))
+(define k-all-ints? (subr pure (k-ids int) bool)
+  (lambda (xs n) (or (null? xs) (and (= (car xs) n) (k-all-ints? (cdr xs) n)))))
+;; Whether the `g`th generative type's representation bears out the variance
+;; declared for its parameters.
+(define k-check-variance (subr (maxeff checks spin) (int syn) unit)
+  (lambda (g s)
+    (let ((gen (k-gen-of g)))
+      (letrec ((each (subr (maxeff checks spin) (k-binders k-ids) unit)
+                     (lambda (bs vs)
+                       (if (null? bs)
+                           #u
+                           (let ((v (extract (car bs) 1)) (want (car vs)))
+                             (begin
+                               (if (= want 2)
+                                   #u
+                                   (let ((found (the (ref k-ids @t) (new nil))))
+                                     (begin
+                                       (k-polarity (extract gen 4) v 0 (the (ref (listof (pairof int int @t) finite) @t) (new nil)) found)
+                                       (if (k-all-ints? (get found) want)
+                                           #u
+                                           (k-sfail (k-cat5 (k-quote (symbol->string (k-dvar-name v))) " is declared "
+                                                            (if (= want 0) "covariant (+)" "contravariant (-)")
+                                                            " in " (string-append (k-quote (symbol->string (extract gen 1)))
+                                                                                  ", but occurs where it may not"))
+                                                    s)))))
+                               (each (cdr bs) (cdr vs))))))))
+        (each (extract gen 2) (extract gen 3))))))
+;; `(define-generative (name (param kind [+|-]) …) rep)`, or with no
+;; parameters `(define-generative name rep)`: a new type, equal only to
+;; itself, converted by `up-name` and `down-name`.
+(define k-gen-params (subr (maxeff checks spin) ((listof syn finite) int) (productof (1 k-binders) (2 k-ids)))
+  (lambda (ps depth)
+    (if (null? ps)
+        (product (1 (the k-binders nil)) (2 (the k-ids nil)))
+        (let* ((p (car ps))
+               (items (k-items p "a parameter"))
+               (n (k-length items))
+               (v (cond ((= n 2) 2)
+                        ((= n 3)
+                         (let ((x (k-nth items 2)))
+                           (cond ((and (syn-symbol? x) (string=? (syn-name x) "+")) 0)
+                                 ((and (syn-symbol? x) (string=? (syn-name x) "-")) 1)
+                                 (else (k-sfail "a parameter's variance is `+` or `-`" x)))))
+                        (else (k-sfail "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`" p))))
+               (name (k-name-of (car items) "a parameter's name"))
+               (kind (k-parse-kind (k-nth items 1)))
+               (checked (if (and (not (= v 2)) (or (= kind 0) (= kind 3)))
+                            (k-sfail "a region or place parameter is invariant: it names where data is" p)
+                            #u))
+               (dv (k-new-dvar-of name kind))
+               (pushed (k-push-desc name (ds-var dv kind)))
+               (rest (k-gen-params (cdr ps) depth)))
+          (product (1 (the k-binders (cons (product (1 dv) (2 kind)) (extract rest 1))))
+                   (2 (the k-ids (cons v (extract rest 2)))))))))
+(define k-define-generative (subr (maxeff checks spin) (syn syn) symbol)
+  (lambda (head rep)
+    (let* ((hs (tagcase head (lst (items d a b) items) (else x (the (listof syn finite) nil))))
+           (name-syn (if (null? hs) head (car hs)))
+           (ps (if (null? hs) (the (listof syn finite) nil) (cdr hs)))
+           (name (k-name-of name-syn "a generative type's name"))
+           (saved (get k-dscope))
+           (params (k-gen-params ps 0))
+           (g (get k-ngens))
+           (slot (k-slot)))
+      (begin
+        (set k-gens (cons (product (1 name) (2 (extract params 1)) (3 (extract params 2)) (4 slot)) (get k-gens)))
+        (set k-ngens (+ g 1))
+        ;; In scope in its own representation: recursion through the name.
+        (k-push-desc name (ds-gen g))
+        (let ((r (k-parse-type rep)))
+          (begin
+            (set k-dscope saved)
+            (k-set-link slot r)
+            (k-check-variance g rep)
+            (k-push-desc name (ds-gen g))
+            name))))))
 
 ;; `(define-type name type)`: `name` stands for the type from here on, and
 ;; may appear in its own definition.
@@ -1299,6 +1563,12 @@
   (lambda (rs r) (cond ((null? rs) #f) ((k-region=? (car rs) r) #t) (else (k-has-region-in? (cdr rs) r)))))
 (define k-add-region (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-region) k-regions)
   (lambda (rs r) (if (k-has-region-in? rs r) rs (cons r rs))))
+;; `out` and each of `rs` that is not a generative type's parameter.
+(define k-add-non-gen (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
+  (lambda (out rs)
+    (cond ((null? rs) out)
+          ((k-gen-region? (car rs)) (k-add-non-gen out (cdr rs)))
+          (else (k-add-non-gen (k-add-region out (car rs)) (cdr rs))))))
 (define k-add-eff-regions (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-eff) k-regions)
   (lambda (rs e)
     (cond ((null? e) rs)
@@ -1316,6 +1586,7 @@
       (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-known nil) (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
+      (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
@@ -1357,7 +1628,23 @@
                   (ty-bloblet (fs z r) (begin (add r) (walks fs)))
                   (ty-product (ps) (k-regions-parts ps seen out))
                   (ty-sum (ps) (k-regions-parts ps seen out))
+                  ;; Transparent to safety: what its representation holds,
+                  ;; its parameters' regions standing for what it was given.
+                  (ty-named (g ds)
+                    (let ((inner (the (ref k-regions @t) (new nil))))
+                      (begin (k-regions-walk (extract (k-gen-of g) 4) seen inner)
+                             (set out (k-add-non-gen (get out) (get inner)))
+                             (k-regions-descs ds seen out))))
                   (else x #u))))))))
+  (k-regions-descs (subr (maxeff (read @t) (write @t) (alloc @t) spin) ((listof k-desc finite) int (ref k-regions @t)) unit)
+    (lambda (ds seen out)
+      (if (null? ds)
+          #u
+          (begin (tagcase (car ds)
+                   (dt (x) (k-regions-walk x seen out))
+                   (dr (r) (set out (k-add-region (get out) r)))
+                   (de (e) (set out (k-add-eff-regions (get out) e))))
+                 (k-regions-descs (cdr ds) seen out)))))
   (k-regions-walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids int (ref k-regions @t)) unit)
     (lambda (ts seen out) (if (null? ts) #u (begin (k-regions-walk (car ts) seen out) (k-regions-walks (cdr ts) seen out)))))
   (k-regions-parts (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-parts int (ref k-regions @t)) unit)
@@ -1622,9 +1909,20 @@
                               (ty-product (ps) (ty-product (k-subst-parts ps m memo)))
                               (ty-sum (ps) (ty-sum (k-subst-parts ps m memo)))
                               (ty-bloblet (fs z r) (ty-bloblet (subs fs) z (reg r)))
+                              (ty-named (g ds) (ty-named g (k-subst-descs ds m memo)))
                               (else z (k-get t))))
                            (id (k-ty-new new-ty)))
                       (begin (k-set-link slot id) slot)))))))))))
+  (k-subst-descs (subr (maxeff kstate spin) ((listof k-desc finite) k-map (ref (listof (pairof int int @t) finite) @t)) (listof k-desc finite))
+    (lambda (ds m memo)
+      (if (null? ds)
+          nil
+          (let* ((d (tagcase (car ds)
+                      (dt (x) (dt (k-subst-memo x m memo)))
+                      (dr (r) (dr (k-subst-region r m)))
+                      (de (e) (de (k-subst-effect e m)))))
+                 (rest (k-subst-descs (cdr ds) m memo)))
+            (cons d rest)))))
   (k-subst-list (subr (maxeff kstate spin) (k-ids k-map (ref (listof (pairof int int @t) finite) @t)) k-ids)
     (lambda (ts m memo)
       (if (null? ts) nil (let* ((x (k-subst-memo (car ts) m memo)) (rest (k-subst-list (cdr ts) m memo))) (cons x rest)))))
@@ -1639,6 +1937,11 @@
 ;; cycles: each node gets its slot before its children are built.
 (define k-subst (subr (maxeff kstate spin) (int k-map) int)
   (lambda (t m) (k-subst-memo t m (the (ref (listof (pairof int int @t) finite) @t) (new nil)))))
+;; The `g`th generative type's representation, for `ds`.
+(define k-gen-map (subr (alloc @t) (k-binders (listof k-desc finite)) k-map)
+  (lambda (bs ds) (if (null? bs) nil (the k-map (cons (cons (extract (car bs) 1) (car ds)) (k-gen-map (cdr bs) (cdr ds)))))))
+(define k-unfold (subr (maxeff kstate spin) (int (listof k-desc finite)) int)
+  (lambda (g ds) (let ((gen (k-gen-of g))) (k-subst (extract gen 4) (k-gen-map (extract gen 2) ds)))))
 
 ;; `b`'s binders renamed to `a`'s, for comparing under them.
 (define k-rename (subr (maxeff kstate spin) (k-binders k-binders) k-map)
@@ -1786,7 +2089,19 @@
           (else
            (begin
              (set trail (cons (product (1 a) (2 b) (3 ea) (4 eb)) (get trail)))
-             (let ((ta (k-get a)) (tb (k-get b)))
+             (let* ((ta (k-get a)) (tb (k-get b))
+                    (same-named (tagcase ta (ty-named (g xs) (tagcase tb (ty-named (h ys) (= g h)) (else z #f))) (else z #f)))
+                    (a-void (tagcase ta (ty-void () #t) (else z #f)))
+                    ;; Inside a generative type's own conversions, its name
+                    ;; is its representation; everywhere else only itself.
+                    (a-open (tagcase ta (ty-named (g xs) (k-has-id? (get k-transparent) g)) (else z #f)))
+                    (b-open (tagcase tb (ty-named (g xs) (k-has-id? (get k-transparent) g)) (else z #f))))
+               (cond
+                ((and (not same-named) (not a-void) a-open)
+                 (tagcase ta (ty-named (g xs) (k-sub (k-unfold g xs) b ea eb trail labels)) (else z #f)))
+                ((and (not same-named) (not a-void) b-open)
+                 (tagcase tb (ty-named (g ys) (k-sub a (k-unfold g ys) ea eb trail labels)) (else z #f)))
+                (else
                (if (and (tagcase ta (ty-comp (x y e r) #t) (else z #f)) (tagcase tb (ty-subr (e ps r) #t) (else z #f)))
                    (k-sub-callable (car (k-as-subr a)) (car (k-as-subr b)) ea eb trail labels)
                    (tagcase ta
@@ -1842,7 +2157,31 @@
                                   (and (k-same-bounds? ba bb ia ib)
                                        (k-sub xa xb ia ib trail labels)))))
                          (else z #f)))
-                     (else z #f))))))))))
+                     ;; A generative type is related only to itself, argument
+                     ;; by argument, as its variance says.
+                     (ty-named (g xs)
+                       (tagcase tb
+                         (ty-named (h ys) (and (= g h) (k-sub-descs xs ys (extract (k-gen-of g) 3) ea eb trail labels)))
+                         (else z #f)))
+                     (else z #f))))))))))))
+  (k-sub-descs (subr (maxeff kstate spin) ((listof k-desc finite) (listof k-desc finite) k-ids k-benv k-benv k-strail k-labels) bool)
+    (lambda (xs ys vs ea eb trail labels)
+      (or (null? xs)
+          (and (let ((v (car vs)))
+                 (tagcase (car xs)
+                   (dt (x)
+                     (tagcase (car ys)
+                       (dt (y) (cond ((= v 0) (k-sub x y ea eb trail labels))
+                                     ((= v 1) (k-sub y x eb ea trail labels))
+                                     (else (k-inv x y ea eb trail labels))))
+                       (else z #f)))
+                   (dr (r) (tagcase (car ys) (dr (q) (k-region=? (k-benv-region ea r) (k-benv-region eb q))) (else z #f)))
+                   (de (d)
+                     (tagcase (car ys)
+                       (de (e) (let ((d2 (k-benv-effect ea d)) (e2 (k-benv-effect eb e)))
+                                 (cond ((= v 0) (k-within? d2 e2)) ((= v 1) (k-within? e2 d2)) (else (k-eff=? d2 e2)))))
+                       (else z #f)))))
+               (k-sub-descs (cdr xs) (cdr ys) (cdr vs) ea eb trail labels)))))
   (k-sub-fields (subr (maxeff kstate spin) (k-ids k-ids bool k-benv k-benv k-strail k-labels) bool)
     (lambda (fa fb frozen ea eb trail labels)
       (cond ((null? fa) #t)
@@ -2102,7 +2441,8 @@
     (tagcase (k-get t)
       (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r) 3) (ty-poly (bs x) 4) (ty-ref (x r) 5)
       (ty-pair (x y r) 6) (ty-tag (x y e r) 7) (ty-comp (x y e r) 8) (ty-markkey (x r) 9) (ty-product (ps) 10)
-      (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16))))
+      (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16)
+      (ty-named (g ds) 17))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 (define k-wrong-shape? (subr (maxeff (read @t) (alloc @t) spin) (int int) bool)
   (lambda (pattern actual)
@@ -2136,6 +2476,14 @@
   (lambda (xs onto) (if (null? xs) onto (cons (car xs) (k-push-ids (cdr xs) onto)))))
 (define k-push-parts (subr (maxeff (read @t) (alloc @t)) (k-parts k-ids) k-ids)
   (lambda (ps onto) (if (null? ps) onto (cons (extract (car ps) 2) (k-push-parts (cdr ps) onto)))))
+(define k-descs-open? (subr (read @t) ((listof k-desc finite) k-binders k-solved) bool)
+  (lambda (ds kinds solved)
+    (and (not (null? ds))
+         (or (tagcase (car ds)
+               (dr (r) (k-open-region? r kinds solved))
+               (de (e) (k-open-effect? e kinds solved))
+               (else y #f))
+             (k-descs-open? (cdr ds) kinds solved)))))
 (define k-any-walk (subr (maxeff kstate spin) (k-ids int k-binders k-solved) bool)
   (lambda (stack seen kinds solved)
     (if (null? stack)
@@ -2161,6 +2509,7 @@
                   (ty-sum (ps) (go (k-push-parts ps rest)))
                   (ty-tag (x y e r) (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-comp (x y e r) (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
+                  (ty-named (g ds) (or (k-descs-open? ds kinds solved) (go (k-push-ids (k-desc-types ds) rest))))
                   (else y (go rest))))))))))
 (define k-mentions-any-unknown? (subr (maxeff kstate spin) (int k-binders k-solved) bool)
   (lambda (t kinds solved) (k-any-walk (cons t nil) (k-new-epoch) kinds solved)))
@@ -2188,6 +2537,7 @@
                   (ty-pair (a b r) (or (w a) (w b)))
                   (ty-tag (a b e r) (or (w a) (w b)))
                   (ty-comp (a b e r) (or (w a) (w b)))
+                  (ty-named (g ds) (ws (k-desc-types ds)))
                   (else y #f))))))))
   (k-vars-walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids int k-binders k-solved) bool)
     (lambda (ts seen kinds solved) (cond ((null? ts) #f) ((k-vars-walk (car ts) seen kinds solved) #t) (else (k-vars-walks (cdr ts) seen kinds solved))))))
@@ -2286,7 +2636,19 @@
                           (tagcase at (ty-tag (a2 h2 d2 r2) (begin (ur r1 r2) (u a1 a2) (u h1 h2) (ue d1 d2))) (else z #u)))
                         (ty-comp (h1 a1 d1 r1)
                           (tagcase at (ty-comp (h2 a2 d2 r2) (begin (ur r1 r2) (u a1 a2) (u h1 h2) (ue d1 d2))) (else z #u)))
+                        (ty-named (g xs)
+                          (tagcase at (ty-named (h ys) (if (= g h) (k-unify-descs xs ys kinds solved trail) #u)) (else z #u)))
                         (else z #u))))))))))
+  (k-unify-descs (subr (maxeff kstate spin) ((listof k-desc finite) (listof k-desc finite) k-binders k-solved k-trail) unit)
+    (lambda (xs ys kinds solved trail)
+      (if (null? xs)
+          #u
+          (begin
+            (tagcase (car xs)
+              (dt (x) (tagcase (car ys) (dt (y) (k-unify x y kinds solved trail)) (else z #u)))
+              (dr (r) (tagcase (car ys) (dr (q) (k-unify-region r q kinds solved)) (else z #u)))
+              (de (d) (tagcase (car ys) (de (e) (k-unify-effect d e kinds solved)) (else z #u))))
+            (k-unify-descs (cdr xs) (cdr ys) kinds solved trail)))))
   (k-unify-lists (subr (maxeff kstate spin) (k-ids k-ids k-binders k-solved k-trail) unit)
     (lambda (xs ys kinds solved trail)
       (if (null? xs) #u (begin (k-unify (car xs) (car ys) kinds solved trail) (k-unify-lists (cdr xs) (cdr ys) kinds solved trail)))))
@@ -2391,6 +2753,32 @@
   (lambda (e r)
     (and (not (null? e))
          (or (tagcase (car e) (a-write (x) (k-region=? x r)) (else y #f)) (k-eff-writes? (cdr e) r)))))
+;; A generative type's representation writing one of its parameters writes
+;; whatever it was given: cautiously, any region given any. Whether some
+;; effect in a walk wrote a parameter, and whether some generative type was
+;; given the region.
+(define k-wrote-param (ref bool @t) (new #f))
+(define k-given (ref bool @t) (new #f))
+(define k-eff-writes-param? (subr (read @t) (k-eff) bool)
+  (lambda (e)
+    (and (not (null? e))
+         (or (tagcase (car e) (a-write (x) (k-gen-region? x)) (a-var (v) (k-gen-param? v)) (else y #f))
+             (k-eff-writes-param? (cdr e))))))
+(define k-eff-writes-noting? (subr (maxeff kstate spin) (k-eff k-region) bool)
+  (lambda (e r)
+    (begin
+      (if (k-eff-writes-param? e) (set k-wrote-param #t) #u)
+      (k-eff-writes? e r))))
+(define k-note-given (subr (maxeff kstate spin) ((listof k-desc finite) k-region) unit)
+  (lambda (ds r)
+    (if (null? ds)
+        #u
+        (begin
+          (tagcase (car ds)
+            (dr (x) (if (k-region=? x r) (set k-given #t) #u))
+            (de (e) (if (k-eff-writes? e r) (set k-given #t) #u))
+            (else y #u))
+          (k-note-given (cdr ds) r)))))
 ;; Whether a latent effect anywhere in `t` writes `r`: what a `letfreeze`'s
 ;; value may not do to its region.
 (define-rec
@@ -2400,9 +2788,9 @@
         (if (k-visit? t seen)
             #f
             (tagcase (k-get t)
-              (ty-subr (e ps x) (or (k-eff-writes? e r) (or (k-writes-list ps r seen) (k-writes-in x r seen))))
-              (ty-tag (a h e x) (or (k-eff-writes? e r) (or (k-writes-in a r seen) (k-writes-in h r seen))))
-              (ty-comp (b a e x) (or (k-eff-writes? e r) (or (k-writes-in a r seen) (k-writes-in b r seen))))
+              (ty-subr (e ps x) (or (k-eff-writes-noting? e r) (or (k-writes-list ps r seen) (k-writes-in x r seen))))
+              (ty-tag (a h e x) (or (k-eff-writes-noting? e r) (or (k-writes-in a r seen) (k-writes-in h r seen))))
+              (ty-comp (b a e x) (or (k-eff-writes-noting? e r) (or (k-writes-in a r seen) (k-writes-in b r seen))))
               (ty-poly (bs body) (k-writes-in body r seen))
               (ty-ref (a x) (k-writes-in a r seen))
               (ty-array (a x) (k-writes-in a r seen))
@@ -2412,6 +2800,9 @@
               (ty-bloblet (fs z x) (k-writes-list fs r seen))
               (ty-product (ps) (k-writes-parts ps r seen))
               (ty-sum (ps) (k-writes-parts ps r seen))
+              (ty-named (g ds)
+                (begin (k-note-given ds r)
+                       (or (k-writes-in (extract (k-gen-of g) 4) r seen) (k-writes-list (k-desc-types ds) r seen))))
               (else x #f))))))
   (k-writes-list (subr (maxeff kstate spin) (k-ids k-region int) bool)
     (lambda (ts r seen) (and (not (null? ts)) (or (k-writes-in (car ts) r seen) (k-writes-list (cdr ts) r seen)))))
@@ -2441,7 +2832,8 @@
 ;; unless something in it could still write `r`.
 (define k-frozen-result (subr (maxeff checks spin) (int k-region bool int int int) int)
   (lambda (r into written t a b)
-    (if (k-writes-in t (r-var r) (k-new-epoch))
+    (if (begin (set k-wrote-param #f) (set k-given #f)
+               (or (k-writes-in t (r-var r) (k-new-epoch)) (and (get k-wrote-param) (get k-given))))
         (k-fail (k-cat4 "the value of `letfreeze " (symbol->string (k-dvar-name r))
                         "` could still write its region's data: its type is " (k-show-ty t))
                 a b)
@@ -2480,6 +2872,9 @@
                    (ty-bloblet (fs z r) (k-cyclic-list? fs #f p))
                    (ty-product (ps) (k-cyclic-parts? ps p))
                    (ty-sum (ps) (k-cyclic-parts? ps p))
+                   ;; Through its representation; what it was given,
+                   ;; cautiously, as if taken as a parameter.
+                   (ty-named (g ds) (or (k-cyclic-from? (extract (k-gen-of g) 4) #f p) (k-cyclic-list? (k-desc-types ds) #t p)))
                    (else x #f))))))))
   (k-cyclic-list? (subr (maxeff kstate spin) (k-ids bool k-cpath) bool)
     (lambda (ts by path) (and (not (null? ts)) (or (k-cyclic-from? (car ts) by path) (k-cyclic-list? (cdr ts) by path)))))
@@ -2598,6 +2993,10 @@
 (define k-sc-nth-ty (subr (read @t) (k-parts int) int)
   (lambda (ps i) (cond ((null? ps) -1) ((= i 0) (extract (car ps) 2)) (else (k-sc-nth-ty (cdr ps) (- i 1))))))
 ;; Field `l` of what `ks` knows of products.
+;; A part's type, where known (`t` ≥ 0); `void` where not, as past a
+;; generative type's conversion.
+(define k-ty-known (subr (maxeff (read @t) spin) (int) k-ty) (lambda (t) (if (< t 0) (ty-void) (k-get t))))
+;; An `extract` proves a product, and so a part, known here or not.
 (define k-sc-fields (subr (maxeff kstate spin) (k-trs symbol) k-trs)
   (lambda (ks l)
     (if (null? ks)
@@ -2605,9 +3004,8 @@
         (let ((rest (k-sc-fields (cdr ks) l)))
           (tagcase (car ks)
             (tr-part (p s t)
-              (tagcase (k-get t)
-                (ty-product (ps) (let ((f (k-sc-part-ty ps l))) (if (< f 0) rest (the k-trs (cons (tr-part p #t f) rest)))))
-                (else y rest)))
+              (let ((f (tagcase (k-ty-known t) (ty-product (ps) (k-sc-part-ty ps l)) (else y -1))))
+                (the k-trs (cons (tr-part p #t f) rest))))
             (else y rest))))))
 ;; What an arm of a `tagcase` on what `ks` knows binds: variant `tag`'s
 ;; value, or (`i` ≥ 0) its field `i`.
@@ -2617,15 +3015,16 @@
         nil
         (let ((rest (k-sc-variant (cdr ks) tag i)))
           (tagcase (car ks)
+            ;; A `tagcase` proves a sum, and so a part, known here or not.
             (tr-part (p s t)
-              (tagcase (k-get t)
-                (ty-sum (vs)
-                  (let* ((v (k-sc-part-ty vs tag))
-                         (f (cond ((< v 0) -1)
-                                  ((< i 0) v)
-                                  (else (tagcase (k-get v) (ty-product (ps) (k-sc-nth-ty ps i)) (else y -1))))))
-                    (if (< f 0) rest (the k-trs (cons (tr-part p #t f) rest)))))
-                (else y rest)))
+              (let ((f (tagcase (k-ty-known t)
+                         (ty-sum (vs)
+                           (let ((v (k-sc-part-ty vs tag)))
+                             (cond ((< v 0) -1)
+                                   ((< i 0) v)
+                                   (else (tagcase (k-get v) (ty-product (ps) (k-sc-nth-ty ps i)) (else y -1))))))
+                         (else y -1))))
+                (the k-trs (cons (tr-part p #t f) rest))))
             (else y rest))))))
 ;; The `car` (`head`) or `cdr` of what `ks` knows of pairs at a `finite`
 ;; region.
@@ -2636,7 +3035,7 @@
         (let ((rest (k-sc-pair-parts (cdr ks) head)))
           (tagcase (car ks)
             (tr-part (p s t)
-              (tagcase (k-get t)
+              (tagcase (k-ty-known t)
                 (ty-pair (x y r)
                   (tagcase r
                     (r-frozen (q fin) (if fin (the k-trs (cons (tr-part p #t (if head x y)) rest)) rest))
@@ -2670,7 +3069,11 @@
         (let ((m (tagcase k
                    (tr-part (p s t)
                      (tagcase (car ls)
-                       (tr-part (q r u) (if (and (= p q) (= (k-resolve t) (k-resolve u))) (the k-trs (cons (tr-part p (and s r) t) nil)) (the k-trs nil)))
+                       (tr-part (q r u)
+                         (if (= p q)
+                             (let ((same (and (>= t 0) (>= u 0) (= (k-resolve t) (k-resolve u)))))
+                               (the k-trs (cons (tr-part p (and s r) (if same t -1)) nil)))
+                             (the k-trs nil)))
                        (else y (the k-trs nil))))
                    (tr-int (p o)
                      (tagcase (car ls)
@@ -2683,6 +3086,20 @@
         nil
         (let ((m (k-sc-meet-one (car ks) ls)) (rest (k-sc-meet (cdr ks) ls)))
           (if (null? m) rest (the k-trs (cons (car m) rest)))))))
+;; Whether `f` names a generative type's `up-` or `down-` conversion, the
+;; identity.
+(define k-sc-conversion? (subr (maxeff (read @t) (alloc @t) spin) (kx k-tscope) bool)
+  (lambda (f sc)
+    (tagcase (k-under f)
+      (x-var (s a b)
+        (let ((t (k-lookup s)))
+          (and (>= t 0) (not (k-sc-in? sc s)) (< (k-sc-index (get k-sc-members) s 0) 0) (k-named-has? (get k-conversions) s t))))
+      (else y #f))))
+(define k-sc-forget-types (subr kstate (k-trs) k-trs)
+  (lambda (ks)
+    (if (null? ks)
+        nil
+        (the k-trs (cons (tagcase (car ks) (tr-part (p s t) (tr-part p s -1)) (else y (car ks))) (k-sc-forget-types (cdr ks)))))))
 ;; What is known of `x`'s value.
 (define k-sc-tracked (subr (maxeff kstate spin) (kx k-tscope) k-trs)
   (lambda (x sc)
@@ -2693,7 +3110,8 @@
       (x-if (p c d a b) (k-sc-meet (k-sc-tracked c sc) (k-sc-tracked d sc)))
       (x-app (f args a b)
         (let ((op (k-sc-op f sc)))
-          (cond ((and (k-sc-one? args) (or (string=? op "car") (string=? op "cdr")))
+          (cond ((and (k-sc-one? args) (k-sc-conversion? f sc)) (k-sc-forget-types (k-sc-tracked (car args) sc)))
+                ((and (k-sc-one? args) (or (string=? op "car") (string=? op "cdr")))
                  (k-sc-pair-parts (k-sc-tracked (car args) sc) (string=? op "car")))
                 ((and (k-sc-one? args) (or (string=? op "datum-car") (string=? op "datum-cdr")))
                  (k-sc-strict (k-sc-tracked (car args) sc)))
@@ -2816,7 +3234,7 @@
     (and (not (null? ks))
          (or (tagcase (car ks)
                (tr-part (p s t)
-                 (tagcase (k-get t) (ty-pair (x y r) (tagcase r (r-frozen (q fin) (not fin)) (else z #t))) (else z #f)))
+                 (tagcase (k-ty-known t) (ty-pair (x y r) (tagcase r (r-frozen (q fin) (not fin)) (else z #t))) (else z #f)))
                (else z #f))
              (k-sc-any-written? (cdr ks))))))
 ;; Whether some argument is the `car` or `cdr` of a parameter's part at a
@@ -3760,6 +4178,19 @@
               (begin (k-push-desc name (ds-private (k-fresh-region (symbol->string name)))) (k-private (cdr rs))))))))
 
 ;; `define-type`, `define-effect` and `private-regions`.
+;; The generative type `name` may see inside, as one of its conversions, or
+;; -1; no longer, once asked.
+(define k-take-inside (subr kstate (symbol) int)
+  (lambda (name)
+    (letrec ((find (subr (read @t) ((listof (pairof symbol int @t) finite)) int)
+                   (lambda (xs) (cond ((null? xs) -1) ((symbol=? (car (car xs)) name) (cdr (car xs))) (else (find (cdr xs))))))
+             (drop (subr (maxeff (read @t) (alloc @t)) ((listof (pairof symbol int @t) finite)) (listof (pairof symbol int @t) finite))
+                   (lambda (xs)
+                     (cond ((null? xs) xs)
+                           ((symbol=? (car (car xs)) name) (cdr xs))
+                           (else (the (listof (pairof symbol int @t) finite) (cons (car xs) (drop (cdr xs)))))))))
+      (let ((g (find (get k-inside))))
+        (begin (if (>= g 0) (set k-inside (drop (get k-inside))) #u) g)))))
 (define k-declare (subr (maxeff checks spin) (top) unit)
   (lambda (form)
     (tagcase form
@@ -3773,6 +4204,11 @@
       (t-define-effect (name def a b)
         (let* ((n (k-name-of name "expected a name")) (e (k-parse-effect def))) (k-push-desc n (ds-eff e))))
       (t-private-regions (rs a b) (k-private rs))
+      (t-define-generative (head rep a b)
+        (let* ((name (k-define-generative head rep)) (g (- (get k-ngens) 1)) (n (symbol->string name)))
+          ;; Only its own conversions, which follow, see inside it.
+          (set k-inside (cons (cons (string->symbol (string-append "down-" n)) g)
+                              (cons (cons (string->symbol (string-append "up-" n)) g) (get k-inside))))))
       (else y #u))))
 
 ;; The first pass: abbreviations, so that types can refer to each other in
@@ -3861,7 +4297,15 @@
                                                       #u
                                                       (begin (set k-recursive (cons (cons name t) rsaved)) (k-note-why g why)))))
                                          #u))
+                              ;; A generative type's own `up-` and `down-` see
+                              ;; inside it.
+                              (inside (k-take-inside name))
+                              (opened (if (>= inside 0) (set k-transparent (cons inside (get k-transparent))) #u))
                               (e (k-check-declared name t x))
+                              (closed (if (>= inside 0)
+                                          (begin (set k-transparent (cdr (get k-transparent)))
+                                                 (set k-conversions (cons (cons name t) (get k-conversions))))
+                                          #u))
                               (popped (set k-recursive rsaved))
                               (after (if (k-lambda? x) #u (k-bind name t))))
                          (cons (k-cat4 "define " (symbol->string name) " : " (k-line t e)) nil))))
