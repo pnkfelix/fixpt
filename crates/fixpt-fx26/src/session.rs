@@ -32,6 +32,12 @@ pub struct Fx26Session {
     /// Under `Strategy::Threaded`: whether the compiler written in FX-26
     /// makes each lambda's register code too, for a machine that runs it.
     pub register_code: bool,
+    /// Under `Strategy::Threaded`: whether each form's [`Outcome::code`] is
+    /// the words the compiler written in FX-26 made for it, those not shown
+    /// for an earlier form, rather than its lowering to Scheme.
+    pub show_words: bool,
+    /// The words shown so far, each as its disassembly.
+    words_shown: std::collections::HashSet<String>,
     /// The initial environment as the FX-26 reader read it, for the checker
     /// written in FX-26: read once, as it takes the reader a while.
     standard26: Option<fixpt_scheme::Handle>,
@@ -209,6 +215,8 @@ impl Fx26Session {
             globals: Globals::default(),
             strategy: Strategy::Lower,
             register_code: false,
+            show_words: false,
+            words_shown: Default::default(),
             standard26: None,
             defined26: String::new(),
             step_limit: Some(DEFAULT_STEP_LIMIT),
@@ -300,9 +308,28 @@ impl Fx26Session {
         if self.strategy != Strategy::Lower {
             let form_text = fixpt_read::write_syntax(form, &self.checker.interner);
             let text = format!("{}{form_text}\n", self.defined26);
-            let out = match self.strategy {
-                Strategy::Evaluate => self.eval_with_own_evaluator(&text)?,
-                _ => self.compile_with_own_compiler(&text)?,
+            let (out, words) = match self.strategy {
+                Strategy::Evaluate => (self.eval_with_own_evaluator(&text)?, None),
+                _ => self.compile_with_own_compiler_showing(&text, self.show_words)?,
+            };
+            // A form is compiled with every definition before it, so only
+            // the words not shown before are this form's.
+            let code = match words {
+                Some(w) => w
+                    .split_inclusive('\n')
+                    .fold(Vec::<String>::new(), |mut blocks, line| {
+                        match blocks.last_mut() {
+                            Some(b) if !line.starts_with("word ") => b.push_str(line),
+                            _ => blocks.push(line.to_string()),
+                        }
+                        blocks
+                    })
+                    .into_iter()
+                    .filter(|b| self.words_shown.insert(b.clone()))
+                    .collect::<String>()
+                    .trim_matches('\n')
+                    .to_string(),
+                None => code,
             };
             if !matches!(top, Top::Exp(_)) && !out.starts_with("!! ") {
                 self.defined26.push_str(&form_text);
@@ -399,6 +426,11 @@ impl Fx26Session {
     /// (read and parsed in FX-26 too), and run it on the threaded machine:
     /// its value as Scheme would write it, or `!! ` and why not.
     pub fn compile_with_own_compiler(&mut self, text: &str) -> R<String> {
+        self.compile_with_own_compiler_showing(text, false).map(|(out, _)| out)
+    }
+
+    /// The same, and, if `show`, the words it made, disassembled.
+    pub fn compile_with_own_compiler_showing(&mut self, text: &str, show: bool) -> R<(String, Option<String>)> {
         if !self.scheme.is_bound(&format!("{READER_PREFIX}compile-program")) {
             load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
         }
@@ -408,7 +440,7 @@ impl Fx26Session {
         self.scheme
             .call_global(&format!("{READER_PREFIX}compile-registers!"), &[on])
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
-        let r = crate::syn::compile_with_fx26_compiler(&mut self.scheme, standard, FileId(0), text);
+        let r = crate::syn::compile_with_fx26_compiler_showing(&mut self.scheme, standard, FileId(0), text, show);
         self.scheme.engine.set_step_limit(self.step_limit);
         r
     }

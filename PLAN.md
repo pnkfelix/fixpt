@@ -1025,8 +1025,8 @@ the order it will be done. Each is committed when done, and marked here.
    returning early. Every test program's register code is the Rust
    compiler's, cell for cell (106 register words), and so is the whole
    bootstrap's, made by the compiler in FX-26 running as register code.
-   Open: the REPL's `--fx26-run threaded` still makes no register code,
-   since it runs words on a machine that does not run it.)*
+   The REPL's `--fx26-run threaded --threaded-machine registers` makes
+   it too.)*
 6. **A nursery, and a write barrier with a remembered set** (raised by
    the user 2026-09-26, "make it toggleable"): the nursery's size zero
    by default, so that it costs nothing when off; measured against the
@@ -1072,6 +1072,10 @@ the order it will be done. Each is committed when done, and marked here.
     2026-09-26): it shows the form's lowering to Scheme, which is not what
     runs there; it should show the words the compiler in FX-26 made, as
     `,disassemble` does for a value.
+    *(Done 2026-09-26: under `--fx26-run threaded`, `,code` shows the
+    words the compiler written in FX-26 made for the form, those it had
+    not shown for an earlier one, since each form is compiled with every
+    definition before it.)*
 11. **A lint on the size of a lambda's body** (raised by the user
     2026-09-26): not a rule of FX-26, but a check that keeps a body from
     growing past what a reader can follow (`check.fx`'s `k-parse-type`,

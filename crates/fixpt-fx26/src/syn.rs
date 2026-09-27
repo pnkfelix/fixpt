@@ -75,6 +75,18 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Session, file: FileId, text: &str) 
 /// compiler written in FX-26, and run the word it makes on the threaded
 /// machine: the value, as Scheme writes it; or `!! ` and why it failed.
 pub fn compile_with_fx26_compiler(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
+    compile_with_fx26_compiler_showing(scheme, standard, file, text, false).map(|(out, _)| out)
+}
+
+/// The same, and, if `show`, the word made, and every word it reaches,
+/// disassembled before it runs.
+pub fn compile_with_fx26_compiler_showing(
+    scheme: &mut Session,
+    standard: Handle,
+    file: FileId,
+    text: &str,
+    show: bool,
+) -> R<(String, Option<String>)> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
         let tops = parse_to_trees(s, file, text)?;
@@ -86,7 +98,7 @@ pub fn compile_with_fx26_compiler(scheme: &mut Session, standard: Handle, file: 
             (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("k-err"))
                 .then(|| r.field(3).and_then(|p| p.field(2)).and_then(|m| m.string()).unwrap_or_default())
         }) {
-            return Ok(format!("!! check: {m}"));
+            return Ok((format!("!! check: {m}"), None));
         }
         let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
         let result = s.call_global(&format!("{READER_PREFIX}compile-program"), &[tops, facts]).map_err(|e| fail(e.to_string()))?;
@@ -97,17 +109,25 @@ pub fn compile_with_fx26_compiler(scheme: &mut Session, standard: Handle, file: 
             (tag, payload.field(2).map(|x| x.string()))
         });
         if tag == "c-err" {
-            return Ok(format!("!! compile: {}", word.flatten().unwrap_or_default()));
+            return Ok((format!("!! compile: {}", word.flatten().unwrap_or_default()), None));
         }
         let word = s.make(|m| {
             let r = m.get(result);
             let payload = m.heap().bloblet_slot(r, 3);
             m.heap().bloblet_slot(payload, 2)
         });
+        let mut words = None;
+        if show {
+            let _ = s.make(|m| {
+                let w = m.get(word);
+                words = Some(fixpt_runtime::disasm::disassemble(m.heap(), w));
+                w
+            });
+        }
         let no_args = s.make(|_| Value::NULL);
         match s.call_global("%run-word", &[word, no_args]) {
-            Ok(v) => Ok(s.write(v)),
-            Err(e) => Ok(format!("!! {}", e.to_string().trim_start_matches("error: threaded word: "))),
+            Ok(v) => Ok((s.write(v), words)),
+            Err(e) => Ok((format!("!! {}", e.to_string().trim_start_matches("error: threaded word: ")), words)),
         }
     })
 }

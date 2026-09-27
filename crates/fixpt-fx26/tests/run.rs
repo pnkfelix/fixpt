@@ -108,3 +108,19 @@ fn the_compiler_uses_the_facts() {
     assert!(listing.contains("prim"), "{listing}");
     assert!(!listing.contains("global"), "{listing}");
 }
+
+/// Compiled by the compiler written in FX-26, a form's code is the words it
+/// made, those not shown for an earlier form: a definition's lambda once,
+/// and the program word, which each form remakes, each time.
+#[test]
+fn threaded_forms_show_their_new_words() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.strategy = fixpt_fx26::session::Strategy::Threaded;
+    s.show_words = true;
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/run/sq.fx")).unwrap();
+    let forms = s.checker.read_in(fixpt_read::FileId(0), &text).expect("reads");
+    let codes: Vec<String> = forms.iter().map(|f| s.run(f).expect("runs").code).collect();
+    let words = |c: &str| c.lines().filter(|l| l.starts_with("word ")).map(|l| l.split(' ').nth(1).unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(words(&codes[0]), ["program", "lambda@45"], "{}", codes[0]);
+    assert_eq!(words(&codes[1]), ["program"], "{}", codes[1]);
+}

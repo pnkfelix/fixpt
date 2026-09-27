@@ -359,6 +359,10 @@ fx26> (+ 1 2)
 3 : int ! pure
 ```
 
+Under `--fx26-run threaded`, `,code` shows instead the threaded words the
+compiler written in FX-26 made for each form, those it had not shown
+before.
+
 ## Layout
 
 | crate           | what it is                                           |

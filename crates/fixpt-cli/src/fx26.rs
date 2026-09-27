@@ -2,7 +2,8 @@
 //!
 //! A form is checked, lowered to Scheme that carries what the checker proved
 //! (`fixpt_fx26::lower`), and run. The REPL prints what FX-87's did — the
-//! value, then ` : <type> ! <effect>` — and `,code` shows the lowered Scheme.
+//! value, then ` : <type> ! <effect>` — and `,code` shows the lowered Scheme
+//! (under `--fx26-run threaded`, the words each form makes).
 //!
 //! Definitions persist between inputs: `(define name type expression)`,
 //! `(define name expression)` and `(define-type name type)`.
@@ -52,7 +53,9 @@ fn report(c: &Checker, top: &Top) -> String {
 /// running it failed.
 fn show(session: &Fx26Session, out: &Outcome, show_code: bool) {
     if show_code && !out.code.is_empty() {
-        println!("; {}", out.code);
+        for line in out.code.lines() {
+            println!("; {line}");
+        }
     }
     print!("{}", out.printed);
     let found = report(&session.checker, &out.top);
@@ -106,6 +109,7 @@ pub fn repl(backend: Backend) -> i32 {
     println!("(each form is checked, {how}.");
     match session.strategy {
         Strategy::Lower => println!(" `,help` for commands, `,code` to show the lowered Scheme. ^D leaves.)"),
+        Strategy::Threaded => println!(" `,help` for commands, `,code` to show the words each form makes. ^D leaves.)"),
         _ => println!(" `,help` for commands, `,code` to show the lowering to Scheme, which is not what runs. ^D leaves.)"),
     }
 
@@ -186,7 +190,9 @@ pub fn repl(backend: Backend) -> i32 {
             "" => continue,
             ",code" => {
                 show_code = !show_code;
-                println!("; lowered Scheme: {}", if show_code { "on" } else { "off" });
+                let what = if session.strategy == Strategy::Threaded { "threaded words" } else { "lowered Scheme" };
+                session.show_words = show_code && session.strategy == Strategy::Threaded;
+                println!("; {what}: {}", if show_code { "on" } else { "off" });
                 continue;
             }
             ",quit" => {
