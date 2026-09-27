@@ -976,6 +976,49 @@ them: the Rust machine, the hand-encoded one, the stencils, and the
 machine-code compilers in Rust and FX-26. Measured against the 13b
 baseline. 13d, typed primitives, follows on the same principle. *(Typed calls done 2026-09-26: 2–12% on the benchmarks.)*
 
+### The queue (written 2026-09-26, at the user's request)
+
+What is agreed, or was raised in the work and not yet written down, in
+the order it will be done. Each is committed when done, and marked here.
+
+1. **Values as addresses** (below, "Values as addresses, not indices"):
+   decided by the user, for after the regions work, which is done.
+2. **Register code's own returns** (13h′ (f)): a return in `x0`, straight
+   to the caller's resume code; the data stack's way only when it returns
+   to stack code.
+3. **The call-outs left hot** (`docs/performance.md`, "Where the
+   self-compile's time goes"): closure creation (1.8 M in the
+   self-compile), `%make-frozen` for sums and products (546 k),
+   `field@`, `string=?`, `%bloblet-fields`, `char-whitespace?`; and the
+   region allocators other than `rcons` (`rnew`, `rmake-array`,
+   `rmake-icell`, `rmake-bloblet`, `rlambda`'s closures), inline as
+   `rcons` is.
+4. **Known calls** (13e and 13h′ (d)): `callk`, a direct call of a known
+   word with no closure fetched; let-conversion of lambdas that do not
+   escape.
+5. **Register code from the compiler written in FX-26** (13h′ (e)).
+6. **A nursery, and a write barrier with a remembered set** (raised by
+   the user 2026-09-26, "make it toggleable"): the nursery's size zero
+   by default, so that it costs nothing when off; measured against the
+   semispaces alone. A reap collected on its own, from the stacks and the
+   regions nested in it, is the typed version of the same idea ("Regions
+   that end").
+7. **Continuations cheaper to capture**: one-shot continuations, or a
+   segmented stack (a stack cache, as Clinger, Hartheimer and Ost
+   describe), measured on a benchmark that captures heavily (the
+   self-compile's reader captures 326 k times through `callcomp`).
+8. **The reader's cursor**: the eager reader allocates a cursor for each
+   character it reads; a cursor kept in place, or a reader that returns
+   its position without allocating.
+9. **Tidying the regions work**: the checker's record of each
+   allocation's region (`NodeFacts::alloc_region`), no longer used to
+   allocate, removed from both checkers; the FX-26 checker's free
+   variables computed once rather than at every mask.
+10. **The type and effect directions** below ("Responsiveness as an
+    effect", "Time complexity as an effect", "Concurrency, and processes
+    as distinct from functions", "Closures that carry their types"):
+    each explored, and concrete tasks drawn from it.
+
 ### Kept open, deliberately
 
 - **Values held by Rust across calls, typed away.** (Raised 2026-09-26,
