@@ -266,7 +266,7 @@
                    (lambda (k) (if (= k 0) #u (begin (c-op c routine-drop) (drops (- k 1)))))))
           (begin (c-op1 c routine-slot! (wcell-int slot)) (drops (- n 1)))))))
 
-(define c-count-let (subr (maxeff (read @a)) ((listof (productof (1 symbol) (2 exp)) finite)) int)
+(define c-count-let (subr (read @a) ((listof (productof (1 symbol) (2 exp)) finite)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-let (cdr bs))))))
 
 ;; `letrec`: every binding is a lambda (the checker says so). Each closure
@@ -311,7 +311,7 @@
 
 (define c-mentions? (subr (maxeff (read @a) (read @k) (alloc @k) spin) (exp symbol) bool)
   (lambda (x n) (c-member? (c-free x nil nil) n)))
-(define c-count-exps (subr (maxeff (read @a)) ((listof exp finite)) int)
+(define c-count-exps (subr (read @a) ((listof exp finite)) int)
   (lambda (es) (if (null? es) 0 (+ 1 (c-count-exps (cdr es))))))
 
 ;; Whether every use of `f` in `x` is a call with `n` arguments in tail
@@ -386,10 +386,10 @@
                         (the cenv (cons (cons g (if (and (= k i) (c-loops-only body g nps #t)) (at-loop 0) (at-pending (+ depth k)))) e))
                         depth (+ k 1) i body nps)))))
 
-(define c-count-letrec (subr (maxeff (read @a)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) int)
+(define c-count-letrec (subr (read @a) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-letrec (cdr bs))))))
 
-(define c-count-params (subr (maxeff (read @a)) ((listof (productof (1 symbol) (2 syns-a)) finite)) int)
+(define c-count-params (subr (read @a) ((listof (productof (1 symbol) (2 syns-a)) finite)) int)
   (lambda (ps) (if (null? ps) 0 (+ 1 (c-count-params (cdr ps))))))
 (define c-param-env (subr (maxeff (read @a) (alloc @k)) ((listof (productof (1 symbol) (2 syns-a)) finite) int cenv) cenv)
   (lambda (ps i acc) (if (null? ps) acc (c-param-env (cdr ps) (+ i 1) (the cenv (cons (cons (extract (car ps) 1) (at-slot i)) acc))))))
@@ -536,7 +536,7 @@
             (c-op1 c routine-closure (wcell-word (c-assemble body (string->symbol name))))
             (c-emit c (i-cell (wcell-int 0))))))))
 
-(define c-count-names (subr (maxeff (read @a)) (names) int)
+(define c-count-names (subr (read @a) (names) int)
   (lambda (ns) (if (null? ns) 0 (+ 1 (c-count-names (cdr ns))))))
 
 ;; A product's members, from the slot after the sum's, each a slot.

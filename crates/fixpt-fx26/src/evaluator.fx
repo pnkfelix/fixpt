@@ -382,7 +382,7 @@
         (begin (bloblet-set! (car cells) 0 (eval (extract (car bs) 3) (get genv))) (rec-fill (cdr bs) (cdr cells))))))
 
 ;; Whether `x` is a lambda, under any type abstractions and ascriptions.
-(define lambda-exp? (subr (maxeff (read @a)) (exp) bool)
+(define lambda-exp? (subr (read @a) (exp) bool)
   (lambda (x)
     (tagcase x
       (e-lambda (ps body a b) #t)

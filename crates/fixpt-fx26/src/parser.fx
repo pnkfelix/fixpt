@@ -114,11 +114,11 @@
 (define syn-int (subr pure (syn) int)
   (lambda (s) (tagcase s (atom (d a b) (if (datum-int? d) (datum-int-value d) -1)) (else x -1))))
 
-(define len (subr (maxeff (read @s)) ((listof syn finite)) int)
+(define len (subr (read @s) ((listof syn finite)) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (len (cdr xs))))))
-(define nth (subr (maxeff parses) ((listof syn finite) int) syn)
+(define nth (subr parses ((listof syn finite) int) syn)
   (lambda (xs i) (if (= i 0) (car xs) (nth (cdr xs) (- i 1)))))
-(define drop (subr (maxeff (read @s)) ((listof syn finite) int) (listof syn finite))
+(define drop (subr (read @s) ((listof syn finite) int) (listof syn finite))
   (lambda (xs i) (if (= i 0) xs (drop (cdr xs) (- i 1)))))
 
 ;; A label or tag: a name, or a positive integer, which is its digits.
@@ -132,16 +132,16 @@
   (lambda (xs) (if (null? xs) nil (cons (car xs) (keep (cdr xs))))))
 
 ;; `(tag x …)` with `n` items, or fail with `shape`.
-(define arity (subr (maxeff parses) ((listof syn finite) int string int int) unit)
+(define arity (subr parses ((listof syn finite) int string int int) unit)
   (lambda (items n shape a b) (if (= (len items) n) #u (pfail-at shape a b))))
-(define at-least (subr (maxeff parses) ((listof syn finite) int string int int) unit)
+(define at-least (subr parses ((listof syn finite) int string int int) unit)
   (lambda (items n shape a b) (if (< (len items) n) (pfail-at shape a b) #u)))
 
-(define parse-params (subr (maxeff parses) (syn) (listof (productof (1 symbol) (2 syns-a)) finite))
+(define parse-params (subr parses (syn) (listof (productof (1 symbol) (2 syns-a)) finite))
   (lambda (ps)
     (if (syn-nil? ps)
         nil
-        (letrec ((each (subr (maxeff parses) ((listof syn finite)) (listof (productof (1 symbol) (2 syns-a)) finite))
+        (letrec ((each (subr parses ((listof syn finite)) (listof (productof (1 symbol) (2 syns-a)) finite))
                    (lambda (xs)
                      (if (null? xs)
                          nil
@@ -163,7 +163,7 @@
 (define arm-else? (subr (read @s) (syn) bool)
   (lambda (c) (tagcase c (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) 'else))) (else x #f))))
 
-(define parse-names (subr (maxeff parses) ((listof syn finite)) names)
+(define parse-names (subr parses ((listof syn finite)) names)
   (lambda (xs) (if (null? xs) nil (cons (syn-symbol (car xs)) (parse-names (cdr xs))))))
 
 ;;; ------------------------------------------------------------ expressions
@@ -456,7 +456,7 @@
         nil
         (let* ((pair (mk-list (cons (mk-int i a b) (cons (car ms) nil)) a b)) (rest (dt-labelled (cdr ms) (+ i 1) a b)))
           (cons pair rest)))))
-(define dt-arms (subr (maxeff parses) ((listof syn finite) int int) (listof syn finite))
+(define dt-arms (subr parses ((listof syn finite) int int) (listof syn finite))
   (lambda (vs a b)
     (if (null? vs)
         nil
@@ -478,7 +478,7 @@
         nil
         (cons (product (1 (string->symbol (int->string i))) (2 (e-var (string->symbol (string-append "%x" (int->string i))) a b)))
               (dt-fields (cdr ms) (+ i 1) a b)))))
-(define dt-constructors (subr (maxeff parses) (syn (listof syn finite) int int) (listof top finite))
+(define dt-constructors (subr parses (syn (listof syn finite) int int) (listof top finite))
   (lambda (name vs a b)
     (if (null? vs)
         nil
@@ -490,7 +490,7 @@
                (ctor (t-define (syn-symbol tag) (the syns-a (cons ty nil)) (e-lambda (dt-params members 1) body a b) a b))
                (rest (dt-constructors name (cdr vs) a b)))
           (cons ctor rest)))))
-(define parse-datatype (subr (maxeff parses) (syn) (listof top finite))
+(define parse-datatype (subr parses (syn) (listof top finite))
   (lambda (s)
     (let* ((items (syn-items s "a datatype")) (a (syn-start s)) (b (syn-end s)))
       (if (or (< (len items) 3) (not (syn-symbol? (nth items 1))))
