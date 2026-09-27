@@ -67,10 +67,21 @@ checker can compute from variables in scope, or a literal), `body` runs
 with `x : (vec T n)`; otherwise `else`. Sugar, as `acyclic` is, over a
 test and a certifying conversion the checker accepts only in its branch.
 
+## `nat`, and sizes as values (the user's, 2026-09-27)
+
+- **`nat`**, a base type below `int`: never negative. Size-change then has
+  a bound below for free on a `nat` that counts down; typing `(- n 1)` as a
+  `nat` needs the fact `n ≥ 1`, which N5b's facts give.
+- **`(nat s)`**, the singleton: exactly the size `s`, as Dependent ML's
+  `int(n)` (from memory). What links values to sizes: `length : (vec T n)
+  → (nat n)`, `confirm-length` with a length computed at run time, and an
+  array index `(nat i)` with the fact `i < n` (CF4).
+
 ## Stages
 
-| stage | what                                                                                                                            |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------- |
-| N5a   | the `vec` type with literal sizes and `finite`; `cons`, `nil`; `vec finite` as `listof finite`; `confirm-length` with a literal |
-| N5b   | kind `size`, variables in `poly`; facts from `null?`; `cdr`; equalities                                                         |
-| N5c   | arithmetic and inequalities (Fourier–Motzkin); existentials for results such as `filter`'s; array bounds                        |
+| stage | what                                                                                                                                  |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| N5a   | done: the `vec` type with literal sizes and `finite`; `cons`, `nil`; `vec finite` as `listof finite`; `confirm-length` with a literal |
+| N5b   | kind `size`, variables in `poly`; facts from `null?`; `cdr`; equalities                                                               |
+| N5c   | arithmetic and inequalities (Fourier–Motzkin); existentials for results such as `filter`'s; array bounds                              |
+| N5d   | `nat` and `(nat s)`; `length`; `confirm-length` with a run-time length                                                                |
