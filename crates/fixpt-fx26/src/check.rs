@@ -273,7 +273,11 @@ impl Checker {
                 }
                 let mut map = HashMap::new();
                 for ((v, k), d) in binders.iter().zip(args) {
-                    let ok = matches!((k, &d), (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type, D::Type(_)));
+                    let ok = match (k, &d) {
+                        (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type, D::Type(_)) => true,
+                        (Kind::Place, D::Region(r)) => self.arena.is_place(*r),
+                        _ => false,
+                    };
                     if !ok {
                         return Err(FxError::at(span, format!("`{}` is bound as a {k:?}, and the description given is not one", self.interner.name(self.arena.dvar_name(*v)))));
                     }
@@ -781,7 +785,7 @@ impl Checker {
                     .zip(&ba)
                     .map(|((vb, k), (va, _))| {
                         let d = match k {
-                            Kind::Region => D::Region(Region::Var(*va)),
+                            Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
                             Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
                             Kind::Type => D::Type(self.arena.ty(Ty::Var(*va))),
                         };

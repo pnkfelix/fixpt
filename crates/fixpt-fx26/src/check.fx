@@ -239,6 +239,14 @@
   (lambda (name)
     (let ((n (get k-ndvars)))
       (begin (set k-dvars (cons name (get k-dvars))) (set k-ndvars (+ n 1)) n))))
+;; The description variables bound as places (kind 3), which are regions too.
+(define k-places (ref k-ids @t) (new nil))
+(define k-new-dvar-of (subr kstate (symbol int) int)
+  (lambda (name kind)
+    (let ((v (k-new-dvar name)))
+      (begin (if (= kind 3) (set k-places (cons v (get k-places))) #u) v))))
+(define k-place-var? (subr (read @t) (int) bool)
+  (lambda (v) (k-has-id? (get k-places) v)))
 (define k-dvar-name (subr (read @t) (int) symbol)
   (lambda (v) (k-nth (get k-dvars) (- (- (get k-ndvars) 1) v))))
 
@@ -390,10 +398,13 @@
           (else (k-cat3 "(maxeff" (k-atoms-show e) ")")))))
 
 (define k-kind-name (subr pure (int) string)
-  (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") (else "type"))))
+  (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") (else "type"))))
 ;; As Rust's `{:?}` writes a kind.
 (define k-kind-debug (subr pure (int) string)
-  (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") (else "Type"))))
+  (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") ((= k 3) "Place") (else "Type"))))
+;; Whether a region is a place: a variable bound as one.
+(define k-place? (subr (read @t) (k-region) bool)
+  (lambda (r) (tagcase r (r-var (v) (k-place-var? v)) (else x #f))))
 
 ;; The name `define-type` gave `t`, innermost first: each name's innermost
 ;; binding only.
@@ -489,8 +500,8 @@
 (define k-parse-kind (subr checks (syn) int)
   (lambda (s)
     (let ((n (if (syn-symbol? s) (syn-name s) "")))
-      (cond ((string=? n "region") 0) ((string=? n "effect") 1) ((string=? n "type") 2)
-            (else (k-sfail "a kind is `region`, `effect` or `type`" s))))))
+      (cond ((string=? n "region") 0) ((string=? n "place") 3) ((string=? n "effect") 1) ((string=? n "type") 2)
+            (else (k-sfail "a kind is `region`, `place`, `effect` or `type`" s))))))
 (define k-binders-each (subr checks ((listof syn @s)) k-binders)
   (lambda (bs)
     (if (null? bs)
@@ -499,7 +510,7 @@
           (if (= (k-length pair) 2)
               (let* ((name (k-name-of (car pair) "a binder's name"))
                      (kind (k-parse-kind (k-nth pair 1)))
-                     (v (k-new-dvar name))
+                     (v (k-new-dvar-of name kind))
                      (pushed (k-push-desc name (ds-var v kind)))
                      (rest (k-binders-each (cdr bs))))
                 (cons (product (1 v) (2 kind)) rest))
@@ -527,9 +538,15 @@
                 (if (null? d)
                     (k-sfail (no) s)
                     (tagcase (car d)
-                      (ds-var (v k) (if (= k 0) (r-var v) (k-sfail (no) s)))
+                      (ds-var (v k) (if (or (= k 0) (= k 3)) (r-var v) (k-sfail (no) s)))
                       (ds-region (r) r)
                       (else x (k-sfail (no) s))))))))))
+
+;; A place: a region that is one.
+(define k-parse-place (subr checks (syn) k-region)
+  (lambda (s)
+    (let ((r (k-parse-region s)))
+      (if (k-place? r) r (k-sfail (string-append (k-quote (k-region-show r)) " is not a place") s)))))
 
 (define-rec
   (k-effects (subr checks ((listof syn @s)) k-eff)
@@ -725,7 +742,7 @@
                   ((symbol=? hd 'place)
                    (begin
                      (k-shape (= n 2) "`(place region)`" s)
-                     (k-ty-new (ty-place (k-parse-region (k-nth items 1))))))
+                     (k-ty-new (ty-place (k-parse-place (k-nth items 1))))))
                   ((symbol=? hd 'mark-key)
                    (begin
                      (k-shape (= n 3) "`(mark-key type region)`" s)
@@ -776,6 +793,7 @@
           (let* ((k (extract (car ps) 2))
                  (d (cond ((= k 2) (ds-rec (k-parse-type (car args))))
                           ((= k 0) (ds-region (k-parse-region (car args))))
+                          ((= k 3) (ds-region (k-parse-place (car args))))
                           (else (ds-eff (k-parse-effect (car args))))))
                  (rest (k-abbrev-args (cdr ps) (cdr args))))
             (cons (cons (extract (car ps) 1) d) rest))))))
@@ -804,7 +822,7 @@
                        (dt (k-parse-type s))
                        (tagcase (car d)
                          (ds-var (v k)
-                           (cond ((= k 0) (dr (r-var v))) ((= k 1) (de (k-one (a-var v)))) (else (dt (k-parse-type s)))))
+                           (cond ((or (= k 0) (= k 3)) (dr (r-var v))) ((= k 1) (de (k-one (a-var v)))) (else (dt (k-parse-type s)))))
                          (ds-eff (e) (de e))
                          (else x (dt (k-parse-type s)))))))))
         (let ((hd (k-head (k-items s "a description"))))
@@ -893,8 +911,11 @@
           (let* ((rx (k-resolve-exp r)) (lx (k-resolve-exp l))) (x-rlambda rx lx a b)))
         (e-letregion (k name body a b)
           (let* ((saved (get k-dscope))
-                 (v (k-new-dvar name))
-                 (pushed (k-push-desc name (ds-var v 0)))
+                 ;; `letrena` and `letreap` make a place (which is also a
+                 ;; region), `letregion` a region only.
+                 (kind (if (= k 0) 0 3))
+                 (v (k-new-dvar-of name kind))
+                 (pushed (k-push-desc name (ds-var v kind)))
                  (x (k-resolve-exp body)))
             (begin (set k-dscope saved) (x-letregion k v x a b))))
         (e-proj (body ds a b)
@@ -990,7 +1011,7 @@
   (lambda ()
     (begin
       (set k-extracts nil)
-      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
+      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
@@ -1287,7 +1308,7 @@
     (if (null? bs)
         nil
         (let* ((vb (extract (car bs) 1)) (k (extract (car bs) 2)) (va (extract (car as) 1))
-               (d (cond ((= k 0) (dr (r-var va))) ((= k 1) (de (k-one (a-var va)))) (else (dt (k-ty-new (ty-var va))))))
+               (d (cond ((or (= k 0) (= k 3)) (dr (r-var va))) ((= k 1) (de (k-one (a-var va)))) (else (dt (k-ty-new (ty-var va))))))
                (rest (k-rename (cdr bs) (cdr as))))
           (cons (cons vb d) rest)))))
 (define k-same-kinds? (subr (read @t) (k-binders k-binders) bool)
@@ -1463,7 +1484,7 @@
     (if (null? bs)
         nil
         (let* ((v (extract (car bs) 1)) (k (extract (car bs) 2)) (d (car ds))
-               (ok (tagcase d (dr (r) (= k 0)) (de (e) (= k 1)) (dt (t) (= k 2)))))
+               (ok (tagcase d (dr (r) (or (= k 0) (and (= k 3) (k-place? r)))) (de (e) (= k 1)) (dt (t) (= k 2)))))
           (if ok
               (cons (cons v d) (k-proj-map (cdr bs) (cdr ds) a b))
               (k-fail (k-cat4 (k-quote (symbol->string (k-dvar-name v))) " is bound as a " (k-kind-debug k)

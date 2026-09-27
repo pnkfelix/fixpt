@@ -79,7 +79,7 @@ impl Checker {
                     .zip(&binders)
                     .map(|((vb, k), (va, _))| {
                         let d = match k {
-                            Kind::Region => D::Region(Region::Var(*va)),
+                            Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
                             Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
                             Kind::Type => D::Type(self.arena.ty(Ty::Var(*va))),
                         };
@@ -492,7 +492,7 @@ impl Checker {
                 Kind::Effect => {
                     map.insert(*v, D::Effect(Effect::pure()));
                 }
-                Kind::Type => {
+                Kind::Type | Kind::Place => {
                     return Err(FxError::at(
                         span,
                         format!(

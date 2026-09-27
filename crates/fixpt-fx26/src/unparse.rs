@@ -84,6 +84,7 @@ impl Checker {
                     .map(|(v, k)| {
                         let k = match k {
                             Kind::Region => "region",
+                            Kind::Place => "place",
                             Kind::Effect => "effect",
                             Kind::Type => "type",
                         };

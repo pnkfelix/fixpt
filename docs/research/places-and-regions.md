@@ -159,8 +159,14 @@ writes. Pairs have no header, so lists could not be frozen that way.
    *Begun 2026-09-27:* the type `(place r)` in place of `(region r)`, and
    `letregion`, in both checkers, the lowering, both compilers, register
    code from both, and the evaluator; `letrena` and `letreap` keep their
-   meaning. A place is still named by its region's name: place names of
-   their own, `arena` and `reap`, and `r in p` come with PR2.
+   meaning. Then, as the user chose, places are a kind of their own,
+   `place`, with `place ≤ region` (a place is the region of the data
+   allocated in it directly): `letrena` and `letreap` bind places,
+   `letregion` a region, `(p place)` binds one in a `poly`, and
+   `(place x)` and a place binder take only a place. The allocators are
+   `(poly ((r place)) …)`, allocating at the place's own region; several
+   regions in one place, with `r in p` and `(alloc p)` for the place's
+   liveness, are PR2.
    - `place` kind, `(place p)` type, `arena` and `reap` forms, and
      `letregion`, in both checkers.
    - `letrena` and `letreap` as sugar.

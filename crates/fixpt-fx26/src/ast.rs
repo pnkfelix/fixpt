@@ -16,8 +16,19 @@ use std::collections::BTreeSet;
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum Kind {
     Region,
+    /// A place, where data is allocated; every place is also a region
+    /// (`docs/research/places-and-regions.md`).
+    Place,
     Effect,
     Type,
+}
+
+impl Kind {
+    /// Whether a description of kind `self` may stand where one of kind
+    /// `want` is expected: the same kind, or a place for a region.
+    pub fn fits(self, want: Kind) -> bool {
+        self == want || (self == Kind::Place && want == Kind::Region)
+    }
 }
 
 /// A description variable, bound by `poly`, `plambda` or a projection's
@@ -314,6 +325,8 @@ pub struct Arena {
     exps: Vec<(Span, Exp)>,
     /// Names of description variables, for printing.
     dvar_names: Vec<Sym>,
+    /// Whether each description variable is a place.
+    dvar_places: Vec<bool>,
 }
 
 impl Arena {
@@ -358,7 +371,20 @@ impl Arena {
 
     pub fn dvar(&mut self, name: Sym) -> DVar {
         self.dvar_names.push(name);
+        self.dvar_places.push(false);
         DVar(self.dvar_names.len() as u32 - 1)
+    }
+
+    /// A description variable of kind `kind`.
+    pub fn dvar_of(&mut self, name: Sym, kind: Kind) -> DVar {
+        let v = self.dvar(name);
+        self.dvar_places[v.0 as usize] = kind == Kind::Place;
+        v
+    }
+
+    /// Whether region `r` is a place: a variable bound as one.
+    pub fn is_place(&self, r: Region) -> bool {
+        matches!(r, Region::Var(v) if self.dvar_places[v.0 as usize])
     }
 
     pub fn dvar_name(&self, v: DVar) -> Sym {
@@ -378,6 +404,7 @@ impl Arena {
         self.tys.truncate(mark.tys);
         self.exps.truncate(mark.exps);
         self.dvar_names.truncate(mark.dvars);
+        self.dvar_places.truncate(mark.dvars);
     }
 }
 

@@ -67,9 +67,10 @@ impl Checker {
     fn parse_kind(&self, s: &Syntax) -> R<Kind> {
         match s.as_symbol().map(|k| self.name(k)) {
             Some("region") => Ok(Kind::Region),
+            Some("place") => Ok(Kind::Place),
             Some("effect") => Ok(Kind::Effect),
             Some("type") => Ok(Kind::Type),
-            _ => Err(FxError::at(s.span, "a kind is `region`, `effect` or `type`")),
+            _ => Err(FxError::at(s.span, "a kind is `region`, `place`, `effect` or `type`")),
         }
     }
 
@@ -83,7 +84,7 @@ impl Checker {
             };
             let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a binder's name"))?;
             let kind = self.parse_kind(kind)?;
-            let v = self.arena.dvar(name);
+            let v = self.arena.dvar_of(name, kind);
             self.dscope.push((name, DScope::Var(v, kind)));
             out.push((v, kind));
         }
@@ -99,10 +100,19 @@ impl Checker {
             return Ok(self.region_constant(sym));
         }
         match self.lookup_desc(sym) {
-            Some(DScope::Var(v, Kind::Region)) => Ok(Region::Var(v)),
+            Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(Region::Var(v)),
             Some(DScope::Region(r)) => Ok(r),
             _ => Err(FxError::at(s.span, format!("`{}` is not a region", self.name(sym)))),
         }
+    }
+
+    /// A place: a region that is one.
+    pub(crate) fn parse_place(&self, s: &Syntax) -> R<Region> {
+        let r = self.parse_region(s)?;
+        if !self.arena.is_place(r) {
+            return Err(FxError::at(s.span, format!("`{}` is not a place", self.show_region(r))));
+        }
+        Ok(r)
     }
 
     // ------------------------------------------------------------- effects
@@ -214,7 +224,7 @@ impl Checker {
                 let [_, r] = &items[..] else {
                     return Err(FxError::at(s.span, "`(place region)`"));
                 };
-                let r = self.parse_region(r)?;
+                let r = self.parse_place(r)?;
                 Ok(self.arena.ty(Ty::Place(r)))
             }
             "pairof" => {
@@ -386,6 +396,7 @@ impl Checker {
             let d = match k {
                 Kind::Type => DScope::Rec(self.parse_type(a)?),
                 Kind::Region => DScope::Region(self.parse_region(a)?),
+                Kind::Place => DScope::Region(self.parse_place(a)?),
                 Kind::Effect => DScope::Eff(self.parse_effect(a)?),
             };
             bound.push((*p, d));
@@ -430,7 +441,7 @@ impl Checker {
                 return Ok(D::Effect(Effect::pure()));
             }
             return match self.lookup_desc(sym) {
-                Some(DScope::Var(v, Kind::Region)) => Ok(D::Region(Region::Var(v))),
+                Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(D::Region(Region::Var(v))),
                 Some(DScope::Var(v, Kind::Effect)) => Ok(D::Effect(Effect::atom(Atom::Var(v)))),
                 Some(DScope::Eff(e)) => Ok(D::Effect(e)),
                 _ => Ok(D::Type(self.parse_type(s)?)),
@@ -664,8 +675,11 @@ impl Checker {
                     _ => RegionForm::Reap,
                 };
                 let depth = self.dscope.len();
-                let region = self.arena.dvar(name);
-                self.dscope.push((name, DScope::Var(region, Kind::Region)));
+                // `letrena` and `letreap` make a place (which is also a
+                // region), `letregion` a region only.
+                let kind = if form == RegionForm::Region { Kind::Region } else { Kind::Place };
+                let region = self.arena.dvar_of(name, kind);
+                self.dscope.push((name, DScope::Var(region, kind)));
                 let body = self.parse_body(span, body);
                 self.dscope.truncate(depth);
                 Ok(self.arena.exp(span, Exp::LetRegion { form, region, body: body? }))
