@@ -91,8 +91,41 @@ could run a spin-free form with no budget.
    (docs/performance.md, "What a word's entry poll costs").
 5. **R5 (M). The poll analysis in both compilers.** *Dropped*: R4 shows
    nothing to gain.
-6. **R6 (M). A `spin` atom in both checkers**, with the knot rules above,
-   declared types "may spin" unless total, and the licence reporting it.
+6. **R6 (M). A `spin` atom in both checkers**, and the licence reporting
+   it. The design, as settled with the user on 2026-09-27 up to one
+   choice:
+   - `spin` is one atom, written bare as `pure` is, with no region. So
+     masking never removes it, and no handler discharges it.
+   - It is introduced by three rules. Primitives never introduce it; the
+     standard operations that call a function argument (`with-mark`,
+     `prompt`'s handler, `cwcc`) apply rules 2 and 3 to it.
+     1. *Recursion*: a call within a `letrec` or `define-rec` group, or of
+        a definition's own name. Self tail loops count: a loop is
+        unbounded, though it polls.
+     2. *Knots through the store*: a call of a closure that is not a known
+        definition, whose latent effect reads or awaits a region, or is an
+        effect variable. Every cycle that is not recursion fetches a
+        closure from a `ref`, I-cell or array somewhere on it, and that
+        read is in the latent effect of every function on the cycle. A
+        bare effect variable counts, so that polymorphic code is sound.
+     3. *Recursive types*: a call through a function whose type involves
+        a `dletrec` type (self-application; a continuation given itself).
+   - Size-indexed data (`docs/research/confirmation.md`) is how recursion
+     over a decreasing size could later stop being `spin`.
+   - **The open choice, the user's:** how written types treat `spin`,
+     since a declared effect must cover the inferred one.
+     - *(a) Explicit, as Koka's `div`* (from memory): written effects mean
+       what they say, so a recursive definition's type says `spin`. The
+       front end mostly writes named effects (`checks`, `parses`,
+       `reads`), so adding `spin` to those `define-effect`s covers most of
+       it; a script driven by the checker's errors does the rest.
+       Recommended.
+     - *(b) Implicit*: a written effect means "may spin" unless marked
+       `(total …)`. Nothing existing changes, but nothing is spin-free
+       unless someone writes `total`, and every printed effect changes
+       meaning.
+   - A sibling atom, `nondet`, for a mailbox with several senders, comes
+     with actors (`docs/research/actors-and-distribution.md`, M3).
 7. **R7 (S). Speculation without a budget for spin-free forms.** After R6.
 8. **R8 (M, optional). Stack-depth checks hoisted.** *Dropped*, for R4's
    reason.
@@ -161,6 +194,11 @@ keep elsewhere:
    invokes its capture stays bounded; `await`'s time under processes.
 
 ## 3. Concurrency, and processes as distinct from functions
+
+*Refined 2026-09-27 by `docs/research/actors-and-distribution.md`, which
+takes the Actor model and Erlang as the model, for distribution as much
+as for local concurrency, and whose tasks (A1–N6) replace P1–P3, P6 and
+P12 below.*
 
 **What FX had.** Lucassen's thesis, chapter 6 ("Explicit Concurrency"):
 `cobegin`, whose branches may not write a region another branch reads or

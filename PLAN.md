@@ -1107,6 +1107,24 @@ the order it will be done. Each is committed when done, and marked here.
     charge no fuel, but a loop through one stops at the limit (R2,
     tested).)*
 
+### The next queue (with the user, 2026-09-27)
+
+In the user's order:
+1. **Places and regions**: split what FX-26 calls a region into places
+   (for allocation) and regions (for analysis), first as a refactoring
+   with no change of meaning (`docs/research/places-and-regions.md`,
+   PR1), then several regions in a place, `letfreeze` and `const`,
+   `where` constraints (PR2–PR5). Outlives between places later (PR6).
+2. **Confirming a type at run time**: `confirm`, sizes, and walking
+   cyclic data without diverging (`docs/research/confirmation.md`,
+   CF1–CF5).
+3. **Responsiveness**: the `spin` atom, waiting on the user's choice of
+   explicit or implicit (`docs/research/type-and-effect-directions.md`,
+   R6, R7). R1–R4 are done; R5 and R8 are dropped, since an entry poll
+   costs nothing measurable.
+4. **Concurrency and processes**, after the Actor model and Erlang, local
+   and distributed (`docs/research/actors-and-distribution.md`, A1–N6).
+
 ### Kept open, deliberately
 
 - **Values held by Rust across calls, typed away.** (Raised 2026-09-26,
