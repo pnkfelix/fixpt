@@ -1141,6 +1141,13 @@ In the user's order:
    the size indices of `confirm` (CF3, CF4), where a variant's type would
    say its size, and the typed interpreter this repository keeps growing,
    whose `eval` could then be given a precise type.
+8. **Two FX-26 front ends** (the user's, 2026-09-27): the present one keeps
+   mirroring the Rust, as the oracle agreement tests need; a second uses
+   FX-26's features as fully as it can (nominal ids, regions by role,
+   per-procedure effects, `finite` and `data`), and must agree on outputs
+   only, so tests become three-way. Staged: the reader and parser first
+   (they change rarely); the checker after N1–N3 (`docs/research/gadts.md`);
+   then decide which bootstraps.
 7. **Parametric datatypes** (done 2026-09-27; `docs/fx26.md`): `define-datatype`
    with parameters, and type families that mention themselves with the same
    parameters (regular, so tied as a knot, not expanded without end:
