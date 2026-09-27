@@ -440,7 +440,7 @@ impl Fx26Session {
         self.scheme
             .call_global(&format!("{READER_PREFIX}compile-registers!"), &[on])
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
-        let r = crate::syn::compile_with_fx26_compiler_showing(&mut self.scheme, standard, FileId(0), text, show);
+        let r = crate::syn::compile_with_fx26_compiler_showing(&mut self.scheme, standard, FileId(0), text, show, self.step_limit);
         self.scheme.engine.set_step_limit(self.step_limit);
         r
     }

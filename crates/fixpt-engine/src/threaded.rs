@@ -1066,7 +1066,7 @@ impl Machine {
 /// With `FIXPT_PROFILE` set, the words that ran the most cells are written
 /// to stderr after each run.
 pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
-    let mut m = Machine::new();
+    let mut m = Machine::with_fuel(rt.word_fuel);
     let profiling = std::env::var_os("FIXPT_PROFILE").is_some();
     if profiling {
         m.profile = Some(Profile::default());

@@ -75,17 +75,18 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Session, file: FileId, text: &str) 
 /// compiler written in FX-26, and run the word it makes on the threaded
 /// machine: the value, as Scheme writes it; or `!! ` and why it failed.
 pub fn compile_with_fx26_compiler(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
-    compile_with_fx26_compiler_showing(scheme, standard, file, text, false).map(|(out, _)| out)
+    compile_with_fx26_compiler_showing(scheme, standard, file, text, false, None).map(|(out, _)| out)
 }
 
 /// The same, and, if `show`, the word made, and every word it reaches,
-/// disassembled before it runs.
+/// disassembled before it runs; the run limited to `steps`, if given.
 pub fn compile_with_fx26_compiler_showing(
     scheme: &mut Session,
     standard: Handle,
     file: FileId,
     text: &str,
     show: bool,
+    steps: Option<u64>,
 ) -> R<(String, Option<String>)> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
@@ -125,9 +126,18 @@ pub fn compile_with_fx26_compiler_showing(
             });
         }
         let no_args = s.make(|_| Value::NULL);
-        match s.call_global("%run-word", &[word, no_args]) {
+        s.runtime_unrooted().word_fuel = steps.unwrap_or(u64::MAX);
+        let run = s.call_global("%run-word", &[word, no_args]);
+        s.runtime_unrooted().word_fuel = u64::MAX;
+        match run {
             Ok(v) => Ok((s.write(v), words)),
-            Err(e) => Ok((format!("!! {}", e.to_string().trim_start_matches("error: threaded word: ")), words)),
+            Err(e) => {
+                let why = e.to_string();
+                let why = why.trim_start_matches("error: threaded word: ");
+                // As the lowered form says it, whichever machine ran out.
+                let why = if why.contains("OutOfFuel") { "evaluation step limit exceeded" } else { why };
+                Ok((format!("!! {why}"), words))
+            }
         }
     })
 }

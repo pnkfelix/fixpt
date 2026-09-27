@@ -32,6 +32,10 @@ pub struct Runtime {
     /// How `%run-word` runs a threaded word: the threaded machine lives in
     /// `fixpt-engine`, above this crate, which installs it.
     pub run_word: Option<RunWord>,
+    /// How many steps (cells, or polls in machine code) a run of a word by
+    /// `run_word` may take before it stops; unlimited unless set, as the
+    /// FX-26 REPL sets it from its step limit for the run of a form.
+    pub word_fuel: u64,
 }
 
 /// Run threaded word `word` with `args` on its data stack; its value, or
@@ -70,6 +74,7 @@ impl Runtime {
             file_base: std::path::PathBuf::from("."),
             error_rtd_root,
             run_word: None,
+            word_fuel: u64::MAX,
         }
     }
 
@@ -147,6 +152,7 @@ impl Runtime {
             file_base: std::path::PathBuf::from("."),
             error_rtd_root: ERROR_RTD_ROOT,
             run_word: None,
+            word_fuel: u64::MAX,
         }
     }
 }

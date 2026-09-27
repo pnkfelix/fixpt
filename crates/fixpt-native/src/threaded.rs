@@ -1672,7 +1672,8 @@ pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value],
         if compile {
             m.compile_reachable(&mut rt.heap, word)?;
         }
-        let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+        let fuel = rt.word_fuel;
+        let out = m.run_in_runtime(rt, word, args, fuel).map_err(|t| format!("{t:?}"));
         report_callouts();
         out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
     })
@@ -1688,7 +1689,8 @@ pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[
         };
         let m = m.get_or_insert_with(NativeMachine::new);
         m.compile_reachable_as(&mut rt.heap, word, true)?;
-        let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+        let fuel = rt.word_fuel;
+        let out = m.run_in_runtime(rt, word, args, fuel).map_err(|t| format!("{t:?}"));
         report_callouts();
         out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
     })
