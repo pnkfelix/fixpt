@@ -96,6 +96,15 @@ impl Asm {
     fn resumed(&mut self, fields: usize) {
         self.e(ldr_post(RESULT, DSP, 8));
         self.pool(fields);
+        self.relink();
+    }
+    /// `x30` is the link again, from the frame: after a call or a call-out,
+    /// which change it. So it is the link wherever the procedure is, and
+    /// leaving the frame need not load it.
+    fn relink(&mut self) {
+        if let Some(m) = self.link {
+            self.slot(LR, m, false);
+        }
     }
     /// A call-out to routine `n` with the ip at field `f`: as
     /// [`callout`](Asm::callout), but on, whatever the routine, to the code
@@ -268,6 +277,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
             // has 0 (the adapter).
             "save" => {
                 let m = k(o(0));
+                a.link = Some(m);
                 a.sub_const(DSP, DSP, 8 * (m as u64 + 1));
                 a.value(X15, Value::FALSE);
                 for s in 1..=m {
@@ -279,7 +289,6 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
             }
             "pop" => {
                 let m = k(o(0));
-                a.slot(LR, m, false);
                 a.e(add_imm(DSP, DSP, 8 * (m as u32 + 1)));
             }
             "stack" => a.slot(RESULT, k(o(0)), false),
@@ -430,6 +439,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     a.e(ldr_post(RESULT, DSP, 8));
                     a.bind(back);
                     a.pool(fields);
+                    a.relink();
                 }
             }
             // To an entry a `blr` pushed: the caller's registers from it,
@@ -482,6 +492,23 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     Ok((a.finish(), resume))
 }
 
+/// With `FIXPT_REGCODE_DUMP=file`, each register word's machine code is
+/// appended to `file`, for looking at: a line of its name and where it
+/// starts in the code space, then its instructions, one to a line, as
+/// `.inst` directives an assembler takes back.
+fn dump(heap: &Heap, rw: Value, at: usize, code: &[u32]) {
+    let Ok(file) = std::env::var("FIXPT_REGCODE_DUMP") else { return };
+    let name = heap.symbol_name(heap.bloblet_slot(rw, WORD_NAME));
+    let mut text = format!("// {name} at {at:#x}\n");
+    for w in code {
+        text.push_str(&format!("  .inst {w:#010x}\n"));
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        let _ = f.write_all(text.as_bytes());
+    }
+}
+
 /// The entry a stack-code caller takes into a word with register code: the
 /// `n` arguments from its frame into registers, the frame dropped, and on
 /// to the register word's entry, native slot `slot`.
@@ -512,6 +539,7 @@ impl NativeMachine {
         let (code, _) = assemble_register_word(heap, rw, [0, 0])?;
         let (at, far) = self.reserve(code.len())?;
         let (code, resume) = assemble_register_word(heap, rw, far)?;
+        dump(heap, rw, at, &code);
         self.install(heap, rw, at, &code, &resume)?;
         let slot = heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum() as usize;
         let n = heap.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;

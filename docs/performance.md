@@ -749,10 +749,18 @@ return is predicted as an indirect branch, which learns the pattern:
 `fib` 5.7 ms, `closures` 25.5 ms. Non-tail recursion over a list as long
 as the data is ordinary in Scheme, so returns are by `br x30`.
 
-**Not yet explained.** `closures` is still 10% slower than before, and
-`lists` 5% (alone, in a fresh session; 10% in the table). With the old
-calling convention restored and the rest kept, `lists` is as slow, and
-so with the stubs back after each instruction; `lists` makes only 6,000
-calls, and its time is in two loops whose instructions this change does
-not touch. What is left is where their code lands. A way to dump a
-register word's machine code would settle it (PLAN.md).
+**What `closures` and `lists` paid, found by looking.** With the old
+calling convention restored, `lists` was as slow, which pointed away
+from calls. `FIXPT_REGCODE_DUMP=file` now writes each register word's
+machine code as `.inst` lines, which `clang -c` and `objdump -d`
+disassemble. `lists`' `iota` is not a loop: its self-call is through a
+global, so each of its three million iterations is a tail call, which
+leaves the frame and makes a new one; and each paid a load of the link
+as it left and a store as it made the frame. (`closures`' `upto` and
+`total` are the same.) So the link now stays in `x30` through the body,
+loaded from the frame only after a call or a call-out, which change it;
+leaving the frame loads nothing. What is left is the store of the link
+when the frame is made, into a slot the collector would otherwise need
+initialized anyway: `closures` 25.1 ms, `lists` 13.9–14.7 ms, against
+23.7 and 13.5 before. A self-call through a global made a loop (known
+calls, PLAN.md item 4) removes the frame from each iteration.

@@ -988,11 +988,11 @@ the order it will be done. Each is committed when done, and marked here.
    to the caller's resume code; the data stack's way only when it returns
    to stack code.
    *(Done 2026-09-26: a `blr`, a marked return entry, and a return by
-   `br x30`; `fib` −22%, `tak` −13%, `loop` −18%, but `closures` +10% and
-   `lists` +5–10%, not yet explained, `docs/performance.md`. Next: a
-   dump of a register word's machine code, to see where `lists`' loops
-   land; and what is left on the calling side, where `closures` pays
-   about 4 cycles a call more than before.)*
+   `br x30`; `fib` −22%, `tak` −13%, `loop` −18%. `closures` and `lists`
+   paid for the link on every tail call through a global, which
+   `FIXPT_REGCODE_DUMP` showed; the link now stays in `x30`, and they are
+   within 6% of before, `docs/performance.md`. Such self-calls made loops
+   is item 4.)*
 3. **The call-outs left hot** (`docs/performance.md`, "Where the
    self-compile's time goes"): closure creation (1.8 M in the
    self-compile), `%make-frozen` for sums and products (546 k),

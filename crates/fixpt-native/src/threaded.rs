@@ -108,6 +108,9 @@ struct Asm {
     /// routines, which `NEXT`.
     cont: Option<Label>,
     target: Option<(Label, usize)>,
+    /// Register code with a frame: how far below `FP` its link is, which
+    /// `x30` is loaded from again after anything that may change it.
+    link: Option<usize>,
 }
 
 impl Asm {
@@ -121,6 +124,7 @@ impl Asm {
             exit_common: Label(0),
             cont: None,
             target: None,
+            link: None,
         };
         a.trap_common = a.label();
         a.exit_common = a.label();
