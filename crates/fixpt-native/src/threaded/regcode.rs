@@ -205,21 +205,35 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
     let mut resume = vec![-1i64; cells.len()];
     let far_exit = a.exit_common;
+    let near_exit = a.label();
+    a.exit_common = near_exit;
     // The register entry.
     a.fuel();
     a.rs_limit();
     a.pool(fields);
+    // Where a backward branch goes: a loop's head, 32-aligned (words are),
+    // so that the loop's speed does not depend on where the word lands.
+    let mut loop_heads = vec![false; cells.len() + 1];
+    let mut j = 0;
+    while j < cells.len() {
+        let (name, n, _) = OPS[cells[j].as_fixnum() as usize];
+        if name == "branch" || name == "branchf" {
+            let to = j as i64 + 2 + cells[j + 1].as_fixnum();
+            if to <= j as i64 {
+                loop_heads[to as usize] = true;
+            }
+        }
+        j += 1 + n;
+    }
     let mut i = 0;
     while i < cells.len() {
+        if loop_heads[i] {
+            while a.here() % 8 != 0 {
+                a.e(NOP);
+            }
+        }
         a.bind(labels[i]);
         let (name, n, _) = OPS[cells[i].as_fixnum() as usize];
-        // The machine's exit may be too far for a conditional branch from
-        // here: those that leave go to a jump to it, placed after.
-        let near_exit = matches!(name, "prim" | "lambda" | "threaded" | "return").then(|| {
-            let l = a.label();
-            a.exit_common = l;
-            l
-        });
         let o = |j: usize| cells[i + 1 + j];
         let f = |j: usize| WORD_CELL0 + i + 1 + j;
         let next = i + 1 + n;
@@ -246,23 +260,27 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.e(mov(X11, CLO));
                 a.field_of(RESULT, X11, CLOSURE_FREE0 + k(o(0)));
             }
+            // A frame of `m` slots, and below them the link: where a call
+            // by `blr` returns to, which a call from this frame replaces.
+            // The collector scans the frame, and the link reads as a
+            // fixnum: every point a `blr` returns to is 8-aligned (as
+            // Larceny aligns its return points), and a call no `blr` made
+            // has 0 (the adapter).
             "save" => {
                 let m = k(o(0));
-                a.sub_const(DSP, DSP, 8 * m as u64);
+                a.sub_const(DSP, DSP, 8 * (m as u64 + 1));
                 a.value(X15, Value::FALSE);
-                for s in 0..m {
+                for s in 1..=m {
                     a.e(str(X15, DSP, 8 * s as u32));
                 }
-                if m == 0 {
-                    a.e(sub_imm(FP, DSP, 8));
-                } else {
-                    a.e(add_imm(FP, DSP, 8 * (m as u32 - 1)));
-                }
+                a.e(str(LR, DSP, 0));
+                a.e(add_imm(FP, DSP, 8 * m as u32));
                 a.ds_limit();
             }
             "pop" => {
-                let m = 8 * k(o(0)) as u32;
-                a.e(add_imm(DSP, DSP, m));
+                let m = k(o(0));
+                a.slot(LR, m, false);
+                a.e(add_imm(DSP, DSP, 8 * (m as u32 + 1)));
             }
             "stack" => a.slot(RESULT, k(o(0)), false),
             "setstk" => a.slot(RESULT, k(o(0)), true),
@@ -358,24 +376,40 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.e(mov(X11, X10));
                 a.e(ldur(X15, X11, field_off(WORD_ENTRY)));
                 a.cbz(X15, threaded);
-                // Register code: the arguments stay where they are. The
-                // entry is loaded last: making the return entry may need
-                // X16 for a large offset.
+                // Register code: the arguments stay where they are. A call
+                // pushes a return entry marked as one `blr` made (its `8k`
+                // negated), so that the callee returns by `ret`, with the
+                // value in `RESULT`. The entry is loaded last: making the
+                // return entry may need X16 for a large offset.
+                let back = a.label();
                 if !tail {
                     a.ip_at(WORD_CELL0 + next);
-                    a.push_return();
+                    a.push_return_marked();
                 }
                 a.e(ldr_reg(X16, TABLE, X15));
                 a.e(mov(CLO, W));
                 a.e(mov(CUR, X10));
-                a.e(br(X16));
-                // Stack code: the arguments as its frame.
+                if tail {
+                    a.e(br(X16));
+                } else {
+                    // The instruction after the `blr` 8-aligned (words are).
+                    if a.here() % 2 == 0 {
+                        a.e(NOP);
+                    }
+                    a.e(blr(X16));
+                    a.b(back);
+                }
+                // Stack code: the arguments as its frame. It returns the
+                // stack's way, so an entry this procedure was called with
+                // by `blr` is unmarked first, in a tail call.
                 a.bind(threaded);
                 a.fuel();
                 a.push_regs(count);
                 a.ds_limit();
                 a.rs_limit();
-                if !tail {
+                if tail {
+                    a.unmark_return();
+                } else {
                     a.ip_at(WORD_CELL0 + next);
                     a.push_return();
                 }
@@ -390,13 +424,32 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.e(movz(X13, (8 * WORD_CELL0) as u32, 0));
                 a.enter_cur(X13);
                 if !tail {
+                    // Returned to the stack's way (the resume table), the
+                    // value on the data stack; or by `ret`, in `RESULT`.
                     resume[next] = a.here() as i64;
-                    a.resumed(fields);
+                    a.e(ldr_post(RESULT, DSP, 8));
+                    a.bind(back);
+                    a.pool(fields);
                 }
             }
+            // To an entry a `blr` pushed: the caller's registers from it,
+            // and back to the link. By `br`, not `ret`: `ret` is predicted
+            // from the processor's stack of return addresses, which a deep
+            // recursion (a `map` of a long list) overflows, and then nearly
+            // every return mispredicts (`docs/performance.md`). To any other
+            // entry, the stack's way.
             "return" => {
+                let stack = a.label();
+                a.e(ldr(X13, RSP, 8));
+                a.e(cmp_imm(X13, 0));
+                a.b_cond(Cond::Ge, stack);
+                a.e(ldp_post(CUR, X13, RSP, 16));
+                a.e(ldp_post(X14, CLO, RSP, 16));
+                a.fp_decode(X14);
+                a.e(br(LR));
+                a.bind(stack);
                 a.e(str_pre(RESULT, DSP, -8));
-                a.pop_return();
+                a.pop_return_of(true);
             }
             "branch" | "branchf" => {
                 let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
@@ -413,22 +466,15 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
             }
             other => return Err(format!("`{other}` in register code")),
         }
-        // Register code falls through to the next instruction: around the
-        // traps and the near exit, when there are some.
-        if !a.stubs.is_empty() || near_exit.is_some() {
-            let past = a.label();
-            a.b(past);
-            a.flush_stubs();
-            if let Some(l) = near_exit {
-                a.bind(l);
-                a.b(far_exit);
-                a.exit_common = far_exit;
-            }
-            a.bind(past);
-        }
         i = next;
     }
     a.bind(labels[cells.len()]);
+    // Out of the way of the code that runs: the traps, and a jump to the
+    // machine's exit, which may be too far for a conditional branch.
+    a.flush_stubs();
+    a.bind(near_exit);
+    a.b(far_exit);
+    a.exit_common = far_exit;
     let [tc, ec] = [a.trap_common, a.exit_common];
     a.bind_at(tc, far[0]);
     a.bind_at(ec, far[1]);
@@ -448,6 +494,8 @@ pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u32> {
     a.e(mov(X11, CUR));
     a.e(ldur(CUR, X11, field_off(WORD_TWIN)));
     a.e(ldr(X16, TABLE, 8 * slot as u32));
+    // No `blr` made this call: the link the callee keeps is a fixnum, 0.
+    a.e(mov(LR, XZR));
     a.e(br(X16));
     a.finish()
 }

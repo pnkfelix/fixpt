@@ -987,6 +987,12 @@ the order it will be done. Each is committed when done, and marked here.
 2. **Register code's own returns** (13h′ (f)): a return in `x0`, straight
    to the caller's resume code; the data stack's way only when it returns
    to stack code.
+   *(Done 2026-09-26: a `blr`, a marked return entry, and a return by
+   `br x30`; `fib` −22%, `tak` −13%, `loop` −18%, but `closures` +10% and
+   `lists` +5–10%, not yet explained, `docs/performance.md`. Next: a
+   dump of a register word's machine code, to see where `lists`' loops
+   land; and what is left on the calling side, where `closures` pays
+   about 4 cycles a call more than before.)*
 3. **The call-outs left hot** (`docs/performance.md`, "Where the
    self-compile's time goes"): closure creation (1.8 M in the
    self-compile), `%make-frozen` for sums and products (546 k),

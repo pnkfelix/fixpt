@@ -66,6 +66,8 @@ const FP: Reg = 26;
 /// The closure running.
 const CLO: Reg = 27;
 const FUEL: Reg = 28;
+/// The link register: where register code's `ret` goes (`regcode`).
+const LR: Reg = 30;
 // Scratch.
 const W: Reg = 9;
 const X10: Reg = 10;
@@ -306,10 +308,42 @@ impl Asm {
         self.e(stp_pre(CUR, X13, RSP, -16));
     }
 
+    /// The same, marked as register code's `blr` pushes it (`regcode`):
+    /// its `8k` negated.
+    fn push_return_marked(&mut self) {
+        self.e(add(X13, BASE, CUR));
+        self.e(sub_imm(X13, X13, 4));
+        self.e(sub(X13, IP, X13));
+        self.fp_encode(X14);
+        self.e(stp_pre(X14, CLO, RSP, -16));
+        self.e(stp_pre(CUR, X13, RSP, -16));
+    }
+
+    /// The return entry on top made plain, if register code's `blr`
+    /// marked it: before a tail call of stack code, which returns the
+    /// stack's way.
+    fn unmark_return(&mut self) {
+        let plain = self.label();
+        self.e(ldr(X13, RSP, 8));
+        self.e(cmp_imm(X13, 0));
+        self.b_cond(Cond::Ge, plain);
+        self.e(sub(X13, XZR, X13));
+        self.e(str(X13, RSP, 8));
+        self.bind(plain);
+    }
+
     /// Pop a return entry and return to it, or leave the machine at the
     /// bottom one (whose word is `#f`). Prompts' and marks' entries are
     /// not returns: pass them by.
     fn pop_return(&mut self) {
+        self.pop_return_of(false);
+    }
+
+    /// The same; with `marked`, an entry register code's `blr` pushed (its
+    /// `8k` negated, `regcode`) is returned to the stack's way all the
+    /// same. Only register code's own `return` can meet one: stack code is
+    /// never called with one.
+    fn pop_return_of(&mut self, marked: bool) {
         let again = self.label();
         self.bind(again);
         self.e(ldr(X13, RSP, 0));
@@ -323,6 +357,13 @@ impl Asm {
             self.bind(not);
         }
         self.e(ldp_post(CUR, X13, RSP, 16));
+        if marked {
+            let plain = self.label();
+            self.e(cmp_imm(X13, 0));
+            self.b_cond(Cond::Ge, plain);
+            self.e(sub(X13, XZR, X13));
+            self.bind(plain);
+        }
         self.e(ldp_post(X14, CLO, RSP, 16));
         self.value(X15, Value::FALSE);
         self.e(cmp(CUR, X15));
@@ -1456,7 +1497,7 @@ impl NativeMachine {
     /// Room for `len` instructions: where, and where the machine's common
     /// trap and exit are from there, in instructions, for [`assemble_word`].
     pub fn reserve(&mut self, len: usize) -> Result<(Offset, [i64; 2]), String> {
-        let at = self.space.alloc(4 * len, 16).ok_or("the code space is full")?;
+        let at = self.space.alloc(4 * len, 32).ok_or("the code space is full")?;
         let origin = (at - self.machine_at) as i64 / 4;
         Ok((at, [self.commons[0] - origin, self.commons[1] - origin]))
     }

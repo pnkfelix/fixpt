@@ -245,6 +245,9 @@ pub fn br(n: Reg) -> u32 {
 pub fn blr(n: Reg) -> u32 {
     0xD63F_0000 | r(n) << 5
 }
+/// `nop`.
+pub const NOP: u32 = 0xD503_201F;
+
 /// `ret`.
 pub fn ret() -> u32 {
     0xD65F_03C0

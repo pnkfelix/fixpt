@@ -710,3 +710,49 @@ it (the hand-encoded machine, the stencils, the compiler in FX-26) is
 unchanged in meaning; register code no longer uses it. Inline allocation
 still needs where the heap's memory starts, which it loads from the
 machine's state (`State::words`).
+
+## Register code's own calls and returns (PLAN.md 13h′ (f))
+
+A call from register code to register code is now a `blr`, with a
+return entry pushed as before (so that a continuation can capture it)
+but marked, its `8k` negated. The callee's `return` sees the mark,
+restores the caller's registers from the entry, and goes back to the
+link, the value staying in `RESULT`: no trip through the data stack, no
+resume table. A frame keeps the link in a slot of its own, raw, since
+every point a `blr` returns to is 8-aligned and so reads as a fixnum (as
+Larceny aligned its return points); the adapter from stack code sets
+the link to 0. A capture copies entries unmarked, so a continuation
+resumed returns the stack's way. With it:
+- a loop's head (a backward branch's target) is 32-aligned: `loop`'s
+  time had depended on where its word landed (6.5 ms or 8.7 ms, the
+  same code);
+- a word's trap stubs and its jump to the machine's exit are at its end,
+  not after each instruction behind a branch over them.
+
+Against the commit before, its words aligned the same, best of three:
+
+| benchmark (register code) | before  | after   |
+| ------------------------- | ------- | ------- |
+| `fib`                     | 7.4 ms  | 5.8 ms  |
+| `tak`                     | 2.3 ms  | 2.0 ms  |
+| `loop`                    | 6.8 ms  | 5.6 ms  |
+| `closures`                | 23.7 ms | 26.2 ms |
+| `lists`                   | 13.5 ms | 14.9 ms |
+| `lists-region`            | 7.4 ms  | 7.4 ms  |
+
+**`ret` or `br x30`.** Returning by `ret` pairs each `blr` with its
+return, and the processor predicts it from its stack of return
+addresses: `fib` 5.2 ms, `tak` 1.9 ms. But `closures` recurses a
+thousand deep (`map-add` is not tail recursive), which overflows that
+stack, and then nearly every return mispredicts: 32 ms. By `br x30` the
+return is predicted as an indirect branch, which learns the pattern:
+`fib` 5.7 ms, `closures` 25.5 ms. Non-tail recursion over a list as long
+as the data is ordinary in Scheme, so returns are by `br x30`.
+
+**Not yet explained.** `closures` is still 10% slower than before, and
+`lists` 5% (alone, in a fresh session; 10% in the table). With the old
+calling convention restored and the rest kept, `lists` is as slow, and
+so with the stubs back after each instruction; `lists` makes only 6,000
+calls, and its time is in two loops whose instructions this change does
+not touch. What is left is where their code lands. A way to dump a
+register word's machine code would settle it (PLAN.md).

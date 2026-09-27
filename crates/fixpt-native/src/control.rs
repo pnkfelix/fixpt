@@ -193,7 +193,15 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
         });
     }
     let ds = heap.vector_with(s.ds_len() - ds_from, |i| s.ds_get(ds_from + i));
-    let rs = heap.vector_with(s.rs_len() - rs_from, |i| s.rs_get(rs_from + i));
+    // An entry register code's `blr` pushed is marked (its `8k` negated):
+    // resumed from a continuation it returns the stack's way, so it is
+    // captured plain.
+    let rs = heap.vector_with(s.rs_len() - rs_from, |i| {
+        let w = s.rs_get(rs_from + i);
+        let lead = s.rs_get(rs_from + i - i % 4);
+        let entry = lead != PROMPT_MARK && lead != MARK_MARK;
+        if i % 4 == 1 && entry && w.is_fixnum() && w.as_fixnum() < 0 { Value::fixnum(-w.as_fixnum()) } else { w }
+    });
     let k = heap.make_bloblet(CONTINUATION, CONT_FIELDS, 0, true);
     let fields = [
         (CONT_DS, ds),
