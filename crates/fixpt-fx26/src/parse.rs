@@ -249,6 +249,21 @@ impl Checker {
                 let result = self.parse_type(result)?;
                 Ok(self.arena.ty(Ty::Subr { effect, params, result }))
             }
+            // `(proves (<= A B))`, or `(proves (poly (binder …) (<= A B)
+            // (<= X Y) …))`: the type of a proof that `A ≤ B` (given each
+            // `X ≤ Y`), a function from a coercion for each hypothesis and
+            // an `A` to a `B`, which may run for ever. The lemma waits for
+            // the definition it declares (`crate::lemma`).
+            "proves" => {
+                let usage = "`(proves (<= type type))` or `(proves (poly ((name kind) …) (<= type type) (<= type type) …))`";
+                let [_, prop] = &items[..] else {
+                    return Err(FxError::at(s.span, usage));
+                };
+                let depth = self.dscope.len();
+                let r = self.parse_proves(prop, usage);
+                self.dscope.truncate(depth);
+                r
+            }
             "poly" => {
                 let [_, binders, body] = &items[..] else {
                     return Err(FxError::at(s.span, "`(poly ((name kind) …) type)`"));
@@ -511,6 +526,38 @@ impl Checker {
         self.arena.set_link(slot, t);
         self.grounded(slot, s.span)?;
         Ok(slot)
+    }
+
+    /// What `(proves prop)` states: its type, with the lemma kept pending.
+    fn parse_proves(&mut self, prop: &Syntax, usage: &str) -> R<TyId> {
+        let items = self.items(prop, "a proposition")?.to_vec();
+        let (binders, conclusion, hyps) = match self.head(&items).unwrap_or("") {
+            "poly" => match &items[..] {
+                [_, bs, c, hs @ ..] => (self.parse_binders(bs)?, c.clone(), hs.to_vec()),
+                _ => return Err(FxError::at(prop.span, usage)),
+            },
+            "<=" => (Vec::new(), prop.clone(), Vec::new()),
+            _ => return Err(FxError::at(prop.span, usage)),
+        };
+        let le = |c: &mut Checker, s: &Syntax| -> R<(TyId, TyId)> {
+            match c.items(s, "a proposition")?.to_vec().as_slice() {
+                [h, a, b] if h.as_symbol().is_some_and(|h| c.name(h) == "<=") => Ok((c.parse_type(a)?, c.parse_type(b)?)),
+                _ => Err(FxError::at(s.span, "a proposition is `(<= type type)`")),
+            }
+        };
+        let (lhs, rhs) = le(self, &conclusion)?;
+        let mut hs = Vec::new();
+        for h in &hyps {
+            hs.push(le(self, h)?);
+        }
+        let spin = Effect::atom(Atom::Spin);
+        let mut params: Vec<TyId> =
+            hs.iter().map(|(x, y)| self.arena.ty(Ty::Subr { effect: spin.clone(), params: vec![*x], result: *y })).collect();
+        params.push(lhs);
+        let body = self.arena.ty(Ty::Subr { effect: spin, params, result: rhs });
+        let t = if binders.is_empty() { body } else { self.arena.ty(Ty::Poly { binders: binders.clone(), body }) };
+        self.pending_lemma = Some(crate::lemma::Lemma { binders, lhs, rhs, hyps: hs, by: None });
+        Ok(t)
     }
 
     /// `(name d …)` for the `g`th generative type: a node, never expanded.

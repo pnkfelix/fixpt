@@ -80,6 +80,7 @@ pub const TABLE: &str = include_str!("table.fx");
 pub mod check;
 pub mod infer;
 pub mod licence;
+pub mod lemma;
 pub mod lower;
 pub mod parse;
 pub mod session;

@@ -316,7 +316,10 @@ impl Checker {
         match items {
             [_, name, ty, init] => {
                 let name = self.binder_name(name)?;
+                self.pending_lemma = None;
                 let ty = self.parse_type(ty)?;
+                // A `proves` type: a lemma, once the body proves it.
+                let lemma = self.pending_lemma.take();
                 // A signature's binders are in scope in the definition, which
                 // is checked against it: `(define id (poly ((t type)) …)
                 // (lambda ((x t)) x))` means what a `plambda` would.
@@ -348,6 +351,14 @@ impl Checker {
                     self.conversions.push((name, ty));
                 }
                 self.recursive.truncate(rdepth);
+                let checked = checked.and_then(|effect| match lemma {
+                    Some(l) => {
+                        self.check_proof(&l, name, e)?;
+                        self.lemmas.push(crate::lemma::Lemma { by: Some((name, ty)), ..l });
+                        Ok(effect)
+                    }
+                    None => Ok(effect),
+                });
                 match checked {
                     Ok(effect) => {
                         if !recursive {

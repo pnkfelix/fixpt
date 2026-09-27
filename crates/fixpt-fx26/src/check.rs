@@ -90,6 +90,12 @@ pub struct Checker {
     /// The bindings of generative types' conversions, which are the
     /// identity: size-change looks through them.
     pub(crate) conversions: Vec<(Sym, TyId)>,
+    /// The lemmas proved so far (`crate::lemma`), which subtyping uses
+    /// when its rules alone do not relate two types.
+    pub(crate) lemmas: Vec<crate::lemma::Lemma>,
+    /// The lemma a `proves` type being read states, for the definition it
+    /// declares.
+    pub(crate) pending_lemma: Option<crate::lemma::Lemma>,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -200,6 +206,8 @@ impl Checker {
             transparent: Vec::new(),
             inside: Vec::new(),
             conversions: Vec::new(),
+            lemmas: Vec::new(),
+            pending_lemma: None,
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -1166,6 +1174,35 @@ impl Checker {
     /// compared as they are, not substituted: a cycle through a `poly` comes
     /// back to a pair, and an environment, already on the trail.
     fn sub(&mut self, a: TyId, b: TyId, env: &BinderEnv, st: &mut SubState) -> bool {
+        if self.lemmas.is_empty() {
+            return self.sub_rules(a, b, env, st);
+        }
+        let (ra, rb) = (self.arena.resolve(a), self.arena.resolve(b));
+        if !self.lemma_may_apply(ra, rb) {
+            return self.sub_rules(a, b, env, st);
+        }
+        // The rules first. A comparison that failed may have left
+        // assumptions on the trail, so it is put back as it was.
+        let saved = st.clone();
+        if self.sub_rules(a, b, env, st) {
+            return true;
+        }
+        *st = saved;
+        // Then a lemma, whose hypotheses are compared assuming what is
+        // being shown, coinductively, as the rules are.
+        st.trail.insert((ra, rb, env.clone()));
+        for hyps in self.lemma_instances(ra, rb) {
+            let saved = st.clone();
+            if hyps.iter().all(|(x, y)| self.sub(*x, *y, env, st)) {
+                return true;
+            }
+            *st = saved;
+        }
+        false
+    }
+
+    /// `a ≤ b` by the rules alone: see [`sub`](Self::sub).
+    fn sub_rules(&mut self, a: TyId, b: TyId, env: &BinderEnv, st: &mut SubState) -> bool {
         let (a, b) = (self.arena.resolve(a), self.arena.resolve(b));
         if (a == b && env.is_empty()) || !st.trail.insert((a, b, env.clone())) {
             return true;
@@ -1749,7 +1786,7 @@ pub fn region_captured(form: &str, r: &str, eff: &str) -> String {
 /// What one subtype question remembers: the pairs assumed (FX-87's trail),
 /// each with the binder environment it was asked under, and the names given
 /// to pairs of `poly` binders.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SubState {
     trail: HashSet<(TyId, TyId, BinderEnv)>,
     labels: HashMap<(TyId, TyId, usize), DVar>,
