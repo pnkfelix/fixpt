@@ -300,7 +300,7 @@
 
 ;; `x`, when it is a lambda under any type abstractions and ascriptions,
 ;; which compile to nothing; none otherwise.
-(define c-lambda-of (subr (maxeff (read @a) (alloc @k) spin) (exp) (listof exp @k))
+(define c-lambda-of (subr (maxeff (read @a) (alloc @k)) (exp) (listof exp @k))
   (lambda (x)
     (tagcase x
       (e-plambda (d body a b) (c-lambda-of body))
@@ -444,9 +444,9 @@
                               (and (c-this-loc? (car l) (get c-this-loc)) (= (c-count-exps args) (get c-this-params)))))))
                 (else y #f))))))
 
-(define c-loop-stores (subr (maxeff (read @k) (write @k) (alloc @k) spin) (code int) unit)
+(define c-loop-stores (subr (maxeff (read @k) (write @k) (alloc @k)) (code int) unit)
   (lambda (c i) (if (< i 0) #u (begin (c-op1 c routine-slot! (wcell-int i)) (c-loop-stores c (- i 1))))))
-(define c-drops (subr (maxeff (read @k) (write @k) (alloc @k) spin) (code int) unit)
+(define c-drops (subr (maxeff (read @k) (write @k) (alloc @k)) (code int) unit)
   (lambda (c k) (if (<= k 0) #u (begin (c-op c routine-drop) (c-drops c (- k 1))))))
 
 ;; How many arguments a standard operation takes, or -1 if it is not one.

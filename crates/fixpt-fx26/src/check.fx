@@ -1883,7 +1883,7 @@
 (define k-bind-letrec (subr (maxeff kstate spin) ((listof (productof (1 symbol) (2 int) (3 kx)) @t)) unit)
   (lambda (bs) (if (null? bs) #u (begin (k-bind (extract (car bs) 1) (extract (car bs) 2)) (k-bind-letrec (cdr bs))))))
 ;; Whether `x` is a lambda, under any type abstractions and ascriptions.
-(define k-lambda? (subr spin (kx) bool)
+(define k-lambda? (subr pure (kx) bool)
   (lambda (x)
     (tagcase x
       (x-lambda (ps body a b) #t)
@@ -1896,7 +1896,7 @@
 ;; `plambda`s, whose effect only allocates. Making a closure makes no mutable
 ;; data a type could be generalized over: it holds only variables bound
 ;; outside.
-(define k-rlambda-under? (subr spin (kx) bool)
+(define k-rlambda-under? (subr pure (kx) bool)
   (lambda (x)
     (tagcase x
       (x-rlambda (r l a b) #t)
@@ -2450,10 +2450,10 @@
 (define k-cyclic? (subr (maxeff kstate spin) (int) bool)
   (lambda (t) (k-cyclic-from? t #f nil)))
 ;; `f` under any projections and ascriptions.
-(define k-under (subr spin (kx) kx)
+(define k-under (subr pure (kx) kx)
   (lambda (f) (tagcase f (x-proj (body ds a b) (k-under body)) (x-the (t body a b) (k-under body)) (else y f))))
 ;; The name `f` is, under any projections and ascriptions, if a variable.
-(define k-callee-name (subr (maxeff (alloc @t) spin) (kx) (listof symbol @t))
+(define k-callee-name (subr (maxeff (alloc @t)) (kx) (listof symbol @t))
   (lambda (f)
     (tagcase f
       (x-proj (body ds a b) (k-callee-name body))
@@ -2534,13 +2534,13 @@
               (symbol->string s)
               "")))
       (else y ""))))
-(define k-sc-literal (subr (maxeff (alloc @t) spin) (kx) (listof int @t))
+(define k-sc-literal (subr (maxeff (alloc @t)) (kx) (listof int @t))
   (lambda (x) (tagcase x (x-const (t v a b) (if (= t k-int) (the (listof int @t) (cons v nil)) nil)) (else y nil))))
-(define k-sc-bool? (subr spin (kx bool) bool)
+(define k-sc-bool? (subr pure (kx bool) bool)
   (lambda (x want) (tagcase x (x-const (t v a b) (and (= t k-bool) (= v (if want 1 0)))) (else y #f))))
-(define k-sc-one? (subr (maxeff (read @t) spin) (kxs) bool)
+(define k-sc-one? (subr (maxeff (read @t)) (kxs) bool)
   (lambda (xs) (and (not (null? xs)) (null? (cdr xs)))))
-(define k-sc-two? (subr (maxeff (read @t) spin) (kxs) bool)
+(define k-sc-two? (subr (maxeff (read @t)) (kxs) bool)
   (lambda (xs) (and (not (null? xs)) (k-sc-one? (cdr xs)))))
 
 (define k-sc-part-ty (subr (maxeff (read @t) spin) (k-parts symbol) int)
@@ -2841,7 +2841,7 @@
                              (k-sc-extend f g a (cdr calls) (cons new todo) (cons new all) (+ n 1)))))))))))
 
 ;; A binding's lambda, under `plambda`, `the` and `rlambda`.
-(define k-sc-lambda-of (subr spin (kx) kx)
+(define k-sc-lambda-of (subr pure (kx) kx)
   (lambda (x)
     (tagcase x
       (x-plambda (bs body a b) (k-sc-lambda-of body))

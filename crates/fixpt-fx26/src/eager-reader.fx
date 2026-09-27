@@ -185,7 +185,7 @@
   (lambda (name start close items)
     (datum-cons name (datum-cons (datum-int start) (datum-cons (datum-char close) (datum-cons items no-data))))))
 ;; `items`, newest first, in order, onto `done`.
-(define datum-reverse-onto (subr spin (datum datum) datum)
+(define datum-reverse-onto (subr pure (datum datum) datum)
   (lambda (items done)
     (if (datum-null? items) done (datum-reverse-onto (datum-cdr items) (datum-cons (datum-car items) done)))))
 ;; The marks' names, interned once.
@@ -257,7 +257,7 @@
         nil)))
 
 (define entry-name (subr pure (datum) string) (lambda (e) (datum-symbol-name (datum-car e))))
-(define entry-ref (subr spin (datum int) datum)
+(define entry-ref (subr pure (datum int) datum)
   (lambda (e i) (if (= i 0) (datum-car e) (entry-ref (datum-cdr e) (- i 1)))))
 
 (define settled? (subr (maxeff (read @c) spin) ((listof datum @c)) bool)
@@ -382,7 +382,7 @@
           (loop cur nil))))))
 
 ;; A proper list of exact integers in 0..=255.
-(define bytes? (subr spin (datum) bool)
+(define bytes? (subr pure (datum) bool)
   (lambda (d)
     (or (datum-null? d)
         (and (datum-pair? d) (datum-byte? (datum-car d)) (bytes? (datum-cdr d))))))
