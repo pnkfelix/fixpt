@@ -25,7 +25,7 @@ use crate::value::{
     ObjType, TAG_BLOBLET, TAG_FORWARD, TAG_HEADER, TAG_MASK, TAG_TRAILER, Value, header_bytes, header_is_large,
     header_kind, is_extension, is_header, make_header, make_large_header,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 mod regions;
 pub use regions::REGION_SLOTS;
@@ -134,9 +134,12 @@ const DEFAULT_SEMI_WORDS: usize = 1 << 16;
 /// The most words a semispace may grow to: each has this much address space
 /// of its own, reserved when the heap is made, so it grows in place.
 const MAX_SEMI_WORDS: usize = 1 << 31;
-/// Past the two semispaces, the regions' area (`regions`), as large.
+/// Past the two semispaces, the arenas' area (`regions`), as large; and
+/// past that, the reaps', as large again.
 const ARENA_BASE: usize = 2 * MAX_SEMI_WORDS;
 const ARENA_WORDS: usize = 1 << 31;
+const REAP_BASE: usize = ARENA_BASE + ARENA_WORDS;
+const REAP_WORDS: usize = 1 << 31;
 
 /// Collect when the active semispace is at least this full at a safepoint.
 const COLLECT_THRESHOLD: f64 = 0.75;
@@ -206,7 +209,7 @@ impl Heap {
     pub fn with_semispace(semi: usize) -> Heap {
         let semi = semi.max(1024);
         Heap {
-            mem: fixpt_memmgmt::Words::new(ARENA_BASE + ARENA_WORDS).expect("address space for the heap"),
+            mem: fixpt_memmgmt::Words::new(REAP_BASE + REAP_WORDS).expect("address space for the heap"),
             regions: regions::Regions::new(),
             active: 0,
             semi,
@@ -1005,7 +1008,8 @@ impl Heap {
         if self.inhibited > 0 {
             return;
         }
-        let full = (self.top - self.active) as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
+        let full = (self.top - self.active) as f64 >= self.semi as f64 * COLLECT_THRESHOLD
+            || self.regions.reap_taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
         self.safepoints += 1;
         let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
         if full || policy {
@@ -1021,10 +1025,13 @@ impl Heap {
         let from = self.active;
         let to = if self.active == 0 { MAX_SEMI_WORDS } else { 0 };
         let mem = self.mem.words_mut();
+        let reaps = self.regions.live.len();
+        let arenas: Vec<(usize, usize)> = self.regions.arena_ranges().collect();
+        let owner = std::mem::take(&mut self.regions.owner);
+        let mut c = Copier { from, to, free: 0, owner, new: vec![Vec::new(); reaps], marked: HashSet::new(), regions: &mut self.regions };
 
-        // `scan` and `free` are relative to `to`.
+        // `scan` and `c.free` are relative to `to`.
         let mut scan = 0usize;
-        let mut free = 0usize;
 
         // Under the bug-finding policy, start to-space with a filler whose
         // size changes from one collection to the next, so that every object
@@ -1039,7 +1046,7 @@ impl Heap {
                 for i in 1..pad {
                     mem[to + i] = 0;
                 }
-                free = pad;
+                c.free = pad;
                 scan = pad;
             }
         }
@@ -1050,7 +1057,7 @@ impl Heap {
             ($v:expr) => {{
                 let v = $v;
                 if v.is_ref() {
-                    Self::copy_out(mem, from, to, &mut free, v)
+                    Self::copy_out(mem, &mut c, v)
                 } else {
                     v
                 }
@@ -1071,18 +1078,80 @@ impl Heap {
                 *v = fwd!(*v);
             }
         }
-        // What the live regions hold is live, and stays where it is.
-        for (lo, hi) in self.regions.ranges() {
+        // What the arenas hold is live, and stays where it is.
+        for (lo, hi) in arenas {
             let mut at = lo;
             while at < hi {
-                at += Self::scan_one(mem, at, from, to, &mut free);
+                at += Self::scan_one(mem, at, &mut c);
             }
         }
 
-        // Scan to-space linearly.
-        while scan < free {
-            scan += Self::scan_one(mem, to + scan, from, to, &mut free);
+        // Scan to-space linearly, and each reap's new chunks, until neither
+        // has anything left to scan: each may copy into the other.
+        let mut reap_scan = vec![(0usize, 0usize); reaps];
+        loop {
+            let mut more = false;
+            while scan < c.free {
+                scan += Self::scan_one(mem, to + scan, &mut c);
+                more = true;
+            }
+            for (h, rs) in reap_scan.iter_mut().enumerate() {
+                while let Some(&(start, fill)) = c.new[h].get(rs.0) {
+                    let at = rs.1.max(start);
+                    if at < fill {
+                        rs.1 = at + Self::scan_one(mem, at, &mut c);
+                        more = true;
+                    } else if rs.0 + 1 < c.new[h].len() {
+                        *rs = (rs.0 + 1, 0);
+                    } else {
+                        rs.1 = at;
+                        break;
+                    }
+                }
+            }
+            if !more {
+                break;
+            }
         }
+        let Copier { free, new, marked, .. } = c;
+        // Ended reaps' chunks no reference was found into may be reused;
+        // the rest wait for a collection that finds none.
+        let quarantine = std::mem::take(&mut self.regions.quarantine);
+        for q in quarantine {
+            if marked.contains(&q) {
+                self.regions.quarantine.insert(q);
+            } else {
+                self.regions.reap_free.push(q);
+            }
+        }
+
+        // Each reap's old chunks given back, its new ones in their place:
+        // the last is its current chunk, which machine code allocates in.
+        for (h, mut chunks) in new.into_iter().enumerate() {
+            if !self.regions.reap[h] {
+                continue;
+            }
+            let old: Vec<(usize, usize)> = self.regions.chunks_of(h).collect();
+            let old_current = self.regions.current(h).map_or(0, |(start, fill)| fill - start);
+            // Every reference into them has been moved on: they may be
+            // reused at once.
+            for (start, _) in old {
+                self.mem.release(start..start + regions::CHUNK_WORDS);
+                self.regions.reap_free.push(start);
+            }
+            let current = chunks.pop();
+            let r = &mut self.regions;
+            r.table[h] = current.map_or([0, 0], |(start, fill)| [fill, start + regions::CHUNK_WORDS]);
+            let new_current = current.map_or(0, |(start, fill)| fill - start);
+            // Allocated before, as `region_words` counts: what was current,
+            // though copied. What is current now is not counted yet.
+            r.words = r.words + old_current as u64 - new_current as u64;
+            for &(start, _) in chunks.iter().chain(current.iter()) {
+                r.owner.insert(start, h);
+            }
+            r.live[h] = chunks;
+        }
+        self.regions.reap_taken = 0;
 
         self.active = to;
         self.top = to + free;
@@ -1135,7 +1204,7 @@ impl Heap {
     /// follows) or an ordinary Value (a pair cell follows); see `value.rs` on
     /// why tag 110 is reserved to make this unambiguous.
     #[inline(always)]
-    fn scan_one(mem: &mut [u64], at: usize, from: usize, to: usize, free: &mut usize) -> usize {
+    fn scan_one(mem: &mut [u64], at: usize, c: &mut Copier) -> usize {
         let w = mem[at];
         if is_header(w) {
             // The collector needs only `F` and `B`: trace the fields, skip
@@ -1145,7 +1214,7 @@ impl Heap {
             for i in 0..head.fields {
                 let v = Value(mem[main + 1 + i]);
                 if v.is_ref() {
-                    mem[main + 1 + i] = Self::copy_out(mem, from, to, free, v).raw();
+                    mem[main + 1 + i] = Self::copy_out(mem, c, v).raw();
                 }
             }
             head.size()
@@ -1153,34 +1222,53 @@ impl Heap {
             for i in 0..2 {
                 let v = Value(mem[at + i]);
                 if v.is_ref() {
-                    mem[at + i] = Self::copy_out(mem, from, to, free, v).raw();
+                    mem[at + i] = Self::copy_out(mem, c, v).raw();
                 }
             }
             2
         }
     }
 
-    /// Copy one object from from-space to to-space if it is not already there,
-    /// leaving a forwarding pointer behind. Returns the to-space reference.
+    /// Copy one object out of from-space, or out of a live reap's old
+    /// chunks, if it is not already; leaving a forwarding pointer behind.
+    /// Returns where it is now. Anything else (an arena's, or a reference an
+    /// ended region left) stays as it is.
     ///
     /// A forwarding pointer always records where the object's *main header*
-    /// went, relative to `to`, whichever kind of pointer found it.
-    fn copy_out(mem: &mut [u64], from: usize, to: usize, free: &mut usize, v: Value) -> Value {
-        // Only what is in from-space moves.
-        if !(from..from + MAX_SEMI_WORDS).contains(&v.index()) {
+    /// went, whichever kind of pointer found it.
+    #[inline(always)]
+    fn copy_out(mem: &mut [u64], c: &mut Copier, v: Value) -> Value {
+        let i = v.index();
+        let reap = if (c.from..c.from + MAX_SEMI_WORDS).contains(&i) {
+            None
+        } else if i >= REAP_BASE {
+            // A bloblet with no suffix is pointed at one past its fields,
+            // which may be the next chunk; its last field is not.
+            let within = if v.is_pair() { i } else { i - 1 };
+            let chunk = within & !(regions::CHUNK_WORDS - 1);
+            match c.owner.get(&chunk) {
+                Some(&h) => Some(h),
+                None => {
+                    // A reference an ended reap left: not followed, but
+                    // its chunk not reused while it is there.
+                    if c.regions.quarantine.contains(&chunk) {
+                        c.marked.insert(chunk);
+                    }
+                    return v;
+                }
+            }
+        } else {
             return v;
-        }
+        };
         if v.is_pair() {
-            let src = v.index();
-            let first = Value(mem[src]);
+            let first = Value(mem[i]);
             if first.is_forward() {
                 return Value::pair(first.index());
             }
-            let dst = to + *free;
-            mem[dst] = mem[src];
-            mem[dst + 1] = mem[src + 1];
-            *free += 2;
-            mem[src] = Value::forward(dst).raw();
+            let dst = c.alloc(reap, 2);
+            mem[dst] = mem[i];
+            mem[dst + 1] = mem[i + 1];
+            mem[i] = Value::forward(dst).raw();
             return Value::pair(dst);
         }
         // A bloblet pointer, at the start of the suffix. Find the header, by
@@ -1188,13 +1276,12 @@ impl Heap {
         // second forward just before the suffix, so that the next pointer to
         // this bloblet finds it in one step, trailer or not.
         debug_assert!(v.tag() == TAG_BLOBLET);
-        let p = v.index();
-        let new_main = match find_main(mem, p) {
+        let new_main = match find_main(mem, i) {
             Err(done) => done,
             Ok(main) => {
-                let new_main = Self::copy_object(mem, main, to, free);
-                if p - 1 != main {
-                    mem[p - 1] = Value::forward(new_main).raw();
+                let new_main = Self::copy_object(mem, main, c, reap);
+                if i - 1 != main {
+                    mem[i - 1] = Value::forward(new_main).raw();
                 }
                 new_main
             }
@@ -1203,9 +1290,10 @@ impl Heap {
         Value::bloblet(new_main + 1 + head.fields)
     }
 
-    /// Copy the object whose main header is at `main` (in from-space), unless
-    /// it has been already. Returns its main header's new index.
-    fn copy_object(mem: &mut [u64], main: usize, to: usize, free: &mut usize) -> usize {
+    /// Copy the object whose main header is at `main`, unless it has been
+    /// already: to to-space, or to reap `reap`'s new chunks. Returns its
+    /// main header's new index.
+    fn copy_object(mem: &mut [u64], main: usize, c: &mut Copier, reap: Option<usize>) -> usize {
         let first = Value(mem[main]);
         if first.is_forward() {
             return first.index();
@@ -1213,9 +1301,9 @@ impl Heap {
         let head = read_head(mem, main);
         let start = main - head.pre;
         let words = head.size();
-        mem.copy_within(start..start + words, to + *free);
-        let new_main = to + *free + head.pre;
-        *free += words;
+        let dst = c.alloc(reap, words);
+        mem.copy_within(start..start + words, dst);
+        let new_main = dst + head.pre;
         mem[main] = Value::forward(new_main).raw();
         new_main
     }
@@ -1396,6 +1484,48 @@ impl Heap {
             }
         }
         Ok(())
+    }
+}
+
+/// Where a collection copies to: the heap's to-space, and each live reap's
+/// new chunks.
+struct Copier<'r> {
+    from: usize,
+    to: usize,
+    /// Words used in to-space.
+    free: usize,
+    /// Each live reap's chunks before this collection, by where they start,
+    /// with its handle: what is copied out of them.
+    owner: HashMap<usize, usize>,
+    /// Each region's new chunks, by handle, and how far each is filled
+    /// (none for an arena).
+    new: Vec<Vec<(usize, usize)>>,
+    /// The quarantined chunks a reference was found into.
+    marked: HashSet<usize>,
+    regions: &'r mut regions::Regions,
+}
+
+impl Copier<'_> {
+    /// `n` words to copy into: in reap `reap`'s new chunks, or, for the
+    /// heap's objects (or if the reaps' area is used up), in to-space.
+    #[inline(always)]
+    fn alloc(&mut self, reap: Option<usize>, n: usize) -> usize {
+        if let Some(h) = reap {
+            if let Some((start, fill)) = self.new[h].last_mut()
+                && *fill + n <= *start + regions::CHUNK_WORDS
+            {
+                let at = *fill;
+                *fill += n;
+                return at;
+            }
+            if let Some(chunk) = self.regions.reap_chunk() {
+                self.new[h].push((chunk, chunk + n));
+                return chunk;
+            }
+        }
+        let at = self.to + self.free;
+        self.free += n;
+        at
     }
 }
 

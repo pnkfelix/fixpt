@@ -296,11 +296,9 @@ impl Compiler<'_> {
                 bindings.iter().any(|(_, y)| self.r_collects(*y, e, this)) || self.r_collects(body, e, this)
             }
             Exp::Begin(items) => items.iter().any(|y| self.r_collects(*y, e, this)),
-            // A `letrena` calls out to enter and leave its region.
-            Exp::LetRegion { arena: true, .. } => true,
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::LetRegion { body, .. } => {
-                self.r_collects(body, e, this)
-            }
+            // A region is entered and left by calling out.
+            Exp::LetRegion { .. } => true,
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_collects(body, e, this),
             Exp::Extract(y, _) => self.r_collects(y, e, this),
             Exp::Bloblet { op: BlobletOp::Ref(_), args } => args.iter().any(|y| self.r_collects(*y, e, this)),
             Exp::TagCase { scrutinee, arms, els } => {
@@ -382,42 +380,25 @@ impl Compiler<'_> {
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => {
                 self.r_exp(g, body, env, te, tail)?
             }
-            // The region's name bound, as a `let`'s: a `letrena`'s to a
-            // region entered (so never in a leaf), and left with the body's
-            // value, which is so not in tail position; a `letreap`'s to the
-            // heap's, `#f`.
+            // The region's name bound, as a `let`'s, to a region entered (an
+            // arena, or a reap: never in a leaf), and left with the body's
+            // value, which is so not in tail position.
             Exp::LetRegion { arena, region, body } => {
+                if g.leaf {
+                    return None;
+                }
                 let name = self.c.arena.dvar_name(region);
                 let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
-                if arena {
-                    if g.leaf {
-                        return None;
-                    }
-                    self.r_prim(g, "%region-enter", &[], env, te)?;
-                } else {
-                    g.op("const", &[Value::FALSE]);
-                }
-                let l = if g.leaf {
-                    let r = g.reg()?;
-                    g.op("setreg", &[Gen::n(r)]);
-                    RLoc::Reg(r)
-                } else {
-                    let s = g.slot();
-                    g.op("setstk", &[Gen::n(s)]);
-                    RLoc::Slot(s)
-                };
-                env.push((name, l));
+                self.r_prim(g, if arena { "%region-enter" } else { "%reap-enter" }, &[], env, te)?;
+                let h = g.slot();
+                g.op("setstk", &[Gen::n(h)]);
+                env.push((name, RLoc::Slot(h)));
                 te.push((name, Loc::Slot(usize::MAX)));
-                if arena {
-                    let RLoc::Slot(h) = l else { unreachable!() };
-                    self.r_exp(g, body, env, te, false)?;
-                    let v = g.slot();
-                    g.op("setstk", &[Gen::n(v)]);
-                    self.r_prim(g, "%region-exit", &[Arg::Slot(h), Arg::Slot(v)], env, te)?;
-                    g.done(tail);
-                } else {
-                    self.r_exp(g, body, env, te, tail)?;
-                }
+                self.r_exp(g, body, env, te, false)?;
+                let v = g.slot();
+                g.op("setstk", &[Gen::n(v)]);
+                self.r_prim(g, "%region-exit", &[Arg::Slot(h), Arg::Slot(v)], env, te)?;
+                g.done(tail);
                 env.truncate(depth);
                 te.truncate(tdepth);
                 g.next_reg = regs;

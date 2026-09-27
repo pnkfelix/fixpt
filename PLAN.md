@@ -1150,7 +1150,26 @@ baseline. 13d, typed primitives, follows on the same principle. *(Typed calls do
      - lowered code: a `letrena` is a `dynamic-wind` whose after ends the
        region, which the Scheme engine's aborts and escapes run.
      - an error: the session ends every region when a form is done.
-  5. `letreap`, a heap of its own.
+  5. *(Done 2026-09-26.)* `letreap`: a region the collector collects
+     with the heap. A Cheney scan over to-space and each live reap's new
+     chunks together, until neither has more; what is reachable in a reap
+     is copied into new chunks of its own, and the old chunks' pages go
+     back to the system. The chunks reaps take also start collections, as
+     the heap's filling does. A reference an ended reap left, in a frame's
+     dead slot say, must never be followed into another reap's objects, so
+     an ended reap's chunks go into quarantine: a collection that meets a
+     reference into one marks it, and after each collection the unmarked
+     ones are free to reuse. (An arena's are reused at once: the collector
+     never follows a reference into an arena.) All reaps share one area,
+     16 GiB of address space as the arenas' is; each reap is a list of
+     64 KiB chunks from it, growing as it needs. When the area is used up,
+     their allocation, and their copies, go to the heap.
+
+     A first version never reused a reap's chunks, from an area of 2 TiB:
+     mapping and unmapping that took about 3 ms per heap (1.3 ms and
+     1.9 ms), which slowed every test that makes heaps (the heap's own from
+     0.01 s to 0.2 s), and would have allowed only some 30 heaps in a
+     process, whose address space the system caps at 64 TiB.
   6. The checker's record of each allocation's region
      (`NodeFacts::alloc_region`) is no longer used to allocate; it may go.
 

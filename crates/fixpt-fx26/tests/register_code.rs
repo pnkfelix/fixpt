@@ -139,6 +139,12 @@ fn runs_as_lowered(gc_every: Option<u64>) {
 /// as that, collecting at every `gc_every`th safepoint if asked: what it
 /// gives, the words allocated in regions, and how many are live after.
 fn run_in_registers(program: &str, gc_every: Option<u64>) -> (String, u64, usize) {
+    let (got, words, live, _) = run_in_registers_counting(program, gc_every);
+    (got, words, live)
+}
+
+/// The same, and how many collections there were.
+fn run_in_registers_counting(program: &str, gc_every: Option<u64>) -> (String, u64, usize, u64) {
     use fixpt_heap::Value;
     let text = std::fs::read_to_string(format!("{}/tests/programs/run/{program}", env!("CARGO_MANIFEST_DIR"))).unwrap();
     let mut c = Checker::new();
@@ -159,7 +165,7 @@ fn run_in_registers(program: &str, gc_every: Option<u64>) -> (String, u64, usize
         let none = sc.make(|_| Value::NULL);
         let got = sc.call_global("%run-word", &[w, none]).map(|v| sc.write(v)).unwrap_or_else(|e| format!("!! {e}"));
         let h = &sc.runtime_unrooted().heap;
-        (got, h.region_words(), h.live_regions())
+        (got, h.region_words(), h.live_regions(), h.gc_count)
     })
 }
 
@@ -198,5 +204,18 @@ fn an_abort_ends_the_regions_it_leaves() {
         assert_eq!(got, (500 * 1001).to_string());
         assert_eq!(words, 1000 * 4, "two pairs each round");
         assert_eq!(live, 0);
+    }
+}
+
+/// A `letreap` is collected while its body runs: 300,000 pairs go
+/// through it, though it holds a thousand live at a time; and it ends.
+#[test]
+fn a_letreap_is_collected_as_it_runs() {
+    for gc_every in [None, Some(1000)] {
+        let (got, words, live, collections) = run_in_registers_counting("reap.fx", gc_every);
+        assert_eq!(got, "500500");
+        assert!(words >= 300 * 1000 * 2, "{words}");
+        assert_eq!(live, 0);
+        assert!(collections >= 10, "what the reap takes starts collections: {collections}");
     }
 }

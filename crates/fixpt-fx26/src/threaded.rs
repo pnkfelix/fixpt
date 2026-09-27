@@ -363,22 +363,16 @@ impl<'a> Compiler<'a> {
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => {
                 self.exp(body, e, depth, code, tail)?
             }
-            // The region's name bound in a slot, as a `let`'s: a `letrena`'s
-            // to a region entered, and left with the body's value, which is
-            // so not in tail position; a `letreap`'s to the heap's, `#f`.
+            // The region's name bound in a slot, as a `let`'s, to a region
+            // entered (an arena, or a reap), and left with the body's value,
+            // which is so not in tail position.
             Exp::LetRegion { arena, region, body } => {
                 let mut inner = e.clone();
                 inner.push((self.c.arena.dvar_name(region), Loc::Slot(depth)));
-                if arena {
-                    self.prim(code, "%region-enter", 0)?;
-                    self.exp(body, &inner, depth + 1, code, false)?;
-                    self.prim(code, "%region-exit", 2)?;
-                    self.done(code, tail);
-                } else {
-                    self.lit(code, Value::FALSE);
-                    self.exp(body, &inner, depth + 1, code, tail)?;
-                    self.unbind(code, depth, 1, tail);
-                }
+                self.prim(code, if arena { "%region-enter" } else { "%reap-enter" }, 0)?;
+                self.exp(body, &inner, depth + 1, code, false)?;
+                self.prim(code, "%region-exit", 2)?;
+                self.done(code, tail);
             }
             Exp::If { test, then, els } => {
                 let (no, end) = (self.fresh(), self.fresh());
@@ -641,9 +635,7 @@ impl<'a> Compiler<'a> {
                     }
             }
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.loops_only(body, f, n, tail),
-            Exp::LetRegion { arena, region, body } => {
-                self.c.arena.dvar_name(region) == f || self.loops_only(body, f, n, tail && !arena)
-            }
+            Exp::LetRegion { region, body, .. } => self.c.arena.dvar_name(region) == f || self.loops_only(body, f, n, false),
             Exp::RLambda { region, lambda } => self.loops_only(region, f, n, false) && self.loops_only(lambda, f, n, false),
             Exp::If { test, then, els } => {
                 self.loops_only(test, f, n, false) && self.loops_only(then, f, n, tail) && self.loops_only(els, f, n, tail)

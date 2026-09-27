@@ -1077,6 +1077,7 @@ prims! {
     // A handle is a fixnum; anything else (`#f`, a `letreap`'s for now)
     // means the heap. Leaving a region gives back the body's value.
     "%region-enter", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.region_enter() as i64)));
+    "%reap-enter", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.reap_enter() as i64)));
     "%region-exit", 2, Some(2), simple!(|rt, a| {
         if a[0].is_fixnum() {
             rt.heap.region_exit(a[0].as_fixnum() as usize);

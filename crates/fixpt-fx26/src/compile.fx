@@ -315,7 +315,7 @@
                  (e-var (m a2 b2) (if (symbol=? m f) (and tail (= (c-count-exps args) n)) #t))
                  (else y (c-loops-only fun f n #f)))))
         (e-plambda (d body a b) (c-loops-only body f n tail))
-        (e-letregion (k r body a b) (or (symbol=? r f) (c-loops-only body f n (and tail (not k)))))
+        (e-letregion (k r body a b) (or (symbol=? r f) (c-loops-only body f n #f)))
         (e-rlambda (r l a b) (and (c-loops-only r f n #f) (c-loops-only l f n #f)))
         (e-proj (body ds a b) (c-loops-only body f n tail))
         (e-the (d body a b) (c-loops-only body f n tail))
@@ -566,21 +566,16 @@
             (else y (c-fail "an rlambda's lambda"))))
         (e-app (f args a b) (c-app f args e depth c tail))
         (e-plambda (d body a b) (c-exp body e depth c tail))
-        ;; The region's name bound in a slot, as a `let`'s: a `letrena`'s to
-        ;; a region entered, and left with the body's value, which is so not
-        ;; in tail position; a `letreap`'s to the heap's, `#f`.
+        ;; The region's name bound in a slot, as a `let`'s, to a region
+        ;; entered (an arena, or a reap), and left with the body's value,
+        ;; which is so not in tail position.
         (e-letregion (k r body a b)
           (let ((inner (the cenv (cons (cons r (at-slot depth)) e))))
-            (if k
-                (begin
-                  (c-prim c "%region-enter" 0)
-                  (c-exp body inner (+ depth 1) c #f)
-                  (c-prim c "%region-exit" 2)
-                  (c-done c tail))
-                (begin
-                  (c-lit c (wcell-bool #f))
-                  (c-exp body inner (+ depth 1) c tail)
-                  (c-unbind c depth 1 tail)))))
+            (begin
+              (c-prim c (if k "%region-enter" "%reap-enter") 0)
+              (c-exp body inner (+ depth 1) c #f)
+              (c-prim c "%region-exit" 2)
+              (c-done c tail))))
         (e-proj (body ds a b) (c-exp body e depth c tail))
         (e-the (d body a b) (c-exp body e depth c tail))
         (e-if (t th el a b)

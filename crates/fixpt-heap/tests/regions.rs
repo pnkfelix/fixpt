@@ -110,3 +110,83 @@ fn large_objects_go_to_the_heap() {
     assert_eq!(h.obj_ref(roots[0], 9_999).as_fixnum(), 7);
     h.region_exit(r);
 }
+
+/// A reap is collected with the heap: what is reachable in it is copied
+/// within it, and what is not is dropped; references into it from the heap
+/// and from roots follow, and what it points to in the heap lives.
+#[test]
+fn a_reap_is_collected() {
+    let mut h = Heap::new();
+    let r = h.reap_enter();
+    let mut keep = Value::NULL;
+    for i in 0..10_000 {
+        let junk = h.in_region(r, |h| h.cons(Value::fixnum(i), Value::NULL));
+        let _ = junk;
+        if i % 100 == 0 {
+            let s = h.make_string(&format!("s{i}"));
+            let cell = h.in_region(r, |h| h.cons(Value::fixnum(i), s));
+            keep = h.in_region(r, |h| h.cons(cell, keep));
+        }
+    }
+    // A heap object pointing into the reap.
+    let boxed = h.make_box(keep);
+    let before = h.region_words();
+    assert_eq!(h.region_in_use(r), 10_000 * 2 + 100 * 4);
+    let mut roots = [boxed];
+    gc(&mut h, &mut roots);
+    assert_eq!(h.region_words(), before, "allocation, as counted, is not undone by copying");
+    assert_eq!(h.region_in_use(r), 100 * 4, "only what is reachable is kept");
+    let keep = h.unbox(roots[0]);
+    let mut v = keep;
+    let mut n = 0;
+    while v.is_pair() {
+        let cell = h.car(v);
+        let i = h.car(cell).as_fixnum();
+        assert_eq!(h.string_to_rust(h.cdr(cell)), format!("s{i}"));
+        v = h.cdr(v);
+        n += 1;
+    }
+    assert_eq!(n, 100);
+    h.region_exit(r);
+}
+
+/// A reference into a reap that has ended, left somewhere the collector
+/// looks, is not followed, though a new reap is made and collected.
+#[test]
+fn a_reference_an_ended_reap_left_is_not_followed() {
+    let mut h = Heap::new();
+    let r = h.reap_enter();
+    let stale = h.in_region(r, |h| h.cons(Value::fixnum(1), Value::NULL));
+    h.region_exit(r);
+    let r2 = h.reap_enter();
+    let mut xs = Value::NULL;
+    for i in 0..5_000 {
+        xs = h.in_region(r2, |h| h.cons(Value::fixnum(i), xs));
+    }
+    let mut roots = [stale, xs];
+    gc(&mut h, &mut roots);
+    assert_eq!(roots[0], stale, "left as it was");
+    assert_eq!(list_sum(&h, roots[1]), (0..5_000).sum::<i64>());
+    h.region_exit(r2);
+
+    // Its chunk is not reused while the reference is there; once a
+    // collection finds none, it is.
+    let chunk = |v: Value| v.index() >> 13;
+    let mut roots = [stale];
+    gc(&mut h, &mut roots);
+    let r3 = h.reap_enter();
+    let mut seen = Vec::new();
+    for _ in 0..20_000 {
+        seen.push(chunk(h.in_region(r3, |h| h.cons(Value::NULL, Value::NULL))));
+    }
+    assert!(!seen.contains(&chunk(stale)), "a chunk a reference is into is not reused");
+    h.region_exit(r3);
+    gc(&mut h, &mut []);
+    let r4 = h.reap_enter();
+    let mut seen = Vec::new();
+    for _ in 0..40_000 {
+        seen.push(chunk(h.in_region(r4, |h| h.cons(Value::NULL, Value::NULL))));
+    }
+    assert!(seen.contains(&chunk(stale)), "once none is found, it is");
+    h.region_exit(r4);
+}
