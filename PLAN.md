@@ -1063,6 +1063,11 @@ the order it will be done. Each is committed when done, and marked here.
    allocation's region (`NodeFacts::alloc_region`), no longer used to
    allocate, removed from both checkers; the FX-26 checker's free
    variables computed once rather than at every mask.
+   *(Done 2026-09-26: `alloc_region` removed. The FX-26 checker's mask
+   now looks only for the regions whose atoms a free variable decides,
+   and stops walking once each is seen: stage 2, 0.23 → 0.22 s. Found
+   once for every node, carried up by `k-synth`, would take the rest,
+   at most 0.01 s more.)*
 12. **The REPL's `,code` under `--fx26-run threaded`** (raised by the user
     2026-09-26): it shows the form's lowering to Scheme, which is not what
     runs there; it should show the words the compiler in FX-26 made, as

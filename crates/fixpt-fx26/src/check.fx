@@ -1107,8 +1107,6 @@
 
 (define k-free-vars (subr (maxeff (read @t) (alloc @t)) (kx) k-names)
   (lambda (x) (k-free-into x nil nil)))
-(define k-union-regions (subr (maxeff (read @t) (alloc @t)) (k-regions k-regions) k-regions)
-  (lambda (xs ys) (if (null? ys) xs (k-union-regions (k-add-region xs (car ys)) (cdr ys)))))
 
 ;;; ------------------------------------------------------------ masking
 ;;; What cannot be observed outside `x`, whose type is `result`, is removed:
@@ -1116,29 +1114,94 @@
 ;;; that `alloc`, `goto` and `comefrom` on a region the result mentions stay
 ;;; (ranks 2 to 4; `await`, like `read`, does not).
 
-(define k-visible (subr (maxeff (read @t) (write @t) (alloc @t)) (k-names k-regions) k-regions)
-  (lambda (vs out)
-    (if (null? vs)
+;; The regions of `e`'s atoms that stay only if a free variable sees them.
+(define k-sought (subr (maxeff (read @t) (alloc @t)) (k-eff k-regions k-regions) k-regions)
+  (lambda (e in-result out)
+    (if (null? e)
         out
-        (let ((t (k-lookup (car vs))))
-          (k-visible (cdr vs) (if (< t 0) out (k-union-regions out (k-regions-in t))))))))
+        (let ((a (car e)))
+          (k-sought (cdr e) in-result
+                    (if (and (k-has-region? a)
+                             (not (and (k-has-region-in? in-result (k-atom-region a))
+                                       (and (> (k-atom-rank a) 1) (< (k-atom-rank a) 5)))))
+                        (k-add-region out (k-atom-region a))
+                        out))))))
+(define k-drop-regions (subr (maxeff (read @t) (alloc @t)) (k-regions k-regions) k-regions)
+  (lambda (rs seen)
+    (cond ((null? rs) nil)
+          ((k-has-region-in? seen (car rs)) (k-drop-regions (cdr rs) seen))
+          (else (cons (car rs) (k-drop-regions (cdr rs) seen))))))
+
+;; Of the regions `rs`, those no variable free in `x` sees: a walk of `x`
+;; as `k-free-into`'s, that stops once each has been seen, as most are.
+(define-rec
+  (k-unseen-list (subr (maxeff (read @t) (write @t) (alloc @t)) (kxs k-names k-regions) k-regions)
+    (lambda (xs bound rs) (if (or (null? xs) (null? rs)) rs (k-unseen-list (cdr xs) bound (k-unseen (car xs) bound rs)))))
+  (k-unseen (subr (maxeff (read @t) (write @t) (alloc @t)) (kx k-names k-regions) k-regions)
+    (lambda (x bound rs)
+      (if (null? rs)
+          rs
+          (tagcase x
+            (x-var (s a b)
+              (let ((t (if (k-has-name? bound s) -1 (k-lookup s))))
+                (if (< t 0) rs (k-drop-regions rs (k-regions-in t)))))
+            (x-const (t a b) rs)
+            (x-lambda (ps body a b) (k-unseen body (k-param-names ps bound) rs))
+            (x-app (f args a b) (k-unseen-list args bound (k-unseen f bound rs)))
+            (x-plambda (bs body a b) (k-unseen body bound rs))
+            (x-letregion (k r body a b) (k-unseen body (cons (k-dvar-name r) bound) rs))
+            (x-rlambda (r l a b) (k-unseen l bound (k-unseen r bound rs)))
+            (x-proj (body ds a b) (k-unseen body bound rs))
+            (x-if (p c d a b) (k-unseen d bound (k-unseen c bound (k-unseen p bound rs))))
+            (x-letrec (bs body a b)
+              (let ((inner (k-letrec-names bs bound)))
+                (k-unseen body inner (k-unseen-letrec bs inner rs))))
+            (x-let (bs body a b) (k-unseen body (k-let-names bs bound) (k-unseen-let bs bound rs)))
+            (x-begin (xs a b) (k-unseen-list xs bound rs))
+            (x-prompt (t body h a b) (k-unseen h bound (k-unseen body bound (k-unseen t bound rs))))
+            (x-the (t body a b) (k-unseen body bound rs))
+            (x-bloblet (o i xs a b) (k-unseen-list xs bound rs))
+            (x-product (fs a b) (k-unseen-fields fs bound rs))
+            (x-extract (body l a b) (k-unseen body bound rs))
+            (x-sum (l body a b) (k-unseen body bound rs))
+            (x-tagcase (s arms els a b)
+              (let ((o (k-unseen-arms arms bound (k-unseen s bound rs))))
+                (if (null? els) o (k-unseen (extract (car els) 2) (cons (extract (car els) 1) bound) o))))))))
+  (k-unseen-letrec (subr (maxeff (read @t) (write @t) (alloc @t)) ((listof (productof (1 symbol) (2 int) (3 kx)) @t) k-names k-regions) k-regions)
+    (lambda (bs bound rs) (if (null? bs) rs (k-unseen-letrec (cdr bs) bound (k-unseen (extract (car bs) 3) bound rs)))))
+  (k-unseen-let (subr (maxeff (read @t) (write @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) @t) k-names k-regions) k-regions)
+    (lambda (bs bound rs) (if (null? bs) rs (k-unseen-let (cdr bs) bound (k-unseen (extract (car bs) 2) bound rs)))))
+  (k-unseen-fields (subr (maxeff (read @t) (write @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) @t) k-names k-regions) k-regions)
+    (lambda (fs bound rs) (if (null? fs) rs (k-unseen-fields (cdr fs) bound (k-unseen (extract (car fs) 2) bound rs)))))
+  (k-unseen-arms (subr (maxeff (read @t) (write @t) (alloc @t))
+                        ((listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) @t) k-names k-regions) k-regions)
+    (lambda (arms bound rs)
+      (if (null? arms)
+          rs
+          (k-unseen-arms (cdr arms) bound
+                         (k-unseen (extract (car arms) 4) (k-names-onto (extract (car arms) 3) bound) rs))))))
+
+;; What stays of `e`: an atom on a region no free variable sees goes.
 (define k-keep (subr (maxeff (read @t) (alloc @t)) (k-eff k-regions k-regions) k-eff)
-  (lambda (e visible in-result)
+  (lambda (e unseen in-result)
     (if (null? e)
         nil
-        (let* ((a (car e)) (r (k-atom-region a)) (rest (k-keep (cdr e) visible in-result)))
+        (let* ((a (car e)) (rest (k-keep (cdr e) unseen in-result)))
           (cond ((not (k-has-region? a)) (cons a rest))
-                ((k-has-region-in? visible r) (cons a rest))
-                ((and (k-has-region-in? in-result r) (and (> (k-atom-rank a) 1) (< (k-atom-rank a) 5))) (cons a rest))
+                ((not (k-has-region-in? unseen (k-atom-region a))) (cons a rest))
+                ((and (k-has-region-in? in-result (k-atom-region a)) (and (> (k-atom-rank a) 1) (< (k-atom-rank a) 5)))
+                 (cons a rest))
                 (else rest))))))
 
 (define k-mask (subr (maxeff (read @t) (write @t) (alloc @t)) (kx k-eff int) k-eff)
   (lambda (x e result)
     (if (null? e)
         e
-        (let* ((visible (k-visible (k-free-vars x) nil))
-               (in-result (k-regions-in result)))
-          (k-keep e visible in-result)))))
+        (let* ((in-result (k-regions-in result))
+               (sought (k-sought e in-result nil)))
+          (if (null? sought)
+              e
+              (k-keep e (k-unseen x nil sought) in-result))))))
 
 ;;; ------------------------------------------------------------ substitution
 

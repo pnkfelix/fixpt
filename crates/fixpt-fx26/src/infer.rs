@@ -290,15 +290,6 @@ impl Checker {
             };
             effect = effect.union(&eff);
         }
-        // A standard operation that allocates says where, once instantiated.
-        if self.facts.standard_operator.contains_key(&e)
-            && let Some(r) = latent.0.iter().find_map(|a| match a {
-                Atom::Alloc(r) => Some(*r),
-                _ => None,
-            })
-        {
-            self.facts.alloc_region.insert(e, r);
-        }
         let effect = effect.union(&latent);
         let effect = self.mask(e, &effect, result);
         Ok((result, effect))
