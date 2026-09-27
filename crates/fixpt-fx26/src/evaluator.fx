@@ -41,7 +41,7 @@
   (v-blob (arrayof val @v) (arrayof int @v))
   (v-product (listof (pairof symbol val @v) @v))
   (v-sum symbol val)
-  (v-clo (listof (productof (1 symbol) (2 syns-a)) @a) exp (listof (pairof symbol (bloblet (fields val) @v) @v) @v))
+  (v-clo (listof (productof (1 symbol) (2 syns-a)) finite) exp (listof (pairof symbol (bloblet (fields val) @v) @v) @v))
   (v-prim symbol)
   (v-tag (prompt-tag val val (maxeff spin (read @a) (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
   (v-cont (composable val val (maxeff spin (read @a) (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
@@ -148,7 +148,7 @@
 
 ;;; ------------------------------------------------------------- evaluating
 
-(define bind (subr evals ((listof (productof (1 symbol) (2 syns-a)) @a) vals env) env)
+(define bind (subr evals ((listof (productof (1 symbol) (2 syns-a)) finite) vals env) env)
   (lambda (ps xs e)
     (cond ((and (null? ps) (null? xs)) e)
           ((or (null? ps) (null? xs)) (efail "the wrong number of arguments"))
@@ -280,9 +280,9 @@
         (v-cont (k) (k (arg xs 0)))
         (v-esc (k) (k (arg xs 0)))
         (else x (efail "not a subroutine")))))
-  (eval-all (subr evals ((listof exp @a) env) vals)
+  (eval-all (subr evals ((listof exp finite) env) vals)
     (lambda (es e) (if (null? es) nil (let ((v (eval (car es) e))) (cons v (eval-all (cdr es) e))))))
-  (eval-begin (subr evals ((listof exp @a) env) val)
+  (eval-begin (subr evals ((listof exp finite) env) val)
     (lambda (es e)
       (cond ((null? es) (v-unit))
             ((null? (cdr es)) (eval (car es) e))
@@ -319,18 +319,18 @@
         (e-extract (p l a b) (field-of (eval p e) l))
         (e-sum (t v a b) (v-sum t (eval v e)))
         (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e)))))
-  (eval-let (subr evals ((listof (productof (1 symbol) (2 exp)) @a) env env) env)
+  (eval-let (subr evals ((listof (productof (1 symbol) (2 exp)) finite) env env) env)
     (lambda (bs outer e)
       (if (null? bs)
           e
           (let ((v (eval (extract (car bs) 2) outer)))
             (eval-let (cdr bs) outer (cons (cons (extract (car bs) 1) (cell v)) e))))))
   ;; Every name first, holding #u; then each value, in the scope of all.
-  (eval-letrec (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) exp env) val)
+  (eval-letrec (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp env) val)
     (lambda (bs body e)
-      (letrec ((open (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) env) env)
+      (letrec ((open (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) env) env)
                  (lambda (bs e) (if (null? bs) e (open (cdr bs) (cons (cons (extract (car bs) 1) (cell (v-unit))) e)))))
-               (fill (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) env) unit)
+               (fill (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) env) unit)
                  (lambda (bs inner)
                    (if (null? bs)
                        #u
@@ -338,18 +338,18 @@
                               (fill (cdr bs) inner))))))
         (let ((inner (open bs e)))
           (begin (fill bs inner) (eval body inner))))))
-  (eval-fields (subr evals ((listof (productof (1 symbol) (2 exp)) @a) env) (listof (pairof symbol val @v) @v))
+  (eval-fields (subr evals ((listof (productof (1 symbol) (2 exp)) finite) env) (listof (pairof symbol val @v) @v))
     (lambda (fs e)
       (if (null? fs)
           nil
           (let ((v (eval (extract (car fs) 2) e)))
             (cons (cons (extract (car fs) 1) v) (eval-fields (cdr fs) e))))))
   (eval-tagcase
-    (subr evals (val (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) (listof (productof (1 symbol) (2 exp)) @a) env) val)
+    (subr evals (val (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) (listof (productof (1 symbol) (2 exp)) finite) env) val)
     (lambda (s arms els e)
       (tagcase s
         (v-sum (tag v)
-          (letrec ((try (subr evals ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a)) val)
+          (letrec ((try (subr evals ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite)) val)
                      (lambda (as)
                        (cond ((null? as)
                               (if (null? els)
@@ -373,9 +373,9 @@
   (lambda (n) (let ((c (cell (v-unit)))) (begin (set genv (cons (cons n c) (get genv))) c))))
 
 
-(define rec-cells (subr (maxeff (read @a) (read @v) (write @v) (alloc @v) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof (bloblet (fields val) @v) @v))
+(define rec-cells (subr (maxeff (read @a) (read @v) (write @v) (alloc @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof (bloblet (fields val) @v) @v))
   (lambda (bs) (if (null? bs) nil (let ((c (push-global (extract (car bs) 1)))) (cons c (rec-cells (cdr bs)))))))
-(define rec-fill (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) (listof (bloblet (fields val) @v) @v)) unit)
+(define rec-fill (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (bloblet (fields val) @v) @v)) unit)
   (lambda (bs cells)
     (if (null? bs)
         #u
@@ -407,10 +407,10 @@
       (else x (v-unit)))))
 
 ;; The value of the last form, or the first error.
-(define eval-program (subr evals ((listof top @a)) eresult)
+(define eval-program (subr evals ((listof top finite)) eresult)
   (lambda (tops)
     (prompt eval-tag
-      (letrec ((go (subr evals ((listof top @a) val) val)
+      (letrec ((go (subr evals ((listof top finite) val) val)
                  (lambda (ts last)
                    (if (null? ts) last (let ((v (eval-top (car ts)))) (go (cdr ts) (tagcase (car ts) (t-exp (x) v) (else y last))))))))
         (ev-ok (go tops (v-unit))))
@@ -465,7 +465,7 @@
           (else x (string-append head (string-append " . " (show-val-in tail (- fuel 1))))))))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
-(define run-program (subr evals ((listof top @a)) string)
+(define run-program (subr evals ((listof top finite)) string)
   (lambda (tops)
     (tagcase (eval-program tops)
       (ev-ok (v) (show-val v))

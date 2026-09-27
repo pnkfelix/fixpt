@@ -1077,7 +1077,7 @@
 (define k-same-span? (subr pure (kx int int) bool)
   (lambda (x a b) (and (= (k-start x) a) (= (k-end x) b))))
 
-(define k-resolve-params (subr checks ((listof (productof (1 symbol) (2 syns-a)) @a)) (listof (productof (1 symbol) (2 k-ids)) @t))
+(define k-resolve-params (subr checks ((listof (productof (1 symbol) (2 syns-a)) finite)) (listof (productof (1 symbol) (2 k-ids)) @t))
   (lambda (ps)
     (if (null? ps)
         nil
@@ -1087,7 +1087,7 @@
           (cons (product (1 (extract (car ps) 1)) (2 t)) rest)))))
 (define k-resolve-descs (subr checks (syns-a) (listof k-desc @t))
   (lambda (ds) (if (null? ds) nil (let* ((d (k-parse-d (car ds))) (rest (k-resolve-descs (cdr ds)))) (cons d rest)))))
-(define k-copy-names (subr (maxeff (read @a) (alloc @t) spin) (names) k-names)
+(define k-copy-names (subr (maxeff (read @a) (alloc @t)) (names) k-names)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (k-copy-names (cdr ns))))))
 
 ;; Where a parser's tree starts and ends.
@@ -1137,7 +1137,7 @@
                 (else x (k-fail (k-cat3 "`" (symbol->string n) "` is not a region") a b))))))))
 
 (define-rec
-  (k-resolve-all (subr checks ((listof exp @a)) kxs)
+  (k-resolve-all (subr checks ((listof exp finite)) kxs)
     (lambda (es) (if (null? es) nil (let* ((x (k-resolve-exp (car es))) (rest (k-resolve-all (cdr es)))) (cons x rest)))))
   (k-resolve-exp (subr checks (exp) kx)
     (lambda (e)
@@ -1204,7 +1204,7 @@
         (e-tagcase (s arms els a b)
           (let* ((sx (k-resolve-exp s)) (rarms (k-resolve-arms arms nil)) (rels (k-resolve-else els)))
             (x-tagcase sx rarms rels a b))))))
-  (k-resolve-letrec (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof (productof (1 symbol) (2 int) (3 kx)) @t))
+  (k-resolve-letrec (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof (productof (1 symbol) (2 int) (3 kx)) @t))
     (lambda (bs)
       (if (null? bs)
           nil
@@ -1212,13 +1212,13 @@
                  (x (k-resolve-exp (extract (car bs) 3)))
                  (rest (k-resolve-letrec (cdr bs))))
             (cons (product (1 (extract (car bs) 1)) (2 t) (3 x)) rest)))))
-  (k-resolve-let (subr checks ((listof (productof (1 symbol) (2 exp)) @a)) (listof (productof (1 symbol) (2 kx)) @t))
+  (k-resolve-let (subr checks ((listof (productof (1 symbol) (2 exp)) finite)) (listof (productof (1 symbol) (2 kx)) @t))
     (lambda (bs)
       (if (null? bs)
           nil
           (let* ((x (k-resolve-exp (extract (car bs) 2))) (rest (k-resolve-let (cdr bs))))
             (cons (product (1 (extract (car bs) 1)) (2 x)) rest)))))
-  (k-resolve-fields (subr checks ((listof (productof (1 symbol) (2 exp)) @a) k-names int int) (listof (productof (1 symbol) (2 kx)) @t))
+  (k-resolve-fields (subr checks ((listof (productof (1 symbol) (2 exp)) finite) k-names int int) (listof (productof (1 symbol) (2 kx)) @t))
     (lambda (fs seen a b)
       (if (null? fs)
           nil
@@ -1227,7 +1227,7 @@
                 (k-fail (string-append (k-quote (symbol->string l)) " appears twice") a b)
                 (let* ((x (k-resolve-exp (extract (car fs) 2))) (rest (k-resolve-fields (cdr fs) (cons l seen) a b)))
                   (cons (product (1 l) (2 x)) rest)))))))
-  (k-resolve-arms (subr checks ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) k-names)
+  (k-resolve-arms (subr checks ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) k-names)
                           (listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) @t))
     (lambda (arms seen)
       (if (null? arms)
@@ -1238,7 +1238,7 @@
                         (exp-start (extract arm 4)) (exp-end (extract arm 4)))
                 (let* ((x (k-resolve-exp (extract arm 4))) (rest (k-resolve-arms (cdr arms) (cons tag seen))))
                   (cons (product (1 tag) (2 (extract arm 2)) (3 (k-copy-names (extract arm 3))) (4 x)) rest)))))))
-  (k-resolve-else (subr checks ((listof (productof (1 symbol) (2 exp)) @a)) (listof (productof (1 symbol) (2 kx)) @t))
+  (k-resolve-else (subr checks ((listof (productof (1 symbol) (2 exp)) finite)) (listof (productof (1 symbol) (2 kx)) @t))
     (lambda (els)
       (if (null? els) nil (cons (product (1 (extract (car els) 1)) (2 (k-resolve-exp (extract (car els) 2)))) nil)))))
 
@@ -3506,7 +3506,7 @@
 
 ;; The first pass: abbreviations, so that types can refer to each other in
 ;; any order. Values cannot: a definition sees only those before it.
-(define k-ahead (subr checks ((listof top @a)) unit)
+(define k-ahead (subr checks ((listof top finite)) unit)
   (lambda (forms)
     (if (null? forms)
         #u
@@ -3516,7 +3516,7 @@
   (lambda (t e) (k-cat3 (k-show-ty t) " ! " (k-show-effect e))))
 (define k-push-lines (subr (maxeff (read @t) (alloc @t) spin) ((listof string @t) k-out) k-out)
   (lambda (lines out) (if (null? lines) out (k-push-lines (cdr lines) (cons (car lines) out)))))
-(define k-rec-types (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) k-ids)
+(define k-rec-types (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) k-ids)
   (lambda (bs)
     (if (null? bs)
         nil
@@ -3524,7 +3524,7 @@
                (noted (k-note-known (extract (car bs) 1) t)))
           (cons t (k-rec-types (cdr bs)))))))
 ;; Each lambda, read under its signature: a lambda, or an error.
-(define k-rec-lambdas (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) k-ids) k-group)
+(define k-rec-lambdas (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) k-ids) k-group)
   (lambda (bs ts)
     (if (null? bs)
         nil
@@ -3549,7 +3549,7 @@
 
 ;; `(define-rec (name type lambda) …)`: every name in scope first, then each
 ;; lambda checked against its type. A line for each.
-(define k-define-rec (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof string @t))
+(define k-define-rec (subr checks ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof string @t))
   (lambda (bs)
     (let* ((rsaved (get k-recursive))
            (g (k-rec-lambdas bs (k-rec-types bs)))
@@ -3559,7 +3559,7 @@
       (begin (set k-recursive rsaved) lines))))
 
 ;; The second pass: definitions and expressions, in order.
-(define k-forms (subr checks ((listof top @a) k-out) k-out)
+(define k-forms (subr checks ((listof top finite) k-out) k-out)
   (lambda (forms out)
     (if (null? forms)
         (reverse out)
@@ -3601,7 +3601,7 @@
 ;; The entry point: check a program's trees, in the initial environment
 ;; written `standard`. What each definition and expression is, in order,
 ;; or the first error.
-(define check-program (subr checks ((listof syn @s) (listof top @a)) k-result)
+(define check-program (subr checks ((listof syn @s) (listof top finite)) k-result)
   (lambda (standard forms)
     (prompt k-tag
       (begin (k-reset) (k-standard standard) (k-ahead forms) (k-ok (k-forms forms nil)))
