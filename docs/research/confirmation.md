@@ -141,14 +141,29 @@ finite list of unknown size.
    arithmetic), so that `map` and `reverse` keep their sizes.
 4. **CF4 (L, later). Size arithmetic**, and array bounds by size.
 5. **CF5 (L, later). Functions**, by carried types or by wrapping.
-6. **CF0 (S, first; the user's, 2026-09-27). Into `finite`, from outside.**
-   A walk from data that may be cyclic (a list at a region that may be
-   written, input read from outside) to `finite` data, which either returns
-   the finite copy or, on meeting a cycle, calls a continuation it was
-   given: `(poly ((r region) (t type) (e effect)) (subr (maxeff (read r)
-   (alloc …) e) ((listof t r) (subr e () (listof t finite))) (listof t
-   finite)))`, and the same for trees by the visited set above. A reader of
-   outside input built on it returns only well-founded data, so what
-   consumes it needs no `spin`. The primitives that walk lists already end
-   on a cycle, with an error (`list_to_vec`); this is the typed way, where
-   the failure is in the type.
+6. **CF0 (the user's, 2026-09-27). `read` and `acyclic`, decoupled.**
+   - **`read` on its own**, as its input says, datum labels (`#0=`)
+     included, tied with `set-cdr!` inside a `letfreeze`: `const` data. The
+     eager reader refuses labels today, which is why `datum` is acyclic by
+     construction (built only by pure constructors from what exists).
+   - **`acyclic` certifies frozen data, without copying**: `(F const)` to
+     `(F finite)`, or a continuation called on a cycle. Frozen data cannot
+     be written, so the check stays true; and a ref in another writable
+     region inside `F` can only be given data already `finite`. Its type
+     abstracts over a type with a region hole, `(f (region) type)`: kinds
+     with arrows, one step past parametric datatypes (PLAN, next queue 7).
+   - **The walk, and the open universe**: types defined later (generative
+     types) must be walkable too. Three ways:
+     1. by representation: every heap object's header says what it is, so
+        walking every pair and bloblet reached, with the visited set above,
+        needs no types and is open for free; but regions are erased, so it
+        cannot tell `r`'s edges from others', and refuses a legitimate cycle
+        elsewhere (imprecise, never unsound: the continuation is called);
+     2. by type representations passed as values, intensional type
+        analysis under type erasure (Crary, Weirich and Morrisett, ICFP
+        1998, from memory): each generative type brings its representation,
+        and the walk follows only `r`'s edges;
+     3. by a traversal each type provides, derived as Haskell's "Scrap your
+        boilerplate" (Lämmel and Peyton Jones, 2003) or Rust's `derive` do.
+   - Recommended: the type above, walked by representation (1) for now;
+     (2) or (3) with generative types, when each can bring its own.
