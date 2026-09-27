@@ -148,3 +148,15 @@ fn threaded_forms_stop_at_the_step_limit() {
         assert_eq!(outs.last(), Some(&Err("evaluation step limit exceeded".to_string())), "{name} on machine {i}");
     }
 }
+
+/// A primitive that walks a list ends on a cyclic one, with an error: its
+/// type says no `spin` (`tests/programs/diverge/cyclic-reverse.fx`).
+#[test]
+fn a_primitive_given_a_cyclic_list_fails_rather_than_loops() {
+    let text = include_str!("programs/diverge/cyclic-reverse.fx");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let forms = s.checker.read_in(fixpt_read::FileId(0), text).expect("reads");
+    let outs: Vec<_> = forms.iter().map(|f| s.run(f).expect("runs").value).collect();
+    let last = outs.last().expect("a value").clone().expect_err("fails");
+    assert!(last.contains("proper list"), "{last}");
+}

@@ -529,11 +529,20 @@ impl Heap {
     }
 
     /// Collect a proper list into a `Vec`. Returns `None` for an improper list.
+    /// A proper list's elements, or `None` if it is improper or cyclic (the
+    /// hare, `v`, meets the tortoise, which moves every other step).
     pub fn list_to_vec(&self, mut v: Value) -> Option<Vec<Value>> {
         let mut out = Vec::new();
+        let mut slow = v;
         while v.is_pair() {
             out.push(self.car(v));
             v = self.cdr(v);
+            if out.len() % 2 == 0 {
+                slow = self.cdr(slow);
+                if slow == v && v.is_pair() {
+                    return None;
+                }
+            }
         }
         if v.is_null() { Some(out) } else { None }
     }
