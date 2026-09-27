@@ -885,7 +885,7 @@ times. `FIXPT_CALLOUTS=1`, register code, instrumented:
 | 20    | 122               | 5 ms       | 1 ms     |
 | 200   | 1,202             | 25 ms      | 11 ms    |
 
-A capture copies the stack at about 1 ns a word, plus about 0.2 µs
+A capture copies the stack at about 1 ns a word, plus about 0.15 µs
 whatever the depth. A whole round (prompt, capture, abort, resume) is
 0.56 µs at depth 20, uninstrumented (11.3 ms for the 20,000).
 
