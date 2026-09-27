@@ -1131,6 +1131,11 @@ In the user's order:
    cover? Literally all of them would let it write frozen data and other
    programs' private regions. More likely it means any effect on the
    regions reachable from what it is given, plus `spin` and control.
+6. **GADTs** (raised by the user, 2026-09-27): sums whose variants refine
+   their type's parameters, so that a `tagcase` arm learns them. They meet
+   the size indices of `confirm` (CF3, CF4), where a variant's type would
+   say its size, and the typed interpreter this repository keeps growing,
+   whose `eval` could then be given a precise type.
 
 ### Kept open, deliberately
 
