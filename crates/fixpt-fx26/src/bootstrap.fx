@@ -7,12 +7,12 @@
 
 (define-datatype bresult (b-word tword) (b-fail string))
 
-(define b-feed (subr reads (state string int) state)
+(define b-feed (subr (maxeff reads spin) (state string int) state)
   (lambda (st text i)
     (eager-feed (eager-feed-string st (substring text i (string-length text))) (integer->char 10))))
 
 ;; Every form of `text`, as the reader reads it, or none if it cannot.
-(define b-read (subr (maxeff reads (read @c) (alloc @c)) (string) (listof syns @s))
+(define b-read (subr (maxeff reads (read @c) (alloc @c) spin) (string) (listof syns @s))
   (lambda (text)
     (let ((st (b-feed (eager-start-fx26) text 0)))
       (if (string=? (datum-symbol-name (eager-status st)) "complete")
@@ -21,7 +21,7 @@
 
 ;; `program`, checked in the initial environment written `standard`
 ;; (`(name type)` for each binding), and compiled.
-(define bootstrap (subr (maxeff reads (read @c) (alloc @c) parses checks compiles (comefrom @p) (comefrom @z) (comefrom @y)) (string string) bresult)
+(define bootstrap (subr (maxeff reads (read @c) (alloc @c) parses checks compiles (comefrom @p) (comefrom @z) (comefrom @y) spin) (string string) bresult)
   (lambda (standard program)
     (let ((std (b-read standard)) (prog (b-read program)))
       (if (or (null? std) (null? prog))

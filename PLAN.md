@@ -1136,6 +1136,13 @@ In the user's order:
    the size indices of `confirm` (CF3, CF4), where a variant's type would
    say its size, and the typed interpreter this repository keeps growing,
    whose `eval` could then be given a precise type.
+7. **Parametric datatypes** (with the user, 2026-09-27): `define-datatype`
+   with parameters, and type families that mention themselves with the same
+   parameters (regular, so tied as a knot, not expanded without end:
+   today `(define-type (tree (r region)) … (tree r) …)` is refused). Needed
+   for trees in a place the caller chooses, `(finite p)` in an arena;
+   the front end's trees in plain `finite` need none. A first step toward
+   GADTs (6).
 
 ### Kept open, deliberately
 

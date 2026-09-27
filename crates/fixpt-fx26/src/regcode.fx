@@ -252,7 +252,7 @@
 (define-rec
   ;; Whether evaluating `x` may call or call out, and so collect. Loops do
   ;; not; declined forms are said to, which does not matter.
-  (r-collects (subr compiles (exp cenv (listof c-this @k) bool) bool)
+  (r-collects (subr (maxeff compiles spin) (exp cenv (listof c-this @k) bool) bool)
     (lambda (x e this tail)
       (tagcase x
         (e-var (n a b) #f) (e-int (n a b) #f) (e-bool (v a b) #f) (e-str (v a b) #f) (e-char (v a b) #f)
@@ -285,23 +285,23 @@
                            (else y #f))))
             (or args-collect (not (or loop-call inline)))))
         (else y #t))))
-  (r-collects-all (subr compiles ((listof exp finite) cenv (listof c-this @k)) bool)
+  (r-collects-all (subr (maxeff compiles spin) ((listof exp finite) cenv (listof c-this @k)) bool)
     (lambda (es e this) (and (not (null? es)) (or (r-collects (car es) e this #f) (r-collects-all (cdr es) e this)))))
-  (r-collects-let (subr compiles ((listof (productof (1 symbol) (2 exp)) finite) cenv (listof c-this @k)) bool)
+  (r-collects-let (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 exp)) finite) cenv (listof c-this @k)) bool)
     (lambda (bs e this) (and (not (null? bs)) (or (r-collects (extract (car bs) 2) e this #f) (r-collects-let (cdr bs) e this)))))
-  (r-collects-begin (subr compiles ((listof exp finite) cenv (listof c-this @k) bool) bool)
+  (r-collects-begin (subr (maxeff compiles spin) ((listof exp finite) cenv (listof c-this @k) bool) bool)
     (lambda (es e this tail)
       (cond ((null? es) #f)
             ((null? (cdr es)) (r-collects (car es) e this tail))
             (else (or (r-collects (car es) e this #f) (r-collects-begin (cdr es) e this tail))))))
-  (r-collects-arms (subr compiles ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) cenv (listof c-this @k) bool) bool)
+  (r-collects-arms (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) cenv (listof c-this @k) bool) bool)
     (lambda (arms e this tail)
       (and (not (null? arms)) (or (r-collects (extract (car arms) 4) e this tail) (r-collects-arms (cdr arms) e this tail)))))
-  (r-collects-else (subr compiles ((listof (productof (1 symbol) (2 exp)) finite) cenv (listof c-this @k) bool) bool)
+  (r-collects-else (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 exp)) finite) cenv (listof c-this @k) bool) bool)
     (lambda (els e this tail) (and (not (null? els)) (r-collects (extract (car els) 2) e this tail))))
 
   ;; `x`'s value into RESULT; in tail position, returned.
-  (r-exp (subr compiles (rgen exp renv cenv bool) unit)
+  (r-exp (subr (maxeff compiles spin) (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
       (tagcase x
         (e-var (n a b)
@@ -392,16 +392,16 @@
         (e-tagcase (s arms els a b) (r-tagcase g s arms els env te tail))
         (e-letrec (bs body a b) (if (extract g leaf) (r-decline) (r-letrec g bs body env te tail)))
         (e-app (f args a b) (r-app g f args env te tail)))))
-  (r-begin (subr compiles (rgen (listof exp finite) renv cenv bool) unit)
+  (r-begin (subr (maxeff compiles spin) (rgen (listof exp finite) renv cenv bool) unit)
     (lambda (g es env te tail)
       (if (null? (cdr es))
           (r-exp g (car es) env te tail)
           (begin (r-exp g (car es) env te #f) (r-begin g (cdr es) env te tail)))))
-  (r-field-args (subr compiles ((listof (productof (1 symbol) (2 exp)) finite)) rargs)
+  (r-field-args (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 exp)) finite)) rargs)
     (lambda (fs) (if (null? fs) nil (cons (a-e (extract (car fs) 2)) (r-field-args (cdr fs))))))
   ;; Each binding's value made, in the scope outside, and put where it
   ;; lives: a register in a leaf, else a frame slot. In order.
-  (r-let-bind (subr compiles (rgen (listof (productof (1 symbol) (2 exp)) finite) renv cenv) renv)
+  (r-let-bind (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 exp)) finite) renv cenv) renv)
     (lambda (g bs env te)
       (if (null? bs)
           nil
@@ -411,11 +411,11 @@
                          (let ((r (r-reg g))) (begin (r-opn g rop-setreg r) (rl-reg r)))
                          (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) (rl-slot s))))))
               (cons (cons (extract (car bs) 1) l) (r-let-bind g (cdr bs) env te)))))))
-  (r-bind-all (subr compiles (renv renv) renv)
+  (r-bind-all (subr (maxeff compiles spin) (renv renv) renv)
     (lambda (bound env) (if (null? bound) env (r-bind-all (cdr bound) (cons (car bound) env)))))
-  (r-local-all (subr compiles (renv cenv) cenv)
+  (r-local-all (subr (maxeff compiles spin) (renv cenv) cenv)
     (lambda (bound te) (if (null? bound) te (r-local-all (cdr bound) (r-local te (car (car bound)))))))
-  (r-bloblet (subr compiles (rgen string int (listof exp finite) renv cenv) unit)
+  (r-bloblet (subr (maxeff compiles spin) (rgen string int (listof exp finite) renv cenv) unit)
     (lambda (g op i args env te)
       (cond ((string=? op "bloblet-ref")
              (begin (r-exp g (car args) env te #f) (r-opn g rop-field (+ i 2))))
@@ -434,7 +434,7 @@
             (else (r-decline)))))
 
   ;;; ---------------------------------------------------------- applications
-  (r-app (subr compiles (rgen exp (listof exp finite) renv cenv bool) unit)
+  (r-app (subr (maxeff compiles spin) (rgen exp (listof exp finite) renv cenv bool) unit)
     (lambda (g f args env te tail)
       (let ((n (c-count-exps args)))
         (if (and tail (r-self-known? g f n te))
@@ -443,7 +443,7 @@
               (if (string=? name "")
                   (r-call g f args env te tail)
                   (begin (r-standard-app g name args env te tail) (r-done g tail))))))))
-  (r-standard-app (subr compiles (rgen string (listof exp finite) renv cenv bool) unit)
+  (r-standard-app (subr (maxeff compiles spin) (rgen string (listof exp finite) renv cenv bool) unit)
     (lambda (g name args env te tail)
       (tagcase (r-standard name (c-count-exps args))
         (s-op2 (r swap not)
@@ -471,7 +471,7 @@
         (s-special (what) (r-special g what args env te))
         (s-none () (r-decline)))))
   ;; A call: the arguments into REG1…REGn, the procedure in RESULT.
-  (r-call (subr compiles (rgen exp (listof exp finite) renv cenv bool) unit)
+  (r-call (subr (maxeff compiles spin) (rgen exp (listof exp finite) renv cenv bool) unit)
     (lambda (g f args env te tail)
       (let ((n (c-count-exps args)))
         (cond ((or (extract g leaf) (> n register-regs)) (r-decline))
@@ -486,7 +486,7 @@
                      (begin (r-leave g) (r-opn g rop-tailinvoke n))
                      (r-opn g rop-invoke n))))))))
   ;; RESULT := r(a, b), `a` evaluated first; a constant `b` an immediate.
-  (r-binary (subr compiles (rgen int exp exp renv cenv) unit)
+  (r-binary (subr (maxeff compiles spin) (rgen int exp exp renv cenv) unit)
     (lambda (g r a b env te)
       (let ((o (r-operands g a b env te #t)))
         (cond ((not (null? (extract o 1))) (r-op2 g rop-op2imm (wcell-int r) (car (extract o 1))))
@@ -495,7 +495,7 @@
   ;; `a` into RESULT and `b` into a register, `a` evaluated first; or, if
   ;; `imm` and `b` is a constant, `b` as an immediate. The register is free
   ;; again after: use it at once.
-  (r-operands (subr compiles (rgen exp exp renv cenv bool) (productof (1 (listof wcell @k)) (2 (listof int @k))))
+  (r-operands (subr (maxeff compiles spin) (rgen exp exp renv cenv bool) (productof (1 (listof wcell @k)) (2 (listof int @k))))
     (lambda (g a b env te imm)
       (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
              (v (if imm (r-constant b) (the (listof wcell @k) nil)))
@@ -524,7 +524,7 @@
         (begin (set (extract g nreg) regs) (set (extract g nslot) slots) out))))
   ;; `x`'s value into REGk: straight from a register or the frame when it is
   ;; a variable there, else by way of RESULT.
-  (r-into (subr compiles (rgen exp int renv cenv) unit)
+  (r-into (subr (maxeff compiles spin) (rgen exp int renv cenv) unit)
     (lambda (g x k env te)
       (let ((l (tagcase x (e-var (n a b) (r-where env n)) (else y (the (listof rloc @k) nil)))))
         (if (null? l)
@@ -536,7 +536,7 @@
   ;; The arguments into REG1…REGn, in order, and then `f`, if a call's (one
   ;; or none), into RESULT. Not in a leaf: an argument that is not simple is
   ;; kept in the frame until all are made; a simple one is made last.
-  (r-args (subr compiles (rgen rargs renv cenv (listof exp @k)) unit)
+  (r-args (subr (maxeff compiles spin) (rgen rargs renv cenv (listof exp @k)) unit)
     (lambda (g args env te f)
       (if (or (extract g leaf) (> (r-count-args args) register-regs))
           (r-decline)
@@ -556,7 +556,7 @@
               (set (extract g nslot) slots))))))
   ;; For each argument: -1 if simple, made later; -2 if made into its
   ;; register now; else the frame slot it is kept in.
-  (r-args-hard (subr compiles (rgen rargs int int renv cenv) (listof int @k))
+  (r-args-hard (subr (maxeff compiles spin) (rgen rargs int int renv cenv) (listof int @k))
     (lambda (g args i direct env te)
       (if (null? args)
           nil
@@ -574,7 +574,7 @@
                              (begin (r-opn g rop-setreg (+ i 1)) -2)
                              (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) s)))))
                   (cons k (r-args-hard g (cdr args) (+ i 1) direct env te))))))))
-  (r-args-into (subr compiles (rgen rargs (listof int @k) int renv cenv) unit)
+  (r-args-into (subr (maxeff compiles spin) (rgen rargs (listof int @k) int renv cenv) unit)
     (lambda (g args kept i env te)
       (if (null? args)
           #u
@@ -591,10 +591,10 @@
                        (a-thunk (b) #u)))))
             (r-args-into g (cdr args) (cdr kept) (+ i 1) env te)))))
   ;; A call-out, `prim p n` or `threaded r n`, on `args` in REG1…REGn.
-  (r-call-out (subr compiles (rgen int int rargs renv cenv) unit)
+  (r-call-out (subr (maxeff compiles spin) (rgen int int rargs renv cenv) unit)
     (lambda (g how what args env te)
       (begin (r-args g args env te (the (listof exp @k) nil)) (r-opnn g how what (r-count-args args)))))
-  (r-prim (subr compiles (rgen string rargs renv cenv) unit)
+  (r-prim (subr (maxeff compiles spin) (rgen string rargs renv cenv) unit)
     (lambda (g name args env te)
       (let ((p (runtime-primitive name))) (if (< p 0) (r-decline) (r-call-out g rop-prim p args env te)))))
   ;; A closure of a lambda into RESULT, its free values into REG1…REGn first;
@@ -602,7 +602,7 @@
   ;; none), the closure is made there, by `%region-closure h fv … w`. What it
   ;; gives: for each sibling not made yet (a `letrec`'s), the free value's
   ;; index and the sibling's frame slot.
-  (r-lambda (subr compiles (rgen (listof (productof (1 symbol) (2 syns-a)) finite) exp renv cenv syms (listof exp @k)) patches)
+  (r-lambda (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syns-a)) finite) exp renv cenv syms (listof exp @k)) patches)
     (lambda (g ps body env te own region)
       (if (extract g leaf)
           (begin (r-decline) (the patches nil))
@@ -622,7 +622,7 @@
                         (extract pa 2)))))))))
   ;; Each free value into REGj+1, as `lambda` wants them; a sibling not made
   ;; yet as `#f`, to be patched.
-  (r-free-regs (subr compiles (rgen syms renv int) patches)
+  (r-free-regs (subr (maxeff compiles spin) (rgen syms renv int) patches)
     (lambda (g fv env j)
       (if (null? fv)
           nil
@@ -637,7 +637,7 @@
                            (cons (cons j s) (r-free-regs g (cdr fv) env (+ j 1)))))
                   (else y (begin (r-decline) (the patches nil)))))))))
   ;; The same, as a call-out's operands.
-  (r-free-args (subr compiles (syms renv int) (productof (1 rargs) (2 patches)))
+  (r-free-args (subr (maxeff compiles spin) (syms renv int) (productof (1 rargs) (2 patches)))
     (lambda (fv env j)
       (if (null? fv)
           (product (1 (the rargs nil)) (2 (the patches nil)))
@@ -650,10 +650,10 @@
                   (rl-pending (s)
                     (product (1 (cons (a-v (wcell-bool #f)) (extract rest 1))) (2 (cons (cons j s) (extract rest 2)))))
                   (else y (begin (r-decline) rest))))))))
-  (r-append-arg (subr compiles (rargs rarg) rargs)
+  (r-append-arg (subr (maxeff compiles spin) (rargs rarg) rargs)
     (lambda (xs x) (if (null? xs) (cons x nil) (cons (car xs) (r-append-arg (cdr xs) x)))))
   ;; Arrays, and the tag and key makers: as the stack compiler does them.
-  (r-special (subr compiles (rgen string (listof exp finite) renv cenv) unit)
+  (r-special (subr (maxeff compiles spin) (rgen string (listof exp finite) renv cenv) unit)
     (lambda (g what args env te)
       (cond ((string=? what "array-ref")
              (begin
@@ -680,7 +680,7 @@
   ;; when there is no `else` (a checked program covers every tag); the value,
   ;; or its product's members, bound.
   (r-tagcase
-    (subr compiles (rgen exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) (listof (productof (1 symbol) (2 exp)) finite) renv cenv bool) unit)
+    (subr (maxeff compiles spin) (rgen exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) (listof (productof (1 symbol) (2 exp)) finite) renv cenv bool) unit)
     (lambda (g s arms els env te tail)
       (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
         (begin
@@ -704,7 +704,7 @@
   (r-get (subr compiles (rgen rloc) unit)
     (lambda (g l) (tagcase l (rl-reg (r) (r-opn g rop-reg r)) (rl-slot (s) (r-opn g rop-stack s)) (else y #u))))
   (r-arms
-    (subr compiles (rgen (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) bool rloc int renv cenv bool) unit)
+    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) bool rloc int renv cenv bool) unit)
     (lambda (g arms no-else sc end env te tail)
       (if (null? arms)
           #u
@@ -727,18 +727,18 @@
               (r-emit g (r-label next))
               (r-arms g (cdr arms) no-else sc end env te tail))))))
   ;; A product's members, each kept, newest first.
-  (r-members (subr compiles (rgen rloc names int renv) renv)
+  (r-members (subr (maxeff compiles spin) (rgen rloc names int renv) renv)
     (lambda (g sc xs j acc)
       (if (null? xs)
           acc
           (begin (r-get g sc) (r-opn g rop-field 3) (r-opn g rop-field (+ j 2))
                  (let ((l (r-place-value g)))
                    (r-members g sc (cdr xs) (+ j 1) (the renv (cons (cons (car xs) l) acc))))))))
-  (r-reverse-env (subr compiles (renv renv) renv)
+  (r-reverse-env (subr (maxeff compiles spin) (renv renv) renv)
     (lambda (xs acc) (if (null? xs) acc (r-reverse-env (cdr xs) (cons (car xs) acc)))))
   ;; A tail call of the procedure itself: the new arguments made, then put
   ;; where the parameters are, and back to the start.
-  (r-loop (subr compiles (rgen (listof exp finite) renv cenv) unit)
+  (r-loop (subr (maxeff compiles spin) (rgen (listof exp finite) renv cenv) unit)
     (lambda (g args env te)
       (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot))) (made (r-loop-make g args env te)))
         (begin
@@ -746,7 +746,7 @@
           (r-emit g (r-branch #f (extract g start)))
           (set (extract g nreg) regs)
           (set (extract g nslot) slots)))))
-  (r-loop-make (subr compiles (rgen (listof exp finite) renv cenv) (listof int @k))
+  (r-loop-make (subr (maxeff compiles spin) (rgen (listof exp finite) renv cenv) (listof int @k))
     (lambda (g args env te)
       (if (null? args)
           nil
@@ -756,7 +756,7 @@
                          (let ((r (r-reg g))) (begin (r-opn g rop-setreg r) r))
                          (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) s)))))
               (cons m (r-loop-make g (cdr args) env te)))))))
-  (r-loop-move (subr compiles (rgen (listof int @k) int) unit)
+  (r-loop-move (subr (maxeff compiles spin) (rgen (listof int @k) int) unit)
     (lambda (g made i)
       (if (null? made)
           #u
@@ -767,7 +767,7 @@
             (r-loop-move g (cdr made) (+ i 1))))))
   ;; `letrec`: each closure made into its slot, a placeholder for a sibling
   ;; not made yet; then each placeholder patched.
-  (r-letrec (subr compiles (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp renv cenv bool) unit)
+  (r-letrec (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp renv cenv bool) unit)
     (lambda (g bs body env te tail)
       (let* ((slots (get (extract g nslot)))
              (at (r-letrec-slots g bs))
@@ -776,10 +776,10 @@
           (r-letrec-patch g patches at)
           (r-exp g body (r-letrec-env bs at env) (r-letrec-te bs te) tail)
           (set (extract g nslot) slots)))))
-  (r-letrec-slots (subr compiles (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof int @k))
+  (r-letrec-slots (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof int @k))
     (lambda (g bs) (if (null? bs) nil (let ((s (r-slot g))) (cons s (r-letrec-slots g (cdr bs)))))))
   (r-letrec-make
-    (subr compiles (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int renv cenv)
+    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int renv cenv)
           (listof patches @k))
     (lambda (g all bs at i env te)
       (if (null? bs)
@@ -798,7 +798,7 @@
               (r-opn g rop-setstk (r-nth-int at i))
               (cons p (r-letrec-make g all (cdr bs) at (+ i 1) env te)))))))
   (r-letrec-one
-    (subr compiles (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int symbol
+    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int symbol
                    (listof (productof (1 symbol) (2 syns-a)) finite) exp (listof exp @k) renv cenv)
           patches)
     (lambda (g all at i name ps lbody region env te)
@@ -808,7 +808,7 @@
   ;; Each sibling where the closure being made sees it: a loop, if it is this
   ;; one and only called so in its body; else the slot it will be in.
   (r-sibling-env
-    (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int int exp int renv cenv)
+    (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int int exp int renv cenv)
           (productof (1 renv) (2 cenv)))
     (lambda (bs at i k lbody n env te)
       (if (null? bs)
@@ -819,14 +819,14 @@
             (r-sibling-env (cdr bs) at i (+ k 1) lbody n
                            (the renv (cons (cons sib (if loops (rl-loop) (rl-pending s))) env))
                            (the cenv (cons (cons sib (if loops (at-loop 0) (at-pending s))) te)))))))
-  (r-letrec-patch (subr compiles (rgen (listof patches @k) (listof int @k)) unit)
+  (r-letrec-patch (subr (maxeff compiles spin) (rgen (listof patches @k) (listof int @k)) unit)
     (lambda (g made at)
       (if (null? made)
           #u
           (begin
             (r-patch-one g (car made) (car at))
             (r-letrec-patch g (cdr made) (cdr at))))))
-  (r-patch-one (subr compiles (rgen patches int) unit)
+  (r-patch-one (subr (maxeff compiles spin) (rgen patches int) unit)
     (lambda (g ps slot)
       (if (null? ps)
           #u
@@ -835,10 +835,10 @@
             (r-opn g rop-stack slot)
             (r-opnn g rop-setfield (+ threaded-closure-free0 (car (car ps))) 1)
             (r-patch-one g (cdr ps) slot)))))
-  (r-letrec-env (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) renv) renv)
+  (r-letrec-env (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) renv) renv)
     (lambda (bs at env)
       (if (null? bs) env (r-letrec-env (cdr bs) (cdr at) (the renv (cons (cons (extract (car bs) 1) (rl-slot (car at))) env))))))
-  (r-letrec-te (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) cenv) cenv)
+  (r-letrec-te (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) cenv) cenv)
     (lambda (bs te) (if (null? bs) te (r-letrec-te (cdr bs) (r-local te (extract (car bs) 1)))))))
 
 
@@ -865,7 +865,7 @@
 ;; A lambda's register code, whose closure captures what `inner` says, or
 ;; none where this compiler declines.
 (define r-register-code
-  (subr compiles ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv (listof c-this @k)) (listof wcell @k))
+  (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv (listof c-this @k)) (listof wcell @k))
   (lambda (ps body inner this)
     (let ((outer (get r-declined)) (n (c-count-params ps)))
       (begin

@@ -40,9 +40,9 @@
 
 ;; What a reading procedure may do: allocate, read and write its own data,
 ;; mark, and suspend or fail through its prompt.
-(define-effect reads (maxeff spin (alloc @s) (read @s) (write @s) (write @m) (read @m) (goto @e) (comefrom @e)))
+(define-effect reads (maxeff (alloc @s) (read @s) (write @s) (write @m) (read @m) (goto @e) (comefrom @e)))
 ;; The same, less the control on @e: what a delimited parse does.
-(define-effect parsing (maxeff spin (alloc @s) (read @s) (write @s) (write @m) (read @m)))
+(define-effect parsing (maxeff (alloc @s) (read @s) (write @s) (write @m) (read @m)))
 
 (define-type chars (listof char @s))
 (define-type data (listof datum @s))
@@ -73,9 +73,9 @@
 ;; complete top-level data (newest first), and the message.
 (define-type state
   (dletrec ((st (pairof bool (pairof (listof k @s) (pairof int (pairof syns string @s) @s) @s) @s))
-            (k (composable char st parsing @e)))
+            (k (composable char st (maxeff parsing spin) @e)))
     st))
-(define-type cont (composable char state parsing @e))
+(define-type cont (composable char state (maxeff parsing spin) @e))
 
 ;; The lookahead character (none once a closing character is consumed), how
 ;; many characters have been consumed, the top-level data, and — after `#`
@@ -88,7 +88,7 @@
 ;; Some characters, and the cursor after them.
 (define-type word (pairof string cursor @s))
 
-(define eager-tag (prompt-tag state state parsing @e) (make-continuation-prompt-tag))
+(define eager-tag (prompt-tag state state (maxeff parsing spin) @e) (make-continuation-prompt-tag))
 (define eager-key (mark-key datum @m) (make-continuation-mark-key))
 
 ;; Which dialect is being read: #f for Scheme, #t for FX-26 (the profile
@@ -128,7 +128,7 @@
            (lambda (k) (abort-current-continuation eager-tag (make-state #t (cons k nil) pos data "")))
            eager-tag)))))
 
-(define eager-run (subr reads ((subr reads () state)) state)
+(define eager-run (subr (maxeff reads spin) ((subr (maxeff reads spin) () state)) state)
   (lambda (thunk) (prompt eager-tag (thunk) (lambda (st) st))))
 
 ;;; ------------------------------------------------------------ the cursors
@@ -166,7 +166,7 @@
 ;;; Each construct marks what it is reading, as data: `(list start close
 ;;; items)` and the rest, as the Scheme version's marks are.
 
-(define marking (poly ((t type)) (subr reads (datum (subr reads () t)) t))
+(define marking (poly ((t type)) (subr (maxeff reads spin) (datum (subr (maxeff reads spin) () t)) t))
   (lambda (what body) (with-mark eager-key what body)))
 
 (define no-data datum (datum-list (the data nil)))
@@ -219,7 +219,7 @@
   (lambda (c) (or (char-numeric? c) (char-in? (char-downcase c) "abcdef"))))
 
 ;; Feed one character to a waiting state, giving the next state.
-(define eager-feed (subr reads (state char) state)
+(define eager-feed (subr (maxeff reads spin) (state char) state)
   (lambda (st ch)
     (if (state-need? st)
         (begin (set ahead-text "") (set ahead-at 0) (eager-run (lambda () ((car (state-ks st)) ch))))
@@ -228,7 +228,7 @@
 ;; The same as feeding each of `text`'s characters in turn, but the reader
 ;; suspends only when it has read them all, not after each: for text that
 ;; is all there, such as a file's.
-(define eager-feed-string (subr reads (state string) state)
+(define eager-feed-string (subr (maxeff reads spin) (state string) state)
   (lambda (st text)
     (if (or (not (state-need? st)) (= (string-length text) 0))
         st
@@ -305,17 +305,17 @@
           (closing ctx nil)
           (datum-bool #f)))))
 
-(define line-comment (subr reads (cursor) cursor)
+(define line-comment (subr (maxeff reads spin) (cursor) cursor)
   (lambda (cur)
     (marking (entry m-comment (cur-pos cur))
       (lambda ()
-        (letrec ((loop (subr reads (cursor) cursor)
+        (letrec ((loop (subr (maxeff reads spin) (cursor) cursor)
                    (lambda (cur)
                      (if (char=? (cur-char cur) #\newline) (consumed cur) (loop (advance cur))))))
           (loop (advance cur)))))))
 
 ;; `#| … |#`, nesting.
-(define block-comment (subr reads (cursor int int) cursor)
+(define block-comment (subr (maxeff reads spin) (cursor int int) cursor)
   (lambda (cur start depth)
     (marking (entry m-block-comment start)
       (lambda ()
@@ -334,11 +334,11 @@
 
 ;;; ----------------------------------------------------------------- strings
 
-(define read-string (subr reads (cursor int) result)
+(define read-string (subr (maxeff reads spin) (cursor int) result)
   (lambda (cur start)
     (marking (entry m-string start)
       (lambda ()
-        (letrec ((loop (subr reads (cursor chars) result)
+        (letrec ((loop (subr (maxeff reads spin) (cursor chars) result)
                    (lambda (cur acc)
                      (let ((c (cur-char cur)))
                        (cond ((char=? c #\")
@@ -346,7 +346,7 @@
                                     (consumed cur)))
                              ((char=? c #\\) (escape (advance cur) acc))
                              (else (loop (advance cur) (cons c acc)))))))
-                 (escape (subr reads (cursor chars) result)
+                 (escape (subr (maxeff reads spin) (cursor chars) result)
                    (lambda (cur acc)
                      (let ((e (cur-char cur)))
                        (cond ((char=? e #\n) (loop (advance cur) (cons #\newline acc)))
@@ -359,7 +359,7 @@
                              ((or (char=? e #\newline) (char=? e #\space) (char=? e (integer->char 9)))
                               (gap (advance cur) acc e (char=? e #\newline)))
                              (else (loop (advance cur) (cons e acc)))))))
-                 (hex (subr reads (cursor chars chars) result)
+                 (hex (subr (maxeff reads spin) (cursor chars chars) result)
                    (lambda (cur acc digits)
                      (let ((h (cur-char cur)))
                        (cond ((char=? h #\;)
@@ -372,7 +372,7 @@
                  ;; A backslash before a line break: the break and the
                  ;; blanks around it vanish. Before blanks alone, it is
                  ;; the character itself.
-                 (gap (subr reads (cursor chars char bool) result)
+                 (gap (subr (maxeff reads spin) (cursor chars char bool) result)
                    (lambda (cur acc e seen-newline)
                      (let ((g (cur-char cur)))
                        (cond ((and (char=? g #\newline) (not seen-newline)) (gap (advance cur) acc e #t))
@@ -388,9 +388,9 @@
         (and (datum-pair? d) (datum-byte? (datum-car d)) (bytes? (datum-cdr d))))))
 
 ;; The characters up to the next delimiter.
-(define read-word (subr reads (cursor) word)
+(define read-word (subr (maxeff reads spin) (cursor) word)
   (lambda (cur)
-    (letrec ((loop (subr reads (cursor chars) word)
+    (letrec ((loop (subr (maxeff reads spin) (cursor chars) word)
                (lambda (cur acc)
                  (if (delimiter? (cur-char cur))
                      (cons (list->string (the chars (reverse acc))) cur)
@@ -413,7 +413,7 @@
 
 ;; `#\c`, `#\space`, `#\x41`. The first character is taken whatever it is,
 ;; and anything after it up to a delimiter makes a name.
-(define read-char (subr reads (cursor int) result)
+(define read-char (subr (maxeff reads spin) (cursor int) result)
   (lambda (cur start)
     (marking (entry m-char start)
       (lambda ()
@@ -435,11 +435,11 @@
 ;;; A symbol or a number: which one can only be decided once the whole token
 ;;; is in hand. `prefix` is text already consumed as part of it (`.` or `#`).
 
-(define read-atom-from (subr reads (cursor int string) result)
+(define read-atom-from (subr (maxeff reads spin) (cursor int string) result)
   (lambda (cur start prefix)
     (marking (entry m-atom start)
       (lambda ()
-        (letrec ((loop (subr reads (cursor chars bool) result)
+        (letrec ((loop (subr (maxeff reads spin) (cursor chars bool) result)
                    (lambda (cur acc escaped)
                      (let ((c (cur-char cur)))
                        (cond ((char=? c #\|) (bar (advance cur) acc))
@@ -449,7 +449,7 @@
                              ((delimiter? c) (finish cur (list->string (the chars (reverse acc))) escaped c))
                              (else (loop (advance cur) (cons c acc) escaped))))))
                  ;; Inside `|…|`.
-                 (bar (subr reads (cursor chars) result)
+                 (bar (subr (maxeff reads spin) (cursor chars) result)
                    (lambda (cur acc)
                      (marking (entry m-symbol start)
                        (lambda ()
@@ -472,7 +472,7 @@
 ;;; -------------------------------------------------------------- atmosphere
 
 (define-rec
-  (skip-atmosphere (subr reads (cursor) cursor)
+  (skip-atmosphere (subr (maxeff reads spin) (cursor) cursor)
     (lambda (cur)
       (let* ((cur (need cur)) (c (cur-char cur)))
         (cond ((char-whitespace? c) (skip-atmosphere (advance cur)))
@@ -489,7 +489,7 @@
                        (else (make-cursor (cons #\# nil) start (cur-data cur) (cons next nil))))))
               (else cur)))))
   ;;; ------------------------------------------------------------------ datum
-  (read-datum (subr reads (cursor) result)
+  (read-datum (subr (maxeff reads spin) (cursor) result)
     (lambda (cur)
       (let ((cur (need cur)))
         (if (hash-pending? cur)
@@ -510,7 +510,7 @@
                            (read-abbrev (advance next) start "unquote-splicing")
                            (read-abbrev next start "unquote"))))
                     (else (read-atom-from cur start ""))))))))
-  (read-abbrev (subr reads (cursor int string) result)
+  (read-abbrev (subr (maxeff reads spin) (cursor int string) result)
     (lambda (cur start name)
       (marking (abbrev-entry start name)
         (lambda ()
@@ -521,9 +521,9 @@
                        (cur-pos (cdr r)))
                   (cdr r)))))))
   ;;; ------------------------------------------------------------------- lists
-  (read-list (subr reads (cursor int char) result)
+  (read-list (subr (maxeff reads spin) (cursor int char) result)
     (lambda (cur start close)
-      (letrec ((loop (subr reads (cursor data datum syns) result)
+      (letrec ((loop (subr (maxeff reads spin) (cursor data datum syns) result)
                  (lambda (cur items items-d syns)
                    ;; In tail position, so the mark is replaced each time
                    ;; round: it always says what has been read so far.
@@ -549,7 +549,7 @@
                                 (let* ((r (read-datum cur)) (d (syn->datum (car r))))
                                   (loop (cdr r) (cons d items) (datum-cons d items-d) (cons (car r) syns)))))))))))
         (loop cur nil no-data nil))))
-  (read-dotted (subr reads (cursor int char data datum syns int) result)
+  (read-dotted (subr (maxeff reads spin) (cursor int char data datum syns int) result)
     (lambda (cur start close items items-d syns dot)
       (marking (list-entry m-dotted start close items-d)
         (lambda ()
@@ -569,7 +569,7 @@
                           (fail cur (str3 "expected `" (char-string close) "` after the tail of a dotted list")))))))))))
   ;;; --------------------------------------------------------------- `#` syntax
   ;;; `start` is where the `#` was; `cur` is at the character after it.
-  (read-hash (subr reads (int cursor) result)
+  (read-hash (subr (maxeff reads spin) (int cursor) result)
     (lambda (start cur)
       (marking (entry m-hash start)
         (lambda ()
@@ -607,9 +607,9 @@
 
 ;;; ------------------------------------------------------------- the driver
 
-(define read-top (subr reads (cursor) void)
+(define read-top (subr (maxeff reads spin) (cursor) void)
   (lambda (cur)
-    (letrec ((loop (subr reads (cursor) void)
+    (letrec ((loop (subr (maxeff reads spin) (cursor) void)
                (lambda (cur)
                  (marking (top-entry)
                    (lambda ()
@@ -618,11 +618,11 @@
       (loop cur))))
 
 ;; A reader with nothing read yet, for Scheme or for FX-26.
-(define start-reading (subr reads (bool) state)
+(define start-reading (subr (maxeff reads spin) (bool) state)
   (lambda (fx26)
     (eager-run
      (lambda ()
        (with-mark dialect-key fx26
          (lambda () (read-top (make-cursor (cons (next-char 0 nil) nil) 0 nil nil))))))))
-(define eager-start (subr reads () state) (lambda () (start-reading #f)))
-(define eager-start-fx26 (subr reads () state) (lambda () (start-reading #t)))
+(define eager-start (subr (maxeff reads spin) () state) (lambda () (start-reading #f)))
+(define eager-start-fx26 (subr (maxeff reads spin) () state) (lambda () (start-reading #t)))
