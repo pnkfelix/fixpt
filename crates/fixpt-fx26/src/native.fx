@@ -37,6 +37,8 @@
 (define n-cont (ref int @k) (new -1))
 (define n-target (ref int @k) (new -1))
 (define n-target-cell (ref int @k) (new -1))
+;; Compiling a word: the cell being compiled.
+(define n-at (ref int @k) (new 0))
 (define n-trap-common (ref int @k) (new 0))
 (define n-exit-common (ref int @k) (new 0))
 
@@ -294,6 +296,10 @@
 
 (define n-fuel-check (subr assembles () unit)
   (lambda () (begin (n-e (arm-subs-imm n-fuel n-fuel 1)) (n-trap-if 0 n-trap-out-of-fuel 0))))
+;; A taken branch's poll: only a backward one can make a loop, so a branch
+;; known to go forward (in a compiled word) makes none.
+(define n-fuel-unless-forward (subr assembles () unit)
+  (lambda () (if (> (get n-target-cell) (get n-at)) #u (n-fuel-check))))
 (define n-ds-limit (subr assembles () unit)
   (lambda ()
     (begin (n-e (arm-ldr n-x13 n-st n-st-ds-limit)) (n-e (arm-cmp n-dsp n-x13)) (n-trap-if 3 n-trap-stack-overflow 0))))
@@ -459,7 +465,7 @@
       ((= n routine-branch)
        (begin
          (if (< (get n-target) 0) (n-e (arm-ldr-post n-x13 n-ip -8)) #u)
-         (n-branch-ip) (n-fuel-check) (n-ds-limit)
+         (n-branch-ip) (n-fuel-unless-forward) (n-ds-limit)
          (if (< (get n-target) 0) (n-next) (n-b (get n-target)))))
       ((= n routine-zbranch)
        (let ((skip (n-label)))
@@ -470,7 +476,7 @@
            (n-e (arm-cmp n-x14 n-x15))
            (n-b-cond 1 skip)
            (n-branch-ip)
-           (n-fuel-check) (n-ds-limit)
+           (n-fuel-unless-forward) (n-ds-limit)
            (if (< (get n-target) 0)
                (begin (n-bind skip) (n-next))
                (begin (n-b (get n-target)) (n-bind skip) (n-cont-code))))))
@@ -630,6 +636,7 @@
                                    -1))
                           (set n-target
                                (if (< (get n-target-cell) 0) -1 (array-ref labels (get n-target-cell))))
+                          (set n-at i)
                           (n-e (arm-sub-imm n-ip n-ip 8))
                           (n-routine r)))
                       (begin
