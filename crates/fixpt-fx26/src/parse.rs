@@ -23,6 +23,8 @@ pub enum DScope {
     Abbrev { params: Vec<(Sym, Kind)>, body: Syntax },
     /// A region given for an abbreviation's region parameter.
     Region(Region),
+    /// A size given for an abbreviation's size parameter.
+    SizeVal(Size),
     /// A name bound by `define-effect`: an effect.
     Eff(crate::ast::Effect),
     /// A name bound by `define-generative`: the `n`th generative type.
@@ -38,6 +40,7 @@ pub enum FamilyArg {
     Ty(TyId),
     Region(Region),
     Eff(crate::ast::Effect),
+    Size(Size),
 }
 
 impl Checker {
@@ -81,7 +84,8 @@ impl Checker {
             Some("effect") => Ok(Kind::Effect),
             Some("type") => Ok(Kind::Type),
             Some("data") => Ok(Kind::Data),
-            _ => Err(FxError::at(s.span, "a kind is `region`, `place`, `effect`, `type` or `data`")),
+            Some("size") => Ok(Kind::Size),
+            _ => Err(FxError::at(s.span, "a kind is `region`, `place`, `effect`, `type`, `data` or `size`")),
         }
     }
 
@@ -526,6 +530,10 @@ impl Checker {
                     let e = self.parse_effect(a)?;
                     (DScope::Eff(e.clone()), crate::parse::FamilyArg::Eff(e))
                 }
+                Kind::Size => {
+                    let z = self.parse_size(a)?;
+                    (DScope::SizeVal(z.clone()), crate::parse::FamilyArg::Size(z))
+                }
             };
             bound.push((*p, d));
             key.push(arg);
@@ -548,17 +556,44 @@ impl Checker {
         Ok(slot)
     }
 
-    /// A size: a natural literal, or `finite`, some number not known.
+    /// A size: a natural literal, `finite` (some number not known), a size
+    /// variable, `(+ size …)`, or `(- size k)`.
     pub(crate) fn parse_size(&mut self, s: &Syntax) -> R<Size> {
+        let usage = "a size is a natural number, `finite`, a size variable, `(+ size …)` or `(- size k)`";
         if let Some(n) = self.literal_int(s)
             && n >= 0
         {
             return Ok(Size::lit(n));
         }
-        if s.as_symbol().is_some_and(|x| self.name(x) == "finite") {
-            return Ok(Size::Finite);
+        if let Some(x) = s.as_symbol() {
+            if self.name(x) == "finite" {
+                return Ok(Size::Finite);
+            }
+            return match self.lookup_desc(x) {
+                Some(DScope::Var(v, Kind::Size)) => Ok(Size::var(v)),
+                Some(DScope::SizeVal(z)) => Ok(z),
+                _ => Err(FxError::at(s.span, usage)),
+            };
         }
-        Err(FxError::at(s.span, "a size is a natural number, or `finite`"))
+        let items = self.items(s, "a size")?.to_vec();
+        match (self.head(&items).unwrap_or(""), &items[..]) {
+            ("+", [_, rest @ ..]) if !rest.is_empty() => {
+                let mut out = Size::lit(0);
+                for r in rest {
+                    let z = self.parse_size(r)?;
+                    out = out.add_scaled(&z, 1);
+                }
+                Ok(out)
+            }
+            ("-", [_, a, k]) => {
+                let a = self.parse_size(a)?;
+                match self.literal_int(k) {
+                    Some(k) if k >= 0 => Ok(a.plus(-k)),
+                    _ => Err(FxError::at(k.span, usage)),
+                }
+            }
+            _ => Err(FxError::at(s.span, usage)),
+        }
     }
 
     /// What `(proves prop)` states: its type, with the lemma kept pending.
@@ -607,6 +642,7 @@ impl Checker {
                 Kind::Region => D::Region(self.parse_region(a)?),
                 Kind::Place => D::Region(self.parse_place(a)?),
                 Kind::Effect => D::Effect(self.parse_effect(a)?),
+                Kind::Size => D::Size(self.parse_size(a)?),
             });
         }
         let t = self.arena.ty(Ty::Named { which: g, args: ds });
@@ -689,6 +725,10 @@ impl Checker {
     /// or, for a bare name, in how the name is bound; the checker confirms it
     /// against the binder when it sees the `poly` being projected.
     fn parse_d(&mut self, s: &Syntax) -> R<D> {
+        // A natural number can only be a size.
+        if self.literal_int(s).is_some() {
+            return Ok(D::Size(self.parse_size(s)?));
+        }
         if let Some(sym) = s.as_symbol() {
             let name = self.name(sym);
             if name.starts_with('@') {
@@ -713,12 +753,15 @@ impl Checker {
                 Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(D::Region(Region::Var(v))),
                 Some(DScope::Var(v, Kind::Effect)) => Ok(D::Effect(Effect::atom(Atom::Var(v)))),
                 Some(DScope::Eff(e)) => Ok(D::Effect(e)),
+                Some(DScope::Var(v, Kind::Size)) => Ok(D::Size(Size::var(v))),
+                Some(DScope::SizeVal(z)) => Ok(D::Size(z)),
                 _ => Ok(D::Type(self.parse_type(s)?)),
             };
         }
         let items = self.items(s, "a description")?;
         match self.head(items).unwrap_or("") {
             "const" | "finite" => Ok(D::Region(self.parse_region(s)?)),
+            "+" | "-" => Ok(D::Size(self.parse_size(s)?)),
             "read" | "write" | "alloc" | "goto" | "comefrom" | "maxeff" => {
                 Ok(D::Effect(self.parse_effect(s)?))
             }

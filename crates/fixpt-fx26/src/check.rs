@@ -102,6 +102,9 @@ pub struct Checker {
     /// The same for `length-is?`: each variable, its binding, and the
     /// length it was found to have.
     pub(crate) certified_lengths: Vec<(Sym, usize, i64)>,
+    /// What the branches being checked have learned about sizes
+    /// (`crate::sizes`).
+    pub(crate) size_facts: Vec<crate::sizes::SizeFact>,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -216,6 +219,7 @@ impl Checker {
             pending_lemma: None,
             certified: Vec::new(),
             certified_lengths: Vec::new(),
+            size_facts: Vec::new(),
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -353,8 +357,15 @@ impl Checker {
                 }
                 let mut map = HashMap::new();
                 for ((v, k), d) in binders.iter().zip(args) {
+                    // `finite` reads as a region; for a size binder it is the
+                    // size `finite`.
+                    let d = match (k, d) {
+                        (Kind::Size, D::Region(Region::Frozen(None, true))) => D::Size(Size::Finite),
+                        (_, d) => d,
+                    };
                     let ok = match (k, &d) {
                         (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type | Kind::Data, D::Type(_)) => true,
+                        (Kind::Size, D::Size(_)) => true,
                         (Kind::Place, D::Region(r)) => self.arena.is_place(*r),
                         _ => false,
                     };
@@ -378,7 +389,11 @@ impl Checker {
                 self.certified.extend(certified);
                 let lengths = self.length_test(test);
                 self.certified_lengths.extend(lengths);
+                let (yes, no) = self.null_facts(test);
+                let depth = self.size_facts.len();
+                self.size_facts.extend(yes);
                 let a = self.synth(then);
+                self.size_facts.truncate(depth);
                 if certified.is_some() {
                     self.certified.pop();
                 }
@@ -386,7 +401,10 @@ impl Checker {
                     self.certified_lengths.pop();
                 }
                 let (a, ae) = a?;
-                let (b, be) = self.synth(els)?;
+                self.size_facts.extend(no);
+                let b = self.synth(els);
+                self.size_facts.truncate(depth);
+                let (b, be) = b?;
                 let t = if self.subtype(a, b) {
                     b
                 } else if self.subtype(b, a) {
@@ -863,6 +881,7 @@ impl Checker {
                             out.insert(r);
                         }
                         D::Effect(e) => out.extend(e.0.iter().filter_map(|a| a.region())),
+                        D::Size(_) => {}
                     }
                 }
             }
@@ -957,6 +976,25 @@ impl Checker {
         }
     }
 
+    /// What `test` shows about sizes when it holds, and when not:
+    /// `(null? xs)`, `xs : (vec T n)`, shows `n = 0`, or `n - 1 ≥ 0`.
+    pub(crate) fn null_facts(&self, test: ExpId) -> (Option<crate::sizes::SizeFact>, Option<crate::sizes::SizeFact>) {
+        let Exp::App { fun, args } = self.arena.exp_at(test) else { return (None, None) };
+        let (Exp::Var(op), [a]) = (self.arena.exp_at(*fun), &args[..]) else { return (None, None) };
+        if self.interner.name(*op) != "null?" || !self.is_standard(*op) {
+            return (None, None);
+        }
+        let Exp::Var(v) = self.arena.exp_at(*a) else { return (None, None) };
+        let Some(t) = self.lookup(*v) else { return (None, None) };
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Vec { size: n @ Size::Lin { .. }, .. } => (
+                Some(crate::sizes::SizeFact { lin: n.clone(), eq: true }),
+                Some(crate::sizes::SizeFact { lin: n.plus(-1), eq: false }),
+            ),
+            _ => (None, None),
+        }
+    }
+
     /// If `test` is `(length-is? v k)`, the variable, as the binding it is,
     /// and the length.
     pub(crate) fn length_test(&self, test: ExpId) -> Option<(Sym, usize, i64)> {
@@ -1007,21 +1045,6 @@ impl Checker {
         let id = self.arena.ty(new);
         self.arena.set_link(slot, id);
         slot
-    }
-
-    /// The size of the tail of a list of size `n`: one less, where `n` is
-    /// known to be at least one; `finite` otherwise.
-    pub(crate) fn tail_size(&self, n: &Size) -> Size {
-        match n.as_lit() {
-            Some(k) if k >= 1 => Size::lit(k - 1),
-            _ => Size::Finite,
-        }
-    }
-
-    /// Whether a list of size `m` is one of size `n`: the same, or `n` is
-    /// `finite`.
-    pub(crate) fn size_le(&self, m: &Size, n: &Size) -> bool {
-        matches!(n, Size::Finite) || m == n
     }
 
     /// Whether `r` is, or is frozen into, a generative type's parameter.
@@ -1151,6 +1174,7 @@ impl Checker {
                         D::Type(x) => self.polarity(*x, v, p, seen, found),
                         D::Region(r) => reg(*r, found),
                         D::Effect(e) => eff(e, p, found),
+                        D::Size(_) => {}
                     }
                 }
             }
@@ -1278,6 +1302,7 @@ impl Checker {
                             D::Type(x) => kids.push(*x),
                             D::Region(x) => given |= *x == r,
                             D::Effect(e) => given |= e.0.contains(&Atom::Write(r)),
+                            D::Size(_) => {}
                         }
                     }
                     (vec![], kids)
@@ -1482,6 +1507,7 @@ impl Checker {
                         Variance::Inv => self.sub(*x, *y, env, st) && self.sub(*y, *x, &flip, st),
                     },
                     (D::Region(r), D::Region(s)) => ra(*r) == rb(*s),
+                    (D::Size(m), D::Size(n)) => self.size_eq(m, n),
                     (D::Effect(d), D::Effect(e)) => match v {
                         Variance::Co => ea(d).within(&eb(e)),
                         Variance::Contra => eb(e).within(&ea(d)),
@@ -1580,7 +1606,7 @@ impl Checker {
                 region: region(r),
             },
             Ty::Vec { elem, size, region: r } => {
-                Ty::Vec { elem: self.subst_memo(elem, map, memo), size: subst_size(&size, map), region: region(r) }
+                Ty::Vec { elem: self.subst_memo(elem, map, memo), size: crate::sizes::subst_size(&size, map), region: region(r) }
             }
             Ty::Named { which, args } => Ty::Named {
                 which,
@@ -1590,6 +1616,7 @@ impl Checker {
                         D::Type(t) => D::Type(self.subst_memo(*t, map, memo)),
                         D::Region(r) => D::Region(region(*r)),
                         D::Effect(e) => D::Effect(subst_effect(e, map)),
+                        D::Size(z) => D::Size(crate::sizes::subst_size(z, map)),
                     })
                     .collect(),
             },
@@ -1599,11 +1626,6 @@ impl Checker {
         self.arena.set_link(slot, id);
         slot
     }
-}
-
-/// `s` with `map`'s sizes for its variables (none yet: N5b).
-pub(crate) fn subst_size(s: &Size, _map: &HashMap<DVar, D>) -> Size {
-    s.clone()
 }
 
 /// `r` with `map`'s regions for its variables: frozen data's place too.

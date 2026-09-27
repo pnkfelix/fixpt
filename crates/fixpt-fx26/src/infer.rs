@@ -84,6 +84,7 @@ impl Checker {
                             Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
                             Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
                             Kind::Type | Kind::Data => D::Type(self.arena.ty(Ty::Var(*va))),
+                            Kind::Size => D::Size(Size::var(*va)),
                         };
                         (*vb, d)
                     })
@@ -147,7 +148,7 @@ impl Checker {
             Exp::Var(s)
                 if self.interner.name(s) == "nil"
                     && self.is_standard(s)
-                    && matches!(&expected_ty, Ty::Vec { size, .. } if matches!(size, Size::Finite) || size.as_lit() == Some(0)) =>
+                    && matches!(&expected_ty, Ty::Vec { size, .. } if matches!(size, Size::Finite) || self.size_eq(size, &Size::lit(0))) =>
             {
                 Ok(Effect::pure())
             }
@@ -163,7 +164,11 @@ impl Checker {
                 self.certified.extend(certified);
                 let lengths = self.length_test(test);
                 self.certified_lengths.extend(lengths);
+                let (yes, no) = self.null_facts(test);
+                let depth = self.size_facts.len();
+                self.size_facts.extend(yes);
                 let ae = self.check(then, expected);
+                self.size_facts.truncate(depth);
                 if certified.is_some() {
                     self.certified.pop();
                 }
@@ -171,7 +176,10 @@ impl Checker {
                     self.certified_lengths.pop();
                 }
                 let ae = ae?;
-                let be = self.check(els, expected)?;
+                self.size_facts.extend(no);
+                let be = self.check(els, expected);
+                self.size_facts.truncate(depth);
+                let be = be?;
                 Ok(self.mask(e, &te.union(&ae).union(&be), expected))
             }
             Exp::Begin(items) => {
@@ -318,7 +326,7 @@ impl Checker {
         {
             let want = expected.map(|t| self.arena.get(self.arena.resolve(t)).clone());
             if let Some(Ty::Vec { elem, size, region }) = want
-                && size.as_lit() != Some(0)
+                && (matches!(size, Size::Finite) || self.size_nonneg(&size.plus(-1)))
             {
                 let tail_ty = self.arena.ty(Ty::Vec { elem, size: size.plus(-1), region });
                 let xe = self.check(*x, elem)?;
@@ -753,6 +761,10 @@ impl Checker {
                 Kind::Effect => {
                     map.insert(*v, D::Effect(Effect::pure()));
                 }
+                // A size nothing says is some size.
+                Kind::Size => {
+                    map.insert(*v, D::Size(Size::Finite));
+                }
                 Kind::Type | Kind::Data | Kind::Place => {
                     return Err(FxError::at(
                         span,
@@ -833,9 +845,9 @@ impl Checker {
                     region(r) || effect(&e)
                 }
                 Ty::Base(_) | Ty::Void | Ty::Link(_) => false,
-                Ty::Vec { elem, region: r, .. } => {
+                Ty::Vec { elem, size, region: r } => {
                     stack.push(elem);
-                    region(r)
+                    region(r) || matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v)))
                 }
                 Ty::Named { args, .. } => {
                     let mut hit = false;
@@ -844,6 +856,7 @@ impl Checker {
                             D::Type(x) => stack.push(x),
                             D::Region(r) => hit |= region(r),
                             D::Effect(e) => hit |= effect(&e),
+                            D::Size(z) => hit |= matches!(&z, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
                         }
                     }
                     hit
@@ -964,9 +977,10 @@ impl Checker {
                 self.unify(h1, h2, u, trail);
                 self.unify_effect(&d1, &d2, u);
             }
-            (Ty::Vec { elem: x, region: r, .. }, Ty::Vec { elem: y, region: s, .. }) => {
+            (Ty::Vec { elem: x, size: m, region: r }, Ty::Vec { elem: y, size: n, region: s }) => {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);
+                self.unify_size(&m, &n, u);
             }
             (Ty::Pair(x, t2, r), Ty::Vec { elem: y, size, region: s }) => {
                 self.unify_region(r, s, u);
@@ -988,6 +1002,16 @@ impl Checker {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Solve a size binder: a pattern `v + k` against a size `s` gives
+    /// `v = s - k` (`finite` stays `finite`).
+    fn unify_size(&self, p: &Size, a: &Size, u: &mut Unknowns) {
+        let Size::Lin { k, terms } = p else { return };
+        let [(v, 1)] = terms[..] else { return };
+        if u.is_unknown(v) && !u.solved.contains_key(&v) {
+            u.solved.insert(v, D::Size(a.plus(-*k)));
         }
     }
 

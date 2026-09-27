@@ -82,6 +82,7 @@ pub mod infer;
 pub mod licence;
 pub mod lemma;
 pub mod lower;
+mod sizes;
 pub mod parse;
 pub mod session;
 pub mod sexp;

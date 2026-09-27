@@ -339,6 +339,7 @@ impl Checker {
         match (x, y) {
             (D::Type(a), D::Type(b)) => self.match_ty(l, *a, *b, map, seen),
             (D::Region(r), D::Region(s)) => self.match_region(l, *r, *s, map),
+            (D::Size(a), D::Size(b)) => a == b,
             (D::Effect(d), D::Effect(e)) => {
                 let var = d.0.iter().next().and_then(|a| match a {
                     crate::ast::Atom::Var(v) if d.0.len() == 1 && l.binders.iter().any(|(x, _)| x == v) => Some(*v),

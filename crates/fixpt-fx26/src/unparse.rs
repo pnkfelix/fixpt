@@ -121,6 +121,7 @@ impl Checker {
                             Kind::Effect => "effect",
                             Kind::Type => "type",
                             Kind::Data => "data",
+                            Kind::Size => "size",
                         };
                         match self.arena.bound(*v) {
                             Some(b) => format!("({} {k} {})", self.interner.name(self.arena.dvar_name(*v)), self.show_region(b)),
@@ -185,6 +186,7 @@ impl Checker {
                             crate::ast::D::Type(x) => self.show_ty_on(*x, path),
                             crate::ast::D::Region(r) => self.show_region(*r),
                             crate::ast::D::Effect(e) => self.show_effect(e),
+                            crate::ast::D::Size(z) => self.show_size(z),
                         })
                         .collect();
                     format!("({name} {})", ds.join(" "))

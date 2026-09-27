@@ -26,6 +26,8 @@ pub enum Kind {
     /// and sent (`docs/research/generative-types.md`, §3). Every data type
     /// is a type.
     Data,
+    /// A list's length (`docs/research/sizes.md`): a natural, or `finite`.
+    Size,
 }
 
 impl Kind {
@@ -292,6 +294,7 @@ pub enum D {
     Region(Region),
     Effect(Effect),
     Type(TyId),
+    Size(Size),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
