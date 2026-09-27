@@ -18,6 +18,22 @@ can read freed memory, and even there the type system's own escape rule
 seems to save the concrete runtime (see F2). Read these as "the proof of
 T5 fails here, and here is why", with F2 flagged for a closer look.
 
+## Status
+
+| item | status                                                                                                                                     |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| F1   | fixed: `known` is by binding (its place in `env`; in `check.fx`, a flag beside each binding), forgotten as its scope ends                  |
+| F2   | open: a fragility, no hole shown                                                                                                           |
+| F3   | open                                                                                                                                       |
+| F4   | fixed: a size binder may be `finite` only as the size of at most one parameter's own `(nlist T n)` or `(nat n)`, and nowhere else supplied |
+| F5   | fixed: past the depth bound, the self-application test says the procedure may loop                                                         |
+| F6   | open, latent                                                                                                                               |
+| F7   | open                                                                                                                                       |
+
+Tests: `tests/programs/terminate/known-shadowed.fx`,
+`known-let-shadowed.fx` and `deep-self-application.fx`;
+`tests/programs/sizes/finite-*.fx`.
+
 ## F1 — "known" procedures are exempt from the spin test by name and type
 
 **Where.** `infer.rs:469–488` (`may_spin`), with `known` populated at

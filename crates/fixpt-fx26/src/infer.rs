@@ -196,11 +196,13 @@ impl Checker {
             Exp::Let { bindings, body } => {
                 let mut eff = Effect::pure();
                 let mut bound = Vec::new();
-                for (n, init) in &bindings {
+                // Where the bindings will be in `env`.
+                let base = self.env.len();
+                for (i, (n, init)) in bindings.iter().enumerate() {
                     let (t, ie) = self.synth(*init)?;
                     eff = eff.union(&ie);
                     if self.is_lambda(*init) {
-                        self.known.insert((*n, t));
+                        self.known.insert((*n, base + i));
                     }
                     bound.push((*n, t));
                 }
@@ -211,7 +213,7 @@ impl Checker {
                     self.env.push((n, t));
                 }
                 let r = self.check(body, expected);
-                self.env.truncate(depth);
+                self.truncate_env(depth);
                 self.skolems.truncate(named);
                 Ok(self.mask(e, &eff.union(&r?), expected))
             }
@@ -274,7 +276,7 @@ impl Checker {
             Some(want) => self.check(body, want).map(|eff| (want, self.mask(body, &eff, want))),
             None => self.synth(body).map(|(t, eff)| (t, self.mask(body, &eff, t))),
         };
-        self.env.truncate(depth);
+        self.truncate_env(depth);
         let r = r.map(|(t, latent)| (self.forget_nats(named, t), latent));
         self.skolems.truncate(named);
         let (result, latent) = r?;
@@ -472,7 +474,8 @@ impl Checker {
             if self.recursive.contains(&b) {
                 return true;
             }
-            if self.known.contains(&b) || self.is_standard(b.0) {
+            let at = self.env.iter().rposition(|(n, _)| *n == b.0);
+            if at.is_some_and(|i| self.known.contains(&(b.0, i))) || self.is_standard(b.0) {
                 return false;
             }
         }
@@ -508,8 +511,10 @@ impl Checker {
             if let Some(i) = path.iter().position(|(x, _)| *x == t) {
                 return by_param || path[i + 1..].iter().any(|(_, p)| *p);
             }
+            // Too deep to follow: say it may loop, as the cautious answer
+            // (`docs/research/soundness-findings.md`, F5).
             if path.len() > 64 {
-                return false;
+                return true;
             }
             path.push((t, by_param));
             let kids: Vec<(TyId, bool)> = match c.arena.get(t) {
@@ -665,6 +670,7 @@ impl Checker {
         self.default_regions(&mut u);
         let map = self.finish(&u, span, ft)?;
         self.check_bounds(&u.kinds, &map, span)?;
+        self.check_finite_sizes(&u.kinds, &map, inner, span)?;
         let inst = self.subst(inner, &map);
         Ok((inst, done))
     }
@@ -696,6 +702,7 @@ impl Checker {
         self.default_regions(&mut u);
         let map = self.finish(&u, span, t)?;
         self.check_bounds(&u.kinds, &map, span)?;
+        self.check_finite_sizes(&u.kinds, &map, inner, span)?;
         let inst = self.subst(inner, &map);
         self.no_knot(inst, span)?;
         Ok(inst)

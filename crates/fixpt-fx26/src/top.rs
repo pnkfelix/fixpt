@@ -333,7 +333,7 @@ impl Checker {
                 let recursive = self.is_lambda(e);
                 if recursive {
                     self.env.push((name, ty));
-                    self.known.insert((name, ty));
+                    self.known.insert((name, self.env.len() - 1));
                 }
                 // A lambda whose every run ends needs no `spin`.
                 let rdepth = self.recursive.len();
@@ -368,7 +368,7 @@ impl Checker {
                     }
                     Err(err) => {
                         if recursive {
-                            self.env.pop();
+                            self.truncate_env(self.env.len() - 1);
                         }
                         Err(err)
                     }
@@ -379,7 +379,7 @@ impl Checker {
                 let e = self.parse_exp(init)?;
                 let (ty, effect) = self.synth(e)?;
                 if self.is_lambda(e) {
-                    self.known.insert((name, ty));
+                    self.known.insert((name, self.env.len()));
                 }
                 self.env.push((name, ty));
                 Ok(Top::Define { name, ty, effect, exp: e, typed: false, recursive: false })
@@ -402,7 +402,7 @@ impl Checker {
                 let name = self.binder_name(name)?;
                 let ty = self.parse_type(ty)?;
                 self.env.push((name, ty));
-                self.known.insert((name, ty));
+                self.known.insert((name, self.env.len() - 1));
                 parts.push((name, ty, init.clone()));
             }
             if parts.is_empty() {
@@ -429,7 +429,7 @@ impl Checker {
         })();
         self.recursive.truncate(rdepth);
         if r.is_err() {
-            self.env.truncate(depth);
+            self.truncate_env(depth);
         }
         r
     }
@@ -535,7 +535,7 @@ impl Checker {
         let (env, dscope, arena) = (self.env.len(), self.dscope.len(), self.arena.mark());
         let private = self.private_regions.len();
         let out = f(self);
-        self.env.truncate(env);
+        self.truncate_env(env);
         self.dscope.truncate(dscope);
         self.private_regions.truncate(private);
         self.facts.forget_from(arena.exps());

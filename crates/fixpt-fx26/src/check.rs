@@ -54,11 +54,14 @@ pub struct Checker {
     /// The regions `letfreeze`s are freezing, innermost last, each with
     /// whether anything has written it: data never written is finite.
     pub(crate) freezing: Vec<(DVar, bool)>,
-    /// Bindings of known procedures, by name and type: those a `define`,
-    /// `letrec`, `define-rec`, or a `let` of a `lambda` made. A call of one
-    /// runs code the checker has seen; a call of anything else might run a
-    /// closure fetched from the store.
-    pub(crate) known: HashSet<(Sym, TyId)>,
+    /// Bindings of known procedures, by name and place in `env`: those a
+    /// `define`, `letrec`, `define-rec`, or a `let` of a `lambda` made. A
+    /// call of one runs code the checker has seen; a call of anything else
+    /// might run a closure fetched from the store. By binding, not by name
+    /// and type, so a parameter that shadows one is not taken for it
+    /// (`docs/research/soundness-findings.md`, F1); forgotten as its scope
+    /// ends (`Checker::truncate_env`).
+    pub(crate) known: HashSet<(Sym, usize)>,
     /// The bindings of the recursive groups whose lambdas are being checked:
     /// a call of one of them there is recursion, and so `spin`.
     pub(crate) recursive: Vec<(Sym, TyId)>,
@@ -379,6 +382,7 @@ impl Checker {
                     map.insert(*v, d);
                 }
                 self.check_bounds(&binders, &map, span)?;
+                self.check_finite_sizes(&binders, &map, inner, span)?;
                 let result = self.subst(inner, &map);
                 self.no_knot(result, span)?;
                 let eff = self.mask(e, &eff, result);
@@ -424,12 +428,12 @@ impl Checker {
             Exp::Letrec { bindings, body } => {
                 let depth = self.env.len();
                 self.env.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
-                self.known.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
+                self.known.extend(bindings.iter().enumerate().map(|(i, (n, _, _))| (*n, depth + i)));
                 let rdepth = self.recursive.len();
                 // Only lambdas: then nothing runs before every binding
                 // exists, and no one sees the knot tied.
                 if let Some((n, _, init)) = bindings.iter().find(|(_, _, init)| !self.is_lambda(*init)) {
-                    self.env.truncate(depth);
+                    self.truncate_env(depth);
                     return Err(FxError::at(self.arena.span_of(*init), letrec_not_lambda(self.interner.name(*n))));
                 }
                 // A group whose every run ends needs no `spin`.
@@ -446,7 +450,7 @@ impl Checker {
                     Ok((bt, eff.union(&be)))
                 })();
                 self.recursive.truncate(rdepth);
-                self.env.truncate(depth);
+                self.truncate_env(depth);
                 let (t, eff) = r?;
                 let eff = self.mask(e, &eff, t);
                 Ok((t, eff))
@@ -454,11 +458,13 @@ impl Checker {
             Exp::Let { bindings, body } => {
                 let mut eff = Effect::pure();
                 let mut bound = Vec::new();
-                for (n, init) in &bindings {
+                // Where the bindings will be in `env`.
+                let base = self.env.len();
+                for (i, (n, init)) in bindings.iter().enumerate() {
                     let (t, ie) = self.synth(*init)?;
                     eff = eff.union(&ie);
                     if self.is_lambda(*init) {
-                        self.known.insert((*n, t));
+                        self.known.insert((*n, base + i));
                     }
                     bound.push((*n, t));
                 }
@@ -469,7 +475,7 @@ impl Checker {
                     self.env.push((n, t));
                 }
                 let r = self.synth(body);
-                self.env.truncate(depth);
+                self.truncate_env(depth);
                 let r = r.map(|(t, be)| (self.forget_nats(named, t), be));
                 self.skolems.truncate(named);
                 let (t, be) = r?;
@@ -491,7 +497,7 @@ impl Checker {
                 }
                 let r = self.synth(body);
                 let written = if matches!(form, RegionForm::Freeze(_)) { self.freezing.pop().expect("pushed").1 } else { true };
-                self.env.truncate(depth);
+                self.truncate_env(depth);
                 let (t, eff) = r?;
                 // A `letfreeze`'s value leaves with its region's data frozen:
                 // `r` made `const`, unless something in it could still write.
@@ -1756,12 +1762,19 @@ impl Checker {
         Ok((t, eff))
     }
 
+    /// `env` cut back to `n` bindings, and the known procedures among those
+    /// cut forgotten.
+    pub(crate) fn truncate_env(&mut self, n: usize) {
+        self.env.truncate(n);
+        self.known.retain(|(_, i)| *i < n);
+    }
+
     /// Run `f` with `bound` in scope.
     fn in_scope<T>(&mut self, bound: &[(Sym, TyId)], f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
         let depth = self.env.len();
         self.env.extend_from_slice(bound);
         let r = f(self);
-        self.env.truncate(depth);
+        self.truncate_env(depth);
         r
     }
 

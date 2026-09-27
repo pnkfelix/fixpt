@@ -6,11 +6,30 @@
 //! `else`. An equality is used to rewrite a variable away; an inequality is
 //! used as it is, or with a constant to spare.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::ast::{D, DVar, Exp, ExpId, Kind, Size, Ty, TyId};
 use fixpt_read::Sym;
 use crate::check::Checker;
+
+/// Where in a type an occurrence is: given back (`Pos`), supplied by a
+/// caller (`Neg`), or both, as in anything that can be written (`Inv`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Polarity {
+    Pos,
+    Neg,
+    Inv,
+}
+
+impl Polarity {
+    fn flip(self) -> Polarity {
+        match self {
+            Polarity::Pos => Polarity::Neg,
+            Polarity::Neg => Polarity::Pos,
+            Polarity::Inv => Polarity::Inv,
+        }
+    }
+}
 
 /// A fact: `lin = 0` (`eq`) or `lin ≥ 0`.
 #[derive(Clone, Debug)]
@@ -211,6 +230,115 @@ impl Checker {
     pub(crate) fn nat_join(&mut self, a: TyId, b: TyId) -> Option<TyId> {
         let nat = |c: &Self, t: TyId| matches!(c.arena.get(c.arena.resolve(t)), Ty::Nat(_));
         (nat(self, a) && nat(self, b)).then(|| self.arena.ty(Ty::Nat(Size::Finite)))
+    }
+
+    /// A size binder instantiated as `finite` is sound only where it stands
+    /// for one size a caller supplies (`docs/research/soundness-findings.md`,
+    /// F4): as the size of at most one parameter, that parameter's own
+    /// `(nlist T v)` or `(nat v)` (less a constant, perhaps), and nowhere else
+    /// a caller supplies or can write. Its occurrences in what the callee
+    /// gives back only forget a size. Anything else is an error.
+    pub(crate) fn check_finite_sizes(
+        &self,
+        kinds: &[(DVar, Kind)],
+        map: &std::collections::HashMap<DVar, D>,
+        body: TyId,
+        span: fixpt_read::Span,
+    ) -> crate::error::R<()> {
+        for (v, k) in kinds {
+            if *k == Kind::Size && matches!(map.get(v), Some(D::Size(Size::Finite))) && !self.finite_size_ok(body, *v) {
+                let name = self.interner.name(self.arena.dvar_name(*v));
+                return Err(crate::error::FxError::at(
+                    span,
+                    format!(
+                        "the size `{name}` cannot be `finite` here: `{name}` is the size of more than one argument, or of something inside one, and `finite` would not keep them the same"
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn finite_size_ok(&self, body: TyId, v: DVar) -> bool {
+        // `v` less a constant: every length it could stand for is a size.
+        let alone = |s: &Size| matches!(s, Size::Lin { k, terms } if *k <= 0 && terms[..] == [(v, 1)]);
+        let (mut bad, mut top) = (0, 0);
+        let mut seen = HashSet::new();
+        match self.arena.get(self.arena.resolve(body)).clone() {
+            Ty::Subr { params, result, .. } => {
+                for p in params {
+                    match self.arena.get(self.arena.resolve(p)).clone() {
+                        Ty::Nat(s) if alone(&s) => top += 1,
+                        Ty::NList { elem, size, .. } if alone(&size) => {
+                            top += 1;
+                            self.size_walk(elem, Polarity::Neg, v, &mut bad, &mut seen);
+                        }
+                        _ => self.size_walk(p, Polarity::Neg, v, &mut bad, &mut seen),
+                    }
+                }
+                self.size_walk(result, Polarity::Pos, v, &mut bad, &mut seen);
+            }
+            _ => self.size_walk(body, Polarity::Pos, v, &mut bad, &mut seen),
+        }
+        bad == 0 && top <= 1
+    }
+
+    /// Count in `bad` the occurrences of size variable `v` in `t` that a
+    /// caller supplies or can write: not in positive position.
+    fn size_walk(&self, t: TyId, pol: Polarity, v: DVar, bad: &mut usize, seen: &mut HashSet<(TyId, Polarity)>) {
+        let t = self.arena.resolve(t);
+        if !seen.insert((t, pol)) {
+            return;
+        }
+        let size = |s: &Size, pol: Polarity, bad: &mut usize| {
+            if pol != Polarity::Pos && matches!(s, Size::Lin { terms, .. } if terms.iter().any(|(w, _)| *w == v)) {
+                *bad += 1;
+            }
+        };
+        match self.arena.get(t).clone() {
+            Ty::Nat(s) => size(&s, pol, bad),
+            Ty::NList { elem, size: s, .. } => {
+                size(&s, pol, bad);
+                self.size_walk(elem, pol, v, bad, seen);
+            }
+            Ty::Named { args, .. } => {
+                for d in args {
+                    match d {
+                        D::Size(s) => size(&s, Polarity::Inv, bad),
+                        D::Type(x) => self.size_walk(x, Polarity::Inv, v, bad, seen),
+                        _ => {}
+                    }
+                }
+            }
+            Ty::Subr { params, result, .. } => {
+                for p in params {
+                    self.size_walk(p, pol.flip(), v, bad, seen);
+                }
+                self.size_walk(result, pol, v, bad, seen);
+            }
+            Ty::Poly { body, .. } => self.size_walk(body, pol, v, bad, seen),
+            Ty::Pair(x, y, r) => {
+                let p = if r.is_frozen() { pol } else { Polarity::Inv };
+                self.size_walk(x, p, v, bad, seen);
+                self.size_walk(y, p, v, bad, seen);
+            }
+            Ty::Bloblet { fields, frozen, .. } => {
+                for f in fields {
+                    self.size_walk(f, if frozen { pol } else { Polarity::Inv }, v, bad, seen);
+                }
+            }
+            Ty::Product(ps) | Ty::Sum(ps) => {
+                for (_, x) in ps {
+                    self.size_walk(x, pol, v, bad, seen);
+                }
+            }
+            Ty::Ref(x, _) | Ty::Array(x, _) | Ty::ICell(x, _) | Ty::MarkKey(x, _) => self.size_walk(x, Polarity::Inv, v, bad, seen),
+            Ty::PromptTag { answer: x, payload: y, .. } | Ty::Composable { arg: x, answer: y, .. } => {
+                self.size_walk(x, Polarity::Inv, v, bad, seen);
+                self.size_walk(y, Polarity::Inv, v, bad, seen);
+            }
+            Ty::Base(_) | Ty::Void | Ty::Var(_) | Ty::Place(_) | Ty::Link(_) => {}
+        }
     }
 
     /// `t` for a variable being bound to it: a `nat` of no known size is

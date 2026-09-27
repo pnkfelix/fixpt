@@ -302,13 +302,10 @@
 ;; written: data never written is finite.
 (define k-freezing (ref k-ids @t) (new nil))
 (define k-written (ref k-ids @t) (new nil))
-;; Bindings of known procedures, by name and type: those a `define`,
-;; `letrec`, `define-rec`, or a `let` of a `lambda` made. A call of one runs
-;; code the checker has seen; a call of anything else might run a closure
-;; fetched from the store. The recursive groups whose lambdas are being
-;; checked, a call of which there is recursion; and the standard bindings.
+;; The recursive groups whose lambdas are being checked, a call of which
+;; there is recursion; and the standard bindings. (Known procedures are
+;; kept with the bindings: `k-known`.)
 (define-type k-named (listof (pairof symbol int @t) finite))
-(define k-known (ref k-named @t) (new nil))
 (define k-recursive (ref k-named @t) (new nil))
 (define k-std (ref k-named @t) (new nil))
 ;; Every `define-generative`, newest first: its name, parameters, their
@@ -355,8 +352,6 @@
 (define k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) finite) @t) (new nil))
 (define k-named-has? (subr (read @t) (k-named symbol int) bool)
   (lambda (ns n t) (and (not (null? ns)) (or (and (symbol=? (car (car ns)) n) (= (cdr (car ns)) t)) (k-named-has? (cdr ns) n t)))))
-(define k-note-known (subr kstate (symbol int) unit)
-  (lambda (n t) (set k-known (cons (cons n t) (get k-known)))))
 (define k-bound-of (subr (maxeff (read @t) (alloc @t)) (int) (listof k-region finite))
   (lambda (v)
     (letrec ((find (subr (maxeff (read @t) (alloc @t)) ((listof (pairof int k-region @t) finite)) (listof k-region finite))
@@ -400,6 +395,13 @@
 (define k-env (ref (table symbol k-stack @t) @t) (new (make-table symbol-hash symbol=?)))
 (define k-trail (ref k-names @t) (new nil))
 (define k-depth (ref int @t) (new 0))
+;; Whether each binding in `k-env` is of a known procedure: one a `define`,
+;; `letrec`, `define-rec`, or a `let` of a `lambda` made. A call of one runs
+;; code the checker has seen; a call of anything else might run a closure
+;; fetched from the store. By binding, in step with `k-env`, not by name and
+;; type, so a parameter that shadows one is not taken for it
+;; (`docs/research/soundness-findings.md`, F1).
+(define k-known (ref (table symbol (listof bool finite) @t) @t) (new (make-table symbol-hash symbol=?)))
 ;; The type `s` is bound to, or -1.
 (define k-lookup (subr (maxeff (read @t) spin) (symbol) int)
   (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))
@@ -407,6 +409,7 @@
   (lambda (s t)
     (begin
       (table-set! (get k-env) s (cons t (table-ref (get k-env) s nil)))
+      (table-set! (get k-known) s (the (listof bool finite) (cons #f (table-ref (get k-known) s nil))))
       (set k-trail (cons s (get k-trail)))
       (set k-depth (+ (get k-depth) 1)))))
 (define k-mark (subr (read @t) () int) (lambda () (get k-depth)))
@@ -417,9 +420,22 @@
         (let ((s (car (get k-trail))))
           (begin
             (table-set! (get k-env) s (cdr (table-ref (get k-env) s nil)))
+            (table-set! (get k-known) s (cdr (table-ref (get k-known) s nil)))
             (set k-trail (cdr (get k-trail)))
             (set k-depth (- (get k-depth) 1))
             (k-unbind-to m))))))
+
+;; Note the binding of `n` that many from the innermost as known.
+(define k-set-nth-true (subr pure ((listof bool finite) int) (listof bool finite))
+  (lambda (bs i)
+    (cond ((null? bs) bs)
+          ((= i 0) (the (listof bool finite) (cons #t (cdr bs))))
+          (else (the (listof bool finite) (cons (car bs) (k-set-nth-true (cdr bs) (- i 1))))))))
+(define k-note-known (subr (maxeff kstate spin) (symbol int) unit)
+  (lambda (n i) (table-set! (get k-known) n (k-set-nth-true (table-ref (get k-known) n nil) i))))
+;; Whether the binding `n` names is of a known procedure.
+(define k-known? (subr (maxeff (read @t) spin) (symbol) bool)
+  (lambda (n) (let ((st (table-ref (get k-known) n nil))) (and (not (null? st)) (car st)))))
 
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) finite))
@@ -1865,7 +1881,7 @@
   (lambda ()
     (begin
       (set k-extracts nil)
-      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-known nil) (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
+      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-known (make-table symbol-hash symbol=?)) (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
@@ -2730,12 +2746,12 @@
                          (go (cdr vs) (cons (cons (car vs) (dz (sz-finite))) m))))))
       (let ((m (go (get k-skolems) nil)))
         (begin (set k-skolems saved) (if (null? m) t (k-subst t m)))))))
-(define k-note-letrec (subr kstate ((listof (productof (1 symbol) (2 int) (3 kx)) finite) bool) unit)
+(define k-note-letrec (subr (maxeff kstate spin) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) bool) unit)
   (lambda (bs spins)
     (if (null? bs)
         #u
         (let ((n (extract (car bs) 1)) (t (extract (car bs) 2)))
-          (begin (k-note-known n t)
+          (begin (k-note-known n 0)
                  (if spins (set k-recursive (cons (cons n t) (get k-recursive))) #u)
                  (k-note-letrec (cdr bs) spins))))))
 ;; The group's members are recursion that says `spin`, if `why` says it may
@@ -2756,6 +2772,20 @@
       (x-plambda (bs e a b) (k-lambda? e))
       (x-the (t e a b) (k-lambda? e))
       (else y #f))))
+;; How many of `ns` are `n`.
+(define k-count-name (subr pure (k-names symbol) int)
+  (lambda (ns n) (cond ((null? ns) 0) ((symbol=? (car ns) n) (+ 1 (k-count-name (cdr ns) n))) (else (k-count-name (cdr ns) n)))))
+;; Note each `let` binding of a lambda as known, once bound: of several of
+;; one name, each is as many from the innermost as come after it. The
+;; names, in order.
+(define k-note-let-lambdas (subr (maxeff kstate spin) ((listof (productof (1 symbol) (2 kx)) finite)) k-names)
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (let* ((later (k-note-let-lambdas (cdr bs)))
+               (n (extract (car bs) 1))
+               (noted (if (k-lambda? (extract (car bs) 2)) (k-note-known n (k-count-name later n)) #u)))
+          (the k-names (cons n later))))))
 ;; Whether a `plambda` body `x` with effect `e` may be generalized: pure, as
 ;; the value restriction has it; or an `rlambda`, under ascriptions and other
 ;; `plambda`s, whose effect only allocates. Making a closure makes no mutable
@@ -2989,6 +3019,98 @@
                                       ", and " (k-cat3 (k-region-show r) " could outlive " (k-region-show c)))
                               a b))))
             (k-check-bounds (cdr kinds) m a b))))))
+;; A size binder instantiated as `finite` is sound only where it stands for
+;; one size a caller supplies (`docs/research/soundness-findings.md`, F4): as
+;; the size of at most one parameter, that parameter's own `(nlist T v)` or
+;; `(nat v)` (less a constant, perhaps), and nowhere else a caller supplies
+;; or can write. Its occurrences in what the callee gives back only forget a
+;; size. Polarity: 1 given back, -1 supplied by a caller, 0 both, as in
+;; anything that can be written.
+(define k-size-alone? (subr pure (k-size int) bool)
+  (lambda (z v)
+    (tagcase z
+      (sz-lin (k ts) (and (<= k 0) (not (null? ts)) (null? (cdr ts)) (= (car (car ts)) v) (= (cdr (car ts)) 1)))
+      (else y #f))))
+(define k-size-bad (subr pure (k-size int int) int)
+  (lambda (z pol v)
+    (if (and (not (= pol 1)) (tagcase z (sz-lin (k ts) (not (= (k-coef-of ts v) 0))) (else y #f))) 1 0)))
+(define-type k-seen-pol (ref (listof (pairof int int @t) finite) @t))
+;; How many occurrences of size variable `v` in `t` a caller supplies or
+;; can write.
+(define-rec
+  (k-size-walk (subr (maxeff kstate spin) (int int int k-seen-pol) int)
+    (lambda (t0 pol v seen)
+      (let ((t (k-resolve t0)))
+        (if (k-pair-seen? (get seen) t pol)
+            0
+            (begin
+              (set seen (cons (cons t pol) (get seen)))
+              (tagcase (k-get t)
+                (ty-nat (z) (k-size-bad z pol v))
+                (ty-nlist (e z r) (+ (k-size-bad z pol v) (k-size-walk e pol v seen)))
+                (ty-named (g ds) (k-size-walk-descs ds v seen))
+                (ty-subr (e ps r) (+ (k-size-walk-list ps (- 0 pol) v seen) (k-size-walk r pol v seen)))
+                (ty-poly (bs body) (k-size-walk body pol v seen))
+                (ty-pair (x y r)
+                  (let ((p (tagcase r (r-frozen (q f) pol) (else w 0))))
+                    (+ (k-size-walk x p v seen) (k-size-walk y p v seen))))
+                (ty-bloblet (fs z r) (k-size-walk-list fs (if z pol 0) v seen))
+                (ty-product (ps) (k-size-walk-parts ps pol v seen))
+                (ty-sum (ps) (k-size-walk-parts ps pol v seen))
+                (ty-ref (x r) (k-size-walk x 0 v seen))
+                (ty-array (x r) (k-size-walk x 0 v seen))
+                (ty-icell (x r) (k-size-walk x 0 v seen))
+                (ty-markkey (x r) (k-size-walk x 0 v seen))
+                (ty-tag (x y e r) (+ (k-size-walk x 0 v seen) (k-size-walk y 0 v seen)))
+                (ty-comp (x y e r) (+ (k-size-walk x 0 v seen) (k-size-walk y 0 v seen)))
+                (else y 0)))))))
+  (k-size-walk-list (subr (maxeff kstate spin) (k-ids int int k-seen-pol) int)
+    (lambda (ts pol v seen)
+      (if (null? ts) 0 (let ((here (k-size-walk (car ts) pol v seen))) (+ here (k-size-walk-list (cdr ts) pol v seen))))))
+  (k-size-walk-parts (subr (maxeff kstate spin) (k-parts int int k-seen-pol) int)
+    (lambda (ps pol v seen)
+      (if (null? ps) 0 (let ((here (k-size-walk (extract (car ps) 2) pol v seen))) (+ here (k-size-walk-parts (cdr ps) pol v seen))))))
+  (k-size-walk-descs (subr (maxeff kstate spin) ((listof k-desc finite) int k-seen-pol) int)
+    (lambda (ds v seen)
+      (if (null? ds)
+          0
+          (let ((here (tagcase (car ds) (dz (z) (k-size-bad z 0 v)) (dt (x) (k-size-walk x 0 v seen)) (else y 0))))
+            (+ here (k-size-walk-descs (cdr ds) v seen)))))))
+;; Each parameter's count of such occurrences, and how many parameters are
+;; sized by `v` alone.
+(define k-size-params (subr (maxeff kstate spin) (k-ids int k-seen-pol) (productof (1 int) (2 int)))
+  (lambda (ps v seen)
+    (if (null? ps)
+        (product (1 0) (2 0))
+        (let* ((p (k-resolve (car ps)))
+               (here (tagcase (k-get p)
+                       (ty-nat (z) (if (k-size-alone? z v) (product (1 0) (2 1)) (product (1 (k-size-walk p -1 v seen)) (2 0))))
+                       (ty-nlist (e z r)
+                         (if (k-size-alone? z v) (product (1 (k-size-walk e -1 v seen)) (2 1)) (product (1 (k-size-walk p -1 v seen)) (2 0))))
+                       (else y (product (1 (k-size-walk p -1 v seen)) (2 0)))))
+               (rest (k-size-params (cdr ps) v seen)))
+          (product (1 (+ (extract here 1) (extract rest 1))) (2 (+ (extract here 2) (extract rest 2))))))))
+(define k-finite-size-ok? (subr (maxeff kstate spin) (int int) bool)
+  (lambda (body v)
+    (let ((seen (the k-seen-pol (new nil))))
+      (tagcase (k-get (k-resolve body))
+        (ty-subr (e ps r)
+          (let* ((counts (k-size-params ps v seen)) (res (k-size-walk r 1 v seen)))
+            (and (= (+ (extract counts 1) res) 0) (<= (extract counts 2) 1))))
+        (else y (= (k-size-walk body 1 v seen) 0))))))
+(define k-check-finite-sizes (subr (maxeff checks spin) (k-binders k-map int int int) unit)
+  (lambda (kinds m body a b)
+    (if (null? kinds)
+        #u
+        (let* ((v (extract (car kinds) 1)) (f (k-map-find m v))
+               (fin (and (= (extract (car kinds) 2) 5) (not (null? f))
+                         (tagcase (cdr (car f)) (dz (z) (tagcase z (sz-finite () #t) (else w #f))) (else y #f)))))
+          (if (and fin (not (k-finite-size-ok? body v)))
+              (let ((name (k-quote (symbol->string (k-dvar-name v)))))
+                (k-fail (k-cat5 "the size " name " cannot be `finite` here: " name
+                                " is the size of more than one argument, or of something inside one, and `finite` would not keep them the same")
+                        a b))
+              (k-check-finite-sizes (cdr kinds) m body a b))))))
 (define k-finish-each (subr (maxeff checks spin) (k-binders k-map int int int) k-map)
   (lambda (kinds m a b ft)
     (if (null? kinds)
@@ -3268,7 +3390,7 @@
         (k-unify inner expected kinds solved (the k-trail (new nil)))
         (k-default-regions kinds solved)
         (let ((m (k-finish kinds solved a b t)))
-          (begin (k-check-bounds kinds m a b) (let ((inst (k-subst inner m))) (begin (k-no-knot inst a b) inst))))))))
+          (begin (k-check-bounds kinds m a b) (k-check-finite-sizes kinds m inner a b) (let ((inst (k-subst inner m))) (begin (k-no-knot inst a b) inst))))))))
 (define k-plambda-matches? (subr (read @t) (kx k-ty) bool)
   (lambda (x et)
     (tagcase x
@@ -3456,7 +3578,8 @@
     (lambda (t by path)
       (let ((t (k-resolve t)))
         (cond ((k-on-path? path t) (or by (k-newer-param? path t)))
-              ((> (k-length path) 64) #f)
+              ;; Too deep to follow: it may loop, the cautious answer.
+              ((> (k-length path) 64) #t)
               (else
                (let ((p (the k-cpath (cons (cons t by) path))))
                  (tagcase (k-get t)
@@ -3498,7 +3621,7 @@
 (define k-known-callee? (subr (maxeff kstate spin) (kx) bool)
   (lambda (f)
     (let ((s (k-callee-name f)))
-      (and (not (null? s)) (let ((t (k-lookup (car s)))) (and (>= t 0) (k-named-has? (get k-known) (car s) t)))))))
+      (and (not (null? s)) (let ((t (k-lookup (car s)))) (and (>= t 0) (k-known? (car s))))))))
 ;; Whether a call of `f` (instantiated to `ft`) may run for an unbounded
 ;; time beyond what its latent effect says: a call, in a recursive group's
 ;; lambdas, of the group; or a call through a recursive type of anything but
@@ -3509,7 +3632,7 @@
     (let* ((s (k-callee-name f))
            (t (if (null? s) -1 (k-lookup (car s)))))
       (cond ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
-            ((and (>= t 0) (or (k-named-has? (get k-known) (car s) t) (k-named-has? (get k-std) (car s) t))) #f)
+            ((and (>= t 0) (or (k-known? (car s)) (k-named-has? (get k-std) (car s) t))) #f)
             ((k-lambda? (k-under f)) #f)
             (else (k-cyclic? ft))))))
 
@@ -4381,7 +4504,7 @@
                                     (int->string (k-length ds)) "")
                             a b)
                     (let ((result (let ((m (k-proj-map bs ds a b)))
-                                    (begin (k-check-bounds bs m a b) (let ((inst (k-subst inner m))) (begin (k-no-knot inst a b) inst))))))
+                                    (begin (k-check-bounds bs m a b) (k-check-finite-sizes bs m inner a b) (let ((inst (k-subst inner m))) (begin (k-no-knot inst a b) inst))))))
                       (k-te result (k-mask x (extract r 2) result)))))
               (else y (k-fail (string-append "`proj` needs a polymorphic value, not a " (k-show-ty t)) a b)))))
         (x-if (p c d a b)
@@ -4429,6 +4552,7 @@
           (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
             (begin
               (k-bind-named (extract inits 1))
+              (k-note-let-lambdas bs)
               (let ((rb (k-synth body)))
                 (begin
                   (k-unbind-to saved)
@@ -4486,7 +4610,6 @@
       (if (null? bs)
           (product (1 nil) (2 nil))
           (let* ((r (k-synth (extract (car bs) 2)))
-                 (noted (if (k-lambda? (extract (car bs) 2)) (k-note-known (extract (car bs) 1) (extract r 1)) #u))
                  (rest (k-synth-lets (cdr bs))))
             (product (1 (cons (cons (extract (car bs) 1) (extract r 1)) (extract rest 1)))
                      (2 (k-union (extract r 2) (extract rest 2))))))))
@@ -4698,7 +4821,7 @@
                     (k-inst-told args params 0 kinds solved done-t done-e)
                     (k-inst-shapes args params 0 solved done-t)
                     (k-default-regions kinds solved)
-                    (let ((m (k-finish kinds solved a b ft))) (begin (k-check-bounds kinds m a b) (k-subst inner m))))))))))
+                    (let ((m (k-finish kinds solved a b ft))) (begin (k-check-bounds kinds m a b) (k-check-finite-sizes kinds m inner a b) (k-subst inner m))))))))))
   ;; What the arguments are, except the ones that need to be told.
   (k-inst-asked (subr (maxeff checks spin) (kxs k-ids int k-binders k-solved (arrayof int @t) (arrayof k-eff @t)) unit)
     (lambda (args params i kinds solved done-t done-e)
@@ -4857,6 +4980,7 @@
             (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
               (begin
                 (k-bind-named (extract inits 1))
+                (k-note-let-lambdas bs)
                 (let ((e (k-check body expected)))
                   (begin (k-unbind-to saved) (set k-skolems named) (k-mask x (k-union (extract inits 2) e) expected))))))
           (else y (otherwise))))))))
@@ -5327,7 +5451,7 @@
     (if (null? bs)
         nil
         (let* ((t (k-parse-type (extract (car bs) 2))) (bound (k-bind (extract (car bs) 1) t))
-               (noted (k-note-known (extract (car bs) 1) t)))
+               (noted (k-note-known (extract (car bs) 1) 0)))
           (cons t (k-rec-types (cdr bs)))))))
 ;; Each lambda, read under its signature: a lambda, or an error.
 (define k-rec-lambdas (subr (maxeff checks spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) k-ids) k-group)
@@ -5375,8 +5499,8 @@
                  (t-define (name ty init a b)
                    (if (null? ty)
                        (let* ((x (k-resolve-exp init)) (r (k-synth x)))
-                         (begin (if (k-lambda? x) (k-note-known name (extract r 1)) #u)
-                                (k-bind name (extract r 1))
+                         (begin (k-bind name (extract r 1))
+                                (if (k-lambda? x) (k-note-known name 0) #u)
                                 (cons (k-cat4 "define " (symbol->string name) " : " (k-line (extract r 1) (extract r 2))) nil)))
                        ;; A lambda is in scope in itself, as a `letrec`
                        ;; binding is; anything else is not.
@@ -5393,7 +5517,7 @@
                               (rsaved (get k-recursive))
                               ;; A lambda whose every run ends needs no `spin`.
                               (noted (if (k-lambda? x)
-                                         (begin (k-note-known name t)
+                                         (begin (k-note-known name 0)
                                                 (let* ((g (the k-group (cons (product (1 name) (2 t) (3 x)) nil)))
                                                        (why (k-termination g)))
                                                   (if (string=? why "")
