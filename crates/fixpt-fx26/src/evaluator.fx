@@ -43,8 +43,8 @@
   (v-sum symbol val)
   (v-clo (listof (productof (1 symbol) (2 syns-a)) finite) exp (listof (pairof symbol (bloblet (fields val) @v) @v) @v))
   (v-prim symbol)
-  (v-tag (prompt-tag val val (maxeff spin (read @a) (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
-  (v-cont (composable val val (maxeff spin (read @a) (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
+  (v-tag (prompt-tag val val (maxeff spin (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
+  (v-cont (composable val val (maxeff spin (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
   (v-esc (subr (goto @x) (val) void))
   (v-key (mark-key val @x)))
 
@@ -53,7 +53,7 @@
 (define-type vals (listof val @v))
 
 ;; What a delimited part of the program may do, besides control on @x.
-(define-effect runs (maxeff (read @a) (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)))
+(define-effect runs (maxeff (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)))
 ;; What evaluating may do: read the trees, run the program on @v, mark and
 ;; transfer control on @x, and stop with an error.
 (define-effect evals (maxeff runs (goto @x) (comefrom @x)))
@@ -373,7 +373,7 @@
   (lambda (n) (let ((c (cell (v-unit)))) (begin (set genv (cons (cons n c) (get genv))) c))))
 
 
-(define rec-cells (subr (maxeff (read @a) (read @v) (write @v) (alloc @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof (bloblet (fields val) @v) @v))
+(define rec-cells (subr (maxeff (read @v) (write @v) (alloc @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof (bloblet (fields val) @v) @v))
   (lambda (bs) (if (null? bs) nil (let ((c (push-global (extract (car bs) 1)))) (cons c (rec-cells (cdr bs)))))))
 (define rec-fill (subr (maxeff evals spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (bloblet (fields val) @v) @v)) unit)
   (lambda (bs cells)
@@ -382,7 +382,7 @@
         (begin (bloblet-set! (car cells) 0 (eval (extract (car bs) 3) (get genv))) (rec-fill (cdr bs) (cdr cells))))))
 
 ;; Whether `x` is a lambda, under any type abstractions and ascriptions.
-(define lambda-exp? (subr (read @a) (exp) bool)
+(define lambda-exp? (subr pure (exp) bool)
   (lambda (x)
     (tagcase x
       (e-lambda (ps body a b) #t)

@@ -142,7 +142,7 @@
 (define r-local (subr (alloc @k) (cenv symbol) cenv)
   (lambda (te n) (the cenv (cons (cons n (at-slot -1)) te))))
 
-(define r-simple? (subr (read @a) (exp) bool)
+(define r-simple? (subr pure (exp) bool)
   (lambda (x)
     (tagcase x
       (e-var (n a b) #t) (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t)
@@ -150,7 +150,7 @@
       (else y #f))))
 
 ;; `x`'s value, if it is a constant that needs no allocation.
-(define r-constant (subr (maxeff (read @a) (alloc @k)) (exp) (listof wcell @k))
+(define r-constant (subr (alloc @k) (exp) (listof wcell @k))
   (lambda (x)
     (tagcase x
       (e-int (n a b) (the (listof wcell @k) (cons (wcell-int n) nil)))
@@ -164,7 +164,7 @@
 
 ;; Whether `f` is the procedure running, called with its arity: its own
 ;; name, still bound where the procedure knows itself to be.
-(define r-self-known? (subr (maxeff (read @a) (read @k) (alloc @k) spin) (rgen exp int cenv) bool)
+(define r-self-known? (subr (maxeff (read @k) (alloc @k) spin) (rgen exp int cenv) bool)
   (lambda (g f nargs te)
     (tagcase f
       (e-var (n a b)
@@ -226,7 +226,7 @@
                (cond ((string=? p "%fx26-identity") (if (= n 1) (s-identity) (s-none)))
                      ((string=? p "") (s-none))
                      (else (r-prim-std p n n)))))))))
-(define r-standard-name (subr (maxeff (read @a) (read @k) (alloc @k) spin) (renv exp) string)
+(define r-standard-name (subr (maxeff (read @k) (alloc @k) spin) (renv exp) string)
   (lambda (env f)
     (tagcase f (e-var (n a b) (if (null? (r-where env n)) (symbol->string n) "")) (else y ""))))
 
@@ -234,17 +234,17 @@
 
 (define r-count-args (subr (maxeff (read @k) spin) (rargs) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (r-count-args (cdr xs))))))
-(define r-exp-args (subr (maxeff (read @a) (alloc @k)) ((listof exp finite)) rargs)
+(define r-exp-args (subr (alloc @k) ((listof exp finite)) rargs)
   (lambda (es) (if (null? es) nil (cons (a-e (car es)) (r-exp-args (cdr es))))))
-(define r-arg-simple? (subr (read @a) (rarg) bool)
+(define r-arg-simple? (subr pure (rarg) bool)
   (lambda (a) (tagcase a (a-e (x) (r-simple? x)) (a-thunk (b) #f) (else y #t))))
 ;; The last argument that is not simple, or -1.
-(define r-last-hard (subr (maxeff (read @a) (read @k) spin) (rargs int int) int)
+(define r-last-hard (subr (maxeff (read @k) spin) (rargs int int) int)
   (lambda (xs i found)
     (if (null? xs) found (r-last-hard (cdr xs) (+ i 1) (if (r-arg-simple? (car xs)) found i)))))
 (define r-nth-int (subr (maxeff (read @k) spin) ((listof int @k) int) int)
   (lambda (xs i) (if (= i 0) (car xs) (r-nth-int (cdr xs) (- i 1)))))
-(define r-nth-exp (subr (read @a) ((listof exp finite) int) exp)
+(define r-nth-exp (subr pure ((listof exp finite) int) exp)
   (lambda (es i) (if (= i 0) (car es) (r-nth-exp (cdr es) (- i 1)))))
 
 ;;; ---------------------------------------------------------- expressions

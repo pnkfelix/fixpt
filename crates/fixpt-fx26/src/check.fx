@@ -23,7 +23,7 @@
 
 ;; The checker's state, and everything checking may do.
 (define-effect kstate (maxeff (read @t) (write @t) (alloc @t)))
-(define-effect checks (maxeff (read @s) (read @a) kstate (goto @z)))
+(define-effect checks (maxeff (read @s) kstate (goto @z)))
 
 ;;; ------------------------------------------------------------ descriptions
 
@@ -130,7 +130,7 @@
   (k-err string int int)
   (k-done k-te))
 
-(define k-tag (prompt-tag k-result k-result (maxeff spin (read @s) (read @a) kstate) @z)
+(define k-tag (prompt-tag k-result k-result (maxeff spin (read @s) kstate) @z)
   (make-continuation-prompt-tag))
 (define k-fail (subr checks (string int int) void)
   (lambda (m a b) (abort-current-continuation k-tag (k-err m a b))))
@@ -1121,7 +1121,7 @@
           (cons (product (1 (extract (car ps) 1)) (2 t)) rest)))))
 (define k-resolve-descs (subr (maxeff checks spin) (syns-a) (listof k-desc finite))
   (lambda (ds) (if (null? ds) nil (let* ((d (k-parse-d (car ds))) (rest (k-resolve-descs (cdr ds)))) (cons d rest)))))
-(define k-copy-names (subr (maxeff (read @a) (alloc @t)) (names) k-names)
+(define k-copy-names (subr (alloc @t) (names) k-names)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (k-copy-names (cdr ns))))))
 
 ;; Where a parser's tree starts and ends.

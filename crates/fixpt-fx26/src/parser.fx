@@ -14,10 +14,10 @@
 ;;; that fails aborts to a prompt in @p; both are this program's own, so
 ;;; `parse-program` is licensed as the reader's entry points are.
 
-(private-regions @a @p)
+(private-regions @p)
 
 ;; What a parse may do: read what was read, build a tree, and give up.
-(define-effect parses (maxeff (read @s) (alloc @s) (read @a) (alloc @a) (goto @p)))
+(define-effect parses (maxeff (read @s) (alloc @s) (goto @p)))
 
 (define-type syns-a (listof syn finite))
 (define-type names (listof symbol finite))
@@ -74,7 +74,7 @@
 
 (define-datatype presult (p-ok (listof top finite)) (p-err string int int))
 
-(define parse-tag (prompt-tag presult presult (maxeff spin (read @s) (alloc @s) (read @a) (alloc @a)) @p)
+(define parse-tag (prompt-tag presult presult (maxeff spin (read @s) (alloc @s)) @p)
   (make-continuation-prompt-tag))
 
 ;;; -------------------------------------------------------- looking at syn
@@ -128,7 +128,7 @@
           ((> (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else (pfail "a label is a name or a positive integer" s)))))
 
-(define keep (subr (maxeff (read @s) (alloc @a)) ((listof syn finite)) syns-a)
+(define keep (subr (read @s) ((listof syn finite)) syns-a)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (keep (cdr xs))))))
 
 ;; `(tag x …)` with `n` items, or fail with `shape`.
@@ -444,13 +444,13 @@
 
 (define mk-symbol (subr pure (string int int) syn) (lambda (n a b) (atom (datum-symbol n) a b)))
 (define mk-int (subr pure (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
-(define syn-datums (subr (maxeff (read @s) (alloc @a)) ((listof syn finite)) (listof datum finite))
+(define syn-datums (subr (read @s) ((listof syn finite)) (listof datum finite))
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
-(define mk-list (subr (maxeff (read @s) (read @a) (alloc @a)) ((listof syn finite) int int) syn)
+(define mk-list (subr (read @s) ((listof syn finite) int int) syn)
   (lambda (items a b) (lst items (datum-list (syn-datums items)) a b)))
 
 ;; `(1 m1) (2 m2) …`, from `i`.
-(define dt-labelled (subr (maxeff (read @s) (alloc @s) (read @a) (alloc @a)) ((listof syn finite) int int int) (listof syn finite))
+(define dt-labelled (subr (maxeff (read @s) (alloc @s)) ((listof syn finite) int int int) (listof syn finite))
   (lambda (ms i a b)
     (if (null? ms)
         nil
@@ -467,12 +467,12 @@
                      (arm (mk-list (cons (car parts) (cons prod nil)) a b))
                      (rest (dt-arms (cdr vs) a b)))
                 (cons arm rest)))))))
-(define dt-params (subr (maxeff (read @s) (alloc @a)) ((listof syn finite) int) (listof (productof (1 symbol) (2 syns-a)) finite))
+(define dt-params (subr (read @s) ((listof syn finite) int) (listof (productof (1 symbol) (2 syns-a)) finite))
   (lambda (ms i)
     (if (null? ms)
         nil
         (cons (product (1 (string->symbol (string-append "%x" (int->string i)))) (2 (the syns-a nil))) (dt-params (cdr ms) (+ i 1))))))
-(define dt-fields (subr (maxeff (read @s) (alloc @a)) ((listof syn finite) int int int) (listof (productof (1 symbol) (2 exp)) finite))
+(define dt-fields (subr (read @s) ((listof syn finite) int int int) (listof (productof (1 symbol) (2 exp)) finite))
   (lambda (ms i a b)
     (if (null? ms)
         nil
@@ -524,7 +524,7 @@
                  (ctors (dt-constructors used family? params (drop items 2) a b)))
             (cons (t-define-type head sum a b) ctors))))))
 
-(define append-tops (subr (maxeff (read @a) (alloc @a)) ((listof top finite) (listof top finite)) (listof top finite))
+(define append-tops (subr pure ((listof top finite) (listof top finite)) (listof top finite))
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))
 
 (define parse-tops (subr (maxeff parses spin) ((listof syn finite)) (listof top finite))
