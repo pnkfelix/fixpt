@@ -925,3 +925,22 @@ The cursor made a product (one frozen bloblet, not four pairs) measured
 29.0 ms, no better, so it stays as it was. What is left is some 75 ns a
 character, in calls of the reader's small procedures more than in
 allocation.
+
+## Type tests and a symbol's hash in register code
+
+The self-compile's commonest calls of primitives, after the reader's, were
+type tests of datums (the parser's `datum-symbol?` and the rest) and
+`%symbol-hash`, the tables' hash of a symbol key. Register code now does
+them in machine code:
+- `%fx26-fixnum?`, `char?` and `boolean?` by the value alone;
+- `symbol?` and `string?` by the header's kind, found before the suffix
+  or by the trailer, calling out only for a large object;
+- `%symbol-hash` as one load, since the checker has seen a symbol.
+
+| stage 2, register code | before | after  |
+| ---------------------- | ------ | ------ |
+| calls of primitives    | 673k   | 441k   |
+| time                   | 0.22 s | 0.22 s |
+
+`tests/programs/datum/` holds programs that use datums, which the
+evaluator written in FX-26 does not have; every other harness runs them.

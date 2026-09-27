@@ -294,6 +294,67 @@ impl Asm {
                 self.e(cmp_imm(X13, 32));
                 self.e(csel(RESULT, X15, RESULT, Cond::Eq));
             }
+            // `%symbol-hash`: the hash a symbol keeps, its field 1 of 3
+            // (the checker has seen that it is a symbol).
+            "symbol-hash" => {
+                self.e(ldur(RESULT, 1, field_off(3)));
+            }
+            // Type tests of any value: the fixnum, character and boolean
+            // ones by the value alone.
+            "fixnum?" => {
+                self.e(tst_low(1, 3));
+                self.value(X15, Value::TRUE);
+                self.value(X16, Value::FALSE);
+                self.e(csel(RESULT, X15, X16, Cond::Eq));
+            }
+            "char?" => {
+                self.e(and_low(X13, 1, 8));
+                self.e(cmp_imm(X13, (Value::char('\0').raw() & 0xFF) as u32));
+                self.value(X15, Value::TRUE);
+                self.value(X16, Value::FALSE);
+                self.e(csel(RESULT, X15, X16, Cond::Eq));
+            }
+            "boolean?" => {
+                self.value(X15, Value::FALSE);
+                self.value(X16, Value::TRUE);
+                self.e(cmp(1, X15));
+                self.e(csel(RESULT, X16, X15, Cond::Eq));
+                self.e(cmp(1, X16));
+                self.e(csel(RESULT, X16, RESULT, Cond::Eq));
+            }
+            // `symbol?` and `string?`: a bloblet whose header says so. The
+            // header is the word before the suffix when there are no
+            // fields, or as far back as the trailer there says. Anything
+            // else (a large object's extension, no trailer) calls out.
+            "symbol?" | "string?" => {
+                let code = if what == "symbol?" { fixpt_heap::ObjType::Symbol } else { fixpt_heap::ObjType::String } as u32;
+                let (no, have, end) = (self.label(), self.label(), self.label());
+                self.e(and_low(X13, 1, 3));
+                self.e(cmp_imm(X13, TAG_BLOBLET as u32));
+                self.b_cond(Cond::Ne, no);
+                self.e(ldur(X16, 1, field_off(1)));
+                self.e(and_low(X13, X16, 3));
+                self.e(cmp_imm(X13, fixpt_heap::value::TAG_HEADER as u32));
+                self.b_cond(Cond::Eq, have);
+                self.e(cmp_imm(X13, TAG_TRAILER as u32));
+                self.b_cond(Cond::Ne, slow);
+                self.e(sub_imm(X16, X16, TAG_TRAILER as u32));
+                self.e(sub(X11, 1, X16));
+                self.e(ldur(X16, X11, field_off(1)));
+                self.bind(have);
+                let k = fixpt_heap::layout::H_KIND;
+                self.e(ubfx(X13, X16, k.lo, k.width));
+                self.e(cmp_imm(X13, fixpt_heap::layout::KIND_EXTENSION as u32));
+                self.b_cond(Cond::Eq, slow);
+                self.e(cmp_imm(X13, code));
+                self.value(X15, Value::TRUE);
+                self.value(X16, Value::FALSE);
+                self.e(csel(RESULT, X15, X16, Cond::Eq));
+                self.b(end);
+                self.bind(no);
+                self.value(RESULT, Value::FALSE);
+                self.bind(end);
+            }
             // `char-numeric?` of an ASCII character: `0` to `9`. Past
             // ASCII, Unicode's say, called out.
             "numeric" => {
@@ -605,6 +666,12 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     ("prim", 3) if prim_named(k(o(0)), "%bloblet-set!") => Some("field!"),
                     ("prim", 1) if prim_named(k(o(0)), "char-whitespace?") => Some("whitespace"),
                     ("prim", 1) if prim_named(k(o(0)), "char-numeric?") => Some("numeric"),
+                    ("prim", 1) if prim_named(k(o(0)), "%symbol-hash") => Some("symbol-hash"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-fixnum?") => Some("fixnum?"),
+                    ("prim", 1) if prim_named(k(o(0)), "char?") => Some("char?"),
+                    ("prim", 1) if prim_named(k(o(0)), "boolean?") => Some("boolean?"),
+                    ("prim", 1) if prim_named(k(o(0)), "symbol?") => Some("symbol?"),
+                    ("prim", 1) if prim_named(k(o(0)), "string?") => Some("string?"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
                     ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),
                     ("prim", 2) if prim_named(k(o(0)), "modulo") => Some("modulo"),

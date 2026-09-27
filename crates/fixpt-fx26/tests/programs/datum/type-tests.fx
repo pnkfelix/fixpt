@@ -1,0 +1,32 @@
+;;; The type tests of datums, which register code does in machine code, on
+;;; one datum of each kind: a fixnum, a character, both booleans, a short
+;;; string, a long one (a large object), a symbol, a pair, the empty list,
+;;; a vector and a bytevector. Each datum gives five bits; and symbols'
+;;; hashes, which register code reads from the symbol.
+(define doubled (subr pure (string int) string)
+  (lambda (s n) (if (= n 0) s (doubled (string-append s s) (- n 1)))))
+(define bit (subr pure (bool int) int) (lambda (b v) (if b v 0)))
+(define kinds (subr pure (datum) int)
+  (lambda (d)
+    (+ (bit (datum-int? d) 1)
+       (+ (bit (datum-char? d) 2)
+          (+ (bit (datum-bool? d) 4) (+ (bit (datum-string? d) 8) (bit (datum-symbol? d) 16)))))))
+(define all (subr pure (datum int) int)
+  (lambda (ds acc) (if (datum-null? ds) acc (all (datum-cdr ds) (+ (* acc 32) (kinds (datum-car ds)))))))
+(define some (subr pure () datum)
+  (lambda ()
+    (datum-cons (datum-int 7)
+     (datum-cons (datum-char #\a)
+      (datum-cons (datum-bool #t)
+       (datum-cons (datum-bool #f)
+        (datum-cons (datum-string "abc")
+         (datum-cons (datum-string (doubled "x" 17))
+          (datum-cons (datum-symbol "abc")
+           (datum-cons (datum-cons (datum-int 1) (datum-list (the (listof datum @l) nil)))
+            (datum-cons (datum-list (the (listof datum @l) nil))
+             (datum-cons (datum-list->vector (datum-cons (datum-int 1) (datum-list (the (listof datum @l) nil))))
+              (datum-list (the (listof datum @l) nil))))))))))))))
+(define same-hash (subr pure () bool)
+  (lambda () (and (= (symbol-name-hash 'abc) (symbol-name-hash (datum->symbol (datum-symbol "abc"))))
+                  (not (= (symbol-name-hash 'abc) (symbol-name-hash 'abd))))))
+(if (same-hash) (all (some) 0) -1)
