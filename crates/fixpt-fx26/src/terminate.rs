@@ -65,6 +65,12 @@ struct Walk<'a> {
     /// Bounds the tests on the way down have put on parameters.
     guards: Vec<(usize, Bound)>,
     calls: Vec<(usize, usize, Graph)>,
+    /// For each call, what each argument is: a parameter of the caller,
+    /// passed unchanged, or not.
+    passed: Vec<(usize, usize, Vec<Option<usize>>)>,
+    /// (member, parameter): passed unchanged by every call in the group,
+    /// so the same for the whole recursion, and a bound as a literal is.
+    invariant: HashSet<(usize, usize)>,
     escapes: bool,
 }
 
@@ -79,23 +85,41 @@ impl Checker {
             scope: Vec::new(),
             guards: Vec::new(),
             calls: Vec::new(),
+            passed: Vec::new(),
+            invariant: HashSet::new(),
             escapes: false,
         };
-        for (i, (_, ty, init)) in bindings.iter().enumerate() {
-            let Some((params, body)) = self.lambda_of(*init) else { return false };
-            let tys = self.param_types(*ty);
-            w.current = i;
-            w.scope.clear();
-            for (j, p) in params.iter().enumerate() {
-                let Some(t) = tys.get(j).copied() else { return false };
-                let mut known = vec![Tracked::Part { param: j, strict: false, ty: t }];
-                if self.arena.resolve(t) == self.arena.resolve(self.int) {
-                    known.push(Tracked::Int { param: j, offset: 0 });
+        let mut arity = Vec::new();
+        for (_, _, init) in bindings {
+            let Some((params, _)) = self.lambda_of(*init) else { return false };
+            arity.push(params.len());
+        }
+        // Twice: first to learn which parameters every call passes on
+        // unchanged, then with them as bounds.
+        if !w.walk_members(bindings) {
+            return false;
+        }
+        let mut inv: HashSet<(usize, usize)> =
+            arity.iter().enumerate().flat_map(|(i, n)| (0..*n).map(move |j| (i, j))).collect();
+        loop {
+            let before = inv.len();
+            for (from, to, args) in &w.passed {
+                for j in 0..arity[*to] {
+                    let kept = args.get(j).copied().flatten().is_some_and(|p| inv.contains(&(*from, p)));
+                    if !kept {
+                        inv.remove(&(*to, j));
+                    }
                 }
-                w.scope.push((*p, known));
             }
-            w.walk(body);
-            if w.escapes {
+            if inv.len() == before {
+                break;
+            }
+        }
+        if !inv.is_empty() {
+            w.invariant = inv;
+            w.calls.clear();
+            w.passed.clear();
+            if !w.walk_members(bindings) {
                 return false;
             }
         }
@@ -129,6 +153,31 @@ impl Checker {
 }
 
 impl Walk<'_> {
+    /// Walk every member's body; `false` if one is not a lambda or a member
+    /// escapes.
+    fn walk_members(&mut self, bindings: &[(Sym, TyId, ExpId)]) -> bool {
+        let c = self.c;
+        for (i, (_, ty, init)) in bindings.iter().enumerate() {
+            let Some((params, body)) = c.lambda_of(*init) else { return false };
+            let tys = c.param_types(*ty);
+            self.current = i;
+            self.scope.clear();
+            for (j, p) in params.iter().enumerate() {
+                let Some(t) = tys.get(j).copied() else { return false };
+                let mut known = vec![Tracked::Part { param: j, strict: false, ty: t }];
+                if c.arena.resolve(t) == c.arena.resolve(c.int) {
+                    known.push(Tracked::Int { param: j, offset: 0 });
+                }
+                self.scope.push((*p, known));
+            }
+            self.walk(body);
+            if self.escapes {
+                return false;
+            }
+        }
+        true
+    }
+
     fn bound(&self, s: Sym) -> Option<&Vec<Tracked>> {
         self.scope.iter().rev().find(|(n, _)| *n == s).map(|(_, k)| k)
     }
@@ -348,13 +397,23 @@ impl Walk<'_> {
         }
     }
 
-    /// Whether `e` is the same at every call of the group: a literal, or a
-    /// variable bound outside it.
+    /// Whether `e` is the same at every call of the group: a literal, a
+    /// variable bound outside it, a parameter passed on unchanged, or the
+    /// length of a string or the sum or difference of such.
     fn fixed(&self, e: ExpId) -> bool {
-        match self.c.arena.exp_at(e) {
+        match self.c.arena.exp_at(e).clone() {
             Exp::Int(_) => true,
-            Exp::Var(s) => self.bound(*s).is_none() && self.member(*s).is_none(),
-            Exp::The { exp, .. } => self.fixed(*exp),
+            Exp::Var(s) => match self.bound(s) {
+                None => self.member(s).is_none(),
+                Some(known) => known.iter().any(|k| {
+                    matches!(k, Tracked::Part { param, strict: false, .. } if self.invariant.contains(&(self.current, *param)))
+                }),
+            },
+            Exp::The { exp, .. } => self.fixed(exp),
+            Exp::App { fun, args } => {
+                matches!((self.std_op(fun), args.len()), (Some("string-length"), 1) | (Some("+" | "-"), 2))
+                    && args.iter().all(|a| self.fixed(*a))
+            }
             _ => false,
         }
     }
@@ -406,6 +465,16 @@ impl Walk<'_> {
 
     /// A call of member `to` with `args`, from the member walked.
     fn call(&mut self, to: usize, args: &[ExpId]) {
+        let unchanged = args
+            .iter()
+            .map(|a| {
+                self.tracked(*a).iter().find_map(|k| match k {
+                    Tracked::Part { param, strict: false, .. } => Some(*param),
+                    _ => None,
+                })
+            })
+            .collect();
+        self.passed.push((self.current, to, unchanged));
         let mut g = Graph::new();
         let mut add = |from: (usize, Measure), to: (usize, Measure), strict: bool| {
             let e = g.entry((from, to)).or_insert(strict);

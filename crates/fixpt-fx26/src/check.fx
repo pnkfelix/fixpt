@@ -175,14 +175,15 @@
 
 ;;; ------------------------------------------------------------ lists
 
+;; Over finite lists, which every list here is: so they end.
 (define k-length
-  (poly ((r region)) (poly ((t type)) (subr (maxeff (read r) spin) ((listof t r)) int)))
-  (plambda ((r region)) (plambda ((t type))
-    (lambda ((xs (listof t r))) (if (null? xs) 0 (+ 1 (k-length (cdr xs))))))))
+  (poly ((t type)) (subr pure ((listof t finite)) int))
+  (plambda ((t type))
+    (lambda ((xs (listof t finite))) (if (null? xs) 0 (+ 1 (k-length (cdr xs)))))))
 (define k-nth
-  (poly ((r region)) (poly ((t type)) (subr (maxeff (read r) spin) ((listof t r) int) t)))
-  (plambda ((r region)) (plambda ((t type))
-    (lambda ((xs (listof t r)) (i int)) (if (= i 0) (car xs) (k-nth (cdr xs) (- i 1)))))))
+  (poly ((t type)) (subr pure ((listof t finite) int) t))
+  (plambda ((t type))
+    (lambda ((xs (listof t finite)) (i int)) (if (= i 0) (car xs) (k-nth (cdr xs) (- i 1))))))
 (define k-has-name? (subr (read @t) (k-names symbol) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((symbol=? (car xs) s) #t) (else (k-has-name? (cdr xs) s)))))
 (define k-has-id? (subr (read @t) (k-ids int) bool)
@@ -294,7 +295,7 @@
       (find (get k-outers)))))
 (define k-set-outer (subr kstate (int k-ids) unit)
   (lambda (v outer) (set k-outers (cons (cons v outer) (get k-outers)))))
-(define k-dvar-name (subr (maxeff (read @t) spin) (int) symbol)
+(define k-dvar-name (subr (read @t) (int) symbol)
   (lambda (v) (k-nth (get k-dvars) (- (- (get k-ndvars) 1) v))))
 
 ;; The base types, made first, in this order, so their indexes are known.
@@ -431,22 +432,22 @@
 
 ;;; ------------------------------------------------------------ printing
 
-(define k-region-show (subr (maxeff (read @t) spin) (k-region) string)
+(define k-region-show (subr (read @t) (k-region) string)
   (lambda (r) (tagcase r (r-const (n) (symbol->string n)) (r-fresh (i n) n) (r-var (v) (symbol->string (k-dvar-name v))) (r-frozen (p f)
                   (let ((word (if f "finite" "const")))
                     (if (< p 0) word (k-cat5 "(" word " " (symbol->string (k-dvar-name p)) ")")))) (r-heap () "heap"))))
-(define k-atom-show (subr (maxeff (read @t) spin) (k-atom) string)
+(define k-atom-show (subr (read @t) (k-atom) string)
   (lambda (a)
-    (letrec ((one (subr (maxeff (read @t) spin) (string k-region) string) (lambda (op r) (k-cat5 "(" op " " (k-region-show r) ")"))))
+    (letrec ((one (subr (read @t) (string k-region) string) (lambda (op r) (k-cat5 "(" op " " (k-region-show r) ")"))))
       (tagcase a
         (a-read (r) (one "read" r)) (a-write (r) (one "write" r)) (a-alloc (r) (one "alloc" r))
         (a-goto (r) (one "goto" r)) (a-comefrom (r) (one "comefrom" r)) (a-await (r) (one "await" r))
         (a-spin () "spin")
         (a-var (v) (symbol->string (k-dvar-name v)))))))
-(define k-atoms-show (subr (maxeff (read @t) spin) (k-eff) string)
+(define k-atoms-show (subr (read @t) (k-eff) string)
   (lambda (e) (if (null? e) "" (string-append (string-append " " (k-atom-show (car e))) (k-atoms-show (cdr e))))))
 ;; `pure`, a single atom, or `…`.
-(define k-show-effect (subr (maxeff (read @t) spin) (k-eff) string)
+(define k-show-effect (subr (read @t) (k-eff) string)
   (lambda (e)
     (cond ((null? e) "pure")
           ((null? (cdr e)) (k-atom-show (car e)))
@@ -474,7 +475,7 @@
                     ((= (k-resolve d) t) (cons (symbol->string n) nil))
                     (else (k-abbrev-in (cdr ds) (cons n seen) t))))
             (else y (k-abbrev-in (cdr ds) seen t)))))))
-(define k-show-binders (subr (maxeff (read @t) (alloc @t) spin) (k-binders) (listof string finite))
+(define k-show-binders (subr (maxeff (read @t) (alloc @t)) (k-binders) (listof string finite))
   (lambda (bs)
     (if (null? bs)
         nil
@@ -484,7 +485,7 @@
                 (k-show-binders (cdr bs)))))))
 
 ;; How deep `t` is in `path`, newest first: its place from the root, from 1.
-(define k-depth-of (subr (maxeff (read @t) spin) (k-ids int) int)
+(define k-depth-of (subr (read @t) (k-ids int) int)
   (lambda (path t) (if (= (car path) t) (k-length path) (k-depth-of (cdr path) t))))
 ;; Whether `name` occurs in `s` as a symbol of its own.
 (define k-mentions-token? (subr spin (string string) bool)
@@ -805,7 +806,7 @@
 (define k-dletrec-grounded (subr (maxeff checks spin) (k-slots syn) unit)
   (lambda (ss s)
     (if (null? ss) #u (begin (k-grounded (car (car ss)) (syn-start s) (syn-end s)) (k-dletrec-grounded (cdr ss) s)))))
-(define k-family-params (subr (maxeff checks spin) ((listof syn finite)) (listof (productof (1 symbol) (2 int)) finite))
+(define k-family-params (subr checks ((listof syn finite)) (listof (productof (1 symbol) (2 int)) finite))
   (lambda (ps)
     (if (null? ps)
         nil
@@ -818,7 +819,7 @@
 
 ;; `(define-type (name (param kind) …) type)`: nothing is read until it is
 ;; used.
-(define k-define-family (subr (maxeff checks spin) (symbol (listof syn finite) syn) unit)
+(define k-define-family (subr checks (symbol (listof syn finite) syn) unit)
   (lambda (name params body) (k-push-desc name (ds-abbrev (k-family-params params) body))))
 ;; Push a scope's entries, the first first.
 (define k-push-all (subr kstate (k-scope) unit)
@@ -1357,9 +1358,9 @@
   (lambda (bs bound) (if (null? bs) bound (k-let-names (cdr bs) (cons (extract (car bs) 1) bound)))))
 
 (define-rec
-  (k-free-list (subr (maxeff (read @t) (alloc @t) spin) (kxs k-names k-names) k-names)
+  (k-free-list (subr (maxeff (read @t) (alloc @t)) (kxs k-names k-names) k-names)
     (lambda (xs bound out) (if (null? xs) out (k-free-list (cdr xs) bound (k-free-into (car xs) bound out)))))
-  (k-free-into (subr (maxeff (read @t) (alloc @t) spin) (kx k-names k-names) k-names)
+  (k-free-into (subr (maxeff (read @t) (alloc @t)) (kx k-names k-names) k-names)
     (lambda (x bound out)
       (tagcase x
         (x-var (s a b) (k-note s bound out))
@@ -1385,13 +1386,13 @@
         (x-tagcase (s arms els a b)
           (let ((o (k-free-arms arms bound (k-free-into s bound out))))
             (if (null? els) o (k-free-into (extract (car els) 2) (cons (extract (car els) 1) bound) o)))))))
-  (k-free-letrec (subr (maxeff (read @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) k-names k-names) k-names)
+  (k-free-letrec (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) k-names k-names) k-names)
     (lambda (bs bound out) (if (null? bs) out (k-free-letrec (cdr bs) bound (k-free-into (extract (car bs) 3) bound out)))))
-  (k-free-let (subr (maxeff (read @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-names) k-names)
+  (k-free-let (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-names) k-names)
     (lambda (bs bound out) (if (null? bs) out (k-free-let (cdr bs) bound (k-free-into (extract (car bs) 2) bound out)))))
-  (k-free-fields (subr (maxeff (read @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-names) k-names)
+  (k-free-fields (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-names) k-names)
     (lambda (fs bound out) (if (null? fs) out (k-free-fields (cdr fs) bound (k-free-into (extract (car fs) 2) bound out)))))
-  (k-free-arms (subr (maxeff (read @t) (alloc @t) spin)
+  (k-free-arms (subr (maxeff (read @t) (alloc @t))
                         ((listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) finite) k-names k-names) k-names)
     (lambda (arms bound out)
       (if (null? arms)
@@ -1401,7 +1402,7 @@
 
 ;;; ------------------------------------------------------------ free variables
 
-(define k-free-vars (subr (maxeff (read @t) (alloc @t) spin) (kx) k-names)
+(define k-free-vars (subr (maxeff (read @t) (alloc @t)) (kx) k-names)
   (lambda (x) (k-free-into x nil nil)))
 
 ;;; ------------------------------------------------------------ masking
@@ -1646,7 +1647,7 @@
       (the k-benv (cons (the (pairof int int @t) (cons v l)) (drop env))))))
 (define k-benv-within? (subr (read @t) (k-benv k-benv) bool)
   (lambda (x y) (or (null? x) (and (= (k-benv-var y (car (car x))) (cdr (car x))) (k-benv-within? (cdr x) y)))))
-(define k-benv=? (subr (maxeff (read @t) spin) (k-benv k-benv) bool)
+(define k-benv=? (subr (read @t) (k-benv k-benv) bool)
   (lambda (x y) (and (= (k-length x) (k-length y)) (k-benv-within? x y))))
 ;; `a ≤ b` for frozen data: the same, or finite data seen as possibly
 ;; cyclic, in one place.
@@ -1684,13 +1685,13 @@
 ;; pairs of `poly` binders, by the pair of nodes and the position.
 (define-type k-strail (ref (listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) finite) @t))
 (define-type k-labels (ref (listof (productof (1 int) (2 int) (3 int) (4 int)) finite) @t))
-(define k-strail-has? (subr (maxeff (read @t) spin) ((listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) finite) int int k-benv k-benv) bool)
+(define k-strail-has? (subr (read @t) ((listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) finite) int int k-benv k-benv) bool)
   (lambda (ps a b ea eb)
     (and (not (null? ps))
          (or (and (= (extract (car ps) 1) a) (and (= (extract (car ps) 2) b)
                   (and (k-benv=? (extract (car ps) 3) ea) (k-benv=? (extract (car ps) 4) eb))))
              (k-strail-has? (cdr ps) a b ea eb)))))
-(define k-label (subr (maxeff kstate spin) (k-labels int int int) int)
+(define k-label (subr kstate (k-labels int int int) int)
   (lambda (labels a b i)
     (letrec ((find (subr (read @t) ((listof (productof (1 int) (2 int) (3 int) (4 int)) finite)) int)
                (lambda (ls)
@@ -1706,7 +1707,7 @@
 
 ;; Name each pair of binders of two `poly` nodes `a` and `b` by the pair and
 ;; its position: the environments inside, for each side.
-(define k-name-binders (subr (maxeff kstate spin) (k-binders k-binders int int int k-benv k-benv k-labels) (pairof k-benv k-benv @t))
+(define k-name-binders (subr kstate (k-binders k-binders int int int k-benv k-benv k-labels) (pairof k-benv k-benv @t))
   (lambda (ba bb a b i ea eb labels)
     (if (null? ba)
         (cons ea eb)
@@ -1912,7 +1913,7 @@
     (string-append (k-quote (symbol->string n))
                    " is bound recursively, so it must be a lambda: nothing may run before every binding exists")))
 
-(define k-proj-map (subr (maxeff checks spin) (k-binders (listof k-desc finite) int int) k-map)
+(define k-proj-map (subr checks (k-binders (listof k-desc finite) int int) k-map)
   (lambda (bs ds a b)
     (if (null? bs)
         nil
@@ -2010,7 +2011,7 @@
                   (else y (k-solve solved v (dr (car bd)))))
                 #u)
             (k-default-bounded all (cdr kinds) solved))))))
-(define k-default-free (subr (maxeff kstate spin) (k-binders k-binders k-solved) unit)
+(define k-default-free (subr kstate (k-binders k-binders k-solved) unit)
   (lambda (all kinds solved)
     (if (null? kinds)
         #u
@@ -2022,7 +2023,7 @@
                 #u)
             (k-default-free all (cdr kinds) solved))))))
 
-(define k-default-regions (subr (maxeff kstate spin) (k-binders k-solved) unit)
+(define k-default-regions (subr kstate (k-binders k-solved) unit)
   (lambda (kinds solved)
     (begin (k-default-bounded kinds kinds solved) (k-default-free kinds kinds solved))))
 
@@ -2270,7 +2271,7 @@
         (k-default-regions kinds solved)
         (let ((m (k-finish kinds solved a b t)))
           (begin (k-check-bounds kinds m a b) (let ((inst (k-subst inner m))) (begin (k-no-knot inst a b) inst))))))))
-(define k-plambda-matches? (subr (maxeff (read @t) spin) (kx k-ty) bool)
+(define k-plambda-matches? (subr (read @t) (kx k-ty) bool)
   (lambda (x et)
     (tagcase x
       (x-plambda (binders body a b)
@@ -2514,6 +2515,13 @@
 (define k-sc-current (ref int @t) (new 0))
 (define k-sc-calls (ref k-calls @t) (new nil))
 (define k-sc-escapes (ref bool @t) (new #f))
+;; For each call: caller, callee, and each argument as the caller's
+;; parameter passed unchanged, or -1.
+(define-type k-passed (listof (productof (1 int) (2 int) (3 k-ids)) finite))
+(define k-sc-passed (ref k-passed @t) (new nil))
+;; (member . parameter): passed unchanged by every call in the group, so the
+;; same for the whole recursion, and a bound as a literal is.
+(define k-sc-invariant (ref k-guards @t) (new nil))
 
 (define k-sc-in? (subr (read @t) (k-tscope symbol) bool)
   (lambda (sc s) (and (not (null? sc)) (or (symbol=? (car (car sc)) s) (k-sc-in? (cdr sc) s)))))
@@ -2632,15 +2640,36 @@
                          (else nil))))
                 (else nil))))
       (else y nil))))
-;; Whether `x` is the same at every call of the group: a literal, or a
-;; variable bound outside it.
-(define k-sc-fixed? (subr (read @t) (kx k-tscope) bool)
-  (lambda (x sc)
-    (tagcase x
-      (x-const (t v a b) (= t k-int))
-      (x-var (s a b) (and (not (k-sc-in? sc s)) (< (k-sc-index (get k-sc-members) s 0) 0)))
-      (x-the (t e a b) (k-sc-fixed? e sc))
-      (else y #f))))
+(define k-sc-guarded? (subr (read @t) (k-guards int int) bool)
+  (lambda (gs p b) (and (not (null? gs)) (or (and (= (car (car gs)) p) (= (cdr (car gs)) b)) (k-sc-guarded? (cdr gs) p b)))))
+;; Whether `ks` knows a value as a parameter, of the member walked, passed on
+;; unchanged by every call.
+(define k-sc-invariant-in? (subr (read @t) (k-trs) bool)
+  (lambda (ks)
+    (and (not (null? ks))
+         (or (tagcase (car ks)
+               (tr-part (p s t) (and (not s) (k-sc-guarded? (get k-sc-invariant) (get k-sc-current) p)))
+               (else y #f))
+             (k-sc-invariant-in? (cdr ks))))))
+;; Whether `x` is the same at every call of the group: a literal, a
+;; variable bound outside it, a parameter passed on unchanged, or the length
+;; of a string or the sum or difference of such.
+(define-rec
+  (k-sc-fixed? (subr (maxeff kstate spin) (kx k-tscope) bool)
+    (lambda (x sc)
+      (tagcase x
+        (x-const (t v a b) (= t k-int))
+        (x-var (s a b)
+          (if (k-sc-in? sc s) (k-sc-invariant-in? (k-sc-trs sc s)) (< (k-sc-index (get k-sc-members) s 0) 0)))
+        (x-the (t e a b) (k-sc-fixed? e sc))
+        (x-app (f args a b)
+          (let ((op (k-sc-op f sc)))
+            (and (or (and (string=? op "string-length") (k-sc-one? args))
+                     (and (or (string=? op "+") (string=? op "-")) (k-sc-two? args)))
+                 (k-sc-all-fixed? args sc))))
+        (else y #f))))
+  (k-sc-all-fixed? (subr (maxeff kstate spin) (kxs k-tscope) bool)
+    (lambda (xs sc) (or (null? xs) (and (k-sc-fixed? (car xs) sc) (k-sc-all-fixed? (cdr xs) sc))))))
 (define k-sc-append (subr kstate (k-guards k-guards) k-guards)
   (lambda (xs ys) (if (null? xs) ys (the k-guards (cons (car xs) (k-sc-append (cdr xs) ys))))))
 (define k-sc-with (subr kstate (int k-ids k-guards) k-guards)
@@ -2690,8 +2719,6 @@
           (cond ((and (= ef f) (= et t)) (the k-graph (cons (product (1 f) (2 t) (3 (or s (extract e 3)))) (cdr g))))
                 ((or (< f ef) (and (= f ef) (< t et))) (the k-graph (cons (product (1 f) (2 t) (3 s)) g)))
                 (else (the k-graph (cons e (k-sc-add (cdr g) f t s)))))))))
-(define k-sc-guarded? (subr (read @t) (k-guards int int) bool)
-  (lambda (gs p b) (and (not (null? gs)) (or (and (= (car (car gs)) p) (= (cdr (car gs)) b)) (k-sc-guarded? (cdr gs) p b)))))
 ;; The edges to argument `q` from what `ks` knows of it.
 (define k-sc-tr-edges (subr kstate (k-trs int k-guards k-graph) k-graph)
   (lambda (ks q gs g)
@@ -2711,9 +2738,18 @@
   (lambda (args q sc gs g)
     (if (null? args) g (k-sc-arg-edges (cdr args) (+ q 1) sc gs (k-sc-tr-edges (k-sc-tracked (car args) sc) q gs g)))))
 ;; A call of member `to` with `args`, from the member walked.
+(define k-sc-unchanged (subr kstate (k-trs) int)
+  (lambda (ks)
+    (cond ((null? ks) -1)
+          ((tagcase (car ks) (tr-part (p s t) (not s)) (else y #f)) (tagcase (car ks) (tr-part (p s t) p) (else y -1)))
+          (else (k-sc-unchanged (cdr ks))))))
+(define k-sc-passing (subr (maxeff kstate spin) (kxs k-tscope) k-ids)
+  (lambda (args sc) (if (null? args) nil (the k-ids (cons (k-sc-unchanged (k-sc-tracked (car args) sc)) (k-sc-passing (cdr args) sc))))))
 (define k-sc-call (subr (maxeff kstate spin) (int kxs k-tscope k-guards) unit)
   (lambda (to args sc gs)
-    (set k-sc-calls (cons (product (1 (get k-sc-current)) (2 to) (3 (k-sc-arg-edges args 0 sc gs nil))) (get k-sc-calls)))))
+    (begin
+     (set k-sc-passed (cons (product (1 (get k-sc-current)) (2 to) (3 (k-sc-passing args sc))) (get k-sc-passed)))
+     (set k-sc-calls (cons (product (1 (get k-sc-current)) (2 to) (3 (k-sc-arg-edges args 0 sc gs nil))) (get k-sc-calls))))))
 
 (define k-sc-hide-params (subr kstate ((listof (productof (1 symbol) (2 k-ids)) finite) k-tscope) k-tscope)
   (lambda (ps sc) (if (null? ps) sc (k-sc-hide-params (cdr ps) (cons (cons (extract (car ps) 1) (the k-trs nil)) sc)))))
@@ -2872,16 +2908,56 @@
           (else y #f)))))
 (define k-sc-names (subr kstate (k-group) k-names)
   (lambda (bs) (if (null? bs) nil (the k-names (cons (extract (car bs) 1) (k-sc-names (cdr bs)))))))
+(define k-sc-upto (subr kstate (int int) k-ids)
+  (lambda (j n) (if (< j n) (the k-ids (cons j (k-sc-upto (+ j 1) n))) nil)))
+;; Every (member . parameter) of the group, the `i`th member on.
+(define k-sc-all-params (subr kstate (k-group int k-guards) k-guards)
+  (lambda (bs i out)
+    (if (null? bs)
+        out
+        (k-sc-all-params (cdr bs) (+ i 1)
+          (tagcase (k-sc-lambda-of (extract (car bs) 3))
+            (x-lambda (ps body a b) (k-sc-with i (k-sc-upto 0 (k-length ps)) out))
+            (else y out))))))
+(define k-sc-drop (subr kstate (k-guards int int) k-guards)
+  (lambda (gs i j)
+    (cond ((null? gs) gs)
+          ((and (= (car (car gs)) i) (= (cdr (car gs)) j)) (k-sc-drop (cdr gs) i j))
+          (else (the k-guards (cons (car gs) (k-sc-drop (cdr gs) i j)))))))
+;; `inv` less what the call from `from` to `to` passing `args` changes.
+(define k-sc-keep-args (subr kstate (k-guards int int k-ids int) k-guards)
+  (lambda (inv from to args j)
+    (if (null? args)
+        inv
+        (let ((p (car args)))
+          (k-sc-keep-args (if (and (>= p 0) (k-sc-guarded? inv from p)) inv (k-sc-drop inv to j)) from to (cdr args) (+ j 1))))))
+(define k-sc-keep-all (subr kstate (k-guards k-passed) k-guards)
+  (lambda (inv ps)
+    (if (null? ps)
+        inv
+        (let ((c (car ps))) (k-sc-keep-all (k-sc-keep-args inv (extract c 1) (extract c 2) (extract c 3) 0) (cdr ps))))))
+;; The invariant parameters: the greatest set every call keeps.
+(define k-sc-invariants (subr (maxeff kstate spin) (k-guards) k-guards)
+  (lambda (inv)
+    (let ((next (k-sc-keep-all inv (get k-sc-passed))))
+      (if (= (k-length next) (k-length inv)) inv (k-sc-invariants next)))))
 ;; Whether every run of the group `bs` ends, so that calls within it need
-;; not say `spin`.
+;; not say `spin`. Walked twice: first to learn which parameters every call
+;; passes on unchanged, then with them as bounds.
 (define k-terminates? (subr (maxeff kstate spin) (k-group) bool)
   (lambda (bs)
     (begin
       (set k-sc-members (k-sc-names bs))
       (set k-sc-calls nil)
+      (set k-sc-passed nil)
+      (set k-sc-invariant nil)
       (set k-sc-escapes #f)
       (and (k-sc-walk-members bs 0)
-           (let ((all (k-sc-dedup (get k-sc-calls) nil))) (k-sc-close all all (k-length all)))))))
+           (let ((inv (k-sc-invariants (k-sc-all-params bs 0 nil))))
+             (and (or (null? inv)
+                      (begin (set k-sc-invariant inv) (set k-sc-calls nil) (set k-sc-passed nil)
+                             (k-sc-walk-members bs 0)))
+                  (let ((all (k-sc-dedup (get k-sc-calls) nil))) (k-sc-close all all (k-length all)))))))))
 
 ;; Every binding of a `letrec` a lambda, or an error at the first that is not.
 (define k-letrec-lambdas (subr checks (k-group) unit)
@@ -3465,7 +3541,7 @@
             (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std))) (k-standard (cdr entries))))))))
 
 (define-type k-out (listof string finite))
-(define k-push-binders (subr (maxeff kstate spin) (k-binders) unit)
+(define k-push-binders (subr kstate (k-binders) unit)
   (lambda (bs)
     (if (null? bs)
         #u

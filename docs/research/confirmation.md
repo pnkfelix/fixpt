@@ -141,3 +141,14 @@ finite list of unknown size.
    arithmetic), so that `map` and `reverse` keep their sizes.
 4. **CF4 (L, later). Size arithmetic**, and array bounds by size.
 5. **CF5 (L, later). Functions**, by carried types or by wrapping.
+6. **CF0 (S, first; the user's, 2026-09-27). Into `finite`, from outside.**
+   A walk from data that may be cyclic (a list at a region that may be
+   written, input read from outside) to `finite` data, which either returns
+   the finite copy or, on meeting a cycle, calls a continuation it was
+   given: `(poly ((r region) (t type) (e effect)) (subr (maxeff (read r)
+   (alloc …) e) ((listof t r) (subr e () (listof t finite))) (listof t
+   finite)))`, and the same for trees by the visited set above. A reader of
+   outside input built on it returns only well-founded data, so what
+   consumes it needs no `spin`. The primitives that walk lists already end
+   on a cycle, with an error (`list_to_vec`); this is the typed way, where
+   the failure is in the type.
