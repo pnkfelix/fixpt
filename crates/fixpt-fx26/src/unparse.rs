@@ -97,6 +97,7 @@ impl Checker {
                             Kind::Place => "place",
                             Kind::Effect => "effect",
                             Kind::Type => "type",
+                            Kind::Data => "data",
                         };
                         match self.arena.bound(*v) {
                             Some(b) => format!("({} {k} {})", self.interner.name(self.arena.dvar_name(*v)), self.show_region(b)),

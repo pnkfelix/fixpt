@@ -21,13 +21,18 @@ pub enum Kind {
     Place,
     Effect,
     Type,
+    /// A type whose values are data: structural, immutable, not generative,
+    /// holding no procedure; what may be read, printed, checked for cycles
+    /// and sent (`docs/research/generative-types.md`, §3). Every data type
+    /// is a type.
+    Data,
 }
 
 impl Kind {
     /// Whether a description of kind `self` may stand where one of kind
     /// `want` is expected: the same kind, or a place for a region.
     pub fn fits(self, want: Kind) -> bool {
-        self == want || (self == Kind::Place && want == Kind::Region)
+        self == want || (self == Kind::Place && want == Kind::Region) || (self == Kind::Data && want == Kind::Type)
     }
 }
 
@@ -372,6 +377,8 @@ pub struct Arena {
     dvar_names: Vec<Sym>,
     /// Whether each description variable is a place.
     dvar_places: Vec<bool>,
+    /// Which description variables are of kind `data`.
+    dvar_data: Vec<bool>,
     /// Each region binder's bound, if it has one: `(r region p)`, a region
     /// that won't outlive `p` (`docs/research/places-and-regions.md`).
     dvar_bounds: Vec<Option<Region>>,
@@ -423,6 +430,7 @@ impl Arena {
     pub fn dvar(&mut self, name: Sym) -> DVar {
         self.dvar_names.push(name);
         self.dvar_places.push(false);
+        self.dvar_data.push(false);
         self.dvar_bounds.push(None);
         self.dvar_outer.push(Vec::new());
         DVar(self.dvar_names.len() as u32 - 1)
@@ -432,6 +440,7 @@ impl Arena {
     pub fn dvar_of(&mut self, name: Sym, kind: Kind) -> DVar {
         let v = self.dvar(name);
         self.dvar_places[v.0 as usize] = kind == Kind::Place;
+        self.dvar_data[v.0 as usize] = kind == Kind::Data;
         v
     }
 
@@ -463,6 +472,11 @@ impl Arena {
     }
 
     /// Whether region `r` is a place: a variable bound as one.
+    /// Whether `v` is a type variable of kind `data`.
+    pub fn is_data_var(&self, v: DVar) -> bool {
+        self.dvar_data[v.0 as usize]
+    }
+
     pub fn is_place(&self, r: Region) -> bool {
         matches!(r, Region::Heap) || matches!(r, Region::Var(v) if self.dvar_places[v.0 as usize])
     }
@@ -490,6 +504,7 @@ impl Arena {
         self.exps.truncate(mark.exps);
         self.dvar_names.truncate(mark.dvars);
         self.dvar_places.truncate(mark.dvars);
+        self.dvar_data.truncate(mark.dvars);
         self.dvar_bounds.truncate(mark.dvars);
         self.dvar_outer.truncate(mark.dvars);
     }

@@ -83,7 +83,7 @@ impl Checker {
                         let d = match k {
                             Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
                             Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
-                            Kind::Type => D::Type(self.arena.ty(Ty::Var(*va))),
+                            Kind::Type | Kind::Data => D::Type(self.arena.ty(Ty::Var(*va))),
                         };
                         (*vb, d)
                     })
@@ -151,7 +151,13 @@ impl Checker {
             }
             Exp::If { test, then, els } => {
                 let te = self.check(test, self.bool_ty())?;
-                let ae = self.check(then, expected)?;
+                let certified = self.acyclic_test(test);
+                self.certified.extend(certified);
+                let ae = self.check(then, expected);
+                if certified.is_some() {
+                    self.certified.pop();
+                }
+                let ae = ae?;
                 let be = self.check(els, expected)?;
                 Ok(self.mask(e, &te.union(&ae).union(&be), expected))
             }
@@ -259,6 +265,29 @@ impl Checker {
     /// polymorphic. `expected` is the type the application should have, when
     /// that is known; it helps solve the operator's binders.
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
+        // `(certify-acyclic v)`: `v`'s value at `finite`, where `acyclic?`
+        // has just found `v` acyclic; nowhere else.
+        if let Exp::Var(op) = self.arena.exp_at(fun)
+            && self.interner.name(*op) == "certify-acyclic"
+            && self.is_standard(*op)
+        {
+            let span = self.arena.span_of(e);
+            let v = match &args[..] {
+                [a] => match self.arena.exp_at(*a) {
+                    Exp::Var(v) => self.env.iter().rposition(|(n, _)| n == v).map(|i| (*v, i)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if !v.is_some_and(|v| self.certified.contains(&v)) {
+                return Err(FxError::at(span, "`certify-acyclic` takes only a variable `acyclic?` has just found acyclic"));
+            }
+            let (t, eff) = self.synth(args[0])?;
+            if !self.is_data(t) {
+                return Err(FxError::at(span, format!("`certify-acyclic` takes data, and a {} is not data", self.show_ty(t))));
+            }
+            return Ok((self.finitized(t), eff));
+        }
         let span = self.arena.span_of(e);
         if let Exp::Var(s) = self.arena.exp_at(fun)
             && self.is_standard(*s)
@@ -589,7 +618,21 @@ impl Checker {
             },
             r => r,
         };
-        for (v, _) in kinds {
+        for (v, k) in kinds {
+            // A `data` binder takes only data.
+            if *k == Kind::Data
+                && let Some(D::Type(t)) = map.get(v)
+                && !self.is_data(*t)
+            {
+                return Err(FxError::at(
+                    span,
+                    format!(
+                        "`{}` is bound as data, and a {} is not data",
+                        self.interner.name(self.arena.dvar_name(*v)),
+                        self.show_ty(*t)
+                    ),
+                ));
+            }
             let Some(b) = self.arena.bound(*v) else { continue };
             let (r, b) = (region(Region::Var(*v)), region(b));
             if !self.arena.outlived(r, b) {
@@ -639,7 +682,7 @@ impl Checker {
                 Kind::Effect => {
                     map.insert(*v, D::Effect(Effect::pure()));
                 }
-                Kind::Type | Kind::Place => {
+                Kind::Type | Kind::Data | Kind::Place => {
                     return Err(FxError::at(
                         span,
                         format!(

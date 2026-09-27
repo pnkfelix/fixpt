@@ -80,7 +80,8 @@ impl Checker {
             Some("place") => Ok(Kind::Place),
             Some("effect") => Ok(Kind::Effect),
             Some("type") => Ok(Kind::Type),
-            _ => Err(FxError::at(s.span, "a kind is `region`, `place`, `effect` or `type`")),
+            Some("data") => Ok(Kind::Data),
+            _ => Err(FxError::at(s.span, "a kind is `region`, `place`, `effect`, `type` or `data`")),
         }
     }
 
@@ -217,7 +218,7 @@ impl Checker {
                 return Ok(t);
             }
             return match self.lookup_desc(sym) {
-                Some(DScope::Var(v, Kind::Type)) => Ok(self.arena.ty(Ty::Var(v))),
+                Some(DScope::Var(v, Kind::Type | Kind::Data)) => Ok(self.arena.ty(Ty::Var(v))),
                 Some(DScope::Rec(t)) => Ok(t),
                 Some(DScope::Generative(g)) => self.apply_generative(s, g, &[]),
                 _ => Err(FxError::at(s.span, format!("`{}` is not a type", self.name(sym)))),
@@ -494,7 +495,7 @@ impl Checker {
         let mut key = Vec::new();
         for ((p, k), a) in params.iter().zip(args) {
             let (d, arg) = match k {
-                Kind::Type => {
+                Kind::Type | Kind::Data => {
                     let t = self.parse_type(a)?;
                     (DScope::Rec(t), crate::parse::FamilyArg::Ty(self.arena.resolve(t)))
                 }
@@ -570,7 +571,7 @@ impl Checker {
         let mut ds = Vec::new();
         for ((_, k), a) in params.iter().zip(args) {
             ds.push(match k {
-                Kind::Type => D::Type(self.parse_type(a)?),
+                Kind::Type | Kind::Data => D::Type(self.parse_type(a)?),
                 Kind::Region => D::Region(self.parse_region(a)?),
                 Kind::Place => D::Region(self.parse_place(a)?),
                 Kind::Effect => D::Effect(self.parse_effect(a)?),
@@ -808,6 +809,32 @@ impl Checker {
             }
             "begin" => self.parse_body(span, &items[1..]),
             "cond" => self.parse_cond(span, &items[1..]),
+            // `(acyclic e (x body) else)`: `(let ((%acyclic-value e)) (if
+            // (acyclic? %acyclic-value) (let ((x (certify-acyclic
+            // %acyclic-value))) body) else))`.
+            "acyclic" => {
+                let usage = "`(acyclic expression (name body) else)`";
+                let [_, e, arm, els] = &items[..] else {
+                    return Err(FxError::at(span, usage));
+                };
+                let [x, body] = self.items(arm, usage)? else {
+                    return Err(FxError::at(arm.span, usage));
+                };
+                let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
+                let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+                let var = |c: &mut Checker, n: &str| {
+                    let s = c.interner.intern(n);
+                    c.arena.exp(span, Exp::Var(s))
+                };
+                let tmp = self.interner.intern("%acyclic-value");
+                let (test_f, test_a) = (var(self, "acyclic?"), var(self, "%acyclic-value"));
+                let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
+                let (cert_f, cert_a) = (var(self, "certify-acyclic"), var(self, "%acyclic-value"));
+                let cert = self.arena.exp(span, Exp::App { fun: cert_f, args: vec![cert_a] });
+                let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
+                let branch = self.arena.exp(span, Exp::If { test, then, els });
+                Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
+            }
             "and" => {
                 // `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
                 let mut out = self.arena.exp(span, Exp::Bool(true));

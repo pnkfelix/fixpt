@@ -101,6 +101,8 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("datum-pair?", "pair?", false),
     ("datum-null?", "null?", false),
     ("datum-car", "car", false),
+    ("acyclic?", "%fx26-acyclic?", false),
+    ("certify-acyclic", "%fx26-identity", false),
     ("datum-cdr", "cdr", false),
     ("datum-symbol?", "symbol?", false),
     ("datum-symbol-name", "symbol->string", false),

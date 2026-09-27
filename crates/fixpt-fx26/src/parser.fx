@@ -244,6 +244,25 @@
                 (e-let (parse-let-bindings (syn-items (nth items 1) "let bindings")) (parse-body (drop items 2) a b) a b)))
         ((symbol=? head 'begin) (parse-body (cdr items) a b))
         ((symbol=? head 'cond) (parse-cond (cdr items) a b))
+        ;; `(acyclic e (x body) else)`: `(let ((%acyclic-value e)) (if
+        ;; (acyclic? %acyclic-value) (let ((x (certify-acyclic
+        ;; %acyclic-value))) body) else))`.
+        ((symbol=? head 'acyclic)
+         (let ((usage "`(acyclic expression (name body) else)`"))
+           (begin
+             (arity items 4 usage a b)
+             (let* ((arm (syn-items (nth items 2) usage))
+                    (shaped (if (= (len arm) 2) #u (pfail usage (nth items 2))))
+                    (x (if (syn-symbol? (car arm)) (syn-symbol (car arm)) (pfail "a name" (car arm))))
+                    (e (parse-exp (nth items 1)))
+                    (body (parse-exp (nth arm 1)))
+                    (els (parse-exp (nth items 3)))
+                    (tmp (string->symbol "%acyclic-value"))
+                    (test (e-app (e-var 'acyclic? a b) (the (listof exp finite) (cons (e-var tmp a b) nil)) a b))
+                    (cert (e-app (e-var 'certify-acyclic a b) (the (listof exp finite) (cons (e-var tmp a b) nil)) a b))
+                    (then (e-let (the (listof (productof (1 symbol) (2 exp)) finite) (cons (product (1 x) (2 cert)) nil)) body a b)))
+               (e-let (the (listof (productof (1 symbol) (2 exp)) finite) (cons (product (1 tmp) (2 e)) nil))
+                      (e-if test then els a b) a b)))))
         ((symbol=? head 'and) (parse-and (cdr items) a b))
         ((symbol=? head 'or) (parse-or (cdr items) a b))
         ((symbol=? head 'let*)

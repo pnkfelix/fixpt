@@ -62,6 +62,8 @@
       ((string=? n "datum-pair?") "pair?")
       ((string=? n "datum-null?") "null?")
       ((string=? n "datum-car") "car")
+      ((string=? n "acyclic?") "%fx26-acyclic?")
+      ((string=? n "certify-acyclic") "%fx26-identity")
       ((string=? n "datum-cdr") "cdr")
       ((string=? n "datum-symbol?") "symbol?")
       ((string=? n "datum-symbol-name") "symbol->string")

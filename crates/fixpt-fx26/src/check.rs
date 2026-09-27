@@ -96,6 +96,9 @@ pub struct Checker {
     /// The lemma a `proves` type being read states, for the definition it
     /// declares.
     pub(crate) pending_lemma: Option<crate::lemma::Lemma>,
+    /// The variables `acyclic?` has just found acyclic, in the branch where
+    /// it did: each by name and by which binding it is (its place in `env`).
+    pub(crate) certified: Vec<(Sym, usize)>,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -208,6 +211,7 @@ impl Checker {
             conversions: Vec::new(),
             lemmas: Vec::new(),
             pending_lemma: None,
+            certified: Vec::new(),
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -346,7 +350,7 @@ impl Checker {
                 let mut map = HashMap::new();
                 for ((v, k), d) in binders.iter().zip(args) {
                     let ok = match (k, &d) {
-                        (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type, D::Type(_)) => true,
+                        (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type | Kind::Data, D::Type(_)) => true,
                         (Kind::Place, D::Region(r)) => self.arena.is_place(*r),
                         _ => false,
                     };
@@ -366,7 +370,13 @@ impl Checker {
                 if !self.subtype(tt, self.bool_) {
                     return Err(FxError::at(self.arena.span_of(test), "an `if` test must be a bool"));
                 }
-                let (a, ae) = self.synth(then)?;
+                let certified = self.acyclic_test(test);
+                self.certified.extend(certified);
+                let a = self.synth(then);
+                if certified.is_some() {
+                    self.certified.pop();
+                }
+                let (a, ae) = a?;
                 let (b, be) = self.synth(els)?;
                 let t = if self.subtype(a, b) {
                     b
@@ -891,6 +901,82 @@ impl Checker {
         for k in kids {
             self.storage_regions(k, seen, out);
         }
+    }
+
+    /// Whether `t` is data: built only from base types, `datum`, products
+    /// and sums, and pairs and bloblets that are frozen, of data; and type
+    /// variables of kind `data`. No procedure, no storage that can be
+    /// written, no generative type.
+    pub(crate) fn is_data(&self, t: TyId) -> bool {
+        self.data_walk(t, &mut HashSet::new())
+    }
+
+    fn data_walk(&self, t: TyId, seen: &mut HashSet<TyId>) -> bool {
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return true;
+        }
+        match self.arena.get(t).clone() {
+            Ty::Base(_) | Ty::Void => true,
+            Ty::Var(v) => self.arena.is_data_var(v),
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.data_walk(*x, seen)),
+            Ty::Pair(a, b, r) => r.is_frozen() && self.data_walk(a, seen) && self.data_walk(b, seen),
+            Ty::Bloblet { fields, frozen, .. } => frozen && fields.iter().all(|f| self.data_walk(*f, seen)),
+            _ => false,
+        }
+    }
+
+    /// If `test` is `(acyclic? v)`, the variable, as the binding it is.
+    pub(crate) fn acyclic_test(&self, test: ExpId) -> Option<(Sym, usize)> {
+        let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
+        let mut f = *fun;
+        while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
+            f = *body;
+        }
+        match (self.arena.exp_at(f), &args[..]) {
+            (Exp::Var(op), [a]) if self.interner.name(*op) == "acyclic?" && self.is_standard(*op) => match self.arena.exp_at(*a) {
+                Exp::Var(v) => Some((*v, self.env.iter().rposition(|(n, _)| n == v)?)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// `t` with its frozen regions made finite: what data `acyclic?` has
+    /// found acyclic is.
+    pub(crate) fn finitized(&mut self, t: TyId) -> TyId {
+        self.finitize_memo(t, &mut HashMap::new())
+    }
+
+    fn finitize_memo(&mut self, t: TyId, memo: &mut HashMap<TyId, TyId>) -> TyId {
+        let t = self.arena.resolve(t);
+        if let Some(x) = memo.get(&t) {
+            return *x;
+        }
+        let fin = |r: Region| match r {
+            Region::Frozen(p, false) => Region::Frozen(p, true),
+            r => r,
+        };
+        let ty = self.arena.get(t).clone();
+        if !matches!(ty, Ty::Pair(..) | Ty::Product(_) | Ty::Sum(_) | Ty::Bloblet { .. }) {
+            return t;
+        }
+        let slot = self.arena.ty(Ty::Link(None));
+        memo.insert(t, slot);
+        let new = match ty {
+            Ty::Pair(a, b, r) => Ty::Pair(self.finitize_memo(a, memo), self.finitize_memo(b, memo), fin(r)),
+            Ty::Product(ps) => Ty::Product(ps.into_iter().map(|(l, x)| (l, self.finitize_memo(x, memo))).collect()),
+            Ty::Sum(ps) => Ty::Sum(ps.into_iter().map(|(l, x)| (l, self.finitize_memo(x, memo))).collect()),
+            Ty::Bloblet { fields, frozen, region } => Ty::Bloblet {
+                fields: fields.into_iter().map(|f| self.finitize_memo(f, memo)).collect(),
+                frozen,
+                region: fin(region),
+            },
+            other => other,
+        };
+        let id = self.arena.ty(new);
+        self.arena.set_link(slot, id);
+        slot
     }
 
     /// Whether `r` is, or is frozen into, a generative type's parameter.

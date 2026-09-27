@@ -93,7 +93,7 @@ plain datatypes?":
 | N3    | M    | lemmas: `proves` types, checked as erased identity coercions, done                           |
 | N4    | L    | GADTs: constructor result types, existentials, refinement in `tagcase`                       |
 | N5    | L    | size indices as their own sort, for `confirm` (CF1, CF3)                                     |
-| N6    | M    | the `data` kind, with `read` and `acyclic` (CF0)                                             |
+| N6    | M    | the `data` kind, with `read` and `acyclic` (CF0), done (acyclic; read later)                 |
 
 `define-datatype` stays transparent by default; a generative variant is
 `generative-types.md`'s G3, and hiding (G4) comes when wanted.

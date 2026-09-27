@@ -94,6 +94,11 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("datum-char-value", "(subr pure (datum) char)"),
     ("datum-byte?", "(subr pure (datum) bool)"),
     ("datum-proper-list?", "(subr pure (datum) bool)"),
+    // `(acyclic e (x body) else)` is these two: whether data has no cycle,
+    // and, of a variable just found to have none, its value at `finite`
+    // where it was `const` (`docs/research/confirmation.md`, CF0).
+    ("acyclic?", "(poly ((t data)) (subr pure (t) bool))"),
+    ("certify-acyclic", "(poly ((t data)) (subr pure (t) t))"),
     ("datum-pair?", "(subr pure (datum) bool)"),
     ("datum-null?", "(subr pure (datum) bool)"),
     ("datum-car", "(subr pure (datum) datum)"),

@@ -822,6 +822,46 @@ prims! {
         let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };
         Ok(rt.heap.list_from(&items))
     });
+    // No cycle through pairs, vectors, or bloblets' fields: a depth-first
+    // walk marking the path it is on and what it has finished, so sharing
+    // is fine and only a way back to the path is a cycle. What FX-26's
+    // `acyclic?` asks of data, whose storage is only these.
+    "%fx26-acyclic?", 1, Some(1), simple!(|rt, a| {
+        let h = &rt.heap;
+        let kids = |v: Value| -> Vec<Value> {
+            if v.is_pair() {
+                vec![h.car(v), h.cdr(v)]
+            } else if v.is_bloblet() {
+                (1..=h.bloblet_head(v).fields).filter_map(|k| h.bloblet_field(v, k).ok()).collect()
+            } else if h.is_a(v, ObjType::Vector) {
+                (0..h.obj_len(v)).map(|i| h.obj_ref(v, i)).collect()
+            } else {
+                Vec::new()
+            }
+        };
+        // 1: on the path; 2: finished.
+        let mut mark: std::collections::HashMap<Value, u8> = std::collections::HashMap::new();
+        let mut stack: Vec<(Value, Vec<Value>)> = vec![(a[0], kids(a[0]))];
+        mark.insert(a[0], 1);
+        while let Some((v, ks)) = stack.last_mut() {
+            match ks.pop() {
+                Some(k) => match mark.get(&k) {
+                    Some(1) => return Ok(Value::FALSE),
+                    Some(_) => {}
+                    None => {
+                        mark.insert(k, 1);
+                        let kk = kids(k);
+                        stack.push((k, kk));
+                    }
+                },
+                None => {
+                    mark.insert(*v, 2);
+                    stack.pop();
+                }
+            }
+        }
+        Ok(Value::TRUE)
+    });
     // A proper list: ends in `()`, and has no cycle (tortoise and hare).
     "%fx26-list?", 1, Some(1), simple!(|rt, a| {
         let (mut slow, mut fast) = (a[0], a[0]);

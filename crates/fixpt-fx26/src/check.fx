@@ -258,10 +258,19 @@
       (begin (set k-dvars (cons name (get k-dvars))) (set k-ndvars (+ n 1)) n))))
 ;; The description variables bound as places (kind 3), which are regions too.
 (define k-places (ref k-ids @t) (new nil))
+(define k-datas (ref k-ids @t) (new nil))
+;; The variables `acyclic?` has just found acyclic, in the branch where it
+;; did: each by name and by which binding it is (how deep its name's stack).
+(define k-certified (ref (listof (pairof symbol int @t) finite) @t) (new nil))
 (define k-new-dvar-of (subr kstate (symbol int) int)
   (lambda (name kind)
     (let ((v (k-new-dvar name)))
-      (begin (if (= kind 3) (set k-places (cons v (get k-places))) #u) v))))
+      (begin (if (= kind 3) (set k-places (cons v (get k-places))) #u)
+             (if (= kind 4) (set k-datas (cons v (get k-datas))) #u)
+             v))))
+;; Which description variables are of kind `data`.
+(define k-data-var? (subr (read @t) (int) bool)
+  (lambda (v) (k-has-id? (get k-datas) v)))
 (define k-place-var? (subr (read @t) (int) bool)
   (lambda (v) (k-has-id? (get k-places) v)))
 ;; Each bounded region binder's bound: `(r region p)`, a region that won't
@@ -503,10 +512,10 @@
           (else (k-cat3 "(maxeff" (k-atoms-show e) ")")))))
 
 (define k-kind-name (subr pure (int) string)
-  (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") (else "type"))))
+  (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") ((= k 4) "data") (else "type"))))
 ;; As Rust's `{:?}` writes a kind.
 (define k-kind-debug (subr pure (int) string)
-  (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") ((= k 3) "Place") (else "Type"))))
+  (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") ((= k 3) "Place") ((= k 4) "Data") (else "Type"))))
 ;; Whether a region is a place: a variable bound as one.
 (define k-place? (subr (read @t) (k-region) bool)
   (lambda (r) (tagcase r (r-var (v) (k-place-var? v)) (r-heap () #t) (else x #f))))
@@ -634,7 +643,8 @@
   (lambda (s)
     (let ((n (if (syn-symbol? s) (syn-name s) "")))
       (cond ((string=? n "region") 0) ((string=? n "place") 3) ((string=? n "effect") 1) ((string=? n "type") 2)
-            (else (k-sfail "a kind is `region`, `place`, `effect` or `type`" s))))))
+            ((string=? n "data") 4)
+            (else (k-sfail "a kind is `region`, `place`, `effect`, `type` or `data`" s))))))
 
 ;; The region `@name` stands for: the program's own, if `private-regions`
 ;; declared it, and otherwise the constant of that name.
@@ -1034,7 +1044,7 @@
       (if (null? ps)
           nil
           (let* ((k (extract (car ps) 2))
-                 (d (cond ((= k 2) (dt (k-parse-type (car args))))
+                 (d (cond ((or (= k 2) (= k 4)) (dt (k-parse-type (car args))))
                           ((= k 0) (dr (k-parse-region (car args))))
                           ((= k 3) (dr (k-parse-place (car args))))
                           (else (de (k-parse-effect (car args))))))
@@ -1051,7 +1061,7 @@
                      (if (null? d)
                          (k-sfail (no) s)
                          (tagcase (car d)
-                           (ds-var (v k) (if (= k 2) (k-ty-new (ty-var v)) (k-sfail (no) s)))
+                           (ds-var (v k) (if (or (= k 2) (= k 4)) (k-ty-new (ty-var v)) (k-sfail (no) s)))
                            (ds-rec (t) t)
                            (ds-gen (g) (k-apply-gen s g nil))
                            (else x (k-sfail (no) s))))))))
@@ -1215,7 +1225,7 @@
       (if (null? ps)
           nil
           (let* ((k (extract (car ps) 2))
-                 (d (cond ((= k 2) (ds-rec (k-parse-type (car args))))
+                 (d (cond ((or (= k 2) (= k 4)) (ds-rec (k-parse-type (car args))))
                           ((= k 0) (ds-region (k-parse-region (car args))))
                           ((= k 3) (ds-region (k-parse-place (car args))))
                           (else (ds-eff (k-parse-effect (car args))))))
@@ -1636,7 +1646,7 @@
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
-      (set k-lemmas nil) (set k-pending-lemma nil)
+      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
@@ -2488,7 +2498,7 @@
     (if (null? bs)
         nil
         (let* ((v (extract (car bs) 1)) (k (extract (car bs) 2)) (d (car ds))
-               (ok (tagcase d (dr (r) (or (= k 0) (and (= k 3) (k-place? r)))) (de (e) (= k 1)) (dt (t) (= k 2)))))
+               (ok (tagcase d (dr (r) (or (= k 0) (and (= k 3) (k-place? r)))) (de (e) (= k 1)) (dt (t) (or (= k 2) (= k 4))))))
           (if ok
               (cons (cons v d) (k-proj-map (cdr bs) (cdr ds) a b))
               (k-fail (k-cat4 (k-quote (symbol->string (k-dvar-name v))) " is bound as a " (k-kind-debug k)
@@ -2599,12 +2609,86 @@
 
 ;; Each bounded region binder, as solved, won't outlive its bound, as solved;
 ;; or an error saying which would.
+;; Whether `t` is data: built only from base types, `datum`, products and
+;; sums, and pairs and bloblets that are frozen, of data; and type variables
+;; of kind `data`.
+(define-rec
+  (k-data-walk (subr (maxeff kstate spin) (int int) bool)
+    (lambda (t seen)
+      (let ((t (k-resolve t)))
+        (if (k-visit? t seen)
+            #t
+            (tagcase (k-get t)
+              (ty-base (s) #t)
+              (ty-void () #t)
+              (ty-var (v) (k-data-var? v))
+              (ty-product (ps) (k-data-parts ps seen))
+              (ty-sum (ps) (k-data-parts ps seen))
+              (ty-pair (a b r) (and (tagcase r (r-frozen (p f) #t) (else y #f)) (k-data-walk a seen) (k-data-walk b seen)))
+              (ty-bloblet (fs z r) (and z (k-data-list fs seen)))
+              (else y #f))))))
+  (k-data-parts (subr (maxeff kstate spin) (k-parts int) bool)
+    (lambda (ps seen) (or (null? ps) (and (k-data-walk (extract (car ps) 2) seen) (k-data-parts (cdr ps) seen)))))
+  (k-data-list (subr (maxeff kstate spin) (k-ids int) bool)
+    (lambda (ts seen) (or (null? ts) (and (k-data-walk (car ts) seen) (k-data-list (cdr ts) seen))))))
+(define k-is-data? (subr (maxeff kstate spin) (int) bool)
+  (lambda (t) (k-data-walk t (k-new-epoch))))
+;; `t` with its frozen regions made finite: what data `acyclic?` has found
+;; acyclic is.
+(define k-fin-region (subr pure (k-region) k-region)
+  (lambda (r) (tagcase r (r-frozen (p f) (r-frozen p #t)) (else y r))))
+(define-rec
+  (k-finitize (subr (maxeff kstate spin) (int (ref (listof (pairof int int @t) finite) @t)) int)
+    (lambda (t memo)
+      (let* ((t (k-resolve t)) (done (k-memo-find (get memo) t)))
+        (if (>= done 0)
+            done
+            (if (not (tagcase (k-get t) (ty-pair (a b r) #t) (ty-product (ps) #t) (ty-sum (ps) #t) (ty-bloblet (fs z r) #t) (else y #f)))
+                t
+                (let ((slot (k-slot)))
+                  (begin
+                    (set memo (cons (cons t slot) (get memo)))
+                    (let ((new (tagcase (k-get t)
+                                 (ty-pair (a b r) (let* ((a2 (k-finitize a memo)) (b2 (k-finitize b memo))) (ty-pair a2 b2 (k-fin-region r))))
+                                 (ty-product (ps) (ty-product (k-finitize-parts ps memo)))
+                                 (ty-sum (ps) (ty-sum (k-finitize-parts ps memo)))
+                                 (ty-bloblet (fs z r) (ty-bloblet (k-finitize-list fs memo) z (k-fin-region r)))
+                                 (else y (k-get t)))))
+                      (begin (k-set-link slot (k-ty-new new)) slot)))))))))
+  (k-finitize-parts (subr (maxeff kstate spin) (k-parts (ref (listof (pairof int int @t) finite) @t)) k-parts)
+    (lambda (ps memo)
+      (if (null? ps)
+          nil
+          (let* ((x (k-finitize (extract (car ps) 2) memo)) (rest (k-finitize-parts (cdr ps) memo)))
+            (cons (product (1 (extract (car ps) 1)) (2 x)) rest)))))
+  (k-finitize-list (subr (maxeff kstate spin) (k-ids (ref (listof (pairof int int @t) finite) @t)) k-ids)
+    (lambda (ts memo) (if (null? ts) nil (let* ((x (k-finitize (car ts) memo)) (rest (k-finitize-list (cdr ts) memo))) (cons x rest))))))
+(define k-finitized (subr (maxeff kstate spin) (int) int)
+  (lambda (t) (k-finitize t (the (ref (listof (pairof int int @t) finite) @t) (new nil)))))
+;; Which binding of `s` is in scope: how deep its name's stack is.
+(define k-binding-depth (subr (maxeff (read @t) spin) (symbol) int)
+  (lambda (s) (k-length (table-ref (get k-env) s nil))))
+(define k-certified-has? (subr (read @t) ((listof (pairof symbol int @t) finite) symbol int) bool)
+  (lambda (cs s d) (and (not (null? cs)) (or (and (symbol=? (car (car cs)) s) (= (cdr (car cs)) d)) (k-certified-has? (cdr cs) s d)))))
+(define k-sc-one-arg? (subr (read @t) (kxs) bool) (lambda (xs) (and (not (null? xs)) (null? (cdr xs)))))
 (define k-check-bounds (subr (maxeff checks spin) (k-binders k-map int int) unit)
   (lambda (kinds m a b)
     (if (null? kinds)
         #u
         (let* ((v (extract (car kinds) 1)) (bd (k-bound-of v)))
           (begin
+            ;; A `data` binder takes only data.
+            (if (= (extract (car kinds) 2) 4)
+                (let ((f (k-map-find m v)))
+                  (if (null? f)
+                      #u
+                      (tagcase (cdr (car f))
+                        (dt (t) (if (k-is-data? t)
+                                    #u
+                                    (k-fail (k-cat5 (k-quote (symbol->string (k-dvar-name v))) " is bound as data, and a " (k-show-ty t) " is not data" "")
+                                            a b)))
+                        (else z #u))))
+                #u)
             (if (null? bd)
                 #u
                 (let ((r (k-subst-region (r-var v) m)) (c (k-subst-region (car bd) m)))
@@ -3766,6 +3850,21 @@
           ((k-lambda? (extract (car bs) 3)) (k-letrec-lambdas (cdr bs)))
           (else (let ((x (extract (car bs) 3))) (k-fail (k-letrec-not-lambda (extract (car bs) 1)) (k-start x) (k-end x)))))))
 
+;; If `p` is `(acyclic? v)`, the variable, as the binding it is (none or one).
+(define k-acyclic-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
+  (lambda (p)
+    (tagcase p
+      (x-app (f args a b)
+        (tagcase (k-under f)
+          (x-var (op fa fb)
+            (let ((t (k-lookup op)))
+              (if (and (string=? (symbol->string op) "acyclic?") (>= t 0) (k-named-has? (get k-std) op t) (k-sc-one-arg? args))
+                  (tagcase (car args)
+                    (x-var (v va vb) (the (listof (pairof symbol int @t) finite) (cons (cons v (k-binding-depth v)) nil)))
+                    (else y nil))
+                  nil)))
+          (else y nil)))
+      (else y nil))))
 (define-rec
   (k-synth (subr (maxeff checks spin) (kx) k-te)
     (lambda (x)
@@ -3802,7 +3901,12 @@
           (let ((rp (k-synth p)))
             (if (not (k-subtype (extract rp 1) k-bool))
                 (k-fail "an `if` test must be a bool" (k-start p) (k-end p))
-                (let* ((rc (k-synth c)) (rd (k-synth d)) (tc (extract rc 1)) (td (extract rd 1))
+                (let* ((cert (k-acyclic-test p))
+                       (saved (get k-certified))
+                       (pushed (set k-certified (if (null? cert) saved (the (listof (pairof symbol int @t) finite) (cons (car cert) saved)))))
+                       (rc (k-synth c))
+                       (popped (set k-certified saved))
+                       (rd (k-synth d)) (tc (extract rc 1)) (td (extract rd 1))
                        (t (cond ((k-subtype tc td) td)
                                 ((k-subtype td tc) tc)
                                 (else (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
@@ -3946,6 +4050,25 @@
         (k-te t (k-mask x e t)))))
   ;;; ------------------------------------------------------------ application
   (k-synth-app (subr (maxeff checks spin) (kx kx kxs int) k-te)
+    (lambda (x f args expected)
+      (if (tagcase f
+            (x-var (op fa fb) (let ((t (k-lookup op))) (and (string=? (symbol->string op) "certify-acyclic") (>= t 0) (k-named-has? (get k-std) op t))))
+            (else y #f))
+          (k-certify x args)
+          (k-synth-app-plain x f args expected))))
+  ;; `(certify-acyclic v)`: `v`'s value at `finite`, where `acyclic?` has
+  ;; just found `v` acyclic; nowhere else.
+  (k-certify (subr (maxeff checks spin) (kx kxs) k-te)
+    (lambda (x args)
+      (let ((ok (and (k-sc-one-arg? args)
+                     (tagcase (car args) (x-var (v va vb) (k-certified-has? (get k-certified) v (k-binding-depth v))) (else y #f)))))
+        (if (not ok)
+            (k-fail "`certify-acyclic` takes only a variable `acyclic?` has just found acyclic" (k-start x) (k-end x))
+            (let* ((r (k-synth (car args))) (t (extract r 1)))
+              (if (k-is-data? t)
+                  (k-te (k-finitized t) (extract r 2))
+                  (k-fail (k-cat3 "`certify-acyclic` takes data, and a " (k-show-ty t) " is not data") (k-start x) (k-end x))))))))
+  (k-synth-app-plain (subr (maxeff checks spin) (kx kx kxs int) k-te)
     (lambda (x f args expected)
       (let* ((a (k-start x)) (b (k-end x))
              (rf (k-synth f))
@@ -4126,7 +4249,13 @@
                     (begin (k-expect x inst expected) (k-naming-effect s t)))
                   (otherwise))))
           (x-if (p c d xa xb)
-            (let* ((pe (k-check p k-bool)) (ce (k-check c expected)) (de (k-check d expected)))
+            (let* ((pe (k-check p k-bool))
+                   (cert (k-acyclic-test p))
+                   (saved (get k-certified))
+                   (pushed (set k-certified (if (null? cert) saved (the (listof (pairof symbol int @t) finite) (cons (car cert) saved)))))
+                   (ce (k-check c expected))
+                   (popped (set k-certified saved))
+                   (de (k-check d expected)))
               (k-mask x (k-union pe (k-union ce de)) expected)))
           (x-begin (xs xa xb)
             (let ((e (k-check-seq xs expected nil)))

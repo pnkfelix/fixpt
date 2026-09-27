@@ -49,6 +49,7 @@ fn the_parsers_agree_on_small_programs() {
         "(letrec ((f (subr pure (int) int) (lambda (n) n))) (f 1))",
         "(proj (plambda ((r region)) (lambda () 1)) @q)",
         "(define-generative (box (t type +)) (productof (v t))) (down-box (up-box (product (v 1))))",
+        "(define f (subr pure ((listof int const)) int) (lambda (xs) (acyclic xs (ok 1) 0)))",
     ] {
         same_trees(&mut s, text);
     }
