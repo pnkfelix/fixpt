@@ -1000,6 +1000,8 @@ the order it will be done. Each is committed when done, and marked here.
    region allocators other than `rcons` (`rnew`, `rmake-array`,
    `rmake-icell`, `rmake-bloblet`, `rlambda`'s closures), inline as
    `rcons` is.
+   *(Done 2026-09-26 but for `rmake-array` and `rmake-bloblet`, which no
+   program here calls often: they wait for one that does.)*
 3′. **Why the compiler written in FX-26 calls primitives so often**
    (raised by the user 2026-09-26): 1.24 million calls in stage 2 after
    item 3, many apparently from names handled as strings (`string=?`
@@ -1007,7 +1009,14 @@ the order it will be done. Each is committed when done, and marked here.
    Count where they come from, and change the FX-26 code where the count
    is its own doing.
    *(Begun 2026-09-26: the reader's quadratic marks and the symbol
-   hash's strings, `docs/performance.md`; 1.24 M → 0.95 M.)*
+   hash's strings, `docs/performance.md`; 1.24 M → 0.95 M. Then
+   2026-09-27: the reader's marks as data, type tests and a symbol's hash
+   and `new` in machine code, names compared as symbols in the parser and
+   `k-parse-type`, and the checker's error messages made only for errors:
+   673k → 296k, stage 2 0.22 → 0.19 s. What is left is mostly the
+   reader's making of each atom's text (`reverse`, `list->string`,
+   `string->symbol`, 42k each) and the checker's report of each
+   definition's type, which it returns as text.)*
 4. **Known calls** (13e and 13h′ (d)): `callk`, a direct call of a known
    word with no closure fetched; let-conversion of lambdas that do not
    escape.
@@ -1016,7 +1025,12 @@ the order it will be done. Each is committed when done, and marked here.
    word's own entry. `lists` 13.9 → 8.8 ms, `fib` 5.7 → 4.4. Open: calls
    of other known procedures, whose word is known when the program is
    compiled (a later definition's call of an earlier one); and
-   let-conversion.)*
+   let-conversion. Measured 2026-09-27: `tak` as two definitions calling
+   each other by `invoke` takes 1.0 s for 500 rounds, against 0.82 s as
+   one calling itself by `invokeself`, so a known call could save up to
+   about a fifth of a call-bound program's time. A `bl` to another word
+   needs its entry placed first, which the words' installation does not
+   yet order; waiting on a call-bound workload.)*
 5. **Register code from the compiler written in FX-26** (13h′ (e)).
    *(Done 2026-09-26: `src/regcode.fx`, a port of `threaded/regcode.rs`,
    called by `compile.fx` through `c-register-code` when `c-registers` is
