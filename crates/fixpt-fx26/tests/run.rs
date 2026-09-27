@@ -126,7 +126,8 @@ fn threaded_forms_show_their_new_words() {
 }
 
 /// Compiled and run on a threaded machine, a form that loops stops at the
-/// session's step limit, as it does lowered, on each machine.
+/// session's step limit, as it does lowered, on each machine: by recursion,
+/// or by calling a continuation again.
 #[test]
 fn threaded_forms_stop_at_the_step_limit() {
     type Run = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, &[fixpt_heap::Value]) -> Result<fixpt_heap::Value, String>;
@@ -135,8 +136,8 @@ fn threaded_forms_stop_at_the_step_limit() {
         fixpt_native::threaded::run_word,
         fixpt_native::threaded::run_word_registers,
     ];
-    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/diverge/spin.fx")).unwrap();
-    for (i, m) in machines.into_iter().enumerate() {
+    for (name, i, m) in ["spin", "resume"].into_iter().flat_map(|n| machines.into_iter().enumerate().map(move |(i, m)| (n, i, m))) {
+        let text = std::fs::read_to_string(format!("{}/tests/programs/diverge/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
         s.strategy = fixpt_fx26::session::Strategy::Threaded;
         s.register_code = i == 2;
@@ -144,6 +145,6 @@ fn threaded_forms_stop_at_the_step_limit() {
         s.set_step_limit(Some(100_000));
         let forms = s.checker.read_in(fixpt_read::FileId(0), &text).expect("reads");
         let outs: Vec<_> = forms.iter().map(|f| s.run(f).expect("runs").value).collect();
-        assert_eq!(outs[1], Err("evaluation step limit exceeded".to_string()), "machine {i}");
+        assert_eq!(outs.last(), Some(&Err("evaluation step limit exceeded".to_string())), "{name} on machine {i}");
     }
 }

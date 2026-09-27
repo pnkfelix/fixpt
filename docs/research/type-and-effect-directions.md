@@ -65,9 +65,9 @@ for the licence: the REPL's speculative run of a form as it is typed
 could run a spin-free form with no budget.
 
 **Hazards.**
-- *Continuations.* The native machines charge no fuel when a
-  continuation is resumed, so `(let ((k (cwcc (lambda (k) k)))) (k k))`
-  loops with no poll (read in the code, not yet run).
+- *Continuations.* Calling a continuation re-enters code without a
+  recursive call, so it introduces `spin`. (The machines already poll on
+  that path: R2.)
 - *Knots through the store.* `(set r (lambda (n) ((get r) n)))` loops
   with no recursive binding, and least-fixpoint effect inference does not
   see `spin` in it. So a `subr` type inside a `ref`, `icell` or `array`
@@ -79,10 +79,11 @@ could run a spin-free form with no budget.
 
 **Tasks.**
 1. **R1 (S). Fuel for a run of a word.** *Done in this pass*: see above.
-2. **R2 (S). Fuel when a continuation is resumed**, in the native
-   machines' `control` call-outs and the call of a non-closure. First
-   step: `(k k)` stops at the limit rather than hanging (test under the
-   timeout wrapper).
+2. **R2 (S). Fuel when a continuation is resumed.** *Checked
+   2026-09-27: not needed.* A loop made only by calling a kept
+   continuation again (`tests/programs/diverge/resume.fx`) stops at the
+   step limit on every machine, since the resumed code passes a poll; the
+   test keeps it so.
 3. **R3 (S). No fuel check on a forward branch in compiled stack code**
    (`fixpt-native/src/threaded.rs`, `branch` and `0branch`), as register
    code already does (`to <= i`). Test: a loop still runs out of fuel.
@@ -333,7 +334,7 @@ runtime's; a side table is a fine first prototype. A field shifts
 ## What to do first
 
 The small, informative first steps, across the four:
-- **R2**, **R3** and **C3**: fixes of what the exploration found, each
+- **R3** and **C3**: fixes of what the exploration found, each
   small, and none needing a type-system change;
 - **R4** and **T1**: measurements that decide whether R5, T3 and T5 are
   worth their size;

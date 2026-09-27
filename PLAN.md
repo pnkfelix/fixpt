@@ -1103,8 +1103,9 @@ the order it will be done. Each is committed when done, and marked here.
     with tasks R1–R8, T1–T6, P1–P12 and C1–C12 and which to do first.
     R1, a threaded run's fuel from the session's step limit, is done: a
     looping form hung the threaded REPL. Found open: an image's words are
-    not checked as they load (C3); a resumed continuation charges no fuel
-    (R2).)*
+    not checked as they load (C3). A resumed continuation was thought to
+    charge no fuel, but a loop through one stops at the limit (R2,
+    tested).)*
 
 ### Kept open, deliberately
 
