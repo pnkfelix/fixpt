@@ -105,13 +105,16 @@ impl Checker {
 
     // ------------------------------------------------------------- regions
     pub(crate) fn parse_region(&self, s: &Syntax) -> R<Region> {
-        // `(const p)`: data frozen into place `p`.
+        // `(const p)`: data frozen into place `p`; `(finite p)`, and never
+        // written, so finite.
         if let Some([head, p]) = s.as_proper_list()
-            && head.as_symbol().is_some_and(|h| self.name(h) == "const")
+            && let Some(h) = head.as_symbol()
+            && matches!(self.name(h), "const" | "finite")
         {
+            let finite = self.name(h) == "finite";
             return Ok(match self.parse_place(p)? {
-                Region::Var(v) => Region::Frozen(Some(v)),
-                _ => Region::Frozen(None),
+                Region::Var(v) => Region::Frozen(Some(v), finite),
+                _ => Region::Frozen(None, finite),
             });
         }
         let Some(sym) = s.as_symbol() else {
@@ -121,7 +124,8 @@ impl Checker {
             return Ok(self.region_constant(sym));
         }
         match self.name(sym) {
-            "const" => return Ok(Region::Frozen(None)),
+            "const" => return Ok(Region::Frozen(None, false)),
+            "finite" => return Ok(Region::Frozen(None, true)),
             "heap" => return Ok(Region::Heap),
             _ => {}
         }
@@ -485,7 +489,10 @@ impl Checker {
                 return Ok(D::Effect(Effect::pure()));
             }
             if name == "const" {
-                return Ok(D::Region(Region::Frozen(None)));
+                return Ok(D::Region(Region::Frozen(None, false)));
+            }
+            if name == "finite" {
+                return Ok(D::Region(Region::Frozen(None, true)));
             }
             if name == "heap" {
                 return Ok(D::Region(Region::Heap));
@@ -499,7 +506,7 @@ impl Checker {
         }
         let items = self.items(s, "a description")?;
         match self.head(items).unwrap_or("") {
-            "const" => Ok(D::Region(self.parse_region(s)?)),
+            "const" | "finite" => Ok(D::Region(self.parse_region(s)?)),
             "read" | "write" | "alloc" | "goto" | "comefrom" | "maxeff" => {
                 Ok(D::Effect(self.parse_effect(s)?))
             }

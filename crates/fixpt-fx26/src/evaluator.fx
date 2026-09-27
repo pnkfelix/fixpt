@@ -422,9 +422,15 @@
 ;;; --------------------------------------------------------------- showing
 ;;; As Scheme's writer shows what the lowered program computes.
 
+;; A value as Scheme would write it. A list may be cyclic (built with
+;; `set-cdr!`), and values have no identity to compare here, so the walk
+;; has fuel: past it, `…`. The car of a pair gets half what is left, so a
+;; cycle through cars and cdrs alike stays bounded too.
 (define-rec
   (show-val (subr (read @v) (val) string)
-    (lambda (v)
+    (lambda (v) (show-val-in v 10000)))
+  (show-val-in (subr (read @v) (val int) string)
+    (lambda (v fuel)
       (tagcase v
         (v-int (n) (int->string n))
         (v-bool (b) (if b "#t" "#f"))
@@ -433,7 +439,7 @@
         (v-sym (s) (symbol->string s))
         (v-unit () "#u")
         (v-nil () "()")
-        (v-pair (p) (string-append "(" (string-append (show-items p) ")")))
+        (v-pair (p) (if (<= fuel 0) "…" (string-append "(" (string-append (show-items p fuel) ")"))))
         (v-ref (r) "#<box>")
         (v-icell (c) "#<bloblet 3 fields 0 bytes>")
         (v-array (a) (string-append "#<bloblet " (string-append (int->string (+ 1 (array-length a))) " fields 0 bytes>")))
@@ -450,13 +456,13 @@
         (v-esc (k) "#<continuation>")
         (v-key (k) "#<mark-key>"))))
   ;; A list's elements, space-separated, and a dotted tail.
-  (show-items (subr (read @v) ((bloblet (fields val val) @v)) string)
-    (lambda (p)
-      (let ((head (show-val (bloblet-ref p 0))) (tail (bloblet-ref p 1)))
+  (show-items (subr (read @v) ((bloblet (fields val val) @v) int) string)
+    (lambda (p fuel)
+      (let ((head (show-val-in (bloblet-ref p 0) (quotient fuel 2))) (tail (bloblet-ref p 1)))
         (tagcase tail
           (v-nil () head)
-          (v-pair (q) (string-append head (string-append " " (show-items q))))
-          (else x (string-append head (string-append " . " (show-val tail)))))))))
+          (v-pair (q) (if (<= fuel 1) (string-append head " …") (string-append head (string-append " " (show-items q (- fuel 1))))))
+          (else x (string-append head (string-append " . " (show-val-in tail (- fuel 1))))))))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr evals ((listof top @a)) string)

@@ -41,6 +41,9 @@ pub struct Checker {
     /// The region and place variables bound around what is being parsed,
     /// by expressions (not types): the order of lifetimes, by nesting.
     pub(crate) lifetimes: Vec<DVar>,
+    /// The regions `letfreeze`s are freezing, innermost last, each with
+    /// whether anything has written it: data never written is finite.
+    pub(crate) freezing: Vec<(DVar, bool)>,
     pub(crate) base: HashMap<Sym, TyId>,
     pub(crate) void: TyId,
     int: TyId,
@@ -144,6 +147,7 @@ impl Checker {
             env: Vec::new(),
             dscope: Vec::new(),
             lifetimes: Vec::new(),
+            freezing: Vec::new(),
             base,
             void,
             int,
@@ -376,7 +380,11 @@ impl Checker {
                 if !matches!(form, RegionForm::Region | RegionForm::Freeze(_)) {
                     self.env.push((name, rt));
                 }
+                if matches!(form, RegionForm::Freeze(_)) {
+                    self.freezing.push((region, false));
+                }
                 let r = self.synth(body);
+                let written = if matches!(form, RegionForm::Freeze(_)) { self.freezing.pop().expect("pushed").1 } else { true };
                 self.env.truncate(depth);
                 let (t, eff) = r?;
                 // A `letfreeze`'s value leaves with its region's data frozen:
@@ -386,7 +394,7 @@ impl Checker {
                         let name = self.interner.name(name);
                         return Err(FxError::at(span, format!("the value of `letfreeze {name}` could still write its region's data: its type is {}", self.show_ty(t))));
                     }
-                    self.subst(t, &HashMap::from([(region, D::Region(Region::Frozen(into)))]))
+                    self.subst(t, &HashMap::from([(region, D::Region(Region::Frozen(into, !written)))]))
                 } else {
                     t
                 };
@@ -521,6 +529,13 @@ impl Checker {
     }
 
     pub(crate) fn mask(&mut self, e: ExpId, effect: &Effect, result: TyId) -> Effect {
+        // A write to a region a `letfreeze` is freezing, noted before
+        // masking could hide it: that region's data may be cyclic.
+        for (v, written) in self.freezing.iter_mut() {
+            if effect.0.contains(&Atom::Write(Region::Var(*v))) {
+                *written = true;
+            }
+        }
         if !self.masking || effect.is_pure() {
             return effect.clone();
         }
@@ -540,7 +555,7 @@ impl Checker {
                 None => true,
                 // What is done to frozen data is never masked: writing it is
                 // an error wherever it happens (`frozen`).
-                Some(Region::Frozen(_)) => true,
+                Some(Region::Frozen(..)) => true,
                 Some(r) if visible.contains(&r) => true,
                 Some(r) if in_result.contains(&r) => {
                     matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_))
@@ -661,7 +676,7 @@ impl Checker {
         self.regions_walk(t, &mut seen, out);
         // Frozen data mentions the place it is in.
         let places: Vec<Region> = out.iter().filter_map(|r| match r {
-            Region::Frozen(Some(p)) => Some(Region::Var(*p)),
+            Region::Frozen(Some(p), _) => Some(Region::Var(*p)),
             _ => None,
         }).collect();
         out.extend(places);
@@ -807,7 +822,7 @@ impl Checker {
             }
             // Frozen pairs cannot be written, so, as a frozen bloblet's
             // fields, their contents are covariant.
-            (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) if r.is_frozen() && ra(r) == rb(s) => {
+            (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) if r.is_frozen() && Region::frozen_le(ra(r), rb(s)) => {
                 self.sub(x1, y1, env, st) && self.sub(x2, y2, env, st)
             }
             (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) => {
@@ -846,7 +861,7 @@ impl Checker {
                 Ty::Bloblet { fields: fa, frozen: za, region: r },
                 Ty::Bloblet { fields: fb, frozen: zb, region: s },
             ) => {
-                ra(r) == rb(s)
+                (ra(r) == rb(s) || (za && Region::frozen_le(ra(r), rb(s))))
                     && za == zb
                     && fa.len() == fb.len()
                     && fa.iter().zip(&fb).all(|(x, y)| self.sub(*x, *y, env, st) && (za || self.sub(*y, *x, &flip, st)))
@@ -963,9 +978,9 @@ pub(crate) fn subst_region(r: Region, map: &HashMap<DVar, D>) -> Region {
             Some(D::Region(x)) => *x,
             _ => r,
         },
-        Region::Frozen(Some(p)) => match map.get(&p) {
-            Some(D::Region(Region::Var(q))) => Region::Frozen(Some(*q)),
-            Some(D::Region(Region::Heap)) => Region::Frozen(None),
+        Region::Frozen(Some(p), f) => match map.get(&p) {
+            Some(D::Region(Region::Var(q))) => Region::Frozen(Some(*q), f),
+            Some(D::Region(Region::Heap)) => Region::Frozen(None, f),
             _ => r,
         },
         c => c,
@@ -1327,7 +1342,7 @@ impl BinderEnv {
     fn region(&self, side: &std::collections::BTreeMap<DVar, DVar>, r: Region) -> Region {
         match r {
             Region::Var(v) => Region::Var(self.var(side, v)),
-            Region::Frozen(Some(p)) => Region::Frozen(Some(self.var(side, p))),
+            Region::Frozen(Some(p), f) => Region::Frozen(Some(self.var(side, p)), f),
             c => c,
         }
     }

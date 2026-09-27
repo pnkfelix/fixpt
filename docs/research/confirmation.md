@@ -100,6 +100,14 @@ must handle cycles even on frozen data.
 bits, as the collector uses, would need a bit per type state rather than
 one per object, so a hash set is simpler to start.
 
+## Finite data (done 2026-09-27)
+
+`finite`, `(finite p)`: what a `letfreeze` gives when its body never wrote
+its region, only built it: frozen data no cycle runs through. So
+finiteness is a property of the frozen region, and so of lists and trees
+alike, and a size index (below) refines it. `(listof T finite)` is the
+finite list of unknown size.
+
 ## Sizes
 
 - **What a size can be:** a literal; then a variable bound by `poly`, in a

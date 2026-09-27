@@ -45,15 +45,23 @@ pub enum Region {
     /// `None`, for the heap), which nothing may write; what a `letfreeze`
     /// gives its region's data as it ends. Reading it, and making data at
     /// it, are pure; it won't outlive `p` (`docs/research/places-and-regions.md`).
-    Frozen(Option<DVar>),
+    /// `(finite p)`, when the flag is set: frozen data that was never
+    /// written, only built, and so is finite: no cycle runs through it.
+    Frozen(Option<DVar>, bool),
     /// `heap`: the collected heap, a place that never ends.
     Heap,
 }
 
 impl Region {
+    /// `a ≤ b` for frozen data: the same, or finite data seen as possibly
+    /// cyclic, in one place.
+    pub fn frozen_le(a: Region, b: Region) -> bool {
+        a == b || matches!((a, b), (Region::Frozen(p, true), Region::Frozen(q, false)) if p == q)
+    }
+
     /// Whether this is frozen data's region, in whatever place.
     pub fn is_frozen(self) -> bool {
-        matches!(self, Region::Frozen(_))
+        matches!(self, Region::Frozen(..))
     }
 }
 
@@ -428,7 +436,7 @@ impl Arena {
         if a == b || !matches!(b, Region::Var(_)) {
             return true;
         }
-        if let Region::Frozen(Some(p)) = a {
+        if let Region::Frozen(Some(p), _) = a {
             return self.outlived(Region::Var(p), b);
         }
         let (Region::Var(v), Region::Var(w)) = (a, b) else { return false };

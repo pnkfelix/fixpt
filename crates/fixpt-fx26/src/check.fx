@@ -29,11 +29,13 @@
 
 ;; A region: a constant `@name`, a fresh one (made by inference, a bloblet,
 ;; or `private-regions`, which no program can name), or a binder.
-;; `(r-frozen p)` is `(const p)`: the region of data frozen into place `p` (a
+;; `(r-frozen p #f)` is `(const p)`, and `(r-frozen p #t)` `(finite p)`
+;; (frozen data never written, only built, and so finite); in both, the
+;; region of data frozen into place `p` (a
 ;; place variable, or -1 for the heap: `const`), which nothing may write;
 ;; `r-heap` is `heap`, the place that never ends
 ;; (`docs/research/places-and-regions.md`).
-(define-datatype k-region (r-const symbol) (r-fresh int string) (r-var int) (r-frozen int) (r-heap))
+(define-datatype k-region (r-const symbol) (r-fresh int string) (r-var int) (r-frozen int bool) (r-heap))
 
 (define-datatype k-atom
   (a-read k-region) (a-write k-region) (a-alloc k-region)
@@ -262,6 +264,10 @@
 ;; The region and place variables bound around what is being read, by
 ;; expressions (not types), innermost first.
 (define k-lifetimes (ref k-ids @t) (new nil))
+;; The regions `letfreeze`s are freezing, and those of them anything has
+;; written: data never written is finite.
+(define k-freezing (ref k-ids @t) (new nil))
+(define k-written (ref k-ids @t) (new nil))
 (define k-bound-of (subr (maxeff (read @t) (alloc @t)) (int) (listof k-region @t))
   (lambda (v)
     (letrec ((find (subr (maxeff (read @t) (alloc @t)) ((listof (pairof int k-region @t) @t)) (listof k-region @t))
@@ -357,7 +363,7 @@
 ;;; ------------------------------------------------------------ effects
 
 (define k-region-rank (subr pure (k-region) int)
-  (lambda (r) (tagcase r (r-const (n) 0) (r-fresh (i n) 1) (r-var (v) 2) (r-frozen (p) 3) (r-heap () 4))))
+  (lambda (r) (tagcase r (r-const (n) 0) (r-fresh (i n) 1) (r-var (v) 2) (r-frozen (p f) 3) (r-heap () 4))))
 (define k-region-cmp (subr pure (k-region k-region) int)
   (lambda (r s)
     (let ((c (k-int-cmp (k-region-rank r) (k-region-rank s))))
@@ -366,7 +372,10 @@
             (r-const (n) (tagcase s (r-const (m) (k-str-cmp (symbol->string n) (symbol->string m) 0)) (else y 0)))
             (r-fresh (i n) (tagcase s (r-fresh (j m) (k-int-cmp i j)) (else y 0)))
             (r-var (v) (tagcase s (r-var (w) (k-int-cmp v w)) (else y 0)))
-            (r-frozen (p) (tagcase s (r-frozen (q) (k-int-cmp p q)) (else y 0)))
+            (r-frozen (p f)
+              (tagcase s
+                (r-frozen (q g) (let ((c (k-int-cmp p q))) (if (= c 0) (k-int-cmp (if f 1 0) (if g 1 0)) c)))
+                (else y 0)))
             (r-heap () 0))
           c))))
 (define k-region=? (subr pure (k-region k-region) bool) (lambda (r s) (= (k-region-cmp r s) 0)))
@@ -409,7 +418,9 @@
 ;;; ------------------------------------------------------------ printing
 
 (define k-region-show (subr (read @t) (k-region) string)
-  (lambda (r) (tagcase r (r-const (n) (symbol->string n)) (r-fresh (i n) n) (r-var (v) (symbol->string (k-dvar-name v))) (r-frozen (p) (if (< p 0) "const" (k-cat3 "(const " (symbol->string (k-dvar-name p)) ")"))) (r-heap () "heap"))))
+  (lambda (r) (tagcase r (r-const (n) (symbol->string n)) (r-fresh (i n) n) (r-var (v) (symbol->string (k-dvar-name v))) (r-frozen (p f)
+                  (let ((word (if f "finite" "const")))
+                    (if (< p 0) word (k-cat5 "(" word " " (symbol->string (k-dvar-name p)) ")")))) (r-heap () "heap"))))
 (define k-atom-show (subr (read @t) (k-atom) string)
   (lambda (a)
     (letrec ((one (subr (read @t) (string k-region) string) (lambda (op r) (k-cat5 "(" op " " (k-region-show r) ")"))))
@@ -562,17 +573,20 @@
   (k-parse-region (subr checks (syn) k-region)
     (lambda (s)
       (if (not (syn-symbol? s))
-          ;; `(const p)`: data frozen into place `p`.
+          ;; `(const p)`: data frozen into place `p`; `(finite p)`, and never
+          ;; written, so finite.
           (let ((items (k-items-or-nil s "a region")))
-            (if (and (= (k-length items) 2) (and (syn-symbol? (car items)) (string=? (syn-name (car items)) "const")))
-                (let ((p (k-parse-region (k-nth items 1))))
+            (if (and (= (k-length items) 2)
+                     (and (syn-symbol? (car items)) (or (string=? (syn-name (car items)) "const") (string=? (syn-name (car items)) "finite"))))
+                (let ((p (k-parse-region (k-nth items 1))) (f (string=? (syn-name (car items)) "finite")))
                   (if (k-place? p)
-                      (tagcase p (r-var (v) (r-frozen v)) (else y (r-frozen -1)))
+                      (tagcase p (r-var (v) (r-frozen v f)) (else y (r-frozen -1 f)))
                       (k-sfail (string-append (k-quote (k-region-show p)) " is not a place") (k-nth items 1))))
                 (k-sfail "expected a region" s)))
           (let* ((n (syn-name s)) (sym (string->symbol n)))
             (cond ((k-at-name? n) (k-region-constant sym))
-                  ((string=? n "const") (r-frozen -1))
+                  ((string=? n "const") (r-frozen -1 #f))
+                  ((string=? n "finite") (r-frozen -1 #t))
                   ((string=? n "heap") (r-heap))
                   (else
                    (let ((d (k-lookup-desc sym)) (no (lambda () (string-append (k-quote n) " is not a region"))))
@@ -903,7 +917,8 @@
         (let* ((n (syn-name s)) (sym (string->symbol n)))
           (cond ((k-at-name? n) (dr (k-region-constant sym)))
                 ((string=? n "pure") (de nil))
-                ((string=? n "const") (dr (r-frozen -1)))
+                ((string=? n "const") (dr (r-frozen -1 #f)))
+                ((string=? n "finite") (dr (r-frozen -1 #t)))
                 ((string=? n "heap") (dr (r-heap)))
                 (else
                  (let ((d (k-lookup-desc sym)))
@@ -1049,7 +1064,7 @@
                  (pushed (k-push-desc name (ds-var v kind)))
                  (x (k-resolve-exp body)))
             (begin (set k-dscope saved) (set k-lifetimes lives)
-                   (x-letregion k v (tagcase place (r-var (p) (r-frozen p)) (else y (r-frozen -1))) x a b))))
+                   (x-letregion k v (tagcase place (r-var (p) (r-frozen p #f)) (else y (r-frozen -1 #f))) x a b))))
         (e-proj (body ds a b)
           (let* ((x (k-resolve-exp body)) (descs (k-resolve-descs ds))) (x-proj x descs a b)))
         (e-if (p c d a b)
@@ -1143,7 +1158,7 @@
   (lambda ()
     (begin
       (set k-extracts nil)
-      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
+      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
@@ -1198,7 +1213,7 @@
     (if (null? rs)
         out
         (k-frozen-places (cdr rs)
-                         (tagcase (car rs) (r-frozen (p) (if (< p 0) out (k-add-region out (r-var p)))) (else y out))))))
+                         (tagcase (car rs) (r-frozen (p f) (if (< p 0) out (k-add-region out (r-var p)))) (else y out))))))
 (define k-regions-in (subr (maxeff (read @t) (write @t) (alloc @t)) (int) k-regions)
   (lambda (t)
     (let* ((t (k-resolve t)) (memo (get k-regions-memo)))
@@ -1278,7 +1293,7 @@
 
 ;; Whether an atom is on `const`, the frozen region.
 (define k-frozen-atom? (subr pure (k-atom) bool)
-  (lambda (a) (and (k-has-region? a) (tagcase (k-atom-region a) (r-frozen (p) #t) (else y #f)))))
+  (lambda (a) (and (k-has-region? a) (tagcase (k-atom-region a) (r-frozen (p f) #t) (else y #f)))))
 ;; The regions of `e`'s atoms that stay only if a free variable sees them.
 (define k-sought (subr (maxeff (read @t) (alloc @t)) (k-eff k-regions k-regions) k-regions)
   (lambda (e in-result out)
@@ -1359,9 +1374,25 @@
                  (cons a rest))
                 (else rest))))))
 
+;; A write to a region a `letfreeze` is freezing, noted before masking could
+;; hide it: that region's data may be cyclic.
+(define k-note-writes (subr kstate (k-eff) unit)
+  (lambda (e)
+    (if (null? e)
+        #u
+        (begin
+          (tagcase (car e)
+            (a-write (r)
+              (tagcase r
+                (r-var (v) (if (and (k-has-id? (get k-freezing) v) (not (k-has-id? (get k-written) v)))
+                               (set k-written (cons v (get k-written)))
+                               #u))
+                (else y #u)))
+            (else x #u))
+          (k-note-writes (cdr e))))))
 (define k-mask (subr (maxeff (read @t) (write @t) (alloc @t)) (kx k-eff int) k-eff)
   (lambda (x e result)
-    (if (null? e)
+    (if (begin (k-note-writes e) (null? e))
         e
         (let* ((in-result (k-regions-in result))
                (sought (k-sought e in-result nil)))
@@ -1378,12 +1409,12 @@
     (tagcase r
       (r-var (v) (let ((f (k-map-find m v))) (if (null? f) r (tagcase (cdr (car f)) (dr (x) x) (else y r)))))
       ;; Frozen data's place too.
-      (r-frozen (p)
+      (r-frozen (p fin)
         (let ((f (if (< p 0) (the k-map nil) (k-map-find m p))))
           (if (null? f)
               r
               (tagcase (cdr (car f))
-                (dr (x) (tagcase x (r-var (q) (r-frozen q)) (r-heap () (r-frozen -1)) (else z r)))
+                (dr (x) (tagcase x (r-var (q) (r-frozen q fin)) (r-heap () (r-frozen -1 fin)) (else z r)))
                 (else y r)))))
       (else y r))))
 (define k-subst-effect (subr (maxeff (read @t) (alloc @t)) (k-eff k-map) k-eff)
@@ -1498,13 +1529,21 @@
   (lambda (x y) (or (null? x) (and (= (k-benv-var y (car (car x))) (cdr (car x))) (k-benv-within? (cdr x) y)))))
 (define k-benv=? (subr (read @t) (k-benv k-benv) bool)
   (lambda (x y) (and (= (k-length x) (k-length y)) (k-benv-within? x y))))
+;; `a ≤ b` for frozen data: the same, or finite data seen as possibly
+;; cyclic, in one place.
+(define k-frozen-le? (subr pure (k-region k-region) bool)
+  (lambda (a b)
+    (or (k-region=? a b)
+        (tagcase a
+          (r-frozen (p f) (and f (tagcase b (r-frozen (q g) (and (= p q) (not g))) (else y #f))))
+          (else y #f)))))
 (define k-benv-region (subr (read @t) (k-benv k-region) k-region)
   (lambda (env r)
     (if (null? env)
         r
         (tagcase r
           (r-var (v) (r-var (k-benv-var env v)))
-          (r-frozen (p) (if (< p 0) r (r-frozen (k-benv-var env p))))
+          (r-frozen (p f) (if (< p 0) r (r-frozen (k-benv-var env p) f)))
           (else y r)))))
 (define k-benv-effect (subr (maxeff (read @t) (alloc @t)) (k-benv k-eff) k-eff)
   (lambda (env e)
@@ -1606,11 +1645,12 @@
                      (ty-pair (x1 x2 r)
                        (tagcase tb
                          (ty-pair (y1 y2 s)
-                           (and (k-region=? (k-benv-region ea r) (k-benv-region eb s))
+                           (and (k-frozen-le? (k-benv-region ea r) (k-benv-region eb s))
                                 ;; Frozen pairs cannot be written, so, as a
                                 ;; frozen bloblet's fields, their contents are
-                                ;; covariant.
-                                (if (tagcase r (r-frozen (p) #t) (else z #f))
+                                ;; covariant; and finite data may be seen as
+                                ;; possibly cyclic.
+                                (if (tagcase r (r-frozen (p f) #t) (else z #f))
                                     (and (k-sub x1 y1 ea eb trail labels) (k-sub x2 y2 ea eb trail labels))
                                     (and (k-inv x1 y1 ea eb trail labels) (k-inv x2 y2 ea eb trail labels)))))
                          (else z #f)))
@@ -1630,7 +1670,8 @@
                      (ty-bloblet (fa za r)
                        (tagcase tb
                          (ty-bloblet (fb zb s)
-                           (and (k-region=? (k-benv-region ea r) (k-benv-region eb s)) (k-bool=? za zb) (= (k-length fa) (k-length fb))
+                           (and (if za (k-frozen-le? (k-benv-region ea r) (k-benv-region eb s)) (k-region=? (k-benv-region ea r) (k-benv-region eb s)))
+                                (k-bool=? za zb) (= (k-length fa) (k-length fb))
                                 (k-sub-fields fa fb za ea eb trail labels)))
                          (else z #f)))
                      (ty-product (pa)
@@ -1808,7 +1849,7 @@
         (tagcase b
           (r-var (w)
             (tagcase a
-              (r-frozen (p) (and (>= p 0) (k-outlived? (r-var p) b)))
+              (r-frozen (p f) (and (>= p 0) (k-outlived? (r-var p) b)))
               (r-var (v)
                 (or (k-has-id? (k-outer-of v) w)
                     (let ((c (k-bound-of v)))
@@ -2226,13 +2267,14 @@
 
 ;; A `letfreeze r`'s value, of type `t`, as it leaves: `r` made `const`,
 ;; unless something in it could still write `r`.
-(define k-frozen-result (subr checks (int k-region int int int) int)
-  (lambda (r into t a b)
+(define k-frozen-result (subr checks (int k-region bool int int int) int)
+  (lambda (r into written t a b)
     (if (k-writes-in t (r-var r) (k-new-epoch))
         (k-fail (k-cat4 "the value of `letfreeze " (symbol->string (k-dvar-name r))
                         "` could still write its region's data: its type is " (k-show-ty t))
                 a b)
-        (k-subst t (the k-map (cons (cons r (dr into)) nil))))))
+        (let ((frozen (tagcase into (r-frozen (p f) (r-frozen p (not written))) (else y into))))
+          (k-subst t (the k-map (cons (cons r (dr frozen)) nil)))))))
 
 (define-rec
   (k-synth (subr checks (kx) k-te)
@@ -2296,11 +2338,15 @@
         (x-letregion (k r i body a b)
           (let* ((saved (k-mark))
                  (bound (if (or (= k 0) (= k 3)) #u (k-bind (k-dvar-name r) (k-ty-new (ty-place (r-var r))))))
-                 (rb (k-synth body)))
+                 (freezing (get k-freezing))
+                 (pushed (if (= k 3) (set k-freezing (cons r freezing)) #u))
+                 (rb (k-synth body))
+                 (written (k-has-id? (get k-written) r))
+                 (popped (set k-freezing freezing)))
             (begin
               (k-unbind-to saved)
               (k-close-region x (cond ((= k 0) "letregion") ((= k 1) "letrena") ((= k 2) "letreap") (else "letfreeze"))
-                              r (if (= k 3) (k-frozen-result r i (extract rb 1) a b) (extract rb 1)) (extract rb 2) a b))))
+                              r (if (= k 3) (k-frozen-result r i written (extract rb 1) a b) (extract rb 1)) (extract rb 2) a b))))
         (x-bloblet (op i args a b) (k-synth-bloblet x op i args -1))
         (x-product (fs a b)
           (let* ((r (k-synth-fields fs)) (t (k-ty-new (ty-product (extract r 1)))))
