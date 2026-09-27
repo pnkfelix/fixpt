@@ -263,6 +263,22 @@ impl Checker {
                 Ok(self.arena.ty(Ty::Pair(a, b, r)))
             }
             "dletrec" => self.parse_dletrec(s, &items),
+            // `(mu name type)`: a recursive type, anonymous; the same as
+            // `(dletrec ((name type)) name)`.
+            "mu" => {
+                let [_, name, body] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(mu name type)`"));
+                };
+                let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+                let depth = self.dscope.len();
+                let slot = self.arena.ty(Ty::Link(None));
+                self.dscope.push((name, DScope::Rec(slot)));
+                let t = self.parse_type(body);
+                self.dscope.truncate(depth);
+                self.arena.set_link(slot, t?);
+                self.grounded(slot, s.span)?;
+                Ok(slot)
+            }
             "listof" => {
                 // FX-87's `listof`: a pair whose tail is the list itself.
                 // Every `pairof` type also has the empty list, `nil`.

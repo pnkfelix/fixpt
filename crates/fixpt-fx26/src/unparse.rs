@@ -2,7 +2,6 @@
 
 use crate::ast::{Atom, Effect, Kind, Region, Ty, TyId};
 use crate::check::Checker;
-use std::collections::HashSet;
 
 impl Checker {
     pub fn show_region(&self, r: Region) -> String {
@@ -42,13 +41,13 @@ impl Checker {
     /// recursive type prints as far as its first repetition, which is shown
     /// as `…` — enough to read, and it always terminates.
     pub fn show_ty(&self, t: TyId) -> String {
-        self.show_ty_on(t, &mut HashSet::new())
+        self.show_ty_on(t, &mut Vec::new())
     }
 
     /// A type written out one level, even if it has a name: what a
     /// `define-type` defined the name as.
     pub fn show_definition(&self, t: TyId) -> String {
-        self.show_ty_body(self.arena.resolve(t), &mut HashSet::new())
+        self.show_ty_body(self.arena.resolve(t), &mut Vec::new())
     }
 
     fn abbreviation(&self, t: TyId) -> Option<&str> {
@@ -59,7 +58,7 @@ impl Checker {
             .map(|n| self.interner.name(n))
     }
 
-    fn show_ty_on(&self, t: TyId, path: &mut HashSet<TyId>) -> String {
+    fn show_ty_on(&self, t: TyId, path: &mut Vec<TyId>) -> String {
         let t = self.arena.resolve(t);
         if let Some(name) = self.abbreviation(t) {
             return name.to_string();
@@ -67,10 +66,14 @@ impl Checker {
         self.show_ty_body(t, path)
     }
 
-    fn show_ty_body(&self, t: TyId, path: &mut HashSet<TyId>) -> String {
-        if !path.insert(t) {
-            return "…".into();
+    fn show_ty_body(&self, t: TyId, path: &mut Vec<TyId>) -> String {
+        // A node met again on the way down is a cycle: named by its depth,
+        // and written `(mu %d …)` where the cycle starts.
+        if let Some(i) = path.iter().position(|x| *x == t) {
+            return format!("%{}", i + 1);
         }
+        path.push(t);
+        let name = format!("%{}", path.len());
         let out = match self.arena.get(t).clone() {
             Ty::Base(s) => self.interner.name(s).to_string(),
             Ty::Void => "void".into(),
@@ -141,7 +144,12 @@ impl Checker {
                 self.show_region(r)
             ),
         };
-        path.remove(&t);
-        out
+        path.pop();
+        if mentions_token(&out, &name) { format!("(mu {name} {out})") } else { out }
     }
+}
+
+/// Whether `name` occurs in `s` as a symbol of its own.
+fn mentions_token(s: &str, name: &str) -> bool {
+    ["(", " "].iter().any(|b| [")", " "].iter().any(|a| s.contains(&format!("{b}{name}{a}"))))
 }

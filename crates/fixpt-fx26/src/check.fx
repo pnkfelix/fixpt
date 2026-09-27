@@ -457,6 +457,20 @@
           (cons (if (null? b) (k-cat3 "(" named ")") (k-cat5 "(" named " " (k-region-show (car b)) ")"))
                 (k-show-binders (cdr bs)))))))
 
+;; How deep `t` is in `path`, newest first: its place from the root, from 1.
+(define k-depth-of (subr (read @t) (k-ids int) int)
+  (lambda (path t) (if (= (car path) t) (k-length path) (k-depth-of (cdr path) t))))
+;; Whether `name` occurs in `s` as a symbol of its own.
+(define k-mentions-token? (subr pure (string string) bool)
+  (lambda (s name)
+    (or (>= (k-find-sub s (k-cat3 " " name " ") 0) 0)
+        (or (>= (k-find-sub s (k-cat3 " " name ")") 0) 0)
+            (or (>= (k-find-sub s (k-cat3 "(" name " ") 0) 0)
+                (>= (k-find-sub s (k-cat3 "(" name ")") 0) 0))))))
+;; `out`, the type a node shows as, as `(mu name out)` if it mentions itself.
+(define k-mu-wrap (subr pure (string string) string)
+  (lambda (name out) (if (k-mentions-token? out name) (k-cat5 "(mu " name " " out ")") out)))
+
 (define-rec
   (k-show-on (subr (maxeff (read @t) (alloc @t)) (int k-ids) string)
     (lambda (t path)
@@ -470,11 +484,14 @@
           ""
           (string-append (k-cat5 " (" (symbol->string (extract (car ps) 1)) " " (k-show-on (extract (car ps) 2) path) ")")
                          (k-show-parts (cdr ps) path)))))
+  ;; A node met again on the way down is a cycle: named by its depth, and
+  ;; written `(mu %d …)` where the cycle starts.
   (k-show-body (subr (maxeff (read @t) (alloc @t)) (int k-ids) string)
     (lambda (t path)
       (if (k-has-id? path t)
-          "…"
+          (string-append "%" (int->string (k-depth-of path t)))
           (let ((p (the k-ids (cons t path))))
+            (k-mu-wrap (string-append "%" (int->string (k-length p)))
             (tagcase (k-get t)
               (ty-base (s) (symbol->string s))
               (ty-void () "void")
@@ -502,10 +519,10 @@
               (ty-markkey (a r) (k-cat5 "(mark-key " (k-show-on a p) " " (k-region-show r) ")"))
               (ty-bloblet (fs z r)
                 (k-cat5 (if z "(bloblet (frozen" "(bloblet (fields") (if (null? fs) "" " ") (k-join (k-show-list fs p) " ")
-                        ") " (string-append (k-region-show r) ")")))))))))
+                        ") " (string-append (k-region-show r) ")"))))))))))
 
 ;; A type. One `define-type` named prints as its name; any other recursive
-;; type as far as its first repetition, shown as `…`.
+;; type as `(mu %d …)`, `%d` naming the cycle.
 (define k-show-ty (subr (maxeff (read @t) (alloc @t)) (int) string)
   (lambda (t) (k-show-on t nil)))
 
@@ -753,6 +770,7 @@
                             (r (k-parse-region (k-nth items 3))))
                        (k-ty-new (ty-pair a b r)))))
                   ((symbol=? hd 'dletrec) (k-parse-dletrec s items))
+                  ((symbol=? hd 'mu) (k-parse-mu s items))
                   ((symbol=? hd 'listof)
                    (begin
                      (k-shape (= n 3) "`(listof type region)`" s)
@@ -815,6 +833,21 @@
                (grounded (k-dletrec-grounded slots s))
                (body (k-parse-type (k-nth items 2))))
           (begin (set k-dscope saved) body)))))
+  ;; `(mu name type)`: a recursive type, anonymous; the same as `(dletrec
+  ;; ((name type)) name)`.
+  (k-parse-mu (subr checks (syn (listof syn @s)) int)
+    (lambda (s items)
+      (begin
+        (k-shape (= (k-length items) 3) "`(mu name type)`" s)
+        (let* ((name (k-name-of (k-nth items 1) "a name"))
+               (saved (get k-dscope))
+               (slot (k-slot))
+               (pushed (k-push-desc name (ds-rec slot)))
+               (t (k-parse-type (k-nth items 2)))
+               (restored (set k-dscope saved))
+               (filled (k-set-link slot t))
+               (grounded (k-grounded slot (syn-start s) (syn-end s))))
+          slot))))
   (k-dletrec-fill (subr checks (k-slots) unit)
     (lambda (ss)
       (if (null? ss)
