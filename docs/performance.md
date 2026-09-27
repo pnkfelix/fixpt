@@ -895,3 +895,33 @@ REPL's reader captures once per character typed. A stack cache or
 one-shot continuations (PLAN.md queue, item 7) would take the copying
 out, but that is a small part of a round until the stack is hundreds of
 frames deep. So it waits for a workload that captures deeply and often.
+
+## The reader: what it called out for, not its cursors
+
+PLAN.md's item 8 suspected the cursor the eager reader allocates for each
+character. `probe_read`, now as register code, and `FIXPT_CALLOUTS=1` said
+otherwise. Reading the bootstrap program (about 390k characters) made
+444k calls of primitives, and the commonest was `%fx26-list-copy`
+(151k), from `datum-list`: each mark the reader set was built with
+`cons` and then copied to make it a datum. Then `reverse` and
+`string->list` for every atom's (almost always empty) prefix, and
+`%fx26-parse-number` for every atom, though most are symbols.
+
+- The marks are built with `datum-cons`, with no copy, and a list's
+  datum is its items' datum reversed with `datum-cons` too.
+- An atom is parsed as a number only if it starts as one can (a digit,
+  `+`, `-`, `.` or `#`).
+- An empty prefix is no work.
+- Register code does `datum-car`, `datum-cdr` and `datum-null?` as it
+  does `car`, `cdr` and `null?`, and `char-numeric?` of an ASCII
+  character in machine code.
+
+| reading the bootstrap program, register code | before  | after   |
+| -------------------------------------------- | ------- | ------- |
+| calls of primitives                          | 444k    | 151k    |
+| time (best of ten)                           | 39.9 ms | 29.3 ms |
+
+The cursor made a product (one frozen bloblet, not four pairs) measured
+29.0 ms, no better, so it stays as it was. What is left is some 75 ns a
+character, in calls of the reader's small procedures more than in
+allocation.

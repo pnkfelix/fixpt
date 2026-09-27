@@ -1054,6 +1054,11 @@ the order it will be done. Each is committed when done, and marked here.
 8. **The reader's cursor**: the eager reader allocates a cursor for each
    character it reads; a cursor kept in place, or a reader that returns
    its position without allocating.
+   *(Done otherwise 2026-09-26: the cursor was not the cost. The reader's
+   calls of primitives were: its marks copied by `datum-list`, and every
+   atom parsed as a number. 39.9 → 29.3 ms reading the bootstrap program;
+   a cursor as one product measured no better. See docs/performance.md,
+   "The reader: what it called out for".)*
 9. **Tidying the regions work**: the checker's record of each
    allocation's region (`NodeFacts::alloc_region`), no longer used to
    allocate, removed from both checkers; the FX-26 checker's free

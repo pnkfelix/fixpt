@@ -294,6 +294,18 @@ impl Asm {
                 self.e(cmp_imm(X13, 32));
                 self.e(csel(RESULT, X15, RESULT, Cond::Eq));
             }
+            // `char-numeric?` of an ASCII character: `0` to `9`. Past
+            // ASCII, Unicode's say, called out.
+            "numeric" => {
+                self.e(asr_imm(X13, 1, 8));
+                self.e(cmp_imm(X13, 128));
+                self.b_cond(Cond::Hs, slow);
+                self.value(X15, Value::TRUE);
+                self.value(X16, Value::FALSE);
+                self.e(sub_imm(X14, X13, '0' as u32));
+                self.e(cmp_imm(X14, 9));
+                self.e(csel(RESULT, X15, X16, Cond::Ls));
+            }
             // `%fx26-char-in?`: whether the character in `REG1` is one of
             // the string in `REG2`'s, 32 bits each after its length.
             "char-in" => {
@@ -592,6 +604,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     ("prim", 1) if prim_named(k(o(0)), "%bloblet-fields") => Some("fields"),
                     ("prim", 3) if prim_named(k(o(0)), "%bloblet-set!") => Some("field!"),
                     ("prim", 1) if prim_named(k(o(0)), "char-whitespace?") => Some("whitespace"),
+                    ("prim", 1) if prim_named(k(o(0)), "char-numeric?") => Some("numeric"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
                     ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),
                     ("prim", 2) if prim_named(k(o(0)), "modulo") => Some("modulo"),

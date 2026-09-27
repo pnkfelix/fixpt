@@ -169,19 +169,25 @@
 (define marking (poly ((t type)) (subr reads (datum (subr reads () t)) t))
   (lambda (what body) (with-mark eager-key what body)))
 
+(define no-data datum (datum-list (the data nil)))
+;; Built with `datum-cons`, as data from the start: a list made with
+;; `cons` would be copied to make it a datum.
 (define entry (subr pure (datum int) datum)
-  (lambda (name start) (datum-list (the data (cons name (cons (datum-int start) nil))))))
+  (lambda (name start) (datum-cons name (datum-cons (datum-int start) no-data))))
 (define top-entry (subr pure () datum)
-  (lambda () (datum-list (the data (cons (datum-symbol "top") nil)))))
+  (lambda () (datum-cons (datum-symbol "top") no-data)))
 (define abbrev-entry (subr pure (int string) datum)
   (lambda (start name)
-    (datum-list (the data (cons (datum-symbol "abbrev") (cons (datum-int start) (cons (datum-symbol name) nil)))))))
+    (datum-cons (datum-symbol "abbrev") (datum-cons (datum-int start) (datum-cons (datum-symbol name) no-data)))))
 ;; A list's mark: its items so far, newest first, as a datum the reader
 ;; builds a pair at a time as it reads them, not copied at each.
 (define list-entry (subr pure (datum int char datum) datum)
   (lambda (name start close items)
-    (datum-list
-     (the data (cons name (cons (datum-int start) (cons (datum-char close) (cons items nil))))))))
+    (datum-cons name (datum-cons (datum-int start) (datum-cons (datum-char close) (datum-cons items no-data))))))
+;; `items`, newest first, in order, onto `done`.
+(define datum-reverse-onto (subr pure (datum datum) datum)
+  (lambda (items done)
+    (if (datum-null? items) done (datum-reverse-onto (datum-cdr items) (datum-cons (datum-car items) done)))))
 ;; The marks' names, interned once.
 (define m-comment datum (datum-symbol "comment"))
 (define m-block-comment datum (datum-symbol "block-comment"))
@@ -193,7 +199,6 @@
 (define m-hash datum (datum-symbol "hash"))
 (define m-list datum (datum-symbol "list"))
 (define m-dotted datum (datum-symbol "dotted"))
-(define no-data datum (datum-list (the data nil)))
 
 ;;; -------------------------------------------------------------- strings
 
@@ -205,6 +210,10 @@
 
 (define delimiter? (subr pure (char) bool)
   (lambda (c) (or (char-whitespace? c) (char-in? c "()[]\";'`,"))))
+
+;; Whether an atom starting so may be a number: only then is it parsed as one.
+(define number-start? (subr pure (char) bool)
+  (lambda (c) (or (char-numeric? c) (char-in? c "+-.#"))))
 
 (define hex-digit? (subr pure (char) bool)
   (lambda (c) (or (char-numeric? c) (char-in? (char-downcase c) "abcdef"))))
@@ -454,11 +463,11 @@
                    (lambda (cur text escaped c)
                      (if (and (string=? text "") (not escaped))
                          (fail cur (str3 "unexpected `" (char-string c) "`"))
-                         (let ((n (the data (if escaped nil (parse-number text 10)))))
+                         (let ((n (the data (if escaped nil (if (number-start? (string-ref text 0)) (parse-number text 10) nil)))))
                            (if (null? n)
                                (cons (atom (datum-symbol text) start (cur-pos cur)) cur)
                                (cons (atom (car n) start (cur-pos cur)) cur)))))))
-          (loop cur (the chars (reverse (the chars (string->list prefix)))) #f))))))
+          (loop cur (the chars (if (string=? prefix "") nil (reverse (the chars (string->list prefix))))) #f))))))
 
 ;;; -------------------------------------------------------------- atmosphere
 
@@ -507,7 +516,7 @@
         (lambda ()
           (let ((r (read-datum (skip-atmosphere cur))))
             (cons (lst (the syns (cons (atom (datum-symbol name) start (+ start 1)) (cons (car r) nil)))
-                       (datum-list (the data (cons (datum-symbol name) (cons (syn->datum (car r)) nil))))
+                       (datum-cons (datum-symbol name) (datum-cons (syn->datum (car r)) no-data))
                        start
                        (cur-pos (cdr r)))
                   (cdr r)))))))
@@ -524,7 +533,7 @@
                               (c (cur-char cur))
                               (plain (not (hash-pending? cur))))
                          (cond ((and plain (char=? c close))
-                                (cons (lst (the syns (reverse syns)) (datum-list (the data (reverse items))) start (+ (cur-pos cur) 1))
+                                (cons (lst (the syns (reverse syns)) (datum-reverse-onto items-d no-data) start (+ (cur-pos cur) 1))
                                       (consumed cur)))
                                ((and plain (char=? c #\]) (fx26?))
                                 (fail cur "`]` is reserved: it has no meaning yet"))

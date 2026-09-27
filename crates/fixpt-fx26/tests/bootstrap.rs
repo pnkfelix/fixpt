@@ -402,21 +402,29 @@ fn comparison() {
     }
 }
 
-/// The compiled reader alone, on the hand-encoded machine, ten times over
-/// the bootstrap program: something to sample.
+/// The compiled reader alone, as register code, ten times over the
+/// bootstrap program: something to sample, or to count the call-outs of
+/// (`FIXPT_CALLOUTS=1`).
 #[test]
 #[ignore = "a probe: cargo test --release -p fixpt-fx26 --test bootstrap probe_read -- --ignored --nocapture"]
 fn probe_read() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
     let text = fixpt_fx26::bootstrap_program();
     s.scheme.scope(|sc| {
         let pieces = sc.make(|_| Value::NULL);
         sc.scope(|inner| {
-            let facts = fixpt_fx26::syn::rust_facts(inner, FileId(0), &text).expect("checks");
-            let stage1 = fixpt_fx26::syn::compile_to_word(inner, FileId(0), &text, facts).expect("parses").expect("compiles");
+            let mut c = fixpt_fx26::Checker::new();
+            let forms = c.read_in(FileId(0), &text).expect("reads");
+            let done = c.declare_ahead(&forms).expect("declares");
+            let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+            let stage1 = inner.make(|m| {
+                let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                comp.registers = true;
+                comp.program(&tops).expect("compiles")
+            });
             let none = inner.make(|_| Value::NULL);
             let made = inner.call_global("%run-word", &[stage1, none]).expect("runs");
             inner.replace(pieces, |m| m.get(made));
@@ -431,7 +439,7 @@ fn probe_read() {
             sc.scope(|one| {
                 one.call_global("%run-word", &[read, args]).expect("reads");
             });
-            eprintln!("read: {:.2} s", t.elapsed().as_secs_f64());
+            eprintln!("read: {:.1} ms", 1e3 * t.elapsed().as_secs_f64());
         }
     });
 }
