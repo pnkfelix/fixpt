@@ -1000,6 +1000,12 @@ the order it will be done. Each is committed when done, and marked here.
    region allocators other than `rcons` (`rnew`, `rmake-array`,
    `rmake-icell`, `rmake-bloblet`, `rlambda`'s closures), inline as
    `rcons` is.
+3′. **Why the compiler written in FX-26 calls primitives so often**
+   (raised by the user 2026-09-26): 1.24 million calls in stage 2 after
+   item 3, many apparently from names handled as strings (`string=?`
+   chains such as `standard-primitive`'s, `string->symbol` and back).
+   Count where they come from, and change the FX-26 code where the count
+   is its own doing.
 4. **Known calls** (13e and 13h′ (d)): `callk`, a direct call of a known
    word with no closure fetched; let-conversion of lambdas that do not
    escape.

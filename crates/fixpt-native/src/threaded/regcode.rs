@@ -256,6 +256,93 @@ impl Asm {
                 self.b_cond(Cond::Ne, slow);
                 self.e(sub_imm(RESULT, X16, TAG_TRAILER as u32));
             }
+            // `%bloblet-set!`: `REG3` into field `REG2` (8k) of the bloblet in
+            // `REG1`, 2 ≤ k ≤ F as `field@` checks; unspecified. Its fields
+            // frozen (by an alias whose type does not say so), the call-out
+            // refuses it.
+            "field!" => {
+                self.e(ldur(X16, 1, field_off(1)));
+                self.e(and_low(X13, X16, 3));
+                self.e(cmp_imm(X13, TAG_TRAILER as u32));
+                self.b_cond(Cond::Ne, slow);
+                self.e(cmp_imm(2, 16));
+                self.b_cond(Cond::Lt, slow);
+                self.e(sub_imm(X16, X16, TAG_TRAILER as u32));
+                self.e(cmp(2, X16));
+                self.b_cond(Cond::Gt, slow);
+                // The header: F + 1 words before the suffix.
+                self.e(sub(X11, 1, X16));
+                self.e(ldur(X13, X11, -12));
+                let frozen = fixpt_heap::layout::H_FIELDS_FROZEN;
+                self.e(ubfx(X13, X13, frozen.lo, 1));
+                self.cbnz(X13, slow);
+                self.e(sub(X11, 1, 2));
+                self.e(stur(3, X11, -4));
+                self.value(RESULT, Value::UNSPECIFIED);
+            }
+            // `char-whitespace?` of an ASCII character: tab to carriage
+            // return, or space. Past ASCII, Unicode's say, called out.
+            "whitespace" => {
+                self.e(asr_imm(X13, 1, 8));
+                self.e(cmp_imm(X13, 128));
+                self.b_cond(Cond::Hs, slow);
+                self.value(X15, Value::TRUE);
+                self.value(X16, Value::FALSE);
+                self.e(sub_imm(X14, X13, 9));
+                self.e(cmp_imm(X14, 4));
+                self.e(csel(RESULT, X15, X16, Cond::Ls));
+                self.e(cmp_imm(X13, 32));
+                self.e(csel(RESULT, X15, RESULT, Cond::Eq));
+            }
+            // `%fx26-char-in?`: whether the character in `REG1` is one of
+            // the string in `REG2`'s, 32 bits each after its length.
+            "char-in" => {
+                let (again, yes, no, end) = (self.label(), self.label(), self.label(), self.label());
+                self.e(asr_imm(X13, 1, 8));
+                self.e(ldur(X15, 2, -4));
+                self.e(mov(X14, 2));
+                self.bind(again);
+                self.cbz(X15, no);
+                self.e(ldur_w(X10, X14, 4));
+                self.e(cmp(X10, X13));
+                self.b_cond(Cond::Eq, yes);
+                self.e(add_imm(X14, X14, 4));
+                self.e(sub_imm(X15, X15, 1));
+                self.b(again);
+                self.bind(yes);
+                self.value(RESULT, Value::TRUE);
+                self.b(end);
+                self.bind(no);
+                self.value(RESULT, Value::FALSE);
+                self.bind(end);
+            }
+            // `string=?` of two strings: their lengths, then their
+            // characters, 32 bits each.
+            "string=" => {
+                let (again, yes, no, end) = (self.label(), self.label(), self.label(), self.label());
+                self.e(ldur(X15, 1, -4));
+                self.e(ldur(X16, 2, -4));
+                self.e(cmp(X15, X16));
+                self.b_cond(Cond::Ne, no);
+                self.e(mov(X13, 1));
+                self.e(mov(X14, 2));
+                self.bind(again);
+                self.cbz(X15, yes);
+                self.e(ldur_w(X10, X13, 4));
+                self.e(ldur_w(X11, X14, 4));
+                self.e(cmp(X10, X11));
+                self.b_cond(Cond::Ne, no);
+                self.e(add_imm(X13, X13, 4));
+                self.e(add_imm(X14, X14, 4));
+                self.e(sub_imm(X15, X15, 1));
+                self.b(again);
+                self.bind(yes);
+                self.value(RESULT, Value::TRUE);
+                self.b(end);
+                self.bind(no);
+                self.value(RESULT, Value::FALSE);
+                self.bind(end);
+            }
             _ => self.inline(what, slow),
         }
     }
@@ -485,6 +572,10 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     ("prim", 2) if prim_named(k(o(0)), "string-ref") => Some("string-ref"),
                     ("prim", 3) if prim_named(k(o(0)), "%region-cons") => Some("rcons"),
                     ("prim", 1) if prim_named(k(o(0)), "%bloblet-fields") => Some("fields"),
+                    ("prim", 3) if prim_named(k(o(0)), "%bloblet-set!") => Some("field!"),
+                    ("prim", 1) if prim_named(k(o(0)), "char-whitespace?") => Some("whitespace"),
+                    ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
+                    ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),
                     ("prim", 2) if prim_named(k(o(0)), "%region-new") => Some("rnew"),
                     ("prim", 1) if prim_named(k(o(0)), "%region-make-icell") => Some("ricell"),
                     ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),

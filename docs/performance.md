@@ -789,7 +789,20 @@ The self-compile's call-outs, stage 2 (`FIXPT_CALLOUTS=1`):
 
 Stage 2: 0.34 s → 0.28 s. The benchmarks make few closures and read no
 arrays, and hardly move (`closures` 25.1 → 24.9 ms). Left: 2.49 million
-primitives, the commonest `string=?` (448 k), `char-whitespace?`
+calls of primitives, the commonest `string=?` (448 k), `char-whitespace?`
 (354 k), `%fx26-char-in?` (294 k), `%fx26-list-copy` (210 k),
 `string->symbol` (166 k), `%bloblet-set!` (160 k), `symbol->string`
 (158 k).
+
+Then, inline too, trusting what the checker proved of the operands'
+types: `%bloblet-set!` (checked against the trailer, and the header's
+frozen bit, since an alias's type may not say it is frozen);
+`char-whitespace?` for an ASCII character; `%fx26-char-in?`; and
+`string=?` of two strings. Calls of primitives 2.49 M → 1.24 M; stage 2
+0.28 s → 0.22 s. Left, the commonest: `%fx26-list-copy` (210 k),
+`string->symbol` (166 k), `symbol->string` (158 k), `reverse` (112 k),
+`%string-hash` and `modulo` (100 k each, a table's), `string-append`
+(70 k). Many of these, and of the `string=?` calls before, look like
+the compiler's own habits (names handled as strings, compared one
+`string=?` at a time) rather than costs to make cheaper: next, where
+they are called from.
