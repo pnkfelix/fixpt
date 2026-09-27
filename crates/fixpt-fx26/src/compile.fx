@@ -150,6 +150,9 @@
     (tagcase this
       (at-loop (z) (c-loop? l))
       (at-free (i) (tagcase l (at-free (j) (= i j)) (else y #f)))
+      ;; A top-level definition's own global, the only global its name can
+      ;; be in its body.
+      (at-global (g) (tagcase l (at-global (h) #t) (else y #f)))
       (else y #f))))
 
 ;; The global environment as compiling has reached it, newest first.
@@ -389,6 +392,8 @@
     (cond ((null? xs) nil)
           ((null? (c-find e (car xs))) (c-captured (cdr xs) e))
           ((c-loop? (car (c-find e (car xs)))) (c-captured (cdr xs) e))
+          ;; A definition's own global, in its body's names, is still a global.
+          ((tagcase (car (c-find e (car xs))) (at-global (g) #t) (else y #f)) (c-captured (cdr xs) e))
           (else (cons (car xs) (c-captured (cdr xs) e))))))
 
 ;; Free value `i` for each captured name, boxed if it was boxed outside.
@@ -666,7 +671,15 @@
       (let* ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
              ;; A parameter of the same name hides the procedure.
              (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
-             (base (if (or (null? own) (c-member? fv (car own))) (the cenv nil) (the cenv (cons (cons (car own) (at-loop 0)) nil))))
+             ;; Its own name: a loop, or a top-level definition's global.
+             (base (if (or (null? own) (c-member? fv (car own)))
+                       (the cenv nil)
+                       (let ((l (c-where e (car own))))
+                         (the cenv (cons (cons (car own)
+                                               (if (and (not (null? l)) (tagcase (car l) (at-global (h) #t) (else y #f)))
+                                                   (car l)
+                                                   (at-loop 0)))
+                                         nil)))))
              (inner (c-inner-env fv e (c-param-env ps 0 base) 0))
              (n (c-count-params ps))
              (body-code (the code (new nil)))
@@ -813,9 +826,13 @@
                   (if (null? (c-lambda-of x))
                       (begin (c-exp x (the cenv nil) 0 c #f)
                              (c-op1 c routine-global! (wcell-global (c-push-global n))))
-                      ;; A lambda: its global first, so that it can call itself.
+                      ;; A lambda: its global first, so that it can call itself;
+                      ;; and its own name that global, known (`c-lambda`).
                       (let ((g (c-push-global n)))
-                        (begin (c-exp x (the cenv nil) 0 c #f)
+                        (begin (tagcase (car (c-lambda-of x))
+                                 (e-lambda (ps body la lb)
+                                   (begin (c-lambda ps body (the cenv nil) 0 c (the syms (cons n nil)) (the (listof exp @k) nil)) #u))
+                                 (else y (c-exp x (the cenv nil) 0 c #f)))
                                (c-op1 c routine-global! (wcell-global g))))))
               (c-tops (cdr ts) c #f)))
           ;; Every name's global first; then each lambda, which runs nothing.

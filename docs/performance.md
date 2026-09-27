@@ -835,3 +835,24 @@ divisor's sign; a zero divisor calls out), checked against the lowering
 on every combination of signs (`tests/programs/run/modulo.fx`). It was
 the tables' commonest (100 k); stage 2 stays at 0.19–0.20 s, since the
 call it saves was a small part of it.
+
+## A definition's own name, known (PLAN.md queue, item 4)
+
+A typed top-level `define` of a lambda gets a new global, which no one
+assigns (a second `define` makes another, and shadows), and which holds
+the lambda before the lambda can run. So in the lambda's body its own
+name is known: a tail call of it with its arity is a loop, as a
+`letrec`'s is, in both stack compilers (alike, cell for cell) and in
+register code; other uses load the global as before. Register code's
+test of whether a procedure may collect now asks whether a self-call is
+in tail position; it had counted every self-call as a loop, which would
+have made `fib` a leaf.
+
+| benchmark (register code) | before  | after   |
+| ------------------------- | ------- | ------- |
+| `lists`                   | 13.9 ms | 8.8 ms  |
+| `closures`                | 25.0 ms | 20.8 ms |
+| `fib`                     | 5.8 ms  | 5.7 ms  |
+| `tak`                     | 1.9 ms  | 1.8 ms  |
+
+The self-compile, stage 2: 0.20 → 0.18 s.

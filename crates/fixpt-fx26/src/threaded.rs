@@ -541,12 +541,22 @@ impl<'a> Compiler<'a> {
         self.free(body, &params.iter().rev().copied().collect::<Vec<_>>(), &mut free);
         // The free names that are locals here, not globals or standard ones,
         // nor a loop, which is not a value.
-        let fv: Vec<Sym> = free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop)).collect();
+        // A definition's own global, in its body's names, is still a global.
+        let fv: Vec<Sym> =
+            free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop && !matches!(l, Loc::Global(_)))).collect();
         // A parameter of the same name hides the procedure.
         let own = own.filter(|f| !params.contains(f));
         let mut inner: Env = Vec::new();
+        // The procedure's own name: a loop, where it is only called so; or,
+        // a top-level definition's, its global, which holds this procedure
+        // whenever it runs (a definition makes a new global and none is
+        // assigned), so that its tail calls are loops and the rest load it.
         if let Some(f) = own.filter(|f| !fv.contains(f)) {
-            inner.push((f, Loc::Loop));
+            let l = match self.where_is(e, f) {
+                Some(Loc::Global(g)) => Loc::Global(g),
+                _ => Loc::Loop,
+            };
+            inner.push((f, l));
         }
         inner.extend(params.iter().enumerate().map(|(i, p)| (*p, Loc::Slot(i))));
         inner.extend(fv.iter().enumerate().map(|(i, n)| (*n, Loc::Free(i))));
@@ -991,7 +1001,13 @@ impl<'a> Compiler<'a> {
                         self.push_global(*name)
                     } else {
                         let g = self.push_global(*name);
-                        self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
+                        // Its own name its global, known (`lambda_word`).
+                        match self.lambda_of(*exp) {
+                            Some((ps, body, None)) => {
+                                self.lambda(&ps, body, &Vec::new(), 0, &mut code, Some(*name), None)?;
+                            }
+                            _ => self.exp(*exp, &Vec::new(), 0, &mut code, false)?,
+                        }
                         g
                     };
                     self.op1(&mut code, "global!", g);

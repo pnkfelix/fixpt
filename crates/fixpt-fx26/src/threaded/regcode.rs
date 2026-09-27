@@ -178,7 +178,7 @@ impl Compiler<'_> {
         if params.len() > REGS {
             return self.decline("more than REGS parameters");
         }
-        let leaf = !self.r_collects(body, inner, this);
+        let leaf = !self.r_collects(body, inner, this, true);
         let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
@@ -193,6 +193,7 @@ impl Compiler<'_> {
                 }
                 Loc::Free(i) => RLoc::Free(*i),
                 Loc::Loop => RLoc::Loop,
+                Loc::Global(g) => RLoc::Global(*g),
                 _ => return None,
             }));
         }
@@ -288,27 +289,34 @@ impl Compiler<'_> {
 
     /// Whether evaluating `x` may call or call out, and so collect. Loops
     /// do not; declined forms are said to, which does not matter.
-    fn r_collects(&mut self, x: ExpId, e: &Env, this: Option<This>) -> bool {
+    fn r_collects(&mut self, x: ExpId, e: &Env, this: Option<This>, tail: bool) -> bool {
         match self.c.arena.exp_at(x).clone() {
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => false,
-            Exp::If { test, then, els } => [test, then, els].iter().any(|y| self.r_collects(*y, e, this)),
-            Exp::Let { bindings, body } => {
-                bindings.iter().any(|(_, y)| self.r_collects(*y, e, this)) || self.r_collects(body, e, this)
+            Exp::If { test, then, els } => {
+                self.r_collects(test, e, this, false) || self.r_collects(then, e, this, tail) || self.r_collects(els, e, this, tail)
             }
-            Exp::Begin(items) => items.iter().any(|y| self.r_collects(*y, e, this)),
+            Exp::Let { bindings, body } => {
+                bindings.iter().any(|(_, y)| self.r_collects(*y, e, this, false)) || self.r_collects(body, e, this, tail)
+            }
+            Exp::Begin(items) => match items.split_last() {
+                Some((last, rest)) => rest.iter().any(|y| self.r_collects(*y, e, this, false)) || self.r_collects(*last, e, this, tail),
+                None => false,
+            },
             // A region is entered and left by calling out.
             Exp::LetRegion { .. } => true,
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_collects(body, e, this),
-            Exp::Extract(y, _) => self.r_collects(y, e, this),
-            Exp::Bloblet { op: BlobletOp::Ref(_), args } => args.iter().any(|y| self.r_collects(*y, e, this)),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_collects(body, e, this, tail),
+            Exp::Extract(y, _) => self.r_collects(y, e, this, false),
+            Exp::Bloblet { op: BlobletOp::Ref(_), args } => args.iter().any(|y| self.r_collects(*y, e, this, false)),
             Exp::TagCase { scrutinee, arms, els } => {
-                self.r_collects(scrutinee, e, this)
-                    || arms.iter().any(|a| self.r_collects(a.body, e, this))
-                    || els.is_some_and(|(_, b)| self.r_collects(b, e, this))
+                self.r_collects(scrutinee, e, this, false)
+                    || arms.iter().any(|a| self.r_collects(a.body, e, this, tail))
+                    || els.is_some_and(|(_, b)| self.r_collects(b, e, this, tail))
             }
             Exp::App { fun, args } => {
-                let args_collect = args.iter().any(|y| self.r_collects(*y, e, this));
-                let loop_call = matches!((this, self.c.arena.exp_at(fun)), (Some(t), Exp::Var(n))
+                let args_collect = args.iter().any(|y| self.r_collects(*y, e, this, false));
+                // A loop: a call of the procedure itself, in tail position.
+                let loop_call = tail
+                    && matches!((this, self.c.arena.exp_at(fun)), (Some(t), Exp::Var(n))
                     if *n == t.name && args.len() == t.params);
                 let inline = match self.c.arena.exp_at(fun) {
                     Exp::Var(n) if self.where_is(e, *n).is_none() => {
@@ -657,7 +665,7 @@ impl Compiler<'_> {
             out = (None, Some(k));
         } else {
             self.r_exp(g, a, env, te, false)?;
-            let collects = !g.leaf && self.r_collects(b, te, g.this.map(|(t, _)| t));
+            let collects = !g.leaf && self.r_collects(b, te, g.this.map(|(t, _)| t), false);
             let kept = if collects {
                 let s = g.slot();
                 g.op("setstk", &[Gen::n(s)]);
