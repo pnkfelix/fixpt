@@ -250,6 +250,27 @@
       (begin (if (= kind 3) (set k-places (cons v (get k-places))) #u) v))))
 (define k-place-var? (subr (read @t) (int) bool)
   (lambda (v) (k-has-id? (get k-places) v)))
+;; Each bounded region binder's bound: `(r region p)`, a region that won't
+;; outlive `p` (`docs/research/places-and-regions.md`).
+(define k-bounds (ref (listof (pairof int k-region @t) @t) @t) (new nil))
+;; The region and place variables bound around each one's binder, which it
+;; won't outlive: the order of lifetimes, by nesting.
+(define k-outers (ref (listof (pairof int k-ids @t) @t) @t) (new nil))
+;; The region and place variables bound around what is being read, by
+;; expressions (not types), innermost first.
+(define k-lifetimes (ref k-ids @t) (new nil))
+(define k-bound-of (subr (maxeff (read @t) (alloc @t)) (int) (listof k-region @t))
+  (lambda (v)
+    (letrec ((find (subr (maxeff (read @t) (alloc @t)) ((listof (pairof int k-region @t) @t)) (listof k-region @t))
+               (lambda (xs) (cond ((null? xs) nil) ((= (car (car xs)) v) (the (listof k-region @t) (cons (cdr (car xs)) nil))) (else (find (cdr xs)))))))
+      (find (get k-bounds)))))
+(define k-outer-of (subr (read @t) (int) k-ids)
+  (lambda (v)
+    (letrec ((find (subr (read @t) ((listof (pairof int k-ids @t) @t)) k-ids)
+               (lambda (xs) (cond ((null? xs) nil) ((= (car (car xs)) v) (cdr (car xs))) (else (find (cdr xs)))))))
+      (find (get k-outers)))))
+(define k-set-outer (subr kstate (int k-ids) unit)
+  (lambda (v outer) (set k-outers (cons (cons v outer) (get k-outers)))))
 (define k-dvar-name (subr (read @t) (int) symbol)
   (lambda (v) (k-nth (get k-dvars) (- (- (get k-ndvars) 1) v))))
 
@@ -427,8 +448,10 @@
   (lambda (bs)
     (if (null? bs)
         nil
-        (cons (k-cat5 "(" (symbol->string (k-dvar-name (extract (car bs) 1))) " " (k-kind-name (extract (car bs) 2)) ")")
-              (k-show-binders (cdr bs))))))
+        (let* ((v (extract (car bs) 1)) (b (k-bound-of v))
+               (named (k-cat3 (symbol->string (k-dvar-name v)) " " (k-kind-name (extract (car bs) 2)))))
+          (cons (if (null? b) (k-cat3 "(" named ")") (k-cat5 "(" named " " (k-region-show (car b)) ")"))
+                (k-show-binders (cdr bs)))))))
 
 (define-rec
   (k-show-on (subr (maxeff (read @t) (alloc @t)) (int k-ids) string)
@@ -506,23 +529,6 @@
     (let ((n (if (syn-symbol? s) (syn-name s) "")))
       (cond ((string=? n "region") 0) ((string=? n "place") 3) ((string=? n "effect") 1) ((string=? n "type") 2)
             (else (k-sfail "a kind is `region`, `place`, `effect` or `type`" s))))))
-(define k-binders-each (subr checks ((listof syn @s)) k-binders)
-  (lambda (bs)
-    (if (null? bs)
-        nil
-        (let ((pair (k-items (car bs) "a binder")))
-          (if (= (k-length pair) 2)
-              (let* ((name (k-name-of (car pair) "a binder's name"))
-                     (kind (k-parse-kind (k-nth pair 1)))
-                     (v (k-new-dvar-of name kind))
-                     (pushed (k-push-desc name (ds-var v kind)))
-                     (rest (k-binders-each (cdr bs))))
-                (cons (product (1 v) (2 kind)) rest))
-              (k-sfail "a binder is `(name kind)`" (car bs)))))))
-
-;; `((name kind) …)`, binding each name for the rest of the reading.
-(define k-parse-binders (subr checks (syn) k-binders)
-  (lambda (s) (k-binders-each (k-items s "binders"))))
 
 ;; The region `@name` stands for: the program's own, if `private-regions`
 ;; declared it, and otherwise the constant of that name.
@@ -553,6 +559,30 @@
   (lambda (s)
     (let ((r (k-parse-region s)))
       (if (k-place? r) r (k-sfail (string-append (k-quote (k-region-show r)) " is not a place") s)))))
+
+(define k-binders-each (subr checks ((listof syn @s)) k-binders)
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (let ((pair (k-items (car bs) "a binder")))
+          (if (or (= (k-length pair) 2) (= (k-length pair) 3))
+              (let* ((name (k-name-of (car pair) "a binder's name"))
+                     (kind (k-parse-kind (k-nth pair 1)))
+                     ;; `(r region p)`: a region that won't outlive `p`, a
+                     ;; place bound before it.
+                     (bound (cond ((= (k-length pair) 2) (the (listof k-region @t) nil))
+                                  ((= kind 0) (the (listof k-region @t) (cons (k-parse-place (k-nth pair 2)) nil)))
+                                  (else (k-sfail "only a region binder has a bound: `(name region place)`" (k-nth pair 2)))))
+                     (v (k-new-dvar-of name kind))
+                     (bounded (if (null? bound) #u (set k-bounds (cons (cons v (car bound)) (get k-bounds)))))
+                     (pushed (k-push-desc name (ds-var v kind)))
+                     (rest (k-binders-each (cdr bs))))
+                (cons (product (1 v) (2 kind)) rest))
+              (k-sfail "a binder is `(name kind)`, or `(name region place)`" (car bs)))))))
+
+;; `((name kind) …)`, binding each name for the rest of the reading.
+(define k-parse-binders (subr checks (syn) k-binders)
+  (lambda (s) (k-binders-each (k-items s "binders"))))
 
 (define-rec
   (k-effects (subr checks ((listof syn @s)) k-eff)
@@ -892,6 +922,19 @@
       (e-the (t x a b) b) (e-bloblet (o i xs a b) b) (e-product (fs a b) b) (e-extract (x l a b) b) (e-sum (l x a b) b)
       (e-tagcase (x arms els a b) b) (e-letregion (k r x a b) b) (e-rlambda (r l a b) b))))
 
+;; A `plambda`'s region and place binders: each won't outlive what is bound
+;; around it (`lives`), and each is around what its body binds.
+(define k-order-binders (subr kstate (k-binders k-ids) unit)
+  (lambda (bs lives)
+    (if (null? bs)
+        #u
+        (let ((v (extract (car bs) 1)) (k (extract (car bs) 2)))
+          (begin
+            (if (or (= k 0) (= k 3))
+                (begin (k-set-outer v lives) (set k-lifetimes (cons v (get k-lifetimes))))
+                #u)
+            (k-order-binders (cdr bs) lives))))))
+
 (define-rec
   (k-resolve-all (subr checks ((listof exp @a)) kxs)
     (lambda (es) (if (null? es) nil (let* ((x (k-resolve-exp (car es))) (rest (k-resolve-all (cdr es)))) (cons x rest)))))
@@ -911,9 +954,13 @@
           (let* ((fx (k-resolve-exp f)) (xs (k-resolve-all args))) (x-app fx xs a b)))
         (e-plambda (binders body a b)
           (let* ((saved (get k-dscope))
+                 (lives (get k-lifetimes))
                  (bs (k-parse-binders binders))
+                 ;; A procedure's regions and places outlive whatever its
+                 ;; body binds.
+                 (ordered (k-order-binders bs lives))
                  (x (k-resolve-exp body)))
-            (begin (set k-dscope saved) (x-plambda bs x a b))))
+            (begin (set k-dscope saved) (set k-lifetimes lives) (x-plambda bs x a b))))
         (e-rlambda (r l a b)
           (let* ((rx (k-resolve-exp r)) (lx (k-resolve-exp l))) (x-rlambda rx lx a b)))
         (e-letregion (k name body a b)
@@ -922,9 +969,11 @@
                  ;; region), `letregion` a region only.
                  (kind (if (or (= k 0) (= k 3)) 0 3))
                  (v (k-new-dvar-of name kind))
+                 (lives (get k-lifetimes))
+                 (ordered (begin (k-set-outer v lives) (set k-lifetimes (cons v lives))))
                  (pushed (k-push-desc name (ds-var v kind)))
                  (x (k-resolve-exp body)))
-            (begin (set k-dscope saved) (x-letregion k v x a b))))
+            (begin (set k-dscope saved) (set k-lifetimes lives) (x-letregion k v x a b))))
         (e-proj (body ds a b)
           (let* ((x (k-resolve-exp body)) (descs (k-resolve-descs ds))) (x-proj x descs a b)))
         (e-if (p c d a b)
@@ -1018,7 +1067,7 @@
   (lambda ()
     (begin
       (set k-extracts nil)
-      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
+      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
@@ -1551,18 +1600,76 @@
 (define k-solve (subr kstate (k-solved int k-desc) unit)
   (lambda (solved v d) (set solved (cons (cons v d) (get solved)))))
 
+;; `a ≤ b`: region `a` won't outlive region `b`. The same; `b` a constant
+;; (which never ends: `@name`, a fresh region, `const`); `b` bound around
+;; `a`'s binder; or `a`'s bound won't outlive `b`.
+(define k-outlived? (subr (maxeff (read @t) (alloc @t)) (k-region k-region) bool)
+  (lambda (a b)
+    (or (k-region=? a b)
+        (tagcase b
+          (r-var (w)
+            (tagcase a
+              (r-var (v)
+                (or (k-has-id? (k-outer-of v) w)
+                    (let ((c (k-bound-of v)))
+                      (and (not (null? c)) (and (not (k-region=? (car c) a)) (k-outlived? (car c) b))))))
+              (else x #f)))
+          (else y #t)))))
+
 ;; Each region binder nothing has solved gets a fresh region of its own,
-;; named after it.
-(define k-default-regions (subr kstate (k-binders k-solved) unit)
-  (lambda (kinds solved)
+;; named after it; or, if it has a bound, its bound, as solved (so `(rcons p
+;; x y)`, with nothing else saying, allocates at `p`'s own region). A bounded
+;; binder waits for its bound to be solved.
+(define k-default-bounded (subr kstate (k-binders k-binders k-solved) unit)
+  (lambda (all kinds solved)
     (if (null? kinds)
         #u
-        (let ((v (extract (car kinds) 1)))
+        (let* ((v (extract (car kinds) 1)) (bd (k-bound-of v)))
           (begin
-            (if (and (= (extract (car kinds) 2) 0) (null? (k-map-find (get solved) v)))
+            (if (and (= (extract (car kinds) 2) 0) (and (null? (k-map-find (get solved) v)) (not (null? bd))))
+                (tagcase (car bd)
+                  (r-var (w)
+                    (let ((f (k-map-find (get solved) w)))
+                      (cond ((not (null? f)) (tagcase (cdr (car f)) (dr (x) (k-solve solved v (dr x))) (else y #u)))
+                            ((k-unknown? all w) #u)
+                            (else (k-solve solved v (dr (car bd)))))))
+                  (else y (k-solve solved v (dr (car bd)))))
+                #u)
+            (k-default-bounded all (cdr kinds) solved))))))
+(define k-default-free (subr kstate (k-binders k-binders k-solved) unit)
+  (lambda (all kinds solved)
+    (if (null? kinds)
+        #u
+        (let* ((v (extract (car kinds) 1)) (bd (k-bound-of v))
+               (waits (and (not (null? bd)) (tagcase (car bd) (r-var (w) (k-unknown? all w)) (else y #f)))))
+          (begin
+            (if (and (= (extract (car kinds) 2) 0) (and (null? (k-map-find (get solved) v)) (not waits)))
                 (k-solve solved v (dr (k-fresh-region (string-append "@" (symbol->string (k-dvar-name v))))))
                 #u)
-            (k-default-regions (cdr kinds) solved))))))
+            (k-default-free all (cdr kinds) solved))))))
+
+(define k-default-regions (subr kstate (k-binders k-solved) unit)
+  (lambda (kinds solved)
+    (begin (k-default-bounded kinds kinds solved) (k-default-free kinds kinds solved))))
+
+;; Each bounded region binder, as solved, won't outlive its bound, as solved;
+;; or an error saying which would.
+(define k-check-bounds (subr checks (k-binders k-map int int) unit)
+  (lambda (kinds m a b)
+    (if (null? kinds)
+        #u
+        (let* ((v (extract (car kinds) 1)) (bd (k-bound-of v)))
+          (begin
+            (if (null? bd)
+                #u
+                (let ((r (k-subst-region (r-var v) m)) (c (k-subst-region (car bd) m)))
+                  (if (k-outlived? r c)
+                      #u
+                      (k-fail (k-cat5 (k-quote (symbol->string (k-dvar-name v))) " must not outlive "
+                                      (k-quote (k-region-show (car bd)))
+                                      ", and " (k-cat3 (k-region-show r) " could outlive " (k-region-show c)))
+                              a b))))
+            (k-check-bounds (cdr kinds) m a b))))))
 (define k-finish-each (subr checks (k-binders k-map int int int) k-map)
   (lambda (kinds m a b ft)
     (if (null? kinds)
@@ -1787,7 +1894,7 @@
       (begin
         (k-unify inner expected kinds solved (the k-trail (new nil)))
         (k-default-regions kinds solved)
-        (k-subst inner (k-finish kinds solved a b t))))))
+        (let ((m (k-finish kinds solved a b t))) (begin (k-check-bounds kinds m a b) (k-subst inner m)))))))
 (define k-plambda-matches? (subr (read @t) (kx k-ty) bool)
   (lambda (x et)
     (tagcase x
@@ -1955,7 +2062,7 @@
                     (k-fail (k-cat5 "this `poly` binds " (int->string (k-length bs)) " description(s); `proj` gave "
                                     (int->string (k-length ds)) "")
                             a b)
-                    (let ((result (k-subst inner (k-proj-map bs ds a b))))
+                    (let ((result (let ((m (k-proj-map bs ds a b))) (begin (k-check-bounds bs m a b) (k-subst inner m)))))
                       (k-te result (k-mask x (extract r 2) result)))))
               (else y (k-fail (string-append "`proj` needs a polymorphic value, not a " (k-show-ty t)) a b)))))
         (x-if (p c d a b)
@@ -2150,7 +2257,7 @@
                     (k-inst-told args params 0 kinds solved done-t done-e)
                     (k-inst-shapes args params 0 solved done-t)
                     (k-default-regions kinds solved)
-                    (k-subst inner (k-finish kinds solved a b ft)))))))))
+                    (let ((m (k-finish kinds solved a b ft))) (begin (k-check-bounds kinds m a b) (k-subst inner m))))))))))
   ;; What the arguments are, except the ones that need to be told.
   (k-inst-asked (subr checks (kxs k-ids int k-binders k-solved (arrayof int @t) (arrayof k-eff @t)) unit)
     (lambda (args params i kinds solved done-t done-e)

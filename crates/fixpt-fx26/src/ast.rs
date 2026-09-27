@@ -334,6 +334,12 @@ pub struct Arena {
     dvar_names: Vec<Sym>,
     /// Whether each description variable is a place.
     dvar_places: Vec<bool>,
+    /// Each region binder's bound, if it has one: `(r region p)`, a region
+    /// that won't outlive `p` (`docs/research/places-and-regions.md`).
+    dvar_bounds: Vec<Option<Region>>,
+    /// The region and place variables bound around each one's binder, which
+    /// it won't outlive: the order of lifetimes, by nesting.
+    dvar_outer: Vec<Vec<DVar>>,
 }
 
 impl Arena {
@@ -379,6 +385,8 @@ impl Arena {
     pub fn dvar(&mut self, name: Sym) -> DVar {
         self.dvar_names.push(name);
         self.dvar_places.push(false);
+        self.dvar_bounds.push(None);
+        self.dvar_outer.push(Vec::new());
         DVar(self.dvar_names.len() as u32 - 1)
     }
 
@@ -387,6 +395,30 @@ impl Arena {
         let v = self.dvar(name);
         self.dvar_places[v.0 as usize] = kind == Kind::Place;
         v
+    }
+
+    /// Give region binder `v` a bound: a region it won't outlive.
+    pub fn set_bound(&mut self, v: DVar, b: Region) {
+        self.dvar_bounds[v.0 as usize] = Some(b);
+    }
+    /// The bound of region binder `v`, if it has one.
+    pub fn bound(&self, v: DVar) -> Option<Region> {
+        self.dvar_bounds[v.0 as usize]
+    }
+    /// Record the region and place variables bound around `v`'s binder.
+    pub fn set_outer(&mut self, v: DVar, outer: Vec<DVar>) {
+        self.dvar_outer[v.0 as usize] = outer;
+    }
+
+    /// `a ≤ b`: region `a` won't outlive region `b`. The same; `b` a
+    /// constant (which never ends: `@name`, a fresh region, `const`); `b`
+    /// bound around `a`'s binder; or `a`'s bound won't outlive `b`.
+    pub fn outlived(&self, a: Region, b: Region) -> bool {
+        if a == b || !matches!(b, Region::Var(_)) {
+            return true;
+        }
+        let (Region::Var(v), Region::Var(w)) = (a, b) else { return false };
+        self.dvar_outer[v.0 as usize].contains(&w) || self.bound(v).is_some_and(|c| c != a && self.outlived(c, b))
     }
 
     /// Whether region `r` is a place: a variable bound as one.
@@ -412,6 +444,8 @@ impl Arena {
         self.exps.truncate(mark.exps);
         self.dvar_names.truncate(mark.dvars);
         self.dvar_places.truncate(mark.dvars);
+        self.dvar_bounds.truncate(mark.dvars);
+        self.dvar_outer.truncate(mark.dvars);
     }
 }
 

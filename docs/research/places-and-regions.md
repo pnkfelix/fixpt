@@ -194,10 +194,13 @@ check a size of.
    the evaluator.
 2. **The order by nesting**, in both checkers: each region and place
    variable knows the binder around it; `a ≤ b` by the rules above.
+   *Done 2026-09-27.*
 3. **Bounded region binders and the allocators with a place and a
    region**, with the default to the bound and `(alloc p)`. Test: a graph
    whose nodes and edges are two regions of one arena, and a region bound
-   outside a place refused for it.
+   outside a place refused for it. *Done 2026-09-27*
+   (`run/two-regions-one-place.fx`, `run/caller-place.fx`,
+   `regions/region-outlives-place.fx`, `regions/caller-region-outside.fx`).
 4. **`heap` as a place name.**
 5. **`letfreeze` and `(const p)`**, into `heap` first, then into any place
    in scope. *Into the heap done 2026-09-27*, ahead of steps 2–4: the

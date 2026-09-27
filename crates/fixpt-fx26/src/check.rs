@@ -38,6 +38,9 @@ pub struct Checker {
     pub env: Vec<(Sym, TyId)>,
     /// Description names in scope while parsing, innermost last.
     pub(crate) dscope: Vec<(Sym, DScope)>,
+    /// The region and place variables bound around what is being parsed,
+    /// by expressions (not types): the order of lifetimes, by nesting.
+    pub(crate) lifetimes: Vec<DVar>,
     pub(crate) base: HashMap<Sym, TyId>,
     pub(crate) void: TyId,
     int: TyId,
@@ -140,6 +143,7 @@ impl Checker {
             interner,
             env: Vec::new(),
             dscope: Vec::new(),
+            lifetimes: Vec::new(),
             base,
             void,
             int,
@@ -296,6 +300,7 @@ impl Checker {
                     }
                     map.insert(*v, d);
                 }
+                self.check_bounds(&binders, &map, span)?;
                 let result = self.subst(inner, &map);
                 let eff = self.mask(e, &eff, result);
                 Ok((result, eff))

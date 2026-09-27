@@ -419,6 +419,7 @@ impl Checker {
         }
         self.default_regions(&mut u);
         let map = self.finish(&u, span, ft)?;
+        self.check_bounds(&u.kinds, &map, span)?;
         let inst = self.subst(inner, &map);
         Ok((inst, done))
     }
@@ -449,17 +450,67 @@ impl Checker {
         self.unify(inner, expected, &mut u, &mut HashSet::new());
         self.default_regions(&mut u);
         let map = self.finish(&u, span, t)?;
+        self.check_bounds(&u.kinds, &map, span)?;
         Ok(self.subst(inner, &map))
     }
 
-    /// Give each region binder nothing has solved a fresh region of its own.
+    /// Give each region binder nothing has solved a fresh region of its own;
+    /// or, if it has a bound, its bound, as solved (so `(rcons p x y)`,
+    /// with nothing else saying, allocates at `p`'s own region).
     fn default_regions(&mut self, u: &mut Unknowns) {
         for (v, k) in u.kinds.clone() {
-            if k == Kind::Region && !u.solved.contains_key(&v) {
+            if k == Kind::Region
+                && !u.solved.contains_key(&v)
+                && let Some(b) = self.arena.bound(v)
+            {
+                let b = match b {
+                    Region::Var(w) => match u.solved.get(&w) {
+                        Some(D::Region(x)) => *x,
+                        _ if u.is_unknown(w) => continue,
+                        _ => b,
+                    },
+                    b => b,
+                };
+                u.solved.insert(v, D::Region(b));
+            }
+        }
+        for (v, k) in u.kinds.clone() {
+            // A bounded binder waits for its bound to be solved.
+            let waits = matches!(self.arena.bound(v), Some(Region::Var(w)) if u.is_unknown(w));
+            if k == Kind::Region && !u.solved.contains_key(&v) && !waits {
                 let r = self.fresh_region(v);
                 u.solved.insert(v, D::Region(r));
             }
         }
+    }
+
+    /// Each bounded region binder, as solved, won't outlive its bound, as
+    /// solved; or an error saying which would.
+    pub(crate) fn check_bounds(&self, kinds: &[(DVar, Kind)], map: &HashMap<DVar, D>, span: fixpt_read::Span) -> R<()> {
+        let region = |r: Region| match r {
+            Region::Var(w) => match map.get(&w) {
+                Some(D::Region(x)) => *x,
+                _ => r,
+            },
+            r => r,
+        };
+        for (v, _) in kinds {
+            let Some(b) = self.arena.bound(*v) else { continue };
+            let (r, b) = (region(Region::Var(*v)), region(b));
+            if !self.arena.outlived(r, b) {
+                return Err(FxError::at(
+                    span,
+                    format!(
+                        "`{}` must not outlive `{}`, and {} could outlive {}",
+                        self.interner.name(self.arena.dvar_name(*v)),
+                        self.show_region(self.arena.bound(*v).expect("bounded")),
+                        self.show_region(r),
+                        self.show_region(b)
+                    ),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// A region no value so far is in, named after the binder it stands for.

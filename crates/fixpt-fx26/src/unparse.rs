@@ -89,7 +89,10 @@ impl Checker {
                             Kind::Effect => "effect",
                             Kind::Type => "type",
                         };
-                        format!("({} {k})", self.interner.name(self.arena.dvar_name(*v)))
+                        match self.arena.bound(*v) {
+                            Some(b) => format!("({} {k} {})", self.interner.name(self.arena.dvar_name(*v)), self.show_region(b)),
+                            None => format!("({} {k})", self.interner.name(self.arena.dvar_name(*v))),
+                        }
                     })
                     .collect();
                 format!("(poly ({}) {})", bs.join(" "), self.show_ty_on(body, path))

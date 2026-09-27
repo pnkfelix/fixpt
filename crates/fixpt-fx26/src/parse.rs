@@ -79,12 +79,24 @@ impl Checker {
         let mut out = Vec::new();
         for b in self.items(s, "binders")? {
             let pair = self.items(b, "a binder")?;
-            let [name, kind] = pair else {
-                return Err(FxError::at(b.span, "a binder is `(name kind)`"));
+            let (name, kind, bound) = match pair {
+                [name, kind] => (name, kind, None),
+                [name, kind, bound] => (name, kind, Some(bound)),
+                _ => return Err(FxError::at(b.span, "a binder is `(name kind)`, or `(name region place)`")),
             };
             let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a binder's name"))?;
             let kind = self.parse_kind(kind)?;
+            // `(r region p)`: a region that won't outlive `p`, a place
+            // bound before it.
+            let bound = match bound {
+                Some(p) if kind == Kind::Region => Some(self.parse_place(p)?),
+                Some(p) => return Err(FxError::at(p.span, "only a region binder has a bound: `(name region place)`")),
+                None => None,
+            };
             let v = self.arena.dvar_of(name, kind);
+            if let Some(p) = bound {
+                self.arena.set_bound(v, p);
+            }
             self.dscope.push((name, DScope::Var(v, kind)));
             out.push((v, kind));
         }
@@ -504,11 +516,20 @@ impl Checker {
                 let [_, binders, body @ ..] = &items[..] else {
                     return Err(FxError::at(span, "`(plambda ((name kind) …) body …)`"));
                 };
-                let depth = self.dscope.len();
-                let parsed = self
-                    .parse_binders(binders)
-                    .and_then(|b| Ok((b, self.parse_body(span, body)?)));
+                let (depth, lives) = (self.dscope.len(), self.lifetimes.len());
+                // A procedure's regions and places outlive whatever its body
+                // binds.
+                let parsed = self.parse_binders(binders).and_then(|b| {
+                    for (v, k) in &b {
+                        if matches!(k, Kind::Region | Kind::Place) {
+                            self.arena.set_outer(*v, self.lifetimes[..lives].to_vec());
+                            self.lifetimes.push(*v);
+                        }
+                    }
+                    Ok((b, self.parse_body(span, body)?))
+                });
                 self.dscope.truncate(depth);
+                self.lifetimes.truncate(lives);
                 let (binders, body) = parsed?;
                 Ok(self.arena.exp(span, Exp::PLambda { binders, body }))
             }
@@ -686,8 +707,11 @@ impl Checker {
                 // region), `letregion` a region only.
                 let kind = if matches!(form, RegionForm::Region | RegionForm::Freeze) { Kind::Region } else { Kind::Place };
                 let region = self.arena.dvar_of(name, kind);
+                self.arena.set_outer(region, self.lifetimes.clone());
                 self.dscope.push((name, DScope::Var(region, kind)));
+                self.lifetimes.push(region);
                 let body = self.parse_body(span, body);
+                self.lifetimes.pop();
                 self.dscope.truncate(depth);
                 Ok(self.arena.exp(span, Exp::LetRegion { form, region, body: body? }))
             }
