@@ -248,6 +248,19 @@ pub fn blr(n: Reg) -> u32 {
 /// `nop`.
 pub const NOP: u32 = 0xD503_201F;
 
+/// `sdiv xd, xn, xm`: `n / m`, rounded toward zero.
+pub fn sdiv(d: Reg, n: Reg, m: Reg) -> u32 {
+    0x9AC0_0C00 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `msub xd, xn, xm, xa`: `a − n × m`.
+pub fn msub(d: Reg, n: Reg, m: Reg, a: Reg) -> u32 {
+    0x9B00_8000 | r(m) << 16 | r(a) << 10 | r(n) << 5 | r(d)
+}
+/// `eor xd, xn, xm`.
+pub fn eor(d: Reg, n: Reg, m: Reg) -> u32 {
+    0xCA00_0000 | r(m) << 16 | r(n) << 5 | r(d)
+}
+
 /// `ret`.
 pub fn ret() -> u32 {
     0xD65F_03C0
@@ -270,5 +283,11 @@ mod tests {
         assert_eq!(ldur_w(1, 2, -8), 0xb85f8041);
         assert_eq!(add_lsl(0, 16, 15, 8), 0x8b0f2200);
         assert_eq!(add_lsl(14, 11, 13, 2), 0x8b0d096e);
+        assert_eq!(sdiv(0, 1, 2), 0x9ac20c20);
+        assert_eq!(sdiv(13, 14, 15), 0x9acf0dcd);
+        assert_eq!(msub(0, 1, 2, 3), 0x9b028c20);
+        assert_eq!(msub(16, 13, 14, 15), 0x9b0ebdb0);
+        assert_eq!(eor(0, 1, 2), 0xca020020);
+        assert_eq!(eor(13, 14, 15), 0xca0f01cd);
     }
 }

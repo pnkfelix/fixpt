@@ -829,3 +829,9 @@ Calls of primitives in stage 2: 1.24 M → 0.95 M; stage 2 0.22 → 0.20 s.
 Left at the top: `modulo` (100 k, a table's bucket), and the reader's
 work per atom, and the parser's names as strings (`symbol->string`
 then `string=?`).
+
+`modulo` of two fixnums is now inline too (`sdiv`, `msub`, and the
+divisor's sign; a zero divisor calls out), checked against the lowering
+on every combination of signs (`tests/programs/run/modulo.fx`). It was
+the tables' commonest (100 k); stage 2 stays at 0.19–0.20 s, since the
+call it saves was a small part of it.

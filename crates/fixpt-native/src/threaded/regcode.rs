@@ -343,6 +343,22 @@ impl Asm {
                 self.value(RESULT, Value::FALSE);
                 self.bind(end);
             }
+            // `modulo` of two fixnums, whose bits are their values times
+            // 8: the quotient's sign rounded toward zero, the remainder the
+            // divisor's sign, as Scheme's `modulo` has it. Division by zero
+            // is the call-out's to report.
+            "modulo" => {
+                let end = self.label();
+                self.cbz(2, slow);
+                self.e(sdiv(X13, 1, 2));
+                self.e(msub(RESULT, X13, 2, 1));
+                self.cbz(RESULT, end);
+                self.e(eor(X14, RESULT, 2));
+                self.e(cmp_imm(X14, 0));
+                self.b_cond(Cond::Ge, end);
+                self.e(add(RESULT, RESULT, 2));
+                self.bind(end);
+            }
             _ => self.inline(what, slow),
         }
     }
@@ -576,6 +592,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     ("prim", 1) if prim_named(k(o(0)), "char-whitespace?") => Some("whitespace"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
                     ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),
+                    ("prim", 2) if prim_named(k(o(0)), "modulo") => Some("modulo"),
                     ("prim", 2) if prim_named(k(o(0)), "%region-new") => Some("rnew"),
                     ("prim", 1) if prim_named(k(o(0)), "%region-make-icell") => Some("ricell"),
                     ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),
