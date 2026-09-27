@@ -1018,6 +1018,15 @@ the order it will be done. Each is committed when done, and marked here.
    compiled (a later definition's call of an earlier one); and
    let-conversion.)*
 5. **Register code from the compiler written in FX-26** (13h′ (e)).
+   *(Done 2026-09-26: `src/regcode.fx`, a port of `threaded/regcode.rs`,
+   called by `compile.fx` through `c-register-code` when `c-registers` is
+   set (`compile-registers!`); `set-register-twin` makes the register word.
+   It declines where the Rust one does, noting it in a flag rather than
+   returning early. Every test program's register code is the Rust
+   compiler's, cell for cell (106 register words), and so is the whole
+   bootstrap's, made by the compiler in FX-26 running as register code.
+   Open: the REPL's `--fx26-run threaded` still makes no register code,
+   since it runs words on a machine that does not run it.)*
 6. **A nursery, and a write barrier with a remembered set** (raised by
    the user 2026-09-26, "make it toggleable"): the nursery's size zero
    by default, so that it costs nothing when off; measured against the

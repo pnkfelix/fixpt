@@ -1151,6 +1151,19 @@ prims! {
         if !rt.heap.is_a(a[0], ObjType::Symbol) { return rt.type_error("a symbol", a[0]); }
         Ok(rt.heap.obj_ref(a[0], 1))
     });
+    // Register code (PLAN.md 13h′) for threaded word `a[0]`, from its cells:
+    // made, checked, and set as the word's twin, as the Rust compiler does.
+    "%set-register-twin", 2, Some(2), simple!(|rt, a| {
+        let Some(cells) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of cells", a[1]) };
+        let name = rt.heap.bloblet_slot(a[0], fixpt_heap::layout::threaded::WORD_NAME);
+        match rt.heap.make_register_word(name, a[0], &cells) {
+            Ok(rw) => {
+                rt.heap.set_bloblet_slot(a[0], fixpt_heap::layout::threaded::WORD_TWIN, rw);
+                Ok(rw)
+            }
+            Err(e) => rt.fail(&format!("not register code: {e}"), &[a[0]]),
+        }
+    });
 }
 
 /// Promise states. `[state, payload]`.

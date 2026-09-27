@@ -83,6 +83,7 @@
       ((string=? n "icell-put!") "%fx26-icell-put!")
       ((string=? n "icell-get") "%fx26-icell-get")
       ((string=? n "make-word") "%make-word")
+      ((string=? n "set-register-twin") "%set-register-twin")
       ((string=? n "tword-fields") "%tword-fields")
       ((string=? n "disassemble") "%disassemble")
       ((string=? n "tword-int?") "%tword-fixnum?")

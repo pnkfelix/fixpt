@@ -142,6 +142,17 @@
 (define c-this-loc (ref loc @k) (new (at-loop 0)))
 (define c-this-params (ref int @k) (new -1))
 (define c-this-start (ref int @k) (new 0))
+;; What register code knows of the procedure being compiled, when it is one
+;; that knows itself: its name, where the name is, and its arity.
+(define-type c-this (productof (1 symbol) (2 loc) (3 int)))
+
+;; Whether each lambda also gets register code (PLAN.md 13h′), as its word's
+;; twin; and the register compiler, `regcode.fx`, which sets itself here: a
+;; lambda's register cells, or none where it declines.
+(define c-registers (ref bool @k) (new #f))
+(define c-register-code
+  (ref (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv (listof c-this @k)) (listof wcell @k)) @k)
+  (new (lambda (ps body inner this) (the (listof wcell @k) nil))))
 
 ;; Whether `l` is where the procedure being compiled is bound: its loop, or
 ;; the free value holding its closure.
@@ -668,6 +679,20 @@
   ;; made, its free value's index and the slot the sibling will be in.
   (c-lambda (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv int code syms (listof exp @k)) patches)
     (lambda (ps body e depth c own0 region)
+      (let* ((made (begin (if (null? region) #u (c-exp (car region) e depth c #f)) (c-lambda-word ps body e own0)))
+             (fv (extract made 2))
+             (patches (c-push-all fv e depth 0 c))
+             (w (wcell-word (extract made 1))))
+        (begin
+          (if (null? region)
+              (begin (c-op1 c routine-closure w) (c-emit c (i-cell (wcell-int (c-length fv)))))
+              (begin (c-lit c w) (c-prim c "%region-closure" (+ 2 (c-length fv)))))
+          patches))))
+  ;; A lambda's word, and the names its closure captures, in order; with its
+  ;; register code as its twin, when this compiler makes register code
+  ;; (`c-registers`).
+  (c-lambda-word (subr compiles ((listof (productof (1 symbol) (2 syns-a)) @a) exp cenv syms) (productof (1 tword) (2 syms)))
+    (lambda (ps body e own0)
       (let* ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
              ;; A parameter of the same name hides the procedure.
              (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
@@ -684,9 +709,10 @@
              (n (c-count-params ps))
              (body-code (the code (new nil)))
              (outer-name (get c-this-name)) (outer-loc (get c-this-loc))
-             (outer-params (get c-this-params)) (outer-start (get c-this-start)))
-        (let ((patches (begin (if (null? region) #u (c-exp (car region) e depth c #f)) (c-push-all fv e depth 0 c))))
-         (begin
+             (outer-params (get c-this-params)) (outer-start (get c-this-start))
+             (this (the (listof c-this @k)
+                     (if (null? own) nil (cons (product (1 (car own)) (2 (car (c-find inner (car own)))) (3 n)) nil)))))
+        (begin
           (if (null? own)
               (set c-this-params -1)
               (let ((start (c-fresh)))
@@ -697,11 +723,13 @@
           (set c-this-name outer-name) (set c-this-loc outer-loc)
           (set c-this-params outer-params) (set c-this-start outer-start)
           ;; Named for where its body starts, so that a profile can say which.
-          (let ((w (wcell-word (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body))))))))
-            (if (null? region)
-                (begin (c-op1 c routine-closure w) (c-emit c (i-cell (wcell-int (c-length fv)))))
-                (begin (c-lit c w) (c-prim c "%region-closure" (+ 2 (c-length fv))))))
-          patches)))))
+          (let ((w (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body)))))))
+            (begin
+              (if (get c-registers)
+                  (let ((cells ((get c-register-code) ps body inner this)))
+                    (if (null? cells) #u (begin (set-register-twin w cells) #u)))
+                  #u)
+              (product (1 w) (2 fv))))))))
   ;;; ------------------------------------------------------------ applications
   (c-app (subr compiles (exp (listof exp @a) cenv int code bool) unit)
     (lambda (f args e depth c tail)

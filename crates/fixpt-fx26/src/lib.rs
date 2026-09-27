@@ -31,6 +31,10 @@ pub const EVALUATOR: &str = include_str!("evaluator.fx");
 /// The compiler from FX-26 to threaded words, written in FX-26.
 pub const COMPILER: &str = include_str!("compile.fx");
 
+/// The register compiler written in FX-26 (PLAN.md 13h′ (e)): register code
+/// for each lambda, as its word's twin, when `c-registers` is set.
+pub const REGCODE: &str = include_str!("regcode.fx");
+
 /// The standard operations the compiler written in FX-26 runs as runtime
 /// primitives, generated from the lowering's table.
 pub const STANDARD_OPS: &str = include_str!("standard.fx");
@@ -53,7 +57,7 @@ pub const CHECKER: &str = include_str!("check.fx");
 /// compiler written in FX-26, with the layout they share, as one program:
 /// each needs the types of the ones before.
 pub fn front_end() -> String {
-    format!("{EAGER_READER}\n{PARSER}\n{TABLE}\n{CHECKER}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}\n{ARM64}\n{NATIVE_LAYOUT}\n{NATIVE}")
+    format!("{EAGER_READER}\n{PARSER}\n{TABLE}\n{CHECKER}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}\n{REGCODE}\n{ARM64}\n{NATIVE_LAYOUT}\n{NATIVE}")
 }
 
 /// A driver for the front end, in FX-26: a text read, parsed, checked and

@@ -213,6 +213,18 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
 /// it found (`facts`, from `checked-extracts` or [`rust_facts`]): the word
 /// that runs the program, as a handle in the caller's scope, or why the
 /// compiler would not make one.
+/// The same, with each lambda's register code as its word's twin, made by the
+/// register compiler written in FX-26 (`regcode.fx`).
+pub fn compile_to_word_with_registers(scheme: &mut Session, file: FileId, text: &str, facts: Handle) -> R<Result<Handle, String>> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let on = scheme.make(|_| Value::TRUE);
+    scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[on]).map_err(|e| fail(e.to_string()))?;
+    let out = compile_to_word(scheme, file, text, facts);
+    let off = scheme.make(|_| Value::FALSE);
+    scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(|e| fail(e.to_string()))?;
+    out
+}
+
 pub fn compile_to_word(scheme: &mut Session, file: FileId, text: &str, facts: Handle) -> R<Result<Handle, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let tops = parse_to_trees(scheme, file, text)?;

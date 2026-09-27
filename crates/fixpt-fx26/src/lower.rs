@@ -126,6 +126,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("icell-put!", "%fx26-icell-put!", false),
     ("icell-get", "%fx26-icell-get", false),
     ("make-word", "%make-word", false),
+    ("set-register-twin", "%set-register-twin", false),
     ("tword-fields", "%tword-fields", false),
     ("disassemble", "%disassemble", false),
     ("tword-int?", "%tword-fixnum?", false),

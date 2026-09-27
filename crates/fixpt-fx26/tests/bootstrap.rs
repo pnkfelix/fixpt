@@ -126,10 +126,16 @@ fn fixpoint_as_register_code() {
         let none = sc.make(|_| Value::NULL);
         let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
+        // Stage 2 with register code too, by the register compiler written
+        // in FX-26 (`regcode.fx`): its twins the same as the Rust one's.
+        let registers = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 9) });
+        let on = sc.make(|_| Value::TRUE);
+        let on = sc.call_global("list", &[on]).expect("a list");
+        sc.call_global("%run-word", &[registers, on]).expect("register code on");
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
         let args = sc.call_global("list", &[std, prog]).expect("a list");
         let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
-        lap("stage 2 compiled, by the compiler run as register code");
+        lap("stage 2 compiled, with register code, by the compiler run as register code");
         if std::env::var_os("FIXPT_GC_REPORT").is_some() {
             let h = &sc.runtime_unrooted().heap;
             eprintln!(

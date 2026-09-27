@@ -14,6 +14,11 @@ use std::collections::HashMap;
 mod common;
 use common::same_code;
 
+thread_local! {
+    /// Register words compared, in all.
+    static REGISTER_WORDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The Rust checker's forms for `text`, and the checker, or why not.
 fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
     let mut c = Checker::new();
@@ -31,16 +36,31 @@ fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
 /// Both compilers on `text`, in one session: whether they made the same
 /// words, or what differs. `None` if the program does not check.
 fn compare(s: &mut Fx26Session, text: &str) -> Option<Result<(), String>> {
+    compare_with(s, text, false)
+}
+
+/// The same, with `registers`: each lambda's register code, its word's twin,
+/// made by both compilers' register compilers and compared too.
+fn compare_with(s: &mut Fx26Session, text: &str, registers: bool) -> Option<Result<(), String>> {
     let (c, tops) = checked(text).ok()?;
     Some(s.scheme.scope(|sc| {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), text).map_err(|e| e.message)?;
-        let theirs = fixpt_fx26::syn::compile_to_word(sc, FileId(0), text, facts).map_err(|e| e.message)?;
+        let theirs = if registers {
+            fixpt_fx26::syn::compile_to_word_with_registers(sc, FileId(0), text, facts)
+        } else {
+            fixpt_fx26::syn::compile_to_word(sc, FileId(0), text, facts)
+        }
+        .map_err(|e| e.message)?;
         let mut ours_err = None;
-        let ours = sc.make(|m| match fixpt_fx26::threaded::Compiler::new(m.heap(), &c, text).program(&tops) {
-            Ok(w) => w,
-            Err(e) => {
-                ours_err = Some(e);
-                Value::NULL
+        let ours = sc.make(|m| {
+            let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, text);
+            comp.registers = registers;
+            match comp.program(&tops) {
+                Ok(w) => w,
+                Err(e) => {
+                    ours_err = Some(e);
+                    Value::NULL
+                }
             }
         });
         match (theirs, ours_err) {
@@ -52,6 +72,12 @@ fn compare(s: &mut Fx26Session, text: &str) -> Option<Result<(), String>> {
                 sc.make(|m| {
                     let (a, b) = (m.get(theirs), m.get(ours));
                     same = same_code(m.heap(), a, b, &mut HashMap::new(), &mut why);
+                    if same && registers {
+                        let fx = common::register_words(m.heap(), a, &mut Default::default());
+                        let rust = common::register_words(m.heap(), b, &mut Default::default());
+                        REGISTER_WORDS.with(|n| n.set(n.get() + fx));
+                        assert_eq!(fx, rust, "as many register words");
+                    }
                     Value::NULL
                 });
                 if same { Ok(()) } else { Err(why) }
@@ -89,6 +115,28 @@ fn every_test_program_compiles_the_same() {
     eprintln!("{same} programs compile the same");
     assert!(report.is_empty(), "{}", report.join("\n"));
     assert!(same >= 15, "only {same}");
+}
+
+/// The same, with register code: the register compiler written in FX-26
+/// (`regcode.fx`) makes each lambda's twin as the Rust one does.
+#[test]
+fn every_test_program_has_the_same_register_code() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    load_eager_reader(&mut s.scheme).expect("loads");
+    s.scheme.engine.set_step_limit(None);
+    let (mut report, mut same) = (Vec::new(), 0);
+    for (name, text) in programs() {
+        match compare_with(&mut s, &text, true) {
+            None => {}
+            Some(Ok(())) => same += 1,
+            Some(Err(why)) => report.push(format!("{name}: {why}")),
+        }
+    }
+    let words = REGISTER_WORDS.with(|n| n.get());
+    eprintln!("{same} programs have the same register code, {words} register words in all");
+    assert!(report.is_empty(), "{}", report.join("\n"));
+    assert!(same >= 15, "only {same}");
+    assert!(words >= 50, "only {words} register words were compared");
 }
 
 /// The Rust compiler's words, run on the Rust machine, as the lowering runs

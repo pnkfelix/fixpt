@@ -506,6 +506,11 @@ pub fn fx26_module() -> String {
     for (i, (name, effect)) in threaded::ROUTINES.iter().enumerate() {
         out.push_str(&format!("(define routine-{} int {i})  ; {effect}\n", fx_name(name)));
     }
+    out.push_str("\n;;; Register code's instructions by number, and how many registers it has.\n");
+    for (i, (name, n, meaning)) in regcode::OPS.iter().enumerate() {
+        out.push_str(&format!("(define rop-{} int {i})  ; {n}: {meaning}\n", fx_name(name)));
+    }
+    out.push_str(&format!("(define register-regs int {})\n", regcode::REGS));
     out
 }
 

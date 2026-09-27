@@ -135,3 +135,34 @@
 (define routine-pair-car int 46)  ; ( pair -- a ), a pair
 (define routine-pair-cdr int 47)  ; ( pair -- b ), a pair
 (define routine-field int 48)  ; ( obj -- x ), field k of a bloblet that has it; k the next cell
+
+;;; Register code's instructions by number, and how many registers it has.
+(define rop-args int 0)  ; 1: entered with n arguments in REG1…REGn; first, and only first (arities are static: nothing is checked)
+(define rop-const int 1)  ; 1: RESULT := x, the operand
+(define rop-global int 2)  ; 1: RESULT := the value in global cell g
+(define rop-setglbl int 3)  ; 1: global cell g := RESULT
+(define rop-reg int 4)  ; 1: RESULT := REGk
+(define rop-setreg int 5)  ; 1: REGk := RESULT
+(define rop-movereg int 6)  ; 2: REGk2 := REGk1
+(define rop-lexical int 7)  ; 1: RESULT := free value i of the closure running (REG0)
+(define rop-save int 8)  ; 1: push a frame of n slots, each #f
+(define rop-pop int 9)  ; 1: pop the frame of n slots
+(define rop-stack int 10)  ; 1: RESULT := frame slot n
+(define rop-setstk int 11)  ; 1: frame slot n := RESULT
+(define rop-load int 12)  ; 2: REGk := frame slot n
+(define rop-store int 13)  ; 2: frame slot n := REGk
+(define rop-op1 int 14)  ; 1: RESULT := threaded routine r applied to RESULT
+(define rop-op2 int 15)  ; 2: RESULT := threaded routine r applied to RESULT and REGk
+(define rop-op2imm int 16)  ; 2: RESULT := threaded routine r applied to RESULT and x
+(define rop-field int 17)  ; 1: RESULT := field k of the bloblet in RESULT
+(define rop-setfield int 18)  ; 2: field k of the bloblet in RESULT := REGj
+(define rop-prim int 19)  ; 2: RESULT := runtime primitive p applied to REG1…REGn; may collect
+(define rop-lambda int 20)  ; 2: RESULT := a closure of threaded word w over REG1…REGn; may collect
+(define rop-invoke int 21)  ; 1: call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect
+(define rop-tailinvoke int 22)  ; 1: the same in tail position, the frame popped: its value is this one's
+(define rop-return int 23)  ; 0: return RESULT, the frame popped
+(define rop-branch int 24)  ; 1: skip the operand's count of cells, counted after it
+(define rop-branchf int 25)  ; 1: the same if RESULT is #f
+(define rop-threaded int 26)  ; 2: threaded routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect
+(define rop-invokeself int 27)  ; 1: call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may collect
+(define register-regs int 8)
