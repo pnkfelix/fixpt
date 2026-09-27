@@ -19,6 +19,8 @@
 //! That is a guess about intent, not a parse: a long printed value such as
 //! `#<closure …>` counts too, which is intended.
 
+pub mod sexp_edit;
+
 use std::path::{Path, PathBuf};
 
 /// A snippet longer than this many lines belongs in a file.

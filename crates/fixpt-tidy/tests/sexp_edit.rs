@@ -1,0 +1,59 @@
+//! `sexp-edit`'s edits (`fixpt_tidy::sexp_edit`), on a small FX-26 file.
+
+use fixpt_read::SyntaxProfile;
+use fixpt_tidy::sexp_edit as se;
+
+const SAMPLE: &str = include_str!("sexp/sample.fx");
+const P: SyntaxProfile = SyntaxProfile::FX26;
+
+#[test]
+fn finds_definitions_and_define_rec_members() {
+    let names: Vec<String> = se::definitions(SAMPLE, P).unwrap().into_iter().map(|d| d.name).collect();
+    assert_eq!(names, ["a", "b", "c", "d", "s"]);
+    let a = se::find(SAMPLE, P, "a").unwrap();
+    assert!(SAMPLE[a.lead..a.end].starts_with(";; A comment about `a`."));
+    assert!(se::find(SAMPLE, P, "zz").is_err());
+}
+
+#[test]
+fn replaces_and_inserts_by_name_and_refuses_what_does_not_read() {
+    let out = se::replace(SAMPLE, P, "d", "(d (subr pure (int) int) (lambda (n) n))").unwrap();
+    assert!(out.contains("  (d (subr pure (int) int) (lambda (n) n)))"));
+    // One closing parenthesis too many: refused, nothing changed.
+    assert!(se::replace(SAMPLE, P, "b", "(define b int 1))").is_err());
+    let out = se::insert_before(SAMPLE, P, "b", ";; new\n(define z int 1)").unwrap();
+    assert!(out.contains(";; new\n(define z int 1)\n(define b"));
+    let out = se::insert_after(SAMPLE, P, "c", "(e (subr pure () int) (lambda () 1))").unwrap();
+    assert!(out.contains("(c n))))") || out.contains("\n  (e (subr pure () int)"));
+}
+
+#[test]
+fn moves_a_definition_with_its_comments() {
+    let out = se::move_before(SAMPLE, P, "b", "a").unwrap();
+    let b = out.find("(define b").unwrap();
+    let a = out.find(";; A comment about `a`.").unwrap();
+    assert!(b < a, "{out}");
+    let out = se::move_before(SAMPLE, P, "a", "s").unwrap();
+    assert!(out.find(";; A comment about `a`.").unwrap() > out.find("(define-rec").unwrap(), "{out}");
+}
+
+#[test]
+fn renames_symbols_but_not_strings() {
+    let (out, n) = se::rename(SAMPLE, P, "b", "bee", None).unwrap();
+    assert_eq!(n, 2);
+    assert!(out.contains("(bee x)") && out.contains("(define bee") && out.contains("\"b is not a symbol here\""));
+    // Within `c` only: its parameter and its two uses, not `d`'s.
+    let (_, n) = se::rename(SAMPLE, P, "n", "k", Some("c")).unwrap();
+    assert_eq!(n, 3);
+}
+
+#[test]
+fn reports_values_used_before_their_definitions() {
+    let early = se::order(&[(SAMPLE.to_string(), P)]).unwrap();
+    let names: Vec<&str> = early.iter().map(|e| e.name.as_str()).collect();
+    // `a` uses `b`, defined after it; `c` and `d` are one group.
+    assert_eq!(names, ["b"]);
+    // A parameter of the same name is no use of the definition.
+    let shadow = "(define f (subr pure (int) int) (lambda (g) g))\n(define g int 1)\n";
+    assert!(se::order(&[(shadow.to_string(), P)]).unwrap().is_empty());
+}

@@ -5,5 +5,8 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+fixpt-read = { path = "../fixpt-read" }
+
 [lints]
 workspace = true
