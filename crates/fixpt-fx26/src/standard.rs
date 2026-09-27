@@ -43,6 +43,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("null?", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr pure ((pairof t1 t2 r)) bool)))"),
     ("+", "(subr pure (int int) int)"),
     ("-", "(subr pure (int int) int)"),
+    // A finite list's length, as a natural of its size.
+    ("length", "(poly ((t type) (n size)) (subr pure ((nlist t n)) (nat n)))"),
     ("=", "(subr pure (int int) bool)"),
     (
         "cwcc",

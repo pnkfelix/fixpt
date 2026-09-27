@@ -218,6 +218,9 @@ impl Checker {
             if name == "void" {
                 return Ok(self.void);
             }
+            if name == "nat" && self.lookup_desc(sym).is_none() {
+                return Ok(self.arena.ty(Ty::Nat(Size::Finite)));
+            }
             if let Some(&t) = self.base.get(&sym) {
                 return Ok(t);
             }
@@ -298,6 +301,14 @@ impl Checker {
                     },
                 };
                 Ok(self.arena.ty(Ty::NList { elem, size, region }))
+            }
+            // `(nat size)`: exactly that natural.
+            "nat" => {
+                let [_, n] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(nat size)`"));
+                };
+                let size = self.parse_size(n)?;
+                Ok(self.arena.ty(Ty::Nat(size)))
             }
             "ref" => {
                 let [_, t, r] = &items[..] else {
@@ -895,8 +906,11 @@ impl Checker {
                 let [_, e, n, arm, els] = &items[..] else {
                     return Err(FxError::at(span, usage));
                 };
-                let Some(k) = self.literal_int(n).filter(|k| *k >= 0) else {
-                    return Err(FxError::at(n.span, "a length is a natural number"));
+                // A natural literal, or a variable holding a `nat`.
+                let k = match (self.literal_int(n), n.as_symbol()) {
+                    (Some(k), _) if k >= 0 => Exp::Int(k),
+                    (None, Some(v)) => Exp::Var(v),
+                    _ => return Err(FxError::at(n.span, "a length is a natural number, or a variable holding one")),
                 };
                 let [x, body] = self.items(arm, usage)? else {
                     return Err(FxError::at(arm.span, usage));
@@ -908,9 +922,9 @@ impl Checker {
                     c.arena.exp(span, Exp::Var(s))
                 };
                 let tmp = self.interner.intern("%confirm-value");
-                let (f, a, l) = (var(self, "length-is?"), var(self, "%confirm-value"), self.arena.exp(span, Exp::Int(k)));
+                let (f, a, l) = (var(self, "length-is?"), var(self, "%confirm-value"), self.arena.exp(span, k.clone()));
                 let test = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
-                let (f, a, l) = (var(self, "certify-length"), var(self, "%confirm-value"), self.arena.exp(span, Exp::Int(k)));
+                let (f, a, l) = (var(self, "certify-length"), var(self, "%confirm-value"), self.arena.exp(span, k));
                 let cert = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
                 let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
                 let branch = self.arena.exp(span, Exp::If { test, then, els });

@@ -67,6 +67,10 @@ struct Walk<'a> {
     scope: Vec<(Sym, Vec<Tracked>)>,
     /// Bounds the tests on the way down have put on parameters.
     guards: Vec<(usize, Bound)>,
+    /// The current member's parameters that are `nat`s: bounded below by
+    /// 0 without a test, since every argument passed for one is checked a
+    /// natural.
+    naturals: Vec<usize>,
     calls: Vec<(usize, usize, Graph)>,
     /// For each call, whether it counts an integer down, or up, with no
     /// test bounding it that way.
@@ -134,6 +138,7 @@ impl Checker {
             current: 0,
             scope: Vec::new(),
             guards: Vec::new(),
+            naturals: Vec::new(),
             calls: Vec::new(),
             unbounded: Vec::new(),
             passed: Vec::new(),
@@ -214,10 +219,15 @@ impl Walk<'_> {
             let tys = c.param_types(*ty);
             self.current = i;
             self.scope.clear();
+            self.naturals.clear();
             for (j, p) in params.iter().enumerate() {
                 let Some(t) = tys.get(j).copied() else { return false };
                 let mut known = vec![Tracked::Part { param: j, strict: false, ty: Some(t) }];
-                if c.arena.resolve(t) == c.arena.resolve(c.int) {
+                let natural = matches!(c.arena.get(c.arena.resolve(t)), Ty::Nat(_));
+                if natural {
+                    self.naturals.push(j);
+                }
+                if natural || c.arena.resolve(t) == c.arena.resolve(c.int) {
                     known.push(Tracked::Int { param: j, offset: 0 });
                 }
                 self.scope.push((*p, known));
@@ -613,7 +623,7 @@ impl Walk<'_> {
                 match k {
                     Tracked::Part { param, strict, .. } => add((param, Measure::Part), (q, Measure::Part), strict),
                     Tracked::Int { param, offset } => {
-                        let has = |b| self.guards.contains(&(param, b));
+                        let has = |b| self.guards.contains(&(param, b)) || (b == Bound::Lower && self.naturals.contains(&param));
                         if offset < 0 && !has(Bound::Lower) {
                             unbounded.get_or_insert("it counts down, but nothing fixed bounds the count below");
                         }

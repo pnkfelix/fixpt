@@ -84,7 +84,10 @@
   (ty-named int (listof k-desc finite))
   ;; `(nlist T size)`: a list frozen at the region (always finite) with `size`
   ;; elements, or some number (`docs/research/sizes.md`).
-  (ty-nlist int k-size k-region))
+  (ty-nlist int k-size k-region)
+  ;; `(nat size)`: a natural, exactly `size`; `nat` is `(nat finite)`.
+  ;; Every one is an `int` (`docs/research/sizes.md`, N5d).
+  (ty-nat k-size))
 
 (define-type k-map (listof (pairof int k-desc @t) finite))
 
@@ -271,7 +274,10 @@
 ;; The variables `acyclic?` has just found acyclic, in the branch where it
 ;; did: each by name and by which binding it is (how deep its name's stack).
 (define k-certified (ref (listof (pairof symbol int @t) finite) @t) (new nil))
-(define k-certified-lengths (ref (listof (productof (1 symbol) (2 int) (3 int)) finite) @t) (new nil))
+;; The sizes given to `nat` variables of no known size, newest first
+;; (`k-name-nat`).
+(define k-skolems (ref k-ids @t) (new nil))
+(define k-certified-lengths (ref (listof (productof (1 symbol) (2 int) (3 k-size)) finite) @t) (new nil))
 (define k-new-dvar-of (subr kstate (symbol int) int)
   (lambda (name kind)
     (let ((v (k-new-dvar name)))
@@ -774,6 +780,7 @@
                         (k-cat5 "(nlist " (k-show-on e p) " " (k-show-size z) (k-cat3 " " (symbol->string (k-dvar-name q)) ")"))
                         (k-cat5 "(nlist " (k-show-on e p) " " (k-show-size z) ")")))
                   (else y (k-cat5 "(nlist " (k-show-on e p) " " (k-show-size z) ")"))))
+              (ty-nat (z) (tagcase z (sz-finite () "nat") (else y (k-cat3 "(nat " (k-show-size z) ")"))))
               (ty-named (g ds)
                 (let ((name (symbol->string (extract (k-gen-of g) 1))))
                   (if (null? ds) name (k-cat5 "(" name " " (k-join (k-show-descs ds p) " ") ")")))))))))))
@@ -1248,6 +1255,7 @@
       (if (syn-symbol? s)
           (let* ((n (syn-name s)) (sym (string->symbol n)) (base (k-find (get k-base) sym)))
             (cond ((string=? n "void") k-void)
+                  ((and (string=? n "nat") (null? (k-lookup-desc sym))) (k-ty-new (ty-nat (sz-finite))))
                   ((>= base 0) base)
                   (else
                    (let ((d (k-lookup-desc sym)) (no (lambda () (string-append (k-quote n) " is not a type"))))
@@ -1297,6 +1305,10 @@
                                    (tagcase (k-parse-place (k-nth items 3)) (r-var (v) (r-frozen v #t)) (else y (r-frozen -1 #t)))
                                    (r-frozen -1 #t))))
                        (k-ty-new (ty-nlist e z r)))))
+                  ((symbol=? hd 'nat)
+                   (begin
+                     (k-shape (= n 2) "`(nat size)`" s)
+                     (k-ty-new (ty-nat (k-parse-size (k-nth items 1))))))
                   ((symbol=? hd 'ref)
                    (begin
                      (k-shape (= n 3) "`(ref type region)`" s)
@@ -1857,7 +1869,7 @@
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
-      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil) (set k-certified-lengths nil) (set k-size-facts nil)
+      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil) (set k-certified-lengths nil) (set k-size-facts nil) (set k-skolems nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
@@ -2151,7 +2163,7 @@
       (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r) 3) (ty-poly (bs x) 4) (ty-ref (x r) 5)
       (ty-pair (x y r) 6) (ty-tag (x y e r) 7) (ty-comp (x y e r) 8) (ty-markkey (x r) 9) (ty-product (ps) 10)
       (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16)
-      (ty-named (g ds) 17) (ty-nlist (e z r) 18))))
+      (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.
 (define k-lemma-head? (subr (maxeff (read @t) spin) (k-binders int int) bool)
@@ -2207,6 +2219,7 @@
                               (ty-bloblet (fs z r) (ty-bloblet (subs fs) z (reg r)))
                               (ty-named (g ds) (ty-named g (k-subst-descs ds m memo)))
                               (ty-nlist (e z r) (ty-nlist (sub e) (k-subst-size z m) (reg r)))
+                              (ty-nat (z) (ty-nat (k-subst-size z m)))
                               (else z (k-get t))))
                            (id (k-ty-new new-ty)))
                       (begin (k-set-link slot id) slot)))))))))))
@@ -2526,6 +2539,8 @@
                    (tagcase ta
                      (ty-void () #t)
                      (ty-base (x) (tagcase tb (ty-base (y) (symbol=? x y)) (else z #f)))
+                     ;; A natural is an integer; one of a known size, a natural.
+                     (ty-nat (m) (tagcase tb (ty-base (y) (symbol=? y 'int)) (ty-nat (n) (k-size-le? m n)) (else z #f)))
                      (ty-var (x) (tagcase tb (ty-var (y) (= (k-benv-var ea x) (k-benv-var eb y))) (else z #f)))
                      (ty-subr (e ps r) (tagcase tb (ty-subr (e2 ps2 r2) (k-sub-callable (car (k-as-subr a)) (car (k-as-subr b)) ea eb trail labels)) (else z #f)))
                      (ty-ref (x r) (tagcase tb (ty-ref (y s) (and (k-region=? (k-benv-region ea r) (k-benv-region eb s)) (k-inv x y ea eb trail labels))) (else z #f)))
@@ -2685,6 +2700,36 @@
 ;; Bind each, the first first.
 (define k-bind-all (subr (maxeff kstate spin) (k-bindings) unit)
   (lambda (bs) (if (null? bs) #u (begin (k-bind (car (car bs)) (cdr (car bs))) (k-bind-all (cdr bs))))))
+;; `t` for a variable being bound to it: a `nat` of no known size is given
+;; one, a variable of its own named after the variable, so that tests of it
+;; can teach facts.
+(define k-name-nat (subr (maxeff kstate spin) (symbol int) int)
+  (lambda (name t)
+    (tagcase (k-get (k-resolve t))
+      (ty-nat (z)
+        (tagcase z
+          (sz-finite ()
+            (let ((v (k-new-dvar-of name 5)))
+              (begin (set k-skolems (cons v (get k-skolems))) (k-ty-new (ty-nat (k-size-var v))))))
+          (else w t)))
+      (else y t))))
+;; Bind each, the first first, a `nat` of no known size given one.
+(define k-bind-named (subr (maxeff kstate spin) (k-bindings) unit)
+  (lambda (bs)
+    (if (null? bs)
+        #u
+        (begin (k-bind (car (car bs)) (k-name-nat (car (car bs)) (cdr (car bs)))) (k-bind-named (cdr bs))))))
+;; `t` with the sizes named since `saved` forgotten, as `finite`: they mean
+;; nothing outside the scope that named them. Pops them.
+(define k-forget-nats (subr (maxeff kstate spin) (k-ids int) int)
+  (lambda (saved t)
+    (letrec ((go (subr (maxeff kstate spin) (k-ids k-map) k-map)
+                   (lambda (vs m)
+                     (if (= (k-length vs) (k-length saved))
+                         m
+                         (go (cdr vs) (cons (cons (car vs) (dz (sz-finite))) m))))))
+      (let ((m (go (get k-skolems) nil)))
+        (begin (set k-skolems saved) (if (null? m) t (k-subst t m)))))))
 (define k-note-letrec (subr kstate ((listof (productof (1 symbol) (2 int) (3 kx)) finite) bool) unit)
   (lambda (bs spins)
     (if (null? bs)
@@ -2870,6 +2915,7 @@
               (ty-pair (a b r) (and (tagcase r (r-frozen (p f) #t) (else y #f)) (k-data-walk a seen) (k-data-walk b seen)))
               (ty-bloblet (fs z r) (and z (k-data-list fs seen)))
               (ty-nlist (e z r) (k-data-walk e seen))
+              (ty-nat (z) #t)
               (else y #f))))))
   (k-data-parts (subr (maxeff kstate spin) (k-parts int) bool)
     (lambda (ps seen) (or (null? ps) (and (k-data-walk (extract (car ps) 2) seen) (k-data-parts (cdr ps) seen)))))
@@ -2979,6 +3025,8 @@
       (cond ((or (= p 2) (= a 1)) #f)
             ((= p 3) (null? (k-as-subr actual)))
             ((and (= p 6) (= a 18)) #f)
+            ;; A `nat` is an `int`.
+            ((and (= p 0) (= a 19)) #f)
             (else (not (= p a)))))))
 
 ;; An argument of the wrong shape altogether is the error to report, before
@@ -3014,6 +3062,14 @@
                (de (e) (k-open-effect? e kinds solved))
                (else y #f))
              (k-descs-open? (cdr ds) kinds solved)))))
+;; Whether a size mentions a variable still to be solved.
+(define k-size-open? (subr (maxeff kstate spin) (k-size k-binders k-solved) bool)
+  (lambda (z kinds solved)
+    (tagcase z
+      (sz-lin (k ts) (letrec ((any (subr (maxeff kstate spin) (k-terms) bool)
+                                   (lambda (xs) (and (not (null? xs)) (or (k-open? kinds solved (car (car xs))) (any (cdr xs)))))))
+                       (any ts)))
+      (else w #f))))
 (define k-any-walk (subr (maxeff kstate spin) (k-ids int k-binders k-solved) bool)
   (lambda (stack seen kinds solved)
     (if (null? stack)
@@ -3040,13 +3096,8 @@
                   (ty-tag (x y e r) (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-comp (x y e r) (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-named (g ds) (or (k-descs-open? ds kinds solved) (go (k-push-ids (k-desc-types ds) rest))))
-                  (ty-nlist (e z r)
-                    (or (reg r)
-                        (tagcase z (sz-lin (k ts) (letrec ((any (subr (maxeff kstate spin) (k-terms) bool)
-                                                              (lambda (xs) (and (not (null? xs)) (or (k-open? kinds solved (car (car xs))) (any (cdr xs)))))))
-                                                     (any ts)))
-                                   (else w #f))
-                        (go (cons e rest))))
+                  (ty-nlist (e z r) (or (reg r) (k-size-open? z kinds solved) (go (cons e rest))))
+                  (ty-nat (z) (or (k-size-open? z kinds solved) (go rest)))
                   (else y (go rest))))))))))
 (define k-mentions-any-unknown? (subr (maxeff kstate spin) (int k-binders k-solved) bool)
   (lambda (t kinds solved) (k-any-walk (cons t nil) (k-new-epoch) kinds solved)))
@@ -3171,6 +3222,7 @@
                                      (u x2 (tagcase sz (sz-finite () a) (else w (k-ty-new (ty-nlist y (k-tail-size sz) s)))))))
                             (else z #u)))
                         (ty-nlist (x sz r) (tagcase at (ty-nlist (y sz2 s) (begin (ur r s) (u x y) (k-unify-size sz sz2 kinds solved))) (else z #u)))
+                        (ty-nat (sz) (tagcase at (ty-nat (sz2) (k-unify-size sz sz2 kinds solved)) (else z #u)))
                         (ty-product (pp) (tagcase at (ty-product (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
                         (ty-sum (pp) (tagcase at (ty-sum (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
                         (ty-bloblet (fp zp r)
@@ -3676,6 +3728,13 @@
       (else y nil))))
 (define k-sc-guarded? (subr (read @t) (k-guards int int) bool)
   (lambda (gs p b) (and (not (null? gs)) (or (and (= (car (car gs)) p) (= (cdr (car gs)) b)) (k-sc-guarded? (cdr gs) p b)))))
+;; The current member's parameters that are `nat`s: bounded below by 0
+;; without a test, since every argument passed for one is checked a natural.
+(define k-sc-naturals (ref k-ids @t) (new nil))
+;; Whether parameter `p` is bounded its way `b` (0 below, 1 above): by a
+;; test, or, below, by being a `nat`.
+(define k-sc-bounded? (subr (read @t) (k-guards int int) bool)
+  (lambda (gs p b) (or (k-sc-guarded? gs p b) (and (= b 0) (k-has-id? (get k-sc-naturals) p)))))
 ;; Whether `ks` knows a value as a parameter, of the member walked, passed on
 ;; unchanged by every call.
 (define k-sc-invariant-in? (subr (read @t) (k-trs) bool)
@@ -3762,10 +3821,10 @@
           (tagcase (car ks)
             (tr-part (p s t) (k-sc-add g (* 3 p) (* 3 q) s))
             (tr-int (p o)
-              (let ((g1 (cond ((and (< o 0) (k-sc-guarded? gs p 0)) (k-sc-add g (+ (* 3 p) 1) (+ (* 3 q) 1) #t))
+              (let ((g1 (cond ((and (< o 0) (k-sc-bounded? gs p 0)) (k-sc-add g (+ (* 3 p) 1) (+ (* 3 q) 1) #t))
                               ((<= o 0) (k-sc-add g (+ (* 3 p) 1) (+ (* 3 q) 1) #f))
                               (else g))))
-                (cond ((and (> o 0) (k-sc-guarded? gs p 1)) (k-sc-add g1 (+ (* 3 p) 2) (+ (* 3 q) 2) #t))
+                (cond ((and (> o 0) (k-sc-bounded? gs p 1)) (k-sc-add g1 (+ (* 3 p) 2) (+ (* 3 q) 2) #t))
                       ((>= o 0) (k-sc-add g1 (+ (* 3 p) 2) (+ (* 3 q) 2) #f))
                       (else g1)))))))))
 (define k-sc-arg-edges (subr (maxeff kstate spin) (kxs int k-tscope k-guards k-graph) k-graph)
@@ -3806,8 +3865,8 @@
         ""
         (let ((h (tagcase (car ks)
                    (tr-int (p o)
-                     (cond ((and (< o 0) (not (k-sc-guarded? gs p 0))) "it counts down, but nothing fixed bounds the count below")
-                           ((and (> o 0) (not (k-sc-guarded? gs p 1))) "it counts up, but nothing fixed bounds the count above")
+                     (cond ((and (< o 0) (not (k-sc-bounded? gs p 0))) "it counts down, but nothing fixed bounds the count below")
+                           ((and (> o 0) (not (k-sc-bounded? gs p 1))) "it counts up, but nothing fixed bounds the count above")
                            (else "")))
                    (else y ""))))
           (if (string=? h "") (k-sc-count-hint (cdr ks) gs) h)))))
@@ -3974,7 +4033,9 @@
     (if (null? ps)
         sc
         (let* ((t (car ts))
-               (ks (the k-trs (cons (tr-part j #f t) (if (= (k-resolve t) (k-resolve k-int)) (the k-trs (cons (tr-int j 0) nil)) nil)))))
+               (natural (tagcase (k-get (k-resolve t)) (ty-nat (z) #t) (else y #f)))
+               (noted (if natural (set k-sc-naturals (cons j (get k-sc-naturals))) #u))
+               (ks (the k-trs (cons (tr-part j #f t) (if (or natural (= (k-resolve t) (k-resolve k-int))) (the k-trs (cons (tr-int j 0) nil)) nil)))))
           (k-sc-param-scope (cdr ps) (cdr ts) (+ j 1) (cons (cons (extract (car ps) 1) ks) sc))))))
 (define k-sc-walk-members (subr (maxeff kstate spin) (k-group int) bool)
   (lambda (bs i)
@@ -3984,6 +4045,7 @@
             (let ((ts (k-sc-param-types (extract (car bs) 2))))
               (and (<= (k-length ps) (k-length ts))
                    (begin (set k-sc-current i)
+                          (set k-sc-naturals nil)
                           (k-sc-walk body (k-sc-param-scope ps ts 0 nil) nil)
                           (and (null? (get k-sc-escapes)) (k-sc-walk-members (cdr bs) (+ i 1)))))))
           (else y #f)))))
@@ -4131,12 +4193,81 @@
           ((k-lambda? (extract (car bs) 3)) (k-letrec-lambdas (cdr bs)))
           (else (let ((x (extract (car bs) 3))) (k-fail (k-letrec-not-lambda (extract (car bs) 1)) (k-start x) (k-end x)))))))
 
+;; What a test shows when it holds, and when not.
+(define-type k-branch-facts (pairof (listof k-size-fact finite) (listof k-size-fact finite) finite))
+(define k-branch-facts-of (subr pure ((listof k-size-fact finite) (listof k-size-fact finite)) k-branch-facts)
+  (lambda (yes no) (the k-branch-facts (cons yes no))))
+;; The fact `lin ≥ 0`, alone.
+(define k-ge-fact (subr pure (k-size) (listof k-size-fact finite))
+  (lambda (lin) (the (listof k-size-fact finite) (cons (product (1 lin) (2 #f)) nil))))
+;; `x < y`, as `y - x - 1 ≥ 0`; `x ≤ y`, as `y - x ≥ 0`.
+(define k-lt-fact (subr pure (k-size k-size) (listof k-size-fact finite))
+  (lambda (x y) (k-ge-fact (k-size-plus (k-size-add-scaled y x -1) -1))))
+(define k-le-fact (subr pure (k-size k-size) (listof k-size-fact finite))
+  (lambda (x y) (k-ge-fact (k-size-add-scaled y x -1))))
+;; The size an argument is, when a natural literal or a variable of type
+;; `(nat s)` (none or one).
+(define k-nat-size (subr (maxeff (read @t) spin) (kx) (listof k-size finite))
+  (lambda (x)
+    (tagcase x
+      (x-const (ty k a b) (if (and (= ty k-int) (>= k 0)) (the (listof k-size finite) (cons (k-size-lit k) nil)) nil))
+      (x-var (v a b)
+        (let ((t (k-lookup v)))
+          (if (< t 0)
+              nil
+              (tagcase (k-get (k-resolve t)) (ty-nat (z) (the (listof k-size finite) (cons z nil))) (else y nil)))))
+      (else y nil))))
+;; `xs : (nlist T n)` shows `n = 0` when null, and `n - 1 ≥ 0` when not.
+(define k-null-facts (subr (maxeff (read @t) (alloc @t) spin) (kx) k-branch-facts)
+  (lambda (x)
+    (let ((none (k-branch-facts-of nil nil)))
+      (tagcase x
+        (x-var (v va vb)
+          (let ((vt (k-lookup v)))
+            (if (< vt 0)
+                none
+                (tagcase (k-get vt)
+                  (ty-nlist (e z r)
+                    (tagcase z
+                      (sz-lin (k ts)
+                        (k-branch-facts-of (the (listof k-size-fact finite) (cons (product (1 z) (2 #t)) nil)) (k-ge-fact (k-size-plus z -1))))
+                      (else w none)))
+                  (else w none)))))
+        (else y none)))))
+;; What a comparison `(op a b)` of naturals shows, when both have sizes.
+(define k-compare-facts (subr (maxeff (read @t) (alloc @t) spin) (string kx kx) k-branch-facts)
+  (lambda (op a b)
+    (let ((xs (k-nat-size a)) (ys (k-nat-size b)) (none (k-branch-facts-of nil nil)))
+      (if (or (null? xs) (null? ys) (tagcase (car xs) (sz-finite () #t) (else w #f)) (tagcase (car ys) (sz-finite () #t) (else w #f)))
+          none
+          (let ((x (car xs)) (y (car ys)))
+            (cond ((string=? op "<") (k-branch-facts-of (k-lt-fact x y) (k-le-fact y x)))
+                  ((string=? op "<=") (k-branch-facts-of (k-le-fact x y) (k-lt-fact y x)))
+                  ((string=? op ">") (k-branch-facts-of (k-lt-fact y x) (k-le-fact x y)))
+                  ((string=? op ">=") (k-branch-facts-of (k-le-fact y x) (k-lt-fact x y)))
+                  (else
+                   (let ((no (cond ((= (k-size-as-lit y) 0) (k-ge-fact (k-size-plus x -1)))
+                                   ((= (k-size-as-lit x) 0) (k-ge-fact (k-size-plus y -1)))
+                                   (else (the (listof k-size-fact finite) nil)))))
+                     (k-branch-facts-of (the (listof k-size-fact finite) (cons (product (1 (k-size-add-scaled x y -1)) (2 #t)) nil)) no)))))))))
+;; `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the
+;; variable, its binding, and the length, a natural literal or a variable
+;; of type `(nat s)` (none or one).
+(define k-length-arg (subr (maxeff (read @t) (alloc @t) spin) (kx kx) (listof k-cert-len finite))
+  (lambda (a n)
+    (tagcase a
+      (x-var (v va vb)
+        (if (tagcase n (x-const (ty k ka kb) #t) (x-var (w wa wb) #t) (else y #f))
+            (let ((z (k-nat-size n)))
+              (if (null? z) nil (the (listof k-cert-len finite) (cons (product (1 v) (2 (k-binding-depth v)) (3 (car z))) nil))))
+            nil))
+      (else y nil))))
 ;; What `length-is?` has just confirmed: a variable, its binding, the length.
-(define-type k-cert-len (productof (1 symbol) (2 int) (3 int)))
+(define-type k-cert-len (productof (1 symbol) (2 int) (3 k-size)))
 (define k-cert-len-has? (subr (read @t) ((listof k-cert-len finite) k-cert-len) bool)
   (lambda (cs c)
     (and (not (null? cs))
-         (or (and (symbol=? (extract (car cs) 1) (extract c 1)) (= (extract (car cs) 2) (extract c 2)) (= (extract (car cs) 3) (extract c 3)))
+         (or (and (symbol=? (extract (car cs) 1) (extract c 1)) (= (extract (car cs) 2) (extract c 2)) (k-size=? (extract (car cs) 3) (extract c 3)))
              (k-cert-len-has? (cdr cs) c)))))
 ;; If `p` is `(length-is? v k)`, the variable, its binding, and the length.
 (define k-length-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof k-cert-len finite))
@@ -4148,43 +4279,60 @@
             (let ((t (k-lookup op)))
               (if (and (string=? (symbol->string op) "length-is?") (>= t 0) (k-named-has? (get k-std) op t)
                        (not (null? args)) (not (null? (cdr args))) (null? (cdr (cdr args))))
-                  (tagcase (car args)
-                    (x-var (v va vb)
-                      (tagcase (car (cdr args))
-                        (x-const (ty k ka kb)
-                          (if (= ty k-int) (the (listof k-cert-len finite) (cons (product (1 v) (2 (k-binding-depth v)) (3 k)) nil)) nil))
-                        (else y nil)))
-                    (else y nil))
+                  (k-length-arg (car args) (car (cdr args)))
                   nil)))
           (else y nil)))
       (else y nil))))
+;; Whether `x` may be a natural of a size without being told what it is: an
+;; integer literal, a variable, or a `+`, `-` or `length`.
+(define k-natural-by-itself? (subr (maxeff (read @t) spin) (kx) bool)
+  (lambda (x)
+    (tagcase x
+      (x-const (ty k a b) (= ty k-int))
+      (x-var (v a b) #t)
+      (x-app (f args a b)
+        (tagcase f
+          (x-var (op fa fb)
+            (let ((t (k-lookup op)) (n (symbol->string op)))
+              (and (or (string=? n "+") (string=? n "-") (string=? n "length")) (>= t 0) (k-named-has? (get k-std) op t))))
+          (else y #f)))
+      (else y #f))))
+;; The size an operand of `+` or `-` of type `t` is: a natural literal's,
+;; or a `(nat s)`'s (none or one).
+(define k-operand-size (subr (maxeff (read @t) spin) (kx int) (listof k-size finite))
+  (lambda (x t)
+    (let ((lit (tagcase x (x-const (ty k a b) (if (and (= ty k-int) (>= k 0)) k -1)) (else y -1))))
+      (if (>= lit 0)
+          (the (listof k-size finite) (cons (k-size-lit lit) nil))
+          (tagcase (k-get (k-resolve t)) (ty-nat (z) (the (listof k-size finite) (cons z nil))) (else y nil))))))
+;; `(+ a b)` and `(- a b)` of naturals: the sum, and the difference where
+;; the facts show it no less than 0 (none or one).
+(define k-nat-arith-size (subr (read @t) (string k-size k-size) (listof k-size finite))
+  (lambda (op a b)
+    (cond ((string=? op "+") (the (listof k-size finite) (cons (k-size-add-scaled a b 1) nil)))
+          ((and (tagcase a (sz-finite () #f) (else w #t)) (k-size-nonneg? (k-size-add-scaled a b -1)))
+           (the (listof k-size finite) (cons (k-size-add-scaled a b -1) nil)))
+          (else nil))))
 ;; What `p` shows about sizes when it holds, and when not (each none or
 ;; one): `(null? xs)`, `xs : (nlist T n)`, shows `n = 0`, or `n - 1 ≥ 0`.
-(define k-null-facts (subr (maxeff (read @t) (alloc @t) spin) (kx) (pairof (listof k-size-fact finite) (listof k-size-fact finite) finite))
+;; What `p` shows about sizes when it holds, and when not (each none or
+;; one). `(null? xs)`, `xs : (nlist T n)`: `n = 0`, or `n - 1 ≥ 0`. A
+;; comparison of naturals: `(< a b)`, `b - a - 1 ≥ 0`, or `a - b ≥ 0`;
+;; `(= a 0)`, `a = 0`, or, a natural not 0, `a - 1 ≥ 0`.
+(define k-test-facts (subr (maxeff (read @t) (alloc @t) spin) (kx) k-branch-facts)
   (lambda (p)
-    (let ((none (the (pairof (listof k-size-fact finite) (listof k-size-fact finite) finite) (cons nil nil))))
+    (let ((none (k-branch-facts-of nil nil)))
       (tagcase p
         (x-app (f args a b)
           (tagcase f
             (x-var (op fa fb)
-              (let ((t (k-lookup op)))
-                (if (and (string=? (symbol->string op) "null?") (>= t 0) (k-named-has? (get k-std) op t) (k-sc-one-arg? args))
-                    (tagcase (car args)
-                      (x-var (v va vb)
-                        (let ((vt (k-lookup v)))
-                          (if (< vt 0)
-                              none
-                              (tagcase (k-get vt)
-                                (ty-nlist (e z r)
-                                  (tagcase z
-                                    (sz-lin (k ts)
-                                      (the (pairof (listof k-size-fact finite) (listof k-size-fact finite) finite)
-                                           (cons (the (listof k-size-fact finite) (cons (product (1 z) (2 #t)) nil))
-                                                 (the (listof k-size-fact finite) (cons (product (1 (k-size-plus z -1)) (2 #f)) nil)))))
-                                    (else w none)))
-                                (else w none)))))
-                      (else y none))
-                    none)))
+              (let ((t (k-lookup op)) (name (symbol->string op)))
+                (cond ((not (and (>= t 0) (k-named-has? (get k-std) op t))) none)
+                      ((string=? name "null?") (if (k-sc-one-arg? args) (k-null-facts (car args)) none))
+                      ((and (or (string=? name "<") (string=? name "<=") (string=? name ">") (string=? name ">=") (string=? name "="))
+                            (not (null? args)) (not (null? (cdr args))) (null? (cdr (cdr args))))
+                       (k-compare-facts name (car args) (car (cdr args))))
+                      (else none))))
             (else y none)))
         (else y none)))))
 (define k-with-fact (subr (alloc @t) ((listof k-size-fact finite) (listof k-size-fact finite)) (listof k-size-fact finite))
@@ -4246,7 +4394,7 @@
                        (lens (k-length-test p))
                        (lsaved (get k-certified-lengths))
                        (lpushed (set k-certified-lengths (if (null? lens) lsaved (the (listof k-cert-len finite) (cons (car lens) lsaved)))))
-                       (facts (k-null-facts p))
+                       (facts (k-test-facts p))
                        (fsaved (get k-size-facts))
                        (fyes (set k-size-facts (k-with-fact (car facts) fsaved)))
                        (rc (k-synth c))
@@ -4258,6 +4406,10 @@
                        (fdone (set k-size-facts fsaved)) (tc (extract rc 1)) (td (extract rd 1))
                        (t (cond ((k-subtype tc td) td)
                                 ((k-subtype td tc) tc)
+                                ;; Naturals of sizes not shown equal: a `nat`.
+                                ((and (tagcase (k-get (k-resolve tc)) (ty-nat (z) #t) (else w #f))
+                                      (tagcase (k-get (k-resolve td)) (ty-nat (z) #t) (else w #f)))
+                                 (k-ty-new (ty-nat (sz-finite))))
                                 (else (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
                   (k-te t (k-mask x (k-union (extract rp 2) (k-union (extract rc 2) (extract rd 2))) t))))))
         (x-letrec (bs body a b)
@@ -4274,13 +4426,14 @@
                   (k-unbind-to saved)
                   (k-te (extract rb 1) (k-mask x (k-union ie (extract rb 2)) (extract rb 1))))))))
         (x-let (bs body a b)
-          (let* ((inits (k-synth-lets bs)) (saved (k-mark)))
+          (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
             (begin
-              (k-bind-all (extract inits 1))
+              (k-bind-named (extract inits 1))
               (let ((rb (k-synth body)))
                 (begin
                   (k-unbind-to saved)
-                  (k-te (extract rb 1) (k-mask x (k-union (extract inits 2) (extract rb 2)) (extract rb 1))))))))
+                  (let ((t (k-forget-nats named (extract rb 1))))
+                    (k-te t (k-mask x (k-union (extract inits 2) (extract rb 2)) t))))))))
         (x-prompt (t body h a b) (k-synth-prompt x t body h))
         ;; The region's name is a variable too, of type `(place r)`, when
         ;; the form makes a place.
@@ -4362,15 +4515,15 @@
     (lambda (x hint result)
       (tagcase x
         (x-lambda (ps body a b)
-          (let* ((typed (k-param-types ps hint a b)) (saved (k-mark)))
+          (let* ((typed (k-param-types ps hint a b)) (saved (k-mark)) (named (get k-skolems)))
             (begin
-              (k-bind-all typed)
+              (k-bind-named typed)
               (let* ((r (if (>= result 0)
                             (let ((e (k-check body result))) (k-te result (k-mask body e result)))
                             (let ((r (k-synth body))) (k-te (extract r 1) (k-mask body (extract r 2) (extract r 1)))))))
                 (begin
                   (k-unbind-to saved)
-                  (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (extract r 1))) nil))))))
+                  (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (k-forget-nats named (extract r 1)))) nil))))))
         (else y (k-fail "a lambda" (k-start x) (k-end x))))))
   ;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
   ;; result types if it is a subroutine's, with `(read R)` in its latent
@@ -4405,22 +4558,34 @@
                   (else y ""))))
         (cond ((string=? op "certify-acyclic") (k-certify x args))
               ((string=? op "certify-length") (k-certify-length x args))
+              ((and (or (string=? op "+") (string=? op "-")) (not (null? args)) (not (null? (cdr args))) (null? (cdr (cdr args))))
+               (k-nat-arith x op args))
               ((string=? op "cons")
                (let ((r (k-nlist-cons x args expected))) (if (null? r) (k-synth-app-plain x f args expected) (car r))))
               (else (k-synth-app-plain x f args expected))))))
+  ;; `+` and `-` of naturals: a natural, of a size when both are known. Only
+  ;; what has a type of its own is asked for it; anything else is told it
+  ;; is an int, as for any call.
+  (k-nat-arith (subr (maxeff checks spin) (kx string kxs) k-te)
+    (lambda (x op args)
+      (let* ((ra (k-nat-operand (car args)))
+             (rb (k-nat-operand (car (cdr args))))
+             (za (extract ra 2)) (zb (extract rb 2))
+             (sz (if (or (null? za) (null? zb)) (the (listof k-size finite) nil) (k-nat-arith-size op (car za) (car zb)))))
+        (k-te (if (null? sz) k-int (k-ty-new (ty-nat (car sz)))) (k-union (extract ra 1) (extract rb 1))))))
+  (k-nat-operand (subr (maxeff checks spin) (kx) (productof (1 k-eff) (2 (listof k-size finite))))
+    (lambda (x)
+      (if (not (k-natural-by-itself? x))
+          (product (1 (k-check x k-int)) (2 (the (listof k-size finite) nil)))
+          (let* ((r (k-synth x)) (t (extract r 1)))
+            (begin (k-expect x t k-int) (product (1 (extract r 2)) (2 (k-operand-size x t))))))))
   ;; `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where `length-is?`
   ;; has just found it so; nowhere else.
   (k-certify-length (subr (maxeff checks spin) (kx kxs) k-te)
     (lambda (x args)
       (let* ((none (the (listof k-cert-len finite) nil))
              (found (if (and (not (null? args)) (not (null? (cdr args))) (null? (cdr (cdr args))))
-                        (tagcase (car args)
-                          (x-var (v va vb)
-                            (tagcase (car (cdr args))
-                              (x-const (t k ka kb)
-                                (if (= t k-int) (the (listof k-cert-len finite) (cons (product (1 v) (2 (k-binding-depth v)) (3 k)) nil)) none))
-                              (else y none)))
-                          (else y none))
+                        (k-length-arg (car args) (car (cdr args)))
                         none))
              (ok (and (not (null? found)) (k-cert-len-has? (get k-certified-lengths) (car found)))))
         (if (not ok)
@@ -4429,9 +4594,9 @@
               (tagcase (k-get t)
                 (ty-pair (e tail rg)
                   (if (and (= (k-resolve tail) t) (tagcase rg (r-frozen (p f) #t) (else y #f)))
-                      (k-te (k-ty-new (ty-nlist e (k-size-lit k) (k-fin-region rg))) (extract r 2))
+                      (k-te (k-ty-new (ty-nlist e k (k-fin-region rg))) (extract r 2))
                       (k-fail (k-cat3 "`certify-length` takes a frozen list, and this is a " (k-show-ty t) "") (k-start x) (k-end x))))
-                (ty-nlist (e z rg) (k-te (k-ty-new (ty-nlist e (k-size-lit k) (k-fin-region rg))) (extract r 2)))
+                (ty-nlist (e z rg) (k-te (k-ty-new (ty-nlist e k (k-fin-region rg))) (extract r 2)))
                 (else y (k-fail (k-cat3 "`certify-length` takes a frozen list, and this is a " (k-show-ty t) "") (k-start x) (k-end x)))))))))
   ;; `cons` onto a `nlist`: one more element. Where a `nlist` is expected, the
   ;; tail is checked as one shorter; otherwise, a tail that is a variable of
@@ -4650,6 +4815,11 @@
                 (let ((t (k-part-find vs l)))
                   (if (>= t 0) (k-mask x (k-check e t) expected) (otherwise))))
               (else y (otherwise))))
+          ;; A natural literal is a `nat`, and a `(nat k)`.
+          (x-const (ty k xa xb)
+            (if (and (= ty k-int) (>= k 0) (tagcase et (ty-nat (z) (k-size-le? (k-size-lit k) z)) (else w #f)))
+                nil
+                (otherwise)))
           (x-var (s xa xb)
             (let ((t (k-lookup s)))
               (cond
@@ -4669,7 +4839,7 @@
                    (lens (k-length-test p))
                    (lsaved (get k-certified-lengths))
                    (lpushed (set k-certified-lengths (if (null? lens) lsaved (the (listof k-cert-len finite) (cons (car lens) lsaved)))))
-                   (facts (k-null-facts p))
+                   (facts (k-test-facts p))
                    (fsaved (get k-size-facts))
                    (fyes (set k-size-facts (k-with-fact (car facts) fsaved)))
                    (ce (k-check c expected))
@@ -4684,11 +4854,11 @@
             (let ((e (k-check-seq xs expected nil)))
               (k-mask x e expected)))
           (x-let (bs body xa xb)
-            (let* ((inits (k-synth-lets bs)) (saved (k-mark)))
+            (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
               (begin
-                (k-bind-all (extract inits 1))
+                (k-bind-named (extract inits 1))
                 (let ((e (k-check body expected)))
-                  (begin (k-unbind-to saved) (k-mask x (k-union (extract inits 2) e) expected))))))
+                  (begin (k-unbind-to saved) (set k-skolems named) (k-mask x (k-union (extract inits 2) e) expected))))))
           (else y (otherwise))))))))
   (k-check-seq (subr (maxeff checks spin) (kxs int k-eff) k-eff)
     (lambda (xs expected e)

@@ -9,6 +9,7 @@
     (cond
       ((string=? n "+") "+")
       ((string=? n "-") "-")
+      ((string=? n "length") "length")
       ((string=? n "=") "=")
       ((string=? n "cons") "cons")
       ((string=? n "rcons") "%region-cons")

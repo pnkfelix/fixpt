@@ -8,7 +8,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::ast::{D, DVar, Size};
+use crate::ast::{D, DVar, Exp, ExpId, Kind, Size, Ty, TyId};
+use fixpt_read::Sym;
 use crate::check::Checker;
 
 /// A fact: `lin = 0` (`eq`) or `lin ≥ 0`.
@@ -124,5 +125,113 @@ impl Checker {
     /// equal, or `n` is `finite`.
     pub(crate) fn size_le(&self, m: &Size, n: &Size) -> bool {
         matches!(n, Size::Finite) || self.size_eq(m, n)
+    }
+
+    /// The size an argument is, when it is a natural literal or a variable
+    /// of type `(nat s)`.
+    pub(crate) fn nat_size(&self, e: ExpId) -> Option<Size> {
+        match self.arena.exp_at(e) {
+            Exp::Int(k) if *k >= 0 => Some(Size::lit(*k)),
+            Exp::Var(v) => match self.arena.get(self.arena.resolve(self.lookup(*v)?)) {
+                Ty::Nat(s) => Some(s.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Whether `e` may be a natural of a size without being told what it
+    /// is: a literal, a variable, or a `+`, `-` or `length`.
+    pub(crate) fn natural_by_itself(&self, e: ExpId) -> bool {
+        match self.arena.exp_at(e) {
+            Exp::Int(_) | Exp::Var(_) => true,
+            Exp::App { fun, .. } => matches!(self.arena.exp_at(*fun),
+                Exp::Var(op) if matches!(self.interner.name(*op), "+" | "-" | "length") && self.is_standard(*op)),
+            _ => false,
+        }
+    }
+
+    /// What `test` shows about sizes when it holds, and when not.
+    /// `(null? xs)`, `xs : (nlist T n)`: `n = 0`, or `n - 1 ≥ 0`. A
+    /// comparison of naturals: `(< a b)`, `b - a - 1 ≥ 0`, or `a - b ≥ 0`;
+    /// `(= a 0)`, `a = 0`, or, a natural not 0, `a - 1 ≥ 0`.
+    pub(crate) fn test_facts(&self, test: ExpId) -> (Vec<SizeFact>, Vec<SizeFact>) {
+        let none = (vec![], vec![]);
+        let Exp::App { fun, args } = self.arena.exp_at(test) else { return none };
+        let Exp::Var(op) = self.arena.exp_at(*fun) else { return none };
+        if !self.is_standard(*op) {
+            return none;
+        }
+        let ge = |lin: Size| vec![SizeFact { lin, eq: false }];
+        match (self.interner.name(*op), &args[..]) {
+            ("null?", [a]) => {
+                let Exp::Var(v) = self.arena.exp_at(*a) else { return none };
+                let Some(t) = self.lookup(*v) else { return none };
+                match self.arena.get(self.arena.resolve(t)) {
+                    Ty::NList { size: n @ Size::Lin { .. }, .. } => (vec![SizeFact { lin: n.clone(), eq: true }], ge(n.plus(-1))),
+                    _ => none,
+                }
+            }
+            (op @ ("<" | "<=" | ">" | ">=" | "="), [a, b]) => {
+                let (Some(x @ Size::Lin { .. }), Some(y @ Size::Lin { .. })) = (self.nat_size(*a), self.nat_size(*b)) else { return none };
+                // `a < b` is `b - a - 1 ≥ 0`; `a ≤ b`, `b - a ≥ 0`.
+                let lt = |x: &Size, y: &Size| ge(y.add_scaled(x, -1).plus(-1));
+                let le = |x: &Size, y: &Size| ge(y.add_scaled(x, -1));
+                match op {
+                    "<" => (lt(&x, &y), le(&y, &x)),
+                    "<=" => (le(&x, &y), lt(&y, &x)),
+                    ">" => (lt(&y, &x), le(&x, &y)),
+                    ">=" => (le(&y, &x), lt(&x, &y)),
+                    _ => {
+                        let no = match (x.as_lit(), y.as_lit()) {
+                            (_, Some(0)) => ge(x.plus(-1)),
+                            (Some(0), _) => ge(y.plus(-1)),
+                            _ => vec![],
+                        };
+                        (vec![SizeFact { lin: x.add_scaled(&y, -1), eq: true }], no)
+                    }
+                }
+            }
+            _ => none,
+        }
+    }
+
+    /// `(+ a b)` and `(- a b)` of naturals: a natural of the sum, and of the
+    /// difference where the facts show it no less than 0. `None` for any
+    /// other call, which is then an ordinary one.
+    pub(crate) fn nat_arith(&self, op: &str, a: &Size, b: &Size) -> Option<Size> {
+        match op {
+            "+" => Some(a.add_scaled(b, 1)),
+            "-" if !matches!(a, Size::Finite) && self.size_nonneg(&a.add_scaled(b, -1)) => Some(a.add_scaled(b, -1)),
+            _ => None,
+        }
+    }
+
+    /// The least type above two naturals of sizes not shown equal: a `nat`.
+    pub(crate) fn nat_join(&mut self, a: TyId, b: TyId) -> Option<TyId> {
+        let nat = |c: &Self, t: TyId| matches!(c.arena.get(c.arena.resolve(t)), Ty::Nat(_));
+        (nat(self, a) && nat(self, b)).then(|| self.arena.ty(Ty::Nat(Size::Finite)))
+    }
+
+    /// `t` for a variable being bound to it: a `nat` of no known size is
+    /// given one, a variable of its own, named after the variable, so that
+    /// tests of it can teach facts. The variable is pushed on `skolems`.
+    pub(crate) fn name_nat(&mut self, name: Sym, t: TyId) -> TyId {
+        if !matches!(self.arena.get(self.arena.resolve(t)), Ty::Nat(Size::Finite)) {
+            return t;
+        }
+        let v = self.arena.dvar_of(name, Kind::Size);
+        self.skolems.push(v);
+        self.arena.ty(Ty::Nat(Size::var(v)))
+    }
+
+    /// `t` with the sizes named since `depth` forgotten, as `finite`: they
+    /// mean nothing outside the scope that named them. Pops them.
+    pub(crate) fn forget_nats(&mut self, depth: usize, t: TyId) -> TyId {
+        if self.skolems.len() == depth {
+            return t;
+        }
+        let map: std::collections::HashMap<DVar, D> = self.skolems.drain(depth..).map(|v| (v, D::Size(Size::Finite))).collect();
+        self.subst(t, &map)
     }
 }

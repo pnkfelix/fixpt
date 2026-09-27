@@ -40,6 +40,7 @@ use std::collections::HashMap;
 pub const STANDARD: &[(&str, &str, bool)] = &[
     ("+", "+", true),
     ("-", "-", true),
+    ("length", "length", true),
     ("=", "=", true),
     ("cons", "cons", true),
     ("rcons", "%region-cons", false),

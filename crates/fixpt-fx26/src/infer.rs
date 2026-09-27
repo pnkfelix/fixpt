@@ -144,6 +144,8 @@ impl Checker {
                 let eff = self.check(x, t)?;
                 Ok(self.mask(e, &eff, expected))
             }
+            // A natural literal is a `nat`, and a `(nat k)`.
+            Exp::Int(k) if k >= 0 && matches!(&expected_ty, Ty::Nat(s) if self.size_le(&Size::lit(k), s)) => Ok(Effect::pure()),
             // `nil` is a `nlist` of no elements, or of some.
             Exp::Var(s)
                 if self.interner.name(s) == "nil"
@@ -163,8 +165,8 @@ impl Checker {
                 let certified = self.acyclic_test(test);
                 self.certified.extend(certified);
                 let lengths = self.length_test(test);
-                self.certified_lengths.extend(lengths);
-                let (yes, no) = self.null_facts(test);
+                self.certified_lengths.extend(lengths.clone());
+                let (yes, no) = self.test_facts(test);
                 let depth = self.size_facts.len();
                 self.size_facts.extend(yes);
                 let ae = self.check(then, expected);
@@ -203,9 +205,14 @@ impl Checker {
                     bound.push((*n, t));
                 }
                 let depth = self.env.len();
-                self.env.extend(bound);
+                let named = self.skolems.len();
+                for (n, t) in bound {
+                    let t = self.name_nat(n, t);
+                    self.env.push((n, t));
+                }
                 let r = self.check(body, expected);
                 self.env.truncate(depth);
+                self.skolems.truncate(named);
                 Ok(self.mask(e, &eff.union(&r?), expected))
             }
             _ => {
@@ -256,7 +263,11 @@ impl Checker {
             }
         }
         let depth = self.env.len();
-        self.env.extend(typed.iter().copied());
+        let named = self.skolems.len();
+        for (n, t) in &typed {
+            let t = self.name_nat(*n, *t);
+            self.env.push((*n, t));
+        }
         // The body's effect is masked *with the parameters in scope*: they
         // are free in the body, so what reaches them stays.
         let r = match result {
@@ -264,6 +275,8 @@ impl Checker {
             None => self.synth(body).map(|(t, eff)| (t, self.mask(body, &eff, t))),
         };
         self.env.truncate(depth);
+        let r = r.map(|(t, latent)| (self.forget_nats(named, t), latent));
+        self.skolems.truncate(named);
         let (result, latent) = r?;
         let t = self.arena.ty(Ty::Subr { effect: latent, params: typed.iter().map(|(_, t)| *t).collect(), result });
         Ok((t, Effect::pure()))
@@ -294,10 +307,7 @@ impl Checker {
         {
             let span = self.arena.span_of(e);
             let found = match &args[..] {
-                [a, n] => match (self.arena.exp_at(*a), self.arena.exp_at(*n)) {
-                    (Exp::Var(v), Exp::Int(k)) => self.env.iter().rposition(|(x, _)| x == v).map(|i| (*v, i, *k)),
-                    _ => None,
-                },
+                [a, n] => self.length_arg(*a, *n),
                 _ => None,
             };
             let Some((_, _, k)) = found.filter(|f| self.certified_lengths.contains(f)) else {
@@ -314,7 +324,41 @@ impl Checker {
                 Region::Frozen(p, _) => Region::Frozen(p, true),
                 r => r,
             };
-            return Ok((self.arena.ty(Ty::NList { elem, size: Size::lit(k), region }), eff));
+            return Ok((self.arena.ty(Ty::NList { elem, size: k, region }), eff));
+        }
+        // `+` and `-` of naturals: a natural, of a size when both are known.
+        if let Exp::Var(op) = self.arena.exp_at(fun)
+            && let name @ ("+" | "-") = self.interner.name(*op)
+            && self.is_standard(*op)
+            && let [a, b] = args
+        {
+            let name = name.to_string();
+            // Still the standard operation, for the lowering to integrate.
+            self.facts.standard_operator.insert(e, *op);
+            let mut eff = Effect::pure();
+            let mut sizes = Vec::new();
+            for x in [*a, *b] {
+                // Only what has a type of its own is asked for it; anything
+                // else is told it is an int, as for any call.
+                if !self.natural_by_itself(x) {
+                    eff = eff.union(&self.check(x, self.int)?);
+                    sizes.push(None);
+                    continue;
+                }
+                let (t, xe) = self.synth(x)?;
+                self.expect(x, t, self.int)?;
+                eff = eff.union(&xe);
+                sizes.push(match (self.arena.exp_at(x), self.arena.get(self.arena.resolve(t))) {
+                    (Exp::Int(k), _) if *k >= 0 => Some(Size::lit(*k)),
+                    (_, Ty::Nat(s)) => Some(s.clone()),
+                    _ => None,
+                });
+            }
+            let t = match (&sizes[0], &sizes[1]) {
+                (Some(x), Some(y)) => self.nat_arith(&name, x, y).map(|s| self.arena.ty(Ty::Nat(s))),
+                _ => None,
+            };
+            return Ok((t.unwrap_or(self.int), eff));
         }
         // `cons` onto a `nlist`: one more element. Where a `nlist` is expected,
         // the tail is checked as one shorter; otherwise, a tail that is a
@@ -790,6 +834,8 @@ impl Checker {
             (Ty::Subr { .. }, _) => a.as_subr().is_none(),
             // A `nlist` is a list.
             (Ty::Pair(..), Ty::NList { .. }) => false,
+            // A `nat` is an `int`.
+            (Ty::Base(_), Ty::Nat(_)) => false,
             _ => std::mem::discriminant(&p) != std::mem::discriminant(&a),
         }
     }
@@ -845,6 +891,7 @@ impl Checker {
                     region(r) || effect(&e)
                 }
                 Ty::Base(_) | Ty::Void | Ty::Link(_) => false,
+                Ty::Nat(size) => matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
                 Ty::NList { elem, size, region: r } => {
                     stack.push(elem);
                     region(r) || matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v)))
@@ -891,7 +938,7 @@ impl Checker {
             Ty::Pair(a, b, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) => false,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) => false,
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) if self.walk_vars(*x, seen, hit))),
             Ty::NList { elem, .. } => self.walk_vars(elem, seen, hit),
         }
@@ -982,6 +1029,7 @@ impl Checker {
                 self.unify(x, y, u, trail);
                 self.unify_size(&m, &n, u);
             }
+            (Ty::Nat(m), Ty::Nat(n)) => self.unify_size(&m, &n, u),
             (Ty::Pair(x, t2, r), Ty::NList { elem: y, size, region: s }) => {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);

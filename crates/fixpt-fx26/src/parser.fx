@@ -251,7 +251,11 @@
          (let ((usage "`(confirm-length expression length (name body) else)`"))
            (begin
              (arity items 5 usage a b)
-             (let* ((k (if (>= (syn-int (nth items 2)) 0) (syn-int (nth items 2)) (pfail "a length is a natural number" (nth items 2))))
+             ;; A natural literal, or a variable holding a `nat`.
+             (let* ((n (nth items 2))
+                    (k (cond ((>= (syn-int n) 0) (syn-int n))
+                             ((syn-symbol? n) -1)
+                             (else (pfail "a length is a natural number, or a variable holding one" n))))
                     (arm (syn-items (nth items 3) usage))
                     (shaped (if (= (len arm) 2) #u (pfail usage (nth items 3))))
                     (x (if (syn-symbol? (car arm)) (syn-symbol (car arm)) (pfail "a name" (car arm))))
@@ -259,8 +263,8 @@
                     (body (parse-exp (nth arm 1)))
                     (els (parse-exp (nth items 4)))
                     (tmp (string->symbol "%confirm-value"))
-                    (test (e-app (e-var 'length-is? a b) (the (listof exp finite) (cons (e-var tmp a b) (cons (e-int k a b) nil))) a b))
-                    (cert (e-app (e-var 'certify-length a b) (the (listof exp finite) (cons (e-var tmp a b) (cons (e-int k a b) nil))) a b))
+                    (test (e-app (e-var 'length-is? a b) (the (listof exp finite) (cons (e-var tmp a b) (cons (if (< k 0) (e-var (syn-symbol n) a b) (e-int k a b)) nil))) a b))
+                    (cert (e-app (e-var 'certify-length a b) (the (listof exp finite) (cons (e-var tmp a b) (cons (if (< k 0) (e-var (syn-symbol n) a b) (e-int k a b)) nil))) a b))
                     (then (e-let (the (listof (productof (1 symbol) (2 exp)) finite) (cons (product (1 x) (2 cert)) nil)) body a b)))
                (e-let (the (listof (productof (1 symbol) (2 exp)) finite) (cons (product (1 tmp) (2 e)) nil))
                       (e-if test then els a b) a b)))))

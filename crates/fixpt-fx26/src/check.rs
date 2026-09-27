@@ -101,7 +101,10 @@ pub struct Checker {
     pub(crate) certified: Vec<(Sym, usize)>,
     /// The same for `length-is?`: each variable, its binding, and the
     /// length it was found to have.
-    pub(crate) certified_lengths: Vec<(Sym, usize, i64)>,
+    pub(crate) certified_lengths: Vec<(Sym, usize, Size)>,
+    /// The sizes given to `nat` variables of no known size, innermost last
+    /// (`Checker::name_nat`).
+    pub(crate) skolems: Vec<DVar>,
     /// What the branches being checked have learned about sizes
     /// (`crate::sizes`).
     pub(crate) size_facts: Vec<crate::sizes::SizeFact>,
@@ -220,6 +223,7 @@ impl Checker {
             certified: Vec::new(),
             certified_lengths: Vec::new(),
             size_facts: Vec::new(),
+            skolems: Vec::new(),
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -388,8 +392,8 @@ impl Checker {
                 let certified = self.acyclic_test(test);
                 self.certified.extend(certified);
                 let lengths = self.length_test(test);
-                self.certified_lengths.extend(lengths);
-                let (yes, no) = self.null_facts(test);
+                self.certified_lengths.extend(lengths.clone());
+                let (yes, no) = self.test_facts(test);
                 let depth = self.size_facts.len();
                 self.size_facts.extend(yes);
                 let a = self.synth(then);
@@ -409,6 +413,8 @@ impl Checker {
                     b
                 } else if self.subtype(b, a) {
                     a
+                } else if let Some(t) = self.nat_join(a, b) {
+                    t
                 } else {
                     return Err(FxError::at(span, format!("the branches are a {} and a {}", self.show_ty(a), self.show_ty(b))));
                 };
@@ -457,9 +463,15 @@ impl Checker {
                     bound.push((*n, t));
                 }
                 let depth = self.env.len();
-                self.env.extend(bound);
+                let named = self.skolems.len();
+                for (n, t) in bound {
+                    let t = self.name_nat(n, t);
+                    self.env.push((n, t));
+                }
                 let r = self.synth(body);
                 self.env.truncate(depth);
+                let r = r.map(|(t, be)| (self.forget_nats(named, t), be));
+                self.skolems.truncate(named);
                 let (t, be) = r?;
                 let eff = self.mask(e, &eff.union(&be), t);
                 Ok((t, eff))
@@ -820,7 +832,7 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) => {}
             Ty::Link(Some(_)) => unreachable!("resolved"),
             Ty::Subr { effect, params, result } => {
                 out.extend(effect.0.iter().filter_map(|a| a.region()));
@@ -950,7 +962,7 @@ impl Checker {
             return true;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Void => true,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void => true,
             Ty::Var(v) => self.arena.is_data_var(v),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.data_walk(*x, seen)),
             Ty::Pair(a, b, r) => r.is_frozen() && self.data_walk(a, seen) && self.data_walk(b, seen),
@@ -976,38 +988,25 @@ impl Checker {
         }
     }
 
-    /// What `test` shows about sizes when it holds, and when not:
-    /// `(null? xs)`, `xs : (nlist T n)`, shows `n = 0`, or `n - 1 ≥ 0`.
-    pub(crate) fn null_facts(&self, test: ExpId) -> (Option<crate::sizes::SizeFact>, Option<crate::sizes::SizeFact>) {
-        let Exp::App { fun, args } = self.arena.exp_at(test) else { return (None, None) };
-        let (Exp::Var(op), [a]) = (self.arena.exp_at(*fun), &args[..]) else { return (None, None) };
-        if self.interner.name(*op) != "null?" || !self.is_standard(*op) {
-            return (None, None);
-        }
-        let Exp::Var(v) = self.arena.exp_at(*a) else { return (None, None) };
-        let Some(t) = self.lookup(*v) else { return (None, None) };
-        match self.arena.get(self.arena.resolve(t)) {
-            Ty::NList { size: n @ Size::Lin { .. }, .. } => (
-                Some(crate::sizes::SizeFact { lin: n.clone(), eq: true }),
-                Some(crate::sizes::SizeFact { lin: n.plus(-1), eq: false }),
-            ),
-            _ => (None, None),
+    /// If `test` is `(length-is? v k)`, the variable, as the binding it is,
+    /// and the length, as a size.
+    pub(crate) fn length_test(&self, test: ExpId) -> Option<(Sym, usize, Size)> {
+        let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
+        match (self.arena.exp_at(*fun), &args[..]) {
+            (Exp::Var(op), [a, n]) if self.interner.name(*op) == "length-is?" && self.is_standard(*op) => self.length_arg(*a, *n),
+            _ => None,
         }
     }
 
-    /// If `test` is `(length-is? v k)`, the variable, as the binding it is,
-    /// and the length.
-    pub(crate) fn length_test(&self, test: ExpId) -> Option<(Sym, usize, i64)> {
-        let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
-        match (self.arena.exp_at(*fun), &args[..]) {
-            (Exp::Var(op), [a, n]) if self.interner.name(*op) == "length-is?" && self.is_standard(*op) => {
-                match (self.arena.exp_at(*a), self.arena.exp_at(*n)) {
-                    (Exp::Var(v), Exp::Int(k)) => Some((*v, self.env.iter().rposition(|(x, _)| x == v)?, *k)),
-                    _ => None,
-                }
-            }
-            _ => None,
+    /// `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the
+    /// variable, its binding, and the length, a natural literal or a
+    /// variable of type `(nat s)`.
+    pub(crate) fn length_arg(&self, a: ExpId, n: ExpId) -> Option<(Sym, usize, Size)> {
+        let Exp::Var(v) = self.arena.exp_at(a) else { return None };
+        if !matches!(self.arena.exp_at(n), Exp::Int(_) | Exp::Var(_)) {
+            return None;
         }
+        Some((*v, self.env.iter().rposition(|(x, _)| x == v)?, self.nat_size(n)?))
     }
 
     /// `t` with its frozen regions made finite: what data `acyclic?` has
@@ -1406,6 +1405,9 @@ impl Checker {
             // `void` is the bottom type: nothing is ever returned as one.
             (Ty::Void, _) => true,
             (Ty::Base(x), Ty::Base(y)) => x == y,
+            // A natural is an integer; one of a known size, a natural.
+            (Ty::Nat(_), Ty::Base(_)) => b == self.int,
+            (Ty::Nat(m), Ty::Nat(n)) => self.size_le(&m, &n),
             (Ty::Var(x), Ty::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
             (
                 Ty::Subr { effect: xa, params: pa, result: qa },
@@ -1608,6 +1610,7 @@ impl Checker {
             Ty::NList { elem, size, region: r } => {
                 Ty::NList { elem: self.subst_memo(elem, map, memo), size: crate::sizes::subst_size(&size, map), region: region(r) }
             }
+            Ty::Nat(size) => Ty::Nat(crate::sizes::subst_size(&size, map)),
             Ty::Named { which, args } => Ty::Named {
                 which,
                 args: args

@@ -177,6 +177,9 @@ pub enum Ty {
     /// what `letrena` and `letreap` bind their region's name to, and what
     /// `rcons` allocates in (`docs/research/places-and-regions.md`).
     Place(Region),
+    /// `(nat s)`: a natural, exactly the size `s`; `nat` is `(nat finite)`,
+    /// some natural. Every `nat` is an `int` (`docs/research/sizes.md`, N5d).
+    Nat(Size),
     /// `(bloblet (fields T…) R)`: a bloblet in region `R` whose fields have
     /// the types `T…`, with a suffix of bytes (`docs/object-model.md`).
     /// `(bloblet (frozen T…) R)` is one whose fields have been frozen: they

@@ -130,7 +130,8 @@ fn both(program: &str) -> Result<Vec<String>, (String, u32, u32)> {
 
 #[test]
 fn small_programs() {
-    assert_eq!(both("(+ 1 2)"), Ok(vec!["int ! pure".to_string()]));
+    // Two naturals add to a natural of their sum.
+    assert_eq!(both("(+ 1 2)"), Ok(vec!["(nat 3) ! pure".to_string()]));
     let _ = both("(define f (subr spin (int) int) (lambda (n) (if (= n 0) 1 (* n (f (- n 1)))))) (f 10)");
     let _ = both("(the (listof int @l) (cons 1 (cons 2 nil)))");
     let _ = both("(car (cons 1 #t))");
