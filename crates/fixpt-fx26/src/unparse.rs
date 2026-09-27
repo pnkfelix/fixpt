@@ -166,14 +166,14 @@ impl Checker {
                 let sep = if fs.is_empty() { "" } else { " " };
                 format!("(bloblet ({head}{sep}{}) {})", fs.join(" "), self.show_region(region))
             }
-            Ty::Vec { elem, size, region } => match region {
+            Ty::NList { elem, size, region } => match region {
                 Region::Frozen(Some(p), _) => format!(
-                    "(vec {} {} {})",
+                    "(nlist {} {} {})",
                     self.show_ty_on(elem, path),
                     self.show_size(&size),
                     self.interner.name(self.arena.dvar_name(p))
                 ),
-                _ => format!("(vec {} {})", self.show_ty_on(elem, path), self.show_size(&size)),
+                _ => format!("(nlist {} {})", self.show_ty_on(elem, path), self.show_size(&size)),
             },
             Ty::Named { which, args } => {
                 let name = self.interner.name(self.generatives[which as usize].name).to_string();

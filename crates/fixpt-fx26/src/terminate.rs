@@ -466,9 +466,9 @@ impl Walk<'_> {
                             Ty::Pair(a, b, Region::Frozen(_, true)) => {
                                 Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *a } else { *b }) })
                             }
-                            // A `vec`'s tail is a `vec` too: the same type
+                            // A `nlist`'s tail is a `nlist` too: the same type
                             // serves to know it is finite.
-                            Ty::Vec { elem, .. } => Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *elem } else { ty }) }),
+                            Ty::NList { elem, .. } => Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *elem } else { ty }) }),
                             _ => None,
                         }
                     })

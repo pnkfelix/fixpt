@@ -144,11 +144,11 @@ impl Checker {
                 let eff = self.check(x, t)?;
                 Ok(self.mask(e, &eff, expected))
             }
-            // `nil` is a `vec` of no elements, or of some.
+            // `nil` is a `nlist` of no elements, or of some.
             Exp::Var(s)
                 if self.interner.name(s) == "nil"
                     && self.is_standard(s)
-                    && matches!(&expected_ty, Ty::Vec { size, .. } if matches!(size, Size::Finite) || self.size_eq(size, &Size::lit(0))) =>
+                    && matches!(&expected_ty, Ty::NList { size, .. } if matches!(size, Size::Finite) || self.size_eq(size, &Size::lit(0))) =>
             {
                 Ok(Effect::pure())
             }
@@ -286,7 +286,7 @@ impl Checker {
     /// polymorphic. `expected` is the type the application should have, when
     /// that is known; it helps solve the operator's binders.
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
-        // `(certify-length v k)`: `v`'s value as a `(vec T k)`, where
+        // `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where
         // `length-is?` has just found it so; nowhere else.
         if let Exp::Var(op) = self.arena.exp_at(fun)
             && self.interner.name(*op) == "certify-length"
@@ -307,39 +307,39 @@ impl Checker {
             let t = self.arena.resolve(t);
             let (elem, region) = match self.arena.get(t).clone() {
                 Ty::Pair(elem, tail, r) if self.arena.resolve(tail) == t && r.is_frozen() => (elem, r),
-                Ty::Vec { elem, region, .. } => (elem, region),
+                Ty::NList { elem, region, .. } => (elem, region),
                 _ => return Err(FxError::at(span, format!("`certify-length` takes a frozen list, and this is a {}", self.show_ty(t)))),
             };
             let region = match region {
                 Region::Frozen(p, _) => Region::Frozen(p, true),
                 r => r,
             };
-            return Ok((self.arena.ty(Ty::Vec { elem, size: Size::lit(k), region }), eff));
+            return Ok((self.arena.ty(Ty::NList { elem, size: Size::lit(k), region }), eff));
         }
-        // `cons` onto a `vec`: one more element. Where a `vec` is expected,
+        // `cons` onto a `nlist`: one more element. Where a `nlist` is expected,
         // the tail is checked as one shorter; otherwise, a tail that is a
-        // variable of `vec` type gives a `vec` one longer.
+        // variable of `nlist` type gives a `nlist` one longer.
         if let Exp::Var(op) = self.arena.exp_at(fun)
             && self.interner.name(*op) == "cons"
             && self.is_standard(*op)
             && let [x, tail] = args
         {
             let want = expected.map(|t| self.arena.get(self.arena.resolve(t)).clone());
-            if let Some(Ty::Vec { elem, size, region }) = want
+            if let Some(Ty::NList { elem, size, region }) = want
                 && (matches!(size, Size::Finite) || self.size_nonneg(&size.plus(-1)))
             {
-                let tail_ty = self.arena.ty(Ty::Vec { elem, size: size.plus(-1), region });
+                let tail_ty = self.arena.ty(Ty::NList { elem, size: size.plus(-1), region });
                 let xe = self.check(*x, elem)?;
                 let te = self.check(*tail, tail_ty)?;
-                return Ok((expected.expect("a vec"), xe.union(&te)));
+                return Ok((expected.expect("an nlist"), xe.union(&te)));
             }
             if let Exp::Var(v) = self.arena.exp_at(*tail)
                 && let Some(t) = self.lookup(*v)
-                && let Ty::Vec { elem, size, region } = self.arena.get(self.arena.resolve(t)).clone()
+                && let Ty::NList { elem, size, region } = self.arena.get(self.arena.resolve(t)).clone()
             {
                 let xe = self.check(*x, elem)?;
                 let (_, te) = self.synth(*tail)?;
-                let t = self.arena.ty(Ty::Vec { elem, size: size.plus(1), region });
+                let t = self.arena.ty(Ty::NList { elem, size: size.plus(1), region });
                 return Ok((t, xe.union(&te)));
             }
         }
@@ -477,7 +477,7 @@ impl Checker {
                 Ty::Pair(a, b, _) => vec![(*a, false), (*b, false)],
                 Ty::Bloblet { fields, .. } => fields.iter().map(|f| (*f, false)).collect(),
                 Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| (*t, false)).collect(),
-                Ty::Vec { elem, .. } => vec![(*elem, false)],
+                Ty::NList { elem, .. } => vec![(*elem, false)],
                 // Through its representation; what it was given, cautiously,
                 // as if taken as a parameter.
                 Ty::Named { which, args } => [(c.generatives[*which as usize].rep, false)]
@@ -788,8 +788,8 @@ impl Checker {
         match (&p, &a) {
             (Ty::Var(_), _) | (_, Ty::Void) => false,
             (Ty::Subr { .. }, _) => a.as_subr().is_none(),
-            // A `vec` is a list.
-            (Ty::Pair(..), Ty::Vec { .. }) => false,
+            // A `nlist` is a list.
+            (Ty::Pair(..), Ty::NList { .. }) => false,
             _ => std::mem::discriminant(&p) != std::mem::discriminant(&a),
         }
     }
@@ -845,7 +845,7 @@ impl Checker {
                     region(r) || effect(&e)
                 }
                 Ty::Base(_) | Ty::Void | Ty::Link(_) => false,
-                Ty::Vec { elem, size, region: r } => {
+                Ty::NList { elem, size, region: r } => {
                     stack.push(elem);
                     region(r) || matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v)))
                 }
@@ -893,7 +893,7 @@ impl Checker {
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
             Ty::Base(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) => false,
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) if self.walk_vars(*x, seen, hit))),
-            Ty::Vec { elem, .. } => self.walk_vars(elem, seen, hit),
+            Ty::NList { elem, .. } => self.walk_vars(elem, seen, hit),
         }
     }
 
@@ -977,17 +977,17 @@ impl Checker {
                 self.unify(h1, h2, u, trail);
                 self.unify_effect(&d1, &d2, u);
             }
-            (Ty::Vec { elem: x, size: m, region: r }, Ty::Vec { elem: y, size: n, region: s }) => {
+            (Ty::NList { elem: x, size: m, region: r }, Ty::NList { elem: y, size: n, region: s }) => {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);
                 self.unify_size(&m, &n, u);
             }
-            (Ty::Pair(x, t2, r), Ty::Vec { elem: y, size, region: s }) => {
+            (Ty::Pair(x, t2, r), Ty::NList { elem: y, size, region: s }) => {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);
                 let tail = match size {
                     Size::Finite => a,
-                    _ => self.arena.ty(Ty::Vec { elem: y, size: self.tail_size(&size), region: s }),
+                    _ => self.arena.ty(Ty::NList { elem: y, size: self.tail_size(&size), region: s }),
                 };
                 self.unify(t2, tail, u, trail);
             }

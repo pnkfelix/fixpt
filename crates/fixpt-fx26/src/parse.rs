@@ -280,13 +280,13 @@ impl Checker {
                 let (binders, body) = body?;
                 Ok(self.arena.ty(Ty::Poly { binders, body }))
             }
-            // `(vec T size)` or `(vec T size p)`: a list frozen in the heap,
+            // `(nlist T size)` or `(nlist T size p)`: a list frozen in the heap,
             // or into place `p`, with `size` elements.
-            "vec" => {
+            "nlist" => {
                 let (t, size, place) = match &items[..] {
                     [_, t, n] => (t, n, None),
                     [_, t, n, p] => (t, n, Some(p)),
-                    _ => return Err(FxError::at(s.span, "`(vec type size)` or `(vec type size place)`")),
+                    _ => return Err(FxError::at(s.span, "`(nlist type size)` or `(nlist type size place)`")),
                 };
                 let elem = self.parse_type(t)?;
                 let size = self.parse_size(size)?;
@@ -297,7 +297,7 @@ impl Checker {
                         _ => Region::Frozen(None, true),
                     },
                 };
-                Ok(self.arena.ty(Ty::Vec { elem, size, region }))
+                Ok(self.arena.ty(Ty::NList { elem, size, region }))
             }
             "ref" => {
                 let [_, t, r] = &items[..] else {

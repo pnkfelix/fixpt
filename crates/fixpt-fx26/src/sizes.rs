@@ -2,7 +2,7 @@
 //! scope show about them (`docs/research/sizes.md`, N5b).
 //!
 //! A fact is `lin = 0` or `lin ≥ 0`, learned in a branch: `(null? xs)` with
-//! `xs : (vec T n)` gives `n = 0` in the `then` and `n - 1 ≥ 0` in the
+//! `xs : (nlist T n)` gives `n = 0` in the `then` and `n - 1 ≥ 0` in the
 //! `else`. An equality is used to rewrite a variable away; an inequality is
 //! used as it is, or with a constant to spare.
 

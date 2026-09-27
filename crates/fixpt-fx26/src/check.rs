@@ -864,7 +864,7 @@ impl Checker {
                     self.regions_walk(t, seen, out);
                 }
             }
-            Ty::Vec { elem, region, .. } => {
+            Ty::NList { elem, region, .. } => {
                 out.insert(region);
                 self.regions_walk(elem, seen, out);
             }
@@ -918,7 +918,7 @@ impl Checker {
                 fields
             }
             Ty::Subr { params, result, .. } => params.into_iter().chain([result]).collect(),
-            Ty::Vec { elem, .. } => vec![elem],
+            Ty::NList { elem, .. } => vec![elem],
             Ty::Poly { body, .. } => vec![body],
             Ty::Product(ps) | Ty::Sum(ps) => ps.into_iter().map(|(_, x)| x).collect(),
             Ty::PromptTag { answer: a, payload: b, .. } | Ty::Composable { arg: a, answer: b, .. } => vec![a, b],
@@ -955,7 +955,7 @@ impl Checker {
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.data_walk(*x, seen)),
             Ty::Pair(a, b, r) => r.is_frozen() && self.data_walk(a, seen) && self.data_walk(b, seen),
             Ty::Bloblet { fields, frozen, .. } => frozen && fields.iter().all(|f| self.data_walk(*f, seen)),
-            Ty::Vec { elem, .. } => self.data_walk(elem, seen),
+            Ty::NList { elem, .. } => self.data_walk(elem, seen),
             _ => false,
         }
     }
@@ -977,7 +977,7 @@ impl Checker {
     }
 
     /// What `test` shows about sizes when it holds, and when not:
-    /// `(null? xs)`, `xs : (vec T n)`, shows `n = 0`, or `n - 1 ≥ 0`.
+    /// `(null? xs)`, `xs : (nlist T n)`, shows `n = 0`, or `n - 1 ≥ 0`.
     pub(crate) fn null_facts(&self, test: ExpId) -> (Option<crate::sizes::SizeFact>, Option<crate::sizes::SizeFact>) {
         let Exp::App { fun, args } = self.arena.exp_at(test) else { return (None, None) };
         let (Exp::Var(op), [a]) = (self.arena.exp_at(*fun), &args[..]) else { return (None, None) };
@@ -987,7 +987,7 @@ impl Checker {
         let Exp::Var(v) = self.arena.exp_at(*a) else { return (None, None) };
         let Some(t) = self.lookup(*v) else { return (None, None) };
         match self.arena.get(self.arena.resolve(t)) {
-            Ty::Vec { size: n @ Size::Lin { .. }, .. } => (
+            Ty::NList { size: n @ Size::Lin { .. }, .. } => (
                 Some(crate::sizes::SizeFact { lin: n.clone(), eq: true }),
                 Some(crate::sizes::SizeFact { lin: n.plus(-1), eq: false }),
             ),
@@ -1158,7 +1158,7 @@ impl Checker {
                 self.polarity(b, v, Variance::Inv, seen, found);
             }
             Ty::Place(r) => reg(r, found),
-            Ty::Vec { elem, region, .. } => {
+            Ty::NList { elem, region, .. } => {
                 reg(region, found);
                 self.polarity(elem, v, at, seen, found);
             }
@@ -1234,7 +1234,7 @@ impl Checker {
                 fields.iter().find_map(|f| self.knot_in(*f, &k, seen))
             }
             Ty::Product(parts) | Ty::Sum(parts) => parts.iter().find_map(|(_, x)| self.knot_in(*x, kept, seen)),
-            Ty::Vec { elem, .. } => self.knot_in(elem, kept, seen),
+            Ty::NList { elem, .. } => self.knot_in(elem, kept, seen),
             Ty::Poly { body, .. } => self.knot_in(body, kept, seen),
             // A procedure: kept where it is, it may not read there unsaid;
             // what it takes and gives is kept nowhere yet.
@@ -1292,7 +1292,7 @@ impl Checker {
                 Ty::Poly { body, .. } => (vec![], vec![*body]),
                 Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => (vec![], vec![*a]),
                 Ty::Pair(a, b, _) => (vec![], vec![*a, *b]),
-                Ty::Vec { elem, .. } => (vec![], vec![*elem]),
+                Ty::NList { elem, .. } => (vec![], vec![*elem]),
                 Ty::Bloblet { fields, .. } => (vec![], fields.clone()),
                 Ty::Product(parts) | Ty::Sum(parts) => (vec![], parts.iter().map(|(_, t)| *t).collect()),
                 Ty::Named { which, args } => {
@@ -1476,24 +1476,24 @@ impl Checker {
             (Ty::Sum(sa), Ty::Sum(sb)) => sa.iter().all(|(la, x)| {
                 sb.iter().find(|(lb, _)| lb == la).is_some_and(|(_, y)| self.sub(*x, *y, env, st))
             }),
-            // A `vec` is frozen, so covariant in its elements; its size must
+            // A `nlist` is frozen, so covariant in its elements; its size must
             // be the same, or forgotten as `finite`.
-            (Ty::Vec { elem: x, size: m, region: r }, Ty::Vec { elem: y, size: n, region: s }) => {
+            (Ty::NList { elem: x, size: m, region: r }, Ty::NList { elem: y, size: n, region: s }) => {
                 Region::frozen_le(ra(r), rb(s)) && self.size_le(&m, &n) && self.sub(x, y, env, st)
             }
-            // Any `vec` is a finite list; a finite list is a `vec` of some
+            // Any `nlist` is a finite list; a finite list is a `nlist` of some
             // length.
-            (Ty::Vec { elem: x, size, region: r }, Ty::Pair(y, tail, s)) => {
+            (Ty::NList { elem: x, size, region: r }, Ty::Pair(y, tail, s)) => {
                 // Of no elements, it has no tail to compare.
-                // A `vec` of some length has for its tail the same type.
+                // A `nlist` of some length has for its tail the same type.
                 let rest = match size {
                     Size::Finite => Some(a),
                     _ if size.as_lit() == Some(0) => None,
-                    _ => Some(self.arena.ty(Ty::Vec { elem: x, size: self.tail_size(&size), region: r })),
+                    _ => Some(self.arena.ty(Ty::NList { elem: x, size: self.tail_size(&size), region: r })),
                 };
                 Region::frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && rest.is_none_or(|rest| self.sub(rest, tail, env, st))
             }
-            (Ty::Pair(x, tail, r), Ty::Vec { elem: y, size: Size::Finite, region: s }) if matches!(r, Region::Frozen(_, true)) => {
+            (Ty::Pair(x, tail, r), Ty::NList { elem: y, size: Size::Finite, region: s }) if matches!(r, Region::Frozen(_, true)) => {
                 Region::frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && self.sub(tail, b, env, st)
             }
             // A generative type is related only to itself, argument by
@@ -1605,8 +1605,8 @@ impl Checker {
                 frozen,
                 region: region(r),
             },
-            Ty::Vec { elem, size, region: r } => {
-                Ty::Vec { elem: self.subst_memo(elem, map, memo), size: crate::sizes::subst_size(&size, map), region: region(r) }
+            Ty::NList { elem, size, region: r } => {
+                Ty::NList { elem: self.subst_memo(elem, map, memo), size: crate::sizes::subst_size(&size, map), region: region(r) }
             }
             Ty::Named { which, args } => Ty::Named {
                 which,

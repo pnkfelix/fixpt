@@ -15,39 +15,39 @@ From least to most:
 | `(listof T r)`      | nothing: `r` may be written, so the list may be cyclic |
 | `(listof T const)`  | it will not change; it may be cyclic                   |
 | `(listof T finite)` | it will not change, and it ends                        |
-| `(vec T finite)`    | the same: it has some length, not known here           |
-| `(vec T n)`         | it has exactly `n` elements                            |
+| `(nlist T finite)`  | the same: it has some length, not known here           |
+| `(nlist T n)`       | it has exactly `n` elements                            |
 
-So `(vec T finite)` and `(listof T finite)` are the same type, each a
-subtype of the other; `(vec T n) ≤ (vec T finite)` forgets the length. A
-list that may be cyclic has no length, and is no `vec`: `acyclic` or
+So `(nlist T finite)` and `(listof T finite)` are the same type, each a
+subtype of the other; `(nlist T n) ≤ (nlist T finite)` forgets the length. A
+list that may be cyclic has no length, and is no `nlist`: `acyclic` or
 `confirm` is the way in.
 
 ## The forms
 
-- **Types.** `(vec T size)`, its pairs frozen in the heap; `(vec T size p)`,
+- **Types.** `(nlist T size)`, its pairs frozen in the heap; `(nlist T size p)`,
   frozen into place `p`, as `(finite p)` is.
 - **Sizes.** A literal (`0`, `3`), a variable of kind `size`, `(+ s s)`,
   `(- s k)` with `k` a literal, and `finite`, the top: some size.
 - **Binders.** `(poly ((n size)) …)`, so `map` is
-  `(poly ((t type) (u type) (n size)) (subr e ((subr e (t) u) (vec t n)) (vec u n)))`.
+  `(poly ((t type) (u type) (n size)) (subr e ((subr e (t) u) (nlist t n)) (nlist u n)))`.
   A size binder may be instantiated with `finite`, so `map` over a
-  `(vec t finite)` gives a `(vec u finite)`.
+  `(nlist t finite)` gives a `(nlist u finite)`.
 
 ## What the checker learns and uses
 
-- **`cons`** onto a `(vec T n)`, frozen, gives a `(vec T (+ n 1))`; `nil`
-  where a `vec` is expected is a `(vec T 0)`.
-- **In a branch** of `(null? xs)` with `xs : (vec T n)`: `n = 0` in the
+- **`cons`** onto a `(nlist T n)`, frozen, gives a `(nlist T (+ n 1))`; `nil`
+  where a `nlist` is expected is a `(nlist T 0)`.
+- **In a branch** of `(null? xs)` with `xs : (nlist T n)`: `n = 0` in the
   `then`, `n ≥ 1` in the `else`. These are facts, kept in a context as
   `acyclic?`'s certified variables are; N4 will put type equalities in the
   same context.
-- **`cdr`** of a `(vec T n)` is a `(vec T (- n 1))` where the facts show
-  `n ≥ 1`, and a `(vec T finite)` where they do not: never an error, only
+- **`cdr`** of a `(nlist T n)` is a `(nlist T (- n 1))` where the facts show
+  `n ≥ 1`, and a `(nlist T finite)` where they do not: never an error, only
   less known. `car` is as for any list.
-- **Comparing sizes**: `(vec T s) ≤ (vec U s′)` when `T ≤ U` and the facts
+- **Comparing sizes**: `(nlist T s) ≤ (nlist U s′)` when `T ≤ U` and the facts
   show `s = s′`, or `s′` is `finite`.
-- **Size-change**: a `vec`'s `cdr` is a part, as a finite list's is.
+- **Size-change**: a `nlist`'s `cdr` is a part, as a finite list's is.
 
 ## Deciding facts
 
@@ -64,7 +64,7 @@ is then `finite`, or an error saying which size could not be shown equal.
 `(confirm-length e n (x body) else)`: if `e`, a list that is data and
 frozen, is acyclic and has `n` elements (`n` a size expression the
 checker can compute from variables in scope, or a literal), `body` runs
-with `x : (vec T n)`; otherwise `else`. Sugar, as `acyclic` is, over a
+with `x : (nlist T n)`; otherwise `else`. Sugar, as `acyclic` is, over a
 test and a certifying conversion the checker accepts only in its branch.
 
 ## `nat`, and sizes as values (the user's, 2026-09-27)
@@ -73,15 +73,15 @@ test and a certifying conversion the checker accepts only in its branch.
   a bound below for free on a `nat` that counts down; typing `(- n 1)` as a
   `nat` needs the fact `n ≥ 1`, which N5b's facts give.
 - **`(nat s)`**, the singleton: exactly the size `s`, as Dependent ML's
-  `int(n)` (from memory). What links values to sizes: `length : (vec T n)
+  `int(n)` (from memory). What links values to sizes: `length : (nlist T n)
   → (nat n)`, `confirm-length` with a length computed at run time, and an
   array index `(nat i)` with the fact `i < n` (CF4).
 
 ## Stages
 
-| stage | what                                                                                                                                  |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| N5a   | done: the `vec` type with literal sizes and `finite`; `cons`, `nil`; `vec finite` as `listof finite`; `confirm-length` with a literal |
-| N5b   | done: kind `size`, variables in `poly`; facts from `null?`; `cdr`; equalities                                                         |
-| N5c   | arithmetic and inequalities (Fourier–Motzkin); existentials for results such as `filter`'s; array bounds                              |
-| N5d   | `nat` and `(nat s)`; `length`; `confirm-length` with a run-time length                                                                |
+| stage | what                                                                                                                                      |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| N5a   | done: the `nlist` type with literal sizes and `finite`; `cons`, `nil`; `nlist finite` as `listof finite`; `confirm-length` with a literal |
+| N5b   | done: kind `size`, variables in `poly`; facts from `null?`; `cdr`; equalities                                                             |
+| N5c   | arithmetic and inequalities (Fourier–Motzkin); existentials for results such as `filter`'s; array bounds                                  |
+| N5d   | `nat` and `(nat s)`; `length`; `confirm-length` with a run-time length                                                                    |
