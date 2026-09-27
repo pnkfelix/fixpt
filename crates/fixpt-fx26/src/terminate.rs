@@ -65,19 +65,62 @@ struct Walk<'a> {
     /// Bounds the tests on the way down have put on parameters.
     guards: Vec<(usize, Bound)>,
     calls: Vec<(usize, usize, Graph)>,
+    /// For each call, whether it counts an integer down, or up, with no
+    /// test bounding it that way.
+    unbounded: Vec<Option<&'static str>>,
     /// For each call, what each argument is: a parameter of the caller,
     /// passed unchanged, or not.
     passed: Vec<(usize, usize, Vec<Option<usize>>)>,
     /// (member, parameter): passed unchanged by every call in the group,
     /// so the same for the whole recursion, and a bound as a literal is.
     invariant: HashSet<(usize, usize)>,
-    escapes: bool,
+    /// A member named other than as a call's operator: (where, which).
+    escapes: Option<(usize, usize)>,
 }
 
 impl Checker {
     /// Whether every run of the group `bindings` (names, declared types and
-    /// lambdas) ends, so that calls within it need not say `spin`.
-    pub(crate) fn terminates(&self, bindings: &[(Sym, TyId, ExpId)]) -> bool {
+    /// lambdas) ends, so that calls within it need not say `spin`; if not,
+    /// why not, in words for an error.
+    pub(crate) fn termination(&self, bindings: &[(Sym, TyId, ExpId)]) -> Result<(), String> {
+        let name = |i: usize| self.interner.name(bindings[i].0).to_string();
+        let mut w = self.size_change_walk(bindings);
+        let Some(w) = w.as_mut() else {
+            return Err("it is not a lambda".into());
+        };
+        if let Some((at, m)) = w.escapes {
+            return Err(format!(
+                "`{}` is named in `{}` other than as a call's operator: whoever is given it may call it again, with anything",
+                name(m),
+                name(at)
+            ));
+        }
+        match size_change_ends(&w.calls) {
+            Ends::Yes => Ok(()),
+            Ends::TooMany => Err("the calls combine in too many ways to follow".into()),
+            Ends::No => {
+                let mut flat: Vec<String> = Vec::new();
+                for ((from, to, g), unbounded) in w.calls.iter().zip(&w.unbounded) {
+                    let mut s = format!("the call of `{}` in `{}`", name(*to), name(*from));
+                    if let Some(u) = unbounded {
+                        s.push_str(&format!(" ({u})"));
+                    }
+                    if !g.values().any(|strict| *strict) && !flat.contains(&s) {
+                        flat.push(s);
+                    }
+                }
+                Err(if flat.is_empty() {
+                    "each call passes something smaller, but nothing keeps shrinking around every loop of calls".into()
+                } else {
+                    format!("nothing smaller is passed by {}", flat.join(", "))
+                })
+            }
+        }
+    }
+
+    /// The walk of the group, with the calls it found; `None` if a member
+    /// is not a lambda.
+    fn size_change_walk<'a>(&'a self, bindings: &[(Sym, TyId, ExpId)]) -> Option<Walk<'a>> {
         let mut w = Walk {
             c: self,
             members: bindings.iter().map(|(n, _, _)| *n).collect(),
@@ -85,19 +128,20 @@ impl Checker {
             scope: Vec::new(),
             guards: Vec::new(),
             calls: Vec::new(),
+            unbounded: Vec::new(),
             passed: Vec::new(),
             invariant: HashSet::new(),
-            escapes: false,
+            escapes: None,
         };
         let mut arity = Vec::new();
         for (_, _, init) in bindings {
-            let Some((params, _)) = self.lambda_of(*init) else { return false };
+            let Some((params, _)) = self.lambda_of(*init) else { return None };
             arity.push(params.len());
         }
         // Twice: first to learn which parameters every call passes on
         // unchanged, then with them as bounds.
         if !w.walk_members(bindings) {
-            return false;
+            return w.escapes.is_some().then_some(w);
         }
         let mut inv: HashSet<(usize, usize)> =
             arity.iter().enumerate().flat_map(|(i, n)| (0..*n).map(move |j| (i, j))).collect();
@@ -118,12 +162,13 @@ impl Checker {
         if !inv.is_empty() {
             w.invariant = inv;
             w.calls.clear();
+            w.unbounded.clear();
             w.passed.clear();
             if !w.walk_members(bindings) {
-                return false;
+                return w.escapes.is_some().then_some(w);
             }
         }
-        size_change_ends(&w.calls)
+        Some(w)
     }
 
     /// A binding's lambda, under `plambda`, `the` and `rlambda`: its
@@ -171,7 +216,7 @@ impl Walk<'_> {
                 self.scope.push((*p, known));
             }
             self.walk(body);
-            if self.escapes {
+            if self.escapes.is_some() {
                 return false;
             }
         }
@@ -210,8 +255,8 @@ impl Walk<'_> {
     fn walk(&mut self, e: ExpId) {
         match self.c.arena.exp_at(e).clone() {
             Exp::Var(s) => {
-                if self.member(s).is_some() {
-                    self.escapes = true;
+                if let Some(m) = self.member(s) {
+                    self.escapes.get_or_insert((self.current, m));
                 }
             }
             Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => {}
@@ -397,6 +442,19 @@ impl Walk<'_> {
         }
     }
 
+    /// Whether `e` is the `car` or `cdr` of a parameter's part at a region
+    /// that is not `finite`.
+    fn written_part(&self, e: ExpId) -> bool {
+        let arena = &self.c.arena;
+        let Exp::App { fun, args } = arena.exp_at(e).clone() else { return false };
+        matches!(self.std_op(fun), Some("car" | "cdr"))
+            && args.len() == 1
+            && self.tracked(args[0]).iter().any(|k| {
+                matches!(k, Tracked::Part { ty, .. }
+                    if matches!(arena.get(arena.resolve(*ty)), Ty::Pair(_, _, r) if !matches!(r, Region::Frozen(_, true))))
+            })
+    }
+
     /// Whether `e` is the same at every call of the group: a literal, a
     /// variable bound outside it, a parameter passed on unchanged, or the
     /// length of a string or the sum or difference of such.
@@ -476,16 +534,28 @@ impl Walk<'_> {
             .collect();
         self.passed.push((self.current, to, unchanged));
         let mut g = Graph::new();
+        let mut unbounded = None;
         let mut add = |from: (usize, Measure), to: (usize, Measure), strict: bool| {
             let e = g.entry((from, to)).or_insert(strict);
             *e |= strict;
         };
+        for a in args {
+            if self.written_part(*a) {
+                unbounded.get_or_insert("a part of a list that may be written is no smaller: it may be cyclic");
+            }
+        }
         for (q, a) in args.iter().enumerate() {
             for k in self.tracked(*a) {
                 match k {
                     Tracked::Part { param, strict, .. } => add((param, Measure::Part), (q, Measure::Part), strict),
                     Tracked::Int { param, offset } => {
                         let has = |b| self.guards.contains(&(param, b));
+                        if offset < 0 && !has(Bound::Lower) {
+                            unbounded.get_or_insert("it counts down, but nothing fixed bounds the count below");
+                        }
+                        if offset > 0 && !has(Bound::Upper) {
+                            unbounded.get_or_insert("it counts up, but nothing fixed bounds the count above");
+                        }
                         if offset < 0 && has(Bound::Lower) {
                             add((param, Measure::Down), (q, Measure::Down), true);
                         } else if offset <= 0 {
@@ -501,6 +571,7 @@ impl Walk<'_> {
             }
         }
         self.calls.push((self.current, to, g));
+        self.unbounded.push(unbounded);
     }
 }
 
@@ -532,8 +603,14 @@ fn compose(a: &Graph, b: &Graph) -> Graph {
     out
 }
 
+enum Ends {
+    Yes,
+    No,
+    TooMany,
+}
+
 /// The size-change criterion over the group's calls.
-fn size_change_ends(calls: &[(usize, usize, Graph)]) -> bool {
+fn size_change_ends(calls: &[(usize, usize, Graph)]) -> Ends {
     let mut all: HashSet<(usize, usize, Graph)> = calls.iter().cloned().collect();
     let mut todo: Vec<(usize, usize, Graph)> = all.iter().cloned().collect();
     while let Some((f, g, a)) = todo.pop() {
@@ -544,14 +621,16 @@ fn size_change_ends(calls: &[(usize, usize, Graph)]) -> bool {
             let c = (f, *h, compose(&a, b));
             if !all.contains(&c) {
                 if all.len() >= MOST_GRAPHS {
-                    return false;
+                    return Ends::TooMany;
                 }
                 all.insert(c.clone());
                 todo.push(c);
             }
         }
     }
-    all.iter()
+    let ends = all
+        .iter()
         .filter(|(f, g, a)| f == g && compose(a, a) == *a)
-        .all(|(_, _, a)| a.iter().any(|((x, y), strict)| x == y && *strict))
+        .all(|(_, _, a)| a.iter().any(|((x, y), strict)| x == y && *strict));
+    if ends { Ends::Yes } else { Ends::No }
 }

@@ -255,14 +255,12 @@ impl Checker {
                     self.known.insert((name, ty));
                 }
                 // A lambda whose every run ends needs no `spin`.
-                let spins = recursive && !self.terminates(&[(name, ty, e)]);
-                if spins {
-                    self.recursive.push((name, ty));
+                let rdepth = self.recursive.len();
+                if recursive {
+                    self.note_termination(&[(name, ty, e)]);
                 }
                 let checked = self.check_declared(name, ty, e);
-                if spins {
-                    self.recursive.pop();
-                }
+                self.recursive.truncate(rdepth);
                 match checked {
                     Ok(effect) => {
                         if !recursive {
@@ -325,9 +323,7 @@ impl Checker {
                 bindings.push((name, ty, e));
             }
             // A group whose every run ends needs no `spin`.
-            if !self.terminates(&bindings) {
-                self.recursive.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
-            }
+            self.note_termination(&bindings);
             for (name, ty, e) in &bindings {
                 self.check_declared(*name, *ty, *e)?;
             }
@@ -343,13 +339,7 @@ impl Checker {
     /// Check `e` against `ty`, the type `name` is declared; an error at `e`
     /// itself says so.
     fn check_declared(&mut self, name: Sym, ty: TyId, e: crate::ast::ExpId) -> R<Effect> {
-        self.check(e, ty).map_err(|err| {
-            if err.span == self.arena.span_of(e) {
-                FxError::at(err.span, format!("`{}` is declared a {}: {}", self.interner.name(name), self.show_ty(ty), err.message))
-            } else {
-                err
-            }
-        })
+        self.check(e, ty).map_err(|err| self.declared_error(name, ty, e, err))
     }
 
     /// Check `form` as [`top`](Self::top) would, then forget it: nothing it

@@ -67,6 +67,9 @@ pub struct Checker {
     /// it and the slot its type will fill: a use inside with the same
     /// descriptions is that slot, a knot (regular recursion).
     pub(crate) knots: Vec<(Sym, Vec<crate::parse::FamilyArg>, TyId)>,
+    /// Why each member of a recursive group that may not end may not: said
+    /// when its declared type leaves out `spin`.
+    pub(crate) spin_why: Vec<((Sym, TyId), String)>,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -172,6 +175,7 @@ impl Checker {
             symbol,
             expanding: 0,
             knots: Vec::new(),
+            spin_why: Vec::new(),
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -354,19 +358,11 @@ impl Checker {
                     return Err(FxError::at(self.arena.span_of(*init), letrec_not_lambda(self.interner.name(*n))));
                 }
                 // A group whose every run ends needs no `spin`.
-                if !self.terminates(&bindings) {
-                    self.recursive.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
-                }
+                self.note_termination(&bindings);
                 let r = (|| {
                     let mut eff = Effect::pure();
                     for (n, t, init) in &bindings {
-                        let ie = self.check(*init, *t).map_err(|err| {
-                            if err.span == self.arena.span_of(*init) {
-                                FxError::at(err.span, format!("`{}` is declared a {}: {}", self.interner.name(*n), self.show_ty(*t), err.message))
-                            } else {
-                                err
-                            }
-                        })?;
+                        let ie = self.check(*init, *t).map_err(|err| self.declared_error(*n, *t, *init, err))?;
                         eff = eff.union(&ie);
                     }
                     // The body's calls of the group are not recursion.
@@ -556,6 +552,33 @@ impl Checker {
             e.0.insert(Atom::Spin);
         }
         e
+    }
+
+    /// Whether the group `bindings` ends; if not, its members are recursion
+    /// that says `spin`, and why is kept for an error.
+    pub(crate) fn note_termination(&mut self, bindings: &[(Sym, TyId, ExpId)]) {
+        if let Err(why) = self.termination(bindings) {
+            for (n, t, _) in bindings {
+                self.recursive.push((*n, *t));
+                self.spin_why.push(((*n, *t), why.clone()));
+            }
+        }
+    }
+
+    /// An error checking `init` against `t`, the type `n` is declared: at
+    /// `init` itself it says so, and, if it is about `spin` and `n`'s group
+    /// may not end, why not.
+    pub(crate) fn declared_error(&self, n: Sym, t: TyId, init: ExpId, err: FxError) -> FxError {
+        if err.span != self.arena.span_of(init) {
+            return err;
+        }
+        let mut msg = format!("`{}` is declared a {}: {}", self.interner.name(n), self.show_ty(t), err.message);
+        if err.message.contains("spin")
+            && let Some((_, why)) = self.spin_why.iter().rev().find(|(k, _)| *k == (n, t))
+        {
+            msg.push_str(&format!("; it may not end: {why}"));
+        }
+        FxError::at(err.span, msg)
     }
 
     pub fn is_lambda(&self, mut x: ExpId) -> bool {

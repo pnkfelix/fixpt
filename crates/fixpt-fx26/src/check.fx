@@ -279,6 +279,8 @@
 (define k-known (ref k-named @t) (new nil))
 (define k-recursive (ref k-named @t) (new nil))
 (define k-std (ref k-named @t) (new nil))
+;; Why each member of a recursive group that may not end may not.
+(define k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) finite) @t) (new nil))
 (define k-named-has? (subr (read @t) (k-named symbol int) bool)
   (lambda (ns n t) (and (not (null? ns)) (or (and (symbol=? (car (car ns)) n) (= (cdr (car ns)) t)) (k-named-has? (cdr ns) n t)))))
 (define k-note-known (subr kstate (symbol int) unit)
@@ -1313,7 +1315,7 @@
       (set k-extracts nil)
       (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-known nil) (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
-      (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil)
+      (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
@@ -1909,6 +1911,8 @@
           (begin (k-note-known n t)
                  (if spins (set k-recursive (cons (cons n t) (get k-recursive))) #u)
                  (k-note-letrec (cdr bs) spins))))))
+;; The group's members are recursion that says `spin`, if `why` says it may
+;; not end, and why is kept for an error.
 ;; Naming `s`: pure, but for a member of a recursive group that may not
 ;; end, named in the group. Called, the call says `spin`; given away,
 ;; whoever calls it could loop through it, so naming it does.
@@ -2547,7 +2551,12 @@
 (define k-sc-members (ref k-names @t) (new nil))
 (define k-sc-current (ref int @t) (new 0))
 (define k-sc-calls (ref k-calls @t) (new nil))
-(define k-sc-escapes (ref bool @t) (new #f))
+;; A member named other than as a call's operator: (where . which), or none.
+(define k-sc-escapes (ref (listof (pairof int int @t) finite) @t) (new nil))
+;; For each call, as `k-sc-calls` has them: why it may shrink nothing, or "".
+(define k-sc-hints (ref (listof string finite) @t) (new nil))
+;; Whether the closure of the calls grew past `k-sc-most`.
+(define k-sc-too-many (ref bool @t) (new #f))
 ;; For each call: caller, callee, and each argument as the caller's
 ;; parameter passed unchanged, or -1.
 (define-type k-passed (listof (productof (1 int) (2 int) (3 k-ids)) finite))
@@ -2778,9 +2787,54 @@
           (else (k-sc-unchanged (cdr ks))))))
 (define k-sc-passing (subr (maxeff kstate spin) (kxs k-tscope) k-ids)
   (lambda (args sc) (if (null? args) nil (the k-ids (cons (k-sc-unchanged (k-sc-tracked (car args) sc)) (k-sc-passing (cdr args) sc))))))
+;; Whether `ks` knows of a pair at a region that is not `finite`.
+(define k-sc-any-written? (subr (maxeff (read @t) spin) (k-trs) bool)
+  (lambda (ks)
+    (and (not (null? ks))
+         (or (tagcase (car ks)
+               (tr-part (p s t)
+                 (tagcase (k-get t) (ty-pair (x y r) (tagcase r (r-frozen (q fin) (not fin)) (else z #t))) (else z #f)))
+               (else z #f))
+             (k-sc-any-written? (cdr ks))))))
+;; Whether some argument is the `car` or `cdr` of a parameter's part at a
+;; region that is not `finite`.
+(define k-sc-written-arg? (subr (maxeff kstate spin) (kxs k-tscope) bool)
+  (lambda (args sc)
+    (and (not (null? args))
+         (or (tagcase (car args)
+               (x-app (f xs a b)
+                 (let ((op (k-sc-op f sc)))
+                   (and (or (string=? op "car") (string=? op "cdr")) (k-sc-one? xs) (k-sc-any-written? (k-sc-tracked (car xs) sc)))))
+               (else y #f))
+             (k-sc-written-arg? (cdr args) sc)))))
+;; The first count in `ks` with no fixed bound its way, in words, or "".
+(define k-sc-count-hint (subr (read @t) (k-trs k-guards) string)
+  (lambda (ks gs)
+    (if (null? ks)
+        ""
+        (let ((h (tagcase (car ks)
+                   (tr-int (p o)
+                     (cond ((and (< o 0) (not (k-sc-guarded? gs p 0))) "it counts down, but nothing fixed bounds the count below")
+                           ((and (> o 0) (not (k-sc-guarded? gs p 1))) "it counts up, but nothing fixed bounds the count above")
+                           (else "")))
+                   (else y ""))))
+          (if (string=? h "") (k-sc-count-hint (cdr ks) gs) h)))))
+(define k-sc-count-hints (subr (maxeff kstate spin) (kxs k-tscope k-guards) string)
+  (lambda (args sc gs)
+    (if (null? args)
+        ""
+        (let ((h (k-sc-count-hint (k-sc-tracked (car args) sc) gs)))
+          (if (string=? h "") (k-sc-count-hints (cdr args) sc gs) h)))))
+;; Why a call with `args` may shrink nothing, or "".
+(define k-sc-hint (subr (maxeff kstate spin) (kxs k-tscope k-guards) string)
+  (lambda (args sc gs)
+    (if (k-sc-written-arg? args sc)
+        "a part of a list that may be written is no smaller: it may be cyclic"
+        (k-sc-count-hints args sc gs))))
 (define k-sc-call (subr (maxeff kstate spin) (int kxs k-tscope k-guards) unit)
   (lambda (to args sc gs)
     (begin
+     (set k-sc-hints (cons (k-sc-hint args sc gs) (get k-sc-hints)))
      (set k-sc-passed (cons (product (1 (get k-sc-current)) (2 to) (3 (k-sc-passing args sc))) (get k-sc-passed)))
      (set k-sc-calls (cons (product (1 (get k-sc-current)) (2 to) (3 (k-sc-arg-edges args 0 sc gs nil))) (get k-sc-calls))))))
 
@@ -2816,7 +2870,9 @@
   (k-sc-walk (subr (maxeff kstate spin) (kx k-tscope k-guards) unit)
     (lambda (x sc gs)
       (tagcase x
-        (x-var (s a b) (if (>= (k-sc-member sc s) 0) (set k-sc-escapes #t) #u))
+        (x-var (s a b)
+          (let ((m (k-sc-member sc s)))
+            (if (and (>= m 0) (null? (get k-sc-escapes))) (set k-sc-escapes (cons (cons (get k-sc-current) m) nil)) #u)))
         (x-const (t v a b) #u)
         (x-app (f args a b)
           (let ((to (tagcase (k-under f) (x-var (s fa fb) (k-sc-member sc s)) (else y -1))))
@@ -2905,7 +2961,7 @@
             (else
              (let ((cg (k-sc-compose a (extract (car calls) 3) nil)) (h (extract (car calls) 2)))
                (cond ((k-sc-has? all f h cg) (k-sc-extend f g a (cdr calls) todo all n))
-                     ((>= n k-sc-most) #f)
+                     ((>= n k-sc-most) (begin (set k-sc-too-many #t) #f))
                      (else (let ((new (product (1 f) (2 h) (3 cg))))
                              (k-sc-extend f g a (cdr calls) (cons new todo) (cons new all) (+ n 1)))))))))))
 
@@ -2937,7 +2993,7 @@
               (and (<= (k-length ps) (k-length ts))
                    (begin (set k-sc-current i)
                           (k-sc-walk body (k-sc-param-scope ps ts 0 nil) nil)
-                          (and (not (get k-sc-escapes)) (k-sc-walk-members (cdr bs) (+ i 1)))))))
+                          (and (null? (get k-sc-escapes)) (k-sc-walk-members (cdr bs) (+ i 1)))))))
           (else y #f)))))
 (define k-sc-names (subr kstate (k-group) k-names)
   (lambda (bs) (if (null? bs) nil (the k-names (cons (extract (car bs) 1) (k-sc-names (cdr bs)))))))
@@ -2974,23 +3030,101 @@
   (lambda (inv)
     (let ((next (k-sc-keep-all inv (get k-sc-passed))))
       (if (= (k-length next) (k-length inv)) inv (k-sc-invariants next)))))
+(define k-sc-member-name (subr (read @t) (int) string)
+  (lambda (i) (symbol->string (k-nth (get k-sc-members) i))))
+(define k-sc-strict-any? (subr pure (k-graph) bool)
+  (lambda (g) (and (not (null? g)) (or (extract (car g) 3) (k-sc-strict-any? (cdr g))))))
+(define k-sc-has-string? (subr pure ((listof string finite) string) bool)
+  (lambda (xs s) (and (not (null? xs)) (or (string=? (car xs) s) (k-sc-has-string? (cdr xs) s)))))
+;; The calls, in the order met, that pass nothing strictly smaller, each
+;; once, in words (newest first).
+(define k-sc-flat (subr (maxeff kstate spin) (k-calls (listof string finite) (listof string finite)) (listof string finite))
+  (lambda (cs hs out)
+    (if (null? cs)
+        out
+        (let* ((c (car cs))
+               (s1 (k-cat5 "the call of `" (k-sc-member-name (extract c 2)) "` in `" (k-sc-member-name (extract c 1)) "`"))
+               (s (if (string=? (car hs) "") s1 (k-cat4 s1 " (" (car hs) ")"))))
+          (k-sc-flat (cdr cs) (cdr hs)
+                     (if (or (k-sc-strict-any? (extract c 3)) (k-sc-has-string? out s)) out (the (listof string finite) (cons s out))))))))
+(define k-sc-escape-why (subr (read @t) () string)
+  (lambda ()
+    (let ((e (car (get k-sc-escapes))))
+      (k-cat5 "`" (k-sc-member-name (cdr e)) "` is named in `" (k-sc-member-name (car e))
+              "` other than as a call's operator: whoever is given it may call it again, with anything"))))
+;; Why the walked calls may not end.
+(define k-sc-calls-why (subr (maxeff kstate spin) () string)
+  (lambda ()
+    (let ((all (k-sc-dedup (get k-sc-calls) nil)))
+      (cond ((k-sc-close all all (k-length all)) "")
+            ((get k-sc-too-many) "the calls combine in too many ways to follow")
+            (else
+             (let ((flat (the (listof string finite)
+                              (reverse (k-sc-flat (the k-calls (reverse (get k-sc-calls)))
+                                                  (the (listof string finite) (reverse (get k-sc-hints))) nil)))))
+               (if (null? flat)
+                   "each call passes something smaller, but nothing keeps shrinking around every loop of calls"
+                   (string-append "nothing smaller is passed by " (k-join flat ", ")))))))))
 ;; Whether every run of the group `bs` ends, so that calls within it need
-;; not say `spin`. Walked twice: first to learn which parameters every call
-;; passes on unchanged, then with them as bounds.
-(define k-terminates? (subr (maxeff kstate spin) (k-group) bool)
+;; not say `spin`: "" if so, and otherwise why not, in words for an error.
+;; Walked twice: first to learn which parameters every call passes on
+;; unchanged, then with them as bounds.
+(define k-termination (subr (maxeff kstate spin) (k-group) string)
   (lambda (bs)
     (begin
       (set k-sc-members (k-sc-names bs))
       (set k-sc-calls nil)
+      (set k-sc-hints nil)
       (set k-sc-passed nil)
       (set k-sc-invariant nil)
-      (set k-sc-escapes #f)
-      (and (k-sc-walk-members bs 0)
-           (let ((inv (k-sc-invariants (k-sc-all-params bs 0 nil))))
-             (and (or (null? inv)
-                      (begin (set k-sc-invariant inv) (set k-sc-calls nil) (set k-sc-passed nil)
-                             (k-sc-walk-members bs 0)))
-                  (let ((all (k-sc-dedup (get k-sc-calls) nil))) (k-sc-close all all (k-length all)))))))))
+      (set k-sc-escapes nil)
+      (set k-sc-too-many #f)
+      (let ((walked (k-sc-walk-members bs 0)))
+        (cond ((not (null? (get k-sc-escapes))) (k-sc-escape-why))
+              ((not walked) "it is not a lambda")
+              (else
+               (let ((inv (k-sc-invariants (k-sc-all-params bs 0 nil))))
+                 (if (null? inv)
+                     (k-sc-calls-why)
+                     (begin
+                       (set k-sc-invariant inv)
+                       (set k-sc-calls nil)
+                       (set k-sc-hints nil)
+                       (set k-sc-passed nil)
+                       (let ((again (k-sc-walk-members bs 0)))
+                         (cond ((not (null? (get k-sc-escapes))) (k-sc-escape-why))
+                               ((not again) "it is not a lambda")
+                               (else (k-sc-calls-why)))))))))))))
+;; Note why each of `g` may not end.
+(define k-note-why (subr kstate (k-group string) unit)
+  (lambda (g why)
+    (if (null? g)
+        #u
+        (begin (set k-spin-why (cons (product (1 (extract (car g) 1)) (2 (extract (car g) 2)) (3 why)) (get k-spin-why)))
+               (k-note-why (cdr g) why)))))
+(define k-why-of (subr (read @t) ((listof (productof (1 symbol) (2 int) (3 string)) finite) symbol int) string)
+  (lambda (ws n t)
+    (cond ((null? ws) "")
+          ((and (symbol=? (extract (car ws) 1) n) (= (extract (car ws) 2) t)) (extract (car ws) 3))
+          (else (k-why-of (cdr ws) n t)))))
+(define k-text-has? (subr spin (string string int) bool)
+  (lambda (hay needle i)
+    (and (<= (+ i (string-length needle)) (string-length hay))
+         (or (string=? (substring hay i (+ i (string-length needle))) needle) (k-text-has? hay needle (+ i 1))))))
+;; `f`, checking what `n` is declared `t`; an error at `a`..`b` itself says
+;; so, and, if it is about `spin` and `n`'s group may not end, why not.
+(define k-declaring (subr (maxeff checks spin) ((subr (maxeff checks spin) () k-te) int int symbol int) k-te)
+  (lambda (f a b n t)
+    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
+      (tagcase r
+        (k-done (te) te)
+        (k-err (m ea eb)
+          (if (and (= ea a) (= eb b))
+              (let* ((why (k-why-of (get k-spin-why) n t))
+                     (tail (if (and (not (string=? why "")) (k-text-has? m "spin" 0)) (string-append "; it may not end: " why) "")))
+                (k-fail (k-cat4 (k-cat4 (k-quote (symbol->string n)) " is declared a " (k-show-ty t) ": ") m tail "") ea eb))
+              (k-fail m ea eb)))
+        (k-ok (xs) (k-fail "k-ok inside" a b))))))
 
 ;; Every binding of a `letrec` a lambda, or an error at the first that is not.
 (define k-letrec-lambdas (subr checks (k-group) unit)
@@ -3046,7 +3180,8 @@
               (k-bind-letrec bs)
               ;; A group whose every run ends needs no `spin`.
               (k-letrec-lambdas bs)
-              (k-note-letrec bs (not (k-terminates? bs)))
+              (let ((why (k-termination bs)))
+                (begin (k-note-letrec bs (not (string=? why ""))) (if (string=? why "") #u (k-note-why bs why))))
               ;; The body's calls of the group are not recursion.
               (let* ((ie (k-check-letrec bs)) (restored (set k-recursive rsaved)) (rb (k-synth body)))
                 (begin
@@ -3132,9 +3267,7 @@
   ;; itself says so.
   (k-check-declared (subr (maxeff checks spin) (symbol int kx) k-eff)
     (lambda (n t init)
-      (extract (k-prefixing (lambda () (k-te t (k-check init t))) (k-start init) (k-end init)
-                            (lambda () (k-cat4 (k-quote (symbol->string n)) " is declared a " (k-show-ty t) ": ")))
-               2)))
+      (extract (k-declaring (lambda () (k-te t (k-check init t))) (k-start init) (k-end init) n t) 2)))
   ;;; ------------------------------------------------------------ lambda
 
   ;; A `lambda`'s type. `hint` supplies the types of parameters the program
@@ -3663,7 +3796,8 @@
     (let* ((rsaved (get k-recursive))
            (g (k-rec-lambdas bs (k-rec-types bs)))
            ;; A group whose every run ends needs no `spin`.
-           (noted (if (k-terminates? g) #u (k-note-recursive g)))
+           (why (k-termination g))
+           (noted (if (string=? why "") #u (begin (k-note-recursive g) (k-note-why g why))))
            (lines (k-rec-check g)))
       (begin (set k-recursive rsaved) lines))))
 
@@ -3692,9 +3826,11 @@
                               ;; A lambda whose every run ends needs no `spin`.
                               (noted (if (k-lambda? x)
                                          (begin (k-note-known name t)
-                                                (if (k-terminates? (the k-group (cons (product (1 name) (2 t) (3 x)) nil)))
-                                                    #u
-                                                    (set k-recursive (cons (cons name t) rsaved))))
+                                                (let* ((g (the k-group (cons (product (1 name) (2 t) (3 x)) nil)))
+                                                       (why (k-termination g)))
+                                                  (if (string=? why "")
+                                                      #u
+                                                      (begin (set k-recursive (cons (cons name t) rsaved)) (k-note-why g why)))))
                                          #u))
                               (e (k-check-declared name t x))
                               (popped (set k-recursive rsaved))
