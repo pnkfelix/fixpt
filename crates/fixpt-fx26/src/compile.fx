@@ -218,7 +218,7 @@
         (e-lambda (ps body a b) (c-free body (c-bind-params ps bound) acc))
         (e-app (f args a b) (c-free f bound (c-free-all args bound acc)))
         (e-plambda (d body a b) (c-free body bound acc))
-        (e-letregion (k r body a b) (c-free body (cons r bound) acc))
+        (e-letregion (k r i body a b) (c-free body (cons r bound) acc))
         (e-rlambda (r l a b) (c-free r bound (c-free l bound acc)))
         (e-proj (body ds a b) (c-free body bound acc))
         (e-the (d body a b) (c-free body bound acc))
@@ -329,7 +329,7 @@
                  (e-var (m a2 b2) (if (symbol=? m f) (and tail (= (c-count-exps args) n)) #t))
                  (else y (c-loops-only fun f n #f)))))
         (e-plambda (d body a b) (c-loops-only body f n tail))
-        (e-letregion (k r body a b) (or (symbol=? r f) (c-loops-only body f n #f)))
+        (e-letregion (k r i body a b) (or (symbol=? r f) (c-loops-only body f n #f)))
         (e-rlambda (r l a b) (and (c-loops-only r f n #f) (c-loops-only l f n #f)))
         (e-proj (body ds a b) (c-loops-only body f n tail))
         (e-the (d body a b) (c-loops-only body f n tail))
@@ -585,7 +585,7 @@
         ;; The region's name bound in a slot, as a `let`'s, to a region
         ;; entered (an arena, or a reap), and left with the body's value,
         ;; which is so not in tail position.
-        (e-letregion (k r body a b)
+        (e-letregion (k r i body a b)
           (if (or (= k 0) (= k 3))
               ;; A region for analysis only: nothing at run time.
               (c-exp body e depth c tail)

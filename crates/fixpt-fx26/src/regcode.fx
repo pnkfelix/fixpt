@@ -262,7 +262,7 @@
         (e-begin (es a b) (r-collects-begin es e this tail))
         ;; A place is made and ended by calling out; a region for analysis
         ;; only is nothing at run time.
-        (e-letregion (k r body a b) (if (or (= k 0) (= k 3)) (r-collects body e this tail) #t))
+        (e-letregion (k r i body a b) (if (or (= k 0) (= k 3)) (r-collects body e this tail) #t))
         (e-plambda (d body a b) (r-collects body e this tail))
         (e-proj (body ds a b) (r-collects body e this tail))
         (e-the (d body a b) (r-collects body e this tail))
@@ -328,7 +328,7 @@
         ;; The region's name bound, as a `let`'s, to a region entered (never
         ;; in a leaf), and left with the body's value, which is so not in
         ;; tail position.
-        (e-letregion (k r body a b)
+        (e-letregion (k r i body a b)
           (if (or (= k 0) (= k 3)) (r-exp g body env te tail)
           (if (extract g leaf)
               (r-decline)

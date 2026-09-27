@@ -105,14 +105,25 @@ impl Checker {
 
     // ------------------------------------------------------------- regions
     pub(crate) fn parse_region(&self, s: &Syntax) -> R<Region> {
+        // `(const p)`: data frozen into place `p`.
+        if let Some([head, p]) = s.as_proper_list()
+            && head.as_symbol().is_some_and(|h| self.name(h) == "const")
+        {
+            return Ok(match self.parse_place(p)? {
+                Region::Var(v) => Region::Frozen(Some(v)),
+                _ => Region::Frozen(None),
+            });
+        }
         let Some(sym) = s.as_symbol() else {
             return Err(FxError::at(s.span, "expected a region"));
         };
         if self.name(sym).starts_with('@') {
             return Ok(self.region_constant(sym));
         }
-        if self.name(sym) == "const" {
-            return Ok(Region::Frozen);
+        match self.name(sym) {
+            "const" => return Ok(Region::Frozen(None)),
+            "heap" => return Ok(Region::Heap),
+            _ => {}
         }
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(Region::Var(v)),
@@ -456,7 +467,10 @@ impl Checker {
                 return Ok(D::Effect(Effect::pure()));
             }
             if name == "const" {
-                return Ok(D::Region(Region::Frozen));
+                return Ok(D::Region(Region::Frozen(None)));
+            }
+            if name == "heap" {
+                return Ok(D::Region(Region::Heap));
             }
             return match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(D::Region(Region::Var(v))),
@@ -467,6 +481,7 @@ impl Checker {
         }
         let items = self.items(s, "a description")?;
         match self.head(items).unwrap_or("") {
+            "const" => Ok(D::Region(self.parse_region(s)?)),
             "read" | "write" | "alloc" | "goto" | "comefrom" | "maxeff" => {
                 Ok(D::Effect(self.parse_effect(s)?))
             }
@@ -693,21 +708,38 @@ impl Checker {
                 let [_, name, body @ ..] = &items[..] else {
                     return Err(FxError::at(span, format!("`({form} name body …)`")));
                 };
+                // `(letfreeze (r p) body …)` freezes into place `p`;
+                // `(letfreeze r body …)` into the heap.
+                let (name, into) = match name.as_proper_list() {
+                    Some([n, p]) if form == "letfreeze" => (n, Some(self.parse_place(p)?)),
+                    _ => (name, None),
+                };
                 let name = name.as_symbol().filter(|n| !self.name(*n).starts_with('@')).ok_or_else(|| {
                     FxError::at(name.span, format!("a `{form}` binds a region variable's name, without `@`"))
                 })?;
                 let form = match form {
                     "letregion" => RegionForm::Region,
-                    "letfreeze" => RegionForm::Freeze,
+                    "letfreeze" => RegionForm::Freeze(match into {
+                        Some(Region::Var(p)) => Some(p),
+                        _ => None,
+                    }),
                     "letrena" => RegionForm::Arena,
                     _ => RegionForm::Reap,
                 };
                 let depth = self.dscope.len();
                 // `letrena` and `letreap` make a place (which is also a
                 // region), `letregion` a region only.
-                let kind = if matches!(form, RegionForm::Region | RegionForm::Freeze) { Kind::Region } else { Kind::Place };
+                let kind = if matches!(form, RegionForm::Region | RegionForm::Freeze(_)) { Kind::Region } else { Kind::Place };
                 let region = self.arena.dvar_of(name, kind);
-                self.arena.set_outer(region, self.lifetimes.clone());
+                // A `letfreeze`'s data leaves in the place it freezes into, so
+                // it may be allocated only in that place or one outliving it:
+                // those are all it won't outlive.
+                let outer = match form {
+                    RegionForm::Freeze(Some(p)) => [p].into_iter().chain(self.arena.outer(p).iter().copied()).collect(),
+                    RegionForm::Freeze(None) => Vec::new(),
+                    _ => self.lifetimes.clone(),
+                };
+                self.arena.set_outer(region, outer);
                 self.dscope.push((name, DScope::Var(region, kind)));
                 self.lifetimes.push(region);
                 let body = self.parse_body(span, body);

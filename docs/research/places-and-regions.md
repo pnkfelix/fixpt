@@ -208,7 +208,8 @@ check a size of.
    `letfreeze`'s data could only be the heap's, and lower bound 1 held
    with nothing to check. `const` is `Region::Frozen` (`r-frozen`); what is
    done to it is never masked, so a write to it is refused wherever it
-   happens. Tests: a list built with `set-cdr!` inside and frozen, then
+   happens. *Into any place done 2026-09-27*: `(letfreeze (r p) body …)`,
+   `(const p)`, and `heap` as a place name. Tests: a list built with `set-cdr!` inside and frozen, then
    `set-car!` on it refused; an allocation into a place that does not
    outlive the bound refused.
 6. **Later: written outlives constraints** between places, for places whose

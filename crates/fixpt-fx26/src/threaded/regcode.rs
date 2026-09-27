@@ -313,7 +313,7 @@ impl Compiler<'_> {
             },
             // A place is made and ended by calling out; a region for
             // analysis only is nothing at run time.
-            Exp::LetRegion { form: crate::ast::RegionForm::Region | crate::ast::RegionForm::Freeze, body, .. } => self.r_collects(body, e, this, tail),
+            Exp::LetRegion { form: crate::ast::RegionForm::Region | crate::ast::RegionForm::Freeze(_), body, .. } => self.r_collects(body, e, this, tail),
             Exp::LetRegion { .. } => true,
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_collects(body, e, this, tail),
             Exp::Extract(y, _) => self.r_collects(y, e, this, false),

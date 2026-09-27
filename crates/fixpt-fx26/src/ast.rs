@@ -41,10 +41,20 @@ pub enum Region {
     /// `@name`.
     Const(Sym),
     Var(DVar),
-    /// `const`: the region of frozen data, which nothing may write; what a
-    /// `letfreeze` gives its region's data as it ends. Reading it, and
-    /// making data at it, are pure (`docs/research/places-and-regions.md`).
-    Frozen,
+    /// `(const p)`: the region of data frozen into place `p` (`const`,
+    /// `None`, for the heap), which nothing may write; what a `letfreeze`
+    /// gives its region's data as it ends. Reading it, and making data at
+    /// it, are pure; it won't outlive `p` (`docs/research/places-and-regions.md`).
+    Frozen(Option<DVar>),
+    /// `heap`: the collected heap, a place that never ends.
+    Heap,
+}
+
+impl Region {
+    /// Whether this is frozen data's region, in whatever place.
+    pub fn is_frozen(self) -> bool {
+        matches!(self, Region::Frozen(_))
+    }
 }
 
 /// One indivisible piece of an effect.
@@ -181,8 +191,9 @@ impl Ty {
 pub enum RegionForm {
     /// `letregion`: nothing; a name for analysis only.
     Region,
-    /// `letfreeze`: nothing either; its region's data is frozen as it ends.
-    Freeze,
+    /// `letfreeze`: nothing either; its region's data is frozen as it
+    /// ends, into the place given (`None`, the heap).
+    Freeze(Option<DVar>),
     /// `letrena`: an arena, reclaimed only when the body ends.
     Arena,
     /// `letreap`: a heap of its own, which the collector collects too.
@@ -194,7 +205,7 @@ impl RegionForm {
     pub fn keyword(self) -> &'static str {
         match self {
             RegionForm::Region => "letregion",
-            RegionForm::Freeze => "letfreeze",
+            RegionForm::Freeze(_) => "letfreeze",
             RegionForm::Arena => "letrena",
             RegionForm::Reap => "letreap",
         }
@@ -202,7 +213,7 @@ impl RegionForm {
     /// The primitive that makes its place, if it makes one.
     pub fn enter(self) -> Option<&'static str> {
         match self {
-            RegionForm::Region | RegionForm::Freeze => None,
+            RegionForm::Region | RegionForm::Freeze(_) => None,
             RegionForm::Arena => Some("%region-enter"),
             RegionForm::Reap => Some("%reap-enter"),
         }
@@ -417,13 +428,21 @@ impl Arena {
         if a == b || !matches!(b, Region::Var(_)) {
             return true;
         }
+        if let Region::Frozen(Some(p)) = a {
+            return self.outlived(Region::Var(p), b);
+        }
         let (Region::Var(v), Region::Var(w)) = (a, b) else { return false };
         self.dvar_outer[v.0 as usize].contains(&w) || self.bound(v).is_some_and(|c| c != a && self.outlived(c, b))
     }
 
     /// Whether region `r` is a place: a variable bound as one.
     pub fn is_place(&self, r: Region) -> bool {
-        matches!(r, Region::Var(v) if self.dvar_places[v.0 as usize])
+        matches!(r, Region::Heap) || matches!(r, Region::Var(v) if self.dvar_places[v.0 as usize])
+    }
+
+    /// The region and place variables bound around `v`'s binder.
+    pub fn outer(&self, v: DVar) -> &[DVar] {
+        &self.dvar_outer[v.0 as usize]
     }
 
     pub fn dvar_name(&self, v: DVar) -> Sym {

@@ -45,8 +45,9 @@
   ;; body …)`, or `(letfreeze name body …)`: what it makes besides the
   ;; region (0 nothing, 1 an arena, 2 a reap, 3 nothing, its region's data
   ;; frozen as it ends: `docs/research/places-and-regions.md`),
-  ;; the region variable's name, and the body.
-  (e-letregion int symbol exp int int)
+  ;; the region variable's name, the place a `letfreeze` freezes into
+  ;; (`heap` unless given), and the body.
+  (e-letregion int symbol symbol exp int int)
   ;; `(rlambda region (param …) body …)`: the region, and the `lambda`.
   (e-rlambda exp exp int int)
   (e-the syn exp int int)
@@ -206,9 +207,18 @@
                   (e-rlambda r (e-lambda (parse-params (nth items 2)) (parse-body (drop items 3) a b) a b) a b))))
         ((or (or (symbol=? head 'letregion) (symbol=? head 'letfreeze)) (or (symbol=? head 'letrena) (symbol=? head 'letreap)))
          (begin (at-least items 2 (string-append "`(" (string-append (symbol->string head) " name body …)`")) a b)
-                (let ((name (nth items 1)))
+                ;; `(letfreeze (r p) body …)` freezes into place `p`;
+                ;; `(letfreeze r body …)` into the heap.
+                (let* ((given (nth items 1))
+                       (pair (the (listof syn @s)
+                               (tagcase given
+                                 (lst (xs d a2 b2) (if (and (symbol=? head 'letfreeze) (= (len xs) 2)) xs (the (listof syn @s) nil)))
+                                 (else x (the (listof syn @s) nil)))))
+                       (name (if (null? pair) given (car pair)))
+                       (into (if (null? pair) 'heap (syn-symbol (nth pair 1)))))
                   (if (and (syn-symbol? name) (not (char=? (string-ref (syn-name name) 0) #\@)))
-                      (e-letregion (cond ((symbol=? head 'letregion) 0) ((symbol=? head 'letrena) 1) ((symbol=? head 'letreap) 2) (else 3)) (syn-symbol name) (parse-body (drop items 2) a b) a b)
+                      (e-letregion (cond ((symbol=? head 'letregion) 0) ((symbol=? head 'letrena) 1) ((symbol=? head 'letreap) 2) (else 3))
+                                   (syn-symbol name) into (parse-body (drop items 2) a b) a b)
                       (pfail (string-append "a `" (string-append (symbol->string head) "` binds a region variable's name, without `@`")) name)))))
         ((symbol=? head 'plambda)
          (begin (at-least items 3 "`(plambda ((name kind) …) body …)`" a b)

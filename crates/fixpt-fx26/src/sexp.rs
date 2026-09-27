@@ -128,13 +128,14 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
         Exp::PLambda { body, .. } => format!("(e-plambda _ {} {a} {b})", go(body)),
         Exp::RLambda { region, lambda } => format!("(e-rlambda {} {} {a} {b})", go(region), go(lambda)),
         Exp::LetRegion { form, region, body } => {
-            let k = match form {
-                RegionForm::Region => 0,
-                RegionForm::Arena => 1,
-                RegionForm::Reap => 2,
-                RegionForm::Freeze => 3,
+            let (k, into) = match form {
+                RegionForm::Region => (0, None),
+                RegionForm::Arena => (1, None),
+                RegionForm::Reap => (2, None),
+                RegionForm::Freeze(into) => (3, into),
             };
-            format!("(e-letregion {k} {} {} {a} {b})", name(c.arena.dvar_name(region)), go(body))
+            let into = into.map_or("heap".to_string(), |p| name(c.arena.dvar_name(p)));
+            format!("(e-letregion {k} {} {into} {} {a} {b})", name(c.arena.dvar_name(region)), go(body))
         }
         Exp::Proj { body, args } => format!("(e-proj {} {} {a} {b})", go(body), list(vec!["_".into(); args.len()])),
         Exp::If { test, then, els } => format!("(e-if {} {} {} {a} {b})", go(test), go(then), go(els)),

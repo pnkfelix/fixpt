@@ -239,13 +239,13 @@ impl Checker {
     /// `eff` with what it does to frozen data taken out, since reading it
     /// and making it are pure; or an error, if it writes it.
     pub(crate) fn frozen(&self, e: ExpId, eff: Effect) -> R<Effect> {
-        if !eff.0.iter().any(|a| a.region() == Some(Region::Frozen)) {
+        if !eff.0.iter().any(|a| a.region().is_some_and(Region::is_frozen)) {
             return Ok(eff);
         }
-        if eff.0.iter().any(|a| matches!(a, Atom::Write(Region::Frozen))) {
+        if eff.0.iter().any(|a| matches!(a, Atom::Write(r) if r.is_frozen())) {
             return Err(FxError::at(self.arena.span_of(e), "this writes frozen data, whose region is `const`"));
         }
-        Ok(Effect(eff.0.into_iter().filter(|a| !matches!(a, Atom::Read(Region::Frozen) | Atom::Alloc(Region::Frozen) | Atom::Await(Region::Frozen))).collect()))
+        Ok(Effect(eff.0.into_iter().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if r.is_frozen())).collect()))
     }
 
     /// Whether `s`, where it is used, is the initial environment's binding.
@@ -373,7 +373,7 @@ impl Checker {
                 let name = self.arena.dvar_name(region);
                 let rt = self.arena.ty(Ty::Place(Region::Var(region)));
                 let depth = self.env.len();
-                if !matches!(form, RegionForm::Region | RegionForm::Freeze) {
+                if !matches!(form, RegionForm::Region | RegionForm::Freeze(_)) {
                     self.env.push((name, rt));
                 }
                 let r = self.synth(body);
@@ -381,12 +381,12 @@ impl Checker {
                 let (t, eff) = r?;
                 // A `letfreeze`'s value leaves with its region's data frozen:
                 // `r` made `const`, unless something in it could still write.
-                let t = if form == RegionForm::Freeze {
+                let t = if let RegionForm::Freeze(into) = form {
                     if self.writes_in(t, Region::Var(region)) {
                         let name = self.interner.name(name);
                         return Err(FxError::at(span, format!("the value of `letfreeze {name}` could still write its region's data: its type is {}", self.show_ty(t))));
                     }
-                    self.subst(t, &HashMap::from([(region, D::Region(Region::Frozen))]))
+                    self.subst(t, &HashMap::from([(region, D::Region(Region::Frozen(into)))]))
                 } else {
                     t
                 };
@@ -540,7 +540,7 @@ impl Checker {
                 None => true,
                 // What is done to frozen data is never masked: writing it is
                 // an error wherever it happens (`frozen`).
-                Some(Region::Frozen) => true,
+                Some(Region::Frozen(_)) => true,
                 Some(r) if visible.contains(&r) => true,
                 Some(r) if in_result.contains(&r) => {
                     matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_))
@@ -659,6 +659,12 @@ impl Checker {
     pub fn regions_in(&self, t: TyId, out: &mut HashSet<Region>) {
         let mut seen = HashSet::new();
         self.regions_walk(t, &mut seen, out);
+        // Frozen data mentions the place it is in.
+        let places: Vec<Region> = out.iter().filter_map(|r| match r {
+            Region::Frozen(Some(p)) => Some(Region::Var(*p)),
+            _ => None,
+        }).collect();
+        out.extend(places);
     }
 
     fn regions_walk(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut HashSet<Region>) {
@@ -886,13 +892,7 @@ impl Checker {
         }
         let slot = self.arena.ty(Ty::Link(None));
         memo.insert(t, slot);
-        let region = |r: Region| match r {
-            Region::Var(v) => match map.get(&v) {
-                Some(D::Region(x)) => *x,
-                _ => r,
-            },
-            c => c,
-        };
+        let region = |r: Region| subst_region(r, map);
         let new = match ty {
             Ty::Subr { effect, params, result } => {
                 let effect = subst_effect(&effect, map);
@@ -934,16 +934,26 @@ impl Checker {
     }
 }
 
+/// `r` with `map`'s regions for its variables: frozen data's place too.
+pub(crate) fn subst_region(r: Region, map: &HashMap<DVar, D>) -> Region {
+    match r {
+        Region::Var(v) => match map.get(&v) {
+            Some(D::Region(x)) => *x,
+            _ => r,
+        },
+        Region::Frozen(Some(p)) => match map.get(&p) {
+            Some(D::Region(Region::Var(q))) => Region::Frozen(Some(*q)),
+            Some(D::Region(Region::Heap)) => Region::Frozen(None),
+            _ => r,
+        },
+        c => c,
+    }
+}
+
 fn subst_effect(e: &Effect, map: &HashMap<DVar, D>) -> Effect {
     let mut out = Effect::pure();
     for a in &e.0 {
-        let sub_r = |r: Region| match r {
-            Region::Var(v) => match map.get(&v) {
-                Some(D::Region(x)) => *x,
-                _ => r,
-            },
-            c => c,
-        };
+        let sub_r = |r: Region| subst_region(r, map);
         let piece = match *a {
             Atom::Var(v) => match map.get(&v) {
                 Some(D::Effect(x)) => x.clone(),
