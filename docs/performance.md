@@ -966,4 +966,6 @@ Of stage 2's calls of primitives that were the FX-26 code's own doing
 
 What is left of them is mostly the reader's, making each atom's text
 (`reverse`, `list->string`, `string->symbol`, 42k each), and `new`
-(`%make-box`, 46k).
+(`%make-box`, 46k), which register code now does in machine code as it
+does `rnew`: 336k → 296k (stage 2 stays 0.19 s; with a collection at
+every 997th safepoint it makes the same code).

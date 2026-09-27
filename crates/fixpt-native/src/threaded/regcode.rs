@@ -223,6 +223,13 @@ impl Asm {
                 self.bloblet_at(2);
                 self.field_at(2, 2, 2);
             }
+            // `new` (`%make-box`): a box in the heap, holding `REG1`.
+            "box" => {
+                self.bump_words(3, false, slow);
+                self.es(&mov_imm64(X15, make_header(fixpt_heap::ObjType::Box as u8, 2, 0)));
+                self.bloblet_at(2);
+                self.field_at(1, 2, 2);
+            }
             // `rmake-icell`: two fields, both `#f`, in the region in `REG1`.
             "ricell" => {
                 self.bump_words(4, true, slow);
@@ -675,6 +682,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
                     ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),
                     ("prim", 2) if prim_named(k(o(0)), "modulo") => Some("modulo"),
+                    ("prim", 1) if prim_named(k(o(0)), "%make-box") => Some("box"),
                     ("prim", 2) if prim_named(k(o(0)), "%region-new") => Some("rnew"),
                     ("prim", 1) if prim_named(k(o(0)), "%region-make-icell") => Some("ricell"),
                     ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),
