@@ -390,8 +390,9 @@ impl Checker {
 
     /// An argument that failed to check is reported as that argument.
     fn as_argument(&self, err: FxError, a: ExpId, i: usize) -> FxError {
-        if err.span == self.arena.span_of(a) && err.message.starts_with("a ") && err.message.contains(" is expected here") {
-            let rest = err.message.trim_start_matches("a ");
+        if err.span == self.arena.span_of(a) && err.message.contains(" is expected here") {
+            // One `a ` only: the type may itself be called `a`.
+            let Some(rest) = err.message.strip_prefix("a ") else { return err };
             if let Some((want, got)) = rest.split_once(" is expected here, and this is a ") {
                 return FxError::at(err.span, format!("argument {} is a {got}, where a {want} is expected", i + 1));
             }

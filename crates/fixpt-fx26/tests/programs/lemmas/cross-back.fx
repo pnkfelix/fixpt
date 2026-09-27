@@ -1,0 +1,7 @@
+; Rejected: the lemma goes one way only.
+(define-generative (tree (a type)) (sumof (leaf a) (node (productof (l (tree a)) (r (tree a))))))
+(define-generative (tree2 (a type)) (sumof (leaf a) (node (productof (l (tree2 a)) (r (tree2 a))))))
+(define t2 (proves (poly ((a type)) (<= (tree a) (tree2 a))))
+  (lambda (t) (up-tree2 (tagcase (down-tree t) (leaf x (sum leaf x)) (node (l r) (sum node (product (l (t2 l)) (r (t2 r)))))))))
+(define one (tree2 int) (up-tree2 (sum leaf 1)))
+(define two (tree int) one)

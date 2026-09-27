@@ -90,7 +90,7 @@ plain datatypes?":
 | ----- | ---- | -------------------------------------------------------------------------------------------- |
 | N1    | M    | nominal families: a type node, in both checkers; safety analyses look through (G1, G2), done |
 | N2    | S    | variance declared, checked once; invariant by default, done                                  |
-| N3    | M    | lemmas: `proves` types, checked as erased identity coercions                                 |
+| N3    | M    | lemmas: `proves` types, checked as erased identity coercions, done                           |
 | N4    | L    | GADTs: constructor result types, existentials, refinement in `tagcase`                       |
 | N5    | L    | size indices as their own sort, for `confirm` (CF1, CF3)                                     |
 | N6    | M    | the `data` kind, with `read` and `acyclic` (CF0)                                             |

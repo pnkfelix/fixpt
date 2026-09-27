@@ -1,0 +1,9 @@
+; Rejected: a coercion given to a proof must say what it takes.
+(define-generative (nest (a type)) (sumof (none unit) (more (productof (hd a) (tl (nest (productof (l a) (r a))))))))
+(define nest-up (proves (poly ((a type) (b type)) (<= (nest a) (nest b)) (<= a b)))
+  (lambda (f n)
+    (up-nest (tagcase (down-nest n)
+               (none u (sum none u))
+               (more (hd tl) (sum more (product (hd (f hd))
+                                                (tl (nest-up (lambda (p) (product (l (f (extract p l))) (r (f (extract p r)))))
+                                                             tl)))))))))

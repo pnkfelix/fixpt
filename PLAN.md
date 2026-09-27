@@ -1137,7 +1137,7 @@ In the user's order:
    Gifford, `GiffordHistory/papers/lfp94.pdf`), later.
 6. **GADTs** (raised by the user, 2026-09-27; planned in
    `docs/research/gadts.md`, stages N1–N6; N1–N2, generative types with
-   checked variance, done 2026-09-27): sums whose variants refine
+   checked variance, and N3, lemmas, done 2026-09-27): sums whose variants refine
    their type's parameters, so that a `tagcase` arm learns them. They meet
    the size indices of `confirm` (CF3, CF4), where a variant's type would
    say its size, and the typed interpreter this repository keeps growing,
