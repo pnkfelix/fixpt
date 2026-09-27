@@ -1106,6 +1106,12 @@ pub fn report_callouts() {
         prims.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
         prims.truncate(15);
         eprintln!("commonest primitives: {prims:?}");
+        let mut callers: Vec<((&str, String), u64)> = PRIM_CALLERS.with(|c| std::mem::take(&mut *c.borrow_mut())).into_iter().collect();
+        callers.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        callers.truncate(30);
+        for ((p, w), n) in callers {
+            eprintln!("  {n:>8} {p} from {w}");
+        }
     }
 }
 
@@ -1116,6 +1122,8 @@ thread_local! {
     /// Words of stack captured into continuations, and how many there were.
     pub(crate) static CAPTURED: std::cell::RefCell<(u64, u64)> = const { std::cell::RefCell::new((0, 0)) };
     static PRIM_COUNTS: std::cell::RefCell<std::collections::HashMap<&'static str, u64>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// The same, by the word each call is made from.
+    static PRIM_CALLERS: std::cell::RefCell<std::collections::HashMap<(&'static str, String), u64>> = std::cell::RefCell::new(std::collections::HashMap::new());
     /// Whether `FIXPT_CALLOUTS` is set, asked once.
     pub(crate) static TIMING: bool = std::env::var_os("FIXPT_CALLOUTS").is_some();
     /// A runtime primitive's message, when one failed in a call-out: a
@@ -1214,6 +1222,8 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     let Some(def) = fixpt_runtime::PRIMITIVES.get(p) else { return Err(Trap::Prim(format!("no primitive {p}"))) };
     if TIMING.with(|t| *t) {
         PRIM_COUNTS.with(|c| *c.borrow_mut().entry(def.name).or_insert(0) += 1);
+        let caller = rt.heap.symbol_name(rt.heap.bloblet_slot(Value(st.cur), WORD_NAME));
+        PRIM_CALLERS.with(|c| *c.borrow_mut().entry((def.name, caller)).or_insert(0) += 1);
     }
     let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
     if count < def.min || def.max.is_some_and(|m| count > m) {

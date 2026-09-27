@@ -1006,6 +1006,8 @@ the order it will be done. Each is committed when done, and marked here.
    chains such as `standard-primitive`'s, `string->symbol` and back).
    Count where they come from, and change the FX-26 code where the count
    is its own doing.
+   *(Begun 2026-09-26: the reader's quadratic marks and the symbol
+   hash's strings, `docs/performance.md`; 1.24 M → 0.95 M.)*
 4. **Known calls** (13e and 13h′ (d)): `callk`, a direct call of a known
    word with no closure fetched; let-conversion of lambdas that do not
    escape.
@@ -1027,6 +1029,11 @@ the order it will be done. Each is committed when done, and marked here.
    allocation's region (`NodeFacts::alloc_region`), no longer used to
    allocate, removed from both checkers; the FX-26 checker's free
    variables computed once rather than at every mask.
+11. **A lint on the size of a lambda's body** (raised by the user
+    2026-09-26): not a rule of FX-26, but a check that keeps a body from
+    growing past what a reader can follow (`check.fx`'s `k-parse-type`,
+    whose cases want to be helpers of their own). Perhaps after adopting a
+    module system, FX-91's, which would give helpers somewhere to live.
 10. **The type and effect directions** below ("Responsiveness as an
     effect", "Time complexity as an effect", "Concurrency, and processes
     as distinct from functions", "Closures that carry their types"):

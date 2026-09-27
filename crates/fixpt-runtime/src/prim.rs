@@ -1146,6 +1146,11 @@ prims! {
             b
         }))
     });
+    // The hash `Heap::intern` kept with the symbol, of its name.
+    "%symbol-hash", 1, Some(1), simple!(|rt, a| {
+        if !rt.heap.is_a(a[0], ObjType::Symbol) { return rt.type_error("a symbol", a[0]); }
+        Ok(rt.heap.obj_ref(a[0], 1))
+    });
 }
 
 /// Promise states. `[state, payload]`.

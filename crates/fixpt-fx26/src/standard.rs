@@ -86,6 +86,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("datum-bool", "(subr pure (bool) datum)"),
     ("datum-int", "(subr pure (int) datum)"),
     ("datum-list", "(poly ((r region)) (subr (read r) ((listof datum r)) datum))"),
+    // A datum pair, made new: a list datum grown a pair at a time.
+    ("datum-cons", "(subr pure (datum datum) datum)"),
     ("datum-dotted", "(poly ((r region)) (subr (read r) ((listof datum r) datum) datum))"),
     ("datum-list->vector", "(subr pure (datum) datum)"),
     ("datum-list->bytevector", "(subr pure (datum) datum)"),
@@ -112,6 +114,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("symbol=?", "(subr pure (symbol symbol) bool)"),
     // A hash of a string's characters: the same string, the same hash.
     ("string-hash", "(subr pure (string) int)"),
+    // A symbol's hash, kept with it when it was interned.
+    ("symbol-name-hash", "(subr pure (symbol) int)"),
     // Arrays: bloblets whose fields are all one type, read by index.
     ("make-array", "(poly ((r region)) (poly ((t type)) (subr (alloc r) (int t) (arrayof t r))))"),
     ("array-ref", "(poly ((r region)) (poly ((t type)) (subr (read r) ((arrayof t r) int) t)))"),

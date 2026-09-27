@@ -806,3 +806,26 @@ frozen bit, since an alias's type may not say it is frozen);
 the compiler's own habits (names handled as strings, compared one
 `string=?` at a time) rather than costs to make cheaper: next, where
 they are called from.
+
+### Where the calls of primitives came from
+
+`FIXPT_CALLOUTS=1` now also counts each primitive's calls by the word
+that made them (a register word is named `lambda@N`, `N` where its body
+starts in the program's text). Two of the commonest were the program's
+own doing:
+- **The reader's marks were quadratic.** Reading a list, the eager reader
+  replaced its mark at each item, and each new mark copied every item
+  read so far into a datum (`datum-list`, 188 k calls of
+  `%fx26-list-copy`) and interned its name again (`datum-symbol`,
+  113 k of `string->symbol`). The mark's items are now a datum grown a
+  pair at a time (`datum-cons`, new, pure), and the marks' names are
+  interned once.
+- **A symbol's hash made a string.** `table.fx`'s `symbol-hash` hashed
+  `(symbol->string s)`: a new string for each lookup (100 k), where the
+  symbol keeps the hash of its name from when it was interned
+  (`symbol-name-hash`, new).
+
+Calls of primitives in stage 2: 1.24 M → 0.95 M; stage 2 0.22 → 0.20 s.
+Left at the top: `modulo` (100 k, a table's bucket), and the reader's
+work per atom, and the parser's names as strings (`symbol->string`
+then `string=?`).

@@ -169,19 +169,31 @@
 (define marking (poly ((t type)) (subr reads (datum (subr reads () t)) t))
   (lambda (what body) (with-mark eager-key what body)))
 
-(define entry (subr pure (string int) datum)
-  (lambda (name start) (datum-list (the data (cons (datum-symbol name) (cons (datum-int start) nil))))))
+(define entry (subr pure (datum int) datum)
+  (lambda (name start) (datum-list (the data (cons name (cons (datum-int start) nil))))))
 (define top-entry (subr pure () datum)
   (lambda () (datum-list (the data (cons (datum-symbol "top") nil)))))
 (define abbrev-entry (subr pure (int string) datum)
   (lambda (start name)
     (datum-list (the data (cons (datum-symbol "abbrev") (cons (datum-int start) (cons (datum-symbol name) nil)))))))
-(define list-entry (subr (maxeff (read @s) (alloc @s)) (string int char data) datum)
+;; A list's mark: its items so far, newest first, as a datum the reader
+;; builds a pair at a time as it reads them, not copied at each.
+(define list-entry (subr pure (datum int char datum) datum)
   (lambda (name start close items)
     (datum-list
-     (the data (cons (datum-symbol name)
-                     (cons (datum-int start)
-                           (cons (datum-char close) (cons (datum-list items) nil))))))))
+     (the data (cons name (cons (datum-int start) (cons (datum-char close) (cons items nil))))))))
+;; The marks' names, interned once.
+(define m-comment datum (datum-symbol "comment"))
+(define m-block-comment datum (datum-symbol "block-comment"))
+(define m-string datum (datum-symbol "string"))
+(define m-char datum (datum-symbol "char"))
+(define m-atom datum (datum-symbol "atom"))
+(define m-symbol datum (datum-symbol "symbol"))
+(define m-datum-comment datum (datum-symbol "datum-comment"))
+(define m-hash datum (datum-symbol "hash"))
+(define m-list datum (datum-symbol "list"))
+(define m-dotted datum (datum-symbol "dotted"))
+(define no-data datum (datum-list (the data nil)))
 
 ;;; -------------------------------------------------------------- strings
 
@@ -286,7 +298,7 @@
 
 (define line-comment (subr reads (cursor) cursor)
   (lambda (cur)
-    (marking (entry "comment" (cur-pos cur))
+    (marking (entry m-comment (cur-pos cur))
       (lambda ()
         (letrec ((loop (subr reads (cursor) cursor)
                    (lambda (cur)
@@ -296,7 +308,7 @@
 ;; `#| … |#`, nesting.
 (define block-comment (subr reads (cursor int int) cursor)
   (lambda (cur start depth)
-    (marking (entry "block-comment" start)
+    (marking (entry m-block-comment start)
       (lambda ()
         (let ((c (cur-char cur)))
           (cond ((char=? c #\|)
@@ -315,7 +327,7 @@
 
 (define read-string (subr reads (cursor int) result)
   (lambda (cur start)
-    (marking (entry "string" start)
+    (marking (entry m-string start)
       (lambda ()
         (letrec ((loop (subr reads (cursor chars) result)
                    (lambda (cur acc)
@@ -394,7 +406,7 @@
 ;; and anything after it up to a delimiter makes a name.
 (define read-char (subr reads (cursor int) result)
   (lambda (cur start)
-    (marking (entry "char" start)
+    (marking (entry m-char start)
       (lambda ()
         (let* ((first (cur-char cur)) (w (read-word (advance cur))) (rest (car w)) (cur (cdr w)))
           (if (string=? rest "")
@@ -416,7 +428,7 @@
 
 (define read-atom-from (subr reads (cursor int string) result)
   (lambda (cur start prefix)
-    (marking (entry "atom" start)
+    (marking (entry m-atom start)
       (lambda ()
         (letrec ((loop (subr reads (cursor chars bool) result)
                    (lambda (cur acc escaped)
@@ -430,7 +442,7 @@
                  ;; Inside `|…|`.
                  (bar (subr reads (cursor chars) result)
                    (lambda (cur acc)
-                     (marking (entry "symbol" start)
+                     (marking (entry m-symbol start)
                        (lambda ()
                          (let ((b (cur-char cur)))
                            (cond ((char=? b #\|) (loop (advance cur) acc #t))
@@ -461,7 +473,7 @@
                  (cond ((char=? d #\|) (skip-atmosphere (block-comment (advance next) start 1)))
                        ((char=? d #\;)
                         (skip-atmosphere
-                         (marking (entry "datum-comment" start)
+                         (marking (entry m-datum-comment start)
                            (lambda () (cdr (read-datum (skip-atmosphere (advance next))))))))
                        ;; Not atmosphere after all: the datum reader takes up
                        ;; the `#` and what follows it.
@@ -502,11 +514,11 @@
   ;;; ------------------------------------------------------------------- lists
   (read-list (subr reads (cursor int char) result)
     (lambda (cur start close)
-      (letrec ((loop (subr reads (cursor data syns) result)
-                 (lambda (cur items syns)
+      (letrec ((loop (subr reads (cursor data datum syns) result)
+                 (lambda (cur items items-d syns)
                    ;; In tail position, so the mark is replaced each time
                    ;; round: it always says what has been read so far.
-                   (marking (list-entry "list" start close items)
+                   (marking (list-entry m-list start close items-d)
                      (lambda ()
                        (let* ((cur (skip-atmosphere cur))
                               (c (cur-char cur))
@@ -521,16 +533,16 @@
                                ((and plain (char=? c #\.))
                                 (let ((next (advance cur)))
                                   (if (delimiter? (cur-char next))
-                                      (read-dotted next start close items syns (cur-pos cur))
-                                      (let ((r (read-atom-from next (cur-pos cur) ".")))
-                                        (loop (cdr r) (cons (syn->datum (car r)) items) (cons (car r) syns))))))
+                                      (read-dotted next start close items items-d syns (cur-pos cur))
+                                      (let* ((r (read-atom-from next (cur-pos cur) ".")) (d (syn->datum (car r))))
+                                        (loop (cdr r) (cons d items) (datum-cons d items-d) (cons (car r) syns))))))
                                (else
-                                (let ((r (read-datum cur)))
-                                  (loop (cdr r) (cons (syn->datum (car r)) items) (cons (car r) syns)))))))))))
-        (loop cur nil nil))))
-  (read-dotted (subr reads (cursor int char data syns int) result)
-    (lambda (cur start close items syns dot)
-      (marking (list-entry "dotted" start close items)
+                                (let* ((r (read-datum cur)) (d (syn->datum (car r))))
+                                  (loop (cdr r) (cons d items) (datum-cons d items-d) (cons (car r) syns)))))))))))
+        (loop cur nil no-data nil))))
+  (read-dotted (subr reads (cursor int char data datum syns int) result)
+    (lambda (cur start close items items-d syns dot)
+      (marking (list-entry m-dotted start close items-d)
         (lambda ()
           (if (null? items)
               (fail-at cur dot "`.` must follow at least one element")
@@ -550,7 +562,7 @@
   ;;; `start` is where the `#` was; `cur` is at the character after it.
   (read-hash (subr reads (int cursor) result)
     (lambda (start cur)
-      (marking (entry "hash" start)
+      (marking (entry m-hash start)
         (lambda ()
           (let ((c (cur-char cur)))
             (cond ((char=? c #\()

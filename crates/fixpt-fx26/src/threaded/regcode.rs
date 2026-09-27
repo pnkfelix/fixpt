@@ -241,7 +241,7 @@ impl Compiler<'_> {
             ("car", 1) => Some(Std::Op1("pair-car")),
             ("cdr", 1) => Some(Std::Op1("pair-cdr")),
             ("get", 1) => Some(Std::Field(2)),
-            ("cons", 2) => Some(Std::Threaded("cons")),
+            ("cons" | "datum-cons", 2) => Some(Std::Threaded("cons")),
             ("set", 2) => Some(Std::Set),
             ("abort-current-continuation", 2) => Some(Std::Threaded("abort")),
             ("call-with-composable-continuation", 2) => Some(Std::Threaded("callcomp")),

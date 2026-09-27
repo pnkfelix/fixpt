@@ -13,7 +13,8 @@
 (define-type (table (k type) (v type) (r region))
   (bloblet (fields (subr pure (k) int) (subr pure (k k) bool) (arrayof (bucket k v r) r) int) r))
 
-(define symbol-hash (subr pure (symbol) int) (lambda (s) (string-hash (symbol->string s))))
+
+(define symbol-hash (subr pure (symbol) int) (lambda (s) (symbol-name-hash s)))
 
 (define make-table
   (poly ((r region)) (poly ((k type) (v type))
