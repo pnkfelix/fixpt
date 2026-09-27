@@ -24,10 +24,10 @@ fn three(program: &str) -> String {
 fn small_programs() {
     assert_eq!(three("(+ 1 2)"), "3");
     assert_eq!(three("(let* ((a 1) (b (+ a 1))) (if (and (< a b) (or #f #t)) 'yes 'no))"), "yes");
-    assert_eq!(three("(define f (subr pure (int) int) (lambda (n) (if (= n 0) 1 (* n (f (- n 1)))))) (f 10)"), "3628800");
+    assert_eq!(three("(define f (subr spin (int) int) (lambda (n) (if (= n 0) 1 (* n (f (- n 1)))))) (f 10)"), "3628800");
     assert_eq!(three("(the (listof int @l) (cons 1 (cons 2 nil)))"), "(1 2)");
     assert_eq!(three("(let ((r (the (ref int @r) (new 1)))) (begin (set r (+ (get r) 41)) (get r)))"), "42");
-    assert_eq!(three("(letrec ((even (subr pure (int) bool) (lambda (n) (if (= n 0) #t (odd (- n 1))))) (odd (subr pure (int) bool) (lambda (n) (if (= n 0) #f (even (- n 1)))))) (even 10))"), "#t");
+    assert_eq!(three("(letrec ((even (subr spin (int) bool) (lambda (n) (if (= n 0) #t (odd (- n 1))))) (odd (subr spin (int) bool) (lambda (n) (if (= n 0) #f (even (- n 1)))))) (even 10))"), "#t");
     assert_eq!(three("(string-append \"ab\" (symbol->string 'cd))"), "\"abcd\"");
     assert_eq!(three("(sum a 1)"), "#<sum a>");
     assert_eq!(three("((lambda ((x int)) ((lambda ((y int)) (+ x y)) 2)) 40)"), "42");

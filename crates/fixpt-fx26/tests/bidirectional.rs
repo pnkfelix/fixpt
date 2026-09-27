@@ -51,7 +51,9 @@ fn a_polymorphic_signature_needs_no_plambda() {
     let def = "(define id (poly ((t type)) (subr pure (t) t)) (lambda (x) x))";
     assert_eq!(check(&format!("{def} (id 3)")), "int ! pure");
     assert_eq!(check(&format!("{def} (id #t)")), "bool ! pure");
-    assert_eq!(check(include_str!("programs/bidirectional/twice.fx")), "int ! pure");
+    // `twice` calls a procedure it is given, whose effect is a variable, so
+    // what it makes spins.
+    assert_eq!(check(include_str!("programs/bidirectional/twice.fx")), "int ! spin");
 }
 
 /// A definition that does not meet its signature says which signature.
@@ -101,11 +103,12 @@ fn a_type_nothing_determines_is_an_error() {
 /// subroutine passed to it.
 #[test]
 fn an_effect_binder_takes_the_latent_effect_of_the_argument() {
-    let def = "(define apply1 (poly ((e effect)) (subr e ((subr e (int) int) int) int))
+    // `apply1` calls what it is given, whose effect is a variable: it spins.
+    let def = "(define apply1 (poly ((e effect)) (subr (maxeff e spin) ((subr e (int) int) int) int))
                  (lambda (f x) (f x)))";
-    assert_eq!(check(&format!("{def} (apply1 (lambda ((n int)) n) 3)")), "int ! pure");
+    assert_eq!(check(&format!("{def} (apply1 (lambda ((n int)) n) 3)")), "int ! spin");
     let reading = format!("{def} (define c (ref int @c) (new 0)) (apply1 (lambda ((n int)) (get c)) 3)");
-    assert_eq!(check(&reading), "int ! (read @c)");
+    assert_eq!(check(&reading), "int ! (maxeff (read @c) spin)");
 }
 
 /// An argument of the wrong type is reported as that argument, in the

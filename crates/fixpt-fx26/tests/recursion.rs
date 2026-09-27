@@ -21,7 +21,7 @@ fn check(program: &str) -> Result<(), String> {
 
 #[test]
 fn a_letrec_binds_lambdas() {
-    assert_eq!(check("(letrec ((f (subr pure (int) int) (lambda (n) (if (= n 0) 0 (f (- n 1)))))) (f 3))"), Ok(()));
+    assert_eq!(check("(letrec ((f (subr spin (int) int) (lambda (n) (if (= n 0) 0 (f (- n 1)))))) (f 3))"), Ok(()));
     // Under an ascription or a type abstraction, still a lambda.
     assert_eq!(check("(letrec ((f (subr pure (int) int) (the (subr pure (int) int) (lambda (n) n)))) (f 3))"), Ok(()));
 }
@@ -43,8 +43,8 @@ fn a_group_defines_procedures_that_call_each_other() {
     assert_eq!(
         check(
             "(define-rec
-               (ev (subr pure (int) bool) (lambda (n) (if (= n 0) #t (od (- n 1)))))
-               (od (subr pure (int) bool) (lambda (n) (if (= n 0) #f (ev (- n 1))))))
+               (ev (subr spin (int) bool) (lambda (n) (if (= n 0) #t (od (- n 1)))))
+               (od (subr spin (int) bool) (lambda (n) (if (= n 0) #f (ev (- n 1))))))
              (ev 10)"
         ),
         Ok(())

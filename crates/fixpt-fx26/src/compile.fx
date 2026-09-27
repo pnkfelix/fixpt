@@ -25,11 +25,11 @@
 (private-regions @k @y)
 
 ;; What compiling may do: read the trees, build code on @k, and give up.
-(define-effect compiles (maxeff (read @a) (read @t) (read @k) (write @k) (alloc @k) (goto @y)))
+(define-effect compiles (maxeff spin (read @a) (read @t) (read @k) (write @k) (alloc @k) (goto @y)))
 
 ;; The checker's facts for the program being compiled.
 (define c-facts (ref k-facts @k) (new nil))
-(define c-field-index (subr (maxeff (read @t) (read @k)) (k-facts int int) int)
+(define c-field-index (subr (maxeff (read @t) (read @k) spin) (k-facts int int) int)
   (lambda (fs a b)
     (cond ((null? fs) -1)
           ((and (= (extract (car fs) 1) a) (= (extract (car fs) 2) b)) (extract (car fs) 3))
@@ -47,7 +47,7 @@
 (define-type code (ref items @k))
 
 (define-datatype cresult (c-ok tword) (c-err string))
-(define c-tag (prompt-tag cresult cresult (maxeff (read @a) (read @t) (read @k) (write @k) (alloc @k)) @y)
+(define c-tag (prompt-tag cresult cresult (maxeff spin (read @a) (read @t) (read @k) (write @k) (alloc @k)) @y)
   (make-continuation-prompt-tag))
 (define c-fail (subr compiles (string) void)
   (lambda (message) (abort-current-continuation c-tag (c-err message))))
@@ -84,14 +84,14 @@
 
 ;;; ----------------------------------------------------------- assembling
 
-(define c-reverse (subr (maxeff (read @k) (alloc @k)) (items items) items)
+(define c-reverse (subr (maxeff (read @k) (alloc @k) spin) (items items) items)
   (lambda (xs acc) (if (null? xs) acc (c-reverse (cdr xs) (cons (car xs) acc)))))
 
 (define c-size (subr pure (item) int)
   (lambda (i) (tagcase i (i-cell (x) 1) (i-label (n) 0) (i-branch (n) 2) (i-zbranch (n) 2))))
 
 ;; Where each label is, in cells.
-(define c-place (subr (maxeff (read @k) (write @k)) (items (arrayof int @k) int) unit)
+(define c-place (subr (maxeff (read @k) (write @k) spin) (items (arrayof int @k) int) unit)
   (lambda (xs at pos)
     (if (null? xs)
         #u
@@ -99,7 +99,7 @@
                (c-place (cdr xs) at (+ pos (c-size (car xs))))))))
 
 ;; The cells, branches resolved: an offset counts from the cell after it.
-(define c-cells (subr (maxeff (read @k) (alloc @k)) (items (arrayof int @k) int) (listof wcell @k))
+(define c-cells (subr (maxeff (read @k) (alloc @k) spin) (items (arrayof int @k) int) (listof wcell @k))
   (lambda (xs at pos)
     (if (null? xs)
         nil
@@ -112,7 +112,7 @@
             (i-zbranch (n)
               (cons (wcell-routine routine-zbranch) (cons (wcell-int (- (array-ref at n) (+ pos 2))) rest))))))))
 
-(define c-assemble (subr (maxeff (read @k) (write @k) (alloc @k)) (code symbol) tword)
+(define c-assemble (subr (maxeff (read @k) (write @k) (alloc @k) spin) (code symbol) tword)
   (lambda (c name)
     (let* ((xs (c-reverse (get c) nil)) (at (the (arrayof int @k) (make-array (get c-labels) 0))))
       (begin (c-place xs at 0) (make-word name (c-cells xs at 0))))))
@@ -169,14 +169,14 @@
 ;; The global environment as compiling has reached it, newest first.
 (define c-genv (ref cenv @k) (new nil))
 
-(define c-find (subr (maxeff (read @k) (alloc @k)) (cenv symbol) (listof loc @k))
+(define c-find (subr (maxeff (read @k) (alloc @k) spin) (cenv symbol) (listof loc @k))
   (lambda (e n)
     (cond ((null? e) nil)
           ((symbol=? (car (car e)) n) (the (listof loc @k) (cons (cdr (car e)) nil)))
           (else (c-find (cdr e) n)))))
 
 ;; Where `n` is: in the locals, else in the globals; none means standard.
-(define c-where (subr (maxeff (read @k) (alloc @k)) (cenv symbol) (listof loc @k))
+(define c-where (subr (maxeff (read @k) (alloc @k) spin) (cenv symbol) (listof loc @k))
   (lambda (e n) (let ((l (c-find e n))) (if (null? l) (c-find (get c-genv) n) l))))
 
 (define c-load (subr compiles (code loc) unit)
@@ -194,24 +194,24 @@
 
 (define-type syms (listof symbol @k))
 
-(define c-member? (subr (read @k) (syms symbol) bool)
+(define c-member? (subr (maxeff (read @k) spin) (syms symbol) bool)
   (lambda (xs n) (and (not (null? xs)) (or (symbol=? (car xs) n) (c-member? (cdr xs) n)))))
-(define c-adjoin (subr (maxeff (read @k) (alloc @k)) (syms symbol) syms)
+(define c-adjoin (subr (maxeff (read @k) (alloc @k) spin) (syms symbol) syms)
   (lambda (xs n) (if (c-member? xs n) xs (cons n xs))))
 
-(define c-bind-params (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syns-a)) @a) syms) syms)
+(define c-bind-params (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syns-a)) @a) syms) syms)
   (lambda (ps bound) (if (null? ps) bound (c-bind-params (cdr ps) (cons (extract (car ps) 1) bound)))))
-(define c-bind-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) syms) syms)
+(define c-bind-letrec (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) syms) syms)
   (lambda (bs bound) (if (null? bs) bound (c-bind-letrec (cdr bs) (cons (extract (car bs) 1) bound)))))
-(define c-bind-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms) syms)
+(define c-bind-let (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) @a) syms) syms)
   (lambda (bs bound) (if (null? bs) bound (c-bind-let (cdr bs) (cons (extract (car bs) 1) bound)))))
-(define c-names (subr (maxeff (read @a) (read @k) (alloc @k)) (names syms) syms)
+(define c-names (subr (maxeff (read @a) (read @k) (alloc @k) spin) (names syms) syms)
   (lambda (ns bound) (if (null? ns) bound (c-names (cdr ns) (cons (car ns) bound)))))
 
 (define-rec
-  (c-free-all (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) syms syms) syms)
+  (c-free-all (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof exp @a) syms syms) syms)
     (lambda (es bound acc) (if (null? es) acc (c-free-all (cdr es) bound (c-free (car es) bound acc)))))
-  (c-free (subr (maxeff (read @a) (read @k) (alloc @k)) (exp syms syms) syms)
+  (c-free (subr (maxeff (read @a) (read @k) (alloc @k) spin) (exp syms syms) syms)
     (lambda (x bound acc)
       (tagcase x
         (e-var (n a b) (if (c-member? bound n) acc (c-adjoin acc n)))
@@ -235,19 +235,19 @@
         (e-sum (t v a b) (c-free v bound acc))
         (e-tagcase (s arms els a b) (c-free s bound (c-free-arms arms bound (c-free-else els bound acc))))
         (else y acc))))
-  (c-free-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) syms syms) syms)
+  (c-free-letrec (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) syms syms) syms)
     (lambda (bs bound acc) (if (null? bs) acc (c-free-letrec (cdr bs) bound (c-free (extract (car bs) 3) bound acc)))))
-  (c-free-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
+  (c-free-let (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
     (lambda (bs bound acc) (if (null? bs) acc (c-free-let (cdr bs) bound (c-free (extract (car bs) 2) bound acc)))))
-  (c-free-fields (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
+  (c-free-fields (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
     (lambda (fs bound acc) (if (null? fs) acc (c-free-fields (cdr fs) bound (c-free (extract (car fs) 2) bound acc)))))
   (c-free-arms
-    (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) syms syms) syms)
+    (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) syms syms) syms)
     (lambda (arms bound acc)
       (if (null? arms)
           acc
           (c-free-arms (cdr arms) bound (c-free (extract (car arms) 4) (c-names (extract (car arms) 3) bound) acc)))))
-  (c-free-else (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
+  (c-free-else (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) @a) syms syms) syms)
     (lambda (els bound acc)
       (if (null? els) acc (c-free (extract (car els) 2) (cons (extract (car els) 1) bound) acc)))))
 
@@ -258,15 +258,15 @@
 ;; After a body whose value is on top of `n` values bound from `slot`
 ;; up: the value into `slot`, the others dropped. Nothing in tail
 ;; position, where `return` drops the whole frame.
-(define c-unbind (subr (maxeff (read @k) (write @k) (alloc @k)) (code int int bool) unit)
+(define c-unbind (subr (maxeff (read @k) (write @k) (alloc @k) spin) (code int int bool) unit)
   (lambda (c slot n tail)
     (if (or tail (= n 0))
         #u
-        (letrec ((drops (subr (maxeff (read @k) (write @k) (alloc @k)) (int) unit)
+        (letrec ((drops (subr (maxeff (read @k) (write @k) (alloc @k) spin) (int) unit)
                    (lambda (k) (if (= k 0) #u (begin (c-op c routine-drop) (drops (- k 1)))))))
           (begin (c-op1 c routine-slot! (wcell-int slot)) (drops (- n 1)))))))
 
-(define c-count-let (subr (read @a) ((listof (productof (1 symbol) (2 exp)) @a)) int)
+(define c-count-let (subr (maxeff (read @a) spin) ((listof (productof (1 symbol) (2 exp)) @a)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-let (cdr bs))))))
 
 ;; `letrec`: every binding is a lambda (the checker says so). Each closure
@@ -276,7 +276,7 @@
 ;; loops is not captured at all.
 (define-type patches (listof (pairof int int @k) @k))
 
-(define c-letrec-slots (subr (maxeff (read @a) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int) cenv)
+(define c-letrec-slots (subr (maxeff (read @a) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int) cenv)
   (lambda (bs e d)
     (if (null? bs) e (c-letrec-slots (cdr bs) (the cenv (cons (cons (extract (car bs) 1) (at-slot d)) e)) (+ d 1)))))
 (define c-patch-one (subr compiles (patches int int code) unit)
@@ -300,7 +300,7 @@
 
 ;; `x`, when it is a lambda under any type abstractions and ascriptions,
 ;; which compile to nothing; none otherwise.
-(define c-lambda-of (subr (maxeff (read @a) (alloc @k)) (exp) (listof exp @k))
+(define c-lambda-of (subr (maxeff (read @a) (alloc @k) spin) (exp) (listof exp @k))
   (lambda (x)
     (tagcase x
       (e-plambda (d body a b) (c-lambda-of body))
@@ -309,16 +309,16 @@
       (e-rlambda (r l a b) (the (listof exp @k) (cons x nil)))
       (else y nil))))
 
-(define c-mentions? (subr (maxeff (read @a) (read @k) (alloc @k)) (exp symbol) bool)
+(define c-mentions? (subr (maxeff (read @a) (read @k) (alloc @k) spin) (exp symbol) bool)
   (lambda (x n) (c-member? (c-free x nil nil) n)))
-(define c-count-exps (subr (read @a) ((listof exp @a)) int)
+(define c-count-exps (subr (maxeff (read @a) spin) ((listof exp @a)) int)
   (lambda (es) (if (null? es) 0 (+ 1 (c-count-exps (cdr es))))))
 
 ;; Whether every use of `f` in `x` is a call with `n` arguments in tail
 ;; position, which the compiler makes a loop.
 
 (define-rec
-  (c-loops-only (subr (maxeff (read @a) (read @k) (alloc @k)) (exp symbol int bool) bool)
+  (c-loops-only (subr (maxeff (read @a) (read @k) (alloc @k) spin) (exp symbol int bool) bool)
     (lambda (x f n tail)
       (tagcase x
         (e-var (m a b) (not (symbol=? m f)))
@@ -351,33 +351,33 @@
         (e-tagcase (s arms els a b)
           (and (c-loops-only s f n #f) (and (c-loops-only-arms arms f n tail) (c-loops-only-else els f n tail))))
         (else y #t))))
-  (c-loops-only-all (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) symbol int) bool)
+  (c-loops-only-all (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof exp @a) symbol int) bool)
     (lambda (es f n) (or (null? es) (and (c-loops-only (car es) f n #f) (c-loops-only-all (cdr es) f n)))))
-  (c-loops-only-begin (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof exp @a) symbol int bool) bool)
+  (c-loops-only-begin (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof exp @a) symbol int bool) bool)
     (lambda (es f n tail)
       (cond ((null? es) #t)
             ((null? (cdr es)) (c-loops-only (car es) f n tail))
             (else (and (c-loops-only (car es) f n #f) (c-loops-only-begin (cdr es) f n tail))))))
-  (c-loops-only-letrec (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) symbol int) bool)
+  (c-loops-only-letrec (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) symbol int) bool)
     (lambda (bs f n) (or (null? bs) (and (c-loops-only (extract (car bs) 3) f n #f) (c-loops-only-letrec (cdr bs) f n)))))
-  (c-loops-only-let (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
+  (c-loops-only-let (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
     (lambda (bs f n) (or (null? bs) (and (c-loops-only (extract (car bs) 2) f n #f) (c-loops-only-let (cdr bs) f n)))))
-  (c-loops-only-fields (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
+  (c-loops-only-fields (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) @a) symbol int) bool)
     (lambda (fs f n) (or (null? fs) (and (c-loops-only (extract (car fs) 2) f n #f) (c-loops-only-fields (cdr fs) f n)))))
   (c-loops-only-arms
-    (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) symbol int bool) bool)
+    (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) @a) symbol int bool) bool)
     (lambda (arms f n tail)
       (or (null? arms)
           (and (or (c-member? (c-names (extract (car arms) 3) nil) f) (c-loops-only (extract (car arms) 4) f n tail))
                (c-loops-only-arms (cdr arms) f n tail)))))
-  (c-loops-only-else (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 exp)) @a) symbol int bool) bool)
+  (c-loops-only-else (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) @a) symbol int bool) bool)
     (lambda (els f n tail)
       (or (null? els) (or (symbol=? (extract (car els) 1) f) (c-loops-only (extract (car els) 2) f n tail))))))
 
 ;; Binding `i`'s scope while it is made: each sibling pending, and itself a
 ;; loop if it only calls itself in loops.
 (define c-letrec-own
-  (subr (maxeff (read @a) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int int int exp int) cenv)
+  (subr (maxeff (read @a) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) cenv int int int exp int) cenv)
   (lambda (bs e depth k i body nps)
     (if (null? bs)
         e
@@ -386,19 +386,19 @@
                         (the cenv (cons (cons g (if (and (= k i) (c-loops-only body g nps #t)) (at-loop 0) (at-pending (+ depth k)))) e))
                         depth (+ k 1) i body nps)))))
 
-(define c-count-letrec (subr (read @a) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) int)
+(define c-count-letrec (subr (maxeff (read @a) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-letrec (cdr bs))))))
 
-(define c-count-params (subr (read @a) ((listof (productof (1 symbol) (2 syns-a)) @a)) int)
+(define c-count-params (subr (maxeff (read @a) spin) ((listof (productof (1 symbol) (2 syns-a)) @a)) int)
   (lambda (ps) (if (null? ps) 0 (+ 1 (c-count-params (cdr ps))))))
-(define c-param-env (subr (maxeff (read @a) (alloc @k)) ((listof (productof (1 symbol) (2 syns-a)) @a) int cenv) cenv)
+(define c-param-env (subr (maxeff (read @a) (alloc @k) spin) ((listof (productof (1 symbol) (2 syns-a)) @a) int cenv) cenv)
   (lambda (ps i acc) (if (null? ps) acc (c-param-env (cdr ps) (+ i 1) (the cenv (cons (cons (extract (car ps) 1) (at-slot i)) acc))))))
-(define c-length (subr (read @k) (syms) int)
+(define c-length (subr (maxeff (read @k) spin) (syms) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (c-length (cdr xs))))))
 
 ;; The free names that are locals here, not globals or standard names, nor
 ;; a loop, which is not a value.
-(define c-captured (subr (maxeff (read @k) (alloc @k)) (syms cenv) syms)
+(define c-captured (subr (maxeff (read @k) (alloc @k) spin) (syms cenv) syms)
   (lambda (xs e)
     (cond ((null? xs) nil)
           ((null? (c-find e (car xs))) (c-captured (cdr xs) e))
@@ -408,7 +408,7 @@
           (else (cons (car xs) (c-captured (cdr xs) e))))))
 
 ;; Free value `i` for each captured name, boxed if it was boxed outside.
-(define c-inner-env (subr (maxeff (read @k) (alloc @k)) (syms cenv cenv int) cenv)
+(define c-inner-env (subr (maxeff (read @k) (alloc @k) spin) (syms cenv cenv int) cenv)
   (lambda (xs outer acc i)
     (if (null? xs)
         acc
@@ -432,7 +432,7 @@
                (rest (c-push-all (cdr xs) e (+ depth 1) (+ j 1) c)))
           (if (< pending 0) rest (the patches (cons (cons j pending) rest)))))))
 
-(define c-self-call? (subr (maxeff (read @a) (read @k) (alloc @k)) (exp (listof exp @a) cenv bool) bool)
+(define c-self-call? (subr (maxeff (read @a) (read @k) (alloc @k) spin) (exp (listof exp @a) cenv bool) bool)
   (lambda (f args e tail)
     (and tail
          (and (>= (get c-this-params) 0)
@@ -444,9 +444,9 @@
                               (and (c-this-loc? (car l) (get c-this-loc)) (= (c-count-exps args) (get c-this-params)))))))
                 (else y #f))))))
 
-(define c-loop-stores (subr (maxeff (read @k) (write @k) (alloc @k)) (code int) unit)
+(define c-loop-stores (subr (maxeff (read @k) (write @k) (alloc @k) spin) (code int) unit)
   (lambda (c i) (if (< i 0) #u (begin (c-op1 c routine-slot! (wcell-int i)) (c-loop-stores c (- i 1))))))
-(define c-drops (subr (maxeff (read @k) (write @k) (alloc @k)) (code int) unit)
+(define c-drops (subr (maxeff (read @k) (write @k) (alloc @k) spin) (code int) unit)
   (lambda (c k) (if (<= k 0) #u (begin (c-op c routine-drop) (c-drops c (- k 1))))))
 
 ;; How many arguments a standard operation takes, or -1 if it is not one.
@@ -527,7 +527,7 @@
       (if (< n 0)
           (c-fail (string-append "not yet compiled as a value: " name))
           (begin
-            (letrec ((params (subr (maxeff (read @k) (write @k) (alloc @k)) (int) unit)
+            (letrec ((params (subr (maxeff (read @k) (write @k) (alloc @k) spin) (int) unit)
                        (lambda (i) (if (= i n) #u (begin (c-op1 body routine-slot (wcell-int i)) (params (+ i 1)))))))
               (if (string=? name "make-array")
                   (begin (c-int body 0) (params 0) (c-prim body "%make-bloblet-filled" 3))
@@ -536,7 +536,7 @@
             (c-op1 c routine-closure (wcell-word (c-assemble body (string->symbol name))))
             (c-emit c (i-cell (wcell-int 0))))))))
 
-(define c-count-names (subr (read @a) (names) int)
+(define c-count-names (subr (maxeff (read @a) spin) (names) int)
   (lambda (ns) (if (null? ns) 0 (+ 1 (c-count-names (cdr ns))))))
 
 ;; A product's members, from the slot after the sum's, each a slot.
@@ -832,7 +832,7 @@
 
 
 
-(define c-rec-globals (subr (maxeff (read @a) (read @k) (write @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof wglobal @k))
+(define c-rec-globals (subr (maxeff (read @a) (read @k) (write @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) @a)) (listof wglobal @k))
   (lambda (bs) (if (null? bs) nil (let ((g (c-push-global (extract (car bs) 1)))) (cons g (c-rec-globals (cdr bs)))))))
 (define c-rec-fill (subr compiles ((listof (productof (1 symbol) (2 syn) (3 exp)) @a) (listof wglobal @k) code) unit)
   (lambda (bs gs c)

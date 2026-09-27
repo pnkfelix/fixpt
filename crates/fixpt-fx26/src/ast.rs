@@ -79,6 +79,11 @@ pub enum Atom {
     /// Reads an I-cell in this region, which waits for its one write: it
     /// must stay after writes to the region, but commutes with other reads.
     Await(Region),
+    /// May run for an unbounded time: a recursive call, a call of a closure
+    /// that may have been fetched from the store, or through a recursive
+    /// type. It has no region, so nothing masks it
+    /// (`docs/research/type-and-effect-directions.md`, R6).
+    Spin,
     /// An effect variable.
     Var(DVar),
 }
@@ -89,7 +94,7 @@ impl Atom {
             Atom::Read(r) | Atom::Write(r) | Atom::Alloc(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) => {
                 Some(r)
             }
-            Atom::Var(_) => None,
+            Atom::Var(_) | Atom::Spin => None,
         }
     }
 }

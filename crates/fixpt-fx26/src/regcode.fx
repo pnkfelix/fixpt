@@ -97,11 +97,11 @@
 (define r-done (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen bool) unit)
   (lambda (g tail) (if tail (begin (r-leave g) (r-op0 g rop-return)) #u)))
 
-(define r-reverse (subr (maxeff (read @k) (alloc @k)) ((listof ritem @k) (listof ritem @k)) (listof ritem @k))
+(define r-reverse (subr (maxeff (read @k) (alloc @k) spin) ((listof ritem @k) (listof ritem @k)) (listof ritem @k))
   (lambda (xs acc) (if (null? xs) acc (r-reverse (cdr xs) (cons (car xs) acc)))))
 (define r-size (subr pure (ritem) int)
   (lambda (i) (tagcase i (r-cell (x) 1) (r-label (n) 0) (r-branch (f n) 2) (r-frame () 1))))
-(define r-place (subr (maxeff (read @k) (write @k)) ((listof ritem @k) (arrayof int @k) int) unit)
+(define r-place (subr (maxeff (read @k) (write @k) spin) ((listof ritem @k) (arrayof int @k) int) unit)
   (lambda (xs at pos)
     (if (null? xs)
         #u
@@ -109,7 +109,7 @@
                (r-place (cdr xs) at (+ pos (r-size (car xs))))))))
 ;; The cells, branches resolved (an offset counts from the cell after it),
 ;; and the frame's size in place.
-(define r-cells (subr (maxeff (read @k) (alloc @k)) ((listof ritem @k) (arrayof int @k) int int) (listof wcell @k))
+(define r-cells (subr (maxeff (read @k) (alloc @k) spin) ((listof ritem @k) (arrayof int @k) int int) (listof wcell @k))
   (lambda (xs at pos frame)
     (if (null? xs)
         nil
@@ -120,7 +120,7 @@
             (r-frame () (cons (wcell-int frame) rest))
             (r-branch (f n)
               (cons (wcell-int (if f rop-branchf rop-branch)) (cons (wcell-int (- (array-ref at n) (+ pos 2))) rest))))))))
-(define r-assemble (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen) (listof wcell @k))
+(define r-assemble (subr (maxeff (read @k) (write @k) (alloc @k) spin) (rgen) (listof wcell @k))
   (lambda (g)
     (let* ((xs (r-reverse (get (extract g items)) nil))
            (at (the (arrayof int @k) (make-array (+ 1 (get (extract g labels))) 0))))
@@ -128,7 +128,7 @@
 
 ;;; ------------------------------------------------------------- variables
 
-(define r-where (subr (maxeff (read @k) (alloc @k)) (renv symbol) (listof rloc @k))
+(define r-where (subr (maxeff (read @k) (alloc @k) spin) (renv symbol) (listof rloc @k))
   (lambda (env n)
     (cond ((null? env)
            (let ((l (c-where (the cenv nil) n)))
@@ -164,7 +164,7 @@
 
 ;; Whether `f` is the procedure running, called with its arity: its own
 ;; name, still bound where the procedure knows itself to be.
-(define r-self-known? (subr (maxeff (read @a) (read @k) (alloc @k)) (rgen exp int cenv) bool)
+(define r-self-known? (subr (maxeff (read @a) (read @k) (alloc @k) spin) (rgen exp int cenv) bool)
   (lambda (g f nargs te)
     (tagcase f
       (e-var (n a b)
@@ -226,25 +226,25 @@
                (cond ((string=? p "%fx26-identity") (if (= n 1) (s-identity) (s-none)))
                      ((string=? p "") (s-none))
                      (else (r-prim-std p n n)))))))))
-(define r-standard-name (subr (maxeff (read @a) (read @k) (alloc @k)) (renv exp) string)
+(define r-standard-name (subr (maxeff (read @a) (read @k) (alloc @k) spin) (renv exp) string)
   (lambda (env f)
     (tagcase f (e-var (n a b) (if (null? (r-where env n)) (symbol->string n) "")) (else y ""))))
 
 ;;; ---------------------------------------------------------------- lists
 
-(define r-count-args (subr (read @k) (rargs) int)
+(define r-count-args (subr (maxeff (read @k) spin) (rargs) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (r-count-args (cdr xs))))))
-(define r-exp-args (subr (maxeff (read @a) (alloc @k)) ((listof exp @a)) rargs)
+(define r-exp-args (subr (maxeff (read @a) (alloc @k) spin) ((listof exp @a)) rargs)
   (lambda (es) (if (null? es) nil (cons (a-e (car es)) (r-exp-args (cdr es))))))
 (define r-arg-simple? (subr (read @a) (rarg) bool)
   (lambda (a) (tagcase a (a-e (x) (r-simple? x)) (a-thunk (b) #f) (else y #t))))
 ;; The last argument that is not simple, or -1.
-(define r-last-hard (subr (maxeff (read @a) (read @k)) (rargs int int) int)
+(define r-last-hard (subr (maxeff (read @a) (read @k) spin) (rargs int int) int)
   (lambda (xs i found)
     (if (null? xs) found (r-last-hard (cdr xs) (+ i 1) (if (r-arg-simple? (car xs)) found i)))))
-(define r-nth-int (subr (read @k) ((listof int @k) int) int)
+(define r-nth-int (subr (maxeff (read @k) spin) ((listof int @k) int) int)
   (lambda (xs i) (if (= i 0) (car xs) (r-nth-int (cdr xs) (- i 1)))))
-(define r-nth-exp (subr (read @a) ((listof exp @a) int) exp)
+(define r-nth-exp (subr (maxeff (read @a) spin) ((listof exp @a) int) exp)
   (lambda (es i) (if (= i 0) (car es) (r-nth-exp (cdr es) (- i 1)))))
 
 ;;; ---------------------------------------------------------- expressions
@@ -846,7 +846,7 @@
 
 ;; The register environment of a lambda's body, from its threaded one: its
 ;; parameters in registers in a leaf, else in the frame.
-(define r-env-of (subr (maxeff (read @k) (write @k) (alloc @k)) (cenv bool) renv)
+(define r-env-of (subr (maxeff (read @k) (write @k) (alloc @k) spin) (cenv bool) renv)
   (lambda (inner leaf)
     (if (null? inner)
         nil
@@ -858,7 +858,7 @@
             (at-global (g) (the renv (cons (cons n (rl-global g)) rest)))
             (at-pending (s) (begin (r-decline) rest)))))))
 
-(define r-store-params (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen int int) unit)
+(define r-store-params (subr (maxeff (read @k) (write @k) (alloc @k) spin) (rgen int int) unit)
   (lambda (g i n)
     (if (= i n) #u (let ((s (r-slot g))) (begin (r-opnn g rop-store (+ i 1) s) (r-store-params g (+ i 1) n))))))
 

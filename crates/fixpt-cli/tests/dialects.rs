@@ -148,7 +148,7 @@ fn a_file_runs_and_its_output_reaches_stdout() {
 fn fx26_runs_threaded_on_each_machine() {
     // The same answer from each machine the compiled words can run on; the
     // stencils only where this build found a nightly compiler.
-    let src = "(letrec ((f (subr pure (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))) (f 15))";
+    let src = "(letrec ((f (subr spin (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))) (f 15))";
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
     for machine in ["rust", "native", "stencils"].into_iter().filter(|m| stencils || *m != "stencils") {
         let out = Command::new(FIXPT)
@@ -172,7 +172,7 @@ fn the_fx26_repl_shows_threaded_code() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("fixpt starts");
-    let input = "(define f (subr pure (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))\n(f 10)\n,disassemble f\n";
+    let input = "(define f (subr spin (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))\n(f 10)\n,disassemble f\n";
     child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
     let out = child.wait_with_output().expect("finishes");
     let out = String::from_utf8_lossy(&out.stdout);
@@ -186,7 +186,7 @@ fn the_fx26_repl_shows_threaded_code() {
 /// anything else is refused; `,step-limit` shows and sets it in the REPL.
 #[test]
 fn the_step_limit_can_be_set_or_lifted() {
-    let long = "(letrec ((f (subr pure (int) int) (lambda (n) (if (< n 1) 0 (f (- n 1)))))) (f 30000000))";
+    let long = "(letrec ((f (subr spin (int) int) (lambda (n) (if (< n 1) 0 (f (- n 1)))))) (f 30000000))";
     let run = |args: &[&str]| {
         let out = Command::new(FIXPT).args(args).output().expect("runs");
         (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string(), String::from_utf8_lossy(&out.stderr).to_string())

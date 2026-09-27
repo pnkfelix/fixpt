@@ -25,10 +25,10 @@ fn a_definition_stays_in_scope() {
 #[test]
 fn a_typed_definition_may_be_recursive() {
     let mut c = Checker::new();
-    let src = "(define count (subr pure (int) int)
+    let src = "(define count (subr spin (int) int)
                  (lambda ((n int)) (if (= n 0) 0 (count (- n 1)))))";
     top(&mut c, src).expect("defines");
-    assert_eq!(ty_of(&mut c, "(count 3)"), "int ! pure");
+    assert_eq!(ty_of(&mut c, "(count 3)"), "int ! spin");
 }
 
 #[test]

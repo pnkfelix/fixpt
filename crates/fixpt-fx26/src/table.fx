@@ -26,7 +26,7 @@
 ;;; The entry for `key` in a bucket, or nil.
 (define bucket-find
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (read r) ((bucket k v r) k (subr pure (k k) bool)) (pairof k v r))))
+    (subr (maxeff (read r) spin) ((bucket k v r) k (subr pure (k k) bool)) (pairof k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((b (bucket k v r)) (key k) (same (subr pure (k k) bool)))
       (cond ((null? b) nil)
@@ -42,7 +42,7 @@
 
 (define table-ref
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (read r) ((table k v r) k v) v)))
+    (subr (maxeff (read r) spin) ((table k v r) k v) v)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k) (default v))
       (let* ((buckets (bloblet-ref t 2))
@@ -51,7 +51,7 @@
 
 (define table-has?
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (read r) ((table k v r) k) bool)))
+    (subr (maxeff (read r) spin) ((table k v r) k) bool)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k))
       (let ((buckets (bloblet-ref t 2)))
@@ -64,7 +64,7 @@
 ;;; Move every entry of bucket `b` into the array `new`.
 (define rehash-bucket
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read r) (write r) (alloc r)) ((table k v r) (bucket k v r) (arrayof (bucket k v r) r)) unit)))
+    (subr (maxeff (read r) (write r) (alloc r) spin) ((table k v r) (bucket k v r) (arrayof (bucket k v r) r)) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (b (bucket k v r)) (new (arrayof (bucket k v r) r)))
       (if (null? b)
@@ -75,7 +75,7 @@
 
 (define rehash-array
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read r) (write r) (alloc r)) ((table k v r) (arrayof (bucket k v r) r) (arrayof (bucket k v r) r) int) unit)))
+    (subr (maxeff (read r) (write r) (alloc r) spin) ((table k v r) (arrayof (bucket k v r) r) (arrayof (bucket k v r) r) int) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (old (arrayof (bucket k v r) r)) (new (arrayof (bucket k v r) r)) (i int))
       (if (= i (array-length old))
@@ -86,7 +86,7 @@
 ;;; Double the buckets once there are more entries than buckets.
 (define table-grow
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read r) (write r) (alloc r)) ((table k v r)) unit)))
+    (subr (maxeff (read r) (write r) (alloc r) spin) ((table k v r)) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)))
       (let ((old (bloblet-ref t 2)))
@@ -98,7 +98,7 @@
 
 (define table-set!
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read r) (write r) (alloc r)) ((table k v r) k v) unit)))
+    (subr (maxeff (read r) (write r) (alloc r) spin) ((table k v r) k v) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k) (value v))
       (let* ((buckets (bloblet-ref t 2))

@@ -21,6 +21,7 @@
 //! rules of the kernel — masking included — apply unchanged afterwards.
 
 use crate::ast::{Atom, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
+use fixpt_read::Sym;
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use std::collections::{HashMap, HashSet};
@@ -169,6 +170,9 @@ impl Checker {
                 for (n, init) in &bindings {
                     let (t, ie) = self.synth(*init)?;
                     eff = eff.union(&ie);
+                    if self.is_lambda(*init) {
+                        self.known.insert((*n, t));
+                    }
                     bound.push((*n, t));
                 }
                 let depth = self.env.len();
@@ -262,6 +266,7 @@ impl Checker {
             self.facts.standard_operator.insert(e, *s);
         }
         let (mut ft, fe) = self.synth(fun)?;
+        let schema = ft;
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         if matches!(self.arena.get(ft), Ty::Poly { .. }) {
             let (inst, cached) = self.instantiate(ft, args, expected, span)?;
@@ -291,9 +296,97 @@ impl Checker {
             };
             effect = effect.union(&eff);
         }
-        let effect = effect.union(&latent);
+        let mut effect = effect.union(&latent);
+        if self.may_spin(fun, args, schema, ft, &latent, &params) {
+            effect.0.insert(Atom::Spin);
+        }
         let effect = self.mask(e, &effect, result);
         Ok((result, effect))
+    }
+
+    /// Whether a call of `fun` (of type `schema`, instantiated to `ft`, with
+    /// latent effect `latent` and parameters `params`) may run for an
+    /// unbounded time (`docs/research/type-and-effect-directions.md`, R6):
+    /// - a call, in a recursive group's lambdas, of the group;
+    /// - a standard operation's call of a function it is given, unless that
+    ///   is a `lambda` written there or a known procedure: otherwise it is
+    ///   as unknown as any closure;
+    /// - a call of anything but a known procedure (or a `lambda` applied
+    ///   where it is written), if what it does reads
+    ///   the store (where it could have been fetched from, which is how a
+    ///   knot is tied with no recursion), or is an effect variable (which may
+    ///   stand for such a read), or if its type is recursive (self-
+    ///   application).
+    fn may_spin(&self, fun: ExpId, args: &[ExpId], schema: TyId, ft: TyId, latent: &Effect, params: &[TyId]) -> bool {
+        let binding = self.callee_binding(fun);
+        if let Some(b) = binding {
+            if self.recursive.contains(&b) {
+                return true;
+            }
+            if self.is_standard(b.0) {
+                let (_, inner) = self.binders_of(schema);
+                let Some((_, formals, _)) = self.arena.get(inner).as_subr() else { return false };
+                return formals.iter().zip(params).zip(args).any(|((f, p), a)| {
+                    matches!(self.arena.get(*f), Ty::Subr { .. })
+                        && !self.is_lambda(*a)
+                        && !self.callee_binding(*a).is_some_and(|b| self.known.contains(&b))
+                        && self.arena.get(*p).as_subr().is_some_and(|(l, _, _)| knots(&l) || self.cyclic(*p))
+                });
+            }
+            if self.known.contains(&b) {
+                return false;
+            }
+        }
+        // A `lambda` applied where it is written is known code too.
+        let mut f = fun;
+        while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
+            f = *body;
+        }
+        if self.is_lambda(f) {
+            return false;
+        }
+        knots(latent) || self.cyclic(ft)
+    }
+
+    /// The binding `f` names, under any projections and ascriptions: its
+    /// name and type, if it is a variable.
+    fn callee_binding(&self, mut f: ExpId) -> Option<(Sym, TyId)> {
+        while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
+            f = *body;
+        }
+        match self.arena.exp_at(f) {
+            Exp::Var(s) => self.lookup(*s).map(|t| (*s, t)),
+            _ => None,
+        }
+    }
+
+    /// Whether type `t` is recursive: a cycle runs through it.
+    pub(crate) fn cyclic(&self, t: TyId) -> bool {
+        fn walk(c: &Checker, t: TyId, path: &mut Vec<TyId>, done: &mut HashSet<TyId>) -> bool {
+            let t = c.arena.resolve(t);
+            if path.contains(&t) {
+                return true;
+            }
+            if !done.insert(t) {
+                return false;
+            }
+            path.push(t);
+            let kids: Vec<TyId> = match c.arena.get(t) {
+                Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).collect(),
+                Ty::PromptTag { answer, payload, .. } => vec![*answer, *payload],
+                Ty::Composable { arg, answer, .. } => vec![*arg, *answer],
+                Ty::Poly { body, .. } => vec![*body],
+                Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
+                Ty::Pair(a, b, _) => vec![*a, *b],
+                Ty::Bloblet { fields, .. } => fields.clone(),
+                Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| *t).collect(),
+                _ => vec![],
+            };
+            let r = kids.into_iter().any(|k| walk(c, k, path, done));
+            path.pop();
+            r
+        }
+        walk(self, t, &mut Vec::new(), &mut HashSet::new())
     }
 
     /// An argument that failed to check is reported as that argument.
@@ -781,4 +874,17 @@ impl Checker {
             }
         }
     }
+}
+
+/// Whether an effect could fetch a closure from the store, or stands for
+/// what could: a read or an await of a region that is not finite (finite
+/// data was never written, so holds no closure put there after it was
+/// made, which a knot needs; merely frozen data may), or an effect
+/// variable.
+fn knots(e: &Effect) -> bool {
+    e.0.iter().any(|a| match a {
+        Atom::Read(r) | Atom::Await(r) => !matches!(r, Region::Frozen(_, true)),
+        Atom::Var(_) => true,
+        _ => false,
+    })
 }

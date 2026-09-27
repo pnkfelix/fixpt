@@ -40,9 +40,9 @@
 
 ;; What a reading procedure may do: allocate, read and write its own data,
 ;; mark, and suspend or fail through its prompt.
-(define-effect reads (maxeff (alloc @s) (read @s) (write @s) (write @m) (read @m) (goto @e) (comefrom @e)))
+(define-effect reads (maxeff spin (alloc @s) (read @s) (write @s) (write @m) (read @m) (goto @e) (comefrom @e)))
 ;; The same, less the control on @e: what a delimited parse does.
-(define-effect parsing (maxeff (alloc @s) (read @s) (write @s) (write @m) (read @m)))
+(define-effect parsing (maxeff spin (alloc @s) (read @s) (write @s) (write @m) (read @m)))
 
 (define-type chars (listof char @s))
 (define-type data (listof datum @s))
@@ -65,7 +65,7 @@
       (lst (items d a b) d)
       (dotted (items tail d a b) d)
       (vec (items d a b) d))))
-(define syns->data (subr (maxeff (read @s) (alloc @s)) (syns) data)
+(define syns->data (subr (maxeff (read @s) (alloc @s) spin) (syns) data)
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syns->data (cdr xs))))))
 
 ;; What a feed returns: waiting for a character, or stopped at an error.
@@ -185,7 +185,7 @@
   (lambda (name start close items)
     (datum-cons name (datum-cons (datum-int start) (datum-cons (datum-char close) (datum-cons items no-data))))))
 ;; `items`, newest first, in order, onto `done`.
-(define datum-reverse-onto (subr pure (datum datum) datum)
+(define datum-reverse-onto (subr spin (datum datum) datum)
   (lambda (items done)
     (if (datum-null? items) done (datum-reverse-onto (datum-cdr items) (datum-cons (datum-car items) done)))))
 ;; The marks' names, interned once.
@@ -243,7 +243,7 @@
 (define eager-state-position (subr (read @s) (state) int) (lambda (st) (state-position st)))
 (define eager-state-message (subr (read @s) (state) string) (lambda (st) (state-message st)))
 ;; The complete top-level data read so far, in order.
-(define eager-state-data (subr (maxeff (read @s) (alloc @s)) (state) data)
+(define eager-state-data (subr (maxeff (read @s) (alloc @s) spin) (state) data)
   (lambda (st) (syns->data (the syns (reverse (state-data st))))))
 ;; The same, with where each piece is.
 (define eager-state-syntax (subr (maxeff (read @s) (alloc @s)) (state) syns)
@@ -257,17 +257,17 @@
         nil)))
 
 (define entry-name (subr pure (datum) string) (lambda (e) (datum-symbol-name (datum-car e))))
-(define entry-ref (subr pure (datum int) datum)
+(define entry-ref (subr spin (datum int) datum)
   (lambda (e i) (if (= i 0) (datum-car e) (entry-ref (datum-cdr e) (- i 1)))))
 
-(define settled? (subr (read @c) ((listof datum @c)) bool)
+(define settled? (subr (maxeff (read @c) spin) ((listof datum @c)) bool)
   (lambda (ctx)
     (or (null? ctx)
         (and (let ((n (entry-name (car ctx)))) (or (string=? n "top") (string=? n "comment")))
              (settled? (cdr ctx))))))
 
 ;; `complete`, `incomplete` or `error`.
-(define eager-status (subr (maxeff (read @s) (read @m) (alloc @c) (read @c)) (state) datum)
+(define eager-status (subr (maxeff (read @s) (read @m) (alloc @c) (read @c) spin) (state) datum)
   (lambda (st)
     (cond ((not (state-need? st)) (datum-symbol "error"))
           ((settled? (the (listof datum @c) (eager-context st))) (datum-symbol "complete"))
@@ -283,7 +283,7 @@
          (let ((n (datum-symbol-name (datum-car (datum-cdr d))))) (or (string=? n "help") (string=? n "?")))
          (datum-null? (datum-cdr (datum-cdr d))))))
 
-(define closing (subr (maxeff (read @c) (alloc @c)) ((listof datum @c) (listof char @c)) datum)
+(define closing (subr (maxeff (read @c) (alloc @c) spin) ((listof datum @c) (listof char @c)) datum)
   (lambda (ctx acc)
     (if (null? ctx)
         (datum-bool #f)
@@ -296,7 +296,7 @@
 
 ;; If the newest thing read in the innermost open list is a `,help` hole,
 ;; the characters that would close every open list; otherwise #f.
-(define eager-hole-closers (subr (maxeff (read @s) (read @m) (alloc @c) (read @c)) (state) datum)
+(define eager-hole-closers (subr (maxeff (read @s) (read @m) (alloc @c) (read @c) spin) (state) datum)
   (lambda (st)
     (let ((ctx (the (listof datum @c) (eager-context st))))
       (if (and (not (null? ctx))
@@ -382,7 +382,7 @@
           (loop cur nil))))))
 
 ;; A proper list of exact integers in 0..=255.
-(define bytes? (subr pure (datum) bool)
+(define bytes? (subr spin (datum) bool)
   (lambda (d)
     (or (datum-null? d)
         (and (datum-pair? d) (datum-byte? (datum-car d)) (bytes? (datum-cdr d))))))

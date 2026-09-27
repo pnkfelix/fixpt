@@ -218,8 +218,14 @@ impl Checker {
                 let recursive = self.is_lambda(e);
                 if recursive {
                     self.env.push((name, ty));
+                    self.known.insert((name, ty));
+                    self.recursive.push((name, ty));
                 }
-                match self.check_declared(name, ty, e) {
+                let checked = self.check_declared(name, ty, e);
+                if recursive {
+                    self.recursive.pop();
+                }
+                match checked {
                     Ok(effect) => {
                         if !recursive {
                             self.env.push((name, ty));
@@ -238,6 +244,9 @@ impl Checker {
                 let name = self.binder_name(name)?;
                 let e = self.parse_exp(init)?;
                 let (ty, effect) = self.synth(e)?;
+                if self.is_lambda(e) {
+                    self.known.insert((name, ty));
+                }
                 self.env.push((name, ty));
                 Ok(Top::Define { name, ty, effect, exp: e, typed: false, recursive: false })
             }
@@ -249,6 +258,7 @@ impl Checker {
     /// each lambda checked against its type.
     fn define_rec(&mut self, span: Span, items: &[Syntax]) -> R<Top> {
         let depth = self.env.len();
+        let rdepth = self.recursive.len();
         let r = (|| {
             let mut parts = Vec::new();
             for b in &items[1..] {
@@ -258,8 +268,10 @@ impl Checker {
                 let name = self.binder_name(name)?;
                 let ty = self.parse_type(ty)?;
                 self.env.push((name, ty));
+                self.known.insert((name, ty));
                 parts.push((name, ty, init.clone()));
             }
+            self.recursive.extend(parts.iter().map(|(n, t, _)| (*n, *t)));
             if parts.is_empty() {
                 return Err(FxError::at(span, "`(define-rec (name type lambda) …)`"));
             }
@@ -278,6 +290,7 @@ impl Checker {
             }
             Ok(Top::DefineRec { bindings })
         })();
+        self.recursive.truncate(rdepth);
         if r.is_err() {
             self.env.truncate(depth);
         }

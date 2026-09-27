@@ -41,8 +41,10 @@ fn c1_twice() {
                    (lambda ((x t)) (f (f x))))))",
         )
         .expect("checks");
-    // STATED, p. 3.
-    let want = "(poly ((t type)) (poly ((e effect)) (subr pure ((subr e (t) t)) (subr e (t) t))))";
+    // STATED, p. 3, but for `spin`, which the paper does not have: the inner
+    // lambda calls `f`, which is no known procedure and whose effect is a
+    // variable, so it may be a knot fetched from the store.
+    let want = "(poly ((t type)) (poly ((e effect)) (subr pure ((subr e (t) t)) (subr (maxeff spin e) (t) t))))";
     assert_eq!(c.show_ty(got.ty), want);
     let want_ty = c.type_of_str(want).expect("a type");
     assert!(c.subtype(got.ty, want_ty) && c.subtype(want_ty, got.ty));
@@ -111,8 +113,10 @@ fn c4_calling_a_continuation_has_a_goto() {
     c.bind("g", K).expect("binds");
     let call = c.check_str("(f g)").expect("checks");
     // DERIVED: `f`'s latent effect is `(goto @k)` (p. 3, p. 4). It stays after
-    // masking: `f` and `g` are free and their types mention `@k`.
-    effect_is(&mut c, &call.effect, "(goto @k)");
+    // masking: `f` and `g` are free and their types mention `@k`. And, beyond
+    // the paper: `K` is a recursive type, through which a continuation can be
+    // given itself, so a call through it may spin.
+    effect_is(&mut c, &call.effect, "(maxeff (goto @k) spin)");
 }
 
 #[test]

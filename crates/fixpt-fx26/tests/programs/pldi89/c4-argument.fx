@@ -4,7 +4,7 @@
 (define-type K (subr (goto @k) (K) void))
 
 (lambda ((f K))
-  ((proj (proj (proj cwcc @k) K) (goto @k))
+  ((proj (proj (proj cwcc @k) K) (maxeff (goto @k) spin))
    (lambda ((g K)) (f g)))
   (h)
   f)

@@ -10,7 +10,7 @@
 ;;; kept in step, so that it and threaded code mix freely; branches become
 ;;; jumps, and the dispatch between cells goes.
 
-(define-effect assembles (maxeff (read @k) (write @k) (alloc @k)))
+(define-effect assembles (maxeff spin (read @k) (write @k) (alloc @k)))
 
 ;;; ------------------------------------------------------------ the assembler
 ;;; Instructions, and labels patched when everything is placed. A label is
@@ -42,10 +42,10 @@
 (define n-trap-common (ref int @k) (new 0))
 (define n-exit-common (ref int @k) (new 0))
 
-(define n-copy-ints (subr (maxeff (read @k) (write @k)) ((arrayof int @k) (arrayof int @k) int) unit)
+(define n-copy-ints (subr (maxeff (read @k) (write @k) spin) ((arrayof int @k) (arrayof int @k) int) unit)
   (lambda (from to i)
     (if (= i (array-length from)) #u (begin (array-set! to i (array-ref from i)) (n-copy-ints from to (+ i 1))))))
-(define n-copy-bools (subr (maxeff (read @k) (write @k)) ((arrayof bool @k) (arrayof bool @k) int) unit)
+(define n-copy-bools (subr (maxeff (read @k) (write @k) spin) ((arrayof bool @k) (arrayof bool @k) int) unit)
   (lambda (from to i)
     (if (= i (array-length from)) #u (begin (array-set! to i (array-ref from i)) (n-copy-bools from to (+ i 1))))))
 
@@ -123,7 +123,7 @@
             (fix-cbz (at l r) (array-set! (get n-code) at (arm-cbz r (n-dist at l))))
             (fix-cbnz (at l r) (array-set! (get n-code) at (arm-cbnz r (n-dist at l)))))
           (n-patch (cdr fs))))))
-(define n-code-list (subr (maxeff (read @k) (alloc @k)) (int) (listof int @k))
+(define n-code-list (subr (maxeff (read @k) (alloc @k) spin) (int) (listof int @k))
   (lambda (i) (if (= i (get n-len)) nil (cons (array-ref (get n-code) i) (n-code-list (+ i 1))))))
 
 ;; The code, every branch patched.
@@ -581,20 +581,20 @@
 ;; does, as a list, first cell first. `n` cells from field `k`.
 
 (define-rec
-  (n-starts (subr (alloc @k) (tword int int) (listof bool @k))
+  (n-starts (subr (maxeff (alloc @k) spin) (tword int int) (listof bool @k))
     (lambda (w i n)
       (if (>= i n)
           nil
           (let* ((k (+ n-word-cell0 i))
                  (step (if (tword-int? w k) (+ 1 (n-operands (tword-int w k))) 1)))
             (cons #t (n-skip w (+ i 1) (- step 1) n))))))
-  (n-skip (subr (alloc @k) (tword int int int) (listof bool @k))
+  (n-skip (subr (maxeff (alloc @k) spin) (tword int int int) (listof bool @k))
     (lambda (w i left n)
       (if (or (= left 0) (>= i n)) (n-starts w i n) (cons #f (n-skip w (+ i 1) (- left 1) n))))))
-(define n-fill-bools (subr (maxeff (read @k) (write @k)) ((arrayof bool @k) (listof bool @k) int) unit)
+(define n-fill-bools (subr (maxeff (read @k) (write @k) spin) ((arrayof bool @k) (listof bool @k) int) unit)
   (lambda (a xs i) (if (null? xs) #u (begin (array-set! a i (car xs)) (n-fill-bools a (cdr xs) (+ i 1))))))
 
-(define n-list->array (subr (maxeff (read @k) (write @k) (alloc @k)) ((listof bool @k) int) (arrayof bool @k))
+(define n-list->array (subr (maxeff (read @k) (write @k) (alloc @k) spin) ((listof bool @k) int) (arrayof bool @k))
   (lambda (xs n)
     (let ((a (the (arrayof bool @k) (make-array (+ n 1) #f))))
       (begin (n-fill-bools a xs 0) a))))
@@ -604,7 +604,7 @@
   (lambda (n)
     (let ((a (the (arrayof int @k) (make-array n 0))))
       (begin (n-fill-labels a 0) a))))
-(define n-starts-at (subr (maxeff (read @k) (alloc @k)) (int int (arrayof bool @k) (arrayof int @k)) (listof int @k))
+(define n-starts-at (subr (maxeff (read @k) (alloc @k) spin) (int int (arrayof bool @k) (arrayof int @k)) (listof int @k))
   (lambda (i n starts labels)
     (if (= i n)
         nil
@@ -612,7 +612,7 @@
               (n-starts-at (+ i 1) n starts labels)))))
 
 ;; The cell after `i` where an instruction starts, or `n`.
-(define n-next-start (subr (read @k) (int int (arrayof bool @k)) int)
+(define n-next-start (subr (maxeff (read @k) spin) (int int (arrayof bool @k)) int)
   (lambda (i n starts) (if (or (>= i n) (array-ref starts i)) i (n-next-start (+ i 1) n starts))))
 
 (define n-cells (subr assembles (tword int int (arrayof bool @k) (arrayof int @k) int) unit)

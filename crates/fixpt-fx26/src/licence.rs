@@ -46,6 +46,8 @@ pub fn unlicensed(effect: &Effect, owned: &[Region]) -> Option<Atom> {
         Atom::Alloc(_) => false,
         Atom::Read(r) | Atom::Write(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) => !owned.contains(&r),
         Atom::Var(_) => true,
+        // A speculative run has a step budget of its own.
+        Atom::Spin => false,
     })
 }
 

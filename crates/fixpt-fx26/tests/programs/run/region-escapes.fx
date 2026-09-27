@@ -1,7 +1,7 @@
 ;;; An abort out of a `letrena`'s body, to a prompt around it: the region
 ;;; is ended with what the abort cuts, as a return would end it. Many times
 ;;; over, and nested, so that regions left live would pile up.
-(define t (prompt-tag int int pure @p) (make-continuation-prompt-tag))
+(define t (prompt-tag int int spin @p) (make-continuation-prompt-tag))
 
 (define escape (subr (goto @p) (int) int)
   (lambda (n)
@@ -11,7 +11,7 @@
               (ys (the (listof int s) (rcons s 1 nil))))
           (+ (car ys) (abort-current-continuation t (car xs))))))))
 
-(define rounds (subr (goto @p) (int int) int)
+(define rounds (subr (maxeff (goto @p) spin) (int int) int)
   (lambda (i acc)
     (if (= i 0)
         acc

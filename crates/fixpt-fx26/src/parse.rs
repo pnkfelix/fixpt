@@ -151,6 +151,9 @@ impl Checker {
             if self.name(sym) == "pure" {
                 return Ok(Effect::pure());
             }
+            if self.name(sym) == "spin" {
+                return Ok(Effect::atom(Atom::Spin));
+            }
             return match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Effect)) => Ok(Effect::atom(Atom::Var(v))),
                 Some(DScope::Eff(e)) => Ok(e),
@@ -487,6 +490,9 @@ impl Checker {
             }
             if name == "pure" {
                 return Ok(D::Effect(Effect::pure()));
+            }
+            if name == "spin" {
+                return Ok(D::Effect(Effect::atom(Atom::Spin)));
             }
             if name == "const" {
                 return Ok(D::Region(Region::Frozen(None, false)));

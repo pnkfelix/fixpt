@@ -26,6 +26,7 @@ impl Checker {
             Atom::Comefrom(r) => ("comefrom", r),
             Atom::Await(r) => ("await", r),
             Atom::Var(v) => return self.interner.name(self.arena.dvar_name(v)).to_string(),
+            Atom::Spin => return "spin".to_string(),
         };
         format!("({op} {})", self.show_region(r))
     }

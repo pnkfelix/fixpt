@@ -44,6 +44,14 @@ pub struct Checker {
     /// The regions `letfreeze`s are freezing, innermost last, each with
     /// whether anything has written it: data never written is finite.
     pub(crate) freezing: Vec<(DVar, bool)>,
+    /// Bindings of known procedures, by name and type: those a `define`,
+    /// `letrec`, `define-rec`, or a `let` of a `lambda` made. A call of one
+    /// runs code the checker has seen; a call of anything else might run a
+    /// closure fetched from the store.
+    pub(crate) known: HashSet<(Sym, TyId)>,
+    /// The bindings of the recursive groups whose lambdas are being checked:
+    /// a call of one of them there is recursion, and so `spin`.
+    pub(crate) recursive: Vec<(Sym, TyId)>,
     pub(crate) base: HashMap<Sym, TyId>,
     pub(crate) void: TyId,
     int: TyId,
@@ -148,6 +156,8 @@ impl Checker {
             dscope: Vec::new(),
             lifetimes: Vec::new(),
             freezing: Vec::new(),
+            known: HashSet::new(),
+            recursive: Vec::new(),
             base,
             void,
             int,
@@ -329,6 +339,9 @@ impl Checker {
             Exp::Letrec { bindings, body } => {
                 let depth = self.env.len();
                 self.env.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
+                self.known.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
+                let rdepth = self.recursive.len();
+                self.recursive.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
                 let r = (|| {
                     let mut eff = Effect::pure();
                     for (n, t, init) in &bindings {
@@ -346,9 +359,12 @@ impl Checker {
                         })?;
                         eff = eff.union(&ie);
                     }
+                    // The body's calls of the group are not recursion.
+                    self.recursive.truncate(rdepth);
                     let (bt, be) = self.synth(body)?;
                     Ok((bt, eff.union(&be)))
                 })();
+                self.recursive.truncate(rdepth);
                 self.env.truncate(depth);
                 let (t, eff) = r?;
                 let eff = self.mask(e, &eff, t);
@@ -360,6 +376,9 @@ impl Checker {
                 for (n, init) in &bindings {
                     let (t, ie) = self.synth(*init)?;
                     eff = eff.union(&ie);
+                    if self.is_lambda(*init) {
+                        self.known.insert((*n, t));
+                    }
                     bound.push((*n, t));
                 }
                 let depth = self.env.len();
@@ -1002,6 +1021,7 @@ fn subst_effect(e: &Effect, map: &HashMap<DVar, D>) -> Effect {
             Atom::Goto(r) => Effect::atom(Atom::Goto(sub_r(r))),
             Atom::Comefrom(r) => Effect::atom(Atom::Comefrom(sub_r(r))),
             Atom::Await(r) => Effect::atom(Atom::Await(sub_r(r))),
+            Atom::Spin => Effect::atom(Atom::Spin),
         };
         out = out.union(&piece);
     }
@@ -1361,6 +1381,7 @@ impl BinderEnv {
                     Atom::Goto(x) => Atom::Goto(r(x)),
                     Atom::Comefrom(x) => Atom::Comefrom(r(x)),
                     Atom::Await(x) => Atom::Await(r(x)),
+                    Atom::Spin => Atom::Spin,
                 })
                 .collect(),
         )

@@ -4,10 +4,10 @@
 (define-type p (pairof k k @p))
 
 ((proj (proj (proj cwcc @k) p)
-       (maxeff (alloc @p) (comefrom @k) (write @p) (read @p) (goto @k)))
+       (maxeff (alloc @p) (comefrom @k) (write @p) (read @p) (goto @k) spin))
  (lambda ((f k))
    (let ((y ((proj (proj cons @p) k k) f f)))
-     ((proj (proj (proj cwcc @k) p) (maxeff (write @p) (goto @k)))
+     ((proj (proj (proj cwcc @k) p) (maxeff (write @p) (goto @k) spin))
       (lambda ((g k))
         ((proj (proj set-cdr! @p) k k) y g)
         (f y)))

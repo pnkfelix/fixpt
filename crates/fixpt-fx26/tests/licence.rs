@@ -86,7 +86,7 @@ fn definitions_and_errors_are_not_run() {
 #[test]
 fn a_speculative_run_has_a_budget() {
     let mut s = session();
-    run(&mut s, "(define spin (subr pure (int) int) (lambda (n) (spin n)))");
+    run(&mut s, "(define spin (subr spin (int) int) (lambda (n) (spin n)))");
     assert!(matches!(speculate(&mut s, "(spin 0)"), Speculation::Failed(_)));
     // And the ordinary budget is back afterwards.
     assert_eq!(speculate(&mut s, "(+ 1 2)"), Speculation::Value("3".into()));

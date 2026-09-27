@@ -1,6 +1,6 @@
 ;;; A symbol table: counts of each symbol in a list, then a lookup of three.
 (define counts (table symbol int @t) (make-table symbol-hash symbol=?))
-(define count-all (subr (maxeff (read @t) (write @t) (alloc @t) (read @l)) ((listof symbol @l)) unit)
+(define count-all (subr (maxeff (read @t) (write @t) (alloc @t) (read @l) spin) ((listof symbol @l)) unit)
   (lambda (xs)
     (if (null? xs)
         #u
