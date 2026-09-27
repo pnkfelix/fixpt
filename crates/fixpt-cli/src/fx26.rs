@@ -75,6 +75,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     if let Some(m) = crate::THREADED_MACHINE.get() {
         s.scheme.runtime_unrooted().run_word = Some(*m);
     }
+    s.register_code = crate::THREADED_MACHINE_NAME.get().is_some_and(|n| n.contains("register code"));
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
         s.set_step_limit(*l);

@@ -29,6 +29,9 @@ pub struct Fx26Session {
     pub globals: Globals,
     /// How checked forms run.
     pub strategy: Strategy,
+    /// Under `Strategy::Threaded`: whether the compiler written in FX-26
+    /// makes each lambda's register code too, for a machine that runs it.
+    pub register_code: bool,
     /// The initial environment as the FX-26 reader read it, for the checker
     /// written in FX-26: read once, as it takes the reader a while.
     standard26: Option<fixpt_scheme::Handle>,
@@ -205,6 +208,7 @@ impl Fx26Session {
             scheme,
             globals: Globals::default(),
             strategy: Strategy::Lower,
+            register_code: false,
             standard26: None,
             defined26: String::new(),
             step_limit: Some(DEFAULT_STEP_LIMIT),
@@ -400,6 +404,10 @@ impl Fx26Session {
         }
         self.scheme.engine.set_step_limit(None);
         let standard = self.standard26()?;
+        let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.register_code));
+        self.scheme
+            .call_global(&format!("{READER_PREFIX}compile-registers!"), &[on])
+            .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
         let r = crate::syn::compile_with_fx26_compiler(&mut self.scheme, standard, FileId(0), text);
         self.scheme.engine.set_step_limit(self.step_limit);
         r

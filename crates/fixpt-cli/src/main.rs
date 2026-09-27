@@ -43,10 +43,12 @@ options:
                                  (default), by the evaluator written in FX-26, or
                                  compiled to threaded words by the compiler
                                  written in FX-26 and run on the threaded machine
-  --threaded-machine rust|native|stencils
+  --threaded-machine rust|native|stencils|registers
                                  which threaded machine runs compiled words: the
                                  one written in Rust (default), the hand-encoded
-                                 arm64 one, or the stencils (built with nightly)
+                                 arm64 one, the stencils (built with nightly), or
+                                 the hand-encoded one running each lambda's
+                                 register code, which the compiler then makes
   --gc-every N                   also collect at every Nth safepoint, moving every
                                  object each time, to shake out rooting bugs
                                  (default: 0, only when the heap is full)
@@ -147,8 +149,9 @@ fn run(args: &[String]) -> i32 {
             return 2;
         }
         Some("stencils") => fixpt_native::stencil::run_word,
+        Some("registers") => fixpt_native::threaded::run_word_registers,
         Some(name) => {
-            eprintln!("fixpt: unknown --threaded-machine `{name}` (want rust, native or stencils)");
+            eprintln!("fixpt: unknown --threaded-machine `{name}` (want rust, native, stencils or registers)");
             return 2;
         }
     };
@@ -156,6 +159,7 @@ fn run(args: &[String]) -> i32 {
     let _ = THREADED_MACHINE_NAME.set(match flags.threaded_machine.as_deref() {
         Some("native") => "the hand-encoded native machine",
         Some("stencils") => "the stencil machine",
+        Some("registers") => "the native machine, as register code",
         _ => "the threaded machine written in Rust",
     });
     for (flag, value, cell) in [
