@@ -36,7 +36,7 @@ impl Asm {
     /// `IP` := the address of the running register word's field `fields`,
     /// its last, from which field `f` is `8 × (fields − f)` bytes up.
     fn pool(&mut self, fields: usize) {
-        self.e(add(IP, BASE, CUR));
+        self.e(mov(IP, CUR));
         self.sub_const(IP, IP, 4 + 8 * fields as u64);
     }
     /// `d := n − k`, for a constant `k` of any size (clobbers `X16`).
@@ -82,7 +82,7 @@ impl Asm {
     /// `IP` := the address of the running word's field `f`, as a threaded
     /// ip is, for what reads the word from where the ip is (`save`).
     fn ip_at(&mut self, f: usize) {
-        self.e(add(IP, BASE, CUR));
+        self.e(mov(IP, CUR));
         self.sub_const(IP, IP, 4 + 8 * f as u64);
     }
     /// Push `REG1`…`REGn`, `REG1` deepest.
@@ -129,27 +129,30 @@ impl Asm {
             // A pair from the heap's free space, if there is room short of
             // where a collection is due: `top` bumped by two words.
             "cons" => {
+                self.e(ldr(W, ST, off(offset_of!(State, words))));
                 self.e(ldr(X13, ST, off(offset_of!(State, top))));
                 self.e(ldr(X14, X13, 0));
                 self.e(ldr(X15, ST, off(offset_of!(State, alloc_limit))));
                 self.e(add_imm(X16, X14, 2));
                 self.e(cmp(X16, X15));
                 self.b_cond(Cond::Hi, slow);
-                self.e(add_lsl(X11, BASE, X14, 3));
+                // The pair's address, and, off the path from `top` to the
+                // result, its tag added to the base first.
+                self.e(add_lsl(X11, W, X14, 3));
+                self.e(add_imm(W, W, TAG_PAIR as u32));
                 self.e(stp(1, 2, X11, 0));
                 self.e(str(X16, X13, 0));
-                self.e(movz(X15, TAG_PAIR as u32, 0));
-                self.e(add_lsl(RESULT, X15, X14, 3));
+                self.e(add_lsl(RESULT, W, X14, 3));
             }
             // A string's length is its suffix's first word; its characters
             // follow, two to a word.
             "string-length" => {
-                self.e(add(X11, BASE, 1));
+                self.e(mov(X11, 1));
                 self.e(ldur(X15, X11, -4));
                 self.e(add_lsl(RESULT, XZR, X15, 3));
             }
             "string-ref" => {
-                self.e(add(X11, BASE, 1));
+                self.e(mov(X11, 1));
                 self.e(ldur(X15, X11, -4));
                 self.e(asr_imm(X13, 2, 3));
                 self.e(cmp(X13, X15));
@@ -175,11 +178,11 @@ impl Asm {
                 self.e(add_imm(X16, X14, 2));
                 self.e(cmp(X16, X15));
                 self.b_cond(Cond::Hi, slow);
-                self.e(add_lsl(X11, BASE, X14, 3));
+                self.e(ldr(X15, ST, off(offset_of!(State, words))));
+                self.e(add_lsl(X11, X15, X14, 3));
                 self.e(stp(2, 3, X11, 0));
                 self.e(str(X16, X13, 0));
-                self.e(movz(X15, TAG_PAIR as u32, 0));
-                self.e(add_lsl(RESULT, X15, X14, 3));
+                self.e(add_imm(RESULT, X11, TAG_PAIR as u32));
             }
             other => unreachable!("{other} is not done inline"),
         }
@@ -233,14 +236,14 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
             }
             "global" | "setglbl" => {
                 a.cell(X16, f(0), fields);
-                a.e(add(X11, BASE, X16));
+                a.e(mov(X11, X16));
                 a.e(if name == "global" { ldur(RESULT, X11, field_off(2)) } else { stur(RESULT, X11, field_off(2)) });
             }
             "reg" => a.e(mov(RESULT, reg(k(o(0))))),
             "setreg" => a.e(mov(reg(k(o(0))), RESULT)),
             "movereg" => a.e(mov(reg(k(o(1))), reg(k(o(0))))),
             "lexical" => {
-                a.e(add(X11, BASE, CLO));
+                a.e(mov(X11, CLO));
                 a.field_of(RESULT, X11, CLOSURE_FREE0 + k(o(0)));
             }
             "save" => {
@@ -267,8 +270,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
             "store" => a.slot(reg(k(o(0))), k(o(1)), true),
             "op1" => match ROUTINES[k(o(0))].0 {
                 r @ ("pair-car" | "pair-cdr") => {
-                    a.e(add(X14, BASE, RESULT));
-                    a.e(ldur(RESULT, X14, if r == "pair-car" { -1 } else { 7 }));
+                    a.e(ldur(RESULT, RESULT, if r == "pair-car" { -1 } else { 7 }));
                 }
                 r => return Err(format!("op1 {r} in register code")),
             },
@@ -299,11 +301,10 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 }
             }
             "field" => {
-                a.e(add(X11, BASE, RESULT));
-                a.field_of(RESULT, X11, k(o(0)));
+                a.field_of(RESULT, RESULT, k(o(0)));
             }
             "setfield" => {
-                a.e(add(X11, BASE, RESULT));
+                a.e(mov(X11, RESULT));
                 let off = field_off(k(o(0)));
                 if off >= -256 {
                     a.e(stur(reg(k(o(1))), X11, off));
@@ -347,14 +348,14 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 let threaded = a.label();
                 // The callee, its word, and the word's twin.
                 a.e(mov(W, RESULT));
-                a.e(add(X11, BASE, W));
+                a.e(mov(X11, W));
                 a.e(ldur(X12, X11, field_off(CLOSURE_WORD)));
-                a.e(add(X11, BASE, X12));
+                a.e(mov(X11, X12));
                 a.e(ldur(X10, X11, field_off(WORD_TWIN)));
                 a.value(X15, Value::FALSE);
                 a.e(cmp(X10, X15));
                 a.b_cond(Cond::Eq, threaded);
-                a.e(add(X11, BASE, X10));
+                a.e(mov(X11, X10));
                 a.e(ldur(X15, X11, field_off(WORD_ENTRY)));
                 a.cbz(X15, threaded);
                 // Register code: the arguments stay where they are. The
@@ -444,7 +445,7 @@ pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u32> {
         a.e(ldur(reg(i + 1), FP, -8 * i as i64));
     }
     a.e(add_imm(DSP, FP, 8));
-    a.e(add(X11, BASE, CUR));
+    a.e(mov(X11, CUR));
     a.e(ldur(CUR, X11, field_off(WORD_TWIN)));
     a.e(ldr(X16, TABLE, 8 * slot as u32));
     a.e(br(X16));

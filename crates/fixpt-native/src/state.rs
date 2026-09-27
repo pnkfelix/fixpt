@@ -44,6 +44,9 @@ pub struct State {
     /// (`Heap::top_address`, `Heap::inline_limit`).
     pub top: u64,
     pub alloc_limit: u64,
+    /// Where the heap's memory starts (`Heap::words_address`): word `i` as
+    /// the heap counts, its `top` or a region's fill, is here plus `8 i`.
+    pub words: u64,
     /// The heap's table of each region's current chunk, `[fill, end]` by
     /// handle, in words from the base (`Heap::region_table_address`).
     pub regions: u64,

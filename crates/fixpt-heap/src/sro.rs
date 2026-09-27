@@ -55,7 +55,7 @@ impl Heap {
             } else {
                 let fields = self.bloblet_head(v).fields;
                 for k in 1..=fields {
-                    let w = self.word(v.index() - k);
+                    let w = self.word(self.ix(v) - k);
                     if w & TAG_MASK != TAG_TRAILER {
                         reach(Value(w), &mut counts, &mut todo);
                     }

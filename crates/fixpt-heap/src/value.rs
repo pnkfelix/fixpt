@@ -7,10 +7,10 @@
 //!
 //! ```text
 //! tag 000  fixnum       value = (w as i64) >> 3          (61-bit signed)
-//! tag 001  pair         (w >> 3) = index of a 2-word car/cdr cell
-//! tag 010  object       (w >> 3) = index of a header word
+//! tag 001  pair         (w & !7) = address of a 2-word car/cdr cell
+//! tag 010  object       (w & !7) = address of a header word
 //! tag 011  immediate    subtag in bits 3..8, payload in bits 8..64
-//! tag 100  bloblet      (w >> 3) = index of the start of a bloblet's suffix
+//! tag 100  bloblet      (w & !7) = address of the start of a bloblet's suffix
 //! tag 101  trailer      a bloblet's last field, if it has one; never traced
 //! tag 110  header       never a Value; marks an object header word (see below)
 //! tag 111  forwarding   GC-internal; never observable outside a collection
@@ -115,8 +115,10 @@ impl Value {
     pub const fn is_bloblet(self) -> bool {
         self.tag() == TAG_BLOBLET
     }
-    /// Word index of the referent. Only meaningful for references: a pair's
-    /// cell, an object's header, a bloblet's suffix.
+    /// Where the referent is, in words: its address over 8. Only
+    /// meaningful for references: a pair's cell, an object's header, a
+    /// bloblet's suffix. (The heap finds its word as this less where its
+    /// memory starts, `Heap::ix`.)
     #[inline]
     pub const fn index(self) -> usize {
         (self.0 >> 3) as usize

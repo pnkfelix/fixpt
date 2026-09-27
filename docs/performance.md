@@ -681,3 +681,32 @@ The Scheme suite under `gc-stress` takes about 6 minutes, run as
 `cargo test --release -p fixpt-scheme --features gc-stress`. With
 `--features fixpt-heap/gc-stress` instead, the tests collect at every
 safepoint but at their full sizes, and run for far longer.
+
+## Values as addresses
+
+A Value's upper bits are now its referent's address, not a word index
+from the heap's base, so machine code no longer adds a base to reach
+the heap (PLAN.md, "Values as addresses, not indices"). First, what the
+add cost: one more dependent add in register code's `car` and `cdr`
+made `lists-region` about 5% slower and `lists` under 1%. Then, with
+Values as addresses and those loads made straight from the Value:
+
+| benchmark (register code) | before  | after   |
+| ------------------------- | ------- | ------- |
+| `lists-region`            | 8.7 ms  | 7.3 ms  |
+| `closures`                | 24.0 ms | 23.9 ms |
+| `fib`                     | 7.2 ms  | 7.3 ms  |
+
+`lists` read 12.8 ms before and 13.5 ms after in the benchmark's table,
+alternating the two builds. Run alone, five times in a fresh session,
+it takes the same at both: 13.5 ms by the fifth run, with the same 167
+collections and 2.7–2.8 ms of collecting. In the table it runs as
+register code after four other machines have run it in that session, so
+the heap it starts with differs; the gap is that, not its code. The
+self-compile is unchanged: stage 2 in 0.34 s, collecting 21 ms.
+
+The machines' `BASE` register now holds 0, so the code that still adds
+it (the hand-encoded machine, the stencils, the compiler in FX-26) is
+unchanged in meaning; register code no longer uses it. Inline allocation
+still needs where the heap's memory starts, which it loads from the
+machine's state (`State::words`).

@@ -983,6 +983,7 @@ the order it will be done. Each is committed when done, and marked here.
 
 1. **Values as addresses** (below, "Values as addresses, not indices"):
    decided by the user, for after the regions work, which is done.
+   *(Done 2026-09-26; the other machines' adds of a `BASE` of 0 remain.)*
 2. **Register code's own returns** (13h′ (f)): a return in `x0`, straight
    to the caller's resume code; the data stack's way only when it returns
    to stack code.
@@ -1247,6 +1248,19 @@ the order it will be done. Each is committed when done, and marked here.
   machine, the stencils, register code and `native.fx`. Measure first
   what the add costs on the list-heavy benchmarks, where it sits between
   dependent loads. Compressed references (32-bit fields) are not planned.
+
+  *(Done 2026-09-26, in two steps.)* The add cost about 5% on
+  `lists-region` and under 1% elsewhere (one more dependent add in
+  `car`/`cdr`). A Value is now its referent's address; the heap keeps
+  its own word numbering and converts where it makes or reads a Value
+  (`Heap::ix`), the collector likewise, and an image is relocated as it
+  is loaded. The machines' `BASE` register holds 0, so the code that
+  adds it keeps its meaning; register code no longer adds it
+  (`lists-region` 8.7 → 7.3 ms). Inline allocation loads where the
+  heap's memory starts from the state (`State::words`). Left: the
+  hand-encoded machine, the stencils and `native.fx` still add a `BASE`
+  of 0; removing those adds frees `x19`, which could then hold where the
+  heap's memory starts, for allocation with no load.
 - **Recursion made explicit: I-cells.** (Raised by the user 2026-09-26:
   "make the imperative nature of mutual recursion explicit".) Seven
   options are compared in `docs/research/recursion-and-initialization.md`.

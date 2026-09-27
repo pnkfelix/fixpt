@@ -153,6 +153,9 @@ pub struct Heap {
     /// in place, up to that (`fixpt_memmgmt::Words`, committed by the
     /// system as it is first written).
     mem: fixpt_memmgmt::Words,
+    /// Where `mem` starts, in words: a Value is an address, and names word
+    /// `(address / 8) - base` of `mem`. Fixed for the heap's life.
+    base: usize,
     /// The live regions, and their chunks.
     regions: regions::Regions,
     /// Base of the active semispace within `mem` — `0` or `MAX_SEMI_WORDS`.
@@ -208,8 +211,11 @@ impl Heap {
 
     pub fn with_semispace(semi: usize) -> Heap {
         let semi = semi.max(1024);
+        let mem = fixpt_memmgmt::Words::new(REAP_BASE + REAP_WORDS).expect("address space for the heap");
+        let base = mem.words().as_ptr() as usize / 8;
         Heap {
-            mem: fixpt_memmgmt::Words::new(REAP_BASE + REAP_WORDS).expect("address space for the heap"),
+            mem,
+            base,
             regions: regions::Regions::new(),
             active: 0,
             semi,
@@ -266,13 +272,28 @@ impl Heap {
         self.set_word(rel, v.raw());
     }
 
-    /// Where the active semispace starts in memory: word `i` of it, which a
-    /// Value with index `i` names, is at this address plus `8 * i`. For
-    /// machine code that reads the heap directly (`fixpt-native`). The address
-    /// holds until the next allocation, which may grow the heap, or
-    /// collection, which flips the semispaces.
-    pub fn active_words(&self) -> *const u64 {
+    /// Where the heap's memory starts: word `i` of it, as the heap counts
+    /// (its `top`, a region's fill), is at this address plus `8 * i`. For
+    /// machine code that allocates without calling in (`fixpt-native`); a
+    /// Value is an address already. Fixed for the heap's life.
+    pub fn words_address(&self) -> *const u64 {
         self.mem.words().as_ptr()
+    }
+
+    /// The word of `mem` a reference names: its address, less where `mem`
+    /// starts.
+    #[inline(always)]
+    pub(crate) fn ix(&self, v: Value) -> usize {
+        v.index() - self.base
+    }
+    /// A pair, or a bloblet's pointer, at word `i` of `mem`: its address.
+    #[inline(always)]
+    fn pair_v(&self, i: usize) -> Value {
+        Value::pair(i + self.base)
+    }
+    #[inline(always)]
+    fn blob_v(&self, i: usize) -> Value {
+        Value::bloblet(i + self.base)
     }
 
     // ------------------------------------------------------------- allocation
@@ -320,7 +341,7 @@ impl Heap {
             for i in 0..len {
                 self.set_word(main + 1 + i, fill.raw());
             }
-            return Value::bloblet(main + 1);
+            return self.blob_v(main + 1);
         }
         // An object with fields gets a trailer, so that from its pointer the
         // header is one load away whatever its size; the trailer is not part
@@ -330,7 +351,7 @@ impl Heap {
             self.set_word(main + 1 + i, fill.raw());
         }
         self.set_word(main + 1 + len, Self::trailer_word(len + 1));
-        Value::bloblet(main + 2 + len)
+        self.blob_v(main + 2 + len)
     }
 
     /// Reserve an object of `fields` fields and `bytes` suffix bytes and write
@@ -355,29 +376,29 @@ impl Heap {
         let at = self.bump(2);
         self.set_word(at, car.raw());
         self.set_word(at + 1, cdr.raw());
-        Value::pair(at)
+        self.pair_v(at)
     }
 
     // -------------------------------------------------------------- accessors
     #[inline]
     pub fn car(&self, p: Value) -> Value {
         debug_assert!(p.is_pair());
-        self.slot(p.index())
+        self.slot(self.ix(p))
     }
     #[inline]
     pub fn cdr(&self, p: Value) -> Value {
         debug_assert!(p.is_pair());
-        self.slot(p.index() + 1)
+        self.slot(self.ix(p) + 1)
     }
     #[inline]
     pub fn set_car(&mut self, p: Value, v: Value) {
         debug_assert!(p.is_pair());
-        self.set_slot(p.index(), v);
+        self.set_slot(self.ix(p), v);
     }
     #[inline]
     pub fn set_cdr(&mut self, p: Value, v: Value) {
         debug_assert!(p.is_pair());
-        self.set_slot(p.index() + 1, v);
+        self.set_slot(self.ix(p) + 1, v);
     }
 
     #[inline]
@@ -395,7 +416,7 @@ impl Heap {
         debug_assert!(o.is_bloblet(), "{o:?} is not an object");
         // The common case, inline: a trailer just before the suffix says how
         // far back the header is.
-        let p = o.index();
+        let p = self.ix(o);
         let w = self.word(p - 1);
         if w & TAG_MASK == TAG_TRAILER {
             return p - 1 - layout::T_DISTANCE.get(w) as usize;
@@ -434,13 +455,13 @@ impl Heap {
     #[inline]
     fn fixed(&self, o: Value, n: usize, j: usize) -> Value {
         debug_assert!(self.obj_len(o) == n, "{o:?} does not have {n} fields");
-        self.slot(o.index() - (n + 1 - j))
+        self.slot(self.ix(o) - (n + 1 - j))
     }
 
     #[inline]
     fn set_fixed(&mut self, o: Value, n: usize, j: usize, v: Value) {
         debug_assert!(self.obj_len(o) == n, "{o:?} does not have {n} fields");
-        self.set_slot(o.index() - (n + 1 - j), v)
+        self.set_slot(self.ix(o) - (n + 1 - j), v)
     }
     pub fn is_a(&self, v: Value, ty: ObjType) -> bool {
         self.obj_type(v) == Some(ty)
@@ -450,7 +471,7 @@ impl Heap {
     pub fn obj_len(&self, o: Value) -> usize {
         let words = read_head(self.mem.words(), self.main_of(o)).payload_words();
         // A trailer is the runtime's, not part of the object's contents.
-        if o.is_bloblet() && self.word(o.index() - 1) & TAG_MASK == TAG_TRAILER { words - 1 } else { words }
+        if o.is_bloblet() && self.word(self.ix(o) - 1) & TAG_MASK == TAG_TRAILER { words - 1 } else { words }
     }
     #[inline]
     pub fn obj_ref(&self, o: Value, i: usize) -> Value {
@@ -654,7 +675,7 @@ impl Heap {
         if trailer {
             self.set_word(main + total, Self::trailer_word(total));
         }
-        Value::bloblet(main + 1 + total)
+        self.blob_v(main + 1 + total)
     }
 
     fn trailer_word(distance: usize) -> u64 {
@@ -675,7 +696,7 @@ impl Heap {
         let all = fields * 8 + bytes;
         assert!(all as u64 <= layout::H_BYTES.max(), "a bloblet's suffix is limited to 4 GiB");
         let main = self.put_header(kind, 0, all);
-        Value::bloblet(main + 1)
+        self.blob_v(main + 1)
     }
 
     /// Construction protocol, step 2: zero the would-be fields `from..to`
@@ -684,7 +705,7 @@ impl Heap {
     /// [`bloblet_reserve`](Heap::bloblet_reserve). May be done a piece at a
     /// time, with collections in between: the words are still suffix.
     pub fn bloblet_zero_reserved(&mut self, v: Value, from: usize, to: usize) {
-        let p = v.index();
+        let p = self.ix(v);
         for i in from..to {
             self.set_word(p + i, 0);
         }
@@ -696,7 +717,7 @@ impl Heap {
     /// fixnum 0 by now: the header change makes them traced. Returns the
     /// bloblet's pointer, which has moved `fields` words forward.
     pub fn bloblet_publish(&mut self, v: Value, fields: usize, trailer: bool) -> Value {
-        let main = v.index() - 1;
+        let main = self.ix(v) - 1;
         let head = read_head(self.mem.words(), main);
         assert_eq!(head.fields, 0, "only a reserved bloblet can be published");
         let total = fields + trailer as usize;
@@ -709,13 +730,13 @@ impl Heap {
         if trailer {
             self.set_word(main + total, Self::trailer_word(total));
         }
-        Value::bloblet(main + 1 + total)
+        self.blob_v(main + 1 + total)
     }
 
     /// The main header's index, relative to the active space.
     fn bloblet_main(&self, v: Value) -> usize {
         debug_assert!(v.is_bloblet(), "{v:?} is not a bloblet");
-        find_main(self.mem.words(), v.index()).expect("no forwarding pointers outside a collection")
+        find_main(self.mem.words(), self.ix(v)).expect("no forwarding pointers outside a collection")
     }
 
     /// What a bloblet's header says.
@@ -729,7 +750,7 @@ impl Heap {
 
     /// Whether field 1 is a trailer.
     pub fn bloblet_has_trailer(&self, v: Value) -> bool {
-        self.bloblet_head(v).fields > 0 && self.word(v.index() - 1) & TAG_MASK == TAG_TRAILER
+        self.bloblet_head(v).fields > 0 && self.word(self.ix(v) - 1) & TAG_MASK == TAG_TRAILER
     }
 
     fn field_slot(&self, v: Value, k: usize) -> Result<usize, BlobletError> {
@@ -737,7 +758,7 @@ impl Heap {
         if k == 0 || k > head.fields {
             return Err(BlobletError::NoSuchField(k));
         }
-        let at = v.index() - k;
+        let at = self.ix(v) - k;
         if self.word(at) & TAG_MASK == TAG_TRAILER {
             return Err(BlobletError::Trailer);
         }
@@ -752,7 +773,7 @@ impl Heap {
     #[inline]
     pub fn bloblet_slot(&self, v: Value, k: usize) -> Value {
         debug_assert!(v.is_bloblet() && k >= 1 && k <= self.bloblet_head(v).fields, "{v:?} has no field -{k}");
-        self.slot(v.index() - k)
+        self.slot(self.ix(v) - k)
     }
 
     /// Set field `k` in one store. Unchecked but for debug builds, as
@@ -761,8 +782,8 @@ impl Heap {
     #[inline]
     pub fn set_bloblet_slot(&mut self, v: Value, k: usize, x: Value) {
         debug_assert!(v.is_bloblet() && k >= 1 && k <= self.bloblet_head(v).fields, "{v:?} has no field -{k}");
-        debug_assert!(self.word(v.index() - k) & TAG_MASK != TAG_TRAILER, "field -{k} is the trailer");
-        self.set_slot(v.index() - k, x);
+        debug_assert!(self.word(self.ix(v) - k) & TAG_MASK != TAG_TRAILER, "field -{k} is the trailer");
+        self.set_slot(self.ix(v) - k, x);
     }
 
     /// Field `k`, `k` words before the suffix.
@@ -787,7 +808,7 @@ impl Heap {
         if i >= self.bloblet_head(v).bytes {
             return Err(BlobletError::NoSuchByte(i));
         }
-        Ok((self.word(v.index() + i / 8) >> ((i % 8) * 8)) as u8)
+        Ok((self.word(self.ix(v) + i / 8) >> ((i % 8) * 8)) as u8)
     }
 
     pub fn set_bloblet_byte(&mut self, v: Value, i: usize, b: u8) -> Result<(), BlobletError> {
@@ -798,7 +819,7 @@ impl Heap {
         if head.suffix_frozen {
             return Err(BlobletError::SuffixFrozen);
         }
-        let wi = v.index() + i / 8;
+        let wi = self.ix(v) + i / 8;
         let shift = (i % 8) * 8;
         let w = (self.word(wi) & !(0xffu64 << shift)) | ((b as u64) << shift);
         self.set_word(wi, w);
@@ -808,7 +829,7 @@ impl Heap {
     /// The whole suffix, as bytes.
     pub fn bloblet_bytes(&self, v: Value) -> Vec<u8> {
         let n = self.bloblet_head(v).bytes;
-        (0..n).map(|i| (self.word(v.index() + i / 8) >> ((i % 8) * 8)) as u8).collect()
+        (0..n).map(|i| (self.word(self.ix(v) + i / 8) >> ((i % 8) * 8)) as u8).collect()
     }
 
     /// Write `bytes` into the suffix starting at byte `at`.
@@ -824,7 +845,7 @@ impl Heap {
     #[inline]
     pub fn bloblet_u32(&self, v: Value, i: usize) -> u32 {
         debug_assert!(4 * i + 4 <= self.bloblet_head(v).bytes);
-        (self.word(v.index() + i / 2) >> ((i % 2) * 32)) as u32
+        (self.word(self.ix(v) + i / 2) >> ((i % 2) * 32)) as u32
     }
 
     /// A new bloblet: `v`'s fields and suffix, with `new` prepended — in front
@@ -840,17 +861,17 @@ impl Heap {
         let skip = trailer as usize;
         // Old field k (counting from the suffix) is at the same k in the new.
         for k in 1 + skip..=head.fields {
-            let x = self.slot(v.index() - k);
-            self.set_slot(n.index() - k, x);
+            let x = self.slot(self.ix(v) - k);
+            self.set_slot(self.ix(n) - k, x);
         }
         for (i, x) in new.iter().enumerate() {
             // `new[0]` is furthest from the suffix.
             let k = head.fields + new.len() - i;
-            self.set_slot(n.index() - k, *x);
+            self.set_slot(self.ix(n) - k, *x);
         }
         for w in 0..head.bytes.div_ceil(8) {
-            let x = self.word(v.index() + w);
-            self.set_word(n.index() + w, x);
+            let x = self.word(self.ix(v) + w);
+            self.set_word(self.ix(n) + w, x);
         }
         n
     }
@@ -1028,7 +1049,7 @@ impl Heap {
         let reaps = self.regions.live.len();
         let arenas: Vec<(usize, usize)> = self.regions.arena_ranges().collect();
         let owner = std::mem::take(&mut self.regions.owner);
-        let mut c = Copier { from, to, free: 0, owner, new: vec![Vec::new(); reaps], marked: HashSet::new(), regions: &mut self.regions };
+        let mut c = Copier { base: self.base, from, to, free: 0, owner, new: vec![Vec::new(); reaps], marked: HashSet::new(), regions: &mut self.regions };
 
         // `scan` and `c.free` are relative to `to`.
         let mut scan = 0usize;
@@ -1238,7 +1259,7 @@ impl Heap {
     /// went, whichever kind of pointer found it.
     #[inline(always)]
     fn copy_out(mem: &mut [u64], c: &mut Copier, v: Value) -> Value {
-        let i = v.index();
+        let i = v.index() - c.base;
         let reap = if (c.from..c.from + MAX_SEMI_WORDS).contains(&i) {
             None
         } else if i >= REAP_BASE {
@@ -1263,13 +1284,13 @@ impl Heap {
         if v.is_pair() {
             let first = Value(mem[i]);
             if first.is_forward() {
-                return Value::pair(first.index());
+                return Value::pair(first.index() + c.base);
             }
             let dst = c.alloc(reap, 2);
             mem[dst] = mem[i];
             mem[dst + 1] = mem[i + 1];
             mem[i] = Value::forward(dst).raw();
-            return Value::pair(dst);
+            return Value::pair(dst + c.base);
         }
         // A bloblet pointer, at the start of the suffix. Find the header, by
         // the trailer or the backward scan, and copy as any object. Leave a
@@ -1287,7 +1308,7 @@ impl Heap {
             }
         };
         let head = read_head(mem, new_main);
-        Value::bloblet(new_main + 1 + head.fields)
+        Value::bloblet(new_main + 1 + head.fields + c.base)
     }
 
     /// Copy the object whose main header is at `main`, unless it has been
@@ -1316,25 +1337,10 @@ impl Heap {
     /// left as they are.
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
         assert_eq!(self.live_regions(), 0, "an image is made with no region live");
-        let shift = (self.active as u64) << 3;
+        let shift = ((self.base + self.active) as u64) << 3;
         let rebase = |v: Value| if v.is_ref() { Value(v.raw() - shift) } else { v };
         let mut words = self.mem.words()[self.active..self.top].to_vec();
-        let mut scan = 0;
-        while scan < words.len() {
-            let w = words[scan];
-            if is_header(w) {
-                let main = scan + is_extension(w) as usize;
-                let head = read_head(&words, main);
-                for i in 0..head.fields {
-                    words[main + 1 + i] = rebase(Value(words[main + 1 + i])).raw();
-                }
-                scan += head.size();
-            } else {
-                words[scan] = rebase(Value(words[scan])).raw();
-                words[scan + 1] = rebase(Value(words[scan + 1])).raw();
-                scan += 2;
-            }
-        }
+        map_refs(&mut words, rebase);
         let all = |vs: &[Value]| vs.iter().map(|v| rebase(*v)).collect::<Vec<_>>();
         (words, all(&self.globals), all(&self.symbols), all(&self.roots))
     }
@@ -1368,11 +1374,16 @@ impl Heap {
             semi *= 2;
         }
         let mut heap = Heap::with_semispace(semi);
+        // An image's references count from word 0: here they are
+        // addresses, of where it is loaded.
+        let shift = (heap.base as u64) << 3;
+        let relocate = |v: Value| if v.is_ref() { Value(v.raw() + shift) } else { v };
         heap.mem.words_mut()[..words.len()].copy_from_slice(words);
+        map_refs(&mut heap.mem.words_mut()[..words.len()], relocate);
         heap.top = words.len();
-        heap.globals = globals;
-        heap.symbols = symbols;
-        heap.roots = roots;
+        heap.globals = globals.into_iter().map(relocate).collect();
+        heap.symbols = symbols.into_iter().map(relocate).collect();
+        heap.roots = roots.into_iter().map(relocate).collect();
         heap.symbol_index = HashMap::with_capacity(heap.symbols.len());
         for i in 0..heap.symbols.len() {
             let name = heap.symbol_name(heap.symbols[i]);
@@ -1455,19 +1466,19 @@ impl Heap {
         }
         // A region's objects are checked as its chunks are walked; and a
         // reference to one ended may linger, unused, in what is dead.
-        if v.is_ref() && Self::in_region_area(v.index()) {
+        if v.is_ref() && Self::in_region_area(self.ix(v)) {
             return Ok(());
         }
         if v.is_ref() {
             // A bloblet with no suffix is pointed at one past its last field,
             // which for the last object in the heap is the top itself.
             let (lo, hi) = (self.active, self.top);
-            let beyond = if v.is_bloblet() { v.index() > hi || v.index() <= lo } else { v.index() >= hi || v.index() < lo };
+            let beyond = if v.is_bloblet() { self.ix(v) > hi || self.ix(v) <= lo } else { self.ix(v) >= hi || self.ix(v) < lo };
             if beyond {
                 return Err(format!("dangling reference {v:?} at word {at}"));
             }
             if v.is_bloblet() {
-                let p = v.index();
+                let p = self.ix(v);
                 let main = find_main(self.mem.words(), p)
                     .map_err(|_| format!("bloblet reference {v:?} at word {at} meets a forwarding pointer"))?;
                 let head = read_head(self.mem.words(), main);
@@ -1477,7 +1488,7 @@ impl Heap {
                     ));
                 }
             }
-            if v.is_pair() && is_header(self.word(v.index())) {
+            if v.is_pair() && is_header(self.word(self.ix(v))) {
                 return Err(format!(
                     "pair reference {v:?} at word {at} lands on a header"
                 ));
@@ -1490,6 +1501,8 @@ impl Heap {
 /// Where a collection copies to: the heap's to-space, and each live reap's
 /// new chunks.
 struct Copier<'r> {
+    /// Where the heap's memory starts, in words (`Heap::base`).
+    base: usize,
     from: usize,
     to: usize,
     /// Words used in to-space.
@@ -1526,6 +1539,27 @@ impl Copier<'_> {
         let at = self.to + self.free;
         self.free += n;
         at
+    }
+}
+
+/// Every reference in `words`, a sequence of objects and pairs as a
+/// semispace is, replaced by `f` of it.
+fn map_refs(words: &mut [u64], f: impl Fn(Value) -> Value) {
+    let mut scan = 0;
+    while scan < words.len() {
+        let w = words[scan];
+        if is_header(w) {
+            let main = scan + is_extension(w) as usize;
+            let head = read_head(words, main);
+            for i in 0..head.fields {
+                words[main + 1 + i] = f(Value(words[main + 1 + i])).raw();
+            }
+            scan += head.size();
+        } else {
+            words[scan] = f(Value(words[scan])).raw();
+            words[scan + 1] = f(Value(words[scan + 1])).raw();
+            scan += 2;
+        }
     }
 }
 
