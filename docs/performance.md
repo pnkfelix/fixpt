@@ -668,3 +668,16 @@ full one, or a handle past the table.
 So in a region the same program takes two thirds of the time: nothing
 is copied, and the chunk, reused round after round, stays in cache. The
 other machines call in for every `rcons`, as before.
+
+### After regions as values, closures in regions, escapes and reaps
+
+Nothing measured moved. Lowered, a `letrena` is now a `dynamic-wind` (so
+that an escape ends its region), which `lists-region` does once a round:
+324 ms, as before. Register code: `lists-region` 8.3 ms, `lists` 12.7 ms.
+The self-compile, stage 2: 0.34 s, 9 collections in 21 ms, though the
+collector now copies reaps too and marks quarantined chunks.
+
+The Scheme suite under `gc-stress` takes about 6 minutes, run as
+`cargo test --release -p fixpt-scheme --features gc-stress`. With
+`--features fixpt-heap/gc-stress` instead, the tests collect at every
+safepoint but at their full sizes, and run for far longer.
