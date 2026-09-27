@@ -133,6 +133,133 @@ fn prim_named(p: usize, name: &str) -> bool {
 impl Asm {
     /// `what` on `REG1`… into `RESULT`, without calling out; to `slow` when
     /// it cannot be done so.
+    /// Room for `n` words: from the heap's free space, short of where a
+    /// collection is due, or, with `region`, from the current chunk of the
+    /// region whose handle is in `REG1` (`rcons`'s way). Its address in
+    /// `X11`, the free space already bumped; to `slow` if there is none.
+    fn bump_words(&mut self, n: u32, region: bool, slow: Label) {
+        if region {
+            self.e(tst_low(1, 3));
+            self.b_cond(Cond::Ne, slow);
+            self.e(cmp_imm(1, 8 * fixpt_heap::heap::REGION_SLOTS as u32));
+            self.b_cond(Cond::Hs, slow);
+            self.e(ldr(X13, ST, off(offset_of!(State, regions))));
+            self.e(add_lsl(X13, X13, 1, 1));
+            self.e(ldp(X14, X15, X13, 0));
+        } else {
+            self.e(ldr(X13, ST, off(offset_of!(State, top))));
+            self.e(ldr(X14, X13, 0));
+            self.e(ldr(X15, ST, off(offset_of!(State, alloc_limit))));
+        }
+        self.e(add_imm(X16, X14, n));
+        self.e(cmp(X16, X15));
+        self.b_cond(Cond::Hi, slow);
+        self.e(ldr(W, ST, off(offset_of!(State, words))));
+        self.e(add_lsl(X11, W, X14, 3));
+        self.e(str(X16, X13, 0));
+    }
+
+    /// A bloblet of `total` fields, the last its trailer, and no suffix, at
+    /// `X11`, from `bump_words`: its header (in `X15`), its trailer, and
+    /// `RESULT` its pointer. The other fields are the caller's to store,
+    /// field `k` at `X11 + 8 (1 + total − k)`.
+    fn bloblet_at(&mut self, total: usize) {
+        self.e(str(X15, X11, 0));
+        self.es(&mov_imm64(X15, fixpt_heap::layout::T_DISTANCE.put(TAG_TRAILER, total as u64)));
+        self.e(str(X15, X11, 8 * total as u32));
+        self.e(add_imm(RESULT, X11, (8 * (1 + total) + TAG_BLOBLET as usize) as u32));
+    }
+    /// Store `r` as field `k` of the bloblet of `total` fields at `X11`.
+    fn field_at(&mut self, r: Reg, k: usize, total: usize) {
+        self.e(str(r, X11, 8 * (1 + total - k) as u32));
+    }
+
+    /// `what` on `REG1`…`REGn` (`count` of them) into `RESULT`, without
+    /// calling out; to `slow` when it cannot be done so. `word` is the
+    /// pool field of a closure's word, for `closure`.
+    fn inline_op(&mut self, what: &str, count: usize, word: usize, fields: usize, slow: Label) {
+        use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD};
+        use fixpt_heap::value::make_header;
+        match what {
+            // A closure over `REG1`…`REGn`: the `closure` routine's object,
+            // or `%region-closure`'s in the region in `REG1`, whose word is
+            // the last operand.
+            "closure" | "region-closure" => {
+                let region = what == "region-closure";
+                let frees: Vec<Reg> = if region { (2..count).map(reg).collect() } else { (1..=count).map(reg).collect() };
+                let total = frees.len() + 2;
+                self.bump_words(1 + total as u32, region, slow);
+                self.es(&mov_imm64(X15, make_header(fixpt_heap::layout::kind("threaded-closure"), total, 0)));
+                self.bloblet_at(total);
+                if region {
+                    self.field_at(reg(count), CLOSURE_WORD, total);
+                } else {
+                    self.cell(X15, word, fields);
+                    self.field_at(X15, CLOSURE_WORD, total);
+                }
+                for (i, r) in frees.iter().enumerate() {
+                    self.field_at(*r, CLOSURE_FREE0 + i, total);
+                }
+            }
+            // A sum or a product (`%make-frozen`): `REG1` its kind, a fixnum,
+            // whose bits are the header's kind as they are; its fields frozen.
+            "frozen" => {
+                let total = count;
+                self.bump_words(1 + total as u32, false, slow);
+                let h = make_header(0, total, 0);
+                let h = fixpt_heap::layout::H_FIELDS_FROZEN.put(h, 1);
+                let h = fixpt_heap::layout::H_SUFFIX_FROZEN.put(h, 1);
+                self.es(&mov_imm64(X15, h));
+                self.e(add(X15, X15, 1));
+                self.bloblet_at(total);
+                for j in 2..=count {
+                    self.field_at(reg(j), j, total);
+                }
+            }
+            // `rnew`: a box in the region in `REG1`, holding `REG2`.
+            "rnew" => {
+                self.bump_words(3, true, slow);
+                self.es(&mov_imm64(X15, make_header(fixpt_heap::ObjType::Box as u8, 2, 0)));
+                self.bloblet_at(2);
+                self.field_at(2, 2, 2);
+            }
+            // `rmake-icell`: two fields, both `#f`, in the region in `REG1`.
+            "ricell" => {
+                self.bump_words(4, true, slow);
+                self.es(&mov_imm64(X15, make_header(fixpt_heap::layout::kind("bloblet"), 3, 0)));
+                self.bloblet_at(3);
+                self.value(X15, Value::FALSE);
+                self.field_at(X15, 2, 3);
+                self.field_at(X15, 3, 3);
+            }
+            // Field `REG2` (8k, a fixnum) of the bloblet in `REG1`, whose
+            // trailer says how many it has: 2 ≤ k ≤ F, else the call-out
+            // reports it.
+            "field@" => {
+                self.e(ldur(X16, 1, field_off(1)));
+                self.e(and_low(X13, X16, 3));
+                self.e(cmp_imm(X13, TAG_TRAILER as u32));
+                self.b_cond(Cond::Ne, slow);
+                self.e(cmp_imm(2, 16));
+                self.b_cond(Cond::Lt, slow);
+                self.e(sub_imm(X16, X16, TAG_TRAILER as u32));
+                self.e(cmp(2, X16));
+                self.b_cond(Cond::Gt, slow);
+                self.e(sub(X11, 1, 2));
+                self.e(ldur(RESULT, X11, -4));
+            }
+            // How many fields the bloblet in `REG1` has, by its trailer.
+            "fields" => {
+                self.e(ldur(X16, 1, field_off(1)));
+                self.e(and_low(X13, X16, 3));
+                self.e(cmp_imm(X13, TAG_TRAILER as u32));
+                self.b_cond(Cond::Ne, slow);
+                self.e(sub_imm(RESULT, X16, TAG_TRAILER as u32));
+            }
+            _ => self.inline(what, slow),
+        }
+    }
+
     fn inline(&mut self, what: &str, slow: Label) {
         match what {
             // A pair from the heap's free space, if there is room short of
@@ -353,13 +480,20 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 let done = a.label();
                 let inline = match (name, count) {
                     ("threaded", 2) if ROUTINES[k(o(0))].0 == "cons" => Some("cons"),
+                    ("threaded", 2) if ROUTINES[k(o(0))].0 == "field@" => Some("field@"),
                     ("prim", 1) if prim_named(k(o(0)), "string-length") => Some("string-length"),
                     ("prim", 2) if prim_named(k(o(0)), "string-ref") => Some("string-ref"),
                     ("prim", 3) if prim_named(k(o(0)), "%region-cons") => Some("rcons"),
+                    ("prim", 1) if prim_named(k(o(0)), "%bloblet-fields") => Some("fields"),
+                    ("prim", 2) if prim_named(k(o(0)), "%region-new") => Some("rnew"),
+                    ("prim", 1) if prim_named(k(o(0)), "%region-make-icell") => Some("ricell"),
+                    ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),
+                    ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-frozen") => Some("frozen"),
+                    ("lambda", _) => Some("closure"),
                     _ => None,
                 };
                 if let Some(what) = inline {
-                    a.inline(what, slow);
+                    a.inline_op(what, count, f(0), fields, slow);
                     a.b(done);
                 }
                 a.bind(slow);

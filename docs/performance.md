@@ -764,3 +764,32 @@ when the frame is made, into a slot the collector would otherwise need
 initialized anyway: `closures` 25.1 ms, `lists` 13.9–14.7 ms, against
 23.7 and 13.5 before. A self-call through a global made a loop (known
 calls, PLAN.md item 4) removes the frame from each iteration.
+
+## The call-outs left hot, inline (PLAN.md queue, item 3)
+
+Register code now does these in machine code, calling out only for what
+it cannot (a full heap or chunk, an index out of range, a region with no
+slot):
+- closure creation (`lambda`), from the heap's free space as `cons`
+  is, and `%region-closure` in a region;
+- sums and products (`%make-frozen`), the kind a fixnum whose bits are
+  the header's kind as they are;
+- `rnew` and `rmake-icell` in a region;
+- `field@` (array reads), checked against the trailer's field count;
+- `%bloblet-fields`, the trailer's count.
+
+The self-compile's call-outs, stage 2 (`FIXPT_CALLOUTS=1`):
+
+| call-out          | before    | after |
+| ----------------- | --------- | ----- |
+| `field@`          | 2,381,992 | 0     |
+| `closure`         | 1,828,755 | 4     |
+| `%make-frozen`    | 546,000   | 0     |
+| `%bloblet-fields` | 389,000   | 0     |
+
+Stage 2: 0.34 s → 0.28 s. The benchmarks make few closures and read no
+arrays, and hardly move (`closures` 25.1 → 24.9 ms). Left: 2.49 million
+primitives, the commonest `string=?` (448 k), `char-whitespace?`
+(354 k), `%fx26-char-in?` (294 k), `%fx26-list-copy` (210 k),
+`string->symbol` (166 k), `%bloblet-set!` (160 k), `symbol->string`
+(158 k).
