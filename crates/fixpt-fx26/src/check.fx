@@ -51,6 +51,10 @@
 ;; A description in argument position, what `proj` supplies.
 (define-datatype k-desc (dr k-region) (de k-eff) (dt int))
 
+;; A list's length, as far as it is known: `finite`, some number; or a
+;; constant and terms (variable . coefficient), in variable order.
+(define-datatype k-size (sz-finite) (sz-lin int (listof (pairof int int finite) finite)))
+
 (define-datatype k-ty
   (ty-base symbol)
   (ty-void)
@@ -77,7 +81,10 @@
   ;; A generative type applied to its descriptions: the `n`th
   ;; `define-generative`. Equal only to itself, by its variance; looked
   ;; through by every analysis of what a value holds.
-  (ty-named int (listof k-desc finite)))
+  (ty-named int (listof k-desc finite))
+  ;; `(vec T size)`: a list frozen at the region (always finite) with `size`
+  ;; elements, or some number (`docs/research/sizes.md`).
+  (ty-vec int k-size k-region))
 
 (define-type k-map (listof (pairof int k-desc @t) finite))
 
@@ -262,6 +269,7 @@
 ;; The variables `acyclic?` has just found acyclic, in the branch where it
 ;; did: each by name and by which binding it is (how deep its name's stack).
 (define k-certified (ref (listof (pairof symbol int @t) finite) @t) (new nil))
+(define k-certified-lengths (ref (listof (productof (1 symbol) (2 int) (3 int)) finite) @t) (new nil))
 (define k-new-dvar-of (subr kstate (symbol int) int)
   (lambda (name kind)
     (let ((v (k-new-dvar name)))
@@ -552,6 +560,50 @@
         (or (>= (k-find-sub s (k-cat3 " " name ")") 0) 0)
             (or (>= (k-find-sub s (k-cat3 "(" name " ") 0) 0)
                 (>= (k-find-sub s (k-cat3 "(" name ")") 0) 0))))))
+;; Sizes: a literal, `finite`, one more or less, and whether one list's
+;; size is another's.
+(define k-size-lit (subr pure (int) k-size) (lambda (k) (sz-lin k nil)))
+;; The literal a size is, or -1.
+(define k-size-as-lit (subr pure (k-size) int)
+  (lambda (z) (tagcase z (sz-lin (k ts) (if (null? ts) k -1)) (else y -1))))
+(define k-size-plus (subr pure (k-size int) k-size)
+  (lambda (z d) (tagcase z (sz-lin (k ts) (sz-lin (+ k d) ts)) (else y z))))
+;; The size of the tail of a list of size `z`: one less where `z` is at
+;; least one; `finite` otherwise.
+(define k-tail-size (subr pure (k-size) k-size)
+  (lambda (z) (let ((k (k-size-as-lit z))) (if (>= k 1) (k-size-lit (- k 1)) (sz-finite)))))
+(define k-terms=? (subr pure ((listof (pairof int int finite) finite) (listof (pairof int int finite) finite)) bool)
+  (lambda (xs ys)
+    (if (null? xs)
+        (null? ys)
+        (and (not (null? ys)) (= (car (car xs)) (car (car ys))) (= (cdr (car xs)) (cdr (car ys))) (k-terms=? (cdr xs) (cdr ys))))))
+(define k-size=? (subr pure (k-size k-size) bool)
+  (lambda (a b)
+    (tagcase a
+      (sz-finite () (tagcase b (sz-finite () #t) (else y #f)))
+      (sz-lin (k ts) (tagcase b (sz-lin (k2 ts2) (and (= k k2) (k-terms=? ts ts2))) (else y #f))))))
+;; Whether a list of size `m` is one of size `n`: the same, or `n` is `finite`.
+(define k-size-le? (subr pure (k-size k-size) bool)
+  (lambda (m n) (or (tagcase n (sz-finite () #t) (else y #f)) (k-size=? m n))))
+(define k-show-terms (subr (maxeff (read @t) (alloc @t) spin) ((listof (pairof int int finite) finite)) (listof string finite))
+  (lambda (ts)
+    (if (null? ts)
+        nil
+        (let* ((n (symbol->string (k-dvar-name (car (car ts)))))
+               (c (cdr (car ts)))
+               (x (if (= c 1) n (k-cat5 "(* " (int->string c) " " n ")"))))
+          (cons x (k-show-terms (cdr ts)))))))
+(define k-show-size (subr (maxeff (read @t) (alloc @t) spin) (k-size) string)
+  (lambda (z)
+    (tagcase z
+      (sz-finite () "finite")
+      (sz-lin (k ts)
+        (let ((parts (k-show-terms ts)))
+          (cond ((null? parts) (int->string k))
+                ((and (null? (cdr parts)) (= k 0)) (car parts))
+                ((and (null? (cdr parts)) (< k 0)) (k-cat5 "(- " (car parts) " " (int->string (- 0 k)) ")"))
+                ((= k 0) (k-cat3 "(+ " (k-join parts " ") ")"))
+                (else (k-cat5 "(+ " (k-join parts " ") " " (int->string k) ")"))))))))
 ;; `out`, the type a node shows as, as `(mu name out)` if it mentions itself.
 (define k-mu-wrap (subr spin (string string) string)
   (lambda (name out) (if (k-mentions-token? out name) (k-cat5 "(mu " name " " out ")") out)))
@@ -611,6 +663,13 @@
               (ty-bloblet (fs z r)
                 (k-cat5 (if z "(bloblet (frozen" "(bloblet (fields") (if (null? fs) "" " ") (k-join (k-show-list fs p) " ")
                         ") " (string-append (k-region-show r) ")")))
+              (ty-vec (e z r)
+                (tagcase r
+                  (r-frozen (q f)
+                    (if (>= q 0)
+                        (k-cat5 "(vec " (k-show-on e p) " " (k-show-size z) (k-cat3 " " (symbol->string (k-dvar-name q)) ")"))
+                        (k-cat5 "(vec " (k-show-on e p) " " (k-show-size z) ")")))
+                  (else y (k-cat5 "(vec " (k-show-on e p) " " (k-show-size z) ")"))))
               (ty-named (g ds)
                 (let ((name (symbol->string (extract (k-gen-of g) 1))))
                   (if (null? ds) name (k-cat5 "(" name " " (k-join (k-show-descs ds p) " ") ")")))))))))))
@@ -797,6 +856,7 @@
                 (ty-tag (a h e r) (begin (walk a) (walk h)))
                 (ty-comp (b a e r) (begin (walk b) (walk a)))
                 (ty-named (g ds) (begin (walk (extract (k-gen-of g) 4)) (walks (k-desc-types ds))))
+                (ty-vec (e z r) (walk e))
                 (else x #u)))))))
   (k-storage-walks (subr (maxeff kstate spin) (k-ids int (ref k-kept @t)) unit)
     (lambda (ts seen out) (if (null? ts) #u (begin (k-storage-walk (car ts) seen out) (k-storage-walks (cdr ts) seen out)))))
@@ -874,6 +934,7 @@
                         (let ((y (k-knot-in x nil seen))) (if (null? y) (k-knot-in a nil seen) y))
                         (the k-knot (cons (cons (car found) t) nil)))))
                 (ty-tag (a h e r) (let ((y (k-knot-in a nil seen))) (if (null? y) (k-knot-in h nil seen) y)))
+                (ty-vec (e z r) (k-knot-in e kept seen))
                 ;; Transparent to safety: its representation, and what it
                 ;; was given, kept, cautiously, wherever its representation
                 ;; keeps anything and in every region it was given.
@@ -994,6 +1055,12 @@
               (k-no-knot t (syn-start s) (syn-end s))
               #u)
           t))))
+  ;; A size: a natural literal, or `finite`, some number not known.
+  (k-parse-size (subr (maxeff checks spin) (syn) k-size)
+    (lambda (s)
+      (cond ((>= (syn-int s) 0) (k-size-lit (syn-int s)))
+            ((and (syn-symbol? s) (string=? (syn-name s) "finite")) (sz-finite))
+            (else (k-sfail "a size is a natural number, or `finite`" s)))))
   ;; What `(proves prop)` states: the type of its proof, with the lemma kept
   ;; pending for the definition it declares.
   (k-parse-proves (subr (maxeff checks spin) (syn string) int)
@@ -1095,6 +1162,15 @@
                             (bs (k-parse-binders (k-nth items 1)))
                             (body (k-parse-type (k-nth items 2))))
                        (begin (set k-dscope saved) (k-ty-new (ty-poly bs body))))))
+                  ((symbol=? hd 'vec)
+                   (begin
+                     (k-shape (or (= n 3) (= n 4)) "`(vec type size)` or `(vec type size place)`" s)
+                     (let* ((e (k-parse-type (k-nth items 1)))
+                            (z (k-parse-size (k-nth items 2)))
+                            (r (if (= n 4)
+                                   (tagcase (k-parse-place (k-nth items 3)) (r-var (v) (r-frozen v #t)) (else y (r-frozen -1 #t)))
+                                   (r-frozen -1 #t))))
+                       (k-ty-new (ty-vec e z r)))))
                   ((symbol=? hd 'ref)
                    (begin
                      (k-shape (= n 3) "`(ref type region)`" s)
@@ -1280,6 +1356,7 @@
                   (ty-comp (a h e r) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
                   (ty-place (r) (reg r))
                   (ty-named (g ds) (k-polarity-descs ds (extract (k-gen-of g) 3) v at seen found))
+                  (ty-vec (e z r) (begin (reg r) (go e at)))
                   (else y #u))))))))
   (k-polarities (subr (maxeff kstate spin) (k-ids int int (ref (listof (pairof int int @t) finite) @t) (ref k-ids @t)) unit)
     (lambda (ts v at seen found) (if (null? ts) #u (begin (k-polarity (car ts) v at seen found) (k-polarities (cdr ts) v at seen found)))))
@@ -1646,7 +1723,7 @@
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
-      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil)
+      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil) (set k-certified-lengths nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
@@ -1688,6 +1765,7 @@
                   (ty-bloblet (fs z r) (begin (add r) (walks fs)))
                   (ty-product (ps) (k-regions-parts ps seen out))
                   (ty-sum (ps) (k-regions-parts ps seen out))
+                  (ty-vec (e z r) (begin (add r) (walk e)))
                   ;; Transparent to safety: what its representation holds,
                   ;; its parameters' regions standing for what it was given.
                   (ty-named (g ds)
@@ -1940,7 +2018,7 @@
       (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r) 3) (ty-poly (bs x) 4) (ty-ref (x r) 5)
       (ty-pair (x y r) 6) (ty-tag (x y e r) 7) (ty-comp (x y e r) 8) (ty-markkey (x r) 9) (ty-product (ps) 10)
       (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16)
-      (ty-named (g ds) 17))))
+      (ty-named (g ds) 17) (ty-vec (e z r) 18))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.
 (define k-lemma-head? (subr (maxeff (read @t) spin) (k-binders int int) bool)
@@ -1995,6 +2073,7 @@
                               (ty-sum (ps) (ty-sum (k-subst-parts ps m memo)))
                               (ty-bloblet (fs z r) (ty-bloblet (subs fs) z (reg r)))
                               (ty-named (g ds) (ty-named g (k-subst-descs ds m memo)))
+                              (ty-vec (e z r) (ty-vec (sub e) z (reg r)))
                               (else z (k-get t))))
                            (id (k-ty-new new-ty)))
                       (begin (k-set-link slot id) slot)))))))))))
@@ -2328,6 +2407,13 @@
                                 (if (tagcase r (r-frozen (p f) #t) (else z #f))
                                     (and (k-sub x1 y1 ea eb trail labels) (k-sub x2 y2 ea eb trail labels))
                                     (and (k-inv x1 y1 ea eb trail labels) (k-inv x2 y2 ea eb trail labels)))))
+                         ;; A finite list is a `vec` of some length.
+                         (ty-vec (y sz s)
+                           (and (tagcase sz (sz-finite () #t) (else z #f))
+                                (tagcase r (r-frozen (p f) f) (else z #f))
+                                (k-frozen-le? (k-benv-region ea r) (k-benv-region eb s))
+                                (k-sub x1 y ea eb trail labels)
+                                (k-sub x2 b ea eb trail labels)))
                          (else z #f)))
                      (ty-tag (a1 h1 d1 r1)
                        (tagcase tb
@@ -2360,6 +2446,22 @@
                                        (ia (car named)) (ib (cdr named)))
                                   (and (k-same-bounds? ba bb ia ib)
                                        (k-sub xa xb ia ib trail labels)))))
+                         (else z #f)))
+                     ;; A `vec` is frozen, so covariant in its elements, and
+                     ;; forgets its size to `finite`; any `vec` is a finite
+                     ;; list, and a finite list a `vec` of some length.
+                     (ty-vec (x m r)
+                       (tagcase tb
+                         (ty-vec (y n s)
+                           (and (k-frozen-le? (k-benv-region ea r) (k-benv-region eb s)) (k-size-le? m n) (k-sub x y ea eb trail labels)))
+                         (ty-pair (y tail s)
+                           (let ((k (k-size-as-lit m)))
+                             (and (k-frozen-le? (k-benv-region ea r) (k-benv-region eb s))
+                                  (k-sub x y ea eb trail labels)
+                                  (tagcase m
+                                    ;; A `vec` of some length has for its tail the same type.
+                                    (sz-finite () (k-sub a tail ea eb trail labels))
+                                    (else w (or (= k 0) (k-sub (k-ty-new (ty-vec x (k-tail-size m) r)) tail ea eb trail labels)))))))
                          (else z #f)))
                      ;; A generative type is related only to itself, argument
                      ;; by argument, as its variance says.
@@ -2626,6 +2728,7 @@
               (ty-sum (ps) (k-data-parts ps seen))
               (ty-pair (a b r) (and (tagcase r (r-frozen (p f) #t) (else y #f)) (k-data-walk a seen) (k-data-walk b seen)))
               (ty-bloblet (fs z r) (and z (k-data-list fs seen)))
+              (ty-vec (e z r) (k-data-walk e seen))
               (else y #f))))))
   (k-data-parts (subr (maxeff kstate spin) (k-parts int) bool)
     (lambda (ps seen) (or (null? ps) (and (k-data-walk (extract (car ps) 2) seen) (k-data-parts (cdr ps) seen)))))
@@ -2719,6 +2822,7 @@
     (let ((p (k-ty-rank pattern)) (a (k-ty-rank actual)))
       (cond ((or (= p 2) (= a 1)) #f)
             ((= p 3) (null? (k-as-subr actual)))
+            ((and (= p 6) (= a 18)) #f)
             (else (not (= p a)))))))
 
 ;; An argument of the wrong shape altogether is the error to report, before
@@ -2780,6 +2884,7 @@
                   (ty-tag (x y e r) (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-comp (x y e r) (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-named (g ds) (or (k-descs-open? ds kinds solved) (go (k-push-ids (k-desc-types ds) rest))))
+                  (ty-vec (e z r) (or (reg r) (go (cons e rest))))
                   (else y (go rest))))))))))
 (define k-mentions-any-unknown? (subr (maxeff kstate spin) (int k-binders k-solved) bool)
   (lambda (t kinds solved) (k-any-walk (cons t nil) (k-new-epoch) kinds solved)))
@@ -2808,6 +2913,7 @@
                   (ty-tag (a b e r) (or (w a) (w b)))
                   (ty-comp (a b e r) (or (w a) (w b)))
                   (ty-named (g ds) (ws (k-desc-types ds)))
+                  (ty-vec (e z r) (w e))
                   (else y #f))))))))
   (k-vars-walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids int k-binders k-solved) bool)
     (lambda (ts seen kinds solved) (cond ((null? ts) #f) ((k-vars-walk (car ts) seen kinds solved) #t) (else (k-vars-walks (cdr ts) seen kinds solved))))))
@@ -2894,7 +3000,15 @@
                         (ty-array (x r) (tagcase at (ty-array (y s) (begin (ur r s) (u x y))) (else z #u)))
                         (ty-icell (x r) (tagcase at (ty-icell (y s) (begin (ur r s) (u x y))) (else z #u)))
                         (ty-place (r) (tagcase at (ty-place (s) (ur r s)) (else z #u)))
-                        (ty-pair (x1 x2 r) (tagcase at (ty-pair (y1 y2 s) (begin (ur r s) (u x1 y1) (u x2 y2))) (else z #u)))
+                        (ty-pair (x1 x2 r)
+                          (tagcase at
+                            (ty-pair (y1 y2 s) (begin (ur r s) (u x1 y1) (u x2 y2)))
+                            ;; A `vec`'s tail is the `vec` one shorter.
+                            (ty-vec (y sz s)
+                              (begin (ur r s) (u x1 y)
+                                     (u x2 (tagcase sz (sz-finite () a) (else w (k-ty-new (ty-vec y (k-tail-size sz) s)))))))
+                            (else z #u)))
+                        (ty-vec (x sz r) (tagcase at (ty-vec (y sz2 s) (begin (ur r s) (u x y))) (else z #u)))
                         (ty-product (pp) (tagcase at (ty-product (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
                         (ty-sum (pp) (tagcase at (ty-sum (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
                         (ty-bloblet (fp zp r)
@@ -3070,6 +3184,7 @@
               (ty-bloblet (fs z x) (k-writes-list fs r seen))
               (ty-product (ps) (k-writes-parts ps r seen))
               (ty-sum (ps) (k-writes-parts ps r seen))
+              (ty-vec (e z x) (k-writes-in e r seen))
               (ty-named (g ds)
                 (begin (k-note-given ds r)
                        (or (k-writes-in (extract (k-gen-of g) 4) r seen) (k-writes-list (k-desc-types ds) r seen))))
@@ -3145,6 +3260,7 @@
                    ;; Through its representation; what it was given,
                    ;; cautiously, as if taken as a parameter.
                    (ty-named (g ds) (or (k-cyclic-from? (extract (k-gen-of g) 4) #f p) (k-cyclic-list? (k-desc-types ds) #t p)))
+                   (ty-vec (e z r) (k-cyclic-from? e #f p))
                    (else x #f))))))))
   (k-cyclic-list? (subr (maxeff kstate spin) (k-ids bool k-cpath) bool)
     (lambda (ts by path) (and (not (null? ts)) (or (k-cyclic-from? (car ts) by path) (k-cyclic-list? (cdr ts) by path)))))
@@ -3306,6 +3422,8 @@
           (tagcase (car ks)
             (tr-part (p s t)
               (tagcase (k-ty-known t)
+                ;; A `vec`'s tail is a `vec` too: the same type serves.
+                (ty-vec (e z r) (the k-trs (cons (tr-part p #t (if head e t)) rest)))
                 (ty-pair (x y r)
                   (tagcase r
                     (r-frozen (q fin) (if fin (the k-trs (cons (tr-part p #t (if head x y)) rest)) rest))
@@ -3850,6 +3968,33 @@
           ((k-lambda? (extract (car bs) 3)) (k-letrec-lambdas (cdr bs)))
           (else (let ((x (extract (car bs) 3))) (k-fail (k-letrec-not-lambda (extract (car bs) 1)) (k-start x) (k-end x)))))))
 
+;; What `length-is?` has just confirmed: a variable, its binding, the length.
+(define-type k-cert-len (productof (1 symbol) (2 int) (3 int)))
+(define k-cert-len-has? (subr (read @t) ((listof k-cert-len finite) k-cert-len) bool)
+  (lambda (cs c)
+    (and (not (null? cs))
+         (or (and (symbol=? (extract (car cs) 1) (extract c 1)) (= (extract (car cs) 2) (extract c 2)) (= (extract (car cs) 3) (extract c 3)))
+             (k-cert-len-has? (cdr cs) c)))))
+;; If `p` is `(length-is? v k)`, the variable, its binding, and the length.
+(define k-length-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof k-cert-len finite))
+  (lambda (p)
+    (tagcase p
+      (x-app (f args a b)
+        (tagcase f
+          (x-var (op fa fb)
+            (let ((t (k-lookup op)))
+              (if (and (string=? (symbol->string op) "length-is?") (>= t 0) (k-named-has? (get k-std) op t)
+                       (not (null? args)) (not (null? (cdr args))) (null? (cdr (cdr args))))
+                  (tagcase (car args)
+                    (x-var (v va vb)
+                      (tagcase (car (cdr args))
+                        (x-const (ty k ka kb)
+                          (if (= ty k-int) (the (listof k-cert-len finite) (cons (product (1 v) (2 (k-binding-depth v)) (3 k)) nil)) nil))
+                        (else y nil)))
+                    (else y nil))
+                  nil)))
+          (else y nil)))
+      (else y nil))))
 ;; If `p` is `(acyclic? v)`, the variable, as the binding it is (none or one).
 (define k-acyclic-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
   (lambda (p)
@@ -3904,8 +4049,12 @@
                 (let* ((cert (k-acyclic-test p))
                        (saved (get k-certified))
                        (pushed (set k-certified (if (null? cert) saved (the (listof (pairof symbol int @t) finite) (cons (car cert) saved)))))
+                       (lens (k-length-test p))
+                       (lsaved (get k-certified-lengths))
+                       (lpushed (set k-certified-lengths (if (null? lens) lsaved (the (listof k-cert-len finite) (cons (car lens) lsaved)))))
                        (rc (k-synth c))
                        (popped (set k-certified saved))
+                       (lpopped (set k-certified-lengths lsaved))
                        (rd (k-synth d)) (tc (extract rc 1)) (td (extract rd 1))
                        (t (cond ((k-subtype tc td) td)
                                 ((k-subtype td tc) tc)
@@ -4051,11 +4200,70 @@
   ;;; ------------------------------------------------------------ application
   (k-synth-app (subr (maxeff checks spin) (kx kx kxs int) k-te)
     (lambda (x f args expected)
-      (if (tagcase f
-            (x-var (op fa fb) (let ((t (k-lookup op))) (and (string=? (symbol->string op) "certify-acyclic") (>= t 0) (k-named-has? (get k-std) op t))))
-            (else y #f))
-          (k-certify x args)
-          (k-synth-app-plain x f args expected))))
+      (let ((op (tagcase f
+                  (x-var (op fa fb) (let ((t (k-lookup op))) (if (and (>= t 0) (k-named-has? (get k-std) op t)) (symbol->string op) "")))
+                  (else y ""))))
+        (cond ((string=? op "certify-acyclic") (k-certify x args))
+              ((string=? op "certify-length") (k-certify-length x args))
+              ((string=? op "cons")
+               (let ((r (k-vec-cons x args expected))) (if (null? r) (k-synth-app-plain x f args expected) (car r))))
+              (else (k-synth-app-plain x f args expected))))))
+  ;; `(certify-length v k)`: `v`'s value as a `(vec T k)`, where `length-is?`
+  ;; has just found it so; nowhere else.
+  (k-certify-length (subr (maxeff checks spin) (kx kxs) k-te)
+    (lambda (x args)
+      (let* ((none (the (listof k-cert-len finite) nil))
+             (found (if (and (not (null? args)) (not (null? (cdr args))) (null? (cdr (cdr args))))
+                        (tagcase (car args)
+                          (x-var (v va vb)
+                            (tagcase (car (cdr args))
+                              (x-const (t k ka kb)
+                                (if (= t k-int) (the (listof k-cert-len finite) (cons (product (1 v) (2 (k-binding-depth v)) (3 k)) nil)) none))
+                              (else y none)))
+                          (else y none))
+                        none))
+             (ok (and (not (null? found)) (k-cert-len-has? (get k-certified-lengths) (car found)))))
+        (if (not ok)
+            (k-fail "`certify-length` takes only a variable and a length `length-is?` has just confirmed" (k-start x) (k-end x))
+            (let* ((r (k-synth (car args))) (t (k-resolve (extract r 1))) (k (extract (car found) 3)))
+              (tagcase (k-get t)
+                (ty-pair (e tail rg)
+                  (if (and (= (k-resolve tail) t) (tagcase rg (r-frozen (p f) #t) (else y #f)))
+                      (k-te (k-ty-new (ty-vec e (k-size-lit k) (k-fin-region rg))) (extract r 2))
+                      (k-fail (k-cat3 "`certify-length` takes a frozen list, and this is a " (k-show-ty t) "") (k-start x) (k-end x))))
+                (ty-vec (e z rg) (k-te (k-ty-new (ty-vec e (k-size-lit k) (k-fin-region rg))) (extract r 2)))
+                (else y (k-fail (k-cat3 "`certify-length` takes a frozen list, and this is a " (k-show-ty t) "") (k-start x) (k-end x)))))))))
+  ;; `cons` onto a `vec`: one more element. Where a `vec` is expected, the
+  ;; tail is checked as one shorter; otherwise, a tail that is a variable of
+  ;; `vec` type gives a `vec` one longer. None if neither.
+  (k-vec-cons (subr (maxeff checks spin) (kx kxs int) (listof k-te finite))
+    (lambda (x args expected)
+      (if (not (and (not (null? args)) (not (null? (cdr args))) (null? (cdr (cdr args)))))
+          nil
+          (let ((hd (car args)) (tl (car (cdr args))))
+            (let ((want (if (< expected 0) (ty-void) (k-get expected))))
+              (tagcase want
+                (ty-vec (e z r)
+                  (if (= (k-size-as-lit z) 0)
+                      (k-vec-cons-tail hd tl)
+                      (let* ((tail-ty (k-ty-new (ty-vec e (k-size-plus z -1) r)))
+                             (xe (k-check hd e))
+                             (te (k-check tl tail-ty)))
+                        (the (listof k-te finite) (cons (k-te expected (k-union xe te)) nil)))))
+                (else y (k-vec-cons-tail hd tl))))))))
+  (k-vec-cons-tail (subr (maxeff checks spin) (kx kx) (listof k-te finite))
+    (lambda (hd tl)
+      (tagcase tl
+        (x-var (v va vb)
+          (let ((t (k-lookup v)))
+            (if (< t 0)
+                nil
+                (tagcase (k-get t)
+                  (ty-vec (e z r)
+                    (let* ((xe (k-check hd e)) (rt (k-synth tl)))
+                      (the (listof k-te finite) (cons (k-te (k-ty-new (ty-vec e (k-size-plus z 1) r)) (k-union xe (extract rt 2))) nil))))
+                  (else y nil)))))
+        (else y nil))))
   ;; `(certify-acyclic v)`: `v`'s value at `finite`, where `acyclic?` has
   ;; just found `v` acyclic; nowhere else.
   (k-certify (subr (maxeff checks spin) (kx kxs) k-te)
@@ -4244,17 +4452,26 @@
               (else y (otherwise))))
           (x-var (s xa xb)
             (let ((t (k-lookup s)))
-              (if (and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #t) (else y #f)))
-                  (let ((inst (k-instantiate-against t expected a b)))
-                    (begin (k-expect x inst expected) (k-naming-effect s t)))
-                  (otherwise))))
+              (cond
+               ;; `nil` is a `vec` of no elements, or of some.
+               ((and (string=? (symbol->string s) "nil") (>= t 0) (k-named-has? (get k-std) s t)
+                     (tagcase et (ty-vec (e z r) (or (tagcase z (sz-finite () #t) (else w #f)) (= (k-size-as-lit z) 0))) (else w #f)))
+                nil)
+               ((and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #t) (else y #f)))
+                (let ((inst (k-instantiate-against t expected a b)))
+                  (begin (k-expect x inst expected) (k-naming-effect s t))))
+               (else (otherwise)))))
           (x-if (p c d xa xb)
             (let* ((pe (k-check p k-bool))
                    (cert (k-acyclic-test p))
                    (saved (get k-certified))
                    (pushed (set k-certified (if (null? cert) saved (the (listof (pairof symbol int @t) finite) (cons (car cert) saved)))))
+                   (lens (k-length-test p))
+                   (lsaved (get k-certified-lengths))
+                   (lpushed (set k-certified-lengths (if (null? lens) lsaved (the (listof k-cert-len finite) (cons (car lens) lsaved)))))
                    (ce (k-check c expected))
                    (popped (set k-certified saved))
+                   (lpopped (set k-certified-lengths lsaved))
                    (de (k-check d expected)))
               (k-mask x (k-union pe (k-union ce de)) expected)))
           (x-begin (xs xa xb)

@@ -244,6 +244,26 @@
                 (e-let (parse-let-bindings (syn-items (nth items 1) "let bindings")) (parse-body (drop items 2) a b) a b)))
         ((symbol=? head 'begin) (parse-body (cdr items) a b))
         ((symbol=? head 'cond) (parse-cond (cdr items) a b))
+        ;; `(confirm-length e k (x body) else)`: `(let ((%confirm-value e))
+        ;; (if (length-is? %confirm-value k) (let ((x (certify-length
+        ;; %confirm-value k))) body) else))`.
+        ((symbol=? head 'confirm-length)
+         (let ((usage "`(confirm-length expression length (name body) else)`"))
+           (begin
+             (arity items 5 usage a b)
+             (let* ((k (if (>= (syn-int (nth items 2)) 0) (syn-int (nth items 2)) (pfail "a length is a natural number" (nth items 2))))
+                    (arm (syn-items (nth items 3) usage))
+                    (shaped (if (= (len arm) 2) #u (pfail usage (nth items 3))))
+                    (x (if (syn-symbol? (car arm)) (syn-symbol (car arm)) (pfail "a name" (car arm))))
+                    (e (parse-exp (nth items 1)))
+                    (body (parse-exp (nth arm 1)))
+                    (els (parse-exp (nth items 4)))
+                    (tmp (string->symbol "%confirm-value"))
+                    (test (e-app (e-var 'length-is? a b) (the (listof exp finite) (cons (e-var tmp a b) (cons (e-int k a b) nil))) a b))
+                    (cert (e-app (e-var 'certify-length a b) (the (listof exp finite) (cons (e-var tmp a b) (cons (e-int k a b) nil))) a b))
+                    (then (e-let (the (listof (productof (1 symbol) (2 exp)) finite) (cons (product (1 x) (2 cert)) nil)) body a b)))
+               (e-let (the (listof (productof (1 symbol) (2 exp)) finite) (cons (product (1 tmp) (2 e)) nil))
+                      (e-if test then els a b) a b)))))
         ;; `(acyclic e (x body) else)`: `(let ((%acyclic-value e)) (if
         ;; (acyclic? %acyclic-value) (let ((x (certify-acyclic
         ;; %acyclic-value))) body) else))`.
