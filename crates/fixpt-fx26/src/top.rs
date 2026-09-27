@@ -42,6 +42,8 @@ pub enum Top {
     DefineType { name: Sym, ty: TyId },
     /// `(define-type (name (param kind) …) …)`: a parametric abbreviation.
     DefineTypeFamily { name: Sym },
+    /// `(define-generative name rep)`: a new type.
+    DefineGenerative { name: Sym },
     /// `(define-effect name …)`: an abbreviation for an effect.
     DefineEffect { name: Sym, effect: Effect },
     /// `(private-regions @r …)`: the regions these names now stand for.
@@ -66,9 +68,72 @@ impl Checker {
     pub fn expand_forms(&mut self, forms: Vec<Syntax>) -> R<Vec<Syntax>> {
         let mut out = Vec::new();
         for f in forms {
+            if self.expand_generative(&f, &mut out)? {
+                continue;
+            }
             self.expand_datatype(f, &mut out)?;
         }
         Ok(out)
+    }
+
+    /// `(define-generative head rep)`: the form itself, which the checker
+    /// alone reads, and its two conversions, each the identity:
+    /// `(define up-name (poly (param …) (subr pure (rep) (name p …))) (lambda (x) x))`
+    /// and `down-name` the other way. `false` if `form` is something else.
+    fn expand_generative(&mut self, form: &Syntax, out: &mut Vec<Syntax>) -> R<bool> {
+        let items = form.as_proper_list().unwrap_or(&[]).to_vec();
+        if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) != Some("define-generative") {
+            return Ok(false);
+        }
+        let span = form.span;
+        let usage = "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`";
+        let [_, head, rep] = &items[..] else {
+            return Err(FxError::at(span, usage));
+        };
+        let (name, params) = match head.as_proper_list() {
+            Some([n, ps @ ..]) => (n.clone(), Some(ps.to_vec())),
+            _ => (head.clone(), None),
+        };
+        let Some(n) = name.as_symbol() else {
+            return Err(FxError::at(span, usage));
+        };
+        let n = self.interner.name(n).to_string();
+        let mut sym = |s: &str| Syntax::symbol(span, self.interner.intern(s));
+        let list = |items: Vec<Syntax>| {
+            if items.is_empty() { Syntax::new(span, fixpt_read::Datum::Nil) } else { Syntax::list(span, items) }
+        };
+        let (define, poly, subr, pure, lambda, x) = (sym("define"), sym("poly"), sym("subr"), sym("pure"), sym("lambda"), sym("x"));
+        let (up, down) = (sym(&format!("up-{n}")), sym(&format!("down-{n}")));
+        // The binders, variance left out, and the type as it is used.
+        let (binders, used) = match &params {
+            Some(ps) => {
+                let mut bs = Vec::new();
+                let mut u = vec![name.clone()];
+                for p in ps {
+                    match p.as_proper_list() {
+                        Some([pn, k, ..]) => {
+                            bs.push(list(vec![pn.clone(), k.clone()]));
+                            u.push(pn.clone());
+                        }
+                        _ => return Err(FxError::at(p.span, "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`")),
+                    }
+                }
+                (Some(bs), list(u))
+            }
+            None => (None, name.clone()),
+        };
+        let conv = |from: &Syntax, to: &Syntax| {
+            let t = list(vec![subr.clone(), pure.clone(), list(vec![from.clone()]), to.clone()]);
+            match &binders {
+                Some(bs) => list(vec![poly.clone(), list(bs.clone()), t]),
+                None => t,
+            }
+        };
+        let identity = list(vec![lambda.clone(), list(vec![x.clone()]), x.clone()]);
+        out.push(form.clone());
+        out.push(list(vec![define.clone(), up, conv(rep, &used), identity.clone()]));
+        out.push(list(vec![define, down, conv(&used, rep), identity]));
+        Ok(true)
     }
 
     /// FX-91's `(define-datatype name (tag type …) …)`: a sum of products,
@@ -196,6 +261,19 @@ impl Checker {
                 self.dscope.push((name, crate::parse::DScope::Eff(effect.clone())));
                 Ok(Top::DefineEffect { name, effect })
             }
+            Some("define-generative") => {
+                let [_, head, rep] = items else {
+                    return Err(FxError::at(form.span, "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`"));
+                };
+                let name = self.define_generative(head, rep)?;
+                // Only its own conversions, which follow, see inside it.
+                let which = self.generatives.len() as u32 - 1;
+                for side in ["up-", "down-"] {
+                    let n = self.interner.intern(&format!("{side}{}", self.interner.name(name)));
+                    self.inside.push((n, which));
+                }
+                Ok(Top::DefineGenerative { name })
+            }
             Some("define-type") => {
                 let [_, name, def] = items else {
                     return Err(FxError::at(form.span, "`(define-type name type)`"));
@@ -259,7 +337,16 @@ impl Checker {
                 if recursive {
                     self.note_termination(&[(name, ty, e)]);
                 }
+                // A generative type's own `up-` and `down-` see inside it.
+                let inside = self.inside.iter().position(|(n, _)| *n == name).map(|i| self.inside.remove(i).1);
+                if let Some(g) = inside {
+                    self.transparent.push(g);
+                }
                 let checked = self.check_declared(name, ty, e);
+                if inside.is_some() {
+                    self.transparent.pop();
+                    self.conversions.push((name, ty));
+                }
                 self.recursive.truncate(rdepth);
                 match checked {
                     Ok(effect) => {
@@ -382,7 +469,7 @@ impl Checker {
             let items = f.as_proper_list().unwrap_or(&[]);
             let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
             match (head.as_deref(), items) {
-                (Some("define-type" | "define-effect" | "private-regions"), _) => {
+                (Some("define-type" | "define-generative" | "define-effect" | "private-regions"), _) => {
                     self.top(f)?;
                     done.push(true);
                 }
@@ -467,7 +554,7 @@ impl Checker {
 
 /// The words FX-26 reserves: syntax, and the parts of descriptions.
 pub const KEYWORDS: &[&str] = &[
-    "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define-type",
+    "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define-type", "define-generative",
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",

@@ -78,7 +78,7 @@ pub enum Speculation {
 pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(Top, String)> {
     let top = checker.top(form)?;
     let code = match &top {
-        Top::DefineType { .. } | Top::DefineTypeFamily { .. } | Top::DefineEffect { .. } | Top::PrivateRegions { .. } => {
+        Top::DefineType { .. } | Top::DefineTypeFamily { .. } | Top::DefineGenerative { .. } | Top::DefineEffect { .. } | Top::PrivateRegions { .. } => {
             String::new()
         }
         Top::Define { name, exp, recursive, .. } => {

@@ -370,6 +370,15 @@ impl Checker {
                 Ty::Pair(a, b, _) => vec![(*a, false), (*b, false)],
                 Ty::Bloblet { fields, .. } => fields.iter().map(|f| (*f, false)).collect(),
                 Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| (*t, false)).collect(),
+                // Through its representation; what it was given, cautiously,
+                // as if taken as a parameter.
+                Ty::Named { which, args } => [(c.generatives[*which as usize].rep, false)]
+                    .into_iter()
+                    .chain(args.iter().filter_map(|d| match d {
+                        D::Type(x) => Some((*x, true)),
+                        _ => None,
+                    }))
+                    .collect(),
                 _ => vec![],
             };
             let r = kids.into_iter().any(|(k, p)| walk(c, k, p, path));
@@ -707,6 +716,17 @@ impl Checker {
                     region(r) || effect(&e)
                 }
                 Ty::Base(_) | Ty::Void | Ty::Link(_) => false,
+                Ty::Named { args, .. } => {
+                    let mut hit = false;
+                    for d in args {
+                        match d {
+                            D::Type(x) => stack.push(x),
+                            D::Region(r) => hit |= region(r),
+                            D::Effect(e) => hit |= effect(&e),
+                        }
+                    }
+                    hit
+                }
             };
             if hit {
                 return true;
@@ -738,6 +758,7 @@ impl Checker {
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
             Ty::Base(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) => false,
+            Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) if self.walk_vars(*x, seen, hit))),
         }
     }
 
@@ -820,6 +841,16 @@ impl Checker {
                 self.unify(a1, a2, u, trail);
                 self.unify(h1, h2, u, trail);
                 self.unify_effect(&d1, &d2, u);
+            }
+            (Ty::Named { which: g, args: xs }, Ty::Named { which: h, args: ys }) if g == h => {
+                for (x, y) in xs.iter().zip(&ys) {
+                    match (x, y) {
+                        (D::Type(x), D::Type(y)) => self.unify(*x, *y, u, trail),
+                        (D::Region(r), D::Region(s)) => self.unify_region(*r, *s, u),
+                        (D::Effect(d), D::Effect(e)) => self.unify_effect(d, e, u),
+                        _ => {}
+                    }
+                }
             }
             _ => {}
         }

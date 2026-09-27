@@ -31,7 +31,10 @@ use crate::check::Checker;
 #[derive(Clone, Copy, Debug)]
 enum Tracked {
     /// The parameter, or (`strict`) a part of it; of type `ty`.
-    Part { param: usize, strict: bool, ty: TyId },
+    /// The type is `None` where it is not known, as past a generative
+    /// type's conversion: a `tagcase` or `extract` still proves a sum or a
+    /// product, but a `car` or `cdr` needs to know the list is finite.
+    Part { param: usize, strict: bool, ty: Option<TyId> },
     /// The integer parameter plus `offset`.
     Int { param: usize, offset: i64 },
 }
@@ -213,7 +216,7 @@ impl Walk<'_> {
             self.scope.clear();
             for (j, p) in params.iter().enumerate() {
                 let Some(t) = tys.get(j).copied() else { return false };
-                let mut known = vec![Tracked::Part { param: j, strict: false, ty: t }];
+                let mut known = vec![Tracked::Part { param: j, strict: false, ty: Some(t) }];
                 if c.arena.resolve(t) == c.arena.resolve(c.int) {
                     known.push(Tracked::Int { param: j, offset: 0 });
                 }
@@ -237,6 +240,18 @@ impl Walk<'_> {
             return None;
         }
         self.members.iter().position(|m| *m == s)
+    }
+
+    /// Whether `e` names a generative type's `up-` or `down-` conversion.
+    fn conversion(&self, e: ExpId) -> bool {
+        match self.c.arena.exp_at(strip(self.c, e)) {
+            Exp::Var(s) => {
+                self.bound(*s).is_none()
+                    && self.member(*s).is_none()
+                    && self.c.lookup(*s).is_some_and(|t| self.c.conversions.contains(&(*s, t)))
+            }
+            _ => false,
+        }
     }
 
     /// Whether `e` names the standard binding `name`.
@@ -376,12 +391,17 @@ impl Walk<'_> {
             .iter()
             .filter_map(|k| {
                 let Tracked::Part { param, ty, .. } = *k else { return None };
-                let Ty::Sum(vs) = arena.get(arena.resolve(ty)) else { return None };
-                let mut t = vs.iter().find(|(l, _)| *l == tag)?.1;
-                if let Some(i) = field {
-                    let Ty::Product(fs) = arena.get(arena.resolve(t)) else { return None };
-                    t = fs.get(i)?.1;
-                }
+                // A `tagcase` proves a sum, and so a part, whether or not
+                // the type is known here.
+                let t = ty.and_then(|ty| {
+                    let Ty::Sum(vs) = arena.get(arena.resolve(ty)) else { return None };
+                    let mut t = vs.iter().find(|(l, _)| *l == tag)?.1;
+                    if let Some(i) = field {
+                        let Ty::Product(fs) = arena.get(arena.resolve(t)) else { return None };
+                        t = fs.get(i)?.1;
+                    }
+                    Some(t)
+                });
                 Some(Tracked::Part { param, strict: true, ty: t })
             })
             .collect()
@@ -402,8 +422,9 @@ impl Walk<'_> {
                             (
                                 Tracked::Part { param: p, strict: s, ty: t },
                                 Tracked::Part { param: q, strict: r, ty: u },
-                            ) if p == q && arena.resolve(t) == arena.resolve(u) => {
-                                Some(Tracked::Part { param: p, strict: s && r, ty: t })
+                            ) if p == q => {
+                                let same = matches!((t, u), (Some(t), Some(u)) if arena.resolve(t) == arena.resolve(u));
+                                Some(Tracked::Part { param: p, strict: s && r, ty: if same { t } else { None } })
                             }
                             (Tracked::Int { param: p, offset: o }, Tracked::Int { param: q, offset: n }) if p == q && o == n => {
                                 Some(*x)
@@ -418,9 +439,21 @@ impl Walk<'_> {
                 .into_iter()
                 .filter_map(|k| {
                     let Tracked::Part { param, ty, .. } = k else { return None };
-                    let Ty::Product(fs) = arena.get(arena.resolve(ty)) else { return None };
-                    let t = fs.iter().find(|(f, _)| *f == l)?.1;
+                    // An `extract` proves a product, known here or not.
+                    let t = ty.and_then(|ty| {
+                        let Ty::Product(fs) = arena.get(arena.resolve(ty)) else { return None };
+                        Some(fs.iter().find(|(f, _)| *f == l)?.1)
+                    });
                     Some(Tracked::Part { param, strict: true, ty: t })
+                })
+                .collect(),
+            // A generative type's conversion is the identity.
+            Exp::App { fun, args } if args.len() == 1 && self.conversion(fun) => self
+                .tracked(args[0])
+                .into_iter()
+                .map(|k| match k {
+                    Tracked::Part { param, strict, .. } => Tracked::Part { param, strict, ty: None },
+                    k => k,
                 })
                 .collect(),
             Exp::App { fun, args } => match (self.std_op(fun), &args[..]) {
@@ -428,9 +461,9 @@ impl Walk<'_> {
                     .tracked(*x)
                     .into_iter()
                     .filter_map(|k| {
-                        let Tracked::Part { param, ty, .. } = k else { return None };
+                        let Tracked::Part { param, ty: Some(ty), .. } = k else { return None };
                         let Ty::Pair(a, b, Region::Frozen(_, true)) = arena.get(arena.resolve(ty)) else { return None };
-                        Some(Tracked::Part { param, strict: true, ty: if op == "car" { *a } else { *b } })
+                        Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *a } else { *b }) })
                     })
                     .collect(),
                 (Some("datum-car" | "datum-cdr"), [x]) => self
@@ -474,7 +507,7 @@ impl Walk<'_> {
         matches!(self.std_op(fun), Some("car" | "cdr"))
             && args.len() == 1
             && self.tracked(args[0]).iter().any(|k| {
-                matches!(k, Tracked::Part { ty, .. }
+                matches!(k, Tracked::Part { ty: Some(ty), .. }
                     if matches!(arena.get(arena.resolve(*ty)), Ty::Pair(_, _, r) if !matches!(r, Region::Frozen(_, true))))
             })
     }

@@ -41,6 +41,7 @@ fn report(c: &Checker, top: &Top) -> String {
         }
         Top::DefineType { name, ty } => format!("{} = {}", c.interner.name(*name), c.show_definition(*ty)),
         Top::DefineTypeFamily { name } => format!("{}: a type with parameters", c.interner.name(*name)),
+        Top::DefineGenerative { name } => format!("{}: a new type", c.interner.name(*name)),
         Top::DefineEffect { name, effect } => format!("{} = {}", c.interner.name(*name), c.show_effect(effect)),
         Top::PrivateRegions { regions } => {
             let names: Vec<String> = regions.iter().map(|r| c.show_region(*r)).collect();

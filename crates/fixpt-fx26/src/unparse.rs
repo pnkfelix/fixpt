@@ -141,6 +141,22 @@ impl Checker {
                 let sep = if fs.is_empty() { "" } else { " " };
                 format!("(bloblet ({head}{sep}{}) {})", fs.join(" "), self.show_region(region))
             }
+            Ty::Named { which, args } => {
+                let name = self.interner.name(self.generatives[which as usize].name).to_string();
+                if args.is_empty() {
+                    name
+                } else {
+                    let ds: Vec<String> = args
+                        .iter()
+                        .map(|d| match d {
+                            crate::ast::D::Type(x) => self.show_ty_on(*x, path),
+                            crate::ast::D::Region(r) => self.show_region(*r),
+                            crate::ast::D::Effect(e) => self.show_effect(e),
+                        })
+                        .collect();
+                    format!("({name} {})", ds.join(" "))
+                }
+            }
             Ty::Pair(a, b, r) => format!(
                 "(pairof {} {} {})",
                 self.show_ty_on(a, path),

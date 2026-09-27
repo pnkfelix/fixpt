@@ -25,11 +25,21 @@
 //! **Prompts** delimit control on their tag's region, under a condition of
 //! their own: see `synth_prompt`.
 
-use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Ty, TyId};
+use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Ty, TyId, Variance};
 use crate::error::{FxError, R};
 use crate::parse::DScope;
 use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
 use std::collections::{HashMap, HashSet};
+
+/// A `define-generative`: its name, parameters, their variance, and the
+/// representation, a type over the parameters.
+#[derive(Clone, Debug)]
+pub struct Generative {
+    pub name: Sym,
+    pub params: Vec<(DVar, Kind)>,
+    pub variance: Vec<Variance>,
+    pub rep: TyId,
+}
 
 pub struct Checker {
     pub arena: Arena,
@@ -70,6 +80,16 @@ pub struct Checker {
     /// Why each member of a recursive group that may not end may not: said
     /// when its declared type leaves out `spin`.
     pub(crate) spin_why: Vec<((Sym, TyId), String)>,
+    /// Every `define-generative`, by number.
+    pub(crate) generatives: Vec<Generative>,
+    /// The generative types whose insides the definition being checked may
+    /// see: its own `up-name` and `down-name`.
+    pub(crate) transparent: Vec<u32>,
+    /// The definitions still to come that may see inside a generative type.
+    pub(crate) inside: Vec<(Sym, u32)>,
+    /// The bindings of generative types' conversions, which are the
+    /// identity: size-change looks through them.
+    pub(crate) conversions: Vec<(Sym, TyId)>,
     /// How many fresh regions inference has made, for naming the next.
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
@@ -176,6 +196,10 @@ impl Checker {
             expanding: 0,
             knots: Vec::new(),
             spin_why: Vec::new(),
+            generatives: Vec::new(),
+            transparent: Vec::new(),
+            inside: Vec::new(),
+            conversions: Vec::new(),
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -795,6 +819,152 @@ impl Checker {
                     self.regions_walk(t, seen, out);
                 }
             }
+            // Transparent to safety: what its representation holds, its
+            // parameters' regions standing for what it was given.
+            Ty::Named { which, args } => {
+                let mut inner = HashSet::new();
+                self.regions_walk(self.generatives[which as usize].rep, seen, &mut inner);
+                out.extend(inner.into_iter().filter(|r| !self.is_generative_param(*r)));
+                for d in args {
+                    match d {
+                        D::Type(t) => self.regions_walk(t, seen, out),
+                        D::Region(r) => {
+                            out.insert(r);
+                        }
+                        D::Effect(e) => out.extend(e.0.iter().filter_map(|a| a.region())),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether `r` is, or is frozen into, a generative type's parameter.
+    fn is_generative_param(&self, r: Region) -> bool {
+        let v = match r {
+            Region::Var(v) | Region::Frozen(Some(v), _) => v,
+            _ => return false,
+        };
+        self.generatives.iter().any(|g| g.params.iter().any(|(p, _)| *p == v))
+    }
+
+    /// The `which`th generative type's representation, for `args`.
+    pub(crate) fn unfold(&mut self, which: u32, args: &[D]) -> TyId {
+        let g = self.generatives[which as usize].clone();
+        let map: HashMap<DVar, D> = g.params.iter().map(|(v, _)| *v).zip(args.iter().cloned()).collect();
+        self.subst(g.rep, &map)
+    }
+
+    /// Whether the `which`th generative type's representation bears out the
+    /// variance declared for its parameters: each occurs only where its
+    /// variance allows (a covariant one only positively, and so on).
+    pub(crate) fn check_variance(&self, which: u32, span: fixpt_read::Span) -> R<()> {
+        let g = &self.generatives[which as usize];
+        for ((v, _), want) in g.params.iter().zip(&g.variance) {
+            if *want == Variance::Inv {
+                continue;
+            }
+            let mut found = Vec::new();
+            self.polarity(g.rep, *v, Variance::Co, &mut HashSet::new(), &mut found);
+            let bad = found.iter().any(|p| *p != *want);
+            if bad {
+                return Err(FxError::at(
+                    span,
+                    format!(
+                        "`{}` is declared {} in `{}`, but occurs where it may not",
+                        self.interner.name(self.arena.dvar_name(*v)),
+                        if *want == Variance::Co { "covariant (+)" } else { "contravariant (-)" },
+                        self.interner.name(g.name)
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Each polarity at which `v` occurs in `t`, reached at polarity `at`.
+    fn polarity(&self, t: TyId, v: DVar, at: Variance, seen: &mut HashSet<(TyId, u8)>, found: &mut Vec<Variance>) {
+        let t = self.arena.resolve(t);
+        let key = match at {
+            Variance::Co => 0,
+            Variance::Contra => 1,
+            Variance::Inv => 2,
+        };
+        if !seen.insert((t, key)) {
+            return;
+        }
+        let flip = |p: Variance| match p {
+            Variance::Co => Variance::Contra,
+            Variance::Contra => Variance::Co,
+            Variance::Inv => Variance::Inv,
+        };
+        let eff = |e: &Effect, p: Variance, found: &mut Vec<Variance>| {
+            if e.0.iter().any(|a| matches!(a, Atom::Var(x) if *x == v)) {
+                found.push(p);
+            }
+            if e.0.iter().any(|a| matches!(a.region(), Some(Region::Var(x)) if x == v)) {
+                found.push(Variance::Inv);
+            }
+        };
+        let reg = |r: Region, found: &mut Vec<Variance>| {
+            if matches!(r, Region::Var(x) | Region::Frozen(Some(x), _) if x == v) {
+                found.push(Variance::Inv);
+            }
+        };
+        match self.arena.get(t).clone() {
+            Ty::Var(x) if x == v => found.push(at),
+            Ty::Subr { effect, params, result } => {
+                eff(&effect, at, found);
+                for p in params {
+                    self.polarity(p, v, flip(at), seen, found);
+                }
+                self.polarity(result, v, at, seen, found);
+            }
+            Ty::Poly { body, .. } => self.polarity(body, v, at, seen, found),
+            Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => {
+                reg(r, found);
+                self.polarity(a, v, Variance::Inv, seen, found);
+            }
+            Ty::Pair(a, b, r) => {
+                reg(r, found);
+                let p = if r.is_frozen() { at } else { Variance::Inv };
+                self.polarity(a, v, p, seen, found);
+                self.polarity(b, v, p, seen, found);
+            }
+            Ty::Bloblet { fields, frozen, region } => {
+                reg(region, found);
+                for f in fields {
+                    self.polarity(f, v, if frozen { at } else { Variance::Inv }, seen, found);
+                }
+            }
+            Ty::Product(parts) | Ty::Sum(parts) => {
+                for (_, x) in parts {
+                    self.polarity(x, v, at, seen, found);
+                }
+            }
+            Ty::PromptTag { answer: a, payload: b, effect, region }
+            | Ty::Composable { arg: a, answer: b, effect, region } => {
+                reg(region, found);
+                eff(&effect, Variance::Inv, found);
+                self.polarity(a, v, Variance::Inv, seen, found);
+                self.polarity(b, v, Variance::Inv, seen, found);
+            }
+            Ty::Place(r) => reg(r, found),
+            Ty::Named { which, args } => {
+                let vs = self.generatives[which as usize].variance.clone();
+                for (d, w) in args.iter().zip(vs) {
+                    let p = match (w, at) {
+                        (Variance::Inv, _) | (_, Variance::Inv) => Variance::Inv,
+                        (Variance::Co, p) => p,
+                        (Variance::Contra, p) => flip(p),
+                    };
+                    match d {
+                        D::Type(x) => self.polarity(*x, v, p, seen, found),
+                        D::Region(r) => reg(*r, found),
+                        D::Effect(e) => eff(e, p, found),
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -860,6 +1030,29 @@ impl Checker {
                 .map(|r| (r, t))
                 .or_else(|| [arg, answer].iter().find_map(|x| self.knot_in(*x, &[], seen))),
             Ty::PromptTag { answer, payload, .. } => [answer, payload].iter().find_map(|x| self.knot_in(*x, &[], seen)),
+            // Transparent to safety: its representation, and what it was
+            // given, kept, cautiously, wherever its representation keeps
+            // anything and in every region it was given.
+            Ty::Named { which, args } => {
+                let rep = self.generatives[which as usize].rep;
+                let mut k = kept.to_vec();
+                let mut inner = HashSet::new();
+                self.regions_walk(rep, &mut HashSet::new(), &mut inner);
+                for r in inner.into_iter().chain(args.iter().filter_map(|d| match d {
+                    D::Region(r) => Some(*r),
+                    _ => None,
+                })) {
+                    if !self.is_generative_param(r) && !r.is_frozen() && !k.contains(&r) {
+                        k.push(r);
+                    }
+                }
+                self.knot_in(rep, kept, seen).or_else(|| {
+                    args.iter().find_map(|d| match d {
+                        D::Type(x) => self.knot_in(*x, &k, seen),
+                        _ => None,
+                    })
+                })
+            }
             _ => None,
         }
     }
@@ -869,6 +1062,9 @@ impl Checker {
     pub(crate) fn writes_in(&self, t: TyId, r: Region) -> bool {
         let mut seen = HashSet::new();
         let mut todo = vec![t];
+        // A generative type's representation writing one of its parameters
+        // writes whatever it was given: cautiously, any region given any.
+        let (mut writes_param, mut given) = (false, false);
         while let Some(t) = todo.pop() {
             let t = self.arena.resolve(t);
             if !seen.insert(t) {
@@ -883,14 +1079,28 @@ impl Checker {
                 Ty::Pair(a, b, _) => (vec![], vec![*a, *b]),
                 Ty::Bloblet { fields, .. } => (vec![], fields.clone()),
                 Ty::Product(parts) | Ty::Sum(parts) => (vec![], parts.iter().map(|(_, t)| *t).collect()),
+                Ty::Named { which, args } => {
+                    let mut kids = vec![self.generatives[*which as usize].rep];
+                    for d in args {
+                        match d {
+                            D::Type(x) => kids.push(*x),
+                            D::Region(x) => given |= *x == r,
+                            D::Effect(e) => given |= e.0.contains(&Atom::Write(r)),
+                        }
+                    }
+                    (vec![], kids)
+                }
                 _ => (vec![], vec![]),
             };
             if effects.iter().any(|e| e.0.contains(&Atom::Write(r))) {
                 return true;
             }
+            writes_param |= effects.iter().any(|e| {
+                e.0.iter().any(|a| matches!(a, Atom::Write(x) if self.is_generative_param(*x)) || matches!(a, Atom::Var(v) if self.generatives.iter().any(|g| g.params.iter().any(|(p, _)| p == v))))
+            });
             todo.extend(kids);
         }
-        false
+        writes_param && given
     }
 
     // ------------------------------------------------------------- subtyping
@@ -919,6 +1129,23 @@ impl Checker {
         let ea = |e: &Effect| env.effect(&env.a, e);
         let eb = |e: &Effect| env.effect(&env.b, e);
         let flip = env.flip();
+        // Inside a generative type's own conversions, its name is its
+        // representation; everywhere else it is only itself.
+        let same_named = matches!((&ta, &tb), (Ty::Named { which: g, .. }, Ty::Named { which: h, .. }) if g == h);
+        if !same_named && !matches!(ta, Ty::Void) {
+            if let Ty::Named { which, args } = &ta
+                && self.transparent.contains(which)
+            {
+                let a2 = self.unfold(*which, args);
+                return self.sub(a2, b, env, st);
+            }
+            if let Ty::Named { which, args } = &tb
+                && self.transparent.contains(which)
+            {
+                let b2 = self.unfold(*which, args);
+                return self.sub(a, b2, env, st);
+            }
+        }
         // A composable continuation can be called, so it can stand where a
         // subroutine is wanted.
         if let (Ty::Composable { .. }, Ty::Subr { .. }) = (&ta, &tb) {
@@ -1003,6 +1230,25 @@ impl Checker {
             (Ty::Sum(sa), Ty::Sum(sb)) => sa.iter().all(|(la, x)| {
                 sb.iter().find(|(lb, _)| lb == la).is_some_and(|(_, y)| self.sub(*x, *y, env, st))
             }),
+            // A generative type is related only to itself, argument by
+            // argument, as its variance says.
+            (Ty::Named { which: g, args: xa }, Ty::Named { which: h, args: xb }) if g == h => {
+                let variance = self.generatives[g as usize].variance.clone();
+                xa.iter().zip(&xb).zip(variance).all(|((x, y), v)| match (x, y) {
+                    (D::Type(x), D::Type(y)) => match v {
+                        Variance::Co => self.sub(*x, *y, env, st),
+                        Variance::Contra => self.sub(*y, *x, &flip, st),
+                        Variance::Inv => self.sub(*x, *y, env, st) && self.sub(*y, *x, &flip, st),
+                    },
+                    (D::Region(r), D::Region(s)) => ra(*r) == rb(*s),
+                    (D::Effect(d), D::Effect(e)) => match v {
+                        Variance::Co => ea(d).within(&eb(e)),
+                        Variance::Contra => eb(e).within(&ea(d)),
+                        Variance::Inv => ea(d) == eb(e),
+                    },
+                    _ => false,
+                })
+            }
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
                     return false;
@@ -1091,6 +1337,17 @@ impl Checker {
                 fields: fields.iter().map(|f| self.subst_memo(*f, map, memo)).collect(),
                 frozen,
                 region: region(r),
+            },
+            Ty::Named { which, args } => Ty::Named {
+                which,
+                args: args
+                    .iter()
+                    .map(|d| match d {
+                        D::Type(t) => D::Type(self.subst_memo(*t, map, memo)),
+                        D::Region(r) => D::Region(region(*r)),
+                        D::Effect(e) => D::Effect(subst_effect(e, map)),
+                    })
+                    .collect(),
             },
             other => other,
         };

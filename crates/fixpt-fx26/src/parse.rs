@@ -6,7 +6,7 @@
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
-use crate::ast::{Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Ty, TyId};
+use crate::ast::{Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Ty, TyId, Variance};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
@@ -25,6 +25,8 @@ pub enum DScope {
     Region(Region),
     /// A name bound by `define-effect`: an effect.
     Eff(crate::ast::Effect),
+    /// A name bound by `define-generative`: the `n`th generative type.
+    Generative(u32),
     /// A region constant `private-regions` made the program's own: `@s` in
     /// the program is this fresh region, which nothing else can name.
     Private(Region),
@@ -217,14 +219,17 @@ impl Checker {
             return match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Type)) => Ok(self.arena.ty(Ty::Var(v))),
                 Some(DScope::Rec(t)) => Ok(t),
+                Some(DScope::Generative(g)) => self.apply_generative(s, g, &[]),
                 _ => Err(FxError::at(s.span, format!("`{}` is not a type", self.name(sym)))),
             };
         }
         let items = self.items(s, "a type")?.to_vec();
-        if let Some(head) = items.first().and_then(|h| h.as_symbol())
-            && let Some(DScope::Abbrev { params, body }) = self.lookup_desc(head)
-        {
-            return self.expand_abbrev(s, head, &params, &body, &items[1..]);
+        if let Some(head) = items.first().and_then(|h| h.as_symbol()) {
+            match self.lookup_desc(head) {
+                Some(DScope::Abbrev { params, body }) => return self.expand_abbrev(s, head, &params, &body, &items[1..]),
+                Some(DScope::Generative(g)) => return self.apply_generative(s, g, &items[1..]),
+                _ => {}
+            }
         }
         match self.head(&items).unwrap_or("") {
             "subr" => {
@@ -506,6 +511,80 @@ impl Checker {
         self.arena.set_link(slot, t);
         self.grounded(slot, s.span)?;
         Ok(slot)
+    }
+
+    /// `(name d …)` for the `g`th generative type: a node, never expanded.
+    fn apply_generative(&mut self, s: &Syntax, g: u32, args: &[Syntax]) -> R<TyId> {
+        let params = self.generatives[g as usize].params.clone();
+        if args.len() != params.len() {
+            let name = self.name(self.generatives[g as usize].name).to_string();
+            return Err(FxError::at(s.span, format!("`{name}` takes {} description(s), and has {}", params.len(), args.len())));
+        }
+        let mut ds = Vec::new();
+        for ((_, k), a) in params.iter().zip(args) {
+            ds.push(match k {
+                Kind::Type => D::Type(self.parse_type(a)?),
+                Kind::Region => D::Region(self.parse_region(a)?),
+                Kind::Place => D::Region(self.parse_place(a)?),
+                Kind::Effect => D::Effect(self.parse_effect(a)?),
+            });
+        }
+        let t = self.arena.ty(Ty::Named { which: g, args: ds });
+        // What it holds may keep a procedure that reaches itself.
+        self.no_knot(t, s.span)?;
+        Ok(t)
+    }
+
+    /// `(define-generative (name (param kind [+|-]) …) rep)`, or with no
+    /// parameters `(define-generative name rep)`: a new type, equal only to
+    /// itself, whose values are `rep`'s, converted by `up-name` and
+    /// `down-name`. A parameter is invariant unless marked `+` (covariant)
+    /// or `-` (contravariant), which `rep` must bear out.
+    pub(crate) fn define_generative(&mut self, head: &Syntax, rep: &Syntax) -> R<Sym> {
+        let (name, params) = match head.as_proper_list() {
+            Some([n, ps @ ..]) => (n, ps.to_vec()),
+            _ => (head, Vec::new()),
+        };
+        let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a generative type's name"))?;
+        let depth = self.dscope.len();
+        let mut binders = Vec::new();
+        let mut declared = Vec::new();
+        for p in &params {
+            let (n, k, v) = match self.items(p, "a parameter")? {
+                [n, k] => (n.clone(), k.clone(), Variance::Inv),
+                [n, k, v] => {
+                    let v = match v.as_symbol().map(|x| self.name(x)) {
+                        Some("+") => Variance::Co,
+                        Some("-") => Variance::Contra,
+                        _ => return Err(FxError::at(v.span, "a parameter's variance is `+` or `-`")),
+                    };
+                    (n.clone(), k.clone(), v)
+                }
+                _ => return Err(FxError::at(p.span, "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`")),
+            };
+            let n = n.as_symbol().ok_or_else(|| FxError::at(n.span, "a parameter's name"))?;
+            let kind = self.parse_kind(&k)?;
+            if v != Variance::Inv && matches!(kind, Kind::Region | Kind::Place) {
+                self.dscope.truncate(depth);
+                return Err(FxError::at(p.span, "a region or place parameter is invariant: it names where data is"));
+            }
+            let dv = self.arena.dvar_of(n, kind);
+            self.dscope.push((n, DScope::Var(dv, kind)));
+            binders.push((dv, kind));
+            declared.push(v);
+        }
+        let g = self.generatives.len() as u32;
+        let slot = self.arena.ty(Ty::Link(None));
+        self.generatives.push(crate::check::Generative { name, params: binders, variance: declared, rep: slot });
+        // In scope in its own representation: recursion through the name.
+        self.dscope.push((name, DScope::Generative(g)));
+        let r = self.parse_type(rep);
+        self.dscope.truncate(depth);
+        let r = r?;
+        self.arena.set_link(slot, r);
+        self.check_variance(g, rep.span)?;
+        self.dscope.push((name, DScope::Generative(g)));
+        Ok(name)
     }
 
     /// `(define-type name type)`: `name` stands for the type from here on,

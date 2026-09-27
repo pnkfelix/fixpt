@@ -178,6 +178,20 @@ pub enum Ty {
     /// A forwarding slot, for building recursive types: `dletrec` allocates
     /// one per name, parses the bodies against them, then fills them in.
     Link(Option<TyId>),
+    /// A generative type applied to its descriptions: `(name d …)`, where
+    /// `name` is the `which`th `define-generative`. Equal only to itself, by
+    /// its variance, and never unfolded to be compared; looked through by
+    /// every analysis of what a value holds (`docs/research/generative-types.md`).
+    Named { which: u32, args: Vec<D> },
+}
+
+/// How a generative type's parameter may vary: `(name d …) ≤ (name d′ …)`
+/// when each `d` is related to `d′` so.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Variance {
+    Co,
+    Contra,
+    Inv,
 }
 
 impl Ty {
