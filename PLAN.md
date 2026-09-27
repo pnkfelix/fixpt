@@ -1147,7 +1147,14 @@ In the user's order:
    per-procedure effects, `finite` and `data`), and must agree on outputs
    only, so tests become three-way. Staged: the reader and parser first
    (they change rarely); the checker after N1–N3 (`docs/research/gadts.md`);
-   then decide which bootstraps.
+   then decide which bootstraps. Each uses the kind of type that states what
+   its data is: the mirror is nominal wherever the Rust is (`TyId`, `DVar`,
+   `Sym` as generative types, not `int`); the idiomatic one is structural
+   where the data is (`syn`, `datum`, trees, and types as `finite` data, so
+   that size-change can see a walk of a type shrink: today `k-check-mode`
+   peels `poly`s off a type held as an `int`, and must say `spin`).
+   In directories named for which is which: `src/fx-rsmirror/` and
+   `src/fx-idiomatic/`.
 7. **Parametric datatypes** (done 2026-09-27; `docs/fx26.md`): `define-datatype`
    with parameters, and type families that mention themselves with the same
    parameters (regular, so tied as a knot, not expanded without end:

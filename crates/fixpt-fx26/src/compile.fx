@@ -29,7 +29,7 @@
 
 ;; The checker's facts for the program being compiled.
 (define c-facts (ref k-facts @k) (new nil))
-(define c-field-index (subr (maxeff (read @t) (read @k) spin) (k-facts int int) int)
+(define c-field-index (subr (maxeff (read @t) (read @k)) (k-facts int int) int)
   (lambda (fs a b)
     (cond ((null? fs) -1)
           ((and (= (extract (car fs) 1) a) (= (extract (car fs) 2) b)) (extract (car fs) 3))

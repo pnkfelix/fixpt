@@ -105,14 +105,18 @@ impl Checker {
                     if let Some(u) = unbounded {
                         s.push_str(&format!(" ({u})"));
                     }
-                    if !g.values().any(|strict| *strict) && !flat.contains(&s) {
+                    // A call passing its caller's parameters on unchanged
+                    // is harmless; one passing nothing related to them, or
+                    // with a count unbounded or a part that may be cyclic,
+                    // is the one to look at.
+                    if (g.is_empty() || unbounded.is_some()) && !g.values().any(|strict| *strict) && !flat.contains(&s) {
                         flat.push(s);
                     }
                 }
                 Err(if flat.is_empty() {
-                    "each call passes something smaller, but nothing keeps shrinking around every loop of calls".into()
+                    "no argument keeps shrinking around every loop of calls".into()
                 } else {
-                    format!("nothing smaller is passed by {}", flat.join(", "))
+                    format!("nothing smaller, or related, is passed by {}", flat.join(", "))
                 })
             }
         }
@@ -389,6 +393,26 @@ impl Walk<'_> {
         match arena.exp_at(e).clone() {
             Exp::Var(s) => self.bound(s).cloned().unwrap_or_default(),
             Exp::The { exp, .. } => self.tracked(exp),
+            // Either branch's value: what both say, the weaker of the two.
+            Exp::If { then, els, .. } => {
+                let (a, b) = (self.tracked(then), self.tracked(els));
+                a.iter()
+                    .filter_map(|x| {
+                        b.iter().find_map(|y| match (*x, *y) {
+                            (
+                                Tracked::Part { param: p, strict: s, ty: t },
+                                Tracked::Part { param: q, strict: r, ty: u },
+                            ) if p == q && arena.resolve(t) == arena.resolve(u) => {
+                                Some(Tracked::Part { param: p, strict: s && r, ty: t })
+                            }
+                            (Tracked::Int { param: p, offset: o }, Tracked::Int { param: q, offset: n }) if p == q && o == n => {
+                                Some(*x)
+                            }
+                            _ => None,
+                        })
+                    })
+                    .collect()
+            }
             Exp::Extract(x, l) => self
                 .tracked(x)
                 .into_iter()

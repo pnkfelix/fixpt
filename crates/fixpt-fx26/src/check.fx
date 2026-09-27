@@ -1886,7 +1886,7 @@
                 (k-fail m ea eb))))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 ;; The same, for any error at `a`..`b`.
-(define k-prefixing (subr (maxeff checks spin) ((subr (maxeff checks spin) () k-te) int int (subr (maxeff checks spin) () string)) k-te)
+(define k-prefixing (subr checks ((subr checks () k-te) int int (subr checks () string)) k-te)
   (lambda (f a b prefix)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
       (tagcase r
@@ -2661,6 +2661,28 @@
         nil
         (let ((rest (k-sc-shift (cdr ks) k)))
           (tagcase (car ks) (tr-int (p o) (the k-trs (cons (tr-int p (+ o k)) rest))) (else y rest))))))
+;; What both `ks` and `ls` say, the weaker of the two: what is known of
+;; either branch's value.
+(define k-sc-meet-one (subr (maxeff (read @t) spin) (k-tr k-trs) k-trs)
+  (lambda (k ls)
+    (if (null? ls)
+        nil
+        (let ((m (tagcase k
+                   (tr-part (p s t)
+                     (tagcase (car ls)
+                       (tr-part (q r u) (if (and (= p q) (= (k-resolve t) (k-resolve u))) (the k-trs (cons (tr-part p (and s r) t) nil)) (the k-trs nil)))
+                       (else y (the k-trs nil))))
+                   (tr-int (p o)
+                     (tagcase (car ls)
+                       (tr-int (q n) (if (and (= p q) (= o n)) (the k-trs (cons k nil)) (the k-trs nil)))
+                       (else y (the k-trs nil)))))))
+          (if (null? m) (k-sc-meet-one k (cdr ls)) m)))))
+(define k-sc-meet (subr (maxeff (read @t) spin) (k-trs k-trs) k-trs)
+  (lambda (ks ls)
+    (if (null? ks)
+        nil
+        (let ((m (k-sc-meet-one (car ks) ls)) (rest (k-sc-meet (cdr ks) ls)))
+          (if (null? m) rest (the k-trs (cons (car m) rest)))))))
 ;; What is known of `x`'s value.
 (define k-sc-tracked (subr (maxeff kstate spin) (kx k-tscope) k-trs)
   (lambda (x sc)
@@ -2668,6 +2690,7 @@
       (x-var (s a b) (k-sc-trs sc s))
       (x-the (t e a b) (k-sc-tracked e sc))
       (x-extract (e l a b) (k-sc-fields (k-sc-tracked e sc) l))
+      (x-if (p c d a b) (k-sc-meet (k-sc-tracked c sc) (k-sc-tracked d sc)))
       (x-app (f args a b)
         (let ((op (k-sc-op f sc)))
           (cond ((and (k-sc-one? args) (or (string=? op "car") (string=? op "cdr")))
@@ -3036,9 +3059,11 @@
   (lambda (g) (and (not (null? g)) (or (extract (car g) 3) (k-sc-strict-any? (cdr g))))))
 (define k-sc-has-string? (subr pure ((listof string finite) string) bool)
   (lambda (xs s) (and (not (null? xs)) (or (string=? (car xs) s) (k-sc-has-string? (cdr xs) s)))))
-;; The calls, in the order met, that pass nothing strictly smaller, each
-;; once, in words (newest first).
-(define k-sc-flat (subr (maxeff kstate spin) (k-calls (listof string finite) (listof string finite)) (listof string finite))
+;; The calls, in the order met, that pass nothing strictly smaller, and
+;; either nothing related to the caller's parameters or with a hint why;
+;; each once, in words (newest first). One passing its caller's parameters
+;; on unchanged is harmless.
+(define k-sc-flat (subr kstate (k-calls (listof string finite) (listof string finite)) (listof string finite))
   (lambda (cs hs out)
     (if (null? cs)
         out
@@ -3046,14 +3071,18 @@
                (s1 (k-cat5 "the call of `" (k-sc-member-name (extract c 2)) "` in `" (k-sc-member-name (extract c 1)) "`"))
                (s (if (string=? (car hs) "") s1 (k-cat4 s1 " (" (car hs) ")"))))
           (k-sc-flat (cdr cs) (cdr hs)
-                     (if (or (k-sc-strict-any? (extract c 3)) (k-sc-has-string? out s)) out (the (listof string finite) (cons s out))))))))
+                     (if (or (k-sc-strict-any? (extract c 3))
+                             (and (not (null? (extract c 3))) (string=? (car hs) ""))
+                             (k-sc-has-string? out s))
+                         out
+                         (the (listof string finite) (cons s out))))))))
 (define k-sc-escape-why (subr (read @t) () string)
   (lambda ()
     (let ((e (car (get k-sc-escapes))))
       (k-cat5 "`" (k-sc-member-name (cdr e)) "` is named in `" (k-sc-member-name (car e))
               "` other than as a call's operator: whoever is given it may call it again, with anything"))))
 ;; Why the walked calls may not end.
-(define k-sc-calls-why (subr (maxeff kstate spin) () string)
+(define k-sc-calls-why (subr kstate () string)
   (lambda ()
     (let ((all (k-sc-dedup (get k-sc-calls) nil)))
       (cond ((k-sc-close all all (k-length all)) "")
@@ -3063,8 +3092,8 @@
                               (reverse (k-sc-flat (the k-calls (reverse (get k-sc-calls)))
                                                   (the (listof string finite) (reverse (get k-sc-hints))) nil)))))
                (if (null? flat)
-                   "each call passes something smaller, but nothing keeps shrinking around every loop of calls"
-                   (string-append "nothing smaller is passed by " (k-join flat ", ")))))))))
+                   "no argument keeps shrinking around every loop of calls"
+                   (string-append "nothing smaller, or related, is passed by " (k-join flat ", ")))))))))
 ;; Whether every run of the group `bs` ends, so that calls within it need
 ;; not say `spin`: "" if so, and otherwise why not, in words for an error.
 ;; Walked twice: first to learn which parameters every call passes on

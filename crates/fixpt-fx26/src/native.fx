@@ -581,14 +581,14 @@
 ;; does, as a list, first cell first. `n` cells from field `k`.
 
 (define-rec
-  (n-starts (subr (maxeff (alloc @k) spin) (tword int int) (listof bool @k))
+  (n-starts (subr (alloc @k) (tword int int) (listof bool @k))
     (lambda (w i n)
       (if (>= i n)
           nil
           (let* ((k (+ n-word-cell0 i))
                  (step (if (tword-int? w k) (+ 1 (n-operands (tword-int w k))) 1)))
             (cons #t (n-skip w (+ i 1) (- step 1) n))))))
-  (n-skip (subr (maxeff (alloc @k) spin) (tword int int int) (listof bool @k))
+  (n-skip (subr (alloc @k) (tword int int int) (listof bool @k))
     (lambda (w i left n)
       (if (or (= left 0) (>= i n)) (n-starts w i n) (cons #f (n-skip w (+ i 1) (- left 1) n))))))
 (define n-fill-bools (subr (maxeff (read @k) (write @k) spin) ((arrayof bool @k) (listof bool @k) int) unit)
@@ -612,7 +612,7 @@
               (n-starts-at (+ i 1) n starts labels)))))
 
 ;; The cell after `i` where an instruction starts, or `n`.
-(define n-next-start (subr (maxeff (read @k) spin) (int int (arrayof bool @k)) int)
+(define n-next-start (subr (read @k) (int int (arrayof bool @k)) int)
   (lambda (i n starts) (if (or (>= i n) (array-ref starts i)) i (n-next-start (+ i 1) n starts))))
 
 (define n-cells (subr (maxeff assembles spin) (tword int int (arrayof bool @k) (arrayof int @k) int) unit)
