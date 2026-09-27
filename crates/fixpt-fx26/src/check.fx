@@ -556,10 +556,10 @@
 
 (define k-sfail (subr checks (string syn) void)
   (lambda (m s) (k-fail m (syn-start s) (syn-end s))))
-(define k-items (subr checks (syn string) (listof syn @s))
+(define k-items (subr checks (syn string) (listof syn finite))
   (lambda (s what)
     (tagcase s (lst (items d a b) items) (else x (k-sfail (string-append what ": expected a list") s)))))
-(define k-head (subr (read @s) ((listof syn @s)) string)
+(define k-head (subr (read @s) ((listof syn finite)) string)
   (lambda (items) (if (null? items) "" (syn-name (car items)))))
 (define k-name-of (subr checks (syn string) symbol)
   (lambda (s what) (if (syn-symbol? s) (syn-head s) (k-sfail what s))))
@@ -568,7 +568,7 @@
 (define k-nil-syn? (subr (read @s) (syn) bool)
   (lambda (s) (tagcase s (lst (items d a b) (null? items)) (else x #f))))
 ;; The items of a list that may be written `()`.
-(define k-items-or-nil (subr checks (syn string) (listof syn @s))
+(define k-items-or-nil (subr checks (syn string) (listof syn finite))
   (lambda (s what) (if (k-nil-syn? s) nil (k-items s what))))
 
 (define k-parse-kind (subr checks (syn) int)
@@ -618,7 +618,7 @@
     (let ((r (k-parse-region s)))
       (if (k-place? r) r (k-sfail (string-append (k-quote (k-region-show r)) " is not a place") s)))))
 
-(define k-binders-each (subr (maxeff checks spin) ((listof syn @s)) k-binders)
+(define k-binders-each (subr (maxeff checks spin) ((listof syn finite)) k-binders)
   (lambda (bs)
     (if (null? bs)
         nil
@@ -643,7 +643,7 @@
   (lambda (s) (k-binders-each (k-items s "binders"))))
 
 (define-rec
-  (k-effects (subr (maxeff checks spin) ((listof syn @s)) k-eff)
+  (k-effects (subr (maxeff checks spin) ((listof syn finite)) k-eff)
     (lambda (xs) (if (null? xs) nil (let* ((e (k-parse-effect (car xs))) (rest (k-effects (cdr xs)))) (k-union e rest)))))
   (k-parse-effect (subr (maxeff checks spin) (syn) k-eff)
     (lambda (s)
@@ -685,7 +685,7 @@
 (define k-shape (subr checks (bool string syn) unit)
   (lambda (ok shape s) (if ok #u (k-sfail shape s))))
 (define-type k-slots (listof (pairof int syn @t) @t))
-(define k-dletrec-slots (subr (maxeff checks spin) ((listof syn @s)) k-slots)
+(define k-dletrec-slots (subr (maxeff checks spin) ((listof syn finite)) k-slots)
   (lambda (bs)
     (if (null? bs)
         nil
@@ -805,7 +805,7 @@
 (define k-dletrec-grounded (subr (maxeff checks spin) (k-slots syn) unit)
   (lambda (ss s)
     (if (null? ss) #u (begin (k-grounded (car (car ss)) (syn-start s) (syn-end s)) (k-dletrec-grounded (cdr ss) s)))))
-(define k-family-params (subr (maxeff checks spin) ((listof syn @s)) (listof (productof (1 symbol) (2 int)) @t))
+(define k-family-params (subr (maxeff checks spin) ((listof syn finite)) (listof (productof (1 symbol) (2 int)) @t))
   (lambda (ps)
     (if (null? ps)
         nil
@@ -818,16 +818,16 @@
 
 ;; `(define-type (name (param kind) …) type)`: nothing is read until it is
 ;; used.
-(define k-define-family (subr (maxeff checks spin) (symbol (listof syn @s) syn) unit)
+(define k-define-family (subr (maxeff checks spin) (symbol (listof syn finite) syn) unit)
   (lambda (name params body) (k-push-desc name (ds-abbrev (k-family-params params) body))))
 ;; Push a scope's entries, the first first.
 (define k-push-all (subr (maxeff kstate spin) (k-scope) unit)
   (lambda (bs) (if (null? bs) #u (begin (k-push-desc (car (car bs)) (cdr (car bs))) (k-push-all (cdr bs))))))
 
 (define-rec
-  (k-parse-types (subr (maxeff checks spin) ((listof syn @s)) k-ids)
+  (k-parse-types (subr (maxeff checks spin) ((listof syn finite)) k-ids)
     (lambda (xs) (if (null? xs) nil (let* ((t (k-parse-type (car xs))) (rest (k-parse-types (cdr xs)))) (cons t rest)))))
-  (k-parse-parts (subr (maxeff checks spin) ((listof syn @s) k-parts) k-parts)
+  (k-parse-parts (subr (maxeff checks spin) ((listof syn finite) k-parts) k-parts)
     (lambda (ps done)
       (if (null? ps)
           (reverse done)
@@ -954,7 +954,7 @@
                   (else (k-sfail "expected a type" s))))))))
   ;; `(dletrec ((name type) …) type)`: each name gets a forwarding slot
   ;; before any body is read, so the bodies can refer to it and each other.
-  (k-parse-dletrec (subr (maxeff checks spin) (syn (listof syn @s)) int)
+  (k-parse-dletrec (subr (maxeff checks spin) (syn (listof syn finite)) int)
     (lambda (s items)
       (begin
         (k-shape (= (k-length items) 3) "`(dletrec ((name type) …) type)`" s)
@@ -967,7 +967,7 @@
           (begin (set k-dscope saved) body)))))
   ;; `(mu name type)`: a recursive type, anonymous; the same as `(dletrec
   ;; ((name type)) name)`.
-  (k-parse-mu (subr (maxeff checks spin) (syn (listof syn @s)) int)
+  (k-parse-mu (subr (maxeff checks spin) (syn (listof syn finite)) int)
     (lambda (s items)
       (begin
         (k-shape (= (k-length items) 3) "`(mu name type)`" s)
@@ -988,7 +988,7 @@
             (begin (k-set-link (car (car ss)) t) (k-dletrec-fill (cdr ss)))))))
   ;; A use of a parametric abbreviation: its body, read with each parameter
   ;; bound to the description given for it.
-  (k-expand-abbrev (subr (maxeff checks spin) (syn symbol (listof (productof (1 symbol) (2 int)) @t) syn (listof syn @s)) int)
+  (k-expand-abbrev (subr (maxeff checks spin) (syn symbol (listof (productof (1 symbol) (2 int)) @t) syn (listof syn finite)) int)
     (lambda (s name ps body args)
       (cond
         ((not (= (k-length args) (k-length ps)))
@@ -1005,7 +1005,7 @@
              (set k-expanding (+ (get k-expanding) 1))
              (let ((t (k-parse-type body)))
                (begin (set k-expanding (- (get k-expanding) 1)) (set k-dscope saved) t))))))))
-  (k-abbrev-args (subr (maxeff checks spin) ((listof (productof (1 symbol) (2 int)) @t) (listof syn @s)) k-scope)
+  (k-abbrev-args (subr (maxeff checks spin) ((listof (productof (1 symbol) (2 int)) @t) (listof syn finite)) k-scope)
     (lambda (ps args)
       (if (null? ps)
           nil
@@ -3455,7 +3455,7 @@
 ;;; ------------------------------------------------------------ programs
 
 ;; The initial environment: `(name type)` for each binding.
-(define k-standard (subr (maxeff checks spin) ((listof syn @s)) unit)
+(define k-standard (subr (maxeff checks spin) ((listof syn finite)) unit)
   (lambda (entries)
     (if (null? entries)
         #u
@@ -3601,7 +3601,7 @@
 ;; The entry point: check a program's trees, in the initial environment
 ;; written `standard`. What each definition and expression is, in order,
 ;; or the first error.
-(define check-program (subr (maxeff checks spin) ((listof syn @s) (listof top finite)) k-result)
+(define check-program (subr (maxeff checks spin) ((listof syn finite) (listof top finite)) k-result)
   (lambda (standard forms)
     (prompt k-tag
       (begin (k-reset) (k-standard standard) (k-ahead forms) (k-ok (k-forms forms nil)))

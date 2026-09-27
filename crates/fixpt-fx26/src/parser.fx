@@ -108,17 +108,17 @@
 (define syn-nil? (subr (read @s) (syn) bool)
   (lambda (s) (tagcase s (lst (items d a b) (null? items)) (else x #f))))
 ;; A proper list's items; `what`, when it is not one.
-(define syn-items (subr parses (syn string) (listof syn @s))
+(define syn-items (subr parses (syn string) (listof syn finite))
   (lambda (s what)
     (tagcase s (lst (items d a b) items) (else x (pfail (string-append what ": expected a list") s)))))
 (define syn-int (subr pure (syn) int)
   (lambda (s) (tagcase s (atom (d a b) (if (datum-int? d) (datum-int-value d) -1)) (else x -1))))
 
-(define len (subr (maxeff (read @s) spin) ((listof syn @s)) int)
+(define len (subr (maxeff (read @s)) ((listof syn finite)) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (len (cdr xs))))))
-(define nth (subr (maxeff parses spin) ((listof syn @s) int) syn)
+(define nth (subr (maxeff parses) ((listof syn finite) int) syn)
   (lambda (xs i) (if (= i 0) (car xs) (nth (cdr xs) (- i 1)))))
-(define drop (subr (maxeff (read @s) spin) ((listof syn @s) int) (listof syn @s))
+(define drop (subr (maxeff (read @s)) ((listof syn finite) int) (listof syn finite))
   (lambda (xs i) (if (= i 0) xs (drop (cdr xs) (- i 1)))))
 
 ;; A label or tag: a name, or a positive integer, which is its digits.
@@ -128,20 +128,20 @@
           ((> (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else (pfail "a label is a name or a positive integer" s)))))
 
-(define keep (subr (maxeff (read @s) (alloc @a) spin) ((listof syn @s)) syns-a)
+(define keep (subr (maxeff (read @s) (alloc @a)) ((listof syn finite)) syns-a)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (keep (cdr xs))))))
 
 ;; `(tag x …)` with `n` items, or fail with `shape`.
-(define arity (subr (maxeff parses spin) ((listof syn @s) int string int int) unit)
+(define arity (subr (maxeff parses) ((listof syn finite) int string int int) unit)
   (lambda (items n shape a b) (if (= (len items) n) #u (pfail-at shape a b))))
-(define at-least (subr (maxeff parses spin) ((listof syn @s) int string int int) unit)
+(define at-least (subr (maxeff parses) ((listof syn finite) int string int int) unit)
   (lambda (items n shape a b) (if (< (len items) n) (pfail-at shape a b) #u)))
 
-(define parse-params (subr (maxeff parses spin) (syn) (listof (productof (1 symbol) (2 syns-a)) finite))
+(define parse-params (subr (maxeff parses) (syn) (listof (productof (1 symbol) (2 syns-a)) finite))
   (lambda (ps)
     (if (syn-nil? ps)
         nil
-        (letrec ((each (subr (maxeff parses spin) ((listof syn @s)) (listof (productof (1 symbol) (2 syns-a)) finite))
+        (letrec ((each (subr (maxeff parses) ((listof syn finite)) (listof (productof (1 symbol) (2 syns-a)) finite))
                    (lambda (xs)
                      (if (null? xs)
                          nil
@@ -163,16 +163,16 @@
 (define arm-else? (subr (read @s) (syn) bool)
   (lambda (c) (tagcase c (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) 'else))) (else x #f))))
 
-(define parse-names (subr (maxeff parses spin) ((listof syn @s)) names)
+(define parse-names (subr (maxeff parses) ((listof syn finite)) names)
   (lambda (xs) (if (null? xs) nil (cons (syn-symbol (car xs)) (parse-names (cdr xs))))))
 
 ;;; ------------------------------------------------------------ expressions
 
 (define-rec
-  (parse-exps (subr (maxeff parses spin) ((listof syn @s)) (listof exp finite))
+  (parse-exps (subr (maxeff parses spin) ((listof syn finite)) (listof exp finite))
     (lambda (xs) (if (null? xs) nil (cons (parse-exp (car xs)) (parse-exps (cdr xs))))))
   ;; One or more expressions, an implicit `begin` spanning `a`..`b`.
-  (parse-body (subr (maxeff parses spin) ((listof syn @s) int int) exp)
+  (parse-body (subr (maxeff parses spin) ((listof syn finite) int int) exp)
     (lambda (forms a b)
       (cond ((null? forms) (pfail-at "an empty body" a b))
             ((null? (cdr forms)) (parse-exp (car forms)))
@@ -197,7 +197,7 @@
               (pfail "not an expression in the FX-26 kernel" s)
               (parse-form s items (syn-head (car items)) a b)))
         (else x (pfail "not an expression in the FX-26 kernel" s)))))
-  (parse-form (subr (maxeff parses spin) (syn (listof syn @s) symbol int int) exp)
+  (parse-form (subr (maxeff parses spin) (syn (listof syn finite) symbol int int) exp)
     (lambda (s items head a b)
       (cond
         ((symbol=? head 'lambda)
@@ -212,10 +212,10 @@
                 ;; `(letfreeze (r p) body …)` freezes into place `p`;
                 ;; `(letfreeze r body …)` into the heap.
                 (let* ((given (nth items 1))
-                       (pair (the (listof syn @s)
+                       (pair (the (listof syn finite)
                                (tagcase given
-                                 (lst (xs d a2 b2) (if (and (symbol=? head 'letfreeze) (= (len xs) 2)) xs (the (listof syn @s) nil)))
-                                 (else x (the (listof syn @s) nil)))))
+                                 (lst (xs d a2 b2) (if (and (symbol=? head 'letfreeze) (= (len xs) 2)) xs (the (listof syn finite) nil)))
+                                 (else x (the (listof syn finite) nil)))))
                        (name (if (null? pair) given (car pair)))
                        (into (if (null? pair) 'heap (syn-symbol (nth pair 1)))))
                   (if (and (syn-symbol? name) (not (char=? (string-ref (syn-name name) 0) #\@)))
@@ -272,7 +272,7 @@
          (begin (arity items 4 "`(prompt tag body handler)`" a b)
                 (e-prompt (parse-exp (nth items 1)) (parse-exp (nth items 2)) (parse-exp (nth items 3)) a b)))
         (else (let ((f (parse-exp (car items)))) (e-app f (parse-exps (cdr items)) a b))))))
-  (parse-letrec-bindings (subr (maxeff parses spin) ((listof syn @s)) (listof (productof (1 symbol) (2 syn) (3 exp)) finite))
+  (parse-letrec-bindings (subr (maxeff parses spin) ((listof syn finite)) (listof (productof (1 symbol) (2 syn) (3 exp)) finite))
     (lambda (bs)
       (if (null? bs)
           nil
@@ -282,7 +282,7 @@
                   (cons (product (1 name) (2 (nth parts 1)) (3 init)) (parse-letrec-bindings (cdr bs))))
                 (pfail "a letrec binding is `(name type expression)`" (car bs)))))))
   ;; `(let ((name expression) …) …)`; `()` is no bindings.
-  (parse-let-bindings (subr (maxeff parses spin) ((listof syn @s)) (listof (productof (1 symbol) (2 exp)) finite))
+  (parse-let-bindings (subr (maxeff parses spin) ((listof syn finite)) (listof (productof (1 symbol) (2 exp)) finite))
     (lambda (bs)
       (if (null? bs)
           nil
@@ -292,7 +292,7 @@
                   (cons (product (1 name) (2 init)) (parse-let-bindings (cdr bs))))
                 (pfail "a let binding is `(name expression)`" (car bs)))))))
   ;; `let*`: nested one-binding `let`s, each spanning its binding.
-  (parse-let* (subr (maxeff parses spin) ((listof syn @s) exp) exp)
+  (parse-let* (subr (maxeff parses spin) ((listof syn finite) exp) exp)
     (lambda (bs body)
       (if (null? bs)
           body
@@ -305,7 +305,7 @@
                          inner (syn-start (car bs)) (syn-end (car bs))))
                 (pfail "a let* binding is `(name expression)`" (car bs)))))))
   ;; `(cond (test e …) … (else e …))`: nested `if`s, each spanning its clause.
-  (parse-cond (subr (maxeff parses spin) ((listof syn @s) int int) exp)
+  (parse-cond (subr (maxeff parses spin) ((listof syn finite) int int) exp)
     (lambda (clauses a b)
       (cond ((null? clauses) (pfail-at "a `cond` needs at least an `else` clause" a b))
             (else
@@ -321,20 +321,20 @@
                               (rest (parse-cond (cdr clauses) a b)))
                          (e-if test then rest (syn-start c) (syn-end c))))))))))
   ;; `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
-  (parse-and (subr (maxeff parses spin) ((listof syn @s) int int) exp)
+  (parse-and (subr (maxeff parses spin) ((listof syn finite) int int) exp)
     (lambda (xs a b)
       (cond ((null? xs) (e-bool #t a b))
             ((null? (cdr xs)) (parse-exp (car xs)))
             (else (let* ((x (parse-exp (car xs))) (rest (parse-and (cdr xs) a b)))
                     (e-if x rest (e-bool #f a b) a b))))))
   ;; `(or a b …)`: `(if a #t (or b …))`, and `(or)` is `#f`.
-  (parse-or (subr (maxeff parses spin) ((listof syn @s) int int) exp)
+  (parse-or (subr (maxeff parses spin) ((listof syn finite) int int) exp)
     (lambda (xs a b)
       (cond ((null? xs) (e-bool #f a b))
             ((null? (cdr xs)) (parse-exp (car xs)))
             (else (let* ((x (parse-exp (car xs))) (rest (parse-or (cdr xs) a b)))
                     (e-if x (e-bool #t a b) rest a b))))))
-  (parse-bloblet (subr (maxeff parses spin) (symbol (listof syn @s) int int) exp)
+  (parse-bloblet (subr (maxeff parses spin) (symbol (listof syn finite) int int) exp)
     (lambda (op args a b)
       (let ((n (len args)))
         (cond ((and (symbol=? op 'make-bloblet) (>= n 1)) (e-bloblet op -1 (parse-exps args) a b))
@@ -349,7 +349,7 @@
                    (and (symbol=? op 'bloblet-set-byte!) (= n 3)) (and (symbol=? op 'bloblet-bytes) (= n 1)))
                (e-bloblet op -1 (parse-exps args) a b))
               (else (pfail-at (string-append "`(" (string-append (symbol->string op) " …)`")) a b))))))
-  (parse-fields (subr (maxeff parses spin) ((listof syn @s)) (listof (productof (1 symbol) (2 exp)) finite))
+  (parse-fields (subr (maxeff parses spin) ((listof syn finite)) (listof (productof (1 symbol) (2 exp)) finite))
     (lambda (ps)
       (if (null? ps)
           nil
@@ -359,7 +359,7 @@
                   (cons (product (1 l) (2 e)) (parse-fields (cdr ps))))
                 (pfail "`(product (label expression) …)`" (car ps)))))))
   ;; The arms of a `tagcase` other than `else`.
-  (parse-arms (subr (maxeff parses spin) ((listof syn @s)) (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite))
+  (parse-arms (subr (maxeff parses spin) ((listof syn finite)) (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite))
     (lambda (cs)
       (cond ((null? cs) nil)
             ((arm-else? (car cs))
@@ -377,7 +377,7 @@
                           (body (parse-body (drop parts 2) (syn-start c) (syn-end c))))
                      (cons (product (1 tag) (2 fields) (3 ns) (4 body)) (parse-arms (cdr cs))))))))))
   ;; The `else` arm, as a list of none or one.
-  (parse-else (subr (maxeff parses spin) ((listof syn @s)) (listof (productof (1 symbol) (2 exp)) finite))
+  (parse-else (subr (maxeff parses spin) ((listof syn finite)) (listof (productof (1 symbol) (2 exp)) finite))
     (lambda (cs)
       (cond ((null? cs) nil)
             ((arm-else? (car cs))
@@ -391,7 +391,7 @@
             (else (parse-else (cdr cs)))))))
 
 ;; A `define-rec`'s bindings, as a `letrec`'s are.
-(define parse-rec-bindings (subr (maxeff parses spin) ((listof syn @s)) (listof (productof (1 symbol) (2 syn) (3 exp)) finite))
+(define parse-rec-bindings (subr (maxeff parses spin) ((listof syn finite)) (listof (productof (1 symbol) (2 syn) (3 exp)) finite))
   (lambda (bs)
     (if (null? bs)
         nil
@@ -444,19 +444,19 @@
 
 (define mk-symbol (subr pure (string int int) syn) (lambda (n a b) (atom (datum-symbol n) a b)))
 (define mk-int (subr pure (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
-(define syn-datums (subr (maxeff (read @s) (alloc @a) spin) ((listof syn @s)) (listof datum finite))
+(define syn-datums (subr (maxeff (read @s) (alloc @a)) ((listof syn finite)) (listof datum finite))
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
-(define mk-list (subr (maxeff (read @s) (read @a) (alloc @a) spin) ((listof syn @s) int int) syn)
+(define mk-list (subr (maxeff (read @s) (read @a) (alloc @a)) ((listof syn finite) int int) syn)
   (lambda (items a b) (lst items (datum-list (syn-datums items)) a b)))
 
 ;; `(1 m1) (2 m2) …`, from `i`.
-(define dt-labelled (subr (maxeff (read @s) (alloc @s) (read @a) (alloc @a) spin) ((listof syn @s) int int int) (listof syn @s))
+(define dt-labelled (subr (maxeff (read @s) (alloc @s) (read @a) (alloc @a)) ((listof syn finite) int int int) (listof syn finite))
   (lambda (ms i a b)
     (if (null? ms)
         nil
         (let* ((pair (mk-list (cons (mk-int i a b) (cons (car ms) nil)) a b)) (rest (dt-labelled (cdr ms) (+ i 1) a b)))
           (cons pair rest)))))
-(define dt-arms (subr (maxeff parses spin) ((listof syn @s) int int) (listof syn @s))
+(define dt-arms (subr (maxeff parses) ((listof syn finite) int int) (listof syn finite))
   (lambda (vs a b)
     (if (null? vs)
         nil
@@ -467,18 +467,18 @@
                      (arm (mk-list (cons (car parts) (cons prod nil)) a b))
                      (rest (dt-arms (cdr vs) a b)))
                 (cons arm rest)))))))
-(define dt-params (subr (maxeff (read @s) (alloc @a) spin) ((listof syn @s) int) (listof (productof (1 symbol) (2 syns-a)) finite))
+(define dt-params (subr (maxeff (read @s) (alloc @a)) ((listof syn finite) int) (listof (productof (1 symbol) (2 syns-a)) finite))
   (lambda (ms i)
     (if (null? ms)
         nil
         (cons (product (1 (string->symbol (string-append "%x" (int->string i)))) (2 (the syns-a nil))) (dt-params (cdr ms) (+ i 1))))))
-(define dt-fields (subr (maxeff (read @s) (alloc @a) spin) ((listof syn @s) int int int) (listof (productof (1 symbol) (2 exp)) finite))
+(define dt-fields (subr (maxeff (read @s) (alloc @a)) ((listof syn finite) int int int) (listof (productof (1 symbol) (2 exp)) finite))
   (lambda (ms i a b)
     (if (null? ms)
         nil
         (cons (product (1 (string->symbol (int->string i))) (2 (e-var (string->symbol (string-append "%x" (int->string i))) a b)))
               (dt-fields (cdr ms) (+ i 1) a b)))))
-(define dt-constructors (subr (maxeff parses spin) (syn (listof syn @s) int int) (listof top finite))
+(define dt-constructors (subr (maxeff parses) (syn (listof syn finite) int int) (listof top finite))
   (lambda (name vs a b)
     (if (null? vs)
         nil
@@ -490,7 +490,7 @@
                (ctor (t-define (syn-symbol tag) (the syns-a (cons ty nil)) (e-lambda (dt-params members 1) body a b) a b))
                (rest (dt-constructors name (cdr vs) a b)))
           (cons ctor rest)))))
-(define parse-datatype (subr (maxeff parses spin) (syn) (listof top finite))
+(define parse-datatype (subr (maxeff parses) (syn) (listof top finite))
   (lambda (s)
     (let* ((items (syn-items s "a datatype")) (a (syn-start s)) (b (syn-end s)))
       (if (or (< (len items) 3) (not (syn-symbol? (nth items 1))))
@@ -503,7 +503,7 @@
 (define append-tops (subr (maxeff (read @a) (alloc @a)) ((listof top finite) (listof top finite)) (listof top finite))
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))
 
-(define parse-tops (subr (maxeff parses spin) ((listof syn @s)) (listof top finite))
+(define parse-tops (subr (maxeff parses spin) ((listof syn finite)) (listof top finite))
   (lambda (xs)
     (cond ((null? xs) nil)
           ((datatype? (car xs)) (let* ((made (parse-datatype (car xs))) (rest (parse-tops (cdr xs)))) (append-tops made rest)))
@@ -513,5 +513,5 @@
 ;; prompt catches every failure, but its tag is a global whose type names
 ;; @p, so the control effect stays in the type, as the reader's on @e do;
 ;; @p is this program's own, so that is still licensed.
-(define parse-program (subr (maxeff parses spin) ((listof syn @s)) presult)
+(define parse-program (subr (maxeff parses spin) ((listof syn finite)) presult)
   (lambda (forms) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r))))
