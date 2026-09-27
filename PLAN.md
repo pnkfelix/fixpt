@@ -1111,10 +1111,11 @@ the order it will be done. Each is committed when done, and marked here.
 
 In the user's order:
 1. **Places and regions**: split what FX-26 calls a region into places
-   (for allocation) and regions (for analysis), first as a refactoring
-   with no change of meaning (`docs/research/places-and-regions.md`,
-   PR1), then several regions in a place, `letfreeze` and `const`,
-   `where` constraints (PR2–PR5). Outlives between places later (PR6).
+   (for allocation) and regions (for analysis), toward `letfreeze`
+   (`docs/research/places-and-regions.md`, its "Steps"): places a kind of
+   their own (done), the lifetime order by nesting, bounded region
+   binders and allocators taking a place and a region, `heap` as a place,
+   `letfreeze` and `(const p)`; written outlives constraints later.
 2. **Confirming a type at run time**: `confirm`, sizes, and walking
    cyclic data without diverging (`docs/research/confirmation.md`,
    CF1–CF5).
