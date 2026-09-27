@@ -6,7 +6,7 @@
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
-use crate::ast::{Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Ty, TyId, Variance};
+use crate::ast::{Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
@@ -276,6 +276,25 @@ impl Checker {
                 let (binders, body) = body?;
                 Ok(self.arena.ty(Ty::Poly { binders, body }))
             }
+            // `(vec T size)` or `(vec T size p)`: a list frozen in the heap,
+            // or into place `p`, with `size` elements.
+            "vec" => {
+                let (t, size, place) = match &items[..] {
+                    [_, t, n] => (t, n, None),
+                    [_, t, n, p] => (t, n, Some(p)),
+                    _ => return Err(FxError::at(s.span, "`(vec type size)` or `(vec type size place)`")),
+                };
+                let elem = self.parse_type(t)?;
+                let size = self.parse_size(size)?;
+                let region = match place {
+                    None => Region::Frozen(None, true),
+                    Some(p) => match self.parse_place(p)? {
+                        Region::Var(v) => Region::Frozen(Some(v), true),
+                        _ => Region::Frozen(None, true),
+                    },
+                };
+                Ok(self.arena.ty(Ty::Vec { elem, size, region }))
+            }
             "ref" => {
                 let [_, t, r] = &items[..] else {
                     return Err(FxError::at(s.span, "`(ref type region)`"));
@@ -527,6 +546,19 @@ impl Checker {
         self.arena.set_link(slot, t);
         self.grounded(slot, s.span)?;
         Ok(slot)
+    }
+
+    /// A size: a natural literal, or `finite`, some number not known.
+    pub(crate) fn parse_size(&mut self, s: &Syntax) -> R<Size> {
+        if let Some(n) = self.literal_int(s)
+            && n >= 0
+        {
+            return Ok(Size::lit(n));
+        }
+        if s.as_symbol().is_some_and(|x| self.name(x) == "finite") {
+            return Ok(Size::Finite);
+        }
+        Err(FxError::at(s.span, "a size is a natural number, or `finite`"))
     }
 
     /// What `(proves prop)` states: its type, with the lemma kept pending.
@@ -812,6 +844,35 @@ impl Checker {
             // `(acyclic e (x body) else)`: `(let ((%acyclic-value e)) (if
             // (acyclic? %acyclic-value) (let ((x (certify-acyclic
             // %acyclic-value))) body) else))`.
+            // `(confirm-length e k (x body) else)`: `(let ((%confirm-value
+            // e)) (if (length-is? %confirm-value k) (let ((x (certify-length
+            // %confirm-value k))) body) else))`.
+            "confirm-length" => {
+                let usage = "`(confirm-length expression length (name body) else)`";
+                let [_, e, n, arm, els] = &items[..] else {
+                    return Err(FxError::at(span, usage));
+                };
+                let Some(k) = self.literal_int(n).filter(|k| *k >= 0) else {
+                    return Err(FxError::at(n.span, "a length is a natural number"));
+                };
+                let [x, body] = self.items(arm, usage)? else {
+                    return Err(FxError::at(arm.span, usage));
+                };
+                let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
+                let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+                let var = |c: &mut Checker, n: &str| {
+                    let s = c.interner.intern(n);
+                    c.arena.exp(span, Exp::Var(s))
+                };
+                let tmp = self.interner.intern("%confirm-value");
+                let (f, a, l) = (var(self, "length-is?"), var(self, "%confirm-value"), self.arena.exp(span, Exp::Int(k)));
+                let test = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
+                let (f, a, l) = (var(self, "certify-length"), var(self, "%confirm-value"), self.arena.exp(span, Exp::Int(k)));
+                let cert = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
+                let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
+                let branch = self.arena.exp(span, Exp::If { test, then, els });
+                Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
+            }
             "acyclic" => {
                 let usage = "`(acyclic expression (name body) else)`";
                 let [_, e, arm, els] = &items[..] else {

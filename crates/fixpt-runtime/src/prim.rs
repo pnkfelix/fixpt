@@ -862,6 +862,15 @@ prims! {
         }
         Ok(Value::TRUE)
     });
+    // The first of two: `certify-length`, which only retypes its value.
+    "%fx26-first", 2, Some(2), simple!(|_rt, a| Ok(a[0]));
+    // A proper list of exactly `n` elements: what FX-26's `confirm-length`
+    // asks. A cyclic list is none (`list_to_vec` stops on a cycle).
+    "%fx26-length-is?", 2, Some(2), simple!(|rt, a| {
+        if !a[1].is_fixnum() { return rt.type_error("a fixnum", a[1]); }
+        let n = a[1].as_fixnum();
+        Ok(Value::boolean(rt.heap.list_to_vec(a[0]).is_some_and(|items| items.len() as i64 == n)))
+    });
     // A proper list: ends in `()`, and has no cycle (tortoise and hare).
     "%fx26-list?", 1, Some(1), simple!(|rt, a| {
         let (mut slow, mut fast) = (a[0], a[0]);

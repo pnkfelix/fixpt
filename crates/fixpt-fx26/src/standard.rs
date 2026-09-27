@@ -99,6 +99,11 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // where it was `const` (`docs/research/confirmation.md`, CF0).
     ("acyclic?", "(poly ((t data)) (subr pure (t) bool))"),
     ("certify-acyclic", "(poly ((t data)) (subr pure (t) t))"),
+    // `(confirm-length e n (x body) else)` is these two: whether a frozen
+    // list is proper and has `n` elements; and, of a variable just found
+    // so, its value as a `(vec T n)` (`docs/research/sizes.md`).
+    ("length-is?", "(poly ((l data)) (subr pure (l int) bool))"),
+    ("certify-length", "(poly ((l data)) (subr pure (l int) l))"),
     ("datum-pair?", "(subr pure (datum) bool)"),
     ("datum-null?", "(subr pure (datum) bool)"),
     ("datum-car", "(subr pure (datum) datum)"),

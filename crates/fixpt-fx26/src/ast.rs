@@ -188,6 +188,40 @@ pub enum Ty {
     /// its variance, and never unfolded to be compared; looked through by
     /// every analysis of what a value holds (`docs/research/generative-types.md`).
     Named { which: u32, args: Vec<D> },
+    /// `(vec T size)`: a list frozen at `region` (always `finite`) with
+    /// `size` elements, or some number if `size` is `finite`
+    /// (`docs/research/sizes.md`).
+    Vec { elem: TyId, size: Size, region: Region },
+}
+
+/// A list's length, as far as it is known: some number (`finite`), or a
+/// linear expression in size variables, `k + Σ cᵢ·vᵢ`.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Size {
+    Finite,
+    Lin { k: i64, terms: Vec<(DVar, i64)> },
+}
+
+impl Size {
+    pub fn lit(k: i64) -> Size {
+        Size::Lin { k, terms: Vec::new() }
+    }
+
+    /// The literal this is, if it is one.
+    pub fn as_lit(&self) -> Option<i64> {
+        match self {
+            Size::Lin { k, terms } if terms.is_empty() => Some(*k),
+            _ => None,
+        }
+    }
+
+    /// `self + d`; `finite` stays `finite`.
+    pub fn plus(&self, d: i64) -> Size {
+        match self {
+            Size::Finite => Size::Finite,
+            Size::Lin { k, terms } => Size::Lin { k: k + d, terms: terms.clone() },
+        }
+    }
 }
 
 /// How a generative type's parameter may vary: `(name d …) ≤ (name d′ …)`

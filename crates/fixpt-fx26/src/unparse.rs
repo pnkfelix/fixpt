@@ -31,6 +31,29 @@ impl Checker {
         format!("({op} {})", self.show_region(r))
     }
 
+    /// A size: `finite`, a literal, a variable, or `(+ …)` / `(- v k)`.
+    pub fn show_size(&self, s: &crate::ast::Size) -> String {
+        match s {
+            crate::ast::Size::Finite => "finite".into(),
+            crate::ast::Size::Lin { k, terms } => {
+                let mut parts: Vec<String> = terms
+                    .iter()
+                    .map(|(v, c)| {
+                        let n = self.interner.name(self.arena.dvar_name(*v)).to_string();
+                        if *c == 1 { n } else { format!("(* {c} {n})") }
+                    })
+                    .collect();
+                match (parts.len(), *k) {
+                    (0, k) => k.to_string(),
+                    (1, 0) => parts.pop().expect("one"),
+                    (1, k) if k < 0 => format!("(- {} {})", parts[0], -k),
+                    (_, 0) => format!("(+ {})", parts.join(" ")),
+                    (_, k) => format!("(+ {} {k})", parts.join(" ")),
+                }
+            }
+        }
+    }
+
     /// `pure`, a single atom, or `(maxeff …)`.
     pub fn show_effect(&self, e: &Effect) -> String {
         let atoms: Vec<String> = e.0.iter().map(|a| self.show_atom(*a)).collect();
@@ -142,6 +165,15 @@ impl Checker {
                 let sep = if fs.is_empty() { "" } else { " " };
                 format!("(bloblet ({head}{sep}{}) {})", fs.join(" "), self.show_region(region))
             }
+            Ty::Vec { elem, size, region } => match region {
+                Region::Frozen(Some(p), _) => format!(
+                    "(vec {} {} {})",
+                    self.show_ty_on(elem, path),
+                    self.show_size(&size),
+                    self.interner.name(self.arena.dvar_name(p))
+                ),
+                _ => format!("(vec {} {})", self.show_ty_on(elem, path), self.show_size(&size)),
+            },
             Ty::Named { which, args } => {
                 let name = self.interner.name(self.generatives[which as usize].name).to_string();
                 if args.is_empty() {

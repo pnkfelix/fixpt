@@ -462,8 +462,15 @@ impl Walk<'_> {
                     .into_iter()
                     .filter_map(|k| {
                         let Tracked::Part { param, ty: Some(ty), .. } = k else { return None };
-                        let Ty::Pair(a, b, Region::Frozen(_, true)) = arena.get(arena.resolve(ty)) else { return None };
-                        Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *a } else { *b }) })
+                        match arena.get(arena.resolve(ty)) {
+                            Ty::Pair(a, b, Region::Frozen(_, true)) => {
+                                Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *a } else { *b }) })
+                            }
+                            // A `vec`'s tail is a `vec` too: the same type
+                            // serves to know it is finite.
+                            Ty::Vec { elem, .. } => Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *elem } else { ty }) }),
+                            _ => None,
+                        }
                     })
                     .collect(),
                 (Some("datum-car" | "datum-cdr"), [x]) => self
