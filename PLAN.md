@@ -1045,7 +1045,12 @@ the order it will be done. Each is committed when done, and marked here.
 7. **Continuations cheaper to capture**: one-shot continuations, or a
    segmented stack (a stack cache, as Clinger, Hartheimer and Ost
    describe), measured on a benchmark that captures heavily (the
-   self-compile's reader captures 326 k times through `callcomp`).
+   self-compile's reader captured 326 k times through `callcomp`).
+   *(Deferred 2026-09-26: `bench/captures.fx` measures a capture at
+   about 0.2 µs plus 1 ns a word of stack, and nothing captures often
+   now. The self-compile captures 6 times since the reader suspends only
+   when its input runs out; see docs/performance.md, "What a capture
+   costs". Worth it for a workload that captures deeply and often.)*
 8. **The reader's cursor**: the eager reader allocates a cursor for each
    character it reads; a cursor kept in place, or a reader that returns
    its position without allocating.

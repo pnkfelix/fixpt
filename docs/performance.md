@@ -873,3 +873,25 @@ predicts outright, with the same resume points as `invoke`.
 | `closures`                | 20.8 ms | 19.2 ms |
 
 Stage 2 stays at 0.18 s.
+
+## What a capture costs
+
+`bench/captures.fx` captures a composable continuation 20 calls deep,
+aborts with it to the prompt's handler, and resumes it at once, 20,000
+times. `FIXPT_CALLOUTS=1`, register code, instrumented:
+
+| depth | words per capture | `callcomp` | `resume` |
+| ----- | ----------------- | ---------- | -------- |
+| 20    | 122               | 5 ms       | 1 ms     |
+| 200   | 1,202             | 25 ms      | 11 ms    |
+
+A capture copies the stack at about 1 ns a word, plus about 0.2 µs
+whatever the depth. A whole round (prompt, capture, abort, resume) is
+0.56 µs at depth 20, uninstrumented (11.3 ms for the 20,000).
+
+No program here captures often any more. The self-compile captures 6
+times since the reader stopped suspending for each character, and the
+REPL's reader captures once per character typed. A stack cache or
+one-shot continuations (PLAN.md queue, item 7) would take the copying
+out, but that is a small part of a round until the stack is hundreds of
+frames deep. So it waits for a workload that captures deeply and often.
