@@ -533,14 +533,27 @@
 (define checked-extracts (subr (maxeff (read @globals) (read @t)) () k-facts) (lambda () (get k-extracts)))
 ;; Each expression synthesized: where it starts and ends, and a summary of
 ;; its effect for a compiler (0 pure: no atom at all, so no `spin` either;
-;; 1 reads only; 2 anything else), newest first. The Rust checker's
+;; 1 reads only; 3 may keep its continuation for later, write a global, or
+;; do what an effect variable stands for, which a global's value may change
+;; across; 2 anything else), newest first. The Rust checker's
 ;; `effect_summaries` is the same.
 (define k-effect-notes (ref k-facts @t) (new nil))
 (define checked-effects (subr (maxeff (read @globals) (read @t)) () k-facts) (lambda () (get k-effect-notes)))
+;; Whether `e` may keep its continuation for later, write a global, or do
+;; what an effect variable stands for.
+(define k-disrupts? (subr (read @globals) (k-eff) bool)
+  (lambda (e)
+    (and (not (null? e))
+         (or (tagcase (car e)
+               (a-comefrom (r) #t)
+               (a-var (v) #t)
+               (a-write (r) (tagcase r (r-global (g) #t) (r-globals () #t) (else y #f)))
+               (else y #f))
+             (k-disrupts? (cdr e))))))
 (define k-reads-only? (subr (read @globals) (k-eff) bool)
   (lambda (e) (or (null? e) (and (tagcase (car e) (a-read (r) #t) (else y #f)) (k-reads-only? (cdr e))))))
 (define k-summary (subr (read @globals) (k-eff) int)
-  (lambda (e) (cond ((null? e) 0) ((k-reads-only? e) 1) (else 2))))
+  (lambda (e) (cond ((null? e) 0) ((k-reads-only? e) 1) ((k-disrupts? e) 3) (else 2))))
 
 ;;; ------------------------------------------------------------ effects
 

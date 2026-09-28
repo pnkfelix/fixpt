@@ -405,8 +405,11 @@ impl Checker {
 
     /// A summary of each expression's effect, for a compiler, by where it
     /// starts and ends: 0 pure (no atom at all, so no `spin` either), 1
-    /// reads only, 2 anything else; where two expressions have one span,
-    /// the greater. `check.fx`'s `checked-effects` says the same.
+    /// reads only, 2 anything else but 3: may keep its continuation for
+    /// later (`comefrom`), write a global, or do what an effect variable
+    /// stands for, any of which a global's value may change across. Where
+    /// two expressions have one span, the greater. `check.fx`'s
+    /// `checked-effects` says the same.
     pub fn effect_summaries(&self) -> HashMap<(u32, u32), u8> {
         let mut out: HashMap<(u32, u32), u8> = HashMap::new();
         for (e, eff) in &self.facts.effects {
@@ -414,6 +417,8 @@ impl Checker {
                 0
             } else if eff.0.iter().all(|a| matches!(a, Atom::Read(_))) {
                 1
+            } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
+                3
             } else {
                 2
             };
