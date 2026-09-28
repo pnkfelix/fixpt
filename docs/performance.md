@@ -1198,3 +1198,55 @@ they are loops now.
 | lists        | 1501500000     |   300.4 |  482.1 | 54.5 |     59.9 |     47.3 |      13.5 |   16.8 |
 | loop         | 49999995000000 |   736.2 |  444.7 | 64.5 |     88.8 |     40.5 |       5.5 |    4.3 |
 | tak          | 9              |    52.0 |   80.9 |  6.5 |      9.5 |      4.5 |       1.9 |    1.2 |
+
+## Specializing a procedure at a lambda argument (2026-09-28)
+
+`(map1 (lambda ((x int)) (+ x k)) xs)`, where `map1` only calls its `f`
+or passes it on to itself: the call runs a copy of `map1` made for that
+lambda. This is partial evaluation at a static argument (the user's
+observation): the lambda is known where the call is, every recursive
+call passes it unchanged, so a residual copy of `map1` is made with it
+fixed, and in the copy each `(f e)` is a known lambda applied, inlined.
+The lambda's captured values stay dynamic: the copy reads them from the
+closure passed as `f` (`field 3` for `k`). Both compilers do it
+(`r_specialize`, `r-specialize`), and make the same register code. The
+copy is named for both, `map1@lambda@N`.
+
+Redefinition stays exact. The copy's closure is made first, then the
+arguments (the lambda's closure among them), then a guard that `map1`
+still holds a closure of the word the copy was made from: the copy, else
+the global. Inside the copy each call of itself is guarded the same way
+(`invokeself`, or a jump in tail position, else the global), so a
+redefinition met mid-recursion (a continuation resumed later) calls the
+new `map1` as the original would. The native compiler folds the guards
+where `map1` holds a cellular closure. What is specialized: a top-level
+lambda of at most 60 nodes with no lambda, `letrec` or `prompt` inside,
+not inlined, with a parameter used only so; the lambda at most 20 nodes,
+with the arity it is called with.
+
+`closures` now ends `(main 3000)`, the same work, so the native
+convention measures it too:
+
+| closures      | before | after |
+| ------------- | ------:| -----:|
+| registers     |   24.0 |  19.0 |
+| native        |   29.8 |  33.1 |
+
+Natively it is slower: the copy keeps the lambda's parameter and `k` in
+frame slots (stored, zeroed on entry, loaded), where the original called
+a native leaf closure that kept them in registers. Register code gains
+because a closure call is dear there. To do: temporaries of an inlined
+body in registers when no call comes between.
+
+`fixpt bench`:
+
+| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   114.7 |   49.4 | 14.5 |     14.5 |     12.8 |       9.4 |   22.6 |
+| closures     | 6003000000     |   345.0 |  697.2 | 75.9 |     77.8 |     60.8 |      19.1 |   33.5 |
+| fib          | 832040         |   181.5 |  213.8 | 16.0 |     22.0 |     13.5 |       5.7 |    2.5 |
+| helpers      | 12000000       |   868.6 | 1285.5 | 90.0 |     95.5 |     55.7 |      12.2 |    7.2 |
+| lists-region | 1501500000     |   334.7 |  313.1 | 97.8 |    103.1 |     83.5 |       7.2 |  158.4 |
+| lists        | 1501500000     |   298.2 |  470.3 | 54.5 |     55.5 |     47.2 |      13.5 |   17.0 |
+| loop         | 49999995000000 |   738.5 |  461.5 | 65.8 |     68.7 |     39.1 |       5.6 |    4.6 |
+| tak          | 9              |    51.3 |   78.0 |  6.6 |      8.6 |      4.5 |       1.9 |    1.2 |

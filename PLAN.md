@@ -98,9 +98,12 @@ queue gained", and "The next queue"):
    code behind a guard that the global still holds the closure it was
    compiled from, so a redefinition needs no recompiling (the user's
    choice); both compilers, `docs/performance.md`; `,inliners NAME` says
-   which globals' code inlines NAME. Next: specializing a recursive
-   higher-order global at a lambda argument, so that `(map (lambda (x) (+
-   x 1)) xs)` is the loop one would write (the user's, 2026-09-28); then
+   which globals' code inlines NAME. A recursive higher-order global
+   called with a lambda at a parameter it only calls is specialized: a
+   copy made for the lambda (partial evaluation at a static argument),
+   guarded as inlining is (the user's example, `(map (lambda (x) (+ x 1))
+   xs)`, 2026-09-28); register code 24 → 19 ms on `closures`, native
+   slower until an inlined body's temporaries stay in registers. Next:
    common subexpressions at the level of cellular or register code, then
    superinstructions (13g), join points (13i),
    the rest of known calls, a nursery with a write barrier, cheaper

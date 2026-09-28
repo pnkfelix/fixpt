@@ -8,4 +8,5 @@
 (define* go (subr (maxeff (read @l) (alloc @l) spin) (int int (listof int @l)) int)
   (lambda (k acc xs)
     (if (= k 0) acc (go (- k 1) (+ acc (total (map-add (lambda ((x int)) (+ x k)) xs) 0)) xs))))
-(go 3000 0 (upto 1000 nil))
+(define* main (subr (maxeff (read @l) (alloc @l) spin) (int) int) (lambda (k) (go k 0 (upto 1000 nil))))
+(main 3000)

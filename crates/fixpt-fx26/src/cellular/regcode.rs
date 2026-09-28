@@ -86,6 +86,9 @@ struct Gen {
     max_slot: usize,
     labels: usize,
     this: Option<(This, usize)>,
+    /// In a procedure specialized at a lambda (`Compiler::spec`): where the
+    /// parameter the lambda is, and the label at the body's start.
+    spec: Option<(RLoc, usize)>,
 }
 
 type O<T> = Option<T>;
@@ -179,7 +182,7 @@ impl Compiler<'_> {
             return self.decline("more than REGS parameters");
         }
         let leaf = !self.r_collects(body, inner, this, true);
-        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None };
+        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
         for (n, l) in inner {
@@ -212,6 +215,12 @@ impl Compiler<'_> {
             let start = g.label();
             g.items.push(RItem::Label(start));
             g.this = Some((t, start));
+        }
+        if let Some(sp) = &self.spec {
+            let at = self.r_where(&env, sp.param_name)?;
+            let start = g.label();
+            g.items.push(RItem::Label(start));
+            g.spec = Some((at, start));
         }
         let mut te = inner.clone();
         self.r_exp(&mut g, body, &mut env, &mut te, true)?;
@@ -597,6 +606,20 @@ impl Compiler<'_> {
         if self.r_self_call(g, f, args.len(), te, tail) {
             return self.r_loop(g, args, env, te);
         }
+        if let (Some(sp), Some((at, start))) = (self.spec.clone(), g.spec) {
+            let is_param = |c: &Self, env: &[(Sym, RLoc)], x: ExpId| matches!(*c.c.arena.exp_at(x), Exp::Var(n) if n == sp.param_name && c.r_where(env, n) == Some(at));
+            if is_param(self, env, f) && args.len() == sp.arity {
+                return self.r_spec_lambda(g, &sp, at, args, env, te, tail);
+            }
+            // Its own name is its own global here: in an inlined body, or
+            // the lambda's, the parameter is not in scope.
+            if matches!(*self.c.arena.exp_at(f), Exp::Var(n) if n == sp.name && matches!(self.r_where(env, n), Some(RLoc::Global(_))))
+                && args.len() == sp.n
+                && is_param(self, env, args[sp.param])
+            {
+                return self.r_spec_self(g, &sp, start, f, args, env, te, tail);
+            }
+        }
         if let Some(name) = self.r_standard_name(env, f) {
             let Some(std) = self.r_standard(&name, args.len()) else {
                 return self.decline(&format!("standard `{name}`"));
@@ -661,6 +684,9 @@ impl Compiler<'_> {
         }
         if let Some((k, cell)) = self.r_inlined(env, f, args.len()) {
             return self.r_inline(g, k, cell, f, args, env, te, tail);
+        }
+        if let Some((k, cell, lam)) = self.r_specialized(env, f, args) {
+            return self.r_specialize(g, k, cell, lam, args, env, te, tail);
         }
         let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
         // A call of the procedure itself, not in tail position: by its own
@@ -743,6 +769,193 @@ impl Compiler<'_> {
             g.op("invoke", &[Gen::n(args.len())]);
         }
         g.items.push(RItem::Label(end));
+        g.next_reg = regs;
+        g.next_slot = slots;
+        Some(())
+    }
+
+    /// Which of `specials`, its global's cell, and the lambda argument, when
+    /// `f` names one of them and the argument at its parameter is a lambda
+    /// small enough to inline, taking as many arguments as it is called
+    /// with; not while a procedure is being specialized.
+    fn r_specialized(&self, env: &[(Sym, RLoc)], f: ExpId, args: &[ExpId]) -> O<(usize, Value, ExpId)> {
+        if self.spec.is_some() {
+            return None;
+        }
+        let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+        let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
+        let k = self.specials.iter().position(|s| s.name == name && s.params.len() == args.len())?;
+        let lam = args[self.specials[k].param];
+        match self.c.arena.exp_at(lam) {
+            Exp::Lambda { params, body } if params.len() == self.specials[k].arity && self.inline_room(*body, super::INLINE_LIMIT) >= 0 => {
+                Some((k, cell, lam))
+            }
+            _ => None,
+        }
+    }
+
+    /// A call of a global procedure with a lambda at a parameter it only
+    /// calls: a copy of the procedure made for the lambda (`Spec`), whose
+    /// closure is made first; then the arguments, the lambda's closure among
+    /// them; then, if the global still holds a closure of the word the copy
+    /// was made from, the copy called, else the global.
+    #[allow(clippy::too_many_arguments)]
+    fn r_specialize(&mut self, g: &mut Gen, k: usize, cell: Value, lam: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        let (regs, slots) = (g.next_reg, g.next_slot);
+        let Exp::Lambda { params, body } = self.c.arena.exp_at(lam).clone() else { return None };
+        let lam_params: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
+        let sp = &self.specials[k];
+        let spec = super::Spec {
+            name: sp.name,
+            cell,
+            word: sp.word,
+            param: sp.param,
+            param_name: sp.params[sp.param],
+            n: sp.params.len(),
+            arity: sp.arity,
+            lam_fv: self.captured(&lam_params, body, te),
+            lam_params,
+            lam_body: body,
+            lam_genv: self.genv_limit,
+        };
+        let (params, gbody, genv_len) = (sp.params.clone(), sp.body, sp.genv_len);
+        let outer = (self.spec.replace(spec), self.genv_limit.replace(genv_len), self.declined.take());
+        // Named for the procedure and the lambda.
+        let at = self.char_at[self.c.arena.span_of(body).start as usize];
+        self.word_name = Some(format!("{}@lambda@{at}", self.name(self.specials[k].name)));
+        let made = self.lambda_word(&params, gbody, &Vec::new(), None);
+        (self.spec, self.genv_limit, self.declined) = outer;
+        let (copy, _) = made.ok()?;
+        let s = g.slot();
+        g.op("lambda", &[copy, Gen::n(0)]);
+        g.op("setstk", &[Gen::n(s)]);
+        let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+        self.r_args(g, &es, env, te, None)?;
+        let (call, end) = (g.label(), g.label());
+        self.r_guard(g, cell, self.specials[k].word, call);
+        g.op("stack", &[Gen::n(s)]);
+        self.r_invoke(g, args.len(), tail);
+        if !tail {
+            g.items.push(RItem::Branch(false, end));
+        }
+        g.items.push(RItem::Label(call));
+        g.op("global", &[cell]);
+        self.r_invoke(g, args.len(), tail);
+        g.items.push(RItem::Label(end));
+        g.next_reg = regs;
+        g.next_slot = slots;
+        Some(())
+    }
+
+    /// The guard of an inlined or specialized call: to `call` unless the
+    /// global `cell` holds a closure of `word`.
+    fn r_guard(&self, g: &mut Gen, cell: Value, word: Value, call: usize) {
+        g.op("global", &[cell]);
+        g.op("field", &[Value::fixnum(super::CLOSURE_WORD as i64)]);
+        g.op("op2imm", &[Value::fixnum(routine("eq") as i64), word]);
+        g.items.push(RItem::Branch(true, call));
+    }
+
+    /// `n` arguments in registers, the procedure in RESULT: called, or in
+    /// tail position, the frame left first.
+    fn r_invoke(&self, g: &mut Gen, n: usize, tail: bool) {
+        if tail {
+            g.leave();
+            g.op("tailinvoke", &[Gen::n(n)]);
+        } else {
+            g.op("invoke", &[Gen::n(n)]);
+        }
+    }
+
+    /// In a procedure specialized at a lambda, a call of the parameter the
+    /// lambda is: the lambda's body, its parameters bound to the arguments
+    /// and the values its closure captured to those fields of the
+    /// parameter's value, where the globals are those it saw.
+    #[allow(clippy::too_many_arguments)]
+    fn r_spec_lambda(&mut self, g: &mut Gen, sp: &super::Spec, at: RLoc, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        let (regs, slots) = (g.next_reg, g.next_slot);
+        let (mut own_env, mut own_te) = (Vec::new(), Vec::new());
+        for (p, a) in sp.lam_params.iter().zip(args) {
+            self.r_exp(g, *a, env, te, false)?;
+            own_env.push((*p, Self::r_keep(g)?));
+            own_te.push((*p, Loc::Slot(usize::MAX)));
+        }
+        for (j, n) in sp.lam_fv.iter().enumerate() {
+            match at {
+                RLoc::Reg(k) => g.op("reg", &[Gen::n(k)]),
+                RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
+                _ => return None,
+            }
+            g.op("field", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64)]);
+            own_env.push((*n, Self::r_keep(g)?));
+            own_te.push((*n, Loc::Slot(usize::MAX)));
+        }
+        let outer = self.genv_limit;
+        self.genv_limit = sp.lam_genv;
+        let done = self.r_exp(g, sp.lam_body, &mut own_env, &mut own_te, tail);
+        self.genv_limit = outer;
+        done?;
+        g.next_reg = regs;
+        g.next_slot = slots;
+        Some(())
+    }
+
+    /// RESULT kept where a `let` keeps a value: a register in a leaf, else
+    /// a frame slot.
+    fn r_keep(g: &mut Gen) -> O<RLoc> {
+        Some(if g.leaf {
+            let r = g.reg()?;
+            g.op("setreg", &[Gen::n(r)]);
+            RLoc::Reg(r)
+        } else {
+            let s = g.slot();
+            g.op("setstk", &[Gen::n(s)]);
+            RLoc::Slot(s)
+        })
+    }
+
+    /// In a procedure specialized at a lambda, a call of its own global with
+    /// the parameter passed as itself: the arguments made; then, if the
+    /// global still holds a closure of the word the copy was made from, the
+    /// copy again (a loop, in tail position), else the global.
+    #[allow(clippy::too_many_arguments)]
+    fn r_spec_self(&mut self, g: &mut Gen, sp: &super::Spec, start: usize, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        if g.leaf || args.len() > REGS {
+            return self.decline("more than REGS arguments");
+        }
+        let (regs, slots) = (g.next_reg, g.next_slot);
+        let (call, end) = (g.label(), g.label());
+        if tail {
+            // Each argument into a slot of its own; then, the copy again,
+            // each into its parameter's slot, and back to the start.
+            let mut made = Vec::new();
+            for a in args {
+                self.r_exp(g, *a, env, te, false)?;
+                let s = g.slot();
+                g.op("setstk", &[Gen::n(s)]);
+                made.push(s);
+            }
+            self.r_guard(g, sp.cell, sp.word, call);
+            for (i, m) in made.iter().enumerate() {
+                g.op("stack", &[Gen::n(*m)]);
+                g.op("setstk", &[Gen::n(i)]);
+            }
+            g.items.push(RItem::Branch(false, start));
+            g.items.push(RItem::Label(call));
+            let es: Vec<Arg> = made.iter().map(|m| Arg::Slot(*m)).collect();
+            self.r_args(g, &es, env, te, Some(f))?;
+            self.r_invoke(g, args.len(), true);
+        } else {
+            let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+            self.r_args(g, &es, env, te, None)?;
+            self.r_guard(g, sp.cell, sp.word, call);
+            g.op("invokeself", &[Gen::n(args.len())]);
+            g.items.push(RItem::Branch(false, end));
+            g.items.push(RItem::Label(call));
+            g.op("global", &[sp.cell]);
+            g.op("invoke", &[Gen::n(args.len())]);
+            g.items.push(RItem::Label(end));
+        }
         g.next_reg = regs;
         g.next_slot = slots;
         Some(())

@@ -244,3 +244,19 @@ fn a_letreap_is_collected_as_it_runs() {
         assert!(collections >= 10, "what the reap takes starts collections: {collections}");
     }
 }
+
+/// A map over a lambda: `map1` only calls `f`, or passes it on to itself,
+/// so the call runs a copy of `map1` made for the lambda (named for both),
+/// whose calls of `f` are the lambda's body, `k` read from the lambda's
+/// closure, and whose calls of itself are by its own entry; each call
+/// behind a guard that `map1` is still what the copy was made from.
+#[test]
+fn a_map_over_a_lambda_is_specialized() {
+    let out = shown(include_str!("programs/run/map-specialized.fx"));
+    let copy = out.split("\nword map1@lambda@").nth(1).expect("a copy of map1");
+    let copy = copy.split("\nword ").next().unwrap_or(copy);
+    for want in ["field 3", "op2 int-add", "global map1", "op2imm eq", "invokeself 2"] {
+        assert!(copy.contains(want), "{want}:\n{copy}");
+    }
+    assert!(!copy.contains("invoke 1"), "the lambda is not called:\n{copy}");
+}

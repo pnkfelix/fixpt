@@ -87,6 +87,45 @@ pub struct Compiler<'a> {
     inlining: Vec<Sym>,
     /// The word of the lambda compiled last.
     last_word: Value,
+    /// The global procedures a call in register code may specialize at a
+    /// lambda argument (`regcode::r_specialize`).
+    specials: Vec<Special>,
+    /// While a procedure specialized at a lambda is compiled: which.
+    spec: Option<Spec>,
+    /// The name the next lambda's word gets, if not where its body starts.
+    word_name: Option<String>,
+}
+
+/// A global procedure whose parameter `param` is only called (with
+/// `arity` arguments) or passed as itself to a call of the procedure: a
+/// call with a lambda there may run a copy of the procedure made for that
+/// lambda, the lambda's body inlined where the parameter is called.
+struct Special {
+    name: Sym,
+    word: Value,
+    params: Vec<Sym>,
+    body: ExpId,
+    genv_len: usize,
+    param: usize,
+    arity: usize,
+}
+
+/// A procedure being specialized: its global's name, cell and word, the
+/// parameter, and the lambda (its parameters, body, the names its closure
+/// captures in order, and the globals it sees).
+#[derive(Clone)]
+struct Spec {
+    name: Sym,
+    cell: Value,
+    word: Value,
+    param: usize,
+    param_name: Sym,
+    n: usize,
+    arity: usize,
+    lam_params: Vec<Sym>,
+    lam_body: ExpId,
+    lam_fv: Vec<Sym>,
+    lam_genv: Option<usize>,
 }
 
 /// A small global procedure a call may inline, guarded, in register code
@@ -101,6 +140,8 @@ struct Inline {
 
 /// The most parser-tree nodes a body may have to be inlined.
 const INLINE_LIMIT: i64 = 20;
+/// The most a procedure's body may have to be specialized at a lambda.
+const SPECIAL_LIMIT: i64 = 60;
 
 type R<T> = Result<T, String>;
 
@@ -122,6 +163,9 @@ impl<'a> Compiler<'a> {
             genv_limit: None,
             inlining: Vec::new(),
             last_word: Value::FALSE,
+            specials: Vec::new(),
+            spec: None,
+            word_name: None,
         }
     }
 
@@ -573,14 +617,19 @@ impl<'a> Compiler<'a> {
 
     /// A lambda's word, and the names its closure captures, in order; with
     /// its register code as its twin when this compiler makes register code.
-    fn lambda_word(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
+    /// The names a closure of a lambda made in `e` captures, in order: its
+    /// free names that are locals there, not globals or standard ones, nor
+    /// a loop, which is not a value. (A definition's own global, in its
+    /// body's names, is still a global.)
+    fn captured(&self, params: &[Sym], body: ExpId, e: &Env) -> Vec<Sym> {
         let mut free = Vec::new();
         self.free(body, &params.iter().rev().copied().collect::<Vec<_>>(), &mut free);
-        // The free names that are locals here, not globals or standard ones,
-        // nor a loop, which is not a value.
-        // A definition's own global, in its body's names, is still a global.
-        let fv: Vec<Sym> =
-            free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop && !matches!(l, Loc::Global(_)))).collect();
+        free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop && !matches!(l, Loc::Global(_)))).collect()
+    }
+
+    fn lambda_word(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
+        let named = self.word_name.take();
+        let fv = self.captured(params, body, e);
         // A parameter of the same name hides the procedure.
         let own = own.filter(|f| !params.contains(f));
         let mut inner: Env = Vec::new();
@@ -606,7 +655,7 @@ impl<'a> Compiler<'a> {
         compiled?;
         // Named for where its body starts, so that a profile can say which.
         let start = self.char_at[self.c.arena.span_of(body).start as usize];
-        let name = format!("lambda@{start}");
+        let name = named.unwrap_or_else(|| format!("lambda@{start}"));
         let w = self.assemble(&body_code, &name)?;
         // For bisecting a fault: with `FIXPT_REG_RANGE=lo-hi,…`, only the
         // lambdas whose bodies start in those character ranges get register
@@ -688,6 +737,49 @@ impl<'a> Compiler<'a> {
                 all(&els.map(|(_, b)| b).into_iter().collect::<Vec<_>>(), n)
             }
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => n,
+        }
+    }
+
+    /// Whether `p` is, in `x`, only called, or passed as itself as argument
+    /// `k` of `n` to a call of `f`; nothing binding either name again. The
+    /// arity it is called with (every call the same), or none.
+    fn call_only(&self, x: ExpId, p: Sym, f: Sym, k: usize, n: usize, arity: &mut Option<usize>) -> bool {
+        let all = |xs: &[ExpId], arity: &mut Option<usize>| xs.iter().all(|a| self.call_only(*a, p, f, k, n, arity));
+        match self.c.arena.exp_at(x).clone() {
+            Exp::Var(m) => m != p,
+            Exp::App { fun, args } => match *self.c.arena.exp_at(fun) {
+                Exp::Var(m) if m == p => {
+                    let same = arity.is_none_or(|a| a == args.len());
+                    *arity = Some(args.len());
+                    same && all(&args, arity)
+                }
+                Exp::Var(m) if m == f && args.len() == n && matches!(*self.c.arena.exp_at(args[k]), Exp::Var(q) if q == p) => {
+                    args.iter().enumerate().all(|(i, a)| i == k || self.call_only(*a, p, f, k, n, arity))
+                }
+                _ => self.call_only(fun, p, f, k, n, arity) && all(&args, arity),
+            },
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => {
+                self.call_only(body, p, f, k, n, arity)
+            }
+            Exp::LetRegion { region, body, .. } => {
+                let r = self.c.arena.dvar_name(region);
+                r != p && r != f && self.call_only(body, p, f, k, n, arity)
+            }
+            Exp::If { test, then, els } => all(&[test, then, els], arity),
+            Exp::Let { bindings, body } => {
+                bindings.iter().all(|(m, i)| *m != p && *m != f && self.call_only(*i, p, f, k, n, arity)) && self.call_only(body, p, f, k, n, arity)
+            }
+            Exp::Begin(items) => all(&items, arity),
+            Exp::Bloblet { args, .. } => all(&args, arity),
+            Exp::Product(fields) => fields.iter().all(|(_, x)| self.call_only(*x, p, f, k, n, arity)),
+            Exp::Extract(x, _) | Exp::Sum(_, x) => self.call_only(x, p, f, k, n, arity),
+            Exp::TagCase { scrutinee, arms, els } => {
+                self.call_only(scrutinee, p, f, k, n, arity)
+                    && arms.iter().all(|a| !a.names().iter().any(|m| *m == p || *m == f) && self.call_only(a.body, p, f, k, n, arity))
+                    && els.is_none_or(|(y, b)| y != p && y != f && self.call_only(b, p, f, k, n, arity))
+            }
+            Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } => false,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => true,
         }
     }
 
@@ -1049,6 +1141,7 @@ impl<'a> Compiler<'a> {
     /// definition assigns it (`Top`'s `assigns`); else a new one.
     fn global_for(&mut self, n: Sym, assigns: bool) -> Value {
         self.inlines.retain(|i| i.name != n);
+        self.specials.retain(|i| i.name != n);
         match find(&self.genv, n) {
             Some(Loc::Global(g)) if assigns => g,
             _ => self.push_global(n),
@@ -1085,6 +1178,20 @@ impl<'a> Compiler<'a> {
                         {
                             let (word, genv_len) = (self.last_word, self.genv.len());
                             self.inlines.push(Inline { name: *name, word, params, body, genv_len });
+                        } else if let Some((params, body, None)) = self.lambda_of(*exp)
+                            && self.inline_room(body, SPECIAL_LIMIT) >= 0
+                        {
+                            // Else, with a parameter only called: specialized
+                            // where it is called with a lambda there.
+                            let n = params.len();
+                            let found = (0..n).find_map(|k| {
+                                let mut arity = None;
+                                (self.call_only(body, params[k], *name, k, n, &mut arity) && arity.is_some()).then(|| (k, arity.unwrap_or(0)))
+                            });
+                            if let Some((param, arity)) = found {
+                                let (word, genv_len) = (self.last_word, self.genv.len());
+                                self.specials.push(Special { name: *name, word, params, body, genv_len, param, arity });
+                            }
                         }
                         g
                     };

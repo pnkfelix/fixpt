@@ -430,8 +430,8 @@ fn every_test_program_runs_natively_as_cellular() {
 
 /// A call of a small global procedure is inlined in register code, behind a
 /// guard that the global still holds the closure the body was compiled
-/// from: redefined, the call calls the new one. As register code, and as
-/// machine code, where the guard is decided when the code is made.
+/// from: redefined, the call calls the new one. So too a call specialized
+/// at a lambda. As register code, and as machine code.
 #[test]
 fn inlined_calls_see_a_redefinition() {
     use fixpt_fx26::session::Strategy;
@@ -451,5 +451,10 @@ fn inlined_calls_see_a_redefinition() {
         assert_eq!(out[2], "Ok(Some(\"4\"))", "native {native}: {out:?}");
         assert_eq!(s.inliners("f").expect("asks"), Ok(vec!["g".to_string()]), "native {native}");
         assert_eq!(out[4], "Ok(Some(\"202\"))", "native {native}: {out:?}");
+        // A call specialized at a lambda, the same.
+        let forms = s.checker.read_in(FileId(0), include_str!("programs/redefine/specialized.fx")).expect("reads");
+        let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{:?}", o.value))).collect();
+        assert_eq!((out[3].as_str(), out[5].as_str()), ("Ok(Some(\"36\"))", "Ok(Some(\"3036\"))"), "native {native}: {out:?}");
+        assert_eq!(s.inliners("map1").expect("asks"), Ok(vec!["test".to_string()]), "native {native}");
     }
 }

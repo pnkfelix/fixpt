@@ -560,6 +560,8 @@
 ;;; value pushed is slot `depth`. In tail position, code ends the word: with
 ;;; a `tailcall`, or with `return` after the value.
 
+;; The name the next lambda's word gets, if not where its body starts.
+(define c-word-name (ref (listof string @k) @k) (new nil))
 ;; The word of the lambda compiled last, in a list; and of the one before.
 (define c-last-word (ref (listof tword @k) @k) (new nil))
 (define c-prev-word (ref (listof tword @k) @k) (new nil))
@@ -710,7 +712,8 @@
   ;; (`c-registers`).
   (c-lambda-word (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv syms) (productof (1 tword) (2 syms)))
     (lambda (ps body e own0)
-      (let* ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
+      (let* ((named (let ((x (get c-word-name))) (begin (set c-word-name (the (listof string @k) nil)) x)))
+             (fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
              ;; A parameter of the same name hides the procedure.
              (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
              ;; Its own name: a loop, or a top-level definition's global.
@@ -740,7 +743,9 @@
           (set c-this-name outer-name) (set c-this-loc outer-loc)
           (set c-this-params outer-params) (set c-this-start outer-start)
           ;; Named for where its body starts, so that a profile can say which.
-          (let ((w (c-assemble body-code (string->symbol (string-append "lambda@" (int->string (exp-start body)))))))
+          (let ((w (c-assemble body-code
+                                (string->symbol
+                                  (if (null? named) (string-append "lambda@" (int->string (exp-start body))) (car named))))))
             (begin
               (if (get c-registers)
                   (let ((cells ((get c-register-code) ps body inner this)))
@@ -860,6 +865,45 @@
     (cond ((null? xs) xs)
           ((symbol=? (extract (car xs) 1) n) (c-drop-inline (cdr xs) n))
           (else (the (listof c-inline finite) (cons (car xs) (c-drop-inline (cdr xs) n)))))))
+;; The most a procedure's body may have to be specialized at a lambda
+;; (`c-inline-room`).
+(define c-special-limit int 60)
+
+;; A global procedure whose parameter (6) is only called, with (7)
+;; arguments, or passed as itself to a call of the procedure: a call with a
+;; lambda there may run a copy of the procedure made for that lambda, the
+;; lambda's body inlined where the parameter is called (`regcode.fx`'s
+;; `r-specialize`). Its name, word, parameters, body and globals, as for
+;; `c-inline`.
+(define-type c-special
+  (productof (1 symbol) (2 tword) (3 (listof (productof (1 symbol) (2 syns-a)) finite)) (4 exp) (5 cenv) (6 int) (7 int)))
+(define c-specials (ref (listof c-special finite) @k) (new nil))
+;; `xs` without `n`'s.
+(define c-drop-special (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof c-special finite) symbol) (listof c-special finite))
+  (lambda (xs n)
+    (cond ((null? xs) xs)
+          ((symbol=? (extract (car xs) 1) n) (c-drop-special (cdr xs) n))
+          (else (the (listof c-special finite) (cons (car xs) (c-drop-special (cdr xs) n)))))))
+
+;; A procedure being specialized at a lambda: its global's name, cell and
+;; word; the parameter's place and name; how many parameters; the lambda's
+;; arity, parameters and body, the names its closure captures in order, and
+;; the globals it sees.
+(define-type c-spec
+  (productof (1 symbol) (2 wglobal) (3 tword) (4 int) (5 symbol) (6 int) (7 int)
+             (8 (listof (productof (1 symbol) (2 syns-a)) finite)) (9 exp) (10 syms) (11 cenv)))
+(define c-spec-now (ref (listof c-spec @k) @k) (new nil))
+
+;; Two arities found: the same one, or -2 if they differ or either failed;
+;; -1 is none found yet.
+(define c-arity-merge (subr pure (int int) int)
+  (lambda (a b) (cond ((or (= a -2) (= b -2)) -2) ((= a -1) b) ((= b -1) a) ((= a b) a) (else -2))))
+;; Whether `ns` has `n`.
+(define c-names-have? (subr (read @globals) (names symbol) bool)
+  (lambda (ns n) (and (not (null? ns)) (or (symbol=? (car ns) n) (c-names-have? (cdr ns) n)))))
+;; The `k`th of `es`.
+(define c-nth (subr (read @globals) ((listof exp finite) int) exp)
+  (lambda (es k) (if (= k 0) (car es) (c-nth (cdr es) (- k 1)))))
 ;; How many of `n` parser-tree nodes are left once `x`'s are counted, as the
 ;; Rust compiler's `inline_room` counts them: negative, and counted no
 ;; further, once they run out, or at a form that makes a closure, which an
@@ -903,14 +947,103 @@
       (if (or (null? arms) (< n 0)) n (c-inline-room-arms (cdr arms) (c-inline-room (extract (car arms) 4) n)))))
   (c-inline-room-else (subr (maxeff (read @globals) spin) ((listof (productof (1 symbol) (2 exp)) finite) int) int)
     (lambda (els n) (if (or (null? els) (< n 0)) n (c-inline-room (extract (car els) 2) n)))))
+;; Whether `p` is, in `x`, only called, or passed as itself as argument `k`
+;; of `n` to a call of `f`, nothing binding either name again, as the Rust
+;; compiler's `call_only` says: the arity it is called with (every call the
+;; same), -1 if it is not called, or -2 if not so.
+(define-rec
+  (c-call-only (subr (maxeff (read @globals) spin) (exp symbol symbol int int) int)
+    (lambda (x p f k n)
+      (tagcase x
+        (e-var (m a b) (if (symbol=? m p) -2 -1))
+        (e-app (fun args a b)
+          (tagcase fun
+            (e-var (m fa fb)
+              (cond ((symbol=? m p) (c-arity-merge (c-count-exps args) (c-call-only-all args p f k n)))
+                    ((and (symbol=? m f)
+                          (and (= (c-count-exps args) n)
+                               (tagcase (c-nth args k) (e-var (q qa qb) (symbol=? q p)) (else y #f))))
+                     (c-call-only-but args p f k n 0))
+                    (else (c-arity-merge (c-call-only fun p f k n) (c-call-only-all args p f k n)))))
+            (else y (c-arity-merge (c-call-only fun p f k n) (c-call-only-all args p f k n)))))
+        (e-plambda (d body a b) (c-call-only body p f k n))
+        (e-proj (body ds a b) (c-call-only body p f k n))
+        (e-the (d body a b) (c-call-only body p f k n))
+        (e-convention (cnv body a b) (c-call-only body p f k n))
+        (e-letregion (kind r i body a b) (if (or (symbol=? r p) (symbol=? r f)) -2 (c-call-only body p f k n)))
+        (e-if (t th el a b)
+          (c-arity-merge (c-call-only t p f k n) (c-arity-merge (c-call-only th p f k n) (c-call-only el p f k n))))
+        (e-let (bs body a b) (c-arity-merge (c-call-only-let bs p f k n) (c-call-only body p f k n)))
+        (e-begin (es a b) (c-call-only-all es p f k n))
+        (e-bloblet (op i args a b) (c-call-only-all args p f k n))
+        (e-product (fs a b) (c-call-only-fields fs p f k n))
+        (e-extract (e l a b) (c-call-only e p f k n))
+        (e-sum (t v a b) (c-call-only v p f k n))
+        (e-tagcase (s arms els a b)
+          (c-arity-merge (c-call-only s p f k n) (c-arity-merge (c-call-only-arms arms p f k n) (c-call-only-else els p f k n))))
+        (e-lambda (ps body a b) -2)
+        (e-rlambda (r l a b) -2)
+        (e-letrec (bs body a b) -2)
+        (e-prompt (t body h a b) -2)
+        (else y -1))))
+  (c-call-only-all (subr (maxeff (read @globals) spin) ((listof exp finite) symbol symbol int int) int)
+    (lambda (es p f k n) (if (null? es) -1 (c-arity-merge (c-call-only (car es) p f k n) (c-call-only-all (cdr es) p f k n)))))
+  ;; Every argument but the `k`th; `i` counts.
+  (c-call-only-but (subr (maxeff (read @globals) spin) ((listof exp finite) symbol symbol int int int) int)
+    (lambda (es p f k n i)
+      (cond ((null? es) -1)
+            ((= i k) (c-call-only-but (cdr es) p f k n (+ i 1)))
+            (else (c-arity-merge (c-call-only (car es) p f k n) (c-call-only-but (cdr es) p f k n (+ i 1)))))))
+  (c-call-only-let (subr (maxeff (read @globals) spin) ((listof (productof (1 symbol) (2 exp)) finite) symbol symbol int int) int)
+    (lambda (bs p f k n)
+      (cond ((null? bs) -1)
+            ((or (symbol=? (extract (car bs) 1) p) (symbol=? (extract (car bs) 1) f)) -2)
+            (else (c-arity-merge (c-call-only (extract (car bs) 2) p f k n) (c-call-only-let (cdr bs) p f k n))))))
+  (c-call-only-fields (subr (maxeff (read @globals) spin) ((listof (productof (1 symbol) (2 exp)) finite) symbol symbol int int) int)
+    (lambda (fs p f k n)
+      (if (null? fs) -1 (c-arity-merge (c-call-only (extract (car fs) 2) p f k n) (c-call-only-fields (cdr fs) p f k n)))))
+  (c-call-only-arms
+    (subr (maxeff (read @globals) spin) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) symbol symbol int int) int)
+    (lambda (arms p f k n)
+      (cond ((null? arms) -1)
+            ((or (c-names-have? (extract (car arms) 3) p) (c-names-have? (extract (car arms) 3) f)) -2)
+            (else (c-arity-merge (c-call-only (extract (car arms) 4) p f k n) (c-call-only-arms (cdr arms) p f k n))))))
+  (c-call-only-else (subr (maxeff (read @globals) spin) ((listof (productof (1 symbol) (2 exp)) finite) symbol symbol int int) int)
+    (lambda (els p f k n)
+      (cond ((null? els) -1)
+            ((or (symbol=? (extract (car els) 1) p) (symbol=? (extract (car els) 1) f)) -2)
+            (else (c-call-only (extract (car els) 2) p f k n))))))
+;; The first parameter from the `k`th of `ps` that `body` only calls, as
+;; `c-call-only` says, and its arity; none if none is.
+(define c-first-call-only
+  (subr (maxeff (read @globals) (alloc @k) spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp symbol int int) (listof (pairof int int @k) @k))
+  (lambda (ps body f k n)
+    (if (null? ps)
+        nil
+        (let ((a (c-call-only body (extract (car ps) 1) f k n)))
+          (if (>= a 0)
+              (the (listof (pairof int int @k) @k) (cons (cons k a) nil))
+              (c-first-call-only (cdr ps) body f (+ k 1) n))))))
 ;; A definition of `n` as a lambda just compiled: inlined where it is
-;; called, if small enough and not calling itself.
+;; called, if small enough and not calling itself; else, with a parameter it
+;; only calls, specialized where it is called with a lambda there.
 (define c-record-inline
   (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (symbol (listof (productof (1 symbol) (2 syns-a)) finite) exp) unit)
   (lambda (n ps body)
-    (if (and (>= (c-inline-room body c-inline-limit) 0) (and (not (c-mentions? body n)) (not (null? (get c-last-word)))))
-        (set c-inlines (the (listof c-inline finite) (cons (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (get c-genv))) (get c-inlines))))
-        #u)))
+    (cond ((null? (get c-last-word)) #u)
+          ((and (>= (c-inline-room body c-inline-limit) 0) (not (c-mentions? body n)))
+           (set c-inlines
+                (the (listof c-inline finite) (cons (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (get c-genv))) (get c-inlines)))))
+          ((>= (c-inline-room body c-special-limit) 0)
+           (let ((found (c-first-call-only ps body n 0 (c-count-params ps))))
+             (if (null? found)
+                 #u
+                 (set c-specials
+                      (the (listof c-special finite)
+                        (cons (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (get c-genv))
+                                       (6 (car (car found))) (7 (cdr (car found))))
+                              (get c-specials)))))))
+          (else #u))))
 ;; The expression compiled last, in a list (for `compile-note-inline!`).
 (define c-last-exp (ref (listof exp @k) @k) (new nil))
 ;; For a driver that computes a definition's value itself (the REPL, in the
@@ -930,6 +1063,7 @@
                     (tagcase (car l)
                       (e-lambda (ps body la lb)
                         (begin (set c-inlines (c-drop-inline (get c-inlines) n))
+                               (set c-specials (c-drop-special (get c-specials) n))
                                (set c-last-word w)
                                (c-record-inline n ps body)))
                       (else y #u)))))
@@ -955,7 +1089,9 @@
 ;; else a new one, which later uses of `n` refer to.
 (define c-push-global (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (symbol) wglobal)
   (lambda (n)
-    (let ((kept (begin (set c-inlines (c-drop-inline (get c-inlines) n)) (c-kept (get c-reuse) n))))
+    (let ((kept (begin (set c-inlines (c-drop-inline (get c-inlines) n))
+                       (set c-specials (c-drop-special (get c-specials) n))
+                       (c-kept (get c-reuse) n))))
       (if (null? kept)
           (let ((g (make-global n))) (begin (set c-genv (the cenv (cons (cons n (at-global g)) (get c-genv)))) g))
           (begin (set c-reuse (c-unkeep (get c-reuse) n)) (car kept))))))
