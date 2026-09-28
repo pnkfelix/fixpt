@@ -188,6 +188,9 @@ fn every_test_program() {
     }
     eprintln!("{agreed} agree; not parsed by the FX-26 front end: {unparsed:?}");
     assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
+    // A front end that does not load parses nothing, and so disagrees with
+    // nothing: that is a failure too.
+    assert!(unparsed.len() <= 5 && agreed >= 150, "only {agreed} compared; not parsed: {unparsed:?}");
 }
 
 /// With `native` the program's convention (`--calling-convention

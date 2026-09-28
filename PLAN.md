@@ -63,9 +63,10 @@ queue gained", and "The next queue"):
    user's decision): one rule, in both checkers (`top_defining`,
    `k-defining`), which say what a form runs (`checked-tops`); a value kept
    as it was is bound, `(define d (let ((g g)) …))`, so the REPL's choices
-   are only break or refuse (`,redefine b|r`). Open: a procedure's calls of
-   itself by name are direct, so an old closure still held recurses into
-   the old code (`docs/fx26.md`, "Redefinition").
+   are only break or refuse (`,redefine b|r`). A procedure's calls of
+   itself by name go through its global too, as in Larceny; `letrec` binds
+   one locally (the user's, 2026-09-28). A redefinition that would close a
+   cycle through globals needs `spin` in its type.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

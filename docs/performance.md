@@ -1100,3 +1100,22 @@ code alive: two instructions more per frame, which `fib` and `tak` show.
 | lists   | 8.7           | 9.9               |
 | loop    | 5.6           | 4.4               |
 
+### Self-calls through the global (2026-09-28)
+
+A top-level procedure's calls of itself by name now go through its
+global, as any use of the global does (`docs/fx26.md`, "Redefinition");
+only a `letrec`-bound procedure calls itself directly. What it costs:
+
+| measured                                  | before | after  |
+| ----------------------------------------- | ------ | ------ |
+| fib, register code                        | 4.3 ms | 5.6 ms |
+| tak, register code                        | 1.6 ms | 1.9 ms |
+| fib, native convention                    | 2.2 ms | 2.4 ms |
+| the front end compiling itself (fixpoint) | 7.40 s | 7.51 s |
+| the same, as register code                | 2.21 s | 2.25 s |
+
+The stack machines are unchanged, and the front end within noise, so no
+site in it is rewritten; the benchmarks stay as written, measuring calls
+through a global (`tests/programs/redefine/local-fib.fx` is fib bound
+locally).
+

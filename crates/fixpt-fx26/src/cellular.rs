@@ -551,16 +551,11 @@ impl<'a> Compiler<'a> {
         // A parameter of the same name hides the procedure.
         let own = own.filter(|f| !params.contains(f));
         let mut inner: Env = Vec::new();
-        // The procedure's own name: a loop, where it is only called so; or,
-        // a top-level definition's, its global, which holds this procedure
-        // whenever it runs (a definition makes a new global and none is
-        // assigned), so that its tail calls are loops and the rest load it.
+        // A `letrec`-bound procedure's own name: a loop, where it is only
+        // called so. (A top-level definition's own name is its global, as
+        // any use of it is: a redefinition may change what it holds.)
         if let Some(f) = own.filter(|f| !fv.contains(f)) {
-            let l = match self.where_is(e, f) {
-                Some(Loc::Global(g)) => Loc::Global(g),
-                _ => Loc::Loop,
-            };
-            inner.push((f, l));
+            inner.push((f, Loc::Loop));
         }
         inner.extend(params.iter().enumerate().map(|(i, p)| (*p, Loc::Slot(i))));
         inner.extend(fv.iter().enumerate().map(|(i, n)| (*n, Loc::Free(i))));
@@ -1008,19 +1003,17 @@ impl<'a> Compiler<'a> {
                     if has_value {
                         self.op(&mut code, "drop");
                     }
-                    // A lambda's global first, so that it can call itself.
+                    // A lambda's global first, so that it can call itself:
+                    // through the global, as any use of it does, which holds
+                    // whatever the name is defined as when the call is made
+                    // (`docs/fx26.md`, "Redefinition"). A procedure that must
+                    // call itself binds itself locally, with `letrec`.
                     let g = if !recursive {
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
                         self.global_for(*name, *assigns)
                     } else {
                         let g = self.global_for(*name, *assigns);
-                        // Its own name its global, known (`lambda_word`).
-                        match self.lambda_of(*exp) {
-                            Some((ps, body, None)) => {
-                                self.lambda(&ps, body, &Vec::new(), 0, &mut code, Some(*name), None)?;
-                            }
-                            _ => self.exp(*exp, &Vec::new(), 0, &mut code, false)?,
-                        }
+                        self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
                         g
                     };
                     self.op1(&mut code, "global!", g);

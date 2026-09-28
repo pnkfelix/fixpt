@@ -899,12 +899,13 @@
                   (if (null? (c-lambda-of x))
                       (begin (c-exp x (the cenv nil) 0 c #f)
                              (c-op1 c routine-global! (wcell-global (c-push-global n))))
-                      ;; A lambda: its global first, so that it can call itself;
-                      ;; and its own name that global, known (`c-lambda`).
+                      ;; A lambda: its global first, so that it can call itself,
+                      ;; through the global, as any use of it does
+                      ;; (`docs/fx26.md`, "Redefinition").
                       (let ((g (c-push-global n)))
                         (begin (tagcase (car (c-lambda-of x))
                                  (e-lambda (ps body la lb)
-                                   (begin (c-lambda ps body (the cenv nil) 0 c (the syms (cons n nil)) (the (listof exp @k) nil)) #u))
+                                   (begin (c-lambda ps body (the cenv nil) 0 c (the syms nil) (the (listof exp @k) nil)) #u))
                                  (else y (c-exp x (the cenv nil) 0 c #f)))
                                (c-op1 c routine-global! (wcell-global g))))))
               (c-tops (cdr ts) c #f)))

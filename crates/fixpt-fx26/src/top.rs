@@ -100,7 +100,12 @@ impl Checker {
         let names = self.defined_names(form);
         let olds: Vec<(Sym, TyId)> = names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
         let users = if olds.is_empty() { Vec::new() } else { self.users_of(&names) };
+        let mark = self.mark();
         let mut top = self.top(form)?;
+        if let Err(e) = self.no_knot_through_globals(&top, &names, &users, form.span) {
+            self.rollback(mark);
+            return Err(e);
+        }
         let assigns = !olds.is_empty() && self.fits_old(&top, &olds);
         set_assigns(&mut top, assigns);
         self.record(form, &top);
@@ -111,7 +116,16 @@ impl Checker {
         let shown = |c: &Checker, ns: &[Sym]| ns.iter().map(|n| format!("`{}`", c.interner.name(*n))).collect::<Vec<_>>().join(", ");
         for u in users {
             let olds: Vec<(Sym, TyId)> = u.names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
-            match self.top(&u.form) {
+            let theirs = self.users_of(&u.names);
+            let mark = self.mark();
+            let checked = self.top(&u.form).and_then(|top| match self.no_knot_through_globals(&top, &u.names, &theirs, u.form.span) {
+                Ok(()) => Ok(top),
+                Err(e) => {
+                    self.rollback(mark);
+                    Err(e)
+                }
+            });
+            match checked {
                 Ok(mut top) => {
                     let assigns = self.fits_old(&top, &olds);
                     set_assigns(&mut top, assigns);
@@ -145,6 +159,48 @@ impl Checker {
         self.rollback(mark);
         (self.broken, self.defs) = (broken, defs);
         r
+    }
+
+    /// A redefinition of `names` whose new definition uses a definition that
+    /// uses them (`users`, transitively) closes a cycle through globals: a
+    /// procedure that reaches itself through the store, which the checker's
+    /// termination reasoning, trusting every procedure of a type without
+    /// `spin` to end, has not seen. So it must have `spin` in its type, or
+    /// be refused (`docs/fx26.md`, "Redefinition").
+    fn no_knot_through_globals(&self, top: &Top, names: &[Sym], users: &[Definition], span: fixpt_read::Span) -> R<()> {
+        let reached: Vec<Sym> = users.iter().flat_map(|u| u.names.iter().copied()).collect();
+        if reached.is_empty() {
+            return Ok(());
+        }
+        let (types, exps): (Vec<TyId>, Vec<crate::ast::ExpId>) = match top {
+            Top::Define { ty, exp, .. } => (vec![*ty], vec![*exp]),
+            Top::DefineRec { bindings, .. } => bindings.iter().map(|(_, t, e)| (*t, *e)).unzip(),
+            _ => return Ok(()),
+        };
+        let mut uses = Vec::new();
+        for e in exps {
+            self.free_into(e, &mut Vec::new(), &mut uses);
+        }
+        let cycle: Vec<Sym> = reached.into_iter().filter(|r| uses.contains(r)).collect();
+        if cycle.is_empty() || types.iter().any(|t| self.spins(*t)) {
+            return Ok(());
+        }
+        let shown = |ns: &[Sym]| ns.iter().map(|n| format!("`{}`", self.interner.name(*n))).collect::<Vec<_>>().join(", ");
+        let (n, c) = (shown(names), shown(&cycle));
+        Err(FxError::at(
+            span,
+            format!("{n} cannot be redefined so: it uses {c}, which use {n} in turn, and might never end; give it a type with `spin`, or define {c} again after it"),
+        ))
+    }
+
+    /// Whether `t` is a procedure whose calls may not end: `spin` in its
+    /// latent effect, under any `poly`.
+    fn spins(&self, t: TyId) -> bool {
+        let mut t = self.arena.resolve(t);
+        while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
+            t = self.arena.resolve(*body);
+        }
+        self.arena.get(t).as_subr().is_some_and(|(e, _, _)| e.0.contains(&crate::ast::Atom::Spin))
     }
 
     /// Whether every name `top` defines has a type the old one's uses can

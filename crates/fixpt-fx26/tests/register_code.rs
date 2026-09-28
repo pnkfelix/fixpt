@@ -37,15 +37,24 @@ fn the_benchmarks_procedures_have_register_code() {
 }
 
 /// `fib`'s: one frame slot for `n` and one for the first call's value;
-/// arguments and the rest in registers; its calls of itself by its own
-/// entry.
+/// arguments and the rest in registers; its calls of itself through its
+/// global, as any use of the global is (`docs/fx26.md`, "Redefinition").
 #[test]
 fn fib_in_registers() {
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/bench/fib.fx")).unwrap();
     let out = shown(&text);
-    for want in ["save 2", "op2imm int-less 2", "invokeself 1", "setstk 1", "op2 int-add 1", "pop 2"] {
+    for want in ["save 2", "op2imm int-less 2", "global fib", "invoke 1", "setstk 1", "op2 int-add 1", "pop 2"] {
         assert!(out.contains(want), "{want}:\n{out}");
     }
+    assert!(!out.contains("invokeself"), "{out}");
+}
+
+/// Bound locally, with `letrec`, a procedure's calls of itself are by its
+/// own entry: the binding cannot change.
+#[test]
+fn a_letrec_procedure_calls_itself_directly() {
+    let out = shown(include_str!("programs/redefine/local-fib.fx"));
+    assert!(out.contains("invokeself 1"), "{out}");
 }
 
 /// Every test program compiles with register code, which the heap checks

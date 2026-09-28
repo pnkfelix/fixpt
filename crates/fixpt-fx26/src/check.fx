@@ -6029,6 +6029,47 @@
                    (let* ((x (k-resolve-exp e)) (r (k-synth x)))
                      (cons (k-line (extract r 1) (extract r 2)) nil)))
                  (else y nil)))))
+(define k-lines-append-names (subr pure (k-names k-names) k-names)
+  (lambda (xs ys) (if (null? xs) ys (the k-names (cons (car xs) (k-lines-append-names (cdr xs) ys))))))
+;; The names `defs` define, in order.
+(define k-defs-names (subr (maxeff (read @t) (alloc @t)) ((listof k-def finite)) k-names)
+  (lambda (ds) (if (null? ds) nil (k-lines-append-names (extract (car ds) 1) (k-defs-names (cdr ds))))))
+;; Those of `xs` that are in `ys`, in `xs`'s order.
+(define k-names-within (subr (read @t) (k-names k-names) k-names)
+  (lambda (xs ys)
+    (cond ((null? xs) xs)
+          ((k-has-name? ys (car xs)) (the k-names (cons (car xs) (k-names-within (cdr xs) ys))))
+          (else (k-names-within (cdr xs) ys)))))
+;; Whether `t` is a procedure whose calls may not end: `spin` in its latent
+;; effect, under any `poly`.
+(define k-type-spins? (subr (maxeff (read @t) spin) (int) bool)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-poly (bs body) (k-type-spins? body))
+      (ty-subr (e ps r cv)
+        (letrec ((go (subr pure (k-eff) bool) (lambda (e) (and (not (null? e)) (or (tagcase (car e) (a-spin () #t) (else y #f)) (go (cdr e)))))))
+          (go e)))
+      (else y #f))))
+(define k-names-spin? (subr (maxeff (read @t) spin) (k-names) bool)
+  (lambda (ns) (and (not (null? ns)) (or (k-type-spins? (k-lookup-raw (car ns))) (k-names-spin? (cdr ns))))))
+(define k-top-start (subr pure (top) int)
+  (lambda (form) (tagcase form (t-define (name ty init a b) a) (t-define-rec (bs a b) a) (else y 0))))
+(define k-top-end (subr pure (top) int)
+  (lambda (form) (tagcase form (t-define (name ty init a b) b) (t-define-rec (bs a b) b) (else y 0))))
+;; A redefinition of `ns` whose new definition uses a definition that uses
+;; them (`users`, transitively) closes a cycle through globals: a procedure
+;; that reaches itself through the store, which termination reasoning has
+;; not seen. So it must have `spin` in its type, or be refused (`top.rs`,
+;; `no_knot_through_globals`).
+(define k-no-knot-through-globals (subr (maxeff checks spin) (top k-names (listof k-def finite)) unit)
+  (lambda (form ns users)
+    (let ((cycle (k-names-within (k-defs-names users) (get k-last-uses))))
+      (if (or (null? cycle) (k-names-spin? ns))
+          #u
+          (let ((n (k-shown ns)) (c (k-shown cycle)))
+            (k-fail (k-cat4 n " cannot be redefined so: it uses " c
+                            (k-cat5 ", which use " n " in turn, and might never end; give it a type with `spin`, or define " c " again after it"))
+                    (k-top-start form) (k-top-end form)))))))
 ;; Each of `users` checked again after the redefinition of `ns`: defined
 ;; again if it checks, broken if not.
 (define k-rerun (subr (maxeff checks spin) ((listof k-def finite) k-names (listof string finite)) (listof string finite))
@@ -6037,9 +6078,13 @@
         lines
         (let* ((u (car users))
                (olds (k-old-types (extract u 1)))
+               (theirs (k-users-of (extract u 1)))
                (m (k-mark))
                (reset (set k-last-uses nil))
-               (r (prompt k-tag (k-ok (k-top-lines (extract u 2))) (lambda (r) r))))
+               (r (prompt k-tag
+                    (let ((ls (k-top-lines (extract u 2))))
+                      (begin (k-no-knot-through-globals (extract u 2) (extract u 1) theirs) (k-ok ls)))
+                    (lambda (r) r))))
           (tagcase r
             (k-ok (ls)
               (let* ((assigns (k-fits-old? olds))
@@ -6060,6 +6105,7 @@
            (users (if (null? olds) (the (listof k-def finite) nil) (k-users-of ns)))
            (reset (set k-last-uses nil))
            (lines (k-top-lines form))
+           (knot (if (null? olds) #u (k-no-knot-through-globals form ns users)))
            (assigns (and (not (null? olds)) (k-fits-old? olds)))
            (recorded (k-record form ns))
            (ran (set k-runs (the (listof k-run finite) (cons (product (1 form) (2 assigns)) (get k-runs))))))
