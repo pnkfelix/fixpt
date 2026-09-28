@@ -1,15 +1,17 @@
 ;;; Hash tables, written in FX-26 over bloblets (PLAN.md §11, step 7).
 ;;;
 ;;; A table is a bloblet of its key's hash and equality, an array of
-;;; buckets, and a count. A bucket is an association list; an entry is a
-;;; pair `(key . value)`, changed in place when a key is set again. When
-;;; there are more entries than buckets, the buckets double.
+;;; buckets, and a count. A bucket is an association list, its spine
+;;; `finite` (made by `cons` onto a bucket, never written), so that walking
+;;; it ends; an entry is a pair `(key . value)` in the table's region,
+;;; changed in place when a key is set again. When there are more entries
+;;; than buckets, the buckets double.
 ;;;
 ;;; Generic in the key, the value and the region, as `cons` is. A table of
 ;;; symbols to ints in `@r`:
 ;;;   (the (table symbol int @r) (make-table symbol-hash symbol=?))
 
-(define-type (bucket (k type) (v type) (r region)) (listof (pairof k v r) r))
+(define-type (bucket (k type) (v type) (r region)) (listof (pairof k v r) finite))
 (define-type (table (k type) (v type) (r region))
   (bloblet (fields (subr pure (k) int) (subr pure (k k) bool) (arrayof (bucket k v r) r) int) r))
 
@@ -26,7 +28,7 @@
 ;;; The entry for `key` in a bucket, or nil.
 (define bucket-find
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) spin) ((bucket k v r) k (subr pure (k k) bool)) (pairof k v r))))
+    (subr (maxeff (read @globals) (read r)) ((bucket k v r) k (subr pure (k k) bool)) (pairof k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((b (bucket k v r)) (key k) (same (subr pure (k k) bool)))
       (cond ((null? b) nil)
@@ -42,7 +44,7 @@
 
 (define table-ref
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) spin) ((table k v r) k v) v)))
+    (subr (maxeff (read @globals) (read r)) ((table k v r) k v) v)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k) (default v))
       (let* ((buckets (bloblet-ref t 2))
@@ -51,7 +53,7 @@
 
 (define table-has?
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) spin) ((table k v r) k) bool)))
+    (subr (maxeff (read @globals) (read r)) ((table k v r) k) bool)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k))
       (let ((buckets (bloblet-ref t 2)))
@@ -64,7 +66,7 @@
 ;;; Move every entry of bucket `b` into the array `new`.
 (define rehash-bucket
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) (write r) (alloc r) spin) ((table k v r) (bucket k v r) (arrayof (bucket k v r) r)) unit)))
+    (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) (bucket k v r) (arrayof (bucket k v r) r)) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (b (bucket k v r)) (new (arrayof (bucket k v r) r)))
       (if (null? b)
@@ -73,32 +75,33 @@
             (begin (array-set! new j (cons (car b) (array-ref new j)))
                    (rehash-bucket t (cdr b) new))))))))
 
+;;; Buckets `i` on, of the `n` of `old`.
 (define rehash-array
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) (write r) (alloc r) spin) ((table k v r) (arrayof (bucket k v r) r) (arrayof (bucket k v r) r) int) unit)))
+    (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) (arrayof (bucket k v r) r) (arrayof (bucket k v r) r) int int) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
-    (lambda ((t (table k v r)) (old (arrayof (bucket k v r) r)) (new (arrayof (bucket k v r) r)) (i int))
-      (if (= i (array-length old))
+    (lambda ((t (table k v r)) (old (arrayof (bucket k v r) r)) (new (arrayof (bucket k v r) r)) (i int) (n int))
+      (if (>= i n)
           #u
           (begin (rehash-bucket t (array-ref old i) new)
-                 (rehash-array t old new (+ i 1))))))))
+                 (rehash-array t old new (+ i 1) n)))))))
 
 ;;; Double the buckets once there are more entries than buckets.
 (define table-grow
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) (write r) (alloc r) spin) ((table k v r)) unit)))
+    (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r)) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)))
       (let ((old (bloblet-ref t 2)))
         (if (> (bloblet-ref t 3) (array-length old))
             (let ((new (the (arrayof (bucket k v r) r) (make-array (* 2 (array-length old)) nil))))
-              (begin (rehash-array t old new 0)
+              (begin (rehash-array t old new 0 (array-length old))
                      (bloblet-set! t 2 new)))
             #u))))))
 
 (define table-set!
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) (write r) (alloc r) spin) ((table k v r) k v) unit)))
+    (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) k v) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k) (value v))
       (let* ((buckets (bloblet-ref t 2))

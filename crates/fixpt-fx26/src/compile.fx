@@ -36,7 +36,7 @@
 (define c-int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
 (define c-fact-table (ref (table int (pairof int int @k) @k) @k) (new (make-table c-int-hash c-int=?)))
 ;; The field of the `extract` from `a` to `b`, or -1.
-(define c-field-at (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (int int) int)
+(define c-field-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) int)
   (lambda (a b)
     (let ((e (table-ref (get c-fact-table) a (the (pairof int int @k) (cons -1 -1)))))
       (if (= (car e) b) (cdr e) -1))))
@@ -181,19 +181,19 @@
 ;; were made (`c-genv-count` so far). A body compiled where it was written
 ;; sees only the globals made before (an inlined body, a copy specialized at
 ;; a lambda): `c-genv`, the count of them; -1 when every global is seen.
-(define c-genv-index (ref (table symbol (listof (pairof int loc @k) @k) @k) @k) (new (make-table symbol-hash symbol=?)))
+(define c-genv-index (ref (table symbol (listof (pairof int loc @k) finite) @k) @k) (new (make-table symbol-hash symbol=?)))
 (define c-genv-count (ref int @k) (new 0))
 (define c-genv (ref int @k) (new -1))
 ;; The globals seen now, as a count, for a body to see them so later.
 (define c-genv-now (subr (maxeff (read @k) (read (globals c-genv c-genv-count))) () int)
   (lambda () (if (< (get c-genv) 0) (get c-genv-count) (get c-genv))))
-(define c-global-first (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (pairof int loc @k) @k) int) (listof loc @k))
+(define c-global-first (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof (pairof int loc @k) finite) int) (listof loc @k))
   (lambda (es limit)
     (cond ((null? es) nil)
           ((or (< limit 0) (< (car (car es)) limit)) (the (listof loc @k) (cons (cdr (car es)) nil)))
           (else (c-global-first (cdr es) limit)))))
 ;; `n`'s newest global before the `limit`th (-1: any), in a list.
-(define c-global-find (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (symbol int) (listof loc @k))
+(define c-global-find (subr (maxeff (read @globals) (read @k) (alloc @k)) (symbol int) (listof loc @k))
   (lambda (n limit) (c-global-first (table-ref (get c-genv-index) n nil) limit)))
 
 (define c-find (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (cenv symbol) (listof loc @k))
@@ -219,32 +219,32 @@
 ;;; The names a lambda's body uses that it does not bind: what its closure
 ;;; must carry, once globals and standard names are set aside.
 
-(define-type syms (listof symbol @k))
+(define-type syms (listof symbol finite))
 
 ;; Each `letrec` in tail position asked about: which bindings are join points
 ;; (`regcode.fx`'s `r-join-flags`), by where its body starts: where the body
 ;; ends, the names bound, and the answer. Asked of the same `letrec` many
 ;; times over (each time what encloses it is asked whether it calls), and
 ;; the answer is the same each time.
-(define-type c-join-answer (productof (1 int) (2 syms) (3 (listof bool @k))))
+(define-type c-join-answer (productof (1 int) (2 syms) (3 (listof bool finite))))
 (define c-join-memo (ref (table int c-join-answer @k) @k) (new (make-table c-int-hash c-int=?)))
-(define c-fill-facts (subr (maxeff (read @globals) (read @t) (read @k) (write @k) (alloc @k) spin) (k-facts) unit)
+(define c-fill-facts (subr (maxeff (read @globals) (read @t) (read @k) (write @k) (alloc @k)) (k-facts) unit)
   (lambda (fs)
     (if (null? fs)
         #u
         (begin (table-set! (get c-fact-table) (extract (car fs) 1) (the (pairof int int @k) (cons (extract (car fs) 2) (extract (car fs) 3))))
                (c-fill-facts (cdr fs))))))
 ;; `c-facts` into `c-fact-table`.
-(define c-set-facts! (subr (maxeff (read @globals) (read @t) (read @k) (write @k) (alloc @k) spin) (k-facts) unit)
+(define c-set-facts! (subr (maxeff (read @globals) (read @t) (read @k) (write @k) (alloc @k)) (k-facts) unit)
   (lambda (fs)
     (begin
       (set c-facts fs)
       (set c-fact-table (make-table c-int-hash c-int=?))
       (set c-join-memo (make-table c-int-hash c-int=?))
       (c-fill-facts fs))))
-(define c-member? (subr (maxeff (read @globals) (read @k) spin) (syms symbol) bool)
+(define c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool)
   (lambda (xs n) (and (not (null? xs)) (or (symbol=? (car xs) n) (c-member? (cdr xs) n)))))
-(define c-adjoin (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms symbol) syms)
+(define c-adjoin (subr (maxeff (read @globals) (read @k) (alloc @k)) (syms symbol) syms)
   (lambda (xs n) (if (c-member? xs n) xs (cons n xs))))
 
 (define c-bind-params (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syns-a)) finite) syms) syms)
@@ -1141,14 +1141,14 @@
           (else (the c-kept-globals (cons (car ks) (c-unkeep (cdr ks) n)))))))
 ;; `n`'s global for a definition of it: the one kept for it, if one was;
 ;; else a new one, which later uses of `n` refer to.
-(define c-push-global (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (symbol) wglobal)
+(define c-push-global (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (symbol) wglobal)
   (lambda (n)
     (let ((kept (begin (set c-inlines (c-drop-inline (get c-inlines) n))
                        (set c-specials (c-drop-special (get c-specials) n))
                        (c-kept (get c-reuse) n))))
       (if (null? kept)
           (let ((g (make-global n)) (i (get c-genv-count)))
-            (begin (table-set! (get c-genv-index) n (cons (the (pairof int loc @k) (cons i (at-global g))) (table-ref (get c-genv-index) n nil)))
+            (begin (table-set! (get c-genv-index) n (the (listof (pairof int loc @k) finite) (cons (the (pairof int loc @k) (cons i (at-global g))) (table-ref (get c-genv-index) n nil))))
                    (set c-genv-count (+ i 1))
                    g))
           (begin (set c-reuse (c-unkeep (get c-reuse) n)) (car kept))))))
@@ -1165,7 +1165,7 @@
 ;; For a driver that computes a definition's value itself (the REPL, in the
 ;; native convention): `n`'s global from now on, made, for the driver to
 ;; fill.
-(define compile-new-global (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (symbol) wglobal)
+(define compile-new-global (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (symbol) wglobal)
   (lambda (n) (c-push-global n)))
 ;; For a driver that makes a global's value native code (the REPL, in the
 ;; native convention): `n`'s global, in a list, if it is one.
@@ -1181,7 +1181,7 @@
 
 
 
-(define c-rec-globals (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof wglobal @k))
+(define c-rec-globals (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof wglobal @k))
   (lambda (bs) (if (null? bs) nil (let ((g (c-push-global (extract (car bs) 1)))) (cons g (c-rec-globals (cdr bs)))))))
 (define c-rec-fill (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof wglobal @k) code) unit)
   (lambda (bs gs c)
