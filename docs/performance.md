@@ -1278,3 +1278,34 @@ helper's body repeated in its caller) the probe does not see; if that
 changes the count, this is where to look again. The time goes elsewhere:
 the native convention's temporaries in frame slots (the specialization's
 cost, above), call-outs and allocation.
+
+## Temporaries in registers where no call comes between (2026-09-28)
+
+Register code kept every `let` of a procedure that calls anything in its
+frame, since a call or a call-out may collect, or clobber registers.
+Now a value bound in turn (a `let`'s, or, in a copy specialized at a
+lambda, the lambda's parameters and captured values) is kept in a
+register where nothing after it, a later init or the body, calls or
+calls out: those are all that clobber registers or collect, so the
+register holds a live value only where nothing can move it. At most half
+the registers are so taken, the rest left for operations' temporaries.
+Both compilers (`r_in_regs`, `r-in-regs`), alike; a native compiler
+then maps them to machine registers.
+
+The specialized `map-add` in `closures` keeps `x` and `k` in registers,
+its frame three slots, not four; the native convention 33.5 → 30 ms
+(the specialization's cost, above, recovered), register code about the
+same (19–20 ms). The rest of the benchmarks and the front end compiling
+itself as register code (0.80 s) are unchanged: their `let`s mostly
+live across calls.
+
+| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   117.5 |   49.9 | 14.3 |     14.5 |     12.5 |       9.1 |   22.5 |
+| closures     | 6003000000     |   344.1 |  688.2 | 75.2 |     72.6 |     59.7 |      20.1 |   31.1 |
+| fib          | 832040         |   182.0 |  214.7 | 15.8 |     23.6 |     13.3 |       5.6 |    2.4 |
+| helpers      | 12000000       |   873.8 | 1291.6 | 90.5 |     88.1 |     55.4 |      12.5 |    7.2 |
+| lists-region | 1501500000     |   333.2 |  313.8 | 96.9 |    101.0 |     84.2 |       7.3 |  157.4 |
+| lists        | 1501500000     |   298.9 |  472.8 | 54.4 |     55.6 |     47.0 |      13.6 |   17.0 |
+| loop         | 49999995000000 |   735.8 |  473.6 | 65.1 |     66.3 |     46.6 |       5.5 |    4.2 |
+| tak          | 9              |    51.5 |   78.9 |  6.5 |      9.3 |      4.4 |       1.9 |    1.2 |

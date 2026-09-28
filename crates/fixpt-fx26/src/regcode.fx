@@ -287,11 +287,11 @@
 ;; position, the frame left first.
 (define r-invoke (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen int bool) unit)
   (lambda (g n tail) (if tail (begin (r-leave g) (r-opn g rop-tailinvoke n)) (r-opn g rop-invoke n))))
-;; RESULT kept where a `let` keeps a value: a register in a leaf, else a
+;; RESULT kept where a `let` keeps a value: a register (`reg`), else a
 ;; frame slot.
-(define r-keep (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen) rloc)
-  (lambda (g)
-    (if (extract g leaf)
+(define r-keep (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen bool) rloc)
+  (lambda (g reg)
+    (if reg
         (let ((r (r-reg g))) (begin (r-opn g rop-setreg r) (rl-reg r)))
         (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) (rl-slot s))))))
 ;; The one of `c-specials` that `n`, taking `k` arguments, names, if any.
@@ -367,6 +367,30 @@
 ;; Frame slots as call-out operands.
 (define r-slot-args (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof int @k)) rargs)
   (lambda (ss) (if (null? ss) nil (the rargs (cons (a-slot (car ss)) (r-slot-args (cdr ss)))))))
+;; `n` of `b`, onto `acc`.
+(define r-repeat (subr (maxeff (read @globals) (alloc @k) spin) (bool int (listof bool @k)) (listof bool @k))
+  (lambda (b n acc) (if (= n 0) acc (r-repeat b (- n 1) (cons b acc)))))
+;; Those flagged, while fewer than half the registers are taken from `next`.
+(define r-budget (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof bool @k) int) (listof bool @k))
+  (lambda (fs next)
+    (cond ((null? fs) nil)
+          ((and (car fs) (< next (quotient register-regs 2))) (cons #t (r-budget (cdr fs) (+ next 1))))
+          (else (cons #f (r-budget (cdr fs) next))))))
+;; `te` with each of `bs`' names bound, as `let`s are to the cellular
+;; compiler.
+(define r-local-names (subr (maxeff (read @globals) (alloc @k)) (cenv (listof (productof (1 symbol) (2 exp)) finite)) cenv)
+  (lambda (te bs) (if (null? bs) te (r-local-names (r-local te (extract (car bs) 1)) (cdr bs)))))
+;; A `let`'s inits, in order.
+(define r-let-inits (subr (maxeff (read @globals) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) finite)) (listof exp finite))
+  (lambda (bs) (if (null? bs) nil (the (listof exp finite) (cons (extract (car bs) 2) (r-let-inits (cdr bs)))))))
+;; `te` with parameters, or names, bound as `let`s are.
+(define r-local-params (subr (maxeff (read @globals) (alloc @k)) (cenv (listof (productof (1 symbol) (2 syns-a)) finite)) cenv)
+  (lambda (te ps) (if (null? ps) te (r-local-params (r-local te (extract (car ps) 1)) (cdr ps)))))
+(define r-local-syms (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (cenv syms) cenv)
+  (lambda (te ns) (if (null? ns) te (r-local-syms (r-local te (car ns)) (cdr ns)))))
+;; `fs` without its first `n`.
+(define r-drop-bools (subr (maxeff (read @globals) (read @k) spin) ((listof bool @k) int) (listof bool @k))
+  (lambda (fs n) (if (= n 0) fs (r-drop-bools (cdr fs) (- n 1)))))
 ;; The one of `c-inlines` that `n`, taking `k` arguments, names, if any.
 (define r-inline-named (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof c-inline finite) symbol int) (listof c-inline finite))
   (lambda (xs n k)
@@ -440,6 +464,29 @@
       (and (not (null? arms)) (or (r-collects (extract (car arms) 4) e this tail) (r-collects-arms (cdr arms) e this tail)))))
   (r-collects-else (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 exp)) finite) cenv (listof c-this @k) bool) bool)
     (lambda (els e this tail) (and (not (null? els)) (r-collects (extract (car els) 2) e this tail))))
+  ;; For values bound in turn, the first made by `inits` in `te`, then `m`
+  ;; more made without a call, and then seen by a body that calls or calls
+  ;; out, or not (`body-collects`): whether each is kept in a register, as
+  ;; the Rust compiler's `r_in_regs` says. In a leaf, each is. Else one is
+  ;; where nothing after it calls or calls out, which is all that clobbers
+  ;; registers or collects; so many, at most, as leave half the registers
+  ;; for the operations' temporaries.
+  (r-in-regs (subr (maxeff compiles spin) (rgen (listof exp finite) int cenv bool) (listof bool @k))
+    (lambda (g inits m te body-collects)
+      (if (extract g leaf)
+          (r-repeat #t (+ (c-count-exps inits) m) nil)
+          (r-budget (car (r-free-flags inits te (extract g this) (not body-collects) (r-repeat (not body-collects) m nil)))
+                    (get (extract g nreg))))))
+  ;; Each of `inits`' flags, onto `after`: set where nothing after it calls;
+  ;; and whether nothing from the first init on calls.
+  (r-free-flags
+    (subr (maxeff compiles spin) ((listof exp finite) cenv (listof c-this @k) bool (listof bool @k)) (pairof (listof bool @k) bool @k))
+    (lambda (inits te this free after)
+      (if (null? inits)
+          (cons after free)
+          (let* ((rest (r-free-flags (cdr inits) te this free after))
+                 (mine (cdr rest)))
+            (cons (cons mine (car rest)) (and mine (not (r-collects (car inits) te this #f))))))))
 
   ;; `x`'s value into RESULT; in tail position, returned.
   (r-exp (subr (maxeff compiles spin) (rgen exp renv cenv bool) unit)
@@ -501,8 +548,10 @@
         (e-begin (es a b)
           (if (null? es) (begin (r-op1 g rop-const (wcell-unit)) (r-done g tail)) (r-begin g es env te tail)))
         (e-let (bs body a b)
-          (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
-            (let ((bound (r-let-bind g bs env te)))
+          (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
+                 (body-collects (and (not (extract g leaf)) (r-collects body (r-local-names te bs) (extract g this) tail)))
+                 (flags (r-in-regs g (r-let-inits bs) 0 te body-collects)))
+            (let ((bound (r-let-bind g bs env te flags)))
               (begin
                 (r-exp g body (r-bind-all bound env) (r-local-all bound te) tail)
                 (set (extract g nreg) regs)
@@ -543,16 +592,14 @@
     (lambda (fs) (if (null? fs) nil (cons (a-e (extract (car fs) 2)) (r-field-args (cdr fs))))))
   ;; Each binding's value made, in the scope outside, and put where it
   ;; lives: a register in a leaf, else a frame slot. In order.
-  (r-let-bind (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 exp)) finite) renv cenv) renv)
-    (lambda (g bs env te)
+  (r-let-bind (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 exp)) finite) renv cenv (listof bool @k)) renv)
+    (lambda (g bs env te flags)
       (if (null? bs)
           nil
           (begin
             (r-exp g (extract (car bs) 2) env te #f)
-            (let ((l (if (extract g leaf)
-                         (let ((r (r-reg g))) (begin (r-opn g rop-setreg r) (rl-reg r)))
-                         (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) (rl-slot s))))))
-              (cons (cons (extract (car bs) 1) l) (r-let-bind g (cdr bs) env te)))))))
+            (let ((l (r-keep g (car flags))))
+              (cons (cons (extract (car bs) 1) l) (r-let-bind g (cdr bs) env te (cdr flags))))))))
   (r-bind-all (subr (maxeff compiles spin) (renv renv) renv)
     (lambda (bound env) (if (null? bound) env (r-bind-all (cdr bound) (cons (car bound) env)))))
   (r-local-all (subr (maxeff compiles spin) (renv cenv) cenv)
@@ -759,8 +806,17 @@
     (lambda (g args env te tail)
       (let* ((sp (car (get c-spec-now))) (at (car (get r-spec-at)))
              (regs (get (extract g nreg))) (slots (get (extract g nslot)))
-             (bound (r-spec-args g (extract sp 8) args env te))
-             (all (r-spec-free g at (extract sp 10) 0 (extract bound 1) (extract bound 2)))
+             (outer-genv (get c-genv))
+             ;; The body as it is compiled: in the globals the lambda saw.
+             (body-collects
+              (begin (set c-genv (extract sp 11))
+                     (let ((c (and (not (extract g leaf))
+                                   (r-collects (extract sp 9) (r-local-syms (r-local-params (the cenv nil) (extract sp 8)) (extract sp 10))
+                                               (the (listof c-this @k) nil) tail))))
+                       (begin (set c-genv outer-genv) c))))
+             (flags (r-in-regs g args (c-length (extract sp 10)) te body-collects))
+             (bound (r-spec-args g (extract sp 8) args env te flags))
+             (all (r-spec-free g at (extract sp 10) 0 (extract bound 1) (extract bound 2) (r-drop-bools flags (c-count-exps args))))
              (outer (get c-genv)))
         (begin
           (set c-genv (extract sp 11))
@@ -771,19 +827,19 @@
   ;; Each of the lambda's parameters bound to its argument, made and kept,
   ;; in order.
   (r-spec-args
-    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syns-a)) finite) (listof exp finite) renv cenv)
+    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syns-a)) finite) (listof exp finite) renv cenv (listof bool @k))
           (productof (1 renv) (2 cenv)))
-    (lambda (g ps args env te)
+    (lambda (g ps args env te flags)
       (if (or (null? ps) (null? args))
           (product (1 (the renv nil)) (2 (the cenv nil)))
           (let* ((p (extract (car ps) 1))
-                 (l (begin (r-exp g (car args) env te #f) (r-keep g)))
-                 (rest (r-spec-args g (cdr ps) (cdr args) env te)))
+                 (l (begin (r-exp g (car args) env te #f) (r-keep g (car flags))))
+                 (rest (r-spec-args g (cdr ps) (cdr args) env te (cdr flags))))
             (product (1 (the renv (cons (cons p l) (extract rest 1)))) (2 (r-local (extract rest 2) p)))))))
   ;; Each value the lambda's closure captured, from the parameter's value at
   ;; `at`, field `j` on, kept, in order, onto `env` and `te`.
-  (r-spec-free (subr (maxeff compiles spin) (rgen rloc syms int renv cenv) (productof (1 renv) (2 cenv)))
-    (lambda (g at fv j env te)
+  (r-spec-free (subr (maxeff compiles spin) (rgen rloc syms int renv cenv (listof bool @k)) (productof (1 renv) (2 cenv)))
+    (lambda (g at fv j env te flags)
       (if (null? fv)
           (product (1 env) (2 te))
           (begin
@@ -792,8 +848,8 @@
               (rl-slot (s) (r-opn g rop-stack s))
               (else y (r-decline)))
             (r-opn g rop-field (+ cellular-closure-free0 j))
-            (let ((l (r-keep g)))
-              (r-spec-free g at (cdr fv) (+ j 1) (the renv (cons (cons (car fv) l) env)) (r-local te (car fv))))))))
+            (let ((l (r-keep g (car flags))))
+              (r-spec-free g at (cdr fv) (+ j 1) (the renv (cons (cons (car fv) l) env)) (r-local te (car fv)) (cdr flags)))))))
   ;; In a procedure specialized at a lambda, a call of its own global with
   ;; the parameter passed as itself: the arguments made; then, if the global
   ;; still holds a closure of the word the copy was made from, the copy

@@ -476,19 +476,15 @@ impl Compiler<'_> {
             }
             Exp::Let { bindings, body } => {
                 let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
+                let inits: Vec<Option<ExpId>> = bindings.iter().map(|(_, i)| Some(*i)).collect();
+                let mut inner = te.clone();
+                inner.extend(bindings.iter().map(|(n, _)| (*n, Loc::Slot(usize::MAX))));
+                let body_collects = !g.leaf && self.r_collects(body, &inner, g.this.map(|(t, _)| t), tail);
+                let in_regs = self.r_in_regs(g, &inits, te, body_collects);
                 let mut bound = Vec::new();
-                for (n, init) in &bindings {
+                for ((n, init), reg) in bindings.iter().zip(in_regs) {
                     self.r_exp(g, *init, env, te, false)?;
-                    let l = if g.leaf {
-                        let r = g.reg()?;
-                        g.op("setreg", &[Gen::n(r)]);
-                        RLoc::Reg(r)
-                    } else {
-                        let s = g.slot();
-                        g.op("setstk", &[Gen::n(s)]);
-                        RLoc::Slot(s)
-                    };
-                    bound.push((*n, l));
+                    bound.push((*n, Self::r_keep(g, reg)?));
                 }
                 for (n, l) in bound {
                     env.push((n, l));
@@ -875,19 +871,26 @@ impl Compiler<'_> {
     fn r_spec_lambda(&mut self, g: &mut Gen, sp: &super::Spec, at: RLoc, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         let (regs, slots) = (g.next_reg, g.next_slot);
         let (mut own_env, mut own_te) = (Vec::new(), Vec::new());
-        for (p, a) in sp.lam_params.iter().zip(args) {
+        let inits: Vec<Option<ExpId>> = args.iter().map(|a| Some(*a)).chain(sp.lam_fv.iter().map(|_| None)).collect();
+        let inner: Env = sp.lam_params.iter().chain(&sp.lam_fv).map(|n| (*n, Loc::Slot(usize::MAX))).collect();
+        // The body as it is compiled: in the globals the lambda saw.
+        let outer = std::mem::replace(&mut self.genv_limit, sp.lam_genv);
+        let body_collects = !g.leaf && self.r_collects(sp.lam_body, &inner, None, tail);
+        self.genv_limit = outer;
+        let in_regs = self.r_in_regs(g, &inits, te, body_collects);
+        for ((p, a), reg) in sp.lam_params.iter().zip(args).zip(&in_regs) {
             self.r_exp(g, *a, env, te, false)?;
-            own_env.push((*p, Self::r_keep(g)?));
+            own_env.push((*p, Self::r_keep(g, *reg)?));
             own_te.push((*p, Loc::Slot(usize::MAX)));
         }
-        for (j, n) in sp.lam_fv.iter().enumerate() {
+        for ((j, n), reg) in sp.lam_fv.iter().enumerate().zip(&in_regs[sp.lam_params.len()..]) {
             match at {
                 RLoc::Reg(k) => g.op("reg", &[Gen::n(k)]),
                 RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
                 _ => return None,
             }
             g.op("field", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64)]);
-            own_env.push((*n, Self::r_keep(g)?));
+            own_env.push((*n, Self::r_keep(g, *reg)?));
             own_te.push((*n, Loc::Slot(usize::MAX)));
         }
         let outer = self.genv_limit;
@@ -900,10 +903,37 @@ impl Compiler<'_> {
         Some(())
     }
 
-    /// RESULT kept where a `let` keeps a value: a register in a leaf, else
-    /// a frame slot.
-    fn r_keep(g: &mut Gen) -> O<RLoc> {
-        Some(if g.leaf {
+    /// For values bound in turn, made by `inits` (none: made without a
+    /// call) in `te`, and then seen by a body that calls or calls out, or
+    /// not (`body_collects`): whether each is kept in a register. In a leaf, each is. Else one is where nothing after it, a
+    /// later value or the body, calls or calls out, which is all that
+    /// clobbers registers or collects; so many, at most, as leave half the
+    /// registers for the operations' temporaries.
+    fn r_in_regs(&mut self, g: &Gen, inits: &[Option<ExpId>], te: &Env, body_collects: bool) -> Vec<bool> {
+        if g.leaf {
+            return vec![true; inits.len()];
+        }
+        let this = g.this.map(|(t, _)| t);
+        let mut free = !body_collects;
+        let mut out = vec![false; inits.len()];
+        for i in (0..inits.len()).rev() {
+            out[i] = free;
+            if let Some(x) = inits[i] {
+                free = free && !self.r_collects(x, te, this, false);
+            }
+        }
+        let mut next = g.next_reg;
+        for r in out.iter_mut().filter(|r| **r) {
+            *r = next < REGS / 2;
+            next += usize::from(*r);
+        }
+        out
+    }
+
+    /// RESULT kept where a `let` keeps a value: a register (`reg`), else a
+    /// frame slot.
+    fn r_keep(g: &mut Gen, reg: bool) -> O<RLoc> {
+        Some(if reg {
             let r = g.reg()?;
             g.op("setreg", &[Gen::n(r)]);
             RLoc::Reg(r)
