@@ -42,7 +42,8 @@ queue gained", and "The next queue"):
    `fib` and `tak` about 2× register code, the identity lambda two
    instructions; `--calling-convention native` and `,native NAME` in the
    REPL; call-outs and inline `cons`, collecting with native frames as
-   roots (`lists` as fast as register code). Then steps 3–7.
+   roots (`lists` as fast as register code). Step 3 in part: the code in
+   the heap's collected code area, reclaimed when dropped. Then steps 4–7.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

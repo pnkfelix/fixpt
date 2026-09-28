@@ -128,7 +128,7 @@ fn in_native_convention(text: &str) -> Option<(String, f64)> {
             closure
         });
         let rt = sc.runtime_unrooted();
-        let p = m.compile(&rt.heap, closure).ok()?[0].1;
+        let p = m.compile(&mut rt.heap, closure).ok()?[0].1;
         Some(best(|| m.call(rt, p, &args, u64::MAX >> 1).map(|v| fixpt_runtime::write_value(&rt.heap, v)).unwrap_or_else(|t| format!("!! {}", t.what))))
     })
 }

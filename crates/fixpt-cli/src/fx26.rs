@@ -766,12 +766,12 @@ fn native(session: &mut Fx26Session, rest: &str) {
     let limit = session.step_limit().unwrap_or(u64::MAX >> 1);
     let shown = session.with_global_value(name, |rt, closure| {
         let mut m = fixpt_native::direct::DirectMachine::new()?;
-        let procs = m.compile(&rt.heap, closure)?;
+        let procs = m.compile(&mut rt.heap, closure)?;
         let mut out = String::new();
         for (i, (n, p)) in procs.iter().enumerate() {
             let n = if i == 0 { format!("{name} ({n})") } else { n.clone() };
             out.push_str(&format!("; {n}, {} instructions:\n", p.len));
-            for (i, w) in m.instructions(*p).iter().enumerate() {
+            for (i, w) in m.instructions(&rt.heap, *p).iter().enumerate() {
                 out.push_str(&format!(";   {i:>4}  {}\n", fixpt_native::arm64::disasm::disassemble(*w, i as i64)));
             }
         }

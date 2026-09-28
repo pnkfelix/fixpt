@@ -238,7 +238,13 @@ its code in one.
    convention, traps and callouts, and a native compiler for code without
    closures or continuations (from register code's intermediate form),
    tested against the Rust machine on the programs that fit.
-3. **The collector and native frames**: stack maps, the walk, code found
+3. **The collector and native frames** (in part, 2026-09-28: each compile
+   is one code bloblet in the code area, kept alive by what refers to it
+   and by the call running it, reclaimed after; frames walked by their
+   links, every slot a value, instead of stack maps; the code area's
+   generate-run-drop test passes for this code,
+   `code_compiled_and_dropped_is_reclaimed`. Still to do: code found by
+   return address, for code no call roots): stack maps, the walk, code found
    and kept alive by return address, the code area's address index; under
    `gc-stress`. The code area's generate-run-drop test
    (`crates/fixpt-native/tests/code_gc.rs`) passes here.

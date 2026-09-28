@@ -87,6 +87,9 @@ struct DState {
     top: u64,
     words: u64,
     alloc_limit: u64,
+    /// The code bloblet running, kept alive by the call-outs' collections
+    /// (it never moves).
+    code: u64,
 }
 
 /// The traps this code raises, by code.
@@ -203,10 +206,15 @@ pub struct DirectTrap {
     pub pc: u64,
 }
 
-/// A compiled procedure: where its code is.
+/// A compiled procedure: the code bloblet it is in (in the heap's code
+/// area, with the procedures it calls), where in it it starts and how long
+/// it is, in instructions. The bloblet lives while something the collector
+/// traces refers to it, and while a call runs it; whoever keeps a
+/// `Compiled` between calls keeps its bloblet alive.
 #[derive(Copy, Clone, Debug)]
 pub struct Compiled {
-    pub at: Offset,
+    pub code: Value,
+    pub start: usize,
     pub len: usize,
     pub arity: usize,
 }
@@ -224,7 +232,7 @@ impl DirectMachine {
     /// Compile `closure`'s procedure, and every procedure it calls, to code
     /// in the native convention: what it compiled, the first first; or why
     /// it could not.
-    pub fn compile(&mut self, heap: &Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
+    pub fn compile(&mut self, heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
         let mut a = Asm::new();
         let kinds = (0..TRAPS.len()).map(|_| a.label()).collect();
         let mut c = Compiling { heap, a, procs: HashMap::new(), queue: Vec::new(), order: Vec::new(), kinds, callouts: &mut self.callouts };
@@ -249,13 +257,15 @@ impl DirectMachine {
         let starts: Vec<(String, usize, usize)> =
             order.iter().map(|(w, name, arity)| (name.clone(), a.labels[procs[w].entry.0].expect("placed"), *arity)).collect();
         let code = a.finish()?;
-        let at = self.space.alloc(4 * code.len(), 16).ok_or("the code space is full")?;
-        self.space.write_code(at, &code);
-        self.space.flush(at, 4 * code.len());
+        // One code bloblet for them all, whose suffix is the code.
+        let blob = heap.make_code_bloblet(fixpt_heap::layout::kind("bloblet"), 0, 4 * code.len(), false);
+        let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
+        heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
+        heap.flush_code(blob);
         let mut out = Vec::new();
         for (i, (name, start, arity)) in starts.iter().enumerate() {
             let end = starts.get(i + 1).map_or(traps_at, |s| s.1);
-            out.push((name.clone(), Compiled { at: at + 4 * start, len: end - start, arity: *arity }));
+            out.push((name.clone(), Compiled { code: blob, start: *start, len: end - start, arity: *arity }));
         }
         Ok(out)
     }
@@ -280,7 +290,8 @@ impl DirectMachine {
         for (i, a) in args.iter().enumerate() {
             st.args[i] = a.raw();
         }
-        let target = self.space.exec_addr(p.at) as u64;
+        st.code = p.code.raw();
+        let target = (rt.heap.code_exec_address(p.code) + 4 * p.start) as u64;
         // SAFETY: the trampoline follows the C convention, saves what it
         // must, runs on the stack in `self.stack` (which outlives the call),
         // and touches only the state and that stack; the procedure's code,
@@ -299,9 +310,10 @@ impl DirectMachine {
         Ok(Value(r))
     }
 
-    /// `p`'s instructions, as they are in the code space.
-    pub fn instructions(&self, p: Compiled) -> Vec<u32> {
-        (0..p.len).map(|i| self.space.read_u32(p.at + 4 * i)).collect()
+    /// `p`'s instructions, as they are in its code bloblet.
+    pub fn instructions(&self, heap: &Heap, p: Compiled) -> Vec<u32> {
+        let bytes = heap.bloblet_bytes(p.code);
+        (p.start..p.start + p.len).map(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().expect("four bytes"))).collect()
     }
 }
 
@@ -710,9 +722,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
     let mut args: Vec<Value> = st.args[..c.arity()].iter().map(|a| Value(*a)).collect();
+    let mut code = [Value(st.code)];
     {
         let mut roots = native_frames(st);
         roots.push(&mut args);
+        roots.push(&mut code);
         rt.heap.maybe_collect(&mut roots);
     }
     let out = match c {

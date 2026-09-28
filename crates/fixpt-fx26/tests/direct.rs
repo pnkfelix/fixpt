@@ -21,6 +21,9 @@ struct Ran {
     code: String,
     /// How many collections its run made.
     collections: u64,
+    /// Words in the heap's code area in use just after the run, and after
+    /// a collection then, when nothing refers to the code any more.
+    code_words: (usize, usize),
 }
 
 /// `defs`, then `name` compiled in the native convention and called with
@@ -71,19 +74,22 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
         if std::env::var("DIRECT_SHOW").is_ok() {
             eprintln!("{}", fixpt_runtime::disasm::disassemble(&rt.heap, closure));
         }
-        let procs = match m.compile(&rt.heap, closure) {
+        let procs = match m.compile(&mut rt.heap, closure) {
             Ok(p) => p,
-            Err(e) => return Ran { direct: Err(format!("declined: {e}")), rust, code: String::new(), collections: 0 },
+            Err(e) => return Ran { direct: Err(format!("declined: {e}")), rust, code: String::new(), collections: 0, code_words: (0, 0) },
         };
         let p = procs[0].1;
-        let code: String = m.instructions(p).iter().enumerate().map(|(i, w)| disassemble(*w, i as i64) + "\n").collect();
+        let code: String = m.instructions(&rt.heap, p).iter().enumerate().map(|(i, w)| disassemble(*w, i as i64) + "\n").collect();
         if std::env::var("DIRECT_SHOW").is_ok() {
             eprintln!("{code}");
         }
         let vals: Vec<Value> = args.iter().map(|a| Value::fixnum(*a)).collect();
         let before = rt.heap.gc_count;
         let direct = m.call(rt, p, &vals, fuel).map(|v| fixpt_runtime::write_value(&rt.heap, v)).map_err(|DirectTrap { what, .. }| what);
-        Ran { direct, rust, code, collections: rt.heap.gc_count - before }
+        let collections = rt.heap.gc_count - before;
+        let after_run = rt.heap.code_words().0;
+        rt.heap.collect(&mut []);
+        Ran { direct, rust, code, collections, code_words: (after_run, rt.heap.code_words().0) }
     })
 }
 
@@ -170,7 +176,8 @@ fn higher_order_code_is_declined() {
 
 /// Lists made by call-outs to `cons`, and read, in a loop of calls: as the
 /// Rust machine gives; and the same collecting at every safepoint, so that
-/// every pair moves while native frames hold it.
+/// every pair moves while native frames hold it, and the code, in the
+/// heap's code area, must be kept alive by the call that runs it.
 #[test]
 fn lists_made_in_call_outs_survive_collection() {
     for gc_every in [None, Some(1), Some(7)] {
@@ -179,6 +186,10 @@ fn lists_made_in_call_outs_survive_collection() {
         if let Some(n) = gc_every {
             assert!(r.collections >= 30 * 1000 / n, "{} collections", r.collections);
         }
+        // The code lived through the run's collections, and is reclaimed
+        // by the first one after, when nothing refers to it.
+        let (after_run, after_collect) = r.code_words;
+        assert!(after_run > 0 && after_collect == 0, "code-area words in use: {:?}", r.code_words);
     }
 }
 
@@ -188,5 +199,53 @@ fn a_primitive_that_fails_says_why() {
     let defs = "(define q (subr pure (int int) int) (lambda (a b) (quotient a b)))";
     let r = run(defs, "q", &[7, 0], FUEL);
     assert!(matches!(&r.direct, Err(m) if m.contains("quotient")), "{:?}\n{}", r.direct, r.code);
+}
+
+/// Code compiled, run and dropped, over and over, with collections between:
+/// the code area holds only what is still referred to, however long it
+/// goes on (the code area's own test, `fixpt-native/tests/code_gc.rs`, for
+/// the native convention).
+#[test]
+fn code_compiled_and_dropped_is_reclaimed() {
+    let text = format!("{}\ntak", bench("tak"));
+    let mut c = Checker::new();
+    let forms = c.read_in(FileId(0), &text).expect("reads");
+    let done = c.declare_ahead(&forms).expect("declares");
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut m = DirectMachine::new().expect("maps");
+    s.scheme.scope(|sc| {
+        let w = sc.make(|h| {
+            let mut comp = fixpt_fx26::cellular::Compiler::new(h.heap(), &c, &text);
+            comp.registers = true;
+            comp.program(&tops).expect("compiles")
+        });
+        let none = sc.make(|_| Value::NULL);
+        let h = sc.call_global("%run-word", &[w, none]).expect("defines");
+        let mut closure = Value::NULL;
+        sc.make(|m| {
+            closure = m.get(h);
+            closure
+        });
+        let rt = sc.runtime_unrooted();
+        let root = rt.heap.push_root(closure);
+        let mut most = 0;
+        for round in 0..5000 {
+            // The closure, from its root: a collection may have moved it.
+            let closure = rt.heap.root_at(root);
+            let p = m.compile(&mut rt.heap, closure).expect("compiles")[0].1;
+            let args = [Value::fixnum(12), Value::fixnum(8), Value::fixnum(4)];
+            assert_eq!(m.call(rt, p, &args, FUEL).map(|v| v.as_fixnum()), Ok(5), "round {round}");
+            if round % 16 == 15 {
+                rt.heap.collect(&mut []);
+                most = most.max(rt.heap.code_words().1);
+            }
+        }
+        // Sixteen compiles' worth, and room to spare: not five thousand.
+        let closure = rt.heap.root_at(root);
+        let p = m.compile(&mut rt.heap, closure).expect("compiles")[0].1;
+        let one = rt.heap.bloblet_head(p.code).bytes / 8;
+        assert!(most < 64 * (one + 2), "the code area spans {most} words; one compile is {one}");
+    });
 }
 
