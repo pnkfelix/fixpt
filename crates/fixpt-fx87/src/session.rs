@@ -50,6 +50,17 @@ pub struct Outcome {
     pub value: Result<String, String>,
 }
 
+/// The names `runtime.scm` defines at its top level: `(define name …)` and
+/// `(define (name …) …)`.
+fn runtime_definitions() -> std::collections::HashSet<String> {
+    RUNTIME
+        .lines()
+        .filter_map(|l| l.strip_prefix("(define "))
+        .map(|rest| rest.trim_start_matches('(').split(|c: char| c.is_whitespace() || c == ')').next().unwrap_or("").to_string())
+        .filter(|n| !n.is_empty())
+        .collect()
+}
+
 impl Fx87Session {
     pub fn new() -> R<Fx87Session> {
         Fx87Session::with_backend(fixpt_engine::Backend::Ast)
@@ -65,7 +76,10 @@ impl Fx87Session {
             )
         })?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
-        let standard = checker.env.value_names().collect();
+        // A standard name the runtime defines is not the Scheme procedure of
+        // that name, so an application of it may not be integrated as one.
+        let defined = runtime_definitions();
+        let standard = checker.env.value_names().filter(|s| !defined.contains(checker.p.interner.name(*s))).collect();
         Ok(Fx87Session { checker, scheme, printed: String::new(), standard })
     }
 

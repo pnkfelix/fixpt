@@ -136,7 +136,17 @@
      ;; reasons -- the case simply carries no #value and the Rust harness
      ;; counts it as having no dynamic golden rather than as a failure.
      (define v (hashlang-value form))
-     (when v (fprintf port "#value ~s\n" v))]
+     (when v (fprintf port "#value ~s\n" v))
+     ;; `floor` and its kin, typed `(float) int`, give an inexact integer in
+     ;; the Scheme-hosted port (Scheme's keep the argument's exactness;
+     ;; FX-87's Common Lisp host gave an exact integer). Such a case is
+     ;; recorded, augmented, with the exact integer its type says: what fixpt
+     ;; gives (docs/divergences.md). Only for these four: a literal `1.0`,
+     ;; typed `int` by the reference's own rule, keeps its value.
+     (let ([n (and v (string->number v))])
+       (when (and n (pair? form) (memq (car form) '(floor ceiling truncate round))
+                  (equal? (format "~a" (cadr r)) "int") (real? n) (integer? n) (inexact? n))
+         (fprintf port "#value-aug ~s\n" (number->string (inexact->exact n)))))]
     ;; One line per record: a message with a newline in it would otherwise
     ;; corrupt the format, and at least one case has one.
     [else      (fprintf port "#static-error ~s\n" (normalize-space (cadr r)))])

@@ -52,6 +52,20 @@
 (define (flabs x) (abs x))
 (define (flneg x) (- x))
 (define (int->float x) (inexact x))
+;;; `floor`, `ceiling`, `truncate` and `round` are typed `(float) int`, as in
+;;; the originals; FX-87's Common Lisp host gave an exact integer, but
+;;; Scheme's keep the argument's exactness, so `(floor 2.3)` would be the
+;;; inexact 2.0, typed `int`, and fail where an exact integer is needed (an
+;;; index). So here they give an exact integer, as their type says; an
+;;; infinity or a NaN, which is no integer, is an error.
+(define %floor floor)
+(define %ceiling ceiling)
+(define %truncate truncate)
+(define %round round)
+(define (floor x) (exact (%floor x)))
+(define (ceiling x) (exact (%ceiling x)))
+(define (truncate x) (exact (%truncate x)))
+(define (round x) (exact (%round x)))
 
 ;;; ---- char --------------------------------------------------------------
 (define (char->int c) (char->integer c))

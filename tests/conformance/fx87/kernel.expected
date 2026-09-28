@@ -473,6 +473,7 @@
 #type int
 #effect pure
 #value "3.0"
+#value-aug "3"
 #end
 #case 82
 #src (int->float 3)

@@ -107,3 +107,18 @@ fn uniqueof_distinguishes_equal_values() {
     // Two `unique`s of different values are different.
     assert_eq!(run(&mut s, "(eq? (unique 3) (unique 4))"), "#f");
 }
+
+/// `floor` and its kin are typed `(float) int`, so they give an exact
+/// integer, usable as an index: not Scheme's inexact 2.0.
+/// On both engines: the bytecode compiler integrates a standard name
+/// claimed integrable, so these must not be claimed so.
+#[test]
+fn rounding_gives_an_exact_int() {
+    for backend in [fixpt_engine::Backend::Ast, fixpt_engine::Backend::Bytecode] {
+        let mut s = Fx87Session::with_backend(backend).expect("starts");
+        assert_eq!(run(&mut s, "(floor 2.3)"), "2", "{backend:?}");
+        assert_eq!(run(&mut s, "(ceiling 2.3)"), "3", "{backend:?}");
+        assert_eq!(run(&mut s, "(truncate -2.7)"), "-2", "{backend:?}");
+        assert_eq!(run(&mut s, "(round 2.5)"), "2", "{backend:?}");
+    }
+}

@@ -144,6 +144,31 @@ faithful to the original. The conformance corpus keeps a case pinning it
 (`kernel.fx`, marked `QUIRK`), and `fixpt` reproduces it. Deviating would make
 the corpus meaningless; it is recorded here so nobody "fixes" it by accident.
 
+### `floor`, `ceiling`, `truncate` and `round` give an exact integer — a divergence
+
+All four are typed `(float) int` (`standard.lisp:114`), and FX-91 types them
+the same way (`standard.scm:155`). FX-87's own host was Common Lisp, whose
+`floor` of a float returns an exact integer, so the type was true there. The
+Racket port runs on Scheme, whose `floor` keeps its argument's exactness:
+`(floor 3.7)` is `3.0`, typed `int`. That is unsound, not only cosmetic: an
+`int` that is `3.0` fails where an exact integer is needed, such as an index
+(`(vector-ref v (floor 1.5))` is an error in Scheme).
+
+`fixpt` gives the exact integer, in both FX-87 and FX-91 (each dialect's
+`runtime.scm` defines the four so); an infinity or a NaN, no integer, is an
+error. Case 81 (`(floor 3.7)`) carries the reference's `3.0` as `#value` and
+`fixpt`'s `3` as `#value-aug`, which `reference/fx87-golden.rkt` writes for
+exactly these four when the port's integer is inexact. FX-91's corpus does
+not call them.
+
+FX-87 also claimed every standard name integrable, so the bytecode engine
+compiled `floor` as Scheme's primitive and bypassed the runtime's definition.
+A standard name the runtime defines is no longer claimed integrable
+(`Fx87Session::with_backend`).
+
+The literal `1.0`, typed `int` by the rule above, is the same kind of
+unsoundness, but a separate, earlier decision, and is left as it is.
+
 ### `'()` types as `symbol`, not `null`
 
 `literal-null?` tests `(eqv? (caddr node) '())`, but under the port's NIL
