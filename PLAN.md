@@ -81,10 +81,10 @@ queue gained", and "The next queue"):
    calls itself through a local `letrec`. Deferred (the user's,
    2026-09-28): `define-rec*`, until something motivates it; a way to name
    a set of globals as a region may come first (`define-effect` already
-   names one as an effect). Next: a
-   lint on non-tail recursion over an index (the user's, after an
-   assembler overflow); a question to answer: tag bits for an ownership
-   bit.
+   names one as an effect). A lint finds loops written as recursion
+   (non-tail self-calls stepping only an index, `fixpt-tidy`); the front
+   end has none (2026-09-28, after an assembler overflow). A question
+   answered: an ownership bit fits in a reference's high bits.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.
