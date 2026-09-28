@@ -42,6 +42,16 @@ enum Loc {
     Loop,
 }
 
+/// A lambda's word, made by the stack code of the body it is in: where
+/// its body is, its parameters and its own name, and the names it captures.
+struct Made {
+    span: (u32, u32),
+    params: Vec<Sym>,
+    own: Option<Sym>,
+    word: Value,
+    fv: Vec<Sym>,
+}
+
 /// The word being compiled, when it is a `letrec`-bound procedure's: a
 /// tail call of `name`, still bound at `loc`, is a loop (13e).
 #[derive(Clone, Copy)]
@@ -78,6 +88,12 @@ pub struct Compiler<'a> {
     /// For each lambda given register code or declined: its name, and why
     /// it was declined (the first form the register compiler does not do).
     pub register_report: Vec<(String, Option<String>)>,
+    /// The words of the lambdas the body being compiled makes, as its stack
+    /// code made them; and those of the body whose register code is being
+    /// made, which uses them rather than making each again (and each of
+    /// theirs, twice as many at every depth).
+    made: Vec<Made>,
+    reuse: Vec<Made>,
     declined: Option<String>,
     /// The global procedures a call in register code may inline, as
     /// `inline_room` allows:
@@ -171,6 +187,8 @@ impl<'a> Compiler<'a> {
         char_at[text.len()] = n;
         Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), genv_index: Default::default(), this: None, registers: false,
             register_report: Vec::new(),
+            made: Vec::new(),
+            reuse: Vec::new(),
             declined: None,
             inlines: Vec::new(),
             genv_limit: None,
@@ -649,6 +667,29 @@ impl<'a> Compiler<'a> {
     }
 
     fn lambda_word(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
+        let outer_made = std::mem::take(&mut self.made);
+        let made = self.lambda_word_in(params, body, e, own);
+        self.made = outer_made;
+        let (w, fv) = made?;
+        let span = self.c.arena.span_of(body);
+        let own = own.filter(|f| !params.contains(f));
+        self.made.push(Made { span: (span.start, span.end), params: params.to_vec(), own, word: w, fv: fv.clone() });
+        Ok((w, fv))
+    }
+
+    /// The word the stack code of the body being compiled made for this
+    /// lambda, if it made one here.
+    fn made_word(&self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> Option<(Value, Vec<Sym>)> {
+        let span = self.c.arena.span_of(body);
+        let fv = self.captured(params, body, e);
+        let own = own.filter(|f| !params.contains(f));
+        self.reuse
+            .iter()
+            .find(|m| m.span == (span.start, span.end) && m.params == params && m.own == own && m.fv == fv)
+            .map(|m| (m.word, fv))
+    }
+
+    fn lambda_word_in(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
         let named = self.word_name.take();
         let defining = self.defining.take();
         let fv = self.captured(params, body, e);
@@ -691,7 +732,10 @@ impl<'a> Compiler<'a> {
         });
         if self.registers && in_range != Some(false) {
             self.declined = None;
-            match self.register_code(params, body, &inner, this, defining.map(|n| (n, w))) {
+            let outer_reuse = std::mem::replace(&mut self.reuse, std::mem::take(&mut self.made));
+            let cells = self.register_code(params, body, &inner, this, defining.map(|n| (n, w)));
+            self.reuse = outer_reuse;
+            match cells {
                 Some(cells) => {
                     let sym = self.heap.intern(&name);
                     let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;

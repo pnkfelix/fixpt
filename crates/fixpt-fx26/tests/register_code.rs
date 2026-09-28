@@ -300,3 +300,19 @@ fn a_body_that_inlines_has_two_versions() {
     let fast: Vec<&&str> = lines.iter().skip(1 + guards).take_while(|l| !l.contains("save")).collect();
     assert!(fast.iter().any(|l| l.contains("return")) && !fast.iter().any(|l| l.contains("global-guard") || l.contains("invoke")), "{step}");
 }
+
+/// A lambda inside another has one word, made by the stack code of the body
+/// it is in, which the register code of that body uses too: not one more
+/// for each, and so twice as many at every depth. Both compilers.
+#[test]
+fn a_nested_lambda_is_compiled_once() {
+    let text = "(lambda ((a int)) (lambda ((b int)) (lambda ((c int)) (lambda ((d int)) (+ a (+ b (+ c d)))))))";
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    for (who, code) in [("FX-26", fx26), ("Rust", rust)] {
+        let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
+        let words = code.lines().filter(|l| l.starts_with("word ")).count();
+        // The program's word and the four lambdas'.
+        assert_eq!(words, 5, "{who}:\n{code}");
+    }
+}

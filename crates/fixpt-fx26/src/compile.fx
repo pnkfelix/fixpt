@@ -638,6 +638,34 @@
 ;; The word of the lambda compiled last, in a list; and of the one before.
 (define c-last-word (ref (listof tword @k) @k) (new nil))
 (define c-prev-word (ref (listof tword @k) @k) (new nil))
+;; A lambda's word, made by the stack code of the body it is in: where its
+;; body starts and ends, its parameters, its own name, the word, and the
+;; names it captures.
+(define-type c-made (productof (1 int) (2 int) (3 syms) (4 syms) (5 tword) (6 syms)))
+;; The words of the lambdas the body being compiled makes, as its stack
+;; code made them; and those of the body whose register code is being made,
+;; which uses them rather than making each again (and each of theirs, twice
+;; as many at every depth).
+(define c-made-now (ref (listof c-made @k) @k) (new nil))
+(define c-made-reuse (ref (listof c-made @k) @k) (new nil))
+;; A lambda's own name, unless a parameter of the same name hides it.
+(define c-own-of (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof (productof (1 symbol) (2 syns-a)) acyclic) syms) syms)
+  (lambda (ps own0) (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0)))
+;; The word the stack code of the body being compiled made for this lambda,
+;; if it made one here, and the names it captures.
+(define c-made-word (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syns-a)) acyclic) exp cenv syms) (listof (productof (1 tword) (2 syms)) @k))
+  (lambda (ps body e own0)
+    (let ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
+          (params (c-bind-params ps nil)) (own (c-own-of ps own0)))
+      (letrec ((find (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof c-made @k)) (listof (productof (1 tword) (2 syms)) @k))
+                 (lambda (ms)
+                   (cond ((null? ms) nil)
+                         ((and (= (extract (car ms) 1) (exp-start body)) (= (extract (car ms) 2) (exp-end body))
+                               (k-syms=? (extract (car ms) 3) params) (k-syms=? (extract (car ms) 4) own)
+                               (k-syms=? (extract (car ms) 6) fv))
+                          (cons (product (1 (extract (car ms) 5)) (2 fv)) nil))
+                         (else (find (cdr ms)))))))
+        (find (get c-made-reuse))))))
 
 (define-rec
   (c-exps (subr (maxeff compiles spin) ((listof exp acyclic) cenv int code) int)
@@ -780,10 +808,20 @@
               (begin (c-op1 c routine-closure w) (c-emit c (i-cell (wcell-int (c-length fv)))))
               (begin (c-lit c w) (c-prim c "%region-closure" (+ 2 (c-length fv)))))
           patches))))
-  ;; A lambda's word, and the names its closure captures, in order; with its
+;; A lambda's word, and the names its closure captures, in order; with its
   ;; register code as its twin, when this compiler makes register code
   ;; (`c-registers`).
   (c-lambda-word (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) acyclic) exp cenv syms) (productof (1 tword) (2 syms)))
+    (lambda (ps body e own0)
+      (let* ((outer (get c-made-now))
+             (made (begin (set c-made-now (the (listof c-made @k) nil)) (c-lambda-word-in ps body e own0))))
+        (begin
+          (set c-made-now (cons (product (1 (exp-start body)) (2 (exp-end body)) (3 (c-bind-params ps nil))
+                                         (4 (c-own-of ps own0)) (5 (extract made 1)) (6 (extract made 2)))
+                                outer))
+          made))))
+;; The same, with the words of the lambdas in it noted as made.
+(c-lambda-word-in (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) acyclic) exp cenv syms) (productof (1 tword) (2 syms)))
     (lambda (ps body e own0)
       (let* ((named (let ((x (get c-word-name))) (begin (set c-word-name (the (listof string @k) nil)) x)))
              (defining (let ((x (get c-defining))) (begin (set c-defining (the (listof symbol @k) nil)) x)))
@@ -826,7 +864,11 @@
                                            (if (null? defining)
                                                (the (listof (productof (1 symbol) (2 tword)) @k) nil)
                                                (cons (product (1 (car defining)) (2 w)) nil)))
-                                      ((get c-register-code) ps body inner this))))
+                                      (let* ((outer-reuse (get c-made-reuse))
+                                             (cells (begin (set c-made-reuse (get c-made-now))
+                                                           (set c-made-now (the (listof c-made @k) nil))
+                                                           ((get c-register-code) ps body inner this))))
+                                        (begin (set c-made-reuse outer-reuse) cells)))))
                     (if (null? cells) #u (begin (set-register-twin w cells) #u)))
                   #u)
               (product (1 w) (2 fv))))))))

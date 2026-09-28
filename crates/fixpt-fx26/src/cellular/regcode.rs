@@ -1561,7 +1561,10 @@ impl Compiler<'_> {
         if g.leaf {
             return None;
         }
-        let (w, fv) = self.lambda_word(ps, body, te, own).ok()?;
+        let (w, fv) = match self.made_word(ps, body, te, own) {
+            Some(made) => made,
+            None => self.lambda_word(ps, body, te, own).ok()?,
+        };
         if let Some(r) = region {
             if fv.len() + 2 > REGS {
                 return self.decline("a closure in a region of more than REGS - 2 values");

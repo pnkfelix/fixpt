@@ -1562,3 +1562,20 @@ whether a fast version pays, and compiling those that do (0.03 s).
 | lists        | 1501500000     |   297.8 |  470.1 | 54.7 |     65.9 |     47.4 |       8.5 |   10.5 |
 | loop         | 49999995000000 |   736.0 |  452.2 | 64.5 |     89.7 |     41.2 |       4.7 |    4.3 |
 | tak          | 9              |    51.6 |   78.0 |  6.6 |      8.7 |      4.5 |       1.7 |    1.2 |
+
+## A nested lambda compiled once (2026-09-28)
+
+Found by the user, asking why `,disassemble-asm` of `(lambda (y) (lambda
+(x) (+ y x)))` showed the inner lambda twice. A body is compiled twice
+when register code is made: to stack code, and to register code, its
+twin. Each pass made its own word for every lambda in the body, and each
+of those words was compiled twice in turn: 2^(d-1) words for a lambda d
+deep (3, 7 and 15 words in all for 2, 3 and 4 deep), each with its own
+register code and machine code. The register code of a body now uses the
+words its stack code just made (matched by where the lambda's body is,
+its parameters, its own name and what it captures), in both compilers:
+one word per lambda (`a_nested_lambda_is_compiled_once`).
+
+The front end nests lambdas little, so compiling itself takes as long
+as before (0.78 s → 0.77–0.78 s); curried code and closures returning
+closures are what gain.

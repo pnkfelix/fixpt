@@ -1388,7 +1388,7 @@
     (lambda (g ps body env te own region)
       (if (extract g leaf)
           (begin (r-decline) (the patches nil))
-          (let* ((made (c-lambda-word ps body te own)) (w (extract made 1)) (fv (extract made 2)) (n (c-length fv)))
+          (let* ((made (let ((m (c-made-word ps body te own))) (if (null? m) (c-lambda-word ps body te own) (car m)))) (w (extract made 1)) (fv (extract made 2)) (n (c-length fv)))
             (if (null? region)
                 (if (> n register-regs)
                     (begin (r-decline) (the patches nil))
