@@ -1,5 +1,5 @@
 ;;; Words compiled to machine code, in FX-26 (PLAN.md §11, step 11c): the
-;;; hand-encoded machine's `assemble_word` (`fixpt-native/src/threaded.rs`),
+;;; hand-encoded machine's `assemble_word` (`fixpt-native/src/cellular.rs`),
 ;;; routine for routine and instruction for instruction, over the encoder
 ;;; written in FX-26 (`arm64.fx`) and what the machine's generator says of
 ;;; it (`native-layout.fx`). The Rust compiler is this one's oracle: for
@@ -7,7 +7,7 @@
 ;;; making the word's entry name them, is the loader's, in Rust.
 ;;;
 ;;; A word's code does what its cells do, routine for routine, with the ip
-;;; kept in step, so that it and threaded code mix freely; branches become
+;;; kept in step, so that it and cellular code mix freely; branches become
 ;;; jumps, and the dispatch between cells goes.
 
 (define-effect assembles (maxeff (read @k) (write @k) (alloc @k)))
@@ -171,18 +171,18 @@
 ;; On from where CUR and the ip now are, `d` in `dreg`.
 (define n-enter-cur (subr (maxeff assembles spin) (int) unit)
   (lambda (dreg)
-    (let ((threaded (n-label)))
+    (let ((cellular (n-label)))
       (begin
         (n-e (arm-add n-x11 n-base n-cur))
         (n-e (arm-ldur n-x10 n-x11 (n-field-off n-word-entry)))
-        (n-cbz n-x10 threaded)
+        (n-cbz n-x10 cellular)
         (n-e (arm-ldr n-x16 n-st n-st-resume))
         (n-e (arm-ldr-reg n-x16 n-x16 n-x10))
-        (n-cbz n-x16 threaded)
+        (n-cbz n-x16 cellular)
         (n-e (arm-ldr-reg n-x16 n-x16 dreg))
-        (n-cbz n-x16 threaded)
+        (n-cbz n-x16 cellular)
         (n-e (arm-br n-x16))
-        (n-bind threaded)
+        (n-bind cellular)
         (n-next)))))
 
 (define n-fp-encode (subr (maxeff assembles spin) (int) unit)

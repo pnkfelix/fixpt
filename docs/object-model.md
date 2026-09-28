@@ -134,7 +134,7 @@ point as an offset from it, as the VM's frames effectively do now.
 
 The bootstrap interpreter reads bloblets directly, *and* code can keep a
 representation of its own. The two are the same design at two stages, as in
-Forth's threaded code:
+Forth's cellular[^cellular] code:
 - **Interpreted.** A code bloblet's *fields* are its program: a sequence of
   pointers to other code bloblets, and literals. Its *suffix* is a small
   inner interpreter, Forth's `NEXT`, that runs through those fields in
@@ -569,5 +569,10 @@ document's.
   invariant 2 allows. But is 8 bytes enough, or should the header record an
   alignment?
 - ~~**The bootstrap interpreter.**~~ Both: it reads bloblets directly,
-  interpreting threaded bloblets, and compiled forms replace those one at a
+  interpreting cellular bloblets, and compiled forms replace those one at a
   time. See "Interpreted and compiled, side by side".
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

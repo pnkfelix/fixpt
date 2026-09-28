@@ -1,9 +1,9 @@
-//! The threaded machine's routines for code compiled from FX-26: frames and
+//! The cellular machine's routines for code compiled from FX-26: frames and
 //! locals, closures, calls and tail calls, globals, and the runtime's
 //! primitives. Words are built by hand here; the compiler (PLAN.md §11, 9d)
 //! makes them from FX-26.
 
-use fixpt_engine::threaded::{Machine, SELF, Trap, WordBuilder};
+use fixpt_engine::cellular::{Machine, SELF, Trap, WordBuilder};
 use fixpt_heap::Value;
 use fixpt_runtime::Runtime;
 

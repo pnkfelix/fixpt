@@ -56,16 +56,16 @@ fn what_cannot_be_done() {
     assert!(got.contains("a bloblet the program made"), "{got}");
 }
 
-/// Threaded words made and run from Scheme.
+/// Cellular words made and run from Scheme.
 #[test]
-fn threaded_words_from_scheme() {
+fn cellular_words_from_scheme() {
     // `+` is routine 11: (lambda (a b) (+ a b)) as a word that adds the
     // two values it is given, then `exit`.
     let src = "(define w (%make-word 'add2 (list 11 1))) (%run-word w (list 40 2))";
     assert_eq!(same(src), "42");
     let got = same("(%make-word 'bad (list 11))");
     assert!(got.contains("not a word: a word must end"), "{got}");
-    assert_eq!(same("(%make-word 'w (list 1))"), "#<threaded-word w>");
+    assert_eq!(same("(%make-word 'w (list 1))"), "#<cellular-word w>");
 }
 
 /// Looking at the heap from outside: SRO, and the collector's counters and

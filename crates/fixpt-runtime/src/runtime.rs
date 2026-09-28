@@ -29,7 +29,7 @@ pub struct Runtime {
     /// valid.
     error_rtd_root: usize,
 
-    /// How `%run-word` runs a threaded word: the threaded machine lives in
+    /// How `%run-word` runs a cellular word: the cellular machine lives in
     /// `fixpt-engine`, above this crate, which installs it.
     pub run_word: Option<RunWord>,
     /// How that machine shows a word's machine code, or what stands for it
@@ -43,7 +43,7 @@ pub struct Runtime {
     pub word_fuel: u64,
 }
 
-/// Run threaded word `word` with `args` on its data stack; its value, or
+/// Run cellular word `word` with `args` on its data stack; its value, or
 /// why it stopped.
 pub type RunWord = fn(&mut Runtime, Value, &[Value]) -> Result<Value, String>;
 

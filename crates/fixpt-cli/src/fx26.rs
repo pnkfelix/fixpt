@@ -3,7 +3,7 @@
 //! A form is checked, lowered to Scheme that carries what the checker proved
 //! (`fixpt_fx26::lower`), and run. The REPL prints what FX-87's did — the
 //! value, then ` : <type> ! <effect>` — and `,code` shows the lowered Scheme
-//! (under `--fx26-run threaded`, the words each form makes).
+//! (under `--fx26-run cellular`, the words each form makes).
 //!
 //! Definitions persist between inputs: `(define name type expression)`,
 //! `(define name expression)` and `(define-type name type)`.
@@ -76,11 +76,11 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         1
     })?;
     s.strategy = crate::FX26_RUN.get().copied().unwrap_or_default();
-    if let Some(m) = crate::THREADED_MACHINE.get() {
+    if let Some(m) = crate::CELLULAR_MACHINE.get() {
         s.scheme.runtime_unrooted().run_word = Some(*m);
     }
-    s.scheme.runtime_unrooted().machine_code = crate::THREADED_MACHINE_CODE.get().copied().flatten();
-    s.register_code = crate::THREADED_MACHINE_NAME.get().is_some_and(|n| n.contains("register code"));
+    s.scheme.runtime_unrooted().machine_code = crate::CELLULAR_MACHINE_CODE.get().copied().flatten();
+    s.register_code = crate::CELLULAR_MACHINE_NAME.get().is_some_and(|n| n.contains("register code"));
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
         s.set_step_limit(*l);
@@ -102,16 +102,16 @@ pub fn repl(backend: Backend) -> i32 {
     };
     println!("fixpt {} — FX-26, {engine}", env!("CARGO_PKG_VERSION"));
     // Say what runs each form: `--fx26-run` chooses.
-    let machine = crate::THREADED_MACHINE_NAME.get().copied().unwrap_or("the threaded machine written in Rust");
+    let machine = crate::CELLULAR_MACHINE_NAME.get().copied().unwrap_or("the cellular machine written in Rust");
     let how = match session.strategy {
         Strategy::Lower => format!("lowered to Scheme and run on the {engine}"),
         Strategy::Evaluate => "run by the evaluator written in FX-26".to_string(),
-        Strategy::Threaded => format!("compiled to threaded words by the compiler written in FX-26, and run on {machine}"),
+        Strategy::Cellular => format!("compiled to cellular words by the compiler written in FX-26, and run on {machine}"),
     };
     println!("(each form is checked, {how}.");
     match session.strategy {
         Strategy::Lower => println!(" `,help` for commands, `,code` to show the lowered Scheme. ^D leaves.)"),
-        Strategy::Threaded => println!(" `,help` for commands, `,code` to show the words each form makes. ^D leaves.)"),
+        Strategy::Cellular => println!(" `,help` for commands, `,code` to show the words each form makes. ^D leaves.)"),
         _ => println!(" `,help` for commands, `,code` to show the lowering to Scheme, which is not what runs. ^D leaves.)"),
     }
 
@@ -165,20 +165,20 @@ pub fn repl(backend: Backend) -> i32 {
         };
         session.scheme.runtime_unrooted().show_machine_code = asm;
         if asm && session.strategy != Strategy::Lower {
-            let name = crate::THREADED_MACHINE_NAME.get().copied().unwrap_or("");
-            if crate::THREADED_MACHINE_CODE.get().copied().flatten().is_none() {
+            let name = crate::CELLULAR_MACHINE_NAME.get().copied().unwrap_or("");
+            if crate::CELLULAR_MACHINE_CODE.get().copied().flatten().is_none() {
                 println!("; {name} interprets the cells: it has no machine code for a word to show.");
                 if name.contains("hand-encoded") {
-                    println!(";   `--threaded-machine native-compiled`, or `registers`, compiles each word.");
+                    println!(";   `--cellular-machine native-compiled`, or `registers`, compiles each word.");
                 }
             }
         }
-        // `,disassemble E`: E's threaded code, shown, as `disassemble` gives
-        // it (under `--fx26-run threaded`; lowered, there is none).
+        // `,disassemble E`: E's cellular code, shown, as `disassemble` gives
+        // it (under `--fx26-run cellular`; lowered, there is none).
         let text = match text.trim().strip_prefix(",disassemble") {
             Some(e) if !e.trim().is_empty() && session.strategy == Strategy::Lower => {
-                println!("; lowered to Scheme, `{}` is a Scheme procedure, with no threaded code:", e.trim());
-                println!(";   `,code` shows a form's lowering; run with `--fx26-run threaded` to disassemble.");
+                println!("; lowered to Scheme, `{}` is a Scheme procedure, with no cellular code:", e.trim());
+                println!(";   `,code` shows a form's lowering; run with `--fx26-run cellular` to disassemble.");
                 continue;
             }
             Some(e) if !e.trim().is_empty() => {
@@ -209,8 +209,8 @@ pub fn repl(backend: Backend) -> i32 {
             "" => continue,
             ",code" => {
                 show_code = !show_code;
-                let what = if session.strategy == Strategy::Threaded { "threaded words" } else { "lowered Scheme" };
-                session.show_words = show_code && session.strategy == Strategy::Threaded;
+                let what = if session.strategy == Strategy::Cellular { "cellular words" } else { "lowered Scheme" };
+                session.show_words = show_code && session.strategy == Strategy::Cellular;
                 println!("; {what}: {}", if show_code { "on" } else { "off" });
                 continue;
             }

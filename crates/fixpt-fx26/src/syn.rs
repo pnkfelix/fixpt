@@ -72,7 +72,7 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Session, file: FileId, text: &str) 
 }
 
 /// Read, parse and compile `text` with the reader, the parser and the
-/// compiler written in FX-26, and run the word it makes on the threaded
+/// compiler written in FX-26, and run the word it makes on the cellular
 /// machine: the value, as Scheme writes it; or `!! ` and why it failed.
 pub fn compile_with_fx26_compiler(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
     compile_with_fx26_compiler_showing(scheme, standard, file, text, false, None).map(|(out, _)| out)
@@ -133,7 +133,7 @@ pub fn compile_with_fx26_compiler_showing(
             Ok(v) => Ok((s.write(v), words)),
             Err(e) => {
                 let why = e.to_string();
-                let why = why.trim_start_matches("error: threaded word: ");
+                let why = why.trim_start_matches("error: cellular word: ");
                 // As the lowered form says it, whichever machine ran out.
                 let why = if why.contains("OutOfFuel") { "evaluation step limit exceeded" } else { why };
                 Ok((format!("!! {why}"), words))

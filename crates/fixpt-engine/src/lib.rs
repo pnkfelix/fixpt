@@ -16,7 +16,7 @@ pub mod compile;
 pub mod frame;
 pub mod interp;
 pub mod prepare;
-pub mod threaded;
+pub mod cellular;
 pub mod vm;
 
 pub use compile::compile;

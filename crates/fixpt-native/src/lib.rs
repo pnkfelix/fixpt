@@ -5,7 +5,7 @@
 //! Everything that maps executable memory, writes machine code, or jumps into
 //! it is here, behind interfaces that are safe to call: a code space mapped
 //! twice (read+write to build, read+execute to run, so no address is ever both),
-//! and the machines that run threaded code. The encoder (`arm64`) is ordinary
+//! and the machines that run cellular code. The encoder (`arm64`) is ordinary
 //! safe code. Every `unsafe` block says what it relies on.
 //!
 //! arm64 on macOS first, since that is the development machine; see
@@ -17,6 +17,6 @@ pub mod codespace;
 mod control;
 pub mod stencil;
 pub mod faults;
-pub mod threaded;
+pub mod cellular;
 
 pub use codespace::CodeSpace;

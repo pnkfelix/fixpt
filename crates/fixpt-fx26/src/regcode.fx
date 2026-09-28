@@ -1,5 +1,5 @@
 ;;; Register code for a lambda, in FX-26 (PLAN.md 13h′ (e)): what the Rust
-;;; compiler's `threaded/regcode.rs` makes, instruction for instruction, as
+;;; compiler's `cellular/regcode.rs` makes, instruction for instruction, as
 ;;; the lambda's word's twin: the MacScheme machine's instructions
 ;;; (`layout::regcode`, the `rop-` numbers), made from the same trees.
 ;;;
@@ -47,9 +47,9 @@
   (s-op1 int)
   (s-op2imm int wcell)
   (s-field int)
-  ;; A call-out: a runtime primitive, or a threaded routine.
+  ;; A call-out: a runtime primitive, or a cellular routine.
   (s-prim int)
-  (s-threaded int)
+  (s-cellular int)
   ;; Its argument itself (`%fx26-identity`).
   (s-identity)
   ;; A reference written: `setfield 2`, then unit.
@@ -138,7 +138,7 @@
           ((symbol=? (car (car env)) n) (the (listof rloc @k) (cons (cdr (car env)) nil)))
           (else (r-where (cdr env) n)))))
 
-;; A let-bound name in the threaded environment: a local, captured as such.
+;; A let-bound name in the cellular environment: a local, captured as such.
 (define r-local (subr (alloc @k) (cenv symbol) cenv)
   (lambda (te n) (the cenv (cons (cons n (at-slot -1)) te))))
 
@@ -181,7 +181,7 @@
 
 ;; Whether `name`, applied to `n` arguments, is a standard operation register
 ;; code does, and how: as the Rust compiler's `r_standard`, whose last case
-;; is what the threaded compiler does with one runtime primitive.
+;; is what the cellular compiler does with one runtime primitive.
 (define r-standard (subr (maxeff (read @k) (alloc @k)) (string int) rstd)
   (lambda (name n)
     (let ((is (lambda ((s string) (k int)) (and (string=? name s) (= n k)))))
@@ -197,21 +197,21 @@
             ((or (is "car" 1) (is "datum-car" 1)) (s-op1 routine-pair-car))
             ((or (is "cdr" 1) (is "datum-cdr" 1)) (s-op1 routine-pair-cdr))
             ((is "get" 1) (s-field 2))
-            ((or (is "cons" 2) (is "datum-cons" 2)) (s-threaded routine-cons))
+            ((or (is "cons" 2) (is "datum-cons" 2)) (s-cellular routine-cons))
             ((is "set" 2) (s-set))
-            ((is "abort-current-continuation" 2) (s-threaded routine-abort))
-            ((is "call-with-composable-continuation" 2) (s-threaded routine-callcomp))
-            ((is "cwcc" 1) (s-threaded routine-callcc))
-            ((is "with-mark" 3) (s-threaded routine-withmark))
-            ((is "first-mark" 2) (s-threaded routine-firstmark))
-            ((is "current-marks" 1) (s-threaded routine-currentmarks))
-            ((is "marks-of" 2) (s-threaded routine-marksof))
+            ((is "abort-current-continuation" 2) (s-cellular routine-abort))
+            ((is "call-with-composable-continuation" 2) (s-cellular routine-callcomp))
+            ((is "cwcc" 1) (s-cellular routine-callcc))
+            ((is "with-mark" 3) (s-cellular routine-withmark))
+            ((is "first-mark" 2) (s-cellular routine-firstmark))
+            ((is "current-marks" 1) (s-cellular routine-currentmarks))
+            ((is "marks-of" 2) (s-cellular routine-marksof))
             ((is "array-ref" 2) (s-special "array-ref"))
             ((is "array-set!" 3) (s-special "array-set!"))
             ((is "array-length" 1) (s-special "array-length"))
             ((is "make-array" 2) (s-special "make-array"))
             ((or (is "make-continuation-prompt-tag" 0) (is "make-continuation-mark-key" 0)) (s-special "make-box"))
-            ;; What the threaded compiler does as one runtime primitive
+            ;; What the cellular compiler does as one runtime primitive
             ;; (`c-standard-on`), register code does too.
             ((or (string=? name "set-car!") (string=? name "set-cdr!")) (s-none))
             ((string=? name "new") (r-prim-std "%make-box" n 1))
@@ -387,7 +387,7 @@
         (e-bloblet (op i args a b) (begin (r-bloblet g (symbol->string op) i args env te) (r-done g tail)))
         (e-prompt (t body h a b)
           (begin
-            (r-call-out g rop-threaded routine-prompt (the rargs (cons (a-e t) (cons (a-e h) (cons (a-thunk body) nil)))) env te)
+            (r-call-out g rop-cellular routine-prompt (the rargs (cons (a-e t) (cons (a-e h) (cons (a-thunk body) nil)))) env te)
             (r-done g tail)))
         (e-tagcase (s arms els a b) (r-tagcase g s arms els env te tail))
         (e-letrec (bs body a b) (if (extract g leaf) (r-decline) (r-letrec g bs body env te tail)))
@@ -458,10 +458,10 @@
         (s-prim (p) (r-call-out g rop-prim p (r-exp-args args) env te))
         ;; In tail position a mark replaces this frame's, which is stack
         ;; code's way (`withmark-tail`); left to it.
-        (s-threaded (r)
+        (s-cellular (r)
           (if (and tail (= r routine-withmark))
               (r-decline)
-              (r-call-out g rop-threaded r (r-exp-args args) env te)))
+              (r-call-out g rop-cellular r (r-exp-args args) env te)))
         (s-identity () (r-exp g (car args) env te #f))
         (s-set ()
           (let ((k (extract (r-operands g (car args) (car (cdr args)) env te #f) 2)))
@@ -590,7 +590,7 @@
                        (a-lexical (j) (begin (r-opn g rop-lexical j) (r-opn g rop-setreg (+ i 1))))
                        (a-thunk (b) #u)))))
             (r-args-into g (cdr args) (cdr kept) (+ i 1) env te)))))
-  ;; A call-out, `prim p n` or `threaded r n`, on `args` in REG1…REGn.
+  ;; A call-out, `prim p n` or `cellular r n`, on `args` in REG1…REGn.
   (r-call-out (subr (maxeff compiles spin) (rgen int int rargs renv cenv) unit)
     (lambda (g how what args env te)
       (begin (r-args g args env te (the (listof exp @k) nil)) (r-opnn g how what (r-count-args args)))))
@@ -659,7 +659,7 @@
              (begin
                (r-args g (r-exp-args args) env te (the (listof exp @k) nil))
                (r-opn g rop-reg 2) (r-op2 g rop-op2imm (wcell-int routine-int-add) (wcell-int 2)) (r-opn g rop-setreg 2)
-               (r-opnn g rop-threaded routine-field-ref 2)))
+               (r-opnn g rop-cellular routine-field-ref 2)))
             ((string=? what "array-set!")
              (let ((p (runtime-primitive "%bloblet-set!")))
                (begin
@@ -833,7 +833,7 @@
           (begin
             (r-opnn g rop-load 1 (cdr (car ps)))
             (r-opn g rop-stack slot)
-            (r-opnn g rop-setfield (+ threaded-closure-free0 (car (car ps))) 1)
+            (r-opnn g rop-setfield (+ cellular-closure-free0 (car (car ps))) 1)
             (r-patch-one g (cdr ps) slot)))))
   (r-letrec-env (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) renv) renv)
     (lambda (bs at env)
@@ -844,7 +844,7 @@
 
 ;;; ------------------------------------------------------------ the entry
 
-;; The register environment of a lambda's body, from its threaded one: its
+;; The register environment of a lambda's body, from its cellular one: its
 ;; parameters in registers in a leaf, else in the frame.
 (define r-env-of (subr (maxeff (read @k) (write @k) (alloc @k) spin) (cenv bool) renv)
   (lambda (inner leaf)

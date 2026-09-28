@@ -216,13 +216,13 @@ Relations:
 ### 4.4 The theorems one would want
 
 **S1 (implementation in class).** *Conjectured.* Both ways FX-26 runs
-(lowered to Scheme on the bytecode engine, and the threaded engine) use
+(lowered to Scheme on the bytecode engine, and the cellular[^cellular] engine) use
 space `O(S_place)`.
 Evidence for: allocation into a place goes into that place's chunks or to
 the heap (`regions.rs:126–146`); reaps are copied; arenas end with their
-frames, and on abort (`fixpt-engine/src/threaded.rs:939–947`); the lowering
+frames, and on abort (`fixpt-engine/src/cellular.rs:939–947`); the lowering
 uses `dynamic-wind`.
-**The threaded-engine counterexample is now closed (F7 fix, d83face).**
+**The cellular-engine counterexample is now closed (F7 fix, d83face).**
 It was: a full continuation thrown out of a place body did not end the
 place (`reinstate` had no `region_exit`), so a loop that enters an arena
 and escapes with `cwcc` each time kept every arena live, `Θ(n)` where
@@ -230,7 +230,7 @@ and escapes with `cwcc` each time kept every arena live, `Θ(n)` where
 never while used). The fix is the one the abort path already had, now
 applied to throw: a continuation records the live-region count when taken
 (`CONT_REGIONS`), and reinstating a whole continuation ends those entered
-since, in both the Rust threaded machine and fixpt-native. So S1 no longer
+since, in both the Rust cellular machine and fixpt-native. So S1 no longer
 has this counterexample. (Verified only that the fix is present and matches
 the abort path; the asymptotic claim S1 is still conjectured — no
 space-measurement harness was run.)
@@ -296,3 +296,8 @@ continuations.
   *usable* reachability. A copying transmitter follows every pointer, so
   it needs the stronger, Elsman-style guarantee, or a copy that stops at
   pointers into places.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

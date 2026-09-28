@@ -29,10 +29,10 @@ pub struct Fx26Session {
     pub globals: Globals,
     /// How checked forms run.
     pub strategy: Strategy,
-    /// Under `Strategy::Threaded`: whether the compiler written in FX-26
+    /// Under `Strategy::Cellular`: whether the compiler written in FX-26
     /// makes each lambda's register code too, for a machine that runs it.
     pub register_code: bool,
-    /// Under `Strategy::Threaded`: whether each form's [`Outcome::code`] is
+    /// Under `Strategy::Cellular`: whether each form's [`Outcome::code`] is
     /// the words the compiler written in FX-26 made for it, those not shown
     /// for an earlier form, rather than its lowering to Scheme.
     pub show_words: bool,
@@ -197,9 +197,9 @@ pub enum Strategy {
     Lower,
     /// Run by the evaluator written in FX-26 (`evaluator.fx`).
     Evaluate,
-    /// Compiled to a threaded word by the compiler written in FX-26
-    /// (`compile.fx`) and run on the threaded machine.
-    Threaded,
+    /// Compiled to a cellular word by the compiler written in FX-26
+    /// (`compile.fx`) and run on the cellular machine.
+    Cellular,
 }
 
 impl Fx26Session {
@@ -422,8 +422,8 @@ impl Fx26Session {
         r
     }
 
-    /// Compile `text` to a threaded word with the compiler written in FX-26
-    /// (read and parsed in FX-26 too), and run it on the threaded machine:
+    /// Compile `text` to a cellular word with the compiler written in FX-26
+    /// (read and parsed in FX-26 too), and run it on the cellular machine:
     /// its value as Scheme would write it, or `!! ` and why not.
     pub fn compile_with_own_compiler(&mut self, text: &str) -> R<String> {
         self.compile_with_own_compiler_showing(text, false).map(|(out, _)| out)

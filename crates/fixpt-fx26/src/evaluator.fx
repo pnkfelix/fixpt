@@ -1,7 +1,7 @@
 ;;; An FX-26 evaluator, in FX-26 (PLAN.md §11, step 9b).
 ;;;
 ;;; FX-26's meaning, written in FX-26: the trees `parser.fx` makes, run
-;;; directly. It is the reference the compiler to threaded code (step 9d) is
+;;; directly. It is the reference the compiler to cellular code (step 9d) is
 ;;; checked against, beside the lowering to Scheme.
 ;;;
 ;;; Values are one datatype, `val`. What a program can change is kept in the

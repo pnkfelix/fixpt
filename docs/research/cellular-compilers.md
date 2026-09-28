@@ -1,4 +1,4 @@
-# Forth, threaded-code VMs and GHC: what applies to FX-26's machine
+# Forth, cellular-code[^cellular] VMs and GHC: what applies to FX-26's machine
 
 A survey made on 2026-09-26 for the FX-26 optimizing compiler (PLAN.md,
 "After M12"). A research agent wrote it without network access, so it
@@ -69,7 +69,7 @@ Ertl, "Stack caching for interpreters" (PLDI 1995).
   block: each item is in a register, in memory, or a known constant. It
   emits code only when a value must exist, and settles the model at block
   ends and calls. It also inlines small words and turns tail calls into
-  jumps. Reported ≈ several times threaded code.
+  jumps. Reported ≈ several times cellular code.
 - **iForth and bigForth** do much the same.
 - **RAFTS** (Ertl) planned data-flow graphs per block with ordinary
   register allocation.
@@ -129,18 +129,18 @@ costs is:
 - fuel and stack-limit checks at each entry;
 - the call protocol.
 
-| rank | optimization                          | level                | static information              | payoff               |
-| ---- | ------------------------------------- | -------------------- | ------------------------------- | -------------------- |
-| 1    | the stack in registers, per block     | machine code         | each routine's stack effect     | high                 |
-| 2    | typed primitives, fewer checks        | source, then cells   | types, refinement after tests   | high                 |
-| 3    | self tail calls become loops          | source, then cells   | the binding is never assigned   | high, for loops      |
-| 4    | known calls, direct                   | source, cells, code  | arity from types, no writes     | medium to high       |
-| 5    | frame slots in registers              | machine code         | control and allocation effects  | medium to high       |
-| 6    | join points                           | source               | escape analysis                 | medium               |
-| 7    | inlining and simplification           | source               | effects for safety, types       | medium, enabling     |
-| 8    | superinstructions and peepholes       | cells                | typed variants                  | medium, interpreters |
-| 9    | limit and fuel checks hoisted         | machine code         | stack effects, control flow     | small to medium      |
-| 10   | unboxed floats                        | source, machine code | types                           | niche                |
+| rank | optimization                      | level                | static information             | payoff               |
+| ---- | --------------------------------- | -------------------- | ------------------------------ | -------------------- |
+| 1    | the stack in registers, per block | machine code         | each routine's stack effect    | high                 |
+| 2    | typed primitives, fewer checks    | source, then cells   | types, refinement after tests  | high                 |
+| 3    | self tail calls become loops      | source, then cells   | the binding is never assigned  | high, for loops      |
+| 4    | known calls, direct               | source, cells, code  | arity from types, no writes    | medium to high       |
+| 5    | frame slots in registers          | machine code         | control and allocation effects | medium to high       |
+| 6    | join points                       | source               | escape analysis                | medium               |
+| 7    | inlining and simplification       | source               | effects for safety, types      | medium, enabling     |
+| 8    | superinstructions and peepholes   | cells                | typed variants                 | medium, interpreters |
+| 9    | limit and fuel checks hoisted     | machine code         | stack effects, control flow    | small to medium      |
+| 10   | unboxed floats                    | source, machine code | types                          | niche                |
 
 In more detail:
 
@@ -169,3 +169,8 @@ In more detail:
 
 **What to build first.** 3 and 2 are cheap and help every engine. 1 is the
 real compiler. 5 is where the effect system pays off.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

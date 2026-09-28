@@ -14,15 +14,15 @@ assembly language, the JVM verifier, proof-carrying code), it is from
 memory, and says so.
 
 Two findings on the way were bugs, not directions:
-- **Fixed now.** Under `--fx26-run threaded`, a form that loops hung the
+- **Fixed now.** Under `--fx26-run cellular`, a form that loops hung the
   REPL on every machine: `%run-word` ran words with unlimited fuel, and
   the step limit bounded only the Scheme engine around it. The runtime
   now has a fuel budget for a run of a word (`Runtime::word_fuel`), which
   the session sets from its step limit for the run of a form
-  (`tests/run.rs`, `threaded_forms_stop_at_the_step_limit`).
+  (`tests/run.rs`, `cellular_forms_stop_at_the_step_limit`).
 - **Open.** A heap image's words are never checked as they load:
   `image::load` runs `Heap::verify`, which checks the heap's shape, but not
-  the structural check that `make_threaded_word` and `regcode::check` make
+  the structural check that `make_cellular_word` and `regcode::check` make
   of every new word (routines in range, operands of the right kind,
   branches onto instructions). Task C3 below.
 
@@ -284,7 +284,7 @@ messages copied between them, the second fitting session types better.
 **What we have.**
 - A word records no arity, frame size or type; `slot i`, `free i` and
   `call n` are trusted.
-- `make_threaded_word` and `regcode::check` check a new word's structure,
+- `make_cellular_word` and `regcode::check` check a new word's structure,
   as the JVM's verifier checks its first pass. An image's words skip even
   that (above).
 - The typed routines (`int-add`, `pair-car`, `field k`, `tcall`) trust
@@ -295,13 +295,13 @@ messages copied between them, the second fitting session types better.
   source this checker checked itself.
 - Images hold no machine code: the receiving runtime makes it from cells.
 - `dump-heap` and `run-image` take Scheme programs, not FX-26 ones run
-  threaded.
+  cellular[^cellular].
 
 **What "carry the type" can mean,** from weaker to stronger:
 - *(a) A type, trusted.* Each word keeps its FX-26 type as a datum. Good
   for tools and for checking the two compilers agree; a guard against
   accidents only.
-- *(b) A type and a certificate a small verifier checks: typed threaded
+- *(b) A type and a certificate a small verifier checks: typed cellular
   code.* The verifier's state at a cell is the frame and data stack as
   types, the free values' types, and the effect so far; each routine gets
   a stack rule (`int-add : (int int -- int)`, `pair-car : ((pairof a b r)
@@ -341,7 +341,7 @@ runtime's; a side table is a fine first prototype. A field shifts
    words' cells.
 2. **C2 (M). `WORD_TYPE` as a field**, on every machine.
 3. **C3 (S). The structural check on loading an image**: one
-   `check_word`, factored from `make_threaded_word` and `regcode::check`,
+   `check_word`, factored from `make_cellular_word` and `regcode::check`,
    run on every word an image brings. First step: a corrupted image (a
    branch into an operand) is refused by `fixpt image verify`.
 4. **C4 (S–M). Typed rules for the routines** the compilers emit, with a
@@ -355,7 +355,7 @@ runtime's; a side table is a fine first prototype. A field shifts
    in both compilers and every machine.
 8. **C8 (L). Control and regions in the verifier**, until the eager reader
    verifies whole.
-9. **C9 (M). FX-26 programs run threaded, as images.**
+9. **C9 (M). FX-26 programs run cellular, as images.**
 10. **C10 (L). Fragments, and a loader that links them** with the checks
     above.
 11. **C11 (S). The licence on verified types**: the eager reader, dumped
@@ -377,3 +377,8 @@ The small, informative first steps, across the four:
 The type-system extensions proper (R6, T3, P4 onward, C5 onward) are for
 the user to choose among: the decision so far is to optimize from what the
 existing types already prove, and to discuss extensions after.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

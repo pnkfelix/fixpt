@@ -255,7 +255,7 @@ fn every_program_in_the_tests_compiled() {
         let norm = |v: &str| {
             if v.is_empty() || v == "#u" {
                 "#u".to_string()
-            } else if v.starts_with("#<threaded-closure") || v == "#<procedure>" {
+            } else if v.starts_with("#<cellular-closure") || v == "#<procedure>" {
                 "#<procedure>".to_string()
             } else if v.is_empty() || v == "#u" {
                 "#u".to_string()

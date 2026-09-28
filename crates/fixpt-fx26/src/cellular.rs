@@ -1,9 +1,9 @@
-//! FX-26 compiled to threaded words, in Rust (PLAN.md, M13 step 13a): the
+//! FX-26 compiled to cellular words, in Rust (PLAN.md, M13 step 13a): the
 //! compiler written in FX-26 (`compile.fx`), decision for decision, over
 //! the Rust checker's trees, so that the two make the same words and each
 //! optimization can be written here first and checked end to end.
 //!
-//! The machine is `fixpt_engine::threaded`'s: a lambda's arguments are its
+//! The machine is `fixpt_engine::cellular`'s: a lambda's arguments are its
 //! frame on the data stack, a `let`'s values are pushed onto the frame,
 //! closures are flat, globals are cells, and a call in tail position is a
 //! `tailcall`. A variable is resolved once: to a slot, a free value, a
@@ -13,7 +13,7 @@ use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{routine, CLOSURE_FREE0, ROUTINES, WORD_TWIN};
+use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, ROUTINES, WORD_TWIN};
 
 mod regcode;
 use fixpt_heap::{Heap, Value};
@@ -126,7 +126,7 @@ impl<'a> Compiler<'a> {
         self.heap.intern("#u")
     }
     fn prim(&self, code: &mut Vec<Item>, name: &str, n: usize) -> R<()> {
-        let p = fixpt_engine::threaded::runtime_primitive(name).ok_or_else(|| format!("no runtime primitive {name}"))?;
+        let p = fixpt_engine::cellular::runtime_primitive(name).ok_or_else(|| format!("no runtime primitive {name}"))?;
         self.op1(code, "prim", Value::fixnum(p as i64));
         code.push(Item::Cell(Value::fixnum(n as i64)));
         Ok(())
@@ -173,7 +173,7 @@ impl<'a> Compiler<'a> {
             pos += size(i);
         }
         let sym = self.heap.intern(name);
-        self.heap.make_threaded_word(sym, &cells)
+        self.heap.make_cellular_word(sym, &cells)
     }
 
     // ------------------------------------------------------- variables
@@ -1053,7 +1053,7 @@ impl<'a> Compiler<'a> {
 /// says, from the lowering's table.
 fn standard_primitive(name: &str) -> Option<&'static str> {
     crate::lower::STANDARD.iter().find(|(fx, _, _)| *fx == name).and_then(|(_, scheme, _)| {
-        (*scheme == "%fx26-identity" || fixpt_engine::threaded::runtime_primitive(scheme).is_some()).then_some(*scheme)
+        (*scheme == "%fx26-identity" || fixpt_engine::cellular::runtime_primitive(scheme).is_some()).then_some(*scheme)
     })
 }
 

@@ -1,5 +1,5 @@
 //! Words compiled to machine code by the compiler written in FX-26
-//! (`src/native.fx`) against the Rust one (`fixpt_native::threaded::
+//! (`src/native.fx`) against the Rust one (`fixpt_native::cellular::
 //! assemble_word`), its oracle: for every word of the bootstrap program,
 //! compiled, the same instructions and the same places where each cell's
 //! code starts (`PLAN.md` §11, 11c).
@@ -7,14 +7,14 @@
 use fixpt_engine::Backend;
 use fixpt_fx26::session::{Fx26Session, READER_PREFIX, load_eager_reader};
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{CLOSURE_WORD, WORD_CELL0};
+use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0};
 use fixpt_heap::{Heap, Value};
 use fixpt_read::FileId;
 use fixpt_scheme::Handle;
 
 /// Every word `word` reaches through its cells and operands.
 fn reachable(heap: &Heap, word: Value) -> Vec<Value> {
-    let closure = kind("threaded-closure");
+    let closure = kind("cellular-closure");
     let (mut todo, mut seen, mut out) = (vec![word], std::collections::HashSet::new(), Vec::new());
     while let Some(w) = todo.pop() {
         if !seen.insert(w.raw()) {
@@ -23,7 +23,7 @@ fn reachable(heap: &Heap, word: Value) -> Vec<Value> {
         out.push(w);
         for k in WORD_CELL0..=heap.bloblet_head(w).fields {
             let v = heap.bloblet_slot(w, k);
-            if heap.is_threaded_word(v) {
+            if heap.is_cellular_word(v) {
                 todo.push(v);
             } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
                 todo.push(heap.bloblet_slot(v, CLOSURE_WORD));
@@ -60,7 +60,7 @@ fn compare(limit: usize) {
             let mut want = (Vec::new(), Vec::new());
             sc.make(|m| {
                 let v = m.get(w);
-                want = fixpt_native::threaded::assemble_word(m.heap(), v, far).expect("assembles");
+                want = fixpt_native::cellular::assemble_word(m.heap(), v, far).expect("assembles");
                 Value::NULL
             });
             let got = sc.scope(|one| {

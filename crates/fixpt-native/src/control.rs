@@ -2,7 +2,7 @@
 //! continuations captured and reinstated, without lifting the stacks into
 //! the Rust machine and back (the round trip).
 //!
-//! These are the Rust machine's routines (`fixpt_engine::threaded`), step
+//! These are the Rust machine's routines (`fixpt_engine::cellular`), step
 //! for step, and it stays their oracle. They can work in place because a
 //! native return entry has the Rust machine's bits: `(word, 8k, 8fp,
 //! closure)` is `(word, fixnum k, fixnum fp, closure)`. So a stack index is
@@ -12,14 +12,14 @@
 //! Every push checks the stack's room, where the Rust machine's stacks are
 //! vectors, so a deep reinstatement traps rather than writing past them.
 
-use fixpt_engine::threaded::{prompt_height, prompt_regions, prompt_word, reinstated_prompt, MARK_MARK, PROMPT_MARK, Trap};
+use fixpt_engine::cellular::{prompt_height, prompt_regions, prompt_word, reinstated_prompt, MARK_MARK, PROMPT_MARK, Trap};
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{
+use fixpt_heap::layout::cellular::{
     CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_WHOLE, WORD_CELL0,
 };
 use fixpt_heap::{Heap, Value};
 
-use crate::threaded::State;
+use crate::cellular::State;
 
 /// The stacks as the Rust machine sees them: the data stack's values and
 /// the return stack's words, each indexed from the bottom.
@@ -126,8 +126,8 @@ impl Stacks<'_> {
     }
 }
 
-const CLOSURE: u8 = kind("threaded-closure");
-const CONTINUATION: u8 = kind("threaded-continuation");
+const CLOSURE: u8 = kind("cellular-closure");
+const CONTINUATION: u8 = kind("cellular-continuation");
 
 fn is_a(heap: &Heap, v: Value, k: u8) -> bool {
     v.is_bloblet() && heap.bloblet_kind(v) == k
@@ -182,9 +182,9 @@ fn call(s: &mut Stacks, heap: &mut Heap, n: usize, tail: bool, routine: &'static
 
 /// A continuation of the stacks from word `rs_from` and value `ds_from` up.
 fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: bool) -> Value {
-    if crate::threaded::TIMING.with(|t| *t) {
+    if crate::cellular::TIMING.with(|t| *t) {
         let words = (s.ds_len() - ds_from + s.rs_len() - rs_from) as u64;
-        crate::threaded::CAPTURED.with(|c| {
+        crate::cellular::CAPTURED.with(|c| {
             let mut c = c.borrow_mut();
             (c.0, c.1) = (c.0 + words, c.1 + 1);
             if c.1.is_power_of_two() {

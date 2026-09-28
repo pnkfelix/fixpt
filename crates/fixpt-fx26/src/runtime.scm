@@ -65,5 +65,5 @@
 ;;; ---- data ----
 ;;; A datum is the Scheme value itself. The operations the ordinary
 ;;; procedures do not cover are runtime primitives (`%fx26-…` in
-;;; `fixpt_runtime::prim`), so that threaded code can call them too.
+;;; `fixpt_runtime::prim`), so that cellular code can call them too.
 (define (%fx26-identity x) x)

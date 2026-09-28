@@ -5,7 +5,7 @@ use fixpt_engine::Backend;
 use fixpt_fx26::session::{Fx26Session, load_eager_reader};
 use fixpt_read::FileId;
 
-/// The front end, compiled to one threaded word by the compiler written in
+/// The front end, compiled to one cellular word by the compiler written in
 /// FX-26 (run lowered to Scheme), with the Rust checker's facts.
 #[test]
 fn the_compiler_compiles_the_front_end() {
@@ -27,7 +27,7 @@ fn the_compiler_compiles_the_front_end() {
 fn probe_uncovered() {
     let compile = fixpt_fx26::COMPILER;
     for (fx, scheme, _) in fixpt_fx26::lower::STANDARD {
-        let prim = *scheme == "%fx26-identity" || fixpt_engine::threaded::runtime_primitive(scheme).is_some();
+        let prim = *scheme == "%fx26-identity" || fixpt_engine::cellular::runtime_primitive(scheme).is_some();
         let special = compile.contains(&format!("\"{fx}\""));
         if !prim && !special {
             eprintln!("{fx} -> {scheme}");
@@ -52,10 +52,10 @@ fn probe_primitives() {
         }
     }
     for n in names {
-        if fixpt_engine::threaded::runtime_primitive(n).is_none() && fixpt_fx26::lower::STANDARD.iter().any(|(fx, _, _)| *fx == n) {
+        if fixpt_engine::cellular::runtime_primitive(n).is_none() && fixpt_fx26::lower::STANDARD.iter().any(|(fx, _, _)| *fx == n) {
             eprintln!("standard name without a primitive of its own: {n}");
         }
-        if n.starts_with('%') && fixpt_engine::threaded::runtime_primitive(n).is_none() {
+        if n.starts_with('%') && fixpt_engine::cellular::runtime_primitive(n).is_none() {
             eprintln!("no such primitive: {n}");
         }
     }
@@ -84,7 +84,7 @@ use common::same_code;
 #[test]
 #[cfg_attr(debug_assertions, ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint() {
-    fixpoint_on(fixpt_native::threaded::run_word);
+    fixpoint_on(fixpt_native::cellular::run_word);
 }
 
 /// The same, with stage 2's words compiled to machine code (step 11a) as
@@ -92,7 +92,7 @@ fn fixpoint() {
 #[test]
 #[cfg_attr(debug_assertions, ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint_with_words_compiled() {
-    fixpoint_on(fixpt_native::threaded::run_word_compiled);
+    fixpoint_on(fixpt_native::cellular::run_word_compiled);
 }
 
 /// The same, with stage 1 made by the compiler written in Rust, register
@@ -104,7 +104,7 @@ fn fixpoint_as_register_code() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
     if let Some(n) = std::env::var("FIXPT_GC_EVERY").ok().and_then(|n| n.parse().ok()) {
         s.scheme.set_gc_every(n);
     }
@@ -118,7 +118,7 @@ fn fixpoint_as_register_code() {
     let lap = |what: &str| eprintln!("{what}: {:.2} s", t.elapsed().as_secs_f64());
     s.scheme.scope(|sc| {
         let stage1 = sc.make(|m| {
-            let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+            let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
             comp.registers = true;
             comp.program(&tops).expect("compiles")
         });
@@ -215,7 +215,7 @@ fn probe_stage2() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word);
     let text = fixpt_fx26::bootstrap_program();
     let target = match std::env::var("PROBE_FILE") {
         Ok(p) if p == "front-end" => text.clone(),
@@ -229,8 +229,8 @@ fn probe_stage2() {
         let none = sc.make(|_| Value::NULL);
         let pieces = sc.call_global("%run-word", &[stage1, none]).expect("runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
-        let _ = fixpt_native::threaded::take_callout_counts();
-        let _ = fixpt_native::threaded::take_callout_nanos();
+        let _ = fixpt_native::cellular::take_callout_counts();
+        let _ = fixpt_native::cellular::take_callout_nanos();
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&target)));
         let args = sc.call_global("list", &[std, prog]).expect("a list");
         let gc = |sc: &mut fixpt_scheme::Session| {
@@ -250,7 +250,7 @@ fn probe_stage2() {
 
 /// The pieces, each alone, on the same input (the bootstrap program): the
 /// Rust ones, the FX-26 ones lowered to Scheme, and the FX-26 ones compiled
-/// and run on each threaded machine. A table, for `docs/performance.md`.
+/// and run on each cellular machine. A table, for `docs/performance.md`.
 #[test]
 #[ignore = "a report: cargo test --release -p fixpt-fx26 --test bootstrap comparison -- --ignored --nocapture"]
 fn comparison() {
@@ -322,8 +322,8 @@ fn comparison() {
     // Compiled, on each machine.
     type Run = fn(&mut fixpt_runtime::Runtime, Value, &[Value]) -> Result<Value, String>;
     let machines: [(&str, Run); 3] = [
-        ("Rust machine", fixpt_engine::threaded::run_word),
-        ("hand-encoded machine", fixpt_native::threaded::run_word),
+        ("Rust machine", fixpt_engine::cellular::run_word),
+        ("hand-encoded machine", fixpt_native::cellular::run_word),
         ("stencils, -O2", fixpt_native::stencil::run_word),
     ];
     for (name, machine) in machines {
@@ -361,7 +361,7 @@ fn comparison() {
         load_eager_reader(&mut s.scheme).expect("loads");
         s.scheme.engine.set_step_limit(None);
         s.scheme.runtime_unrooted().run_word =
-            Some(if registers { fixpt_native::threaded::run_word_registers } else { fixpt_native::threaded::run_word_compiled });
+            Some(if registers { fixpt_native::cellular::run_word_registers } else { fixpt_native::cellular::run_word_compiled });
         let times = s.scheme.scope(|sc| {
             let pieces = sc.make(|_| Value::NULL);
             sc.scope(|inner| {
@@ -371,7 +371,7 @@ fn comparison() {
                     let done = c.declare_ahead(&forms).expect("declares");
                     let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
                     inner.make(|m| {
-                        let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                        let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
                         comp.registers = true;
                         comp.program(&tops).expect("compiles")
                     })
@@ -411,7 +411,7 @@ fn probe_read() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
     let text = fixpt_fx26::bootstrap_program();
     s.scheme.scope(|sc| {
         let pieces = sc.make(|_| Value::NULL);
@@ -421,7 +421,7 @@ fn probe_read() {
             let done = c.declare_ahead(&forms).expect("declares");
             let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
             let stage1 = inner.make(|m| {
-                let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
                 comp.registers = true;
                 comp.program(&tops).expect("compiles")
             });
@@ -454,7 +454,7 @@ fn fixpoint_with_words_compiled_by_fx26() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_as_is);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_as_is);
     let text = fixpt_fx26::bootstrap_program();
     let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
     let t = std::time::Instant::now();
@@ -490,14 +490,14 @@ fn fixpoint_with_words_compiled_by_fx26() {
             };
             // Once for the size, then for the place it goes.
             let (sized, _) = code(sc, [0, 0]);
-            let (at, far) = fixpt_native::threaded::with_machine(|m| m.reserve(sized.len())).expect("room");
+            let (at, far) = fixpt_native::cellular::with_machine(|m| m.reserve(sized.len())).expect("room");
             let (words32, starts) = code(sc, far);
             assert!(words32.iter().all(|x| (0..1 << 32).contains(x)), "an instruction that could not be encoded");
             let words32: Vec<u32> = words32.into_iter().map(|x| x as u32).collect();
             instructions += words32.len();
             sc.make(|m| {
                 let v = m.get(*w);
-                fixpt_native::threaded::with_machine(|n| n.install(m.heap(), v, at, &words32, &starts)).expect("installs");
+                fixpt_native::cellular::with_machine(|n| n.install(m.heap(), v, at, &words32, &starts)).expect("installs");
                 Value::NULL
             });
         }
@@ -523,19 +523,19 @@ fn fixpoint_with_words_compiled_by_fx26() {
 
 /// Every word `word` reaches through its cells and operands.
 fn reachable_words(heap: &Heap, word: Value) -> Vec<Value> {
-    let closure = fixpt_heap::layout::kind("threaded-closure");
+    let closure = fixpt_heap::layout::kind("cellular-closure");
     let (mut todo, mut seen, mut out) = (vec![word], std::collections::HashSet::new(), Vec::new());
     while let Some(w) = todo.pop() {
         if !seen.insert(w.raw()) {
             continue;
         }
         out.push(w);
-        for k in fixpt_heap::layout::threaded::WORD_CELL0..=heap.bloblet_head(w).fields {
+        for k in fixpt_heap::layout::cellular::WORD_CELL0..=heap.bloblet_head(w).fields {
             let v = heap.bloblet_slot(w, k);
-            if heap.is_threaded_word(v) {
+            if heap.is_cellular_word(v) {
                 todo.push(v);
             } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
-                todo.push(heap.bloblet_slot(v, fixpt_heap::layout::threaded::CLOSURE_WORD));
+                todo.push(heap.bloblet_slot(v, fixpt_heap::layout::cellular::CLOSURE_WORD));
             }
         }
     }
@@ -548,7 +548,7 @@ thread_local! {
 
 /// `%run-word`'s hook, on the Rust machine, keeping a profile of the run.
 fn profiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
-    let mut m = fixpt_engine::threaded::Machine::new();
+    let mut m = fixpt_engine::cellular::Machine::new();
     m.profile = Some(Default::default());
     m.ds.extend_from_slice(args);
     let out = m.run_in_runtime(rt, word).map_err(|t| format!("{t:?}"));
@@ -586,7 +586,7 @@ fn probe_profile_check() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_as_is);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_as_is);
     let text = fixpt_fx26::bootstrap_program();
     let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
     s.scheme.scope(|sc| {

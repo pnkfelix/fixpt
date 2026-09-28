@@ -116,9 +116,9 @@ fn the_compiler_uses_the_facts() {
 /// made, those not shown for an earlier form: a definition's lambda once,
 /// and the program word, which each form remakes, each time.
 #[test]
-fn threaded_forms_show_their_new_words() {
+fn cellular_forms_show_their_new_words() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    s.strategy = fixpt_fx26::session::Strategy::Threaded;
+    s.strategy = fixpt_fx26::session::Strategy::Cellular;
     s.show_words = true;
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/run/sq.fx")).unwrap();
     let forms = s.checker.read_in(fixpt_read::FileId(0), &text).expect("reads");
@@ -128,21 +128,21 @@ fn threaded_forms_show_their_new_words() {
     assert_eq!(words(&codes[1]), ["program"], "{}", codes[1]);
 }
 
-/// Compiled and run on a threaded machine, a form that loops stops at the
+/// Compiled and run on a cellular machine, a form that loops stops at the
 /// session's step limit, as it does lowered, on each machine: by recursion,
 /// or by calling a continuation again.
 #[test]
-fn threaded_forms_stop_at_the_step_limit() {
+fn cellular_forms_stop_at_the_step_limit() {
     type Run = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, &[fixpt_heap::Value]) -> Result<fixpt_heap::Value, String>;
     let machines: [Run; 3] = [
-        fixpt_engine::threaded::run_word,
-        fixpt_native::threaded::run_word,
-        fixpt_native::threaded::run_word_registers,
+        fixpt_engine::cellular::run_word,
+        fixpt_native::cellular::run_word,
+        fixpt_native::cellular::run_word_registers,
     ];
     for (name, i, m) in ["spin", "resume"].into_iter().flat_map(|n| machines.into_iter().enumerate().map(move |(i, m)| (n, i, m))) {
         let text = std::fs::read_to_string(format!("{}/tests/programs/diverge/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        s.strategy = fixpt_fx26::session::Strategy::Threaded;
+        s.strategy = fixpt_fx26::session::Strategy::Cellular;
         s.register_code = i == 2;
         s.scheme.runtime_unrooted().run_word = Some(m);
         s.set_step_limit(Some(100_000));

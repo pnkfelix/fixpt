@@ -28,7 +28,7 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 | F4   | fixed: a size binder may be `finite` only as the size of at most one parameter's own `(nlist T n)` or `(nat n)`, and nowhere else supplied                                                                                                                                                  |
 | F5   | fixed: past the depth bound, the self-application test says the procedure may loop                                                                                                                                                                                                          |
 | F6   | fixed: `no-escape` only where the value is first-order data                                                                                                                                                                                                                                 |
-| F7   | fixed: a continuation keeps how many regions were live when taken; reinstated whole, it ends those entered since, in both threaded machines                                                                                                                                                 |
+| F7   | fixed: a continuation keeps how many regions were live when taken; reinstated whole, it ends those entered since, in both cellular[^cellular] machines                                                                                                                                      |
 | A1   | holds for the constructs present (the syntactic rule is the stronger)                                                                                                                                                                                                                       |
 | A2   | fixed: a generative type whose representation is one of what it is given is no constructor for the recursive-type rule                                                                                                                                                                      |
 | A3   | holds by construction: every `datum` is made by FX-26's own constructors (fresh pairs of acyclic data; lists checked proper, cycle-safely) or its reader; the host passes no datum in. The contract for Scheme code calling an `fx:` global directly is that a `datum` it passes is acyclic |
@@ -185,7 +185,7 @@ The continuation `k` re-enters the point after `cwcc`, which calls
 `(icell-get c)` and jumps again: an unbounded loop. The checker accepts
 `loop : (subr pure () int)` (the effects on `@k` and `@c` are masked, the
 cell being private), and running it exceeds the step limit on both the
-lowered and threaded back ends.
+lowered and cellular back ends.
 
 **Assessment.** This is a real hole in the `spin` analysis: a `pure`
 procedure that does not terminate. It is not a memory-safety problem; the
@@ -312,11 +312,11 @@ licenses nothing about placement — or strengthen the analysis to check
 that no returned value's type mentions the allocation's region
 (`soundness-regions.md` §3.3).
 
-## F7 — the threaded engine's throw does not end the places it leaves
+## F7 — the cellular engine's throw does not end the places it leaves
 
-**Where.** `fixpt-engine/src/threaded.rs:557–592` (`reinstate`): no
+**Where.** `fixpt-engine/src/cellular.rs:557–592` (`reinstate`): no
 `region_exit`. Compare the abort path, which does end them
-(`fixpt-engine/src/threaded.rs:939–947`), and the lowering, which wraps
+(`fixpt-engine/src/cellular.rs:939–947`), and the lowering, which wraps
 each place in `dynamic-wind` (`lower.rs:286–295`).
 
 **Why it is a space issue, not a safety one.** A full continuation thrown
@@ -330,7 +330,7 @@ to S1).
 
 **Status.** From reading the engine, not from a run. The fix mirrors the
 abort path: record the live-region count in the continuation (the abort
-path already stores it in the prompt word, `threaded.rs:900–902,939–947`)
+path already stores it in the prompt word, `cellular.rs:900–902,939–947`)
 and call `region_exit` to that count when a whole continuation is
 reinstated.
 
@@ -522,3 +522,8 @@ and handed in (`docs/fx26.md` notes "a `read` that makes cycles from datum
 labels is still to come") would break the termination of a walk that the
 checker certified. The proof (T5) assumes host data acyclic; the language
 does not yet enforce it.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

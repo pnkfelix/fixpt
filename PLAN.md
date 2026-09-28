@@ -11,10 +11,10 @@ where things stand, and points into it.
   macros), FX-87 (161/161 parse, 160/161 type and effect), FX-91 (182/182).
 - **FX-26** (M11, M12): the language, and its reader, parser, checker and
   compiler written in FX-26 and bootstrapped to a fixpoint, over bloblets,
-  on threaded machines in Rust and arm64 (hand-encoded, register code,
+  on cellular[^cellular] machines in Rust and arm64 (hand-encoded, register code,
   stencils). The Rust versions stay as oracles; both checkers must agree.
 - **M13 so far** (§11, "M13 plan"; "The queue"): the Rust compiler to
-  threaded words, benchmarks, typed primitives, self tail calls as loops,
+  cellular words, benchmarks, typed primitives, self tail calls as loops,
   known calls in part, register code (the MacScheme machine), values as
   addresses.
 - **FX-26's type system, 2026-09-27** ("The next queue", "Progress…"):
@@ -46,7 +46,7 @@ queue gained", and "The next queue"):
 5. M13's rest: inlining (13f), superinstructions (13g), join points (13i),
    the rest of known calls, a nursery with a write barrier, cheaper
    continuations, a lint on a lambda's size. Known gap, seen with
-   `,disassemble-asm`: words compiled cell for cell (`--threaded-machine
+   `,disassemble-asm`: words compiled cell for cell (`--cellular-machine
    native-compiled`) are about 95 instructions for `(lambda ((x int)) x)`,
    some 60 of them run, since each cell is its routine's whole body; first
    targets, each something the checker already proves: slot bounds checks
@@ -594,7 +594,7 @@ made piece by piece.
 4. **Code as bloblets**, compiled form: constants and metadata in fields at
    fixed negative offsets, which are part of the layout specification, and
    bytecode as the suffix. Closures hold bloblet pointers. *(Done
-   2026-09-25.)* The *threaded* form, with the program in the fields, is a
+   2026-09-25.)* The *cellular* form, with the program in the fields, is a
    new execution mode with an inner interpreter. It is built with the native
    inner interpreter, A′3, where the Rust bootstrap version is its oracle.
 5. **The other types, one at a time**: vectors, bytevectors, strings (UTF-32),
@@ -605,7 +605,7 @@ made piece by piece.
 ### Phase A′: a native core (in Rust, arm64 first)
 
 In the Forth vision a code bloblet's suffix is machine code, even for
-threaded code, where it is the inner interpreter. So a small native core
+cellular code, where it is the inner interpreter. So a small native core
 belongs to M12. M10 keeps a full native compiler.
 
 A1. **`fixpt-native`**, the one crate where `unsafe` is allowed:
@@ -628,14 +628,14 @@ A2. **An arm64 encoder**, in Rust, covering only the instructions needed:
     for the FX-26 compiler's own encoder. *(Done 2026-09-26; each encoding
     is checked against the system assembler, which is used only as that
     oracle.)*
-A3. **A native inner interpreter** (`NEXT`) as the suffix of threaded code
+A3. **A native inner interpreter** (`NEXT`) as the suffix of cellular code
     bloblets, run beside the Rust bootstrap interpreter and checked against
-    it. *(Done 2026-09-26, as `fixpt_engine::threaded` (the Rust machine,
-    and the word layout, `layout::threaded`) and `fixpt_native::threaded`.
+    it. *(Done 2026-09-26, as `fixpt_engine::cellular` (the Rust machine,
+    and the word layout, `layout::cellular`) and `fixpt_native::cellular`.
     A change from the text above: the heap is not executable and moves, so
     a word's entry is a routine *number*, and the routines live in the code
     space. That also keeps machine addresses out of heap images. Cells are
-    token-threaded primitives or words. Both machines check fuel and stack
+    token-cellular primitives or words. Both machines check fuel and stack
     limits at word entry and taken branches, and agree on every trap but
     underflow, which the native machine turns into a guard-page fault.
     Measured in `docs/performance.md`: about 0.55 ns per cell natively,
@@ -685,9 +685,9 @@ A4. **Stencils**: primitives written in Rust with `become`, compiled by the
 
 *(Revised 2026-09-26, before starting it, by checking that every step's
 inputs come from an earlier step. The first version had no compiler from
-FX-26 to threaded code, which the user pointed out; checking the rest the
-same way found no FX-26 AST in FX-26, a threaded machine that knew only
-Forth's primitives, and no way for FX-26 code to make a threaded word or run
+FX-26 to cellular code, which the user pointed out; checking the rest the
+same way found no FX-26 AST in FX-26, a cellular machine that knew only
+Forth's primitives, and no way for FX-26 code to make a cellular word or run
 one.)*
 
 9. **FX-26 in FX-26, up to running it:**
@@ -710,7 +710,7 @@ one.)*
      checks runs to the same value both ways, read and parsed by the FX-26
      front end; so do shadowing definitions. Not yet: bloblets' frozen
      flags.)*
-   - **9c. The threaded machine grows what FX-26 needs**: frames and
+   - **9c. The cellular machine grows what FX-26 needs**: frames and
      locals, closures, calls with arguments, globals, and calls out to the
      runtime's primitives. In the Rust machine, the hand-encoded machine and
      the stencils, each checked against the others as now. Plus a checked
@@ -727,14 +727,14 @@ one.)*
      closure)`; calls allocate nothing; `tailcall` slides the new frame
      down. Globals are cells, as MacScheme's; `prim p n` calls the
      runtime's primitives. Words are checked in one place,
-     `Heap::make_threaded_word`, for the builder, `%make-word` and FX-26
+     `Heap::make_cellular_word`, for the builder, `%make-word` and FX-26
      alike; `%run-word` runs one through `Runtime::run_word`. The native
      machines trap on the new routines until 9c's native half. Boxing is
      the compiler's, and only `letrec`'s need it.)* *(Control done
      2026-09-26: a prompt is two return entries, where to resume and a
      marker with its tag, handler and the data stack's height; the body runs
      as a closure above them. A composable continuation copies the stacks
-     above its prompt into a `threaded-continuation`, and composing it
+     above its prompt into a `cellular-continuation`, and composing it
      rebases frame pointers and prompts' heights; `cwcc` takes everything;
      marks are return entries too. Every test program that checks without
      `extract` runs the same compiled as lowered, control ones included.)*
@@ -746,12 +746,12 @@ one.)*
      runtime's primitive in place; the rest (closures, control, marks)
      make a round trip, the stacks lifted into a Rust machine for one
      routine and put back. Every compiled test program, control included,
-     gives the same value on all three machines; `fixpt --threaded-machine
+     gives the same value on all three machines; `fixpt --cellular-machine
      rust|native|stencils` picks one.)*
-   - **9d. A compiler in FX-26 from the AST to threaded words**, emitting
+   - **9d. A compiler in FX-26 from the AST to cellular words**, emitting
      bloblets. Checked three ways on the same programs: the evaluator, the
-     lowering to Scheme, and the threaded words on the native machine.
-     *(First part done 2026-09-26: `src/compile.fx`, on the Rust threaded
+     lowering to Scheme, and the cellular words on the native machine.
+     *(First part done 2026-09-26: `src/compile.fx`, on the Rust cellular
      machine. Every test program without `extract` or control gives the
      same value compiled, evaluated and lowered. `extract` needs a
      product's field order, which only its type says: it waits for step
@@ -777,24 +777,24 @@ one.)*
     runs as it does lowered.)*
     *(The bootstrap, 2026-09-26: the FX-26 compiler, run lowered to Scheme,
     compiles the front end (reader, parser, checker, tables, evaluator,
-    compiler) and a driver, `src/bootstrap.fx`, to one threaded word:
+    compiler) and a driver, `src/bootstrap.fx`, to one cellular word:
     stage 1. That word, run on the native machine, gives the driver. The
     driver reads, parses, checks and compiles the same text, entirely by
     compiled FX-26: stage 2. The two words are the same code, cell for cell
     (`tests/bootstrap.rs`, `fixpoint`). On the way:*
     - *the standard operations that Scheme ran as procedures of its own
-      became runtime primitives, so threaded code calls them too;*
-    - *`%run-word` calls a threaded closure as well as a word.)*
+      became runtime primitives, so cellular code calls them too;*
+    - *`%run-word` calls a cellular closure as well as a word.)*
 11. **Native code from FX-26**: a word's cells compiled to machine code, by
     an encoder written in FX-26 (the Rust one its oracle) or by placing
     stencils, and installed as the word's entry routine, one word at a time,
-    as decision 6 describes. Checked by running the same programs threaded
+    as decision 6 describes. Checked by running the same programs cellular
     and compiled. *(Revised 2026-09-26, tracing each step's inputs. The
     hand-encoded machine's routines read their operands through the ip,
     and the ip walks the cells. So a word's native code can be its cells'
     routines inlined in order, with the dispatch between them removed and
     the ip kept exactly in step. Traps, call-outs, safepoints and return
-    entries then see the same state as threaded code, and the two mix
+    entries then see the same state as cellular code, and the two mix
     freely. Operands are still read from the cells, so a collection that
     moves the word changes nothing.)*
     - **11a. Native words, from Rust.** A word gets native code by having
@@ -834,31 +834,31 @@ one.)*
 12. **The comparison**, Rust pieces against FX-26 ones, with no piece
     retired (decision 8). *(First report 2026-09-26, in
     `docs/performance.md`: each piece alone on the bootstrap program, Rust,
-    FX-26 lowered, and FX-26 compiled on each threaded machine. Compiled
+    FX-26 lowered, and FX-26 compiled on each cellular machine. Compiled
     FX-26 on the native machines now beats lowered FX-26 in every piece;
     the Rust checker is still 22 times faster than the FX-26 one.)*
 
 ### After M12: what the user asked for next (2026-09-26)
 
 - **An optimizing compiler for FX-26, in Rust and in FX-26.** It takes
-  Twobit as a model, and Forth compilers and threaded-code VMs, since much
-  may be won on the threaded code itself (peephole optimization,
+  Twobit as a model, and Forth compilers and cellular-code VMs, since much
+  may be won on the cellular code itself (peephole optimization,
   superinstructions, stack caching). It keeps Twobit's principle: each
   transformed program is still a well-formed program of the source
   language with the same meaning, carrying at most the analysis added.
-  Research on Twobit's passes and history, and on Forth and threaded-code
+  Research on Twobit's passes and history, and on Forth and cellular-code
   compilers, comes first.
-- **A printer for compiled forms**: the threaded code in a word's
+- **A printer for compiled forms**: the cellular code in a word's
   bloblet, shown from the REPL, cell by cell, with routine names and
   operands. *(Done 2026-09-26: `fixpt_runtime::disasm`, `%disassemble`,
   FX-26's `disassemble`, and `,disassemble E` in the FX-26 REPL under
-  `--fx26-run threaded`. Globals' cells now carry their names. The
-  threaded REPL keeps earlier definitions, so later forms can use
+  `--fx26-run cellular`. Globals' cells now carry their names. The
+  cellular REPL keeps earlier definitions, so later forms can use
   them.)*
 - **Research for the compiler**: `docs/research/twobit.md` and
-  `docs/research/threaded-compilers.md`.
+  `docs/research/cellular-compilers.md`.
 - **Closures that carry their types** (a direction, not yet a task). A
-  threaded closure is a bloblet, so it could carry its type, or enough
+  cellular closure is a bloblet, so it could carry its type, or enough
   for a checker to confirm the type from its fields and code:
   foundational proof-carrying code. With heap images, and fragments of
   them, loaded into other runtimes, that would let a runtime trust code it
@@ -869,7 +869,7 @@ one.)*
 ### M13 plan: an optimizing compiler for FX-26, in Rust and in FX-26
 
 Drafted 2026-09-26 from `docs/research/twobit.md` and
-`docs/research/threaded-compilers.md`, tracing each step's inputs.
+`docs/research/cellular-compilers.md`, tracing each step's inputs.
 
 **Principles**
 
@@ -888,11 +888,11 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
 
 **Steps**
 
-- **13a. A Rust compiler to threaded words.** It makes the same words as
+- **13a. A Rust compiler to cellular words.** It makes the same words as
   `compile.fx` for every program, cell for cell. `compile.fx` has had only
   the Scheme lowering as its oracle, so there is nowhere yet to test a
   pass in Rust end to end. *(Done 2026-09-26:
-  `fixpt_fx26::threaded::Compiler`, over the Rust checker's forms. It
+  `fixpt_fx26::cellular::Compiler`, over the Rust checker's forms. It
   makes the same words as `compile.fx` for every test program and for the
   whole bootstrap program, and its words run as the lowering does
   (`tests/rust_compiler.rs`).)*
@@ -947,11 +947,11 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
     the arguments in `REG1`…`REGn`, and a return address in the frame.
 
   Values live in registers, and a frame holds only what must survive a
-  call. Our threaded machine already has `REG0` (`clo`) and frames, but
+  call. Our cellular machine already has `REG0` (`clo`) and frames, but
   passes every value through the data stack. The plan:
 
   1. **An IR, in Rust** (`fixpt_fx26::regcode`). Each lambda becomes
-     MacScheme instructions, made from the checker's trees as the threaded
+     MacScheme instructions, made from the checker's trees as the cellular
      compiler's are. Twobit's pass 4 is the model: register targeting, a
      frame made lazily (only on paths that call), `store` only of what is
      live across a call, `load` after. Primitives are `op1`/`op2`/`op2imm`,
@@ -960,7 +960,7 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
      test program.
   2. **The moving collector decides where values may be.** A Value may be
      in a machine register only between points that can collect. Anything
-     that can collect is a call-out, the same as the threaded machines:
+     that can collect is a call-out, the same as the cellular machines:
      allocation, a runtime primitive, control, a call. Before one,
      everything live is stored to the frame; after it, loaded again. The
      frame is on the data stack, the root the collector already scans, so
@@ -976,21 +976,21 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
 
      Calls between register procedures use the register convention.
   4. **Two entries per compiled procedure,** so register code and
-     threaded code call each other. The *register entry* takes arguments in
-     registers. The *threaded entry*, the word's usual one, moves a
-     threaded frame's arguments into registers and continues. A register
-     call to a callee without register code pushes a threaded frame and
+     cellular code call each other. The *register entry* takes arguments in
+     registers. The *cellular entry*, the word's usual one, moves a
+     cellular frame's arguments into registers and continues. A register
+     call to a callee without register code pushes a cellular frame and
      enters the word. A return entry says which convention returns to it.
   5. **Checks where they are needed:** fuel and stack limits at entry and
      on back edges, and an argument count never, since arities are static.
   6. **Order:**
      - (a) the IR and its interpreter, for all of FX-26;
      - (b) machine code for the procedures the benchmarks need, with the
-       rest still threaded behind the two entries, and measured;
+       rest still cellular behind the two entries, and measured;
      - (c) every form, until the bootstrap runs as register code;
      - (d) known calls (`callk`, 13e) as direct branches;
      - (e) the compiler written in FX-26 to match, instruction for
-       instruction, as for the threaded compilers.
+       instruction, as for the cellular compilers.
      - (f) *(The user, 2026-09-26: "support distinct calling conventions
        for the two kinds of code, but allow calls between each other.")*
        Calls already differ: registers or a stack frame, with an adapter
@@ -1002,7 +1002,7 @@ Drafted 2026-09-26 from `docs/research/twobit.md` and
        point expects. *((a) and (b) done 2026-09-26, the IR made by the Rust compiler
      and tested by running every test program as register code against
      the lowering, with no separate interpreter. `fib` 1.7×, `tak` 1.9×
-     and `loop` 5.9× faster than compiled threaded words; see
+     and `loop` 5.9× faster than compiled cellular words; see
      `docs/performance.md`. (c) done the same day: 966 of the bootstrap's
      972 lambdas as register code, and the fixpoint holds as register
      code. Stage 2 takes 0.56 s against 0.7 s as compiled stack code,
@@ -1097,14 +1097,14 @@ the order it will be done. Each is committed when done, and marked here.
    needs its entry placed first, which the words' installation does not
    yet order; waiting on a call-bound workload.)*
 5. **Register code from the compiler written in FX-26** (13h′ (e)).
-   *(Done 2026-09-26: `src/regcode.fx`, a port of `threaded/regcode.rs`,
+   *(Done 2026-09-26: `src/regcode.fx`, a port of `cellular/regcode.rs`,
    called by `compile.fx` through `c-register-code` when `c-registers` is
    set (`compile-registers!`); `set-register-twin` makes the register word.
    It declines where the Rust one does, noting it in a flag rather than
    returning early. Every test program's register code is the Rust
    compiler's, cell for cell (106 register words), and so is the whole
    bootstrap's, made by the compiler in FX-26 running as register code.
-   The REPL's `--fx26-run threaded --threaded-machine registers` makes
+   The REPL's `--fx26-run cellular --cellular-machine registers` makes
    it too.)*
 6. **A nursery, and a write barrier with a remembered set** (raised by
    the user 2026-09-26, "make it toggleable"): the nursery's size zero
@@ -1147,11 +1147,11 @@ the order it will be done. Each is committed when done, and marked here.
    and stops walking once each is seen: stage 2, 0.23 → 0.22 s. Found
    once for every node, carried up by `k-synth`, would take the rest,
    at most 0.01 s more.)*
-12. **The REPL's `,code` under `--fx26-run threaded`** (raised by the user
+12. **The REPL's `,code` under `--fx26-run cellular`** (raised by the user
     2026-09-26): it shows the form's lowering to Scheme, which is not what
     runs there; it should show the words the compiler in FX-26 made, as
     `,disassemble` does for a value.
-    *(Done 2026-09-26: under `--fx26-run threaded`, `,code` shows the
+    *(Done 2026-09-26: under `--fx26-run cellular`, `,code` shows the
     words the compiler written in FX-26 made for the form, those it had
     not shown for an earlier one, since each form is compiled with every
     definition before it.)*
@@ -1166,8 +1166,8 @@ the order it will be done. Each is committed when done, and marked here.
     each explored, and concrete tasks drawn from it.
     *(Done 2026-09-27: `docs/research/type-and-effect-directions.md`,
     with tasks R1–R8, T1–T6, P1–P12 and C1–C12 and which to do first.
-    R1, a threaded run's fuel from the session's step limit, is done: a
-    looping form hung the threaded REPL. Found open: an image's words are
+    R1, a cellular run's fuel from the session's step limit, is done: a
+    looping form hung the cellular REPL. Found open: an image's words are
     not checked as they load (C3). A resumed continuation was thought to
     charge no fuel, but a loop through one stops at the limit (R2,
     tested).)*
@@ -1356,7 +1356,7 @@ should fragmentation call for moving code.
   internals) uses `runtime_unrooted`, a name that says what it gives up.
   `gc-arena`'s compile-time brand remains possible on top.)*
 - **A collector without safepoints.** (Raised 2026-09-26, after Cliff
-  Click's Pauseless GC at Azul, later C4.) The threaded machine's state is
+  Click's Pauseless GC at Azul, later C4.) The cellular machine's state is
   Values in root arrays and word-relative offsets, so it could be collected
   between any two cells; the native machine holds an absolute ip and the
   heap's base in registers, rebuilt at call-outs, so it would need either
@@ -1497,7 +1497,7 @@ should fragmentation call for moving code.
      machine code bumps. `lists` in a region: 8.1 ms, against 12.4 ms in
      the heap.
   4. *(Done 2026-09-26.)* An escape ends the regions it leaves:
-     - the threaded machines (Rust and native): a prompt's entry keeps
+     - the cellular machines (Rust and native): a prompt's entry keeps
        how many regions were live, above the data stack's height in its
        last word, and an abort to it ends any newer. A composable
        continuation's prompts, reinstated, take the count live then: every
@@ -1537,7 +1537,7 @@ should fragmentation call for moving code.
   check, or an interrupt check) discharges the effect, as a handler masks
   one; Koka's `div` is the coarse version. It would let a word with no
   backward branch that calls only such words skip the check at entry. The
-  threaded machines already check exactly at word entry and taken branches,
+  cellular machines already check exactly at word entry and taken branches,
   the only ways to run unboundedly, so the check points are where the
   effect would be discharged.
 
@@ -1635,7 +1635,7 @@ should fragmentation call for moving code.
   what it returns, which is where session types, which the user has also
   raised, would come in. This is for when the type system is extended.
 
-- **The threaded REPL's state.** Under `--fx26-run threaded` or
+- **The cellular REPL's state.** Under `--fx26-run cellular` or
   `evaluate`, each form is compiled with the definitions before it re-run.
   So a definition's state does not survive from one form to the next: a
   reference set by an earlier expression is fresh again. A session that
@@ -1669,9 +1669,9 @@ should fragmentation call for moving code.
    field count, before the bloblet is published. The allocator is not
    required to hand out zeroed memory.
 5. **Strings stay UTF-32.**
-6. **The bootstrap interpreter reads bloblets directly**, including threaded
+6. **The bootstrap interpreter reads bloblets directly**, including cellular
    ones, and compiled forms replace them incrementally, as in Forth.
-7. **The FX-26 compiler written in FX-26 emits bloblets directly**: threaded
+7. **The FX-26 compiler written in FX-26 emits bloblets directly**: cellular
    and bytecode code bloblets. The Scheme pipeline leaves the FX-26 path.
    What the checker proved goes into the code's metadata fields. Annotated
    Scheme remains how FX-87 and FX-91 run. This supersedes, for FX-26 only,
@@ -1698,8 +1698,12 @@ should fragmentation call for moving code.
 12. **Nightly Rust is allowed for the stencils, and only there.** The user is
     willing to use unstable Rust where it expresses what we need.
     `become` (`explicit_tail_calls`) works on the installed nightly and
-    guarantees the tail jumps a threaded inner interpreter is made of, even
+    guarantees the tail jumps a cellular inner interpreter is made of, even
     at `-O0` (`docs/research/copy-and-patch.md`, addendum). `fixpt-native`'s
     build script compiles stencils with `rustc +nightly`, and the workspace
     stays on stable.
 
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

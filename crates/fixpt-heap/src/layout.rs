@@ -136,7 +136,7 @@ pub const KINDS: &[Kind] = &[
     Kind { name: "primitive", code: 19, traced: true },
     // Bloblets proper, pointed at their suffix.
     Kind { name: "bloblet", code: 32, traced: true },
-    Kind { name: "threaded-code", code: 33, traced: true },
+    Kind { name: "cellular-code", code: 33, traced: true },
     Kind { name: "compiled-code", code: 34, traced: true },
     // The AST engine's environment frames: `layout::frame`.
     Kind { name: "env-frame", code: 35, traced: true },
@@ -144,11 +144,11 @@ pub const KINDS: &[Kind] = &[
     // its value; a product's fields, in order.
     Kind { name: "sum", code: 36, traced: true },
     Kind { name: "product", code: 37, traced: true },
-    // A closure made by threaded code: `layout::threaded::CLOSURE_WORD` and
+    // A closure made by cellular code: `layout::cellular::CLOSURE_WORD` and
     // `CLOSURE_FRAME`. Its own kind, so no engine takes it for one of its.
-    Kind { name: "threaded-closure", code: 38, traced: true },
-    // A continuation captured by threaded code: `layout::threaded::CONT_*`.
-    Kind { name: "threaded-continuation", code: 39, traced: true },
+    Kind { name: "cellular-closure", code: 38, traced: true },
+    // A continuation captured by cellular code: `layout::cellular::CONT_*`.
+    Kind { name: "cellular-continuation", code: 39, traced: true },
     // Register code (PLAN.md 13h′): `layout::regcode`.
     Kind { name: "register-code", code: 40, traced: true },
 ];
@@ -225,7 +225,7 @@ pub mod code {
     ];
 }
 
-/// A threaded word (kind `threaded-code`): Forth's threaded code, as a
+/// A cellular word (kind `cellular-code`): Forth's cellular code, as a
 /// bloblet. Laid out `[cell…][twin][name][entry][trailer]`. `twin` is the
 /// word's register code (PLAN.md, 13h′), or `#f`. `entry` is the fixnum
 /// number of the routine that runs the word: `ROUTINE_DOCOL` for a word made
@@ -241,7 +241,7 @@ pub mod code {
 /// The return stack holds pairs, the word and the fixnum `k` of the next
 /// cell to run in it, so every entry is a Value and the stack is a root like
 /// any other.
-pub mod threaded {
+pub mod cellular {
     pub const KIND: u8 = 33;
     pub const WORD_ENTRY: usize = 2;
     pub const WORD_NAME: usize = 3;
@@ -272,7 +272,7 @@ pub mod threaded {
         ("cons", "( a b -- pair )"),
         ("car", "( pair -- a )"),
         ("cdr", "( pair -- b )"),
-        // For FX-26 compiled to threaded code, after the MacScheme machine
+        // For FX-26 compiled to cellular code, after the MacScheme machine
         // (Larceny's `note13-malcode`): a call's arguments stay on the data
         // stack as its frame, found from a frame pointer; closures are flat,
         // their free values copied in; the closure running is a register,
@@ -348,12 +348,12 @@ pub mod threaded {
         0
     }
 
-    /// A threaded closure's fields, `[free…][word][trailer]`: the word it
+    /// A cellular closure's fields, `[free…][word][trailer]`: the word it
     /// runs, then free value `i` at `CLOSURE_FREE0 + i`, each one load.
     pub const CLOSURE_WORD: usize = 2;
     pub const CLOSURE_FREE0: usize = 3;
 
-    /// A threaded continuation's fields: the data stack's values and the
+    /// A cellular continuation's fields: the data stack's values and the
     /// return stack's entries it took (vectors), where it was (word, `k`,
     /// frame pointer, closure), the data stack's height it started at,
     /// whether it is the whole continuation (`callcc`) or delimited, and how
@@ -385,8 +385,8 @@ pub mod threaded {
 }
 
 /// Register code (kind `register-code`, PLAN.md 13h′): a procedure for the
-/// MacScheme machine (Larceny Note 13), as a bloblet laid out as a threaded
-/// word is, `[cell…][twin][name][entry][trailer]`, `twin` being the threaded
+/// MacScheme machine (Larceny Note 13), as a bloblet laid out as a cellular
+/// word is, `[cell…][twin][name][entry][trailer]`, `twin` being the cellular
 /// word it stands for. Its cells are instructions: an operation's number,
 /// then its operands.
 ///
@@ -416,19 +416,19 @@ pub mod regcode {
         ("setstk", 1, "frame slot n := RESULT"),
         ("load", 2, "REGk := frame slot n"),
         ("store", 2, "frame slot n := REGk"),
-        ("op1", 1, "RESULT := threaded routine r applied to RESULT"),
-        ("op2", 2, "RESULT := threaded routine r applied to RESULT and REGk"),
-        ("op2imm", 2, "RESULT := threaded routine r applied to RESULT and x"),
+        ("op1", 1, "RESULT := cellular routine r applied to RESULT"),
+        ("op2", 2, "RESULT := cellular routine r applied to RESULT and REGk"),
+        ("op2imm", 2, "RESULT := cellular routine r applied to RESULT and x"),
         ("field", 1, "RESULT := field k of the bloblet in RESULT"),
         ("setfield", 2, "field k of the bloblet in RESULT := REGj"),
         ("prim", 2, "RESULT := runtime primitive p applied to REG1…REGn; may collect"),
-        ("lambda", 2, "RESULT := a closure of threaded word w over REG1…REGn; may collect"),
+        ("lambda", 2, "RESULT := a closure of cellular word w over REG1…REGn; may collect"),
         ("invoke", 1, "call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect"),
         ("tailinvoke", 1, "the same in tail position, the frame popped: its value is this one's"),
         ("return", 0, "return RESULT, the frame popped"),
         ("branch", 1, "skip the operand's count of cells, counted after it"),
         ("branchf", 1, "the same if RESULT is #f"),
-        ("threaded", 2, "threaded routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect"),
+        ("cellular", 2, "cellular routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect"),
         ("invokeself", 1, "call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may collect"),
     ];
 
@@ -499,14 +499,14 @@ pub fn fx26_module() -> String {
     for (name, k) in code::ALL {
         out.push_str(&format!("(define code-{name} int {k})\n"));
     }
-    out.push_str("\n;;; A threaded word's fields, by negative offset, and its routines by number.\n");
-    out.push_str(&format!("(define word-entry int {})\n", threaded::WORD_ENTRY));
-    out.push_str(&format!("(define word-name int {})\n", threaded::WORD_NAME));
-    out.push_str(&format!("(define word-twin int {})\n", threaded::WORD_TWIN));
-    out.push_str(&format!("(define word-cell0 int {})\n", threaded::WORD_CELL0));
-    out.push_str(&format!("(define threaded-closure-word int {})\n", threaded::CLOSURE_WORD));
-    out.push_str(&format!("(define threaded-closure-free0 int {})\n", threaded::CLOSURE_FREE0));
-    for (i, (name, effect)) in threaded::ROUTINES.iter().enumerate() {
+    out.push_str("\n;;; A cellular word's fields, by negative offset, and its routines by number.\n");
+    out.push_str(&format!("(define word-entry int {})\n", cellular::WORD_ENTRY));
+    out.push_str(&format!("(define word-name int {})\n", cellular::WORD_NAME));
+    out.push_str(&format!("(define word-twin int {})\n", cellular::WORD_TWIN));
+    out.push_str(&format!("(define word-cell0 int {})\n", cellular::WORD_CELL0));
+    out.push_str(&format!("(define cellular-closure-word int {})\n", cellular::CLOSURE_WORD));
+    out.push_str(&format!("(define cellular-closure-free0 int {})\n", cellular::CLOSURE_FREE0));
+    for (i, (name, effect)) in cellular::ROUTINES.iter().enumerate() {
         out.push_str(&format!("(define routine-{} int {i})  ; {effect}\n", fx_name(name)));
     }
     out.push_str("\n;;; Register code's instructions by number, and how many registers it has.\n");

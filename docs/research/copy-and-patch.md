@@ -567,7 +567,7 @@ cargo run --offline --bin wx               # W^X probes
      comparisons, vector and string access, type tests) dominated by call
      overhead, or needing constant specialisation. Stencils give inlined,
      LLVM-quality bodies without hand-encoding them.
-   - A baseline compiler from threaded or bytecode bloblets to native code is
+   - A baseline compiler from cellular[^cellular] or bytecode bloblets to native code is
      wanted (M10, or M12 step 11 as a fast tier).
 4. **When adopting it:**
    - put the stencils in a `fixpt-native/stencils/` file compiled by
@@ -597,11 +597,11 @@ cargo run --offline --bin wx               # W^X probes
 *Verified locally.* The machine has `nightly-aarch64-apple-darwin` installed
 (`rustc 1.97.0-nightly (82bee9650 2026-05-09)`), so this needed no download.
 `#![feature(explicit_tail_calls)]` and `become` work for exactly the shape a
-threaded-code inner interpreter needs: primitives as
+cellular-code inner interpreter needs: primitives as
 `extern "C" fn(ip, sp, acc) -> i64`, each ending in `become` to the next code
 pointer loaded from the program.
 
-- A direct-threaded program of `LIT 40, LIT 2, ADD, EXIT` computes 42.
+- A direct-cellular program of `LIT 40, LIT 2, ADD, EXIT` computes 42.
 - A chain of 5,000,000 primitives runs without overflowing the stack. That
   happens only if every `become` is a real tail jump.
 - At `-C opt-level=3`, `NEXT` is Forth's two instructions:
@@ -629,10 +629,10 @@ stable. Pinning an exact nightly date in `rust-toolchain.toml` would make
 rustup download that toolchain, so the stencil build uses the installed
 `nightly` and records the version it found.
 
-## Addendum: stencils for the threaded machine (2026-09-26)
+## Addendum: stencils for the cellular machine (2026-09-26)
 
 Built as `fixpt-native`'s stencil machine (`src/stencil.rs`,
-`stencils/threaded.rs`, `build.rs`). What it took to get stencils that are
+`stencils/cellular.rs`, `build.rs`). What it took to get stencils that are
 placed by copying alone, at every optimisation level:
 
 - **No holes at all.** The machine lives in the eight argument registers;
@@ -652,3 +652,8 @@ placed by copying alone, at every optimisation level:
 
 Measured in `docs/performance.md`: optimised stencils match the
 hand-encoded machine.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

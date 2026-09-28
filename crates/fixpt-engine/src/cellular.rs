@@ -1,8 +1,11 @@
-//! Threaded code: Forth's execution model over bloblets, and the Rust
-//! bootstrap inner interpreter that runs it.
+//! Cellular code: Forth's execution model over bloblets, and the Rust
+//! bootstrap inner interpreter that runs it. ("Cellular" would be called
+//! "threaded" in the Forth community: code as a sequence of cells,
+//! references to routines and their operands, run by an inner interpreter.
+//! This repository says "cellular" throughout.)
 //!
-//! A threaded word is a bloblet whose fields are its program (the layout is
-//! `layout::threaded`). This interpreter reads words directly from the heap
+//! A cellular word is a bloblet whose fields are its program (the layout is
+//! `layout::cellular`). This interpreter reads words directly from the heap
 //! and is the oracle for the native inner interpreters in `fixpt-native`,
 //! which run the same words. The machine is a data stack of Values; a
 //! frame pointer, where the running closure's frame (its arguments, then
@@ -13,13 +16,13 @@
 //! for code compiled from FX-26 follows the MacScheme machine's (Larceny's
 //! `doc/LarcenyNotes/note13-malcode.html`), on a stack.
 //!
-//! Every word is made by `Heap::make_threaded_word`, which checks each cell
+//! Every word is made by `Heap::make_cellular_word`, which checks each cell
 //! and operand, and published with its fields frozen, so a cell is always a
 //! routine's number or a word. The native machines rely on that: they run a
 //! cell without looking at it twice.
 
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{
+use fixpt_heap::layout::cellular::{
     CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_WHOLE,
     KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
 };
@@ -39,7 +42,7 @@ pub fn prim(name: &str) -> Value {
     Value::fixnum(routine(name) as i64)
 }
 
-/// Why a threaded program stopped short.
+/// Why a cellular program stopped short.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Trap {
     /// A primitive was given a value of the wrong kind.
@@ -110,7 +113,7 @@ enum Pending {
     To(usize),
 }
 
-/// Builds one threaded word, cell by cell.
+/// Builds one cellular word, cell by cell.
 ///
 /// Values given to the builder must stay valid until [`WordBuilder::build`];
 /// building allocates but never collects, so any Value live when building
@@ -148,9 +151,9 @@ impl WordBuilder {
         self.prim("lit").operand(x)
     }
 
-    /// Run `word`, which must be a threaded word.
+    /// Run `word`, which must be a cellular word.
     pub fn call(&mut self, heap: &Heap, word: Value) -> &mut Self {
-        assert!(is_word(heap, word), "{word:?} is not a threaded word");
+        assert!(is_word(heap, word), "{word:?} is not a cellular word");
         self.operand(word)
     }
 
@@ -257,7 +260,7 @@ impl WordBuilder {
                 }
             })
             .collect();
-        heap.make_threaded_word(name, &cells)
+        heap.make_cellular_word(name, &cells)
     }
 
     /// The word, published with its fields frozen.
@@ -266,7 +269,7 @@ impl WordBuilder {
     }
 }
 
-/// In a word's cells as given to `make_threaded_word`: the word itself.
+/// In a word's cells as given to `make_cellular_word`: the word itself.
 pub const SELF: Value = Value::DEFAULT;
 
 /// A runtime primitive's number, for `prim`, if it is one the machine can
@@ -288,7 +291,7 @@ pub fn primitive_word(heap: &mut Heap, name: &str) -> Value {
 }
 
 pub fn is_word(heap: &Heap, v: Value) -> bool {
-    heap.is_threaded_word(v)
+    heap.is_cellular_word(v)
 }
 
 pub fn word_name(heap: &Heap, w: Value) -> Value {
@@ -518,7 +521,7 @@ impl Machine {
     /// Run closure `thunk` with no arguments above a marker entry: its
     /// frame, the marker's `(sentinel, a, b, c)`, and where to resume after.
     fn enter_above(&mut self, heap: &Heap, r: &mut Regs, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
-        if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == kind("threaded-closure")) {
+        if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == kind("cellular-closure")) {
             return Err(Trap::Type { routine });
         }
         self.check_limits()?;
@@ -533,7 +536,7 @@ impl Machine {
     fn capture(&mut self, heap: &mut Heap, r: &mut Regs, rs_from: usize, ds_from: usize, whole: bool) -> Value {
         let ds = heap.vector_from(&self.ds[ds_from..]);
         let rs = heap.vector_from(&self.rs[rs_from..]);
-        let k = heap.make_bloblet(kind("threaded-continuation"), CONT_FIELDS, 0, true);
+        let k = heap.make_bloblet(kind("cellular-continuation"), CONT_FIELDS, 0, true);
         let fields = [
             (CONT_DS, ds),
             (CONT_RS, rs),
@@ -659,7 +662,7 @@ impl Machine {
         }
         let heap = cx.heap();
         let c = self.ds.pop().expect("counted");
-        if c.is_bloblet() && heap.bloblet_kind(c) == kind("threaded-continuation") {
+        if c.is_bloblet() && heap.bloblet_kind(c) == kind("cellular-continuation") {
             if n != 1 {
                 return Err(Trap::Prim(format!("a continuation takes one value, and was given {n}")));
             }
@@ -668,7 +671,7 @@ impl Machine {
             self.reinstate(heap, r, c, v, tail);
             return Ok(());
         }
-        if !(c.is_bloblet() && heap.bloblet_kind(c) == kind("threaded-closure")) {
+        if !(c.is_bloblet() && heap.bloblet_kind(c) == kind("cellular-closure")) {
             return Err(Trap::Type { routine });
         }
         self.check_limits()?;
@@ -850,7 +853,7 @@ impl Machine {
                 if self.ds.len() < r.fp + count {
                     return Err(Trap::Underflow { routine: name });
                 }
-                let c = heap.make_bloblet(kind("threaded-closure"), count + 1, 0, true);
+                let c = heap.make_bloblet(kind("cellular-closure"), count + 1, 0, true);
                 heap.set_bloblet_slot(c, CLOSURE_WORD, w);
                 let free = self.ds.split_off(self.ds.len() - count);
                 for (i, v) in free.into_iter().enumerate() {
@@ -869,7 +872,7 @@ impl Machine {
                 let k = self.pop(name)?;
                 let v = self.pop(name)?;
                 let heap = cx.heap();
-                if !(k.is_bloblet() && heap.bloblet_kind(k) == kind("threaded-continuation")) {
+                if !(k.is_bloblet() && heap.bloblet_kind(k) == kind("cellular-continuation")) {
                     return Err(Trap::Type { routine: name });
                 }
                 self.check_limits()?;
@@ -923,7 +926,7 @@ impl Machine {
                 let v = self.pop(name)?;
                 let key = self.pop(name)?;
                 let heap = cx.heap();
-                if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == kind("threaded-closure")) {
+                if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == kind("cellular-closure")) {
                     return Err(Trap::Type { routine: name });
                 }
                 self.check_limits()?;
@@ -1153,7 +1156,7 @@ enum Flow {
     Halt,
 }
 
-/// Small threaded programs, shared by the tests of both inner interpreters
+/// Small cellular programs, shared by the tests of both inner interpreters
 /// and by their benchmark.
 pub mod examples {
     use super::WordBuilder;

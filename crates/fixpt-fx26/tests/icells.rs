@@ -1,7 +1,7 @@
 //! I-cells (docs/research/recursion-and-initialization.md): written once,
 //! read after. The misuses, a read of an empty cell and a second write, are
 //! errors in every way FX-26 runs: lowered to Scheme, by the evaluator
-//! written in FX-26, and compiled to threaded code by the compiler written
+//! written in FX-26, and compiled to cellular code by the compiler written
 //! in FX-26. `tests/programs/run/icells.fx` is the use that works.
 
 use fixpt_engine::Backend;

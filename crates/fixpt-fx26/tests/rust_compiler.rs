@@ -1,4 +1,4 @@
-//! The compiler to threaded words written in Rust (`src/threaded.rs`)
+//! The compiler to cellular words written in Rust (`src/cellular.rs`)
 //! against the one written in FX-26 (`src/compile.fx`): the same words,
 //! cell for cell, for every test program and for the whole bootstrap
 //! program; and the Rust one's words run as the lowering does (PLAN.md,
@@ -53,7 +53,7 @@ fn compare_with(s: &mut Fx26Session, text: &str, registers: bool) -> Option<Resu
         .map_err(|e| e.message)?;
         let mut ours_err = None;
         let ours = sc.make(|m| {
-            let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, text);
+            let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
             comp.registers = registers;
             match comp.program(&tops) {
                 Ok(w) => w,
@@ -151,7 +151,7 @@ fn the_rust_compilers_words_run_as_lowered() {
         let Ok(Ok(lowered)) = s.run_program(&text).map(|v| v.map_err(|e| e.to_string())) else { continue };
         let got = s.scheme.scope(|sc| {
             let mut err = None;
-            let w = sc.make(|m| match fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text).program(&tops) {
+            let w = sc.make(|m| match fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text).program(&tops) {
                 Ok(w) => w,
                 Err(e) => {
                     err = Some(e);

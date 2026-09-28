@@ -182,7 +182,7 @@ impl CodeSpace {
     }
 
     /// The address `at` has in the executable view: what a branch, a return
-    /// address or a threaded-code cell holds.
+    /// address or a cellular-code cell holds.
     pub fn exec_addr(&self, at: Offset) -> usize {
         self.check(at, 0);
         self.rx as usize + at

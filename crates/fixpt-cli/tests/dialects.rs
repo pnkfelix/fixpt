@@ -145,28 +145,28 @@ fn a_file_runs_and_its_output_reaches_stdout() {
 }
 
 #[test]
-fn fx26_runs_threaded_on_each_machine() {
+fn fx26_runs_cellular_on_each_machine() {
     // The same answer from each machine the compiled words can run on; the
     // stencils only where this build found a nightly compiler.
     let src = "(letrec ((f (subr spin (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))) (f 15))";
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
     for machine in ["rust", "native", "stencils"].into_iter().filter(|m| stencils || *m != "stencils") {
         let out = Command::new(FIXPT)
-            .args(["--dialect", "fx26", "--fx26-run", "threaded", "--threaded-machine", machine, "eval", src])
+            .args(["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", machine, "eval", src])
             .output()
             .expect("fixpt runs");
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.contains("610 : int"), "{machine}: {stdout}{}", String::from_utf8_lossy(&out.stderr));
     }
-    let out = Command::new(FIXPT).args(["--threaded-machine", "forth", "eval", "1"]).output().expect("fixpt runs");
+    let out = Command::new(FIXPT).args(["--cellular-machine", "forth", "eval", "1"]).output().expect("fixpt runs");
     assert!(!out.status.success(), "an unknown machine is refused");
 }
 
 #[test]
-fn the_fx26_repl_shows_threaded_code() {
+fn the_fx26_repl_shows_cellular_code() {
     use std::io::Write as _;
     let mut child = Command::new(FIXPT)
-        .args(["--dialect", "fx26", "--fx26-run", "threaded", "repl"])
+        .args(["--dialect", "fx26", "--fx26-run", "cellular", "repl"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

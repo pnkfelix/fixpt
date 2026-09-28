@@ -57,10 +57,10 @@ ranges 0.028–0.041 s), so only the totals are compared.
 
 The per-piece table fills in as each piece moves.
 
-## Threaded code: the Rust inner interpreter and the native one (A′3)
+## Cellular[^cellular] code: the Rust inner interpreter and the native one (A′3)
 
-`cargo run --release -p fixpt-native --example threaded_bench`: the same
-threaded words on both machines, results checked equal, best of three.
+`cargo run --release -p fixpt-native --example cellular_bench`: the same
+cellular words on both machines, results checked equal, best of three.
 A *cell* is one step of the Rust machine; the native machine counts only
 word entries and taken branches (its fuel), shown for scale.
 
@@ -73,7 +73,7 @@ word entries and taken branches (its fuel), shown for scale.
 
 For scale only, not a comparison: the engines benchmark's `fib 25` takes
 0.027 s on the AST engine and 0.019 s on the bytecode VM, but that is Scheme,
-with closures, frames, and generic arithmetic, where the threaded `fib` is a
+with closures, frames, and generic arithmetic, where the cellular `fib` is a
 hand-written Forth word on fixnums. What the table does say: the native
 `NEXT` costs about half a nanosecond per cell, the Rust `match` loop about
 three, and the machine's checks (fuel and stack limits at every word entry
@@ -81,10 +81,10 @@ and taken branch, tags and overflow in every primitive) leave `NEXT` the
 dominant cost. `cons` calls out to Rust, which saves and reloads the
 machine's registers; that is the 0.96.
 
-## Threaded code: stencils at each optimisation level (A′4)
+## Cellular code: stencils at each optimisation level (A′4)
 
 The same words again, now also on the stencil machine: the routines written
-in Rust with `become` (`crates/fixpt-native/stencils/threaded.rs`), compiled
+in Rust with `become` (`crates/fixpt-native/stencils/cellular.rs`), compiled
 by the build script with the installed nightly at `-C opt-level` 0, 1, 2, 3
 and `s` (debug assertions and overflow checks off at every level, since
 their calls into `core` could not be copied), and placed by copying. Best of
@@ -116,9 +116,9 @@ What it says:
   growth, at about the speed of the Rust machine built with `--release`,
   and 18× the Rust machine built without.
 
-## FX-26 compiled to threaded words, on each machine (C9c-3)
+## FX-26 compiled to cellular words, on each machine (C9c-3)
 
-`fixpt --dialect fx26 --fx26-run threaded --threaded-machine M run FILE`,
+`fixpt --dialect fx26 --fx26-run cellular --cellular-machine M run FILE`,
 release build, best of three. The programs are FX-26, compiled by the
 compiler written in FX-26 (`src/compile.fx`): `fib 27` (doubly recursive,
 `<`, `+` and `-` as the machine's primitives) and a `letrec` loop counting
@@ -139,7 +139,7 @@ programs at 20 million steps.
 What it says:
 
 - **Compiled FX-26 on the native machines is as fast as hand-written
-  threaded code**: `fib 27` takes 4.0 ms here and 3.3 ms as the Forth word
+  cellular code**: `fib 27` takes 4.0 ms here and 3.3 ms as the Forth word
   of the table above, though this one has frames, closures and generic
   calls. Ten times the Rust machine, twelve times the Scheme VM.
 - **A routine left to Rust costs what its way back costs.** The first
@@ -249,7 +249,7 @@ a direct call-out like `prim`.
 - **Marks in tail position.** Counting the words captured showed 3,664 a
   continuation, growing as the reader went on. The reader's top-level loop
   marks each form in tail position, which in Scheme replaces the frame's
-  mark. The threaded machines stacked a new one each time, so the
+  mark. The cellular machines stacked a new one each time, so the
   reader's continuation carried one mark per form read so far. The new
   routine `withmark-tail` has Scheme's meaning, and the compiler emits it
   for `with-mark` in tail position. Captures now average 88 words.
@@ -259,7 +259,7 @@ a direct call-out like `prim`.
 `NativeMachine::compile_word` places a word's routines' code inline in
 cell order, with the ip kept in step, branches as jumps, and no dispatch
 between cells. `cargo run --release -p fixpt-native --example
-threaded_bench`, ns per cell of the Rust machine:
+cellular_bench`, ns per cell of the Rust machine:
 
 | program                | hand-encoded | its words compiled |
 | ---------------------- | ------------ | ------------------ |
@@ -389,7 +389,7 @@ run on each machine. Best of three, release, before any M13 optimization:
 | tak      | 50.6 ms  | 65.9 ms      | 6.8 ms       | 11.3 ms      | 4.7 ms         |
 
 On whole FX-26 programs, words compiled to machine code (C11a) gain 10–30%
-over threaded code on the hand-encoded machine, more than the
+over cellular code on the hand-encoded machine, more than the
 micro-benchmarks showed.
 
 ## Typed calls (13c′)
@@ -455,7 +455,7 @@ procedure had read its own box on each iteration (`free 1; field 2`).
 
 The first measurement made compiled words *slower*: the loop went from 47
 to 57 ms. The dump of the word's machine code showed why. A compiled word
-keeps the threaded ip up to date: `sub ip, ip, #8` per cell, and a
+keeps the cellular ip up to date: `sub ip, ip, #8` per cell, and a
 post-indexed load per operand. That chain runs through every cell. A tail
 call used to remake the ip from the callee's word, which cut the chain at
 each iteration, so iterations could overlap. `branch` instead made the new
@@ -1004,10 +1004,10 @@ here, so R5, and R8 (stack checks hoisted), are not worth building.
 
 ## Closures: what copying code into each would cost (2026-09-27)
 
-A threaded closure is `[word][free…]`: the code (the word) is shared by
+A cellular closure is `[word][free…]`: the code (the word) is shared by
 every closure of one `lambda`, and a free value is one load from the
 closure register, as Larceny's closures are. Measured once, with temporary
-counters in the Rust threaded machine's `CLOSURE` routine (not kept), on
+counters in the Rust cellular machine's `CLOSURE` routine (not kept), on
 the self-compile (the driver compiling the bootstrap program):
 
 | what                                                        | count or words |
@@ -1026,3 +1026,8 @@ closures, each of a different `lambda`, exactly once: for those, copying
 would cost nothing but the one copy. On the native machines copying would
 also mean writing executable memory for each closure (W^X on arm64 macOS,
 and an instruction-cache flush), which is far dearer than the words.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

@@ -1,17 +1,17 @@
-//! The threaded machines against each other on the same words: the Rust
+//! The cellular machines against each other on the same words: the Rust
 //! inner interpreter, the hand-encoded native machine, and the stencil
 //! machine at each optimisation level its stencils were compiled at.
 //!
-//!     cargo run --release -p fixpt-native --example threaded_bench
+//!     cargo run --release -p fixpt-native --example cellular_bench
 //!
 //! The Rust machine's time depends on how *this* program was built, so run
 //! it both ways to see that (`--release`, and without); the native machines'
 //! code does not.
 
-use fixpt_engine::threaded::{Machine, examples};
+use fixpt_engine::cellular::{Machine, examples};
 use fixpt_heap::{Heap, Value};
 use fixpt_native::stencil::{StencilMachine, opt_levels};
-use fixpt_native::threaded::NativeMachine;
+use fixpt_native::cellular::NativeMachine;
 use std::time::Instant;
 
 const FUEL: u64 = 1 << 40;

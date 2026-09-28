@@ -1,9 +1,9 @@
-//! Making threaded words (`layout::threaded`): the one place a word is
+//! Making cellular words (`layout::cellular`): the one place a word is
 //! made, whoever asks — the Rust builder, a Scheme primitive, FX-26 code —
 //! because the native machines run a word's cells without looking at them
 //! twice, so every word must be checked as it is made.
 
-use crate::layout::threaded::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
+use crate::layout::cellular::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
 use crate::{Heap, Value};
 
 impl Heap {
@@ -24,7 +24,7 @@ impl Heap {
     /// * `call`, `tailcall`: a non-negative fixnum;
     /// * `prim`: two non-negative fixnums (the primitive is checked when it
     ///   is called, by the runtime, which knows them).
-    pub fn make_threaded_word(&mut self, name: Value, cells: &[Value]) -> Result<Value, String> {
+    pub fn make_cellular_word(&mut self, name: Value, cells: &[Value]) -> Result<Value, String> {
         // Which cells begin an instruction: every branch must land on one.
         let mut starts = vec![false; cells.len() + 1];
         let mut branches = Vec::new();
@@ -39,7 +39,7 @@ impl Heap {
                     return Err(format!("cell {i}: {n} is no routine"));
                 }
                 ROUTINES[n as usize].0
-            } else if c == Value::DEFAULT || self.is_threaded_word(c) {
+            } else if c == Value::DEFAULT || self.is_cellular_word(c) {
                 ""
             } else {
                 return Err(format!("cell {i}: neither a routine nor a word"));
@@ -64,7 +64,7 @@ impl Heap {
                 "global" | "global!" if !self.is_global_cell(op(0)) => {
                     return Err(format!("cell {i}: a global is a bloblet with a field"));
                 }
-                "closure" if !(op(0) == Value::DEFAULT || self.is_threaded_word(op(0))) || !non_negative(op(1)) => {
+                "closure" if !(op(0) == Value::DEFAULT || self.is_cellular_word(op(0))) || !non_negative(op(1)) => {
                     return Err(format!("cell {i}: a closure is of a word, over a count of values"));
                 }
                 "slot" | "slot!" | "free" | "call" | "tailcall" | "tcall" | "ttailcall" if !non_negative(op(0)) => {
@@ -110,12 +110,12 @@ impl Heap {
     /// `k`, running the word `slot 0; free 0; resume`. Allocates; does not
     /// collect.
     pub fn continuation_closure(&mut self, k: Value) -> Value {
-        use crate::layout::threaded::{routine, CLOSURE_FREE0, CLOSURE_WORD};
+        use crate::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD};
         let f = |n: u64| Value::fixnum(n as i64);
         let cells = [f(routine("slot")), f(0), f(routine("free")), f(0), f(routine("resume"))];
         let name = self.intern("continuation");
-        let word = self.make_threaded_word(name, &cells).expect("a well-formed word");
-        let c = self.make_bloblet(crate::layout::kind("threaded-closure"), 2, 0, true);
+        let word = self.make_cellular_word(name, &cells).expect("a well-formed word");
+        let c = self.make_bloblet(crate::layout::kind("cellular-closure"), 2, 0, true);
         self.set_bloblet_slot(c, CLOSURE_WORD, word);
         self.set_bloblet_slot(c, CLOSURE_FREE0, k);
         c
@@ -125,12 +125,12 @@ impl Heap {
     /// continuation whose word ends in `resume`, which only
     /// `continuation_closure` makes.
     pub fn continuation_of(&self, v: Value) -> Option<Value> {
-        use crate::layout::threaded::{routine, CLOSURE_FREE0, CLOSURE_WORD};
-        let k = crate::layout::kind("threaded-continuation");
+        use crate::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD};
+        let k = crate::layout::kind("cellular-continuation");
         if v.is_bloblet() && self.bloblet_kind(v) == k {
             return Some(v);
         }
-        if !(v.is_bloblet() && self.bloblet_kind(v) == crate::layout::kind("threaded-closure")) || self.bloblet_head(v).fields != CLOSURE_FREE0 {
+        if !(v.is_bloblet() && self.bloblet_kind(v) == crate::layout::kind("cellular-closure")) || self.bloblet_head(v).fields != CLOSURE_FREE0 {
             return None;
         }
         let (word, x) = (self.bloblet_slot(v, CLOSURE_WORD), self.bloblet_slot(v, CLOSURE_FREE0));
@@ -143,16 +143,16 @@ impl Heap {
     /// (`undefined`). What a global's cell holds before its definition runs,
     /// which a checked program never sees.
     pub fn undefined_closure(&mut self) -> Value {
-        use crate::layout::threaded::{routine, CLOSURE_WORD};
+        use crate::layout::cellular::{routine, CLOSURE_WORD};
         let cells = [Value::fixnum(routine("undefined") as i64)];
         let name = self.intern("undefined");
-        let word = self.make_threaded_word(name, &cells).expect("a well-formed word");
-        let c = self.make_bloblet(crate::layout::kind("threaded-closure"), 1, 0, true);
+        let word = self.make_cellular_word(name, &cells).expect("a well-formed word");
+        let c = self.make_bloblet(crate::layout::kind("cellular-closure"), 1, 0, true);
         self.set_bloblet_slot(c, CLOSURE_WORD, word);
         c
     }
 
-    pub fn is_threaded_word(&self, v: Value) -> bool {
+    pub fn is_cellular_word(&self, v: Value) -> bool {
         v.is_bloblet() && self.bloblet_kind(v) == KIND
     }
 }

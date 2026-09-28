@@ -45,7 +45,7 @@ fn standard_fx_is_generated_from_the_lowering() {
 #[test]
 fn native_layout_fx_is_generated_from_the_machine() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/native-layout.fx");
-    let want = fixpt_native::threaded::fx26_module();
+    let want = fixpt_native::cellular::fx26_module();
     if std::env::var_os("FIXPT_BLESS").is_some() {
         std::fs::write(path, &want).expect("writes native-layout.fx");
     }

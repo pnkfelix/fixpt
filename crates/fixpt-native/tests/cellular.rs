@@ -3,11 +3,11 @@
 //! machine and the stencil machine at every optimisation level it was built
 //! at.
 
-use fixpt_engine::threaded::{Machine, Trap, WordBuilder, examples, prim, primitive_word};
-use fixpt_heap::layout::threaded::WORD_NAME;
+use fixpt_engine::cellular::{Machine, Trap, WordBuilder, examples, prim, primitive_word};
+use fixpt_heap::layout::cellular::WORD_NAME;
 use fixpt_heap::{Heap, Value};
 use fixpt_native::stencil::{StencilMachine, opt_levels};
-use fixpt_native::threaded::NativeMachine;
+use fixpt_native::cellular::NativeMachine;
 
 const FUEL: u64 = 10_000_000;
 

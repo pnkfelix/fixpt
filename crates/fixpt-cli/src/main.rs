@@ -38,13 +38,13 @@ options:
   --engine bytecode|ast          execution engine (default: bytecode)
   --main NAME                    an image's entry point (default: main)
   --reader scheme|fx26           the Scheme REPL's eager reader (default: scheme)
-  --fx26-run lower|evaluate|threaded
+  --fx26-run lower|evaluate|cellular
                                  how FX-26 runs, once checked: lowered to Scheme
                                  (default), by the evaluator written in FX-26, or
-                                 compiled to threaded words by the compiler
-                                 written in FX-26 and run on the threaded machine
-  --threaded-machine rust|native|native-compiled|stencils|registers
-                                 which threaded machine runs compiled words: the
+                                 compiled to cellular words by the compiler
+                                 written in FX-26 and run on the cellular machine
+  --cellular-machine rust|native|native-compiled|stencils|registers
+                                 which cellular machine runs compiled words: the
                                  one written in Rust (default); the hand-encoded
                                  arm64 one, running the cells (native), or with
                                  each word compiled to machine code first
@@ -137,40 +137,40 @@ fn run(args: &[String]) -> i32 {
     let strategy = match flags.fx26_run.as_deref() {
         None | Some("lower") => fixpt_fx26::session::Strategy::Lower,
         Some("evaluate") => fixpt_fx26::session::Strategy::Evaluate,
-        Some("threaded") => fixpt_fx26::session::Strategy::Threaded,
+        Some("cellular") => fixpt_fx26::session::Strategy::Cellular,
         Some(name) => {
-            eprintln!("fixpt: unknown --fx26-run `{name}` (want lower, evaluate or threaded)");
+            eprintln!("fixpt: unknown --fx26-run `{name}` (want lower, evaluate or cellular)");
             return 2;
         }
     };
     let _ = FX26_RUN.set(strategy);
-    let machine: fixpt_runtime::RunWord = match flags.threaded_machine.as_deref() {
-        None | Some("rust") => fixpt_engine::threaded::run_word,
-        Some("native") => fixpt_native::threaded::run_word,
-        Some("native-compiled") => fixpt_native::threaded::run_word_compiled,
+    let machine: fixpt_runtime::RunWord = match flags.cellular_machine.as_deref() {
+        None | Some("rust") => fixpt_engine::cellular::run_word,
+        Some("native") => fixpt_native::cellular::run_word,
+        Some("native-compiled") => fixpt_native::cellular::run_word_compiled,
         Some("stencils") if fixpt_native::stencil::opt_levels().is_empty() => {
             eprintln!("fixpt: this build has no stencils (it found no nightly compiler)");
             return 2;
         }
         Some("stencils") => fixpt_native::stencil::run_word,
-        Some("registers") => fixpt_native::threaded::run_word_registers,
+        Some("registers") => fixpt_native::cellular::run_word_registers,
         Some(name) => {
-            eprintln!("fixpt: unknown --threaded-machine `{name}` (want rust, native, native-compiled, stencils or registers)");
+            eprintln!("fixpt: unknown --cellular-machine `{name}` (want rust, native, native-compiled, stencils or registers)");
             return 2;
         }
     };
-    let _ = THREADED_MACHINE.set(machine);
-    let _ = THREADED_MACHINE_CODE.set(match flags.threaded_machine.as_deref() {
-        Some("native-compiled" | "registers") => Some(fixpt_native::threaded::machine_code_text as fixpt_runtime::MachineCode),
+    let _ = CELLULAR_MACHINE.set(machine);
+    let _ = CELLULAR_MACHINE_CODE.set(match flags.cellular_machine.as_deref() {
+        Some("native-compiled" | "registers") => Some(fixpt_native::cellular::machine_code_text as fixpt_runtime::MachineCode),
         Some("stencils") => Some(fixpt_native::stencil::stencil_source_text as fixpt_runtime::MachineCode),
         _ => None,
     });
-    let _ = THREADED_MACHINE_NAME.set(match flags.threaded_machine.as_deref() {
+    let _ = CELLULAR_MACHINE_NAME.set(match flags.cellular_machine.as_deref() {
         Some("native") => "the hand-encoded native machine",
         Some("native-compiled") => "the hand-encoded native machine, its words compiled to machine code",
         Some("stencils") => "the stencil machine",
         Some("registers") => "the native machine, as register code",
-        _ => "the threaded machine written in Rust",
+        _ => "the cellular machine written in Rust",
     });
     for (flag, value, cell) in [
         ("--step-limit", &flags.step_limit, &STEP_LIMIT),
@@ -304,20 +304,20 @@ struct Flags {
     reader: Option<String>,
     fx26_run: Option<String>,
     gc_every: Option<String>,
-    threaded_machine: Option<String>,
+    cellular_machine: Option<String>,
     step_limit: Option<String>,
     speculation_step_limit: Option<String>,
 }
 
 /// `--fx26-run`, for every FX-26 session this process starts.
 pub(crate) static FX26_RUN: std::sync::OnceLock<fixpt_fx26::session::Strategy> = std::sync::OnceLock::new();
-/// `--threaded-machine`, for every FX-26 session this process starts.
-pub(crate) static THREADED_MACHINE: std::sync::OnceLock<fixpt_runtime::RunWord> = std::sync::OnceLock::new();
+/// `--cellular-machine`, for every FX-26 session this process starts.
+pub(crate) static CELLULAR_MACHINE: std::sync::OnceLock<fixpt_runtime::RunWord> = std::sync::OnceLock::new();
 /// How that machine shows a word's machine code (`,disassemble-asm`): none
 /// for the one written in Rust, which interprets cells.
-pub(crate) static THREADED_MACHINE_CODE: std::sync::OnceLock<Option<fixpt_runtime::MachineCode>> = std::sync::OnceLock::new();
+pub(crate) static CELLULAR_MACHINE_CODE: std::sync::OnceLock<Option<fixpt_runtime::MachineCode>> = std::sync::OnceLock::new();
 /// Which machine that is, for the REPL to say.
-pub(crate) static THREADED_MACHINE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+pub(crate) static CELLULAR_MACHINE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 /// `--gc-every`, for every heap this process starts.
 pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -353,7 +353,7 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         reader: None,
         fx26_run: None,
         gc_every: None,
-        threaded_machine: None,
+        cellular_machine: None,
         step_limit: None,
         speculation_step_limit: None,
     };
@@ -364,7 +364,7 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
     let named: [(&str, Setter); 10] = [
         ("--speculation-step-limit", |f, v| f.speculation_step_limit = Some(v)),
         ("--step-limit", |f, v| f.step_limit = Some(v)),
-        ("--threaded-machine", |f, v| f.threaded_machine = Some(v)),
+        ("--cellular-machine", |f, v| f.cellular_machine = Some(v)),
         ("--fx26-run", |f, v| f.fx26_run = Some(v)),
         ("--gc-every", |f, v| f.gc_every = Some(v)),
         ("--dialect", |f, v| f.dialect = Some(v)),

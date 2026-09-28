@@ -145,9 +145,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("make-icell", "(poly ((r region)) (poly ((t type)) (subr (alloc r) () (icell t r))))"),
     ("icell-put!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((icell t r) t) unit)))"),
     ("icell-get", "(poly ((r region)) (poly ((t type)) (subr (await r) ((icell t r)) t)))"),
-    // Threaded code (`layout::threaded`), for the compiler written in
+    // Cellular code (`layout::cellular`), for the compiler written in
     // FX-26. A word is immutable once made, so making one is pure; a word
-    // that is not one (`Heap::make_threaded_word`) is an error when run.
+    // that is not one (`Heap::make_cellular_word`) is an error when run.
     ("make-word", "(poly ((r region)) (subr (read r) (symbol (listof wcell r)) tword))"),
     // A word's register code (PLAN.md 13h′) made from its cells, checked,
     // and set as the word's twin; it is given back.
@@ -155,7 +155,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // A word's cells, looked at, for the compiler to machine code: how many
     // fields it has, and field k if it is an int.
     ("tword-fields", "(subr pure (tword) int)"),
-    // Any value's threaded code, shown, if it has some: for looking at what
+    // Any value's cellular code, shown, if it has some: for looking at what
     // the compiler made.
     ("disassemble", "(poly ((t type)) (subr pure (t) string))"),
     ("tword-int?", "(subr pure (tword int) bool)"),

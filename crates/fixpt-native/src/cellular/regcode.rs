@@ -1,5 +1,5 @@
 //! Register code (PLAN.md 13h′) as machine code, on the machine stack code
-//! (threaded words, interpreted or compiled) runs on, so that each may call
+//! (cellular words, interpreted or compiled) runs on, so that each may call
 //! the other. The two differ in their machine model, not in being compiled:
 //! stack code passes and keeps every value on the data stack, register code
 //! in registers.
@@ -22,7 +22,7 @@
 
 use super::*;
 use fixpt_heap::layout::regcode::{OPS, REGS};
-use fixpt_heap::layout::threaded::{routine, WORD_TWIN};
+use fixpt_heap::layout::cellular::{routine, WORD_TWIN};
 
 const RESULT: Reg = 0;
 const X12: Reg = 12;
@@ -79,7 +79,7 @@ impl Asm {
             self.e(if store { str(r, X16, 0) } else { ldr(r, X16, 0) });
         }
     }
-    /// `IP` := the address of the running word's field `f`, as a threaded
+    /// `IP` := the address of the running word's field `f`, as a cellular
     /// ip is, for what reads the word from where the ip is (`save`).
     fn ip_at(&mut self, f: usize) {
         self.e(mov(IP, CUR));
@@ -178,7 +178,7 @@ impl Asm {
     /// calling out; to `slow` when it cannot be done so. `word` is the
     /// pool field of a closure's word, for `closure`.
     fn inline_op(&mut self, what: &str, count: usize, word: usize, fields: usize, slow: Label) {
-        use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD};
+        use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
         use fixpt_heap::value::make_header;
         match what {
             // A closure over `REG1`…`REGn`: the `closure` routine's object,
@@ -189,7 +189,7 @@ impl Asm {
                 let frees: Vec<Reg> = if region { (2..count).map(reg).collect() } else { (1..=count).map(reg).collect() };
                 let total = frees.len() + 2;
                 self.bump_words(1 + total as u32, region, slow);
-                self.es(&mov_imm64(X15, make_header(fixpt_heap::layout::kind("threaded-closure"), total, 0)));
+                self.es(&mov_imm64(X15, make_header(fixpt_heap::layout::kind("cellular-closure"), total, 0)));
                 self.bloblet_at(total);
                 if region {
                     self.field_at(reg(count), CLOSURE_WORD, total);
@@ -652,7 +652,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     a.e(str(reg(k(o(1))), X16, 0));
                 }
             }
-            "prim" | "lambda" | "threaded" => {
+            "prim" | "lambda" | "cellular" => {
                 let (count, routine_n, at) = match name {
                     "prim" => (k(o(1)), routine("prim"), f(0)),
                     "lambda" => (k(o(1)), routine("closure"), f(0)),
@@ -664,8 +664,8 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 let slow = a.label();
                 let done = a.label();
                 let inline = match (name, count) {
-                    ("threaded", 2) if ROUTINES[k(o(0))].0 == "cons" => Some("cons"),
-                    ("threaded", 2) if ROUTINES[k(o(0))].0 == "field@" => Some("field@"),
+                    ("cellular", 2) if ROUTINES[k(o(0))].0 == "cons" => Some("cons"),
+                    ("cellular", 2) if ROUTINES[k(o(0))].0 == "field@" => Some("field@"),
                     ("prim", 1) if prim_named(k(o(0)), "string-length") => Some("string-length"),
                     ("prim", 2) if prim_named(k(o(0)), "string-ref") => Some("string-ref"),
                     ("prim", 3) if prim_named(k(o(0)), "%region-cons") => Some("rcons"),
@@ -704,7 +704,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
             "invoke" | "tailinvoke" => {
                 let tail = name == "tailinvoke";
                 let count = k(o(0));
-                let threaded = a.label();
+                let cellular = a.label();
                 // The callee, its word, and the word's twin.
                 a.e(mov(W, RESULT));
                 a.e(mov(X11, W));
@@ -713,10 +713,10 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.e(ldur(X10, X11, field_off(WORD_TWIN)));
                 a.value(X15, Value::FALSE);
                 a.e(cmp(X10, X15));
-                a.b_cond(Cond::Eq, threaded);
+                a.b_cond(Cond::Eq, cellular);
                 a.e(mov(X11, X10));
                 a.e(ldur(X15, X11, field_off(WORD_ENTRY)));
-                a.cbz(X15, threaded);
+                a.cbz(X15, cellular);
                 // Register code: the arguments stay where they are. A call
                 // pushes a return entry marked as one `blr` made (its `8k`
                 // negated), so that the callee returns by `ret`, with the
@@ -743,7 +743,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 // Stack code: the arguments as its frame. It returns the
                 // stack's way, so an entry this procedure was called with
                 // by `blr` is unmarked first, in a tail call.
-                a.bind(threaded);
+                a.bind(cellular);
                 a.fuel();
                 a.push_regs(count);
                 a.ds_limit();

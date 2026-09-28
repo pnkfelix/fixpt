@@ -15,7 +15,7 @@ pub fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, wh
     // a literal, by how it is written.
     let code = |v: Value| {
         v.is_bloblet()
-            && ["threaded-code", "threaded-closure", "bloblet", "register-code"].iter().any(|k| h.bloblet_kind(v) == fixpt_heap::layout::kind(k))
+            && ["cellular-code", "cellular-closure", "bloblet", "register-code"].iter().any(|k| h.bloblet_kind(v) == fixpt_heap::layout::kind(k))
     };
     let (ka, kb) = (code(a).then(|| h.bloblet_kind(a)), code(b).then(|| h.bloblet_kind(b)));
     if ka.is_none() || kb.is_none() {
@@ -46,10 +46,10 @@ pub fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, wh
     // twin, its register code, is compared as code, as the word is.
     let entry = |w: Value, i: usize| {
         let v = h.bloblet_slot(w, i);
-        let word = ka == Some(fixpt_heap::layout::kind("threaded-code"));
+        let word = ka == Some(fixpt_heap::layout::kind("cellular-code"));
         let register = ka == Some(fixpt_heap::layout::kind("register-code"));
-        let native = (word && v.as_fixnum() >= fixpt_heap::layout::threaded::PRIMITIVES as i64 || register)
-            && i == fixpt_heap::layout::threaded::WORD_ENTRY;
+        let native = (word && v.as_fixnum() >= fixpt_heap::layout::cellular::PRIMITIVES as i64 || register)
+            && i == fixpt_heap::layout::cellular::WORD_ENTRY;
         if native { Value::fixnum(0) } else { v }
     };
     (2..=na).all(|i| same_code(h, entry(a, i), entry(b, i), pairs, why))
@@ -63,7 +63,7 @@ pub fn register_words(h: &Heap, w: Value, seen: &mut std::collections::HashSet<u
     }
     let k = h.bloblet_kind(w);
     let own = (k == fixpt_heap::layout::kind("register-code")) as usize;
-    if k != fixpt_heap::layout::kind("threaded-code") && k != fixpt_heap::layout::kind("register-code") {
+    if k != fixpt_heap::layout::kind("cellular-code") && k != fixpt_heap::layout::kind("register-code") {
         return 0;
     }
     own + (2..=h.bloblet_head(w).fields).map(|i| register_words(h, h.bloblet_slot(w, i), seen)).sum::<usize>()

@@ -53,13 +53,13 @@
 (define kind-environment int 18)
 (define kind-primitive int 19)
 (define kind-bloblet int 32)
-(define kind-threaded-code int 33)
+(define kind-cellular-code int 33)
 (define kind-compiled-code int 34)
 (define kind-env-frame int 35)
 (define kind-sum int 36)
 (define kind-product int 37)
-(define kind-threaded-closure int 38)
-(define kind-threaded-continuation int 39)
+(define kind-cellular-closure int 38)
+(define kind-cellular-continuation int 39)
 (define kind-register-code int 40)
 (define kind-extension int 255)
 
@@ -79,13 +79,13 @@
 (define code-items int 8)
 (define code-item0 int 9)
 
-;;; A threaded word's fields, by negative offset, and its routines by number.
+;;; A cellular word's fields, by negative offset, and its routines by number.
 (define word-entry int 2)
 (define word-name int 3)
 (define word-twin int 4)
 (define word-cell0 int 5)
-(define threaded-closure-word int 2)
-(define threaded-closure-free0 int 3)
+(define cellular-closure-word int 2)
+(define cellular-closure-free0 int 3)
 (define routine-docol int 0)  ; run a word's cells
 (define routine-exit int 1)  ; return to the calling word
 (define routine-halt int 2)  ; stop, leaving the data stack as the result
@@ -151,18 +151,18 @@
 (define rop-setstk int 11)  ; 1: frame slot n := RESULT
 (define rop-load int 12)  ; 2: REGk := frame slot n
 (define rop-store int 13)  ; 2: frame slot n := REGk
-(define rop-op1 int 14)  ; 1: RESULT := threaded routine r applied to RESULT
-(define rop-op2 int 15)  ; 2: RESULT := threaded routine r applied to RESULT and REGk
-(define rop-op2imm int 16)  ; 2: RESULT := threaded routine r applied to RESULT and x
+(define rop-op1 int 14)  ; 1: RESULT := cellular routine r applied to RESULT
+(define rop-op2 int 15)  ; 2: RESULT := cellular routine r applied to RESULT and REGk
+(define rop-op2imm int 16)  ; 2: RESULT := cellular routine r applied to RESULT and x
 (define rop-field int 17)  ; 1: RESULT := field k of the bloblet in RESULT
 (define rop-setfield int 18)  ; 2: field k of the bloblet in RESULT := REGj
 (define rop-prim int 19)  ; 2: RESULT := runtime primitive p applied to REG1…REGn; may collect
-(define rop-lambda int 20)  ; 2: RESULT := a closure of threaded word w over REG1…REGn; may collect
+(define rop-lambda int 20)  ; 2: RESULT := a closure of cellular word w over REG1…REGn; may collect
 (define rop-invoke int 21)  ; 1: call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect
 (define rop-tailinvoke int 22)  ; 1: the same in tail position, the frame popped: its value is this one's
 (define rop-return int 23)  ; 0: return RESULT, the frame popped
 (define rop-branch int 24)  ; 1: skip the operand's count of cells, counted after it
 (define rop-branchf int 25)  ; 1: the same if RESULT is #f
-(define rop-threaded int 26)  ; 2: threaded routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect
+(define rop-cellular int 26)  ; 2: cellular routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect
 (define rop-invokeself int 27)  ; 1: call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may collect
 (define register-regs int 8)

@@ -4,10 +4,10 @@
 //! traps.
 #![allow(unsafe_code)]
 
-use fixpt_engine::threaded::{Machine, Trap, WordBuilder};
+use fixpt_engine::cellular::{Machine, Trap, WordBuilder};
 use fixpt_heap::Value;
 use fixpt_native::stencil::{StencilMachine, opt_levels};
-use fixpt_native::threaded::NativeMachine;
+use fixpt_native::cellular::NativeMachine;
 use fixpt_runtime::Runtime;
 
 const FUEL: u64 = 10_000_000;

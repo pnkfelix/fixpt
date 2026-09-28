@@ -1,5 +1,5 @@
 //! The benchmarks of `tests/programs/bench` (PLAN.md, M13 step 13b): each
-//! program lowered to Scheme, and compiled by the Rust compiler to threaded
+//! program lowered to Scheme, and compiled by the Rust compiler to cellular
 //! words run on each machine, best of three. Each optimization of M13 is
 //! measured with this before it stays; the figures go in
 //! `docs/performance.md`.
@@ -39,11 +39,11 @@ fn benchmarks() {
     names.sort();
     type Run = fn(&mut fixpt_runtime::Runtime, Value, &[Value]) -> Result<Value, String>;
     let machines: [(&str, Run); 4] = [
-        ("Rust machine", fixpt_engine::threaded::run_word),
-        ("hand-encoded", fixpt_native::threaded::run_word_as_is),
+        ("Rust machine", fixpt_engine::cellular::run_word),
+        ("hand-encoded", fixpt_native::cellular::run_word_as_is),
         ("stencils -O2", fixpt_native::stencil::run_word),
         // Last: compiling to machine code changes the words' entries.
-        ("words compiled", fixpt_native::threaded::run_word_compiled),
+        ("words compiled", fixpt_native::cellular::run_word_compiled),
     ];
     println!("| program | lowered | {} | register code |", machines.map(|m| m.0).join(" | "));
     for path in names {
@@ -59,7 +59,7 @@ fn benchmarks() {
         let (c, tops) = checked(&text);
         let mut row = vec![format!("{:.1} ms", 1e3 * t_lowered)];
         s.scheme.scope(|sc| {
-            let w = sc.make(|m| fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text).program(&tops).expect("compiles"));
+            let w = sc.make(|m| fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text).program(&tops).expect("compiles"));
             for (_, run) in machines {
                 sc.runtime_unrooted().run_word = Some(run);
                 let (out, t) = best(|| {
@@ -75,11 +75,11 @@ fn benchmarks() {
             // Register code (PLAN.md 13h′): the program compiled again, with
             // each lambda's register code, and run as that.
             let w = sc.make(|m| {
-                let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
                 comp.registers = true;
                 comp.program(&tops).expect("compiles")
             });
-            sc.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+            sc.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
             let (out, t) = best(|| {
                 let none = sc.make(|_| Value::NULL);
                 match sc.call_global("%run-word", &[w, none]) {

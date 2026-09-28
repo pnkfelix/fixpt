@@ -1,17 +1,17 @@
-//! The stencil machine: the threaded machine again, its routines written in
-//! Rust (`stencils/threaded.rs`) with `become`, compiled by the build script
+//! The stencil machine: the cellular machine again, its routines written in
+//! Rust (`stencils/cellular.rs`) with `become`, compiled by the build script
 //! at several optimisation levels, and placed in a code space by copying.
 //!
-//! Beside the hand-encoded machine in `threaded.rs` it answers two
+//! Beside the hand-encoded machine in `cellular.rs` it answers two
 //! questions: whether Rust with guaranteed tail calls can express the inner
 //! interpreter, and what that costs against code we encode ourselves. Both
 //! run the same words on the same stacks and state, and are checked against
 //! the Rust machine by the same tests.
 
 use crate::codespace::{CodeSpace, Offset};
-use crate::threaded::{ROUTINE_SLOTS, Stacks, State};
-use fixpt_engine::threaded::Trap;
-use fixpt_heap::layout::threaded::ROUTINES;
+use crate::cellular::{ROUTINE_SLOTS, Stacks, State};
+use fixpt_engine::cellular::Trap;
+use fixpt_heap::layout::cellular::ROUTINES;
 use fixpt_heap::{Heap, Value};
 
 /// The stencils compiled at one optimisation level.
@@ -95,13 +95,13 @@ impl StencilMachine {
         Some(StencilMachine { space, start, routines, stacks: Stacks::new(), fuel_left: 0, code_bytes })
     }
 
-    /// As [`NativeMachine::run`](crate::threaded::NativeMachine::run).
+    /// As [`NativeMachine::run`](crate::cellular::NativeMachine::run).
     pub fn run(&mut self, heap: &mut Heap, word: Value, args: &[Value], fuel: u64) -> Result<Vec<Value>, Trap> {
         let st = self.stacks.start(heap, word, args, fuel);
         self.go(st, word)
     }
 
-    /// As [`NativeMachine::run_in_runtime`](crate::threaded::NativeMachine::run_in_runtime).
+    /// As [`NativeMachine::run_in_runtime`](crate::cellular::NativeMachine::run_in_runtime).
     pub fn run_in_runtime(
         &mut self,
         rt: &mut fixpt_runtime::Runtime,
@@ -135,7 +135,7 @@ impl StencilMachine {
 /// The stencils' Rust source, as built into this binary: what a stencil
 /// machine runs, shown instead of machine code (`,disassemble-asm`), since
 /// it compiles no word and runs each cell through a fixed set of routines.
-const STENCIL_SOURCE: &str = include_str!("../stencils/threaded.rs");
+const STENCIL_SOURCE: &str = include_str!("../stencils/cellular.rs");
 
 /// From `from`, which is at an opening bracket, to just past the one that
 /// closes it.
@@ -192,8 +192,8 @@ fn macros_used(text: &str, shown: &mut Vec<String>) -> Vec<String> {
 /// each, and of the stencils' macros those use: what the stencil machine
 /// does for this word.
 pub fn stencil_source_text(heap: &Heap, word: Value) -> Option<String> {
-    use fixpt_heap::layout::threaded::{WORD_CELL0, operands};
-    if !heap.is_threaded_word(word) {
+    use fixpt_heap::layout::cellular::{WORD_CELL0, operands};
+    if !heap.is_cellular_word(word) {
         return None;
     }
     let fields = heap.bloblet_head(word).fields;
@@ -207,7 +207,7 @@ pub fn stencil_source_text(heap: &Heap, word: Value) -> Option<String> {
         }
         k += 1 + if cell.is_fixnum() { operands(name) } else { 0 };
     }
-    let mut out = String::from("the stencils its cells run, as Rust (crates/fixpt-native/stencils/threaded.rs):\n");
+    let mut out = String::from("the stencils its cells run, as Rust (crates/fixpt-native/stencils/cellular.rs):\n");
     let mut shown = Vec::new();
     for r in routines {
         let stencil = stencil_name(r);

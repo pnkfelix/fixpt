@@ -28,7 +28,7 @@ pub const PARSER: &str = include_str!("parser.fx");
 /// The evaluator written in FX-26, which runs the parser's trees.
 pub const EVALUATOR: &str = include_str!("evaluator.fx");
 
-/// The compiler from FX-26 to threaded words, written in FX-26.
+/// The compiler from FX-26 to cellular words, written in FX-26.
 pub const COMPILER: &str = include_str!("compile.fx");
 
 /// The register compiler written in FX-26 (PLAN.md 13h′ (e)): register code
@@ -88,7 +88,7 @@ pub mod session;
 pub mod sexp;
 pub mod syn;
 mod terminate;
-pub mod threaded;
+pub mod cellular;
 pub mod standard;
 pub mod top;
 pub mod unparse;

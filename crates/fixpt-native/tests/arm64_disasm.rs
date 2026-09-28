@@ -68,9 +68,9 @@ fn what_no_encoder_makes_is_a_word() {
 /// and the code of words it compiles.
 #[test]
 fn everything_the_native_machine_makes_reads_back() {
-    use fixpt_engine::threaded::examples;
+    use fixpt_engine::cellular::examples;
     use fixpt_heap::Heap;
-    use fixpt_native::threaded::{NativeMachine, machine_code_text};
+    use fixpt_native::cellular::{NativeMachine, machine_code_text};
     let m = NativeMachine::new();
     let unread: Vec<String> = m
         .machine_instructions()

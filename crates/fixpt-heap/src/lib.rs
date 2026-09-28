@@ -18,7 +18,7 @@ pub mod image;
 pub mod layout;
 mod regcode;
 mod sro;
-mod threaded;
+mod cellular;
 
 pub use sro::SroKind;
 pub mod value;

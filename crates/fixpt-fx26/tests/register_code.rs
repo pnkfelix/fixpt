@@ -17,7 +17,7 @@ fn shown(text: &str) -> String {
     let mut out = String::new();
     s.scheme.scope(|sc| {
         sc.make(|m| {
-            let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, text);
+            let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
             comp.registers = true;
             let w = comp.program(&tops).expect("compiles");
             out = fixpt_runtime::disasm::disassemble(m.heap(), w);
@@ -65,7 +65,7 @@ fn every_test_program_has_well_formed_register_code() {
             let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
             s.scheme.scope(|sc| {
                 sc.make(|m| {
-                    let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                    let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
                     comp.registers = true;
                     comp.program(&tops).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
                 });
@@ -111,11 +111,11 @@ fn runs_as_lowered(gc_every: Option<u64>) {
             let Ok(Ok(lowered)) = s.run_program(&text).map(|v| v.map_err(|e| e.to_string())) else { continue };
             let got = s.scheme.scope(|sc| {
                 let w = sc.make(|m| {
-                    let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+                    let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
                     comp.registers = true;
                     comp.program(&tops).expect("compiles")
                 });
-                sc.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+                sc.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
                 if let Some(n) = gc_every {
                     sc.set_gc_every(n);
                 }
@@ -155,11 +155,11 @@ fn run_in_registers_counting(program: &str, gc_every: Option<u64>) -> (String, u
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.scheme.scope(|sc| {
         let w = sc.make(|m| {
-            let mut comp = fixpt_fx26::threaded::Compiler::new(m.heap(), &c, &text);
+            let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
             comp.registers = true;
             comp.program(&tops).expect("compiles")
         });
-        sc.runtime_unrooted().run_word = Some(fixpt_native::threaded::run_word_registers);
+        sc.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
         if let Some(n) = gc_every {
             sc.set_gc_every(n);
         }

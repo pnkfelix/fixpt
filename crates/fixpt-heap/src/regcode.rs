@@ -1,16 +1,16 @@
 //! Register code (PLAN.md 13h′): words for the MacScheme machine, made and
-//! checked here as threaded words are in `threaded.rs`.
+//! checked here as cellular words are in `cellular.rs`.
 
 use crate::heap::Heap;
 use crate::layout::regcode::{OPS, REGS};
-use crate::layout::threaded::{PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN};
+use crate::layout::cellular::{PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN};
 use crate::layout::kind;
 use crate::value::Value;
 
 const KIND: u8 = kind("register-code");
 
 impl Heap {
-    /// A register word named `name`, standing for the threaded word `twin`,
+    /// A register word named `name`, standing for the cellular word `twin`,
     /// whose cells are `cells`: made only if well formed, so that a machine
     /// may run it without checking again. Its entry is 0 until a machine
     /// compiles it.
@@ -32,8 +32,8 @@ impl Heap {
 }
 
 fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
-    if !heap.is_threaded_word(twin) {
-        return Err("a register word stands for a threaded word".into());
+    if !heap.is_cellular_word(twin) {
+        return Err("a register word stands for a cellular word".into());
     }
     let count = |v: Value, max: i64| v.is_fixnum() && (0..=max).contains(&v.as_fixnum());
     let mut starts = vec![false; cells.len() + 1];
@@ -64,9 +64,9 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
             "field" => o(0).is_fixnum() && o(0).as_fixnum() >= 2,
             "setfield" => o(0).is_fixnum() && o(0).as_fixnum() >= 2 && reg(o(1)),
             "prim" => count(o(0), i64::MAX) && count(o(1), n),
-            "lambda" => heap.is_threaded_word(o(0)) && count(o(1), n),
+            "lambda" => heap.is_cellular_word(o(0)) && count(o(1), n),
             "invoke" | "tailinvoke" => count(o(0), n),
-            "threaded" => count(o(0), ROUTINES.len() as i64 - 1) && count(o(1), n),
+            "cellular" => count(o(0), ROUTINES.len() as i64 - 1) && count(o(1), n),
             "global" | "setglbl" => o(0).is_bloblet(),
             "branch" | "branchf" => {
                 if !o(0).is_fixnum() {

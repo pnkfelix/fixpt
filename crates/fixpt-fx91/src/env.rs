@@ -6,7 +6,7 @@
 //! the domain would happily return a kind where a type was wanted; the comment
 //! there says to think of `(lambda ((x t)) t)`.
 //!
-//! They are mutable and global rather than threaded, which is safe precisely
+//! They are mutable and global rather than cellular, which is safe precisely
 //! *because* everything is alpha-renamed: no two binders share a slot.
 
 use crate::ast::{Domain, FxId, Kind, VarData};

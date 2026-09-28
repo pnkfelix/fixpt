@@ -1,7 +1,7 @@
-//! The Rust inner interpreter on threaded words.
+//! The Rust inner interpreter on cellular words.
 
-use fixpt_engine::threaded::{Machine, Trap, WordBuilder, examples, prim, primitive_word};
-use fixpt_heap::layout::threaded::WORD_NAME;
+use fixpt_engine::cellular::{Machine, Trap, WordBuilder, examples, prim, primitive_word};
+use fixpt_heap::layout::cellular::WORD_NAME;
 use fixpt_heap::{Heap, Value};
 
 fn run(heap: &mut Heap, word: Value, args: &[i64]) -> Result<Vec<Value>, Trap> {

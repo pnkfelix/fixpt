@@ -1,6 +1,6 @@
 //! Register code for a lambda (PLAN.md 13h′): the MacScheme machine's
 //! instructions (`fixpt_heap::layout::regcode`), made from the same trees,
-//! as its threaded word's twin.
+//! as its cellular word's twin.
 //!
 //! Where values live, the first way: a procedure that neither calls nor
 //! calls out (a leaf, loops aside) keeps its parameters, its `let`s and its
@@ -23,7 +23,7 @@ fn two() -> Value {
 }
 use crate::ast::{BlobletOp, Exp, ExpId};
 use fixpt_heap::layout::regcode::{op, REGS};
-use fixpt_heap::layout::threaded::routine;
+use fixpt_heap::layout::cellular::routine;
 use fixpt_heap::Value;
 use fixpt_read::Sym;
 
@@ -67,9 +67,9 @@ enum Std {
     Op1(&'static str),
     Op2Imm(&'static str, Value),
     Field(i64),
-    /// A call-out: a runtime primitive, or a threaded routine.
+    /// A call-out: a runtime primitive, or a cellular routine.
     Prim(i64),
-    Threaded(&'static str),
+    Cellular(&'static str),
     /// Its argument itself (`%fx26-identity`).
     Identity,
     /// A reference written: `setfield 2`, then unit.
@@ -242,22 +242,22 @@ impl Compiler<'_> {
             ("car" | "datum-car", 1) => Some(Std::Op1("pair-car")),
             ("cdr" | "datum-cdr", 1) => Some(Std::Op1("pair-cdr")),
             ("get", 1) => Some(Std::Field(2)),
-            ("cons" | "datum-cons", 2) => Some(Std::Threaded("cons")),
+            ("cons" | "datum-cons", 2) => Some(Std::Cellular("cons")),
             ("set", 2) => Some(Std::Set),
-            ("abort-current-continuation", 2) => Some(Std::Threaded("abort")),
-            ("call-with-composable-continuation", 2) => Some(Std::Threaded("callcomp")),
-            ("cwcc", 1) => Some(Std::Threaded("callcc")),
-            ("with-mark", 3) => Some(Std::Threaded("withmark")),
-            ("first-mark", 2) => Some(Std::Threaded("firstmark")),
-            ("current-marks", 1) => Some(Std::Threaded("currentmarks")),
-            ("marks-of", 2) => Some(Std::Threaded("marksof")),
+            ("abort-current-continuation", 2) => Some(Std::Cellular("abort")),
+            ("call-with-composable-continuation", 2) => Some(Std::Cellular("callcomp")),
+            ("cwcc", 1) => Some(Std::Cellular("callcc")),
+            ("with-mark", 3) => Some(Std::Cellular("withmark")),
+            ("first-mark", 2) => Some(Std::Cellular("firstmark")),
+            ("current-marks", 1) => Some(Std::Cellular("currentmarks")),
+            ("marks-of", 2) => Some(Std::Cellular("marksof")),
             ("array-ref", 2) => Some(Std::Special("array-ref")),
             ("array-set!", 3) => Some(Std::Special("array-set!")),
             ("array-length", 1) => Some(Std::Special("array-length")),
             ("make-array", 2) => Some(Std::Special("make-array")),
             ("make-continuation-prompt-tag" | "make-continuation-mark-key", 0) => Some(Std::Special("make-box")),
             _ => {
-                // What the threaded compiler does with one runtime
+                // What the cellular compiler does with one runtime
                 // primitive, register code does too.
                 let mut tmp = Vec::new();
                 self.standard_on(name, n, &mut tmp).ok()?;
@@ -532,7 +532,7 @@ impl Compiler<'_> {
                 g.done(tail);
             }
             Exp::Prompt { tag, body, handler } => {
-                self.r_call_out(g, "threaded", routine("prompt") as i64, &[Arg::E(tag), Arg::E(handler), Arg::Thunk(body)], env, te)?;
+                self.r_call_out(g, "cellular", routine("prompt") as i64, &[Arg::E(tag), Arg::E(handler), Arg::Thunk(body)], env, te)?;
                 g.done(tail);
             }
             Exp::TagCase { scrutinee, arms, els } => self.r_tagcase(g, scrutinee, &arms, els, env, te, tail)?,
@@ -613,10 +613,10 @@ impl Compiler<'_> {
                 }
                 // In tail position a mark replaces this frame's, which is
                 // stack code's way (`withmark-tail`); left to it.
-                Std::Threaded("withmark") if tail => return self.decline("with-mark in tail position"),
-                Std::Threaded(r) => {
+                Std::Cellular("withmark") if tail => return self.decline("with-mark in tail position"),
+                Std::Cellular(r) => {
                     let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
-                    self.r_call_out(g, "threaded", routine(r) as i64, &es, env, te)?;
+                    self.r_call_out(g, "cellular", routine(r) as i64, &es, env, te)?;
                 }
                 Std::Identity => self.r_exp(g, args[0], env, te, false)?,
                 Std::Set => {
@@ -821,7 +821,7 @@ impl Compiler<'_> {
         Some(())
     }
 
-    /// A call-out, `prim p n` or `threaded r n`, on `args` in REG1…REGn.
+    /// A call-out, `prim p n` or `cellular r n`, on `args` in REG1…REGn.
     fn r_call_out(&mut self, g: &mut Gen, how: &str, what: i64, args: &[Arg], env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
         self.r_args(g, args, env, te, None)?;
         g.op(how, &[Value::fixnum(what), Gen::n(args.len())]);
@@ -829,7 +829,7 @@ impl Compiler<'_> {
     }
 
     fn r_prim(&mut self, g: &mut Gen, name: &str, args: &[Arg], env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
-        let p = fixpt_engine::threaded::runtime_primitive(name)? as i64;
+        let p = fixpt_engine::cellular::runtime_primitive(name)? as i64;
         self.r_call_out(g, "prim", p, args, env, te)
     }
 
@@ -909,10 +909,10 @@ impl Compiler<'_> {
                 g.op("reg", &[Gen::n(2)]);
                 g.op("op2imm", &[add, two]);
                 g.op("setreg", &[Gen::n(2)]);
-                g.op("threaded", &[Value::fixnum(routine("field@") as i64), Gen::n(2)]);
+                g.op("cellular", &[Value::fixnum(routine("field@") as i64), Gen::n(2)]);
             }
             "array-set!" => {
-                let p = fixpt_engine::threaded::runtime_primitive("%bloblet-set!")? as i64;
+                let p = fixpt_engine::cellular::runtime_primitive("%bloblet-set!")? as i64;
                 self.r_args(g, &es, env, te, None)?;
                 g.op("reg", &[Gen::n(2)]);
                 g.op("op2imm", &[add, two]);

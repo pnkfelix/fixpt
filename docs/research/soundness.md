@@ -410,11 +410,11 @@ place too soon, and none writes frozen data.
 
 Two remarks on faithfulness:
 - **Abort and throw end places.** The lowering wraps each place body in
-  `dynamic-wind` (`lower.rs:286–295`), and the threaded engine's abort ends
-  the regions entered inside the prompt (`fixpt-engine/src/threaded.rs:939–947`).
+  `dynamic-wind` (`lower.rs:286–295`), and the cellular[^cellular] engine's abort ends
+  the regions entered inside the prompt (`fixpt-engine/src/cellular.rs:939–947`).
   Since the F7 fix (d83face) a continuation records how many regions were
   live when it was taken (`CONT_REGIONS`), and reinstating a whole
-  continuation ends those entered since, in both the Rust threaded machine
+  continuation ends those entered since, in both the Rust cellular machine
   and fixpt-native's control code — so `throw` ends its places too, and the
   semantics' "places framed in `E` but not `E′` end" is faithful on both
   back ends. (Even before the fix this was space, not safety: a place left
@@ -707,7 +707,7 @@ in `E′` are exactly `P` restricted to below the prompt.
   the throw rule's side condition and (I7), every place framed in `E′` is
   live; places framed in `E` but abandoned are ended, as in exit-rena,
   and the whole-continuation reinstatement ends those entered since the
-  capture (F7 fix in both engines, `threaded.rs`, `control.rs`), so `P′`
+  capture (F7 fix in both engines, `cellular.rs`, `control.rs`), so `P′`
   again lists exactly `E′`'s place frames. *Effects.* the throw's own
   `goto ρ` is in `φ`; the reinstated `E′` reintroduces no atom that was not
   in `E′`'s type at capture, all `⊆ φ` by subsumption at the `cwcc`.
@@ -970,9 +970,14 @@ in `docs/research/soundness-findings.md`. In short:
 | F4  | size binders instantiated with `finite` on the `proj` path                         | sizes and `nat` wrong | fixed (0f0a61e); but see F8           |
 | F5  | the self-application test gives up at depth 64 and answers "not cyclic"            | `spin` unsound        | fixed (0f0a61e); re-verified          |
 | F6  | the `no-escape` fact is claimed for data a returned closure still holds            | latent                | fixed (d83face): first-order only     |
-| F7  | the threaded engine's throw does not end the places it leaves                      | space                 | fixed (d83face): `CONT_REGIONS`       |
+| F7  | the cellular engine's throw does not end the places it leaves                      | space                 | fixed (d83face): `CONT_REGIONS`       |
 | F8  | `forget_nats` sends a `nat` skolem to `finite` in a negative position, no F4 check | `spin` + sizes wrong  | **NEW, open**; `pure` loop shown      |
 | F9  | a `cwcc` continuation cleared by `escape_only` loops through a stored composable   | `spin` unsound        | **NEW, suspected**; `pure` loop shown |
 | A1  | K26 reads masking side conditions over derivation types, the checker over syntax   | proof assumption      | holds for constructs present          |
 | A2  | cycles through a generative name count as contractive                              | proof assumption      | fixed (d83face): `grounded`           |
 | A3  | `datum` values from the host are acyclic                                           | proof assumption      | holds by construction                 |
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

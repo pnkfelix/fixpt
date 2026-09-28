@@ -104,7 +104,7 @@ Assumptions that failed stay on the trail. This is harmless today, because
   between subgoals.
 
 **The hazard for the future:** an untagged union, an intersection, or a
-`confirm` rule that tries alternatives would make a threaded trail unsound.
+`confirm` rule that tries alternatives would make a cellular[^cellular] trail unsound.
 A failed branch would leave false assumptions that a later branch relies on.
 The standard remedy:
 
@@ -236,7 +236,7 @@ instead of a type node:
   stack means a cycle;
 - *black* pairs are memoized both ways, so sharing (DAGs) costs nothing
   extra;
-- tags make every choice deterministic, so the threaded set is sound, as in
+- tags make every choice deterministic, so the cellular set is sound, as in
   §1;
 - the bound is O(objects × type nodes).
 
@@ -543,3 +543,8 @@ cache (§1, "Cost today").
   `define_type`, `listof`.
 - Probes: `crates/fixpt-fx26/tests/recsub_probe.rs` and
   `scratch/probes/*.fx`, in the worktree.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

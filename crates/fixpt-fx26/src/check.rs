@@ -192,7 +192,7 @@ impl Checker {
         basic("datum");
         // A symbol: interned, so compared by identity, and immutable.
         let symbol = basic("symbol");
-        // Threaded code, for the compiler written in FX-26: a word (`tword`,
+        // Cellular code, for the compiler written in FX-26: a word (`tword`,
         // since the reader has a `word` of its own), a cell of one, and a
         // global's cell. Opaque; made by the `wcell-` and
         // `make-` constants and checked when a word is made.

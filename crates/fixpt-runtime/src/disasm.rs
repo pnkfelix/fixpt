@@ -1,14 +1,14 @@
-//! Threaded code, shown: a word's cells as routines and their operands,
+//! Cellular code, shown: a word's cells as routines and their operands,
 //! and every word it reaches, each once. For looking at what a compiler
 //! made, from a REPL (`%disassemble`) or a test.
 
 use crate::print::write_value;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
 use fixpt_heap::{Heap, Value};
 use std::fmt::Write as _;
 
-/// `v`, a threaded word or closure, shown; or why it is neither.
+/// `v`, a cellular word or closure, shown; or why it is neither.
 pub fn disassemble(heap: &Heap, v: Value) -> String {
     disassemble_with(heap, v, None)
 }
@@ -16,7 +16,7 @@ pub fn disassemble(heap: &Heap, v: Value) -> String {
 /// The same, with each word's machine code as `asm` shows it, after its
 /// cells and after its register code's (`,disassemble-asm`).
 pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>) -> String {
-    let closure = kind("threaded-closure");
+    let closure = kind("cellular-closure");
     let mut out = String::new();
     if let Some(k) = heap.continuation_of(v) {
         let mut todo = continuation(heap, k, &mut out);
@@ -36,10 +36,10 @@ pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::Machi
             let _ = writeln!(out, "  free {i}: {}", short(heap, heap.bloblet_slot(v, CLOSURE_FREE0 + i)));
         }
         heap.bloblet_slot(v, CLOSURE_WORD)
-    } else if heap.is_threaded_word(v) {
+    } else if heap.is_cellular_word(v) {
         v
     } else {
-        return format!("not threaded code: {}\n", short(heap, v));
+        return format!("not cellular code: {}\n", short(heap, v));
     };
     let (mut todo, mut seen) = (vec![start], Vec::new());
     while let Some(w) = todo.pop() {
@@ -56,12 +56,12 @@ pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::Machi
 /// first, as they will be when it is reinstated. Returns the words it
 /// reaches, to show after.
 fn continuation(heap: &Heap, k: Value, out: &mut String) -> Vec<Value> {
-    use fixpt_heap::layout::threaded::{CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FP, CONT_K, CONT_RS, CONT_WHOLE};
+    use fixpt_heap::layout::cellular::{CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FP, CONT_K, CONT_RS, CONT_WHOLE};
     let mut words = Vec::new();
     let whole = heap.bloblet_slot(k, CONT_WHOLE) == Value::TRUE;
     let at = |w: Value, k: Value| {
         let cell = k.as_fixnum() - WORD_CELL0 as i64;
-        if heap.is_threaded_word(w) { format!("word {} at cell {cell}", name_of(heap, w)) } else { short(heap, w) }
+        if heap.is_cellular_word(w) { format!("word {} at cell {cell}", name_of(heap, w)) } else { short(heap, w) }
     };
     let cur = heap.bloblet_slot(k, CONT_CUR);
     let _ = writeln!(
@@ -73,7 +73,7 @@ fn continuation(heap: &Heap, k: Value, out: &mut String) -> Vec<Value> {
         short(heap, heap.bloblet_slot(k, CONT_CLO)),
         heap.bloblet_slot(k, CONT_BASE).as_fixnum(),
     );
-    if heap.is_threaded_word(cur) {
+    if heap.is_cellular_word(cur) {
         words.push(cur);
     }
     let ds = heap.bloblet_slot(k, CONT_DS);
@@ -83,7 +83,7 @@ fn continuation(heap: &Heap, k: Value, out: &mut String) -> Vec<Value> {
     }
     let rs: Vec<Value> = heap.obj_iter(heap.bloblet_slot(k, CONT_RS)).collect();
     let _ = writeln!(out, "  return stack, {} entr(ies), oldest first:", rs.len() / 4);
-    // The markers' first words, as `fixpt_engine::threaded` has them.
+    // The markers' first words, as `fixpt_engine::cellular` has them.
     let (prompt_mark, mark_mark) = (Value::DEFAULT, Value::UNSPECIFIED);
     for (i, e) in rs.chunks(4).enumerate() {
         let line = match e {
@@ -92,7 +92,7 @@ fn continuation(heap: &Heap, k: Value, out: &mut String) -> Vec<Value> {
             }
             [m, key, v, _] if *m == mark_mark => format!("mark {} = {}", short(heap, *key), short(heap, *v)),
             [w, k, fp, clo] => {
-                if heap.is_threaded_word(*w) {
+                if heap.is_cellular_word(*w) {
                     words.push(*w);
                 }
                 format!("return to {} (frame at {}, closure {})", at(*w, *k), fp.as_fixnum(), short(heap, *clo))
@@ -116,11 +116,11 @@ fn name_of(heap: &Heap, w: Value) -> String {
 
 /// One word: its name, how it is entered, and a line per instruction.
 fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Option<crate::runtime::MachineCode>) {
-    let closure = kind("threaded-closure");
+    let closure = kind("cellular-closure");
     let fields = heap.bloblet_head(w).fields;
     let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
     let how = match entry {
-        0 => "threaded".to_string(),
+        0 => "cellular".to_string(),
         n if n >= PRIMITIVES as i64 => format!("compiled to machine code, native slot {n}"),
         n => format!("the routine {}", ROUTINES.get(n as usize).map_or("?", |r| r.0)),
     };
@@ -130,7 +130,7 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Opt
         let cell = heap.bloblet_slot(w, k);
         let at = k - WORD_CELL0;
         if !cell.is_fixnum() {
-            if heap.is_threaded_word(cell) {
+            if heap.is_cellular_word(cell) {
                 todo.push(cell);
                 let _ = writeln!(out, "  {at:>4}: word {}", name_of(heap, cell));
             } else {
@@ -157,7 +157,7 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Opt
             _ => ops
                 .iter()
                 .map(|v| {
-                    if heap.is_threaded_word(*v) {
+                    if heap.is_cellular_word(*v) {
                         todo.push(*v);
                         format!("word {}", name_of(heap, *v))
                     } else if v.is_bloblet() && heap.bloblet_kind(*v) == closure {
@@ -207,7 +207,7 @@ fn register_word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>)
         let shown: Vec<String> = match name {
             "branch" | "branchf" => vec![format!("→ {}", at as i64 + 2 + ops[0].as_fixnum())],
             "global" | "setglbl" => vec![global(heap, ops[0])],
-            "op1" | "threaded" => std::iter::once(routine(ops[0])).chain(ops[1..].iter().map(|v| short(heap, *v))).collect(),
+            "op1" | "cellular" => std::iter::once(routine(ops[0])).chain(ops[1..].iter().map(|v| short(heap, *v))).collect(),
             "op2" | "op2imm" => vec![routine(ops[0]), short(heap, ops[1])],
             "prim" => {
                 let pname = crate::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name);

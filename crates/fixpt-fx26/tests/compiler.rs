@@ -1,5 +1,5 @@
 //! The compiler written in FX-26 (`src/compile.fx`): programs read, parsed
-//! and compiled to threaded words in FX-26, run on the threaded machine,
+//! and compiled to cellular words in FX-26, run on the cellular machine,
 //! against the evaluator written in FX-26 and the lowering to Scheme
 //! (`PLAN.md` §11, step 9d).
 
@@ -65,7 +65,7 @@ fn extract_and_errors() {
 }
 
 /// Every test program that checks, control ones included, compiled and run
-/// on the threaded machine against the lowering; disagreements reported
+/// on the cellular machine against the lowering; disagreements reported
 /// together.
 #[test]
 fn every_program_compiled() {
@@ -105,8 +105,8 @@ fn every_program_compiled() {
 fn every_program_on_every_machine() {
     type Run = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, &[fixpt_heap::Value]) -> Result<fixpt_heap::Value, String>;
     let machines: [(&str, Run); 3] = [
-        ("native", fixpt_native::threaded::run_word),
-        ("native, words compiled", fixpt_native::threaded::run_word_compiled),
+        ("native", fixpt_native::cellular::run_word),
+        ("native, words compiled", fixpt_native::cellular::run_word_compiled),
         ("stencils", fixpt_native::stencil::run_word),
     ];
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");

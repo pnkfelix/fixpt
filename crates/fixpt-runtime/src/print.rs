@@ -241,9 +241,9 @@ fn put(
                 out.push_str(&format!("#<sum {}>", write_value(heap, tag)));
             } else if kind == "product" {
                 out.push_str(&format!("#<product of {}>", h.fields - 1));
-            } else if h.kind == fixpt_heap::layout::threaded::KIND {
-                let name = heap.bloblet_slot(v, fixpt_heap::layout::threaded::WORD_NAME);
-                out.push_str(&format!("#<threaded-word {}>", write_value(heap, name)));
+            } else if h.kind == fixpt_heap::layout::cellular::KIND {
+                let name = heap.bloblet_slot(v, fixpt_heap::layout::cellular::WORD_NAME);
+                out.push_str(&format!("#<cellular-word {}>", write_value(heap, name)));
             } else {
                 out.push_str(&format!("#<{kind} {} fields {} bytes>", h.fields, h.bytes));
             }

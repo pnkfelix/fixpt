@@ -89,25 +89,25 @@ The passes:
 
 ## 2. The optimizations
 
-| optimization                                   | where                                  | notes                                                           |
-| ---------------------------------------------- | -------------------------------------- | --------------------------------------------------------------- |
-| primitives integrated, with explicit `.check!` | `common.imp.sch:540-600`               |                                                                 |
-| self-recursion to a known local                | `expand.sch:146-160`                   | benchmark mode                                                  |
-| block compilation                              | `pass1.sch:81-`                        |                                                                 |
-| single-assignment elimination                  | `pass2p2.sch:13-75`                    |                                                                 |
-| assignments to cells                           | `pass2p2.sch:205-`                     | keeps lambda lifting simple                                     |
-| let-conversion, known procedures               | `pass2p1.sch:391-443`                  |                                                                 |
-| lambda lifting                                 | `pass2p2.sch:336-472`                  | "not a clear win" (`:341-346`)                                  |
-| `if`/`case` control                            | `pass2if.sch`                          | sequential beats binary below about 8 constants (SPARC)         |
-| inlining known local procedures                | `pass3inlining.sch:14-57`              | thresholds: tail 10, non-tail 20; a non-tail inline saves a frame |
-| constant propagation and folding               | `pass3folding.sch:14-88`               | at most 5 iterations                                            |
-| A-normal form                                  | `pass3anormal.sch`                     | abandoned above size 80000                                      |
-| CSE, copy propagation, dead code, targeting    | `pass3commoning.sch:14-35`             |                                                                 |
-| representation inference                       | `pass3rep.sch`, `*.imp2.sch`           | specializes primitives, removes checks; widens after a budget    |
-| known calls                                    | `pass4p2.sch:90-115`                   | a branch to a label instead of `invoke`                          |
-| parallel assignment of arguments               | `pass4p2.sch:399-600`                  |                                                                 |
-| frame elision                                  | `pass4p1.sch:60-91`, `pass4.aux.sch`   | lazy `save`; unused stores dropped, and then empty frames        |
-| local assembly optimization                    | `pass4p3.sch:7-22`                     |                                                                 |
+| optimization                                   | where                                | notes                                                             |
+| ---------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------- |
+| primitives integrated, with explicit `.check!` | `common.imp.sch:540-600`             |                                                                   |
+| self-recursion to a known local                | `expand.sch:146-160`                 | benchmark mode                                                    |
+| block compilation                              | `pass1.sch:81-`                      |                                                                   |
+| single-assignment elimination                  | `pass2p2.sch:13-75`                  |                                                                   |
+| assignments to cells                           | `pass2p2.sch:205-`                   | keeps lambda lifting simple                                       |
+| let-conversion, known procedures               | `pass2p1.sch:391-443`                |                                                                   |
+| lambda lifting                                 | `pass2p2.sch:336-472`                | "not a clear win" (`:341-346`)                                    |
+| `if`/`case` control                            | `pass2if.sch`                        | sequential beats binary below about 8 constants (SPARC)           |
+| inlining known local procedures                | `pass3inlining.sch:14-57`            | thresholds: tail 10, non-tail 20; a non-tail inline saves a frame |
+| constant propagation and folding               | `pass3folding.sch:14-88`             | at most 5 iterations                                              |
+| A-normal form                                  | `pass3anormal.sch`                   | abandoned above size 80000                                        |
+| CSE, copy propagation, dead code, targeting    | `pass3commoning.sch:14-35`           |                                                                   |
+| representation inference                       | `pass3rep.sch`, `*.imp2.sch`         | specializes primitives, removes checks; widens after a budget     |
+| known calls                                    | `pass4p2.sch:90-115`                 | a branch to a label instead of `invoke`                           |
+| parallel assignment of arguments               | `pass4p2.sch:399-600`                |                                                                   |
+| frame elision                                  | `pass4p1.sch:60-91`, `pass4.aux.sch` | lazy `save`; unused stores dropped, and then empty frames         |
+| local assembly optimization                    | `pass4p3.sch:7-22`                   |                                                                   |
 
 ## 3. The peephole optimizer
 
@@ -151,7 +151,7 @@ What there is:
 ## 5. What the survey recommends for FX-26
 
 This section is the agent's inference, not something it read. For
-threaded code, where calls, returns, frames and stack traffic cost the
+cellular[^cellular] code, where calls, returns, frames and stack traffic cost the
 most:
 
 1. Known procedures and let-conversion: direct calls, and no closure for
@@ -159,7 +159,7 @@ most:
 2. Inlining small known procedures, favouring non-tail calls.
 3. Specializing primitives by type, by renaming them, so the output is
    still FX-26.
-4. Superinstruction peepholes on the threaded code, each measured.
+4. Superinstruction peepholes on the cellular code, each measured.
 5. Frame and store elision.
 6. Constant folding, copy propagation and dead code, after inlining.
 7. Assignments made explicit cells, which FX-26's effects already make
@@ -167,3 +167,8 @@ most:
 
 Lambda lifting comes last, since flat closures already spare a known
 procedure its closure.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

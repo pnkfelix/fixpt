@@ -1,6 +1,6 @@
-;;; The compiler from FX-26 to threaded words, in FX-26 (PLAN.md §11, 9d).
+;;; The compiler from FX-26 to cellular words, in FX-26 (PLAN.md §11, 9d).
 ;;;
-;;; The parser's trees to words for the threaded machine (`layout::threaded`,
+;;; The parser's trees to words for the cellular machine (`layout::cellular`,
 ;;; the MacScheme-like part of it): a lambda's arguments are its frame on the
 ;;; data stack, a `let`'s values are pushed onto the frame and are slots of
 ;;; it, closures are flat, globals are cells, and a call in tail position is
@@ -285,7 +285,7 @@
         #u
         (begin (c-op1 c routine-slot (wcell-int (cdr (car ps))))
                (c-op1 c routine-slot (wcell-int (+ depth i)))
-               (c-int c (+ threaded-closure-free0 (car (car ps))))
+               (c-int c (+ cellular-closure-free0 (car (car ps))))
                (c-op c routine-field-set)
                (c-patch-one (cdr ps) depth i c)))))
 

@@ -1,4 +1,4 @@
-//! The threaded machine's routines as stencils: Rust functions, compiled by
+//! The cellular machine's routines as stencils: Rust functions, compiled by
 //! the build script with the installed nightly, never linked. Their machine
 //! code is copied into a code space as it is.
 //!
@@ -182,7 +182,7 @@ unsafe fn push_return(st: *mut State, base: u64, ip: u64, cur: u64, rsp: u64, fp
     rsp
 }
 
-/// Whether `v` is a threaded closure: a bloblet with a trailer, whose
+/// Whether `v` is a cellular closure: a bloblet with a trailer, whose
 /// header says so.
 #[inline(always)]
 unsafe fn is_closure(base: u64, v: u64) -> bool {
@@ -232,7 +232,7 @@ macro_rules! pop_return {
 routine!(st_exit, |base, ip, cur, dsp, rsp, st, fp, w| { pop_return!(base, ip, dsp, rsp, st, fp) });
 
 // Code compiled from FX-26: frames on the data stack, flat closures,
-// globals, calls; as `fixpt_engine::threaded` has them.
+// globals, calls; as `fixpt_engine::cellular` has them.
 
 routine!(st_slot, |base, ip, cur, dsp, rsp, st, fp, w| {
     let i8 = unsafe { rd(ip) };
@@ -287,7 +287,7 @@ routine!(st_global_set, |base, ip, cur, dsp, rsp, st, fp, w| {
     next!(base, ip - 8, cur, dsp + 8, rsp, st, fp)
 });
 
-/// `call` and `tailcall`: a threaded closure on top, over a frame of the n
+/// `call` and `tailcall`: a cellular closure on top, over a frame of the n
 /// values below it. Anything else goes the Rust machine's way.
 macro_rules! call {
     ($tail:expr, $typed:expr, $r:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {{

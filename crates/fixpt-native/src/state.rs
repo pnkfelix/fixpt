@@ -28,7 +28,7 @@ pub struct State {
     pub ds_limit: u64,
     pub rs_limit: u64,
     /// The frame pointer, saved as `ds_base - 8 - fp`: the bits of the
-    /// fixnum index of the frame's slot 0 (`fixpt_engine::threaded`).
+    /// fixnum index of the frame's slot 0 (`fixpt_engine::cellular`).
     pub fp: u64,
     /// The closure running (a Value), or `#f`.
     pub clo: u64,

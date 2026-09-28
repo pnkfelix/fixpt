@@ -359,7 +359,7 @@ fx26> (+ 1 2)
 3 : int ! pure
 ```
 
-Under `--fx26-run threaded`, `,code` shows instead the threaded words the
+Under `--fx26-run cellular`, `,code` shows instead the cellular[^cellular] words the
 compiler written in FX-26 made for each form, those it had not shown
 before.
 
@@ -463,3 +463,8 @@ archive. `reference/regenerate.sh` reproduces them, as a reviewable diff.
 
 `docs/divergences.md` records every place `fixpt` intentionally differs from the
 reference, with evidence.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

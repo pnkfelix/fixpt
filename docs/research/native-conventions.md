@@ -6,12 +6,12 @@ subsumes several of M13's remaining items.
 
 ## Where we are, and why change it
 
-FX-26 compiles each `lambda` to a threaded word: cells, run by an inner
-interpreter. Five machines run them (`--threaded-machine`): `rust`,
+FX-26 compiles each `lambda` to a cellular[^cellular] word: cells, run by an inner
+interpreter. Five machines run them (`--cellular-machine`): `rust`,
 `native` and `stencils` interpret the cells, and `native-compiled` and
 `registers` compile them to machine code. The compiled forms keep the
 interpreter's shape, which came from the Forth models M12 and M13 took
-(`docs/research/threaded-compilers.md`):
+(`docs/research/cellular-compilers.md`):
 
 - **The ip in step.** At every cell boundary, compiled code leaves the
   machine exactly as the interpreter would: the ip register current, and
@@ -51,8 +51,8 @@ reference native code is tested against.
 
 ## Conventions in types
 
-- **A kind, `conv`**, whose descriptions are the conventions: `threaded`
-  (the procedure is a threaded closure, run by an inner interpreter),
+- **A kind, `conv`**, whose descriptions are the conventions: `cellular`
+  (the procedure is a cellular closure, run by an inner interpreter),
   `native` (it is native code, run by being called), and `fx` (either of
   FX-26's own; the caller finds out which when it calls, below). A foreign
   `c` convention may come later, for calling out; it is not below `fx`,
@@ -68,7 +68,7 @@ reference native code is tested against.
   `cwcc` gives carry one too.
 - **Inferred, and defaulted.** A convention binder nothing solves defaults
   to the program's, which is the machine the program is compiled for: a
-  checker setting, `threaded` for `rust`, `native`, `native-compiled` and
+  checker setting, `cellular` for `rust`, `native`, `native-compiled` and
   `stencils`, and `native` for the new native compiler. A type prints
   its convention only where it differs from the program's, so programs,
   tests and both checkers' outputs are unchanged by default.
@@ -79,16 +79,16 @@ reference native code is tested against.
   programs use one). The standard operations are polymorphic too: the
   runtime provides each in every convention.
 - **`fx`: code that need not know** (the user's, 2026-09-27). A
-  procedure value already says at run time how it is run: a threaded
+  procedure value already says at run time how it is run: a cellular
   closure and a native closure are bloblets of different kinds. So a call
   through `(subr (conv fx) …)` looks at the callee's kind and enters the
   interpreter or calls the code: a test and a branch per call, and no
   adapter anywhere. Hence the only subsumption between conventions:
-  `threaded ≤ fx` and `native ≤ fx`, free at run time, since the value
+  `cellular ≤ fx` and `native ≤ fx`, free at run time, since the value
   does not change, only what its callers may assume. Code that does not
   care (cold code, the evaluator written in FX-26, a table of handlers of
   either kind) takes `fx` and stays ignorant of what it receives; code
-  that cares names a convention and calls directly. `threaded` and
+  that cares names a convention and calls directly. `cellular` and
   `native` are not related to each other, and nothing goes from `fx` back
   to a specific convention but a conversion.
 - **Conventions compare** as equal, or by the subsumption into `fx`, in
@@ -106,7 +106,7 @@ reference native code is tested against.
   `,code` show where conversions went, so their cost can be found.
 - **Soundness.** An application's rule requires the callee's convention to
   be the one the call is compiled for; calling native code through the
-  threaded convention, or the reverse, would be a crash, so this is type
+  cellular convention, or the reverse, would be a crash, so this is type
   safety, not style. A call through `fx` is safe because it dispatches on
   the value's kind, which the runtime keeps truthful. `docs/research/soundness.md`'s
   core gains the convention as part of the arrow type, with the
@@ -204,8 +204,8 @@ its code in one.
 
 | piece                                         | becomes                                                                                                                          |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| threaded words and cells                      | kept: the portable form, and the reference                                                                                       |
-| `rust`, `native`, `stencils` machines         | kept, convention `threaded`                                                                                                      |
+| cellular words and cells                      | kept: the portable form, and the reference                                                                                       |
+| `rust`, `native`, `stencils` machines         | kept, convention `cellular`                                                                                                      |
 | `native-compiled` (cell for cell)             | retired once the native compiler covers it                                                                                       |
 | register code (`regcode.rs`, `regcode.fx`)    | its intermediate form and register allocation the start of the native compiler; its twins, adapters and marked return entries go |
 | native slots, per-word resume tables          | gone for native code                                                                                                             |
@@ -213,7 +213,7 @@ its code in one.
 | `CodeSpace`                                   | holds only the interpreters' routines; compiled functions go in the code area                                                    |
 | code-area step 4a (commons through the state) | kept: the native compiler's traps and exits go that way too                                                                      |
 | code-area steps 4b and 4c                     | dropped, and replaced by the steps below                                                                                         |
-| the bootstrap's fixpoint                      | unchanged: it compares threaded words; native code is compared by running it                                                     |
+| the bootstrap's fixpoint                      | unchanged: it compares cellular words; native code is compared by running it                                                     |
 
 ## Steps, each committed and tested
 
@@ -221,7 +221,7 @@ its code in one.
    position in `subr`, `fx` and the subsumption into it, inference and
    defaulting, printing only when not the default, `(convention C e)`, the
    soundness note's rule. No change in behaviour: every program is
-   `threaded` by default, and calls through `fx` dispatch on the kind the
+   `cellular` by default, and calls through `fx` dispatch on the kind the
    interpreters already check.
 2. **Native frames, first-order**: the stack segment, the calling
    convention, traps and callouts, and a native compiler for code without
@@ -256,3 +256,8 @@ its code in one.
    because it is large.
 4. **The convention for either is `fx`**, and a `c` convention, when it
    comes, is not below it.
+
+[^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
+a sequence of cells (references to routines, and their operands), run by an inner
+interpreter. This repository says "cellular" throughout (the user's decision,
+2026-09-27).

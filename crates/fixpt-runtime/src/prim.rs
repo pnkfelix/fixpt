@@ -735,7 +735,7 @@ prims! {
     // FNV-1a over the characters, kept to a non-negative fixnum: the same
     // string always hashes the same, across runs and collections.
     // FX-26's standard operations that Scheme runs as procedures of its
-    // own: primitives here, so that threaded code can call them too.
+    // own: primitives here, so that cellular code can call them too.
     "%fx26-char-in?", 2, Some(2), simple!(|rt, a| {
         let c = get_char(rt, a[0])?;
         let s = get_string(rt, a[1])?;
@@ -809,7 +809,7 @@ prims! {
         }
         Ok(rt.heap.bloblet_slot(a[0], 3))
     });
-    // A threaded word or closure's code, shown: every word it reaches.
+    // A cellular word or closure's code, shown: every word it reaches.
     "%disassemble", 1, Some(1), simple!(|rt, a| {
         let asm = if rt.show_machine_code { rt.machine_code } else { None };
         let s = crate::disasm::disassemble_with(&rt.heap, a[0], asm);
@@ -887,20 +887,20 @@ prims! {
             if slow == fast { return Ok(Value::FALSE); }
         }
     });
-    // A threaded word's cells, looked at: for the compiler to machine code
+    // A cellular word's cells, looked at: for the compiler to machine code
     // written in FX-26. Words are frozen, so these are pure.
     "%tword-fields", 1, Some(1), simple!(|rt, a| {
-        if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
+        if !rt.heap.is_cellular_word(a[0]) { return rt.type_error("a cellular word", a[0]); }
         Ok(Value::fixnum(rt.heap.bloblet_head(a[0]).fields as i64))
     });
     "%tword-fixnum?", 2, Some(2), simple!(|rt, a| {
-        if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
+        if !rt.heap.is_cellular_word(a[0]) { return rt.type_error("a cellular word", a[0]); }
         let k = int(rt, a[1])?;
         let fields = rt.heap.bloblet_head(a[0]).fields as i64;
         Ok(Value::boolean((1..=fields).contains(&k) && rt.heap.bloblet_slot(a[0], k as usize).is_fixnum()))
     });
     "%tword-int", 2, Some(2), simple!(|rt, a| {
-        if !rt.heap.is_threaded_word(a[0]) { return rt.type_error("a threaded word", a[0]); }
+        if !rt.heap.is_cellular_word(a[0]) { return rt.type_error("a cellular word", a[0]); }
         let k = int(rt, a[1])?;
         let fields = rt.heap.bloblet_head(a[0]).fields as i64;
         let v = if (1..=fields).contains(&k) { rt.heap.bloblet_slot(a[0], k as usize) } else { Value::fixnum(0) };
@@ -929,12 +929,12 @@ prims! {
         rt.heap.freeze_bloblet(b, true, true);
         Ok(b)
     });
-    // ---- threaded words (`layout::threaded`) ----
+    // ---- cellular words (`layout::cellular`) ----
     // A word of `cells` (a list), checked as every word is
-    // (`Heap::make_threaded_word`); `#!default` in a cell is the word itself.
+    // (`Heap::make_cellular_word`); `#!default` in a cell is the word itself.
     "%make-word", 2, Some(2), simple!(|rt, a| {
         let Some(cells) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of cells", a[1]) };
-        match rt.heap.make_threaded_word(a[0], &cells) {
+        match rt.heap.make_cellular_word(a[0], &cells) {
             Ok(w) => Ok(w),
             Err(e) => rt.fail(&format!("not a word: {e}"), &[a[0]]),
         }
@@ -964,7 +964,7 @@ prims! {
     "%sro", 2, Some(2), PrimKind::Engine(EngineOp::Sro);
     // The object that stands for the word being made in `%make-word`'s cells.
     "%default-object", 0, Some(0), simple!(|_rt, _a| Ok(Value::DEFAULT));
-    // A primitive's number, for threaded code's `prim`, if it needs no
+    // A primitive's number, for cellular code's `prim`, if it needs no
     // engine; -1 otherwise.
     "%runtime-primitive", 1, Some(1), simple!(|rt, a| {
         let name = get_string(rt, a[0])?;
@@ -979,8 +979,8 @@ prims! {
         // `lit a1 … lit an lit closure call n exit`. A word's frame starts
         // above what it is run on, so the arguments are the word's to push.
         // Allocation does not collect here.
-        let (word, args) = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("threaded-closure") {
-            use fixpt_heap::layout::threaded::routine;
+        let (word, args) = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("cellular-closure") {
+            use fixpt_heap::layout::cellular::routine;
             let f = |n: u64| Value::fixnum(n as i64);
             let mut cells = Vec::with_capacity(2 * args.len() + 5);
             for x in &args {
@@ -988,16 +988,16 @@ prims! {
             }
             cells.extend([f(routine("lit")), a[0], f(routine("call")), f(args.len() as u64), f(routine("exit"))]);
             let name = rt.heap.intern("call-closure");
-            match rt.heap.make_threaded_word(name, &cells) {
+            match rt.heap.make_cellular_word(name, &cells) {
                 Ok(w) => (w, Vec::new()),
                 Err(e) => return rt.fail(&e, &[a[0]]),
             }
-        } else if rt.heap.is_threaded_word(a[0]) {
+        } else if rt.heap.is_cellular_word(a[0]) {
             (a[0], args)
         } else {
-            return rt.type_error("a threaded word or closure", a[0]);
+            return rt.type_error("a cellular word or closure", a[0]);
         };
-        let Some(run) = rt.run_word else { return rt.fail("no threaded machine is installed", &[]) };
+        let Some(run) = rt.run_word else { return rt.fail("no cellular machine is installed", &[]) };
         // With `FIXPT_TIME_WORDS` set, how long each run took: the machine
         // alone, without the front end around it.
         let started = std::env::var_os("FIXPT_TIME_WORDS").map(|_| std::time::Instant::now());
@@ -1007,7 +1007,7 @@ prims! {
         }
         match out {
             Ok(v) => Ok(v),
-            Err(e) => rt.fail(&format!("threaded word: {e}"), &[a[0]]),
+            Err(e) => rt.fail(&format!("cellular word: {e}"), &[a[0]]),
         }
     });
     "%bloblet?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_bloblet())));
@@ -1174,11 +1174,11 @@ prims! {
     // The `closure` routine's closure, in a region: `h`, the free values in
     // order, then the word.
     "%region-closure", 2, None, simple!(|rt, a| {
-        use fixpt_heap::layout::threaded::{CLOSURE_FREE0, CLOSURE_WORD};
+        use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
         let h = region_handle(a[0]);
         let (w, free) = (a[a.len() - 1], &a[1..a.len() - 1]);
         Ok(rt.heap.in_region(h, |heap| {
-            let c = heap.make_bloblet(fixpt_heap::layout::kind("threaded-closure"), free.len() + 1, 0, true);
+            let c = heap.make_bloblet(fixpt_heap::layout::kind("cellular-closure"), free.len() + 1, 0, true);
             heap.set_bloblet_slot(c, CLOSURE_WORD, w);
             for (i, v) in free.iter().enumerate() {
                 heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, *v);
@@ -1203,14 +1203,14 @@ prims! {
         if !rt.heap.is_a(a[0], ObjType::Symbol) { return rt.type_error("a symbol", a[0]); }
         Ok(rt.heap.obj_ref(a[0], 1))
     });
-    // Register code (PLAN.md 13h′) for threaded word `a[0]`, from its cells:
+    // Register code (PLAN.md 13h′) for cellular word `a[0]`, from its cells:
     // made, checked, and set as the word's twin, as the Rust compiler does.
     "%set-register-twin", 2, Some(2), simple!(|rt, a| {
         let Some(cells) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of cells", a[1]) };
-        let name = rt.heap.bloblet_slot(a[0], fixpt_heap::layout::threaded::WORD_NAME);
+        let name = rt.heap.bloblet_slot(a[0], fixpt_heap::layout::cellular::WORD_NAME);
         match rt.heap.make_register_word(name, a[0], &cells) {
             Ok(rw) => {
-                rt.heap.set_bloblet_slot(a[0], fixpt_heap::layout::threaded::WORD_TWIN, rw);
+                rt.heap.set_bloblet_slot(a[0], fixpt_heap::layout::cellular::WORD_TWIN, rw);
                 Ok(rw)
             }
             Err(e) => rt.fail(&format!("not register code: {e}"), &[a[0]]),
