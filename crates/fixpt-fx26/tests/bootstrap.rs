@@ -667,15 +667,20 @@ fn probe_phases_as_register_code() {
         run(sc, registers, &[on]);
         let (tx, st) = (sc.make(|m| m.heap().make_string(&text)), sc.make(|m| m.heap().make_string(&standard)));
         let mut t = std::time::Instant::now();
-        let mut gcs = (0, 0);
+        let mut gcs = (0, 0, 0, 0);
+        // Time, and what explains a step in it: collections, and the cons
+        // rate and working set (words allocated; words copied, which is
+        // what the collections found live).
         let mut lap = |sc: &mut fixpt_scheme::Session, what: &str| {
             let h = &sc.runtime_unrooted().heap;
-            let now = (h.gc_count, h.gc_nanos);
+            let now = (h.gc_count, h.gc_nanos, h.allocated(), h.words_copied);
             eprintln!(
-                "{what:>8}: {:.3} s, {} collection(s), {:.1} ms",
+                "{what:>8}: {:.3} s, {} collection(s), {:.1} ms; {:.1} M words allocated, {:.1} M copied",
                 t.elapsed().as_secs_f64(),
                 now.0 - gcs.0,
-                (now.1 - gcs.1) as f64 / 1e6
+                (now.1 - gcs.1) as f64 / 1e6,
+                (now.2 - gcs.2) as f64 / 1e6,
+                (now.3 - gcs.3) as f64 / 1e6
             );
             gcs = now;
             t = std::time::Instant::now();
