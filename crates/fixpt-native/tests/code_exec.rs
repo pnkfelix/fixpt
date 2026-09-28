@@ -77,3 +77,16 @@ fn freed_code_room_holds_new_code_that_runs() {
     assert_eq!(heap.code_exec_address(second), at, "the same room");
     assert_eq!(run(&heap, second), 22, "the new code, not the old");
 }
+
+/// A heap that has collected before its code area is first used still
+/// makes the area's execute view then (a collection once marked the area
+/// begun, and the view was never made).
+#[test]
+fn code_runs_in_a_heap_that_collected_first() {
+    let mut heap = Heap::new();
+    heap.collect(&mut []);
+    heap.collect(&mut []);
+    let c = code_bloblet(&mut heap, 1, &[movz(0, 7, 0), ret()]);
+    assert_eq!(run(&heap, c), 7);
+}
+

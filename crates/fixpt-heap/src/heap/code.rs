@@ -66,7 +66,7 @@ impl Heap {
             self.code.top = CODE_BASE;
             // Before anything is written there: the view replaces the
             // area's pages with shared ones, zero, as they were.
-            self.code_exec = self.mem.exec_view(CODE_BASE..CODE_BASE + CODE_WORDS).ok();
+            self.code_exec = self.mem.exec_view(CODE_BASE..CODE_BASE + CODE_WORDS).map_err(|e| e.to_string());
         }
         self.code.used += n;
         self.code.taken += n;
@@ -91,7 +91,7 @@ impl Heap {
     /// distances before it there, so its code reaches them PC-relatively.
     pub fn code_exec_address(&self, v: Value) -> usize {
         assert!(self.is_code_bloblet(v), "{v:?} is not in the code area");
-        let view = self.code_exec.as_ref().expect("the code area has an execute view");
+        let view = self.code_exec.as_ref().unwrap_or_else(|e| panic!("the code area has no execute view: {e}"));
         view.exec_address(v.index() * 8)
     }
 
@@ -101,7 +101,7 @@ impl Heap {
     pub fn flush_code(&self, v: Value) {
         assert!(self.is_code_bloblet(v), "{v:?} is not in the code area");
         let bytes = self.bloblet_head(v).bytes;
-        let view = self.code_exec.as_ref().expect("the code area has an execute view");
+        let view = self.code_exec.as_ref().unwrap_or_else(|e| panic!("the code area has no execute view: {e}"));
         view.flush(v.index() * 8, bytes.max(1));
     }
 
@@ -121,6 +121,11 @@ impl Heap {
     /// given back to the walkable part's end. Pages wholly inside a free
     /// block are given back to the system.
     pub(super) fn sweep_code(&mut self, marks: &HashSet<usize>) {
+        // Never used: nothing to sweep, and nothing to start (the first use
+        // makes the area's execute view, before anything is in it).
+        if self.code.top == 0 {
+            return;
+        }
         let (mut at, top) = (CODE_BASE, self.code.top);
         let mut free = Vec::new();
         let mut used = 0;

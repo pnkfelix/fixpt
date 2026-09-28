@@ -167,7 +167,9 @@ pub struct Heap {
     code: code::CodeArea,
     /// The code area's read+execute view, made when the area is first
     /// used; none where the system gives none.
-    code_exec: Option<fixpt_memmgmt::ExecView>,
+    /// The code area's read+execute view, made when it is first used; or
+    /// why it could not be.
+    code_exec: Result<fixpt_memmgmt::ExecView, String>,
     /// Base of the active semispace within `mem` — `0` or `MAX_SEMI_WORDS`.
     /// A Value's index is from the start of `mem`, whichever is active, so
     /// that where a Value points does not depend on it.
@@ -228,7 +230,7 @@ impl Heap {
             base,
             regions: regions::Regions::new(),
             code: code::CodeArea::default(),
-            code_exec: None,
+            code_exec: Err("the code area is not used yet".into()),
             active: 0,
             semi,
             top: 0,
