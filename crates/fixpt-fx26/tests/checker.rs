@@ -395,3 +395,24 @@ fn probe_file() {
     }
     assert_eq!(ours, rust);
 }
+
+/// Every program meant to run checks: one that stopped checking is refused
+/// alike by both checkers, which the agreement above cannot tell from one
+/// meant to be refused (as `run/letregion.fx` was, for years of commits,
+/// once `sum` became syntax).
+#[test]
+fn every_program_meant_to_run_checks() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let mut report = Vec::new();
+    for sub in ["run", "bench", "bidirectional", "native", "groups"] {
+        let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
+        names.sort();
+        for path in names {
+            let program = std::fs::read_to_string(&path).unwrap();
+            if let Err((m, a, _)) = rust_check(&program) {
+                report.push(format!("{sub}/{}: at {a}: {m}", path.file_name().unwrap().to_string_lossy()));
+            }
+        }
+    }
+    assert!(report.is_empty(), "programs meant to run that do not check:\n{}", report.join("\n"));
+}

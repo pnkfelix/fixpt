@@ -37,6 +37,9 @@ pub struct Fx26Session {
     native_convention: bool,
     /// Whether naming a global reads it (`set_globals_effects`).
     globals_effects: bool,
+    /// Whether the form running is one the pieces written in FX-26 made
+    /// already (`run_forms`).
+    own_made: bool,
     /// Under `Strategy::Cellular` with the native convention: how an
     /// expression form is run, in place of the cellular machine.
     pub native_runner: Option<NativeRunner>,
@@ -302,6 +305,7 @@ impl Fx26Session {
             native_runner: None,
             native_compiler: None,
             globals_effects: true,
+            own_made: false,
             own_begun: false,
             redefine: None,
             next_redefine: None,
@@ -378,10 +382,16 @@ impl Fx26Session {
                 }
             }
         }
+        // What the reader made of a form declared ahead (a generative type's
+        // `up-` and `down-`, which have its span) the pieces written in
+        // FX-26 made of it themselves, above, in its context.
+        let ahead: Vec<Span> = forms.iter().zip(&done).filter(|(_, d)| **d).map(|(f, _)| f.span).collect();
         let mut outs = Vec::new();
         for (f, done) in forms.iter().zip(done) {
             if !done {
+                self.own_made = self.strategy != Strategy::Lower && ahead.contains(&f.span);
                 let out = self.run(f);
+                self.own_made = false;
                 let failed = out.is_err();
                 outs.push(out);
                 if failed {
@@ -485,6 +495,13 @@ impl Fx26Session {
     fn run_checked(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
         let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
+            if self.own_made {
+                if let (Top::Define { name, .. }, Some(compile)) = (&top, self.native_compiler) {
+                    // Nothing to say if it cannot: it runs as cellular code.
+                    let _ = self.compile_global_natively(*name, compile)?;
+                }
+                return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) });
+            }
             if again && self.native_runner.is_none() {
                 return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) });
             }

@@ -25,7 +25,7 @@
       (go (lambda ((x int)) (+ x 1)) n))))
 
 ;; A procedure that also escapes, as a value: boxed, its tail calls still loops.
-(define twice (subr spin ((subr spin (int int) int) int int) int)
+(define twice (subr (maxeff spin (read (globals twice))) ((subr (maxeff spin (read (globals twice))) (int int) int) int int) int)
   (lambda (g i a) (g i a)))
 (define* escapes (subr spin (int) int)
   (lambda (n)
