@@ -75,8 +75,10 @@ queue gained", and "The next queue"):
    (2026-09-28, with the user; `docs/fx26.md`): naming `g` reads `(globals
    g)`, within `(read @globals)`; `define*` finds a procedure's globals
    precisely; both checkers, every program, and the front end (through
-   `(read @globals)`) say so. Next: compatibility counts what a
-   redefinition reads, and the cycle rule from types; `define-rec*`; a
+   `(read @globals)`) say so; compatibility counts what a redefinition
+   reads, and the cycle rule looks at types and definitions both. Next:
+   perhaps a call that may reach the definition being checked says `spin`
+   (to discuss); `define-rec*`; a
    lint on non-tail recursion over an index (the user's, after an
    assembler overflow); a question to answer: tag bits for an ownership
    bit.
