@@ -108,3 +108,24 @@ fn errors_report_source_position() {
     let e = s.eval_str("<test>", "(+ 1 (undefined-thing))").unwrap_err();
     assert!(format!("{e}").contains("unbound variable: undefined-thing"), "{e}");
 }
+
+/// R7RS 6.2.6's integer division, against its own examples.
+#[test]
+fn integer_division() {
+    let both = |call: &str| ev(&format!("(call-with-values (lambda () {call}) list)"));
+    assert_eq!(both("(floor/ 5 2)"), "(2 1)");
+    assert_eq!(both("(floor/ -5 2)"), "(-3 1)");
+    assert_eq!(both("(floor/ 5 -2)"), "(-3 -1)");
+    assert_eq!(both("(floor/ -5 -2)"), "(2 -1)");
+    assert_eq!(both("(truncate/ 5 2)"), "(2 1)");
+    assert_eq!(both("(truncate/ -5 2)"), "(-2 -1)");
+    assert_eq!(both("(truncate/ 5 -2)"), "(-2 1)");
+    assert_eq!(both("(truncate/ -5 -2)"), "(2 -1)");
+    assert_eq!(both("(truncate/ -5.0 2)"), "(-2.0 -1.0)");
+    assert_eq!(ev("(list (floor-quotient 7 -2) (floor-remainder 7 -2) (truncate-quotient 7 -2) (truncate-remainder 7 -2))"), "(-4 -1 -3 1)");
+    assert_eq!(both("(exact-integer-sqrt 4)"), "(2 0)");
+    assert_eq!(both("(exact-integer-sqrt 5)"), "(2 1)");
+    assert_eq!(both("(exact-integer-sqrt 0)"), "(0 0)");
+    assert_eq!(both("(exact-integer-sqrt (+ (expt 10 40) 7))"), "(100000000000000000000 7)");
+    assert!(ev("(exact-integer-sqrt -1)").starts_with("!! "));
+}

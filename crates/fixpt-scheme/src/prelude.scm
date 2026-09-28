@@ -133,6 +133,25 @@
 (define (exact->inexact x) (inexact x))
 (define (inexact->exact x) (exact x))
 (define (square x) (* x x))
+
+;; R7RS 6.2.6's integer division: floor rounds the quotient toward -inf, so
+;; the remainder has the divisor's sign (it is `modulo`); truncate rounds it
+;; toward zero, so the remainder has the dividend's (it is `remainder`).
+(define (floor-remainder n m) (modulo n m))
+(define (floor-quotient n m) (quotient (- n (modulo n m)) m))
+(define (floor/ n m) (values (floor-quotient n m) (floor-remainder n m)))
+(define (truncate-quotient n m) (quotient n m))
+(define (truncate-remainder n m) (remainder n m))
+(define (truncate/ n m) (values (quotient n m) (remainder n m)))
+;; The largest s with s*s <= k, and k - s*s: Newton's method on exact
+;; integers, so right for bignums too.
+(define (exact-integer-sqrt k)
+  (if (not (and (exact-integer? k) (>= k 0)))
+      (error "exact-integer-sqrt: not an exact non-negative integer" k))
+  (let loop ((x k) (y (quotient (+ k 1) 2)))
+    (if (>= y x)
+        (values x (- k (* x x)))
+        (loop y (quotient (+ y (quotient k y)) 2)))))
 (define (numerator q) (if (exact? q) (%numerator q) (inexact (%numerator (exact q)))))
 (define (denominator q) (if (exact? q) (%denominator q) (inexact (%denominator (exact q)))))
 
