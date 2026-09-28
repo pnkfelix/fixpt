@@ -111,18 +111,17 @@ queue gained", and "The next queue"):
    between; constants propagated and folded, with inlining (the guard
    keeps them inside it); a top-level procedure's calls of itself guarded,
    so a tail one is a loop (`lists` 13.5 → 9.3 ms); lifting out of loops
-   measured and not built (3 in the front end's heads). Next:
-   superinstructions (13g),
-   join points (13i),
-   the rest of known calls, a nursery with a write barrier, cheaper
-   continuations, a lint on a lambda's size. Known gap, seen with
-   `,disassemble-asm`: words compiled cell for cell (`--cellular-machine
-   native-compiled`) are about 95 instructions for `(lambda ((x int)) x)`,
-   some 60 of them run, since each cell is its routine's whole body; first
-   targets, each something the checker already proves: slot bounds checks
-   (the arity is known), stack limits checked once per word, returns that
-   need not scan for prompt and mark entries, direct returns into callers
-   known to be compiled.
+   measured and not built (3 in the front end's heads). Speed is judged
+   by the native convention's code only (the user's, 2026-09-28: the
+   interpreters must not be asymptotically inefficient, but their constant
+   factors do not matter): superinstructions (13g)
+   are dropped, and so are the cell-for-cell compiled words' gaps
+   (`--cellular-machine native-compiled`, about 95 instructions for the
+   identity). Next, for native code: join points (13i), the rest of known
+   calls, a nursery with a write barrier, a lint on a lambda's size; and,
+   when the user says (2026-09-28: "don't worry about those yet"), region
+   `cons` inline natively (`lists-region`, 158 ms native against 7 in
+   register code) and cheaper captures (`captures`).
 6. Smaller: `nlist` error messages; the language gaps the survey found;
    M8 docs and polish; M10, a full native compiler, is not scheduled.
    (Done, 2026-09-28, the user's: `,disassemble` of a native closure
