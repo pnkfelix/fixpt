@@ -416,3 +416,66 @@ fn every_program_meant_to_run_checks() {
     }
     assert!(report.is_empty(), "programs meant to run that do not check:\n{}", report.join("\n"));
 }
+
+/// The two checkers summarize each expression's effect alike, for a
+/// compiler (`Checker::effect_summaries`, `checked-effects`): pure, reads
+/// only, or anything else, by span (in characters), the greater where two
+/// expressions share one.
+#[test]
+fn effect_summaries_agree() {
+    use std::collections::HashMap;
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (mut report, mut both, mut only_fx, mut only_rust) = (Vec::new(), 0, 0, 0);
+    let mut programs = Vec::new();
+    for sub in ["run", "bench", "bidirectional", "control", "pldi89", "datum"] {
+        let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
+        names.sort();
+        programs.extend(names.into_iter().map(|p| (format!("{sub}/{}", p.file_name().unwrap().to_string_lossy()), std::fs::read_to_string(&p).unwrap())));
+    }
+    let t = std::time::Instant::now();
+    for (name, program) in programs {
+        {
+            let Ok(Ok(_)) = s.check_with_own_checker(&program) else { continue };
+            let mut fx: HashMap<(u32, u32), i64> = HashMap::new();
+            for (a, b, k) in s.own_effect_summaries().expect("notes") {
+                let e = fx.entry((a as u32, b as u32)).or_insert(k);
+                *e = (*e).max(k);
+            }
+            let mut c = Checker::new();
+            let forms = c.read_in(FileId(0), &program).expect("reads");
+            let done = c.declare_ahead(&forms).expect("declares");
+            for (f, d) in forms.iter().zip(done) {
+                if !d {
+                    c.top_all(f).expect("checks");
+                }
+            }
+            // Bytes to characters, as the FX-26 reader counts.
+            let mut char_at = vec![0u32; program.len() + 1];
+            let mut n = 0;
+            for (b, ch) in program.char_indices() {
+                for x in &mut char_at[b..b + ch.len_utf8()] {
+                    *x = n;
+                }
+                n += 1;
+            }
+            char_at[program.len()] = n;
+            let mut rust: HashMap<(u32, u32), i64> = HashMap::new();
+            for ((a, b), k) in c.effect_summaries() {
+                let e = rust.entry((char_at[a as usize], char_at[b as usize])).or_insert(k as i64);
+                *e = (*e).max(k as i64);
+            }
+            for (span, k) in &fx {
+                match rust.get(span) {
+                    Some(r) if r == k => both += 1,
+                    Some(r) => report.push(format!("{name} {span:?}: FX-26 {k}, Rust {r}")),
+                    None => only_fx += 1,
+                }
+            }
+            only_rust += rust.keys().filter(|k| !fx.contains_key(k)).count();
+        }
+    }
+    eprintln!("effect summaries: {both} agree; noted only by FX-26 {only_fx}, only by Rust {only_rust}; {:.1} s", t.elapsed().as_secs_f64());
+    assert!(both > 1000, "only {both} compared");
+    assert!(report.is_empty(), "{} disagreements:\n{}", report.len(), report.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
+}

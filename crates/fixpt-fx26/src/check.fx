@@ -531,6 +531,16 @@
 (define-type k-facts (listof (productof (1 int) (2 int) (3 int)) finite))
 (define k-extracts (ref k-facts @t) (new nil))
 (define checked-extracts (subr (maxeff (read @globals) (read @t)) () k-facts) (lambda () (get k-extracts)))
+;; Each expression synthesized: where it starts and ends, and a summary of
+;; its effect for a compiler (0 pure: no atom at all, so no `spin` either;
+;; 1 reads only; 2 anything else), newest first. The Rust checker's
+;; `effect_summaries` is the same.
+(define k-effect-notes (ref k-facts @t) (new nil))
+(define checked-effects (subr (maxeff (read @globals) (read @t)) () k-facts) (lambda () (get k-effect-notes)))
+(define k-reads-only? (subr (read @globals) (k-eff) bool)
+  (lambda (e) (or (null? e) (and (tagcase (car e) (a-read (r) #t) (else y #f)) (k-reads-only? (cdr e))))))
+(define k-summary (subr (read @globals) (k-eff) int)
+  (lambda (e) (cond ((null? e) 0) ((k-reads-only? e) 1) (else 2))))
 
 ;;; ------------------------------------------------------------ effects
 
@@ -2138,7 +2148,7 @@
 (define k-reset (subr (maxeff kstate spin) () unit)
   (lambda ()
     (begin
-      (set k-extracts nil)
+      (set k-extracts nil) (set k-effect-notes nil)
       (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-known (make-table symbol-hash symbol=?)) (set k-global (make-table symbol-hash symbol=?)) (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
@@ -3921,6 +3931,9 @@
                 (tagcase (k-atom-region (car e)) (r-frozen (p f) (< p 0)) (else y #f)))
            (k-drop-frozen (cdr e)))
           (else (cons (car e) (k-drop-frozen (cdr e)))))))
+;; `x`'s effect `e`, noted.
+(define k-note-effect (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (kx k-eff) unit)
+  (lambda (x e) (set k-effect-notes (the k-facts (cons (product (1 (k-start x)) (2 (k-end x)) (3 (k-summary e))) (get k-effect-notes))))))
 ;; `e`, the effect of `x`, with what it does to frozen data taken out; or an
 ;; error, if it writes it.
 (define k-frozen (subr checks (kx k-eff) k-eff)
@@ -4942,7 +4955,8 @@
 (define-rec
   (k-synth (subr (maxeff checks spin) (kx) k-te)
     (lambda (x)
-      (let ((r (k-synth-node x))) (k-te (extract r 1) (k-frozen x (extract r 2))))))
+      (let* ((r (k-synth-node x)) (e (k-frozen x (extract r 2))))
+        (begin (k-note-effect x e) (k-te (extract r 1) e)))))
   (k-synth-node (subr (maxeff checks spin) (kx) k-te)
     (lambda (x)
       (tagcase x
@@ -5371,7 +5385,9 @@
             (k-inst-told (cdr args) (cdr params) (+ i 1) kinds solved done-t done-e)))))
   ;;; ------------------------------------------------------------ check mode
   (k-check (subr (maxeff checks spin) (kx int) k-eff)
-    (lambda (x expected) (k-frozen x (k-check-mode x expected))))
+    (lambda (x expected)
+      (let ((e (k-frozen x (k-check-mode x expected))))
+        (begin (k-note-effect x e) e))))
   (k-check-mode (subr (maxeff checks spin) (kx int) k-eff)
     (lambda (x expected)
       (let* ((et (k-get expected))
@@ -6326,5 +6342,5 @@
 (define check-more (subr (maxeff (read @globals) checks spin) ((listof top finite)) k-result)
   (lambda (forms)
     (prompt k-tag
-      (begin (set k-extracts nil) (set k-runs nil) (k-ahead forms) (k-ok (k-forms forms nil)))
+      (begin (set k-extracts nil) (set k-effect-notes nil) (set k-runs nil) (k-ahead forms) (k-ok (k-forms forms nil)))
       (lambda (r) r))))

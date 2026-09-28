@@ -403,6 +403,27 @@ impl Checker {
         Ok(Effect(eff.0.into_iter().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if in_heap(r))).collect()))
     }
 
+    /// A summary of each expression's effect, for a compiler, by where it
+    /// starts and ends: 0 pure (no atom at all, so no `spin` either), 1
+    /// reads only, 2 anything else; where two expressions have one span,
+    /// the greater. `check.fx`'s `checked-effects` says the same.
+    pub fn effect_summaries(&self) -> HashMap<(u32, u32), u8> {
+        let mut out: HashMap<(u32, u32), u8> = HashMap::new();
+        for (e, eff) in &self.facts.effects {
+            let s = if eff.is_pure() {
+                0
+            } else if eff.0.iter().all(|a| matches!(a, Atom::Read(_))) {
+                1
+            } else {
+                2
+            };
+            let span = self.arena.span_of(*e);
+            let k = out.entry((span.start, span.end)).or_insert(s);
+            *k = (*k).max(s);
+        }
+        out
+    }
+
     /// Whether `s`, where it is used, is the initial environment's binding.
     pub(crate) fn is_standard(&self, s: Sym) -> bool {
         self.env.iter().rposition(|(n, _)| *n == s).is_some_and(|i| i < self.standard_len)
