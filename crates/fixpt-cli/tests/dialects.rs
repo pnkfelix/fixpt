@@ -182,6 +182,33 @@ fn the_fx26_repl_shows_cellular_code() {
     }
 }
 
+/// `--calling-convention native`: procedure types are native unless they
+/// say otherwise, and `,native` shows a procedure's code in that convention
+/// and calls it; what it cannot compile yet it says.
+#[test]
+fn the_fx26_repl_compiles_in_the_native_convention() {
+    use std::io::Write as _;
+    let mut child = Command::new(FIXPT)
+        .args(["--dialect", "fx26", "--fx26-run", "cellular", "--calling-convention", "native", "repl"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    let input = include_str!("programs/native-convention.fx");
+    child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
+    let done = child.wait_with_output().expect("finishes");
+    let out = String::from_utf8_lossy(&done.stdout);
+    for want in ["; id (lambda@", "2 instructions", "mov x0, x1", "\n7\n", "832040", "`twice` is not compiled in the native convention yet"] {
+        assert!(out.contains(want), "no `{want}` in:\n{out}");
+    }
+    // A cellular procedure cannot be called from native code: an error.
+    let err = String::from_utf8_lossy(&done.stderr);
+    assert!(err.contains("a `cellular` procedure cannot be called from `native` code yet"), "{err}");
+    let out = Command::new(FIXPT).args(["--calling-convention", "fast", "eval", "1"]).output().expect("fixpt runs");
+    assert!(!out.status.success(), "an unknown convention is refused");
+}
+
 /// `--step-limit`: a count stops a long run, `none` lets it finish, and
 /// anything else is refused; `,step-limit` shows and sets it in the REPL.
 #[test]

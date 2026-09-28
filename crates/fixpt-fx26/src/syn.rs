@@ -142,6 +142,46 @@ pub fn compile_with_fx26_compiler_showing(
     })
 }
 
+/// Check, compile and run `text`, a program whose last form names a global,
+/// with the pieces written in FX-26: that global's value, given to `f` with
+/// the heap, which nothing changes while `f` runs; or why there is none.
+pub fn with_last_value<T>(
+    scheme: &mut Session,
+    standard: Handle,
+    file: FileId,
+    text: &str,
+    f: impl FnOnce(&fixpt_heap::Heap, Value) -> T,
+) -> R<Result<T, String>> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    scheme.scope(|s| {
+        let tops = parse_to_trees(s, file, text)?;
+        let checked = s.call_global(&format!("{READER_PREFIX}check-program"), &[standard, tops]).map_err(|e| fail(e.to_string()))?;
+        if let Some(m) = s.view(|v| {
+            let r = v.get(checked);
+            (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("k-err"))
+                .then(|| r.field(3).and_then(|p| p.field(2)).and_then(|m| m.string()).unwrap_or_default())
+        }) {
+            return Ok(Err(format!("check: {m}")));
+        }
+        let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
+        let word = match compile_to_word(s, file, text, facts)? {
+            Ok(w) => w,
+            Err(m) => return Ok(Err(format!("compile: {m}"))),
+        };
+        let no_args = s.make(|_| Value::NULL);
+        let v = match s.call_global("%run-word", &[word, no_args]) {
+            Ok(v) => v,
+            Err(e) => return Ok(Err(e.to_string())),
+        };
+        let mut value = Value::NULL;
+        s.make(|m| {
+            value = m.get(v);
+            value
+        });
+        Ok(Ok(f(&s.runtime_unrooted().heap, value)))
+    })
+}
+
 /// What the checker written in FX-26 made of a program: for each definition
 /// and expression, in order, `define name : type ! effect` or `type !
 /// effect`; or its first error.

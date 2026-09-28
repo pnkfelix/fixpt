@@ -560,6 +560,13 @@
 (define k-conv-show (subr (read @t) (k-conv) string)
   (lambda (c)
     (tagcase c (cv-cellular () "cellular") (cv-native () "native") (cv-fx () "fx") (cv-var (v) (symbol->string (k-dvar-name v))))))
+;; The program's convention: what a subroutine type that names none has,
+;; and what a convention nothing solves defaults to. Cellular, unless a
+;; driver says otherwise (`--calling-convention`).
+(define k-conv-default (ref k-conv @t) (new (cv-cellular)))
+;; For a driver: whether the program's convention is native.
+(define check-conv-native! (subr (write @t) (bool) unit)
+  (lambda (on) (set k-conv-default (if on (cv-native) (cv-cellular)))))
 ;; A convention as a number: one of FX-26's own, or its binder.
 (define k-conv-code (subr pure (k-conv) int)
   (lambda (c) (tagcase c (cv-cellular () -1) (cv-native () -2) (cv-fx () -3) (cv-var (v) v))))
@@ -788,7 +795,7 @@
               (ty-link (x) "?")
               (ty-subr (e ps r cv)
                 ;; The convention only where it is not the program's.
-                (k-cat5 (k-cat4 "(subr " (tagcase cv (cv-cellular () "") (else y (k-cat3 "(conv " (k-conv-show cv) ") "))) (k-show-effect e) " (") (k-join (k-show-list ps p) " ") ") " (k-show-on r p) ")"))
+                (k-cat5 (k-cat4 "(subr " (if (k-conv=? cv (get k-conv-default)) "" (k-cat3 "(conv " (k-conv-show cv) ") ")) (k-show-effect e) " (") (k-join (k-show-list ps p) " ") ") " (k-show-on r p) ")"))
               (ty-poly (bs body) (k-cat5 "(poly (" (k-join (k-show-binders bs) " ") ") " (k-show-on body p) ")"))
               (ty-ref (a r) (k-cat5 "(ref " (k-show-on a p) " " (k-region-show r) ")"))
               (ty-product (ps) (k-cat3 "(productof" (k-show-parts ps p) ")"))
@@ -1317,7 +1324,7 @@
              (hyps (if poly? (k-les (cdr (cdr (cdr items)))) (the k-hyps nil)))
              (spin (k-one (a-spin)))
              (params (k-hyp-coercions hyps spin (the k-ids (cons (car conc) nil))))
-             (body (k-ty-new (ty-subr spin params (cdr conc) (cv-cellular))))
+             (body (k-ty-new (ty-subr spin params (cdr conc) (get k-conv-default))))
              (t (if (null? bs) body (k-ty-new (ty-poly bs body)))))
         (begin
           (set k-pending-lemma (cons (product (1 bs) (2 (car conc)) (3 (cdr conc)) (4 hyps) (5 (the k-named nil))) nil))
@@ -1334,7 +1341,7 @@
     (lambda (hs spin tail)
       (if (null? hs)
           tail
-          (let ((c (k-ty-new (ty-subr spin (the k-ids (cons (car (car hs)) nil)) (cdr (car hs)) (cv-cellular)))))
+          (let ((c (k-ty-new (ty-subr spin (the k-ids (cons (car (car hs)) nil)) (cdr (car hs)) (get k-conv-default)))))
             (cons c (k-hyp-coercions (cdr hs) spin tail))))))
   ;; `(name d …)` for the `g`th generative type: a node, never expanded.
   (k-apply-gen (subr (maxeff checks spin) (syn int (listof syn finite)) int)
@@ -1391,7 +1398,7 @@
                   ;; out, it is the program's.
                   ((symbol=? hd 'subr)
                    (let* ((conv? (and (= n 5) (string=? (k-list-head (k-nth items 1)) "conv")))
-                          (cv (if conv? (k-parse-conv-form (k-nth items 1)) (cv-cellular)))
+                          (cv (if conv? (k-parse-conv-form (k-nth items 1)) (get k-conv-default)))
                           (items (if conv? (the (listof syn finite) (cons (car items) (cdr (cdr items)))) items))
                           (n (if conv? 4 n)))
                      (begin
@@ -2873,22 +2880,28 @@
             (if (and (not (k-conv=? from to)) (k-subtype (k-ty-new (ty-subr e ps r to)) want)) (cons to nil) nil))
           (else y nil)))
       (else y nil))))
-;; A conversion of `x`'s procedure to `to`. Every procedure is still made
-;; cellular, so a conversion to `cellular`, `fx` or a convention binder does
-;; nothing at run time yet, and none can be to `native`.
+;; Whether `c` is one of the two conventions code is made in, and not the
+;; program's.
+(define k-other-conv? (subr (read @t) (k-conv) bool)
+  (lambda (c)
+    (and (tagcase c (cv-cellular () #t) (cv-native () #t) (else y #f)) (not (k-conv=? c (get k-conv-default))))))
+;; A conversion of `x`'s procedure to `to`. Every procedure is made in the
+;; program's convention, so a conversion to it, to `fx` or to a convention
+;; binder does nothing at run time yet; one to the other convention would
+;; need an adapter, which none can be yet.
 (define k-convert-at (subr (maxeff checks spin) (kx k-conv) unit)
   (lambda (x to)
-    (tagcase to
-      (cv-native () (k-fail "a `native` procedure is expected here, and none can be made yet" (k-start x) (k-end x)))
-      (else y #u))))
+    (if (k-other-conv? to)
+        (k-fail (k-cat3 "no procedure can be converted to `" (k-conv-show to) "` yet") (k-start x) (k-end x))
+        #u)))
 ;; Code calls procedures of its own convention, or through `fx`.
 (define k-callable-here (subr (maxeff checks spin) (int int int) unit)
   (lambda (ft a b)
     (tagcase (k-get ft)
       (ty-subr (e ps r cv)
-        (tagcase cv
-          (cv-native () (k-fail "a `native` procedure cannot be called from `cellular` code yet" a b))
-          (else y #u)))
+        (if (k-other-conv? cv)
+            (k-fail (k-cat5 "a `" (k-conv-show cv) "` procedure cannot be called from `" (k-conv-show (get k-conv-default)) "` code yet") a b)
+            #u))
       (else y #u))))
 ;; `got ≤ want`, or an error at `x` saying so.
 (define k-expect (subr (maxeff checks spin) (kx int int) unit)
@@ -3321,7 +3334,7 @@
           (cond ((not (null? (k-map-find m v))) (k-finish-each (cdr kinds) m a b ft))
                 ((= k 1) (k-finish-each (cdr kinds) (cons (cons v (de nil)) m) a b ft))
                 ;; A convention nothing says is the program's.
-                ((= k 6) (k-finish-each (cdr kinds) (cons (cons v (dc (cv-cellular))) m) a b ft))
+                ((= k 6) (k-finish-each (cdr kinds) (cons (cons v (dc (get k-conv-default))) m) a b ft))
                 ;; A size nothing says is some size.
                 ((= k 5) (k-finish-each (cdr kinds) (cons (cons v (dz (sz-finite))) m) a b ft))
                 (else (k-fail (k-cat5 (k-quote (symbol->string (k-dvar-name v))) " cannot be inferred for " (k-show-ty ft)
@@ -4959,7 +4972,7 @@
                             (let ((r (k-synth body))) (k-te (extract r 1) (k-mask body (extract r 2) (extract r 1)))))))
                 (begin
                   (k-unbind-to saved)
-                  (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (k-forget-nats named (extract r 1) a b) (cv-cellular))) nil))))))
+                  (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (k-forget-nats named (extract r 1) a b) (get k-conv-default))) nil))))))
         (else y (k-fail "a lambda" (k-start x) (k-end x))))))
   ;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
   ;; result types if it is a subroutine's, with `(read R)` in its latent

@@ -81,6 +81,9 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     }
     s.scheme.runtime_unrooted().machine_code = crate::CELLULAR_MACHINE_CODE.get().copied().flatten();
     s.register_code = crate::CELLULAR_MACHINE_NAME.get().is_some_and(|n| n.contains("register code"));
+    if crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) {
+        s.set_native_convention(true);
+    }
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
         s.set_step_limit(*l);
@@ -154,6 +157,11 @@ pub fn repl(backend: Backend) -> i32 {
         };
         if let Some(ask) = crate::help::parse(&text) {
             crate::help::answer(&mut session.checker, &ask);
+            continue;
+        }
+        // `,native NAME [ARG…]`: NAME's procedure in the native convention.
+        if let Some(rest) = text.trim().strip_prefix(",native") {
+            native(&mut session, rest);
             continue;
         }
         // `,disassemble-asm E`: the same, with each word's machine code as
@@ -734,4 +742,59 @@ fn a_kind(kind: &str) -> String {
     let article = if kind.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
     let name = if kind == "family" { "type family" } else if kind == "generative" { "generative type" } else if kind == "region" { "private region" } else { kind };
     format!("{article} {name}")
+}
+
+/// `,native NAME [ARG…]`: the procedure the global NAME holds, compiled in
+/// the native convention (`fixpt_native::direct`), with every procedure it
+/// calls: its machine code shown, and, given integer ARGs, called on them.
+/// What the compiler cannot do yet it says.
+fn native(session: &mut Fx26Session, rest: &str) {
+    let mut words = rest.split_whitespace();
+    let Some(name) = words.next() else {
+        println!("; `,native NAME [ARG…]`: NAME's procedure, compiled in the native convention");
+        return;
+    };
+    if session.strategy != Strategy::Cellular {
+        println!("; `,native` compiles what the compiler written in FX-26 makes: run with `--fx26-run cellular`.");
+        return;
+    }
+    let args: Option<Vec<i64>> = words.map(|a| a.parse().ok()).collect();
+    let Some(args) = args else {
+        println!("; `,native` takes integer arguments only, for now");
+        return;
+    };
+    let limit = session.step_limit().unwrap_or(u64::MAX >> 1);
+    let shown = session.with_global_value(name, |heap, closure| {
+        let mut m = fixpt_native::direct::DirectMachine::new()?;
+        let procs = m.compile(heap, closure)?;
+        let mut out = String::new();
+        for (i, (n, p)) in procs.iter().enumerate() {
+            let n = if i == 0 { format!("{name} ({n})") } else { n.clone() };
+            out.push_str(&format!("; {n}, {} instructions:\n", p.len));
+            for (i, w) in m.instructions(*p).iter().enumerate() {
+                out.push_str(&format!(";   {i:>4}  {}\n", fixpt_native::arm64::disasm::disassemble(*w, i as i64)));
+            }
+        }
+        let p = procs[0].1;
+        if !args.is_empty() || p.arity == 0 {
+            if args.len() != p.arity {
+                return Err(format!("`{name}` takes {} argument(s)", p.arity));
+            }
+            let vals: Vec<fixpt_heap::Value> = args.iter().map(|a| fixpt_heap::Value::fixnum(*a)).collect();
+            let start = std::time::Instant::now();
+            let r = m.call(p, &vals, limit);
+            let ms = 1e3 * start.elapsed().as_secs_f64();
+            match r {
+                Ok(v) => out.push_str(&format!("{}\n; ({ms:.3} ms)\n", fixpt_runtime::write_value(heap, v))),
+                Err(t) => out.push_str(&format!("! {} ({ms:.3} ms)\n", t.what)),
+            }
+        }
+        Ok::<String, String>(out)
+    });
+    match shown {
+        Ok(Ok(Ok(out))) => print!("{out}"),
+        Ok(Ok(Err(why))) => println!("; `{name}` is not compiled in the native convention yet: {why}"),
+        Ok(Err(why)) => println!("! {why}"),
+        Err(e) => println!("! {e}"),
+    }
 }

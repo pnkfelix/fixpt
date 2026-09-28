@@ -228,8 +228,10 @@ its code in one.
 2. **Native frames, first-order** (in part, 2026-09-28:
    `crates/fixpt-native/src/direct.rs`, `crates/fixpt-fx26/tests/direct.rs`;
    frames on a stack of its own, `bl`/`ret`, checks only where work is
-   unbounded, traps; no call-outs yet, globals bound when compiling, and
-   not yet a machine the REPL can choose): the stack segment, the calling
+   unbounded, traps; no call-outs yet, and globals bound when compiling.
+   In the REPL, `--calling-convention native` makes the program's
+   convention native in both checkers, and `,native NAME [ARG…]` shows a
+   procedure's code in it and calls it; top-level forms stay cellular): the stack segment, the calling
    convention, traps and callouts, and a native compiler for code without
    closures or continuations (from register code's intermediate form),
    tested against the Rust machine on the programs that fit.

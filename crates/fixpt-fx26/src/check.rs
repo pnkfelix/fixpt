@@ -110,10 +110,10 @@ pub struct Checker {
     /// The sizes given to `nat` variables of no known size, innermost last
     /// (`Checker::name_nat`).
     pub(crate) skolems: Vec<DVar>,
-    /// The program's convention: what a subroutine type that names none
-    /// has, and what a convention nothing solves defaults to
-    /// (`docs/research/native-conventions.md`). Cellular, for every machine
-    /// so far.
+    /// The program's convention (set by [`Checker::with_convention`]):
+    /// what a subroutine type that names none has, and what a convention
+    /// nothing solves defaults to
+    /// (`docs/research/native-conventions.md`). Cellular unless asked.
     pub conv_default: Conv,
     /// What the branches being checked have learned about sizes
     /// (`crate::sizes`).
@@ -182,6 +182,13 @@ impl Default for Checker {
 impl Checker {
     /// A checker with the initial environment of `crate::standard`.
     pub fn new() -> Checker {
+        Checker::with_convention(Conv::Cellular)
+    }
+
+    /// A checker whose program's convention is `conv`: every subroutine
+    /// type that names none has it, the standard environment's included
+    /// (`--calling-convention`).
+    pub fn with_convention(conv: Conv) -> Checker {
         let mut interner = Interner::new();
         let mut arena = Arena::default();
         let mut base = HashMap::new();
@@ -240,7 +247,7 @@ impl Checker {
             certified_lengths: Vec::new(),
             size_facts: Vec::new(),
             skolems: Vec::new(),
-            conv_default: Conv::Cellular,
+            conv_default: conv,
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),

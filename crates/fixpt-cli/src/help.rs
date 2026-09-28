@@ -207,6 +207,7 @@ fn overview(h: &dyn Helpful) {
     if h.dialect() == "FX-26" {
         rows.push((",disassemble E", "E's cellular code (under --fx26-run cellular)"));
         rows.push((",disassemble-asm E", "the same, and each word's machine code (or its stencils' source)"));
+        rows.push((",native NAME [ARG…]", "NAME's procedure in the native convention: its machine code, and called on ARGs (under --fx26-run cellular)"));
         rows.push((",step-limit [N|none]", "show or set how many steps a form may take"));
     }
     rows.push((",quit", "leave"));

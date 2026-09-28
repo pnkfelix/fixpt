@@ -32,6 +32,9 @@ pub struct Fx26Session {
     /// Under `Strategy::Cellular`: whether the compiler written in FX-26
     /// makes each lambda's register code too, for a machine that runs it.
     pub register_code: bool,
+    /// Whether the program's convention is native (`--calling-convention`;
+    /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
+    native_convention: bool,
     /// Under `Strategy::Cellular`: whether each form's [`Outcome::code`] is
     /// the words the compiler written in FX-26 made for it, those not shown
     /// for an earlier form, rather than its lowering to Scheme.
@@ -215,6 +218,7 @@ impl Fx26Session {
             globals: Globals::default(),
             strategy: Strategy::Lower,
             register_code: false,
+            native_convention: false,
             show_words: false,
             words_shown: Default::default(),
             standard26: None,
@@ -408,12 +412,48 @@ impl Fx26Session {
         Ok(h)
     }
 
+    /// Make the program's convention native, or cellular: what every
+    /// subroutine type that names none has, the standard environment's
+    /// included, in both checkers. Before any form is checked.
+    pub fn set_native_convention(&mut self, on: bool) {
+        self.native_convention = on;
+        self.checker = Checker::with_convention(if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
+    }
+
+    /// The pieces written in FX-26, loaded if they are not yet, and told the
+    /// program's convention.
+    fn own_pieces(&mut self) -> R<()> {
+        let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
+        if !self.scheme.is_bound(&format!("{READER_PREFIX}check-program")) {
+            load_eager_reader(&mut self.scheme).map_err(fail)?;
+        }
+        let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.native_convention));
+        self.scheme.call_global(&format!("{READER_PREFIX}check-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;
+        Ok(())
+    }
+
+    /// The value of the global `name`, as the forms defined so far make it,
+    /// compiled by the compiler written in FX-26 with register code: given
+    /// to `f`, with the heap, which nothing changes while `f` runs.
+    pub fn with_global_value<T>(&mut self, name: &str, f: impl FnOnce(&fixpt_heap::Heap, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
+        self.own_pieces()?;
+        self.scheme.engine.set_step_limit(None);
+        let standard = self.standard26()?;
+        let text = format!("{}{name}\n", self.defined26);
+        let on = self.scheme.make(|_| fixpt_heap::Value::TRUE);
+        let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
+        self.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[on]).map_err(fail)?;
+        let r = crate::syn::with_last_value(&mut self.scheme, standard, FileId(0), &text, f);
+        let off = self.scheme.make(|_| fixpt_heap::Value::boolean(self.register_code));
+        self.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(fail)?;
+        self.scheme.engine.set_step_limit(self.step_limit);
+        r
+    }
+
     /// Check `text` with the checker written in FX-26 (read and parsed in
     /// FX-26 too): see [`crate::syn::check_with_fx26_checker`].
     pub fn check_with_own_checker(&mut self, text: &str) -> R<crate::syn::Checked26> {
-        if !self.scheme.is_bound(&format!("{READER_PREFIX}check-program")) {
-            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
-        }
+        self.own_pieces()?;
         // Generous, but a checker that loops is an error, not a hang.
         self.scheme.engine.set_step_limit(Some(2_000_000_000));
         let standard = self.standard26()?;
@@ -431,9 +471,7 @@ impl Fx26Session {
 
     /// The same, and, if `show`, the words it made, disassembled.
     pub fn compile_with_own_compiler_showing(&mut self, text: &str, show: bool) -> R<(String, Option<String>)> {
-        if !self.scheme.is_bound(&format!("{READER_PREFIX}compile-program")) {
-            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
-        }
+        self.own_pieces()?;
         self.scheme.engine.set_step_limit(None);
         let standard = self.standard26()?;
         let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.register_code));

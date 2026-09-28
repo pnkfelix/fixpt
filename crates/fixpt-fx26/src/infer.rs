@@ -260,12 +260,14 @@ impl Checker {
         self.subtype(t, want).then_some(to)
     }
 
-    /// A conversion of `e`'s procedure to `to`. Every procedure is still
-    /// made cellular, so a conversion to `cellular`, `fx` or a convention
-    /// binder does nothing at run time yet, and none can be to `native`.
+    /// A conversion of `e`'s procedure to `to`. Every procedure is made in
+    /// the program's convention, so a conversion to it, to `fx` or to a
+    /// convention binder does nothing at run time yet; one to the other
+    /// convention would need an adapter, which none can be yet.
     pub(crate) fn convert_at(&mut self, e: ExpId, to: Conv) -> R<()> {
-        if to == Conv::Native {
-            return Err(FxError::at(self.arena.span_of(e), "a `native` procedure is expected here, and none can be made yet"));
+        if matches!(to, Conv::Native | Conv::Cellular) && to != self.conv_default {
+            let msg = format!("no procedure can be converted to `{}` yet", self.show_conv(to));
+            return Err(FxError::at(self.arena.span_of(e), msg));
         }
         self.facts.converted.insert(e, to);
         Ok(())

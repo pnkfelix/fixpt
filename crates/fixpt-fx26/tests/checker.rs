@@ -79,7 +79,10 @@ fn canonical(s: &str) -> String {
 
 /// The Rust checker on `program`, in the same terms as the FX-26 one.
 fn rust_check(program: &str) -> Result<Vec<String>, (String, u32, u32)> {
-    let mut c = Checker::new();
+    rust_check_in(Checker::new(), program)
+}
+
+fn rust_check_in(mut c: Checker, program: &str) -> Result<Vec<String>, (String, u32, u32)> {
     let fail = |e: fixpt_fx26::FxError| (e.message, e.span.start, e.span.end);
     let forms = c.read_in(FileId(0), program).map_err(fail)?;
     let done = c.declare_ahead(&forms).map_err(fail)?;
@@ -180,6 +183,27 @@ fn every_test_program() {
         }
     }
     eprintln!("{agreed} agree; not parsed by the FX-26 front end: {unparsed:?}");
+    assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
+}
+
+/// With `native` the program's convention (`--calling-convention
+/// native`), the two checkers agree on the conventions' programs too.
+#[test]
+fn conventions_agree_when_native() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/conventions");
+    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    names.sort();
+    let mut report = Vec::new();
+    for path in names {
+        let program = std::fs::read_to_string(&path).unwrap();
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.set_native_convention(true);
+        let ours = canon(fx26_check_in(&mut s, &program).expect("parses"));
+        let rust = canon(rust_check_in(Checker::with_convention(fixpt_fx26::ast::Conv::Native), &program));
+        if ours != rust {
+            report.push(format!("{}:\n  FX-26 {ours:?}\n  Rust  {rust:?}", path.display()));
+        }
+    }
     assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
 }
 

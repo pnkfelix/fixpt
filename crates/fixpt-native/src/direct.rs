@@ -180,10 +180,25 @@ impl DirectMachine {
     /// in the native convention: what it compiled, the first first; or why
     /// it could not.
     pub fn compile(&mut self, heap: &Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
-        let mut c = Compiling { heap, a: Asm::new(), procs: HashMap::new(), queue: Vec::new(), order: Vec::new() };
+        let mut a = Asm::new();
+        let kinds = (0..TRAPS.len()).map(|_| a.label()).collect();
+        let mut c = Compiling { heap, a, procs: HashMap::new(), queue: Vec::new(), order: Vec::new(), kinds };
         c.proc_of(closure)?;
         while let Some((word, rw)) = c.queue.pop() {
             c.procedure(word, rw)?;
+        }
+        // Each trap's code, once for them all: it records the trap and
+        // where, and leaves.
+        let traps_at = c.a.code.len();
+        for code in 1..TRAPS.len() {
+            let a = &mut c.a;
+            a.bind(c.kinds[code]);
+            a.e(movz(X9, code as u32, 0));
+            a.e(str(X9, ST, st_off(offset_of!(DState, trap))));
+            a.e(sub_imm(X9, LINK, 4));
+            a.e(str(X9, ST, st_off(offset_of!(DState, pc))));
+            a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
+            leave(a);
         }
         let Compiling { a, procs, order, .. } = c;
         let starts: Vec<(String, usize, usize)> =
@@ -194,7 +209,7 @@ impl DirectMachine {
         self.space.flush(at, 4 * code.len());
         let mut out = Vec::new();
         for (i, (name, start, arity)) in starts.iter().enumerate() {
-            let end = starts.get(i + 1).map_or(code.len(), |s| s.1);
+            let end = starts.get(i + 1).map_or(traps_at, |s| s.1);
             out.push((name.clone(), Compiled { at: at + 4 * start, len: end - start, arity: *arity }));
         }
         Ok(out)
@@ -277,6 +292,8 @@ struct Compiling<'h> {
     queue: Vec<(Value, Value)>,
     /// Every procedure, in the order first seen: name and arity.
     order: Vec<(u64, String, usize)>,
+    /// Each trap's common code, by its number.
+    kinds: Vec<Label>,
 }
 
 impl Compiling<'_> {
@@ -471,24 +488,10 @@ impl Compiling<'_> {
             }
         }
         a.bind(labels[cells.len()]);
-        // The traps, out of the way: a stub per site, then each kind's code,
-        // which records it and where, and leaves.
-        let kinds: Vec<Label> = (0..TRAPS.len()).map(|_| a.label()).collect();
+        // The traps, out of the way: a stub per site, calling its kind's code.
         for (l, code) in &stubs {
             a.bind(*l);
-            a.to(kinds[*code as usize], Fix::Bl);
-        }
-        for code in 1..TRAPS.len() {
-            if !stubs.iter().any(|(_, c)| *c as usize == code) {
-                continue;
-            }
-            a.bind(kinds[code]);
-            a.e(movz(X9, code as u32, 0));
-            a.e(str(X9, ST, st_off(offset_of!(DState, trap))));
-            a.e(sub_imm(X9, LINK, 4));
-            a.e(str(X9, ST, st_off(offset_of!(DState, pc))));
-            a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
-            leave(a);
+            a.to(self.kinds[*code as usize], Fix::Bl);
         }
         Ok(())
     }

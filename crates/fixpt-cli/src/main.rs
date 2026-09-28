@@ -52,6 +52,11 @@ options:
                                  nightly); or the hand-encoded one running each
                                  lambda's register code, which the compiler then
                                  makes
+  --calling-convention cellular|native
+                                 FX-26's default calling convention: what a
+                                 procedure type that names none has, and how
+                                 procedures are made (default: cellular); native
+                                 procedures are shown and called by `,native`
   --gc-every N                   also collect at every Nth safepoint, moving every
                                  object each time, to shake out rooting bugs
                                  (default: 0, only when the heap is full)
@@ -160,6 +165,14 @@ fn run(args: &[String]) -> i32 {
         }
     };
     let _ = CELLULAR_MACHINE.set(machine);
+    let _ = NATIVE_CONVENTION.set(match flags.calling_convention.as_deref() {
+        None | Some("cellular") => false,
+        Some("native") => true,
+        Some(name) => {
+            eprintln!("fixpt: unknown --calling-convention `{name}` (want cellular or native)");
+            return 2;
+        }
+    });
     let _ = CELLULAR_MACHINE_CODE.set(match flags.cellular_machine.as_deref() {
         Some("native-compiled" | "registers") => Some(fixpt_native::cellular::machine_code_text as fixpt_runtime::MachineCode),
         Some("stencils") => Some(fixpt_native::stencil::stencil_source_text as fixpt_runtime::MachineCode),
@@ -305,6 +318,7 @@ struct Flags {
     fx26_run: Option<String>,
     gc_every: Option<String>,
     cellular_machine: Option<String>,
+    calling_convention: Option<String>,
     step_limit: Option<String>,
     speculation_step_limit: Option<String>,
 }
@@ -318,6 +332,9 @@ pub(crate) static CELLULAR_MACHINE: std::sync::OnceLock<fixpt_runtime::RunWord> 
 pub(crate) static CELLULAR_MACHINE_CODE: std::sync::OnceLock<Option<fixpt_runtime::MachineCode>> = std::sync::OnceLock::new();
 /// Which machine that is, for the REPL to say.
 pub(crate) static CELLULAR_MACHINE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+/// `--calling-convention native`, for every FX-26 session this process
+/// starts.
+pub(crate) static NATIVE_CONVENTION: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// `--gc-every`, for every heap this process starts.
 pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -354,6 +371,7 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         fx26_run: None,
         gc_every: None,
         cellular_machine: None,
+        calling_convention: None,
         step_limit: None,
         speculation_step_limit: None,
     };
@@ -361,7 +379,8 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
     let mut i = 0;
     // Each flag takes a value, spelled either `--flag v` or `--flag=v`.
     type Setter = fn(&mut Flags, String);
-    let named: [(&str, Setter); 10] = [
+    let named: [(&str, Setter); 11] = [
+        ("--calling-convention", |f, v| f.calling_convention = Some(v)),
         ("--speculation-step-limit", |f, v| f.speculation_step_limit = Some(v)),
         ("--step-limit", |f, v| f.step_limit = Some(v)),
         ("--cellular-machine", |f, v| f.cellular_machine = Some(v)),
