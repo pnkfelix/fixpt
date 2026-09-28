@@ -55,7 +55,9 @@ pub enum Ask {
     Overview,
     /// `,help NAME` — what one name is.
     Name(String),
-    /// `,apropos TEXT` — names containing it.
+    /// `,apropos TEXT` — names containing it; in FX-26, `,apropos KIND TEXT`
+    /// looks in one namespace (`value`, `type`, `family`, `generative`,
+    /// `effect`, `region`, `base`).
     Apropos(String),
     /// `,fits TYPE` — what accepts a value of this type.
     Fits(String),
@@ -192,10 +194,12 @@ fn show(header: &str, lines: Vec<String>, empty: &str) {
 
 fn overview(h: &dyn Helpful) {
     println!("; {} — commands", h.dialect());
-    let mut rows: Vec<(&str, &str)> = vec![
-        (",help NAME", "what a name is"),
-        (",apropos TEXT", "names containing TEXT"),
-    ];
+    let mut rows: Vec<(&str, &str)> = vec![(",help NAME", "what a name is")];
+    if h.dialect() == "FX-26" {
+        rows.push((",apropos [KIND] TEXT", "names containing TEXT, in every namespace; KIND (value, type, family, generative, effect, region, base) narrows it"));
+    } else {
+        rows.push((",apropos TEXT", "names containing TEXT"));
+    }
     if h.typed() {
         rows.push((",fits TYPE", "what accepts a value of that type"));
         rows.push((",returns TYPE", "what produces one"));

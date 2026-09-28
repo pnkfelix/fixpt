@@ -53,8 +53,7 @@ queue gained", and "The next queue"):
    (the arity is known), stack limits checked once per word, returns that
    need not scan for prompt and mark entries, direct returns into callers
    known to be compiled.
-6. Smaller: `,apropos` and `,help` over every namespace; `nlist` error
-   messages; the language gaps the survey found;
+6. Smaller: `nlist` error messages; the language gaps the survey found;
    M8 docs and polish; M10, a full native compiler, is not scheduled.
 
 **Unknown**
@@ -1290,12 +1289,8 @@ New, in rough order:
 5. **Error messages for `nlist`**: say "a (nlist t n), where a (pairof t
    (nlist t n) finite) is expected" in terms of lengths.
 6. **`,apropos` and `,help` over every namespace** (the user's,
-   2026-09-27): in the FX-26 REPL both look at values (and `,help` at type
-   abbreviations and base types) but not at parametric type families,
-   generative types, named effects or private regions. One `,apropos`
-   that searches all of them and labels each hit by kind, with an optional
-   kind filter (`,apropos effect TEXT`); `,help NAME` the same. After the
-   code area's step 3.
+   2026-09-27). *(Done 2026-09-27: `Checker::description_entries`; each hit
+   labelled by kind; `,apropos KIND TEXT` narrows it.)*
 
 ### A collected code area (with the user, 2026-09-27)
 

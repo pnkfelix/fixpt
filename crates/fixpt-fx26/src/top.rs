@@ -529,6 +529,57 @@ impl Checker {
         self.base.keys().copied().collect()
     }
 
+    /// Every description name in scope, the innermost binding of each:
+    /// its name, what kind of thing it names (`type`, `family`,
+    /// `generative`, `effect`, `region`), and its definition shown, for the
+    /// REPL's `,apropos` and `,help`.
+    pub fn description_entries(&self) -> Vec<(Sym, &'static str, String)> {
+        use crate::parse::DScope;
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for (name, d) in self.dscope.iter().rev() {
+            if !seen.insert(*name) {
+                continue;
+            }
+            let n = self.interner.name(*name).to_string();
+            let entry = match d {
+                DScope::Rec(t) => ("type", format!("{n} = {}", self.show_definition(*t))),
+                DScope::Abbrev { params, body } => {
+                    let ps: Vec<String> = params.iter().map(|(p, k)| format!("({} {})", self.interner.name(*p), kind_name(*k))).collect();
+                    ("family", format!("({n} {}) = {}", ps.join(" "), fixpt_read::write_syntax(body, &self.interner)))
+                }
+                DScope::Eff(e) => ("effect", format!("{n} = {}", self.show_effect(e))),
+                DScope::Generative(g) => {
+                    let family = &self.generatives[*g as usize];
+                    let ps: Vec<String> = family
+                        .params
+                        .iter()
+                        .zip(&family.variance)
+                        .map(|((v, k), var)| {
+                            let mark = match var {
+                                crate::ast::Variance::Co => " +",
+                                crate::ast::Variance::Contra => " -",
+                                crate::ast::Variance::Inv => "",
+                            };
+                            format!("({} {}{mark})", self.interner.name(self.arena.dvar_name(*v)), kind_name(*k))
+                        })
+                        .collect();
+                    let head = if ps.is_empty() { n.clone() } else { format!("({n} {})", ps.join(" ")) };
+                    ("generative", format!("{head} = {}", self.show_ty(family.rep)))
+                }
+                DScope::Private(_) => ("region", n.clone()),
+                DScope::Var(..) | DScope::Region(_) | DScope::SizeVal(_) => continue,
+            };
+            out.push((*name, entry.0, entry.1));
+        }
+        for b in self.base_names() {
+            if seen.insert(b) {
+                out.push((b, "base type", self.interner.name(b).to_string()));
+            }
+        }
+        out
+    }
+
     /// Run `f`, then forget everything it added to the environment, the
     /// description scope and the arena. The caller restores the interner.
     pub fn scratch<T>(&mut self, f: impl FnOnce(&mut Checker) -> T) -> T {
@@ -573,3 +624,16 @@ pub const KEYWORDS: &[&str] = &[
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet",
 ];
+
+/// A kind as a program writes it.
+fn kind_name(k: crate::ast::Kind) -> &'static str {
+    use crate::ast::Kind;
+    match k {
+        Kind::Region => "region",
+        Kind::Place => "place",
+        Kind::Effect => "effect",
+        Kind::Type => "type",
+        Kind::Data => "data",
+        Kind::Size => "size",
+    }
+}

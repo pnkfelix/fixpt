@@ -357,3 +357,31 @@ fn a_hole_can_be_asked_about_before_the_form_is_finished() {
     // it is not offered.
     assert!(!out.contains("`,resume EXPR`"), "{out}");
 }
+
+/// In FX-26, `,apropos` looks in every namespace, labelling what it finds,
+/// and `,apropos KIND TEXT` in one; `,help` shows each meaning of a name.
+#[test]
+fn fx26_apropos_searches_every_namespace() {
+    let defs = "(define-effect kstate (maxeff (read @t) (write @t)))\n\
+                (define-type kcell (ref int @t))\n\
+                (define-type (kbox (t type)) (pairof t t finite))\n\
+                (define-generative (kid (t type +)) (pairof t int finite))\n\
+                (define kval int 3)\n";
+    let out = repl(Some("fx26"), &format!("{defs},apropos k\n"));
+    for want in [
+        "kstate = (maxeff (read @t) (write @t))  (an effect)",
+        "kcell = (ref int @t)  (a type)",
+        "(kbox (t type)) = (pairof t t finite)  (a type family)",
+        "(kid (t type +)) = (pairof t int finite)  (a generative type)",
+        "kval : int",
+    ] {
+        assert!(out.contains(want), "no `{want}` in:\n{out}");
+    }
+    // What `,apropos` finds is the indented lines; the rest echoes the
+    // definitions.
+    let out = repl(Some("fx26"), &format!("{defs},apropos effect k\n"));
+    let found: Vec<&str> = out.lines().filter_map(|l| l.split("fx26> ").last()).filter(|l| l.starts_with("  ")).collect();
+    assert_eq!(found, ["  kstate = (maxeff (read @t) (write @t))  (an effect)"], "{out}");
+    let out = repl(Some("fx26"), &format!("{defs},help kid\n"));
+    assert!(out.contains("(kid (t type +)) = (pairof t int finite)  (a generative type)"), "{out}");
+}

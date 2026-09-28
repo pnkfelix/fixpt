@@ -401,26 +401,38 @@ impl crate::help::Helpful for Checker {
         if let Some(t) = self.type_of_name(sym) {
             out.push(format!("{name} : {}", self.show_ty(t)));
         }
-        if let Some(t) = self.type_named(sym) {
-            out.push(format!("{name} = {}  (a type)", self.show_definition(t)));
-        }
-        if self.base_names().contains(&sym) {
-            out.push(format!("{name}  (a base type)"));
+        for (s, kind, shown) in self.description_entries() {
+            if s == sym {
+                out.push(format!("{shown}  ({})", a_kind(kind)));
+            }
         }
         out
     }
 
+    /// Names containing `pattern`, in every namespace: values, and each
+    /// kind of description. `KIND TEXT` (`value`, `type`, `family`,
+    /// `generative`, `effect`, `region` or `base`) looks in that one only.
     fn apropos(&mut self, pattern: &str) -> Vec<String> {
-        let mut out: Vec<String> = self
-            .value_names()
-            .into_iter()
-            .filter(|s| self.interner.name(*s).contains(pattern))
-            .filter_map(|s| {
+        const KINDS: [&str; 7] = ["value", "type", "family", "generative", "effect", "region", "base"];
+        let (only, text) = match pattern.split_once(char::is_whitespace) {
+            Some((k, rest)) if KINDS.contains(&k) && !rest.trim().is_empty() => (Some(k), rest.trim()),
+            _ => (None, pattern),
+        };
+        let wants = |k: &str| only.is_none_or(|o| o == k || (o == "base" && k == "base type"));
+        let mut out: Vec<String> = Vec::new();
+        if wants("value") {
+            out.extend(self.value_names().into_iter().filter(|s| self.interner.name(*s).contains(text)).filter_map(|s| {
                 let t = self.type_of_name(s)?;
                 Some(format!("{} : {}", self.interner.name(s), self.show_ty(t)))
-            })
-            .collect();
+            }));
+        }
+        for (s, kind, shown) in self.description_entries() {
+            if wants(kind) && self.interner.name(s).contains(text) {
+                out.push(format!("{shown}  ({})", a_kind(kind)));
+            }
+        }
         out.sort();
+        out.dedup();
         out
     }
 
@@ -715,4 +727,11 @@ mod commands {
         let lines = answer_hole(&mut c, &forms[0]).expect("a hole");
         assert_eq!(lines, ["; the hole wants: int  (argument 2 of =)"]);
     }
+}
+
+/// "a type", "an effect": a kind of description, with its article.
+fn a_kind(kind: &str) -> String {
+    let article = if kind.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+    let name = if kind == "family" { "type family" } else if kind == "generative" { "generative type" } else if kind == "region" { "private region" } else { kind };
+    format!("{article} {name}")
 }
