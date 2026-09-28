@@ -60,6 +60,10 @@ pub fn disassemble(w: u32, at: i64) -> String {
         _ if is(0xFFE0_0C00, 0x9A80_0000) => format!("csel {}, {}, {}, {}", x(d), x(n), x(m), cond((w >> 12) & 15)),
         _ if is(0xFF80_0000, 0xD280_0000) => mov16("movz", w),
         _ if is(0xFF80_0000, 0xF280_0000) => mov16("movk", w),
+        _ if is(0x9F00_0000, 0x1000_0000) => {
+            let bytes = sext(((w >> 5) & 0x7ffff) << 2 | (w >> 29) & 3, 21);
+            format!("adr {}, {}", x(d), target(at, bytes / 4))
+        }
         _ if is(0xFC00_0000, 0x1400_0000) => format!("b {}", target(at, sext(w & 0x3ff_ffff, 26))),
         _ if is(0xFC00_0000, 0x9400_0000) => format!("bl {}", target(at, sext(w & 0x3ff_ffff, 26))),
         _ if is(0xFF00_0010, 0x5400_0000) => format!("b.{} {}", cond(w & 15), target(at, imm19)),

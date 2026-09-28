@@ -326,8 +326,51 @@ fn native_and_cellular_code_call_each_other() {
         let forms = s.checker.read_in(FileId(0), include_str!("programs/native/mixed.fx")).expect("reads");
         let out: Vec<String> =
             s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
-        assert!(out[4].ends_with("Ok(Some(\"5150\"))") && out[4].contains("`callcc`"), "{out:?}");
-        assert!(out[5].ends_with("Ok(Some(\"42\"))"), "{out:?}");
+        assert!(out[5].ends_with("Ok(Some(\"5150\"))") && out[5].contains("run as cellular code"), "{out:?}");
+        assert!(out[6].ends_with("Ok(Some(\"42\"))"), "{out:?}");
+    }
+}
+
+/// `run_native`, collecting every 97 safepoints while the native code runs
+/// (not while the front end compiles it).
+fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
+    let was = std::mem::replace(&mut rt.heap.gc_every, 97);
+    let r = run_native(rt, closure, fuel);
+    rt.heap.gc_every = was;
+    r
+}
+
+/// Control on native frames (`docs/research/native-conventions.md`, step
+/// 5): prompts and aborts, whole and composable continuations taken and
+/// given values, throws out of regions, and marks, each program's last
+/// form run as machine code, not declined, collecting often as it runs, so
+/// that frames and taken continuations move.
+#[test]
+fn control_on_native_frames() {
+    use fixpt_fx26::session::Strategy;
+    let programs = [
+        ("bidirectional/capture-and-resume", "4"),
+        ("bidirectional/cwcc", "1"),
+        ("bidirectional/own-abort", "5"),
+        ("run/region-escapes", "500500"),
+        ("run/region-throws", "500500"),
+        ("pldi89/c7", "(#<continuation> . #<continuation>)"),
+        ("bench/captures", "420000"),
+    ];
+    for (name, want) in programs {
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.strategy = Strategy::Cellular;
+        s.native_runner = Some(run_native_collecting);
+        s.native_compiler = Some(fixpt_native::direct::compile_closure);
+        s.register_code = true;
+        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+        let text = std::fs::read_to_string(format!("{}/tests/programs/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let forms = s.checker.read_in(FileId(0), &text).expect("reads");
+        let (last, before) = forms.split_last().expect("a form");
+        s.run_forms(before).expect("runs");
+        let out = s.run(last).expect("checks");
+        assert!(!out.printed.contains("not in the native convention"), "{name}: {}", out.printed);
+        assert_eq!(out.value.map(|v| v.unwrap_or_default()), Ok(want.to_string()), "{name}");
     }
 }
 

@@ -20,6 +20,7 @@ mod regcode;
 mod sro;
 mod cellular;
 
+pub use cellular::NATIVE_CONT_MARK;
 pub use sro::SroKind;
 pub mod value;
 

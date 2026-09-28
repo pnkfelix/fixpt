@@ -107,6 +107,17 @@ struct DState {
     clo: u64,
     delta: u64,
     code_lo: u64,
+    /// For control: where a continuation taken now resumes (set by the code
+    /// before the call-out that takes it); where a call-out that does not
+    /// return to its caller goes instead (the stack, frame, code and value
+    /// it resumes with); and how many regions are live, as a fixnum, which
+    /// a prompt keeps.
+    ret_pc: u64,
+    resume_sp: u64,
+    resume_fp: u64,
+    resume_pc: u64,
+    resume_x0: u64,
+    regions: u64,
 }
 
 /// The traps this code raises, by code.
@@ -134,12 +145,30 @@ enum Callout {
     /// state's `nargs` arguments: a cellular closure or continuation, run
     /// by the cellular machine (`fixpt_engine::cellular::call_value`).
     Foreign,
+    /// `abort-current-continuation`: to the innermost prompt for the tag
+    /// (argument 0), with the value (argument 1), resumed at its landing.
+    Abort,
+    /// A continuation taken, whole (`cwcc`) or up to the innermost prompt
+    /// for the tag (argument 1): a native closure over the frames it takes,
+    /// of the code in the state's `aux`, the continuation procedure.
+    Capture { whole: bool },
+    /// A continuation (argument 1) given a value (argument 0): its frames
+    /// put back, and resumed.
+    Reinstate,
+    /// `first-mark`: the innermost mark for the key, or the default.
+    FirstMark,
+    /// `current-marks`: every mark for the key, innermost first.
+    CurrentMarks,
+    /// `marks-of`: those a continuation took.
+    MarksOf,
 }
 
 impl Callout {
     fn arity(self) -> usize {
         match self {
-            Callout::Cons | Callout::FieldRef => 2,
+            Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
+            Callout::Capture { whole } => if whole { 1 } else { 2 },
+            Callout::CurrentMarks => 1,
             Callout::Foreign => 0,
             Callout::Prim { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
@@ -218,6 +247,17 @@ pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Valu
     })
 }
 
+/// What a prompt's frame, and a mark's, holds first, and a continuation's
+/// data: values no program can make (`UNBOUND` with a payload), so no other
+/// frame's first slot is one.
+const PROMPT_MARK: Value = Value(Value::UNBOUND.raw() + (1 << 8));
+const MARK_MARK: Value = Value(Value::UNBOUND.raw() + (2 << 8));
+const CONT_MARK: Value = fixpt_heap::NATIVE_CONT_MARK;
+/// A prompt's frame, and a mark's: the link, the landing (for a mark, 0),
+/// the marker, the tag and handler (the key and value), and the regions
+/// live (for a mark, 0).
+const CONTROL_FRAME: u64 = 48;
+
 fn st_off(f: usize) -> u32 {
     f as u32
 }
@@ -236,6 +276,8 @@ enum Fix {
     B,
     Bl,
     If(Cond),
+    /// `adr` of the label into the register.
+    Adr(Reg),
 }
 
 /// Instructions with labels, patched when everything is placed.
@@ -275,6 +317,7 @@ impl Asm {
                 Fix::B => b(d),
                 Fix::Bl => bl(d),
                 Fix::If(c) => b_cond(c, d),
+                Fix::Adr(t) => adr(t, d),
             };
         }
         Ok(self.code)
@@ -342,7 +385,7 @@ impl DirectMachine {
     /// bloblet of its own: what it compiled, the first first; or why it
     /// could not.
     pub fn compile(&mut self, heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
-        let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts };
+        let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None };
         let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
         let first = c.proc_of(word)?;
         while let Some(p) = c.queue.pop() {
@@ -403,6 +446,7 @@ impl DirectMachine {
             top: rt.heap.top_address() as u64,
             words: rt.heap.words_address() as u64,
             alloc_limit: rt.heap.inline_limit() as u64,
+            regions: Value::fixnum(rt.heap.live_regions() as i64).raw(),
             ..DState::default()
         };
         for (i, a) in args.iter().enumerate() {
@@ -470,6 +514,17 @@ fn trampoline() -> Vec<u32> {
     a.finish().expect("no labels")
 }
 
+/// Where a call-out that does not return to its caller said to go: its
+/// stack, frame and value, and there.
+fn resume(a: &mut Asm) {
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, resume_sp))));
+    a.e(add_imm(SP, X9, 0));
+    a.e(ldr(FRAME, ST, st_off(offset_of!(DState, resume_fp))));
+    a.e(ldr(RESULT, ST, st_off(offset_of!(DState, resume_x0))));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, resume_pc))));
+    a.e(br(X16));
+}
+
 /// Back to Rust from anywhere on the native stack.
 fn leave(a: &mut Asm) {
     a.e(ldr(X9, ST, st_off(offset_of!(DState, rust_sp))));
@@ -490,9 +545,43 @@ struct Compiling<'h> {
     queue: Vec<usize>,
     /// The machine's call-outs, which this compile adds to.
     callouts: &'h mut Vec<Callout>,
+    /// The continuation procedure, once a procedure takes a continuation.
+    resume: Option<usize>,
 }
 
 impl Compiling<'_> {
+    /// The continuation procedure: what a continuation's native closure
+    /// runs, given the value (in `x1`), the closure in `CLO`. In a frame of
+    /// its own, it calls out to put the continuation's frames back, which
+    /// it replaces (`Callout::Reinstate`), and goes where they resume.
+    fn resume_proc(&mut self) -> usize {
+        if let Some(q) = self.resume {
+            return q;
+        }
+        let mut a = Asm::new();
+        a.e(stp_pre(FRAME, LINK, SP, -16));
+        a.e(add_imm(FRAME, SP, 0));
+        let args = offset_of!(DState, args) as u32;
+        a.e(str(1, ST, args));
+        a.e(str(CLO, ST, args + 8));
+        let n = self.callouts.len();
+        self.callouts.push(Callout::Reinstate);
+        call_out(&mut a, n);
+        let failed = a.label();
+        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+        a.e(cmp_imm(X9, 0));
+        a.to(failed, Fix::If(Cond::Ne));
+        resume(&mut a);
+        a.bind(failed);
+        a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
+        leave(&mut a);
+        let code = a.finish().expect("placed");
+        let q = self.procs.len();
+        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself], len: code.len(), code });
+        self.resume = Some(q);
+        q
+    }
+
     /// The procedure of cellular word `word`, queued to compile if new.
     fn proc_of(&mut self, word: Value) -> Result<usize, String> {
         if let Some(p) = self.by_word.get(&word.raw()) {
@@ -619,6 +708,9 @@ impl Compiling<'_> {
         // arguments, and whether a tail call), which calls the common
         // routine that calls out for it.
         let mut foreign: Vec<(Label, Label, usize, bool)> = Vec::new();
+        // Where a call-out that does not return goes on (an abort), if one
+        // does here.
+        let (resume_at, mut uses_resume) = (a.label(), false);
         let trap = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, code: u32, c: Cond| {
             let l = a.label();
             stubs.push((l, code));
@@ -839,6 +931,115 @@ impl Compiling<'_> {
                     }
                     a.e(stur(reg(o(1)), RESULT, off));
                 }
+                // Control, on the native stack (`docs/research/
+                // native-conventions.md`, step 5). A prompt, and a mark, is a
+                // frame of its own around the thunk's call, which the frames'
+                // walk finds; the rest are call-outs, which walk the frames,
+                // and take and put back runs of them.
+                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "abort" | "callcc" | "callcomp" | "firstmark" | "currentmarks" | "marksof")) => {
+                    if frame.is_none() {
+                        return decline("a call-out outside a frame".into());
+                    }
+                    let args = offset_of!(DState, args) as u32;
+                    // A call of the closure in `CLO`, `n` arguments in
+                    // registers, back at `after`: native code, or not.
+                    let call_clo = |a: &mut Asm, foreign: &mut Vec<(Label, Label, usize, bool)>, n: usize, after: Label| {
+                        let stub = a.label();
+                        a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                        a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
+                        a.e(cmp(X16, X17));
+                        a.to(stub, Fix::If(Cond::Lo));
+                        foreign.push((stub, after, n, false));
+                        a.e(add(X16, X16, DELTA));
+                        a.e(blr(X16));
+                        a.bind(after);
+                    };
+                    let callout = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, callouts: &mut Vec<Callout>, c: Callout| {
+                        let n = callouts.len();
+                        callouts.push(c);
+                        for j in 0..c.arity() {
+                            a.e(str(1 + j as Reg, ST, args + 8 * j as u32));
+                        }
+                        call_out(a, n);
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+                        a.e(cmp_imm(X9, 0));
+                        trap(a, stubs, PRIM_FAILED, Cond::Ne);
+                    };
+                    // A control frame: the link, `second` (the landing, or
+                    // nothing), the marker, `x1` and `x2`, and `last`.
+                    let control_frame = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, second: Reg, marker: Value, last: Option<u32>| {
+                        a.e(stp_pre(FRAME, second, SP, -(CONTROL_FRAME as i64)));
+                        a.e(add_imm(FRAME, SP, 0));
+                        a.e(cmp_sp(LIMIT));
+                        trap(a, stubs, STACK_OVERFLOW, Cond::Lo);
+                        a.es(&mov_imm64(X16, marker.raw()));
+                        a.e(str(X16, FRAME, 16));
+                        a.e(str(1, FRAME, 24));
+                        a.e(str(2, FRAME, 32));
+                        match last {
+                            Some(off) => {
+                                a.e(ldr(X16, ST, off));
+                                a.e(str(X16, FRAME, 40));
+                            }
+                            None => a.e(str(XZR, FRAME, 40)),
+                        }
+                    };
+                    let pop_control = |a: &mut Asm| {
+                        a.e(ldr(FRAME, SP, 0));
+                        a.e(add_imm(SP, SP, CONTROL_FRAME as u32));
+                    };
+                    match ROUTINES[k(o(0))].0 {
+                        // `x1` the tag, `x2` the handler, `x3` the thunk. An
+                        // abort resumes at the landing, the prompt's frame on
+                        // top, with the value: the handler called with it.
+                        "prompt" => {
+                            let (land, after, done, handled) = (a.label(), a.label(), a.label(), a.label());
+                            a.to(land, Fix::Adr(X9));
+                            control_frame(&mut a, &mut stubs, X9, PROMPT_MARK, Some(st_off(offset_of!(DState, regions))));
+                            a.e(mov(CLO, 3));
+                            call_clo(&mut a, &mut foreign, 0, after);
+                            pop_control(&mut a);
+                            a.to(done, Fix::B);
+                            a.bind(land);
+                            a.e(mov(1, RESULT));
+                            a.e(ldr(CLO, SP, 32));
+                            pop_control(&mut a);
+                            call_clo(&mut a, &mut foreign, 1, handled);
+                            a.bind(done);
+                        }
+                        // `x1` the key, `x2` the value, `x3` the thunk.
+                        "withmark" => {
+                            let after = a.label();
+                            control_frame(&mut a, &mut stubs, XZR, MARK_MARK, None);
+                            a.e(mov(CLO, 3));
+                            call_clo(&mut a, &mut foreign, 0, after);
+                            pop_control(&mut a);
+                        }
+                        "abort" => {
+                            callout(&mut a, &mut stubs, self.callouts, Callout::Abort);
+                            uses_resume = true;
+                            a.to(resume_at, Fix::B);
+                        }
+                        // The continuation resumes where `f`'s call returns:
+                        // it is taken, and `f` called with it.
+                        r @ ("callcc" | "callcomp") => {
+                            let after = a.label();
+                            a.to(after, Fix::Adr(X9));
+                            a.e(str(X9, ST, st_off(offset_of!(DState, ret_pc))));
+                            let q = self.resume_proc();
+                            let f = self.field(p, Field::Code(q));
+                            ldr_field(&mut a, X9, f);
+                            a.e(str(X9, ST, st_off(offset_of!(DState, aux))));
+                            callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r == "callcc" });
+                            a.e(mov(1, RESULT));
+                            a.e(ldr(CLO, ST, args));
+                            call_clo(&mut a, &mut foreign, 1, after);
+                        }
+                        "firstmark" => callout(&mut a, &mut stubs, self.callouts, Callout::FirstMark),
+                        "currentmarks" => callout(&mut a, &mut stubs, self.callouts, Callout::CurrentMarks),
+                        _ => callout(&mut a, &mut stubs, self.callouts, Callout::MarksOf),
+                    }
+                }
                 // A call-out: to Rust, on Rust's stack, which may collect;
                 // everything live is in the frame by then (register code
                 // sees to it), and the arguments go through the state.
@@ -1018,6 +1219,10 @@ impl Compiling<'_> {
             a.e(ldp_post(FRAME, LINK, SP, 16));
             a.e(ret());
         }
+        if uses_resume {
+            a.bind(resume_at);
+            resume(&mut a);
+        }
         // The traps, out of the way: a stub per site, calling its kind's
         // code, which records the trap and where, and leaves.
         let kinds: Vec<Label> = (0..TRAPS.len()).map(|_| a.label()).collect();
@@ -1147,6 +1352,44 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
                 }
             }
         }
+        Callout::Abort => match frames_of(st).into_iter().find(|&(fp, end)| is_control(fp, end, PROMPT_MARK, args[0])) {
+            // The prompt's frame on top, resumed at its landing, with what
+            // the regions entered inside it held gone.
+            Some((pf, _)) => {
+                rt.heap.region_exit(Value(word(pf + 40)).as_fixnum() as usize);
+                (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (pf, pf, word(pf + 8), args[1].raw());
+                0
+            }
+            None => failed(st, "abort: no prompt for this tag".into()),
+        },
+        Callout::Capture { whole } => {
+            // `f`, moved by a collection, where the code reads it.
+            st.args[0] = args[0].raw();
+            let frames = frames_of(st);
+            let end = if whole {
+                Some(st.stack_top)
+            } else {
+                frames.iter().find(|&&(fp, end)| is_control(fp, end, PROMPT_MARK, args[1])).map(|&(fp, _)| fp)
+            };
+            match end {
+                Some(end) => capture(rt, st, &frames, end, whole).raw(),
+                None => failed(st, "call-with-composable-continuation: no prompt for this tag".into()),
+            }
+        }
+        Callout::Reinstate => reinstate(rt, st, args[1], args[0]),
+        Callout::FirstMark => {
+            let found = frames_of(st).into_iter().find(|&(fp, end)| is_control(fp, end, MARK_MARK, args[0]));
+            found.map_or(args[1], |(fp, _)| Value(word(fp + 32))).raw()
+        }
+        Callout::CurrentMarks => {
+            let marks: Vec<Value> =
+                frames_of(st).into_iter().filter(|&(fp, end)| is_control(fp, end, MARK_MARK, args[0])).map(|(fp, _)| Value(word(fp + 32))).collect();
+            rt.heap.list_from(&marks).raw()
+        }
+        Callout::MarksOf => match marks_of(&rt.heap, args[0], args[1]) {
+            Some(marks) => rt.heap.list_from(&marks).raw(),
+            None => failed(st, "marks-of: not a continuation".into()),
+        },
         Callout::Prim { p, .. } => {
             let def = &fixpt_runtime::PRIMITIVES[p];
             let fixpt_runtime::PrimKind::Simple(f) = def.kind else { unreachable!("checked when compiled") };
@@ -1161,10 +1404,147 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             }
         }
     };
-    // Where the heap is now, and how far native code may allocate in it.
+    // Where the heap is now, and how far native code may allocate in it;
+    // how many regions are live.
     st.words = rt.heap.words_address() as u64;
     st.alloc_limit = rt.heap.inline_limit() as u64;
+    st.regions = Value::fixnum(rt.heap.live_regions() as i64).raw();
     out
+}
+
+/// A call-out's failure, saying why: the call traps.
+fn failed(st: &mut DState, why: String) -> u64 {
+    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(why));
+    st.trap = PRIM_FAILED as u64;
+    0
+}
+
+/// The word at `at`, on the native stack.
+fn word(at: u64) -> u64 {
+    // SAFETY: a word of a frame on the native stack, which the call-out's
+    // caller made and which lives while it runs.
+    unsafe { *(at as *const u64) }
+}
+
+fn set_word(at: u64, w: u64) {
+    // SAFETY: a word of the native stack, above its limit, which no Rust
+    // code holds while the call-out runs.
+    unsafe { *(at as *mut u64) = w }
+}
+
+/// Each native frame, innermost first, from the one that called out: where
+/// it starts, and where it ends (its caller's frame, or the stack's top).
+fn frames_of(st: &DState) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let mut fp = st.fp;
+    while fp != 0 && fp < st.stack_top {
+        let caller = word(fp);
+        let end = if caller > fp && caller <= st.stack_top { caller } else { st.stack_top };
+        out.push((fp, end));
+        fp = if end == caller { caller } else { 0 };
+    }
+    out
+}
+
+/// Whether the frame at `fp` is a control frame of `marker` for `key`.
+fn is_control(fp: u64, end: u64, marker: Value, key: Value) -> bool {
+    end - fp == CONTROL_FRAME && word(fp + 16) == marker.raw() && word(fp + 24) == key.raw()
+}
+
+/// The continuation of the frames from the one that called out up to `end`
+/// (the stack's top, or a prompt's frame), resumed where the state's
+/// `ret_pc` says: a native closure of the continuation procedure (the
+/// state's `aux`) over what it holds. The frames are kept as values: each
+/// frame's link as an offset from the first (or -1, for the last, whose
+/// link and return address are those of whoever gives the continuation a
+/// value), its return address as a fixnum, its slots as they are.
+fn capture(rt: &mut fixpt_runtime::Runtime, st: &DState, frames: &[(u64, u64)], end: u64, whole: bool) -> Value {
+    let base = st.fp;
+    let mut words = Vec::new();
+    for &(fp, stop) in frames.iter().take_while(|&&(fp, _)| fp < end) {
+        let link = word(fp);
+        words.push(Value::fixnum(if link > fp && link < end { (link - base) as i64 } else { -1 }));
+        words.push(Value::fixnum(word(fp + 8) as i64));
+        words.extend((fp + 16..stop).step_by(8).map(|at| Value(word(at))));
+    }
+    let heap = &mut rt.heap;
+    let saved = heap.vector_from(&words);
+    let regions = Value::fixnum(heap.live_regions() as i64);
+    let data = heap.vector_from(&[CONT_MARK, saved, Value::fixnum(st.ret_pc as i64), regions, Value::boolean(whole)]);
+    native_closure(heap, Value(st.aux), &[data])
+}
+
+/// Continuation `k` given `v`: its frames put back, and the state told to
+/// resume where it was taken. A whole one replaces the native stack, its
+/// last frame returning where the current last one does, and ends the
+/// regions entered since it was taken; a delimited one goes on top of the
+/// continuation procedure's caller (the frame that procedure made is
+/// where), its last frame returning to that caller.
+fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Value) -> u64 {
+    let heap = &mut rt.heap;
+    let data = heap.bloblet_slot(k, CLOSURE_FREE0);
+    let (saved, pc, regions, whole) = (heap.obj_ref(data, 1), heap.obj_ref(data, 2), heap.obj_ref(data, 3), heap.obj_ref(data, 4) == Value::TRUE);
+    let n = heap.obj_len(saved);
+    let (end, outer_link, outer_lr) = if whole {
+        let &(last, _) = frames_of(st).last().expect("a frame");
+        (st.stack_top, word(last), word(last + 8))
+    } else {
+        (st.fp + 16, word(st.fp), word(st.fp + 8))
+    };
+    let base = end - 8 * n as u64;
+    if base < st.stack_limit {
+        return failed(st, "stack overflow".into());
+    }
+    let mut at = 0;
+    while at < n {
+        let link = heap.obj_ref(saved, at).as_fixnum();
+        let next = if link < 0 { n } else { link as usize / 8 };
+        set_word(base + 8 * at as u64, if link < 0 { outer_link } else { base + link as u64 });
+        set_word(base + 8 * at as u64 + 8, if link < 0 { outer_lr } else { heap.obj_ref(saved, at + 1).as_fixnum() as u64 });
+        for j in at + 2..next {
+            set_word(base + 8 * j as u64, heap.obj_ref(saved, j).raw());
+        }
+        at = next;
+    }
+    if whole {
+        heap.region_exit(regions.as_fixnum() as usize);
+    }
+    (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (base, base, pc.as_fixnum() as u64, v.raw());
+    0
+}
+
+/// The marks for `key` continuation `k` took, innermost first: a native
+/// continuation's, from its frames; a cellular one's, from its return
+/// stack's entries. None if `k` is neither.
+fn marks_of(heap: &Heap, k: Value, key: Value) -> Option<Vec<Value>> {
+    {
+        if let Some(data) = heap.native_continuation_of(k) {
+            let saved = heap.obj_ref(data, 1);
+            let n = heap.obj_len(saved);
+            let (mut out, mut at) = (Vec::new(), 0);
+            while at < n {
+                let link = heap.obj_ref(saved, at).as_fixnum();
+                let next = if link < 0 { n } else { link as usize / 8 };
+                if next - at == CONTROL_FRAME as usize / 8 && heap.obj_ref(saved, at + 2) == MARK_MARK && heap.obj_ref(saved, at + 3) == key {
+                    out.push(heap.obj_ref(saved, at + 4));
+                }
+                at = next;
+            }
+            return Some(out);
+        }
+    }
+    let c = heap.continuation_of(k)?;
+    let rs = heap.bloblet_slot(c, fixpt_heap::layout::cellular::CONT_RS);
+    let entries: Vec<Value> = (0..heap.obj_len(rs)).map(|i| heap.obj_ref(rs, i)).collect();
+    let mut out = Vec::new();
+    let mut i = entries.len();
+    while i >= 4 {
+        i -= 4;
+        if entries[i] == fixpt_engine::cellular::MARK_MARK && entries[i + 1] == key {
+            out.push(entries[i + 2]);
+        }
+    }
+    Some(out)
 }
 
 /// The slots of every native frame, innermost first, from the frame that

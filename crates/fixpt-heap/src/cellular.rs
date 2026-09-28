@@ -121,6 +121,18 @@ impl Heap {
         c
     }
 
+    /// The saved frames of the native continuation `v` is: a native closure
+    /// over one vector, marked first with `NATIVE_CONT_MARK`, which only the
+    /// native convention's `Callout::Capture` makes (`fixpt-native`).
+    pub fn native_continuation_of(&self, v: Value) -> Option<Value> {
+        use crate::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
+        if !(v.is_bloblet() && self.bloblet_kind(v) == crate::layout::kind("native-closure")) || self.bloblet_head(v).fields <= CLOSURE_WORD {
+            return None;
+        }
+        let data = self.bloblet_slot(v, CLOSURE_FREE0);
+        (self.obj_type(data) == Some(crate::ObjType::Vector) && self.obj_len(data) == 5 && self.obj_ref(data, 0) == NATIVE_CONT_MARK).then_some(data)
+    }
+
     /// The continuation `v` is, or wraps: a closure over exactly one
     /// continuation whose word ends in `resume`, which only
     /// `continuation_closure` makes.
@@ -156,3 +168,7 @@ impl Heap {
         v.is_bloblet() && self.bloblet_kind(v) == KIND
     }
 }
+
+/// What a native continuation's data holds first: a value no program can
+/// make (`UNBOUND` with a payload).
+pub const NATIVE_CONT_MARK: Value = Value(Value::UNBOUND.raw() + (3 << 8));

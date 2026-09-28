@@ -249,6 +249,12 @@ pub fn cbz(t: Reg, words: i64) -> u32 {
 pub fn cbnz(t: Reg, words: i64) -> u32 {
     0xB500_0000 | simm(words, 19) << 5 | r(t)
 }
+/// `adr xd`: the address `words` instructions from here (signed, 19 bits
+/// of words; the low two bits of the byte offset are always zero).
+pub fn adr(d: Reg, words: i64) -> u32 {
+    let bytes = simm(words * 4, 21);
+    0x1000_0000 | (bytes & 3) << 29 | (bytes >> 2) << 5 | r(d)
+}
 /// `br xn`.
 pub fn br(n: Reg) -> u32 {
     0xD61F_0000 | r(n) << 5
