@@ -5035,6 +5035,13 @@
                                            ", which is not yet known here; give the other arguments first, or `proj` the operator")
                                    (k-start arg) (k-end arg)))))
                   (cond
+                    ;; A thunk has no parameters to be told: told nothing, it
+                    ;; says what it is, as any argument does.
+                    ((and (k-needs-telling? arg) (null? (k-as-subr p)) (tagcase arg (x-lambda (ps body a b) (null? ps)) (else y #f)))
+                     (let ((r (k-synth arg)))
+                       (begin (k-unify (car params) (extract r 1) kinds solved (the k-trail (new nil)))
+                              (array-set! done-t i (extract r 1))
+                              (array-set! done-e i (extract r 2)))))
                     ((k-needs-telling? arg)
                      (let ((c (k-as-subr p)))
                        (if (or (null? c) (k-any-unknown-type? (extract (car c) 2) kinds solved))

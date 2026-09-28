@@ -41,7 +41,8 @@ queue gained", and "The next queue"):
 5. M13's rest: inlining (13f), superinstructions (13g), join points (13i),
    the rest of known calls, a nursery with a write barrier, cheaper
    continuations, a lint on a lambda's size.
-6. Smaller: `nlist` error messages; the language gaps the survey found;
+6. Smaller: `,apropos` and `,help` over every namespace; `nlist` error
+   messages; the language gaps the survey found;
    M8 docs and polish; M10, a full native compiler, is not scheduled.
 
 **Unknown**
@@ -1276,6 +1277,13 @@ New, in rough order:
    effect (5) was needed nowhere in the front end.
 5. **Error messages for `nlist`**: say "a (nlist t n), where a (pairof t
    (nlist t n) finite) is expected" in terms of lengths.
+6. **`,apropos` and `,help` over every namespace** (the user's,
+   2026-09-27): in the FX-26 REPL both look at values (and `,help` at type
+   abbreviations and base types) but not at parametric type families,
+   generative types, named effects or private regions. One `,apropos`
+   that searches all of them and labels each hit by kind, with an optional
+   kind filter (`,apropos effect TEXT`); `,help NAME` the same. After the
+   code area's step 3.
 
 ### A collected code area (with the user, 2026-09-27)
 

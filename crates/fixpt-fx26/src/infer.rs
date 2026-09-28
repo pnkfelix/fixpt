@@ -727,6 +727,14 @@ impl Checker {
                 // The parameter types must be known; the result helps if it
                 // is, and otherwise the body says what it is.
                 let Some((_, ps, res)) = self.arena.get(p).as_subr() else {
+                    // A thunk has no parameters to be told: told nothing, it
+                    // says what it is, as any argument does.
+                    if !self.unannotated_lambda(*a) {
+                        let (t, eff) = self.synth(*a)?;
+                        self.unify(params[i], t, &mut u, &mut HashSet::new());
+                        done[i] = Some((t, eff));
+                        continue;
+                    }
                     return Err(not_known(self, p));
                 };
                 if ps.iter().any(|t| self.mentions_unknown_type(*t, &u)) {
