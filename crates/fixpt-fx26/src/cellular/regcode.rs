@@ -871,8 +871,38 @@ impl Compiler<'_> {
             };
             match std {
                 Std::Op2 { r, swap, not } => {
-                    let (a, b) = if swap { (args[1], args[0]) } else { (args[0], args[1]) };
-                    self.r_binary(g, r, a, b, env, te)?;
+                    let (x, y) = (args[0], args[1]);
+                    // A chain of `+`, and `-` of constants, with one operand
+                    // not a constant, deeper than here: that one, and then
+                    // the constants' sum at once. Integers are exact, so the
+                    // order they are added in cannot matter.
+                    if let Some((Some(core), k)) = self.r_split_app(env, &name, args)
+                        && core != x
+                        && core != y
+                    {
+                        self.r_exp(g, core, env, te, false)?;
+                        if k > 0 {
+                            g.op("op2imm", &[Value::fixnum(routine("int-add") as i64), Value::fixnum(k)]);
+                        } else if k < 0 {
+                            g.op("op2imm", &[Value::fixnum(routine("int-sub") as i64), Value::fixnum(-k)]);
+                        }
+                        g.done(tail);
+                        return Some(());
+                    }
+                    // Operands trade places only where one is a variable or
+                    // a constant, which neither has an effect nor sees one
+                    // (only a definition writes a global); else they run as
+                    // written. A constant goes second, an immediate, where
+                    // the operation does not care which.
+                    let known = |c: &mut Self, e: ExpId| c.r_const(env, e).is_some();
+                    let free = |c: &mut Self, e: ExpId| c.r_simple(e) || known(c, e);
+                    if swap && !free(self, x) && !free(self, y) {
+                        self.r_binary_swapped(g, r, x, y, env, te)?;
+                    } else if swap || (matches!(r, "int-add" | "eq") && known(self, x) && !known(self, y)) {
+                        self.r_binary(g, r, y, x, env, te)?;
+                    } else {
+                        self.r_binary(g, r, x, y, env, te)?;
+                    }
                     if not {
                         g.op("op2imm", &[Value::fixnum(routine("eq") as i64), Value::FALSE]);
                     }
@@ -1346,6 +1376,68 @@ impl Compiler<'_> {
             (None, Some(k)) => g.op("op2", &[r, Gen::n(k)]),
             (None, None) => return None,
         }
+        Some(())
+    }
+
+    /// `x` as `core + k`: `core` the one operand of a chain of `+`, and of
+    /// `-` of constants, that is not a constant (none if all are), and `k`
+    /// the constants' sum, under 2^30 in size; else `x` itself and 0.
+    fn r_split(&mut self, env: &[(Sym, RLoc)], x: ExpId) -> (O<ExpId>, i64) {
+        const SMALL: i64 = 1 << 30;
+        if let Some(v) = self.r_const(env, x)
+            && v.is_fixnum()
+            && v.as_fixnum().abs() < SMALL
+        {
+            return (None, v.as_fixnum());
+        }
+        let split = match self.c.arena.exp_at(x).clone() {
+            Exp::App { fun, args } => match self.r_standard_name(env, fun) {
+                Some(name) => self.r_split_app(env, &name, &args),
+                None => None,
+            },
+            _ => None,
+        };
+        split.unwrap_or((Some(x), 0))
+    }
+
+    /// The same for standard operation `name` applied to `args`, if it is
+    /// such a chain.
+    fn r_split_app(&mut self, env: &[(Sym, RLoc)], name: &str, args: &[ExpId]) -> O<(O<ExpId>, i64)> {
+        if args.len() != 2 || !matches!(name, "+" | "-") {
+            return None;
+        }
+        let (pa, ka) = self.r_split(env, args[0]);
+        let (pb, kb) = self.r_split(env, args[1]);
+        let (core, k) = match (name, pa, pb) {
+            ("+", Some(_), Some(_)) => return None,
+            ("+", p, q) => (p.or(q), ka + kb),
+            ("-", p, None) => (p, ka - kb),
+            _ => return None,
+        };
+        (k.abs() < 1 << 30).then_some((core, k))
+    }
+
+    /// RESULT := r(y, x), `x` evaluated first, as written: for an operation
+    /// whose operands trade places, where they may not run in the other
+    /// order. `x` is kept in a register, or the frame if `y` calls.
+    fn r_binary_swapped(&mut self, g: &mut Gen, r: &str, x: ExpId, y: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        let r = Value::fixnum(routine(r) as i64);
+        let (regs, slots) = (g.next_reg, g.next_slot);
+        self.r_exp(g, x, env, te, false)?;
+        let collects = !g.leaf && self.r_collects(y, te, g.this.map(|(t, _)| t), false);
+        let k = g.reg()?;
+        if collects {
+            let s = g.slot();
+            g.op("setstk", &[Gen::n(s)]);
+            self.r_exp(g, y, env, te, false)?;
+            g.op("load", &[Gen::n(k), Gen::n(s)]);
+        } else {
+            g.op("setreg", &[Gen::n(k)]);
+            self.r_exp(g, y, env, te, false)?;
+        }
+        g.op("op2", &[r, Gen::n(k)]);
+        g.next_reg = regs;
+        g.next_slot = slots;
         Some(())
     }
 

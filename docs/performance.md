@@ -1595,3 +1595,20 @@ them with `wcell-sum` and `wcell-product`, new standard operations; the
 native code loads them from its code's fields, which the collector traces.
 
 The front end compiling itself: 0.77–0.78 s → 0.75–0.76 s.
+
+## Operands: order kept, constants second, constant chains combined (2026-09-28)
+
+`>` and `<=` are `<` with the operands traded, and register code ran the
+second operand first: `(> (begin (set r 10) 5) (get r))` gave #t there and
+#f everywhere else (`run/operand-order.fx`). Operands now trade places only
+where one is a variable or a constant, which neither has an effect nor sees
+one (only a definition writes a global). Otherwise the first runs first and
+waits in a register (or the frame, if the second calls).
+
+The same rule, asked by the user: where the operation does not care which
+comes first (`+`, `eq`), a constant first goes second, as an immediate:
+`(+ 1 x)` is `op2imm int-add 1`. And a chain of `+`, and of `-` of
+constants, with one operand not a constant, adds the constants' sum at
+once: `(- (+ 1 (+ 2 x)) 10)` is `op2imm int-sub 7`. Integers are exact
+(overflow goes to bignums), so the order of the additions cannot matter.
+Both compilers.

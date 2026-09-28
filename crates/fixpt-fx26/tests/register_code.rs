@@ -334,3 +334,19 @@ fn a_constructor_of_constants_is_made_once() {
         assert!(fast.contains("const #<sum rgb>") && !fast.contains("%make-frozen"), "{who}:\n{f}");
     }
 }
+
+/// A constant first goes second, an immediate, where the operation does not
+/// care which; and a chain of `+` and `-` of constants adds their sum at
+/// once (integers are exact). Both compilers.
+#[test]
+fn constants_are_combined_and_made_immediates() {
+    let text = "(define* f (subr pure (int) int) (lambda (x) (- (+ 1 (+ 2 x)) 10))) (f 3)";
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    for (who, code) in [("FX-26", fx26), ("Rust", rust)] {
+        let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
+        let ops: Vec<&str> = code.lines().filter(|l| l.contains("op2")).collect();
+        assert_eq!(ops.len(), 1, "{who}:\n{code}");
+        assert!(ops[0].ends_with("op2imm int-sub 7"), "{who}:\n{code}");
+    }
+}

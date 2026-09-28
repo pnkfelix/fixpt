@@ -345,6 +345,39 @@
             (if (null? c) nil (r-known-fields env (cdr fs) (cons (car c) acc))))))))
 
 
+;; Whether `a` and `b` are the same expression: where they are.
+(define r-same-exp? (subr (read (globals exp-end exp-start)) (exp exp) bool)
+  (lambda (a b) (and (= (exp-start a) (exp-start b)) (= (exp-end a) (exp-end b)))))
+(define-rec
+  ;; `x` as `core + k`: `core` the one operand of a chain of `+`, and of `-`
+  ;; of constants, that is not a constant (none if all are), and `k` the
+  ;; constants' sum, under 2^30 in size; else `x` itself and 0.
+  (r-split (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) (productof (1 (listof exp @k)) (2 int)))
+    (lambda (env x)
+      (let* ((c (r-known env x))
+             (small (if (null? c) (the (listof int @k) nil) (r-const-small (car c)))))
+        (if (not (null? small))
+            (product (1 (the (listof exp @k) nil)) (2 (car small)))
+            (let ((s (tagcase x
+                       (e-app (f args a b)
+                         (let ((name (r-standard-name env f))) (if (string=? name "") (the (listof (productof (1 (listof exp @k)) (2 int)) @k) nil) (r-split-app env name args))))
+                       (else y (the (listof (productof (1 (listof exp @k)) (2 int)) @k) nil)))))
+              (if (null? s) (product (1 (the (listof exp @k) (cons x nil))) (2 0)) (car s)))))))
+  ;; The same for standard operation `name` applied to `args`, if it is
+  ;; such a chain.
+  (r-split-app (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv string (listof exp acyclic)) (listof (productof (1 (listof exp @k)) (2 int)) @k))
+    (lambda (env name args)
+      (if (or (not (= (c-count-exps args) 2)) (not (or (string=? name "+") (string=? name "-"))))
+          (the (listof (productof (1 (listof exp @k)) (2 int)) @k) nil)
+          (let* ((sa (r-split env (car args))) (sb (r-split env (car (cdr args))))
+                 (pa (extract sa 1)) (pb (extract sb 1))
+                 (plus (string=? name "+"))
+                 (k (if plus (+ (extract sa 2) (extract sb 2)) (- (extract sa 2) (extract sb 2)))))
+            (cond ((and plus (and (not (null? pa)) (not (null? pb)))) nil)
+                  ((and (not plus) (not (null? pb))) nil)
+                  ((not (and (< k 1073741824) (> k -1073741824))) nil)
+                  (else (the (listof (productof (1 (listof exp @k)) (2 int)) @k) (cons (product (1 (if (null? pa) pb pa)) (2 k)) nil)))))))))
+
 ;;; ---------------------------------------------------------------- lists
 
 (define r-count-args (subr (maxeff (read @globals) (read @k) spin) (rargs) int)
@@ -995,12 +1028,34 @@
   (r-standard-app (subr (maxeff compiles spin) (rgen string (listof exp acyclic) renv cenv bool) unit)
     (lambda (g name args env te tail)
       (tagcase (r-standard name (c-count-exps args))
-        (s-op2 (r swap not)
-          (begin
-            (if swap
-                (r-binary g r (car (cdr args)) (car args) env te)
-                (r-binary g r (car args) (car (cdr args)) env te))
-            (if not (r-op2 g rop-op2imm (wcell-int routine-eq) (wcell-bool #f)) #u)))
+        (s-op2 (r swap negate)
+          ;; Operands trade places only where one is a variable or a
+          ;; constant, which neither has an effect nor sees one (only a
+          ;; definition writes a global); else they run as written. A
+          ;; constant goes second, an immediate, where the operation does
+          ;; not care which.
+          (let* ((x (car args)) (y (car (cdr args)))
+                 (known (lambda ((e exp)) (not (null? (r-known env e)))))
+                 (free (lambda ((e exp)) (or (r-simple? e) (known e))))
+                 ;; A chain of `+`, and `-` of constants, with one operand not
+                 ;; a constant, deeper than here: that one, and then the
+                 ;; constants' sum at once. Integers are exact, so the order
+                 ;; they are added in cannot matter.
+                 (split (r-split-app env name args))
+                 (core (if (null? split) (the (listof exp @k) nil) (extract (car split) 1))))
+            (begin
+              (cond ((and (not (null? core)) (and (not (r-same-exp? (car core) x)) (not (r-same-exp? (car core) y))))
+                     (let ((k (extract (car split) 2)))
+                       (begin
+                         (r-exp g (car core) env te #f)
+                         (cond ((> k 0) (r-op2 g rop-op2imm (wcell-int routine-int-add) (wcell-int k)))
+                               ((< k 0) (r-op2 g rop-op2imm (wcell-int routine-int-sub) (wcell-int (- 0 k))))
+                               (else #u)))))
+                    ((and swap (and (not (free x)) (not (free y)))) (r-binary-swapped g r x y env te))
+                    ((or swap (and (or (= r routine-int-add) (= r routine-eq)) (and (known x) (not (known y)))))
+                     (r-binary g r y x env te))
+                    (else (r-binary g r x y env te)))
+              (if negate (r-op2 g rop-op2imm (wcell-int routine-eq) (wcell-bool #f)) #u))))
         (s-op1 (r) (begin (r-exp g (car args) env te #f) (r-opn g rop-op1 r)))
         (s-op2imm (r v) (begin (r-exp g (car args) env te #f) (r-op2 g rop-op2imm (wcell-int r) v)))
         (s-field (k) (begin (r-exp g (car args) env te #f) (r-opn g rop-field k)))
@@ -1289,6 +1344,23 @@
         (cond ((not (null? (extract o 1))) (r-op2 g rop-op2imm (wcell-int r) (car (extract o 1))))
               ((not (null? (extract o 2))) (r-opnn g rop-op2 r (car (extract o 2))))
               (else (r-decline))))))
+  ;; RESULT := r(y, x), `x` evaluated first, as written: for an operation
+  ;; whose operands trade places, where they may not run in the other
+  ;; order. `x` is kept in a register, or the frame if `y` calls.
+  (r-binary-swapped (subr (maxeff compiles spin) (rgen int exp exp renv cenv) unit)
+    (lambda (g r x y env te)
+      (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
+        (begin
+          (r-exp g x env te #f)
+          (let* ((collects (and (not (extract g leaf)) (r-collects y te (extract g this) #f)))
+                 (k (r-reg g)))
+            (begin
+              (if collects
+                  (let ((s (r-slot g)))
+                    (begin (r-opn g rop-setstk s) (r-exp g y env te #f) (r-opnn g rop-load k s)))
+                  (begin (r-opn g rop-setreg k) (r-exp g y env te #f)))
+              (r-opnn g rop-op2 r k)))
+          (set (extract g nreg) regs) (set (extract g nslot) slots)))))
   ;; `a` into RESULT and `b` into a register, `a` evaluated first; or, if
   ;; `imm` and `b` is a constant, `b` as an immediate. The register is free
   ;; again after: use it at once.
