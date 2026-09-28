@@ -211,7 +211,7 @@
             ((is ">" 2) (s-op2 routine-int-less #t #f))
             ((is "<=" 2) (s-op2 routine-int-less #t #t))
             ((is ">=" 2) (s-op2 routine-int-less #f #t))
-            ((or (is "=" 2) (or (is "char=?" 2) (is "symbol=?" 2))) (s-op2 routine-eq #f #f))
+            ((or (is "=" 2) (or (is "char=?" 2) (or (is "symbol=?" 2) (is "wglobal=?" 2)))) (s-op2 routine-eq #f #f))
             ((is "not" 1) (s-op2imm routine-eq (wcell-bool #f)))
             ((or (is "null?" 1) (is "datum-null?" 1)) (s-op2imm routine-eq (wcell-nil)))
             ((or (is "car" 1) (is "datum-car" 1)) (s-op1 routine-pair-car))
@@ -595,6 +595,74 @@
 ;; A frame slot for each binding that is no join point; -1 for one that is.
 (define r-letrec-slots-j (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen (listof bool finite)) (listof int @k))
   (lambda (g joins) (if (null? joins) nil (let ((s (if (car joins) -1 (r-slot g)))) (cons s (r-letrec-slots-j g (cdr joins)))))))
+;; While a body's fast version is compiled (`r-register-code`): whether, and
+;; the globals it assumes hold what they held and what that was, newest
+;; first, each once.
+(define-type r-assumptions (listof (pairof wglobal tword @k) finite))
+(define r-assuming (ref bool @k) (new #f))
+;; Whether a call of itself through its global was made a loop, in the body
+;; being compiled's fast version.
+(define r-looped (ref bool @k) (new #f))
+(define r-assumed (ref r-assumptions @k) (new nil))
+(define r-assumed-has? (subr (maxeff (read @globals) (read @k)) (r-assumptions wglobal) bool)
+  (lambda (xs cell) (and (not (null? xs)) (or (wglobal=? (car (car xs)) cell) (r-assumed-has? (cdr xs) cell)))))
+;; Whether the body being compiled is its fast version, which assumes what
+;; the guard would test: if so, the assumption noted, for its guard at the
+;; start.
+(define r-assume (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (wglobal tword) bool)
+  (lambda (cell word)
+    (if (get r-assuming)
+        (begin (if (r-assumed-has? (get r-assumed) cell)
+                   #u
+                   (set r-assumed (the r-assumptions (cons (the (pairof wglobal tword @k) (cons cell word)) (get r-assumed)))))
+               #t)
+        #f)))
+;; The top-level definition whose body is being compiled: its name and
+;; arity, in a list.
+(define r-own-name (ref (listof (pairof symbol int @k) @k) @k) (new nil))
+(define r-own-is? (subr (maxeff (read @globals) (read @k)) (symbol int) bool)
+  (lambda (name n)
+    (and (not (null? (get r-own-name)))
+         (and (symbol=? (car (car (get r-own-name))) name) (= (cdr (car (get r-own-name))) n)))))
+;; Each value made for a jump back to the start into its parameter's place:
+;; a register's into REGi+1, a slot's into slot i.
+(define r-self-moves (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen (listof rloc @k) int) unit)
+  (lambda (g made i)
+    (if (null? made)
+        #u
+        (begin
+          (tagcase (car made)
+            (rl-reg (r) (r-opnn g rop-movereg r (+ i 1)))
+            (rl-slot (s) (begin (r-opn g rop-stack s) (r-opn g rop-setstk i)))
+            (else y (r-decline)))
+          (r-self-moves g (cdr made) (+ i 1))))))
+;; Frame slots as call-out operands; anything else, declined.
+(define r-slot-args-of (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((listof rloc @k)) rargs)
+  (lambda (ls)
+    (if (null? ls)
+        nil
+        (the rargs (cons (tagcase (car ls) (rl-slot (s) (a-slot s)) (else y (begin (r-decline) (a-slot 0))))
+                         (r-slot-args-of (cdr ls)))))))
+;; A list of cells' length, and two appended.
+(define r-cells-length (subr (maxeff (read @globals) (read @k) spin) ((listof wcell @k) int) int)
+  (lambda (cs n) (if (null? cs) n (r-cells-length (cdr cs) (+ n 1)))))
+(define r-rev-cells (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof wcell @k) (listof wcell @k)) (listof wcell @k))
+  (lambda (cs acc) (if (null? cs) acc (r-rev-cells (cdr cs) (cons (car cs) acc)))))
+(define r-rev-assumptions (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (r-assumptions r-assumptions) r-assumptions)
+  (lambda (xs acc) (if (null? xs) acc (r-rev-assumptions (cdr xs) (the r-assumptions (cons (car xs) acc))))))
+(define r-assumptions-length (subr (maxeff (read @globals) (read @k) spin) (r-assumptions int) int)
+  (lambda (xs n) (if (null? xs) n (r-assumptions-length (cdr xs) (+ n 1)))))
+;; The guards, in order, from cell `at`, each to `plain-at` where it fails,
+;; onto `rest`.
+(define r-guard-cells (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (r-assumptions int int (listof wcell @k)) (listof wcell @k))
+  (lambda (xs at plain-at rest)
+    (if (null? xs)
+        rest
+        (cons (wcell-int rop-global-guard)
+              (cons (wcell-global (car (car xs)))
+                    (cons (wcell-word (cdr (car xs)))
+                          (cons (wcell-int (- plain-at (+ at 4)))
+                                (r-guard-cells (cdr xs) (+ at 4) plain-at rest))))))))
 ;; The one of `c-inlines` that `n`, taking `k` arguments, names, if any.
 (define r-inline-named (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof c-inline finite) symbol int) (listof c-inline finite))
   (lambda (xs n k)
@@ -662,7 +730,7 @@
                                    (s-identity () #t) (s-set () #t) (else y #f))
                                  #f))
                            (else y #f))))
-            (or args-collect (not (or loop-call inline)))))
+            (or args-collect (not (or loop-call (or inline (r-call-is-free? f (c-count-exps args) e tail)))))))
         (else y #t))))
   (r-collects-all (subr (maxeff compiles spin) ((listof exp finite) cenv (listof c-this @k)) bool)
     (lambda (es e this) (and (not (null? es)) (or (r-collects (car es) e this #f) (r-collects-all (cdr es) e this)))))
@@ -678,6 +746,29 @@
       (and (not (null? arms)) (or (r-collects (extract (car arms) 4) e this tail) (r-collects-arms (cdr arms) e this tail)))))
   (r-collects-else (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 exp)) finite) cenv (listof c-this @k) bool) bool)
     (lambda (els e this tail) (and (not (null? els)) (r-collects (extract (car els) 2) e this tail))))
+  ;; Whether a call of global `f` with `n` arguments, in a body's fast
+  ;; version (`r-register-code`), is no call: its own in tail position, a
+  ;; loop; or one inlined, whose body makes none. As the Rust compiler's
+  ;; `r_call_is_free`.
+  (r-call-is-free? (subr (maxeff compiles spin) (exp int cenv bool) bool)
+    (lambda (f n e tail)
+      (and (get r-assuming)
+           (tagcase f
+             (e-var (name a b)
+               (let ((l (c-where e name)))
+                 (and (not (null? l))
+                      (and (tagcase (car l) (at-global (c) #t) (else y #f))
+                           (and (not (c-member? (get c-inlining) name))
+                                (or (and tail (and (null? (get c-inlining)) (r-own-is? name n)))
+                                    (let ((i (r-inline-named (get c-inlines) name n)))
+                                      (and (not (null? i))
+                                           (let ((outer-genv (get c-genv)) (outer-inlining (get c-inlining)))
+                                             (begin
+                                               (set c-genv (extract (car i) 5))
+                                               (set c-inlining (cons name outer-inlining))
+                                               (let ((collects (r-collects (extract (car i) 4) (r-local-params (the cenv nil) (extract (car i) 3)) (the (listof c-this @k) nil) tail)))
+                                                 (begin (set c-inlining outer-inlining) (set c-genv outer-genv) (not collects)))))))))))))
+             (else y #f)))))
   ;; Whether any of `bs`' lambdas' bodies, their parameters bound in `e`,
   ;; calls or calls out.
   (r-collects-joins (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) cenv (listof c-this @k)) bool)
@@ -923,9 +1014,12 @@
   (r-call (subr (maxeff compiles spin) (rgen exp (listof exp finite) renv cenv bool) unit)
     (lambda (g f args env te tail)
       (let ((n (c-count-exps args)))
-        (cond ((or (extract g leaf) (> n register-regs)) (r-decline))
+        (cond ;; An inlined call: in a fast version, no call, so in a leaf too.
               ((not (null? (r-inlined env f n)))
-               (let ((i (car (r-inlined env f n)))) (r-inline g (car i) (cdr i) f args env te tail)))
+               (if (and (not (get r-assuming)) (or (extract g leaf) (> n register-regs)))
+                   (r-decline)
+                   (let ((i (car (r-inlined env f n)))) (r-inline g (car i) (cdr i) f args env te tail))))
+              ((or (extract g leaf) (> n register-regs)) (r-decline))
               ((not (null? (r-specialized env f args)))
                (let ((i (car (r-specialized env f args)))) (r-specialize g (extract i 1) (extract i 2) (extract i 3) args env te tail)))
               ;; A call of the procedure itself, not in tail position: by its
@@ -955,22 +1049,26 @@
              (h (the rgen (product (items (extract g items)) (leaf (extract g leaf)) (nreg (extract g nreg)) (nslot (extract g nslot))
                                    (mslot (extract g mslot)) (labels (extract g labels)) (this (the (listof c-this @k) nil))
                                    (start (extract g start))))))
-        (begin
-          (r-guard g cell (extract i 2) call)
-          (set c-genv (extract i 5))
-          (set c-inlining (cons (extract i 1) outer-inlining))
-          (r-exp h (extract i 4) (extract bound 1) (extract bound 2) tail)
-          (set c-inlining outer-inlining)
-          (set c-genv outer-genv)
-          (if tail #u (r-emit g (r-branch #f end)))
-          (r-emit g (r-label call))
-          (r-args g (extract bound 3) env te (the (listof exp @k) (cons f nil)))
-          (if tail
-              (begin (r-leave g) (r-opn g rop-tailinvoke n))
-              (r-opn g rop-invoke n))
-          (r-emit g (r-label end))
-          (set (extract g nreg) regs)
-          (set (extract g nslot) slots)))))
+        (let ((assumed (r-assume cell (extract i 2))))
+          (begin
+            (if assumed #u (r-guard g cell (extract i 2) call))
+            (set c-genv (extract i 5))
+            (set c-inlining (cons (extract i 1) outer-inlining))
+            (r-exp h (extract i 4) (extract bound 1) (extract bound 2) tail)
+            (set c-inlining outer-inlining)
+            (set c-genv outer-genv)
+            (if assumed
+                #u
+                (begin
+                  (if tail #u (r-emit g (r-branch #f end)))
+                  (r-emit g (r-label call))
+                  (r-args g (extract bound 3) env te (the (listof exp @k) (cons f nil)))
+                  (if tail
+                      (begin (r-leave g) (r-opn g rop-tailinvoke n))
+                      (r-opn g rop-invoke n))
+                  (r-emit g (r-label end))))
+            (set (extract g nreg) regs)
+            (set (extract g nslot) slots))))))
   ;; Each parameter bound to its argument, in order: where the body finds
   ;; them, as the body's cellular scope has them, and as the call's
   ;; arguments.
@@ -989,9 +1087,12 @@
                              (rl-slot (s) l)
                              (rl-free (j) l)
                              (rl-const (c) l)
+                             ;; In a fast version, where no call comes after
+                             ;; to clobber it.
+                             (rl-reg (r) (if (get r-assuming) l (the (listof rloc @k) nil)))
                              (else y (the (listof rloc @k) nil)))))
                  (here (if (null? kept)
-                           (begin (r-exp g a env te #f) (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) (rl-slot s))))
+                           (begin (r-exp g a env te #f) (r-keep g (extract g leaf)))
                            (car kept)))
                  (arg (cond ((not (null? k)) (a-v (r-const-cell (car k))))
                             ((null? kept) (tagcase here (rl-slot (s) (a-slot s)) (else y (a-e a))))
@@ -1016,7 +1117,11 @@
                                   (7 (extract sp 7)) (8 lps) (9 lbody)
                                   (10 (c-captured (c-free lbody (c-bind-params lps nil) nil) te)) (11 (c-genv-now)))))
                  (outer-spec (get c-spec-now)) (outer-genv (get c-genv))
+                 ;; The copy compiled apart: what this body assumes is not its.
+                 (outer-assuming (get r-assuming)) (outer-assumed (get r-assumed))
                  (made (begin
+                         (set r-assuming #f)
+                         (set r-assumed (the r-assumptions nil))
                          (set c-spec-now (the (listof c-spec @k) (cons spec nil)))
                          (set c-genv (extract sp 5))
                          ;; Named for the procedure and the lambda.
@@ -1026,22 +1131,26 @@
                                                      (string-append "@lambda@" (int->string (exp-start lbody))))
                                       nil)))
                          (c-lambda-word (extract sp 3) (extract sp 4) (the cenv nil) (the syms nil))))
-                 (s (begin (set c-spec-now outer-spec) (set c-genv outer-genv) (r-slot g)))
+                 (s (begin (set c-spec-now outer-spec) (set c-genv outer-genv)
+                           (set r-assuming outer-assuming) (set r-assumed outer-assumed)
+                           (r-slot g)))
                  (n (c-count-exps args)))
             (begin
               (r-op2 g rop-lambda (wcell-word (extract made 1)) (wcell-int 0))
               (r-opn g rop-setstk s)
               (r-args g (r-exp-args args) env te (the (listof exp @k) nil))
               (let* ((call (r-new-label g)) (end (r-new-label g)))
-                (begin
-                  (r-guard g cell (extract sp 2) call)
-                  (r-opn g rop-stack s)
-                  (r-invoke g n tail)
-                  (if tail #u (r-emit g (r-branch #f end)))
-                  (r-emit g (r-label call))
-                  (r-op1 g rop-global (wcell-global cell))
-                  (r-invoke g n tail)
-                  (r-emit g (r-label end))))
+                (if (r-assume cell (extract sp 2))
+                    (begin (r-opn g rop-stack s) (r-invoke g n tail))
+                    (begin
+                      (r-guard g cell (extract sp 2) call)
+                      (r-opn g rop-stack s)
+                      (r-invoke g n tail)
+                      (if tail #u (r-emit g (r-branch #f end)))
+                      (r-emit g (r-label call))
+                      (r-op1 g rop-global (wcell-global cell))
+                      (r-invoke g n tail)
+                      (r-emit g (r-label end)))))
               (set (extract g nreg) regs)
               (set (extract g nslot) slots))))
         (else y (r-decline)))))
@@ -1107,29 +1216,36 @@
   (r-self-guarded (subr (maxeff compiles spin) (rgen wglobal tword int exp (listof exp finite) renv cenv bool) unit)
     (lambda (g cell word start f args env te tail)
       (let ((n (c-count-exps args)))
-        (if (or (extract g leaf) (> n register-regs))
+        ;; In a fast version, a call in tail position is a loop, in a leaf too.
+        (if (or (and (extract g leaf) (not (and tail (get r-assuming)))) (> n register-regs))
             (r-decline)
             (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
                    (call (r-new-label g)) (end (r-new-label g)))
               (begin
                 (if tail
-                    (let ((made (r-spec-temps g args env te)))
+                    (let* ((made (r-self-temps g args env te)) (assumed (r-assume cell word)))
                       (begin
-                        (r-guard g cell word call)
-                        (r-spec-moves g made 0)
+                        (if assumed #u (r-guard g cell word call))
+                        (r-self-moves g made 0)
                         (r-emit g (r-branch #f start))
-                        (r-emit g (r-label call))
-                        (r-args g (r-slot-args made) env te (the (listof exp @k) (cons f nil)))
-                        (r-invoke g n #t)))
+                        (if assumed
+                            (set r-looped #t)
+                            (begin
+                              (r-emit g (r-label call))
+                              (r-args g (r-slot-args-of made) env te (the (listof exp @k) (cons f nil)))
+                              (r-invoke g n #t)))))
                     (begin
                       (r-args g (r-exp-args args) env te (the (listof exp @k) nil))
-                      (r-guard g cell word call)
-                      (r-opn g rop-invokeself n)
-                      (r-emit g (r-branch #f end))
-                      (r-emit g (r-label call))
-                      (r-op1 g rop-global (wcell-global cell))
-                      (r-opn g rop-invoke n)
-                      (r-emit g (r-label end))))
+                      (if (r-assume cell word)
+                          (r-opn g rop-invokeself n)
+                          (begin
+                            (r-guard g cell word call)
+                            (r-opn g rop-invokeself n)
+                            (r-emit g (r-branch #f end))
+                            (r-emit g (r-label call))
+                            (r-op1 g rop-global (wcell-global cell))
+                            (r-opn g rop-invoke n)
+                            (r-emit g (r-label end))))))
                 (set (extract g nreg) regs)
                 (set (extract g nslot) slots)))))))
   ;; Each argument into a frame slot of its own, in order: the slots.
@@ -1140,6 +1256,15 @@
           (let* ((s (begin (r-exp g (car args) env te #f) (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) s))))
                  (rest (r-spec-temps g (cdr args) env te)))
             (cons s rest)))))
+  ;; Each argument kept, in a register in a leaf, else a frame slot, in
+  ;; order: where each is.
+  (r-self-temps (subr (maxeff compiles spin) (rgen (listof exp finite) renv cenv) (listof rloc @k))
+    (lambda (g args env te)
+      (if (null? args)
+          nil
+          (let* ((l (begin (r-exp g (car args) env te #f) (r-keep g (extract g leaf))))
+                 (rest (r-self-temps g (cdr args) env te)))
+            (cons l rest)))))
   ;; RESULT := r(a, b), `a` evaluated first; a constant `b` an immediate.
   (r-binary (subr (maxeff compiles spin) (rgen int exp exp renv cenv) unit)
     (lambda (g r a b env te)
@@ -1620,55 +1745,125 @@
   (lambda (g i n)
     (if (= i n) #u (let ((s (r-slot g))) (begin (r-opnn g rop-store (+ i 1) s) (r-store-params g (+ i 1) n))))))
 
-;; A lambda's register code, whose closure captures what `inner` says, or
-;; none where this compiler declines.
-(define r-register-code
-  (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv (listof c-this @k)) (listof wcell @k))
-  (lambda (ps body inner this)
-    (let ((outer (get r-declined)) (n (c-count-params ps))
-          (outer-at (get r-spec-at)) (outer-start (get r-spec-start))
-          (outer-own (get r-own-now)) (own (get c-own-now)))
+;; Whether a fast version may be worth compiling, asked before it is, as the
+;; Rust compiler's `r_fast_may_pay` says: whether, with inlined calls no
+;; calls, the body would be a leaf; or it mentions its own name, and so may
+;; loop.
+(define r-fast-may-pay?
+  (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv (listof c-this @k) (listof (productof (1 symbol) (2 tword)) @k)) bool)
+  (lambda (ps body inner this own)
+    (or (and (not (null? own)) (c-mentions? body (extract (car own) 1)))
+        (let ((outer-assuming (get r-assuming)) (outer-name (get r-own-name)))
+          (begin
+            (set r-assuming #t)
+            (set r-own-name (if (null? own) (the (listof (pairof symbol int @k) @k) nil) (cons (the (pairof symbol int @k) (cons (extract (car own) 1) (c-count-params ps))) nil)))
+            (let ((leaf (not (r-collects body inner this #t))))
+              (begin (set r-assuming outer-assuming) (set r-own-name outer-name) leaf)))))))
+;; A lambda's body in register code, not yet assembled, in a list; none where
+;; this compiler declines. In a fast version, where a call inlined or of
+;; itself in tail position is no call, a leaf maybe where the plain one is
+;; not.
+(define r-register-body
+  (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv (listof c-this @k) (listof (productof (1 symbol) (2 tword)) @k)) (listof rgen @k))
+  (lambda (ps body inner this own)
+    (let ((n (c-count-params ps)))
       (begin
         (set r-declined #f)
+        (set r-looped #f)
         (set r-spec-at (the (listof rloc @k) nil))
         (set r-own-now (the (listof (productof (1 symbol) (2 tword) (3 int) (4 int)) @k) nil))
-        (set c-own-now (the (listof (productof (1 symbol) (2 tword)) @k) nil))
+        (set r-own-name (if (null? own) (the (listof (pairof symbol int @k) @k) nil) (cons (the (pairof symbol int @k) (cons (extract (car own) 1) n)) nil)))
         (let* ((leaf (not (r-collects body inner this #t)))
                (g (the rgen
                     (product (items (new (the (listof ritem @k) nil))) (leaf leaf) (nreg (new 0)) (nslot (new 0))
                              (mslot (new 0)) (labels (new (+ (if (null? this) 0 1) (+ (if (null? (get c-spec-now)) 0 1) (if (null? own) 0 1)))))
-                             (this this) (start 0))))
-               (cells
-                (if (> n register-regs)
-                    (the (listof wcell @k) nil)
-                    (begin
-                      (r-opn g rop-args n)
-                      (let ((env (r-env-of inner leaf)))
-                        (begin
-                          (if leaf
-                              (set (extract g nreg) n)
-                              (begin (r-op0 g rop-save) (r-emit g (r-frame)) (r-store-params g 0 n)))
-                          (if (null? this) #u (r-emit g (r-label 0)))
-                          ;; A procedure specialized at a lambda: where the
-                          ;; parameter is, and a label at the start.
-                          (if (null? (get c-spec-now))
-                              #u
-                              (let ((l (r-where env (extract (car (get c-spec-now)) 5))) (start (if (null? this) 0 1)))
-                                (if (null? l)
-                                    (r-decline)
-                                    (begin (set r-spec-at (the (listof rloc @k) (cons (car l) nil)))
-                                           (set r-spec-start start)
-                                           (r-emit g (r-label start))))))
-                          ;; A top-level definition's procedure: a label at the
-                          ;; start, for its calls of itself.
-                          (if (null? own)
-                              #u
-                              (let ((start (+ (if (null? this) 0 1) (if (null? (get c-spec-now)) 0 1))))
-                                (begin (set r-own-now (cons (product (1 (extract (car own) 1)) (2 (extract (car own) 2)) (3 n) (4 start)) nil))
-                                       (r-emit g (r-label start)))))
-                          (r-exp g body env inner #t)
-                          (if (get r-declined) (the (listof wcell @k) nil) (r-assemble g))))))))
-          (begin (set r-declined outer) (set r-spec-at outer-at) (set r-spec-start outer-start) (set r-own-now outer-own) cells))))))
+                             (this this) (start 0)))))
+          (if (> n register-regs)
+              (the (listof rgen @k) nil)
+              (begin
+                (r-opn g rop-args n)
+                (let ((env (r-env-of inner leaf)))
+                  (begin
+                    (if leaf
+                        (set (extract g nreg) n)
+                        (begin (r-op0 g rop-save) (r-emit g (r-frame)) (r-store-params g 0 n)))
+                    (if (null? this) #u (r-emit g (r-label 0)))
+                    ;; A procedure specialized at a lambda: where the
+                    ;; parameter is, and a label at the start.
+                    (if (null? (get c-spec-now))
+                        #u
+                        (let ((l (r-where env (extract (car (get c-spec-now)) 5))) (start (if (null? this) 0 1)))
+                          (if (null? l)
+                              (r-decline)
+                              (begin (set r-spec-at (the (listof rloc @k) (cons (car l) nil)))
+                                     (set r-spec-start start)
+                                     (r-emit g (r-label start))))))
+                    ;; A top-level definition's procedure: a label at the
+                    ;; start, for its calls of itself.
+                    (if (null? own)
+                        #u
+                        (let ((start (+ (if (null? this) 0 1) (if (null? (get c-spec-now)) 0 1))))
+                          (begin (set r-own-now (cons (product (1 (extract (car own) 1)) (2 (extract (car own) 2)) (3 n) (4 start)) nil))
+                                 (r-emit g (r-label start)))))
+                    (r-exp g body env inner #t)
+                    (if (get r-declined) (the (listof rgen @k) nil) (the (listof rgen @k) (cons g nil))))))))))))
+;; The body compiled once, as ever.
+(define r-plain-code
+  (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv (listof c-this @k) (listof (productof (1 symbol) (2 tword)) @k)) (listof wcell @k))
+  (lambda (ps body inner this own)
+    (let ((g (r-register-body ps body inner this own)))
+      (if (null? g) (the (listof wcell @k) nil) (r-assemble (car g))))))
+;; The two versions as one: `args n`, the guards, the fast body, the plain
+;; one; both with the larger frame.
+(define r-versions (subr (maxeff compiles spin) (rgen rgen r-assumptions) (listof wcell @k))
+  (lambda (fast plain assumptions)
+    (let ((frame (if (> (get (extract fast mslot)) (get (extract plain mslot))) (get (extract fast mslot)) (get (extract plain mslot)))))
+      (begin
+        (set (extract fast mslot) frame)
+        (set (extract plain mslot) frame)
+        (let* ((fc (r-assemble fast)) (pc (r-assemble plain))
+               (plain-at (+ 2 (+ (* 4 (r-assumptions-length assumptions 0)) (- (r-cells-length fc 0) 2))))
+               (bodies (r-rev-cells (r-rev-cells (cdr (cdr fc)) nil) (cdr (cdr pc)))))
+          (cons (car fc) (cons (car (cdr fc)) (r-guard-cells assumptions 2 plain-at bodies))))))))
+;; A lambda's register code, whose closure captures what `inner` says, or
+;; none where this compiler declines: in two versions where that is sound
+;; and something is gained, as the Rust compiler's `register_code` says. Its
+;; body compiled assuming every global it inlines, specializes or calls
+;; itself through holds what it held when compiled, behind one guard for
+;; each at its start; and, where a guard fails, compiled as ever. Sound where
+;; no global can change during a run of the body: its effect summary is less
+;; than 3. Only where the body makes no closure, so that compiling it twice
+;; compiles nothing else twice.
+(define r-register-code
+  (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv (listof c-this @k)) (listof wcell @k))
+  (lambda (ps body inner this)
+    (let ((outer (get r-declined))
+          (outer-at (get r-spec-at)) (outer-start (get r-spec-start))
+          (outer-own (get r-own-now)) (outer-name (get r-own-name)) (own (get c-own-now)))
+      (begin
+        (set c-own-now (the (listof (productof (1 symbol) (2 tword)) @k) nil))
+        (let ((cells
+               (if (and (< (c-summary-at (exp-start body) (exp-end body)) 3)
+                        (and (>= (c-inline-room body 1000000000) 0) (r-fast-may-pay? ps body inner this own)))
+                   (let* ((outer-assuming (get r-assuming)) (outer-assumed (get r-assumed))
+                          (fast (begin (set r-assuming #t) (set r-assumed (the r-assumptions nil))
+                                       (r-register-body ps body inner this own)))
+                          (assumptions (r-rev-assumptions (get r-assumed) (the r-assumptions nil))))
+                     (begin
+                       (set r-assuming outer-assuming)
+                       (set r-assumed outer-assumed)
+                       ;; Worth it where the fast version is a leaf, or loops
+                       ;; where the plain one calls: else its guards, all run
+                       ;; on entry, cost more than the plain version's, each
+                       ;; run where its call is.
+                       (if (or (null? fast) (or (null? assumptions) (not (or (extract (car fast) leaf) (get r-looped)))))
+                           (r-plain-code ps body inner this own)
+                           (let ((plain (r-register-body ps body inner this own)))
+                             (if (null? plain) (the (listof wcell @k) nil) (r-versions (car fast) (car plain) assumptions))))))
+                   (r-plain-code ps body inner this own))))
+          (begin (set r-declined outer) (set r-spec-at outer-at) (set r-spec-start outer-start)
+                 (set r-own-now outer-own) (set r-own-name outer-name)
+                 cells))))))
 
 (set c-register-code r-register-code)
 

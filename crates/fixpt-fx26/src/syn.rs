@@ -312,6 +312,11 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
             (char_at(span.start), char_at(span.end), *i as i64)
         })
         .collect();
+    // And each expression's effect summary, as -1 - s (`checked-extracts`).
+    let facts: Vec<(i64, i64, i64)> = facts
+        .into_iter()
+        .chain(c.effect_summaries().into_iter().map(|((a, b), s)| (char_at(a), char_at(b), -1 - s as i64)))
+        .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut list = scheme.make(|_| Value::NULL);
     for (a, b, i) in facts {

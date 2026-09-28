@@ -530,14 +530,26 @@
 ;; position, keyed by where the `extract` is. Only the product's type says.
 (define-type k-facts (listof (productof (1 int) (2 int) (3 int)) finite))
 (define k-extracts (ref k-facts @t) (new nil))
-(define checked-extracts (subr (maxeff (read @globals) (read @t)) () k-facts) (lambda () (get k-extracts)))
 ;; Each expression synthesized: where it starts and ends, and a summary of
-;; its effect for a compiler (0 pure: no atom at all, so no `spin` either;
-;; 1 reads only; 3 may keep its continuation for later, write a global, or
-;; do what an effect variable stands for, which a global's value may change
-;; across; 2 anything else), newest first. The Rust checker's
-;; `effect_summaries` is the same.
+;; its effect for a compiler, each a stronger claim on what the code may do
+;; than the one before, so that the greater of two is the safe one: 0 pure
+;; (no atom at all, so no `spin` either); 1 reads only; 2 anything else; 3
+;; anything else that may also keep its continuation for later, write a
+;; global, or do what an effect variable stands for, which a global's value
+;; may change across. Newest first. The Rust checker's `effect_summaries` is
+;; the same.
 (define k-effect-notes (ref k-facts @t) (new nil))
+(define k-add-effect-facts (subr (read @globals) (k-facts k-facts) k-facts)
+  (lambda (notes acc)
+    (if (null? notes)
+        acc
+        (k-add-effect-facts (cdr notes)
+                            (the k-facts (cons (product (1 (extract (car notes) 1)) (2 (extract (car notes) 2)) (3 (- -1 (extract (car notes) 3)))) acc))))))
+;; What checking found, for a compiler: each `extract`'s field, `(a b i)`;
+;; and each expression's effect summary (`k-effect-notes`), `(a b n)` with n
+;; negative, the summary -1 - n.
+(define checked-extracts (subr (maxeff (read @globals) (read @t)) () k-facts)
+  (lambda () (k-add-effect-facts (get k-effect-notes) (get k-extracts))))
 (define checked-effects (subr (maxeff (read @globals) (read @t)) () k-facts) (lambda () (get k-effect-notes)))
 ;; Whether `e` may keep its continuation for later, write a global, or do
 ;; what an effect variable stands for.

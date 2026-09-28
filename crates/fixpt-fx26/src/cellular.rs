@@ -99,6 +99,14 @@ pub struct Compiler<'a> {
     word_name: Option<String>,
     /// The top-level definition whose lambda is compiled next: its name.
     defining: Option<Sym>,
+    /// While a body's fast version is compiled (`regcode::register_code`):
+    /// the globals it assumes hold what they held, and what that was.
+    assume: Option<Vec<(Value, Value)>>,
+    /// Each expression's effect summary, by span, once asked.
+    summaries: Option<std::collections::HashMap<(u32, u32), u8>>,
+    /// The top-level definition whose body is being compiled: its name and
+    /// arity.
+    own_now: Option<(Sym, usize)>,
 }
 
 /// A global procedure whose parameter `param` is only called (with
@@ -172,6 +180,9 @@ impl<'a> Compiler<'a> {
             spec: None,
             word_name: None,
             defining: None,
+            assume: None,
+            summaries: None,
+            own_now: None,
         }
     }
 
@@ -890,7 +901,7 @@ impl<'a> Compiler<'a> {
             | "symbol->string" | "string->symbol" | "char->string" | "array-length" | "current-marks" | "cwcc" => Some(1),
             "with-mark" | "array-set!" | "substring" => Some(3),
             "+" | "-" | "*" | "<" | ">" | "<=" | ">=" | "=" | "modulo" | "quotient" | "cons" | "set-car!" | "set-cdr!"
-            | "set" | "char=?" | "string-append" | "string=?" | "symbol=?" | "array-ref" | "string-ref" | "make-array"
+            | "set" | "char=?" | "string-append" | "string=?" | "symbol=?" | "wglobal=?" | "array-ref" | "string-ref" | "make-array"
             | "abort-current-continuation" | "call-with-composable-continuation" | "first-mark" | "marks-of" => Some(2),
             _ => None,
         }
@@ -955,7 +966,7 @@ impl<'a> Compiler<'a> {
                 self.lit(code, f);
                 self.op(code, "eq");
             }
-            "=" | "symbol=?" | "char=?" => self.op(code, "eq"),
+            "=" | "symbol=?" | "wglobal=?" | "char=?" => self.op(code, "eq"),
             "cons" => self.op(code, "cons"),
             "car" => self.op(code, "pair-car"),
             "cdr" => self.op(code, "pair-cdr"),

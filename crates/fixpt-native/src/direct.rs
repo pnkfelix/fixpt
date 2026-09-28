@@ -695,6 +695,31 @@ impl Compiling<'_> {
             i += 1 + n;
         }
         let op_at = |j: usize| OPS[cells[j].as_fixnum() as usize].0;
+        // Whether this procedure's frame is pushed where each instruction
+        // starts: a body's fast version may be a leaf, with no frame, where
+        // its plain one has one (`regcode::register_code`). After `save`,
+        // pushed; after `pop`, not; where a branch goes, as at the branch.
+        let mut framed = vec![false; cells.len() + 1];
+        {
+            let mut known: Vec<Option<bool>> = vec![None; cells.len() + 1];
+            let mut cur = false;
+            for &i in &starts {
+                if let Some(k) = known[i] {
+                    cur = k;
+                }
+                framed[i] = cur;
+                let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
+                match op {
+                    "save" => cur = true,
+                    "pop" => cur = false,
+                    "branch" | "branchf" | "global-guard" => {
+                        let to = (i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize;
+                        known[to].get_or_insert(cur);
+                    }
+                    _ => {}
+                }
+            }
+        }
         // What each `global` is for: a call just after it (a tail call's
         // frame popped between), or its value.
         let called = |j: usize| {
@@ -820,7 +845,7 @@ impl Compiling<'_> {
                     a.e(stur(RESULT, X9, field_off(2)));
                 }
                 "lexical" => {
-                    let from = match clo_slot {
+                    let from = match clo_slot.filter(|_| framed[i]) {
                         Some(s) => {
                             a.e(ldr(X9, FRAME, s));
                             X9

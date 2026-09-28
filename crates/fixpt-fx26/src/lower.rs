@@ -153,6 +153,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("wcell-self", "%default-object", false),
     ("wcell-nil", "%fx26-nil-cell", false),
     ("make-global", "%fx26-make-global", false),
+    ("wglobal=?", "eq?", false),
     ("runtime-primitive", "%runtime-primitive", false),
     ("make-continuation-prompt-tag", "%fx26-make-prompt-tag", false),
     ("abort-current-continuation", "%fx26-abort", false),

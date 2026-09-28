@@ -176,6 +176,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("wcell-nil", "(subr pure () wcell)"),
     // A global's cell, new: its value is the compiled program's to change.
     ("make-global", "(subr pure (symbol) wglobal)"),
+    // Whether two globals are the one.
+    ("wglobal=?", "(subr pure (wglobal wglobal) bool)"),
     // A runtime primitive's number, for `prim`, or -1.
     ("runtime-primitive", "(subr pure (string) int)"),
     (

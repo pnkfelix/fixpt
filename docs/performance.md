@@ -1501,3 +1501,64 @@ points and now: 0.91–0.94 s → 0.75 s.
 | lists        | 1501500000     |   300.3 |  480.1 | 54.9 |     57.4 |     47.2 |       9.3 |   12.5 |
 | loop         | 49999995000000 |   739.5 |  447.9 | 66.4 |     75.9 |     48.6 |       4.9 |    4.6 |
 | tak          | 9              |    52.2 |   80.9 |  6.6 |      9.7 |      4.5 |       1.7 |    1.2 |
+
+## Versions: one guard per global, at the start (2026-09-28)
+
+The user's idea: rather than a guard at each inlined, specialized or self
+call, all of a body's guards at once at its start, then a version of the
+body compiled assuming every one holds (no guards inside, no slow calls),
+and the plain version, as before, where any fails. Two versions, not one
+per combination of globals: code at most twice the procedure's, no
+blow-up.
+
+Sound where no global can change during one run of the body. A
+redefinition happens between top-level forms, so only a continuation kept
+past one and resumed after, or a write to a global, could let a run see
+one; and those show in the body's own effect, masked (a continuation that
+cannot escape has its `comefrom` masked away): the effect summary 3
+(`docs/fx26.md`, "Effect summaries"). Where the summary is 3, per-site
+guards as before. Only bodies that make no closure (no lambda, `letrec`
+or `prompt`) are versioned, since register code compiles a nested lambda
+afresh, and a body compiled twice would compile its lambdas twice, and
+theirs, exponentially.
+
+In the fast version an inlined call and a call of itself in tail position
+are no calls, so it can be a leaf, all in registers, where the plain one
+has a frame; the native compiler now says per instruction whether the
+frame is pushed (`lexical` reads the closure's register where it is not).
+Its guards are `global-guard` each, deduplicated (`wglobal=?`, new, as
+`eq?`); decided when compiling natively where the global holds a cellular
+closure, as before.
+
+Worth it only where the fast version is a leaf or loops where the plain
+one calls: else all its guards run on every entry, where the plain
+version's each run only on the path that reaches its call, and the front
+end, whose procedures branch widely, got slower (as register code, 0.72
+→ 0.87 s compiling itself). A fast version is compiled only where asking
+first (a leaf, with inlined calls no calls; or its own name mentioned)
+says it may pay. Both compilers alike; the summaries reach the FX-26
+compiler with the facts (`checked-extracts`, `rust_facts`: `(a b n)`,
+negative `n` a summary).
+
+| benchmark | registers before | after | native before | after |
+| --------- | ----------------:| -----:| -------------:| -----:|
+| helpers   |              9.0 |   2.8 |           6.1 |   2.0 |
+| lists     |              9.3 |   8.5 |          12.1 |  10.5 |
+| closures  |             19.6 |  17.6 |          27.6 |  24.0 |
+
+`helpers`'s `run` is now, in its fast version, a loop in registers with
+`step`, `sum2` and `dbl` inlined into it, and `(dbl 2)` folded to 4. The
+front end compiling itself: 0.70–0.71 s → 0.76–0.77 s (same hour),
+the compiler's own work: filling the summaries' table (0.01 s), asking
+whether a fast version pays, and compiling those that do (0.03 s).
+
+| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   111.8 |   49.1 | 14.6 |     14.5 |     12.4 |       9.2 |   21.9 |
+| closures     | 6003000000     |   343.2 |  699.4 | 75.7 |     85.0 |     60.3 |      17.6 |   24.0 |
+| fib          | 832040         |   180.5 |  213.7 | 16.1 |     22.0 |     13.5 |       4.9 |    2.4 |
+| helpers      | 12000000       |   865.5 | 1274.3 | 89.3 |    110.0 |     55.2 |       2.8 |    2.3 |
+| lists-region | 1501500000     |   332.8 |  314.4 | 96.9 |    111.8 |     82.8 |       7.2 |  156.5 |
+| lists        | 1501500000     |   297.8 |  470.1 | 54.7 |     65.9 |     47.4 |       8.5 |   10.5 |
+| loop         | 49999995000000 |   736.0 |  452.2 | 64.5 |     89.7 |     41.2 |       4.7 |    4.3 |
+| tak          | 9              |    51.6 |   78.0 |  6.6 |      8.7 |      4.5 |       1.7 |    1.2 |

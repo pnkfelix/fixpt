@@ -284,3 +284,19 @@ fn a_loop_entered_in_tail_position_is_a_join_point() {
     assert!(!count.contains("lambda") && !count.contains("invoke") && !count.contains("save"), "{count}");
     assert!(count.contains("movereg") && count.contains("branch"), "{count}");
 }
+
+/// A body that inlines, where no global can change while it runs, has two
+/// versions: after `args`, one `global-guard` for each global it assumes,
+/// then the fast version, a leaf (no `save`) with no guard inside; the
+/// plain one, as ever, after.
+#[test]
+fn a_body_that_inlines_has_two_versions() {
+    let out = shown(include_str!("programs/run/versions.fx"));
+    let step = out.split("its register code").find(|c| c.contains("global-guard sum2") && c.contains("0: args 2")).expect("step's register code");
+    let lines: Vec<&str> = step.lines().skip(1).take_while(|l| !l.is_empty()).collect();
+    assert!(lines[0].contains("args 2"), "{step}");
+    let guards = lines.iter().skip(1).take_while(|l| l.contains("global-guard")).count();
+    assert!(guards >= 2, "{step}");
+    let fast: Vec<&&str> = lines.iter().skip(1 + guards).take_while(|l| !l.contains("save")).collect();
+    assert!(fast.iter().any(|l| l.contains("return")) && !fast.iter().any(|l| l.contains("global-guard") || l.contains("invoke")), "{step}");
+}

@@ -111,7 +111,13 @@ queue gained", and "The next queue"):
    between; constants propagated and folded, with inlining (the guard
    keeps them inside it); a top-level procedure's calls of itself guarded,
    so a tail one is a loop (`lists` 13.5 → 9.3 ms); lifting out of loops
-   measured and not built (3 in the front end's heads). Speed is judged
+   measured and not built (3 in the front end's heads). Versions (the
+   user's, 2026-09-28): a body's guards all at its start, a fast version
+   assuming them (a leaf, or a loop, where it pays) and the plain one;
+   sound where the body's effect keeps no continuation for later and
+   writes no global (effect summaries, both checkers); `helpers` native
+   6.1 → 2.0 ms. To refine: guards per segment between `comefrom`s (the
+   user's), and bodies with closures (compile nested lambdas once). Speed is judged
    by the native convention's code only (the user's, 2026-09-28: the
    interpreters must not be asymptotically inefficient, but their constant
    factors do not matter): superinstructions (13g)

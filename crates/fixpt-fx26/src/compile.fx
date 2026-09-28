@@ -35,6 +35,10 @@
 (define c-int-hash (subr pure (int) int) (lambda (a) a))
 (define c-int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
 (define c-fact-table (ref (table int (pairof int int @k) @k) @k) (new (make-table c-int-hash c-int=?)))
+;; Each expression's effect summary, by where it starts: where it ends, and
+;; the summary, for each span starting there.
+(define-type c-ends (listof (pairof int int @k) finite))
+(define c-summary-table (ref (table int c-ends @k) @k) (new (make-table c-int-hash c-int=?)))
 ;; The field of the `extract` from `a` to `b`, or -1.
 (define c-field-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) int)
   (lambda (a b)
@@ -228,18 +232,38 @@
 ;; the answer is the same each time.
 (define-type c-join-answer (productof (1 int) (2 syms) (3 (listof bool finite))))
 (define c-join-memo (ref (table int c-join-answer @k) @k) (new (make-table c-int-hash c-int=?)))
+;; `es` with span end `b`'s summary at least `s`.
+(define c-end-max (subr (maxeff (read @globals) (read @k) (alloc @k)) (c-ends int int) c-ends)
+  (lambda (es b s)
+    (cond ((null? es) (the c-ends (cons (the (pairof int int @k) (cons b s)) nil)))
+          ((= (car (car es)) b)
+           (the c-ends (cons (the (pairof int int @k) (cons b (if (> s (cdr (car es))) s (cdr (car es))))) (cdr es))))
+          (else (the c-ends (cons (car es) (c-end-max (cdr es) b s)))))))
 (define c-fill-facts (subr (maxeff (read @globals) (read @t) (read @k) (write @k) (alloc @k)) (k-facts) unit)
   (lambda (fs)
     (if (null? fs)
         #u
-        (begin (table-set! (get c-fact-table) (extract (car fs) 1) (the (pairof int int @k) (cons (extract (car fs) 2) (extract (car fs) 3))))
-               (c-fill-facts (cdr fs))))))
+        (let ((a (extract (car fs) 1)) (b (extract (car fs) 2)) (n (extract (car fs) 3)))
+          (begin
+            (if (>= n 0)
+                (table-set! (get c-fact-table) a (the (pairof int int @k) (cons b n)))
+                ;; An effect summary, -1 - s: the greatest, per span.
+                (let ((s (- -1 n)) (known (table-ref (get c-summary-table) a (the c-ends nil))))
+                  (table-set! (get c-summary-table) a (c-end-max known b s))))
+            (c-fill-facts (cdr fs)))))))
+(define c-end-summary (subr (maxeff (read @globals) (read @k)) (c-ends int) int)
+  (lambda (es b) (cond ((null? es) 3) ((= (car (car es)) b) (cdr (car es))) (else (c-end-summary (cdr es) b)))))
+;; The effect summary of the expression from `a` to `b` (3, the most, if
+;; none was noted: `checked-extracts`).
+(define c-summary-at (subr (maxeff (read @globals) (read @k)) (int int) int)
+  (lambda (a b) (c-end-summary (table-ref (get c-summary-table) a (the c-ends nil)) b)))
 ;; `c-facts` into `c-fact-table`.
 (define c-set-facts! (subr (maxeff (read @globals) (read @t) (read @k) (write @k) (alloc @k)) (k-facts) unit)
   (lambda (fs)
     (begin
       (set c-facts fs)
       (set c-fact-table (make-table c-int-hash c-int=?))
+      (set c-summary-table (make-table c-int-hash c-int=?))
       (set c-join-memo (make-table c-int-hash c-int=?))
       (c-fill-facts fs))))
 (define c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool)
@@ -513,7 +537,7 @@
           ((or (string=? n "+") (string=? n "-") (string=? n "*") (string=? n "<") (string=? n ">") (string=? n "<=")
                (string=? n ">=") (string=? n "=") (string=? n "modulo") (string=? n "quotient") (string=? n "cons")
                (string=? n "set-car!") (string=? n "set-cdr!") (string=? n "set") (string=? n "char=?")
-               (string=? n "string-append") (string=? n "string=?") (string=? n "symbol=?") (string=? n "array-ref")
+               (string=? n "string-append") (string=? n "string=?") (string=? n "symbol=?") (string=? n "wglobal=?") (string=? n "array-ref")
                (string=? n "string-ref") (string=? n "make-array") (string=? n "abort-current-continuation")
                (string=? n "call-with-composable-continuation") (string=? n "first-mark") (string=? n "marks-of"))
            2)
@@ -528,7 +552,7 @@
             ((string=? name "<=") (begin (c-op c routine-swap) (c-op c routine-int-less) (c-lit c (wcell-bool #f)) (c-op c routine-eq)))
             ((string=? name ">=") (begin (c-op c routine-int-less) (c-lit c (wcell-bool #f)) (c-op c routine-eq)))
             ;; Characters are immediates, so compared as symbols are.
-            ((or (string=? name "=") (string=? name "symbol=?") (string=? name "char=?")) (c-op c routine-eq))
+            ((or (string=? name "=") (or (string=? name "symbol=?") (string=? name "wglobal=?")) (string=? name "char=?")) (c-op c routine-eq))
             ((string=? name "cons") (c-op c routine-cons))
             ((string=? name "car") (c-op c routine-pair-car))
             ((string=? name "cdr") (c-op c routine-pair-cdr))

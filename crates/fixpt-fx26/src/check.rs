@@ -404,12 +404,14 @@ impl Checker {
     }
 
     /// A summary of each expression's effect, for a compiler, by where it
-    /// starts and ends: 0 pure (no atom at all, so no `spin` either), 1
-    /// reads only, 2 anything else but 3: may keep its continuation for
-    /// later (`comefrom`), write a global, or do what an effect variable
-    /// stands for, any of which a global's value may change across. Where
-    /// two expressions have one span, the greater. `check.fx`'s
-    /// `checked-effects` says the same.
+    /// starts and ends, each a stronger claim on what the code may do than
+    /// the one before, so that the greater of two is the safe one: 0 pure
+    /// (no atom at all, so no `spin` either), 1 reads only, 2 anything
+    /// else, 3 anything else that may also keep its continuation for later
+    /// (`comefrom`), write a global, or do what an effect variable stands
+    /// for, which a global's value may change across. Where two expressions
+    /// have one span, the greater. `check.fx`'s `checked-effects` says the
+    /// same.
     pub fn effect_summaries(&self) -> HashMap<(u32, u32), u8> {
         let mut out: HashMap<(u32, u32), u8> = HashMap::new();
         for (e, eff) in &self.facts.effects {
