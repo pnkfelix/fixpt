@@ -830,8 +830,41 @@
 
 ;;; ------------------------------------------------------------- programs
 
+;; Globals kept for their names' next definitions: a redefinition of a type
+;; the old one's users can take, for which the REPL asks
+;; (`compile-keep-global!`).
+(define-type c-kept-globals (listof (pairof symbol wglobal finite) finite))
+(define c-reuse (ref c-kept-globals @k) (new nil))
+;; The global kept for `n`, if any.
+(define c-kept (subr pure (c-kept-globals symbol) (listof wglobal finite))
+  (lambda (ks n)
+    (cond ((null? ks) nil)
+          ((symbol=? (car (car ks)) n) (the (listof wglobal finite) (cons (cdr (car ks)) nil)))
+          (else (c-kept (cdr ks) n)))))
+;; `ks` without `n`'s.
+(define c-unkeep (subr pure (c-kept-globals symbol) c-kept-globals)
+  (lambda (ks n)
+    (cond ((null? ks) ks)
+          ((symbol=? (car (car ks)) n) (c-unkeep (cdr ks) n))
+          (else (the c-kept-globals (cons (car ks) (c-unkeep (cdr ks) n)))))))
+;; `n`'s global for a definition of it: the one kept for it, if one was;
+;; else a new one, which later uses of `n` refer to.
 (define c-push-global (subr (maxeff (read @k) (write @k) (alloc @k)) (symbol) wglobal)
-  (lambda (n) (let ((g (make-global n))) (begin (set c-genv (the cenv (cons (cons n (at-global g)) (get c-genv)))) g))))
+  (lambda (n)
+    (let ((kept (c-kept (get c-reuse) n)))
+      (if (null? kept)
+          (let ((g (make-global n))) (begin (set c-genv (the cenv (cons (cons n (at-global g)) (get c-genv)))) g))
+          (begin (set c-reuse (c-unkeep (get c-reuse) n)) (car kept))))))
+;; For a driver: `n`'s next definition keeps the global `n` has now, so
+;; that every use of `n`, before it and after, sees the new value.
+(define compile-keep-global! (subr (maxeff (read @k) (write @k) (alloc @k) spin) (symbol) unit)
+  (lambda (n)
+    (let ((l (c-find (get c-genv) n)))
+      (if (null? l)
+          #u
+          (tagcase (car l)
+            (at-global (g) (set c-reuse (the c-kept-globals (cons (cons n g) (get c-reuse)))))
+            (else y #u))))))
 ;; For a driver that computes a definition's value itself (the REPL, in the
 ;; native convention): `n`'s global from now on, made, for the driver to
 ;; fill.

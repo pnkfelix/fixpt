@@ -12,7 +12,7 @@ use crate::lineedit::{Line, LineReader, Note};
 use fixpt_engine::Backend;
 use fixpt_fx26::session::{Fx26Session, Outcome, Strategy};
 use fixpt_fx26::{Checker, Top};
-use fixpt_read::{Datum, FileId, Sym, Syntax, SyntaxProfile};
+use fixpt_read::{Datum, FileId, Syntax, SyntaxProfile};
 
 /// Line and column (both from 1) of byte `at` in `text`.
 fn line_col(text: &str, at: usize) -> (usize, usize) {
@@ -81,6 +81,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     }
     s.scheme.runtime_unrooted().machine_code = crate::CELLULAR_MACHINE_CODE.get().copied().flatten();
     s.register_code = crate::CELLULAR_MACHINE_NAME.get().is_some_and(|n| n.contains("register code"));
+    s.redefine = Some(ask_redefine);
     if crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) {
         s.set_native_convention(true);
         s.native_runner = Some(run_native);
@@ -164,6 +165,21 @@ pub fn repl(backend: Backend) -> i32 {
         };
         if let Some(ask) = crate::help::parse(&text) {
             crate::help::answer(&mut session.checker, &ask);
+            continue;
+        }
+        // `,redefine b|k|r`: what the next redefinition that would break
+        // definitions does, said ahead of it (for input no one is asked).
+        if let Some(arg) = text.trim().strip_prefix(",redefine") {
+            use fixpt_fx26::session::Redefine;
+            session.next_redefine = match arg.trim() {
+                "b" | "break" => Some(Redefine::Break),
+                "k" | "keep" => Some(Redefine::Keep),
+                "r" | "refuse" => Some(Redefine::Refuse),
+                _ => {
+                    println!("; `,redefine b|k|r`: the next redefinition that would break definitions breaks them, keeps them on the old one, or is refused");
+                    continue;
+                }
+            };
             continue;
         }
         // `,native NAME [ARG…]`: NAME's procedure in the native convention.
@@ -251,33 +267,47 @@ pub fn repl(backend: Backend) -> i32 {
                 }
                 continue;
             }
-            let known = session.checker.value_names();
             match session.run(form) {
                 Ok(out) if disassembling => match &out.value {
                     Ok(Some(v)) => print!("{}", unwrite_string(v)),
                     _ => show(&session, &out, show_code),
                 },
-                Ok(out) => {
-                    show(&session, &out, show_code);
-                    let defined: Vec<Sym> = match &out.top {
-                        Top::Define { name, .. } => vec![*name],
-                        Top::DefineRec { bindings } => bindings.iter().map(|(n, _, _)| *n).collect(),
-                        _ => Vec::new(),
-                    };
-                    for name in defined.iter().filter(|n| known.contains(n)) {
-                        println!("{}", shadowing_note(session.checker.interner.name(*name)));
-                    }
-                }
+                Ok(out) => show(&session, &out, show_code),
                 Err(e) => eprintln!("{}", located(&name, &text, &e)),
             }
         }
     }
 }
 
-/// A second `define` makes a new binding (ML's top level, not Scheme's):
-/// said at the REPL, where Scheme's habits would expect an assignment.
-fn shadowing_note(name: &str) -> String {
-    format!("; note: a new `{name}`. What was defined before keeps the old one: define it again to use this one.")
+/// A redefinition that would break definitions, asked about at a terminal
+/// (`Fx26Session::redefine`); anywhere else, `b`, as the session does with
+/// no one to ask.
+fn ask_redefine(q: &fixpt_fx26::session::Redefinition) -> fixpt_fx26::session::Redefine {
+    use fixpt_fx26::session::Redefine;
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return Redefine::Break;
+    }
+    let names: Vec<String> = q.names.iter().map(|n| format!("`{n}`")).collect();
+    println!("; redefining {} breaks what uses it as it was:", names.join(", "));
+    for (n, why) in &q.breaking {
+        println!(";   {n}: {why}");
+    }
+    if !q.rerun.is_empty() {
+        println!("; and runs again, as they still check: {}", q.rerun.join(", "));
+    }
+    println!("; [b]reak them: unusable until you define them again (the default)");
+    println!("; [k]eep them on the old one, which is then a different global");
+    println!("; [r]efuse this redefinition: nothing changes");
+    print!("; which? [b] ");
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut line);
+    match line.trim() {
+        "k" | "keep" => Redefine::Keep,
+        "r" | "refuse" => Redefine::Refuse,
+        _ => Redefine::Break,
+    }
 }
 
 /// A string as it was written, `"…"` with escapes, back to its text.

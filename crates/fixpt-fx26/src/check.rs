@@ -130,6 +130,11 @@ pub struct Checker {
     /// effect *before* masking, which is what some of the paper's claims are
     /// about.
     pub masking: bool,
+    /// Globals broken by an incompatible redefinition of one they use
+    /// (`Fx26Session`'s redefinition): by name, the index in `env` of the
+    /// binding broken, and why. A use of it is an error until the name is
+    /// defined again.
+    pub(crate) broken: HashMap<Sym, (usize, String)>,
 }
 
 /// What checking proved about expressions, keyed by expression. Lowering
@@ -253,6 +258,7 @@ impl Checker {
             facts: NodeFacts::default(),
             private_regions: Vec::new(),
             masking: true,
+            broken: HashMap::new(),
         };
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
@@ -318,8 +324,44 @@ impl Checker {
         self.bool_
     }
 
+    /// What `s` is where it is used: its innermost binding; nothing, if that
+    /// is a global broken by a redefinition (`broken`).
     pub(crate) fn lookup(&self, s: Sym) -> Option<TyId> {
-        self.env.iter().rev().find(|(n, _)| *n == s).map(|(_, t)| *t)
+        let i = self.env.iter().rposition(|(n, _)| *n == s)?;
+        if self.broken.get(&s).is_some_and(|(b, _)| *b == i) {
+            return None;
+        }
+        Some(self.env[i].1)
+    }
+
+    /// The type of the global `s` as defined now, broken or not.
+    pub fn global_type(&self, s: Sym) -> Option<TyId> {
+        self.env.iter().rposition(|(n, _)| *n == s).filter(|i| *i >= self.standard_len).map(|i| self.env[i].1)
+    }
+
+    /// Where the environment is now, to go back to (`rollback`).
+    pub fn mark(&self) -> usize {
+        self.env.len()
+    }
+
+    /// The environment as it was at `mark`: what was bound since, unbound.
+    pub fn rollback(&mut self, mark: usize) {
+        self.truncate_env(mark);
+        self.broken.retain(|_, (i, _)| *i < mark);
+    }
+
+    /// The global `s`, as defined now, broken: a use of it is an error
+    /// saying `why`, until it is defined again.
+    pub fn break_global(&mut self, s: Sym, why: String) {
+        if let Some(i) = self.env.iter().rposition(|(n, _)| *n == s) {
+            self.broken.insert(s, (i, why));
+        }
+    }
+
+    /// Whether the global `s` is broken, and why.
+    pub fn broken_why(&self, s: Sym) -> Option<&str> {
+        let i = self.env.iter().rposition(|(n, _)| *n == s)?;
+        self.broken.get(&s).filter(|(b, _)| *b == i).map(|(_, w)| w.as_str())
     }
 
     // ------------------------------------------------------------ synthesis
@@ -358,7 +400,10 @@ impl Checker {
         match self.arena.exp_at(e).clone() {
             Exp::Var(s) => match self.lookup(s) {
                 Some(t) => Ok((t, self.naming_effect(s, t))),
-                None => Err(FxError::at(span, format!("unbound variable `{}`", self.interner.name(s)))),
+                None => match self.broken_why(s) {
+                    Some(why) => Err(FxError::at(span, format!("`{}` is broken, {why}: define it again to use it", self.interner.name(s)))),
+                    None => Err(FxError::at(span, format!("unbound variable `{}`", self.interner.name(s)))),
+                },
             },
             Exp::Int(_) => Ok((self.int, Effect::pure())),
             Exp::Bool(_) => Ok((self.bool_, Effect::pure())),

@@ -55,6 +55,13 @@ queue gained", and "The next queue"):
    convention too: the global made by the compiler, filled with the value
    a native thunk computes; native code reads globals through their cells
    when it runs (but binds a cellular closure when compiling).
+   Redefinition at the REPL (2026-09-28, with the user): a global's uses
+   always refer to what it is now; one of a type every use can take keeps
+   the global; one they cannot re-runs its users, breaking those that no
+   longer check until they are defined again (the default), or keeps them
+   on the old one, or is refused, as asked (`,redefine b|k|r`). A whole
+   program's own second definition still makes a new binding: whether
+   files should follow the REPL is open.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

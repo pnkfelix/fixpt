@@ -190,6 +190,8 @@ pub struct Globals {
     current: HashMap<Sym, String>,
     /// How many times each name has been defined.
     defined: HashMap<Sym, usize>,
+    /// Names whose next definition keeps their global (`keep_next`).
+    keep: Vec<Sym>,
 }
 
 impl Default for Globals {
@@ -200,12 +202,26 @@ impl Default for Globals {
 
 impl Globals {
     pub fn with_prefix(prefix: &str) -> Globals {
-        Globals { prefix: prefix.to_string(), current: HashMap::new(), defined: HashMap::new() }
+        Globals { prefix: prefix.to_string(), current: HashMap::new(), defined: HashMap::new(), keep: Vec::new() }
+    }
+
+    /// The next definition of `name` keeps the global it has: every use of
+    /// it, before and after, sees the new value (a redefinition of a type
+    /// its users can take; `Fx26Session`'s redefinition).
+    pub fn keep_next(&mut self, name: Sym) {
+        self.keep.push(name);
     }
 
     /// The global a new definition of `name` gets, which becomes the one
-    /// later uses of `name` refer to.
+    /// later uses of `name` refer to: a new one, unless `keep_next` asked
+    /// for the one it has.
     pub fn define(&mut self, c: &Checker, name: Sym) -> String {
+        if let Some(k) = self.keep.iter().position(|n| *n == name) {
+            self.keep.remove(k);
+            if let Some(g) = self.current.get(&name) {
+                return g.clone();
+            }
+        }
         let n = self.defined.entry(name).or_insert(0);
         *n += 1;
         let base = format!("{}{}", self.prefix, fixpt_read::escape_symbol(c.interner.name(name)));
