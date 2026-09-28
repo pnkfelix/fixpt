@@ -52,8 +52,9 @@ reference native code is tested against.
 ## Conventions in types
 
 - **A kind, `conv`**, whose descriptions are the conventions: `threaded`
-  (the procedure is a threaded closure, run by an inner interpreter) and
-  `native` (it is native code, run by being called). A foreign `c`
+  (the procedure is a threaded closure, run by an inner interpreter),
+  `native` (it is native code, run by being called), and `any` (either;
+  the caller finds out which when it calls, below). A foreign `c`
   convention could come later, for calling out.
 - **In every subroutine type.** `(subr (conv C) e (t …) u)`: the
   convention position is optional, and `(subr e (t …) u)` means a
@@ -71,21 +72,40 @@ reference native code is tested against.
   native compiler makes one copy per convention it is used at (few: most
   programs use one). The standard operations are polymorphic too: the
   runtime provides each in every convention.
-- **No subsumption.** A `threaded` procedure is not a `native` one, nor the
-  reverse: conventions compare as equal or not, in both checkers' `sub`.
-  A mismatch is an error that says so, and names the conversion.
+- **`any`: code that need not know** (the user's, 2026-09-27). A
+  procedure value already says at run time how it is run: a threaded
+  closure and a native closure are bloblets of different kinds. So a call
+  through `(subr (conv any) …)` looks at the callee's kind and enters the
+  interpreter or calls the code: a test and a branch per call, and no
+  adapter anywhere. Hence the only subsumption between conventions:
+  `threaded ≤ any` and `native ≤ any`, free at run time, since the value
+  does not change, only what its callers may assume. Code that does not
+  care (cold code, the evaluator written in FX-26, a table of handlers of
+  either kind) takes `any` and stays ignorant of what it receives; code
+  that cares names a convention and calls directly. `threaded` and
+  `native` are not related to each other, and nothing goes from `any` back
+  to a specific convention but a conversion.
+- **Conventions compare** as equal, or by the subsumption into `any`, in
+  both checkers' `sub`. A mismatch is an error that says so, and names the
+  conversion.
 - **Conversion is explicit.** `(convention C e)`: `e`'s procedure, called
-  in convention `C`. It makes an adapter, a small procedure in `C` that
-  calls the original in its own. Where adapters go is then visible in the
+  in convention `C`. From a specific convention to the other, it makes an
+  adapter, a small procedure in `C` that calls the original in its own;
+  from `any` to a specific one, it checks the value's kind, and adapts it
+  only if it is of the other. Where adapters go is then visible in the
   source. Whether the checker should insert them itself in checking mode,
-  where the expected type says the convention, is an open question below.
+  where the expected type says the convention, is an open question below;
+  `any` makes it less pressing, since code that would need many
+  conversions can take `any` instead.
 - **Soundness.** An application's rule requires the callee's convention to
   be the one the call is compiled for; calling native code through the
   threaded convention, or the reverse, would be a crash, so this is type
-  safety, not style. `docs/research/soundness.md`'s core gains the
-  convention as part of the arrow type, with the adapter's rule. The Rust
-  host calling into FX-26 (`%run-word`) checks the closure's kind at run
-  time: the one dynamic boundary.
+  safety, not style. A call through `any` is safe because it dispatches on
+  the value's kind, which the runtime keeps truthful. `docs/research/soundness.md`'s
+  core gains the convention as part of the arrow type, with the
+  subsumption into `any` and the adapter's rule. The Rust host calling
+  into FX-26 (`%run-word`) is a call through `any`: it already checks the
+  closure's kind at run time.
 
 Where conventions actually meet, in one run: the evaluator written in
 FX-26 calling compiled code; the REPL, where forms meet earlier
@@ -189,9 +209,11 @@ its code in one.
 ## Steps, each committed and tested
 
 1. **Conventions in types**, in both checkers: the kind, the optional
-   position in `subr`, inference and defaulting, printing only when not the
-   default, `(convention C e)`, the soundness note's rule. No change in
-   behaviour: every program is `threaded` by default.
+   position in `subr`, `any` and the subsumption into it, inference and
+   defaulting, printing only when not the default, `(convention C e)`, the
+   soundness note's rule. No change in behaviour: every program is
+   `threaded` by default, and calls through `any` dispatch on the kind the
+   interpreters already check.
 2. **Native frames, first-order**: the stack segment, the calling
    convention, traps and callouts, and a native compiler for code without
    closures or continuations (from register code's intermediate form),
