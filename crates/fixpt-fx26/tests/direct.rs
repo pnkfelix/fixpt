@@ -110,7 +110,12 @@ fn on_rust_machine(text: &str) -> String {
 }
 
 fn bench(name: &str) -> String {
-    let text = std::fs::read_to_string(format!("{}/tests/programs/bench/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    program(&format!("bench/{name}"))
+}
+
+/// A test program's definitions: everything but its last line, the call.
+fn program(name: &str) -> String {
+    let text = std::fs::read_to_string(format!("{}/tests/programs/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
     // The definitions: everything but the last line, the call.
     let lines: Vec<&str> = text.trim_end().lines().collect();
     lines[..lines.len() - 1].join("\n")
@@ -226,6 +231,25 @@ fn a_primitive_that_fails_says_why() {
     assert!(matches!(&r.direct, Err(m) if m.contains("zero")), "{:?}\n{}", r.direct, r.code);
 }
 
+/// An array's element, by `field@`: inline in range, and out of range
+/// the call-out says so, as the Rust machine does.
+#[test]
+fn array_elements_in_and_out_of_range() {
+    let defs = "(define a (arrayof int @a) (make-array 10 7))\n(define at (subr (read @a) (int) int) (lambda (i) (array-ref a i)))";
+    let r = run(defs, "at", &[9], FUEL);
+    assert_eq!(r.direct, Ok("7".into()), "{}", r.code);
+    let r = run(defs, "at", &[10], FUEL);
+    assert!(matches!(&r.direct, Err(m) if m.contains("field")), "{:?} (the Rust machine: {})\n{}", r.direct, r.rust, r.code);
+}
+
+/// A pair written, by the runtime's `set-car!`, called out.
+#[test]
+fn a_pair_written() {
+    let r = run(&program("run/letfreeze"), "frozen-list", &[10], FUEL);
+    assert_eq!(r.direct, Ok("(10 2 3)".into()), "{}", r.code);
+    assert_eq!(r.rust, "(10 2 3)");
+}
+
 /// Code compiled, run and dropped, over and over, with collections between:
 /// the code area holds only what is still referred to, however long it
 /// goes on (the code area's own test, `fixpt-native/tests/code_gc.rs`, for
@@ -274,19 +298,36 @@ fn code_compiled_and_dropped_is_reclaimed() {
     });
 }
 
-thread_local! {
-    static MACHINE: std::cell::RefCell<DirectMachine> = std::cell::RefCell::new(DirectMachine::new().expect("maps"));
-}
-
 fn run_native(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     use fixpt_fx26::session::NativeRun;
-    MACHINE.with(|m| {
-        let mut m = m.borrow_mut();
-        match m.compile(&mut rt.heap, closure) {
-            Err(why) => NativeRun::Declined(why),
-            Ok(procs) => NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map_err(|t| t.what)),
-        }
+    fixpt_native::direct::with_machine(|m| match m.compile(&mut rt.heap, closure) {
+        Err(why) => NativeRun::Declined(why),
+        Ok(procs) => NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map_err(|t| t.what)),
     })
+    .unwrap_or_else(|e| NativeRun::Ran(Err(e)))
+}
+
+/// Native code and cellular code calling each other, as the REPL runs
+/// what the native compiler declines as cellular code: cellular code
+/// calling a native closure, native code a cellular one, and a whole
+/// continuation cellular code took thrown from native code
+/// (`programs/native/mixed.fx`); and the same collecting often.
+#[test]
+fn native_and_cellular_code_call_each_other() {
+    use fixpt_fx26::session::Strategy;
+    for gc_every in [0, 500] {
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.strategy = Strategy::Cellular;
+        s.native_runner = Some(run_native);
+        s.register_code = true;
+        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+        s.scheme.runtime_unrooted().heap.gc_every = gc_every;
+        let forms = s.checker.read_in(FileId(0), include_str!("programs/native/mixed.fx")).expect("reads");
+        let out: Vec<String> =
+            s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
+        assert!(out[4].ends_with("Ok(Some(\"5150\"))") && out[4].contains("`callcc`"), "{out:?}");
+        assert!(out[5].ends_with("Ok(Some(\"42\"))"), "{out:?}");
+    }
 }
 
 /// Every test program, form by form as the REPL runs them (each form after
@@ -304,6 +345,9 @@ fn every_test_program_runs_natively_as_cellular() {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
         s.strategy = Strategy::Cellular;
         s.native_runner = runner;
+        // As the REPL has it: what the native compiler starts from.
+        s.register_code = runner.is_some();
+        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
         let forms = s.checker.read_in(FileId(0), text).ok()?;
         Some(s.run_forms(&forms).ok()?.into_iter().map(|o| o.map(|o| (o.value, o.printed))).collect::<Vec<_>>())
     };

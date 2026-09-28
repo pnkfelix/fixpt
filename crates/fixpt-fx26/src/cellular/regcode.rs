@@ -255,6 +255,8 @@ impl Compiler<'_> {
             ("array-set!", 3) => Some(Std::Special("array-set!")),
             ("array-length", 1) => Some(Std::Special("array-length")),
             ("make-array", 2) => Some(Std::Special("make-array")),
+            ("set-car!", 2) => Some(Std::Special("set-car!")),
+            ("set-cdr!", 2) => Some(Std::Special("set-cdr!")),
             ("make-continuation-prompt-tag" | "make-continuation-mark-key", 0) => Some(Std::Special("make-box")),
             _ => {
                 // What the cellular compiler does with one runtime
@@ -273,8 +275,20 @@ impl Compiler<'_> {
         }
     }
 
+    /// The operator under the type abstractions, projections, ascriptions
+    /// and conversions, which compile to nothing: `((proj car @r) xs)` is
+    /// `car` applied.
+    fn r_operator(&self, mut f: ExpId) -> ExpId {
+        loop {
+            match self.c.arena.exp_at(f) {
+                Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => f = *body,
+                _ => return f,
+            }
+        }
+    }
+
     fn r_standard_name(&self, env: &[(Sym, RLoc)], f: ExpId) -> O<String> {
-        match self.c.arena.exp_at(f) {
+        match self.c.arena.exp_at(self.r_operator(f)) {
             Exp::Var(n) if self.r_where(env, *n).is_none() => Some(self.name(*n).to_string()),
             _ => None,
         }
@@ -329,7 +343,7 @@ impl Compiler<'_> {
                 let loop_call = tail
                     && matches!((this, self.c.arena.exp_at(fun)), (Some(t), Exp::Var(n))
                     if *n == t.name && args.len() == t.params);
-                let inline = match self.c.arena.exp_at(fun) {
+                let inline = match self.c.arena.exp_at(self.r_operator(fun)) {
                     Exp::Var(n) if self.where_is(e, *n).is_none() => {
                         let name = self.name(*n).to_string();
                         matches!(
@@ -929,6 +943,13 @@ impl Compiler<'_> {
             "make-box" => {
                 let u = self.unit();
                 self.r_prim(g, "%make-box", &[Arg::V(u)], env, te)?;
+            }
+            // The runtime's, which refuses a pair not to be written; then
+            // unit.
+            "set-car!" | "set-cdr!" => {
+                self.r_prim(g, what, &es, env, te)?;
+                let u = self.unit();
+                g.op("const", &[u]);
             }
             _ => return None,
         }

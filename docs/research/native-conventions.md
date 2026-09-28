@@ -264,8 +264,24 @@ its code in one.
    (`compile-new-global`); forms compiled alone, as Larceny's REPL
    compiles them, against the globals' cells. Native code reads a global
    through its cell when it runs, so a later definition is seen; a cell
-   holding a cellular closure is bound when compiling.
-   Still to do: polymorphism in conventions and a copy per convention;
+   holding a cellular closure is bound when compiling. What the native
+   compiler declines runs as cellular code, and the two call each other
+   (2026-09-28): cellular code calls a native closure through the
+   runtime's `call_native`, its stacks rooted meanwhile; native code
+   calls what is not native (an unknown call whose code is not in the code
+   area) through a call-out that runs it on a cellular machine of its own,
+   the native frames rooted meanwhile (`fixpt_engine::cellular::call_value`).
+   A whole continuation that another run took, given a value there, is
+   thrown past the native code, which is dropped, to the run that took it
+   (each continuation records its run, `CONT_RUN`). `field@` is inline,
+   `set-car!` and `set-cdr!` call out, and register code sees through
+   `proj` to a standard operation applied.
+   Still to do: a definition's initializer is checked again as an
+   expression, `(the T init)`, which fails where only the definition's own
+   context lets it check (a generative type's `up-` and `down-`, a
+   recursion proved to end); such definitions run as cellular code. To
+   compile the definition as the REPL always does, and then the closure it
+   made natively, would avoid that. Also: polymorphism in conventions and a copy per convention;
    adapters between conventions): native closures, polymorphism in
    conventions and a copy per convention, adapters.
 5. **Continuations, prompts and marks** on native frames; regions across

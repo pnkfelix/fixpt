@@ -364,7 +364,10 @@ pub mod cellular {
     /// frame pointer, closure), the data stack's height it started at,
     /// whether it is the whole continuation (`callcc`) or delimited, and how
     /// many regions were live when it was taken: reinstated whole, it ends
-    /// any entered since, as an abort does.
+    /// any entered since, as an abort does; and which run of a machine took
+    /// it (a fixnum, 0 for a run native code did not call): given a value
+    /// in a run native code called, a whole continuation another run took
+    /// is thrown past the native code, to that run.
     pub const CONT_DS: usize = 2;
     pub const CONT_RS: usize = 3;
     pub const CONT_CUR: usize = 4;
@@ -374,7 +377,8 @@ pub mod cellular {
     pub const CONT_BASE: usize = 8;
     pub const CONT_WHOLE: usize = 9;
     pub const CONT_REGIONS: usize = 10;
-    pub const CONT_FIELDS: usize = 9;
+    pub const CONT_RUN: usize = 11;
+    pub const CONT_FIELDS: usize = 10;
 
     pub const fn routine(name: &str) -> u64 {
         let mut i = 0;

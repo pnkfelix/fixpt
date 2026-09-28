@@ -40,6 +40,10 @@ pub struct Runtime {
     /// How a closure of code in the native convention is shown: its machine
     /// code (`fixpt-native`, above this crate, installs it).
     pub native_code: Option<MachineCode>,
+    /// How a cellular machine calls a closure of code in the native
+    /// convention (`fixpt-native` installs it): its value, or why it
+    /// stopped. None: such a call is a type error.
+    pub call_native: Option<CallNative>,
     /// How many steps (cells, or polls in machine code) a run of a word by
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
@@ -49,6 +53,22 @@ pub struct Runtime {
 /// Run cellular word `word` with `args` on its data stack; its value, or
 /// why it stopped.
 pub type RunWord = fn(&mut Runtime, Value, &[Value]) -> Result<Value, String>;
+
+/// Call native closure `closure` with `args`: its value, or how it left.
+/// Every value the caller holds must be rooted, since the call may collect.
+pub type CallNative = fn(&mut Runtime, Value, &[Value]) -> Result<Value, NativeExit>;
+
+/// How a call between machines left, if not with a value.
+#[derive(Debug)]
+pub enum NativeExit {
+    /// It stopped, for this reason.
+    Failed(String),
+    /// A whole continuation taken by the machine that called was given a
+    /// value: the call's frames are gone, and that machine goes on from
+    /// the continuation. Nothing has collected since, so the values are as
+    /// they were.
+    Throw { k: Value, v: Value },
+}
 
 /// A word's machine code, shown, as the machine that runs it has it; or
 /// none, if it has none for this word.
@@ -89,6 +109,7 @@ impl Runtime {
             machine_code: None,
             show_machine_code: false,
             native_code: None,
+            call_native: None,
             word_fuel: u64::MAX,
         }
     }
@@ -170,6 +191,7 @@ impl Runtime {
             machine_code: None,
             show_machine_code: false,
             native_code: None,
+            call_native: None,
             word_fuel: u64::MAX,
         }
     }

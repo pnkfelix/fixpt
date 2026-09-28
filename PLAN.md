@@ -45,9 +45,14 @@ queue gained", and "The next queue"):
    roots (`lists` as fast as register code). Step 3 in part: the code in
    the heap's collected code area, reclaimed when dropped. Step 4 in large
    part: closures and higher-order code; with `--calling-convention native`
-   the REPL compiles and runs every expression as machine code (119 of the
-   test programs' expressions; 16 declined, for continuations (step 5),
-   `field@`, and procedures with no register code). Then the rest of 4, and
+   the REPL compiles and runs every expression as machine code; what it
+   declines runs as cellular code, and native and cellular code call each
+   other, continuations thrown past native code included. Of the test
+   programs' forms, 52 run as machine code and 49 are declined: 11 for
+   continuations and prompts (step 5), 35 because a definition's
+   initializer does not check outside its definition (generative types'
+   coercions, proved recursion; to do: compile the definition, then its
+   closure natively), 3 for procedures with no register code. Then the rest of 4, and
    5–7. The REPL is incremental (2026-09-28), as Larceny's is: each form
    is checked after the ones before (`check-more`) and compiled alone
    against the globals' cells the compiler keeps; nothing is replayed.

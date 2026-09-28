@@ -213,7 +213,7 @@
             ((or (is "make-continuation-prompt-tag" 0) (is "make-continuation-mark-key" 0)) (s-special "make-box"))
             ;; What the cellular compiler does as one runtime primitive
             ;; (`c-standard-on`), register code does too.
-            ((or (string=? name "set-car!") (string=? name "set-cdr!")) (s-none))
+            ((or (is "set-car!" 2) (is "set-cdr!" 2)) (s-special name))
             ((string=? name "new") (r-prim-std "%make-box" n 1))
             ((string=? name "char->string") (r-prim-std "string" n 1))
             ((or (string=? name "*") (string=? name "modulo") (string=? name "quotient")
@@ -226,9 +226,20 @@
                (cond ((string=? p "%fx26-identity") (if (= n 1) (s-identity) (s-none)))
                      ((string=? p "") (s-none))
                      (else (r-prim-std p n n)))))))))
+;; The operator under the type abstractions, projections, ascriptions and
+;; conversions, which compile to nothing: `((proj car @r) xs)` is `car`
+;; applied.
+(define r-operator (subr (maxeff (read @k) spin) (exp) exp)
+  (lambda (f)
+    (tagcase f
+      (e-plambda (d body a b) (r-operator body))
+      (e-proj (body ds a b) (r-operator body))
+      (e-the (d body a b) (r-operator body))
+      (e-convention (cnv body a b) (r-operator body))
+      (else y y))))
 (define r-standard-name (subr (maxeff (read @k) (alloc @k) spin) (renv exp) string)
   (lambda (env f)
-    (tagcase f (e-var (n a b) (if (null? (r-where env n)) (symbol->string n) "")) (else y ""))))
+    (tagcase (r-operator f) (e-var (n a b) (if (null? (r-where env n)) (symbol->string n) "")) (else y ""))))
 
 ;;; ---------------------------------------------------------------- lists
 
@@ -276,7 +287,7 @@
           (let* ((args-collect (r-collects-all args e this))
                  ;; A loop: a call of the procedure itself, in tail position.
                  (loop-call (and tail (tagcase f (e-var (n a2 b2) (r-this-name? this n (c-count-exps args))) (else y #f))))
-                 (inline (tagcase f
+                 (inline (tagcase (r-operator f)
                            (e-var (n a2 b2)
                              (if (null? (c-where e n))
                                  (tagcase (r-standard (symbol->string n) (c-count-exps args))
@@ -677,6 +688,10 @@
                      (the rargs (cons (a-v (wcell-int 0)) (cons (a-e (car args)) (cons (a-e (car (cdr args))) nil)))) env te))
             ((string=? what "make-box")
              (r-prim g "%make-box" (the rargs (cons (a-v (wcell-unit)) nil)) env te))
+            ;; The runtime's, which refuses a pair not to be written; then
+            ;; unit.
+            ((or (string=? what "set-car!") (string=? what "set-cdr!"))
+             (begin (r-prim g what (r-exp-args args) env te) (r-op1 g rop-const (wcell-unit))))
             (else (r-decline)))))
   ;; `tagcase`: the scrutinee kept; each arm's tag compared, the last's not
   ;; when there is no `else` (a checked program covers every tag); the value,

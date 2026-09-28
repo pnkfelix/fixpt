@@ -354,6 +354,18 @@ impl Fx26Session {
     /// first pass and have none. Redefinition is as at the REPL.
     pub fn run_forms(&mut self, forms: &[Syntax]) -> R<Vec<R<Outcome>>> {
         let done = self.checker.declare_ahead(forms)?;
+        // The type definitions, declared ahead, are the pieces written in
+        // FX-26's too, first and in order, as the REPL gives them.
+        if self.strategy != Strategy::Lower {
+            for (f, _) in forms.iter().zip(&done).filter(|(_, d)| **d) {
+                let text = format!("{}\n", fixpt_read::write_syntax(f, &self.checker.interner));
+                if self.strategy == Strategy::Evaluate {
+                    self.defined26.push_str(&text);
+                } else if let Some(e) = self.compile_form_showing(&text, false)?.0.strip_prefix("!! ") {
+                    return Err(FxError::at(f.span, e.to_string()));
+                }
+            }
+        }
         let mut outs = Vec::new();
         for (f, done) in forms.iter().zip(done) {
             if !done {
@@ -486,7 +498,7 @@ impl Fx26Session {
             // A definition, in the native convention: its global made, and
             // filled with its value, computed as an expression is.
             if let (Some(run), Top::Define { name, assigns, .. }, Strategy::Cellular) = (self.native_runner, &top, self.strategy)
-                && let Some((ty, init)) = definition_init(form)
+                && let Some((ty, init)) = definition_init(form, &self.checker, *name)
             {
                 if *assigns {
                     self.keep_global(*name)?;
@@ -787,12 +799,18 @@ impl Fx26Session {
     }
 }
 
-/// A definition's type, if it says one, and initializer: `(define name
-/// [type] init)`.
-fn definition_init(form: &Syntax) -> Option<(Option<&Syntax>, &Syntax)> {
-    match &form.datum {
-        fixpt_read::Datum::List { items, tail: None } if items.len() == 3 => Some((None, &items[2])),
-        fixpt_read::Datum::List { items, tail: None } if items.len() == 4 => Some((Some(&items[2]), &items[3])),
+/// A definition's type, if it says one, and initializer, when `form` is
+/// `(define name [type] init)` of `name`; not one of the forms that define
+/// names of their own (`define-generative`'s coercions, say).
+fn definition_init<'f>(form: &'f Syntax, c: &Checker, name: Sym) -> Option<(Option<&'f Syntax>, &'f Syntax)> {
+    let fixpt_read::Datum::List { items, tail: None } = &form.datum else { return None };
+    let is = |s: &Syntax, n: &str| s.as_symbol().is_some_and(|x| c.interner.name(x) == n);
+    if !(is(items.first()?, "define") && is(items.get(1)?, c.interner.name(name))) {
+        return None;
+    }
+    match items.len() {
+        3 => Some((None, &items[2])),
+        4 => Some((Some(&items[2]), &items[3])),
         _ => None,
     }
 }

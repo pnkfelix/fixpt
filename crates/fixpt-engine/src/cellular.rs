@@ -23,11 +23,11 @@
 
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{
-    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_WHOLE,
+    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_WHOLE,
     KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
 };
 use fixpt_heap::{Heap, Value};
-use fixpt_runtime::{PrimKind, Runtime};
+use fixpt_runtime::{NativeExit, PrimKind, Runtime};
 
 /// The most values the data stack may hold, and the most calls the return
 /// stack may hold, checked where a word is entered and where a branch is
@@ -371,6 +371,14 @@ pub struct Machine {
     pub fuel: u64,
     /// When profiling: cells run in each word, by the word's name.
     pub profile: Option<Profile>,
+    /// Whether native code called this run (`call_value`): a whole
+    /// continuation given a value here is then `thrown`, for the machine
+    /// under the native code to go on from.
+    nested: bool,
+    thrown: Option<(Value, Value)>,
+    /// Which run this is, for the continuations it takes: 0 unless native
+    /// code called it.
+    run: u64,
 }
 
 use std::collections::HashMap;
@@ -408,7 +416,7 @@ impl Profile {
 
 impl Default for Machine {
     fn default() -> Machine {
-        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None }
+        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None, nested: false, thrown: None, run: 0 }
     }
 }
 
@@ -547,6 +555,7 @@ impl Machine {
             (CONT_BASE, Value::fixnum(ds_from as i64)),
             (CONT_WHOLE, Value::boolean(whole)),
             (CONT_REGIONS, Value::fixnum(heap.live_regions() as i64)),
+            (CONT_RUN, Value::fixnum(self.run as i64)),
         ];
         for (f, v) in fields {
             heap.set_bloblet_slot(k, f, v);
@@ -668,6 +677,7 @@ impl Machine {
             }
             let v = self.ds.pop().expect("counted");
             self.check_limits()?;
+            self.escape(heap, c, v)?;
             self.reinstate(heap, r, c, v, tail);
             return Ok(());
         }
@@ -685,6 +695,52 @@ impl Machine {
         }
         (r.cur, r.k, r.clo) = (word, WORD_CELL0, c);
         Ok(())
+    }
+
+    /// In a run native code called, a whole continuation given a value
+    /// leaves it, thrown.
+    fn escape(&mut self, heap: &Heap, k: Value, v: Value) -> Result<(), Trap> {
+        let run = heap.bloblet_slot(k, CONT_RUN);
+        if self.nested && heap.bloblet_slot(k, CONT_WHOLE) == Value::TRUE && run != Value::fixnum(self.run as i64) {
+            self.thrown = Some((k, v));
+            return Err(Trap::Prim(THROWN.into()));
+        }
+        Ok(())
+    }
+
+    /// A call of the native closure on top with the `n` values below it,
+    /// by the runtime's `call_native`, on Rust's stack: its value. The call
+    /// may collect, so the stacks and registers are kept in a vector the
+    /// heap roots meanwhile, and taken back from it after, moved.
+    fn call_native(&mut self, rt: &mut Runtime, r: &mut Regs, n: usize, routine: &'static str) -> Result<Option<Value>, Trap> {
+        let Some(call) = rt.call_native else { return Err(Trap::Type { routine }) };
+        self.check_limits()?;
+        let c = self.ds.pop().expect("counted");
+        let args = self.ds.split_off(self.ds.len() - n);
+        let (nd, nr) = (self.ds.len(), self.rs.len());
+        let mut all = std::mem::take(&mut self.ds);
+        all.append(&mut self.rs);
+        all.extend([r.cur, r.clo]);
+        let kept = rt.heap.vector_from(&all);
+        let at = rt.heap.push_root(kept);
+        let v = call(rt, c, &args);
+        let kept = rt.heap.root_at(at);
+        rt.heap.pop_roots_to(at);
+        let all: Vec<Value> = (0..rt.heap.obj_len(kept)).map(|i| rt.heap.obj_ref(kept, i)).collect();
+        self.ds = all[..nd].to_vec();
+        self.rs = all[nd..nd + nr].to_vec();
+        (r.cur, r.clo) = (all[nd + nr], all[nd + nr + 1]);
+        match v {
+            Ok(v) => Ok(Some(v)),
+            Err(NativeExit::Failed(m)) => Err(Trap::Prim(m)),
+            // Thrown past native code: this machine goes on from `k`, or,
+            // itself called by native code, throws it on.
+            Err(NativeExit::Throw { k, v }) => {
+                self.escape(&rt.heap, k, v)?;
+                self.reinstate(&mut rt.heap, r, k, v, true);
+                Ok(None)
+            }
+        }
     }
 
     fn prim(&mut self, cx: &mut Ctx, n: i64, r: &mut Regs) -> Result<Flow, Trap> {
@@ -866,7 +922,26 @@ impl Machine {
             // them. The native machines leave the checks out.
             CALL | TAILCALL | TCALL | TTAILCALL => {
                 let count = Self::operand(cx.heap(), r).as_fixnum() as usize;
-                self.call(cx, r, count, n == TAILCALL || n == TTAILCALL, name)?;
+                let tail = n == TAILCALL || n == TTAILCALL;
+                let callee = self.ds.last().copied().filter(|_| self.ds.len() > r.fp + count);
+                if let (Some(c), Ctx::Rt(rt)) = (callee, &mut *cx)
+                    && c.is_bloblet()
+                    && rt.heap.bloblet_kind(c) == kind("native-closure")
+                {
+                    // None: a continuation was thrown past it, and is where
+                    // this machine now is.
+                    let Some(v) = self.call_native(rt, r, count, name)? else { return Ok(Flow::Next) };
+                    self.ds.push(v);
+                    if tail {
+                        // Returned from here, as `return` does.
+                        let v = self.pop(name)?;
+                        self.ds.truncate(r.fp);
+                        self.ds.push(v);
+                        return Ok(Flow::Exit);
+                    }
+                } else {
+                    self.call(cx, r, count, tail, name)?;
+                }
             }
             RESUME => {
                 let k = self.pop(name)?;
@@ -876,6 +951,7 @@ impl Machine {
                     return Err(Trap::Type { routine: name });
                 }
                 self.check_limits()?;
+                self.escape(heap, k, v)?;
                 self.reinstate(heap, r, k, v, true);
             }
             UNDEFINED => return Err(Trap::Prim("a procedure was called before it was defined".into())),
@@ -1035,7 +1111,7 @@ impl Machine {
     /// return stack's entries oldest first, each `(word, fixnum k, fixnum
     /// frame pointer, closure)` or a marker, as this machine keeps them.
     pub fn from_stacks(ds: Vec<Value>, rs: Vec<Value>) -> Machine {
-        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None }
+        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None, nested: false, thrown: None, run: 0 }
     }
 
     /// The stacks, as `from_stacks` takes them.
@@ -1089,6 +1165,47 @@ pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, 
     }
     out?;
     m.ds.pop().ok_or_else(|| "the word left nothing".to_string())
+}
+
+thread_local! {
+    /// How many runs native code has called: each one's number.
+    static RUNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// What a run native code called traps with when a whole continuation is
+/// thrown out of it (`Machine::thrown` says which).
+const THROWN: &str = "a continuation thrown past native code";
+
+/// Call `f`, a cellular closure or continuation, with `args`, on a machine
+/// of its own, for native code (`fixpt-native`'s call-out): its value, or
+/// how it left. Every value the caller holds must be rooted, since the run
+/// may collect.
+pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, NativeExit> {
+    let heap = &mut rt.heap;
+    let is = |k: &str| f.is_bloblet() && heap.bloblet_kind(f) == kind(k);
+    if !(is("cellular-closure") || is("cellular-continuation")) {
+        return Err(NativeExit::Failed("a call of what is not a procedure".into()));
+    }
+    // The arguments and `f` pushed, as the word's literals, and called.
+    let mut w = WordBuilder::new();
+    for a in args.iter().chain([&f]) {
+        w.lit(*a);
+    }
+    let word = w.call_closure(args.len()).prim("exit").build(heap, "call-from-native");
+    let mut m = Machine::with_fuel(rt.word_fuel);
+    m.nested = true;
+    m.run = RUNS.with(|n| {
+        n.set(n.get() + 1);
+        n.get()
+    });
+    match m.run_in_runtime(rt, word) {
+        Ok(()) => m.ds.pop().ok_or_else(|| NativeExit::Failed("the call left nothing".into())),
+        Err(_) if m.thrown.is_some() => {
+            let (k, v) = m.thrown.expect("thrown");
+            Err(NativeExit::Throw { k, v })
+        }
+        Err(t) => Err(NativeExit::Failed(format!("{t:?}"))),
+    }
 }
 
 /// A thrown value as a message.

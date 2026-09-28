@@ -97,8 +97,11 @@ struct DState {
     /// The code bloblet running, kept alive by the call-outs' collections
     /// (it never moves).
     code: u64,
-    /// For a call-out that makes a closure: the code bloblet it runs.
+    /// For a call-out that makes a closure: the code bloblet it runs; for
+    /// one that calls what is not native code, that, and how many
+    /// arguments it is given.
     aux: u64,
+    nargs: u64,
     /// The closure the call starts in; `DELTA`; and where the code area
     /// starts, below which a closure's code is not native code.
     clo: u64,
@@ -107,13 +110,11 @@ struct DState {
 }
 
 /// The traps this code raises, by code.
-const TRAPS: [&str; 6] =
-    ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed", "a procedure not in the native convention was called"];
+const TRAPS: [&str; 5] = ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed"];
 const OUT_OF_FUEL: u32 = 1;
 const STACK_OVERFLOW: u32 = 2;
 const OVERFLOW: u32 = 3;
 const PRIM_FAILED: u32 = 4;
-const NOT_NATIVE: u32 = 5;
 
 /// What a call-out does: `cons`; a runtime primitive of `n` arguments; a
 /// native closure over `n` values of the code in the state's `aux`.
@@ -126,12 +127,20 @@ enum Callout {
     /// native closure over arguments 1 to `n − 2` of the code that is the
     /// last.
     RegionClosure { n: usize },
+    /// `field@`: field `k` (argument 1) of the bloblet that is argument 0,
+    /// when the inline path found it out of range or not a bloblet.
+    FieldRef,
+    /// A call of what is not native code, in the state's `aux`, with the
+    /// state's `nargs` arguments: a cellular closure or continuation, run
+    /// by the cellular machine (`fixpt_engine::cellular::call_value`).
+    Foreign,
 }
 
 impl Callout {
     fn arity(self) -> usize {
         match self {
-            Callout::Cons => 2,
+            Callout::Cons | Callout::FieldRef => 2,
+            Callout::Foreign => 0,
             Callout::Prim { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
     }
@@ -160,6 +169,47 @@ enum Field {
 thread_local! {
     /// Why the last primitive that failed failed.
     static LAST_MESSAGE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// This thread's machine, made when first asked for: the one every
+    /// native closure its code makes runs on, since that code's call-outs
+    /// are numbered in its table.
+    static MACHINE: std::cell::RefCell<Option<DirectMachine>> = const { std::cell::RefCell::new(None) };
+    /// A whole continuation of cellular code, and its value, thrown past
+    /// the native code running: the call traps, and the caller throws it on.
+    static THROWN: std::cell::Cell<Option<(Value, Value)>> = const { std::cell::Cell::new(None) };
+}
+
+/// The continuation, and its value, that the last call that trapped threw
+/// past its native code, if it did.
+pub fn take_thrown() -> Option<(Value, Value)> {
+    THROWN.with(|t| t.take())
+}
+
+/// `f` of this thread's machine; or why not: no code space for one, or it
+/// is running already (a native call from code a native call called, which
+/// cannot be yet).
+pub fn with_machine<T>(f: impl FnOnce(&mut DirectMachine) -> T) -> Result<T, String> {
+    MACHINE.with(|m| {
+        let mut m = m.try_borrow_mut().map_err(|_| "native code called from code native code called".to_string())?;
+        if m.is_none() {
+            *m = Some(DirectMachine::new()?);
+        }
+        Ok(f(m.as_mut().expect("made")))
+    })
+}
+
+/// A runtime's `call_native`: native closure `closure` called with `args`
+/// on this thread's machine, in the steps a word may take.
+pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Value]) -> Result<Value, fixpt_runtime::NativeExit> {
+    let fail = fixpt_runtime::NativeExit::Failed;
+    let p = DirectMachine::compiled_of(&rt.heap, closure).ok_or_else(|| fail("not a native closure".into()))?;
+    if args.len() > 8 {
+        return Err(fail("a native call of more than 8 arguments".into()));
+    }
+    let fuel = rt.word_fuel.min(u64::MAX >> 1);
+    with_machine(|m| m.call(rt, p, args, fuel)).map_err(fail)?.map_err(|t| match take_thrown() {
+        Some((k, v)) => fixpt_runtime::NativeExit::Throw { k, v },
+        None => fail(t.what),
+    })
 }
 
 fn st_off(f: usize) -> u32 {
@@ -335,6 +385,7 @@ impl DirectMachine {
     pub fn call(&mut self, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
         assert!(p.arity == usize::MAX || args.len() == p.arity, "the procedure's arity");
         assert!(args.len() <= 8, "arguments in registers only");
+        THROWN.with(|t| t.set(None));
         let top = (self.stack.as_mut_ptr() as u64 + 8 * STACK_WORDS as u64) & !15;
         let mut st = DState {
             stack_top: top,
@@ -557,6 +608,11 @@ impl Compiling<'_> {
         // Each trap site branches to a stub of its own, which calls the
         // trap's code: so the return address says where it was.
         let mut stubs: Vec<(Label, u32)> = Vec::new();
+        // Each call of what may not be native code branches, when it is
+        // not, to a stub of its own (with where to come back to, how many
+        // arguments, and whether a tail call), which calls the common
+        // routine that calls out for it.
+        let mut foreign: Vec<(Label, Label, usize, bool)> = Vec::new();
         let trap = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, code: u32, c: Cond| {
             let l = a.label();
             stubs.push((l, code));
@@ -790,6 +846,7 @@ impl Compiling<'_> {
                             Callout::Closure { n: k(o(1)) }
                         }
                         ("cellular", Some("cons")) if k(o(1)) == 2 => Callout::Cons,
+                        ("cellular", Some("field@")) if k(o(1)) == 2 => Callout::FieldRef,
                         ("prim", _) => match fixpt_runtime::PRIMITIVES.get(k(o(0))) {
                             Some(d) if d.name == "%region-closure" => Callout::RegionClosure { n: k(o(1)) },
                             Some(d) if matches!(d.kind, fixpt_runtime::PrimKind::Simple(_)) && d.accepts(k(o(1))) => {
@@ -821,6 +878,24 @@ impl Compiling<'_> {
                         a.e(add_imm(RESULT, X11, fixpt_heap::value::TAG_PAIR as u32));
                         a.to(done, Fix::B);
                     }
+                    // Field `x2` (8k, a fixnum) of the bloblet in `x1`, whose
+                    // trailer says how many it has: 2 ≤ k ≤ F, else the
+                    // call-out reports it.
+                    if let Callout::FieldRef = c {
+                        let tag = fixpt_heap::value::TAG_TRAILER as u32;
+                        a.e(ldur(X16, 1, field_off(1)));
+                        a.e(and_low(X13, X16, 3));
+                        a.e(cmp_imm(X13, tag));
+                        a.to(slow, Fix::If(Cond::Ne));
+                        a.e(cmp_imm(2, 16));
+                        a.to(slow, Fix::If(Cond::Lt));
+                        a.e(sub_imm(X16, X16, tag));
+                        a.e(cmp(2, X16));
+                        a.to(slow, Fix::If(Cond::Gt));
+                        a.e(sub(X11, 1, 2));
+                        a.e(ldur(RESULT, X11, -4));
+                        a.to(done, Fix::B);
+                    }
                     a.bind(slow);
                     let n = self.callouts.len();
                     self.callouts.push(c);
@@ -828,17 +903,7 @@ impl Compiling<'_> {
                     for j in 0..c.arity() {
                         a.e(str(1 + j as Reg, ST, args + 8 * j as u32));
                     }
-                    a.e(str(FRAME, ST, st_off(offset_of!(DState, fp))));
-                    a.e(add_imm(X9, SP, 0));
-                    a.e(str(X9, ST, st_off(offset_of!(DState, native_sp))));
-                    a.e(ldr(X9, ST, st_off(offset_of!(DState, rust_sp))));
-                    a.e(add_imm(SP, X9, 0));
-                    a.e(mov(0, ST));
-                    a.es(&mov_imm64(1, n as u64));
-                    a.e(ldr(X16, ST, st_off(offset_of!(DState, callout))));
-                    a.e(blr(X16));
-                    a.e(ldr(X9, ST, st_off(offset_of!(DState, native_sp))));
-                    a.e(add_imm(SP, X9, 0));
+                    call_out(&mut a, n);
                     a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
                     a.e(cmp_imm(X9, 0));
                     trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
@@ -851,21 +916,26 @@ impl Compiling<'_> {
                 // in the code area is not native code, and traps.
                 "invoke" | "tailinvoke" => {
                     let tail = op == "tailinvoke";
+                    let (stub, after) = (a.label(), a.label());
+                    let not_native = |a: &mut Asm| {
+                        a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                        a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
+                        a.e(cmp(X16, X17));
+                        a.to(stub, Fix::If(Cond::Lo));
+                    };
                     match pending.take() {
                         Some(Field::Code(q)) => {
                             let f = self.field(p, Field::Code(q));
                             ldr_field(&mut a, X16, f);
                         }
                         // Through the global's cell, when the code runs: what
-                        // it holds then, which must be native code.
+                        // it holds then, native code or not.
                         Some(Field::Cell(c)) => {
                             let f = self.field(p, Field::Cell(c));
                             ldr_field(&mut a, X9, f);
                             a.e(ldur(CLO, X9, field_off(2)));
-                            a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
-                            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
-                            a.e(cmp(X16, X17));
-                            trap(&mut a, &mut stubs, NOT_NATIVE, Cond::Lo);
+                            not_native(&mut a);
+                            foreign.push((stub, after, k(o(0)), tail));
                         }
                         Some(g) => {
                             let f = self.field(p, g);
@@ -874,14 +944,13 @@ impl Compiling<'_> {
                         }
                         None => {
                             a.e(mov(CLO, RESULT));
-                            a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
-                            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
-                            a.e(cmp(X16, X17));
-                            trap(&mut a, &mut stubs, NOT_NATIVE, Cond::Lo);
+                            not_native(&mut a);
+                            foreign.push((stub, after, k(o(0)), tail));
                         }
                     }
                     a.e(add(X16, X16, DELTA));
                     a.e(if tail { br(X16) } else { blr(X16) });
+                    a.bind(after);
                 }
                 "invokeself" => {
                     if let Some(s) = clo_slot.filter(|_| captures) {
@@ -908,6 +977,41 @@ impl Compiling<'_> {
             }
         }
         a.bind(labels[cells.len()]);
+        let own = a.code.len();
+        // The calls of what is not native code, out of the way: the common
+        // routine, in a frame of its own with nothing in it, calls out with
+        // the arguments and the callee, and returns its value; a tail call
+        // goes there to return from it to this procedure's caller.
+        if !foreign.is_empty() {
+            let common = a.label();
+            for (stub, after, n, tail) in &foreign {
+                a.bind(*stub);
+                a.e(movz(X9, *n as u32, 0));
+                if *tail {
+                    a.to(common, Fix::B);
+                } else {
+                    a.to(common, Fix::Bl);
+                    a.to(*after, Fix::B);
+                }
+            }
+            a.bind(common);
+            a.e(stp_pre(FRAME, LINK, SP, -16));
+            a.e(add_imm(FRAME, SP, 0));
+            a.e(str(X9, ST, st_off(offset_of!(DState, nargs))));
+            a.e(str(CLO, ST, st_off(offset_of!(DState, aux))));
+            let args = offset_of!(DState, args) as u32;
+            for j in 0..8u32 {
+                a.e(str(1 + j as Reg, ST, args + 8 * j));
+            }
+            let n = self.callouts.len();
+            self.callouts.push(Callout::Foreign);
+            call_out(&mut a, n);
+            a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+            a.e(cmp_imm(X9, 0));
+            trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
+            a.e(ldp_post(FRAME, LINK, SP, 16));
+            a.e(ret());
+        }
         // The traps, out of the way: a stub per site, calling its kind's
         // code, which records the trap and where, and leaves.
         let kinds: Vec<Label> = (0..TRAPS.len()).map(|_| a.label()).collect();
@@ -927,11 +1031,26 @@ impl Compiling<'_> {
             a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
             leave(&mut a);
         }
-        let len = stubs.first().map_or(a.code.len(), |(l, _)| a.labels[l.0].expect("placed"));
         self.procs[p].code = a.finish()?;
-        self.procs[p].len = len;
+        self.procs[p].len = own;
         Ok(())
     }
+}
+
+/// Call-out `n`, its arguments in the state already: on Rust's stack,
+/// with where the native frames are for its collections to find.
+fn call_out(a: &mut Asm, n: usize) {
+    a.e(str(FRAME, ST, st_off(offset_of!(DState, fp))));
+    a.e(add_imm(X9, SP, 0));
+    a.e(str(X9, ST, st_off(offset_of!(DState, native_sp))));
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, rust_sp))));
+    a.e(add_imm(SP, X9, 0));
+    a.e(mov(0, ST));
+    a.es(&mov_imm64(1, n as u64));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, callout))));
+    a.e(blr(X16));
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, native_sp))));
+    a.e(add_imm(SP, X9, 0));
 }
 
 /// `t` := field `k` of the code bloblet being made, PC-relatively: field
@@ -958,7 +1077,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let st = unsafe { &mut *st };
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
-    let mut args: Vec<Value> = st.args[..c.arity()].iter().map(|a| Value(*a)).collect();
+    let n = if let Callout::Foreign = c { st.nargs as usize } else { c.arity() };
+    let mut args: Vec<Value> = st.args[..n].iter().map(|a| Value(*a)).collect();
+    if let Callout::Foreign = c {
+        args.push(Value(st.aux));
+    }
     let mut code = [Value(st.code)];
     {
         let mut roots = native_frames(st);
@@ -973,6 +1096,50 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             let h = if args[0].is_fixnum() { args[0].as_fixnum() as usize } else { usize::MAX };
             let (free, code) = (&args[1..n - 1], args[n - 1]);
             rt.heap.in_region(h, |heap| native_closure(heap, code, free)).raw()
+        }
+        Callout::Foreign => {
+            let (f, args) = args.split_last().expect("the callee");
+            // What the native frames hold, kept where the heap roots it while
+            // the cellular machine runs, which may collect; then put back.
+            let held: Vec<Value> = native_frames(st).iter().flat_map(|s| s.iter().copied()).collect();
+            let kept = rt.heap.vector_from(&held);
+            let at = rt.heap.push_root(kept);
+            let r = fixpt_engine::cellular::call_value(rt, *f, args);
+            let kept = rt.heap.root_at(at);
+            rt.heap.pop_roots_to(at);
+            let mut i = 0;
+            for s in native_frames(st) {
+                for v in s.iter_mut() {
+                    *v = rt.heap.obj_ref(kept, i);
+                    i += 1;
+                }
+            }
+            match r {
+                Ok(v) => v.raw(),
+                Err(e) => {
+                    match e {
+                        fixpt_runtime::NativeExit::Failed(m) => LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m)),
+                        fixpt_runtime::NativeExit::Throw { k, v } => {
+                            THROWN.with(|t| t.set(Some((k, v))));
+                            LAST_MESSAGE.with(|c| *c.borrow_mut() = Some("a continuation of cellular code was thrown past native code".into()));
+                        }
+                    }
+                    st.trap = PRIM_FAILED as u64;
+                    0
+                }
+            }
+        }
+        Callout::FieldRef => {
+            let k = if args[1].is_fixnum() { usize::try_from(args[1].as_fixnum()).ok() } else { None };
+            match k.and_then(|k| rt.heap.bloblet_field(args[0], k).ok()) {
+                Some(v) => v.raw(),
+                None => {
+                    let m = format!("field@: no field {} of {}", fixpt_engine::cellular::describe(rt, args[1]), fixpt_engine::cellular::describe(rt, args[0]));
+                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m));
+                    st.trap = PRIM_FAILED as u64;
+                    0
+                }
+            }
         }
         Callout::Prim { p, .. } => {
             let def = &fixpt_runtime::PRIMITIVES[p];

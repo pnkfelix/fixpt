@@ -88,6 +88,8 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         // What the native convention's compiler starts from.
         s.register_code = true;
         s.scheme.runtime_unrooted().native_code = Some(fixpt_native::direct::code_text);
+        // Cellular code, what the compiler declines, calls native code.
+        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
     }
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
@@ -793,12 +795,11 @@ fn native(session: &mut Fx26Session, rest: &str) {
         let limit = session.step_limit().unwrap_or(u64::MAX >> 1);
         let shown = session.with_thunk(rest.trim(), |rt, closure| {
             let mut out = String::new();
-            let r = MACHINE.with(|m| {
-                let mut m = m.borrow_mut();
+            let r = fixpt_native::direct::with_machine(|m| {
                 let procs = m.compile(&mut rt.heap, closure)?;
-                out.push_str(&listing(&m, &rt.heap, &procs, "E"));
+                out.push_str(&listing(m, &rt.heap, &procs, "E"));
                 Ok::<_, String>(m.call(rt, procs[0].1, &[], limit).map(|v| fixpt_runtime::write_value(&rt.heap, v)))
-            })?;
+            })??;
             match r {
                 Ok(v) => out.push_str(&format!("{v}\n")),
                 Err(t) => out.push_str(&format!("! {}\n", t.what)),
@@ -859,12 +860,6 @@ fn native(session: &mut Fx26Session, rest: &str) {
     }
 }
 
-thread_local! {
-    /// The REPL's machine for code in the native convention.
-    static MACHINE: std::cell::RefCell<fixpt_native::direct::DirectMachine> =
-        std::cell::RefCell::new(fixpt_native::direct::DirectMachine::new().expect("a code space"));
-}
-
 /// Each procedure compiled, its instructions one to a line; the first
 /// named `name`.
 fn listing(m: &fixpt_native::direct::DirectMachine, heap: &fixpt_heap::Heap, procs: &[(String, fixpt_native::direct::Compiled)], name: &str) -> String {
@@ -884,13 +879,13 @@ fn listing(m: &fixpt_native::direct::DirectMachine, heap: &fixpt_heap::Heap, pro
 /// and called.
 fn run_native(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     use fixpt_fx26::session::NativeRun;
-    MACHINE.with(|m| {
-        let mut m = m.borrow_mut();
+    fixpt_native::direct::with_machine(|m| {
         let procs = match m.compile(&mut rt.heap, closure) {
             Ok(p) => p,
             Err(why) => return NativeRun::Declined(why),
         };
         NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map_err(|t| t.what))
     })
+    .unwrap_or_else(|e| NativeRun::Ran(Err(e)))
 }
 

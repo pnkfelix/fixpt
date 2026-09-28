@@ -15,7 +15,7 @@
 use fixpt_engine::cellular::{prompt_height, prompt_regions, prompt_word, reinstated_prompt, MARK_MARK, PROMPT_MARK, Trap};
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{
-    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_WHOLE, WORD_CELL0,
+    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_WHOLE, WORD_CELL0,
 };
 use fixpt_heap::{Heap, Value};
 
@@ -212,6 +212,7 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
         (CONT_CLO, Value(s.st.clo)),
         (CONT_BASE, Value::fixnum(ds_from as i64)),
         (CONT_WHOLE, Value::boolean(whole)),
+        (CONT_RUN, Value::fixnum(0)),
         (CONT_REGIONS, Value::fixnum(heap.live_regions() as i64)),
     ];
     for (f, v) in fields {
