@@ -19,6 +19,7 @@
       ((string=? n "car") "car")
       ((string=? n "cdr") "cdr")
       ((string=? n "null?") "null?")
+      ((string=? n "stay-cellular") "%stay-cellular")
       ((string=? n "<") "<")
       ((string=? n ">") ">")
       ((string=? n "<=") "<=")

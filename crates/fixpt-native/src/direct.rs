@@ -1056,6 +1056,9 @@ impl Compiling<'_> {
                         ("cellular", Some("field@")) if k(o(1)) == 2 => Callout::FieldRef,
                         ("prim", _) => match fixpt_runtime::PRIMITIVES.get(k(o(0))) {
                             Some(d) if d.name == "%region-closure" => Callout::RegionClosure { n: k(o(1)) },
+                            // By design: a procedure calling `stay-cellular`
+                            // runs as cellular code.
+                            Some(d) if d.name == "%stay-cellular" => return decline("it calls `stay-cellular`".into()),
                             Some(d) if matches!(d.kind, fixpt_runtime::PrimKind::Simple(_)) && d.accepts(k(o(1))) => {
                                 Callout::Prim { p: k(o(0)), n: k(o(1)) }
                             }

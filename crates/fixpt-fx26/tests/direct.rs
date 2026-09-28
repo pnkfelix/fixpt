@@ -308,7 +308,8 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fix
 }
 
 /// Native code and cellular code calling each other, as the REPL runs
-/// what the native compiler declines as cellular code: cellular code
+/// what the native compiler declines (here, by `stay-cellular`, which it
+/// always declines) as cellular code: cellular code
 /// calling a native closure, native code a cellular one, and a whole
 /// continuation cellular code took thrown from native code
 /// (`programs/native/mixed.fx`); and the same collecting often.
@@ -326,8 +327,8 @@ fn native_and_cellular_code_call_each_other() {
         let forms = s.checker.read_in(FileId(0), include_str!("programs/native/mixed.fx")).expect("reads");
         let out: Vec<String> =
             s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
-        assert!(out[5].ends_with("Ok(Some(\"5150\"))") && out[5].contains("run as cellular code"), "{out:?}");
-        assert!(out[6].ends_with("Ok(Some(\"42\"))"), "{out:?}");
+        assert!(out[4].ends_with("Ok(Some(\"5150\"))") && out[4].contains("run as cellular code"), "{out:?}");
+        assert!(out[5].ends_with("Ok(Some(\"42\"))"), "{out:?}");
     }
 }
 

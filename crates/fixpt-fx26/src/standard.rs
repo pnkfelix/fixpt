@@ -37,6 +37,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("rmake-icell", "(poly ((p place) (r region p)) (poly ((t type)) (subr (maxeff (alloc r) (alloc p)) ((place p)) (icell t r))))"),
     ("car", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((pairof t1 t2 r)) t1)))"),
     ("cdr", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((pairof t1 t2 r)) t2)))"),
+    // The identity, which the native convention's compiler declines: a
+    // procedure calling it runs as cellular code.
+    ("stay-cellular", "(poly ((t type)) (subr pure (t) t))"),
     ("set-car!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) t1) unit)))"),
     ("set-cdr!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) t2) unit)))"),
     ("nil", "(poly ((r region)) (poly ((t1 type) (t2 type)) (pairof t1 t2 r)))"),

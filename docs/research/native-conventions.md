@@ -273,19 +273,38 @@ its code in one.
    the native frames rooted meanwhile (`fixpt_engine::cellular::call_value`).
    A whole continuation that another run took, given a value there, is
    thrown past the native code, which is dropped, to the run that took it
-   (each continuation records its run, `CONT_RUN`). `field@` is inline,
-   `set-car!` and `set-cdr!` call out, and register code sees through
-   `proj` to a standard operation applied.
-   Still to do: a definition's initializer is checked again as an
-   expression, `(the T init)`, which fails where only the definition's own
-   context lets it check (a generative type's `up-` and `down-`, a
-   recursion proved to end); such definitions run as cellular code. To
-   compile the definition as the REPL always does, and then the closure it
-   made natively, would avoid that. Also: polymorphism in conventions and a copy per convention;
-   adapters between conventions): native closures, polymorphism in
-   conventions and a copy per convention, adapters.
-5. **Continuations, prompts and marks** on native frames; regions across
-   throws.
+   (each continuation records its run, `CONT_RUN`). The standard
+   `stay-cellular`, the identity, is one the compiler always declines, so
+   that a procedure calling it runs as cellular code: what tests of the two
+   calling each other use, however much the compiler learns. `field@` is
+   inline, `set-car!` and `set-cdr!` call out, and register code sees
+   through `proj` to a standard operation applied. A definition the native
+   path declines (its initializer checked again alone fails where only its
+   definition's context lets it check) runs as cellular code, and the
+   closure it made is then compiled natively (`native_compiler`).
+   Still to do: polymorphism in conventions and a copy per convention;
+   adapters between conventions.
+5. **Continuations, prompts and marks** on native frames (done,
+   2026-09-28; `control_on_native_frames` in `tests/direct.rs`). A prompt,
+   and a mark, is a 48-byte frame of its own around the thunk's call: the
+   link, the abort's landing (for a mark, nothing), a marker no program
+   can make, the tag and handler (the key and value), and the regions
+   live; walking the frames' links finds them, and the collector scans
+   them as any frame. An abort finds the innermost prompt for its tag,
+   ends the regions entered inside it, and resumes at the prompt's
+   landing, which calls the handler. A continuation is taken by copying
+   the frames up to the stack's top (`cwcc`) or to the prompt
+   (`call-with-composable-continuation`) into a vector on the heap (links
+   as offsets, return addresses as fixnums, slots as they are), given as a
+   native closure of a continuation procedure over it; called, that puts
+   the frames back, a whole one replacing the stack and returning where
+   the current run does (ending the regions entered since), a delimited
+   one on top of its caller, and resumes where it was taken. Frames live
+   on the stack until taken, as in Larceny's stack cache, not on the heap.
+   Still to do: a mark in tail position (register code declines it), a
+   continuation's frames as a bloblet of its own kind (slots in fields,
+   links and return addresses in the suffix, so the collector skips them),
+   and taking them lazily, a segment at a time.
 6. **Checks where work is unbounded**: fuel and stack limits as above,
    leaves checking nothing; benchmarks against `registers`; retire
    `native-compiled` and register code's twins.

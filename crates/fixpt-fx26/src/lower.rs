@@ -54,6 +54,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("null?", "null?", true),
     ("nil", "'()", false),
     ("set-car!", "%fx26-set-car!", false),
+    ("stay-cellular", "%stay-cellular", false),
     ("set-cdr!", "%fx26-set-cdr!", false),
     ("new", "%fx26-new", false),
     ("get", "%fx26-get", false),

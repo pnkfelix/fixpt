@@ -1219,7 +1219,11 @@ prims! {
             }
             Err(e) => rt.fail(&format!("not register code: {e}"), &[a[0]]),
         }
-    });
+    });    // Its argument: FX-26's `stay-cellular`, which the native convention's
+    // compiler declines by design (`fixpt_native::direct`), so that a
+    // procedure calling it runs as cellular code, whatever that compiler
+    // learns to do: a test's way to have some.
+    "%stay-cellular", 1, Some(1), simple!(|_rt, a| Ok(a[0]));
 }
 
 /// Promise states. `[state, payload]`.
