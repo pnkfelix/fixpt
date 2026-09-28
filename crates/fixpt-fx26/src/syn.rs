@@ -144,13 +144,14 @@ pub fn compile_with_fx26_compiler_showing(
 
 /// Check, compile and run `text`, a program whose last form names a global,
 /// with the pieces written in FX-26: that global's value, given to `f` with
-/// the heap, which nothing changes while `f` runs; or why there is none.
+/// the runtime, which only `f` changes while it runs (the value is not
+/// rooted: it moves if `f` collects); or why there is none.
 pub fn with_last_value<T>(
     scheme: &mut Session,
     standard: Handle,
     file: FileId,
     text: &str,
-    f: impl FnOnce(&fixpt_heap::Heap, Value) -> T,
+    f: impl FnOnce(&mut fixpt_runtime::Runtime, Value) -> T,
 ) -> R<Result<T, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
@@ -178,7 +179,7 @@ pub fn with_last_value<T>(
             value = m.get(v);
             value
         });
-        Ok(Ok(f(&s.runtime_unrooted().heap, value)))
+        Ok(Ok(f(s.runtime_unrooted(), value)))
     })
 }
 

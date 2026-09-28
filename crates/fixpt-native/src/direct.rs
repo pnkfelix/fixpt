@@ -53,6 +53,10 @@ const LIMIT: Reg = 27;
 const FRAME: Reg = 29;
 const LINK: Reg = 30;
 const X9: Reg = 9;
+const X11: Reg = 11;
+const X13: Reg = 13;
+const X14: Reg = 14;
+const X15: Reg = 15;
 const X16: Reg = 16;
 const X17: Reg = 17;
 
@@ -69,13 +73,49 @@ struct DState {
     trap: u64,
     pc: u64,
     args: [u64; 8],
+    /// For a call-out: the Rust function, the runtime, the table of what
+    /// each call-out is, and the native stack's pointer and frame when it
+    /// called out.
+    callout: u64,
+    rt: u64,
+    table: u64,
+    native_sp: u64,
+    fp: u64,
+    /// For allocating inline: where the heap keeps its top (an index), the
+    /// address of its word 0, and how far the top may go before a call-out
+    /// must allocate (and perhaps collect). A call-out updates the last two.
+    top: u64,
+    words: u64,
+    alloc_limit: u64,
 }
 
 /// The traps this code raises, by code.
-const TRAPS: [&str; 4] = ["", "out of fuel", "stack overflow", "integer overflow"];
+const TRAPS: [&str; 5] = ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed"];
 const OUT_OF_FUEL: u32 = 1;
 const STACK_OVERFLOW: u32 = 2;
 const OVERFLOW: u32 = 3;
+const PRIM_FAILED: u32 = 4;
+
+/// What a call-out does: `cons`, or a runtime primitive of `n` arguments.
+#[derive(Copy, Clone)]
+enum Callout {
+    Cons,
+    Prim { p: usize, n: usize },
+}
+
+impl Callout {
+    fn arity(self) -> usize {
+        match self {
+            Callout::Cons => 2,
+            Callout::Prim { n, .. } => n,
+        }
+    }
+}
+
+thread_local! {
+    /// Why the last primitive that failed failed.
+    static LAST_MESSAGE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
 
 fn st_off(f: usize) -> u32 {
     f as u32
@@ -151,13 +191,15 @@ pub struct DirectMachine {
     /// The trampoline from Rust, and the common trap.
     entry: Offset,
     stack: Vec<u64>,
+    /// What each call-out any compiled code makes does, by number.
+    callouts: Vec<Callout>,
 }
 
 /// A run that trapped: what, and where: the address of the stub its site
 /// branched to, one per site.
 #[derive(Debug, PartialEq)]
 pub struct DirectTrap {
-    pub what: &'static str,
+    pub what: String,
     pub pc: u64,
 }
 
@@ -176,7 +218,7 @@ impl DirectMachine {
         let entry = space.alloc(4 * code.len(), 16).ok_or("no room for the trampoline")?;
         space.write_code(entry, &code);
         space.flush(entry, 4 * code.len());
-        Ok(DirectMachine { space, entry, stack: vec![0; STACK_WORDS] })
+        Ok(DirectMachine { space, entry, stack: vec![0; STACK_WORDS], callouts: Vec::new() })
     }
 
     /// Compile `closure`'s procedure, and every procedure it calls, to code
@@ -185,7 +227,7 @@ impl DirectMachine {
     pub fn compile(&mut self, heap: &Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
         let mut a = Asm::new();
         let kinds = (0..TRAPS.len()).map(|_| a.label()).collect();
-        let mut c = Compiling { heap, a, procs: HashMap::new(), queue: Vec::new(), order: Vec::new(), kinds };
+        let mut c = Compiling { heap, a, procs: HashMap::new(), queue: Vec::new(), order: Vec::new(), kinds, callouts: &mut self.callouts };
         c.proc_of(closure)?;
         while let Some((word, rw)) = c.queue.pop() {
             c.procedure(word, rw)?;
@@ -218,11 +260,23 @@ impl DirectMachine {
         Ok(out)
     }
 
-    /// Call `p` with `args`, in at most about `fuel` steps.
-    pub fn call(&mut self, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
+    /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
+    /// heap its call-outs allocate in, collecting when they must.
+    pub fn call(&mut self, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
         assert_eq!(args.len(), p.arity, "the procedure's arity");
         let top = (self.stack.as_mut_ptr() as u64 + 8 * STACK_WORDS as u64) & !15;
-        let mut st = DState { stack_top: top, stack_limit: self.stack.as_ptr() as u64 + STACK_SLACK, fuel, ..DState::default() };
+        let mut st = DState {
+            stack_top: top,
+            stack_limit: self.stack.as_ptr() as u64 + STACK_SLACK,
+            fuel,
+            callout: callout as *const () as u64,
+            rt: rt as *mut fixpt_runtime::Runtime as u64,
+            table: self.callouts.as_ptr() as u64,
+            top: rt.heap.top_address() as u64,
+            words: rt.heap.words_address() as u64,
+            alloc_limit: rt.heap.inline_limit() as u64,
+            ..DState::default()
+        };
         for (i, a) in args.iter().enumerate() {
             st.args[i] = a.raw();
         }
@@ -231,11 +285,16 @@ impl DirectMachine {
         // must, runs on the stack in `self.stack` (which outlives the call),
         // and touches only the state and that stack; the procedure's code,
         // compiled above, reads only its arguments and what they point to,
-        // which the heap's owner keeps still while it runs (it allocates
-        // nothing, so nothing collects).
+        // in the heap of `rt`, which is exclusively this call's while it
+        // runs; it changes only in call-outs, which see every value the
+        // native frames hold (`callout`).
         let r = unsafe { self.space.call(self.entry, [&mut st as *mut DState as u64, target, 0, 0]) };
         if st.trap != 0 {
-            return Err(DirectTrap { what: TRAPS[st.trap as usize], pc: st.pc });
+            let what = match LAST_MESSAGE.with(|m| m.borrow_mut().take()) {
+                Some(m) if st.trap == PRIM_FAILED as u64 => m,
+                _ => TRAPS[st.trap as usize].to_string(),
+            };
+            return Err(DirectTrap { what, pc: st.pc });
         }
         Ok(Value(r))
     }
@@ -298,6 +357,8 @@ struct Compiling<'h> {
     order: Vec<(u64, String, usize)>,
     /// Each trap's common code, by its number.
     kinds: Vec<Label>,
+    /// The machine's call-outs, which this compile adds to.
+    callouts: &'h mut Vec<Callout>,
 }
 
 impl Compiling<'_> {
@@ -446,6 +507,12 @@ impl Compiling<'_> {
                     a.e(add_imm(FRAME, SP, 0));
                     a.e(cmp_sp(LIMIT));
                     trap(a, STACK_OVERFLOW, Cond::Lo);
+                    // Every slot a value from the start (the fixnum 0), so
+                    // that a call-out's collection may scan the whole frame.
+                    let size = size.expect("a frame") as i64;
+                    for off in (16..size).step_by(16) {
+                        a.e(stp(XZR, XZR, FRAME, off));
+                    }
                 }
                 "pop" => a.e(ldp_post(FRAME, LINK, SP, size.expect("a frame") as i64)),
                 "stack" => a.e(ldr(RESULT, FRAME, 16 + 8 * k(o(0)) as u32)),
@@ -537,6 +604,64 @@ impl Compiling<'_> {
                     }
                 }
                 "field" => a.e(ldur(RESULT, RESULT, -(4 + 8 * k(o(0)) as i64))),
+                // A call-out: to Rust, on Rust's stack, which may collect;
+                // everything live is in the frame by then (register code
+                // sees to it), and the arguments go through the state.
+                "prim" | "cellular" => {
+                    let c = match (op, ROUTINES.get(k(o(0))).map(|r| r.0)) {
+                        ("cellular", Some("cons")) if k(o(1)) == 2 => Callout::Cons,
+                        ("prim", _) => match fixpt_runtime::PRIMITIVES.get(k(o(0))) {
+                            Some(d) if matches!(d.kind, fixpt_runtime::PrimKind::Simple(_)) && d.accepts(k(o(1))) => {
+                                Callout::Prim { p: k(o(0)), n: k(o(1)) }
+                            }
+                            _ => return decline(format!("prim {}", k(o(0)))),
+                        },
+                        (_, r) => return decline(format!("cellular {}", r.unwrap_or("?"))),
+                    };
+                    if frame.is_none() {
+                        return decline("a call-out outside a frame".into());
+                    }
+                    // A pair, from the heap's free space when there is room
+                    // short of the collection's threshold; else the call-out.
+                    let done = a.label();
+                    let slow = a.label();
+                    if let Callout::Cons = c {
+                        a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
+                        a.e(ldr(X14, X13, 0));
+                        a.e(ldr(X15, ST, st_off(offset_of!(DState, alloc_limit))));
+                        a.e(add_imm(X16, X14, 2));
+                        a.e(cmp(X16, X15));
+                        a.to(slow, Fix::If(Cond::Hi));
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
+                        a.e(add_lsl(X11, X9, X14, 3));
+                        a.e(stp(1, 2, X11, 0));
+                        a.e(str(X16, X13, 0));
+                        a.e(add_imm(RESULT, X11, fixpt_heap::value::TAG_PAIR as u32));
+                        a.to(done, Fix::B);
+                    }
+                    a.bind(slow);
+                    let n = self.callouts.len();
+                    self.callouts.push(c);
+                    let args = offset_of!(DState, args) as u32;
+                    for j in 0..c.arity() {
+                        a.e(str(1 + j as Reg, ST, args + 8 * j as u32));
+                    }
+                    a.e(str(FRAME, ST, st_off(offset_of!(DState, fp))));
+                    a.e(add_imm(X9, SP, 0));
+                    a.e(str(X9, ST, st_off(offset_of!(DState, native_sp))));
+                    a.e(ldr(X9, ST, st_off(offset_of!(DState, rust_sp))));
+                    a.e(add_imm(SP, X9, 0));
+                    a.e(mov(0, ST));
+                    a.es(&mov_imm64(1, n as u64));
+                    a.e(ldr(X16, ST, st_off(offset_of!(DState, callout))));
+                    a.e(blr(X16));
+                    a.e(ldr(X9, ST, st_off(offset_of!(DState, native_sp))));
+                    a.e(add_imm(SP, X9, 0));
+                    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+                    a.e(cmp_imm(X9, 0));
+                    trap(a, PRIM_FAILED, Cond::Ne);
+                    a.bind(done);
+                }
                 "invoke" | "tailinvoke" => {
                     if pending_global.take().is_none() {
                         return decline("a call of a procedure not named by a global".into());
@@ -572,3 +697,64 @@ impl Compiling<'_> {
         Ok(())
     }
 }
+
+/// A call-out from native code: call-out number `which`, its arguments in
+/// the state. Collects first if it must, with every value in the native
+/// frames a root, and those in the frames updated. Returns the value made,
+/// or sets a trap.
+extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
+    // SAFETY: `st` is the state `DirectMachine::call` made, alive for the
+    // whole call; its `rt` is the runtime that call holds exclusively; its
+    // `table`, the machine's call-outs, which do not change while it runs.
+    let st = unsafe { &mut *st };
+    let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
+    let c = unsafe { *(st.table as *const Callout).add(which as usize) };
+    let mut args: Vec<Value> = st.args[..c.arity()].iter().map(|a| Value(*a)).collect();
+    {
+        let mut roots = native_frames(st);
+        roots.push(&mut args);
+        rt.heap.maybe_collect(&mut roots);
+    }
+    let out = match c {
+        Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),
+        Callout::Prim { p, .. } => {
+            let def = &fixpt_runtime::PRIMITIVES[p];
+            let fixpt_runtime::PrimKind::Simple(f) = def.kind else { unreachable!("checked when compiled") };
+            match f(rt, &mut args) {
+                Ok(v) => v.raw(),
+                Err(t) => {
+                    let m = fixpt_engine::cellular::describe(rt, t.obj);
+                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(format!("`{}`: {m}", def.name)));
+                    st.trap = PRIM_FAILED as u64;
+                    0
+                }
+            }
+        }
+    };
+    // Where the heap is now, and how far native code may allocate in it.
+    st.words = rt.heap.words_address() as u64;
+    st.alloc_limit = rt.heap.inline_limit() as u64;
+    out
+}
+
+/// The slots of every native frame, innermost first, from the frame that
+/// called out: each frame runs from its frame pointer to its caller's, the
+/// outermost to the stack's top, and every word of it but the first two
+/// (the caller's frame pointer and the return address) is a value.
+fn native_frames<'a>(st: &DState) -> Vec<&'a mut [Value]> {
+    let mut out = Vec::new();
+    let mut fp = st.fp;
+    while fp != 0 && fp < st.stack_top {
+        // SAFETY: a frame on the native stack, made by `save`, whose first
+        // word is the caller's frame pointer.
+        let caller = unsafe { *(fp as *const u64) };
+        let end = if caller > fp && caller <= st.stack_top { caller } else { st.stack_top };
+        let n = ((end - fp) / 8) as usize - 2;
+        // SAFETY: the frame's slots, each a value (`save` zeroes them), not
+        // overlapping any other frame's.
+        out.push(unsafe { std::slice::from_raw_parts_mut((fp + 16) as *mut Value, n) });
+        fp = if end == caller { caller } else { 0 };
+    }
+    out
+}
+

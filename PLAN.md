@@ -41,7 +41,8 @@ queue gained", and "The next queue"):
    compiled to native frames and `bl`/`ret` (`fixpt_native::direct`),
    `fib` and `tak` about 2× register code, the identity lambda two
    instructions; `--calling-convention native` and `,native NAME` in the
-   REPL. Call-outs remain; then steps 3–7.
+   REPL; call-outs and inline `cons`, collecting with native frames as
+   roots (`lists` as fast as register code). Then steps 3–7.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

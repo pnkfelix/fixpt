@@ -19,18 +19,29 @@ struct Ran {
     rust: String,
     /// The procedure's own instructions, one to a line.
     code: String,
+    /// How many collections its run made.
+    collections: u64,
 }
 
 /// `defs`, then `name` compiled in the native convention and called with
 /// `args`; and `(name args…)` on the Rust machine, from the same `defs`.
 fn run(defs: &str, name: &str, args: &[i64], fuel: u64) -> Ran {
+    run_collecting(defs, name, args, fuel, None)
+}
+
+/// The same, collecting at every `gc_every`th safepoint if asked.
+fn run_collecting(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u64>) -> Ran {
     let call = format!("({name} {})", args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(" "));
     let rust = on_rust_machine(&format!("{defs}\n{call}"));
-    Ran { rust, ..direct_only(defs, name, args, fuel) }
+    Ran { rust, ..direct_in(defs, name, args, fuel, gc_every) }
 }
 
 /// The same without the Rust machine's run: for what it would not finish.
 fn direct_only(defs: &str, name: &str, args: &[i64], fuel: u64) -> Ran {
+    direct_in(defs, name, args, fuel, None)
+}
+
+fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u64>) -> Ran {
     let rust = String::new();
     let text = format!("{defs}\n{name}");
     let mut c = Checker::new();
@@ -53,13 +64,16 @@ fn direct_only(defs: &str, name: &str, args: &[i64], fuel: u64) -> Ran {
             closure = m.get(h);
             closure
         });
-        let heap = &sc.runtime_unrooted().heap;
-        if std::env::var("DIRECT_SHOW").is_ok() {
-            eprintln!("{}", fixpt_runtime::disasm::disassemble(heap, closure));
+        if let Some(n) = gc_every {
+            sc.set_gc_every(n);
         }
-        let procs = match m.compile(heap, closure) {
+        let rt = sc.runtime_unrooted();
+        if std::env::var("DIRECT_SHOW").is_ok() {
+            eprintln!("{}", fixpt_runtime::disasm::disassemble(&rt.heap, closure));
+        }
+        let procs = match m.compile(&rt.heap, closure) {
             Ok(p) => p,
-            Err(e) => return Ran { direct: Err(format!("declined: {e}")), rust, code: String::new() },
+            Err(e) => return Ran { direct: Err(format!("declined: {e}")), rust, code: String::new(), collections: 0 },
         };
         let p = procs[0].1;
         let code: String = m.instructions(p).iter().enumerate().map(|(i, w)| disassemble(*w, i as i64) + "\n").collect();
@@ -67,8 +81,9 @@ fn direct_only(defs: &str, name: &str, args: &[i64], fuel: u64) -> Ran {
             eprintln!("{code}");
         }
         let vals: Vec<Value> = args.iter().map(|a| Value::fixnum(*a)).collect();
-        let direct = m.call(p, &vals, fuel).map(|v| fixpt_runtime::write_value(heap, v)).map_err(|DirectTrap { what, .. }| what.to_string());
-        Ran { direct, rust, code }
+        let before = rt.heap.gc_count;
+        let direct = m.call(rt, p, &vals, fuel).map(|v| fixpt_runtime::write_value(&rt.heap, v)).map_err(|DirectTrap { what, .. }| what);
+        Ran { direct, rust, code, collections: rt.heap.gc_count - before }
     })
 }
 
@@ -152,3 +167,26 @@ fn higher_order_code_is_declined() {
     let r = direct_only(twice, "twice", &[], FUEL);
     assert!(matches!(&r.direct, Err(e) if e.starts_with("declined")), "{:?}", r.direct);
 }
+
+/// Lists made by call-outs to `cons`, and read, in a loop of calls: as the
+/// Rust machine gives; and the same collecting at every safepoint, so that
+/// every pair moves while native frames hold it.
+#[test]
+fn lists_made_in_call_outs_survive_collection() {
+    for gc_every in [None, Some(1), Some(7)] {
+        let r = run_collecting(&bench("lists"), "rounds", &[30, 0], FUEL, gc_every);
+        assert_eq!(r.direct, Ok(r.rust.clone()), "collecting every {gc_every:?}:\n{}", r.code);
+        if let Some(n) = gc_every {
+            assert!(r.collections >= 30 * 1000 / n, "{} collections", r.collections);
+        }
+    }
+}
+
+/// A runtime primitive that fails says why, as a trap.
+#[test]
+fn a_primitive_that_fails_says_why() {
+    let defs = "(define q (subr pure (int int) int) (lambda (a b) (quotient a b)))";
+    let r = run(defs, "q", &[7, 0], FUEL);
+    assert!(matches!(&r.direct, Err(m) if m.contains("quotient")), "{:?}\n{}", r.direct, r.code);
+}
+

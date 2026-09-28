@@ -1070,3 +1070,19 @@ and `fib`'s body 27 instructions, from 40.
 | fib     | 4.5           | 2.4                       | 1.9   |
 | tak     | 1.7           | 0.8                       | 0.8   |
 
+### Call-outs, and pairs made inline (2026-09-28)
+
+Native code now calls out to Rust for runtime primitives and `cons`, on
+Rust's stack, through the state. A call-out may collect: every native
+frame runs from its frame pointer to its caller's, its words after the
+link and return address are all values (`save` zeroes them), so the
+collector's roots are the frames' slots, found by following the links,
+with no stack maps; a collection at every safepoint (`gc_every` 1 and 7,
+at least 30 000 collections) leaves `lists` right. A pair is made inline
+from the heap's free space, short of the collection's threshold, as
+register code makes it; the call-out only when there is no room.
+
+| program | register code | native, every `cons` a call-out | native, `cons` inline |
+| ------- | ------------- | ------------------------------- | --------------------- |
+| lists   | 8.4           | 83.6                            | 8.0                   |
+

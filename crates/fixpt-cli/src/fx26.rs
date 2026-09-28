@@ -764,9 +764,9 @@ fn native(session: &mut Fx26Session, rest: &str) {
         return;
     };
     let limit = session.step_limit().unwrap_or(u64::MAX >> 1);
-    let shown = session.with_global_value(name, |heap, closure| {
+    let shown = session.with_global_value(name, |rt, closure| {
         let mut m = fixpt_native::direct::DirectMachine::new()?;
-        let procs = m.compile(heap, closure)?;
+        let procs = m.compile(&rt.heap, closure)?;
         let mut out = String::new();
         for (i, (n, p)) in procs.iter().enumerate() {
             let n = if i == 0 { format!("{name} ({n})") } else { n.clone() };
@@ -782,10 +782,10 @@ fn native(session: &mut Fx26Session, rest: &str) {
             }
             let vals: Vec<fixpt_heap::Value> = args.iter().map(|a| fixpt_heap::Value::fixnum(*a)).collect();
             let start = std::time::Instant::now();
-            let r = m.call(p, &vals, limit);
+            let r = m.call(rt, p, &vals, limit);
             let ms = 1e3 * start.elapsed().as_secs_f64();
             match r {
-                Ok(v) => out.push_str(&format!("{}\n; ({ms:.3} ms)\n", fixpt_runtime::write_value(heap, v))),
+                Ok(v) => out.push_str(&format!("{}\n; ({ms:.3} ms)\n", fixpt_runtime::write_value(&rt.heap, v))),
                 Err(t) => out.push_str(&format!("! {} ({ms:.3} ms)\n", t.what)),
             }
         }

@@ -127,8 +127,8 @@ fn in_native_convention(text: &str) -> Option<(String, f64)> {
             closure = m.get(h);
             closure
         });
-        let heap = &sc.runtime_unrooted().heap;
-        let p = m.compile(heap, closure).ok()?[0].1;
-        Some(best(|| m.call(p, &args, u64::MAX >> 1).map(|v| fixpt_runtime::write_value(heap, v)).unwrap_or_else(|t| format!("!! {}", t.what))))
+        let rt = sc.runtime_unrooted();
+        let p = m.compile(&rt.heap, closure).ok()?[0].1;
+        Some(best(|| m.call(rt, p, &args, u64::MAX >> 1).map(|v| fixpt_runtime::write_value(&rt.heap, v)).unwrap_or_else(|t| format!("!! {}", t.what))))
     })
 }

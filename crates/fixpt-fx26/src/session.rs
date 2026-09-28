@@ -434,8 +434,8 @@ impl Fx26Session {
 
     /// The value of the global `name`, as the forms defined so far make it,
     /// compiled by the compiler written in FX-26 with register code: given
-    /// to `f`, with the heap, which nothing changes while `f` runs.
-    pub fn with_global_value<T>(&mut self, name: &str, f: impl FnOnce(&fixpt_heap::Heap, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
+    /// to `f`, with the runtime (see [`crate::syn::with_last_value`]).
+    pub fn with_global_value<T>(&mut self, name: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
         self.own_pieces()?;
         self.scheme.engine.set_step_limit(None);
         let standard = self.standard26()?;
