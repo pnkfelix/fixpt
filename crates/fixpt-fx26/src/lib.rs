@@ -78,6 +78,7 @@ pub const LAYOUT: &str = include_str!("layout.fx");
 pub const TABLE: &str = include_str!("table.fx");
 
 pub mod check;
+pub mod compare;
 pub mod infer;
 pub mod licence;
 pub mod lemma;

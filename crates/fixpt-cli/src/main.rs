@@ -26,7 +26,16 @@ fixpt — a Scheme engine with FX-87 and FX-91 front ends
 usage:
   fixpt repl                     start a read-eval-print loop
   fixpt run FILE...              run each file in one session
-  fixpt eval EXPR                evaluate one expression and print it
+  fixpt eval EXPR                evaluate one expression and print it; in
+                                 FX-26, EXPR may be a file (a whole program,
+                                 and a `.fx` one needs no --dialect) or `-`
+                                 for the standard input
+  fixpt check INPUT              FX-26: both checkers (Rust and FX-26) on a
+                                 file, `-` or program text; each form's type
+                                 and effect, and where the checkers disagree
+  fixpt compile INPUT            FX-26: both compilers, with register code;
+                                 the code, and where the compilers disagree
+                                 (`--eval`, `--check` and `--compile` too)
   fixpt dump-heap -o OUT FILE... run FILE... and write the resulting heap image
   fixpt build -o PROG FILE...    the same, as a standalone executable
   fixpt run-image FILE [ARG...]  run a heap image's entry point
@@ -120,11 +129,22 @@ fn run(args: &[String]) -> i32 {
     if args.first().is_some_and(|a| a == "bench") {
         return bench::command(&args[1..]);
     }
-    let (flags, rest) = split_flags(args);
+    let (flags, mut rest) = split_flags(args);
+    // `--eval INPUT` and its kin are the commands `eval INPUT`, and so on.
+    if let Some(cmd) = rest.first().and_then(|a| a.strip_prefix("--")).filter(|c| ["eval", "check", "compile"].contains(c)) {
+        rest[0] = cmd.to_string();
+    }
+    // Only FX-26 has `check` and `compile`; and a `.fx` file is FX-26.
+    let fx26_implied = match rest.first().map(String::as_str) {
+        Some("check" | "compile") => true,
+        Some("eval" | "run") => rest.get(1).is_some_and(|f| f.ends_with(".fx") && std::path::Path::new(f).is_file()),
+        _ => false,
+    };
     // The dialect picks a *language*, which is a front end, not just a set of
     // lexical rules: FX-91 forms go through the checker and the code generator
     // before any of this runs them.
     let dialect = match flags.dialect.as_deref() {
+        None if fx26_implied => Dialect::Fx26,
         None | Some("scheme") => Dialect::Scheme,
         Some("fx91") => Dialect::Fx91,
         Some("fx87") => Dialect::Fx87,
@@ -248,6 +268,24 @@ fn run(args: &[String]) -> i32 {
                 },
             }
         }
+        Some(cmd @ ("check" | "compile")) => {
+            if dialect != Dialect::Fx26 {
+                eprintln!("fixpt {cmd}: FX-26 only");
+                return 2;
+            }
+            if rest.len() < 2 {
+                eprintln!("fixpt {cmd}: needs a file, `-` or a program");
+                return 2;
+            }
+            match fx26::input(&rest[1..]) {
+                Ok((name, text)) if cmd == "check" => fx26::check(backend, &name, &text),
+                Ok((name, text)) => fx26::compile(backend, &name, &text),
+                Err(e) => {
+                    eprintln!("fixpt: {e}");
+                    1
+                }
+            }
+        }
         Some("eval") => {
             if rest.len() < 2 {
                 eprintln!("fixpt eval: needs an expression");
@@ -256,7 +294,16 @@ fn run(args: &[String]) -> i32 {
             match dialect {
                 Dialect::Fx87 => return fx87::eval(backend, &rest[1..].join(" ")),
                 Dialect::Fx91 => return fx91::eval(backend, &rest[1..].join(" ")),
-                Dialect::Fx26 => return fx26::eval(backend, &rest[1..].join(" ")),
+                Dialect::Fx26 => {
+                    return match fx26::input(&rest[1..]) {
+                        Ok((name, text)) if name == "<argument>" => fx26::eval(backend, &text),
+                        Ok((name, text)) => fx26::eval_program(backend, &name, &text),
+                        Err(e) => {
+                            eprintln!("fixpt: {e}");
+                            1
+                        }
+                    };
+                }
                 Dialect::Scheme => {}
             }
             let mut session = Session::with_backend(backend);

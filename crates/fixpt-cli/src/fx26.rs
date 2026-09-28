@@ -397,6 +397,136 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
     0
 }
 
+/// A command's INPUT, its arguments: a file, if there is one at the one
+/// argument's path; the standard input, if that is `-`; or else the text
+/// of the arguments, joined. Its name for messages, and its text.
+pub fn input(args: &[String]) -> Result<(String, String), String> {
+    match args {
+        [a] if a == "-" => {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut text).map_err(|e| format!("cannot read the standard input: {e}"))?;
+            Ok(("<stdin>".to_string(), text))
+        }
+        [a] if std::path::Path::new(a).is_file() => {
+            std::fs::read_to_string(a).map(|t| (a.clone(), t)).map_err(|e| format!("cannot read {a}: {e}"))
+        }
+        _ => Ok(("<argument>".to_string(), args.join(" "))),
+    }
+}
+
+/// `fixpt check`: both checkers on a program, each form's type and effect;
+/// said once where they agree, both where they do not (and then 1).
+pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let (fx26, rust) = match fixpt_fx26::compare::both_checkers(&mut session, text) {
+        Ok(both) => both,
+        Err(e) => {
+            eprintln!("fixpt: the FX-26 front end: {}", located(name, text, &e));
+            return 1;
+        }
+    };
+    let say = |r: &fixpt_fx26::syn::Checked26, who: &str| match r {
+        Ok(lines) => lines.iter().for_each(|l| println!("{who}{l}")),
+        Err(e) => println!("{who}! {}", located(name, text, e)),
+    };
+    let same = match (&fx26, &rust) {
+        (Ok(a), Ok(b)) => a == b,
+        (Err(a), Err(b)) => a.message == b.message && a.span == b.span,
+        _ => false,
+    };
+    if same {
+        say(&fx26, "");
+        println!("; both checkers agree");
+        i32::from(fx26.is_err())
+    } else {
+        say(&fx26, "FX-26: ");
+        say(&rust, "Rust:  ");
+        println!("; the checkers disagree");
+        1
+    }
+}
+
+/// `fixpt compile`: both compilers on a program, with register code; the
+/// code the FX-26 one made, and whether the Rust one made the same (both,
+/// if not, and then 1).
+pub fn compile(backend: Backend, name: &str, text: &str) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let (fx26, rust) = match fixpt_fx26::compare::both_compilers(&mut session, text) {
+        Ok(both) => both,
+        Err(e) => {
+            eprintln!("fixpt: {}", located(name, text, &e));
+            return 1;
+        }
+    };
+    match (&fx26, &rust) {
+        (Ok(a), Ok(b)) if a == b => {
+            print!("{a}");
+            println!("; both compilers made this");
+            0
+        }
+        (Err(a), Err(b)) if a == b => {
+            println!("! {a}");
+            println!("; both compilers refuse it");
+            1
+        }
+        _ => {
+            for (who, r) in [("FX-26", &fx26), ("Rust", &rust)] {
+                println!("; the {who} compiler:");
+                match r {
+                    Ok(code) => print!("{code}"),
+                    Err(e) => println!("! {e}"),
+                }
+            }
+            println!("; the compilers disagree");
+            1
+        }
+    }
+}
+
+/// `fixpt eval` of a file: the whole program (definitions in any order),
+/// each form's value and type.
+pub fn eval_program(backend: Backend, name: &str, text: &str) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let forms = match session.checker.read_in(FileId(0), text) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("fixpt: read error: {}", located(name, text, &e));
+            return 1;
+        }
+    };
+    let outs = match session.run_forms(&forms) {
+        Ok(outs) => outs,
+        Err(e) => {
+            eprintln!("fixpt: {}", located(name, text, &e));
+            return 1;
+        }
+    };
+    for out in outs {
+        match out {
+            Ok(out) => {
+                show(&session, &out, false);
+                if out.value.is_err() {
+                    return 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("fixpt: {}", located(name, text, &e));
+                return 1;
+            }
+        }
+    }
+    0
+}
+
 /// Run the forms of `text` and print what each is.
 pub fn eval(backend: Backend, text: &str) -> i32 {
     let mut session = match start(backend) {

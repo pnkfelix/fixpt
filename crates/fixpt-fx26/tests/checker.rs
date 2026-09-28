@@ -43,41 +43,8 @@ mod common;
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
-use fixpt_fx26::{Checker, Top};
+use fixpt_fx26::Checker;
 use fixpt_read::FileId;
-
-/// An effect's atoms in a fixed order: the two checkers keep theirs in
-/// orders of their own (Rust's follows symbols' interning).
-fn canonical(s: &str) -> String {
-    let mut out = String::new();
-    let mut rest = s;
-    while let Some(i) = rest.find("(maxeff ") {
-        out.push_str(&rest[..i]);
-        let inner = &rest[i + "(maxeff ".len()..];
-        let (mut depth, mut end, mut items, mut start) = (0, inner.len(), Vec::new(), 0);
-        for (j, c) in inner.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' if depth == 0 => {
-                    end = j;
-                    break;
-                }
-                ')' => depth -= 1,
-                ' ' if depth == 0 => {
-                    items.push(&inner[start..j]);
-                    start = j + 1;
-                }
-                _ => {}
-            }
-        }
-        items.push(&inner[start..end]);
-        items.sort();
-        out.push_str(&format!("(maxeff {})", items.join(" ")));
-        rest = &inner[(end + 1).min(inner.len())..];
-    }
-    out.push_str(rest);
-    out
-}
 
 /// The Rust checker on `program`, in the same terms as the FX-26 one.
 fn rust_check(program: &str) -> Result<Vec<String>, (String, u32, u32)> {
@@ -85,31 +52,7 @@ fn rust_check(program: &str) -> Result<Vec<String>, (String, u32, u32)> {
 }
 
 fn rust_check_in(mut c: Checker, program: &str) -> Result<Vec<String>, (String, u32, u32)> {
-    let fail = |e: fixpt_fx26::FxError| (e.message, e.span.start, e.span.end);
-    let forms = c.read_in(FileId(0), program).map_err(fail)?;
-    let done = c.declare_ahead(&forms).map_err(fail)?;
-    let mut out = Vec::new();
-    for (f, done) in forms.iter().zip(done) {
-        if done {
-            continue;
-        }
-        // Under redefinition: the form, and what it runs again.
-        for (top, _) in c.top_defining(f).map_err(fail)?.run {
-            match top {
-                Top::Define { name, ty, effect, .. } => {
-                    out.push(format!("define {} : {} ! {}", c.interner.name(name), c.show_ty(ty), c.show_effect(&effect)))
-                }
-                Top::DefineRec { bindings, .. } => {
-                    for (name, ty, _) in bindings {
-                        out.push(format!("define {} : {} ! pure", c.interner.name(name), c.show_ty(ty)))
-                    }
-                }
-                Top::Exp(k) => out.push(format!("{} ! {}", c.show_ty(k.ty), c.show_effect(&k.effect))),
-                _ => {}
-            }
-        }
-    }
-    Ok(out)
+    fixpt_fx26::compare::check_with_rust_checker(&mut c, program).map_err(|e| (e.message, e.span.start, e.span.end))
 }
 
 /// The FX-26 checker on `program`; `None` if the FX-26 front end cannot
@@ -124,6 +67,7 @@ fn fx26_check_in(s: &mut Fx26Session, program: &str) -> Option<Result<Vec<String
 }
 
 fn canon(r: Result<Vec<String>, (String, u32, u32)>) -> Result<Vec<String>, (String, u32, u32)> {
+    use fixpt_fx26::compare::canonical;
     r.map(|ls| ls.iter().map(|l| canonical(l)).collect()).map_err(|(m, a, b)| (canonical(&m), a, b))
 }
 

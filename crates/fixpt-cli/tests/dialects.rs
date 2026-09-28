@@ -249,3 +249,36 @@ fn the_step_limit_can_be_set_or_lifted() {
     let (_, out, _) = fx91(&["repl", "--dialect", "fx26"], ",step-limit\n,step-limit none\n,step-limit\n");
     assert!(out.contains("step limit: 20000000") && out.contains("step limit: none"), "{out}");
 }
+
+/// `fixpt ARGS` with `stdin`, no dialect given: whether it succeeded, and
+/// its standard output.
+fn fixpt(args: &[&str], stdin: &str) -> (bool, String) {
+    use std::io::Write as _;
+    let mut child = Command::new(FIXPT)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    child.stdin.take().expect("stdin is piped").write_all(stdin.as_bytes()).expect("can write");
+    let out = child.wait_with_output().expect("fixpt finishes");
+    (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[test]
+fn fx26_checks_compiles_and_evaluates_a_file_or_text() {
+    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/run/finite-in-a-place.fx");
+    // Both checkers, and both compilers; `check` and `compile` imply FX-26.
+    let (ok, out) = fixpt(&["check", file], "");
+    assert!(ok && out.contains("int ! (read (globals len))") && out.ends_with("; both checkers agree\n"), "{out}");
+    let (ok, out) = fixpt(&["--check", "(+ 1 #t)"], "");
+    assert!(!ok && out.contains("! <argument>:1:6:"), "{out}");
+    let (ok, out) = fixpt(&["compile", "-"], "(define f (subr pure (int) int) (lambda (x) (+ x 1))) (f 2)");
+    assert!(ok && out.contains("its register code") && out.ends_with("; both compilers made this\n"), "{out}");
+    // A `.fx` file is FX-26, and a whole program.
+    let (ok, out) = fixpt(&["eval", file], "");
+    assert!(ok && out.contains("3 : int"), "{out}");
+    let (ok, out) = fixpt(&["--dialect", "fx26", "--fx26-run", "cellular", "--eval", "(+ 1 2)"], "");
+    assert!(ok && out.contains("3 : "), "{out}");
+}

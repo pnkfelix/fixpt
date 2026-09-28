@@ -329,6 +329,16 @@ Definitions persist between inputs. As in the other FX REPLs, errors in
 finished subforms are underlined as you type, and a hint says what the
 argument at the cursor must be.
 
+Outside the REPL, each of these commands takes a file, `-` for the standard
+input, or program text:
+
+- `fixpt eval INPUT` runs a whole program and prints each form's value,
+  type and effect. A `.fx` file needs no `--dialect`.
+- `fixpt check INPUT` runs both checkers, the one in Rust and the one in
+  FX-26, and prints what they found. Where they disagree, it prints both.
+- `fixpt compile INPUT` runs both compilers and shows the code, register
+  code included, and says whether the two made the same.
+
 The eager reader (see "The REPL" above) has been ported to FX-26
 (`crates/fixpt-fx26/src/eager-reader.fx`). It is checked, lowered and run
 like any FX-26 program, and it reads the same inputs to the same data, errors

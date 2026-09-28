@@ -685,6 +685,19 @@ impl Fx26Session {
         self.checker.globals_effects = on;
     }
 
+    /// A checker with no program in it yet, set as this session's is.
+    pub fn fresh_checker(&self) -> Checker {
+        let mut c = Checker::with_convention(if self.native_convention { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
+        c.globals_effects = self.globals_effects;
+        c
+    }
+
+    /// The pieces written in FX-26 (reader, checker, compilers), loaded if
+    /// they are not yet.
+    pub fn load_own_pieces(&mut self) -> R<()> {
+        self.own_pieces()
+    }
+
     /// The pieces written in FX-26, loaded if they are not yet, and told the
     /// program's convention.
     fn own_pieces(&mut self) -> R<()> {
