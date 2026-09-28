@@ -2,13 +2,14 @@
 //! with the reader and the parser written in FX-26, against the same
 //! programs lowered to Scheme (`PLAN.md` §11, step 9b).
 
+mod common;
+
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 
 /// Both ways; they must agree. Returns the value.
 fn both(program: &str) -> String {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    let ours = s.eval_with_own_evaluator(program).unwrap_or_else(|e| panic!("the FX-26 front end: {e}\n{program}"));
+    let ours = common::with_own(|s| s.eval_with_own_evaluator(program)).unwrap_or_else(|e| panic!("the FX-26 front end: {e}\n{program}"));
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let scheme = s.run_program(program).unwrap_or_else(|e| panic!("does not check: {e}\n{program}"));
     let scheme = scheme.unwrap_or_else(|e| format!("!! {e}"));
@@ -50,26 +51,46 @@ fn errors_stop_the_program() {
     assert!(out.starts_with("!! a pair is expected"), "{out}");
 }
 
-/// Every test program that checks, both ways, reported together.
+/// Programs that do enough work that the evaluator, itself run by the
+/// Scheme engine, takes seconds on each (`run/reap.fx` 30 s): left to
+/// `the_long_programs`, which runs only when asked. The compiler's and the
+/// lowering's tests run them every time.
+const LONG: [&str; 4] = ["run/reap.fx", "run/define-rec.fx", "run/loops.fx", "run/arena.fx"];
+
+/// Every test program that checks, both ways, reported together; but the
+/// long ones.
 #[test]
 fn control_and_marks() {
+    every_program(|name| !LONG.contains(&name));
+}
+
+/// The long ones.
+#[test]
+#[ignore = "about a minute: cargo test --release -p fixpt-fx26 --test evaluator -- --ignored"]
+fn the_long_programs() {
+    every_program(|name| LONG.contains(&name));
+}
+
+fn every_program(wanted: impl Fn(&str) -> bool) {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
     for sub in ["bidirectional", "control", "run", "pldi89"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
+            let name = format!("{sub}/{}", path.file_name().unwrap().to_string_lossy());
+            if !wanted(&name) {
+                continue;
+            }
             let program = std::fs::read_to_string(&path).unwrap();
             let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
             let scheme = match s.run_program(&program) {
                 Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
                 Err(_) => continue, // written to be rejected
             };
-            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-            let ours = s.eval_with_own_evaluator(&program).map_err(|e| e.to_string());
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let ours = common::with_own(|s| s.eval_with_own_evaluator(&program)).map_err(|e| e.to_string());
             if ours.as_deref() != Ok(scheme.as_str()) {
-                report.push(format!("{sub}/{name}: evaluator {ours:?}, Scheme {scheme:?}"));
+                report.push(format!("{name}: evaluator {ours:?}, Scheme {scheme:?}"));
             }
         }
     }

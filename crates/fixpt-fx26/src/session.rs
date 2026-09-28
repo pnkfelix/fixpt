@@ -38,6 +38,11 @@ pub struct Fx26Session {
     /// Under `Strategy::Cellular` with the native convention: how an
     /// expression form is run, in place of the cellular machine.
     pub native_runner: Option<NativeRunner>,
+    /// Under `Strategy::Cellular`: whether the checker written in FX-26 has
+    /// begun this session's program, so that each form is checked after the
+    /// ones before (`check-more`), and compiled alone against the globals
+    /// they made, which the compiler keeps.
+    own_begun: bool,
     /// Under `Strategy::Cellular`: whether each form's [`Outcome::code`] is
     /// the words the compiler written in FX-26 made for it, those not shown
     /// for an earlier form, rather than its lowering to Scheme.
@@ -237,6 +242,7 @@ impl Fx26Session {
             register_code: false,
             native_convention: false,
             native_runner: None,
+            own_begun: false,
             show_words: false,
             words_shown: Default::default(),
             standard26: None,
@@ -343,10 +349,9 @@ impl Fx26Session {
                     Err(why) => note = format!("; not compiled as a procedure: {why}\n"),
                 }
             }
-            let text = format!("{}{form_text}\n", self.defined26);
             let (out, words) = match self.strategy {
-                Strategy::Evaluate => (self.eval_with_own_evaluator(&text)?, None),
-                _ => self.compile_with_own_compiler_showing(&text, self.show_words)?,
+                Strategy::Evaluate => (self.eval_with_own_evaluator(&format!("{}{form_text}\n", self.defined26))?, None),
+                _ => self.compile_form_showing(&format!("{form_text}\n"), self.show_words)?,
             };
             // A form is compiled with every definition before it, so only
             // the words not shown before are this form's.
@@ -468,25 +473,26 @@ impl Fx26Session {
     /// compiled by the compiler written in FX-26 with register code: given
     /// to `f`, with the runtime (see [`crate::syn::with_last_value`]).
     pub fn with_global_value<T>(&mut self, name: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
-        let text = format!("{}{name}\n", self.defined26);
-        self.with_last_value(&text, f)
+        self.with_last_value(&format!("{name}\n"), f)
     }
 
     /// The same for the value of expression `exp` (text) as a procedure of
     /// no arguments that computes it.
     pub fn with_thunk<T>(&mut self, exp: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
-        let text = format!("{}(define native-thunk% (lambda () {exp}))\nnative-thunk%\n", self.defined26);
-        self.with_last_value(&text, f)
+        self.with_last_value(&format!("(lambda () {exp})\n"), f)
     }
 
+    /// `text` checked and compiled as the next form of this session's
+    /// program, and run: its value, to `f`.
     fn with_last_value<T>(&mut self, text: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
         self.own_pieces()?;
         self.scheme.engine.set_step_limit(None);
-        let standard = self.standard26()?;
+        let standard = self.next_standard()?;
         let on = self.scheme.make(|_| fixpt_heap::Value::TRUE);
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
         self.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[on]).map_err(fail)?;
         let r = crate::syn::with_last_value(&mut self.scheme, standard, FileId(0), text, f);
+        self.own_begun |= !matches!(&r, Ok(Err(m)) if m.starts_with("check:"));
         let off = self.scheme.make(|_| fixpt_heap::Value::boolean(self.register_code));
         self.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(fail)?;
         self.scheme.engine.set_step_limit(self.step_limit);
@@ -512,11 +518,36 @@ impl Fx26Session {
         self.compile_with_own_compiler_showing(text, false).map(|(out, _)| out)
     }
 
-    /// The same, and, if `show`, the words it made, disassembled.
+    /// The checker's start for the next form of this session's program:
+    /// the initial environment, if it has not begun; else none, so that the
+    /// form is checked after the ones before.
+    fn next_standard(&mut self) -> R<Option<fixpt_scheme::Handle>> {
+        if self.own_begun { Ok(None) } else { self.standard26().map(Some) }
+    }
+
+    /// `text`, one form, as the next of this session's program: checked
+    /// after the forms before, compiled against the globals they made, and
+    /// run; as [`compile_with_own_compiler_showing`](Self::compile_with_own_compiler_showing).
+    fn compile_form_showing(&mut self, text: &str, show: bool) -> R<(String, Option<String>)> {
+        self.own_pieces()?;
+        let standard = self.next_standard()?;
+        let r = self.compile_showing_in(standard, text, show);
+        self.own_begun |= !matches!(&r, Ok((out, _)) if out.starts_with("!! check:"));
+        r
+    }
+
+    /// The same, and, if `show`, the words it made, disassembled. A whole
+    /// program: the checker begins again.
     pub fn compile_with_own_compiler_showing(&mut self, text: &str, show: bool) -> R<(String, Option<String>)> {
         self.own_pieces()?;
-        self.scheme.engine.set_step_limit(None);
         let standard = self.standard26()?;
+        self.own_begun = false;
+        self.compile_showing_in(Some(standard), text, show)
+    }
+
+    fn compile_showing_in(&mut self, standard: Option<fixpt_scheme::Handle>, text: &str, show: bool) -> R<(String, Option<String>)> {
+        self.own_pieces()?;
+        self.scheme.engine.set_step_limit(None);
         let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.register_code));
         self.scheme
             .call_global(&format!("{READER_PREFIX}compile-registers!"), &[on])

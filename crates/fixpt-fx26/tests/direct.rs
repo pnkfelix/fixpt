@@ -295,7 +295,7 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fix
 /// same forms run as cellular code. What the compiler declines runs as
 /// cellular code; how many were, and why, is reported.
 #[test]
-#[ignore = "a report, minutes long while the REPL replays definitions: cargo test --release -p fixpt-fx26 --test direct -- --ignored --nocapture"]
+#[ignore = "a report, minutes long (two fresh REPL sessions a program): cargo test --release -p fixpt-fx26 --test direct -- --ignored --nocapture"]
 fn every_test_program_runs_natively_as_cellular() {
     use fixpt_fx26::session::Strategy;
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");

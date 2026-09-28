@@ -39,6 +39,8 @@ fn the_checker_checks() {
     }
 }
 
+mod common;
+
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 use fixpt_fx26::{Checker, Top};
@@ -110,8 +112,7 @@ fn rust_check_in(mut c: Checker, program: &str) -> Result<Vec<String>, (String, 
 /// The FX-26 checker on `program`; `None` if the FX-26 front end cannot
 /// parse it.
 fn fx26_check(program: &str) -> Option<Result<Vec<String>, (String, u32, u32)>> {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    fx26_check_in(&mut s, program)
+    common::with_own(|s| fx26_check_in(s, program))
 }
 
 fn fx26_check_in(s: &mut Fx26Session, program: &str) -> Option<Result<Vec<String>, (String, u32, u32)>> {
@@ -194,10 +195,10 @@ fn conventions_agree_when_native() {
     let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
     names.sort();
     let mut report = Vec::new();
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.set_native_convention(true);
     for path in names {
         let program = std::fs::read_to_string(&path).unwrap();
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        s.set_native_convention(true);
         let ours = canon(fx26_check_in(&mut s, &program).expect("parses"));
         let rust = canon(rust_check_in(Checker::with_convention(fixpt_fx26::ast::Conv::Native), &program));
         if ours != rust {

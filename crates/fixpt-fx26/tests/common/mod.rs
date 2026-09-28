@@ -68,3 +68,23 @@ pub fn register_words(h: &Heap, w: Value, seen: &mut std::collections::HashSet<u
     }
     own + (2..=h.bloblet_head(w).fields).map(|i| register_words(h, h.bloblet_slot(w, i), seen)).sum::<usize>()
 }
+
+thread_local! {
+    /// This thread's session for the pieces written in FX-26: loading them
+    /// is most of a check's or a compile's cost (1.3 s, against a few ms for
+    /// a small program), and each program they are given begins afresh
+    /// (`check-program` resets the checker; the compiler's globals only
+    /// shadow), so one session serves every program a test gives them.
+    static OWN: std::cell::RefCell<Option<fixpt_fx26::session::Fx26Session>> = const { std::cell::RefCell::new(None) };
+}
+
+/// `f` with this thread's session for the pieces written in FX-26, made
+/// on first use.
+pub fn with_own<R>(f: impl FnOnce(&mut fixpt_fx26::session::Fx26Session) -> R) -> R {
+    OWN.with(|s| {
+        let mut s = s.borrow_mut();
+        let s = s.get_or_insert_with(|| fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts"));
+        f(s)
+    })
+}
+

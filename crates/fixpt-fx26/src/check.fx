@@ -5909,3 +5909,13 @@
     (prompt k-tag
       (begin (k-reset) (k-standard standard) (k-ahead forms) (k-ok (k-forms forms nil)))
       (lambda (r) r))))
+
+;; The entry point for more of a program, form by form, as the REPL gives
+;; them: checked in the environment the forms before left, which
+;; `check-program` began. The facts for the compiler are only the new
+;; forms', whose positions are in their own text.
+(define check-more (subr (maxeff checks spin) ((listof top finite)) k-result)
+  (lambda (forms)
+    (prompt k-tag
+      (begin (set k-extracts nil) (k-ahead forms) (k-ok (k-forms forms nil)))
+      (lambda (r) r))))

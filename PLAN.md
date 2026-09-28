@@ -48,8 +48,11 @@ queue gained", and "The next queue"):
    the REPL compiles and runs every expression as machine code (119 of the
    test programs' expressions; 16 declined, for continuations (step 5),
    `field@`, and procedures with no register code). Then the rest of 4, and
-   5–7. The cellular REPL loses what an expression form writes (each form
-   re-runs only the definitions before it): to fix.
+   5–7. The REPL is incremental (2026-09-28), as Larceny's is: each form
+   is checked after the ones before (`check-more`) and compiled alone
+   against the globals' cells the compiler keeps; nothing is replayed.
+   Next: definitions run in the native convention too, native code
+   reading globals through their cells.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

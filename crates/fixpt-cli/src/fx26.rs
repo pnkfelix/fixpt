@@ -84,6 +84,8 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     if crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) {
         s.set_native_convention(true);
         s.native_runner = Some(run_native);
+        // What the native convention's compiler starts from.
+        s.register_code = true;
         s.scheme.runtime_unrooted().native_code = Some(fixpt_native::direct::code_text);
     }
     crate::apply_gc_policy(&mut s.scheme);

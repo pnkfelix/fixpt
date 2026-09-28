@@ -3,15 +3,15 @@
 //! against the evaluator written in FX-26 and the lowering to Scheme
 //! (`PLAN.md` §11, step 9d).
 
+mod common;
+
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 
 /// All three ways; they must agree. Returns the value.
 fn three(program: &str) -> String {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    let compiled = s.compile_with_own_compiler(program).unwrap_or_else(|e| panic!("the FX-26 front end: {e}\n{program}"));
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    let evaluated = s.eval_with_own_evaluator(program).unwrap_or_else(|e| panic!("the FX-26 front end: {e}\n{program}"));
+    let compiled = common::with_own(|s| s.compile_with_own_compiler(program)).unwrap_or_else(|e| panic!("the FX-26 front end: {e}\n{program}"));
+    let evaluated = common::with_own(|s| s.eval_with_own_evaluator(program)).unwrap_or_else(|e| panic!("the FX-26 front end: {e}\n{program}"));
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let lowered = s.run_program(program).unwrap_or_else(|e| panic!("does not check: {e}\n{program}"));
     let lowered = lowered.unwrap_or_else(|e| format!("!! {e}"));
@@ -82,8 +82,7 @@ fn every_program_compiled() {
                 Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
                 Err(_) => continue, // written to be rejected
             };
-            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-            let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
+            let compiled = common::with_own(|s| s.compile_with_own_compiler(&program)).map_err(|e| e.to_string());
             ran += 1;
             let name = path.file_name().unwrap().to_string_lossy().to_string();
             if compiled.as_deref() != Ok(lowered.as_str()) {
@@ -111,6 +110,15 @@ fn every_program_on_every_machine() {
     ];
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
+    // A session for each machine, for every program.
+    let mut sessions: Vec<Fx26Session> = machines
+        .iter()
+        .map(|(_, run)| {
+            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+            s.scheme.runtime_unrooted().run_word = Some(*run);
+            s
+        })
+        .collect();
     for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
@@ -121,10 +129,7 @@ fn every_program_on_every_machine() {
                 Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
                 Err(_) => continue,
             };
-            for (name, run) in machines {
-                eprintln!("RUNNING {name} {}", path.display());
-                let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-                s.scheme.runtime_unrooted().run_word = Some(run);
+            for ((name, _), s) in machines.iter().zip(&mut sessions) {
                 let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
                 if compiled.as_deref() != Ok(lowered.as_str()) {
                     let file = path.file_name().unwrap().to_string_lossy().to_string();

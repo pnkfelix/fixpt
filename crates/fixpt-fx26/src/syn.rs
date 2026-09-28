@@ -75,14 +75,16 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Session, file: FileId, text: &str) 
 /// compiler written in FX-26, and run the word it makes on the cellular
 /// machine: the value, as Scheme writes it; or `!! ` and why it failed.
 pub fn compile_with_fx26_compiler(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
-    compile_with_fx26_compiler_showing(scheme, standard, file, text, false, None).map(|(out, _)| out)
+    compile_with_fx26_compiler_showing(scheme, Some(standard), file, text, false, None).map(|(out, _)| out)
 }
 
 /// The same, and, if `show`, the word made, and every word it reaches,
 /// disassembled before it runs; the run limited to `steps`, if given.
+/// `standard` begins the checker's state; without it, `text` is checked
+/// after the forms checked before (`check-more`), as the REPL gives them.
 pub fn compile_with_fx26_compiler_showing(
     scheme: &mut Session,
-    standard: Handle,
+    standard: Option<Handle>,
     file: FileId,
     text: &str,
     show: bool,
@@ -93,7 +95,7 @@ pub fn compile_with_fx26_compiler_showing(
         let tops = parse_to_trees(s, file, text)?;
         // Checked first, by the checker written in FX-26, which says where
         // each `extract`'s field is.
-        let checked = s.call_global(&format!("{READER_PREFIX}check-program"), &[standard, tops]).map_err(|e| fail(e.to_string()))?;
+        let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = s.view(|v| {
             let r = v.get(checked);
             (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("k-err"))
@@ -148,7 +150,7 @@ pub fn compile_with_fx26_compiler_showing(
 /// rooted: it moves if `f` collects); or why there is none.
 pub fn with_last_value<T>(
     scheme: &mut Session,
-    standard: Handle,
+    standard: Option<Handle>,
     file: FileId,
     text: &str,
     f: impl FnOnce(&mut fixpt_runtime::Runtime, Value) -> T,
@@ -156,7 +158,7 @@ pub fn with_last_value<T>(
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
         let tops = parse_to_trees(s, file, text)?;
-        let checked = s.call_global(&format!("{READER_PREFIX}check-program"), &[standard, tops]).map_err(|e| fail(e.to_string()))?;
+        let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = s.view(|v| {
             let r = v.get(checked);
             (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("k-err"))
@@ -181,6 +183,16 @@ pub fn with_last_value<T>(
         });
         Ok(Ok(f(s.runtime_unrooted(), value)))
     })
+}
+
+/// The checker written in FX-26 on `tops`: a program, in the initial
+/// environment `standard`; or, without it, more forms after those checked
+/// before.
+fn check_in(s: &mut Session, standard: Option<Handle>, tops: Handle) -> Result<Handle, fixpt_scheme::SessionError> {
+    match standard {
+        Some(std) => s.call_global(&format!("{READER_PREFIX}check-program"), &[std, tops]),
+        None => s.call_global(&format!("{READER_PREFIX}check-more"), &[tops]),
+    }
 }
 
 /// What the checker written in FX-26 made of a program: for each definition
