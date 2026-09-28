@@ -959,7 +959,7 @@
                   (else (k-sfail "expected an effect" s))))))))
 
 ;; A label or tag: a name, or a positive integer, which is its digits.
-(define k-label (subr checks (syn) symbol)
+(define k-syn-label (subr checks (syn) symbol)
   (lambda (s)
     (cond ((syn-symbol? s) (syn-head s))
           ((> (syn-int s) 0) (string->symbol (int->string (syn-int s))))
@@ -1265,7 +1265,7 @@
           (reverse done)
           (let ((pair (k-items (car ps) "`(label type)`")))
             (if (= (k-length pair) 2)
-                (let ((l (k-label (car pair))))
+                (let ((l (k-syn-label (car pair))))
                   (if (k-has-label? done l)
                       (k-sfail (string-append (k-quote (symbol->string l)) " appears twice") (car ps))
                       (let ((t (k-parse-type (k-nth pair 1))))
@@ -5610,9 +5610,6 @@
   (lambda (ls s t) (and (not (null? ls)) (or (k-named-has? (extract (car ls) 5) s t) (k-lemma-name? (cdr ls) s t)))))
 (define k-names-meet? (subr (read @t) (k-names k-names) bool)
   (lambda (xs ys) (and (not (null? xs)) (or (k-has-name? ys (car xs)) (k-names-meet? (cdr xs) ys)))))
-(define k-same-labels? (subr (read @t) ((listof (productof (1 symbol) (2 kx)) finite) k-parts) bool)
-  (lambda (gs fs)
-    (if (null? gs) (null? fs) (and (not (null? fs)) (symbol=? (extract (car gs) 1) (extract (car fs) 1)) (k-same-labels? (cdr gs) (cdr fs))))))
 (define k-last (subr (read @t) (kxs) kx) (lambda (xs) (if (null? (cdr xs)) (car xs) (k-last (cdr xs)))))
 (define k-but-last (subr (maxeff (read @t) (alloc @t)) (kxs) kxs)
   (lambda (xs) (if (null? (cdr xs)) nil (the kxs (cons (car xs) (k-but-last (cdr xs)))))))
