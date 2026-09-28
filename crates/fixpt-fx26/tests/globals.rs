@@ -46,6 +46,7 @@ fn effect_polymorphism_carries_what_an_argument_reads() {
     let out = check("polymorphic");
     assert_eq!(out[3], "bool ! (read (globals below limit twice))", "{out:?}");
     assert_eq!(out[4], "bool ! (read (globals twice))", "{out:?}");
+    assert_eq!(out[5], "twice-below : (subr (read (globals below limit twice)) (int) bool)", "{out:?}");
 }
 
 #[test]

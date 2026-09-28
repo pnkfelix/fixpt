@@ -572,6 +572,26 @@ impl Checker {
                     self.transparent.push(g);
                 }
                 let checked = self.check_declared(name, ty, e);
+                // With `define*`, the globals the body read, found, are its
+                // type's; and it is checked again at that type, bound to it,
+                // so that what is kept is a check at the type it has: one
+                // that fails is the checker's mistake, not the program's.
+                let (checked, ty) = match (infer, checked) {
+                    (true, Ok(_)) => {
+                        let reads = self.globals_read_by(e);
+                        let found = self.with_latent(declared, &reads).expect("a subr");
+                        let at = self.env.len() - 1;
+                        self.env[at].1 = found;
+                        self.recursive.truncate(rdepth);
+                        self.note_termination(&[(name, found, e)]);
+                        let again = self.check_declared(name, found, e).map_err(|err| {
+                            let shown = self.show_ty(found);
+                            FxError::at(err.span, format!("`define*` found `{}` to be a {shown}, and checked at it, it does not check (a mistake of the checker's): {}", self.interner.name(name), err.message))
+                        });
+                        (again, found)
+                    }
+                    (_, c) => (c, ty),
+                };
                 if inside.is_some() {
                     self.transparent.pop();
                     self.conversions.push((name, ty));
@@ -587,16 +607,6 @@ impl Checker {
                 });
                 match checked {
                     Ok(effect) => {
-                        let ty = match infer {
-                            false => ty,
-                            true => {
-                                let reads = self.globals_read_by(e);
-                                let found = self.with_latent(declared, &reads).expect("a subr");
-                                let at = self.env.len() - 1;
-                                self.env[at].1 = found;
-                                found
-                            }
-                        };
                         if !recursive {
                             self.push_global(name, ty);
                         }

@@ -6,3 +6,4 @@
   (plambda ((e effect)) (lambda (f x) (if (f x) (f (+ x 1)) #f))))
 ((proj twice (read (globals limit))) below 3)
 ((proj twice pure) (lambda (x) (= x 3)) 3)
+(define* twice-below (subr pure (int) bool) (lambda (x) ((proj twice (read (globals limit))) below x)))
