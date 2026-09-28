@@ -17,7 +17,7 @@
 (private-regions @p)
 
 ;; What a parse may do: read what was read, build a tree, and give up.
-(define-effect parses (maxeff (read @s) (alloc @s) (goto @p)))
+(define-effect parses (maxeff (read @globals) (read @s) (alloc @s) (goto @p)))
 
 (define-type syns-a (listof syn finite))
 (define-type names (listof symbol finite))
@@ -80,7 +80,7 @@
 
 (define-datatype presult (p-ok (listof top finite)) (p-err string int int))
 
-(define parse-tag (prompt-tag presult presult (maxeff spin (read @s) (alloc @s)) @p)
+(define parse-tag (prompt-tag presult presult (maxeff (read @globals) spin (read @s) (alloc @s)) @p)
   (make-continuation-prompt-tag))
 
 ;;; -------------------------------------------------------- looking at syn
@@ -120,11 +120,11 @@
 (define syn-int (subr pure (syn) int)
   (lambda (s) (tagcase s (atom (d a b) (if (datum-int? d) (datum-int-value d) -1)) (else x -1))))
 
-(define len (subr (read @s) ((listof syn finite)) int)
+(define len (subr (maxeff (read @globals) (read @s)) ((listof syn finite)) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (len (cdr xs))))))
 (define nth (subr parses ((listof syn finite) int) syn)
   (lambda (xs i) (if (= i 0) (car xs) (nth (cdr xs) (- i 1)))))
-(define drop (subr (read @s) ((listof syn finite) int) (listof syn finite))
+(define drop (subr (maxeff (read @globals) (read @s)) ((listof syn finite) int) (listof syn finite))
   (lambda (xs i) (if (= i 0) xs (drop (cdr xs) (- i 1)))))
 
 ;; A label or tag: a name, or a positive integer, which is its digits.
@@ -134,7 +134,7 @@
           ((> (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else (pfail "a label is a name or a positive integer" s)))))
 
-(define keep (subr (read @s) ((listof syn finite)) syns-a)
+(define keep (subr (maxeff (read @globals) (read @s)) ((listof syn finite)) syns-a)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (keep (cdr xs))))))
 
 ;; `(tag x …)` with `n` items, or fail with `shape`.
@@ -147,7 +147,7 @@
   (lambda (ps)
     (if (syn-nil? ps)
         nil
-        (letrec ((each (subr parses ((listof syn finite)) (listof (productof (1 symbol) (2 syns-a)) finite))
+        (letrec ((each (subr (maxeff (read @globals) parses) ((listof syn finite)) (listof (productof (1 symbol) (2 syns-a)) finite))
                    (lambda (xs)
                      (if (null? xs)
                          nil
@@ -166,7 +166,7 @@
   (lambda (s)
     (if (>= (syn-int s) 0) (syn-int s) (pfail "a field index is a literal, non-negative integer" s))))
 
-(define arm-else? (subr (read @s) (syn) bool)
+(define arm-else? (subr (maxeff (read @globals) (read @s)) (syn) bool)
   (lambda (c) (tagcase c (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) 'else))) (else x #f))))
 
 (define parse-names (subr parses ((listof syn finite)) names)
@@ -520,18 +520,18 @@
 ;;; labelled from 1, and a constructor per tag, `(tag e …)`. What it makes
 ;;; is written where the form is.
 
-(define datatype? (subr (read @s) (syn) bool)
+(define datatype? (subr (maxeff (read @globals) (read @s)) (syn) bool)
   (lambda (s) (tagcase s (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) 'define-datatype))) (else x #f))))
 
-(define mk-symbol (subr pure (string int int) syn) (lambda (n a b) (atom (datum-symbol n) a b)))
-(define mk-int (subr pure (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
-(define syn-datums (subr (read @s) ((listof syn finite)) (listof datum finite))
+(define mk-symbol (subr (read @globals) (string int int) syn) (lambda (n a b) (atom (datum-symbol n) a b)))
+(define mk-int (subr (read @globals) (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
+(define syn-datums (subr (maxeff (read @globals) (read @s)) ((listof syn finite)) (listof datum finite))
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
-(define mk-list (subr (read @s) ((listof syn finite) int int) syn)
+(define mk-list (subr (maxeff (read @globals) (read @s)) ((listof syn finite) int int) syn)
   (lambda (items a b) (lst items (datum-list (syn-datums items)) a b)))
 
 ;; `(1 m1) (2 m2) …`, from `i`.
-(define dt-labelled (subr (maxeff (read @s) (alloc @s)) ((listof syn finite) int int int) (listof syn finite))
+(define dt-labelled (subr (maxeff (read @globals) (read @s) (alloc @s)) ((listof syn finite) int int int) (listof syn finite))
   (lambda (ms i a b)
     (if (null? ms)
         nil
@@ -548,12 +548,12 @@
                      (arm (mk-list (cons (car parts) (cons prod nil)) a b))
                      (rest (dt-arms (cdr vs) a b)))
                 (cons arm rest)))))))
-(define dt-params (subr (read @s) ((listof syn finite) int) (listof (productof (1 symbol) (2 syns-a)) finite))
+(define dt-params (subr (maxeff (read @globals) (read @s)) ((listof syn finite) int) (listof (productof (1 symbol) (2 syns-a)) finite))
   (lambda (ms i)
     (if (null? ms)
         nil
         (cons (product (1 (string->symbol (string-append "%x" (int->string i)))) (2 (the syns-a nil))) (dt-params (cdr ms) (+ i 1))))))
-(define dt-fields (subr (read @s) ((listof syn finite) int int int) (listof (productof (1 symbol) (2 exp)) finite))
+(define dt-fields (subr (maxeff (read @globals) (read @s)) ((listof syn finite) int int int) (listof (productof (1 symbol) (2 exp)) finite))
   (lambda (ms i a b)
     (if (null? ms)
         nil
@@ -605,13 +605,13 @@
                  (ctors (dt-constructors used family? params (drop items 2) a b)))
             (cons (t-define-type head sum a b) ctors))))))
 
-(define append-tops (subr pure ((listof top finite) (listof top finite)) (listof top finite))
+(define append-tops (subr (read @globals) ((listof top finite) (listof top finite)) (listof top finite))
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))
 
 ;; `(define-generative head rep)`: the form, and its two conversions, each
 ;; the identity: `(define up-name (poly (param …) (subr pure (rep) (name p
 ;; …))) (lambda (x) x))`, and `down-name` the other way.
-(define generative? (subr (read @s) (syn) bool)
+(define generative? (subr (maxeff (read @globals) (read @s)) (syn) bool)
   (lambda (s) (tagcase s (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) 'define-generative))) (else x #f))))
 ;; The parameters as binders, variance left out, and their names.
 (define gen-binders (subr parses ((listof syn finite) int int) (listof syn finite))
@@ -660,5 +660,5 @@
 ;; prompt catches every failure, but its tag is a global whose type names
 ;; @p, so the control effect stays in the type, as the reader's on @e do;
 ;; @p is this program's own, so that is still licensed.
-(define parse-program (subr (maxeff parses spin) ((listof syn finite)) presult)
+(define parse-program (subr (maxeff (read @globals) parses spin) ((listof syn finite)) presult)
   (lambda (forms) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r))))

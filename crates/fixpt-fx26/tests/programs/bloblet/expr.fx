@@ -1,7 +1,7 @@
 ;;; FX-91's define-datatype: a recursive sum of products, taken apart by
 ;;; tagcase, whose arms name each variant's members.
 (define-datatype expr (num int) (add expr expr) (neg expr))
-(define value (subr spin (expr) int)
+(define* value (subr spin (expr) int)
   (lambda (e)
     (tagcase e
       (num (n) n)

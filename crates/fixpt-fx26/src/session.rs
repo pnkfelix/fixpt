@@ -301,7 +301,7 @@ impl Fx26Session {
             native_convention: false,
             native_runner: None,
             native_compiler: None,
-            globals_effects: false,
+            globals_effects: true,
             own_begun: false,
             redefine: None,
             next_redefine: None,

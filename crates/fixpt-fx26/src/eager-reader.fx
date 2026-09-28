@@ -40,9 +40,9 @@
 
 ;; What a reading procedure may do: allocate, read and write its own data,
 ;; mark, and suspend or fail through its prompt.
-(define-effect reads (maxeff (alloc @s) (read @s) (write @s) (write @m) (read @m) (goto @e) (comefrom @e)))
+(define-effect reads (maxeff (read @globals) (alloc @s) (read @s) (write @s) (write @m) (read @m) (goto @e) (comefrom @e)))
 ;; The same, less the control on @e: what a delimited parse does.
-(define-effect parsing (maxeff (alloc @s) (read @s) (write @s) (write @m) (read @m)))
+(define-effect parsing (maxeff (read @globals) (alloc @s) (read @s) (write @s) (write @m) (read @m)))
 
 (define-type chars (listof char finite))
 (define-type data (listof datum finite))
@@ -65,7 +65,7 @@
       (lst (items d a b) d)
       (dotted (items tail d a b) d)
       (vec (items d a b) d))))
-(define syns->data (subr (maxeff (read @s) (alloc @s)) (syns) data)
+(define syns->data (subr (maxeff (read @globals) (read @s) (alloc @s)) (syns) data)
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syns->data (cdr xs))))))
 
 ;; What a feed returns: waiting for a character, or stopped at an error.
@@ -140,7 +140,7 @@
 (define cur-pos (subr (read @s) (cursor) int) (lambda (cur) (car (cdr cur))))
 (define cur-data (subr (read @s) (cursor) syns) (lambda (cur) (car (cdr (cdr cur)))))
 (define cur-pending (subr (read @s) (cursor) (listof cursor finite)) (lambda (cur) (cdr (cdr (cdr cur)))))
-(define hash-pending? (subr (read @s) (cursor) bool) (lambda (cur) (not (null? (cur-pending cur)))))
+(define hash-pending? (subr (maxeff (read @globals) (read @s)) (cursor) bool) (lambda (cur) (not (null? (cur-pending cur)))))
 
 (define advance (subr reads (cursor) cursor)
   (lambda (cur)
@@ -172,20 +172,20 @@
 (define no-data datum (datum-list (the data nil)))
 ;; Built with `datum-cons`, as data from the start: a list made with
 ;; `cons` would be copied to make it a datum.
-(define entry (subr pure (datum int) datum)
+(define entry (subr (read @globals) (datum int) datum)
   (lambda (name start) (datum-cons name (datum-cons (datum-int start) no-data))))
-(define top-entry (subr pure () datum)
+(define top-entry (subr (read @globals) () datum)
   (lambda () (datum-cons (datum-symbol "top") no-data)))
-(define abbrev-entry (subr pure (int string) datum)
+(define abbrev-entry (subr (read @globals) (int string) datum)
   (lambda (start name)
     (datum-cons (datum-symbol "abbrev") (datum-cons (datum-int start) (datum-cons (datum-symbol name) no-data)))))
 ;; A list's mark: its items so far, newest first, as a datum the reader
 ;; builds a pair at a time as it reads them, not copied at each.
-(define list-entry (subr pure (datum int char datum) datum)
+(define list-entry (subr (read @globals) (datum int char datum) datum)
   (lambda (name start close items)
     (datum-cons name (datum-cons (datum-int start) (datum-cons (datum-char close) (datum-cons items no-data))))))
 ;; `items`, newest first, in order, onto `done`.
-(define datum-reverse-onto (subr pure (datum datum) datum)
+(define datum-reverse-onto (subr (read @globals) (datum datum) datum)
   (lambda (items done)
     (if (datum-null? items) done (datum-reverse-onto (datum-cdr items) (datum-cons (datum-car items) done)))))
 ;; The marks' names, interned once.
@@ -204,7 +204,7 @@
 
 (define str3 (subr pure (string string string) string)
   (lambda (a b c) (string-append a (string-append b c))))
-(define str5 (subr pure (string string string string string) string)
+(define str5 (subr (read @globals) (string string string string string) string)
   (lambda (a b c d e) (string-append a (string-append b (str3 c d e)))))
 (define char-string (subr pure (char) string) (lambda (c) (char->string c)))
 
@@ -238,36 +238,36 @@
           (let ((after (eager-run (lambda () ((car (state-ks st)) (string-ref text 0))))))
             (begin (set ahead-text "") (set ahead-at 0) after))))))
 
-(define eager-state-kind (subr (read @s) (state) datum)
+(define eager-state-kind (subr (maxeff (read @globals) (read @s)) (state) datum)
   (lambda (st) (if (state-need? st) (datum-symbol "need") (datum-symbol "error"))))
-(define eager-state-position (subr (read @s) (state) int) (lambda (st) (state-position st)))
-(define eager-state-message (subr (read @s) (state) string) (lambda (st) (state-message st)))
+(define eager-state-position (subr (maxeff (read @globals) (read @s)) (state) int) (lambda (st) (state-position st)))
+(define eager-state-message (subr (maxeff (read @globals) (read @s)) (state) string) (lambda (st) (state-message st)))
 ;; The complete top-level data read so far, in order.
-(define eager-state-data (subr (maxeff (read @s) (alloc @s)) (state) data)
+(define eager-state-data (subr (maxeff (read @globals) (read @s) (alloc @s)) (state) data)
   (lambda (st) (syns->data (the syns (reverse (state-data st))))))
 ;; The same, with where each piece is.
-(define eager-state-syntax (subr (maxeff (read @s) (alloc @s)) (state) syns)
+(define eager-state-syntax (subr (maxeff (read @globals) (read @s) (alloc @s)) (state) syns)
   (lambda (st) (the syns (reverse (state-data st)))))
 
 ;; What the suspended parse is in the middle of, innermost first.
-(define eager-context (subr (maxeff (read @s) (read @m) (alloc @c)) (state) (listof datum @c))
+(define eager-context (subr (maxeff (read @globals) (read @s) (read @m) (alloc @c)) (state) (listof datum @c))
   (lambda (st)
     (if (state-need? st)
         (marks-of (car (state-ks st)) eager-key)
         nil)))
 
 (define entry-name (subr pure (datum) string) (lambda (e) (datum-symbol-name (datum-car e))))
-(define entry-ref (subr pure (datum int) datum)
+(define entry-ref (subr (read @globals) (datum int) datum)
   (lambda (e i) (if (= i 0) (datum-car e) (entry-ref (datum-cdr e) (- i 1)))))
 
-(define settled? (subr (maxeff (read @c) spin) ((listof datum @c)) bool)
+(define settled? (subr (maxeff (read @globals) (read @c) spin) ((listof datum @c)) bool)
   (lambda (ctx)
     (or (null? ctx)
         (and (let ((n (entry-name (car ctx)))) (or (string=? n "top") (string=? n "comment")))
              (settled? (cdr ctx))))))
 
 ;; `complete`, `incomplete` or `error`.
-(define eager-status (subr (maxeff (read @s) (read @m) (alloc @c) (read @c) spin) (state) datum)
+(define eager-status (subr (maxeff (read @globals) (read @s) (read @m) (alloc @c) (read @c) spin) (state) datum)
   (lambda (st)
     (cond ((not (state-need? st)) (datum-symbol "error"))
           ((settled? (the (listof datum @c) (eager-context st))) (datum-symbol "complete"))
@@ -283,7 +283,7 @@
          (let ((n (datum-symbol-name (datum-car (datum-cdr d))))) (or (string=? n "help") (string=? n "?")))
          (datum-null? (datum-cdr (datum-cdr d))))))
 
-(define closing (subr (maxeff (read @c) (alloc @c) spin) ((listof datum @c) (listof char @c)) datum)
+(define closing (subr (maxeff (read @globals) (read @c) (alloc @c) spin) ((listof datum @c) (listof char @c)) datum)
   (lambda (ctx acc)
     (if (null? ctx)
         (datum-bool #f)
@@ -296,7 +296,7 @@
 
 ;; If the newest thing read in the innermost open list is a `,help` hole,
 ;; the characters that would close every open list; otherwise #f.
-(define eager-hole-closers (subr (maxeff (read @s) (read @m) (alloc @c) (read @c) spin) (state) datum)
+(define eager-hole-closers (subr (maxeff (read @globals) (read @s) (read @m) (alloc @c) (read @c) spin) (state) datum)
   (lambda (st)
     (let ((ctx (the (listof datum @c) (eager-context st))))
       (if (and (not (null? ctx))
@@ -309,7 +309,7 @@
   (lambda (cur)
     (marking (entry m-comment (cur-pos cur))
       (lambda ()
-        (letrec ((loop (subr (maxeff reads spin) (cursor) cursor)
+        (letrec ((loop (subr (maxeff (read @globals) reads spin) (cursor) cursor)
                    (lambda (cur)
                      (if (char=? (cur-char cur) #\newline) (consumed cur) (loop (advance cur))))))
           (loop (advance cur)))))))
@@ -338,7 +338,7 @@
   (lambda (cur start)
     (marking (entry m-string start)
       (lambda ()
-        (letrec ((loop (subr (maxeff reads spin) (cursor chars) result)
+        (letrec ((loop (subr (maxeff (read @globals) reads spin) (cursor chars) result)
                    (lambda (cur acc)
                      (let ((c (cur-char cur)))
                        (cond ((char=? c #\")
@@ -346,7 +346,7 @@
                                     (consumed cur)))
                              ((char=? c #\\) (escape (advance cur) acc))
                              (else (loop (advance cur) (cons c acc)))))))
-                 (escape (subr (maxeff reads spin) (cursor chars) result)
+                 (escape (subr (maxeff (read @globals) reads spin) (cursor chars) result)
                    (lambda (cur acc)
                      (let ((e (cur-char cur)))
                        (cond ((char=? e #\n) (loop (advance cur) (cons #\newline acc)))
@@ -359,7 +359,7 @@
                              ((or (char=? e #\newline) (char=? e #\space) (char=? e (integer->char 9)))
                               (gap (advance cur) acc e (char=? e #\newline)))
                              (else (loop (advance cur) (cons e acc)))))))
-                 (hex (subr (maxeff reads spin) (cursor chars chars) result)
+                 (hex (subr (maxeff (read @globals) reads spin) (cursor chars chars) result)
                    (lambda (cur acc digits)
                      (let ((h (cur-char cur)))
                        (cond ((char=? h #\;)
@@ -372,7 +372,7 @@
                  ;; A backslash before a line break: the break and the
                  ;; blanks around it vanish. Before blanks alone, it is
                  ;; the character itself.
-                 (gap (subr (maxeff reads spin) (cursor chars char bool) result)
+                 (gap (subr (maxeff (read @globals) reads spin) (cursor chars char bool) result)
                    (lambda (cur acc e seen-newline)
                      (let ((g (cur-char cur)))
                        (cond ((and (char=? g #\newline) (not seen-newline)) (gap (advance cur) acc e #t))
@@ -382,7 +382,7 @@
           (loop cur nil))))))
 
 ;; A proper list of exact integers in 0..=255.
-(define bytes? (subr pure (datum) bool)
+(define bytes? (subr (read @globals) (datum) bool)
   (lambda (d)
     (or (datum-null? d)
         (and (datum-pair? d) (datum-byte? (datum-car d)) (bytes? (datum-cdr d))))))
@@ -390,7 +390,7 @@
 ;; The characters up to the next delimiter.
 (define read-word (subr (maxeff reads spin) (cursor) word)
   (lambda (cur)
-    (letrec ((loop (subr (maxeff reads spin) (cursor chars) word)
+    (letrec ((loop (subr (maxeff (read @globals) reads spin) (cursor chars) word)
                (lambda (cur acc)
                  (if (delimiter? (cur-char cur))
                      (cons (list->string (the chars (reverse acc))) cur)
@@ -439,7 +439,7 @@
   (lambda (cur start prefix)
     (marking (entry m-atom start)
       (lambda ()
-        (letrec ((loop (subr (maxeff reads spin) (cursor chars bool) result)
+        (letrec ((loop (subr (maxeff (read @globals) reads spin) (cursor chars bool) result)
                    (lambda (cur acc escaped)
                      (let ((c (cur-char cur)))
                        (cond ((char=? c #\|) (bar (advance cur) acc))
@@ -449,7 +449,7 @@
                              ((delimiter? c) (finish cur (list->string (the chars (reverse acc))) escaped c))
                              (else (loop (advance cur) (cons c acc) escaped))))))
                  ;; Inside `|…|`.
-                 (bar (subr (maxeff reads spin) (cursor chars) result)
+                 (bar (subr (maxeff (read @globals) reads spin) (cursor chars) result)
                    (lambda (cur acc)
                      (marking (entry m-symbol start)
                        (lambda ()
@@ -459,7 +459,7 @@
                                   (let ((cur (advance cur)))
                                     (bar (advance cur) (cons (cur-char cur) acc))))
                                  (else (bar (advance cur) (cons b acc)))))))))
-                 (finish (subr reads (cursor string bool char) result)
+                 (finish (subr (maxeff (read @globals) reads) (cursor string bool char) result)
                    (lambda (cur text escaped c)
                      (if (and (string=? text "") (not escaped))
                          (fail cur (str3 "unexpected `" (char-string c) "`"))
@@ -523,7 +523,7 @@
   ;;; ------------------------------------------------------------------- lists
   (read-list (subr (maxeff reads spin) (cursor int char) result)
     (lambda (cur start close)
-      (letrec ((loop (subr (maxeff reads spin) (cursor data datum syns) result)
+      (letrec ((loop (subr (maxeff (read @globals) reads spin) (cursor data datum syns) result)
                  (lambda (cur items items-d syns)
                    ;; In tail position, so the mark is replaced each time
                    ;; round: it always says what has been read so far.
@@ -609,7 +609,7 @@
 
 (define read-top (subr (maxeff reads spin) (cursor) void)
   (lambda (cur)
-    (letrec ((loop (subr (maxeff reads spin) (cursor) void)
+    (letrec ((loop (subr (maxeff (read @globals) reads spin) (cursor) void)
                (lambda (cur)
                  (marking (top-entry)
                    (lambda ()

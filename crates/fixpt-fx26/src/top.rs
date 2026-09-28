@@ -35,10 +35,11 @@ pub enum Top {
     /// computing it has this effect.
     /// `typed` when the type was written; `recursive` when the name is in
     /// scope in its expression, which is then a lambda.
+    /// `inferred` when it is a `define*`, whose type's globals were found.
     /// `assigns` when it assigns the global the name has, a redefinition
     /// every use can take (`Checker::top_defining`); else it makes a new
     /// global.
-    Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, typed: bool, recursive: bool, assigns: bool },
+    Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, typed: bool, inferred: bool, recursive: bool, assigns: bool },
     /// `(define-rec (name type lambda) …)`: each name bound to its lambda;
     /// `assigns` as for `Define`, for all of them.
     DefineRec { bindings: Vec<(Sym, TyId, crate::ast::ExpId)>, assigns: bool },
@@ -610,7 +611,7 @@ impl Checker {
                         if !recursive {
                             self.push_global(name, ty);
                         }
-                        Ok(Top::Define { name, ty, effect, exp: e, typed: true, recursive, assigns: false })
+                        Ok(Top::Define { name, ty, effect, exp: e, typed: true, inferred: infer, recursive, assigns: false })
                     }
                     Err(err) => {
                         if recursive {
@@ -628,7 +629,7 @@ impl Checker {
                     self.known.insert((name, self.env.len()));
                 }
                 self.push_global(name, ty);
-                Ok(Top::Define { name, ty, effect, exp: e, typed: false, recursive: false, assigns: false })
+                Ok(Top::Define { name, ty, effect, exp: e, typed: false, inferred: false, recursive: false, assigns: false })
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),
         }

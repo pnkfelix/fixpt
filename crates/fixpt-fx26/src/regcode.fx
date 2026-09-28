@@ -67,23 +67,23 @@
 
 ;; Whether the register code being made has been declined.
 (define r-declined (ref bool @k) (new #f))
-(define r-decline (subr (write @k) () unit) (lambda () (set r-declined #t)))
+(define r-decline (subr (maxeff (read @globals) (write @k)) () unit) (lambda () (set r-declined #t)))
 
 (define r-emit (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen ritem) unit)
   (lambda (g i) (let ((items (extract g items))) (set items (cons i (get items))))))
-(define r-op0 (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen int) unit)
+(define r-op0 (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen int) unit)
   (lambda (g op) (r-emit g (r-cell (wcell-int op)))))
-(define r-op1 (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen int wcell) unit)
+(define r-op1 (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen int wcell) unit)
   (lambda (g op x) (begin (r-op0 g op) (r-emit g (r-cell x)))))
-(define r-op2 (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen int wcell wcell) unit)
+(define r-op2 (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen int wcell wcell) unit)
   (lambda (g op x y) (begin (r-op1 g op x) (r-emit g (r-cell y)))))
-(define r-opn (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen int int) unit)
+(define r-opn (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen int int) unit)
   (lambda (g op n) (r-op1 g op (wcell-int n))))
-(define r-opnn (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen int int int) unit)
+(define r-opnn (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen int int int) unit)
   (lambda (g op n m) (r-op2 g op (wcell-int n) (wcell-int m))))
 (define r-new-label (subr (maxeff (read @k) (write @k)) (rgen) int)
   (lambda (g) (let* ((l (extract g labels)) (n (get l))) (begin (set l (+ n 1)) n))))
-(define r-reg (subr (maxeff (read @k) (write @k)) (rgen) int)
+(define r-reg (subr (maxeff (read @globals) (read @k) (write @k)) (rgen) int)
   (lambda (g)
     (let* ((r (extract g nreg)) (n (+ (get r) 1)))
       (begin (set r n) (if (> n register-regs) (r-decline) #u) n))))
@@ -92,16 +92,16 @@
     (let* ((s (extract g nslot)) (n (get s)) (m (extract g mslot)))
       (begin (set s (+ n 1)) (if (> (+ n 1) (get m)) (set m (+ n 1)) #u) n))))
 ;; Pop the frame, if there is one, before leaving.
-(define r-leave (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen) unit)
+(define r-leave (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen) unit)
   (lambda (g) (if (extract g leaf) #u (begin (r-op0 g rop-pop) (r-emit g (r-frame))))))
-(define r-done (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen bool) unit)
+(define r-done (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen bool) unit)
   (lambda (g tail) (if tail (begin (r-leave g) (r-op0 g rop-return)) #u)))
 
-(define r-reverse (subr (maxeff (read @k) (alloc @k) spin) ((listof ritem @k) (listof ritem @k)) (listof ritem @k))
+(define r-reverse (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof ritem @k) (listof ritem @k)) (listof ritem @k))
   (lambda (xs acc) (if (null? xs) acc (r-reverse (cdr xs) (cons (car xs) acc)))))
 (define r-size (subr pure (ritem) int)
   (lambda (i) (tagcase i (r-cell (x) 1) (r-label (n) 0) (r-branch (f n) 2) (r-frame () 1))))
-(define r-place (subr (maxeff (read @k) (write @k) spin) ((listof ritem @k) (arrayof int @k) int) unit)
+(define r-place (subr (maxeff (read @globals) (read @k) (write @k) spin) ((listof ritem @k) (arrayof int @k) int) unit)
   (lambda (xs at pos)
     (if (null? xs)
         #u
@@ -109,7 +109,7 @@
                (r-place (cdr xs) at (+ pos (r-size (car xs))))))))
 ;; The cells, branches resolved (an offset counts from the cell after it),
 ;; and the frame's size in place.
-(define r-cells (subr (maxeff (read @k) (alloc @k) spin) ((listof ritem @k) (arrayof int @k) int int) (listof wcell @k))
+(define r-cells (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof ritem @k) (arrayof int @k) int int) (listof wcell @k))
   (lambda (xs at pos frame)
     (if (null? xs)
         nil
@@ -120,7 +120,7 @@
             (r-frame () (cons (wcell-int frame) rest))
             (r-branch (f n)
               (cons (wcell-int (if f rop-branchf rop-branch)) (cons (wcell-int (- (array-ref at n) (+ pos 2))) rest))))))))
-(define r-assemble (subr (maxeff (read @k) (write @k) (alloc @k) spin) (rgen) (listof wcell @k))
+(define r-assemble (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen) (listof wcell @k))
   (lambda (g)
     (let* ((xs (r-reverse (get (extract g items)) nil))
            (at (the (arrayof int @k) (make-array (+ 1 (get (extract g labels))) 0))))
@@ -128,7 +128,7 @@
 
 ;;; ------------------------------------------------------------- variables
 
-(define r-where (subr (maxeff (read @k) (alloc @k) spin) (renv symbol) (listof rloc @k))
+(define r-where (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv symbol) (listof rloc @k))
   (lambda (env n)
     (cond ((null? env)
            (let ((l (c-where (the cenv nil) n)))
@@ -139,7 +139,7 @@
           (else (r-where (cdr env) n)))))
 
 ;; A let-bound name in the cellular environment: a local, captured as such.
-(define r-local (subr (alloc @k) (cenv symbol) cenv)
+(define r-local (subr (maxeff (read @globals) (alloc @k)) (cenv symbol) cenv)
   (lambda (te n) (the cenv (cons (cons n (at-slot -1)) te))))
 
 (define r-simple? (subr pure (exp) bool)
@@ -164,7 +164,7 @@
 
 ;; Whether `f` is the procedure running, called with its arity: its own
 ;; name, still bound where the procedure knows itself to be.
-(define r-self-known? (subr (maxeff (read @k) (alloc @k) spin) (rgen exp int cenv) bool)
+(define r-self-known? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (rgen exp int cenv) bool)
   (lambda (g f nargs te)
     (tagcase f
       (e-var (n a b)
@@ -175,14 +175,14 @@
 ;;; ------------------------------------------------------ standard names
 
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`.
-(define r-prim-std (subr pure (string int int) rstd)
+(define r-prim-std (subr (read @globals) (string int int) rstd)
   (lambda (name n k)
     (let ((p (runtime-primitive name))) (if (and (>= p 0) (= n k)) (s-prim p) (s-none)))))
 
 ;; Whether `name`, applied to `n` arguments, is a standard operation register
 ;; code does, and how: as the Rust compiler's `r_standard`, whose last case
 ;; is what the cellular compiler does with one runtime primitive.
-(define r-standard (subr (maxeff (read @k) (alloc @k)) (string int) rstd)
+(define r-standard (subr (maxeff (read @globals) (read @k) (alloc @k)) (string int) rstd)
   (lambda (name n)
     (let ((is (lambda ((s string) (k int)) (and (string=? name s) (= n k)))))
       (cond ((is "+" 2) (s-op2 routine-int-add #f #f))
@@ -229,7 +229,7 @@
 ;; The operator under the type abstractions, projections, ascriptions and
 ;; conversions, which compile to nothing: `((proj car @r) xs)` is `car`
 ;; applied.
-(define r-operator (subr (maxeff (read @k) spin) (exp) exp)
+(define r-operator (subr (maxeff (read @globals) (read @k) spin) (exp) exp)
   (lambda (f)
     (tagcase f
       (e-plambda (d body a b) (r-operator body))
@@ -237,25 +237,25 @@
       (e-the (d body a b) (r-operator body))
       (e-convention (cnv body a b) (r-operator body))
       (else y y))))
-(define r-standard-name (subr (maxeff (read @k) (alloc @k) spin) (renv exp) string)
+(define r-standard-name (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) string)
   (lambda (env f)
     (tagcase (r-operator f) (e-var (n a b) (if (null? (r-where env n)) (symbol->string n) "")) (else y ""))))
 
 ;;; ---------------------------------------------------------------- lists
 
-(define r-count-args (subr (maxeff (read @k) spin) (rargs) int)
+(define r-count-args (subr (maxeff (read @globals) (read @k) spin) (rargs) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (r-count-args (cdr xs))))))
-(define r-exp-args (subr (alloc @k) ((listof exp finite)) rargs)
+(define r-exp-args (subr (maxeff (read @globals) (alloc @k)) ((listof exp finite)) rargs)
   (lambda (es) (if (null? es) nil (cons (a-e (car es)) (r-exp-args (cdr es))))))
-(define r-arg-simple? (subr pure (rarg) bool)
+(define r-arg-simple? (subr (read @globals) (rarg) bool)
   (lambda (a) (tagcase a (a-e (x) (r-simple? x)) (a-thunk (b) #f) (else y #t))))
 ;; The last argument that is not simple, or -1.
-(define r-last-hard (subr (maxeff (read @k) spin) (rargs int int) int)
+(define r-last-hard (subr (maxeff (read @globals) (read @k) spin) (rargs int int) int)
   (lambda (xs i found)
     (if (null? xs) found (r-last-hard (cdr xs) (+ i 1) (if (r-arg-simple? (car xs)) found i)))))
-(define r-nth-int (subr (maxeff (read @k) spin) ((listof int @k) int) int)
+(define r-nth-int (subr (maxeff (read @globals) (read @k) spin) ((listof int @k) int) int)
   (lambda (xs i) (if (= i 0) (car xs) (r-nth-int (cdr xs) (- i 1)))))
-(define r-nth-exp (subr pure ((listof exp finite) int) exp)
+(define r-nth-exp (subr (read @globals) ((listof exp finite) int) exp)
   (lambda (es i) (if (= i 0) (car es) (r-nth-exp (cdr es) (- i 1)))))
 
 ;;; ---------------------------------------------------------- expressions
@@ -863,7 +863,7 @@
 
 ;; The register environment of a lambda's body, from its cellular one: its
 ;; parameters in registers in a leaf, else in the frame.
-(define r-env-of (subr (maxeff (read @k) (write @k) (alloc @k) spin) (cenv bool) renv)
+(define r-env-of (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (cenv bool) renv)
   (lambda (inner leaf)
     (if (null? inner)
         nil
@@ -875,7 +875,7 @@
             (at-global (g) (the renv (cons (cons n (rl-global g)) rest)))
             (at-pending (s) (begin (r-decline) rest)))))))
 
-(define r-store-params (subr (maxeff (read @k) (write @k) (alloc @k) spin) (rgen int int) unit)
+(define r-store-params (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen int int) unit)
   (lambda (g i n)
     (if (= i n) #u (let ((s (r-slot g))) (begin (r-opnn g rop-store (+ i 1) s) (r-store-params g (+ i 1) n))))))
 
@@ -909,4 +909,4 @@
 (set c-register-code r-register-code)
 
 ;; Whether the compiler makes register code from now on: for a driver.
-(define compile-registers! (subr (write @k) (bool) unit) (lambda (on) (set c-registers on)))
+(define compile-registers! (subr (maxeff (read @globals) (write @k)) (bool) unit) (lambda (on) (set c-registers on)))

@@ -10,7 +10,7 @@
                  (lambda (xs acc) (if (null? xs) acc (add-up (cdr xs) (+ acc (car xs)))))))
         (add-up (build n nil) 0)))))
 
-(define total (subr spin (int int) int)
+(define* total (subr spin (int int) int)
   (lambda (i acc) (if (= i 0) acc (total (- i 1) (+ acc (sum-to 10))))))
 
 (total 1000 0)

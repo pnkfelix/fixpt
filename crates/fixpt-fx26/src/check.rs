@@ -270,7 +270,7 @@ impl Checker {
             masking: true,
             broken: HashMap::new(),
             defs: Vec::new(),
-            globals_effects: false,
+            globals_effects: true,
             global_slots: HashSet::new(),
         };
         for (name, ty) in crate::standard::ENTRIES {
@@ -2090,7 +2090,7 @@ impl Checker {
             }
         })?;
         let own = Effect([Atom::Goto(region), Atom::Comefrom(region)].into_iter().collect());
-        let beyond = Effect(be.0.iter().copied().filter(|a| !bound.contains(*a) && !own.contains(*a)).collect());
+        let beyond = Effect(be.0.iter().copied().filter(|a| !Effect::atom(*a).within(&bound) && !own.contains(*a)).collect());
         if !beyond.is_pure() {
             return Err(FxError::at(
                 self.arena.span_of(body),

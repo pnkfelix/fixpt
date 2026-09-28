@@ -19,23 +19,24 @@ fn ty_of(c: &mut Checker, text: &str) -> String {
 fn a_definition_stays_in_scope() {
     let mut c = Checker::new();
     top(&mut c, "(define double (subr pure (int) int) (lambda ((x int)) (+ x x)))").expect("defines");
-    assert_eq!(ty_of(&mut c, "(double 4)"), "int ! pure");
+    // Calling `double` reads the global.
+    assert_eq!(ty_of(&mut c, "(double 4)"), "int ! (read (globals double))");
 }
 
 #[test]
 fn a_typed_definition_may_be_recursive() {
     let mut c = Checker::new();
-    let src = "(define count (subr spin (int) int)
+    let src = "(define* count (subr spin (int) int)
                  (lambda ((n int)) (if (= n 0) 0 (count (- n 1)))))";
     top(&mut c, src).expect("defines");
-    assert_eq!(ty_of(&mut c, "(count 3)"), "int ! spin");
+    assert_eq!(ty_of(&mut c, "(count 3)"), "int ! (maxeff spin (read (globals count)))");
 }
 
 #[test]
 fn an_untyped_definition_takes_its_expressions_type() {
     let mut c = Checker::new();
     top(&mut c, "(define three 3)").expect("defines");
-    assert_eq!(ty_of(&mut c, "(+ three 1)"), "int ! pure");
+    assert_eq!(ty_of(&mut c, "(+ three 1)"), "int ! (read (globals three))");
 }
 
 #[test]

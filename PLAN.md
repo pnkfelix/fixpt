@@ -71,7 +71,15 @@ queue gained", and "The next queue"):
    are only break or refuse (`,redefine b|r`). A procedure's calls of
    itself by name go through its global too, as in Larceny; `letrec` binds
    one locally (the user's, 2026-09-28). A redefinition that would close a
-   cycle through globals needs `spin` in its type.
+   cycle through globals needs `spin` in its type. Globals are a region
+   (2026-09-28, with the user; `docs/fx26.md`): naming `g` reads `(globals
+   g)`, within `(read @globals)`; `define*` finds a procedure's globals
+   precisely; both checkers, every program, and the front end (through
+   `(read @globals)`) say so. Next: compatibility counts what a
+   redefinition reads, and the cycle rule from types; `define-rec*`; a
+   lint on non-tail recursion over an index (the user's, after an
+   assembler overflow); a question to answer: tag bits for an ownership
+   bit.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

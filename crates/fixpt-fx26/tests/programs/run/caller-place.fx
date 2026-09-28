@@ -4,7 +4,7 @@
 (define build (poly ((p place) (r region p)) (subr (maxeff (alloc r) (alloc p)) ((place p) int) (listof int r)))
   (plambda ((p place) (r region p))
     (lambda ((h (place p)) (n int)) (rcons h n (rcons h (+ n 1) nil)))))
-(define use (subr pure (int) int)
+(define* use (subr pure (int) int)
   (lambda (n)
     (letrena a
       (letregion d

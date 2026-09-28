@@ -42,16 +42,16 @@ fn a_new_bloblet_has_its_fields_types_and_allocates() {
 #[test]
 fn reading_and_writing_fields_are_effects_on_the_region() {
     let b = "(define b (bloblet (fields int string) @r) (make-bloblet 0 1 \"x\"))";
-    assert_eq!(check(&format!("{b} (bloblet-ref b 1)")), "string ! (read @r)");
-    assert_eq!(check(&format!("{b} (bloblet-set! b 0 5)")), "unit ! (write @r)");
-    assert_eq!(check(&format!("{b} (bloblet-byte b 0)")), "int ! (read @r)");
-    assert_eq!(check(&format!("{b} (bloblet-bytes b)")), "int ! pure");
+    assert_eq!(check(&format!("{b} (bloblet-ref b 1)")), "string ! (maxeff (read @r) (read (globals b)))");
+    assert_eq!(check(&format!("{b} (bloblet-set! b 0 5)")), "unit ! (maxeff (write @r) (read (globals b)))");
+    assert_eq!(check(&format!("{b} (bloblet-byte b 0)")), "int ! (maxeff (read @r) (read (globals b)))");
+    assert_eq!(check(&format!("{b} (bloblet-bytes b)")), "int ! (read (globals b))");
 }
 
 #[test]
 fn frozen_fields_read_purely_and_cannot_be_written() {
     let b = "(define b (bloblet (frozen int) @r) (bloblet-freeze (the (bloblet (fields int) @r) (make-bloblet 0 1))))";
-    assert_eq!(check(&format!("{b} (bloblet-ref b 0)")), "int ! pure");
+    assert_eq!(check(&format!("{b} (bloblet-ref b 0)")), "int ! (read (globals b))");
     let err = rejects(&format!("{b} (bloblet-set! b 0 2)"));
     assert!(err.contains("its fields are frozen"), "{err}");
     // Freezing is a change of type, not a subtype.
@@ -104,9 +104,9 @@ fn symbols_are_values() {
 fn arrays_are_bloblets_indexed_at_run_time() {
     assert_eq!(check("(the (arrayof int @r) (make-array 3 0))"), "(arrayof int @r) ! (alloc @r)");
     let a = "(define a (arrayof string @r) (make-array 2 \"\"))";
-    assert_eq!(check(&format!("{a} (array-ref a 1)")), "string ! (read @r)");
-    assert_eq!(check(&format!("{a} (array-set! a 0 \"x\")")), "unit ! (write @r)");
-    assert_eq!(check(&format!("{a} (array-length a)")), "nat ! pure");
+    assert_eq!(check(&format!("{a} (array-ref a 1)")), "string ! (maxeff (read @r) (read (globals a)))");
+    assert_eq!(check(&format!("{a} (array-set! a 0 \"x\")")), "unit ! (maxeff (write @r) (read (globals a)))");
+    assert_eq!(check(&format!("{a} (array-length a)")), "nat ! (read (globals a))");
     assert_eq!(run(include_str!("programs/bloblet/array-sum.fx")), "285");
     let out = run("(array-ref (make-array 2 0) 2)");
     assert!(out.starts_with("!! "), "{out}");

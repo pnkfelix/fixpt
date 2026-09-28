@@ -67,7 +67,7 @@ fn an_unlicensed_expression_is_not_run() {
     run(&mut s, "(define c (ref int @c) (new 1))");
     assert_eq!(speculate(&mut s, "(set c 5)"), Speculation::NotLicensed("(write @c)".into()));
     assert_eq!(speculate(&mut s, "(get c)"), Speculation::NotLicensed("(read @c)".into()));
-    run(&mut s, "(define probe (subr (read @c) () int) (lambda () (get c)))");
+    run(&mut s, "(define* probe (subr (read @c) () int) (lambda () (get c)))");
     let forms = s.checker.read_in(fixpt_read::FileId(0), "(probe)").expect("reads");
     assert_eq!(s.run(&forms[0]).expect("runs").value, Ok(Some("1".into())), "the speculative write happened");
 }
@@ -86,7 +86,7 @@ fn definitions_and_errors_are_not_run() {
 #[test]
 fn a_speculative_run_has_a_budget() {
     let mut s = session();
-    run(&mut s, "(define spin (subr spin (int) int) (lambda (n) (spin n)))");
+    run(&mut s, "(define* spin (subr spin (int) int) (lambda (n) (spin n)))");
     assert!(matches!(speculate(&mut s, "(spin 0)"), Speculation::Failed(_)));
     // And the ordinary budget is back afterwards.
     assert_eq!(speculate(&mut s, "(+ 1 2)"), Speculation::Value("3".into()));
@@ -108,7 +108,7 @@ fn the_eager_reader_is_licensed() {
 fn a_reader_that_reaches_outside_is_refused() {
     let doctored = format!(
         "{}\n(define shared (ref int @user) (new 0))
-         (define eager-feed (subr (write @user) (state char) state)
+         (define* eager-feed (subr (write @user) (state char) state)
            (lambda (st ch) (begin (set shared 1) st)))",
         fixpt_fx26::front_end()
     );

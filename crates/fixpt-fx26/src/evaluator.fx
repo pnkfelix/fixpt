@@ -43,8 +43,8 @@
   (v-sum symbol val)
   (v-clo (listof (productof (1 symbol) (2 syns-a)) finite) exp (listof (pairof symbol (bloblet (fields val) @v) @v) @v))
   (v-prim symbol)
-  (v-tag (prompt-tag val val (maxeff spin (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
-  (v-cont (composable val val (maxeff spin (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
+  (v-tag (prompt-tag val val (maxeff (read @globals) spin (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
+  (v-cont (composable val val (maxeff (read @globals) spin (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
   (v-esc (subr (goto @x) (val) void))
   (v-key (mark-key val @x)))
 
@@ -53,7 +53,7 @@
 (define-type vals (listof val @v))
 
 ;; What a delimited part of the program may do, besides control on @x.
-(define-effect runs (maxeff (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)))
+(define-effect runs (maxeff (read @globals) (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)))
 ;; What evaluating may do: read the trees, run the program on @v, mark and
 ;; transfer control on @x, and stop with an error.
 (define-effect evals (maxeff runs (goto @x) (comefrom @x)))
@@ -93,7 +93,7 @@
 (define icell-full? (subr (read @v) ((bloblet (fields val val) @v)) bool)
   (lambda (c) (tagcase (bloblet-ref c 0) (v-bool (b) b) (else x #f))))
 
-(define as-tag (subr evals (val) (prompt-tag val val (maxeff runs spin) @x))
+(define as-tag (subr (maxeff (read @globals) evals) (val) (prompt-tag val val (maxeff runs spin) @x))
   (lambda (v) (tagcase v (v-tag (t) t) (else x (efail "a prompt tag is expected")))))
 (define as-key (subr evals (val) (mark-key val @x))
   (lambda (v) (tagcase v (v-key (k) k) (else x (efail "a mark key is expected")))))
@@ -101,7 +101,7 @@
   (lambda (v) (tagcase v (v-cont (k) k) (else x (efail "a composable continuation is expected")))))
 
 ;; The evaluator's list of values, as the program's.
-(define list->val (subr (maxeff (read @x) (alloc @v) spin) ((listof val @x)) val)
+(define list->val (subr (maxeff (read @globals) (read @x) (alloc @v) spin) ((listof val @x)) val)
   (lambda (xs) (if (null? xs) (v-nil) (v-pair (make-bloblet 0 (car xs) (list->val (cdr xs)))))))
 
 (define arg (subr (maxeff evals spin) (vals int) val)
@@ -117,13 +117,13 @@
   " + - * = < > <= >= not modulo quotient cons rcons rnew rmake-array rmake-icell car cdr null? set-car! set-cdr! new get set make-icell icell-put! icell-get char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc ")
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
-(define occurs? (subr spin (string string int) bool)
+(define occurs? (subr (maxeff (read @globals) spin) (string string int) bool)
   (lambda (needle hay i)
     (and (<= (+ i (string-length needle)) (string-length hay))
          (or (string=? (substring hay i (+ i (string-length needle))) needle)
              (occurs? needle hay (+ i 1))))))
 
-(define primitive? (subr spin (string) bool)
+(define primitive? (subr (maxeff (read @globals) spin) (string) bool)
   (lambda (n) (occurs? (string-append " " (string-append n " ")) primitive-names 0)))
 
 ;; A standard name: a primitive, or `nil`.
@@ -162,7 +162,7 @@
 
 (define field-of (subr (maxeff evals spin) (val symbol) val)
   (lambda (p l)
-    (letrec ((find (subr (maxeff evals spin) ((listof (pairof symbol val @v) @v)) val)
+    (letrec ((find (subr (maxeff (read @globals) evals spin) ((listof (pairof symbol val @v) @v)) val)
                (lambda (fs)
                  (cond ((null? fs) (efail "no such label"))
                        ((symbol=? (car (car fs)) l) (cdr (car fs)))
@@ -172,16 +172,16 @@
 ;; An arm's names, bound to a product's fields in order.
 (define bind-fields (subr evals (names val env) env)
   (lambda (ns p e)
-    (letrec ((go (subr evals (names (listof (pairof symbol val @v) @v) env) env)
+    (letrec ((go (subr (maxeff (read @globals) evals) (names (listof (pairof symbol val @v) @v) env) env)
                (lambda (ns fs e)
                  (cond ((and (null? ns) (null? fs)) e)
                        ((or (null? ns) (null? fs)) (efail "the wrong number of fields"))
                        (else (go (cdr ns) (cdr fs) (cons (cons (car ns) (cell (cdr (car fs)))) e)))))))
       (tagcase p (v-product (fs) (go ns fs e)) (else x (efail "a product is expected"))))))
 
-(define length-of (subr (maxeff (read @v) spin) (vals) int)
+(define length-of (subr (maxeff (read @globals) (read @v) spin) (vals) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (length-of (cdr xs))))))
-(define fill-array (subr (maxeff (read @v) (write @v) spin) ((arrayof val @v) vals int) unit)
+(define fill-array (subr (maxeff (read @globals) (read @v) (write @v) spin) ((arrayof val @v) vals int) unit)
   (lambda (a xs i) (if (null? xs) #u (begin (array-set! a i (car xs)) (fill-array a (cdr xs) (+ i 1))))))
 
 (define eval-bloblet (subr (maxeff evals spin) (string int vals) val)
@@ -204,7 +204,7 @@
              (else x (efail "a bloblet is expected")))))))
 
 (define-rec
-  (apply-prim (subr (maxeff evals spin) (string vals) val)
+  (apply-prim (subr (maxeff (read @globals) evals spin) (string vals) val)
     (lambda (n xs)
       (cond ((string=? n "+") (int2 xs (lambda (a b) (+ a b))))
             ((string=? n "-") (int2 xs (lambda (a b) (- a b))))
@@ -272,7 +272,7 @@
             ((string=? n "current-marks") (list->val (current-marks (as-key (arg xs 0)))))
             ((string=? n "marks-of") (list->val (marks-of (as-cont (arg xs 0)) (as-key (arg xs 1)))))
             (else (efail (string-append "not in the evaluator yet: " n))))))
-  (apply-val (subr (maxeff evals spin) (val vals) val)
+  (apply-val (subr (maxeff (read @globals) evals spin) (val vals) val)
     (lambda (f xs)
       (tagcase f
         (v-clo (ps body e) (eval body (bind ps xs e)))
@@ -280,14 +280,14 @@
         (v-cont (k) (k (arg xs 0)))
         (v-esc (k) (k (arg xs 0)))
         (else x (efail "not a subroutine")))))
-  (eval-all (subr (maxeff evals spin) ((listof exp finite) env) vals)
+  (eval-all (subr (maxeff (read @globals) evals spin) ((listof exp finite) env) vals)
     (lambda (es e) (if (null? es) nil (let ((v (eval (car es) e))) (cons v (eval-all (cdr es) e))))))
-  (eval-begin (subr (maxeff evals spin) ((listof exp finite) env) val)
+  (eval-begin (subr (maxeff (read @globals) evals spin) ((listof exp finite) env) val)
     (lambda (es e)
       (cond ((null? es) (v-unit))
             ((null? (cdr es)) (eval (car es) e))
             (else (begin (eval (car es) e) (eval-begin (cdr es) e))))))
-  (eval (subr (maxeff evals spin) (exp env) val)
+  (eval (subr (maxeff (read @globals) evals spin) (exp env) val)
     (lambda (x e)
       (tagcase x
         (e-var (n a b) (lookup e n))
@@ -320,18 +320,18 @@
         (e-extract (p l a b) (field-of (eval p e) l))
         (e-sum (t v a b) (v-sum t (eval v e)))
         (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e)))))
-  (eval-let (subr (maxeff evals spin) ((listof (productof (1 symbol) (2 exp)) finite) env env) env)
+  (eval-let (subr (maxeff (read @globals) evals spin) ((listof (productof (1 symbol) (2 exp)) finite) env env) env)
     (lambda (bs outer e)
       (if (null? bs)
           e
           (let ((v (eval (extract (car bs) 2) outer)))
             (eval-let (cdr bs) outer (cons (cons (extract (car bs) 1) (cell v)) e))))))
   ;; Every name first, holding #u; then each value, in the scope of all.
-  (eval-letrec (subr (maxeff evals spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp env) val)
+  (eval-letrec (subr (maxeff (read @globals) evals spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp env) val)
     (lambda (bs body e)
-      (letrec ((open (subr evals ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) env) env)
+      (letrec ((open (subr (maxeff (read @globals) evals) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) env) env)
                  (lambda (bs e) (if (null? bs) e (open (cdr bs) (cons (cons (extract (car bs) 1) (cell (v-unit))) e)))))
-               (fill (subr (maxeff evals spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) env) unit)
+               (fill (subr (maxeff (read @globals) evals spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) env) unit)
                  (lambda (bs inner)
                    (if (null? bs)
                        #u
@@ -339,18 +339,18 @@
                               (fill (cdr bs) inner))))))
         (let ((inner (open bs e)))
           (begin (fill bs inner) (eval body inner))))))
-  (eval-fields (subr (maxeff evals spin) ((listof (productof (1 symbol) (2 exp)) finite) env) (listof (pairof symbol val @v) @v))
+  (eval-fields (subr (maxeff (read @globals) evals spin) ((listof (productof (1 symbol) (2 exp)) finite) env) (listof (pairof symbol val @v) @v))
     (lambda (fs e)
       (if (null? fs)
           nil
           (let ((v (eval (extract (car fs) 2) e)))
             (cons (cons (extract (car fs) 1) v) (eval-fields (cdr fs) e))))))
   (eval-tagcase
-    (subr (maxeff evals spin) (val (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) (listof (productof (1 symbol) (2 exp)) finite) env) val)
+    (subr (maxeff (read @globals) evals spin) (val (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) (listof (productof (1 symbol) (2 exp)) finite) env) val)
     (lambda (s arms els e)
       (tagcase s
         (v-sum (tag v)
-          (letrec ((try (subr (maxeff evals spin) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite)) val)
+          (letrec ((try (subr (maxeff (read @globals) evals spin) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite)) val)
                      (lambda (as)
                        (cond ((null? as)
                               (if (null? els)
@@ -367,36 +367,36 @@
 
 ;;; ------------------------------------------------------------- programs
 
-(define bound? (subr (maxeff (read @v) spin) (env symbol) bool)
+(define bound? (subr (maxeff (read @globals) (read @v) spin) (env symbol) bool)
   (lambda (e n) (and (not (null? e)) (or (symbol=? (car (car e)) n) (bound? (cdr e) n)))))
 
 ;; Names whose next definition keeps the cell they have: definitions that
 ;; assign their globals (`checked-tops`, under redefinition).
 (define ev-keep (ref (listof symbol finite) @v) (new nil))
-(define ev-kept? (subr pure ((listof symbol finite) symbol) bool)
+(define ev-kept? (subr (read @globals) ((listof symbol finite) symbol) bool)
   (lambda (ks n) (and (not (null? ks)) (or (symbol=? (car ks) n) (ev-kept? (cdr ks) n)))))
-(define ev-unkeep (subr pure ((listof symbol finite) symbol) (listof symbol finite))
+(define ev-unkeep (subr (read @globals) ((listof symbol finite) symbol) (listof symbol finite))
   (lambda (ks n)
     (cond ((null? ks) ks)
           ((symbol=? (car ks) n) (ev-unkeep (cdr ks) n))
           (else (the (listof symbol finite) (cons (car ks) (ev-unkeep (cdr ks) n)))))))
-(define ev-new-global (subr (maxeff (read @v) (write @v) (alloc @v)) (symbol) (bloblet (fields val) @v))
+(define ev-new-global (subr (maxeff (read @globals) (read @v) (write @v) (alloc @v)) (symbol) (bloblet (fields val) @v))
   (lambda (n) (let ((c (cell (v-unit)))) (begin (set genv (cons (cons n c) (get genv))) c))))
 ;; The cell global `n` has; a new one, if it has none.
-(define ev-cell-of (subr (maxeff (read @v) (write @v) (alloc @v) spin) (env symbol) (bloblet (fields val) @v))
+(define ev-cell-of (subr (maxeff (read @globals) (read @v) (write @v) (alloc @v) spin) (env symbol) (bloblet (fields val) @v))
   (lambda (e n)
     (cond ((null? e) (ev-new-global n))
           ((symbol=? (car (car e)) n) (cdr (car e)))
           (else (ev-cell-of (cdr e) n)))))
 ;; The cell a definition of `n` sets: the one it has, if kept; else new.
-(define push-global (subr (maxeff (read @v) (write @v) (alloc @v) spin) (symbol) (bloblet (fields val) @v))
+(define push-global (subr (maxeff (read @globals) (read @v) (write @v) (alloc @v) spin) (symbol) (bloblet (fields val) @v))
   (lambda (n)
     (if (ev-kept? (get ev-keep) n)
         (begin (set ev-keep (ev-unkeep (get ev-keep) n)) (ev-cell-of (get genv) n))
         (ev-new-global n))))
 
 
-(define rec-cells (subr (maxeff (read @v) (write @v) (alloc @v) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof (bloblet (fields val) @v) @v))
+(define rec-cells (subr (maxeff (read @globals) (read @v) (write @v) (alloc @v) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof (bloblet (fields val) @v) @v))
   (lambda (bs) (if (null? bs) nil (let ((c (push-global (extract (car bs) 1)))) (cons c (rec-cells (cdr bs)))))))
 (define rec-fill (subr (maxeff evals spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (bloblet (fields val) @v) @v)) unit)
   (lambda (bs cells)
@@ -405,7 +405,7 @@
         (begin (bloblet-set! (car cells) 0 (eval (extract (car bs) 3) (get genv))) (rec-fill (cdr bs) (cdr cells))))))
 
 ;; Whether `x` is a lambda, under any type abstractions and ascriptions.
-(define lambda-exp? (subr pure (exp) bool)
+(define lambda-exp? (subr (read @globals) (exp) bool)
   (lambda (x)
     (tagcase x
       (e-lambda (ps body a b) #t)
@@ -434,19 +434,19 @@
 (define eval-program (subr (maxeff evals spin) ((listof top finite)) eresult)
   (lambda (tops)
     (prompt eval-tag
-      (letrec ((go (subr (maxeff evals spin) ((listof top finite) val) val)
+      (letrec ((go (subr (maxeff (read @globals) evals spin) ((listof top finite) val) val)
                  (lambda (ts last)
                    (if (null? ts) last (let ((v (eval-top (car ts)))) (go (cdr ts) (tagcase (car ts) (t-exp (x) v) (else y last))))))))
         (ev-ok (go tops (v-unit))))
       (lambda (r) r))))
 
 ;; Before a run that assigns its names' globals: each keeps its cell.
-(define ev-keep-names (subr (maxeff (read @v) (write @v)) (top) unit)
+(define ev-keep-names (subr (maxeff (read @globals) (read @v) (write @v)) (top) unit)
   (lambda (t)
     (tagcase t
       (t-define (n ty x a b) (set ev-keep (the (listof symbol finite) (cons n (get ev-keep)))))
       (t-define-rec (bs a b)
-        (letrec ((go (subr (maxeff (read @v) (write @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) unit)
+        (letrec ((go (subr (maxeff (read @globals) (read @v) (write @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) unit)
                    (lambda (bs) (if (null? bs) #u (begin (set ev-keep (the (listof symbol finite) (cons (extract (car bs) 1) (get ev-keep)))) (go (cdr bs)))))))
           (go bs)))
       (else y #u))))
@@ -456,7 +456,7 @@
 (define eval-runs (subr (maxeff evals spin) ((listof k-run finite)) eresult)
   (lambda (runs)
     (prompt eval-tag
-      (letrec ((go (subr (maxeff evals spin) ((listof k-run finite) val) val)
+      (letrec ((go (subr (maxeff (read @globals) evals spin) ((listof k-run finite) val) val)
                  (lambda (rs last)
                    (if (null? rs)
                        last
@@ -467,7 +467,7 @@
         (ev-ok (go runs (v-unit))))
       (lambda (r) r))))
 
-(define length-pairs (subr (maxeff (read @v) spin) ((listof (pairof symbol val @v) @v)) int)
+(define length-pairs (subr (maxeff (read @globals) (read @v) spin) ((listof (pairof symbol val @v) @v)) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (length-pairs (cdr xs))))))
 
 ;;; --------------------------------------------------------------- showing
@@ -478,9 +478,9 @@
 ;; has fuel: past it, `…`. The car of a pair gets half what is left, so a
 ;; cycle through cars and cdrs alike stays bounded too.
 (define-rec
-  (show-val (subr (maxeff (read @v) spin) (val) string)
+  (show-val (subr (maxeff (read @globals) (read @v) spin) (val) string)
     (lambda (v) (show-val-in v 10000)))
-  (show-val-in (subr (maxeff (read @v) spin) (val int) string)
+  (show-val-in (subr (maxeff (read @globals) (read @v) spin) (val int) string)
     (lambda (v fuel)
       (tagcase v
         (v-int (n) (int->string n))
@@ -507,7 +507,7 @@
         (v-esc (k) "#<continuation>")
         (v-key (k) "#<mark-key>"))))
   ;; A list's elements, space-separated, and a dotted tail.
-  (show-items (subr (maxeff (read @v) spin) ((bloblet (fields val val) @v) int) string)
+  (show-items (subr (maxeff (read @globals) (read @v) spin) ((bloblet (fields val val) @v) int) string)
     (lambda (p fuel)
       (let ((head (show-val-in (bloblet-ref p 0) (quotient fuel 2))) (tail (bloblet-ref p 1)))
         (tagcase tail

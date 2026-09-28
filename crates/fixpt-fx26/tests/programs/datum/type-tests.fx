@@ -3,17 +3,17 @@
 ;;; string, a long one (a large object), a symbol, a pair, the empty list,
 ;;; a vector and a bytevector. Each datum gives five bits; and symbols'
 ;;; hashes, which register code reads from the symbol.
-(define doubled (subr spin (string int) string)
+(define* doubled (subr spin (string int) string)
   (lambda (s n) (if (= n 0) s (doubled (string-append s s) (- n 1)))))
 (define bit (subr pure (bool int) int) (lambda (b v) (if b v 0)))
-(define kinds (subr pure (datum) int)
+(define* kinds (subr pure (datum) int)
   (lambda (d)
     (+ (bit (datum-int? d) 1)
        (+ (bit (datum-char? d) 2)
           (+ (bit (datum-bool? d) 4) (+ (bit (datum-string? d) 8) (bit (datum-symbol? d) 16)))))))
-(define all (subr spin (datum int) int)
+(define* all (subr spin (datum int) int)
   (lambda (ds acc) (if (datum-null? ds) acc (all (datum-cdr ds) (+ (* acc 32) (kinds (datum-car ds)))))))
-(define some (subr spin () datum)
+(define* some (subr spin () datum)
   (lambda ()
     (datum-cons (datum-int 7)
      (datum-cons (datum-char #\a)

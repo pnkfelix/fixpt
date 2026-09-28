@@ -1,7 +1,7 @@
 ;;; A lemma between two generative types of the same shape.
 (define-generative (tree (a type)) (sumof (leaf a) (node (productof (l (tree a)) (r (tree a))))))
 (define-generative (tree2 (a type)) (sumof (leaf a) (node (productof (l (tree2 a)) (r (tree2 a))))))
-(define t2 (proves (poly ((a type)) (<= (tree a) (tree2 a))))
+(define* t2 (proves (poly ((a type)) (<= (tree a) (tree2 a))))
   (lambda (t) (up-tree2 (tagcase (down-tree t) (leaf x (sum leaf x)) (node (l r) (sum node (product (l (t2 l)) (r (t2 r)))))))))
 (define one (tree int) (up-tree (sum leaf 1)))
 (define two (tree2 int) one)

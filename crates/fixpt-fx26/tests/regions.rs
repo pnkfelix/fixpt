@@ -34,7 +34,7 @@ fn what_happens_in_a_region_is_masked() {
     );
     assert_eq!(
         check("(define add-to (subr pure (int) int) (lambda (n) (letreap r (let ((b (the (ref int r) (new 0)))) (begin (set b (+ (get b) n)) (get b)))))) (add-to 41)"),
-        Ok(vec!["int ! pure".to_string()])
+        Ok(vec!["int ! (read (globals add-to))".to_string()])
     );
 }
 
@@ -78,7 +78,7 @@ fn a_region_is_a_value_to_allocate_in() {
     assert!(e.as_ref().is_err_and(|m| m.contains("would outlive its region")), "{e:?}");
     assert_eq!(
         check("(define f (subr pure (int) int) (lambda (n) (letrena r (let ((k (lambda ((x int)) (the (listof int r) (rcons r x nil))))) (car (k n)))))) (f 3)"),
-        Ok(vec!["int ! pure".to_string()])
+        Ok(vec!["int ! (read (globals f))".to_string()])
     );
 }
 

@@ -8,6 +8,6 @@
                (add-up (subr (maxeff (read r) spin) ((listof int r) int) int)
                  (lambda (xs acc) (if (null? xs) acc (add-up (cdr xs) (+ acc (car xs)))))))
         (add-up (iota n nil) 0)))))
-(define rounds (subr spin (int int) int)
+(define* rounds (subr spin (int int) int)
   (lambda (k acc) (if (= k 0) acc (rounds (- k 1) (+ acc (one-round 1000))))))
 (rounds 3000 0)

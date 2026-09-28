@@ -1,5 +1,5 @@
 (define f (subr pure (int) int) (lambda (x) (+ x 1)))
-(define g (subr pure (int) int) (lambda (x) (* 2 (f x))))
+(define* g (subr pure (int) int) (lambda (x) (* 2 (f x))))
 (g 1)
 (define f (subr pure (int) int) (lambda (x) (+ x 100)))
 (g 1)

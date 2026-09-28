@@ -22,7 +22,7 @@
 (private-regions @t @z)
 
 ;; The checker's state, and everything checking may do.
-(define-effect kstate (maxeff (read @t) (write @t) (alloc @t)))
+(define-effect kstate (maxeff (read @globals) (read @t) (write @t) (alloc @t)))
 (define-effect checks (maxeff (read @s) kstate (goto @z)))
 
 ;;; ------------------------------------------------------------ descriptions
@@ -169,32 +169,32 @@
 
 (define k-cat3 (subr pure (string string string) string)
   (lambda (a b c) (string-append a (string-append b c))))
-(define k-cat4 (subr pure (string string string string) string)
+(define k-cat4 (subr (read @globals) (string string string string) string)
   (lambda (a b c d) (string-append a (k-cat3 b c d))))
-(define k-cat5 (subr pure (string string string string string) string)
+(define k-cat5 (subr (read @globals) (string string string string string) string)
   (lambda (a b c d e) (string-append a (k-cat4 b c d e))))
-(define k-quote (subr pure (string) string) (lambda (n) (k-cat3 "`" n "`")))
+(define k-quote (subr (read @globals) (string) string) (lambda (n) (k-cat3 "`" n "`")))
 
-(define k-join (subr (read @t) ((listof string finite) string) string)
+(define k-join (subr (maxeff (read @globals) (read @t)) ((listof string finite) string) string)
   (lambda (xs sep)
     (cond ((null? xs) "")
           ((null? (cdr xs)) (car xs))
           (else (k-cat3 (car xs) sep (k-join (cdr xs) sep))))))
 
-(define k-starts-at? (subr spin (string string int int) bool)
+(define k-starts-at? (subr (maxeff (read @globals) spin) (string string int int) bool)
   (lambda (s sub at i)
     (cond ((= i (string-length sub)) #t)
           ((>= (+ at i) (string-length s)) #f)
           ((char=? (string-ref s (+ at i)) (string-ref sub i)) (k-starts-at? s sub at (+ i 1)))
           (else #f))))
 ;; Where `sub` first starts in `s` from `at`, or -1.
-(define k-find-sub (subr spin (string string int) int)
+(define k-find-sub (subr (maxeff (read @globals) spin) (string string int) int)
   (lambda (s sub at)
     (cond ((> (+ at (string-length sub)) (string-length s)) -1)
           ((k-starts-at? s sub at 0) at)
           (else (k-find-sub s sub (+ at 1))))))
 
-(define k-str-cmp (subr spin (string string int) int)
+(define k-str-cmp (subr (maxeff (read @globals) spin) (string string int) int)
   (lambda (a b i)
     (cond ((= i (string-length a)) (if (= i (string-length b)) 0 -1))
           ((= i (string-length b)) 1)
@@ -207,16 +207,16 @@
 
 ;; Over finite lists, which every list here is: so they end.
 (define k-length
-  (poly ((t type)) (subr pure ((listof t finite)) int))
+  (poly ((t type)) (subr (read @globals) ((listof t finite)) int))
   (plambda ((t type))
     (lambda ((xs (listof t finite))) (if (null? xs) 0 (+ 1 (k-length (cdr xs)))))))
 (define k-nth
-  (poly ((t type)) (subr pure ((listof t finite) int) t))
+  (poly ((t type)) (subr (read @globals) ((listof t finite) int) t))
   (plambda ((t type))
     (lambda ((xs (listof t finite)) (i int)) (if (= i 0) (car xs) (k-nth (cdr xs) (- i 1))))))
-(define k-has-name? (subr (read @t) (k-names symbol) bool)
+(define k-has-name? (subr (maxeff (read @globals) (read @t)) (k-names symbol) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((symbol=? (car xs) s) #t) (else (k-has-name? (cdr xs) s)))))
-(define k-has-id? (subr (read @t) (k-ids int) bool)
+(define k-has-id? (subr (maxeff (read @globals) (read @t)) (k-ids int) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((= (car xs) s) #t) (else (k-has-id? (cdr xs) s)))))
 
 ;;; ------------------------------------------------------------ the arena
@@ -224,7 +224,7 @@
 (define k-tys (ref (arrayof k-ty @t) @t) (new (make-array 512 (ty-void))))
 (define k-ntys (ref int @t) (new 0))
 
-(define k-copy-tys (subr (maxeff (read @t) (write @t) spin) ((arrayof k-ty @t) (arrayof k-ty @t) int) unit)
+(define k-copy-tys (subr (maxeff (read @globals) (read @t) (write @t) spin) ((arrayof k-ty @t) (arrayof k-ty @t) int) unit)
   (lambda (from to i)
     (if (= i (array-length from))
         #u
@@ -242,11 +242,11 @@
         (set k-ntys (+ n 1))
         n))))
 
-(define k-raw (subr (read @t) (int) k-ty) (lambda (id) (array-ref (get k-tys) id)))
+(define k-raw (subr (maxeff (read @globals) (read @t)) (int) k-ty) (lambda (id) (array-ref (get k-tys) id)))
 ;; Follow forwarding links to the type itself.
-(define k-resolve (subr (maxeff (read @t) spin) (int) int)
+(define k-resolve (subr (maxeff (read @globals) (read @t) spin) (int) int)
   (lambda (id) (tagcase (k-raw id) (ty-link (to) (if (null? to) id (k-resolve (car to)))) (else x id))))
-(define k-get (subr (maxeff (read @t) spin) (int) k-ty) (lambda (id) (k-raw (k-resolve id))))
+(define k-get (subr (maxeff (read @globals) (read @t) spin) (int) k-ty) (lambda (id) (k-raw (k-resolve id))))
 (define k-set-link (subr kstate (int int) unit)
   (lambda (slot to) (array-set! (get k-tys) slot (ty-link (cons to nil)))))
 (define k-slot (subr (maxeff kstate spin) () int) (lambda () (k-ty-new (ty-link nil))))
@@ -257,7 +257,7 @@
 (define k-epoch (ref int @t) (new 0))
 (define k-new-epoch (subr kstate () int)
   (lambda () (begin (set k-epoch (+ (get k-epoch) 1)) (get k-epoch))))
-(define n-copy-marks (subr (maxeff (read @t) (write @t) spin) ((arrayof int @t) (arrayof int @t) int) unit)
+(define n-copy-marks (subr (maxeff (read @globals) (read @t) (write @t) spin) ((arrayof int @t) (arrayof int @t) int) unit)
   (lambda (from to i)
     (if (= i (array-length from)) #u (begin (array-set! to i (array-ref from i)) (n-copy-marks from to (+ i 1))))))
 ;; Whether walk `e` has seen `t` already; if not, it has now.
@@ -298,9 +298,9 @@
              (if (= kind 4) (set k-datas (cons v (get k-datas))) #u)
              v))))
 ;; Which description variables are of kind `data`.
-(define k-data-var? (subr (read @t) (int) bool)
+(define k-data-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-datas) v)))
-(define k-place-var? (subr (read @t) (int) bool)
+(define k-place-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-places) v)))
 ;; Each bounded region binder's bound: `(r region p)`, a region that won't
 ;; outlive `p` (`docs/research/places-and-regions.md`).
@@ -326,7 +326,7 @@
 (define-type k-gen (productof (1 symbol) (2 k-binders) (3 k-ids) (4 int)))
 (define k-gens (ref (listof k-gen finite) @t) (new nil))
 (define k-ngens (ref int @t) (new 0))
-(define k-gen-of (subr (read @t) (int) k-gen) (lambda (g) (k-nth (get k-gens) (- (- (get k-ngens) 1) g))))
+(define k-gen-of (subr (maxeff (read @globals) (read @t)) (int) k-gen) (lambda (g) (k-nth (get k-gens) (- (- (get k-ngens) 1) g))))
 ;; The generative types whose insides the definition being checked may see;
 ;; the definitions still to come that may see inside one; and the bindings
 ;; of their conversions, which are the identity.
@@ -340,44 +340,44 @@
 (define-type k-lemma (productof (1 k-binders) (2 int) (3 int) (4 k-hyps) (5 k-named)))
 (define k-lemmas (ref (listof k-lemma finite) @t) (new nil))
 (define k-pending-lemma (ref (listof k-lemma finite) @t) (new nil))
-(define k-binder-has? (subr (read @t) (k-binders int) bool)
+(define k-binder-has? (subr (maxeff (read @globals) (read @t)) (k-binders int) bool)
   (lambda (bs v) (and (not (null? bs)) (or (= (extract (car bs) 1) v) (k-binder-has? (cdr bs) v)))))
 ;; Whether `v` is a generative type's parameter, and `r` one or frozen into one.
-(define k-gen-param? (subr (read @t) (int) bool)
+(define k-gen-param? (subr (maxeff (read @globals) (read @t)) (int) bool)
   (lambda (v)
-    (letrec ((in-binders (subr (read @t) (k-binders) bool)
+    (letrec ((in-binders (subr (maxeff (read @globals) (read @t)) (k-binders) bool)
                          (lambda (bs) (and (not (null? bs)) (or (= (extract (car bs) 1) v) (in-binders (cdr bs))))))
-             (in-gens (subr (read @t) ((listof k-gen finite)) bool)
+             (in-gens (subr (maxeff (read @globals) (read @t)) ((listof k-gen finite)) bool)
                       (lambda (gs) (and (not (null? gs)) (or (in-binders (extract (car gs) 2)) (in-gens (cdr gs)))))))
       (in-gens (get k-gens)))))
 ;; The types among descriptions, and the regions.
-(define k-desc-types (subr (alloc @t) ((listof k-desc finite)) k-ids)
+(define k-desc-types (subr (maxeff (read @globals) (alloc @t)) ((listof k-desc finite)) k-ids)
   (lambda (ds)
     (if (null? ds) nil (let ((rest (k-desc-types (cdr ds)))) (tagcase (car ds) (dt (x) (the k-ids (cons x rest))) (else y rest))))))
-(define k-desc-regions (subr (alloc @t) ((listof k-desc finite)) (listof k-region finite))
+(define k-desc-regions (subr (maxeff (read @globals) (alloc @t)) ((listof k-desc finite)) (listof k-region finite))
   (lambda (ds)
     (if (null? ds)
         nil
         (let ((rest (k-desc-regions (cdr ds)))) (tagcase (car ds) (dr (r) (the (listof k-region finite) (cons r rest))) (else y rest))))))
-(define k-gen-region? (subr (read @t) (k-region) bool)
+(define k-gen-region? (subr (maxeff (read @globals) (read @t)) (k-region) bool)
   (lambda (r) (tagcase r (r-var (v) (k-gen-param? v)) (r-frozen (p f) (and (>= p 0) (k-gen-param? p))) (else x #f))))
 ;; Why each member of a recursive group that may not end may not.
 (define k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) finite) @t) (new nil))
-(define k-named-has? (subr (read @t) (k-named symbol int) bool)
+(define k-named-has? (subr (maxeff (read @globals) (read @t)) (k-named symbol int) bool)
   (lambda (ns n t) (and (not (null? ns)) (or (and (symbol=? (car (car ns)) n) (= (cdr (car ns)) t)) (k-named-has? (cdr ns) n t)))))
-(define k-bound-of (subr (maxeff (read @t) (alloc @t)) (int) (listof k-region finite))
+(define k-bound-of (subr (maxeff (read @globals) (read @t) (alloc @t)) (int) (listof k-region finite))
   (lambda (v)
-    (letrec ((find (subr (maxeff (read @t) (alloc @t)) ((listof (pairof int k-region @t) finite)) (listof k-region finite))
+    (letrec ((find (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (pairof int k-region @t) finite)) (listof k-region finite))
                (lambda (xs) (cond ((null? xs) nil) ((= (car (car xs)) v) (the (listof k-region finite) (cons (cdr (car xs)) nil))) (else (find (cdr xs)))))))
       (find (get k-bounds)))))
-(define k-outer-of (subr (read @t) (int) k-ids)
+(define k-outer-of (subr (maxeff (read @globals) (read @t)) (int) k-ids)
   (lambda (v)
-    (letrec ((find (subr (read @t) ((listof (pairof int k-ids @t) finite)) k-ids)
+    (letrec ((find (subr (maxeff (read @globals) (read @t)) ((listof (pairof int k-ids @t) finite)) k-ids)
                (lambda (xs) (cond ((null? xs) nil) ((= (car (car xs)) v) (cdr (car xs))) (else (find (cdr xs)))))))
       (find (get k-outers)))))
 (define k-set-outer (subr kstate (int k-ids) unit)
   (lambda (v outer) (set k-outers (cons (cons v outer) (get k-outers)))))
-(define k-dvar-name (subr (read @t) (int) symbol)
+(define k-dvar-name (subr (maxeff (read @globals) (read @t)) (int) symbol)
   (lambda (v) (k-nth (get k-dvars) (- (- (get k-ndvars) 1) v))))
 
 ;; The base types, made first, in this order, so their indexes are known.
@@ -396,7 +396,7 @@
 
 ;; Bindings, as lists of them are passed around.
 (define-type k-bindings (listof (pairof symbol int @t) finite))
-(define k-find (subr (read @t) (k-bindings symbol) int)
+(define k-find (subr (maxeff (read @globals) (read @t)) (k-bindings symbol) int)
   (lambda (bs s)
     (cond ((null? bs) -1) ((symbol=? (car (car bs)) s) (cdr (car bs))) (else (k-find (cdr bs) s)))))
 
@@ -420,12 +420,12 @@
 ;; `k-globals-effects` says so, as the language will once every program
 ;; says what it reads (off until then).
 (define k-global (ref (table symbol (listof bool finite) @t) @t) (new (make-table symbol-hash symbol=?)))
-(define k-globals-effects (ref bool @t) (new #f))
+(define k-globals-effects (ref bool @t) (new #t))
 ;; The latent effect of the lambda checked last: for `define*`, what the
 ;; globals its lambda reads are.
 (define k-last-latent (ref k-eff @t) (new nil))
 ;; For a driver: whether naming a global reads it.
-(define check-globals-effects! (subr (write @t) (bool) unit) (lambda (on) (set k-globals-effects on)))
+(define check-globals-effects! (subr (maxeff (read @globals) (write @t)) (bool) unit) (lambda (on) (set k-globals-effects on)))
 ;; The type `s` is bound to, or -1.
 ;; Globals broken by a redefinition (`k-defining`): the name, how many
 ;; bindings it had then (so which one is broken), and why. A use of a broken
@@ -433,13 +433,13 @@
 (define-type k-break (productof (1 symbol) (2 int) (3 string)))
 (define k-broken (ref (listof k-break finite) @t) (new nil))
 ;; How many bindings `s` has now.
-(define k-name-depth (subr (maxeff (read @t) spin) (symbol) int)
+(define k-name-depth (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s) (k-length (table-ref (get k-env) s nil))))
 ;; Why `s`'s binding now is broken, if it is.
-(define k-broken-why (subr (maxeff (read @t) spin) (symbol) (listof string finite))
+(define k-broken-why (subr (maxeff (read @globals) (read @t) spin) (symbol) (listof string finite))
   (lambda (s)
     (let ((d (k-name-depth s)))
-      (letrec ((go (subr pure ((listof k-break finite)) (listof string finite))
+      (letrec ((go (subr (read @globals) ((listof k-break finite)) (listof string finite))
                  (lambda (bs)
                    (cond ((null? bs) nil)
                          ((and (symbol=? (extract (car bs) 1) s) (= (extract (car bs) 2) d)) (the (listof string finite) (cons (extract (car bs) 3) nil)))
@@ -447,15 +447,15 @@
         (go (get k-broken))))))
 ;; What `s` is where it is used: its innermost binding; none, if that is
 ;; broken.
-(define k-lookup (subr (maxeff (read @t) spin) (symbol) int)
+(define k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s)
     (let ((st (table-ref (get k-env) s nil)))
       (if (or (null? st) (not (null? (k-broken-why s)))) -1 (car st)))))
 ;; The same, broken or not.
-(define k-lookup-raw (subr (maxeff (read @t) spin) (symbol) int)
+(define k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))
 ;; What an unbound name's use says: why, if it is broken.
-(define k-unbound (subr (maxeff (read @t) (alloc @t) spin) (symbol) string)
+(define k-unbound (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (symbol) string)
   (lambda (s)
     (let ((why (k-broken-why s)))
       (if (null? why)
@@ -469,7 +469,7 @@
       (table-set! (get k-global) s (the (listof bool finite) (cons #f (table-ref (get k-global) s nil))))
       (set k-trail (cons s (get k-trail)))
       (set k-depth (+ (get k-depth) 1)))))
-(define k-mark (subr (read @t) () int) (lambda () (get k-depth)))
+(define k-mark (subr (maxeff (read @globals) (read @t)) () int) (lambda () (get k-depth)))
 (define k-unbind-to (subr (maxeff kstate spin) (int) unit)
   (lambda (m)
     (if (<= (get k-depth) m)
@@ -484,7 +484,7 @@
             (k-unbind-to m))))))
 
 ;; Note the binding of `n` that many from the innermost as known.
-(define k-set-nth-true (subr pure ((listof bool finite) int) (listof bool finite))
+(define k-set-nth-true (subr (read @globals) ((listof bool finite) int) (listof bool finite))
   (lambda (bs i)
     (cond ((null? bs) bs)
           ((= i 0) (the (listof bool finite) (cons #t (cdr bs))))
@@ -492,7 +492,7 @@
 (define k-note-known (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n i) (table-set! (get k-known) n (k-set-nth-true (table-ref (get k-known) n nil) i))))
 ;; Whether the binding `n` names is of a known procedure.
-(define k-known? (subr (maxeff (read @t) spin) (symbol) bool)
+(define k-known? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool)
   (lambda (n) (let ((st (table-ref (get k-known) n nil))) (and (not (null? st)) (car st)))))
 ;; Note the innermost binding of `n` as a global.
 (define k-note-global (subr (maxeff kstate spin) (symbol) unit)
@@ -501,17 +501,17 @@
 (define k-bind-global (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (begin (k-bind n t) (k-note-global n))))
 ;; Whether the binding `n` names is a global's.
-(define k-global? (subr (maxeff (read @t) spin) (symbol) bool)
+(define k-global? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool)
   (lambda (n) (let ((st (table-ref (get k-global) n nil))) (and (not (null? st)) (car st)))))
 
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) finite))
 (define k-dscope (ref k-scope @t) (new nil))
-(define k-find-desc (subr (maxeff (read @t) (alloc @t)) (k-scope symbol) (listof k-ds finite))
+(define k-find-desc (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-scope symbol) (listof k-ds finite))
   (lambda (ds s)
     (cond ((null? ds) nil) ((symbol=? (car (car ds)) s) (cons (cdr (car ds)) nil)) (else (k-find-desc (cdr ds) s)))))
 ;; What `s` means as a description: none or one.
-(define k-lookup-desc (subr (maxeff (read @t) (alloc @t)) (symbol) (listof k-ds finite))
+(define k-lookup-desc (subr (maxeff (read @globals) (read @t) (alloc @t)) (symbol) (listof k-ds finite))
   (lambda (s) (k-find-desc (get k-dscope) s)))
 (define k-push-desc (subr kstate (symbol k-ds) unit)
   (lambda (n d) (set k-dscope (cons (cons n d) (get k-dscope)))))
@@ -530,13 +530,13 @@
 ;; position, keyed by where the `extract` is. Only the product's type says.
 (define-type k-facts (listof (productof (1 int) (2 int) (3 int)) finite))
 (define k-extracts (ref k-facts @t) (new nil))
-(define checked-extracts (subr (read @t) () k-facts) (lambda () (get k-extracts)))
+(define checked-extracts (subr (maxeff (read @globals) (read @t)) () k-facts) (lambda () (get k-extracts)))
 
 ;;; ------------------------------------------------------------ effects
 
 (define k-region-rank (subr pure (k-region) int)
   (lambda (r) (tagcase r (r-const (n) 0) (r-fresh (i n) 1) (r-var (v) 2) (r-frozen (p f) 3) (r-heap () 4) (r-global (g) 5) (r-globals () 6))))
-(define k-region-cmp (subr spin (k-region k-region) int)
+(define k-region-cmp (subr (maxeff (read @globals) spin) (k-region k-region) int)
   (lambda (r s)
     (let ((c (k-int-cmp (k-region-rank r) (k-region-rank s))))
       (if (= c 0)
@@ -552,76 +552,76 @@
             (r-global (g) (tagcase s (r-global (h) (k-str-cmp (symbol->string g) (symbol->string h) 0)) (else y 0)))
             (r-globals () 0))
           c))))
-(define k-region=? (subr spin (k-region k-region) bool) (lambda (r s) (= (k-region-cmp r s) 0)))
+(define k-region=? (subr (maxeff (read @globals) spin) (k-region k-region) bool) (lambda (r s) (= (k-region-cmp r s) 0)))
 
 (define k-atom-rank (subr pure (k-atom) int)
   (lambda (a) (tagcase a (a-read (r) 0) (a-write (r) 1) (a-alloc (r) 2) (a-goto (r) 3) (a-comefrom (r) 4) (a-await (r) 5) (a-spin () 6) (a-var (v) 7))))
 ;; The atom's region; a variable's is none, shown as a binder -1.
-(define k-atom-region (subr pure (k-atom) k-region)
+(define k-atom-region (subr (read @globals) (k-atom) k-region)
   (lambda (a)
     (tagcase a (a-read (r) r) (a-write (r) r) (a-alloc (r) r) (a-goto (r) r) (a-comefrom (r) r) (a-await (r) r) (a-spin () (r-var -1)) (a-var (v) (r-var -1)))))
-(define k-has-region? (subr pure (k-atom) bool) (lambda (a) (< (k-atom-rank a) 6)))
-(define k-atom-cmp (subr spin (k-atom k-atom) int)
+(define k-has-region? (subr (read @globals) (k-atom) bool) (lambda (a) (< (k-atom-rank a) 6)))
+(define k-atom-cmp (subr (maxeff (read @globals) spin) (k-atom k-atom) int)
   (lambda (a b)
     (let ((c (k-int-cmp (k-atom-rank a) (k-atom-rank b))))
       (cond ((not (= c 0)) c)
             ((k-has-region? a) (k-region-cmp (k-atom-region a) (k-atom-region b)))
             (else (tagcase a (a-var (v) (tagcase b (a-var (w) (k-int-cmp v w)) (else y 0))) (else y 0)))))))
-(define k-atom-with (subr pure (k-atom k-region) k-atom)
+(define k-atom-with (subr (read @globals) (k-atom k-region) k-atom)
   (lambda (a r)
     (tagcase a (a-read (x) (a-read r)) (a-write (x) (a-write r)) (a-alloc (x) (a-alloc r))
       (a-goto (x) (a-goto r)) (a-comefrom (x) (a-comefrom r)) (a-await (x) (a-await r)) (a-spin () a) (a-var (v) a))))
 
-(define k-insert (subr (maxeff (read @t) (alloc @t) spin) (k-atom k-eff) k-eff)
+(define k-insert (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-atom k-eff) k-eff)
   (lambda (a e)
     (if (null? e)
         (cons a nil)
         (let ((c (k-atom-cmp a (car e))))
           (cond ((< c 0) (cons a e)) ((= c 0) e) (else (cons (car e) (k-insert a (cdr e)))))))))
-(define k-union (subr (maxeff (read @t) (alloc @t) spin) (k-eff k-eff) k-eff)
+(define k-union (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-eff) k-eff)
   (lambda (x y) (if (null? x) y (k-union (cdr x) (k-insert (car x) y)))))
-(define k-contains? (subr (maxeff (read @t) spin) (k-eff k-atom) bool)
+(define k-contains? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool)
   (lambda (e a) (cond ((null? e) #f) ((= (k-atom-cmp (car e) a) 0) #t) (else (k-contains? (cdr e) a)))))
 ;; Whether `a` is in `e`, or, reading or writing one global, `e` does so to
 ;; `@globals`.
-(define k-covered? (subr (maxeff (read @t) spin) (k-eff k-atom) bool)
+(define k-covered? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool)
   (lambda (e a)
     (or (k-contains? e a)
         (tagcase a
           (a-read (r) (tagcase r (r-global (g) (k-contains? e (a-read (r-globals)))) (else y #f)))
           (a-write (r) (tagcase r (r-global (g) (k-contains? e (a-write (r-globals)))) (else y #f)))
           (else y #f)))))
-(define k-within? (subr (maxeff (read @t) spin) (k-eff k-eff) bool)
+(define k-within? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool)
   (lambda (x y) (or (null? x) (and (k-covered? y (car x)) (k-within? (cdr x) y)))))
-(define k-eff=? (subr (maxeff (read @t) spin) (k-eff k-eff) bool) (lambda (x y) (and (k-within? x y) (k-within? y x))))
+(define k-eff=? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool) (lambda (x y) (and (k-within? x y) (k-within? y x))))
 (define k-one (subr (alloc @t) (k-atom) k-eff) (lambda (a) (cons a nil)))
-(define k-allocates? (subr (read @t) (k-eff) bool)
+(define k-allocates? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
   (lambda (e) (cond ((null? e) #f) ((= (k-atom-rank (car e)) 2) #t) (else (k-allocates? (cdr e))))))
 
 ;;; ------------------------------------------------------------ printing
 
-(define k-region-show (subr (read @t) (k-region) string)
+(define k-region-show (subr (maxeff (read @globals) (read @t)) (k-region) string)
   (lambda (r) (tagcase r (r-const (n) (symbol->string n)) (r-fresh (i n) n) (r-var (v) (symbol->string (k-dvar-name v))) (r-frozen (p f)
                   (let ((word (if f "finite" "const")))
                     (if (< p 0) word (k-cat5 "(" word " " (symbol->string (k-dvar-name p)) ")")))) (r-heap () "heap")
                   (r-global (g) (k-cat3 "(globals " (symbol->string g) ")")) (r-globals () "@globals"))))
-(define k-atom-show (subr (read @t) (k-atom) string)
+(define k-atom-show (subr (maxeff (read @globals) (read @t)) (k-atom) string)
   (lambda (a)
-    (letrec ((one (subr (read @t) (string k-region) string) (lambda (op r) (k-cat5 "(" op " " (k-region-show r) ")"))))
+    (letrec ((one (subr (maxeff (read @globals) (read @t)) (string k-region) string) (lambda (op r) (k-cat5 "(" op " " (k-region-show r) ")"))))
       (tagcase a
         (a-read (r) (one "read" r)) (a-write (r) (one "write" r)) (a-alloc (r) (one "alloc" r))
         (a-goto (r) (one "goto" r)) (a-comefrom (r) (one "comefrom" r)) (a-await (r) (one "await" r))
         (a-spin () "spin")
         (a-var (v) (symbol->string (k-dvar-name v)))))))
-(define k-atoms-show (subr (read @t) (k-eff) string)
+(define k-atoms-show (subr (maxeff (read @globals) (read @t)) (k-eff) string)
   (lambda (e) (if (null? e) "" (string-append (string-append " " (k-atom-show (car e))) (k-atoms-show (cdr e))))))
-(define k-strings-append (subr pure ((listof string finite) (listof string finite)) (listof string finite))
+(define k-strings-append (subr (read @globals) ((listof string finite) (listof string finite)) (listof string finite))
   (lambda (xs ys) (if (null? xs) ys (the (listof string finite) (cons (car xs) (k-strings-append (cdr xs) ys))))))
-(define k-strings-spaced (subr pure ((listof string finite)) string)
+(define k-strings-spaced (subr (read @globals) ((listof string finite)) string)
   (lambda (xs) (if (null? xs) "" (string-append (string-append " " (car xs)) (k-strings-spaced (cdr xs))))))
 ;; The names of the globals `e` reads (`op` 0) or writes (1), in order, each
 ;; after a space.
-(define k-globals-shown (subr (read @t) (k-eff int) string)
+(define k-globals-shown (subr (maxeff (read @globals) (read @t)) (k-eff int) string)
   (lambda (e op)
     (if (null? e)
         ""
@@ -637,22 +637,22 @@
       (a-write (r) (tagcase r (r-global (g) #t) (else y #f)))
       (else y #f))))
 ;; Whether `a` is on globals' bindings, which are never masked.
-(define k-globals-atom? (subr pure (k-atom) bool)
+(define k-globals-atom? (subr (read @globals) (k-atom) bool)
   (lambda (a) (and (k-has-region? a) (tagcase (k-atom-region a) (r-global (g) #t) (r-globals () #t) (else y #f)))))
 ;; The atoms shown, reads, or writes, of several globals being one atom:
 ;; `(read (globals f g))`.
-(define k-atom-strings (subr (read @t) (k-eff) (listof string finite))
+(define k-atom-strings (subr (maxeff (read @globals) (read @t)) (k-eff) (listof string finite))
   (lambda (e)
-    (letrec ((others (subr (read @t) (k-eff) (listof string finite))
+    (letrec ((others (subr (maxeff (read @globals) (read @t)) (k-eff) (listof string finite))
                        (lambda (e)
                          (cond ((null? e) nil)
                                ((k-one-global? (car e)) (others (cdr e)))
                                (else (the (listof string finite) (cons (k-atom-show (car e)) (others (cdr e))))))))
-             (grouped (subr (read @t) (string string) (listof string finite))
+             (grouped (subr (maxeff (read @globals) (read @t)) (string string) (listof string finite))
                         (lambda (op names) (if (string=? names "") nil (the (listof string finite) (cons (k-cat5 "(" op " (globals" names "))") nil))))))
       (k-strings-append (others e) (k-strings-append (grouped "read" (k-globals-shown e 0)) (grouped "write" (k-globals-shown e 1)))))))
 ;; `pure`, a single atom, or `…`.
-(define k-show-effect (subr (read @t) (k-eff) string)
+(define k-show-effect (subr (maxeff (read @globals) (read @t)) (k-eff) string)
   (lambda (e)
     (let ((xs (k-atom-strings e)))
       (cond ((null? xs) "pure")
@@ -662,7 +662,7 @@
 (define k-kind-name (subr pure (int) string)
   (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") ((= k 4) "data") ((= k 5) "size") ((= k 6) "conv") (else "type"))))
 ;; A convention as a program writes it.
-(define k-conv-show (subr (read @t) (k-conv) string)
+(define k-conv-show (subr (maxeff (read @globals) (read @t)) (k-conv) string)
   (lambda (c)
     (tagcase c (cv-cellular () "cellular") (cv-native () "native") (cv-fx () "fx") (cv-var (v) (symbol->string (k-dvar-name v))))))
 ;; The program's convention: what a subroutine type that names none has,
@@ -670,23 +670,23 @@
 ;; driver says otherwise (`--calling-convention`).
 (define k-conv-default (ref k-conv @t) (new (cv-cellular)))
 ;; For a driver: whether the program's convention is native.
-(define check-conv-native! (subr (write @t) (bool) unit)
+(define check-conv-native! (subr (maxeff (read @globals) (write @t)) (bool) unit)
   (lambda (on) (set k-conv-default (if on (cv-native) (cv-cellular)))))
 ;; A convention as a number: one of FX-26's own, or its binder.
 (define k-conv-code (subr pure (k-conv) int)
   (lambda (c) (tagcase c (cv-cellular () -1) (cv-native () -2) (cv-fx () -3) (cv-var (v) v))))
-(define k-conv=? (subr pure (k-conv k-conv) bool)
+(define k-conv=? (subr (read @globals) (k-conv k-conv) bool)
   (lambda (a b) (= (k-conv-code a) (k-conv-code b))))
 ;; As Rust's `{:?}` writes a kind.
 (define k-kind-debug (subr pure (int) string)
   (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") ((= k 3) "Place") ((= k 4) "Data") ((= k 5) "Size") ((= k 6) "Conv") (else "Type"))))
 ;; Whether a region is a place: a variable bound as one.
-(define k-place? (subr (read @t) (k-region) bool)
+(define k-place? (subr (maxeff (read @globals) (read @t)) (k-region) bool)
   (lambda (r) (tagcase r (r-var (v) (k-place-var? v)) (r-heap () #t) (else x #f))))
 
 ;; The name `define-type` gave `t`, innermost first: each name's innermost
 ;; binding only.
-(define k-abbrev-in (subr (maxeff (read @t) (alloc @t) spin) (k-scope k-names int) (listof string finite))
+(define k-abbrev-in (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-scope k-names int) (listof string finite))
   (lambda (ds seen t)
     (if (null? ds)
         nil
@@ -697,7 +697,7 @@
                     ((= (k-resolve d) t) (cons (symbol->string n) nil))
                     (else (k-abbrev-in (cdr ds) (cons n seen) t))))
             (else y (k-abbrev-in (cdr ds) seen t)))))))
-(define k-show-binders (subr (maxeff (read @t) (alloc @t)) (k-binders) (listof string finite))
+(define k-show-binders (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-binders) (listof string finite))
   (lambda (bs)
     (if (null? bs)
         nil
@@ -707,10 +707,10 @@
                 (k-show-binders (cdr bs)))))))
 
 ;; How deep `t` is in `path`, newest first: its place from the root, from 1.
-(define k-depth-of (subr (read @t) (k-ids int) int)
+(define k-depth-of (subr (maxeff (read @globals) (read @t)) (k-ids int) int)
   (lambda (path t) (if (= (car path) t) (k-length path) (k-depth-of (cdr path) t))))
 ;; Whether `name` occurs in `s` as a symbol of its own.
-(define k-mentions-token? (subr spin (string string) bool)
+(define k-mentions-token? (subr (maxeff (read @globals) spin) (string string) bool)
   (lambda (s name)
     (or (>= (k-find-sub s (k-cat3 " " name " ") 0) 0)
         (or (>= (k-find-sub s (k-cat3 " " name ")") 0) 0)
@@ -718,30 +718,30 @@
                 (>= (k-find-sub s (k-cat3 "(" name ")") 0) 0))))))
 ;; Sizes: a literal, `finite`, one more or less, and whether one list's
 ;; size is another's.
-(define k-size-lit (subr pure (int) k-size) (lambda (k) (sz-lin k nil)))
+(define k-size-lit (subr (read @globals) (int) k-size) (lambda (k) (sz-lin k nil)))
 ;; The literal a size is, or -1.
 (define k-size-as-lit (subr pure (k-size) int)
   (lambda (z) (tagcase z (sz-lin (k ts) (if (null? ts) k -1)) (else y -1))))
-(define k-size-plus (subr pure (k-size int) k-size)
+(define k-size-plus (subr (read @globals) (k-size int) k-size)
   (lambda (z d) (tagcase z (sz-lin (k ts) (sz-lin (+ k d) ts)) (else y z))))
-(define k-terms=? (subr pure ((listof (pairof int int finite) finite) (listof (pairof int int finite) finite)) bool)
+(define k-terms=? (subr (read @globals) ((listof (pairof int int finite) finite) (listof (pairof int int finite) finite)) bool)
   (lambda (xs ys)
     (if (null? xs)
         (null? ys)
         (and (not (null? ys)) (= (car (car xs)) (car (car ys))) (= (cdr (car xs)) (cdr (car ys))) (k-terms=? (cdr xs) (cdr ys))))))
-(define k-size=? (subr pure (k-size k-size) bool)
+(define k-size=? (subr (read @globals) (k-size k-size) bool)
   (lambda (a b)
     (tagcase a
       (sz-finite () (tagcase b (sz-finite () #t) (else y #f)))
       (sz-lin (k ts) (tagcase b (sz-lin (k2 ts2) (and (= k k2) (k-terms=? ts ts2))) (else y #f))))))
 
-(define k-map-find (subr (read @t) (k-map int) k-map)
+(define k-map-find (subr (maxeff (read @globals) (read @t)) (k-map int) k-map)
   (lambda (m v) (cond ((null? m) nil) ((= (car (car m)) v) m) (else (k-map-find (cdr m) v)))))
 ;; Linear sizes (`src/sizes.rs`): a variable; `a + c·b`; `v` replaced.
 (define-type k-terms (listof (pairof int int finite) finite))
-(define k-size-var (subr pure (int) k-size) (lambda (v) (sz-lin 0 (the k-terms (cons (cons v 1) nil)))))
+(define k-size-var (subr (read @globals) (int) k-size) (lambda (v) (sz-lin 0 (the k-terms (cons (cons v 1) nil)))))
 ;; `xs + c·ys`, terms in variable order, none zero.
-(define k-terms-add (subr pure (k-terms k-terms int) k-terms)
+(define k-terms-add (subr (read @globals) (k-terms k-terms int) k-terms)
   (lambda (xs ys c)
     (cond ((null? ys) xs)
           ((null? xs) (let ((n (* c (cdr (car ys)))) (rest (k-terms-add xs (cdr ys) c)))
@@ -752,14 +752,14 @@
              (if (= n 0) rest (the k-terms (cons (cons (car (car ys)) n) rest)))))
           (else (let ((n (+ (cdr (car xs)) (* c (cdr (car ys))))) (rest (k-terms-add (cdr xs) (cdr ys) c)))
                   (if (= n 0) rest (the k-terms (cons (cons (car (car xs)) n) rest))))))))
-(define k-size-add-scaled (subr pure (k-size k-size int) k-size)
+(define k-size-add-scaled (subr (read @globals) (k-size k-size int) k-size)
   (lambda (a b c)
     (tagcase a
       (sz-lin (k ts) (tagcase b (sz-lin (k2 ts2) (sz-lin (+ k (* c k2)) (k-terms-add ts ts2 c))) (else y (sz-finite))))
       (else y (sz-finite)))))
-(define k-coef-of (subr pure (k-terms int) int)
+(define k-coef-of (subr (read @globals) (k-terms int) int)
   (lambda (ts v) (cond ((null? ts) 0) ((= (car (car ts)) v) (cdr (car ts))) (else (k-coef-of (cdr ts) v)))))
-(define k-size-replace (subr pure (k-size int k-size) k-size)
+(define k-size-replace (subr (read @globals) (k-size int k-size) k-size)
   (lambda (s v by)
     (tagcase s
       (sz-lin (k ts)
@@ -772,9 +772,9 @@
 (define k-size-facts (ref (listof k-size-fact finite) @t) (new nil))
 ;; `s` with each variable an equality determines rewritten away, oldest
 ;; fact first.
-(define k-reduced (subr (read @t) (k-size) k-size)
+(define k-reduced (subr (maxeff (read @globals) (read @t)) (k-size) k-size)
   (lambda (s)
-    (letrec ((go (subr pure (k-size (listof k-size-fact finite)) k-size)
+    (letrec ((go (subr (read @globals) (k-size (listof k-size-fact finite)) k-size)
                    (lambda (s fs)
                      (if (null? fs)
                          s
@@ -783,7 +783,7 @@
                                    s
                                    (tagcase (extract f 1)
                                      (sz-lin (k ts)
-                                       (letrec ((unit (subr pure (k-terms) k-terms)
+                                       (letrec ((unit (subr (read @globals) (k-terms) k-terms)
                                                       (lambda (xs) (cond ((null? xs) xs)
                                                                          ((or (= (cdr (car xs)) 1) (= (cdr (car xs)) -1)) xs)
                                                                          (else (unit (cdr xs)))))))
@@ -798,17 +798,17 @@
                              (cdr fs))))))
       (go s (the (listof k-size-fact finite) (reverse (get k-size-facts)))))))
 ;; Whether a size is plainly non-negative: every size is a natural.
-(define k-plainly-nonneg? (subr pure (k-size) bool)
+(define k-plainly-nonneg? (subr (read @globals) (k-size) bool)
   (lambda (s)
     (tagcase s
-      (sz-lin (k ts) (and (>= k 0) (letrec ((all (subr pure (k-terms) bool) (lambda (xs) (or (null? xs) (and (>= (cdr (car xs)) 0) (all (cdr xs))))))) (all ts))))
+      (sz-lin (k ts) (and (>= k 0) (letrec ((all (subr (read @globals) (k-terms) bool) (lambda (xs) (or (null? xs) (and (>= (cdr (car xs)) 0) (all (cdr xs))))))) (all ts))))
       (else y #f))))
 ;; Whether the facts show `a ≥ 0`: plainly, or with a fact `f ≥ 0` to spare.
-(define k-size-nonneg? (subr (read @t) (k-size) bool)
+(define k-size-nonneg? (subr (maxeff (read @globals) (read @t)) (k-size) bool)
   (lambda (a0)
     (let ((a (k-reduced a0)))
       (or (k-plainly-nonneg? a)
-          (letrec ((any (subr (read @t) ((listof k-size-fact finite)) bool)
+          (letrec ((any (subr (maxeff (read @globals) (read @t)) ((listof k-size-fact finite)) bool)
                         (lambda (fs)
                           (and (not (null? fs))
                                (or (and (not (extract (car fs) 2))
@@ -816,25 +816,25 @@
                                    (any (cdr fs)))))))
             (any (the (listof k-size-fact finite) (reverse (get k-size-facts)))))))))
 ;; Whether the facts show `a = b`.
-(define k-size-eq? (subr (read @t) (k-size k-size) bool)
+(define k-size-eq? (subr (maxeff (read @globals) (read @t)) (k-size k-size) bool)
   (lambda (a b)
     (tagcase a
       (sz-finite () (tagcase b (sz-finite () #t) (else y #f)))
       (else y (tagcase b (sz-finite () #f) (else w (k-size=? (k-reduced (k-size-add-scaled a b -1)) (k-size-lit 0))))))))
 ;; The size of the tail of a list of size `n`: one less, where the facts
 ;; show `n ≥ 1`; `finite` otherwise.
-(define k-tail-size (subr (read @t) (k-size) k-size)
+(define k-tail-size (subr (maxeff (read @globals) (read @t)) (k-size) k-size)
   (lambda (n) (tagcase n (sz-finite () n) (else y (if (k-size-nonneg? (k-size-plus n -1)) (k-size-plus n -1) (sz-finite))))))
 ;; Whether a list of size `m` is one of size `n`: the facts show them
 ;; equal, or `n` is `finite`.
-(define k-size-le? (subr (read @t) (k-size k-size) bool)
+(define k-size-le? (subr (maxeff (read @globals) (read @t)) (k-size k-size) bool)
   (lambda (m n) (or (tagcase n (sz-finite () #t) (else y #f)) (k-size-eq? m n))))
 ;; `s` with `m`'s sizes for its variables.
-(define k-subst-size (subr (read @t) (k-size k-map) k-size)
+(define k-subst-size (subr (maxeff (read @globals) (read @t)) (k-size k-map) k-size)
   (lambda (s m)
     (tagcase s
       (sz-lin (k ts)
-        (letrec ((go (subr (read @t) (k-size k-terms) k-size)
+        (letrec ((go (subr (maxeff (read @globals) (read @t)) (k-size k-terms) k-size)
                        (lambda (out xs)
                          (if (null? xs)
                              out
@@ -843,7 +843,7 @@
                                    (cdr xs)))))))
           (go s ts)))
       (else y s))))
-(define k-show-terms (subr (maxeff (read @t) (alloc @t) spin) ((listof (pairof int int finite) finite)) (listof string finite))
+(define k-show-terms (subr (maxeff (read @globals) (read @t) (alloc @t) spin) ((listof (pairof int int finite) finite)) (listof string finite))
   (lambda (ts)
     (if (null? ts)
         nil
@@ -851,7 +851,7 @@
                (c (cdr (car ts)))
                (x (if (= c 1) n (k-cat5 "(* " (int->string c) " " n ")"))))
           (cons x (k-show-terms (cdr ts)))))))
-(define k-show-size (subr (maxeff (read @t) (alloc @t) spin) (k-size) string)
+(define k-show-size (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-size) string)
   (lambda (z)
     (tagcase z
       (sz-finite () "finite")
@@ -863,17 +863,17 @@
                 ((= k 0) (k-cat3 "(+ " (k-join parts " ") ")"))
                 (else (k-cat5 "(+ " (k-join parts " ") " " (int->string k) ")"))))))))
 ;; `out`, the type a node shows as, as `(mu name out)` if it mentions itself.
-(define k-mu-wrap (subr spin (string string) string)
+(define k-mu-wrap (subr (maxeff (read @globals) spin) (string string) string)
   (lambda (name out) (if (k-mentions-token? out name) (k-cat5 "(mu " name " " out ")") out)))
 
 (define-rec
-  (k-show-on (subr (maxeff (read @t) (alloc @t) spin) (int k-ids) string)
+  (k-show-on (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int k-ids) string)
     (lambda (t path)
       (let* ((t (k-resolve t)) (name (k-abbrev-in (get k-dscope) nil t)))
         (if (null? name) (k-show-body t path) (car name)))))
-  (k-show-list (subr (maxeff (read @t) (alloc @t) spin) (k-ids k-ids) (listof string finite))
+  (k-show-list (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-ids k-ids) (listof string finite))
     (lambda (ts path) (if (null? ts) nil (cons (k-show-on (car ts) path) (k-show-list (cdr ts) path)))))
-  (k-show-parts (subr (maxeff (read @t) (alloc @t) spin) (k-parts k-ids) string)
+  (k-show-parts (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-parts k-ids) string)
     (lambda (ps path)
       (if (null? ps)
           ""
@@ -881,13 +881,13 @@
                          (k-show-parts (cdr ps) path)))))
   ;; A node met again on the way down is a cycle: named by its depth, and
   ;; written `(mu %d …)` where the cycle starts.
-  (k-show-descs (subr (maxeff (read @t) (alloc @t) spin) ((listof k-desc finite) k-ids) (listof string finite))
+  (k-show-descs (subr (maxeff (read @globals) (read @t) (alloc @t) spin) ((listof k-desc finite) k-ids) (listof string finite))
     (lambda (ds p)
       (if (null? ds)
           nil
           (let ((x (tagcase (car ds) (dt (t) (k-show-on t p)) (dr (r) (k-region-show r)) (de (e) (k-show-effect e)) (dz (z) (k-show-size z)) (dc (c) (k-conv-show c)))))
             (cons x (k-show-descs (cdr ds) p))))))
-  (k-show-body (subr (maxeff (read @t) (alloc @t) spin) (int k-ids) string)
+  (k-show-body (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int k-ids) string)
     (lambda (t path)
       (if (k-has-id? path t)
           (string-append "%" (int->string (k-depth-of path t)))
@@ -936,7 +936,7 @@
 
 ;; A type. One `define-type` named prints as its name; any other recursive
 ;; type as `(mu %d …)`, `%d` naming the cycle.
-(define k-show-ty (subr (maxeff (read @t) (alloc @t) spin) (int) string)
+(define k-show-ty (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int) string)
   (lambda (t) (k-show-on t nil)))
 
 ;;; ------------------------------------------------------------ reading syntax
@@ -946,7 +946,7 @@
 (define k-items (subr checks (syn string) (listof syn finite))
   (lambda (s what)
     (tagcase s (lst (items d a b) items) (else x (k-sfail (string-append what ": expected a list") s)))))
-(define k-head (subr (read @s) ((listof syn finite)) string)
+(define k-head (subr (maxeff (read @globals) (read @s)) ((listof syn finite)) string)
   (lambda (items) (if (null? items) "" (syn-name (car items)))))
 (define k-name-of (subr checks (syn string) symbol)
   (lambda (s what) (if (syn-symbol? s) (syn-head s) (k-sfail what s))))
@@ -982,11 +982,11 @@
                   (the (listof k-regions finite) (cons (k-global-names (cdr items)) nil)))
               nil)))))
 ;; Each of `rs`, read (or written).
-(define k-atoms-on (subr (maxeff (read @t) (alloc @t) spin) (bool k-regions) k-eff)
+(define k-atoms-on (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (bool k-regions) k-eff)
   (lambda (read rs) (if (null? rs) nil (k-insert (if read (a-read (car rs)) (a-write (car rs))) (k-atoms-on read (cdr rs))))))
 ;; The region `@name` stands for: the program's own, if `private-regions`
 ;; declared it, and otherwise the constant of that name.
-(define k-region-constant (subr (maxeff (read @t) (alloc @t)) (symbol) k-region)
+(define k-region-constant (subr (maxeff (read @globals) (read @t) (alloc @t)) (symbol) k-region)
   (lambda (sym)
     (let ((d (k-lookup-desc sym)))
       (if (null? d) (r-const sym) (tagcase (car d) (ds-private (r) r) (else x (r-const sym)))))))
@@ -1094,7 +1094,7 @@
     (cond ((syn-symbol? s) (syn-head s))
           ((> (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else (k-sfail "a label is a name or a positive integer" s)))))
-(define k-has-label? (subr (read @t) (k-parts symbol) bool)
+(define k-has-label? (subr (maxeff (read @globals) (read @t)) (k-parts symbol) bool)
   (lambda (ps l) (cond ((null? ps) #f) ((symbol=? (extract (car ps) 1) l) #t) (else (k-has-label? (cdr ps) l)))))
 
 (define k-shape (subr checks (bool string syn) unit)
@@ -1114,9 +1114,9 @@
               (k-sfail "a dletrec binding is `(name type)`" (car bs)))))))
 ;; Regions storage is kept in, for `k-knot-in`.
 (define-type k-kept (listof k-region finite))
-(define k-kept-has? (subr (maxeff (read @t) spin) (k-kept k-region) bool)
+(define k-kept-has? (subr (maxeff (read @globals) (read @t) spin) (k-kept k-region) bool)
   (lambda (rs r) (and (not (null? rs)) (or (k-region=? (car rs) r) (k-kept-has? (cdr rs) r)))))
-(define k-kept-add (subr (maxeff (read @t) (alloc @t) spin) (k-kept k-region) k-kept)
+(define k-kept-add (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-kept k-region) k-kept)
   (lambda (rs r) (if (k-kept-has? rs r) rs (cons r rs))))
 ;; The regions of everything in `t` that can be written: storage a
 ;; generative type's representation may keep what it was given in.
@@ -1126,9 +1126,9 @@
       (let ((t (k-resolve t)))
         (if (k-visit? t seen)
             #u
-            (letrec ((add (subr (maxeff kstate spin) (k-region) unit) (lambda (r) (set out (k-kept-add (get out) r))))
-                     (walk (subr (maxeff kstate spin) (int) unit) (lambda (x) (k-storage-walk x seen out)))
-                     (walks (subr (maxeff kstate spin) (k-ids) unit) (lambda (xs) (k-storage-walks xs seen out))))
+            (letrec ((add (subr (maxeff (read @globals) kstate spin) (k-region) unit) (lambda (r) (set out (k-kept-add (get out) r))))
+                     (walk (subr (maxeff (read @globals) kstate spin) (int) unit) (lambda (x) (k-storage-walk x seen out)))
+                     (walks (subr (maxeff (read @globals) kstate spin) (k-ids) unit) (lambda (xs) (k-storage-walks xs seen out))))
               (tagcase (k-get t)
                 (ty-ref (a r) (begin (add r) (walk a)))
                 (ty-array (a r) (begin (add r) (walk a)))
@@ -1153,22 +1153,22 @@
   (lambda (t) (let ((out (the (ref k-kept @t) (new nil)))) (begin (k-storage-walk t (k-new-epoch) out) (get out)))))
 ;; `kept`, and each of `rs` that is not a generative type's parameter nor
 ;; frozen.
-(define k-kept-extend (subr (maxeff (read @t) (alloc @t) spin) (k-kept (listof k-region finite)) k-kept)
+(define k-kept-extend (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-kept (listof k-region finite)) k-kept)
   (lambda (kept rs)
     (cond ((null? rs) kept)
           ((or (k-gen-region? (car rs)) (tagcase (car rs) (r-frozen (q f) #t) (else y #f))) (k-kept-extend kept (cdr rs)))
           (else (k-kept-extend (k-kept-add kept (car rs)) (cdr rs))))))
-(define k-append-regions (subr (alloc @t) ((listof k-region finite) (listof k-region finite)) (listof k-region finite))
+(define k-append-regions (subr (maxeff (read @globals) (alloc @t)) ((listof k-region finite) (listof k-region finite)) (listof k-region finite))
   (lambda (xs ys) (if (null? xs) ys (the (listof k-region finite) (cons (car xs) (k-append-regions (cdr xs) ys))))))
 ;; Whether `t` keeps, in storage at some region `r`, a procedure whose
 ;; latent effect reads or awaits `r` and does not say `spin`: a knot tied
 ;; through the store, a loop with no recursive call, which only its type can
 ;; show. The region and the procedure's type, if so.
-(define k-reads-kept (subr (maxeff (read @t) (alloc @t) spin) (k-eff k-kept) (listof k-region finite))
+(define k-reads-kept (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-kept) (listof k-region finite))
   (lambda (e kept)
     (if (k-contains? e (a-spin))
         (the (listof k-region finite) nil)
-        (letrec ((find (subr (maxeff (read @t) (alloc @t) spin) (k-eff) (listof k-region finite))
+        (letrec ((find (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff) (listof k-region finite))
                    (lambda (xs)
                      (if (null? xs)
                          (the (listof k-region finite) nil)
@@ -1178,14 +1178,14 @@
                                     (else y (the (listof k-region finite) nil)))))
                            (if (null? r) (find (cdr xs)) r))))))
           (find e)))))
-(define k-kept-same? (subr (maxeff (read @t) spin) (k-kept k-kept) bool)
+(define k-kept-same? (subr (maxeff (read @globals) (read @t) spin) (k-kept k-kept) bool)
   (lambda (x y)
-    (letrec ((within (subr (maxeff (read @t) spin) (k-kept k-kept) bool)
+    (letrec ((within (subr (maxeff (read @globals) (read @t) spin) (k-kept k-kept) bool)
                (lambda (a b) (or (null? a) (and (k-kept-has? b (car a)) (within (cdr a) b))))))
       (and (within x y) (within y x)))))
 (define-type k-knot (listof (pairof k-region int @t) finite))
 (define-type k-kseen (ref (listof (pairof int k-kept @t) finite) @t))
-(define k-kseen-has? (subr (maxeff (read @t) spin) ((listof (pairof int k-kept @t) finite) int k-kept) bool)
+(define k-kseen-has? (subr (maxeff (read @globals) (read @t) spin) ((listof (pairof int k-kept @t) finite) int k-kept) bool)
   (lambda (xs t kept)
     (and (not (null? xs)) (or (and (= (car (car xs)) t) (k-kept-same? (cdr (car xs)) kept)) (k-kseen-has? (cdr xs) t kept)))))
 (define-rec
@@ -1248,17 +1248,17 @@
                     a b))))))
 
 ;; Where description variable `v` is among binders `bs`, from `i`, or -1.
-(define k-binder-index (subr pure (k-binders int int) int)
+(define k-binder-index (subr (read @globals) (k-binders int int) int)
   (lambda (bs v i) (cond ((null? bs) -1) ((= (extract (car bs) 1) v) i) (else (k-binder-index (cdr bs) v (+ i 1))))))
 ;; The `i`th description of `ds`, none or one.
-(define k-desc-at (subr pure ((listof k-desc finite) int) (listof k-desc finite))
+(define k-desc-at (subr (read @globals) ((listof k-desc finite) int) (listof k-desc finite))
   (lambda (ds i) (cond ((null? ds) nil) ((= i 0) (the (listof k-desc finite) (cons (car ds) nil))) (else (k-desc-at (cdr ds) (- i 1))))))
 ;; The `i`th parameter of binders `ps` a type `t` is, or -1.
-(define k-param-of (subr (maxeff (read @t) spin) (k-binders int) int)
+(define k-param-of (subr (maxeff (read @globals) (read @t) spin) (k-binders int) int)
   (lambda (ps t) (tagcase (k-get (k-resolve t)) (ty-var (v) (k-binder-index ps v 0)) (else y -1))))
 ;; Descriptions `inner`, with each that is one of parameters `ps` replaced
 ;; by what `args` gives for it.
-(define k-descs-given (subr (maxeff (read @t) spin) ((listof k-desc finite) k-binders (listof k-desc finite)) (listof k-desc finite))
+(define k-descs-given (subr (maxeff (read @globals) (read @t) spin) ((listof k-desc finite) k-binders (listof k-desc finite)) (listof k-desc finite))
   (lambda (inner ps args)
     (if (null? inner)
         nil
@@ -1271,7 +1271,7 @@
 ;; generative types: what it is given there (none or one). None if its
 ;; representation has a constructor at its head
 ;; (`docs/research/soundness-findings.md`, A2).
-(define k-named-head (subr (maxeff (read @t) spin) (int (listof k-desc finite) k-ids) (listof int finite))
+(define k-named-head (subr (maxeff (read @globals) (read @t) spin) (int (listof k-desc finite) k-ids) (listof int finite))
   (lambda (g args seen)
     (if (k-has-id? seen g)
         nil
@@ -1340,7 +1340,7 @@
 ;; is that slot, a knot (regular recursion).
 (define-type k-family-knot (productof (1 symbol) (2 k-scope) (3 int)))
 (define k-knots (ref (listof k-family-knot finite) @t) (new nil))
-(define k-ds=? (subr (maxeff (read @t) spin) (k-ds k-ds) bool)
+(define k-ds=? (subr (maxeff (read @globals) (read @t) spin) (k-ds k-ds) bool)
   (lambda (x y)
     (tagcase x
       (ds-rec (a) (tagcase y (ds-rec (b) (= (k-resolve a) (k-resolve b))) (else z #f)))
@@ -1349,13 +1349,13 @@
       (ds-size (a) (tagcase y (ds-size (b) (k-size=? a b)) (else z #f)))
       (ds-conv (a) (tagcase y (ds-conv (b) (k-conv=? a b)) (else z #f)))
       (else z #f))))
-(define k-scope=? (subr (maxeff (read @t) spin) (k-scope k-scope) bool)
+(define k-scope=? (subr (maxeff (read @globals) (read @t) spin) (k-scope k-scope) bool)
   (lambda (xs ys)
     (if (null? xs)
         (null? ys)
         (and (not (null? ys)) (k-ds=? (cdr (car xs)) (cdr (car ys))) (k-scope=? (cdr xs) (cdr ys))))))
 ;; The head of a list's first item, or "" for anything else.
-(define k-list-head (subr (read @s) (syn) string)
+(define k-list-head (subr (maxeff (read @globals) (read @s)) (syn) string)
   (lambda (s) (tagcase s (lst (items d a b) (k-head items)) (else x ""))))
 ;; A convention: `cellular`, `native`, `fx`, or a name bound as one.
 (define k-parse-conv (subr (maxeff checks spin) (syn) k-conv)
@@ -1380,7 +1380,7 @@
     (let ((items (k-items s "`(conv convention)`")))
       (if (= (k-length items) 2) (k-parse-conv (k-nth items 1)) (k-sfail "`(conv convention)`" s)))))
 ;; The slot of the expansion of `name` with `bound` in progress, or -1.
-(define k-knot-of (subr (maxeff (read @t) spin) ((listof k-family-knot finite) symbol k-scope) int)
+(define k-knot-of (subr (maxeff (read @globals) (read @t) spin) ((listof k-family-knot finite) symbol k-scope) int)
   (lambda (ks name bound)
     (cond ((null? ks) -1)
           ((and (symbol=? (extract (car ks) 1) name) (k-scope=? (extract (car ks) 2) bound)) (extract (car ks) 3))
@@ -1707,9 +1707,9 @@
 (define k-flip (subr pure (int) int) (lambda (p) (cond ((= p 0) 1) ((= p 1) 0) (else 2))))
 (define k-reg-is? (subr pure (k-region int) bool)
   (lambda (r v) (tagcase r (r-var (x) (= x v)) (r-frozen (x f) (= x v)) (else y #f))))
-(define k-eff-var? (subr (read @t) (k-eff int) bool)
+(define k-eff-var? (subr (maxeff (read @globals) (read @t)) (k-eff int) bool)
   (lambda (e v) (and (not (null? e)) (or (tagcase (car e) (a-var (x) (= x v)) (else y #f)) (k-eff-var? (cdr e) v)))))
-(define k-eff-region-var? (subr (read @t) (k-eff int) bool)
+(define k-eff-region-var? (subr (maxeff (read @globals) (read @t)) (k-eff int) bool)
   (lambda (e v)
     (and (not (null? e))
          (or (tagcase (car e)
@@ -1717,7 +1717,7 @@
                (a-goto (r) (k-reg-is? r v)) (a-comefrom (r) (k-reg-is? r v)) (a-await (r) (k-reg-is? r v))
                (else y #f))
              (k-eff-region-var? (cdr e) v)))))
-(define k-pol-seen? (subr (read @t) ((listof (pairof int int @t) finite) int int) bool)
+(define k-pol-seen? (subr (maxeff (read @globals) (read @t)) ((listof (pairof int int @t) finite) int int) bool)
   (lambda (xs t at) (and (not (null? xs)) (or (and (= (car (car xs)) t) (= (cdr (car xs)) at)) (k-pol-seen? (cdr xs) t at)))))
 (define-rec
   (k-polarity (subr (maxeff kstate spin) (int int int (ref (listof (pairof int int @t) finite) @t) (ref k-ids @t)) unit)
@@ -1725,12 +1725,12 @@
       (let ((t (k-resolve t)))
         (if (k-pol-seen? (get seen) t at)
             #u
-            (letrec ((push (subr kstate (int) unit) (lambda (p) (set found (cons p (get found)))))
-                     (reg (subr kstate (k-region) unit) (lambda (r) (if (k-reg-is? r v) (push 2) #u)))
-                     (eff (subr kstate (k-eff int) unit)
+            (letrec ((push (subr (maxeff (read @globals) kstate) (int) unit) (lambda (p) (set found (cons p (get found)))))
+                     (reg (subr (maxeff (read @globals) kstate) (k-region) unit) (lambda (r) (if (k-reg-is? r v) (push 2) #u)))
+                     (eff (subr (maxeff (read @globals) kstate) (k-eff int) unit)
                           (lambda (e p) (begin (if (k-eff-var? e v) (push p) #u) (if (k-eff-region-var? e v) (push 2) #u))))
-                     (go (subr (maxeff kstate spin) (int int) unit) (lambda (x p) (k-polarity x v p seen found)))
-                     (gos (subr (maxeff kstate spin) (k-ids int) unit) (lambda (xs p) (k-polarities xs v p seen found))))
+                     (go (subr (maxeff (read @globals) kstate spin) (int int) unit) (lambda (x p) (k-polarity x v p seen found)))
+                     (gos (subr (maxeff (read @globals) kstate spin) (k-ids int) unit) (lambda (xs p) (k-polarities xs v p seen found))))
               (begin
                 (set seen (cons (cons t at) (get seen)))
                 (tagcase (k-get t)
@@ -1772,14 +1772,14 @@
                 (dz (z) #u)
                 (dc (c) #u))
               (k-polarity-descs (cdr ds) (cdr ws) v at seen found)))))))
-(define k-all-ints? (subr pure (k-ids int) bool)
+(define k-all-ints? (subr (read @globals) (k-ids int) bool)
   (lambda (xs n) (or (null? xs) (and (= (car xs) n) (k-all-ints? (cdr xs) n)))))
 ;; Whether the `g`th generative type's representation bears out the variance
 ;; declared for its parameters.
 (define k-check-variance (subr (maxeff checks spin) (int syn) unit)
   (lambda (g s)
     (let ((gen (k-gen-of g)))
-      (letrec ((each (subr (maxeff checks spin) (k-binders k-ids) unit)
+      (letrec ((each (subr (maxeff (read @globals) checks spin) (k-binders k-ids) unit)
                      (lambda (bs vs)
                        (if (null? bs)
                            #u
@@ -1915,7 +1915,7 @@
       (x-let (bs e a b) b) (x-begin (xs a b) b) (x-prompt (t e h a b) b) (x-the (t e a b) b) (x-convention (c e a b) b)
       (x-bloblet (o i xs a b) b) (x-product (fs a b) b) (x-extract (e l a b) b) (x-sum (l e a b) b)
       (x-tagcase (e arms els a b) b) (x-letregion (k r i e a b) b) (x-rlambda (r l a b) b))))
-(define k-same-span? (subr pure (kx int int) bool)
+(define k-same-span? (subr (read @globals) (kx int int) bool)
   (lambda (x a b) (and (= (k-start x) a) (= (k-end x) b))))
 
 (define k-resolve-params (subr (maxeff checks spin) ((listof (productof (1 symbol) (2 syns-a)) finite)) (listof (productof (1 symbol) (2 k-ids)) finite))
@@ -1928,7 +1928,7 @@
           (cons (product (1 (extract (car ps) 1)) (2 t)) rest)))))
 (define k-resolve-descs (subr (maxeff checks spin) (syns-a) (listof k-desc finite))
   (lambda (ds) (if (null? ds) nil (let* ((d (k-parse-d (car ds))) (rest (k-resolve-descs (cdr ds)))) (cons d rest)))))
-(define k-copy-names (subr (alloc @t) (names) k-names)
+(define k-copy-names (subr (maxeff (read @globals) (alloc @t)) (names) k-names)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (k-copy-names (cdr ns))))))
 
 ;; Where a parser's tree starts and ends.
@@ -2091,7 +2091,7 @@
 ;; result, as none or one. A composable continuation runs the rest of its
 ;; prompt's body, with control effects on the tag's region.
 (define-type k-callable (productof (1 k-eff) (2 k-ids) (3 int)))
-(define k-as-subr (subr (maxeff (read @t) (alloc @t) spin) (int) (listof k-callable finite))
+(define k-as-subr (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int) (listof k-callable finite))
   (lambda (t)
     (tagcase (k-get t)
       (ty-subr (e ps r cv) (cons (product (1 e) (2 ps) (3 r)) nil))
@@ -2102,17 +2102,17 @@
 ;;; ------------------------------------------------------------ regions of types
 
 (define-type k-regions (listof k-region finite))
-(define k-has-region-in? (subr (maxeff (read @t) spin) (k-regions k-region) bool)
+(define k-has-region-in? (subr (maxeff (read @globals) (read @t) spin) (k-regions k-region) bool)
   (lambda (rs r) (cond ((null? rs) #f) ((k-region=? (car rs) r) #t) (else (k-has-region-in? (cdr rs) r)))))
-(define k-add-region (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-region) k-regions)
+(define k-add-region (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-regions k-region) k-regions)
   (lambda (rs r) (if (k-has-region-in? rs r) rs (cons r rs))))
 ;; `out` and each of `rs` that is not a generative type's parameter.
-(define k-add-non-gen (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
+(define k-add-non-gen (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
   (lambda (out rs)
     (cond ((null? rs) out)
           ((k-gen-region? (car rs)) (k-add-non-gen out (cdr rs)))
           (else (k-add-non-gen (k-add-region out (car rs)) (cdr rs))))))
-(define k-add-eff-regions (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-eff) k-regions)
+(define k-add-eff-regions (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-regions k-eff) k-regions)
   (lambda (rs e)
     (cond ((null? e) rs)
           ((k-has-region? (car e)) (k-add-eff-regions (k-add-region rs (k-atom-region (car e))) (cdr e)))
@@ -2149,10 +2149,10 @@
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
       #u)))
-(define n-copy-memo (subr (maxeff (read @t) (write @t) spin) ((arrayof (listof k-regions finite) @t) (arrayof (listof k-regions finite) @t) int) unit)
+(define n-copy-memo (subr (maxeff (read @globals) (read @t) (write @t) spin) ((arrayof (listof k-regions finite) @t) (arrayof (listof k-regions finite) @t) int) unit)
   (lambda (from to i)
     (if (= i (array-length from)) #u (begin (array-set! to i (array-ref from i)) (n-copy-memo from to (+ i 1))))))
-(define k-remember-regions (subr (maxeff (read @t) (write @t) (alloc @t) spin) (int k-regions) unit)
+(define k-remember-regions (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int k-regions) unit)
   (lambda (t rs)
     (begin
       (if (>= t (array-length (get k-regions-memo)))
@@ -2162,15 +2162,15 @@
       (array-set! (get k-regions-memo) t (cons rs nil)))))
 
 (define-rec
-  (k-regions-walk (subr (maxeff (read @t) (write @t) (alloc @t) spin) (int int (ref k-regions @t)) unit)
+  (k-regions-walk (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int int (ref k-regions @t)) unit)
     (lambda (t seen out)
       (let ((t (k-resolve t)))
         (if (k-visit? t seen)
             #u
-            (letrec ((add (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-region) unit)
+            (letrec ((add (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-region) unit)
                          (lambda (r) (set out (k-add-region (get out) r))))
-                  (walk (subr (maxeff (read @t) (write @t) (alloc @t) spin) (int) unit) (lambda (x) (k-regions-walk x seen out)))
-                  (walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids) unit) (lambda (xs) (k-regions-walks xs seen out))))
+                  (walk (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int) unit) (lambda (x) (k-regions-walk x seen out)))
+                  (walks (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-ids) unit) (lambda (xs) (k-regions-walks xs seen out))))
               (begin
                 (tagcase (k-get t)
                   (ty-subr (e ps r cv) (begin (set out (k-add-eff-regions (get out) e)) (walks ps) (walk r)))
@@ -2195,7 +2195,7 @@
                              (set out (k-add-non-gen (get out) (get inner)))
                              (k-regions-descs ds seen out))))
                   (else x #u))))))))
-  (k-regions-descs (subr (maxeff (read @t) (write @t) (alloc @t) spin) ((listof k-desc finite) int (ref k-regions @t)) unit)
+  (k-regions-descs (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) ((listof k-desc finite) int (ref k-regions @t)) unit)
     (lambda (ds seen out)
       (if (null? ds)
           #u
@@ -2206,18 +2206,18 @@
                    (dz (z) #u)
                    (dc (c) #u))
                  (k-regions-descs (cdr ds) seen out)))))
-  (k-regions-walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids int (ref k-regions @t)) unit)
+  (k-regions-walks (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-ids int (ref k-regions @t)) unit)
     (lambda (ts seen out) (if (null? ts) #u (begin (k-regions-walk (car ts) seen out) (k-regions-walks (cdr ts) seen out)))))
-  (k-regions-parts (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-parts int (ref k-regions @t)) unit)
+  (k-regions-parts (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-parts int (ref k-regions @t)) unit)
     (lambda (ps seen out)
       (if (null? ps) #u (begin (k-regions-walk (extract (car ps) 2) seen out) (k-regions-parts (cdr ps) seen out))))))
-(define k-frozen-places (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
+(define k-frozen-places (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
   (lambda (rs out)
     (if (null? rs)
         out
         (k-frozen-places (cdr rs)
                          (tagcase (car rs) (r-frozen (p f) (if (< p 0) out (k-add-region out (r-var p)))) (else y out))))))
-(define k-regions-in (subr (maxeff (read @t) (write @t) (alloc @t) spin) (int) k-regions)
+(define k-regions-in (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int) k-regions)
   (lambda (t)
     (let* ((t (k-resolve t)) (memo (get k-regions-memo)))
       (if (and (< t (array-length memo)) (not (null? (array-ref memo t))))
@@ -2229,21 +2229,21 @@
               (set out (k-frozen-places (get out) (get out)))
               (k-remember-regions t (get out))
               (get out)))))))
-(define k-note (subr (maxeff (read @t) (alloc @t)) (symbol k-names k-names) k-names)
+(define k-note (subr (maxeff (read @globals) (read @t) (alloc @t)) (symbol k-names k-names) k-names)
   (lambda (s bound out) (if (or (k-has-name? bound s) (k-has-name? out s)) out (cons s out))))
-(define k-names-onto (subr (maxeff (read @t) (alloc @t)) (k-names k-names) k-names)
+(define k-names-onto (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-names k-names) k-names)
   (lambda (ns bound) (if (null? ns) bound (k-names-onto (cdr ns) (cons (car ns) bound)))))
-(define k-param-names (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 k-ids)) finite) k-names) k-names)
+(define k-param-names (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 k-ids)) finite) k-names) k-names)
   (lambda (ps bound) (if (null? ps) bound (k-param-names (cdr ps) (cons (extract (car ps) 1) bound)))))
-(define k-letrec-names (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) k-names) k-names)
+(define k-letrec-names (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) k-names) k-names)
   (lambda (bs bound) (if (null? bs) bound (k-letrec-names (cdr bs) (cons (extract (car bs) 1) bound)))))
-(define k-let-names (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-names) k-names)
+(define k-let-names (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-names) k-names)
   (lambda (bs bound) (if (null? bs) bound (k-let-names (cdr bs) (cons (extract (car bs) 1) bound)))))
 
 (define-rec
-  (k-free-list (subr (maxeff (read @t) (alloc @t)) (kxs k-names k-names) k-names)
+  (k-free-list (subr (maxeff (read @globals) (read @t) (alloc @t)) (kxs k-names k-names) k-names)
     (lambda (xs bound out) (if (null? xs) out (k-free-list (cdr xs) bound (k-free-into (car xs) bound out)))))
-  (k-free-into (subr (maxeff (read @t) (alloc @t)) (kx k-names k-names) k-names)
+  (k-free-into (subr (maxeff (read @globals) (read @t) (alloc @t)) (kx k-names k-names) k-names)
     (lambda (x bound out)
       (tagcase x
         (x-var (s a b) (k-note s bound out))
@@ -2270,13 +2270,13 @@
         (x-tagcase (s arms els a b)
           (let ((o (k-free-arms arms bound (k-free-into s bound out))))
             (if (null? els) o (k-free-into (extract (car els) 2) (cons (extract (car els) 1) bound) o)))))))
-  (k-free-letrec (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) k-names k-names) k-names)
+  (k-free-letrec (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) k-names k-names) k-names)
     (lambda (bs bound out) (if (null? bs) out (k-free-letrec (cdr bs) bound (k-free-into (extract (car bs) 3) bound out)))))
-  (k-free-let (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-names) k-names)
+  (k-free-let (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-names) k-names)
     (lambda (bs bound out) (if (null? bs) out (k-free-let (cdr bs) bound (k-free-into (extract (car bs) 2) bound out)))))
-  (k-free-fields (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-names) k-names)
+  (k-free-fields (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-names) k-names)
     (lambda (fs bound out) (if (null? fs) out (k-free-fields (cdr fs) bound (k-free-into (extract (car fs) 2) bound out)))))
-  (k-free-arms (subr (maxeff (read @t) (alloc @t))
+  (k-free-arms (subr (maxeff (read @globals) (read @t) (alloc @t))
                         ((listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) finite) k-names k-names) k-names)
     (lambda (arms bound out)
       (if (null? arms)
@@ -2286,7 +2286,7 @@
 
 ;;; ------------------------------------------------------------ free variables
 
-(define k-free-vars (subr (maxeff (read @t) (alloc @t)) (kx) k-names)
+(define k-free-vars (subr (maxeff (read @globals) (read @t) (alloc @t)) (kx) k-names)
   (lambda (x) (k-free-into x nil nil)))
 
 ;;; ------------------------------------------------------------ masking
@@ -2296,17 +2296,17 @@
 ;;; (ranks 2 to 4; `await`, like `read`, does not).
 
 ;; Whether an atom is on `const`, the frozen region.
-(define k-frozen-atom? (subr pure (k-atom) bool)
+(define k-frozen-atom? (subr (read @globals) (k-atom) bool)
   (lambda (a) (and (k-has-region? a) (tagcase (k-atom-region a) (r-frozen (p f) #t) (else y #f)))))
 ;; Whether an atom is on data frozen into a place, other than a write: it is
 ;; masked as what is done to the place is
 ;; (`docs/research/soundness-findings.md`, F2).
-(define k-place-frozen-atom? (subr pure (k-atom) bool)
+(define k-place-frozen-atom? (subr (read @globals) (k-atom) bool)
   (lambda (a)
     (and (k-has-region? a) (not (= (k-atom-rank a) 1))
          (tagcase (k-atom-region a) (r-frozen (p f) (>= p 0)) (else y #f)))))
 ;; The region an atom is masked by: a place-frozen atom's place.
-(define k-mask-region (subr pure (k-atom) k-region)
+(define k-mask-region (subr (read @globals) (k-atom) k-region)
   (lambda (a)
     (if (k-place-frozen-atom? a)
         (tagcase (k-atom-region a) (r-frozen (p f) (r-var p)) (else y (k-atom-region a)))
@@ -2314,10 +2314,10 @@
 ;; Whether an atom stays because the result mentions its region: `alloc`,
 ;; `goto` and `comefrom` (ranks 2 to 4); only `alloc`, for a place-frozen
 ;; one.
-(define k-result-keeps? (subr pure (k-atom) bool)
+(define k-result-keeps? (subr (read @globals) (k-atom) bool)
   (lambda (a) (if (k-place-frozen-atom? a) (= (k-atom-rank a) 2) (and (> (k-atom-rank a) 1) (< (k-atom-rank a) 5)))))
 ;; The regions of `e`'s atoms that stay only if a free variable sees them.
-(define k-sought (subr (maxeff (read @t) (alloc @t) spin) (k-eff k-regions k-regions) k-regions)
+(define k-sought (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-regions k-regions) k-regions)
   (lambda (e in-result out)
     (if (null? e)
         out
@@ -2327,7 +2327,7 @@
                              (not (and (k-has-region-in? in-result (k-mask-region a)) (k-result-keeps? a))))
                         (k-add-region out (k-mask-region a))
                         out))))))
-(define k-drop-regions (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
+(define k-drop-regions (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
   (lambda (rs seen)
     (cond ((null? rs) nil)
           ((k-has-region-in? seen (car rs)) (k-drop-regions (cdr rs) seen))
@@ -2336,9 +2336,9 @@
 ;; Of the regions `rs`, those no variable free in `x` sees: a walk of `x`
 ;; as `k-free-into`'s, that stops once each has been seen, as most are.
 (define-rec
-  (k-unseen-list (subr (maxeff (read @t) (write @t) (alloc @t) spin) (kxs k-names k-regions) k-regions)
+  (k-unseen-list (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (kxs k-names k-regions) k-regions)
     (lambda (xs bound rs) (if (or (null? xs) (null? rs)) rs (k-unseen-list (cdr xs) bound (k-unseen (car xs) bound rs)))))
-  (k-unseen (subr (maxeff (read @t) (write @t) (alloc @t) spin) (kx k-names k-regions) k-regions)
+  (k-unseen (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (kx k-names k-regions) k-regions)
     (lambda (x bound rs)
       (if (null? rs)
           rs
@@ -2369,13 +2369,13 @@
             (x-tagcase (s arms els a b)
               (let ((o (k-unseen-arms arms bound (k-unseen s bound rs))))
                 (if (null? els) o (k-unseen (extract (car els) 2) (cons (extract (car els) 1) bound) o))))))))
-  (k-unseen-letrec (subr (maxeff (read @t) (write @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) k-names k-regions) k-regions)
+  (k-unseen-letrec (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) k-names k-regions) k-regions)
     (lambda (bs bound rs) (if (null? bs) rs (k-unseen-letrec (cdr bs) bound (k-unseen (extract (car bs) 3) bound rs)))))
-  (k-unseen-let (subr (maxeff (read @t) (write @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-regions) k-regions)
+  (k-unseen-let (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-regions) k-regions)
     (lambda (bs bound rs) (if (null? bs) rs (k-unseen-let (cdr bs) bound (k-unseen (extract (car bs) 2) bound rs)))))
-  (k-unseen-fields (subr (maxeff (read @t) (write @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-regions) k-regions)
+  (k-unseen-fields (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) ((listof (productof (1 symbol) (2 kx)) finite) k-names k-regions) k-regions)
     (lambda (fs bound rs) (if (null? fs) rs (k-unseen-fields (cdr fs) bound (k-unseen (extract (car fs) 2) bound rs)))))
-  (k-unseen-arms (subr (maxeff (read @t) (write @t) (alloc @t) spin)
+  (k-unseen-arms (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin)
                         ((listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) finite) k-names k-regions) k-regions)
     (lambda (arms bound rs)
       (if (null? arms)
@@ -2384,7 +2384,7 @@
                          (k-unseen (extract (car arms) 4) (k-names-onto (extract (car arms) 3) bound) rs))))))
 
 ;; What stays of `e`: an atom on a region no free variable sees goes.
-(define k-keep (subr (maxeff (read @t) (alloc @t) spin) (k-eff k-regions k-regions) k-eff)
+(define k-keep (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-regions k-regions) k-eff)
   (lambda (e unseen in-result)
     (if (null? e)
         nil
@@ -2411,7 +2411,7 @@
                 (else y #u)))
             (else x #u))
           (k-note-writes (cdr e))))))
-(define k-mask (subr (maxeff (read @t) (write @t) (alloc @t) spin) (kx k-eff int) k-eff)
+(define k-mask (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (kx k-eff int) k-eff)
   (lambda (x e result)
     (if (begin (k-note-writes e) (null? e))
         e
@@ -2423,12 +2423,12 @@
 
 ;;; ------------------------------------------------------------ substitution
 
-(define k-subst-conv (subr (read @t) (k-conv k-map) k-conv)
+(define k-subst-conv (subr (maxeff (read @globals) (read @t)) (k-conv k-map) k-conv)
   (lambda (c m)
     (tagcase c
       (cv-var (v) (let ((f (k-map-find m v))) (if (null? f) c (tagcase (cdr (car f)) (dc (x) x) (else y c)))))
       (else y c))))
-(define k-subst-region (subr (read @t) (k-region k-map) k-region)
+(define k-subst-region (subr (maxeff (read @globals) (read @t)) (k-region k-map) k-region)
   (lambda (r m)
     (tagcase r
       (r-var (v) (let ((f (k-map-find m v))) (if (null? f) r (tagcase (cdr (car f)) (dr (x) x) (else y r)))))
@@ -2441,7 +2441,7 @@
                 (dr (x) (tagcase x (r-var (q) (r-frozen q fin)) (r-heap () (r-frozen -1 fin)) (else z r)))
                 (else y r)))))
       (else y r))))
-(define k-subst-effect (subr (maxeff (read @t) (alloc @t) spin) (k-eff k-map) k-eff)
+(define k-subst-effect (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-map) k-eff)
   (lambda (e m)
     (if (null? e)
         nil
@@ -2453,10 +2453,10 @@
                             (if (null? f) (k-one a) (tagcase (cdr (car f)) (de (x) x) (else y (k-one a))))))
                         (else y (k-one (k-atom-with a (k-subst-region (k-atom-region a) m)))))))
           (k-union piece rest)))))
-(define k-memo-find (subr (read @t) ((listof (pairof int int @t) finite) int) int)
+(define k-memo-find (subr (maxeff (read @globals) (read @t)) ((listof (pairof int int @t) finite) int) int)
   (lambda (ms t) (cond ((null? ms) -1) ((= (car (car ms)) t) (cdr (car ms))) (else (k-memo-find (cdr ms) t)))))
 
-(define k-ty-rank (subr (maxeff (read @t) spin) (int) int)
+(define k-ty-rank (subr (maxeff (read @globals) (read @t) spin) (int) int)
   (lambda (t)
     (tagcase (k-get t)
       (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r cv) 3) (ty-poly (bs x) 4) (ty-ref (x r) 5)
@@ -2465,21 +2465,21 @@
       (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.
-(define k-lemma-head? (subr (maxeff (read @t) spin) (k-binders int int) bool)
+(define k-lemma-head? (subr (maxeff (read @globals) (read @t) spin) (k-binders int int) bool)
   (lambda (bs pat t)
     (let ((p (k-resolve pat)))
       (tagcase (k-get p)
         (ty-var (v) (or (k-binder-has? bs v) (= (k-ty-rank p) (k-ty-rank t))))
         (ty-named (g xs) (tagcase (k-get t) (ty-named (h ys) (= g h)) (else z #f)))
         (else z (= (k-ty-rank p) (k-ty-rank t)))))))
-(define k-lemma-may-apply? (subr (maxeff (read @t) spin) ((listof k-lemma finite) int int) bool)
+(define k-lemma-may-apply? (subr (maxeff (read @globals) (read @t) spin) ((listof k-lemma finite) int int) bool)
   (lambda (ls a b)
     (and (not (null? ls))
          (or (let ((l (car ls))) (and (k-lemma-head? (extract l 1) (extract l 2) a) (k-lemma-head? (extract l 1) (extract l 3) b)))
              (k-lemma-may-apply? (cdr ls) a b)))))
-(define k-pair-seen? (subr (read @t) ((listof (pairof int int @t) finite) int int) bool)
+(define k-pair-seen? (subr (maxeff (read @globals) (read @t)) ((listof (pairof int int @t) finite) int int) bool)
   (lambda (xs a b) (and (not (null? xs)) (or (and (= (car (car xs)) a) (= (cdr (car xs)) b)) (k-pair-seen? (cdr xs) a b)))))
-(define k-all-bound? (subr (read @t) (k-binders k-map) bool)
+(define k-all-bound? (subr (maxeff (read @globals) (read @t)) (k-binders k-map) bool)
   (lambda (bs m) (or (null? bs) (and (not (null? (k-map-find m (extract (car bs) 1)))) (k-all-bound? (cdr bs) m)))))
 (define-rec
   (k-subst-memo (subr (maxeff kstate spin) (int k-map (ref (listof (pairof int int @t) finite) @t)) int)
@@ -2496,9 +2496,9 @@
                 (let ((slot (k-slot)))
                   (begin
                     (set memo (cons (cons t slot) (get memo)))
-                    (letrec ((sub (subr (maxeff kstate spin) (int) int) (lambda (x) (k-subst-memo x m memo)))
-                             (subs (subr (maxeff kstate spin) (k-ids) k-ids) (lambda (xs) (k-subst-list xs m memo)))
-                             (reg (subr (read @t) (k-region) k-region) (lambda (r) (k-subst-region r m))))
+                    (letrec ((sub (subr (maxeff (read @globals) kstate spin) (int) int) (lambda (x) (k-subst-memo x m memo)))
+                             (subs (subr (maxeff (read @globals) kstate spin) (k-ids) k-ids) (lambda (xs) (k-subst-list xs m memo)))
+                             (reg (subr (maxeff (read @globals) (read @t)) (k-region) k-region) (lambda (r) (k-subst-region r m))))
                     (let* ((new-ty
                             (tagcase (k-get t)
                               (ty-subr (e ps r cv) (let* ((e2 (k-subst-effect e m)) (ps2 (subs ps)) (r2 (sub r))) (ty-subr e2 ps2 r2 (k-subst-conv cv m))))
@@ -2552,7 +2552,7 @@
 (define k-subst-hyps (subr (maxeff kstate spin) (k-hyps k-map) k-hyps)
   (lambda (hs m)
     (if (null? hs) nil (let* ((x (k-subst (car (car hs)) m)) (y (k-subst (cdr (car hs)) m))) (the k-hyps (cons (cons x y) (k-subst-hyps (cdr hs) m)))))))
-(define k-gen-map (subr (alloc @t) (k-binders (listof k-desc finite)) k-map)
+(define k-gen-map (subr (maxeff (read @globals) (alloc @t)) (k-binders (listof k-desc finite)) k-map)
   (lambda (bs ds) (if (null? bs) nil (the k-map (cons (cons (extract (car bs) 1) (car ds)) (k-gen-map (cdr bs) (cdr ds)))))))
 (define k-unfold (subr (maxeff kstate spin) (int (listof k-desc finite)) int)
   (lambda (g ds) (let ((gen (k-gen-of g))) (k-subst (extract gen 4) (k-gen-map (extract gen 2) ds)))))
@@ -2568,7 +2568,7 @@
                         (else (dt (k-ty-new (ty-var va))))))
                (rest (k-rename (cdr bs) (cdr as))))
           (cons (cons vb d) rest)))))
-(define k-same-kinds? (subr (read @t) (k-binders k-binders) bool)
+(define k-same-kinds? (subr (maxeff (read @globals) (read @t)) (k-binders k-binders) bool)
   (lambda (xs ys)
     (cond ((null? xs) (null? ys))
           ((null? ys) #f)
@@ -2579,10 +2579,10 @@
 ;;; being compared is assumed to hold.
 
 (define-type k-trail (ref (listof (pairof int int @t) finite) @t))
-(define k-trail-has? (subr (read @t) ((listof (pairof int int @t) finite) int int) bool)
+(define k-trail-has? (subr (maxeff (read @globals) (read @t)) ((listof (pairof int int @t) finite) int int) bool)
   (lambda (ps a b) (cond ((null? ps) #f) ((and (= (car (car ps)) a) (= (cdr (car ps)) b)) #t) (else (k-trail-has? (cdr ps) a b)))))
 (define k-bool=? (subr pure (bool bool) bool) (lambda (x y) (if x y (not y))))
-(define k-part-find (subr (read @t) (k-parts symbol) int)
+(define k-part-find (subr (maxeff (read @globals) (read @t)) (k-parts symbol) int)
   (lambda (ps l) (cond ((null? ps) -1) ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2)) (else (k-part-find (cdr ps) l)))))
 
 ;; A subtype question's binder environment, for one side: each `poly`
@@ -2590,42 +2590,42 @@
 ;; compared as they are, not substituted, and a cycle through a `poly` comes
 ;; back to a pair, and an environment, already on the trail.
 (define-type k-benv (listof (pairof int int @t) finite))
-(define k-benv-var (subr (read @t) (k-benv int) int)
+(define k-benv-var (subr (maxeff (read @globals) (read @t)) (k-benv int) int)
   (lambda (env v) (cond ((null? env) v) ((= (car (car env)) v) (cdr (car env))) (else (k-benv-var (cdr env) v)))))
 ;; `env` with `v` named `l`, in place of any name it had: re-entering a scope
 ;; shadows it, so the environments stay finitely many.
 ;; Whether a procedure called in convention `a` may be used as one called
 ;; in `b`: the same, or any of FX-26's own as `fx`; binders by the binders
 ;; they stand for.
-(define k-conv-sub? (subr (read @t) (k-conv k-conv k-benv k-benv) bool)
+(define k-conv-sub? (subr (maxeff (read @globals) (read @t)) (k-conv k-conv k-benv k-benv) bool)
   (lambda (a b ea eb)
     (tagcase a
       (cv-var (x) (tagcase b (cv-var (y) (= (k-benv-var ea x) (k-benv-var eb y))) (else z #f)))
       (else y (or (k-conv=? a b) (tagcase b (cv-fx () #t) (else z #f)))))))
 ;; Whether two conventions are the same, binders by what they stand for.
-(define k-conv-same? (subr (read @t) (k-conv k-conv k-benv k-benv) bool)
+(define k-conv-same? (subr (maxeff (read @globals) (read @t)) (k-conv k-conv k-benv k-benv) bool)
   (lambda (a b ea eb)
     (tagcase a
       (cv-var (x) (tagcase b (cv-var (y) (= (k-benv-var ea x) (k-benv-var eb y))) (else z #f)))
       (else y (k-conv=? a b)))))
-(define k-benv-set (subr (maxeff (read @t) (alloc @t)) (k-benv int int) k-benv)
+(define k-benv-set (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-benv int int) k-benv)
   (lambda (env v l)
-    (letrec ((drop (subr (maxeff (read @t) (alloc @t)) (k-benv) k-benv)
+    (letrec ((drop (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-benv) k-benv)
                (lambda (e) (cond ((null? e) nil) ((= (car (car e)) v) (cdr e)) (else (cons (car e) (drop (cdr e))))))))
       (the k-benv (cons (the (pairof int int @t) (cons v l)) (drop env))))))
-(define k-benv-within? (subr (read @t) (k-benv k-benv) bool)
+(define k-benv-within? (subr (maxeff (read @globals) (read @t)) (k-benv k-benv) bool)
   (lambda (x y) (or (null? x) (and (= (k-benv-var y (car (car x))) (cdr (car x))) (k-benv-within? (cdr x) y)))))
-(define k-benv=? (subr (read @t) (k-benv k-benv) bool)
+(define k-benv=? (subr (maxeff (read @globals) (read @t)) (k-benv k-benv) bool)
   (lambda (x y) (and (= (k-length x) (k-length y)) (k-benv-within? x y))))
 ;; `a ≤ b` for frozen data: the same, or finite data seen as possibly
 ;; cyclic, in one place.
-(define k-frozen-le? (subr spin (k-region k-region) bool)
+(define k-frozen-le? (subr (maxeff (read @globals) spin) (k-region k-region) bool)
   (lambda (a b)
     (or (k-region=? a b)
         (tagcase a
           (r-frozen (p f) (and f (tagcase b (r-frozen (q g) (and (= p q) (not g))) (else y #f))))
           (else y #f)))))
-(define k-benv-region (subr (read @t) (k-benv k-region) k-region)
+(define k-benv-region (subr (maxeff (read @globals) (read @t)) (k-benv k-region) k-region)
   (lambda (env r)
     (if (null? env)
         r
@@ -2633,7 +2633,7 @@
           (r-var (v) (r-var (k-benv-var env v)))
           (r-frozen (p f) (if (< p 0) r (r-frozen (k-benv-var env p) f)))
           (else y r)))))
-(define k-benv-effect (subr (maxeff (read @t) (alloc @t)) (k-benv k-eff) k-eff)
+(define k-benv-effect (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-benv k-eff) k-eff)
   (lambda (env e)
     (if (or (null? env) (null? e))
         e
@@ -2653,7 +2653,7 @@
 ;; pairs of `poly` binders, by the pair of nodes and the position.
 (define-type k-strail (ref (listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) finite) @t))
 (define-type k-labels (ref (listof (productof (1 int) (2 int) (3 int) (4 int)) finite) @t))
-(define k-strail-has? (subr (read @t) ((listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) finite) int int k-benv k-benv) bool)
+(define k-strail-has? (subr (maxeff (read @globals) (read @t)) ((listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) finite) int int k-benv k-benv) bool)
   (lambda (ps a b ea eb)
     (and (not (null? ps))
          (or (and (= (extract (car ps) 1) a) (and (= (extract (car ps) 2) b)
@@ -2661,7 +2661,7 @@
              (k-strail-has? (cdr ps) a b ea eb)))))
 (define k-label (subr kstate (k-labels int int int) int)
   (lambda (labels a b i)
-    (letrec ((find (subr (read @t) ((listof (productof (1 int) (2 int) (3 int) (4 int)) finite)) int)
+    (letrec ((find (subr (maxeff (read @globals) (read @t)) ((listof (productof (1 int) (2 int) (3 int) (4 int)) finite)) int)
                (lambda (ls)
                  (cond ((null? ls) 0)
                        ((and (= (extract (car ls) 1) a) (and (= (extract (car ls) 2) b) (= (extract (car ls) 3) i)))
@@ -2683,7 +2683,7 @@
           (k-name-binders (cdr ba) (cdr bb) a b (+ i 1)
                           (k-benv-set ea (extract (car ba) 1) l) (k-benv-set eb (extract (car bb) 1) l) labels)))))
 ;; Bounded region binders must have the same bounds.
-(define k-same-bounds? (subr (maxeff (read @t) (alloc @t) spin) (k-binders k-binders k-benv k-benv) bool)
+(define k-same-bounds? (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-binders k-binders k-benv k-benv) bool)
   (lambda (ba bb ea eb)
     (or (null? ba)
         (let ((x (k-bound-of (extract (car ba) 1))) (y (k-bound-of (extract (car bb) 1))))
@@ -2765,9 +2765,9 @@
             (begin
               (set seen (cons (cons pat t) (get seen)))
               (let ((bs (extract l 1)) (tt (k-get t)))
-                (letrec ((mt (subr (maxeff kstate spin) (int int) bool) (lambda (x y) (k-match-ty l x y m seen)))
-                         (mr (subr (maxeff kstate spin) (k-region k-region) bool) (lambda (r q) (k-match-region bs r q m)))
-                         (same (subr (maxeff kstate spin) () bool) (lambda () (k-same-ty? pat t))))
+                (letrec ((mt (subr (maxeff (read @globals) kstate spin) (int int) bool) (lambda (x y) (k-match-ty l x y m seen)))
+                         (mr (subr (maxeff (read @globals) kstate spin) (k-region k-region) bool) (lambda (r q) (k-match-region bs r q m)))
+                         (same (subr (maxeff (read @globals) kstate spin) () bool) (lambda () (k-same-ty? pat t))))
                   (tagcase (k-get pat)
                     (ty-var (v)
                       (if (k-binder-has? bs v)
@@ -2794,7 +2794,7 @@
   (k-match-parts (subr (maxeff kstate spin) (k-lemma k-parts k-parts (ref k-map @t) (ref (listof (pairof int int @t) finite) @t)) bool)
     (lambda (l ps qs m seen)
       (and (= (k-length ps) (k-length qs))
-           (letrec ((each (subr (maxeff kstate spin) (k-parts k-parts) bool)
+           (letrec ((each (subr (maxeff (read @globals) kstate spin) (k-parts k-parts) bool)
                           (lambda (ps qs)
                             (or (null? ps)
                                 (and (symbol=? (extract (car ps) 1) (extract (car qs) 1))
@@ -2981,18 +2981,18 @@
   (lambda (a b)
     (k-sub a b (the k-benv nil) (the k-benv nil)
            (the k-strail (new nil)) (the k-labels (new nil)))))
-(define k-part-index (subr (read @t) (k-parts symbol int) int)
+(define k-part-index (subr (maxeff (read @globals) (read @t)) (k-parts symbol int) int)
   (lambda (ps l i) (cond ((null? ps) -1) ((symbol=? (extract (car ps) 1) l) i) (else (k-part-index (cdr ps) l (+ i 1))))))
 
 ;;; ------------------------------------------------------------ errors
 
 ;; Run `f`, and if it fails at `a`..`b` with "a W is expected here, and
 ;; this is a G", fail instead with what `say` makes of W and G.
-(define k-expected-split (subr spin (string) string)
+(define k-expected-split (subr (maxeff (read @globals) spin) (string) string)
   (lambda (m) (if (k-starts-at? m "a " 0 0) (substring m 2 (string-length m)) "")))
 (define k-sep string " is expected here, and this is a ")
 
-(define k-rewriting (subr (maxeff checks spin) ((subr (maxeff checks spin) () k-te) int int (subr (maxeff checks spin) (string string string) string)) k-te)
+(define k-rewriting (subr (maxeff (read @globals) checks spin) ((subr (maxeff checks spin) () k-te) int int (subr (maxeff checks spin) (string string string) string)) k-te)
   (lambda (f a b say)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
       (tagcase r
@@ -3004,7 +3004,7 @@
                 (k-fail m ea eb))))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 ;; The same, for any error at `a`..`b`.
-(define k-prefixing (subr checks ((subr checks () k-te) int int (subr checks () string)) k-te)
+(define k-prefixing (subr (maxeff (read @globals) checks) ((subr checks () k-te) int int (subr checks () string)) k-te)
   (lambda (f a b prefix)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
       (tagcase r
@@ -3026,7 +3026,7 @@
       (else y nil))))
 ;; Whether `c` is one of the two conventions code is made in, and not the
 ;; program's.
-(define k-other-conv? (subr (read @t) (k-conv) bool)
+(define k-other-conv? (subr (maxeff (read @globals) (read @t)) (k-conv) bool)
   (lambda (c)
     (and (tagcase c (cv-cellular () #t) (cv-native () #t) (else y #f)) (not (k-conv=? c (get k-conv-default))))))
 ;; A conversion of `x`'s procedure to `to`. Every procedure is made in the
@@ -3091,14 +3091,14 @@
 ;; Naming `s`: pure, but for a member of a recursive group that may not
 ;; end, named in the group. Called, the call says `spin`; given away,
 ;; whoever calls it could loop through it, so naming it does.
-(define k-naming-effect (subr (maxeff (read @t) (alloc @t) spin) (symbol int) k-eff)
+(define k-naming-effect (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (symbol int) k-eff)
   (lambda (s t)
     (let ((spins (if (k-named-has? (get k-recursive) s t) (the k-eff (cons (a-spin) nil)) (the k-eff nil))))
       (if (and (get k-globals-effects) (k-global? s)) (k-insert (a-read (r-global s)) spins) spins))))
 (define k-bind-letrec (subr (maxeff kstate spin) ((listof (productof (1 symbol) (2 int) (3 kx)) finite)) unit)
   (lambda (bs) (if (null? bs) #u (begin (k-bind (extract (car bs) 1) (extract (car bs) 2)) (k-bind-letrec (cdr bs))))))
 ;; Whether `x` is a lambda, under any type abstractions and ascriptions.
-(define k-lambda? (subr pure (kx) bool)
+(define k-lambda? (subr (read @globals) (kx) bool)
   (lambda (x)
     (tagcase x
       (x-lambda (ps body a b) #t)
@@ -3107,7 +3107,7 @@
       (x-the (t e a b) (k-lambda? e))
       (else y #f))))
 ;; How many of `ns` are `n`.
-(define k-count-name (subr pure (k-names symbol) int)
+(define k-count-name (subr (read @globals) (k-names symbol) int)
   (lambda (ns n) (cond ((null? ns) 0) ((symbol=? (car ns) n) (+ 1 (k-count-name (cdr ns) n))) (else (k-count-name (cdr ns) n)))))
 ;; Note each `let` binding of a lambda as known, once bound: of several of
 ;; one name, each is as many from the innermost as come after it. The
@@ -3125,18 +3125,18 @@
 ;; `plambda`s, whose effect only allocates. Making a closure makes no mutable
 ;; data a type could be generalized over: it holds only variables bound
 ;; outside.
-(define k-rlambda-under? (subr pure (kx) bool)
+(define k-rlambda-under? (subr (read @globals) (kx) bool)
   (lambda (x)
     (tagcase x
       (x-rlambda (r l a b) #t)
       (x-plambda (bs e a b) (k-rlambda-under? e))
       (x-the (t e a b) (k-rlambda-under? e))
       (else y #f))))
-(define k-only-alloc? (subr (read @t) (k-eff) bool)
+(define k-only-alloc? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
   (lambda (e) (or (null? e) (and (tagcase (car e) (a-alloc (r) #t) (else y #f)) (k-only-alloc? (cdr e))))))
-(define k-generalizable? (subr (read @t) (kx k-eff) bool)
+(define k-generalizable? (subr (maxeff (read @globals) (read @t)) (kx k-eff) bool)
   (lambda (x e) (or (null? e) (and (k-rlambda-under? x) (k-only-alloc? e)))))
-(define k-letrec-not-lambda (subr pure (symbol) string)
+(define k-letrec-not-lambda (subr (read @globals) (symbol) string)
   (lambda (n)
     (string-append (k-quote (symbol->string n))
                    " is bound recursively, so it must be a lambda: nothing may run before every binding exists")))
@@ -3169,15 +3169,15 @@
                                        a b))))
                (rest (k-param-types (cdr ps) (if (null? hint) hint (cdr hint)) a b)))
           (cons (cons n ty) rest)))))
-(define k-binding-types (subr (maxeff (read @t) (alloc @t)) (k-bindings) k-ids)
+(define k-binding-types (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-bindings) k-ids)
   (lambda (bs) (if (null? bs) nil (cons (cdr (car bs)) (k-binding-types (cdr bs))))))
-(define k-some-untyped? (subr (read @t) ((listof (productof (1 symbol) (2 k-ids)) finite)) bool)
+(define k-some-untyped? (subr (maxeff (read @globals) (read @t)) ((listof (productof (1 symbol) (2 k-ids)) finite)) bool)
   (lambda (ps) (cond ((null? ps) #f) ((null? (extract (car ps) 2)) #t) (else (k-some-untyped? (cdr ps))))))
 
-(define k-unannotated? (subr (read @t) (kx) bool)
+(define k-unannotated? (subr (maxeff (read @globals) (read @t)) (kx) bool)
   (lambda (x) (tagcase x (x-lambda (ps body a b) (k-some-untyped? ps)) (else y #f))))
 ;; A `lambda` missing parameter types, or a thunk: better told than asked.
-(define k-needs-telling? (subr (read @t) (kx) bool)
+(define k-needs-telling? (subr (maxeff (read @globals) (read @t)) (kx) bool)
   (lambda (x) (tagcase x (x-lambda (ps body a b) (or (null? ps) (k-some-untyped? ps))) (else y #f))))
 
 ;;; ------------------------------------------------------------ instantiation
@@ -3187,21 +3187,21 @@
 ;;; region.
 
 (define-type k-solved (ref k-map @t))
-(define k-append-binders (subr (maxeff (read @t) (alloc @t)) (k-binders k-binders) k-binders)
+(define k-append-binders (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-binders k-binders) k-binders)
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (k-append-binders (cdr xs) ys)))))
-(define k-binders-from (subr (maxeff (read @t) (alloc @t) spin) (int k-binders) (productof (1 k-binders) (2 int)))
+(define k-binders-from (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int k-binders) (productof (1 k-binders) (2 int)))
   (lambda (t acc)
     (tagcase (k-get t)
       (ty-poly (bs body) (k-binders-from (k-resolve body) (k-append-binders acc bs)))
       (else y (product (1 acc) (2 t))))))
 
 ;; The binders of `t` through every nested `poly`, and the type under them.
-(define k-binders-of (subr (maxeff (read @t) (alloc @t) spin) (int) (productof (1 k-binders) (2 int)))
+(define k-binders-of (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int) (productof (1 k-binders) (2 int)))
   (lambda (t) (k-binders-from (k-resolve t) nil)))
 
-(define k-unknown? (subr (read @t) (k-binders int) bool)
+(define k-unknown? (subr (maxeff (read @globals) (read @t)) (k-binders int) bool)
   (lambda (kinds v) (cond ((null? kinds) #f) ((= (extract (car kinds) 1) v) #t) (else (k-unknown? (cdr kinds) v)))))
-(define k-open? (subr (read @t) (k-binders k-solved int) bool)
+(define k-open? (subr (maxeff (read @globals) (read @t)) (k-binders k-solved int) bool)
   (lambda (kinds solved v) (and (k-unknown? kinds v) (null? (k-map-find (get solved) v)))))
 (define k-solve (subr kstate (k-solved int k-desc) unit)
   (lambda (solved v d) (set solved (cons (cons v d) (get solved)))))
@@ -3209,7 +3209,7 @@
 ;; `a ≤ b`: region `a` won't outlive region `b`. The same; `b` a constant
 ;; (which never ends: `@name`, a fresh region, `const`); `b` bound around
 ;; `a`'s binder; or `a`'s bound won't outlive `b`.
-(define k-outlived? (subr (maxeff (read @t) (alloc @t) spin) (k-region k-region) bool)
+(define k-outlived? (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-region k-region) bool)
   (lambda (a b)
     (or (k-region=? a b)
         (tagcase b
@@ -3289,7 +3289,7 @@
   (lambda (t) (k-data-walk t (k-new-epoch))))
 ;; `t` with its frozen regions made finite: what data `acyclic?` has found
 ;; acyclic is.
-(define k-fin-region (subr pure (k-region) k-region)
+(define k-fin-region (subr (read @globals) (k-region) k-region)
   (lambda (r) (tagcase r (r-frozen (p f) (r-frozen p #t)) (else y r))))
 (define-rec
   (k-finitize (subr (maxeff kstate spin) (int (ref (listof (pairof int int @t) finite) @t)) int)
@@ -3320,9 +3320,9 @@
 (define k-finitized (subr (maxeff kstate spin) (int) int)
   (lambda (t) (k-finitize t (the (ref (listof (pairof int int @t) finite) @t) (new nil)))))
 ;; Which binding of `s` is in scope: how deep its name's stack is.
-(define k-binding-depth (subr (maxeff (read @t) spin) (symbol) int)
+(define k-binding-depth (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s) (k-length (table-ref (get k-env) s nil))))
-(define k-certified-has? (subr (read @t) ((listof (pairof symbol int @t) finite) symbol int) bool)
+(define k-certified-has? (subr (maxeff (read @globals) (read @t)) ((listof (pairof symbol int @t) finite) symbol int) bool)
   (lambda (cs s d) (and (not (null? cs)) (or (and (symbol=? (car (car cs)) s) (= (cdr (car cs)) d)) (k-certified-has? (cdr cs) s d)))))
 (define k-sc-one-arg? (subr (read @t) (kxs) bool) (lambda (xs) (and (not (null? xs)) (null? (cdr xs)))))
 (define k-check-bounds (subr (maxeff checks spin) (k-binders k-map int int) unit)
@@ -3365,7 +3365,7 @@
     (tagcase z
       (sz-lin (k ts) (and (<= k 0) (not (null? ts)) (null? (cdr ts)) (= (car (car ts)) v) (= (cdr (car ts)) 1)))
       (else y #f))))
-(define k-size-bad (subr pure (k-size int int) int)
+(define k-size-bad (subr (read @globals) (k-size int int) int)
   (lambda (z pol v)
     (if (and (not (= pol 1)) (tagcase z (sz-lin (k ts) (not (= (k-coef-of ts v) 0))) (else y #f))) 1 0)))
 (define-type k-seen-pol (ref (listof (pairof int int @t) finite) @t))
@@ -3442,9 +3442,9 @@
 ;; F8), and that is an error at `a`–`b`.
 (define k-forget-nats (subr (maxeff checks spin) (k-ids int int int) int)
   (lambda (saved t a b)
-    (letrec ((named (subr (maxeff kstate spin) (k-ids k-ids) k-ids)
+    (letrec ((named (subr (maxeff (read @globals) kstate spin) (k-ids k-ids) k-ids)
                       (lambda (vs out) (if (= (k-length vs) (k-length saved)) out (named (cdr vs) (the k-ids (cons (car vs) out))))))
-             (check (subr (maxeff checks spin) (k-ids) unit)
+             (check (subr (maxeff (read @globals) checks spin) (k-ids) unit)
                       (lambda (vs)
                         (cond ((null? vs) #u)
                               ((> (k-size-walk t 1 (car vs) (the k-seen-pol (new nil))) 0)
@@ -3453,7 +3453,7 @@
                                                  ", and that size is not known outside " name "'s scope")
                                          a b)))
                               (else (check (cdr vs))))))
-             (go (subr (maxeff kstate spin) (k-ids k-map) k-map)
+             (go (subr (maxeff (read @globals) kstate spin) (k-ids k-map) k-map)
                    (lambda (vs m) (if (null? vs) m (go (cdr vs) (cons (cons (car vs) (dz (sz-finite))) m))))))
       (let ((vs (named (get k-skolems) nil)))
         (begin (set k-skolems saved)
@@ -3504,7 +3504,7 @@
                   #u))
             #u))
       (else y #u))))
-(define k-wrong-shape? (subr (maxeff (read @t) (alloc @t) spin) (int int) bool)
+(define k-wrong-shape? (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int int) bool)
   (lambda (pattern actual)
     (let ((p (k-ty-rank pattern)) (a (k-ty-rank actual)))
       (cond ((or (= p 2) (= a 1)) #f)
@@ -3528,20 +3528,20 @@
               (k-inst-shapes (cdr args) (cdr params) (+ i 1) solved done-t))))))
 
 ;; Whether `t` mentions a binder of any kind not yet solved.
-(define k-open-region? (subr (read @t) (k-region k-binders k-solved) bool)
+(define k-open-region? (subr (maxeff (read @globals) (read @t)) (k-region k-binders k-solved) bool)
   (lambda (r kinds solved) (tagcase r (r-var (v) (k-open? kinds solved v)) (else y #f))))
-(define k-open-conv? (subr (read @t) (k-conv k-binders k-solved) bool)
+(define k-open-conv? (subr (maxeff (read @globals) (read @t)) (k-conv k-binders k-solved) bool)
   (lambda (c kinds solved) (tagcase c (cv-var (v) (k-open? kinds solved v)) (else y #f))))
-(define k-open-effect? (subr (read @t) (k-eff k-binders k-solved) bool)
+(define k-open-effect? (subr (maxeff (read @globals) (read @t)) (k-eff k-binders k-solved) bool)
   (lambda (e kinds solved)
     (cond ((null? e) #f)
           ((tagcase (car e) (a-var (v) (k-open? kinds solved v)) (else y (k-open-region? (k-atom-region (car e)) kinds solved))) #t)
           (else (k-open-effect? (cdr e) kinds solved)))))
-(define k-push-ids (subr (maxeff (read @t) (alloc @t)) (k-ids k-ids) k-ids)
+(define k-push-ids (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-ids k-ids) k-ids)
   (lambda (xs onto) (if (null? xs) onto (cons (car xs) (k-push-ids (cdr xs) onto)))))
-(define k-push-parts (subr (maxeff (read @t) (alloc @t)) (k-parts k-ids) k-ids)
+(define k-push-parts (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-parts k-ids) k-ids)
   (lambda (ps onto) (if (null? ps) onto (cons (extract (car ps) 2) (k-push-parts (cdr ps) onto)))))
-(define k-descs-open? (subr (read @t) ((listof k-desc finite) k-binders k-solved) bool)
+(define k-descs-open? (subr (maxeff (read @globals) (read @t)) ((listof k-desc finite) k-binders k-solved) bool)
   (lambda (ds kinds solved)
     (and (not (null? ds))
          (or (tagcase (car ds)
@@ -3554,7 +3554,7 @@
 (define k-size-open? (subr (maxeff kstate spin) (k-size k-binders k-solved) bool)
   (lambda (z kinds solved)
     (tagcase z
-      (sz-lin (k ts) (letrec ((any (subr (maxeff kstate spin) (k-terms) bool)
+      (sz-lin (k ts) (letrec ((any (subr (maxeff (read @globals) kstate spin) (k-terms) bool)
                                    (lambda (xs) (and (not (null? xs)) (or (k-open? kinds solved (car (car xs))) (any (cdr xs)))))))
                        (any ts)))
       (else w #f))))
@@ -3566,8 +3566,8 @@
           (if (k-visit? t seen)
               (k-any-walk rest seen kinds solved)
               (let ((seen seen))
-               (letrec ((reg (subr (read @t) (k-region) bool) (lambda (r) (k-open-region? r kinds solved)))
-                        (go (subr (maxeff kstate spin) (k-ids) bool) (lambda (s) (k-any-walk s seen kinds solved))))
+               (letrec ((reg (subr (maxeff (read @globals) (read @t)) (k-region) bool) (lambda (r) (k-open-region? r kinds solved)))
+                        (go (subr (maxeff (read @globals) kstate spin) (k-ids) bool) (lambda (s) (k-any-walk s seen kinds solved))))
                 (tagcase (k-get t)
                   (ty-var (v) (or (k-open? kinds solved v) (go rest)))
                   (ty-subr (e ps r cv) (or (k-open-effect? e kinds solved) (k-open-conv? cv kinds solved) (go (k-push-ids ps (cons r rest)))))
@@ -3591,13 +3591,13 @@
   (lambda (t kinds solved) (k-any-walk (cons t nil) (k-new-epoch) kinds solved)))
 
 (define-rec
-  (k-vars-walk (subr (maxeff (read @t) (write @t) (alloc @t) spin) (int int k-binders k-solved) bool)
+  (k-vars-walk (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int int k-binders k-solved) bool)
     (lambda (t seen kinds solved)
       (let ((t (k-resolve t)))
         (if (k-visit? t seen)
             #f
-            (letrec ((w (subr (maxeff (read @t) (write @t) (alloc @t) spin) (int) bool) (lambda (x) (k-vars-walk x seen kinds solved)))
-                  (ws (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids) bool) (lambda (xs) (k-vars-walks xs seen kinds solved))))
+            (letrec ((w (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int) bool) (lambda (x) (k-vars-walk x seen kinds solved)))
+                  (ws (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-ids) bool) (lambda (xs) (k-vars-walks xs seen kinds solved))))
               (begin
                 (tagcase (k-get t)
                   (ty-var (v) (k-open? kinds solved v))
@@ -3616,13 +3616,13 @@
                   (ty-named (g ds) (ws (k-desc-types ds)))
                   (ty-nlist (e z r) (w e))
                   (else y #f))))))))
-  (k-vars-walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids int k-binders k-solved) bool)
+  (k-vars-walks (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-ids int k-binders k-solved) bool)
     (lambda (ts seen kinds solved) (cond ((null? ts) #f) ((k-vars-walk (car ts) seen kinds solved) #t) (else (k-vars-walks (cdr ts) seen kinds solved))))))
 
 ;; Whether `t` mentions a type binder not yet solved.
-(define k-mentions-unknown-type? (subr (maxeff (read @t) (write @t) (alloc @t) spin) (int k-binders k-solved) bool)
+(define k-mentions-unknown-type? (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int k-binders k-solved) bool)
   (lambda (t kinds solved) (k-vars-walk t (k-new-epoch) kinds solved)))
-(define k-any-unknown-type? (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids k-binders k-solved) bool)
+(define k-any-unknown-type? (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-ids k-binders k-solved) bool)
   (lambda (ts kinds solved)
     (cond ((null? ts) #f) ((k-mentions-unknown-type? (car ts) kinds solved) #t) (else (k-any-unknown-type? (cdr ts) kinds solved)))))
 ;; A convention binder takes the actual's convention, if nothing has yet.
@@ -3634,7 +3634,7 @@
 (define k-unify-region (subr kstate (k-region k-region k-binders k-solved) unit)
   (lambda (p a kinds solved)
     (tagcase p (r-var (v) (if (k-open? kinds solved v) (k-solve solved v (dr a)) #u)) (else y #u))))
-(define k-same-kind-regions (subr (maxeff (read @t) (alloc @t)) (k-eff int) k-regions)
+(define k-same-kind-regions (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-eff int) k-regions)
   (lambda (e rank)
     (cond ((null? e) nil)
           ((= (k-atom-rank (car e)) rank) (cons (k-atom-region (car e)) (k-same-kind-regions (cdr e) rank)))
@@ -3679,9 +3679,9 @@
                 (if (and (tagcase at (ty-void () #t) (else y #f))
                          (not (tagcase pt (ty-var (v) (k-open? kinds solved v)) (else y #f))))
                     #u
-                    (letrec ((u (subr (maxeff kstate spin) (int int) unit) (lambda (x y) (k-unify x y kinds solved trail)))
-                          (ur (subr kstate (k-region k-region) unit) (lambda (r s) (k-unify-region r s kinds solved)))
-                          (ue (subr (maxeff kstate spin) (k-eff k-eff) unit) (lambda (e f) (k-unify-effect e f kinds solved))))
+                    (letrec ((u (subr (maxeff (read @globals) kstate spin) (int int) unit) (lambda (x y) (k-unify x y kinds solved trail)))
+                          (ur (subr (maxeff (read @globals) kstate) (k-region k-region) unit) (lambda (r s) (k-unify-region r s kinds solved)))
+                          (ue (subr (maxeff (read @globals) kstate spin) (k-eff k-eff) unit) (lambda (e f) (k-unify-effect e f kinds solved))))
                       (tagcase pt
                         (ty-var (v)
                           (if (k-unknown? kinds v)
@@ -3767,13 +3767,13 @@
         (k-default-regions kinds solved)
         (let ((m (k-finish kinds solved a b t)))
           (begin (k-check-bounds kinds m a b) (k-check-finite-sizes kinds m inner a b) (let ((inst (k-subst inner m))) (begin (k-no-knot inst a b) inst))))))))
-(define k-plambda-matches? (subr (read @t) (kx k-ty) bool)
+(define k-plambda-matches? (subr (maxeff (read @globals) (read @t)) (kx k-ty) bool)
   (lambda (x et)
     (tagcase x
       (x-plambda (binders body a b)
         (tagcase et (ty-poly (bs want) (and (= (k-length bs) (k-length binders)) (k-same-kinds? bs binders))) (else y #f)))
       (else y #f))))
-(define k-same-labels? (subr (read @t) ((listof (productof (1 symbol) (2 kx)) finite) k-parts) bool)
+(define k-same-labels? (subr (maxeff (read @globals) (read @t)) ((listof (productof (1 symbol) (2 kx)) finite) k-parts) bool)
   (lambda (fs ps)
     (cond ((null? fs) (null? ps))
           ((null? ps) #f)
@@ -3790,11 +3790,11 @@
     (cond ((null? candidates) -1)
           ((k-all-fit? types (car candidates)) (car candidates))
           (else (k-upper-bound (cdr candidates) types)))))
-(define k-part-names (subr (maxeff (read @t) (alloc @t)) (k-parts) (listof string finite))
+(define k-part-names (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-parts) (listof string finite))
   (lambda (ps) (if (null? ps) nil (cons (symbol->string (extract (car ps) 1)) (k-part-names (cdr ps))))))
-(define k-arm-named? (subr (read @t) (k-arms symbol) bool)
+(define k-arm-named? (subr (maxeff (read @globals) (read @t)) (k-arms symbol) bool)
   (lambda (arms l) (cond ((null? arms) #f) ((symbol=? (extract (car arms) 1) l) #t) (else (k-arm-named? (cdr arms) l)))))
-(define k-variants-not-named (subr (maxeff (read @t) (alloc @t)) (k-parts k-arms) k-parts)
+(define k-variants-not-named (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-parts k-arms) k-parts)
   (lambda (vs arms)
     (cond ((null? vs) nil)
           ((k-arm-named? arms (extract (car vs) 1)) (k-variants-not-named (cdr vs) arms))
@@ -3804,15 +3804,15 @@
     (k-fail (k-cat5 (k-quote (symbol->string tag)) " carries a " (k-show-ty t) ", which cannot be taken apart into "
                     (string-append (int->string (k-length names)) " name(s)"))
             (k-start body) (k-end body))))
-(define k-zip-fields (subr (maxeff (read @t) (alloc @t)) (k-names k-parts) k-bindings)
+(define k-zip-fields (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-names k-parts) k-bindings)
   (lambda (ns fs) (if (null? ns) nil (cons (cons (car ns) (extract (car fs) 2)) (k-zip-fields (cdr ns) (cdr fs))))))
 ;; The atoms of `e` in neither `bound` nor `own`.
-(define k-beyond (subr (maxeff (read @t) (alloc @t) spin) (k-eff k-eff k-eff) k-eff)
+(define k-beyond (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-eff k-eff) k-eff)
   (lambda (e bound own)
     (cond ((null? e) nil)
-          ((or (k-contains? bound (car e)) (k-contains? own (car e))) (k-beyond (cdr e) bound own))
+          ((or (k-covered? bound (car e)) (k-contains? own (car e))) (k-beyond (cdr e) bound own))
           (else (cons (car e) (k-beyond (cdr e) bound own))))))
-(define k-none-reach? (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-names k-names k-region) bool)
+(define k-none-reach? (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-names k-names k-region) bool)
   (lambda (vs tv r)
     (cond ((null? vs) #t)
           ((k-has-name? tv (car vs)) (k-none-reach? (cdr vs) tv r))
@@ -3820,14 +3820,14 @@
                   (and (or (< t 0) (not (k-has-region-in? (k-regions-in t) r))) (k-none-reach? (cdr vs) tv r)))))))
 ;; Whether the only way `body` can name anything in region `r` is the
 ;; variable `tag`, if it is one.
-(define k-reaches-only? (subr (maxeff (read @t) (write @t) (alloc @t) spin) (kx kx k-region) bool)
+(define k-reaches-only? (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (kx kx k-region) bool)
   (lambda (body tag r)
     (let ((tv (the k-names (tagcase tag (x-var (s a b) (cons s nil)) (else y nil)))))
       (k-none-reach? (k-free-vars body) tv r))))
 
 ;;; ------------------------------------------------------------ synthesis
 
-(define k-has-comefrom? (subr (read @t) (k-eff) bool)
+(define k-has-comefrom? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
   (lambda (e) (and (not (null? e)) (or (tagcase (car e) (a-comefrom (r) #t) (else y #f)) (k-has-comefrom? (cdr e))))))
 ;; `(letrena r …)`'s or `(letreap r …)`'s body, of type `t` and effect `e`,
 ;; closed: its value
@@ -3846,7 +3846,7 @@
                 (k-te t masked)))))))
 
 ;; Whether an effect writes region `r`.
-(define k-eff-writes? (subr (maxeff (read @t) spin) (k-eff k-region) bool)
+(define k-eff-writes? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-region) bool)
   (lambda (e r)
     (and (not (null? e))
          (or (tagcase (car e) (a-write (x) (k-region=? x r)) (else y #f)) (k-eff-writes? (cdr e) r)))))
@@ -3856,7 +3856,7 @@
 ;; given the region.
 (define k-wrote-param (ref bool @t) (new #f))
 (define k-given (ref bool @t) (new #f))
-(define k-eff-writes-param? (subr (read @t) (k-eff) bool)
+(define k-eff-writes-param? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
   (lambda (e)
     (and (not (null? e))
          (or (tagcase (car e) (a-write (x) (k-gen-region? x)) (a-var (v) (k-gen-param? v)) (else y #f))
@@ -3907,12 +3907,12 @@
   (k-writes-parts (subr (maxeff kstate spin) (k-parts k-region int) bool)
     (lambda (ps r seen) (and (not (null? ps)) (or (k-writes-in (extract (car ps) 2) r seen) (k-writes-parts (cdr ps) r seen))))))
 
-(define k-any-frozen? (subr (read @t) (k-eff) bool)
+(define k-any-frozen? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
   (lambda (e) (and (not (null? e)) (or (k-frozen-atom? (car e)) (k-any-frozen? (cdr e))))))
-(define k-writes-frozen? (subr (read @t) (k-eff) bool)
+(define k-writes-frozen? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
   (lambda (e) (and (not (null? e)) (or (and (k-frozen-atom? (car e)) (= (k-atom-rank (car e)) 1)) (k-writes-frozen? (cdr e))))))
 ;; `e` without its reads, allocations and awaits on `const`, which are pure.
-(define k-drop-frozen (subr (maxeff (read @t) (alloc @t)) (k-eff) k-eff)
+(define k-drop-frozen (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-eff) k-eff)
   (lambda (e)
     (cond ((null? e) nil)
           ;; Only data frozen in the heap, which never ends; what is done to
@@ -3947,10 +3947,10 @@
 ;; anything loop. `path`: the nodes on the way down, newest first, each with
 ;; whether it was reached through a parameter.
 (define-type k-cpath (listof (pairof int bool @t) finite))
-(define k-on-path? (subr (read @t) (k-cpath int) bool)
+(define k-on-path? (subr (maxeff (read @globals) (read @t)) (k-cpath int) bool)
   (lambda (path t) (and (not (null? path)) (or (= (car (car path)) t) (k-on-path? (cdr path) t)))))
 ;; Whether a node newer than `t` on the path was reached through a parameter.
-(define k-newer-param? (subr (read @t) (k-cpath int) bool)
+(define k-newer-param? (subr (maxeff (read @globals) (read @t)) (k-cpath int) bool)
   (lambda (path t) (and (not (= (car (car path)) t)) (or (cdr (car path)) (k-newer-param? (cdr path) t)))))
 (define-rec
   (k-cyclic-from? (subr (maxeff kstate spin) (int bool k-cpath) bool)
@@ -3986,13 +3986,13 @@
 (define k-cyclic? (subr (maxeff kstate spin) (int) bool)
   (lambda (t) (k-cyclic-from? t #f nil)))
 ;; `f` under any projections and ascriptions.
-(define k-under (subr pure (kx) kx)
+(define k-under (subr (read @globals) (kx) kx)
   (lambda (f) (tagcase f (x-proj (body ds a b) (k-under body)) (x-the (t body a b) (k-under body)) (else y f))))
 ;; Whether `k` is named in `x` only as the operator of calls, evaluated as
 ;; `x` is: not under a `lambda` (which could be called later) or a prompt
 ;; (whose captures could be composed later).
 (define-rec
-  (k-only-called? (subr (maxeff (read @t) (alloc @t)) (kx symbol) bool)
+  (k-only-called? (subr (maxeff (read @globals) (read @t) (alloc @t)) (kx symbol) bool)
     (lambda (x k)
       (tagcase x
         (x-var (s a b) (not (symbol=? s k)))
@@ -4021,37 +4021,37 @@
         (x-begin (xs a b) (k-only-called-list? xs k))
         (x-bloblet (o i xs a b) (k-only-called-list? xs k))
         (x-product (fs a b) (k-only-called-lets? fs k)))))
-  (k-only-called-list? (subr (maxeff (read @t) (alloc @t)) (kxs symbol) bool)
+  (k-only-called-list? (subr (maxeff (read @globals) (read @t) (alloc @t)) (kxs symbol) bool)
     (lambda (xs k) (or (null? xs) (and (k-only-called? (car xs) k) (k-only-called-list? (cdr xs) k)))))
-  (k-only-called-lets? (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) symbol) bool)
+  (k-only-called-lets? (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) symbol) bool)
     (lambda (bs k) (or (null? bs) (and (k-only-called? (extract (car bs) 2) k) (k-only-called-lets? (cdr bs) k)))))
-  (k-only-called-arms? (subr (maxeff (read @t) (alloc @t)) (k-arms symbol) bool)
+  (k-only-called-arms? (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-arms symbol) bool)
     (lambda (arms k)
       (or (null? arms)
           (and (or (k-has-name? (extract (car arms) 3) k) (k-only-called? (extract (car arms) 4) k))
                (k-only-called-arms? (cdr arms) k))))))
 ;; Whether the receiver of `cwcc` at type `ft` may capture a continuation:
 ;; its latent effect has a `comefrom`. Unknown counts as may.
-(define k-receiver-captures? (subr (maxeff (read @t) (alloc @t) spin) (int) bool)
+(define k-receiver-captures? (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int) bool)
   (lambda (ft)
     (let ((c (k-as-subr ft)))
       (or (null? c) (null? (extract (car c) 2))
           (let ((r (k-as-subr (k-resolve (car (extract (car c) 2))))))
             (or (null? r)
-                (letrec ((any (subr pure (k-eff) bool)
+                (letrec ((any (subr (read @globals) (k-eff) bool)
                               (lambda (e) (and (not (null? e)) (or (tagcase (car e) (a-comefrom (x) #t) (else y #f)) (any (cdr e)))))))
                   (any (extract (car r) 1)))))))))
 ;; Whether `r`, given to `cwcc`, is a `lambda` whose continuation can only
 ;; be called while `cwcc` runs, so can only leave it
 ;; (`docs/research/soundness-findings.md`, F3).
-(define k-escape-only? (subr (maxeff (read @t) (alloc @t)) (kx) bool)
+(define k-escape-only? (subr (maxeff (read @globals) (read @t) (alloc @t)) (kx) bool)
   (lambda (r)
     (tagcase r
       (x-the (t body a b) (k-escape-only? body))
       (x-lambda (ps body a b) (and (not (null? ps)) (null? (cdr ps)) (k-only-called? body (extract (car ps) 1))))
       (else y #f))))
 ;; The name `f` is, under any projections and ascriptions, if a variable.
-(define k-callee-name (subr (alloc @t) (kx) (listof symbol finite))
+(define k-callee-name (subr (maxeff (read @globals) (alloc @t)) (kx) (listof symbol finite))
   (lambda (f)
     (tagcase f
       (x-proj (body ds a b) (k-callee-name body))
@@ -4134,17 +4134,17 @@
 ;; same for the whole recursion, and a bound as a literal is.
 (define k-sc-invariant (ref k-guards @t) (new nil))
 
-(define k-sc-in? (subr (read @t) (k-tscope symbol) bool)
+(define k-sc-in? (subr (maxeff (read @globals) (read @t)) (k-tscope symbol) bool)
   (lambda (sc s) (and (not (null? sc)) (or (symbol=? (car (car sc)) s) (k-sc-in? (cdr sc) s)))))
-(define k-sc-trs (subr (read @t) (k-tscope symbol) k-trs)
+(define k-sc-trs (subr (maxeff (read @globals) (read @t)) (k-tscope symbol) k-trs)
   (lambda (sc s) (cond ((null? sc) nil) ((symbol=? (car (car sc)) s) (cdr (car sc))) (else (k-sc-trs (cdr sc) s)))))
-(define k-sc-index (subr (read @t) (k-names symbol int) int)
+(define k-sc-index (subr (maxeff (read @globals) (read @t)) (k-names symbol int) int)
   (lambda (ns s i) (cond ((null? ns) -1) ((symbol=? (car ns) s) i) (else (k-sc-index (cdr ns) s (+ i 1))))))
 ;; The member `s` names, or -1 if none, or if something on the way hid it.
-(define k-sc-member (subr (read @t) (k-tscope symbol) int)
+(define k-sc-member (subr (maxeff (read @globals) (read @t)) (k-tscope symbol) int)
   (lambda (sc s) (if (k-sc-in? sc s) -1 (k-sc-index (get k-sc-members) s 0))))
 ;; The standard operation `f` names, or "".
-(define k-sc-op (subr (maxeff (read @t) (alloc @t) spin) (kx k-tscope) string)
+(define k-sc-op (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx k-tscope) string)
   (lambda (f sc)
     (tagcase (k-under f)
       (x-var (s a b)
@@ -4153,23 +4153,23 @@
               (symbol->string s)
               "")))
       (else y ""))))
-(define k-sc-literal (subr (alloc @t) (kx) (listof int finite))
+(define k-sc-literal (subr (maxeff (read @globals) (alloc @t)) (kx) (listof int finite))
   (lambda (x) (tagcase x (x-const (t v a b) (if (= t k-int) (the (listof int finite) (cons v nil)) nil)) (else y nil))))
-(define k-sc-bool? (subr pure (kx bool) bool)
+(define k-sc-bool? (subr (read @globals) (kx bool) bool)
   (lambda (x want) (tagcase x (x-const (t v a b) (and (= t k-bool) (= v (if want 1 0)))) (else y #f))))
 (define k-sc-one? (subr (read @t) (kxs) bool)
   (lambda (xs) (and (not (null? xs)) (null? (cdr xs)))))
-(define k-sc-two? (subr (read @t) (kxs) bool)
+(define k-sc-two? (subr (maxeff (read @globals) (read @t)) (kxs) bool)
   (lambda (xs) (and (not (null? xs)) (k-sc-one? (cdr xs)))))
 
-(define k-sc-part-ty (subr (read @t) (k-parts symbol) int)
+(define k-sc-part-ty (subr (maxeff (read @globals) (read @t)) (k-parts symbol) int)
   (lambda (ps l) (cond ((null? ps) -1) ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2)) (else (k-sc-part-ty (cdr ps) l)))))
-(define k-sc-nth-ty (subr (read @t) (k-parts int) int)
+(define k-sc-nth-ty (subr (maxeff (read @globals) (read @t)) (k-parts int) int)
   (lambda (ps i) (cond ((null? ps) -1) ((= i 0) (extract (car ps) 2)) (else (k-sc-nth-ty (cdr ps) (- i 1))))))
 ;; Field `l` of what `ks` knows of products.
 ;; A part's type, where known (`t` ≥ 0); `void` where not, as past a
 ;; generative type's conversion.
-(define k-ty-known (subr (maxeff (read @t) spin) (int) k-ty) (lambda (t) (if (< t 0) (ty-void) (k-get t))))
+(define k-ty-known (subr (maxeff (read @globals) (read @t) spin) (int) k-ty) (lambda (t) (if (< t 0) (ty-void) (k-get t))))
 ;; An `extract` proves a product, and so a part, known here or not.
 (define k-sc-fields (subr (maxeff kstate spin) (k-trs symbol) k-trs)
   (lambda (ks l)
@@ -4238,7 +4238,7 @@
           (tagcase (car ks) (tr-int (p o) (the k-trs (cons (tr-int p (+ o k)) rest))) (else y rest))))))
 ;; What both `ks` and `ls` say, the weaker of the two: what is known of
 ;; either branch's value.
-(define k-sc-meet-one (subr (maxeff (read @t) spin) (k-tr k-trs) k-trs)
+(define k-sc-meet-one (subr (maxeff (read @globals) (read @t) spin) (k-tr k-trs) k-trs)
   (lambda (k ls)
     (if (null? ls)
         nil
@@ -4256,7 +4256,7 @@
                        (tr-int (q n) (if (and (= p q) (= o n)) (the k-trs (cons k nil)) (the k-trs nil)))
                        (else y (the k-trs nil)))))))
           (if (null? m) (k-sc-meet-one k (cdr ls)) m)))))
-(define k-sc-meet (subr (maxeff (read @t) spin) (k-trs k-trs) k-trs)
+(define k-sc-meet (subr (maxeff (read @globals) (read @t) spin) (k-trs k-trs) k-trs)
   (lambda (ks ls)
     (if (null? ks)
         nil
@@ -4264,7 +4264,7 @@
           (if (null? m) rest (the k-trs (cons (car m) rest)))))))
 ;; Whether `f` names a generative type's `up-` or `down-` conversion, the
 ;; identity.
-(define k-sc-conversion? (subr (maxeff (read @t) (alloc @t) spin) (kx k-tscope) bool)
+(define k-sc-conversion? (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx k-tscope) bool)
   (lambda (f sc)
     (tagcase (k-under f)
       (x-var (s a b)
@@ -4300,18 +4300,18 @@
                          (else nil))))
                 (else nil))))
       (else y nil))))
-(define k-sc-guarded? (subr (read @t) (k-guards int int) bool)
+(define k-sc-guarded? (subr (maxeff (read @globals) (read @t)) (k-guards int int) bool)
   (lambda (gs p b) (and (not (null? gs)) (or (and (= (car (car gs)) p) (= (cdr (car gs)) b)) (k-sc-guarded? (cdr gs) p b)))))
 ;; The current member's parameters that are `nat`s: bounded below by 0
 ;; without a test, since every argument passed for one is checked a natural.
 (define k-sc-naturals (ref k-ids @t) (new nil))
 ;; Whether parameter `p` is bounded its way `b` (0 below, 1 above): by a
 ;; test, or, below, by being a `nat`.
-(define k-sc-bounded? (subr (read @t) (k-guards int int) bool)
+(define k-sc-bounded? (subr (maxeff (read @globals) (read @t)) (k-guards int int) bool)
   (lambda (gs p b) (or (k-sc-guarded? gs p b) (and (= b 0) (k-has-id? (get k-sc-naturals) p)))))
 ;; Whether `ks` knows a value as a parameter, of the member walked, passed on
 ;; unchanged by every call.
-(define k-sc-invariant-in? (subr (read @t) (k-trs) bool)
+(define k-sc-invariant-in? (subr (maxeff (read @globals) (read @t)) (k-trs) bool)
   (lambda (ks)
     (and (not (null? ks))
          (or (tagcase (car ks)
@@ -4415,7 +4415,7 @@
 (define k-sc-passing (subr (maxeff kstate spin) (kxs k-tscope) k-ids)
   (lambda (args sc) (if (null? args) nil (the k-ids (cons (k-sc-unchanged (k-sc-tracked (car args) sc)) (k-sc-passing (cdr args) sc))))))
 ;; Whether `ks` knows of a pair at a region that is not `finite`.
-(define k-sc-any-written? (subr (maxeff (read @t) spin) (k-trs) bool)
+(define k-sc-any-written? (subr (maxeff (read @globals) (read @t) spin) (k-trs) bool)
   (lambda (ks)
     (and (not (null? ks))
          (or (tagcase (car ks)
@@ -4435,7 +4435,7 @@
                (else y #f))
              (k-sc-written-arg? (cdr args) sc)))))
 ;; The first count in `ks` with no fixed bound its way, in words, or "".
-(define k-sc-count-hint (subr (read @t) (k-trs k-guards) string)
+(define k-sc-count-hint (subr (maxeff (read @globals) (read @t)) (k-trs k-guards) string)
   (lambda (ks gs)
     (if (null? ks)
         ""
@@ -4543,7 +4543,7 @@
           (else (k-sc-compose-one e (cdr b) out)))))
 (define k-sc-compose (subr kstate (k-graph k-graph k-graph) k-graph)
   (lambda (a b out) (if (null? a) out (k-sc-compose (cdr a) b (k-sc-compose-one (car a) b out)))))
-(define k-sc-same? (subr (read @t) (k-graph k-graph) bool)
+(define k-sc-same? (subr (maxeff (read @globals) (read @t)) (k-graph k-graph) bool)
   (lambda (a b)
     (if (null? a)
         (null? b)
@@ -4552,7 +4552,7 @@
              (= (extract (car a) 2) (extract (car b) 2))
              (if (extract (car a) 3) (extract (car b) 3) (not (extract (car b) 3)))
              (k-sc-same? (cdr a) (cdr b))))))
-(define k-sc-has? (subr (read @t) (k-calls int int k-graph) bool)
+(define k-sc-has? (subr (maxeff (read @globals) (read @t)) (k-calls int int k-graph) bool)
   (lambda (cs f h g)
     (and (not (null? cs))
          (or (and (= (extract (car cs) 1) f) (= (extract (car cs) 2) h) (k-sc-same? (extract (car cs) 3) g))
@@ -4562,7 +4562,7 @@
     (cond ((null? cs) out)
           ((k-sc-has? out (extract (car cs) 1) (extract (car cs) 2) (extract (car cs) 3)) (k-sc-dedup (cdr cs) out))
           (else (k-sc-dedup (cdr cs) (cons (car cs) out))))))
-(define k-sc-strict-loop? (subr (read @t) (k-graph) bool)
+(define k-sc-strict-loop? (subr (maxeff (read @globals) (read @t)) (k-graph) bool)
   (lambda (g) (and (not (null? g)) (or (and (= (extract (car g) 1) (extract (car g) 2)) (extract (car g) 3)) (k-sc-strict-loop? (cdr g))))))
 ;; Whether every graph from a member to itself that is its own composition
 ;; has a strict loop.
@@ -4594,7 +4594,7 @@
                              (k-sc-extend f g a (cdr calls) (cons new todo) (cons new all) (+ n 1)))))))))))
 
 ;; A binding's lambda, under `plambda`, `the` and `rlambda`.
-(define k-sc-lambda-of (subr pure (kx) kx)
+(define k-sc-lambda-of (subr (read @globals) (kx) kx)
   (lambda (x)
     (tagcase x
       (x-plambda (bs body a b) (k-sc-lambda-of body))
@@ -4602,7 +4602,7 @@
       (x-rlambda (r l a b) (k-sc-lambda-of l))
       (else y y))))
 ;; The parameter types of a declared type, under its binders.
-(define k-sc-param-types (subr (maxeff (read @t) spin) (int) k-ids)
+(define k-sc-param-types (subr (maxeff (read @globals) (read @t) spin) (int) k-ids)
   (lambda (t) (tagcase (k-get t) (ty-poly (bs body) (k-sc-param-types body)) (ty-subr (e ps r cv) ps) (else y nil))))
 ;; The parameters `ps`, the `j`th on, each known as itself.
 (define k-sc-param-scope (subr (maxeff kstate spin) ((listof (productof (1 symbol) (2 k-ids)) finite) k-ids int k-tscope) k-tscope)
@@ -4661,11 +4661,11 @@
   (lambda (inv)
     (let ((next (k-sc-keep-all inv (get k-sc-passed))))
       (if (= (k-length next) (k-length inv)) inv (k-sc-invariants next)))))
-(define k-sc-member-name (subr (read @t) (int) string)
+(define k-sc-member-name (subr (maxeff (read @globals) (read @t)) (int) string)
   (lambda (i) (symbol->string (k-nth (get k-sc-members) i))))
-(define k-sc-strict-any? (subr pure (k-graph) bool)
+(define k-sc-strict-any? (subr (read @globals) (k-graph) bool)
   (lambda (g) (and (not (null? g)) (or (extract (car g) 3) (k-sc-strict-any? (cdr g))))))
-(define k-sc-has-string? (subr pure ((listof string finite) string) bool)
+(define k-sc-has-string? (subr (read @globals) ((listof string finite) string) bool)
   (lambda (xs s) (and (not (null? xs)) (or (string=? (car xs) s) (k-sc-has-string? (cdr xs) s)))))
 ;; The calls, in the order met, that pass nothing strictly smaller, and
 ;; either nothing related to the caller's parameters or with a hint why;
@@ -4684,7 +4684,7 @@
                              (k-sc-has-string? out s))
                          out
                          (the (listof string finite) (cons s out))))))))
-(define k-sc-escape-why (subr (read @t) () string)
+(define k-sc-escape-why (subr (maxeff (read @globals) (read @t)) () string)
   (lambda ()
     (let ((e (car (get k-sc-escapes))))
       (k-cat5 "`" (k-sc-member-name (cdr e)) "` is named in `" (k-sc-member-name (car e))
@@ -4739,18 +4739,18 @@
         #u
         (begin (set k-spin-why (cons (product (1 (extract (car g) 1)) (2 (extract (car g) 2)) (3 why)) (get k-spin-why)))
                (k-note-why (cdr g) why)))))
-(define k-why-of (subr (read @t) ((listof (productof (1 symbol) (2 int) (3 string)) finite) symbol int) string)
+(define k-why-of (subr (maxeff (read @globals) (read @t)) ((listof (productof (1 symbol) (2 int) (3 string)) finite) symbol int) string)
   (lambda (ws n t)
     (cond ((null? ws) "")
           ((and (symbol=? (extract (car ws) 1) n) (= (extract (car ws) 2) t)) (extract (car ws) 3))
           (else (k-why-of (cdr ws) n t)))))
-(define k-text-has? (subr spin (string string int) bool)
+(define k-text-has? (subr (maxeff (read @globals) spin) (string string int) bool)
   (lambda (hay needle i)
     (and (<= (+ i (string-length needle)) (string-length hay))
          (or (string=? (substring hay i (+ i (string-length needle))) needle) (k-text-has? hay needle (+ i 1))))))
 ;; `f`, checking what `n` is declared `t`; an error at `a`..`b` itself says
 ;; so, and, if it is about `spin` and `n`'s group may not end, why not.
-(define k-declaring (subr (maxeff checks spin) ((subr (maxeff checks spin) () k-te) int int symbol int) k-te)
+(define k-declaring (subr (maxeff (read @globals) checks spin) ((subr (maxeff checks spin) () k-te) int int symbol int) k-te)
   (lambda (f a b n t)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
       (tagcase r
@@ -4778,13 +4778,13 @@
 (define k-ge-fact (subr pure (k-size) (listof k-size-fact finite))
   (lambda (lin) (the (listof k-size-fact finite) (cons (product (1 lin) (2 #f)) nil))))
 ;; `x < y`, as `y - x - 1 ≥ 0`; `x ≤ y`, as `y - x ≥ 0`.
-(define k-lt-fact (subr pure (k-size k-size) (listof k-size-fact finite))
+(define k-lt-fact (subr (read @globals) (k-size k-size) (listof k-size-fact finite))
   (lambda (x y) (k-ge-fact (k-size-plus (k-size-add-scaled y x -1) -1))))
-(define k-le-fact (subr pure (k-size k-size) (listof k-size-fact finite))
+(define k-le-fact (subr (read @globals) (k-size k-size) (listof k-size-fact finite))
   (lambda (x y) (k-ge-fact (k-size-add-scaled y x -1))))
 ;; The size an argument is, when a natural literal or a variable of type
 ;; `(nat s)` (none or one).
-(define k-nat-size (subr (maxeff (read @t) spin) (kx) (listof k-size finite))
+(define k-nat-size (subr (maxeff (read @globals) (read @t) spin) (kx) (listof k-size finite))
   (lambda (x)
     (tagcase x
       (x-const (ty k a b) (if (and (= ty k-int) (>= k 0)) (the (listof k-size finite) (cons (k-size-lit k) nil)) nil))
@@ -4795,7 +4795,7 @@
               (tagcase (k-get (k-resolve t)) (ty-nat (z) (the (listof k-size finite) (cons z nil))) (else y nil)))))
       (else y nil))))
 ;; `xs : (nlist T n)` shows `n = 0` when null, and `n - 1 ≥ 0` when not.
-(define k-null-facts (subr (maxeff (read @t) (alloc @t) spin) (kx) k-branch-facts)
+(define k-null-facts (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) k-branch-facts)
   (lambda (x)
     (let ((none (k-branch-facts-of nil nil)))
       (tagcase x
@@ -4812,7 +4812,7 @@
                   (else w none)))))
         (else y none)))))
 ;; What a comparison `(op a b)` of naturals shows, when both have sizes.
-(define k-compare-facts (subr (maxeff (read @t) (alloc @t) spin) (string kx kx) k-branch-facts)
+(define k-compare-facts (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (string kx kx) k-branch-facts)
   (lambda (op a b)
     (let ((xs (k-nat-size a)) (ys (k-nat-size b)) (none (k-branch-facts-of nil nil)))
       (if (or (null? xs) (null? ys) (tagcase (car xs) (sz-finite () #t) (else w #f)) (tagcase (car ys) (sz-finite () #t) (else w #f)))
@@ -4830,7 +4830,7 @@
 ;; `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the
 ;; variable, its binding, and the length, a natural literal or a variable
 ;; of type `(nat s)` (none or one).
-(define k-length-arg (subr (maxeff (read @t) (alloc @t) spin) (kx kx) (listof k-cert-len finite))
+(define k-length-arg (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx kx) (listof k-cert-len finite))
   (lambda (a n)
     (tagcase a
       (x-var (v va vb)
@@ -4841,13 +4841,13 @@
       (else y nil))))
 ;; What `length-is?` has just confirmed: a variable, its binding, the length.
 (define-type k-cert-len (productof (1 symbol) (2 int) (3 k-size)))
-(define k-cert-len-has? (subr (read @t) ((listof k-cert-len finite) k-cert-len) bool)
+(define k-cert-len-has? (subr (maxeff (read @globals) (read @t)) ((listof k-cert-len finite) k-cert-len) bool)
   (lambda (cs c)
     (and (not (null? cs))
          (or (and (symbol=? (extract (car cs) 1) (extract c 1)) (= (extract (car cs) 2) (extract c 2)) (k-size=? (extract (car cs) 3) (extract c 3)))
              (k-cert-len-has? (cdr cs) c)))))
 ;; If `p` is `(length-is? v k)`, the variable, its binding, and the length.
-(define k-length-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof k-cert-len finite))
+(define k-length-test (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) (listof k-cert-len finite))
   (lambda (p)
     (tagcase p
       (x-app (f args a b)
@@ -4862,7 +4862,7 @@
       (else y nil))))
 ;; Whether `x` may be a natural of a size without being told what it is: an
 ;; integer literal, a variable, or a `+`, `-` or `length`.
-(define k-natural-by-itself? (subr (maxeff (read @t) spin) (kx) bool)
+(define k-natural-by-itself? (subr (maxeff (read @globals) (read @t) spin) (kx) bool)
   (lambda (x)
     (tagcase x
       (x-const (ty k a b) (= ty k-int))
@@ -4877,7 +4877,7 @@
       (else y #f))))
 ;; The size an operand of `+` or `-` of type `t` is: a natural literal's,
 ;; or a `(nat s)`'s (none or one).
-(define k-operand-size (subr (maxeff (read @t) spin) (kx int) (listof k-size finite))
+(define k-operand-size (subr (maxeff (read @globals) (read @t) spin) (kx int) (listof k-size finite))
   (lambda (x t)
     (let ((lit (tagcase x (x-const (ty k a b) (if (and (= ty k-int) (>= k 0)) k -1)) (else y -1))))
       (if (>= lit 0)
@@ -4885,7 +4885,7 @@
           (tagcase (k-get (k-resolve t)) (ty-nat (z) (the (listof k-size finite) (cons z nil))) (else y nil))))))
 ;; `(+ a b)` and `(- a b)` of naturals: the sum, and the difference where
 ;; the facts show it no less than 0 (none or one).
-(define k-nat-arith-size (subr (read @t) (string k-size k-size) (listof k-size finite))
+(define k-nat-arith-size (subr (maxeff (read @globals) (read @t)) (string k-size k-size) (listof k-size finite))
   (lambda (op a b)
     (cond ((string=? op "+") (the (listof k-size finite) (cons (k-size-add-scaled a b 1) nil)))
           ((and (tagcase a (sz-finite () #f) (else w #t)) (k-size-nonneg? (k-size-add-scaled a b -1)))
@@ -4897,7 +4897,7 @@
 ;; one). `(null? xs)`, `xs : (nlist T n)`: `n = 0`, or `n - 1 ≥ 0`. A
 ;; comparison of naturals: `(< a b)`, `b - a - 1 ≥ 0`, or `a - b ≥ 0`;
 ;; `(= a 0)`, `a = 0`, or, a natural not 0, `a - 1 ≥ 0`.
-(define k-test-facts (subr (maxeff (read @t) (alloc @t) spin) (kx) k-branch-facts)
+(define k-test-facts (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) k-branch-facts)
   (lambda (p)
     (let ((none (k-branch-facts-of nil nil)))
       (tagcase p
@@ -4917,7 +4917,7 @@
   (lambda (f fs) (if (null? f) fs (the (listof k-size-fact finite) (cons (car f) fs)))))
 ;; If `p` is `(name v)`, `name` standard, the variable, as the binding it is
 ;; (none or one).
-(define k-certifying-test (subr (maxeff (read @t) (alloc @t) spin) (kx string) (listof (pairof symbol int @t) finite))
+(define k-certifying-test (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx string) (listof (pairof symbol int @t) finite))
   (lambda (p name)
     (tagcase p
       (x-app (f args a b)
@@ -4932,10 +4932,10 @@
           (else y nil)))
       (else y nil))))
 ;; If `p` is `(acyclic? v)`, the variable, as the binding it is (none or one).
-(define k-acyclic-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
+(define k-acyclic-test (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
   (lambda (p) (k-certifying-test p "acyclic?")))
 ;; If `p` is `(nat? v)`, the variable, as the binding it is (none or one).
-(define k-nat-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
+(define k-nat-test (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
   (lambda (p) (k-certifying-test p "nat?")))
 (define-rec
   (k-synth (subr (maxeff checks spin) (kx) k-te)
@@ -5341,7 +5341,7 @@
                 (let* ((arg (car args))
                        (defaulted (k-default-regions kinds solved))
                        (p (k-subst (car params) (get solved))))
-                 (letrec ((not-known (subr (maxeff checks spin) (int) void)
+                 (letrec ((not-known (subr (maxeff (read @globals) checks spin) (int) void)
                          (lambda (t)
                            (k-fail (k-cat5 "argument " (int->string (+ i 1)) " must be a " (k-show-ty t)
                                            ", which is not yet known here; give the other arguments first, or `proj` the operator")
@@ -5394,7 +5394,7 @@
           (else (k-check-node x expected et))))))
   (k-check-node (subr (maxeff checks spin) (kx int k-ty) k-eff)
     (lambda (x expected et)
-      (letrec ((otherwise (subr (maxeff checks spin) () k-eff)
+      (letrec ((otherwise (subr (maxeff (read @globals) checks spin) () k-eff)
                            (lambda () (let ((r (k-synth x))) (begin (k-expect x (extract r 1) expected) (extract r 2))))))
        (the k-eff (let ((a (k-start x)) (b (k-end x)))
         (tagcase x
@@ -5591,7 +5591,7 @@
             (let* ((bx (car args)) (rest (cdr args)) (rb (k-synth bx)) (bt (extract rb 1)))
               (tagcase (k-get bt)
                 (ty-bloblet (fields frozen region)
-                  (letrec ((field (subr (maxeff checks spin) () int)
+                  (letrec ((field (subr (maxeff (read @globals) checks spin) () int)
                                   (lambda ()
                                     (if (< i (k-length fields))
                                         (k-nth fields i)
@@ -5717,32 +5717,32 @@
 
 ;; A place in what a proof was given: a variable and the labels extracted.
 (define-type k-pos (pairof symbol (listof symbol finite) @t))
-(define k-syms=? (subr pure ((listof symbol finite) (listof symbol finite)) bool)
+(define k-syms=? (subr (read @globals) ((listof symbol finite) (listof symbol finite)) bool)
   (lambda (xs ys) (if (null? xs) (null? ys) (and (not (null? ys)) (symbol=? (car xs) (car ys)) (k-syms=? (cdr xs) (cdr ys))))))
-(define k-append-sym (subr (alloc @t) ((listof symbol finite) symbol) (listof symbol finite))
+(define k-append-sym (subr (maxeff (read @globals) (alloc @t)) ((listof symbol finite) symbol) (listof symbol finite))
   (lambda (xs l) (if (null? xs) (the (listof symbol finite) (cons l nil)) (the (listof symbol finite) (cons (car xs) (k-append-sym (cdr xs) l))))))
 ;; Whether `f` names a generative type's conversion.
-(define k-names-conversion? (subr (maxeff (read @t) (alloc @t) spin) (kx) bool)
+(define k-names-conversion? (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) bool)
   (lambda (f)
     (tagcase (k-under f)
       (x-var (s a b) (let ((t (k-lookup s))) (and (>= t 0) (k-named-has? (get k-conversions) s t))))
       (else y #f))))
 ;; `e` under ascriptions and conversions, which are the identity.
-(define k-strip-conv (subr (maxeff (read @t) (alloc @t) spin) (kx) kx)
+(define k-strip-conv (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) kx)
   (lambda (e)
     (tagcase e
       (x-the (t x a b) (k-strip-conv x))
       (x-app (f args a b) (if (and (k-sc-one? args) (k-names-conversion? f)) (k-strip-conv (car args)) e))
       (else y e))))
 ;; The place `e` names, if it names one (none or one).
-(define k-place-of (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof k-pos finite))
+(define k-place-of (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) (listof k-pos finite))
   (lambda (e)
     (tagcase (k-strip-conv e)
       (x-var (s a b) (the (listof k-pos finite) (cons (cons s nil) nil)))
       (x-extract (x l a b)
         (let ((p (k-place-of x))) (if (null? p) nil (the (listof k-pos finite) (cons (cons (car (car p)) (k-append-sym (cdr (car p)) l)) nil)))))
       (else y nil))))
-(define k-at? (subr (maxeff (read @t) (alloc @t) spin) (kx k-pos) bool)
+(define k-at? (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx k-pos) bool)
   (lambda (e at)
     (let ((p (k-place-of e))) (and (not (null? p)) (symbol=? (car (car p)) (car at)) (k-syms=? (cdr (car p)) (cdr at))))))
 ;; `t` with generative types unfolded, as far as they go.
@@ -5753,12 +5753,12 @@
         (let ((t (k-resolve t))) (tagcase (k-get t) (ty-named (g ds) (k-unfold-all (k-unfold g ds) (- n 1))) (else y t))))))
 (define k-proof-fail (subr checks (kx string string) void)
   (lambda (e want why) (k-fail (k-cat4 "this does not prove " want ": " why) (k-start e) (k-end e))))
-(define k-lemma-name? (subr (maxeff (read @t) spin) ((listof k-lemma finite) symbol int) bool)
+(define k-lemma-name? (subr (maxeff (read @globals) (read @t) spin) ((listof k-lemma finite) symbol int) bool)
   (lambda (ls s t) (and (not (null? ls)) (or (k-named-has? (extract (car ls) 5) s t) (k-lemma-name? (cdr ls) s t)))))
-(define k-names-meet? (subr (read @t) (k-names k-names) bool)
+(define k-names-meet? (subr (maxeff (read @globals) (read @t)) (k-names k-names) bool)
   (lambda (xs ys) (and (not (null? xs)) (or (k-has-name? ys (car xs)) (k-names-meet? (cdr xs) ys)))))
-(define k-last (subr (read @t) (kxs) kx) (lambda (xs) (if (null? (cdr xs)) (car xs) (k-last (cdr xs)))))
-(define k-but-last (subr (maxeff (read @t) (alloc @t)) (kxs) kxs)
+(define k-last (subr (maxeff (read @globals) (read @t)) (kxs) kx) (lambda (xs) (if (null? (cdr xs)) (car xs) (k-last (cdr xs)))))
+(define k-but-last (subr (maxeff (read @globals) (read @t) (alloc @t)) (kxs) kxs)
   (lambda (xs) (if (null? (cdr xs)) nil (the kxs (cons (car xs) (k-but-last (cdr xs)))))))
 (define-rec
   ;; Whether `e0` rebuilds, as the identity, what was given at `at`, of type
@@ -5879,9 +5879,9 @@
   (k-proof-coercions (subr (maxeff checks spin) (kxs bool symbol k-names string) unit)
     (lambda (cs guarded me hyps want)
       (if (null? cs) #u (begin (k-proof-coercion (car cs) guarded me hyps want) (k-proof-coercions (cdr cs) guarded me hyps want))))))
-(define k-under-abstractions (subr spin (kx) kx)
+(define k-under-abstractions (subr (maxeff (read @globals) spin) (kx) kx)
   (lambda (x) (tagcase x (x-plambda (bs body a b) (k-under-abstractions body)) (x-the (t body a b) (k-under-abstractions body)) (else y x))))
-(define k-param-names-first (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 k-ids)) finite) int) k-names)
+(define k-param-names-first (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 k-ids)) finite) int) k-names)
   (lambda (ps n) (if (= n 0) nil (the k-names (cons (extract (car ps) 1) (k-param-names-first (cdr ps) (- n 1)))))))
 
 ;; Whether `e`, the body of `name`, proves lemma `l`; an error where not.
@@ -5900,9 +5900,9 @@
 ;; -1; no longer, once asked.
 (define k-take-inside (subr kstate (symbol) int)
   (lambda (name)
-    (letrec ((find (subr (read @t) ((listof (pairof symbol int @t) finite)) int)
+    (letrec ((find (subr (maxeff (read @globals) (read @t)) ((listof (pairof symbol int @t) finite)) int)
                    (lambda (xs) (cond ((null? xs) -1) ((symbol=? (car (car xs)) name) (cdr (car xs))) (else (find (cdr xs))))))
-             (drop (subr (maxeff (read @t) (alloc @t)) ((listof (pairof symbol int @t) finite)) (listof (pairof symbol int @t) finite))
+             (drop (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof (pairof symbol int @t) finite)) (listof (pairof symbol int @t) finite))
                    (lambda (xs)
                      (cond ((null? xs) xs)
                            ((symbol=? (car (car xs)) name) (cdr xs))
@@ -5937,9 +5937,9 @@
         #u
         (begin (k-declare (car forms)) (k-ahead (cdr forms))))))
 
-(define k-line (subr (maxeff (read @t) (alloc @t) spin) (int k-eff) string)
+(define k-line (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int k-eff) string)
   (lambda (t e) (k-cat3 (k-show-ty t) " ! " (k-show-effect e))))
-(define k-push-lines (subr (maxeff (read @t) (alloc @t)) ((listof string finite) k-out) k-out)
+(define k-push-lines (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof string finite) k-out) k-out)
   (lambda (lines out) (if (null? lines) out (k-push-lines (cdr lines) (cons (car lines) out)))))
 (define k-rec-types (subr (maxeff checks spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) k-ids)
   (lambda (bs)
@@ -5973,7 +5973,7 @@
           (cons line rest)))))
 
 ;; A `define-rec` group's free variables.
-(define k-group-free (subr (maxeff (read @t) (alloc @t)) (k-group k-names) k-names)
+(define k-group-free (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-group k-names) k-names)
   (lambda (g out) (if (null? g) out (k-group-free (cdr g) (k-free-into (extract (car g) 3) nil out)))))
 ;; `(define-rec (name type lambda) …)`: every name in scope first, then each
 ;; lambda checked against its type. A line for each.
@@ -5997,32 +5997,32 @@
 ;;; by the same rule; each that does not is broken. To keep a value as it
 ;;; was, a program binds it: `(define d (let ((g g)) …))`.
 
-(define k-rev-runs (subr pure ((listof k-run finite) (listof k-run finite)) (listof k-run finite))
+(define k-rev-runs (subr (read @globals) ((listof k-run finite) (listof k-run finite)) (listof k-run finite))
   (lambda (xs acc) (if (null? xs) acc (k-rev-runs (cdr xs) (the (listof k-run finite) (cons (car xs) acc))))))
 ;; For a driver: what the program checked runs, in order (`compile-checked`,
 ;; `run-checked`).
-(define checked-tops (subr (read @t) () (listof k-run finite))
+(define checked-tops (subr (maxeff (read @globals) (read @t)) () (listof k-run finite))
   (lambda () (k-rev-runs (get k-runs) nil)))
-(define k-rev-defs (subr pure ((listof k-def finite) (listof k-def finite)) (listof k-def finite))
+(define k-rev-defs (subr (read @globals) ((listof k-def finite) (listof k-def finite)) (listof k-def finite))
   (lambda (xs acc) (if (null? xs) acc (k-rev-defs (cdr xs) (the (listof k-def finite) (cons (car xs) acc))))))
-(define k-rec-names (subr pure ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) k-names)
+(define k-rec-names (subr (read @globals) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) k-names)
   (lambda (bs) (if (null? bs) nil (the k-names (cons (extract (car bs) 1) (k-rec-names (cdr bs)))))))
 ;; The names a form defines.
-(define k-top-names (subr pure (top) k-names)
+(define k-top-names (subr (read @globals) (top) k-names)
   (lambda (form)
     (tagcase form
       (t-define (name ty init a b) (the k-names (cons name nil)))
       (t-define-rec (bs a b) (k-rec-names bs))
       (else y (the k-names nil)))))
 ;; Whether `n` is a global a definition made.
-(define k-defined? (subr (read @t) (symbol) bool)
+(define k-defined? (subr (maxeff (read @globals) (read @t)) (symbol) bool)
   (lambda (n)
-    (letrec ((go (subr (read @t) ((listof k-def finite)) bool)
+    (letrec ((go (subr (maxeff (read @globals) (read @t)) ((listof k-def finite)) bool)
                (lambda (ds) (and (not (null? ds)) (or (k-has-name? (extract (car ds) 1) n) (go (cdr ds)))))))
       (go (get k-defs)))))
 ;; The names of `ns` that are globals already, with their types.
 (define-type k-olds (listof (pairof symbol int finite) finite))
-(define k-old-types (subr (maxeff (read @t) spin) (k-names) k-olds)
+(define k-old-types (subr (maxeff (read @globals) (read @t) spin) (k-names) k-olds)
   (lambda (ns)
     (cond ((null? ns) nil)
           ((k-defined? (car ns)) (the k-olds (cons (cons (car ns) (k-lookup-raw (car ns))) (k-old-types (cdr ns)))))
@@ -6030,12 +6030,12 @@
 ;; Whether each of them now has a type its old one's uses can take.
 (define k-fits-old? (subr (maxeff kstate spin) (k-olds) bool)
   (lambda (os) (or (null? os) (and (k-subtype (k-lookup-raw (car (car os))) (cdr (car os))) (k-fits-old? (cdr os))))))
-(define k-names-without (subr (read @t) (k-names k-names) k-names)
+(define k-names-without (subr (maxeff (read @globals) (read @t)) (k-names k-names) k-names)
   (lambda (xs ns)
     (cond ((null? xs) xs)
           ((k-has-name? ns (car xs)) (k-names-without (cdr xs) ns))
           (else (the k-names (cons (car xs) (k-names-without (cdr xs) ns)))))))
-(define k-defs-without (subr (read @t) ((listof k-def finite) k-names) (listof k-def finite))
+(define k-defs-without (subr (maxeff (read @globals) (read @t)) ((listof k-def finite) k-names) (listof k-def finite))
   (lambda (ds ns)
     (cond ((null? ds) ds)
           ((k-names-meet? (extract (car ds) 1) ns) (k-defs-without (cdr ds) ns))
@@ -6049,9 +6049,9 @@
                       (cons (product (1 ns) (2 form) (3 (k-names-without (get k-last-uses) ns))) (k-defs-without (get k-defs) ns)))))))
 ;; The definitions that use `ns`, and those that use them, and so on,
 ;; oldest first.
-(define k-users-of (subr (maxeff (read @t) (alloc @t)) (k-names) (listof k-def finite))
+(define k-users-of (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-names) (listof k-def finite))
   (lambda (ns)
-    (letrec ((go (subr (maxeff (read @t) (alloc @t)) ((listof k-def finite) k-names) (listof k-def finite))
+    (letrec ((go (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof k-def finite) k-names) (listof k-def finite))
                (lambda (ds used)
                  (cond ((null? ds) nil)
                        ((k-names-meet? (extract (car ds) 1) ns) (go (cdr ds) used))
@@ -6060,9 +6060,9 @@
                        (else (go (cdr ds) used))))))
       (go (k-rev-defs (get k-defs) nil) ns))))
 ;; Names as a message shows them: `a`, `b`.
-(define k-shown (subr (maxeff (read @t) (alloc @t)) (k-names) string)
+(define k-shown (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-names) string)
   (lambda (ns)
-    (letrec ((go (subr (alloc @t) (k-names) (listof string finite))
+    (letrec ((go (subr (maxeff (read @globals) (alloc @t)) (k-names) (listof string finite))
                (lambda (xs) (if (null? xs) nil (the (listof string finite) (cons (k-cat3 "`" (symbol->string (car xs)) "`") (go (cdr xs))))))))
       (k-join (go ns) ", "))))
 (define k-break-all (subr (maxeff kstate spin) (k-names string) unit)
@@ -6071,7 +6071,7 @@
         #u
         (begin (set k-broken (the (listof k-break finite) (cons (product (1 (car ns)) (2 (k-name-depth (car ns))) (3 why)) (get k-broken))))
                (k-break-all (cdr ns) why)))))
-(define k-lines-append (subr pure ((listof string finite) (listof string finite)) (listof string finite))
+(define k-lines-append (subr (read @globals) ((listof string finite) (listof string finite)) (listof string finite))
   (lambda (xs ys) (if (null? xs) ys (the (listof string finite) (cons (car xs) (k-lines-append (cdr xs) ys))))))
 ;; `t`, a `subr` under any `poly`s, with `extra` in its latent effect; -1 if
 ;; `t` is not one.
@@ -6082,13 +6082,13 @@
       (ty-subr (e ps r cv) (k-ty-new (ty-subr (k-union e extra) ps r cv)))
       (else y -1))))
 ;; The atoms of `e` on globals.
-(define k-globals-of (subr (maxeff (read @t) (alloc @t)) (k-eff) k-eff)
+(define k-globals-of (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-eff) k-eff)
   (lambda (e) (cond ((null? e) nil) ((k-globals-atom? (car e)) (the k-eff (cons (car e) (k-globals-of (cdr e))))) (else (k-globals-of (cdr e))))))
 ;; `n`'s innermost binding, now of type `t`.
 (define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (table-set! (get k-env) n (cons t (cdr (table-ref (get k-env) n nil))))))
 ;; `f`'s value, or, if it fails, the error `say` makes of its message.
-(define k-saying (subr (maxeff checks spin) ((subr (maxeff checks spin) () k-te) (subr (maxeff checks spin) (string) string)) k-te)
+(define k-saying (subr (maxeff (read @globals) checks spin) ((subr (maxeff checks spin) () k-te) (subr (maxeff checks spin) (string) string)) k-te)
   (lambda (f say)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
       (tagcase r
@@ -6184,28 +6184,28 @@
                    (let* ((x (k-resolve-exp e)) (r (k-synth x)))
                      (cons (k-line (extract r 1) (extract r 2)) nil)))
                  (else y nil)))))
-(define k-lines-append-names (subr pure (k-names k-names) k-names)
+(define k-lines-append-names (subr (read @globals) (k-names k-names) k-names)
   (lambda (xs ys) (if (null? xs) ys (the k-names (cons (car xs) (k-lines-append-names (cdr xs) ys))))))
 ;; The names `defs` define, in order.
-(define k-defs-names (subr (maxeff (read @t) (alloc @t)) ((listof k-def finite)) k-names)
+(define k-defs-names (subr (maxeff (read @globals) (read @t) (alloc @t)) ((listof k-def finite)) k-names)
   (lambda (ds) (if (null? ds) nil (k-lines-append-names (extract (car ds) 1) (k-defs-names (cdr ds))))))
 ;; Those of `xs` that are in `ys`, in `xs`'s order.
-(define k-names-within (subr (read @t) (k-names k-names) k-names)
+(define k-names-within (subr (maxeff (read @globals) (read @t)) (k-names k-names) k-names)
   (lambda (xs ys)
     (cond ((null? xs) xs)
           ((k-has-name? ys (car xs)) (the k-names (cons (car xs) (k-names-within (cdr xs) ys))))
           (else (k-names-within (cdr xs) ys)))))
 ;; Whether `t` is a procedure whose calls may not end: `spin` in its latent
 ;; effect, under any `poly`.
-(define k-type-spins? (subr (maxeff (read @t) spin) (int) bool)
+(define k-type-spins? (subr (maxeff (read @globals) (read @t) spin) (int) bool)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body) (k-type-spins? body))
       (ty-subr (e ps r cv)
-        (letrec ((go (subr pure (k-eff) bool) (lambda (e) (and (not (null? e)) (or (tagcase (car e) (a-spin () #t) (else y #f)) (go (cdr e)))))))
+        (letrec ((go (subr (read @globals) (k-eff) bool) (lambda (e) (and (not (null? e)) (or (tagcase (car e) (a-spin () #t) (else y #f)) (go (cdr e)))))))
           (go e)))
       (else y #f))))
-(define k-names-spin? (subr (maxeff (read @t) spin) (k-names) bool)
+(define k-names-spin? (subr (maxeff (read @globals) (read @t) spin) (k-names) bool)
   (lambda (ns) (and (not (null? ns)) (or (k-type-spins? (k-lookup-raw (car ns))) (k-names-spin? (cdr ns))))))
 (define k-top-start (subr pure (top) int)
   (lambda (form) (tagcase form (t-define (name ty init a b) a) (t-define-rec (bs a b) a) (else y 0))))
@@ -6227,7 +6227,7 @@
                     (k-top-start form) (k-top-end form)))))))
 ;; Each of `users` checked again after the redefinition of `ns`: defined
 ;; again if it checks, broken if not.
-(define k-rerun (subr (maxeff checks spin) ((listof k-def finite) k-names (listof string finite)) (listof string finite))
+(define k-rerun (subr (maxeff (read @globals) checks spin) ((listof k-def finite) k-names (listof string finite)) (listof string finite))
   (lambda (users ns lines)
     (if (null? users)
         lines
@@ -6278,7 +6278,7 @@
 ;; The entry point: check a program's trees, in the initial environment
 ;; written `standard`. What each definition and expression is, in order,
 ;; or the first error.
-(define check-program (subr (maxeff checks spin) ((listof syn finite) (listof top finite)) k-result)
+(define check-program (subr (maxeff (read @globals) checks spin) ((listof syn finite) (listof top finite)) k-result)
   (lambda (standard forms)
     (prompt k-tag
       (begin (k-reset) (k-standard standard) (k-ahead forms) (k-ok (k-forms forms nil)))
@@ -6288,7 +6288,7 @@
 ;; them: checked in the environment the forms before left, which
 ;; `check-program` began. The facts for the compiler are only the new
 ;; forms', whose positions are in their own text.
-(define check-more (subr (maxeff checks spin) ((listof top finite)) k-result)
+(define check-more (subr (maxeff (read @globals) checks spin) ((listof top finite)) k-result)
   (lambda (forms)
     (prompt k-tag
       (begin (set k-extracts nil) (set k-runs nil) (k-ahead forms) (k-ok (k-forms forms nil)))

@@ -707,7 +707,7 @@ mod speculative {
         let forms = s.checker.read_in(FileId(0), "(define c (ref int @c) (new 1))").expect("reads");
         s.run(&forms[0]).expect("runs");
         assert_eq!(notes_in(&mut s, "(set c 5)")[0].message, "not run early: it may (write @c)");
-        let forms = s.checker.read_in(FileId(0), "(define peek (subr (read @c) () int) (lambda () (get c)))").expect("reads");
+        let forms = s.checker.read_in(FileId(0), "(define* peek (subr (read @c) () int) (lambda () (get c)))").expect("reads");
         s.run(&forms[0]).expect("runs");
         let forms = s.checker.read_in(FileId(0), "(peek)").expect("reads");
         assert_eq!(s.run(&forms[0]).expect("runs").value, Ok(Some("1".into())));

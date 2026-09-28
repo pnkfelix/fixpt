@@ -24,7 +24,7 @@ fn rejects(program: &str) -> String {
 #[test]
 fn a_signature_types_the_lambdas_parameters() {
     let p = "(define inc (subr pure (int) int) (lambda (x) (+ x 1))) (inc 2)";
-    assert_eq!(check(p), "int ! pure");
+    assert_eq!(check(p), "int ! (read (globals inc))");
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn what_is_expected_flows_into_branches_and_bodies() {
     let p = "(define f (subr pure (bool) (subr pure (int) int))
                (lambda (b) (let ((one 1)) (if b (lambda (x) (+ x one)) (begin 0 (lambda (y) y))))))
              ((f #t) 2)";
-    assert_eq!(check(p), "int ! pure");
+    assert_eq!(check(p), "int ! (read (globals f))");
 }
 
 /// A polymorphic signature, and no `plambda`: the definition is checked
@@ -49,9 +49,9 @@ fn what_is_expected_flows_into_branches_and_bodies() {
 #[test]
 fn a_polymorphic_signature_needs_no_plambda() {
     let def = "(define id (poly ((t type)) (subr pure (t) t)) (lambda (x) x))";
-    assert_eq!(check(&format!("{def} (id 3)")), "int ! pure");
-    assert_eq!(check(&format!("{def} (id #t)")), "bool ! pure");
-    assert_eq!(check(include_str!("programs/bidirectional/twice.fx")), "int ! pure");
+    assert_eq!(check(&format!("{def} (id 3)")), "int ! (read (globals id))");
+    assert_eq!(check(&format!("{def} (id #t)")), "bool ! (read (globals id))");
+    assert_eq!(check(include_str!("programs/bidirectional/twice.fx")), "int ! (read (globals twice))");
 }
 
 /// A definition that does not meet its signature says which signature.
@@ -87,7 +87,7 @@ fn a_projection_is_inferred_from_the_arguments() {
 #[test]
 fn a_projection_is_inferred_from_what_is_expected() {
     let p = "(define empty (listof int @l) nil) ((proj (proj null? @l) int (listof int @l)) empty)";
-    assert_eq!(check(p), "bool ! pure");
+    assert_eq!(check(p), "bool ! (read (globals empty))");
     assert_eq!(check("(null? (the (listof int @l) nil))"), "bool ! pure");
 }
 
@@ -103,9 +103,9 @@ fn a_type_nothing_determines_is_an_error() {
 fn an_effect_binder_takes_the_latent_effect_of_the_argument() {
     let def = "(define apply1 (poly ((e effect)) (subr e ((subr e (int) int) int) int))
                  (lambda (f x) (f x)))";
-    assert_eq!(check(&format!("{def} (apply1 (lambda ((n int)) n) 3)")), "int ! pure");
+    assert_eq!(check(&format!("{def} (apply1 (lambda ((n int)) n) 3)")), "int ! (read (globals apply1))");
     let reading = format!("{def} (define c (ref int @c) (new 0)) (apply1 (lambda ((n int)) (get c)) 3)");
-    assert_eq!(check(&reading), "int ! (read @c)");
+    assert_eq!(check(&reading), "int ! (maxeff (read @c) (read (globals apply1 c)))");
 }
 
 /// An argument of the wrong type is reported as that argument, in the
@@ -121,8 +121,8 @@ fn a_wrong_argument_is_named() {
 /// The control cases of step 3, with every projection left out.
 #[test]
 fn delimited_control_needs_no_projections() {
-    assert_eq!(check(include_str!("programs/bidirectional/own-abort.fx")), "int ! pure");
-    assert_eq!(check(include_str!("programs/bidirectional/capture-and-resume.fx")), "int ! pure");
+    assert_eq!(check(include_str!("programs/bidirectional/own-abort.fx")), "int ! (read (globals t))");
+    assert_eq!(check(include_str!("programs/bidirectional/capture-and-resume.fx")), "int ! (read (globals t))");
 }
 
 /// PLDI '89's C3: `cwcc` instantiated with a region of its own, so its

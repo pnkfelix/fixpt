@@ -27,9 +27,9 @@
 ;; A procedure that also escapes, as a value: boxed, its tail calls still loops.
 (define twice (subr spin ((subr spin (int int) int) int int) int)
   (lambda (g i a) (g i a)))
-(define escapes (subr spin (int) int)
+(define* escapes (subr spin (int) int)
   (lambda (n)
-    (letrec ((go (subr spin (int int) int)
+    (letrec ((go (subr (maxeff spin (read (globals twice))) (int int) int)
                (lambda (i acc)
                  (cond ((= i 0) acc)
                        ((= i 1000) (twice go (- i 1) acc))

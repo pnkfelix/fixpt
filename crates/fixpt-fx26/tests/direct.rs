@@ -124,7 +124,7 @@ fn program(name: &str) -> String {
 /// The identity on ints is two instructions: nothing to check, no frame.
 #[test]
 fn the_identity_is_a_move_and_a_return() {
-    let r = run("(define id (subr pure (int) int) (lambda (x) x))", "id", &[42], FUEL);
+    let r = run("(define* id (subr pure (int) int) (lambda (x) x))", "id", &[42], FUEL);
     assert_eq!(r.direct, Ok("42".into()));
     assert_eq!(r.rust, "42");
     assert_eq!(r.code, "mov x0, x1\nret\n");
@@ -133,10 +133,10 @@ fn the_identity_is_a_move_and_a_return() {
 /// Adding one is one instruction, and its check of overflow.
 #[test]
 fn adding_one_checks_only_overflow() {
-    let r = run("(define inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[41], FUEL);
+    let r = run("(define* inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[41], FUEL);
     assert_eq!(r.direct, Ok("42".into()));
     assert!(r.code.starts_with("adds x0, x1, #8\nb.vs @3\nret\n"), "{}", r.code);
-    let r = run("(define inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[(1 << 60) - 1], FUEL);
+    let r = run("(define* inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[(1 << 60) - 1], FUEL);
     assert_eq!(r.direct, Err("integer overflow".into()));
     assert!(r.rust.starts_with("!!"), "{}", r.rust);
 }
@@ -154,8 +154,8 @@ fn fib_and_tak_as_the_rust_machine_runs_them() {
 /// position.
 #[test]
 fn calls_between_procedures() {
-    let defs = "(define add3 (subr pure (int int int) int) (lambda (a b c) (+ a (+ b c))))\n\
-                (define f (subr pure (int) int) (lambda (n) (add3 n (+ n 1) (+ n 2))))";
+    let defs = "(define* add3 (subr pure (int int int) int) (lambda (a b c) (+ a (+ b c))))\n\
+                (define* f (subr pure (int) int) (lambda (n) (add3 n (+ n 1) (+ n 2))))";
     let r = run(defs, "f", &[10], FUEL);
     assert_eq!(r.direct, Ok("33".into()), "{}", r.code);
     assert_eq!(r.rust, "33");
@@ -164,9 +164,9 @@ fn calls_between_procedures() {
 /// Running out of fuel, and of stack, are traps, as on the other machines.
 #[test]
 fn fuel_and_stack_run_out() {
-    let forever = "(define forever (subr spin (int) int) (lambda (n) (forever (+ n 1))))";
+    let forever = "(define* forever (subr spin (int) int) (lambda (n) (forever (+ n 1))))";
     assert_eq!(direct_only(forever, "forever", &[0], 100_000).direct, Err("out of fuel".into()));
-    let deep = "(define deep (subr spin (int) int) (lambda (n) (+ 1 (deep n))))";
+    let deep = "(define* deep (subr spin (int) int) (lambda (n) (+ 1 (deep n))))";
     assert_eq!(run(deep, "deep", &[0], FUEL).direct, Err("stack overflow".into()));
 }
 
@@ -175,13 +175,13 @@ fn fuel_and_stack_run_out() {
 /// they captured; a `letrec`'s procedure, patched to capture itself.
 #[test]
 fn higher_order_code_and_closures() {
-    let twice = "(define twice (subr pure ((subr pure (int) int) int) int) (lambda (f x) (f (f x))))\n\
-                 (define inc (subr pure (int) int) (lambda (x) (+ x 1)))\n\
-                 (define use (subr pure (int) int) (lambda (n) (twice inc n)))";
+    let twice = "(define* twice (subr pure ((subr pure (int) int) int) int) (lambda (f x) (f (f x))))\n\
+                 (define* inc (subr pure (int) int) (lambda (x) (+ x 1)))\n\
+                 (define* use (subr pure (int) int) (lambda (n) (twice inc n)))";
     let r = run(twice, "use", &[40], FUEL);
     assert_eq!(r.direct, Ok("42".into()), "{}", r.code);
-    let adder = "(define add (subr pure (int) (subr pure (int) int)) (lambda (n) (lambda ((m int)) (+ n m))))\n\
-                 (define use (subr pure (int) int) (lambda (k) ((add k) 10)))";
+    let adder = "(define* add (subr pure (int) (subr pure (int) int)) (lambda (n) (lambda ((m int)) (+ n m))))\n\
+                 (define* use (subr pure (int) int) (lambda (k) ((add k) 10)))";
     let r = run(adder, "use", &[32], FUEL);
     assert_eq!(r.direct, Ok("42".into()), "{}", r.code);
     let r = run(&bench("loop"), "count", &[1000], FUEL);
@@ -195,7 +195,7 @@ fn higher_order_code_and_closures() {
 #[test]
 fn closures_through_a_map_survive_collection() {
     let defs = format!(
-        "{}\n(define main (subr (maxeff (read @l) (alloc @l) spin) (int) int) (lambda (k) (go k 0 (upto 100 nil))))",
+        "{}\n(define* main (subr (maxeff (read @l) (alloc @l) spin) (int) int) (lambda (k) (go k 0 (upto 100 nil))))",
         bench("closures")
     );
     for gc_every in [None, Some(1), Some(5)] {
@@ -226,7 +226,7 @@ fn lists_made_in_call_outs_survive_collection() {
 /// A runtime primitive that fails says why, as a trap.
 #[test]
 fn a_primitive_that_fails_says_why() {
-    let defs = "(define q (subr pure (int int) int) (lambda (a b) (quotient a b)))";
+    let defs = "(define* q (subr pure (int int) int) (lambda (a b) (quotient a b)))";
     let r = run(defs, "q", &[7, 0], FUEL);
     assert!(matches!(&r.direct, Err(m) if m.contains("zero")), "{:?}\n{}", r.direct, r.code);
 }
@@ -235,7 +235,7 @@ fn a_primitive_that_fails_says_why() {
 /// the call-out says so, as the Rust machine does.
 #[test]
 fn array_elements_in_and_out_of_range() {
-    let defs = "(define a (arrayof int @a) (make-array 10 7))\n(define at (subr (read @a) (int) int) (lambda (i) (array-ref a i)))";
+    let defs = "(define a (arrayof int @a) (make-array 10 7))\n(define* at (subr (read @a) (int) int) (lambda (i) (array-ref a i)))";
     let r = run(defs, "at", &[9], FUEL);
     assert_eq!(r.direct, Ok("7".into()), "{}", r.code);
     let r = run(defs, "at", &[10], FUEL);

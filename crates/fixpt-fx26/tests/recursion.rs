@@ -41,12 +41,7 @@ fn a_letrec_binding_that_is_not_a_lambda_is_rejected() {
 #[test]
 fn a_group_defines_procedures_that_call_each_other() {
     assert_eq!(
-        check(
-            "(define-rec
-               (ev (subr spin (int) bool) (lambda (n) (if (= n 0) #t (od (- n 1)))))
-               (od (subr spin (int) bool) (lambda (n) (if (= n 0) #f (ev (- n 1))))))
-             (ev 10)"
-        ),
+        check(include_str!("programs/groups/even-odd.fx")),
         Ok(())
     );
 }

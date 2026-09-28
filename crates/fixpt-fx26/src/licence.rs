@@ -44,6 +44,8 @@ use crate::check::Checker;
 pub fn unlicensed(effect: &Effect, owned: &[Region]) -> Option<Atom> {
     effect.0.iter().copied().find(|a| match *a {
         Atom::Alloc(_) => false,
+        // Reading globals, which it defined itself, is seen by no one else.
+        Atom::Read(r) if r.is_globals() => false,
         Atom::Read(r) | Atom::Write(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) => !owned.contains(&r),
         Atom::Var(_) => true,
         // A speculative run has a step budget of its own.

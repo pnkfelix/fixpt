@@ -172,7 +172,7 @@ fn the_fx26_repl_shows_cellular_code() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("fixpt starts");
-    let input = "(define f (subr spin (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))\n(f 10)\n,disassemble f\n";
+    let input = "(define* f (subr spin (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))\n(f 10)\n,disassemble f\n";
     child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
     let out = child.wait_with_output().expect("finishes");
     let out = String::from_utf8_lossy(&out.stdout);

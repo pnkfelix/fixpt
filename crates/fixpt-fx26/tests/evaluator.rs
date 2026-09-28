@@ -21,7 +21,7 @@ fn both(program: &str) -> String {
 fn small_programs() {
     assert_eq!(both("(+ 1 2)"), "3");
     assert_eq!(both("(let* ((a 1) (b (+ a 1))) (if (and (< a b) (or #f #t)) 'yes 'no))"), "yes");
-    assert_eq!(both("(define f (subr spin (int) int) (lambda (n) (if (= n 0) 1 (* n (f (- n 1)))))) (f 10)"), "3628800");
+    assert_eq!(both("(define* f (subr spin (int) int) (lambda (n) (if (= n 0) 1 (* n (f (- n 1)))))) (f 10)"), "3628800");
     assert_eq!(both("(the (listof int @l) (cons 1 (cons 2 nil)))"), "(1 2)");
     assert_eq!(both("(let ((r (the (ref int @r) (new 1)))) (begin (set r (+ (get r) 41)) (get r)))"), "42");
     assert_eq!(both("(extract (product (a 1) (b \"two\")) b)"), "\"two\"");

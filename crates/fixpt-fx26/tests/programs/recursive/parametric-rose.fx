@@ -5,9 +5,9 @@
   (leaf t)
   (node (listof (rose t r) r)))
 (define-rec
-  (total (subr pure ((rose int finite)) int)
+  (total (subr (read @globals) ((rose int finite)) int)
     (lambda (x) (tagcase x (leaf (n) n) (node (kids) (total-all kids)))))
-  (total-all (subr pure ((listof (rose int finite) finite)) int)
+  (total-all (subr (read @globals) ((listof (rose int finite) finite)) int)
     (lambda (ks) (if (null? ks) 0 (+ (total (car ks)) (total-all (cdr ks)))))))
 (define kids (listof (rose int finite) finite) (cons (leaf 1) (cons (leaf 2) nil)))
 (total (node kids))

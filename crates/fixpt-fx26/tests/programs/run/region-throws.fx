@@ -10,12 +10,12 @@
               (ys (the (listof int s) (rcons s 1 nil))))
           (+ (car ys) (k (car xs))))))))
 
-(define rounds (subr (maxeff (goto @k) (comefrom @k) spin) (int int) int)
+(define* rounds (subr (maxeff (goto @k) (comefrom @k) spin) (int int) int)
   (lambda (i acc)
     (if (= i 0)
         acc
         (rounds (- i 1)
-                (+ acc ((proj (proj (proj cwcc @k) int) (goto @k))
+                (+ acc ((proj (proj (proj cwcc @k) int) (maxeff (goto @k) (read (globals escape))))
                         (lambda ((k (subr (goto @k) (int) void))) (escape i k))))))))
 
 (rounds 1000 0)
