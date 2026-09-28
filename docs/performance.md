@@ -368,7 +368,8 @@ has not been measured yet.
 
 ## M13's benchmarks: the baseline (13b)
 
-`cargo test --release -p fixpt-fx26 --test bench -- --ignored --nocapture`.
+`fixpt bench` (it was an ignored test, `--test bench`, until 2026-09-28;
+`fixpt bench --help` says how to choose programs, machines and runs).
 The programs are in `tests/programs/bench`:
 
 - `fib 30`: calls;
@@ -1118,4 +1119,27 @@ The stack machines are unchanged, and the front end within noise, so no
 site in it is rewritten; the benchmarks stay as written, measuring calls
 through a global (`tests/programs/redefine/local-fib.fx` is fib bound
 locally).
+
+## `fixpt bench`, after native step 5 (2026-09-28)
+
+`fixpt bench` (release build, best of 3, milliseconds). The native column
+is the last line's call compiled in the native convention alone; `—`
+where the last line is not a call on integer literals.
+
+| program      | answer         | lowered |  rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| -----:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   116.0 |  49.2 | 14.5 |     14.3 |     12.5 |       9.3 |   21.9 |
+| closures     | 6003000000     |   344.0 | 686.4 | 75.7 |     86.3 |     60.2 |      24.7 |      — |
+| fib          | 832040         |   180.7 | 212.5 | 16.1 |     20.7 |     13.2 |       5.8 |    2.4 |
+| lists-region | 1501500000     |   334.6 | 311.7 | 96.6 |    112.7 |     83.5 |       7.0 |  157.9 |
+| lists        | 1501500000     |   300.2 | 467.1 | 54.8 |     63.7 |     47.5 |      13.5 |   16.6 |
+| loop         | 49999995000000 |   739.5 | 450.3 | 64.6 |     91.6 |     41.9 |       5.5 |    4.4 |
+| tak          | 9              |    52.1 |  78.1 |  6.6 |     10.5 |      4.5 |       1.9 |    1.2 |
+
+What it says of the native convention: calls (`fib`, `tak`, `loop`) are
+fastest there; `lists-region` is twenty times register code's, since its
+region `cons` is a call-out each (register code does it inline, which the
+native compiler does not yet); `captures` copies the frames on each
+capture, where register code's continuations are a stack segment; and
+`lists`, whose `cons` is inline in both, is close.
 

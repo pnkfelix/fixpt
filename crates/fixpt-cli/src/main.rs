@@ -6,6 +6,7 @@
 //! short. The same reasoning produced [`lineedit`], which is why this binary
 //! has no external dependencies at all.
 
+mod bench;
 mod help;
 mod fx26;
 mod fx87;
@@ -31,6 +32,7 @@ usage:
   fixpt run-image FILE [ARG...]  run a heap image's entry point
   fixpt image info FILE          describe a heap image
   fixpt image verify FILE        load a heap image and check its invariants
+  fixpt bench [FILE...]          time FX-26 programs on each machine (`fixpt bench --help`)
   fixpt help                     show this
 
 options:
@@ -114,6 +116,10 @@ fn main() {
 const STACK: usize = 256 << 20;
 
 fn run(args: &[String]) -> i32 {
+    // `fixpt bench` takes options of its own.
+    if args.first().is_some_and(|a| a == "bench") {
+        return bench::command(&args[1..]);
+    }
     let (flags, rest) = split_flags(args);
     // The dialect picks a *language*, which is a front end, not just a set of
     // lexical rules: FX-91 forms go through the checker and the code generator
