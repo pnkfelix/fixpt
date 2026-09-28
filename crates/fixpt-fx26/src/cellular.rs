@@ -13,7 +13,7 @@ use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD, ROUTINES, WORD_TWIN};
+use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, ROUTINES, WORD_TWIN};
 
 mod regcode;
 use fixpt_heap::{Heap, Value};

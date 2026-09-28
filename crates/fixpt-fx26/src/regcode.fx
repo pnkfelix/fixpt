@@ -21,7 +21,10 @@
   ;; `branch` (#f) or `branchf` (#t) to a label.
   (r-branch bool int)
   ;; The frame's size, known when the body is done.
-  (r-frame))
+  (r-frame)
+  ;; `global-guard g w` to a label: unless global cell `g` holds a closure
+  ;; made from word `w`.
+  (r-guard-to wcell wcell int))
 
 ;; Where a variable is, to register code.
 ;; A constant that needs no allocation, as register code may know one.
@@ -105,7 +108,7 @@
 (define r-reverse (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof ritem @k) (listof ritem @k)) (listof ritem @k))
   (lambda (xs acc) (if (null? xs) acc (r-reverse (cdr xs) (cons (car xs) acc)))))
 (define r-size (subr pure (ritem) int)
-  (lambda (i) (tagcase i (r-cell (x) 1) (r-label (n) 0) (r-branch (f n) 2) (r-frame () 1))))
+  (lambda (i) (tagcase i (r-cell (x) 1) (r-label (n) 0) (r-branch (f n) 2) (r-frame () 1) (r-guard-to (c w n) 4))))
 (define r-place (subr (maxeff (read @globals) (read @k) (write @k) spin) ((listof ritem @k) (arrayof int @k) int) int)
   (lambda (xs at pos)
     (if (null? xs)
@@ -126,7 +129,9 @@
                      (r-label (n) acc)
                      (r-frame () (cons (wcell-int frame) acc))
                      (r-branch (f n)
-                       (cons (wcell-int (if f rop-branchf rop-branch)) (cons (wcell-int (- (array-ref at n) (+ pos 2))) acc)))))))))
+                       (cons (wcell-int (if f rop-branchf rop-branch)) (cons (wcell-int (- (array-ref at n) (+ pos 2))) acc)))
+                     (r-guard-to (c w n)
+                       (cons (wcell-int rop-global-guard) (cons c (cons w (cons (wcell-int (- (array-ref at n) (+ pos 4))) acc)))))))))))
 (define r-assemble (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen) (listof wcell @k))
   (lambda (g)
     (let* ((items (get (extract g items)))
@@ -353,12 +358,7 @@
 ;; The guard of an inlined or specialized call: to `call` unless the global
 ;; `cell` holds a closure of `word`.
 (define r-guard (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen wglobal tword int) unit)
-  (lambda (g cell word call)
-    (begin
-      (r-op1 g rop-global (wcell-global cell))
-      (r-opn g rop-field cellular-closure-word)
-      (r-op2 g rop-op2imm (wcell-int routine-eq) (wcell-word word))
-      (r-emit g (r-branch #t call)))))
+  (lambda (g cell word call) (r-emit g (r-guard-to (wcell-global cell) (wcell-word word) call))))
 ;; `n` arguments in registers, the procedure in RESULT: called, or in tail
 ;; position, the frame left first.
 (define r-invoke (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (rgen int bool) unit)
@@ -821,10 +821,7 @@
                                    (mslot (extract g mslot)) (labels (extract g labels)) (this (the (listof c-this @k) nil))
                                    (start (extract g start))))))
         (begin
-          (r-op1 g rop-global (wcell-global cell))
-          (r-opn g rop-field cellular-closure-word)
-          (r-op2 g rop-op2imm (wcell-int routine-eq) (wcell-word (extract i 2)))
-          (r-emit g (r-branch #t call))
+          (r-guard g cell (extract i 2) call)
           (set c-genv (extract i 5))
           (set c-inlining (cons (extract i 1) outer-inlining))
           (r-exp h (extract i 4) (extract bound 1) (extract bound 2) tail)

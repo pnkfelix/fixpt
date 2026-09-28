@@ -444,6 +444,7 @@ pub mod regcode {
         ("branchf", 1, "the same if RESULT is #f"),
         ("cellular", 2, "cellular routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect"),
         ("invokeself", 1, "call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may collect"),
+        ("global-guard", 3, "unless global cell g holds a closure made from cellular word w (a cellular closure of w, or a native one whose code was compiled from w), skip the third operand's count of cells, counted after it; RESULT kept"),
     ];
 
     pub const fn op(name: &str) -> usize {

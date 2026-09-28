@@ -44,7 +44,7 @@ fn the_benchmarks_procedures_have_register_code() {
 fn fib_in_registers() {
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/bench/fib.fx")).unwrap();
     let out = shown(&text);
-    for want in ["save 2", "op2imm int-less 2", "global fib", "field 2", "invokeself 1", "invoke 1", "setstk 1", "op2 int-add 1", "pop 2"] {
+    for want in ["save 2", "op2imm int-less 2", "global fib", "global-guard fib", "invokeself 1", "invoke 1", "setstk 1", "op2 int-add 1", "pop 2"] {
         assert!(out.contains(want), "{want}:\n{out}");
     }
 }

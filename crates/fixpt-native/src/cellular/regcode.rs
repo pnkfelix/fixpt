@@ -538,8 +538,8 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     let mut j = 0;
     while j < cells.len() {
         let (name, n, _) = OPS[cells[j].as_fixnum() as usize];
-        if name == "branch" || name == "branchf" {
-            let to = j as i64 + 2 + cells[j + 1].as_fixnum();
+        if matches!(name, "branch" | "branchf" | "global-guard") {
+            let to = j as i64 + 1 + n as i64 + cells[j + n].as_fixnum();
             if to <= j as i64 {
                 loop_heads[to as usize] = true;
             }
@@ -823,6 +823,23 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     }
                     a.b(labels[to]);
                 }
+            }
+            // The global's value's field 2: a cellular closure's word, or a
+            // native closure's code, whose field 2 is the word it was
+            // compiled from (`CODE_SOURCE`); a word's field 2 is no word.
+            "global-guard" => {
+                let to = (i as i64 + 4 + o(2).as_fixnum()) as usize;
+                let held = a.label();
+                a.cell(X16, f(0), fields);
+                a.e(ldur(X11, X16, field_off(2)));
+                a.e(ldur(X12, X11, field_off(CLOSURE_WORD)));
+                a.cell(X16, f(1), fields);
+                a.e(cmp(X12, X16));
+                a.b_cond(Cond::Eq, held);
+                a.e(ldur(X12, X12, field_off(fixpt_heap::layout::cellular::CODE_SOURCE)));
+                a.e(cmp(X12, X16));
+                a.b_cond(Cond::Ne, labels[to]);
+                a.bind(held);
             }
             other => return Err(format!("`{other}` in register code")),
         }

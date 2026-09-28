@@ -60,6 +60,9 @@ enum RItem {
     Branch(bool, usize),
     /// The frame's size, known when the body is done.
     Frame,
+    /// `global-guard g w` to a label: unless global cell `g` holds a
+    /// closure made from word `w`.
+    Guard(Value, Value, usize),
 }
 
 /// A standard operation, as register code does it.
@@ -144,6 +147,7 @@ impl Gen {
             RItem::Cell(_) | RItem::Frame => 1,
             RItem::Label(_) => 0,
             RItem::Branch(..) => 2,
+            RItem::Guard(..) => 4,
         };
         let mut at = vec![0i64; self.labels];
         let mut pos = 0;
@@ -163,6 +167,9 @@ impl Gen {
                 RItem::Branch(f, n) => {
                     cells.push(Value::fixnum(op(if *f { "branchf" } else { "branch" }) as i64));
                     cells.push(Value::fixnum(at[*n] - (pos + 2)));
+                }
+                RItem::Guard(c, w, n) => {
+                    cells.extend([Value::fixnum(op("global-guard") as i64), *c, *w, Value::fixnum(at[*n] - (pos + 4))]);
                 }
             }
             pos += size(i);
@@ -785,10 +792,7 @@ impl Compiler<'_> {
             own_te.push((*p, Loc::Slot(usize::MAX)));
         }
         let (call, end) = (g.label(), g.label());
-        g.op("global", &[cell]);
-        g.op("field", &[Value::fixnum(super::CLOSURE_WORD as i64)]);
-        g.op("op2imm", &[Value::fixnum(routine("eq") as i64), word]);
-        g.items.push(RItem::Branch(true, call));
+        self.r_guard(g, cell, word, call);
         let outer = (g.this.take(), self.genv_limit.replace(genv_len));
         self.inlining.push(name);
         let inlined = self.r_exp(g, body, &mut own_env, &mut own_te, tail);
@@ -888,10 +892,7 @@ impl Compiler<'_> {
     /// The guard of an inlined or specialized call: to `call` unless the
     /// global `cell` holds a closure of `word`.
     fn r_guard(&self, g: &mut Gen, cell: Value, word: Value, call: usize) {
-        g.op("global", &[cell]);
-        g.op("field", &[Value::fixnum(super::CLOSURE_WORD as i64)]);
-        g.op("op2imm", &[Value::fixnum(routine("eq") as i64), word]);
-        g.items.push(RItem::Branch(true, call));
+        g.items.push(RItem::Guard(cell, word, call));
     }
 
     /// `n` arguments in registers, the procedure in RESULT: called, or in

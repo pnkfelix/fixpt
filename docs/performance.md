@@ -1406,3 +1406,22 @@ the new value, as the loop without the lifting would. So not built:
 FX-26's loops pass what they use as parameters, and the code binds
 invariants outside its loops already. What made loops at all, the
 guarded calls of itself above, was the gain.
+
+## `global-guard`, one instruction (2026-09-28)
+
+The guard of inlined, specialized and self calls was four instructions of
+register code (`global g; field 2; op2imm eq w; branchf L`), which three
+places each matched as a pattern: the native compiler's fold (and its
+test that no branch landed inside), `,inliners`, and a rewrite for
+globals holding native closures. It is one now, `global-guard g w L`
+(the user's name): unless global `g` holds a closure made from word `w`,
+to `L`; RESULT kept. "Made from `w`" takes both kinds: a cellular
+closure of `w`, or a native closure whose code was compiled from `w`
+(the code's field 2, `CODE_SOURCE`, as a closure's field 2 is its word or
+its code), so the rewrite for native closures is gone. The native
+compiler still decides it when it compiles, where the global holds a
+cellular closure; else it is two loads and a compare, and two more for a
+native closure. Both register compilers make it (`RItem::Guard`,
+`r-guard-to`); the heap checks its target as a branch's; the
+register-code machine and the disassembler know it. Clarity, not speed:
+the times are unchanged.

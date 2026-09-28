@@ -51,8 +51,8 @@ pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
 
 /// Whether the register code of `v`, a closure (cellular, or native through
 /// the word its code was compiled from), or of any lambda it makes, has a
-/// call of the global whose cell is `cell` inlined: the guard `global cell;
-/// field 2` (`,inliners`).
+/// call of the global whose cell is `cell` inlined: `global-guard cell`
+/// (`,inliners`).
 pub fn inlines_global(heap: &Heap, v: Value, cell: Value) -> bool {
     use fixpt_heap::layout::cellular::CODE_SOURCE;
     use fixpt_heap::layout::regcode::OPS;
@@ -81,11 +81,7 @@ pub fn inlines_global(heap: &Heap, v: Value, cell: Value) -> bool {
             let (name, n, _) = op(k);
             let next = k + 1 + n;
             match name {
-                "global" if heap.bloblet_slot(twin, k + 1) == cell && next <= fields => {
-                    if op(next).0 == "field" && heap.bloblet_slot(twin, next + 1).as_fixnum() as usize == CLOSURE_WORD {
-                        return true;
-                    }
-                }
+                "global-guard" if heap.bloblet_slot(twin, k + 1) == cell => return true,
                 "lambda" => todo.push(heap.bloblet_slot(twin, k + 1)),
                 _ => {}
             }
@@ -294,6 +290,7 @@ fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>
         let routine = |v: Value| ROUTINES.get(v.as_fixnum() as usize).map_or("?", |r| r.0).to_string();
         let shown: Vec<String> = match name {
             "branch" | "branchf" => vec![format!("→ {}", at as i64 + 2 + ops[0].as_fixnum())],
+            "global-guard" => vec![global(heap, ops[0]), short(heap, ops[1]), format!("else → {}", at as i64 + 4 + ops[2].as_fixnum())],
             "global" | "setglbl" => vec![global(heap, ops[0])],
             "op1" | "cellular" => std::iter::once(routine(ops[0])).chain(ops[1..].iter().map(|v| short(heap, *v))).collect(),
             "op2" | "op2imm" => vec![routine(ops[0]), short(heap, ops[1])],
