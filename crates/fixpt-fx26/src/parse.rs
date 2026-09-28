@@ -148,7 +148,26 @@ impl Checker {
     }
 
     // ------------------------------------------------------------- regions
+    /// `@globals`, or `(globals g …)` as the regions of each `g`; `None` if
+    /// `s` is neither.
+    fn globals_region(&self, s: &Syntax) -> R<Option<Vec<Region>>> {
+        if s.as_symbol().is_some_and(|x| self.name(x) == "@globals") {
+            return Ok(Some(vec![Region::Globals]));
+        }
+        let Some([head, names @ ..]) = s.as_proper_list() else { return Ok(None) };
+        if !head.as_symbol().is_some_and(|h| self.name(h) == "globals") {
+            return Ok(None);
+        }
+        if names.is_empty() {
+            return Err(FxError::at(s.span, "`(globals name …)`: at least one global"));
+        }
+        names.iter().map(|n| n.as_symbol().map(Region::Global).ok_or_else(|| FxError::at(n.span, "a global's name"))).collect::<R<_>>().map(Some)
+    }
+
     pub(crate) fn parse_region(&self, s: &Syntax) -> R<Region> {
+        if self.globals_region(s)?.is_some() {
+            return Err(FxError::at(s.span, "globals are a region only in effects: `(read @globals)`, `(write (globals g))`"));
+        }
         // `(const p)`: data frozen into place `p`; `(finite p)`, and never
         // written, so finite.
         if let Some([head, p]) = s.as_proper_list()
@@ -210,6 +229,13 @@ impl Checker {
             let [_, r] = items else {
                 return Err(FxError::at(s.span, format!("`({head} region)`")));
             };
+            // Globals' bindings, which are only read and written.
+            if let Some(gs) = self.globals_region(r)? {
+                if !matches!(head, "read" | "write") {
+                    return Err(FxError::at(r.span, format!("globals are only read and written, not `{head}`")));
+                }
+                return Ok(Effect(gs.into_iter().map(c).collect()));
+            }
             Ok(Effect::atom(c(self.parse_region(r)?)))
         };
         match head {

@@ -139,6 +139,12 @@ pub struct Checker {
     /// names: what a redefinition finds the users of a name in
     /// (`Checker::top_defining`).
     pub(crate) defs: Vec<crate::top::Definition>,
+    /// Whether naming a global reads its binding, `(read (globals g))`, as
+    /// the language will say once every program says so (off until then).
+    pub globals_effects: bool,
+    /// Where in `env` the globals are: the bindings top-level definitions
+    /// made.
+    pub(crate) global_slots: HashSet<usize>,
 }
 
 /// What checking proved about expressions, keyed by expression. Lowering
@@ -264,6 +270,8 @@ impl Checker {
             masking: true,
             broken: HashMap::new(),
             defs: Vec::new(),
+            globals_effects: false,
+            global_slots: HashSet::new(),
         };
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
@@ -730,7 +738,16 @@ impl Checker {
         if self.recursive.contains(&(s, t)) {
             e.0.insert(Atom::Spin);
         }
+        if self.globals_effects && self.env.iter().rposition(|(n, _)| *n == s).is_some_and(|i| self.global_slots.contains(&i)) {
+            e.0.insert(Atom::Read(Region::Global(s)));
+        }
         e
+    }
+
+    /// Bind `name`, at top level, to a value of type `t`: a global.
+    pub(crate) fn push_global(&mut self, name: Sym, t: TyId) {
+        self.global_slots.insert(self.env.len());
+        self.env.push((name, t));
     }
 
     /// Whether the group `bindings` ends; if not, its members are recursion
@@ -807,6 +824,8 @@ impl Checker {
                 // What else is done to frozen data is never masked: writing
                 // it is an error wherever it happens (`frozen`).
                 Some(Region::Frozen(..)) => true,
+                // Globals' bindings are seen everywhere: never masked.
+                Some(Region::Global(_) | Region::Globals) => true,
                 Some(r) if visible.contains(&r) => true,
                 Some(r) if in_result.contains(&r) => {
                     matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_))
@@ -1931,6 +1950,7 @@ impl Checker {
     pub(crate) fn truncate_env(&mut self, n: usize) {
         self.env.truncate(n);
         self.known.retain(|(_, i)| *i < n);
+        self.global_slots.retain(|i| *i < n);
     }
 
     /// Run `f` with `bound` in scope.

@@ -79,6 +79,13 @@ pub enum Region {
     Frozen(Option<DVar>, bool),
     /// `heap`: the collected heap, a place that never ends.
     Heap,
+    /// `(globals g)`: the binding of the global `g`, which reading `g` reads
+    /// and defining it writes. Only in effects: `(read (globals f g))` is
+    /// `(maxeff (read (globals f)) (read (globals g)))`.
+    Global(Sym),
+    /// `@globals`: every global's binding, past and future; each
+    /// `(globals g)` is within it.
+    Globals,
 }
 
 impl Region {
@@ -91,6 +98,11 @@ impl Region {
     /// Whether this is frozen data's region, in whatever place.
     pub fn is_frozen(self) -> bool {
         matches!(self, Region::Frozen(..))
+    }
+
+    /// Whether this is globals' bindings: `(globals g)` or `@globals`.
+    pub fn is_globals(self) -> bool {
+        matches!(self, Region::Global(_) | Region::Globals)
     }
 }
 
@@ -145,9 +157,17 @@ impl Effect {
     pub fn union(&self, other: &Effect) -> Effect {
         Effect(self.0.union(&other.0).copied().collect())
     }
-    /// Subeffecting: every atom of `self` is in `other`.
+    /// Subeffecting: every atom of `self` is in `other`, or, if it reads or
+    /// writes one global, `other` does so to `@globals`.
     pub fn within(&self, other: &Effect) -> bool {
-        self.0.is_subset(&other.0)
+        self.0.iter().all(|a| {
+            other.0.contains(a)
+                || match a {
+                    Atom::Read(Region::Global(_)) => other.0.contains(&Atom::Read(Region::Globals)),
+                    Atom::Write(Region::Global(_)) => other.0.contains(&Atom::Write(Region::Globals)),
+                    _ => false,
+                }
+        })
     }
     pub fn contains(&self, a: Atom) -> bool {
         self.0.contains(&a)

@@ -14,6 +14,8 @@ impl Checker {
                 format!("({} {})", if finite { "finite" } else { "const" }, self.interner.name(self.arena.dvar_name(p)))
             }
             Region::Heap => "heap".to_string(),
+            Region::Global(g) => format!("(globals {})", self.interner.name(g)),
+            Region::Globals => "@globals".to_string(),
         }
     }
 
@@ -66,8 +68,24 @@ impl Checker {
     }
 
     /// `pure`, a single atom, or `(maxeff …)`.
+    /// Reads, or writes, of several globals are one atom: `(read (globals f
+    /// g))`.
     pub fn show_effect(&self, e: &Effect) -> String {
-        let atoms: Vec<String> = e.0.iter().map(|a| self.show_atom(*a)).collect();
+        let mut atoms: Vec<String> = Vec::new();
+        let (mut reads, mut writes) = (Vec::new(), Vec::new());
+        for a in &e.0 {
+            match a {
+                Atom::Read(Region::Global(g)) => reads.push(self.interner.name(*g).to_string()),
+                Atom::Write(Region::Global(g)) => writes.push(self.interner.name(*g).to_string()),
+                _ => atoms.push(self.show_atom(*a)),
+            }
+        }
+        for (op, mut gs) in [("read", reads), ("write", writes)] {
+            gs.sort();
+            if !gs.is_empty() {
+                atoms.push(format!("({op} (globals {}))", gs.join(" ")));
+            }
+        }
         match atoms.len() {
             0 => "pure".into(),
             1 => atoms[0].clone(),

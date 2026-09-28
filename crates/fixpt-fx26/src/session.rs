@@ -859,7 +859,7 @@ impl Fx26Session {
 fn definition_init<'f>(form: &'f Syntax, c: &Checker, name: Sym) -> Option<(Option<&'f Syntax>, &'f Syntax)> {
     let fixpt_read::Datum::List { items, tail: None } = &form.datum else { return None };
     let is = |s: &Syntax, n: &str| s.as_symbol().is_some_and(|x| c.interner.name(x) == n);
-    if !(is(items.first()?, "define") && is(items.get(1)?, c.interner.name(name))) {
+    if !((is(items.first()?, "define") || is(items.first()?, "define*")) && is(items.get(1)?, c.interner.name(name))) {
         return None;
     }
     match items.len() {

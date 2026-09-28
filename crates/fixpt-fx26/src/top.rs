@@ -219,7 +219,7 @@ impl Checker {
     pub fn defined_names(&self, form: &Syntax) -> Vec<Sym> {
         let Some(items) = form.as_proper_list() else { return Vec::new() };
         match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
-            Some("define") => items.get(1).and_then(|n| n.as_symbol()).into_iter().collect(),
+            Some("define" | "define*") => items.get(1).and_then(|n| n.as_symbol()).into_iter().collect(),
             Some("define-rec") => items[1..].iter().filter_map(|b| b.as_proper_list()?.first()?.as_symbol()).collect(),
             _ => Vec::new(),
         }
@@ -440,7 +440,8 @@ impl Checker {
         let items = form.as_proper_list().unwrap_or(&[]);
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
         match head {
-            Some("define") => self.define(form.span, items),
+            Some("define") => self.define(form.span, items, false),
+            Some("define*") => self.define(form.span, items, true),
             Some("define-rec") => self.define_rec(form.span, items),
             Some("private-regions") => {
                 let mut regions = Vec::new();
@@ -517,12 +518,26 @@ impl Checker {
         s.as_symbol().ok_or_else(|| FxError::at(s.span, "expected a name"))
     }
 
-    fn define(&mut self, span: Span, items: &[Syntax]) -> R<Top> {
+    /// `(define name type init)`, or `(define name init)`. With `infer`,
+    /// `(define* name type lambda)`: the globals the procedure reads, which
+    /// its type leaves out, are found, precisely, and put in its type's
+    /// latent effect.
+    fn define(&mut self, span: Span, items: &[Syntax], infer: bool) -> R<Top> {
         match items {
             [_, name, ty, init] => {
                 let name = self.binder_name(name)?;
                 self.pending_lemma = None;
+                let written = ty;
                 let ty = self.parse_type(ty)?;
+                // Checked as though it said it read any globals; what it
+                // reads is then taken from its body.
+                let declared = ty;
+                let ty = match infer {
+                    false => ty,
+                    true => self.with_latent(ty, &Effect::atom(crate::ast::Atom::Read(crate::ast::Region::Globals))).ok_or_else(|| {
+                        FxError::at(written.span, "`define*` finds what a procedure reads: its type is a `subr`")
+                    })?,
+                };
                 // A `proves` type: a lemma, once the body proves it.
                 let lemma = self.pending_lemma.take();
                 // A signature's binders are in scope in the definition, which
@@ -533,11 +548,17 @@ impl Checker {
                 let e = self.parse_exp(init);
                 self.dscope.truncate(depth);
                 let e = e?;
+                if infer && !self.is_lambda(e) {
+                    return Err(FxError::at(self.arena.span_of(e), "`define*` defines a procedure: a `lambda`"));
+                }
                 // A lambda is in scope in itself, as a `letrec` binding is:
-                // making it runs nothing, so nothing sees it unmade.
+                // making it runs nothing, so nothing sees it unmade. With
+                // `define*`, at its type as written: the globals it reads
+                // are those of its body, its own name included if it calls
+                // itself.
                 let recursive = self.is_lambda(e);
                 if recursive {
-                    self.env.push((name, ty));
+                    self.push_global(name, declared);
                     self.known.insert((name, self.env.len() - 1));
                 }
                 // A lambda whose every run ends needs no `spin`.
@@ -566,8 +587,18 @@ impl Checker {
                 });
                 match checked {
                     Ok(effect) => {
+                        let ty = match infer {
+                            false => ty,
+                            true => {
+                                let reads = self.globals_read_by(e);
+                                let found = self.with_latent(declared, &reads).expect("a subr");
+                                let at = self.env.len() - 1;
+                                self.env[at].1 = found;
+                                found
+                            }
+                        };
                         if !recursive {
-                            self.env.push((name, ty));
+                            self.push_global(name, ty);
                         }
                         Ok(Top::Define { name, ty, effect, exp: e, typed: true, recursive, assigns: false })
                     }
@@ -586,11 +617,43 @@ impl Checker {
                 if self.is_lambda(e) {
                     self.known.insert((name, self.env.len()));
                 }
-                self.env.push((name, ty));
+                self.push_global(name, ty);
                 Ok(Top::Define { name, ty, effect, exp: e, typed: false, recursive: false, assigns: false })
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),
         }
+    }
+
+    /// `t`, a `subr` under any `poly`s, with `extra` in its latent effect;
+    /// `None` if `t` is not one.
+    pub(crate) fn with_latent(&mut self, t: TyId, extra: &Effect) -> Option<TyId> {
+        let t = self.arena.resolve(t);
+        match self.arena.get(t).clone() {
+            crate::ast::Ty::Poly { binders, body } => {
+                let body = self.with_latent(body, extra)?;
+                Some(self.arena.ty(crate::ast::Ty::Poly { binders, body }))
+            }
+            crate::ast::Ty::Subr { conv, effect, params, result } => {
+                Some(self.arena.ty(crate::ast::Ty::Subr { conv, effect: effect.union(extra), params, result }))
+            }
+            _ => None,
+        }
+    }
+
+    /// The globals lambda `e`'s body reads, as checking found it: what a
+    /// call of it reads.
+    fn globals_read_by(&self, mut e: crate::ast::ExpId) -> Effect {
+        use crate::ast::Exp;
+        let body = loop {
+            match self.arena.exp_at(e) {
+                Exp::PLambda { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => e = *body,
+                Exp::RLambda { lambda, .. } => e = *lambda,
+                Exp::Lambda { body, .. } => break *body,
+                _ => return Effect::pure(),
+            }
+        };
+        let found = self.facts.effects.get(&body).cloned().unwrap_or_default();
+        Effect(found.0.into_iter().filter(|a| a.region().is_some_and(crate::ast::Region::is_globals)).collect())
     }
 
     /// `(define-rec (name type lambda) …)`: every name in scope first, then
@@ -606,7 +669,7 @@ impl Checker {
                 };
                 let name = self.binder_name(name)?;
                 let ty = self.parse_type(ty)?;
-                self.env.push((name, ty));
+                self.push_global(name, ty);
                 self.known.insert((name, self.env.len() - 1));
                 parts.push((name, ty, init.clone()));
             }
@@ -821,7 +884,7 @@ impl Checker {
 
 /// The words FX-26 reserves: syntax, and the parts of descriptions.
 pub const KEYWORDS: &[&str] = &[
-    "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define-type", "define-generative",
+    "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define*", "define-type", "define-generative",
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
