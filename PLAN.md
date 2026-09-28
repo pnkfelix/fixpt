@@ -106,8 +106,13 @@ queue gained", and "The next queue"):
    slower until an inlined body's temporaries stay in registers. Common
    subexpressions measured and not built (109 pure recomputations in the
    front end, none in the benchmarks, each worth one instruction;
-   `docs/performance.md`). Next: an inlined body's temporaries in
-   registers where no call comes between, then superinstructions (13g),
+   `docs/performance.md`). Done too (2026-09-28, the user's list): an
+   inlined body's temporaries and `let`s in registers where no call comes
+   between; constants propagated and folded, with inlining (the guard
+   keeps them inside it); a top-level procedure's calls of itself guarded,
+   so a tail one is a loop (`lists` 13.5 → 9.3 ms); lifting out of loops
+   measured and not built (3 in the front end's heads). Next:
+   superinstructions (13g),
    join points (13i),
    the rest of known calls, a nursery with a write barrier, cheaper
    continuations, a lint on a lambda's size. Known gap, seen with

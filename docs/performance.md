@@ -1381,3 +1381,28 @@ this hour, HEAD and this alike).
 | lists        | 1501500000     |   300.3 |  464.8 | 54.5 |     59.6 |     47.1 |       9.3 |   12.0 |
 | loop         | 49999995000000 |   734.4 |  452.6 | 64.7 |     71.8 |     43.2 |       5.6 |    4.6 |
 | tak          | 9              |    52.1 |   77.9 |  6.5 |      9.0 |      4.4 |       1.8 |    1.2 |
+
+## Lifting out of loops: measured, not built (2026-09-28)
+
+A probe counted, in each loop (a procedure with a tail call of itself,
+a `letrec`'s or, since the change above, a top-level one's), the pure
+expressions (arithmetic, comparisons, `not`, `null?`, `extract` of a
+frozen product; `car` and `cdr` counted too) whose names are all
+invariant: parameters passed unchanged to every call of itself, values
+captured from outside, constants. Those in the head, before the first
+branch, run every iteration, so lifting them keeps what runs:
+
+| where                     | loops | invariant | in the head |
+| ------------------------- | -----:| ---------:| -----------:|
+| the front end             |   311 |        21 |           3 |
+| every benchmark           |    13 |         2 |           1 |
+
+About half the front end's are `car` or `cdr`, which a `set-car!` in the
+loop would change (the effect system would have to say not). The rest
+are `(extract gen 4)`, `(+ depth i)` and the like, each one instruction.
+Global loads are not invariant under redefinition, exactly: a
+continuation taken in the loop and resumed after a redefinition must see
+the new value, as the loop without the lifting would. So not built:
+FX-26's loops pass what they use as parameters, and the code binds
+invariants outside its loops already. What made loops at all, the
+guarded calls of itself above, was the gain.
