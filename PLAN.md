@@ -92,7 +92,10 @@ queue gained", and "The next queue"):
    `src/fx-rsmirror/` and `src/fx-idiomatic/`.
 4. GADTs (N4, to design with the user); a top effect; the rest of
    confirming types at run time (CF1–CF5); concurrency and actors.
-5. M13's rest: inlining (13f), superinstructions (13g), join points (13i),
+5. M13's rest, the transformations first (the user's, 2026-09-28: more
+   for the effort than fixed-width types): inlining (13f) and common
+   subexpressions at the level of cellular or register code, then
+   superinstructions (13g), join points (13i),
    the rest of known calls, a nursery with a write barrier, cheaper
    continuations, a lint on a lambda's size. Known gap, seen with
    `,disassemble-asm`: words compiled cell for cell (`--cellular-machine
@@ -104,6 +107,17 @@ queue gained", and "The next queue"):
    known to be compiled.
 6. Smaller: `nlist` error messages; the language gaps the survey found;
    M8 docs and polish; M10, a full native compiler, is not scheduled.
+   `,disassemble` of a native closure showing the cellular word and
+   register code it was compiled from (each code bloblet keeping its
+   source word), `,disassemble-asm` the machine code.
+7. Fixed-width integers, low priority (the user's, 2026-09-28): `i32` and
+   `u32` kept in a word's upper half (`v << 32`, a fixnum to the collector,
+   so frames stay scannable), with wrapping `+`, `-` and compare one
+   instruction each and no overflow stub, which also makes code smaller;
+   packed arrays of them in a bloblet's suffix; `i64` and `u64` only once
+   native frames have stack maps (step 3), since they need all 64 bits
+   unboxed (the problem Larceny solved for flonums by boxing).
+8. Far future: a k-CFA, for what the types do not already say.
 
 **Unknown**
 - Whether code free of `spin` always ends: T5 is conjectured, and false
