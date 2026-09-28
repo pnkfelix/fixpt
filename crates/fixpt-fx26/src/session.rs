@@ -382,10 +382,14 @@ impl Fx26Session {
                 }
             }
         }
-        // What the reader made of a form declared ahead (a generative type's
+        // What the reader made of a `define-generative` declared ahead (its
         // `up-` and `down-`, which have its span) the pieces written in
-        // FX-26 made of it themselves, above, in its context.
-        let ahead: Vec<Span> = forms.iter().zip(&done).filter(|(_, d)| **d).map(|(f, _)| f.span).collect();
+        // FX-26 made of it themselves, above, in its context. (A datatype's
+        // constructors they are given as the reader made them.)
+        let generative = |f: &Syntax| {
+            f.as_proper_list().and_then(|l| l.first()?.as_symbol()).is_some_and(|h| self.checker.interner.name(h) == "define-generative")
+        };
+        let ahead: Vec<Span> = forms.iter().zip(&done).filter(|(f, d)| **d && generative(f)).map(|(f, _)| f.span).collect();
         let mut outs = Vec::new();
         for (f, done) in forms.iter().zip(done) {
             if !done {

@@ -4,7 +4,9 @@
 //! A fact is `lin = 0` or `lin ≥ 0`, learned in a branch: `(null? xs)` with
 //! `xs : (nlist T n)` gives `n = 0` in the `then` and `n - 1 ≥ 0` in the
 //! `else`. An equality is used to rewrite a variable away; an inequality is
-//! used as it is, or with a constant to spare.
+//! used as it is, or with a constant to spare; and when neither shows what
+//! is asked, the inequalities together, by Fourier–Motzkin elimination
+//! (N5c).
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -81,6 +83,25 @@ impl Size {
     }
 }
 
+/// How many constraints Fourier–Motzkin elimination may have at once
+/// before it gives up (`Checker::refuted_below`).
+const FM_LIMIT: usize = 64;
+
+/// `c ≥ 0` as integers allow: its coefficients divided by their gcd, and
+/// its constant rounded down after the same division.
+fn tightened(c: &Size) -> Size {
+    let Some((k, t)) = parts(c) else { return c.clone() };
+    let g = t.values().fold(0i64, |g, c| gcd(g, c.abs()));
+    if g <= 1 {
+        return c.clone();
+    }
+    from_parts(k.div_euclid(g), t.into_iter().map(|(v, c)| (v, c / g)).collect())
+}
+
+fn gcd(a: i64, b: i64) -> i64 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
 /// `s` with `map`'s sizes for its variables.
 pub(crate) fn subst_size(s: &Size, map: &std::collections::HashMap<DVar, D>) -> Size {
     let Some((_, t)) = parts(s) else { return Size::Finite };
@@ -127,7 +148,50 @@ impl Checker {
             Size::Finite => false,
         };
         let a = self.reduced(a);
-        plainly(&a) || self.size_facts.iter().filter(|f| !f.eq).any(|f| plainly(&a.add_scaled(&self.reduced(&f.lin), -1)))
+        plainly(&a) || self.size_facts.iter().filter(|f| !f.eq).any(|f| plainly(&a.add_scaled(&self.reduced(&f.lin), -1))) || self.refuted_below(&a)
+    }
+
+    /// Whether the inequalities in scope, with every size a natural, leave
+    /// no room for `a ≤ -1`: Fourier–Motzkin elimination (as Xi and
+    /// Pfenning's Dependent ML decides its index constraints, from memory).
+    /// Each variable in turn, lowest first, is eliminated by adding every
+    /// constraint with it positive to every one with it negative, scaled
+    /// so that it cancels; each sum is tightened as integers allow (divided
+    /// by its coefficients' gcd, its constant rounded down). No room left
+    /// shows as a constant constraint below 0. Sound, as rationals are more
+    /// room than integers; incomplete, and it gives up past
+    /// `FM_LIMIT` constraints. `check.fx`'s `k-refuted-below?` is this, step
+    /// for step.
+    fn refuted_below(&self, a: &Size) -> bool {
+        let Some(_) = parts(a) else { return false };
+        let mut cs: Vec<Size> = self.size_facts.iter().filter(|f| !f.eq).map(|f| self.reduced(&f.lin)).filter(|c| parts(c).is_some()).collect();
+        cs.push(Size::lit(-1).add_scaled(a, -1));
+        let mut vars: Vec<DVar> = cs.iter().flat_map(|c| parts(c).map(|(_, t)| t.into_keys().collect::<Vec<_>>()).unwrap_or_default()).collect();
+        vars.sort();
+        vars.dedup();
+        cs.extend(vars.iter().map(|v| Size::var(*v)));
+        let coef = |c: &Size, v: DVar| parts(c).and_then(|(_, t)| t.get(&v).copied()).unwrap_or(0);
+        for v in vars {
+            let (mut next, mut pos, mut neg) = (Vec::new(), Vec::new(), Vec::new());
+            for c in cs {
+                match coef(&c, v) {
+                    0 => next.push(c),
+                    k if k > 0 => pos.push(c),
+                    _ => neg.push(c),
+                }
+            }
+            for p in &pos {
+                for n in &neg {
+                    let (x, y) = (coef(p, v), -coef(n, v));
+                    next.push(tightened(&Size::lit(0).add_scaled(p, y).add_scaled(n, x)));
+                }
+            }
+            if next.len() > FM_LIMIT {
+                return false;
+            }
+            cs = next;
+        }
+        cs.iter().any(|c| matches!(c, Size::Lin { k, terms } if terms.is_empty() && *k < 0))
     }
 
     /// The size of the tail of a list of size `n`: one less, where the
