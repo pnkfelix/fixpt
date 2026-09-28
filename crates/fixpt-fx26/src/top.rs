@@ -23,7 +23,8 @@
 //!   from everything outside it, by construction (`crate::licence`).
 //! * anything else is an expression, checked in the environment so far.
 
-use crate::ast::{Effect, TyId};
+use crate::ast::{Effect, Region, TyId};
+use std::collections::HashSet;
 use crate::check::{Checked, Checker};
 use crate::error::{FxError, R};
 use fixpt_read::{FileId, Reader, Span, Sym, Syntax, SyntaxProfile};
@@ -103,7 +104,8 @@ impl Checker {
         let users = if olds.is_empty() { Vec::new() } else { self.users_of(&names) };
         let mark = self.mark();
         let mut top = self.top(form)?;
-        if let Err(e) = self.no_knot_through_globals(&top, &names, &users, form.span) {
+        let knot = if olds.is_empty() { Ok(()) } else { self.no_knot_through_globals(&top, &names, &users, form.span) };
+        if let Err(e) = knot {
             self.rollback(mark);
             return Err(e);
         }
@@ -162,28 +164,57 @@ impl Checker {
         r
     }
 
-    /// A redefinition of `names` whose new definition uses a definition that
-    /// uses them (`users`, transitively) closes a cycle through globals: a
-    /// procedure that reaches itself through the store, which the checker's
-    /// termination reasoning, trusting every procedure of a type without
-    /// `spin` to end, has not seen. So it must have `spin` in its type, or
-    /// be refused (`docs/fx26.md`, "Redefinition").
+    /// A redefinition of `names` whose new type reads a global whose type
+    /// in turn mentions them (or `@globals`, which may be anything) closes
+    /// a cycle through globals: a procedure that reaches itself through the
+    /// store, which the checker's termination reasoning, trusting every
+    /// procedure of a type without `spin` to end, has not seen. So it must
+    /// have `spin` in its type, or be refused (`docs/fx26.md`,
+    /// "Redefinition"). The types say what each reads, transitively, so one
+    /// step is enough; its own name is its own recursion, which size-change
+    /// sees.
+    ///
+    /// And, from the definitions: a new definition that uses one that uses
+    /// `names` (`users`, transitively), which catches what a type does not
+    /// say, such as a procedure kept as it was, `(let ((h h)) …)`, that
+    /// calls them.
     fn no_knot_through_globals(&self, top: &Top, names: &[Sym], users: &[Definition], span: fixpt_read::Span) -> R<()> {
-        let reached: Vec<Sym> = users.iter().flat_map(|u| u.names.iter().copied()).collect();
-        if reached.is_empty() {
+        let types: Vec<TyId> = match top {
+            Top::Define { ty, .. } => vec![*ty],
+            Top::DefineRec { bindings, .. } => bindings.iter().map(|(_, t, _)| *t).collect(),
+            _ => return Ok(()),
+        };
+        if types.iter().any(|t| self.spins(*t)) {
             return Ok(());
         }
-        let (types, exps): (Vec<TyId>, Vec<crate::ast::ExpId>) = match top {
-            Top::Define { ty, exp, .. } => (vec![*ty], vec![*exp]),
-            Top::DefineRec { bindings, .. } => bindings.iter().map(|(_, t, e)| (*t, *e)).unzip(),
-            _ => return Ok(()),
+        let reads: HashSet<Region> = types.iter().flat_map(|t| self.latent_globals(*t)).collect();
+        let mut candidates: Vec<Sym> = if reads.contains(&Region::Globals) {
+            self.defs.iter().flat_map(|d| d.names.iter().copied()).collect()
+        } else {
+            reads.iter().filter_map(|r| if let Region::Global(g) = r { Some(*g) } else { None }).collect()
+        };
+        candidates.retain(|g| !names.contains(g));
+        let mut cycle: Vec<Sym> = candidates
+            .into_iter()
+            .filter(|g| {
+                let Some(t) = self.global_type(*g) else { return false };
+                let theirs = self.latent_globals(t);
+                theirs.contains(&Region::Globals) || names.iter().any(|n| theirs.contains(&Region::Global(*n)))
+            })
+            .collect();
+        let exps: Vec<crate::ast::ExpId> = match top {
+            Top::Define { exp, .. } => vec![*exp],
+            Top::DefineRec { bindings, .. } => bindings.iter().map(|(_, _, e)| *e).collect(),
+            _ => Vec::new(),
         };
         let mut uses = Vec::new();
         for e in exps {
             self.free_into(e, &mut Vec::new(), &mut uses);
         }
-        let cycle: Vec<Sym> = reached.into_iter().filter(|r| uses.contains(r)).collect();
-        if cycle.is_empty() || types.iter().any(|t| self.spins(*t)) {
+        cycle.extend(users.iter().flat_map(|u| u.names.iter().copied()).filter(|r| uses.contains(r)));
+        cycle.sort_by(|a, b| self.interner.name(*a).cmp(self.interner.name(*b)));
+        cycle.dedup();
+        if cycle.is_empty() {
             return Ok(());
         }
         let shown = |ns: &[Sym]| ns.iter().map(|n| format!("`{}`", self.interner.name(*n))).collect::<Vec<_>>().join(", ");
@@ -192,6 +223,16 @@ impl Checker {
             span,
             format!("{n} cannot be redefined so: it uses {c}, which use {n} in turn, and might never end; give it a type with `spin`, or define {c} again after it"),
         ))
+    }
+
+    /// The globals calling a value of type `t` reads: its latent effect's,
+    /// under any `poly`; none, if it is not a procedure.
+    fn latent_globals(&self, t: TyId) -> Vec<Region> {
+        let mut t = self.arena.resolve(t);
+        while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
+            t = self.arena.resolve(*body);
+        }
+        self.arena.get(t).as_subr().map_or(Vec::new(), |(e, _, _)| e.0.iter().filter_map(|a| a.region().filter(|r| r.is_globals())).collect())
     }
 
     /// Whether `t` is a procedure whose calls may not end: `spin` in its

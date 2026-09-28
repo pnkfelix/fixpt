@@ -75,3 +75,13 @@ fn the_same_compiled() {
     assert!(out[1].contains("`g` is broken"), "{out:?}");
     assert_eq!(out[2], "3");
 }
+
+/// A redefinition that reaches itself through a procedure kept as it was
+/// is refused: its type does not say it uses `h`, but its definition does,
+/// and `h` uses `f` (`Checker::no_knot_through_globals`).
+#[test]
+fn a_knot_through_a_kept_procedure_is_refused() {
+    let mut s = session();
+    let out = run(&mut s, include_str!("programs/redefine/knot-kept.fx"));
+    assert!(out[2].contains("`f` cannot be redefined so: it uses `h`, which use `f` in turn"), "{out:?}");
+}
