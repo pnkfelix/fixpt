@@ -260,3 +260,13 @@ fn a_map_over_a_lambda_is_specialized() {
     }
     assert!(!copy.contains("invoke 1"), "the lambda is not called:\n{copy}");
 }
+
+/// Constants through inlining: `(sum2 i 2)` is `(+ (dbl i) (dbl 2))`, and
+/// `(dbl 2)`, `(+ 2 2)`, is 4, folded; behind `dbl`'s guard, since `dbl`
+/// may yet be redefined, so the sum is not folded further.
+#[test]
+fn constants_are_folded_through_inlined_calls() {
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/bench/helpers.fx")).unwrap();
+    let out = shown(&text);
+    assert!(out.contains("const 4"), "{out}");
+}

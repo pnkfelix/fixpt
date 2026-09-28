@@ -37,6 +37,8 @@ enum RLoc {
     Loop,
     /// A `letrec` sibling not made yet, to be in frame slot `s`.
     Pending(usize),
+    /// A constant, bound to the name (`r_const`): no place at all.
+    Const(Value),
 }
 
 /// An operand of a call-out: an expression, a constant, a procedure of
@@ -379,6 +381,11 @@ impl Compiler<'_> {
 
     /// `x`'s value into `RESULT`; in tail position, returned.
     fn r_exp(&mut self, g: &mut Gen, x: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        if let Some(v) = self.r_const(env, x) {
+            g.op("const", &[v]);
+            g.done(tail);
+            return Some(());
+        }
         match self.c.arena.exp_at(x).clone() {
             Exp::Var(n) => {
                 match self.r_where(env, n) {
@@ -386,7 +393,7 @@ impl Compiler<'_> {
                     Some(RLoc::Slot(s)) => g.op("stack", &[Gen::n(s)]),
                     Some(RLoc::Free(i)) => g.op("lexical", &[Gen::n(i)]),
                     Some(RLoc::Global(c)) => g.op("global", &[c]),
-                    Some(RLoc::Loop | RLoc::Pending(_)) => return None,
+                    Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_)) => return None,
                     None if self.name(n) == "nil" => g.op("const", &[Value::NULL]),
                     None => return self.decline("a standard operation as a value"),
                 }
@@ -450,6 +457,11 @@ impl Compiler<'_> {
                 g.next_reg = regs;
                 g.next_slot = slots;
             }
+            // A test known: the arm it takes, alone.
+            Exp::If { test, then, els } if self.r_const(env, test).is_some() => {
+                let arm = if self.r_const(env, test) == Some(Value::FALSE) { els } else { then };
+                self.r_exp(g, arm, env, te, tail)?;
+            }
             Exp::If { test, then, els } => {
                 let (no, end) = (g.label(), g.label());
                 self.r_exp(g, test, env, te, false)?;
@@ -483,6 +495,11 @@ impl Compiler<'_> {
                 let in_regs = self.r_in_regs(g, &inits, te, body_collects);
                 let mut bound = Vec::new();
                 for ((n, init), reg) in bindings.iter().zip(in_regs) {
+                    // A constant is bound as itself.
+                    if let Some(v) = self.r_const(env, *init) {
+                        bound.push((*n, RLoc::Const(v)));
+                        continue;
+                    }
                     self.r_exp(g, *init, env, te, false)?;
                     bound.push((*n, Self::r_keep(g, reg)?));
                 }
@@ -727,6 +744,12 @@ impl Compiler<'_> {
         let params = self.inlines[k].params.clone();
         let (mut own_env, mut own_te, mut slow) = (Vec::new(), Vec::new(), Vec::new());
         for (p, a) in params.iter().zip(args) {
+            if let Some(v) = self.r_const(env, *a) {
+                own_env.push((*p, RLoc::Const(v)));
+                slow.push(Arg::V(v));
+                own_te.push((*p, Loc::Slot(usize::MAX)));
+                continue;
+            }
             match self.r_var(env, *a) {
                 Some(l @ (RLoc::Slot(_) | RLoc::Free(_))) => {
                     own_env.push((*p, l));
@@ -879,6 +902,11 @@ impl Compiler<'_> {
         self.genv_limit = outer;
         let in_regs = self.r_in_regs(g, &inits, te, body_collects);
         for ((p, a), reg) in sp.lam_params.iter().zip(args).zip(&in_regs) {
+            if let Some(v) = self.r_const(env, *a) {
+                own_env.push((*p, RLoc::Const(v)));
+                own_te.push((*p, Loc::Slot(usize::MAX)));
+                continue;
+            }
             self.r_exp(g, *a, env, te, false)?;
             own_env.push((*p, Self::r_keep(g, *reg)?));
             own_te.push((*p, Loc::Slot(usize::MAX)));
@@ -1012,7 +1040,7 @@ impl Compiler<'_> {
     fn r_operands(&mut self, g: &mut Gen, a: ExpId, b: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, imm: bool) -> O<(O<Value>, O<usize>)> {
         let (regs, slots) = (g.next_reg, g.next_slot);
         let out;
-        if let (true, Some(v)) = (imm, self.r_constant(b)) {
+        if let (true, Some(v)) = (imm, self.r_const(env, b)) {
             self.r_exp(g, a, env, te, false)?;
             out = (Some(v), None);
         } else if let Some(RLoc::Reg(k)) = self.r_var(env, b) {
@@ -1073,12 +1101,40 @@ impl Compiler<'_> {
         Some(())
     }
 
-    /// `x`'s value, if it is a constant that needs no allocation.
-    fn r_constant(&mut self, x: ExpId) -> O<Value> {
+    /// `x`'s value, if it is a constant that needs no allocation: a
+    /// literal, a name bound to one, `nil`, or a standard operation on
+    /// constants folded (`+` and `-` on integers under 2^30 in size, which
+    /// cannot overflow; comparisons; `not`; `null?`; `char=?`).
+    fn r_const(&self, env: &[(Sym, RLoc)], x: ExpId) -> O<Value> {
         match self.c.arena.exp_at(x).clone() {
             Exp::Int(k) => Some(Value::fixnum(k)),
             Exp::Bool(b) => Some(Value::boolean(b)),
             Exp::Char(c) => Some(Value::char(c)),
+            Exp::Var(n) => match self.r_where(env, n) {
+                Some(RLoc::Const(v)) => Some(v),
+                None if self.name(n) == "nil" => Some(Value::NULL),
+                _ => None,
+            },
+            Exp::The { exp: body, .. } | Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.r_const(env, body),
+            Exp::App { fun, args } => {
+                let name = self.r_standard_name(env, fun)?;
+                let vs: Vec<Value> = args.iter().map(|a| self.r_const(env, *a)).collect::<O<_>>()?;
+                let small = |v: &Value| v.is_fixnum() && v.as_fixnum().abs() < 1 << 30;
+                let int2 = || (vs.len() == 2 && vs.iter().all(small)).then(|| (vs[0].as_fixnum(), vs[1].as_fixnum()));
+                match name.as_str() {
+                    "+" => int2().map(|(a, b)| Value::fixnum(a + b)),
+                    "-" => int2().map(|(a, b)| Value::fixnum(a - b)),
+                    "<" => int2().map(|(a, b)| Value::boolean(a < b)),
+                    ">" => int2().map(|(a, b)| Value::boolean(a > b)),
+                    "<=" => int2().map(|(a, b)| Value::boolean(a <= b)),
+                    ">=" => int2().map(|(a, b)| Value::boolean(a >= b)),
+                    "=" => int2().map(|(a, b)| Value::boolean(a == b)),
+                    "not" if vs.len() == 1 => Some(Value::boolean(vs[0] == Value::FALSE)),
+                    "null?" if vs.len() == 1 => Some(Value::boolean(vs[0] == Value::NULL)),
+                    "char=?" if vs.len() == 2 && vs.iter().all(|v| v.is_char()) => Some(Value::boolean(vs[0] == vs[1])),
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -1206,6 +1262,7 @@ impl Compiler<'_> {
                         patches.push((j, s));
                         Arg::V(Value::FALSE)
                     }
+                    RLoc::Const(v) => Arg::V(v),
                     _ => return None,
                 });
             }
@@ -1228,6 +1285,10 @@ impl Compiler<'_> {
                     g.op("const", &[Value::FALSE]);
                     g.op("setreg", &[Gen::n(j + 1)]);
                     patches.push((j, s));
+                }
+                RLoc::Const(v) => {
+                    g.op("const", &[v]);
+                    g.op("setreg", &[Gen::n(j + 1)]);
                 }
                 _ => return None,
             }

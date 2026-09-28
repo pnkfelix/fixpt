@@ -1309,3 +1309,40 @@ live across calls.
 | lists        | 1501500000     |   298.9 |  472.8 | 54.4 |     55.6 |     47.0 |      13.6 |   17.0 |
 | loop         | 49999995000000 |   735.8 |  473.6 | 65.1 |     66.3 |     46.6 |       5.5 |    4.2 |
 | tak          | 9              |    51.5 |   78.9 |  6.5 |      9.3 |      4.4 |       1.9 |    1.2 |
+
+## Constants propagated and folded, with inlining (2026-09-28)
+
+In register code, a name bound to a constant (a `let`'s, an inlined
+call's argument, a specialized lambda's argument) is bound to the
+constant itself, and no code is made for it; a standard operation on
+constants is folded (`+` and `-` on integers under 2^30 in size, so that
+neither compiler can overflow; comparisons, `not`, `null?`, `char=?`);
+an `if` whose test is known is its arm alone; a constant operand is an
+immediate; a closure that captures a name bound to one gets the constant.
+Both compilers (`r_const`, `r-known`), alike.
+
+What makes the constants is inlining: in `helpers`, `(sum2 i 2)` is
+`(+ (dbl i) (dbl 2))`, and `(dbl 2)` is `(+ 2 2)`, 4. What stops them is
+the guard: `(dbl 2)` is 4 only while `dbl` holds what it was compiled
+from, so 4 is made inside the guard, and the sum around it is not folded
+further. The native compiler decides guards where the global holds a
+cellular closure, but does not fold what follows.
+
+Globals defined as constants (`(define rop-const int 3)`, much used in
+the front end) are not propagated: a compatible redefinition keeps the
+global and changes its value, so each use would need a guard, which
+costs what the load does.
+
+`helpers`: register code 12.5 → 10.9 ms, native 7.2 → 6.9 ms; the rest
+unchanged.
+
+| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   118.8 |   49.4 | 14.4 |     14.2 |     12.5 |       9.3 |   22.4 |
+| closures     | 6003000000     |   344.2 |  691.5 | 76.2 |     80.1 |     60.3 |      21.7 |   31.0 |
+| fib          | 832040         |   181.1 |  215.8 | 16.0 |     22.5 |     12.9 |       5.6 |    2.5 |
+| helpers      | 12000000       |   865.3 | 1291.8 | 90.5 |     98.6 |     55.3 |      10.9 |    6.9 |
+| lists-region | 1501500000     |   334.0 |  312.7 | 98.2 |    104.8 |     83.5 |       7.4 |  158.7 |
+| lists        | 1501500000     |   299.7 |  467.6 | 54.5 |     59.2 |     47.2 |      13.5 |   17.0 |
+| loop         | 49999995000000 |   735.3 |  453.4 | 64.6 |     84.0 |     41.3 |       5.6 |    4.5 |
+| tak          | 9              |    52.0 |   79.4 |  6.5 |      9.4 |      4.4 |       1.9 |    1.2 |

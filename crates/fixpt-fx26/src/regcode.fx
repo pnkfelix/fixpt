@@ -24,6 +24,9 @@
   (r-frame))
 
 ;; Where a variable is, to register code.
+;; A constant that needs no allocation, as register code may know one.
+(define-datatype rconst (rc-int int) (rc-bool bool) (rc-char char) (rc-nil))
+
 (define-datatype rloc
   (rl-reg int)
   (rl-slot int)
@@ -31,7 +34,9 @@
   (rl-global wglobal)
   (rl-loop)
   ;; A `letrec` sibling not made yet, to be in this frame slot.
-  (rl-pending int))
+  (rl-pending int)
+  ;; A constant, bound to the name (`r-known`): no place at all.
+  (rl-const rconst))
 (define-type renv (listof (pairof symbol rloc @k) @k))
 
 ;; An operand of a call-out: an expression, a constant, a procedure of no
@@ -152,14 +157,18 @@
       (e-sym (v a b) #t) (e-unit (a b) #t) (e-str (v a b) #t)
       (else y #f))))
 
-;; `x`'s value, if it is a constant that needs no allocation.
-(define r-constant (subr (alloc @k) (exp) (listof wcell @k))
-  (lambda (x)
-    (tagcase x
-      (e-int (n a b) (the (listof wcell @k) (cons (wcell-int n) nil)))
-      (e-bool (v a b) (the (listof wcell @k) (cons (wcell-bool v) nil)))
-      (e-char (v a b) (the (listof wcell @k) (cons (wcell-char v) nil)))
-      (else y (the (listof wcell @k) nil)))))
+;; A constant's cell.
+(define r-const-cell (subr pure (rconst) wcell)
+  (lambda (c) (tagcase c (rc-int (n) (wcell-int n)) (rc-bool (v) (wcell-bool v)) (rc-char (v) (wcell-char v)) (rc-nil () (wcell-nil)))))
+;; Whether a constant is #f.
+(define r-const-false? (subr pure (rconst) bool)
+  (lambda (c) (tagcase c (rc-bool (v) (not v)) (else y #f))))
+;; An integer under 2^30 in size, in a list, if `c` is one.
+(define r-const-small (subr (alloc @k) (rconst) (listof int @k))
+  (lambda (c)
+    (tagcase c
+      (rc-int (n) (if (and (< n 1073741824) (> n -1073741824)) (the (listof int @k) (cons n nil)) nil))
+      (else y nil))))
 
 (define r-this-name? (subr (read @k) ((listof c-this @k) symbol int) bool)
   (lambda (this n nargs)
@@ -243,6 +252,73 @@
 (define r-standard-name (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) string)
   (lambda (env f)
     (tagcase (r-operator f) (e-var (n a b) (if (null? (r-where env n)) (symbol->string n) "")) (else y ""))))
+(define r-rev-consts (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof rconst @k) (listof rconst @k)) (listof rconst @k))
+  (lambda (xs acc) (if (null? xs) acc (r-rev-consts (cdr xs) (cons (car xs) acc)))))
+(define c-length-consts (subr (maxeff (read @globals) (read @k) spin) ((listof rconst @k)) int)
+  (lambda (xs) (if (null? xs) 0 (+ 1 (c-length-consts (cdr xs))))))
+;; Standard operation `name` on constants `vs`, folded, if it is one that
+;; folds.
+(define r-fold (subr (maxeff (read @globals) (read @k) (alloc @k)) (string (listof rconst @k)) (listof rconst @k))
+  (lambda (name vs)
+    (let* ((two (and (not (null? vs)) (and (not (null? (cdr vs))) (null? (cdr (cdr vs))))))
+           (one (and (not (null? vs)) (null? (cdr vs))))
+           (a (if two (r-const-small (car vs)) (the (listof int @k) nil)))
+           (b (if two (r-const-small (car (cdr vs))) (the (listof int @k) nil)))
+           (ints (and (not (null? a)) (not (null? b))))
+           (int (lambda ((n int)) (the (listof rconst @k) (cons (rc-int n) nil))))
+           (bool (lambda ((v bool)) (the (listof rconst @k) (cons (rc-bool v) nil)))))
+      (cond ((and ints (string=? name "+")) (int (+ (car a) (car b))))
+            ((and ints (string=? name "-")) (int (- (car a) (car b))))
+            ((and ints (string=? name "<")) (bool (< (car a) (car b))))
+            ((and ints (string=? name ">")) (bool (> (car a) (car b))))
+            ((and ints (string=? name "<=")) (bool (<= (car a) (car b))))
+            ((and ints (string=? name ">=")) (bool (>= (car a) (car b))))
+            ((and ints (string=? name "=")) (bool (= (car a) (car b))))
+            ((and one (string=? name "not")) (bool (r-const-false? (car vs))))
+            ((and one (string=? name "null?")) (bool (tagcase (car vs) (rc-nil () #t) (else y #f))))
+            ((and two (string=? name "char=?"))
+             (tagcase (car vs)
+               (rc-char (x) (tagcase (car (cdr vs)) (rc-char (y) (bool (char=? x y))) (else z nil)))
+               (else z nil)))
+            (else nil)))))
+(define-rec
+  ;; `x`'s value, if it is a constant that needs no allocation, as the Rust
+  ;; compiler's `r_const` says: a literal, a name bound to one, `nil`, or a
+  ;; standard operation on constants folded (`+` and `-` on integers under
+  ;; 2^30 in size, which cannot overflow; comparisons; `not`; `null?`;
+  ;; `char=?`).
+  (r-known (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) (listof rconst @k))
+    (lambda (env x)
+      (tagcase x
+        (e-int (n a b) (the (listof rconst @k) (cons (rc-int n) nil)))
+        (e-bool (v a b) (the (listof rconst @k) (cons (rc-bool v) nil)))
+        (e-char (v a b) (the (listof rconst @k) (cons (rc-char v) nil)))
+        (e-var (n a b)
+          (let ((l (r-where env n)))
+            (if (null? l)
+                (if (string=? (symbol->string n) "nil") (the (listof rconst @k) (cons (rc-nil) nil)) nil)
+                (tagcase (car l) (rl-const (c) (the (listof rconst @k) (cons c nil))) (else y nil)))))
+        (e-the (d body a b) (r-known env body))
+        (e-plambda (d body a b) (r-known env body))
+        (e-proj (body ds a b) (r-known env body))
+        (e-app (f args a b)
+          (let ((name (r-standard-name env f)))
+            (if (string=? name "")
+                nil
+                (let ((vs (r-knowns env args nil)))
+                  (if (or (null? vs) (not (= (c-length-consts (car vs)) (c-count-exps args))))
+                      nil
+                      (r-fold name (car vs)))))))
+        (else y nil))))
+  ;; Each of `es`' constants, in order, onto `acc` reversed, in a list; none
+  ;; if one is not a constant.
+  (r-knowns (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv (listof exp finite) (listof rconst @k)) (listof (listof rconst @k) @k))
+    (lambda (env es acc)
+      (if (null? es)
+          (the (listof (listof rconst @k) @k) (cons (r-rev-consts acc nil) nil))
+          (let ((c (r-known env (car es))))
+            (if (null? c) nil (r-knowns env (cdr es) (cons (car c) acc))))))))
+
 
 ;;; ---------------------------------------------------------------- lists
 
@@ -491,6 +567,9 @@
   ;; `x`'s value into RESULT; in tail position, returned.
   (r-exp (subr (maxeff compiles spin) (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
+      (let ((k (r-known env x)))
+        (if (not (null? k))
+            (begin (r-op1 g rop-const (r-const-cell (car k))) (r-done g tail))
       (tagcase x
         (e-var (n a b)
           (let ((l (r-where env n)))
@@ -536,6 +615,9 @@
                   (set (extract g nreg) regs)
                   (set (extract g nslot) slots))))))
         (e-if (t th el a b)
+          (if (not (null? (r-known env t)))
+              ;; A test known: the arm it takes, alone.
+              (r-exp g (if (r-const-false? (car (r-known env t))) el th) env te tail)
           (let ((no (r-new-label g)) (end (r-new-label g)))
             (begin
               (r-exp g t env te #f)
@@ -544,7 +626,7 @@
               (if tail #u (r-emit g (r-branch #f end)))
               (r-emit g (r-label no))
               (r-exp g el env te tail)
-              (r-emit g (r-label end)))))
+              (r-emit g (r-label end))))))
         (e-begin (es a b)
           (if (null? es) (begin (r-op1 g rop-const (wcell-unit)) (r-done g tail)) (r-begin g es env te tail)))
         (e-let (bs body a b)
@@ -582,7 +664,7 @@
             (r-done g tail)))
         (e-tagcase (s arms els a b) (r-tagcase g s arms els env te tail))
         (e-letrec (bs body a b) (if (extract g leaf) (r-decline) (r-letrec g bs body env te tail)))
-        (e-app (f args a b) (r-app g f args env te tail)))))
+        (e-app (f args a b) (r-app g f args env te tail)))))))
   (r-begin (subr (maxeff compiles spin) (rgen (listof exp finite) renv cenv bool) unit)
     (lambda (g es env te tail)
       (if (null? (cdr es))
@@ -596,10 +678,12 @@
     (lambda (g bs env te flags)
       (if (null? bs)
           nil
-          (begin
-            (r-exp g (extract (car bs) 2) env te #f)
-            (let ((l (r-keep g (car flags))))
-              (cons (cons (extract (car bs) 1) l) (r-let-bind g (cdr bs) env te (cdr flags))))))))
+          (let* ((k (r-known env (extract (car bs) 2)))
+                 ;; A constant is bound as itself.
+                 (l (if (null? k)
+                        (begin (r-exp g (extract (car bs) 2) env te #f) (r-keep g (car flags)))
+                        (rl-const (car k)))))
+            (cons (cons (extract (car bs) 1) l) (r-let-bind g (cdr bs) env te (cdr flags)))))))
   (r-bind-all (subr (maxeff compiles spin) (renv renv) renv)
     (lambda (bound env) (if (null? bound) env (r-bind-all (cdr bound) (cons (car bound) env)))))
   (r-local-all (subr (maxeff compiles spin) (renv cenv) cenv)
@@ -738,17 +822,21 @@
       (if (or (null? ps) (null? args))
           (product (1 (the renv nil)) (2 (the cenv nil)) (3 (the rargs nil)))
           (let* ((p (extract (car ps) 1)) (a (car args))
-                 (l (tagcase a (e-var (n x y) (r-where env n)) (else y (the (listof rloc @k) nil))))
+                 (k (r-known env a))
+                 (l (if (null? k) (tagcase a (e-var (n x y) (r-where env n)) (else y (the (listof rloc @k) nil))) (the (listof rloc @k) (cons (rl-const (car k)) nil))))
                  (kept (if (null? l)
                            (the (listof rloc @k) nil)
                            (tagcase (car l)
                              (rl-slot (s) l)
                              (rl-free (j) l)
+                             (rl-const (c) l)
                              (else y (the (listof rloc @k) nil)))))
                  (here (if (null? kept)
                            (begin (r-exp g a env te #f) (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) (rl-slot s))))
                            (car kept)))
-                 (arg (if (null? kept) (tagcase here (rl-slot (s) (a-slot s)) (else y (a-e a))) (a-e a)))
+                 (arg (cond ((not (null? k)) (a-v (r-const-cell (car k))))
+                            ((null? kept) (tagcase here (rl-slot (s) (a-slot s)) (else y (a-e a))))
+                            (else (a-e a))))
                  (rest (r-inline-args g (cdr ps) (cdr args) env te)))
             (product (1 (the renv (cons (cons p here) (extract rest 1))))
                      (2 (r-local (extract rest 2) p))
@@ -833,7 +921,8 @@
       (if (or (null? ps) (null? args))
           (product (1 (the renv nil)) (2 (the cenv nil)))
           (let* ((p (extract (car ps) 1))
-                 (l (begin (r-exp g (car args) env te #f) (r-keep g (car flags))))
+                 (k (r-known env (car args)))
+                 (l (if (null? k) (begin (r-exp g (car args) env te #f) (r-keep g (car flags))) (rl-const (car k))))
                  (rest (r-spec-args g (cdr ps) (cdr args) env te (cdr flags))))
             (product (1 (the renv (cons (cons p l) (extract rest 1)))) (2 (r-local (extract rest 2) p)))))))
   ;; Each value the lambda's closure captured, from the parameter's value at
@@ -903,7 +992,9 @@
   (r-operands (subr (maxeff compiles spin) (rgen exp exp renv cenv bool) (productof (1 (listof wcell @k)) (2 (listof int @k))))
     (lambda (g a b env te imm)
       (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
-             (v (if imm (r-constant b) (the (listof wcell @k) nil)))
+             (v (if imm
+                    (let ((k (r-known env b))) (if (null? k) (the (listof wcell @k) nil) (the (listof wcell @k) (cons (r-const-cell (car k)) nil))))
+                    (the (listof wcell @k) nil)))
              (bl (tagcase b (e-var (n x y) (r-where env n)) (else z (the (listof rloc @k) nil))))
              (breg (if (null? bl) -1 (tagcase (car bl) (rl-reg (k) k) (else z -1))))
              (out
@@ -1040,6 +1131,8 @@
                   (rl-pending (s)
                     (begin (r-op1 g rop-const (wcell-bool #f)) (r-opn g rop-setreg (+ j 1))
                            (cons (cons j s) (r-free-regs g (cdr fv) env (+ j 1)))))
+                  (rl-const (c)
+                    (begin (r-op1 g rop-const (r-const-cell c)) (r-opn g rop-setreg (+ j 1)) (r-free-regs g (cdr fv) env (+ j 1))))
                   (else y (begin (r-decline) (the patches nil)))))))))
   ;; The same, as a call-out's operands.
   (r-free-args (subr (maxeff compiles spin) (syms renv int) (productof (1 rargs) (2 patches)))
@@ -1054,6 +1147,7 @@
                   (rl-free (i) (product (1 (cons (a-lexical i) (extract rest 1))) (2 (extract rest 2))))
                   (rl-pending (s)
                     (product (1 (cons (a-v (wcell-bool #f)) (extract rest 1))) (2 (cons (cons j s) (extract rest 2)))))
+                  (rl-const (c) (product (1 (cons (a-v (r-const-cell c)) (extract rest 1))) (2 (extract rest 2))))
                   (else y (begin (r-decline) rest))))))))
   (r-append-arg (subr (maxeff compiles spin) (rargs rarg) rargs)
     (lambda (xs x) (if (null? xs) (cons x nil) (cons (car xs) (r-append-arg (cdr xs) x)))))
