@@ -1001,3 +1001,28 @@ an upper bound on what it could save:
 
 A poll never taken (a subtract and a branch) costs nothing measurable
 here, so R5, and R8 (stack checks hoisted), are not worth building.
+
+## Closures: what copying code into each would cost (2026-09-27)
+
+A threaded closure is `[word][free…]`: the code (the word) is shared by
+every closure of one `lambda`, and a free value is one load from the
+closure register, as Larceny's closures are. Measured once, with temporary
+counters in the Rust threaded machine's `CLOSURE` routine (not kept), on
+the self-compile (the driver compiling the bootstrap program):
+
+| what                                                        | count or words |
+| ----------------------------------------------------------- | -------------- |
+| closures made                                               | 1,382,525      |
+| words allocated for them                                    | 6,734,703      |
+| words more, were each lambda's code copied into its closure | 94,289,442     |
+| distinct `lambda`s whose closures were made                 | 1,329          |
+| words of code, all of those `lambda`s                       | 137,016        |
+
+Copying would allocate 15 times the words (about 750 MB more over the run,
+at 8 bytes a word, against 54 MB). The cost is concentrated: one `lambda`
+of 41 words is made 383,286 times, one of 295 words 136,005 times, and
+five more 41,000 to 79,000 times each. Loading the front end made 1,251
+closures, each of a different `lambda`, exactly once: for those, copying
+would cost nothing but the one copy. On the native machines copying would
+also mean writing executable memory for each closure (W^X on arm64 macOS,
+and an instruction-cache flush), which is far dearer than the words.
