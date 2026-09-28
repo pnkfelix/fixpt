@@ -117,7 +117,16 @@ queue gained", and "The next queue"):
    sound where the body's effect keeps no continuation for later and
    writes no global (effect summaries, both checkers); `helpers` native
    6.1 → 2.0 ms. To refine: guards per segment between `comefrom`s (the
-   user's), and bodies with closures (compile nested lambdas once). Speed is judged
+   user's), and versions of bodies with closures. Done too (2026-09-28): a
+   nested lambda compiled once, not 2^(d−1) times at depth d (the user
+   spotted it in `,disassemble-asm`); constructors of constants made once
+   while compiling (`wcell-sum`, `wcell-product`); operands in the order
+   written (register code ran `>`'s second first, a bug), a constant
+   second as an immediate and constant chains of `+` and `-` combined (the
+   user's question); tests as jumps, `and`/`or`/`not` making no boolean,
+   with a `brancht` (Twobit's `pass2if.sch`, the user's recollection). A
+   collection landing in a phase shows as a step in its time
+   (`probe_phases_as_register_code`): heap sizing is its fix. Speed is judged
    by the native convention's code only (the user's, 2026-09-28: the
    interpreters must not be asymptotically inefficient, but their constant
    factors do not matter): superinstructions (13g)
