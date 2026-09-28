@@ -114,7 +114,7 @@ pub fn repl(backend: Backend) -> i32 {
         Strategy::Lower => format!("lowered to Scheme and run on the {engine}"),
         Strategy::Evaluate => "run by the evaluator written in FX-26".to_string(),
         Strategy::Cellular if session.native_runner.is_some() => format!(
-            "compiled by the compiler written in FX-26; each expression then compiled in the native convention and run as machine code (where it cannot be yet, on {machine}, saying why), definitions on {machine}"
+            "compiled by the compiler written in FX-26, then in the native convention, and run as machine code (where it cannot be yet, on {machine}, saying why)"
         ),
         Strategy::Cellular => format!("compiled to cellular words by the compiler written in FX-26, and run on {machine}"),
     };
@@ -798,11 +798,18 @@ fn native(session: &mut Fx26Session, rest: &str) {
     let limit = session.step_limit().unwrap_or(u64::MAX >> 1);
     let shown = session.with_global_value(name, |rt, closure| {
         let mut m = fixpt_native::direct::DirectMachine::new()?;
-        let procs = m.compile(&mut rt.heap, closure)?;
-        let mut out = listing(&m, &rt.heap, &procs, name);
+        // Already native code (defined in the native convention): as it is.
+        let (procs, mut out) = match fixpt_native::direct::DirectMachine::compiled_of(&rt.heap, closure) {
+            Some(p) => (vec![(name.to_string(), p)], fixpt_native::direct::code_text(&rt.heap, closure).unwrap_or_default()),
+            None => {
+                let procs = m.compile(&mut rt.heap, closure)?;
+                let out = listing(&m, &rt.heap, &procs, name);
+                (procs, out)
+            }
+        };
         let p = procs[0].1;
         if !args.is_empty() || p.arity == 0 {
-            if args.len() != p.arity {
+            if p.arity != usize::MAX && args.len() != p.arity {
                 return Err(format!("`{name}` takes {} argument(s)", p.arity));
             }
             let vals: Vec<fixpt_heap::Value> = args.iter().map(|a| fixpt_heap::Value::fixnum(*a)).collect();
@@ -855,7 +862,7 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel:
             Ok(p) => p,
             Err(why) => return NativeRun::Declined(why),
         };
-        NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map(|v| fixpt_runtime::write_value(&rt.heap, v)).map_err(|t| t.what))
+        NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map_err(|t| t.what))
     })
 }
 

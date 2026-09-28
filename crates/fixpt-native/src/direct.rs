@@ -320,10 +320,21 @@ impl DirectMachine {
             .collect())
     }
 
+    /// A native closure, as what it runs: its code, all of it, and the
+    /// closure; its arity is not recorded, so a call of it is not checked.
+    pub fn compiled_of(heap: &Heap, closure: Value) -> Option<Compiled> {
+        if !closure.is_bloblet() || heap.bloblet_kind(closure) != fixpt_heap::layout::kind("native-closure") {
+            return None;
+        }
+        let code = heap.bloblet_slot(closure, CLOSURE_WORD);
+        Some(Compiled { code, len: heap.bloblet_head(code).bytes / 4, arity: usize::MAX, closure })
+    }
+
     /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
     /// heap its call-outs allocate in, collecting when they must.
     pub fn call(&mut self, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
-        assert_eq!(args.len(), p.arity, "the procedure's arity");
+        assert!(p.arity == usize::MAX || args.len() == p.arity, "the procedure's arity");
+        assert!(args.len() <= 8, "arguments in registers only");
         let top = (self.stack.as_mut_ptr() as u64 + 8 * STACK_WORDS as u64) & !15;
         let mut st = DState {
             stack_top: top,
@@ -471,19 +482,24 @@ impl Compiling<'_> {
         }
     }
 
-    /// How a global's value is had: a native closure of the procedure it
-    /// holds, made now (bound when compiling), or the global's cell, read
-    /// when the code runs.
-    fn global_value(&mut self, p: usize, cell: Value) -> Result<Field, String> {
+    /// How a global's value is had: the global's cell, read when the code
+    /// runs, as Larceny's code reads its globals, so that a later
+    /// definition is seen; but a cellular closure (a procedure the cellular
+    /// machine made), which native code cannot call, is compiled and bound
+    /// now, as a native closure of its procedure.
+    fn global_value(&mut self, cell: Value) -> Result<Field, String> {
         let v = self.heap.bloblet_slot(cell, 2);
-        if let Some((word, free)) = self.closure_parts(v) {
+        // Not defined yet (a definition of itself, being compiled): what its
+        // cell holds when the code runs.
+        if let Some((word, free)) = self.closure_parts(v)
+            && self.name(word) != "undefined"
+        {
             let q = self.proc_of(word)?;
-            return Ok(Field::Closure(q, free));
+            return Ok(match free.is_empty() {
+                true => Field::Code(q),
+                false => Field::Closure(q, free),
+            });
         }
-        if v.is_bloblet() && self.heap.bloblet_kind(v) == fixpt_heap::layout::kind("native-closure") {
-            return Ok(Field::Const(v));
-        }
-        let _ = p;
         Ok(Field::Cell(cell))
     }
 
@@ -585,20 +601,21 @@ impl Compiling<'_> {
                 }
                 "global" => {
                     let cell = o(0);
+                    let g = self.global_value(cell).map_err(|e| format!("`{name}` calls {e}"))?;
                     if called(i).is_some() {
-                        let v = h.bloblet_slot(cell, 2);
-                        pending = Some(match self.closure_parts(v) {
-                            Some((w, free)) if free.is_empty() => Field::Code(self.proc_of(w).map_err(|e| format!("`{name}` calls {e}"))?),
-                            Some((w, free)) => Field::Closure(self.proc_of(w).map_err(|e| format!("`{name}` calls {e}"))?, free),
-                            None if v.is_bloblet() && h.bloblet_kind(v) == fixpt_heap::layout::kind("native-closure") => Field::Const(v),
-                            None => return decline("a call of a global that holds no procedure".into()),
-                        });
+                        pending = Some(g);
                     } else {
-                        match self.global_value(p, cell)? {
+                        match g {
                             Field::Cell(c) => {
                                 let f = self.field(p, Field::Cell(c));
                                 ldr_field(&mut a, X9, f);
                                 a.e(ldur(RESULT, X9, field_off(2)));
+                            }
+                            // A procedure's code alone is no value: its
+                            // closure, over nothing.
+                            Field::Code(q) => {
+                                let f = self.field(p, Field::Closure(q, vec![]));
+                                ldr_field(&mut a, RESULT, f);
                             }
                             g => {
                                 let f = self.field(p, g);
@@ -838,6 +855,17 @@ impl Compiling<'_> {
                         Some(Field::Code(q)) => {
                             let f = self.field(p, Field::Code(q));
                             ldr_field(&mut a, X16, f);
+                        }
+                        // Through the global's cell, when the code runs: what
+                        // it holds then, which must be native code.
+                        Some(Field::Cell(c)) => {
+                            let f = self.field(p, Field::Cell(c));
+                            ldr_field(&mut a, X9, f);
+                            a.e(ldur(CLO, X9, field_off(2)));
+                            a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
+                            a.e(cmp(X16, X17));
+                            trap(&mut a, &mut stubs, NOT_NATIVE, Cond::Lo);
                         }
                         Some(g) => {
                             let f = self.field(p, g);

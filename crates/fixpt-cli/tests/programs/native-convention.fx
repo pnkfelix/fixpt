@@ -9,3 +9,6 @@
 (twice (lambda ((x int)) (+ x 5)) 32)
 (lambda ((x int)) x)
 ,native ((lambda ((x int)) (+ x 1)) 41)
+(define c (ref int @c) (new 1))
+(set c 41)
+(+ (get c) 1000)

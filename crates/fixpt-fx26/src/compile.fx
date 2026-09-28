@@ -832,6 +832,11 @@
 
 (define c-push-global (subr (maxeff (read @k) (write @k) (alloc @k)) (symbol) wglobal)
   (lambda (n) (let ((g (make-global n))) (begin (set c-genv (the cenv (cons (cons n (at-global g)) (get c-genv)))) g))))
+;; For a driver that computes a definition's value itself (the REPL, in the
+;; native convention): `n`'s global from now on, made, for the driver to
+;; fill.
+(define compile-new-global (subr (maxeff (read @k) (write @k) (alloc @k)) (symbol) wglobal)
+  (lambda (n) (c-push-global n)))
 
 
 

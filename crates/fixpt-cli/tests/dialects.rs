@@ -200,7 +200,8 @@ fn the_fx26_repl_compiles_in_the_native_convention() {
     let done = child.wait_with_output().expect("finishes");
     let out = String::from_utf8_lossy(&done.stdout);
     for want in [
-        "; id (lambda@",
+        // Defined in the native convention, `id` is native code already.
+        "a native closure over 0 value(s)",
         "2 instructions",
         "mov x0, x1",
         "\n7\n",
@@ -211,6 +212,9 @@ fn the_fx26_repl_compiles_in_the_native_convention() {
         "42 : int",
         "#<native-closure",
         "adds x0, x1, #8",
+        // State kept from form to form: each is compiled alone, against
+        // the globals the ones before made.
+        "1041 : int",
     ] {
         assert!(out.contains(want), "no `{want}` in:\n{out}");
     }

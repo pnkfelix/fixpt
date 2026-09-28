@@ -51,8 +51,10 @@ queue gained", and "The next queue"):
    5–7. The REPL is incremental (2026-09-28), as Larceny's is: each form
    is checked after the ones before (`check-more`) and compiled alone
    against the globals' cells the compiler keeps; nothing is replayed.
-   Next: definitions run in the native convention too, native code
-   reading globals through their cells.
+   With `--calling-convention native`, definitions run in the native
+   convention too: the global made by the compiler, filled with the value
+   a native thunk computes; native code reads globals through their cells
+   when it runs (but binds a cellular closure when compiling).
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

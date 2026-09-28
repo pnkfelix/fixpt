@@ -284,7 +284,7 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fix
         let mut m = m.borrow_mut();
         match m.compile(&mut rt.heap, closure) {
             Err(why) => NativeRun::Declined(why),
-            Ok(procs) => NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map(|v| fixpt_runtime::write_value(&rt.heap, v)).map_err(|t| t.what)),
+            Ok(procs) => NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map_err(|t| t.what)),
         }
     })
 }

@@ -258,7 +258,13 @@ its code in one.
    delta to the code area's run address, and traps if it is not code in
    the code area; each frame keeps its own code bloblet, and its closure if
    it reads it, so no return-address index is needed. In the REPL, with
-   `--calling-convention native`, every expression is compiled so and run.
+   `--calling-convention native`, every form is compiled so and run:
+   an expression as a procedure of no arguments; a definition likewise,
+   its value put in the global the compiler written in FX-26 makes for it
+   (`compile-new-global`); forms compiled alone, as Larceny's REPL
+   compiles them, against the globals' cells. Native code reads a global
+   through its cell when it runs, so a later definition is seen; a cell
+   holding a cellular closure is bound when compiling.
    Still to do: polymorphism in conventions and a copy per convention;
    adapters between conventions): native closures, polymorphism in
    conventions and a copy per convention, adapters.

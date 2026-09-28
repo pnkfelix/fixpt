@@ -185,6 +185,24 @@ pub fn with_last_value<T>(
     })
 }
 
+/// `text` checked by the checker written in FX-26 (after the forms before,
+/// without `standard`), and nothing more: what it found wrong, if anything.
+pub fn check_only(scheme: &mut Session, standard: Option<Handle>, file: FileId, text: &str) -> R<Result<(), String>> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    scheme.scope(|s| {
+        let tops = parse_to_trees(s, file, text)?;
+        let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
+        Ok(match s.view(|v| {
+            let r = v.get(checked);
+            (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("k-err"))
+                .then(|| r.field(3).and_then(|p| p.field(2)).and_then(|m| m.string()).unwrap_or_default())
+        }) {
+            Some(m) => Err(m),
+            None => Ok(()),
+        })
+    })
+}
+
 /// The checker written in FX-26 on `tops`: a program, in the initial
 /// environment `standard`; or, without it, more forms after those checked
 /// before.

@@ -204,7 +204,9 @@ pub struct Outcome {
 /// value (written) or a trap; or was declined, and why (the compiler cannot
 /// do something in it yet).
 pub enum NativeRun {
-    Ran(Result<String, String>),
+    /// The value, as it is now: for the caller to write or keep at once,
+    /// before anything allocates.
+    Ran(Result<fixpt_heap::Value, String>),
     Declined(String),
 }
 
@@ -341,12 +343,36 @@ impl Fx26Session {
             let mut note = String::new();
             if let (Some(run), Top::Exp(_), Strategy::Cellular) = (self.native_runner, &top, self.strategy) {
                 let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
-                match self.with_thunk(&form_text, |rt, clo| run(rt, clo, fuel))? {
-                    Ok(NativeRun::Ran(value)) => {
+                let written = |rt: &mut fixpt_runtime::Runtime, clo| match run(rt, clo, fuel) {
+                    NativeRun::Ran(v) => Ok(v.map(|v| fixpt_runtime::write_value(&rt.heap, v))),
+                    NativeRun::Declined(why) => Err(why),
+                };
+                match self.with_thunk(&form_text, written)? {
+                    Ok(Ok(value)) => {
                         return Ok(Outcome { top, code: String::new(), printed: String::new(), value: value.map(Some) });
                     }
-                    Ok(NativeRun::Declined(why)) => note = format!("; not in the native convention yet, so run as cellular code: {why}\n"),
+                    Ok(Err(why)) => note = format!("; not in the native convention yet, so run as cellular code: {why}\n"),
                     Err(why) => note = format!("; not compiled as a procedure: {why}\n"),
+                }
+            }
+            // A definition, in the native convention: its global made, and
+            // filled with its value, computed as an expression is.
+            if let (Some(run), Top::Define { name, .. }, Strategy::Cellular) = (self.native_runner, &top, self.strategy)
+                && let Some((ty, init)) = definition_init(form)
+            {
+                let name = self.checker.interner.name(*name).to_string();
+                // Checked against the type the definition says, if it says
+                // one: a `lambda`'s parameters may be typed only by it.
+                let w = |s: &Syntax| fixpt_read::write_syntax(s, &self.checker.interner);
+                let init = match ty {
+                    Some(t) => format!("(the {} {})", w(t), w(init)),
+                    None => w(init),
+                };
+                match self.native_define(&name, &format!("{form_text}\n"), &init, run)? {
+                    Ok(()) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) }),
+                    Err(NativeRun::Ran(Err(e))) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Err(e) }),
+                    Err(NativeRun::Declined(why)) => note = format!("; not in the native convention yet, so run as cellular code: {why}\n"),
+                    Err(NativeRun::Ran(Ok(_))) => unreachable!("a value is stored"),
                 }
             }
             let (out, words) = match self.strategy {
@@ -482,6 +508,44 @@ impl Fx26Session {
         self.with_last_value(&format!("(lambda () {exp})\n"), f)
     }
 
+    /// `form` (text), a definition of `name` whose value is `init` (text),
+    /// in the native convention: checked, as the next form; `name`'s global
+    /// made by the compiler written in FX-26; `init` run as a procedure of
+    /// no arguments, by `run`; and its value put in the global. What `run`
+    /// did instead, if anything else.
+    fn native_define(&mut self, name: &str, form: &str, init: &str, run: NativeRunner) -> R<Result<(), NativeRun>> {
+        self.own_pieces()?;
+        let standard = self.next_standard()?;
+        if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, FileId(0), form)? {
+            return Ok(Err(NativeRun::Declined(format!("check: {why}"))));
+        }
+        self.own_begun = true;
+        let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
+        let sym = self.scheme.make(|m| m.heap().intern(name));
+        let cell = self.scheme.call_global(&format!("{READER_PREFIX}compile-new-global"), &[sym]).map_err(fail)?;
+        // The global, kept where a collection updates it while `init` runs.
+        let mut at = 0;
+        self.scheme.make(|m| {
+            let c = m.get(cell);
+            at = m.heap().push_root(c);
+            c
+        });
+        let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
+        let r = self.with_thunk(init, |rt, clo| match run(rt, clo, fuel) {
+            NativeRun::Ran(Ok(v)) => {
+                let g = rt.heap.root_at(at);
+                rt.heap.set_bloblet_slot(g, 2, v);
+                Ok(())
+            }
+            other => Err(other),
+        });
+        self.scheme.runtime_unrooted().heap.pop_roots_to(at);
+        Ok(match r? {
+            Ok(done) => done,
+            Err(why) => Err(NativeRun::Declined(why)),
+        })
+    }
+
     /// `text` checked and compiled as the next form of this session's
     /// program, and run: its value, to `f`.
     fn with_last_value<T>(&mut self, text: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
@@ -590,3 +654,14 @@ impl Fx26Session {
         Ok(last)
     }
 }
+
+/// A definition's type, if it says one, and initializer: `(define name
+/// [type] init)`.
+fn definition_init(form: &Syntax) -> Option<(Option<&Syntax>, &Syntax)> {
+    match &form.datum {
+        fixpt_read::Datum::List { items, tail: None } if items.len() == 3 => Some((None, &items[2])),
+        fixpt_read::Datum::List { items, tail: None } if items.len() == 4 => Some((Some(&items[2]), &items[3])),
+        _ => None,
+    }
+}
+
