@@ -1312,8 +1312,8 @@ In the user's order:
    with parameters, and type families that mention themselves with the same
    parameters (regular, so tied as a knot, not expanded without end:
    today `(define-type (tree (r region)) … (tree r) …)` is refused). Needed
-   for trees in a place the caller chooses, `(finite p)` in an arena;
-   the front end's trees in plain `finite` need none. A first step toward
+   for trees in a place the caller chooses, `(acyclic p)` in an arena;
+   the front end's trees in plain `acyclic` need none. A first step toward
    GADTs (6).
 
 ### Progress, and what the queue gained (2026-09-27, later)

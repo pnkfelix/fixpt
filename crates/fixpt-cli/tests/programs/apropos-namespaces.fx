@@ -1,5 +1,5 @@
 (define-effect kstate (maxeff (read @t) (write @t)))
 (define-type kcell (ref int @t))
-(define-type (kbox (t type)) (pairof t t finite))
-(define-generative (kid (t type +)) (pairof t int finite))
+(define-type (kbox (t type)) (pairof t t acyclic))
+(define-generative (kid (t type +)) (pairof t int acyclic))
 (define kval int 3)

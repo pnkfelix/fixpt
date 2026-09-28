@@ -2,7 +2,7 @@
 ;;;
 ;;; A table is a bloblet of its key's hash and equality, an array of
 ;;; buckets, and a count. A bucket is an association list, its spine
-;;; `finite` (made by `cons` onto a bucket, never written), so that walking
+;;; `acyclic` (made by `cons` onto a bucket, never written), so that walking
 ;;; it ends; an entry is a pair `(key . value)` in the table's region,
 ;;; changed in place when a key is set again. When there are more entries
 ;;; than buckets, the buckets double.
@@ -11,7 +11,7 @@
 ;;; symbols to ints in `@r`:
 ;;;   (the (table symbol int @r) (make-table symbol-hash symbol=?))
 
-(define-type (bucket (k type) (v type) (r region)) (listof (pairof k v r) finite))
+(define-type (bucket (k type) (v type) (r region)) (listof (pairof k v r) acyclic))
 (define-type (table (k type) (v type) (r region))
   (bloblet (fields (subr pure (k) int) (subr pure (k k) bool) (arrayof (bucket k v r) r) int) r))
 

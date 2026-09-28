@@ -1,7 +1,7 @@
-;;; `acyclic`: frozen data found to have no cycle is `finite`, and a walk of
+;;; `acyclic`: frozen data found to have no cycle is `acyclic`, and a walk of
 ;;; it needs no `spin`; data frozen with a cycle takes the other branch.
-(define len (subr pure ((listof int finite) int) int)
-  (letrec ((len (subr pure ((listof int finite) int) int)
+(define len (subr pure ((listof int acyclic) int) int)
+  (letrec ((len (subr pure ((listof int acyclic) int) int)
              (lambda (xs n) (if (null? xs) n (len (cdr xs) (+ n 1))))))
     len))
 (define ring (subr pure (int) (listof int const))

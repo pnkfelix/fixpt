@@ -6,6 +6,6 @@
              (lambda (xs n) (if (null? xs) n (len (cdr xs) (+ n 1))))))
     len))
 (define two (nlist int 2) (cdr three))
-(define as-list (listof int finite) three)
+(define as-list (listof int acyclic) three)
 (define back (nlist int finite) as-list)
 (+ (len three 0) (car two))

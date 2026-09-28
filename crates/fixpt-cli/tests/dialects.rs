@@ -268,7 +268,7 @@ fn fixpt(args: &[&str], stdin: &str) -> (bool, String) {
 
 #[test]
 fn fx26_checks_compiles_and_evaluates_a_file_or_text() {
-    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/run/finite-in-a-place.fx");
+    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/run/acyclic-in-a-place.fx");
     // Both checkers, and both compilers; `check` and `compile` imply FX-26.
     let (ok, out) = fixpt(&["check", file], "");
     assert!(ok && out.contains("int ! (read (globals len))") && out.ends_with("; both checkers agree\n"), "{out}");

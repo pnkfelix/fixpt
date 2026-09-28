@@ -487,12 +487,6 @@ impl Checker {
                 }
                 let mut map = HashMap::new();
                 for ((v, k), d) in binders.iter().zip(args) {
-                    // `finite` reads as a region; for a size binder it is the
-                    // size `finite`.
-                    let d = match (k, d) {
-                        (Kind::Size, D::Region(Region::Frozen(None, true))) => D::Size(Size::Finite),
-                        (_, d) => d,
-                    };
                     let ok = match (k, &d) {
                         (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type | Kind::Data, D::Type(_)) => true,
                         (Kind::Size, D::Size(_)) | (Kind::Conv, D::Conv(_)) => true,

@@ -168,16 +168,16 @@ impl Checker {
         if self.globals_region(s)?.is_some() {
             return Err(FxError::at(s.span, "globals are a region only in effects: `(read @globals)`, `(write (globals g))`"));
         }
-        // `(const p)`: data frozen into place `p`; `(finite p)`, and never
-        // written, so finite.
+        // `(const p)`: data frozen into place `p`; `(acyclic p)`, and never
+        // written, so with no cycle through it.
         if let Some([head, p]) = s.as_proper_list()
             && let Some(h) = head.as_symbol()
-            && matches!(self.name(h), "const" | "finite")
+            && matches!(self.name(h), "const" | "acyclic")
         {
-            let finite = self.name(h) == "finite";
+            let acyclic = self.name(h) == "acyclic";
             return Ok(match self.parse_place(p)? {
-                Region::Var(v) => Region::Frozen(Some(v), finite),
-                _ => Region::Frozen(None, finite),
+                Region::Var(v) => Region::Frozen(Some(v), acyclic),
+                _ => Region::Frozen(None, acyclic),
             });
         }
         let Some(sym) = s.as_symbol() else {
@@ -188,7 +188,8 @@ impl Checker {
         }
         match self.name(sym) {
             "const" => return Ok(Region::Frozen(None, false)),
-            "finite" => return Ok(Region::Frozen(None, true)),
+            "acyclic" => return Ok(Region::Frozen(None, true)),
+            "finite" => return Err(FxError::at(s.span, "`finite` is a size; data with no cycle through it is at `acyclic`")),
             "heap" => return Ok(Region::Heap),
             _ => {}
         }
@@ -870,8 +871,11 @@ impl Checker {
             if name == "const" {
                 return Ok(D::Region(Region::Frozen(None, false)));
             }
-            if name == "finite" {
+            if name == "acyclic" {
                 return Ok(D::Region(Region::Frozen(None, true)));
+            }
+            if name == "finite" {
+                return Ok(D::Size(Size::Finite));
             }
             if name == "heap" {
                 return Ok(D::Region(Region::Heap));
@@ -890,7 +894,7 @@ impl Checker {
         }
         let items = self.items(s, "a description")?;
         match self.head(items).unwrap_or("") {
-            "const" | "finite" => Ok(D::Region(self.parse_region(s)?)),
+            "const" | "acyclic" => Ok(D::Region(self.parse_region(s)?)),
             "+" | "-" => Ok(D::Size(self.parse_size(s)?)),
             "read" | "write" | "alloc" | "goto" | "comefrom" | "maxeff" => {
                 Ok(D::Effect(self.parse_effect(s)?))

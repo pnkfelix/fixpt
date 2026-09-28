@@ -448,7 +448,7 @@ impl Checker {
             self.expect(args[0], t, self.int)?;
             return Ok((self.arena.ty(Ty::Nat(Size::Finite)), eff));
         }
-        // `(certify-acyclic v)`: `v`'s value at `finite`, where `acyclic?`
+        // `(certify-acyclic v)`: `v`'s value at `acyclic`, where `acyclic?`
         // has just found `v` acyclic; nowhere else.
         if let Exp::Var(op) = self.arena.exp_at(fun)
             && self.interner.name(*op) == "certify-acyclic"
@@ -1236,7 +1236,7 @@ impl Checker {
         {
             u.solved.insert(v, D::Region(a));
         }
-        // A place frozen into, `(finite p)` or `(const p)`: the place is
+        // A place frozen into, `(acyclic p)` or `(const p)`: the place is
         // the actual's (the heap's, where that is frozen into the heap).
         if let Region::Frozen(Some(v), _) = p
             && u.is_unknown(v)

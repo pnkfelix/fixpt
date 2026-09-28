@@ -44,8 +44,8 @@
 ;; The same, less the control on @e: what a delimited parse does.
 (define-effect parsing (maxeff (read @globals) (alloc @s) (read @s) (write @s) (write @m) (read @m)))
 
-(define-type chars (listof char finite))
-(define-type data (listof datum finite))
+(define-type chars (listof char acyclic))
+(define-type data (listof datum acyclic))
 
 ;; What is read, with where each piece starts and ends. A vector's elements
 ;; keep theirs; any other datum that is not a list is an `atom`. Each piece
@@ -53,10 +53,10 @@
 ;; from the datums the marks already hold.
 (define-datatype syn
   (atom datum int int)
-  (lst (listof syn finite) datum int int)
-  (dotted (listof syn finite) syn datum int int)
-  (vec (listof syn finite) datum int int))
-(define-type syns (listof syn finite))
+  (lst (listof syn acyclic) datum int int)
+  (dotted (listof syn acyclic) syn datum int int)
+  (vec (listof syn acyclic) datum int int))
+(define-type syns (listof syn acyclic))
 
 (define syn->datum (subr pure (syn) datum)
   (lambda (s)
@@ -72,7 +72,7 @@
 ;; Fields: need?, the continuation (one, when waiting), position, the
 ;; complete top-level data (newest first), and the message.
 (define-type state
-  (dletrec ((st (pairof bool (pairof (listof k finite) (pairof int (pairof syns string @s) @s) @s) @s))
+  (dletrec ((st (pairof bool (pairof (listof k acyclic) (pairof int (pairof syns string @s) @s) @s) @s))
             (k (composable char st (maxeff parsing spin) @e)))
     st))
 (define-type cont (composable char state (maxeff parsing spin) @e))
@@ -81,7 +81,7 @@
 ;; many characters have been consumed, the top-level data, and — after `#`
 ;; followed by something that is not a comment — the cursor after that
 ;; something, which the datum reader takes up.
-(define-type cursor (pairof chars (pairof int (pairof syns (listof cursor finite) @s) @s) @s))
+(define-type cursor (pairof chars (pairof int (pairof syns (listof cursor acyclic) @s) @s) @s))
 
 ;; What was read, and the cursor after it.
 (define-type result (pairof syn cursor @s))
@@ -101,10 +101,10 @@
 
 ;;; ------------------------------------------------------------- the states
 
-(define make-state (subr (alloc @s) (bool (listof cont finite) int syns string) state)
+(define make-state (subr (alloc @s) (bool (listof cont acyclic) int syns string) state)
   (lambda (need ks pos data message) (cons need (cons ks (cons pos (cons data message))))))
 (define state-need? (subr (read @s) (state) bool) (lambda (st) (car st)))
-(define state-ks (subr (read @s) (state) (listof cont finite)) (lambda (st) (car (cdr st))))
+(define state-ks (subr (read @s) (state) (listof cont acyclic)) (lambda (st) (car (cdr st))))
 (define state-position (subr (read @s) (state) int) (lambda (st) (car (cdr (cdr st)))))
 (define state-data (subr (read @s) (state) syns) (lambda (st) (car (cdr (cdr (cdr st))))))
 (define state-message (subr (read @s) (state) string) (lambda (st) (cdr (cdr (cdr (cdr st))))))
@@ -133,13 +133,13 @@
 
 ;;; ------------------------------------------------------------ the cursors
 
-(define make-cursor (subr (alloc @s) (chars int syns (listof cursor finite)) cursor)
+(define make-cursor (subr (alloc @s) (chars int syns (listof cursor acyclic)) cursor)
   (lambda (look pos data pending) (cons look (cons pos (cons data pending)))))
 (define cur-look (subr (read @s) (cursor) chars) (lambda (cur) (car cur)))
 (define cur-char (subr (read @s) (cursor) char) (lambda (cur) (car (car cur))))
 (define cur-pos (subr (read @s) (cursor) int) (lambda (cur) (car (cdr cur))))
 (define cur-data (subr (read @s) (cursor) syns) (lambda (cur) (car (cdr (cdr cur)))))
-(define cur-pending (subr (read @s) (cursor) (listof cursor finite)) (lambda (cur) (cdr (cdr (cdr cur)))))
+(define cur-pending (subr (read @s) (cursor) (listof cursor acyclic)) (lambda (cur) (cdr (cdr (cdr cur)))))
 (define hash-pending? (subr (maxeff (read @globals) (read @s)) (cursor) bool) (lambda (cur) (not (null? (cur-pending cur)))))
 
 (define advance (subr reads (cursor) cursor)

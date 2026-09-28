@@ -12,7 +12,7 @@
     (eager-feed (eager-feed-string st (substring text i (string-length text))) (integer->char 10))))
 
 ;; Every form of `text`, as the reader reads it, or none if it cannot.
-(define b-read (subr (maxeff reads (read @c) (alloc @c) spin) (string) (listof syns finite))
+(define b-read (subr (maxeff reads (read @c) (alloc @c) spin) (string) (listof syns acyclic))
   (lambda (text)
     (let ((st (b-feed (eager-start-fx26) text 0)))
       (if (string=? (datum-symbol-name (eager-status st)) "complete")

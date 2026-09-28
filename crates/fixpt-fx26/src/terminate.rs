@@ -9,7 +9,7 @@
 //!
 //! Three measures, each well-founded:
 //! - **parts**: a component of a sum or product, the `car` or `cdr` of a
-//!   pair at a `finite` region, the `datum-car` or `datum-cdr` of a datum.
+//!   pair at an `acyclic` region, the `datum-car` or `datum-cdr` of a datum.
 //!   Each was made before what holds it, and none can be changed, so no
 //!   cycle runs through them;
 //! - **down**: an integer less by a literal, where a test has bounded the

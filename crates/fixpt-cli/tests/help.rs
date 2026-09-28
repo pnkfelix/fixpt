@@ -367,8 +367,8 @@ fn fx26_apropos_searches_every_namespace() {
     for want in [
         "kstate = (maxeff (read @t) (write @t))  (an effect)",
         "kcell = (ref int @t)  (a type)",
-        "(kbox (t type)) = (pairof t t finite)  (a type family)",
-        "(kid (t type +)) = (pairof t int finite)  (a generative type)",
+        "(kbox (t type)) = (pairof t t acyclic)  (a type family)",
+        "(kid (t type +)) = (pairof t int acyclic)  (a generative type)",
         "kval : int",
     ] {
         assert!(out.contains(want), "no `{want}` in:\n{out}");
@@ -379,5 +379,5 @@ fn fx26_apropos_searches_every_namespace() {
     let found: Vec<&str> = out.lines().filter_map(|l| l.split("fx26> ").last()).filter(|l| l.starts_with("  ")).collect();
     assert_eq!(found, ["  kstate = (maxeff (read @t) (write @t))  (an effect)"], "{out}");
     let out = repl(Some("fx26"), &format!("{defs},help kid\n"));
-    assert!(out.contains("(kid (t type +)) = (pairof t int finite)  (a generative type)"), "{out}");
+    assert!(out.contains("(kid (t type +)) = (pairof t int acyclic)  (a generative type)"), "{out}");
 }

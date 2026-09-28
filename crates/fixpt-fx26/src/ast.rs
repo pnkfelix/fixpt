@@ -235,7 +235,7 @@ pub enum Ty {
     /// its variance, and never unfolded to be compared; looked through by
     /// every analysis of what a value holds (`docs/research/generative-types.md`).
     Named { which: u32, args: Vec<D> },
-    /// `(nlist T size)`: a list frozen at `region` (always `finite`) with
+    /// `(nlist T size)`: a list frozen at `region` (always `acyclic`) with
     /// `size` elements, or some number if `size` is `finite`
     /// (`docs/research/sizes.md`).
     NList { elem: TyId, size: Size, region: Region },
