@@ -68,6 +68,9 @@ pub struct Compiler<'a> {
     labels: usize,
     /// The globals, as compiling has reached them.
     genv: Env,
+    /// The same by name: each name's globals, newest last, with each one's
+    /// place in `genv`, so that finding a global is not a search of them all.
+    genv_index: std::collections::HashMap<Sym, Vec<(usize, Loc)>>,
     this: Option<This>,
     /// Whether each lambda also gets register code (PLAN.md 13h′), as its
     /// word's twin.
@@ -158,7 +161,7 @@ impl<'a> Compiler<'a> {
             n += 1;
         }
         char_at[text.len()] = n;
-        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), this: None, registers: false,
+        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), genv_index: Default::default(), this: None, registers: false,
             register_report: Vec::new(),
             declined: None,
             inlines: Vec::new(),
@@ -256,9 +259,13 @@ impl<'a> Compiler<'a> {
 
     // ------------------------------------------------------- variables
 
+    /// `n`'s newest global of the first `limit`.
+    fn global(&self, n: Sym, limit: usize) -> Option<Loc> {
+        self.genv_index.get(&n)?.iter().rev().find(|(i, _)| *i < limit).map(|(_, l)| *l)
+    }
+
     fn where_is(&self, e: &Env, n: Sym) -> Option<Loc> {
-        let genv = &self.genv[..self.genv_limit.unwrap_or(self.genv.len())];
-        find(e, n).or_else(|| find(genv, n))
+        find(e, n).or_else(|| self.global(n, self.genv_limit.unwrap_or(self.genv.len())))
     }
 
     fn load(&self, code: &mut Vec<Item>, l: Loc) {
@@ -1137,6 +1144,7 @@ impl<'a> Compiler<'a> {
         let g = self.heap.make_bloblet(kind("bloblet"), 2, 0, true);
         self.heap.set_bloblet_slot(g, 2, undefined);
         self.heap.set_bloblet_slot(g, 3, name);
+        self.genv_index.entry(n).or_default().push((self.genv.len(), Loc::Global(g)));
         self.genv.push((n, Loc::Global(g)));
         g
     }
@@ -1146,7 +1154,7 @@ impl<'a> Compiler<'a> {
     fn global_for(&mut self, n: Sym, assigns: bool) -> Value {
         self.inlines.retain(|i| i.name != n);
         self.specials.retain(|i| i.name != n);
-        match find(&self.genv, n) {
+        match self.global(n, self.genv.len()) {
             Some(Loc::Global(g)) if assigns => g,
             _ => self.push_global(n),
         }

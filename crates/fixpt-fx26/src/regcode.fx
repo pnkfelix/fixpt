@@ -520,20 +520,44 @@
         (listof bool @k))
   (lambda (bs rest body tail i)
     (if (null? rest) nil (cons (and tail (r-join-ok? bs body i)) (r-join-flags-from bs (cdr rest) body tail (+ i 1))))))
+(define r-binding-names (subr (maxeff (read @globals) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) syms)
+  (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (r-binding-names (cdr bs))))))
+(define r-same-syms? (subr (maxeff (read @globals) (read @k) spin) (syms syms) bool)
+  (lambda (a b)
+    (cond ((null? a) (null? b))
+          ((null? b) #f)
+          (else (and (symbol=? (car a) (car b)) (r-same-syms? (cdr a) (cdr b)))))))
 ;; Each binding of `bs`: whether it is a join point (in tail position).
-(define r-join-flags (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp bool) (listof bool @k))
-  (lambda (bs body tail) (r-join-flags-from bs bs body tail 0)))
+;; Remembered per `letrec` (`c-join-memo`), where it is in tail position.
+(define r-join-flags (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp bool) (listof bool @k))
+  (lambda (bs body tail)
+    (if (not tail)
+        (r-join-flags-from bs bs body tail 0)
+        (let* ((names (r-binding-names bs))
+               (known (table-ref (get c-join-memo) (exp-start body) (the c-join-answer (product (1 -1) (2 (the syms nil)) (3 (the (listof bool @k) nil)))))))
+          (if (and (= (extract known 1) (exp-end body)) (r-same-syms? (extract known 2) names))
+              (extract known 3)
+              (let ((flags (r-join-flags-from bs bs body tail 0)))
+                (begin (table-set! (get c-join-memo) (exp-start body) (the c-join-answer (product (1 (exp-end body)) (2 names) (3 flags))))
+                       flags)))))))
 (define r-all? (subr (maxeff (read @globals) (read @k) spin) ((listof bool @k)) bool)
   (lambda (fs) (or (null? fs) (and (car fs) (r-all? (cdr fs))))))
 ;; `te` with each of `bs`' names a loop, as join points' are.
 (define r-loop-names (subr (maxeff (read @globals) (alloc @k)) (cenv (listof (productof (1 symbol) (2 syn) (3 exp)) finite)) cenv)
   (lambda (te bs) (if (null? bs) te (r-loop-names (the cenv (cons (cons (extract (car bs) 1) (at-loop 0)) te)) (cdr bs)))))
-;; The join point `f` names, in a list, if it names one.
+;; Where local `n` is, in a list; none if it is not a local.
+(define r-local-loc (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv symbol) (listof rloc @k))
+  (lambda (env n)
+    (cond ((null? env) nil)
+          ((symbol=? (car (car env)) n) (the (listof rloc @k) (cons (cdr (car env)) nil)))
+          (else (r-local-loc (cdr env) n)))))
+;; The join point `f` names, in a list, if it names one: a local, so only
+;; the locals are searched, not the globals, which every call would search.
 (define r-join-of (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) (listof rloc @k))
   (lambda (env f)
     (tagcase f
       (e-var (m a b)
-        (let ((l (r-where env m)))
+        (let ((l (r-local-loc env m)))
           (if (null? l) nil (tagcase (car l) (rl-join (ps label) l) (else y nil)))))
       (else y nil))))
 (define c-length-locs (subr (maxeff (read @globals) (read @k) spin) ((listof rloc @k)) int)
@@ -990,7 +1014,7 @@
                          (product (1 (extract sp 1)) (2 cell) (3 (extract sp 2)) (4 (extract sp 6))
                                   (5 (r-nth-param (extract sp 3) (extract sp 6))) (6 (c-count-params (extract sp 3)))
                                   (7 (extract sp 7)) (8 lps) (9 lbody)
-                                  (10 (c-captured (c-free lbody (c-bind-params lps nil) nil) te)) (11 (get c-genv)))))
+                                  (10 (c-captured (c-free lbody (c-bind-params lps nil) nil) te)) (11 (c-genv-now)))))
                  (outer-spec (get c-spec-now)) (outer-genv (get c-genv))
                  (made (begin
                          (set c-spec-now (the (listof c-spec @k) (cons spec nil)))

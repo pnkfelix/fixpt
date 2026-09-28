@@ -1467,3 +1467,37 @@ Not asymptotic; a cache of the answer per `letrec` would remove it.
 | lists        | 1501500000     |   298.2 |  466.4 | 55.2 |     68.4 |     47.4 |       9.3 |   12.4 |
 | loop         | 49999995000000 |   735.0 |  457.1 | 64.3 |     96.3 |     53.2 |       4.8 |    4.2 |
 | tak          | 9              |    52.0 |   78.1 |  6.6 |     11.6 |      4.5 |       1.7 |    1.2 |
+
+## Globals found by name in a table, not a list (2026-09-28)
+
+The FX-26 compiler kept the global environment as a list, newest first,
+searched from the start for each global a name might be: every call site
+asked it, some several times (whether the callee is a standard
+operation, a join point, a global to inline or specialize), and the list
+is some 900 long when the front end compiles itself. That is a search of
+all the globals per name used, quadratic in the program. Now a table from
+each name to its globals, newest first, each with its place in the order
+made; a body compiled where it was written (an inlined one, a copy
+specialized at a lambda) sees the globals made before it as a count,
+where it saw a list's tail. The Rust compiler the same, by a map. The
+same code made, by both.
+
+Found by chasing the join points' cost to compile time (0.87 → 0.94 s):
+not the question asked of each `letrec` (answered once each now, all the
+same), but that every call now also asked whether its callee was a join
+point, by a search of the locals and then all the globals. Join points
+are locals; that is asked of the locals alone now, too.
+
+The front end compiling itself as register code, same hour, before join
+points and now: 0.91–0.94 s → 0.75 s.
+
+| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   116.2 |   50.0 | 15.5 |     14.9 |     12.3 |       9.0 |   22.8 |
+| closures     | 6003000000     |   344.6 |  699.1 | 75.6 |     77.8 |     60.3 |      19.6 |   27.6 |
+| fib          | 832040         |   181.0 |  218.4 | 15.9 |     23.5 |     13.2 |       5.0 |    2.4 |
+| helpers      | 12000000       |   865.5 | 1312.7 | 89.4 |     99.7 |     56.2 |       9.0 |    6.1 |
+| lists-region | 1501500000     |   335.7 |  313.4 | 99.9 |    108.2 |     85.3 |       7.2 |  159.1 |
+| lists        | 1501500000     |   300.3 |  480.1 | 54.9 |     57.4 |     47.2 |       9.3 |   12.5 |
+| loop         | 49999995000000 |   739.5 |  447.9 | 66.4 |     75.9 |     48.6 |       4.9 |    4.6 |
+| tak          | 9              |    52.2 |   80.9 |  6.6 |      9.7 |      4.5 |       1.7 |    1.2 |
