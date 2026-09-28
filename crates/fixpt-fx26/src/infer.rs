@@ -994,7 +994,7 @@ impl Checker {
     /// Whether `t` mentions a binder of any kind not yet solved.
     fn mentions_any_unknown(&self, t: TyId, u: &Unknowns) -> bool {
         let open = |v: DVar| u.is_unknown(v) && !u.solved.contains_key(&v);
-        let region = |r: Region| matches!(r, Region::Var(v) if open(v));
+        let region = |r: Region| matches!(r, Region::Var(v) | Region::Frozen(Some(v), _) if open(v));
         let effect = |e: &Effect| {
             e.0.iter().any(|a| match *a {
                 Atom::Var(v) => open(v),
@@ -1235,6 +1235,22 @@ impl Checker {
             && !u.solved.contains_key(&v)
         {
             u.solved.insert(v, D::Region(a));
+        }
+        // A place frozen into, `(finite p)` or `(const p)`: the place is
+        // the actual's (the heap's, where that is frozen into the heap).
+        if let Region::Frozen(Some(v), _) = p
+            && u.is_unknown(v)
+            && !u.solved.contains_key(&v)
+        {
+            match a {
+                Region::Frozen(Some(q), _) => {
+                    u.solved.insert(v, D::Region(Region::Var(q)));
+                }
+                Region::Frozen(None, _) => {
+                    u.solved.insert(v, D::Region(Region::Heap));
+                }
+                _ => {}
+            }
         }
     }
 

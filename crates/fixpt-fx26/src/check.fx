@@ -3564,7 +3564,11 @@
 
 ;; Whether `t` mentions a binder of any kind not yet solved.
 (define k-open-region? (subr (maxeff (read @globals) (read @t)) (k-region k-binders k-solved) bool)
-  (lambda (r kinds solved) (tagcase r (r-var (v) (k-open? kinds solved v)) (else y #f))))
+  (lambda (r kinds solved)
+    (tagcase r
+      (r-var (v) (k-open? kinds solved v))
+      (r-frozen (p f) (and (>= p 0) (k-open? kinds solved p)))
+      (else y #f))))
 (define k-open-conv? (subr (maxeff (read @globals) (read @t)) (k-conv k-binders k-solved) bool)
   (lambda (c kinds solved) (tagcase c (cv-var (v) (k-open? kinds solved v)) (else y #f))))
 (define k-open-effect? (subr (maxeff (read @globals) (read @t)) (k-eff k-binders k-solved) bool)
@@ -3666,9 +3670,20 @@
     (tagcase pc
       (cv-var (v) (if (and (k-unknown? kinds v) (null? (k-map-find (get solved) v))) (k-solve solved v (dc ac)) #u))
       (else y #u))))
+;; A region binder takes the actual region; a place frozen into, `(finite
+;; p)` or `(const p)`, takes the actual's place (the heap, where that is
+;; frozen into the heap).
 (define k-unify-region (subr kstate (k-region k-region k-binders k-solved) unit)
   (lambda (p a kinds solved)
-    (tagcase p (r-var (v) (if (k-open? kinds solved v) (k-solve solved v (dr a)) #u)) (else y #u))))
+    (tagcase p
+      (r-var (v) (if (k-open? kinds solved v) (k-solve solved v (dr a)) #u))
+      (r-frozen (v f)
+        (if (and (>= v 0) (k-open? kinds solved v))
+            (tagcase a
+              (r-frozen (q g) (k-solve solved v (dr (if (< q 0) (r-heap) (r-var q)))))
+              (else y #u))
+            #u))
+      (else y #u))))
 (define k-same-kind-regions (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-eff int) k-regions)
   (lambda (e rank)
     (cond ((null? e) nil)
