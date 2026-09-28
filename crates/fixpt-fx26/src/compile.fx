@@ -560,6 +560,11 @@
 ;;; value pushed is slot `depth`. In tail position, code ends the word: with
 ;;; a `tailcall`, or with `return` after the value.
 
+;; The top-level definition whose lambda is compiled next: its name, in a
+;; list; and, for the register compiler, the lambda being so compiled: its
+;; name and word.
+(define c-defining (ref (listof symbol @k) @k) (new nil))
+(define c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k) (new nil))
 ;; The name the next lambda's word gets, if not where its body starts.
 (define c-word-name (ref (listof string @k) @k) (new nil))
 ;; The word of the lambda compiled last, in a list; and of the one before.
@@ -713,6 +718,7 @@
   (c-lambda-word (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv syms) (productof (1 tword) (2 syms)))
     (lambda (ps body e own0)
       (let* ((named (let ((x (get c-word-name))) (begin (set c-word-name (the (listof string @k) nil)) x)))
+             (defining (let ((x (get c-defining))) (begin (set c-defining (the (listof symbol @k) nil)) x)))
              (fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
              ;; A parameter of the same name hides the procedure.
              (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
@@ -748,7 +754,11 @@
                                   (if (null? named) (string-append "lambda@" (int->string (exp-start body))) (car named))))))
             (begin
               (if (get c-registers)
-                  (let ((cells ((get c-register-code) ps body inner this)))
+                  (let ((cells (begin (set c-own-now
+                                           (if (null? defining)
+                                               (the (listof (productof (1 symbol) (2 tword)) @k) nil)
+                                               (cons (product (1 (car defining)) (2 w)) nil)))
+                                      ((get c-register-code) ps body inner this))))
                     (if (null? cells) #u (begin (set-register-twin w cells) #u)))
                   #u)
               (product (1 w) (2 fv))))))))
@@ -1155,7 +1165,9 @@
                       (let ((g (c-push-global n)))
                         (begin (tagcase (car (c-lambda-of x))
                                  (e-lambda (ps body la lb)
-                                   (begin (c-lambda ps body (the cenv nil) 0 c (the syms nil) (the (listof exp @k) nil))
+                                   (begin (set c-defining (the (listof symbol @k) (cons n nil)))
+                                          (c-lambda ps body (the cenv nil) 0 c (the syms nil) (the (listof exp @k) nil))
+                                          (set c-defining (the (listof symbol @k) nil))
                                           (c-record-inline n ps body)))
                                  (else y (c-exp x (the cenv nil) 0 c #f)))
                                (c-op1 c routine-global! (wcell-global g))))))

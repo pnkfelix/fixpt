@@ -781,7 +781,9 @@ impl Fx26Session {
         let Some(target) = cell_of(self, name)? else { return Ok(Err(format!("`{name}` has no global"))) };
         let mut out = Vec::new();
         let names: Vec<String> = self.checker.value_names().into_iter().map(|n| self.checker.interner.name(n).to_string()).collect();
-        for n in names {
+        // Its own calls of itself, guarded too, are not counted: redefined,
+        // it is not called by what it was.
+        for n in names.into_iter().filter(|n| n != name) {
             let Some(g) = cell_of(self, &n)? else { continue };
             let mut inlines = false;
             self.scheme.make(|m| {

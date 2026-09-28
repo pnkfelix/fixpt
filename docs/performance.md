@@ -1346,3 +1346,38 @@ unchanged.
 | lists        | 1501500000     |   299.7 |  467.6 | 54.5 |     59.2 |     47.2 |      13.5 |   17.0 |
 | loop         | 49999995000000 |   735.3 |  453.4 | 64.6 |     84.0 |     41.3 |       5.6 |    4.5 |
 | tak          | 9              |    52.0 |   79.4 |  6.5 |      9.4 |      4.4 |       1.9 |    1.2 |
+
+## A procedure's calls of itself, guarded (2026-09-28)
+
+A top-level procedure's calls of itself go through its global, so that
+a redefinition is seen (`docs/fx26.md`, "Redefinition"): each was a full
+call, a tail one no loop. Now, in register code, they are guarded as
+inlined calls are: the arguments made, then, if the global still holds a
+closure of the procedure's own word, a jump back to its start (in tail
+position) or `invokeself`; else the call through the global, as before.
+Exact under redefinition; and a loop now, which is what can be lifted
+out of (next). Not from an inlined body, whose names may be an older
+global's of the same name (FX-26 has no equality on globals to tell).
+Both compilers alike (`r_self_guarded`, `r-self-guarded`, which the
+specialized copies' self-calls now share).
+
+| benchmark    | registers before | after | native before | after |
+| ------------ | ----------------:| -----:| -------------:| -----:|
+| lists        |             13.5 |   9.3 |          17.0 |  12.0 |
+| helpers      |             10.9 |   8.9 |           6.9 |   5.5 |
+| closures     |       about 20   |  18.0 |          31.0 |  26.1 |
+| fib          |              5.6 |   5.4 |           2.5 |   2.4 |
+
+The front end compiling itself as register code: the same (0.87–0.90 s
+this hour, HEAD and this alike).
+
+| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   113.1 |   48.7 | 15.2 |     14.8 |     12.9 |       9.5 |   21.9 |
+| closures     | 6003000000     |   341.9 |  681.0 | 75.0 |     79.5 |     60.0 |      18.0 |   26.1 |
+| fib          | 832040         |   180.9 |  211.9 | 16.1 |     21.7 |     13.3 |       5.4 |    2.4 |
+| helpers      | 12000000       |   871.5 | 1272.8 | 90.0 |    102.0 |     55.9 |       8.9 |    5.5 |
+| lists-region | 1501500000     |   334.4 |  313.5 | 98.5 |    105.5 |     83.8 |       7.2 |  159.0 |
+| lists        | 1501500000     |   300.3 |  464.8 | 54.5 |     59.6 |     47.1 |       9.3 |   12.0 |
+| loop         | 49999995000000 |   734.4 |  452.6 | 64.7 |     71.8 |     43.2 |       5.6 |    4.6 |
+| tak          | 9              |    52.1 |   77.9 |  6.5 |      9.0 |      4.4 |       1.8 |    1.2 |

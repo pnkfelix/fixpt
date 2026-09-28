@@ -467,6 +467,26 @@
 ;; `fs` without its first `n`.
 (define r-drop-bools (subr (maxeff (read @globals) (read @k) spin) ((listof bool @k) int) (listof bool @k))
   (lambda (fs n) (if (= n 0) fs (r-drop-bools (cdr fs) (- n 1)))))
+;; In a top-level definition's procedure: its name, its word, its arity, and
+;; the label at the body's start (`r-self-guarded`), in a list.
+(define r-own-now (ref (listof (productof (1 symbol) (2 tword) (3 int) (4 int)) @k) @k) (new nil))
+;; The global `f` names, in a list, when it is the procedure's own, called
+;; with its arity, and not from an inlined body, whose names may be an
+;; older global's.
+(define r-own-self (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp (listof exp finite)) (listof wglobal @k))
+  (lambda (env f args)
+    (if (or (null? (get r-own-now)) (not (null? (get c-inlining))))
+        nil
+        (let ((o (car (get r-own-now))))
+          (if (not (= (c-count-exps args) (extract o 3)))
+              nil
+              (tagcase f
+                (e-var (m a b)
+                  (if (symbol=? m (extract o 1))
+                      (let ((l (r-where env m)))
+                        (if (null? l) nil (tagcase (car l) (rl-global (c) (the (listof wglobal @k) (cons c nil))) (else y nil))))
+                      nil))
+                (else y nil)))))))
 ;; The one of `c-inlines` that `n`, taking `k` arguments, names, if any.
 (define r-inline-named (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof c-inline finite) symbol int) (listof c-inline finite))
   (lambda (xs n k)
@@ -714,7 +734,14 @@
               ;; In a procedure specialized at a lambda: the lambda called,
               ;; or the procedure calling itself.
               ((and (r-spec-param? env f) (= n (extract (car (get c-spec-now)) 7))) (r-spec-lambda g args env te tail))
-              ((r-spec-self? env f args) (r-spec-self g f args env te tail))
+              ((r-spec-self? env f args)
+               (let ((sp (car (get c-spec-now))))
+                 (r-self-guarded g (extract sp 2) (extract sp 3) (get r-spec-start) f args env te tail)))
+              ;; A top-level procedure calling itself through its global, its
+              ;; own name not an inlined body's, which may name an older global.
+              ((not (null? (r-own-self env f args)))
+               (let ((o (car (get r-own-now))))
+                 (r-self-guarded g (car (r-own-self env f args)) (extract o 2) (extract o 4) f args env te tail)))
               (else
                (let ((name (r-standard-name env f)))
                  (if (string=? name "")
@@ -939,13 +966,15 @@
             (r-opn g rop-field (+ cellular-closure-free0 j))
             (let ((l (r-keep g (car flags))))
               (r-spec-free g at (cdr fv) (+ j 1) (the renv (cons (cons (car fv) l) env)) (r-local te (car fv)) (cdr flags)))))))
-  ;; In a procedure specialized at a lambda, a call of its own global with
-  ;; the parameter passed as itself: the arguments made; then, if the global
-  ;; still holds a closure of the word the copy was made from, the copy
-  ;; again (a loop, in tail position), else the global.
-  (r-spec-self (subr (maxeff compiles spin) (rgen exp (listof exp finite) renv cenv bool) unit)
-    (lambda (g f args env te tail)
-      (let ((n (c-count-exps args)) (sp (car (get c-spec-now))))
+  ;; A procedure calling itself through its global `cell` (a top-level
+  ;; definition's, or, in a copy specialized at a lambda, with the parameter
+  ;; passed as itself): the arguments made; then, if the global still holds
+  ;; a closure of `word` (its own, or the one the copy was made from), this
+  ;; procedure again, by its own entry, or in tail position a loop back to
+  ;; `start`; else the global.
+  (r-self-guarded (subr (maxeff compiles spin) (rgen wglobal tword int exp (listof exp finite) renv cenv bool) unit)
+    (lambda (g cell word start f args env te tail)
+      (let ((n (c-count-exps args)))
         (if (or (extract g leaf) (> n register-regs))
             (r-decline)
             (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
@@ -954,19 +983,19 @@
                 (if tail
                     (let ((made (r-spec-temps g args env te)))
                       (begin
-                        (r-guard g (extract sp 2) (extract sp 3) call)
+                        (r-guard g cell word call)
                         (r-spec-moves g made 0)
-                        (r-emit g (r-branch #f (get r-spec-start)))
+                        (r-emit g (r-branch #f start))
                         (r-emit g (r-label call))
                         (r-args g (r-slot-args made) env te (the (listof exp @k) (cons f nil)))
                         (r-invoke g n #t)))
                     (begin
                       (r-args g (r-exp-args args) env te (the (listof exp @k) nil))
-                      (r-guard g (extract sp 2) (extract sp 3) call)
+                      (r-guard g cell word call)
                       (r-opn g rop-invokeself n)
                       (r-emit g (r-branch #f end))
                       (r-emit g (r-label call))
-                      (r-op1 g rop-global (wcell-global (extract sp 2)))
+                      (r-op1 g rop-global (wcell-global cell))
                       (r-opn g rop-invoke n)
                       (r-emit g (r-label end))))
                 (set (extract g nreg) regs)
@@ -1371,14 +1400,17 @@
   (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) finite) exp cenv (listof c-this @k)) (listof wcell @k))
   (lambda (ps body inner this)
     (let ((outer (get r-declined)) (n (c-count-params ps))
-          (outer-at (get r-spec-at)) (outer-start (get r-spec-start)))
+          (outer-at (get r-spec-at)) (outer-start (get r-spec-start))
+          (outer-own (get r-own-now)) (own (get c-own-now)))
       (begin
         (set r-declined #f)
         (set r-spec-at (the (listof rloc @k) nil))
+        (set r-own-now (the (listof (productof (1 symbol) (2 tword) (3 int) (4 int)) @k) nil))
+        (set c-own-now (the (listof (productof (1 symbol) (2 tword)) @k) nil))
         (let* ((leaf (not (r-collects body inner this #t)))
                (g (the rgen
                     (product (items (new (the (listof ritem @k) nil))) (leaf leaf) (nreg (new 0)) (nslot (new 0))
-                             (mslot (new 0)) (labels (new (+ (if (null? this) 0 1) (if (null? (get c-spec-now)) 0 1))))
+                             (mslot (new 0)) (labels (new (+ (if (null? this) 0 1) (+ (if (null? (get c-spec-now)) 0 1) (if (null? own) 0 1)))))
                              (this this) (start 0))))
                (cells
                 (if (> n register-regs)
@@ -1401,9 +1433,16 @@
                                     (begin (set r-spec-at (the (listof rloc @k) (cons (car l) nil)))
                                            (set r-spec-start start)
                                            (r-emit g (r-label start))))))
+                          ;; A top-level definition's procedure: a label at the
+                          ;; start, for its calls of itself.
+                          (if (null? own)
+                              #u
+                              (let ((start (+ (if (null? this) 0 1) (if (null? (get c-spec-now)) 0 1))))
+                                (begin (set r-own-now (cons (product (1 (extract (car own) 1)) (2 (extract (car own) 2)) (3 n) (4 start)) nil))
+                                       (r-emit g (r-label start)))))
                           (r-exp g body env inner #t)
                           (if (get r-declined) (the (listof wcell @k) nil) (r-assemble g))))))))
-          (begin (set r-declined outer) (set r-spec-at outer-at) (set r-spec-start outer-start) cells))))))
+          (begin (set r-declined outer) (set r-spec-at outer-at) (set r-spec-start outer-start) (set r-own-now outer-own) cells))))))
 
 (set c-register-code r-register-code)
 

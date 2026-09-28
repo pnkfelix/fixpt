@@ -94,6 +94,8 @@ pub struct Compiler<'a> {
     spec: Option<Spec>,
     /// The name the next lambda's word gets, if not where its body starts.
     word_name: Option<String>,
+    /// The top-level definition whose lambda is compiled next: its name.
+    defining: Option<Sym>,
 }
 
 /// A global procedure whose parameter `param` is only called (with
@@ -166,6 +168,7 @@ impl<'a> Compiler<'a> {
             specials: Vec::new(),
             spec: None,
             word_name: None,
+            defining: None,
         }
     }
 
@@ -629,6 +632,7 @@ impl<'a> Compiler<'a> {
 
     fn lambda_word(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
         let named = self.word_name.take();
+        let defining = self.defining.take();
         let fv = self.captured(params, body, e);
         // A parameter of the same name hides the procedure.
         let own = own.filter(|f| !params.contains(f));
@@ -669,7 +673,7 @@ impl<'a> Compiler<'a> {
         });
         if self.registers && in_range != Some(false) {
             self.declined = None;
-            match self.register_code(params, body, &inner, this) {
+            match self.register_code(params, body, &inner, this, defining.map(|n| (n, w))) {
                 Some(cells) => {
                     let sym = self.heap.intern(&name);
                     let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
@@ -1169,7 +1173,11 @@ impl<'a> Compiler<'a> {
                         self.global_for(*name, *assigns)
                     } else {
                         let g = self.global_for(*name, *assigns);
+                        if let Some((_, _, None)) = self.lambda_of(*exp) {
+                            self.defining = Some(*name);
+                        }
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
+                        self.defining = None;
                         // Small enough, and not calling itself: inlined
                         // where it is called.
                         if let Some((params, body, None)) = self.lambda_of(*exp)

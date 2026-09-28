@@ -91,6 +91,9 @@ struct Gen {
     /// In a procedure specialized at a lambda (`Compiler::spec`): where the
     /// parameter the lambda is, and the label at the body's start.
     spec: Option<(RLoc, usize)>,
+    /// In a top-level definition's procedure: its name, its word, its
+    /// arity, and the label at the body's start (`r_self_guarded`).
+    own: Option<(Sym, Value, usize, usize)>,
 }
 
 type O<T> = Option<T>;
@@ -179,12 +182,12 @@ impl Compiler<'_> {
 
     /// A lambda's register code, whose closure captures `inner`'s free
     /// values in order, or none where this compiler declines.
-    pub(super) fn register_code(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>) -> O<Vec<Value>> {
+    pub(super) fn register_code(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>) -> O<Vec<Value>> {
         if params.len() > REGS {
             return self.decline("more than REGS parameters");
         }
         let leaf = !self.r_collects(body, inner, this, true);
-        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None };
+        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
         for (n, l) in inner {
@@ -223,6 +226,11 @@ impl Compiler<'_> {
             let start = g.label();
             g.items.push(RItem::Label(start));
             g.spec = Some((at, start));
+        }
+        if let Some((name, word)) = own {
+            let start = g.label();
+            g.items.push(RItem::Label(start));
+            g.own = Some((name, word, params.len(), start));
         }
         let mut te = inner.clone();
         self.r_exp(&mut g, body, &mut env, &mut te, true)?;
@@ -630,8 +638,19 @@ impl Compiler<'_> {
                 && args.len() == sp.n
                 && is_param(self, env, args[sp.param])
             {
-                return self.r_spec_self(g, &sp, start, f, args, env, te, tail);
+                return self.r_self_guarded(g, sp.cell, sp.word, start, f, args, env, te, tail);
             }
+        }
+        // A top-level procedure calling itself through its global, its own
+        // name not an inlined body's, which may name an older global.
+        if let Some((name, word, n, start)) = g.own
+            && self.inlining.is_empty()
+            && args.len() == n
+            && let Exp::Var(m) = *self.c.arena.exp_at(f)
+            && m == name
+            && let Some(RLoc::Global(cell)) = self.r_where(env, m)
+        {
+            return self.r_self_guarded(g, cell, word, start, f, args, env, te, tail);
         }
         if let Some(name) = self.r_standard_name(env, f) {
             let Some(std) = self.r_standard(&name, args.len()) else {
@@ -972,12 +991,14 @@ impl Compiler<'_> {
         })
     }
 
-    /// In a procedure specialized at a lambda, a call of its own global with
-    /// the parameter passed as itself: the arguments made; then, if the
-    /// global still holds a closure of the word the copy was made from, the
-    /// copy again (a loop, in tail position), else the global.
+    /// A procedure calling itself through its global `cell` (a top-level
+    /// definition's, or, in a copy specialized at a lambda, with the
+    /// parameter passed as itself): the arguments made; then, if the global
+    /// still holds a closure of `word` (its own, or the one the copy was
+    /// made from), this procedure again, by its own entry, or in tail
+    /// position a loop back to `start`; else the global.
     #[allow(clippy::too_many_arguments)]
-    fn r_spec_self(&mut self, g: &mut Gen, sp: &super::Spec, start: usize, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+    fn r_self_guarded(&mut self, g: &mut Gen, cell: Value, word: Value, start: usize, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         if g.leaf || args.len() > REGS {
             return self.decline("more than REGS arguments");
         }
@@ -993,7 +1014,7 @@ impl Compiler<'_> {
                 g.op("setstk", &[Gen::n(s)]);
                 made.push(s);
             }
-            self.r_guard(g, sp.cell, sp.word, call);
+            self.r_guard(g, cell, word, call);
             for (i, m) in made.iter().enumerate() {
                 g.op("stack", &[Gen::n(*m)]);
                 g.op("setstk", &[Gen::n(i)]);
@@ -1006,11 +1027,11 @@ impl Compiler<'_> {
         } else {
             let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
             self.r_args(g, &es, env, te, None)?;
-            self.r_guard(g, sp.cell, sp.word, call);
+            self.r_guard(g, cell, word, call);
             g.op("invokeself", &[Gen::n(args.len())]);
             g.items.push(RItem::Branch(false, end));
             g.items.push(RItem::Label(call));
-            g.op("global", &[sp.cell]);
+            g.op("global", &[cell]);
             g.op("invoke", &[Gen::n(args.len())]);
             g.items.push(RItem::Label(end));
         }
