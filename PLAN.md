@@ -76,9 +76,9 @@ queue gained", and "The next queue"):
    g)`, within `(read @globals)`; `define*` finds a procedure's globals
    precisely; both checkers, every program, and the front end (through
    `(read @globals)`) say so; compatibility counts what a redefinition
-   reads, and the cycle rule looks at types and definitions both. Next:
-   perhaps a call that may reach the definition being checked says `spin`
-   (to discuss); `define-rec*`; a
+   reads; a procedure whose calls read its own global says `spin`, with
+   no exception for recursion (the user's, 2026-09-28): one proved to end
+   calls itself through a local `letrec`. Next: `define-rec*`; a
    lint on non-tail recursion over an index (the user's, after an
    assembler overflow); a question to answer: tag bits for an ownership
    bit.

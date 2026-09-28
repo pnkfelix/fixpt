@@ -77,11 +77,11 @@ fn the_same_compiled() {
 }
 
 /// A redefinition that reaches itself through a procedure kept as it was
-/// is refused: its type does not say it uses `h`, but its definition does,
-/// and `h` uses `f` (`Checker::no_knot_through_globals`).
+/// is refused: calling it reads `f`, since calling the kept `h` does, and
+/// it does not say `spin` (`Checker::no_reaching_itself`).
 #[test]
 fn a_knot_through_a_kept_procedure_is_refused() {
     let mut s = session();
     let out = run(&mut s, include_str!("programs/redefine/knot-kept.fx"));
-    assert!(out[2].contains("`f` cannot be redefined so: it uses `h`, which use `f` in turn"), "{out:?}");
+    assert!(out[2].contains("calling `f` reads `f`, so `f` may reach itself through a global"), "{out:?}");
 }

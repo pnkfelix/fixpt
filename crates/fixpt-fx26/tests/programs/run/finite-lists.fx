@@ -2,8 +2,10 @@
 ;;; never writing it, gives `finite` data, which no cycle runs through; one
 ;;; that writes it gives `const`, which may be cyclic. Finite data is also
 ;;; `const` data, so a procedure over `(listof int const)` takes both.
-(define* len (subr pure ((listof int finite) int) int)
-  (lambda (xs n) (if (null? xs) n (len (cdr xs) (+ n 1)))))
+(define len (subr pure ((listof int finite) int) int)
+  (letrec ((len (subr pure ((listof int finite) int) int)
+             (lambda (xs n) (if (null? xs) n (len (cdr xs) (+ n 1))))))
+    len))
 (define first (subr pure ((listof int const)) int) (lambda (xs) (car xs)))
 (define built (subr pure (int) (listof int finite))
   (lambda (n) (letfreeze r (the (listof int r) (cons n (cons (+ n 1) nil))))))

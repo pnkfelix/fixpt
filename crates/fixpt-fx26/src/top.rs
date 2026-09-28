@@ -24,7 +24,6 @@
 //! * anything else is an expression, checked in the environment so far.
 
 use crate::ast::{Effect, Region, TyId};
-use std::collections::HashSet;
 use crate::check::{Checked, Checker};
 use crate::error::{FxError, R};
 use fixpt_read::{FileId, Reader, Span, Sym, Syntax, SyntaxProfile};
@@ -102,13 +101,7 @@ impl Checker {
         let names = self.defined_names(form);
         let olds: Vec<(Sym, TyId)> = names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
         let users = if olds.is_empty() { Vec::new() } else { self.users_of(&names) };
-        let mark = self.mark();
         let mut top = self.top(form)?;
-        let knot = if olds.is_empty() { Ok(()) } else { self.no_knot_through_globals(&top, &names, &users, form.span) };
-        if let Err(e) = knot {
-            self.rollback(mark);
-            return Err(e);
-        }
         let assigns = !olds.is_empty() && self.fits_old(&top, &olds);
         set_assigns(&mut top, assigns);
         self.record(form, &top);
@@ -119,15 +112,7 @@ impl Checker {
         let shown = |c: &Checker, ns: &[Sym]| ns.iter().map(|n| format!("`{}`", c.interner.name(*n))).collect::<Vec<_>>().join(", ");
         for u in users {
             let olds: Vec<(Sym, TyId)> = u.names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
-            let theirs = self.users_of(&u.names);
-            let mark = self.mark();
-            let checked = self.top(&u.form).and_then(|top| match self.no_knot_through_globals(&top, &u.names, &theirs, u.form.span) {
-                Ok(()) => Ok(top),
-                Err(e) => {
-                    self.rollback(mark);
-                    Err(e)
-                }
-            });
+            let checked = self.top(&u.form);
             match checked {
                 Ok(mut top) => {
                     let assigns = self.fits_old(&top, &olds);
@@ -164,65 +149,44 @@ impl Checker {
         r
     }
 
-    /// A redefinition of `names` whose new type reads a global whose type
-    /// in turn mentions them (or `@globals`, which may be anything) closes
-    /// a cycle through globals: a procedure that reaches itself through the
-    /// store, which the checker's termination reasoning, trusting every
-    /// procedure of a type without `spin` to end, has not seen. So it must
-    /// have `spin` in its type, or be refused (`docs/fx26.md`,
-    /// "Redefinition"). The types say what each reads, transitively, so one
-    /// step is enough; its own name is its own recursion, which size-change
-    /// sees.
-    ///
-    /// And, from the definitions: a new definition that uses one that uses
-    /// `names` (`users`, transitively), which catches what a type does not
-    /// say, such as a procedure kept as it was, `(let ((h h)) …)`, that
-    /// calls them.
-    fn no_knot_through_globals(&self, top: &Top, names: &[Sym], users: &[Definition], span: fixpt_read::Span) -> R<()> {
-        let types: Vec<TyId> = match top {
-            Top::Define { ty, .. } => vec![*ty],
-            Top::DefineRec { bindings, .. } => bindings.iter().map(|(_, t, _)| *t).collect(),
+    /// Defining a global writes it: a procedure stored in global `f` whose
+    /// calls read `f` may reach itself through the global, which the
+    /// checker's termination reasoning, trusting every procedure of a type
+    /// without `spin` to end, has not seen. So it must say `spin`, as a
+    /// procedure kept in a ref must (`no_knot`), however it reads `f`: by
+    /// calling itself, or something that calls it, or a procedure kept as
+    /// it was, `(let ((h h)) …)`. One that stays `pure` binds itself with a
+    /// local `letrec`. A `define-rec`'s members read each other so. Reading
+    /// `@globals` may read `f` only once `f` is a global: at its first
+    /// definition nothing defined before refers to it, and what later does
+    /// is a write checked in its turn (`docs/fx26.md`, "Redefinition").
+    fn no_reaching_itself(&self, top: &Top, redefining: bool, span: fixpt_read::Span) -> R<()> {
+        let group: Vec<(Sym, TyId)> = match top {
+            Top::Define { name, ty, .. } => vec![(*name, *ty)],
+            Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, t, _)| (*n, *t)).collect(),
             _ => return Ok(()),
         };
-        if types.iter().any(|t| self.spins(*t)) {
-            return Ok(());
+        for (n, t) in &group {
+            if self.spins(*t) {
+                continue;
+            }
+            let reads = self.latent_globals(*t);
+            let name = self.interner.name(*n);
+            if let Some((m, _)) = group.iter().find(|(m, _)| reads.contains(&Region::Global(*m))) {
+                let m = self.interner.name(*m);
+                return Err(FxError::at(
+                    span,
+                    format!("calling `{name}` reads `{m}`, so `{name}` may reach itself through a global: its type must say `spin` (or, to call itself directly, it binds itself with a local `letrec`)"),
+                ));
+            }
+            if redefining && reads.contains(&Region::Globals) {
+                return Err(FxError::at(
+                    span,
+                    format!("calling `{name}` may read any global, `{name}` too, so `{name}` may reach itself through a global: its type must say `spin`"),
+                ));
+            }
         }
-        let reads: HashSet<Region> = types.iter().flat_map(|t| self.latent_globals(*t)).collect();
-        let mut candidates: Vec<Sym> = if reads.contains(&Region::Globals) {
-            self.defs.iter().flat_map(|d| d.names.iter().copied()).collect()
-        } else {
-            reads.iter().filter_map(|r| if let Region::Global(g) = r { Some(*g) } else { None }).collect()
-        };
-        candidates.retain(|g| !names.contains(g));
-        let mut cycle: Vec<Sym> = candidates
-            .into_iter()
-            .filter(|g| {
-                let Some(t) = self.global_type(*g) else { return false };
-                let theirs = self.latent_globals(t);
-                theirs.contains(&Region::Globals) || names.iter().any(|n| theirs.contains(&Region::Global(*n)))
-            })
-            .collect();
-        let exps: Vec<crate::ast::ExpId> = match top {
-            Top::Define { exp, .. } => vec![*exp],
-            Top::DefineRec { bindings, .. } => bindings.iter().map(|(_, _, e)| *e).collect(),
-            _ => Vec::new(),
-        };
-        let mut uses = Vec::new();
-        for e in exps {
-            self.free_into(e, &mut Vec::new(), &mut uses);
-        }
-        cycle.extend(users.iter().flat_map(|u| u.names.iter().copied()).filter(|r| uses.contains(r)));
-        cycle.sort_by(|a, b| self.interner.name(*a).cmp(self.interner.name(*b)));
-        cycle.dedup();
-        if cycle.is_empty() {
-            return Ok(());
-        }
-        let shown = |ns: &[Sym]| ns.iter().map(|n| format!("`{}`", self.interner.name(*n))).collect::<Vec<_>>().join(", ");
-        let (n, c) = (shown(names), shown(&cycle));
-        Err(FxError::at(
-            span,
-            format!("{n} cannot be redefined so: it uses {c}, which use {n} in turn, and might never end; give it a type with `spin`, or define {c} again after it"),
-        ))
+        Ok(())
     }
 
     /// The globals calling a value of type `t` reads: its latent effect's,
@@ -482,9 +446,20 @@ impl Checker {
         let items = form.as_proper_list().unwrap_or(&[]);
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
         match head {
-            Some("define") => self.define(form.span, items, false),
-            Some("define*") => self.define(form.span, items, true),
-            Some("define-rec") => self.define_rec(form.span, items),
+            Some("define" | "define*" | "define-rec") => {
+                let redefining = self.defined_names(form).iter().any(|n| self.global_type(*n).is_some());
+                let mark = self.mark();
+                let top = match head {
+                    Some("define") => self.define(form.span, items, false),
+                    Some("define*") => self.define(form.span, items, true),
+                    _ => self.define_rec(form.span, items),
+                }?;
+                if let Err(e) = self.no_reaching_itself(&top, redefining, form.span) {
+                    self.rollback(mark);
+                    return Err(e);
+                }
+                Ok(top)
+            }
             Some("private-regions") => {
                 let mut regions = Vec::new();
                 for r in &items[1..] {

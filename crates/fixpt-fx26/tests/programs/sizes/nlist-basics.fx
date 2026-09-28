@@ -1,7 +1,10 @@
 ;;; A `nlist` built by `cons`, taken apart by `cdr`, walked with no `spin`,
 ;;; and seen as a finite list and back.
 (define three (nlist int 3) (cons 1 (cons 2 (cons 3 nil))))
-(define* len (subr pure ((nlist int finite) int) int) (lambda (xs n) (if (null? xs) n (len (cdr xs) (+ n 1)))))
+(define len (subr pure ((nlist int finite) int) int)
+  (letrec ((len (subr pure ((nlist int finite) int) int)
+             (lambda (xs n) (if (null? xs) n (len (cdr xs) (+ n 1))))))
+    len))
 (define two (nlist int 2) (cdr three))
 (define as-list (listof int finite) three)
 (define back (nlist int finite) as-list)

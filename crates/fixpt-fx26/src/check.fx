@@ -6224,67 +6224,41 @@
       (ty-poly (bs body) (k-latent-globals body))
       (ty-subr (e ps r cv) (k-atoms-globals e))
       (else y nil))))
-(define k-regions-union (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
-  (lambda (xs out) (if (null? xs) out (k-regions-union (cdr xs) (k-add-region out (car xs))))))
-;; What calling the globals `ns` reads, onto `out`.
-(define k-names-regions (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-names k-regions) k-regions)
-  (lambda (ns out)
-    (if (null? ns)
-        out
-        (k-names-regions (cdr ns) (k-regions-union (k-latent-globals (k-lookup-raw (car ns))) out)))))
-;; The globals `rs` names.
-(define k-region-globals (subr (maxeff (read @globals) (alloc @t)) (k-regions) k-names)
-  (lambda (rs)
-    (cond ((null? rs) nil)
-          (else (tagcase (car rs)
-                  (r-global (g) (the k-names (cons g (k-region-globals (cdr rs)))))
-                  (else y (k-region-globals (cdr rs))))))))
-(define k-name-insert (subr (maxeff (read @globals) (alloc @t) spin) (symbol k-names) k-names)
-  (lambda (n xs)
-    (if (null? xs)
-        (the k-names (cons n nil))
-        (let ((c (k-str-cmp (symbol->string n) (symbol->string (car xs)) 0)))
-          (cond ((< c 0) (the k-names (cons n xs)))
-                ((= c 0) xs)
-                (else (the k-names (cons (car xs) (k-name-insert n (cdr xs))))))))))
-;; `ns` in the order of their names, without repeats.
-(define k-sort-names (subr (maxeff (read @globals) (alloc @t) spin) (k-names k-names) k-names)
-  (lambda (ns out) (if (null? ns) out (k-sort-names (cdr ns) (k-name-insert (car ns) out)))))
-(define k-mentions-global? (subr (maxeff (read @globals) (read @t) spin) (k-regions k-names) bool)
-  (lambda (rs ns) (and (not (null? ns)) (or (k-has-region-in? rs (r-global (car ns))) (k-mentions-global? rs (cdr ns))))))
-;; Those of `gs` whose types mention one of `ns`, or `@globals`, which may
-;; be anything.
-(define k-mentioning (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (k-names k-names) k-names)
-  (lambda (gs ns)
-    (cond ((null? gs) nil)
-          ((let ((theirs (k-latent-globals (k-lookup-raw (car gs)))))
-             (or (k-has-region-in? theirs (r-globals)) (k-mentions-global? theirs ns)))
-           (the k-names (cons (car gs) (k-mentioning (cdr gs) ns))))
-          (else (k-mentioning (cdr gs) ns)))))
-;; A redefinition of `ns` whose new definition uses a definition that uses
-;; them (`users`, transitively) closes a cycle through globals: a procedure
-;; that reaches itself through the store, which termination reasoning has
-;; not seen. So it must have `spin` in its type, or be refused (`top.rs`,
-;; `no_knot_through_globals`).
-(define k-no-knot-through-globals (subr (maxeff checks spin) (top k-names (listof k-def finite)) unit)
-  (lambda (form ns users)
-    (if (k-names-spin? ns)
-        #u
-        (let* ((reads (k-names-regions ns nil))
-               (candidates (if (k-has-region-in? reads (r-globals))
-                               (k-defs-names (get k-defs))
-                               (k-region-globals reads)))
-               (typed (k-mentioning (k-names-without candidates ns) ns))
-               ;; And from the definitions: one it uses that uses them,
-               ;; which a type need not say (a procedure kept as it was).
-               (used (k-names-within (k-defs-names users) (get k-last-uses)))
-               (cycle (k-sort-names (k-lines-append-names typed used) nil)))
-          (if (null? cycle)
-              #u
-              (let ((n (k-shown ns)) (c (k-shown cycle)))
-                (k-fail (k-cat4 n " cannot be redefined so: it uses " c
-                                (k-cat5 ", which use " n " in turn, and might never end; give it a type with `spin`, or define " c " again after it"))
-                        (k-top-start form) (k-top-end form))))))))
+;; The first of `ns` whose global `rs` has, if any.
+(define k-first-read (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-regions k-names) k-names)
+  (lambda (rs ns)
+    (cond ((null? ns) nil)
+          ((k-has-region-in? rs (r-global (car ns))) (the k-names (cons (car ns) nil)))
+          (else (k-first-read rs (cdr ns))))))
+;; Defining a global writes it: a procedure stored in global `f` whose calls
+;; read `f` may reach itself through the global, which termination checking,
+;; trusting every procedure of a type without `spin` to end, has not seen.
+;; So it must say `spin`, as a procedure kept in a ref must, however it
+;; reads `f`; one that stays `pure` binds itself with a local `letrec`. A
+;; group's members read each other so. Reading `@globals` may read `f` only
+;; once `f` is a global (`top.rs`, `no_reaching_itself`).
+(define k-no-reaching-itself (subr (maxeff checks spin) (top k-names bool) unit)
+  (lambda (form ns redefining)
+    (letrec ((each (subr (maxeff checks spin) (k-names) unit)
+               (lambda (ms)
+                 (if (null? ms)
+                     #u
+                     (let* ((n (car ms)) (t (k-lookup-raw n)))
+                       (if (k-type-spins? t)
+                           (each (cdr ms))
+                           (let* ((reads (k-latent-globals t))
+                                  (m (k-first-read reads ns))
+                                  (name (symbol->string n)))
+                             (cond ((not (null? m))
+                                    (k-fail (k-cat5 (k-cat5 "calling `" name "` reads `" (symbol->string (car m)) "`, so `")
+                                                    name "` may reach itself through a global: its type must say `spin` (or, to call itself directly, it binds itself with a local `letrec`)" "" "")
+                                            (k-top-start form) (k-top-end form)))
+                                   ((and redefining (k-has-region-in? reads (r-globals)))
+                                    (k-fail (k-cat5 (k-cat5 "calling `" name "` may read any global, `" name "` too, so `")
+                                                    name "` may reach itself through a global: its type must say `spin`" "" "")
+                                            (k-top-start form) (k-top-end form)))
+                                   (else (each (cdr ms)))))))))))
+      (each ns))))
 ;; Each of `users` checked again after the redefinition of `ns`: defined
 ;; again if it checks, broken if not.
 (define k-rerun (subr (maxeff (read @globals) checks spin) ((listof k-def finite) k-names (listof string finite)) (listof string finite))
@@ -6293,12 +6267,11 @@
         lines
         (let* ((u (car users))
                (olds (k-old-types (extract u 1)))
-               (theirs (k-users-of (extract u 1)))
                (m (k-mark))
                (reset (set k-last-uses nil))
                (r (prompt k-tag
                     (let ((ls (k-top-lines (extract u 2))))
-                      (begin (k-no-knot-through-globals (extract u 2) (extract u 1) theirs) (k-ok ls)))
+                      (begin (k-no-reaching-itself (extract u 2) (extract u 1) #t) (k-ok ls)))
                     (lambda (r) r))))
           (tagcase r
             (k-ok (ls)
@@ -6320,7 +6293,7 @@
            (users (if (null? olds) (the (listof k-def finite) nil) (k-users-of ns)))
            (reset (set k-last-uses nil))
            (lines (k-top-lines form))
-           (knot (if (null? olds) #u (k-no-knot-through-globals form ns users)))
+           (knot (k-no-reaching-itself form ns (not (null? olds))))
            (assigns (and (not (null? olds)) (k-fits-old? olds)))
            (recorded (k-record form ns))
            (ran (set k-runs (the (listof k-run finite) (cons (product (1 form) (2 assigns)) (get k-runs))))))
