@@ -1,8 +1,54 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-**Status: approved 2026-09-20; M0–M7 complete — the three deliverables of §0 are
-done. See the milestone table in
-§8 and `README.md` for what runs today.**
+## At a glance (kept current; last updated 2026-09-27)
+
+The rest of this file is the plan as it grew, oldest first. This section says
+where things stand, and points into it.
+
+**Done**
+- **The three original deliverables** (§0; M0–M7, M9): the Scheme engine
+  (AST and bytecode engines, heap images, standalone binaries, hygienic
+  macros), FX-87 (161/161 parse, 160/161 type and effect), FX-91 (182/182).
+- **FX-26** (M11, M12): the language, and its reader, parser, checker and
+  compiler written in FX-26 and bootstrapped to a fixpoint, over bloblets,
+  on threaded machines in Rust and arm64 (hand-encoded, register code,
+  stencils). The Rust versions stay as oracles; both checkers must agree.
+- **M13 so far** (§11, "M13 plan"; "The queue"): the Rust compiler to
+  threaded words, benchmarks, typed primitives, self tail calls as loops,
+  known calls in part, register code (the MacScheme machine), values as
+  addresses.
+- **FX-26's type system, 2026-09-27** ("The next queue", "Progress…"):
+  places and regions with `letfreeze`; `spin` with size-change termination;
+  parametric datatypes; generative types; lemmas; the `data` kind and
+  `acyclic`; sizes (`nlist`, `nat`, `confirm-length`, `confirm-nat`).
+- **Soundness** (`docs/research/soundness*.md`): a formal core with
+  progress and preservation proved (control included), no use after free,
+  frozen data never written; holes F1–F9 and A2 found and fixed.
+
+**Known to remain**, roughly in order (details in "Progress, and what the
+queue gained", and "The next queue"):
+1. Soundness obligations: effect soundness (T3) in full, lemma erasure
+   (T4), termination of code free of `spin` (T5), space bounds (T6).
+2. Sizes N5c: inequalities, "at most n" results, array bounds.
+3. The front end written in FX-26: quick wins, then the split into
+   `src/fx-rsmirror/` and `src/fx-idiomatic/`.
+4. GADTs (N4, to design with the user); a top effect; the rest of
+   confirming types at run time (CF1–CF5); concurrency and actors.
+5. M13's rest: inlining (13f), superinstructions (13g), join points (13i),
+   the rest of known calls, a nursery with a write barrier, cheaper
+   continuations, a lint on a lambda's size.
+6. Smaller: `nlist` error messages; the language gaps the survey found;
+   M8 docs and polish; M10, a full native compiler, is not scheduled.
+
+**Unknown**
+- Whether code free of `spin` always ends: T5 is conjectured, and false
+  until each hole is closed; a proof wants a logical relation.
+- How much space programs take against the model: no harness measures it.
+- How GADTs should meet subtyping, what regions a top effect covers, and
+  which of the two front ends bootstraps: each needs a decision with the
+  user.
+- Older items may still be done but unmarked; §11's items 1–3 were, and
+  are now marked. When one is found, mark it where it is written.
 
 ## 0. What this is
 
@@ -509,10 +555,12 @@ made piece by piece.
 
 ### Phase A: the object model (`fixpt-heap`, in Rust)
 
-1. **`docs/object-model.md`**, reviewed and committed.
+1. **`docs/object-model.md`**, reviewed and committed. *(Done.)*
 2. **One specification table**: tags, header bits, kinds, and the reserved
    trailer. The Rust constants are generated from it, and later an FX-26
-   module too, with a test that the two agree.
+   module too, with a test that the two agree. *(Done: `fixpt-heap`'s
+   `layout.rs`, with `src/layout.fx` and `src/native-layout.fx` generated
+   from it and checked by `tests/layout.rs`.)*
 3. **Bloblets in the heap, alongside today's objects:**
    - allocation, through the layout/placement interface, with the default
      placement;
@@ -525,7 +573,7 @@ made piece by piece.
    - tracing, verification, and a new heap image version.
 
    Tested under `gc-stress`, and with deliberately trailer-less bloblets so
-   the backward scan runs.
+   the backward scan runs. *(Done: everything since is built on them.)*
 4. **Code as bloblets**, compiled form: constants and metadata in fields at
    fixed negative offsets, which are part of the layout specification, and
    bytecode as the suffix. Closures hold bloblet pointers. *(Done
