@@ -177,6 +177,7 @@ compared coinductively: Amadio–Cardelli; `check.rs:1366–1552`):
 | `void ≤ τ`                 | always: no value has type `void`                                      |
 | `(nat s) ≤ (nat s′) ≤ int` | `Φ ⊢ s = s′` (with `nat` = `(nat ∃)`)                                 |
 | `subr`                     | effects `φ ⊆ φ′`, parameters contravariant, result covariant          |
+| conventions (in `subr`)    | the same, or `cellular ≤ fx`, `native ≤ fx`; a binder only itself     |
 | `ref`, `icell`, `arrayof`  | same region, contents invariant                                       |
 | mutable `pairof`, bloblet  | same region, contents invariant                                       |
 | frozen `pairof`, bloblet   | `(finite π) ≤ (const π)`; contents covariant                          |
@@ -210,11 +211,24 @@ textbook effect system are written out.
 (Lam)     Γ, x̄:τ̄ ⊢ e : τ ! φ                        ⊢ λ(x̄:τ̄).e : (subr φ (τ̄) τ) ! ∅
 (App)     ⊢ e : (subr φ (τ̄) τ) ! φ₀   ⊢ eᵢ : τᵢ ! φᵢ
                                                     ⊢ e ē : τ ! φ₀ ∪ ⋃φᵢ ∪ φ
+(Conv)    ⊢ e : (subr (conv C) φ (τ̄) τ) ! φ₀   C′ ≠ native
+                                                    ⊢ (convention C′ e) : (subr (conv C′) φ (τ̄) τ) ! φ₀
 (TLam)    Δ, χ:κ≤ρ ⊢ e : τ ! φ    φ ⊆ alloc-only, e a closure former
                                                     ⊢ Λ(χ:κ≤ρ).e : ∀(χ:κ≤ρ).τ ! φ
 (TApp)    ⊢ e : ∀(χ:κ≤ρ).τ ! φ   Δ ⊢ d : κ   d ≤ ρ[d/χ]   no knot in τ[d/χ]
                                                     ⊢ e[d] : τ[d/χ] ! φ
 ```
+
+Conventions (`docs/research/native-conventions.md`). Every `subr` type
+carries one; (App) further requires the callee's to be the program's,
+`fx`, or a binder, since code calls only procedures of its own convention
+or dispatches through `fx` on the value's kind, which the runtime keeps
+truthful. (Conv) is also what the checker inserts where a procedure
+differs from what is expected only in its convention. While every
+procedure is still made cellular, a conversion to `cellular`, `fx` or a
+binder changes nothing at run time, and none to `native` is allowed; so
+(Conv) preserves the value typing lemma trivially. When native procedures
+exist, conversions become adapters, and the rule gains their typing.
 
 `(Lam)` has **no masking**: the latent effect is the body's effect,
 exactly. Masking is only in the binders:

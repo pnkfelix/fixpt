@@ -222,6 +222,7 @@
         (e-rlambda (r l a b) (c-free r bound (c-free l bound acc)))
         (e-proj (body ds a b) (c-free body bound acc))
         (e-the (d body a b) (c-free body bound acc))
+        (e-convention (cnv body a b) (c-free body bound acc))
         (e-if (t th el a b) (c-free t bound (c-free th bound (c-free el bound acc))))
         (e-letrec (bs body a b)
           (let ((inner (c-bind-letrec bs bound)))
@@ -305,6 +306,7 @@
     (tagcase x
       (e-plambda (d body a b) (c-lambda-of body))
       (e-the (d body a b) (c-lambda-of body))
+      (e-convention (cnv body a b) (c-lambda-of body))
       (e-lambda (ps body a b) (the (listof exp @k) (cons x nil)))
       (e-rlambda (r l a b) (the (listof exp @k) (cons x nil)))
       (else y nil))))
@@ -333,6 +335,7 @@
         (e-rlambda (r l a b) (and (c-loops-only r f n #f) (c-loops-only l f n #f)))
         (e-proj (body ds a b) (c-loops-only body f n tail))
         (e-the (d body a b) (c-loops-only body f n tail))
+        (e-convention (cnv body a b) (c-loops-only body f n tail))
         (e-if (t th el a b)
           (and (c-loops-only t f n #f) (and (c-loops-only th f n tail) (c-loops-only el f n tail))))
         (e-letrec (bs body a b)
@@ -597,6 +600,7 @@
                   (c-done c tail)))))
         (e-proj (body ds a b) (c-exp body e depth c tail))
         (e-the (d body a b) (c-exp body e depth c tail))
+        (e-convention (cnv body a b) (c-exp body e depth c tail))
         (e-if (t th el a b)
           (let ((no (c-fresh)) (end (c-fresh)))
             (begin

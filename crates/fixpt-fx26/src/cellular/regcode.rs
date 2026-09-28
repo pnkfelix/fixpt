@@ -315,7 +315,7 @@ impl Compiler<'_> {
             // analysis only is nothing at run time.
             Exp::LetRegion { form: crate::ast::RegionForm::Region | crate::ast::RegionForm::Freeze(_), body, .. } => self.r_collects(body, e, this, tail),
             Exp::LetRegion { .. } => true,
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.r_collects(body, e, this, tail),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.r_collects(body, e, this, tail),
             Exp::Extract(y, _) => self.r_collects(y, e, this, false),
             Exp::Bloblet { op: BlobletOp::Ref(_), args } => args.iter().any(|y| self.r_collects(*y, e, this, false)),
             Exp::TagCase { scrutinee, arms, els } => {
@@ -396,7 +396,7 @@ impl Compiler<'_> {
                 g.op("const", &[u]);
                 g.done(tail);
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => {
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => {
                 self.r_exp(g, body, env, te, tail)?
             }
             // The region's name bound, as a `let`'s, to a region entered (an

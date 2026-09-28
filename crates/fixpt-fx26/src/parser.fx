@@ -53,6 +53,8 @@
   ;; `(rlambda region (param …) body …)`: the region, and the `lambda`.
   (e-rlambda exp exp int int)
   (e-the syn exp int int)
+  ;; `(convention C expression)`: the procedure converted to `C`.
+  (e-convention syn exp int int)
   ;; A bloblet form, by name, with its field index, or -1.
   (e-bloblet symbol int (listof exp finite) int int)
   (e-product (listof (productof (1 symbol) (2 exp)) finite) int int)
@@ -313,6 +315,9 @@
         ((symbol=? head 'the)
          (begin (arity items 3 "`(the type expression)`" a b)
                 (e-the (nth items 1) (parse-exp (nth items 2)) a b)))
+        ((symbol=? head 'convention)
+         (begin (arity items 3 "`(convention C expression)`" a b)
+                (e-convention (nth items 1) (parse-exp (nth items 2)) a b)))
         ((or (symbol=? head 'make-bloblet) (symbol=? head 'rmake-bloblet) (symbol=? head 'bloblet-ref) (symbol=? head 'bloblet-set!)
              (symbol=? head 'bloblet-freeze) (symbol=? head 'bloblet-byte) (symbol=? head 'bloblet-set-byte!)
              (symbol=? head 'bloblet-bytes))

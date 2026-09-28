@@ -6,7 +6,7 @@
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
-use crate::ast::{Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
+use crate::ast::{Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
@@ -25,6 +25,8 @@ pub enum DScope {
     Region(Region),
     /// A size given for an abbreviation's size parameter.
     SizeVal(Size),
+    /// A convention given for an abbreviation's convention parameter.
+    ConvVal(Conv),
     /// A name bound by `define-effect`: an effect.
     Eff(crate::ast::Effect),
     /// A name bound by `define-generative`: the `n`th generative type.
@@ -41,6 +43,7 @@ pub enum FamilyArg {
     Region(Region),
     Eff(crate::ast::Effect),
     Size(Size),
+    Conv(Conv),
 }
 
 impl Checker {
@@ -85,7 +88,33 @@ impl Checker {
             Some("type") => Ok(Kind::Type),
             Some("data") => Ok(Kind::Data),
             Some("size") => Ok(Kind::Size),
-            _ => Err(FxError::at(s.span, "a kind is `region`, `place`, `effect`, `type`, `data` or `size`")),
+            Some("conv") => Ok(Kind::Conv),
+            _ => Err(FxError::at(s.span, "a kind is `region`, `place`, `effect`, `type`, `data`, `size` or `conv`")),
+        }
+    }
+
+    /// `(conv C)`: the convention `C`.
+    fn parse_conv_form(&self, s: &Syntax) -> R<Conv> {
+        match self.items(s, "`(conv convention)`")? {
+            [_, c] => self.parse_conv(c),
+            _ => Err(FxError::at(s.span, "`(conv convention)`")),
+        }
+    }
+
+    /// A convention: `cellular`, `native`, `fx`, or a name bound as one.
+    pub(crate) fn parse_conv(&self, s: &Syntax) -> R<Conv> {
+        let Some(sym) = s.as_symbol() else {
+            return Err(FxError::at(s.span, "a convention is `cellular`, `native`, `fx`, or a name bound as one"));
+        };
+        match self.name(sym) {
+            "cellular" => Ok(Conv::Cellular),
+            "native" => Ok(Conv::Native),
+            "fx" => Ok(Conv::Fx),
+            _ => match self.lookup_desc(sym) {
+                Some(DScope::Var(v, Kind::Conv)) => Ok(Conv::Var(v)),
+                Some(DScope::ConvVal(c)) => Ok(c),
+                _ => Err(FxError::at(s.span, format!("`{}` is not a convention", self.name(sym)))),
+            },
         }
     }
 
@@ -240,8 +269,18 @@ impl Checker {
             }
         }
         match self.head(&items).unwrap_or("") {
+            // `(subr effect (param …) result)`, or with a convention first,
+            // `(subr (conv C) effect (param …) result)`; left out, it is the
+            // program's (`docs/research/native-conventions.md`).
             "subr" => {
-                let [_, effect, params, result] = &items[..] else {
+                let (conv, rest) = match &items[..] {
+                    [_, c, rest @ ..] if rest.len() == 3 && self.head(&self.items(c, "a convention").unwrap_or_default()) == Some("conv") => {
+                        (self.parse_conv_form(c)?, rest)
+                    }
+                    [_, rest @ ..] => (self.conv_default, rest),
+                    [] => unreachable!("a head"),
+                };
+                let [effect, params, result] = rest else {
                     return Err(FxError::at(s.span, "`(subr effect (param …) result)`"));
                 };
                 let effect = self.parse_effect(effect)?;
@@ -255,7 +294,7 @@ impl Checker {
                         .collect::<R<Vec<_>>>()?,
                 };
                 let result = self.parse_type(result)?;
-                Ok(self.arena.ty(Ty::Subr { effect, params, result }))
+                Ok(self.arena.ty(Ty::Subr { conv, effect, params, result }))
             }
             // `(proves (<= A B))`, or `(proves (poly (binder …) (<= A B)
             // (<= X Y) …))`: the type of a proof that `A ≤ B` (given each
@@ -591,6 +630,10 @@ impl Checker {
                     let z = self.parse_size(a)?;
                     (DScope::SizeVal(z.clone()), crate::parse::FamilyArg::Size(z))
                 }
+                Kind::Conv => {
+                    let c = self.parse_conv(a)?;
+                    (DScope::ConvVal(c), crate::parse::FamilyArg::Conv(c))
+                }
             };
             bound.push((*p, d));
             key.push(arg);
@@ -677,9 +720,9 @@ impl Checker {
         }
         let spin = Effect::atom(Atom::Spin);
         let mut params: Vec<TyId> =
-            hs.iter().map(|(x, y)| self.arena.ty(Ty::Subr { effect: spin.clone(), params: vec![*x], result: *y })).collect();
+            hs.iter().map(|(x, y)| self.arena.ty(Ty::Subr { conv: self.conv_default, effect: spin.clone(), params: vec![*x], result: *y })).collect();
         params.push(lhs);
-        let body = self.arena.ty(Ty::Subr { effect: spin, params, result: rhs });
+        let body = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: spin, params, result: rhs });
         let t = if binders.is_empty() { body } else { self.arena.ty(Ty::Poly { binders: binders.clone(), body }) };
         self.pending_lemma = Some(crate::lemma::Lemma { binders, lhs, rhs, hyps: hs, by: None });
         Ok(t)
@@ -700,6 +743,7 @@ impl Checker {
                 Kind::Place => D::Region(self.parse_place(a)?),
                 Kind::Effect => D::Effect(self.parse_effect(a)?),
                 Kind::Size => D::Size(self.parse_size(a)?),
+                Kind::Conv => D::Conv(self.parse_conv(a)?),
             });
         }
         let t = self.arena.ty(Ty::Named { which: g, args: ds });
@@ -812,6 +856,9 @@ impl Checker {
                 Some(DScope::Eff(e)) => Ok(D::Effect(e)),
                 Some(DScope::Var(v, Kind::Size)) => Ok(D::Size(Size::var(v))),
                 Some(DScope::SizeVal(z)) => Ok(D::Size(z)),
+                Some(DScope::Var(v, Kind::Conv)) => Ok(D::Conv(Conv::Var(v))),
+                Some(DScope::ConvVal(c)) => Ok(D::Conv(c)),
+                _ if matches!(name, "cellular" | "native" | "fx") => Ok(D::Conv(self.parse_conv(s)?)),
                 _ => Ok(D::Type(self.parse_type(s)?)),
             };
         }
@@ -1084,6 +1131,14 @@ impl Checker {
                 let ty = self.parse_type(ty)?;
                 let exp = self.parse_exp(exp)?;
                 Ok(self.arena.exp(span, Exp::The { ty, exp }))
+            }
+            "convention" => {
+                let [_, conv, exp] = &items[..] else {
+                    return Err(FxError::at(span, "`(convention C expression)`"));
+                };
+                let conv = self.parse_conv(conv)?;
+                let exp = self.parse_exp(exp)?;
+                Ok(self.arena.exp(span, Exp::Convention { conv, exp }))
             }
             name if BlobletOp::NAMES.contains(&name) => {
                 let name = name.to_string();

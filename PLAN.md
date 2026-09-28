@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-09-27)
+## At a glance (kept current; last updated 2026-09-28)
 
 The rest of this file is the plan as it grew, oldest first. This section says
 where things stand, and points into it.
@@ -32,10 +32,12 @@ queue gained", and "The next queue"):
    of the heap, so code no longer reachable is reclaimed, and code can
    reach GC-traced fields of its own bloblet PC-relatively. Steps 1–3 and
    4a done; the rest waits on **native code without the interpreter's
-   shape** (`docs/research/native-conventions.md`, for the user's review):
-   calling conventions in function types, native frames with stack maps
-   instead of the ip in step and resume tables, and seven steps that
-   replace 4b and 4c.
+   shape** (`docs/research/native-conventions.md`, decided with the user
+   2026-09-27): calling conventions in function types, native frames with
+   stack maps instead of the ip in step and resume tables, and seven steps
+   that replace 4b and 4c. Step 1 done (2026-09-28): conventions in both
+   checkers, `(subr (conv C) …)`, `fx`, conversions inserted by the
+   checker and `(convention C e)`; steps 2–7 remain.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

@@ -137,6 +137,9 @@ dependencies = [
 [[package]]
 name = "fixpt-tidy"
 version = "0.1.0"
+dependencies = [
+ "fixpt-read",
+]
 
 [[package]]
 name = "libc"

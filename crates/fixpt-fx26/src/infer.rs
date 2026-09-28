@@ -20,7 +20,7 @@
 //! Everything inferred is what an explicit `proj` would have said, so the
 //! rules of the kernel — masking included — apply unchanged afterwards.
 
-use crate::ast::{Atom, D, DVar, Effect, Exp, ExpId, Kind, Region, Size, Ty, TyId};
+use crate::ast::{Atom, Conv, D, DVar, Effect, Exp, ExpId, Kind, Region, Size, Ty, TyId};
 use fixpt_read::Sym;
 use crate::check::Checker;
 use crate::error::{FxError, R};
@@ -85,6 +85,7 @@ impl Checker {
                             Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
                             Kind::Type | Kind::Data => D::Type(self.arena.ty(Ty::Var(*va))),
                             Kind::Size => D::Size(Size::var(*va)),
+                            Kind::Conv => D::Conv(crate::ast::Conv::Var(*va)),
                         };
                         (*vb, d)
                     })
@@ -235,10 +236,39 @@ impl Checker {
         if self.subtype(got, want) {
             return Ok(());
         }
+        if let Some(c) = self.conversion(got, want) {
+            return self.convert_at(e, c);
+        }
         Err(FxError::at(
             self.arena.span_of(e),
             format!("a {} is expected here, and this is a {}", self.show_ty(want), self.show_ty(got)),
         ))
+    }
+
+    /// The convention `want` asks of `got`, where a procedure differs from
+    /// what is expected only in its convention, so that a conversion makes
+    /// it one (`docs/research/native-conventions.md`).
+    fn conversion(&mut self, got: TyId, want: TyId) -> Option<Conv> {
+        let (g, w) = (self.arena.resolve(got), self.arena.resolve(want));
+        let (Ty::Subr { conv: from, effect, params, result }, Ty::Subr { conv: to, .. }) = (self.arena.get(g).clone(), self.arena.get(w).clone()) else {
+            return None;
+        };
+        if from == to {
+            return None;
+        }
+        let t = self.arena.ty(Ty::Subr { conv: to, effect, params, result });
+        self.subtype(t, want).then_some(to)
+    }
+
+    /// A conversion of `e`'s procedure to `to`. Every procedure is still
+    /// made cellular, so a conversion to `cellular`, `fx` or a convention
+    /// binder does nothing at run time yet, and none can be to `native`.
+    pub(crate) fn convert_at(&mut self, e: ExpId, to: Conv) -> R<()> {
+        if to == Conv::Native {
+            return Err(FxError::at(self.arena.span_of(e), "a `native` procedure is expected here, and none can be made yet"));
+        }
+        self.facts.converted.insert(e, to);
+        Ok(())
     }
 
     // --------------------------------------------------------------- lambda
@@ -286,7 +316,7 @@ impl Checker {
         let r = r.and_then(|(t, latent)| Ok((self.forget_nats(named, t, span)?, latent)));
         self.skolems.truncate(named);
         let (result, latent) = r?;
-        let t = self.arena.ty(Ty::Subr { effect: latent, params: typed.iter().map(|(_, t)| *t).collect(), result });
+        let t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: latent, params: typed.iter().map(|(_, t)| *t).collect(), result });
         Ok((t, Effect::pure()))
     }
 
@@ -457,6 +487,13 @@ impl Checker {
         let Some((latent, params, result)) = callee.as_subr() else {
             return Err(FxError::at(span, format!("not a subroutine: {}", self.show_ty(ft))));
         };
+        // Code calls procedures of its own convention, or through `fx`.
+        if let Ty::Subr { conv: conv @ (Conv::Native | Conv::Cellular), .. } = callee
+            && conv != self.conv_default
+        {
+            let (c, d) = (self.show_conv(conv), self.show_conv(self.conv_default));
+            return Err(FxError::at(span, format!("a `{c}` procedure cannot be called from `{d}` code yet")));
+        }
         if params.len() != args.len() {
             return Err(FxError::at(span, format!("expected {} argument(s), got {}", params.len(), args.len())));
         }
@@ -465,10 +502,13 @@ impl Checker {
             let eff = match done[i].take() {
                 Some((t, eff)) => {
                     if !self.subtype(t, *p) {
-                        return Err(FxError::at(
-                            self.arena.span_of(*a),
-                            format!("argument {} is a {}, where a {} is expected", i + 1, self.show_ty(t), self.show_ty(*p)),
-                        ));
+                        let Some(c) = self.conversion(t, *p) else {
+                            return Err(FxError::at(
+                                self.arena.span_of(*a),
+                                format!("argument {} is a {}, where a {} is expected", i + 1, self.show_ty(t), self.show_ty(*p)),
+                            ));
+                        };
+                        self.convert_at(*a, c)?;
                     }
                     eff
                 }
@@ -569,7 +609,7 @@ impl Checker {
                     && arms.iter().all(|arm| arm.names().contains(&k) || self.only_called(arm.body, k))
                     && els.is_none_or(|(y, body)| y == k || self.only_called(body, k))
             }
-            Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Extract(body, _) | Exp::Sum(_, body) => self.only_called(body, k),
+            Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } | Exp::Extract(body, _) | Exp::Sum(_, body) => self.only_called(body, k),
             Exp::If { test, then, els } => all(vec![test, then, els]),
             Exp::Begin(items) | Exp::Bloblet { args: items, .. } => all(items),
             Exp::Product(fields) => all(fields.into_iter().map(|(_, x)| x).collect()),
@@ -910,6 +950,10 @@ impl Checker {
                 Kind::Effect => {
                     map.insert(*v, D::Effect(Effect::pure()));
                 }
+                // A convention nothing says is the program's.
+                Kind::Conv => {
+                    map.insert(*v, D::Conv(self.conv_default));
+                }
                 // A size nothing says is some size.
                 Kind::Size => {
                     map.insert(*v, D::Size(Size::Finite));
@@ -964,10 +1008,10 @@ impl Checker {
             }
             let hit = match self.arena.get(t).clone() {
                 Ty::Var(v) => open(v),
-                Ty::Subr { effect: e, params, result } => {
+                Ty::Subr { conv, effect: e, params, result } => {
                     stack.extend(params);
                     stack.push(result);
-                    effect(&e)
+                    effect(&e) || matches!(conv, Conv::Var(v) if open(v))
                 }
                 Ty::Poly { body, .. } => {
                     stack.push(body);
@@ -1009,6 +1053,7 @@ impl Checker {
                             D::Region(r) => hit |= region(r),
                             D::Effect(e) => hit |= effect(&e),
                             D::Size(z) => hit |= matches!(&z, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
+                            D::Conv(c) => hit |= matches!(c, crate::ast::Conv::Var(v) if open(v)),
                         }
                     }
                     hit
@@ -1079,8 +1124,11 @@ impl Checker {
                 }
                 Some(_) => {}
             },
-            (Ty::Subr { effect: pe, params: pp, result: pr }, at) => {
+            (Ty::Subr { conv: pc, effect: pe, params: pp, result: pr }, at) => {
                 let Some((ae, ap, ar)) = at.as_subr() else { return };
+                if let Ty::Subr { conv: ac, .. } = at {
+                    self.unify_conv(pc, ac, u);
+                }
                 if pp.len() != ap.len() {
                     return;
                 }
@@ -1150,11 +1198,22 @@ impl Checker {
                         (D::Type(x), D::Type(y)) => self.unify(*x, *y, u, trail),
                         (D::Region(r), D::Region(s)) => self.unify_region(*r, *s, u),
                         (D::Effect(d), D::Effect(e)) => self.unify_effect(d, e, u),
+                        (D::Conv(c), D::Conv(d)) => self.unify_conv(*c, *d, u),
                         _ => {}
                     }
                 }
             }
             _ => {}
+        }
+    }
+
+    /// A convention binder takes the actual's convention, if nothing has yet.
+    fn unify_conv(&self, pattern: Conv, actual: Conv, u: &mut Unknowns) {
+        if let Conv::Var(v) = pattern
+            && u.is_unknown(v)
+            && !u.solved.contains_key(&v)
+        {
+            u.solved.insert(v, D::Conv(actual));
         }
     }
 

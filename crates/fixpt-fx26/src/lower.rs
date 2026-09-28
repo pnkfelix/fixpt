@@ -297,7 +297,7 @@ impl Lowerer<'_> {
                 let b = self.body(&[n], body);
                 format!("(let (({l} ({enter}))) (dynamic-wind (lambda () #f) (lambda () {b}) (lambda () (%region-exit {l} #f))))")
             }
-            Exp::The { exp, .. } => self.go(exp),
+            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.go(exp),
             Exp::If { test, then, els } => {
                 format!("(if {} {} {})", self.go(test), self.go(then), self.go(els))
             }

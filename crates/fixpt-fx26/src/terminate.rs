@@ -308,7 +308,7 @@ impl Walk<'_> {
                 self.walk(body);
                 self.scope.truncate(depth);
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.walk(body),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.walk(body),
             Exp::LetRegion { body, .. } => self.walk(body),
             Exp::RLambda { region, lambda } => {
                 self.walk(region);
@@ -422,7 +422,7 @@ impl Walk<'_> {
         let arena = &self.c.arena;
         match arena.exp_at(e).clone() {
             Exp::Var(s) => self.bound(s).cloned().unwrap_or_default(),
-            Exp::The { exp, .. } => self.tracked(exp),
+            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.tracked(exp),
             // Either branch's value: what both say, the weaker of the two.
             Exp::If { then, els, .. } => {
                 let (a, b) = (self.tracked(then), self.tracked(els));
@@ -542,7 +542,7 @@ impl Walk<'_> {
                     matches!(k, Tracked::Part { param, strict: false, .. } if self.invariant.contains(&(self.current, *param)))
                 }),
             },
-            Exp::The { exp, .. } => self.fixed(exp),
+            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.fixed(exp),
             Exp::App { fun, args } => {
                 matches!((self.std_op(fun), args.len()), (Some("string-length" | "array-length"), 1) | (Some("+" | "-"), 2))
                     && args.iter().all(|a| self.fixed(*a))

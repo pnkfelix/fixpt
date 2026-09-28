@@ -151,6 +151,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
         Exp::Begin(items) => format!("(e-begin {} {a} {b})", list(items.iter().map(|x| go(*x)).collect())),
         Exp::Prompt { tag, body, handler } => format!("(e-prompt {} {} {} {a} {b})", go(tag), go(body), go(handler)),
         Exp::The { exp, .. } => format!("(e-the _ {} {a} {b})", go(exp)),
+        Exp::Convention { exp, .. } => format!("(e-convention _ {} {a} {b})", go(exp)),
         Exp::Bloblet { op, args } => {
             let (n, i) = match op {
                 BlobletOp::Make => ("make-bloblet", -1),

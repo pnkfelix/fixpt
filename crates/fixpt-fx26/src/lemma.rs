@@ -325,8 +325,9 @@ impl Checker {
                 ps.len() == qs.len()
                     && ps.iter().zip(&qs).all(|((a, x), (b, y))| a == b && self.match_ty(l, *x, *y, map, seen))
             }
-            (Ty::Subr { effect: e1, params: p1, result: r1 }, Ty::Subr { effect: e2, params: p2, result: r2 }) => {
-                e1 == e2
+            (Ty::Subr { conv: c1, effect: e1, params: p1, result: r1 }, Ty::Subr { conv: c2, effect: e2, params: p2, result: r2 }) => {
+                c1 == c2
+                    && e1 == e2
                     && p1.len() == p2.len()
                     && p1.iter().zip(&p2).all(|(x, y)| self.match_ty(l, *x, *y, map, seen))
                     && self.match_ty(l, r1, r2, map, seen)
@@ -340,6 +341,7 @@ impl Checker {
             (D::Type(a), D::Type(b)) => self.match_ty(l, *a, *b, map, seen),
             (D::Region(r), D::Region(s)) => self.match_region(l, *r, *s, map),
             (D::Size(a), D::Size(b)) => a == b,
+            (D::Conv(a), D::Conv(b)) => a == b,
             (D::Effect(d), D::Effect(e)) => {
                 let var = d.0.iter().next().and_then(|a| match a {
                     crate::ast::Atom::Var(v) if d.0.len() == 1 && l.binders.iter().any(|(x, _)| x == v) => Some(*v),

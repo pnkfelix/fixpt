@@ -307,6 +307,7 @@
         (e-rlambda (r l a b) (eval l e))
         (e-proj (body ds a b) (eval body e))
         (e-the (d body a b) (eval body e))
+        (e-convention (cnv body a b) (eval body e))
         (e-if (t th el a b) (if (as-bool (eval t e)) (eval th e) (eval el e)))
         (e-letrec (bs body a b) (eval-letrec bs body e))
         (e-let (bs body a b) (eval body (eval-let bs e e)))
@@ -388,6 +389,7 @@
       (e-lambda (ps body a b) #t)
       (e-plambda (d body a b) (lambda-exp? body))
       (e-the (d body a b) (lambda-exp? body))
+      (e-convention (cnv body a b) (lambda-exp? body))
       (else y #f))))
 
 (define eval-top (subr (maxeff evals spin) (top) val)

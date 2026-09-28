@@ -266,6 +266,7 @@
         (e-plambda (d body a b) (r-collects body e this tail))
         (e-proj (body ds a b) (r-collects body e this tail))
         (e-the (d body a b) (r-collects body e this tail))
+        (e-convention (cnv body a b) (r-collects body e this tail))
         (e-extract (p l a b) (r-collects p e this #f))
         (e-bloblet (op i args a b)
           (if (string=? (symbol->string op) "bloblet-ref") (r-collects-all args e this) #t))
@@ -325,6 +326,7 @@
         (e-plambda (d body a b) (r-exp g body env te tail))
         (e-proj (body ds a b) (r-exp g body env te tail))
         (e-the (d body a b) (r-exp g body env te tail))
+        (e-convention (cnv body a b) (r-exp g body env te tail))
         ;; The region's name bound, as a `let`'s, to a region entered (never
         ;; in a leaf), and left with the body's value, which is so not in
         ;; tail position.

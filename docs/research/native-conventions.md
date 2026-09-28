@@ -217,7 +217,9 @@ its code in one.
 
 ## Steps, each committed and tested
 
-1. **Conventions in types**, in both checkers: the kind, the optional
+1. **Conventions in types**, in both checkers (done, 2026-09-28; tests in
+   `crates/fixpt-fx26/tests/programs/conventions/`, and the rules in
+   `docs/research/soundness.md` §2.4): the kind, the optional
    position in `subr`, `fx` and the subsumption into it, inference and
    defaulting, printing only when not the default, `(convention C e)`, the
    soundness note's rule. No change in behaviour: every program is

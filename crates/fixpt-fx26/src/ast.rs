@@ -28,6 +28,28 @@ pub enum Kind {
     Data,
     /// A list's length (`docs/research/sizes.md`): a natural, or `finite`.
     Size,
+    /// How a procedure is called (`docs/research/native-conventions.md`).
+    Conv,
+}
+
+/// How a procedure is called: a cellular closure, run by an inner
+/// interpreter; native code, run by being called; either of FX-26's own,
+/// which a call finds out from the value (`fx`); or a variable of kind
+/// `conv` (`docs/research/native-conventions.md`).
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Conv {
+    Cellular,
+    Native,
+    Fx,
+    Var(DVar),
+}
+
+impl Conv {
+    /// Whether a procedure called in `self` may be used as one called in
+    /// `want`: the same convention, or any of FX-26's own as `fx`.
+    pub fn fits(self, want: Conv) -> bool {
+        self == want || (want == Conv::Fx && !matches!(self, Conv::Var(_)))
+    }
 }
 
 impl Kind {
@@ -144,7 +166,7 @@ pub enum Ty {
     /// continuation, here — and a subtype of every type.
     Void,
     Var(DVar),
-    Subr { effect: Effect, params: Vec<TyId>, result: TyId },
+    Subr { conv: Conv, effect: Effect, params: Vec<TyId>, result: TyId },
     Poly { binders: Vec<(DVar, Kind)>, body: TyId },
     Ref(TyId, Region),
     Pair(TyId, TyId, Region),
@@ -245,7 +267,7 @@ impl Ty {
     /// together with the control effects on the tag's region.
     pub fn as_subr(&self) -> Option<(Effect, Vec<TyId>, TyId)> {
         match self {
-            Ty::Subr { effect, params, result } => Some((effect.clone(), params.clone(), *result)),
+            Ty::Subr { effect, params, result, .. } => Some((effect.clone(), params.clone(), *result)),
             Ty::Composable { arg, answer, effect, region } => {
                 let mut e = effect.clone();
                 e.0.insert(Atom::Goto(*region));
@@ -298,6 +320,7 @@ pub enum D {
     Effect(Effect),
     Type(TyId),
     Size(Size),
+    Conv(Conv),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -342,6 +365,8 @@ pub enum Exp {
     RLambda { region: ExpId, lambda: ExpId },
     /// `(the type expression)`: check the expression against the type.
     The { ty: TyId, exp: ExpId },
+    /// `(convention C expression)`: the procedure converted to `C`.
+    Convention { conv: Conv, exp: ExpId },
     /// The bloblet forms, which are syntax because a field's index must be
     /// known to know its type.
     Bloblet { op: BlobletOp, args: Vec<ExpId> },

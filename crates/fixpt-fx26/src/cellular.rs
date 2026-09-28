@@ -223,7 +223,7 @@ impl<'a> Compiler<'a> {
                 }
                 self.free(fun, bound, acc);
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.free(body, bound, acc),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.free(body, bound, acc),
             Exp::LetRegion { region, body, .. } => self.free(body, &with(bound, &[self.c.arena.dvar_name(region)]), acc),
             Exp::RLambda { region, lambda } => {
                 self.free(lambda, bound, acc);
@@ -360,7 +360,7 @@ impl<'a> Compiler<'a> {
                 self.done(code, tail);
             }
             Exp::App { fun, args } => self.app(fun, &args, e, depth, code, tail)?,
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => {
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => {
                 self.exp(body, e, depth, code, tail)?
             }
             // The region's name bound in a slot, as a `let`'s, to a region
@@ -611,13 +611,13 @@ impl<'a> Compiler<'a> {
     // ------------------------------------------------- known procedures
 
     /// The parameters and body of `x`, when it is a lambda under any type
-    /// abstractions and ascriptions, which compile to nothing; and its
+    /// abstractions, ascriptions and conversions, which compile to nothing; and its
     /// region, when it is an `rlambda`.
     fn lambda_of(&self, mut x: ExpId) -> Option<(Vec<Sym>, ExpId, Option<ExpId>)> {
         let mut region = None;
         loop {
             match self.c.arena.exp_at(x) {
-                Exp::PLambda { body, .. } | Exp::The { exp: body, .. } => x = *body,
+                Exp::PLambda { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => x = *body,
                 Exp::RLambda { region: r, lambda } => {
                     region = Some(*r);
                     x = *lambda;
@@ -648,7 +648,7 @@ impl<'a> Compiler<'a> {
                         _ => self.loops_only(fun, f, n, false),
                     }
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.loops_only(body, f, n, tail),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.loops_only(body, f, n, tail),
             Exp::LetRegion { region, body, .. } => self.c.arena.dvar_name(region) == f || self.loops_only(body, f, n, false),
             Exp::RLambda { region, lambda } => self.loops_only(region, f, n, false) && self.loops_only(lambda, f, n, false),
             Exp::If { test, then, els } => {

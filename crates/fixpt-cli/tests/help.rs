@@ -362,11 +362,7 @@ fn a_hole_can_be_asked_about_before_the_form_is_finished() {
 /// and `,apropos KIND TEXT` in one; `,help` shows each meaning of a name.
 #[test]
 fn fx26_apropos_searches_every_namespace() {
-    let defs = "(define-effect kstate (maxeff (read @t) (write @t)))\n\
-                (define-type kcell (ref int @t))\n\
-                (define-type (kbox (t type)) (pairof t t finite))\n\
-                (define-generative (kid (t type +)) (pairof t int finite))\n\
-                (define kval int 3)\n";
+    let defs = include_str!("programs/apropos-namespaces.fx");
     let out = repl(Some("fx26"), &format!("{defs},apropos k\n"));
     for want in [
         "kstate = (maxeff (read @t) (write @t))  (an effect)",

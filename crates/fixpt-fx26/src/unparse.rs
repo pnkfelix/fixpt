@@ -54,6 +54,17 @@ impl Checker {
         }
     }
 
+    /// A convention as a program writes it.
+    pub fn show_conv(&self, c: crate::ast::Conv) -> String {
+        use crate::ast::Conv;
+        match c {
+            Conv::Cellular => "cellular".into(),
+            Conv::Native => "native".into(),
+            Conv::Fx => "fx".into(),
+            Conv::Var(v) => self.interner.name(self.arena.dvar_name(v)).to_string(),
+        }
+    }
+
     /// `pure`, a single atom, or `(maxeff …)`.
     pub fn show_effect(&self, e: &Effect) -> String {
         let atoms: Vec<String> = e.0.iter().map(|a| self.show_atom(*a)).collect();
@@ -107,9 +118,11 @@ impl Checker {
             Ty::Var(v) => self.interner.name(self.arena.dvar_name(v)).to_string(),
             Ty::Link(None) => "?".into(),
             Ty::Link(Some(_)) => unreachable!("resolved"),
-            Ty::Subr { effect, params, result } => {
+            Ty::Subr { conv, effect, params, result } => {
                 let ps: Vec<String> = params.iter().map(|p| self.show_ty_on(*p, path)).collect();
-                format!("(subr {} ({}) {})", self.show_effect(&effect), ps.join(" "), self.show_ty_on(result, path))
+                // The convention only where it is not the program's.
+                let c = if conv == self.conv_default { String::new() } else { format!("(conv {}) ", self.show_conv(conv)) };
+                format!("(subr {c}{} ({}) {})", self.show_effect(&effect), ps.join(" "), self.show_ty_on(result, path))
             }
             Ty::Poly { binders, body } => {
                 let bs: Vec<String> = binders
@@ -121,6 +134,7 @@ impl Checker {
                             Kind::Effect => "effect",
                             Kind::Type => "type",
                             Kind::Data => "data",
+                            Kind::Conv => "conv",
                             Kind::Size => "size",
                         };
                         match self.arena.bound(*v) {
@@ -189,6 +203,7 @@ impl Checker {
                             crate::ast::D::Region(r) => self.show_region(*r),
                             crate::ast::D::Effect(e) => self.show_effect(e),
                             crate::ast::D::Size(z) => self.show_size(z),
+                            crate::ast::D::Conv(c) => self.show_conv(*c),
                         })
                         .collect();
                     format!("({name} {})", ds.join(" "))

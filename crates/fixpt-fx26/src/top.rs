@@ -568,7 +568,7 @@ impl Checker {
                     ("generative", format!("{head} = {}", self.show_ty(family.rep)))
                 }
                 DScope::Private(_) => ("region", n.clone()),
-                DScope::Var(..) | DScope::Region(_) | DScope::SizeVal(_) => continue,
+                DScope::Var(..) | DScope::Region(_) | DScope::SizeVal(_) | DScope::ConvVal(_) => continue,
             };
             out.push((*name, entry.0, entry.1));
         }
@@ -635,5 +635,6 @@ fn kind_name(k: crate::ast::Kind) -> &'static str {
         Kind::Type => "type",
         Kind::Data => "data",
         Kind::Size => "size",
+        Kind::Conv => "conv",
     }
 }

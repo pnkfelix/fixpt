@@ -51,15 +51,20 @@
 ;; A description in argument position, what `proj` supplies.
 ;; A list's length, as far as it is known: `finite`, some number; or a
 ;; constant and terms (variable . coefficient), in variable order.
+;; A procedure's convention (`docs/research/native-conventions.md`):
+;; `cellular`, `native`, `fx`, or a binder.
+(define-datatype k-conv (cv-cellular) (cv-native) (cv-fx) (cv-var int))
+
 (define-datatype k-size (sz-finite) (sz-lin int (listof (pairof int int finite) finite)))
 
-(define-datatype k-desc (dr k-region) (de k-eff) (dt int) (dz k-size))
+(define-datatype k-desc (dr k-region) (de k-eff) (dt int) (dz k-size) (dc k-conv))
 
 (define-datatype k-ty
   (ty-base symbol)
   (ty-void)
   (ty-var int)
-  (ty-subr k-eff k-ids int)
+  ;; effect, parameters, result, convention
+  (ty-subr k-eff k-ids int k-conv)
   (ty-poly k-binders int)
   (ty-ref int k-region)
   (ty-pair int int k-region)
@@ -102,7 +107,9 @@
   (ds-abbrev (listof (productof (1 symbol) (2 int)) finite) syn)
   (ds-region k-region)
   (ds-eff k-eff)
-  (ds-private k-region))
+  (ds-private k-region)
+  ;; A convention given for an abbreviation's convention parameter.
+  (ds-conv k-conv))
 
 ;;; ------------------------------------------------------------ expressions
 ;;; The parser's trees with their descriptions read. Each ends with where it
@@ -130,6 +137,8 @@
   (x-begin (listof kx finite) int int)
   (x-prompt kx kx kx int int)
   (x-the int kx int int)
+  ;; `(convention C e)`: the procedure converted to `C`.
+  (x-convention k-conv kx int int)
   (x-bloblet symbol int (listof kx finite) int int)
   (x-product (listof (productof (1 symbol) (2 kx)) finite) int int)
   (x-extract kx symbol int int)
@@ -546,10 +555,19 @@
           (else (k-cat3 "(maxeff" (k-atoms-show e) ")")))))
 
 (define k-kind-name (subr pure (int) string)
-  (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") ((= k 4) "data") ((= k 5) "size") (else "type"))))
+  (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") ((= k 4) "data") ((= k 5) "size") ((= k 6) "conv") (else "type"))))
+;; A convention as a program writes it.
+(define k-conv-show (subr (read @t) (k-conv) string)
+  (lambda (c)
+    (tagcase c (cv-cellular () "cellular") (cv-native () "native") (cv-fx () "fx") (cv-var (v) (symbol->string (k-dvar-name v))))))
+;; A convention as a number: one of FX-26's own, or its binder.
+(define k-conv-code (subr pure (k-conv) int)
+  (lambda (c) (tagcase c (cv-cellular () -1) (cv-native () -2) (cv-fx () -3) (cv-var (v) v))))
+(define k-conv=? (subr pure (k-conv k-conv) bool)
+  (lambda (a b) (= (k-conv-code a) (k-conv-code b))))
 ;; As Rust's `{:?}` writes a kind.
 (define k-kind-debug (subr pure (int) string)
-  (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") ((= k 3) "Place") ((= k 4) "Data") ((= k 5) "Size") (else "Type"))))
+  (lambda (k) (cond ((= k 0) "Region") ((= k 1) "Effect") ((= k 3) "Place") ((= k 4) "Data") ((= k 5) "Size") ((= k 6) "Conv") (else "Type"))))
 ;; Whether a region is a place: a variable bound as one.
 (define k-place? (subr (read @t) (k-region) bool)
   (lambda (r) (tagcase r (r-var (v) (k-place-var? v)) (r-heap () #t) (else x #f))))
@@ -755,7 +773,7 @@
     (lambda (ds p)
       (if (null? ds)
           nil
-          (let ((x (tagcase (car ds) (dt (t) (k-show-on t p)) (dr (r) (k-region-show r)) (de (e) (k-show-effect e)) (dz (z) (k-show-size z)))))
+          (let ((x (tagcase (car ds) (dt (t) (k-show-on t p)) (dr (r) (k-region-show r)) (de (e) (k-show-effect e)) (dz (z) (k-show-size z)) (dc (c) (k-conv-show c)))))
             (cons x (k-show-descs (cdr ds) p))))))
   (k-show-body (subr (maxeff (read @t) (alloc @t) spin) (int k-ids) string)
     (lambda (t path)
@@ -768,8 +786,9 @@
               (ty-void () "void")
               (ty-var (v) (symbol->string (k-dvar-name v)))
               (ty-link (x) "?")
-              (ty-subr (e ps r)
-                (k-cat5 (k-cat3 "(subr " (k-show-effect e) " (") (k-join (k-show-list ps p) " ") ") " (k-show-on r p) ")"))
+              (ty-subr (e ps r cv)
+                ;; The convention only where it is not the program's.
+                (k-cat5 (k-cat4 "(subr " (tagcase cv (cv-cellular () "") (else y (k-cat3 "(conv " (k-conv-show cv) ") "))) (k-show-effect e) " (") (k-join (k-show-list ps p) " ") ") " (k-show-on r p) ")"))
               (ty-poly (bs body) (k-cat5 "(poly (" (k-join (k-show-binders bs) " ") ") " (k-show-on body p) ")"))
               (ty-ref (a r) (k-cat5 "(ref " (k-show-on a p) " " (k-region-show r) ")"))
               (ty-product (ps) (k-cat3 "(productof" (k-show-parts ps p) ")"))
@@ -833,7 +852,8 @@
       (cond ((string=? n "region") 0) ((string=? n "place") 3) ((string=? n "effect") 1) ((string=? n "type") 2)
             ((string=? n "data") 4)
             ((string=? n "size") 5)
-            (else (k-sfail "a kind is `region`, `place`, `effect`, `type`, `data` or `size`" s))))))
+            ((string=? n "conv") 6)
+            (else (k-sfail "a kind is `region`, `place`, `effect`, `type`, `data`, `size` or `conv`" s))))))
 
 ;; The region `@name` stands for: the program's own, if `private-regions`
 ;; declared it, and otherwise the constant of that name.
@@ -979,7 +999,7 @@
                 (ty-markkey (a r) (begin (add r) (walk a)))
                 (ty-pair (a b r) (begin (tagcase r (r-frozen (q f) #u) (else y (add r))) (walk a) (walk b)))
                 (ty-bloblet (fs z r) (begin (if z #u (add r)) (walks fs)))
-                (ty-subr (e ps r) (begin (walks ps) (walk r)))
+                (ty-subr (e ps r cv) (begin (walks ps) (walk r)))
                 (ty-poly (bs body) (walk body))
                 (ty-product (ps) (k-storage-parts ps seen out))
                 (ty-sum (ps) (k-storage-parts ps seen out))
@@ -1053,7 +1073,7 @@
                 (ty-poly (bs body) (k-knot-in body kept seen))
                 ;; A procedure: kept where it is, it may not read there
                 ;; unsaid; what it takes and gives is kept nowhere yet.
-                (ty-subr (e ps r)
+                (ty-subr (e ps r cv)
                   (let ((found (k-reads-kept e kept)))
                     (if (null? found)
                         (let ((x (k-knot-list ps nil seen))) (if (null? x) (k-knot-in r nil seen) x))
@@ -1190,12 +1210,38 @@
       (ds-region (a) (tagcase y (ds-region (b) (k-region=? a b)) (else z #f)))
       (ds-eff (a) (tagcase y (ds-eff (b) (k-eff=? a b)) (else z #f)))
       (ds-size (a) (tagcase y (ds-size (b) (k-size=? a b)) (else z #f)))
+      (ds-conv (a) (tagcase y (ds-conv (b) (k-conv=? a b)) (else z #f)))
       (else z #f))))
 (define k-scope=? (subr (maxeff (read @t) spin) (k-scope k-scope) bool)
   (lambda (xs ys)
     (if (null? xs)
         (null? ys)
         (and (not (null? ys)) (k-ds=? (cdr (car xs)) (cdr (car ys))) (k-scope=? (cdr xs) (cdr ys))))))
+;; The head of a list's first item, or "" for anything else.
+(define k-list-head (subr (read @s) (syn) string)
+  (lambda (s) (tagcase s (lst (items d a b) (k-head items)) (else x ""))))
+;; A convention: `cellular`, `native`, `fx`, or a name bound as one.
+(define k-parse-conv (subr (maxeff checks spin) (syn) k-conv)
+  (lambda (s)
+    (if (not (syn-symbol? s))
+        (k-sfail "a convention is `cellular`, `native`, `fx`, or a name bound as one" s)
+        (let* ((n (syn-name s)) (no (k-cat3 "`" n "` is not a convention")))
+          (cond ((string=? n "cellular") (cv-cellular))
+                ((string=? n "native") (cv-native))
+                ((string=? n "fx") (cv-fx))
+                (else
+                 (let ((d (k-lookup-desc (string->symbol n))))
+                   (if (null? d)
+                       (k-sfail no s)
+                       (tagcase (car d)
+                         (ds-var (v k) (if (= k 6) (cv-var v) (k-sfail no s)))
+                         (ds-conv (c) c)
+                         (else x (k-sfail no s)))))))))))
+;; `(conv C)`: the convention `C`.
+(define k-parse-conv-form (subr (maxeff checks spin) (syn) k-conv)
+  (lambda (s)
+    (let ((items (k-items s "`(conv convention)`")))
+      (if (= (k-length items) 2) (k-parse-conv (k-nth items 1)) (k-sfail "`(conv convention)`" s)))))
 ;; The slot of the expansion of `name` with `bound` in progress, or -1.
 (define k-knot-of (subr (maxeff (read @t) spin) ((listof k-family-knot finite) symbol k-scope) int)
   (lambda (ks name bound)
@@ -1271,7 +1317,7 @@
              (hyps (if poly? (k-les (cdr (cdr (cdr items)))) (the k-hyps nil)))
              (spin (k-one (a-spin)))
              (params (k-hyp-coercions hyps spin (the k-ids (cons (car conc) nil))))
-             (body (k-ty-new (ty-subr spin params (cdr conc))))
+             (body (k-ty-new (ty-subr spin params (cdr conc) (cv-cellular))))
              (t (if (null? bs) body (k-ty-new (ty-poly bs body)))))
         (begin
           (set k-pending-lemma (cons (product (1 bs) (2 (car conc)) (3 (cdr conc)) (4 hyps) (5 (the k-named nil))) nil))
@@ -1288,7 +1334,7 @@
     (lambda (hs spin tail)
       (if (null? hs)
           tail
-          (let ((c (k-ty-new (ty-subr spin (the k-ids (cons (car (car hs)) nil)) (cdr (car hs))))))
+          (let ((c (k-ty-new (ty-subr spin (the k-ids (cons (car (car hs)) nil)) (cdr (car hs)) (cv-cellular)))))
             (cons c (k-hyp-coercions (cdr hs) spin tail))))))
   ;; `(name d …)` for the `g`th generative type: a node, never expanded.
   (k-apply-gen (subr (maxeff checks spin) (syn int (listof syn finite)) int)
@@ -1310,6 +1356,7 @@
                           ((= k 0) (dr (k-parse-region (car args))))
                           ((= k 3) (dr (k-parse-place (car args))))
                           ((= k 5) (dz (k-parse-size (car args))))
+                          ((= k 6) (dc (k-parse-conv (car args))))
                           (else (de (k-parse-effect (car args))))))
                  (rest (k-gen-args (cdr ps) (cdr args))))
             (cons d rest)))))
@@ -1339,13 +1386,20 @@
                   (ds-gen (g) (k-apply-gen s g (cdr items)))
                   (else x (k-sfail "an abbreviation" s)))
                 (cond
+                  ;; `(subr effect (param …) result)`, or with a convention
+                  ;; first, `(subr (conv C) effect (param …) result)`; left
+                  ;; out, it is the program's.
                   ((symbol=? hd 'subr)
-                   (begin
-                     (k-shape (= n 4) "`(subr effect (param …) result)`" s)
-                     (let* ((e (k-parse-effect (k-nth items 1)))
-                            (ps (k-parse-types (k-items-or-nil (k-nth items 2) "parameter types")))
-                            (r (k-parse-type (k-nth items 3))))
-                       (k-ty-new (ty-subr e ps r)))))
+                   (let* ((conv? (and (= n 5) (string=? (k-list-head (k-nth items 1)) "conv")))
+                          (cv (if conv? (k-parse-conv-form (k-nth items 1)) (cv-cellular)))
+                          (items (if conv? (the (listof syn finite) (cons (car items) (cdr (cdr items)))) items))
+                          (n (if conv? 4 n)))
+                     (begin
+                       (k-shape (= n 4) "`(subr effect (param …) result)`" s)
+                       (let* ((e (k-parse-effect (k-nth items 1)))
+                              (ps (k-parse-types (k-items-or-nil (k-nth items 2) "parameter types")))
+                              (r (k-parse-type (k-nth items 3))))
+                         (k-ty-new (ty-subr e ps r cv))))))
                   ((symbol=? hd 'proves)
                    (let ((usage "`(proves (<= type type))` or `(proves (poly ((name kind) …) (<= type type) (<= type type) …))`"))
                      (begin
@@ -1506,6 +1560,7 @@
                           ((= k 0) (ds-region (k-parse-region (car args))))
                           ((= k 3) (ds-region (k-parse-place (car args))))
                           ((= k 5) (ds-size (k-parse-size (car args))))
+                          ((= k 6) (ds-conv (k-parse-conv (car args))))
                           (else (ds-eff (k-parse-effect (car args))))))
                  (rest (k-abbrev-args (cdr ps) (cdr args))))
             (cons (cons (extract (car ps) 1) d) rest))))))
@@ -1543,7 +1598,7 @@
                 (set seen (cons (cons t at) (get seen)))
                 (tagcase (k-get t)
                   (ty-var (x) (if (= x v) (push at) #u))
-                  (ty-subr (e ps r) (begin (eff e at) (gos ps (k-flip at)) (go r at)))
+                  (ty-subr (e ps r cv) (begin (eff e at) (gos ps (k-flip at)) (go r at)))
                   (ty-poly (bs body) (go body at))
                   (ty-ref (a r) (begin (reg r) (go a 2)))
                   (ty-array (a r) (begin (reg r) (go a 2)))
@@ -1577,7 +1632,8 @@
                 (dr (r) (if (k-reg-is? r v) (set found (cons 2 (get found))) #u))
                 (de (e) (begin (if (k-eff-var? e v) (set found (cons p (get found))) #u)
                                (if (k-eff-region-var? e v) (set found (cons 2 (get found))) #u)))
-                (dz (z) #u))
+                (dz (z) #u)
+                (dc (c) #u))
               (k-polarity-descs (cdr ds) (cdr ws) v at seen found)))))))
 (define k-all-ints? (subr pure (k-ids int) bool)
   (lambda (xs n) (or (null? xs) (and (= (car xs) n) (k-all-ints? (cdr xs) n)))))
@@ -1682,16 +1738,19 @@
                 ((string=? n "finite") (dr (r-frozen -1 #t)))
                 ((string=? n "heap") (dr (r-heap)))
                 (else
-                 (let ((d (k-lookup-desc sym)))
+                 (let ((d (k-lookup-desc sym))
+                       (conv? (or (string=? n "cellular") (string=? n "native") (string=? n "fx"))))
                    (if (null? d)
-                       (dt (k-parse-type s))
+                       (if conv? (dc (k-parse-conv s)) (dt (k-parse-type s)))
                        (tagcase (car d)
                          (ds-var (v k)
                            (cond ((or (= k 0) (= k 3)) (dr (r-var v))) ((= k 1) (de (k-one (a-var v)))) ((= k 5) (dz (k-size-var v)))
-                                 (else (dt (k-parse-type s)))))
+                                 ((= k 6) (dc (cv-var v)))
+                                 (else (if conv? (dc (k-parse-conv s)) (dt (k-parse-type s))))))
                          (ds-eff (e) (de e))
                          (ds-size (z) (dz z))
-                         (else x (dt (k-parse-type s)))))))))
+                         (ds-conv (c) (dc c))
+                         (else x (if conv? (dc (k-parse-conv s)) (dt (k-parse-type s))))))))))
         (let ((hd (k-head (k-items s "a description"))))
           (cond ((or (string=? hd "read") (string=? hd "write") (string=? hd "alloc") (string=? hd "goto")
                      (string=? hd "comefrom") (string=? hd "await") (string=? hd "maxeff"))
@@ -1708,7 +1767,7 @@
     (tagcase x
       (x-var (s a b) a) (x-const (t v a b) a) (x-lambda (ps e a b) a) (x-app (f xs a b) a)
       (x-plambda (bs e a b) a) (x-proj (e ds a b) a) (x-if (p c d a b) a) (x-letrec (bs e a b) a)
-      (x-let (bs e a b) a) (x-begin (xs a b) a) (x-prompt (t e h a b) a) (x-the (t e a b) a)
+      (x-let (bs e a b) a) (x-begin (xs a b) a) (x-prompt (t e h a b) a) (x-the (t e a b) a) (x-convention (c e a b) a)
       (x-bloblet (o i xs a b) a) (x-product (fs a b) a) (x-extract (e l a b) a) (x-sum (l e a b) a)
       (x-tagcase (e arms els a b) a) (x-letregion (k r i e a b) a) (x-rlambda (r l a b) a))))
 (define k-end (subr pure (kx) int)
@@ -1716,7 +1775,7 @@
     (tagcase x
       (x-var (s a b) b) (x-const (t v a b) b) (x-lambda (ps e a b) b) (x-app (f xs a b) b)
       (x-plambda (bs e a b) b) (x-proj (e ds a b) b) (x-if (p c d a b) b) (x-letrec (bs e a b) b)
-      (x-let (bs e a b) b) (x-begin (xs a b) b) (x-prompt (t e h a b) b) (x-the (t e a b) b)
+      (x-let (bs e a b) b) (x-begin (xs a b) b) (x-prompt (t e h a b) b) (x-the (t e a b) b) (x-convention (c e a b) b)
       (x-bloblet (o i xs a b) b) (x-product (fs a b) b) (x-extract (e l a b) b) (x-sum (l e a b) b)
       (x-tagcase (e arms els a b) b) (x-letregion (k r i e a b) b) (x-rlambda (r l a b) b))))
 (define k-same-span? (subr pure (kx int int) bool)
@@ -1742,7 +1801,7 @@
       (e-var (s a b) a) (e-int (n a b) a) (e-bool (v a b) a) (e-str (v a b) a) (e-char (v a b) a) (e-sym (v a b) a)
       (e-unit (a b) a) (e-lambda (ps x a b) a) (e-app (f xs a b) a) (e-plambda (bs x a b) a) (e-proj (x ds a b) a)
       (e-if (p c d a b) a) (e-letrec (bs x a b) a) (e-let (bs x a b) a) (e-begin (xs a b) a) (e-prompt (t x h a b) a)
-      (e-the (t x a b) a) (e-bloblet (o i xs a b) a) (e-product (fs a b) a) (e-extract (x l a b) a) (e-sum (l x a b) a)
+      (e-the (t x a b) a) (e-convention (c x a b) a) (e-bloblet (o i xs a b) a) (e-product (fs a b) a) (e-extract (x l a b) a) (e-sum (l x a b) a)
       (e-tagcase (x arms els a b) a) (e-letregion (k r i x a b) a) (e-rlambda (r l a b) a))))
 (define exp-end (subr pure (exp) int)
   (lambda (e)
@@ -1750,7 +1809,7 @@
       (e-var (s a b) b) (e-int (n a b) b) (e-bool (v a b) b) (e-str (v a b) b) (e-char (v a b) b) (e-sym (v a b) b)
       (e-unit (a b) b) (e-lambda (ps x a b) b) (e-app (f xs a b) b) (e-plambda (bs x a b) b) (e-proj (x ds a b) b)
       (e-if (p c d a b) b) (e-letrec (bs x a b) b) (e-let (bs x a b) b) (e-begin (xs a b) b) (e-prompt (t x h a b) b)
-      (e-the (t x a b) b) (e-bloblet (o i xs a b) b) (e-product (fs a b) b) (e-extract (x l a b) b) (e-sum (l x a b) b)
+      (e-the (t x a b) b) (e-convention (c x a b) b) (e-bloblet (o i xs a b) b) (e-product (fs a b) b) (e-extract (x l a b) b) (e-sum (l x a b) b)
       (e-tagcase (x arms els a b) b) (e-letregion (k r i x a b) b) (e-rlambda (r l a b) b))))
 
 ;; A `plambda`'s region and place binders: each won't outlive what is bound
@@ -1842,6 +1901,8 @@
           (let* ((tx (k-resolve-exp t)) (bx (k-resolve-exp body)) (hx (k-resolve-exp h))) (x-prompt tx bx hx a b)))
         (e-the (ty body a b)
           (let* ((t (k-parse-type ty)) (x (k-resolve-exp body))) (x-the t x a b)))
+        (e-convention (c body a b)
+          (let* ((cv (k-parse-conv c)) (x (k-resolve-exp body))) (x-convention cv x a b)))
         (e-bloblet (op i args a b) (x-bloblet op i (k-resolve-all args) a b))
         (e-product (fs a b) (x-product (k-resolve-fields fs nil a b) a b))
         (e-extract (body l a b) (x-extract (k-resolve-exp body) l a b))
@@ -1896,7 +1957,7 @@
 (define k-as-subr (subr (maxeff (read @t) (alloc @t) spin) (int) (listof k-callable finite))
   (lambda (t)
     (tagcase (k-get t)
-      (ty-subr (e ps r) (cons (product (1 e) (2 ps) (3 r)) nil))
+      (ty-subr (e ps r cv) (cons (product (1 e) (2 ps) (3 r)) nil))
       (ty-comp (arg answer e r)
         (cons (product (1 (k-insert (a-goto r) (k-insert (a-comefrom r) e))) (2 (the k-ids (cons arg nil))) (3 answer)) nil))
       (else x nil))))
@@ -1961,7 +2022,7 @@
                   (walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids) unit) (lambda (xs) (k-regions-walks xs seen out))))
               (begin
                 (tagcase (k-get t)
-                  (ty-subr (e ps r) (begin (set out (k-add-eff-regions (get out) e)) (walks ps) (walk r)))
+                  (ty-subr (e ps r cv) (begin (set out (k-add-eff-regions (get out) e)) (walks ps) (walk r)))
                   (ty-poly (bs body) (walk body))
                   (ty-ref (a r) (begin (add r) (walk a)))
                   (ty-array (a r) (begin (add r) (walk a)))
@@ -1991,7 +2052,8 @@
                    (dt (x) (k-regions-walk x seen out))
                    (dr (r) (set out (k-add-region (get out) r)))
                    (de (e) (set out (k-add-eff-regions (get out) e)))
-                   (dz (z) #u))
+                   (dz (z) #u)
+                   (dc (c) #u))
                  (k-regions-descs (cdr ds) seen out)))))
   (k-regions-walks (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids int (ref k-regions @t)) unit)
     (lambda (ts seen out) (if (null? ts) #u (begin (k-regions-walk (car ts) seen out) (k-regions-walks (cdr ts) seen out)))))
@@ -2049,6 +2111,7 @@
         (x-begin (xs a b) (k-free-list xs bound out))
         (x-prompt (t body h a b) (k-free-into h bound (k-free-into body bound (k-free-into t bound out))))
         (x-the (t body a b) (k-free-into body bound out))
+        (x-convention (c body a b) (k-free-into body bound out))
         (x-bloblet (o i xs a b) (k-free-list xs bound out))
         (x-product (fs a b) (k-free-fields fs bound out))
         (x-extract (body l a b) (k-free-into body bound out))
@@ -2147,6 +2210,7 @@
             (x-begin (xs a b) (k-unseen-list xs bound rs))
             (x-prompt (t body h a b) (k-unseen h bound (k-unseen body bound (k-unseen t bound rs))))
             (x-the (t body a b) (k-unseen body bound rs))
+            (x-convention (c body a b) (k-unseen body bound rs))
             (x-bloblet (o i xs a b) (k-unseen-list xs bound rs))
             (x-product (fs a b) (k-unseen-fields fs bound rs))
             (x-extract (body l a b) (k-unseen body bound rs))
@@ -2208,6 +2272,11 @@
 
 ;;; ------------------------------------------------------------ substitution
 
+(define k-subst-conv (subr (read @t) (k-conv k-map) k-conv)
+  (lambda (c m)
+    (tagcase c
+      (cv-var (v) (let ((f (k-map-find m v))) (if (null? f) c (tagcase (cdr (car f)) (dc (x) x) (else y c)))))
+      (else y c))))
 (define k-subst-region (subr (read @t) (k-region k-map) k-region)
   (lambda (r m)
     (tagcase r
@@ -2239,7 +2308,7 @@
 (define k-ty-rank (subr (maxeff (read @t) spin) (int) int)
   (lambda (t)
     (tagcase (k-get t)
-      (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r) 3) (ty-poly (bs x) 4) (ty-ref (x r) 5)
+      (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r cv) 3) (ty-poly (bs x) 4) (ty-ref (x r) 5)
       (ty-pair (x y r) 6) (ty-tag (x y e r) 7) (ty-comp (x y e r) 8) (ty-markkey (x r) 9) (ty-product (ps) 10)
       (ty-sum (ps) 11) (ty-array (x r) 12) (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16)
       (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19))))
@@ -2281,7 +2350,7 @@
                              (reg (subr (read @t) (k-region) k-region) (lambda (r) (k-subst-region r m))))
                     (let* ((new-ty
                             (tagcase (k-get t)
-                              (ty-subr (e ps r) (let* ((e2 (k-subst-effect e m)) (ps2 (subs ps)) (r2 (sub r))) (ty-subr e2 ps2 r2)))
+                              (ty-subr (e ps r cv) (let* ((e2 (k-subst-effect e m)) (ps2 (subs ps)) (r2 (sub r))) (ty-subr e2 ps2 r2 (k-subst-conv cv m))))
                               (ty-poly (bs body) (ty-poly bs (sub body)))
                               (ty-ref (a r) (ty-ref (sub a) (reg r)))
                               (ty-array (a r) (ty-array (sub a) (reg r)))
@@ -2310,7 +2379,8 @@
                       (dt (x) (dt (k-subst-memo x m memo)))
                       (dr (r) (dr (k-subst-region r m)))
                       (de (e) (de (k-subst-effect e m)))
-                      (dz (z) (dz (k-subst-size z m)))))
+                      (dz (z) (dz (k-subst-size z m)))
+                      (dc (c) (dc (k-subst-conv c m)))))
                  (rest (k-subst-descs (cdr ds) m memo)))
             (cons d rest)))))
   (k-subst-list (subr (maxeff kstate spin) (k-ids k-map (ref (listof (pairof int int @t) finite) @t)) k-ids)
@@ -2343,6 +2413,7 @@
         nil
         (let* ((vb (extract (car bs) 1)) (k (extract (car bs) 2)) (va (extract (car as) 1))
                (d (cond ((or (= k 0) (= k 3)) (dr (r-var va))) ((= k 1) (de (k-one (a-var va)))) ((= k 5) (dz (k-size-var va)))
+                        ((= k 6) (dc (cv-var va)))
                         (else (dt (k-ty-new (ty-var va))))))
                (rest (k-rename (cdr bs) (cdr as))))
           (cons (cons vb d) rest)))))
@@ -2372,6 +2443,20 @@
   (lambda (env v) (cond ((null? env) v) ((= (car (car env)) v) (cdr (car env))) (else (k-benv-var (cdr env) v)))))
 ;; `env` with `v` named `l`, in place of any name it had: re-entering a scope
 ;; shadows it, so the environments stay finitely many.
+;; Whether a procedure called in convention `a` may be used as one called
+;; in `b`: the same, or any of FX-26's own as `fx`; binders by the binders
+;; they stand for.
+(define k-conv-sub? (subr (read @t) (k-conv k-conv k-benv k-benv) bool)
+  (lambda (a b ea eb)
+    (tagcase a
+      (cv-var (x) (tagcase b (cv-var (y) (= (k-benv-var ea x) (k-benv-var eb y))) (else z #f)))
+      (else y (or (k-conv=? a b) (tagcase b (cv-fx () #t) (else z #f)))))))
+;; Whether two conventions are the same, binders by what they stand for.
+(define k-conv-same? (subr (read @t) (k-conv k-conv k-benv k-benv) bool)
+  (lambda (a b ea eb)
+    (tagcase a
+      (cv-var (x) (tagcase b (cv-var (y) (= (k-benv-var ea x) (k-benv-var eb y))) (else z #f)))
+      (else y (k-conv=? a b)))))
 (define k-benv-set (subr (maxeff (read @t) (alloc @t)) (k-benv int int) k-benv)
   (lambda (env v l)
     (letrec ((drop (subr (maxeff (read @t) (alloc @t)) (k-benv) k-benv)
@@ -2547,10 +2632,10 @@
                     (ty-icell (x r) (tagcase tt (ty-icell (y q) (and (mr r q) (mt x y))) (else z (same))))
                     (ty-product (ps) (tagcase tt (ty-product (qs) (k-match-parts l ps qs m seen)) (else z (same))))
                     (ty-sum (ps) (tagcase tt (ty-sum (qs) (k-match-parts l ps qs m seen)) (else z (same))))
-                    (ty-subr (e1 p1 r1)
+                    (ty-subr (e1 p1 r1 c1)
                       (tagcase tt
-                        (ty-subr (e2 p2 r2)
-                          (and (k-eff=? e1 e2) (= (k-length p1) (k-length p2)) (k-match-list l p1 p2 m seen) (mt r1 r2)))
+                        (ty-subr (e2 p2 r2 c2)
+                          (and (k-conv=? c1 c2) (k-eff=? e1 e2) (= (k-length p1) (k-length p2)) (k-match-list l p1 p2 m seen) (mt r1 r2)))
                         (else z (same))))
                     (else z (same))))))))))
   (k-match-list (subr (maxeff kstate spin) (k-lemma k-ids k-ids (ref k-map @t) (ref (listof (pairof int int @t) finite) @t)) bool)
@@ -2572,7 +2657,8 @@
                  (dt (a) (tagcase (car ys) (dt (b) (k-match-ty l a b m seen)) (else z #f)))
                  (dr (r) (tagcase (car ys) (dr (q) (k-match-region (extract l 1) r q m)) (else z #f)))
                  (de (d) (tagcase (car ys) (de (e) (k-match-effect (extract l 1) d e m)) (else z #f)))
-                 (dz (a) (tagcase (car ys) (dz (b) (k-size=? a b)) (else z #f))))
+                 (dz (a) (tagcase (car ys) (dz (b) (k-size=? a b)) (else z #f)))
+                 (dc (a) (tagcase (car ys) (dc (b) (k-conv=? a b)) (else z #f))))
                (k-match-descs l (cdr xs) (cdr ys) m seen)))))
   (k-match-region (subr (maxeff kstate spin) (k-binders k-region k-region (ref k-map @t)) bool)
     (lambda (bs r q m)
@@ -2613,7 +2699,7 @@
                 ((and (not same-named) (not a-void) b-open)
                  (tagcase tb (ty-named (g ys) (k-sub a (k-unfold g ys) ea eb trail labels)) (else z #f)))
                 (else
-               (if (and (tagcase ta (ty-comp (x y e r) #t) (else z #f)) (tagcase tb (ty-subr (e ps r) #t) (else z #f)))
+               (if (and (tagcase ta (ty-comp (x y e r) #t) (else z #f)) (tagcase tb (ty-subr (e ps r cv) #t) (else z #f)))
                    (k-sub-callable (car (k-as-subr a)) (car (k-as-subr b)) ea eb trail labels)
                    (tagcase ta
                      (ty-void () #t)
@@ -2621,7 +2707,11 @@
                      ;; A natural is an integer; one of a known size, a natural.
                      (ty-nat (m) (tagcase tb (ty-base (y) (symbol=? y 'int)) (ty-nat (n) (k-size-le? m n)) (else z #f)))
                      (ty-var (x) (tagcase tb (ty-var (y) (= (k-benv-var ea x) (k-benv-var eb y))) (else z #f)))
-                     (ty-subr (e ps r) (tagcase tb (ty-subr (e2 ps2 r2) (k-sub-callable (car (k-as-subr a)) (car (k-as-subr b)) ea eb trail labels)) (else z #f)))
+                     (ty-subr (e ps r cv)
+                       (tagcase tb
+                         (ty-subr (e2 ps2 r2 cv2)
+                           (and (k-conv-sub? cv cv2 ea eb) (k-sub-callable (car (k-as-subr a)) (car (k-as-subr b)) ea eb trail labels)))
+                         (else z #f)))
                      (ty-ref (x r) (tagcase tb (ty-ref (y s) (and (k-region=? (k-benv-region ea r) (k-benv-region eb s)) (k-inv x y ea eb trail labels))) (else z #f)))
                      (ty-array (x r) (tagcase tb (ty-array (y s) (and (k-region=? (k-benv-region ea r) (k-benv-region eb s)) (k-inv x y ea eb trail labels))) (else z #f)))
                      (ty-icell (x r) (tagcase tb (ty-icell (y s) (and (k-region=? (k-benv-region ea r) (k-benv-region eb s)) (k-inv x y ea eb trail labels))) (else z #f)))
@@ -2717,7 +2807,8 @@
                        (de (e) (let ((d2 (k-benv-effect ea d)) (e2 (k-benv-effect eb e)))
                                  (cond ((= v 0) (k-within? d2 e2)) ((= v 1) (k-within? e2 d2)) (else (k-eff=? d2 e2)))))
                        (else z #f)))
-                   (dz (m) (tagcase (car ys) (dz (n) (k-size-eq? m n)) (else z #f)))))
+                   (dz (m) (tagcase (car ys) (dz (n) (k-size-eq? m n)) (else z #f)))
+                   (dc (c) (tagcase (car ys) (dc (d) (k-conv-same? c d ea eb)) (else z #f)))))
                (k-sub-descs (cdr xs) (cdr ys) (cdr vs) ea eb trail labels)))))
   (k-sub-fields (subr (maxeff kstate spin) (k-ids k-ids bool k-benv k-benv k-strail k-labels) bool)
     (lambda (fa fb frozen ea eb trail labels)
@@ -2770,12 +2861,44 @@
         (k-err (m ea eb) (if (and (= ea a) (= eb b)) (k-fail (string-append (prefix) m) ea eb) (k-fail m ea eb)))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 
+;; The convention `want` asks of `got`, where a procedure differs from what
+;; is expected only in its convention, so that a conversion makes it one
+;; (`docs/research/native-conventions.md`).
+(define k-conversion (subr (maxeff checks spin) (int int) (listof k-conv finite))
+  (lambda (got want)
+    (tagcase (k-get (k-resolve got))
+      (ty-subr (e ps r from)
+        (tagcase (k-get (k-resolve want))
+          (ty-subr (e2 ps2 r2 to)
+            (if (and (not (k-conv=? from to)) (k-subtype (k-ty-new (ty-subr e ps r to)) want)) (cons to nil) nil))
+          (else y nil)))
+      (else y nil))))
+;; A conversion of `x`'s procedure to `to`. Every procedure is still made
+;; cellular, so a conversion to `cellular`, `fx` or a convention binder does
+;; nothing at run time yet, and none can be to `native`.
+(define k-convert-at (subr (maxeff checks spin) (kx k-conv) unit)
+  (lambda (x to)
+    (tagcase to
+      (cv-native () (k-fail "a `native` procedure is expected here, and none can be made yet" (k-start x) (k-end x)))
+      (else y #u))))
+;; Code calls procedures of its own convention, or through `fx`.
+(define k-callable-here (subr (maxeff checks spin) (int int int) unit)
+  (lambda (ft a b)
+    (tagcase (k-get ft)
+      (ty-subr (e ps r cv)
+        (tagcase cv
+          (cv-native () (k-fail "a `native` procedure cannot be called from `cellular` code yet" a b))
+          (else y #u)))
+      (else y #u))))
 ;; `got ≤ want`, or an error at `x` saying so.
 (define k-expect (subr (maxeff checks spin) (kx int int) unit)
   (lambda (x got want)
     (if (k-subtype got want)
         #u
-        (k-fail (k-cat4 "a " (k-show-ty want) " is expected here, and this is a " (k-show-ty got)) (k-start x) (k-end x)))))
+        (let ((c (k-conversion got want)))
+          (if (null? c)
+              (k-fail (k-cat4 "a " (k-show-ty want) " is expected here, and this is a " (k-show-ty got)) (k-start x) (k-end x))
+              (k-convert-at x (car c)))))))
 ;; Bind each, the first first.
 (define k-bind-all (subr (maxeff kstate spin) (k-bindings) unit)
   (lambda (bs) (if (null? bs) #u (begin (k-bind (car (car bs)) (cdr (car bs))) (k-bind-all (cdr bs))))))
@@ -2868,7 +2991,7 @@
                (d (if (and (= k 5) (tagcase (car ds) (dr (r) (tagcase r (r-frozen (p f) (and (< p 0) f)) (else y #f))) (else y #f)))
                       (dz (sz-finite))
                       (car ds)))
-               (ok (tagcase d (dr (r) (or (= k 0) (and (= k 3) (k-place? r)))) (de (e) (= k 1)) (dt (t) (or (= k 2) (= k 4))) (dz (z) (= k 5)))))
+               (ok (tagcase d (dr (r) (or (= k 0) (and (= k 3) (k-place? r)))) (de (e) (= k 1)) (dt (t) (or (= k 2) (= k 4))) (dz (z) (= k 5)) (dc (c) (= k 6)))))
           (if ok
               (cons (cons v d) (k-proj-map (cdr bs) (cdr ds) a b))
               (k-fail (k-cat4 (k-quote (symbol->string (k-dvar-name v))) " is bound as a " (k-kind-debug k)
@@ -3101,7 +3224,7 @@
                 (ty-nat (z) (k-size-bad z pol v))
                 (ty-nlist (e z r) (+ (k-size-bad z pol v) (k-size-walk e pol v seen)))
                 (ty-named (g ds) (k-size-walk-descs ds v seen))
-                (ty-subr (e ps r) (+ (k-size-walk-list ps (- 0 pol) v seen) (k-size-walk r pol v seen)))
+                (ty-subr (e ps r cv) (+ (k-size-walk-list ps (- 0 pol) v seen) (k-size-walk r pol v seen)))
                 (ty-poly (bs body) (k-size-walk body pol v seen))
                 (ty-pair (x y r)
                   (let ((p (tagcase r (r-frozen (q f) pol) (else w 0))))
@@ -3146,7 +3269,7 @@
   (lambda (body v)
     (let ((seen (the k-seen-pol (new nil))))
       (tagcase (k-get (k-resolve body))
-        (ty-subr (e ps r)
+        (ty-subr (e ps r cv)
           (let* ((counts (k-size-params ps v seen)) (res (k-size-walk r 1 v seen)))
             (and (= (+ (extract counts 1) res) 0) (<= (extract counts 2) 1))))
         (else y (= (k-size-walk body 1 v seen) 0))))))
@@ -3197,6 +3320,8 @@
         (let ((v (extract (car kinds) 1)) (k (extract (car kinds) 2)))
           (cond ((not (null? (k-map-find m v))) (k-finish-each (cdr kinds) m a b ft))
                 ((= k 1) (k-finish-each (cdr kinds) (cons (cons v (de nil)) m) a b ft))
+                ;; A convention nothing says is the program's.
+                ((= k 6) (k-finish-each (cdr kinds) (cons (cons v (dc (cv-cellular))) m) a b ft))
                 ;; A size nothing says is some size.
                 ((= k 5) (k-finish-each (cdr kinds) (cons (cons v (dz (sz-finite))) m) a b ft))
                 (else (k-fail (k-cat5 (k-quote (symbol->string (k-dvar-name v))) " cannot be inferred for " (k-show-ty ft)
@@ -3246,6 +3371,8 @@
 ;; Whether `t` mentions a binder of any kind not yet solved.
 (define k-open-region? (subr (read @t) (k-region k-binders k-solved) bool)
   (lambda (r kinds solved) (tagcase r (r-var (v) (k-open? kinds solved v)) (else y #f))))
+(define k-open-conv? (subr (read @t) (k-conv k-binders k-solved) bool)
+  (lambda (c kinds solved) (tagcase c (cv-var (v) (k-open? kinds solved v)) (else y #f))))
 (define k-open-effect? (subr (read @t) (k-eff k-binders k-solved) bool)
   (lambda (e kinds solved)
     (cond ((null? e) #f)
@@ -3261,6 +3388,7 @@
          (or (tagcase (car ds)
                (dr (r) (k-open-region? r kinds solved))
                (de (e) (k-open-effect? e kinds solved))
+               (dc (c) (k-open-conv? c kinds solved))
                (else y #f))
              (k-descs-open? (cdr ds) kinds solved)))))
 ;; Whether a size mentions a variable still to be solved.
@@ -3283,7 +3411,7 @@
                         (go (subr (maxeff kstate spin) (k-ids) bool) (lambda (s) (k-any-walk s seen kinds solved))))
                 (tagcase (k-get t)
                   (ty-var (v) (or (k-open? kinds solved v) (go rest)))
-                  (ty-subr (e ps r) (or (k-open-effect? e kinds solved) (go (k-push-ids ps (cons r rest)))))
+                  (ty-subr (e ps r cv) (or (k-open-effect? e kinds solved) (k-open-conv? cv kinds solved) (go (k-push-ids ps (cons r rest)))))
                   (ty-poly (bs body) (go (cons body rest)))
                   (ty-ref (x r) (or (reg r) (go (cons x rest))))
                   (ty-markkey (x r) (or (reg r) (go (cons x rest))))
@@ -3314,7 +3442,7 @@
               (begin
                 (tagcase (k-get t)
                   (ty-var (v) (k-open? kinds solved v))
-                  (ty-subr (e ps r) (or (ws ps) (w r)))
+                  (ty-subr (e ps r cv) (or (ws ps) (w r)))
                   (ty-poly (bs body) (w body))
                   (ty-ref (a r) (w a))
                   (ty-markkey (a r) (w a))
@@ -3338,6 +3466,12 @@
 (define k-any-unknown-type? (subr (maxeff (read @t) (write @t) (alloc @t) spin) (k-ids k-binders k-solved) bool)
   (lambda (ts kinds solved)
     (cond ((null? ts) #f) ((k-mentions-unknown-type? (car ts) kinds solved) #t) (else (k-any-unknown-type? (cdr ts) kinds solved)))))
+;; A convention binder takes the actual's convention, if nothing has yet.
+(define k-unify-conv (subr kstate (k-conv k-conv k-binders k-solved) unit)
+  (lambda (pc ac kinds solved)
+    (tagcase pc
+      (cv-var (v) (if (and (k-unknown? kinds v) (null? (k-map-find (get solved) v))) (k-solve solved v (dc ac)) #u))
+      (else y #u))))
 (define k-unify-region (subr kstate (k-region k-region k-binders k-solved) unit)
   (lambda (p a kinds solved)
     (tagcase p (r-var (v) (if (k-open? kinds solved v) (k-solve solved v (dr a)) #u)) (else y #u))))
@@ -3399,16 +3533,19 @@
                                       (dt (prev) (if (and (not (k-subtype a prev)) (k-subtype prev a)) (k-solve solved v (dt a)) #u))
                                       (else y #u))))
                               #u))
-                        (ty-subr (pe pp pr)
+                        (ty-subr (pe pp pr pc)
                           (let ((c (k-as-subr a)))
                             (if (null? c)
                                 #u
-                                (let ((ap (extract (car c) 2)))
-                                  (if (not (= (k-length pp) (k-length ap)))
-                                      #u
-                                      (begin (k-unify-lists pp ap kinds solved trail)
-                                             (u pr (extract (car c) 3))
-                                             (ue pe (extract (car c) 1))))))))
+                                (begin
+                                 ;; A convention binder takes the actual's convention.
+                                 (tagcase at (ty-subr (e ps r ac) (k-unify-conv pc ac kinds solved)) (else y #u))
+                                 (let ((ap (extract (car c) 2)))
+                                   (if (not (= (k-length pp) (k-length ap)))
+                                       #u
+                                       (begin (k-unify-lists pp ap kinds solved trail)
+                                              (u pr (extract (car c) 3))
+                                              (ue pe (extract (car c) 1)))))))))
                         (ty-ref (x r) (tagcase at (ty-ref (y s) (begin (ur r s) (u x y))) (else z #u)))
                         (ty-markkey (x r) (tagcase at (ty-markkey (y s) (begin (ur r s) (u x y))) (else z #u)))
                         (ty-array (x r) (tagcase at (ty-array (y s) (begin (ur r s) (u x y))) (else z #u)))
@@ -3447,7 +3584,8 @@
               (dt (x) (tagcase (car ys) (dt (y) (k-unify x y kinds solved trail)) (else z #u)))
               (dr (r) (tagcase (car ys) (dr (q) (k-unify-region r q kinds solved)) (else z #u)))
               (de (d) (tagcase (car ys) (de (e) (k-unify-effect d e kinds solved)) (else z #u)))
-              (dz (m) #u))
+              (dz (m) #u)
+              (dc (c) (tagcase (car ys) (dc (d) (k-unify-conv c d kinds solved)) (else z #u))))
             (k-unify-descs (cdr xs) (cdr ys) kinds solved trail)))))
   (k-unify-lists (subr (maxeff kstate spin) (k-ids k-ids k-binders k-solved k-trail) unit)
     (lambda (xs ys kinds solved trail)
@@ -3588,7 +3726,7 @@
         (if (k-visit? t seen)
             #f
             (tagcase (k-get t)
-              (ty-subr (e ps x) (or (k-eff-writes-noting? e r) (or (k-writes-list ps r seen) (k-writes-in x r seen))))
+              (ty-subr (e ps x cv) (or (k-eff-writes-noting? e r) (or (k-writes-list ps r seen) (k-writes-in x r seen))))
               (ty-tag (a h e x) (or (k-eff-writes-noting? e r) (or (k-writes-in a r seen) (k-writes-in h r seen))))
               (ty-comp (b a e x) (or (k-eff-writes-noting? e r) (or (k-writes-in a r seen) (k-writes-in b r seen))))
               (ty-poly (bs body) (k-writes-in body r seen))
@@ -3665,7 +3803,7 @@
               (else
                (let ((p (the k-cpath (cons (cons t by) path))))
                  (tagcase (k-get t)
-                   (ty-subr (e ps r) (or (k-cyclic-list? ps #t p) (k-cyclic-from? r #f p)))
+                   (ty-subr (e ps r cv) (or (k-cyclic-list? ps #t p) (k-cyclic-from? r #f p)))
                    (ty-comp (x a e r) (or (k-cyclic-from? x #t p) (k-cyclic-from? a #f p)))
                    (ty-tag (a h e r) (or (k-cyclic-from? a #f p) (k-cyclic-from? h #f p)))
                    (ty-poly (bs x) (k-cyclic-from? x #f p))
@@ -3717,6 +3855,7 @@
                (or (null? els) (symbol=? (extract (car els) 1) k) (k-only-called? (extract (car els) 2) k))))
         (x-proj (body ds a b) (k-only-called? body k))
         (x-the (t body a b) (k-only-called? body k))
+        (x-convention (c body a b) (k-only-called? body k))
         (x-extract (body l a b) (k-only-called? body k))
         (x-sum (l body a b) (k-only-called? body k))
         (x-if (p c d a b) (and (k-only-called? p k) (k-only-called? c k) (k-only-called? d k)))
@@ -3984,6 +4123,7 @@
     (tagcase x
       (x-var (s a b) (k-sc-trs sc s))
       (x-the (t e a b) (k-sc-tracked e sc))
+        (x-convention (c e a b) (k-sc-tracked e sc))
       (x-extract (e l a b) (k-sc-fields (k-sc-tracked e sc) l))
       (x-if (p c d a b) (k-sc-meet (k-sc-tracked c sc) (k-sc-tracked d sc)))
       (x-app (f args a b)
@@ -4030,6 +4170,7 @@
         (x-var (s a b)
           (if (k-sc-in? sc s) (k-sc-invariant-in? (k-sc-trs sc s)) (< (k-sc-index (get k-sc-members) s 0) 0)))
         (x-the (t e a b) (k-sc-fixed? e sc))
+        (x-convention (c e a b) (k-sc-fixed? e sc))
         (x-app (f args a b)
           (let ((op (k-sc-op f sc)))
             ;; An array's length never changes, as a string's does not.
@@ -4209,6 +4350,7 @@
         (x-plambda (bs body a b) (k-sc-walk body sc gs))
         (x-proj (body ds a b) (k-sc-walk body sc gs))
         (x-the (t body a b) (k-sc-walk body sc gs))
+        (x-convention (c body a b) (k-sc-walk body sc gs))
         (x-letregion (k r i body a b) (k-sc-walk body sc gs))
         (x-rlambda (r l a b) (begin (k-sc-walk r sc gs) (k-sc-walk l sc gs)))
         (x-if (p c d a b)
@@ -4302,7 +4444,7 @@
       (else y y))))
 ;; The parameter types of a declared type, under its binders.
 (define k-sc-param-types (subr (maxeff (read @t) spin) (int) k-ids)
-  (lambda (t) (tagcase (k-get t) (ty-poly (bs body) (k-sc-param-types body)) (ty-subr (e ps r) ps) (else y nil))))
+  (lambda (t) (tagcase (k-get t) (ty-poly (bs body) (k-sc-param-types body)) (ty-subr (e ps r cv) ps) (else y nil))))
 ;; The parameters `ps`, the `j`th on, each known as itself.
 (define k-sc-param-scope (subr (maxeff kstate spin) ((listof (productof (1 symbol) (2 k-ids)) finite) k-ids int k-tscope) k-tscope)
   (lambda (ps ts j sc)
@@ -4650,6 +4792,13 @@
         (x-lambda (ps body a b) (k-synth-lambda-as x nil -1))
         (x-app (f args a b) (k-synth-app x f args -1))
         (x-the (t e a b) (k-te t (k-check e t)))
+        (x-convention (c e a b)
+          (let* ((r (k-synth e)) (t (k-resolve (extract r 1))))
+            (tagcase (k-get t)
+              (ty-subr (fe ps res from)
+                (begin (if (k-conv=? from c) #u (k-convert-at x c))
+                       (k-te (k-ty-new (ty-subr fe ps res c)) (extract r 2))))
+              (else y (k-fail (string-append "`convention` takes a procedure, and this is a " (k-show-ty t)) a b)))))
         (x-plambda (bs body a b)
           (let ((r (k-synth body)))
             (if (k-generalizable? body (extract r 2))
@@ -4810,7 +4959,7 @@
                             (let ((r (k-synth body))) (k-te (extract r 1) (k-mask body (extract r 2) (extract r 1)))))))
                 (begin
                   (k-unbind-to saved)
-                  (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (k-forget-nats named (extract r 1) a b))) nil))))))
+                  (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (k-forget-nats named (extract r 1) a b) (cv-cellular))) nil))))))
         (else y (k-fail "a lambda" (k-start x) (k-end x))))))
   ;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
   ;; result types if it is a subroutine's, with `(read R)` in its latent
@@ -4833,7 +4982,7 @@
                             (k-start x) (k-end x)))
                    (else (k-synth-lambda-as l (extract (car c) 2) (extract (car c) 3)))))
              (t (tagcase (k-get (extract lt 1))
-                  (ty-subr (e ps res) (k-ty-new (ty-subr (k-insert (a-read g) e) ps res)))
+                  (ty-subr (e ps res cv) (k-ty-new (ty-subr (k-insert (a-read g) e) ps res cv)))
                   (else y (k-fail "a lambda" (k-start x) (k-end x)))))
              (e (k-insert (a-alloc g) (extract rr 2))))
         (k-te t (k-mask x e t)))))
@@ -4955,7 +5104,7 @@
              (callee (k-as-subr ft)))
         (if (null? callee)
             (k-fail (string-append "not a subroutine: " (k-show-ty ft)) a b)
-            (let ((params (extract (car callee) 2)))
+            (let ((params (begin (k-callable-here ft a b) (extract (car callee) 2))))
               (if (not (= (k-length params) n))
                   (k-fail (k-cat4 "expected " (int->string (k-length params)) " argument(s), got " (int->string n)) a b)
                   (let* ((e (k-app-args args params 0 done-t done-e (extract rf 2)))
@@ -4971,9 +5120,12 @@
                  (ae (if (>= t 0)
                          (if (k-subtype t p)
                              (array-ref done-e i)
-                             (k-fail (k-cat5 "argument " (int->string (+ i 1)) " is a " (k-show-ty t)
-                                             (k-cat3 ", where a " (k-show-ty p) " is expected"))
-                                     (k-start arg) (k-end arg)))
+                             (let ((c (k-conversion t p)))
+                               (if (null? c)
+                                   (k-fail (k-cat5 "argument " (int->string (+ i 1)) " is a " (k-show-ty t)
+                                                   (k-cat3 ", where a " (k-show-ty p) " is expected"))
+                                           (k-start arg) (k-end arg))
+                                   (begin (k-convert-at arg (car c)) (array-ref done-e i)))))
                          (k-check-argument arg p i))))
             (k-app-args (cdr args) (cdr params) (+ i 1) done-t done-e (k-union e ae))))))
   ;; An argument that failed to check is reported as that argument.

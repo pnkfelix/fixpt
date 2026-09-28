@@ -25,7 +25,7 @@
 //! **Prompts** delimit control on their tag's region, under a condition of
 //! their own: see `synth_prompt`.
 
-use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
+use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
 use crate::error::{FxError, R};
 use crate::parse::DScope;
 use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
@@ -110,6 +110,11 @@ pub struct Checker {
     /// The sizes given to `nat` variables of no known size, innermost last
     /// (`Checker::name_nat`).
     pub(crate) skolems: Vec<DVar>,
+    /// The program's convention: what a subroutine type that names none
+    /// has, and what a convention nothing solves defaults to
+    /// (`docs/research/native-conventions.md`). Cellular, for every machine
+    /// so far.
+    pub conv_default: Conv,
     /// What the branches being checked have learned about sizes
     /// (`crate::sizes`).
     pub(crate) size_facts: Vec<crate::sizes::SizeFact>,
@@ -143,6 +148,9 @@ pub struct NodeFacts {
     /// Each `extract`'s field, by position: lowering needs it, and only the
     /// product's type says it.
     pub field_index: HashMap<ExpId, usize>,
+    /// Procedures converted to another convention, by the checker or by
+    /// `(convention C e)`: the convention each is converted to.
+    pub converted: HashMap<ExpId, Conv>,
 }
 
 impl NodeFacts {
@@ -152,6 +160,7 @@ impl NodeFacts {
         self.standard_operator.retain(|e, _| e.0 < first);
         self.no_escape.retain(|e| e.0 < first);
         self.field_index.retain(|e, _| e.0 < first);
+        self.converted.retain(|e, _| e.0 < first);
     }
 }
 
@@ -231,6 +240,7 @@ impl Checker {
             certified_lengths: Vec::new(),
             size_facts: Vec::new(),
             skolems: Vec::new(),
+            conv_default: Conv::Cellular,
             fresh_regions: 0,
             standard_len: 0,
             facts: NodeFacts::default(),
@@ -356,6 +366,17 @@ impl Checker {
                 let eff = self.check(exp, ty)?;
                 Ok((ty, eff))
             }
+            Exp::Convention { conv, exp } => {
+                let (t, eff) = self.synth(exp)?;
+                let t = self.arena.resolve(t);
+                let Ty::Subr { conv: from, effect, params, result } = self.arena.get(t).clone() else {
+                    return Err(FxError::at(span, format!("`convention` takes a procedure, and this is a {}", self.show_ty(t))));
+                };
+                if from != conv {
+                    self.convert_at(e, conv)?;
+                }
+                Ok((self.arena.ty(Ty::Subr { conv, effect, params, result }), eff))
+            }
             Exp::PLambda { binders, body } => {
                 let (t, eff) = self.synth(body)?;
                 if !self.generalizable(body, &eff) {
@@ -381,7 +402,7 @@ impl Checker {
                     };
                     let ok = match (k, &d) {
                         (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type | Kind::Data, D::Type(_)) => true,
-                        (Kind::Size, D::Size(_)) => true,
+                        (Kind::Size, D::Size(_)) | (Kind::Conv, D::Conv(_)) => true,
                         (Kind::Place, D::Region(r)) => self.arena.is_place(*r),
                         _ => false,
                     };
@@ -635,9 +656,9 @@ impl Checker {
             }
             None => self.synth_lambda(lambda, None)?,
         };
-        let Ty::Subr { mut effect, params, result } = self.arena.get(lt).clone() else { unreachable!("a lambda's type") };
+        let Ty::Subr { conv, mut effect, params, result } = self.arena.get(lt).clone() else { unreachable!("a lambda's type") };
         effect.0.insert(Atom::Read(g));
-        let t = self.arena.ty(Ty::Subr { effect, params, result });
+        let t = self.arena.ty(Ty::Subr { conv, effect, params, result });
         let eff = reff.union(&Effect::atom(Atom::Alloc(g)));
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
@@ -842,7 +863,7 @@ impl Checker {
                     self.free_into(x, bound, out);
                 }
             }
-            Exp::The { exp, .. } => self.free_into(exp, bound, out),
+            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.free_into(exp, bound, out),
             Exp::Bloblet { args, .. } => {
                 for a in args {
                     self.free_into(a, bound, out);
@@ -891,7 +912,7 @@ impl Checker {
         match self.arena.get(t).clone() {
             Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) => {}
             Ty::Link(Some(_)) => unreachable!("resolved"),
-            Ty::Subr { effect, params, result } => {
+            Ty::Subr { effect, params, result, .. } => {
                 out.extend(effect.0.iter().filter_map(|a| a.region()));
                 for p in params {
                     self.regions_walk(p, seen, out);
@@ -950,6 +971,7 @@ impl Checker {
                             out.insert(r);
                         }
                         D::Effect(e) => out.extend(e.0.iter().filter_map(|a| a.region())),
+                        D::Conv(_) => {}
                         D::Size(_) => {}
                     }
                 }
@@ -1188,7 +1210,7 @@ impl Checker {
         };
         match self.arena.get(t).clone() {
             Ty::Var(x) if x == v => found.push(at),
-            Ty::Subr { effect, params, result } => {
+            Ty::Subr { effect, params, result, .. } => {
                 eff(&effect, at, found);
                 for p in params {
                     self.polarity(p, v, flip(at), seen, found);
@@ -1241,7 +1263,7 @@ impl Checker {
                         D::Type(x) => self.polarity(*x, v, p, seen, found),
                         D::Region(r) => reg(*r, found),
                         D::Effect(e) => eff(e, p, found),
-                        D::Size(_) => {}
+                        D::Size(_) | D::Conv(_) => {}
                     }
                 }
             }
@@ -1305,7 +1327,7 @@ impl Checker {
             Ty::Poly { body, .. } => self.knot_in(body, kept, seen),
             // A procedure: kept where it is, it may not read there unsaid;
             // what it takes and gives is kept nowhere yet.
-            Ty::Subr { effect, params, result } => reads_kept(&effect)
+            Ty::Subr { effect, params, result, .. } => reads_kept(&effect)
                 .map(|r| (r, t))
                 .or_else(|| params.iter().chain([&result]).find_map(|x| self.knot_in(*x, &[], seen))),
             Ty::Composable { arg, answer, effect, .. } => reads_kept(&effect)
@@ -1353,7 +1375,7 @@ impl Checker {
                 continue;
             }
             let (effects, kids): (Vec<&Effect>, Vec<TyId>) = match self.arena.get(t) {
-                Ty::Subr { effect, params, result } => (vec![effect], params.iter().copied().chain([*result]).collect()),
+                Ty::Subr { effect, params, result, .. } => (vec![effect], params.iter().copied().chain([*result]).collect()),
                 Ty::PromptTag { answer, payload, effect, .. } => (vec![effect], vec![*answer, *payload]),
                 Ty::Composable { arg, answer, effect, .. } => (vec![effect], vec![*arg, *answer]),
                 Ty::Poly { body, .. } => (vec![], vec![*body]),
@@ -1369,7 +1391,7 @@ impl Checker {
                             D::Type(x) => kids.push(*x),
                             D::Region(x) => given |= *x == r,
                             D::Effect(e) => given |= e.0.contains(&Atom::Write(r)),
-                            D::Size(_) => {}
+                            D::Size(_) | D::Conv(_) => {}
                         }
                     }
                     (vec![], kids)
@@ -1478,10 +1500,17 @@ impl Checker {
             (Ty::Nat(m), Ty::Nat(n)) => self.size_le(&m, &n),
             (Ty::Var(x), Ty::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
             (
-                Ty::Subr { effect: xa, params: pa, result: qa },
-                Ty::Subr { effect: xb, params: pb, result: qb },
+                Ty::Subr { conv: ca, effect: xa, params: pa, result: qa },
+                Ty::Subr { conv: cb, effect: xb, params: pb, result: qb },
             ) => {
-                pa.len() == pb.len()
+                // Conventions: the same, or any of FX-26's own as `fx`;
+                // variables by the binders they stand for.
+                let conv_ok = match (ca, cb) {
+                    (Conv::Var(x), Conv::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
+                    _ => ca.fits(cb),
+                };
+                conv_ok
+                    && pa.len() == pb.len()
                     && ea(&xa).within(&eb(&xb))
                     && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
                     && self.sub(qa, qb, env, st)
@@ -1578,6 +1607,8 @@ impl Checker {
                     },
                     (D::Region(r), D::Region(s)) => ra(*r) == rb(*s),
                     (D::Size(m), D::Size(n)) => self.size_eq(m, n),
+                    (D::Conv(Conv::Var(x)), D::Conv(Conv::Var(y))) => env.var(&env.a, *x) == env.var(&env.b, *y),
+                    (D::Conv(c), D::Conv(d)) => c == d,
                     (D::Effect(d), D::Effect(e)) => match v {
                         Variance::Co => ea(d).within(&eb(e)),
                         Variance::Contra => eb(e).within(&ea(d)),
@@ -1643,11 +1674,18 @@ impl Checker {
         memo.insert(t, slot);
         let region = |r: Region| subst_region(r, map);
         let new = match ty {
-            Ty::Subr { effect, params, result } => {
+            Ty::Subr { conv, effect, params, result } => {
+                let conv = match conv {
+                    Conv::Var(v) => match map.get(&v) {
+                        Some(D::Conv(c)) => *c,
+                        _ => conv,
+                    },
+                    c => c,
+                };
                 let effect = subst_effect(&effect, map);
                 let params = params.iter().map(|p| self.subst_memo(*p, map, memo)).collect();
                 let result = self.subst_memo(result, map, memo);
-                Ty::Subr { effect, params, result }
+                Ty::Subr { conv, effect, params, result }
             }
             Ty::Poly { binders, body } => Ty::Poly { binders, body: self.subst_memo(body, map, memo) },
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),
@@ -1688,6 +1726,13 @@ impl Checker {
                         D::Region(r) => D::Region(region(*r)),
                         D::Effect(e) => D::Effect(subst_effect(e, map)),
                         D::Size(z) => D::Size(crate::sizes::subst_size(z, map)),
+                        D::Conv(c) => D::Conv(match c {
+                            Conv::Var(v) => match map.get(v) {
+                                Some(D::Conv(by)) => *by,
+                                _ => *c,
+                            },
+                            c => *c,
+                        }),
                     })
                     .collect(),
             },
