@@ -39,7 +39,10 @@
   ;; A `letrec` sibling not made yet, to be in this frame slot.
   (rl-pending int)
   ;; A constant, bound to the name (`r-known`): no place at all.
-  (rl-const rconst))
+  (rl-const rconst)
+  ;; A `letrec`-bound procedure only called in tail position, a join point
+  ;; (`r-join-ok?`): where its parameters are, and its label.
+  (rl-join (listof rloc @k) int))
 (define-type renv (listof (pairof symbol rloc @k) @k))
 
 ;; An operand of a call-out: an expression, a constant, a procedure of no
@@ -487,6 +490,87 @@
                         (if (null? l) nil (tagcase (car l) (rl-global (c) (the (listof wglobal @k) (cons c nil))) (else y nil))))
                       nil))
                 (else y nil)))))))
+(define r-nth-binding
+  (subr (read @globals) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) int) (productof (1 symbol) (2 syn) (3 exp)))
+  (lambda (bs i) (if (= i 0) (car bs) (r-nth-binding (cdr bs) (- i 1)))))
+;; Whether no binding of `bs` but the `i`th mentions `name`; `k` counts.
+(define r-unmentioned? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) symbol int int) bool)
+  (lambda (bs name i k)
+    (or (null? bs)
+        (and (or (= k i) (not (c-mentions? (extract (car bs) 3) name))) (r-unmentioned? (cdr bs) name i (+ k 1))))))
+;; Whether `letrec` binding `i` of `bs` is a join point, as the Rust
+;; compiler's `r_join_ok` says: a lambda whose body calls it only in tail
+;; position, as the `letrec`'s body does, and that no sibling mentions; so
+;; no closure of it need be made, and each call is a jump.
+(define r-join-ok? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp int) bool)
+  (lambda (bs body i)
+    (let* ((b (r-nth-binding bs i)) (name (extract b 1)) (lam (c-lambda-of (extract b 3))))
+      (and (not (null? lam))
+           (tagcase (car lam)
+             (e-lambda (ps lbody la lb)
+               (let ((n (c-count-params ps)))
+                 (and (not (c-member? (c-bind-params ps nil) name))
+                      (and (c-loops-only lbody name n #t)
+                           (and (c-loops-only body name n #t) (r-unmentioned? bs name i 0))))))
+             (else y #f))))))
+;; The flags from `rest`, the `i`th binding of `bs` on.
+(define r-join-flags-from
+  (subr (maxeff (read @globals) (read @k) (alloc @k) spin)
+        ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp bool int)
+        (listof bool @k))
+  (lambda (bs rest body tail i)
+    (if (null? rest) nil (cons (and tail (r-join-ok? bs body i)) (r-join-flags-from bs (cdr rest) body tail (+ i 1))))))
+;; Each binding of `bs`: whether it is a join point (in tail position).
+(define r-join-flags (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp bool) (listof bool @k))
+  (lambda (bs body tail) (r-join-flags-from bs bs body tail 0)))
+(define r-all? (subr (maxeff (read @globals) (read @k) spin) ((listof bool @k)) bool)
+  (lambda (fs) (or (null? fs) (and (car fs) (r-all? (cdr fs))))))
+;; `te` with each of `bs`' names a loop, as join points' are.
+(define r-loop-names (subr (maxeff (read @globals) (alloc @k)) (cenv (listof (productof (1 symbol) (2 syn) (3 exp)) finite)) cenv)
+  (lambda (te bs) (if (null? bs) te (r-loop-names (the cenv (cons (cons (extract (car bs) 1) (at-loop 0)) te)) (cdr bs)))))
+;; The join point `f` names, in a list, if it names one.
+(define r-join-of (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) (listof rloc @k))
+  (lambda (env f)
+    (tagcase f
+      (e-var (m a b)
+        (let ((l (r-where env m)))
+          (if (null? l) nil (tagcase (car l) (rl-join (ps label) l) (else y nil)))))
+      (else y nil))))
+(define c-length-locs (subr (maxeff (read @globals) (read @k) spin) ((listof rloc @k)) int)
+  (lambda (xs) (if (null? xs) 0 (+ 1 (c-length-locs (cdr xs))))))
+;; Each value made for a jump into its parameter's place.
+(define r-jump-moves (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen (listof rloc @k) (listof rloc @k)) unit)
+  (lambda (g made params)
+    (if (or (null? made) (null? params))
+        #u
+        (begin
+          (tagcase (car made)
+            (rl-reg (a)
+              (tagcase (car params)
+                (rl-reg (b) (r-opnn g rop-movereg a b))
+                (rl-slot (b) (begin (r-opn g rop-reg a) (r-opn g rop-setstk b)))
+                (else y (r-decline))))
+            (rl-slot (a)
+              (tagcase (car params)
+                (rl-reg (b) (r-opnn g rop-load b a))
+                (rl-slot (b) (begin (r-opn g rop-stack a) (r-opn g rop-setstk b)))
+                (else y (r-decline))))
+            (else y (r-decline)))
+          (r-jump-moves g (cdr made) (cdr params))))))
+;; A join point's parameters' places: registers in a leaf, else frame slots.
+(define r-param-places (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen (listof (productof (1 symbol) (2 syns-a)) finite) bool) (listof rloc @k))
+  (lambda (g ps regs)
+    (if (null? ps)
+        nil
+        (let ((l (if regs (rl-reg (r-reg g)) (rl-slot (r-slot g)))))
+          (cons l (r-param-places g (cdr ps) regs))))))
+;; `env` with each parameter at its place.
+(define r-bind-places (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv (listof (productof (1 symbol) (2 syns-a)) finite) (listof rloc @k)) renv)
+  (lambda (env ps ls)
+    (if (or (null? ps) (null? ls)) env (r-bind-places (the renv (cons (cons (extract (car ps) 1) (car ls)) env)) (cdr ps) (cdr ls)))))
+;; A frame slot for each binding that is no join point; -1 for one that is.
+(define r-letrec-slots-j (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen (listof bool @k)) (listof int @k))
+  (lambda (g joins) (if (null? joins) nil (let ((s (if (car joins) -1 (r-slot g)))) (cons s (r-letrec-slots-j g (cdr joins)))))))
 ;; The one of `c-inlines` that `n`, taking `k` arguments, names, if any.
 (define r-inline-named (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof c-inline finite) symbol int) (listof c-inline finite))
   (lambda (xs n k)
@@ -516,6 +600,12 @@
     (lambda (x e this tail)
       (tagcase x
         (e-var (n a b) #f) (e-int (n a b) #f) (e-bool (v a b) #f) (e-str (v a b) #f) (e-char (v a b) #f)
+        ;; Join points only: no closure made, and their calls are jumps.
+        (e-letrec (bs body a b)
+          (if (and tail (r-all? (r-join-flags bs body #t)))
+              (let ((inner (r-loop-names e bs)))
+                (or (r-collects body inner this tail) (r-collects-joins bs inner this)))
+              #t))
         (e-sym (v a b) #f) (e-unit (a b) #f)
         (e-if (t th el a b) (or (r-collects t e this #f) (or (r-collects th e this tail) (r-collects el e this tail))))
         (e-let (bs body a b) (or (r-collects-let bs e this) (r-collects body e this tail)))
@@ -535,7 +625,11 @@
         (e-app (f args a b)
           (let* ((args-collect (r-collects-all args e this))
                  ;; A loop: a call of the procedure itself, in tail position.
-                 (loop-call (and tail (tagcase f (e-var (n a2 b2) (r-this-name? this n (c-count-exps args))) (else y #f))))
+                 (loop-call (and tail (tagcase f
+                                        (e-var (n a2 b2)
+                                          (or (r-this-name? this n (c-count-exps args))
+                                              (let ((l (c-find e n))) (and (not (null? l)) (c-loop? (car l))))))
+                                        (else y #f))))
                  (inline (tagcase (r-operator f)
                            (e-var (n a2 b2)
                              (if (null? (c-where e n))
@@ -560,6 +654,20 @@
       (and (not (null? arms)) (or (r-collects (extract (car arms) 4) e this tail) (r-collects-arms (cdr arms) e this tail)))))
   (r-collects-else (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 exp)) finite) cenv (listof c-this @k) bool) bool)
     (lambda (els e this tail) (and (not (null? els)) (r-collects (extract (car els) 2) e this tail))))
+  ;; Whether any of `bs`' lambdas' bodies, their parameters bound in `e`,
+  ;; calls or calls out.
+  (r-collects-joins (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) cenv (listof c-this @k)) bool)
+    (lambda (bs e this)
+      (and (not (null? bs))
+           (or (let ((lam (c-lambda-of (extract (car bs) 3))))
+                 (if (null? lam)
+                     #t
+                     (tagcase (car lam)
+                       (e-lambda (ps lbody la lb) (r-collects lbody (r-local-params e ps) this #t))
+                       (e-rlambda (r l la lb)
+                         (tagcase l (e-lambda (ps lbody x y) (r-collects lbody (r-local-params e ps) this #t)) (else z #t)))
+                       (else y #t))))
+               (r-collects-joins (cdr bs) e this)))))
   ;; For values bound in turn, the first made by `inits` in `te`, then `m`
   ;; more made without a call, and then seen by a body that calls or calls
   ;; out, or not (`body-collects`): whether each is kept in a register, as
@@ -683,7 +791,9 @@
             (r-call-out g rop-cellular routine-prompt (the rargs (cons (a-e t) (cons (a-e h) (cons (a-thunk body) nil)))) env te)
             (r-done g tail)))
         (e-tagcase (s arms els a b) (r-tagcase g s arms els env te tail))
-        (e-letrec (bs body a b) (if (extract g leaf) (r-decline) (r-letrec g bs body env te tail)))
+        (e-letrec (bs body a b)
+          ;; A leaf makes no closure; join points it may have.
+          (if (and (extract g leaf) (not (r-all? (r-join-flags bs body tail)))) (r-decline) (r-letrec g bs body env te tail)))
         (e-app (f args a b) (r-app g f args env te tail)))))))
   (r-begin (subr (maxeff compiles spin) (rgen (listof exp finite) renv cenv bool) unit)
     (lambda (g es env te tail)
@@ -730,7 +840,8 @@
   (r-app (subr (maxeff compiles spin) (rgen exp (listof exp finite) renv cenv bool) unit)
     (lambda (g f args env te tail)
       (let ((n (c-count-exps args)))
-        (cond ((and tail (r-self-known? g f n te)) (r-loop g args env te))
+        (cond ((not (null? (r-join-of env f))) (r-jump g (car (r-join-of env f)) args env te tail))
+              ((and tail (r-self-known? g f n te)) (r-loop g args env te))
               ;; In a procedure specialized at a lambda: the lambda called,
               ;; or the procedure calling itself.
               ((and (r-spec-param? env f) (= n (extract (car (get c-spec-now)) 7))) (r-spec-lambda g args env te tail))
@@ -1298,21 +1409,95 @@
   ;; not made yet; then each placeholder patched.
   (r-letrec (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) exp renv cenv bool) unit)
     (lambda (g bs body env te tail)
-      (let* ((slots (get (extract g nslot)))
-             (at (r-letrec-slots g bs))
-             (patches (r-letrec-make g bs bs at 0 env te)))
+      (let* ((slots (get (extract g nslot))) (regs (get (extract g nreg)))
+             (joins (r-join-flags bs body tail))
+             ;; A slot for each closure (a join point is none).
+             (at (r-letrec-slots-j g joins))
+             (patches (r-letrec-make g bs bs at 0 env te joins))
+             ;; Each join point's parameters' places, and its label.
+             (places (begin (r-letrec-patch g patches at) (r-join-places g bs joins (r-letrec-te-j bs joins te))))
+             (env2 (r-letrec-env-j bs at places env))
+             (te2 (r-letrec-te-j bs joins te)))
         (begin
-          (r-letrec-patch g patches at)
-          (r-exp g body (r-letrec-env bs at env) (r-letrec-te bs te) tail)
-          (set (extract g nslot) slots)))))
-  (r-letrec-slots (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof int @k))
-    (lambda (g bs) (if (null? bs) nil (let ((s (r-slot g))) (cons s (r-letrec-slots g (cdr bs)))))))
-  (r-letrec-make
-    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int renv cenv)
-          (listof patches @k))
-    (lambda (g all bs at i env te)
+          (r-exp g body env2 te2 tail)
+          (r-join-bodies g bs places env2 te2 tail)
+          (set (extract g nslot) slots)
+          (set (extract g nreg) regs)))))
+  ;; A join point's call: each argument made and kept (a register in a
+  ;; leaf, else a frame slot), then each into its parameter's place, and a
+  ;; jump.
+  (r-jump (subr (maxeff compiles spin) (rgen rloc (listof exp finite) renv cenv bool) unit)
+    (lambda (g j args env te tail)
+      (tagcase j
+        (rl-join (params label)
+          (if (or (not tail) (not (= (c-count-exps args) (c-length-locs params))))
+              (r-decline)
+              (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
+                     ;; Each kept in a register where no later argument calls.
+                     (made (r-jump-args g args env te (r-in-regs g args 0 te #f))))
+                (begin
+                  (r-jump-moves g made params)
+                  (r-emit g (r-branch #f label))
+                  (set (extract g nreg) regs)
+                  (set (extract g nslot) slots)))))
+        (else y (r-decline)))))
+  (r-jump-args (subr (maxeff compiles spin) (rgen (listof exp finite) renv cenv (listof bool @k)) (listof rloc @k))
+    (lambda (g args env te flags)
+      (if (null? args)
+          nil
+          (let* ((l (begin (r-exp g (car args) env te #f) (r-keep g (car flags))))
+                 (rest (r-jump-args g (cdr args) env te (cdr flags))))
+            (cons l rest)))))
+  ;; Each join point's place: its parameters' places and its label, in a
+  ;; list; none for a binding that is not one.
+  (r-join-places
+    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof bool @k) cenv)
+          (listof (listof (pairof (listof rloc @k) int @k) @k) @k))
+    (lambda (g bs joins named)
       (if (null? bs)
           nil
+          (let* ((here
+                  (if (car joins)
+                      (tagcase (car (c-lambda-of (extract (car bs) 3)))
+                        (e-lambda (ps lbody la lb)
+                          ;; In registers where its body makes no call (or in a
+                          ;; leaf), so many as leave half of them.
+                          (let* ((in-regs (or (extract g leaf)
+                                              (and (not (r-collects lbody (r-local-params named ps) (extract g this) #t))
+                                                   (<= (+ (get (extract g nreg)) (c-count-params ps)) (quotient register-regs 2)))))
+                                 (locs (r-param-places g ps in-regs)) (label (r-new-label g)))
+                            (the (listof (pairof (listof rloc @k) int @k) @k) (cons (the (pairof (listof rloc @k) int @k) (cons locs label)) nil))))
+                        (else y (the (listof (pairof (listof rloc @k) int @k) @k) nil)))
+                      (the (listof (pairof (listof rloc @k) int @k) @k) nil)))
+                 (rest (r-join-places g (cdr bs) (cdr joins) named)))
+            (cons here rest)))))
+  ;; Each join point's body, after the `letrec`'s, which ends every path
+  ;; itself: where its calls go.
+  (r-join-bodies
+    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (listof (pairof (listof rloc @k) int @k) @k) @k) renv cenv bool) unit)
+    (lambda (g bs places env te tail)
+      (if (null? bs)
+          #u
+          (begin
+            (if (null? (car places))
+                #u
+                (tagcase (car (c-lambda-of (extract (car bs) 3)))
+                  (e-lambda (ps lbody la lb)
+                    (let ((p (car (car places))))
+                      (begin
+                        (r-emit g (r-label (cdr p)))
+                        (r-exp g lbody (r-bind-places env ps (car p)) (r-local-params te ps) tail))))
+                  (else y (r-decline))))
+            (r-join-bodies g (cdr bs) (cdr places) env te tail)))))
+  (r-letrec-make
+    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int renv cenv (listof bool @k))
+          (listof patches @k))
+    (lambda (g all bs at i env te joins)
+      (cond
+        ((null? bs) nil)
+        ;; A join point is no closure.
+        ((car joins) (cons (the patches nil) (r-letrec-make g all (cdr bs) at (+ i 1) env te (cdr joins))))
+        (else
           (let* ((lam (c-lambda-of (extract (car bs) 3)))
                  (name (extract (car bs) 1))
                  (p (tagcase (car lam)
@@ -1325,7 +1510,7 @@
                       (else y (begin (r-decline) (the patches nil))))))
             (begin
               (r-opn g rop-setstk (r-nth-int at i))
-              (cons p (r-letrec-make g all (cdr bs) at (+ i 1) env te)))))))
+              (cons p (r-letrec-make g all (cdr bs) at (+ i 1) env te (cdr joins)))))))))
   (r-letrec-one
     (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) int symbol
                    (listof (productof (1 symbol) (2 syns-a)) finite) exp (listof exp @k) renv cenv)
@@ -1368,7 +1553,27 @@
     (lambda (bs at env)
       (if (null? bs) env (r-letrec-env (cdr bs) (cdr at) (the renv (cons (cons (extract (car bs) 1) (rl-slot (car at))) env))))))
   (r-letrec-te (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) cenv) cenv)
-    (lambda (bs te) (if (null? bs) te (r-letrec-te (cdr bs) (r-local te (extract (car bs) 1)))))))
+    (lambda (bs te) (if (null? bs) te (r-letrec-te (cdr bs) (r-local te (extract (car bs) 1))))))
+  ;; The `letrec`'s names where its body sees them: a join point as itself,
+  ;; any other in its slot.
+  (r-letrec-env-j
+    (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof int @k) (listof (listof (pairof (listof rloc @k) int @k) @k) @k) renv) renv)
+    (lambda (bs at places env)
+      (if (null? bs)
+          env
+          (r-letrec-env-j (cdr bs) (cdr at) (cdr places)
+                          (the renv (cons (cons (extract (car bs) 1)
+                                                (if (null? (car places))
+                                                    (rl-slot (car at))
+                                                    (rl-join (car (car (car places))) (cdr (car (car places))))))
+                                          env))))))
+  ;; The same to the cellular compiler: a join point a loop.
+  (r-letrec-te-j (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof bool @k) cenv) cenv)
+    (lambda (bs joins te)
+      (if (null? bs)
+          te
+          (r-letrec-te-j (cdr bs) (cdr joins)
+                         (if (car joins) (the cenv (cons (cons (extract (car bs) 1) (at-loop 0)) te)) (r-local te (extract (car bs) 1))))))))
 
 
 ;;; ------------------------------------------------------------ the entry

@@ -39,6 +39,9 @@ enum RLoc {
     Pending(usize),
     /// A constant, bound to the name (`r_const`): no place at all.
     Const(Value),
+    /// A `letrec`-bound procedure only called in tail position, a join
+    /// point (`r_join_ok`): its parameters' slots and label, `Gen::joins`'s.
+    Join(usize),
 }
 
 /// An operand of a call-out: an expression, a constant, a procedure of
@@ -97,6 +100,8 @@ struct Gen {
     /// In a top-level definition's procedure: its name, its word, its
     /// arity, and the label at the body's start (`r_self_guarded`).
     own: Option<(Sym, Value, usize, usize)>,
+    /// The join points: where each one's parameters are, and its label.
+    joins: Vec<(Vec<RLoc>, usize)>,
 }
 
 type O<T> = Option<T>;
@@ -194,7 +199,7 @@ impl Compiler<'_> {
             return self.decline("more than REGS parameters");
         }
         let leaf = !self.r_collects(body, inner, this, true);
-        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None };
+        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new() };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
         for (n, l) in inner {
@@ -340,6 +345,20 @@ impl Compiler<'_> {
     /// do not; declined forms are said to, which does not matter.
     fn r_collects(&mut self, x: ExpId, e: &Env, this: Option<This>, tail: bool) -> bool {
         match self.c.arena.exp_at(x).clone() {
+            // Join points only: no closure made, and their calls are jumps.
+            Exp::Letrec { bindings, body } if tail && (0..bindings.len()).all(|i| self.r_join_ok(&bindings, body, i)) => {
+                let mut inner = e.clone();
+                inner.extend(bindings.iter().map(|(n, _, _)| (*n, Loc::Loop)));
+                self.r_collects(body, &inner, this, tail)
+                    || bindings.iter().any(|(_, _, init)| match self.lambda_of(*init) {
+                        Some((ps, lbody, _)) => {
+                            let mut own = inner.clone();
+                            own.extend(ps.iter().map(|p| (*p, Loc::Slot(usize::MAX))));
+                            self.r_collects(lbody, &own, this, true)
+                        }
+                        None => true,
+                    })
+            }
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => false,
             Exp::If { test, then, els } => {
                 self.r_collects(test, e, this, false) || self.r_collects(then, e, this, tail) || self.r_collects(els, e, this, tail)
@@ -367,8 +386,9 @@ impl Compiler<'_> {
                 let args_collect = args.iter().any(|y| self.r_collects(*y, e, this, false));
                 // A loop: a call of the procedure itself, in tail position.
                 let loop_call = tail
-                    && matches!((this, self.c.arena.exp_at(fun)), (Some(t), Exp::Var(n))
-                    if *n == t.name && args.len() == t.params);
+                    && (matches!((this, self.c.arena.exp_at(fun)), (Some(t), Exp::Var(n))
+                    if *n == t.name && args.len() == t.params)
+                        || matches!(self.c.arena.exp_at(fun), Exp::Var(n) if find(e, *n) == Some(Loc::Loop)));
                 let inline = match self.c.arena.exp_at(self.r_operator(fun)) {
                     Exp::Var(n) if self.where_is(e, *n).is_none() => {
                         let name = self.name(*n).to_string();
@@ -408,7 +428,7 @@ impl Compiler<'_> {
                     Some(RLoc::Slot(s)) => g.op("stack", &[Gen::n(s)]),
                     Some(RLoc::Free(i)) => g.op("lexical", &[Gen::n(i)]),
                     Some(RLoc::Global(c)) => g.op("global", &[c]),
-                    Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_)) => return None,
+                    Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_) | RLoc::Join(_)) => return None,
                     None if self.name(n) == "nil" => g.op("const", &[Value::NULL]),
                     None => return self.decline("a standard operation as a value"),
                 }
@@ -588,16 +608,24 @@ impl Compiler<'_> {
             }
             Exp::TagCase { scrutinee, arms, els } => self.r_tagcase(g, scrutinee, &arms, els, env, te, tail)?,
             Exp::Letrec { bindings, body } => {
-                if g.leaf {
+                let (depth, tdepth, slots, regs) = (env.len(), te.len(), g.next_slot, g.next_reg);
+                let n = bindings.len();
+                let joins: Vec<bool> = (0..n).map(|i| tail && self.r_join_ok(&bindings, body, i)).collect();
+                // A leaf makes no closure; join points it may have.
+                if g.leaf && !joins.iter().all(|j| *j) {
                     return None;
                 }
-                let (depth, tdepth, slots) = (env.len(), te.len(), g.next_slot);
-                let n = bindings.len();
-                let at: Vec<usize> = (0..n).map(|_| g.slot()).collect();
+                // A slot for each closure (a join point is none: its slot is
+                // never used).
+                let at: Vec<usize> = (0..n).map(|i| if joins[i] { usize::MAX } else { g.slot() }).collect();
                 // Each closure made into its slot, a placeholder for a
                 // sibling not made yet; then each placeholder patched.
                 let mut patches = Vec::new();
                 for (i, (name, _, init)) in bindings.iter().enumerate() {
+                    if joins[i] {
+                        patches.push(Vec::new());
+                        continue;
+                    }
                     let (ps, lbody, region) = self.lambda_of(*init)?;
                     let (mut own_env, mut own_te) = (env.clone(), te.clone());
                     for (k, (sib, _, _)) in bindings.iter().enumerate() {
@@ -616,14 +644,53 @@ impl Compiler<'_> {
                         g.op("setfield", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64), Gen::n(1)]);
                     }
                 }
+                // Each join point's parameters' places, and its label: in
+                // registers where its body makes no call (or in a leaf), so
+                // many as leave half of them; else in frame slots.
+                let mut named = te.clone();
+                named.extend(bindings.iter().enumerate().map(|(k, (n, _, _))| (*n, if joins[k] { Loc::Loop } else { Loc::Slot(usize::MAX) })));
+                let mut js = Vec::new();
+                for (i, (_, _, init)) in bindings.iter().enumerate().filter(|(i, _)| joins[*i]) {
+                    let (ps, lbody, _) = self.lambda_of(*init)?;
+                    let in_regs = g.leaf || {
+                        let mut own = named.clone();
+                        own.extend(ps.iter().map(|p| (*p, Loc::Slot(usize::MAX))));
+                        !self.r_collects(lbody, &own, g.this.map(|(t, _)| t), true) && g.next_reg + ps.len() <= REGS / 2
+                    };
+                    let mut pslots = Vec::new();
+                    for _ in &ps {
+                        pslots.push(if in_regs { RLoc::Reg(g.reg()?) } else { RLoc::Slot(g.slot()) });
+                    }
+                    let label = g.label();
+                    g.joins.push((pslots.clone(), label));
+                    js.push((i, ps, lbody, pslots, label, g.joins.len() - 1));
+                }
                 for (k, (name, _, _)) in bindings.iter().enumerate() {
-                    env.push((*name, RLoc::Slot(at[k])));
-                    te.push((*name, Loc::Slot(usize::MAX)));
+                    let (l, t) = match js.iter().find(|j| j.0 == k) {
+                        Some(j) => (RLoc::Join(j.5), Loc::Loop),
+                        None => (RLoc::Slot(at[k]), Loc::Slot(usize::MAX)),
+                    };
+                    env.push((*name, l));
+                    te.push((*name, t));
                 }
                 self.r_exp(g, body, env, te, tail)?;
+                // Each join point's body, after the body, which ends every
+                // path itself (it is in tail position): where its calls go.
+                for (_, ps, lbody, pslots, label, _) in js {
+                    g.items.push(RItem::Label(label));
+                    let (d, t) = (env.len(), te.len());
+                    for (p, l) in ps.iter().zip(&pslots) {
+                        env.push((*p, *l));
+                        te.push((*p, Loc::Slot(usize::MAX)));
+                    }
+                    self.r_exp(g, lbody, env, te, tail)?;
+                    env.truncate(d);
+                    te.truncate(t);
+                }
                 env.truncate(depth);
                 te.truncate(tdepth);
                 g.next_slot = slots;
+                g.next_reg = regs;
             }
             Exp::App { fun, args } => self.r_app(g, fun, &args, env, te, tail)?,
         }
@@ -631,6 +698,46 @@ impl Compiler<'_> {
     }
 
     fn r_app(&mut self, g: &mut Gen, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        // A join point's call: each argument made and kept (a register in a
+        // leaf, else a frame slot), then each into its parameter's place,
+        // and a jump. (Before the procedure's own loop: a join point may
+        // have its name.)
+        if let Exp::Var(n) = *self.c.arena.exp_at(f)
+            && let Some(RLoc::Join(j)) = self.r_where(env, n)
+        {
+            let (params, label) = g.joins[j].clone();
+            if !tail || args.len() != params.len() {
+                return self.decline("a join point called not in tail position");
+            }
+            let (regs, slots) = (g.next_reg, g.next_slot);
+            // Each kept in a register where no later argument calls.
+            let inits: Vec<Option<ExpId>> = args.iter().map(|a| Some(*a)).collect();
+            let in_regs = self.r_in_regs(g, &inits, te, false);
+            let mut made = Vec::new();
+            for (a, reg) in args.iter().zip(in_regs) {
+                self.r_exp(g, *a, env, te, false)?;
+                made.push(Self::r_keep(g, reg)?);
+            }
+            for (m, p) in made.iter().zip(&params) {
+                match (m, p) {
+                    (RLoc::Reg(a), RLoc::Reg(b)) => g.op("movereg", &[Gen::n(*a), Gen::n(*b)]),
+                    (RLoc::Slot(a), RLoc::Reg(b)) => g.op("load", &[Gen::n(*b), Gen::n(*a)]),
+                    (RLoc::Reg(a), RLoc::Slot(b)) => {
+                        g.op("reg", &[Gen::n(*a)]);
+                        g.op("setstk", &[Gen::n(*b)]);
+                    }
+                    (RLoc::Slot(a), RLoc::Slot(b)) => {
+                        g.op("stack", &[Gen::n(*a)]);
+                        g.op("setstk", &[Gen::n(*b)]);
+                    }
+                    _ => return None,
+                }
+            }
+            g.items.push(RItem::Branch(false, label));
+            g.next_reg = regs;
+            g.next_slot = slots;
+            return Some(());
+        }
         if self.r_self_call(g, f, args.len(), te, tail) {
             return self.r_loop(g, args, env, te);
         }
@@ -814,6 +921,19 @@ impl Compiler<'_> {
         g.next_reg = regs;
         g.next_slot = slots;
         Some(())
+    }
+
+    /// Whether `letrec` binding `i` is a join point: a lambda whose body
+    /// calls it only in tail position, as the `letrec`'s body does, and that
+    /// no sibling mentions; so no closure of it need be made, and each call
+    /// is a jump (the `letrec` being in tail position itself).
+    fn r_join_ok(&self, bindings: &[(Sym, crate::ast::TyId, ExpId)], body: ExpId, i: usize) -> bool {
+        let (name, _, init) = bindings[i];
+        let Some((ps, lbody, None)) = self.lambda_of(init) else { return false };
+        !ps.contains(&name)
+            && self.loops_only(lbody, name, ps.len(), true)
+            && self.loops_only(body, name, ps.len(), true)
+            && bindings.iter().enumerate().all(|(k, (_, _, j))| k == i || !self.mentions(*j, name))
     }
 
     /// Which of `specials`, its global's cell, and the lambda argument, when

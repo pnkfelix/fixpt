@@ -270,3 +270,17 @@ fn constants_are_folded_through_inlined_calls() {
     let out = shown(&text);
     assert!(out.contains("const 4"), "{out}");
 }
+
+/// A `letrec`-bound procedure entered and calling itself only in tail
+/// position is a join point: `count`'s `loop` is no closure and no call,
+/// but code in `count` itself, its parameters in registers (`count` a
+/// leaf), each call a jump.
+#[test]
+fn a_loop_entered_in_tail_position_is_a_join_point() {
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/bench/loop.fx")).unwrap();
+    let out = shown(&text);
+    let count = out.split("its register code").nth(1).expect("register code");
+    let count = count.split("\nword ").next().unwrap_or(count);
+    assert!(!count.contains("lambda") && !count.contains("invoke") && !count.contains("save"), "{count}");
+    assert!(count.contains("movereg") && count.contains("branch"), "{count}");
+}

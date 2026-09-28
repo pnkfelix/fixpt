@@ -1425,3 +1425,45 @@ native closure. Both register compilers make it (`RItem::Guard`,
 `r-guard-to`); the heap checks its target as a branch's; the
 register-code machine and the disassembler know it. Clarity, not speed:
 the times are unchanged.
+
+## Join points (2026-09-28)
+
+A `letrec`-bound procedure that the `letrec`'s body calls only in tail
+position, that calls itself only so, and that no sibling mentions, is a
+join point (the `letrec` itself in tail position): in register code no
+closure is made of it and no call is made to it; its code follows the
+body's, in the procedure around it, where its free names are that
+procedure's own variables, and each call is its arguments into its
+parameters' places and a jump. The places are registers in a leaf, or
+where its body makes no call (so many as leave half of them), else frame
+slots. A procedure whose `letrec`s are join points only can be a leaf.
+Both compilers alike (`r_join_ok`, `r-join-ok?`).
+
+Measured first: the front end has 27 such `letrec`s of 54, the test
+programs 14 of 44; the benchmarks enter theirs once each, so they gain
+nothing measurable (`loop` 4.4 → 4.2 ms native). What it saves is an
+allocation and a call each time such a loop is entered.
+
+The first version kept a join point's parameters in frame slots always:
+`loop`'s code, a leaf with its parameters in registers while it was a
+procedure of its own, went from 4.1 to 12.3 ms natively. Hence the
+registers.
+
+The front end compiling itself as register code takes longer, 0.87 →
+0.94 s: not its code (with join points turned off in the Rust compiler
+that makes stage 1, the time is the same) but the FX-26 compiler's own
+work, which now asks of each `letrec` whether its bindings are join
+points, a walk of its body each time it is asked, and it is asked
+repeatedly (`r-collects` is called on the same subtrees many times).
+Not asymptotic; a cache of the answer per `letrec` would remove it.
+
+| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   113.3 |   49.5 | 14.4 |     14.0 |     12.7 |       9.1 |   23.0 |
+| closures     | 6003000000     |   349.4 |  691.3 | 75.3 |     82.5 |     62.5 |      19.9 |   27.7 |
+| fib          | 832040         |   181.9 |  213.4 | 16.1 |     22.5 |     13.2 |       5.0 |    2.4 |
+| helpers      | 12000000       |   868.7 | 1286.4 | 89.1 |    115.8 |     58.1 |       9.1 |    6.0 |
+| lists-region | 1501500000     |   337.1 |  315.5 | 98.4 |    112.3 |     83.5 |       7.1 |  156.3 |
+| lists        | 1501500000     |   298.2 |  466.4 | 55.2 |     68.4 |     47.4 |       9.3 |   12.4 |
+| loop         | 49999995000000 |   735.0 |  457.1 | 64.3 |     96.3 |     53.2 |       4.8 |    4.2 |
+| tak          | 9              |    52.0 |   78.1 |  6.6 |     11.6 |      4.5 |       1.7 |    1.2 |
