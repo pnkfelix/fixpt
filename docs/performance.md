@@ -1143,3 +1143,52 @@ native compiler does not yet); `captures` copies the frames on each
 capture, where register code's continuations are a stack segment; and
 `lists`, whose `cons` is inline in both, is close.
 
+## Guarded inlining of small global procedures (2026-09-28)
+
+A call of a global procedure whose definition is a lambda of at most 20
+parser-tree nodes, with no lambda, `letrec` or `prompt` inside it and no
+use of its own name, is inlined in register code: the arguments made (one
+that is a variable in the frame or the closure used where it is), then a
+guard, then the body, in a scope of its own whose globals are those it saw
+when defined; else the call. The guard is that the global still holds a
+closure of the word the body was compiled to (`global g; field 2; op2imm
+eq w; branchf`), so a redefinition, which makes a new closure of a new
+word, is seen at once and nothing need be compiled again (the user's
+choice, 2026-09-28). The native compiler decides the guard when it makes
+the code, as it takes every global's value then; where the global holds
+that word's closure (cellular, or native through its code's
+`CODE_SOURCE`) the guard is nothing. Both compilers (`cellular/regcode.rs`,
+`regcode.fx`) do it, and make the same register code.
+
+Stack code keeps its calls. Inlined there first, `helpers` (below) went
+from 1270 to 977 ms on the machine written in Rust, but from 88 to 98 ms
+on the hand-encoded one and not at all compiled: the guard and the
+unbinding are seven routines, as dear as the call they save.
+
+`helpers` is small helpers called in a loop, in the style of the front
+end; the other benchmarks' procedures are recursive, and do not change.
+
+| program | registers before | registers after | native before | native after |
+| ------- | ----------------:| ---------------:| -------------:| ------------:|
+| helpers |             27.0 |            12.5 |          11.2 |          7.1 |
+
+The front end has 8814 call sites inlined (in 479 procedures; `arm-sum`,
+`arm-reg`, `r-emit`, `syn-start`, `k-err` most), but compiling itself as
+register code takes the same time, 0.77 s, with inlining in its own code
+or without: its time is in call-outs, allocation and the collector, not
+in calls. Its register code is longer, which found that the assemblers
+written in FX-26 (`c-cells`, `r-cells`) recursed once per item of a word;
+they are loops now.
+
+`fixpt bench`:
+
+| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
+| captures     | 420000         |   114.6 |   50.0 | 15.3 |     14.2 |     12.0 |       9.0 |   22.5 |
+| closures     | 6003000000     |   343.9 |  703.5 | 74.8 |     84.8 |     59.7 |      25.4 |      — |
+| fib          | 832040         |   180.6 |  219.4 | 15.8 |     22.9 |     13.7 |       5.9 |    2.5 |
+| helpers      | 12000000       |   852.6 | 1305.1 | 89.2 |    106.4 |     54.8 |      12.5 |    7.1 |
+| lists-region | 1501500000     |   333.9 |  311.5 | 97.5 |    108.8 |     83.0 |       7.3 |  158.0 |
+| lists        | 1501500000     |   300.4 |  482.1 | 54.5 |     59.9 |     47.3 |      13.5 |   16.8 |
+| loop         | 49999995000000 |   736.2 |  444.7 | 64.5 |     88.8 |     40.5 |       5.5 |    4.3 |
+| tak          | 9              |    52.0 |   80.9 |  6.5 |      9.5 |      4.5 |       1.9 |    1.2 |

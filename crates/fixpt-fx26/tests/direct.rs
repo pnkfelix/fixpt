@@ -427,3 +427,28 @@ fn every_test_program_runs_natively_as_cellular() {
     assert!(report.is_empty(), "{}", report.join("\n"));
     assert!(native >= 40, "only {native}");
 }
+
+/// A call of a small global procedure is inlined in register code, behind a
+/// guard that the global still holds the closure the body was compiled
+/// from: redefined, the call calls the new one. As register code, and as
+/// machine code, where the guard is decided when the code is made.
+#[test]
+fn inlined_calls_see_a_redefinition() {
+    use fixpt_fx26::session::Strategy;
+    for native in [false, true] {
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.strategy = Strategy::Cellular;
+        s.register_code = true;
+        if native {
+            s.native_runner = Some(run_native);
+            s.native_compiler = Some(fixpt_native::direct::compile_closure);
+            s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+        } else {
+            s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+        }
+        let forms = s.checker.read_in(FileId(0), include_str!("programs/redefine/compatible.fx")).expect("reads");
+        let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{:?}", o.value))).collect();
+        assert_eq!(out[2], "Ok(Some(\"4\"))", "native {native}: {out:?}");
+        assert_eq!(out[4], "Ok(Some(\"202\"))", "native {native}: {out:?}");
+    }
+}

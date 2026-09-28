@@ -659,6 +659,9 @@ impl Compiler<'_> {
         if g.leaf || args.len() > REGS {
             return self.decline("more than REGS arguments");
         }
+        if let Some((k, cell)) = self.r_inlined(env, f, args.len()) {
+            return self.r_inline(g, k, cell, f, args, env, te, tail);
+        }
         let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
         // A call of the procedure itself, not in tail position: by its own
         // entry, with no closure fetched.
@@ -674,6 +677,74 @@ impl Compiler<'_> {
         } else {
             g.op("invoke", &[Gen::n(args.len())]);
         }
+        Some(())
+    }
+
+    /// Which of `inlines`, and its global's cell, when `f` names one of
+    /// them, taking `n` arguments, whose body is not being inlined already.
+    fn r_inlined(&self, env: &[(Sym, RLoc)], f: ExpId, n: usize) -> O<(usize, Value)> {
+        let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+        let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
+        if self.inlining.contains(&name) {
+            return None;
+        }
+        let k = self.inlines.iter().position(|i| i.name == name && i.params.len() == n)?;
+        Some((k, cell))
+    }
+
+    /// A call of a small global procedure, inlined: the arguments made and
+    /// kept (one that is a variable in the frame or the closure is used
+    /// where it is); then, if the global still holds a closure of the word
+    /// the body was compiled to, the body, in a scope of its own where the
+    /// parameters are the arguments and the globals those it saw; else the
+    /// call. A redefinition makes a new closure, of a new word: the call.
+    #[allow(clippy::too_many_arguments)]
+    fn r_inline(&mut self, g: &mut Gen, k: usize, cell: Value, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        let (regs, slots) = (g.next_reg, g.next_slot);
+        let (name, word, body, genv_len) = (self.inlines[k].name, self.inlines[k].word, self.inlines[k].body, self.inlines[k].genv_len);
+        let params = self.inlines[k].params.clone();
+        let (mut own_env, mut own_te, mut slow) = (Vec::new(), Vec::new(), Vec::new());
+        for (p, a) in params.iter().zip(args) {
+            match self.r_var(env, *a) {
+                Some(l @ (RLoc::Slot(_) | RLoc::Free(_))) => {
+                    own_env.push((*p, l));
+                    slow.push(Arg::E(*a));
+                }
+                _ => {
+                    self.r_exp(g, *a, env, te, false)?;
+                    let s = g.slot();
+                    g.op("setstk", &[Gen::n(s)]);
+                    own_env.push((*p, RLoc::Slot(s)));
+                    slow.push(Arg::Slot(s));
+                }
+            }
+            own_te.push((*p, Loc::Slot(usize::MAX)));
+        }
+        let (call, end) = (g.label(), g.label());
+        g.op("global", &[cell]);
+        g.op("field", &[Value::fixnum(super::CLOSURE_WORD as i64)]);
+        g.op("op2imm", &[Value::fixnum(routine("eq") as i64), word]);
+        g.items.push(RItem::Branch(true, call));
+        let outer = (g.this.take(), self.genv_limit.replace(genv_len));
+        self.inlining.push(name);
+        let inlined = self.r_exp(g, body, &mut own_env, &mut own_te, tail);
+        self.inlining.pop();
+        (g.this, self.genv_limit) = outer;
+        inlined?;
+        if !tail {
+            g.items.push(RItem::Branch(false, end));
+        }
+        g.items.push(RItem::Label(call));
+        self.r_args(g, &slow, env, te, Some(f))?;
+        if tail {
+            g.leave();
+            g.op("tailinvoke", &[Gen::n(args.len())]);
+        } else {
+            g.op("invoke", &[Gen::n(args.len())]);
+        }
+        g.items.push(RItem::Label(end));
+        g.next_reg = regs;
+        g.next_slot = slots;
         Some(())
     }
 

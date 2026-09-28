@@ -101,30 +101,33 @@
   (lambda (xs acc) (if (null? xs) acc (r-reverse (cdr xs) (cons (car xs) acc)))))
 (define r-size (subr pure (ritem) int)
   (lambda (i) (tagcase i (r-cell (x) 1) (r-label (n) 0) (r-branch (f n) 2) (r-frame () 1))))
-(define r-place (subr (maxeff (read @globals) (read @k) (write @k) spin) ((listof ritem @k) (arrayof int @k) int) unit)
+(define r-place (subr (maxeff (read @globals) (read @k) (write @k) spin) ((listof ritem @k) (arrayof int @k) int) int)
   (lambda (xs at pos)
     (if (null? xs)
-        #u
+        pos
         (begin (tagcase (car xs) (r-label (n) (array-set! at n pos)) (else x #u))
                (r-place (cdr xs) at (+ pos (r-size (car xs))))))))
 ;; The cells, branches resolved (an offset counts from the cell after it),
-;; and the frame's size in place.
-(define r-cells (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof ritem @k) (arrayof int @k) int int) (listof wcell @k))
-  (lambda (xs at pos frame)
+;; and the frame's size in place: from the items newest first, each ending
+;; at `end`, onto those after it, in a loop, however long the code.
+(define r-cells (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof ritem @k) (arrayof int @k) int int (listof wcell @k)) (listof wcell @k))
+  (lambda (xs at end frame acc)
     (if (null? xs)
-        nil
-        (let ((rest (r-cells (cdr xs) at (+ pos (r-size (car xs))) frame)))
-          (tagcase (car xs)
-            (r-cell (x) (cons x rest))
-            (r-label (n) rest)
-            (r-frame () (cons (wcell-int frame) rest))
-            (r-branch (f n)
-              (cons (wcell-int (if f rop-branchf rop-branch)) (cons (wcell-int (- (array-ref at n) (+ pos 2))) rest))))))))
+        acc
+        (let ((pos (- end (r-size (car xs)))))
+          (r-cells (cdr xs) at pos frame
+                   (tagcase (car xs)
+                     (r-cell (x) (cons x acc))
+                     (r-label (n) acc)
+                     (r-frame () (cons (wcell-int frame) acc))
+                     (r-branch (f n)
+                       (cons (wcell-int (if f rop-branchf rop-branch)) (cons (wcell-int (- (array-ref at n) (+ pos 2))) acc)))))))))
 (define r-assemble (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen) (listof wcell @k))
   (lambda (g)
-    (let* ((xs (r-reverse (get (extract g items)) nil))
-           (at (the (arrayof int @k) (make-array (+ 1 (get (extract g labels))) 0))))
-      (begin (r-place xs at 0) (r-cells xs at 0 (get (extract g mslot)))))))
+    (let* ((items (get (extract g items)))
+           (at (the (arrayof int @k) (make-array (+ 1 (get (extract g labels))) 0)))
+           (end (r-place (r-reverse items nil) at 0)))
+      (r-cells items at end (get (extract g mslot)) nil))))
 
 ;;; ------------------------------------------------------------- variables
 
@@ -260,6 +263,28 @@
 
 ;;; ---------------------------------------------------------- expressions
 
+;; The one of `c-inlines` that `n`, taking `k` arguments, names, if any.
+(define r-inline-named (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof c-inline finite) symbol int) (listof c-inline finite))
+  (lambda (xs n k)
+    (cond ((null? xs) nil)
+          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
+           (the (listof c-inline finite) (cons (car xs) nil)))
+          (else (r-inline-named (cdr xs) n k)))))
+;; Which of `c-inlines`, and its global, when `f` names one of them, taking
+;; `k` arguments, whose body is not being inlined already.
+(define r-inlined (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp int) (listof (pairof c-inline wglobal @k) @k))
+  (lambda (env f k)
+    (tagcase f
+      (e-var (n a b)
+        (let ((l (r-where env n)))
+          (if (or (null? l) (c-member? (get c-inlining) n))
+              nil
+              (tagcase (car l)
+                (rl-global (cell)
+                  (let ((i (r-inline-named (get c-inlines) n k)))
+                    (if (null? i) nil (the (listof (pairof c-inline wglobal @k) @k) (cons (cons (car i) cell) nil)))))
+                (else y nil)))))
+      (else y nil))))
 (define-rec
   ;; Whether evaluating `x` may call or call out, and so collect. Loops do
   ;; not; declined forms are said to, which does not matter.
@@ -498,6 +523,8 @@
     (lambda (g f args env te tail)
       (let ((n (c-count-exps args)))
         (cond ((or (extract g leaf) (> n register-regs)) (r-decline))
+              ((not (null? (r-inlined env f n)))
+               (let ((i (car (r-inlined env f n)))) (r-inline g (car i) (cdr i) f args env te tail)))
               ;; A call of the procedure itself, not in tail position: by its
               ;; own entry, with no closure fetched.
               ((and (not tail) (r-self-known? g f n te))
@@ -508,6 +535,67 @@
                  (if tail
                      (begin (r-leave g) (r-opn g rop-tailinvoke n))
                      (r-opn g rop-invoke n))))))))
+  ;; A call of a small global procedure, inlined: the arguments made and
+  ;; kept (one that is a variable in the frame or the closure is used where
+  ;; it is); then, if the global still holds a closure of the word the body
+  ;; was compiled to, the body, in a scope of its own where the parameters
+  ;; are the arguments and the globals those it saw; else the call. A
+  ;; redefinition makes a new closure, of a new word: the call.
+  (r-inline (subr (maxeff compiles spin) (rgen c-inline wglobal exp (listof exp finite) renv cenv bool) unit)
+    (lambda (g i cell f args env te tail)
+      (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
+             (bound (r-inline-args g (extract i 3) args env te))
+             (call (r-new-label g)) (end (r-new-label g))
+             (outer-genv (get c-genv)) (outer-inlining (get c-inlining))
+             (n (c-count-exps args))
+             ;; The procedure running is not known in the body.
+             (h (the rgen (product (items (extract g items)) (leaf (extract g leaf)) (nreg (extract g nreg)) (nslot (extract g nslot))
+                                   (mslot (extract g mslot)) (labels (extract g labels)) (this (the (listof c-this @k) nil))
+                                   (start (extract g start))))))
+        (begin
+          (r-op1 g rop-global (wcell-global cell))
+          (r-opn g rop-field cellular-closure-word)
+          (r-op2 g rop-op2imm (wcell-int routine-eq) (wcell-word (extract i 2)))
+          (r-emit g (r-branch #t call))
+          (set c-genv (extract i 5))
+          (set c-inlining (cons (extract i 1) outer-inlining))
+          (r-exp h (extract i 4) (extract bound 1) (extract bound 2) tail)
+          (set c-inlining outer-inlining)
+          (set c-genv outer-genv)
+          (if tail #u (r-emit g (r-branch #f end)))
+          (r-emit g (r-label call))
+          (r-args g (extract bound 3) env te (the (listof exp @k) (cons f nil)))
+          (if tail
+              (begin (r-leave g) (r-opn g rop-tailinvoke n))
+              (r-opn g rop-invoke n))
+          (r-emit g (r-label end))
+          (set (extract g nreg) regs)
+          (set (extract g nslot) slots)))))
+  ;; Each parameter bound to its argument, in order: where the body finds
+  ;; them, as the body's cellular scope has them, and as the call's
+  ;; arguments.
+  (r-inline-args
+    (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syns-a)) finite) (listof exp finite) renv cenv)
+          (productof (1 renv) (2 cenv) (3 rargs)))
+    (lambda (g ps args env te)
+      (if (or (null? ps) (null? args))
+          (product (1 (the renv nil)) (2 (the cenv nil)) (3 (the rargs nil)))
+          (let* ((p (extract (car ps) 1)) (a (car args))
+                 (l (tagcase a (e-var (n x y) (r-where env n)) (else y (the (listof rloc @k) nil))))
+                 (kept (if (null? l)
+                           (the (listof rloc @k) nil)
+                           (tagcase (car l)
+                             (rl-slot (s) l)
+                             (rl-free (j) l)
+                             (else y (the (listof rloc @k) nil)))))
+                 (here (if (null? kept)
+                           (begin (r-exp g a env te #f) (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) (rl-slot s))))
+                           (car kept)))
+                 (arg (if (null? kept) (tagcase here (rl-slot (s) (a-slot s)) (else y (a-e a))) (a-e a)))
+                 (rest (r-inline-args g (cdr ps) (cdr args) env te)))
+            (product (1 (the renv (cons (cons p here) (extract rest 1))))
+                     (2 (r-local (extract rest 2) p))
+                     (3 (the rargs (cons arg (extract rest 3)))))))))
   ;; RESULT := r(a, b), `a` evaluated first; a constant `b` an immediate.
   (r-binary (subr (maxeff compiles spin) (rgen int exp exp renv cenv) unit)
     (lambda (g r a b env te)

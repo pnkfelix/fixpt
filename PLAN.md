@@ -93,8 +93,15 @@ queue gained", and "The next queue"):
 4. GADTs (N4, to design with the user); a top effect; the rest of
    confirming types at run time (CF1–CF5); concurrency and actors.
 5. M13's rest, the transformations first (the user's, 2026-09-28: more
-   for the effort than fixed-width types): inlining (13f) and common
-   subexpressions at the level of cellular or register code, then
+   for the effort than fixed-width types): inlining (13f) done in part
+   (2026-09-28): a call of a small global procedure is inlined in register
+   code behind a guard that the global still holds the closure it was
+   compiled from, so a redefinition needs no recompiling (the user's
+   choice); both compilers, `docs/performance.md`. Next: a `,inliners`
+   query (which procedures inline a global); specializing a recursive
+   higher-order global at a lambda argument, so that `(map (lambda (x) (+
+   x 1)) xs)` is the loop one would write (the user's, 2026-09-28); then
+   common subexpressions at the level of cellular or register code, then
    superinstructions (13g), join points (13i),
    the rest of known calls, a nursery with a write barrier, cheaper
    continuations, a lint on a lambda's size. Known gap, seen with

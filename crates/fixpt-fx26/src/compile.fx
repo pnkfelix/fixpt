@@ -90,32 +90,36 @@
 (define c-size (subr pure (item) int)
   (lambda (i) (tagcase i (i-cell (x) 1) (i-label (n) 0) (i-branch (n) 2) (i-zbranch (n) 2))))
 
-;; Where each label is, in cells.
-(define c-place (subr (maxeff (read @globals) (read @k) (write @k) spin) (items (arrayof int @k) int) unit)
+;; Where each label is, in cells; and how many cells there are.
+(define c-place (subr (maxeff (read @globals) (read @k) (write @k) spin) (items (arrayof int @k) int) int)
   (lambda (xs at pos)
     (if (null? xs)
-        #u
+        pos
         (begin (tagcase (car xs) (i-label (n) (array-set! at n pos)) (else x #u))
                (c-place (cdr xs) at (+ pos (c-size (car xs))))))))
 
-;; The cells, branches resolved: an offset counts from the cell after it.
-(define c-cells (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (items (arrayof int @k) int) (listof wcell @k))
-  (lambda (xs at pos)
+;; The cells, branches resolved (an offset counts from the cell after it):
+;; from the items newest first, each ending at `end`, onto those after it,
+;; in a loop, however long the word.
+(define c-cells (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (items (arrayof int @k) int (listof wcell @k)) (listof wcell @k))
+  (lambda (xs at end acc)
     (if (null? xs)
-        nil
-        (let ((rest (c-cells (cdr xs) at (+ pos (c-size (car xs))))))
-          (tagcase (car xs)
-            (i-cell (x) (cons x rest))
-            (i-label (n) rest)
-            (i-branch (n)
-              (cons (wcell-routine routine-branch) (cons (wcell-int (- (array-ref at n) (+ pos 2))) rest)))
-            (i-zbranch (n)
-              (cons (wcell-routine routine-zbranch) (cons (wcell-int (- (array-ref at n) (+ pos 2))) rest))))))))
+        acc
+        (let ((pos (- end (c-size (car xs)))))
+          (c-cells (cdr xs) at pos
+                   (tagcase (car xs)
+                     (i-cell (x) (cons x acc))
+                     (i-label (n) acc)
+                     (i-branch (n)
+                       (cons (wcell-routine routine-branch) (cons (wcell-int (- (array-ref at n) (+ pos 2))) acc)))
+                     (i-zbranch (n)
+                       (cons (wcell-routine routine-zbranch) (cons (wcell-int (- (array-ref at n) (+ pos 2))) acc)))))))))
 
 (define c-assemble (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (code symbol) tword)
   (lambda (c name)
-    (let* ((xs (c-reverse (get c) nil)) (at (the (arrayof int @k) (make-array (get c-labels) 0))))
-      (begin (c-place xs at 0) (make-word name (c-cells xs at 0))))))
+    (let* ((at (the (arrayof int @k) (make-array (get c-labels) 0)))
+           (end (c-place (c-reverse (get c) nil) at 0)))
+      (make-word name (c-cells (get c) at end nil)))))
 
 ;;; ------------------------------------------------------------ variables
 
@@ -556,6 +560,9 @@
 ;;; value pushed is slot `depth`. In tail position, code ends the word: with
 ;;; a `tailcall`, or with `return` after the value.
 
+;; The word of the lambda compiled last, in a list.
+(define c-last-word (ref (listof tword @k) @k) (new nil))
+
 (define-rec
   (c-exps (subr (maxeff compiles spin) ((listof exp finite) cenv int code) int)
     (lambda (es e depth c)
@@ -691,6 +698,7 @@
              (patches (c-push-all fv e depth 0 c))
              (w (wcell-word (extract made 1))))
         (begin
+          (set c-last-word (the (listof tword @k) (cons (extract made 1) nil)))
           (if (null? region)
               (begin (c-op1 c routine-closure w) (c-emit c (i-cell (wcell-int (c-length fv)))))
               (begin (c-lit c w) (c-prim c "%region-closure" (+ 2 (c-length fv)))))
@@ -830,6 +838,77 @@
 
 ;;; ------------------------------------------------------------- programs
 
+;;; ------------------------------------------------------------- inlining
+
+;; The most parser-tree nodes a body may have to be inlined
+;; (`c-inline-room`).
+(define c-inline-limit int 20)
+
+;; A small global procedure a call in register code may inline, guarded
+;; (`regcode.fx`'s `r-inline`): its name, word, parameters and body, and
+;; the globals as its body saw them.
+(define-type c-inline
+  (productof (1 symbol) (2 tword) (3 (listof (productof (1 symbol) (2 syns-a)) finite)) (4 exp) (5 cenv)))
+(define c-inlines (ref (listof c-inline finite) @k) (new nil))
+;; The globals whose bodies are being inlined, which are not again.
+(define c-inlining (ref syms @k) (new nil))
+;; `xs` without `n`'s.
+(define c-drop-inline (subr (maxeff (read @globals) (read @k) (alloc @k)) ((listof c-inline finite) symbol) (listof c-inline finite))
+  (lambda (xs n)
+    (cond ((null? xs) xs)
+          ((symbol=? (extract (car xs) 1) n) (c-drop-inline (cdr xs) n))
+          (else (the (listof c-inline finite) (cons (car xs) (c-drop-inline (cdr xs) n)))))))
+;; How many of `n` parser-tree nodes are left once `x`'s are counted, as the
+;; Rust compiler's `inline_room` counts them: negative, and counted no
+;; further, once they run out, or at a form that makes a closure, which an
+;; inlined body would have to capture its slots in.
+(define-rec
+  (c-inline-room (subr (maxeff (read @globals) spin) (exp int) int)
+    (lambda (x n0)
+      (let ((n (- n0 1)))
+        (if (< n 0)
+            n
+            (tagcase x
+              (e-lambda (ps body a b) -1)
+              (e-rlambda (r l a b) -1)
+              (e-letrec (bs body a b) -1)
+              (e-prompt (t body h a b) -1)
+              (e-app (f args a b) (c-inline-room-all args (c-inline-room f n)))
+              (e-plambda (d body a b) (c-inline-room body n))
+              (e-proj (body ds a b) (c-inline-room body n))
+              (e-the (d body a b) (c-inline-room body n))
+              (e-convention (cnv body a b) (c-inline-room body n))
+              (e-letregion (k r i body a b) (c-inline-room body n))
+              (e-if (t th el a b) (c-inline-room-if el (c-inline-room-if th (c-inline-room t n))))
+              (e-let (bs body a b) (c-inline-room-if body (c-inline-room-let bs n)))
+              (e-begin (es a b) (c-inline-room-all es n))
+              (e-bloblet (op i args a b) (c-inline-room-all args n))
+              (e-product (fs a b) (c-inline-room-let fs n))
+              (e-extract (p l a b) (c-inline-room p n))
+              (e-sum (t v a b) (c-inline-room v n))
+              (e-tagcase (s arms els a b)
+                (c-inline-room-else els (c-inline-room-arms arms (c-inline-room s n))))
+              (else y n))))))
+  ;; `x`'s nodes counted from `n`, unless none are left.
+  (c-inline-room-if (subr (maxeff (read @globals) spin) (exp int) int)
+    (lambda (x n) (if (< n 0) n (c-inline-room x n))))
+  (c-inline-room-all (subr (maxeff (read @globals) spin) ((listof exp finite) int) int)
+    (lambda (es n) (if (or (null? es) (< n 0)) n (c-inline-room-all (cdr es) (c-inline-room (car es) n)))))
+  (c-inline-room-let (subr (maxeff (read @globals) spin) ((listof (productof (1 symbol) (2 exp)) finite) int) int)
+    (lambda (bs n) (if (or (null? bs) (< n 0)) n (c-inline-room-let (cdr bs) (c-inline-room (extract (car bs) 2) n)))))
+  (c-inline-room-arms (subr (maxeff (read @globals) spin) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite) int) int)
+    (lambda (arms n)
+      (if (or (null? arms) (< n 0)) n (c-inline-room-arms (cdr arms) (c-inline-room (extract (car arms) 4) n)))))
+  (c-inline-room-else (subr (maxeff (read @globals) spin) ((listof (productof (1 symbol) (2 exp)) finite) int) int)
+    (lambda (els n) (if (or (null? els) (< n 0)) n (c-inline-room (extract (car els) 2) n)))))
+;; A definition of `n` as a lambda just compiled: inlined where it is
+;; called, if small enough and not calling itself.
+(define c-record-inline
+  (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (symbol (listof (productof (1 symbol) (2 syns-a)) finite) exp) unit)
+  (lambda (n ps body)
+    (if (and (>= (c-inline-room body c-inline-limit) 0) (and (not (c-mentions? body n)) (not (null? (get c-last-word)))))
+        (set c-inlines (the (listof c-inline finite) (cons (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (get c-genv))) (get c-inlines))))
+        #u)))
 ;; Globals kept for their names' next definitions: a redefinition of a type
 ;; the old one's users can take, for which the REPL asks
 ;; (`compile-keep-global!`).
@@ -851,7 +930,7 @@
 ;; else a new one, which later uses of `n` refer to.
 (define c-push-global (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (symbol) wglobal)
   (lambda (n)
-    (let ((kept (c-kept (get c-reuse) n)))
+    (let ((kept (begin (set c-inlines (c-drop-inline (get c-inlines) n)) (c-kept (get c-reuse) n))))
       (if (null? kept)
           (let ((g (make-global n))) (begin (set c-genv (the cenv (cons (cons n (at-global g)) (get c-genv)))) g))
           (begin (set c-reuse (c-unkeep (get c-reuse) n)) (car kept))))))
@@ -915,7 +994,8 @@
                       (let ((g (c-push-global n)))
                         (begin (tagcase (car (c-lambda-of x))
                                  (e-lambda (ps body la lb)
-                                   (begin (c-lambda ps body (the cenv nil) 0 c (the syms nil) (the (listof exp @k) nil)) #u))
+                                   (begin (c-lambda ps body (the cenv nil) 0 c (the syms nil) (the (listof exp @k) nil))
+                                          (c-record-inline n ps body)))
                                  (else y (c-exp x (the cenv nil) 0 c #f)))
                                (c-op1 c routine-global! (wcell-global g))))))
               (c-tops (cdr ts) c #f)))

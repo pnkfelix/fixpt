@@ -41,7 +41,7 @@
 
 use crate::arm64::*;
 use crate::codespace::{CodeSpace, Offset};
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, ROUTINES, WORD_CELL0, WORD_TWIN};
+use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD, ROUTINES, WORD_CELL0, WORD_TWIN};
 use fixpt_heap::layout::regcode::OPS;
 use fixpt_heap::{Heap, Value};
 use std::collections::HashMap;
@@ -616,6 +616,23 @@ impl Compiling<'_> {
         self.heap.symbol_name(self.heap.bloblet_slot(word, fixpt_heap::layout::cellular::WORD_NAME))
     }
 
+    /// The cellular word `v` is a closure of: a cellular closure's, or the
+    /// one a native closure's code was compiled from (`CODE_SOURCE`).
+    fn word_held(&self, v: Value) -> Option<Value> {
+        let h = self.heap;
+        if !v.is_bloblet() {
+            return None;
+        }
+        let k = h.bloblet_kind(v);
+        if k == fixpt_heap::layout::kind("cellular-closure") {
+            Some(h.bloblet_slot(v, CLOSURE_WORD))
+        } else if k == fixpt_heap::layout::kind("native-closure") {
+            Some(h.bloblet_slot(h.bloblet_slot(v, CLOSURE_WORD), fixpt_heap::layout::cellular::CODE_SOURCE)).filter(|w| h.is_cellular_word(*w))
+        } else {
+            None
+        }
+    }
+
     /// A cellular closure's procedure and free values; `None` for anything
     /// else.
     fn closure_parts(&self, v: Value) -> Option<(Value, Vec<Value>)> {
@@ -767,6 +784,27 @@ impl Compiling<'_> {
                 }
                 "global" => {
                     let cell = o(0);
+                    // An inlined call's guard (`global; field 2; op2imm eq
+                    // w; branchf`): decided here, as every global's value is
+                    // when this code is made, by the word the cell holds a
+                    // closure of now. Where it holds that word's closure,
+                    // nothing; else the test, which the code runs.
+                    let guard = [si, si + 1, si + 2].map(|x| starts.get(x).copied());
+                    if let [Some(f), Some(e), Some(b)] = guard
+                        && op_at(f) == "field"
+                        && cells[f + 1].as_fixnum() as usize == CLOSURE_WORD
+                        && op_at(e) == "op2imm"
+                        && cells[e + 1].as_fixnum() == routine("eq") as i64
+                        && op_at(b) == "branchf"
+                        && ![f, e, b].iter().any(|&j| target[j])
+                        && self.word_held(self.heap.bloblet_slot(cell, 2)) == Some(cells[e + 2])
+                    {
+                        for j in [f, e, b] {
+                            a.bind(labels[j]);
+                        }
+                        si += 3;
+                        continue;
+                    }
                     let g = self.global_value(cell).map_err(|e| format!("`{name}` calls {e}"))?;
                     if called(i).is_some() {
                         pending = Some(g);

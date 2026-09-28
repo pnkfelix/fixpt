@@ -13,7 +13,7 @@ use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, ROUTINES, WORD_TWIN};
+use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD, ROUTINES, WORD_TWIN};
 
 mod regcode;
 use fixpt_heap::{Heap, Value};
@@ -55,7 +55,7 @@ struct This {
 type Env = Vec<(Sym, Loc)>;
 
 /// The innermost binding of `n` in `e`.
-fn find(e: &Env, n: Sym) -> Option<Loc> {
+fn find(e: &[(Sym, Loc)], n: Sym) -> Option<Loc> {
     e.iter().rev().find(|(m, _)| *m == n).map(|(_, l)| *l)
 }
 
@@ -76,7 +76,31 @@ pub struct Compiler<'a> {
     /// it was declined (the first form the register compiler does not do).
     pub register_report: Vec<(String, Option<String>)>,
     declined: Option<String>,
+    /// The global procedures a call in register code may inline, as
+    /// `inline_room` allows:
+    /// each one's name, word, parameters, body, and how many globals there
+    /// were when its body was compiled, which are those its names see.
+    inlines: Vec<Inline>,
+    /// While an inlined body is compiled: how many globals it sees.
+    genv_limit: Option<usize>,
+    /// The globals whose bodies are being inlined, which are not again.
+    inlining: Vec<Sym>,
+    /// The word of the lambda compiled last.
+    last_word: Value,
 }
+
+/// A small global procedure a call may inline, guarded, in register code
+/// (`regcode::r_inline`).
+struct Inline {
+    name: Sym,
+    word: Value,
+    params: Vec<Sym>,
+    body: ExpId,
+    genv_len: usize,
+}
+
+/// The most parser-tree nodes a body may have to be inlined.
+const INLINE_LIMIT: i64 = 20;
 
 type R<T> = Result<T, String>;
 
@@ -91,7 +115,14 @@ impl<'a> Compiler<'a> {
             n += 1;
         }
         char_at[text.len()] = n;
-        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), this: None, registers: false, register_report: Vec::new(), declined: None }
+        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), this: None, registers: false,
+            register_report: Vec::new(),
+            declined: None,
+            inlines: Vec::new(),
+            genv_limit: None,
+            inlining: Vec::new(),
+            last_word: Value::FALSE,
+        }
     }
 
     fn name(&self, s: Sym) -> &str {
@@ -179,7 +210,8 @@ impl<'a> Compiler<'a> {
     // ------------------------------------------------------- variables
 
     fn where_is(&self, e: &Env, n: Sym) -> Option<Loc> {
-        find(e, n).or_else(|| find(&self.genv, n))
+        let genv = &self.genv[..self.genv_limit.unwrap_or(self.genv.len())];
+        find(e, n).or_else(|| find(genv, n))
     }
 
     fn load(&self, code: &mut Vec<Item>, l: Loc) {
@@ -515,6 +547,7 @@ impl<'a> Compiler<'a> {
             self.exp(r, e, depth, code, false)?;
         }
         let (w, fv) = self.lambda_word(params, body, e, own)?;
+        self.last_word = w;
         // Each captured value, as the closure will hold it.
         let mut patches = Vec::new();
         for (j, n) in fv.iter().enumerate() {
@@ -627,6 +660,35 @@ impl<'a> Compiler<'a> {
         let mut acc = Vec::new();
         self.free(x, &[], &mut acc);
         acc.contains(&n)
+    }
+
+    /// How many of `n` parser-tree nodes are left once `x`'s are counted,
+    /// as `compile.fx`'s `c-inline-room` counts them: negative, and counted
+    /// no further, once they run out, or at a form that makes a closure,
+    /// which an inlined body would have to capture its slots in.
+    fn inline_room(&self, x: ExpId, n: i64) -> i64 {
+        let n = n - 1;
+        if n < 0 {
+            return n;
+        }
+        let all = |xs: &[ExpId], n: i64| xs.iter().fold(n, |n, a| if n < 0 { n } else { self.inline_room(*a, n) });
+        match self.c.arena.exp_at(x).clone() {
+            Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } => -1,
+            Exp::App { fun, args } => all(&args, self.inline_room(fun, n)),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.inline_room(body, n),
+            Exp::LetRegion { body, .. } => self.inline_room(body, n),
+            Exp::If { test, then, els } => all(&[then, els], self.inline_room(test, n)),
+            Exp::Let { bindings, body } => all(&[body], all(&bindings.iter().map(|(_, i)| *i).collect::<Vec<_>>(), n)),
+            Exp::Begin(items) => all(&items, n),
+            Exp::Bloblet { args, .. } => all(&args, n),
+            Exp::Product(fields) => all(&fields.iter().map(|(_, x)| *x).collect::<Vec<_>>(), n),
+            Exp::Extract(x, _) | Exp::Sum(_, x) => self.inline_room(x, n),
+            Exp::TagCase { scrutinee, arms, els } => {
+                let n = all(&arms.iter().map(|a| a.body).collect::<Vec<_>>(), self.inline_room(scrutinee, n));
+                all(&els.map(|(_, b)| b).into_iter().collect::<Vec<_>>(), n)
+            }
+            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => n,
+        }
     }
 
     /// Whether every use of `f` in `x` is a call with `n` arguments in tail
@@ -986,6 +1048,7 @@ impl<'a> Compiler<'a> {
     /// The global a definition of `n` sets: the one `n` has, if the
     /// definition assigns it (`Top`'s `assigns`); else a new one.
     fn global_for(&mut self, n: Sym, assigns: bool) -> Value {
+        self.inlines.retain(|i| i.name != n);
         match find(&self.genv, n) {
             Some(Loc::Global(g)) if assigns => g,
             _ => self.push_global(n),
@@ -1014,6 +1077,15 @@ impl<'a> Compiler<'a> {
                     } else {
                         let g = self.global_for(*name, *assigns);
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
+                        // Small enough, and not calling itself: inlined
+                        // where it is called.
+                        if let Some((params, body, None)) = self.lambda_of(*exp)
+                            && self.inline_room(body, INLINE_LIMIT) >= 0
+                            && !self.mentions(body, *name)
+                        {
+                            let (word, genv_len) = (self.last_word, self.genv.len());
+                            self.inlines.push(Inline { name: *name, word, params, body, genv_len });
+                        }
                         g
                     };
                     self.op1(&mut code, "global!", g);

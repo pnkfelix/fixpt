@@ -244,6 +244,9 @@ fn put(
             } else if h.kind == fixpt_heap::layout::cellular::KIND {
                 let name = heap.bloblet_slot(v, fixpt_heap::layout::cellular::WORD_NAME);
                 out.push_str(&format!("#<cellular-word {}>", write_value(heap, name)));
+            } else if heap.is_register_word(v) {
+                let name = heap.bloblet_slot(v, fixpt_heap::layout::cellular::WORD_NAME);
+                out.push_str(&format!("#<register-code {}>", write_value(heap, name)));
             } else {
                 out.push_str(&format!("#<{kind} {} fields {} bytes>", h.fields, h.bytes));
             }
