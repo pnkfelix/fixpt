@@ -13,6 +13,7 @@
 //! | frame link           | `x29`                                                      |
 //! | the machine's state  | `x24`, pinned                                              |
 //! | fuel                 | `x28`, pinned                                              |
+//! | the stack's limit    | `x27`, pinned                                              |
 //! | values across a call | the frame's slots, `[x29, #16 + 8n]` for slot `n`          |
 //!
 //! Every register but the pinned ones is the caller's to lose across a
@@ -47,6 +48,8 @@ use std::mem::offset_of;
 const RESULT: Reg = 0;
 const ST: Reg = 24;
 const FUEL: Reg = 28;
+/// The native stack's limit, pinned.
+const LIMIT: Reg = 27;
 const FRAME: Reg = 29;
 const LINK: Reg = 30;
 const X9: Reg = 9;
@@ -259,6 +262,7 @@ fn trampoline() -> Vec<u32> {
     a.e(add_imm(X9, SP, 0));
     a.e(str(X9, ST, st_off(offset_of!(DState, rust_sp))));
     a.e(ldr(FUEL, ST, st_off(offset_of!(DState, fuel))));
+    a.e(ldr(LIMIT, ST, st_off(offset_of!(DState, stack_limit))));
     a.e(mov(X16, 1));
     a.e(ldr(X9, ST, st_off(offset_of!(DState, stack_top))));
     a.e(add_imm(SP, X9, 0));
@@ -337,6 +341,7 @@ impl Compiling<'_> {
         // whether the procedure has a frame or calls: what it must check.
         let mut starts = Vec::new();
         let mut back_to = vec![false; cells.len() + 1];
+        let mut target = vec![false; cells.len() + 1];
         let (mut frame, mut calls) = (None, false);
         let mut i = 0;
         while i < cells.len() {
@@ -345,6 +350,7 @@ impl Compiling<'_> {
             match op {
                 "branch" | "branchf" => {
                     let to = i as i64 + 2 + cells[i + 1].as_fixnum();
+                    target[to as usize] = true;
                     if to <= i as i64 {
                         back_to[to as usize] = true;
                     }
@@ -388,7 +394,23 @@ impl Compiling<'_> {
             trap(a, OUT_OF_FUEL, Cond::Lo);
         }
         let mut pending_global: Option<Value> = None;
-        for &i in &starts {
+        let op_at = |j: usize| OPS[cells[j].as_fixnum() as usize].0;
+        // Whether the instruction at `j` sets `RESULT` before reading it,
+        // so that nothing needs a value the one before it left there.
+        let sets_first = |j: usize| matches!(op_at(j), "const" | "reg" | "stack" | "global");
+        // Whether it leaves `RESULT` unread: what sets it first, or a call,
+        // whose callee is not in it here (a global's, or the procedure's own).
+        let ignores = |j: usize| sets_first(j) || matches!(op_at(j), "invokeself" | "invoke" | "tailinvoke");
+        // The next instruction, if control reaches it only from this one:
+        // then the two may be done as one.
+        let joinable = |si: usize| starts.get(si + 1).copied().filter(|&j| !target[j]);
+        // Where `RESULT` is read from by the instruction being done: a
+        // register it was only a copy of, when `reg k` was joined to it.
+        let mut src = RESULT;
+        let mut si = 0;
+        while si < starts.len() {
+            let i = starts[si];
+            si += 1;
             a.bind(labels[i]);
             let (op, _, _) = OPS[cells[i].as_fixnum() as usize];
             let o = |j: usize| cells[i + 1 + j];
@@ -407,7 +429,13 @@ impl Compiling<'_> {
                     a.es(&mov_imm64(RESULT, v.raw()));
                 }
                 "global" => pending_global = Some(o(0)),
-                "reg" => a.e(mov(RESULT, reg(o(0)))),
+                "reg" => match joinable(si - 1) {
+                    Some(j) if matches!(op_at(j), "op2" | "op2imm") => {
+                        src = reg(o(0));
+                        continue;
+                    }
+                    _ => a.e(mov(RESULT, reg(o(0)))),
+                },
                 "setreg" => a.e(mov(reg(o(0)), RESULT)),
                 "movereg" => a.e(mov(reg(o(1)), reg(o(0)))),
                 // The frame: the caller's frame link and return address,
@@ -416,48 +444,96 @@ impl Compiling<'_> {
                 "save" => {
                     a.e(stp_pre(FRAME, LINK, SP, -(size.expect("a frame") as i64)));
                     a.e(add_imm(FRAME, SP, 0));
-                    a.e(ldr(X16, ST, st_off(offset_of!(DState, stack_limit))));
-                    a.e(add_imm(X17, SP, 0));
-                    a.e(cmp(X17, X16));
+                    a.e(cmp_sp(LIMIT));
                     trap(a, STACK_OVERFLOW, Cond::Lo);
                 }
                 "pop" => a.e(ldp_post(FRAME, LINK, SP, size.expect("a frame") as i64)),
                 "stack" => a.e(ldr(RESULT, FRAME, 16 + 8 * k(o(0)) as u32)),
                 "setstk" => a.e(str(RESULT, FRAME, 16 + 8 * k(o(0)) as u32)),
                 "load" => a.e(ldr(reg(o(0)), FRAME, 16 + 8 * k(o(1)) as u32)),
-                "store" => a.e(str(reg(o(0)), FRAME, 16 + 8 * k(o(1)) as u32)),
+                "store" => {
+                    a.e(str(reg(o(0)), FRAME, 16 + 8 * k(o(1)) as u32));
+                    // Its slot read back at once: the register is still it.
+                    if let Some(j) = joinable(si - 1)
+                        && op_at(j) == "stack"
+                        && cells[j + 1] == o(1)
+                    {
+                        a.bind(labels[j]);
+                        si += 1;
+                        match joinable(si - 1) {
+                            Some(n) if matches!(op_at(n), "op2" | "op2imm") => src = reg(o(0)),
+                            _ => a.e(mov(RESULT, reg(o(0)))),
+                        }
+                    }
+                }
                 "op1" => match ROUTINES[k(o(0))].0 {
                     "pair-car" => a.e(ldur(RESULT, RESULT, -1)),
                     "pair-cdr" => a.e(ldur(RESULT, RESULT, 7)),
                     r => return decline(format!("op1 {r}")),
                 },
                 "op2" | "op2imm" => {
-                    let other = if op == "op2" {
-                        reg(o(1))
+                    let x = std::mem::replace(&mut src, RESULT);
+                    // The other operand: a register, or a constant, which an
+                    // add, a subtract or a compare may take as it is when it
+                    // is small.
+                    let (other, small) = if op == "op2" {
+                        (reg(o(1)), None)
                     } else {
                         let v = o(1);
                         if !(v.is_fixnum() || v.raw() & 7 == 3) {
                             return decline("a constant in the heap".into());
                         }
-                        a.es(&mov_imm64(X16, v.raw()));
-                        X16
+                        if v.raw() < 4096 {
+                            (X16, Some(v.raw() as u32))
+                        } else {
+                            a.es(&mov_imm64(X16, v.raw()));
+                            (X16, None)
+                        }
                     };
-                    match ROUTINES[k(o(0))].0 {
-                        "int-add" => {
-                            a.e(adds(RESULT, RESULT, other));
-                            trap(a, OVERFLOW, Cond::Vs);
-                        }
-                        "int-sub" => {
-                            a.e(subs(RESULT, RESULT, other));
-                            trap(a, OVERFLOW, Cond::Vs);
-                        }
-                        r @ ("int-less" | "eq") => {
-                            a.e(cmp(RESULT, other));
-                            a.es(&mov_imm64(X9, Value::TRUE.raw()));
-                            a.es(&mov_imm64(X17, Value::FALSE.raw()));
-                            a.e(csel(RESULT, X9, X17, if r == "eq" { Cond::Eq } else { Cond::Lt }));
-                        }
-                        r => return decline(format!("{op} {r}")),
+                    let r = ROUTINES[k(o(0))].0;
+                    // A sum or difference only moved on to a register, and
+                    // then not read: made in that register.
+                    let mut d = RESULT;
+                    if matches!(r, "int-add" | "int-sub")
+                        && let Some(j) = joinable(si - 1)
+                        && op_at(j) == "setreg"
+                        && starts.get(si + 1).is_some_and(|&f| ignores(f))
+                    {
+                        a.bind(labels[j]);
+                        d = reg(cells[j + 1]);
+                        si += 1;
+                    }
+                    match (r, small) {
+                        ("int-add", Some(n)) => a.e(adds_imm(d, x, n)),
+                        ("int-add", None) => a.e(adds(d, x, other)),
+                        ("int-sub", Some(n)) => a.e(subs_imm(d, x, n)),
+                        ("int-sub", None) => a.e(subs(d, x, other)),
+                        ("int-less" | "eq", Some(n)) => a.e(cmp_imm(x, n)),
+                        ("int-less" | "eq", None) => a.e(cmp(x, other)),
+                        _ => return decline(format!("{op} {r}")),
+                    }
+                    let cond = if r == "eq" { Cond::Eq } else { Cond::Lt };
+                    match r {
+                        "int-add" | "int-sub" => trap(a, OVERFLOW, Cond::Vs),
+                        // A test that only a branch reads: the branch on the
+                        // flags, with no boolean made.
+                        _ => match joinable(si - 1) {
+                            Some(j)
+                                if op_at(j) == "branchf"
+                                    && starts.get(si + 1).is_none_or(|&f| sets_first(f))
+                                    && sets_first((j as i64 + 2 + cells[j + 1].as_fixnum()) as usize) =>
+                            {
+                                a.bind(labels[j]);
+                                let to = (j as i64 + 2 + cells[j + 1].as_fixnum()) as usize;
+                                a.to(labels[to], Fix::If(if r == "eq" { Cond::Ne } else { Cond::Ge }));
+                                si += 1;
+                            }
+                            _ => {
+                                a.es(&mov_imm64(X9, Value::TRUE.raw()));
+                                a.es(&mov_imm64(X17, Value::FALSE.raw()));
+                                a.e(csel(RESULT, X9, X17, cond));
+                            }
+                        },
                     }
                 }
                 "field" => a.e(ldur(RESULT, RESULT, -(4 + 8 * k(o(0)) as i64))),

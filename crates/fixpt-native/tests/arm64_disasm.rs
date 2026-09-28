@@ -30,6 +30,8 @@ fn every_encoder_reads_back() {
         (adds(0, 1, 2), "adds x0, x1, x2"),
         (subs(0, 1, 2), "subs x0, x1, x2"),
         (subs_imm(28, 28, 1), "subs x28, x28, #1"),
+        (adds_imm(0, 1, 8), "adds x0, x1, #8"),
+        (cmp_sp(27), "cmp sp, x27"),
         (orr(1, 2, 3), "orr x1, x2, x3"),
         (and_low(1, 2, 3), "and x1, x2, #0x7"),
         (tst_low(9, 3), "tst x9, #0x7"),

@@ -1052,3 +1052,21 @@ The rest are declined: `loop`'s `letrec` procedure captures `n`, and the
 others capture, allocate, or call what they are given, which waits for
 steps 3 and 4. `(lambda ((x int)) x)` is now `mov x0, x1; ret`, where
 the cell-for-cell compiled word was about 95 instructions.
+
+### Joining register code's instructions (2026-09-28)
+
+The native convention's compiler now does two of register code's
+instructions as one where no branch lands between them: `reg k` read
+straight by the operation after it; a compare only a `branchf` reads, as
+a compare and a conditional branch with no boolean made; small constants
+as immediates; a slot read back just after it is stored, from the
+register; and a sum or difference made in the argument register it is
+moved to. The stack's limit is pinned in `x27`, so the check is `cmp sp,
+x27; b.lo`. `(lambda ((x int)) (+ x 1))` is `adds x0, x1, #8; b.vs; ret`,
+and `fib`'s body 27 instructions, from 40.
+
+| program | register code | native convention, before | after |
+| ------- | ------------- | ------------------------- | ----- |
+| fib     | 4.5           | 2.4                       | 1.9   |
+| tak     | 1.7           | 0.8                       | 0.8   |
+

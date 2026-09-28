@@ -104,13 +104,12 @@ fn the_identity_is_a_move_and_a_return() {
     assert_eq!(r.code, "mov x0, x1\nret\n");
 }
 
-/// Adding one checks overflow, and nothing else.
+/// Adding one is one instruction, and its check of overflow.
 #[test]
 fn adding_one_checks_only_overflow() {
     let r = run("(define inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[41], FUEL);
     assert_eq!(r.direct, Ok("42".into()));
-    let body: Vec<&str> = r.code.lines().take_while(|l| *l != "ret").collect();
-    assert!(body.len() <= 4, "{}", r.code);
+    assert!(r.code.starts_with("adds x0, x1, #8\nb.vs @3\nret\n"), "{}", r.code);
     let r = run("(define inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[(1 << 60) - 1], FUEL);
     assert_eq!(r.direct, Err("integer overflow".into()));
     assert!(r.rust.starts_with("!!"), "{}", r.rust);

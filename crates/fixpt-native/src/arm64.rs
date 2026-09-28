@@ -154,6 +154,16 @@ pub fn subs_imm(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0xF100_0000 | imm << 10 | r(n) << 5 | r(d)
 }
+/// `cmp sp, xm`: the stack pointer against a register (the extended
+/// register form, which alone takes `sp`).
+pub fn cmp_sp(m: Reg) -> u32 {
+    0xEB20_63FF | r(m) << 16
+}
+/// `adds xd, xn, #imm`.
+pub fn adds_imm(d: Reg, n: Reg, imm: u32) -> u32 {
+    assert!(imm < 4096);
+    0xB100_0000 | imm << 10 | r(n) << 5 | r(d)
+}
 /// `orr xd, xn, xm`.
 pub fn orr(d: Reg, n: Reg, m: Reg) -> u32 {
     0xAA00_0000 | r(m) << 16 | r(n) << 5 | r(d)
