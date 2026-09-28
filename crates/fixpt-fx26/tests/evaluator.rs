@@ -55,7 +55,7 @@ fn errors_stop_the_program() {
 /// Scheme engine, takes seconds on each (`run/reap.fx` 30 s): left to
 /// `the_long_programs`, which runs only when asked. The compiler's and the
 /// lowering's tests run them every time.
-const LONG: [&str; 4] = ["run/reap.fx", "run/define-rec.fx", "run/loops.fx", "run/arena.fx"];
+const LONG: [&str; 5] = ["run/reap.fx", "run/define-rec.fx", "run/loops.fx", "run/arena.fx", "run/tail-marks.fx"];
 
 /// Every test program that checks, both ways, reported together; but the
 /// long ones.

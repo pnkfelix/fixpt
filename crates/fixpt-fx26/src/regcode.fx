@@ -455,7 +455,9 @@
             (let ((name (r-standard-name env f)))
               (if (string=? name "")
                   (r-call g f args env te tail)
-                  (begin (r-standard-app g name args env te tail) (r-done g tail))))))))
+                  (if (and tail (and (string=? name "with-mark") (= n 3)))
+                      (r-withmark-tail g args env te)
+                      (begin (r-standard-app g name args env te tail) (r-done g tail)))))))))
   (r-standard-app (subr (maxeff compiles spin) (rgen string (listof exp finite) renv cenv bool) unit)
     (lambda (g name args env te tail)
       (tagcase (r-standard name (c-count-exps args))
@@ -469,12 +471,8 @@
         (s-op2imm (r v) (begin (r-exp g (car args) env te #f) (r-op2 g rop-op2imm (wcell-int r) v)))
         (s-field (k) (begin (r-exp g (car args) env te #f) (r-opn g rop-field k)))
         (s-prim (p) (r-call-out g rop-prim p (r-exp-args args) env te))
-        ;; In tail position a mark replaces this frame's, which is stack
-        ;; code's way (`withmark-tail`); left to it.
-        (s-cellular (r)
-          (if (and tail (= r routine-withmark))
-              (r-decline)
-              (r-call-out g rop-cellular r (r-exp-args args) env te)))
+        ;; (A mark in tail position is `r-withmark-tail`'s.)
+        (s-cellular (r) (r-call-out g rop-cellular r (r-exp-args args) env te))
         (s-identity () (r-exp g (car args) env te #f))
         (s-set ()
           (let ((k (extract (r-operands g (car args) (car (cdr args)) env te #f) 2)))
@@ -483,6 +481,18 @@
                 (begin (r-opnn g rop-setfield 2 (car k)) (r-op1 g rop-const (wcell-unit))))))
         (s-special (what) (r-special g what args env te))
         (s-none () (r-decline)))))
+  ;; In tail position a mark replaces this frame's, as stack code's
+  ;; `withmark-tail` does: the arguments made, the frame left, and the
+  ;; call-out, which calls the thunk as a tail call.
+  (r-withmark-tail (subr (maxeff compiles spin) (rgen (listof exp finite) renv cenv) unit)
+    (lambda (g args env te)
+      (begin
+        (r-args g (r-exp-args args) env te (the (listof exp @k) nil))
+        (r-leave g)
+        (r-opnn g rop-cellular routine-withmark-tail 3)
+      ;; Never reached (the call-out goes on in the thunk): register code
+      ;; ends each path so.
+      (r-op0 g rop-return))))
   ;; A call: the arguments into REG1…REGn, the procedure in RESULT.
   (r-call (subr (maxeff compiles spin) (rgen exp (listof exp finite) renv cenv bool) unit)
     (lambda (g f args env te tail)

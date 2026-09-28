@@ -625,9 +625,20 @@ impl Compiler<'_> {
                     let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
                     self.r_call_out(g, "prim", p, &es, env, te)?;
                 }
-                // In tail position a mark replaces this frame's, which is
-                // stack code's way (`withmark-tail`); left to it.
-                Std::Cellular("withmark") if tail => return self.decline("with-mark in tail position"),
+                // In tail position a mark replaces this frame's, as stack
+                // code's `withmark-tail` does: the arguments made, the frame
+                // left, and the call-out, which calls the thunk as a tail
+                // call.
+                Std::Cellular("withmark") if tail => {
+                    let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+                    self.r_args(g, &es, env, te, None)?;
+                    g.leave();
+                    g.op("cellular", &[Value::fixnum(routine("withmark-tail") as i64), Gen::n(3)]);
+                    // Never reached (the call-out goes on in the thunk):
+                    // register code ends each path so.
+                    g.op("return", &[]);
+                    return Some(());
+                }
                 Std::Cellular(r) => {
                     let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
                     self.r_call_out(g, "cellular", routine(r) as i64, &es, env, te)?;

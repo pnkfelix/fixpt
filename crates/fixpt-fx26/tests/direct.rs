@@ -357,6 +357,9 @@ fn control_on_native_frames() {
         ("run/region-throws", "500500"),
         ("pldi89/c7", "(#<continuation> . #<continuation>)"),
         ("bench/captures", "420000"),
+        ("run/marks-of", "(7)"),
+        ("control/private-mark", "1"),
+        ("run/tail-marks", "(1 2)"),
     ];
     for (name, want) in programs {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");

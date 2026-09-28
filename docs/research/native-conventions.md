@@ -301,8 +301,15 @@ its code in one.
    the current run does (ending the regions entered since), a delimited
    one on top of its caller, and resumes where it was taken. Frames live
    on the stack until taken, as in Larceny's stack cache, not on the heap.
-   Still to do: a mark in tail position (register code declines it), a
-   continuation's frames as a bloblet of its own kind (slots in fields,
+   A mark in tail position replaces this frame, as the cellular machine's
+   `withmark-tail` does: register code makes the arguments, leaves the
+   frame, and calls out; the native code pushes a mark's frame and
+   tail-calls the thunk, which returns through a stub of the machine's
+   that pops the mark's frame (`mark_ret`); returning there already, a
+   mark's frame for the same key is on top, and its value is replaced, so
+   a loop that marks each time runs in constant space
+   (`programs/run/tail-marks.fx`). Still to do: a continuation's frames as
+   a bloblet of its own kind (slots in fields,
    links and return addresses in the suffix, so the collector skips them),
    and taking them lazily, a segment at a time.
 6. **Checks where work is unbounded**: fuel and stack limits as above,

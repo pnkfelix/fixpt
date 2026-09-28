@@ -118,6 +118,8 @@ struct DState {
     resume_pc: u64,
     resume_x0: u64,
     regions: u64,
+    /// The machine's `mark_ret`, where it runs.
+    mark_ret: u64,
 }
 
 /// The traps this code raises, by code.
@@ -342,6 +344,9 @@ pub struct DirectMachine {
     space: CodeSpace,
     /// The trampoline from Rust, and the common trap.
     entry: Offset,
+    /// Where a thunk a mark in tail position called returns: its mark's
+    /// frame popped, and back to that frame's return address.
+    mark_ret: Offset,
     stack: Vec<u64>,
     /// What each call-out any compiled code makes does, by number.
     callouts: Vec<Callout>,
@@ -377,7 +382,11 @@ impl DirectMachine {
         let entry = space.alloc(4 * code.len(), 16).ok_or("no room for the trampoline")?;
         space.write_code(entry, &code);
         space.flush(entry, 4 * code.len());
-        Ok(DirectMachine { space, entry, stack: vec![0; STACK_WORDS], callouts: Vec::new() })
+        let pop_mark = [ldp_post(FRAME, LINK, SP, CONTROL_FRAME as i64), ret()];
+        let mark_ret = space.alloc(4 * pop_mark.len(), 16).ok_or("no room for the mark's return")?;
+        space.write_code(mark_ret, &pop_mark);
+        space.flush(mark_ret, 4 * pop_mark.len());
+        Ok(DirectMachine { space, entry, mark_ret, stack: vec![0; STACK_WORDS], callouts: Vec::new() })
     }
 
     /// Compile `closure`'s procedure, and every procedure it calls or
@@ -457,6 +466,7 @@ impl DirectMachine {
         let target = rt.heap.code_exec_address(p.code) as u64;
         st.delta = target.wrapping_sub(p.code.raw());
         st.code_lo = rt.heap.code_area_address() as u64;
+        st.mark_ret = self.space.exec_addr(self.mark_ret) as u64;
         // SAFETY: the trampoline follows the C convention, saves what it
         // must, runs on the stack in `self.stack` (which outlives the call),
         // and touches only the state and that stack; the procedure's code,
@@ -936,7 +946,7 @@ impl Compiling<'_> {
                 // frame of its own around the thunk's call, which the frames'
                 // walk finds; the rest are call-outs, which walk the frames,
                 // and take and put back runs of them.
-                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "abort" | "callcc" | "callcomp" | "firstmark" | "currentmarks" | "marksof")) => {
+                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "withmark-tail" | "abort" | "callcc" | "callcomp" | "firstmark" | "currentmarks" | "marksof")) => {
                     if frame.is_none() {
                         return decline("a call-out outside a frame".into());
                     }
@@ -1014,6 +1024,38 @@ impl Compiling<'_> {
                             a.e(mov(CLO, 3));
                             call_clo(&mut a, &mut foreign, 0, after);
                             pop_control(&mut a);
+                        }
+                        // In tail position, this frame popped: `x1` the key,
+                        // `x2` the value, `x3` the thunk, tail-called with the
+                        // mark's frame under it, returning through
+                        // `mark_ret`, which pops that frame. Returning there
+                        // already, a mark's frame is on top: one for the same
+                        // key has its value replaced, as the cellular
+                        // machine's `withmark-tail` does, so that a loop that
+                        // marks each time runs in constant space.
+                        "withmark-tail" => {
+                            let (push, call, stub, after) = (a.label(), a.label(), a.label(), a.label());
+                            a.e(ldr(X9, ST, st_off(offset_of!(DState, mark_ret))));
+                            a.e(cmp(LINK, X9));
+                            a.to(push, Fix::If(Cond::Ne));
+                            a.e(ldr(X16, SP, 24));
+                            a.e(cmp(X16, 1));
+                            a.to(push, Fix::If(Cond::Ne));
+                            a.e(str(2, SP, 32));
+                            a.to(call, Fix::B);
+                            a.bind(push);
+                            control_frame(&mut a, &mut stubs, LINK, MARK_MARK, None);
+                            a.e(ldr(LINK, ST, st_off(offset_of!(DState, mark_ret))));
+                            a.bind(call);
+                            a.e(mov(CLO, 3));
+                            a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
+                            a.e(cmp(X16, X17));
+                            a.to(stub, Fix::If(Cond::Lo));
+                            foreign.push((stub, after, 0, true));
+                            a.e(add(X16, X16, DELTA));
+                            a.e(br(X16));
+                            a.bind(after);
                         }
                         "abort" => {
                             callout(&mut a, &mut stubs, self.callouts, Callout::Abort);
