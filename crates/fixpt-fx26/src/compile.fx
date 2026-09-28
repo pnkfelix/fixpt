@@ -185,7 +185,7 @@
 (define c-genv-count (ref int @k) (new 0))
 (define c-genv (ref int @k) (new -1))
 ;; The globals seen now, as a count, for a body to see them so later.
-(define c-genv-now (subr (maxeff (read @globals) (read @k)) () int)
+(define c-genv-now (subr (maxeff (read @k) (read (globals c-genv c-genv-count))) () int)
   (lambda () (if (< (get c-genv) 0) (get c-genv-count) (get c-genv))))
 (define c-global-first (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (pairof int loc @k) @k) int) (listof loc @k))
   (lambda (es limit)
