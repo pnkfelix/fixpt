@@ -2798,17 +2798,6 @@
     (if (null? bs)
         #u
         (begin (k-bind (car (car bs)) (k-name-nat (car (car bs)) (cdr (car bs)))) (k-bind-named (cdr bs))))))
-;; `t` with the sizes named since `saved` forgotten, as `finite`: they mean
-;; nothing outside the scope that named them. Pops them.
-(define k-forget-nats (subr (maxeff kstate spin) (k-ids int) int)
-  (lambda (saved t)
-    (letrec ((go (subr (maxeff kstate spin) (k-ids k-map) k-map)
-                   (lambda (vs m)
-                     (if (= (k-length vs) (k-length saved))
-                         m
-                         (go (cdr vs) (cons (cons (car vs) (dz (sz-finite))) m))))))
-      (let ((m (go (get k-skolems) nil)))
-        (begin (set k-skolems saved) (if (null? m) t (k-subst t m)))))))
 (define k-note-letrec (subr (maxeff kstate spin) ((listof (productof (1 symbol) (2 int) (3 kx)) finite) bool) unit)
   (lambda (bs spins)
     (if (null? bs)
@@ -3161,6 +3150,33 @@
           (let* ((counts (k-size-params ps v seen)) (res (k-size-walk r 1 v seen)))
             (and (= (+ (extract counts 1) res) 0) (<= (extract counts 2) 1))))
         (else y (= (k-size-walk body 1 v seen) 0))))))
+;; `t` with the sizes named since `saved` forgotten, as `finite`: they mean
+;; nothing outside the scope that named them. Pops them.
+;; `t` with the sizes named since `saved` forgotten, as `finite`: they mean
+;; nothing outside the scope that named them. Pops them. Each stands for one
+;; value's size, which no caller chooses, so it may be forgotten only where
+;; `t` gives it back: where a caller would supply something of that size,
+;; forgetting it would let any size in (`docs/research/soundness-findings.md`,
+;; F8), and that is an error at `a`–`b`.
+(define k-forget-nats (subr (maxeff checks spin) (k-ids int int int) int)
+  (lambda (saved t a b)
+    (letrec ((named (subr (maxeff kstate spin) (k-ids k-ids) k-ids)
+                      (lambda (vs out) (if (= (k-length vs) (k-length saved)) out (named (cdr vs) (the k-ids (cons (car vs) out))))))
+             (check (subr (maxeff checks spin) (k-ids) unit)
+                      (lambda (vs)
+                        (cond ((null? vs) #u)
+                              ((> (k-size-walk t 1 (car vs) (the k-seen-pol (new nil))) 0)
+                               (let ((name (k-quote (symbol->string (k-dvar-name (car vs))))))
+                                 (k-fail (k-cat5 (k-cat3 "this is a " (k-show-ty t) ", which takes something of the size of ") name
+                                                 ", and that size is not known outside " name "'s scope")
+                                         a b)))
+                              (else (check (cdr vs))))))
+             (go (subr (maxeff kstate spin) (k-ids k-map) k-map)
+                   (lambda (vs m) (if (null? vs) m (go (cdr vs) (cons (cons (car vs) (dz (sz-finite))) m))))))
+      (let ((vs (named (get k-skolems) nil)))
+        (begin (set k-skolems saved)
+               (check vs)
+               (if (null? vs) t (k-subst t (go vs nil))))))))
 (define k-check-finite-sizes (subr (maxeff checks spin) (k-binders k-map int int int) unit)
   (lambda (kinds m body a b)
     (if (null? kinds)
@@ -3716,6 +3732,17 @@
       (or (null? arms)
           (and (or (k-has-name? (extract (car arms) 3) k) (k-only-called? (extract (car arms) 4) k))
                (k-only-called-arms? (cdr arms) k))))))
+;; Whether the receiver of `cwcc` at type `ft` may capture a continuation:
+;; its latent effect has a `comefrom`. Unknown counts as may.
+(define k-receiver-captures? (subr (maxeff (read @t) (alloc @t) spin) (int) bool)
+  (lambda (ft)
+    (let ((c (k-as-subr ft)))
+      (or (null? c) (null? (extract (car c) 2))
+          (let ((r (k-as-subr (k-resolve (car (extract (car c) 2))))))
+            (or (null? r)
+                (letrec ((any (subr pure (k-eff) bool)
+                              (lambda (e) (and (not (null? e)) (or (tagcase (car e) (a-comefrom (x) #t) (else y #f)) (any (cdr e)))))))
+                  (any (extract (car r) 1)))))))))
 ;; Whether `r`, given to `cwcc`, is a `lambda` whose continuation can only
 ;; be called while `cwcc` runs, so can only leave it
 ;; (`docs/research/soundness-findings.md`, F3).
@@ -3750,8 +3777,12 @@
       (cond ;; A continuation called after `cwcc` has returned comes back to
             ;; it again, as often as it is called: only one that can only
             ;; leave needs no `spin`.
+            ;; And the receiver must capture no continuation, which could
+            ;; hold a call of `k` and be run after `cwcc` returns (F9): a
+            ;; `comefrom` in its latent effect, `cwcc`'s `e` as solved.
             ((and (>= t 0) (string=? (symbol->string (car s)) "cwcc") (k-named-has? (get k-std) (car s) t))
-             (not (and (not (null? args)) (null? (cdr args)) (k-escape-only? (car args)))))
+             (or (k-receiver-captures? ft)
+                 (not (and (not (null? args)) (null? (cdr args)) (k-escape-only? (car args))))))
             ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
             ((and (>= t 0) (or (k-known? (car s)) (k-named-has? (get k-std) (car s) t))) #f)
             ((k-lambda? (k-under f)) #f)
@@ -4689,7 +4720,7 @@
               (let ((rb (k-synth body)))
                 (begin
                   (k-unbind-to saved)
-                  (let ((t (k-forget-nats named (extract rb 1))))
+                  (let ((t (k-forget-nats named (extract rb 1) a b)))
                     (k-te t (k-mask x (k-union (extract inits 2) (extract rb 2)) t))))))))
         (x-prompt (t body h a b) (k-synth-prompt x t body h))
         ;; The region's name is a variable too, of type `(place r)`, when
@@ -4779,7 +4810,7 @@
                             (let ((r (k-synth body))) (k-te (extract r 1) (k-mask body (extract r 2) (extract r 1)))))))
                 (begin
                   (k-unbind-to saved)
-                  (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (k-forget-nats named (extract r 1)))) nil))))))
+                  (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (k-forget-nats named (extract r 1) a b))) nil))))))
         (else y (k-fail "a lambda" (k-start x) (k-end x))))))
   ;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
   ;; result types if it is a subroutine's, with `(read R)` in its latent

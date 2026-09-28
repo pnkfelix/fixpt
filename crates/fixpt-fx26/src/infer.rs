@@ -282,7 +282,8 @@ impl Checker {
             None => self.synth(body).map(|(t, eff)| (t, self.mask(body, &eff, t))),
         };
         self.truncate_env(depth);
-        let r = r.map(|(t, latent)| (self.forget_nats(named, t), latent));
+        let span = self.arena.span_of(e);
+        let r = r.and_then(|(t, latent)| Ok((self.forget_nats(named, t, span)?, latent)));
         self.skolems.truncate(named);
         let (result, latent) = r?;
         let t = self.arena.ty(Ty::Subr { effect: latent, params: typed.iter().map(|(_, t)| *t).collect(), result });
@@ -504,7 +505,15 @@ impl Checker {
             && self.interner.name(s) == "cwcc"
             && self.is_standard(s)
         {
-            return !matches!(args, [r] if self.escape_only(*r));
+            // And the receiver must capture no continuation: one captured
+            // inside it could hold a call of `k`, and be run after `cwcc`
+            // has returned (F9). A capture shows as a `comefrom` in the
+            // receiver's latent effect, what `cwcc`'s `e` was solved to.
+            let captures = self.arena.get(ft).as_subr().and_then(|(_, ps, _)| {
+                let p = *ps.first()?;
+                self.arena.get(self.arena.resolve(p)).as_subr().map(|(e, _, _)| e.0.iter().any(|a| matches!(a, Atom::Comefrom(_))))
+            });
+            return captures != Some(false) || !matches!(args, [r] if self.escape_only(*r));
         }
         if let Some(b) = binding {
             if self.recursive.contains(&b) {

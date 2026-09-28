@@ -355,12 +355,31 @@ impl Checker {
     }
 
     /// `t` with the sizes named since `depth` forgotten, as `finite`: they
-    /// mean nothing outside the scope that named them. Pops them.
-    pub(crate) fn forget_nats(&mut self, depth: usize, t: TyId) -> TyId {
+    /// mean nothing outside the scope that named them. Pops them. Each
+    /// stands for one value's size, which no caller chooses, so it may be
+    /// forgotten only where `t` gives it back: where a caller would supply
+    /// something of that size, forgetting it would let any size in
+    /// (`docs/research/soundness-findings.md`, F8), and that is an error.
+    pub(crate) fn forget_nats(&mut self, depth: usize, t: TyId, span: fixpt_read::Span) -> crate::error::R<TyId> {
         if self.skolems.len() == depth {
-            return t;
+            return Ok(t);
         }
-        let map: std::collections::HashMap<DVar, D> = self.skolems.drain(depth..).map(|v| (v, D::Size(Size::Finite))).collect();
-        self.subst(t, &map)
+        let named: Vec<DVar> = self.skolems.drain(depth..).collect();
+        for v in &named {
+            let mut bad = 0;
+            self.size_walk(t, Polarity::Pos, *v, &mut bad, &mut HashSet::new());
+            if bad > 0 {
+                let name = self.interner.name(self.arena.dvar_name(*v)).to_string();
+                return Err(crate::error::FxError::at(
+                    span,
+                    format!(
+                        "this is a {}, which takes something of the size of `{name}`, and that size is not known outside `{name}`'s scope",
+                        self.show_ty(t)
+                    ),
+                ));
+            }
+        }
+        let map: std::collections::HashMap<DVar, D> = named.into_iter().map(|v| (v, D::Size(Size::Finite))).collect();
+        Ok(self.subst(t, &map))
     }
 }

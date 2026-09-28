@@ -490,7 +490,7 @@ impl Checker {
                 }
                 let r = self.synth(body);
                 self.truncate_env(depth);
-                let r = r.map(|(t, be)| (self.forget_nats(named, t), be));
+                let r = r.and_then(|(t, be)| Ok((self.forget_nats(named, t, span)?, be)));
                 self.skolems.truncate(named);
                 let (t, be) = r?;
                 let eff = self.mask(e, &eff.union(&be), t);

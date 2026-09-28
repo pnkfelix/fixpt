@@ -1165,6 +1165,66 @@ In the user's order:
    the front end's trees in plain `finite` need none. A first step toward
    GADTs (6).
 
+### Progress, and what the queue gained (2026-09-27, later)
+
+Done since the list above was written:
+- **Sizes** (`docs/research/sizes.md`): N5a (`(nlist T n)`, `finite`,
+  `confirm-length` with a literal), N5b (size variables, facts from
+  `null?`), N5d (`nat` and `(nat s)`, facts from comparisons, `length`,
+  `confirm-length` with a run-time length, `confirm-nat`, `string-length`
+  and `array-length` as naturals, size-change bounded below by a `nat`).
+  `vec` was renamed `nlist`.
+- **`sexp-edit`** (`crates/fixpt-tidy`): structural edits of `.fx` by
+  definition name, and an `order` report of uses before definitions.
+- **Soundness** (`docs/research/soundness.md`, `soundness-regions.md`,
+  `soundness-findings.md`): K26, a core of FX-26, with a small-step
+  semantics over places and regions; progress and preservation proved,
+  control included; no use after free, frozen never written and `finite`
+  acyclic proved. Holes found and closed in both checkers: F1 (known
+  procedures by binding), F2 (reads of data frozen into a place are an
+  effect on it), F3 and F9 (`cwcc` says `spin` unless its continuation can
+  only leave, and its receiver captures no continuation), F4 and F8 (a size
+  may be forgotten as `finite` only where it is given back, or sizes one
+  parameter), F5 (the self-application test's depth bound says "may loop"),
+  F6 (`no-escape` only for first-order data), F7 (a whole continuation's
+  throw ends the regions it leaves), A2 (a generative name whose
+  representation is a parameter is no constructor).
+
+New, in rough order:
+1. **Soundness, still open**: effect soundness T3 in full (a composable
+   continuation's effect need not describe what its frames touch); lemma
+   erasure T4; termination of code free of `spin`, T5, conjectured, which
+   wants a step-indexed or Kripke logical relation over region levels and a
+   proof of size-change; the space theorem T6, which wants a harness that
+   measures space against `S_place`. Probe each new rule with the
+   soundness agent before building on it.
+2. **N5c**: inequalities between size variables (Fourier–Motzkin),
+   existential sizes for results such as `filter`'s ("at most n"), and
+   array sizes with bounds from facts (CF4).
+3. **Quick wins in the front end written in FX-26**
+   (`docs/research/fx-idiomatic-opportunities.md`): finite bucket spines in
+   `table.fx`; loops bounded by `>=` or a `nat` rather than `=`, so the
+   array copies need no `spin`; tighter declared effects (`len`, `nth`,
+   `drop`, `syn-nil?`); products for the 57 unmutated pairs in `check.fx`;
+   sums for the integer codes (kinds, variance, region forms); an `opt`
+   type for the `-1` sentinels and "none or one" lists; finite lists in the
+   compiler's refs; structured errors instead of re-parsed messages.
+   Those that change no message go in the mirror; the rest wait for
+   `src/fx-idiomatic/`, whose first files are `table.fx`, then `arm64.fx`,
+   then `parser.fx`, and `check.fx` last.
+4. **Language gaps the survey found**: size-change cannot see that a
+   helper's result is a part of its argument (`nth`, `drop`, `syn-items`:
+   why the parser needs `spin`); a datatype's constructor gives the whole
+   datatype, not its variant, and there is no "all but one variant" type;
+   no `opt` in a prelude; no identity equality or hash on mutable objects;
+   no test of whether an I-cell is full; no append-only (arena) effect; no
+   handlers for named effects, so global failure tags cannot be masked; no
+   modules polymorphic in their regions; no productivity for the eager
+   reader; no termination measure over state for walks of graphs. A top
+   effect (5) was needed nowhere in the front end.
+5. **Error messages for `nlist`**: say "a (nlist t n), where a (pairof t
+   (nlist t n) finite) is expected" in terms of lengths.
+
 ### Kept open, deliberately
 
 - **Values held by Rust across calls, typed away.** (Raised 2026-09-26,
