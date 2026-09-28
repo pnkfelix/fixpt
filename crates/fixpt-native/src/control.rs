@@ -15,7 +15,7 @@
 use fixpt_engine::threaded::{prompt_height, prompt_regions, prompt_word, reinstated_prompt, MARK_MARK, PROMPT_MARK, Trap};
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::threaded::{
-    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_WHOLE, WORD_CELL0,
+    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_WHOLE, WORD_CELL0,
 };
 use fixpt_heap::{Heap, Value};
 
@@ -146,7 +146,7 @@ fn enter_above(s: &mut Stacks, heap: &Heap, thunk: Value, marker: [Value; 4], ro
 }
 
 /// Call the closure or continuation on top with the `n` values below it.
-fn call(s: &mut Stacks, heap: &Heap, n: usize, tail: bool, routine: &'static str) -> Result<(), Trap> {
+fn call(s: &mut Stacks, heap: &mut Heap, n: usize, tail: bool, routine: &'static str) -> Result<(), Trap> {
     if s.ds_len() < s.fp() + n + 1 {
         return Err(Trap::Underflow { routine });
     }
@@ -212,6 +212,7 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
         (CONT_CLO, Value(s.st.clo)),
         (CONT_BASE, Value::fixnum(ds_from as i64)),
         (CONT_WHOLE, Value::boolean(whole)),
+        (CONT_REGIONS, Value::fixnum(heap.live_regions() as i64)),
     ];
     for (f, v) in fields {
         heap.set_bloblet_slot(k, f, v);
@@ -222,7 +223,7 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
 /// Give continuation `k` the value `v`: composed onto these stacks, frame
 /// pointers and prompts' heights moved by the difference in depth; or,
 /// whole, replacing them.
-fn reinstate(s: &mut Stacks, heap: &Heap, k: Value, v: Value, tail: bool) -> Result<(), Trap> {
+fn reinstate(s: &mut Stacks, heap: &mut Heap, k: Value, v: Value, tail: bool) -> Result<(), Trap> {
     let ds = heap.bloblet_slot(k, CONT_DS);
     let rs = heap.bloblet_slot(k, CONT_RS);
     let whole = heap.bloblet_slot(k, CONT_WHOLE) == Value::TRUE;
@@ -230,6 +231,8 @@ fn reinstate(s: &mut Stacks, heap: &Heap, k: Value, v: Value, tail: bool) -> Res
     if whole {
         s.ds_truncate(0);
         s.rs_truncate(0);
+        // The regions entered since it was taken end, as an abort's do.
+        heap.region_exit(heap.bloblet_slot(k, CONT_REGIONS).as_fixnum() as usize);
     } else if tail {
         let fp = s.fp();
         s.ds_truncate(fp);

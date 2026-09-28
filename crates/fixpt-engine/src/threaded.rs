@@ -20,7 +20,7 @@
 
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::threaded::{
-    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_WHOLE,
+    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_WHOLE,
     KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
 };
 use fixpt_heap::{Heap, Value};
@@ -543,6 +543,7 @@ impl Machine {
             (CONT_CLO, r.clo),
             (CONT_BASE, Value::fixnum(ds_from as i64)),
             (CONT_WHOLE, Value::boolean(whole)),
+            (CONT_REGIONS, Value::fixnum(heap.live_regions() as i64)),
         ];
         for (f, v) in fields {
             heap.set_bloblet_slot(k, f, v);
@@ -555,7 +556,7 @@ impl Machine {
     /// by the difference in depth, and it returns here; or, from a tail
     /// call, to this frame's caller, this frame dropped, as a tail call of a
     /// closure does. A whole one replaces these stacks.
-    fn reinstate(&mut self, heap: &Heap, r: &mut Regs, k: Value, v: Value, tail: bool) {
+    fn reinstate(&mut self, heap: &mut Heap, r: &mut Regs, k: Value, v: Value, tail: bool) {
         let ds = heap.bloblet_slot(k, CONT_DS);
         let rs = heap.bloblet_slot(k, CONT_RS);
         let whole = heap.bloblet_slot(k, CONT_WHOLE) == Value::TRUE;
@@ -563,6 +564,10 @@ impl Machine {
         if whole {
             self.ds.clear();
             self.rs.truncate(self.rs_floor);
+            // The regions entered since it was taken were the frames' it
+            // replaces: nothing left can resume their bodies, so they end,
+            // as an abort's do (`docs/research/soundness-findings.md`, F7).
+            heap.region_exit(heap.bloblet_slot(k, CONT_REGIONS).as_fixnum() as usize);
         } else if tail {
             self.ds.truncate(r.fp);
         } else {

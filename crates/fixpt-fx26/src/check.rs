@@ -134,8 +134,9 @@ pub struct NodeFacts {
     /// Applications whose operator is a standard binding, by name. The
     /// initial environment cannot be assigned, so the operator is known.
     pub standard_operator: HashMap<ExpId, Sym>,
-    /// Expressions that allocate, where masking removed every allocation:
-    /// nothing they allocate outlives them.
+    /// Expressions that allocate, where masking removed every allocation
+    /// and the value is first-order data (`Checker::first_order`): nothing
+    /// they allocate outlives them.
     pub no_escape: HashSet<ExpId>,
     /// Each `extract`'s field, by position: lowering needs it, and only the
     /// product's type says it.
@@ -310,8 +311,12 @@ impl Checker {
         Ok((t, eff))
     }
 
-    /// `eff` with what it does to frozen data taken out, since reading it
-    /// and making it are pure; or an error, if it writes it.
+    /// `eff` with what it does to data frozen in the heap taken out, since
+    /// reading it and making it are pure; or an error, if it writes frozen
+    /// data. What it does to data frozen into a place stays: the place
+    /// ends, and the atom is what ties a closure that reads the data to it
+    /// (`docs/research/soundness-findings.md`, F2), until masking removes
+    /// it where the place is no longer seen.
     pub(crate) fn frozen(&self, e: ExpId, eff: Effect) -> R<Effect> {
         if !eff.0.iter().any(|a| a.region().is_some_and(Region::is_frozen)) {
             return Ok(eff);
@@ -319,7 +324,8 @@ impl Checker {
         if eff.0.iter().any(|a| matches!(a, Atom::Write(r) if r.is_frozen())) {
             return Err(FxError::at(self.arena.span_of(e), "this writes frozen data, whose region is `const`"));
         }
-        Ok(Effect(eff.0.into_iter().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if r.is_frozen())).collect()))
+        let in_heap = |r: &Region| matches!(r, Region::Frozen(None, _));
+        Ok(Effect(eff.0.into_iter().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if in_heap(r))).collect()))
     }
 
     /// Whether `s`, where it is used, is the initial environment's binding.
@@ -703,8 +709,17 @@ impl Checker {
             .copied()
             .filter(|a| match a.region() {
                 None => true,
-                // What is done to frozen data is never masked: writing it is
-                // an error wherever it happens (`frozen`).
+                // Reading data frozen into a place, or awaiting it, is
+                // masked as what is done to the place is: where nothing
+                // outside sees the place.
+                Some(r @ Region::Frozen(Some(p), _)) if !matches!(a, Atom::Write(_)) => {
+                    let place = Region::Var(p);
+                    visible.contains(&r)
+                        || visible.contains(&place)
+                        || ((in_result.contains(&r) || in_result.contains(&place)) && matches!(a, Atom::Alloc(_)))
+                }
+                // What else is done to frozen data is never masked: writing
+                // it is an error wherever it happens (`frozen`).
                 Some(Region::Frozen(..)) => true,
                 Some(r) if visible.contains(&r) => true,
                 Some(r) if in_result.contains(&r) => {
@@ -715,10 +730,38 @@ impl Checker {
             .collect();
         let kept = Effect(kept);
         let allocates = |x: &Effect| x.0.iter().any(|a| matches!(a, Atom::Alloc(_)));
-        if allocates(effect) && !allocates(&kept) {
+        // Masking alone does not show the allocation dead: a closure in
+        // the value may hold it, its type saying nothing of the region
+        // (`docs/research/soundness-findings.md`, F6). A value of data whose
+        // type names the region of all it reaches holds none of it.
+        if allocates(effect) && !allocates(&kept) && self.first_order(result) {
             self.facts.no_escape.insert(e);
         }
         kept
+    }
+
+    /// Whether a value of type `t` reaches only storage its type names:
+    /// data, references, arrays, cells and bloblets of such, with no
+    /// procedure, continuation, tag, key, generative type or type variable
+    /// anywhere that could hold what its type does not say.
+    fn first_order(&self, t: TyId) -> bool {
+        let mut seen = HashSet::new();
+        let mut stack = vec![t];
+        while let Some(t) = stack.pop() {
+            let t = self.arena.resolve(t);
+            if !seen.insert(t) {
+                continue;
+            }
+            match self.arena.get(t) {
+                Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Place(_) => {}
+                Ty::Pair(a, b, _) => stack.extend([*a, *b]),
+                Ty::NList { elem: a, .. } | Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) => stack.push(*a),
+                Ty::Bloblet { fields, .. } => stack.extend(fields),
+                Ty::Product(ps) | Ty::Sum(ps) => stack.extend(ps.iter().map(|(_, x)| *x)),
+                _ => return false,
+            }
+        }
+        true
     }
 
     /// The value variables free in `e`.

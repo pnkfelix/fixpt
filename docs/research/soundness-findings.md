@@ -20,19 +20,26 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 
 ## Status
 
-| item | status                                                                                                                                     |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| F1   | fixed: `known` is by binding (its place in `env`; in `check.fx`, a flag beside each binding), forgotten as its scope ends                  |
-| F2   | open: a fragility, no hole shown                                                                                                           |
-| F3   | open                                                                                                                                       |
-| F4   | fixed: a size binder may be `finite` only as the size of at most one parameter's own `(nlist T n)` or `(nat n)`, and nowhere else supplied |
-| F5   | fixed: past the depth bound, the self-application test says the procedure may loop                                                         |
-| F6   | open, latent                                                                                                                               |
-| F7   | open                                                                                                                                       |
+| item | status                                                                                                                                                                                                                                                                                      |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1   | fixed: `known` is by binding (its place in `env`; in `check.fx`, a flag beside each binding), forgotten as its scope ends                                                                                                                                                                   |
+| F2   | fixed: reading data frozen into a place is an effect on it, masked where the place is not seen; only heap-frozen reads are pure                                                                                                                                                             |
+| F3   | fixed: a `cwcc` call says `spin` unless its receiver's continuation can only be called while `cwcc` runs; a kept composable continuation is refused by the knot rule                                                                                                                        |
+| F4   | fixed: a size binder may be `finite` only as the size of at most one parameter's own `(nlist T n)` or `(nat n)`, and nowhere else supplied                                                                                                                                                  |
+| F5   | fixed: past the depth bound, the self-application test says the procedure may loop                                                                                                                                                                                                          |
+| F6   | fixed: `no-escape` only where the value is first-order data                                                                                                                                                                                                                                 |
+| F7   | fixed: a continuation keeps how many regions were live when taken; reinstated whole, it ends those entered since, in both threaded machines                                                                                                                                                 |
+| A1   | holds for the constructs present (the syntactic rule is the stronger)                                                                                                                                                                                                                       |
+| A2   | fixed: a generative type whose representation is one of what it is given is no constructor for the recursive-type rule                                                                                                                                                                      |
+| A3   | holds by construction: every `datum` is made by FX-26's own constructors (fresh pairs of acyclic data; lists checked proper, cycle-safely) or its reader; the host passes no datum in. The contract for Scheme code calling an `fx:` global directly is that a `datum` it passes is acyclic |
 
 Tests: `tests/programs/terminate/known-shadowed.fx`,
-`known-let-shadowed.fx` and `deep-self-application.fx`;
-`tests/programs/sizes/finite-*.fx`.
+`known-let-shadowed.fx`, `deep-self-application.fx`, `cwcc-kept.fx`,
+`cwcc-escape.fx` and `composable-kept.fx`; `tests/programs/sizes/finite-*.fx`;
+`tests/programs/regions/frozen-read-effect.fx`;
+`tests/programs/generative/unguarded-cycle.fx`; `tests/run.rs`
+(`no-escape`); `tests/register_code.rs`, `a_throw_ends_the_regions_it_leaves`
+(`run/region-throws.fx`).
 
 ## F1 — "known" procedures are exempt from the spin test by name and type
 

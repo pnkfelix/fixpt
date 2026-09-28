@@ -482,15 +482,61 @@ impl Checker {
     fn grounded(&self, slot: TyId, span: fixpt_read::Span) -> R<()> {
         let mut seen = std::collections::HashSet::new();
         let mut id = slot;
-        // A `poly` is no constructor either: a cycle through `poly`s alone
-        // describes no type, and unfolding it would never end.
-        while let Ty::Link(Some(next)) | Ty::Poly { body: next, .. } = self.arena.get_raw(id) {
+        loop {
+            let next = match self.arena.get_raw(id) {
+                // A `poly` is no constructor either: a cycle through `poly`s
+                // alone describes no type, and unfolding it would never end.
+                Ty::Link(Some(next)) | Ty::Poly { body: next, .. } => *next,
+                // Nor is a generative type whose representation is one of
+                // what it is given: it is that (`docs/research/
+                // soundness-findings.md`, A2).
+                Ty::Named { which, args } => match self.named_head(*which, args) {
+                    Some(next) => next,
+                    None => return Ok(()),
+                },
+                _ => return Ok(()),
+            };
             if !seen.insert(id) {
                 return Err(FxError::at(span, "a recursive type must be built from a constructor, not only from names"));
             }
-            id = *next;
+            id = next;
         }
-        Ok(())
+    }
+
+    /// The type the `which`th generative type, given `args`, is at its
+    /// head, if its representation is one of its type parameters, perhaps
+    /// through other such generative types: what it is given there. `None`
+    /// if its representation has a constructor at its head.
+    fn named_head(&self, mut which: u32, args: &[D]) -> Option<TyId> {
+        let mut args = args.to_vec();
+        let mut seen = std::collections::HashSet::new();
+        while seen.insert(which) {
+            let g = &self.generatives[which as usize];
+            let param = |t: TyId| match self.arena.get(self.arena.resolve(t)) {
+                Ty::Var(v) => g.params.iter().position(|(p, _)| p == v),
+                _ => None,
+            };
+            match self.arena.get(self.arena.resolve(g.rep)) {
+                Ty::Var(_) => {
+                    return match args.get(param(g.rep)?) {
+                        Some(D::Type(t)) => Some(*t),
+                        _ => None,
+                    };
+                }
+                Ty::Named { which: h, args: inner } => {
+                    args = inner
+                        .iter()
+                        .map(|d| match d {
+                            D::Type(t) => param(*t).and_then(|i| args.get(i).cloned()).unwrap_or(d.clone()),
+                            _ => d.clone(),
+                        })
+                        .collect();
+                    which = *h;
+                }
+                _ => return None,
+            }
+        }
+        None
     }
 
     /// `(define-type (name (param kind) …) type)`: bind a parametric

@@ -450,7 +450,7 @@ impl Checker {
             effect = effect.union(&eff);
         }
         let mut effect = effect.union(&latent);
-        if self.may_spin(fun, ft) {
+        if self.may_spin(fun, ft, args) {
             effect.0.insert(Atom::Spin);
         }
         let effect = self.mask(e, &effect, result);
@@ -468,8 +468,18 @@ impl Checker {
     /// A knot tied through the store needs nothing here: a procedure kept
     /// in storage whose latent effect reads that storage must say `spin`
     /// (`no_knot`), so latent effects can be trusted.
-    fn may_spin(&self, fun: ExpId, ft: TyId) -> bool {
+    fn may_spin(&self, fun: ExpId, ft: TyId, args: &[ExpId]) -> bool {
         let binding = self.callee_binding(fun);
+        // A continuation called after `cwcc` has returned comes back to it
+        // again, as often as it is called: recursion with no procedure at
+        // all (`docs/research/soundness-findings.md`, F3). Only one that
+        // cannot outlive the call, so can only leave it, needs no `spin`.
+        if let Some((s, _)) = binding
+            && self.interner.name(s) == "cwcc"
+            && self.is_standard(s)
+        {
+            return !matches!(args, [r] if self.escape_only(*r));
+        }
         if let Some(b) = binding {
             if self.recursive.contains(&b) {
                 return true;
@@ -485,6 +495,51 @@ impl Checker {
             f = *body;
         }
         !self.is_lambda(f) && self.cyclic(ft)
+    }
+
+    /// Whether `receiver`, given to `cwcc`, is a `lambda` whose continuation
+    /// can only be called while `cwcc` runs: its parameter is named only as
+    /// the operator of calls in its body, outside any `lambda` (which could
+    /// be called later) and any prompt (whose captures could be composed
+    /// later).
+    fn escape_only(&self, receiver: ExpId) -> bool {
+        let mut r = receiver;
+        while let Exp::The { exp, .. } = self.arena.exp_at(r) {
+            r = *exp;
+        }
+        match self.arena.exp_at(r) {
+            Exp::Lambda { params, body } if params.len() == 1 => self.only_called(*body, params[0].0),
+            _ => false,
+        }
+    }
+
+    /// Whether `k` is named in `e` only as the operator of calls, evaluated
+    /// as `e` is.
+    fn only_called(&self, e: ExpId, k: Sym) -> bool {
+        let all = |xs: Vec<ExpId>| xs.into_iter().all(|x| self.only_called(x, k));
+        match self.arena.exp_at(e).clone() {
+            Exp::Var(s) => s != k,
+            Exp::App { fun, args } => {
+                (matches!(self.arena.exp_at(fun), Exp::Var(s) if *s == k) || self.only_called(fun, k)) && all(args)
+            }
+            Exp::Lambda { .. } | Exp::PLambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } => {
+                !self.free_vars(e).contains(&k)
+            }
+            Exp::Let { bindings, body } => {
+                all(bindings.iter().map(|(_, x)| *x).collect()) && (bindings.iter().any(|(n, _)| *n == k) || self.only_called(body, k))
+            }
+            Exp::LetRegion { region, body, .. } => self.arena.dvar_name(region) == k || self.only_called(body, k),
+            Exp::TagCase { scrutinee, arms, els } => {
+                self.only_called(scrutinee, k)
+                    && arms.iter().all(|arm| arm.names().contains(&k) || self.only_called(arm.body, k))
+                    && els.is_none_or(|(y, body)| y == k || self.only_called(body, k))
+            }
+            Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Extract(body, _) | Exp::Sum(_, body) => self.only_called(body, k),
+            Exp::If { test, then, els } => all(vec![test, then, els]),
+            Exp::Begin(items) | Exp::Bloblet { args: items, .. } => all(items),
+            Exp::Product(fields) => all(fields.into_iter().map(|(_, x)| x).collect()),
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => true,
+        }
     }
 
     /// The binding `f` names, under any projections and ascriptions: its

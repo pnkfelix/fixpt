@@ -82,6 +82,9 @@ fn the_checkers_facts_are_in_the_lowered_code() {
     assert!(c.contains("(basis checked)"), "{c}");
     let c = code("(let ((r (new 1))) (get r))");
     assert!(c.contains("(no-escape)"), "{c}");
+    // A closure returned holds what it captured, whatever its type says.
+    let c = code("(let ((x (cons 1 2))) (lambda () (begin x 1)))");
+    assert!(!c.contains("(no-escape)"), "{c}");
     // A local that shadows a standard name is not the standard binding.
     let c = code("((lambda ((car (subr pure (int) int))) (car 1)) (lambda ((x int)) x))");
     assert!(!c.contains("(integrable car)"), "{c}");

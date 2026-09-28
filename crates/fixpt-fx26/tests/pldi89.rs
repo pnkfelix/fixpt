@@ -147,7 +147,10 @@ fn c5_cwcc_calls_are_not_pure() {
         .expect("checks");
     // STATED: "cannot be pure" (p. 4). Exact form DERIVED with `e = pure`, and
     // it survives masking because the result type `K` mentions `@k` (p. 6).
-    effect_is(&mut c, &got.effect, "(comefrom @k)");
+    // FX-26's own: `spin`, since the continuation, returned, can be called
+    // after `cwcc` has returned, and come back to it again
+    // (`docs/research/soundness-findings.md`, F3).
+    effect_is(&mut c, &got.effect, "(maxeff (comefrom @k) spin)");
 }
 
 // ------------------------------------------------------------------- C6
@@ -168,8 +171,9 @@ fn c6_checker(masking: bool) -> Checker {
 fn c6_a_stored_continuation_keeps_its_comefrom() {
     let mut c = c6_checker(false);
     let before = c.check_str(C6).expect("checks");
-    // DERIVED by the application rule (p. 3).
-    effect_is(&mut c, &before.effect, "(maxeff (comefrom @k) (write @x))");
+    // DERIVED by the application rule (p. 3); and FX-26's own `spin`, since
+    // the continuation is kept, and could be called after `cwcc` returns (F3).
+    effect_is(&mut c, &before.effect, "(maxeff (comefrom @k) (write @x) spin)");
 
     let mut c = c6_checker(true);
     let after = c.check_str(C6).expect("checks");

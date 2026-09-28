@@ -355,8 +355,10 @@ pub mod threaded {
 
     /// A threaded continuation's fields: the data stack's values and the
     /// return stack's entries it took (vectors), where it was (word, `k`,
-    /// frame pointer, closure), the data stack's height it started at, and
-    /// whether it is the whole continuation (`callcc`) or delimited.
+    /// frame pointer, closure), the data stack's height it started at,
+    /// whether it is the whole continuation (`callcc`) or delimited, and how
+    /// many regions were live when it was taken: reinstated whole, it ends
+    /// any entered since, as an abort does.
     pub const CONT_DS: usize = 2;
     pub const CONT_RS: usize = 3;
     pub const CONT_CUR: usize = 4;
@@ -365,7 +367,8 @@ pub mod threaded {
     pub const CONT_CLO: usize = 7;
     pub const CONT_BASE: usize = 8;
     pub const CONT_WHOLE: usize = 9;
-    pub const CONT_FIELDS: usize = 8;
+    pub const CONT_REGIONS: usize = 10;
+    pub const CONT_FIELDS: usize = 9;
 
     pub const fn routine(name: &str) -> u64 {
         let mut i = 0;

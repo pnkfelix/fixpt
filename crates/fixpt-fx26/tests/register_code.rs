@@ -208,6 +208,19 @@ fn an_abort_ends_the_regions_it_leaves() {
     }
 }
 
+/// A throw to a whole continuation, out of the bodies of regions entered
+/// since it was taken, ends them, as an abort does
+/// (`docs/research/soundness-findings.md`, F7).
+#[test]
+fn a_throw_ends_the_regions_it_leaves() {
+    for gc_every in [None, Some(1)] {
+        let (got, words, live) = run_in_registers("region-throws.fx", gc_every);
+        assert_eq!(got, (500 * 1001).to_string());
+        assert_eq!(words, 1000 * 4, "two pairs each round");
+        assert_eq!(live, 0);
+    }
+}
+
 /// A `letreap` is collected while its body runs: 300,000 pairs go
 /// through it, though it holds a thousand live at a time; and it ends.
 #[test]

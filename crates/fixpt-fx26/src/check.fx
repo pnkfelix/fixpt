@@ -1088,6 +1088,44 @@
                             (k-cat3 "`, so it could reach itself: it must say `spin`, and it is a " (k-show-ty (cdr (car found))) ""))
                     a b))))))
 
+;; Where description variable `v` is among binders `bs`, from `i`, or -1.
+(define k-binder-index (subr pure (k-binders int int) int)
+  (lambda (bs v i) (cond ((null? bs) -1) ((= (extract (car bs) 1) v) i) (else (k-binder-index (cdr bs) v (+ i 1))))))
+;; The `i`th description of `ds`, none or one.
+(define k-desc-at (subr pure ((listof k-desc finite) int) (listof k-desc finite))
+  (lambda (ds i) (cond ((null? ds) nil) ((= i 0) (the (listof k-desc finite) (cons (car ds) nil))) (else (k-desc-at (cdr ds) (- i 1))))))
+;; The `i`th parameter of binders `ps` a type `t` is, or -1.
+(define k-param-of (subr (maxeff (read @t) spin) (k-binders int) int)
+  (lambda (ps t) (tagcase (k-get (k-resolve t)) (ty-var (v) (k-binder-index ps v 0)) (else y -1))))
+;; Descriptions `inner`, with each that is one of parameters `ps` replaced
+;; by what `args` gives for it.
+(define k-descs-given (subr (maxeff (read @t) spin) ((listof k-desc finite) k-binders (listof k-desc finite)) (listof k-desc finite))
+  (lambda (inner ps args)
+    (if (null? inner)
+        nil
+        (let* ((d (car inner))
+               (given (tagcase d (dt (t) (let ((i (k-param-of ps t))) (if (< i 0) (the (listof k-desc finite) nil) (k-desc-at args i)))) (else y (the (listof k-desc finite) nil))))
+               (rest (k-descs-given (cdr inner) ps args)))
+          (the (listof k-desc finite) (cons (if (null? given) d (car given)) rest))))))
+;; The type the `g`th generative type, given `args`, is at its head, if its
+;; representation is one of its type parameters, perhaps through other such
+;; generative types: what it is given there (none or one). None if its
+;; representation has a constructor at its head
+;; (`docs/research/soundness-findings.md`, A2).
+(define k-named-head (subr (maxeff (read @t) spin) (int (listof k-desc finite) k-ids) (listof int finite))
+  (lambda (g args seen)
+    (if (k-has-id? seen g)
+        nil
+        (let* ((gen (k-gen-of g)) (ps (extract gen 2)) (rep (extract gen 4)))
+          (tagcase (k-get (k-resolve rep))
+            (ty-var (v)
+              (let ((i (k-param-of ps rep)))
+                (if (< i 0)
+                    nil
+                    (let ((d (k-desc-at args i)))
+                      (if (null? d) nil (tagcase (car d) (dt (t) (the (listof int finite) (cons t nil))) (else y nil)))))))
+            (ty-named (h inner) (k-named-head h (k-descs-given inner ps args) (the k-ids (cons g seen))))
+            (else y nil))))))
 (define k-grounded-from (subr (maxeff checks spin) (int k-ids int int) unit)
   (lambda (id seen a b)
     (tagcase (k-raw id)
@@ -1101,6 +1139,13 @@
         (if (k-has-id? seen id)
             (k-fail "a recursive type must be built from a constructor, not only from names" a b)
             (k-grounded-from x (cons id seen) a b)))
+      ;; Nor is a generative type whose representation is one of what it is
+      ;; given: it is that.
+      (ty-named (g ds)
+        (let ((h (k-named-head g ds nil)))
+          (cond ((null? h) #u)
+                ((k-has-id? seen id) (k-fail "a recursive type must be built from a constructor, not only from names" a b))
+                (else (k-grounded-from (car h) (cons id seen) a b)))))
       (else x #u))))
 
 ;; A name defined as another name, round a loop, describes nothing.
@@ -2037,6 +2082,24 @@
 ;; Whether an atom is on `const`, the frozen region.
 (define k-frozen-atom? (subr pure (k-atom) bool)
   (lambda (a) (and (k-has-region? a) (tagcase (k-atom-region a) (r-frozen (p f) #t) (else y #f)))))
+;; Whether an atom is on data frozen into a place, other than a write: it is
+;; masked as what is done to the place is
+;; (`docs/research/soundness-findings.md`, F2).
+(define k-place-frozen-atom? (subr pure (k-atom) bool)
+  (lambda (a)
+    (and (k-has-region? a) (not (= (k-atom-rank a) 1))
+         (tagcase (k-atom-region a) (r-frozen (p f) (>= p 0)) (else y #f)))))
+;; The region an atom is masked by: a place-frozen atom's place.
+(define k-mask-region (subr pure (k-atom) k-region)
+  (lambda (a)
+    (if (k-place-frozen-atom? a)
+        (tagcase (k-atom-region a) (r-frozen (p f) (r-var p)) (else y (k-atom-region a)))
+        (k-atom-region a))))
+;; Whether an atom stays because the result mentions its region: `alloc`,
+;; `goto` and `comefrom` (ranks 2 to 4); only `alloc`, for a place-frozen
+;; one.
+(define k-result-keeps? (subr pure (k-atom) bool)
+  (lambda (a) (if (k-place-frozen-atom? a) (= (k-atom-rank a) 2) (and (> (k-atom-rank a) 1) (< (k-atom-rank a) 5)))))
 ;; The regions of `e`'s atoms that stay only if a free variable sees them.
 (define k-sought (subr (maxeff (read @t) (alloc @t) spin) (k-eff k-regions k-regions) k-regions)
   (lambda (e in-result out)
@@ -2044,10 +2107,9 @@
         out
         (let ((a (car e)))
           (k-sought (cdr e) in-result
-                    (if (and (k-has-region? a) (not (k-frozen-atom? a))
-                             (not (and (k-has-region-in? in-result (k-atom-region a))
-                                       (and (> (k-atom-rank a) 1) (< (k-atom-rank a) 5)))))
-                        (k-add-region out (k-atom-region a))
+                    (if (and (k-has-region? a) (or (not (k-frozen-atom? a)) (k-place-frozen-atom? a))
+                             (not (and (k-has-region-in? in-result (k-mask-region a)) (k-result-keeps? a))))
+                        (k-add-region out (k-mask-region a))
                         out))))))
 (define k-drop-regions (subr (maxeff (read @t) (alloc @t) spin) (k-regions k-regions) k-regions)
   (lambda (rs seen)
@@ -2111,10 +2173,9 @@
         nil
         (let* ((a (car e)) (rest (k-keep (cdr e) unseen in-result)))
           (cond ((not (k-has-region? a)) (cons a rest))
-                ((k-frozen-atom? a) (cons a rest))
-                ((not (k-has-region-in? unseen (k-atom-region a))) (cons a rest))
-                ((and (k-has-region-in? in-result (k-atom-region a)) (and (> (k-atom-rank a) 1) (< (k-atom-rank a) 5)))
-                 (cons a rest))
+                ((and (k-frozen-atom? a) (not (k-place-frozen-atom? a))) (cons a rest))
+                ((not (k-has-region-in? unseen (k-mask-region a))) (cons a rest))
+                ((and (k-has-region-in? in-result (k-mask-region a)) (k-result-keeps? a)) (cons a rest))
                 (else rest))))))
 
 ;; A write to a region a `letfreeze` is freezing, noted before masking could
@@ -3539,7 +3600,10 @@
 (define k-drop-frozen (subr (maxeff (read @t) (alloc @t)) (k-eff) k-eff)
   (lambda (e)
     (cond ((null? e) nil)
-          ((and (k-frozen-atom? (car e)) (let ((k (k-atom-rank (car e)))) (or (= k 0) (or (= k 2) (= k 5)))))
+          ;; Only data frozen in the heap, which never ends; what is done to
+          ;; data frozen into a place stays, until masking removes it.
+          ((and (k-frozen-atom? (car e)) (let ((k (k-atom-rank (car e)))) (or (= k 0) (or (= k 2) (= k 5))))
+                (tagcase (k-atom-region (car e)) (r-frozen (p f) (< p 0)) (else y #f)))
            (k-drop-frozen (cdr e)))
           (else (cons (car e) (k-drop-frozen (cdr e)))))))
 ;; `e`, the effect of `x`, with what it does to frozen data taken out; or an
@@ -3609,6 +3673,56 @@
 ;; `f` under any projections and ascriptions.
 (define k-under (subr pure (kx) kx)
   (lambda (f) (tagcase f (x-proj (body ds a b) (k-under body)) (x-the (t body a b) (k-under body)) (else y f))))
+;; Whether `k` is named in `x` only as the operator of calls, evaluated as
+;; `x` is: not under a `lambda` (which could be called later) or a prompt
+;; (whose captures could be composed later).
+(define-rec
+  (k-only-called? (subr (maxeff (read @t) (alloc @t)) (kx symbol) bool)
+    (lambda (x k)
+      (tagcase x
+        (x-var (s a b) (not (symbol=? s k)))
+        (x-const (t v a b) #t)
+        (x-app (f args a b)
+          (and (or (tagcase f (x-var (s fa fb) (symbol=? s k)) (else y #f)) (k-only-called? f k))
+               (k-only-called-list? args k)))
+        (x-lambda (ps body a b) (not (k-has-name? (k-free-vars x) k)))
+        (x-plambda (bs body a b) (not (k-has-name? (k-free-vars x) k)))
+        (x-rlambda (r l a b) (not (k-has-name? (k-free-vars x) k)))
+        (x-letrec (bs body a b) (not (k-has-name? (k-free-vars x) k)))
+        (x-prompt (t body h a b) (not (k-has-name? (k-free-vars x) k)))
+        (x-let (bs body a b)
+          (and (k-only-called-lets? bs k) (or (k-has-name? (k-let-names bs nil) k) (k-only-called? body k))))
+        (x-letregion (m r i body a b) (or (symbol=? (k-dvar-name r) k) (k-only-called? body k)))
+        (x-tagcase (s arms els a b)
+          (and (k-only-called? s k)
+               (k-only-called-arms? arms k)
+               (or (null? els) (symbol=? (extract (car els) 1) k) (k-only-called? (extract (car els) 2) k))))
+        (x-proj (body ds a b) (k-only-called? body k))
+        (x-the (t body a b) (k-only-called? body k))
+        (x-extract (body l a b) (k-only-called? body k))
+        (x-sum (l body a b) (k-only-called? body k))
+        (x-if (p c d a b) (and (k-only-called? p k) (k-only-called? c k) (k-only-called? d k)))
+        (x-begin (xs a b) (k-only-called-list? xs k))
+        (x-bloblet (o i xs a b) (k-only-called-list? xs k))
+        (x-product (fs a b) (k-only-called-lets? fs k)))))
+  (k-only-called-list? (subr (maxeff (read @t) (alloc @t)) (kxs symbol) bool)
+    (lambda (xs k) (or (null? xs) (and (k-only-called? (car xs) k) (k-only-called-list? (cdr xs) k)))))
+  (k-only-called-lets? (subr (maxeff (read @t) (alloc @t)) ((listof (productof (1 symbol) (2 kx)) finite) symbol) bool)
+    (lambda (bs k) (or (null? bs) (and (k-only-called? (extract (car bs) 2) k) (k-only-called-lets? (cdr bs) k)))))
+  (k-only-called-arms? (subr (maxeff (read @t) (alloc @t)) (k-arms symbol) bool)
+    (lambda (arms k)
+      (or (null? arms)
+          (and (or (k-has-name? (extract (car arms) 3) k) (k-only-called? (extract (car arms) 4) k))
+               (k-only-called-arms? (cdr arms) k))))))
+;; Whether `r`, given to `cwcc`, is a `lambda` whose continuation can only
+;; be called while `cwcc` runs, so can only leave it
+;; (`docs/research/soundness-findings.md`, F3).
+(define k-escape-only? (subr (maxeff (read @t) (alloc @t)) (kx) bool)
+  (lambda (r)
+    (tagcase r
+      (x-the (t body a b) (k-escape-only? body))
+      (x-lambda (ps body a b) (and (not (null? ps)) (null? (cdr ps)) (k-only-called? body (extract (car ps) 1))))
+      (else y #f))))
 ;; The name `f` is, under any projections and ascriptions, if a variable.
 (define k-callee-name (subr (alloc @t) (kx) (listof symbol finite))
   (lambda (f)
@@ -3627,11 +3741,16 @@
 ;; lambdas, of the group; or a call through a recursive type of anything but
 ;; known code (self-application loops with no store at all). A knot through
 ;; the store needs nothing here: `k-no-knot` makes its type say `spin`.
-(define k-may-spin? (subr (maxeff kstate spin) (kx int) bool)
-  (lambda (f ft)
+(define k-may-spin? (subr (maxeff kstate spin) (kx int kxs) bool)
+  (lambda (f ft args)
     (let* ((s (k-callee-name f))
            (t (if (null? s) -1 (k-lookup (car s)))))
-      (cond ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
+      (cond ;; A continuation called after `cwcc` has returned comes back to
+            ;; it again, as often as it is called: only one that can only
+            ;; leave needs no `spin`.
+            ((and (>= t 0) (string=? (symbol->string (car s)) "cwcc") (k-named-has? (get k-std) (car s) t))
+             (not (and (not (null? args)) (null? (cdr args)) (k-escape-only? (car args)))))
+            ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
             ((and (>= t 0) (or (k-known? (car s)) (k-named-has? (get k-std) (car s) t))) #f)
             ((k-lambda? (k-under f)) #f)
             (else (k-cyclic? ft))))))
@@ -4784,7 +4903,7 @@
                   (k-fail (k-cat4 "expected " (int->string (k-length params)) " argument(s), got " (int->string n)) a b)
                   (let* ((e (k-app-args args params 0 done-t done-e (extract rf 2)))
                          (e (k-union e (extract (car callee) 1)))
-                         (e (if (k-may-spin? f ft) (k-insert (a-spin) e) e))
+                         (e (if (k-may-spin? f ft args) (k-insert (a-spin) e) e))
                          (result (extract (car callee) 3)))
                     (k-te result (k-mask x e result)))))))))
   (k-app-args (subr (maxeff checks spin) (kxs k-ids int (arrayof int @t) (arrayof k-eff @t) k-eff) k-eff)

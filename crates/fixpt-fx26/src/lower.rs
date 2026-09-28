@@ -20,8 +20,10 @@
 //!   global), so the call may skip the global.
 //! * `(pure)` — the application's effect, after masking, is `pure`, so its
 //!   value may be dropped when unused.
-//! * `(no-escape)` — the expression allocates, and masking removed every
-//!   allocation: nothing it allocates outlives it.
+//! * `(no-escape)` — the expression allocates, masking removed every
+//!   allocation, and its value is first-order data, which could hold no
+//!   closure keeping an allocation its type does not name: nothing it
+//!   allocates outlives it.
 //!
 //! Descriptions go: `plambda` lowers to its body, `proj` to its operand, `the`
 //! to its expression, and parameter types are dropped. A program's own names
