@@ -1031,3 +1031,24 @@ and an instruction-cache flush), which is far dearer than the words.
 a sequence of cells (references to routines, and their operands), run by an inner
 interpreter. This repository says "cellular" throughout (the user's decision,
 2026-09-27).
+
+## The native convention, first-order (2026-09-28)
+
+Native conventions step 2, in part (`docs/research/native-conventions.md`;
+`crates/fixpt-native/src/direct.rs`): first-order procedures compiled
+from their register code to code that calls by `bl` and returns by
+`ret`, on frames of its own stack, arguments in `x1`–`x8`, the result in
+`x0`, with no ip, return entry or resume table; a leaf checks nothing,
+a procedure with a frame checks the stack once and fuel once on entry,
+and a loop fuel on its back edge. The benchmark report's new column, the
+procedure the last line calls, called directly (best of three, ms):
+
+| program | register code | native convention | gain |
+| ------- | ------------- | ----------------- | ---- |
+| fib     | 4.5           | 2.4               | 1.9× |
+| tak     | 1.6           | 0.8               | 2.0× |
+
+The rest are declined: `loop`'s `letrec` procedure captures `n`, and the
+others capture, allocate, or call what they are given, which waits for
+steps 3 and 4. `(lambda ((x int)) x)` is now `mov x0, x1; ret`, where
+the cell-for-cell compiled word was about 95 instructions.

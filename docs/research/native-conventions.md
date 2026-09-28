@@ -225,7 +225,11 @@ its code in one.
    soundness note's rule. No change in behaviour: every program is
    `cellular` by default, and calls through `fx` dispatch on the kind the
    interpreters already check.
-2. **Native frames, first-order**: the stack segment, the calling
+2. **Native frames, first-order** (in part, 2026-09-28:
+   `crates/fixpt-native/src/direct.rs`, `crates/fixpt-fx26/tests/direct.rs`;
+   frames on a stack of its own, `bl`/`ret`, checks only where work is
+   unbounded, traps; no call-outs yet, globals bound when compiling, and
+   not yet a machine the REPL can choose): the stack segment, the calling
    convention, traps and callouts, and a native compiler for code without
    closures or continuations (from register code's intermediate form),
    tested against the Rust machine on the programs that fit.

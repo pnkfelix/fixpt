@@ -37,7 +37,10 @@ queue gained", and "The next queue"):
    stack maps instead of the ip in step and resume tables, and seven steps
    that replace 4b and 4c. Step 1 done (2026-09-28): conventions in both
    checkers, `(subr (conv C) …)`, `fx`, conversions inserted by the
-   checker and `(convention C e)`; steps 2–7 remain.
+   checker and `(convention C e)`. Step 2 in part: first-order procedures
+   compiled to native frames and `bl`/`ret` (`fixpt_native::direct`),
+   `fib` and `tak` about 2× register code, the identity lambda two
+   instructions; call-outs, and a REPL machine, remain; then steps 3–7.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

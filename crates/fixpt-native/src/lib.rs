@@ -18,5 +18,6 @@ mod control;
 pub mod stencil;
 pub mod faults;
 pub mod cellular;
+pub mod direct;
 
 pub use codespace::CodeSpace;
