@@ -248,7 +248,19 @@ its code in one.
    and kept alive by return address, the code area's address index; under
    `gc-stress`. The code area's generate-run-drop test
    (`crates/fixpt-native/tests/code_gc.rs`) passes here.
-4. **Closures and higher-order code**: native closures, polymorphism in
+4. **Closures and higher-order code** (in large part, 2026-09-28: each
+   procedure is a code bloblet of its own, whose fields hold what its code
+   reads PC-relatively (itself, the code it calls, heap constants, global
+   cells, closures of globals' procedures); a native closure is a new kind,
+   `[free…][code][trailer]`, free values where a cellular closure has them,
+   so register code's `lexical` and `letrec` patching are unchanged; an
+   unknown call loads the code from the closure's field 2 and adds a pinned
+   delta to the code area's run address, and traps if it is not code in
+   the code area; each frame keeps its own code bloblet, and its closure if
+   it reads it, so no return-address index is needed. In the REPL, with
+   `--calling-convention native`, every expression is compiled so and run.
+   Still to do: polymorphism in conventions and a copy per convention;
+   adapters between conventions): native closures, polymorphism in
    conventions and a copy per convention, adapters.
 5. **Continuations, prompts and marks** on native frames; regions across
    throws.

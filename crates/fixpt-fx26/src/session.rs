@@ -35,6 +35,9 @@ pub struct Fx26Session {
     /// Whether the program's convention is native (`--calling-convention`;
     /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
     native_convention: bool,
+    /// Under `Strategy::Cellular` with the native convention: how an
+    /// expression form is run, in place of the cellular machine.
+    pub native_runner: Option<NativeRunner>,
     /// Under `Strategy::Cellular`: whether each form's [`Outcome::code`] is
     /// the words the compiler written in FX-26 made for it, those not shown
     /// for an earlier form, rather than its lowering to Scheme.
@@ -192,6 +195,20 @@ pub struct Outcome {
     pub value: Result<Option<String>, String>,
 }
 
+/// What running an expression in the native convention did: ran, to a
+/// value (written) or a trap; or was declined, and why (the compiler cannot
+/// do something in it yet).
+pub enum NativeRun {
+    Ran(Result<String, String>),
+    Declined(String),
+}
+
+/// How a driver runs an expression in the native convention: the closure
+/// of a procedure of no arguments that computes it (made by the compiler
+/// written in FX-26, with register code), in the runtime, with at most so
+/// much fuel. The CLI's is `fixpt_native::direct`'s.
+pub type NativeRunner = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, u64) -> NativeRun;
+
 /// How a checked form is run.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum Strategy {
@@ -219,6 +236,7 @@ impl Fx26Session {
             strategy: Strategy::Lower,
             register_code: false,
             native_convention: false,
+            native_runner: None,
             show_words: false,
             words_shown: Default::default(),
             standard26: None,
@@ -311,6 +329,20 @@ impl Fx26Session {
         let (top, code) = self.compile(form)?;
         if self.strategy != Strategy::Lower {
             let form_text = fixpt_read::write_syntax(form, &self.checker.interner);
+            // An expression, in the native convention: as a procedure of no
+            // arguments, compiled and called; what the compiler declines
+            // runs as cellular code, saying why.
+            let mut note = String::new();
+            if let (Some(run), Top::Exp(_), Strategy::Cellular) = (self.native_runner, &top, self.strategy) {
+                let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
+                match self.with_thunk(&form_text, |rt, clo| run(rt, clo, fuel))? {
+                    Ok(NativeRun::Ran(value)) => {
+                        return Ok(Outcome { top, code: String::new(), printed: String::new(), value: value.map(Some) });
+                    }
+                    Ok(NativeRun::Declined(why)) => note = format!("; not in the native convention yet, so run as cellular code: {why}\n"),
+                    Err(why) => note = format!("; not compiled as a procedure: {why}\n"),
+                }
+            }
             let text = format!("{}{form_text}\n", self.defined26);
             let (out, words) = match self.strategy {
                 Strategy::Evaluate => (self.eval_with_own_evaluator(&text)?, None),
@@ -344,7 +376,7 @@ impl Fx26Session {
                 None if matches!(top, Top::Exp(_)) => Ok(Some(out)),
                 None => Ok(None),
             };
-            return Ok(Outcome { top, code, printed: String::new(), value });
+            return Ok(Outcome { top, code, printed: note, value });
         }
         if code.is_empty() {
             return Ok(Outcome { top, code, printed: String::new(), value: Ok(None) });
@@ -436,14 +468,25 @@ impl Fx26Session {
     /// compiled by the compiler written in FX-26 with register code: given
     /// to `f`, with the runtime (see [`crate::syn::with_last_value`]).
     pub fn with_global_value<T>(&mut self, name: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
+        let text = format!("{}{name}\n", self.defined26);
+        self.with_last_value(&text, f)
+    }
+
+    /// The same for the value of expression `exp` (text) as a procedure of
+    /// no arguments that computes it.
+    pub fn with_thunk<T>(&mut self, exp: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
+        let text = format!("{}(define native-thunk% (lambda () {exp}))\nnative-thunk%\n", self.defined26);
+        self.with_last_value(&text, f)
+    }
+
+    fn with_last_value<T>(&mut self, text: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
         self.own_pieces()?;
         self.scheme.engine.set_step_limit(None);
         let standard = self.standard26()?;
-        let text = format!("{}{name}\n", self.defined26);
         let on = self.scheme.make(|_| fixpt_heap::Value::TRUE);
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
         self.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[on]).map_err(fail)?;
-        let r = crate::syn::with_last_value(&mut self.scheme, standard, FileId(0), &text, f);
+        let r = crate::syn::with_last_value(&mut self.scheme, standard, FileId(0), text, f);
         let off = self.scheme.make(|_| fixpt_heap::Value::boolean(self.register_code));
         self.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(fail)?;
         self.scheme.engine.set_step_limit(self.step_limit);

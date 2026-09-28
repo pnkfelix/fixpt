@@ -37,6 +37,9 @@ pub struct Runtime {
     pub machine_code: Option<MachineCode>,
     /// Whether `%disassemble` shows it too.
     pub show_machine_code: bool,
+    /// How a closure of code in the native convention is shown: its machine
+    /// code (`fixpt-native`, above this crate, installs it).
+    pub native_code: Option<MachineCode>,
     /// How many steps (cells, or polls in machine code) a run of a word by
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
@@ -85,6 +88,7 @@ impl Runtime {
             run_word: None,
             machine_code: None,
             show_machine_code: false,
+            native_code: None,
             word_fuel: u64::MAX,
         }
     }
@@ -165,6 +169,7 @@ impl Runtime {
             run_word: None,
             machine_code: None,
             show_machine_code: false,
+            native_code: None,
             word_fuel: u64::MAX,
         }
     }

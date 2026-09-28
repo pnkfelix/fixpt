@@ -14,6 +14,8 @@
 //! | the machine's state  | `x24`, pinned                                              |
 //! | fuel                 | `x28`, pinned                                              |
 //! | the stack's limit    | `x27`, pinned                                              |
+//! | the closure called   | `x10`, as the call enters it; kept in the frame if read    |
+//! | code's run address   | `x26`, pinned: a code bloblet's reference plus it          |
 //! | values across a call | the frame's slots, `[x29, #16 + 8n]` for slot `n`          |
 //!
 //! Every register but the pinned ones is the caller's to lose across a
@@ -52,6 +54,11 @@ const FUEL: Reg = 28;
 const LIMIT: Reg = 27;
 const FRAME: Reg = 29;
 const LINK: Reg = 30;
+/// The closure called, as the call enters it.
+const CLO: Reg = 10;
+/// From a code bloblet's reference to where its code runs, pinned: the
+/// code area's two views are this far apart, less the reference's tag.
+const DELTA: Reg = 26;
 const X9: Reg = 9;
 const X11: Reg = 11;
 const X13: Reg = 13;
@@ -90,29 +97,64 @@ struct DState {
     /// The code bloblet running, kept alive by the call-outs' collections
     /// (it never moves).
     code: u64,
+    /// For a call-out that makes a closure: the code bloblet it runs.
+    aux: u64,
+    /// The closure the call starts in; `DELTA`; and where the code area
+    /// starts, below which a closure's code is not native code.
+    clo: u64,
+    delta: u64,
+    code_lo: u64,
 }
 
 /// The traps this code raises, by code.
-const TRAPS: [&str; 5] = ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed"];
+const TRAPS: [&str; 6] =
+    ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed", "a procedure not in the native convention was called"];
 const OUT_OF_FUEL: u32 = 1;
 const STACK_OVERFLOW: u32 = 2;
 const OVERFLOW: u32 = 3;
 const PRIM_FAILED: u32 = 4;
+const NOT_NATIVE: u32 = 5;
 
-/// What a call-out does: `cons`, or a runtime primitive of `n` arguments.
+/// What a call-out does: `cons`; a runtime primitive of `n` arguments; a
+/// native closure over `n` values of the code in the state's `aux`.
 #[derive(Copy, Clone)]
 enum Callout {
     Cons,
     Prim { p: usize, n: usize },
+    Closure { n: usize },
+    /// `%region-closure`'s: in the region whose handle is argument 0, a
+    /// native closure over arguments 1 to `n − 2` of the code that is the
+    /// last.
+    RegionClosure { n: usize },
 }
 
 impl Callout {
     fn arity(self) -> usize {
         match self {
             Callout::Cons => 2,
-            Callout::Prim { n, .. } => n,
+            Callout::Prim { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
     }
+}
+
+/// What a field of a procedure's code bloblet holds, for its code to read
+/// PC-relatively.
+#[derive(Clone, PartialEq)]
+enum Field {
+    /// The bloblet itself, which each frame of it keeps, so that code
+    /// running is alive.
+    Myself,
+    /// Procedure `p`'s code bloblet, which this code calls or makes
+    /// closures of.
+    Code(usize),
+    /// A constant in the heap.
+    Const(Value),
+    /// A global's cell, read or written when the code runs.
+    Cell(Value),
+    /// A native closure of procedure `p` over these values: a global's
+    /// procedure, used as a value or called, as the global held it when
+    /// compiled.
+    Closure(usize, Vec<Value>),
 }
 
 thread_local! {
@@ -183,9 +225,17 @@ impl Asm {
     }
 }
 
-/// A procedure, compiled or being compiled: where its code will start.
+/// A procedure, compiled or being compiled: its cellular word and register
+/// word, name and arity, its code bloblet's fields, and its code, of which
+/// the first `len` instructions are its own (the rest, its traps').
 struct Proc {
-    entry: Label,
+    word: Value,
+    rw: Value,
+    name: String,
+    arity: usize,
+    fields: Vec<Field>,
+    code: Vec<u32>,
+    len: usize,
 }
 
 /// Compiles procedures and runs them.
@@ -206,17 +256,19 @@ pub struct DirectTrap {
     pub pc: u64,
 }
 
-/// A compiled procedure: the code bloblet it is in (in the heap's code
-/// area, with the procedures it calls), where in it it starts and how long
-/// it is, in instructions. The bloblet lives while something the collector
-/// traces refers to it, and while a call runs it; whoever keeps a
-/// `Compiled` between calls keeps its bloblet alive.
+/// A compiled procedure: its code bloblet (in the heap's code area), how
+/// many instructions are its own, its arity, and a native closure of it
+/// over what the closure compiled captured (for the first procedure a
+/// compile gives; `#f` for the others). The bloblet lives while something
+/// the collector traces refers to it, and while a call runs it; the
+/// closure is a heap object, which a collection moves: compile again
+/// after one.
 #[derive(Copy, Clone, Debug)]
 pub struct Compiled {
     pub code: Value,
-    pub start: usize,
     pub len: usize,
     pub arity: usize,
+    pub closure: Value,
 }
 
 impl DirectMachine {
@@ -229,45 +281,43 @@ impl DirectMachine {
         Ok(DirectMachine { space, entry, stack: vec![0; STACK_WORDS], callouts: Vec::new() })
     }
 
-    /// Compile `closure`'s procedure, and every procedure it calls, to code
-    /// in the native convention: what it compiled, the first first; or why
-    /// it could not.
+    /// Compile `closure`'s procedure, and every procedure it calls or
+    /// makes closures of, to code in the native convention, each in a code
+    /// bloblet of its own: what it compiled, the first first; or why it
+    /// could not.
     pub fn compile(&mut self, heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
-        let mut a = Asm::new();
-        let kinds = (0..TRAPS.len()).map(|_| a.label()).collect();
-        let mut c = Compiling { heap, a, procs: HashMap::new(), queue: Vec::new(), order: Vec::new(), kinds, callouts: &mut self.callouts };
-        c.proc_of(closure)?;
-        while let Some((word, rw)) = c.queue.pop() {
-            c.procedure(word, rw)?;
+        let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts };
+        let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
+        let first = c.proc_of(word)?;
+        while let Some(p) = c.queue.pop() {
+            c.procedure(p)?;
         }
-        // Each trap's code, once for them all: it records the trap and
-        // where, and leaves.
-        let traps_at = c.a.code.len();
-        for code in 1..TRAPS.len() {
-            let a = &mut c.a;
-            a.bind(c.kinds[code]);
-            a.e(movz(X9, code as u32, 0));
-            a.e(str(X9, ST, st_off(offset_of!(DState, trap))));
-            a.e(sub_imm(X9, LINK, 4));
-            a.e(str(X9, ST, st_off(offset_of!(DState, pc))));
-            a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
-            leave(a);
+        let procs = std::mem::take(&mut c.procs);
+        // Every bloblet first, then their fields, which refer to each other.
+        // Nothing here collects, so the values held do not move.
+        let blobs: Vec<Value> =
+            procs.iter().map(|p| heap.make_code_bloblet(fixpt_heap::layout::kind("bloblet"), p.fields.len(), 4 * p.code.len(), false)).collect();
+        for (p, &blob) in procs.iter().zip(&blobs) {
+            for (k, f) in p.fields.iter().enumerate() {
+                let v = match f {
+                    Field::Myself => blob,
+                    Field::Code(q) => blobs[*q],
+                    Field::Const(v) | Field::Cell(v) => *v,
+                    Field::Closure(q, free) => native_closure(heap, blobs[*q], free),
+                };
+                heap.set_bloblet_slot(blob, k + 1, v);
+            }
+            let bytes: Vec<u8> = p.code.iter().flat_map(|i| i.to_le_bytes()).collect();
+            heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
+            heap.flush_code(blob);
         }
-        let Compiling { a, procs, order, .. } = c;
-        let starts: Vec<(String, usize, usize)> =
-            order.iter().map(|(w, name, arity)| (name.clone(), a.labels[procs[w].entry.0].expect("placed"), *arity)).collect();
-        let code = a.finish()?;
-        // One code bloblet for them all, whose suffix is the code.
-        let blob = heap.make_code_bloblet(fixpt_heap::layout::kind("bloblet"), 0, 4 * code.len(), false);
-        let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
-        heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
-        heap.flush_code(blob);
-        let mut out = Vec::new();
-        for (i, (name, start, arity)) in starts.iter().enumerate() {
-            let end = starts.get(i + 1).map_or(traps_at, |s| s.1);
-            out.push((name.clone(), Compiled { code: blob, start: *start, len: end - start, arity: *arity }));
-        }
-        Ok(out)
+        let entry = native_closure(heap, blobs[first], &free);
+        Ok(procs
+            .iter()
+            .zip(&blobs)
+            .enumerate()
+            .map(|(i, (p, &code))| (p.name.clone(), Compiled { code, len: p.len, arity: p.arity, closure: if i == first { entry } else { Value::FALSE } }))
+            .collect())
     }
 
     /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
@@ -291,7 +341,10 @@ impl DirectMachine {
             st.args[i] = a.raw();
         }
         st.code = p.code.raw();
-        let target = (rt.heap.code_exec_address(p.code) + 4 * p.start) as u64;
+        st.clo = p.closure.raw();
+        let target = rt.heap.code_exec_address(p.code) as u64;
+        st.delta = target.wrapping_sub(p.code.raw());
+        st.code_lo = rt.heap.code_area_address() as u64;
         // SAFETY: the trampoline follows the C convention, saves what it
         // must, runs on the stack in `self.stack` (which outlives the call),
         // and touches only the state and that stack; the procedure's code,
@@ -313,7 +366,7 @@ impl DirectMachine {
     /// `p`'s instructions, as they are in its code bloblet.
     pub fn instructions(&self, heap: &Heap, p: Compiled) -> Vec<u32> {
         let bytes = heap.bloblet_bytes(p.code);
-        (p.start..p.start + p.len).map(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().expect("four bytes"))).collect()
+        (0..p.len).map(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().expect("four bytes"))).collect()
     }
 }
 
@@ -334,6 +387,8 @@ fn trampoline() -> Vec<u32> {
     a.e(str(X9, ST, st_off(offset_of!(DState, rust_sp))));
     a.e(ldr(FUEL, ST, st_off(offset_of!(DState, fuel))));
     a.e(ldr(LIMIT, ST, st_off(offset_of!(DState, stack_limit))));
+    a.e(ldr(DELTA, ST, st_off(offset_of!(DState, delta))));
+    a.e(ldr(CLO, ST, st_off(offset_of!(DState, clo))));
     a.e(mov(X16, 1));
     a.e(ldr(X9, ST, st_off(offset_of!(DState, stack_top))));
     a.e(add_imm(SP, X9, 0));
@@ -360,62 +415,92 @@ fn leave(a: &mut Asm) {
 
 struct Compiling<'h> {
     heap: &'h Heap,
-    a: Asm,
-    /// Each procedure by its cellular word.
-    procs: HashMap<u64, Proc>,
-    /// Those still to compile: the word and its register word.
-    queue: Vec<(Value, Value)>,
-    /// Every procedure, in the order first seen: name and arity.
-    order: Vec<(u64, String, usize)>,
-    /// Each trap's common code, by its number.
-    kinds: Vec<Label>,
+    procs: Vec<Proc>,
+    /// Each procedure's index, by its cellular word.
+    by_word: HashMap<u64, usize>,
+    /// Those still to compile.
+    queue: Vec<usize>,
     /// The machine's call-outs, which this compile adds to.
     callouts: &'h mut Vec<Callout>,
 }
 
 impl Compiling<'_> {
-    /// The procedure of `closure`, queued to compile if it is new.
-    fn proc_of(&mut self, closure: Value) -> Result<Label, String> {
+    /// The procedure of cellular word `word`, queued to compile if new.
+    fn proc_of(&mut self, word: Value) -> Result<usize, String> {
+        if let Some(p) = self.by_word.get(&word.raw()) {
+            return Ok(*p);
+        }
         let h = self.heap;
-        if !closure.is_bloblet() || h.bloblet_head(closure).fields < CLOSURE_WORD {
-            return Err("a call of something not a closure".into());
-        }
-        if h.bloblet_head(closure).fields >= CLOSURE_FREE0 {
-            return Err("a closure that captures".into());
-        }
-        let word = h.bloblet_slot(closure, CLOSURE_WORD);
-        if let Some(p) = self.procs.get(&word.raw()) {
-            return Ok(p.entry);
-        }
         let rw = h.bloblet_slot(word, WORD_TWIN);
         if !h.is_register_word(rw) {
             return Err(format!("`{}` has no register code", self.name(word)));
         }
-        let entry = self.a.label();
-        self.procs.insert(word.raw(), Proc { entry });
         let arity = h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;
-        self.order.push((word.raw(), self.name(word), arity));
-        self.queue.push((word, rw));
-        Ok(entry)
+        let p = self.procs.len();
+        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself], code: Vec::new(), len: 0 });
+        self.by_word.insert(word.raw(), p);
+        self.queue.push(p);
+        Ok(p)
     }
 
     fn name(&self, word: Value) -> String {
         self.heap.symbol_name(self.heap.bloblet_slot(word, fixpt_heap::layout::cellular::WORD_NAME))
     }
 
-    /// One procedure's code, from its register word `rw`.
-    fn procedure(&mut self, word: Value, rw: Value) -> Result<(), String> {
+    /// A cellular closure's procedure and free values; `None` for anything
+    /// else.
+    fn closure_parts(&self, v: Value) -> Option<(Value, Vec<Value>)> {
         let h = self.heap;
+        if !v.is_bloblet() || h.bloblet_kind(v) != fixpt_heap::layout::kind("cellular-closure") {
+            return None;
+        }
+        let fields = h.bloblet_head(v).fields;
+        Some((h.bloblet_slot(v, CLOSURE_WORD), (CLOSURE_FREE0..=fields).map(|k| h.bloblet_slot(v, k)).collect()))
+    }
+
+    /// Procedure `p`'s field holding `f`: an index from 1, shared with an
+    /// equal one.
+    fn field(&mut self, p: usize, f: Field) -> usize {
+        let fs = &mut self.procs[p].fields;
+        match fs.iter().position(|g| *g == f) {
+            Some(k) => k + 1,
+            None => {
+                fs.push(f);
+                fs.len()
+            }
+        }
+    }
+
+    /// How a global's value is had: a native closure of the procedure it
+    /// holds, made now (bound when compiling), or the global's cell, read
+    /// when the code runs.
+    fn global_value(&mut self, p: usize, cell: Value) -> Result<Field, String> {
+        let v = self.heap.bloblet_slot(cell, 2);
+        if let Some((word, free)) = self.closure_parts(v) {
+            let q = self.proc_of(word)?;
+            return Ok(Field::Closure(q, free));
+        }
+        if v.is_bloblet() && self.heap.bloblet_kind(v) == fixpt_heap::layout::kind("native-closure") {
+            return Ok(Field::Const(v));
+        }
+        let _ = p;
+        Ok(Field::Cell(cell))
+    }
+
+    /// One procedure's code, from its register word.
+    fn procedure(&mut self, p: usize) -> Result<(), String> {
+        let h = self.heap;
+        let (word, rw) = (self.procs[p].word, self.procs[p].rw);
         let fields = h.bloblet_head(rw).fields;
         let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| h.bloblet_slot(rw, k)).collect();
         let name = self.name(word);
         let decline = |what: String| Err(format!("`{name}`: {what}"));
         // Where each instruction starts, what a branch goes back to, and
-        // whether the procedure has a frame or calls: what it must check.
+        // whether the procedure has a frame, calls, or reads its closure.
         let mut starts = Vec::new();
         let mut back_to = vec![false; cells.len() + 1];
         let mut target = vec![false; cells.len() + 1];
-        let (mut frame, mut calls) = (None, false);
+        let (mut frame, mut calls, mut captures) = (None, false, false);
         let mut i = 0;
         while i < cells.len() {
             starts.push(i);
@@ -430,78 +515,117 @@ impl Compiling<'_> {
                 }
                 "save" => frame = Some(cells[i + 1].as_fixnum() as usize),
                 "invoke" | "tailinvoke" | "invokeself" => calls = true,
+                "lexical" => captures = true,
                 _ => {}
             }
             i += 1 + n;
         }
-        // Each call's callee, named by the global just before it (a tail
-        // call's frame popped between).
-        let op_at = |i: usize| OPS[cells[i].as_fixnum() as usize].0;
-        let mut callees = HashMap::new();
-        for (j, &i) in starts.iter().enumerate() {
-            let call = starts[j + 1..].iter().copied().find(|&c| op_at(c) != "pop");
-            if op_at(i) == "global" && let Some(c) = call.filter(|&c| matches!(op_at(c), "invoke" | "tailinvoke")) {
-                let callee = h.bloblet_slot(cells[i + 1], 2);
-                callees.insert(c, self.proc_of(callee).map_err(|e| format!("`{name}` calls {e}"))?);
-            }
-        }
-        if frame.is_some_and(|m| 16 + 8 * m > 504) {
+        let op_at = |j: usize| OPS[cells[j].as_fixnum() as usize].0;
+        // What each `global` is for: a call just after it (a tail call's
+        // frame popped between), or its value.
+        let called = |j: usize| {
+            let at = starts.iter().position(|&s| s == j).expect("an instruction");
+            starts[at + 1..].iter().copied().find(|&c| op_at(c) != "pop").filter(|&c| matches!(op_at(c), "invoke" | "tailinvoke"))
+        };
+        // The frame: the link and return address, register code's slots,
+        // then this code bloblet and the closure running.
+        if frame.is_some_and(|m| 16 + 8 * (m + 2) > 504) {
             return decline("a frame too large for one `stp`".into());
         }
-        let entry = self.procs[&word.raw()].entry;
-        let a = &mut self.a;
+        let size = frame.map(|m| (16 + 8 * (m as u32 + 2)).div_ceil(16) * 16);
+        let self_slot = frame.map(|m| 16 + 8 * m as u32);
+        let clo_slot = frame.map(|m| 16 + 8 * (m as u32 + 1));
+        let mut a = Asm::new();
+        let entry = a.label();
         let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
         // Each trap site branches to a stub of its own, which calls the
-        // trap's common code: so the return address says where it was.
+        // trap's code: so the return address says where it was.
         let mut stubs: Vec<(Label, u32)> = Vec::new();
-        let mut trap = |a: &mut Asm, code: u32, c: Cond| {
+        let trap = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, code: u32, c: Cond| {
             let l = a.label();
             stubs.push((l, code));
             a.to(l, Fix::If(c));
         };
         a.bind(entry);
-        // Entered in the body's own terms: `invokeself` comes here too.
-        let size = frame.map(|m| (16 + 8 * m as u32).div_ceil(16) * 16);
         if calls || frame.is_some() {
             a.e(subs_imm(FUEL, FUEL, 1));
-            trap(a, OUT_OF_FUEL, Cond::Lo);
+            trap(&mut a, &mut stubs, OUT_OF_FUEL, Cond::Lo);
         }
-        let mut pending_global: Option<Value> = None;
-        let op_at = |j: usize| OPS[cells[j].as_fixnum() as usize].0;
-        // Whether the instruction at `j` sets `RESULT` before reading it,
-        // so that nothing needs a value the one before it left there.
-        let sets_first = |j: usize| matches!(op_at(j), "const" | "reg" | "stack" | "global");
-        // Whether it leaves `RESULT` unread: what sets it first, or a call,
-        // whose callee is not in it here (a global's, or the procedure's own).
-        let ignores = |j: usize| sets_first(j) || matches!(op_at(j), "invokeself" | "invoke" | "tailinvoke");
-        // The next instruction, if control reaches it only from this one:
-        // then the two may be done as one.
+        let sets_first = |j: usize| matches!(op_at(j), "const" | "reg" | "stack" | "global" | "lexical");
+        let ignores = |j: usize| sets_first(j) || matches!(op_at(j), "invokeself");
         let joinable = |si: usize| starts.get(si + 1).copied().filter(|&j| !target[j]);
-        // Where `RESULT` is read from by the instruction being done: a
-        // register it was only a copy of, when `reg k` was joined to it.
         let mut src = RESULT;
+        // A global about to be called: the call to make.
+        let mut pending: Option<Field> = None;
         let mut si = 0;
         while si < starts.len() {
             let i = starts[si];
             si += 1;
             a.bind(labels[i]);
-            let (op, _, _) = OPS[cells[i].as_fixnum() as usize];
+            let op = op_at(i);
             let o = |j: usize| cells[i + 1 + j];
             let k = |v: Value| v.as_fixnum() as usize;
             let reg = |v: Value| v.as_fixnum() as Reg;
-            if pending_global.is_some() && !matches!(op, "invoke" | "tailinvoke" | "pop") {
-                return decline("a global read for its value".into());
-            }
             match op {
                 "args" => {}
                 "const" => {
                     let v = o(0);
-                    if !(v.is_fixnum() || v.raw() & 7 == 3) {
-                        return decline("a constant in the heap".into());
+                    if v.is_fixnum() || v.raw() & 7 == 3 {
+                        a.es(&mov_imm64(RESULT, v.raw()));
+                    } else if h.is_cellular_word(v) {
+                        // A word, which only a closure is made of: its code
+                        // here, compiled, in its place.
+                        let q = self.proc_of(v).map_err(|e| format!("`{name}` makes a closure of {e}"))?;
+                        let f = self.field(p, Field::Code(q));
+                        ldr_field(&mut a, RESULT, f);
+                    } else {
+                        let f = self.field(p, Field::Const(v));
+                        ldr_field(&mut a, RESULT, f);
                     }
-                    a.es(&mov_imm64(RESULT, v.raw()));
                 }
-                "global" => pending_global = Some(o(0)),
+                "global" => {
+                    let cell = o(0);
+                    if called(i).is_some() {
+                        let v = h.bloblet_slot(cell, 2);
+                        pending = Some(match self.closure_parts(v) {
+                            Some((w, free)) if free.is_empty() => Field::Code(self.proc_of(w).map_err(|e| format!("`{name}` calls {e}"))?),
+                            Some((w, free)) => Field::Closure(self.proc_of(w).map_err(|e| format!("`{name}` calls {e}"))?, free),
+                            None if v.is_bloblet() && h.bloblet_kind(v) == fixpt_heap::layout::kind("native-closure") => Field::Const(v),
+                            None => return decline("a call of a global that holds no procedure".into()),
+                        });
+                    } else {
+                        match self.global_value(p, cell)? {
+                            Field::Cell(c) => {
+                                let f = self.field(p, Field::Cell(c));
+                                ldr_field(&mut a, X9, f);
+                                a.e(ldur(RESULT, X9, field_off(2)));
+                            }
+                            g => {
+                                let f = self.field(p, g);
+                                ldr_field(&mut a, RESULT, f);
+                            }
+                        }
+                    }
+                }
+                "setglbl" => {
+                    let f = self.field(p, Field::Cell(o(0)));
+                    ldr_field(&mut a, X9, f);
+                    a.e(stur(RESULT, X9, field_off(2)));
+                }
+                "lexical" => {
+                    let from = match clo_slot {
+                        Some(s) => {
+                            a.e(ldr(X9, FRAME, s));
+                            X9
+                        }
+                        None => CLO,
+                    };
+                    let off = field_off(CLOSURE_FREE0 + k(o(0)));
+                    if off < -256 {
+                        return decline("a closure too large".into());
+                    }
+                    a.e(ldur(RESULT, from, off));
+                }
                 "reg" => match joinable(si - 1) {
                     Some(j) if matches!(op_at(j), "op2" | "op2imm") => {
                         src = reg(o(0));
@@ -511,19 +635,25 @@ impl Compiling<'_> {
                 },
                 "setreg" => a.e(mov(reg(o(0)), RESULT)),
                 "movereg" => a.e(mov(reg(o(1)), reg(o(0)))),
-                // The frame: the caller's frame link and return address,
-                // then the slots. The stack's limit is checked once it is
-                // made; the limit leaves room for any one frame below it.
+                // The frame made: the stack's limit checked (it leaves room
+                // for any one frame below it); every slot a value from the
+                // start, the fixnum 0, so that a collection may scan the
+                // whole frame; this code bloblet in its slot, so that the
+                // frame keeps it alive; the closure in its, if the code
+                // reads it.
                 "save" => {
-                    a.e(stp_pre(FRAME, LINK, SP, -(size.expect("a frame") as i64)));
+                    let size = size.expect("a frame") as i64;
+                    a.e(stp_pre(FRAME, LINK, SP, -size));
                     a.e(add_imm(FRAME, SP, 0));
                     a.e(cmp_sp(LIMIT));
-                    trap(a, STACK_OVERFLOW, Cond::Lo);
-                    // Every slot a value from the start (the fixnum 0), so
-                    // that a call-out's collection may scan the whole frame.
-                    let size = size.expect("a frame") as i64;
+                    trap(&mut a, &mut stubs, STACK_OVERFLOW, Cond::Lo);
                     for off in (16..size).step_by(16) {
                         a.e(stp(XZR, XZR, FRAME, off));
+                    }
+                    ldr_field(&mut a, X9, 1);
+                    a.e(str(X9, FRAME, self_slot.expect("a frame")));
+                    if captures {
+                        a.e(str(CLO, FRAME, clo_slot.expect("a frame")));
                     }
                 }
                 "pop" => a.e(ldp_post(FRAME, LINK, SP, size.expect("a frame") as i64)),
@@ -560,9 +690,10 @@ impl Compiling<'_> {
                     } else {
                         let v = o(1);
                         if !(v.is_fixnum() || v.raw() & 7 == 3) {
-                            return decline("a constant in the heap".into());
-                        }
-                        if v.raw() < 4096 {
+                            let f = self.field(p, Field::Const(v));
+                            ldr_field(&mut a, X16, f);
+                            (X16, None)
+                        } else if v.raw() < 4096 {
                             (X16, Some(v.raw() as u32))
                         } else {
                             a.es(&mov_imm64(X16, v.raw()));
@@ -593,7 +724,7 @@ impl Compiling<'_> {
                     }
                     let cond = if r == "eq" { Cond::Eq } else { Cond::Lt };
                     match r {
-                        "int-add" | "int-sub" => trap(a, OVERFLOW, Cond::Vs),
+                        "int-add" | "int-sub" => trap(&mut a, &mut stubs, OVERFLOW, Cond::Vs),
                         // A test that only a branch reads: the branch on the
                         // flags, with no boolean made.
                         _ => match joinable(si - 1) {
@@ -615,20 +746,42 @@ impl Compiling<'_> {
                         },
                     }
                 }
-                "field" => a.e(ldur(RESULT, RESULT, -(4 + 8 * k(o(0)) as i64))),
+                "field" => {
+                    let off = field_off(k(o(0)));
+                    if off < -256 {
+                        return decline("a field too far".into());
+                    }
+                    a.e(ldur(RESULT, RESULT, off));
+                }
+                "setfield" => {
+                    let off = field_off(k(o(0)));
+                    if off < -256 {
+                        return decline("a field too far".into());
+                    }
+                    a.e(stur(reg(o(1)), RESULT, off));
+                }
                 // A call-out: to Rust, on Rust's stack, which may collect;
                 // everything live is in the frame by then (register code
                 // sees to it), and the arguments go through the state.
-                "prim" | "cellular" => {
+                "prim" | "cellular" | "lambda" => {
                     let c = match (op, ROUTINES.get(k(o(0))).map(|r| r.0)) {
+                        ("lambda", _) => {
+                            let q = self.proc_of(o(0)).map_err(|e| format!("`{name}` makes a closure of {e}"))?;
+                            let f = self.field(p, Field::Code(q));
+                            ldr_field(&mut a, X9, f);
+                            a.e(str(X9, ST, st_off(offset_of!(DState, aux))));
+                            Callout::Closure { n: k(o(1)) }
+                        }
                         ("cellular", Some("cons")) if k(o(1)) == 2 => Callout::Cons,
                         ("prim", _) => match fixpt_runtime::PRIMITIVES.get(k(o(0))) {
+                            Some(d) if d.name == "%region-closure" => Callout::RegionClosure { n: k(o(1)) },
                             Some(d) if matches!(d.kind, fixpt_runtime::PrimKind::Simple(_)) && d.accepts(k(o(1))) => {
                                 Callout::Prim { p: k(o(0)), n: k(o(1)) }
                             }
-                            _ => return decline(format!("prim {}", k(o(0)))),
+                            Some(d) => return decline(format!("the primitive `{}`", d.name)),
+                            None => return decline(format!("primitive {}", k(o(0)))),
                         },
-                        (_, r) => return decline(format!("cellular {}", r.unwrap_or("?"))),
+                        (_, r) => return decline(format!("the routine `{}`", r.unwrap_or("?"))),
                     };
                     if frame.is_none() {
                         return decline("a call-out outside a frame".into());
@@ -671,17 +824,43 @@ impl Compiling<'_> {
                     a.e(add_imm(SP, X9, 0));
                     a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
                     a.e(cmp_imm(X9, 0));
-                    trap(a, PRIM_FAILED, Cond::Ne);
+                    trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
                     a.bind(done);
                 }
+                // A call. Of a global's procedure that captures nothing: its
+                // code, from this bloblet's field, entered at its start. Of
+                // any other procedure: a native closure, in `CLO`, whose
+                // field 2 is its code, entered so; one whose field 2 is not
+                // in the code area is not native code, and traps.
                 "invoke" | "tailinvoke" => {
-                    if pending_global.take().is_none() {
-                        return decline("a call of a procedure not named by a global".into());
+                    let tail = op == "tailinvoke";
+                    match pending.take() {
+                        Some(Field::Code(q)) => {
+                            let f = self.field(p, Field::Code(q));
+                            ldr_field(&mut a, X16, f);
+                        }
+                        Some(g) => {
+                            let f = self.field(p, g);
+                            ldr_field(&mut a, CLO, f);
+                            a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                        }
+                        None => {
+                            a.e(mov(CLO, RESULT));
+                            a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
+                            a.e(cmp(X16, X17));
+                            trap(&mut a, &mut stubs, NOT_NATIVE, Cond::Lo);
+                        }
                     }
-                    let l = callees[&i];
-                    if op == "invoke" { a.to(l, Fix::Bl) } else { a.to(l, Fix::B) }
+                    a.e(add(X16, X16, DELTA));
+                    a.e(if tail { br(X16) } else { blr(X16) });
                 }
-                "invokeself" => a.to(entry, Fix::Bl),
+                "invokeself" => {
+                    if let Some(s) = clo_slot.filter(|_| captures) {
+                        a.e(ldr(CLO, FRAME, s));
+                    }
+                    a.to(entry, Fix::Bl);
+                }
                 "return" => a.e(ret()),
                 "branch" | "branchf" => {
                     let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
@@ -692,7 +871,7 @@ impl Compiling<'_> {
                     } else {
                         if back_to[to] {
                             a.e(subs_imm(FUEL, FUEL, 1));
-                            trap(a, OUT_OF_FUEL, Cond::Lo);
+                            trap(&mut a, &mut stubs, OUT_OF_FUEL, Cond::Lo);
                         }
                         a.to(labels[to], Fix::B);
                     }
@@ -701,13 +880,43 @@ impl Compiling<'_> {
             }
         }
         a.bind(labels[cells.len()]);
-        // The traps, out of the way: a stub per site, calling its kind's code.
+        // The traps, out of the way: a stub per site, calling its kind's
+        // code, which records the trap and where, and leaves.
+        let kinds: Vec<Label> = (0..TRAPS.len()).map(|_| a.label()).collect();
         for (l, code) in &stubs {
             a.bind(*l);
-            a.to(self.kinds[*code as usize], Fix::Bl);
+            a.to(kinds[*code as usize], Fix::Bl);
         }
+        for (code, l) in kinds.iter().enumerate().skip(1) {
+            if !stubs.iter().any(|(_, c)| *c as usize == code) {
+                continue;
+            }
+            a.bind(*l);
+            a.e(movz(X9, code as u32, 0));
+            a.e(str(X9, ST, st_off(offset_of!(DState, trap))));
+            a.e(sub_imm(X9, LINK, 4));
+            a.e(str(X9, ST, st_off(offset_of!(DState, pc))));
+            a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
+            leave(&mut a);
+        }
+        let len = stubs.first().map_or(a.code.len(), |(l, _)| a.labels[l.0].expect("placed"));
+        self.procs[p].code = a.finish()?;
+        self.procs[p].len = len;
         Ok(())
     }
+}
+
+/// `t` := field `k` of the code bloblet being made, PC-relatively: field
+/// `k` is `8k` bytes before the code's first instruction.
+fn ldr_field(a: &mut Asm, t: Reg, k: usize) {
+    let at = a.code.len() as i64;
+    a.e(ldr_lit(t, -2 * k as i64 - at));
+}
+
+/// Field `k` of the bloblet whose `suffix + 4` is in a register, as an
+/// offset from that register.
+fn field_off(k: usize) -> i64 {
+    -(4 + 8 * k as i64)
 }
 
 /// A call-out from native code: call-out number `which`, its arguments in
@@ -731,6 +940,12 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     }
     let out = match c {
         Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),
+        Callout::Closure { .. } => native_closure(&mut rt.heap, Value(st.aux), &args).raw(),
+        Callout::RegionClosure { n } => {
+            let h = if args[0].is_fixnum() { args[0].as_fixnum() as usize } else { usize::MAX };
+            let (free, code) = (&args[1..n - 1], args[n - 1]);
+            rt.heap.in_region(h, |heap| native_closure(heap, code, free)).raw()
+        }
         Callout::Prim { p, .. } => {
             let def = &fixpt_runtime::PRIMITIVES[p];
             let fixpt_runtime::PrimKind::Simple(f) = def.kind else { unreachable!("checked when compiled") };
@@ -738,7 +953,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
                 Ok(v) => v.raw(),
                 Err(t) => {
                     let m = fixpt_engine::cellular::describe(rt, t.obj);
-                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(format!("`{}`: {m}", def.name)));
+                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m));
                     st.trap = PRIM_FAILED as u64;
                     0
                 }
@@ -770,5 +985,55 @@ fn native_frames<'a>(st: &DState) -> Vec<&'a mut [Value]> {
         fp = if end == caller { caller } else { 0 };
     }
     out
+}
+
+/// A native closure of the code in code bloblet `code`, over `free`.
+fn native_closure(heap: &mut Heap, code: Value, free: &[Value]) -> Value {
+    let c = heap.make_bloblet(fixpt_heap::layout::kind("native-closure"), free.len() + 1, 0, true);
+    heap.set_bloblet_slot(c, CLOSURE_WORD, code);
+    for (i, v) in free.iter().enumerate() {
+        heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, *v);
+    }
+    c
+}
+
+/// A native closure's code, shown: what it captured, its instructions one
+/// to a line, and those of every procedure it reaches through its code
+/// bloblet's fields, each once. For `%disassemble` (`Runtime::native_code`).
+pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
+    use std::fmt::Write as _;
+    if !closure.is_bloblet() || heap.bloblet_kind(closure) != fixpt_heap::layout::kind("native-closure") {
+        return None;
+    }
+    let mut out = String::new();
+    let free = (heap.bloblet_head(closure).fields + 1).saturating_sub(CLOSURE_FREE0);
+    let _ = writeln!(out, "a native closure over {free} value(s):");
+    for i in 0..free {
+        let _ = writeln!(out, "  free {i}: {}", fixpt_runtime::write_value(heap, heap.bloblet_slot(closure, CLOSURE_FREE0 + i)));
+    }
+    let (mut todo, mut seen) = (vec![heap.bloblet_slot(closure, CLOSURE_WORD)], Vec::new());
+    while let Some(code) = todo.pop() {
+        if seen.contains(&code.raw()) || !heap.is_code_bloblet(code) {
+            continue;
+        }
+        seen.push(code.raw());
+        let bytes = heap.bloblet_bytes(code);
+        let _ = writeln!(out, "\ncode {}, {} instructions:", seen.len(), bytes.len() / 4);
+        for (i, w) in bytes.chunks_exact(4).enumerate() {
+            let w = u32::from_le_bytes(w.try_into().expect("four bytes"));
+            let _ = writeln!(out, "  {i:>4}  {}", crate::arm64::disasm::disassemble(w, i as i64));
+        }
+        // What it calls, and makes closures of: code in its fields, and
+        // in the closures there.
+        for k in 1..=heap.bloblet_head(code).fields {
+            let f = heap.bloblet_slot(code, k);
+            if heap.is_code_bloblet(f) {
+                todo.push(f);
+            } else if f.is_bloblet() && heap.bloblet_kind(f) == fixpt_heap::layout::kind("native-closure") {
+                todo.push(heap.bloblet_slot(f, CLOSURE_WORD));
+            }
+        }
+    }
+    Some(out)
 }
 

@@ -151,6 +151,12 @@ pub const KINDS: &[Kind] = &[
     Kind { name: "cellular-continuation", code: 39, traced: true },
     // Register code (PLAN.md 13h′): `layout::regcode`.
     Kind { name: "register-code", code: 40, traced: true },
+    // A closure of code in the native convention
+    // (`docs/research/native-conventions.md`): `[free…][code][trailer]`, its
+    // code bloblet (in the code area) at `CLOSURE_WORD`, where a cellular
+    // closure has its word, and free value `i` at `CLOSURE_FREE0 + i`, as
+    // there.
+    Kind { name: "native-closure", code: 41, traced: true },
 ];
 
 pub const KIND_EXTENSION: u8 = 255;

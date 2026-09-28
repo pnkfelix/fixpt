@@ -165,13 +165,38 @@ fn fuel_and_stack_run_out() {
     assert_eq!(run(deep, "deep", &[0], FUEL).direct, Err("stack overflow".into()));
 }
 
-/// A procedure that captures, or calls what it was given, is declined, and
-/// so is one that calls it.
+/// Higher-order code: a global's procedure passed as a value and called
+/// through its native closure; closures made as the code runs, reading what
+/// they captured; a `letrec`'s procedure, patched to capture itself.
 #[test]
-fn higher_order_code_is_declined() {
-    let twice = "(define twice (subr pure ((subr pure (int) int) int) int) (lambda (f x) (f (f x))))";
-    let r = direct_only(twice, "twice", &[], FUEL);
-    assert!(matches!(&r.direct, Err(e) if e.starts_with("declined")), "{:?}", r.direct);
+fn higher_order_code_and_closures() {
+    let twice = "(define twice (subr pure ((subr pure (int) int) int) int) (lambda (f x) (f (f x))))\n\
+                 (define inc (subr pure (int) int) (lambda (x) (+ x 1)))\n\
+                 (define use (subr pure (int) int) (lambda (n) (twice inc n)))";
+    let r = run(twice, "use", &[40], FUEL);
+    assert_eq!(r.direct, Ok("42".into()), "{}", r.code);
+    let adder = "(define add (subr pure (int) (subr pure (int) int)) (lambda (n) (lambda ((m int)) (+ n m))))\n\
+                 (define use (subr pure (int) int) (lambda (k) ((add k) 10)))";
+    let r = run(adder, "use", &[32], FUEL);
+    assert_eq!(r.direct, Ok("42".into()), "{}", r.code);
+    let r = run(&bench("loop"), "count", &[1000], FUEL);
+    assert_eq!(r.direct, Ok(r.rust.clone()), "{}", r.code);
+}
+
+/// Closures made in a loop and passed to a higher-order `map`, which conses
+/// the results: as the Rust machine gives, and collecting at every
+/// safepoint, so that closures, their captured values and the lists move
+/// while native frames and closures refer to them.
+#[test]
+fn closures_through_a_map_survive_collection() {
+    let defs = format!(
+        "{}\n(define main (subr (maxeff (read @l) (alloc @l) spin) (int) int) (lambda (k) (go k 0 (upto 100 nil))))",
+        bench("closures")
+    );
+    for gc_every in [None, Some(1), Some(5)] {
+        let r = run_collecting(&defs, "main", &[20], FUEL, gc_every);
+        assert_eq!(r.direct, Ok(r.rust.clone()), "collecting every {gc_every:?}:\n{}", r.code);
+    }
 }
 
 /// Lists made by call-outs to `cons`, and read, in a loop of calls: as the
@@ -198,7 +223,7 @@ fn lists_made_in_call_outs_survive_collection() {
 fn a_primitive_that_fails_says_why() {
     let defs = "(define q (subr pure (int int) int) (lambda (a b) (quotient a b)))";
     let r = run(defs, "q", &[7, 0], FUEL);
-    assert!(matches!(&r.direct, Err(m) if m.contains("quotient")), "{:?}\n{}", r.direct, r.code);
+    assert!(matches!(&r.direct, Err(m) if m.contains("zero")), "{:?}\n{}", r.direct, r.code);
 }
 
 /// Code compiled, run and dropped, over and over, with collections between:
@@ -249,3 +274,61 @@ fn code_compiled_and_dropped_is_reclaimed() {
     });
 }
 
+thread_local! {
+    static MACHINE: std::cell::RefCell<DirectMachine> = std::cell::RefCell::new(DirectMachine::new().expect("maps"));
+}
+
+fn run_native(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
+    use fixpt_fx26::session::NativeRun;
+    MACHINE.with(|m| {
+        let mut m = m.borrow_mut();
+        match m.compile(&mut rt.heap, closure) {
+            Err(why) => NativeRun::Declined(why),
+            Ok(procs) => NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map(|v| fixpt_runtime::write_value(&rt.heap, v)).map_err(|t| t.what)),
+        }
+    })
+}
+
+/// Every test program, form by form as the REPL runs them (each form after
+/// the definitions before it), with each expression compiled in the native
+/// convention and run as machine code: the same values and errors as the
+/// same forms run as cellular code. What the compiler declines runs as
+/// cellular code; how many were, and why, is reported.
+#[test]
+#[ignore = "a report, minutes long while the REPL replays definitions: cargo test --release -p fixpt-fx26 --test direct -- --ignored --nocapture"]
+fn every_test_program_runs_natively_as_cellular() {
+    use fixpt_fx26::session::Strategy;
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let (mut report, mut native, mut declined) = (Vec::new(), 0, Vec::new());
+    let forms_of = |text: &str, runner: Option<fixpt_fx26::session::NativeRunner>| {
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.strategy = Strategy::Cellular;
+        s.native_runner = runner;
+        let forms = s.checker.read_in(FileId(0), text).ok()?;
+        Some(s.run_forms(&forms).ok()?.into_iter().map(|o| o.map(|o| (o.value, o.printed))).collect::<Vec<_>>())
+    };
+    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "datum", "recursive", "generative", "sizes"] {
+        let mut paths: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|p| p.unwrap().path()).collect();
+        paths.sort();
+        for path in paths {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let (Some(want), Some(got)) = (forms_of(&text, None), forms_of(&text, Some(run_native))) else { continue };
+            for (i, (w, g)) in want.iter().zip(&got).enumerate() {
+                let (Ok((w, _)), Ok((g, printed))) = (w, g) else { continue };
+                if printed.contains("not in the native convention yet") {
+                    declined.push(format!("{}: {}", path.display(), printed.trim()));
+                } else if g.as_ref().is_ok_and(|v| v.is_some()) || g.is_err() {
+                    native += 1;
+                }
+                // The same error, said as each machine says it.
+                let same_error = matches!((w, g), (Err(a), Err(b)) if a.contains(b.as_str()) || b.contains(a.as_str()));
+                if w != g && !same_error {
+                    report.push(format!("{} form {i}: native {g:?}, cellular {w:?}", path.display()));
+                }
+            }
+        }
+    }
+    eprintln!("{native} expressions ran as machine code; {} declined:\n{}", declined.len(), declined.join("\n"));
+    assert!(report.is_empty(), "{}", report.join("\n"));
+    assert!(native >= 40, "only {native}");
+}

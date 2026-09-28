@@ -1086,3 +1086,17 @@ register code makes it; the call-out only when there is no room.
 | ------- | ------------- | ------------------------------- | --------------------- |
 | lists   | 8.4           | 83.6                            | 8.0                   |
 
+### Closures, and every procedure its own code bloblet (2026-09-28)
+
+With closures (native conventions step 4), `loop`, whose `letrec`
+procedure captures `n`, runs in the native convention too. Each procedure
+is now a code bloblet of its own, and each frame stores it, to keep the
+code alive: two instructions more per frame, which `fib` and `tak` show.
+
+| program | register code | native convention |
+| ------- | ------------- | ----------------- |
+| fib     | 4.4           | 2.3               |
+| tak     | 1.6           | 1.2               |
+| lists   | 8.7           | 9.9               |
+| loop    | 5.6           | 4.4               |
+

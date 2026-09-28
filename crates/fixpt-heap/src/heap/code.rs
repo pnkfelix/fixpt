@@ -105,6 +105,13 @@ impl Heap {
         view.flush(v.index() * 8, bytes.max(1));
     }
 
+    /// The address of the code area's first word: every reference into it
+    /// is at or above this, and every other reference below, so machine
+    /// code tells a code bloblet from other objects with one comparison.
+    pub fn code_area_address(&self) -> usize {
+        self.words_address() as usize + 8 * CODE_BASE
+    }
+
     /// Whether `v` refers into the code area.
     pub fn is_code_bloblet(&self, v: Value) -> bool {
         v.is_bloblet() && in_code_area(self.ix(v))

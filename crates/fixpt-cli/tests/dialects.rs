@@ -199,9 +199,22 @@ fn the_fx26_repl_compiles_in_the_native_convention() {
     child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
     let done = child.wait_with_output().expect("finishes");
     let out = String::from_utf8_lossy(&done.stdout);
-    for want in ["; id (lambda@", "2 instructions", "mov x0, x1", "\n7\n", "832040", "`twice` is not compiled in the native convention yet"] {
+    for want in [
+        "; id (lambda@",
+        "2 instructions",
+        "mov x0, x1",
+        "\n7\n",
+        "832040",
+        // Expressions, run as machine code: a call, closures made and passed,
+        // and a closure as the value.
+        "75025 : int",
+        "42 : int",
+        "#<native-closure",
+        "adds x0, x1, #8",
+    ] {
         assert!(out.contains(want), "no `{want}` in:\n{out}");
     }
+    assert!(!out.contains("not in the native convention yet"), "{out}");
     // A cellular procedure cannot be called from native code: an error.
     let err = String::from_utf8_lossy(&done.stderr);
     assert!(err.contains("a `cellular` procedure cannot be called from `native` code yet"), "{err}");
