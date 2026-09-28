@@ -328,7 +328,9 @@ The consequences for the design:
   non-moving code space, mapped twice. That settles "pinned code" for
   native code, and raw return addresses into it become possible.
   Addressing bloblets across the two spaces is decided when code moves
-  there (`PLAN.md` §11, Phase A′).
+  there (`PLAN.md` §11, Phase A′). *(Being replaced, 2026-09-27: "A
+  collected code area", below, puts code in a non-moving section of the
+  heap itself, which the collector traces and reclaims.)*
 - **Copy-and-patch** with Rust-compiled stencils also works on this machine,
   offline and on stable rustc; see `docs/research/copy-and-patch.md`. The
   hand-written encoder stays the plan for the native core, and
@@ -371,6 +373,69 @@ header. A bloblet with no suffix is pointed at one word past its last field,
 which may be the address of the next object's header. The pointer's tag says
 which object it belongs to, so verification must go by the tag, not by what
 the word there looks like.
+
+## A collected code area (designed 2026-09-27)
+
+Code that is no longer reachable must be reclaimed: a program that
+generates code, runs it and drops it, over and over, must not run out of
+room. Today native code goes in `fixpt-native`'s `CodeSpace`, a bump
+allocator that is never collected (a 32 MiB space fills after a few
+hundred large words: `crates/fixpt-native/tests/code_gc.rs`). And code
+should be able to reach GC-traced values PC-relatively, through fields of
+its own bloblet at fixed negative offsets from its first instruction
+(this section's "Code", above), with the collector keeping those fields
+current.
+
+**The design: a fourth section of the heap, collected by mark-sweep within
+the copying collection.**
+- **Where.** The heap reserves one range of address space: two
+  semispaces, the arenas' area and the reaps' (`ARENA_BASE`, `REAP_BASE` in
+  `heap.rs`). A code area follows them. When the heap is made, that range
+  of the reservation is replaced by a *shared* anonymous mapping (the
+  heap's own is private, and only a shared one can be mapped twice), and
+  given, once and whole, a second view that is read+execute, as
+  `CodeSpace` does. Nothing is committed until touched, so reserving it
+  whole costs nothing, and the second view never has to grow.
+- **What lives there.** Bloblets, like any others: a header, traced fields,
+  and a suffix, here machine code. A bloblet pointer to one is its address
+  in the heap's own (read+write) view, like every value; its code runs at
+  the same address plus the fixed distance to the execute view. Code at
+  its execute address reaches its own fields PC-relatively, since both
+  views are the same pages.
+- **Allocation.** First fit from a free list, never moving. A free block
+  is written as a raw bloblet (a header whose suffix covers the block), so
+  the area can always be walked from its start, header to header.
+- **Collection.** The copying collector's `copy_out` meets a pointer into
+  the code area: it does not copy, it marks the bloblet (a side table of
+  marks, by where its header is), and queues it the first time. The
+  queued bloblets' fields are scanned as to-space's are, alternating with
+  Cheney's scan until both are done, so a field's value is forwarded and
+  the field updated in place. Then a sweep walks the area: each unmarked
+  bloblet becomes free, and adjacent free blocks are coalesced.
+- **Instruction caches.** Only instructions need flushing, and only when
+  they are written (a new code bloblet, or a reused block). Fields are
+  data: the collector updating them needs no flush, which is this
+  document's "mutable fields, immutable code".
+
+**What keeps code alive.** Only what the collector traces: a word that has
+machine code holds its code bloblet in a field, and every frame, captured
+continuation and caller holds the word. Raw code addresses (a native
+machine's dispatch and resume tables, `x30` in register code) do not keep
+code alive, so they must never outlive the code bloblet they point into:
+the tables are cleared when the collector frees what they name, and `x30`
+only ever points into the code of a word some frame holds.
+
+**Not yet decided.** Heap images must carry the code area (with its code
+position-independent, or relocated on load); heap verification must walk
+it. Fragmentation in the free list is to be measured, not assumed; code
+could move into the semispaces later, if it turns out to matter.
+
+**Steps** (`PLAN.md`, "A collected code area"): the area in `fixpt-heap`
+with plain bloblets, tested under `gc-stress`; the execute view, and a
+test that runs a code bloblet reading its own field PC-relatively across a
+collection that moves the field's value; the native machines compiling
+into the area, so the test above passes; closures as code bloblets whose
+captured values are fields their code reads PC-relatively.
 
 ## The header
 

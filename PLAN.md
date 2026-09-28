@@ -27,6 +27,10 @@ where things stand, and points into it.
 
 **Known to remain**, roughly in order (details in "Progress, and what the
 queue gained", and "The next queue"):
+0. **In progress: a collected code area** ("A collected code area", below;
+   the user's, 2026-09-27): native code in a non-moving, mark-swept section
+   of the heap, so code no longer reachable is reclaimed, and code can
+   reach GC-traced fields of its own bloblet PC-relatively. Five steps.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.
@@ -1272,6 +1276,34 @@ New, in rough order:
    effect (5) was needed nowhere in the front end.
 5. **Error messages for `nlist`**: say "a (nlist t n), where a (pairof t
    (nlist t n) finite) is expected" in terms of lengths.
+
+### A collected code area (with the user, 2026-09-27)
+
+Two wants: a program that generates code, runs it and drops it must never
+run out of room for code; and code must be able to reach GC-traced values
+through fields of its own bloblet, PC-relatively, as the bloblet design
+intends. Today native code goes in `CodeSpace`, a bump allocator never
+collected. Design: `docs/object-model.md`, "A collected code area". Steps,
+each committed:
+1. The design, and a test that generates, compiles, runs and drops words
+   past one code space's room (`crates/fixpt-native/tests/code_gc.rs`,
+   ignored until step 4; it fails at round 278 today). *(Done 2026-09-27.)*
+2. The code area in `fixpt-heap`: a shared mapping over its part of the
+   reservation, first-fit allocation, marking and scanning within the
+   copying collection, and a sweep; tested with plain bloblets, under
+   `gc-stress` too.
+3. The execute view, and a test that runs a code bloblet reading its own
+   field PC-relatively across a collection that moves the field's value.
+4. The native machines compiling into the code area, their tables cleared
+   when what they name is freed; step 1's test passes.
+5. Closures as code bloblets whose captured values are fields their code
+   reads PC-relatively (the experiment that prompted this; measurements in
+   `docs/performance.md`, "Closures: what copying code into each would
+   cost").
+
+The alternative, running code from the semispaces, was set aside because
+bloblets can live in a non-moving area the collector traces; it stays open
+should fragmentation call for moving code.
 
 ### Kept open, deliberately
 
