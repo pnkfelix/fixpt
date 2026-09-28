@@ -1,8 +1,8 @@
 //! Redefinition at the REPL: a global's uses always refer to what it is
 //! now, as in Larceny; a redefinition every use can take changes only the
 //! value; one they cannot runs its users again, breaking those that no
-//! longer check, or, as the driver decides, keeps them on the old one or is
-//! refused (`Fx26Session::run`, `Redefine`).
+//! longer check, or, as the driver decides, is refused (`Fx26Session::run`,
+//! `Redefine`).
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::{Fx26Session, Redefine, Strategy};
@@ -43,23 +43,19 @@ fn an_incompatible_redefinition_runs_its_users_again_or_breaks_them() {
     let out = run(&mut s, include_str!("programs/redefine/incompatible.fx"));
     assert!(out[3].contains("run again, as they use it: `p`") && out[3].contains("broken until defined again: `m`"), "{out:?}");
     assert!(out[4].contains("`m` is broken, since `n` was redefined"), "{out:?}");
-    assert_eq!(out[5], "\"x\"");
+    assert_eq!(out[5], "#t");
     assert_eq!(out[7], "4", "defined again, `m` works: {out:?}");
 }
 
-/// Told to keep them, they keep the old one; told to refuse, nothing
-/// changes.
+/// A value kept as it was is bound: `(let ((n n)) …)` reads `n` once,
+/// when the definition runs. Told to refuse, nothing changes.
 #[test]
-fn keeping_and_refusing() {
+fn keeping_a_value_and_refusing() {
     let mut s = session();
-    let forms = "(define n int 5)\n(define m int (+ n 1))\n";
-    run(&mut s, forms);
-    s.next_redefine = Some(Redefine::Keep);
-    let out = run(&mut s, "(define n string \"five\")\nm\nn");
-    assert!(out[0].contains("a new `n`: `m` keep the old one"), "{out:?}");
-    assert_eq!(out[1..], ["6", "\"five\""]);
+    let out = run(&mut s, "(define n int 5)\n(define m int (let ((n n)) (+ n 1)))\n(define n int 50)\nm");
+    assert_eq!(out[3], "6", "`m` ran once, and is not run again: {out:?}");
     let mut s = session();
-    run(&mut s, forms);
+    run(&mut s, "(define n int 5)\n(define m int (+ n 1))\n");
     s.next_redefine = Some(Redefine::Refuse);
     let out = run(&mut s, "(define n string \"five\")\nn\nm");
     assert!(out[0].starts_with("error: `n` not redefined: it would break `m`"), "{out:?}");

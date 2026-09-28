@@ -13,7 +13,7 @@ fn check(program: &str) -> Result<(), String> {
     let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
     for (f, done) in forms.iter().zip(done) {
         if !done {
-            c.top(f).map_err(|e| e.message)?;
+            c.top_defining(f).map_err(|e| e.message)?;
         }
     }
     Ok(())

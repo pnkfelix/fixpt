@@ -17,7 +17,7 @@ fn checked(text: &str) -> (Checker, Vec<Top>) {
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
-    let tops = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let tops = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     (c, tops)
 }
 

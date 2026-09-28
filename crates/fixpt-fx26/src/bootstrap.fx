@@ -32,7 +32,7 @@
               (tagcase (check-program (car std) tops)
                 (k-err (m a b) (b-fail (string-append "check: " m)))
                 (k-ok (lines)
-                  (tagcase (compile-program tops (checked-extracts))
+                  (tagcase (compile-checked (checked-tops) (checked-extracts))
                     (c-ok (w) (b-word w))
                     (c-err (m) (b-fail (string-append "compile: " m)))))
                 (k-done (te) (b-fail "check: no result")))))))))

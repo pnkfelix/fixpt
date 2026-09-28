@@ -27,7 +27,7 @@ fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
     let mut tops = Vec::new();
     for (f, done) in forms.iter().zip(done) {
         if !done {
-            tops.push(c.top(f).map_err(|e| e.message)?);
+            tops.extend(c.top_all(f).map_err(|e| e.message)?);
         }
     }
     Ok((c, tops))

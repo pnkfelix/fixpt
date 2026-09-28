@@ -1,6 +1,6 @@
 (define n int 5)
 (define m int (+ n 1))
-(define p string (let ((n "x")) n))
+(define p bool (let ((k n)) #t))
 (define n string "five")
 m
 p

@@ -922,6 +922,39 @@
 
 ;; The entry point: a program's trees to one word that runs it and leaves
 ;; the value of its last expression (unit, if it has none).
+;; Before a run that assigns its names' globals (`checked-tops`): each
+;; name's next definition keeps the global it has.
+(define c-keep-names (subr (maxeff (read @k) (write @k) (alloc @k) spin) (top) unit)
+  (lambda (t)
+    (tagcase t
+      (t-define (n ty x a b) (compile-keep-global! n))
+      (t-define-rec (bs a b)
+        (letrec ((go (subr (maxeff (read @k) (write @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) unit)
+                   (lambda (bs) (if (null? bs) #u (begin (compile-keep-global! (extract (car bs) 1)) (go (cdr bs)))))))
+          (go bs)))
+      (else y #u))))
+;; What a checked program runs (`checked-tops`), each in turn: whether the
+;; last was an expression, whose value stays.
+(define c-runs (subr (maxeff compiles spin) ((listof k-run finite) code bool) bool)
+  (lambda (rs c has-value)
+    (if (null? rs)
+        has-value
+        (let ((r (car rs)))
+          (begin (if (extract r 2) (c-keep-names (extract r 1)) #u)
+                 (c-runs (cdr rs) c (c-tops (the (listof top finite) (cons (extract r 1) nil)) c has-value)))))))
+;; The entry point for a program the checker written in FX-26 checked: what
+;; it runs (`checked-tops`, under redefinition), and what checking found.
+(define compile-checked (subr (maxeff compiles (comefrom @y) spin) ((listof k-run finite) k-facts) cresult)
+  (lambda (runs facts)
+    (prompt c-tag
+      (let ((c (the code (new nil))))
+        (begin
+          (set c-facts facts)
+          (set c-this-params -1)
+          (if (c-runs runs c #f) #u (c-lit c (wcell-unit)))
+          (c-op c routine-exit)
+          (c-ok (c-assemble c (string->symbol "program")))))
+      (lambda (r) r))))
 ;; The entry point: a checked program's trees, and what checking found.
 (define compile-program (subr (maxeff compiles (comefrom @y) spin) ((listof top finite) k-facts) cresult)
   (lambda (tops facts)

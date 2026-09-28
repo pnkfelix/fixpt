@@ -60,13 +60,24 @@ pub fn parse_with_fx26_parser(scheme: &mut Session, file: FileId, text: &str) ->
     })
 }
 
-/// Read, parse, and run `text` with the evaluator written in FX-26: its
+/// Read, parse, check (in the initial environment `standard`) and run
+/// `text` with the pieces written in FX-26, the evaluator running what the
+/// checker says the program runs (`checked-tops`, under redefinition): its
 /// value as Scheme would write it, or `!! ` and its error.
-pub fn eval_with_fx26_evaluator(scheme: &mut Session, file: FileId, text: &str) -> R<String> {
+pub fn eval_with_fx26_evaluator(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
         let tops = parse_to_trees(s, file, text)?;
-        let out = s.call_global(&format!("{READER_PREFIX}run-program"), &[tops]).map_err(|e| fail(e.to_string()))?;
+        let checked = check_in(s, Some(standard), tops).map_err(|e| fail(e.to_string()))?;
+        if let Some(m) = s.view(|v| {
+            let r = v.get(checked);
+            (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("k-err"))
+                .then(|| r.field(3).and_then(|p| p.field(2)).and_then(|m| m.string()).unwrap_or_default())
+        }) {
+            return Ok(format!("!! check: {m}"));
+        }
+        let runs = s.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
+        let out = s.call_global(&format!("{READER_PREFIX}run-checked"), &[runs]).map_err(|e| fail(e.to_string()))?;
         Ok(s.view(|v| v.get(out).string().unwrap_or_default()))
     })
 }
@@ -104,7 +115,8 @@ pub fn compile_with_fx26_compiler_showing(
             return Ok((format!("!! check: {m}"), None));
         }
         let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
-        let result = s.call_global(&format!("{READER_PREFIX}compile-program"), &[tops, facts]).map_err(|e| fail(e.to_string()))?;
+        let runs = s.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
+        let result = s.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts]).map_err(|e| fail(e.to_string()))?;
         let (tag, word) = s.view(|v| {
             let r = v.get(result);
             let tag = r.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();
@@ -167,7 +179,7 @@ pub fn with_last_value<T>(
             return Ok(Err(format!("check: {m}")));
         }
         let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
-        let word = match compile_to_word(s, file, text, facts)? {
+        let word = match compile_checked_to_word(s, file, facts)? {
             Ok(w) => w,
             Err(m) => return Ok(Err(format!("compile: {m}"))),
         };
@@ -286,7 +298,7 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     let done = c.declare_ahead(&forms)?;
     for (f, done) in forms.iter().zip(done) {
         if !done {
-            c.top(f)?;
+            c.top_defining(f)?;
         }
     }
     let offsets = byte_offsets(text);
@@ -326,10 +338,26 @@ pub fn compile_to_word_with_registers(scheme: &mut Session, file: FileId, text: 
     out
 }
 
+/// Compile what the checker written in FX-26 just checked, as it runs it
+/// (`checked-tops`, under redefinition), given what it found (`facts`):
+/// the word, as a handle in the caller's scope, or why the compiler would
+/// not make one.
+pub fn compile_checked_to_word(scheme: &mut Session, file: FileId, facts: Handle) -> R<Result<Handle, String>> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let runs = scheme.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
+    let result = scheme.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts]).map_err(|e| fail(e.to_string()))?;
+    word_of(scheme, result)
+}
+
 pub fn compile_to_word(scheme: &mut Session, file: FileId, text: &str, facts: Handle) -> R<Result<Handle, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let tops = parse_to_trees(scheme, file, text)?;
     let result = scheme.call_global(&format!("{READER_PREFIX}compile-program"), &[tops, facts]).map_err(|e| fail(e.to_string()))?;
+    word_of(scheme, result)
+}
+
+/// A `cresult`'s word, or its error.
+fn word_of(scheme: &mut Session, result: Handle) -> R<Result<Handle, String>> {
     let err = scheme.view(|v| {
         let r = v.get(result);
         (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("c-err"))

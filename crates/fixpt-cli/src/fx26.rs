@@ -34,7 +34,7 @@ fn report(c: &Checker, top: &Top) -> String {
         Top::Define { name, ty, effect, .. } => {
             format!("{} : {} ! {}", c.interner.name(*name), c.show_ty(*ty), c.show_effect(effect))
         }
-        Top::DefineRec { bindings } => {
+        Top::DefineRec { bindings, .. } => {
             let lines: Vec<String> =
                 bindings.iter().map(|(n, t, _)| format!("{} : {} ! pure", c.interner.name(*n), c.show_ty(*t))).collect();
             lines.join("\n")
@@ -167,16 +167,15 @@ pub fn repl(backend: Backend) -> i32 {
             crate::help::answer(&mut session.checker, &ask);
             continue;
         }
-        // `,redefine b|k|r`: what the next redefinition that would break
+        // `,redefine b|r`: what the next redefinition that would break
         // definitions does, said ahead of it (for input no one is asked).
         if let Some(arg) = text.trim().strip_prefix(",redefine") {
             use fixpt_fx26::session::Redefine;
             session.next_redefine = match arg.trim() {
                 "b" | "break" => Some(Redefine::Break),
-                "k" | "keep" => Some(Redefine::Keep),
                 "r" | "refuse" => Some(Redefine::Refuse),
                 _ => {
-                    println!("; `,redefine b|k|r`: the next redefinition that would break definitions breaks them, keeps them on the old one, or is refused");
+                    println!("; `,redefine b|r`: the next redefinition that would break definitions breaks them, or is refused");
                     continue;
                 }
             };
@@ -297,14 +296,13 @@ fn ask_redefine(q: &fixpt_fx26::session::Redefinition) -> fixpt_fx26::session::R
         println!("; and runs again, as they still check: {}", q.rerun.join(", "));
     }
     println!("; [b]reak them: unusable until you define them again (the default)");
-    println!("; [k]eep them on the old one, which is then a different global");
     println!("; [r]efuse this redefinition: nothing changes");
+    println!(";   (to keep an old value, bind it: `(define d (let ((g g)) …))`)");
     print!("; which? [b] ");
     let _ = std::io::stdout().flush();
     let mut line = String::new();
     let _ = std::io::stdin().lock().read_line(&mut line);
     match line.trim() {
-        "k" | "keep" => Redefine::Keep,
         "r" | "refuse" => Redefine::Refuse,
         _ => Redefine::Break,
     }

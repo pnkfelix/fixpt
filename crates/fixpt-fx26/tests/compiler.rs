@@ -43,7 +43,7 @@ fn test_programs() {
         include_str!("programs/bloblet/array-sum.fx"),
         include_str!("programs/bloblet/else-narrows.fx"),
         include_str!("programs/run/recursion.fx"),
-        include_str!("programs/run/shadowing.fx"),
+        include_str!("programs/run/redefinition.fx"),
         include_str!("programs/run/state.fx"),
     ] {
         three(p);

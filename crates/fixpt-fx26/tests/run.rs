@@ -52,10 +52,12 @@ fn marks_run() {
     assert_eq!(run(p), "1");
 }
 
-/// A second `define` shadows: code written before it keeps the first.
+/// A second `define`, at a type every use can take, assigns: code written
+/// before it sees the second, as in Scheme and at the REPL
+/// (`Checker::top_defining`).
 #[test]
-fn a_redefinition_shadows_rather_than_assigns() {
-    assert_eq!(run(include_str!("programs/run/shadowing.fx")), "6");
+fn a_redefinition_assigns() {
+    assert_eq!(run(include_str!("programs/run/redefinition.fx")), "8");
 }
 
 #[test]

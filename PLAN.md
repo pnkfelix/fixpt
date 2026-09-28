@@ -59,9 +59,13 @@ queue gained", and "The next queue"):
    always refer to what it is now; one of a type every use can take keeps
    the global; one they cannot re-runs its users, breaking those that no
    longer check until they are defined again (the default), or keeps them
-   on the old one, or is refused, as asked (`,redefine b|k|r`). A whole
-   program's own second definition still makes a new binding: whether
-   files should follow the REPL is open.
+   on the old one, or is refused, as asked. Files too (2026-09-28, the
+   user's decision): one rule, in both checkers (`top_defining`,
+   `k-defining`), which say what a form runs (`checked-tops`); a value kept
+   as it was is bound, `(define d (let ((g g)) …))`, so the REPL's choices
+   are only break or refuse (`,redefine b|r`). Open: a procedure's calls of
+   itself by name are direct, so an old closure still held recurses into
+   the old code (`docs/fx26.md`, "Redefinition").
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.

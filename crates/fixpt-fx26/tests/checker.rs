@@ -93,17 +93,20 @@ fn rust_check_in(mut c: Checker, program: &str) -> Result<Vec<String>, (String, 
         if done {
             continue;
         }
-        match c.top(f).map_err(fail)? {
-            Top::Define { name, ty, effect, .. } => {
-                out.push(format!("define {} : {} ! {}", c.interner.name(name), c.show_ty(ty), c.show_effect(&effect)))
-            }
-            Top::DefineRec { bindings } => {
-                for (name, ty, _) in bindings {
-                    out.push(format!("define {} : {} ! pure", c.interner.name(name), c.show_ty(ty)))
+        // Under redefinition: the form, and what it runs again.
+        for (top, _) in c.top_defining(f).map_err(fail)?.run {
+            match top {
+                Top::Define { name, ty, effect, .. } => {
+                    out.push(format!("define {} : {} ! {}", c.interner.name(name), c.show_ty(ty), c.show_effect(&effect)))
                 }
+                Top::DefineRec { bindings, .. } => {
+                    for (name, ty, _) in bindings {
+                        out.push(format!("define {} : {} ! pure", c.interner.name(name), c.show_ty(ty)))
+                    }
+                }
+                Top::Exp(k) => out.push(format!("{} ! {}", c.show_ty(k.ty), c.show_effect(&k.effect))),
+                _ => {}
             }
-            Top::Exp(k) => out.push(format!("{} ! {}", c.show_ty(k.ty), c.show_effect(&k.effect))),
-            _ => {}
         }
     }
     Ok(out)
@@ -165,7 +168,7 @@ fn probe_helpers() {
 fn every_test_program() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let (mut report, mut unparsed, mut agreed) = (Vec::new(), Vec::new(), 0);
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate", "generative", "lemmas", "sizes", "conventions"] {
+    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate", "generative", "lemmas", "sizes", "conventions", "redefine"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {

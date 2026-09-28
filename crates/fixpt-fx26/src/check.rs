@@ -135,6 +135,10 @@ pub struct Checker {
     /// binding broken, and why. A use of it is an error until the name is
     /// defined again.
     pub(crate) broken: HashMap<Sym, (usize, String)>,
+    /// The definitions checked so far, oldest first, each the latest of its
+    /// names: what a redefinition finds the users of a name in
+    /// (`Checker::top_defining`).
+    pub(crate) defs: Vec<crate::top::Definition>,
 }
 
 /// What checking proved about expressions, keyed by expression. Lowering
@@ -259,6 +263,7 @@ impl Checker {
             private_regions: Vec::new(),
             masking: true,
             broken: HashMap::new(),
+            defs: Vec::new(),
         };
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
@@ -852,7 +857,7 @@ impl Checker {
         out
     }
 
-    fn free_into(&self, e: ExpId, bound: &mut Vec<Sym>, out: &mut Vec<Sym>) {
+    pub(crate) fn free_into(&self, e: ExpId, bound: &mut Vec<Sym>, out: &mut Vec<Sym>) {
         match self.arena.exp_at(e).clone() {
             Exp::Var(s) => {
                 if !bound.contains(&s) && !out.contains(&s) {

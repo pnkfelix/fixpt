@@ -12,7 +12,7 @@ fn shown(text: &str) -> String {
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
-    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let mut out = String::new();
     s.scheme.scope(|sc| {
@@ -60,7 +60,8 @@ fn every_test_program_has_well_formed_register_code() {
             let mut c = Checker::new();
             let Ok(forms) = c.read_in(FileId(0), &text) else { continue };
             let Ok(done) = c.declare_ahead(&forms) else { continue };
-            let tops: Result<Vec<_>, _> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f)).collect();
+            let tops: Result<Vec<Vec<_>>, _> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top_all(f)).collect();
+            let tops = tops.map(|t| t.concat());
             let Ok(tops) = tops else { continue };
             let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
             s.scheme.scope(|sc| {
@@ -105,7 +106,8 @@ fn runs_as_lowered(gc_every: Option<u64>) {
             let mut c = Checker::new();
             let Ok(forms) = c.read_in(FileId(0), &text) else { continue };
             let Ok(done) = c.declare_ahead(&forms) else { continue };
-            let tops: Result<Vec<_>, _> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f)).collect();
+            let tops: Result<Vec<Vec<_>>, _> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top_all(f)).collect();
+            let tops = tops.map(|t| t.concat());
             let Ok(tops) = tops else { continue };
             let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
             let Ok(Ok(lowered)) = s.run_program(&text).map(|v| v.map_err(|e| e.to_string())) else { continue };
@@ -151,7 +153,7 @@ fn run_in_registers_counting(program: &str, gc_every: Option<u64>) -> (String, u
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), &text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
-    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.scheme.scope(|sc| {
         let w = sc.make(|m| {

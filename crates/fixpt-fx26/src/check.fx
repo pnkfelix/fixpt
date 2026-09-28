@@ -414,8 +414,40 @@
 ;; (`docs/research/soundness-findings.md`, F1).
 (define k-known (ref (table symbol (listof bool finite) @t) @t) (new (make-table symbol-hash symbol=?)))
 ;; The type `s` is bound to, or -1.
+;; Globals broken by a redefinition (`k-defining`): the name, how many
+;; bindings it had then (so which one is broken), and why. A use of a broken
+;; binding is an error saying why, until the name is defined again.
+(define-type k-break (productof (1 symbol) (2 int) (3 string)))
+(define k-broken (ref (listof k-break finite) @t) (new nil))
+;; How many bindings `s` has now.
+(define k-name-depth (subr (maxeff (read @t) spin) (symbol) int)
+  (lambda (s) (k-length (table-ref (get k-env) s nil))))
+;; Why `s`'s binding now is broken, if it is.
+(define k-broken-why (subr (maxeff (read @t) spin) (symbol) (listof string finite))
+  (lambda (s)
+    (let ((d (k-name-depth s)))
+      (letrec ((go (subr pure ((listof k-break finite)) (listof string finite))
+                 (lambda (bs)
+                   (cond ((null? bs) nil)
+                         ((and (symbol=? (extract (car bs) 1) s) (= (extract (car bs) 2) d)) (the (listof string finite) (cons (extract (car bs) 3) nil)))
+                         (else (go (cdr bs)))))))
+        (go (get k-broken))))))
+;; What `s` is where it is used: its innermost binding; none, if that is
+;; broken.
 (define k-lookup (subr (maxeff (read @t) spin) (symbol) int)
+  (lambda (s)
+    (let ((st (table-ref (get k-env) s nil)))
+      (if (or (null? st) (not (null? (k-broken-why s)))) -1 (car st)))))
+;; The same, broken or not.
+(define k-lookup-raw (subr (maxeff (read @t) spin) (symbol) int)
   (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))
+;; What an unbound name's use says: why, if it is broken.
+(define k-unbound (subr (maxeff (read @t) (alloc @t) spin) (symbol) string)
+  (lambda (s)
+    (let ((why (k-broken-why s)))
+      (if (null? why)
+          (k-cat3 "unbound variable `" (symbol->string s) "`")
+          (k-cat5 "`" (symbol->string s) "` is broken, " (car why) ": define it again to use it")))))
 (define k-bind (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (s t)
     (begin
@@ -1992,6 +2024,19 @@
 ;; Kept once found, by type: a type does not change once built.
 (define k-regions-memo (ref (arrayof (listof k-regions finite) @t) @t) (new (make-array 512 nil)))
 
+;; A definition checked, as a redefinition finds it: the names it defines,
+;; its tree, and the globals it uses (its expressions' free variables).
+(define-type k-def (productof (1 k-names) (2 top) (3 k-names)))
+;; The definitions checked so far, newest first, each the latest of its
+;; names.
+(define k-defs (ref (listof k-def finite) @t) (new nil))
+;; The free variables of the definition being checked, for `k-record`.
+(define k-last-uses (ref k-names @t) (new nil))
+;; What the program runs, newest first: each top-level form, and the
+;; definitions run again for a redefinition, each with whether it assigns
+;; its names' globals rather than making new ones.
+(define-type k-run (productof (1 top) (2 bool)))
+(define k-runs (ref (listof k-run finite) @t) (new nil))
 (define k-reset (subr (maxeff kstate spin) () unit)
   (lambda ()
     (begin
@@ -2001,6 +2046,7 @@
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
       (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil) (set k-certified-lengths nil) (set k-certified-nats nil) (set k-size-facts nil) (set k-skolems nil)
+      (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
@@ -4800,7 +4846,7 @@
       (tagcase x
         (x-var (s a b)
           (let ((t (k-lookup s)))
-            (if (< t 0) (k-fail (k-cat3 "unbound variable `" (symbol->string s) "`") a b) (k-te t (k-naming-effect s t)))))
+            (if (< t 0) (k-fail (k-unbound s) a b) (k-te t (k-naming-effect s t)))))
         (x-const (t v a b) (k-te t nil))
         (x-lambda (ps body a b) (k-synth-lambda-as x nil -1))
         (x-app (f args a b) (k-synth-app x f args -1))
@@ -5825,28 +5871,114 @@
                (rest (k-rec-check (cdr g))))
           (cons line rest)))))
 
+;; A `define-rec` group's free variables.
+(define k-group-free (subr (maxeff (read @t) (alloc @t)) (k-group k-names) k-names)
+  (lambda (g out) (if (null? g) out (k-group-free (cdr g) (k-free-into (extract (car g) 3) nil out)))))
 ;; `(define-rec (name type lambda) …)`: every name in scope first, then each
 ;; lambda checked against its type. A line for each.
 (define k-define-rec (subr (maxeff checks spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof string finite))
   (lambda (bs)
     (let* ((rsaved (get k-recursive))
            (g (k-rec-lambdas bs (k-rec-types bs)))
+           (u (set k-last-uses (k-group-free g nil)))
            ;; A group whose every run ends needs no `spin`.
            (why (k-termination g))
            (noted (if (string=? why "") #u (begin (k-note-recursive g) (k-note-why g why))))
            (lines (k-rec-check g)))
       (begin (set k-recursive rsaved) lines))))
 
-;; The second pass: definitions and expressions, in order.
-(define k-forms (subr (maxeff checks spin) ((listof top finite) k-out) k-out)
-  (lambda (forms out)
-    (if (null? forms)
-        (reverse out)
-        (let ((line
-               (the (listof string finite) (tagcase (car forms)
+;;; Redefinition (`top.rs`, `Checker::top_defining`), for files and the REPL
+;;; alike: a global's uses always refer to what it is now. A definition of a
+;;; name already a global, at a type every use can take (each a subtype of
+;;; the old), assigns the global. At any other type it makes a new global,
+;;; and every earlier definition that uses the name (and every one that uses
+;;; those) is checked again, in order: each that checks is defined again,
+;;; by the same rule; each that does not is broken. To keep a value as it
+;;; was, a program binds it: `(define d (let ((g g)) …))`.
+
+(define k-rev-runs (subr pure ((listof k-run finite) (listof k-run finite)) (listof k-run finite))
+  (lambda (xs acc) (if (null? xs) acc (k-rev-runs (cdr xs) (the (listof k-run finite) (cons (car xs) acc))))))
+;; For a driver: what the program checked runs, in order (`compile-checked`,
+;; `run-checked`).
+(define checked-tops (subr (read @t) () (listof k-run finite))
+  (lambda () (k-rev-runs (get k-runs) nil)))
+(define k-rev-defs (subr pure ((listof k-def finite) (listof k-def finite)) (listof k-def finite))
+  (lambda (xs acc) (if (null? xs) acc (k-rev-defs (cdr xs) (the (listof k-def finite) (cons (car xs) acc))))))
+(define k-rec-names (subr pure ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) k-names)
+  (lambda (bs) (if (null? bs) nil (the k-names (cons (extract (car bs) 1) (k-rec-names (cdr bs)))))))
+;; The names a form defines.
+(define k-top-names (subr pure (top) k-names)
+  (lambda (form)
+    (tagcase form
+      (t-define (name ty init a b) (the k-names (cons name nil)))
+      (t-define-rec (bs a b) (k-rec-names bs))
+      (else y (the k-names nil)))))
+;; Whether `n` is a global a definition made.
+(define k-defined? (subr (read @t) (symbol) bool)
+  (lambda (n)
+    (letrec ((go (subr (read @t) ((listof k-def finite)) bool)
+               (lambda (ds) (and (not (null? ds)) (or (k-has-name? (extract (car ds) 1) n) (go (cdr ds)))))))
+      (go (get k-defs)))))
+;; The names of `ns` that are globals already, with their types.
+(define-type k-olds (listof (pairof symbol int finite) finite))
+(define k-old-types (subr (maxeff (read @t) spin) (k-names) k-olds)
+  (lambda (ns)
+    (cond ((null? ns) nil)
+          ((k-defined? (car ns)) (the k-olds (cons (cons (car ns) (k-lookup-raw (car ns))) (k-old-types (cdr ns)))))
+          (else (k-old-types (cdr ns))))))
+;; Whether each of them now has a type its old one's uses can take.
+(define k-fits-old? (subr (maxeff kstate spin) (k-olds) bool)
+  (lambda (os) (or (null? os) (and (k-subtype (k-lookup-raw (car (car os))) (cdr (car os))) (k-fits-old? (cdr os))))))
+(define k-names-without (subr (read @t) (k-names k-names) k-names)
+  (lambda (xs ns)
+    (cond ((null? xs) xs)
+          ((k-has-name? ns (car xs)) (k-names-without (cdr xs) ns))
+          (else (the k-names (cons (car xs) (k-names-without (cdr xs) ns)))))))
+(define k-defs-without (subr (read @t) ((listof k-def finite) k-names) (listof k-def finite))
+  (lambda (ds ns)
+    (cond ((null? ds) ds)
+          ((k-names-meet? (extract (car ds) 1) ns) (k-defs-without (cdr ds) ns))
+          (else (the (listof k-def finite) (cons (car ds) (k-defs-without (cdr ds) ns)))))))
+;; `form`, which defines `ns`, recorded as their definition now.
+(define k-record (subr kstate (top k-names) unit)
+  (lambda (form ns)
+    (if (null? ns)
+        #u
+        (set k-defs (the (listof k-def finite)
+                      (cons (product (1 ns) (2 form) (3 (k-names-without (get k-last-uses) ns))) (k-defs-without (get k-defs) ns)))))))
+;; The definitions that use `ns`, and those that use them, and so on,
+;; oldest first.
+(define k-users-of (subr (maxeff (read @t) (alloc @t)) (k-names) (listof k-def finite))
+  (lambda (ns)
+    (letrec ((go (subr (maxeff (read @t) (alloc @t)) ((listof k-def finite) k-names) (listof k-def finite))
+               (lambda (ds used)
+                 (cond ((null? ds) nil)
+                       ((k-names-meet? (extract (car ds) 1) ns) (go (cdr ds) used))
+                       ((k-names-meet? (extract (car ds) 3) used)
+                        (the (listof k-def finite) (cons (car ds) (go (cdr ds) (k-names-onto (extract (car ds) 1) used)))))
+                       (else (go (cdr ds) used))))))
+      (go (k-rev-defs (get k-defs) nil) ns))))
+;; Names as a message shows them: `a`, `b`.
+(define k-shown (subr (maxeff (read @t) (alloc @t)) (k-names) string)
+  (lambda (ns)
+    (letrec ((go (subr (alloc @t) (k-names) (listof string finite))
+               (lambda (xs) (if (null? xs) nil (the (listof string finite) (cons (k-cat3 "`" (symbol->string (car xs)) "`") (go (cdr xs))))))))
+      (k-join (go ns) ", "))))
+(define k-break-all (subr (maxeff kstate spin) (k-names string) unit)
+  (lambda (ns why)
+    (if (null? ns)
+        #u
+        (begin (set k-broken (the (listof k-break finite) (cons (product (1 (car ns)) (2 (k-name-depth (car ns))) (3 why)) (get k-broken))))
+               (k-break-all (cdr ns) why)))))
+(define k-lines-append (subr pure ((listof string finite) (listof string finite)) (listof string finite))
+  (lambda (xs ys) (if (null? xs) ys (the (listof string finite) (cons (car xs) (k-lines-append (cdr xs) ys))))))
+;; One top-level form's lines: what each definition and expression is.
+(define k-top-lines (subr (maxeff checks spin) (top) (listof string finite))
+  (lambda (form)
+    (the (listof string finite) (tagcase form
                  (t-define (name ty init a b)
                    (if (null? ty)
-                       (let* ((x (k-resolve-exp init)) (r (k-synth x)))
+                       (let* ((x (k-resolve-exp init)) (u (set k-last-uses (k-free-into x nil nil))) (r (k-synth x)))
                          (begin (k-bind name (extract r 1))
                                 (if (k-lambda? x) (k-note-known name 0) #u)
                                 (cons (k-cat4 "define " (symbol->string name) " : " (k-line (extract r 1) (extract r 2))) nil)))
@@ -5860,6 +5992,7 @@
                               (saved (get k-dscope))
                               (signed (k-bind-signature t))
                               (x (k-resolve-exp init))
+                              (u (set k-last-uses (k-free-into x nil nil)))
                               (restored (set k-dscope saved))
                               (bound (if (k-lambda? x) (k-bind name t) #u))
                               (rsaved (get k-recursive))
@@ -5896,7 +6029,50 @@
                    (let* ((x (k-resolve-exp e)) (r (k-synth x)))
                      (cons (k-line (extract r 1) (extract r 2)) nil)))
                  (else y nil)))))
-          (k-forms (cdr forms) (k-push-lines line out))))))
+;; Each of `users` checked again after the redefinition of `ns`: defined
+;; again if it checks, broken if not.
+(define k-rerun (subr (maxeff checks spin) ((listof k-def finite) k-names (listof string finite)) (listof string finite))
+  (lambda (users ns lines)
+    (if (null? users)
+        lines
+        (let* ((u (car users))
+               (olds (k-old-types (extract u 1)))
+               (m (k-mark))
+               (reset (set k-last-uses nil))
+               (r (prompt k-tag (k-ok (k-top-lines (extract u 2))) (lambda (r) r))))
+          (tagcase r
+            (k-ok (ls)
+              (let* ((assigns (k-fits-old? olds))
+                     (recorded (k-record (extract u 2) (extract u 1)))
+                     (ran (set k-runs (the (listof k-run finite) (cons (product (1 (extract u 2)) (2 assigns)) (get k-runs))))))
+                (k-rerun (cdr users) ns (k-lines-append lines ls))))
+            (k-err (msg a b)
+              (begin (k-unbind-to m)
+                     (k-break-all (extract u 1) (k-cat5 "since " (k-shown ns) " was redefined (" msg ")"))
+                     (k-rerun (cdr users) ns lines)))
+            (else y (k-rerun (cdr users) ns lines)))))))
+;; A top-level form, checked under redefinition: its lines, and those of
+;; the definitions it has run again.
+(define k-defining (subr (maxeff checks spin) (top) (listof string finite))
+  (lambda (form)
+    (let* ((ns (k-top-names form))
+           (olds (k-old-types ns))
+           (users (if (null? olds) (the (listof k-def finite) nil) (k-users-of ns)))
+           (reset (set k-last-uses nil))
+           (lines (k-top-lines form))
+           (assigns (and (not (null? olds)) (k-fits-old? olds)))
+           (recorded (k-record form ns))
+           (ran (set k-runs (the (listof k-run finite) (cons (product (1 form) (2 assigns)) (get k-runs))))))
+      (if (or (null? olds) assigns) lines (k-rerun users ns lines)))))
+
+
+;; The second pass: definitions and expressions, in order, each under
+;; redefinition (`k-defining`).
+(define k-forms (subr (maxeff checks spin) ((listof top finite) k-out) k-out)
+  (lambda (forms out)
+    (if (null? forms)
+        (reverse out)
+        (k-forms (cdr forms) (k-push-lines (k-defining (car forms)) out)))))
 
 ;; The entry point: check a program's trees, in the initial environment
 ;; written `standard`. What each definition and expression is, in order,
@@ -5914,5 +6090,5 @@
 (define check-more (subr (maxeff checks spin) ((listof top finite)) k-result)
   (lambda (forms)
     (prompt k-tag
-      (begin (set k-extracts nil) (k-ahead forms) (k-ok (k-forms forms nil)))
+      (begin (set k-extracts nil) (set k-runs nil) (k-ahead forms) (k-ok (k-forms forms nil)))
       (lambda (r) r))))

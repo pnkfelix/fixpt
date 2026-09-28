@@ -89,7 +89,7 @@ pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span) -
             let ty = if *typed { "(_)" } else { "()" };
             format!("(t-define {} {ty} {} {a} {b})", c.interner.name(*name), show_exp(c, chars, *exp))
         }
-        Top::DefineRec { bindings } => {
+        Top::DefineRec { bindings, .. } => {
             let bs: Vec<String> =
                 bindings.iter().map(|(n, _, e)| format!("[{} _ {}]", c.interner.name(*n), show_exp(c, chars, *e))).collect();
             format!("(t-define-rec ({}) {a} {b})", bs.join(" "))

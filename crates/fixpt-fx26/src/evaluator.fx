@@ -370,11 +370,33 @@
 (define bound? (subr (maxeff (read @v) spin) (env symbol) bool)
   (lambda (e n) (and (not (null? e)) (or (symbol=? (car (car e)) n) (bound? (cdr e) n)))))
 
-(define push-global (subr (maxeff (read @v) (write @v) (alloc @v)) (symbol) (bloblet (fields val) @v))
+;; Names whose next definition keeps the cell they have: definitions that
+;; assign their globals (`checked-tops`, under redefinition).
+(define ev-keep (ref (listof symbol finite) @v) (new nil))
+(define ev-kept? (subr pure ((listof symbol finite) symbol) bool)
+  (lambda (ks n) (and (not (null? ks)) (or (symbol=? (car ks) n) (ev-kept? (cdr ks) n)))))
+(define ev-unkeep (subr pure ((listof symbol finite) symbol) (listof symbol finite))
+  (lambda (ks n)
+    (cond ((null? ks) ks)
+          ((symbol=? (car ks) n) (ev-unkeep (cdr ks) n))
+          (else (the (listof symbol finite) (cons (car ks) (ev-unkeep (cdr ks) n)))))))
+(define ev-new-global (subr (maxeff (read @v) (write @v) (alloc @v)) (symbol) (bloblet (fields val) @v))
   (lambda (n) (let ((c (cell (v-unit)))) (begin (set genv (cons (cons n c) (get genv))) c))))
+;; The cell global `n` has; a new one, if it has none.
+(define ev-cell-of (subr (maxeff (read @v) (write @v) (alloc @v) spin) (env symbol) (bloblet (fields val) @v))
+  (lambda (e n)
+    (cond ((null? e) (ev-new-global n))
+          ((symbol=? (car (car e)) n) (cdr (car e)))
+          (else (ev-cell-of (cdr e) n)))))
+;; The cell a definition of `n` sets: the one it has, if kept; else new.
+(define push-global (subr (maxeff (read @v) (write @v) (alloc @v) spin) (symbol) (bloblet (fields val) @v))
+  (lambda (n)
+    (if (ev-kept? (get ev-keep) n)
+        (begin (set ev-keep (ev-unkeep (get ev-keep) n)) (ev-cell-of (get genv) n))
+        (ev-new-global n))))
 
 
-(define rec-cells (subr (maxeff (read @v) (write @v) (alloc @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof (bloblet (fields val) @v) @v))
+(define rec-cells (subr (maxeff (read @v) (write @v) (alloc @v) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) (listof (bloblet (fields val) @v) @v))
   (lambda (bs) (if (null? bs) nil (let ((c (push-global (extract (car bs) 1)))) (cons c (rec-cells (cdr bs)))))))
 (define rec-fill (subr (maxeff evals spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite) (listof (bloblet (fields val) @v) @v)) unit)
   (lambda (bs cells)
@@ -416,6 +438,33 @@
                  (lambda (ts last)
                    (if (null? ts) last (let ((v (eval-top (car ts)))) (go (cdr ts) (tagcase (car ts) (t-exp (x) v) (else y last))))))))
         (ev-ok (go tops (v-unit))))
+      (lambda (r) r))))
+
+;; Before a run that assigns its names' globals: each keeps its cell.
+(define ev-keep-names (subr (maxeff (read @v) (write @v)) (top) unit)
+  (lambda (t)
+    (tagcase t
+      (t-define (n ty x a b) (set ev-keep (the (listof symbol finite) (cons n (get ev-keep)))))
+      (t-define-rec (bs a b)
+        (letrec ((go (subr (maxeff (read @v) (write @v)) ((listof (productof (1 symbol) (2 syn) (3 exp)) finite)) unit)
+                   (lambda (bs) (if (null? bs) #u (begin (set ev-keep (the (listof symbol finite) (cons (extract (car bs) 1) (get ev-keep)))) (go (cdr bs)))))))
+          (go bs)))
+      (else y #u))))
+
+;; What a checked program runs (`checked-tops`), each in turn: the value of
+;; the last expression, or the first error.
+(define eval-runs (subr (maxeff evals spin) ((listof k-run finite)) eresult)
+  (lambda (runs)
+    (prompt eval-tag
+      (letrec ((go (subr (maxeff evals spin) ((listof k-run finite) val) val)
+                 (lambda (rs last)
+                   (if (null? rs)
+                       last
+                       (let* ((r (car rs))
+                              (kept (if (extract r 2) (ev-keep-names (extract r 1)) #u))
+                              (v (eval-top (extract r 1))))
+                         (go (cdr rs) (tagcase (extract r 1) (t-exp (x) v) (else y last))))))))
+        (ev-ok (go runs (v-unit))))
       (lambda (r) r))))
 
 (define length-pairs (subr (maxeff (read @v) spin) ((listof (pairof symbol val @v) @v)) int)
@@ -465,6 +514,15 @@
           (v-nil () head)
           (v-pair (q) (if (<= fuel 1) (string-append head " …") (string-append head (string-append " " (show-items q (- fuel 1))))))
           (else x (string-append head (string-append " . " (show-val-in tail (- fuel 1))))))))))
+
+;; The entry point for a program the checker written in FX-26 checked: what
+;; it runs (`checked-tops`, under redefinition), run; its value shown, or
+;; its error.
+(define run-checked (subr (maxeff evals spin) ((listof k-run finite)) string)
+  (lambda (runs)
+    (tagcase (eval-runs runs)
+      (ev-ok (v) (show-val v))
+      (ev-err (m) (string-append "!! " m)))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr (maxeff evals spin) ((listof top finite)) string)

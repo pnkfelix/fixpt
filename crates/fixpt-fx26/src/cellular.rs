@@ -988,6 +988,15 @@ impl<'a> Compiler<'a> {
         g
     }
 
+    /// The global a definition of `n` sets: the one `n` has, if the
+    /// definition assigns it (`Top`'s `assigns`); else a new one.
+    fn global_for(&mut self, n: Sym, assigns: bool) -> Value {
+        match find(&self.genv, n) {
+            Some(Loc::Global(g)) if assigns => g,
+            _ => self.push_global(n),
+        }
+    }
+
     /// A checked program's forms, as the checker found them, to one word
     /// that runs it and leaves its last expression's value (unit if none).
     pub fn program(&mut self, tops: &[Top]) -> R<Value> {
@@ -995,16 +1004,16 @@ impl<'a> Compiler<'a> {
         let mut has_value = false;
         for t in tops {
             match t {
-                Top::Define { name, exp, recursive, .. } => {
+                Top::Define { name, exp, recursive, assigns, .. } => {
                     if has_value {
                         self.op(&mut code, "drop");
                     }
                     // A lambda's global first, so that it can call itself.
                     let g = if !recursive {
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
-                        self.push_global(*name)
+                        self.global_for(*name, *assigns)
                     } else {
-                        let g = self.push_global(*name);
+                        let g = self.global_for(*name, *assigns);
                         // Its own name its global, known (`lambda_word`).
                         match self.lambda_of(*exp) {
                             Some((ps, body, None)) => {
@@ -1019,11 +1028,11 @@ impl<'a> Compiler<'a> {
                 }
                 // Every name's global first; then each lambda, which runs
                 // nothing.
-                Top::DefineRec { bindings } => {
+                Top::DefineRec { bindings, assigns } => {
                     if has_value {
                         self.op(&mut code, "drop");
                     }
-                    let gs: Vec<Value> = bindings.iter().map(|(n, _, _)| self.push_global(*n)).collect();
+                    let gs: Vec<Value> = bindings.iter().map(|(n, _, _)| self.global_for(*n, *assigns)).collect();
                     for ((_, _, e), g) in bindings.iter().zip(gs) {
                         self.exp(*e, &Vec::new(), 0, &mut code, false)?;
                         self.op1(&mut code, "global!", g);

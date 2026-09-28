@@ -50,7 +50,7 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), &text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
-    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let mut m = DirectMachine::new().expect("maps");
     s.scheme.scope(|sc| {
@@ -97,7 +97,7 @@ fn on_rust_machine(text: &str) -> String {
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
-    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.scheme.scope(|sc| {
         let w = sc.make(|h| fixpt_fx26::cellular::Compiler::new(h.heap(), &c, text).program(&tops).expect("compiles"));
@@ -236,7 +236,7 @@ fn code_compiled_and_dropped_is_reclaimed() {
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), &text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
-    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let mut m = DirectMachine::new().expect("maps");
     s.scheme.scope(|sc| {

@@ -10,14 +10,12 @@
 //! the three FX front ends' sessions had in common: evaluate, and keep what the
 //! program printed apart from its value.
 
-use crate::ast::TyId;
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::lower::{Globals, lower};
 use crate::top::Top;
 use fixpt_read::{FileId, Span, Sym, Syntax};
 use fixpt_scheme::Session;
-use std::collections::HashSet;
 
 /// The FX-26 run-time environment, as Scheme.
 pub const RUNTIME: &str = include_str!("runtime.scm");
@@ -45,18 +43,12 @@ pub struct Fx26Session {
     /// ones before (`check-more`), and compiled alone against the globals
     /// they made, which the compiler keeps.
     own_begun: bool,
-    /// The definitions run so far, oldest first: what a redefinition finds
-    /// the users of a name in.
-    defs: Vec<DefRecord>,
     /// How a redefinition that would break definitions is decided: asked of
     /// the driver, or, with none, `Redefine::Break`.
     pub redefine: Option<fn(&Redefinition) -> Redefine>,
     /// What the next such redefinition does, said ahead of it (the REPL's
     /// `,redefine`), in place of asking.
     pub next_redefine: Option<Redefine>,
-    /// Running definitions again for a redefinition: none of them is itself
-    /// a redefinition to decide about.
-    rerunning: bool,
     /// Under `Strategy::Cellular`: whether each form's [`Outcome::code`] is
     /// the words the compiler written in FX-26 made for it, those not shown
     /// for an earlier form, rather than its lowering to Scheme.
@@ -99,10 +91,32 @@ pub enum Speculation {
     NotAnExpression,
 }
 
-/// Check and lower one top-level form, keeping what it defines.
+/// Check and lower one top-level form, keeping what it defines, alone: not
+/// under redefinition (`compile_form_defining` is).
 pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(Top, String)> {
     let top = checker.top(form)?;
-    let code = match &top {
+    let code = lower_top(checker, globals, &top);
+    Ok((top, code))
+}
+
+/// Check and lower one top-level form, under redefinition
+/// (`Checker::top_defining`): the Scheme for everything it makes run, in
+/// order, and what it broke.
+pub fn compile_form_defining(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(crate::top::Defining, Vec<String>)> {
+    let done = checker.top_defining(form)?;
+    let code = done.run.iter().map(|(top, _)| lower_top(checker, globals, top)).collect();
+    Ok((done, code))
+}
+
+/// A checked top-level form, lowered: a definition that assigns keeps the
+/// global its name has (`Globals::keep_next`).
+pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> String {
+    match top {
+        Top::Define { name, assigns: true, .. } => globals.keep_next(*name),
+        Top::DefineRec { bindings, assigns: true } => bindings.iter().for_each(|(n, _, _)| globals.keep_next(*n)),
+        _ => {}
+    }
+    match top {
         Top::DefineType { .. } | Top::DefineTypeFamily { .. } | Top::DefineGenerative { .. } | Top::DefineEffect { .. } | Top::PrivateRegions { .. } => {
             String::new()
         }
@@ -118,7 +132,7 @@ pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax)
             };
             format!("(define {global} {body})")
         }
-        Top::DefineRec { bindings } => {
+        Top::DefineRec { bindings, .. } => {
             // Every name first: each lambda refers to the group's globals.
             let names: Vec<String> = bindings.iter().map(|(n, _, _)| globals.define(checker, *n)).collect();
             let defs: Vec<String> =
@@ -126,8 +140,7 @@ pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax)
             format!("(begin {})", defs.join(" "))
         }
         Top::Exp(k) => lower(checker, globals, k.exp),
-    };
-    Ok((top, code))
+    }
 }
 
 /// A whole program, checked and lowered but not run: the checker that
@@ -153,10 +166,8 @@ pub fn compile_program_as(text: &str, prefix: &str) -> R<Compiled> {
     let mut code = Vec::new();
     for (f, done) in forms.iter().zip(done) {
         if !done {
-            let (_, c) = compile_form(&mut checker, &mut globals, f)?;
-            if !c.is_empty() {
-                code.push(c);
-            }
+            let (_, cs) = compile_form_defining(&mut checker, &mut globals, f)?;
+            code.extend(cs.into_iter().filter(|c| !c.is_empty()));
         }
     }
     Ok(Compiled { checker, code })
@@ -230,16 +241,14 @@ pub enum NativeRun {
 /// much fuel. The CLI's is `fixpt_native::direct`'s.
 pub type NativeRunner = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, u64) -> NativeRun;
 
-/// What a redefinition of a type the definitions that use the name cannot
-/// all take does to them.
+/// Whether a redefinition goes ahead that would break definitions (those
+/// that use the name and would no longer check). To keep a value as it was
+/// instead, a program binds it: `(define d (let ((g g)) …))`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Redefine {
     /// Those that still check run again; the rest are broken, unusable
     /// until they are defined again. What a REPL does unless told otherwise.
     Break,
-    /// None of them changes: they keep the old one, and the name is a new
-    /// global, ML's way.
-    Keep,
     /// The redefinition is refused, and nothing changes.
     Refuse,
 }
@@ -251,15 +260,6 @@ pub struct Redefinition {
     pub names: Vec<String>,
     pub breaking: Vec<(String, String)>,
     pub rerun: Vec<String>,
-}
-
-/// A definition run, for redefinition to find: the names it defines, its
-/// form, and the globals its text mentions (a local of the same name too:
-/// that only checks one more definition again).
-struct DefRecord {
-    names: Vec<Sym>,
-    form: Syntax,
-    uses: HashSet<Sym>,
 }
 
 /// How a checked form is run.
@@ -291,10 +291,8 @@ impl Fx26Session {
             native_convention: false,
             native_runner: None,
             own_begun: false,
-            defs: Vec::new(),
             redefine: None,
             next_redefine: None,
-            rerunning: false,
             show_words: false,
             words_shown: Default::default(),
             standard26: None,
@@ -353,17 +351,13 @@ impl Fx26Session {
 
     /// Run the forms of a whole program, its type abbreviations first. One
     /// outcome per form still to run; the abbreviations are done in the
-    /// first pass and have none.
-    /// A program's own second definition of a name makes a new binding
-    /// (ML's way, as its checker and compilers see it), not a redefinition:
-    /// that is the REPL's, form by form.
+    /// first pass and have none. Redefinition is as at the REPL.
     pub fn run_forms(&mut self, forms: &[Syntax]) -> R<Vec<R<Outcome>>> {
         let done = self.checker.declare_ahead(forms)?;
         let mut outs = Vec::new();
         for (f, done) in forms.iter().zip(done) {
             if !done {
-                let out = self.run_form(f);
-                self.scheme.scope(|s| s.runtime_unrooted().heap.region_exit(0));
+                let out = self.run(f);
                 let failed = out.is_err();
                 outs.push(out);
                 if failed {
@@ -387,162 +381,70 @@ impl Fx26Session {
         out
     }
 
-    /// `form`, run, as a redefinition if it redefines a global. A global's
-    /// uses always refer to what it is now, as Larceny's do (to keep a
-    /// value as it was, bind it with `let`). So a redefinition whose types
-    /// every use can take (each a subtype of the old) keeps the global and
-    /// changes only its value. One that not every use can take runs the
-    /// definitions that use the name (transitively) again, and those that no
-    /// longer check are broken until defined again; or, as the driver
-    /// decides, keeps them on the old one, or is refused (`Redefine`).
+    /// `form`, run under redefinition (`Checker::top_defining`), as the
+    /// language says for files and the REPL alike. Only whether a
+    /// redefinition that would break definitions goes ahead is the driver's
+    /// to decide (`Redefine`): asked, or said ahead, before anything changes.
     fn run_defining(&mut self, form: &Syntax) -> R<Outcome> {
-        let names = defined_names(form, &self.checker.interner);
-        let olds: Vec<(Sym, TyId)> = names.iter().filter_map(|n| Some((*n, self.checker.global_type(*n)?))).collect();
-        if olds.is_empty() {
-            let out = self.run_form(form)?;
-            self.record(form, &names);
-            return Ok(out);
-        }
-        // The new types: checked, and undone. A form that does not check
-        // runs as any other, to say so.
-        let mark = self.checker.mark();
-        let news = match self.checker.top(form) {
-            Ok(top) => defined_types(&top),
-            Err(_) => {
-                self.checker.rollback(mark);
-                return self.run_form(form);
-            }
-        };
-        let fits = |c: &mut Checker| olds.iter().all(|(n, t)| news.iter().any(|(m, u)| m == n && c.subtype(*u, *t)));
-        let compatible = fits(&mut self.checker);
-        self.checker.rollback(mark);
+        let names = self.checker.defined_names(form);
         let shown = |c: &Checker, ns: &[Sym]| ns.iter().map(|n| format!("`{}`", c.interner.name(*n))).collect::<Vec<_>>().join(", ");
-        if compatible {
-            for (n, _) in &olds {
-                self.keep_global(*n)?;
+        if names.iter().any(|n| self.checker.global_type(*n).is_some())
+            && let Ok(trial) = self.checker.try_defining(form)
+            && !trial.broken.is_empty()
+        {
+            let choice = self.next_redefine.take().unwrap_or_else(|| {
+                let q = Redefinition {
+                    names: names.iter().map(|n| self.checker.interner.name(*n).to_string()).collect(),
+                    breaking: trial.broken.iter().map(|(ns, why)| (shown(&self.checker, ns), why.clone())).collect(),
+                    rerun: trial.run[1..].iter().map(|(_, f)| shown(&self.checker, &self.checker.defined_names(f))).collect(),
+                };
+                self.redefine.map_or(Redefine::Break, |ask| ask(&q))
+            });
+            if choice == Redefine::Refuse {
+                let list: Vec<String> = trial.broken.iter().map(|(ns, why)| format!("{}: {why}", shown(&self.checker, ns))).collect();
+                return Err(FxError::at(form.span, format!("{} not redefined: it would break {}", shown(&self.checker, &names), list.join("; "))));
             }
-            let mut out = self.run_form(form)?;
-            self.record(form, &names);
-            if !self.rerunning {
+        }
+        let redefined = names.iter().any(|n| self.checker.global_type(*n).is_some());
+        let done = self.checker.top_defining(form)?;
+        let reran: Vec<Sym> = done.run[1..].iter().flat_map(|(_, f)| self.checker.defined_names(f)).collect();
+        let mut notes = String::new();
+        let mut out = None;
+        for (i, (top, f)) in done.run.into_iter().enumerate() {
+            let o = self.run_checked(top, &f, i > 0)?;
+            if i == 0 {
+                out = Some(o);
+            } else if let Err(e) = &o.value {
+                notes.push_str(&format!("; {} failed as it ran again: {e}\n", shown(&self.checker, &self.checker.defined_names(&f))));
+            }
+        }
+        let mut out = out.expect("the form itself runs first");
+        match &out.top {
+            Top::Define { assigns: true, .. } | Top::DefineRec { assigns: true, .. } => {
                 out.printed.push_str(&format!("; {} redefined: every use sees the new one\n", shown(&self.checker, &names)));
             }
-            return Ok(out);
-        }
-        if self.rerunning {
-            // Its users are among those being run again already.
-            let out = self.run_form(form)?;
-            self.record(form, &names);
-            return Ok(out);
-        }
-        // Who uses the names, and whether each would still check: tried, and
-        // undone.
-        let users = self.users_of(&names);
-        let mark = self.checker.mark();
-        let broken = self.checker.broken.clone();
-        let (mut rerun, mut breaking) = (Vec::new(), Vec::new());
-        let _ = self.checker.top(form);
-        for u in &users {
-            let d = &self.defs[*u];
-            let who = shown(&self.checker, &d.names);
-            match self.checker.top(&d.form.clone()) {
-                Ok(_) => rerun.push(who),
-                Err(e) => {
-                    for n in d.names.clone() {
-                        self.checker.break_global(n, String::new());
-                    }
-                    breaking.push((who, e.message));
-                }
-            }
-        }
-        self.checker.rollback(mark);
-        self.checker.broken = broken;
-        // The users' forms and names now: recording the redefinition moves
-        // them in `defs`.
-        let users: Vec<(Syntax, Vec<Sym>)> = users.iter().map(|u| (self.defs[*u].form.clone(), self.defs[*u].names.clone())).collect();
-        let choice = match breaking.is_empty() {
-            true => Redefine::Break,
-            false => self.next_redefine.take().unwrap_or_else(|| {
-                let q = Redefinition { names: names.iter().map(|n| self.checker.interner.name(*n).to_string()).collect(), breaking: breaking.clone(), rerun: rerun.clone() };
-                self.redefine.map_or(Redefine::Break, |ask| ask(&q))
-            }),
-        };
-        match choice {
-            Redefine::Refuse => {
-                let list: Vec<String> = breaking.iter().map(|(n, why)| format!("{n}: {why}")).collect();
-                Err(FxError::at(form.span, format!("{} not redefined: it would break {}", shown(&self.checker, &names), list.join("; "))))
-            }
-            Redefine::Keep => {
-                let mut out = self.run_form(form)?;
-                self.record(form, &names);
-                let users: Vec<String> = users.iter().map(|(_, ns)| shown(&self.checker, ns)).collect();
-                out.printed.push_str(&format!("; a new {}: {} keep the old one\n", shown(&self.checker, &names), users.join(", ")));
-                Ok(out)
-            }
-            Redefine::Break => {
-                let mut out = self.run_form(form)?;
-                self.record(form, &names);
-                let (mut ran, mut broke) = (Vec::new(), Vec::new());
-                self.rerunning = true;
-                for (f, ns) in &users {
-                    match self.run(f) {
-                        Ok(_) => ran.push(shown(&self.checker, ns)),
-                        Err(e) => {
-                            let why = format!("since {} was redefined ({})", shown(&self.checker, &names), e.message);
-                            for n in ns {
-                                self.checker.break_global(*n, why.clone());
-                            }
-                            broke.push(format!("{} ({})", shown(&self.checker, ns), e.message));
-                        }
-                    }
-                }
-                self.rerunning = false;
+            _ if redefined => {
                 out.printed.push_str(&format!("; {} redefined", shown(&self.checker, &names)));
-                if !ran.is_empty() {
-                    out.printed.push_str(&format!("; run again, as they use it: {}", ran.join(", ")));
+                if !reran.is_empty() {
+                    out.printed.push_str(&format!("; run again, as they use it: {}", shown(&self.checker, &reran)));
                 }
                 out.printed.push('\n');
-                if !broke.is_empty() {
-                    out.printed.push_str(&format!("; broken until defined again: {}\n", broke.join("; ")));
-                }
-                Ok(out)
             }
+            _ => {}
         }
+        if !done.broken.is_empty() {
+            let list: Vec<String> = done.broken.iter().map(|(ns, why)| format!("{} ({why})", shown(&self.checker, ns))).collect();
+            out.printed.push_str(&format!("; broken until defined again: {}\n", list.join("; ")));
+        }
+        out.printed.push_str(&notes);
+        Ok(out)
     }
 
-    /// The definitions that use `names`, and those that use them, and so
-    /// on: by index, oldest first.
-    fn users_of(&self, names: &[Sym]) -> Vec<usize> {
-        let mut used: HashSet<Sym> = names.iter().copied().collect();
-        let mut out = Vec::new();
-        for (i, d) in self.defs.iter().enumerate() {
-            if d.names.iter().any(|n| names.contains(n)) {
-                continue;
-            }
-            if d.uses.iter().any(|u| used.contains(u)) {
-                out.push(i);
-                used.extend(d.names.iter().copied());
-            }
-        }
-        out
-    }
-
-    /// `form`, which defines `names`, recorded as their definition now.
-    fn record(&mut self, form: &Syntax, names: &[Sym]) {
-        if names.is_empty() {
-            return;
-        }
-        let mut uses = HashSet::new();
-        symbols_in(form, &mut uses);
-        uses.retain(|s| !names.contains(s) && self.checker.global_type(*s).is_some());
-        self.defs.retain(|d| !d.names.iter().any(|n| names.contains(n)));
-        self.defs.push(DefRecord { names: names.to_vec(), form: form.clone(), uses });
-    }
-
-    /// The next definition of `name` keeps the global it has, however this
-    /// session runs forms.
+    /// The next definition of `name` the compiler written in FX-26 makes a
+    /// global for keeps the one it has: for a definition run in the native
+    /// convention, which makes its global so (`native_define`).
     fn keep_global(&mut self, name: Sym) -> R<()> {
-        self.globals.keep_next(name);
-        if self.strategy == Strategy::Cellular && self.own_begun {
+        if self.own_begun {
             let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
             let text = self.checker.interner.name(name).to_string();
             let sym = self.scheme.make(|m| m.heap().intern(&text));
@@ -551,9 +453,17 @@ impl Fx26Session {
         Ok(())
     }
 
-    fn run_form(&mut self, form: &Syntax) -> R<Outcome> {
-        let (top, code) = self.compile(form)?;
+    /// `top`, checked from `form`, run as `strategy` says; `again` when it
+    /// is a definition run again for a redefinition, which the pieces
+    /// written in FX-26 do themselves as they compile the redefinition,
+    /// but which the native convention's definitions and the lowering do
+    /// here.
+    fn run_checked(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
+        let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
+            if again && self.native_runner.is_none() {
+                return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) });
+            }
             let form_text = fixpt_read::write_syntax(form, &self.checker.interner);
             // An expression, in the native convention: as a procedure of no
             // arguments, compiled and called; what the compiler declines
@@ -575,9 +485,12 @@ impl Fx26Session {
             }
             // A definition, in the native convention: its global made, and
             // filled with its value, computed as an expression is.
-            if let (Some(run), Top::Define { name, .. }, Strategy::Cellular) = (self.native_runner, &top, self.strategy)
+            if let (Some(run), Top::Define { name, assigns, .. }, Strategy::Cellular) = (self.native_runner, &top, self.strategy)
                 && let Some((ty, init)) = definition_init(form)
             {
+                if *assigns {
+                    self.keep_global(*name)?;
+                }
                 let name = self.checker.interner.name(*name).to_string();
                 // Checked against the type the definition says, if it says
                 // one: a `lambda`'s parameters may be typed only by it.
@@ -673,11 +586,12 @@ impl Fx26Session {
     /// it with the reader and the parser written in FX-26: its value as
     /// Scheme would write it, or `!! ` and its error.
     pub fn eval_with_own_evaluator(&mut self, text: &str) -> R<String> {
-        if !self.scheme.is_bound(&format!("{READER_PREFIX}run-program")) {
-            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
-        }
+        self.own_pieces()?;
+        let standard = self.standard26()?;
+        // A whole program: the checker begins again.
+        self.own_begun = false;
         self.scheme.engine.set_step_limit(None);
-        let r = crate::syn::eval_with_fx26_evaluator(&mut self.scheme, FileId(0), text);
+        let r = crate::syn::eval_with_fx26_evaluator(&mut self.scheme, standard, FileId(0), text);
         self.scheme.engine.set_step_limit(self.step_limit);
         r
     }
@@ -882,39 +796,3 @@ fn definition_init(form: &Syntax) -> Option<(Option<&Syntax>, &Syntax)> {
         _ => None,
     }
 }
-
-/// The names a form defines: `(define name …)`'s, and each of
-/// `(define-rec (name type lambda) …)`'s.
-fn defined_names(form: &Syntax, interner: &fixpt_read::Interner) -> Vec<Sym> {
-    let Some(items) = form.as_proper_list() else { return Vec::new() };
-    match items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h)) {
-        Some("define") => items.get(1).and_then(|n| n.as_symbol()).into_iter().collect(),
-        Some("define-rec") => items[1..].iter().filter_map(|b| b.as_proper_list()?.first()?.as_symbol()).collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// The names a checked form defined, with their types.
-fn defined_types(top: &Top) -> Vec<(Sym, TyId)> {
-    match top {
-        Top::Define { name, ty, .. } => vec![(*name, *ty)],
-        Top::DefineRec { bindings } => bindings.iter().map(|(n, t, _)| (*n, *t)).collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// Every symbol in `s`.
-fn symbols_in(s: &Syntax, out: &mut HashSet<Sym>) {
-    if let Some(x) = s.as_symbol() {
-        out.insert(x);
-    }
-    if let fixpt_read::Datum::List { items, tail } = &s.datum {
-        for i in items {
-            symbols_in(i, out);
-        }
-        if let Some(t) = tail {
-            symbols_in(t, out);
-        }
-    }
-}
-

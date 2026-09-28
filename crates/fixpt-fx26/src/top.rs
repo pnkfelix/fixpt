@@ -35,9 +35,13 @@ pub enum Top {
     /// computing it has this effect.
     /// `typed` when the type was written; `recursive` when the name is in
     /// scope in its expression, which is then a lambda.
-    Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, typed: bool, recursive: bool },
-    /// `(define-rec (name type lambda) …)`: each name bound to its lambda.
-    DefineRec { bindings: Vec<(Sym, TyId, crate::ast::ExpId)> },
+    /// `assigns` when it assigns the global the name has, a redefinition
+    /// every use can take (`Checker::top_defining`); else it makes a new
+    /// global.
+    Define { name: Sym, ty: TyId, effect: Effect, exp: crate::ast::ExpId, typed: bool, recursive: bool, assigns: bool },
+    /// `(define-rec (name type lambda) …)`: each name bound to its lambda;
+    /// `assigns` as for `Define`, for all of them.
+    DefineRec { bindings: Vec<(Sym, TyId, crate::ast::ExpId)>, assigns: bool },
     /// `(define-type name …)`.
     DefineType { name: Sym, ty: TyId },
     /// `(define-type (name (param kind) …) …)`: a parametric abbreviation.
@@ -52,7 +56,152 @@ pub enum Top {
     Exp(Checked),
 }
 
+/// A definition checked, as a redefinition finds it: the names it defines,
+/// its form, and the globals it uses (its expressions' free variables).
+#[derive(Clone, Debug)]
+pub struct Definition {
+    pub names: Vec<Sym>,
+    pub form: Syntax,
+    pub uses: Vec<Sym>,
+}
+
+/// A form checked at the top level, and what it makes run
+/// (`Checker::top_defining`).
+#[derive(Clone, Debug)]
+pub struct Defining {
+    /// What runs, in order: the form's own definition (or anything else it
+    /// is), then, if it redefined a name with a type not every use of it can
+    /// take, each earlier definition that uses the name and still checks,
+    /// defined again. With each, whether it assigns the globals its names
+    /// have (a redefinition every use can take) rather than making new ones.
+    pub run: Vec<(Top, Syntax)>,
+    /// The earlier definitions that no longer check, and why: broken, a use
+    /// of one an error, until they are defined again.
+    pub broken: Vec<(Vec<Sym>, String)>,
+}
+
+fn set_assigns(top: &mut Top, to: bool) {
+    if let Top::Define { assigns, .. } | Top::DefineRec { assigns, .. } = top {
+        *assigns = to;
+    }
+}
+
 impl Checker {
+    /// `form`, checked as the next top-level form, under redefinition
+    /// (`docs/fx26.md`, "Redefinition"), for files and the REPL alike:
+    /// a global's uses always refer to what it is now. A definition of a
+    /// name already a global, at a type every use can take (each a subtype
+    /// of the old), assigns the global. At any other type it makes a new
+    /// global, and every earlier definition that uses the name (and every
+    /// one that uses those) is checked again, in order: each that checks is
+    /// defined again, by the same rule; each that does not is broken. To
+    /// keep a value as it was, bind it: `(define d (let ((g g)) …))`.
+    pub fn top_defining(&mut self, form: &Syntax) -> R<Defining> {
+        let names = self.defined_names(form);
+        let olds: Vec<(Sym, TyId)> = names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
+        let users = if olds.is_empty() { Vec::new() } else { self.users_of(&names) };
+        let mut top = self.top(form)?;
+        let assigns = !olds.is_empty() && self.fits_old(&top, &olds);
+        set_assigns(&mut top, assigns);
+        self.record(form, &top);
+        let mut done = Defining { run: vec![(top, form.clone())], broken: Vec::new() };
+        if olds.is_empty() || assigns {
+            return Ok(done);
+        }
+        let shown = |c: &Checker, ns: &[Sym]| ns.iter().map(|n| format!("`{}`", c.interner.name(*n))).collect::<Vec<_>>().join(", ");
+        for u in users {
+            let olds: Vec<(Sym, TyId)> = u.names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
+            match self.top(&u.form) {
+                Ok(mut top) => {
+                    let assigns = self.fits_old(&top, &olds);
+                    set_assigns(&mut top, assigns);
+                    self.record(&u.form, &top);
+                    done.run.push((top, u.form));
+                }
+                Err(e) => {
+                    let why = format!("since {} was redefined ({})", shown(self, &names), e.message);
+                    for n in &u.names {
+                        self.break_global(*n, why.clone());
+                    }
+                    done.broken.push((u.names, e.message));
+                }
+            }
+        }
+        Ok(done)
+    }
+
+    /// Every top-level form `form` runs under redefinition, in order
+    /// (`top_defining`): itself, and the definitions it runs again.
+    pub fn top_all(&mut self, form: &Syntax) -> R<Vec<Top>> {
+        Ok(self.top_defining(form)?.run.into_iter().map(|(t, _)| t).collect())
+    }
+
+    /// What `top_defining` would do with `form`, with nothing changed: for
+    /// a driver to decide whether a redefinition that would break
+    /// definitions goes ahead.
+    pub fn try_defining(&mut self, form: &Syntax) -> R<Defining> {
+        let (mark, broken, defs) = (self.mark(), self.broken.clone(), self.defs.clone());
+        let r = self.top_defining(form);
+        self.rollback(mark);
+        (self.broken, self.defs) = (broken, defs);
+        r
+    }
+
+    /// Whether every name `top` defines has a type the old one's uses can
+    /// take.
+    fn fits_old(&mut self, top: &Top, olds: &[(Sym, TyId)]) -> bool {
+        let news: Vec<(Sym, TyId)> = match top {
+            Top::Define { name, ty, .. } => vec![(*name, *ty)],
+            Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, t, _)| (*n, *t)).collect(),
+            _ => return false,
+        };
+        olds.iter().all(|(n, t)| news.iter().any(|(m, u)| m == n && self.subtype(*u, *t)))
+    }
+
+    /// The names a form defines: `(define name …)`'s, and each of
+    /// `(define-rec (name type lambda) …)`'s.
+    pub fn defined_names(&self, form: &Syntax) -> Vec<Sym> {
+        let Some(items) = form.as_proper_list() else { return Vec::new() };
+        match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
+            Some("define") => items.get(1).and_then(|n| n.as_symbol()).into_iter().collect(),
+            Some("define-rec") => items[1..].iter().filter_map(|b| b.as_proper_list()?.first()?.as_symbol()).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The definitions that use `names`, and those that use them, and so
+    /// on, oldest first.
+    fn users_of(&self, names: &[Sym]) -> Vec<Definition> {
+        let mut used: Vec<Sym> = names.to_vec();
+        let mut out = Vec::new();
+        for d in &self.defs {
+            if d.names.iter().any(|n| names.contains(n)) {
+                continue;
+            }
+            if d.uses.iter().any(|u| used.contains(u)) {
+                used.extend(d.names.iter().copied());
+                out.push(d.clone());
+            }
+        }
+        out
+    }
+
+    /// `form`, checked as `top`, recorded as the definition of its names now.
+    fn record(&mut self, form: &Syntax, top: &Top) {
+        let (names, exps): (Vec<Sym>, Vec<crate::ast::ExpId>) = match top {
+            Top::Define { name, exp, .. } => (vec![*name], vec![*exp]),
+            Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, _, e)| (*n, *e)).unzip(),
+            _ => return,
+        };
+        let mut uses = Vec::new();
+        for e in exps {
+            self.free_into(e, &mut Vec::new(), &mut uses);
+        }
+        uses.retain(|u| !names.contains(u));
+        self.defs.retain(|d| !d.names.iter().any(|n| names.contains(n)));
+        self.defs.push(Definition { names, form: form.clone(), uses });
+    }
+
     /// Read `text` in FX-26's lexical syntax (`SyntaxProfile::FX26`),
     /// recording spans against `file`.
     pub fn read_in(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
@@ -364,7 +513,7 @@ impl Checker {
                         if !recursive {
                             self.env.push((name, ty));
                         }
-                        Ok(Top::Define { name, ty, effect, exp: e, typed: true, recursive })
+                        Ok(Top::Define { name, ty, effect, exp: e, typed: true, recursive, assigns: false })
                     }
                     Err(err) => {
                         if recursive {
@@ -382,7 +531,7 @@ impl Checker {
                     self.known.insert((name, self.env.len()));
                 }
                 self.env.push((name, ty));
-                Ok(Top::Define { name, ty, effect, exp: e, typed: false, recursive: false })
+                Ok(Top::Define { name, ty, effect, exp: e, typed: false, recursive: false, assigns: false })
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),
         }
@@ -425,7 +574,7 @@ impl Checker {
             for (name, ty, e) in &bindings {
                 self.check_declared(*name, *ty, *e)?;
             }
-            Ok(Top::DefineRec { bindings })
+            Ok(Top::DefineRec { bindings, assigns: false })
         })();
         self.recursive.truncate(rdepth);
         if r.is_err() {

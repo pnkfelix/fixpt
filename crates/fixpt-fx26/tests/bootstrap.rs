@@ -113,7 +113,7 @@ fn fixpoint_as_register_code() {
     let mut c = fixpt_fx26::Checker::new();
     let forms = c.read_in(FileId(0), &text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
-    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let t = std::time::Instant::now();
     let lap = |what: &str| eprintln!("{what}: {:.2} s", t.elapsed().as_secs_f64());
     s.scheme.scope(|sc| {
@@ -269,7 +269,7 @@ fn comparison() {
     let done = c.declare_ahead(&forms).expect("declares");
     for (f, done) in forms.iter().zip(done) {
         if !done {
-            c.top(f).expect("checks");
+            c.top_defining(f).expect("checks");
         }
     }
     let check = t.elapsed().as_secs_f64();
@@ -369,7 +369,7 @@ fn comparison() {
                     let mut c = fixpt_fx26::Checker::new();
                     let forms = c.read_in(FileId(0), &text).expect("reads");
                     let done = c.declare_ahead(&forms).expect("declares");
-                    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+                    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
                     inner.make(|m| {
                         let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
                         comp.registers = true;
@@ -419,7 +419,7 @@ fn probe_read() {
             let mut c = fixpt_fx26::Checker::new();
             let forms = c.read_in(FileId(0), &text).expect("reads");
             let done = c.declare_ahead(&forms).expect("declares");
-            let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top(f).expect("checks")).collect();
+            let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
             let stage1 = inner.make(|m| {
                 let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
                 comp.registers = true;
