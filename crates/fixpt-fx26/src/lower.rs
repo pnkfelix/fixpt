@@ -170,7 +170,9 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
 /// as the identity, `%fx26-identity`. `src/standard.fx` is this, and a test
 /// keeps it so.
 pub fn standard_fx26_module() -> String {
-    let mut out = String::from(include_str!("standard-header.fx"));
+    // The definition's head, whose `cond` the clauses below complete: not
+    // a whole FX-26 file, so not named as one.
+    let mut out = String::from(include_str!("standard-head.part"));
     for (fx, scheme, _) in STANDARD {
         if *scheme == "%fx26-identity" || fixpt_engine::cellular::runtime_primitive(scheme).is_some() {
             out.push_str(&format!("      ((string=? n {fx:?}) {scheme:?})\n"));
