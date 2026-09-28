@@ -79,6 +79,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     if let Some(m) = crate::THREADED_MACHINE.get() {
         s.scheme.runtime_unrooted().run_word = Some(*m);
     }
+    s.scheme.runtime_unrooted().machine_code = crate::THREADED_MACHINE_CODE.get().copied().flatten();
     s.register_code = crate::THREADED_MACHINE_NAME.get().is_some_and(|n| n.contains("register code"));
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
@@ -154,6 +155,22 @@ pub fn repl(backend: Backend) -> i32 {
         if let Some(ask) = crate::help::parse(&text) {
             crate::help::answer(&mut session.checker, &ask);
             continue;
+        }
+        // `,disassemble-asm E`: the same, with each word's machine code as
+        // the machine that runs it has it: native code, decoded, or, for
+        // the stencil machine, its stencils' Rust source.
+        let (asm, text) = match text.trim().strip_prefix(",disassemble-asm") {
+            Some(e) => (true, format!(",disassemble {e}")),
+            None => (false, text),
+        };
+        session.scheme.runtime_unrooted().show_machine_code = asm;
+        if asm && session.strategy != Strategy::Lower {
+            let name = crate::THREADED_MACHINE_NAME.get().copied().unwrap_or("");
+            if crate::THREADED_MACHINE_CODE.get().copied().flatten().is_none() {
+                println!("; {name} interprets the cells: it has no machine code to show.");
+            } else if name.contains("hand-encoded") && std::env::var_os("FIXPT_NATIVE_WORDS").is_none() {
+                println!("; {name} runs words as cells unless FIXPT_NATIVE_WORDS is set; `--threaded-machine registers` compiles them.");
+            }
         }
         // `,disassemble E`: E's threaded code, shown, as `disassemble` gives
         // it (under `--fx26-run threaded`; lowered, there is none).

@@ -156,6 +156,11 @@ fn run(args: &[String]) -> i32 {
         }
     };
     let _ = THREADED_MACHINE.set(machine);
+    let _ = THREADED_MACHINE_CODE.set(match flags.threaded_machine.as_deref() {
+        Some("native" | "registers") => Some(fixpt_native::threaded::machine_code_text as fixpt_runtime::MachineCode),
+        Some("stencils") => Some(fixpt_native::stencil::stencil_source_text as fixpt_runtime::MachineCode),
+        _ => None,
+    });
     let _ = THREADED_MACHINE_NAME.set(match flags.threaded_machine.as_deref() {
         Some("native") => "the hand-encoded native machine",
         Some("stencils") => "the stencil machine",
@@ -303,6 +308,9 @@ struct Flags {
 pub(crate) static FX26_RUN: std::sync::OnceLock<fixpt_fx26::session::Strategy> = std::sync::OnceLock::new();
 /// `--threaded-machine`, for every FX-26 session this process starts.
 pub(crate) static THREADED_MACHINE: std::sync::OnceLock<fixpt_runtime::RunWord> = std::sync::OnceLock::new();
+/// How that machine shows a word's machine code (`,disassemble-asm`): none
+/// for the one written in Rust, which interprets cells.
+pub(crate) static THREADED_MACHINE_CODE: std::sync::OnceLock<Option<fixpt_runtime::MachineCode>> = std::sync::OnceLock::new();
 /// Which machine that is, for the REPL to say.
 pub(crate) static THREADED_MACHINE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 /// `--gc-every`, for every heap this process starts.

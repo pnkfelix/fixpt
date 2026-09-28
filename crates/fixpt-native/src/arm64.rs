@@ -8,6 +8,8 @@
 
 pub type Reg = u32;
 
+pub mod disasm;
+
 pub const SP: Reg = 31;
 pub const XZR: Reg = 31;
 

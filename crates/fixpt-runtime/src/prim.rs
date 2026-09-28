@@ -811,7 +811,8 @@ prims! {
     });
     // A threaded word or closure's code, shown: every word it reaches.
     "%disassemble", 1, Some(1), simple!(|rt, a| {
-        let s = crate::disasm::disassemble(&rt.heap, a[0]);
+        let asm = if rt.show_machine_code { rt.machine_code } else { None };
+        let s = crate::disasm::disassemble_with(&rt.heap, a[0], asm);
         Ok(rt.heap.make_string(&s))
     });
     "%fx26-string-downcase", 1, Some(1), simple!(|rt, a| { let s = get_string(rt, a[0])?; Ok(rt.heap.make_string(&s.to_lowercase())) });

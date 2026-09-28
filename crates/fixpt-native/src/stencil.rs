@@ -131,3 +131,95 @@ impl StencilMachine {
         self.stacks.finish(&st)
     }
 }
+
+/// The stencils' Rust source, as built into this binary: what a stencil
+/// machine runs, shown instead of machine code (`,disassemble-asm`), since
+/// it compiles no word and runs each cell through a fixed set of routines.
+const STENCIL_SOURCE: &str = include_str!("../stencils/threaded.rs");
+
+/// From `from`, which is at an opening bracket, to just past the one that
+/// closes it.
+fn balanced(src: &str, from: usize) -> &str {
+    let (open, close) = match src.as_bytes()[from] {
+        b'(' => (b'(', b')'),
+        _ => (b'{', b'}'),
+    };
+    let mut depth = 0;
+    for (i, c) in src.bytes().enumerate().skip(from) {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            depth -= 1;
+            if depth == 0 {
+                return &src[from..=i];
+            }
+        }
+    }
+    &src[from..]
+}
+
+/// Stencil `st_name`'s definition, `routine!(st_name, …);`, if there is one.
+fn routine_source(name: &str) -> Option<String> {
+    let at = STENCIL_SOURCE.find(&format!("routine!(st_{name},"))?;
+    let open = at + "routine!".len();
+    Some(format!("routine!{};", balanced(STENCIL_SOURCE, open)))
+}
+
+/// The macros defined in the stencils' source that `text` uses, each's
+/// definition.
+fn macros_used(text: &str, shown: &mut Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = STENCIL_SOURCE;
+    while let Some(at) = rest.find("macro_rules! ") {
+        let name_at = at + "macro_rules! ".len();
+        let name: String = rest[name_at..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+        let open = name_at + rest[name_at..].find('{').unwrap_or(0);
+        let def = balanced(rest, open);
+        if name != "routine" && text.contains(&format!("{name}!(")) && !shown.contains(&name) {
+            shown.push(name.clone());
+            let def = format!("macro_rules! {name} {def}");
+            // And the macros it uses in turn.
+            let inner = macros_used(&def, shown);
+            out.push(def);
+            out.extend(inner);
+        }
+        rest = &rest[open + def.len()..];
+    }
+    out
+}
+
+/// For word `word`, the Rust source of each stencil its cells run, once
+/// each, and of the stencils' macros those use: what the stencil machine
+/// does for this word.
+pub fn stencil_source_text(heap: &Heap, word: Value) -> Option<String> {
+    use fixpt_heap::layout::threaded::{WORD_CELL0, operands};
+    if !heap.is_threaded_word(word) {
+        return None;
+    }
+    let fields = heap.bloblet_head(word).fields;
+    let mut routines: Vec<&str> = Vec::new();
+    let mut k = WORD_CELL0;
+    while k <= fields {
+        let cell = heap.bloblet_slot(word, k);
+        let name = if cell.is_fixnum() { ROUTINES.get(cell.as_fixnum() as usize).map_or("?", |r| r.0) } else { "docol" };
+        if !routines.contains(&name) {
+            routines.push(name);
+        }
+        k += 1 + if cell.is_fixnum() { operands(name) } else { 0 };
+    }
+    let mut out = String::from("the stencils its cells run, as Rust (crates/fixpt-native/stencils/threaded.rs):\n");
+    let mut shown = Vec::new();
+    for r in routines {
+        let stencil = stencil_name(r);
+        match routine_source(&stencil) {
+            Some(src) => {
+                out.push_str(&format!("\n// `{r}`\n{src}\n"));
+                for m in macros_used(&src, &mut shown) {
+                    out.push_str(&format!("{m}\n"));
+                }
+            }
+            None => out.push_str(&format!("\n// `{r}`: no stencil of its own; run by the Rust machine, through `st_other`\n")),
+        }
+    }
+    Some(out)
+}

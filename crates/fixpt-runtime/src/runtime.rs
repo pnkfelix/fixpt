@@ -32,6 +32,11 @@ pub struct Runtime {
     /// How `%run-word` runs a threaded word: the threaded machine lives in
     /// `fixpt-engine`, above this crate, which installs it.
     pub run_word: Option<RunWord>,
+    /// How that machine shows a word's machine code, or what stands for it
+    /// (`,disassemble-asm`); none for a machine that has none.
+    pub machine_code: Option<MachineCode>,
+    /// Whether `%disassemble` shows it too.
+    pub show_machine_code: bool,
     /// How many steps (cells, or polls in machine code) a run of a word by
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
@@ -41,6 +46,10 @@ pub struct Runtime {
 /// Run threaded word `word` with `args` on its data stack; its value, or
 /// why it stopped.
 pub type RunWord = fn(&mut Runtime, Value, &[Value]) -> Result<Value, String>;
+
+/// A word's machine code, shown, as the machine that runs it has it; or
+/// none, if it has none for this word.
+pub type MachineCode = fn(&fixpt_heap::Heap, Value) -> Option<String>;
 
 /// Root 0 of any runtime's heap is the error-object record type.
 ///
@@ -74,6 +83,8 @@ impl Runtime {
             file_base: std::path::PathBuf::from("."),
             error_rtd_root,
             run_word: None,
+            machine_code: None,
+            show_machine_code: false,
             word_fuel: u64::MAX,
         }
     }
@@ -152,6 +163,8 @@ impl Runtime {
             file_base: std::path::PathBuf::from("."),
             error_rtd_root: ERROR_RTD_ROOT,
             run_word: None,
+            machine_code: None,
+            show_machine_code: false,
             word_fuel: u64::MAX,
         }
     }

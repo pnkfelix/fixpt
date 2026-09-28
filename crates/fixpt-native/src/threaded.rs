@@ -1478,6 +1478,34 @@ impl Stacks {
 pub const NATIVE_SLOTS: usize = 1 << 16;
 static NEXT_SLOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(PRIMITIVES);
 
+/// Each installed code's machine code, by native slot: where it runs, and
+/// how many instructions. For showing it (`,disassemble-asm`), which is
+/// asked for from inside a machine's run, and so cannot reach the machine.
+/// A machine's entries go when it does.
+static CODE_OF_SLOT: std::sync::Mutex<std::collections::BTreeMap<usize, (usize, usize)>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// Word `word`'s machine code, shown an instruction a line, if a native
+/// machine has compiled it: for a word run as register code, the adapter
+/// into it (its register word shows its own).
+pub fn machine_code_text(heap: &Heap, word: Value) -> Option<String> {
+    let slot = heap.bloblet_slot(word, WORD_ENTRY).as_fixnum();
+    if slot < PRIMITIVES as i64 {
+        return None;
+    }
+    let (at, n) = *CODE_OF_SLOT.lock().expect("not poisoned").get(&(slot as usize))?;
+    // SAFETY: the record is of code a live machine installed and flushed,
+    // `n` instructions at `at`, in its code space's read+execute view,
+    // which is readable, and stays mapped while the machine lives; its
+    // records go when it does.
+    let code = unsafe { std::slice::from_raw_parts(at as *const u32, n) };
+    let mut out = format!("machine code, {n} instructions at {at:#x} (native slot {slot}):\n");
+    for (i, w) in code.iter().enumerate() {
+        out.push_str(&format!("  {i:>5}: {w:08x}  {}\n", crate::arm64::disasm::disassemble(*w, i as i64)));
+    }
+    Some(out)
+}
+
 /// Room for the machine and for the words compiled into it.
 const CODE_SPACE: usize = 32 << 20;
 
@@ -1497,6 +1525,19 @@ pub struct NativeMachine {
     stacks: Stacks,
     /// Fuel left after the last run.
     pub fuel_left: u64,
+    /// The native slots this machine has installed code in.
+    slots: Vec<usize>,
+    /// How many instructions the machine's own code is.
+    machine_len: usize,
+}
+
+impl Drop for NativeMachine {
+    fn drop(&mut self) {
+        let mut code = CODE_OF_SLOT.lock().expect("not poisoned");
+        for s in &self.slots {
+            code.remove(s);
+        }
+    }
 }
 
 impl NativeMachine {
@@ -1510,7 +1551,18 @@ impl NativeMachine {
         let docol = table[ROUTINE_DOCOL as usize];
         table.resize(NATIVE_SLOTS, docol);
         let resume = vec![0; NATIVE_SLOTS];
-        NativeMachine { entry: at + 4 * entry, machine_at: at, commons, space, table, resume, stacks: Stacks::new(), fuel_left: 0 }
+        NativeMachine {
+            entry: at + 4 * entry,
+            machine_at: at,
+            commons,
+            space,
+            table,
+            resume,
+            stacks: Stacks::new(),
+            fuel_left: 0,
+            slots: Vec::new(),
+            machine_len: code.len(),
+        }
     }
 
     /// Compile `word`'s cells to machine code in this machine, and make the
@@ -1564,6 +1616,8 @@ impl NativeMachine {
         }
         self.table[slot] = self.space.exec_addr(at) as u64;
         self.resume[slot] = self.space.exec_addr(rt_at) as u64;
+        CODE_OF_SLOT.lock().expect("not poisoned").insert(slot, (self.space.exec_addr(at), code.len()));
+        self.slots.push(slot);
         heap.set_bloblet_slot(word, WORD_ENTRY, Value::fixnum(slot as i64));
         Ok(())
     }
@@ -1613,6 +1667,12 @@ impl NativeMachine {
             }
         }
         Ok(n)
+    }
+
+    /// The machine's own code, its routines and its entry, as instructions:
+    /// for looking at, and for checking the disassembler reads all of it.
+    pub fn machine_instructions(&self) -> Vec<u32> {
+        (0..self.machine_len).map(|i| self.space.read_u32(self.machine_at + 4 * i)).collect()
     }
 
     /// Where this machine's common trap and exit are, for the state.

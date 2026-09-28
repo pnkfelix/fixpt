@@ -10,6 +10,12 @@ use std::fmt::Write as _;
 
 /// `v`, a threaded word or closure, shown; or why it is neither.
 pub fn disassemble(heap: &Heap, v: Value) -> String {
+    disassemble_with(heap, v, None)
+}
+
+/// The same, with each word's machine code as `asm` shows it, after its
+/// cells and after its register code's (`,disassemble-asm`).
+pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>) -> String {
     let closure = kind("threaded-closure");
     let mut out = String::new();
     if let Some(k) = heap.continuation_of(v) {
@@ -18,7 +24,7 @@ pub fn disassemble(heap: &Heap, v: Value) -> String {
         while let Some(w) = todo.pop() {
             if !seen.contains(&w.raw()) {
                 seen.push(w.raw());
-                word(heap, w, &mut out, &mut todo);
+                word(heap, w, &mut out, &mut todo, asm);
             }
         }
         return out;
@@ -41,7 +47,7 @@ pub fn disassemble(heap: &Heap, v: Value) -> String {
             continue;
         }
         seen.push(w.raw());
-        word(heap, w, &mut out, &mut todo);
+        word(heap, w, &mut out, &mut todo, asm);
     }
     out
 }
@@ -109,7 +115,7 @@ fn name_of(heap: &Heap, w: Value) -> String {
 }
 
 /// One word: its name, how it is entered, and a line per instruction.
-fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>) {
+fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Option<crate::runtime::MachineCode>) {
     let closure = kind("threaded-closure");
     let fields = heap.bloblet_head(w).fields;
     let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
@@ -166,9 +172,22 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>) {
         let _ = writeln!(out, "  {at:>4}: {name}{}{}", if shown.is_empty() { "" } else { " " }, shown.join(" "));
         k += 1 + ops.len();
     }
+    if let Some(text) = asm.and_then(|f| f(heap, w)) {
+        machine_code(out, &text);
+    }
     let twin = heap.bloblet_slot(w, WORD_TWIN);
     if heap.is_register_word(twin) {
         register_word(heap, twin, out, todo);
+        if let Some(text) = asm.and_then(|f| f(heap, twin)) {
+            machine_code(out, &format!("its register code's {text}"));
+        }
+    }
+}
+
+/// Machine code as a machine shows it, under the word it belongs to.
+fn machine_code(out: &mut String, text: &str) {
+    for line in text.lines() {
+        let _ = writeln!(out, "  {line}");
     }
 }
 
