@@ -165,6 +165,9 @@ pub struct Heap {
     regions: regions::Regions,
     /// The code area's allocation and free blocks.
     code: code::CodeArea,
+    /// The code area's read+execute view, made when the area is first
+    /// used; none where the system gives none.
+    code_exec: Option<fixpt_memmgmt::ExecView>,
     /// Base of the active semispace within `mem` — `0` or `MAX_SEMI_WORDS`.
     /// A Value's index is from the start of `mem`, whichever is active, so
     /// that where a Value points does not depend on it.
@@ -225,6 +228,7 @@ impl Heap {
             base,
             regions: regions::Regions::new(),
             code: code::CodeArea::default(),
+            code_exec: None,
             active: 0,
             semi,
             top: 0,

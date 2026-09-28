@@ -9,7 +9,9 @@
 //! block says what it relies on.
 #![allow(unsafe_code)]
 
+pub mod exec;
 pub mod reserve;
 pub mod words;
 
+pub use exec::ExecView;
 pub use words::Words;

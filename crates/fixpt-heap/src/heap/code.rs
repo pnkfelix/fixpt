@@ -64,6 +64,9 @@ impl Heap {
     fn code_alloc(&mut self, n: usize) -> usize {
         if self.code.top == 0 {
             self.code.top = CODE_BASE;
+            // Before anything is written there: the view replaces the
+            // area's pages with shared ones, zero, as they were.
+            self.code_exec = self.mem.exec_view(CODE_BASE..CODE_BASE + CODE_WORDS).ok();
         }
         self.code.used += n;
         self.code.taken += n;
@@ -81,6 +84,25 @@ impl Heap {
         assert!(at + n <= CODE_BASE + CODE_WORDS, "the code area is full: {n} words more, past {} in use", self.code.used - n);
         self.code.top = at + n;
         at
+    }
+
+    /// Where a code bloblet's suffix, its code, runs from: its address in
+    /// the code area's read+execute view. Its fields are at the same
+    /// distances before it there, so its code reaches them PC-relatively.
+    pub fn code_exec_address(&self, v: Value) -> usize {
+        assert!(self.is_code_bloblet(v), "{v:?} is not in the code area");
+        let view = self.code_exec.as_ref().expect("the code area has an execute view");
+        view.exec_address(v.index() * 8)
+    }
+
+    /// After a code bloblet's suffix is written with instructions: make them
+    /// runnable at [`code_exec_address`](Heap::code_exec_address). Writing
+    /// its fields needs none of this.
+    pub fn flush_code(&self, v: Value) {
+        assert!(self.is_code_bloblet(v), "{v:?} is not in the code area");
+        let bytes = self.bloblet_head(v).bytes;
+        let view = self.code_exec.as_ref().expect("the code area has an execute view");
+        view.flush(v.index() * 8, bytes.max(1));
     }
 
     /// Whether `v` refers into the code area.

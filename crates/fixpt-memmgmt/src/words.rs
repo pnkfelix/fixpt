@@ -6,8 +6,8 @@
 /// `len` words at a fixed address, zero until written. Dropping them gives
 /// the range back.
 pub struct Words {
-    base: *mut u64,
-    len: usize,
+    pub(crate) base: *mut u64,
+    pub(crate) len: usize,
 }
 
 // SAFETY: the words are plain memory owned by whoever holds this value.

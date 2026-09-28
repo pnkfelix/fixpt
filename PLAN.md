@@ -1303,7 +1303,10 @@ each committed:
    `tests/code_area.rs`. The shared mapping waits for step 3, which needs
    it.)*
 3. The execute view, and a test that runs a code bloblet reading its own
-   field PC-relatively across a collection that moves the field's value.
+   field PC-relatively across a collection that moves the field's value. *(Done
+   2026-09-27: `fixpt-memmgmt`'s `exec.rs`, made when the area is first
+   used; `Heap::code_exec_address` and `Heap::flush_code`;
+   `crates/fixpt-native/tests/code_exec.rs`.)*
 4. The native machines compiling into the code area, their tables cleared
    when what they name is freed; step 1's test passes.
 5. Closures as code bloblets whose captured values are fields their code
