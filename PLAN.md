@@ -30,7 +30,12 @@ queue gained", and "The next queue"):
 0. **In progress: a collected code area** ("A collected code area", below;
    the user's, 2026-09-27): native code in a non-moving, mark-swept section
    of the heap, so code no longer reachable is reclaimed, and code can
-   reach GC-traced fields of its own bloblet PC-relatively. Five steps.
+   reach GC-traced fields of its own bloblet PC-relatively. Steps 1–3 and
+   4a done; the rest waits on **native code without the interpreter's
+   shape** (`docs/research/native-conventions.md`, for the user's review):
+   calling conventions in function types, native frames with stack maps
+   instead of the ip in step and resume tables, and seven steps that
+   replace 4b and 4c.
 1. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 2. Sizes N5c: inequalities, "at most n" results, array bounds.
@@ -1315,7 +1320,11 @@ each committed:
    used; `Heap::code_exec_address` and `Heap::flush_code`;
    `crates/fixpt-native/tests/code_exec.rs`.)*
 4. The native machines compiling into the code area, their tables cleared
-   when what they name is freed; step 1's test passes.
+   when what they name is freed; step 1's test passes. *(4a done
+   2026-09-27: word code reaches the machine's trap and exit through its
+   state, so no branch leaves it. 4b and 4c are replaced by
+   `docs/research/native-conventions.md`, whose step 3 makes step 1's test
+   pass.)*
 5. Closures as code bloblets whose captured values are fields their code
    reads PC-relatively (the experiment that prompted this; measurements in
    `docs/performance.md`, "Closures: what copying code into each would
