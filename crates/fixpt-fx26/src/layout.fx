@@ -167,4 +167,5 @@
 (define rop-cellular int 26)  ; 2: cellular routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect
 (define rop-invokeself int 27)  ; 1: call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may collect
 (define rop-global-guard int 28)  ; 3: unless global cell g holds a closure made from cellular word w (a cellular closure of w, or a native one whose code was compiled from w), skip the third operand's count of cells, counted after it; RESULT kept
+(define rop-brancht int 29)  ; 1: the same as branch if RESULT is not #f
 (define register-regs int 8)

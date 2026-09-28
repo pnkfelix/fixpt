@@ -350,3 +350,21 @@ fn constants_are_combined_and_made_immediates() {
         assert!(ops[0].ends_with("op2imm int-sub 7"), "{who}:\n{code}");
     }
 }
+
+/// A test made of `and`, `or` and `not` is jumps: each comparison branches
+/// straight to where its outcome goes, and no boolean is made (Twobit's
+/// `pass2if.sch` gets there by rewriting `if`s in tests). Both compilers.
+#[test]
+fn a_compound_test_is_jumps() {
+    let text = "(define* f (subr pure (int int) int)
+                  (lambda (x y) (if (and (< x 10) (not (= y 0))) 1 (if (or (= x 3) (< y x)) 2 3))))
+                (f 3 4)";
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    for (who, code) in [("FX-26", fx26), ("Rust", rust)] {
+        let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
+        let reg = &code[code.find("its register code").expect("register code")..];
+        let n = |op: &str| reg.lines().filter(|l| l.contains(op)).count();
+        assert_eq!((n("branchf"), n("brancht"), n("const #")), (2, 2, 0), "{who}:\n{reg}");
+    }
+}

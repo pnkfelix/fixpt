@@ -62,6 +62,8 @@ enum RItem {
     Label(usize),
     /// `branch` (false) or `branchf` (true) to a label.
     Branch(bool, usize),
+    /// `brancht` to a label.
+    BranchT(usize),
     /// The frame's size, known when the body is done.
     Frame,
     /// `global-guard g w` to a label: unless global cell `g` holds a
@@ -155,7 +157,7 @@ impl Gen {
         let size = |i: &RItem| match i {
             RItem::Cell(_) | RItem::Frame => 1,
             RItem::Label(_) => 0,
-            RItem::Branch(..) => 2,
+            RItem::Branch(..) | RItem::BranchT(_) => 2,
             RItem::Guard(..) => 4,
         };
         let mut at = vec![0i64; self.labels];
@@ -175,6 +177,10 @@ impl Gen {
                 RItem::Label(_) => {}
                 RItem::Branch(f, n) => {
                     cells.push(Value::fixnum(op(if *f { "branchf" } else { "branch" }) as i64));
+                    cells.push(Value::fixnum(at[*n] - (pos + 2)));
+                }
+                RItem::BranchT(n) => {
+                    cells.push(Value::fixnum(op("brancht") as i64));
                     cells.push(Value::fixnum(at[*n] - (pos + 2)));
                 }
                 RItem::Guard(c, w, n) => {
@@ -598,8 +604,7 @@ impl Compiler<'_> {
             }
             Exp::If { test, then, els } => {
                 let (no, end) = (g.label(), g.label());
-                self.r_exp(g, test, env, te, false)?;
-                g.items.push(RItem::Branch(true, no));
+                self.r_branch_on(g, test, false, no, env, te)?;
                 self.r_exp(g, then, env, te, tail)?;
                 if !tail {
                     g.items.push(RItem::Branch(false, end));
@@ -876,7 +881,13 @@ impl Compiler<'_> {
                     // not a constant, deeper than here: that one, and then
                     // the constants' sum at once. Integers are exact, so the
                     // order they are added in cannot matter.
-                    if let Some((Some(core), k)) = self.r_split_app(env, &name, args)
+                    let adds = |c: &Self, e: ExpId| match c.c.arena.exp_at(e) {
+                        Exp::App { fun, args } => args.len() == 2 && matches!(c.r_standard_name(env, *fun).as_deref(), Some("+" | "-")),
+                        _ => false,
+                    };
+                    if matches!(name.as_str(), "+" | "-")
+                        && (adds(self, x) || adds(self, y))
+                        && let Some((Some(core), k)) = self.r_split_app(env, &name, args)
                         && core != x
                         && core != y
                     {
@@ -894,11 +905,13 @@ impl Compiler<'_> {
                     // (only a definition writes a global); else they run as
                     // written. A constant goes second, an immediate, where
                     // the operation does not care which.
-                    let known = |c: &mut Self, e: ExpId| c.r_const(env, e).is_some();
-                    let free = |c: &mut Self, e: ExpId| c.r_simple(e) || known(c, e);
+                    // (Asked only where it can matter, and a literal first:
+                    // what is known is looked up, and that costs.)
+                    let literal = |c: &Self, e: ExpId| matches!(c.c.arena.exp_at(e), Exp::Int(_) | Exp::Bool(_) | Exp::Char(_));
+                    let free = |c: &mut Self, e: ExpId| c.r_simple(e) || c.r_const(env, e).is_some();
                     if swap && !free(self, x) && !free(self, y) {
                         self.r_binary_swapped(g, r, x, y, env, te)?;
-                    } else if swap || (matches!(r, "int-add" | "eq") && known(self, x) && !known(self, y)) {
+                    } else if swap || (matches!(r, "int-add" | "eq") && literal(self, x) && self.r_const(env, y).is_none()) {
                         self.r_binary(g, r, y, x, env, te)?;
                     } else {
                         self.r_binary(g, r, x, y, env, te)?;
@@ -1376,6 +1389,67 @@ impl Compiler<'_> {
             (None, Some(k)) => g.op("op2", &[r, Gen::n(k)]),
             (None, None) => return None,
         }
+        Some(())
+    }
+
+    /// Code that goes to `label` if `x` is `when` (true: anything but #f),
+    /// and on if not: a test as jumps. `and` and `or` (`if`s, as the parser
+    /// makes them), `not` and constants make no boolean, and are tested
+    /// no more than once.
+    fn r_branch_on(&mut self, g: &mut Gen, x: ExpId, when: bool, label: usize, env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        let truth = |v: Value| v != Value::FALSE;
+        match self.c.arena.exp_at(x).clone() {
+            Exp::The { exp, .. } => return self.r_branch_on(g, exp, when, label, env, te),
+            Exp::App { fun, args } if args.len() == 1 && self.r_standard_name(env, fun).as_deref() == Some("not") => {
+                return self.r_branch_on(g, args[0], !when, label, env, te);
+            }
+            Exp::If { test, then, els } => {
+                let (tc, ec) = (self.r_const(env, then), self.r_const(env, els));
+                match (tc, ec) {
+                    // `(if a K e)`: where `a` holds, `K` decides.
+                    (Some(t), _) if truth(t) == when => {
+                        self.r_branch_on(g, test, true, label, env, te)?;
+                        self.r_branch_on(g, els, when, label, env, te)?;
+                    }
+                    (Some(_), _) => {
+                        let skip = g.label();
+                        self.r_branch_on(g, test, true, skip, env, te)?;
+                        self.r_branch_on(g, els, when, label, env, te)?;
+                        g.items.push(RItem::Label(skip));
+                    }
+                    // `(if a t K)`: `and`'s shape.
+                    (None, Some(e)) if truth(e) == when => {
+                        self.r_branch_on(g, test, false, label, env, te)?;
+                        self.r_branch_on(g, then, when, label, env, te)?;
+                    }
+                    (None, Some(_)) => {
+                        let skip = g.label();
+                        self.r_branch_on(g, test, false, skip, env, te)?;
+                        self.r_branch_on(g, then, when, label, env, te)?;
+                        g.items.push(RItem::Label(skip));
+                    }
+                    (None, None) => {
+                        let (no, end) = (g.label(), g.label());
+                        self.r_branch_on(g, test, false, no, env, te)?;
+                        self.r_branch_on(g, then, when, label, env, te)?;
+                        g.items.push(RItem::Branch(false, end));
+                        g.items.push(RItem::Label(no));
+                        self.r_branch_on(g, els, when, label, env, te)?;
+                        g.items.push(RItem::Label(end));
+                    }
+                }
+                return Some(());
+            }
+            _ => {}
+        }
+        if let Some(v) = self.r_const(env, x) {
+            if truth(v) == when {
+                g.items.push(RItem::Branch(false, label));
+            }
+            return Some(());
+        }
+        self.r_exp(g, x, env, te, false)?;
+        g.items.push(if when { RItem::BranchT(label) } else { RItem::Branch(true, label) });
         Some(())
     }
 

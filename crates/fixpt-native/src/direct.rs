@@ -680,7 +680,7 @@ impl Compiling<'_> {
             starts.push(i);
             let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
             match op {
-                "branch" | "branchf" | "global-guard" => {
+                "branch" | "branchf" | "brancht" | "global-guard" => {
                     let to = i as i64 + 1 + n as i64 + cells[i + n].as_fixnum();
                     target[to as usize] = true;
                     if to <= i as i64 {
@@ -712,7 +712,7 @@ impl Compiling<'_> {
                 match op {
                     "save" => cur = true,
                     "pop" => cur = false,
-                    "branch" | "branchf" | "global-guard" => {
+                    "branch" | "branchf" | "brancht" | "global-guard" => {
                         let to = (i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize;
                         known[to].get_or_insert(cur);
                     }
@@ -961,13 +961,21 @@ impl Compiling<'_> {
                         // flags, with no boolean made.
                         _ => match joinable(si - 1) {
                             Some(j)
-                                if op_at(j) == "branchf"
+                                if matches!(op_at(j), "branchf" | "brancht")
                                     && starts.get(si + 1).is_none_or(|&f| sets_first(f))
                                     && sets_first((j as i64 + 2 + cells[j + 1].as_fixnum()) as usize) =>
                             {
                                 a.bind(labels[j]);
                                 let to = (j as i64 + 2 + cells[j + 1].as_fixnum()) as usize;
-                                a.to(labels[to], Fix::If(if r == "eq" { Cond::Ne } else { Cond::Ge }));
+                                // `branchf` goes where the test fails; `brancht`
+                                // where it holds.
+                                let cond = match (op_at(j), r) {
+                                    ("branchf", "eq") => Cond::Ne,
+                                    ("branchf", _) => Cond::Ge,
+                                    (_, "eq") => Cond::Eq,
+                                    _ => Cond::Lt,
+                                };
+                                a.to(labels[to], Fix::If(cond));
                                 si += 1;
                             }
                             _ => {
@@ -1262,12 +1270,12 @@ impl Compiling<'_> {
                     a.to(entry, Fix::Bl);
                 }
                 "return" => a.e(ret()),
-                "branch" | "branchf" => {
+                "branch" | "branchf" | "brancht" => {
                     let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
-                    if op == "branchf" {
+                    if op != "branch" {
                         a.es(&mov_imm64(X16, Value::FALSE.raw()));
                         a.e(cmp(RESULT, X16));
-                        a.to(labels[to], Fix::If(Cond::Eq));
+                        a.to(labels[to], Fix::If(if op == "branchf" { Cond::Eq } else { Cond::Ne }));
                     } else {
                         if back_to[to] {
                             a.e(subs_imm(FUEL, FUEL, 1));

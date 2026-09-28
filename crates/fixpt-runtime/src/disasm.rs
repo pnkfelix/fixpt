@@ -289,7 +289,7 @@ fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>
         let ops: Vec<Value> = (1..=n).map(|i| heap.bloblet_slot(w, k + i)).collect();
         let routine = |v: Value| ROUTINES.get(v.as_fixnum() as usize).map_or("?", |r| r.0).to_string();
         let shown: Vec<String> = match name {
-            "branch" | "branchf" => vec![format!("→ {}", at as i64 + 2 + ops[0].as_fixnum())],
+            "branch" | "branchf" | "brancht" => vec![format!("→ {}", at as i64 + 2 + ops[0].as_fixnum())],
             "global-guard" => vec![global(heap, ops[0]), short(heap, ops[1]), format!("else → {}", at as i64 + 4 + ops[2].as_fixnum())],
             "global" | "setglbl" => vec![global(heap, ops[0])],
             "op1" | "cellular" => std::iter::once(routine(ops[0])).chain(ops[1..].iter().map(|v| short(heap, *v))).collect(),

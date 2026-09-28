@@ -68,7 +68,7 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
             "invoke" | "tailinvoke" => count(o(0), n),
             "cellular" => count(o(0), ROUTINES.len() as i64 - 1) && count(o(1), n),
             "global" | "setglbl" => o(0).is_bloblet(),
-            "branch" | "branchf" => {
+            "branch" | "branchf" | "brancht" => {
                 if !o(0).is_fixnum() {
                     return Err(format!("cell {i}: a branch's offset is a fixnum"));
                 }

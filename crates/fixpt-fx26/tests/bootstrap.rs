@@ -631,3 +631,82 @@ fn probe_profile_check() {
         eprintln!("{n:>12} {:>5.1}%  {w} {at}", 100.0 * *n as f64 / total as f64);
     }
 }
+
+/// How long each phase of the front end takes on itself, run as register
+/// code (as `fixpoint_as_register_code` runs it whole): read, parse, check,
+/// and compile with register code.
+#[test]
+#[ignore = "a probe: cargo test --release -p fixpt-fx26 --test bootstrap probe_phases_as_register_code -- --ignored --nocapture"]
+fn probe_phases_as_register_code() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    load_eager_reader(&mut s.scheme).expect("loads");
+    s.scheme.engine.set_step_limit(None);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+    let text = fixpt_fx26::bootstrap_program();
+    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let mut c = fixpt_fx26::Checker::new();
+    let forms = c.read_in(FileId(0), &text).expect("reads");
+    let done = c.declare_ahead(&forms).expect("declares");
+    let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
+    s.scheme.scope(|sc| {
+        let stage1 = sc.make(|m| {
+            let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
+            comp.registers = true;
+            comp.program(&tops).expect("compiles")
+        });
+        let none = sc.make(|_| Value::NULL);
+        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
+        let piece = |sc: &mut fixpt_scheme::Session, i: usize| sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 1 + i) });
+        let run = |sc: &mut fixpt_scheme::Session, f: fixpt_scheme::Handle, args: &[fixpt_scheme::Handle]| {
+            let list = sc.call_global("list", args).expect("a list");
+            sc.call_global("%run-word", &[f, list]).expect("runs")
+        };
+        let (read, parse, check, compile, extracts, registers) =
+            (piece(sc, 2), piece(sc, 3), piece(sc, 4), piece(sc, 5), piece(sc, 6), piece(sc, 8));
+        let on = sc.make(|_| Value::TRUE);
+        run(sc, registers, &[on]);
+        let (tx, st) = (sc.make(|m| m.heap().make_string(&text)), sc.make(|m| m.heap().make_string(&standard)));
+        let mut t = std::time::Instant::now();
+        let mut gcs = (0, 0);
+        let mut lap = |sc: &mut fixpt_scheme::Session, what: &str| {
+            let h = &sc.runtime_unrooted().heap;
+            let now = (h.gc_count, h.gc_nanos);
+            eprintln!(
+                "{what:>8}: {:.3} s, {} collection(s), {:.1} ms",
+                t.elapsed().as_secs_f64(),
+                now.0 - gcs.0,
+                (now.1 - gcs.1) as f64 / 1e6
+            );
+            gcs = now;
+            t = std::time::Instant::now();
+        };
+        let syns = run(sc, read, &[tx]);
+        let std = run(sc, read, &[st]);
+        lap(sc, "read");
+        let syns = sc.make(|m| { let l = m.get(syns); m.heap().car(l) });
+        let std = sc.make(|m| { let l = m.get(std); m.heap().car(l) });
+        let parsed = run(sc, parse, &[syns]);
+        lap(sc, "parse");
+        let progs = sc.make(|m| { let r = m.get(parsed); let p = m.heap().bloblet_slot(r, 3); m.heap().bloblet_slot(p, 2) });
+        run(sc, check, &[std, progs]);
+        lap(sc, "check");
+        let facts = run(sc, extracts, &[]);
+        // With `FIXPT_PROFILE_COMPILE`, the compile on the Rust machine,
+        // counting cells by word: the compiler's work, whatever its code.
+        let profile = std::env::var_os("FIXPT_PROFILE_COMPILE").is_some();
+        if profile {
+            sc.runtime_unrooted().run_word = Some(profiled);
+        }
+        let _ = run(sc, compile, &[progs, facts]);
+        lap(sc, "compile");
+        if profile {
+            let top = LAST_PROFILE.with(|p| p.borrow().clone());
+            let total: u64 = top.iter().map(|(_, n)| n).sum();
+            eprintln!("{total} cells");
+            for (w, n) in top.iter().take(25) {
+                let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();
+                eprintln!("{n:>12}  {w} {at}");
+            }
+        }
+    });
+}

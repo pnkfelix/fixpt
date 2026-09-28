@@ -538,7 +538,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     let mut j = 0;
     while j < cells.len() {
         let (name, n, _) = OPS[cells[j].as_fixnum() as usize];
-        if matches!(name, "branch" | "branchf" | "global-guard") {
+        if matches!(name, "branch" | "branchf" | "brancht" | "global-guard") {
             let to = j as i64 + 1 + n as i64 + cells[j + n].as_fixnum();
             if to <= j as i64 {
                 loop_heads[to as usize] = true;
@@ -811,12 +811,12 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.e(str_pre(RESULT, DSP, -8));
                 a.pop_return_of(true);
             }
-            "branch" | "branchf" => {
+            "branch" | "branchf" | "brancht" => {
                 let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
-                if name == "branchf" {
+                if name != "branch" {
                     a.value(X16, Value::FALSE);
                     a.e(cmp(RESULT, X16));
-                    a.b_cond(Cond::Eq, labels[to]);
+                    a.b_cond(if name == "branchf" { Cond::Eq } else { Cond::Ne }, labels[to]);
                 } else {
                     if to <= i {
                         a.fuel();

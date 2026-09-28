@@ -20,6 +20,8 @@
   (r-label int)
   ;; `branch` (#f) or `branchf` (#t) to a label.
   (r-branch bool int)
+  ;; `brancht` to a label.
+  (r-brancht int)
   ;; The frame's size, known when the body is done.
   (r-frame)
   ;; `global-guard g w` to a label: unless global cell `g` holds a closure
@@ -112,7 +114,7 @@
 (define r-reverse (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof ritem @k) (listof ritem @k)) (listof ritem @k))
   (lambda (xs acc) (if (null? xs) acc (r-reverse (cdr xs) (cons (car xs) acc)))))
 (define r-size (subr pure (ritem) int)
-  (lambda (i) (tagcase i (r-cell (x) 1) (r-label (n) 0) (r-branch (f n) 2) (r-frame () 1) (r-guard-to (c w n) 4))))
+  (lambda (i) (tagcase i (r-cell (x) 1) (r-label (n) 0) (r-branch (f n) 2) (r-brancht (n) 2) (r-frame () 1) (r-guard-to (c w n) 4))))
 (define r-place (subr (maxeff (read @globals) (read @k) (write @k) spin) ((listof ritem @k) (arrayof int @k) int) int)
   (lambda (xs at pos)
     (if (null? xs)
@@ -134,6 +136,8 @@
                      (r-frame () (cons (wcell-int frame) acc))
                      (r-branch (f n)
                        (cons (wcell-int (if f rop-branchf rop-branch)) (cons (wcell-int (- (array-ref at n) (+ pos 2))) acc)))
+                     (r-brancht (n)
+                       (cons (wcell-int rop-brancht) (cons (wcell-int (- (array-ref at n) (+ pos 2))) acc)))
                      (r-guard-to (c w n)
                        (cons (wcell-int rop-global-guard) (cons c (cons w (cons (wcell-int (- (array-ref at n) (+ pos 4))) acc)))))))))))
 (define r-assemble (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen) (listof wcell @k))
@@ -181,6 +185,9 @@
     (tagcase c
       (rc-int (n) (if (and (< n 1073741824) (> n -1073741824)) (the (listof int @k) (cons n nil)) nil))
       (else y nil))))
+;; Whether constant `c` (in a list) is `when` (true: anything but #f).
+(define r-holds? (subr (maxeff (read @globals) (read @k)) ((listof rconst @k) bool) bool)
+  (lambda (c when) (if (r-const-false? (car c)) (not when) when)))
 
 (define r-this-name? (subr (read @k) ((listof c-this @k) symbol int) bool)
   (lambda (this n nargs)
@@ -264,6 +271,14 @@
 (define r-standard-name (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) string)
   (lambda (env f)
     (tagcase (r-operator f) (e-var (n a b) (if (null? (r-where env n)) (symbol->string n) "")) (else y ""))))
+;; Whether `e` is a `+` or `-` of two.
+(define r-adds? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) bool)
+  (lambda (env e)
+    (tagcase e
+      (e-app (f args a b)
+        (and (= (c-count-exps args) 2)
+             (let ((n (r-standard-name env f))) (or (string=? n "+") (string=? n "-")))))
+      (else y #f))))
 (define r-rev-consts (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof rconst @k) (listof rconst @k)) (listof rconst @k))
   (lambda (xs acc) (if (null? xs) acc (r-rev-consts (cdr xs) (cons (car xs) acc)))))
 (define c-length-consts (subr (maxeff (read @globals) (read @k) spin) ((listof rconst @k)) int)
@@ -913,8 +928,7 @@
               (r-exp g (if (r-const-false? (car (r-known env t))) el th) env te tail)
           (let ((no (r-new-label g)) (end (r-new-label g)))
             (begin
-              (r-exp g t env te #f)
-              (r-emit g (r-branch #t no))
+              (r-branch-on g t #f no env te)
               (r-exp g th env te tail)
               (if tail #u (r-emit g (r-branch #f end)))
               (r-emit g (r-label no))
@@ -960,6 +974,47 @@
           ;; A leaf makes no closure; join points it may have.
           (if (and (extract g leaf) (not (r-all? (r-join-flags bs body tail)))) (r-decline) (r-letrec g bs body env te tail)))
         (e-app (f args a b) (r-app g f args env te tail)))))))
+;; Code that goes to `label` if `x` is `when` (true: anything but #f), and
+;; on if not: a test as jumps. `and` and `or` (`if`s, as the parser makes
+;; them), `not` and constants make no boolean, and are tested no more than
+;; once.
+(r-branch-on (subr (maxeff compiles spin) (rgen exp bool int renv cenv) unit)
+  (lambda (g x when label env te)
+    (tagcase x
+      (e-the (d body a b) (r-branch-on g body when label env te))
+      (e-app (f args a b)
+        (if (and (string=? (r-standard-name env f) "not") (= (c-count-exps args) 1))
+            (r-branch-on g (car args) (not when) label env te)
+            (r-branch-plain g x when label env te)))
+      (e-if (t th el a b)
+        (let ((tc (r-known env th)) (ec (r-known env el)))
+          (cond
+            ;; `(if a K e)`: where `a` holds, `K` decides.
+            ((and (not (null? tc)) (r-holds? tc when))
+             (begin (r-branch-on g t #t label env te) (r-branch-on g el when label env te)))
+            ((not (null? tc))
+             (let ((skip (r-new-label g)))
+               (begin (r-branch-on g t #t skip env te) (r-branch-on g el when label env te) (r-emit g (r-label skip)))))
+            ;; `(if a t K)`: `and`'s shape.
+            ((and (not (null? ec)) (r-holds? ec when))
+             (begin (r-branch-on g t #f label env te) (r-branch-on g th when label env te)))
+            ((not (null? ec))
+             (let ((skip (r-new-label g)))
+               (begin (r-branch-on g t #f skip env te) (r-branch-on g th when label env te) (r-emit g (r-label skip)))))
+            (else
+             (let ((no (r-new-label g)) (end (r-new-label g)))
+               (begin (r-branch-on g t #f no env te) (r-branch-on g th when label env te)
+                      (r-emit g (r-branch #f end)) (r-emit g (r-label no))
+                      (r-branch-on g el when label env te) (r-emit g (r-label end))))))))
+      (else y (r-branch-plain g x when label env te)))))
+;; The same for a test that is not `not` or an `if`: a constant decided
+;; now, anything else made and branched on.
+(r-branch-plain (subr (maxeff compiles spin) (rgen exp bool int renv cenv) unit)
+  (lambda (g x when label env te)
+    (let ((k (r-known env x)))
+      (if (not (null? k))
+          (if (r-holds? k when) (r-emit g (r-branch #f label)) #u)
+          (begin (r-exp g x env te #f) (r-emit g (if when (r-brancht label) (r-branch #t label))))))))
   (r-begin (subr (maxeff compiles spin) (rgen (listof exp acyclic) renv cenv bool) unit)
     (lambda (g es env te tail)
       (if (null? (cdr es))
@@ -1035,14 +1090,19 @@
           ;; constant goes second, an immediate, where the operation does
           ;; not care which.
           (let* ((x (car args)) (y (car (cdr args)))
-                 (known (lambda ((e exp)) (not (null? (r-known env e)))))
-                 (free (lambda ((e exp)) (or (r-simple? e) (known e))))
                  ;; A chain of `+`, and `-` of constants, with one operand not
                  ;; a constant, deeper than here: that one, and then the
                  ;; constants' sum at once. Integers are exact, so the order
                  ;; they are added in cannot matter.
-                 (split (r-split-app env name args))
-                 (core (if (null? split) (the (listof exp @k) nil) (extract (car split) 1))))
+                 (split (if (and (or (string=? name "+") (string=? name "-")) (or (r-adds? env x) (r-adds? env y)))
+                            (r-split-app env name args)
+                            (the (listof (productof (1 (listof exp @k)) (2 int)) @k) nil)))
+                 (core (if (null? split) (the (listof exp @k) nil) (extract (car split) 1)))
+                 ;; (Asked only where it can matter, and a literal first:
+                 ;; what is known is looked up, and that costs.)
+                 (literal (tagcase x (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t) (else z #f)))
+                 (free-x (and swap (or (r-simple? x) (not (null? (r-known env x))))))
+                 (free-y (and swap (and (not free-x) (or (r-simple? y) (not (null? (r-known env y))))))))
             (begin
               (cond ((and (not (null? core)) (and (not (r-same-exp? (car core) x)) (not (r-same-exp? (car core) y))))
                      (let ((k (extract (car split) 2)))
@@ -1051,8 +1111,8 @@
                          (cond ((> k 0) (r-op2 g rop-op2imm (wcell-int routine-int-add) (wcell-int k)))
                                ((< k 0) (r-op2 g rop-op2imm (wcell-int routine-int-sub) (wcell-int (- 0 k))))
                                (else #u)))))
-                    ((and swap (and (not (free x)) (not (free y)))) (r-binary-swapped g r x y env te))
-                    ((or swap (and (or (= r routine-int-add) (= r routine-eq)) (and (known x) (not (known y)))))
+                    ((and swap (and (not free-x) (not free-y))) (r-binary-swapped g r x y env te))
+                    ((or swap (and (or (= r routine-int-add) (= r routine-eq)) (and literal (null? (r-known env y)))))
                      (r-binary g r y x env te))
                     (else (r-binary g r x y env te)))
               (if negate (r-op2 g rop-op2imm (wcell-int routine-eq) (wcell-bool #f)) #u))))

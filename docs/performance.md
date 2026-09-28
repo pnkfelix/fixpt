@@ -1612,3 +1612,35 @@ constants, with one operand not a constant, adds the constants' sum at
 once: `(- (+ 1 (+ 2 x)) 10)` is `op2imm int-sub 7`. Integers are exact
 (overflow goes to bignums), so the order of the additions cannot matter.
 Both compilers.
+
+## Tests as jumps: `and`, `or`, `not`, no boolean made (2026-09-28)
+
+The user recalled that Twobit made much of conditionals, and it does:
+`pass2if.sch` (Clinger, 1991 and 1999) rewrites `if`s in tests, as
+`(if (not E0) E1 E2)` to `(if E0 E2 E1)` and `(if (if B0 K #f) E1 E2)` to
+`(if B0 E1 E2)`, because `and`, `or` and `cond` expand to nested `if`s.
+FX-26's parser expands them the same way (476 `and`s and 339 `or`s in the
+front end), and register code made a boolean of each compound test and
+tested it again: `(if (and (< x 10) (not (= y 0))) 1 …)` was 19 arm64
+instructions natively.
+
+Both register compilers now compile a test as jumps (`r_branch_on`): to a
+label if it is true, or false, and on if not. `not` turns the sense; an
+`if`, which is what `and` and `or` are, becomes jumps from its parts, its
+constant arms decided while compiling; a constant is a branch or nothing;
+anything else is made and branched on, by `branchf` or the new `brancht`
+(a register operation, 29). The native compiler fuses a comparison with
+the branch after it, either kind, into `cmp` and `b.cond`. The example is
+14 instructions, each test one compare and one branch. Since `and` and
+`or` are on booleans only, one rule covers what Twobit needed several for.
+
+**A regression that was a collection.** The compile phase of the front
+end on itself, as register code, went 0.120 → 0.138 s with the operand
+commit before this one, on 2% more cells (the Rust machine's count, the
+compiler's own work). Back-to-back runs of both commits held the baseline;
+`probe_phases_as_register_code` (`tests/bootstrap.rs`), which reports time
+and collections per phase, showed the compile phase taking two collections
+where it took one: 35.6 ms against 18.5 ms, the whole difference. The
+front end grew by the new code and crossed the next threshold. So a
+collection's cost, not the new code's, is the step; the heap's sizing is
+what would take it back.
