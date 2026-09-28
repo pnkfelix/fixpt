@@ -29,11 +29,30 @@
 
 ;; The checker's facts for the program being compiled.
 (define c-facts (ref k-facts @k) (new nil))
-(define c-field-index (subr (maxeff (read @globals) (read @t) (read @k)) (k-facts int int) int)
-  (lambda (fs a b)
-    (cond ((null? fs) -1)
-          ((and (= (extract (car fs) 1) a) (= (extract (car fs) 2) b)) (extract (car fs) 3))
-          (else (c-field-index (cdr fs) a b)))))
+;; The same, by where each `extract` starts (two cannot start at one place):
+;; where it ends, and its field. A table, so that a program's facts are not
+;; searched from the start for each `extract` compiled.
+(define c-int-hash (subr pure (int) int) (lambda (a) a))
+(define c-int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
+(define c-fact-table (ref (table int (pairof int int @k) @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-fill-facts (subr (maxeff (read @globals) (read @t) (read @k) (write @k) (alloc @k) spin) (k-facts) unit)
+  (lambda (fs)
+    (if (null? fs)
+        #u
+        (begin (table-set! (get c-fact-table) (extract (car fs) 1) (the (pairof int int @k) (cons (extract (car fs) 2) (extract (car fs) 3))))
+               (c-fill-facts (cdr fs))))))
+;; `c-facts` into `c-fact-table`.
+(define c-set-facts! (subr (maxeff (read @globals) (read @t) (read @k) (write @k) (alloc @k) spin) (k-facts) unit)
+  (lambda (fs)
+    (begin
+      (set c-facts fs)
+      (set c-fact-table (make-table c-int-hash c-int=?))
+      (c-fill-facts fs))))
+;; The field of the `extract` from `a` to `b`, or -1.
+(define c-field-at (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (int int) int)
+  (lambda (a b)
+    (let ((e (table-ref (get c-fact-table) a (the (pairof int int @k) (cons -1 -1)))))
+      (if (= (car e) b) (cdr e) -1))))
 
 ;;; ----------------------------------------------------------------- code
 
@@ -642,7 +661,7 @@
         (e-product (fs a b)
           (begin (c-int c 37) (c-prim c "%make-frozen" (+ 1 (c-fields fs e (+ depth 1) c))) (c-done c tail)))
         (e-extract (p l a b)
-          (let ((i (c-field-index (get c-facts) a b)))
+          (let ((i (c-field-at a b)))
             (if (< i 0)
                 (c-fail "an extract the checker did not see")
                 (begin (c-exp p e depth c #f) (c-field c (+ i 2)) (c-done c tail)))))
@@ -1214,7 +1233,7 @@
     (prompt c-tag
       (let ((c (the code (new nil))))
         (begin
-          (set c-facts facts)
+          (c-set-facts! facts)
           (set c-this-params -1)
           (if (c-runs runs c #f) #u (c-lit c (wcell-unit)))
           (c-op c routine-exit)
@@ -1226,7 +1245,7 @@
     (prompt c-tag
       (let ((c (the code (new nil))))
         (begin
-          (set c-facts facts)
+          (c-set-facts! facts)
           (set c-this-params -1)
           (if (c-tops tops c #f) #u (c-lit c (wcell-unit)))
           (c-op c routine-exit)

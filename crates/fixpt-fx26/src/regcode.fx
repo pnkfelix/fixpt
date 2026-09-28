@@ -767,7 +767,7 @@
                 (set (extract g nreg) regs)
                 (set (extract g nslot) slots)))))
         (e-extract (p l a b)
-          (let ((i (c-field-index (get c-facts) a b)))
+          (let ((i (c-field-at a b)))
             (if (< i 0)
                 (r-decline)
                 (begin (r-exp g p env te #f) (r-opn g rop-field (+ i 2)) (r-done g tail)))))
