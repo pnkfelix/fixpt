@@ -217,8 +217,8 @@ fn the_fx26_repl_compiles_in_the_native_convention() {
         "1041 : int",
         // `,disassemble` shows what a native procedure was compiled from,
         // `,disassemble-asm` its machine code.
-        "compiled from the words below",
-        "its register code",
+        "compiled from the register code below",
+        "cells of register code):",
         "a native closure over 0 value(s):",
     ] {
         assert!(out.contains(want), "no `{want}` in:\n{out}");

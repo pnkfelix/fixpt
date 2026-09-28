@@ -13,12 +13,11 @@ pub fn disassemble(heap: &Heap, v: Value) -> String {
     disassemble_with(heap, v, None)
 }
 
-/// The same, with each word's machine code as `asm` shows it, after its
-/// cells and after its register code's (`,disassemble-asm`).
-/// A native closure shown as what it was compiled from: its free values,
-/// then its code's cellular word, and every word that reaches, with their
-/// register code. `None` if `v` is not one, or its code keeps no word (a
-/// continuation's).
+/// A native closure shown as what its machine code was compiled from:
+/// its free values, then its code's register code, and that of every
+/// procedure it makes closures of (the stack code beside it the native
+/// compiler does not read). `None` if `v` is not one, or its code keeps no
+/// word (a continuation's).
 pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
     use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE};
     if !(v.is_bloblet() && heap.bloblet_kind(v) == kind("native-closure")) {
@@ -30,14 +29,28 @@ pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
         return None;
     }
     let free = (heap.bloblet_head(v).fields + 1).saturating_sub(CLOSURE_FREE0);
-    let mut out = format!("a native closure over {free} value(s), compiled from the words below (`,disassemble-asm` shows its machine code):\n");
+    let mut out = format!("a native closure over {free} value(s), compiled from the register code below (`,disassemble-asm` shows its machine code):\n");
     for i in 0..free {
-        out.push_str(&format!("  free {i}: {}\n", crate::write_value(heap, heap.bloblet_slot(v, CLOSURE_FREE0 + i))));
+        let _ = writeln!(out, "  free {i}: {}", short(heap, heap.bloblet_slot(v, CLOSURE_FREE0 + i)));
     }
-    out.push_str(&disassemble_with(heap, word, None));
+    let (mut todo, mut seen) = (vec![word], Vec::new());
+    while let Some(w) = todo.pop() {
+        if seen.contains(&w.raw()) || !heap.is_cellular_word(w) {
+            continue;
+        }
+        seen.push(w.raw());
+        let twin = heap.bloblet_slot(w, WORD_TWIN);
+        let fields = heap.bloblet_head(twin).fields;
+        if heap.is_register_word(twin) {
+            let _ = writeln!(out, "\nprocedure {} ({} cells of register code):", name_of(heap, w), fields + 1 - WORD_CELL0);
+            register_lines(heap, twin, &mut out, &mut todo);
+        }
+    }
     Some(out)
 }
 
+/// The same, with each word's machine code as `asm` shows it, after its
+/// cells and after its register code's (`,disassemble-asm`).
 pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>) -> String {
     let closure = kind("cellular-closure");
     let mut out = String::new();
@@ -216,11 +229,17 @@ fn machine_code(out: &mut String, text: &str) {
 
 /// A word's register code (PLAN.md 13h′): a line per instruction.
 fn register_word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>) {
-    use fixpt_heap::layout::regcode::OPS;
     let fields = heap.bloblet_head(w).fields;
     let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
     let how = if entry == 0 { "not compiled".to_string() } else { format!("native slot {entry}") };
     let _ = writeln!(out, "  its register code ({} cells, {how}):", fields + 1 - WORD_CELL0);
+    register_lines(heap, w, out, todo);
+}
+
+/// A word's register code, a line per instruction.
+fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>) {
+    use fixpt_heap::layout::regcode::OPS;
+    let fields = heap.bloblet_head(w).fields;
     let mut k = WORD_CELL0;
     while k <= fields {
         let at = k - WORD_CELL0;
