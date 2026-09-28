@@ -870,6 +870,16 @@
 ;; fill.
 (define compile-new-global (subr (maxeff (read @k) (write @k) (alloc @k)) (symbol) wglobal)
   (lambda (n) (c-push-global n)))
+;; For a driver that makes a global's value native code (the REPL, in the
+;; native convention): `n`'s global, in a list, if it is one.
+(define compile-global-cell (subr (maxeff (read @k) (alloc @k) spin) (symbol) (listof wglobal @k))
+  (lambda (n)
+    (let ((l (c-find (get c-genv) n)))
+      (if (null? l)
+          nil
+          (tagcase (car l)
+            (at-global (g) (cons g nil))
+            (else y nil))))))
 
 
 

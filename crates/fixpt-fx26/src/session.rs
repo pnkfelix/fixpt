@@ -38,6 +38,10 @@ pub struct Fx26Session {
     /// Under `Strategy::Cellular` with the native convention: how an
     /// expression form is run, in place of the cellular machine.
     pub native_runner: Option<NativeRunner>,
+    /// And how a definition's procedure, made by cellular code, is compiled
+    /// to a native closure of the same code: for the definitions the native
+    /// runner declines, and `define-rec`'s.
+    pub native_compiler: Option<NativeCompiler>,
     /// Under `Strategy::Cellular`: whether the checker written in FX-26 has
     /// begun this session's program, so that each form is checked after the
     /// ones before (`check-more`), and compiled alone against the globals
@@ -241,6 +245,10 @@ pub enum NativeRun {
 /// much fuel. The CLI's is `fixpt_native::direct`'s.
 pub type NativeRunner = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, u64) -> NativeRun;
 
+/// A cellular closure compiled in the native convention: a native closure
+/// of the same code over the same values, or why not.
+pub type NativeCompiler = fn(&mut fixpt_heap::Heap, fixpt_heap::Value) -> Result<fixpt_heap::Value, String>;
+
 /// Whether a redefinition goes ahead that would break definitions (those
 /// that use the name and would no longer check). To keep a value as it was
 /// instead, a program binds it: `(define d (let ((g g)) …))`.
@@ -290,6 +298,7 @@ impl Fx26Session {
             register_code: false,
             native_convention: false,
             native_runner: None,
+            native_compiler: None,
             own_begun: false,
             redefine: None,
             next_redefine: None,
@@ -550,6 +559,23 @@ impl Fx26Session {
                 None if matches!(top, Top::Exp(_)) => Ok(Some(out)),
                 None => Ok(None),
             };
+            // In the native convention, a definition run so has its
+            // procedures compiled after, as it made them: each global that
+            // holds a cellular closure then holds a native one.
+            let names = match &top {
+                Top::Define { name, .. } => vec![*name],
+                Top::DefineRec { bindings, .. } => bindings.iter().map(|b| b.0).collect(),
+                _ => Vec::new(),
+            };
+            if let (Some(compile), Ok(_), false) = (self.native_compiler, &value, names.is_empty()) {
+                let mut why = Vec::new();
+                for n in names {
+                    if let Err(w) = self.compile_global_natively(n, compile)? {
+                        why.push(w);
+                    }
+                }
+                note = if why.is_empty() { String::new() } else { format!("; not in the native convention yet, so run as cellular code: {}\n", why.join("; ")) };
+            }
             return Ok(Outcome { top, code, printed: note, value });
         }
         if code.is_empty() {
@@ -688,6 +714,34 @@ impl Fx26Session {
             Ok(done) => done,
             Err(why) => Err(NativeRun::Declined(why)),
         })
+    }
+
+    /// Global `name`'s value, if a cellular closure, compiled by `compile`
+    /// to a native closure, which the global then holds; or why not.
+    fn compile_global_natively(&mut self, name: Sym, compile: NativeCompiler) -> R<Result<(), String>> {
+        let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
+        let text = self.checker.interner.name(name).to_string();
+        let sym = self.scheme.make(|m| m.heap().intern(&text));
+        let cells = self.scheme.call_global(&format!("{READER_PREFIX}compile-global-cell"), &[sym]).map_err(fail)?;
+        let mut r = Ok(());
+        self.scheme.make(|m| {
+            let cells = m.get(cells);
+            if !cells.is_pair() {
+                r = Err(format!("`{text}` has no global"));
+                return fixpt_heap::Value::FALSE;
+            }
+            let heap = m.heap();
+            let g = heap.car(cells);
+            let v = heap.bloblet_slot(g, 2);
+            if v.is_bloblet() && heap.bloblet_kind(v) == fixpt_heap::layout::kind("cellular-closure") {
+                match compile(heap, v) {
+                    Ok(native) => heap.set_bloblet_slot(g, 2, native),
+                    Err(why) => r = Err(why),
+                }
+            }
+            fixpt_heap::Value::FALSE
+        });
+        Ok(r)
     }
 
     /// `text` checked and compiled as the next form of this session's

@@ -319,6 +319,7 @@ fn native_and_cellular_code_call_each_other() {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
         s.strategy = Strategy::Cellular;
         s.native_runner = Some(run_native);
+        s.native_compiler = Some(fixpt_native::direct::compile_closure);
         s.register_code = true;
         s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
         s.scheme.runtime_unrooted().heap.gc_every = gc_every;
@@ -345,6 +346,7 @@ fn every_test_program_runs_natively_as_cellular() {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
         s.strategy = Strategy::Cellular;
         s.native_runner = runner;
+        s.native_compiler = runner.map(|_| fixpt_native::direct::compile_closure as fixpt_fx26::session::NativeCompiler);
         // As the REPL has it: what the native compiler starts from.
         s.register_code = runner.is_some();
         s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);

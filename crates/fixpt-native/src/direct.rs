@@ -197,6 +197,12 @@ pub fn with_machine<T>(f: impl FnOnce(&mut DirectMachine) -> T) -> Result<T, Str
     })
 }
 
+/// A cellular closure compiled on this thread's machine: a native closure
+/// of the same code over the same values, or why not.
+pub fn compile_closure(heap: &mut Heap, closure: Value) -> Result<Value, String> {
+    with_machine(|m| m.compile(heap, closure).map(|procs| procs[0].1.closure))?
+}
+
 /// A runtime's `call_native`: native closure `closure` called with `args`
 /// on this thread's machine, in the steps a word may take.
 pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Value]) -> Result<Value, fixpt_runtime::NativeExit> {
