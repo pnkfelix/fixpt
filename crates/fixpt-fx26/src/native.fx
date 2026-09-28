@@ -123,15 +123,15 @@
             (fix-cbz (at l r) (array-set! (get n-code) at (arm-cbz r (n-dist at l))))
             (fix-cbnz (at l r) (array-set! (get n-code) at (arm-cbnz r (n-dist at l)))))
           (n-patch (cdr fs))))))
-(define n-code-list (subr (maxeff (read @k) (alloc @k) spin) (int) (listof int @k))
-  (lambda (i) (if (= i (get n-len)) nil (cons (array-ref (get n-code) i) (n-code-list (+ i 1))))))
+(define n-code-list (subr (maxeff (read @k) (alloc @k) spin) (int (listof int @k)) (listof int @k))
+  (lambda (i acc) (if (< i 0) acc (n-code-list (- i 1) (cons (array-ref (get n-code) i) acc)))))
 
 ;; The code, every branch patched.
 (define n-finish (subr (maxeff assembles spin) () (listof int @k))
   (lambda ()
     (begin
       (n-patch (get n-fixups))
-      (n-code-list 0))))
+      (n-code-list (- (get n-len) 1) nil))))
 
 (define n-reset (subr (maxeff assembles spin) () unit)
   (lambda ()

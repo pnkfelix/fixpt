@@ -35,6 +35,8 @@ pub struct Fx26Session {
     /// Whether the program's convention is native (`--calling-convention`;
     /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
     native_convention: bool,
+    /// Whether naming a global reads it (`set_globals_effects`).
+    globals_effects: bool,
     /// Under `Strategy::Cellular` with the native convention: how an
     /// expression form is run, in place of the cellular machine.
     pub native_runner: Option<NativeRunner>,
@@ -299,6 +301,7 @@ impl Fx26Session {
             native_convention: false,
             native_runner: None,
             native_compiler: None,
+            globals_effects: false,
             own_begun: false,
             redefine: None,
             next_redefine: None,
@@ -651,6 +654,14 @@ impl Fx26Session {
     pub fn set_native_convention(&mut self, on: bool) {
         self.native_convention = on;
         self.checker = Checker::with_convention(if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
+        self.checker.globals_effects = self.globals_effects;
+    }
+
+    /// Whether naming a global reads it, `(read (globals g))`, in both
+    /// checkers (`Checker::globals_effects`).
+    pub fn set_globals_effects(&mut self, on: bool) {
+        self.globals_effects = on;
+        self.checker.globals_effects = on;
     }
 
     /// The pieces written in FX-26, loaded if they are not yet, and told the
@@ -662,6 +673,8 @@ impl Fx26Session {
         }
         let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.native_convention));
         self.scheme.call_global(&format!("{READER_PREFIX}check-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;
+        let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.globals_effects));
+        self.scheme.call_global(&format!("{READER_PREFIX}check-globals-effects!"), &[on]).map_err(|e| fail(e.to_string()))?;
         Ok(())
     }
 

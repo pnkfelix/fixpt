@@ -34,8 +34,10 @@
 ;; region of data frozen into place `p` (a
 ;; place variable, or -1 for the heap: `const`), which nothing may write;
 ;; `r-heap` is `heap`, the place that never ends
-;; (`docs/research/places-and-regions.md`).
-(define-datatype k-region (r-const symbol) (r-fresh int string) (r-var int) (r-frozen int bool) (r-heap))
+;; (`docs/research/places-and-regions.md`). `(r-global g)` is `(globals g)`,
+;; the binding of global `g`, and `r-globals` is `@globals`, every global's:
+;; only in effects, only read and written, never masked.
+(define-datatype k-region (r-const symbol) (r-fresh int string) (r-var int) (r-frozen int bool) (r-heap) (r-global symbol) (r-globals))
 
 (define-datatype k-atom
   (a-read k-region) (a-write k-region) (a-alloc k-region)
@@ -413,6 +415,17 @@
 ;; type, so a parameter that shadows one is not taken for it
 ;; (`docs/research/soundness-findings.md`, F1).
 (define k-known (ref (table symbol (listof bool finite) @t) @t) (new (make-table symbol-hash symbol=?)))
+;; Whether each binding in `k-env` is a global: one a top-level definition
+;; made. Naming one reads it, `(read (globals g))`, when
+;; `k-globals-effects` says so, as the language will once every program
+;; says what it reads (off until then).
+(define k-global (ref (table symbol (listof bool finite) @t) @t) (new (make-table symbol-hash symbol=?)))
+(define k-globals-effects (ref bool @t) (new #f))
+;; The latent effect of the lambda checked last: for `define*`, what the
+;; globals its lambda reads are.
+(define k-last-latent (ref k-eff @t) (new nil))
+;; For a driver: whether naming a global reads it.
+(define check-globals-effects! (subr (write @t) (bool) unit) (lambda (on) (set k-globals-effects on)))
 ;; The type `s` is bound to, or -1.
 ;; Globals broken by a redefinition (`k-defining`): the name, how many
 ;; bindings it had then (so which one is broken), and why. A use of a broken
@@ -453,6 +466,7 @@
     (begin
       (table-set! (get k-env) s (cons t (table-ref (get k-env) s nil)))
       (table-set! (get k-known) s (the (listof bool finite) (cons #f (table-ref (get k-known) s nil))))
+      (table-set! (get k-global) s (the (listof bool finite) (cons #f (table-ref (get k-global) s nil))))
       (set k-trail (cons s (get k-trail)))
       (set k-depth (+ (get k-depth) 1)))))
 (define k-mark (subr (read @t) () int) (lambda () (get k-depth)))
@@ -464,6 +478,7 @@
           (begin
             (table-set! (get k-env) s (cdr (table-ref (get k-env) s nil)))
             (table-set! (get k-known) s (cdr (table-ref (get k-known) s nil)))
+            (table-set! (get k-global) s (cdr (table-ref (get k-global) s nil)))
             (set k-trail (cdr (get k-trail)))
             (set k-depth (- (get k-depth) 1))
             (k-unbind-to m))))))
@@ -479,6 +494,15 @@
 ;; Whether the binding `n` names is of a known procedure.
 (define k-known? (subr (maxeff (read @t) spin) (symbol) bool)
   (lambda (n) (let ((st (table-ref (get k-known) n nil))) (and (not (null? st)) (car st)))))
+;; Note the innermost binding of `n` as a global.
+(define k-note-global (subr (maxeff kstate spin) (symbol) unit)
+  (lambda (n) (table-set! (get k-global) n (k-set-nth-true (table-ref (get k-global) n nil) 0))))
+;; Bind `n`, at top level, to a value of type `t`: a global.
+(define k-bind-global (subr (maxeff kstate spin) (symbol int) unit)
+  (lambda (n t) (begin (k-bind n t) (k-note-global n))))
+;; Whether the binding `n` names is a global's.
+(define k-global? (subr (maxeff (read @t) spin) (symbol) bool)
+  (lambda (n) (let ((st (table-ref (get k-global) n nil))) (and (not (null? st)) (car st)))))
 
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) finite))
@@ -511,7 +535,7 @@
 ;;; ------------------------------------------------------------ effects
 
 (define k-region-rank (subr pure (k-region) int)
-  (lambda (r) (tagcase r (r-const (n) 0) (r-fresh (i n) 1) (r-var (v) 2) (r-frozen (p f) 3) (r-heap () 4))))
+  (lambda (r) (tagcase r (r-const (n) 0) (r-fresh (i n) 1) (r-var (v) 2) (r-frozen (p f) 3) (r-heap () 4) (r-global (g) 5) (r-globals () 6))))
 (define k-region-cmp (subr spin (k-region k-region) int)
   (lambda (r s)
     (let ((c (k-int-cmp (k-region-rank r) (k-region-rank s))))
@@ -524,7 +548,9 @@
               (tagcase s
                 (r-frozen (q g) (let ((c (k-int-cmp p q))) (if (= c 0) (k-int-cmp (if f 1 0) (if g 1 0)) c)))
                 (else y 0)))
-            (r-heap () 0))
+            (r-heap () 0)
+            (r-global (g) (tagcase s (r-global (h) (k-str-cmp (symbol->string g) (symbol->string h) 0)) (else y 0)))
+            (r-globals () 0))
           c))))
 (define k-region=? (subr spin (k-region k-region) bool) (lambda (r s) (= (k-region-cmp r s) 0)))
 
@@ -556,8 +582,17 @@
   (lambda (x y) (if (null? x) y (k-union (cdr x) (k-insert (car x) y)))))
 (define k-contains? (subr (maxeff (read @t) spin) (k-eff k-atom) bool)
   (lambda (e a) (cond ((null? e) #f) ((= (k-atom-cmp (car e) a) 0) #t) (else (k-contains? (cdr e) a)))))
+;; Whether `a` is in `e`, or, reading or writing one global, `e` does so to
+;; `@globals`.
+(define k-covered? (subr (maxeff (read @t) spin) (k-eff k-atom) bool)
+  (lambda (e a)
+    (or (k-contains? e a)
+        (tagcase a
+          (a-read (r) (tagcase r (r-global (g) (k-contains? e (a-read (r-globals)))) (else y #f)))
+          (a-write (r) (tagcase r (r-global (g) (k-contains? e (a-write (r-globals)))) (else y #f)))
+          (else y #f)))))
 (define k-within? (subr (maxeff (read @t) spin) (k-eff k-eff) bool)
-  (lambda (x y) (or (null? x) (and (k-contains? y (car x)) (k-within? (cdr x) y)))))
+  (lambda (x y) (or (null? x) (and (k-covered? y (car x)) (k-within? (cdr x) y)))))
 (define k-eff=? (subr (maxeff (read @t) spin) (k-eff k-eff) bool) (lambda (x y) (and (k-within? x y) (k-within? y x))))
 (define k-one (subr (alloc @t) (k-atom) k-eff) (lambda (a) (cons a nil)))
 (define k-allocates? (subr (read @t) (k-eff) bool)
@@ -568,7 +603,8 @@
 (define k-region-show (subr (read @t) (k-region) string)
   (lambda (r) (tagcase r (r-const (n) (symbol->string n)) (r-fresh (i n) n) (r-var (v) (symbol->string (k-dvar-name v))) (r-frozen (p f)
                   (let ((word (if f "finite" "const")))
-                    (if (< p 0) word (k-cat5 "(" word " " (symbol->string (k-dvar-name p)) ")")))) (r-heap () "heap"))))
+                    (if (< p 0) word (k-cat5 "(" word " " (symbol->string (k-dvar-name p)) ")")))) (r-heap () "heap")
+                  (r-global (g) (k-cat3 "(globals " (symbol->string g) ")")) (r-globals () "@globals"))))
 (define k-atom-show (subr (read @t) (k-atom) string)
   (lambda (a)
     (letrec ((one (subr (read @t) (string k-region) string) (lambda (op r) (k-cat5 "(" op " " (k-region-show r) ")"))))
@@ -579,12 +615,49 @@
         (a-var (v) (symbol->string (k-dvar-name v)))))))
 (define k-atoms-show (subr (read @t) (k-eff) string)
   (lambda (e) (if (null? e) "" (string-append (string-append " " (k-atom-show (car e))) (k-atoms-show (cdr e))))))
+(define k-strings-append (subr pure ((listof string finite) (listof string finite)) (listof string finite))
+  (lambda (xs ys) (if (null? xs) ys (the (listof string finite) (cons (car xs) (k-strings-append (cdr xs) ys))))))
+(define k-strings-spaced (subr pure ((listof string finite)) string)
+  (lambda (xs) (if (null? xs) "" (string-append (string-append " " (car xs)) (k-strings-spaced (cdr xs))))))
+;; The names of the globals `e` reads (`op` 0) or writes (1), in order, each
+;; after a space.
+(define k-globals-shown (subr (read @t) (k-eff int) string)
+  (lambda (e op)
+    (if (null? e)
+        ""
+        (let ((g (tagcase (car e)
+                   (a-read (r) (if (= op 0) (tagcase r (r-global (g) (string-append " " (symbol->string g))) (else y "")) ""))
+                   (a-write (r) (if (= op 1) (tagcase r (r-global (g) (string-append " " (symbol->string g))) (else y "")) ""))
+                   (else y ""))))
+          (string-append g (k-globals-shown (cdr e) op))))))
+(define k-one-global? (subr pure (k-atom) bool)
+  (lambda (a)
+    (tagcase a
+      (a-read (r) (tagcase r (r-global (g) #t) (else y #f)))
+      (a-write (r) (tagcase r (r-global (g) #t) (else y #f)))
+      (else y #f))))
+;; Whether `a` is on globals' bindings, which are never masked.
+(define k-globals-atom? (subr pure (k-atom) bool)
+  (lambda (a) (and (k-has-region? a) (tagcase (k-atom-region a) (r-global (g) #t) (r-globals () #t) (else y #f)))))
+;; The atoms shown, reads, or writes, of several globals being one atom:
+;; `(read (globals f g))`.
+(define k-atom-strings (subr (read @t) (k-eff) (listof string finite))
+  (lambda (e)
+    (letrec ((others (subr (read @t) (k-eff) (listof string finite))
+                       (lambda (e)
+                         (cond ((null? e) nil)
+                               ((k-one-global? (car e)) (others (cdr e)))
+                               (else (the (listof string finite) (cons (k-atom-show (car e)) (others (cdr e))))))))
+             (grouped (subr (read @t) (string string) (listof string finite))
+                        (lambda (op names) (if (string=? names "") nil (the (listof string finite) (cons (k-cat5 "(" op " (globals" names "))") nil))))))
+      (k-strings-append (others e) (k-strings-append (grouped "read" (k-globals-shown e 0)) (grouped "write" (k-globals-shown e 1)))))))
 ;; `pure`, a single atom, or `…`.
 (define k-show-effect (subr (read @t) (k-eff) string)
   (lambda (e)
-    (cond ((null? e) "pure")
-          ((null? (cdr e)) (k-atom-show (car e)))
-          (else (k-cat3 "(maxeff" (k-atoms-show e) ")")))))
+    (let ((xs (k-atom-strings e)))
+      (cond ((null? xs) "pure")
+            ((null? (cdr xs)) (car xs))
+            (else (k-cat3 "(maxeff" (k-strings-spaced xs) ")"))))))
 
 (define k-kind-name (subr pure (int) string)
   (lambda (k) (cond ((= k 0) "region") ((= k 1) "effect") ((= k 3) "place") ((= k 4) "data") ((= k 5) "size") ((= k 6) "conv") (else "type"))))
@@ -894,6 +967,23 @@
             ((string=? n "conv") 6)
             (else (k-sfail "a kind is `region`, `place`, `effect`, `type`, `data`, `size` or `conv`" s))))))
 
+;; `@globals`, or `(globals g …)` as the regions of each `g`, in a list of
+;; one; none if `s` is neither.
+(define k-global-names (subr (maxeff checks spin) ((listof syn finite)) k-regions)
+  (lambda (ns) (if (null? ns) nil (the k-regions (cons (r-global (k-name-of (car ns) "a global's name")) (k-global-names (cdr ns)))))))
+(define k-globals-region (subr (maxeff checks spin) (syn) (listof k-regions finite))
+  (lambda (s)
+    (if (syn-symbol? s)
+        (if (string=? (syn-name s) "@globals") (the (listof k-regions finite) (cons (the k-regions (cons (r-globals) nil)) nil)) nil)
+        (let ((items (k-items-or-nil s "a region")))
+          (if (and (not (null? items)) (and (syn-symbol? (car items)) (string=? (syn-name (car items)) "globals")))
+              (if (null? (cdr items))
+                  (k-sfail "`(globals name …)`: at least one global" s)
+                  (the (listof k-regions finite) (cons (k-global-names (cdr items)) nil)))
+              nil)))))
+;; Each of `rs`, read (or written).
+(define k-atoms-on (subr (maxeff (read @t) (alloc @t) spin) (bool k-regions) k-eff)
+  (lambda (read rs) (if (null? rs) nil (k-insert (if read (a-read (car rs)) (a-write (car rs))) (k-atoms-on read (cdr rs))))))
 ;; The region `@name` stands for: the program's own, if `private-regions`
 ;; declared it, and otherwise the constant of that name.
 (define k-region-constant (subr (maxeff (read @t) (alloc @t)) (symbol) k-region)
@@ -904,6 +994,8 @@
 (define-rec
   (k-parse-region (subr (maxeff checks spin) (syn) k-region)
     (lambda (s)
+      (if (not (null? (k-globals-region s)))
+          (k-sfail "globals are a region only in effects: `(read @globals)`, `(write (globals g))`" s)
       (if (not (syn-symbol? s))
           ;; `(const p)`: data frozen into place `p`; `(finite p)`, and never
           ;; written, so finite.
@@ -927,7 +1019,7 @@
                          (tagcase (car d)
                            (ds-var (v k) (if (or (= k 0) (= k 3)) (r-var v) (k-sfail (no) s)))
                            (ds-region (r) r)
-                           (else x (k-sfail (no) s))))))))))))
+                           (else x (k-sfail (no) s)))))))))))))
 
 ;; A place: a region that is one.
 (define k-parse-place (subr (maxeff checks spin) (syn) k-region)
@@ -982,11 +1074,17 @@
                   ((or (string=? head "read") (string=? head "write") (string=? head "alloc")
                        (string=? head "goto") (string=? head "comefrom") (string=? head "await"))
                    (if (= (k-length items) 2)
+                       (let ((gs (k-globals-region (k-nth items 1))))
+                        (cond
+                         ((null? gs)
                        (let ((r (k-parse-region (k-nth items 1))))
                          (k-one (cond ((string=? head "read") (a-read r)) ((string=? head "write") (a-write r))
                                       ((string=? head "alloc") (a-alloc r)) ((string=? head "goto") (a-goto r))
                                       ((string=? head "await") (a-await r))
-                                      (else (a-comefrom r)))))
+                                      (else (a-comefrom r))))))
+                         ;; Globals' bindings, which are only read and written.
+                         ((or (string=? head "read") (string=? head "write")) (k-atoms-on (string=? head "read") (car gs)))
+                         (else (k-sfail (k-cat3 "globals are only read and written, not `" head "`") (k-nth items 1)))))
                        (k-sfail (k-cat3 "`(" head " region)`") s)))
                   (else (k-sfail "expected an effect" s))))))))
 
@@ -2041,7 +2139,7 @@
   (lambda ()
     (begin
       (set k-extracts nil)
-      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-known (make-table symbol-hash symbol=?)) (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
+      (set k-ntys 0) (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil) (set k-lifetimes nil) (set k-freezing nil) (set k-written nil) (set k-known (make-table symbol-hash symbol=?)) (set k-global (make-table symbol-hash symbol=?)) (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?)) (set k-trail nil) (set k-depth 0)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
@@ -2225,7 +2323,7 @@
         out
         (let ((a (car e)))
           (k-sought (cdr e) in-result
-                    (if (and (k-has-region? a) (or (not (k-frozen-atom? a)) (k-place-frozen-atom? a))
+                    (if (and (k-has-region? a) (and (not (k-globals-atom? a)) (or (not (k-frozen-atom? a)) (k-place-frozen-atom? a)))
                              (not (and (k-has-region-in? in-result (k-mask-region a)) (k-result-keeps? a))))
                         (k-add-region out (k-mask-region a))
                         out))))))
@@ -2993,8 +3091,10 @@
 ;; Naming `s`: pure, but for a member of a recursive group that may not
 ;; end, named in the group. Called, the call says `spin`; given away,
 ;; whoever calls it could loop through it, so naming it does.
-(define k-naming-effect (subr (maxeff (read @t) (alloc @t)) (symbol int) k-eff)
-  (lambda (s t) (if (k-named-has? (get k-recursive) s t) (the k-eff (cons (a-spin) nil)) nil)))
+(define k-naming-effect (subr (maxeff (read @t) (alloc @t) spin) (symbol int) k-eff)
+  (lambda (s t)
+    (let ((spins (if (k-named-has? (get k-recursive) s t) (the k-eff (cons (a-spin) nil)) (the k-eff nil))))
+      (if (and (get k-globals-effects) (k-global? s)) (k-insert (a-read (r-global s)) spins) spins))))
 (define k-bind-letrec (subr (maxeff kstate spin) ((listof (productof (1 symbol) (2 int) (3 kx)) finite)) unit)
   (lambda (bs) (if (null? bs) #u (begin (k-bind (extract (car bs) 1) (extract (car bs) 2)) (k-bind-letrec (cdr bs))))))
 ;; Whether `x` is a lambda, under any type abstractions and ascriptions.
@@ -5018,6 +5118,7 @@
                             (let ((r (k-synth body))) (k-te (extract r 1) (k-mask body (extract r 2) (extract r 1)))))))
                 (begin
                   (k-unbind-to saved)
+                  (set k-last-latent (extract r 2))
                   (k-te (k-ty-new (ty-subr (extract r 2) (k-binding-types typed) (k-forget-nats named (extract r 1) a b) (get k-conv-default))) nil))))))
         (else y (k-fail "a lambda" (k-start x) (k-end x))))))
   ;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
@@ -5844,7 +5945,7 @@
   (lambda (bs)
     (if (null? bs)
         nil
-        (let* ((t (k-parse-type (extract (car bs) 2))) (bound (k-bind (extract (car bs) 1) t))
+        (let* ((t (k-parse-type (extract (car bs) 2))) (bound (k-bind-global (extract (car bs) 1) t))
                (noted (k-note-known (extract (car bs) 1) 0)))
           (cons t (k-rec-types (cdr bs)))))))
 ;; Each lambda, read under its signature: a lambda, or an error.
@@ -5972,6 +6073,101 @@
                (k-break-all (cdr ns) why)))))
 (define k-lines-append (subr pure ((listof string finite) (listof string finite)) (listof string finite))
   (lambda (xs ys) (if (null? xs) ys (the (listof string finite) (cons (car xs) (k-lines-append (cdr xs) ys))))))
+;; `t`, a `subr` under any `poly`s, with `extra` in its latent effect; -1 if
+;; `t` is not one.
+(define k-with-latent (subr (maxeff kstate spin) (int k-eff) int)
+  (lambda (t extra)
+    (tagcase (k-get (k-resolve t))
+      (ty-poly (bs body) (let ((b (k-with-latent body extra))) (if (< b 0) -1 (k-ty-new (ty-poly bs b)))))
+      (ty-subr (e ps r cv) (k-ty-new (ty-subr (k-union e extra) ps r cv)))
+      (else y -1))))
+;; The atoms of `e` on globals.
+(define k-globals-of (subr (maxeff (read @t) (alloc @t)) (k-eff) k-eff)
+  (lambda (e) (cond ((null? e) nil) ((k-globals-atom? (car e)) (the k-eff (cons (car e) (k-globals-of (cdr e))))) (else (k-globals-of (cdr e))))))
+;; `n`'s innermost binding, now of type `t`.
+(define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
+  (lambda (n t) (table-set! (get k-env) n (cons t (cdr (table-ref (get k-env) n nil))))))
+;; `f`'s value, or, if it fails, the error `say` makes of its message.
+(define k-saying (subr (maxeff checks spin) ((subr (maxeff checks spin) () k-te) (subr (maxeff checks spin) (string) string)) k-te)
+  (lambda (f say)
+    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
+      (tagcase r
+        (k-done (te) te)
+        (k-err (m ea eb) (k-fail (say m) ea eb))
+        (k-ok (xs) (k-fail "k-ok inside" 0 0))))))
+;; `(define name type init)`, or, if `star` is not empty,
+;; `(define* name type init)`: its line.
+(define k-define-typed (subr (maxeff checks spin) (symbol syn (listof syn finite) exp) (listof string finite))
+  (lambda (name written star-syns init)
+    ;; A lambda is in scope in itself, as a `letrec`
+    ;; binding is; anything else is not.
+    (let* ((reset (set k-pending-lemma nil))
+           (t (k-parse-type written))
+           ;; `define*`: checked as though its type read
+           ;; `@globals`, which finds what it reads.
+           (star (not (null? star-syns)))
+           (tw (if star (k-with-latent t (k-one (a-read (r-globals)))) t))
+           (subr-ok (if (< tw 0) (k-sfail "`define*` finds what a procedure reads: its type is a `subr`" written) #u))
+           ;; A `proves` type: a lemma, once the body proves it.
+           (lemma (get k-pending-lemma))
+           (taken (set k-pending-lemma nil))
+           (saved (get k-dscope))
+           (signed (k-bind-signature t))
+           (x (k-resolve-exp init))
+           (lambda-ok (if (and star (not (k-lambda? x))) (k-fail "`define*` defines a procedure: a `lambda`" (k-start x) (k-end x)) #u))
+           (u (set k-last-uses (k-free-into x nil nil)))
+           (restored (set k-dscope saved))
+           (bound (if (k-lambda? x) (k-bind-global name t) #u))
+           (rsaved (get k-recursive))
+           ;; A lambda whose every run ends needs no `spin`.
+           (noted (if (k-lambda? x)
+                      (begin (k-note-known name 0)
+                             (let* ((g (the k-group (cons (product (1 name) (2 tw) (3 x)) nil)))
+                                    (why (k-termination g)))
+                               (if (string=? why "")
+                                   #u
+                                   (begin (set k-recursive (cons (cons name tw) rsaved)) (k-note-why g why)))))
+                      #u))
+           ;; A generative type's own `up-` and `down-` see
+           ;; inside it.
+           (inside (k-take-inside name))
+           (opened (if (>= inside 0) (set k-transparent (cons inside (get k-transparent))) #u))
+           (e0 (k-check-declared name tw x))
+           ;; With `define*`, the globals the lambda read,
+           ;; found, are its type's; and it is checked again
+           ;; at that type, bound to it: one that fails is
+           ;; the checker's mistake, not the program's.
+           (tf (if star (k-with-latent t (k-globals-of (get k-last-latent))) tw))
+           (refound (if star
+                        (begin
+                          (k-rebind-top name tf)
+                          (set k-recursive rsaved)
+                          (let* ((g (the k-group (cons (product (1 name) (2 tf) (3 x)) nil)))
+                                 (why (k-termination g)))
+                            (if (string=? why "")
+                                #u
+                                (begin (set k-recursive (cons (cons name tf) rsaved)) (k-note-why g why)))))
+                        #u))
+           (e (if star
+                  (extract (k-saying (lambda () (k-te tf (k-check-declared name tf x)))
+                                     (lambda (m) (k-cat5 (k-cat3 "`define*` found `" (symbol->string name) "` to be a ")
+                                                         (k-show-ty tf) ", and checked at it, it does not check (a mistake of the checker's): " m "")))
+                           2)
+                  e0))
+           (closed (if (>= inside 0)
+                       (begin (set k-transparent (cdr (get k-transparent)))
+                              (set k-conversions (cons (cons name t) (get k-conversions))))
+                       #u))
+           (popped (set k-recursive rsaved))
+           (proved (if (null? lemma)
+                       #u
+                       (let ((l (car lemma)))
+                         (begin (k-check-proof l name x)
+                                (set k-lemmas (cons (product (1 (extract l 1)) (2 (extract l 2)) (3 (extract l 3)) (4 (extract l 4))
+                                                             (5 (the k-named (cons (cons name t) nil))))
+                                                    (get k-lemmas)))))))
+           (after (if (k-lambda? x) #u (k-bind-global name tf))))
+      (cons (k-cat4 "define " (symbol->string name) " : " (k-line tf e)) nil))))
 ;; One top-level form's lines: what each definition and expression is.
 (define k-top-lines (subr (maxeff checks spin) (top) (listof string finite))
   (lambda (form)
@@ -5979,51 +6175,10 @@
                  (t-define (name ty init a b)
                    (if (null? ty)
                        (let* ((x (k-resolve-exp init)) (u (set k-last-uses (k-free-into x nil nil))) (r (k-synth x)))
-                         (begin (k-bind name (extract r 1))
+                         (begin (k-bind-global name (extract r 1))
                                 (if (k-lambda? x) (k-note-known name 0) #u)
                                 (cons (k-cat4 "define " (symbol->string name) " : " (k-line (extract r 1) (extract r 2))) nil)))
-                       ;; A lambda is in scope in itself, as a `letrec`
-                       ;; binding is; anything else is not.
-                       (let* ((reset (set k-pending-lemma nil))
-                              (t (k-parse-type (car ty)))
-                              ;; A `proves` type: a lemma, once the body proves it.
-                              (lemma (get k-pending-lemma))
-                              (taken (set k-pending-lemma nil))
-                              (saved (get k-dscope))
-                              (signed (k-bind-signature t))
-                              (x (k-resolve-exp init))
-                              (u (set k-last-uses (k-free-into x nil nil)))
-                              (restored (set k-dscope saved))
-                              (bound (if (k-lambda? x) (k-bind name t) #u))
-                              (rsaved (get k-recursive))
-                              ;; A lambda whose every run ends needs no `spin`.
-                              (noted (if (k-lambda? x)
-                                         (begin (k-note-known name 0)
-                                                (let* ((g (the k-group (cons (product (1 name) (2 t) (3 x)) nil)))
-                                                       (why (k-termination g)))
-                                                  (if (string=? why "")
-                                                      #u
-                                                      (begin (set k-recursive (cons (cons name t) rsaved)) (k-note-why g why)))))
-                                         #u))
-                              ;; A generative type's own `up-` and `down-` see
-                              ;; inside it.
-                              (inside (k-take-inside name))
-                              (opened (if (>= inside 0) (set k-transparent (cons inside (get k-transparent))) #u))
-                              (e (k-check-declared name t x))
-                              (closed (if (>= inside 0)
-                                          (begin (set k-transparent (cdr (get k-transparent)))
-                                                 (set k-conversions (cons (cons name t) (get k-conversions))))
-                                          #u))
-                              (popped (set k-recursive rsaved))
-                              (proved (if (null? lemma)
-                                          #u
-                                          (let ((l (car lemma)))
-                                            (begin (k-check-proof l name x)
-                                                   (set k-lemmas (cons (product (1 (extract l 1)) (2 (extract l 2)) (3 (extract l 3)) (4 (extract l 4))
-                                                                                (5 (the k-named (cons (cons name t) nil))))
-                                                                       (get k-lemmas)))))))
-                              (after (if (k-lambda? x) #u (k-bind name t))))
-                         (cons (k-cat4 "define " (symbol->string name) " : " (k-line t e)) nil))))
+                       (k-define-typed name (car ty) (cdr ty) init)))
                  (t-define-rec (bs a b) (k-define-rec bs))
                  (t-exp (e)
                    (let* ((x (k-resolve-exp e)) (r (k-synth x)))

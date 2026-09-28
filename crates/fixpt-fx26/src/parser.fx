@@ -64,7 +64,8 @@
   (e-tagcase exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) finite)
              (listof (productof (1 symbol) (2 exp)) finite) int int))
 
-;; A top-level form. A definition's type is a list of none or one.
+;; A top-level form. A definition's type is a list of none or one; a
+;; `define*`'s, of it and the `define*`.
 (define-datatype top
   (t-define symbol syns-a exp int int)
   ;; `(define-rec (name type lambda) …)`: a top-level `letrec`.
@@ -480,6 +481,17 @@
                (cond ((= n 4)
                       (let ((name (syn-symbol (nth items 1))))
                         (t-define name (the syns-a (cons (nth items 2) nil)) (parse-exp (nth items 3)) (syn-start s) (syn-end s))))
+                     ((= n 3)
+                      (let ((name (syn-symbol (nth items 1))))
+                        (t-define name (the syns-a nil) (parse-exp (nth items 2)) (syn-start s) (syn-end s))))
+                     (else (pfail "`(define name type expression)` or `(define name expression)`" s)))))
+            ;; `(define* name type lambda)`: its type is a list of it and the
+            ;; head, which says the checker finds what the lambda reads.
+            ((symbol=? head 'define*)
+             (let* ((items (syn-items s "a definition")) (n (len items)))
+               (cond ((= n 4)
+                      (let ((name (syn-symbol (nth items 1))))
+                        (t-define name (the syns-a (cons (nth items 2) (cons (car items) nil))) (parse-exp (nth items 3)) (syn-start s) (syn-end s))))
                      ((= n 3)
                       (let ((name (syn-symbol (nth items 1))))
                         (t-define name (the syns-a nil) (parse-exp (nth items 2)) (syn-start s) (syn-end s))))

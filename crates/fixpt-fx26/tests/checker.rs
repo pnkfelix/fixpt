@@ -214,6 +214,33 @@ fn conventions_agree_when_native() {
     assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
 }
 
+/// With naming a global reading it, the two checkers agree on the globals'
+/// programs.
+#[test]
+fn globals_agree_when_read() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/globals");
+    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    names.sort();
+    let mut report = Vec::new();
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.set_globals_effects(true);
+    for path in names {
+        let program = std::fs::read_to_string(&path).unwrap();
+        let ours = canon(fx26_check_in(&mut s, &program).expect("parses"));
+        let mut c = Checker::new();
+        c.globals_effects = true;
+        let rust = canon(rust_check_in(c, &program));
+        if path.ends_with("inferred.fx") {
+            let want = "define clamp : (subr (read (globals below limit)) (int) int) ! pure";
+            assert!(ours.as_ref().is_ok_and(|ls| ls.iter().any(|l| l == want)), "{ours:?}");
+        }
+        if ours != rust {
+            report.push(format!("{}:\n  FX-26 {ours:?}\n  Rust  {rust:?}", path.display()));
+        }
+    }
+    assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
+}
+
 /// The string literals in Rust source that look like programs: a crude
 /// scanner, enough for this crate's tests.
 fn literals(src: &str) -> Vec<String> {

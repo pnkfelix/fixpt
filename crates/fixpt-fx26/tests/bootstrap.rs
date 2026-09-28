@@ -480,7 +480,17 @@ fn fixpoint_with_words_compiled_by_fx26() {
                 sc.scope(|one| {
                     let (ft, fe) = (one.make(|_| Value::fixnum(far[0])), one.make(|_| Value::fixnum(far[1])));
                     let args = one.call_global("list", &[*w, ft, fe]).expect("a list");
-                    let r = one.call_global("%run-word", &[assemble, args]).expect("assembles");
+                    let r = one.call_global("%run-word", &[assemble, args]).unwrap_or_else(|e| {
+                        // Which word, and how large, for a failure to say.
+                        let mut shown = String::new();
+                        one.make(|m| {
+                            let v = m.get(*w);
+                            let text = fixpt_runtime::disasm::disassemble(m.heap(), v);
+                            shown = format!("{} lines: {}", text.lines().count(), text.lines().filter(|l| !l.trim().is_empty()).take(3).collect::<Vec<_>>().join(" | "));
+                            Value::NULL
+                        });
+                        panic!("assembling {shown}: {e}")
+                    });
                     one.view(|v| {
                         let r = v.get(r);
                         let ints = |l: fixpt_scheme::Local| l.list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>();
