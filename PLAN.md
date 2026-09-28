@@ -40,7 +40,14 @@ queue gained", and "The next queue"):
    confirming types at run time (CF1–CF5); concurrency and actors.
 5. M13's rest: inlining (13f), superinstructions (13g), join points (13i),
    the rest of known calls, a nursery with a write barrier, cheaper
-   continuations, a lint on a lambda's size.
+   continuations, a lint on a lambda's size. Known gap, seen with
+   `,disassemble-asm`: words compiled cell for cell (`--threaded-machine
+   native-compiled`) are about 95 instructions for `(lambda ((x int)) x)`,
+   some 60 of them run, since each cell is its routine's whole body; first
+   targets, each something the checker already proves: slot bounds checks
+   (the arity is known), stack limits checked once per word, returns that
+   need not scan for prompt and mark entries, direct returns into callers
+   known to be compiled.
 6. Smaller: `,apropos` and `,help` over every namespace; `nlist` error
    messages; the language gaps the survey found;
    M8 docs and polish; M10, a full native compiler, is not scheduled.

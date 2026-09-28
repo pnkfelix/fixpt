@@ -167,9 +167,10 @@ pub fn repl(backend: Backend) -> i32 {
         if asm && session.strategy != Strategy::Lower {
             let name = crate::THREADED_MACHINE_NAME.get().copied().unwrap_or("");
             if crate::THREADED_MACHINE_CODE.get().copied().flatten().is_none() {
-                println!("; {name} interprets the cells: it has no machine code to show.");
-            } else if name.contains("hand-encoded") && std::env::var_os("FIXPT_NATIVE_WORDS").is_none() {
-                println!("; {name} runs words as cells unless FIXPT_NATIVE_WORDS is set; `--threaded-machine registers` compiles them.");
+                println!("; {name} interprets the cells: it has no machine code for a word to show.");
+                if name.contains("hand-encoded") {
+                    println!(";   `--threaded-machine native-compiled`, or `registers`, compiles each word.");
+                }
             }
         }
         // `,disassemble E`: E's threaded code, shown, as `disassemble` gives

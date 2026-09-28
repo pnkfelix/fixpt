@@ -1732,16 +1732,14 @@ thread_local! {
     /// The machine `run_word` uses: one per thread, kept, so that the words
     /// compiled into it stay compiled.
     static MACHINE: std::cell::RefCell<Option<NativeMachine>> = const { std::cell::RefCell::new(None) };
-    /// Whether `run_word` compiles what it runs to machine code first.
-    static COMPILE: bool = std::env::var_os("FIXPT_NATIVE_WORDS").is_some();
 }
 
 /// Run `word` with `args` on a native machine in `rt`: what the runtime's
 /// `%run-word` calls when a native machine is chosen (`Runtime::run_word`).
-/// With `FIXPT_NATIVE_WORDS` set, every word it can reach is compiled to
-/// machine code first ([`NativeMachine::compile_reachable`]).
+/// It runs the cells, with its routines as machine code;
+/// [`run_word_compiled`] compiles every word it can reach first.
 pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
-    run_word_as(rt, word, args, COMPILE.with(|c| *c))
+    run_word_as(rt, word, args, false)
 }
 
 /// The same, compiling or not as `compile` says.
