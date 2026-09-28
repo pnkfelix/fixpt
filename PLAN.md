@@ -78,7 +78,10 @@ queue gained", and "The next queue"):
    `(read @globals)`) say so; compatibility counts what a redefinition
    reads; a procedure whose calls read its own global says `spin`, with
    no exception for recursion (the user's, 2026-09-28): one proved to end
-   calls itself through a local `letrec`. Next: `define-rec*`; a
+   calls itself through a local `letrec`. Deferred (the user's,
+   2026-09-28): `define-rec*`, until something motivates it; a way to name
+   a set of globals as a region may come first (`define-effect` already
+   names one as an effect). Next: a
    lint on non-tail recursion over an index (the user's, after an
    assembler overflow); a question to answer: tag bits for an ownership
    bit.
