@@ -53,4 +53,9 @@ pub struct State {
     /// The routines' addresses, by number, for machines that find them
     /// through the state rather than a register.
     pub routines: [u64; ROUTINE_SLOTS],
+    /// Where the running machine's common trap and exit are: a word's
+    /// machine code reaches them through these, so it runs in any machine
+    /// and from anywhere (`docs/object-model.md`, "A collected code area").
+    pub trap: u64,
+    pub exit: u64,
 }

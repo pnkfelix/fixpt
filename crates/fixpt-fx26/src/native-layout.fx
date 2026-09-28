@@ -32,6 +32,8 @@
 (define n-st-fp int 144)  ; a State field's offset
 (define n-st-clo int 152)  ; a State field's offset
 (define n-st-resume int 168)  ; a State field's offset
+(define n-st-trap int 720)  ; a State field's offset
+(define n-st-exit int 728)  ; a State field's offset
 (define n-false int 3)  ; a Value's bits
 (define n-true int 11)  ; a Value's bits
 (define n-prompt-mark int 51)  ; a Value's bits

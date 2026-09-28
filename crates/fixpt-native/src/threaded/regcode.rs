@@ -835,10 +835,16 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     a.bind(near_exit);
     a.b(far_exit);
     a.exit_common = far_exit;
+    // The machine's common trap and exit, through the state, as a word's
+    // (`assemble_word`): no branch leaves this code.
     let [tc, ec] = [a.trap_common, a.exit_common];
-    a.bind_at(tc, far[0]);
-    a.bind_at(ec, far[1]);
-    let _ = (far_exit, starts, REGS);
+    a.bind(tc);
+    a.e(ldr(X16, ST, off(offset_of!(State, trap))));
+    a.e(br(X16));
+    a.bind(ec);
+    a.e(ldr(X16, ST, off(offset_of!(State, exit))));
+    a.e(br(X16));
+    let _ = (far, far_exit, starts, REGS);
     Ok((a.finish(), resume))
 }
 

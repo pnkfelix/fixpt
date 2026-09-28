@@ -150,12 +150,6 @@ impl Asm {
         assert!(self.labels[l.0].is_none());
         self.labels[l.0] = Some(self.here() as i64);
     }
-    /// Bind `l` to instruction `at`, counted from this code's start, which
-    /// may be outside it.
-    fn bind_at(&mut self, l: Label, at: i64) {
-        assert!(self.labels[l.0].is_none());
-        self.labels[l.0] = Some(at);
-    }
     fn to(&mut self, l: Label, w: u32) {
         self.fixups.push((self.here(), l.0));
         self.e(w);
@@ -931,9 +925,17 @@ pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32
         a.b(far_exit);
     }
     a.exit_common = far_exit;
+    // The machine's common trap and exit, through the state: no branch
+    // leaves this code, so it may be placed anywhere, and run by any
+    // machine.
+    let _ = far;
     let [tc, ec] = [a.trap_common, a.exit_common];
-    a.bind_at(tc, far[0]);
-    a.bind_at(ec, far[1]);
+    a.bind(tc);
+    a.e(ldr(X16, ST, off(offset_of!(State, trap))));
+    a.e(br(X16));
+    a.bind(ec);
+    a.e(ldr(X16, ST, off(offset_of!(State, exit))));
+    a.e(br(X16));
     let at: Vec<i64> = (0..cells.len()).map(|i| if starts[i] { a.labels[labels[i].0].expect("bound") } else { -1 }).collect();
     Ok((a.finish(), at))
 }
@@ -968,7 +970,8 @@ pub fn fx26_module() -> String {
         ("n-st-fuel", offset_of!(State, fuel)), ("n-st-callout", offset_of!(State, callout)),
         ("n-st-ds-base", offset_of!(State, ds_base)), ("n-st-ds-limit", offset_of!(State, ds_limit)),
         ("n-st-rs-limit", offset_of!(State, rs_limit)), ("n-st-fp", offset_of!(State, fp)), ("n-st-clo", offset_of!(State, clo)),
-        ("n-st-resume", offset_of!(State, resume)),
+        ("n-st-resume", offset_of!(State, resume)), ("n-st-trap", offset_of!(State, trap)),
+        ("n-st-exit", offset_of!(State, exit)),
     ] {
         c(name, o as i64, "a State field's offset");
     }
@@ -1441,6 +1444,8 @@ impl Stacks {
             rt: 0,
             rs_limit: self.rs.base - 32 * (RS_LIMIT as u64 + 1),
             routines: [0; ROUTINE_SLOTS],
+            trap: 0,
+            exit: 0,
             resume: 0,
             top: heap.top_address() as u64,
             alloc_limit: heap.inline_limit() as u64,
@@ -1610,6 +1615,12 @@ impl NativeMachine {
         Ok(n)
     }
 
+    /// Where this machine's common trap and exit are, for the state.
+    fn commons_addresses(&self) -> (u64, u64) {
+        let at = |i: i64| self.space.exec_addr(self.machine_at + 4 * i as usize) as u64;
+        (at(self.commons[0]), at(self.commons[1]))
+    }
+
     /// The machine code, for looking at.
     pub fn code_bytes(&self) -> usize {
         self.space.used()
@@ -1622,6 +1633,7 @@ impl NativeMachine {
         let mut st = self.stacks.start(heap, word, args, fuel);
         st.table = self.table.as_ptr() as u64;
         st.resume = self.resume.as_ptr() as u64;
+        (st.trap, st.exit) = self.commons_addresses();
         // SAFETY: the entry follows the C convention and takes the state.
         // Everything the machine touches is valid while it runs: the state,
         // the table and the stacks here, and the heap, which `heap` holds
@@ -1647,6 +1659,7 @@ impl NativeMachine {
         st.rt = rt_ptr;
         st.table = self.table.as_ptr() as u64;
         st.resume = self.resume.as_ptr() as u64;
+        (st.trap, st.exit) = self.commons_addresses();
         // SAFETY: as for `run`; the runtime, and so the heap, is reached
         // only through the state while the machine runs.
         unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };

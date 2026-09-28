@@ -670,7 +670,14 @@
           (n-flush-stubs)
           (n-cells w 0 cells starts labels far-exit-label)
           (set n-exit-common far-exit-label)
-          (n-bind-at (get n-trap-common) far-trap)
-          (n-bind-at far-exit-label far-exit)
+          ;; The machine's common trap and exit, through the state: no
+          ;; branch leaves this code, so it may be placed anywhere, and run
+          ;; by any machine. `far-trap` and `far-exit` are no longer needed.
+          (n-bind (get n-trap-common))
+          (n-e (arm-ldr n-x16 n-st n-st-trap))
+          (n-e (arm-br n-x16))
+          (n-bind far-exit-label)
+          (n-e (arm-ldr n-x16 n-st n-st-exit))
+          (n-e (arm-br n-x16))
           (let ((at (n-starts-at 0 cells starts labels)))
             (product (1 (n-finish)) (2 at))))))))
