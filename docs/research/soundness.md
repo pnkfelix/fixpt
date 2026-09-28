@@ -19,18 +19,21 @@ Literature is cited from memory unless a local copy is named
 
 ## 0. Results at a glance
 
-| result                                                    | status                                             |
-| --------------------------------------------------------- | -------------------------------------------------- |
-| T0 elaboration of the checker's derivations into core K26 | sketched; rule-1 masking proved, rule-2 sketched   |
-| T1 progress                                               | proved (memory fragment); control cases sketched   |
-| T2 preservation                                           | proved (memory fragment); control cases sketched   |
-| C1 no dead place is ever read, written or allocated into  | proved from T1–T2, given the fixes in §6           |
-| C2 frozen data is never written; `finite` data is acyclic | proved from T1–T2                                  |
-| C3 sizes and `nat` values are exact                       | proved for the core; false for the checker (§6)    |
-| T3 effect soundness (masking hides only fresh state)      | sketched                                           |
-| T4 lemmas are erasable                                    | sketched                                           |
-| T5 termination of `spin`-free code                        | conjectured; false for the checker today (§5, §6)  |
-| T6 space safety of places (in `soundness-regions.md`)     | conjectured; one counterexample in the threaded VM |
+Second round (2026-09-27), after the F1–F7/A2 fixes (commits 0f0a61e,
+d83face) were verified against a fresh offline build.
+
+| result                                                    | status                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------ |
+| T0 elaboration of the checker's derivations into core K26 | sketched; rule-1 masking proved, rule-2 sketched       |
+| T1 progress                                               | proved (memory fragment); control cases now in full    |
+| T2 preservation                                           | proved (memory fragment); control cases now in full    |
+| C1 no dead place is ever read, written or allocated into  | proved from T1–T2                                      |
+| C2 frozen data is never written; `finite` data is acyclic | proved from T1–T2                                      |
+| C3 sizes and `nat` values are exact                       | proved for the core and the `proj` path; F8 breaks it  |
+| T3 effect soundness (masking hides only fresh state)      | sketched; frozen part now proved (F2 fix); F9 gap      |
+| T4 lemmas are erasable                                    | sketched                                               |
+| T5 termination of `spin`-free code                        | conjectured; F1/F4/F5 obstacles cleared, F8/F9 open    |
+| T6 space safety of places (in `soundness-regions.md`)     | conjectured; F7 fixed, so its counterexample is closed |
 
 ## 1. The core calculus K26
 
@@ -409,8 +412,13 @@ Two remarks on faithfulness:
 - **Abort and throw end places.** The lowering wraps each place body in
   `dynamic-wind` (`lower.rs:286–295`), and the threaded engine's abort ends
   the regions entered inside the prompt (`fixpt-engine/src/threaded.rs:939–947`).
-  The threaded engine's `throw` does not (§6, F7). That is a space
-  question, not a safety one: a place left live longer is still safe.
+  Since the F7 fix (d83face) a continuation records how many regions were
+  live when it was taken (`CONT_REGIONS`), and reinstating a whole
+  continuation ends those entered since, in both the Rust threaded machine
+  and fixpt-native's control code — so `throw` ends its places too, and the
+  semantics' "places framed in `E` but not `E′` end" is faithful on both
+  back ends. (Even before the fix this was space, not safety: a place left
+  live longer is still safe.)
 - **Allocation into a dead place.** `Heap::in_region` allocates in the
   heap when the region is no longer live (`regions.rs:210–218`). K26 makes
   it stuck instead; the theorem shows it never happens in a well-typed
@@ -618,23 +626,105 @@ global invariants. The key cases:
   `(nlist τ k ρ)`: by (I6) `k = 0` holds, so the fact `k = 0` the branch was
   checked under is true and can be discharged (a closed true fact adds
   nothing to `Φ`). Likewise `k ≥ 1` in the `else` branch.
-- **abort** *(sketched)*. The handler's type `(subr φ₃ (H) A)` and the
-  abort's payload `H` give `h v : A`. Places framed in the discarded `E′`
-  end, as in exit-rena; the dropped `goto ρ` atoms were removed by the
-  prompt, and `φ₃ ∪ φ₄` were already in `φ`.
-- **callcomp and compose** *(sketched)*. `comp E′ ρ : (composable T A D ρ)`
-  because the prompt checked `E′`'s effect `⊆ D ∪ {goto ρ, comefrom ρ}`.
-  Composing reinstates `E′`, whose frames are only `priv`, `letregion`,
-  marks and prompts: `priv`/`letregion` frames may be duplicated, since
-  their names carry no memory (a duplicated `[r̂]` frame shares `r̂`, which
-  is sound because nothing is freed at its exit).
-- **cwcc and throw** *(sketched)*. `cont E : (subr (goto ρ) (T) void)`.
-  Throw: the new term `E′[v]` is typed as it was at capture, by Lemma 4.6
-  and (I7); places framed in the abandoned context end, as in exit-rena.
+The control cases in full follow. Fix the redex
+`E[#κ{E′[…], h}]`, where the tag `κ` has type `(prompt-tag A H D ρ)`, and
+call `Δ_p` the descriptions live at the prompt frame `#κ{·,h}` and `Δ_c`
+those live at the control redex inside `E′`. By (I2)–(I3) the place frames
+in `E′` are exactly `P` restricted to below the prompt.
+
+- **abort** `E[#κ{E′[abort κ v], h}] → E[h v]`, `E′` holding no `#κ`.
+  *Typing.* `abort κ v` has type `void` and effect `goto ρ` (from the
+  constant's type at this tag, `standard.rs`), with `v : H`. `h : (subr φ₃
+  (H) A)` from `(Prompt)`, so `h v : A ! φ₃`. The whole prompt had type `A`
+  (its answer), so `E[h v]` retypes at `A` by Lemma 4.4: replace the
+  subterm `#κ{E′[abort κ v], h} : A` with `h v : A`. *Effects.* `φ₃ ⊆ φ`
+  was recorded by `(Prompt)`. The atoms of `E′`'s computation vanish with
+  `E′`; the only ones that could have escaped the prompt, `goto ρ` and
+  `comefrom ρ`, are removed by `(Prompt)` and are not in the residual.
+  *Store and places.* Every place frame `⟦π̂⟧` in `E′` is popped: mark each
+  `π̂` dead, its locations tombstones. This is sound for the same reason as
+  exit-rena — the surviving term `E[h v]` mentions none of those `π̂` in an
+  effect: an atom on `ρ′ ≤ π̂` would be an atom the prompt's body kept,
+  contradicting `(Prompt)`'s bound `φ₂ ⊆ D ∪ {goto ρ, comefrom ρ}` unless
+  `ρ′` is `ρ` itself, whose control atoms the prompt removed. (I5), (I7)
+  are preserved: no location is written, and continuations captured inside
+  `E′` had, by (I7), their regions bound inside a now-dead place, so they
+  can never be entered (their `goto`/`comefrom` would violate (I4)).
+- **callcomp** `E[#κ{E′[callcomp f κ], h}] → E[#κ{E′[f (comp E′ ρ)], h}]`,
+  `E′` holding no `#κ`. *Typing.* `callcomp f κ` at this tag has `f :
+  (subr e ((composable T A D ρ)) T)` and result `T`, effect `comefrom ρ ∪
+  e` (`standard.rs`). The reified `comp E′ ρ` must have type `(composable T
+  A D ρ)`. It does: `E′` is the context from the capture point to the
+  prompt, so `E′[·] : A` with a hole of type `T` (the type at the capture
+  point, which is `callcomp`'s result `T`), and its effect is `⊆ D ∪ {goto
+  ρ, comefrom ρ}` — precisely `(Prompt)`'s check on the body `φ₂`,
+  restricted to the sub-context `E′` (a sub-context's effect is a subset).
+  A `composable` is invariant except as a callable subroutine; its
+  subtyping (`check.rs`) is `(subr (D ∪ goto ρ ∪ comefrom ρ) (T) A)`, which
+  is what `f`'s parameter wants. *Store, places.* Nothing is freed or
+  written; `E′` is *copied* into the reified value, not removed, so both
+  the live `E′` and the captured `comp E′ ρ` exist. (I7) needs the captured
+  `comp E′ ρ` to hold no place frame: `E′` runs from the capture point up
+  to the prompt, and by (I3) any `⟦π̂⟧` between them would have `ρ ≤ π̂`
+  (the tag `κ`, bound outside `π̂`, is free in `E′`), which `(Arena)`
+  refuses for a body that keeps `comefrom ρ` — and `E′` does keep it, since
+  the capture's `comefrom ρ` reaches every place body it crosses. So `E′`
+  has no place frame, and neither does the reified value; the substitution
+  is well typed by Lemma 4.4 at `T`.
+- **compose** `E[(comp E′ ρ) v] → E[E′[v]]`, `E′` holding no live-place
+  frame (just shown). *Typing.* `(comp E′ ρ) : (composable T A D ρ)` used
+  as a subroutine takes `v : T` and gives `A`; `E′[v]` has type `A` with
+  effect `⊆ D ∪ {goto ρ, comefrom ρ} ⊆ φ` (the composition's own effect,
+  which `(App)`/subsumption put in `φ`). Lemma 4.4 retypes `E[E′[v]]` at
+  the ambient type. *Places.* `E′` has no place frame, so nothing is
+  entered or freed; the `priv`, `letregion`, mark and prompt frames of `E′`
+  may be re-instantiated, and a duplicated analysis frame `[r̂]` sharing
+  its name `r̂` is sound because its exit frees nothing (exit-reg) and
+  (I1)/(I5) never constrain a duplicated analysis name. If `E′` contains a
+  `#κ′` prompt, the copy makes a second live prompt for `κ′`, which is
+  sound: prompts are not unique. The composition's `comefrom ρ`/`goto ρ`
+  are the atoms F3 requires when the composable can be re-entered; T5 (§5)
+  treats them as possible non-termination.
+- **cwcc** `E[cwcc f] → E[f (cont E)]`. *Typing.* `cwcc : ((subr e ((subr
+  (goto ρ) (T) void)) T)) → T` with effect `comefrom ρ ∪ e` (`standard.rs`,
+  instantiated at the ambient region `ρ`). The reified `cont E` must have
+  type `(subr (goto ρ) (T) void)`. `E` is the whole current context with a
+  hole of type `T` (the type at `cwcc`'s position); calling `cont E` on a
+  `T` reinstates `E`, which never returns to its caller — hence result
+  `void`, a subtype of anything, matching the argument's expected result.
+  The latent `goto ρ` is what throwing does. `f (cont E) : T` and Lemma 4.4
+  retypes `E[f (cont E)]` at `T`. *Store, places.* `E` is copied, nothing
+  freed. (I7): `cont E` records the live-place count (the runtime's
+  `CONT_REGIONS`, F7 fix); every `⟦π̂⟧` frame in `E` has, by (I3) and the
+  `comefrom ρ` that reaches its body, `ρ ≤ π̂`, so throwing to it (which
+  needs `ρ` live) is only possible while those places live.
+- **throw** `E[(cont E′) v] → E′[v]`, places framed in `E` but not `E′`
+  ended. *Typing.* `cont E′ : (subr (goto ρ) (T) void)`, `v : T`, so
+  `E′[v]` is well typed at whatever `E′` was captured at, by Lemma 4.6
+  (the context outside a surviving frame is unchanged) and the fact that
+  `E′` was typed at capture with store typing `Σ` extended only by fresh
+  locations since (agreement of `Σ` on surviving locations). *Places.* By
+  the throw rule's side condition and (I7), every place framed in `E′` is
+  live; places framed in `E` but abandoned are ended, as in exit-rena,
+  and the whole-continuation reinstatement ends those entered since the
+  capture (F7 fix in both engines, `threaded.rs`, `control.rs`), so `P′`
+  again lists exactly `E′`'s place frames. *Effects.* the throw's own
+  `goto ρ` is in `φ`; the reinstated `E′` reintroduces no atom that was not
+  in `E′`'s type at capture, all `⊆ φ` by subsumption at the `cwcc`.
+  *(I5)*, *(I6)* are about the store, unchanged by control transfer.
 
 The invariants (I2), (I3) follow from the frame rules (each push is
 inside the current frames; each pop is of the innermost, or of a whole
-discarded segment). ∎
+discarded segment; a copied context, in compose and cwcc, carries no place
+frame — compose — or is re-entered whole with its place count restored —
+throw). ∎
+
+**Caveat on T5, not T1–T2.** These control cases preserve *types and the
+memory invariants*: no case reads a dead place, writes frozen data, or
+mistypes a value. What they do **not** establish is termination. A
+composable re-entered by its own return (F9 in
+`soundness-findings.md`) is well typed at every step and never stuck; it
+simply runs forever. That is consistent with T1–T2 and is a T5 concern.
 
 ### 4.5 What the two theorems give
 
@@ -659,17 +749,33 @@ false, because they instantiate size binders with `finite` (§4.9, §6 F4).
 (writes, awaits) is at a region `ρ` with `read ρ` (`write ρ`, `await ρ`)
 in `φ`; every place allocated into has `alloc` in `φ`; and every control
 transfer out of `e` is to a region with `goto` in `φ`.
-*Status: sketched.* Instrument each frame with the domain of the store
-when it was entered; an access to an older location inside `priv r̂` or
-`adopt` is at a region other than `r̂`, since `r̂` is fresh, so its atom
-reaches the frame's result. The obstacle is continuations: a `comp`
-captured inside a prompt carries frames that hold private state, and
-calling it again touches that state although `D` does not say so. The
-theorem holds only if `comefrom ρ`/`goto ρ` on the continuation's region
-are read as covering the state its frames hold. Every call of a
-composable has those atoms (`ast.rs:249–253`), so what the REPL licence
-and the compiler's reordering rely on still holds; but `D` alone is not a
-complete description of what calling a continuation does.
+*Status: sketched, and stronger after the F2 fix.* Instrument each frame
+with the domain of the store when it was entered; an access to an older
+location inside `priv r̂` or `adopt` is at a region other than `r̂`, since
+`r̂` is fresh, so its atom reaches the frame's result. The **frozen part is
+now proved rather than assumed**: after the F2 fix, reading data frozen
+into a place `p` is the atom `read (const p)`/`read (finite p)`, kept by
+`frozen` and masked exactly as `p` is (visible or in the result), so a
+closure that reads such data has `p` in its latent effect — the effect,
+not only the escape rule, records the access (verified: a closure over
+place-frozen data has latent `(read (finite p))` and cannot leave
+`letrena p`; the same read masks to `pure` when used internally). Only
+data frozen into the *heap*, which never ends, is read purely, which is
+sound because the heap is in `φ` implicitly (it never appears in an atom
+because it never ends).
+
+The obstacle that remains is continuations: a `comp` captured inside a
+prompt carries frames that hold private state, and calling it again
+touches that state although its effect `D` need not mention it. The theorem
+holds only if `comefrom ρ`/`goto ρ` on the continuation's region are read
+as covering the state its frames hold. Every call of a composable has
+those atoms (`ast.rs:249–253`), so what the REPL licence and the compiler's
+reordering rely on still holds; but `D` alone is not a complete description
+of what calling a continuation does, and F9 (`soundness-findings.md`) shows
+this gap has teeth for *termination* (a composable re-entered by its own
+return). For the memory/read claim of T3, the composable's control atoms
+suffice; for a full effect description, `D` would have to be closed under
+what the continuation's frames touch.
 
 ### 4.7 Recursive and generative types
 
@@ -712,18 +818,69 @@ of the goal is under a rebuilt constructor. The check never rebuilds a
 mutable pair, a `ref` or a bloblet, which is what keeps the argument from
 failing on invariant storage.
 
-### 4.9 Sizes
+### 4.9 Sizes, `nat`, and the `finite` rule (revised for the F4 fix)
 
-A size binder ranges over naturals. `(nlist τ ∃ ρ)` is an existential,
-`∃n.(nlist τ n ρ)`. **Instantiating a size binder with `finite` is not a
-substitution**: `∀n.(nlist τ n) (nlist τ n) → …` at `finite` would admit
-two lists of different lengths, and facts learned from one would be
-applied to the other. The sound reading is to *open* the existential of
-one argument: `∀n.(nlist τ n ρ) → B[n]` may be used at
-`(nlist τ ∃ ρ) → ∃n.B[n]` when `n` occurs in exactly one parameter,
-and not under another arrow. The checkers substitute instead (§6, F4).
-With that restriction Lemma 4.3 holds for sizes: facts in `Φ` stay true
-under substitution of a natural.
+A size binder ranges over naturals. `(nat s)` is the singleton natural
+`s`; `nat` alone is `(nat ∃)`, some natural (`≥ 0`), a subtype of `int`.
+`(nlist τ s ρ)` is a list of exactly `s` frozen pairs; `(nlist τ ∃ ρ)`
+(surface `finite`) is `∃n.(nlist τ n ρ)`, some length.
+
+**Why `finite` is not a substitution.** `∀n.((nlist τ n) (nlist τ n) → …)`
+at `finite` would admit two lists of different lengths where the body
+relies on their being equal; `∀n.((nat n) (nat n) → (nat 0))` at `finite`
+would let `(- b a) : (nat 0)` hold for `b ≠ a`. So `finite` may replace a
+size binder only where every value the binder could stand for is
+interchangeable — i.e. where the exact size is *forgotten*, never *relied
+on*.
+
+**The implemented rule (F4 fix, `sizes.rs check_finite_sizes`,
+`finite_size_ok`, `size_walk`).** A size binder `n` may be given, solved,
+or defaulted to `finite` at an instantiation only when, in the operator's
+type:
+1. `n` is the whole size (coefficient 1, constant `≤ 0`) of **at most one**
+   parameter's own `(nlist τ n)` or `(nat n)` (`top ≤ 1`); and
+2. `n` occurs **nowhere** in a negative or invariant position (`bad = 0`):
+   not in a parameter's interior, not under a contravariant arrow flip
+   into a positive-again supply, not in a mutable cell/array/ref/bloblet
+   field or a generative type's arguments (all counted invariant), and not
+   in the size of anything a caller otherwise supplies.
+
+This is exactly a **restricted existential opening**, not the general
+"`n` occurs in one parameter and not under another arrow" I first proposed:
+it is stated positionally (positive occurrences are fine, negative and
+invariant ones forbidden) and it caps the *positive* supplying positions at
+one. It is *sound* — it is a special case of the opening rule, since the
+one allowed occurrence is a positive `(nlist τ n)`/`(nat n)` at top level,
+which is the argument whose existential is opened, and every other
+occurrence is positive (given back, where forgetting a size only weakens
+the result). It is *incomplete*: it rejects some sound uses (e.g. `n` the
+size of one parameter and also, positively, inside another parameter that
+is a thunk's result), which is acceptable for a checker.
+
+**Soundness statement (proved, modulo F8).** With the rule enforced at
+every place a size binder is fixed, Lemma 4.3 holds for sizes: a fact in
+`Φ` about `n` stays true when `n` is replaced by a natural, and the
+`finite`/open case never equates two distinct supplied sizes, so (I6) is
+preserved. **The proviso is F8**: the rule is enforced on the
+`proj`/instantiation path but *not* on the skolem-forgetting path
+(`forget_nats`), where a plain-`nat` binding's skolem is sent to `finite`
+with no positional check. There a skolem in a negative position leaks, (I6)
+fails, and a `pure` countdown loops (`soundness-findings.md`, F8). So C3
+and the size clause of T5 hold **only once `forget_nats` applies the same
+`finite_size_ok` check**.
+
+**`nat` skolems in the calculus.** K26 models a plain-`nat` binding as an
+existential opened for the scope: `let x = e in b` with `e : nat` binds
+`x : (nat n̂)` for a fresh `n̂` (a rigid skolem), checks `b`, and at the end
+the escaping type is `∃n̂. τ` — which is sound to *weaken* to `τ[finite/n̂]`
+**only** under the `finite_size_ok` positions of `n̂` in `τ`. This is the
+same rule as instantiation; the checker must call it in both places. Facts
+learned about `n̂` inside the scope (from comparisons, N5d) are discharged
+at the boundary: they are true of the actual value, and are dropped, not
+exported. Size-change may use `n̂ ≥ 0` as a lower bound for a `nat`
+parameter it counts down, which is sound because a `nat` value is a
+genuine natural — again, *provided* no F8 leak has put a non-natural into a
+`nat`.
 
 ## 5. `spin` and termination
 
@@ -740,12 +897,16 @@ through a recursive type says `spin` (`may_spin`, `infer.rs:469–488`), and
 a procedure kept in a region whose latent effect reads that region must say
 `spin` (`no_knot`, `check.rs:1190–1274`).
 
-**Theorem T5 (termination).** *Conjectured*, and false for the checkers
-today (§6, F1, F3, F4, F5). Statement: if `⊢ e : τ ! φ` with `spin ∉ φ`,
-all fixes of §6 applied, and every `datum` from the host acyclic, then
-every run of `e` from a well-typed store ends in a value or `error`.
+**Theorem T5 (termination).** *Conjectured.* Statement: if `⊢ e : τ ! φ`
+with `spin ∉ φ`, the F8 and F9 fixes applied, and every `datum` from the
+host acyclic, then every run of `e` from a well-typed store ends in a value
+or `error`.
 
-*What a proof needs.*
+**What the fixes settled, and what remains.** Of the four obstacles below,
+the F1, F4 and F5 fixes discharge parts of 2 and 4 at the level of the
+*checker's rules being the ones a proof would assume*; two concrete
+counterexamples remain (F8, F9), each with a fix identified.
+
 1. **A unary logical relation**, indexed by types and by a *level* for
    each region: a closure is terminating at `(subr φ …)` if applying it to
    terminating arguments in a store whose contents at the regions `φ`
@@ -760,39 +921,58 @@ every run of `e` from a well-typed store ends in a value or `error`.
    region, so the local rule implies a stratification *if* the region
    graph of stored procedure types is acyclic. That graph is exactly what
    the knot rule's walk inspects; the proof would have to make this
-   precise.
+   precise. **The F3 fix strengthened the base case**: a `cwcc`
+   continuation is `spin` unless its receiver only *calls* it while `cwcc`
+   runs (`escape_only`), and a stored composable is refused by the knot
+   rule — both now tested. So a *directly* stored-and-re-entered
+   continuation is caught (`cwcc-store.fx` is `spin`). **F9 is the
+   residual hole**: a `cwcc` continuation that `escape_only` clears can
+   still loop when its own return re-composes a stored composable. The
+   relation must treat a `comefrom ρ` whose continuation can outlive its
+   prompt (be stored, or captured by an enclosing `cwcc`) as possible
+   non-termination; `escape_only` is the rule to strengthen.
 2. **Size-change soundness**: the Lee–Jones–Ben-Amram theorem, plus
    well-foundedness of each measure: parts of immutable finite data
    (corollary C2 and the acyclicity of sums and products), integers
-   bounded by a test, and `nat` (by I6, which needs F4 fixed).
-3. **Control.** A continuation re-entered from the store is a backward
-   jump with no recursive call and no read of the continuation's own
-   region. The relation must treat `comefrom ρ` as possible
-   non-termination unless `ρ`'s continuations cannot be stored or called
-   twice. Without that, T5 is false (§6, F3).
-4. **Known procedures.** The exemption of calls to "known" procedures
-   from the self-application test must refer to a binding, not a name
-   (§6, F1).
+   bounded by a test, and `nat` (by I6). **The F4 fix makes the `nat`
+   measure sound on the instantiation path**; **F8 is the residual hole**:
+   the skolem-forgetting path (`forget_nats`) can still put a non-natural
+   into a `nat`, defeating the "bounded below by 0" measure and looping a
+   `pure` countdown (`f8-full.fx`). The fix is to apply the F4 positional
+   check in `forget_nats` too.
+3. **Control.** Subsumed by point 1 after the F3 fix; the residual is F9.
+4. **Known procedures.** The exemption of "known" callees from the
+   self-application test now refers to a *binding* (env position), not a
+   `(name, type)` pair, and is forgotten as its scope ends (`truncate_env`,
+   the F1 fix). So a parameter shadowing a known lambda's name no longer
+   escapes the test (`known.fx` is now `spin`). This obstacle is
+   **cleared** as far as probing found; the relation's "known code
+   terminates by IH" step now matches the checker.
 
 A proof of T5 along these lines is a substantial piece of work: the
 relation is not step-indexed (it must prove termination), and the store
 makes it Kripke-style over worlds of region levels. Ahmed's and Boudol's
-work are the nearest precedents we know of, from memory.
+work are the nearest precedents we know of, from memory. **With F8 and F9
+open, T5 is not merely unproved but false as the checker stands**; both
+have concrete fixes, and neither touches type or memory safety (T1–T2 hold
+regardless).
 
 ## 6. Where the proof and the checkers part
 
 Details, with file and line and a short program where one was tried, are
 in `docs/research/soundness-findings.md`. In short:
 
-| id  | what                                                                             | kind                  |
-| --- | -------------------------------------------------------------------------------- | --------------------- |
-| F1  | calls of "known" procedures exempt from `spin` by name and type, not by binding  | `spin` unsound        |
-| F2  | reads of frozen data dropped from effects, so a closure forgets its place        | memory unsafe         |
-| F3  | a continuation stored and re-entered loops with no `spin`                        | `spin` unsound        |
-| F4  | size binders instantiated with `finite`                                          | sizes and `nat` wrong |
-| F5  | the self-application test gives up at depth 64 and answers "not cyclic"          | `spin` unsound        |
-| F6  | the `no-escape` fact is claimed for data a returned closure still holds          | latent                |
-| F7  | the threaded engine's throw does not end the places it leaves                    | space                 |
-| A1  | K26 reads masking side conditions over derivation types, the checker over syntax | proof assumption      |
-| A2  | cycles through a generative name count as contractive                            | proof assumption      |
-| A3  | `datum` values from the host are acyclic                                         | proof assumption      |
+| id  | what                                                                               | kind                  | status (2026-09-27)                   |
+| --- | ---------------------------------------------------------------------------------- | --------------------- | ------------------------------------- |
+| F1  | "known" callees exempt from `spin` by name and type, not by binding                | `spin` unsound        | fixed (0f0a61e); re-verified          |
+| F2  | reads of frozen data dropped from effects, so a closure forgets its place          | memory unsafe         | fixed (d83face); re-verified          |
+| F3  | a continuation stored and re-entered loops with no `spin`                          | `spin` unsound        | fixed (d83face); but see F9           |
+| F4  | size binders instantiated with `finite` on the `proj` path                         | sizes and `nat` wrong | fixed (0f0a61e); but see F8           |
+| F5  | the self-application test gives up at depth 64 and answers "not cyclic"            | `spin` unsound        | fixed (0f0a61e); re-verified          |
+| F6  | the `no-escape` fact is claimed for data a returned closure still holds            | latent                | fixed (d83face): first-order only     |
+| F7  | the threaded engine's throw does not end the places it leaves                      | space                 | fixed (d83face): `CONT_REGIONS`       |
+| F8  | `forget_nats` sends a `nat` skolem to `finite` in a negative position, no F4 check | `spin` + sizes wrong  | **NEW, open**; `pure` loop shown      |
+| F9  | a `cwcc` continuation cleared by `escape_only` loops through a stored composable   | `spin` unsound        | **NEW, suspected**; `pure` loop shown |
+| A1  | K26 reads masking side conditions over derivation types, the checker over syntax   | proof assumption      | holds for constructs present          |
+| A2  | cycles through a generative name count as contractive                              | proof assumption      | fixed (d83face): `grounded`           |
+| A3  | `datum` values from the host are acyclic                                           | proof assumption      | holds by construction                 |

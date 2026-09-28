@@ -222,16 +222,18 @@ Evidence for: allocation into a place goes into that place's chunks or to
 the heap (`regions.rs:126–146`); reaps are copied; arenas end with their
 frames, and on abort (`fixpt-engine/src/threaded.rs:939–947`); the lowering
 uses `dynamic-wind`.
-**Counterexample in the threaded engine:** a full continuation thrown out
-of a place body does not end the place (`reinstate`,
-`fixpt-engine/src/threaded.rs:557–592`, has no `region_exit`). The place
-stays live until an older place ends; if none encloses the loop, a loop
-that enters an arena and escapes with `cwcc` each time keeps every arena
-live: `Θ(n)` where `S_place` is `O(1)`. (From reading the code; not run.)
-The place is still ended *safely* (never while used), so this is space,
-not safety. The fix is the one the abort path already has: record the
-live count in the continuation and end newer places on reinstatement of a
-whole continuation.
+**The threaded-engine counterexample is now closed (F7 fix, d83face).**
+It was: a full continuation thrown out of a place body did not end the
+place (`reinstate` had no `region_exit`), so a loop that enters an arena
+and escapes with `cwcc` each time kept every arena live, `Θ(n)` where
+`S_place` is `O(1)`. It was space, not safety (the place was ended safely,
+never while used). The fix is the one the abort path already had, now
+applied to throw: a continuation records the live-region count when taken
+(`CONT_REGIONS`), and reinstating a whole continuation ends those entered
+since, in both the Rust threaded machine and fixpt-native. So S1 no longer
+has this counterexample. (Verified only that the fix is present and matches
+the abort path; the asymptotic claim S1 is still conjectured — no
+space-measurement harness was run.)
 
 **S2 (early release).** *Sketched.* If a `letrena π` body is
 `E[f v̄]` with the call in tail position of the body, and `π` is in
@@ -269,10 +271,12 @@ A proposal, in three parts:
    Sketched. It is what lets the runtime's tolerant collector coexist with
    Tofte–Talpin typing.
 3. **Space**: S1 as a class statement, `O(S_place)`, with S2 as the
-   refinement for tail calls. Conjectured; one known counterexample (F7)
-   to be fixed first. Space belongs *beside* the soundness theorem, not
-   in it: it is a statement about implementations measured against the
-   reference semantics, as Clinger's classes are.
+   refinement for tail calls. Conjectured; its one known counterexample
+   (F7) is now fixed (both engines end a thrown-past place), so no
+   counterexample stands, but the asymptotic claim is unproved and no
+   space-measurement harness has been run. Space belongs *beside* the
+   soundness theorem, not in it: it is a statement about implementations
+   measured against the reference semantics, as Clinger's classes are.
 
 Not needed: a region-level logical relation in the style of Tofte and
 Talpin's consistency relation. The syntactic proof suffices once masking

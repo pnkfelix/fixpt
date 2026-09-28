@@ -32,6 +32,23 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 | A1   | holds for the constructs present (the syntactic rule is the stronger)                                                                                                                                                                                                                       |
 | A2   | fixed: a generative type whose representation is one of what it is given is no constructor for the recursive-type rule                                                                                                                                                                      |
 | A3   | holds by construction: every `datum` is made by FX-26's own constructors (fresh pairs of acyclic data; lists checked proper, cycle-safely) or its reader; the host passes no datum in. The contract for Scheme code calling an `fx:` global directly is that a `datum` it passes is acyclic |
+| F8   | NEW (spin + sizes unsound): `forget_nats` sends a `nat` skolem to `finite` in a negative position with no F4 check; re-verified against d83face — a `pure` program loops. Both checkers.                                                                                                    |
+| F9   | NEW (spin unsound, suspected): a `cwcc` continuation cleared by `escape_only` loops through a stored composable; the seam of three rules. `pure`-typed loop exhibited against d83face; not fully minimized.                                                                                 |
+
+**Re-verification of F1–F7, A2, A3 against d83face** (fresh offline build,
+2026-09-27). F1: the name-shadowing probe (`known.fx`) is now rejected
+(`omega` is `(subr spin (T) int)`). F2: a closure reading place-frozen data
+now carries `(read (finite p))` and its escape from `letrena` is refused
+(`frozen-eff.fx`); the same read masks to `pure` when used internally
+(`frozen-internal.fx`) and heap-frozen reads stay `pure` (`frozen-heap.fx`).
+F3: a stored full continuation is rejected `spin` (`cwcc-store.fx`), and the
+honest stored composable is refused by `no_knot` (`comp-min2.fx`); but see
+F9. F4: `(proj f finite)` with `f` sizing two parameters, or one parameter's
+inner list, is refused (`skolem-neg.fx`, `f4-gen.fx`, and the crate's
+`finite-two-args.fx`/`finite-inside.fx`/`finite-proj.fx`), while the
+map-shaped one-parameter case is accepted (`f4-ok.fx`,
+`finite-one-arg.fx`); but see F8. F5: the depth-`>64`
+self-application (`deep.fx`) is rejected `spin`. All as intended.
 
 Tests: `tests/programs/terminate/known-shadowed.fx`,
 `known-let-shadowed.fx`, `deep-self-application.fx`, `cwcc-kept.fx`,
@@ -316,6 +333,161 @@ abort path: record the live-region count in the continuation (the abort
 path already stores it in the prompt word, `threaded.rs:900–902,939–947`)
 and call `region_exit` to that count when a whole continuation is
 reinstated.
+
+## F8 — `finite` leaks into a negative position through `forget_nats`
+
+**New, 2026-09-27, after the F4 fix (commits 0f0a61e, d83face).** Found
+against a fresh build of d83face; confirmed in the Rust checker and, by
+inspection, present in the FX-26 checker on the same path.
+
+**Where.** `sizes.rs` `forget_nats` (the skolem-forgetting substitution,
+`{skolem ↦ D::Size(Size::Finite)}`, `sizes.rs:358–364` at d83face), called
+from the `let` and `lambda` rules (`check.rs` and `infer.rs`, at each
+`self.forget_nats(named, t)`). The F4 guard `check_finite_sizes` is called
+only from the `proj`/instantiation path (`check.rs`, `infer.rs`
+`instantiate`/`instantiate_against`), **not** from `forget_nats`. The
+FX-26 checker: `k-forget-nats` (`check.fx:2801–2809`) does the same
+`k-subst t m` with no call to `k-finite-size-ok?` (`check.fx:3154`).
+
+**The rule that is missing.** N5d gives a plain-`nat` binding a fresh
+*skolem* size `ŝ` (`name_nat`, `sizes.rs:347–354`), so a `let`- or
+`lambda`-bound `n : nat` is typed `(nat ŝ)` inside the scope, and facts can
+be learned about `ŝ`. When the scope ends, `forget_nats` replaces `ŝ` with
+`finite` everywhere in the escaping type. That substitution is exactly the
+one F4 governs — but here it is applied with no check on where `ŝ` occurs.
+When `ŝ` lands in a **negative** (parameter) position of the escaping
+type, the F4 unsoundness returns: a singleton `(nat ŝ)` that stood for a
+fixed value becomes `(nat finite) = nat`, "any natural", while the closure
+body still treats it as the fixed value.
+
+**Probe.** `f8-min.fx`:
+
+```
+(define f (poly ((s size)) (subr pure ((nat s)) (subr pure ((nat s)) (nat 0))))
+  (plambda ((s size)) (lambda (a) (lambda (b) (- b a)))))
+(define k (let ((y (the nat 5))) (f y)))
+(the (nat 0) (k 2))
+```
+
+`f` is sound: `a, b : (nat s)` are singletons, both equal to `s`, so
+`(- b a) : (nat (s − s)) = (nat 0)` is genuinely 0, and a direct
+`(proj f finite)` is refused by F4 (`s` sizes two parameters). But `y` in
+the `let` is typed `(nat ŝ)` with `ŝ = 5`; `(f y)` unifies `s` with the
+skolem `ŝ`, not `finite`, so F4 passes, giving
+`k : (subr pure ((nat ŝ)) (nat 0))`. Ending the `let`, `forget_nats`
+sends `ŝ ↦ finite` in this escaping type — `ŝ` is in the *parameter* of
+the returned subroutine — so `k : (subr pure (nat) (nat 0))`. Now `(k 2)`
+computes `2 − 5 = −3` and the REPL prints `-3 : (nat 0)`: a `(nat 0)` that
+is neither 0 nor a natural.
+
+**Consequence.** Invariant (I6) of `soundness.md` is false again, this time
+on the `let`/`lambda` path rather than `proj`. And it drives a `pure`-typed
+loop, via size-change's trust that a `nat` is bounded below by 0.
+`f8-full.fx`:
+
+```
+(define f (poly ((s size)) (subr pure ((nat s)) (subr pure ((nat s)) (nat 0))))
+  (plambda ((s size)) (lambda (a) (lambda (b) (- b a)))))
+(define k (let ((y (the nat 5))) (f y)))
+(define down (subr pure (nat) int) (lambda (n) (if (= n 0) 0 (down (- n 1)))))
+(define bad (subr pure () int) (lambda () (down (k 2))))
+(bad)
+```
+
+`down` is accepted `pure` by size-change (a countdown on a `nat`, bounded
+below). `bad : (subr pure () int)`; running `(bad)` feeds `down` the
+value `−3` and exceeds the step limit — a spin-free procedure that never
+ends.
+
+**Fix.** `forget_nats` must not send a skolem to `finite` where the
+skolem occurs in a non-positive position of the escaping type: the same
+test `finite_size_ok`/`size_walk` already written for F4, applied to each
+skolem before it is forgotten. Where it would be unsound, the binding
+should not have been given a skolem to begin with, or the type must be
+rejected (the value's exact size cannot be forgotten if a caller of the
+result would rely on it). In the proof (`soundness.md` §4.9, revised) the
+skolem is an existential opened at the *end* of the scope, and opening is
+sound only under the same single-positive-occurrence condition.
+
+## F9 — a `cwcc` continuation, cleared by `escape_only`, loops through a stored composable
+
+**New, 2026-09-27. Suspected: a `pure`-typed program that does not
+terminate is exhibited; the precise rule to blame is the *interaction* of
+three, and the reproduction is not fully minimized.** Confirmed against a
+fresh build of d83face.
+
+**Where.** `escape_only`/`only_called` (`infer.rs:505–543` at d83face),
+the prompt rule (`synth_prompt`, `check.rs`), and `no_knot`
+(`check.rs`). Each is individually sound (F3's tests pass; see below); the
+loop slips through their seam.
+
+**Probe.** `comp-cwcc.fx`:
+
+```
+(define-effect D (maxeff (write @d) (goto @k) (comefrom @k)))
+(define loop (subr pure () int)
+  (lambda ()
+    (let ((c (the (icell (composable int int D @p) @d) (make-icell)))
+          (t ((proj (proj make-continuation-prompt-tag @p) int int D))))
+      (begin
+        (prompt t
+          ((proj (proj (proj cwcc @k) int) (maxeff (write @d) (comefrom @p) (goto @k)))
+            (lambda ((k (subr (goto @k) (int) void)))
+              (begin
+                ((proj (proj call-with-composable-continuation @p) int int D int (write @d))
+                  (lambda ((j (composable int int D @p))) (begin (icell-put! c j) 0))
+                  t)
+                (k 0))))
+          (lambda ((v int)) v))
+        ((icell-get c) 0)))))
+(loop)
+```
+
+`loop : (subr pure () int)` is accepted, and `(loop)` exceeds the step
+limit.
+
+**Why the three rules each pass.**
+- `escape_only` clears the `cwcc`'s `spin`: the continuation `k` is named
+  only as `(k 0)`, the operator of a call, so it is judged "only called
+  while `cwcc` runs".
+- The prompt rule does not force `await @d` into the tag's effect `D`,
+  because the `(icell-get c)` that composes the stored continuation is
+  *outside* the prompt (in `loop`'s body), not in the delimited
+  computation.
+- `no_knot` does not fire on the stored composable `j`: `j`'s effect `D`
+  writes `@d` but does not `read` or `await` it (the read is outside `j`'s
+  delimited segment), and `no_knot` looks only for `read`/`await` of the
+  storing region.
+
+The loop is real: invoking `k` resumes a context that composes `j`, whose
+return leads back to `((icell-get c) 0)`, composing `j` again. The
+recursion runs through the *return* of a composable continuation into an
+outer context that re-composes it — a cycle no one of the three rules
+sees.
+
+**What is and is not minimized.** Two controls locate the seam:
+- `cwcc-store.fx` (store `k` itself in a cell and re-enter): **rejected**,
+  `spin` — `escape_only` sees `k` passed to `icell-put!`, not only called.
+- `comp-outside.fx` / `comp-min2.fx` (the composable alone, no `cwcc`,
+  composed outside its prompt): the honest version with `await @d` in the
+  effect is **rejected** by `no_knot`; the version that hides the `await`
+  is **rejected** by the prompt rule; and the accepted variant
+  **terminates** (composing a delimited continuation once and returning).
+
+So neither mechanism loops alone; the `cwcc` re-entry is needed, and its
+`spin` was cleared by `escape_only`. This points at `escape_only` as too
+weak: a `k` that is "only called" can still re-enter a context that, via a
+stored composable, re-invokes the same computation. But because the
+reproduction needs the composable and the effect annotations are intricate,
+this is filed as *suspected*, pending a cleaner minimization and a decision
+whether the fix belongs in `escape_only` (treat a `cwcc` whose extent
+captures a composable that outlives the prompt as `spin`), in the prompt
+rule (an `await` on a region a composable of the tag is stored in), or in
+`no_knot` (count a composable reachable from storage the surrounding
+computation reads).
+
+**Not a memory-safety problem**, like F1/F3/F5: the loop is well behaved
+but for ending.
 
 ## Assumptions the proof makes
 
