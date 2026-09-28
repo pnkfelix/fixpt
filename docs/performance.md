@@ -1155,10 +1155,16 @@ closure of the word the body was compiled to (`global g; field 2; op2imm
 eq w; branchf`), so a redefinition, which makes a new closure of a new
 word, is seen at once and nothing need be compiled again (the user's
 choice, 2026-09-28). The native compiler decides the guard when it makes
-the code, as it takes every global's value then; where the global holds
-that word's closure (cellular, or native through its code's
-`CODE_SOURCE`) the guard is nothing. Both compilers (`cellular/regcode.rs`,
-`regcode.fx`) do it, and make the same register code.
+the code where the global holds a cellular closure, as it takes such a
+global's value then: where it is that word's closure, the guard is
+nothing. A global holding a native closure it reads when the code runs,
+so there the guard stays, testing for the closure's code (its field 2),
+which was compiled from the word (`CODE_SOURCE`) and which a redefinition
+replaces. Both compilers (`cellular/regcode.rs`, `regcode.fx`) inline,
+and make the same register code; the REPL in the native convention, which
+makes a definition's value itself, notes the lambda for inlining after
+(`compile-note-inline!`). `,inliners NAME` says which globals' code
+inlines NAME: those a redefinition of NAME sends back to calling it.
 
 Stack code keeps its calls. Inlined there first, `helpers` (below) went
 from 1270 to 977 ms on the machine written in Rust, but from 88 to 98 ms

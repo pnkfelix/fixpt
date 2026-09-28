@@ -449,6 +449,7 @@ fn inlined_calls_see_a_redefinition() {
         let forms = s.checker.read_in(FileId(0), include_str!("programs/redefine/compatible.fx")).expect("reads");
         let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{:?}", o.value))).collect();
         assert_eq!(out[2], "Ok(Some(\"4\"))", "native {native}: {out:?}");
+        assert_eq!(s.inliners("f").expect("asks"), Ok(vec!["g".to_string()]), "native {native}");
         assert_eq!(out[4], "Ok(Some(\"202\"))", "native {native}: {out:?}");
     }
 }

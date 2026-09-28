@@ -184,6 +184,21 @@ pub fn repl(backend: Backend) -> i32 {
             };
             continue;
         }
+        // `,inliners NAME`: the globals whose code inlines NAME's calls.
+        if let Some(rest) = text.trim().strip_prefix(",inliners") {
+            let name = rest.trim();
+            match session.inliners(name) {
+                Ok(Ok(ns)) if ns.is_empty() => println!("; no global's code inlines `{name}`"),
+                Ok(Ok(ns)) => {
+                    let ns: Vec<String> = ns.iter().map(|n| format!("`{n}`")).collect();
+                    println!("; inlining `{name}`: {}", ns.join(", "));
+                    println!(";   (redefined, `{name}` is called by them instead: nothing is compiled again)");
+                }
+                Ok(Err(why)) => println!("; {why}"),
+                Err(e) => eprintln!("; {}", e.message),
+            }
+            continue;
+        }
         // `,native NAME [ARG…]`: NAME's procedure in the native convention.
         if let Some(rest) = text.trim().strip_prefix(",native") {
             native(&mut session, rest);

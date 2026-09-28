@@ -49,6 +49,52 @@ pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
     Some(out)
 }
 
+/// Whether the register code of `v`, a closure (cellular, or native through
+/// the word its code was compiled from), or of any lambda it makes, has a
+/// call of the global whose cell is `cell` inlined: the guard `global cell;
+/// field 2` (`,inliners`).
+pub fn inlines_global(heap: &Heap, v: Value, cell: Value) -> bool {
+    use fixpt_heap::layout::cellular::CODE_SOURCE;
+    use fixpt_heap::layout::regcode::OPS;
+    if !v.is_bloblet() {
+        return false;
+    }
+    let start = match heap.bloblet_kind(v) {
+        k if k == kind("cellular-closure") => heap.bloblet_slot(v, CLOSURE_WORD),
+        k if k == kind("native-closure") => heap.bloblet_slot(heap.bloblet_slot(v, CLOSURE_WORD), CODE_SOURCE),
+        _ => return false,
+    };
+    let (mut todo, mut seen) = (vec![start], Vec::new());
+    while let Some(w) = todo.pop() {
+        if seen.contains(&w.raw()) || !heap.is_cellular_word(w) {
+            continue;
+        }
+        seen.push(w.raw());
+        let twin = heap.bloblet_slot(w, WORD_TWIN);
+        if !heap.is_register_word(twin) {
+            continue;
+        }
+        let fields = heap.bloblet_head(twin).fields;
+        let op = |k: usize| OPS[heap.bloblet_slot(twin, k).as_fixnum() as usize];
+        let mut k = WORD_CELL0;
+        while k <= fields {
+            let (name, n, _) = op(k);
+            let next = k + 1 + n;
+            match name {
+                "global" if heap.bloblet_slot(twin, k + 1) == cell && next <= fields => {
+                    if op(next).0 == "field" && heap.bloblet_slot(twin, next + 1).as_fixnum() as usize == CLOSURE_WORD {
+                        return true;
+                    }
+                }
+                "lambda" => todo.push(heap.bloblet_slot(twin, k + 1)),
+                _ => {}
+            }
+            k = next;
+        }
+    }
+    false
+}
+
 /// The same, with each word's machine code as `asm` shows it, after its
 /// cells and after its register code's (`,disassemble-asm`).
 pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>) -> String {

@@ -744,6 +744,11 @@ impl Fx26Session {
             other => Err(other),
         });
         self.scheme.runtime_unrooted().heap.pop_roots_to(at);
+        if matches!(r, Ok(Ok(Ok(())))) {
+            // A lambda, noted for inlining, as a definition compiled is.
+            let sym = self.scheme.make(|m| m.heap().intern(name));
+            self.scheme.call_global(&format!("{READER_PREFIX}compile-note-inline!"), &[sym]).map_err(fail)?;
+        }
         Ok(match r? {
             Ok(done) => done,
             Err(why) => Err(NativeRun::Declined(why)),
@@ -752,6 +757,47 @@ impl Fx26Session {
 
     /// Global `name`'s value, if a cellular closure, compiled by `compile`
     /// to a native closure, which the global then holds; or why not.
+    /// The globals whose code has a call of global `name` inlined, behind
+    /// a guard that `name` still holds what it held when they were
+    /// compiled (`,inliners`): what a redefinition of `name` sends back to
+    /// calling it. Nothing need be compiled again; it is for knowing.
+    pub fn inliners(&mut self, name: &str) -> R<Result<Vec<String>, String>> {
+        if self.strategy != Strategy::Cellular {
+            return Ok(Err("only compiled code inlines: `--fx26-run cellular`".into()));
+        }
+        self.own_pieces()?;
+        let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
+        let cell_of = |s: &mut Self, n: &str| -> R<Option<fixpt_scheme::Handle>> {
+            let sym = s.scheme.make(|m| m.heap().intern(n));
+            let cells = s.scheme.call_global(&format!("{READER_PREFIX}compile-global-cell"), &[sym]).map_err(fail)?;
+            let mut found = false;
+            let g = s.scheme.make(|m| {
+                let cells = m.get(cells);
+                found = cells.is_pair();
+                if found { m.heap().car(cells) } else { fixpt_heap::Value::FALSE }
+            });
+            Ok(found.then_some(g))
+        };
+        let Some(target) = cell_of(self, name)? else { return Ok(Err(format!("`{name}` has no global"))) };
+        let mut out = Vec::new();
+        let names: Vec<String> = self.checker.value_names().into_iter().map(|n| self.checker.interner.name(n).to_string()).collect();
+        for n in names {
+            let Some(g) = cell_of(self, &n)? else { continue };
+            let mut inlines = false;
+            self.scheme.make(|m| {
+                let (g, t) = (m.get(g), m.get(target));
+                let heap = m.heap();
+                inlines = fixpt_runtime::disasm::inlines_global(heap, heap.bloblet_slot(g, 2), t);
+                fixpt_heap::Value::FALSE
+            });
+            if inlines {
+                out.push(n);
+            }
+        }
+        out.sort();
+        Ok(Ok(out))
+    }
+
     fn compile_global_natively(&mut self, name: Sym, compile: NativeCompiler) -> R<Result<(), String>> {
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
         let text = self.checker.interner.name(name).to_string();

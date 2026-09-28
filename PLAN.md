@@ -97,8 +97,8 @@ queue gained", and "The next queue"):
    (2026-09-28): a call of a small global procedure is inlined in register
    code behind a guard that the global still holds the closure it was
    compiled from, so a redefinition needs no recompiling (the user's
-   choice); both compilers, `docs/performance.md`. Next: a `,inliners`
-   query (which procedures inline a global); specializing a recursive
+   choice); both compilers, `docs/performance.md`; `,inliners NAME` says
+   which globals' code inlines NAME. Next: specializing a recursive
    higher-order global at a lambda argument, so that `(map (lambda (x) (+
    x 1)) xs)` is the loop one would write (the user's, 2026-09-28); then
    common subexpressions at the level of cellular or register code, then

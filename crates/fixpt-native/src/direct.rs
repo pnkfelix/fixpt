@@ -616,21 +616,36 @@ impl Compiling<'_> {
         self.heap.symbol_name(self.heap.bloblet_slot(word, fixpt_heap::layout::cellular::WORD_NAME))
     }
 
-    /// The cellular word `v` is a closure of: a cellular closure's, or the
-    /// one a native closure's code was compiled from (`CODE_SOURCE`).
-    fn word_held(&self, v: Value) -> Option<Value> {
+    /// Register code's cells with each inlined call's guard (`global g;
+    /// field 2; op2imm eq w`) made to test for the code, not the word,
+    /// where `g` holds a native closure whose code was compiled from `w`:
+    /// a native closure's field 2 is its code, which a redefinition
+    /// replaces as it does the word.
+    fn guards_on_code(&self, mut cells: Vec<Value>) -> Vec<Value> {
         let h = self.heap;
-        if !v.is_bloblet() {
-            return None;
+        let op = |c: &[Value], k: usize| OPS[c[k].as_fixnum() as usize];
+        let mut k = 0;
+        while k < cells.len() {
+            let (name, n, _) = op(&cells, k);
+            let (f, e) = (k + 1 + n, k + 3 + n);
+            if name == "global"
+                && e + 2 < cells.len()
+                && op(&cells, f).0 == "field"
+                && cells[f + 1].as_fixnum() as usize == CLOSURE_WORD
+                && op(&cells, e).0 == "op2imm"
+                && cells[e + 1].as_fixnum() == routine("eq") as i64
+            {
+                let v = h.bloblet_slot(cells[k + 1], 2);
+                if v.is_bloblet() && h.bloblet_kind(v) == fixpt_heap::layout::kind("native-closure") {
+                    let code = h.bloblet_slot(v, CLOSURE_WORD);
+                    if h.bloblet_slot(code, fixpt_heap::layout::cellular::CODE_SOURCE) == cells[e + 2] {
+                        cells[e + 2] = code;
+                    }
+                }
+            }
+            k += 1 + n;
         }
-        let k = h.bloblet_kind(v);
-        if k == fixpt_heap::layout::kind("cellular-closure") {
-            Some(h.bloblet_slot(v, CLOSURE_WORD))
-        } else if k == fixpt_heap::layout::kind("native-closure") {
-            Some(h.bloblet_slot(h.bloblet_slot(v, CLOSURE_WORD), fixpt_heap::layout::cellular::CODE_SOURCE)).filter(|w| h.is_cellular_word(*w))
-        } else {
-            None
-        }
+        cells
     }
 
     /// A cellular closure's procedure and free values; `None` for anything
@@ -683,7 +698,7 @@ impl Compiling<'_> {
         let h = self.heap;
         let (word, rw) = (self.procs[p].word, self.procs[p].rw);
         let fields = h.bloblet_head(rw).fields;
-        let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| h.bloblet_slot(rw, k)).collect();
+        let cells = self.guards_on_code((WORD_CELL0..=fields).map(|k| h.bloblet_slot(rw, k)).collect());
         let name = self.name(word);
         let decline = |what: String| Err(format!("`{name}`: {what}"));
         // Where each instruction starts, what a branch goes back to, and
@@ -785,10 +800,12 @@ impl Compiling<'_> {
                 "global" => {
                     let cell = o(0);
                     // An inlined call's guard (`global; field 2; op2imm eq
-                    // w; branchf`): decided here, as every global's value is
-                    // when this code is made, by the word the cell holds a
-                    // closure of now. Where it holds that word's closure,
-                    // nothing; else the test, which the code runs.
+                    // w; branchf`), where the cell holds a cellular closure
+                    // now: decided here, as that global's value is when
+                    // this code is made (`global_value`). Where it holds
+                    // that word's closure, nothing; else the test, which the
+                    // code runs. (A native closure is read when the code
+                    // runs: `guards_on_code`.)
                     let guard = [si, si + 1, si + 2].map(|x| starts.get(x).copied());
                     if let [Some(f), Some(e), Some(b)] = guard
                         && op_at(f) == "field"
@@ -797,7 +814,7 @@ impl Compiling<'_> {
                         && cells[e + 1].as_fixnum() == routine("eq") as i64
                         && op_at(b) == "branchf"
                         && ![f, e, b].iter().any(|&j| target[j])
-                        && self.word_held(self.heap.bloblet_slot(cell, 2)) == Some(cells[e + 2])
+                        && self.closure_parts(self.heap.bloblet_slot(cell, 2)).is_some_and(|(w, _)| w == cells[e + 2])
                     {
                         for j in [f, e, b] {
                             a.bind(labels[j]);

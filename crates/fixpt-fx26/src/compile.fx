@@ -560,8 +560,9 @@
 ;;; value pushed is slot `depth`. In tail position, code ends the word: with
 ;;; a `tailcall`, or with `return` after the value.
 
-;; The word of the lambda compiled last, in a list.
+;; The word of the lambda compiled last, in a list; and of the one before.
 (define c-last-word (ref (listof tword @k) @k) (new nil))
+(define c-prev-word (ref (listof tword @k) @k) (new nil))
 
 (define-rec
   (c-exps (subr (maxeff compiles spin) ((listof exp finite) cenv int code) int)
@@ -698,6 +699,7 @@
              (patches (c-push-all fv e depth 0 c))
              (w (wcell-word (extract made 1))))
         (begin
+          (set c-prev-word (get c-last-word))
           (set c-last-word (the (listof tword @k) (cons (extract made 1) nil)))
           (if (null? region)
               (begin (c-op1 c routine-closure w) (c-emit c (i-cell (wcell-int (c-length fv)))))
@@ -909,6 +911,29 @@
     (if (and (>= (c-inline-room body c-inline-limit) 0) (and (not (c-mentions? body n)) (not (null? (get c-last-word)))))
         (set c-inlines (the (listof c-inline finite) (cons (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (get c-genv))) (get c-inlines))))
         #u)))
+;; The expression compiled last, in a list (for `compile-note-inline!`).
+(define c-last-exp (ref (listof exp @k) @k) (new nil))
+;; For a driver that computes a definition's value itself (the REPL, in the
+;; native convention), right after compiling `(lambda () init)`: if `init`
+;; is a lambda, `n`'s definition as `c-tops` would note it, to be inlined
+;; where it is called. Its word is the one compiled before the thunk's.
+(define compile-note-inline! (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (symbol) unit)
+  (lambda (n)
+    (let ((x (get c-last-exp)) (w (get c-prev-word)))
+      (if (null? x)
+          #u
+          (tagcase (car x)
+            (e-lambda (ps0 thunk a b)
+              (let ((l (c-lambda-of thunk)))
+                (if (null? l)
+                    #u
+                    (tagcase (car l)
+                      (e-lambda (ps body la lb)
+                        (begin (set c-inlines (c-drop-inline (get c-inlines) n))
+                               (set c-last-word w)
+                               (c-record-inline n ps body)))
+                      (else y #u)))))
+            (else y #u))))))
 ;; Globals kept for their names' next definitions: a redefinition of a type
 ;; the old one's users can take, for which the REPL asks
 ;; (`compile-keep-global!`).
@@ -1007,6 +1032,7 @@
               (c-tops (cdr ts) c #f)))
           (t-exp (x)
             (begin (if has-value (c-op c routine-drop) #u)
+                   (set c-last-exp (the (listof exp @k) (cons x nil)))
                    (c-exp x (the cenv nil) 0 c #f)
                    (c-tops (cdr ts) c #t)))
           (else y (c-tops (cdr ts) c has-value))))))
