@@ -107,9 +107,10 @@ queue gained", and "The next queue"):
    known to be compiled.
 6. Smaller: `nlist` error messages; the language gaps the survey found;
    M8 docs and polish; M10, a full native compiler, is not scheduled.
-   `,disassemble` of a native closure showing the cellular word and
-   register code it was compiled from (each code bloblet keeping its
-   source word), `,disassemble-asm` the machine code.
+   (Done, 2026-09-28, the user's: `,disassemble` of a native closure
+   shows the cellular word and register code it was compiled from, each
+   code bloblet keeping its word, `CODE_SOURCE`; `,disassemble-asm` its
+   machine code.)
 7. Fixed-width integers, low priority (the user's, 2026-09-28): `i32` and
    `u32` kept in a word's upper half (`v << 32`, a fixnum to the collector,
    so frames stay scannable), with wrapping `+`, `-` and compare one

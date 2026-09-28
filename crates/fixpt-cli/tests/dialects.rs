@@ -215,6 +215,11 @@ fn the_fx26_repl_compiles_in_the_native_convention() {
         // State kept from form to form: each is compiled alone, against
         // the globals the ones before made.
         "1041 : int",
+        // `,disassemble` shows what a native procedure was compiled from,
+        // `,disassemble-asm` its machine code.
+        "compiled from the words below",
+        "its register code",
+        "a native closure over 0 value(s):",
     ] {
         assert!(out.contains(want), "no `{want}` in:\n{out}");
     }

@@ -358,6 +358,10 @@ pub mod cellular {
     /// runs, then free value `i` at `CLOSURE_FREE0 + i`, each one load.
     pub const CLOSURE_WORD: usize = 2;
     pub const CLOSURE_FREE0: usize = 3;
+    /// A native procedure's code bloblet's field 2: the cellular word it
+    /// was compiled from (`#f` if none), kept for showing it
+    /// (`%disassemble`); field 1 is the bloblet itself.
+    pub const CODE_SOURCE: usize = 2;
 
     /// A cellular continuation's fields: the data stack's values and the
     /// return stack's entries it took (vectors), where it was (word, `k`,

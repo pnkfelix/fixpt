@@ -15,6 +15,29 @@ pub fn disassemble(heap: &Heap, v: Value) -> String {
 
 /// The same, with each word's machine code as `asm` shows it, after its
 /// cells and after its register code's (`,disassemble-asm`).
+/// A native closure shown as what it was compiled from: its free values,
+/// then its code's cellular word, and every word that reaches, with their
+/// register code. `None` if `v` is not one, or its code keeps no word (a
+/// continuation's).
+pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
+    use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE};
+    if !(v.is_bloblet() && heap.bloblet_kind(v) == kind("native-closure")) {
+        return None;
+    }
+    let code = heap.bloblet_slot(v, CLOSURE_WORD);
+    let word = heap.bloblet_slot(code, CODE_SOURCE);
+    if !heap.is_cellular_word(word) {
+        return None;
+    }
+    let free = (heap.bloblet_head(v).fields + 1).saturating_sub(CLOSURE_FREE0);
+    let mut out = format!("a native closure over {free} value(s), compiled from the words below (`,disassemble-asm` shows its machine code):\n");
+    for i in 0..free {
+        out.push_str(&format!("  free {i}: {}\n", crate::write_value(heap, heap.bloblet_slot(v, CLOSURE_FREE0 + i))));
+    }
+    out.push_str(&disassemble_with(heap, word, None));
+    Some(out)
+}
+
 pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>) -> String {
     let closure = kind("cellular-closure");
     let mut out = String::new();

@@ -197,7 +197,9 @@ pub fn repl(backend: Backend) -> i32 {
             None => (false, text),
         };
         session.scheme.runtime_unrooted().show_machine_code = asm;
-        if asm && session.strategy != Strategy::Lower {
+        // (In the native convention the procedures are machine code, which
+        // it shows, whatever the cellular machine is.)
+        if asm && session.strategy != Strategy::Lower && session.native_runner.is_none() {
             let name = crate::CELLULAR_MACHINE_NAME.get().copied().unwrap_or("");
             if crate::CELLULAR_MACHINE_CODE.get().copied().flatten().is_none() {
                 println!("; {name} interprets the cells: it has no machine code for a word to show.");

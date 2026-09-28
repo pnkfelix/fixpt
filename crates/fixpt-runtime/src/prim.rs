@@ -813,9 +813,13 @@ prims! {
     "%disassemble", 1, Some(1), simple!(|rt, a| {
         let asm = if rt.show_machine_code { rt.machine_code } else { None };
         let native = a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("native-closure");
-        let s = match rt.native_code.filter(|_| native).and_then(|f| f(&rt.heap, a[0])) {
-            Some(s) => s,
-            None => crate::disasm::disassemble_with(&rt.heap, a[0], asm),
+        // A native closure: the cellular word it was compiled from, or,
+        // asked for machine code (`,disassemble-asm`), its machine code.
+        let source = crate::disasm::native_source(&rt.heap, a[0]).filter(|_| native && !rt.show_machine_code);
+        let s = match (source, rt.native_code.filter(|_| native).and_then(|f| f(&rt.heap, a[0]))) {
+            (Some(text), _) => text,
+            (None, Some(s)) => s,
+            (None, None) => crate::disasm::disassemble_with(&rt.heap, a[0], asm),
         };
         Ok(rt.heap.make_string(&s))
     });

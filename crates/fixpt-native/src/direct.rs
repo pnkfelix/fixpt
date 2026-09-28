@@ -184,6 +184,8 @@ enum Field {
     /// The bloblet itself, which each frame of it keeps, so that code
     /// running is alive.
     Myself,
+    // Field 2 is always `Const` of the cellular word compiled
+    // (`layout::cellular::CODE_SOURCE`), for `,disassemble` to show.
     /// Procedure `p`'s code bloblet, which this code calls or makes
     /// closures of.
     Code(usize),
@@ -587,7 +589,7 @@ impl Compiling<'_> {
         leave(&mut a);
         let code = a.finish().expect("placed");
         let q = self.procs.len();
-        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself], len: code.len(), code });
+        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code });
         self.resume = Some(q);
         q
     }
@@ -604,7 +606,7 @@ impl Compiling<'_> {
         }
         let arity = h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;
         let p = self.procs.len();
-        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself], code: Vec::new(), len: 0 });
+        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0 });
         self.by_word.insert(word.raw(), p);
         self.queue.push(p);
         Ok(p)

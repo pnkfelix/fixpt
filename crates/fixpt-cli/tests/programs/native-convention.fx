@@ -12,3 +12,5 @@
 (define c (ref int @c) (new 1))
 (set c 41)
 (+ (get c) 1000)
+,disassemble id
+,disassemble-asm id
