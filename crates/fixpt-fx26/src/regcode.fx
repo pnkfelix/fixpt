@@ -27,8 +27,9 @@
   (r-guard-to wcell wcell int))
 
 ;; Where a variable is, to register code.
-;; A constant that needs no allocation, as register code may know one.
-(define-datatype rconst (rc-int int) (rc-bool bool) (rc-char char) (rc-nil))
+;; A constant that needs no allocation when it runs, as register code may
+;; know one: a sum or product of constants is made while compiling, once.
+(define-datatype rconst (rc-int int) (rc-bool bool) (rc-char char) (rc-nil) (rc-data wcell))
 
 (define-datatype rloc
   (rl-reg int)
@@ -167,7 +168,10 @@
 
 ;; A constant's cell.
 (define r-const-cell (subr pure (rconst) wcell)
-  (lambda (c) (tagcase c (rc-int (n) (wcell-int n)) (rc-bool (v) (wcell-bool v)) (rc-char (v) (wcell-char v)) (rc-nil () (wcell-nil)))))
+  (lambda (c) (tagcase c (rc-int (n) (wcell-int n)) (rc-bool (v) (wcell-bool v)) (rc-char (v) (wcell-char v)) (rc-nil () (wcell-nil)) (rc-data (w) w))))
+;; Constants' cells, in order.
+(define r-const-cells (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof rconst @k)) (listof wcell @k))
+  (lambda (cs) (if (null? cs) nil (cons (r-const-cell (car cs)) (r-const-cells (cdr cs))))))
 ;; Whether a constant is #f.
 (define r-const-false? (subr pure (rconst) bool)
   (lambda (c) (tagcase c (rc-bool (v) (not v)) (else y #f))))
@@ -290,11 +294,11 @@
                (else z nil)))
             (else nil)))))
 (define-rec
-  ;; `x`'s value, if it is a constant that needs no allocation, as the Rust
-  ;; compiler's `r_const` says: a literal, a name bound to one, `nil`, or a
-  ;; standard operation on constants folded (`+` and `-` on integers under
-  ;; 2^30 in size, which cannot overflow; comparisons; `not`; `null?`;
-  ;; `char=?`).
+  ;; `x`'s value, if it is a constant that needs no allocation when it
+  ;; runs, as the Rust compiler's `r_const` says: a literal, a name bound to
+  ;; one, `nil`, a standard operation on constants folded (`+` and `-` on
+  ;; integers under 2^30 in size, which cannot overflow; comparisons; `not`;
+  ;; `null?`; `char=?`), or a sum or product of constants, made now, once.
   (r-known (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) (listof rconst @k))
     (lambda (env x)
       (tagcase x
@@ -309,6 +313,12 @@
         (e-the (d body a b) (r-known env body))
         (e-plambda (d body a b) (r-known env body))
         (e-proj (body ds a b) (r-known env body))
+        (e-sum (t v a b)
+          (let ((c (r-known env v)))
+            (if (null? c) nil (the (listof rconst @k) (cons (rc-data (wcell-sum t (r-const-cell (car c)))) nil)))))
+        (e-product (fs a b)
+          (let ((vs (r-known-fields env fs nil)))
+            (if (null? vs) nil (the (listof rconst @k) (cons (rc-data (wcell-product (r-const-cells (car vs)))) nil)))))
         (e-app (f args a b)
           (let ((name (r-standard-name env f)))
             (if (string=? name "")
@@ -325,7 +335,14 @@
       (if (null? es)
           (the (listof (listof rconst @k) @k) (cons (r-rev-consts acc nil) nil))
           (let ((c (r-known env (car es))))
-            (if (null? c) nil (r-knowns env (cdr es) (cons (car c) acc))))))))
+            (if (null? c) nil (r-knowns env (cdr es) (cons (car c) acc)))))))
+  ;; The same for a product's fields.
+  (r-known-fields (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv (listof (productof (1 symbol) (2 exp)) acyclic) (listof rconst @k)) (listof (listof rconst @k) @k))
+    (lambda (env fs acc)
+      (if (null? fs)
+          (the (listof (listof rconst @k) @k) (cons (r-rev-consts acc nil) nil))
+          (let ((c (r-known env (extract (car fs) 2))))
+            (if (null? c) nil (r-known-fields env (cdr fs) (cons (car c) acc))))))))
 
 
 ;;; ---------------------------------------------------------------- lists

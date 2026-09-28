@@ -899,6 +899,18 @@ impl Heap {
         n
     }
 
+    /// A frozen bloblet of `kind` with `fields`, in order: a sum or a
+    /// product, as `%make-frozen` makes them, or as a compiler makes a
+    /// constant one once.
+    pub fn make_frozen(&mut self, kind: u8, fields: &[Value]) -> Value {
+        let b = self.make_bloblet(kind, fields.len(), 0, true);
+        for (i, v) in fields.iter().enumerate() {
+            self.set_bloblet_slot(b, i + 2, *v);
+        }
+        self.freeze_bloblet(b, true, true);
+        b
+    }
+
     /// Freeze a bloblet's fields, its suffix, or both. There is no thawing.
     pub fn freeze_bloblet(&mut self, v: Value, fields: bool, suffix: bool) {
         let main = self.bloblet_main(v);

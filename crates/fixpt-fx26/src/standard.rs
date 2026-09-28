@@ -174,6 +174,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("wcell-global", "(subr pure (wglobal) wcell)"),
     ("wcell-self", "(subr pure () wcell)"),
     ("wcell-nil", "(subr pure () wcell)"),
+    ("wcell-sum", "(subr pure (symbol wcell) wcell)"),
+    ("wcell-product", "(poly ((r region)) (subr (read r) ((listof wcell r)) wcell))"),
     // A global's cell, new: its value is the compiled program's to change.
     ("make-global", "(subr pure (symbol) wglobal)"),
     // Whether two globals are the one.

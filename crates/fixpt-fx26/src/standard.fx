@@ -107,6 +107,8 @@
       ((string=? n "wcell-global") "%fx26-identity")
       ((string=? n "wcell-self") "%default-object")
       ((string=? n "wcell-nil") "%fx26-nil-cell")
+      ((string=? n "wcell-sum") "%fx26-sum-cell")
+      ((string=? n "wcell-product") "%fx26-product-cell")
       ((string=? n "make-global") "%fx26-make-global")
       ((string=? n "wglobal=?") "eq?")
       ((string=? n "runtime-primitive") "%runtime-primitive")

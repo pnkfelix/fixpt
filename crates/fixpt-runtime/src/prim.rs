@@ -771,6 +771,14 @@ prims! {
     "%fx26-nat?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_fixnum() && a[0].as_fixnum() >= 0)));
     "%fx26-unit-cell", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.intern("#u")));
     "%fx26-nil-cell", 0, Some(0), simple!(|_rt, _a| Ok(Value::NULL));
+    // A constant sum or product, made while compiling (`wcell-sum`,
+    // `wcell-product`): a sum of tag `a[0]` and value `a[1]`; a product of
+    // the list `a[0]`'s cells, in order.
+    "%fx26-sum-cell", 2, Some(2), simple!(|rt, a| Ok(rt.heap.make_frozen(SUM_KIND, &a[..2])));
+    "%fx26-product-cell", 1, Some(1), simple!(|rt, a| {
+        let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };
+        Ok(rt.heap.make_frozen(PRODUCT_KIND, &items))
+    });
     // A global's cell: a plain bloblet whose field 2 is the value and whose
     // field 3 is its name, for showing (`%disassemble`). Until its
     // definition runs it holds a procedure that traps when called. A checked
@@ -930,12 +938,7 @@ prims! {
         if kind != SUM_KIND as i64 && kind != PRODUCT_KIND as i64 {
             return rt.fail("%make-frozen makes sums and products", &[a[0]]);
         }
-        let b = rt.heap.make_bloblet(kind as u8, a.len() - 1, 0, true);
-        for (i, v) in a[1..].iter().enumerate() {
-            rt.heap.set_bloblet_slot(b, i + 2, *v);
-        }
-        rt.heap.freeze_bloblet(b, true, true);
-        Ok(b)
+        Ok(rt.heap.make_frozen(kind as u8, &a[1..]))
     });
     // ---- cellular words (`layout::cellular`) ----
     // A word of `cells` (a list), checked as every word is

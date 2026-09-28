@@ -152,6 +152,8 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("wcell-global", "%fx26-identity", false),
     ("wcell-self", "%default-object", false),
     ("wcell-nil", "%fx26-nil-cell", false),
+    ("wcell-sum", "%fx26-sum-cell", false),
+    ("wcell-product", "%fx26-product-cell", false),
     ("make-global", "%fx26-make-global", false),
     ("wglobal=?", "eq?", false),
     ("runtime-primitive", "%runtime-primitive", false),

@@ -316,3 +316,21 @@ fn a_nested_lambda_is_compiled_once() {
         assert_eq!(words, 5, "{who}:\n{code}");
     }
 }
+
+/// A constructor called on constants, inlined in a fast version, is a
+/// constant made once while compiling: no `%make-frozen` when it runs.
+/// Both compilers.
+#[test]
+fn a_constructor_of_constants_is_made_once() {
+    let text = "(define-datatype col (red) (rgb int int int))
+                (define* f (subr pure () col) (lambda () (rgb 1 2 3)))
+                (f)";
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    for (who, code) in [("FX-26", fx26), ("Rust", rust)] {
+        let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
+        let f = &code[code.find("its register code").expect("register code")..];
+        let fast = &f[..f.find("global rgb").expect("the plain version")];
+        assert!(fast.contains("const #<sum rgb>") && !fast.contains("%make-frozen"), "{who}:\n{f}");
+    }
+}

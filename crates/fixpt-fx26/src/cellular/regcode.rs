@@ -24,6 +24,7 @@ fn two() -> Value {
 use crate::ast::{BlobletOp, Exp, ExpId};
 use fixpt_heap::layout::regcode::{op, REGS};
 use fixpt_heap::layout::cellular::routine;
+use fixpt_heap::layout::kind;
 use fixpt_heap::Value;
 use fixpt_read::Sym;
 
@@ -1415,11 +1416,13 @@ impl Compiler<'_> {
         Some(())
     }
 
-    /// `x`'s value, if it is a constant that needs no allocation: a
-    /// literal, a name bound to one, `nil`, or a standard operation on
+    /// `x`'s value, if it is a constant that needs no allocation when it
+    /// runs: a literal, a name bound to one, `nil`, a standard operation on
     /// constants folded (`+` and `-` on integers under 2^30 in size, which
-    /// cannot overflow; comparisons; `not`; `null?`; `char=?`).
-    fn r_const(&self, env: &[(Sym, RLoc)], x: ExpId) -> O<Value> {
+    /// cannot overflow; comparisons; `not`; `null?`; `char=?`), or a sum or
+    /// product of constants, made now, once. (Frozen, and FX-26 has no
+    /// `eq?`, so no run can tell it from one it made itself.)
+    fn r_const(&mut self, env: &[(Sym, RLoc)], x: ExpId) -> O<Value> {
         match self.c.arena.exp_at(x).clone() {
             Exp::Int(k) => Some(Value::fixnum(k)),
             Exp::Bool(b) => Some(Value::boolean(b)),
@@ -1430,6 +1433,15 @@ impl Compiler<'_> {
                 _ => None,
             },
             Exp::The { exp: body, .. } | Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.r_const(env, body),
+            Exp::Sum(t, v) => {
+                let v = self.r_const(env, v)?;
+                let tag = self.heap.intern(self.c.interner.name(t));
+                Some(self.heap.make_frozen(kind("sum"), &[tag, v]))
+            }
+            Exp::Product(fields) => {
+                let vs: Vec<Value> = fields.iter().map(|(_, f)| self.r_const(env, *f)).collect::<O<_>>()?;
+                Some(self.heap.make_frozen(kind("product"), &vs))
+            }
             Exp::App { fun, args } => {
                 let name = self.r_standard_name(env, fun)?;
                 let vs: Vec<Value> = args.iter().map(|a| self.r_const(env, *a)).collect::<O<_>>()?;

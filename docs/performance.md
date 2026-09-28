@@ -1579,3 +1579,19 @@ one word per lambda (`a_nested_lambda_is_compiled_once`).
 The front end nests lambdas little, so compiling itself takes as long
 as before (0.78 s → 0.77–0.78 s); curried code and closures returning
 closures are what gain.
+
+## Constant data made once, while compiling (2026-09-28)
+
+A constructor is a global procedure whose body is a sum of a product,
+`(sum rgb (product (1 r) (2 g) (3 b)))`: two `%make-frozen` calls each time
+it runs, even `(red)`, which has no fields. Inlined in a fast version
+(behind the body's `global-guard`s) and given constants, both register
+compilers now make the data while compiling, once, and the code loads it:
+`(red)` is `const #<sum red>`, a leaf. A sum or a product is a known
+constant when its parts are, so it folds through `let`s and inlined calls
+as integers do. Sums and products are frozen, and FX-26 has no `eq?`, so
+no run can tell a shared one from one of its own. The FX-26 compiler makes
+them with `wcell-sum` and `wcell-product`, new standard operations; the
+native code loads them from its code's fields, which the collector traces.
+
+The front end compiling itself: 0.77–0.78 s → 0.75–0.76 s.
