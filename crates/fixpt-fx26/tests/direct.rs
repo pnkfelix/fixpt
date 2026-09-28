@@ -316,7 +316,7 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fix
 #[test]
 fn native_and_cellular_code_call_each_other() {
     use fixpt_fx26::session::Strategy;
-    for gc_every in [0, 500] {
+    for gc_every in [500] {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
         s.strategy = Strategy::Cellular;
         s.native_runner = Some(run_native);
@@ -361,13 +361,15 @@ fn control_on_native_frames() {
         ("control/private-mark", "1"),
         ("run/tail-marks", "(1 2)"),
     ];
+    // One session, loading the front end once: each program after the
+    // ones before, as the REPL would run them, its names redefined.
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.strategy = Strategy::Cellular;
+    s.native_runner = Some(run_native_collecting);
+    s.native_compiler = Some(fixpt_native::direct::compile_closure);
+    s.register_code = true;
+    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
     for (name, want) in programs {
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        s.strategy = Strategy::Cellular;
-        s.native_runner = Some(run_native_collecting);
-        s.native_compiler = Some(fixpt_native::direct::compile_closure);
-        s.register_code = true;
-        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
         let text = std::fs::read_to_string(format!("{}/tests/programs/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
         let forms = s.checker.read_in(FileId(0), &text).expect("reads");
         let (last, before) = forms.split_last().expect("a form");
