@@ -16,7 +16,9 @@
 ;; lt 11, gt 12, le 13.
 
 (define arm-pow2 (subr (maxeff (read @globals) spin) (int) int)
-  (lambda (n) (if (= n 0) 1 (* 2 (arm-pow2 (- n 1))))))
+  (lambda (n)
+    (letrec ((go (subr (maxeff (read @globals) spin) (int int) int) (lambda (n acc) (if (= n 0) acc (go (- n 1) (* 2 acc))))))
+      (go n 1))))
 
 ;; `v` as a `bits`-bit two's-complement field, or -1 if it does not fit.
 (define arm-simm (subr (maxeff (read @globals) spin) (int int) int)

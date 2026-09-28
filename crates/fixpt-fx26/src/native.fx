@@ -578,38 +578,34 @@
 ;;; ------------------------------------------------------------ words
 
 ;; Where each instruction of `w`'s cells starts: for cell i, whether one
-;; does, as a list, first cell first. `n` cells from field `k`.
-
-(define-rec
-  (n-starts (subr (maxeff (read @globals) (alloc @k)) (tword int int) (listof bool @k))
-    (lambda (w i n)
-      (if (>= i n)
-          nil
-          (let* ((k (+ n-word-cell0 i))
-                 (step (if (tword-int? w k) (+ 1 (n-operands (tword-int w k))) 1)))
-            (cons #t (n-skip w (+ i 1) (- step 1) n))))))
-  (n-skip (subr (maxeff (read @globals) (alloc @k)) (tword int int int) (listof bool @k))
-    (lambda (w i left n)
-      (if (or (= left 0) (>= i n)) (n-starts w i n) (cons #f (n-skip w (+ i 1) (- left 1) n))))))
-(define n-fill-bools (subr (maxeff (read @globals) (read @k) (write @k) spin) ((arrayof bool @k) (listof bool @k) int) unit)
-  (lambda (a xs i) (if (null? xs) #u (begin (array-set! a i (car xs)) (n-fill-bools a (cdr xs) (+ i 1))))))
-
-(define n-list->array (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((listof bool @k) int) (arrayof bool @k))
-  (lambda (xs n)
+;; does, in an array, marked from cell `i` on: a loop, stepping from each
+;; instruction to the next.
+(define n-mark-starts (subr (maxeff (read @globals) (read @k) (write @k) spin) ((arrayof bool @k) tword int int) unit)
+  (lambda (a w i n)
+    (if (>= i n)
+        #u
+        (let ((k (+ n-word-cell0 i)))
+          (begin
+            (array-set! a i #t)
+            (n-mark-starts a w (+ i (if (tword-int? w k) (+ 1 (n-operands (tword-int w k))) 1)) n))))))
+(define n-starts (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (tword int) (arrayof bool @k))
+  (lambda (w n)
     (let ((a (the (arrayof bool @k) (make-array (+ n 1) #f))))
-      (begin (n-fill-bools a xs 0) a))))
+      (begin (n-mark-starts a w 0 n) a))))
 (define n-fill-labels (subr (maxeff assembles spin) ((arrayof int @k) int) unit)
   (lambda (a i) (if (= i (array-length a)) #u (begin (array-set! a i (n-label)) (n-fill-labels a (+ i 1))))))
 (define n-labels-for (subr (maxeff assembles spin) (int) (arrayof int @k))
   (lambda (n)
     (let ((a (the (arrayof int @k) (make-array n 0))))
       (begin (n-fill-labels a 0) a))))
-(define n-starts-at (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (int int (arrayof bool @k) (arrayof int @k)) (listof int @k))
-  (lambda (i n starts labels)
-    (if (= i n)
-        nil
-        (cons (if (array-ref starts i) (array-ref (get n-labels) (array-ref labels i)) -1)
-              (n-starts-at (+ i 1) n starts labels)))))
+;; Where each of cells 0 to `i` starts in the code, or -1, onto `acc`: a
+;; loop, from the last cell down.
+(define n-starts-at (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (int (arrayof bool @k) (arrayof int @k) (listof int @k)) (listof int @k))
+  (lambda (i starts labels acc)
+    (if (< i 0)
+        acc
+        (n-starts-at (- i 1) starts labels
+                     (cons (if (array-ref starts i) (array-ref (get n-labels) (array-ref labels i)) -1) acc)))))
 
 ;; The cell after `i` where an instruction starts, or `n`.
 (define n-next-start (subr (maxeff (read @globals) (read @k)) (int int (arrayof bool @k)) int)
@@ -659,7 +655,7 @@
     (begin
       (n-reset)
       (let* ((cells (- (+ (tword-fields w) 1) n-word-cell0))
-             (starts (the (arrayof bool @k) (n-list->array (n-starts w 0 cells) cells)))
+             (starts (n-starts w cells))
              (labels (n-labels-for (+ cells 1)))
              (far-exit-label (get n-exit-common)))
         (begin
@@ -679,5 +675,5 @@
           (n-bind far-exit-label)
           (n-e (arm-ldr n-x16 n-st n-st-exit))
           (n-e (arm-br n-x16))
-          (let ((at (n-starts-at 0 cells starts labels)))
+          (let ((at (n-starts-at (- cells 1) starts labels nil)))
             (product (1 (n-finish)) (2 at))))))))

@@ -165,12 +165,14 @@ fn column_of(text: &str, at: usize) -> usize {
     line_col(text, at).1 - 1
 }
 
-/// Replace the definition `name` (its form, not its comments) with `new`,
-/// one form.
+/// Replace the definition `name` with `new`, one form: its form, and, if
+/// `new` begins with a comment, its comment block too, which `new`'s
+/// replaces.
 pub fn replace(text: &str, profile: SyntaxProfile, name: &str, new: &str) -> Result<String, String> {
     whole(new, profile, Some(1))?;
     let d = find(text, profile, name)?;
-    splice(text, profile, d.start, d.end, &indent(new, column_of(text, d.start)))
+    let from = if new.trim_start().starts_with(';') { d.lead } else { d.start };
+    splice(text, profile, from, d.end, &indent(new, column_of(text, from)))
 }
 
 /// Insert `new`, whole forms (and comments), before the definition `name`

@@ -21,6 +21,9 @@ fn replaces_and_inserts_by_name_and_refuses_what_does_not_read() {
     assert!(out.contains("  (d (subr pure (int) int) (lambda (n) n)))"));
     // One closing parenthesis too many: refused, nothing changed.
     assert!(se::replace(SAMPLE, P, "b", "(define b int 1))").is_err());
+    // A new text with a comment replaces the comment too.
+    let out = se::replace(SAMPLE, P, "a", ";; A new comment.\n(define a int 2)").unwrap();
+    assert!(out.contains(";; A new comment.\n(define a int 2)") && !out.contains("A comment about `a`"), "{out}");
     let out = se::insert_before(SAMPLE, P, "b", ";; new\n(define z int 1)").unwrap();
     assert!(out.contains(";; new\n(define z int 1)\n(define b"));
     let out = se::insert_after(SAMPLE, P, "c", "(e (subr pure () int) (lambda () 1))").unwrap();

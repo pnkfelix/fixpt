@@ -4629,7 +4629,9 @@
 (define k-sc-names (subr kstate (k-group) k-names)
   (lambda (bs) (if (null? bs) nil (the k-names (cons (extract (car bs) 1) (k-sc-names (cdr bs)))))))
 (define k-sc-upto (subr kstate (int int) k-ids)
-  (lambda (j n) (if (< j n) (the k-ids (cons j (k-sc-upto (+ j 1) n))) nil)))
+  (lambda (j n)
+    (letrec ((down (subr kstate (int k-ids) k-ids) (lambda (i acc) (if (< i j) acc (down (- i 1) (the k-ids (cons i acc)))))))
+      (down (- n 1) nil))))
 ;; Every (member . parameter) of the group, the `i`th member on.
 (define k-sc-all-params (subr kstate (k-group int k-guards) k-guards)
   (lambda (bs i out)
