@@ -53,9 +53,15 @@ reference native code is tested against.
 
 - **A kind, `conv`**, whose descriptions are the conventions: `threaded`
   (the procedure is a threaded closure, run by an inner interpreter),
-  `native` (it is native code, run by being called), and `any` (either;
-  the caller finds out which when it calls, below). A foreign `c`
-  convention could come later, for calling out.
+  `native` (it is native code, run by being called), and `fx` (either of
+  FX-26's own; the caller finds out which when it calls, below). A foreign
+  `c` convention may come later, for calling out; it is not below `fx`,
+  since `fx` dispatches cheaply only between FX-26's own conventions, whose
+  values say at run time which they are, and nothing says so of another
+  language's procedures (the user's, 2026-09-27).
+- **Never written unless wanted** (the user's, 2026-09-27: code is still
+  written at the REPL). Every convention can be left out, everywhere, and
+  is inferred; a program need never mention one.
 - **In every subroutine type.** `(subr (conv C) e (t …) u)`: the
   convention position is optional, and `(subr e (t …) u)` means a
   convention inferred. Composable continuations and the continuations
@@ -72,39 +78,40 @@ reference native code is tested against.
   native compiler makes one copy per convention it is used at (few: most
   programs use one). The standard operations are polymorphic too: the
   runtime provides each in every convention.
-- **`any`: code that need not know** (the user's, 2026-09-27). A
+- **`fx`: code that need not know** (the user's, 2026-09-27). A
   procedure value already says at run time how it is run: a threaded
   closure and a native closure are bloblets of different kinds. So a call
-  through `(subr (conv any) …)` looks at the callee's kind and enters the
+  through `(subr (conv fx) …)` looks at the callee's kind and enters the
   interpreter or calls the code: a test and a branch per call, and no
   adapter anywhere. Hence the only subsumption between conventions:
-  `threaded ≤ any` and `native ≤ any`, free at run time, since the value
+  `threaded ≤ fx` and `native ≤ fx`, free at run time, since the value
   does not change, only what its callers may assume. Code that does not
   care (cold code, the evaluator written in FX-26, a table of handlers of
-  either kind) takes `any` and stays ignorant of what it receives; code
+  either kind) takes `fx` and stays ignorant of what it receives; code
   that cares names a convention and calls directly. `threaded` and
-  `native` are not related to each other, and nothing goes from `any` back
+  `native` are not related to each other, and nothing goes from `fx` back
   to a specific convention but a conversion.
-- **Conventions compare** as equal, or by the subsumption into `any`, in
+- **Conventions compare** as equal, or by the subsumption into `fx`, in
   both checkers' `sub`. A mismatch is an error that says so, and names the
   conversion.
-- **Conversion is explicit.** `(convention C e)`: `e`'s procedure, called
-  in convention `C`. From a specific convention to the other, it makes an
-  adapter, a small procedure in `C` that calls the original in its own;
-  from `any` to a specific one, it checks the value's kind, and adapts it
-  only if it is of the other. Where adapters go is then visible in the
-  source. Whether the checker should insert them itself in checking mode,
-  where the expected type says the convention, is an open question below;
-  `any` makes it less pressing, since code that would need many
-  conversions can take `any` instead.
+- **Conversions are inserted by the checker** (the user's, 2026-09-27).
+  Where a procedure of one convention is given where another is expected
+  (an argument, a binding, a result checked against a signature), the
+  checker elaborates a conversion there: from a specific convention to
+  the other, an adapter, a small procedure in the expected convention that
+  calls the original in its own; from `fx` to a specific one, a check of
+  the value's kind, adapting it only if it is of the other. Into `fx`
+  nothing is needed. `(convention C e)` writes one explicitly, where the
+  checker could not tell, or to make it visible. The lowering and
+  `,code` show where conversions went, so their cost can be found.
 - **Soundness.** An application's rule requires the callee's convention to
   be the one the call is compiled for; calling native code through the
   threaded convention, or the reverse, would be a crash, so this is type
-  safety, not style. A call through `any` is safe because it dispatches on
+  safety, not style. A call through `fx` is safe because it dispatches on
   the value's kind, which the runtime keeps truthful. `docs/research/soundness.md`'s
   core gains the convention as part of the arrow type, with the
-  subsumption into `any` and the adapter's rule. The Rust host calling
-  into FX-26 (`%run-word`) is a call through `any`: it already checks the
+  subsumption into `fx` and the adapter's rule. The Rust host calling
+  into FX-26 (`%run-word`) is a call through `fx`: it already checks the
   closure's kind at run time.
 
 Where conventions actually meet, in one run: the evaluator written in
@@ -169,9 +176,11 @@ native frames with the same maps.
 loop back edges and on entry to a function that calls. A leaf with no
 loop does bounded work and checks nothing: its caller or loop will. The
 stack limit is checked once on entry, for the frame and its calls'
-arguments. The cost: machines no longer run out of fuel at identical
-points, only at points a bounded distance apart. Tests compare that a run
-ran out, not exactly where. This is an open question below.
+arguments. Machines no longer run out of fuel at identical points, only
+at points a bounded distance apart, which the user accepts (2026-09-27);
+tests compare that a run ran out, not exactly where. Whether even the
+bound is needed, rather than a finite distance not known in advance, the
+user may revisit.
 
 **Continuations.** A whole continuation is the native stack from its base
 to the current frame, copied into a heap object, with the frames' return
@@ -209,10 +218,10 @@ its code in one.
 ## Steps, each committed and tested
 
 1. **Conventions in types**, in both checkers: the kind, the optional
-   position in `subr`, `any` and the subsumption into it, inference and
+   position in `subr`, `fx` and the subsumption into it, inference and
    defaulting, printing only when not the default, `(convention C e)`, the
    soundness note's rule. No change in behaviour: every program is
-   `threaded` by default, and calls through `any` dispatch on the kind the
+   `threaded` by default, and calls through `fx` dispatch on the kind the
    interpreters already check.
 2. **Native frames, first-order**: the stack segment, the calling
    convention, traps and callouts, and a native compiler for code without
@@ -232,16 +241,18 @@ its code in one.
 7. **The closure experiment**: closures of chosen `lambda`s as code
    bloblets reading captured values PC-relatively.
 
-## Open questions, for the user
+## Decided with the user (2026-09-27)
 
-1. **Conversions: explicit only, or inserted by the checker** where the
-   expected type gives the convention? Explicit is Rust's choice, and
-   keeps every adapter visible; inserted is more convenient where
-   conventions meet often, as at the REPL.
-2. **Fuel across machines**: is "runs out within a bounded distance" the
-   right promise, rather than "at the same cell"? The alternative, a
-   leaf's fixed cost charged at its known call sites, keeps counts
-   identical, but only where the callee is known.
-3. **The evaluator written in FX-26**: stays `threaded`, run by the
-   interpreters, and calls native code only through conversions?
-4. **A `c` convention** for calling Rust and C directly, later, or never?
+1. **Conversions are inserted by the checker**, and conventions are never
+   required in the source; `(convention C e)` remains, for when it is
+   wanted.
+2. **Fuel runs out within a bounded distance** of where it would on
+   another machine; perhaps later only within a finite one.
+3. **The evaluator written in FX-26 has no special status.** It
+   represents the procedures it interprets as its own data (a datatype of
+   closures, primitives by name); the one machine procedure it holds is
+   a continuation from `cwcc`, of the program's own convention. It is
+   compiled as any program is, and is a good test of the native compiler
+   because it is large.
+4. **The convention for either is `fx`**, and a `c` convention, when it
+   comes, is not below it.
