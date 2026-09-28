@@ -65,6 +65,8 @@
       ((string=? n "datum-car") "car")
       ((string=? n "acyclic?") "%fx26-acyclic?")
       ((string=? n "certify-acyclic") "%fx26-identity")
+      ((string=? n "nat?") "%fx26-nat?")
+      ((string=? n "certify-nat") "%fx26-identity")
       ((string=? n "length-is?") "%fx26-length-is?")
       ((string=? n "certify-length") "%fx26-first")
       ((string=? n "datum-cdr") "cdr")

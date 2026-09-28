@@ -106,7 +106,7 @@ fn arrays_are_bloblets_indexed_at_run_time() {
     let a = "(define a (arrayof string @r) (make-array 2 \"\"))";
     assert_eq!(check(&format!("{a} (array-ref a 1)")), "string ! (read @r)");
     assert_eq!(check(&format!("{a} (array-set! a 0 \"x\")")), "unit ! (write @r)");
-    assert_eq!(check(&format!("{a} (array-length a)")), "int ! pure");
+    assert_eq!(check(&format!("{a} (array-length a)")), "nat ! pure");
     assert_eq!(run(include_str!("programs/bloblet/array-sum.fx")), "285");
     let out = run("(array-ref (make-array 2 0) 2)");
     assert!(out.starts_with("!! "), "{out}");

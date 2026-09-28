@@ -160,12 +160,13 @@ impl Checker {
     }
 
     /// Whether `e` may be a natural of a size without being told what it
-    /// is: a literal, a variable, or a `+`, `-` or `length`.
+    /// is: a literal, a variable, or a `+`, `-`, `length`, `string-length`
+    /// or `array-length`.
     pub(crate) fn natural_by_itself(&self, e: ExpId) -> bool {
         match self.arena.exp_at(e) {
             Exp::Int(_) | Exp::Var(_) => true,
             Exp::App { fun, .. } => matches!(self.arena.exp_at(*fun),
-                Exp::Var(op) if matches!(self.interner.name(*op), "+" | "-" | "length") && self.is_standard(*op)),
+                Exp::Var(op) if matches!(self.interner.name(*op), "+" | "-" | "length" | "string-length" | "array-length") && self.is_standard(*op)),
             _ => false,
         }
     }

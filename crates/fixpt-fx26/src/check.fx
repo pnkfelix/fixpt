@@ -277,6 +277,8 @@
 ;; The sizes given to `nat` variables of no known size, newest first
 ;; (`k-name-nat`).
 (define k-skolems (ref k-ids @t) (new nil))
+;; The same for `nat?`: the variables it has just found no less than 0.
+(define k-certified-nats (ref (listof (pairof symbol int @t) finite) @t) (new nil))
 (define k-certified-lengths (ref (listof (productof (1 symbol) (2 int) (3 k-size)) finite) @t) (new nil))
 (define k-new-dvar-of (subr kstate (symbol int) int)
   (lambda (name kind)
@@ -1930,7 +1932,7 @@
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil) (set k-conversions nil)
-      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil) (set k-certified-lengths nil) (set k-size-facts nil) (set k-skolems nil)
+      (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil) (set k-certified-lengths nil) (set k-certified-nats nil) (set k-size-facts nil) (set k-skolems nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       (k-ty-new (ty-void))
@@ -3999,7 +4001,8 @@
         (x-the (t e a b) (k-sc-fixed? e sc))
         (x-app (f args a b)
           (let ((op (k-sc-op f sc)))
-            (and (or (and (string=? op "string-length") (k-sc-one? args))
+            ;; An array's length never changes, as a string's does not.
+            (and (or (and (or (string=? op "string-length") (string=? op "array-length")) (k-sc-one? args))
                      (and (or (string=? op "+") (string=? op "-")) (k-sc-two? args)))
                  (k-sc-all-fixed? args sc))))
         (else y #f))))
@@ -4536,7 +4539,8 @@
         (tagcase f
           (x-var (op fa fb)
             (let ((t (k-lookup op)) (n (symbol->string op)))
-              (and (or (string=? n "+") (string=? n "-") (string=? n "length")) (>= t 0) (k-named-has? (get k-std) op t))))
+              (and (or (string=? n "+") (string=? n "-") (string=? n "length") (string=? n "string-length") (string=? n "array-length"))
+                   (>= t 0) (k-named-has? (get k-std) op t))))
           (else y #f)))
       (else y #f))))
 ;; The size an operand of `+` or `-` of type `t` is: a natural literal's,
@@ -4579,21 +4583,28 @@
         (else y none)))))
 (define k-with-fact (subr (alloc @t) ((listof k-size-fact finite) (listof k-size-fact finite)) (listof k-size-fact finite))
   (lambda (f fs) (if (null? f) fs (the (listof k-size-fact finite) (cons (car f) fs)))))
-;; If `p` is `(acyclic? v)`, the variable, as the binding it is (none or one).
-(define k-acyclic-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
-  (lambda (p)
+;; If `p` is `(name v)`, `name` standard, the variable, as the binding it is
+;; (none or one).
+(define k-certifying-test (subr (maxeff (read @t) (alloc @t) spin) (kx string) (listof (pairof symbol int @t) finite))
+  (lambda (p name)
     (tagcase p
       (x-app (f args a b)
         (tagcase (k-under f)
           (x-var (op fa fb)
             (let ((t (k-lookup op)))
-              (if (and (string=? (symbol->string op) "acyclic?") (>= t 0) (k-named-has? (get k-std) op t) (k-sc-one-arg? args))
+              (if (and (string=? (symbol->string op) name) (>= t 0) (k-named-has? (get k-std) op t) (k-sc-one-arg? args))
                   (tagcase (car args)
                     (x-var (v va vb) (the (listof (pairof symbol int @t) finite) (cons (cons v (k-binding-depth v)) nil)))
                     (else y nil))
                   nil)))
           (else y nil)))
       (else y nil))))
+;; If `p` is `(acyclic? v)`, the variable, as the binding it is (none or one).
+(define k-acyclic-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
+  (lambda (p) (k-certifying-test p "acyclic?")))
+;; If `p` is `(nat? v)`, the variable, as the binding it is (none or one).
+(define k-nat-test (subr (maxeff (read @t) (alloc @t) spin) (kx) (listof (pairof symbol int @t) finite))
+  (lambda (p) (k-certifying-test p "nat?")))
 (define-rec
   (k-synth (subr (maxeff checks spin) (kx) k-te)
     (lambda (x)
@@ -4636,13 +4647,16 @@
                        (lens (k-length-test p))
                        (lsaved (get k-certified-lengths))
                        (lpushed (set k-certified-lengths (if (null? lens) lsaved (the (listof k-cert-len finite) (cons (car lens) lsaved)))))
+                   (nats (k-nat-test p))
+                   (nsaved (get k-certified-nats))
+                   (npushed (set k-certified-nats (if (null? nats) nsaved (the (listof (pairof symbol int @t) finite) (cons (car nats) nsaved)))))
                        (facts (k-test-facts p))
                        (fsaved (get k-size-facts))
                        (fyes (set k-size-facts (k-with-fact (car facts) fsaved)))
                        (rc (k-synth c))
                        (fpopped (set k-size-facts fsaved))
                        (popped (set k-certified saved))
-                       (lpopped (set k-certified-lengths lsaved))
+                       (lpopped (set k-certified-lengths lsaved)) (npopped (set k-certified-nats nsaved))
                        (fno (set k-size-facts (k-with-fact (cdr facts) fsaved)))
                        (rd (k-synth d))
                        (fdone (set k-size-facts fsaved)) (tc (extract rc 1)) (td (extract rd 1))
@@ -4800,6 +4814,7 @@
                   (else y ""))))
         (cond ((string=? op "certify-acyclic") (k-certify x args))
               ((string=? op "certify-length") (k-certify-length x args))
+              ((string=? op "certify-nat") (k-certify-nat x args))
               ((and (or (string=? op "+") (string=? op "-")) (not (null? args)) (not (null? (cdr args))) (null? (cdr (cdr args))))
                (k-nat-arith x op args))
               ((string=? op "cons")
@@ -4871,6 +4886,17 @@
                       (the (listof k-te finite) (cons (k-te (k-ty-new (ty-nlist e (k-size-plus z 1) r)) (k-union xe (extract rt 2))) nil))))
                   (else y nil)))))
         (else y nil))))
+  ;; `(certify-nat v)`: `v`'s value as a `nat`, where `nat?` has just found
+  ;; `v` no less than 0; nowhere else.
+  (k-certify-nat (subr (maxeff checks spin) (kx kxs) k-te)
+    (lambda (x args)
+      (let ((ok (and (k-sc-one-arg? args)
+                     (tagcase (car args) (x-var (v va vb) (k-certified-has? (get k-certified-nats) v (k-binding-depth v))) (else y #f)))))
+        (if (not ok)
+            (k-fail "`certify-nat` takes only a variable `nat?` has just found no less than 0" (k-start x) (k-end x))
+            (let ((r (k-synth (car args))))
+              (begin (k-expect (car args) (extract r 1) k-int)
+                     (k-te (k-ty-new (ty-nat (sz-finite))) (extract r 2))))))))
   ;; `(certify-acyclic v)`: `v`'s value at `finite`, where `acyclic?` has
   ;; just found `v` acyclic; nowhere else.
   (k-certify (subr (maxeff checks spin) (kx kxs) k-te)
@@ -5081,13 +5107,16 @@
                    (lens (k-length-test p))
                    (lsaved (get k-certified-lengths))
                    (lpushed (set k-certified-lengths (if (null? lens) lsaved (the (listof k-cert-len finite) (cons (car lens) lsaved)))))
+                   (nats (k-nat-test p))
+                   (nsaved (get k-certified-nats))
+                   (npushed (set k-certified-nats (if (null? nats) nsaved (the (listof (pairof symbol int @t) finite) (cons (car nats) nsaved)))))
                    (facts (k-test-facts p))
                    (fsaved (get k-size-facts))
                    (fyes (set k-size-facts (k-with-fact (car facts) fsaved)))
                    (ce (k-check c expected))
                    (fpopped (set k-size-facts fsaved))
                    (popped (set k-certified saved))
-                   (lpopped (set k-certified-lengths lsaved))
+                   (lpopped (set k-certified-lengths lsaved)) (npopped (set k-certified-nats nsaved))
                    (fno (set k-size-facts (k-with-fact (cdr facts) fsaved)))
                    (de (k-check d expected))
                    (fdone (set k-size-facts fsaved)))

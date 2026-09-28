@@ -166,6 +166,8 @@ impl Checker {
                 self.certified.extend(certified);
                 let lengths = self.length_test(test);
                 self.certified_lengths.extend(lengths.clone());
+                let nats = self.nat_test(test);
+                self.certified_nats.extend(nats);
                 let (yes, no) = self.test_facts(test);
                 let depth = self.size_facts.len();
                 self.size_facts.extend(yes);
@@ -176,6 +178,9 @@ impl Checker {
                 }
                 if lengths.is_some() {
                     self.certified_lengths.pop();
+                }
+                if nats.is_some() {
+                    self.certified_nats.pop();
                 }
                 let ae = ae?;
                 self.size_facts.extend(no);
@@ -388,6 +393,27 @@ impl Checker {
                 let t = self.arena.ty(Ty::NList { elem, size: size.plus(1), region });
                 return Ok((t, xe.union(&te)));
             }
+        }
+        // `(certify-nat v)`: `v`'s value as a `nat`, where `nat?` has just
+        // found `v` no less than 0; nowhere else.
+        if let Exp::Var(op) = self.arena.exp_at(fun)
+            && self.interner.name(*op) == "certify-nat"
+            && self.is_standard(*op)
+        {
+            let span = self.arena.span_of(e);
+            let v = match &args[..] {
+                [a] => match self.arena.exp_at(*a) {
+                    Exp::Var(v) => self.env.iter().rposition(|(n, _)| n == v).map(|i| (*v, i)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if !v.is_some_and(|v| self.certified_nats.contains(&v)) {
+                return Err(FxError::at(span, "`certify-nat` takes only a variable `nat?` has just found no less than 0"));
+            }
+            let (t, eff) = self.synth(args[0])?;
+            self.expect(args[0], t, self.int)?;
+            return Ok((self.arena.ty(Ty::Nat(Size::Finite)), eff));
         }
         // `(certify-acyclic v)`: `v`'s value at `finite`, where `acyclic?`
         // has just found `v` acyclic; nowhere else.

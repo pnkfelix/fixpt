@@ -70,7 +70,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("integer->char", "(subr pure (int) char)"),
     ("char-in?", "(subr pure (char string) bool)"),
     ("string-append", "(subr pure (string string) string)"),
-    ("string-length", "(subr pure (string) int)"),
+    // Lengths never below 0: naturals.
+    ("string-length", "(subr pure (string) nat)"),
     ("string-ref", "(subr pure (string int) char)"),
     ("substring", "(subr pure (string int int) string)"),
     ("string=?", "(subr pure (string string) bool)"),
@@ -101,6 +102,11 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // where it was `const` (`docs/research/confirmation.md`, CF0).
     ("acyclic?", "(poly ((t data)) (subr pure (t) bool))"),
     ("certify-acyclic", "(poly ((t data)) (subr pure (t) t))"),
+    // `(confirm-nat e (n body) else)` is these two: whether an integer is no
+    // less than 0, and, where `nat?` has just said so of a variable, its
+    // value as a `nat`.
+    ("nat?", "(subr pure (int) bool)"),
+    ("certify-nat", "(subr pure (int) nat)"),
     // `(confirm-length e n (x body) else)` is these two: whether a frozen
     // list is proper and has `n` elements; and, of a variable just found
     // so, its value as a `(nlist T n)` (`docs/research/sizes.md`).
@@ -132,7 +138,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("make-array", "(poly ((r region)) (poly ((t type)) (subr (alloc r) (int t) (arrayof t r))))"),
     ("array-ref", "(poly ((r region)) (poly ((t type)) (subr (read r) ((arrayof t r) int) t)))"),
     ("array-set!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((arrayof t r) int t) unit)))"),
-    ("array-length", "(poly ((r region)) (poly ((t type)) (subr pure ((arrayof t r)) int)))"),
+    ("array-length", "(poly ((r region)) (poly ((t type)) (subr pure ((arrayof t r)) nat)))"),
     // I-cells: written once, read after (docs/research/recursion-and-initialization.md).
     // A read waits for the write, so it is ordered after writes to the
     // region (`await`), but not after other reads.

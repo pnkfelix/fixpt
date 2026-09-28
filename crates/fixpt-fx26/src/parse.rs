@@ -999,6 +999,32 @@ impl Checker {
                 let branch = self.arena.exp(span, Exp::If { test, then, els });
                 Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
             }
+            // `(confirm-nat e (n body) else)`: `(let ((%nat-value e)) (if
+            // (nat? %nat-value) (let ((n (certify-nat %nat-value))) body)
+            // else))`.
+            "confirm-nat" => {
+                let usage = "`(confirm-nat expression (name body) else)`";
+                let [_, e, arm, els] = &items[..] else {
+                    return Err(FxError::at(span, usage));
+                };
+                let [x, body] = self.items(arm, usage)? else {
+                    return Err(FxError::at(arm.span, usage));
+                };
+                let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
+                let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+                let var = |c: &mut Checker, n: &str| {
+                    let s = c.interner.intern(n);
+                    c.arena.exp(span, Exp::Var(s))
+                };
+                let tmp = self.interner.intern("%nat-value");
+                let (test_f, test_a) = (var(self, "nat?"), var(self, "%nat-value"));
+                let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
+                let (cert_f, cert_a) = (var(self, "certify-nat"), var(self, "%nat-value"));
+                let cert = self.arena.exp(span, Exp::App { fun: cert_f, args: vec![cert_a] });
+                let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
+                let branch = self.arena.exp(span, Exp::If { test, then, els });
+                Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
+            }
             "and" => {
                 // `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
                 let mut out = self.arena.exp(span, Exp::Bool(true));

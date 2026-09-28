@@ -531,7 +531,8 @@ impl Walk<'_> {
 
     /// Whether `e` is the same at every call of the group: a literal, a
     /// variable bound outside it, a parameter passed on unchanged, or the
-    /// length of a string or the sum or difference of such.
+    /// length of a string or an array (which never changes), or the sum or
+    /// difference of such.
     fn fixed(&self, e: ExpId) -> bool {
         match self.c.arena.exp_at(e).clone() {
             Exp::Int(_) => true,
@@ -543,7 +544,7 @@ impl Walk<'_> {
             },
             Exp::The { exp, .. } => self.fixed(exp),
             Exp::App { fun, args } => {
-                matches!((self.std_op(fun), args.len()), (Some("string-length"), 1) | (Some("+" | "-"), 2))
+                matches!((self.std_op(fun), args.len()), (Some("string-length" | "array-length"), 1) | (Some("+" | "-"), 2))
                     && args.iter().all(|a| self.fixed(*a))
             }
             _ => false,

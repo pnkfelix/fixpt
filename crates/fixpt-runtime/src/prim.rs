@@ -767,6 +767,8 @@ prims! {
     });
     "%fx26-byte?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_fixnum() && (0..=255).contains(&a[0].as_fixnum()))));
     "%fx26-fixnum?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_fixnum())));
+    // FX-26's `nat?`: an integer no less than 0.
+    "%fx26-nat?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_fixnum() && a[0].as_fixnum() >= 0)));
     "%fx26-unit-cell", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.intern("#u")));
     "%fx26-nil-cell", 0, Some(0), simple!(|_rt, _a| Ok(Value::NULL));
     // A global's cell: a plain bloblet whose field 2 is the value and whose

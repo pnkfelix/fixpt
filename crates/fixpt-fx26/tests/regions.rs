@@ -87,7 +87,7 @@ fn a_region_is_a_value_to_allocate_in() {
 #[test]
 fn every_allocator_takes_a_region() {
     assert_eq!(check("(letrena r (get (rnew r 1)))"), Ok(vec!["int ! pure".to_string()]));
-    assert_eq!(check("(letrena r (array-length (the (arrayof int r) (rmake-array r 3 0))))"), Ok(vec!["int ! pure".to_string()]));
+    assert_eq!(check("(letrena r (array-length (the (arrayof int r) (rmake-array r 3 0))))"), Ok(vec!["nat ! pure".to_string()]));
     assert_eq!(check("(letrena r (bloblet-ref (rmake-bloblet r 0 7) 0))"), Ok(vec!["int ! pure".to_string()]));
     assert_eq!(
         check("(letrena r (rmake-bloblet r 0 7))"),

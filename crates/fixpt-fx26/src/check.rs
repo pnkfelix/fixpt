@@ -102,6 +102,8 @@ pub struct Checker {
     /// The variables `acyclic?` has just found acyclic, in the branch where
     /// it did: each by name and by which binding it is (its place in `env`).
     pub(crate) certified: Vec<(Sym, usize)>,
+    /// The same for `nat?`: the variables it has just found no less than 0.
+    pub(crate) certified_nats: Vec<(Sym, usize)>,
     /// The same for `length-is?`: each variable, its binding, and the
     /// length it was found to have.
     pub(crate) certified_lengths: Vec<(Sym, usize, Size)>,
@@ -225,6 +227,7 @@ impl Checker {
             lemmas: Vec::new(),
             pending_lemma: None,
             certified: Vec::new(),
+            certified_nats: Vec::new(),
             certified_lengths: Vec::new(),
             size_facts: Vec::new(),
             skolems: Vec::new(),
@@ -403,6 +406,8 @@ impl Checker {
                 self.certified.extend(certified);
                 let lengths = self.length_test(test);
                 self.certified_lengths.extend(lengths.clone());
+                let nats = self.nat_test(test);
+                self.certified_nats.extend(nats);
                 let (yes, no) = self.test_facts(test);
                 let depth = self.size_facts.len();
                 self.size_facts.extend(yes);
@@ -413,6 +418,9 @@ impl Checker {
                 }
                 if lengths.is_some() {
                     self.certified_lengths.pop();
+                }
+                if nats.is_some() {
+                    self.certified_nats.pop();
                 }
                 let (a, ae) = a?;
                 self.size_facts.extend(no);
@@ -1023,13 +1031,24 @@ impl Checker {
 
     /// If `test` is `(acyclic? v)`, the variable, as the binding it is.
     pub(crate) fn acyclic_test(&self, test: ExpId) -> Option<(Sym, usize)> {
+        self.certifying_test(test, "acyclic?")
+    }
+
+    /// If `test` is `(nat? v)`, the variable, as the binding it is.
+    pub(crate) fn nat_test(&self, test: ExpId) -> Option<(Sym, usize)> {
+        self.certifying_test(test, "nat?")
+    }
+
+    /// If `test` is `(op v)`, `op` standard, the variable, as the binding
+    /// it is.
+    fn certifying_test(&self, test: ExpId, name: &str) -> Option<(Sym, usize)> {
         let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
         let mut f = *fun;
         while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
             f = *body;
         }
         match (self.arena.exp_at(f), &args[..]) {
-            (Exp::Var(op), [a]) if self.interner.name(*op) == "acyclic?" && self.is_standard(*op) => match self.arena.exp_at(*a) {
+            (Exp::Var(op), [a]) if self.interner.name(*op) == name && self.is_standard(*op) => match self.arena.exp_at(*a) {
                 Exp::Var(v) => Some((*v, self.env.iter().rposition(|(n, _)| n == v)?)),
                 _ => None,
             },
