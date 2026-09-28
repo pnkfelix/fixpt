@@ -103,9 +103,12 @@ queue gained", and "The next queue"):
    copy made for the lambda (partial evaluation at a static argument),
    guarded as inlining is (the user's example, `(map (lambda (x) (+ x 1))
    xs)`, 2026-09-28); register code 24 → 19 ms on `closures`, native
-   slower until an inlined body's temporaries stay in registers. Next:
-   common subexpressions at the level of cellular or register code, then
-   superinstructions (13g), join points (13i),
+   slower until an inlined body's temporaries stay in registers. Common
+   subexpressions measured and not built (109 pure recomputations in the
+   front end, none in the benchmarks, each worth one instruction;
+   `docs/performance.md`). Next: an inlined body's temporaries in
+   registers where no call comes between, then superinstructions (13g),
+   join points (13i),
    the rest of known calls, a nursery with a write barrier, cheaper
    continuations, a lint on a lambda's size. Known gap, seen with
    `,disassemble-asm`: words compiled cell for cell (`--cellular-machine

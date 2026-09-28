@@ -1250,3 +1250,31 @@ body in registers when no call comes between.
 | lists        | 1501500000     |   298.2 |  470.3 | 54.5 |     55.5 |     47.2 |      13.5 |   17.0 |
 | loop         | 49999995000000 |   738.5 |  461.5 | 65.8 |     68.7 |     39.1 |       5.6 |    4.6 |
 | tak          | 9              |    51.3 |   78.0 |  6.6 |      8.6 |      4.5 |       1.9 |    1.2 |
+
+## Common subexpressions: measured, not built (2026-09-28)
+
+Before writing common-subexpression elimination, a probe counted, in
+evaluation order (an expression counts where the same one was computed on
+every path before it, with no name in it bound again between), the pure
+expressions computed again:
+
+| where                        | pure ops only | with `car`, `cdr` |
+| ---------------------------- | -------------:| -----------------:|
+| the front end (~900 globals) |           109 |               443 |
+| every benchmark              |             0 |                 0 |
+
+Pure ops: arithmetic, comparisons, `not`, `null?`, and `extract` of a
+product, which is frozen. The front end's most repeated are `(extract g
+nslot)` (13), `(extract g nreg)` (11) and `(extract r 1)` (8); with pairs,
+`(car bs)` (41), `(car xs)` (29). Pairs can be written (`set-car!`), so
+those would need the effect system to show no write to the pair's region
+between the two.
+
+Each reuse saves one instruction (`op1 pair-car`, `field k`; natively an
+`ldur`) and costs a store at the first and a frame slot, so in register
+code it is about even, and natively one load. Not built: the source
+already binds what it uses much in a `let`. What inlining makes (a
+helper's body repeated in its caller) the probe does not see; if that
+changes the count, this is where to look again. The time goes elsewhere:
+the native convention's temporaries in frame slots (the specialization's
+cost, above), call-outs and allocation.
