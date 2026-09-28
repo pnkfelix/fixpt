@@ -60,3 +60,18 @@ fn reports_values_used_before_their_definitions() {
     let shadow = "(define f (subr pure (int) int) (lambda (g) g))\n(define g int 1)\n";
     assert!(se::order(&[(shadow.to_string(), P)]).unwrap().is_empty());
 }
+
+#[test]
+fn edits_text_inside_a_definition_keeping_its_balance() {
+    let out = se::edit(SAMPLE, P, "b", "(+ x 1)", "(+ (* x 2) 1)").unwrap();
+    assert!(out.contains("(lambda (x) (+ (* x 2) 1)))"), "{out}");
+    // A fragment need not be a form: the tail of `c`'s body, closed as it was.
+    let out = se::edit(SAMPLE, P, "c", "(- n 1)))))", "(- n 2)))))").unwrap();
+    assert!(out.contains("(d (- n 2)))))"), "{out}");
+    // One list closed fewer: refused, and says so.
+    let e = se::edit(SAMPLE, P, "c", "(- n 1)))))", "(- n 1))))").unwrap_err();
+    assert!(e.contains("leaves 1 more list(s) open"), "{e}");
+    // Only within the definition named, and only once.
+    assert!(se::edit(SAMPLE, P, "a", "(+ x 1)", "x").is_err());
+    assert!(se::edit(SAMPLE, P, "c", "n", "m").unwrap_err().contains("times"));
+}

@@ -10,6 +10,8 @@
 //!     sexp-edit insert-after FILE NAME NEW
 //!     sexp-edit move FILE NAME OTHER           NAME, with its comments, before OTHER
 //!     sexp-edit rename FILE OLD NEW [WITHIN]   symbols only; within one definition
+//!     sexp-edit edit FILE NAME OLD NEW         text OLD, once in NAME, to NEW (files, or
+//!                                              - for one); as many lists opened as closed
 //!     sexp-edit order FILE…                    values used before defined, in load order
 
 use std::io::Read;
@@ -32,7 +34,7 @@ fn write(path: &str, text: &str) -> Result<(), String> {
 }
 
 fn run(args: &[String]) -> Result<(), String> {
-    let usage = "usage: sexp-edit list|find|check|replace|insert-before|insert-after|move|rename|order …";
+    let usage = "usage: sexp-edit list|find|check|replace|insert-before|insert-after|move|rename|edit|order …";
     let (cmd, rest) = args.split_first().ok_or(usage)?;
     let at = |text: &str, i: usize| {
         let (l, c) = se::line_col(text, i);
@@ -92,6 +94,15 @@ fn run(args: &[String]) -> Result<(), String> {
                 .map_err(|e| format!("{file}: {e}"))?;
             write(file, &out)?;
             println!("{file}: renamed {n} `{old}` to `{new}`");
+            Ok(())
+        }
+        ("edit", [file, name, old, new]) => {
+            let (text, old, new) = (slurp(file)?, slurp(old)?, slurp(new)?);
+            // A fragment in a file ends where its last line does.
+            let (old, new) = (old.strip_suffix('\n').unwrap_or(&old), new.strip_suffix('\n').unwrap_or(&new));
+            let out = se::edit(&text, se::profile_for(file), name, old, new).map_err(|e| format!("{file}: {e}"))?;
+            write(file, &out)?;
+            println!("{file}: edited `{name}`");
             Ok(())
         }
         ("order", files) if !files.is_empty() => {

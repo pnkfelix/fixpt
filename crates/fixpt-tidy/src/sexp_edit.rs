@@ -215,6 +215,42 @@ pub fn move_before(text: &str, profile: SyntaxProfile, name: &str, other: &str) 
     Ok(out)
 }
 
+/// The lists `frag` opens less those it closes (strings, characters and
+/// comments aside): a fragment of a form need not be one, but must keep the
+/// balance of what it replaces.
+fn depth(frag: &str, profile: SyntaxProfile) -> i64 {
+    tokens(frag, profile)
+        .iter()
+        .map(|t| match t.kind {
+            TokenKind::Open => 1,
+            TokenKind::Close => -1,
+            // `#(` and its kin open a list too.
+            TokenKind::Hash if frag[t.start..t.end].ends_with('(') => 1,
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Replace the text `old`, found once within the definition `name`, by
+/// `new`: an edit inside a definition. `old` and `new` need not be whole
+/// forms, but must open and close as many lists as each other, and the
+/// file must still read.
+pub fn edit(text: &str, profile: SyntaxProfile, name: &str, old: &str, new: &str) -> Result<String, String> {
+    let d = find(text, profile, name)?;
+    let within = &text[d.lead..d.end];
+    let at = match within.match_indices(old).map(|(i, _)| i).collect::<Vec<_>>()[..] {
+        [] => return Err(format!("the old text is not in `{name}`")),
+        [i] => d.lead + i,
+        ref many => return Err(format!("the old text is in `{name}` {} times", many.len())),
+    };
+    let (was, is) = (depth(old, profile), depth(new, profile));
+    if was != is {
+        let how = if is > was { format!("leaves {} more list(s) open", is - was) } else { format!("closes {} more list(s)", was - is) };
+        return Err(format!("the new text {how} than the old: it would unbalance `{name}`"));
+    }
+    splice(text, profile, at, at + old.len(), new)
+}
+
 /// Rename the symbol `old` to `new` (never in strings or comments), within
 /// the definition `within` if given.
 pub fn rename(text: &str, profile: SyntaxProfile, old: &str, new: &str, within: Option<&str>) -> Result<(String, usize), String> {
