@@ -1291,7 +1291,9 @@ each committed:
 2. The code area in `fixpt-heap`: a shared mapping over its part of the
    reservation, first-fit allocation, marking and scanning within the
    copying collection, and a sweep; tested with plain bloblets, under
-   `gc-stress` too.
+   `gc-stress` too. *(Done 2026-09-27: `fixpt-heap`'s `heap/code.rs`,
+   `tests/code_area.rs`. The shared mapping waits for step 3, which needs
+   it.)*
 3. The execute view, and a test that runs a code bloblet reading its own
    field PC-relatively across a collection that moves the field's value.
 4. The native machines compiling into the code area, their tables cleared

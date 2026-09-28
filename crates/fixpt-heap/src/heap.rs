@@ -27,6 +27,7 @@ use crate::value::{
 };
 use std::collections::{HashMap, HashSet};
 
+mod code;
 mod regions;
 pub use regions::REGION_SLOTS;
 
@@ -140,6 +141,10 @@ const ARENA_BASE: usize = 2 * MAX_SEMI_WORDS;
 const ARENA_WORDS: usize = 1 << 31;
 const REAP_BASE: usize = ARENA_BASE + ARENA_WORDS;
 const REAP_WORDS: usize = 1 << 31;
+/// Past the reaps' area, the code area (`code`): bloblets that never move,
+/// collected by marking and sweeping.
+const CODE_BASE: usize = REAP_BASE + REAP_WORDS;
+const CODE_WORDS: usize = 1 << 27;
 
 /// Collect when the active semispace is at least this full at a safepoint.
 const COLLECT_THRESHOLD: f64 = 0.75;
@@ -158,6 +163,8 @@ pub struct Heap {
     base: usize,
     /// The live regions, and their chunks.
     regions: regions::Regions,
+    /// The code area's allocation and free blocks.
+    code: code::CodeArea,
     /// Base of the active semispace within `mem` — `0` or `MAX_SEMI_WORDS`.
     /// A Value's index is from the start of `mem`, whichever is active, so
     /// that where a Value points does not depend on it.
@@ -211,12 +218,13 @@ impl Heap {
 
     pub fn with_semispace(semi: usize) -> Heap {
         let semi = semi.max(1024);
-        let mem = fixpt_memmgmt::Words::new(REAP_BASE + REAP_WORDS).expect("address space for the heap");
+        let mem = fixpt_memmgmt::Words::new(CODE_BASE + CODE_WORDS).expect("address space for the heap");
         let base = mem.words().as_ptr() as usize / 8;
         Heap {
             mem,
             base,
             regions: regions::Regions::new(),
+            code: code::CodeArea::default(),
             active: 0,
             semi,
             top: 0,
@@ -1039,7 +1047,8 @@ impl Heap {
             return;
         }
         let full = (self.top - self.active) as f64 >= self.semi as f64 * COLLECT_THRESHOLD
-            || self.regions.reap_taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
+            || self.regions.reap_taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD
+            || self.code.taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
         self.safepoints += 1;
         let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
         if full || policy {
@@ -1058,7 +1067,18 @@ impl Heap {
         let reaps = self.regions.live.len();
         let arenas: Vec<(usize, usize)> = self.regions.arena_ranges().collect();
         let owner = std::mem::take(&mut self.regions.owner);
-        let mut c = Copier { base: self.base, from, to, free: 0, owner, new: vec![Vec::new(); reaps], marked: HashSet::new(), regions: &mut self.regions };
+        let mut c = Copier {
+            base: self.base,
+            from,
+            to,
+            free: 0,
+            owner,
+            new: vec![Vec::new(); reaps],
+            marked: HashSet::new(),
+            code_marks: HashSet::new(),
+            code_gray: Vec::new(),
+            regions: &mut self.regions,
+        };
 
         // `scan` and `c.free` are relative to `to`.
         let mut scan = 0usize;
@@ -1125,6 +1145,11 @@ impl Heap {
                 scan += Self::scan_one(mem, to + scan, &mut c);
                 more = true;
             }
+            // The code area's bloblets found live, scanned in place.
+            while let Some(main) = c.code_gray.pop() {
+                Self::scan_one(mem, main, &mut c);
+                more = true;
+            }
             for (h, rs) in reap_scan.iter_mut().enumerate() {
                 while let Some(&(start, fill)) = c.new[h].get(rs.0) {
                     let at = rs.1.max(start);
@@ -1143,7 +1168,8 @@ impl Heap {
                 break;
             }
         }
-        let Copier { free, new, marked, .. } = c;
+        let Copier { free, new, marked, code_marks, .. } = c;
+        self.sweep_code(&code_marks);
         // Ended reaps' chunks no reference was found into may be reused;
         // the rest wait for a collection that finds none.
         let quarantine = std::mem::take(&mut self.regions.quarantine);
@@ -1271,6 +1297,11 @@ impl Heap {
         let i = v.index() - c.base;
         let reap = if (c.from..c.from + MAX_SEMI_WORDS).contains(&i) {
             None
+        } else if code::in_code_area(i) {
+            // It never moves: marked, and scanned once.
+            debug_assert!(v.tag() == TAG_BLOBLET, "only bloblets are in the code area");
+            code::mark_code(mem, i, &mut c.code_marks, &mut c.code_gray);
+            return v;
         } else if i >= REAP_BASE {
             // A bloblet with no suffix is pointed at one past its fields,
             // which may be the next chunk; its last field is not.
@@ -1346,6 +1377,7 @@ impl Heap {
     /// left as they are.
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
         assert_eq!(self.live_regions(), 0, "an image is made with no region live");
+        assert_eq!(self.code.used, 0, "an image cannot yet carry the code area (docs/object-model.md, \"A collected code area\")");
         let shift = ((self.base + self.active) as u64) << 3;
         let rebase = |v: Value| if v.is_ref() { Value(v.raw() - shift) } else { v };
         let mut words = self.mem.words()[self.active..self.top].to_vec();
@@ -1408,6 +1440,9 @@ impl Heap {
         self.verify_range(self.active, self.top)?;
         for (lo, hi) in self.regions.ranges() {
             self.verify_range(lo, hi).map_err(|e| format!("in a region: {e}"))?;
+        }
+        if self.code.top > CODE_BASE {
+            self.verify_range(CODE_BASE, self.code.top).map_err(|e| format!("in the code area: {e}"))?;
         }
         for (i, g) in self.globals.iter().enumerate() {
             self.check_ref(*g, i)
@@ -1478,6 +1513,10 @@ impl Heap {
         if v.is_ref() && Self::in_region_area(self.ix(v)) {
             return Ok(());
         }
+        // The code area's objects are checked as it is walked.
+        if v.is_bloblet() && code::in_code_area(self.ix(v)) {
+            return Ok(());
+        }
         if v.is_ref() {
             // A bloblet with no suffix is pointed at one past its last field,
             // which for the last object in the heap is the top itself.
@@ -1524,6 +1563,10 @@ struct Copier<'r> {
     new: Vec<Vec<(usize, usize)>>,
     /// The quarantined chunks a reference was found into.
     marked: HashSet<usize>,
+    /// The code area's bloblets found live, by main header, and those not
+    /// yet scanned.
+    code_marks: HashSet<usize>,
+    code_gray: Vec<usize>,
     regions: &'r mut regions::Regions,
 }
 
