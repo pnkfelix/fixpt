@@ -111,7 +111,7 @@ gives the Haskell (GHC's GADT syntax) or OCaml it comes from, then FX-26:
 | `exists-closures.fx`            | checks; runs, `44`                            | E4: existentials as closures                     |
 | `vec-head.fx`                   | checks; runs, `3`                             | E5: safe `head` of a sized list                  |
 | `vec-head-refused.fx`           | refused: `(nlist int 0)` where `1`            | E5: no head of the empty list                    |
-| `vec-head-hole.fx`              | **checks, and fails at run time**             | E5: a hole in size inference, found here         |
+| `vec-head-hole.fx`              | refused since the fix (F10)                   | E5: a hole in size inference, found here         |
 | `nest-polyrec.fx`               | checks; runs, `3`                             | E6: nested type, polymorphic recursion           |
 | `phantom-transparent.fx`        | checks; runs, `0`                             | E7: a phantom index means nothing, transparently |
 | `phantom-generative-refused.fx` | refused: `(counted zero)` not `(counted one)` | E7: generative and invariant, it means something |
@@ -385,7 +385,11 @@ unsolved from `n + 1 = 0`, so `finite`; `(+ finite 1)` is `finite`, which
 `(nlist int 0)` fits. The F4 guard of `soundness-findings.md` refuses the
 same thing when the argument is a `(nlist int finite)` ("`n` is the size of
 … something inside one"), but not here. A soundness bug to fix, independent
-of GADTs.
+of GADTs. *Fixed (2026-09-29, F10 of `soundness-findings.md`):* the
+explanation above was near but not exact. Inference solved `n = -1` (the
+size less the constant), and nothing asked that a solved size be a
+natural. Now both checkers refuse `vec-head-hole.fx`: "the size `n` would
+be -1, which is not known here to be no less than 0".
 
 **Proposed**, for a user's own sized family (N4 with N5's sort):
 

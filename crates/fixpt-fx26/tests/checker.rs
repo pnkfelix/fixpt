@@ -137,6 +137,30 @@ fn every_test_program() {
     assert!(unparsed.len() <= 5 && agreed >= 150, "only {agreed} compared; not parsed: {unparsed:?}");
 }
 
+/// The size programs that say, on their first line, that they are
+/// `Rejected` or `Accepted` are so, by the Rust checker (the FX-26 one
+/// agrees, `every_test_program`).
+#[test]
+fn size_programs_as_they_say() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/sizes");
+    let mut wrong = Vec::new();
+    for path in std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()) {
+        let program = std::fs::read_to_string(&path).unwrap();
+        let refused = rust_check(&program).is_err();
+        let said = if program.starts_with("; Rejected") {
+            true
+        } else if program.starts_with("; Accepted") {
+            false
+        } else {
+            continue;
+        };
+        if refused != said {
+            wrong.push(path.file_name().unwrap().to_string_lossy().to_string());
+        }
+    }
+    assert!(wrong.is_empty(), "not as their first line says: {wrong:?}");
+}
+
 /// With `native` the program's convention (`--calling-convention
 /// native`), the two checkers agree on the conventions' programs too.
 #[test]

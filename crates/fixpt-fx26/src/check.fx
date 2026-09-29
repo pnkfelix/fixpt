@@ -3494,12 +3494,21 @@
         (let* ((v (extract (car kinds) 1)) (f (k-map-find m v))
                (fin (and (= (extract (car kinds) 2) 5) (not (null? f))
                          (tagcase (cdr (car f)) (dz (z) (tagcase z (sz-finite () #t) (else w #f))) (else y #f)))))
+          (if (and (= (extract (car kinds) 2) 5) (not (null? f))
+                   (tagcase (cdr (car f)) (dz (z) (tagcase z (sz-finite () #f) (else w (not (k-size-nonneg? z))))) (else y #f)))
+              ;; A size binder solved from `v + k` against a size is that
+              ;; size less `k`: a natural only where the facts here show it.
+              (let ((name (k-quote (symbol->string (k-dvar-name v))))
+                    (z (tagcase (cdr (car f)) (dz (z) z) (else y (sz-finite)))))
+                (k-fail (k-cat5 "the size " name " would be " (k-show-size z)
+                                ", which is not known here to be no less than 0: an argument may be shorter than this procedure's type needs")
+                        a b))
           (if (and fin (not (k-finite-size-ok? body v)))
               (let ((name (k-quote (symbol->string (k-dvar-name v)))))
                 (k-fail (k-cat5 "the size " name " cannot be `finite` here: " name
                                 " is the size of more than one argument, or of something inside one, and `finite` would not keep them the same")
                         a b))
-              (k-check-finite-sizes (cdr kinds) m body a b))))))
+              (k-check-finite-sizes (cdr kinds) m body a b)))))))
 (define k-finish-each (subr (maxeff checks spin) (k-binders k-map int int int) k-map)
   (lambda (kinds m a b ft)
     (if (null? kinds)

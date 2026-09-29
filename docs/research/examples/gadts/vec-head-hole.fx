@@ -4,7 +4,9 @@
 ;;; `finite`, which an `(nlist int 0)` fits. The F4 rule of
 ;;; soundness-findings.md refuses `finite` for a size that is "of something
 ;;; inside" an argument when the argument is itself `finite`, but not here.
-;;; It should be refused, as `vec-head-refused.fx` is.
+;;; It should be refused, as `vec-head-refused.fx` is. Fixed the same day
+;;; (soundness-findings.md, F10): inference solved n = -1, and a solved
+;;; size must now be shown no less than 0.
 (define head (poly ((t type) (n size)) (subr pure ((nlist t (+ n 1))) t))
   (lambda (xs) (car xs)))
 (head (the (nlist int 0) nil))

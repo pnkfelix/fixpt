@@ -34,6 +34,7 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 | A3   | holds by construction: every `datum` is made by FX-26's own constructors (fresh pairs of acyclic data; lists checked proper, cycle-safely) or its reader; the host passes no datum in. The contract for Scheme code calling an `fx:` global directly is that a `datum` it passes is acyclic |
 | F8   | fixed: a `nat` binding's size may be forgotten only where the escaping type gives it back (no negative or invariant occurrence); otherwise an error. Both checkers. Test `sizes/nat-forget-taken.fx`                                                                                        |
 | F9   | fixed: a `cwcc` call also says `spin` when its receiver's latent effect has a `comefrom`, since a continuation captured inside it could carry a call of `k` past `cwcc`'s return. Both checkers. Test `terminate/cwcc-captures.fx`                                                          |
+| F10  | fixed (2026-09-29): a size binder solved from `n + k` against a size `s` is `s - k`, and must be shown no less than 0 by the facts in scope; `head` of an empty list solved `n = -1`. Both checkers. Tests `sizes/solved-*.fx`                                                              |
 
 **Re-verification of F1–F7, A2, A3 against d83face** (fresh offline build,
 2026-09-27). F1: the name-shadowing probe (`known.fx`) is now rejected

@@ -311,6 +311,21 @@ impl Checker {
         span: fixpt_read::Span,
     ) -> crate::error::R<()> {
         for (v, k) in kinds {
+            // A size binder solved from `v + k` against a size is that size
+            // less `k`: a natural only where the facts here show it.
+            if *k == Kind::Size
+                && let Some(D::Size(s @ Size::Lin { .. })) = map.get(v)
+                && !self.size_nonneg(s)
+            {
+                let name = self.interner.name(self.arena.dvar_name(*v));
+                return Err(crate::error::FxError::at(
+                    span,
+                    format!(
+                        "the size `{name}` would be {}, which is not known here to be no less than 0: an argument may be shorter than this procedure's type needs",
+                        self.show_size(s)
+                    ),
+                ));
+            }
             if *k == Kind::Size && matches!(map.get(v), Some(D::Size(Size::Finite))) && !self.finite_size_ok(body, *v) {
                 let name = self.interner.name(self.arena.dvar_name(*v));
                 return Err(crate::error::FxError::at(

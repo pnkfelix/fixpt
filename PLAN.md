@@ -103,7 +103,9 @@ are in the last section, "Log: the glance's details", and in
   to `(the (nlist int 0) nil)` passes both checkers when `n` is inferred
   (`n + 1 = 0` has no solution, so `n` is left `finite`, and `(+ finite
   1)` is `finite`, which size 0 fits), then fails at run time. Given
-  explicitly, `(proj head int 0)` is refused. To fix before Q2.
+  explicitly, `(proj head int 0)` is refused. Fixed (2026-09-29, F10):
+  inference solved `n = -1`; a solved size must now be shown no less
+  than 0 by the facts in scope, in both checkers (`sizes/solved-*.fx`).
 
 **Next**, roughly in order. First the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
