@@ -570,3 +570,33 @@ In `fixpt eval --fx26-run evaluate`, after `(define xs (listof int @heap)
 fails with "a pair is expected": the write does not reach the list the
 global holds. Every other path gives 1. Found writing F11's test
 (`native/apply-cyclic.fx`).
+
+## 19. `eq?`: identity (the user's, 2026-09-29; PLAN Q5)
+
+FX-26 has no identity test. Wanted by:
+- the benchmark ports (PLAN Q5 lists `browse`, `conform`, `maze`, `sboyer`,
+  `peval`, `logic`, `boyer`, `hashtable0`);
+- `eq?`-hashed tables;
+- the FX-26 evaluator, which cannot find a cycle when `apply` copies a list
+  without it (F11; `native/apply-cyclic.fx`).
+
+Prior art, FX-91 (`crates/fixpt-fx91/src/fx-module.fx`, the `uniqueof`
+module): identity is opt-in, through an abstract type.
+- `(unique x)`: a fresh `(uniqueof t)` around `x`, of effect `init`.
+- `(value u)`: its `t`, pure.
+- `(eq? u1 u2)`: pure, on two `(uniqueof t)`.
+FX-91's references (`refof`) have no `eq?`, and neither does FX-87.
+
+The type is to be decided. Points either way:
+- `eq?` must not reach immutable data (products, sums, frozen and `acyclic`
+  lists). The compilers rely on no program being able to tell a shared value
+  from a copy:
+  - `r_const` makes constant data once;
+  - `apply` shares an `acyclic` list (F11);
+  - TODO §17 would share `(list CONST …)`.
+- On mutable objects (refs, pairs and bloblets at a region, arrays, i-cells),
+  identity is stable across moving collections, so `eq?` could be pure there.
+  PLAN Q5 proposes one per kind of mutable object. FX-91's `uniqueof` is the
+  narrower choice: identity only where a program asked for it.
+- `eq?`-hashed tables need an address hash that survives collections.
+  PLAN Q5 has Larceny's design (tablets stamped with GC counters).

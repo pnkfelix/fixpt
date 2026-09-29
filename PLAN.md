@@ -2022,6 +2022,9 @@ continuation capture must keep raw words (a captured frame as a bloblet
 of its own kind), and native code must save `d8`-`d15` or not use them.
 
 **Q5. Identity: `eq?` on mutable objects, and address-hashed tables.**
+(The type is still open: `TODO.md` §19 sets FX-91's opt-in `uniqueof`
+beside one `eq?` per kind of mutable object, and says why immutable data
+must stay out of reach.)
 Every batch of ports hit the missing identity test (`equal`, `dynamic`
 blocked; workarounds in `browse`, `conform`, `maze`, `sboyer`, `peval`,
 `logic`, `boyer`, `hashtable0`). A typed `eq?` per kind of mutable
