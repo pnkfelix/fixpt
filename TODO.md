@@ -562,3 +562,11 @@ be written, and FX-26 has no `eq?`, so no run can tell a shared list from
 a fresh one. Today each call makes its pairs at run time (inline, natively).
 The rewrite of code and benchmarks to use `list` will turn up constant
 lists, which is where this pays.
+
+## 18. The FX-26 evaluator's `set-cdr!` on a global's list (found 2026-09-29)
+
+In `fixpt eval --fx26-run evaluate`, after `(define xs (listof int @heap)
+(cons 1 (cons 2 nil)))` and `(set-cdr! (cdr xs) xs)`, `(car (cdr (cdr xs)))`
+fails with "a pair is expected": the write does not reach the list the
+global holds. Every other path gives 1. Found writing F11's test
+(`native/apply-cyclic.fx`).

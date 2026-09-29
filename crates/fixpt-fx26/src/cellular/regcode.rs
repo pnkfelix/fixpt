@@ -918,7 +918,7 @@ impl Compiler<'_> {
                 g.next_slot = slots;
                 g.next_reg = regs;
             }
-            Exp::App { fun, args } => self.r_app(g, fun, &args, env, te, tail)?,
+            Exp::App { fun, args } => self.r_app(g, x, fun, &args, env, te, tail)?,
         }
         Some(())
     }
@@ -955,7 +955,8 @@ impl Compiler<'_> {
         Some(())
     }
 
-    fn r_app(&mut self, g: &mut Gen, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+    #[allow(clippy::too_many_arguments)]
+    fn r_app(&mut self, g: &mut Gen, x: ExpId, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         // A join point's call: each argument made and kept (a register in a
         // leaf, else a frame slot), then each into its parameter's place,
         // and a jump. (Before the procedure's own loop: a join point may
@@ -1131,7 +1132,8 @@ impl Compiler<'_> {
                         return self.decline("a call in a leaf");
                     }
                     // `f` and `xs` in order; `f`'s procedure kept in a slot
-                    // while `xs` moves to REG1.
+                    // while `xs` moves to REG1, copied there unless the
+                    // checker found it at `acyclic` (`apply_shares`).
                     let (regs, slots) = (g.next_reg, g.next_slot);
                     let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
                     self.r_args(g, &es, env, te, None)?;
@@ -1141,6 +1143,11 @@ impl Compiler<'_> {
                     g.op("setstk", &[Gen::n(s)]);
                     g.op("reg", &[Gen::n(2)]);
                     g.op("setreg", &[Gen::n(1)]);
+                    if !self.c.facts.apply_shares.contains(&x) {
+                        let p = fixpt_engine::cellular::runtime_primitive("%fx26-list-copy")? as i64;
+                        g.op("prim", &[Value::fixnum(p), Gen::n(1)]);
+                        g.op("setreg", &[Gen::n(1)]);
+                    }
                     g.op("stack", &[Gen::n(s)]);
                     self.r_invoke(g, 1, tail);
                     g.next_reg = regs;

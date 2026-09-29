@@ -110,7 +110,8 @@ are in the last section, "Log: the glance's details", and in
 - **Variadic procedures, then `list`** (the user's order, 2026-09-29):
   `vsubr`, `vlambda` and `apply` in both checkers, the lowering, and
   every machine, natively with the count in `x9`; `list` in the standard
-  library, its pairs made in line natively. Next: the code and benchmarks
+  library, its pairs made in line natively. A soundness hole found and
+  fixed (F11): `apply` now copies its list unless it is at `acyclic`. Next: the code and benchmarks
   rewritten to use it (perhaps with a lint for `(cons A (cons B … nil))`).
 - **`.fx` size limits** (the user's, 2026-09-29): 1000 lines and 100
   characters, met by extracting subroutines and splitting files, never by

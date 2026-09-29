@@ -496,6 +496,13 @@ fn native_session_adapters_aborts_and_stack_maps() {
     // `list`, called and as a value, likewise.
     let forms = s.checker.read_in(FileId(0), include_str!("programs/run/list.fx")).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["5539".to_string()], vec![]), "list");
+    // `apply` copies a list that may be written (F11), and a cyclic one is an
+    // error, as machine code too.
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/run/apply-fresh.fx")).expect("reads");
+    assert_eq!(values_and_fallbacks(&mut s, &forms).0.last().map(String::as_str), Some("22"), "apply-fresh");
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/apply-cyclic.fx")).expect("reads");
+    let values = values_of(&mut s, &forms);
+    assert!(values.last().is_some_and(|v| v.contains("expected a list")), "{values:?}");
 }
 
 /// `run_native`, collecting every 97 safepoints while the native code runs

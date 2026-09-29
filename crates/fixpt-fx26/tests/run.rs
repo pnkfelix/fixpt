@@ -74,6 +74,16 @@ fn list_runs() {
     assert_eq!(run(include_str!("programs/run/list.fx")), "5539");
 }
 
+/// `apply` gives a variadic procedure a fresh list (F11): one that is at
+/// `acyclic` as its type says, not the caller's, which may be written after.
+/// A cyclic list is an error, not a loop.
+#[test]
+fn apply_gives_a_fresh_list() {
+    assert_eq!(run(include_str!("programs/run/apply-fresh.fx")), "22");
+    let v = run(include_str!("programs/native/apply-cyclic.fx"));
+    assert!(v.starts_with("!! ") && v.contains("expected a list"), "{v}");
+}
+
 #[test]
 fn recursion_and_state_run() {
     assert_eq!(run(include_str!("programs/run/recursion.fx")), "(55 . 1000)");

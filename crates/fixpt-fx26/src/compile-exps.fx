@@ -232,9 +232,14 @@
         ;; A lambda applied at once: a `let` (`c-applied-let`).
         (e-app (f args a b)
           (let ((l (c-applied-let f args)))
-            (if (null? l)
-                (c-app f args e depth c tail)
-                (c-let (extract (car l) 1) (extract (car l) 2) e depth c tail))))
+            (cond ((not (null? l)) (c-let (extract (car l) 1) (extract (car l) 2) e depth c tail))
+                  ;; `apply` copies its list, unless the checker found it at
+                  ;; `acyclic`: the variadic procedure's list must be one
+                  ;; nothing else can write.
+                  ((and (string=? (c-standard-name f e) "apply") (not (c-apply-shares-at a b)))
+                   (begin (c-exps args e depth c) (c-prim c "%fx26-list-copy" 1)
+                          (c-standard-on "apply" 2 c) (c-done c tail)))
+                  (else (c-app f args e depth c tail)))))
         (e-plambda (d body a b) (c-exp body e depth c tail))
         ;; The region's name bound in a slot, as a `let`'s, to a region
         ;; entered (an arena, or a reap), and left with the body's value,

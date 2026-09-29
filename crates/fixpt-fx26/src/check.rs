@@ -170,6 +170,10 @@ pub struct NodeFacts {
     /// `(convention C e)`: the convention each is converted to, and how
     /// many arguments the procedure takes.
     pub converted: HashMap<ExpId, (Conv, usize)>,
+    /// Applications of `apply` whose list is at `acyclic`: the variadic
+    /// procedure may have that list itself, since nothing can write it.
+    /// Every other `apply` copies its list.
+    pub apply_shares: HashSet<ExpId>,
 }
 
 impl NodeFacts {
@@ -180,6 +184,7 @@ impl NodeFacts {
         self.no_escape.retain(|e| e.0 < first);
         self.field_index.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
+        self.apply_shares.retain(|e| e.0 < first);
     }
 
     /// What the compilers give `%fx26-convert` for `e`'s conversion: its

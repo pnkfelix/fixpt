@@ -105,6 +105,15 @@
     (let ((e (table-ref (get c-convert-table) (exp-start x) c-no-conversion)))
       (if (= (car e) (exp-end x)) (cdr e) -1))))
 
+;; Each `apply` whose list the checker found at `acyclic` (the fact -500,
+;; `k-note-apply-shares`), by where it starts: where it ends. Every other
+;; `apply` copies its list.
+(define c-shares-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
+
+;; Whether the `apply` from `a` to `b` may give its list itself.
+(define c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int) bool)
+  (lambda (a b) (= (car (table-ref (get c-shares-table) a c-no-conversion)) b)))
+
 ;; The field of the `extract` from `a` to `b`, or -1.
 (define c-field-at (subr c-builds (int int) int)
   (lambda (a b)
@@ -384,6 +393,7 @@
         (let ((a (extract (car fs) 1)) (b (extract (car fs) 2)) (n (extract (car fs) 3)))
           (begin
             (cond ((>= n 0) (table-set! (get c-fact-table) a (the c-span (cons b n))))
+                  ((= n -500) (table-set! (get c-shares-table) a (the c-span (cons b 0))))
                   ;; A conversion, -1000 - code (`k-convert-at`).
                   ((<= n -1000)
                    (table-set! (get c-convert-table) a (the c-span (cons b (- -1000 n)))))
@@ -411,6 +421,7 @@
       (set c-facts fs)
       (set c-fact-table (make-table c-int-hash c-int=?))
       (set c-convert-table (make-table c-int-hash c-int=?))
+      (set c-shares-table (make-table c-int-hash c-int=?))
       (set c-summary-table (make-table c-int-hash c-int=?))
       (set c-join-memo (make-table c-int-hash c-int=?))
       (set c-lifts (make-table c-int-hash c-int=?))

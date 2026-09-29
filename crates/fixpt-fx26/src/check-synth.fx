@@ -6,6 +6,25 @@
   (lambda (rest x)
     (let ((names (k-join (k-part-names rest) ", ")))
       (k-fail-at (string-append "this `tagcase` has no arm for " names) x))))
+;; Whether `t` is a list at `acyclic`: a pair's type, its region frozen and
+;; never written.
+(define k-acyclic-list? (subr (maxeff kreads spin) (int) bool)
+  (lambda (t)
+    (tagcase (k-get t)
+      (ty-pair (a d r) (tagcase r (r-frozen (p finite) finite) (else y #f)))
+      (else y #f))))
+;; Note, for the compilers, that the call `x` of `f` (on parameters
+;; `params`) is `apply` of a list at `acyclic`, which it need not copy: the
+;; fact -500 (`c-fill-facts`). Every other `apply` copies its list, so that
+;; the variadic procedure's is one nothing else can write.
+(define k-note-apply-shares (subr (maxeff checks spin) (kx kx k-ids) unit)
+  (lambda (x f params)
+    (let ((apply? (tagcase f
+                    (x-var (op a b) (and (k-std? op) (string=? (symbol->string op) "apply")))
+                    (else y #f))))
+      (if (and apply? (and (= (k-length params) 2) (k-acyclic-list? (car (cdr params)))))
+          (set k-extracts (cons (product (1 (k-start x)) (2 (k-end x)) (3 -500)) (get k-extracts)))
+          #u))))
 ;; Types, and the effect of all.
 (define-type k-types-eff (productof (1 k-ids) (2 k-eff)))
 ;; What a call's arguments were found to be before they are checked: types (or -1), effects.
@@ -551,7 +570,9 @@
           (else
            (let* ((c (car callee))
                   (e (k-app-args args (extract c 2) 0 done (extract rf 2))))
-             (k-app-result x f ft args e (extract c 1) (extract c 3))))))))
+             (begin
+               (k-note-apply-shares x f (extract c 2))
+               (k-app-result x f ft args e (extract c 1) (extract c 3)))))))))
   ;; A call's type and effect, once its arguments have effect `e`: its
   ;; callee's latent effect too, `spin` where the call may loop, and what
   ;; the call masks; its result, of type `result`.

@@ -504,6 +504,13 @@ impl Checker {
         let Some((latent, params, result)) = callee.as_subr() else {
             return Err(FxError::at(span, format!("not a subroutine: {}", self.show_ty(ft))));
         };
+        // `apply` of a list at `acyclic`: no copy.
+        if matches!(self.facts.standard_operator.get(&e), Some(s) if self.interner.name(*s) == "apply")
+            && let [_, list] = params[..]
+            && matches!(self.arena.get(self.arena.resolve(list)), Ty::Pair(_, _, Region::Frozen(_, true)))
+        {
+            self.facts.apply_shares.insert(e);
+        }
         // A procedure of the other convention is called as through `fx`
         // (`native ≤ fx`, `cellular ≤ fx`): every call looks at its
         // callee's kind, as a call through `fx` does.

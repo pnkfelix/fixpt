@@ -90,7 +90,7 @@
         (e-app (f args a b)
           (let ((l (c-applied-let f args)))
             (if (null? l)
-                (r-app g f args env te tail)
+                (r-app g f args a b env te tail)
                 (r-let g (extract (car l) 1) (extract (car l) 2) env te tail)))))))))
   ;; The region's name bound, as a `let`'s, to a region entered (never in a
   ;; leaf), and left with the body's value, which is so not in tail
@@ -196,8 +196,8 @@
               ((string=? op "bloblet-bytes") (r-prim g "%bloblet-bytes" all env te))
               (else (r-decline))))))
   ;;; ---------------------------------------------------------- applications
-  (r-app (subr rcompiles (rgen exp exps renv cenv bool) unit)
-    (lambda (g f args env te tail)
+  (r-app (subr rcompiles (rgen exp exps int int renv cenv bool) unit)
+    (lambda (g f args a b env te tail)
       (let ((n (c-count-exps args)))
         (cond ((not (null? (r-join-of env f))) (r-jump g (car (r-join-of env f)) args env te tail))
               ((and tail (r-self-known? g f n te)) (r-loop g args env te))
@@ -219,7 +219,8 @@
                      (r-call g f args env te tail)
                      (cond ((and tail (and (string=? name "with-mark") (= n 3)))
                             (r-withmark-tail g args env te))
-                           ((and (string=? name "apply") (= n 2)) (r-apply g args env te tail))
+                           ((and (string=? name "apply") (= n 2))
+                            (r-apply g args env te tail (not (c-apply-shares-at a b))))
                            (else (begin (r-standard-app g name args env te tail)
                                         (r-done g tail)))))))))))
   (r-standard-app (subr rcompiles (rgen string exps renv cenv bool) unit)
@@ -287,8 +288,8 @@
   ;; procedure of one list, free value 0; that procedure, called with `xs`.
   ;; `f` and `xs` in order; `f`'s procedure kept in a slot while `xs` moves
   ;; to REG1.
-  (r-apply (subr rcompiles (rgen exps renv cenv bool) unit)
-    (lambda (g args env te tail)
+  (r-apply (subr rcompiles (rgen exps renv cenv bool bool) unit)
+    (lambda (g args env te tail copy)
       (if (extract g leaf)
           (r-decline)
           (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
@@ -297,6 +298,11 @@
               (let ((s (r-slot g)))
                 (begin (r-opn g rop-reg 1) (r-opn g rop-field cellular-closure-free0)
                        (r-opn g rop-setstk s) (r-opn g rop-reg 2) (r-opn g rop-setreg 1)
+                       ;; Copied, unless the checker found it at `acyclic`.
+                       (if copy
+                           (begin (r-opnn g rop-prim (runtime-primitive "%fx26-list-copy") 1)
+                                  (r-opn g rop-setreg 1))
+                           #u)
                        (r-opn g rop-stack s) (r-invoke g 1 tail)))
               (r-restore g regs slots))))))
   ;; A call: the arguments into REG1…REGn, the procedure in RESULT.

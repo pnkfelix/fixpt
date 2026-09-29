@@ -521,7 +521,7 @@ impl<'a> Compiler<'a> {
                 let bindings: Vec<(Sym, ExpId)> = ps.into_iter().zip(args.iter().copied()).collect();
                 self.let_(&bindings, lbody, e, depth, code, tail)?;
             }
-            Exp::App { fun, args } => self.app(fun, &args, e, depth, code, tail)?,
+            Exp::App { fun, args } => self.app(x, fun, &args, e, depth, code, tail)?,
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => {
                 self.exp(body, e, depth, code, tail)?
             }
@@ -1139,7 +1139,8 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn app(&mut self, f: ExpId, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
+    #[allow(clippy::too_many_arguments)]
+    fn app(&mut self, x: ExpId, f: ExpId, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         if let (true, Some(t), Exp::Var(n)) = (tail, self.this, self.c.arena.exp_at(f)) {
             if *n == t.name && find(e, *n) == Some(t.loc) && t.added + args.len() == t.params {
                 // A loop: the arguments into the parameters' slots (those a
@@ -1187,6 +1188,15 @@ impl<'a> Compiler<'a> {
             Some(s) if tail && s == "with-mark" => {
                 self.exps(args, e, depth, code)?;
                 self.op(code, "withmark-tail");
+            }
+            // `apply` copies its list, unless the checker found it at
+            // `acyclic` (`apply_shares`): the variadic procedure's rest list
+            // must be one nothing else can write.
+            Some(s) if s == "apply" && !self.c.facts.apply_shares.contains(&x) => {
+                self.exps(args, e, depth, code)?;
+                self.prim(code, "%fx26-list-copy", 1)?;
+                self.standard_on("apply", 2, code)?;
+                self.done(code, tail);
             }
             Some(s) => {
                 self.standard(&s, args, e, depth, code)?;

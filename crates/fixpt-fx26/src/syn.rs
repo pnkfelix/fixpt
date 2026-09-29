@@ -321,6 +321,12 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
             let span = c.arena.span_of(*e);
             c.facts.conversion_code(*e).map(|k| (char_at(span.start), char_at(span.end), -1000 - k))
         }))
+        // And each `apply` of a list at `acyclic`, as -500
+        // (`k-note-apply-shares`).
+        .chain(c.facts.apply_shares.iter().map(|e| {
+            let span = c.arena.span_of(*e);
+            (char_at(span.start), char_at(span.end), -500)
+        }))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut list = scheme.make(|_| Value::NULL);

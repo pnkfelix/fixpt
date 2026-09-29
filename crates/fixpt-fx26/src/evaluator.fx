@@ -129,6 +129,15 @@
   (lambda (xs) (if (null? xs) (v-nil) (v-cons (car xs) (vals->val (cdr xs))))))
 (define list->val (subr (maxeff (read @globals) (read @x) (alloc @v) spin) ((listof val @x)) val)
   (lambda (xs) (if (null? xs) (v-nil) (v-cons (car xs) (list->val (cdr xs))))))
+;; A list value's pairs, copied: `apply`'s, whose variadic procedure's list
+;; must be one nothing else can write (F11), as the machines copy it. With
+;; no `eq?` to find a cycle by, a cyclic list is not ended: the machines'
+;; is an error (`programs/native/apply-cyclic.fx`, which this never runs).
+(define* val-list-copy (subr (maxeff (read (globals v-cons)) (read @v) (alloc @v) spin) (val) val)
+  (lambda (v)
+    (tagcase v
+      (v-pair (p) (v-cons (bloblet-ref p 0) (val-list-copy (bloblet-ref p 1))))
+      (else y v))))
 
 (define arg (subr (maxeff evals spin) (vals int) val)
   (lambda (xs i)
@@ -278,13 +287,14 @@
             ((string=? n "%vlambda") (v-vsubr (arg xs 0)))
             ((string=? n "list") (vals->val xs))
             ((string=? n "apply")
-             (tagcase (arg xs 0)
-               (v-vsubr (g) (apply1 g (arg xs 1)))
-               ;; `list`, whose one list is its value.
-               (v-prim (p) (if (string=? (symbol->string p) "list")
-                               (arg xs 1)
-                               (efail "apply: not a variadic procedure")))
-               (else y (efail "apply: not a variadic procedure"))))
+             (let ((fresh (val-list-copy (arg xs 1))))
+               (tagcase (arg xs 0)
+                 (v-vsubr (g) (apply1 g fresh))
+                 ;; `list`, whose one list is its value.
+                 (v-prim (p) (if (string=? (symbol->string p) "list")
+                                 fresh
+                                 (efail "apply: not a variadic procedure")))
+                 (else y (efail "apply: not a variadic procedure")))))
             ;; Regions are erased: an allocation in one is the heap's.
             ((region-prim? n)
              (apply-prim (substring n 1 (string-length n)) (cdr xs)))

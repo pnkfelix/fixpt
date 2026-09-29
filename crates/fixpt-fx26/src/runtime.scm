@@ -35,7 +35,9 @@
 ;; list of its arguments; `apply`, Scheme's. (The cellular machines have
 ;; runtime primitives of these names, which this Scheme shadows.)
 (define (%fx26-vlambda f) (lambda xs (f xs)))
-(define (%fx26-apply v xs) (apply v xs))
+;; The list copied, and so checked for a cycle (`apply` says no `spin`):
+;; Scheme's `apply` copies it too, but loops on a cycle.
+(define (%fx26-apply v xs) (apply v (%fx26-list-copy xs)))
 (define (%fx26-no-arm v) (error "tagcase: no arm for this value" v))
 
 
