@@ -922,7 +922,14 @@ pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u32> {
     a.e(add_imm(DSP, FP, 8));
     a.e(mov(X11, CUR));
     a.e(ldur(CUR, X11, field_off(WORD_TWIN)));
-    a.e(ldr(X16, TABLE, 8 * slot as u32));
+    // Past 4096 slots, the offset is too far for one `ldr`.
+    let off = 8 * slot as u64;
+    if off < 32768 {
+        a.e(ldr(X16, TABLE, off as u32));
+    } else {
+        a.es(&mov_imm64(X16, off));
+        a.e(ldr_reg(X16, TABLE, X16));
+    }
     // No `blr` made this call: the link the callee keeps is a fixnum, 0.
     a.e(mov(LR, XZR));
     a.e(br(X16));
