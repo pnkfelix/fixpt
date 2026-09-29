@@ -86,9 +86,9 @@ are in the last section, "Log: the glance's details", and in
   program (checkable again, and printable by a `fixpt expand`).
 
 - **Bugs the benchmark ports found** (native path; the lowered one is
-  right; queue Q1): `car` of `nil` crashes native code; a native abort does not
-  find a prompt cellular code installed, and costs time in proportion to
-  the stack; an inlined `extract` from an earlier form gets field -1 and
+  right; queue Q1). Fixed (2026-09-29): `car` of `nil` crashing machine
+  code; a native abort not finding a prompt cellular code installed, and
+  its cost growing with the stack. Left: an inlined `extract` from an earlier form gets field -1 and
   drops its callers out of register code; register code declines above 8
   free values, arguments or fields, and frames too large for one `stp`,
   silently; a product argument is slow natively; the native stack is a
@@ -1837,13 +1837,14 @@ as an ordered queue. Smaller friction is in `TODO.md` §§ 12–15.
 
 **Q1. Native-path bugs the ports found.** Each has a reproduction in the
 ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
-- `car`/`cdr` of `nil` crashes native code (one unchecked load). Stopgap:
-  a check where the type allows `nil`; the principled fix is Q7's
-  `consof`.
-- A native abort does not find a prompt that cellular code installed
-  (`Callout::Abort` searches native frames only); and its cost grows with
-  the stack under it (`frames_of` collects every frame first). kb runs
-  5x slower native than lowered because of it.
+- Done (2026-09-29): `car`/`cdr` of `nil` crashed every machine-code
+  machine (one unchecked load); each now checks the tag and traps. Q7's
+  `consof` can drop the check where the type proves a pair.
+- Done (2026-09-29): a native abort did not find a prompt that cellular
+  code installed, nor cellular code one native code installed; an abort
+  finding none now goes on to the other machine (`NativeExit::Abort`).
+  Its cost no longer grows with the stack (the search stops at the first
+  prompt).
 - An inlined `extract` from an earlier form gets field -1 (facts are keyed
   by offset in one text), and its callers silently drop to cellular code
   (`life` 200 s -> 2.9 s when avoided). Fix now by keying facts by

@@ -77,6 +77,10 @@ pub enum NativeExit {
     /// the continuation. Nothing has collected since, so the values are as
     /// they were.
     Throw { k: Value, v: Value },
+    /// An abort to prompt tag `tag`, with value `v`, that found no prompt
+    /// for it in the call: the call's frames are gone, and the machine
+    /// that called goes on looking in its own.
+    Abort { tag: Value, v: Value },
 }
 
 /// A word's machine code, shown, as the machine that runs it has it; or

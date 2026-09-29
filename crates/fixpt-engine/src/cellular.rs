@@ -376,6 +376,9 @@ pub struct Machine {
     /// under the native code to go on from.
     nested: bool,
     thrown: Option<(Value, Value)>,
+    /// An abort that found no prompt here, where native code called this
+    /// machine: its tag and value, for that code to look further.
+    aborted: Option<(Value, Value)>,
     /// Which run this is, for the continuations it takes: 0 unless native
     /// code called it.
     run: u64,
@@ -435,7 +438,7 @@ impl Profile {
 
 impl Default for Machine {
     fn default() -> Machine {
-        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None, nested: false, thrown: None, run: 0 }
+        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None, nested: false, thrown: None, aborted: None, run: 0 }
     }
 }
 
@@ -731,7 +734,7 @@ impl Machine {
     /// by the runtime's `call_native`, on Rust's stack: its value. The call
     /// may collect, so the stacks and registers are kept in a vector the
     /// heap roots meanwhile, and taken back from it after, moved.
-    fn call_native(&mut self, rt: &mut Runtime, r: &mut Regs, n: usize, routine: &'static str) -> Result<Option<Value>, Trap> {
+    fn call_native(&mut self, rt: &mut Runtime, r: &mut Regs, n: usize, routine: &'static str) -> Result<Back, Trap> {
         let Some(call) = rt.call_native else { return Err(Trap::Type { routine }) };
         self.check_limits()?;
         let c = self.ds.pop().expect("counted");
@@ -750,16 +753,41 @@ impl Machine {
         self.rs = all[nd..nd + nr].to_vec();
         (r.cur, r.clo) = (all[nd + nr], all[nd + nr + 1]);
         match v {
-            Ok(v) => Ok(Some(v)),
+            Ok(v) => Ok(Back::Value(v)),
             Err(NativeExit::Failed(m)) => Err(Trap::Prim(m)),
             // Thrown past native code: this machine goes on from `k`, or,
             // itself called by native code, throws it on.
             Err(NativeExit::Throw { k, v }) => {
                 self.escape(&rt.heap, k, v)?;
                 self.reinstate(&mut rt.heap, r, k, v, true);
-                Ok(None)
+                Ok(Back::Moved)
             }
+            Err(NativeExit::Abort { tag, v }) => Ok(Back::Abort(tag, v)),
         }
+    }
+
+    /// An abort to `tag` with `v`: to the innermost prompt for it on this
+    /// machine's return stack, whose handler gets `v`; or, none here but
+    /// this machine called by native code, on to that code.
+    fn abort(&mut self, cx: &mut Ctx, r: &mut Regs, tag: Value, v: Value, name: &'static str) -> Result<(), Trap> {
+        let Some(at) = Self::find_marked(&self.rs, self.rs_floor, PROMPT_MARK, tag) else {
+            if self.nested {
+                self.aborted = Some((tag, v));
+                return Err(Trap::Prim(ABORTED.into()));
+            }
+            return Err(Trap::Prim("abort: no prompt for this tag".into()));
+        };
+        let handler = self.rs[at + 2];
+        let (height, regions) = (prompt_height(self.rs[at + 3]), prompt_regions(self.rs[at + 3]));
+        self.rs.truncate(at);
+        self.pop_return(r);
+        self.ds.truncate(height);
+        // What the regions entered inside the prompt held is gone with what
+        // was cut: no frame left can resume their bodies.
+        cx.heap().region_exit(regions);
+        self.ds.push(v);
+        self.ds.push(handler);
+        self.call(cx, r, 1, false, name)
     }
 
     fn prim(&mut self, cx: &mut Ctx, n: i64, r: &mut Regs) -> Result<Flow, Trap> {
@@ -947,9 +975,17 @@ impl Machine {
                     && c.is_bloblet()
                     && rt.heap.bloblet_kind(c) == kind("native-closure")
                 {
-                    // None: a continuation was thrown past it, and is where
-                    // this machine now is.
-                    let Some(v) = self.call_native(rt, r, count, name)? else { return Ok(Flow::Next) };
+                    // A continuation was thrown past it, and is where this
+                    // machine now is; or an abort found no prompt in it, and
+                    // goes on here.
+                    let v = match self.call_native(rt, r, count, name)? {
+                        Back::Value(v) => v,
+                        Back::Moved => return Ok(Flow::Next),
+                        Back::Abort(tag, v) => {
+                            self.abort(cx, r, tag, v, name)?;
+                            return Ok(Flow::Next);
+                        }
+                    };
                     self.ds.push(v);
                     if tail {
                         // Returned from here, as `return` does.
@@ -1037,20 +1073,7 @@ impl Machine {
             ABORT => {
                 let v = self.pop(name)?;
                 let tag = self.pop(name)?;
-                let Some(at) = Self::find_marked(&self.rs, self.rs_floor, PROMPT_MARK, tag) else {
-                    return Err(Trap::Prim("abort: no prompt for this tag".into()));
-                };
-                let handler = self.rs[at + 2];
-                let (height, regions) = (prompt_height(self.rs[at + 3]), prompt_regions(self.rs[at + 3]));
-                self.rs.truncate(at);
-                self.pop_return(r);
-                self.ds.truncate(height);
-                // What the regions entered inside the prompt held is gone
-                // with what was cut: no frame left can resume their bodies.
-                cx.heap().region_exit(regions);
-                self.ds.push(v);
-                self.ds.push(handler);
-                self.call(cx, r, 1, false, name)?;
+                self.abort(cx, r, tag, v, name)?;
             }
             CALLCOMP | CALLCC => {
                 let (proc_, at) = if n == CALLCOMP {
@@ -1130,7 +1153,7 @@ impl Machine {
     /// return stack's entries oldest first, each `(word, fixnum k, fixnum
     /// frame pointer, closure)` or a marker, as this machine keeps them.
     pub fn from_stacks(ds: Vec<Value>, rs: Vec<Value>) -> Machine {
-        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None, nested: false, thrown: None, run: 0 }
+        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None, nested: false, thrown: None, aborted: None, run: 0 }
     }
 
     /// The stacks, as `from_stacks` takes them.
@@ -1195,6 +1218,18 @@ thread_local! {
 /// thrown out of it (`Machine::thrown` says which).
 const THROWN: &str = "a continuation thrown past native code";
 
+/// What a run native code called traps with when an abort finds no prompt
+/// in it (`Machine::aborted` says to what).
+const ABORTED: &str = "an abort past native code";
+
+/// How a call of native code came back: with a value; moved, a continuation
+/// thrown past it; or with an abort that found no prompt in it.
+enum Back {
+    Value(Value),
+    Moved,
+    Abort(Value, Value),
+}
+
 /// Call `f`, a cellular closure or continuation, with `args`, on a machine
 /// of its own, for native code (`fixpt-native`'s call-out): its value, or
 /// how it left. Every value the caller holds must be rooted, since the run
@@ -1219,6 +1254,10 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
     });
     match m.run_in_runtime(rt, word) {
         Ok(()) => m.ds.pop().ok_or_else(|| NativeExit::Failed("the call left nothing".into())),
+        Err(_) if m.aborted.is_some() => {
+            let (tag, v) = m.aborted.expect("aborted");
+            Err(NativeExit::Abort { tag, v })
+        }
         Err(_) if m.thrown.is_some() => {
             let (k, v) = m.thrown.expect("thrown");
             Err(NativeExit::Throw { k, v })

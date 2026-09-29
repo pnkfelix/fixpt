@@ -134,6 +134,9 @@ struct DState {
     /// The heap's card table, biased (`Heap::card_table_address`), for the
     /// write barrier.
     cards: u64,
+    /// Set by a call of what is not native code that came back with an
+    /// abort to a prompt in these frames: `common_foreign` resumes there.
+    foreign_resume: u64,
 }
 
 /// The traps this code raises, by code.
@@ -228,6 +231,9 @@ thread_local! {
     /// A whole continuation of cellular code, and its value, thrown past
     /// the native code running: the call traps, and the caller throws it on.
     static THROWN: std::cell::Cell<Option<(Value, Value)>> = const { std::cell::Cell::new(None) };
+    /// An abort that found no prompt in the native code running, and its
+    /// value: the call traps, and the caller looks further.
+    static ABORTED: std::cell::Cell<Option<(Value, Value)>> = const { std::cell::Cell::new(None) };
     /// While native code has called out to run cellular code: how to run
     /// native code, and the native stack's pointer as it called out, below
     /// which a native call from that cellular code runs (`call_native`),
@@ -332,9 +338,10 @@ pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Valu
         }
         None => with_machine(|m| m.call(rt, p, args, fuel)).map_err(fail)?,
     };
-    r.map_err(|t| match take_thrown() {
-        Some((k, v)) => fixpt_runtime::NativeExit::Throw { k, v },
-        None => fail(t.what),
+    r.map_err(|t| match (take_thrown(), ABORTED.with(|a| a.take())) {
+        (Some((k, v)), _) => fixpt_runtime::NativeExit::Throw { k, v },
+        (None, Some((tag, v))) => fixpt_runtime::NativeExit::Abort { tag, v },
+        (None, None) => fail(t.what),
     })
 }
 
@@ -692,10 +699,17 @@ fn common_foreign(n: usize) -> Vec<u32> {
     call_out(&mut a, n);
     a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
     a.e(cmp_imm(X9, 0));
-    let (failed, stub) = (a.label(), a.label());
+    let (failed, stub, resumed) = (a.label(), a.label(), a.label());
     a.to(failed, Fix::If(Cond::Ne));
+    // Back with an abort to a prompt in these frames: resumed there.
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, foreign_resume))));
+    a.e(cmp_imm(X9, 0));
+    a.to(resumed, Fix::If(Cond::Ne));
     a.e(ldp_post(FRAME, LINK, SP, 16));
     a.e(ret());
+    a.bind(resumed);
+    a.e(str(XZR, ST, st_off(offset_of!(DState, foreign_resume))));
+    resume(&mut a);
     a.bind(failed);
     a.to(stub, Fix::Bl);
     a.bind(stub);
@@ -1775,6 +1789,15 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
                             THROWN.with(|t| t.set(Some((k, v))));
                             LAST_MESSAGE.with(|c| *c.borrow_mut() = Some("a continuation of cellular code was thrown past native code".into()));
                         }
+                        // An abort the cellular code found no prompt for: to
+                        // one in these frames, which `common_foreign` resumes
+                        // at; or on, out of this run.
+                        fixpt_runtime::NativeExit::Abort { tag, v } => {
+                            if abort_to(rt, st, tag, v) {
+                                st.foreign_resume = 1;
+                                return 0;
+                            }
+                        }
                     }
                     st.trap = PRIM_FAILED as u64;
                     0
@@ -1793,16 +1816,10 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
                 }
             }
         }
-        Callout::Abort => match frames_of(st).into_iter().find(|&(fp, end)| is_control(fp, end, PROMPT_MARK, args[0])) {
-            // The prompt's frame on top, resumed at its landing, with what
-            // the regions entered inside it held gone.
-            Some((pf, _)) => {
-                rt.heap.region_exit(Value(word(pf + 40)).as_fixnum() as usize);
-                (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (pf, pf, word(pf + 8), args[1].raw());
-                0
-            }
-            None => failed(st, "abort: no prompt for this tag".into()),
-        },
+        Callout::Abort => {
+            abort_to(rt, st, args[0], args[1]);
+            0
+        }
         Callout::Capture { whole } => {
             // `f`, moved by a collection, where the code reads it.
             st.args[0] = args[0].raw();
@@ -1853,6 +1870,26 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     out
 }
 
+/// An abort to `tag` with `v`: to the innermost prompt for it in this run's
+/// frames, whose frame is put on top and resumed at its landing, with what
+/// the regions entered inside it held gone (whether it was is the result);
+/// or, none here, out of this run, to the machine that called it, which
+/// looks further (`ABORTED`; the run traps).
+fn abort_to(rt: &mut fixpt_runtime::Runtime, st: &mut DState, tag: Value, v: Value) -> bool {
+    match frames(st).find(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag)) {
+        Some((pf, _)) => {
+            rt.heap.region_exit(Value(word(pf + 40)).as_fixnum() as usize);
+            (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (pf, pf, word(pf + 8), v.raw());
+            true
+        }
+        None => {
+            ABORTED.with(|a| a.set(Some((tag, v))));
+            failed(st, "abort: no prompt for this tag".into());
+            false
+        }
+    }
+}
+
 /// A call-out's failure, saying why: the call traps.
 fn failed(st: &mut DState, why: String) -> u64 {
     LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(why));
@@ -1876,15 +1913,22 @@ fn set_word(at: u64, w: u64) {
 /// Each native frame, innermost first, from the one that called out: where
 /// it starts, and where it ends (its caller's frame, or the stack's top).
 fn frames_of(st: &DState) -> Vec<(u64, u64)> {
-    let mut out = Vec::new();
-    let mut fp = st.fp;
-    while fp != 0 && fp < st.stack_top {
-        let caller = word(fp);
-        let end = if caller > fp && caller <= st.stack_top { caller } else { st.stack_top };
-        out.push((fp, end));
+    frames(st).collect()
+}
+
+/// The same, one at a time, so that a search stops where it finds.
+fn frames(st: &DState) -> impl Iterator<Item = (u64, u64)> + use<> {
+    let (top, mut fp) = (st.stack_top, st.fp);
+    std::iter::from_fn(move || {
+        if fp == 0 || fp >= top {
+            return None;
+        }
+        let at = fp;
+        let caller = word(at);
+        let end = if caller > at && caller <= top { caller } else { top };
         fp = if end == caller { caller } else { 0 };
-    }
-    out
+        Some((at, end))
+    })
 }
 
 /// Whether the frame at `fp` is a control frame of `marker` for `key`.

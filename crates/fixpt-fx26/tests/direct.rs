@@ -369,6 +369,34 @@ fn conversions_make_adapters() {
     }
 }
 
+/// Aborts across machines (`programs/native/aborts.fx`): from native code
+/// to a prompt cellular code installed, and from cellular code to one
+/// native code installed, the abort going on from one machine to the other
+/// where it finds no prompt; and under a deep native stack, which the
+/// search for the prompt no longer walks whole.
+#[test]
+fn aborts_cross_machines() {
+    use fixpt_fx26::session::Strategy;
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.strategy = Strategy::Cellular;
+    s.set_native_convention(true);
+    s.native_runner = Some(run_native);
+    s.native_compiler = Some(fixpt_native::direct::compile_closure);
+    s.register_code = true;
+    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/aborts.fx")).expect("reads");
+    let out: Vec<String> = s
+        .run_forms(&forms)
+        .expect("runs")
+        .into_iter()
+        .filter_map(|o| match o {
+            Ok(o) => o.value.transpose().map(|v| v.unwrap_or_else(|e| format!("error: {e}"))),
+            Err(e) => Some(format!("error: {}", e.message)),
+        })
+        .collect();
+    assert_eq!(out, ["15", "105", "400200"]);
+}
+
 /// A frame's stack map (`docs/research/generational-gc.md`): a large
 /// array in a slot that is dead across a call that collects is not copied
 /// by those collections; kept live across it, it is, each time
