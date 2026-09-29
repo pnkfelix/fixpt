@@ -91,8 +91,8 @@ are in the last section, "Log: the glance's details", and in
   its cost growing with the stack; an inlined `extract` from an earlier
   form getting field -1; frames too large for one `stp`; register
   exhaustion on long operand chains; more than 8 values in register
-  code. Left: a product argument is slow natively; the native stack is a
-  fixed 8 MB; native collection slows as live data grows (`paraffins`
+  code; a product argument slow natively; an 8 MB native stack. Left: native
+  collection slows as live data grows (`paraffins`
   57 s native, 20 s lowered); precise globals effects doubled `set.fx`'s
   native time. Collections counted by
   `gc_count` leave out minor ones (`%gc-count`, the phase probe), and the
@@ -1870,10 +1870,16 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   operand chain ran out of registers (the operand's register is now taken
   after the operand is computed); `fixpt compile` names each definition
   the Rust compiler made no register code for, and why.
-- A product argument is slow natively (10M calls: 3.4 s against 0.5 s).
-- The native stack is a fixed 8 MB (`STACK_WORDS`); deep non-tail
-  recursion that runs lowered overflows natively. Grow it, or segment it
-  (the async note's stack segments).
+- Resolved (2026-09-29): a product argument was slow natively (10M
+  calls: 3.4 s against 0.5 s). Measured again after the inlined-`extract`
+  fix: 10M calls not inlined, a product or two ints, take the same time,
+  and native is ahead of lowered in both.
+- Fixed (2026-09-29): the native stack was a fixed 8 MB, and recursion
+  a million deep overflowed it natively. It is 512 MB of zeroed memory,
+  committed only as it is touched (a run's resident size is unchanged):
+  ten million frames. Segmenting it (the async note's stack segments) is
+  for later. A collection still walks every native frame, so a deep
+  stack makes each minor collection slow; a watermark would fix that.
 - Native collection slows as live data grows (`paraffins` 57 s native,
   20 s lowered; a 12M-object live set 24 s against 6.5 s for 2M x 6).
   Count collections and time them first (Q3).

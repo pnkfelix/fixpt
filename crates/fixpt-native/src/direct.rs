@@ -354,9 +354,11 @@ fn st_off(f: usize) -> u32 {
     f as u32
 }
 
-/// The native stack: plenty for deep recursion, with room below the limit
-/// for the frame that finds it has passed it.
-const STACK_WORDS: usize = 1 << 20;
+/// The native stack: plenty for deep recursion (512 MB, ten million frames
+/// of the smallest kind), with room below the limit for the frame that
+/// finds it has passed it. Zeroed memory, which the system commits only as
+/// it is touched.
+const STACK_WORDS: usize = 1 << 26;
 const STACK_SLACK: u64 = 64 * 1024;
 
 #[derive(Copy, Clone)]

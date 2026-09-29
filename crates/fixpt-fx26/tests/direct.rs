@@ -420,8 +420,9 @@ fn conversions_make_adapters_in_cellular_code() {
 /// (`programs/native/many-values.fx`); and a frame's stack map (`docs/research/generational-gc.md`): a
 /// large array in a slot dead across a call that collects is not copied
 /// by those collections; kept live across it, it is, each time
-/// (`programs/native/dead-slot.fx`); and a frame too wide for its map
-/// (`programs/native/wide-frame.fx`).
+/// (`programs/native/dead-slot.fx`); a frame too wide for its map
+/// (`programs/native/wide-frame.fx`); and recursion a million deep
+/// (`programs/native/deep.fx`).
 #[test]
 fn native_session_adapters_aborts_and_stack_maps() {
     let mut s = session(true);
@@ -470,6 +471,9 @@ fn native_session_adapters_aborts_and_stack_maps() {
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!(values, ["25", "1012", "-154", "119", "1025", "1001"], "many values");
     assert_eq!(fell, ["cell10", "from-cell"], "only those that stay cellular do");
+    // Deep recursion, under those collections too.
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/deep.fx")).expect("reads");
+    assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["500000500000".to_string()], vec![]), "deep");
 }
 
 /// `run_native`, collecting every 97 safepoints while the native code runs
