@@ -120,6 +120,13 @@ struct DState {
     regions: u64,
     /// The machine's `mark_ret`, where it runs.
     mark_ret: u64,
+    /// The machine's common trap, where it runs: a code's stub for a kind
+    /// of trap puts the kind in X9 and goes there, the return address still
+    /// the site's.
+    trap_stub: u64,
+    /// The machine's common call of what is not native code
+    /// (`common_foreign`), where it runs.
+    foreign: u64,
 }
 
 /// The traps this code raises, by code.
@@ -349,6 +356,11 @@ pub struct DirectMachine {
     /// Where a thunk a mark in tail position called returns: its mark's
     /// frame popped, and back to that frame's return address.
     mark_ret: Offset,
+    /// The common trap, which every code's trap stubs go to.
+    trap_stub: Offset,
+    /// The common call of what is not native code, which every code's
+    /// calls of it go to.
+    foreign: Offset,
     stack: Vec<u64>,
     /// What each call-out any compiled code makes does, by number.
     callouts: Vec<Callout>,
@@ -388,7 +400,17 @@ impl DirectMachine {
         let mark_ret = space.alloc(4 * pop_mark.len(), 16).ok_or("no room for the mark's return")?;
         space.write_code(mark_ret, &pop_mark);
         space.flush(mark_ret, 4 * pop_mark.len());
-        Ok(DirectMachine { space, entry, mark_ret, stack: vec![0; STACK_WORDS], callouts: Vec::new() })
+        let code = common_trap();
+        let trap_stub = space.alloc(4 * code.len(), 16).ok_or("no room for the common trap")?;
+        space.write_code(trap_stub, &code);
+        space.flush(trap_stub, 4 * code.len());
+        // Call-out 0: what is not native code, called (`common_foreign`).
+        let callouts = vec![Callout::Foreign];
+        let code = common_foreign(0);
+        let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
+        space.write_code(foreign, &code);
+        space.flush(foreign, 4 * code.len());
+        Ok(DirectMachine { space, entry, mark_ret, trap_stub, foreign, stack: vec![0; STACK_WORDS], callouts })
     }
 
     /// Compile `closure`'s procedure, and every procedure it calls or
@@ -469,6 +491,8 @@ impl DirectMachine {
         st.delta = target.wrapping_sub(p.code.raw());
         st.code_lo = rt.heap.code_area_address() as u64;
         st.mark_ret = self.space.exec_addr(self.mark_ret) as u64;
+        st.trap_stub = self.space.exec_addr(self.trap_stub) as u64;
+        st.foreign = self.space.exec_addr(self.foreign) as u64;
         // SAFETY: the trampoline follows the C convention, saves what it
         // must, runs on the stack in `self.stack` (which outlives the call),
         // and touches only the state and that stack; the procedure's code,
@@ -524,6 +548,52 @@ fn trampoline() -> Vec<u32> {
     a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
     leave(&mut a);
     a.finish().expect("no labels")
+}
+
+/// The common trap: the trap's kind (in X9) recorded, and where (the
+/// return address, one past its site's stub), and the fuel; then back to
+/// Rust. One for the machine: each code's stub for a kind is three
+/// instructions that come here.
+fn common_trap() -> Vec<u32> {
+    let mut a = Asm::new();
+    a.e(str(X9, ST, st_off(offset_of!(DState, trap))));
+    a.e(sub_imm(X9, LINK, 4));
+    a.e(str(X9, ST, st_off(offset_of!(DState, pc))));
+    a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
+    leave(&mut a);
+    a.finish().expect("no labels")
+}
+
+/// The common call of what is not native code: from a code's stub for
+/// such a call, with the arguments' count in X9 and the callee in CLO (a
+/// `bl` or, in tail position, a `b`, so the return address is where to go
+/// back to): a frame, the arguments into the state, call-out `n` (a
+/// `Callout::Foreign`), and back with its value; or, if it failed, the
+/// trap. One for the machine.
+fn common_foreign(n: usize) -> Vec<u32> {
+    let mut a = Asm::new();
+    a.e(stp_pre(FRAME, LINK, SP, -16));
+    a.e(add_imm(FRAME, SP, 0));
+    a.e(str(X9, ST, st_off(offset_of!(DState, nargs))));
+    a.e(str(CLO, ST, st_off(offset_of!(DState, aux))));
+    let args = offset_of!(DState, args) as u32;
+    for j in 0..8u32 {
+        a.e(str(1 + j as Reg, ST, args + 8 * j));
+    }
+    call_out(&mut a, n);
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+    a.e(cmp_imm(X9, 0));
+    let (failed, stub) = (a.label(), a.label());
+    a.to(failed, Fix::If(Cond::Ne));
+    a.e(ldp_post(FRAME, LINK, SP, 16));
+    a.e(ret());
+    a.bind(failed);
+    a.to(stub, Fix::Bl);
+    a.bind(stub);
+    a.e(movz(X9, PRIM_FAILED, 0));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
+    a.e(br(X16));
+    a.finish().expect("labels bound")
 }
 
 /// Where a call-out that does not return to its caller said to go: its
@@ -1293,42 +1363,26 @@ impl Compiling<'_> {
         // routine, in a frame of its own with nothing in it, calls out with
         // the arguments and the callee, and returns its value; a tail call
         // goes there to return from it to this procedure's caller.
-        if !foreign.is_empty() {
-            let common = a.label();
-            for (stub, after, n, tail) in &foreign {
-                a.bind(*stub);
-                a.e(movz(X9, *n as u32, 0));
-                if *tail {
-                    a.to(common, Fix::B);
-                } else {
-                    a.to(common, Fix::Bl);
-                    a.to(*after, Fix::B);
-                }
+        // Each call of what is not native code: to the machine's common
+        // routine (`common_foreign`), with the arguments' count.
+        for (stub, after, n, tail) in &foreign {
+            a.bind(*stub);
+            a.e(movz(X9, *n as u32, 0));
+            a.e(ldr(X16, ST, st_off(offset_of!(DState, foreign))));
+            if *tail {
+                a.e(br(X16));
+            } else {
+                a.e(blr(X16));
+                a.to(*after, Fix::B);
             }
-            a.bind(common);
-            a.e(stp_pre(FRAME, LINK, SP, -16));
-            a.e(add_imm(FRAME, SP, 0));
-            a.e(str(X9, ST, st_off(offset_of!(DState, nargs))));
-            a.e(str(CLO, ST, st_off(offset_of!(DState, aux))));
-            let args = offset_of!(DState, args) as u32;
-            for j in 0..8u32 {
-                a.e(str(1 + j as Reg, ST, args + 8 * j));
-            }
-            let n = self.callouts.len();
-            self.callouts.push(Callout::Foreign);
-            call_out(&mut a, n);
-            a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
-            a.e(cmp_imm(X9, 0));
-            trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
-            a.e(ldp_post(FRAME, LINK, SP, 16));
-            a.e(ret());
         }
         if uses_resume {
             a.bind(resume_at);
             resume(&mut a);
         }
         // The traps, out of the way: a stub per site, calling its kind's
-        // code, which records the trap and where, and leaves.
+        // stub, which goes to the machine's common trap (`common_trap`),
+        // which records the trap and where, and leaves.
         let kinds: Vec<Label> = (0..TRAPS.len()).map(|_| a.label()).collect();
         for (l, code) in &stubs {
             a.bind(*l);
@@ -1340,11 +1394,8 @@ impl Compiling<'_> {
             }
             a.bind(*l);
             a.e(movz(X9, code as u32, 0));
-            a.e(str(X9, ST, st_off(offset_of!(DState, trap))));
-            a.e(sub_imm(X9, LINK, 4));
-            a.e(str(X9, ST, st_off(offset_of!(DState, pc))));
-            a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
-            leave(&mut a);
+            a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
+            a.e(br(X16));
         }
         self.procs[p].code = a.finish()?;
         self.procs[p].len = own;
