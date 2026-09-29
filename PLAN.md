@@ -1905,9 +1905,25 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   the difference is the front end. The FX-26 checker takes 5.0 s against
   2.8 s, the Rust checker 25 ms against 11 ms (`FIXPT_TIME_PHASES=1
   fixpt check`), compiling the same. Each global read is an atom of its
-  own, so effect joins and subsumption grow with the globals named. To
-  do: a set of globals as one atom (a sorted set, merged), in both
-  checkers; and the reference tables' times should leave out checking.
+  own, so effect joins and subsumption grow with the globals named.
+  Looked into (2026-09-29), the user asking why the FX-26 checker is
+  100x the Rust one. Two causes:
+  - The FX-26 checker's own costs, on `set.fx` run as register code
+    (`FIXPT_PROBE_FILE=… probe_phases_as_register_code`, with
+    `FIXPT_PROFILE_PHASE=check` for cells by procedure): 0.41 s. Global
+    names were ordered character by character through `symbol->string`;
+    every type printed searched its whole text for its own `%n` (quadratic
+    in the type); `k-union` and `k-within?` were quadratic in the atoms.
+    Now `string-compare`, `symbol-compare` and `string-search` are
+    standard operations (runtime primitives), and union and subset walk
+    sorted effects once: 0.112 s (coarse: 0.063 -> 0.037 s). The Rust
+    checker: 0.025 s.
+  - The session runs the front end as lowered Scheme on the bytecode VM,
+    about 28x its register code (`fixpt check`'s FX-26 checker on
+    `set.fx`: 4.96 -> 3.18 s with the fixes above). To do: the session's
+    front end as register code (compiling it costs about 2 s, like
+    loading it now), then a cached image of it (Q9 S0).
+  Still to do: the reference tables' times should leave out checking.
 - Fixed (2026-09-29): a standard operation as a value takes the arity of
   the runtime primitive it runs as (`runtime-primitive-arity`), so
   `char-downcase` and the like are values in both compilers; `parse-int`

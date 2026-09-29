@@ -644,7 +644,8 @@ fn probe_profile_check() {
 
 /// How long each phase of the front end takes on itself, run as register
 /// code (as `fixpoint_as_register_code` runs it whole): read, parse, check,
-/// and compile with register code.
+/// and compile with register code. With `FIXPT_PROBE_FILE` naming an
+/// FX-26 program, on that program instead: read, parse and check.
 #[test]
 #[ignore = "a probe: cargo test --release -p fixpt-fx26 --test bootstrap probe_phases_as_register_code -- --ignored --nocapture"]
 fn probe_phases_as_register_code() {
@@ -675,7 +676,9 @@ fn probe_phases_as_register_code() {
             (piece(sc, 2), piece(sc, 3), piece(sc, 4), piece(sc, 5), piece(sc, 6), piece(sc, 8));
         let on = sc.make(|_| Value::TRUE);
         run(sc, registers, &[on]);
-        let (tx, st) = (sc.make(|m| m.heap().make_string(&text)), sc.make(|m| m.heap().make_string(&standard)));
+        let probed = std::env::var("FIXPT_PROBE_FILE").ok().map(|f| std::fs::read_to_string(f).expect("the probe file reads"));
+        let program = probed.as_deref().unwrap_or(&text);
+        let (tx, st) = (sc.make(|m| m.heap().make_string(program)), sc.make(|m| m.heap().make_string(&standard)));
         let mut t = std::time::Instant::now();
         let mut gcs = (0, 0, 0, 0);
         // Time, and what explains a step in it: collections, and the cons
@@ -718,10 +721,12 @@ fn probe_phases_as_register_code() {
         run(sc, check, &[std, progs]);
         lap(sc, "check");
         profile_from(sc, "");
-        let facts = run(sc, extracts, &[]);
-        profile_from(sc, "compile");
-        let _ = run(sc, compile, &[progs, facts]);
-        lap(sc, "compile");
+        if probed.is_none() {
+            let facts = run(sc, extracts, &[]);
+            profile_from(sc, "compile");
+            let _ = run(sc, compile, &[progs, facts]);
+            lap(sc, "compile");
+        }
         if !phase.is_empty() {
             for (what, top) in [("cells", LAST_PROFILE.with(|p| p.borrow().clone())), ("words allocated", LAST_ALLOCATING.with(|p| p.borrow().clone()))] {
                 let total: u64 = top.iter().map(|(_, n)| n).sum();

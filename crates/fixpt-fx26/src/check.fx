@@ -181,25 +181,12 @@
           ((null? (cdr xs)) (car xs))
           (else (k-cat3 (car xs) sep (k-join (cdr xs) sep))))))
 
-(define k-starts-at? (subr (maxeff (read @globals) spin) (string string int int) bool)
-  (lambda (s sub at i)
-    (cond ((= i (string-length sub)) #t)
-          ((>= (+ at i) (string-length s)) #f)
-          ((char=? (string-ref s (+ at i)) (string-ref sub i)) (k-starts-at? s sub at (+ i 1)))
-          (else #f))))
 ;; Where `sub` first starts in `s` from `at`, or -1.
 (define k-find-sub (subr (maxeff (read @globals) spin) (string string int) int)
-  (lambda (s sub at)
-    (cond ((> (+ at (string-length sub)) (string-length s)) -1)
-          ((k-starts-at? s sub at 0) at)
-          (else (k-find-sub s sub (+ at 1))))))
+  (lambda (s sub at) (string-search s sub at)))
 
 (define k-str-cmp (subr (maxeff (read @globals) spin) (string string int) int)
-  (lambda (a b i)
-    (cond ((= i (string-length a)) (if (= i (string-length b)) 0 -1))
-          ((= i (string-length b)) 1)
-          (else (let ((x (char->integer (string-ref a i))) (y (char->integer (string-ref b i))))
-                  (cond ((< x y) -1) ((> x y) 1) (else (k-str-cmp a b (+ i 1)))))))))
+  (lambda (a b i) (string-compare a b)))
 (define k-int-cmp (subr pure (int int) int)
   (lambda (x y) (cond ((< x y) -1) ((> x y) 1) (else 0))))
 
@@ -576,7 +563,7 @@
     (let ((c (k-int-cmp (k-region-rank r) (k-region-rank s))))
       (if (= c 0)
           (tagcase r
-            (r-const (n) (tagcase s (r-const (m) (k-str-cmp (symbol->string n) (symbol->string m) 0)) (else y 0)))
+            (r-const (n) (tagcase s (r-const (m) (symbol-compare n m)) (else y 0)))
             (r-fresh (i n) (tagcase s (r-fresh (j m) (k-int-cmp i j)) (else y 0)))
             (r-var (v) (tagcase s (r-var (w) (k-int-cmp v w)) (else y 0)))
             (r-frozen (p f)
@@ -584,7 +571,7 @@
                 (r-frozen (q g) (let ((c (k-int-cmp p q))) (if (= c 0) (k-int-cmp (if f 1 0) (if g 1 0)) c)))
                 (else y 0)))
             (r-heap () 0)
-            (r-global (g) (tagcase s (r-global (h) (k-str-cmp (symbol->string g) (symbol->string h) 0)) (else y 0)))
+            (r-global (g) (tagcase s (r-global (h) (symbol-compare g h)) (else y 0)))
             (r-globals () 0))
           c))))
 (define k-region=? (subr (maxeff (read @globals) spin) (k-region k-region) bool) (lambda (r s) (= (k-region-cmp r s) 0)))
@@ -613,8 +600,23 @@
         (cons a nil)
         (let ((c (k-atom-cmp a (car e))))
           (cond ((< c 0) (cons a e)) ((= c 0) e) (else (cons (car e) (k-insert a (cdr e)))))))))
+(define k-union-each (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-eff) k-eff)
+  (lambda (x y) (if (null? x) y (k-union-each (cdr x) (k-insert (car x) y)))))
+(define k-sorted? (subr (maxeff (read @globals) (read @t) spin) (k-eff) bool)
+  (lambda (e) (or (null? e) (null? (cdr e)) (and (< (k-atom-cmp (car e) (car (cdr e))) 0) (k-sorted? (cdr e))))))
+(define k-merge (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-eff) k-eff)
+  (lambda (x y)
+    (cond ((null? x) y)
+          ((null? y) x)
+          (else
+           (let ((c (k-atom-cmp (car x) (car y))))
+             (cond ((< c 0) (cons (car x) (k-merge (cdr x) y)))
+                   ((= c 0) (cons (car x) (k-merge (cdr x) (cdr y))))
+                   (else (cons (car y) (k-merge x (cdr y))))))))))
+;; `x` and `y` together, sorted as `k-insert` keeps an effect: a merge, when
+;; `x` is sorted too (as effects made here are), else one atom at a time.
 (define k-union (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-eff) k-eff)
-  (lambda (x y) (if (null? x) y (k-union (cdr x) (k-insert (car x) y)))))
+  (lambda (x y) (if (k-sorted? x) (k-merge x y) (k-union-each x y))))
 (define k-contains? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool)
   (lambda (e a) (cond ((null? e) #f) ((= (k-atom-cmp (car e) a) 0) #t) (else (k-contains? (cdr e) a)))))
 ;; Whether `a` is in `e`, or, reading or writing one global, `e` does so to
@@ -626,8 +628,31 @@
           (a-read (r) (tagcase r (r-global (g) (k-contains? e (a-read (r-globals)))) (else y #f)))
           (a-write (r) (tagcase r (r-global (g) (k-contains? e (a-write (r-globals)))) (else y #f)))
           (else y #f)))))
+(define k-within-each? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool)
+  (lambda (x y) (or (null? x) (and (k-covered? y (car x)) (k-within-each? (cdr x) y)))))
+;; `k-within?` of sorted effects, `rg` and `wg` whether `y` reads and writes
+;; `@globals`, which cover reading and writing any one global.
+(define k-within-sorted? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff bool bool) bool)
+  (lambda (x y rg wg)
+    (cond ((null? x) #t)
+          ((tagcase (car x)
+             (a-read (r) (and rg (tagcase r (r-global (g) #t) (else z #f))))
+             (a-write (r) (and wg (tagcase r (r-global (g) #t) (else z #f))))
+             (else z #f))
+           (k-within-sorted? (cdr x) y rg wg))
+          ((null? y) #f)
+          (else
+           (let ((c (k-atom-cmp (car x) (car y))))
+             (cond ((< c 0) #f)
+                   ((= c 0) (k-within-sorted? (cdr x) (cdr y) rg wg))
+                   (else (k-within-sorted? x (cdr y) rg wg))))))))
+;; Whether every atom of `x` is covered by `y` (`k-covered?`): both sorted,
+;; as effects made here are, by one walk of the two; else atom by atom.
 (define k-within? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool)
-  (lambda (x y) (or (null? x) (and (k-covered? y (car x)) (k-within? (cdr x) y)))))
+  (lambda (x y)
+    (if (and (k-sorted? x) (k-sorted? y))
+        (k-within-sorted? x y (k-contains? y (a-read (r-globals))) (k-contains? y (a-write (r-globals))))
+        (k-within-each? x y))))
 (define k-eff=? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool) (lambda (x y) (and (k-within? x y) (k-within? y x))))
 (define k-one (subr (alloc @t) (k-atom) k-eff) (lambda (a) (cons a nil)))
 (define k-allocates? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
@@ -3026,7 +3051,7 @@
 ;; Run `f`, and if it fails at `a`..`b` with "a W is expected here, and
 ;; this is a G", fail instead with what `say` makes of W and G.
 (define k-expected-split (subr (maxeff (read @globals) spin) (string) string)
-  (lambda (m) (if (k-starts-at? m "a " 0 0) (substring m 2 (string-length m)) "")))
+  (lambda (m) (if (= (string-search m "a " 0) 0) (substring m 2 (string-length m)) "")))
 (define k-sep string " is expected here, and this is a ")
 
 (define k-rewriting (subr (maxeff (read @globals) checks spin) ((subr (maxeff checks spin) () k-te) int int (subr (maxeff checks spin) (string string string) string)) k-te)

@@ -761,6 +761,26 @@ prims! {
         let s = get_string(rt, a[1])?;
         Ok(Value::boolean(s.contains(c)))
     });
+    // FX-26's `string-compare`: -1, 0 or 1, as `a[0]` comes before, is, or
+    // comes after `a[1]`, character by character.
+    "%fx26-string-compare", 2, Some(2), simple!(|rt, a| {
+        let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?);
+        Ok(Value::fixnum(x.cmp(&y) as i64))
+    });
+    // FX-26's `symbol-compare`: the same, of two symbols' names.
+    "%fx26-symbol-compare", 2, Some(2), simple!(|rt, a| {
+        for s in [a[0], a[1]] {
+            if !rt.heap.is_a(s, ObjType::Symbol) { return rt.type_error("a symbol", s); }
+        }
+        Ok(Value::fixnum(rt.heap.symbol_name(a[0]).cmp(&rt.heap.symbol_name(a[1])) as i64))
+    });
+    // FX-26's `string-search`: where `a[1]` first occurs in `a[0]` at or
+    // after character `a[2]`, in characters; or -1.
+    "%fx26-string-search", 3, Some(3), simple!(|rt, a| {
+        let (s, sub, from) = (get_string(rt, a[0])?, get_string(rt, a[1])?, int(rt, a[2])?);
+        let Some((start, _)) = s.char_indices().chain(std::iter::once((s.len(), ' '))).nth(from.max(0) as usize) else { return Ok(Value::fixnum(-1)) };
+        Ok(Value::fixnum(s[start..].find(&sub).map_or(-1, |b| from.max(0) + s[start..start + b].chars().count() as i64)))
+    });
     // FX-26's `+`, `-` and `*`: on fixnums, and failing past them ("integer
     // overflow"), as every machine's code does (PLAN.md, Q2).
     "%fx26-add", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_add));
