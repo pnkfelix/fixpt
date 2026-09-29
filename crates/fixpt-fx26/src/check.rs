@@ -248,7 +248,7 @@ impl Checker {
         basic("wglobal");
         // The fixed-width integers: an `i32` or `u32` is the fixnum it stands
         // for, an `i64` or `u64` the exact integer (PLAN.md, Q2 b). After
-        // the others, in the order `check.fx` makes them: type ids agree.
+        // the others, in the order `check-types.fx` makes them: type ids agree.
         for fixed in ["i32", "u32", "i64", "u64"] {
             basic(fixed);
         }
@@ -438,7 +438,7 @@ impl Checker {
     /// else, 3 anything else that may also keep its continuation for later
     /// (`comefrom`), write a global, or do what an effect variable stands
     /// for, which a global's value may change across. Where two expressions
-    /// have one span, the greater. `check.fx`'s `checked-effects` says the
+    /// have one span, the greater. `check-types.fx`'s `checked-effects` says the
     /// same.
     pub fn effect_summaries(&self) -> HashMap<(u32, u32), u8> {
         let mut out: HashMap<(u32, u32), u8> = HashMap::new();

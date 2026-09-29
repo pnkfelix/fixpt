@@ -50,8 +50,21 @@ pub const NATIVE_LAYOUT: &str = include_str!("native-layout.fx");
 /// `assemble_word`, over [`ARM64`].
 pub const NATIVE: &str = include_str!("native.fx");
 
-/// The checker written in FX-26, over the parser's trees.
-pub const CHECKER: &str = include_str!("check.fx");
+/// The checker written in FX-26, over the parser's trees, in files of its
+/// parts, in order: types and effects, printing, reading descriptions,
+/// resolving them, subtyping, instantiation, termination, the rules, and
+/// programs.
+pub const CHECKER_FILES: [(&str, &str); 9] = [
+    ("check-types.fx", include_str!("check-types.fx")),
+    ("check-print.fx", include_str!("check-print.fx")),
+    ("check-syntax.fx", include_str!("check-syntax.fx")),
+    ("check-resolve.fx", include_str!("check-resolve.fx")),
+    ("check-subtype.fx", include_str!("check-subtype.fx")),
+    ("check-infer.fx", include_str!("check-infer.fx")),
+    ("check-terminate.fx", include_str!("check-terminate.fx")),
+    ("check-synth.fx", include_str!("check-synth.fx")),
+    ("check-program.fx", include_str!("check-program.fx")),
+];
 
 /// The reader, the parser, the tables, the checker, the evaluator and the
 /// compiler written in FX-26, with the layout they share, as one program:
@@ -62,11 +75,19 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 12] = [
+pub const FRONT_END_FILES: [(&str, &str); 20] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("table.fx", TABLE),
-    ("check.fx", CHECKER),
+    CHECKER_FILES[0],
+    CHECKER_FILES[1],
+    CHECKER_FILES[2],
+    CHECKER_FILES[3],
+    CHECKER_FILES[4],
+    CHECKER_FILES[5],
+    CHECKER_FILES[6],
+    CHECKER_FILES[7],
+    CHECKER_FILES[8],
     ("evaluator.fx", EVALUATOR),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),

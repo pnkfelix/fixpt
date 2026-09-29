@@ -580,12 +580,7 @@ fn profiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Res
 
 /// Where character `at` of the bootstrap program is, as `file:line`.
 fn locate_char(text: &str, at: usize) -> String {
-    let parts = [
-        ("eager-reader.fx", fixpt_fx26::EAGER_READER), ("parser.fx", fixpt_fx26::PARSER), ("table.fx", fixpt_fx26::TABLE),
-        ("check.fx", fixpt_fx26::CHECKER), ("evaluator.fx", fixpt_fx26::EVALUATOR), ("layout.fx", fixpt_fx26::LAYOUT),
-        ("standard.fx", fixpt_fx26::STANDARD_OPS), ("compile.fx", fixpt_fx26::COMPILER), ("arm64.fx", fixpt_fx26::ARM64),
-        ("native-layout.fx", fixpt_fx26::NATIVE_LAYOUT), ("native.fx", fixpt_fx26::NATIVE), ("bootstrap.fx", fixpt_fx26::BOOTSTRAP),
-    ];
+    let parts: Vec<(&str, &str)> = fixpt_fx26::FRONT_END_FILES.into_iter().chain([("bootstrap.fx", fixpt_fx26::BOOTSTRAP)]).collect();
     let byte = text.char_indices().nth(at).map_or(text.len(), |(b, _)| b);
     let mut start = 0;
     for (name, part) in parts {
@@ -634,8 +629,8 @@ fn probe_profile_check() {
     });
     let top = LAST_PROFILE.with(|p| p.borrow().clone());
     let total: u64 = top.iter().map(|(_, n)| n).sum();
-    let in_checker: u64 = top.iter().filter(|(w, _)| w.strip_prefix("lambda@").is_some_and(|at| locate_char(&text, at.parse().unwrap_or(0)).starts_with("check.fx"))).map(|(_, n)| n).sum();
-    eprintln!("{total} cells in all, {in_checker} in check.fx's code");
+    let in_checker: u64 = top.iter().filter(|(w, _)| w.strip_prefix("lambda@").is_some_and(|at| locate_char(&text, at.parse().unwrap_or(0)).starts_with("check-"))).map(|(_, n)| n).sum();
+    eprintln!("{total} cells in all, {in_checker} in the checker's code (check-*.fx)");
     for (w, n) in top.iter().take(40) {
         let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();
         eprintln!("{n:>12} {:>5.1}%  {w} {at}", 100.0 * *n as f64 / total as f64);

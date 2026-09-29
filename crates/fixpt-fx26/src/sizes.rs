@@ -160,7 +160,7 @@ impl Checker {
     /// by its coefficients' gcd, its constant rounded down). No room left
     /// shows as a constant constraint below 0. Sound, as rationals are more
     /// room than integers; incomplete, and it gives up past
-    /// `FM_LIMIT` constraints. `check.fx`'s `k-refuted-below?` is this, step
+    /// `FM_LIMIT` constraints. The FX-26 checker's is this, step
     /// for step.
     fn refuted_below(&self, a: &Size) -> bool {
         let Some(_) = parts(a) else { return false };

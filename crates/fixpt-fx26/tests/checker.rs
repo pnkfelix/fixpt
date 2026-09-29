@@ -1,4 +1,4 @@
-//! The checker written in FX-26 (`src/check.fx`), reading and parsing with
+//! The checker written in FX-26 (`src/check-*.fx`), reading and parsing with
 //! the reader and the parser written in FX-26, against the Rust checker on
 //! the same programs (`PLAN.md` §11, step 10).
 
@@ -6,19 +6,7 @@ use fixpt_fx26::session::compile_program_as;
 
 /// Where byte `at` of the front end is, as `file:line:column`.
 fn locate(at: usize) -> String {
-    let parts = [
-        ("eager-reader.fx", fixpt_fx26::EAGER_READER),
-        ("parser.fx", fixpt_fx26::PARSER),
-        ("table.fx", fixpt_fx26::TABLE),
-        ("check.fx", fixpt_fx26::CHECKER),
-        ("evaluator.fx", fixpt_fx26::EVALUATOR),
-        ("layout.fx", fixpt_fx26::LAYOUT),
-        ("standard.fx", fixpt_fx26::STANDARD_OPS),
-        ("compile.fx", fixpt_fx26::COMPILER),
-        ("arm64.fx", fixpt_fx26::ARM64),
-        ("native-layout.fx", fixpt_fx26::NATIVE_LAYOUT),
-        ("native.fx", fixpt_fx26::NATIVE),
-    ];
+    let parts = fixpt_fx26::FRONT_END_FILES;
     let mut start = 0;
     for (name, text) in parts {
         if at <= start + text.len() {

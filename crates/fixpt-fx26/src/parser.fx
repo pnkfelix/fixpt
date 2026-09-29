@@ -5,7 +5,7 @@
 ;;; node for node and span for span, so the two can be compared. Descriptions
 ;;; (types, effects, regions, binders) are kept as the syntax they were
 ;;; written in: the evaluator and the compiler do not need them, and the
-;;; checker written in FX-26 (`check.fx`) reads them itself.
+;;; checker written in FX-26 (`check-*.fx`) reads them itself.
 ;;;
 ;;; Compiled with the reader, as one program: `syn` is in the reader's region
 ;;; @s, which only this program can name. The trees are `acyclic`: made by
