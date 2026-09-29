@@ -485,6 +485,27 @@ const fn const_str_eq(a: &str, b: &str) -> bool {
 /// definitions, for FX-26 code that lays out or reads objects. Checked in as
 /// `crates/fixpt-fx26/src/layout.fx`; a test there requires the file to be
 /// exactly this.
+/// `def` and its `comment`: on one line where it fits in 100 characters
+/// (the `.fx` limit, `fixpt_tidy::fx_size`), else the comment above it,
+/// its words wrapped.
+fn commented(out: &mut String, def: &str, comment: &str) {
+    if def.chars().count() + 4 + comment.chars().count() <= 100 {
+        out.push_str(&format!("{def}  ; {comment}\n"));
+        return;
+    }
+    let mut line = String::from(";;");
+    for w in comment.split_whitespace() {
+        if line.chars().count() + 1 + w.chars().count() > 100 {
+            out.push_str(&line);
+            out.push('\n');
+            line = String::from(";;");
+        }
+        line.push(' ');
+        line.push_str(w);
+    }
+    out.push_str(&format!("{line}\n{def}\n"));
+}
+
 pub fn fx26_module() -> String {
     let mut out = String::new();
     out.push_str(";;; The object layout, generated from `crates/fixpt-heap/src/layout.rs`.\n");
@@ -493,20 +514,17 @@ pub fn fx26_module() -> String {
     out.push_str(";;; See `docs/object-model.md`.\n\n");
     out.push_str(";;; Tags: the low three bits of every word.\n");
     for t in TAGS {
-        out.push_str(&format!("(define tag-{} int {})  ; {}\n", t.name, t.bits, t.meaning));
+        commented(&mut out, &format!("(define tag-{} int {})", t.name, t.bits), t.meaning);
     }
     out.push_str(&format!("(define tag-bits int {TAG_BITS})\n\n"));
     out.push_str(";;; The header word's bit fields: lowest bit, and width.\n");
     for f in HEADER_FIELDS {
-        out.push_str(&format!(
-            "(define header-{}-lo int {})\n(define header-{}-width int {})  ; {}\n",
-            f.name, f.lo, f.name, f.width, f.meaning
-        ));
+        out.push_str(&format!("(define header-{}-lo int {})\n", f.name, f.lo));
+        commented(&mut out, &format!("(define header-{}-width int {})", f.name, f.width), f.meaning);
     }
-    out.push_str(&format!(
-        "(define extension-fields-lo int {})\n(define extension-fields-width int {})  ; {}\n\n",
-        X_FIELDS.lo, X_FIELDS.width, X_FIELDS.meaning
-    ));
+    out.push_str(&format!("(define extension-fields-lo int {})\n", X_FIELDS.lo));
+    commented(&mut out, &format!("(define extension-fields-width int {})", X_FIELDS.width), X_FIELDS.meaning);
+    out.push('\n');
     out.push_str(";;; Kinds.\n");
     for k in KINDS {
         out.push_str(&format!("(define kind-{} int {})\n", k.name, k.code));
@@ -529,11 +547,11 @@ pub fn fx26_module() -> String {
     out.push_str(&format!("(define cellular-closure-word int {})\n", cellular::CLOSURE_WORD));
     out.push_str(&format!("(define cellular-closure-free0 int {})\n", cellular::CLOSURE_FREE0));
     for (i, (name, effect)) in cellular::ROUTINES.iter().enumerate() {
-        out.push_str(&format!("(define routine-{} int {i})  ; {effect}\n", fx_name(name)));
+        commented(&mut out, &format!("(define routine-{} int {i})", fx_name(name)), effect);
     }
     out.push_str("\n;;; Register code's instructions by number, and how many registers it has.\n");
     for (i, (name, n, meaning)) in regcode::OPS.iter().enumerate() {
-        out.push_str(&format!("(define rop-{} int {i})  ; {n}: {meaning}\n", fx_name(name)));
+        commented(&mut out, &format!("(define rop-{} int {i})", fx_name(name)), &format!("{n}: {meaning}"));
     }
     out.push_str(&format!("(define register-regs int {})\n", regcode::REGS));
     out

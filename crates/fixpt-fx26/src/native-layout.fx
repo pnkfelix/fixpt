@@ -83,4 +83,22 @@
 ;; Whether routine `n`'s call-out may leave the machine anywhere.
 (define n-control? (subr pure (int) bool)
   (lambda (n)
-    (or (= n 0) (= n 1) (= n 2) (= n 6) (= n 26) (= n 27) (= n 28) (= n 30) (= n 31) (= n 32) (= n 33) (= n 34) (= n 38) (= n 39) (= n 40) (= n 41) (= n 42))))
+    (cond
+      ((= n 0) #t)  ; docol
+      ((= n 1) #t)  ; exit
+      ((= n 2) #t)  ; halt
+      ((= n 6) #t)  ; execute
+      ((= n 26) #t)  ; call
+      ((= n 27) #t)  ; tailcall
+      ((= n 28) #t)  ; return
+      ((= n 30) #t)  ; prompt
+      ((= n 31) #t)  ; abort
+      ((= n 32) #t)  ; callcomp
+      ((= n 33) #t)  ; callcc
+      ((= n 34) #t)  ; withmark
+      ((= n 38) #t)  ; withmark-tail
+      ((= n 39) #t)  ; tcall
+      ((= n 40) #t)  ; ttailcall
+      ((= n 41) #t)  ; resume
+      ((= n 42) #t)  ; undefined
+      (else #f))))

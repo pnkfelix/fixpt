@@ -1013,13 +1013,13 @@ pub fn fx26_module() -> String {
     }
     out.push_str("      (else 0))))\n\n");
     out.push_str(";; Whether routine `n`'s call-out may leave the machine anywhere.\n");
-    out.push_str("(define n-control? (subr pure (int) bool)\n  (lambda (n)\n    (or");
+    out.push_str("(define n-control? (subr pure (int) bool)\n  (lambda (n)\n    (cond\n");
     for (i, (name, _)) in ROUTINES.iter().enumerate() {
         if CONTROL_CALLOUTS.contains(name) {
-            out.push_str(&format!(" (= n {i})"));
+            out.push_str(&format!("      ((= n {i}) #t)  ; {name}\n"));
         }
     }
-    out.push_str(")))\n");
+    out.push_str("      (else #f))))\n");
     out
 }
 

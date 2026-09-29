@@ -6,7 +6,8 @@
 ;;; Tags: the low three bits of every word.
 (define tag-fixnum int 0)  ; 61-bit signed integer; also what a zeroed word is
 (define tag-pair int 1)  ; index of a two-word car/cdr cell, which has no header
-(define tag-unused int 2)  ; retired: pointed at an object's header, before every object was a bloblet
+;; retired: pointed at an object's header, before every object was a bloblet
+(define tag-unused int 2)
 (define tag-immediate int 3)  ; #f, #t, (), unit, eof, characters, …
 (define tag-bloblet int 4)  ; index of the start of a bloblet's suffix
 (define tag-trailer int 5)  ; the last field of a bloblet that has one; runtime-reserved payload
@@ -112,20 +113,25 @@
 (define routine-free int 22)  ; ( -- x ), free value i of the closure running
 (define routine-global int 23)  ; ( -- x ), what the cell that is the next cell holds
 (define routine-global! int 24)  ; ( x -- ), into the cell that is the next cell
-(define routine-closure int 25)  ; ( v1 … vn -- c ), word w closed over the v's; w and n the next cells
-(define routine-call int 26)  ; ( x1 … xn c -- r ), n the next cell: the x's become the callee's frame
+;; ( v1 … vn -- c ), word w closed over the v's; w and n the next cells
+(define routine-closure int 25)
+;; ( x1 … xn c -- r ), n the next cell: the x's become the callee's frame
+(define routine-call int 26)
 (define routine-tailcall int 27)  ; ( x1 … xn c -- r ), the same, the x's replacing this frame
 (define routine-return int 28)  ; ( … r -- r ), leave this frame, keeping r, and return
 (define routine-prim int 29)  ; ( x1 … xn -- r ), the runtime's primitive p; p and n the next cells
 (define routine-prompt int 30)  ; ( tag handler thunk -- r ), run the thunk under a prompt for tag
 (define routine-abort int 31)  ; ( tag v -- ), to the nearest prompt for tag, whose handler gets v
-(define routine-callcomp int 32)  ; ( proc tag -- r ), call proc with the continuation up to tag's prompt
+;; ( proc tag -- r ), call proc with the continuation up to tag's prompt
+(define routine-callcomp int 32)
 (define routine-callcc int 33)  ; ( proc -- r ), call proc with the whole continuation
 (define routine-withmark int 34)  ; ( key v thunk -- r ), run the thunk with key marked v
 (define routine-firstmark int 35)  ; ( key default -- v ), the innermost mark for key
 (define routine-currentmarks int 36)  ; ( key -- list ), every mark for key, innermost first
 (define routine-marksof int 37)  ; ( k key -- list ), the marks for key in continuation k
-(define routine-withmark-tail int 38)  ; ( key v thunk -- r ), withmark in tail position: the frame is left, and a mark for key on top replaced
+;; ( key v thunk -- r ), withmark in tail position: the frame is left, and a mark for key on top
+;; replaced
+(define routine-withmark-tail int 38)
 (define routine-tcall int 39)  ; ( x1 … xn c -- r ), call closure c; n the next cell
 (define routine-ttailcall int 40)  ; ( x1 … xn c -- ), tail-call closure c; n the next cell
 (define routine-resume int 41)  ; ( v k -- ), give continuation k the value v, in this frame's place
@@ -139,7 +145,9 @@
 (define routine-rest int 49)  ; ( -- list ), this frame's values, from slot 0, as a list
 
 ;;; Register code's instructions by number, and how many registers it has.
-(define rop-args int 0)  ; 1: entered with n arguments in REG1…REGn; first, and only first (arities are static: nothing is checked)
+;; 1: entered with n arguments in REG1…REGn; first, and only first (arities are static: nothing is
+;; checked)
+(define rop-args int 0)
 (define rop-const int 1)  ; 1: RESULT := x, the operand
 (define rop-global int 2)  ; 1: RESULT := the value in global cell g
 (define rop-setglbl int 3)  ; 1: global cell g := RESULT
@@ -160,13 +168,22 @@
 (define rop-setfield int 18)  ; 2: field k of the bloblet in RESULT := REGj
 (define rop-prim int 19)  ; 2: RESULT := runtime primitive p applied to REG1…REGn; may collect
 (define rop-lambda int 20)  ; 2: RESULT := a closure of cellular word w over REG1…REGn; may collect
-(define rop-invoke int 21)  ; 1: call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect
-(define rop-tailinvoke int 22)  ; 1: the same in tail position, the frame popped: its value is this one's
+;; 1: call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect
+(define rop-invoke int 21)
+;; 1: the same in tail position, the frame popped: its value is this one's
+(define rop-tailinvoke int 22)
 (define rop-return int 23)  ; 0: return RESULT, the frame popped
 (define rop-branch int 24)  ; 1: skip the operand's count of cells, counted after it
 (define rop-branchf int 25)  ; 1: the same if RESULT is #f
-(define rop-cellular int 26)  ; 2: cellular routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect
-(define rop-invokeself int 27)  ; 1: call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may collect
-(define rop-global-guard int 28)  ; 3: unless global cell g holds a closure made from cellular word w (a cellular closure of w, or a native one whose code was compiled from w), skip the third operand's count of cells, counted after it; RESULT kept
+;; 2: cellular routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may
+;; collect
+(define rop-cellular int 26)
+;; 1: call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may
+;; collect
+(define rop-invokeself int 27)
+;; 3: unless global cell g holds a closure made from cellular word w (a cellular closure of w, or a
+;; native one whose code was compiled from w), skip the third operand's count of cells, counted
+;; after it; RESULT kept
+(define rop-global-guard int 28)
 (define rop-brancht int 29)  ; 1: the same as branch if RESULT is not #f
 (define register-regs int 8)
