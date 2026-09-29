@@ -94,7 +94,8 @@ are in the last section, "Log: the glance's details", and in
   code; a product argument slow natively; an 8 MB native stack; native
   call-outs making major collections where a minor one was due
   (`paraffins` 56 s native, now 9.7; lowered 17). Left: precise globals
-  effects doubled `set.fx`'s native time. Q3's counts done: minor
+  effects doubled `set.fx`'s native time: no, its checking time (the
+  native code costs the same; entry below). Q3's counts done: minor
   collections counted, their copying and time apart, regions and code in
   `allocated()`, and `FIXPT_GC_REPORT=1 fixpt eval FILE`.
 - **A soundness hole in size inference** (found writing the GADT note's
@@ -1896,8 +1897,17 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   that filled was collected with the whole heap. It makes the one due
   now: 8 major, 664 minor, 9.7 s. Test: a native run that fills the
   nursery makes minor collections only.
-- Precise globals effects made `set.fx` 2x slower natively (7.2 -> 14 s),
-  and doubled `peval`'s check time; cause unknown.
+- Measured (2026-09-29): precise globals effects did not make `set.fx`'s
+  native code slower. With `cmps`, the effect naming 17 globals, written
+  `(read @globals)` instead, the run takes 6.6 s against 13.1 s, but
+  with no iterations 3.5 s against 9.8 s: the benchmark itself costs the
+  same (identical register and machine code, identical call-outs), and
+  the difference is the front end. The FX-26 checker takes 5.0 s against
+  2.8 s, the Rust checker 25 ms against 11 ms (`FIXPT_TIME_PHASES=1
+  fixpt check`), compiling the same. Each global read is an atom of its
+  own, so effect joins and subsumption grow with the globals named. To
+  do: a set of globals as one atom (a sorted set, merged), in both
+  checkers; and the reference tables' times should leave out checking.
 - Fixed (2026-09-29): a standard operation as a value takes the arity of
   the runtime primitive it runs as (`runtime-primitive-arity`), so
   `char-downcase` and the like are values in both compilers; `parse-int`

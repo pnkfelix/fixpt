@@ -82,9 +82,16 @@ pub fn canonical_checked(r: Checked26) -> Checked26 {
 /// one's, with `s`'s convention. The outer error is the FX-26 front end
 /// failing to read or parse.
 pub fn both_checkers(s: &mut Fx26Session, text: &str) -> R<(Checked26, Checked26)> {
+    // With `FIXPT_TIME_PHASES` set, how long each checker took.
+    let timing = std::env::var_os("FIXPT_TIME_PHASES").is_some();
+    let started = std::time::Instant::now();
     let fx26 = canonical_checked(s.check_with_own_checker(text)?);
+    let between = std::time::Instant::now();
     let mut c = s.fresh_checker();
     let rust = canonical_checked(check_with_rust_checker(&mut c, text));
+    if timing {
+        eprintln!("; the FX-26 checker {:.3} s, the Rust checker {:.3} s", (between - started).as_secs_f64(), between.elapsed().as_secs_f64());
+    }
     Ok((fx26, rust))
 }
 
