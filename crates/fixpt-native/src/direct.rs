@@ -127,6 +127,9 @@ struct DState {
     /// The machine's common call of what is not native code
     /// (`common_foreign`), where it runs.
     foreign: u64,
+    /// The machine's common making of a closure by call-out
+    /// (`common_closure`), where it runs.
+    closure: u64,
 }
 
 /// The traps this code raises, by code.
@@ -143,6 +146,10 @@ enum Callout {
     Cons,
     Prim { p: usize, n: usize },
     Closure { n: usize },
+    /// The same, over the state's `nargs` values: the machine's common
+    /// routine's (`common_closure`), for a closure the inline path had no
+    /// room for.
+    ClosureAny,
     /// `%region-closure`'s: in the region whose handle is argument 0, a
     /// native closure over arguments 1 to `n − 2` of the code that is the
     /// last.
@@ -178,7 +185,7 @@ impl Callout {
             Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
             Callout::Capture { whole } => if whole { 1 } else { 2 },
             Callout::CurrentMarks => 1,
-            Callout::Foreign => 0,
+            Callout::Foreign | Callout::ClosureAny => 0,
             Callout::Prim { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
     }
@@ -361,6 +368,9 @@ pub struct DirectMachine {
     /// The common call of what is not native code, which every code's
     /// calls of it go to.
     foreign: Offset,
+    /// The common making of a closure by call-out, which every code's
+    /// closures go to when the inline path has no room.
+    closure: Offset,
     stack: Vec<u64>,
     /// What each call-out any compiled code makes does, by number.
     callouts: Vec<Callout>,
@@ -404,13 +414,18 @@ impl DirectMachine {
         let trap_stub = space.alloc(4 * code.len(), 16).ok_or("no room for the common trap")?;
         space.write_code(trap_stub, &code);
         space.flush(trap_stub, 4 * code.len());
-        // Call-out 0: what is not native code, called (`common_foreign`).
-        let callouts = vec![Callout::Foreign];
+        // Call-out 0: what is not native code, called (`common_foreign`);
+        // 1: a closure made (`common_closure`).
+        let callouts = vec![Callout::Foreign, Callout::ClosureAny];
         let code = common_foreign(0);
         let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
         space.write_code(foreign, &code);
         space.flush(foreign, 4 * code.len());
-        Ok(DirectMachine { space, entry, mark_ret, trap_stub, foreign, stack: vec![0; STACK_WORDS], callouts })
+        let code = common_closure(1);
+        let closure = space.alloc(4 * code.len(), 16).ok_or("no room for the common closure")?;
+        space.write_code(closure, &code);
+        space.flush(closure, 4 * code.len());
+        Ok(DirectMachine { space, entry, mark_ret, trap_stub, foreign, closure, stack: vec![0; STACK_WORDS], callouts })
     }
 
     /// Compile `closure`'s procedure, and every procedure it calls or
@@ -493,6 +508,7 @@ impl DirectMachine {
         st.mark_ret = self.space.exec_addr(self.mark_ret) as u64;
         st.trap_stub = self.space.exec_addr(self.trap_stub) as u64;
         st.foreign = self.space.exec_addr(self.foreign) as u64;
+        st.closure = self.space.exec_addr(self.closure) as u64;
         // SAFETY: the trampoline follows the C convention, saves what it
         // must, runs on the stack in `self.stack` (which outlives the call),
         // and touches only the state and that stack; the procedure's code,
@@ -576,6 +592,37 @@ fn common_foreign(n: usize) -> Vec<u32> {
     a.e(add_imm(FRAME, SP, 0));
     a.e(str(X9, ST, st_off(offset_of!(DState, nargs))));
     a.e(str(CLO, ST, st_off(offset_of!(DState, aux))));
+    let args = offset_of!(DState, args) as u32;
+    for j in 0..8u32 {
+        a.e(str(1 + j as Reg, ST, args + 8 * j));
+    }
+    call_out(&mut a, n);
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+    a.e(cmp_imm(X9, 0));
+    let (failed, stub) = (a.label(), a.label());
+    a.to(failed, Fix::If(Cond::Ne));
+    a.e(ldp_post(FRAME, LINK, SP, 16));
+    a.e(ret());
+    a.bind(failed);
+    a.to(stub, Fix::Bl);
+    a.bind(stub);
+    a.e(movz(X9, PRIM_FAILED, 0));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
+    a.e(br(X16));
+    a.finish().expect("labels bound")
+}
+
+/// The common making of a closure by call-out: from a code's closure site
+/// whose inline path had no room, with the count of free values (in
+/// REG1…REGn) in X9 and the code in X17, by `blr`: a frame, what it needs
+/// into the state, call-out `n` (a `Callout::ClosureAny`), and back with
+/// the closure; or, if it failed, the trap. One for the machine.
+fn common_closure(n: usize) -> Vec<u32> {
+    let mut a = Asm::new();
+    a.e(stp_pre(FRAME, LINK, SP, -16));
+    a.e(add_imm(FRAME, SP, 0));
+    a.e(str(X9, ST, st_off(offset_of!(DState, nargs))));
+    a.e(str(X17, ST, st_off(offset_of!(DState, aux))));
     let args = offset_of!(DState, args) as u32;
     for j in 0..8u32 {
         a.e(str(1 + j as Reg, ST, args + 8 * j));
@@ -1215,12 +1262,12 @@ impl Compiling<'_> {
                 // everything live is in the frame by then (register code
                 // sees to it), and the arguments go through the state.
                 "prim" | "cellular" | "lambda" => {
+                    // A closure's code: this bloblet's field.
+                    let mut code_field = None;
                     let c = match (op, ROUTINES.get(k(o(0))).map(|r| r.0)) {
                         ("lambda", _) => {
                             let q = self.proc_of(o(0)).map_err(|e| format!("`{name}` makes a closure of {e}"))?;
-                            let f = self.field(p, Field::Code(q));
-                            ldr_field(&mut a, X9, f);
-                            a.e(str(X9, ST, st_off(offset_of!(DState, aux))));
+                            code_field = Some(self.field(p, Field::Code(q)));
                             Callout::Closure { n: k(o(1)) }
                         }
                         ("cellular", Some("cons")) if k(o(1)) == 2 => Callout::Cons,
@@ -1277,17 +1324,54 @@ impl Compiling<'_> {
                         a.e(ldur(RESULT, X11, -4));
                         a.to(done, Fix::B);
                     }
-                    a.bind(slow);
-                    let n = self.callouts.len();
-                    self.callouts.push(c);
-                    let args = offset_of!(DState, args) as u32;
-                    for j in 0..c.arity() {
-                        a.e(str(1 + j as Reg, ST, args + 8 * j as u32));
+                    // A native closure over REG1…REGn likewise, from the free
+                    // space: its header; its free values, the code, and the
+                    // trailer, fields counted back from where it points.
+                    if let (Callout::Closure { n }, Some(f)) = (c, code_field) {
+                        let total = n + 2;
+                        a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
+                        a.e(ldr(X14, X13, 0));
+                        a.e(ldr(X15, ST, st_off(offset_of!(DState, alloc_limit))));
+                        a.e(add_imm(X16, X14, (total + 1) as u32));
+                        a.e(cmp(X16, X15));
+                        a.to(slow, Fix::If(Cond::Hi));
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
+                        a.e(add_lsl(X11, X9, X14, 3));
+                        let header = fixpt_heap::value::make_header(fixpt_heap::layout::kind("native-closure"), total, 0);
+                        a.es(&mov_imm64(X17, header));
+                        a.e(str(X17, X11, 0));
+                        for i in 0..n {
+                            a.e(str(1 + i as Reg, X11, 8 * (n - i) as u32));
+                        }
+                        ldr_field(&mut a, X17, f);
+                        a.e(str(X17, X11, 8 * (n + 1) as u32));
+                        let trailer = fixpt_heap::layout::T_DISTANCE.put(fixpt_heap::value::TAG_TRAILER, total as u64);
+                        a.es(&mov_imm64(X17, trailer));
+                        a.e(str(X17, X11, 8 * total as u32));
+                        a.e(str(X16, X13, 0));
+                        a.e(add_imm(RESULT, X11, (8 * (total + 1)) as u32 + fixpt_heap::value::TAG_BLOBLET as u32));
+                        a.to(done, Fix::B);
                     }
-                    call_out(&mut a, n);
-                    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
-                    a.e(cmp_imm(X9, 0));
-                    trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
+                    a.bind(slow);
+                    // A closure the free space had no room for: the
+                    // machine's common routine makes it.
+                    if let (Callout::Closure { n }, Some(f)) = (c, code_field) {
+                        ldr_field(&mut a, X17, f);
+                        a.e(movz(X9, n as u32, 0));
+                        a.e(ldr(X16, ST, st_off(offset_of!(DState, closure))));
+                        a.e(blr(X16));
+                    } else {
+                        let n = self.callouts.len();
+                        self.callouts.push(c);
+                        let args = offset_of!(DState, args) as u32;
+                        for j in 0..c.arity() {
+                            a.e(str(1 + j as Reg, ST, args + 8 * j as u32));
+                        }
+                        call_out(&mut a, n);
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+                        a.e(cmp_imm(X9, 0));
+                        trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
+                    }
                     a.bind(done);
                 }
                 // A call. Of a global's procedure that captures nothing: its
@@ -1443,7 +1527,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let st = unsafe { &mut *st };
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
-    let n = if let Callout::Foreign = c { st.nargs as usize } else { c.arity() };
+    let n = if let Callout::Foreign | Callout::ClosureAny = c { st.nargs as usize } else { c.arity() };
     let mut args: Vec<Value> = st.args[..n].iter().map(|a| Value(*a)).collect();
     if let Callout::Foreign = c {
         args.push(Value(st.aux));
@@ -1457,7 +1541,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     }
     let out = match c {
         Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),
-        Callout::Closure { .. } => native_closure(&mut rt.heap, Value(st.aux), &args).raw(),
+        Callout::Closure { .. } | Callout::ClosureAny => native_closure(&mut rt.heap, Value(st.aux), &args).raw(),
         Callout::RegionClosure { n } => {
             let h = if args[0].is_fixnum() { args[0].as_fixnum() as usize } else { usize::MAX };
             let (free, code) = (&args[1..n - 1], args[n - 1]);

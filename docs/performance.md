@@ -1676,3 +1676,29 @@ What is left: closures for each atom's and list's `letrec` procedures,
 called from inside a mark's thunk, so not join points (lambda lifting
 would take them); the atoms' character lists; the marks of lists, whose
 shape the Scheme and Rust readers share.
+
+## Native code: shared stubs, closures made inline (2026-09-28)
+
+The user's example, `,disassemble-asm (lambda () ((lambda ((y int))
+(lambda ((x int)) (+ y x))) 3))` in the native convention: three code
+objects of 114, 76 and 19 instructions, growing outward. Not the nested
+lambdas compiled more than once (fixed before); each object carried its
+own copy of code that depends on nothing in it.
+
+- **Traps** (#76): each object had, for each kind of trap it could raise,
+  14 instructions that record the trap and leave. Now the machine has one
+  common trap (`common_trap`), and an object's stub for a kind is three
+  instructions that go there, the return address still the site's.
+- **Calls of what is not native code**: the routine that calls out for
+  them (some 28 instructions) is the machine's too (`common_foreign`).
+- **Closures** (#75): made inline, as pairs are, from the heap's free
+  space when there is room short of the collection's threshold: the
+  header, the free values from REG1…REGn, the code, the trailer, and the
+  top bumped. When there is no room, the machine's common routine
+  (`common_closure`, call-out `ClosureAny`) makes it, in four instructions
+  at the site.
+
+The example's objects: 114, 76, 19 → 54, 44, 8 instructions. `captures`
+natively 22.3 → 18.4 ms; `closures` unchanged (its time is elsewhere). A
+procedure that makes a closure still has a frame, for the call-out: a
+leaf would need register code to count making a closure as not calling.
