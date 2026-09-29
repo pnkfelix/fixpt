@@ -223,6 +223,26 @@ thread_local! {
     /// A whole continuation of cellular code, and its value, thrown past
     /// the native code running: the call traps, and the caller throws it on.
     static THROWN: std::cell::Cell<Option<(Value, Value)>> = const { std::cell::Cell::new(None) };
+    /// While native code has called out to run cellular code: how to run
+    /// native code, and the native stack's pointer as it called out, below
+    /// which a native call from that cellular code runs (`call_native`),
+    /// the machine being in use.
+    static CALLED_OUT: std::cell::Cell<Option<(Runner, u64)>> = const { std::cell::Cell::new(None) };
+    /// The run of native code innermost, if one is running.
+    static RUNNING: std::cell::Cell<Option<Runner>> = const { std::cell::Cell::new(None) };
+}
+
+/// What a run of native code needs of its machine: where the trampoline,
+/// stubs and call-outs' table are, and the stack's lowest address.
+#[derive(Clone, Copy)]
+struct Runner {
+    entry: u64,
+    mark_ret: u64,
+    trap_stub: u64,
+    foreign: u64,
+    closure: u64,
+    table: u64,
+    stack_lo: u64,
 }
 
 /// The continuation, and its value, that the last call that trapped threw
@@ -250,8 +270,46 @@ pub fn compile_closure(heap: &mut Heap, closure: Value) -> Result<Value, String>
     with_machine(|m| m.compile(heap, closure).map(|procs| procs[0].1.closure))?
 }
 
+/// A runtime's `adapt` (`%fx26-convert`): an adapter of `f`, of `arity`
+/// arguments, to the native convention if `native`, else to the cellular
+/// one. To the native convention, a native closure over `f` whose code
+/// calls it as native code calls what is not native code, through the
+/// machine's `common_foreign`, in a tail call:
+///
+/// ```text
+/// ldur x10, [x10, #free 0]    the closure called: now `f`
+/// movz x9, #arity
+/// ldr  x16, [x24, #foreign]
+/// br   x16
+/// ```
+pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bool) -> Result<Value, String> {
+    let heap = &mut rt.heap;
+    if !native {
+        return Ok(fixpt_engine::cellular::cellular_adapter(heap, f, arity));
+    }
+    if arity > 8 {
+        return Err("an adapter to the native convention of more than 8 arguments".into());
+    }
+    let mut a = Asm::new();
+    a.e(ldur(CLO, CLO, field_off(CLOSURE_FREE0)));
+    a.e(movz(X9, arity as u32, 0));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, foreign))));
+    a.e(br(X16));
+    let code = a.finish().expect("no labels");
+    let blob = heap.make_code_bloblet(fixpt_heap::layout::kind("bloblet"), 1, 4 * code.len(), false);
+    heap.set_bloblet_slot(blob, 1, blob);
+    let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
+    heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
+    heap.flush_code(blob);
+    Ok(native_closure(heap, blob, &[f]))
+}
+
 /// A runtime's `call_native`: native closure `closure` called with `args`
 /// on this thread's machine, in the steps a word may take.
+///
+/// Called from cellular code that native code called, the machine is in
+/// use: the call runs on its stack below the frames of the run that called
+/// out, whose values that call-out keeps rooted.
 pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Value]) -> Result<Value, fixpt_runtime::NativeExit> {
     let fail = fixpt_runtime::NativeExit::Failed;
     let p = DirectMachine::compiled_of(&rt.heap, closure).ok_or_else(|| fail("not a native closure".into()))?;
@@ -259,7 +317,17 @@ pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Valu
         return Err(fail("a native call of more than 8 arguments".into()));
     }
     let fuel = rt.word_fuel.min(u64::MAX >> 1);
-    with_machine(|m| m.call(rt, p, args, fuel)).map_err(fail)?.map_err(|t| match take_thrown() {
+    let r = match CALLED_OUT.with(|c| c.get()) {
+        Some((runner, sp)) => {
+            let top = (sp - 16) & !15;
+            if top < runner.stack_lo + 2 * STACK_SLACK {
+                return Err(fail("stack overflow".into()));
+            }
+            run(&runner, rt, p, args, fuel, top)
+        }
+        None => with_machine(|m| m.call(rt, p, args, fuel)).map_err(fail)?,
+    };
+    r.map_err(|t| match take_thrown() {
         Some((k, v)) => fixpt_runtime::NativeExit::Throw { k, v },
         None => fail(t.what),
     })
@@ -480,51 +548,20 @@ impl DirectMachine {
     /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
     /// heap its call-outs allocate in, collecting when they must.
     pub fn call(&mut self, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
-        assert!(p.arity == usize::MAX || args.len() == p.arity, "the procedure's arity");
-        assert!(args.len() <= 8, "arguments in registers only");
-        THROWN.with(|t| t.set(None));
         let top = (self.stack.as_mut_ptr() as u64 + 8 * STACK_WORDS as u64) & !15;
-        let mut st = DState {
-            stack_top: top,
-            stack_limit: self.stack.as_ptr() as u64 + STACK_SLACK,
-            fuel,
-            callout: callout as *const () as u64,
-            rt: rt as *mut fixpt_runtime::Runtime as u64,
+        run(&self.runner(), rt, p, args, fuel, top)
+    }
+
+    fn runner(&self) -> Runner {
+        Runner {
+            entry: self.space.exec_addr(self.entry) as u64,
+            mark_ret: self.space.exec_addr(self.mark_ret) as u64,
+            trap_stub: self.space.exec_addr(self.trap_stub) as u64,
+            foreign: self.space.exec_addr(self.foreign) as u64,
+            closure: self.space.exec_addr(self.closure) as u64,
             table: self.callouts.as_ptr() as u64,
-            top: rt.heap.top_address() as u64,
-            words: rt.heap.words_address() as u64,
-            alloc_limit: rt.heap.inline_limit() as u64,
-            regions: Value::fixnum(rt.heap.live_regions() as i64).raw(),
-            ..DState::default()
-        };
-        for (i, a) in args.iter().enumerate() {
-            st.args[i] = a.raw();
+            stack_lo: self.stack.as_ptr() as u64,
         }
-        st.code = p.code.raw();
-        st.clo = p.closure.raw();
-        let target = rt.heap.code_exec_address(p.code) as u64;
-        st.delta = target.wrapping_sub(p.code.raw());
-        st.code_lo = rt.heap.code_area_address() as u64;
-        st.mark_ret = self.space.exec_addr(self.mark_ret) as u64;
-        st.trap_stub = self.space.exec_addr(self.trap_stub) as u64;
-        st.foreign = self.space.exec_addr(self.foreign) as u64;
-        st.closure = self.space.exec_addr(self.closure) as u64;
-        // SAFETY: the trampoline follows the C convention, saves what it
-        // must, runs on the stack in `self.stack` (which outlives the call),
-        // and touches only the state and that stack; the procedure's code,
-        // compiled above, reads only its arguments and what they point to,
-        // in the heap of `rt`, which is exclusively this call's while it
-        // runs; it changes only in call-outs, which see every value the
-        // native frames hold (`callout`).
-        let r = unsafe { self.space.call(self.entry, [&mut st as *mut DState as u64, target, 0, 0]) };
-        if st.trap != 0 {
-            let what = match LAST_MESSAGE.with(|m| m.borrow_mut().take()) {
-                Some(m) if st.trap == PRIM_FAILED as u64 => m,
-                _ => TRAPS[st.trap as usize].to_string(),
-            };
-            return Err(DirectTrap { what, pc: st.pc });
-        }
-        Ok(Value(r))
     }
 
     /// `p`'s instructions, as they are in its code bloblet.
@@ -532,6 +569,56 @@ impl DirectMachine {
         let bytes = heap.bloblet_bytes(p.code);
         (0..p.len).map(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().expect("four bytes"))).collect()
     }
+}
+
+/// Run `p` with `args`, in at most about `fuel` steps, in `rt`, whose heap
+/// its call-outs allocate in, on `r`'s machine's stack from `top` down.
+fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64, top: u64) -> Result<Value, DirectTrap> {
+    assert!(p.arity == usize::MAX || args.len() == p.arity, "the procedure's arity");
+    assert!(args.len() <= 8, "arguments in registers only");
+    THROWN.with(|t| t.set(None));
+    let mut st = DState {
+        stack_top: top,
+        stack_limit: r.stack_lo + STACK_SLACK,
+        fuel,
+        callout: callout as *const () as u64,
+        rt: rt as *mut fixpt_runtime::Runtime as u64,
+        table: r.table,
+        top: rt.heap.top_address() as u64,
+        words: rt.heap.words_address() as u64,
+        alloc_limit: rt.heap.inline_limit() as u64,
+        regions: Value::fixnum(rt.heap.live_regions() as i64).raw(),
+        ..DState::default()
+    };
+    for (i, a) in args.iter().enumerate() {
+        st.args[i] = a.raw();
+    }
+    st.code = p.code.raw();
+    st.clo = p.closure.raw();
+    let target = rt.heap.code_exec_address(p.code) as u64;
+    st.delta = target.wrapping_sub(p.code.raw());
+    st.code_lo = rt.heap.code_area_address() as u64;
+    (st.mark_ret, st.trap_stub, st.foreign, st.closure) = (r.mark_ret, r.trap_stub, r.foreign, r.closure);
+    // SAFETY: the trampoline follows the C convention, saves what it
+    // must, runs on the machine's stack from `top` (which outlives the
+    // call, and which nothing else uses below `top` while it runs),
+    // and touches only the state and that stack; the procedure's code,
+    // compiled above, reads only its arguments and what they point to,
+    // in the heap of `rt`, which is exclusively this call's while it
+    // runs; it changes only in call-outs, which see every value the
+    // native frames hold (`callout`).
+    let entry: extern "C" fn(u64, u64, u64, u64) -> u64 = unsafe { std::mem::transmute(r.entry as usize) };
+    let outer = RUNNING.replace(Some(*r));
+    let v = entry(&mut st as *mut DState as u64, target, 0, 0);
+    RUNNING.set(outer);
+    if st.trap != 0 {
+        let what = match LAST_MESSAGE.with(|m| m.borrow_mut().take()) {
+            Some(m) if st.trap == PRIM_FAILED as u64 => m,
+            _ => TRAPS[st.trap as usize].to_string(),
+        };
+        return Err(DirectTrap { what, pc: st.pc });
+    }
+    Ok(Value(v))
 }
 
 /// From Rust, `entry(state, procedure)`: the callee-saved registers saved,
@@ -766,8 +853,11 @@ impl Compiling<'_> {
         let v = self.heap.bloblet_slot(cell, 2);
         // Not defined yet (a definition of itself, being compiled): what its
         // cell holds when the code runs.
+        // A cellular closure of no register code (an adapter) cannot be
+        // compiled: called through its cell, as what is not native code.
         if let Some((word, free)) = self.closure_parts(v)
             && self.name(word) != "undefined"
+            && self.heap.is_register_word(self.heap.bloblet_slot(word, WORD_TWIN))
         {
             let q = self.proc_of(word)?;
             return Ok(match free.is_empty() {
@@ -1582,7 +1672,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             let held: Vec<Value> = native_frames(st).iter().flat_map(|s| s.iter().copied()).collect();
             let kept = rt.heap.vector_from(&held);
             let at = rt.heap.push_root(kept);
+            // A native call from the cellular code runs below these frames.
+            let runner = RUNNING.get().expect("native code is running");
+            let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));
             let r = fixpt_engine::cellular::call_value(rt, *f, args);
+            CALLED_OUT.set(outer);
             let kept = rt.heap.root_at(at);
             rt.heap.pop_roots_to(at);
             let mut i = 0;

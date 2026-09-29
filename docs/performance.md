@@ -1808,3 +1808,44 @@ The read: 13.1 → 11.8 M words, five collections → four, 0.060 → 0.054 s.
 The check phase after it now takes three collections where it took two
 (the thresholds moved), so the self-compile as a whole is the same
 (0.723 → 0.730 s, 58.8 → 57.9 M words).
+
+## Conversions between conventions: adapters (2026-09-29)
+
+A procedure of one convention given where the other is expected is
+converted by `%fx26-convert`, which both checkers record with the
+procedure's arity and all four compilers emit: a value already of the
+kind asked for is itself; one of the other kind becomes an adapter, a
+closure of that kind over it whose code calls it. A cellular adapter's
+word is `free 0; tailcall n`; a native adapter's code is four
+instructions into the machine's `common_foreign`. A call of a procedure of
+the other convention needs nothing: every machine's call looks at its
+callee's kind, as a call through `fx` does.
+
+What a call through an adapter costs, 10^6 calls of `(lambda (x) (+ x 1))`
+from a cellular loop (the `rust` machine):
+
+| callee                              | time    |
+| ----------------------------------- | -------:|
+| a cellular closure, an unknown call | 0.11 s  |
+| a native adapter over it            | 0.53 s  |
+
+About 0.4 µs a call more: cellular code calls native code through the
+runtime's `call_native`, and the adapter calls the cellular closure through
+a call-out that runs it on a cellular machine of its own, for which
+`call_value` builds a word each time. Nothing in the benchmarks converts,
+and their times are unchanged.
+
+Native code may now call cellular code that calls native code, to any
+depth: the inner native call runs on the machine's stack below the frames
+of the run that called out (a machine was in use before, and the call
+failed). 300 such levels, collecting every 50 safepoints, are in
+`conversions_make_adapters`.
+
+A standard operation as a value (`(m * 5)`, `(app2 cons 7)`) is a closure
+of a word the compilers make for it; that word now has register code too
+(its operands already in REG1…REGn; a call-out made in a frame), and the
+register compilers make the closure where the stack compilers did, instead
+of declining the procedure. A name a standard operation has is no longer
+"simple" to the register compilers, since it may be such a closure, made
+when needed. Of every test program's forms, 102 expressions ran as
+machine code before these changes, with the widened report; 115 now.

@@ -784,6 +784,27 @@ prims! {
         rt.heap.set_bloblet_slot(a[0], fixpt_heap::layout::cellular::CLOSURE_WORD, a[1]);
         Ok(rt.heap.intern("#u"))
     });
+    // A procedure converted to a convention (`docs/research/native-conventions.md`):
+    // `a[1]` is its arity times 4, plus 1 for `cellular` or 2 for `native`.
+    // A procedure already of that convention is itself; one of the other,
+    // an adapter (`Runtime::adapt`); anything else is itself, as every
+    // machine's call looks at its callee's kind.
+    "%fx26-convert", 2, Some(2), simple!(|rt, a| {
+        let (f, code) = (a[0], a[1].as_fixnum());
+        let native = code & 3 == 2;
+        let is = |rt: &Runtime, k: &str| f.is_bloblet() && rt.heap.bloblet_kind(f) == fixpt_heap::layout::kind(k);
+        let (cellular, is_native) = (is(rt, "cellular-closure") || is(rt, "cellular-continuation"), is(rt, "native-closure"));
+        if (native && cellular) || (!native && is_native) {
+            let Some(adapt) = rt.adapt else {
+                return rt.fail("no procedure of the other convention can be made here", &[f]);
+            };
+            return match adapt(rt, f, (code >> 2) as usize, native) {
+                Ok(v) => Ok(v),
+                Err(m) => rt.fail(&m, &[f]),
+            };
+        }
+        Ok(f)
+    });
     "%fx26-sum-cell", 2, Some(2), simple!(|rt, a| Ok(rt.heap.make_frozen(SUM_KIND, &a[..2])));
     "%fx26-product-cell", 1, Some(1), simple!(|rt, a| {
         let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };

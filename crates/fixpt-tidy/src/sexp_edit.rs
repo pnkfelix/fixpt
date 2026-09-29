@@ -195,6 +195,19 @@ pub fn insert_after(text: &str, profile: SyntaxProfile, name: &str, new: &str) -
     splice(text, profile, d.end, d.end, &by)
 }
 
+/// Remove the definition `name`, with its comments: its lines, whole.
+pub fn delete(text: &str, profile: SyntaxProfile, name: &str) -> Result<String, String> {
+    let d = find(text, profile, name)?;
+    let from = text[..d.lead].rfind('\n').map_or(0, |i| i + 1);
+    let to = text[d.end..].find('\n').map_or(text.len(), |i| d.end + i + 1);
+    if !text[from..d.lead].trim().is_empty() || !text[d.end..to].trim().is_empty() {
+        return Err(format!("`{name}` shares a line with other text"));
+    }
+    let out = format!("{}{}", &text[..from], &text[to..]);
+    check(&out, profile).map_err(|e| format!("the deletion would not read: {e}"))?;
+    Ok(out)
+}
+
 /// Move the definition `name`, with its comments, to just before `other`.
 pub fn move_before(text: &str, profile: SyntaxProfile, name: &str, other: &str) -> Result<String, String> {
     let d = find(text, profile, name)?;

@@ -5,6 +5,7 @@
 (define twice (subr pure ((subr pure (int) int) int) int) (lambda (f x) (f (f x))))
 ,native twice
 (define call-c (subr pure ((subr (conv cellular) pure (int) int)) int) (lambda (f) (f 1)))
+(call-c (lambda ((x int)) (+ x 2000)))
 (fib 25)
 (twice (lambda ((x int)) (+ x 5)) 32)
 (lambda ((x int)) x)

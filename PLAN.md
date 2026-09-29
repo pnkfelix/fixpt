@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-09-28)
+## At a glance (kept current; last updated 2026-09-29)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -33,23 +33,32 @@ are in the last section, "Log: the glance's details", and in
   constant data made once; operands in written order, constant chains
   combined; tests compiled as jumps.
 - **The native convention** (`docs/research/native-conventions.md`), steps
-  1–4 in large part: conventions in types; native frames, `bl`/`ret`;
-  code in the heap's collected code area; closures and higher-order code;
-  native and cellular code calling each other. Closures and pairs made
-  inline; one common trap, foreign call and closure call-out per machine.
+  1–5 in large part (the collector's part of step 3 is below): conventions
+  in types; native frames, `bl`/`ret`; code in the heap's collected code
+  area; closures and higher-order code; prompts, marks and continuations
+  on native frames. Native and cellular code call each other, nested to
+  any depth; a conversion between conventions makes an adapter
+  (`%fx26-convert`), and a procedure of the other convention is called as
+  through `fx` (2026-09-29). Closures and pairs made inline; one common
+  trap, foreign call and closure call-out per machine. Of every test
+  program's forms, as the REPL runs them, 115 expressions run as machine
+  code; the three declined call `stay-cellular` by design.
 - **Tools**: `fixpt check|compile|eval INPUT` (both checkers, both
   compilers); `sexp-edit`, `edit` included; the phase probe
   (`probe_phases_as_register_code`), with collections and allocation by
   word.
 
 **In progress**
-- **The native convention**: of every test program's forms, as the REPL
-  runs them, 72 expressions run as machine code and none is declined
-  (2026-09-28, `every_test_program_runs_natively_as_cellular`; the 35
-  definitions once declined now run natively, checked against the type
-  they declare). Left of step 4: polymorphism in conventions (a copy per
-  convention) and adapters between conventions, to design with the user;
-  then steps 6 and 7.
+- **The collector and native code** (the user's, 2026-09-29, next): stack
+  maps (frames laid out as bloblets: traced slots counted in a header, the
+  link and return address untraced), then a write barrier, a remembered
+  set and a nursery. Today frames are walked by their links, every slot a
+  value, and there is one generation.
+- **The native convention, after step 4**: steps 6 (checks where work is
+  unbounded; retire `native-compiled` and register code's twins) and 7
+  (the closure experiment). A copy of polymorphic code per convention
+  waits on calls in a specific convention no longer looking at their
+  callee's kind, which is all it would save.
 - **The reader's allocation** (the user's): 18.4 → 11.8 M words to read
   the front end (a cursor a token, lambda lifting, atoms taken whole from
   the text); left are the marks of lists, whose shape the Scheme and Rust
@@ -101,6 +110,11 @@ are in the last section, "Log: the glance's details", and in
   user.
 - Older items may still be done but unmarked; when one is found, mark it
   where it is written.
+- Known, in a test harness only: a session that runs the Rust front end
+  with a native runner checks a redefinition with the checker written in
+  FX-26's `check-more`, which rejects one that breaks a dependent where
+  the REPL breaks it with a note (`redefine/knot-spin.fx` in the report
+  `every_test_program_runs_natively_as_cellular`).
 
 **Contents** (the plan as it grew): §0 What this is; §1 Findings from the
 archive; §2 Architecture; §3 The core runtime; §4 The core Scheme engine;

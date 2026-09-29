@@ -287,8 +287,29 @@ its code in one.
    run as machine code and none is declined; the definitions once
    declined (35, their initializers not checking outside their
    definitions) now run natively, checked against the type they declare.
-   Still to do: polymorphism in conventions and a copy per convention;
-   adapters between conventions.
+   Conversions and calls between the conventions (2026-09-29): a
+   procedure of the other convention is called as through `fx`, since
+   every machine's call looks at its callee's kind; a conversion to a
+   specific convention is `%fx26-convert`, which gives a value already of
+   that kind back, and otherwise an adapter, a closure of the kind asked
+   for over the value, whose code calls it (a cellular word `free 0;
+   tailcall n`, or four instructions of native code into the machine's
+   `common_foreign`). The checkers record each conversion with its arity,
+   and all four compilers (stack and register code, Rust and FX-26) and
+   the lowering emit it. Native code may now call cellular code that calls
+   native code, to any depth: a native call made from cellular code that
+   native code called runs on the same stack, below the frames of the run
+   that called out (`CALLED_OUT`). A global holding a cellular closure
+   without register code (an adapter) is called through its cell. A
+   standard operation as a value is a closure whose word has register code
+   too, so a procedure that makes one is compiled natively
+   (`programs/native/adapters.fx`, `conversions_make_adapters`).
+   Polymorphism in conventions needs nothing more while every call looks
+   at its callee's kind: polymorphic code runs in each convention it is
+   used at, and the standard operations as values are in each. A copy per
+   convention would save that look (a compare and a branch in native
+   code's unknown calls), and belongs with the step that stops calls in a
+   specific convention from looking, if measurement says it pays.
 5. **Continuations, prompts and marks** on native frames (done,
    2026-09-28; `control_on_native_frames` in `tests/direct.rs`). A prompt,
    and a mark, is a 48-byte frame of its own around the thunk's call: the

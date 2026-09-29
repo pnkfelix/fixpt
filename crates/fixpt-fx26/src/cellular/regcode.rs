@@ -53,6 +53,9 @@ enum RLoc {
 #[derive(Clone, Copy)]
 enum Arg {
     E(ExpId),
+    /// An expression's value, not converted as the checker said it is
+    /// (the conversion's own operand).
+    AsIs(ExpId),
     V(Value),
     Thunk(ExpId),
     /// A variable's value, wherever it is (a lifted procedure's added
@@ -403,6 +406,51 @@ impl Compiler<'_> {
         }
     }
 
+    /// Register code for a standard operation as a value (`standard_value`):
+    /// its operands are its parameters, in REG1…REGn already, and a
+    /// call-out, if it is one, is made in a frame. None for one done in
+    /// several instructions, or that takes control (the closure then has
+    /// stack code only).
+    pub(super) fn r_standard_word(&mut self, name: &str, n: usize) -> O<Vec<Value>> {
+        let std = self.r_standard(name, n)?;
+        let callout = matches!(std, Std::Prim(_) | Std::Cellular(_));
+        let mut g = Gen { items: Vec::new(), leaf: !callout, next_reg: n, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new(), looped: false };
+        g.op("args", &[Gen::n(n)]);
+        if callout {
+            g.cell(Value::fixnum(op("save") as i64));
+            g.items.push(RItem::Frame);
+        }
+        let r = |name: &str| Value::fixnum(routine(name) as i64);
+        match std {
+            Std::Op2 { r: o, swap, not } => {
+                let (a, b) = if swap { (2, 1) } else { (1, 2) };
+                g.op("reg", &[Gen::n(a)]);
+                g.op("op2", &[r(o), Gen::n(b)]);
+                if not {
+                    g.op("op2imm", &[r("eq"), Value::FALSE]);
+                }
+            }
+            Std::Op1(o) => {
+                g.op("reg", &[Gen::n(1)]);
+                g.op("op1", &[r(o)]);
+            }
+            Std::Op2Imm(o, v) => {
+                g.op("reg", &[Gen::n(1)]);
+                g.op("op2imm", &[r(o), v]);
+            }
+            Std::Field(k) => {
+                g.op("reg", &[Gen::n(1)]);
+                g.op("field", &[Value::fixnum(k)]);
+            }
+            Std::Identity => g.op("reg", &[Gen::n(1)]),
+            Std::Prim(p) => g.op("prim", &[Value::fixnum(p), Gen::n(n)]),
+            Std::Cellular("cons") => g.op("cellular", &[r("cons"), Gen::n(n)]),
+            _ => return None,
+        }
+        g.done(true);
+        Some(g.assemble())
+    }
+
     /// The operator under the type abstractions, projections, ascriptions
     /// and conversions, which compile to nothing: `((proj car @r) xs)` is
     /// `car` applied.
@@ -441,6 +489,9 @@ impl Compiler<'_> {
     /// Whether evaluating `x` may call or call out, and so collect. Loops
     /// do not; declined forms are said to, which does not matter.
     fn r_collects(&mut self, x: ExpId, e: &Env, this: Option<This>, tail: bool) -> bool {
+        if self.c.facts.conversion_code(x).is_some() {
+            return true;
+        }
         match self.c.arena.exp_at(x).clone() {
             // Join points only: no closure made, and their calls are jumps.
             Exp::Letrec { bindings, body } if tail && (0..bindings.len()).all(|i| self.r_join_ok(&bindings, body, i)) => {
@@ -456,6 +507,8 @@ impl Compiler<'_> {
                         None => true,
                     })
             }
+            // A standard operation as a value: a closure made.
+            Exp::Var(n) if self.where_is(e, n).is_none() && Self::arity(self.name(n)).is_some() => !tail,
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => false,
             // A closure made as the value: its call-out may collect, but
             // nothing is used after it (`r_lambda`).
@@ -533,14 +586,29 @@ impl Compiler<'_> {
     /// Whether `x` is a variable or a constant: evaluated in `RESULT` alone,
     /// with no effect, so it may wait until its value is needed.
     fn r_simple(&self, x: ExpId) -> bool {
-        matches!(
-            self.c.arena.exp_at(x),
-            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit | Exp::Str(_)
-        )
+        let plain = match self.c.arena.exp_at(x) {
+            // Not a name a standard operation has, which may be one made a
+            // value, a closure.
+            Exp::Var(n) => Self::arity(self.name(*n)).is_none(),
+            Exp::Int(_) | Exp::Bool(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit | Exp::Str(_) => true,
+            _ => false,
+        };
+        plain && self.c.facts.conversion_code(x).is_none()
     }
 
     /// `x`'s value into `RESULT`; in tail position, returned.
     fn r_exp(&mut self, g: &mut Gen, x: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        // A procedure converted to a convention: made, then given to
+        // `%fx26-convert` with what it is converted to.
+        if let Some(k) = self.c.facts.conversion_code(x) {
+            self.r_prim(g, "%fx26-convert", &[Arg::AsIs(x), Arg::V(Value::fixnum(k))], env, te)?;
+            g.done(tail);
+            return Some(());
+        }
+        self.r_exp_as_is(g, x, env, te, tail)
+    }
+
+    fn r_exp_as_is(&mut self, g: &mut Gen, x: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         if let Some(v) = self.r_const(env, x) {
             g.op("const", &[v]);
             g.done(tail);
@@ -555,7 +623,18 @@ impl Compiler<'_> {
                     Some(RLoc::Global(c)) => g.op("global", &[c]),
                     Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_) | RLoc::Join(_) | RLoc::Lifted(_)) => return None,
                     None if self.name(n) == "nil" => g.op("const", &[Value::NULL]),
-                    None => return self.decline("a standard operation as a value"),
+                    // A standard operation as a value: its closure, of the
+                    // word the stack code makes for it, and that word's
+                    // register code. A leaf makes it only in tail position.
+                    None if g.leaf && !tail => return self.decline("a standard operation as a value, in a leaf"),
+                    None => {
+                        let mut made = Vec::new();
+                        if self.standard_value(&self.name(n).to_string(), &mut made).is_err() {
+                            return self.decline("a standard operation as a value");
+                        }
+                        let Some(super::Item::Cell(w)) = made.get(1).cloned() else { return None };
+                        g.op("lambda", &[w, Gen::n(0)]);
+                    }
                 }
                 g.done(tail);
             }
@@ -1623,7 +1702,7 @@ impl Compiler<'_> {
     /// Where `x` is, if it is a variable.
     fn r_var(&self, env: &[(Sym, RLoc)], x: ExpId) -> O<RLoc> {
         match self.c.arena.exp_at(x) {
-            Exp::Var(n) => self.r_where(env, *n),
+            Exp::Var(n) if self.c.facts.conversion_code(x).is_none() => self.r_where(env, *n),
             _ => None,
         }
     }
@@ -1704,7 +1783,7 @@ impl Compiler<'_> {
         let simple = |c: &Self, a: &Arg| match a {
             Arg::E(x) => c.r_simple(*x),
             Arg::V(_) | Arg::Name(_) | Arg::Slot(_) | Arg::Lexical(_) => true,
-            Arg::Thunk(_) => false,
+            Arg::Thunk(_) | Arg::AsIs(_) => false,
         };
         // The last argument that is not simple goes straight to its
         // register, when the procedure is simple too: all that follows it
@@ -1720,6 +1799,7 @@ impl Compiler<'_> {
             }
             match a {
                 Arg::E(x) => self.r_exp(g, *x, env, te, false)?,
+                Arg::AsIs(x) => self.r_exp_as_is(g, *x, env, te, false)?,
                 Arg::Thunk(body) => {
                     self.r_lambda(g, &[], *body, env, te, None, None, false)?;
                 }
@@ -1771,7 +1851,7 @@ impl Compiler<'_> {
                     g.op("lexical", &[Gen::n(*k)]);
                     g.op("setreg", &[Gen::n(i + 1)]);
                 }
-                (None, Arg::Thunk(_)) => unreachable!(),
+                (None, Arg::Thunk(_) | Arg::AsIs(_)) => unreachable!(),
             }
         }
         match (f, fun) {

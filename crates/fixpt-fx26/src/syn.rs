@@ -316,6 +316,11 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     let facts: Vec<(i64, i64, i64)> = facts
         .into_iter()
         .chain(c.effect_summaries().into_iter().map(|((a, b), s)| (char_at(a), char_at(b), -1 - s as i64)))
+        // And each conversion, as -1000 - its code (`k-convert-at`).
+        .chain(c.facts.converted.keys().filter_map(|e| {
+            let span = c.arena.span_of(*e);
+            c.facts.conversion_code(*e).map(|k| (char_at(span.start), char_at(span.end), -1000 - k))
+        }))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut list = scheme.make(|_| Value::NULL);

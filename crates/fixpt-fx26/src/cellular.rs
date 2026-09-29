@@ -452,6 +452,19 @@ impl<'a> Compiler<'a> {
     }
 
     fn exp(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
+        // A procedure converted to a convention: made, then given to
+        // `%fx26-convert` with what it is converted to.
+        if let Some(k) = self.c.facts.conversion_code(x) {
+            self.exp_as_is(x, e, depth, code, false)?;
+            self.int(code, k);
+            self.prim(code, "%fx26-convert", 2)?;
+            self.done(code, tail);
+            return Ok(());
+        }
+        self.exp_as_is(x, e, depth, code, tail)
+    }
+
+    fn exp_as_is(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         match self.c.arena.exp_at(x).clone() {
             Exp::Var(n) => {
                 match self.where_is(e, n) {
@@ -1215,6 +1228,14 @@ impl<'a> Compiler<'a> {
         }
         self.op(&mut body, "return");
         let w = self.assemble(&body, name)?;
+        // Register code too, for the native compiler to start from.
+        if self.registers
+            && let Some(cells) = self.r_standard_word(name, n)
+        {
+            let sym = self.heap.intern(name);
+            let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
+            self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
+        }
         self.op1(code, "closure", w);
         code.push(Item::Cell(Value::fixnum(0)));
         Ok(())

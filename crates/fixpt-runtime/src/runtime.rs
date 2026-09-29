@@ -44,6 +44,10 @@ pub struct Runtime {
     /// convention (`fixpt-native` installs it): its value, or why it
     /// stopped. None: such a call is a type error.
     pub call_native: Option<CallNative>,
+    /// How `%fx26-convert` makes an adapter (`fixpt-native` installs it):
+    /// a procedure of the other convention that calls the one given.
+    /// None: no procedure of the other convention can be made here.
+    pub adapt: Option<Adapt>,
     /// How many steps (cells, or polls in machine code) a run of a word by
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
@@ -57,6 +61,11 @@ pub type RunWord = fn(&mut Runtime, Value, &[Value]) -> Result<Value, String>;
 /// Call native closure `closure` with `args`: its value, or how it left.
 /// Every value the caller holds must be rooted, since the call may collect.
 pub type CallNative = fn(&mut Runtime, Value, &[Value]) -> Result<Value, NativeExit>;
+
+/// An adapter of procedure `f`, of `arity` arguments, to the native
+/// convention if `native`, else to the cellular one: a procedure of that
+/// convention that calls `f`; or why none could be made.
+pub type Adapt = fn(&mut Runtime, Value, usize, bool) -> Result<Value, String>;
 
 /// How a call between machines left, if not with a value.
 #[derive(Debug)]
@@ -110,6 +119,7 @@ impl Runtime {
             show_machine_code: false,
             native_code: None,
             call_native: None,
+            adapt: None,
             word_fuel: u64::MAX,
         }
     }
@@ -192,6 +202,7 @@ impl Runtime {
             show_machine_code: false,
             native_code: None,
             call_native: None,
+            adapt: None,
             word_fuel: u64::MAX,
         }
     }

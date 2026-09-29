@@ -405,6 +405,12 @@ impl Lowerer<'_> {
                 self.go(handler)
             ),
         };
+        // A conversion shows where it went; a Scheme procedure is of
+        // neither convention, so it gives the procedure back.
+        let code = match self.c.facts.conversion_code(e) {
+            Some(k) => format!("(%fx26-convert {code} {k})"),
+            None => code,
+        };
         self.annotate(e, code)
     }
 

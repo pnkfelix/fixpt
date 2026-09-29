@@ -1227,6 +1227,18 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
     }
 }
 
+/// A cellular closure that calls `f`, a procedure of `arity` arguments of
+/// another convention, with its own arguments: an adapter to the cellular
+/// convention (`%fx26-convert`). Its word calls `f`, its one free value,
+/// in a tail call, which calls native code as every call here does.
+pub fn cellular_adapter(heap: &mut Heap, f: Value, arity: usize) -> Value {
+    let word = WordBuilder::new().free(0).tailcall(arity).build(heap, "adapter");
+    let c = heap.make_bloblet(kind("cellular-closure"), 2, 0, true);
+    heap.set_bloblet_slot(c, CLOSURE_WORD, word);
+    heap.set_bloblet_slot(c, CLOSURE_FREE0, f);
+    c
+}
+
 /// A thrown value as a message.
 /// What a primitive raised, as a trap's message.
 pub fn describe(rt: &Runtime, obj: Value) -> String {

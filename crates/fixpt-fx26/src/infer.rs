@@ -236,8 +236,9 @@ impl Checker {
         if self.subtype(got, want) {
             return Ok(());
         }
-        if let Some(c) = self.conversion(got, want) {
-            return self.convert_at(e, c);
+        if let Some((c, n)) = self.conversion(got, want) {
+            self.convert_at(e, c, n);
+            return Ok(());
         }
         Err(FxError::at(
             self.arena.span_of(e),
@@ -247,8 +248,8 @@ impl Checker {
 
     /// The convention `want` asks of `got`, where a procedure differs from
     /// what is expected only in its convention, so that a conversion makes
-    /// it one (`docs/research/native-conventions.md`).
-    fn conversion(&mut self, got: TyId, want: TyId) -> Option<Conv> {
+    /// it one (`docs/research/native-conventions.md`); and its arity.
+    fn conversion(&mut self, got: TyId, want: TyId) -> Option<(Conv, usize)> {
         let (g, w) = (self.arena.resolve(got), self.arena.resolve(want));
         let (Ty::Subr { conv: from, effect, params, result }, Ty::Subr { conv: to, .. }) = (self.arena.get(g).clone(), self.arena.get(w).clone()) else {
             return None;
@@ -256,21 +257,18 @@ impl Checker {
         if from == to {
             return None;
         }
+        let n = params.len();
         let t = self.arena.ty(Ty::Subr { conv: to, effect, params, result });
-        self.subtype(t, want).then_some(to)
+        self.subtype(t, want).then_some((to, n))
     }
 
-    /// A conversion of `e`'s procedure to `to`. Every procedure is made in
-    /// the program's convention, so a conversion to it, to `fx` or to a
-    /// convention binder does nothing at run time yet; one to the other
-    /// convention would need an adapter, which none can be yet.
-    pub(crate) fn convert_at(&mut self, e: ExpId, to: Conv) -> R<()> {
-        if matches!(to, Conv::Native | Conv::Cellular) && to != self.conv_default {
-            let msg = format!("no procedure can be converted to `{}` yet", self.show_conv(to));
-            return Err(FxError::at(self.arena.span_of(e), msg));
-        }
-        self.facts.converted.insert(e, to);
-        Ok(())
+    /// A conversion of `e`'s procedure, of `arity` arguments, to `to`. To
+    /// `fx` or to a convention binder it does nothing at run time; to
+    /// `cellular` or `native` it is `%fx26-convert`, which gives the value
+    /// if it is already one of those, and otherwise an adapter: a
+    /// procedure of the convention asked for that calls it.
+    pub(crate) fn convert_at(&mut self, e: ExpId, to: Conv, arity: usize) {
+        self.facts.converted.insert(e, (to, arity));
     }
 
     // --------------------------------------------------------------- lambda
@@ -489,13 +487,9 @@ impl Checker {
         let Some((latent, params, result)) = callee.as_subr() else {
             return Err(FxError::at(span, format!("not a subroutine: {}", self.show_ty(ft))));
         };
-        // Code calls procedures of its own convention, or through `fx`.
-        if let Ty::Subr { conv: conv @ (Conv::Native | Conv::Cellular), .. } = callee
-            && conv != self.conv_default
-        {
-            let (c, d) = (self.show_conv(conv), self.show_conv(self.conv_default));
-            return Err(FxError::at(span, format!("a `{c}` procedure cannot be called from `{d}` code yet")));
-        }
+        // A procedure of the other convention is called as through `fx`
+        // (`native ≤ fx`, `cellular ≤ fx`): every call looks at its
+        // callee's kind, as a call through `fx` does.
         if params.len() != args.len() {
             return Err(FxError::at(span, format!("expected {} argument(s), got {}", params.len(), args.len())));
         }
@@ -504,13 +498,13 @@ impl Checker {
             let eff = match done[i].take() {
                 Some((t, eff)) => {
                     if !self.subtype(t, *p) {
-                        let Some(c) = self.conversion(t, *p) else {
+                        let Some((c, n)) = self.conversion(t, *p) else {
                             return Err(FxError::at(
                                 self.arena.span_of(*a),
                                 format!("argument {} is a {}, where a {} is expected", i + 1, self.show_ty(t), self.show_ty(*p)),
                             ));
                         };
-                        self.convert_at(*a, c)?;
+                        self.convert_at(*a, c, n);
                     }
                     eff
                 }

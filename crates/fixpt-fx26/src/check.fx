@@ -3061,29 +3061,23 @@
             (if (and (not (k-conv=? from to)) (k-subtype (k-ty-new (ty-subr e ps r to)) want)) (cons to nil) nil))
           (else y nil)))
       (else y nil))))
-;; Whether `c` is one of the two conventions code is made in, and not the
-;; program's.
-(define k-other-conv? (subr (maxeff (read @globals) (read @t)) (k-conv) bool)
-  (lambda (c)
-    (and (tagcase c (cv-cellular () #t) (cv-native () #t) (else y #f)) (not (k-conv=? c (get k-conv-default))))))
-;; A conversion of `x`'s procedure to `to`. Every procedure is made in the
-;; program's convention, so a conversion to it, to `fx` or to a convention
-;; binder does nothing at run time yet; one to the other convention would
-;; need an adapter, which none can be yet.
-(define k-convert-at (subr (maxeff checks spin) (kx k-conv) unit)
-  (lambda (x to)
-    (if (k-other-conv? to)
-        (k-fail (k-cat3 "no procedure can be converted to `" (k-conv-show to) "` yet") (k-start x) (k-end x))
-        #u)))
-;; Code calls procedures of its own convention, or through `fx`.
-(define k-callable-here (subr (maxeff checks spin) (int int int) unit)
-  (lambda (ft a b)
-    (tagcase (k-get ft)
-      (ty-subr (e ps r cv)
-        (if (k-other-conv? cv)
-            (k-fail (k-cat5 "a `" (k-conv-show cv) "` procedure cannot be called from `" (k-conv-show (get k-conv-default)) "` code yet") a b)
-            #u))
-      (else y #u))))
+;; Conversion `code` at `x`'s span, among the facts `checked-extracts` gives.
+(define k-note-conversion (subr (maxeff checks spin) (kx int) unit)
+  (lambda (x code)
+    (set k-extracts (cons (product (1 (k-start x)) (2 (k-end x)) (3 (- -1000 code))) (get k-extracts)))))
+;; A conversion of `x`'s procedure, of type `t`, to `to`. To `fx` or to a
+;; convention binder it does nothing at run time; to `cellular` or `native`
+;; it is `%fx26-convert`, which gives the value if it is already one of
+;; those, and otherwise an adapter: a procedure of the convention asked
+;; for that calls it. The compiler learns of it as a fact at `x`'s span:
+;; -1000 less the arity times 4, plus 1 for `cellular` or 2 for `native`.
+(define k-convert-at (subr (maxeff checks spin) (kx int k-conv) unit)
+  (lambda (x t to)
+    (let ((n (tagcase (k-get (k-resolve t)) (ty-subr (e ps r cv) (* 4 (k-length ps))) (else y 0))))
+      (tagcase to
+        (cv-cellular () (k-note-conversion x (+ n 1)))
+        (cv-native () (k-note-conversion x (+ n 2)))
+        (else y #u)))))
 ;; `got ≤ want`, or an error at `x` saying so.
 (define k-expect (subr (maxeff checks spin) (kx int int) unit)
   (lambda (x got want)
@@ -3092,7 +3086,7 @@
         (let ((c (k-conversion got want)))
           (if (null? c)
               (k-fail (k-cat4 "a " (k-show-ty want) " is expected here, and this is a " (k-show-ty got)) (k-start x) (k-end x))
-              (k-convert-at x (car c)))))))
+              (k-convert-at x got (car c)))))))
 ;; Bind each, the first first.
 (define k-bind-all (subr (maxeff kstate spin) (k-bindings) unit)
   (lambda (bs) (if (null? bs) #u (begin (k-bind (car (car bs)) (cdr (car bs))) (k-bind-all (cdr bs))))))
@@ -5010,7 +5004,7 @@
           (let* ((r (k-synth e)) (t (k-resolve (extract r 1))))
             (tagcase (k-get t)
               (ty-subr (fe ps res from)
-                (begin (if (k-conv=? from c) #u (k-convert-at x c))
+                (begin (if (k-conv=? from c) #u (k-convert-at x t c))
                        (k-te (k-ty-new (ty-subr fe ps res c)) (extract r 2))))
               (else y (k-fail (string-append "`convention` takes a procedure, and this is a " (k-show-ty t)) a b)))))
         (x-plambda (bs body a b)
@@ -5319,7 +5313,7 @@
              (callee (k-as-subr ft)))
         (if (null? callee)
             (k-fail (string-append "not a subroutine: " (k-show-ty ft)) a b)
-            (let ((params (begin (k-callable-here ft a b) (extract (car callee) 2))))
+            (let ((params (extract (car callee) 2)))
               (if (not (= (k-length params) n))
                   (k-fail (k-cat4 "expected " (int->string (k-length params)) " argument(s), got " (int->string n)) a b)
                   (let* ((e (k-app-args args params 0 done-t done-e (extract rf 2)))
@@ -5340,7 +5334,7 @@
                                    (k-fail (k-cat5 "argument " (int->string (+ i 1)) " is a " (k-show-ty t)
                                                    (k-cat3 ", where a " (k-show-ty p) " is expected"))
                                            (k-start arg) (k-end arg))
-                                   (begin (k-convert-at arg (car c)) (array-ref done-e i)))))
+                                   (begin (k-convert-at arg t (car c)) (array-ref done-e i)))))
                          (k-check-argument arg p i))))
             (k-app-args (cdr args) (cdr params) (+ i 1) done-t done-e (k-union e ae))))))
   ;; An argument that failed to check is reported as that argument.

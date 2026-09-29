@@ -89,9 +89,11 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         // What the native convention's compiler starts from.
         s.register_code = true;
         s.scheme.runtime_unrooted().native_code = Some(fixpt_native::direct::code_text);
-        // Cellular code, what the compiler declines, calls native code.
-        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
     }
+    // Cellular code calls native code (what the native compiler did not
+    // decline, or an adapter), and a conversion makes adapters.
+    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
         s.set_step_limit(*l);

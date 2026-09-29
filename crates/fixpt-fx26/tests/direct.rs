@@ -332,6 +332,43 @@ fn native_and_cellular_code_call_each_other() {
     }
 }
 
+/// Conversions between the conventions make adapters, and native and
+/// cellular code call each other through them, nested hundreds deep:
+/// with each convention the program's, as the REPL runs each form, the
+/// native one's forms compiled natively; the deepest collecting often
+/// (`programs/native/adapters.fx`).
+#[test]
+fn conversions_make_adapters() {
+    use fixpt_fx26::session::Strategy;
+    let want = ["2", "2", "2", "2", "6", "7", "12", "22", "15", "(7 7)", "(3 2 1)", "300"];
+    for native in [false, true] {
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.strategy = Strategy::Cellular;
+        s.set_native_convention(native);
+        if native {
+            s.native_runner = Some(run_native);
+            s.native_compiler = Some(fixpt_native::direct::compile_closure);
+            s.register_code = true;
+        }
+        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+        s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+        let forms = s.checker.read_in(FileId(0), include_str!("programs/native/adapters.fx")).expect("reads");
+        // The last form, the deepest, collecting often.
+        let (most, last) = forms.split_at(forms.len() - 1);
+        let mut outcomes = s.run_forms(most).expect("runs");
+        s.scheme.runtime_unrooted().heap.gc_every = 50;
+        outcomes.extend(s.run_forms(last).expect("runs"));
+        let out: Vec<String> = outcomes
+            .into_iter()
+            .filter_map(|o| match o {
+                Ok(o) => o.value.transpose().map(|v| v.unwrap_or_else(|e| format!("error: {e}"))),
+                Err(e) => Some(format!("error: {}", e.message)),
+            })
+            .collect();
+        assert_eq!(out, want, "native {native}");
+    }
+}
+
 /// `run_native`, collecting every 97 safepoints while the native code runs
 /// (not while the front end compiles it).
 fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
@@ -399,10 +436,16 @@ fn every_test_program_runs_natively_as_cellular() {
         // As the REPL has it: what the native compiler starts from.
         s.register_code = runner.is_some();
         s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+        s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
         let forms = s.checker.read_in(FileId(0), text).ok()?;
         Some(s.run_forms(&forms).ok()?.into_iter().map(|o| o.map(|o| (o.value, o.printed))).collect::<Vec<_>>())
     };
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "datum", "recursive", "generative", "sizes"] {
+    // Every directory of programs but those that loop until a step limit
+    // (`diverge`) and the benchmarks (long by design); what does not
+    // check, or is not FX-26 forms, is skipped.
+    let mut subs: Vec<String> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|d| d != "diverge" && d != "bench").collect();
+    subs.sort();
+    for sub in subs {
         let mut paths: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|p| p.unwrap().path()).collect();
         paths.sort();
         for path in paths {
@@ -417,7 +460,11 @@ fn every_test_program_runs_natively_as_cellular() {
                 }
                 // The same error, said as each machine says it.
                 let same_error = matches!((w, g), (Err(a), Err(b)) if a.contains(b.as_str()) || b.contains(a.as_str()));
-                if w != g && !same_error {
+                // A procedure prints as the closure each makes, of either
+                // kind, and perhaps an adapter: compared as a procedure.
+                let procedure = |v: String| if v.starts_with("#<native-closure") || v.starts_with("#<cellular-closure") { "#<procedure>".into() } else { v };
+                let kindless = |v: &Result<Option<String>, String>| v.clone().map(|v| v.map(procedure));
+                if kindless(w) != kindless(g) && !same_error {
                     report.push(format!("{} form {i}: native {g:?}, cellular {w:?}", path.display()));
                 }
             }

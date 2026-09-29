@@ -164,8 +164,9 @@ pub struct NodeFacts {
     /// product's type says it.
     pub field_index: HashMap<ExpId, usize>,
     /// Procedures converted to another convention, by the checker or by
-    /// `(convention C e)`: the convention each is converted to.
-    pub converted: HashMap<ExpId, Conv>,
+    /// `(convention C e)`: the convention each is converted to, and how
+    /// many arguments the procedure takes.
+    pub converted: HashMap<ExpId, (Conv, usize)>,
 }
 
 impl NodeFacts {
@@ -176,6 +177,18 @@ impl NodeFacts {
         self.no_escape.retain(|e| e.0 < first);
         self.field_index.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
+    }
+
+    /// What the compilers give `%fx26-convert` for `e`'s conversion: its
+    /// arity times 4, plus 1 to make it `cellular` or 2 to make it
+    /// `native`. None if `e` is not converted to one of those; a
+    /// conversion to `fx` or to a binder does nothing at run time.
+    pub fn conversion_code(&self, e: ExpId) -> Option<i64> {
+        match self.converted.get(&e)? {
+            (Conv::Cellular, n) => Some(4 * *n as i64 + 1),
+            (Conv::Native, n) => Some(4 * *n as i64 + 2),
+            _ => None,
+        }
     }
 }
 
@@ -466,7 +479,7 @@ impl Checker {
                     return Err(FxError::at(span, format!("`convention` takes a procedure, and this is a {}", self.show_ty(t))));
                 };
                 if from != conv {
-                    self.convert_at(e, conv)?;
+                    self.convert_at(e, conv, params.len());
                 }
                 Ok((self.arena.ty(Ty::Subr { conv, effect, params, result }), eff))
             }

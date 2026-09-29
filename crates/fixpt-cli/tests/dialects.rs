@@ -225,9 +225,9 @@ fn the_fx26_repl_compiles_in_the_native_convention() {
         assert!(out.contains(want), "no `{want}` in:\n{out}");
     }
     assert!(!out.contains("not in the native convention yet"), "{out}");
-    // A cellular procedure cannot be called from native code: an error.
-    let err = String::from_utf8_lossy(&done.stderr);
-    assert!(err.contains("a `cellular` procedure cannot be called from `native` code yet"), "{err}");
+    // A cellular procedure is called from native code, and a native one
+    // given where a cellular one is expected is converted: an adapter.
+    assert!(out.contains("2001 : int"), "{out}");
     let out = Command::new(FIXPT).args(["--calling-convention", "fast", "eval", "1"]).output().expect("fixpt runs");
     assert!(!out.status.success(), "an unknown convention is refused");
 }

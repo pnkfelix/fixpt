@@ -9,6 +9,7 @@
 //!     sexp-edit insert-before FILE NAME NEW
 //!     sexp-edit insert-after FILE NAME NEW
 //!     sexp-edit move FILE NAME OTHER           NAME, with its comments, before OTHER
+//!     sexp-edit delete FILE NAME               NAME, with its comments
 //!     sexp-edit rename FILE OLD NEW [WITHIN]   symbols only; within one definition
 //!     sexp-edit edit FILE NAME OLD NEW         text OLD, once in NAME, to NEW (files, or
 //!                                              - for one); as many lists opened as closed
@@ -34,7 +35,7 @@ fn write(path: &str, text: &str) -> Result<(), String> {
 }
 
 fn run(args: &[String]) -> Result<(), String> {
-    let usage = "usage: sexp-edit list|find|check|replace|insert-before|insert-after|move|rename|edit|order …";
+    let usage = "usage: sexp-edit list|find|check|replace|insert-before|insert-after|move|delete|rename|edit|order …";
     let (cmd, rest) = args.split_first().ok_or(usage)?;
     let at = |text: &str, i: usize| {
         let (l, c) = se::line_col(text, i);
@@ -86,6 +87,13 @@ fn run(args: &[String]) -> Result<(), String> {
             let out = se::move_before(&text, se::profile_for(file), name, other).map_err(|e| format!("{file}: {e}"))?;
             write(file, &out)?;
             println!("{file}: moved `{name}` before `{other}`");
+            Ok(())
+        }
+        ("delete", [file, name]) => {
+            let text = slurp(file)?;
+            let out = se::delete(&text, se::profile_for(file), name).map_err(|e| format!("{file}: {e}"))?;
+            write(file, &out)?;
+            println!("{file}: deleted `{name}`");
             Ok(())
         }
         ("rename", [file, old, new, within @ ..]) if within.len() <= 1 => {

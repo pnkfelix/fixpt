@@ -51,6 +51,15 @@
 ;; the summary, for each span starting there.
 (define-type c-ends (listof (pairof int int @k) acyclic))
 (define c-summary-table (ref (table int c-ends @k) @k) (new (make-table c-int-hash c-int=?)))
+;; Each procedure converted to a convention (`k-convert-at`), by where it
+;; starts: where it ends, and what `%fx26-convert` is given for it.
+(define c-convert-table (ref (table int (pairof int int @k) @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-no-conversion (pairof int int @k) (cons -1 -1))
+;; What `%fx26-convert` is given for `x`, if it is converted; or -1.
+(define c-conversion-at (subr (maxeff (read @globals) (read @k)) (exp) int)
+  (lambda (x)
+    (let ((e (table-ref (get c-convert-table) (exp-start x) c-no-conversion)))
+      (if (= (car e) (exp-end x)) (cdr e) -1))))
 ;; The field of the `extract` from `a` to `b`, or -1.
 (define c-field-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) int)
   (lambda (a b)
@@ -186,6 +195,10 @@
 (define c-register-code
   (ref (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) acyclic) exp cenv (listof c-this @k)) (listof wcell @k)) @k)
   (new (lambda (ps body inner this) (the (listof wcell @k) nil))))
+;; The same for a standard operation as a value, by its name and arity.
+(define c-standard-register-code
+  (ref (subr (maxeff compiles spin) (string int) (listof wcell @k)) @k)
+  (new (lambda (name n) (the (listof wcell @k) nil))))
 
 ;; Whether `l` is where the procedure being compiled is bound: its loop, or
 ;; the free value holding its closure.
@@ -265,11 +278,13 @@
         #u
         (let ((a (extract (car fs) 1)) (b (extract (car fs) 2)) (n (extract (car fs) 3)))
           (begin
-            (if (>= n 0)
-                (table-set! (get c-fact-table) a (the (pairof int int @k) (cons b n)))
-                ;; An effect summary, -1 - s: the greatest, per span.
-                (let ((s (- -1 n)) (known (table-ref (get c-summary-table) a (the c-ends nil))))
-                  (table-set! (get c-summary-table) a (c-end-max known b s))))
+            (cond ((>= n 0) (table-set! (get c-fact-table) a (the (pairof int int @k) (cons b n))))
+                  ;; A conversion, -1000 - code (`k-convert-at`).
+                  ((<= n -1000) (table-set! (get c-convert-table) a (the (pairof int int @k) (cons b (- -1000 n)))))
+                  ;; An effect summary, -1 - s: the greatest, per span.
+                  (else
+                   (let ((s (- -1 n)) (known (table-ref (get c-summary-table) a (the c-ends nil))))
+                     (table-set! (get c-summary-table) a (c-end-max known b s)))))
             (c-fill-facts (cdr fs)))))))
 (define c-end-summary (subr (maxeff (read @globals) (read @k)) (c-ends int) int)
   (lambda (es b) (cond ((null? es) 3) ((= (car (car es)) b) (cdr (car es))) (else (c-end-summary (cdr es) b)))))
@@ -283,6 +298,7 @@
     (begin
       (set c-facts fs)
       (set c-fact-table (make-table c-int-hash c-int=?))
+      (set c-convert-table (make-table c-int-hash c-int=?))
       (set c-summary-table (make-table c-int-hash c-int=?))
       (set c-join-memo (make-table c-int-hash c-int=?))
       (set c-lifts (make-table c-int-hash c-int=?))
@@ -925,7 +941,14 @@
                   (begin (c-int body 0) (params 0) (c-prim body "%make-bloblet-filled" 3))
                   (begin (params 0) (c-standard-on name n body))))
             (c-op body routine-return)
-            (c-op1 c routine-closure (wcell-word (c-assemble body (string->symbol name))))
+            (let ((w (c-assemble body (string->symbol name))))
+              (begin
+                ;; Register code too, for the native compiler to start from.
+                (if (get c-registers)
+                    (let ((cells ((get c-standard-register-code) name n)))
+                      (if (null? cells) #u (begin (set-register-twin w cells) #u)))
+                    #u)
+                (c-op1 c routine-closure (wcell-word w))))
             (c-emit c (i-cell (wcell-int 0))))))))
 
 (define c-count-names (subr (read @globals) (names) int)
@@ -988,7 +1011,15 @@
   (c-exps (subr (maxeff compiles spin) ((listof exp acyclic) cenv int code) int)
     (lambda (es e depth c)
       (if (null? es) 0 (begin (c-exp (car es) e depth c #f) (+ 1 (c-exps (cdr es) e (+ depth 1) c))))))
+  ;; `x`'s code. A procedure converted to a convention is made, then given
+  ;; to `%fx26-convert` with what it is converted to.
   (c-exp (subr (maxeff compiles spin) (exp cenv int code bool) unit)
+      (lambda (x e depth c tail)
+        (let ((k (c-conversion-at x)))
+          (if (< k 0)
+              (c-exp-as-is x e depth c tail)
+              (begin (c-exp-as-is x e depth c #f) (c-int c k) (c-prim c "%fx26-convert" 2) (c-done c tail))))))
+  (c-exp-as-is (subr (maxeff compiles spin) (exp cenv int code bool) unit)
     (lambda (x e depth c tail)
       (tagcase x
         (e-var (n a b)

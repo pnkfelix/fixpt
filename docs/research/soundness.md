@@ -211,7 +211,7 @@ textbook effect system are written out.
 (Lam)     Γ, x̄:τ̄ ⊢ e : τ ! φ                        ⊢ λ(x̄:τ̄).e : (subr φ (τ̄) τ) ! ∅
 (App)     ⊢ e : (subr φ (τ̄) τ) ! φ₀   ⊢ eᵢ : τᵢ ! φᵢ
                                                     ⊢ e ē : τ ! φ₀ ∪ ⋃φᵢ ∪ φ
-(Conv)    ⊢ e : (subr (conv C) φ (τ̄) τ) ! φ₀   C′ ≠ native
+(Conv)    ⊢ e : (subr (conv C) φ (τ̄) τ) ! φ₀
                                                     ⊢ (convention C′ e) : (subr (conv C′) φ (τ̄) τ) ! φ₀
 (TLam)    Δ, χ:κ≤ρ ⊢ e : τ ! φ    φ ⊆ alloc-only, e a closure former
                                                     ⊢ Λ(χ:κ≤ρ).e : ∀(χ:κ≤ρ).τ ! φ
@@ -223,12 +223,26 @@ Conventions (`docs/research/native-conventions.md`). Every `subr` type
 carries one; (App) further requires the callee's to be the program's,
 `fx`, or a binder, since code calls only procedures of its own convention
 or dispatches through `fx` on the value's kind, which the runtime keeps
-truthful. (Conv) is also what the checker inserts where a procedure
-differs from what is expected only in its convention. While every
-procedure is still made cellular, a conversion to `cellular`, `fx` or a
-binder changes nothing at run time, and none to `native` is allowed; so
-(Conv) preserves the value typing lemma trivially. When native procedures
-exist, conversions become adapters, and the rule gains their typing.
+truthful. A callee of the other specific convention reaches (App) through
+(Sub), by `cellular ≤ fx` and `native ≤ fx`: the call is compiled as a
+call through `fx`, which every machine's call is today (each looks at its
+callee's kind). When calls in a specific convention stop looking, the
+compilers must be told which calls are such (a fact at the call, as
+conversions are). (Conv) is also what the checker inserts where a
+procedure differs from what is expected only in its convention.
+
+At run time a conversion to `fx` or to a binder does nothing, and one to
+`cellular` or `native` is `%fx26-convert` (2026-09-29): a value whose kind
+is already `C′` is itself; one of the other kind becomes an **adapter**, a
+new closure of kind `C′` over the value, whose code calls it with the
+adapter's own arguments (as a call through `fx`) and returns what it
+returns. The value typing lemma then holds for (Conv) as for (Sub): the
+adapter is of kind `C′`, as its type says; it takes the arguments the
+value takes (the conversion records the arity, from the type); and a call
+of it has the value's effect and result, since it does nothing but call
+the value. An adapter of an adapter is two such calls. Identity is not
+kept (`eq?` of a procedure and its conversion may be false), which no
+typing rule relies on.
 
 `(Lam)` has **no masking**: the latent effect is the body's effect,
 exactly. Masking is only in the binders:

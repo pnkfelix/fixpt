@@ -55,7 +55,9 @@
 ;; value, or a free value of the closure running.
 ;; (`a-name`: a variable's value, wherever it is: a lifted procedure's
 ;; added argument.)
-(define-datatype rarg (a-e exp) (a-v wcell) (a-thunk exp) (a-slot int) (a-lexical int) (a-name symbol))
+;; `a-as-is`: an expression's value, not converted as the checker said it
+;; is (the conversion's own operand).
+(define-datatype rarg (a-e exp) (a-v wcell) (a-thunk exp) (a-slot int) (a-lexical int) (a-name symbol) (a-as-is exp))
 (define-type rargs (listof rarg @k))
 
 ;; A standard operation, as register code does it.
@@ -167,12 +169,16 @@
 (define r-local (subr (maxeff (read @globals) (alloc @k)) (cenv symbol) cenv)
   (lambda (te n) (the cenv (cons (cons n (at-slot -1)) te))))
 
-(define r-simple? (subr pure (exp) bool)
+;; Whether `x` needs no register code of its own to be had: a constant, or
+;; a variable not named as a standard operation is (which may be one made a
+;; value, a closure); and not converted.
+(define r-simple? (subr (maxeff (read @globals) (read @k)) (exp) bool)
   (lambda (x)
-    (tagcase x
-      (e-var (n a b) #t) (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t)
-      (e-sym (v a b) #t) (e-unit (a b) #t) (e-str (v a b) #t)
-      (else y #f))))
+    (and (< (c-conversion-at x) 0)
+         (tagcase x
+           (e-var (n a b) (< (c-arity (symbol->string n)) 0)) (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t)
+           (e-sym (v a b) #t) (e-unit (a b) #t) (e-str (v a b) #t)
+           (else y #f)))))
 
 ;; A constant's cell.
 (define r-const-cell (subr pure (rconst) wcell)
@@ -480,8 +486,8 @@
   (lambda (xs) (if (null? xs) 0 (+ 1 (r-count-args (cdr xs))))))
 (define r-exp-args (subr (maxeff (read @globals) (alloc @k)) ((listof exp acyclic)) rargs)
   (lambda (es) (if (null? es) nil (cons (a-e (car es)) (r-exp-args (cdr es))))))
-(define r-arg-simple? (subr (read @globals) (rarg) bool)
-  (lambda (a) (tagcase a (a-e (x) (r-simple? x)) (a-thunk (b) #f) (else y #t))))
+(define r-arg-simple? (subr (maxeff (read @globals) (read @k)) (rarg) bool)
+  (lambda (a) (tagcase a (a-e (x) (r-simple? x)) (a-thunk (b) #f) (a-as-is (x) #f) (else y #t))))
 ;; The last argument that is not simple, or -1.
 (define r-last-hard (subr (maxeff (read @globals) (read @k) spin) (rargs int int) int)
   (lambda (xs i found)
@@ -793,6 +799,26 @@
           ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
            (the (listof c-inline acyclic) (cons (car xs) nil)))
           (else (r-inline-named (cdr xs) n k)))))
+;; A standard operation as a value, into RESULT: its closure, of the word
+;; the stack code makes for it (`c-standard-value`), and that word's
+;; register code. A leaf makes it only in tail position.
+(define r-standard-value (subr (maxeff compiles spin) (rgen string bool) unit)
+  (lambda (g name tail)
+    (if (and (extract g leaf) (not tail))
+        (r-decline)
+        (let ((made (the code (new nil))))
+          (begin
+            (c-standard-value name made)
+            (let ((items (get made)))
+              (if (or (null? items) (null? (cdr items)))
+                  (r-decline)
+                  (tagcase (car (cdr items))
+                    (i-cell (w) (r-op2 g rop-lambda w (wcell-int 0)))
+                    (else y (r-decline))))))))))
+;; Whether `n`, not bound in `e`, is a standard operation as a value: a
+;; closure made.
+(define r-standard-value? (subr (maxeff compiles spin) (cenv symbol) bool)
+  (lambda (e n) (and (null? (c-where e n)) (>= (c-arity (symbol->string n)) 0))))
 ;; Which of `c-inlines`, and its global, when `f` names one of them, taking
 ;; `k` arguments, whose body is not being inlined already.
 (define r-inlined (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp int) (listof (pairof c-inline wglobal @k) @k))
@@ -809,12 +835,17 @@
                 (else y nil)))))
       (else y nil))))
 (define-rec
+;; Whether evaluating `x` may call or call out, and so collect: a
+;; conversion calls out.
+(r-collects (subr (maxeff compiles spin) (exp cenv (listof c-this @k) bool) bool)
+    (lambda (x e this tail)
+      (or (>= (c-conversion-at x) 0) (r-collects-as-is x e this tail))))
   ;; Whether evaluating `x` may call or call out, and so collect. Loops do
   ;; not; declined forms are said to, which does not matter.
-  (r-collects (subr (maxeff compiles spin) (exp cenv (listof c-this @k) bool) bool)
+  (r-collects-as-is (subr (maxeff compiles spin) (exp cenv (listof c-this @k) bool) bool)
     (lambda (x e this tail)
       (tagcase x
-        (e-var (n a b) #f) (e-int (n a b) #f) (e-bool (v a b) #f) (e-str (v a b) #f) (e-char (v a b) #f)
+        (e-var (n a b) (and (r-standard-value? e n) (not tail))) (e-int (n a b) #f) (e-bool (v a b) #f) (e-str (v a b) #f) (e-char (v a b) #f)
         ;; Join points only: no closure made, and their calls are jumps.
         (e-letrec (bs body a b)
           (if (and tail (r-all? (r-join-flags bs body #t)))
@@ -933,8 +964,19 @@
                  (mine (cdr rest)))
             (cons (cons mine (car rest)) (and mine (not (r-collects (car inits) te this #f))))))))
 
+;; `x`'s value into RESULT; in tail position, returned. A procedure
+;; converted to a convention is made, then given to `%fx26-convert` with
+;; what it is converted to.
+(r-exp (subr (maxeff compiles spin) (rgen exp renv cenv bool) unit)
+    (lambda (g x env te tail)
+      (let ((k (c-conversion-at x)))
+        (if (< k 0)
+            (r-exp-as-is g x env te tail)
+            (begin
+              (r-prim g "%fx26-convert" (the rargs (cons (a-as-is x) (cons (a-v (wcell-int k)) nil))) env te)
+              (r-done g tail))))))
   ;; `x`'s value into RESULT; in tail position, returned.
-  (r-exp (subr (maxeff compiles spin) (rgen exp renv cenv bool) unit)
+  (r-exp-as-is (subr (maxeff compiles spin) (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
       (let ((k (r-known env x)))
         (if (not (null? k))
@@ -944,7 +986,7 @@
           (let ((l (r-where env n)))
             (begin
               (if (null? l)
-                  (if (string=? (symbol->string n) "nil") (r-op1 g rop-const (wcell-nil)) (r-decline))
+                  (if (string=? (symbol->string n) "nil") (r-op1 g rop-const (wcell-nil)) (r-standard-value g (symbol->string n) tail))
                   (tagcase (car l)
                     (rl-reg (k) (r-opn g rop-reg k))
                     (rl-slot (s) (r-opn g rop-stack s))
@@ -1529,7 +1571,7 @@
   ;; a variable there, else by way of RESULT.
   (r-into (subr (maxeff compiles spin) (rgen exp int renv cenv) unit)
     (lambda (g x k env te)
-      (let ((l (tagcase x (e-var (n a b) (r-where env n)) (else y (the (listof rloc @k) nil)))))
+      (let ((l (tagcase x (e-var (n a b) (if (< (c-conversion-at x) 0) (r-where env n) (the (listof rloc @k) nil))) (else y (the (listof rloc @k) nil)))))
         (if (null? l)
             (begin (r-exp g x env te #f) (r-opn g rop-setreg k))
             (tagcase (car l)
@@ -1568,6 +1610,7 @@
               (begin
                 (tagcase (car args)
                   (a-e (x) (r-exp g x env te #f))
+                  (a-as-is (x) (r-exp-as-is g x env te #f))
                   (a-thunk (body)
                     (begin (r-lambda g (the (listof (productof (1 symbol) (2 syns-a)) acyclic) nil) body env te
                                      (the syms nil) (the (listof exp @k) nil) #f)
@@ -1592,6 +1635,7 @@
                        (a-slot (s) (r-opnn g rop-load (+ i 1) s))
                        (a-lexical (j) (begin (r-opn g rop-lexical j) (r-opn g rop-setreg (+ i 1))))
                        (a-thunk (b) #u)
+                       (a-as-is (x) #u)
                        (a-name (n)
                          (let ((l (r-where env n)))
                            (if (null? l)
@@ -2074,6 +2118,37 @@
                (plain-at (+ 2 (+ (* 4 (r-assumptions-length assumptions 0)) (- (r-cells-length fc 0) 2))))
                (bodies (r-rev-cells (r-rev-cells (cdr (cdr fc)) nil) (cdr (cdr pc)))))
           (cons (car fc) (cons (car (cdr fc)) (r-guard-cells assumptions 2 plain-at bodies))))))))
+;; Register code for a standard operation as a value (`c-standard-value`),
+;; as the Rust compiler's `r_standard_word`: its operands are its
+;; parameters, in REG1…REGn already, and a call-out, if it is one, is made in
+;; a frame. None for one done in several instructions, or that takes
+;; control (the closure then has stack code only).
+(define r-standard-word (subr (maxeff compiles spin) (string int) (listof wcell @k))
+  (lambda (name n)
+    (let* ((std (r-standard name n))
+           (callout (tagcase std (s-prim (p) #t) (s-cellular (r) (= r routine-cons)) (else y #f)))
+           (g (the rgen
+                (product (items (new (the (listof ritem @k) nil))) (leaf (not callout)) (nreg (new n)) (nslot (new 0))
+                         (mslot (new 0)) (labels (new 0)) (this (the (listof c-this @k) nil)) (start 0))))
+           (none (the (listof wcell @k) nil)))
+      (begin
+        (r-opn g rop-args n)
+        (if callout (begin (r-op0 g rop-save) (r-emit g (r-frame))) #u)
+        (let ((made
+               (tagcase std
+                 (s-op2 (r swap negate)
+                   (begin (r-opn g rop-reg (if swap 2 1))
+                          (r-opnn g rop-op2 r (if swap 1 2))
+                          (if negate (r-op2 g rop-op2imm (wcell-int routine-eq) (wcell-bool #f)) #u)
+                          #t))
+                 (s-op1 (r) (begin (r-opn g rop-reg 1) (r-opn g rop-op1 r) #t))
+                 (s-op2imm (r v) (begin (r-opn g rop-reg 1) (r-op2 g rop-op2imm (wcell-int r) v) #t))
+                 (s-field (k) (begin (r-opn g rop-reg 1) (r-opn g rop-field k) #t))
+                 (s-identity () (begin (r-opn g rop-reg 1) #t))
+                 (s-prim (p) (begin (r-opnn g rop-prim p n) #t))
+                 (s-cellular (r) (if callout (begin (r-opnn g rop-cellular r n) #t) #f))
+                 (else y #f))))
+          (if made (begin (r-done g #t) (r-assemble g)) none))))))
 ;; A lambda's register code, whose closure captures what `inner` says, or
 ;; none where this compiler declines: in two versions where that is sound
 ;; and something is gained, as the Rust compiler's `register_code` says. Its
@@ -2115,6 +2190,7 @@
                  cells))))))
 
 (set c-register-code r-register-code)
+(set c-standard-register-code r-standard-word)
 
 ;; Whether the compiler makes register code from now on: for a driver.
 (define compile-registers! (subr (maxeff (read @globals) (write @k)) (bool) unit) (lambda (on) (set c-registers on)))

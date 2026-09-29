@@ -41,6 +41,14 @@ fn moves_a_definition_with_its_comments() {
 }
 
 #[test]
+fn deletes_a_definition_with_its_comments() {
+    let out = se::delete(SAMPLE, P, "a").unwrap();
+    assert!(!out.contains("A comment about `a`") && !out.contains("(define a"), "{out}");
+    assert!(out.contains("(define b"));
+    assert!(se::delete(SAMPLE, P, "zz").is_err());
+}
+
+#[test]
 fn renames_symbols_but_not_strings() {
     let (out, n) = se::rename(SAMPLE, P, "b", "bee", None).unwrap();
     assert_eq!(n, 2);
