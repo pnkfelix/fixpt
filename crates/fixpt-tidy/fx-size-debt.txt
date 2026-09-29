@@ -12,14 +12,9 @@ exempt tests/conformance/fx91/
 exempt crates/fixpt-fx26/tests/programs/native/wide-frame.fx
 
 # In debt: path, lines, lines over 100 columns.
-crates/fixpt-fx26/src/parser.fx                                       682   96
 crates/fixpt-fx26/src/eager-reader.fx                                 678   51
-crates/fixpt-fx26/src/evaluator.fx                                    545   53
-crates/fixpt-fx26/src/native.fx                                       693   32
 crates/fixpt-fx87/src/standard.fx                                     245   57
-crates/fixpt-fx26/src/arm64.fx                                        157   39
 crates/fixpt-fx91/src/fx-module.fx                                    380    1
-crates/fixpt-fx26/src/table.fx                                        114    7
 crates/fixpt-fx26/tests/programs/run/loops.fx                          76    3
 docs/research/examples/async/arena-outside.fx                          42    6
 crates/fixpt-fx26/tests/programs/native/adapters.fx                    32    6
@@ -27,7 +22,6 @@ docs/research/examples/polytypic/sop-view.fx                           65    2
 crates/fixpt-fx26/tests/programs/native/many-values.fx                 27    5
 docs/research/examples/async/promise.fx                                66    1
 docs/research/examples/polytypic/derived-copy.fx                       38    4
-crates/fixpt-fx26/src/bootstrap.fx                                     41    2
 crates/fixpt-fx26/tests/programs/datum/type-tests.fx                   32    3
 docs/research/examples/async/cancel.fx                                 58    1
 docs/research/examples/polytypic/datum-model.fx                        32    3

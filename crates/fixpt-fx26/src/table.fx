@@ -12,25 +12,29 @@
 ;;;   (the (table symbol int @r) (make-table symbol-hash symbol=?))
 
 (define-type (bucket (k type) (v type) (r region)) (listof (pairof k v r) acyclic))
+(define-type (bucket-array (k type) (v type) (r region)) (arrayof (bucket k v r) r))
+;; A key's hash, and whether two keys are the same.
+(define-type (key-hash (k type)) (subr pure (k) int))
+(define-type (key-same (k type)) (subr pure (k k) bool))
 (define-type (table (k type) (v type) (r region))
-  (bloblet (fields (subr pure (k) int) (subr pure (k k) bool) (arrayof (bucket k v r) r) int) r))
+  (bloblet (fields (key-hash k) (key-same k) (bucket-array k v r) int) r))
 
 
 (define symbol-hash (subr pure (symbol) int) (lambda (s) (symbol-name-hash s)))
 
 (define make-table
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (alloc r) ((subr pure (k) int) (subr pure (k k) bool)) (table k v r))))
+    (subr (alloc r) ((key-hash k) (key-same k)) (table k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
-    (lambda ((hash (subr pure (k) int)) (same (subr pure (k k) bool)))
+    (lambda ((hash (key-hash k)) (same (key-same k)))
       (the (table k v r) (make-bloblet 0 hash same (make-array 8 nil) 0))))))
 
 ;;; The entry for `key` in a bucket, or nil.
 (define bucket-find
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r)) ((bucket k v r) k (subr pure (k k) bool)) (pairof k v r))))
+    (subr (maxeff (read @globals) (read r)) ((bucket k v r) k (key-same k)) (pairof k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
-    (lambda ((b (bucket k v r)) (key k) (same (subr pure (k k) bool)))
+    (lambda ((b (bucket k v r)) (key k) (same (key-same k)))
       (cond ((null? b) nil)
             ((same (car (car b)) key) (car b))
             (else (bucket-find (cdr b) key same)))))))
@@ -42,13 +46,22 @@
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k) (n int)) (modulo ((bloblet-ref t 0) key) n)))))
 
+;;; The entry for `key` in `t`, or nil.
+(define table-entry
+  (poly ((r region)) (poly ((k type) (v type))
+    (subr (maxeff (read @globals) (read r)) ((table k v r) k) (pairof k v r))))
+  (plambda ((r region)) (plambda ((k type) (v type))
+    (lambda ((t (table k v r)) (key k))
+      (let* ((buckets (bloblet-ref t 2))
+             (b (array-ref buckets (bucket-of t key (array-length buckets)))))
+        (bucket-find b key (bloblet-ref t 1)))))))
+
 (define table-ref
   (poly ((r region)) (poly ((k type) (v type))
     (subr (maxeff (read @globals) (read r)) ((table k v r) k v) v)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k) (default v))
-      (let* ((buckets (bloblet-ref t 2))
-             (e (bucket-find (array-ref buckets (bucket-of t key (array-length buckets))) key (bloblet-ref t 1))))
+      (let ((e (table-entry t key)))
         (if (null? e) default (cdr e)))))))
 
 (define table-has?
@@ -56,35 +69,40 @@
     (subr (maxeff (read @globals) (read r)) ((table k v r) k) bool)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k))
-      (let ((buckets (bloblet-ref t 2)))
-        (not (null? (bucket-find (array-ref buckets (bucket-of t key (array-length buckets))) key (bloblet-ref t 1)))))))))
+      (not (null? (table-entry t key)))))))
 
 (define table-count
   (poly ((r region)) (poly ((k type) (v type)) (subr (read r) ((table k v r)) int)))
-  (plambda ((r region)) (plambda ((k type) (v type)) (lambda ((t (table k v r))) (bloblet-ref t 3)))))
+  (plambda ((r region)) (plambda ((k type) (v type))
+    (lambda ((t (table k v r))) (bloblet-ref t 3)))))
+
+;;; Rehashing: moving the entries of an `a` into new buckets, as `b` says,
+;;; reading, writing and consing in the table's region.
+(define-type (rehashing (k type) (v type) (r region) (a type) (b type))
+  (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) a b) unit))
 
 ;;; Move every entry of bucket `b` into the array `new`.
 (define rehash-bucket
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) (bucket k v r) (arrayof (bucket k v r) r)) unit)))
+    (rehashing k v r (bucket k v r) (bucket-array k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
-    (lambda ((t (table k v r)) (b (bucket k v r)) (new (arrayof (bucket k v r) r)))
+    (lambda ((t (table k v r)) (b (bucket k v r)) (new (bucket-array k v r)))
       (if (null? b)
           #u
           (let ((j (bucket-of t (car (car b)) (array-length new))))
             (begin (array-set! new j (cons (car b) (array-ref new j)))
                    (rehash-bucket t (cdr b) new))))))))
 
-;;; Buckets `i` on, of the `n` of `old`.
+;;; Buckets `i` on of `old` into the table's, new ones.
 (define rehash-array
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) (arrayof (bucket k v r) r) (arrayof (bucket k v r) r) int int) unit)))
+    (rehashing k v r (bucket-array k v r) int)))
   (plambda ((r region)) (plambda ((k type) (v type))
-    (lambda ((t (table k v r)) (old (arrayof (bucket k v r) r)) (new (arrayof (bucket k v r) r)) (i int) (n int))
-      (if (>= i n)
+    (lambda ((t (table k v r)) (old (bucket-array k v r)) (i int))
+      (if (>= i (array-length old))
           #u
-          (begin (rehash-bucket t (array-ref old i) new)
-                 (rehash-array t old new (+ i 1) n)))))))
+          (begin (rehash-bucket t (array-ref old i) (bloblet-ref t 2))
+                 (rehash-array t old (+ i 1))))))))
 
 ;;; Double the buckets once there are more entries than buckets.
 (define table-grow
@@ -94,9 +112,9 @@
     (lambda ((t (table k v r)))
       (let ((old (bloblet-ref t 2)))
         (if (> (bloblet-ref t 3) (array-length old))
-            (let ((new (the (arrayof (bucket k v r) r) (make-array (* 2 (array-length old)) nil))))
-              (begin (rehash-array t old new 0 (array-length old))
-                     (bloblet-set! t 2 new)))
+            (let ((new (the (bucket-array k v r) (make-array (* 2 (array-length old)) nil))))
+              (begin (bloblet-set! t 2 new)
+                     (rehash-array t old 0)))
             #u))))))
 
 (define table-set!
