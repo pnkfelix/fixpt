@@ -600,3 +600,38 @@ The type is to be decided. Points either way:
   narrower choice: identity only where a program asked for it.
 - `eq?`-hashed tables need an address hash that survives collections.
   PLAN Q5 has Larceny's design (tablets stamped with GC counters).
+
+## 20. Shape conflicts during inference are errors, and checking goes on (the user's, 2026-09-29)
+
+`(list 1 (cons 2 nil))`, a real type error, is reported as "argument 2 must
+be a t2, which is not yet known here". That is an error about `cons`'s own
+type variables, which the user never wrote. Found by the `list` rewrite of
+the benchmarks.
+
+What happens, in both checkers (`instantiate` in `infer.rs`, `k-instantiate`
+in `check-synth.fx`):
+1. The expected type is unified with the callee's result first, as a hint:
+   `(pairof t1 t2 r)` against `int`.
+2. That fails, and the failure is ignored.
+3. `nil` fixes nothing, so `t2` stays unknown, and the "not yet known" error
+   fires before the result is ever compared with the context, which would
+   have said the true thing.
+
+To do:
+1. **Report a shape conflict found while unifying the result with the
+   expected type**, at once, as the mismatch it is: "argument 2 is a pair,
+   `(pairof int ? r)`, where an `int` is expected". No choice of the
+   unknowns could make a pair an `int`. Merely unsolved unknowns stay a
+   hint, as now. (Alternatively, defer "not yet known" errors until the
+   result has been checked against the context; reporting at once is
+   simpler and names the right place.) For the standard `list` with a
+   `cons` or `list` argument, a hint: "did you mean `(cons 1 (cons 2 nil))`,
+   or `(list 1 2)`?"
+2. **Keep checking after an error**, to report the errors that follow from the
+   same mistake, which often point at the true one. Both checkers now stop at
+   the first error, because failures are returned. Going on needs:
+   - errors collected, not returned;
+   - a failed expression given a stand-in type that unifies with anything
+     and is itself reported no further, so that one mistake does not cascade
+     into noise;
+   - both checkers agreeing on the list of errors, not only on the first.
