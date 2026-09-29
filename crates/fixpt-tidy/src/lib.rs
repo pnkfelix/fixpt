@@ -1,6 +1,6 @@
 //! Checks on the repository itself, run as ordinary tests (`tests/`).
 //!
-//! One check so far: **a Scheme or FX program longer than a few lines does not
+//! Two checks. **FX program files stay small** ([`fx_size`]). And **a Scheme or FX program longer than a few lines does not
 //! live inside a Rust string literal.** A short snippet inline is the clearest
 //! way to write a test — the program and what it should do side by side — but
 //! past a few lines the string loses everything a source file has: an editor
@@ -19,6 +19,7 @@
 //! That is a guess about intent, not a parse: a long printed value such as
 //! `#<closure …>` counts too, which is intended.
 
+pub mod fx_size;
 pub mod recursion;
 pub mod sexp_edit;
 
