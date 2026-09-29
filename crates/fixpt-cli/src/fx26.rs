@@ -98,6 +98,10 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     if let Some(l) = crate::STEP_LIMIT.get() {
         s.set_step_limit(*l);
     }
+    // The front end's checker and compilers as register code, on the hand
+    // register machine, whatever machine runs the program.
+    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    s.front_end_compiled = std::env::var_os("FIXPT_FRONT_END_LOWERED").is_none();
     if let Some(l) = crate::SPECULATION_STEP_LIMIT.get() {
         s.speculation_limit = *l;
     }

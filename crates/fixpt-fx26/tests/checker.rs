@@ -137,6 +137,25 @@ fn every_test_program() {
     assert!(unparsed.len() <= 5 && agreed >= 150, "only {agreed} compared; not parsed: {unparsed:?}");
 }
 
+/// The front end's checker run as register code
+/// (`Fx26Session::front_end_compiled`) says what it says run as lowered
+/// Scheme, on programs that check and one that does not.
+#[test]
+fn the_front_end_compiled_checks_alike() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let programs = ["run/recursion.fx", "sizes/solved-by-test.fx", "sizes/solved-negative.fx", "native/many-values.fx"];
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.front_end_compiled = true;
+    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    for p in programs {
+        let text = std::fs::read_to_string(format!("{dir}/{p}")).unwrap();
+        let compiled = canon(fx26_check_in(&mut s, &text).expect("parses"));
+        let lowered = canon(fx26_check(&text).expect("parses"));
+        assert_eq!(compiled, lowered, "{p}");
+    }
+    assert!(s.scheme.is_bound("fx26-native:check-program"), "the compiled front end was used");
+}
+
 /// The size programs that say, on their first line, that they are
 /// `Rejected` or `Accepted` are so, by the Rust checker (the FX-26 one
 /// agrees, `every_test_program`).

@@ -128,6 +128,45 @@ fn fx26_arith(rt: &mut Runtime, a: &[Value], op: fn(i64, i64) -> Option<i64>) ->
     }
 }
 
+/// `%run-word`'s work, by the machine `run`.
+fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Outcome<Value> {
+    let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
+    // A closure is called by a word of its own, run with no arguments:
+    // `lit a1 … lit an lit closure call n exit`. A word's frame starts
+    // above what it is run on, so the arguments are the word's to push.
+    // Allocation does not collect here.
+    let (word, args) = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("cellular-closure") {
+        use fixpt_heap::layout::cellular::routine;
+        let f = |n: u64| Value::fixnum(n as i64);
+        let mut cells = Vec::with_capacity(2 * args.len() + 5);
+        for x in &args {
+            cells.extend([f(routine("lit")), *x]);
+        }
+        cells.extend([f(routine("lit")), a[0], f(routine("call")), f(args.len() as u64), f(routine("exit"))]);
+        let name = rt.heap.intern("call-closure");
+        match rt.heap.make_cellular_word(name, &cells) {
+            Ok(w) => (w, Vec::new()),
+            Err(e) => return rt.fail(&e, &[a[0]]),
+        }
+    } else if rt.heap.is_cellular_word(a[0]) {
+        (a[0], args)
+    } else {
+        return rt.type_error("a cellular word or closure", a[0]);
+    };
+    let Some(run) = run else { return rt.fail("no cellular machine is installed", &[]) };
+    // With `FIXPT_TIME_WORDS` set, how long each run took: the machine
+    // alone, without the front end around it.
+    let started = std::env::var_os("FIXPT_TIME_WORDS").map(|_| std::time::Instant::now());
+    let out = run(rt, word, &args);
+    if let Some(t) = started {
+        eprintln!("run-word: {:.6} s", t.elapsed().as_secs_f64());
+    }
+    match out {
+        Ok(v) => Ok(v),
+        Err(e) => rt.fail(&format!("cellular word: {e}"), &[a[0]]),
+    }
+}
+
 /// A radix, 2 to 36.
 fn radix(rt: &mut Runtime, v: Value) -> Outcome<u32> {
     match int(rt, v)? {
@@ -1070,43 +1109,10 @@ prims! {
     });
     // Run a word with the arguments in a list on its data stack; the value it
     // leaves on top.
-    "%run-word", 2, Some(2), simple!(|rt, a| {
-        let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
-        // A closure is called by a word of its own, run with no arguments:
-        // `lit a1 … lit an lit closure call n exit`. A word's frame starts
-        // above what it is run on, so the arguments are the word's to push.
-        // Allocation does not collect here.
-        let (word, args) = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("cellular-closure") {
-            use fixpt_heap::layout::cellular::routine;
-            let f = |n: u64| Value::fixnum(n as i64);
-            let mut cells = Vec::with_capacity(2 * args.len() + 5);
-            for x in &args {
-                cells.extend([f(routine("lit")), *x]);
-            }
-            cells.extend([f(routine("lit")), a[0], f(routine("call")), f(args.len() as u64), f(routine("exit"))]);
-            let name = rt.heap.intern("call-closure");
-            match rt.heap.make_cellular_word(name, &cells) {
-                Ok(w) => (w, Vec::new()),
-                Err(e) => return rt.fail(&e, &[a[0]]),
-            }
-        } else if rt.heap.is_cellular_word(a[0]) {
-            (a[0], args)
-        } else {
-            return rt.type_error("a cellular word or closure", a[0]);
-        };
-        let Some(run) = rt.run_word else { return rt.fail("no cellular machine is installed", &[]) };
-        // With `FIXPT_TIME_WORDS` set, how long each run took: the machine
-        // alone, without the front end around it.
-        let started = std::env::var_os("FIXPT_TIME_WORDS").map(|_| std::time::Instant::now());
-        let out = run(rt, word, &args);
-        if let Some(t) = started {
-            eprintln!("run-word: {:.6} s", t.elapsed().as_secs_f64());
-        }
-        match out {
-            Ok(v) => Ok(v),
-            Err(e) => rt.fail(&format!("cellular word: {e}"), &[a[0]]),
-        }
-    });
+    "%run-word", 2, Some(2), simple!(|rt, a| { let run = rt.run_word; run_word_by(rt, a, run) });
+    // `%run-word` on the machine for the front end (`front_end_run_word`).
+    "%run-front-end", 2, Some(2), simple!(|rt, a| { let run = rt.front_end_run_word.or(rt.run_word); run_word_by(rt, a, run) });
+
     "%bloblet?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_bloblet())));
     "%bloblet-kind", 1, Some(1), simple!(|rt, a| {
         let b = bloblet(rt, a[0])?;

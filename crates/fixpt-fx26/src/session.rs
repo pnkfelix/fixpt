@@ -32,6 +32,10 @@ pub struct Fx26Session {
     /// Under `Strategy::Cellular`: whether the compiler written in FX-26
     /// makes each lambda's register code too, for a machine that runs it.
     pub register_code: bool,
+    /// Whether the FX-26 front end's checker and compilers run as register
+    /// code (`front_end_as_register_code`), made so when first loaded; the
+    /// runtime's `front_end_run_word` must be a machine for register code.
+    pub front_end_compiled: bool,
     /// Whether the program's convention is native (`--calling-convention`;
     /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
     native_convention: bool,
@@ -303,6 +307,7 @@ impl Fx26Session {
             globals: Globals::default(),
             strategy: Strategy::Lower,
             register_code: false,
+            front_end_compiled: false,
             native_convention: false,
             native_runner: None,
             native_compiler: None,
@@ -699,6 +704,72 @@ impl Fx26Session {
         c
     }
 
+    /// The front end's entry points the Rust side calls by name
+    /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
+    pub const FRONT_ENTRIES: [&'static str; 19] = [
+        "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!",
+        "check-globals-effects!", "parse-program", "run-checked", "compile-program", "compile-checked", "compile-registers!",
+        "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
+        "arm-ret", "arm-mov-imm64",
+    ];
+
+    /// The front end's checker and compilers run as register code, not as
+    /// lowered Scheme on the engine (about 28 times as fast): the front
+    /// end compiled by the Rust compiler, with register code, and run once
+    /// to give its entry points; each `READER_PREFIX` global the Rust side
+    /// calls then calls its entry point by `%run-front-end` (the runtime's
+    /// `front_end_run_word`, which the caller installs: a machine that
+    /// runs register code). The reader stays lowered, and loaded as ever.
+    fn front_end_as_register_code(&mut self) -> R<()> {
+        let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
+        let fields: Vec<String> = Self::FRONT_ENTRIES.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
+        let text = format!("{}\n(product {})\n", crate::front_end(), fields.join(" "));
+        let mut c = Checker::new();
+        let forms = c.read_in(FileId(0), &text)?;
+        let done = c.declare_ahead(&forms)?;
+        let mut tops = Vec::new();
+        for (f, done) in forms.iter().zip(done) {
+            if !done {
+                tops.extend(c.top_all(f)?);
+            }
+        }
+        let limit = self.step_limit();
+        self.scheme.engine.set_step_limit(None);
+        let pieces = self.scheme.scope(|sc| {
+            let mut compiled = Err(String::new());
+            let word = sc.make(|m| {
+                let mut comp = crate::cellular::Compiler::new(m.heap(), &c, &text);
+                comp.registers = true;
+                compiled = comp.program(&tops);
+                compiled.clone().unwrap_or(fixpt_heap::Value::FALSE)
+            });
+            compiled.map_err(|e| format!("the front end as register code: {e}"))?;
+            let none = sc.make(|_| fixpt_heap::Value::NULL);
+            let pieces = sc.call_global("%run-front-end", &[word, none]).map_err(|e| e.to_string())?;
+            // Each entry point in a global of its own, and the name the Rust
+            // side calls made to call it.
+            sc.make(|m| {
+                let p = m.get(pieces);
+                for (i, name) in Self::FRONT_ENTRIES.iter().enumerate() {
+                    // Field `i + 1` of the product, its slot `i + 2`.
+                    let piece = m.heap().bloblet_slot(p, 2 + i);
+                    let sym = m.heap().intern(&format!("fx26-native:{name}"));
+                    let slot = m.heap().symbol_global_slot(sym);
+                    m.heap().set_global(slot, piece);
+                }
+                fixpt_heap::Value::NULL
+            });
+            Ok(())
+        });
+        self.scheme.engine.set_step_limit(limit);
+        pieces.map_err(fail)?;
+        for name in Self::FRONT_ENTRIES {
+            let define = format!("(define (fx26-reader:{name} . args) (%run-front-end fx26-native:{name} args))");
+            self.scheme.eval_str("<front end>", &define).map_err(|e| fail(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// The pieces written in FX-26 (reader, checker, compilers), loaded if
     /// they are not yet.
     pub fn load_own_pieces(&mut self) -> R<()> {
@@ -711,6 +782,9 @@ impl Fx26Session {
         let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
         if !self.scheme.is_bound(&format!("{READER_PREFIX}check-program")) {
             load_eager_reader(&mut self.scheme).map_err(fail)?;
+        }
+        if self.front_end_compiled && !self.scheme.is_bound("fx26-native:check-program") {
+            self.front_end_as_register_code()?;
         }
         let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.native_convention));
         self.scheme.call_global(&format!("{READER_PREFIX}check-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;

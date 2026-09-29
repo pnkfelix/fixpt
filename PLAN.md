@@ -1920,9 +1920,16 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
     checker: 0.025 s.
   - The session runs the front end as lowered Scheme on the bytecode VM,
     about 28x its register code (`fixpt check`'s FX-26 checker on
-    `set.fx`: 4.96 -> 3.18 s with the fixes above). To do: the session's
-    front end as register code (compiling it costs about 2 s, like
-    loading it now), then a cached image of it (Q9 S0).
+    `set.fx`: 4.96 -> 3.18 s with the fixes above). Done (2026-09-29):
+    the session's checker and compilers run as register code
+    (`Fx26Session::front_end_compiled`, on in the CLI; the front end
+    compiled when first loaded, its 19 entry points rebound to call the
+    compiled ones by `%run-front-end` on the hand register machine; the
+    reader stays lowered). `set.fx`: the FX-26 checker 3.31 -> 0.31 s
+    (the Rust checker 0.026 s); the front end's work in a native run
+    5.0 -> 0.65 s. A tiny program starts 0.2-0.45 s later (the front end
+    checked again by the Rust checker, and compiled). To do: reuse the
+    load's check, and a cached image (Q9 S0); the reader as register code.
   Still to do: the reference tables' times should leave out checking.
 - Fixed (2026-09-29): a standard operation as a value takes the arity of
   the runtime primitive it runs as (`runtime-primitive-arity`), so

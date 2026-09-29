@@ -1954,3 +1954,21 @@ which with the nursery meant every time it filled. It calls
 
 The `direct` test binary, which runs native code under collections, went
 from 12 s to 5 s.
+
+## The FX-26 checker: quadratic spots, and run as register code (2026-09-29)
+
+The user asked why the FX-26 checker took seconds where the Rust one
+takes milliseconds. On `scheme-bench/set.fx`, whose effects name up to 17
+globals:
+
+| the FX-26 checker                               | as lowered Scheme | as register code | the Rust checker |
+| ----------------------------------------------- | -----------------:| ----------------:| ----------------:|
+| before                                          |            4.96 s |           0.41 s |          0.026 s |
+| name order, type printing, union, subset linear |            3.18 s |          0.112 s |          0.026 s |
+| the session's front end as register code        |                 — |           0.31 s |          0.026 s |
+
+(The last row is `fixpt check`'s own timing, `FIXPT_TIME_PHASES=1`; the
+register-code column above it is the bootstrap probe's, which reads the
+program with the compiled reader too.) The front end's work in a native
+run of `set.fx` with no iterations: 9.8 s before, 5.0 s after the
+quadratic fixes, 0.65 s as register code.

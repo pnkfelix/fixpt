@@ -32,6 +32,10 @@ pub struct Runtime {
     /// How `%run-word` runs a cellular word: the cellular machine lives in
     /// `fixpt-engine`, above this crate, which installs it.
     pub run_word: Option<RunWord>,
+    /// How `%run-front-end` runs the FX-26 front end compiled
+    /// (`Fx26Session::front_end_as_register_code`): a machine that runs
+    /// register code, whatever machine runs the program; `run_word` if none.
+    pub front_end_run_word: Option<RunWord>,
     /// How that machine shows a word's machine code, or what stands for it
     /// (`,disassemble-asm`); none for a machine that has none.
     pub machine_code: Option<MachineCode>,
@@ -119,6 +123,7 @@ impl Runtime {
             file_base: std::path::PathBuf::from("."),
             error_rtd_root,
             run_word: None,
+            front_end_run_word: None,
             machine_code: None,
             show_machine_code: false,
             native_code: None,
@@ -202,6 +207,7 @@ impl Runtime {
             file_base: std::path::PathBuf::from("."),
             error_rtd_root: ERROR_RTD_ROOT,
             run_word: None,
+            front_end_run_word: None,
             machine_code: None,
             show_machine_code: false,
             native_code: None,
