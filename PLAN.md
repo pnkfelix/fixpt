@@ -116,8 +116,8 @@ are in the last section, "Log: the glance's details", and in
   characters, met by extracting subroutines and splitting files, never by
   re-wrapping (`fixpt_tidy::fx_size`, debt in `fx-size-debt.txt`). Every
   hand-written `.fx` file is within both: the front end, the test programs
-  and the examples. Left in debt: two generated files (FX-87's
-  `standard.fx`, FX-91's `fx-module.fx`), whose generators need changing.
+  and the examples; the debt list is empty. The two generated files
+  (FX-87's `standard.fx`, FX-91's `fx-module.fx`) are exempt (the user's).
   Later: a lint for indentation (`TODO.md` §16).
 
 **Next**, roughly in order. First the queue in "The queue after the

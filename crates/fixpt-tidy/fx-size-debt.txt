@@ -10,9 +10,10 @@ exempt mllang-bench/
 exempt tests/conformance/fx91/
 # Test inputs whose size is their point: 70 values live across one call.
 exempt crates/fixpt-fx26/tests/programs/native/wide-frame.fx
+# Generated files (the user's decision, 2026-09-29): regenerated, not edited.
+exempt crates/fixpt-fx87/src/standard.fx
+exempt crates/fixpt-fx91/src/fx-module.fx
 # Seventy nested products, on two lines: the depth the termination check meets.
 exempt crates/fixpt-fx26/tests/programs/terminate/deep-self-application.fx
 
 # In debt: path, lines, lines over 100 columns.
-crates/fixpt-fx87/src/standard.fx                                     245   57
-crates/fixpt-fx91/src/fx-module.fx                                    380    1
