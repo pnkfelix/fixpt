@@ -35,6 +35,18 @@
 (define c-int-hash (subr pure (int) int) (lambda (a) a))
 (define c-int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
 (define c-fact-table (ref (table int (pairof int int @k) @k) @k) (new (make-table c-int-hash c-int=?)))
+;; A `letrec`-bound procedure lambda-lifted, as Twobit's pass 2 lifts
+;; (`pass2p2.sch`): its closure, over nothing, made while compiling; the
+;; names it would have captured, each passed as an argument before its own.
+(define-type c-lift (productof (1 wcell) (2 (listof symbol acyclic))))
+;; The procedures lambda-lifted, by index; and, by where each `letrec` is
+;; (`c-span-key`), its members' (none if it is not lifted), so that its
+;; register code lifts it as its stack code did, with the same words.
+(define c-lifts (ref (table int c-lift @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-lift-count (ref int @k) (new 0))
+(define c-lifted (ref (table int (listof (listof int @k) @k) @k) @k) (new (make-table c-int-hash c-int=?)))
+;; The parameters a lifting added to the lambda about to be compiled.
+(define c-lifting-added (ref int @k) (new 0))
 ;; Each expression's effect summary, by where it starts: where it ends, and
 ;; the summary, for each span starting there.
 (define-type c-ends (listof (pairof int int @k) acyclic))
@@ -143,7 +155,11 @@
   ;; A `letrec`-bound procedure, in its own body, where it is only called
   ;; in tail position: each call is a jump back to its start. (The int is
   ;; unused.)
-  (at-loop int))
+  (at-loop int)
+  ;; A `letrec`-bound procedure lambda-lifted (`c-lift`), by its index in
+  ;; `c-lifts`: only called, by a closure over nothing made once, with the
+  ;; names it would have captured passed first.
+  (at-lifted int))
 (define-type cenv (listof (pairof symbol loc @k) @k))
 
 (define c-loop? (subr pure (loc) bool)
@@ -156,9 +172,12 @@
 (define c-this-loc (ref loc @k) (new (at-loop 0)))
 (define c-this-params (ref int @k) (new -1))
 (define c-this-start (ref int @k) (new 0))
+;; How many of its parameters, first, a lifting added (`c-lift`): a loop
+;; passes them on as they are.
+(define c-this-added (ref int @k) (new 0))
 ;; What register code knows of the procedure being compiled, when it is one
 ;; that knows itself: its name, where the name is, and its arity.
-(define-type c-this (productof (1 symbol) (2 loc) (3 int)))
+(define-type c-this (productof (1 symbol) (2 loc) (3 int) (4 int)))
 
 ;; Whether each lambda also gets register code (PLAN.md 13h′), as its word's
 ;; twin; and the register compiler, `regcode.fx`, which sets itself here: a
@@ -217,7 +236,8 @@
       (at-free (i) (c-op1 c routine-free (wcell-int i)))
       (at-global (g) (c-op1 c routine-global (wcell-global g)))
       (at-pending (i) (c-fail "a letrec sibling not made yet is only captured"))
-      (at-loop (z) (c-fail "a loop is only ever called, in tail position")))))
+      (at-loop (z) (c-fail "a loop is only ever called, in tail position"))
+      (at-lifted (k) (c-fail "a lifted procedure is only called")))))
 
 ;;; ------------------------------------------------------------- free names
 ;;; The names a lambda's body uses that it does not bind: what its closure
@@ -265,6 +285,9 @@
       (set c-fact-table (make-table c-int-hash c-int=?))
       (set c-summary-table (make-table c-int-hash c-int=?))
       (set c-join-memo (make-table c-int-hash c-int=?))
+      (set c-lifts (make-table c-int-hash c-int=?))
+      (set c-lift-count 0)
+      (set c-lifted (make-table c-int-hash c-int=?))
       (c-fill-facts fs))))
 (define c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool)
   (lambda (xs n) (and (not (null? xs)) (or (symbol=? (car xs) n) (c-member? (cdr xs) n)))))
@@ -460,16 +483,281 @@
           (c-letrec-own (cdr bs)
                         (the cenv (cons (cons g (if (and (= k i) (c-loops-only body g nps #t)) (at-loop 0) (at-pending (+ depth k)))) e))
                         depth (+ k 1) i body nps)))))
-
 (define c-count-letrec (subr (read @globals) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-letrec (cdr bs))))))
-
 (define c-count-params (subr (read @globals) ((listof (productof (1 symbol) (2 syns-a)) acyclic)) int)
   (lambda (ps) (if (null? ps) 0 (+ 1 (c-count-params (cdr ps))))))
-(define c-param-env (subr (maxeff (read @globals) (alloc @k)) ((listof (productof (1 symbol) (2 syns-a)) acyclic) int cenv) cenv)
-  (lambda (ps i acc) (if (null? ps) acc (c-param-env (cdr ps) (+ i 1) (the cenv (cons (cons (extract (car ps) 1) (at-slot i)) acc))))))
 (define c-length (subr (maxeff (read @globals) (read @k) spin) (syms) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (c-length (cdr xs))))))
+(define c-nth-binding
+  (subr (read @globals) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) int) (productof (1 symbol) (2 syn) (3 exp)))
+  (lambda (bs i) (if (= i 0) (car bs) (c-nth-binding (cdr bs) (- i 1)))))
+;; Whether no binding of `bs` but the `i`th mentions `name`; `k` counts.
+(define c-unmentioned? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) symbol int int) bool)
+  (lambda (bs name i k)
+    (or (null? bs)
+        (and (or (= k i) (not (c-mentions? (extract (car bs) 3) name))) (c-unmentioned? (cdr bs) name i (+ k 1))))))
+;; Whether `letrec` binding `i` of `bs` is a join point, as the Rust
+;; compiler's `r_join_ok` says: a lambda whose body calls it only in tail
+;; position, as the `letrec`'s body does, and that no sibling mentions; so
+;; no closure of it need be made, and each call is a jump.
+(define c-join-ok? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp int) bool)
+  (lambda (bs body i)
+    (let* ((b (c-nth-binding bs i)) (name (extract b 1)) (lam (c-lambda-of (extract b 3))))
+      (and (not (null? lam))
+           (tagcase (car lam)
+             (e-lambda (ps lbody la lb)
+               (let ((n (c-count-params ps)))
+                 (and (not (c-member? (c-bind-params ps nil) name))
+                      (and (c-loops-only lbody name n #t)
+                           (and (c-loops-only body name n #t) (c-unmentioned? bs name i 0))))))
+             (else y #f))))))
+;;; ------------------------------------------------------ lambda lifting
+;;; As the Rust compiler's `lift`, `lift_plan` and `called_only`.
+
+;; A `letrec`'s key in `c-lifted`: where it starts and ends.
+(define c-span-key (subr pure (int int) int) (lambda (a b) (+ (* a 4194304) b)))
+;; The index in `c-lifts` of the procedure `n` names in `e`, if a lifted
+;; one; else -1.
+(define c-lifted-index (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (symbol cenv) int)
+  (lambda (n e) (let ((l (c-find e n))) (if (null? l) -1 (tagcase (car l) (at-lifted (k) k) (else y -1))))))
+(define c-lifted-at (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp cenv) int)
+  (lambda (f e) (tagcase f (e-var (n a b) (c-lifted-index n e)) (else y -1))))
+;; A lifted procedure's added names.
+(define c-lift-added (subr (maxeff (read @globals) (read @k)) (int) syms)
+  (lambda (k) (extract (table-ref (get c-lifts) k (the c-lift (product (1 (wcell-nil)) (2 (the syms nil))))) 2)))
+;; The lifted procedures `e` binds, as it binds them: known everywhere
+;; inside a lambda, being constants.
+(define c-lifted-entries (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (cenv) cenv)
+  (lambda (e)
+    (cond ((null? e) nil)
+          ((tagcase (cdr (car e)) (at-lifted (k) #t) (else y #f)) (the cenv (cons (car e) (c-lifted-entries (cdr e)))))
+          (else (c-lifted-entries (cdr e))))))
+;; Each of `ns`' values pushed, from where `e` has it.
+(define c-load-names (subr (maxeff compiles spin) (syms cenv code) unit)
+  (lambda (ns e c)
+    (if (null? ns)
+        #u
+        (let ((l (c-where e (car ns))))
+          (begin (if (null? l) (c-fail "a lifted procedure's added name is not bound") (c-load c (car l)))
+                 (c-load-names (cdr ns) e c))))))
+(define c-snoc (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms symbol) syms)
+  (lambda (xs n) (if (null? xs) (cons n nil) (cons (car xs) (c-snoc (cdr xs) n)))))
+;; `acc` with each of `ns` in neither it nor `params` after it, in order.
+(define c-append-new (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms syms syms) syms)
+  (lambda (ns acc params)
+    (cond ((null? ns) acc)
+          ((or (c-member? acc (car ns)) (c-member? params (car ns))) (c-append-new (cdr ns) acc params))
+          (else (c-append-new (cdr ns) (c-snoc acc (car ns)) params)))))
+(define c-lifted-names-onto (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms syms syms cenv) syms)
+  (lambda (xs acc params e)
+    (if (null? xs)
+        acc
+        (let ((k (c-lifted-index (car xs) e)))
+          (c-lifted-names-onto (cdr xs) (if (< k 0) acc (c-append-new (c-lift-added k) acc params)) params e)))))
+;; `free` with, for each lifted procedure in it, the names its calls pass
+;; (not `params`) after: code that calls one needs them too.
+(define c-with-lifted-names (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms syms cenv) syms)
+  (lambda (free params e) (c-lifted-names-onto free free params e)))
+
+;; Whether every use of `f` in `x` is a call with `n` arguments, in any
+;; position and in lambdas inside too: so it is never a value.
+(define-rec
+  (c-called-only (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp symbol int) bool)
+    (lambda (x f n)
+      (tagcase x
+        (e-var (m a b) (not (symbol=? m f)))
+        (e-app (fun args a b)
+          (and (c-called-only-all args f n)
+               (tagcase fun
+                 (e-var (m a2 b2) (if (symbol=? m f) (= (c-count-exps args) n) #t))
+                 (else y (c-called-only fun f n)))))
+        (e-lambda (ps body a b) (or (c-member? (c-bind-params ps nil) f) (c-called-only body f n)))
+        (e-rlambda (r l a b) (and (c-called-only r f n) (c-called-only l f n)))
+        (e-plambda (d body a b) (c-called-only body f n))
+        (e-proj (body ds a b) (c-called-only body f n))
+        (e-the (d body a b) (c-called-only body f n))
+        (e-convention (cnv body a b) (c-called-only body f n))
+        (e-letregion (k r i body a b) (or (symbol=? r f) (c-called-only body f n)))
+        (e-if (t th el a b) (and (c-called-only t f n) (and (c-called-only th f n) (c-called-only el f n))))
+        (e-letrec (bs body a b)
+          (or (c-member? (c-bind-letrec bs nil) f) (and (c-called-only-letrec bs f n) (c-called-only body f n))))
+        (e-let (bs body a b)
+          (and (c-called-only-let bs f n) (or (c-member? (c-bind-let bs nil) f) (c-called-only body f n))))
+        (e-begin (es a b) (c-called-only-all es f n))
+        (e-prompt (t body h a b) (and (c-called-only t f n) (and (c-called-only body f n) (c-called-only h f n))))
+        (e-bloblet (op i args a b) (c-called-only-all args f n))
+        (e-product (fs a b) (c-called-only-fields fs f n))
+        (e-extract (p l a b) (c-called-only p f n))
+        (e-sum (t v a b) (c-called-only v f n))
+        (e-tagcase (s arms els a b)
+          (and (c-called-only s f n) (and (c-called-only-arms arms f n) (c-called-only-else els f n))))
+        (else y #t))))
+  (c-called-only-all (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof exp acyclic) symbol int) bool)
+    (lambda (es f n) (or (null? es) (and (c-called-only (car es) f n) (c-called-only-all (cdr es) f n)))))
+  (c-called-only-letrec (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) symbol int) bool)
+    (lambda (bs f n) (or (null? bs) (and (c-called-only (extract (car bs) 3) f n) (c-called-only-letrec (cdr bs) f n)))))
+  (c-called-only-let (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) acyclic) symbol int) bool)
+    (lambda (bs f n) (or (null? bs) (and (c-called-only (extract (car bs) 2) f n) (c-called-only-let (cdr bs) f n)))))
+  (c-called-only-fields (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) acyclic) symbol int) bool)
+    (lambda (fs f n) (or (null? fs) (and (c-called-only (extract (car fs) 2) f n) (c-called-only-fields (cdr fs) f n)))))
+  (c-called-only-arms
+    (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic) symbol int) bool)
+    (lambda (arms f n)
+      (or (null? arms)
+          (and (or (c-member? (c-names (extract (car arms) 3) nil) f) (c-called-only (extract (car arms) 4) f n))
+               (c-called-only-arms (cdr arms) f n)))))
+  (c-called-only-else (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 exp)) acyclic) symbol int) bool)
+    (lambda (els f n) (or (null? els) (or (symbol=? (extract (car els) 1) f) (c-called-only (extract (car els) 2) f n))))))
+
+;; Whether every binding of `bs`, from the `i`th, is a join point.
+(define c-all-join? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp int) bool)
+  (lambda (bs body i) (or (>= i (c-count-letrec bs)) (and (c-join-ok? bs body i) (c-all-join? bs body (+ i 1))))))
+;; Whether no binding of `all` uses `name` but in calls of `n` arguments.
+(define c-called-only-inits (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) symbol int) bool)
+  (lambda (all name n) (or (null? all) (and (c-called-only (extract (car all) 3) name n) (c-called-only-inits (cdr all) name n)))))
+;; Whether each member of `bs` is a plain lambda, only ever called, with
+;; its arity, in `body` and in every binding of `all`.
+(define c-liftable? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp) bool)
+  (lambda (all bs body)
+    (or (null? bs)
+        (let ((lam (c-lambda-of (extract (car bs) 3))))
+          (and (not (null? lam))
+               (tagcase (car lam)
+                 (e-lambda (ps lbody a b)
+                   (let ((name (extract (car bs) 1)) (n (c-count-params ps)))
+                     (and (c-called-only body name n) (and (c-called-only-inits all name n) (c-liftable? all (cdr bs) body)))))
+                 (else y #f)))))))
+;; The locals of `free` (not `names`, the siblings) a member would capture,
+;; onto `acc`, in a list of one; none if one is a sibling not made yet or a
+;; loop, which cannot be passed.
+(define c-lift-locals (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms syms cenv syms) (listof syms @k))
+  (lambda (free names e acc)
+    (cond ((null? free) (the (listof syms @k) (cons acc nil)))
+          ((c-member? names (car free)) (c-lift-locals (cdr free) names e acc))
+          (else
+           (let ((l (c-find e (car free))))
+             (if (null? l)
+                 (c-lift-locals (cdr free) names e acc)
+                 (tagcase (car l)
+                   (at-slot (i) (c-lift-locals (cdr free) names e (cons (car free) acc)))
+                   (at-free (i) (c-lift-locals (cdr free) names e (cons (car free) acc)))
+                   (at-pending (i) (the (listof syms @k) nil))
+                   (at-loop (z) (the (listof syms @k) nil))
+                   (else y (c-lift-locals (cdr free) names e acc)))))))))
+;; The indices of the bindings of `bs`, from the `k`th, whose names are in
+;; `free`: the siblings a member calls.
+(define c-sibling-indices (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) int) (listof int @k))
+  (lambda (free bs k)
+    (cond ((null? bs) nil)
+          ((c-member? free (extract (car bs) 1)) (cons k (c-sibling-indices free (cdr bs) (+ k 1))))
+          (else (c-sibling-indices free (cdr bs) (+ k 1))))))
+;; Each member's locals into `added`, the siblings it calls into `calls`,
+;; from the `i`th of `bs`; whether every member's could be.
+(define c-lift-direct
+  (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin)
+        ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) int syms cenv (arrayof syms @k) (arrayof (listof int @k) @k))
+        bool)
+  (lambda (all bs i names e added calls)
+    (or (null? bs)
+        (tagcase (car (c-lambda-of (extract (car bs) 3)))
+          (e-lambda (ps lbody a b)
+            (let* ((params (c-bind-params ps nil))
+                   (free (c-with-lifted-names (c-free lbody params nil) params e))
+                   (mine (c-lift-locals free names e nil)))
+              (and (not (null? mine))
+                   (begin (array-set! added i (car mine))
+                          (array-set! calls i (c-sibling-indices free all 0))
+                          (c-lift-direct all (cdr bs) (+ i 1) names e added calls)))))
+          (else y #f)))))
+(define c-union-into (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms syms) syms)
+  (lambda (xs ys) (if (null? ys) xs (c-union-into (if (c-member? xs (car ys)) xs (cons (car ys) xs)) (cdr ys)))))
+;; Member `i` takes what the siblings `js` it calls take too; whether it
+;; took more than it had (`more`).
+(define c-lift-from (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((arrayof syms @k) int (listof int @k) bool) bool)
+  (lambda (added i js more)
+    (if (null? js)
+        more
+        (let* ((had (array-ref added i)) (now (c-union-into had (array-ref added (car js)))))
+          (begin (array-set! added i now)
+                 (c-lift-from added i (cdr js) (or more (not (= (c-length now) (c-length had))))))))))
+(define c-lift-round (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((arrayof syms @k) (arrayof (listof int @k) @k) int int bool) bool)
+  (lambda (added calls i n more)
+    (if (>= i n) more (c-lift-round added calls (+ i 1) n (c-lift-from added i (array-ref calls i) more)))))
+;; Twobit's flow equations (`compute-added-arguments`), to their fixed
+;; point: each member takes its locals, and what each sibling it calls
+;; takes.
+(define c-lift-flow (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((arrayof syms @k) (arrayof (listof int @k) @k) int) unit)
+  (lambda (added calls n) (if (c-lift-round added calls 0 n #f) (c-lift-flow added calls n) #u)))
+;; Where `n` is bound in `e`, counting from the innermost.
+(define c-env-pos (subr (maxeff (read @globals) (read @k) spin) (cenv symbol int) int)
+  (lambda (e n k) (cond ((null? e) k) ((symbol=? (car (car e)) n) k) (else (c-env-pos (cdr e) n (+ k 1))))))
+(define c-insert-outer (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (symbol syms cenv) syms)
+  (lambda (x ys e)
+    (cond ((null? ys) (cons x nil))
+          ((> (c-env-pos e x 0) (c-env-pos e (car ys) 0)) (cons x ys))
+          (else (cons (car ys) (c-insert-outer x (cdr ys) e))))))
+;; `xs`, outermost binding first.
+(define c-sort-outer (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms cenv) syms)
+  (lambda (xs e) (if (null? xs) nil (c-insert-outer (car xs) (c-sort-outer (cdr xs) e) e))))
+(define c-lift-sort (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((arrayof syms @k) cenv int int) unit)
+  (lambda (added e i n) (if (>= i n) #u (begin (array-set! added i (c-sort-outer (array-ref added i) e)) (c-lift-sort added e (+ i 1) n)))))
+;; Whether each member, from the `i`th of `bs`, takes fewer than 6 names
+;; more, and no more than `register-regs` arguments in all.
+(define c-lift-fits? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (arrayof syms @k) int) bool)
+  (lambda (bs added i)
+    (or (null? bs)
+        (tagcase (car (c-lambda-of (extract (car bs) 3)))
+          (e-lambda (ps lbody a b)
+            (let ((m (c-length (array-ref added i))))
+              (and (< m 6) (and (<= (+ m (c-count-params ps)) register-regs) (c-lift-fits? (cdr bs) added (+ i 1))))))
+          (else y #f)))))
+;; Whether to lift a `letrec` (`c-lift`), as the Rust compiler's `lift_plan`
+;; decides: none if not; else, in a list of one, each member's added names.
+;; Lifted where every member is a plain lambda only ever called, with its
+;; arity; where the group is not join points (register code's jumps,
+;; better still); and where each member takes fewer than 6 names more
+;; (Twobit's bound, `POLICY:LIFT?`) and no more than `register-regs`
+;; arguments in all. The names a member takes: the locals it would
+;; capture, and those of each sibling it calls (Twobit's flow equations);
+;; outermost first.
+(define c-lift-plan
+  (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin)
+        ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp cenv bool) (listof (arrayof syms @k) @k))
+  (lambda (bs body e tail)
+    (if (or (and tail (c-all-join? bs body 0)) (not (c-liftable? bs bs body)))
+        nil
+        (let* ((n (c-count-letrec bs))
+               (added (the (arrayof syms @k) (make-array n nil)))
+               (calls (the (arrayof (listof int @k) @k) (make-array n nil))))
+          (if (not (c-lift-direct bs bs 0 (c-bind-letrec bs nil) e added calls))
+              nil
+              (begin
+                (c-lift-flow added calls n)
+                (c-lift-sort added e 0 n)
+                (if (c-lift-fits? bs added 0) (the (listof (arrayof syms @k) @k) (cons added nil)) nil)))))))
+;; `bs`' names bound to the lifted procedures `ks`, onto `e`.
+(define c-bind-lifted (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (listof int @k) cenv) cenv)
+  (lambda (bs ks e)
+    (if (null? bs) e (c-bind-lifted (cdr bs) (cdr ks) (the cenv (cons (cons (extract (car bs) 1) (at-lifted (car ks))) e))))))
+;; The names `added` as parameters (with no type), then `ps`.
+(define c-added-params (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms (listof (productof (1 symbol) (2 syns-a)) acyclic)) (listof (productof (1 symbol) (2 syns-a)) acyclic))
+  (lambda (added ps) (if (null? added) ps (cons (product (1 (car added)) (2 (the syns-a nil))) (c-added-params (cdr added) ps)))))
+;; A closure over nothing for each member, from the `i`th, its word to
+;; come, in `c-lifts` with what it takes: their indices.
+(define c-lift-closures (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (arrayof syms @k) int) (listof int @k))
+  (lambda (bs added i)
+    (if (null? bs)
+        nil
+        (let ((k (get c-lift-count)))
+          (begin
+            (table-set! (get c-lifts) k (the c-lift (product (1 (wcell-closure)) (2 (array-ref added i)))))
+            (set c-lift-count (+ k 1))
+            (cons k (c-lift-closures (cdr bs) added (+ i 1))))))))
+
+
+(define c-param-env (subr (maxeff (read @globals) (alloc @k)) ((listof (productof (1 symbol) (2 syns-a)) acyclic) int cenv) cenv)
+  (lambda (ps i acc) (if (null? ps) acc (c-param-env (cdr ps) (+ i 1) (the cenv (cons (cons (extract (car ps) 1) (at-slot i)) acc))))))
 
 ;; The free names that are locals here, not globals or standard names, nor
 ;; a loop, which is not a value.
@@ -479,9 +767,16 @@
           ((null? (c-find e (car xs))) (c-captured (cdr xs) e))
           ((c-loop? (car (c-find e (car xs)))) (c-captured (cdr xs) e))
           ;; A definition's own global, in its body's names, is still a global.
-          ((tagcase (car (c-find e (car xs))) (at-global (g) #t) (else y #f)) (c-captured (cdr xs) e))
+          ((tagcase (car (c-find e (car xs))) (at-global (g) #t) (at-lifted (k) #t) (else y #f)) (c-captured (cdr xs) e))
           (else (cons (car xs) (c-captured (cdr xs) e))))))
 
+;; The names a lambda of `ps` and `body` captures in `e`, as the Rust
+;; compiler's `captured` finds them: its free locals, and the names the
+;; lifted procedures it calls take.
+(define c-lambda-captured (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syns-a)) acyclic) exp cenv) syms)
+  (lambda (ps body e)
+    (let ((params (c-bind-params ps nil)))
+      (c-captured (c-with-lifted-names (c-free body params nil) params e) e))))
 ;; Free value `i` for each captured name, boxed if it was boxed outside.
 (define c-inner-env (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms cenv cenv int) cenv)
   (lambda (xs outer acc i)
@@ -503,7 +798,8 @@
                           (at-free (i) (begin (c-op1 c routine-free (wcell-int i)) -1))
                           (at-pending (s) (begin (c-lit c (wcell-bool #f)) s))
                           (at-global (g) (c-fail "a global is not captured"))
-                          (at-loop (z) (c-fail "a loop is not captured"))))
+                          (at-loop (z) (c-fail "a loop is not captured"))
+                          (at-lifted (k) (c-fail "a lifted procedure is not captured"))))
                (rest (c-push-all (cdr xs) e (+ depth 1) (+ j 1) c)))
           (if (< pending 0) rest (the patches (cons (cons j pending) rest)))))))
 
@@ -516,11 +812,13 @@
                   (and (symbol=? n (get c-this-name))
                        (let ((l (c-find e n)))
                          (and (not (null? l))
-                              (and (c-this-loc? (car l) (get c-this-loc)) (= (c-count-exps args) (get c-this-params)))))))
+                              (and (c-this-loc? (car l) (get c-this-loc)) (= (+ (get c-this-added) (c-count-exps args)) (get c-this-params)))))))
                 (else y #f))))))
 
-(define c-loop-stores (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (code int) unit)
-  (lambda (c i) (if (< i 0) #u (begin (c-op1 c routine-slot! (wcell-int i)) (c-loop-stores c (- i 1))))))
+;; Into the parameters' slots, from `i` down to `lo` (those below, a
+;; lifting's, passed on as they are).
+(define c-loop-stores (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (code int int) unit)
+  (lambda (c i lo) (if (< i lo) #u (begin (c-op1 c routine-slot! (wcell-int i)) (c-loop-stores c (- i 1) lo)))))
 (define c-drops (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k)) (code int) unit)
   (lambda (c k) (if (<= k 0) #u (begin (c-op c routine-drop) (c-drops c (- k 1))))))
 
@@ -655,7 +953,7 @@
 ;; if it made one here, and the names it captures.
 (define c-made-word (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syns-a)) acyclic) exp cenv syms) (listof (productof (1 tword) (2 syms)) @k))
   (lambda (ps body e own0)
-    (let ((fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
+    (let ((fv (c-lambda-captured ps body e))
           (params (c-bind-params ps nil)) (own (c-own-of ps own0)))
       (letrec ((find (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof c-made @k)) (listof (productof (1 tword) (2 syms)) @k))
                  (lambda (ms)
@@ -725,7 +1023,7 @@
         (e-let (bs body a b)
           (let* ((inner (c-let-bind bs e e depth c)) (n (c-count-let bs)))
             (begin (c-exp body inner (+ depth n) c tail) (c-unbind c depth n tail))))
-        (e-letrec (bs body a b) (c-letrec bs body e depth c tail))
+        (e-letrec (bs body a b) (c-letrec-or-lift bs body a b e depth c tail))
         (e-begin (es a b) (c-begin es e depth c tail))
         (e-prompt (t body h a b)
           (begin
@@ -768,6 +1066,49 @@
           (c-letrec-patch made depth 0 c)
           (c-exp body (c-letrec-slots bs e depth) (+ depth n) c tail)
           (c-unbind c depth n tail)))))
+  ;; Whether the `letrec` at `a`–`b` is lambda-lifted, deciding the first
+  ;; time it is asked (by its stack code: its register code asks again, and
+  ;; has the same answer and words): its members' `c-lifts` indices if so, in
+  ;; a list of one, each member's word made, with the names it takes first.
+  (c-lift (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp int int cenv bool) (listof (listof int @k) @k))
+    (lambda (bs body a b e tail)
+      (let ((key (c-span-key a b)))
+        (if (table-has? (get c-lifted) key)
+            (table-ref (get c-lifted) key (the (listof (listof int @k) @k) nil))
+            (let ((plan (c-lift-plan bs body e tail)))
+              (if (null? plan)
+                  (begin (table-set! (get c-lifted) key (the (listof (listof int @k) @k) nil)) (the (listof (listof int @k) @k) nil))
+                  (let* ((added (car plan))
+                         (ks (c-lift-closures bs added 0))
+                         (done (the (listof (listof int @k) @k) (cons ks nil))))
+                    (begin
+                      (table-set! (get c-lifted) key done)
+                      (c-lift-words bs added ks (c-bind-lifted bs ks (c-lifted-entries e)) 0)
+                      done))))))))
+  ;; Each member's word, from the `i`th, into its closure: its added names
+  ;; first, then its parameters; its tail calls of itself loops.
+  (c-lift-words (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (arrayof syms @k) (listof int @k) cenv int) unit)
+    (lambda (bs added ks known i)
+      (if (null? bs)
+          #u
+          (tagcase (car (c-lambda-of (extract (car bs) 3)))
+            (e-lambda (ps lbody la lb)
+              (let* ((name (extract (car bs) 1))
+                     (own (if (c-loops-only lbody name (c-count-params ps) #t) (the syms (cons name nil)) (the syms nil)))
+                     (made (begin (set c-lifting-added (c-length (array-ref added i)))
+                                  (c-lambda-word (c-added-params (array-ref added i) ps) lbody known own))))
+                (begin
+                  (if (null? (extract made 2)) #u (c-fail "a lifted procedure captures names"))
+                  (close-over-word! (extract (table-ref (get c-lifts) (car ks) (the c-lift (product (1 (wcell-nil)) (2 (the syms nil))))) 1) (extract made 1))
+                  (c-lift-words (cdr bs) added (cdr ks) known (+ i 1)))))
+            (else y (c-fail "a lifted binding is a lambda"))))))
+  ;; A `letrec`, lifted if it may be (`c-lift`), else closures made.
+  (c-letrec-or-lift (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp int int cenv int code bool) unit)
+    (lambda (bs body a b e depth c tail)
+      (let ((ks (c-lift bs body a b e tail)))
+        (if (null? ks)
+            (c-letrec bs body e depth c tail)
+            (c-exp body (c-bind-lifted bs (car ks) e) depth c tail)))))
   ;; Each closure made, in order; what each must have patched.
   (c-letrec-make
     (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) cenv int int code)
@@ -825,35 +1166,39 @@
     (lambda (ps body e own0)
       (let* ((named (let ((x (get c-word-name))) (begin (set c-word-name (the (listof string @k) nil)) x)))
              (defining (let ((x (get c-defining))) (begin (set c-defining (the (listof symbol @k) nil)) x)))
-             (fv (c-captured (c-free body (c-bind-params ps nil) nil) e))
+             (fv (c-lambda-captured ps body e))
+             ;; The parameters a lifting added, first (`c-lift`).
+             (added (let ((x (get c-lifting-added))) (begin (set c-lifting-added 0) x)))
              ;; A parameter of the same name hides the procedure.
              (own (if (or (null? own0) (c-member? (c-bind-params ps nil) (car own0))) (the syms nil) own0))
              ;; Its own name: a loop, or a top-level definition's global.
+             ;; (Lifted procedures are known everywhere inside: they are
+             ;; constants.)
              (base (if (or (null? own) (c-member? fv (car own)))
-                       (the cenv nil)
+                       (c-lifted-entries e)
                        (let ((l (c-where e (car own))))
                          (the cenv (cons (cons (car own)
                                                (if (and (not (null? l)) (tagcase (car l) (at-global (h) #t) (else y #f)))
                                                    (car l)
                                                    (at-loop 0)))
-                                         nil)))))
+                                         (c-lifted-entries e))))))
              (inner (c-inner-env fv e (c-param-env ps 0 base) 0))
              (n (c-count-params ps))
              (body-code (the code (new nil)))
              (outer-name (get c-this-name)) (outer-loc (get c-this-loc))
-             (outer-params (get c-this-params)) (outer-start (get c-this-start))
+             (outer-params (get c-this-params)) (outer-start (get c-this-start)) (outer-added (get c-this-added))
              (this (the (listof c-this @k)
-                     (if (null? own) nil (cons (product (1 (car own)) (2 (car (c-find inner (car own)))) (3 n)) nil)))))
+                     (if (null? own) nil (cons (product (1 (car own)) (2 (car (c-find inner (car own)))) (3 n) (4 added)) nil)))))
         (begin
           (if (null? own)
               (set c-this-params -1)
               (let ((start (c-fresh)))
                 (begin (set c-this-name (car own)) (set c-this-loc (car (c-find inner (car own))))
-                       (set c-this-params n) (set c-this-start start)
+                       (set c-this-params n) (set c-this-start start) (set c-this-added added)
                        (c-emit body-code (i-label start)))))
           (c-exp body inner n body-code #t)
           (set c-this-name outer-name) (set c-this-loc outer-loc)
-          (set c-this-params outer-params) (set c-this-start outer-start)
+          (set c-this-params outer-params) (set c-this-start outer-start) (set c-this-added outer-added)
           ;; Named for where its body starts, so that a profile can say which.
           (let ((w (c-assemble body-code
                                 (string->symbol
@@ -879,25 +1224,37 @@
           ;; A loop: the arguments into the parameters' slots, the rest of
           ;; the frame dropped, and back to the start.
           (begin (c-exps args e depth c)
-                 (c-loop-stores c (- (get c-this-params) 1))
+                 (c-loop-stores c (- (get c-this-params) 1) (get c-this-added))
                  (c-drops c (- depth (get c-this-params)))
                  (c-emit c (i-branch (get c-this-start))))
           (c-app-other f args e depth c tail))))
   (c-app-other (subr (maxeff compiles spin) (exp (listof exp acyclic) cenv int code bool) unit)
-    (lambda (f args e depth c tail)
-      (let ((standard (tagcase f (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) "") ) (else y ""))))
-        (if (string=? standard "")
-            (let ((n (c-exps args e depth c)))
-              (begin (c-exp f e (+ depth n) c #f)
-                     ;; The checker typed the callee a subroutine: a typed call.
-                     (if tail
-                         (c-op1 c routine-ttailcall (wcell-int n))
-                         (c-op1 c routine-tcall (wcell-int n)))))
-            (if (and tail (string=? standard "with-mark"))
-                ;; In tail position, the mark replaces this frame's: a loop
-                ;; that marks each iteration runs in constant space.
-                (begin (c-exps args e depth c) (c-op c routine-withmark-tail))
-                (begin (c-standard standard args e depth c) (c-done c tail)))))))
+      (lambda (f args e depth c tail)
+        (let ((k (c-lifted-at f e)))
+          (if (>= k 0)
+              ;; A lifted procedure's call: the names it would have captured,
+              ;; then the arguments, then its closure.
+              (let* ((lift (table-ref (get c-lifts) k (the c-lift (product (1 (wcell-nil)) (2 (the syms nil))))))
+                     (added (extract lift 2))
+                     (m (begin (c-load-names added e c) (c-length added)))
+                     (n (c-exps args e (+ depth m) c)))
+                (begin (c-lit c (extract lift 1))
+                       (if tail
+                           (c-op1 c routine-ttailcall (wcell-int (+ m n)))
+                           (c-op1 c routine-tcall (wcell-int (+ m n))))))
+        (let ((standard (tagcase f (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) "") ) (else y ""))))
+          (if (string=? standard "")
+              (let ((n (c-exps args e depth c)))
+                (begin (c-exp f e (+ depth n) c #f)
+                       ;; The checker typed the callee a subroutine: a typed call.
+                       (if tail
+                           (c-op1 c routine-ttailcall (wcell-int n))
+                           (c-op1 c routine-tcall (wcell-int n)))))
+              (if (and tail (string=? standard "with-mark"))
+                  ;; In tail position, the mark replaces this frame's: a loop
+                  ;; that marks each iteration runs in constant space.
+                  (begin (c-exps args e depth c) (c-op c routine-withmark-tail))
+                  (begin (c-standard standard args e depth c) (c-done c tail)))))))))
   ;; A standard operation, open-coded: a routine, or a runtime primitive, with
   ;; FX-26's conventions made plain (mutators give unit; arrays skip the
   ;; trailer's field).

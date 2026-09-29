@@ -899,6 +899,15 @@ impl Heap {
         n
     }
 
+    /// A cellular closure over nothing, its word to come (field 2 is #f
+    /// until set): what a compiler makes once for a procedure it lifts,
+    /// before the procedures that call it are compiled.
+    pub fn closure_over_nothing(&mut self) -> Value {
+        let c = self.make_bloblet(layout::kind("cellular-closure"), 1, 0, true);
+        self.set_bloblet_slot(c, layout::cellular::CLOSURE_WORD, Value::FALSE);
+        c
+    }
+
     /// A frozen bloblet of `kind` with `fields`, in order: a sum or a
     /// product, as `%make-frozen` makes them, or as a compiler makes a
     /// constant one once.

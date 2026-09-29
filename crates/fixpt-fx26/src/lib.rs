@@ -57,7 +57,41 @@ pub const CHECKER: &str = include_str!("check.fx");
 /// compiler written in FX-26, with the layout they share, as one program:
 /// each needs the types of the ones before.
 pub fn front_end() -> String {
-    format!("{EAGER_READER}\n{PARSER}\n{TABLE}\n{CHECKER}\n{EVALUATOR}\n{LAYOUT}\n{STANDARD_OPS}\n{COMPILER}\n{REGCODE}\n{ARM64}\n{NATIVE_LAYOUT}\n{NATIVE}")
+    FRONT_END_FILES.iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n")
+}
+
+/// The front end's files, by name, in the order [`front_end`] joins them;
+/// [`bootstrap_program`] puts `bootstrap.fx` after them.
+pub const FRONT_END_FILES: [(&str, &str); 12] = [
+    ("eager-reader.fx", EAGER_READER),
+    ("parser.fx", PARSER),
+    ("table.fx", TABLE),
+    ("check.fx", CHECKER),
+    ("evaluator.fx", EVALUATOR),
+    ("layout.fx", LAYOUT),
+    ("standard.fx", STANDARD_OPS),
+    ("compile.fx", COMPILER),
+    ("regcode.fx", REGCODE),
+    ("arm64.fx", ARM64),
+    ("native-layout.fx", NATIVE_LAYOUT),
+    ("native.fx", NATIVE),
+];
+
+/// Where byte `at` of [`front_end`] (or of [`bootstrap_program`]) is, as
+/// `file.fx:line:col`: for an error in the front end itself, which is
+/// read as one text.
+pub fn front_end_location(at: usize) -> String {
+    let mut start = 0;
+    for (name, text) in FRONT_END_FILES.iter().copied().chain([("bootstrap.fx", BOOTSTRAP)]) {
+        if at <= start + text.len() {
+            let before = &text[..at - start];
+            let line = before.matches('\n').count() + 1;
+            let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+            return format!("{name}:{line}:{col}");
+        }
+        start += text.len() + 1;
+    }
+    format!("byte {at}, past the front end")
 }
 
 /// A driver for the front end, in FX-26: a text read, parsed, checked and

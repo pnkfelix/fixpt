@@ -902,6 +902,21 @@ impl Compiling<'_> {
                         let q = self.proc_of(v).map_err(|e| format!("`{name}` makes a closure of {e}"))?;
                         let f = self.field(p, Field::Code(q));
                         ldr_field(&mut a, RESULT, f);
+                    } else if let Some((word, free)) = self.closure_parts(v)
+                        && free.is_empty()
+                        && self.name(word) != "undefined"
+                    {
+                        // A closure over nothing that the compiler made (a
+                        // lambda-lifted procedure's): its code, compiled,
+                        // called straight, as a global's is; as a value, a
+                        // native closure of it.
+                        let q = self.proc_of(word).map_err(|e| format!("`{name}` calls {e}"))?;
+                        if called(i).is_some() {
+                            pending = Some(Field::Code(q));
+                        } else {
+                            let f = self.field(p, Field::Closure(q, vec![]));
+                            ldr_field(&mut a, RESULT, f);
+                        }
                     } else {
                         let f = self.field(p, Field::Const(v));
                         ldr_field(&mut a, RESULT, f);

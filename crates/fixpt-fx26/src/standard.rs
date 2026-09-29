@@ -175,6 +175,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("wcell-self", "(subr pure () wcell)"),
     ("wcell-nil", "(subr pure () wcell)"),
     ("wcell-sum", "(subr pure (symbol wcell) wcell)"),
+    // A lambda-lifted procedure's closure, over nothing, its word to come;
+    // and its word, once compiled.
+    ("wcell-closure", "(subr pure () wcell)"),
+    ("close-over-word!", "(subr pure (wcell tword) unit)"),
     ("wcell-product", "(poly ((r region)) (subr (read r) ((listof wcell r)) wcell))"),
     // A global's cell, new: its value is the compiled program's to change.
     ("make-global", "(subr pure (symbol) wglobal)"),

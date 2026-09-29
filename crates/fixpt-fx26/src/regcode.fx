@@ -44,14 +44,18 @@
   ;; A constant, bound to the name (`r-known`): no place at all.
   (rl-const rconst)
   ;; A `letrec`-bound procedure only called in tail position, a join point
-  ;; (`r-join-ok?`): where its parameters are, and its label.
-  (rl-join (listof rloc @k) int))
+  ;; (`c-join-ok?`): where its parameters are, and its label.
+  (rl-join (listof rloc @k) int)
+  ;; A lambda-lifted procedure (`at-lifted`): only called.
+  (rl-lifted int))
 (define-type renv (listof (pairof symbol rloc @k) @k))
 
 ;; An operand of a call-out: an expression, a constant, a procedure of no
 ;; arguments whose body is an expression (a `prompt`'s), a frame slot's
 ;; value, or a free value of the closure running.
-(define-datatype rarg (a-e exp) (a-v wcell) (a-thunk exp) (a-slot int) (a-lexical int))
+;; (`a-name`: a variable's value, wherever it is: a lifted procedure's
+;; added argument.)
+(define-datatype rarg (a-e exp) (a-v wcell) (a-thunk exp) (a-slot int) (a-lexical int) (a-name symbol))
 (define-type rargs (listof rarg @k))
 
 ;; A standard operation, as register code does it.
@@ -191,7 +195,32 @@
 
 (define r-this-name? (subr (read @k) ((listof c-this @k) symbol int) bool)
   (lambda (this n nargs)
-    (and (not (null? this)) (and (symbol=? n (extract (car this) 1)) (= nargs (extract (car this) 3))))))
+    (and (not (null? this)) (and (symbol=? n (extract (car this) 1)) (= (+ (extract (car this) 4) nargs) (extract (car this) 3))))))
+;; How many of the running procedure's parameters, first, a lifting added.
+(define r-this-added (subr (read @k) (rgen) int)
+  (lambda (g) (let ((this (extract g this))) (if (null? this) 0 (extract (car this) 4)))))
+;; The members' `c-lifts` indices, in a list of one, if the `letrec` at
+;; `a`–`b` was lifted by its stack code (`c-lift`); none if not, or if it
+;; is in a body inlined or specialized here, which another program's text
+;; may have spans in common with.
+(define r-lifted (subr (maxeff (read @globals) (read @k)) (int int) (listof (listof int @k) @k))
+  (lambda (a b)
+    (if (and (null? (get c-inlining)) (null? (get c-spec-now)))
+        (table-ref (get c-lifted) (c-span-key a b) (the (listof (listof int @k) @k) nil))
+        nil)))
+;; `bs`' names bound to the lifted procedures `ks`, onto `env`.
+(define r-bind-lifted (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (listof int @k) renv) renv)
+  (lambda (bs ks env)
+    (if (null? bs) env (r-bind-lifted (cdr bs) (cdr ks) (the renv (cons (cons (extract (car bs) 1) (rl-lifted (car ks))) env))))))
+;; The index in `c-lifts` of the procedure `f` names, if a lifted one; else -1.
+(define r-lifted-at (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (renv exp) int)
+  (lambda (env f)
+    (tagcase f
+      (e-var (n a b) (let ((l (r-where env n))) (if (null? l) -1 (tagcase (car l) (rl-lifted (k) k) (else y -1)))))
+      (else y -1))))
+;; `names` as arguments, their values wherever they are, then `rest`.
+(define r-name-args (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms rargs) rargs)
+  (lambda (names rest) (if (null? names) rest (the rargs (cons (a-name (car names)) (r-name-args (cdr names) rest))))))
 
 ;; Whether `f` is the procedure running, called with its arity: its own
 ;; name, still bound where the procedure knows itself to be.
@@ -555,36 +584,13 @@
                         (if (null? l) nil (tagcase (car l) (rl-global (c) (the (listof wglobal @k) (cons c nil))) (else y nil))))
                       nil))
                 (else y nil)))))))
-(define r-nth-binding
-  (subr (read @globals) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) int) (productof (1 symbol) (2 syn) (3 exp)))
-  (lambda (bs i) (if (= i 0) (car bs) (r-nth-binding (cdr bs) (- i 1)))))
-;; Whether no binding of `bs` but the `i`th mentions `name`; `k` counts.
-(define r-unmentioned? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) symbol int int) bool)
-  (lambda (bs name i k)
-    (or (null? bs)
-        (and (or (= k i) (not (c-mentions? (extract (car bs) 3) name))) (r-unmentioned? (cdr bs) name i (+ k 1))))))
-;; Whether `letrec` binding `i` of `bs` is a join point, as the Rust
-;; compiler's `r_join_ok` says: a lambda whose body calls it only in tail
-;; position, as the `letrec`'s body does, and that no sibling mentions; so
-;; no closure of it need be made, and each call is a jump.
-(define r-join-ok? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp int) bool)
-  (lambda (bs body i)
-    (let* ((b (r-nth-binding bs i)) (name (extract b 1)) (lam (c-lambda-of (extract b 3))))
-      (and (not (null? lam))
-           (tagcase (car lam)
-             (e-lambda (ps lbody la lb)
-               (let ((n (c-count-params ps)))
-                 (and (not (c-member? (c-bind-params ps nil) name))
-                      (and (c-loops-only lbody name n #t)
-                           (and (c-loops-only body name n #t) (r-unmentioned? bs name i 0))))))
-             (else y #f))))))
 ;; The flags from `rest`, the `i`th binding of `bs` on.
 (define r-join-flags-from
   (subr (maxeff (read @globals) (read @k) (alloc @k) spin)
         ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp bool int)
         (listof bool acyclic))
   (lambda (bs rest body tail i)
-    (if (null? rest) nil (cons (and tail (r-join-ok? bs body i)) (r-join-flags-from bs (cdr rest) body tail (+ i 1))))))
+    (if (null? rest) nil (cons (and tail (c-join-ok? bs body i)) (r-join-flags-from bs (cdr rest) body tail (+ i 1))))))
 (define r-binding-names (subr (maxeff (read @globals) (alloc @k)) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic)) syms)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (r-binding-names (cdr bs))))))
 (define r-same-syms? (subr (maxeff (read @globals) (read @k)) (syms syms) bool)
@@ -971,8 +977,12 @@
             (r-done g tail)))
         (e-tagcase (s arms els a b) (r-tagcase g s arms els env te tail))
         (e-letrec (bs body a b)
-          ;; A leaf makes no closure; join points it may have.
-          (if (and (extract g leaf) (not (r-all? (r-join-flags bs body tail)))) (r-decline) (r-letrec g bs body env te tail)))
+          (let ((ks (r-lifted a b)))
+            (if (not (null? ks))
+                ;; Lifted as its stack code lifted it (`c-lift`).
+                (r-exp g body (r-bind-lifted bs (car ks) env) (c-bind-lifted bs (car ks) te) tail)
+                ;; A leaf makes no closure; join points it may have.
+                (if (and (extract g leaf) (not (r-all? (r-join-flags bs body tail)))) (r-decline) (r-letrec g bs body env te tail)))))
         (e-app (f args a b) (r-app g f args env te tail)))))))
 ;; Code that goes to `label` if `x` is `when` (true: anything but #f), and
 ;; on if not: a test as jumps. `and` and `or` (`if`s, as the parser makes
@@ -1154,6 +1164,18 @@
               ((or (extract g leaf) (> n register-regs)) (r-decline))
               ((not (null? (r-specialized env f args)))
                (let ((i (car (r-specialized env f args)))) (r-specialize g (extract i 1) (extract i 2) (extract i 3) args env te tail)))
+              ;; A lifted procedure's call: the names it would have captured,
+              ;; then the arguments, into REG1…REGn; its closure, a constant.
+              ((>= (r-lifted-at env f) 0)
+               (let* ((k (r-lifted-at env f))
+                      (all (r-name-args (c-lift-added k) (r-exp-args args)))
+                      (m (r-count-args all)))
+                 (begin
+                   (r-args g all env te (the (listof exp @k) nil))
+                   (r-op1 g rop-const (extract (table-ref (get c-lifts) k (the c-lift (product (1 (wcell-nil)) (2 (the syms nil))))) 1))
+                   (if tail
+                       (begin (r-leave g) (r-opn g rop-tailinvoke m))
+                       (r-opn g rop-invoke m)))))
               ;; A call of the procedure itself, not in tail position: by its
               ;; own entry, with no closure fetched.
               ((and (not tail) (r-self-known? g f n te))
@@ -1247,7 +1269,7 @@
                          (product (1 (extract sp 1)) (2 cell) (3 (extract sp 2)) (4 (extract sp 6))
                                   (5 (r-nth-param (extract sp 3) (extract sp 6))) (6 (c-count-params (extract sp 3)))
                                   (7 (extract sp 7)) (8 lps) (9 lbody)
-                                  (10 (c-captured (c-free lbody (c-bind-params lps nil) nil) te)) (11 (c-genv-now)))))
+                                  (10 (c-lambda-captured lps lbody te)) (11 (c-genv-now)))))
                  (outer-spec (get c-spec-now)) (outer-genv (get c-genv))
                  ;; The copy compiled apart: what this body assumes is not its.
                  (outer-assuming (get r-assuming)) (outer-assumed (get r-assumed))
@@ -1519,7 +1541,17 @@
                        (a-v (v) (begin (r-op1 g rop-const v) (r-opn g rop-setreg (+ i 1))))
                        (a-slot (s) (r-opnn g rop-load (+ i 1) s))
                        (a-lexical (j) (begin (r-opn g rop-lexical j) (r-opn g rop-setreg (+ i 1))))
-                       (a-thunk (b) #u)))))
+                       (a-thunk (b) #u)
+                       (a-name (n)
+                         (let ((l (r-where env n)))
+                           (if (null? l)
+                               (r-decline)
+                               (tagcase (car l)
+                                 (rl-slot (s) (r-opnn g rop-load (+ i 1) s))
+                                 (rl-reg (r) (if (= r (+ i 1)) #u (r-opnn g rop-movereg r (+ i 1))))
+                                 (rl-free (j) (begin (r-opn g rop-lexical j) (r-opn g rop-setreg (+ i 1))))
+                                 (rl-const (c) (begin (r-op1 g rop-const (r-const-cell c)) (r-opn g rop-setreg (+ i 1))))
+                                 (else y (r-decline))))))))))
             (r-args-into g (cdr args) (cdr kept) (+ i 1) env te)))))
   ;; A call-out, `prim p n` or `cellular r n`, on `args` in REG1…REGn.
   (r-call-out (subr (maxeff compiles spin) (rgen int int rargs renv cenv) unit)
@@ -1700,8 +1732,8 @@
           #u
           (begin
             (if (extract g leaf)
-                (r-opnn g rop-movereg (car made) (+ i 1))
-                (begin (r-opn g rop-stack (car made)) (r-opn g rop-setstk i)))
+                (r-opnn g rop-movereg (car made) (+ (+ (r-this-added g) i) 1))
+                (begin (r-opn g rop-stack (car made)) (r-opn g rop-setstk (+ (r-this-added g) i))))
             (r-loop-move g (cdr made) (+ i 1))))))
   ;; `letrec`: each closure made into its slot, a placeholder for a sibling
   ;; not made yet; then each placeholder patched.
@@ -1888,7 +1920,8 @@
             (at-free (i) (the renv (cons (cons n (rl-free i)) rest)))
             (at-loop (z) (the renv (cons (cons n (rl-loop)) rest)))
             (at-global (g) (the renv (cons (cons n (rl-global g)) rest)))
-            (at-pending (s) (begin (r-decline) rest)))))))
+            (at-pending (s) (begin (r-decline) rest))
+            (at-lifted (k) (the renv (cons (cons n (rl-lifted k)) rest))))))))
 
 (define r-store-params (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen int int) unit)
   (lambda (g i n)

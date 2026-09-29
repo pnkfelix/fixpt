@@ -1702,3 +1702,44 @@ The example's objects: 114, 76, 19 → 54, 44, 8 instructions. `captures`
 natively 22.3 → 18.4 ms; `closures` unchanged (its time is elsewhere). A
 procedure that makes a closure still has a frame, for the call-out: a
 leaf would need register code to count making a closure as not calling.
+
+## Lambda lifting (2026-09-28)
+
+The user's request, after Twobit's pass 2 (`pass2p2.sch`, Clinger 1991):
+a `letrec` procedure that is only ever called need not be a closure made
+each time the `letrec` runs. Both compilers lift a `letrec` group where
+every member is a plain lambda only called (in any position, lambdas
+inside included), with its arity; where it is not all join points
+(register code's jumps are better still); and where each member takes
+fewer than 6 names more (Twobit's bound) and no more than 8 arguments
+(the registers). What a member takes: the locals it would capture, and
+what each sibling it calls takes (Twobit's flow equations), outermost
+binding first. Each member's closure, over nothing, is made once while
+compiling; a call passes the added names first; a member's tail calls of
+itself are still loops, storing only its own parameters. The stack code
+decides, by where the `letrec` is; its register code asks and gets the
+same answer and words (not in a body inlined or specialized there). A
+lambda that calls a lifted procedure captures the names the call passes.
+The native compiler calls such a closure's code straight, as it does a
+global's (without that, `lists-region` ran its loops on the cellular
+machine: 156 → 316 ms, now 160).
+
+Measured against a baseline re-measured back to back (three runs each),
+the front end on itself, as register code:
+
+| phase   | words before | after  | collections | time before | after   |
+| ------- | ------------:| ------:| ----------- | -----------:| -------:|
+| read    |       14.5 M | 13.1 M | 5 → 5       |     0.061 s | 0.061 s |
+| check   |       21.4 M | 18.4 M | 3 → 2       |     0.534 s | 0.530 s |
+| compile |       26.1 M | 27.3 M | 1 → 1       |     0.125 s | 0.132 s |
+
+About 5% less allocation in all, one collection fewer; the time about the
+same. The Rust compiler alone lifting (the front end not yet grown by the
+FX-26 side) had checked in 0.508 s. The compile phase does more: the
+lifting's own work (every lambda's free names looked up for lifted ones,
++1.8 M cells in `c-find`), and the front end is bigger, which crossed a
+table's doubling in the compiler (+4.5 M cells rehashing). Native
+benchmarks unchanged: their loops are globals, not `letrec`s.
+
+Found on the way: an error loading the front end now says where in its
+files (`front_end_location`), not at the user's input's first character.

@@ -774,6 +774,13 @@ prims! {
     // A constant sum or product, made while compiling (`wcell-sum`,
     // `wcell-product`): a sum of tag `a[0]` and value `a[1]`; a product of
     // the list `a[0]`'s cells, in order.
+    // A lifted procedure's closure, over nothing, made while compiling
+    // (`wcell-closure`), and its word set once compiled (`close-over-word!`).
+    "%fx26-closure-cell", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.closure_over_nothing()));
+    "%fx26-close-over-word!", 2, Some(2), simple!(|rt, a| {
+        rt.heap.set_bloblet_slot(a[0], fixpt_heap::layout::cellular::CLOSURE_WORD, a[1]);
+        Ok(rt.heap.intern("#u"))
+    });
     "%fx26-sum-cell", 2, Some(2), simple!(|rt, a| Ok(rt.heap.make_frozen(SUM_KIND, &a[..2])));
     "%fx26-product-cell", 1, Some(1), simple!(|rt, a| {
         let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };

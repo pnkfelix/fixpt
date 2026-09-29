@@ -10,6 +10,7 @@
 //! global's cell, or, for `letrec`'s, a box in a slot or free value.
 
 use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
+use std::collections::HashMap;
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
@@ -40,6 +41,19 @@ enum Loc {
     /// A `letrec`-bound procedure, in its own body, where it is only
     /// called in tail position: each call is a jump back to its start.
     Loop,
+    /// A `letrec`-bound procedure lambda-lifted (`Lift`, `lifts`'s index):
+    /// only called, by a closure over nothing made once, with the names
+    /// it would have captured passed first.
+    Lifted(usize),
+}
+
+/// A `letrec`-bound procedure lambda-lifted, as Twobit's pass 2 lifts
+/// (`pass2p2.sch`): its closure, over nothing, made while compiling; the
+/// names it would have captured, each passed as an argument before its
+/// own; its own parameters' count.
+struct Lift {
+    closure: Value,
+    added: Vec<Sym>,
 }
 
 /// A lambda's word, made by the stack code of the body it is in: where
@@ -60,6 +74,9 @@ struct This {
     loc: Loc,
     params: usize,
     start: usize,
+    /// How many of the parameters, first, were added by lifting it: a
+    /// loop passes them on as they are.
+    added: usize,
 }
 
 type Env = Vec<(Sym, Loc)>;
@@ -94,6 +111,13 @@ pub struct Compiler<'a> {
     /// theirs, twice as many at every depth).
     made: Vec<Made>,
     reuse: Vec<Made>,
+    /// The procedures lambda-lifted; and, by where each `letrec` is, its
+    /// members' (none if it is not lifted), so that its register code
+    /// lifts it as its stack code did, with the same words.
+    lifts: Vec<Lift>,
+    lifted: HashMap<(u32, u32), Option<Vec<usize>>>,
+    /// The parameters added to the lambda about to be compiled.
+    lifting_added: usize,
     declined: Option<String>,
     /// The global procedures a call in register code may inline, as
     /// `inline_room` allows:
@@ -189,6 +213,9 @@ impl<'a> Compiler<'a> {
             register_report: Vec::new(),
             made: Vec::new(),
             reuse: Vec::new(),
+            lifts: Vec::new(),
+            lifted: HashMap::new(),
+            lifting_added: 0,
             declined: None,
             inlines: Vec::new(),
             genv_limit: None,
@@ -304,6 +331,7 @@ impl<'a> Compiler<'a> {
             Loc::Global(g) => self.op1(code, "global", g),
             Loc::Loop => unreachable!("a loop is only ever called, in tail position"),
             Loc::Pending(_) => unreachable!("a letrec sibling not made yet is only captured"),
+            Loc::Lifted(_) => unreachable!("a lifted procedure is only called"),
         }
     }
 
@@ -516,6 +544,12 @@ impl<'a> Compiler<'a> {
                 self.exp(body, &inner, depth + n, code, tail)?;
                 self.unbind(code, depth, n, tail);
             }
+            Exp::Letrec { bindings, body } if self.lift(x, &bindings, body, e, tail)?.is_some() => {
+                let ks = self.lift(x, &bindings, body, e, tail)?.expect("lifted");
+                let mut inner = e.clone();
+                inner.extend(bindings.iter().zip(&ks).map(|((g, _, _), k)| (*g, Loc::Lifted(*k))));
+                self.exp(body, &inner, depth, code, tail)?;
+            }
             Exp::Letrec { bindings, body } => {
                 // Every binding is a lambda (the checker says so). Each
                 // closure is made in its slot, with a placeholder for a
@@ -641,7 +675,7 @@ impl<'a> Compiler<'a> {
                     self.lit(code, Value::FALSE);
                     patches.push((j, sibling));
                 }
-                Loc::Global(_) | Loc::Loop => return Err("a global is not captured".into()),
+                Loc::Global(_) | Loc::Loop | Loc::Lifted(_) => return Err("a global is not captured".into()),
             }
         }
         if region.is_some() {
@@ -663,7 +697,24 @@ impl<'a> Compiler<'a> {
     fn captured(&self, params: &[Sym], body: ExpId, e: &Env) -> Vec<Sym> {
         let mut free = Vec::new();
         self.free(body, &params.iter().rev().copied().collect::<Vec<_>>(), &mut free);
-        free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop && !matches!(l, Loc::Global(_)))).collect()
+        self.with_lifted_names(&mut free, params, e);
+        free.into_iter().filter(|n| matches!(find(e, *n), Some(l) if l != Loc::Loop && !matches!(l, Loc::Global(_) | Loc::Lifted(_)))).collect()
+    }
+
+    /// `free` with, for each lifted procedure in it, the names its calls
+    /// pass (not `params`), after: code that calls one needs them too.
+    fn with_lifted_names(&self, free: &mut Vec<Sym>, params: &[Sym], e: &Env) {
+        let lifted: Vec<usize> = free.iter().filter_map(|n| match find(e, *n) {
+            Some(Loc::Lifted(k)) => Some(k),
+            _ => None,
+        }).collect();
+        for k in lifted {
+            for a in &self.lifts[k].added {
+                if !free.contains(a) && !params.contains(a) {
+                    free.push(*a);
+                }
+            }
+        }
     }
 
     fn lambda_word(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
@@ -695,7 +746,9 @@ impl<'a> Compiler<'a> {
         let fv = self.captured(params, body, e);
         // A parameter of the same name hides the procedure.
         let own = own.filter(|f| !params.contains(f));
-        let mut inner: Env = Vec::new();
+        let added = std::mem::take(&mut self.lifting_added);
+        // Lifted procedures are known everywhere inside: they are constants.
+        let mut inner: Env = e.iter().filter(|(_, l)| matches!(l, Loc::Lifted(_))).copied().collect();
         // A `letrec`-bound procedure's own name: a loop, where it is only
         // called so. (A top-level definition's own name is its global, as
         // any use of it is: a redefinition may change what it holds.)
@@ -705,7 +758,7 @@ impl<'a> Compiler<'a> {
         inner.extend(params.iter().enumerate().map(|(i, p)| (*p, Loc::Slot(i))));
         inner.extend(fv.iter().enumerate().map(|(i, n)| (*n, Loc::Free(i))));
         let this = match own {
-            Some(f) => Some(This { name: f, loc: find(&inner, f).expect("bound"), params: params.len(), start: self.fresh() }),
+            Some(f) => Some(This { name: f, loc: find(&inner, f).expect("bound"), params: params.len(), start: self.fresh(), added }),
             None => None,
         };
         let mut body_code = Vec::new();
@@ -849,6 +902,163 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Whether every use of `f` in `x` is a call with `n` arguments, in
+    /// any position and in lambdas inside too: so it is never a value.
+    fn called_only(&self, x: ExpId, f: Sym, n: usize) -> bool {
+        let all = |xs: &[ExpId]| xs.iter().all(|a| self.called_only(*a, f, n));
+        match self.c.arena.exp_at(x).clone() {
+            Exp::Var(m) => m != f,
+            Exp::App { fun, args } => {
+                all(&args)
+                    && match self.c.arena.exp_at(fun) {
+                        Exp::Var(m) if *m == f => args.len() == n,
+                        _ => self.called_only(fun, f, n),
+                    }
+            }
+            Exp::Lambda { params, body } => params.iter().any(|(p, _)| *p == f) || self.called_only(body, f, n),
+            Exp::RLambda { region, lambda } => all(&[region, lambda]),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.called_only(body, f, n),
+            Exp::LetRegion { region, body, .. } => self.c.arena.dvar_name(region) == f || self.called_only(body, f, n),
+            Exp::If { test, then, els } => all(&[test, then, els]),
+            Exp::Letrec { bindings, body } => {
+                bindings.iter().any(|(m, _, _)| *m == f)
+                    || (bindings.iter().all(|(_, _, i)| self.called_only(*i, f, n)) && self.called_only(body, f, n))
+            }
+            Exp::Let { bindings, body } => {
+                bindings.iter().all(|(_, i)| self.called_only(*i, f, n)) && (bindings.iter().any(|(m, _)| *m == f) || self.called_only(body, f, n))
+            }
+            Exp::Begin(items) => all(&items),
+            Exp::Prompt { tag, body, handler } => all(&[tag, body, handler]),
+            Exp::Bloblet { args, .. } => all(&args),
+            Exp::Product(fields) => fields.iter().all(|(_, x)| self.called_only(*x, f, n)),
+            Exp::Extract(x, _) | Exp::Sum(_, x) => self.called_only(x, f, n),
+            Exp::TagCase { scrutinee, arms, els } => {
+                self.called_only(scrutinee, f, n)
+                    && arms.iter().all(|a| a.names().contains(&f) || self.called_only(a.body, f, n))
+                    && els.is_none_or(|(y, b)| y == f || self.called_only(b, f, n))
+            }
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => true,
+        }
+    }
+
+    /// Whether the `letrec` `x` (these `bindings` and `body`, in `e`) is
+    /// lambda-lifted, deciding the first time it is asked (by its stack
+    /// code: its register code asks again, and has the same answer and
+    /// words): its members' `lifts` if so, each member's word made, with
+    /// the names it takes first.
+    fn lift(&mut self, x: ExpId, bindings: &[(Sym, crate::ast::TyId, ExpId)], body: ExpId, e: &Env, tail: bool) -> R<Option<Vec<usize>>> {
+        let span = self.c.arena.span_of(x);
+        let key = (span.start, span.end);
+        if let Some(done) = self.lifted.get(&key) {
+            return Ok(done.clone());
+        }
+        let Some((lams, added)) = self.lift_plan(bindings, body, e, tail) else {
+            self.lifted.insert(key, None);
+            return Ok(None);
+        };
+        // Each closure first, over nothing, its word to come: members call
+        // each other.
+        let mut ks = Vec::new();
+        for a in &added {
+            let closure = self.heap.closure_over_nothing();
+            self.lifts.push(Lift { closure, added: a.clone() });
+            ks.push(self.lifts.len() - 1);
+        }
+        self.lifted.insert(key, Some(ks.clone()));
+        let mut known: Env = e.iter().filter(|(_, l)| matches!(l, Loc::Lifted(_))).copied().collect();
+        known.extend(bindings.iter().zip(&ks).map(|((g, _, _), k)| (*g, Loc::Lifted(*k))));
+        for (i, (name, _, _)) in bindings.iter().enumerate() {
+            let (ps, lbody) = &lams[i];
+            let mut all = added[i].clone();
+            all.extend(ps.iter().copied());
+            // Its own calls in tail position are loops, as a closure's are.
+            let own = self.loops_only(*lbody, *name, ps.len(), true).then_some(*name);
+            self.lifting_added = added[i].len();
+            let (w, fv) = self.lambda_word(&all, *lbody, &known, own)?;
+            if !fv.is_empty() {
+                return Err(format!("a lifted procedure captures {} name(s)", fv.len()));
+            }
+            self.heap.set_bloblet_slot(self.lifts[ks[i]].closure, fixpt_heap::layout::cellular::CLOSURE_WORD, w);
+        }
+        Ok(Some(ks))
+    }
+
+    /// Whether to lift a `letrec` (`lift`), and if so each member's
+    /// parameters and body, and the names it takes before them. Lifted
+    /// where every member is a plain lambda only ever called, with its
+    /// arity; where the group is not join points (register code's jumps,
+    /// better still); and where each member takes fewer than 6 names more
+    /// (Twobit's bound, `POLICY:LIFT?`) and no more than `REGS` arguments
+    /// in all. The names a member takes: the locals it would capture, and
+    /// those of each sibling it calls (Twobit's flow equations,
+    /// `compute-added-arguments`); outermost first.
+    #[allow(clippy::type_complexity)]
+    fn lift_plan(&self, bindings: &[(Sym, crate::ast::TyId, ExpId)], body: ExpId, e: &Env, tail: bool) -> Option<(Vec<(Vec<Sym>, ExpId)>, Vec<Vec<Sym>>)> {
+        if tail && (0..bindings.len()).all(|i| self.r_join_ok(bindings, body, i)) {
+            return None;
+        }
+        let mut lams = Vec::new();
+        for (_, _, init) in bindings {
+            let (ps, lbody, region) = self.lambda_of(*init)?;
+            if region.is_some() {
+                return None;
+            }
+            lams.push((ps, lbody));
+        }
+        for (k, (name, _, _)) in bindings.iter().enumerate() {
+            let n = lams[k].0.len();
+            if !self.called_only(body, *name, n) || !bindings.iter().all(|(_, _, i)| self.called_only(*i, *name, n)) {
+                return None;
+            }
+        }
+        let names: Vec<Sym> = bindings.iter().map(|(n, _, _)| *n).collect();
+        let (mut added, mut calls) = (Vec::new(), Vec::new());
+        for (ps, lbody) in &lams {
+            let mut free = Vec::new();
+            self.free(*lbody, &ps.iter().rev().copied().collect::<Vec<_>>(), &mut free);
+            self.with_lifted_names(&mut free, ps, e);
+            let (mut mine, mut cs) = (Vec::new(), Vec::new());
+            for n in free {
+                if let Some(k) = names.iter().position(|m| *m == n) {
+                    cs.push(k);
+                    continue;
+                }
+                match find(e, n) {
+                    Some(Loc::Slot(_) | Loc::Free(_)) => mine.push(n),
+                    Some(Loc::Pending(_) | Loc::Loop) => return None,
+                    _ => {}
+                }
+            }
+            added.push(mine);
+            calls.push(cs);
+        }
+        loop {
+            let mut more = false;
+            for i in 0..added.len() {
+                for j in calls[i].clone() {
+                    for v in added[j].clone() {
+                        if !added[i].contains(&v) {
+                            added[i].push(v);
+                            more = true;
+                        }
+                    }
+                }
+            }
+            if !more {
+                break;
+            }
+        }
+        let at = |n: &Sym| e.iter().rposition(|(m, _)| m == n);
+        for a in &mut added {
+            a.sort_by_key(at);
+        }
+        let regs = fixpt_heap::layout::regcode::REGS;
+        if added.iter().zip(&lams).any(|(a, (ps, _))| a.len() >= 6 || a.len() + ps.len() > regs) {
+            return None;
+        }
+        Some((lams, added))
+    }
+
     /// Whether every use of `f` in `x` is a call with `n` arguments in tail
     /// position, which the compiler makes a loop.
     fn loops_only(&self, x: ExpId, f: Sym, n: usize, tail: bool) -> bool {
@@ -898,11 +1108,12 @@ impl<'a> Compiler<'a> {
 
     fn app(&mut self, f: ExpId, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         if let (true, Some(t), Exp::Var(n)) = (tail, self.this, self.c.arena.exp_at(f)) {
-            if *n == t.name && find(e, *n) == Some(t.loc) && args.len() == t.params {
-                // A loop: the arguments into the parameters' slots, the
-                // rest of the frame dropped, and back to the start.
+            if *n == t.name && find(e, *n) == Some(t.loc) && t.added + args.len() == t.params {
+                // A loop: the arguments into the parameters' slots (those a
+                // lifting added passed on as they are), the rest of the
+                // frame dropped, and back to the start.
                 self.exps(args, e, depth, code)?;
-                for i in (0..t.params).rev() {
+                for i in (t.added..t.params).rev() {
                     self.op1(code, "slot!", Value::fixnum(i as i64));
                 }
                 for _ in t.params..depth {
@@ -911,6 +1122,21 @@ impl<'a> Compiler<'a> {
                 code.push(Item::Branch(t.start));
                 return Ok(());
             }
+        }
+        // A lifted procedure's call: the names it would have captured, then
+        // the arguments, then its closure.
+        if let Exp::Var(n) = *self.c.arena.exp_at(f)
+            && let Some(Loc::Lifted(k)) = self.where_is(e, n)
+        {
+            let added = self.lifts[k].added.clone();
+            for a in &added {
+                let l = self.where_is(e, *a).ok_or("a lifted procedure's added name is not bound")?;
+                self.load(code, l);
+            }
+            let n = self.exps(args, e, depth + added.len(), code)?;
+            self.op1(code, "lit", self.lifts[k].closure);
+            self.op1(code, if tail { "ttailcall" } else { "tcall" }, Value::fixnum((added.len() + n) as i64));
+            return Ok(());
         }
         let standard = match self.c.arena.exp_at(f) {
             Exp::Var(n) if self.where_is(e, *n).is_none() => Some(self.name(*n).to_string()),

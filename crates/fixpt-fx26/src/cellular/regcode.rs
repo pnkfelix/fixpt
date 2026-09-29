@@ -43,6 +43,8 @@ enum RLoc {
     /// A `letrec`-bound procedure only called in tail position, a join
     /// point (`r_join_ok`): its parameters' slots and label, `Gen::joins`'s.
     Join(usize),
+    /// A lambda-lifted procedure (`Loc::Lifted`): only called.
+    Lifted(usize),
 }
 
 /// An operand of a call-out: an expression, a constant, a procedure of
@@ -53,6 +55,9 @@ enum Arg {
     E(ExpId),
     V(Value),
     Thunk(ExpId),
+    /// A variable's value, wherever it is (a lifted procedure's added
+    /// argument).
+    Name(Sym),
     Slot(usize),
     Lexical(usize),
 }
@@ -294,6 +299,7 @@ impl Compiler<'_> {
                 Loc::Free(i) => RLoc::Free(*i),
                 Loc::Loop => RLoc::Loop,
                 Loc::Global(g) => RLoc::Global(*g),
+                Loc::Lifted(k) => RLoc::Lifted(*k),
                 _ => return None,
             }));
         }
@@ -327,6 +333,17 @@ impl Compiler<'_> {
         let mut te = inner.clone();
         self.r_exp(&mut g, body, &mut env, &mut te, true)?;
         Some(g)
+    }
+
+    /// The members' `lifts`, if the `letrec` `x`'s stack code lifted it;
+    /// not in a body inlined or specialized here, which another program's
+    /// text may have spans in common with.
+    fn r_lifted(&self, x: ExpId) -> O<Vec<usize>> {
+        if !self.inlining.is_empty() || self.spec.is_some() {
+            return None;
+        }
+        let span = self.c.arena.span_of(x);
+        self.lifted.get(&(span.start, span.end)).cloned().flatten()
     }
 
     fn r_where(&self, env: &[(Sym, RLoc)], n: Sym) -> O<RLoc> {
@@ -409,14 +426,14 @@ impl Compiler<'_> {
     /// name, still bound where the procedure knows itself to be.
     fn r_self_known(&self, g: &Gen, f: ExpId, nargs: usize, te: &Env) -> bool {
         match (g.this, self.c.arena.exp_at(f)) {
-            (Some((t, _)), Exp::Var(n)) => *n == t.name && find(te, *n) == Some(t.loc) && nargs == t.params,
+            (Some((t, _)), Exp::Var(n)) => *n == t.name && find(te, *n) == Some(t.loc) && t.added + nargs == t.params,
             _ => false,
         }
     }
 
     fn r_self_call(&self, g: &Gen, f: ExpId, nargs: usize, te: &Env, tail: bool) -> bool {
         match (g.this, self.c.arena.exp_at(f)) {
-            (Some((t, _)), Exp::Var(n)) => tail && *n == t.name && find(te, *n) == Some(t.loc) && nargs == t.params,
+            (Some((t, _)), Exp::Var(n)) => tail && *n == t.name && find(te, *n) == Some(t.loc) && t.added + nargs == t.params,
             _ => false,
         }
     }
@@ -533,7 +550,7 @@ impl Compiler<'_> {
                     Some(RLoc::Slot(s)) => g.op("stack", &[Gen::n(s)]),
                     Some(RLoc::Free(i)) => g.op("lexical", &[Gen::n(i)]),
                     Some(RLoc::Global(c)) => g.op("global", &[c]),
-                    Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_) | RLoc::Join(_)) => return None,
+                    Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_) | RLoc::Join(_) | RLoc::Lifted(_)) => return None,
                     None if self.name(n) == "nil" => g.op("const", &[Value::NULL]),
                     None => return self.decline("a standard operation as a value"),
                 }
@@ -711,6 +728,18 @@ impl Compiler<'_> {
                 g.done(tail);
             }
             Exp::TagCase { scrutinee, arms, els } => self.r_tagcase(g, scrutinee, &arms, els, env, te, tail)?,
+            // Lifted as its stack code lifted it (`Compiler::lift`).
+            Exp::Letrec { bindings, body } if self.r_lifted(x).is_some() => {
+                let ks = self.r_lifted(x).expect("lifted");
+                let (depth, tdepth) = (env.len(), te.len());
+                for ((n, _, _), k) in bindings.iter().zip(&ks) {
+                    env.push((*n, RLoc::Lifted(*k)));
+                    te.push((*n, Loc::Lifted(*k)));
+                }
+                self.r_exp(g, body, env, te, tail)?;
+                env.truncate(depth);
+                te.truncate(tdepth);
+            }
             Exp::Letrec { bindings, body } => {
                 let (depth, tdepth, slots, regs) = (env.len(), te.len(), g.next_slot, g.next_reg);
                 let n = bindings.len();
@@ -980,6 +1009,24 @@ impl Compiler<'_> {
         if let Some((k, cell, lam)) = self.r_specialized(env, f, args) {
             return self.r_specialize(g, k, cell, lam, args, env, te, tail);
         }
+        // A lifted procedure's call: the names it would have captured,
+        // then the arguments, into REG1…REGn; its closure, a constant.
+        if let Exp::Var(n) = *self.c.arena.exp_at(f)
+            && let Some(RLoc::Lifted(k)) = self.r_where(env, n)
+        {
+            let mut all: Vec<Arg> = self.lifts[k].added.iter().map(|a| Arg::Name(*a)).collect();
+            all.extend(args.iter().map(|a| Arg::E(*a)));
+            let closure = self.lifts[k].closure;
+            self.r_args(g, &all, env, te, None)?;
+            g.op("const", &[closure]);
+            if tail {
+                g.leave();
+                g.op("tailinvoke", &[Gen::n(all.len())]);
+            } else {
+                g.op("invoke", &[Gen::n(all.len())]);
+            }
+            return Some(());
+        }
         let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
         // A call of the procedure itself, not in tail position: by its own
         // entry, with no closure fetched.
@@ -1090,7 +1137,7 @@ impl Compiler<'_> {
     /// calls it only in tail position, as the `letrec`'s body does, and that
     /// no sibling mentions; so no closure of it need be made, and each call
     /// is a jump (the `letrec` being in tail position itself).
-    fn r_join_ok(&self, bindings: &[(Sym, crate::ast::TyId, ExpId)], body: ExpId, i: usize) -> bool {
+    pub(super) fn r_join_ok(&self, bindings: &[(Sym, crate::ast::TyId, ExpId)], body: ExpId, i: usize) -> bool {
         let (name, _, init) = bindings[i];
         let Some((ps, lbody, None)) = self.lambda_of(init) else { return false };
         !ps.contains(&name)
@@ -1642,7 +1689,7 @@ impl Compiler<'_> {
         let mut kept = Vec::new();
         let simple = |c: &Self, a: &Arg| match a {
             Arg::E(x) => c.r_simple(*x),
-            Arg::V(_) | Arg::Slot(_) | Arg::Lexical(_) => true,
+            Arg::V(_) | Arg::Name(_) | Arg::Slot(_) | Arg::Lexical(_) => true,
             Arg::Thunk(_) => false,
         };
         // The last argument that is not simple goes straight to its
@@ -1662,7 +1709,7 @@ impl Compiler<'_> {
                 Arg::Thunk(body) => {
                     self.r_lambda(g, &[], *body, env, te, None, None)?;
                 }
-                Arg::V(_) | Arg::Slot(_) | Arg::Lexical(_) => unreachable!(),
+                Arg::V(_) | Arg::Name(_) | Arg::Slot(_) | Arg::Lexical(_) => unreachable!(),
             }
             if Some(i) == direct {
                 g.op("setreg", &[Gen::n(i + 1)]);
@@ -1692,6 +1739,20 @@ impl Compiler<'_> {
                     g.op("setreg", &[Gen::n(i + 1)]);
                 }
                 (None, Arg::Slot(s)) => g.op("load", &[Gen::n(i + 1), Gen::n(*s)]),
+                (None, Arg::Name(n)) => match self.r_where(env, *n)? {
+                    RLoc::Slot(s) => g.op("load", &[Gen::n(i + 1), Gen::n(s)]),
+                    RLoc::Reg(r) if r == i + 1 => {}
+                    RLoc::Reg(r) => g.op("movereg", &[Gen::n(r), Gen::n(i + 1)]),
+                    RLoc::Free(k) => {
+                        g.op("lexical", &[Gen::n(k)]);
+                        g.op("setreg", &[Gen::n(i + 1)]);
+                    }
+                    RLoc::Const(v) => {
+                        g.op("const", &[v]);
+                        g.op("setreg", &[Gen::n(i + 1)]);
+                    }
+                    _ => return self.decline("a lifted procedure's added name, not a value in a place"),
+                },
                 (None, Arg::Lexical(k)) => {
                     g.op("lexical", &[Gen::n(*k)]);
                     g.op("setreg", &[Gen::n(i + 1)]);
@@ -1943,15 +2004,15 @@ impl Compiler<'_> {
                 made.push(s);
             }
         }
+        // (The parameters a lifting added, first, passed on as they are.)
         for (i, m) in made.into_iter().enumerate() {
             if g.leaf {
-                g.op("movereg", &[Gen::n(m), Gen::n(i + 1)]);
+                g.op("movereg", &[Gen::n(m), Gen::n(t.added + i + 1)]);
             } else {
                 g.op("stack", &[Gen::n(m)]);
-                g.op("setstk", &[Gen::n(i)]);
+                g.op("setstk", &[Gen::n(t.added + i)]);
             }
         }
-        let _ = t;
         g.items.push(RItem::Branch(false, start));
         g.next_reg = regs;
         g.next_slot = slots;

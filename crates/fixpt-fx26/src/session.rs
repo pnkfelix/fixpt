@@ -191,7 +191,9 @@ pub const READER_PREFIX: &str = "fx26-reader:";
 /// then load it into `scheme`, under [`READER_PREFIX`]. It runs on every
 /// keystroke, so nothing of it may run before the licence says it can.
 pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
-    let mut compiled = compile_program_as(&crate::front_end(), READER_PREFIX).map_err(|e| e.to_string())?;
+    // An error in the front end says where in its files.
+    let mut compiled = compile_program_as(&crate::front_end(), READER_PREFIX)
+        .map_err(|e| format!("the front end, {}: {}", crate::front_end_location(e.span.start as usize), e.message))?;
     compiled.checker.reader_licence()?;
     compiled.load_into(scheme)
 }

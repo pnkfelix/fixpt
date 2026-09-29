@@ -368,3 +368,25 @@ fn a_compound_test_is_jumps() {
         assert_eq!((n("branchf"), n("brancht"), n("const #")), (2, 2, 0), "{who}:\n{reg}");
     }
 }
+
+/// `letrec` procedures only called are lambda-lifted: no closure made
+/// for them when the `letrec` runs; each call passes what they would have
+/// captured, to a closure over nothing made once; a tail call of itself
+/// is still a loop. Both compilers.
+#[test]
+fn letrec_procedures_only_called_are_lifted() {
+    let text = include_str!("programs/run/lifted-loop.fx");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    for (who, code) in [("FX-26", fx26), ("Rust", rust)] {
+        let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
+        // `f`'s body makes no closure; it calls `up` by a closure constant,
+        // `base` and `n` first.
+        let f = &code[code.find("\nword lambda@").expect("f's word") + 1..];
+        let f = &f[..f[1..].find("\nword ").map_or(f.len(), |i| i + 1)];
+        assert!(!f.contains("lambda word") && !f.contains("closure word") && f.contains("closure of"), "{who}:\n{f}");
+        assert!(f.contains("invoke 4") || f.contains("tcall 4"), "{who}:\n{f}");
+        // `up`'s loop is a jump.
+        assert!(code.contains("branch →"), "{who}:\n{code}");
+    }
+}
