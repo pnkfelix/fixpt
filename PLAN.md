@@ -1960,7 +1960,16 @@ library.
   (`int` is still `int`); the compilers' constant folding must not
   assume 61 bits; the front end's machine-word arithmetic moves to `i64`
   or `u64`.
-- `i32`, `u32`, `i64`, `u64`, whose arithmetic wraps. `i32`/`u32`
+- Done in part (2026-09-29): `i32`, `u32`, `i64`, `u64`, whose
+  arithmetic wraps, in both checkers, with 18 operations each, named by
+  type (`u32*`, `u32-xor`, `int->u32`, `u32->int`; the user's choice over a
+  width argument or overloading), as runtime primitives on every path
+  (`docs/fx26.md`, "Fixed-width integers"; test
+  `fixed_width_integers_on_every_machine`). An `i32`/`u32` is the fixnum
+  of its value (the user's choice, over an immediate with a subtag; so
+  `f32` should be asked again); an `i64`/`u64` the exact integer. Left:
+  the operations inline, one instruction each, on the machines; `i64`
+  and `u64` unboxed. The plan was: `i32`/`u32`
   immediate (a word's upper half, a subtag); `i64`/`u64` raw in native
   registers and in frame slots outside the stack map, boxed as a
   bloblet with an 8-byte suffix in uniform positions, like `f64`. Bit

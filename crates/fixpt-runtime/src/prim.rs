@@ -167,6 +167,124 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
     }
 }
 
+/// A fixed-width integer type: its bits, and whether it is signed.
+#[derive(Clone, Copy)]
+enum Width {
+    I32,
+    U32,
+    I64,
+    U64,
+}
+
+impl Width {
+    fn bits(self) -> u32 {
+        match self {
+            Width::I32 | Width::U32 => 32,
+            Width::I64 | Width::U64 => 64,
+        }
+    }
+    fn signed(self) -> bool {
+        matches!(self, Width::I32 | Width::I64)
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Width::I32 => "an i32",
+            Width::U32 => "a u32",
+            Width::I64 => "an i64",
+            Width::U64 => "a u64",
+        }
+    }
+    /// `x` wrapped to this width: its low bits, sign-extended if signed.
+    fn wrap(self, x: i128) -> i128 {
+        let b = self.bits();
+        let low = x & ((1i128 << b) - 1);
+        if self.signed() && low >> (b - 1) == 1 { low - (1i128 << b) } else { low }
+    }
+}
+
+/// An exact integer, as an `i128`, if it is one that fits.
+fn exact_i128(rt: &Runtime, v: Value) -> Option<i128> {
+    if v.is_fixnum() {
+        return Some(v.as_fixnum() as i128);
+    }
+    crate::num::N::load(&rt.heap, v).filter(|n| matches!(n, crate::num::N::Big(_))).and_then(|n| n.to_bigint()).and_then(|b| i128::try_from(b).ok())
+}
+
+/// A value of width `w`: the integer it stands for.
+fn fixed_in(rt: &mut Runtime, v: Value, w: Width) -> Outcome<i128> {
+    match exact_i128(rt, v) {
+        Some(x) if w.wrap(x) == x => Ok(x),
+        _ => rt.type_error(w.name(), v),
+    }
+}
+
+/// The integer `x`, as the runtime keeps it: a fixnum where it fits.
+fn exact_out(rt: &mut Runtime, x: i128) -> Value {
+    crate::num::N::big(num_bigint::BigInt::from(x)).store(&mut rt.heap)
+}
+
+/// Operation `op` of the fixed-width integers of width `w`.
+fn fixed_op(rt: &mut Runtime, a: &[Value], op: &str, w: Width) -> Outcome<Value> {
+    match op {
+        // `int->T`: any exact integer, wrapped.
+        "from" => {
+            let x = match exact_bigint(rt, a[0]) {
+                Some(b) => b,
+                None => return rt.type_error("an exact integer", a[0]),
+            };
+            let m = num_bigint::BigInt::from(1u8) << w.bits();
+            let low = ((x % &m) + &m) % &m;
+            let low = i128::try_from(low).expect("under 2^64");
+            return Ok(exact_out(rt, w.wrap(low)));
+        }
+        "to" => {
+            let x = fixed_in(rt, a[0], w)?;
+            return Ok(exact_out(rt, x));
+        }
+        _ => {}
+    }
+    let x = fixed_in(rt, a[0], w)?;
+    if op == "not" {
+        return Ok(exact_out(rt, w.wrap(!x)));
+    }
+    if op == "shl" || op == "shr" {
+        let k = (int(rt, a[1])? as u32) & (w.bits() - 1);
+        // Signed: arithmetic; unsigned: logical (`x` is non-negative).
+        let r = if op == "shl" { x << k } else { x >> k };
+        return Ok(exact_out(rt, w.wrap(r)));
+    }
+    let y = fixed_in(rt, a[1], w)?;
+    let r = match op {
+        "add" => x + y,
+        "sub" => x - y,
+        "mul" => x.wrapping_mul(y),
+        "quot" | "rem" => {
+            if y == 0 {
+                return rt.fail("division by zero", &[a[0], a[1]]);
+            }
+            if op == "quot" { x / y } else { x % y }
+        }
+        "and" => x & y,
+        "or" => x | y,
+        "xor" => x ^ y,
+        "lt" => return Ok(Value::boolean(x < y)),
+        "le" => return Ok(Value::boolean(x <= y)),
+        "gt" => return Ok(Value::boolean(x > y)),
+        "ge" => return Ok(Value::boolean(x >= y)),
+        "eq" => return Ok(Value::boolean(x == y)),
+        _ => unreachable!("a fixed-width operation"),
+    };
+    Ok(exact_out(rt, w.wrap(r)))
+}
+
+/// Any exact integer, as a big integer.
+fn exact_bigint(rt: &Runtime, v: Value) -> Option<num_bigint::BigInt> {
+    if v.is_fixnum() {
+        return Some(num_bigint::BigInt::from(v.as_fixnum()));
+    }
+    crate::num::N::load(&rt.heap, v).filter(|n| matches!(n, crate::num::N::Big(_))).and_then(|n| n.to_bigint())
+}
+
 /// A radix, 2 to 36.
 fn radix(rt: &mut Runtime, v: Value) -> Outcome<u32> {
     match int(rt, v)? {
@@ -800,6 +918,80 @@ prims! {
         let s = get_string(rt, a[1])?;
         Ok(Value::boolean(s.contains(c)))
     });
+    // The fixed-width integers, `i32`, `u32`, `i64`, `u64` (PLAN.md, Q2 b):
+    // wrapping arithmetic, on values that are the integers they stand for.
+    "%fx26-i32+", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "add", Width::I32));
+    "%fx26-i32-", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "sub", Width::I32));
+    "%fx26-i32*", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "mul", Width::I32));
+    "%fx26-i32-quotient", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "quot", Width::I32));
+    "%fx26-i32-remainder", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "rem", Width::I32));
+    "%fx26-i32-and", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "and", Width::I32));
+    "%fx26-i32-or", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "or", Width::I32));
+    "%fx26-i32-xor", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "xor", Width::I32));
+    "%fx26-i32<", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "lt", Width::I32));
+    "%fx26-i32<=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "le", Width::I32));
+    "%fx26-i32>", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "gt", Width::I32));
+    "%fx26-i32>=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "ge", Width::I32));
+    "%fx26-i32=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "eq", Width::I32));
+    "%fx26-i32-shl", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shl", Width::I32));
+    "%fx26-i32-shr", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shr", Width::I32));
+    "%fx26-i32-not", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "not", Width::I32));
+    "%fx26-int->i32", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "from", Width::I32));
+    "%fx26-i32->int", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "to", Width::I32));
+    "%fx26-u32+", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "add", Width::U32));
+    "%fx26-u32-", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "sub", Width::U32));
+    "%fx26-u32*", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "mul", Width::U32));
+    "%fx26-u32-quotient", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "quot", Width::U32));
+    "%fx26-u32-remainder", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "rem", Width::U32));
+    "%fx26-u32-and", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "and", Width::U32));
+    "%fx26-u32-or", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "or", Width::U32));
+    "%fx26-u32-xor", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "xor", Width::U32));
+    "%fx26-u32<", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "lt", Width::U32));
+    "%fx26-u32<=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "le", Width::U32));
+    "%fx26-u32>", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "gt", Width::U32));
+    "%fx26-u32>=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "ge", Width::U32));
+    "%fx26-u32=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "eq", Width::U32));
+    "%fx26-u32-shl", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shl", Width::U32));
+    "%fx26-u32-shr", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shr", Width::U32));
+    "%fx26-u32-not", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "not", Width::U32));
+    "%fx26-int->u32", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "from", Width::U32));
+    "%fx26-u32->int", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "to", Width::U32));
+    "%fx26-i64+", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "add", Width::I64));
+    "%fx26-i64-", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "sub", Width::I64));
+    "%fx26-i64*", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "mul", Width::I64));
+    "%fx26-i64-quotient", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "quot", Width::I64));
+    "%fx26-i64-remainder", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "rem", Width::I64));
+    "%fx26-i64-and", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "and", Width::I64));
+    "%fx26-i64-or", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "or", Width::I64));
+    "%fx26-i64-xor", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "xor", Width::I64));
+    "%fx26-i64<", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "lt", Width::I64));
+    "%fx26-i64<=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "le", Width::I64));
+    "%fx26-i64>", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "gt", Width::I64));
+    "%fx26-i64>=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "ge", Width::I64));
+    "%fx26-i64=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "eq", Width::I64));
+    "%fx26-i64-shl", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shl", Width::I64));
+    "%fx26-i64-shr", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shr", Width::I64));
+    "%fx26-i64-not", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "not", Width::I64));
+    "%fx26-int->i64", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "from", Width::I64));
+    "%fx26-i64->int", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "to", Width::I64));
+    "%fx26-u64+", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "add", Width::U64));
+    "%fx26-u64-", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "sub", Width::U64));
+    "%fx26-u64*", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "mul", Width::U64));
+    "%fx26-u64-quotient", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "quot", Width::U64));
+    "%fx26-u64-remainder", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "rem", Width::U64));
+    "%fx26-u64-and", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "and", Width::U64));
+    "%fx26-u64-or", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "or", Width::U64));
+    "%fx26-u64-xor", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "xor", Width::U64));
+    "%fx26-u64<", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "lt", Width::U64));
+    "%fx26-u64<=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "le", Width::U64));
+    "%fx26-u64>", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "gt", Width::U64));
+    "%fx26-u64>=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "ge", Width::U64));
+    "%fx26-u64=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "eq", Width::U64));
+    "%fx26-u64-shl", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shl", Width::U64));
+    "%fx26-u64-shr", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shr", Width::U64));
+    "%fx26-u64-not", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "not", Width::U64));
+    "%fx26-int->u64", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "from", Width::U64));
+    "%fx26-u64->int", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "to", Width::U64));
     // FX-26's `string-compare`: -1, 0 or 1, as `a[0]` comes before, is, or
     // comes after `a[1]`, character by character.
     "%fx26-string-compare", 2, Some(2), simple!(|rt, a| {

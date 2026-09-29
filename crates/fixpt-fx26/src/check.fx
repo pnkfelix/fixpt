@@ -374,7 +374,7 @@
 (define k-unit int 3)
 (define k-char int 4)
 (define k-symbol int 6)
-(define k-void int 10)
+(define k-void int 14)
 (define k-base (ref (listof (pairof symbol int @t) acyclic) @t) (new nil))
 (define k-basic (subr (maxeff kstate spin) (string) unit)
   (lambda (name)
@@ -2209,6 +2209,7 @@
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
+      (k-basic "i32") (k-basic "u32") (k-basic "i64") (k-basic "u64")  ; 10 to 13; `void` 14, `k-void`
       (k-ty-new (ty-void))
       #u)))
 (define n-copy-memo (subr (maxeff (read @globals) (read @t) (write @t) spin) ((arrayof (listof k-regions acyclic) @t) (arrayof (listof k-regions acyclic) @t) int) unit)

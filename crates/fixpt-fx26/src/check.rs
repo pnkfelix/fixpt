@@ -243,6 +243,12 @@ impl Checker {
         basic("tword");
         basic("wcell");
         basic("wglobal");
+        // The fixed-width integers: an `i32` or `u32` is the fixnum it stands
+        // for, an `i64` or `u64` the exact integer (PLAN.md, Q2 b). After
+        // the others, in the order `check.fx` makes them: type ids agree.
+        for fixed in ["i32", "u32", "i64", "u64"] {
+            basic(fixed);
+        }
         let void = arena.ty(Ty::Void);
         let mut c = Checker {
             arena,

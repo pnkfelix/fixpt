@@ -315,6 +315,16 @@ fn overflow_traps_on_every_machine() {
     }
 }
 
+/// The fixed-width integers wrap alike on every machine
+/// (`programs/fixed-width.fx`).
+#[test]
+fn fixed_width_integers_on_every_machine() {
+    for (m, text) in on_every_machine(include_str!("programs/fixed-width.fx")) {
+        let values: Vec<&str> = text.lines().filter(|l| !l.starts_with("fnv") && !l.starts_with(';')).map(|l| l.split(" : ").next().unwrap_or("")).collect();
+        assert_eq!(values, ["1335831723", "-2147483648", "1", "(-4 1073741820 -1)"], "{m:?}: {text}");
+    }
+}
+
 /// `program` run by `fixpt eval` on every machine, all at once (each
 /// loads the front end): each machine's options and what it printed, none
 /// killed by a signal.
