@@ -455,3 +455,82 @@ the user's program.
    FX-26. Also still open: the shape loss in FX-87's eraser (§2), and
    carrying more of FX-26's facts (region and control claims) through the
    lowering.
+
+---
+
+## 12. What the benchmark ports found hard to write (2026-09-29)
+
+Nine agents ported 87 benchmarks (`scheme-bench/`, `mllang-bench/fx/`);
+each header says what its port worked around. The same things came up
+in batch after batch. In `PLAN.md` they are queue item Q11; the bigger
+ones (identity, integers, floats, unions) are items of their own.
+
+- **Globals listed transitively.** A local `letrec` procedure's effect
+  must name every global it reads, and every global its callees read,
+  datatype constructors included: a loop calling `ocons` must say
+  `(read (globals ocons opair))`. Ports used long `define-effect` lists,
+  or fell back to `(read @globals)`. `define*` infers this at the top
+  level; do the same for local `letrec` and `define-rec` (a
+  `define-rec*`). And name the missing atom in the error, instead of
+  printing both whole effects (hundreds of names in `conform`).
+- **One answer type per prompt tag.** OCaml exceptions caught at several
+  types need a wrapping sum, allocated at every `handle`; and a prompt
+  rarely masks `goto` when a free variable's type mentions the tag's
+  region, so helpers that abort must be bound inside the prompt body.
+  (Proposed: a note on tags whose prompts choose their answer type.)
+- **`quote` takes only symbols.** Constant lists of numbers, strings or
+  booleans become `cons` chains ending in `(the (listof T @heap) nil)`,
+  or an in-file reader. Quoted literals typed `(listof T acyclic)` would
+  do.
+- **No `error`.** Unreachable error branches return made-up values;
+  one port signals errors by an out-of-range `array-ref`.
+- **Names.** `sum` is reserved; defining `get`, `null?` or `pair?`
+  silently shadows the standard one for the rest of the program.
+
+## 13. Checker limitations the ports met
+
+Each has a small reproduction in the port that met it:
+- A `letrec` body is not checked against the type expected of it (a
+  `let` body is): `(letrec (…) (if b nil (cons (g) nil)))` fails with
+  "argument 2 must be a t2, which is not yet known here". Every port
+  wraps such bodies in `(the T …)`.
+- A `cons` in one branch of an `if`, or bound by a `let`, gets a fresh
+  region instead of the one the other branch or the expected type
+  fixes; a lambda passed to a polymorphic procedure is not checked
+  against the solved result type.
+- A `define-type` or `define-datatype` cannot name a type defined after
+  it, though `docs/fx26.md` says types are declared ahead: two datatypes
+  cannot refer to each other.
+- A `plambda` under a `let` is refused against its expected `poly`.
+- `define*` without `spin` on a recursive procedure says "it does not
+  check (a mistake of the checker's)"; the real problem is the missing
+  `spin`. The native path also refuses, "may reach itself through a
+  global", some top-level recursive procedures without `spin` that the
+  lowered path accepts.
+- `length` accepts only frozen `nlist`s, so every port over `@heap`
+  lists writes its own.
+
+## 14. Standard operations the ports wrote themselves
+
+`remainder`, `zero?`, `list`, `append`, `map`, `for-each`, `fold`,
+`max`, `min`, `char<?`, `char-upcase`, `string<?`, `string-ci<?`,
+`vector->list`/`list->vector` (`array->list`/`list->array`), a
+`make-array` without a fill element, `eq?` on booleans (`bool=?`), a
+list length for `@heap` lists, n-ary `string-append`, and a mutable
+string (or an array of chars to string without a list). Each is small;
+together they are most of every port's helpers. Some become generic
+operations by dictionary (`PLAN.md` Q8).
+
+## 15. Tools the ports wished for
+
+- The FX-26 reader reports an unbalanced parenthesis at 1:1 ("did not
+  read the whole text"), wherever it is.
+- `sexp-edit order` printed nothing for a forward use that `check`
+  reports as unbound.
+- A procedure that falls back to cellular code is named only by a byte
+  offset (`lambda@59`), and only at run time; say it when compiling,
+  with the procedure's name and why.
+- Native start-up grows with program size (2.9–3.5 s before the first
+  iteration for `boyer`, `ratio-regions`, `tyan`; 6.3 s for `parsing`
+  with its 28 KB string): separate compilation's saved front-end image
+  (`PLAN.md` Q9, S0) and faster checking would both help.

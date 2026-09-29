@@ -86,7 +86,7 @@ are in the last section, "Log: the glance's details", and in
   program (checkable again, and printable by a `fixpt expand`).
 
 - **Bugs the benchmark ports found** (native path; the lowered one is
-  right): `car` of `nil` crashes native code; a native abort does not
+  right; queue Q1): `car` of `nil` crashes native code; a native abort does not
   find a prompt cellular code installed, and costs time in proportion to
   the stack; an inlined `extract` from an earlier form gets field -1 and
   drops its callers out of register code; register code declines above 8
@@ -99,7 +99,14 @@ are in the last section, "Log: the glance's details", and in
   `gc_count` leave out minor ones (`%gc-count`, the phase probe), and the
   engine profile's name cache is keyed on major collections only.
 
-**Next**, roughly in order
+**Next**, roughly in order. First the queue in "The queue after the
+benchmark ports and the research (2026-09-29)", below: Q1 native-path
+bugs; Q2 integers (lowering and machines agree, then `int` a bignum,
+then `i32`/`i64`/`u32`/`u64`); Q3 telemetry's counts; Q4 floats (`f64`
+boxed, `f32`); Q5 `eq?` and address-hashed tables (Larceny's tablets);
+Q6 flat arrays; Q7 `consof` and disjoint unions; Q8 generic operations
+by dictionary; Q9 separate compilation; Q10 async; Q11 language
+friction. Then, as before:
 1. Done (2026-09-28): an immediately applied lambda as a `let`;
    procedures that only make a closure as frameless leaves; lambda
    lifting (the check phase 14% less allocation).
@@ -117,10 +124,13 @@ are in the last section, "Log: the glance's details", and in
    at run time (CF1–CF5); concurrency and actors.
 8. Smaller: `nlist` error messages; the language gaps the survey found;
    M8 docs and polish.
-9. Fixed-width integers, low priority: `i32`/`u32` in a word's upper
-   half, wrapping arithmetic; `i64`/`u64` in native frames, whose stack
-   maps (2026-09-29) leave a slot outside the mask free for raw words.
+9. Fixed-width integers: now Q2 (the user's, 2026-09-29).
 10. Far future: a k-CFA, for what the types do not already say.
+
+**Decided with the user (2026-09-29)**: `int` becomes a bignum;
+`i32`/`i64`/`u32`/`u64` for fixed widths; `f32` and `f64` (`f64` boxed
+where needed); polymorphism by passing dictionaries or tags, not by a
+copy of the code per type.
 
 **Decided against, or waiting on the user**
 - Speed is judged by native code only (the user's, 2026-09-28):
@@ -154,7 +164,8 @@ archive; §2 Architecture; §3 The core runtime; §4 The core Scheme engine;
 Decisions (2026-09-20); §11 M12, with its phases, "After M12", "M13
 plan", "The queue", "The next queue", "Progress, and what the queue
 gained", "A collected code area", "Kept open, deliberately" and
-"Decisions (2026-09-25)"; then "Log: the glance's details".
+"Decisions (2026-09-25)"; "The queue after the benchmark ports and the
+research (2026-09-29)"; then "Log: the glance's details".
 
 ## 0. What this is
 
@@ -1792,6 +1803,176 @@ should fragmentation call for moving code.
 a sequence of cells (references to routines, and their operands), run by an inner
 interpreter. This repository says "cellular" throughout (the user's decision,
 2026-09-27).
+
+## The queue after the benchmark ports and the research (2026-09-29)
+
+What the reference benchmarks (`scheme-bench/`, `mllang-bench/`) and the
+research notes (`docs/research/{floats,telemetry,async,separate-compilation,
+logical-types,polytypic}.md`) found, and the user's decisions on them,
+as an ordered queue. Smaller friction is in `TODO.md` §§ 12–15.
+
+### Decided with the user (2026-09-29)
+
+1. **`int` is a bignum.** An exact integer of any size: a fixnum while it
+   fits, a bignum past that. Today the lowered path gives bignums (it
+   runs Scheme's `+`) and every compiled machine traps on overflow, so
+   the machines disagree; they must agree on the bignum answer.
+2. **Fixed-width integers:** `i32`, `i64`, `u32`, `u64`, for machine
+   words, bit operations and speed where the width is the point.
+3. **Floats: `f32` and `f64`.** An `f64` is boxed where a uniform word is
+   needed (the heap's flonum, a 16-byte bloblet), not by changing the
+   runtime's representation; unboxed where the types allow
+   (`docs/research/floats.md`).
+4. **Dictionaries and tags over specialization.** Polymorphic code is one
+   copy that is passed what it needs (a dictionary, a layout descriptor,
+   a type representation, a tag), not a copy per type. The compilers may
+   specialize where a dictionary is known, as they specialize at a known
+   lambda today, but that is an optimization, not the mechanism. This
+   revisits the polytypic note (deriving whole copies) and the flat-array
+   idea (layout descriptors, not monomorphization).
+
+### The queue
+
+**Q1. Native-path bugs the ports found.** Each has a reproduction in the
+ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
+- `car`/`cdr` of `nil` crashes native code (one unchecked load). Stopgap:
+  a check where the type allows `nil`; the principled fix is Q7's
+  `consof`.
+- A native abort does not find a prompt that cellular code installed
+  (`Callout::Abort` searches native frames only); and its cost grows with
+  the stack under it (`frames_of` collects every frame first). kb runs
+  5x slower native than lowered because of it.
+- An inlined `extract` from an earlier form gets field -1 (facts are keyed
+  by offset in one text), and its callers silently drop to cellular code
+  (`life` 200 s -> 2.9 s when avoided). Fix now by keying facts by
+  (form, offset); separate compilation's S2 generalizes it.
+- Register code declines, silently, above 8 free values, arguments or
+  product/bloblet fields, prompt bodies included, and on frames too large
+  for one `stp`; and says so only at run time, by byte offset. Pass the
+  rest on the stack; name the procedure; say it when compiling.
+- A product argument is slow natively (10M calls: 3.4 s against 0.5 s).
+- The native stack is a fixed 8 MB (`STACK_WORDS`); deep non-tail
+  recursion that runs lowered overflows natively. Grow it, or segment it
+  (the async note's stack segments).
+- Native collection slows as live data grows (`paraffins` 57 s native,
+  20 s lowered; a 12M-object live set 24 s against 6.5 s for 2M x 6).
+  Count collections and time them first (Q3).
+- Precise globals effects made `set.fx` 2x slower natively (7.2 -> 14 s),
+  and doubled `peval`'s check time; cause unknown.
+- A standard operation as a value is still declined for some operations
+  (`char-downcase`); `parse-int` panics on a bad radix and cannot take a
+  sign.
+- A redefinition check in the harness-only session path (`knot-spin`).
+
+**Q2. Integers.**
+- Lowering and every machine agree now: overflow traps everywhere
+  (lower `+ - *` to overflow-checked primitives), with a test that
+  overflows on purpose. Then:
+- `int` as a bignum: the fixnum fast path stays one `adds` and a branch;
+  the branch goes to a call-out that makes or uses a bignum (the Scheme
+  engine's `N::Big` and `num_bigint`) instead of trapping. Comparison,
+  `=`, `quotient`/`modulo`, hashing and printing take bignums;
+  `array-ref` of a bignum index is out of range. Both checkers unchanged
+  (`int` is still `int`); the compilers' constant folding must not
+  assume 61 bits; the front end's machine-word arithmetic moves to `i64`
+  or `u64`.
+- `i32`, `u32`, `i64`, `u64`: wrapping or checked? (to ask). `i32`/`u32`
+  immediate (a word's upper half, a subtag); `i64`/`u64` raw in native
+  registers and in frame slots outside the stack map, boxed as a
+  bloblet with an 8-byte suffix in uniform positions, like `f64`. Bit
+  operations (`and`, `or`, `xor`, `not`, shifts) on them; conversions
+  to and from `int`. Unblocks `md5`, `psdes-random`, `DLXSimulator`, and
+  the front end's word arithmetic.
+- Unblocks `pi`, `chudnovsky`, `pidigits`, `smith-normal-form`.
+
+**Q3. Telemetry, stage 1** (`docs/research/telemetry.md`): fix the counts
+first (minor collections counted with major ones in `%gc-count`, the
+phase probe and `FIXPT_GC_REPORT`; `words_copied` split into promoted and
+copied; region and code-area allocation in `allocated()`; the engine
+profile's name cache keyed on every collection). Then peak live words,
+pause times per kind, `FIXPT_GC_TRACE`/`FIXPT_GC_SUMMARY`, and
+allocation and collection columns in `fixpt bench`. Stage 2: the FX-26
+operations under an `@telemetry` effect, and `black-box`.
+
+**Q4. Floats** (`docs/research/floats.md`, S0 onwards): `f64` boxed
+everywhere with the right answers (unblocks 10 Larceny and about 17 ML
+benchmarks); `f32` immediate; then floats in native registers and raw
+frame slots; float arrays as flat arrays (Q6); calling convention for
+float arguments later, if measurements ask. Before floats in frames:
+continuation capture must keep raw words (a captured frame as a bloblet
+of its own kind), and native code must save `d8`-`d15` or not use them.
+
+**Q5. Identity: `eq?` on mutable objects, and address-hashed tables.**
+Every batch of ports hit the missing identity test (`equal`, `dynamic`
+blocked; workarounds in `browse`, `conform`, `maze`, `sboyer`, `peval`,
+`logic`, `boyer`, `hashtable0`). A typed `eq?` per kind of mutable
+object (pairs, refs, arrays, bloblets), then `eq?`-hashed tables. Objects
+move, so an address hash goes stale at a collection: Larceny's answer
+(`src/Lib/Common/hashtable.sch`) is three tablets per `eq?` table, for
+keys whose hash does not depend on the address (fixnums, chars,
+symbols' own hashes), for old keys hashed by address and stamped with
+`(major-gc-counter)`, and for young keys stamped with `(gc-counter)`. A
+lookup searches them, and only on a miss, if a stamp is stale, rehashes
+that tablet (young entries into the old tablet, since a minor
+collection promoted them) and retries; a rehash that a collection
+interrupts is retried; `reset-all-hashtables!` runs before a heap dump.
+Our nursery promotes everything live at a minor collection, which is the
+case this handles exactly. It needs from the runtime: an address hash,
+whether a key's hash is address-sensitive (and young or old), a
+collection counter that counts minor collections (Q3's fix) and a
+major-only one, both readable cheaply; and a type story (the counters
+under `@telemetry`, or a table type whose operations carry the effect).
+
+**Q6. Flat arrays and a `flat` kind** (the user's idea, 2026-09-29): a
+kind for types that carry no references (`int` as fixnums, `bool`,
+`char`, the fixed-width integers, `f32`, `f64`, products of those),
+and arrays of them as a bloblet suffix: no scanning by the collector, no
+write barrier, bulk copy and fill as byte moves. Polymorphism over the
+kind by a layout descriptor passed at run time (decision 4); flat arrays
+at statically known element types first. Name to settle (`flat`, `bits`,
+`plain`; `(flat-arrayof T R)` or a representation chosen by kind).
+
+**Q7. Logical types, restricted** (`docs/research/logical-types.md`):
+first `consof`, a pair that is not `nil`, which `null?` narrows to (and
+which lets native `car` stay one load); then unions of members with
+disjoint run-time shapes, `(union T …)`, introduced only by subsumption
+and eliminated by narrowing a variable (`typecase`, shape predicates);
+intersections of procedure types (`overload`) later. Its open questions
+are the user's.
+
+**Q8. Generic operations by dictionary** (`docs/research/polytypic.md`,
+revised by decision 4): first the standard environment's gaps (`bool=?`,
+`datum=?`, string and symbol ordering, a hash combiner, `list->array`,
+`array->list`); then generic `equal`, `hash`, `->datum`, `compare`,
+`map`/`fold` as one definition each over a type representation or a
+dictionary passed at run time, with the compilers specializing only
+where it is known. Record and fix the `acyclic?` soundness gap it found
+(a closure calling `acyclic?` on data frozen into an arena escapes it,
+checked as `pure`).
+
+**Q9. Separate compilation** (`docs/research/separate-compilation.md`):
+S0 a saved heap image of the loaded front end, keyed by a hash of its
+files and the binary; S1 checker snapshots at file boundaries; S2 facts
+keyed by (file, offset) (with Q1's `extract` fix); S3 an optional
+`(unit …)` header with `.fxi` interfaces both checkers write alike;
+later stages as the note has them. Its open questions are the user's.
+
+**Q10. Async** (`docs/research/async.md`): S0, a scheduler written in
+FX-26 over prompts on a virtual clock, with tests on every machine; then
+cancel scopes and channels, the Rust reactor, the benchmark that decides
+stack segments. Before building: check continuation capture across nested
+machine runs, and settle which reading of the soundness note's
+`(Region)` rule is meant. Its open questions are the user's.
+
+**Q11. Language friction the ports hit** (`TODO.md` §§ 12–15): local `letrec`
+effects must list every global read transitively (infer them as
+`define*` does); a `letrec` body is not checked against the expected
+type; types cannot name types defined after them; one answer type per
+prompt tag; `quote` takes only symbols; no `error`; missing `remainder`,
+`zero?`, `list`, `append`, `map`, `max`/`min`, `char<?`, `string<?`,
+`char-upcase`, `vector->list`, `list->vector`; `length` only on frozen
+lists; `sum` is reserved; standard names silently shadowed; reader errors
+always at 1:1; effect-mismatch messages print both whole sets.
 
 ## Log: the glance's details (moved here 2026-09-28)
 
