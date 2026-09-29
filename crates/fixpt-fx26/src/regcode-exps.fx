@@ -775,8 +775,10 @@
   (lambda (x) (the maybe-exp (cons x nil))))
 ;; A call-out's operands: `a` and `b`, or `a`, `b` and `c`.
 (define r-args-2 (subr (alloc @k) (rarg rarg) rargs)
+  ;; cons-chain: in `@k`, which goes when the compile does
   (lambda (a b) (the rargs (cons a (cons b nil)))))
 (define r-args-3 (subr (alloc @k) (rarg rarg rarg) rargs)
+  ;; cons-chain: in `@k`, as `r-args-2`'s
   (lambda (a b c) (the rargs (cons a (cons b (cons c nil))))))
 
 ;; Constant `w` into RESULT; in tail position, returned.

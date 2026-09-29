@@ -219,7 +219,7 @@
 (define mk-listof-acyclic (subr (maxeff (read @globals) (read @s)) (syn int int) syn)
   (lambda (t a b)
     (let ((listof (mk-symbol "listof" a b)) (acyclic (mk-symbol "acyclic" a b)))
-      (mk-list (the syns-a (cons listof (cons t (cons acyclic nil)))) a b))))
+      (mk-list (list listof t acyclic) a b))))
 (define vlambda-usage string "`(vlambda name body …)` or `(vlambda (name type) body …)`")
 ;; A `vlambda`'s parameter: `xs`, or `(xs T)`, whose type is then
 ;; `(listof T acyclic)`.
@@ -543,7 +543,7 @@
                (let* ((i (field-index (nth args 1)))
                       (x (parse-exp (car args)))
                       (v (parse-exp (nth args 2))))
-                 (e-bloblet op i (the exp-list (cons x (cons v nil))) a b)))
+                 (e-bloblet op i (list x v) a b)))
               ((bloblet-untagged? op n) (e-bloblet op -1 (parse-exps args) a b))
               (else (pfail-at (str3 "`(" (symbol->string op) " …)`") a b))))))
   (parse-fields (subr (maxeff parses spin) (syns-a) let-list)
@@ -657,10 +657,10 @@
 (define mk-pure-subr (subr (maxeff (read @globals) (read @s)) (syns-a syn int int) syn)
   (lambda (members result a b)
     (let ((pure (mk-symbol "pure" a b)) (args (mk-list members a b)))
-      (mk-form "subr" (the syns-a (cons pure (cons args (cons result nil)))) a b))))
+      (mk-form "subr" (list pure args result) a b))))
 (define mk-poly (subr (maxeff (read @globals) (read @s)) (syns-a syn int int) syn)
   (lambda (binders body a b)
-    (mk-form "poly" (the syns-a (cons (mk-list binders a b) (cons body nil))) a b)))
+    (mk-form "poly" (list (mk-list binders a b) body) a b)))
 ;; The name of a constructor's `i`th parameter: `%x<i>`.
 (define dt-var (subr (read @globals) (int) symbol)
   (lambda (i) (string->symbol (string-append "%x" (int->string i)))))
@@ -670,7 +670,7 @@
   (lambda (ms i a b)
     (if (null? ms)
         nil
-        (let* ((pair (mk-list (cons (mk-int i a b) (cons (car ms) nil)) a b))
+        (let* ((pair (mk-list (list (mk-int i a b) (car ms)) a b))
                (rest (dt-labelled (cdr ms) (+ i 1) a b)))
           (cons pair rest)))))
 (define dt-arms (subr parses (syns-a int int) syns-a)
@@ -681,7 +681,7 @@
           (if (or (null? parts) (not (syn-symbol? (car parts))))
               (pfail "a variant is `(tag type …)`" v)
               (let* ((prod (mk-form "productof" (dt-labelled (cdr parts) 1 a b) a b))
-                     (arm (mk-list (cons (car parts) (cons prod nil)) a b))
+                     (arm (mk-list (list (car parts) prod) a b))
                      (rest (dt-arms (cdr vs) a b)))
                 (cons arm rest)))))))
 (define dt-params (subr (maxeff (read @globals) (read @s)) (syns-a int) param-list)
@@ -755,7 +755,7 @@
   (lambda (param a b)
     (let ((p (syn-items param "a parameter")))
       (if (>= (len p) 2)
-          (mk-list (cons (car p) (cons (nth p 1) nil)) a b)
+          (mk-list (list (car p) (nth p 1)) a b)
           (pfail "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`" param)))))
 ;; The parameters as binders, and their names.
 (define gen-binders (subr parses (syns-a int int) syns-a)
@@ -795,7 +795,7 @@
                  (identity (e-lambda (the param-list (cons x nil)) (e-var 'x a b) a b))
                  (up (gen-conversion "up-" n (conv rep used) identity a b))
                  (down (gen-conversion "down-" n (conv used rep) identity a b)))
-            (cons (t-define-generative head rep a b) (cons up (cons down nil))))))))
+            (list (t-define-generative head rep a b) up down))))))
 
 ;; What top-level form `x` makes: a generative type's or a datatype's
 ;; several forms, or one.

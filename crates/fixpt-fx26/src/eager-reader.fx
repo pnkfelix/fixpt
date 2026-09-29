@@ -565,7 +565,7 @@
       (marking (abbrev-entry start name)
         (lambda ()
           (let ((r (read-datum (skip-atmosphere cur))))
-            (cons (lst (the syns (cons (atom (datum-symbol name) start (+ start 1)) (cons (car r) nil)))
+            (cons (lst (the syns (list (atom (datum-symbol name) start (+ start 1)) (car r)))
                        (datum-cons (datum-symbol name) (datum-cons (syn->datum (car r)) no-data))
                        start
                        (cur-pos (cdr r)))

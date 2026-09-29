@@ -19,6 +19,7 @@
 //! That is a guess about intent, not a parse: a long printed value such as
 //! `#<closure …>` counts too, which is intended.
 
+pub mod cons_chain;
 pub mod fx_size;
 pub mod recursion;
 pub mod sexp_edit;

@@ -313,7 +313,7 @@
     (let ((lt (k-op-either? op "<" "<=")) (gt (k-op-either? op ">" ">=")))
       (the k-ids (cond ((or (and lt holds) (and gt (not holds))) (cons 1 nil))
                        ((or (and lt (not holds)) (and gt holds)) (cons 0 nil))
-                       ((and (string=? op "=") holds) (cons 0 (cons 1 nil)))
+                       ((and (string=? op "=") holds) (list 0 1))
                        (else nil))))))
 ;; Bounds `bs` on each integer parameter known of `x`, if `other`, compared with it, is fixed.
 (define k-sc-compared (subr (maxeff kstate spin) (kx kx k-tscope k-ids) k-guards)
