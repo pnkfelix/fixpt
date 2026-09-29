@@ -2,155 +2,90 @@
 
 ## At a glance (kept current; last updated 2026-09-28)
 
-The rest of this file is the plan as it grew, oldest first. This section says
-where things stand, and points into it.
+Where things stand. Below it is the plan as it grew, oldest first (the
+contents are at the end of this section); the details behind this summary
+are in the last section, "Log: the glance's details", and in
+`docs/performance.md`, `docs/fx26.md` and `docs/research/`.
 
 **Done**
-- **The three original deliverables** (§0; M0–M7, M9): the Scheme engine
-  (AST and bytecode engines, heap images, standalone binaries, hygienic
-  macros), FX-87 (161/161 parse, 160/161 type and effect), FX-91 (182/182).
+- **The original deliverables** (§0; M0–M7, M9): the Scheme engine (AST
+  and bytecode engines, heap images, standalone binaries, hygienic
+  macros), FX-87 (161/161 parse, 160/161 type and effect), FX-91
+  (182/182).
 - **FX-26** (M11, M12): the language, and its reader, parser, checker and
-  compiler written in FX-26 and bootstrapped to a fixpoint, over bloblets,
-  on cellular[^cellular] machines in Rust and arm64 (hand-encoded, register code,
-  stencils). The Rust versions stay as oracles; both checkers must agree.
-- **M13 so far** (§11, "M13 plan"; "The queue"): the Rust compiler to
-  cellular words, benchmarks, typed primitives, self tail calls as loops,
-  known calls in part, register code (the MacScheme machine), values as
-  addresses.
-- **FX-26's type system, 2026-09-27** ("The next queue", "Progress…"):
-  places and regions with `letfreeze`; `spin` with size-change termination;
-  parametric datatypes; generative types; lemmas; the `data` kind and
-  `acyclic`; sizes (`nlist`, `nat`, `confirm-length`, `confirm-nat`).
+  compiler written in FX-26, bootstrapped to a fixpoint, on
+  cellular[^cellular] machines in Rust and arm64. The Rust versions stay
+  as oracles: both checkers, and both compilers, must agree.
+- **FX-26's type system** (2026-09-27; `docs/fx26.md`): places and regions,
+  `letfreeze`; `acyclic` data (named `finite` until 2026-09-28,
+  `docs/research/acyclic-regions.md`); `spin` with size-change
+  termination; parametric and generative types; lemmas; the `data` kind;
+  sizes (`nlist`, `nat`). Globals are a region; redefinition follows one
+  rule at the REPL and in files, in both checkers; the REPL is
+  incremental.
 - **Soundness** (`docs/research/soundness*.md`): a formal core with
-  progress and preservation proved (control included), no use after free,
-  frozen data never written; holes F1–F9 and A2 found and fixed.
+  progress and preservation proved, control included; holes F1–F9 and A2
+  found and fixed.
+- **M13, the compilers** (`docs/performance.md`): the Rust compiler to
+  cellular words; register code (the MacScheme machine); guarded inlining,
+  specialization at a lambda, versions (a fast body under guards at its
+  start), join points; effect summaries in both checkers; constants folded,
+  constant data made once; operands in written order, constant chains
+  combined; tests compiled as jumps.
+- **The native convention** (`docs/research/native-conventions.md`), steps
+  1–4 in large part: conventions in types; native frames, `bl`/`ret`;
+  code in the heap's collected code area; closures and higher-order code;
+  native and cellular code calling each other. Closures and pairs made
+  inline; one common trap, foreign call and closure call-out per machine.
+- **Tools**: `fixpt check|compile|eval INPUT` (both checkers, both
+  compilers); `sexp-edit`, `edit` included; the phase probe
+  (`probe_phases_as_register_code`), with collections and allocation by
+  word.
 
-**Known to remain**, roughly in order (details in "Progress, and what the
-queue gained", and "The next queue"):
-0. **In progress: a collected code area** ("A collected code area", below;
-   the user's, 2026-09-27): native code in a non-moving, mark-swept section
-   of the heap, so code no longer reachable is reclaimed, and code can
-   reach GC-traced fields of its own bloblet PC-relatively. Steps 1–3 and
-   4a done; the rest waits on **native code without the interpreter's
-   shape** (`docs/research/native-conventions.md`, decided with the user
-   2026-09-27): calling conventions in function types, native frames with
-   stack maps instead of the ip in step and resume tables, and seven steps
-   that replace 4b and 4c. Step 1 done (2026-09-28): conventions in both
-   checkers, `(subr (conv C) …)`, `fx`, conversions inserted by the
-   checker and `(convention C e)`. Step 2 in part: first-order procedures
-   compiled to native frames and `bl`/`ret` (`fixpt_native::direct`),
-   `fib` and `tak` about 2× register code, the identity lambda two
-   instructions; `--calling-convention native` and `,native NAME` in the
-   REPL; call-outs and inline `cons`, collecting with native frames as
-   roots (`lists` as fast as register code). Step 3 in part: the code in
-   the heap's collected code area, reclaimed when dropped. Step 4 in large
-   part: closures and higher-order code; with `--calling-convention native`
-   the REPL compiles and runs every expression as machine code; what it
-   declines runs as cellular code, and native and cellular code call each
-   other, continuations thrown past native code included. Of the test
-   programs' forms, 52 run as machine code and 49 are declined: 11 for
-   continuations and prompts (step 5), 35 because a definition's
-   initializer does not check outside its definition (generative types'
-   coercions, proved recursion; to do: compile the definition, then its
-   closure natively), 3 for procedures with no register code. Then the rest of 4, and
-   5–7. The REPL is incremental (2026-09-28), as Larceny's is: each form
-   is checked after the ones before (`check-more`) and compiled alone
-   against the globals' cells the compiler keeps; nothing is replayed.
-   With `--calling-convention native`, definitions run in the native
-   convention too: the global made by the compiler, filled with the value
-   a native thunk computes; native code reads globals through their cells
-   when it runs (but binds a cellular closure when compiling).
-   Redefinition at the REPL (2026-09-28, with the user): a global's uses
-   always refer to what it is now; one of a type every use can take keeps
-   the global; one they cannot re-runs its users, breaking those that no
-   longer check until they are defined again (the default), or keeps them
-   on the old one, or is refused, as asked. Files too (2026-09-28, the
-   user's decision): one rule, in both checkers (`top_defining`,
-   `k-defining`), which say what a form runs (`checked-tops`); a value kept
-   as it was is bound, `(define d (let ((g g)) …))`, so the REPL's choices
-   are only break or refuse (`,redefine b|r`). A procedure's calls of
-   itself by name go through its global too, as in Larceny; `letrec` binds
-   one locally (the user's, 2026-09-28). A redefinition that would close a
-   cycle through globals needs `spin` in its type. Globals are a region
-   (2026-09-28, with the user; `docs/fx26.md`): naming `g` reads `(globals
-   g)`, within `(read @globals)`; `define*` finds a procedure's globals
-   precisely; both checkers, every program, and the front end (through
-   `(read @globals)`) say so; compatibility counts what a redefinition
-   reads; a procedure whose calls read its own global says `spin`, with
-   no exception for recursion (the user's, 2026-09-28): one proved to end
-   calls itself through a local `letrec`. Deferred (the user's,
-   2026-09-28): `define-rec*`, until something motivates it; a way to name
-   a set of globals as a region may come first (`define-effect` already
-   names one as an effect). A lint finds loops written as recursion
-   (non-tail self-calls stepping only an index, `fixpt-tidy`); the front
-   end has none (2026-09-28, after an assembler overflow). A question
-   answered: an ownership bit fits in a reference's high bits.
-1. Soundness obligations: effect soundness (T3) in full, lemma erasure
+**In progress**
+- **The native convention**, the rest of step 4 (definitions whose
+  initializer does not check outside its definition), then steps 5
+  (continuations and prompts natively) to 7, which replace the collected
+  code area's steps 4b and 4c.
+- **The reader's allocation** (the user's): 18.4 → 14.5 M words to read the
+  front end; left are atoms' character lists, list marks, and closures for
+  `letrec` helpers.
+- **Lambda lifting**, evaluated in the Rust compiler only, kept in `git
+  stash` ("lambda lifting, Rust compiler only"): the check phase 18% fewer
+  words, one collection fewer, 4% faster. To keep it: the FX-26 compiler
+  too, or, later, a Twobit-style pass that rewrites the program (checkable
+  again, and printable by a `fixpt expand`).
+
+**Next**, roughly in order
+1. Code size: an immediately applied lambda as a `let`; procedures that
+   only make a closure as frameless leaves.
+2. Versions of bodies with closures; guards per segment between
+   `comefrom`s (the user's).
+3. The rest of known calls; a nursery with a write barrier; heap sizing
+   (a collection landing in a phase is a step in its time).
+4. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
-2. Sizes N5c: inequalities, "at most n" results, array bounds.
-3. The front end written in FX-26: quick wins, then the split into
+5. Sizes N5c: inequalities, "at most n" results, array bounds.
+6. The front end written in FX-26: quick wins, then the split into
    `src/fx-rsmirror/` and `src/fx-idiomatic/`.
-4. GADTs (N4, to design with the user); a top effect; the rest of
-   confirming types at run time (CF1–CF5); concurrency and actors.
-5. M13's rest, the transformations first (the user's, 2026-09-28: more
-   for the effort than fixed-width types): inlining (13f) done in part
-   (2026-09-28): a call of a small global procedure is inlined in register
-   code behind a guard that the global still holds the closure it was
-   compiled from, so a redefinition needs no recompiling (the user's
-   choice); both compilers, `docs/performance.md`; `,inliners NAME` says
-   which globals' code inlines NAME. A recursive higher-order global
-   called with a lambda at a parameter it only calls is specialized: a
-   copy made for the lambda (partial evaluation at a static argument),
-   guarded as inlining is (the user's example, `(map (lambda (x) (+ x 1))
-   xs)`, 2026-09-28); register code 24 → 19 ms on `closures`, native
-   slower until an inlined body's temporaries stay in registers. Common
-   subexpressions measured and not built (109 pure recomputations in the
-   front end, none in the benchmarks, each worth one instruction;
-   `docs/performance.md`). Done too (2026-09-28, the user's list): an
-   inlined body's temporaries and `let`s in registers where no call comes
-   between; constants propagated and folded, with inlining (the guard
-   keeps them inside it); a top-level procedure's calls of itself guarded,
-   so a tail one is a loop (`lists` 13.5 → 9.3 ms); lifting out of loops
-   measured and not built (3 in the front end's heads). Versions (the
-   user's, 2026-09-28): a body's guards all at its start, a fast version
-   assuming them (a leaf, or a loop, where it pays) and the plain one;
-   sound where the body's effect keeps no continuation for later and
-   writes no global (effect summaries, both checkers); `helpers` native
-   6.1 → 2.0 ms. To refine: guards per segment between `comefrom`s (the
-   user's), and versions of bodies with closures. Done too (2026-09-28): a
-   nested lambda compiled once, not 2^(d−1) times at depth d (the user
-   spotted it in `,disassemble-asm`); constructors of constants made once
-   while compiling (`wcell-sum`, `wcell-product`); operands in the order
-   written (register code ran `>`'s second first, a bug), a constant
-   second as an immediate and constant chains of `+` and `-` combined (the
-   user's question); tests as jumps, `and`/`or`/`not` making no boolean,
-   with a `brancht` (Twobit's `pass2if.sch`, the user's recollection). A
-   collection landing in a phase shows as a step in its time
-   (`probe_phases_as_register_code`): heap sizing is its fix. Speed is judged
-   by the native convention's code only (the user's, 2026-09-28: the
-   interpreters must not be asymptotically inefficient, but their constant
-   factors do not matter): superinstructions (13g)
-   are dropped, and so are the cell-for-cell compiled words' gaps
-   (`--cellular-machine native-compiled`, about 95 instructions for the
-   identity). Next, for native code: join points (13i), the rest of known
-   calls, a nursery with a write barrier, a lint on a lambda's size; and,
-   when the user says (2026-09-28: "don't worry about those yet"), region
-   `cons` inline natively (`lists-region`, 158 ms native against 7 in
-   register code) and cheaper captures (`captures`).
-6. Smaller: `nlist` error messages; the language gaps the survey found;
-   M8 docs and polish; M10, a full native compiler, is not scheduled.
-   (Done, 2026-09-28, the user's: `,disassemble` of a native closure
-   shows the cellular word and register code it was compiled from, each
-   code bloblet keeping its word, `CODE_SOURCE`; `,disassemble-asm` its
-   machine code.)
-7. Fixed-width integers, low priority (the user's, 2026-09-28): `i32` and
-   `u32` kept in a word's upper half (`v << 32`, a fixnum to the collector,
-   so frames stay scannable), with wrapping `+`, `-` and compare one
-   instruction each and no overflow stub, which also makes code smaller;
-   packed arrays of them in a bloblet's suffix; `i64` and `u64` only once
-   native frames have stack maps (step 3), since they need all 64 bits
-   unboxed (the problem Larceny solved for flonums by boxing).
-8. Far future: a k-CFA, for what the types do not already say.
+7. GADTs (N4, to design with the user); a top effect; confirming types
+   at run time (CF1–CF5); concurrency and actors.
+8. Smaller: `nlist` error messages; the language gaps the survey found;
+   M8 docs and polish.
+9. Fixed-width integers, low priority: `i32`/`u32` in a word's upper
+   half, wrapping arithmetic; `i64`/`u64` once frames have stack maps.
+10. Far future: a k-CFA, for what the types do not already say.
+
+**Decided against, or waiting on the user**
+- Speed is judged by native code only (the user's, 2026-09-28):
+  superinstructions (13g) are dropped, and so are the cell-for-cell
+  compiled words' gaps. Interpreters must still not be asymptotically
+  slow.
+- Measured and not built: common subexpressions (109 in the front end,
+  none in the benchmarks), lifting out of loops (3).
+- Waiting on the user ("don't worry about those yet"): region `cons`
+  inline natively (`lists-region`), cheaper captures. Deferred:
+  `define-rec*`. Not scheduled: M10, a full native compiler.
 
 **Unknown**
 - Whether code free of `spin` always ends: T5 is conjectured, and false
@@ -159,8 +94,16 @@ queue gained", and "The next queue"):
 - How GADTs should meet subtyping, what regions a top effect covers, and
   which of the two front ends bootstraps: each needs a decision with the
   user.
-- Older items may still be done but unmarked; §11's items 1–3 were, and
-  are now marked. When one is found, mark it where it is written.
+- Older items may still be done but unmarked; when one is found, mark it
+  where it is written.
+
+**Contents** (the plan as it grew): §0 What this is; §1 Findings from the
+archive; §2 Architecture; §3 The core runtime; §4 The core Scheme engine;
+§5 FX-87; §6 FX-91; §7 Conformance harness; §8 Milestones; §9 Risks; §10
+Decisions (2026-09-20); §11 M12, with its phases, "After M12", "M13
+plan", "The queue", "The next queue", "Progress, and what the queue
+gained", "A collected code area", "Kept open, deliberately" and
+"Decisions (2026-09-25)"; then "Log: the glance's details".
 
 ## 0. What this is
 
@@ -1798,3 +1741,131 @@ should fragmentation call for moving code.
 a sequence of cells (references to routines, and their operands), run by an inner
 interpreter. This repository says "cellular" throughout (the user's decision,
 2026-09-27).
+
+## Log: the glance's details (moved here 2026-09-28)
+
+The glance's long entries, as they stood on 2026-09-28, when it was cut
+down to a summary. Newest work is also in `docs/performance.md`.
+
+**The collected code area, the native convention, the REPL and globals**
+(was item 0):
+
+**In progress: a collected code area** ("A collected code area", below;
+   the user's, 2026-09-27): native code in a non-moving, mark-swept section
+   of the heap, so code no longer reachable is reclaimed, and code can
+   reach GC-traced fields of its own bloblet PC-relatively. Steps 1–3 and
+   4a done; the rest waits on **native code without the interpreter's
+   shape** (`docs/research/native-conventions.md`, decided with the user
+   2026-09-27): calling conventions in function types, native frames with
+   stack maps instead of the ip in step and resume tables, and seven steps
+   that replace 4b and 4c. Step 1 done (2026-09-28): conventions in both
+   checkers, `(subr (conv C) …)`, `fx`, conversions inserted by the
+   checker and `(convention C e)`. Step 2 in part: first-order procedures
+   compiled to native frames and `bl`/`ret` (`fixpt_native::direct`),
+   `fib` and `tak` about 2× register code, the identity lambda two
+   instructions; `--calling-convention native` and `,native NAME` in the
+   REPL; call-outs and inline `cons`, collecting with native frames as
+   roots (`lists` as fast as register code). Step 3 in part: the code in
+   the heap's collected code area, reclaimed when dropped. Step 4 in large
+   part: closures and higher-order code; with `--calling-convention native`
+   the REPL compiles and runs every expression as machine code; what it
+   declines runs as cellular code, and native and cellular code call each
+   other, continuations thrown past native code included. Of the test
+   programs' forms, 52 run as machine code and 49 are declined: 11 for
+   continuations and prompts (step 5), 35 because a definition's
+   initializer does not check outside its definition (generative types'
+   coercions, proved recursion; to do: compile the definition, then its
+   closure natively), 3 for procedures with no register code. Then the rest of 4, and
+   5–7. The REPL is incremental (2026-09-28), as Larceny's is: each form
+   is checked after the ones before (`check-more`) and compiled alone
+   against the globals' cells the compiler keeps; nothing is replayed.
+   With `--calling-convention native`, definitions run in the native
+   convention too: the global made by the compiler, filled with the value
+   a native thunk computes; native code reads globals through their cells
+   when it runs (but binds a cellular closure when compiling).
+   Redefinition at the REPL (2026-09-28, with the user): a global's uses
+   always refer to what it is now; one of a type every use can take keeps
+   the global; one they cannot re-runs its users, breaking those that no
+   longer check until they are defined again (the default), or keeps them
+   on the old one, or is refused, as asked. Files too (2026-09-28, the
+   user's decision): one rule, in both checkers (`top_defining`,
+   `k-defining`), which say what a form runs (`checked-tops`); a value kept
+   as it was is bound, `(define d (let ((g g)) …))`, so the REPL's choices
+   are only break or refuse (`,redefine b|r`). A procedure's calls of
+   itself by name go through its global too, as in Larceny; `letrec` binds
+   one locally (the user's, 2026-09-28). A redefinition that would close a
+   cycle through globals needs `spin` in its type. Globals are a region
+   (2026-09-28, with the user; `docs/fx26.md`): naming `g` reads `(globals
+   g)`, within `(read @globals)`; `define*` finds a procedure's globals
+   precisely; both checkers, every program, and the front end (through
+   `(read @globals)`) say so; compatibility counts what a redefinition
+   reads; a procedure whose calls read its own global says `spin`, with
+   no exception for recursion (the user's, 2026-09-28): one proved to end
+   calls itself through a local `letrec`. Deferred (the user's,
+   2026-09-28): `define-rec*`, until something motivates it; a way to name
+   a set of globals as a region may come first (`define-effect` already
+   names one as an effect). A lint finds loops written as recursion
+   (non-tail self-calls stepping only an index, `fixpt-tidy`); the front
+   end has none (2026-09-28, after an assembler overflow). A question
+   answered: an ownership bit fits in a reference's high bits.
+
+**The compilers, and smaller items** (were items 5–7):
+
+5. M13's rest, the transformations first (the user's, 2026-09-28: more
+   for the effort than fixed-width types): inlining (13f) done in part
+   (2026-09-28): a call of a small global procedure is inlined in register
+   code behind a guard that the global still holds the closure it was
+   compiled from, so a redefinition needs no recompiling (the user's
+   choice); both compilers, `docs/performance.md`; `,inliners NAME` says
+   which globals' code inlines NAME. A recursive higher-order global
+   called with a lambda at a parameter it only calls is specialized: a
+   copy made for the lambda (partial evaluation at a static argument),
+   guarded as inlining is (the user's example, `(map (lambda (x) (+ x 1))
+   xs)`, 2026-09-28); register code 24 → 19 ms on `closures`, native
+   slower until an inlined body's temporaries stay in registers. Common
+   subexpressions measured and not built (109 pure recomputations in the
+   front end, none in the benchmarks, each worth one instruction;
+   `docs/performance.md`). Done too (2026-09-28, the user's list): an
+   inlined body's temporaries and `let`s in registers where no call comes
+   between; constants propagated and folded, with inlining (the guard
+   keeps them inside it); a top-level procedure's calls of itself guarded,
+   so a tail one is a loop (`lists` 13.5 → 9.3 ms); lifting out of loops
+   measured and not built (3 in the front end's heads). Versions (the
+   user's, 2026-09-28): a body's guards all at its start, a fast version
+   assuming them (a leaf, or a loop, where it pays) and the plain one;
+   sound where the body's effect keeps no continuation for later and
+   writes no global (effect summaries, both checkers); `helpers` native
+   6.1 → 2.0 ms. To refine: guards per segment between `comefrom`s (the
+   user's), and versions of bodies with closures. Done too (2026-09-28): a
+   nested lambda compiled once, not 2^(d−1) times at depth d (the user
+   spotted it in `,disassemble-asm`); constructors of constants made once
+   while compiling (`wcell-sum`, `wcell-product`); operands in the order
+   written (register code ran `>`'s second first, a bug), a constant
+   second as an immediate and constant chains of `+` and `-` combined (the
+   user's question); tests as jumps, `and`/`or`/`not` making no boolean,
+   with a `brancht` (Twobit's `pass2if.sch`, the user's recollection). A
+   collection landing in a phase shows as a step in its time
+   (`probe_phases_as_register_code`): heap sizing is its fix. Speed is judged
+   by the native convention's code only (the user's, 2026-09-28: the
+   interpreters must not be asymptotically inefficient, but their constant
+   factors do not matter): superinstructions (13g)
+   are dropped, and so are the cell-for-cell compiled words' gaps
+   (`--cellular-machine native-compiled`, about 95 instructions for the
+   identity). Next, for native code: join points (13i), the rest of known
+   calls, a nursery with a write barrier, a lint on a lambda's size; and,
+   when the user says (2026-09-28: "don't worry about those yet"), region
+   `cons` inline natively (`lists-region`, 158 ms native against 7 in
+   register code) and cheaper captures (`captures`).
+6. Smaller: `nlist` error messages; the language gaps the survey found;
+   M8 docs and polish; M10, a full native compiler, is not scheduled.
+   (Done, 2026-09-28, the user's: `,disassemble` of a native closure
+   shows the cellular word and register code it was compiled from, each
+   code bloblet keeping its word, `CODE_SOURCE`; `,disassemble-asm` its
+   machine code.)
+7. Fixed-width integers, low priority (the user's, 2026-09-28): `i32` and
+   `u32` kept in a word's upper half (`v << 32`, a fixnum to the collector,
+   so frames stay scannable), with wrapping `+`, `-` and compare one
+   instruction each and no overflow stub, which also makes code smaller;
+   packed arrays of them in a bloblet's suffix; `i64` and `u64` only once
+   native frames have stack maps (step 3), since they need all 64 bits
+   unboxed (the problem Larceny solved for flonums by boxing).
