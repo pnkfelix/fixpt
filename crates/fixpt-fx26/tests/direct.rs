@@ -488,6 +488,11 @@ fn native_session_adapters_aborts_and_stack_maps() {
     // Deep recursion, under those collections too.
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/deep.fx")).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["500000500000".to_string()], vec![]), "deep");
+    // Variadic procedures, the count in a register, under those collections
+    // too: none left as cellular code.
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/variadic.fx")).expect("reads");
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    assert_eq!((values, fell), (vec!["60".into(), "1019".into(), "4140000".into()], vec![]), "variadic");
 }
 
 /// `run_native`, collecting every 97 safepoints while the native code runs

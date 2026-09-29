@@ -57,7 +57,8 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
         let many = |v: Value| count(v, 1 << 16);
         let ok = match name {
             "args" => i == 0 && many(o(0)),
-            _ if i == 0 => return Err("register code begins `args n`".into()),
+            "vargs" => i == 0,
+            _ if i == 0 => return Err("register code begins `args n` or `vargs`".into()),
             "reg" => count(o(0), n),
             "setreg" => reg(o(0)),
             "movereg" => count(o(0), n) && reg(o(1)),

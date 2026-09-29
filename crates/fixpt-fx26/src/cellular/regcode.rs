@@ -97,6 +97,9 @@ enum Std {
     Set,
     /// Arrays, the tag and key makers: several instructions (`r_app`).
     Special(&'static str),
+    /// `(apply f xs)`: `f` a `vsubr`, a closure of `%vlambda`'s over the
+    /// procedure of one list, free value 0; that procedure, called with `xs`.
+    Apply,
 }
 
 struct Gen {
@@ -401,6 +404,7 @@ impl Compiler<'_> {
             ("set-car!", 2) => Some(Std::Special("set-car!")),
             ("set-cdr!", 2) => Some(Std::Special("set-cdr!")),
             ("make-continuation-prompt-tag" | "make-continuation-mark-key", 0) => Some(Std::Special("make-box")),
+            ("apply", 2) => Some(Std::Apply),
             _ => {
                 // What the cellular compiler does with one runtime
                 // primitive, register code does too.
@@ -1096,6 +1100,27 @@ impl Compiler<'_> {
                     g.op("const", &[u]);
                 }
                 Std::Special(what) => self.r_special(g, what, args, env, te)?,
+                Std::Apply => {
+                    if g.leaf {
+                        return self.decline("a call in a leaf");
+                    }
+                    // `f` and `xs` in order; `f`'s procedure kept in a slot
+                    // while `xs` moves to REG1.
+                    let (regs, slots) = (g.next_reg, g.next_slot);
+                    let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+                    self.r_args(g, &es, env, te, None)?;
+                    let s = g.slot();
+                    g.op("reg", &[Gen::n(1)]);
+                    g.op("field", &[Value::fixnum(super::CLOSURE_FREE0 as i64)]);
+                    g.op("setstk", &[Gen::n(s)]);
+                    g.op("reg", &[Gen::n(2)]);
+                    g.op("setreg", &[Gen::n(1)]);
+                    g.op("stack", &[Gen::n(s)]);
+                    self.r_invoke(g, 1, tail);
+                    g.next_reg = regs;
+                    g.next_slot = slots;
+                    return Some(());
+                }
             }
             g.done(tail);
             return Some(());

@@ -995,9 +995,13 @@ prims! {
     // FX-26's `vlambda` (`%vlambda`): `f`, a procedure of one list, as a
     // variadic one, a cellular closure over `f` of the word `rest; free 0;
     // ttailcall 1`: however many arguments it is called with (the frame's
-    // count), their list, given to `f` in its place.
+    // count), their list, given to `f` in its place. Its register code, for
+    // native code, which passes the count in a register at every call:
+    // `vargs; save 0; cellular rest 0; setreg 1; lexical 0; pop 0;
+    // tailinvoke 1`.
     "%fx26-vlambda", 1, Some(1), simple!(|rt, a| {
-        use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD};
+        use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD, WORD_TWIN};
+        use fixpt_heap::layout::regcode::op;
         let f = |n: u64| Value::fixnum(n as i64);
         let cells = [f(routine("rest")), f(routine("free")), Value::fixnum(0), f(routine("ttailcall")), Value::fixnum(1)];
         let name = rt.heap.intern("vlambda");
@@ -1005,6 +1009,16 @@ prims! {
             Ok(w) => w,
             Err(e) => return rt.fail(&e, &[a[0]]),
         };
+        let o = |n: &str| Value::fixnum(op(n) as i64);
+        let (zero, one) = (Value::fixnum(0), Value::fixnum(1));
+        let regs = [
+            o("vargs"), o("save"), zero, o("cellular"), f(routine("rest")), zero, o("setreg"), one,
+            o("lexical"), zero, o("pop"), zero, o("tailinvoke"), one,
+        ];
+        match rt.heap.make_register_word(name, word, &regs) {
+            Ok(rw) => rt.heap.set_bloblet_slot(word, WORD_TWIN, rw),
+            Err(e) => return rt.fail(&e, &[a[0]]),
+        }
         let c = rt.heap.make_bloblet(fixpt_heap::layout::kind("cellular-closure"), 2, 0, true);
         rt.heap.set_bloblet_slot(c, CLOSURE_WORD, word);
         rt.heap.set_bloblet_slot(c, CLOSURE_FREE0, a[0]);

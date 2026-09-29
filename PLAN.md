@@ -107,6 +107,17 @@ are in the last section, "Log: the glance's details", and in
   explicitly, `(proj head int 0)` is refused. Fixed (2026-09-29, F10):
   inference solved `n = -1`; a solved size must now be shown no less
   than 0 by the facts in scope, in both checkers (`sizes/solved-*.fx`).
+- **Variadic procedures, then `list`** (the user's order, 2026-09-29):
+  `vsubr`, `vlambda` and `apply` in both checkers, the lowering, and
+  every machine, natively with the count in `x9`. Next: `list` in the
+  standard library, then the code and benchmarks rewritten to use it
+  (perhaps with a lint for `(cons A (cons B … nil))`).
+- **`.fx` size limits** (the user's, 2026-09-29): 1000 lines and 100
+  characters, met by extracting subroutines and splitting files, never by
+  re-wrapping (`fixpt_tidy::fx_size`, debt in `fx-size-debt.txt`). The
+  checker, the compilers and register code are within both. Left: the
+  reader, parser, evaluator, native code generator and test programs.
+  Later: a lint for indentation (`TODO.md` §16).
 
 **Next**, roughly in order. First the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
@@ -1983,10 +1994,11 @@ library.
 (the user's choice, Larceny's way, so that `apply` spreads a list). Done:
 both checkers (`vsubr` generative type 0, variadic calls, `vlambda` read as
 `%vlambda` of a one-list lambda), the lowering (Scheme's), and every
-machine through a cellular wrapper and the routine `rest`
-(`docs/fx26.md`, "Variadic procedures"). To do: `vlambda` bodies as
-native code, entered with the count in a register at every native call;
-a standard `list`; fixed parameters before the rest.
+machine through a cellular wrapper and the routine `rest`; natively (same
+day), the wrapper's register twin begins `vargs`, and every native call
+passes its count in `x9`; `apply` in both register compilers
+(`docs/fx26.md`, "Variadic procedures"). To do: a standard `list`; fixed
+parameters before the rest.
 
 **Q3. Telemetry, stage 1** (`docs/research/telemetry.md`): fix the counts
 first. Done (2026-09-29): minor collections counted with major ones

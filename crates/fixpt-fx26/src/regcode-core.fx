@@ -217,9 +217,11 @@
                (let ((name (r-standard-name env f)))
                  (if (string=? name "")
                      (r-call g f args env te tail)
-                     (if (and tail (and (string=? name "with-mark") (= n 3)))
-                         (r-withmark-tail g args env te)
-                         (begin (r-standard-app g name args env te tail) (r-done g tail))))))))))
+                     (cond ((and tail (and (string=? name "with-mark") (= n 3)))
+                            (r-withmark-tail g args env te))
+                           ((and (string=? name "apply") (= n 2)) (r-apply g args env te tail))
+                           (else (begin (r-standard-app g name args env te tail)
+                                        (r-done g tail)))))))))))
   (r-standard-app (subr rcompiles (rgen string exps renv cenv bool) unit)
     (lambda (g name args env te tail)
       (tagcase (r-standard name (c-count-exps args))
@@ -265,6 +267,8 @@
                 (r-decline)
                 (begin (r-opnn g rop-setfield 2 (car k)) (r-unit g)))))
         (s-special (what) (r-special g what args env te))
+        ;; (`r-apply`'s, which `r-app` calls.)
+        (s-apply () (r-decline))
         (s-none () (r-decline)))))
   ;; In tail position a mark replaces this frame's, as stack code's
   ;; `withmark-tail` does: the arguments made, the frame left, and the
@@ -278,6 +282,22 @@
       ;; Never reached (the call-out goes on in the thunk): register code
       ;; ends each path so.
       (r-op0 g rop-return))))
+  ;; `(apply f xs)`: `f` a `vsubr`, a closure of `%vlambda`'s over the
+  ;; procedure of one list, free value 0; that procedure, called with `xs`.
+  ;; `f` and `xs` in order; `f`'s procedure kept in a slot while `xs` moves
+  ;; to REG1.
+  (r-apply (subr rcompiles (rgen exps renv cenv bool) unit)
+    (lambda (g args env te tail)
+      (if (extract g leaf)
+          (r-decline)
+          (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
+            (begin
+              (r-exp-args-into g args env te)
+              (let ((s (r-slot g)))
+                (begin (r-opn g rop-reg 1) (r-opn g rop-field cellular-closure-free0)
+                       (r-opn g rop-setstk s) (r-opn g rop-reg 2) (r-opn g rop-setreg 1)
+                       (r-opn g rop-stack s) (r-invoke g 1 tail)))
+              (r-restore g regs slots))))))
   ;; A call: the arguments into REG1…REGn, the procedure in RESULT.
   (r-call (subr rcompiles (rgen exp exps renv cenv bool) unit)
     (lambda (g f args env te tail)

@@ -945,6 +945,13 @@ impl NativeMachine {
         if !heap.is_register_word(rw) || heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum() != 0 {
             return Ok(false);
         }
+        // A variadic procedure's register code (`vargs`) is for native code,
+        // which passes the count in a register; here, its stack code, which
+        // finds the count from its frame.
+        if heap.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == fixpt_heap::layout::regcode::op("vargs") {
+            self.compile_word(heap, word)?;
+            return Ok(true);
+        }
         let (code, _) = assemble_register_word(heap, rw, [0, 0])?;
         let (at, far) = self.reserve(code.len())?;
         let (code, resume) = assemble_register_word(heap, rw, far)?;

@@ -186,4 +186,7 @@
 ;; after it; RESULT kept
 (define rop-global-guard int 28)
 (define rop-brancht int 29)  ; 1: the same as branch if RESULT is not #f
+;; 0: entered with any number of arguments, their count in a register (x9, natively), in REG1…REGn
+;; (past REGS, a list of the rest in the last); first, instead of args, and only first
+(define rop-vargs int 30)
 (define register-regs int 8)

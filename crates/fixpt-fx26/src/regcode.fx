@@ -103,6 +103,8 @@
   (s-set)
   ;; Arrays, the tag and key makers: several instructions.
   (s-special string)
+  ;; `(apply f xs)`: a call, of `f`'s procedure of one list (`r-apply`).
+  (s-apply)
   (s-none))
 
 ;; What is being made: the items, newest first; whether a leaf; the next
@@ -441,6 +443,7 @@
             ((is "array-set!" 3) (s-special "array-set!"))
             ((is "array-length" 1) (s-special "array-length"))
             ((is "make-array" 2) (s-special "make-array"))
+            ((is "apply" 2) (s-apply))
             ((and (r-box-name? name) (= n 0)) (s-special "make-box"))
             ;; What the cellular compiler does as one runtime primitive
             ;; (`c-standard-on`), register code does too.

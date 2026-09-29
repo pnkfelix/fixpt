@@ -185,6 +185,9 @@ enum Callout {
     CurrentMarks,
     /// `marks-of`: those a continuation took.
     MarksOf,
+    /// `rest`: the list of the arguments a variadic procedure was called
+    /// with, which its `vargs` put in the state.
+    Rest,
 }
 
 impl Callout {
@@ -193,7 +196,7 @@ impl Callout {
             Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
             Callout::Capture { whole } => if whole { 1 } else { 2 },
             Callout::CurrentMarks => 1,
-            Callout::Foreign | Callout::ClosureAny => 0,
+            Callout::Foreign | Callout::ClosureAny | Callout::Rest => 0,
             Callout::Prim { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
     }
@@ -601,7 +604,9 @@ impl DirectMachine {
 /// its call-outs allocate in, on `r`'s machine's stack from `top` down.
 fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64, top: u64) -> Result<Value, DirectTrap> {
     assert!(p.arity == usize::MAX || args.len() == p.arity, "the procedure's arity");
-    // Past 8, the eighth a list of the rest (Larceny's convention).
+    // The count, for a variadic procedure; past 8, the eighth a list of
+    // the rest (Larceny's convention).
+    let count = args.len() as u64;
     let packed;
     let args = if args.len() > 8 {
         let rest = rt.heap.list_from(&args[7..]);
@@ -628,6 +633,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     for (i, a) in args.iter().enumerate() {
         st.args[i] = a.raw();
     }
+    st.nargs = count;
     st.code = p.code.raw();
     st.clo = p.closure.raw();
     let target = rt.heap.code_exec_address(p.code) as u64;
@@ -682,6 +688,8 @@ fn trampoline() -> Vec<u32> {
     for k in 0..4 {
         a.e(ldp(1 + 2 * k, 2 + 2 * k, ST, args + 16 * k as i64));
     }
+    // The count, for a variadic procedure (`vargs`).
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, nargs))));
     a.e(blr(X16));
     a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
     leave(&mut a);
@@ -853,7 +861,9 @@ impl Compiling<'_> {
         if !h.is_register_word(rw) {
             return Err(format!("`{}` has no register code", self.name(word)));
         }
-        let arity = h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;
+        // A variadic procedure's (`vargs`) arity is none: any number.
+        let variadic = h.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == fixpt_heap::layout::regcode::op("vargs");
+        let arity = if variadic { usize::MAX } else { h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize };
         let p = self.procs.len();
         self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0, global: false });
         self.by_word.insert(word.raw(), p);
@@ -1095,6 +1105,15 @@ impl Compiling<'_> {
             let reg = |v: Value| v.as_fixnum() as Reg;
             match op {
                 "args" => {}
+                // Entered with any number of arguments, their count in X9:
+                // it and the registers into the state, for `rest` to list.
+                "vargs" => {
+                    a.e(str(X9, ST, st_off(offset_of!(DState, nargs))));
+                    let args = offset_of!(DState, args) as u32;
+                    for j in 0..8u32 {
+                        a.e(str(1 + j as Reg, ST, args + 8 * j));
+                    }
+                }
                 "const" => {
                     let v = o(0);
                     if v.is_fixnum() || v.raw() & 7 == 3 {
@@ -1519,6 +1538,7 @@ impl Compiling<'_> {
                             Callout::Closure { n: k(o(1)) }
                         }
                         ("cellular", Some("cons")) if k(o(1)) == 2 => Callout::Cons,
+                        ("cellular", Some("rest")) if k(o(1)) == 0 => Callout::Rest,
                         ("cellular", Some("field@")) if k(o(1)) == 2 => Callout::FieldRef,
                         ("prim", _) => match fixpt_runtime::PRIMITIVES.get(k(o(0))) {
                             Some(d) if d.name == "%region-closure" => Callout::RegionClosure { n: k(o(1)) },
@@ -1676,6 +1696,9 @@ impl Compiling<'_> {
                             foreign.push((stub, after, k(o(0)), tail));
                         }
                     }
+                    // The count, for a variadic callee (`vargs`), Larceny's
+                    // way: every call passes it.
+                    a.e(movz(X9, k(o(0)) as u32, 0));
                     a.e(add(X16, X16, DELTA));
                     a.e(if tail { br(X16) } else { blr(X16) });
                     a.bind(after);
@@ -1790,7 +1813,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let st = unsafe { &mut *st };
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
-    let n = if let Callout::Foreign | Callout::ClosureAny = c { st.nargs as usize } else { c.arity() };
+    let n = if let Callout::Foreign | Callout::ClosureAny | Callout::Rest = c { st.nargs as usize } else { c.arity() };
     // Past 8, the eighth is a list of the rest (Larceny's convention).
     let mut args: Vec<Value> = st.args[..n.min(8)].iter().map(|a| Value(*a)).collect();
     if n > 8 {
@@ -1895,6 +1918,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             }
         }
         Callout::Reinstate => reinstate(rt, st, args[1], args[0]),
+        Callout::Rest => rt.heap.list_from(&args).raw(),
         Callout::FirstMark => {
             let found = frames_of(st).into_iter().find(|&(fp, end)| is_control(fp, end, MARK_MARK, args[0]));
             found.map_or(args[1], |(fp, _)| Value(word(fp + 32))).raw()
