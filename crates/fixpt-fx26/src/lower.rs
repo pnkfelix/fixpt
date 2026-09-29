@@ -40,8 +40,9 @@ use std::collections::HashMap;
 /// the Scheme name does — in which case, if the engine has it as a
 /// primitive, an application may be claimed `integrable`.
 pub const STANDARD: &[(&str, &str, bool)] = &[
-    ("+", "+", true),
-    ("-", "-", true),
+    // Overflow past a fixnum traps, as on every machine (PLAN.md, Q2).
+    ("+", "%fx26-add", true),
+    ("-", "%fx26-sub", true),
     ("length", "length", true),
     ("=", "=", true),
     ("cons", "cons", true),
@@ -64,7 +65,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     (">", ">", true),
     ("<=", "<=", true),
     (">=", ">=", true),
-    ("*", "*", true),
+    ("*", "%fx26-mul", true),
     ("modulo", "modulo", true),
     ("quotient", "quotient", true),
     ("not", "not", true),

@@ -334,7 +334,7 @@
             ((or (is "set-car!" 2) (is "set-cdr!" 2)) (s-special name))
             ((string=? name "new") (r-prim-std "%make-box" n 1))
             ((string=? name "char->string") (r-prim-std "string" n 1))
-            ((or (string=? name "*") (string=? name "modulo") (string=? name "quotient")
+            ((or (string=? name "modulo") (string=? name "quotient")
                  (string=? name "char->integer") (string=? name "integer->char") (string=? name "string-append")
                  (string=? name "string-length") (string=? name "string-ref") (string=? name "substring")
                  (string=? name "string=?") (string=? name "string->symbol") (string=? name "symbol->string"))

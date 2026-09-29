@@ -1922,9 +1922,13 @@ limbs `u32` computed in `u64`, so it never overflows into bignums itself
 machines' overflow paths call it, and big literals are built as constants.
 The lowered path keeps the Scheme engine's bignums, an oracle for the
 library.
-- Lowering and every machine agree now: overflow traps everywhere
-  (lower `+ - *` to overflow-checked primitives), with a test that
-  overflows on purpose. Then:
+- Done (2026-09-29): lowering and every machine agree: overflow traps
+  everywhere. `+ - *` lower to `%fx26-add`/`-sub`/`-mul`, which fail
+  "integer overflow" past a fixnum (the lowered path promoted to a
+  bignum); the machines' `*`, which called the generic `*` and promoted
+  too, is `%fx26-mul`. Test `overflow_traps_on_every_machine`. The
+  lowered column of `fixpt bench` got faster (fixnum primitives, not the
+  generic ones). Then:
 - `int` as a bignum: the fixnum fast path stays one `adds` and a branch;
   the branch goes to a call-out that makes or uses a bignum (the Scheme
   engine's `N::Big` and `num_bigint`) instead of trapping. Comparison,

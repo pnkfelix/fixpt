@@ -1338,7 +1338,7 @@ impl<'a> Compiler<'a> {
                 self.int(code, 1);
                 self.op(code, "int-sub");
             }
-            "*" | "modulo" | "quotient" | "char->integer" | "integer->char" | "string-append" | "string-length"
+            "modulo" | "quotient" | "char->integer" | "integer->char" | "string-append" | "string-length"
             | "string-ref" | "substring" | "string=?" | "string->symbol" | "symbol->string" => self.prim(code, name, n)?,
             // The rest, as the lowering runs them: a runtime primitive, or
             // nothing at all.

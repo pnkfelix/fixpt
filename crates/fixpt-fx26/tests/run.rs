@@ -75,12 +75,12 @@ fn a_run_time_error_is_reported_as_one() {
     assert!(v.starts_with("!! "), "{v}");
 }
 
-/// What the checker proved rides along: the standard `+` is integrable and
-/// its application pure; a private cell's allocation does not escape.
+/// What the checker proved rides along: the standard `+` is integrable (as
+/// `%fx26-add`, which fails past a fixnum) and its application pure; a private cell's allocation does not escape.
 #[test]
 fn the_checkers_facts_are_in_the_lowered_code() {
     let c = code("(+ 1 2)");
-    assert!(c.contains("(integrable +)") && c.contains("(pure)"), "{c}");
+    assert!(c.contains("(integrable %fx26-add)") && c.contains("(pure)"), "{c}");
     assert!(c.contains("(basis checked)"), "{c}");
     let c = code("(let ((r (new 1))) (get r))");
     assert!(c.contains("(no-escape)"), "{c}");

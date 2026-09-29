@@ -119,6 +119,15 @@ fn int(rt: &mut Runtime, v: Value) -> Outcome<i64> {
     rt.type_error("an exact integer that fits a machine word", v)
 }
 
+/// `op` on two fixnums, a fixnum or "integer overflow".
+fn fx26_arith(rt: &mut Runtime, a: &[Value], op: fn(i64, i64) -> Option<i64>) -> Outcome<Value> {
+    let (x, y) = (int(rt, a[0])?, int(rt, a[1])?);
+    match op(x, y).and_then(Value::try_fixnum) {
+        Some(v) => Ok(v),
+        None => rt.fail("integer overflow", &[a[0], a[1]]),
+    }
+}
+
 /// A radix, 2 to 36.
 fn radix(rt: &mut Runtime, v: Value) -> Outcome<u32> {
     match int(rt, v)? {
@@ -752,6 +761,11 @@ prims! {
         let s = get_string(rt, a[1])?;
         Ok(Value::boolean(s.contains(c)))
     });
+    // FX-26's `+`, `-` and `*`: on fixnums, and failing past them ("integer
+    // overflow"), as every machine's code does (PLAN.md, Q2).
+    "%fx26-add", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_add));
+    "%fx26-sub", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_sub));
+    "%fx26-mul", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_mul));
     // FX-26's `parse-number`: the number `a[0]` spells in radix `a[1]`
     // (2 to 36), sign and all, in a list; or none.
     "%fx26-parse-number", 2, Some(2), simple!(|rt, a| {
