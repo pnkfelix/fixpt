@@ -14,6 +14,5 @@ exempt crates/fixpt-fx26/tests/programs/native/wide-frame.fx
 exempt crates/fixpt-fx26/tests/programs/terminate/deep-self-application.fx
 
 # In debt: path, lines, lines over 100 columns.
-crates/fixpt-fx26/src/eager-reader.fx                                 678   50
 crates/fixpt-fx87/src/standard.fx                                     245   57
 crates/fixpt-fx91/src/fx-module.fx                                    380    1

@@ -114,9 +114,10 @@ are in the last section, "Log: the glance's details", and in
   rewritten to use it (perhaps with a lint for `(cons A (cons B … nil))`).
 - **`.fx` size limits** (the user's, 2026-09-29): 1000 lines and 100
   characters, met by extracting subroutines and splitting files, never by
-  re-wrapping (`fixpt_tidy::fx_size`, debt in `fx-size-debt.txt`). The
-  checker, the compilers and register code are within both. Left: the
-  reader, parser, evaluator, native code generator and test programs.
+  re-wrapping (`fixpt_tidy::fx_size`, debt in `fx-size-debt.txt`). Every
+  hand-written `.fx` file is within both: the front end, the test programs
+  and the examples. Left in debt: two generated files (FX-87's
+  `standard.fx`, FX-91's `fx-module.fx`), whose generators need changing.
   Later: a lint for indentation (`TODO.md` §16).
 
 **Next**, roughly in order. First the queue in "The queue after the

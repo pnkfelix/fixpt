@@ -75,6 +75,9 @@ fn it_agrees_with_the_rust_reader_on_data() {
 #[test]
 fn it_agrees_on_whole_files() {
     let mut s = session(Backend::Bytecode);
+    // This reader's source, fed one character at a time, is past the
+    // default limit's steps.
+    s.set_step_limit(Some(4 * fixpt_fx26::session::DEFAULT_STEP_LIMIT));
     let forms = if cfg!(feature = "gc-stress") { 4 } else { usize::MAX };
     agree(&mut s, leading_forms(fixpt_scheme::eager::SOURCE, forms));
     agree(&mut s, leading_forms(fixpt_fx26::EAGER_READER, forms));
@@ -210,6 +213,8 @@ fn rust_fx26(text: &str) -> String {
 #[test]
 fn it_reads_fx26_as_the_rust_reader_does() {
     let mut s = session(Backend::Bytecode);
+    // This reader's own source is past the default limit's steps.
+    s.set_step_limit(Some(4 * fixpt_fx26::session::DEFAULT_STEP_LIMIT));
     let sources = [
         "(f #u #u8(1 2) #t #f Foo) #| c |# #;(gone) (g #\\a)",
         include_str!("programs/bidirectional/twice.fx"),
