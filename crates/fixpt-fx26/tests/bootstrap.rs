@@ -688,7 +688,7 @@ fn probe_phases_as_register_code() {
             gcs = now;
             t = std::time::Instant::now();
         };
-        // With `FIXPT_PROFILE_PHASE` naming a phase (`read`, `compile`), that
+        // With `FIXPT_PROFILE_PHASE` naming a phase (`read`, `check`, `compile`), that
         // phase on the Rust machine, counting cells and words allocated by
         // word: its work, whatever its code.
         let phase = std::env::var("FIXPT_PROFILE_PHASE").unwrap_or_default();
@@ -707,8 +707,10 @@ fn probe_phases_as_register_code() {
         let parsed = run(sc, parse, &[syns]);
         lap(sc, "parse");
         let progs = sc.make(|m| { let r = m.get(parsed); let p = m.heap().bloblet_slot(r, 3); m.heap().bloblet_slot(p, 2) });
+        profile_from(sc, "check");
         run(sc, check, &[std, progs]);
         lap(sc, "check");
+        profile_from(sc, "");
         let facts = run(sc, extracts, &[]);
         profile_from(sc, "compile");
         let _ = run(sc, compile, &[progs, facts]);
@@ -717,7 +719,7 @@ fn probe_phases_as_register_code() {
             for (what, top) in [("cells", LAST_PROFILE.with(|p| p.borrow().clone())), ("words allocated", LAST_ALLOCATING.with(|p| p.borrow().clone()))] {
                 let total: u64 = top.iter().map(|(_, n)| n).sum();
                 eprintln!("{phase}: {total} {what}, by word");
-                for (w, n) in top.iter().take(20) {
+                for (w, n) in top.iter().take(if std::env::var_os("FIXPT_PROFILE_ALL").is_some() { usize::MAX } else { 20 }) {
                     let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();
                     eprintln!("{n:>12}  {w} {at}");
                 }
