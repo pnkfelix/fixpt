@@ -12,7 +12,8 @@
       (lambda (k) (abort-current-continuation g (product (v x) (k k))))
       g)))
 
-(define for-each (poly ((e effect)) (subr (maxeff e spin (read @l)) ((subr e (int) unit) (listof int @l)) unit))
+(define for-each
+  (poly ((e effect)) (subr (maxeff e spin (read @l)) ((subr e (int) unit) (listof int @l)) unit))
   (plambda ((e effect))
     (lambda (f xs)
       (letrec ((go (subr (maxeff e spin (read @l)) ((listof int @l)) unit)

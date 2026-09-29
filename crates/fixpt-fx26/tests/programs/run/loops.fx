@@ -25,11 +25,12 @@
       (go (lambda ((x int)) (+ x 1)) n))))
 
 ;; A procedure that also escapes, as a value: boxed, its tail calls still loops.
-(define twice (subr (maxeff spin (read (globals twice))) ((subr (maxeff spin (read (globals twice))) (int int) int) int int) int)
+(define-effect calls-twice (maxeff spin (read (globals twice))))
+(define twice (subr calls-twice ((subr calls-twice (int int) int) int int) int)
   (lambda (g i a) (g i a)))
 (define* escapes (subr spin (int) int)
   (lambda (n)
-    (letrec ((go (subr (maxeff spin (read (globals twice))) (int int) int)
+    (letrec ((go (subr calls-twice (int int) int)
                (lambda (i acc)
                  (cond ((= i 0) acc)
                        ((= i 1000) (twice go (- i 1) acc))
@@ -44,14 +45,16 @@
       (if (ev n) 1 0))))
 
 ;; A loop through a `tagcase`'s arms, with the arms' names on the frame.
+(define-type shape (sumof (sq int) (rect (productof (1 int) (2 int)))))
 (define areas (subr spin (int) int)
   (lambda (n)
     (letrec ((go (subr spin (int int) int)
                (lambda (i acc)
                  (if (= i n)
                      acc
-                     (tagcase (the (sumof (sq int) (rect (productof (1 int) (2 int))))
-                                   (if (= (modulo i 2) 0) (sum sq i) (sum rect (product (1 i) (2 3)))))
+                     (tagcase (the shape (if (= (modulo i 2) 0)
+                                             (sum sq i)
+                                             (sum rect (product (1 i) (2 3)))))
                        (sq s (go (+ i 1) (+ acc (* s s))))
                        (rect (w h) (go (+ i 1) (+ acc (* w h)))))))))
       (go 0 0))))
@@ -62,7 +65,9 @@
     (letrec ((go (subr spin (int) int)
                (lambda (i)
                  (if (= i 0)
-                     (letrec ((go (subr spin (int) int) (lambda (j) (if (= j 5) j (go (+ j 1)))))) (go 0))
+                     (letrec ((go (subr spin (int) int)
+                                (lambda (j) (if (= j 5) j (go (+ j 1))))))
+                       (go 0))
                      (go (- i 1))))))
       (go n))))
 

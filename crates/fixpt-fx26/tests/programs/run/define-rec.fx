@@ -5,7 +5,8 @@
   (ev (subr (maxeff (read @globals) spin) (int) bool) (lambda (n) (if (= n 0) #t (od (- n 1)))))
   (od (subr (maxeff (read @globals) spin) (int) bool) (lambda (n) (if (= n 0) #f (ev (- n 1)))))
   ;; A loop, in the group: its tail call of itself jumps.
-  (count (subr (maxeff (read @globals) spin) (int int) int) (lambda (i acc) (if (= i 0) acc (count (- i 1) (+ acc (if (ev i) 1 0)))))))
+  (count (subr (maxeff (read @globals) spin) (int int) int)
+    (lambda (i acc) (if (= i 0) acc (count (- i 1) (+ acc (if (ev i) 1 0)))))))
 
 (define* evens (subr spin (int) int) (lambda (n) (count n 0)))
 

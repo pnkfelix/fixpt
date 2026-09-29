@@ -2,7 +2,8 @@
 ;;; so a call with a lambda there runs a copy of `map1` made for it, the
 ;;; lambda's body where `f` is called, behind a guard that `map1` is still
 ;;; what the copy was made from.
-(define* map1 (subr (maxeff (read @l) (alloc @l) spin) ((subr pure (int) int) (listof int @l)) (listof int @l))
+(define* map1
+  (subr (maxeff (read @l) (alloc @l) spin) ((subr pure (int) int) (listof int @l)) (listof int @l))
   (lambda (f xs) (if (null? xs) nil (cons (f (car xs)) (map1 f (cdr xs))))))
 (define* total (subr (maxeff (read @l) spin) ((listof int @l) int) int)
   (lambda (xs acc) (if (null? xs) acc (total (cdr xs) (+ acc (car xs))))))

@@ -14,7 +14,9 @@
                  (g-con (c u) (tagcase y (g-con (d v) (and (symbol=? c d) (geq u v))) (else _ #f)))
                  (g-inl (u) (tagcase y (g-inl (v) (geq u v)) (else _ #f)))
                  (g-inr (u) (tagcase y (g-inr (v) (geq u v)) (else _ #f)))
-                 (g-pair (u1 u2) (tagcase y (g-pair (v1 v2) (and (geq u1 v1) (geq u2 v2))) (else _ #f)))))))
+                 (g-pair (u1 u2) (tagcase y
+                                   (g-pair (v1 v2) (and (geq u1 v1) (geq u2 v2)))
+                                   (else _ #f)))))))
     geq))
 (define gsize (subr pure (gv) int)            ; the number of ints
   (letrec ((gsize (subr pure (gv) int)
@@ -49,7 +51,8 @@
   (letrec ((to (subr (read (globals leaf node)) (gv) tree)
              (lambda (x)
                (tagcase x
-                 (g-inl (u) (tagcase u (g-con (c v) (tagcase v (g-int (n) (leaf n)) (else _ (leaf 0))))
+                 (g-inl (u) (tagcase u (g-con (c v) (tagcase v (g-int (n) (leaf n))
+                                                             (else _ (leaf 0))))
                                        (else _ (leaf 0))))
                  (g-inr (u) (tagcase u (g-con (c v) (tagcase v (g-pair (l r) (node (to l) (to r)))
                                                              (else _ (leaf 0))))

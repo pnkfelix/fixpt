@@ -6,7 +6,9 @@
 
 ;; Flagged: the same, in a `letrec`.
 (define count (subr spin (int) int)
-  (lambda (n) (letrec ((go (subr spin (int) int) (lambda (i) (if (= i 0) 0 (+ 1 (go (- i 1))))))) (go n))))
+  (lambda (n)
+    (letrec ((go (subr spin (int) int) (lambda (i) (if (= i 0) 0 (+ 1 (go (- i 1)))))))
+      (go n))))
 
 ;; Not flagged: the same in tail position, with an accumulator.
 (define upto-acc (subr spin (int int (listof int @l)) (listof int @l))

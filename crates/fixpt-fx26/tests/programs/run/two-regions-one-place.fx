@@ -1,12 +1,16 @@
 ;;; Two regions in one place: a list of nodes and a list of edges, each at a
 ;;; region of its own, both in one arena. The regions are bound inside the
 ;;; arena, so they won't outlive it, and `rcons` may put their data there.
+(define-type (graph-builder (p place) (nodes region) (edges region))
+  (subr (maxeff (read nodes) (read edges) (alloc nodes) (alloc edges) (alloc p) spin)
+        (int (listof int nodes) (listof int edges))
+        int))
 (define count (subr spin (int) int)
   (lambda (n)
     (letrena p
       (letregion nodes
         (letregion edges
-          (letrec ((build (subr (maxeff (read nodes) (read edges) (alloc nodes) (alloc edges) (alloc p) spin) (int (listof int nodes) (listof int edges)) int)
+          (letrec ((build (graph-builder p nodes edges)
                      (lambda (i ns es)
                        (if (= i 0)
                            (+ (car ns) (car es))

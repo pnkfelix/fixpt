@@ -5,6 +5,7 @@
 ;;; and runs as cellular code, ten times slower.
 (define-type pt (productof (x int) (y int)))
 (define* e (subr pure (pt) int) (lambda (a) (extract a x)))
-(define* lp (subr spin (pt int int) int) (lambda (p i acc) (if (= i 0) acc (lp p (- i 1) (+ acc (e p))))))
+(define* lp (subr spin (pt int int) int)
+  (lambda (p i acc) (if (= i 0) acc (lp p (- i 1) (+ acc (e p))))))
 (define* go (subr spin (int) int) (lambda (n) (lp (product (x 3) (y 2)) n 0)))
 (go 1000)

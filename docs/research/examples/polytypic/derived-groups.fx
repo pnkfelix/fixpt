@@ -15,7 +15,8 @@
                      ((null? ys) #f)
                      (else (and (t=? (car xs) (car ys)) (ts=? (cdr xs) (cdr ys))))))))
     t=?))
-;; Without spin in the three signatures: refused, "a part of a list that may be written is no smaller".
+;; Without spin in the three signatures: refused, "a part of a list that
+;; may be written is no smaller".
 (define-datatype hrose (hleaf int) (hnode (listof hrose @heap)))
 (define hrose=? (subr (maxeff (read @heap) spin) (hrose hrose) bool)
   (letrec ((t=? (subr (maxeff (read @heap) spin) (hrose hrose) bool)

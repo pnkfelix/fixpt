@@ -4,7 +4,9 @@
 ;;; queue, `await!` among the promise's waiters. Every suspension resumes
 ;;; with unit; the value awaited is read from the promise.
 (define-effect Q (maxeff (read @q) (write @q) (alloc @q) (read (globals queue log))))
-(define-effect D (maxeff spin Q (read (globals sched queue log suspend! enqueue! yield! await! resolve! enqueue-all! note! fut))))
+;; What running the tasks reads: the scheduler's operations, and its state.
+(define-effect ops (read (globals suspend! enqueue! yield! await! resolve! enqueue-all! note!)))
+(define-effect D (maxeff spin Q ops (read (globals sched queue log fut))))
 (define-type task (composable unit unit D @p))
 (define-type promise (ref (sumof (pending (listof task @q)) (resolved int)) @q))
 (define sched (prompt-tag unit (subr Q () unit) D @p) (make-continuation-prompt-tag))

@@ -3,6 +3,7 @@
 (define total (subr (read @a) ((arrayof int @a)) int)
   (lambda (xs)
     (letrec ((go (subr (read @a) (nat int) int)
-                   (lambda (i acc) (if (>= i (array-length xs)) acc (go (+ i 1) (+ acc (array-ref xs i)))))))
+                   (lambda (i acc)
+                     (if (>= i (array-length xs)) acc (go (+ i 1) (+ acc (array-ref xs i)))))))
       (go 0 0))))
 (total (the (arrayof int @a) (make-array 4 5)))

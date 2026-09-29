@@ -3,9 +3,10 @@
 (define loop (subr pure () int)
   (lambda ()
     (let ((c (the (icell (composable int int (read @c) @p) @c) (make-icell)))
-          (t ((proj (proj make-continuation-prompt-tag @p) int int (read @c)))))
+          (t ((proj (proj make-continuation-prompt-tag @p) int int (read @c))))
+          (capture (proj call-with-composable-continuation @p)))
       (prompt t
-        (+ 1 (begin ((proj (proj call-with-composable-continuation @p) int int (read @c) int (write @c))
+        (+ 1 (begin ((proj capture int int (read @c) int (write @c))
                      (lambda ((k (composable int int (read @c) @p))) (begin (icell-put! c k) 0))
                      t)
                     ((icell-get c) 1)))

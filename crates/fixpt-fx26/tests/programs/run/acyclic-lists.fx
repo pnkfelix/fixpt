@@ -10,5 +10,8 @@
 (define built (subr pure (int) (listof int acyclic))
   (lambda (n) (letfreeze r (the (listof int r) (cons n (cons (+ n 1) nil))))))
 (define changed (subr pure (int) (listof int const))
-  (lambda (n) (letfreeze r (let ((ys (the (listof int r) (cons 1 nil)))) (begin (set-car! ys n) ys)))))
+  (lambda (n)
+    (letfreeze r
+      (let ((ys (the (listof int r) (cons 1 nil))))
+        (begin (set-car! ys n) ys)))))
 (+ (len (built 5) 0) (+ (first (built 7)) (first (changed 9))))

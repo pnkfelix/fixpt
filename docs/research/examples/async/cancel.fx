@@ -11,7 +11,8 @@
 (define sched (prompt-tag unit task D @p) (make-continuation-prompt-tag))
 (define queue (ref (listof task @q) @q) (new nil))
 (define log (ref (listof int @q) @q) (new nil))
-(define scope (prompt-tag (sumof (done int) (cancelled unit)) unit (maxeff D (goto @p) (comefrom @p)) @c)
+(define-type outcome (sumof (done int) (cancelled unit)))
+(define scope (prompt-tag outcome unit (maxeff D (goto @p) (comefrom @p)) @c)
   (make-continuation-prompt-tag))
 (define stop? (ref bool @q) (new #f))
 

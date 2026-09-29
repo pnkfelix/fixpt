@@ -1,6 +1,8 @@
 ;;; A tree walked through `down-tree` ends: size-change sees the
 ;;; conversions as the identity, and `tagcase` gives parts.
-(define-generative (nest (a type)) (sumof (none unit) (more (productof (hd a) (tl (nest (productof (l a) (r a))))))))
+(define-type (pair (a type)) (productof (l a) (r a)))
+(define-generative (nest (a type))
+  (sumof (none unit) (more (productof (hd a) (tl (nest (pair a)))))))
 (define-generative (tree (a type)) (sumof (leaf a) (node (productof (l (tree a)) (r (tree a))))))
 (define total (subr (read (globals down-tree)) ((tree int)) int)
   (letrec ((total (subr (read (globals down-tree)) ((tree int)) int)

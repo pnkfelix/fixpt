@@ -1,7 +1,9 @@
 ; Rejected: `map` of three is three, not two.
-(define map (poly ((t type) (u type) (n size)) (subr pure ((subr pure (t) u) (nlist t n)) (nlist u n)))
+(define-type map-type
+  (poly ((t type) (u type) (n size)) (subr pure ((subr pure (t) u) (nlist t n)) (nlist u n))))
+(define map map-type
   (plambda ((t type) (u type) (n size))
-    (proj (letrec ((map (poly ((t type) (u type) (n size)) (subr pure ((subr pure (t) u) (nlist t n)) (nlist u n)))
+    (proj (letrec ((map map-type
                     (lambda (f xs) (if (null? xs) nil (cons (f (car xs)) (map f (cdr xs)))))))
             map)
           t u n)))

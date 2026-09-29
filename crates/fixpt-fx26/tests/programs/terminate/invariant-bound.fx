@@ -4,6 +4,9 @@
   (letrec ((up (subr pure (int int) int)
              (lambda (i n) (if (< i n) (up (+ i 1) n) i))))
     up))
-(define-rec (down (subr (read @globals) (int int) int) (lambda (i n) (if (> i n) (down2 (- i 1) n) i)))
-            (down2 (subr (read @globals) (int int) int) (lambda (i n) (if (> i n) (down (- i 1) n) i))))
+(define-rec
+  (down (subr (read @globals) (int int) int)
+    (lambda (i n) (if (> i n) (down2 (- i 1) n) i)))
+  (down2 (subr (read @globals) (int int) int)
+    (lambda (i n) (if (> i n) (down (- i 1) n) i))))
 (+ (up 0 10) (down 10 0))
