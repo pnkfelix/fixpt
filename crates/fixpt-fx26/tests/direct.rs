@@ -456,19 +456,25 @@ fn native_session_adapters_aborts_and_stack_maps() {
     s.native_runner = Some(run_native_collecting);
     let mut seen = Vec::new();
     for form in runs {
-        let heap = |s: &mut Fx26Session| (s.scheme.runtime_unrooted().heap.gc_count, s.scheme.runtime_unrooted().heap.words_copied);
+        // Major collections, and the words they copied (minor ones copy
+        // only the young, and the array is old).
+        let heap = |s: &mut Fx26Session| {
+            let h = &s.scheme.runtime_unrooted().heap;
+            (h.gc_count, h.words_copied - h.minor_words_copied)
+        };
         let before = heap(&mut s);
         let out = s.run_forms(std::slice::from_ref(form)).expect("runs").remove(0).expect("ran");
         assert!(!out.printed.contains("not in the native convention"), "{}", out.printed);
         let after = heap(&mut s);
         seen.push((after.0 - before.0, after.1 - before.1));
     }
-    // As many major collections each (three policy collections in four
-    // are minor, and the array, old, is not copied by those); `keep`'s
-    // copy the array each time, and `drop`'s do not.
+    // About as many major collections each (three policy collections in
+    // four are minor, and the array, old, is not copied by those); each of
+    // `keep`'s copies the array, 100 000 words, and `drop`'s do not: per
+    // collection, since each copies the whole live heap besides.
     let ((n0, c0), (n1, c1)) = (seen[0], seen[1]);
     assert!(n0 >= 5 && n0.abs_diff(n1) <= 1, "{seen:?}");
-    assert!(c1 > c0 + 100_000 * (n1 - 1), "{seen:?}");
+    assert!(c1 / n1 > c0 / n0 + 80_000, "{seen:?}");
     // A frame of 70 slots, past what a header's mask holds: traced whole,
     // under those collections (`programs/native/wide-frame.fx`).
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/wide-frame.fx")).expect("reads");

@@ -2162,6 +2162,30 @@
       (ty-comp (arg answer e r)
         (cons (product (1 (k-insert (a-goto r) (k-insert (a-comefrom r) e))) (2 (the k-ids (cons arg nil))) (3 answer)) nil))
       (else x nil))))
+;; No `vsubr`; one, of latent effect `e`, arguments of type `a`, result `r`.
+(define k-vsub-none k-vsub nil)
+(define k-vsub-one (subr (alloc @t) (k-eff int int) k-vsub)
+  (lambda (e a r) (cons (product (1 e) (2 a) (3 r)) nil)))
+;; `vsubr`'s three descriptions, an effect and two types, as `k-vsubr-parts`
+;; gives them.
+(define* k-vsubr-descs (subr (alloc @t) (k-desc k-desc k-desc) k-vsub)
+  (lambda (e a r)
+    (tagcase e
+      (de (le)
+        (tagcase a
+          (dt (at) (tagcase r (dt (rt) (k-vsub-one le at rt)) (else z k-vsub-none)))
+          (else z k-vsub-none)))
+      (else z k-vsub-none))))
+;; A `vsubr` (generative type 0), taken apart: its latent effect, the type of
+;; each argument, and the result's, in a list; none for any other type.
+(define k-vsubr-parts (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int) k-vsub)
+  (lambda (t)
+    (tagcase (k-get t)
+      (ty-named (g ds)
+        (if (and (= g 0) (= (k-length ds) 3))
+            (k-vsubr-descs (car ds) (car (cdr ds)) (car (cdr (cdr ds))))
+            k-vsub-none))
+      (else y k-vsub-none))))
 
 ;;; ------------------------------------------------------------ regions of types
 
@@ -5348,20 +5372,7 @@
                        (begin (k-no-knot inst a b) inst)))
                    (else y (extract rf 1))))
              (callee (k-as-subr ft))
-             ;; A `vsubr` (generative type 0): its effect, element and
-             ;; result, in a list; none for anything else.
-             (variadic (tagcase (k-get ft)
-                         (ty-named (g ds)
-                           (if (and (= g 0) (= (k-length ds) 3))
-                               (tagcase (car ds)
-                                 (de (le) (tagcase (car (cdr ds))
-                                            (dt (et) (tagcase (car (cdr (cdr ds)))
-                                                       (dt (rt) (the k-vsub (cons (product (1 le) (2 et) (3 rt)) nil)))
-                                                       (else z (the k-vsub nil))))
-                                            (else z (the k-vsub nil))))
-                                 (else z (the k-vsub nil)))
-                               (the k-vsub nil)))
-                         (else y (the k-vsub nil)))))
+             (variadic (k-vsubr-parts ft)))
         (if (not (null? variadic))
             ;; Any number of arguments, each of the element type.
             (let* ((v (car variadic))

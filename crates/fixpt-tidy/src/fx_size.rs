@@ -7,7 +7,10 @@
 //!
 //! Files over the limits when the rule came are listed, with how far over
 //! they are, in `fx-size-debt.txt`; a listed file may not get worse, and its
-//! entry must come down as it gets better, until it goes.
+//! entry must come down as it gets better, until it goes. Some are exempt
+//! for good, each by a line `exempt PREFIX` there (the user's, 2026-09-29):
+//! benchmarks that are one file by design, and test inputs whose size is
+//! their point.
 
 use std::path::{Path, PathBuf};
 
@@ -63,7 +66,7 @@ pub fn fx_files(root: &Path) -> Vec<PathBuf> {
 pub fn parse_debt(text: &str) -> Vec<(String, Size)> {
     text.lines()
         .map(|l| l.split('#').next().unwrap_or("").trim())
-        .filter(|l| !l.is_empty())
+        .filter(|l| !l.is_empty() && !l.starts_with("exempt "))
         .filter_map(|l| {
             let mut w = l.split_whitespace();
             let path = w.next()?.to_string();
@@ -71,6 +74,15 @@ pub fn parse_debt(text: &str) -> Vec<(String, Size)> {
             let long = w.next()?.parse().ok()?;
             Some((path, Size { lines, long }))
         })
+        .collect()
+}
+
+/// The debt file's exempt prefixes: a file whose path starts with one is
+/// not measured.
+pub fn parse_exempt(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|l| l.split('#').next().unwrap_or("").trim())
+        .filter_map(|l| l.strip_prefix("exempt ").map(|p| p.trim().to_string()))
         .collect()
 }
 
