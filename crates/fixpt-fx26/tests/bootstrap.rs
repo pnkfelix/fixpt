@@ -554,6 +554,7 @@ fn reachable_words(heap: &Heap, word: Value) -> Vec<Value> {
 
 thread_local! {
     static LAST_PROFILE: std::cell::RefCell<Vec<(String, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static LAST_ALLOCATING: std::cell::RefCell<Vec<(String, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// `%run-word`'s hook, on the Rust machine, keeping a profile of the run.
@@ -564,6 +565,8 @@ fn profiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Res
     let out = m.run_in_runtime(rt, word).map_err(|t| format!("{t:?}"));
     let top = m.profile.as_ref().expect("profiling").top(usize::MAX);
     LAST_PROFILE.with(|p| *p.borrow_mut() = top);
+    let top = m.profile.as_ref().expect("profiling").top_allocating(usize::MAX);
+    LAST_ALLOCATING.with(|p| *p.borrow_mut() = top);
     out?;
     m.ds.pop().ok_or_else(|| "the word left nothing".into())
 }
@@ -685,9 +688,20 @@ fn probe_phases_as_register_code() {
             gcs = now;
             t = std::time::Instant::now();
         };
-        let syns = run(sc, read, &[tx]);
+        // With `FIXPT_PROFILE_PHASE` naming a phase (`read`, `compile`), that
+        // phase on the Rust machine, counting cells and words allocated by
+        // word: its work, whatever its code.
+        let phase = std::env::var("FIXPT_PROFILE_PHASE").unwrap_or_default();
+        let fast = sc.runtime_unrooted().run_word;
+        let profile_from = |sc: &mut fixpt_scheme::Session, what: &str| {
+            sc.runtime_unrooted().run_word = if !phase.is_empty() && phase == what { Some(profiled) } else { fast };
+        };
+        profile_from(sc, "read");
+        // (The program last, so that a profile is of it.)
         let std = run(sc, read, &[st]);
+        let syns = run(sc, read, &[tx]);
         lap(sc, "read");
+        profile_from(sc, "");
         let syns = sc.make(|m| { let l = m.get(syns); m.heap().car(l) });
         let std = sc.make(|m| { let l = m.get(std); m.heap().car(l) });
         let parsed = run(sc, parse, &[syns]);
@@ -696,21 +710,17 @@ fn probe_phases_as_register_code() {
         run(sc, check, &[std, progs]);
         lap(sc, "check");
         let facts = run(sc, extracts, &[]);
-        // With `FIXPT_PROFILE_COMPILE`, the compile on the Rust machine,
-        // counting cells by word: the compiler's work, whatever its code.
-        let profile = std::env::var_os("FIXPT_PROFILE_COMPILE").is_some();
-        if profile {
-            sc.runtime_unrooted().run_word = Some(profiled);
-        }
+        profile_from(sc, "compile");
         let _ = run(sc, compile, &[progs, facts]);
         lap(sc, "compile");
-        if profile {
-            let top = LAST_PROFILE.with(|p| p.borrow().clone());
-            let total: u64 = top.iter().map(|(_, n)| n).sum();
-            eprintln!("{total} cells");
-            for (w, n) in top.iter().take(25) {
-                let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();
-                eprintln!("{n:>12}  {w} {at}");
+        if !phase.is_empty() {
+            for (what, top) in [("cells", LAST_PROFILE.with(|p| p.borrow().clone())), ("words allocated", LAST_ALLOCATING.with(|p| p.borrow().clone()))] {
+                let total: u64 = top.iter().map(|(_, n)| n).sum();
+                eprintln!("{phase}: {total} {what}, by word");
+                for (w, n) in top.iter().take(20) {
+                    let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();
+                    eprintln!("{n:>12}  {w} {at}");
+                }
             }
         }
     });

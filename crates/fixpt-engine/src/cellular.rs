@@ -383,13 +383,17 @@ pub struct Machine {
 
 use std::collections::HashMap;
 
-/// Cells run per word, by name. A word's name is looked up once per word
-/// and collection (a collection moves words).
+/// Cells run per word, by name, and words allocated: what a cell
+/// allocates (by a primitive it calls too) is its word's. A word's name is
+/// looked up once per word and collection (a collection moves words).
 #[derive(Default)]
 pub struct Profile {
     pub cells: HashMap<String, u64>,
+    pub allocated: HashMap<String, u64>,
     names: HashMap<u64, String>,
     gc_count: u64,
+    /// The heap's words allocated when the last cell began, and its word.
+    last: (u64, Option<String>),
 }
 
 impl Profile {
@@ -403,6 +407,21 @@ impl Profile {
             heap.symbol_name(sym)
         });
         *self.cells.entry(name.clone()).or_insert(0) += 1;
+        let now = heap.allocated();
+        if let (before, Some(last)) = &self.last
+            && now > *before
+        {
+            *self.allocated.entry(last.clone()).or_insert(0) += now - before;
+        }
+        self.last = (now, Some(name.clone()));
+    }
+
+    /// The `n` words that allocated the most, with how many words.
+    pub fn top_allocating(&self, n: usize) -> Vec<(String, u64)> {
+        let mut all: Vec<(String, u64)> = self.allocated.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        all.sort_by_key(|(_, v)| std::cmp::Reverse(*v));
+        all.truncate(n);
+        all
     }
 
     /// The `n` words that ran the most cells, with how many.

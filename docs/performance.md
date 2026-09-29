@@ -1644,3 +1644,35 @@ where it took one: 35.6 ms against 18.5 ms, the whole difference. The
 front end grew by the new code and crossed the next threshold. So a
 collection's cost, not the new code's, is the step; the heap's sizing is
 what would take it back.
+
+## The reader's allocation (2026-09-28)
+
+The user's request, after the phase probe showed the reader allocating
+18.4 M words to read the front end (some 760 KB). Allocation is now counted
+by word too: the Rust machine's profile charges what each cell allocates,
+by a primitive it calls as well, to the cell's word
+(`FIXPT_PROFILE_PHASE=read` or `=compile` with
+`probe_phases_as_register_code`).
+
+Of the program's 16.6 M words: cursors 6.3 M (38%: `advance` made a
+cursor, three pairs and a one-character list, for every character), atoms
+3.4 M (a `cons` a character, then `reverse` and `list->string`), the
+marks of lists 4.0 M (a mark rebuilt for each item, and the items
+reversed at the end), the syntax itself 1.2 M. Continuations are not
+the cost, as the user wondered: fed a whole file, the reader takes every
+character from the text given ahead and suspends once, at the end; its
+marks cost 5% of the read's time (0.003 of 0.060 s, measured with them
+off).
+
+The loops over characters (whitespace, line comments, atoms, strings)
+now keep only the last character and where it is, and read the next
+themselves: one cursor for a token, not one for each character; and an
+atom's reader no longer makes a closure to read with. The read: 18.4 M →
+14.5 M words, the same five collections and time (0.059 s); the compile
+phase after it, 2 collections → 1 (0.134 → 0.121 s), the thresholds
+moved.
+
+What is left: closures for each atom's and list's `letrec` procedures,
+called from inside a mark's thunk, so not join points (lambda lifting
+would take them); the atoms' character lists; the marks of lists, whose
+shape the Scheme and Rust readers share.
