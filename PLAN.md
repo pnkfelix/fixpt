@@ -48,6 +48,18 @@ are in the last section, "Log: the glance's details", and in
   (`probe_phases_as_register_code`), with collections and allocation by
   word.
 
+- **Reference benchmarks** (2026-09-29, not in the per-commit bench):
+  `scheme-bench/`, 49 of Larceny's 75 R7RS benchmarks ported; and
+  `mllang-bench/`, MLton's suite, OCaml's classic programs and the
+  Benchmarks Game (sources and provenance), 38 ported. Each README lists
+  answers, native times, and what blocks the rest (mostly floats, file
+  I/O, `eq?` on mutable objects, bignums).
+- **Research notes** (2026-09-29, sources checked): `docs/research/floats.md`
+  (boxed flonums as the uniform form, unboxed where types say; NaN-boxing
+  worked out and declined), `telemetry.md` (an `@telemetry` effect and
+  fourteen operations), `async.md` (a scheduler over prompts, structured
+  concurrency as region scoping). Each has open questions for the user.
+
 **In progress**
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
@@ -72,6 +84,20 @@ are in the last section, "Log: the glance's details", and in
   allocation in the front end's self-compile, one collection fewer, time
   about the same. Later, maybe: as a Twobit-style pass that rewrites the
   program (checkable again, and printable by a `fixpt expand`).
+
+- **Bugs the benchmark ports found** (native path; the lowered one is
+  right): `car` of `nil` crashes native code; a native abort does not
+  find a prompt cellular code installed, and costs time in proportion to
+  the stack; an inlined `extract` from an earlier form gets field -1 and
+  drops its callers out of register code; register code declines above 8
+  free values, arguments or fields, and frames too large for one `stp`,
+  silently; a product argument is slow natively; the native stack is a
+  fixed 8 MB; native collection slows as live data grows (`paraffins`
+  57 s native, 20 s lowered); precise globals effects doubled `set.fx`'s
+  native time; `parse-int` panics on a bad radix; a standard operation as
+  a value is still declined for some operations. Collections counted by
+  `gc_count` leave out minor ones (`%gc-count`, the phase probe), and the
+  engine profile's name cache is keyed on major collections only.
 
 **Next**, roughly in order
 1. Done (2026-09-28): an immediately applied lambda as a `let`;
