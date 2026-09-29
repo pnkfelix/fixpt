@@ -1215,9 +1215,27 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Whether a standard name has a value: an operation of an arity, or
+    /// `list`, a `vsubr`.
+    pub(crate) fn has_standard_value(name: &str) -> bool {
+        name == "list" || Self::arity(name).is_some()
+    }
+
     /// A standard operation as a value: a closure of its arity whose body
-    /// applies it to its parameters.
+    /// applies it to its parameters. `list` is a `vsubr`: `%vlambda`'s
+    /// closure over the identity on one list, whose register code is any
+    /// standard identity's (`certify-acyclic`'s).
     fn standard_value(&mut self, name: &str, code: &mut Vec<Item>) -> R<()> {
+        if name == "list" {
+            let mut body = Vec::new();
+            self.op1(&mut body, "slot", Value::fixnum(0));
+            self.op(&mut body, "return");
+            let w = self.assemble(&body, name)?;
+            self.register_twin(w, name, "certify-acyclic", 1)?;
+            self.op1(code, "closure", w);
+            code.push(Item::Cell(Value::fixnum(0)));
+            return self.prim(code, "%fx26-vlambda", 1);
+        }
         let n = Self::arity(name).ok_or_else(|| format!("not yet compiled as a value: {name}"))?;
         let mut body = Vec::new();
         if name == "make-array" {
@@ -1233,16 +1251,23 @@ impl<'a> Compiler<'a> {
         }
         self.op(&mut body, "return");
         let w = self.assemble(&body, name)?;
-        // Register code too, for the native compiler to start from.
+        self.register_twin(w, name, name, n)?;
+        self.op1(code, "closure", w);
+        code.push(Item::Cell(Value::fixnum(0)));
+        Ok(())
+    }
+
+    /// Register code for word `w`, named `name`, as standard operation `op`
+    /// of `n` arguments has it as a value, for the native compiler to start
+    /// from.
+    fn register_twin(&mut self, w: Value, name: &str, op: &str, n: usize) -> R<()> {
         if self.registers
-            && let Some(cells) = self.r_standard_word(name, n)
+            && let Some(cells) = self.r_standard_word(op, n)
         {
             let sym = self.heap.intern(name);
             let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
             self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
         }
-        self.op1(code, "closure", w);
-        code.push(Item::Cell(Value::fixnum(0)));
         Ok(())
     }
 

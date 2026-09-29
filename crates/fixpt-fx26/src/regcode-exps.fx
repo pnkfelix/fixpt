@@ -346,12 +346,16 @@
           ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
            (the (listof c-inline acyclic) (cons (car xs) nil)))
           (else (r-inline-named (cdr xs) n k)))))
+;; The item made second, of those made (newest first, at least two).
+(define* r-next-to-oldest (subr (maxeff (read @k) spin) (items) item)
+  (lambda (xs) (if (null? (cdr (cdr xs))) (car xs) (r-next-to-oldest (cdr xs)))))
 ;; A standard operation as a value, into RESULT: its closure, of the word
 ;; the stack code makes for it (`c-standard-value`), and that word's
-;; register code. A leaf makes it only in tail position.
+;; register code. A leaf makes it only in tail position. `list`'s, a
+;; `vsubr`, is then given to `%fx26-vlambda`, a call-out: never in a leaf.
 (define r-standard-value (subr rcompiles (rgen string bool) unit)
   (lambda (g name tail)
-    (if (and (extract g leaf) (not tail))
+    (if (and (extract g leaf) (or (not tail) (string=? name "list")))
         (r-decline)
         (let ((made (the code (new nil))))
           (begin
@@ -359,13 +363,19 @@
             (let ((items (get made)))
               (if (or (null? items) (null? (cdr items)))
                   (r-decline)
-                  (tagcase (car (cdr items))
-                    (i-cell (w) (r-op2 g rop-lambda w (wcell-int 0)))
+                  (tagcase (r-next-to-oldest items)
+                    (i-cell (w)
+                      (begin
+                        (r-op2 g rop-lambda w (wcell-int 0))
+                        (if (string=? name "list")
+                            (begin (r-opn g rop-setreg 1)
+                                   (r-opnn g rop-prim (runtime-primitive "%fx26-vlambda") 1))
+                            #u)))
                     (else y (r-decline))))))))))
 ;; Whether `n`, not bound in `e`, is a standard operation as a value: a
 ;; closure made.
 (define r-standard-value? (subr rcompiles (cenv symbol) bool)
-  (lambda (e n) (and (null? (c-where e n)) (>= (c-arity (symbol->string n)) 0))))
+  (lambda (e n) (and (null? (c-where e n)) (c-has-standard-value? (symbol->string n)))))
 ;; An inlined call: which of `c-inlines`, and its global.
 (define-type rinline (pairof c-inline wglobal @k))
 ;; Which of `c-inlines`, and its global, when `f` names one of them, taking
@@ -423,7 +433,8 @@
   (r-collects-as-is (subr rcompiles (exp cenv rthis bool) bool)
     (lambda (x e this tail)
       (tagcase x
-        (e-var (n a b) (and (r-standard-value? e n) (not tail)))
+        (e-var (n a b)
+          (and (r-standard-value? e n) (or (not tail) (string=? (symbol->string n) "list"))))
         (e-int (n a b) #f) (e-bool (v a b) #f) (e-str (v a b) #f) (e-char (v a b) #f)
         ;; Join points only: no closure made, and their calls are jumps.
         (e-letrec (bs body a b)

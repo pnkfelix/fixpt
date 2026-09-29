@@ -155,6 +155,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("int->u64", "%fx26-int->u64", true),
     ("u64->int", "%fx26-u64->int", true),
     ("%vlambda", "%fx26-vlambda", false),
+    ("list", "list", true),
     ("apply", "%fx26-apply", false),
     ("string-compare", "%fx26-string-compare", true),
     ("string-search", "%fx26-string-search", true),

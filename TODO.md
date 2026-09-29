@@ -551,3 +551,14 @@ operations by dictionary (`PLAN.md` Q8).
   test. The user found an `if` whose else branch, itself an `if`, sat at
   its parent's column (`k-synth-app-plain`, now a `cond`). An indenter in
   `sexp-edit` computes what the lint compares against.
+
+## 17. `(list CONST …)` as a constant (the user's, 2026-09-29)
+
+The register compilers' `r_const` (and the FX-26 mirror) should recognise
+`(list c …)` whose elements are all constants as a constant itself: a
+frozen list made once, at compile time, as sums and products of constants
+are. The type allows it: `list` gives `(listof T acyclic)`, which cannot
+be written, and FX-26 has no `eq?`, so no run can tell a shared list from
+a fresh one. Today each call makes its pairs at run time (inline, natively).
+The rewrite of code and benchmarks to use `list` will turn up constant
+lists, which is where this pays.

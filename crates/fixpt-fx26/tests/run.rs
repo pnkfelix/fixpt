@@ -67,6 +67,13 @@ fn variadic_procedures_run() {
     assert_eq!(run(include_str!("programs/run/variadic.fx")), "1011");
 }
 
+/// `list`: calls of 0 to 10 arguments, and `list` as a value, a `vsubr`
+/// that `apply` spreads a list over (`programs/run/list.fx`).
+#[test]
+fn list_runs() {
+    assert_eq!(run(include_str!("programs/run/list.fx")), "5539");
+}
+
 #[test]
 fn recursion_and_state_run() {
     assert_eq!(run(include_str!("programs/run/recursion.fx")), "(55 . 1000)");

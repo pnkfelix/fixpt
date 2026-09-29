@@ -97,6 +97,8 @@ enum Std {
     Set,
     /// Arrays, the tag and key makers: several instructions (`r_app`).
     Special(&'static str),
+    /// `(list x …)`: the pairs made in line (`r_cons_list`).
+    List,
     /// `(apply f xs)`: `f` a `vsubr`, a closure of `%vlambda`'s over the
     /// procedure of one list, free value 0; that procedure, called with `xs`.
     Apply,
@@ -405,6 +407,7 @@ impl Compiler<'_> {
             ("set-cdr!", 2) => Some(Std::Special("set-cdr!")),
             ("make-continuation-prompt-tag" | "make-continuation-mark-key", 0) => Some(Std::Special("make-box")),
             ("apply", 2) => Some(Std::Apply),
+            ("list", _) => Some(Std::List),
             _ => {
                 // What the cellular compiler does with one runtime
                 // primitive, register code does too.
@@ -523,8 +526,11 @@ impl Compiler<'_> {
                         None => true,
                     })
             }
-            // A standard operation as a value: a closure made.
-            Exp::Var(n) if self.where_is(e, n).is_none() && Self::arity(self.name(n)).is_some() => !tail,
+            // A standard operation as a value: a closure made; `list`'s
+            // then given to `%fx26-vlambda`, a call-out.
+            Exp::Var(n) if self.where_is(e, n).is_none() && Self::has_standard_value(self.name(n)) => {
+                !tail || self.name(n) == "list"
+            }
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => false,
             // A closure made as the value: its call-out may collect, but
             // nothing is used after it (`r_lambda`).
@@ -605,7 +611,7 @@ impl Compiler<'_> {
         let plain = match self.c.arena.exp_at(x) {
             // Not a name a standard operation has, which may be one made a
             // value, a closure.
-            Exp::Var(n) => Self::arity(self.name(*n)).is_none(),
+            Exp::Var(n) => !Self::has_standard_value(self.name(*n)),
             Exp::Int(_) | Exp::Bool(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit | Exp::Str(_) => true,
             _ => false,
         };
@@ -650,6 +656,16 @@ impl Compiler<'_> {
                         }
                         let Some(super::Item::Cell(w)) = made.get(1).cloned() else { return None };
                         g.op("lambda", &[w, Gen::n(0)]);
+                        // `list`'s, a `vsubr`: that closure given to
+                        // `%fx26-vlambda`.
+                        if self.name(n) == "list" {
+                            if g.leaf {
+                                return self.decline("`list` as a value, in a leaf");
+                            }
+                            let p = fixpt_engine::cellular::runtime_primitive("%fx26-vlambda")? as i64;
+                            g.op("setreg", &[Gen::n(1)]);
+                            g.op("prim", &[Value::fixnum(p), Gen::n(1)]);
+                        }
                     }
                 }
                 g.done(tail);
@@ -1100,6 +1116,16 @@ impl Compiler<'_> {
                     g.op("const", &[u]);
                 }
                 Std::Special(what) => self.r_special(g, what, args, env, te)?,
+                Std::List => {
+                    if g.leaf {
+                        return self.decline("a call-out in a leaf");
+                    }
+                    let slots = g.next_slot;
+                    let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
+                    let kept = self.r_keep_args(g, &es, env, te, true, None)?;
+                    self.r_cons_list(g, &es, &kept, 0, env, te)?;
+                    g.next_slot = slots;
+                }
                 Std::Apply => {
                     if g.leaf {
                         return self.decline("a call in a leaf");
@@ -1832,6 +1858,56 @@ impl Compiler<'_> {
         }
         let many = args.len() > REGS;
         let slots = g.next_slot;
+        let mut kept = self.r_keep_args(g, args, env, te, many, f)?;
+        let fun = match f {
+            Some(f) if !self.r_simple(f) => {
+                self.r_exp(g, f, env, te, false)?;
+                let s = g.slot();
+                g.op("setstk", &[Gen::n(s)]);
+                Some(s)
+            }
+            _ => None,
+        };
+        // The list of those past the seventh, last first, kept.
+        let in_regs = if many {
+            self.r_cons_list(g, args, &kept, REGS - 1, env, te)?;
+            let s = g.slot();
+            g.op("setstk", &[Gen::n(s)]);
+            kept.truncate(REGS - 1);
+            kept.push(Some(s));
+            REGS
+        } else {
+            args.len()
+        };
+        for (i, k) in kept.iter().enumerate().take(in_regs) {
+            match (i, k) {
+                (i, Some(s)) if i + 1 == REGS && many => g.op("load", &[Gen::n(REGS), Gen::n(*s)]),
+                _ => self.r_arg_into(g, &args[i], *k, i + 1, env, te)?,
+            }
+        }
+        match (f, fun) {
+            (_, Some(s)) => g.op("stack", &[Gen::n(s)]),
+            (Some(f), None) => self.r_exp(g, f, env, te, false)?,
+            (None, None) => {}
+        }
+        g.next_slot = slots;
+        Some(())
+    }
+
+    /// Each argument that is not simple made, in order, and kept: in a frame
+    /// slot, or (`usize::MAX`) straight in its register, the last such when
+    /// the procedure `f` is simple too. With `many`, a `cons` follows, so an
+    /// argument in a register is kept too, and none goes straight to its.
+    #[allow(clippy::too_many_arguments)]
+    fn r_keep_args(
+        &mut self,
+        g: &mut Gen,
+        args: &[Arg],
+        env: &mut Vec<(Sym, RLoc)>,
+        te: &mut Env,
+        many: bool,
+        f: Option<ExpId>,
+    ) -> O<Vec<Option<usize>>> {
         let mut kept = Vec::new();
         let simple: Vec<bool> = args
             .iter()
@@ -1873,43 +1949,18 @@ impl Compiler<'_> {
                 kept.push(Some(s));
             }
         }
-        let fun = match f {
-            Some(f) if !self.r_simple(f) => {
-                self.r_exp(g, f, env, te, false)?;
-                let s = g.slot();
-                g.op("setstk", &[Gen::n(s)]);
-                Some(s)
-            }
-            _ => None,
-        };
-        // The list of those past the seventh, last first, kept.
-        let in_regs = if many {
-            g.op("const", &[Value::NULL]);
-            for i in (REGS - 1..args.len()).rev() {
-                g.op("setreg", &[Gen::n(2)]);
-                self.r_arg_into(g, &args[i], kept[i], 1, env, te)?;
-                g.op("cellular", &[Value::fixnum(routine("cons") as i64), Gen::n(2)]);
-            }
-            let s = g.slot();
-            g.op("setstk", &[Gen::n(s)]);
-            kept.truncate(REGS - 1);
-            kept.push(Some(s));
-            REGS
-        } else {
-            args.len()
-        };
-        for (i, k) in kept.iter().enumerate().take(in_regs) {
-            match (i, k) {
-                (i, Some(s)) if i + 1 == REGS && many => g.op("load", &[Gen::n(REGS), Gen::n(*s)]),
-                _ => self.r_arg_into(g, &args[i], *k, i + 1, env, te)?,
-            }
+        Some(kept)
+    }
+
+    /// Into RESULT, a list of the arguments from the `from`th, as kept
+    /// (`r_keep_args`): the pairs made from the last, onto `nil`.
+    fn r_cons_list(&mut self, g: &mut Gen, args: &[Arg], kept: &[Option<usize>], from: usize, env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        g.op("const", &[Value::NULL]);
+        for i in (from..args.len()).rev() {
+            g.op("setreg", &[Gen::n(2)]);
+            self.r_arg_into(g, &args[i], kept[i], 1, env, te)?;
+            g.op("cellular", &[Value::fixnum(routine("cons") as i64), Gen::n(2)]);
         }
-        match (f, fun) {
-            (_, Some(s)) => g.op("stack", &[Gen::n(s)]),
-            (Some(f), None) => self.r_exp(g, f, env, te, false)?,
-            (None, None) => {}
-        }
-        g.next_slot = slots;
         Some(())
     }
 

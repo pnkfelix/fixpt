@@ -105,6 +105,8 @@
   (s-special string)
   ;; `(apply f xs)`: a call, of `f`'s procedure of one list (`r-apply`).
   (s-apply)
+  ;; `(list x …)`: the pairs made in line (`r-list`).
+  (s-list)
   (s-none))
 
 ;; What is being made: the items, newest first; whether a leaf; the next
@@ -240,7 +242,7 @@
   (lambda (x)
     (and (< (c-conversion-at x) 0)
          (tagcase x
-           (e-var (n a b) (< (c-arity (symbol->string n)) 0))
+           (e-var (n a b) (not (c-has-standard-value? (symbol->string n))))
            (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t)
            (e-sym (v a b) #t) (e-unit (a b) #t) (e-str (v a b) #t)
            (else y #f)))))
@@ -444,6 +446,7 @@
             ((is "array-length" 1) (s-special "array-length"))
             ((is "make-array" 2) (s-special "make-array"))
             ((is "apply" 2) (s-apply))
+            ((string=? name "list") (s-list))
             ((and (r-box-name? name) (= n 0)) (s-special "make-box"))
             ;; What the cellular compiler does as one runtime primitive
             ;; (`c-standard-on`), register code does too.

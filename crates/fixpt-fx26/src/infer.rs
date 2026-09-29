@@ -725,7 +725,16 @@ impl Checker {
         span: fixpt_read::Span,
     ) -> R<(TyId, Vec<Synthesised>)> {
         let (kinds, inner) = self.binders_of(ft);
-        let Some((_, params, result)) = self.arena.get(inner).as_subr() else {
+        // A `vsubr` (a standard `list`): a subroutine of as many parameters
+        // as there are arguments, each of its argument type.
+        let callee = match self.arena.get(inner) {
+            Ty::Named { which: 0, args: ds } => match &ds[..] {
+                [D::Effect(e), D::Type(elem), D::Type(r)] => Some((e.clone(), vec![*elem; args.len()], *r)),
+                _ => None,
+            },
+            t => t.as_subr(),
+        };
+        let Some((_, params, result)) = callee else {
             return Err(FxError::at(span, format!("not a subroutine, even once projected: {}", self.show_ty(ft))));
         };
         if params.len() != args.len() {
@@ -799,6 +808,15 @@ impl Checker {
                 done[i] = Some((t, eff));
             } else if self.mentions_unknown_type(p, &u) {
                 return Err(not_known(self, p));
+            } else if let Exp::Var(s) = *self.arena.exp_at(*a)
+                && let Some(t) = self.lookup(s).filter(|t| matches!(self.arena.get(*t), Ty::Poly { .. }))
+            {
+                // A variable of a polymorphic type: instantiated at the
+                // parameter, and what it turns out to be solves more
+                // (`(apply list xs)`: `apply`'s effect).
+                let inst = self.instantiate_against(t, p, self.arena.span_of(*a))?;
+                self.unify(params[i], inst, &mut u, &mut HashSet::new());
+                done[i] = Some((inst, self.naming_effect(s, t)));
             } else {
                 let eff = self.check(*a, p)?;
                 done[i] = Some((p, eff));

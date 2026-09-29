@@ -113,6 +113,7 @@
       ((string=? n "int->u64") "%fx26-int->u64")
       ((string=? n "u64->int") "%fx26-u64->int")
       ((string=? n "%vlambda") "%fx26-vlambda")
+      ((string=? n "list") "list")
       ((string=? n "string-compare") "%fx26-string-compare")
       ((string=? n "string-search") "%fx26-string-search")
       ((string=? n "symbol-compare") "%fx26-symbol-compare")

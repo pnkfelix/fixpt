@@ -392,32 +392,54 @@
                    ((string=? p "") (c-fail (string-append "not yet compiled: " name)))
                    (else (c-prim c p n))))))))
 
+;; Whether a standard name has a value: an operation of an arity, or `list`,
+;; a `vsubr`.
+(define c-has-standard-value? (subr (read (globals c-arity standard-primitive)) (string) bool)
+  (lambda (n) (or (string=? n "list") (>= (c-arity n) 0))))
+
+;; Word `w`, with register code as standard operation `op` of `n` arguments
+;; has it as a value, for the native compiler to start from.
+(define c-register-twin (subr (maxeff compiles spin) (tword string int) tword)
+  (lambda (w op n)
+    (begin
+      (if (get c-registers)
+          (let ((cells ((get c-standard-register-code) op n)))
+            (if (null? cells) #u (begin (set-register-twin w cells) #u)))
+          #u)
+      w)))
+
+;; A closure, over no values, of `body` assembled as the word `name`, with
+;; register code as standard operation `op` of `n` arguments has it.
+(define c-standard-closure (subr (maxeff compiles spin) (code code string string int) unit)
+  (lambda (c body name op n)
+    (let ((w (c-register-twin (c-assemble body (string->symbol name)) op n)))
+      (begin (c-op1 c routine-closure (wcell-word w)) (c-emit c (i-cell (wcell-int 0)))))))
 ;; A standard operation as a value: a closure of its arity whose body
-;; applies it to its parameters.
+;; applies it to its parameters. `list` is a `vsubr`: `%vlambda`'s closure
+;; over the identity on one list, whose register code is any standard
+;; identity's (`certify-acyclic`'s).
 (define c-standard-value (subr (maxeff compiles spin) (string code) unit)
   (lambda (name c)
     (let ((n (c-arity name)) (body (the code (new nil))))
-      (if (< n 0)
-          (c-fail (string-append "not yet compiled as a value: " name))
-          (begin
-            (letrec ((params (subr (maxeff c-emits spin) (int) unit)
-                       (lambda (i)
-                         (if (= i n)
-                             #u
-                             (begin (c-op1 body routine-slot (wcell-int i)) (params (+ i 1)))))))
-              (if (string=? name "make-array")
-                  (begin (c-int body 0) (params 0) (c-prim body "%make-bloblet-filled" 3))
-                  (begin (params 0) (c-standard-on name n body))))
-            (c-op body routine-return)
-            (let ((w (c-assemble body (string->symbol name))))
-              (begin
-                ;; Register code too, for the native compiler to start from.
-                (if (get c-registers)
-                    (let ((cells ((get c-standard-register-code) name n)))
-                      (if (null? cells) #u (begin (set-register-twin w cells) #u)))
-                    #u)
-                (c-op1 c routine-closure (wcell-word w))))
-            (c-emit c (i-cell (wcell-int 0))))))))
+      (cond ((string=? name "list")
+             (begin
+               (c-op1 body routine-slot (wcell-int 0))
+               (c-op body routine-return)
+               (c-standard-closure c body name "certify-acyclic" 1)
+               (c-prim c "%fx26-vlambda" 1)))
+            ((< n 0) (c-fail (string-append "not yet compiled as a value: " name)))
+            (else
+             (begin
+               (letrec ((params (subr (maxeff c-emits spin) (int) unit)
+                          (lambda (i)
+                            (if (= i n)
+                                #u
+                                (begin (c-op1 body routine-slot (wcell-int i)) (params (+ i 1)))))))
+                 (if (string=? name "make-array")
+                     (begin (c-int body 0) (params 0) (c-prim body "%make-bloblet-filled" 3))
+                     (begin (params 0) (c-standard-on name n body))))
+               (c-op body routine-return)
+               (c-standard-closure c body name name n)))))))
 
 (define c-count-names (subr (read @globals) (names) int)
   (lambda (ns) (if (null? ns) 0 (+ 1 (c-count-names (cdr ns))))))

@@ -109,9 +109,9 @@ are in the last section, "Log: the glance's details", and in
   than 0 by the facts in scope, in both checkers (`sizes/solved-*.fx`).
 - **Variadic procedures, then `list`** (the user's order, 2026-09-29):
   `vsubr`, `vlambda` and `apply` in both checkers, the lowering, and
-  every machine, natively with the count in `x9`. Next: `list` in the
-  standard library, then the code and benchmarks rewritten to use it
-  (perhaps with a lint for `(cons A (cons B … nil))`).
+  every machine, natively with the count in `x9`; `list` in the standard
+  library, its pairs made in line natively. Next: the code and benchmarks
+  rewritten to use it (perhaps with a lint for `(cons A (cons B … nil))`).
 - **`.fx` size limits** (the user's, 2026-09-29): 1000 lines and 100
   characters, met by extracting subroutines and splitting files, never by
   re-wrapping (`fixpt_tidy::fx_size`, debt in `fx-size-debt.txt`). The
@@ -1997,8 +1997,9 @@ both checkers (`vsubr` generative type 0, variadic calls, `vlambda` read as
 machine through a cellular wrapper and the routine `rest`; natively (same
 day), the wrapper's register twin begins `vargs`, and every native call
 passes its count in `x9`; `apply` in both register compilers
-(`docs/fx26.md`, "Variadic procedures"). To do: a standard `list`; fixed
-parameters before the rest.
+(`docs/fx26.md`, "Variadic procedures"). A standard `list`, its pairs made
+in line by register code (same day). To do: fixed parameters before the
+rest.
 
 **Q3. Telemetry, stage 1** (`docs/research/telemetry.md`): fix the counts
 first. Done (2026-09-29): minor collections counted with major ones

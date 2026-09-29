@@ -269,6 +269,7 @@
         (s-special (what) (r-special g what args env te))
         ;; (`r-apply`'s, which `r-app` calls.)
         (s-apply () (r-decline))
+        (s-list () (r-list g args env te))
         (s-none () (r-decline)))))
   ;; In tail position a mark replaces this frame's, as stack code's
   ;; `withmark-tail` does: the arguments made, the frame left, and the
@@ -600,7 +601,7 @@
               (if many
                   (begin
                     (r-op1 g rop-const (wcell-nil))
-                    (r-args-list g args kept (- n 1) env te)
+                    (r-args-list g args kept (- n 1) (- register-regs 1) env te)
                     (let ((s (r-slot g)))
                       (begin
                         (r-opn g rop-setstk s)
@@ -671,15 +672,28 @@
                          (else y (r-decline)))))))))))
   ;; The list of the arguments from the `i`th down to the eighth, onto the
   ;; list in RESULT, by `cons`.
-  (r-args-list (subr rcompiles (rgen rargs (listof int @k) int renv cenv) unit)
-    (lambda (g args kept i env te)
-      (if (< i (- register-regs 1))
+  (r-args-list (subr rcompiles (rgen rargs (listof int @k) int int renv cenv) unit)
+    (lambda (g args kept i from env te)
+      (if (< i from)
           #u
           (begin
             (r-opn g rop-setreg 2)
             (r-arg-into g (r-nth-arg args i) (r-nth-int kept i) 1 env te)
             (r-opnn g rop-cellular routine-cons 2)
-            (r-args-list g args kept (- i 1) env te)))))
+            (r-args-list g args kept (- i 1) from env te)))))
+  ;; `(list x …)`: every argument that is not simple, or is in a register,
+  ;; made and kept first, in order, as for a list past `register-regs`; then
+  ;; the pairs made from the last, onto `nil`.
+  (r-list (subr rcompiles (rgen exps renv cenv) unit)
+    (lambda (g args env te)
+      (if (extract g leaf)
+          (r-decline)
+          (let* ((slots (get (extract g nslot))) (as (r-exp-args args))
+                 (kept (r-args-hard g as 0 -1 env te #t)))
+            (begin
+              (r-op1 g rop-const (wcell-nil))
+              (r-args-list g as kept (- (r-count-args as) 1) 0 env te)
+              (set (extract g nslot) slots))))))
   ;; A call-out, `prim p n` or `cellular r n`, on `args` in REG1…REGn.
   (r-call-out (subr rcompiles (rgen int int rargs renv cenv) unit)
     (lambda (g how what args env te)

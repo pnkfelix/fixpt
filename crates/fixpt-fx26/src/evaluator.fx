@@ -147,7 +147,7 @@
           "symbol=? char->string make-array array-ref array-set! array-length "
           (k-cat3 "make-continuation-prompt-tag abort-current-continuation "
                   "call-with-composable-continuation make-continuation-mark-key with-mark "
-                  "first-mark current-marks marks-of cwcc %vlambda apply ")))
+                  "first-mark current-marks marks-of cwcc %vlambda apply list ")))
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
 (define occurs? (subr (maxeff (read @globals) spin) (string string int) bool)
@@ -276,9 +276,14 @@
             ((string=? n "not") (v-bool (not (as-bool (arg xs 0)))))
             ((string=? n "cons") (v-cons (arg xs 0) (arg xs 1)))
             ((string=? n "%vlambda") (v-vsubr (arg xs 0)))
+            ((string=? n "list") (vals->val xs))
             ((string=? n "apply")
              (tagcase (arg xs 0)
                (v-vsubr (g) (apply1 g (arg xs 1)))
+               ;; `list`, whose one list is its value.
+               (v-prim (p) (if (string=? (symbol->string p) "list")
+                               (arg xs 1)
+                               (efail "apply: not a variadic procedure")))
                (else y (efail "apply: not a variadic procedure"))))
             ;; Regions are erased: an allocation in one is the heap's.
             ((region-prim? n)
