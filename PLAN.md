@@ -43,22 +43,25 @@ are in the last section, "Log: the glance's details", and in
   word.
 
 **In progress**
-- **The native convention**, the rest of step 4 (definitions whose
-  initializer does not check outside its definition), then steps 5
-  (continuations and prompts natively) to 7, which replace the collected
-  code area's steps 4b and 4c.
+- **The native convention**: of every test program's forms, as the REPL
+  runs them, 72 expressions run as machine code and none is declined
+  (2026-09-28, `every_test_program_runs_natively_as_cellular`; the 35
+  definitions once declined now run natively, checked against the type
+  they declare). Left of step 4: polymorphism in conventions (a copy per
+  convention) and adapters between conventions, to design with the user;
+  then steps 6 and 7.
 - **The reader's allocation** (the user's): 18.4 → 14.5 M words to read the
   front end; left are atoms' character lists, list marks, and closures for
   `letrec` helpers.
-- **Lambda lifting**, evaluated in the Rust compiler only, kept in `git
-  stash` ("lambda lifting, Rust compiler only"): the check phase 18% fewer
-  words, one collection fewer, 4% faster. To keep it: the FX-26 compiler
-  too, or, later, a Twobit-style pass that rewrites the program (checkable
-  again, and printable by a `fixpt expand`).
+- **Lambda lifting** is in both compilers (2026-09-28): 5% less
+  allocation in the front end's self-compile, one collection fewer, time
+  about the same. Later, maybe: as a Twobit-style pass that rewrites the
+  program (checkable again, and printable by a `fixpt expand`).
 
 **Next**, roughly in order
-1. Code size: an immediately applied lambda as a `let`; procedures that
-   only make a closure as frameless leaves.
+1. Done (2026-09-28): an immediately applied lambda as a `let`;
+   procedures that only make a closure as frameless leaves; lambda
+   lifting (the check phase 14% less allocation).
 2. Versions of bodies with closures; guards per segment between
    `comefrom`s (the user's).
 3. The rest of known calls; a nursery with a write barrier; heap sizing

@@ -282,6 +282,11 @@ its code in one.
    path declines (its initializer checked again alone fails where only its
    definition's context lets it check) runs as cellular code, and the
    closure it made is then compiled natively (`native_compiler`).
+   Measured 2026-09-28 (`every_test_program_runs_natively_as_cellular`):
+   of every test program's forms, as the REPL runs them, 72 expressions
+   run as machine code and none is declined; the definitions once
+   declined (35, their initializers not checking outside their
+   definitions) now run natively, checked against the type they declare.
    Still to do: polymorphism in conventions and a copy per convention;
    adapters between conventions.
 5. **Continuations, prompts and marks** on native frames (done,
