@@ -721,6 +721,15 @@
                   (tagcase x (r-var (q) (r-frozen q fin)) (r-heap () (r-frozen -1 fin)) (else z r)))
                 (else y r)))))
       (else y r))))
+;; Atom `a`, not a variable, substituted into: none if it reads, allocates
+;; or awaits at data frozen into the heap, which is pure (`k-frozen`), so
+;; that a region variable instantiated at `acyclic` or `const` leaves none.
+(define k-subst-atom (subr (maxeff kmakes spin) (k-atom k-map) k-eff)
+  (lambda (a m)
+    (let* ((r (k-subst-region (k-atom-region a) m))
+           (heap-frozen (tagcase r (r-frozen (p f) (< p 0)) (else y #f)))
+           (pure-there (tagcase a (a-read (x) #t) (a-alloc (x) #t) (a-await (x) #t) (else y #f))))
+      (if (and heap-frozen pure-there) nil (k-one (k-atom-with a r))))))
 (define k-subst-effect (subr (maxeff kmakes spin) (k-eff k-map) k-eff)
   (lambda (e m)
     (if (null? e)
@@ -733,7 +742,7 @@
                             (if (null? f)
                                 (k-one a)
                                 (tagcase (cdr (car f)) (de (x) x) (else y (k-one a))))))
-                        (else y (k-one (k-atom-with a (k-subst-region (k-atom-region a) m)))))))
+                        (else y (k-subst-atom a m)))))
           (k-union piece rest)))))
 (define k-memo-find (subr kreads (k-pairs int) int)
   (lambda (ms t)

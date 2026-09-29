@@ -1233,15 +1233,18 @@ impl<'a> Compiler<'a> {
 
     /// A standard operation as a value: a closure of its arity whose body
     /// applies it to its parameters. `list` is a `vsubr`: `%vlambda`'s
-    /// closure over the identity on one list, whose register code is any
-    /// standard identity's (`certify-acyclic`'s).
+    /// closure over a procedure of one list that copies it, as `datum-list`
+    /// does (and its register code is `datum-list`'s). A copy, not the list
+    /// itself: `apply` gives a list at `acyclic` as it is (F11), and `list`
+    /// may give it at any region, one that can be written.
     fn standard_value(&mut self, name: &str, code: &mut Vec<Item>) -> R<()> {
         if name == "list" {
             let mut body = Vec::new();
             self.op1(&mut body, "slot", Value::fixnum(0));
+            self.standard_on("datum-list", 1, &mut body)?;
             self.op(&mut body, "return");
             let w = self.assemble(&body, name)?;
-            self.register_twin(w, name, "certify-acyclic", 1)?;
+            self.register_twin(w, name, "datum-list", 1)?;
             self.op1(code, "closure", w);
             code.push(Item::Cell(Value::fixnum(0)));
             return self.prim(code, "%fx26-vlambda", 1);

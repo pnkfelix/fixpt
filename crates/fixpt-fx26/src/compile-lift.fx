@@ -416,16 +416,19 @@
       (begin (c-op1 c routine-closure (wcell-word w)) (c-emit c (i-cell (wcell-int 0)))))))
 ;; A standard operation as a value: a closure of its arity whose body
 ;; applies it to its parameters. `list` is a `vsubr`: `%vlambda`'s closure
-;; over the identity on one list, whose register code is any standard
-;; identity's (`certify-acyclic`'s).
+;; over a procedure of one list that copies it, as `datum-list` does (and its
+;; register code is `datum-list`'s). A copy, not the list itself: `apply`
+;; gives a list at `acyclic` as it is (F11), and `list` may give it at any
+;; region, one that can be written.
 (define c-standard-value (subr (maxeff compiles spin) (string code) unit)
   (lambda (name c)
     (let ((n (c-arity name)) (body (the code (new nil))))
       (cond ((string=? name "list")
              (begin
                (c-op1 body routine-slot (wcell-int 0))
+               (c-standard-on "datum-list" 1 body)
                (c-op body routine-return)
-               (c-standard-closure c body name "certify-acyclic" 1)
+               (c-standard-closure c body name "datum-list" 1)
                (c-prim c "%fx26-vlambda" 1)))
             ((< n 0) (c-fail (string-append "not yet compiled as a value: " name)))
             (else

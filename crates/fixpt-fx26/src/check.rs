@@ -1891,10 +1891,18 @@ pub(crate) fn subst_region(r: Region, map: &HashMap<DVar, D>) -> Region {
     }
 }
 
+/// An effect substituted into. A read, allocation or await at data frozen
+/// into the heap is pure (`Checker::frozen`), and so is dropped: a region
+/// variable instantiated at `acyclic` or `const` leaves none behind.
 fn subst_effect(e: &Effect, map: &HashMap<DVar, D>) -> Effect {
     let mut out = Effect::pure();
     for a in &e.0 {
         let sub_r = |r: Region| subst_region(r, map);
+        if let Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) = *a
+            && matches!(sub_r(r), Region::Frozen(None, _))
+        {
+            continue;
+        }
         let piece = match *a {
             Atom::Var(v) => match map.get(&v) {
                 Some(D::Effect(x)) => x.clone(),

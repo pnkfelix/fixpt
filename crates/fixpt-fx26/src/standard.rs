@@ -152,8 +152,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("int->u64", "(subr pure (int) u64)"),
     ("u64->int", "(subr pure (u64) int)"),
     // Variadic procedures (`vsubr`, `vlambda`): FX-87's.
-    // `(list x …)`: a fresh list of its arguments, a `vsubr` as a value.
-    ("list", "(poly ((t type)) (vsubr pure t (listof t acyclic)))"),
+    // `(list x …)`: a fresh list of its arguments, at any region, as a
+    // `cons` chain may be; a `vsubr` as a value.
+    ("list", "(poly ((t type) (r region)) (vsubr (alloc r) t (listof t r)))"),
     ("%vlambda", "(poly ((e effect) (t type) (r type)) (subr pure ((subr e ((listof t acyclic)) r)) (vsubr e t r)))"),
     ("apply", "(poly ((e effect) (t type) (r type) (g region)) (subr (maxeff e (read g)) ((vsubr e t r) (listof t g)) r))"),
     ("string-compare", "(subr pure (string string) int)"),
