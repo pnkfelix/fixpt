@@ -49,11 +49,13 @@ are in the last section, "Log: the glance's details", and in
   word.
 
 **In progress**
-- **The collector and native code** (the user's, 2026-09-29, next): stack
-  maps (frames laid out as bloblets: traced slots counted in a header, the
-  link and return address untraced), then a write barrier, a remembered
-  set and a nursery. Today frames are walked by their links, every slot a
-  value, and there is one generation.
+- **The collector and native code** (the user's, 2026-09-29;
+  `docs/research/generational-gc.md`): stack maps are done (each native
+  frame's header word, a mask of its live slots, stored before each call
+  and call-out; slots no longer cleared on entry). Next: a card-marking
+  write barrier and the cards as the remembered set, then a nursery with
+  minor collections that promote everything live. There is one
+  generation today.
 - **The native convention, after step 4**: steps 6 (checks where work is
   unbounded; retire `native-compiled` and register code's twins) and 7
   (the closure experiment). A copy of polymorphic code per convention
@@ -87,7 +89,8 @@ are in the last section, "Log: the glance's details", and in
 8. Smaller: `nlist` error messages; the language gaps the survey found;
    M8 docs and polish.
 9. Fixed-width integers, low priority: `i32`/`u32` in a word's upper
-   half, wrapping arithmetic; `i64`/`u64` once frames have stack maps.
+   half, wrapping arithmetic; `i64`/`u64` in native frames, whose stack
+   maps (2026-09-29) leave a slot outside the mask free for raw words.
 10. Far future: a k-CFA, for what the types do not already say.
 
 **Decided against, or waiting on the user**

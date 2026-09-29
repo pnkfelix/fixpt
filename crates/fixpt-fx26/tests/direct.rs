@@ -369,6 +369,44 @@ fn conversions_make_adapters() {
     }
 }
 
+/// A frame's stack map (`docs/research/generational-gc.md`): a large
+/// array in a slot that is dead across a call that collects is not copied
+/// by those collections; kept live across it, it is, each time
+/// (`programs/native/dead-slot.fx`).
+#[test]
+fn a_dead_slot_keeps_nothing_alive() {
+    use fixpt_fx26::session::Strategy;
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.strategy = Strategy::Cellular;
+    s.set_native_convention(true);
+    s.native_runner = Some(run_native);
+    s.native_compiler = Some(fixpt_native::direct::compile_closure);
+    s.register_code = true;
+    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/dead-slot.fx")).expect("reads");
+    let (defs, runs) = forms.split_at(forms.len() - 2);
+    for o in s.run_forms(defs).expect("runs") {
+        assert!(o.is_ok_and(|o| !o.printed.contains("not in the native convention")), "defined natively");
+    }
+    // Collecting often while the native code runs (not while the front end
+    // compiles it): how many collections, and how many words they copied.
+    s.native_runner = Some(run_native_collecting);
+    let mut seen = Vec::new();
+    for form in runs {
+        let heap = |s: &mut Fx26Session| (s.scheme.runtime_unrooted().heap.gc_count, s.scheme.runtime_unrooted().heap.words_copied);
+        let before = heap(&mut s);
+        let out = s.run_forms(std::slice::from_ref(form)).expect("runs").remove(0).expect("ran");
+        assert!(!out.printed.contains("not in the native convention"), "{}", out.printed);
+        let after = heap(&mut s);
+        seen.push((after.0 - before.0, after.1 - before.1));
+    }
+    // As many collections each; `keep`'s copy the array each time, and
+    // `drop`'s do not.
+    let ((n0, c0), (n1, c1)) = (seen[0], seen[1]);
+    assert!(n0 >= 10 && n0.abs_diff(n1) <= 1, "{seen:?}");
+    assert!(c1 > c0 + 100_000 * (n1 - 1), "{seen:?}");
+}
+
 /// `run_native`, collecting every 97 safepoints while the native code runs
 /// (not while the front end compiles it).
 fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {

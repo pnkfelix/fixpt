@@ -1070,17 +1070,25 @@ impl Heap {
     /// Collect if the heap warrants it. Call only at an engine safepoint, with
     /// every live `Value` reachable from `extra_roots` or the heap's own roots.
     pub fn maybe_collect(&mut self, extra_roots: &mut [&mut [Value]]) {
+        if self.collection_due() {
+            self.collect(extra_roots);
+        }
+    }
+
+    /// A safepoint, counted: whether the heap warrants a collection there,
+    /// which the caller then makes with [`collect`](Heap::collect). For a
+    /// machine whose roots cost something to gather, which it gathers only
+    /// then.
+    pub fn collection_due(&mut self) -> bool {
         if self.inhibited > 0 {
-            return;
+            return false;
         }
         let full = (self.top - self.active) as f64 >= self.semi as f64 * COLLECT_THRESHOLD
             || self.regions.reap_taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD
             || self.code.taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
         self.safepoints += 1;
         let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
-        if full || policy {
-            self.collect(extra_roots);
-        }
+        full || policy
     }
 
     /// Cheney semispace copy. Compacts, which is also what makes a dumped image

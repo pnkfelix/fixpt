@@ -146,7 +146,11 @@ frame's slots hold Values. Registers hold no Value across a safepoint, so
 the maps are all the collector needs. It walks the frames by their links,
 finds each frame's code by its return address, and scans and updates the
 slots that the code's map for that return address names. Nothing in a
-frame is a word, a cell index or a return entry.
+frame is a word, a cell index or a return entry. (As built, 2026-09-29:
+the map is in the frame, not found by return address. Each frame has a
+header word, a fixnum mask of the slots live, which the code stores
+before each call and call-out where it changes;
+`docs/research/generational-gc.md`.)
 
 **Metadata lives in the code bloblet.** A function's code is a bloblet in
 the heap's collected code area (`docs/object-model.md`, "A collected code
@@ -241,7 +245,9 @@ its code in one.
 3. **The collector and native frames** (in part, 2026-09-28: each compile
    is one code bloblet in the code area, kept alive by what refers to it
    and by the call running it, reclaimed after; frames walked by their
-   links, every slot a value, instead of stack maps; the code area's
+   links, each with its stack map in a header word (2026-09-29: a mask of
+   the slots live, stored before each call and call-out; slots no longer
+   cleared on entry); the code area's
    generate-run-drop test passes for this code,
    `code_compiled_and_dropped_is_reclaimed`. Still to do: code found by
    return address, for code no call roots): stack maps, the walk, code found

@@ -16,7 +16,8 @@
 //! | the stack's limit    | `x27`, pinned                                              |
 //! | the closure called   | `x10`, as the call enters it; kept in the frame if read    |
 //! | code's run address   | `x26`, pinned: a code bloblet's reference plus it          |
-//! | values across a call | the frame's slots, `[x29, #16 + 8n]` for slot `n`          |
+//! | values across a call | the frame's slots, `[x29, #24 + 8n]` for slot `n`          |
+//! | the frame's stack map | `[x29, #16]`: a fixnum, the mask of the slots traced       |
 //!
 //! Every register but the pinned ones is the caller's to lose across a
 //! call; register code already keeps whatever lives across one in its
@@ -933,14 +934,61 @@ impl Compiling<'_> {
             let at = starts.iter().position(|&s| s == j).expect("an instruction");
             starts[at + 1..].iter().copied().find(|&c| op_at(c) != "pop").filter(|&c| matches!(op_at(c), "invoke" | "tailinvoke"))
         };
-        // The frame: the link and return address, register code's slots,
-        // then this code bloblet and the closure running.
-        if frame.is_some_and(|m| 16 + 8 * (m + 2) > 504) {
+        // The frame: the link and return address, its stack map (a header,
+        // the mask of the slots traced), register code's slots, then this
+        // code bloblet and the closure running.
+        if frame.is_some_and(|m| 24 + 8 * (m + 2) > 504) {
             return decline("a frame too large for one `stp`".into());
         }
-        let size = frame.map(|m| (16 + 8 * (m as u32 + 2)).div_ceil(16) * 16);
-        let self_slot = frame.map(|m| 16 + 8 * m as u32);
-        let clo_slot = frame.map(|m| 16 + 8 * (m as u32 + 1));
+        let size = frame.map(|m| (24 + 8 * (m as u32 + 2)).div_ceil(16) * 16);
+        let self_slot = frame.map(|m| 24 + 8 * m as u32);
+        let clo_slot = frame.map(|m| 24 + 8 * (m as u32 + 1));
+        // Which slots are live after each instruction: a backward pass over
+        // register code's slots (`stack` and `load` read one, `setstk` and
+        // `store` write one), for the stack map a frame stores before each
+        // call and call-out (`docs/research/generational-gc.md`).
+        let live_out = {
+            let at_of: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
+            let ns = starts.len();
+            let (mut uses, mut defs) = (vec![0u64; ns], vec![0u64; ns]);
+            let mut succ: Vec<Vec<usize>> = vec![Vec::new(); ns];
+            for (si, &i) in starts.iter().enumerate() {
+                let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
+                let bit = |j: usize| 1u64 << cells[i + 1 + j].as_fixnum();
+                match op {
+                    "stack" => uses[si] |= bit(0),
+                    "load" => uses[si] |= bit(1),
+                    "setstk" => defs[si] |= bit(0),
+                    "store" => defs[si] |= bit(1),
+                    _ => {}
+                }
+                let to = || at_of[&((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize)];
+                match op {
+                    "return" | "tailinvoke" => {}
+                    "branch" => succ[si].push(to()),
+                    "branchf" | "brancht" | "global-guard" => succ[si].extend([si + 1, to()]),
+                    _ if si + 1 < ns => succ[si].push(si + 1),
+                    _ => {}
+                }
+            }
+            let (mut live_in, mut live_out) = (vec![0u64; ns], vec![0u64; ns]);
+            loop {
+                let mut changed = false;
+                for si in (0..ns).rev() {
+                    let out = succ[si].iter().fold(0, |m, &t| m | live_in[t]);
+                    let inn = (out & !defs[si]) | uses[si];
+                    if (out, inn) != (live_out[si], live_in[si]) {
+                        (live_out[si], live_in[si], changed) = (out, inn, true);
+                    }
+                }
+                if !changed {
+                    break live_out;
+                }
+            }
+        };
+        // The stack map stored where a collection may come, unless the same
+        // one is stored already on the only way here.
+        let mut map_stored: Option<u64> = None;
         let mut a = Asm::new();
         let entry = a.label();
         let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
@@ -977,6 +1025,22 @@ impl Compiling<'_> {
             si += 1;
             a.bind(labels[i]);
             let op = op_at(i);
+            if target[i] {
+                map_stored = None;
+            }
+            // Before what may collect, in a frame: the slots live after it,
+            // the code bloblet's, and the closure's if the code reads it.
+            if let Some(m) = frame
+                && framed[i]
+                && (matches!(op, "prim" | "cellular" | "lambda" | "invokeself") || op == "invoke")
+            {
+                let map = live_out[si - 1] | 1 << m | if captures { 1 << (m + 1) } else { 0 };
+                if map_stored != Some(map) {
+                    a.es(&mov_imm64(X16, Value::fixnum(map as i64).raw()));
+                    a.e(str(X16, FRAME, 16));
+                    map_stored = Some(map);
+                }
+            }
             let o = |j: usize| cells[i + 1 + j];
             let k = |v: Value| v.as_fixnum() as usize;
             let reg = |v: Value| v.as_fixnum() as Reg;
@@ -1090,19 +1154,22 @@ impl Compiling<'_> {
                 "setreg" => a.e(mov(reg(o(0)), RESULT)),
                 "movereg" => a.e(mov(reg(o(1)), reg(o(0)))),
                 // The frame made: the stack's limit checked (it leaves room
-                // for any one frame below it); every slot a value from the
-                // start, the fixnum 0, so that a collection may scan the
-                // whole frame; this code bloblet in its slot, so that the
-                // frame keeps it alive; the closure in its, if the code
-                // reads it.
+                // for any one frame below it); this code bloblet in its slot,
+                // so that the frame keeps it alive; the closure in its, if
+                // the code reads it. Its slots are not cleared: a
+                // collection traces only those its stack map says are live,
+                // each written before. One read before any write on some
+                // way (no register compiler makes one) is cleared.
                 "save" => {
                     let size = size.expect("a frame") as i64;
                     a.e(stp_pre(FRAME, LINK, SP, -size));
                     a.e(add_imm(FRAME, SP, 0));
                     a.e(cmp_sp(LIMIT));
                     trap(&mut a, &mut stubs, STACK_OVERFLOW, Cond::Lo);
-                    for off in (16..size).step_by(16) {
-                        a.e(stp(XZR, XZR, FRAME, off));
+                    map_stored = None;
+                    let unwritten = live_out[si - 1];
+                    for k in (0..64).filter(|k| unwritten & (1 << k) != 0) {
+                        a.e(str(XZR, FRAME, 24 + 8 * k));
                     }
                     ldr_field(&mut a, X9, 1);
                     a.e(str(X9, FRAME, self_slot.expect("a frame")));
@@ -1111,11 +1178,11 @@ impl Compiling<'_> {
                     }
                 }
                 "pop" => a.e(ldp_post(FRAME, LINK, SP, size.expect("a frame") as i64)),
-                "stack" => a.e(ldr(RESULT, FRAME, 16 + 8 * k(o(0)) as u32)),
-                "setstk" => a.e(str(RESULT, FRAME, 16 + 8 * k(o(0)) as u32)),
-                "load" => a.e(ldr(reg(o(0)), FRAME, 16 + 8 * k(o(1)) as u32)),
+                "stack" => a.e(ldr(RESULT, FRAME, 24 + 8 * k(o(0)) as u32)),
+                "setstk" => a.e(str(RESULT, FRAME, 24 + 8 * k(o(0)) as u32)),
+                "load" => a.e(ldr(reg(o(0)), FRAME, 24 + 8 * k(o(1)) as u32)),
                 "store" => {
-                    a.e(str(reg(o(0)), FRAME, 16 + 8 * k(o(1)) as u32));
+                    a.e(str(reg(o(0)), FRAME, 24 + 8 * k(o(1)) as u32));
                     // Its slot read back at once: the register is still it.
                     if let Some(j) = joinable(si - 1)
                         && op_at(j) == "stack"
@@ -1651,11 +1718,12 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         args.push(Value(st.aux));
     }
     let mut code = [Value(st.code)];
-    {
+    // The frames walked only for a collection.
+    if rt.heap.collection_due() {
         let mut roots = native_frames(st);
         roots.push(&mut args);
         roots.push(&mut code);
-        rt.heap.maybe_collect(&mut roots);
+        rt.heap.collect(&mut roots);
     }
     let out = match c {
         Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),
@@ -1826,7 +1894,14 @@ fn capture(rt: &mut fixpt_runtime::Runtime, st: &DState, frames: &[(u64, u64)], 
         let link = word(fp);
         words.push(Value::fixnum(if link > fp && link < end { (link - base) as i64 } else { -1 }));
         words.push(Value::fixnum(word(fp + 8) as i64));
-        words.extend((fp + 16..stop).step_by(8).map(|at| Value(word(at))));
+        // What the frame's stack map does not trace, dead or not a value,
+        // is kept as the fixnum 0: the vector is traced. (A control
+        // frame's marker is where the map would be: all of it is kept.)
+        let head = Value(word(fp + 16));
+        let map = if head.is_fixnum() { head.as_fixnum() as u64 } else { u64::MAX };
+        words.extend((fp + 16..stop).step_by(8).enumerate().map(|(j, at)| {
+            if j == 0 || (j <= 64 && map & (1 << (j - 1)) != 0) { Value(word(at)) } else { Value::fixnum(0) }
+        }));
     }
     let heap = &mut rt.heap;
     let saved = heap.vector_from(&words);
@@ -1908,23 +1983,45 @@ fn marks_of(heap: &Heap, k: Value, key: Value) -> Option<Vec<Value>> {
     Some(out)
 }
 
-/// The slots of every native frame, innermost first, from the frame that
-/// called out: each frame runs from its frame pointer to its caller's, the
-/// outermost to the stack's top, and every word of it but the first two
-/// (the caller's frame pointer and the return address) is a value.
+/// The words of the frame from `fp` to `end` that a collection traces, as
+/// runs (where each starts, and how many words). A frame of 16 bytes (a
+/// stub's) has none. A procedure's frame has a stack map where the first
+/// slot would be, a fixnum: the mask of its slots, from `fp + 24`, that are
+/// live. A control frame has its marker there instead, and every word of
+/// it after the link and return address is a value.
+fn traced(fp: u64, end: u64) -> Vec<(u64, usize)> {
+    let n = ((end - fp) / 8) as usize - 2;
+    if n == 0 {
+        return Vec::new();
+    }
+    let head = Value(word(fp + 16));
+    if !head.is_fixnum() {
+        return vec![(fp + 16, n)];
+    }
+    let map = head.as_fixnum() as u64;
+    let mut runs: Vec<(u64, usize)> = Vec::new();
+    for k in (0..n - 1).filter(|&k| k < 64 && map & (1 << k) != 0) {
+        let at = fp + 24 + 8 * k as u64;
+        match runs.last_mut() {
+            Some((start, len)) if *start + 8 * *len as u64 == at => *len += 1,
+            _ => runs.push((at, 1)),
+        }
+    }
+    runs
+}
+
+/// The traced words of every native frame, innermost first, from the frame
+/// that called out (`traced`): each frame runs from its frame pointer to
+/// its caller's, the outermost to the stack's top.
 fn native_frames<'a>(st: &DState) -> Vec<&'a mut [Value]> {
     let mut out = Vec::new();
-    let mut fp = st.fp;
-    while fp != 0 && fp < st.stack_top {
-        // SAFETY: a frame on the native stack, made by `save`, whose first
-        // word is the caller's frame pointer.
-        let caller = unsafe { *(fp as *const u64) };
-        let end = if caller > fp && caller <= st.stack_top { caller } else { st.stack_top };
-        let n = ((end - fp) / 8) as usize - 2;
-        // SAFETY: the frame's slots, each a value (`save` zeroes them), not
-        // overlapping any other frame's.
-        out.push(unsafe { std::slice::from_raw_parts_mut((fp + 16) as *mut Value, n) });
-        fp = if end == caller { caller } else { 0 };
+    for (fp, end) in frames_of(st) {
+        for (at, n) in traced(fp, end) {
+            // SAFETY: words of a frame on the native stack that its code
+            // wrote as values (its stack map says which), not overlapping
+            // any other frame's.
+            out.push(unsafe { std::slice::from_raw_parts_mut(at as *mut Value, n) });
+        }
     }
     out
 }

@@ -1849,3 +1849,38 @@ of declining the procedure. A name a standard operation has is no longer
 "simple" to the register compilers, since it may be such a closure, made
 when needed. Of every test program's forms, 102 expressions ran as
 machine code before these changes, with the widened report; 115 now.
+
+## Stack maps in native frames (2026-09-29)
+
+A native frame now has a header word after its link and return address:
+a fixnum, the mask of its slots the collector traces
+(`docs/research/generational-gc.md` §1). The native compiler finds which
+of register code's slots are live after each instruction, with a
+backward pass over `stack`/`load` (reads) and `setstk`/`store` (writes).
+Before each call, call-out and closure made in a frame, the code stores
+that mask with the code bloblet's slot and the closure's. It leaves the
+store out where the same mask is stored already on the only way there.
+The collector's walk, the foreign call-out's copy of the frames' values,
+and a continuation's copy follow the mask. `save` no longer clears the
+slots, since none is read unless written.
+
+A dead slot no longer keeps what it held: `a_dead_slot_keeps_nothing_alive`
+(`programs/native/dead-slot.fx`) holds a 100 000-word array in a slot
+dead across a call that collects about 30 times. Traced as before, every
+slot, both versions copied the array each time. With the map, only the
+version that keeps it live does.
+
+On the way: a call-out walked every native frame to gather roots whether
+or not it then collected (`maybe_collect`). It now asks the heap first
+(`collection_due`), and walks only for a collection. Native times:
+
+| program      | before | after |
+| ------------ | ------:| -----:|
+| captures     |   18.0 |  14.4 |
+| lists-region |  155.5 |  55.4 |
+| fib          |    2.3 |   2.2 |
+| tak          |    1.2 |   1.0 |
+
+(ms, best of 3; the rest unchanged. `lists-region` calls out for each
+region `cons`, 20 deep and more; `captures` takes continuations, whose
+copy reads each frame's mask directly.)
