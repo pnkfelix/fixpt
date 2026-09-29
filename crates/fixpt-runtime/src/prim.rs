@@ -458,14 +458,17 @@ prims! {
         for v in a.iter().copied() { chars.push(get_char(rt, v)?); }
         Ok(rt.heap.string_from_chars(&chars))
     });
+    // In time for the part taken, not the whole string: a reader takes
+    // each atom of a file's text so.
     "substring", 3, Some(3), simple!(|rt, a| {
-        let s = get_string(rt, a[0])?;
-        let chars: Vec<char> = s.chars().collect();
+        if !rt.heap.is_a(a[0], ObjType::String) { return rt.type_error("a string", a[0]); }
+        let n = rt.heap.string_len(a[0]);
         let start = int(rt, a[1])?; let end = int(rt, a[2])?;
-        if start < 0 || end < start || end as usize > chars.len() {
+        if start < 0 || end < start || end as usize > n {
             return rt.fail("substring range out of bounds", &[a[1], a[2]]);
         }
-        Ok(rt.heap.string_from_chars(&chars[start as usize..end as usize]))
+        let chars: Vec<char> = (start as usize..end as usize).map(|i| rt.heap.string_ref(a[0], i)).collect();
+        Ok(rt.heap.string_from_chars(&chars))
     });
     "string-append", 0, None, simple!(|rt, a| {
         let mut out = String::new();

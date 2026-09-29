@@ -1785,3 +1785,26 @@ The example's closure maker natively: 43 → 26 instructions (the inline
 allocation, then the slow path's seven, then `ret`). Both `r_collects`
 now also count a lifted procedure's added parameters when they ask
 whether a call of itself is a loop.
+
+## The reader: atoms taken whole; `substring` in time for its part (2026-09-28)
+
+The reader's atoms were lists of characters, a pair a character, then
+reversed and made a string: some 3 M of the 12.7 M words the front end's
+reading took. When an atom is all in the text given ahead, as a file's
+is, `read-atom-from` now takes it whole at the end, with `substring`, and
+lists nothing (`mode` 0); if a feed comes in the middle (text typed a
+character at a time) or an escape does, it lists what it has so far from
+that text and goes on as before. A feed changes `ahead-origin` (where the
+text given ahead starts, or -1), so an unchanged origin is an unchanged
+text. The loop's free names and parameters were kept to Twobit's bounds,
+so its procedures stay lambda-lifted (a first try had six added names
+and closures again).
+
+Found on the way, an asymptotic bug: the runtime's `substring` copied the
+whole string to take a part (a 760 KB text for each atom: the read went
+from 0.06 s to 150 s). It reads just the part now.
+
+The read: 13.1 → 11.8 M words, five collections → four, 0.060 → 0.054 s.
+The check phase after it now takes three collections where it took two
+(the thresholds moved), so the self-compile as a whole is the same
+(0.723 → 0.730 s, 58.8 → 57.9 M words).

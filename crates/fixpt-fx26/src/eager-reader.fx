@@ -116,6 +116,11 @@
 ;; while a feed runs, so that states stay values.
 (define ahead-text (ref string @s) (new ""))
 (define ahead-at (ref int @s) (new 0))
+;; Where the text given ahead starts, as the reader counts positions (its
+;; first character's), or -1 when there is none: each feed changes it (a
+;; later text starts later), so an atom read while it stays the same is all
+;; in one text, and is taken from it whole (`read-atom-from`).
+(define ahead-origin (ref int @s) (new -1))
 
 ;; The next character: the next one given ahead, or, if there is none,
 ;; suspend for it.
@@ -160,6 +165,10 @@
 ;; one for a token rather than one for each character.
 (define cursor-at (subr (maxeff (alloc @s) (read (globals make-cursor))) (char int syns) cursor)
   (lambda (c pos data) (make-cursor (cons c nil) pos data nil)))
+;; The characters of `text` from `i` to `j`, newest first: an atom's so far,
+;; listed once it cannot be taken whole.
+(define chars-back (subr (maxeff (read @globals) (alloc @s)) (string int int) chars)
+  (lambda (text i j) (the chars (reverse (the chars (string->list (substring text i j)))))))
 ;; Past whitespace, the character at `pos` one: the cursor at the first
 ;; that is not.
 (define skip-white (subr (maxeff reads spin) (int syns) cursor)
@@ -233,7 +242,9 @@
 (define eager-feed (subr (maxeff reads spin) (state char) state)
   (lambda (st ch)
     (if (state-need? st)
-        (begin (set ahead-text "") (set ahead-at 0) (eager-run (lambda () ((car (state-ks st)) ch))))
+        (begin (set ahead-text "") (set ahead-at 0)
+               (set ahead-origin -1)
+               (eager-run (lambda () ((car (state-ks st)) ch))))
         st)))
 
 ;; The same as feeding each of `text`'s characters in turn, but the reader
@@ -246,8 +257,9 @@
         (begin
           (set ahead-text text)
           (set ahead-at 1)
+          (set ahead-origin (state-position st))
           (let ((after (eager-run (lambda () ((car (state-ks st)) (string-ref text 0))))))
-            (begin (set ahead-text "") (set ahead-at 0) after))))))
+            (begin (set ahead-text "") (set ahead-at 0) (set ahead-origin -1) after))))))
 
 (define eager-state-kind (subr (maxeff (read @globals) (read @s)) (state) datum)
   (lambda (st) (if (state-need? st) (datum-symbol "need") (datum-symbol "error"))))
@@ -457,23 +469,40 @@
   (lambda (cur start prefix)
     (marking (entry m-atom start)
       (lambda ()
-        (let ((data (cur-data cur)))
-            ;; Each loop has the character `c` at `pos` in hand, and reads
-          ;; the next itself.
-          (letrec ((loop (subr (maxeff (read @globals) reads spin) (char int chars bool) result)
-                     (lambda (c pos acc escaped)
-                       (cond ((char=? c #\|) (bar (next-char (+ pos 1) data) (+ pos 1) acc))
-                             ((char=? c #\\)
-                              (let ((e (next-char (+ pos 1) data)))
-                                (loop (next-char (+ pos 2) data) (+ pos 2) (cons e acc) #t)))
-                             ((delimiter? c) (finish (cursor-at c pos data) (list->string (the chars (reverse acc))) escaped c))
-                             (else (loop (next-char (+ pos 1) data) (+ pos 1) (cons c acc) escaped)))))
+        (let ((data (cur-data cur))
+              ;; The text given ahead now, and where it starts: while the
+              ;; atom is all in it (the origin unchanged, as any feed changes
+              ;; it), its text is taken from there at the end, with no list
+              ;; of its characters.
+              (text0 (get ahead-text)) (origin0 (get ahead-origin)))
+          ;; Each loop has the character `c` at `pos` in hand, and reads
+          ;; the next itself. `mode`: 0, taken whole at the end; 1, listed
+          ;; in `acc`, newest first; 2, listed, with an escape.
+          (letrec ((loop (subr (maxeff (read @globals) reads spin) (char int chars int) result)
+                     (lambda (c pos acc mode)
+                       (if (and (= mode 0) (not (= (get ahead-origin) origin0)))
+                           ;; Fed anew: listed from here on.
+                           (loop c pos (chars-back text0 (- start origin0) (- pos origin0)) 1)
+                           (cond ((char=? c #\|)
+                                  (bar (next-char (+ pos 1) data) (+ pos 1)
+                                       (if (= mode 0) (chars-back text0 (- start origin0) (- pos origin0)) acc)))
+                                 ((char=? c #\\)
+                                  (let* ((acc (if (= mode 0) (chars-back text0 (- start origin0) (- pos origin0)) acc))
+                                         (e (next-char (+ pos 1) data)))
+                                    (loop (next-char (+ pos 2) data) (+ pos 2) (cons e acc) 2)))
+                                 ((delimiter? c)
+                                  (finish (cursor-at c pos data)
+                                          (if (= mode 0)
+                                              (substring text0 (- start origin0) (- pos origin0))
+                                              (list->string (the chars (reverse acc))))
+                                          (= mode 2) c))
+                                 (else (loop (next-char (+ pos 1) data) (+ pos 1) (if (= mode 0) acc (cons c acc)) mode))))))
                    ;; Inside `|…|`.
                    (bar (subr (maxeff (read @globals) reads spin) (char int chars) result)
                      (lambda (b pos acc)
                        (marking (entry m-symbol start)
                          (lambda ()
-                           (cond ((char=? b #\|) (loop (next-char (+ pos 1) data) (+ pos 1) acc #t))
+                           (cond ((char=? b #\|) (loop (next-char (+ pos 1) data) (+ pos 1) acc 2))
                                  ((char=? b #\\)
                                   (let ((e (next-char (+ pos 1) data)))
                                     (bar (next-char (+ pos 2) data) (+ pos 2) (cons e acc))))
@@ -486,7 +515,9 @@
                              (if (null? n)
                                  (cons (atom (datum-symbol text) start (cur-pos cur)) cur)
                                  (cons (atom (car n) start (cur-pos cur)) cur)))))))
-            (loop (cur-char cur) (cur-pos cur) (the chars (if (string=? prefix "") nil (reverse (the chars (string->list prefix))))) #f)))))))
+            (if (and (string=? prefix "") (and (>= (- start origin0) 0) (< (- start origin0) (string-length text0))))
+                (loop (cur-char cur) (cur-pos cur) nil 0)
+                (loop (cur-char cur) (cur-pos cur) (the chars (reverse (the chars (string->list prefix)))) 1))))))))
 
 ;;; -------------------------------------------------------------- atmosphere
 
