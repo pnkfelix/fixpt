@@ -22,7 +22,8 @@ crates/fixpt-fx26/src/check-synth.fx                                  759  123
 crates/fixpt-fx26/src/check-terminate.fx                              857  112
 crates/fixpt-fx26/src/check-types.fx                                  661   45
 crates/fixpt-fx26/src/regcode.fx                                     2277  269
-crates/fixpt-fx26/src/compile.fx                                     1828  275
+crates/fixpt-fx26/src/compile.fx                                     972  157
+crates/fixpt-fx26/src/compile-exps.fx                                858  118
 crates/fixpt-fx26/src/parser.fx                                       682   96
 crates/fixpt-fx26/src/eager-reader.fx                                 678   51
 crates/fixpt-fx26/src/evaluator.fx                                    545   53
