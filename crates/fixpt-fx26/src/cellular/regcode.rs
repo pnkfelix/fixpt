@@ -9,8 +9,10 @@
 //! then only the frame holds values; its registers are only temporaries,
 //! and arguments on their way to a call. What this compiler does not do yet
 //! (`letrec`, `prompt`, `tagcase`, products, sums, arrays and bloblets
-//! made, standard operations as values, more than `REGS` values), it
-//! declines: the lambda keeps its stack code alone.
+//! made, standard operations as values), it declines: the lambda keeps
+//! its stack code alone. Past `REGS` values (arguments, parameters, free
+//! values, operands), REG1…REG7 hold the first seven and REG8 a list of the
+//! rest, Larceny's convention (`r_args`).
 //!
 //! A `letrena`'s region is the heap's (`Heap::region_enter`), and its name
 //! a variable whose value is the region's handle, for `rcons`; a closure
@@ -222,9 +224,6 @@ impl Compiler<'_> {
     /// writes no global). Only where the body makes no closure, so that
     /// compiling it twice compiles nothing else twice.
     pub(super) fn register_code(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>) -> O<Vec<Value>> {
-        if params.len() > REGS {
-            return self.decline("more than REGS parameters");
-        }
         if self.summary_of(body) < 3 && self.inline_room(body, i64::MAX / 2) >= 0 && self.r_fast_may_pay(params, body, inner, this, own) {
             let (assumed, declined) = (self.assume.replace(Vec::new()), self.declined.take());
             let fast = self.register_body(params, body, inner, this, own);
@@ -286,7 +285,9 @@ impl Compiler<'_> {
     }
 
     fn register_body_in(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>) -> O<Gen> {
-        let leaf = !self.r_collects(body, inner, this, true);
+        // Past `REGS` parameters, the rest come as a list in REG8, taken
+        // apart into the frame.
+        let leaf = params.len() <= REGS && !self.r_collects(body, inner, this, true);
         let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new(), looped: false };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
@@ -314,7 +315,18 @@ impl Compiler<'_> {
             g.items.push(RItem::Frame);
             for i in 0..params.len() {
                 let s = g.slot();
-                g.op("store", &[Gen::n(i + 1), Gen::n(s)]);
+                if params.len() <= REGS || i + 1 < REGS {
+                    g.op("store", &[Gen::n(i + 1), Gen::n(s)]);
+                    continue;
+                }
+                g.op("reg", &[Gen::n(REGS)]);
+                g.op("op1", &[Value::fixnum(routine("pair-car") as i64)]);
+                g.op("setstk", &[Gen::n(s)]);
+                if i + 1 < params.len() {
+                    g.op("reg", &[Gen::n(REGS)]);
+                    g.op("op1", &[Value::fixnum(routine("pair-cdr") as i64)]);
+                    g.op("setreg", &[Gen::n(REGS)]);
+                }
             }
         }
         if let Some(t) = this {
@@ -1091,13 +1103,13 @@ impl Compiler<'_> {
         // A call: the arguments into REG1…REGn, the procedure in RESULT.
         // An inlined call: in a fast version, no call, so in a leaf too.
         if let Some((k, cell)) = self.r_inlined(env, f, args.len()) {
-            if self.assume.is_none() && (g.leaf || args.len() > REGS) {
-                return self.decline("more than REGS arguments");
+            if self.assume.is_none() && g.leaf {
+                return self.decline("a call in a leaf");
             }
             return self.r_inline(g, k, cell, f, args, env, te, tail);
         }
-        if g.leaf || args.len() > REGS {
-            return self.decline("more than REGS arguments");
+        if g.leaf {
+            return self.decline("a call in a leaf");
         }
         if let Some((k, cell, lam)) = self.r_specialized(env, f, args) {
             return self.r_specialize(g, k, cell, lam, args, env, te, tail);
@@ -1450,8 +1462,8 @@ impl Compiler<'_> {
     fn r_self_guarded(&mut self, g: &mut Gen, cell: Value, word: Value, start: usize, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         // In a fast version, a call in tail position is a loop, in a leaf
         // too.
-        if (g.leaf && !(tail && self.assume.is_some())) || args.len() > REGS {
-            return self.decline("more than REGS arguments");
+        if g.leaf && (!(tail && self.assume.is_some()) || args.len() > REGS) {
+            return self.decline("more than REGS arguments in a leaf");
         }
         let (regs, slots) = (g.next_reg, g.next_slot);
         let (call, end) = (g.label(), g.label());
@@ -1784,27 +1796,37 @@ impl Compiler<'_> {
 
     /// The arguments into REG1…REGn, in order, and then `f`, if a call's,
     /// into RESULT. Not in a leaf: an argument that is not simple is kept in
-    /// the frame until all are made; a simple one is made last.
+    /// the frame until all are made; a simple one is made last. Past `REGS`
+    /// (Larceny's convention), REG1…REG7 hold the first seven and REG8 a
+    /// list of the rest, made after every argument, by `cons`, which may
+    /// collect: so then an argument in a register is kept first, like one
+    /// that is not simple.
     fn r_args(&mut self, g: &mut Gen, args: &[Arg], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, f: Option<ExpId>) -> O<()> {
-        if g.leaf || args.len() > REGS {
-            return self.decline("more than REGS operands");
+        if g.leaf {
+            return self.decline("a call-out in a leaf");
         }
+        let many = args.len() > REGS;
         let slots = g.next_slot;
         let mut kept = Vec::new();
-        let simple = |c: &Self, a: &Arg| match a {
-            Arg::E(x) => c.r_simple(*x),
-            Arg::V(_) | Arg::Name(_) | Arg::Slot(_) | Arg::Lexical(_) => true,
-            Arg::Thunk(_) | Arg::AsIs(_) => false,
-        };
+        let simple: Vec<bool> = args
+            .iter()
+            .map(|a| match a {
+                Arg::E(x) => self.r_simple(*x) && !(many && matches!(self.r_var(env, *x), Some(RLoc::Reg(_)))),
+                Arg::Name(n) => !(many && matches!(self.r_where(env, *n), Some(RLoc::Reg(_)))),
+                Arg::V(_) | Arg::Slot(_) | Arg::Lexical(_) => true,
+                Arg::Thunk(_) | Arg::AsIs(_) => false,
+            })
+            .collect();
         // The last argument that is not simple goes straight to its
         // register, when the procedure is simple too: all that follows it
         // is simple, and touches only RESULT and its own register.
         let direct = match f {
+            _ if many => None,
             Some(f) if !self.r_simple(f) => None,
-            _ => args.iter().rposition(|a| !simple(self, a)),
+            _ => simple.iter().rposition(|s| !s),
         };
         for (i, a) in args.iter().enumerate() {
-            if simple(self, a) {
+            if simple[i] {
                 kept.push(None);
                 continue;
             }
@@ -1814,7 +1836,8 @@ impl Compiler<'_> {
                 Arg::Thunk(body) => {
                     self.r_lambda(g, &[], *body, env, te, None, None, false)?;
                 }
-                Arg::V(_) | Arg::Name(_) | Arg::Slot(_) | Arg::Lexical(_) => unreachable!(),
+                Arg::Name(n) => self.r_name(g, *n, env)?,
+                Arg::V(_) | Arg::Slot(_) | Arg::Lexical(_) => unreachable!(),
             }
             if Some(i) == direct {
                 g.op("setreg", &[Gen::n(i + 1)]);
@@ -1834,35 +1857,26 @@ impl Compiler<'_> {
             }
             _ => None,
         };
-        for (i, (a, k)) in args.iter().zip(&kept).enumerate() {
-            match (k, a) {
-                (Some(usize::MAX), _) => {}
-                (Some(s), _) => g.op("load", &[Gen::n(i + 1), Gen::n(*s)]),
-                (None, Arg::E(x)) => self.r_into(g, *x, i + 1, env, te)?,
-                (None, Arg::V(v)) => {
-                    g.op("const", &[*v]);
-                    g.op("setreg", &[Gen::n(i + 1)]);
-                }
-                (None, Arg::Slot(s)) => g.op("load", &[Gen::n(i + 1), Gen::n(*s)]),
-                (None, Arg::Name(n)) => match self.r_where(env, *n)? {
-                    RLoc::Slot(s) => g.op("load", &[Gen::n(i + 1), Gen::n(s)]),
-                    RLoc::Reg(r) if r == i + 1 => {}
-                    RLoc::Reg(r) => g.op("movereg", &[Gen::n(r), Gen::n(i + 1)]),
-                    RLoc::Free(k) => {
-                        g.op("lexical", &[Gen::n(k)]);
-                        g.op("setreg", &[Gen::n(i + 1)]);
-                    }
-                    RLoc::Const(v) => {
-                        g.op("const", &[v]);
-                        g.op("setreg", &[Gen::n(i + 1)]);
-                    }
-                    _ => return self.decline("a lifted procedure's added name, not a value in a place"),
-                },
-                (None, Arg::Lexical(k)) => {
-                    g.op("lexical", &[Gen::n(*k)]);
-                    g.op("setreg", &[Gen::n(i + 1)]);
-                }
-                (None, Arg::Thunk(_) | Arg::AsIs(_)) => unreachable!(),
+        // The list of those past the seventh, last first, kept.
+        let in_regs = if many {
+            g.op("const", &[Value::NULL]);
+            for i in (REGS - 1..args.len()).rev() {
+                g.op("setreg", &[Gen::n(2)]);
+                self.r_arg_into(g, &args[i], kept[i], 1, env, te)?;
+                g.op("cellular", &[Value::fixnum(routine("cons") as i64), Gen::n(2)]);
+            }
+            let s = g.slot();
+            g.op("setstk", &[Gen::n(s)]);
+            kept.truncate(REGS - 1);
+            kept.push(Some(s));
+            REGS
+        } else {
+            args.len()
+        };
+        for (i, k) in kept.iter().enumerate().take(in_regs) {
+            match (i, k) {
+                (i, Some(s)) if i + 1 == REGS && many => g.op("load", &[Gen::n(REGS), Gen::n(*s)]),
+                _ => self.r_arg_into(g, &args[i], *k, i + 1, env, te)?,
             }
         }
         match (f, fun) {
@@ -1871,6 +1885,49 @@ impl Compiler<'_> {
             (None, None) => {}
         }
         g.next_slot = slots;
+        Some(())
+    }
+
+    /// Argument `a` into REGk: from the frame slot it was kept in, if it
+    /// was (`usize::MAX`: in its register already), else made there.
+    fn r_arg_into(&mut self, g: &mut Gen, a: &Arg, kept: Option<usize>, k: usize, env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        match (kept, a) {
+            (Some(usize::MAX), _) => {}
+            (Some(s), _) => g.op("load", &[Gen::n(k), Gen::n(s)]),
+            (None, Arg::E(x)) => self.r_into(g, *x, k, env, te)?,
+            (None, Arg::V(v)) => {
+                g.op("const", &[*v]);
+                g.op("setreg", &[Gen::n(k)]);
+            }
+            (None, Arg::Slot(s)) => g.op("load", &[Gen::n(k), Gen::n(*s)]),
+            (None, Arg::Name(n)) => match self.r_where(env, *n)? {
+                RLoc::Slot(s) => g.op("load", &[Gen::n(k), Gen::n(s)]),
+                RLoc::Reg(r) if r == k => {}
+                RLoc::Reg(r) => g.op("movereg", &[Gen::n(r), Gen::n(k)]),
+                _ => {
+                    self.r_name(g, *n, env)?;
+                    g.op("setreg", &[Gen::n(k)]);
+                }
+            },
+            (None, Arg::Lexical(i)) => {
+                g.op("lexical", &[Gen::n(*i)]);
+                g.op("setreg", &[Gen::n(k)]);
+            }
+            (None, Arg::Thunk(_) | Arg::AsIs(_)) => unreachable!(),
+        }
+        Some(())
+    }
+
+    /// A lifted procedure's added name's value into RESULT: a value in a
+    /// place, not a register.
+    fn r_name(&mut self, g: &mut Gen, n: Sym, env: &[(Sym, RLoc)]) -> O<()> {
+        match self.r_where(env, n)? {
+            RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
+            RLoc::Reg(r) => g.op("reg", &[Gen::n(r)]),
+            RLoc::Free(k) => g.op("lexical", &[Gen::n(k)]),
+            RLoc::Const(v) => g.op("const", &[v]),
+            _ => return self.decline("a lifted procedure's added name, not a value in a place"),
+        }
         Some(())
     }
 
@@ -1913,11 +1970,10 @@ impl Compiler<'_> {
             Some(made) => made,
             None => self.lambda_word(ps, body, te, own).ok()?,
         };
-        if let Some(r) = region {
-            if fv.len() + 2 > REGS {
-                return self.decline("a closure in a region of more than REGS - 2 values");
-            }
-            let mut args = vec![Arg::E(r)];
+        // In a region, or past `REGS` (the rest a list, as a call's
+        // arguments are, `r_args`): the free values as a call-out's operands.
+        if region.is_some() || fv.len() > REGS {
+            let mut args: Vec<Arg> = region.iter().map(|r| Arg::E(*r)).collect();
             let mut patches = Vec::new();
             for (j, n) in fv.iter().enumerate() {
                 args.push(match self.r_where(env, *n)? {
@@ -1928,15 +1984,17 @@ impl Compiler<'_> {
                         Arg::V(Value::FALSE)
                     }
                     RLoc::Const(v) => Arg::V(v),
-                    _ => return None,
+                    _ => return self.decline("a free value in a register"),
                 });
             }
-            args.push(Arg::V(w));
-            self.r_prim(g, "%region-closure", &args, env, te)?;
+            if region.is_some() {
+                args.push(Arg::V(w));
+                self.r_prim(g, "%region-closure", &args, env, te)?;
+            } else {
+                self.r_args(g, &args, env, te, None)?;
+                g.op("lambda", &[w, Gen::n(fv.len())]);
+            }
             return Some(patches);
-        }
-        if fv.len() > REGS {
-            return self.decline("a closure of more than REGS values");
         }
         // Those in registers first, none overwritten before it is read
         // (`r_par_moves`); then the rest, in order.

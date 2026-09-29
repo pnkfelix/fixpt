@@ -35,12 +35,12 @@ checking and compiling the program).
 | `destruc`    | ((1 1 2) (1 1 1) (1 1 1 2) (1 1 1 1) (1 1 1 1 2… | 31.3     | elements a datatype (`nil` or int)                                       |
 | `diviter`    | 500                                              | 4.5      |                                                                          |
 | `divrec`     | 500                                              | 8.1      |                                                                          |
-| `earley`     | 2674440                                          | 761.4    | n=15; 11 procedures run as cellular code                                 |
+| `earley`     | 2674440                                          | 104.0    | n=15; was 761.4 s, 11 procedures cellular (more than 8 values)           |
 | `fib`        | 102334155                                        | 3.3      |                                                                          |
 | `fibc`       | 832040                                           | 31.0     | `cwcc`                                                                   |
 | `gcbench`    | 0                                                | 9.4      | float ballast kept as small boxed ints                                   |
 | `generator`  | (135 324 351)                                    | 9.7      |                                                                          |
-| `graphs`     | 213829                                           | 29.0     | 1 procedure runs as cellular code                                        |
+| `graphs`     | 213829                                           | 13.6     | was 29.0 s, 1 procedure cellular (more than 8 values)                    |
 | `hashtable0` | 102005                                           | 5.2      | measures a table written in FX-26                                        |
 | `ilist`      | ((x0 x1 x2 x3 x4 x5 x6 x7))                      | 2.2      | frozen lists                                                             |
 | `lattice`    | 120549                                           | 5.6      |                                                                          |
@@ -55,7 +55,7 @@ checking and compiling the program).
 | `nqueens`    | 73712                                            | 5.5      |                                                                          |
 | `ntakl`      | 13                                               | 3.6      |                                                                          |
 | `paraffins`  | 5731580                                          | 57.4     |                                                                          |
-| `parsing`    | (should return this list)                        | 125.2    | 28 KB input as a string in the file; 1 procedure runs as cellular code   |
+| `parsing`    | (should return this list)                        | 15.7     | 28 KB input as a string in the file; was 125.2 s (more than 8 values)    |
 | `peval`      | (lambda () (list (quote z) (quote y) (quote x) … | 17.7     | `/` dropped (needs rationals); in-file reader for the examples           |
 | `primes`     | (2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59… | 9.1      |                                                                          |
 | `puzzle`     | 2005                                             | 6.8      |                                                                          |

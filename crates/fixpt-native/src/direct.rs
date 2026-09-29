@@ -298,9 +298,6 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
     if !native {
         return Ok(fixpt_engine::cellular::cellular_adapter(heap, f, arity));
     }
-    if arity > 8 {
-        return Err("an adapter to the native convention of more than 8 arguments".into());
-    }
     let mut a = Asm::new();
     a.e(ldur(CLO, CLO, field_off(CLOSURE_FREE0)));
     a.e(movz(X9, arity as u32, 0));
@@ -324,9 +321,6 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
 pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Value]) -> Result<Value, fixpt_runtime::NativeExit> {
     let fail = fixpt_runtime::NativeExit::Failed;
     let p = DirectMachine::compiled_of(&rt.heap, closure).ok_or_else(|| fail("not a native closure".into()))?;
-    if args.len() > 8 {
-        return Err(fail("a native call of more than 8 arguments".into()));
-    }
     let fuel = rt.word_fuel.min(u64::MAX >> 1);
     let r = match CALLED_OUT.with(|c| c.get()) {
         Some((runner, sp)) => {
@@ -433,6 +427,8 @@ struct Proc {
     fields: Vec<Field>,
     code: Vec<u32>,
     len: usize,
+    /// A global's procedure, which may be called through its cell instead.
+    global: bool,
 }
 
 /// Compiles procedures and runs them.
@@ -513,13 +509,29 @@ impl DirectMachine {
     /// bloblet of its own: what it compiled, the first first; or why it
     /// could not.
     pub fn compile(&mut self, heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
-        let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None };
-        let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
-        let first = c.proc_of(word)?;
-        while let Some(p) = c.queue.pop() {
-            c.procedure(p)?;
-        }
-        let procs = std::mem::take(&mut c.procs);
+        // A global's procedure that cannot be compiled is called as what is
+        // not native code, and the rest compiled again without it.
+        let mut refused = std::collections::HashSet::new();
+        let (procs, first, free) = loop {
+            let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused };
+            let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
+            let first = c.proc_of(word)?;
+            let mut failed = None;
+            while let Some(p) = c.queue.pop() {
+                if let Err(e) = c.procedure(p) {
+                    failed = Some((p, e));
+                    break;
+                }
+            }
+            match failed {
+                None => break (std::mem::take(&mut c.procs), first, free),
+                Some((p, e)) if p == first || !c.procs[p].global => return Err(e),
+                Some((p, _)) => {
+                    refused = std::mem::take(&mut c.refused);
+                    refused.insert(c.procs[p].word.raw());
+                }
+            }
+        };
         // Every bloblet first, then their fields, which refer to each other.
         // Nothing here collects, so the values held do not move.
         let blobs: Vec<Value> =
@@ -587,7 +599,15 @@ impl DirectMachine {
 /// its call-outs allocate in, on `r`'s machine's stack from `top` down.
 fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64, top: u64) -> Result<Value, DirectTrap> {
     assert!(p.arity == usize::MAX || args.len() == p.arity, "the procedure's arity");
-    assert!(args.len() <= 8, "arguments in registers only");
+    // Past 8, the eighth a list of the rest (Larceny's convention).
+    let packed;
+    let args = if args.len() > 8 {
+        let rest = rt.heap.list_from(&args[7..]);
+        packed = [&args[..7], &[rest]].concat();
+        &packed[..]
+    } else {
+        args
+    };
     THROWN.with(|t| t.set(None));
     let mut st = DState {
         stack_top: top,
@@ -783,6 +803,9 @@ struct Compiling<'h> {
     callouts: &'h mut Vec<Callout>,
     /// The continuation procedure, once a procedure takes a continuation.
     resume: Option<usize>,
+    /// Globals' procedures that could not be compiled (a word's raw
+    /// value): called through their cells, as what is not native code.
+    refused: std::collections::HashSet<u64>,
 }
 
 impl Compiling<'_> {
@@ -813,7 +836,7 @@ impl Compiling<'_> {
         leave(&mut a);
         let code = a.finish().expect("placed");
         let q = self.procs.len();
-        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code });
+        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false });
         self.resume = Some(q);
         q
     }
@@ -830,7 +853,7 @@ impl Compiling<'_> {
         }
         let arity = h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;
         let p = self.procs.len();
-        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0 });
+        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0, global: false });
         self.by_word.insert(word.raw(), p);
         self.queue.push(p);
         Ok(p)
@@ -878,8 +901,10 @@ impl Compiling<'_> {
         if let Some((word, free)) = self.closure_parts(v)
             && self.name(word) != "undefined"
             && self.heap.is_register_word(self.heap.bloblet_slot(word, WORD_TWIN))
+            && !self.refused.contains(&word.raw())
         {
             let q = self.proc_of(word)?;
+            self.procs[q].global = true;
             return Ok(match free.is_empty() {
                 true => Field::Code(q),
                 false => Field::Closure(q, free),
@@ -1364,7 +1389,7 @@ impl Compiling<'_> {
                     let callout = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, callouts: &mut Vec<Callout>, c: Callout| {
                         let n = callouts.len();
                         callouts.push(c);
-                        for j in 0..c.arity() {
+                        for j in 0..c.arity().min(8) {
                             a.e(str(1 + j as Reg, ST, args + 8 * j as u32));
                         }
                         call_out(a, n);
@@ -1552,7 +1577,9 @@ impl Compiling<'_> {
                     // A native closure over REG1…REGn likewise, from the free
                     // space: its header; its free values, the code, and the
                     // trailer, fields counted back from where it points.
-                    if let (Callout::Closure { n }, Some(f)) = (c, code_field) {
+                    if let (Callout::Closure { n }, Some(f)) = (c, code_field)
+                        && n <= 8
+                    {
                         let total = n + 2;
                         a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
                         a.e(ldr(X14, X13, 0));
@@ -1598,7 +1625,7 @@ impl Compiling<'_> {
                         let n = self.callouts.len();
                         self.callouts.push(c);
                         let args = offset_of!(DState, args) as u32;
-                        for j in 0..c.arity() {
+                        for j in 0..c.arity().min(8) {
                             a.e(str(1 + j as Reg, ST, args + 8 * j as u32));
                         }
                         call_out(&mut a, n);
@@ -1762,7 +1789,15 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
     let n = if let Callout::Foreign | Callout::ClosureAny = c { st.nargs as usize } else { c.arity() };
-    let mut args: Vec<Value> = st.args[..n].iter().map(|a| Value(*a)).collect();
+    // Past 8, the eighth is a list of the rest (Larceny's convention).
+    let mut args: Vec<Value> = st.args[..n.min(8)].iter().map(|a| Value(*a)).collect();
+    if n > 8 {
+        let mut rest = args.pop().expect("eight");
+        while args.len() < n {
+            args.push(rt.heap.car(rest));
+            rest = rt.heap.cdr(rest);
+        }
+    }
     if let Callout::Foreign = c {
         args.push(Value(st.aux));
     }

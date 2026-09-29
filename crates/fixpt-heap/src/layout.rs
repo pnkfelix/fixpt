@@ -411,7 +411,10 @@ pub mod cellular {
 /// may move every object, so across one only the frame keeps values: the
 /// registers are dead after it, `RESULT` excepted.
 pub mod regcode {
-    /// The general registers.
+    /// The general registers. An operation on more values than there are
+    /// (arguments, parameters, a closure's free values, a call-out's
+    /// operands) has the first `REGS − 1` in REG1…REG7 and a list of the
+    /// rest in REG8: Larceny's convention.
     pub const REGS: usize = 8;
 
     /// The operations: name, operand count, and what each does.

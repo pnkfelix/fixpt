@@ -87,8 +87,21 @@ impl Asm {
     }
     /// Push `REG1`…`REGn`, `REG1` deepest.
     fn push_regs(&mut self, n: usize) {
-        for k in 1..=n {
+        if n <= REGS {
+            for k in 1..=n {
+                self.e(str_pre(reg(k), DSP, -8));
+            }
+            return;
+        }
+        // Past `REGS`, the rest are a list in the last register.
+        for k in 1..REGS {
             self.e(str_pre(reg(k), DSP, -8));
+        }
+        self.e(mov(X16, reg(REGS)));
+        for _ in REGS..=n {
+            self.e(ldur(X13, X16, -1));
+            self.e(str_pre(X13, DSP, -8));
+            self.e(ldur(X16, X16, 7));
         }
     }
     /// Back from somewhere that may have collected: the value on the data
@@ -702,7 +715,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     ("lambda", _) => Some("closure"),
                     _ => None,
                 };
-                if let Some(what) = inline {
+                if let Some(what) = inline.filter(|_| count <= REGS) {
                     a.inline_op(what, count, f(0), fields, slow);
                     a.b(done);
                 }
@@ -932,6 +945,12 @@ impl NativeMachine {
         self.install(heap, rw, at, &code, &resume)?;
         let slot = heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum() as usize;
         let n = heap.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;
+        // Past `REGS` arguments stack code runs the word as stack code:
+        // entering register code, it would have to make a list of the rest.
+        if n > REGS {
+            self.compile_word(heap, word)?;
+            return Ok(true);
+        }
         let adapter = assemble_adapter(n, slot);
         let (at, _) = self.reserve(adapter.len())?;
         let cells = heap.bloblet_head(word).fields + 1 - WORD_CELL0;

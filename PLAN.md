@@ -90,8 +90,8 @@ are in the last section, "Log: the glance's details", and in
   code; a native abort not finding a prompt cellular code installed, and
   its cost growing with the stack; an inlined `extract` from an earlier
   form getting field -1; frames too large for one `stp`; register
-  exhaustion on long operand chains. Left: register code declines above
-  8 free values, arguments or fields; a product argument is slow natively; the native stack is a
+  exhaustion on long operand chains; more than 8 values in register
+  code. Left: a product argument is slow natively; the native stack is a
   fixed 8 MB; native collection slows as live data grows (`paraffins`
   57 s native, 20 s lowered); precise globals effects doubled `set.fx`'s
   native time; `parse-int` panics on a bad radix; a standard operation as
@@ -1853,9 +1853,19 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   by name. Other facts keyed by position (conversions, effect summaries)
   are still lost in such bodies; separate compilation's S2 generalizes
   the fix.
-- Register code declines above 8 free values, arguments or
-  product/bloblet fields, prompt bodies included. Pass the rest on the
-  stack. Fixed (2026-09-29): frames too large for one `stp` (two
+- Fixed (2026-09-29): register code for more than 8 values (arguments,
+  parameters, free values, a call-out's operands: a bloblet's fields).
+  Larceny's convention: REG1…REG7 hold the first seven, REG8 a list of
+  the rest; the callee takes it apart into its frame; stack code calls a
+  register word of more than 8 parameters as stack code. `earley`,
+  `graphs`, `parsing` and `ratio-regions` now have no declines. Also: a
+  procedure that calls `stay-cellular` is not inlined or specialized
+  (it made its callers cellular: `aborts.fx`'s `mid` never ran natively),
+  and a global's procedure the native compiler cannot compile is called
+  through its cell, the rest compiled natively, where it used to fail
+  them all. Still to do: a constant list of the rest made at compile
+  time; prompt bodies of more than 8 free values.
+- Also fixed (2026-09-29): frames too large for one `stp` (two
   instructions now; a frame past 60 slots is unmapped, header -1, zeroed
   on entry and traced whole, `native/wide-frame.fx`); a long right-nested
   operand chain ran out of registers (the operand's register is now taken

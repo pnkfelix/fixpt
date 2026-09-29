@@ -459,13 +459,14 @@ pub fn compile(backend: Backend, name: &str, text: &str) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
-    let (fx26, rust) = match fixpt_fx26::compare::both_compilers(&mut session, text) {
+    let (fx26, rust, declined) = match fixpt_fx26::compare::both_compilers_declining(&mut session, text) {
         Ok(both) => both,
         Err(e) => {
             eprintln!("fixpt: {}", located(name, text, &e));
             return 1;
         }
     };
+    print!("{declined}");
     match (&fx26, &rust) {
         (Ok(a), Ok(b)) if a == b => {
             print!("{a}");

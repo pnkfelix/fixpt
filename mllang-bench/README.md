@@ -50,7 +50,7 @@ program lowered to Scheme. Times are one native run each, alone, on
 | `mlton/mpuz`                   | "J = 0 I = 1 D = 8 E = 2 C = 5 B = 6 F … | 8.2      | (doit 1)                                                           |
 | `mlton/peek`                   | (640000000 580000000)                    | 6.7      | (doit 1)                                                           |
 | `mlton/psdes-random`           | 2419669511                               | 3.8      | 300 000 words (MLton: 150M); xor emulated by byte tables           |
-| `mlton/ratio-regions`          | 144                                      | 3.8      | 30 × doit 24; 1 procedure runs as cellular code                    |
+| `mlton/ratio-regions`          | 144                                      | 4.2      | 30 × doit 24; had 1 procedure cellular (more than 8 values)        |
 | `mlton/string-concat`          | 468705                                   | 3.4      | loop 4000                                                          |
 | `mlton/tailfib`                | 701408733                                | 3.0      | 50M × fib 44                                                       |
 | `mlton/tailmerge`              | 0                                        | 2.6      | (doit 200)                                                         |

@@ -52,8 +52,11 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
         let o = |j: usize| cells[i + 1 + j];
         let reg = |v: Value| count(v, REGS as i64) && v.as_fixnum() >= 1;
         let n = REGS as i64;
+        // How many values an operation takes: past `REGS`, the rest are a
+        // list in the last register (Larceny's convention).
+        let many = |v: Value| count(v, 1 << 16);
         let ok = match name {
-            "args" => i == 0 && count(o(0), n),
+            "args" => i == 0 && many(o(0)),
             _ if i == 0 => return Err("register code begins `args n`".into()),
             "reg" => count(o(0), n),
             "setreg" => reg(o(0)),
@@ -63,10 +66,10 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
             "op1" | "op2" | "op2imm" => count(o(0), PRIMITIVES as i64 - 1) && (name != "op2" || reg(o(1))),
             "field" => o(0).is_fixnum() && o(0).as_fixnum() >= 2,
             "setfield" => o(0).is_fixnum() && o(0).as_fixnum() >= 2 && reg(o(1)),
-            "prim" => count(o(0), i64::MAX) && count(o(1), n),
-            "lambda" => heap.is_cellular_word(o(0)) && count(o(1), n),
-            "invoke" | "tailinvoke" => count(o(0), n),
-            "cellular" => count(o(0), ROUTINES.len() as i64 - 1) && count(o(1), n),
+            "prim" => count(o(0), i64::MAX) && many(o(1)),
+            "lambda" => heap.is_cellular_word(o(0)) && many(o(1)),
+            "invoke" | "tailinvoke" | "invokeself" => many(o(0)),
+            "cellular" => count(o(0), ROUTINES.len() as i64 - 1) && many(o(1)),
             "global" | "setglbl" => o(0).is_bloblet(),
             "branch" | "branchf" | "brancht" => {
                 if !o(0).is_fixnum() {

@@ -1615,12 +1615,15 @@
                   (c-resolve-arms (cdr arms))))))))
 ;; A definition of `n` as a lambda just compiled: inlined where it is
 ;; called, if small enough and not calling itself; else, with a parameter it
-;; only calls, specialized where it is called with a lambda there.
+;; only calls, specialized where it is called with a lambda there. Neither
+;; if it calls `stay-cellular`.
 (define c-record-inline
   (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (symbol (listof (productof (1 symbol) (2 syns-a)) acyclic) exp) unit)
   (lambda (n ps unresolved)
     (let ((body (c-resolve-extracts unresolved)))
     (cond ((null? (get c-last-word)) #u)
+          ;; Not one that stays cellular, which would make its callers so.
+          ((c-mentions? body 'stay-cellular) #u)
           ((and (>= (c-inline-room body c-inline-limit) 0) (not (c-mentions? body n)))
            (set c-inlines
                 (the (listof c-inline acyclic) (cons (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (c-genv-now))) (get c-inlines)))))

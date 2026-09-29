@@ -27,14 +27,14 @@
 ;;;   the wave queue), are top-level procedures taking those locals as one
 ;;;   record, `rr` (what closure conversion makes of them), and
 ;;;   `preflow_push`'s, which also close over `v`, take `v` too. A closure
-;;;   over more than eight variables is declined by the register compiler,
-;;;   and its procedure then runs as cellular code.
+;;;   over more than eight variables was then declined by the register
+;;;   compiler (no longer, since 2026-09-29: the rest go as a list).
 ;;; - `rr` is a bloblet read by accessor procedures (`rr-h`, …), not a
 ;;;   product read by `extract`: a procedure that calls (inlines) one that
 ;;;   `extract`s from a product parameter is declined by the register
 ;;;   compiler (reported, with a reproduction). Its constructor, `make-rr`,
-;;;   gives `make-bloblet` fifteen operands, and is declined too: it runs as
-;;;   cellular code, once per `doit`.
+;;;   gives `make-bloblet` fifteen operands, which the register compiler
+;;;   declined too, until 2026-09-29.
 ;;; - `'a matrix` (`Matrix of 'a array array`) is the array of arrays
 ;;;   itself, without the one-constructor box; its operations are
 ;;;   polymorphic, used at int and bool.
@@ -210,8 +210,8 @@
 (define rr-m2 (subr (read @heap) (rr) int) (lambda (s) (bloblet-ref s 12)))
 (define rr-q (subr (read @heap) (rr) (arrayof points @heap)) (lambda (s) (bloblet-ref s 13)))
 
-;; The locals made: fifteen operands to `make-bloblet`, more than the
-;; register compiler takes (eight), so this runs as cellular code, once.
+;; The locals made: fifteen operands to `make-bloblet`, past the eight
+;; registers: the rest go as a list in the last.
 (define* make-rr (subr rreff ((matrix int) (matrix int) (matrix int) int int) rr)
   (lambda (c-right c-down w height width)
     (the rr (make-bloblet 0 c-right c-down w height width

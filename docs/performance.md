@@ -1917,3 +1917,22 @@ The benchmarks: native `closures` 25.5 → 20.6 ms, `lists` 11.3 → 8.0;
 register code's `lists` 9.3 → 6.0, `closures` 19.4 → 15.0; the rest the
 same. The barrier's six instructions are not seen: no benchmark stores
 much into old objects.
+
+## More than 8 values in register code (2026-09-29)
+
+Register code took at most 8 arguments, parameters, free values or a
+call-out's operands, and declined the rest: its procedure ran as cellular
+code, and, natively, so did every procedure compiled with it. Larceny's
+convention now carries more: REG1…REG7 the first seven, REG8 a list of
+the rest, which the callee takes apart into its frame. The list costs a
+`cons` per value past the seventh, at each call. With it, and with a
+global's procedure the native compiler cannot compile called through its
+cell instead of failing its callers, the reference benchmarks that
+declined have no declines left. Native, one run each, seconds:
+
+| benchmark             | before | after |
+| --------------------- | ------:| -----:|
+| `earley`              |  761.4 | 104.0 |
+| `parsing`             |  125.2 |  15.7 |
+| `graphs`              |   29.0 |  13.6 |
+| `mlton/ratio-regions` |    3.8 |   4.2 |

@@ -492,6 +492,33 @@
 (define r-last-hard (subr (maxeff (read @globals) (read @k) spin) (rargs int int) int)
   (lambda (xs i found)
     (if (null? xs) found (r-last-hard (cdr xs) (+ i 1) (if (r-arg-simple? (car xs)) found i)))))
+(define r-nth-arg (subr (maxeff (read @globals) (read @k) spin) (rargs int) rarg)
+  (lambda (xs i) (if (= i 0) (car xs) (r-nth-arg (cdr xs) (- i 1)))))
+(define r-in-reg? (subr (read @k) ((listof rloc @k)) bool)
+  (lambda (l) (and (not (null? l)) (tagcase (car l) (rl-reg (r) #t) (else y #f)))))
+;; Whether an argument may wait until its value is needed, as
+;; `r-arg-simple?` says; past `register-regs`, a list of the rest is made
+;; first, which may collect, so then not one in a register.
+(define r-arg-simple-here? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (rarg renv bool) bool)
+  (lambda (a env many)
+    (and (r-arg-simple? a)
+         (or (not many)
+             (tagcase a
+               (a-e (x) (tagcase x (e-var (n p q) (not (and (< (c-conversion-at x) 0) (r-in-reg? (r-where env n))))) (else y #t)))
+               (a-name (n) (not (r-in-reg? (r-where env n))))
+               (else y #t))))))
+;; A lifted procedure's added name's value into RESULT: a value in a place.
+(define r-name (subr (maxeff compiles spin) (rgen symbol renv) unit)
+  (lambda (g n env)
+    (let ((l (r-where env n)))
+      (if (null? l)
+          (r-decline)
+          (tagcase (car l)
+            (rl-slot (s) (r-opn g rop-stack s))
+            (rl-reg (r) (r-opn g rop-reg r))
+            (rl-free (j) (r-opn g rop-lexical j))
+            (rl-const (c) (r-op1 g rop-const (r-const-cell c)))
+            (else y (r-decline)))))))
 (define r-nth-int (subr (maxeff (read @globals) (read @k) spin) ((listof int @k) int) int)
   (lambda (xs i) (if (= i 0) (car xs) (r-nth-int (cdr xs) (- i 1)))))
 (define r-nth-exp (subr (read @globals) ((listof exp acyclic) int) exp)
@@ -1250,10 +1277,10 @@
       (let ((n (c-count-exps args)))
         (cond ;; An inlined call: in a fast version, no call, so in a leaf too.
               ((not (null? (r-inlined env f n)))
-               (if (and (not (get r-assuming)) (or (extract g leaf) (> n register-regs)))
+               (if (and (not (get r-assuming)) (extract g leaf))
                    (r-decline)
                    (let ((i (car (r-inlined env f n)))) (r-inline g (car i) (cdr i) f args env te tail))))
-              ((or (extract g leaf) (> n register-regs)) (r-decline))
+              ((extract g leaf) (r-decline))
               ((not (null? (r-specialized env f args)))
                (let ((i (car (r-specialized env f args)))) (r-specialize g (extract i 1) (extract i 2) (extract i 3) args env te tail)))
               ;; A lifted procedure's call: the names it would have captured,
@@ -1463,7 +1490,7 @@
     (lambda (g cell word start f args env te tail)
       (let ((n (c-count-exps args)))
         ;; In a fast version, a call in tail position is a loop, in a leaf too.
-        (if (or (and (extract g leaf) (not (and tail (get r-assuming)))) (> n register-regs))
+        (if (and (extract g leaf) (or (not (and tail (get r-assuming))) (> n register-regs)))
             (r-decline)
             (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
                    (call (r-new-label g)) (end (r-new-label g)))
@@ -1586,33 +1613,48 @@
               (else y (begin (r-exp g x env te #f) (r-opn g rop-setreg k))))))))
   ;; The arguments into REG1…REGn, in order, and then `f`, if a call's (one
   ;; or none), into RESULT. Not in a leaf: an argument that is not simple is
-  ;; kept in the frame until all are made; a simple one is made last.
+  ;; kept in the frame until all are made; a simple one is made last. Past
+  ;; `register-regs` (Larceny's convention), REG1…REG7 hold the first seven
+  ;; and REG8 a list of the rest, made after every argument, by `cons`,
+  ;; which may collect: so then an argument in a register is kept first,
+  ;; like one that is not simple.
   (r-args (subr (maxeff compiles spin) (rgen rargs renv cenv (listof exp @k)) unit)
     (lambda (g args env te f)
-      (if (or (extract g leaf) (> (r-count-args args) register-regs))
+      (if (extract g leaf)
           (r-decline)
-          (let* ((slots (get (extract g nslot)))
+          (let* ((n (r-count-args args))
+                 (many (> n register-regs))
+                 (slots (get (extract g nslot)))
                  ;; The last argument that is not simple goes straight to its
                  ;; register, when the procedure is simple too.
-                 (direct (if (and (not (null? f)) (not (r-simple? (car f)))) -1 (r-last-hard args 0 -1)))
-                 (kept (r-args-hard g args 0 direct env te))
+                 (direct (if (or many (and (not (null? f)) (not (r-simple? (car f))))) -1 (r-last-hard args 0 -1)))
+                 (kept (r-args-hard g args 0 direct env te many))
                  (fun (if (and (not (null? f)) (not (r-simple? (car f))))
                           (begin (r-exp g (car f) env te #f) (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) s)))
                           -1)))
             (begin
-              (r-args-into g args kept 0 env te)
+              (if many
+                  (begin
+                    (r-op1 g rop-const (wcell-nil))
+                    (r-args-list g args kept (- n 1) env te)
+                    (let ((s (r-slot g)))
+                      (begin
+                        (r-opn g rop-setstk s)
+                        (r-args-into g args kept 0 (- register-regs 1) env te)
+                        (r-opnn g rop-load register-regs s))))
+                  (r-args-into g args kept 0 n env te))
               (cond ((>= fun 0) (r-opn g rop-stack fun))
                     ((not (null? f)) (r-exp g (car f) env te #f))
                     (else #u))
               (set (extract g nslot) slots))))))
   ;; For each argument: -1 if simple, made later; -2 if made into its
   ;; register now; else the frame slot it is kept in.
-  (r-args-hard (subr (maxeff compiles spin) (rgen rargs int int renv cenv) (listof int @k))
-    (lambda (g args i direct env te)
+  (r-args-hard (subr (maxeff compiles spin) (rgen rargs int int renv cenv bool) (listof int @k))
+    (lambda (g args i direct env te many)
       (if (null? args)
           nil
-          (if (r-arg-simple? (car args))
-              (cons -1 (r-args-hard g (cdr args) (+ i 1) direct env te))
+          (if (r-arg-simple-here? (car args) env many)
+              (cons -1 (r-args-hard g (cdr args) (+ i 1) direct env te many))
               (begin
                 (tagcase (car args)
                   (a-e (x) (r-exp g x env te #f))
@@ -1621,38 +1663,56 @@
                     (begin (r-lambda g (the (listof (productof (1 symbol) (2 syns-a)) acyclic) nil) body env te
                                      (the syms nil) (the (listof exp @k) nil) #f)
                            #u))
+                  (a-name (n) (r-name g n env))
                   (else y #u))
                 (let ((k (if (= i direct)
                              (begin (r-opn g rop-setreg (+ i 1)) -2)
                              (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) s)))))
-                  (cons k (r-args-hard g (cdr args) (+ i 1) direct env te))))))))
-  (r-args-into (subr (maxeff compiles spin) (rgen rargs (listof int @k) int renv cenv) unit)
-    (lambda (g args kept i env te)
-      (if (null? args)
+                  (cons k (r-args-hard g (cdr args) (+ i 1) direct env te many))))))))
+  ;; The arguments from the `i`th, short of the `stop`th, each into its
+  ;; register.
+  (r-args-into (subr (maxeff compiles spin) (rgen rargs (listof int @k) int int renv cenv) unit)
+    (lambda (g args kept i stop env te)
+      (if (or (null? args) (= i stop))
           #u
           (begin
-            (let ((k (car kept)))
-              (cond ((= k -2) #u)
-                    ((>= k 0) (r-opnn g rop-load (+ i 1) k))
-                    (else
-                     (tagcase (car args)
-                       (a-e (x) (r-into g x (+ i 1) env te))
-                       (a-v (v) (begin (r-op1 g rop-const v) (r-opn g rop-setreg (+ i 1))))
-                       (a-slot (s) (r-opnn g rop-load (+ i 1) s))
-                       (a-lexical (j) (begin (r-opn g rop-lexical j) (r-opn g rop-setreg (+ i 1))))
-                       (a-thunk (b) #u)
-                       (a-as-is (x) #u)
-                       (a-name (n)
-                         (let ((l (r-where env n)))
-                           (if (null? l)
-                               (r-decline)
-                               (tagcase (car l)
-                                 (rl-slot (s) (r-opnn g rop-load (+ i 1) s))
-                                 (rl-reg (r) (if (= r (+ i 1)) #u (r-opnn g rop-movereg r (+ i 1))))
-                                 (rl-free (j) (begin (r-opn g rop-lexical j) (r-opn g rop-setreg (+ i 1))))
-                                 (rl-const (c) (begin (r-op1 g rop-const (r-const-cell c)) (r-opn g rop-setreg (+ i 1))))
-                                 (else y (r-decline))))))))))
-            (r-args-into g (cdr args) (cdr kept) (+ i 1) env te)))))
+            (r-arg-into g (car args) (car kept) (+ i 1) env te)
+            (r-args-into g (cdr args) (cdr kept) (+ i 1) stop env te)))))
+  ;; Argument `a` into REGk: from the frame slot it was kept in, if it was
+  ;; (-2: in its register already), else made there.
+  (r-arg-into (subr (maxeff compiles spin) (rgen rarg int int renv cenv) unit)
+    (lambda (g a kept k env te)
+      (cond ((= kept -2) #u)
+            ((>= kept 0) (r-opnn g rop-load k kept))
+            (else
+             (tagcase a
+               (a-e (x) (r-into g x k env te))
+               (a-v (v) (begin (r-op1 g rop-const v) (r-opn g rop-setreg k)))
+               (a-slot (s) (r-opnn g rop-load k s))
+               (a-lexical (j) (begin (r-opn g rop-lexical j) (r-opn g rop-setreg k)))
+               (a-thunk (b) #u)
+               (a-as-is (x) #u)
+               (a-name (n)
+                 (let ((l (r-where env n)))
+                   (if (null? l)
+                       (r-decline)
+                       (tagcase (car l)
+                         (rl-slot (s) (r-opnn g rop-load k s))
+                         (rl-reg (r) (if (= r k) #u (r-opnn g rop-movereg r k)))
+                         (rl-free (j) (begin (r-opn g rop-lexical j) (r-opn g rop-setreg k)))
+                         (rl-const (c) (begin (r-op1 g rop-const (r-const-cell c)) (r-opn g rop-setreg k)))
+                         (else y (r-decline)))))))))))
+  ;; The list of the arguments from the `i`th down to the eighth, onto the
+  ;; list in RESULT, by `cons`.
+  (r-args-list (subr (maxeff compiles spin) (rgen rargs (listof int @k) int renv cenv) unit)
+    (lambda (g args kept i env te)
+      (if (< i (- register-regs 1))
+          #u
+          (begin
+            (r-opn g rop-setreg 2)
+            (r-arg-into g (r-nth-arg args i) (r-nth-int kept i) 1 env te)
+            (r-opnn g rop-cellular routine-cons 2)
+            (r-args-list g args kept (- i 1) env te)))))
   ;; A call-out, `prim p n` or `cellular r n`, on `args` in REG1…REGn.
   (r-call-out (subr (maxeff compiles spin) (rgen int int rargs renv cenv) unit)
     (lambda (g how what args env te)
@@ -1674,18 +1734,21 @@
           (begin (r-decline) (the patches nil))
           (let* ((made (let ((m (c-made-word ps body te own))) (if (null? m) (c-lambda-word ps body te own) (car m)))) (w (extract made 1)) (fv (extract made 2)) (n (c-length fv)))
             (if (null? region)
+                ;; Past `register-regs`, the rest a list, as a call's
+                ;; arguments are (`r-args`).
                 (if (> n register-regs)
-                    (begin (r-decline) (the patches nil))
+                    (let ((pa (r-free-args fv env 0)))
+                      (begin (r-args g (extract pa 1) env te (the (listof exp @k) nil))
+                             (r-op2 g rop-lambda (wcell-word w) (wcell-int n))
+                             (extract pa 2)))
                     (let ((patches (begin (r-par-moves g (r-reg-moves fv env 0)) (r-free-regs g fv env 0))))
                       (begin (r-op2 g rop-lambda (wcell-word w) (wcell-int n)) patches)))
-                (if (> (+ n 2) register-regs)
-                    (begin (r-decline) (the patches nil))
-                    (let* ((pa (r-free-args fv env 0)))
-                      (begin
-                        (r-prim g "%region-closure"
-                                (the rargs (cons (a-e (car region)) (r-append-arg (extract pa 1) (a-v (wcell-word w)))))
-                                env te)
-                        (extract pa 2)))))))))
+                (let* ((pa (r-free-args fv env 0)))
+                  (begin
+                    (r-prim g "%region-closure"
+                            (the rargs (cons (a-e (car region)) (r-append-arg (extract pa 1) (a-v (wcell-word w)))))
+                            env te)
+                    (extract pa 2))))))))
   ;; Each free value into REGj+1, as `lambda` wants them; a sibling not made
   ;; yet as `#f`, to be patched.
   (r-free-regs (subr (maxeff compiles spin) (rgen syms renv int) patches)
@@ -2042,7 +2105,19 @@
 
 (define r-store-params (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen int int) unit)
   (lambda (g i n)
-    (if (= i n) #u (let ((s (r-slot g))) (begin (r-opnn g rop-store (+ i 1) s) (r-store-params g (+ i 1) n))))))
+    (cond ((= i n) #u)
+          ((or (<= n register-regs) (< (+ i 1) register-regs))
+           (let ((s (r-slot g))) (begin (r-opnn g rop-store (+ i 1) s) (r-store-params g (+ i 1) n))))
+          (else
+           (let ((s (r-slot g)))
+             (begin
+               (r-opn g rop-reg register-regs)
+               (r-opn g rop-op1 routine-pair-car)
+               (r-opn g rop-setstk s)
+               (if (< (+ i 1) n)
+                   (begin (r-opn g rop-reg register-regs) (r-opn g rop-op1 routine-pair-cdr) (r-opn g rop-setreg register-regs))
+                   #u)
+               (r-store-params g (+ i 1) n)))))))
 
 ;; Whether a fast version may be worth compiling, asked before it is, as the
 ;; Rust compiler's `r_fast_may_pay` says: whether, with inlined calls no
@@ -2072,14 +2147,14 @@
         (set r-spec-at (the (listof rloc @k) nil))
         (set r-own-now (the (listof (productof (1 symbol) (2 tword) (3 int) (4 int)) @k) nil))
         (set r-own-name (if (null? own) (the (listof (pairof symbol int @k) @k) nil) (cons (the (pairof symbol int @k) (cons (extract (car own) 1) n)) nil)))
-        (let* ((leaf (not (r-collects body inner this #t)))
+        ;; Past `register-regs` parameters, the rest come as a list in the
+        ;; last register, taken apart into the frame.
+        (let* ((leaf (and (<= n register-regs) (not (r-collects body inner this #t))))
                (g (the rgen
                     (product (items (new (the (listof ritem @k) nil))) (leaf leaf) (nreg (new 0)) (nslot (new 0))
                              (mslot (new 0)) (labels (new (+ (if (null? this) 0 1) (+ (if (null? (get c-spec-now)) 0 1) (if (null? own) 0 1)))))
                              (this this) (start 0)))))
-          (if (> n register-regs)
-              (the (listof rgen @k) nil)
-              (begin
+          (begin
                 (r-opn g rop-args n)
                 (let ((env (r-env-of inner leaf)))
                   (begin
@@ -2105,7 +2180,7 @@
                           (begin (set r-own-now (cons (product (1 (extract (car own) 1)) (2 (extract (car own) 2)) (3 n) (4 start)) nil))
                                  (r-emit g (r-label start)))))
                     (r-exp g body env inner #t)
-                    (if (get r-declined) (the (listof rgen @k) nil) (the (listof rgen @k) (cons g nil))))))))))))
+                    (if (get r-declined) (the (listof rgen @k) nil) (the (listof rgen @k) (cons g nil)))))))))))
 ;; The body compiled once, as ever.
 (define r-plain-code
   (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 syns-a)) acyclic) exp cenv (listof c-this @k) (listof (productof (1 symbol) (2 tword)) @k)) (listof wcell @k))

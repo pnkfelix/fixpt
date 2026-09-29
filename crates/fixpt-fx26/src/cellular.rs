@@ -1509,15 +1509,19 @@ impl<'a> Compiler<'a> {
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
                         self.defining = None;
                         // Small enough, and not calling itself: inlined
-                        // where it is called.
+                        // where it is called. Not one that stays cellular
+                        // (`stay-cellular`), which would make its callers so.
+                        let stays = |c: &Self, body| c.c.interner.get("stay-cellular").is_some_and(|s| c.mentions(body, s));
                         if let Some((params, body, None)) = self.lambda_of(*exp)
                             && self.inline_room(body, INLINE_LIMIT) >= 0
                             && !self.mentions(body, *name)
+                            && !stays(self, body)
                         {
                             let (word, genv_len) = (self.last_word, self.genv.len());
                             self.inlines.push(Inline { name: *name, word, params, body, genv_len });
                         } else if let Some((params, body, None)) = self.lambda_of(*exp)
                             && self.inline_room(body, SPECIAL_LIMIT) >= 0
+                            && !stays(self, body)
                         {
                             // Else, with a parameter only called: specialized
                             // where it is called with a lambda there.

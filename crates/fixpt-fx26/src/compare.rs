@@ -92,6 +92,13 @@ pub fn both_checkers(s: &mut Fx26Session, text: &str) -> R<(Checked26, Checked26
 /// FX-26 one's, given what the Rust checker found, then the Rust one's; or
 /// why either made none. The outer error is the program not checking.
 pub fn both_compilers(s: &mut Fx26Session, text: &str) -> R<(Result<String, String>, Result<String, String>)> {
+    both_compilers_declining(s, text).map(|(fx26, rust, _)| (fx26, rust))
+}
+
+/// `both_compilers`, and a line for each procedure the Rust compiler made
+/// no register code for, and why: such a procedure runs as cellular code,
+/// however it is called.
+pub fn both_compilers_declining(s: &mut Fx26Session, text: &str) -> R<(Result<String, String>, Result<String, String>, String)> {
     let mut c = s.fresh_checker();
     let forms = c.read_in(FileId(0), text)?;
     let done = c.declare_ahead(&forms)?;
@@ -117,19 +124,18 @@ pub fn both_compilers(s: &mut Fx26Session, text: &str) -> R<(Result<String, Stri
             shown
         });
         let mut rust = Err(String::new());
+        let mut declined = String::new();
         sc.make(|m| {
             let mut comp = crate::cellular::Compiler::new(m.heap(), &c, text);
             comp.registers = true;
-            rust = comp.program(&tops).map(|w| {
-                // What register code declined, and why: a procedure without
-                // it runs as cellular code, however it is called.
-                let declined: String =
-                    comp.register_report.iter().filter_map(|(n, why)| why.as_ref().map(|w| format!("; `{n}`: no register code: {w}\n"))).collect();
-                format!("{declined}{}", fixpt_runtime::disasm::disassemble(m.heap(), w))
-            });
+            let word = comp.program(&tops);
+            declined =
+                comp.register_report.iter().filter_map(|(n, why)| why.as_ref().map(|w| format!("; `{n}`: no register code: {w}\n"))).collect();
+            drop(comp);
+            rust = word.map(|w| fixpt_runtime::disasm::disassemble(m.heap(), w));
             Value::NULL
         });
-        Ok((fx26, rust))
+        Ok((fx26, rust, declined))
     });
     s.scheme.engine.set_step_limit(limit);
     out

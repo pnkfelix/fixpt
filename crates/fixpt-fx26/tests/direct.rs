@@ -327,7 +327,9 @@ fn native_and_cellular_code_call_each_other() {
         let forms = s.checker.read_in(FileId(0), include_str!("programs/native/mixed.fx")).expect("reads");
         let out: Vec<String> =
             s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
-        assert!(out[4].ends_with("Ok(Some(\"5150\"))") && out[4].contains("run as cellular code"), "{out:?}");
+        // Native: `bump`, which stays cellular, is neither inlined nor
+        // specialized into its callers, so they stay native.
+        assert!(out[4].ends_with("Ok(Some(\"5150\"))") && !out[4].contains("run as cellular code"), "{out:?}");
         assert!(out[5].ends_with("Ok(Some(\"42\"))"), "{out:?}");
     }
 }
@@ -362,6 +364,27 @@ fn values_of(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> Vec<String> {
         .collect()
 }
 
+/// Each form's value, as `values_of` gives them, and the names of the
+/// definitions that ran as cellular code, not native code, in order.
+fn values_and_fallbacks(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> (Vec<String>, Vec<String>) {
+    let mut fell = Vec::new();
+    let mut values = Vec::new();
+    for o in s.run_forms(forms).expect("runs") {
+        match o {
+            Ok(o) => {
+                for line in o.printed.lines().filter(|l| l.contains("not in the native convention")) {
+                    if let Some(name) = line.split('`').nth(1).filter(|_| line.contains("so `")) {
+                        fell.push(name.to_string());
+                    }
+                }
+                values.extend(o.value.transpose().map(|v| v.unwrap_or_else(|e| format!("error: {e}"))));
+            }
+            Err(e) => values.push(format!("error: {}", e.message)),
+        }
+    }
+    (values, fell)
+}
+
 /// Conversions between the conventions make adapters, and native and
 /// cellular code call each other through them, nested hundreds deep:
 /// with each convention the program's, as the REPL runs each form, the
@@ -393,7 +416,8 @@ fn conversions_make_adapters_in_cellular_code() {
 /// code installed, and from cellular code to one native code installed,
 /// the abort going on from one machine to the other where it finds no
 /// prompt, and under a deep native stack, which the search no longer walks
-/// whole; and a frame's stack map (`docs/research/generational-gc.md`): a
+/// whole; more values than registers, the rest a list in the last one
+/// (`programs/native/many-values.fx`); and a frame's stack map (`docs/research/generational-gc.md`): a
 /// large array in a slot dead across a call that collects is not copied
 /// by those collections; kept live across it, it is, each time
 /// (`programs/native/dead-slot.fx`); and a frame too wide for its map
@@ -403,7 +427,9 @@ fn native_session_adapters_aborts_and_stack_maps() {
     let mut s = session(true);
     assert_eq!(adapters_in(&mut s), ADAPTED, "adapters");
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/aborts.fx")).expect("reads");
-    assert_eq!(values_of(&mut s, &forms), ["15", "105", "400200"], "aborts");
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    assert_eq!(values, ["15", "105", "400200"], "aborts");
+    assert_eq!(fell, ["in-cellular", "raise-cellular"], "only those that stay cellular do");
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/inlined-extract.fx")).expect("reads");
     for o in s.run_forms(&forms).expect("runs") {
         let o = o.expect("ran");
@@ -438,6 +464,12 @@ fn native_session_adapters_aborts_and_stack_maps() {
     // under those collections (`programs/native/wide-frame.fx`).
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/wide-frame.fx")).expect("reads");
     assert_eq!(values_of(&mut s, &forms), ["2485", "37450000"], "wide frame");
+    // More values than registers, the rest a list in the last register, under
+    // those collections too.
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/many-values.fx")).expect("reads");
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    assert_eq!(values, ["25", "1012", "-154", "119", "1025", "1001"], "many values");
+    assert_eq!(fell, ["cell10", "from-cell"], "only those that stay cellular do");
 }
 
 /// `run_native`, collecting every 97 safepoints while the native code runs
