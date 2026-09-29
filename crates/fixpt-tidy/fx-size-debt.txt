@@ -12,9 +12,6 @@ exempt tests/conformance/fx91/
 exempt crates/fixpt-fx26/tests/programs/native/wide-frame.fx
 
 # In debt: path, lines, lines over 100 columns.
-crates/fixpt-fx26/src/check-program.fx                                661  112
-crates/fixpt-fx26/src/check-synth.fx                                  759  123
-crates/fixpt-fx26/src/check-terminate.fx                              857  112
 crates/fixpt-fx26/src/regcode.fx                                     525   51
 crates/fixpt-fx26/src/regcode-exps.fx                                654   98
 crates/fixpt-fx26/src/regcode-core.fx                                926   93
