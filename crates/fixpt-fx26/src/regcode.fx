@@ -221,6 +221,58 @@
 ;; `names` as arguments, their values wherever they are, then `rest`.
 (define r-name-args (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms rargs) rargs)
   (lambda (names rest) (if (null? names) rest (the rargs (cons (a-name (car names)) (r-name-args (cdr names) rest))))))
+;;; Register moves: (source, destination), source 0 being RESULT.
+(define-type rmoves (listof (pairof int int @k) @k))
+;; Whether a move of `ms` but the `k`th reads register `d`.
+(define r-read-by-other? (subr (maxeff (read @globals) (read @k) spin) (rmoves int int int) bool)
+  (lambda (ms d k i)
+    (cond ((null? ms) #f)
+          ((and (not (= i k)) (= (car (car ms)) d)) #t)
+          (else (r-read-by-other? (cdr ms) d k (+ i 1))))))
+;; The index of the first move of `ms` (from the `k`th of `all`) whose
+;; destination no other move reads; -1 if none.
+(define r-free-move (subr (maxeff (read @globals) (read @k) spin) (rmoves rmoves int) int)
+  (lambda (all ms k)
+    (cond ((null? ms) -1)
+          ((r-read-by-other? all (cdr (car ms)) k 0) (r-free-move all (cdr ms) (+ k 1)))
+          (else k))))
+(define r-nth-move (subr (maxeff (read @globals) (read @k) spin) (rmoves int) (pairof int int @k))
+  (lambda (ms k) (if (= k 0) (car ms) (r-nth-move (cdr ms) (- k 1)))))
+(define r-drop-move (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (rmoves int int) rmoves)
+  (lambda (ms k i) (cond ((null? ms) nil) ((= i k) (cdr ms)) (else (cons (car ms) (r-drop-move (cdr ms) k (+ i 1)))))))
+;; `ms`, those reading register `d` reading RESULT instead.
+(define r-reread (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (rmoves int) rmoves)
+  (lambda (ms d)
+    (if (null? ms)
+        nil
+        (cons (if (= (car (car ms)) d) (the (pairof int int @k) (cons 0 (cdr (car ms)))) (car ms)) (r-reread (cdr ms) d)))))
+;; Register moves made so that none overwrites what another has yet to
+;; read, as the Rust compiler's `r_par_moves`: the first whose destination
+;; no other reads, in order; else, the rest a cycle, the first's
+;; destination kept in RESULT, and read from there.
+(define r-par-moves (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (rgen rmoves) unit)
+  (lambda (g ms)
+    (if (null? ms)
+        #u
+        (let ((k (r-free-move ms ms 0)))
+          (if (>= k 0)
+              (let ((m (r-nth-move ms k)))
+                (begin (if (= (car m) 0) (r-opn g rop-setreg (cdr m)) (r-opnn g rop-movereg (car m) (cdr m)))
+                       (r-par-moves g (r-drop-move ms k 0))))
+              (let ((d (cdr (car ms))))
+                (begin (r-opn g rop-reg d) (r-par-moves g (r-reread ms d)))))))))
+;; The moves of each free value of `fv` (from the `j`th) in a register into
+;; REGj+1, where it is not there already.
+(define r-reg-moves (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (syms renv int) rmoves)
+  (lambda (fv env j)
+    (if (null? fv)
+        nil
+        (let ((l (r-where env (car fv))) (rest (r-reg-moves (cdr fv) env (+ j 1))))
+          (if (null? l)
+              rest
+              (tagcase (car l)
+                (rl-reg (r) (if (= r (+ j 1)) rest (cons (the (pairof int int @k) (cons r (+ j 1))) rest)))
+                (else y rest)))))))
 
 ;; Whether `f` is the procedure running, called with its arity: its own
 ;; name, still bound where the procedure knows itself to be.
@@ -770,6 +822,9 @@
                 (or (r-collects body inner this tail) (r-collects-joins bs inner this)))
               #t))
         (e-sym (v a b) #f) (e-unit (a b) #f)
+        ;; A closure made as the value: its call-out may collect, but nothing
+        ;; is used after it (`r-lambda`).
+        (e-lambda (ps body a b) (not tail))
         (e-if (t th el a b) (or (r-collects t e this #f) (or (r-collects th e this tail) (r-collects el e this tail))))
         (e-let (bs body a b) (or (r-collects-let bs e this) (r-collects body e this tail)))
         (e-begin (es a b) (r-collects-begin es e this tail))
@@ -948,11 +1003,11 @@
             (if (< i 0)
                 (r-decline)
                 (begin (r-exp g p env te #f) (r-opn g rop-field (+ i 2)) (r-done g tail)))))
-        (e-lambda (ps body a b) (begin (r-lambda g ps body env te (the syms nil) (the (listof exp @k) nil)) (r-done g tail)))
+        (e-lambda (ps body a b) (begin (r-lambda g ps body env te (the syms nil) (the (listof exp @k) nil) tail) (r-done g tail)))
         (e-rlambda (r l a b)
           (tagcase l
             (e-lambda (ps body la lb)
-              (begin (r-lambda g ps body env te (the syms nil) (the (listof exp @k) (cons r nil))) (r-done g tail)))
+              (begin (r-lambda g ps body env te (the syms nil) (the (listof exp @k) (cons r nil)) #f) (r-done g tail)))
             (else y (r-decline))))
         (e-sum (t v a b)
           (begin
@@ -1515,7 +1570,7 @@
                   (a-e (x) (r-exp g x env te #f))
                   (a-thunk (body)
                     (begin (r-lambda g (the (listof (productof (1 symbol) (2 syns-a)) acyclic) nil) body env te
-                                     (the syms nil) (the (listof exp @k) nil))
+                                     (the syms nil) (the (listof exp @k) nil) #f)
                            #u))
                   (else y #u))
                 (let ((k (if (= i direct)
@@ -1560,15 +1615,18 @@
   ;; none), the closure is made there, by `%region-closure h fv … w`. What it
   ;; gives: for each sibling not made yet (a `letrec`'s), the free value's
   ;; index and the sibling's frame slot.
-  (r-lambda (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syns-a)) acyclic) exp renv cenv syms (listof exp @k)) patches)
-    (lambda (g ps body env te own region)
-      (if (extract g leaf)
+  ;; A leaf makes a closure only as its value, in tail position (`tail`): its
+  ;; call-out, where the free space has no room, may collect, and then
+  ;; nothing but the closure is used after.
+  (r-lambda (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 syns-a)) acyclic) exp renv cenv syms (listof exp @k) bool) patches)
+    (lambda (g ps body env te own region tail)
+      (if (and (extract g leaf) (not (and tail (null? region))))
           (begin (r-decline) (the patches nil))
           (let* ((made (let ((m (c-made-word ps body te own))) (if (null? m) (c-lambda-word ps body te own) (car m)))) (w (extract made 1)) (fv (extract made 2)) (n (c-length fv)))
             (if (null? region)
                 (if (> n register-regs)
                     (begin (r-decline) (the patches nil))
-                    (let ((patches (r-free-regs g fv env 0)))
+                    (let ((patches (begin (r-par-moves g (r-reg-moves fv env 0)) (r-free-regs g fv env 0))))
                       (begin (r-op2 g rop-lambda (wcell-word w) (wcell-int n)) patches)))
                 (if (> (+ n 2) register-regs)
                     (begin (r-decline) (the patches nil))
@@ -1588,6 +1646,8 @@
             (if (null? l)
                 (begin (r-decline) (the patches nil))
                 (tagcase (car l)
+                  ;; (Moved already, `r-reg-moves`.)
+                  (rl-reg (r) (r-free-regs g (cdr fv) env (+ j 1)))
                   (rl-slot (s) (begin (r-opnn g rop-load (+ j 1) s) (r-free-regs g (cdr fv) env (+ j 1))))
                   (rl-free (i) (begin (r-opn g rop-lexical i) (r-opn g rop-setreg (+ j 1)) (r-free-regs g (cdr fv) env (+ j 1))))
                   (rl-pending (s)
@@ -1855,7 +1915,7 @@
     (lambda (g all at i name ps lbody region env te)
       (let* ((n (c-count-params ps))
              (own (r-sibling-env all at i 0 lbody n env te)))
-        (r-lambda g ps lbody (extract own 1) (extract own 2) (the syms (cons name nil)) region))))
+        (r-lambda g ps lbody (extract own 1) (extract own 2) (the syms (cons name nil)) region #f))))
   ;; Each sibling where the closure being made sees it: a loop, if it is this
   ;; one and only called so in its body; else the slot it will be in.
   (r-sibling-env

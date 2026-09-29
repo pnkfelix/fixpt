@@ -102,8 +102,10 @@ impl Asm {
     /// which change it. So it is the link wherever the procedure is, and
     /// leaving the frame need not load it.
     fn relink(&mut self) {
-        if let Some(m) = self.link {
-            self.slot(LR, m, false);
+        match self.link {
+            Some(m) => self.slot(LR, m, false),
+            // A leaf's, kept in the state around its call-out.
+            None => self.e(ldr(LR, ST, off(offset_of!(State, leaf_link)))),
         }
     }
     /// A call-out to routine `n` with the ip at field `f`: as
@@ -695,6 +697,10 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     a.b(done);
                 }
                 a.bind(slow);
+                if a.link.is_none() {
+                    // A leaf's link, kept while it calls out (`relink`).
+                    a.e(str(LR, ST, off(offset_of!(State, leaf_link))));
+                }
                 a.push_regs(count);
                 a.r_callout(routine_n, at);
                 resume[next] = a.here() as i64;

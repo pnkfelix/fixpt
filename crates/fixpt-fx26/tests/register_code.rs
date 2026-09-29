@@ -405,3 +405,22 @@ fn a_lambda_applied_at_once_is_a_let() {
         assert!(!f.contains("closure") && !f.contains("lambda word") && !f.contains("invoke") && !f.contains("call"), "{who}:\n{f}");
     }
 }
+
+/// A procedure whose value is a closure it makes, and that calls nothing,
+/// is a leaf: no frame. Its free values are moved into REG1…REGn with none
+/// overwritten before it is read. Both compilers.
+#[test]
+fn a_procedure_that_only_makes_a_closure_is_a_leaf() {
+    let text = include_str!("programs/run/leaf-closures.fx");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    for (who, code) in [("FX-26", fx26), ("Rust", rust)] {
+        let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
+        let blocks: Vec<&str> = code.split("its register code").skip(1).map(|b| b.split("\n\n").next().unwrap_or(b)).collect();
+        assert!(blocks.iter().any(|b| b.contains("lambda word") && !b.contains("save")), "{who}:\n{code}");
+    }
+    // Two free values swapped between registers: a cycle, through RESULT.
+    let text = "(define* f (subr pure (int int) (subr pure () int)) (lambda (a b) (lambda () (- b a)))) ((f 1 5))";
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    assert_eq!(fx26, rust);
+}

@@ -1760,3 +1760,28 @@ of 43 and 8. `,native ((lambda ((x int)) (+ x 1)) 41)` is now `movz x0,
 #0x150`, 42. The front end has no such applications; its self-compile is
 unchanged. Analyses (free names, whether code calls) still see an
 application there, and so are only cautious.
+
+## A procedure that only makes a closure is a leaf (2026-09-28)
+
+`(lambda ((y int)) (lambda ((x int)) (+ y x)))` had a frame only because
+making a closure may call out, and so collect. Where the closure is the
+procedure's value, in tail position, nothing is used after that call-out
+but the closure, so both register compilers now count a lambda in tail
+position as not collecting (`r_collects`, `r-collects`) and let a leaf
+make one (`r_lambda`'s `tail`). A leaf's free values are in registers, so
+they are moved into REG1…REGn as a parallel move (`r_par_moves`,
+`r-par-moves`): the first move whose destination no other reads, in order;
+at a cycle, the first destination kept in RESULT. Where no free value is
+in a register, the code is as before.
+
+The machines: the native compiler's inline path needs no frame; its slow
+path, where the free space has no room, makes a frame of its own (16
+bytes, nothing in it for the collector) around the call to the common
+routine. The hand-encoded register machine keeps a leaf's link in the
+state (`leaf_link`) while it calls out, since the call-out's `blr` takes
+`x30`.
+
+The example's closure maker natively: 43 → 26 instructions (the inline
+allocation, then the slow path's seven, then `ret`). Both `r_collects`
+now also count a lifted procedure's added parameters when they ask
+whether a call of itself is a loop.

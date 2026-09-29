@@ -58,4 +58,9 @@ pub struct State {
     /// and from anywhere (`docs/object-model.md`, "A collected code area").
     pub trap: u64,
     pub exit: u64,
+    /// The link of register code with no frame (a leaf), kept here while a
+    /// call-out it makes (a closure's, where the free space has no room)
+    /// runs: the call-out's `blr` takes `x30`, and a leaf has no frame to
+    /// keep it in. Call-outs from a leaf do not nest.
+    pub leaf_link: u64,
 }

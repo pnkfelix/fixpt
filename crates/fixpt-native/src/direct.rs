@@ -1300,7 +1300,11 @@ impl Compiling<'_> {
                         },
                         (_, r) => return decline(format!("the routine `{}`", r.unwrap_or("?"))),
                     };
-                    if frame.is_none() {
+                    // A leaf may make a closure (register code makes it one only
+                    // where the closure is its value): its slow path makes a
+                    // frame of its own around the call-out.
+                    let leaf_closure = frame.is_none() && matches!(c, Callout::Closure { .. });
+                    if frame.is_none() && !leaf_closure {
                         return decline("a call-out outside a frame".into());
                     }
                     // A pair, from the heap's free space when there is room
@@ -1371,10 +1375,19 @@ impl Compiling<'_> {
                     // A closure the free space had no room for: the
                     // machine's common routine makes it.
                     if let (Callout::Closure { n }, Some(f)) = (c, code_field) {
+                        if leaf_closure {
+                            // The return address kept, and a frame for the
+                            // collector to walk, with nothing in it.
+                            a.e(stp_pre(FRAME, LINK, SP, -16));
+                            a.e(add_imm(FRAME, SP, 0));
+                        }
                         ldr_field(&mut a, X17, f);
                         a.e(movz(X9, n as u32, 0));
                         a.e(ldr(X16, ST, st_off(offset_of!(DState, closure))));
                         a.e(blr(X16));
+                        if leaf_closure {
+                            a.e(ldp_post(FRAME, LINK, SP, 16));
+                        }
                     } else {
                         let n = self.callouts.len();
                         self.callouts.push(c);

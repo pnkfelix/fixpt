@@ -457,6 +457,9 @@ impl Compiler<'_> {
                     })
             }
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => false,
+            // A closure made as the value: its call-out may collect, but
+            // nothing is used after it (`r_lambda`).
+            Exp::Lambda { .. } if tail => false,
             Exp::If { test, then, els } => {
                 self.r_collects(test, e, this, false) || self.r_collects(then, e, this, tail) || self.r_collects(els, e, this, tail)
             }
@@ -484,7 +487,7 @@ impl Compiler<'_> {
                 // A loop: a call of the procedure itself, in tail position.
                 let loop_call = tail
                     && (matches!((this, self.c.arena.exp_at(fun)), (Some(t), Exp::Var(n))
-                    if *n == t.name && args.len() == t.params)
+                    if *n == t.name && t.added + args.len() == t.params)
                         || matches!(self.c.arena.exp_at(fun), Exp::Var(n) if find(e, *n) == Some(Loc::Loop)));
                 let inline = match self.c.arena.exp_at(self.r_operator(fun)) {
                     Exp::Var(n) if self.where_is(e, *n).is_none() => {
@@ -661,13 +664,13 @@ impl Compiler<'_> {
             }
             Exp::Lambda { params, body } => {
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-                self.r_lambda(g, &ps, body, env, te, None, None)?;
+                self.r_lambda(g, &ps, body, env, te, None, None, tail)?;
                 g.done(tail);
             }
             Exp::RLambda { region, lambda } => {
                 let Exp::Lambda { params, body } = self.c.arena.exp_at(lambda).clone() else { unreachable!("parsed") };
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-                self.r_lambda(g, &ps, body, env, te, None, Some(region))?;
+                self.r_lambda(g, &ps, body, env, te, None, Some(region), false)?;
                 g.done(tail);
             }
             Exp::Sum(t, v) => {
@@ -745,7 +748,7 @@ impl Compiler<'_> {
                         own_env.push((*sib, if loops { RLoc::Loop } else { RLoc::Pending(at[k]) }));
                         own_te.push((*sib, if loops { Loc::Loop } else { Loc::Pending(at[k]) }));
                     }
-                    let p = self.r_lambda(g, &ps, lbody, &mut own_env, &mut own_te, Some(*name), region)?;
+                    let p = self.r_lambda(g, &ps, lbody, &mut own_env, &mut own_te, Some(*name), region, false)?;
                     g.op("setstk", &[Gen::n(at[i])]);
                     patches.push(p);
                 }
@@ -1718,7 +1721,7 @@ impl Compiler<'_> {
             match a {
                 Arg::E(x) => self.r_exp(g, *x, env, te, false)?,
                 Arg::Thunk(body) => {
-                    self.r_lambda(g, &[], *body, env, te, None, None)?;
+                    self.r_lambda(g, &[], *body, env, te, None, None, false)?;
                 }
                 Arg::V(_) | Arg::Name(_) | Arg::Slot(_) | Arg::Lexical(_) => unreachable!(),
             }
@@ -1807,8 +1810,12 @@ impl Compiler<'_> {
         te: &mut Env,
         own: Option<Sym>,
         region: Option<ExpId>,
+        tail: bool,
     ) -> O<Vec<(usize, usize)>> {
-        if g.leaf {
+        // A leaf makes a closure only as its value, in tail position: its
+        // call-out, where the free space has no room, may collect, and then
+        // nothing but the closure is used after.
+        if g.leaf && !(tail && region.is_none()) {
             return None;
         }
         let (w, fv) = match self.made_word(ps, body, te, own) {
@@ -1840,9 +1847,21 @@ impl Compiler<'_> {
         if fv.len() > REGS {
             return self.decline("a closure of more than REGS values");
         }
+        // Those in registers first, none overwritten before it is read
+        // (`r_par_moves`); then the rest, in order.
+        let mut moves = Vec::new();
+        for (j, n) in fv.iter().enumerate() {
+            if let RLoc::Reg(r) = self.r_where(env, *n)?
+                && r != j + 1
+            {
+                moves.push((r, j + 1));
+            }
+        }
+        Self::r_par_moves(g, moves);
         let mut patches = Vec::new();
         for (j, n) in fv.iter().enumerate() {
             match self.r_where(env, *n)? {
+                RLoc::Reg(_) => {}
                 RLoc::Slot(s) => g.op("load", &[Gen::n(j + 1), Gen::n(s)]),
                 RLoc::Free(i) => {
                     g.op("lexical", &[Gen::n(i)]);
@@ -1862,6 +1881,33 @@ impl Compiler<'_> {
         }
         g.op("lambda", &[w, Gen::n(fv.len())]);
         Some(patches)
+    }
+
+    /// Register moves (source, destination; source 0 is RESULT), made so
+    /// that none overwrites what another has yet to read: the first whose
+    /// destination no other reads, in order; else, the rest a cycle, the
+    /// first's destination kept in RESULT, and read from there.
+    fn r_par_moves(g: &mut Gen, mut ms: Vec<(usize, usize)>) {
+        while !ms.is_empty() {
+            let free = (0..ms.len()).find(|&k| !ms.iter().enumerate().any(|(m, (s, _))| m != k && *s == ms[k].1));
+            match free {
+                Some(k) => {
+                    let (s, d) = ms.remove(k);
+                    if s == 0 {
+                        g.op("setreg", &[Gen::n(d)]);
+                    } else {
+                        g.op("movereg", &[Gen::n(s), Gen::n(d)]);
+                    }
+                }
+                None => {
+                    let d = ms[0].1;
+                    g.op("reg", &[Gen::n(d)]);
+                    for m in ms.iter_mut().filter(|m| m.0 == d) {
+                        m.0 = 0;
+                    }
+                }
+            }
+        }
     }
 
     /// Arrays, and the tag and key makers: as the stack compiler does them.
