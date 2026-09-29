@@ -23,6 +23,19 @@ concurrency, and cancellation. It refines A1 (scheduler), P2/Q3 (I-vars
 that suspend) and Q2 (preemption), and it does not change the actors
 plan above A2.
 
+**Examples** (added 2026-09-29). Each main idea has a toy example beside
+it, with the snippet from the language the idea comes from. Two kinds are
+kept apart:
+- **FX-26 today.** Files under `docs/research/examples/async/`, each
+  checked with `fixpt check` (both checkers agree) and run with
+  `fixpt eval`; the comment after the last form gives the value it
+  printed. Excerpts in the text are copied from them. §8 lists them all.
+- **Proposed.** Blocks headed `;;; PROPOSED`, using §6.1's operations
+  (`with-loop`, `spawn`, `sleep`, …), which do not exist. Not checked.
+
+The Python, JavaScript, OCaml, Rust and Go snippets were written for this
+note from the documentation cited in "Sources"; none was run.
+
 ## Findings first
 
 1. **FX-26 already has the hard parts.** asyncio and Node build
@@ -88,6 +101,26 @@ A coroutine is **stackless**: each `async def` frame is a heap object, and
 `__await__`. A Task drives a coroutine by calling `coro.send(None)`. When
 the chain yields a Future, the Task adds a done-callback to it that
 schedules the next `send`.
+
+The whole of asyncio in one toy, the one §2 builds in FX-26: two tasks
+take turns, each giving the loop back with `sleep(0)`.
+
+```python
+import asyncio
+log = []
+
+async def pinger(who, n):
+    for i in range(n, 0, -1):
+        log.append(who + i)
+        await asyncio.sleep(0)            # yield to the loop
+
+async def main():
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(pinger(100, 3))
+        tg.create_task(pinger(200, 3))
+
+asyncio.run(main())                       # log: [103, 203, 102, 202, 101, 201]
+```
 
 **The loop.** `asyncio.run(main())` makes a loop, runs `main` to the end,
 and cancels whatever is left. Callbacks go in with `loop.call_soon`,
@@ -183,7 +216,20 @@ back as callbacks.
 
 JavaScript generators (`function*`, `yield`, `next(v)`, `throw(e)`,
 `return(v)`) came first; libraries such as `co` drove them with promises
-to get async/await before ES2017.
+to get async/await before ES2017. In miniature, a generator, and the same
+suspension written as `await` on a promise, whose rest runs as a
+microtask:
+
+```js
+function* countUp(i, n) { while (i <= n) yield i++; }
+let s = 0; for (const v of countUp(1, 4)) s += v;      // s === 10
+
+const fut = new Promise(resolve => setTimeout(() => resolve(42), 0));
+async function consumer() { log.push(1); log.push(await fut); }
+```
+
+§2's `generator.fx` and §2's `promise.fx` are the FX-26 versions of these
+two.
 
 ### 1.3 Others
 
@@ -300,6 +346,63 @@ copies only the task's frames. A typical task is shallow (a handler, a
 read loop, a few helpers), so a switch should cost well under a
 microsecond on native code, and nothing new is needed on any machine.
 
+**Example: two tasks ping-ponging** (FX-26 today;
+`examples/async/ping-pong.fx`, checked and run). §1.1's asyncio program,
+with the scheduler written out. A task is the rest of a computation up to
+the scheduler's prompt, `(composable unit unit D @p)`. `yield!` captures
+it and aborts to the prompt's handler with it, which queues it; `run!`
+resumes queued tasks, each under a fresh prompt, until none is left.
+
+```scheme
+(define-type task (composable unit unit D @p))
+(define sched (prompt-tag unit task D @p) (make-continuation-prompt-tag))
+(define queue (ref (listof task @q) @q) (new nil))
+
+(define* yield! (subr (maxeff (goto @p) (comefrom @p)) () unit)
+  (lambda ()
+    (call-with-composable-continuation
+      (lambda (k) (abort-current-continuation sched k))
+      sched)))
+
+(define* run! (subr (maxeff D (goto @p) (comefrom @p)) () unit)
+  (lambda ()
+    (let ((q (get queue)))
+      (if (null? q)
+          #u
+          (begin
+            (set queue (cdr q))
+            (prompt sched ((car q) #u) (lambda (k) (enqueue! k)))
+            (run!))))))
+
+(define* pinger (subr (maxeff D (goto @p) (comefrom @p)) (int int) unit)
+  (lambda (who n)
+    (if (= n 0)
+        #u
+        (begin (set log (cons (+ who n) (get log)))
+               (yield!)
+               (pinger who (- n 1))))))
+
+(spawn! (lambda () (pinger 100 3)))
+(spawn! (lambda () (pinger 200 3)))
+(run!)
+(the (listof int @q) (reverse (get log)))   ; (103 203 102 202 101 201)
+```
+
+`D` is the bound on what tasks do (the queue and log at `@q`, the globals
+they read, `spin`); `enqueue!`, `spawn!` and `log` are in the file. The
+same loop in OCaml 5 is a handler of a `Yield` effect, from the manual's
+scheduler example:
+
+```ocaml
+type _ Effect.t += Yield : unit t
+let yield () = perform Yield
+(* in the scheduler's handler: *)
+| effect Yield, k -> enqueue k (); dequeue ()
+```
+
+`perform Yield` is `yield!`; the handler's `k` is the continuation the
+abort carries.
+
 **Handlers without per-operation types.** An effect handler resumes each
 operation at its own result type. FX-26's tag fixes one `H`, and a
 continuation's `T` is fixed where it is captured, so a sum of operations
@@ -309,6 +412,109 @@ used by Guile Fibers' `suspend-current-task` and by Rust's `Waker`:
 travels through a cell. Then `H` is one type, the continuation is always
 `(composable unit A D c)`, and all operations are built from one
 primitive, `suspend` (§6.1).
+
+**Example: a generator is a handler** (FX-26 today;
+`examples/async/generator.fx`, checked and run). Where a handler *does*
+want a value with the continuation, a product carries both, and the tag
+fixes the one type. The consumer `sum-all` is the prompt's handler; it
+resumes the producer under a new prompt of the same tag, which is what a
+deep handler does.
+
+```scheme
+(define-type step (productof (v int) (k (composable unit int D @p))))
+(define g (prompt-tag int step D @p) (make-continuation-prompt-tag))
+
+(define* yield-int (subr (maxeff (goto @p) (comefrom @p)) (int) unit)
+  (lambda (x)
+    (call-with-composable-continuation
+      (lambda (k) (abort-current-continuation g (product (v x) (k k))))
+      g)))
+
+(define* count-up (subr (maxeff (goto @p) (comefrom @p) spin) (int int) unit)
+  (lambda (i n)
+    (if (> i n) #u (begin (yield-int i) (count-up (+ i 1) n)))))
+
+(define* sum-all (subr (maxeff (goto @p) (comefrom @p) spin) (step) int)
+  (lambda (s)
+    (+ (extract s v) (prompt g ((extract s k) #u) (lambda (s2) (sum-all s2))))))
+
+(prompt g (begin (count-up 1 4) 0) sum-all)   ; 10
+```
+
+Python and OCaml 5 (the manual's first example, whose handler resumes
+with a value, as `sum-all` does not):
+
+```python
+def count_up(i, n):
+    while i <= n:
+        yield i
+        i += 1
+sum(count_up(1, 4))                       # 10
+```
+
+```ocaml
+type _ Effect.t += Xchg: int -> int t
+let comp1 () = perform (Xchg 0) + perform (Xchg 1)
+try comp1 () with
+| effect (Xchg n), k -> continue k (n+1)
+```
+
+One thing the types show: the last line's effect keeps `(goto @p)` and
+`(comefrom @p)`. The prompt inside `sum-all` cannot delimit, because its
+body calls `k`, a variable whose type mentions `@p` ("Control, typed").
+A handler that resumes a stored continuation always shows control on the
+tag's region, until the region itself is masked (§3.1's example).
+
+**Example: a promise and `await`, from one `suspend!`** (FX-26 today;
+`examples/async/promise.fx`, checked and run). Here the abort carries a
+thunk that files the task somewhere, as Guile's `suspend-current-task`
+takes a procedure. `yield!` files it on the run queue, `await!` among the
+promise's waiters; every suspension resumes with unit, and `await!` reads
+the value from the promise when it wakes.
+
+```scheme
+(define-type promise (ref (sumof (pending (listof task @q)) (resolved int)) @q))
+(define sched (prompt-tag unit (subr Q () unit) D @p) (make-continuation-prompt-tag))
+
+(define* suspend! (subr (maxeff (goto @p) (comefrom @p)) ((subr Q (task) unit)) unit)
+  (lambda (file)
+    (call-with-composable-continuation
+      (lambda (k) (abort-current-continuation sched (lambda () (file k))))
+      sched)))
+
+(define* yield! (subr (maxeff (goto @p) (comefrom @p)) () unit)
+  (lambda () (suspend! enqueue!)))
+
+(define* await! (subr (maxeff D (goto @p) (comefrom @p)) (promise) int)
+  (lambda (pr)
+    (tagcase (get pr)
+      (resolved v v)
+      (pending ws (begin (suspend! (lambda (k) (set pr (sum pending (cons k ws)))))
+                         (await! pr))))))
+
+(spawn! (lambda () (begin (note! 1) (note! (await! fut)))))
+(spawn! (lambda () (begin (note! 2) (yield!) (note! 3) (resolve! fut 42))))
+(run!)                                    ; log: (1 2 3 42)
+```
+
+`resolve!` sets the value and queues the waiters. The promise is a `ref`
+of a sum, not an `icell`: FX-26 has no test for whether an I-cell is full,
+and `icell-get` on an empty one is an error, not a suspension (§6.1, open
+question 8). Python and Eio (Eio's README):
+
+```python
+async def consumer(): log.append(1); log.append(await fut)
+async def producer():
+    log.append(2); await asyncio.sleep(0); log.append(3)
+    fut.set_result(42)                    # fut = loop.create_future()
+```
+
+```ocaml
+let promise, resolver = Promise.create () in
+Fiber.both
+  (fun () -> let x = Promise.await promise in traceln "x = %d" x)
+  (fun () -> Promise.resolve resolver 42)
+```
 
 **Segmented stacks, and whether to have them.** The copying scheme
 suffices until tasks are deep or switch very often. The alternatives,
@@ -368,6 +574,50 @@ outside cannot tell that it suspended inside. A task cannot take a
 continuation that leaves its loop, because every such continuation's type
 mentions `c`. That is the check Larceny's notes wanted and could not make.
 
+**Example: `asyncio.run` is masking** (FX-26 today;
+`examples/async/run-masked.fx`, checked and run). The ping-pong again,
+with the tag, the run queue and the log made inside one procedure, at a
+region `@s` that nothing outside names:
+
+```scheme
+(define-effect L (maxeff spin (read @s) (write @s) (alloc @s) (alloc @l)))
+(define-type ltask (composable unit unit L @s))
+
+(define interleave (subr (maxeff spin (alloc @l) (read @l)) (int) (listof int @l))
+  (lambda (n)
+    (let* ((sched (the (prompt-tag unit ltask L @s) (make-continuation-prompt-tag)))
+           (queue (the (ref (listof ltask @s) @s) (new nil)))
+           (log (the (ref (listof int @l) @s) (new nil)))
+           (yield! …) (enqueue! …))              ; as in ping-pong.fx
+      (letrec ((pinger …) (run! …))
+        (begin
+          (prompt sched (pinger 100 n) (lambda (k) (enqueue! k)))
+          (prompt sched (pinger 200 n) (lambda (k) (enqueue! k)))
+          (run!)
+          (the (listof int @l) (reverse (get log))))))))
+
+(interleave 3)   ; (103 203 102 202 101 201)
+```
+
+The checker gives `interleave` the type it was declared, `(subr (maxeff
+spin (alloc @l) (read @l)) (int) (listof int @l))`: every `goto`,
+`comefrom`, read and write on `@s` is masked, so a caller cannot tell
+that tasks were switched inside. In Python the same boundary is a call,
+and nothing in `interleave`'s signature says what it does:
+
+```python
+def interleave(n):
+    log = []
+    async def pinger(who, i): ...        # as in §1.1
+    async def main(): ...
+    asyncio.run(main())
+    return log
+```
+
+What is missing today is only the packaging: `with-loop` would bind `@s`
+with `letregion` (as `arena-outside.fx` in §3.6 does) rather than rely on
+the procedure's boundary.
+
 ### 3.2 Colour
 
 A function suspends iff its latent effect mentions `(suspends c)` for
@@ -387,6 +637,36 @@ effects in signatures, which `define-effect` shortens, and the places
 where a closed effect was written (a `(subr pure …)` callback slot) and so
 a suspending procedure cannot go. That is the right refusal: code that
 took a pure callback may rely on it not interleaving.
+
+**Example: one `for-each` for both colours** (FX-26 today;
+`examples/async/colour.fx`, checked and run). `for-each` is polymorphic
+in its argument's effect. Given `generator.fx`'s `yield-int` it
+suspends, and its call has `(goto @p)` and `(comefrom @p)`; given a
+procedure that writes a ref, its call has `(write @r)` and no control
+effect. One definition, one compilation:
+
+```scheme
+(define for-each (poly ((e effect)) (subr (maxeff e spin (read @l)) ((subr e (int) unit) (listof int @l)) unit))
+  (plambda ((e effect))
+    (lambda (f xs)
+      (letrec ((go (subr (maxeff e spin (read @l)) ((listof int @l)) unit)
+                 (lambda (ys) (if (null? ys) #u (begin (f (car ys)) (go (cdr ys)))))))
+        (go xs)))))
+
+(prompt g (begin (for-each yield-int xs) 0) sum-all)          ; 6, suspending
+(for-each (lambda (x) (set total (+ x (get total)))) xs)      ; not suspending
+(get total)                                                   ; 6
+```
+
+Python needs the helper twice, once per colour:
+
+```python
+def for_each(f, xs):
+    for x in xs: f(x)
+
+async def for_each_async(f, xs):
+    for x in xs: await f(x)
+```
 
 **Cancellation points are visible.** In a design with no preemption, a
 procedure whose effect lacks `(suspends c)` runs to completion between
@@ -435,6 +715,62 @@ function is masked with it.
   question 4). No "may fail" atom, for the actors note's reason: every
   call can trap.
 
+**Example: a level-triggered cancel scope** (FX-26 today;
+`examples/async/cancel.fx`, checked and run, with `ping-pong.fx`'s
+scheduler). A scope is a prompt of a second tag, `scope`, *inside* the
+task, and a flag. `checkpoint!` suspends; on resuming it aborts to the
+scope if the flag is set, and so would every later checkpoint in the
+scope. The captured continuation contains the scope's prompt, so the
+abort finds it after any number of suspensions. A second task sets the
+flag; `ticker` would count for ever.
+
+```scheme
+(define scope (prompt-tag (sumof (done int) (cancelled unit)) unit (maxeff D (goto @p) (comefrom @p)) @c)
+  (make-continuation-prompt-tag))
+(define stop? (ref bool @q) (new #f))
+
+(define* checkpoint! (subr (maxeff D (goto @p) (comefrom @p)) () unit)
+  (lambda ()
+    (begin (yield!)
+           (if (get stop?) (abort-current-continuation scope #u) #u))))
+
+(define* ticker (subr (maxeff D (goto @p) (comefrom @p)) (int) int)
+  (lambda (i) (begin (set log (cons i (get log))) (checkpoint!) (ticker (+ i 1)))))
+
+(spawn! (lambda ()
+          (tagcase (prompt scope (sum done (ticker 0)) (lambda (u) (sum cancelled u)))
+            (done n (set log (cons n (get log))))
+            (cancelled u (set log (cons -1 (get log)))))))
+(spawn! (lambda () (begin (yield!) (yield!) (set stop? #t))))
+(run!)                                    ; log: (0 1 2 -1)
+```
+
+The two tags bound each other: `scope`'s delimited computations suspend
+to `sched`, so its bound has control on `@p`, and `sched`'s `D` has
+control on `@c`. That is allowed, since a bound excludes only its own
+tag's region. trio's version (the order of the two tasks is not
+guaranteed there):
+
+```python
+scope = trio.CancelScope()
+
+async def ticker():
+    with scope:
+        i = 0
+        while True:
+            log.append(i); i += 1
+            await trio.sleep(0)           # a checkpoint
+    log.append(-1)
+
+async def canceller():
+    await trio.sleep(0); await trio.sleep(0)
+    scope.cancel()
+```
+
+The toy checks the flag only when the task is resumed. The real design
+(§6.1) has `cancel!` also wake a task suspended in the scope, so it need
+not wait for its timer or channel.
+
 ### 3.6 What a suspended task may hold
 
 | Held across a suspension                             | Today                         | Why                                                                                                            |
@@ -445,6 +781,59 @@ function is masked with it.
 | a `letregion` (analysis only) around a `suspend`     | refused, as above             | `soundness.md` §2.6 says K26's `priv` allows a `comefrom` for a region with no memory; the checker could too   |
 | a composable continuation of a tag inside the task   | yes, within the task          | its type mentions the tag's region                                                                             |
 | a continuation or task handle, out of its loop       | refused                       | its type mentions `c`                                                                                          |
+
+**Example: rows 2 and 3 of the table** (FX-26 today). Accepted
+(`examples/async/arena-outside.fx`, checked and run; §6.2's `squares`
+sketch, with no proposed operation): an arena encloses the loop, whose
+region `s` is bound by `letregion`, and every task writes the arena.
+
+```scheme
+(define-type (stask (s region) (r region))
+  (composable unit unit (maxeff spin (read s) (write s) (alloc s) (write r)) s))
+
+(define squares (subr spin (int) int)
+  (lambda (k)
+    (letrena r
+      (let ((out (the (arrayof int r) (rmake-array r k 0))))
+        (begin
+          (letregion s
+            (let* ((sched (the (prompt-tag unit (stask s r) (maxeff spin (read s) (write s) (alloc s) (write r)) s)
+                               (make-continuation-prompt-tag)))
+                   … queue, park!, yield! …)
+              (letrec ((spawn-all … (prompt sched (begin (yield!) (array-set! out i (* i i))) park!) …)
+                       (run! …))
+                (begin (spawn-all 0) (run!)))))
+          (sum-from 0 0))))))                 ; a local loop over `out`
+
+(squares 5)   ; 30
+```
+
+`squares` checks at `(subr spin (int) int)`: the continuations mention
+`s`, not `r`, and `letregion s` masks their control effects before
+`letrena r` looks. Rust's scoped threads are the nearest thing, a scope
+that tasks may borrow from:
+
+```rust
+let mut out = vec![0; 5];
+std::thread::scope(|s| {
+    for (i, x) in out.iter_mut().enumerate() {
+        s.spawn(move || *x = i * i);
+    }
+});
+```
+
+Refused (`examples/async/suspend-in-arena.fx`, checked: the checker
+rejects it): a task that opens its own arena and suspends inside it.
+
+```scheme
+(define* holder (subr (maxeff D (goto @p) (comefrom @p)) () int)
+  (lambda ()
+    (letrena r
+      (let ((x (the (ref int r) (rnew r 1))))
+        (begin (yield!) (get x))))))
+;; ! a continuation captured in `letrena r` could outlive its region:
+;;   its effect is (maxeff (comefrom @p) (goto @p) (read (globals sched yield!)))
+```
 
 To let a task suspend inside its own `letrena` needs two things:
 1. **Per-task place stacks** (the actors note's Q1). Regions end newest
@@ -583,6 +972,49 @@ within `run`. The proposal is that `spawn` takes a list of
 keys to carry (typed per key), since copying all marks cannot be typed
 generically. Open question 6.
 
+**Example: task-local context** (FX-26 today; `examples/async/context.fx`,
+checked and run, with `ping-pong.fx`'s scheduler). Each task sets a mark
+for `who` inside its own prompt; after every `yield!` each still reads
+its own value, though the two interleave.
+
+```scheme
+(define who (mark-key int @m) (make-continuation-mark-key))
+
+(define* worker (subr (maxeff D (goto @p) (comefrom @p)) (int) unit)
+  (lambda (i)
+    (if (= i 0)
+        #u
+        (begin (set log (cons (+ (first-mark who 0) i) (get log)))
+               (yield!)
+               (worker (- i 1))))))
+
+(spawn! (lambda () (with-mark who 100 (lambda () (worker 3)))))
+(spawn! (lambda () (with-mark who 200 (lambda () (worker 3)))))
+(run!)                                    ; log: (103 203 102 202 101 201)
+```
+
+The mark is set by the task itself, so inheritance is not tested here.
+Python and Node:
+
+```python
+who = contextvars.ContextVar("who")
+
+async def worker(n):
+    for i in range(n, 0, -1):
+        log.append(who.get() + i)
+        await asyncio.sleep(0)
+
+async def task(w):
+    who.set(w)          # this Task's copy of the context
+    await worker(3)
+```
+
+```js
+const who = new AsyncLocalStorage();
+who.run(100, () => worker(3));            // worker reads who.getStore()
+who.run(200, () => worker(3));
+```
+
 ## 5. Structured concurrency and regions
 
 A nursery is a region `n` bound inside the loop, and `with-nursery` is a
@@ -651,7 +1083,25 @@ abbreviation. `(loop c D)`, `(nursery n c D)`, `(task T n)`, `(waker c)`,
 Stage 3 adds `wait-readable`, `wait-writable`, `read-some` and
 `write-some` on descriptors, all `(suspends c)` plus an effect on the
 outside world. Stage 6 adds CML's `(event T c)` with `choose`, `wrap`,
-`with-nack` and `sync`.
+`with-nack` and `sync`. A receive with a timeout, as it would read:
+
+```scheme
+;;; PROPOSED — sketch only; `receive-evt` and `timeout-evt` are made up here.
+(sync (choose (wrap (receive-evt ch) (lambda (v) (sum value v)))
+              (wrap (timeout-evt lp 50) (lambda (u) (sum timed-out u)))))
+```
+
+```go
+select {
+case v := <-ch:
+    return v, true
+case <-time.After(50 * time.Millisecond):
+    return 0, false
+}
+```
+
+Both arms hold the task's one waker. The first to fire wakes it, and a
+later wake by the other does nothing, as `wake!` says in the table above.
 
 A task's result is kept in an `(icell T c)`: `join` is an `icell-get`
 that suspends first while the cell is empty. The general "`icell-get`
@@ -676,6 +1126,23 @@ apart from `spin`:
              (tagcase (join b) (done x x) (cancelled u 0))))))))
 (race-two)   ; 3, after 20 ms of (virtual) time
 ```
+
+The same in asyncio:
+
+```python
+async def race_two():
+    async def after(ms, v):
+        await asyncio.sleep(ms / 1000)
+        return v
+    async with asyncio.TaskGroup() as tg:
+        a = tg.create_task(after(20, 1))
+        b = tg.create_task(after(10, 2))
+    return a.result() + b.result()        # 3
+```
+
+The difference that matters: `race-two`'s type says it is pure apart from
+`spin`, and `a` and `b` cannot outlive the nursery because their types
+mention `n`. Python's `a` and `b` can be kept after the `async with`.
 
 A producer and a consumer over a bounded channel, under a deadline.
 Region-polymorphic helpers take the loop, as `caller-place.fx`'s `build`
@@ -709,8 +1176,29 @@ takes its caller's place:
                 ((proj consume c) lp ch 0)))))))))
 ```
 
+The same in trio, whose memory channel and `move_on_after` §6.1 copies:
+
+```python
+async def sum_before(k, ms):
+    total = 0
+    with trio.move_on_after(ms / 1000) as cs:
+        send, recv = trio.open_memory_channel(4)
+        async def produce():
+            async with send:
+                for i in range(k, 0, -1):
+                    await send.send(i)
+        async with trio.open_nursery() as n:
+            n.start_soon(produce)
+            async with recv:
+                async for v in recv:
+                    total += v
+    return None if cs.cancelled_caught else total
+```
+
 Structured concurrency meeting a region. The arena encloses the loop,
-every task writes it, and the whole is accepted by today's rules:
+every task writes it, and the whole is accepted by today's rules (a
+version with the loop written out, and no proposed operation, is
+checked and run: `examples/async/arena-outside.fx`, §3.6):
 
 ```
 ;;; PROPOSED — sketch only.
@@ -729,7 +1217,8 @@ every task writes it, and the whole is accepted by today's rules:
 ```
 
 And the variant that is refused until §3.6's changes: a task that opens
-its own arena and suspends inside it.
+its own arena and suspends inside it (checked as refused, with
+`yield!` for `sleep`: `examples/async/suspend-in-arena.fx`, §3.6).
 
 ```
 ;;; PROPOSED — refused by the checker today, rightly.
@@ -817,6 +1306,67 @@ S0 and S4 need no language change and are the first to do.
 13. **Nursery as custodian**: should `with-nursery` also bind a place
     that owns what its tasks open (Eio's switch), or should resources be
     tied only to places the program opens itself?
+
+## 8. The examples, and what writing them showed
+
+Every file below was checked with `fixpt check FILE` (both checkers
+agree) and run with `fixpt eval FILE`, on the release binary of
+2026-09-29, under a 60-second limit. Paths are under
+`docs/research/examples/async/`.
+
+| File                  | Shows                                                | Where | Result                      |
+| --------------------- | ---------------------------------------------------- | ----- | --------------------------- |
+| `ping-pong.fx`        | round-robin scheduler; `yield!`, `spawn!`, `run!`    | §2    | `(103 203 102 202 101 201)` |
+| `generator.fx`        | a generator; the consumer is the prompt's handler    | §2    | `10`                        |
+| `promise.fx`          | one `suspend!`; a promise with waiters; `await!`     | §2    | `(1 2 3 42)`                |
+| `run-masked.fx`       | the loop inside a procedure: control effects masked  | §3.1  | `(103 203 102 202 101 201)` |
+| `colour.fx`           | one effect-polymorphic `for-each`, suspending or not | §3.2  | `6`, `6`                    |
+| `cancel.fx`           | a level-triggered cancel scope as a second tag       | §3.5  | `(0 1 2 -1)`                |
+| `arena-outside.fx`    | `letrena` ⊃ loop ⊃ tasks writing the arena: accepted | §3.6  | `30`                        |
+| `suspend-in-arena.fx` | a task suspending inside its own `letrena`: refused  | §3.6  | refused, as expected        |
+| `context.fx`          | marks as task-local context across suspensions       | §4.5  | `(103 203 102 202 101 201)` |
+
+The `;;; PROPOSED` blocks in §6.1 and §6.2 are not checked, since the
+operations they use do not exist.
+
+What writing them showed, beyond the findings at the top:
+- **Findings 1 and 3 hold as checked code.** A scheduler over a prompt,
+  a promise, a generator, a cancel scope and task-local marks all run on
+  today's FX-26, with no new primitive. `arena-outside.fx` is the
+  "order of scopes that works today" of §5, accepted by the checker.
+- **Control effects stay visible until the loop's region is masked.**
+  A prompt whose body resumes a stored continuation cannot delimit it,
+  since the continuation is a variable whose type mentions the tag's
+  region. So `run!`, `spawn!` and a generator's consumer all show
+  `(goto @p)` and `(comefrom @p)`, and at the top level, with `@p`
+  named, so does every program that runs them. They go only where `@p`
+  is private (`run-masked.fx`) or bound by `letregion`
+  (`arena-outside.fx`). `with-loop` should be a region binder, as §3.1
+  says, rather than a prompt.
+- **Each tag's bound names the other's region.** In `cancel.fx`, the
+  scope tag's bound has control on the loop's region, and the loop's `D`
+  has control on the scope's. Two `define-effect`s written in terms of
+  each other were needed, and every cancel scope of §6.1 would need its
+  bound to include `(suspends c)`.
+- **`define-effect` takes no parameters,** so a loop whose region is
+  bound locally (`arena-outside.fx`) writes its effect out in full each
+  time; a parametric `define-type` for the task type saved most of it.
+  This is open question 1 again.
+- **Precise globals lengthen `D`.** With `define*`, the tag's bound must
+  list every global the tasks read (`(read (globals sched queue log
+  yield! pinger))`). A procedure whose latent effect names its own
+  global must say `spin`, so `promise.fx`'s `Q` could not list
+  `enqueue!`. `(read @globals)` would be shorter, but precision is the
+  project's rule; a library scheduler would be region-polymorphic and
+  read no globals.
+- **No test for a full I-cell,** and reading an empty one is an error
+  ("an i-cell read before it was written"), so `promise.fx` uses a `ref`
+  of a sum. Open question 8.
+- **Small frictions.** A queue needs `the` on the result of `reverse`
+  and `cons` to fix their regions; a `lambda` passed to
+  `call-with-composable-continuation` from a `let*`-bound procedure
+  needs its type written (`the (subr …)`); there is no `append`, so the
+  FIFO queue reverses twice.
 
 ## Corrections after checking (2026-09-29)
 
@@ -1019,6 +1569,22 @@ was read, through search results.
   of Stacks and Continuations", PLDI 2020,
   <https://www.cs.tufts.edu/comp/150FP/archive/john-reppy/pldi20-stacks-n-conts.pdf>
   (§1 and §6 read).
+
+**For the examples' snippets** (read 2026-09-29).
+- OCaml 5.3 manual, "Language extensions: effect handlers",
+  <https://ocaml.org/manual/5.3/effects.html>: the `Xchg` example and the
+  `Fork`/`Yield` scheduler's handler, quoted in §2.
+- Eio README at `main`, <https://github.com/ocaml-multicore/eio>: the
+  `Promise.create`/`Fiber.both` example, quoted in §2.
+- Rust `std::thread::scope`, Rust 1.98.1,
+  <https://doc.rust-lang.org/std/thread/fn.scope.html>: §3.6's snippet
+  is written after its example.
+- The Go specification, go1.27 (2026-05-26), <https://go.dev/ref/spec>:
+  the page was fetched, but its "Select statements" section was not in
+  what was read, so §6.1's `select` is from memory.
+- The Python (asyncio, trio, `contextvars`) and JavaScript (generators,
+  promises, `AsyncLocalStorage`) snippets use only the APIs cited above
+  under Python and Node.js; they were written for this note and not run.
 
 **On disk.** Jouvelot and Gifford, "Reasoning about Continuations with
 Control Effects", PLDI '89,

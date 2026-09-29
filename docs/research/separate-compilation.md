@@ -40,6 +40,58 @@ The recommendation runs in four stages:
 From FX-91, adopt `input`'s idea of a closed file stamped for identity, and
 abstract effects, bounded. Skip first-class modules for now.
 
+**Examples.** Each idea below comes with a toy: two tiny "files", a module
+(a stack, a counter, a tally) and a client, a few lines each, and beside it
+the same thing in the language the idea is drawn from (FX-91, FX-87, SML,
+OCaml, Haskell, Rust, Racket). Two kinds of FX-26 code are kept apart:
+- **FX-26 today**: in a file under `docs/research/examples/separate-compilation/`,
+  checked with `fixpt check FILE` (both checkers agree on each) and run
+  with `fixpt eval FILE`, with `target/release/fixpt` as of 2026-09-29
+  (commit `e623b23`, plus uncommitted work in the tree). There are no
+  units yet, so each file holds both "files" one after the other, marked
+  `;;; ---- name.fx ----`, joined as the front end joins its files today.
+  A file named `*-rejected.fx` is meant to be refused, and is.
+- **Proposed**: syntax that does not exist, marked so, kept close to
+  FX-26's forms. Not checked, since nothing can check it.
+
+| Example file (FX-26 today)   | What it shows                                               | Result of `fixpt eval` | Section |
+| ---------------------------- | ----------------------------------------------------------- | ---------------------- | ------- |
+| `stack-record.fx`            | a module as a product of procedures; a client generic in it | `2`                    | §1      |
+| `stack-abstract-rejected.fx` | that client cannot take the stack apart                     | refused, as meant      | §1      |
+| `counter-generative.fx`      | an abstract type as a generative type                       | `3`, then `0`          | §1, §2  |
+| `counter-opaque-rejected.fx` | a counter is not an int outside its conversions             | refused, as meant      | §1      |
+| `set-functor.fx`             | a functor as a polymorphic procedure over products          | `#t`                   | §1      |
+| `tally-effects.fx`           | an export's effect names the module's private region        | `2`                    | §2.3    |
+| `tally-effect-poly.fx`       | a client polymorphic in the module's effect                 | `2`                    | §2.3    |
+| `relink-compatible.fx`       | a new implementation at the same type: no re-check          | `20`                   | §2.4    |
+| `relink-broken-rejected.fx`  | at another type: the client is broken                       | refused, as meant      | §2.4    |
+| `inline-guard.fx`            | a call inlined behind a guard (`fixpt compile`)             | `2`                    | §2.5    |
+| `hook-icell.fx`              | a knot across files through an I-cell                       | `12`                   | §2.6    |
+
+The FX-91 snippets are the FX-91 implementation's own test programs where
+one fits (`extracted/fx91/tests.fx`), and were run with fixpt's FX-91 port
+(`fixpt --dialect fx91 eval`), which says whether each checks. The Rust
+snippet was compiled with `rustc`. The SML, OCaml, Haskell and Racket
+snippets are written for this note and were not compiled: no compiler for
+them is installed here.
+
+| Example | Idea                                      | FX-26 today             | Proposed FX-26         | Beside it                          |
+| ------- | ----------------------------------------- | ----------------------- | ---------------------- | ---------------------------------- |
+| 1       | a module value; a generic client          | `stack-record.fx`       | none                   | SML signature, functor; FX-91      |
+| 2       | an abstract type                          | `counter-generative.fx` | none                   | FX-91; OCaml `.mli`; Haskell; Rust |
+| 3       | a functor                                 | `set-functor.fx`        | none                   | SML functor                        |
+| 4       | a unit header, export list                | Example 2               | `unit`, `import`       | Haskell, OCaml, FX-91              |
+| 5       | an interface written by the checker       | `fixpt check` output    | `counter.fxi`          | FX-91 `load` and `.fxt`            |
+| 6       | precise globals across units              | `fixpt check` output    | options (a)–(c)        | none                               |
+| 7       | effects, regions, abstract effects        | `tally-effect*.fx`      | `abstract-effect`      | FX-91 `(abs ticks effect)`         |
+| 8       | linking as redefinition (cutoff)          | `relink-*.fx`           | stamps in `.fxi`       | SML/NJ CM                          |
+| 9       | cross-unit inlining under a guard         | `inline-guard.fx`       | `unfolding`, link word | GHC `INLINE`                       |
+| 10      | initialization order; a knot across units | `hook-icell.fx`         | `import`, `export`     | Racket `require`                   |
+| 11      | a compiled file of types and values       | none                    | a C10 fragment         | FX-87 `.fxfasl`                    |
+
+The sketch of options 2 and 3 of §1 (the image, prefix snapshots) is
+proposed tooling over today's files.
+
 ## 1. Today
 
 ### What a program is
@@ -117,6 +169,10 @@ places:
   by byte offset. That is why "an inlined `extract` from an earlier form
   gets field -1" (`PLAN.md` 91): `check-more` resets `k-extracts` per
   batch (`check.fx` 6371–6379), so an earlier form's offsets are gone.
+  (Since this note was first written, commit `ee79c5e` fixed that symptom
+  for extracts: the kept body is rewritten when kept,
+  `c-resolve-extracts`, each extract made the bloblet-ref of its field.
+  Other facts are still keyed by offset.)
 - **Field indices and datatype layouts.** These are fixed by types.
   Products are compared label for label with equal lengths (`check.rs`
   1683–1685), and a sum's tag is a symbol at run time. A type-compatible
@@ -159,6 +215,227 @@ places:
    the kept cells. What is missing is a way to skip the check when the file
    was checked before against the same summary. That is exactly what an
    interface stamp gives (§2).
+
+**Sketch: options 2 and 3 on three toy files** (proposed; no language
+change, so the files are today's FX-26):
+
+```
+;; stack.fx    (define-type (stack-ops (s type)) …)       snapshot K1 = checker after stack.fx,  key hash(stack.fx)
+;; impl.fx     (define list-stack (stack-ops …) …)         snapshot K2 = checker after impl.fx,   key hash(stack.fx impl.fx)
+;; client.fx   (define use-stack …) (use-stack list-stack)  edited: start from K2, check client.fx alone
+
+;; option 2, the image: the same idea one level up, for the whole front end
+;;   key = hash(eager-reader.fx … native-layout.fx, fixpt binary)
+;;   hit:  load front-end-<key>.img (lowered, compiled, standard26 read)
+;;   miss: load the twelve pieces as today, then dump the session to front-end-<key>.img
+```
+
+An edit to `client.fx` costs one file's check; an edit to `stack.fx` costs
+all three, as today. That is the whole of prefix caching: it is exact
+because it is the same program, and it saves nothing below an edit.
+
+### Modules FX-26 can already write
+
+FX-26 has no module forms, but a module *value* can be written today, in
+FX-91's spirit: a product of procedures is a structure, a `define-type` of
+one is a signature, a client that is `poly` in the representation cannot
+see it, and a `poly` procedure from one product to another is a functor.
+None of this helps separate compilation by itself, since the files are
+still one text; but it is what a unit's exports would look like as a
+value, and it shows what the checker already enforces.
+
+**Example 1: a stack module and a client.** FX-26 today
+(`stack-record.fx`; checked; runs to `2`):
+
+```
+;;; ---- stack.fx : the interface (a type) and one implementation ----
+(define-type (stack-ops (s type))
+  (productof (empty s)
+             (push (subr pure (int s) s))
+             (top  (subr pure (s) int))))
+
+(define list-stack (stack-ops (listof int acyclic))
+  (product (empty nil)
+           (push (lambda (x s) (cons x s)))
+           (top  (lambda (s) (if (null? s) 0 (car s))))))
+
+;;; ---- client.fx : written for any s, so it cannot see the list ----
+(define use-stack (poly ((s type)) (subr pure ((stack-ops s)) int))
+  (plambda ((s type))
+    (lambda (m) ((extract m top) ((extract m push) 2 ((extract m push) 1 (extract m empty)))))))
+
+(use-stack list-stack)                    ; 2
+```
+
+The same client doing `(car (extract m empty))` is refused, "argument 1 is
+a s, where a (pairof int t2 r) is expected" (`stack-abstract-rejected.fx`).
+So `poly` gives abstraction, but on the client's side: the client is
+checked once for every `s`, which is the universal half of an existential.
+
+In SML the abstraction sits on the module's side instead, by opaque
+ascription (`:>`), and a client generic in the stack is a functor:
+
+```sml
+signature STACK = sig
+  type stack
+  val empty : stack
+  val push  : int * stack -> stack
+  val top   : stack -> int
+end
+structure ListStack :> STACK = struct
+  type stack = int list
+  val empty = []
+  fun push (x, s) = x :: s
+  fun top [] = 0 | top (x :: _) = x
+end
+functor UseStack (S : STACK) = struct
+  val two = S.top (S.push (2, S.push (1, S.empty)))
+end
+structure Two = UseStack (ListStack)
+```
+
+FX-91 is closest to the FX-26 version: a client is a `lambda` whose
+parameter's type is a `moduleof`, applied to a `module`. From the FX-91
+implementation's tests (`extracted/fx91/tests.fx` 142–146; fixpt's FX-91
+port checks it):
+
+```
+((lambda ((ints (moduleof (abs newint type)
+                          (val == (subr pure ((x newint)) bool)))))
+   2)
+ (module (define-abstraction newint type int)
+         (define (== (x newint)) #t)))
+```
+
+What FX-26 lacks against FX-91 here is `moduleof`'s `(abs …)`: an
+abstract type *inside* the product's type. `stack-ops` has to take `s` as a
+parameter, and every client has to be `poly` in it.
+
+**Example 2: an abstract counter.** FX-26 today, with the abstract type a
+generative type (`counter-generative.fx`; checked; runs to `3`):
+
+```
+;;; ---- counter.fx ----
+(define-generative counter int)
+(define zero counter (up-counter 0))
+(define* incr (subr pure (counter) counter) (lambda (c) (up-counter (+ (down-counter c) 1))))
+(define* value (subr pure (counter) int) (lambda (c) (down-counter c)))
+
+;;; ---- client.fx ----
+(define* three (subr pure () int) (lambda () (value (incr (incr (incr zero))))))
+(three)                                   ; 3
+```
+
+`(+ zero 1)` in the client is refused, "a int is expected here, and this is
+a counter" (`counter-opaque-rejected.fx`). But `(down-counter zero)` in the
+client is accepted: every global is visible to every later form, so the
+conversions are too. That is the hiding `define-generative` deferred
+(`generative-types.md`), and a unit's export list (§2.1) is what supplies
+it.
+
+FX-91's `define-abstraction` is the same idea with the hiding built in: the
+`up-`/`down-` conversions exist inside the module only, and the `moduleof`
+says `(abs newint type)`. From `extracted/fx91/tests.fx` 148–176 (the
+interface is the `moduleof`, the implementation the `module`; abridged to
+three operations, and the abridged program checks and runs in fixpt's FX-91
+port):
+
+```
+((lambda ((ints (moduleof (abs newint type)
+                          (val zero newint)
+                          (val one newint)
+                          (val == (subr pure ((x newint) (y newint)) bool)))))
+   (with ints (== one one)))
+ (module (define-abstraction newint type int)
+         (define zero (up-newint 0))
+         (define one (up-newint 1))
+         (define (== x y) (= (down-newint x) (down-newint y)))))
+```
+
+The hiding is real in the port: `(let ((m (module (define-abstraction t
+type int) (define x (up-t 3))))) (with m (down-t x)))` is refused,
+"unbound value variable down-t".
+
+OCaml, Haskell and Rust put the same line in the same place, between the
+file and its interface:
+
+```ocaml
+(* counter.mli *)                       (* counter.ml *)
+type t                                   type t = int
+val zero  : t                            let zero = 0
+val incr  : t -> t                       let incr c = c + 1
+val value : t -> int                     let value c = c
+```
+
+```haskell
+module Counter (Counter, zero, incr, value) where   -- `Counter`, not `Counter(..)`
+newtype Counter = C Int
+zero = C 0
+incr (C n) = C (n + 1)
+value (C n) = n
+```
+
+```rust
+// counter.rs, a crate of its own (compiled with rustc 1.95.0, with a client)
+pub struct Counter(i64);                 // the field is private to the crate
+pub fn zero() -> Counter { Counter(0) }
+pub fn incr(c: Counter) -> Counter { Counter(c.0 + 1) }
+pub fn value(c: &Counter) -> i64 { c.0 }
+```
+
+**Example 3: a functor.** FX-26 today (`set-functor.fx`; checked; runs to
+`#t`). The argument signature, the result signature, and a `poly`
+procedure from one to the other:
+
+```
+;;; ---- set.fx ----
+(define-type (eq-ops (t type)) (productof (eq (subr pure (t t) bool))))
+(define-type (set-ops (t type))
+  (productof (empty  (listof t acyclic))
+             (insert (subr pure (t (listof t acyclic)) (listof t acyclic)))
+             (member (subr pure (t (listof t acyclic)) bool))))
+
+(define make-set (poly ((t type)) (subr pure ((eq-ops t)) (set-ops t)))
+  (plambda ((t type))
+    (lambda (e)
+      (product
+        (empty nil)
+        (insert (lambda (x s) (cons x s)))
+        (member (letrec ((mem (subr pure (t (listof t acyclic)) bool)
+                           (lambda (x s)
+                             (if (null? s) #f
+                                 (if ((extract e eq) x (car s)) #t (mem x (cdr s)))))))
+                  mem))))))
+
+;;; ---- client.fx : applies the functor, then uses the result ----
+(define int-set (set-ops int) (make-set (product (eq (lambda (a b) (= a b))))))
+(define* has-two (subr pure () bool)
+  (lambda ()
+    ((extract int-set member) 2
+      ((extract int-set insert) 2 ((extract int-set insert) 1 (extract int-set empty))))))
+(has-two)                                 ; #t
+```
+
+`member`'s loop is `pure`, not `spin`: size-change sees `(cdr s)` of an
+`acyclic` list. SML, for comparison:
+
+```sml
+signature EQ = sig type t  val eq : t * t -> bool end
+functor MakeSet (E : EQ) = struct
+  type set = E.t list
+  val empty = []
+  fun insert (x, s) = x :: s
+  fun member (x, s) = List.exists (fn y => E.eq (x, y)) s
+end
+structure IntSet = MakeSet (struct type t = int  val eq = op = end)
+val hasTwo = IntSet.member (2, IntSet.insert (2, IntSet.insert (1, IntSet.empty)))
+```
+
+The FX-26 set is transparent: `int-set`'s type says a set is a
+`(listof int acyclic)`. Making it abstract, as `MakeSet (E) :> SET` would,
+needs a type the functor makes fresh at each application, which is a
+generative type made at run time: the first-class-module territory §3
+recommends skipping.
 
 ### What checking a file against a summary needs, and what breaks
 
@@ -211,6 +488,33 @@ it can. Each change below is weighed by what it costs that.
 qualified names in messages. It is not a module language. A unit is not a
 value, has no functors, and is not a type.
 
+**Example 4: the counter as two units** (proposed; compare Example 2, which
+is the same code today). Only the two headers and the last line are new:
+
+```
+;;; counter.fx
+(unit counter
+  (export counter zero incr value))      ; not up-counter, down-counter
+(define-generative counter int)
+(define zero counter (up-counter 0))
+(define* incr (subr pure (counter) counter) (lambda (c) (up-counter (+ (down-counter c) 1))))
+(define* value (subr pure (counter) int) (lambda (c) (down-counter c)))
+
+;;; client.fx
+(unit client
+  (import counter))
+(define* three (subr pure () int) (lambda () (value (incr (incr (incr zero))))))
+(three)                                  ; 3
+(down-counter zero)                      ; proposed error: `down-counter` is not exported by `counter`
+```
+
+With `(import (counter as c))` the client would write `c:zero`, `c:incr`.
+Exporting the type name `counter` but not its conversions is Haskell's
+`Counter` without `(..)`, OCaml's `type t` in the `.mli`, and FX-91's
+`(abs newint type)` (Example 2). The difference from FX-91 is that nothing
+is a value: `counter` cannot be passed to a procedure, so Example 1's
+`use-stack` still needs the product.
+
 ### 2.2 Interfaces written by the checker
 
 The `.fxi` is written by the checker, never by hand (**proposed**). It has
@@ -235,6 +539,63 @@ files it inputs" (thesis p. 40).
 effects canonically is new, since the FX-26 checker's atom order differs
 from Rust's today (`docs/fx26.md` 797–799).
 
+**Example 5: what `counter.fxi` would hold** (proposed format). Today,
+`fixpt check counter-generative.fx` prints, for the counter's part:
+
+```
+define up-counter : (subr pure (int) counter) ! pure
+define down-counter : (subr pure (counter) int) ! pure
+define zero : counter ! (read (globals up-counter))
+define incr : (subr (read (globals down-counter up-counter)) (counter) counter) ! pure
+define value : (subr (read (globals down-counter)) (counter) int) ! pure
+```
+
+The interface is those lines kept to the exports, with the private globals
+widened as §2.3 (b) says, and the rest of the list above:
+
+```
+;;; counter.fxi -- written by the checker, never by hand (proposed)
+(interface counter
+  (stamp "c0ffee…")                             ; hash of counter.fx without unfoldings
+  (checked-against)                             ; stamps of its imports' interfaces: none
+  (generative counter int)                      ; the rep, for safety analyses; importers see only the name
+  (zero  counter)
+  (incr  (subr (read (globals-of counter)) (counter) counter))
+  (value (subr (read (globals-of counter)) (counter) int))
+  (known incr value))                           ; lambdas, for size-change and self-application
+```
+
+An importer is checked against these entries as FX-26's checker is
+against `standard.rs`'s `ENTRIES` today: each one a global of that type.
+
+The FX-91 implementation did the same with one entry. The first expression
+of its `tests.fx` (lines 14–15) is a module, and a later test reads it as a
+value (116–117):
+
+```
+;; tests.fx
+(module (define-abstraction t type int)
+        (define x (up-t 3)))
+
+;; elsewhere
+(let ((m (load "tests.fx")))
+  (with m x))
+```
+
+Checking that `load` writes `tests.fxt` with two data, the type and the
+effect, and trusts it while `tests.fx`'s write date is unchanged
+(`typecheck.scm` 642–690). For this module fixpt's FX-91 port gives the
+type `(moduleof (abs t type) (val x t))` and effect `(maxeff)`, i.e. pure;
+so the `.fxt` is, up to how `unparse-dexp` prints:
+
+```
+(moduleof (abs t type) (val x t))
+(maxeff)
+```
+
+The `.fxi` above is that, one entry per export, with a content hash in
+place of the write date.
+
 ### 2.3 Precise globals across units
 
 Options, in increasing cost:
@@ -258,6 +619,113 @@ Option (c) is FX-91's `(abs id effect)` (below). Keep it for when a real
 client wants to hide what it reads. An unbounded abstract effect could not
 be licensed, since the licence has to see regions (`docs/fx26.md` 535–541).
 
+**Example 6: the problem, today.** In Example 2 the client's `three` is a
+`define*`, and `fixpt check` gives it
+
+```
+define three : (subr (read (globals down-counter incr up-counter value zero)) () int) ! pure
+```
+
+So a type in `client.fx` names `down-counter` and `up-counter`, which in
+Example 4 `counter` does not export. If `client` exported `three`, its
+interface would say, under each option:
+
+| Option | `three` in `client.fxi`                                                                                          |
+| ------ | ---------------------------------------------------------------------------------------------------------------- |
+| today  | `(subr (read (globals down-counter incr up-counter value zero)) () int)`                                         |
+| a      | `(subr (read (globals counter:down-counter counter:incr counter:up-counter counter:value counter:zero)) () int)` |
+| b      | `(subr (maxeff (read (globals counter:incr counter:value counter:zero)) (read (globals-of counter))) () int)`    |
+| c      | `(subr counter:reads () int)`, with `counter:reads ≤ (read (globals-of counter))` known to importers             |
+| d      | not for `three`: it calls known procedures; (d) is Example 7's second half                                       |
+
+Under (a), rewriting `incr` to skip `down-counter` changes `client.fxi`.
+Under (b) it does not, which is the cutoff §2.4 needs; and (b) may print
+as just `(read (globals-of counter))`, since the three exported names are
+within it.
+
+**Example 7: effects and a private region in an export** (FX-26 today).
+The module keeps its state in a region no other program can name
+(`tally-effects.fx`; checked; runs to `2`):
+
+```
+;;; ---- tally.fx ----
+(private-regions @tally)
+(define count (ref int @tally) (new 0))
+(define* tick (subr (maxeff (read @tally) (write @tally)) () int)
+  (lambda () (begin (set count (+ (get count) 1)) (get count))))
+
+;;; ---- client.fx : names the module's region, since tick's type does ----
+(define* tick-twice (subr (maxeff (read @tally) (write @tally)) () int)
+  (lambda () (begin (tick) (tick))))
+(tick-twice)                              ; 2
+```
+
+`fixpt check` prints `tick : (subr (maxeff (read (globals count)) (read
+@tally.1) (write @tally.1)) () int)`: `@tally.1` is the fresh region, and
+`count` is a private global the type names. As a unit, `tally` would
+`(export tick (region @tally))`, and `count` would become `(globals-of
+tally)`. The client has to say `@tally` in its own signature, which is the
+coupling (c) or (d) removes. Today (d) does it, with a client polymorphic
+in the effect of the operations it is given (`tally-effect-poly.fx`;
+checked; runs to `2`):
+
+```
+;;; ---- tally.fx : as above, and the interface as a type ----
+(define-type (tally-ops (e effect)) (productof (tick (subr e () int))))
+
+;;; ---- client.fx : never names @tally ----
+(define tick-twice (poly ((e effect)) (subr e ((tally-ops e)) int))
+  (plambda ((e effect)) (lambda (m) (begin ((extract m tick)) ((extract m tick))))))
+
+;;; ---- main.fx : links the two by application ----
+(tick-twice (product (tick tick)))        ; 2
+```
+
+`tick-twice`'s type is now `(poly ((e effect)) (subr e ((productof (tick
+(subr e () int)))) int))`; `@tally` appears only at the application. Option
+(c) is the same hiding with the unit's name in place of the `poly`
+(proposed):
+
+```
+;;; tally.fx (proposed)
+(unit tally
+  (export tick (abstract-effect ticks)))  ; importers see: ticks ≤ (maxeff (read @tally) (write @tally) (read (globals-of tally)))
+(private-regions @tally)
+(define-effect ticks (maxeff (read @tally) (write @tally) (read (globals count))))
+(define count (ref int @tally) (new 0))
+(define tick (subr ticks () int) (lambda () (begin (set count (+ (get count) 1)) (get count))))
+
+;;; client.fx (proposed)
+(unit client (import tally))
+(define tick-twice (subr (maxeff tally:ticks (read (globals tally:tick))) () int)
+  (lambda () (begin (tick) (tick))))
+```
+
+The client's type has to add `(read (globals tally:tick))`: calling `tick`
+reads the global `tick`, and an importer knows only an upper bound on
+`ticks`, so it cannot count that read as within it. Today, in one file,
+the `tally.fx` half of this (the `define-effect` and `tick` at `(subr ticks
+() int)`) checks; a `tick-twice` declared `(subr ticks () int)` is refused
+for exactly this reason, its effect being `(read (globals count tick))`.
+
+FX-91 writes the interface half as a `moduleof` with an abstraction of
+kind `effect` (grammar, report pp. 6, 10):
+
+```
+(moduleof (abs ticks effect)
+          (val tick (subr ticks () int)))
+```
+
+The implementation half did not go through in fixpt's FX-91 port. A
+`module` with `(define-abstraction ticks effect (maxeff read write))` and
+a `define-typed tick (subr ticks () int)` is refused, "effect constraint is
+not satisfiable": inside the module, too, `ticks` is opaque, and FX-91 has
+no conversions for an effect abstraction (§2.3.11). Whether that is the
+report's rule or the port's was not settled here. The bound in (c) is what
+avoids the question: an importer knows `ticks` only up to its bound, while
+the unit that defines it sees through it, as a `define-effect` is seen
+through today.
+
 ### 2.4 Linking is redefinition at unit grain
 
 At load, each import's current interface is compared with the one the
@@ -276,6 +744,46 @@ No new rule is added to the language, only a larger grain for an old one.
 
 *Cost:* the dependent records which exports it used. `record` already
 computes free globals per definition (`top.rs` 252–265).
+
+**Example 8: the rule, today, at the grain of a definition.** Two
+versions of the counter's `step`, and a client checked against the first
+(`relink-compatible.fx`; checked; runs to `20`):
+
+```
+;;; ---- counter.fx, version 1 ----
+(define step (subr pure (int) int) (lambda (n) (+ n 1)))
+
+;;; ---- client.fx, checked against version 1 ----
+(define* twice (subr pure (int) int) (lambda (n) (step (step n))))
+(twice 0)                                 ; 2
+
+;;; ---- counter.fx, version 2: same type, new body ----
+(define step (subr pure (int) int) (lambda (n) (+ n 10)))
+(twice 0)                                 ; 20: the client sees version 2
+```
+
+`twice` is not checked again; `fixpt eval` says "`step` redefined: every
+use sees the new one". Change version 2's type to `(subr pure (string)
+int)` and `twice` is checked again, fails, and is broken:
+"`twice` is broken, since `step` was redefined (argument 1 is a int,
+where a string is expected): define it again to use it"
+(`relink-broken-rejected.fx`).
+
+At unit grain (proposed), the same two outcomes, decided by the stamps and
+entries of `counter.fxi`:
+
+```
+client.fx was checked against counter.fxi, stamp A, using: step : (subr pure (int) int)
+counter.fx is edited; counter.fxi now has stamp B
+  step : (subr pure (int) int)          fits_old → link client as it is (cutoff)
+  step : (subr pure (string) int)       does not → check client.fx again; it fails;
+                                        its definitions are broken until it is fixed
+```
+
+This is the shape of CM's cutoff recompilation (Blume, CM manual p. 5):
+an unchanged interface stops the rebuild at the edited unit. The
+difference is only that a failing re-check leaves the dependent broken, as
+the REPL does now, where a build would stop.
 
 ### 2.5 Cross-unit inlining under guards and stamps
 
@@ -299,6 +807,63 @@ the guard checks.
 *Cost:* unfoldings grow interfaces. Limit them to what `c-record-inline`
 already selects (20 nodes, 60 for specialization).
 
+**Example 9: the guard, today.** The counter's `step` and a client
+(`inline-guard.fx`; checked; runs to `2`):
+
+```
+;;; ---- counter.fx ----
+(define step (subr pure (int) int) (lambda (n) (+ n 1)))
+
+;;; ---- client.fx ----
+(define* twice (subr pure (int) int) (lambda (n) (step (step n))))
+(twice 0)                                 ; 2
+```
+
+`fixpt compile` on it shows `twice`'s register code beginning (both
+compilers make the same):
+
+```
+  its register code (65 cells, not compiled):
+       0: args 1
+       2: global-guard step #<cellular-word lambda@296> else → 19
+       6: reg 1
+       8: op2imm int-add 1
+      11: setreg 2
+      13: reg 2
+      15: op2imm int-add 1
+      18: return
+      19: …                              ; the calls, made normally
+```
+
+Both calls of `step` became `op2imm int-add 1`, behind one check that the
+global `step` still holds the word `lambda@296`. That word is a heap
+pointer in the compiling session; across units it would come from a link
+table instead (proposed):
+
+```
+;;; in counter.fxi (proposed)
+(unfolding step (stamp "c0ffee…") (lambda (n) (+ n 1)))   ; the tree, with its facts
+
+;;; in client's compiled unit (proposed)
+(global-guard step (link counter step "c0ffee…") else → 19)
+;; at link: counter's implementation stamp is c0ffee… → the guard's word is counter's `step`
+;;          it is not                               → a sentinel no word equals: always the call
+```
+
+GHC's version of the same toy carries the unfolding in `Counter.hi`, and
+recompiles importers when it changes:
+
+```haskell
+module Counter (step) where
+{-# INLINE step #-}
+step :: Int -> Int
+step n = n + 1
+```
+
+With `-fomit-interface-pragmas` (GHC) or `-opaque` (OCaml) the body stays
+out of the interface and importers are recompiled "only when M's exports
+change their type". The guard gives both behaviours from one interface.
+
 ### 2.6 Initialization order
 
 A unit's top level runs once, after its imports, as Racket's "Module
@@ -307,6 +872,39 @@ invoked again" (CSUG §10.5). A cycle between units is an error. A knot
 across units is an I-cell or a `ref`, which the types show; this is the
 design `recursion-and-initialization.md` already chose for knots that are
 not `define-rec` groups.
+
+**Example 10: a knot across files, today** (`hook-icell.fx`; checked; runs
+to `12`). `log.fx` runs first and calls a procedure only `app.fx`
+supplies:
+
+```
+;;; ---- log.fx : runs first; calls a hook it does not define ----
+(private-regions @h)
+(define hook (icell (subr pure (int) int) @h) (make-icell))
+(define* twice-hooked (subr (await @h) (int) int)
+  (lambda (n) ((icell-get hook) ((icell-get hook) n))))
+
+;;; ---- app.fx : imports log.fx, and ties the knot ----
+(icell-put! hook (lambda ((n int)) (* n 2)))
+(twice-hooked 3)                          ; 12
+```
+
+`twice-hooked`'s type says `(await @h)`: it reads a cell that may not be
+filled yet, and calling it before `app.fx` runs is an error at run time,
+not a wrong answer. As units (proposed), `log` would `(export hook
+twice-hooked (region @h))`, `app` would `(import log)`, and `log`'s top
+level would run once, before `app`'s. If `log` instead imported `app` as
+well, that is a cycle, an error when linking. Racket's rule, for
+comparison, where a cycle is refused too:
+
+```racket
+;; log.rkt                               ;; app.rkt
+#lang racket                             #lang racket
+(provide hook twice-hooked)              (require "log.rkt")
+(define hook (box #f))                   (set-box! hook (lambda (n) (* n 2)))
+(define (twice-hooked n)                 (twice-hooked 3)   ; 12
+  ((unbox hook) ((unbox hook) n)))
+```
 
 ### 2.7 Carriers: images, fragments, native code
 
@@ -393,6 +991,21 @@ The FX-87 manual (MIT/LCS/TR-407) is not available
   interned as one group (`try-to-intern`, 7599), which is the opposite of
   FX-26's "sees only those before".
 
+**Example 11: FX-87's compiled file, for the counter's `step`.** The
+shape is from the comment and `write-compile-define` (`impl.rkt`
+7376–7410); the type is written in FX-87's `(subr F (T…) T)`, which FX-26
+kept; the value is elided, since it is whatever the erased code prints as:
+
+```
+;; counter.fx                              ;; counter.fxfasl, written by (compile "counter.fx")
+(define step (subr pure (int) int)         (compiled-define step (subr pure (int) int) …)
+  (lambda ((n int)) (+ n 1)))
+```
+
+Loading `counter.fxfasl` binds `step` at that type without checking the
+value against it. A C10 fragment (§2.7) is the same line with the value
+replaced by cellular words and an import table, checked on link.
+
 ### Adopt, adapt, skip
 
 | FX-91 / FX-87 feature                                  | Verdict      | Why                                                                                                                                                                  |
@@ -464,6 +1077,29 @@ after. S2 is a bug fix in its own right.
   a REPL `,load` that links a unit by stamp; a REPL `,enter U` for
   redefining inside a unit.
 
+### What the examples found
+
+Writing the toys in today's FX-26 turned up these, each small:
+- **No abstract type inside a product's type.** `stack-ops` takes `s` as
+  a parameter, and every client is `poly` in it (Example 1). FX-91's
+  `moduleof` has `(abs s type)`; FX-26 would need an existential, which is
+  first-class-module territory.
+- **Generative conversions are global.** `down-counter` works in any later
+  form (Example 2). An export list is the fix, and the only thing
+  `define-generative` still needs from units.
+- **`define*` names private helpers.** `three`'s precise type lists
+  `down-counter` and `up-counter` (Example 6), which is why §2.3 (b)
+  matters as soon as units exist.
+- **A client names the module's region**, `@tally`, unless it is
+  polymorphic in the effect (Example 7).
+- **Calling a global reads it**, so an abstract effect cannot cover a call
+  of the procedure that has it; the caller adds `(read (globals tick))`
+  (Example 7).
+- **Printed types expand parametrized `define-type`s.** `use-stack` prints
+  with `stack-ops` written out as its `productof` (`fixpt check` on
+  Example 1). An interface printed so is correct but long, and loses the
+  name; the `.fxi` should keep type abbreviations as entries and use them.
+
 ### Open questions for the user
 
 1. **Scope first.** Is the target the front end's own edit–check loop
@@ -516,6 +1152,23 @@ On disk (read-only):
 - `~/Dev/LangPlay/GiffordHistory/fx-lang/fx87/private/impl.rkt` 7317–7530,
   7599. The FX-87 interpreter (BETA-0), ported: `load`, `compile`,
   compiled files, `try-to-intern`.
+- `~/Dev/LangPlay/GiffordHistory/extracted/fx91/tests.fx` 14–15, 116–117,
+  142–146, 148–176. The FX-91 implementation's test programs, source of
+  the FX-91 snippets in Examples 1, 2 and 5.
+
+Examples (this revision):
+- `docs/research/examples/separate-compilation/*.fx`, each checked with
+  `fixpt check` and run with `fixpt eval`, `target/release/fixpt` of
+  2026-09-29 11:01 (commit `e623b23` plus uncommitted work in the
+  tree); Example 9's register code is `fixpt compile`'s.
+- The FX-91 snippets, and the refusals quoted beside them, are from
+  fixpt's FX-91 port, `fixpt --dialect fx91 eval`, same binary.
+- The Rust snippet, compiled as a library with a client by `rustc 1.95.0
+  (59807616e 2026-04-14)`.
+- The SML, OCaml, Haskell and Racket snippets were written for this note
+  and not compiled. Syntax as in the definitions and manuals already cited
+  here (OCaml manual 5.2; GHC User's Guide; Racket Reference §1.1.9), not
+  re-read for this revision.
 
 Online (read 2026-09-29):
 - Xavier Leroy, *Manifest types, modules, and separate compilation*, POPL

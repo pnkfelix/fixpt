@@ -43,7 +43,528 @@ is implemented here.
   collection, as V8's `--trace-gc`, GHC's `+RTS -S`, Go's `GODEBUG=gctrace=1`
   and Larceny's `-annoy-user` do) and `FIXPT_GC_SUMMARY=1` (a summary at
   exit, as `+RTS -s` and `@MLton gc-summary` do), plus two fixes to what
-  exists today (next section).
+  exists today (in "What fixpt measures today").
+- **Worked examples** (next section): nine toy programs, each beside the
+  Python, Node, Racket, OCaml, Java or Chez snippet it comes from. The
+  typing of every proposal is checked today with `fixpt check`, over a
+  mock of the operations, in `docs/research/examples/telemetry/`.
+
+## Worked examples
+
+Small programs, one per proposal, each next to the snippet from the
+runtime the idea comes from. The rest of this note explains them.
+
+**What is FX-26 today and what is proposed.** None of the operations below
+exist in FX-26 today: there is no clock, no counter and no `@telemetry` in
+standard.rs, and `%gc-count` is reachable only from fixpt's Scheme. But
+everything the proposal adds to the *type system* can be written today,
+because `@telemetry` is just a region constant and `observes` just a
+`define-effect`. So each file under `docs/research/examples/telemetry/`
+begins with a **mock prelude**: the proposed operations, written as
+ordinary FX-26 definitions with the proposed types, over a fake counter
+kept in a `ref` at `@telemetry`. The checker's verdicts on these files are
+therefore the verdicts the proposal would give. The numbers they compute
+are not measurements. Code blocks marked `; PROPOSED` use operations or
+forms that are not even mocked, and were not checked.
+
+One difference from the real thing: the mock operations are globals, so
+the printed types also say `(read (globals real-time-ns …))`. The real
+operations would be standard constants, like `+`, which read no global.
+The types quoted below leave those `globals` atoms out.
+
+Every file was run with `fixpt check FILE` (both checkers, which agree on
+all of them) and `fixpt eval FILE`, under a 60-second limit, with the
+binary in `target/release` on 2026-09-29:
+
+| File                        | Shows                                                         | `fixpt check`     | `fixpt eval`          |
+| --------------------------- | ------------------------------------------------------------- | ----------------- | --------------------- |
+| `time-fib.fx`               | two clock reads around `fib 25`; pinning with `black-box`     | passes            | `76025`               |
+| `pure-refused.fx`           | a `pure` procedure that reads a clock                         | refused, as meant | (refused)             |
+| `masked-not.fx`             | `letregion` masks its own region, never `@telemetry`          | passes            | `1000` (stub clock)   |
+| `count-collections.fx`      | collections and words allocated while building a list         | passes            | `0` (stub counters)   |
+| `black-box.fx`              | a benchmark loop, dropped, hoisted and pinned                 | passes            | `0`                   |
+| `run-with-stats.fx`         | the typed thunk runner, on a pure and an allocating thunk     | passes            | `5000125025`          |
+| `place-words.fx`            | words allocated in one arena, read inside its body            | passes            | `0` (stub counter)    |
+| `place-escape-refused.fx`   | the same reading kept for after the arena ends                | refused, as meant | (refused)             |
+
+The snippets from other runtimes: the Python, Node and Java ones were run
+here (Python 3.14.7, Node 26.0.0, OpenJDK 21.0.11). The Chez, Racket,
+OCaml, Haskell, Larceny and Erlang ones are written from the documentation or
+source cited in the survey and with each example, and were not run.
+
+### E1. Timing `fib 25`
+
+The simplest use: read a clock, run the work, read it again. From
+`time-fib.fx` (checked; the prelude is left out here):
+
+```
+(define fib (subr pure (int) int)
+  (letrec ((fib (subr pure (int) int)
+             (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))))
+    fib))
+
+(define* time-fib (subr observes (int) (productof (value int) (ns int)))
+  (lambda (n)
+    (let* ((t0 (real-time-ns))
+           (v  (fib n))
+           (t1 (real-time-ns)))
+      (product (value v) (ns (- t1 t0))))))
+```
+
+Python (run here) and Node (run here) are the same shape, with no effect
+in any type:
+
+```python
+t0 = time.perf_counter_ns()
+v = fib(25)
+t1 = time.perf_counter_ns()          # 75025 5278625 ns
+```
+
+```javascript
+const t0 = process.hrtime.bigint();
+const v = fib(25);
+const t1 = process.hrtime.bigint();  // 75025 1062458n ns
+```
+
+The closest typed precedent is Haskell, whose clock is in `IO`
+(`getMonotonicTimeNSec :: IO Word64`, base-4.22.0.0, GHC.Clock). Its pure
+`fib n` may float out of the window too, and is forced with `seq` or
+`evaluate` to pin it; FX-26's `black-box` plays that role:
+
+```haskell
+timeFib n = do t0 <- getMonotonicTimeNSec
+               v  <- evaluate (fib n)
+               t1 <- getMonotonicTimeNSec
+               return (v, t1 - t0)
+```
+
+What it shows:
+- `real-time-ns : (subr observes () nat)`, where `observes` is `(maxeff
+  (read @telemetry) (write @telemetry))`.
+- `fib` checks as `(subr pure (int) int)`. `time-fib` must say
+  `observes`, and `fixpt check` prints its type as `(subr (maxeff (read
+  @telemetry) (write @telemetry)) (int) (productof (value int) (ns
+  int)))`. Every caller of `time-fib` gets the effect too.
+- Because `(fib n)` is pure, the semantics lets a compiler compute it
+  before `t0` or after `t1` ("Pure code stays pure", under "Typing"). The
+  file's second version pins it, as Chez's manual does in its fourth
+  example (E4):
+
+  ```
+  (v (black-box (fib (black-box n))))
+  ```
+
+  `(black-box n)` is summary 2, so it stays after `t0`. The outer
+  `black-box` stays before `t1`. And `fib`'s call depends on the one and
+  feeds the other.
+
+### E2. What the effect checker says
+
+A procedure that claims `pure` and reads a clock is refused.
+`pure-refused.fx` (checked; refused as intended; the message is shown
+without the mock's `globals` atom):
+
+```
+(define seeded (subr pure (int) int)
+  (lambda (x) (+ x (real-time-ns))))
+```
+
+```
+! pure-refused.fx:10:3: `seeded` is declared a (subr pure (int) int): a (subr pure (int) int)
+  is expected here, and this is a (subr (maxeff (read @telemetry) (write @telemetry)) (int) int)
+```
+
+Masking removes what a body does to a region it binds, but `@telemetry`
+is a constant, so it is never masked. From `masked-not.fx` (checked):
+
+```
+(define local-work (subr pure (int) int)           ; checks: r is masked
+  (lambda (n)
+    (letregion r
+      (let ((c (the (ref int r) (new 0))))
+        (begin (set c (+ (get c) n)) (get c))))))
+
+(define* timed-local-work (subr observes (int) int) ; must say observes
+  (lambda (n)
+    (let* ((t0 (real-time-ns)) (v (local-work n)) (t1 (real-time-ns)))
+      (- t1 t0))))
+```
+
+What it shows: `timed-local-work` returns only a difference of two
+readings, yet its type says `observes`, as "Masking" (under "Typing")
+intends, since its result is not a function of its argument. No other
+runtime surveyed has a type that could say this. Haskell's `IO` is the
+nearest, and it does not separate reading a clock from any other I/O.
+
+### E3. Counting collections while building a list
+
+Cumulative counters, read before and after, and differenced. From
+`count-collections.fx` (checked; the counters are stubs, so the answer is
+0):
+
+```
+(define* build-and-count (subr (maxeff (alloc @l) spin observes) (int) gc-delta)
+  (lambda (n)
+    (let* ((m0 (minor-collections)) (j0 (major-collections)) (w0 (words-allocated))
+           (xs (iota n nil))
+           (w1 (words-allocated)) (j1 (major-collections)) (m1 (minor-collections)))
+      (product (minor (- m1 m0)) (major (- j1 j0)) (words (- w1 w0))))))
+```
+
+Python (run here: `[46, 4, 0]` collections per generation, and
+`(10390103, 10390260)` bytes, current and peak):
+
+```python
+def collections(): return [g["collections"] for g in gc.get_stats()]
+tracemalloc.start()
+before = collections()
+xs = [(i, None) for i in range(100_000)]
+after = collections()
+print([a - b for a, b in zip(after, before)], tracemalloc.get_traced_memory())
+```
+
+OCaml (`Gc.quick_stat`, and `Sys.opaque_identity` to keep `xs`; gc.mli
+and sys.mli at commit `7da997d28b1a`):
+
+```ocaml
+let build_and_count n =
+  let s0 = Gc.quick_stat () in
+  let xs = List.init n (fun i -> i) in
+  let s1 = Gc.quick_stat () in
+  ignore (Sys.opaque_identity xs);
+  (s1.minor_collections - s0.minor_collections,
+   s1.major_collections - s0.major_collections,
+   s1.minor_words -. s0.minor_words)
+```
+
+Racket fills a vector the caller made once (slot 3 is the collection
+count; Racket 9.3 reference, runtime.html):
+
+```racket
+(define v (make-vector 12 0))
+(vector-set-performance-stats! v #f) (define g0 (vector-ref v 3))
+(define xs (build-list 100000 values))
+(vector-set-performance-stats! v #f) (- (vector-ref v 3) g0)
+```
+
+Java sums the collector beans (run here; 0 collections for a million
+small arrays with the default heap):
+
+```java
+static long gcs() { long n = 0;
+  for (GarbageCollectorMXBean b : ManagementFactory.getGarbageCollectorMXBeans())
+    n += b.getCollectionCount();
+  return n; }
+```
+
+What it shows:
+- Each counter is `(subr observes () nat)`. They are cumulative since the
+  heap was made, and allocate nothing, so reading them does not disturb
+  them. OCaml's `quick_stat` and Racket's filled vector take the same
+  care. Python's `get_stats` builds a list of dicts each time.
+- `build-and-count`'s effect is the list's `(alloc @l)` and `spin`, plus
+  `observes`.
+- `(iota n nil)` allocates, which is summary 2, as each counter read is.
+  So the build stays between the reads even though `xs` is unused. A
+  *pure* builder (one that masks its region) could move out of the window,
+  and would need `black-box`, as in E1.
+- A test on these numbers asserts only relations, such as `(>= words (* 2
+  n))`, never values: the counts differ between machines ("Allocation
+  counters").
+
+### E4. A benchmark loop that disappears without `black-box`
+
+From `black-box.fx` (checked). The mock `black-box` has the proposed type
+`(poly ((t type)) (subr observes (t) t))`:
+
+```
+;; 1. (fib 20) is pure, ends, and is unused: summary 0, so it may be dropped.
+(define* loop-dropped (subr spin (int) int)
+  (lambda (k) (if (= k 0) 0 (begin (fib 20) (loop-dropped (- k 1))))))
+
+;; 2. Consumed, but pure and loop-invariant: it may be computed once, before the loop.
+(define* loop-hoisted (subr (maxeff observes spin) (int) int)
+  (lambda (k) (if (= k 0) 0 (begin (black-box (fib 20)) (loop-hoisted (- k 1))))))
+
+;; 3. Input and output through black-box: fib runs k times.
+(define* loop-pinned (subr (maxeff observes spin) (int) int)
+  (lambda (k) (if (= k 0) 0 (begin (black-box (fib (black-box 20))) (loop-pinned (- k 1))))))
+```
+
+Chez Scheme's manual gives the same three cases, and one more for safe
+mode. This is its fourth, the pinned one (`csug/system.stex` at commit
+`d9e76eb8e4f2`, https://github.com/cisco/ChezScheme):
+
+```scheme
+(time
+ (let ([to-power (black-box 100)])
+   (let loop ([i 1000])
+     (unless (zero? i)
+       ; arithmetic really performed every iteration, since `to-power` value
+       ; is assumed unknown, and `expt` result is assumed to be used
+       (black-box (expt 2 to-power))
+       (loop (sub1 i))))))
+```
+
+OCaml's `Sys.opaque_identity` is the same operation. Its documentation
+gives this loop (sys.mli at commit `7da997d28b1a`):
+
+```ocaml
+for _round = 1 to 100_000 do
+  ignore (Sys.opaque_identity (my_pure_computation ()))
+done
+```
+
+JMH's `Blackhole` takes the result, and reads the input from a `@State`
+field so it cannot be folded (`JMHSample_09_Blackholes.java` at commit
+`a194eead0136` of https://github.com/openjdk/jmh):
+
+```java
+@Benchmark
+public void measureRight_2(Blackhole bh) {
+    bh.consume(compute(x1));
+    bh.consume(compute(x2));
+}
+```
+
+What it shows:
+- The checker gives `loop-dropped` the type `(subr spin (int) int)`:
+  nothing in it observes, so everything a compiler may do to pure code it
+  may do there.
+- `loop-hoisted` and `loop-pinned` say `observes`.
+- No fixpt compiler uses effect summaries yet (fx26.md, "Effect
+  summaries"), so today all three loops run `fib` k times. The example
+  shows what the summaries *permit*, which is what a benchmark must be
+  written against.
+
+### E5. `run-with-stats` and `(time e)`
+
+The thunk runner, written in FX-26 over `telemetry-begin` and
+`telemetry-end` as "The first set" proposes. From `run-with-stats.fx`
+(checked; the two operations are stubs, and the prelude and `run-stats`
+type are as in "The first set"):
+
+```
+(define* run-with-stats
+  (poly ((t type) (e effect))
+    (subr (maxeff e observes) ((subr e () t)) (productof (value t) (stats run-stats))))
+  (plambda ((t type) (e effect))
+    (lambda ((thunk (subr e () t)))
+      (let* ((k (telemetry-begin)) (v (thunk)) (s (telemetry-end k)))
+        (product (value v) (stats s))))))
+
+(define* time-fib (subr observes () (productof (value int) (stats run-stats)))
+  (lambda () (run-with-stats (lambda () (fib 25)))))
+(define* time-list (subr (maxeff (alloc @l) (read @l) spin observes) ()
+                         (productof (value int) (stats run-stats)))
+  (lambda () (run-with-stats (lambda () (add-up (iota 100000 nil) 0)))))
+```
+
+```
+; PROPOSED: (time e) as a derived form, read as (run-with-stats (lambda () e))
+(extract (extract (time (fib 25)) stats) minor)
+```
+
+Larceny's version prints, and returns the value (`memstats.sch` and
+`lib/Base/macros.sch`, on disk at commit `fef550c7d392`):
+
+```scheme
+(run-with-stats (lambda () (fib 25)))   ; prints "Words allocated: ...", "Elapsed time...: ...", ...
+(define-syntax time
+  (syntax-rules ()
+    ((time ?expr)
+     (run-with-stats (lambda () ?expr)))))
+```
+
+Chez's `sstats-difference` does the same by hand (CSUG 10.4.0, "Timing
+and Statistics"). Racket's `time-apply` returns its statistics as values
+("a list containing the result(s) …, the number of milliseconds of CPU
+time …, the number of "real" milliseconds …, and the number of
+milliseconds of CPU time … spent on garbage collection", reference 9.3,
+time.html):
+
+```scheme
+(let* ([s0 (statistics)] [v (fib 25)] [s1 (statistics)])   ; Chez
+  (sstats-print (sstats-difference s1 s0))
+  v)
+```
+
+```racket
+(define-values (results cpu-ms real-ms gc-ms) (time-apply fib '(25)))
+```
+
+What it shows:
+- `run-with-stats` is polymorphic in the thunk's effect `e`, and the
+  checker gives each call site `e` plus `observes`. For `time-fib` that is
+  just `observes`. For `time-list` it is `(maxeff (alloc @l) (read @l)
+  spin observes)`.
+- The result is a product, so taking the statistics apart with `extract`
+  is pure.
+- Like Racket's `time-apply`, and unlike Larceny's and Chez's `time`, it
+  prints nothing, since FX-26 has no output.
+- Inside `run-with-stats` the call `(thunk)` has an effect variable, which
+  is summary 3, so it stays between `telemetry-begin` and `telemetry-end`.
+  A compiler that inlines it at `e` = `pure` would see a pure call it may
+  move, which is E1's question again. So the standard definition should
+  either keep its summary when inlined, or take the result through
+  `black-box`. This is a detail left for stage 2.
+
+Nesting works by tokens (proposed semantics; the stubs do not model it).
+The outer run's `peak-words` is at least the inner run's:
+
+```
+; PROPOSED semantics
+(run-with-stats
+  (lambda ()
+    (let ((inner (run-with-stats (lambda () (iota 100000 nil)))))
+      (add-up (extract inner value) 0))))
+```
+
+### E6. Words allocated in one arena
+
+A stage-3 operation (see "Regions and reaps") that takes the place as a value, as `rcons` does. From
+`place-words.fx` (checked; stub counter):
+
+```
+place-words-allocated : (poly ((p place)) (subr (maxeff (read p) observes) ((place p)) nat))
+
+(define* arena-cost (subr (maxeff observes spin) (int) int)
+  (lambda (n)
+    (letrena r
+      (letrec ((build (subr (maxeff (alloc r) spin) (int (listof int r)) (listof int r))
+                 (lambda (i acc) (if (= i 0) acc (build (- i 1) (rcons r i acc))))))
+        (let* ((w0 (place-words-allocated r))
+               (xs (build n nil))
+               (w1 (place-words-allocated r)))
+          (- w1 w0))))))
+```
+
+Keeping the reading for after the arena ends is refused.
+`place-escape-refused.fx` (checked; refused as intended; the message is
+shown without the mock's `globals` atom):
+
+```
+(define later (subr pure () (subr observes () nat))
+  (lambda () (letrena r (lambda () (place-words-allocated r)))))
+```
+
+```
+! place-escape-refused.fx:12:14: the value of `letrena r` would outlive its region: its type is
+  (subr (maxeff (read @telemetry) (read r) (write @telemetry)) () nat)
+```
+
+The nearest precedent is per memory pool, not per region. The JVM gives a
+usage and peak for each pool (Java SE 21, `MemoryPoolMXBean`; run here,
+it prints lines such as `Metaspace 10348232`):
+
+```java
+for (MemoryPoolMXBean p : ManagementFactory.getMemoryPoolMXBeans())
+    System.out.println(p.getName() + " " + p.getPeakUsage().getUsed());
+```
+
+What it shows:
+- The `(read r)` and `(alloc r)` in `arena-cost`'s body are masked when
+  the arena ends, and `observes` is not.
+- `(read p)` in the operation's type is what ties a reading to the
+  place's lifetime. It uses the rule that already keeps a closure over
+  `r` inside the body, with no new check.
+
+### E7. No collection hooks: a pull-style buffer instead
+
+The push style, from OCaml (`Gc.create_alarm`, gc.mli at `7da997d28b1a`;
+a sketch, not run) and Python
+(`gc.callbacks`, run here: it prints `start 0`, `stop 0`, … while the list
+is built):
+
+```ocaml
+let _alarm = Gc.create_alarm (fun () -> incr majors)   (* runs at the end of major cycles *)
+```
+
+```python
+def on_gc(phase, info): print(phase, info["generation"])
+gc.callbacks.append(on_gc)          # runs arbitrary code at every collection
+xs = [[i] for i in range(100_000)]
+```
+
+```
+; REJECTED, for contrast: what a hook would cost the types
+on-collection : (poly ((e effect)) (subr observes ((subr e () unit)) unit))
+;; any allocation may now run a hook of effect e, so cons could no longer
+;; be (subr (alloc r) (t1 t2) (pairof t1 t2 r)): every pure procedure
+;; that allocates would have to carry e.
+```
+
+The pull style, from Racket (a log receiver on topic `'GC`; each event's
+data is a `gc-info` prefab; reference 9.3):
+
+```racket
+(define r (make-log-receiver (current-logger) 'debug 'GC))
+(collect-garbage 'minor)
+(sync/timeout 0 r)   ; a vector: the level, a message, a gc-info prefab, and 'GC
+```
+
+```
+; PROPOSED: the pull-style event buffer (see "Collection event hooks")
+(define-type gc-event (productof (kind symbol) (pause-ns nat) (promoted nat) (live-after nat)))
+collection-events-since : (poly ((r region)) (subr (maxeff observes (alloc r)) (nat) (listof gc-event r)))
+```
+
+What it shows: a buffer the program reads when it chooses costs one more
+`(alloc r)` at the read, and leaves every other procedure's type alone.
+
+### E8. Tools, not language: the trace and the sampling profiler
+
+These are environment variables and REPL commands, with no FX-26 syntax at
+all.
+
+```
+; PROPOSED, stage 1: one line per collection on stderr
+$ FIXPT_GC_TRACE=1 fixpt eval bench/lists.fx
+; PROPOSED: a sampled allocation profile by source position
+> ,profile (rounds 3000 0)
+```
+
+Node's `--trace-gc` line, run here (wrapped):
+
+```
+[36527:0x96880c000]  6 ms: Scavenge 1.4 (3.0) -> 0.7 (3.5) MB, pooled: 0.0 MB, 0.17 / 0.00 ms
+    (average mu = 1.000, current mu = 1.000) allocation failure;
+```
+
+OCaml's `Gc.Memprof` is the model for the profiler: a sample every 1/rate
+words, found by moving the allocation limit (gc.mli at `7da997d28b1a`; the
+rate is "in samples per word", and "1e-4 has no visible effect on
+performance"). A sketch, not run:
+
+```ocaml
+let tracker = { Gc.Memprof.null_tracker with
+                alloc_minor = (fun info -> Hashtbl.replace sites info.callstack (); None) } in
+let _p = Gc.Memprof.start ~sampling_rate:1e-4 tracker in
+run_workload ();
+Gc.Memprof.stop ()
+```
+
+### E9. Deterministic work
+
+```
+; PROPOSED (see "Deterministic work")
+(define* work-of-fib (subr observes (int) int)
+  (lambda (n) (let* ((w0 (work-units)) (v (black-box (fib (black-box n)))) (w1 (work-units)))
+                (- w1 w0))))
+```
+
+Erlang's reductions are the model (`erlang:statistics/1`, OTP 29.1.1):
+
+```erlang
+{R0, _} = erlang:statistics(exact_reductions),
+V = fib(25),
+{R1, _} = erlang:statistics(exact_reductions),
+R1 - R0.
+```
+
+What it shows: `work-units` has the same type as the other counters. On
+one machine its difference is the same on every run, so it could be a
+column in a commit's bench table where time cannot.
 
 ## What fixpt measures today
 
@@ -607,6 +1128,8 @@ Four lessons recur:
   and the collection counts, stable numbers for regression tracking in a
   way time never is. They could be a column in `fixpt bench` and so in every
   commit's bench table.
+- **Example.** E3, under "Worked examples", counts collections and words
+  around building a list.
 - **Consequence for tests.** Cross-machine tests (compare.rs, `fixpt
   bench`'s result column) must never print a telemetry value. A test may
   assert relations only, such as "grew by at least n words after building
@@ -704,7 +1227,7 @@ strategy:
   ```
 
   `(read p)` keeps such a call inside the body, as a closure that reads `p`
-  is kept there. That is right: after the body ends, the place no longer
+  is kept there (E6, under "Worked examples", checks both halves). That is right: after the body ends, the place no longer
   exists. What a body wants to know after it ends is in the run's
   statistics, as `region-words` in `run-stats`.
 
@@ -728,7 +1251,7 @@ strategy:
 - **Not for FX-26 code.** This is a tool, like `%sro`: it sees every region
   and every procedure. It belongs to the CLI and the REPL (`,profile`),
   with a report printed by the host, not to FX-26's standard environment.
-  Stage 3.
+  Stage 3. E8, under "Worked examples", sets it beside OCaml's Memprof.
 
 ### Collection event hooks, alarms and logs
 
@@ -751,6 +1274,8 @@ strategy:
   promoted or copied, old-space words after, and live regions. This is what
   V8's `--trace-gc`, GHC's `-S`, `gctrace` and `-annoy-user` do, and it
   needs no language design at all.
+- E7, under "Worked examples", shows both styles and what a hook would
+  cost `cons`'s type.
 
 ### Timing a thunk
 
@@ -784,6 +1309,9 @@ strategy:
   seen through it. It is Chez 10's `black-box` (whose name it takes)
   and plays the role of JMH's `Blackhole` and Rust's `black_box`. `stay-cellular` is the precedent: an identity with a
   purpose.
+- **Examples.** E1 (timing `fib 25` by hand), E4 (a loop dropped, hoisted
+  and pinned) and E5 (`run-with-stats` and `(time e)`), under "Worked
+  examples".
 
 ### Deterministic work
 
@@ -796,7 +1324,8 @@ strategy:
 - **The operation.** `(work-units)` is stage 2, typed like the other
   counters. Its meaning per machine is: cells run on the Rust machine;
   fuel consumed natively; and the engine's step count on the lowered
-  Scheme.
+  Scheme. E9, under "Worked examples", is a sketch beside Erlang's
+  reductions.
 
 ## Typing
 
@@ -839,7 +1368,8 @@ pinned between two readings. `spin` code is never moved early anyway: only
 code the checker proved terminating can be, since `pure` excludes `spin`.
 
 **Masking.** `@telemetry` is a constant, so no `letregion` binds it and
-masking never removes it. A procedure that reads a clock says so in its
+masking never removes it (E2, under "Worked examples", shows the checker
+saying so). A procedure that reads a clock says so in its
 type, even when it only returns something computed from the reading. That
 is intended: its result is not a function of its arguments.
 
@@ -1066,3 +1596,30 @@ depth.
     `38f24c5c4659b7b8f468e5a2544412e9532e55e9` (go1.28 development).
   - Lua 5.5 reference manual; MDN's `measureUserAgentSpecificMemory`
     page; Java SE 21 API; Python 3.14 and Node 26 documentation.
+- **For the worked examples, read 2026-09-29.** Sources were read as
+  text, and none was built or run:
+  - Chez Scheme: the `black-box` entry and its four examples, and the
+    `time` and `sstats-difference` entries, in `csug/system.stex` at
+    `d9e76eb8e4f283a2bf96f58e3066327b7ab72db9`
+    (https://raw.githubusercontent.com/cisco/ChezScheme/d9e76eb8e4f283a2bf96f58e3066327b7ab72db9/csug/system.stex).
+  - OCaml: `Sys.opaque_identity` in `stdlib/sys.mli`, and `quick_stat`,
+    `create_alarm` and `Memprof` in `stdlib/gc.mli`, at
+    `7da997d28b1ac57dd3a7108a865b327493fd4239`
+    (https://github.com/ocaml/ocaml).
+  - JMH: `jmh-samples/src/main/java/org/openjdk/jmh/samples/JMHSample_09_Blackholes.java`
+    at `a194eead0136bb66e5e59e4fdb2e18543e730929`
+    (https://github.com/openjdk/jmh).
+  - Racket: `time-apply` and `current-gc-milliseconds` in the 9.3
+    reference, https://docs.racket-lang.org/reference/time.html.
+  - Haskell: `getMonotonicTimeNSec`,
+    https://hackage.haskell.org/package/base-4.22.0.0/docs/GHC-Clock.html,
+    and `evaluate`,
+    https://hackage.haskell.org/package/base-4.22.0.0/docs/Control-Exception.html.
+  - Larceny, on disk at `fef550c7d3923deb7a5a1ccd5a628e54cf231c75`:
+    `run-with-stats` in `src/Lib/Common/memstats.sch`, `time` in
+    `lib/Base/macros.sch`.
+  - Run here: the Python snippets (`time.perf_counter_ns`,
+    `gc.get_stats`, `tracemalloc`, `gc.callbacks`) on 3.14.7; the Node
+    ones (`process.hrtime.bigint`, `--trace-gc`) on 26.0.0; the Java
+    ones (`GarbageCollectorMXBean`, `MemoryPoolMXBean`) on OpenJDK
+    21.0.11.

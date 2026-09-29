@@ -11,7 +11,8 @@ Sources are listed at the end with URLs and versions. Every one marked
 *read* was fetched or opened for this note (2026-09-29). Those marked
 *abstract* were checked only for their bibliographic details and
 abstract, and their content is given from memory. FX-26 facts are from
-the repository at commit `eaab38f`.
+the repository at commit `eaab38f`. The toy examples of §2.5 were added
+later the same day and checked at commit `e623b23`.
 
 ## 0. At a glance
 
@@ -36,6 +37,20 @@ the repository at commit `eaab38f`.
   an elaboration that both checkers and both compilers must repeat
   exactly. Both would also lose termination proofs that deriving gets for
   free.
+- **Toy examples, side by side (§2.5).** Each idea gets a snippet in
+  its source language and one in FX-26. Eight FX-26 programs, in
+  `docs/research/examples/polytypic/`, check and run today. Most pass
+  dictionaries: an argument per type parameter, type classes as
+  products, and a representation that *is* a dictionary of generic
+  operations (C). A `Rep` GADT and `(derived …)` at the use are shown
+  as proposed syntax.
+- **The user's preference for dictionaries or tags over per-type copies**
+  (§5, last paragraph) keeps the recommendation, with one reading made
+  explicit. `derive` copies per *declaration*, never per type argument: a
+  family's derived function takes its parameters' operations as
+  dictionaries. Where one function is wanted for many types, a library
+  of representation dictionaries (§2.5 C) works today with no language
+  change. It costs `spin`, `(read @globals)` and allocation.
 - **Found on the way** (§7, Q10): `acyclic?` is typed `pure` over any
   `(t data)`, so a closure that calls it on data frozen into an arena
   escapes the arena. Both checkers accept this. A run-time generic over
@@ -188,6 +203,394 @@ into what deriving writes directly.
 5. A smaller universe gives more useful generics (Altenkirch and McBride).
    FX-26 already has a smaller universe: the `data` kind.
 
+### 2.5 The ideas in toy code
+
+Each idea below comes as a paper-sized example: the source language's
+snippet, then FX-26's. One running type serves them all, a binary tree
+of ints:
+
+```
+data Tree = Leaf Int | Node Tree Tree             -- Haskell
+(define-datatype tree (leaf int) (node tree tree))  ; FX-26
+```
+
+In FX-26, `tree` is `(sumof (leaf (productof (1 int))) (node (productof
+(1 tree) (2 tree))))`: `define-datatype` numbers a variant's fields from 1
+(`top.rs`, `expand_datatype`).
+
+**Today or proposed.** Every FX-26 snippet not marked *proposed* is an
+excerpt of a whole program under `docs/research/examples/polytypic/`. Each
+program was checked with `fixpt check` (both checkers agreed on every one)
+and run with `fixpt eval`, at commit `e623b23`. The results are given
+beside the snippets. Snippets marked *proposed* are syntax that does not
+exist.
+
+| file                    | idea                                                          | checked, ran | effect of the generic operation                        |
+| ----------------------- | ------------------------------------------------------------- | ------------ | ------------------------------------------------------ |
+| `eq-dict.fx`            | an argument per type parameter (Generic Haskell, ppx)         | yes          | `e`, the element function's                            |
+| `dict-of-derived.fx`    | type classes as explicit dictionaries                         | yes          | `e`, the dictionary's                                  |
+| `rep-dict.fx`           | a representation that is a dictionary (GM, MLton `Generic`)   | yes          | `(maxeff spin (read @globals))`                        |
+| `sop-view.fx`           | one sum-of-products value type (GHC.Generics' view, untyped)  | yes          | `pure`, plus reads of `gv`'s constructors              |
+| `datum-model.fx`        | serde's split, with `datum` as the model                      | yes          | `pure`                                                 |
+| `cata-algebra.fx`       | PolyP's `cata`, with the functor fixed                        | yes          | `e`, the algebra's                                     |
+| `derived-copy.fx`       | what `derive` would write: a copy per datatype                | yes          | `pure` (a family: `e`)                                 |
+| `derived-groups.fx`     | §4's local group: `acyclic` descends, `@heap` must say `spin` | yes          | `pure`; `(maxeff (read @heap) spin)`                   |
+| a `Rep` GADT            | Cheney–Hinze's type representation, typed                     | proposed     | would be `spin` (polymorphic recursion)                |
+| `(derived eqd T)`       | instance resolution at the use                                | proposed     | as the derived function's                              |
+
+The user prefers, for FX-26 now, systems that pass dictionaries or tags
+over ones that copy code per type. So the examples lead with those, and
+deriving comes last, as the contrast.
+
+#### A. An argument per type parameter (Generic Haskell, ppx_deriving)
+
+Generic Haskell gives a generic function's case for a type constructor
+the functions for its arguments. This is Hinze's classic style, from
+memory:
+
+```haskell
+eq {| Int |}              = (==)
+eq {| :*: |} eqA eqB (a1 :*: b1) (a2 :*: b2) = eqA a1 a2 && eqB b1 b2
+eq {| :+: |} eqA eqB (Inl a1) (Inl a2)       = eqA a1 a2
+eq {| :+: |} eqA eqB (Inr b1) (Inr b2)       = eqB b1 b2
+eq {| :+: |} _   _   _        _              = False
+```
+
+ppx_deriving follows the same rule for a parametric type: "the generated
+functions accept an argument for every type variable before all other
+arguments". Its README shows `[@@deriving map]` on `'a btree` giving `val
+map_btree : ('a -> 'b) -> 'a btree -> 'b btree`. By that rule, `eq`
+gives `equal_btree : ('a -> 'a -> bool) -> 'a btree -> 'a btree -> bool`.
+
+FX-26 today (`eq-dict.fx`). One `list=?` serves every element type. It
+is effect-polymorphic, and it checks without `spin` because its loop is
+a local group:
+
+```
+(define list=?
+  (poly ((t type) (e effect))
+    (subr e ((subr e (t t) bool) (listof t acyclic) (listof t acyclic)) bool))
+  (lambda (eq xs ys)
+    (letrec ((go (subr e ((listof t acyclic) (listof t acyclic)) bool)
+               (lambda (xs ys)
+                 (cond ((null? xs) (null? ys))
+                       ((null? ys) #f)
+                       (else (and (eq (car xs) (car ys)) (go (cdr xs) (cdr ys))))))))
+      (go xs ys))))
+(list=? (lambda (a b) (list=? int=? a b)) lists lists)     ; #t, at (listof (listof int))
+```
+
+This is §3.3's typing rule in miniature: a `type` parameter adds an
+argument, and one `e` covers it.
+
+#### B. Type classes as explicit dictionaries
+
+In Haskell a constraint is a dictionary the compiler passes. An instance
+for a type constructor is a function from dictionaries to a dictionary:
+
+```haskell
+class Eq a where (==) :: a -> a -> Bool
+instance Eq a => Eq [a] where ...
+member :: Eq a => a -> [a] -> Bool
+member x = any (== x)
+```
+
+FX-26 today (`dict-of-derived.fx`). The dictionary is a product, and
+`list-d` is the instance `Eq a => Eq [a]`:
+
+```
+(define-type (eqd (t type) (e effect))
+  (productof (eq (subr e (t t) bool)) (show (subr e (t) datum))))
+(define list-d
+  (poly ((t type) (e effect)) (subr pure ((eqd t e)) (eqd (listof t acyclic) e)))
+  …)                                         ; eq and show, each a local loop
+(define member
+  (poly ((t type) (e effect)) (subr e ((eqd t e) t (listof t acyclic)) bool))
+  …)
+(member (list-d int-d) (cons 2 (cons 3 nil)) xss)          ; #t
+((extract (list-d (list-d int-d)) show) xss)               ; ((1) (2 3))
+```
+
+Everything here is `pure` at `int`, and polymorphic in `e`. A datatype's
+instance would be its derived functions,
+`(product (eq tree=?) (show tree->datum))`. That combines the two: code
+per *declaration*, and dictionaries passed at every *use*. The
+dictionary is the one value FX-91's modules made first-class (§6.6).
+
+#### C. A representation that is a dictionary ("Generics for the masses", MLton)
+
+Cheney and Hinze's representation is a type-indexed value, `Rep τ`, and
+a generic function interprets it (HW02, p. 2):
+
+```
+RInt :: Rep Int
+R+   :: ∀α . Rep α → (∀β . Rep β → Rep (α + β))
+R×   :: ∀α . Rep α → (∀β . Rep β → Rep (α × β))
+rEqual (R× rα rβ) t1 t2 = case (t1, t2) of
+                            (a1 :×: b1, a2 :×: b2) → rEqual rα a1 a2 ∧ rEqual rβ b1 b2
+```
+
+"Generics for the masses" turns this around: a representation *is* the
+generic functions, one class method per type case (ICFP04, p. 3):
+
+```haskell
+class Generic g where
+  unit     :: g Unit
+  plus     :: (Rep α, Rep β) ⇒ g (Plus α β)
+  pair     :: (Rep α, Rep β) ⇒ g (Pair α β)
+  datatype :: (Rep α) ⇒ Iso α β → g β
+  int      :: g Int
+```
+
+MLton's `TypeIndexedValues` page builds the same thing from combinators:
+`inj (fn NONE => INL () | SOME v => INR v) (data (C0"NONE" + C1"SOME" t))`.
+
+FX-26 today (`rep-dict.fx`). A representation is a product of the
+generic operations. `rep-pair` and `rep-sum` are written once, for every
+product and every sum:
+
+```
+(define-type (rep (t type))
+  (productof (eq (subr walk (t t) bool)) (show (subr walk (t) datum)) (size (subr walk (t) int))))
+(define rep-sum
+  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (sumof (inl a) (inr b)))))
+  (lambda (ra rb)
+    (product
+     (eq (lambda (x y)
+           (tagcase x
+             (inl u (tagcase y (inl v ((extract ra eq) u v)) (inr v #f)))
+             (inr u (tagcase y (inl v #f) (inr v ((extract rb eq) u v)))))))
+     (show …) (size …))))
+```
+
+A user type enters through its `from` (Hinze's `Iso`, MLton's `inj`),
+`rep-con` names a constructor (MLton's `C1`), and `rep-delay` ties the
+recursion (MLton's `Y`):
+
+```
+(define tree-view
+  (subr pure (tree) (sumof (inl int) (inr (productof (1 tree) (2 tree)))))
+  (lambda (t) (tagcase t (leaf (n) (sum inl n))
+                         (node (l r) (sum inr (product (1 l) (2 r)))))))
+(define rep-tree (subr walk () (rep tree))
+  (lambda ()
+    (rep-iso tree-view
+             (rep-sum (rep-con 'leaf rep-int)
+                      (rep-con 'node (rep-pair (rep-delay rep-tree) (rep-delay rep-tree)))))))
+((extract (rep-tree) show) t1)       ; (node ((leaf 1) (node ((leaf 2) (leaf 3)))))
+((extract (rep-tree) size) t1)       ; 3
+((extract (rep-pair rep-int (rep-sum rep-int rep-int)) show)
+ (product (1 7) (2 (sum inr 8))))    ; (7 8): a type with no declaration at all
+```
+
+What it shows, and what it costs:
+
+- **It needs no new feature.** The existentials of Cheney–Hinze's `R×`
+  (the `∀α β` of its components) are not needed: each component's type
+  is hidden inside the closures of the product, as it is in "Generics for
+  the masses". Their Haskell 98 encoding (`R× (Rep α) (Rep β) (τ ↔ (α ×
+  β))`) *would* need existentials, which FX-26 lacks (N4).
+- **Its effect is `walk`, `(maxeff spin (read @globals))`.** The knot
+  runs through a closure: `rep-delay` calls `rep-tree`, a global. So
+  termination and purity are lost, as §5's row (b) says. The derived
+  `tree=?` in G below is `pure`.
+- **Every step allocates.** `tree-view` builds a sum and a product per
+  node, as Hinze's `fromData` does, and each `rep-delay` call rebuilds
+  `rep-tree`. An I-cell could build it once.
+- **The set of generic functions is closed.** `rep` lists `eq`, `show`
+  and `size`, so adding `hash` changes every combinator. Hinze's `class
+  Generic g` abstracts over `g`, the generic function's type
+  constructor. FX-26 has no kind `type → type` (`gadts.md`) to do that.
+
+#### D. One value type for all: a sum-of-products view as data (GHC.Generics, SYB)
+
+GHC.Generics gives each type a `Rep` built from `U1`, `K1`, `M1`, `:+:`
+and `:*:`. A generic function is a class over those (base-4.22.0.0's own
+example):
+
+```haskell
+data Tree a = Leaf a | Node (Tree a) (Tree a) deriving Generic
+class Encode' f where encode' :: f p -> [Bool]
+instance (Encode' f, Encode' g) => Encode' (f :+: g) where
+  encode' (L1 x) = False : encode' x
+  encode' (R1 x) = True  : encode' x
+instance (Encode' f, Encode' g) => Encode' (f :*: g) where
+  encode' (x :*: y) = encode' x ++ encode' y
+```
+
+In FX-26 the view cannot be a *type* computed from `tree`, since there
+are no type-level functions. It can be one *value* type, `gv`, for every
+type. That is untyped, as SYB's traversals effectively are
+(`sop-view.fx`):
+
+```
+(define-datatype gv (g-unit) (g-int int) (g-con symbol gv) (g-inl gv) (g-inr gv) (g-pair gv gv))
+(define gsize (subr pure (gv) int)            ; written once, for every type
+  (letrec ((gsize (subr pure (gv) int)
+             (lambda (x)
+               (tagcase x
+                 (g-unit () 0) (g-int (n) 1) (g-con (c u) (gsize u))
+                 (g-inl (u) (gsize u)) (g-inr (u) (gsize u))
+                 (g-pair (u v) (+ (gsize u) (gsize v)))))))
+    gsize))
+(define tree->gv (subr mk-gv (tree) gv)       ; per type: what `deriving Generic` writes
+  (letrec ((from (subr mk-gv (tree) gv)
+             (lambda (t)
+               (tagcase t
+                 (leaf (n) (g-inl (g-con 'leaf (g-int n))))
+                 (node (l r) (g-inr (g-con 'node (g-pair (from l) (from r)))))))))
+    from))
+```
+
+`gv` is immutable, so every walk of it descends, and `geq` and `gsize`
+are `pure`, unlike C. The same file has SYB's `everywhere (mkT f)`,
+`gmap-int`, which applies `f` at every int whatever the type:
+
+```haskell
+everywhere (mkT ((+1) :: Int -> Int)) tree          -- SYB, from memory
+```
+
+```
+(geq (gmap-int (lambda (n) (* n 10)) (tree->gv t1))
+     (tree->gv (node (leaf 10) (node (leaf 20) (leaf 30)))))     ; #t
+```
+
+What it costs: `from` allocates a copy of the value. `to`, `gv->tree`,
+is partial, since a `gv` does not say which type it came from, so it
+must invent an answer for a `gv` that is not a tree's view. GHC's `to`
+is total because `Rep Tree` is a type.
+
+#### E. serde's split, with `datum` as the data model
+
+serde's `Serialize` maps each type into a fixed data model, and each
+format consumes the model. In FX-26, `datum` is the model. Each type
+writes only its `->datum`, and consumers are written once over `datum`.
+The consumers here are a `datum=?`, missing today (P0), and a count of
+ints (`datum-model.fx`):
+
+```
+(define datum=? (subr pure (datum datum) bool)
+  (letrec ((eq (subr pure (datum datum) bool)
+             (lambda (x y)
+               (cond ((datum-pair? x)
+                      (and (datum-pair? y) (eq (datum-car x) (datum-car y)) (eq (datum-cdr x) (datum-cdr y))))
+                     ((datum-int? x) (and (datum-int? y) (= (datum-int-value x) (datum-int-value y))))
+                     …))))
+    eq))
+(datum=? (tree->datum t1) (tree->datum (node (leaf 1) (node (leaf 2) (leaf 4)))))   ; #f
+```
+
+This is D with `datum` for `gv`. It is `pure`, it needs no new type, and
+it loses the same things: a copy per call, and no way back without a
+check. It is also what option (d) of §5 would do with a primitive, but
+written in FX-26 and reaching only data that has a `->datum`.
+
+#### F. PolyP: a function over a functor, and why FX-26 fixes the functor
+
+PolyP writes one `cata` for every regular datatype, by the datatype's
+pattern functor (`FunctorOf d`). From memory, after Jansson and Jeuring:
+
+```haskell
+cata :: Regular d => (FunctorOf d a b -> b) -> d a -> b
+cata h = h . fmap2 id (cata h) . out
+```
+
+FX-26 cannot abstract over the functor, since it has no kind `type →
+type`. What it can do is one fold per type, taking the algebra as a
+dictionary, a product with one function per constructor
+(`cata-algebra.fx`):
+
+```
+(define-type (tree-alg (b type) (e effect))
+  (productof (leaf (subr e (int) b)) (node (subr e (b b) b))))
+(define tree-cata (poly ((b type) (e effect)) (subr e ((tree-alg b e) tree) b)) …)
+(define depth-alg (tree-alg int pure)
+  (product (leaf (lambda (n) 0)) (node (lambda (x y) (+ 1 (if (< x y) y x))))))
+(tree-cata depth-alg t1)                                      ; 2
+```
+
+`tree-cata` is what a deriver would write per type (P5's `fold`). Each
+algebra is then a generic-looking function with no recursion of its own.
+Its effect is the algebra's `e`, and `pure` here.
+
+#### G. The contrast: what `derive` would write, a copy per datatype
+
+ppx and Rust expand `[@@deriving eq]` / `#[derive(PartialEq)]` into the
+per-type function. The proposed `(derive tree equal ->datum)` would write
+this (`derived-copy.fx`, by hand):
+
+```
+(define tree=? (subr pure (tree tree) bool)
+  (letrec ((eq (subr pure (tree tree) bool)
+             (lambda (x y)
+               (tagcase x
+                 (leaf (n) (tagcase y (leaf (m) (= n m)) (else _ #f)))
+                 (node (l r) (tagcase y (node (l2 r2) (and (eq l l2) (eq r r2))) (else _ #f)))))))
+    eq))
+```
+
+It needs no view, no conversion and no dictionary, and it is `pure`. The
+copy is per *declaration*, not per use. A family, `(ptree t)`, gets one
+`ptree=?` that takes the element's equality as an argument, as in A. So
+deriving is not the specialization the user wants to avoid: nothing is
+copied per type argument. `derived-groups.fx` is §4's rose tree. At
+`acyclic` the two-member group is `pure`. At `@heap` it must say
+`(maxeff (read @heap) spin)`. Without `spin` both checkers refuse it: "a
+part of a list that may be written is no smaller: it may be cyclic".
+
+#### H. Proposed: a `Rep` GADT, tags passed at run time
+
+The typed version of C passes a *tag* and dispatches on it. In Haskell
+(with GADTs) that is:
+
+```haskell
+data Rep t where
+  RInt  :: Rep Int
+  RPair :: Rep a -> Rep b -> Rep (a, b)
+geq :: Rep t -> t -> t -> Bool
+geq RInt         x       y       = x == y
+geq (RPair ra rb) (a1, b1) (a2, b2) = geq ra a1 a2 && geq rb b1 b2
+```
+
+*Proposed* FX-26, after N4 (constructor result types, existentials and
+refinement in `tagcase`). None of this syntax exists:
+
+```
+(define-datatype (rep (t type))                          ; proposed
+  (r-int                       : (rep int))
+  (r-pair (rep a) (rep b)      : (rep (productof (1 a) (2 b)))))   ; a, b existential
+(define geq (poly ((t type)) (subr spin ((rep t) t t) bool))   ; proposed
+  (lambda (r x y)
+    (tagcase r
+      (r-int () (= x y))                                 ; here t = int
+      (r-pair (ra rb) (and (geq ra (extract x 1) (extract y 1))
+                           (geq rb (extract x 2) (extract y 2)))))))
+```
+
+Next to C, this needs three things more: existentials, refinement, and
+polymorphic recursion (`geq` at `a` and `b` inside `geq` at `t`). It
+says `spin` for the same reason C does: a recursive type's `rep` is
+cyclic. What it would gain over C is an open set of generic functions,
+since the representation is data, not a fixed product of operations. So
+C is what FX-26 can do now, and H is what N4 would add.
+
+#### I. Proposed: the dictionary found by type, `(derived …)`
+
+Haskell finds `member`'s dictionary from the type at the call. *Proposed*
+(§3.3's last row, P6), in FX-26:
+
+```haskell
+member t ts                                  -- Eq Tree found by instance resolution
+```
+
+```
+(member (product (eq tree=?) (show tree->datum)) t ts)    ; today: written out
+(member (derived eqd tree) t ts)                          ; proposed: the checker builds it
+```
+
+Both checkers would have to elaborate `(derived …)` to the same text. It
+is a convenience, and B already works without it.
+
 ## 3. Structure in FX-26
 
 ### 3.1 What each type former contributes
@@ -307,7 +710,11 @@ value, as `fib` does in `fx26.md`. Two properties follow:
   `extract`, and `car`/`cdr` at an acyclic region.
 
 Checked with `target/release/fixpt check` (both checkers, which agreed on
-every one), on hand-written code of the shape the deriver would emit:
+every one), on hand-written code of the shape the deriver would emit. The
+first two are reproduced, for a rose tree of ints, in
+`docs/research/examples/polytypic/derived-groups.fx` (§2.5 G). There the
+refusal without `spin` also names the cause: "a part of a list that may be
+written is no smaller: it may be cyclic".
 
 | program (in `/tmp`, not in the repo)                            | result                                                                                                                                                                                              |
 | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -360,6 +767,25 @@ that must agree. (b) is what SML must do for lack of a compiler hook; FX-26
 has the hook. (d) is cheap, and `acyclic?` shows it works. But over `data`
 it cannot see mutable data at all (none of the ports' `@heap` lists), and
 it discards what the types proved.
+
+**With the preference for dictionaries and tags** (the user, after this
+note was first written: "systems that pass dictionaries or tags rather than
+duplicating all the code to be specialized over every type"), (a) still
+fits best, read this way:
+
+- `derive` writes one definition per *declaration*, as `define-datatype`
+  writes one constructor per variant. It never writes one per type
+  argument. A family's derived function takes each `type` parameter's
+  operation as an argument (§3.3, §2.5 A and G). That is dictionary
+  passing, and it keeps §4's termination proofs.
+- Instances can be passed as dictionaries, `(product (eq tree=?) (show
+  tree->datum))`, to consumers written once (§2.5 B). This needs nothing
+  new, and it is `pure` where the operations are.
+- (b) in its dictionary form needs no new feature (§2.5 C), unlike the
+  `Rep` GADT of the table (§2.5 H). It can be a library beside `derive`,
+  for code that wants one generic function over many types. Its costs are
+  measurable: `spin` and `(read @globals)` through the recursion's knot,
+  and a view allocated per node. Tags proper (H) wait for N4.
 
 ## 6. Recommendation
 
@@ -568,8 +994,8 @@ bibliographic record or abstract was seen; content from memory.
 | Hinze, "A new approach to generic functional programming", POPL 2000, doi 10.1145/325694.325709                                      | https://www.cs.ox.ac.uk/ralf.hinze/publications/index.html                                                                                              | abstract                      |
 | Hinze, "Polytypic values possess polykinded types", MPC 2000, doi 10.1007/10722010_2                                                 | same list; its PDF link served a 1 KB stub                                                                                                              | abstract; formula from memory |
 | Hinze, Jeuring, "Generic Haskell: practice and theory", 2003, doi 10.1007/978-3-540-45191-4_1                                        | same list                                                                                                                                               | abstract                      |
-| Cheney, Hinze, "A lightweight implementation of generics and dynamics", Haskell Workshop 2002, pp. 90–104, doi 10.1145/581690.581698 | https://www.cs.ox.ac.uk/ralf.hinze/publications/HW02.pdf, pp. 2–3                                                                                       | read                          |
-| Hinze, "Generics for the masses", ICFP 2004, doi 10.1145/1016850.1016882                                                             | https://www.cs.ox.ac.uk/ralf.hinze/publications/ICFP04.pdf, p. 3                                                                                        | read                          |
+| Cheney, Hinze, "A lightweight implementation of generics and dynamics", Haskell Workshop 2002, pp. 90–104, doi 10.1145/581690.581698 | https://www.cs.ox.ac.uk/ralf.hinze/publications/HW02.pdf, pp. 2–3; copy in `docs/research/papers/cheney-hinze-hw02.pdf`                                 | read                          |
+| Hinze, "Generics for the masses", ICFP 2004, doi 10.1145/1016850.1016882                                                             | https://www.cs.ox.ac.uk/ralf.hinze/publications/ICFP04.pdf, pp. 2–3; copy in `docs/research/papers/hinze-icfp04-generics-for-the-masses.pdf`            | read                          |
 | Lämmel, Peyton Jones, "Scrap your boilerplate", TLDI 2003                                                                            | https://www.microsoft.com/en-us/research/publication/scrap-your-boilerplate-a-practical-approach-to-generic-programming/                                | read (summary page)           |
 | Magalhães, Dijkstra, Jeuring, Löh, "A generic deriving mechanism for Haskell", Haskell 2010, pp. 37–48, doi 10.1145/1863523.1863529  | https://dl.acm.org/doi/10.1145/1863523.1863529                                                                                                          | abstract                      |
 | GHC.Generics, base-4.22.0.0                                                                                                          | https://hackage-content.haskell.org/package/base-4.22.0.0/docs/GHC-Generics.html                                                                        | read                          |
