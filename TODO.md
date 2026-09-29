@@ -534,3 +534,20 @@ operations by dictionary (`PLAN.md` Q8).
   iteration for `boyer`, `ratio-regions`, `tyan`; 6.3 s for `parsing`
   with its 28 KB string): separate compilation's saved front-end image
   (`PLAN.md` Q9, S0) and faster checking would both help.
+
+## 16. FX source sizes and indentation (the user's, 2026-09-29)
+
+- **Size** (done as a lint, `fixpt_tidy::fx_size`): at most 1000 lines per
+  `.fx` file and 100 characters per line, met by extracting meaningful
+  subroutines and splitting files at their seams, never by re-wrapping.
+  The debt, `crates/fixpt-tidy/fx-size-debt.txt`, only shrinks: `check.fx`
+  (to split: lists and strings, types, effects, sizes, the checker proper,
+  top-level forms), `compile.fx`, `regcode.fx` (its 1223-line `define-rec`
+  broken up first), and some 130 lines in test programs and examples.
+- **Indentation** (to do): the lint should check that `.fx` code is
+  indented as Lisp and Scheme are: a form's arguments under its first
+  argument or its body indented two past its head (`define`, `lambda`,
+  `let`, `tagcase`, `cond` and the like), and an `if`'s branches under its
+  test. The user found an `if` whose else branch, itself an `if`, sat at
+  its parent's column (`k-synth-app-plain`, now a `cond`). An indenter in
+  `sexp-edit` computes what the lint compares against.
