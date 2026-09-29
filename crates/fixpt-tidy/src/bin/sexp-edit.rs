@@ -11,8 +11,9 @@
 //!     sexp-edit move FILE NAME OTHER           NAME, with its comments, before OTHER
 //!     sexp-edit delete FILE NAME               NAME, with its comments
 //!     sexp-edit rename FILE OLD NEW [WITHIN]   symbols only; within one definition
-//!     sexp-edit edit FILE NAME OLD NEW         text OLD, once in NAME, to NEW (files, or
-//!                                              - for one); as many lists opened as closed
+//!     sexp-edit edit FILE NAME OLD NEW …       text OLD, once in NAME, to NEW (files, or
+//!                                              - for one); as many lists opened as closed,
+//!                                              over all the pairs, applied at once
 //!     sexp-edit order FILE…                    values used before defined, in load order
 
 use std::io::Read;
@@ -102,6 +103,15 @@ fn run(args: &[String]) -> Result<(), String> {
                 .map_err(|e| format!("{file}: {e}"))?;
             write(file, &out)?;
             println!("{file}: renamed {n} `{old}` to `{new}`");
+            Ok(())
+        }
+        ("edit", [file, name, rest @ ..]) if rest.len() > 2 && rest.len() % 2 == 0 => {
+            let text = slurp(file)?;
+            let texts: Vec<String> = rest.iter().map(|p| slurp(p).map(|t| t.strip_suffix('\n').map(str::to_string).unwrap_or(t))).collect::<Result<_, _>>()?;
+            let pairs: Vec<(&str, &str)> = texts.chunks(2).map(|c| (c[0].as_str(), c[1].as_str())).collect();
+            let out = se::edit_many(&text, se::profile_for(file), name, &pairs).map_err(|e| format!("{file}: {e}"))?;
+            write(file, &out)?;
+            println!("{file}: edited `{name}` in {} places", pairs.len());
             Ok(())
         }
         ("edit", [file, name, old, new]) => {

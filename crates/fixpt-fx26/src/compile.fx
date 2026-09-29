@@ -1557,12 +1557,69 @@
           (if (>= a 0)
               (the (listof (pairof int int @k) @k) (cons (cons k a) nil))
               (c-first-call-only (cdr ps) body f (+ k 1) n))))))
+;; `x`, each `extract` in it that the checker's facts give a field made the
+;; `bloblet-ref` of that field, which compiles as it would: for a body kept
+;; to be inlined or specialized in a later form, whose facts, keyed by
+;; position in its own form's text, are gone by then.
+(define-rec
+  (c-resolve-extracts (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp) exp)
+    (lambda (x)
+      (tagcase x
+        (e-lambda (ps body a b) (e-lambda ps (c-resolve-extracts body) a b))
+        (e-app (f args a b) (e-app (c-resolve-extracts f) (c-resolve-all args) a b))
+        (e-plambda (d body a b) (e-plambda d (c-resolve-extracts body) a b))
+        (e-proj (body ds a b) (e-proj (c-resolve-extracts body) ds a b))
+        (e-if (t c el a b) (e-if (c-resolve-extracts t) (c-resolve-extracts c) (c-resolve-extracts el) a b))
+        (e-letrec (bs body a b) (e-letrec (c-resolve-letrec bs) (c-resolve-extracts body) a b))
+        (e-let (bs body a b) (e-let (c-resolve-named bs) (c-resolve-extracts body) a b))
+        (e-begin (es a b) (e-begin (c-resolve-all es) a b))
+        (e-prompt (t body h a b) (e-prompt (c-resolve-extracts t) (c-resolve-extracts body) (c-resolve-extracts h) a b))
+        (e-letregion (k r p body a b) (e-letregion k r p (c-resolve-extracts body) a b))
+        (e-rlambda (r l a b) (e-rlambda (c-resolve-extracts r) (c-resolve-extracts l) a b))
+        (e-the (t body a b) (e-the t (c-resolve-extracts body) a b))
+        (e-convention (cv body a b) (e-convention cv (c-resolve-extracts body) a b))
+        (e-bloblet (op i args a b) (e-bloblet op i (c-resolve-all args) a b))
+        (e-product (fs a b) (e-product (c-resolve-named fs) a b))
+        (e-extract (p l a b)
+          (let ((i (c-field-at a b)) (q (c-resolve-extracts p)))
+            (if (< i 0) (e-extract q l a b) (e-bloblet 'bloblet-ref i (the (listof exp acyclic) (cons q nil)) a b))))
+        (e-sum (t v a b) (e-sum t (c-resolve-extracts v) a b))
+        (e-tagcase (s arms els a b) (e-tagcase (c-resolve-extracts s) (c-resolve-arms arms) (c-resolve-named els) a b))
+        (else y x))))
+  (c-resolve-all (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof exp acyclic)) (listof exp acyclic))
+    (lambda (es) (if (null? es) es (the (listof exp acyclic) (cons (c-resolve-extracts (car es)) (c-resolve-all (cdr es)))))))
+  (c-resolve-named (subr (maxeff (read @globals) (read @k) (alloc @k) spin)
+                     ((listof (productof (1 symbol) (2 exp)) acyclic)) (listof (productof (1 symbol) (2 exp)) acyclic))
+    (lambda (bs)
+      (if (null? bs)
+          bs
+          (the (listof (productof (1 symbol) (2 exp)) acyclic)
+            (cons (product (1 (extract (car bs) 1)) (2 (c-resolve-extracts (extract (car bs) 2)))) (c-resolve-named (cdr bs)))))))
+  (c-resolve-letrec (subr (maxeff (read @globals) (read @k) (alloc @k) spin)
+                      ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic)) (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
+    (lambda (bs)
+      (if (null? bs)
+          bs
+          (the (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic)
+            (cons (product (1 (extract (car bs) 1)) (2 (extract (car bs) 2)) (3 (c-resolve-extracts (extract (car bs) 3))))
+                  (c-resolve-letrec (cdr bs)))))))
+  (c-resolve-arms (subr (maxeff (read @globals) (read @k) (alloc @k) spin)
+                    ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
+                    (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
+    (lambda (arms)
+      (if (null? arms)
+          arms
+          (the (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic)
+            (cons (product (1 (extract (car arms) 1)) (2 (extract (car arms) 2)) (3 (extract (car arms) 3))
+                           (4 (c-resolve-extracts (extract (car arms) 4))))
+                  (c-resolve-arms (cdr arms))))))))
 ;; A definition of `n` as a lambda just compiled: inlined where it is
 ;; called, if small enough and not calling itself; else, with a parameter it
 ;; only calls, specialized where it is called with a lambda there.
 (define c-record-inline
   (subr (maxeff (read @globals) (read @k) (write @k) (alloc @k) spin) (symbol (listof (productof (1 symbol) (2 syns-a)) acyclic) exp) unit)
-  (lambda (n ps body)
+  (lambda (n ps unresolved)
+    (let ((body (c-resolve-extracts unresolved)))
     (cond ((null? (get c-last-word)) #u)
           ((and (>= (c-inline-room body c-inline-limit) 0) (not (c-mentions? body n)))
            (set c-inlines
@@ -1576,7 +1633,7 @@
                         (cons (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (c-genv-now))
                                        (6 (car (car found))) (7 (cdr (car found))))
                               (get c-specials)))))))
-          (else #u))))
+          (else #u)))))
 ;; The expression compiled last, in a list (for `compile-note-inline!`).
 (define c-last-exp (ref (listof exp @k) @k) (new nil))
 ;; For a driver that computes a definition's value itself (the REPL, in the

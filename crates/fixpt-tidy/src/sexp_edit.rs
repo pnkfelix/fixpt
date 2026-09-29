@@ -264,6 +264,37 @@ pub fn edit(text: &str, profile: SyntaxProfile, name: &str, old: &str, new: &str
     splice(text, profile, at, at + old.len(), new)
 }
 
+/// Several edits in the definition `name` at once, each old text once in it
+/// (as it was before any), balanced taken together: for a change that opens
+/// a list in one place and closes it in another. Checked to read after.
+pub fn edit_many(text: &str, profile: SyntaxProfile, name: &str, pairs: &[(&str, &str)]) -> Result<String, String> {
+    let d = find(text, profile, name)?;
+    let within = &text[d.lead..d.end];
+    let mut at = Vec::new();
+    for (k, (old, _)) in pairs.iter().enumerate() {
+        match within.match_indices(old).map(|(i, _)| i).collect::<Vec<_>>()[..] {
+            [] => return Err(format!("old text {} is not in `{name}`", k + 1)),
+            [i] => at.push((d.lead + i, k)),
+            ref many => return Err(format!("old text {} is in `{name}` {} times", k + 1, many.len())),
+        }
+    }
+    at.sort();
+    if at.windows(2).any(|w| w[0].0 + pairs[w[0].1].0.len() > w[1].0) {
+        return Err(format!("two old texts overlap in `{name}`"));
+    }
+    let (was, is): (i64, i64) = pairs.iter().fold((0, 0), |(w, i), (o, n)| (w + depth(o, profile), i + depth(n, profile)));
+    if was != is {
+        let how = if is > was { format!("leave {} more list(s) open", is - was) } else { format!("close {} more list(s)", was - is) };
+        return Err(format!("the new texts {how} than the old: they would unbalance `{name}`"));
+    }
+    let mut out = text.to_string();
+    for &(i, k) in at.iter().rev() {
+        out.replace_range(i..i + pairs[k].0.len(), pairs[k].1);
+    }
+    check(&out, profile).map_err(|e| format!("the edits would not read: {e}"))?;
+    Ok(out)
+}
+
 /// Rename the symbol `old` to `new` (never in strings or comments), within
 /// the definition `within` if given.
 pub fn rename(text: &str, profile: SyntaxProfile, old: &str, new: &str, within: Option<&str>) -> Result<(String, usize), String> {

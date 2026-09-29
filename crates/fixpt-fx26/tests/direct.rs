@@ -332,85 +332,85 @@ fn native_and_cellular_code_call_each_other() {
     }
 }
 
-/// Conversions between the conventions make adapters, and native and
-/// cellular code call each other through them, nested hundreds deep:
-/// with each convention the program's, as the REPL runs each form, the
-/// native one's forms compiled natively; the deepest collecting often
-/// (`programs/native/adapters.fx`).
-#[test]
-fn conversions_make_adapters() {
-    use fixpt_fx26::session::Strategy;
-    let want = ["2", "2", "2", "2", "6", "7", "12", "22", "15", "(7 7)", "(3 2 1)", "300"];
-    for native in [false, true] {
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        s.strategy = Strategy::Cellular;
-        s.set_native_convention(native);
-        if native {
-            s.native_runner = Some(run_native);
-            s.native_compiler = Some(fixpt_native::direct::compile_closure);
-            s.register_code = true;
-        }
-        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
-        s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
-        let forms = s.checker.read_in(FileId(0), include_str!("programs/native/adapters.fx")).expect("reads");
-        // The last form, the deepest, collecting often.
-        let (most, last) = forms.split_at(forms.len() - 1);
-        let mut outcomes = s.run_forms(most).expect("runs");
-        s.scheme.runtime_unrooted().heap.gc_every = 50;
-        outcomes.extend(s.run_forms(last).expect("runs"));
-        let out: Vec<String> = outcomes
-            .into_iter()
-            .filter_map(|o| match o {
-                Ok(o) => o.value.transpose().map(|v| v.unwrap_or_else(|e| format!("error: {e}"))),
-                Err(e) => Some(format!("error: {}", e.message)),
-            })
-            .collect();
-        assert_eq!(out, want, "native {native}");
-    }
-}
-
-/// Aborts across machines (`programs/native/aborts.fx`): from native code
-/// to a prompt cellular code installed, and from cellular code to one
-/// native code installed, the abort going on from one machine to the other
-/// where it finds no prompt; and under a deep native stack, which the
-/// search for the prompt no longer walks whole.
-#[test]
-fn aborts_cross_machines() {
+/// A session running forms as the REPL does, compiled; in the native
+/// convention if `native`, its forms then compiled natively; with native
+/// code callable from cellular code, and adapters between conventions.
+fn session(native: bool) -> Fx26Session {
     use fixpt_fx26::session::Strategy;
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.strategy = Strategy::Cellular;
-    s.set_native_convention(true);
-    s.native_runner = Some(run_native);
-    s.native_compiler = Some(fixpt_native::direct::compile_closure);
-    s.register_code = true;
+    s.set_native_convention(native);
+    if native {
+        s.native_runner = Some(run_native);
+        s.native_compiler = Some(fixpt_native::direct::compile_closure);
+        s.register_code = true;
+    }
     s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/aborts.fx")).expect("reads");
-    let out: Vec<String> = s
-        .run_forms(&forms)
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+    s
+}
+
+/// The values `forms` give, run in `s` (a failure as `error: …`).
+fn values_of(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> Vec<String> {
+    s.run_forms(forms)
         .expect("runs")
         .into_iter()
         .filter_map(|o| match o {
             Ok(o) => o.value.transpose().map(|v| v.unwrap_or_else(|e| format!("error: {e}"))),
             Err(e) => Some(format!("error: {}", e.message)),
         })
-        .collect();
-    assert_eq!(out, ["15", "105", "400200"]);
+        .collect()
 }
 
-/// A frame's stack map (`docs/research/generational-gc.md`): a large
-/// array in a slot that is dead across a call that collects is not copied
+/// Conversions between the conventions make adapters, and native and
+/// cellular code call each other through them, nested hundreds deep:
+/// with each convention the program's, as the REPL runs each form, the
+/// native one's forms compiled natively; the deepest collecting often
+/// (`programs/native/adapters.fx`). One native session serves the tests
+/// that follow too, `native_session_*`: each loads the front end.
+fn adapters_in(s: &mut Fx26Session) -> Vec<String> {
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/adapters.fx")).expect("reads");
+    // The last form, the deepest, collecting often.
+    let (most, last) = forms.split_at(forms.len() - 1);
+    let mut out = values_of(s, most);
+    s.scheme.runtime_unrooted().heap.gc_every = 50;
+    out.extend(values_of(s, last));
+    s.scheme.runtime_unrooted().heap.gc_every = 0;
+    out
+}
+
+const ADAPTED: [&str; 12] = ["2", "2", "2", "2", "6", "7", "12", "22", "15", "(7 7)", "(3 2 1)", "300"];
+
+#[test]
+fn conversions_make_adapters_in_cellular_code() {
+    assert_eq!(adapters_in(&mut session(false)), ADAPTED);
+}
+
+/// In one native session: conversions (as above); an `extract` inlined
+/// from an earlier form (`programs/native/inlined-extract.fx`), whose caller
+/// keeps its register code; aborts across machines
+/// (`programs/native/aborts.fx`): from native code to a prompt cellular
+/// code installed, and from cellular code to one native code installed,
+/// the abort going on from one machine to the other where it finds no
+/// prompt, and under a deep native stack, which the search no longer walks
+/// whole; and a frame's stack map (`docs/research/generational-gc.md`): a
+/// large array in a slot dead across a call that collects is not copied
 /// by those collections; kept live across it, it is, each time
 /// (`programs/native/dead-slot.fx`).
 #[test]
-fn a_dead_slot_keeps_nothing_alive() {
-    use fixpt_fx26::session::Strategy;
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    s.strategy = Strategy::Cellular;
-    s.set_native_convention(true);
-    s.native_runner = Some(run_native);
-    s.native_compiler = Some(fixpt_native::direct::compile_closure);
-    s.register_code = true;
-    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+fn native_session_adapters_aborts_and_stack_maps() {
+    let mut s = session(true);
+    assert_eq!(adapters_in(&mut s), ADAPTED, "adapters");
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/aborts.fx")).expect("reads");
+    assert_eq!(values_of(&mut s, &forms), ["15", "105", "400200"], "aborts");
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/inlined-extract.fx")).expect("reads");
+    for o in s.run_forms(&forms).expect("runs") {
+        let o = o.expect("ran");
+        assert!(!o.printed.contains("not in the native convention"), "{}", o.printed);
+        if let Some(v) = o.value.transpose() {
+            assert_eq!(v.as_deref(), Ok("3000"));
+        }
+    }
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/dead-slot.fx")).expect("reads");
     let (defs, runs) = forms.split_at(forms.len() - 2);
     for o in s.run_forms(defs).expect("runs") {

@@ -41,6 +41,17 @@ fn moves_a_definition_with_its_comments() {
 }
 
 #[test]
+fn edits_in_several_places_balanced_together() {
+    // An open paren in one place and its close in another: each alone is
+    // refused, both at once are not.
+    let (open, close) = (("(if (= n 0)", "(begin (if (= n 0)"), ("(d (- n 1))", "(d (- n 1)))"));
+    assert!(se::edit(SAMPLE, P, "c", open.0, open.1).is_err());
+    assert!(se::edit_many(SAMPLE, P, "c", &[open]).is_err());
+    let out = se::edit_many(SAMPLE, P, "c", &[open, close]).unwrap();
+    assert!(out.contains("(begin (if (= n 0) 0 (d (- n 1))))"), "{out}");
+}
+
+#[test]
 fn deletes_a_definition_with_its_comments() {
     let out = se::delete(SAMPLE, P, "a").unwrap();
     assert!(!out.contains("A comment about `a`") && !out.contains("(define a"), "{out}");

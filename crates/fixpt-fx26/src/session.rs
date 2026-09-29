@@ -502,11 +502,16 @@ impl Fx26Session {
         let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
             if self.own_made {
-                if let (Top::Define { name, .. }, Some(compile)) = (&top, self.native_compiler) {
-                    // Nothing to say if it cannot: it runs as cellular code.
-                    let _ = self.compile_global_natively(*name, compile)?;
+                // What the native compiler declines runs as cellular code,
+                // which is slower: said, with why.
+                let mut printed = String::new();
+                if let (Top::Define { name, .. }, Some(compile)) = (&top, self.native_compiler)
+                    && let Err(why) = self.compile_global_natively(*name, compile)?
+                {
+                    let name = self.checker.interner.name(*name);
+                    printed = format!("; `{name}` is not in the native convention yet, so it runs as cellular code: {why}\n");
                 }
-                return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) });
+                return Ok(Outcome { top, code: String::new(), printed, value: Ok(None) });
             }
             if again && self.native_runner.is_none() {
                 return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) });
@@ -549,7 +554,7 @@ impl Fx26Session {
                 match self.native_define(&name, &format!("{form_text}\n"), &init, run)? {
                     Ok(()) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) }),
                     Err(NativeRun::Ran(Err(e))) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Err(e) }),
-                    Err(NativeRun::Declined(why)) => note = format!("; not in the native convention yet, so run as cellular code: {why}\n"),
+                    Err(NativeRun::Declined(why)) => note = format!("; not in the native convention yet, so `{name}` runs as cellular code: {why}\n"),
                     Err(NativeRun::Ran(Ok(_))) => unreachable!("a value is stored"),
                 }
             }
@@ -597,10 +602,10 @@ impl Fx26Session {
                 let mut why = Vec::new();
                 for n in names {
                     if let Err(w) = self.compile_global_natively(n, compile)? {
-                        why.push(w);
+                        why.push(format!("`{}` runs as cellular code: {w}", self.checker.interner.name(n)));
                     }
                 }
-                note = if why.is_empty() { String::new() } else { format!("; not in the native convention yet, so run as cellular code: {}\n", why.join("; ")) };
+                note = if why.is_empty() { String::new() } else { format!("; not in the native convention yet, so {}\n", why.join("; ")) };
             }
             return Ok(Outcome { top, code, printed: note, value });
         }
