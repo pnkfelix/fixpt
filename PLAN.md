@@ -50,9 +50,11 @@ are in the last section, "Log: the glance's details", and in
   they declare). Left of step 4: polymorphism in conventions (a copy per
   convention) and adapters between conventions, to design with the user;
   then steps 6 and 7.
-- **The reader's allocation** (the user's): 18.4 → 14.5 M words to read the
-  front end; left are atoms' character lists, list marks, and closures for
-  `letrec` helpers.
+- **The reader's allocation** (the user's): 18.4 → 11.8 M words to read
+  the front end (a cursor a token, lambda lifting, atoms taken whole from
+  the text); left are the marks of lists, whose shape the Scheme and Rust
+  readers share. The self-compile's collections move between phases as
+  allocation drops; its total time is about the same.
 - **Lambda lifting** is in both compilers (2026-09-28): 5% less
   allocation in the front end's self-compile, one collection fewer, time
   about the same. Later, maybe: as a Twobit-style pass that rewrites the
