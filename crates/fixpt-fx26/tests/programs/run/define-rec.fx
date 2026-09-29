@@ -10,4 +10,4 @@
 
 (define* evens (subr spin (int) int) (lambda (n) (count n 0)))
 
-(the (listof int @l) (cons (evens 1000) (cons (if (od 7) 1 0) nil)))
+(list (evens 1000) (if (od 7) 1 0))

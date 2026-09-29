@@ -18,5 +18,5 @@
     mk))
 (define step (subr spin (counter) counter) (lambda (c) ((extract c next))))
 (define peek (subr pure (counter) int) (lambda (c) ((extract c get))))
-(define cs (listof counter acyclic) (cons (by-int 40) (cons (by-string "") nil)))
+(define cs (listof counter acyclic) (list (by-int 40) (by-string "")))
 (+ (peek (step (step (car cs)))) (peek (step (step (car (cdr cs))))))

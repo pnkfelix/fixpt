@@ -3,6 +3,7 @@
 ;;; says no `spin`, so it must end.
 (define f (subr (maxeff (read @r) (write @r) (alloc @r)) () (listof int @r))
   (lambda ()
+    ;; cons-chain: in @r, made cyclic by set-cdr!
     (let ((xs (the (listof int @r) (cons 1 (cons 2 nil)))))
       (begin (set-cdr! (cdr xs) xs) (reverse xs)))))
 (f)

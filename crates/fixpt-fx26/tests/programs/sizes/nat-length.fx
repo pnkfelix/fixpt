@@ -1,5 +1,6 @@
 ;;; `length` of a `(nlist t n)` is a `(nat n)`; a length computed at run
 ;;; time can confirm a list's: here, that a frozen list is as long as `xs`.
+;; cons-chain: an (nlist int n): list gives no size
 (define three (nlist int 3) (cons 1 (cons 2 (cons 3 nil))))
 (define n (nat 3) (length three))
 (define as-long
@@ -10,6 +11,7 @@
 (define line (subr pure (int) (listof int const))
   (lambda (n)
     (letfreeze r
+      ;; cons-chain: built in r, then frozen
       (let ((ys (the (listof int r) (cons 1 (cons 2 (cons 3 nil))))))
         (begin (set-car! ys n) ys)))))
 (define total (poly ((n size)) (subr pure ((nlist int n)) int))

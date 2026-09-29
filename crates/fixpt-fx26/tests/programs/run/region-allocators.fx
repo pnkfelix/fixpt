@@ -18,4 +18,5 @@
             (icell-put! c (get acc))
             (+ (icell-get c) (+ (bloblet-ref blob 0) (bloblet-ref blob 1)))))))))
 
+;; cons-chain: the list is in @l
 (the (listof int @l) (cons (tally 5) (cons (tally 100) nil)))

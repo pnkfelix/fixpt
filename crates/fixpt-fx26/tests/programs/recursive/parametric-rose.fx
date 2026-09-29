@@ -9,5 +9,5 @@
     (lambda (x) (tagcase x (leaf (n) n) (node (kids) (total-all kids)))))
   (total-all (subr (read @globals) ((listof (rose int acyclic) acyclic)) int)
     (lambda (ks) (if (null? ks) 0 (+ (total (car ks)) (total-all (cdr ks)))))))
-(define kids (listof (rose int acyclic) acyclic) (cons (leaf 1) (cons (leaf 2) nil)))
+(define kids (listof (rose int acyclic) acyclic) (list (leaf 1) (leaf 2)))
 (total (node kids))

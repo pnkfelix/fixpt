@@ -1,5 +1,6 @@
 ;;; A `nlist` built by `cons`, taken apart by `cdr`, walked with no `spin`,
 ;;; and seen as a finite list and back.
+;; cons-chain: an (nlist int n): list gives no size
 (define three (nlist int 3) (cons 1 (cons 2 (cons 3 nil))))
 (define len (subr pure ((nlist int finite) int) int)
   (letrec ((len (subr pure ((nlist int finite) int) int)

@@ -2,5 +2,5 @@
 ; not be the same length.
 (define firsts (poly ((n size)) (subr pure ((listof (nlist int n) acyclic)) int))
   (plambda ((n size)) (lambda (xss) 0)))
-(define two (nlist int finite) (cons 1 (cons 2 nil)))
+(define two (nlist int finite) (list 1 2))
 (firsts (the (listof (nlist int finite) acyclic) (cons two nil)))

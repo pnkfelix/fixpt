@@ -14,6 +14,6 @@
                        (else (and (eq (car xs) (car ys)) (go (cdr xs) (cdr ys))))))))
       (go xs ys))))
 ;; Equality at (listof (listof int)) is built by applying, not by copying.
-(define ints (listof int acyclic) (cons 1 (cons 2 nil)))
-(define lists (listof (listof int acyclic) acyclic) (cons ints (cons ints nil)))
+(define ints (listof int acyclic) (list 1 2))
+(define lists (listof (listof int acyclic) acyclic) (list ints ints))
 (list=? (lambda (a b) (list=? int=? a b)) lists lists)

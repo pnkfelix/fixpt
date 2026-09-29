@@ -11,4 +11,4 @@
 (let ((i64-shifted (i64->int (i64-shr (int->i64 -16) 2)))
       (u32-shifted (u32->int (u32-shr (int->u32 -16) 2)))
       (remainder (i32->int (i32-remainder (int->i32 -7) (int->i32 2)))))
-  (cons i64-shifted (cons u32-shifted (cons remainder (the (listof int @heap) nil)))))
+  (list i64-shifted u32-shifted remainder))

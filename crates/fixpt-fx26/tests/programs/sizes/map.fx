@@ -9,6 +9,7 @@
                     (lambda (f xs) (if (null? xs) nil (cons (f (car xs)) (map f (cdr xs)))))))
             map)
           t u n)))
+;; cons-chain: an (nlist int n): list gives no size
 (define three (nlist int 3) (cons 1 (cons 2 (cons 3 nil))))
 (define doubled (nlist int 3) (map (lambda ((x int)) (+ x x)) three))
 (define some (nlist int finite) (map (lambda ((x int)) x) (the (nlist int finite) three)))

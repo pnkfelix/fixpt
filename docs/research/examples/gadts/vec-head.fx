@@ -6,5 +6,6 @@
   (lambda (xs) (car xs)))
 (define tail (poly ((t type) (n size)) (subr pure ((nlist t (+ n 1))) (nlist t n)))
   (lambda (xs) (cdr xs)))
+;; cons-chain: an (nlist int n): list gives no size
 (define three (nlist int 3) (cons 1 (cons 2 (cons 3 nil))))
 (+ (head three) (head (tail three)))

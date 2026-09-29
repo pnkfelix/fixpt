@@ -7,5 +7,5 @@
                       (lambda (xs) (if (null? xs) nil (cons (car xs) (copy (cdr xs))))))))
             copy)
           n)))
-(define some (nlist int finite) (cons 1 (cons 2 nil)))
+(define some (nlist int finite) (list 1 2))
 (length (copy some))

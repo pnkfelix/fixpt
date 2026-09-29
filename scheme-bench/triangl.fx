@@ -6,20 +6,21 @@
 ;;;
 ;;; Vectors are arrays, and the global `*answer*`, which the benchmark
 ;;; assigns, a reference. FX-26 quotes only symbols, so each
-;;; `(list->vector '(...))` is `list->array` of a list made with `cons`;
+;;; `(list->vector '(...))` is `list->array` of a list made with `list`;
 ;;; `list->array` and `array->list` (for `vector->list`) are written here.
 ;;; The `do` loop in `attempt` is a local `letrec` loop.
 
 (define-type ints (listof int @heap))
 (define-type ivec (arrayof int @heap))
 
-(define* list-length (subr (maxeff (read @heap) spin) (ints) int)
+(define* list-length (subr spin ((listof int acyclic)) int)
   (lambda (l) (if (null? l) 0 (+ 1 (list-length (cdr l))))))
 
-(define* list->array (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin) (ints) ivec)
+(define* list->array
+  (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin) ((listof int acyclic)) ivec)
   (lambda (l)
     (let ((v (the ivec (make-array (list-length l) 0))))
-      (letrec ((fill (subr (maxeff (read @heap) (write @heap) spin) (int ints) ivec)
+      (letrec ((fill (subr (maxeff (read @heap) (write @heap) spin) (int (listof int acyclic)) ivec)
                  (lambda (i l)
                    (if (null? l)
                        v
@@ -38,33 +39,19 @@
 
 (define *board* ivec
   (list->array
-    (cons 1 (cons 1 (cons 1 (cons 1 (cons 1 (cons 0 (cons 1 (cons 1 (cons 1
-    (cons 1 (cons 1 (cons 1 (cons 1 (cons 1 (cons 1 (cons 1 (the ints nil)))))))))))))))))))
+    (list 1 1 1 1 1 0 1 1 1 1 1 1 1 1 1 1)))
 (define *sequence* ivec
   (list->array
-    (cons 0 (cons 0 (cons 0 (cons 0 (cons 0 (cons 0 (cons 0 (cons 0 (cons 0
-    (cons 0 (cons 0 (cons 0 (cons 0 (cons 0 (the ints nil)))))))))))))))))
+    (list 0 0 0 0 0 0 0 0 0 0 0 0 0 0)))
 (define *a* ivec
   (list->array
-    (cons 1 (cons 2 (cons 4 (cons 3 (cons 5 (cons 6 (cons 1 (cons 3 (cons 6
-    (cons 2 (cons 5 (cons 4 (cons 11 (cons 12 (cons 13 (cons 7 (cons 8 (cons 4
-    (cons 4 (cons 7 (cons 11 (cons 8 (cons 12 (cons 13 (cons 6 (cons 10
-    (cons 15 (cons 9 (cons 14 (cons 13 (cons 13 (cons 14 (cons 15 (cons 9
-    (cons 10 (cons 6 (cons 6 (the ints nil))))))))))))))))))))))))))))))))))))))))
+    (list 1 2 4 3 5 6 1 3 6 2 5 4 11 12 13 7 8 4 4 7 11 8 12 13 6 10 15 9 14 13 13 14 15 9 10 6 6)))
 (define *b* ivec
   (list->array
-    (cons 2 (cons 4 (cons 7 (cons 5 (cons 8 (cons 9 (cons 3 (cons 6 (cons 10
-    (cons 5 (cons 9 (cons 8 (cons 12 (cons 13 (cons 14 (cons 8 (cons 9 (cons 5
-    (cons 2 (cons 4 (cons 7 (cons 5 (cons 8 (cons 9 (cons 3 (cons 6 (cons 10
-    (cons 5 (cons 9 (cons 8 (cons 12 (cons 13 (cons 14 (cons 8 (cons 9 (cons 5
-    (cons 5 (the ints nil))))))))))))))))))))))))))))))))))))))))
+    (list 2 4 7 5 8 9 3 6 10 5 9 8 12 13 14 8 9 5 2 4 7 5 8 9 3 6 10 5 9 8 12 13 14 8 9 5 5)))
 (define *c* ivec
   (list->array
-    (cons 4 (cons 7 (cons 11 (cons 8 (cons 12 (cons 13 (cons 6 (cons 10
-    (cons 15 (cons 9 (cons 14 (cons 13 (cons 13 (cons 14 (cons 15 (cons 9
-    (cons 10 (cons 6 (cons 1 (cons 2 (cons 4 (cons 3 (cons 5 (cons 6 (cons 1
-    (cons 3 (cons 6 (cons 2 (cons 5 (cons 4 (cons 11 (cons 12 (cons 13 (cons 7
-    (cons 8 (cons 4 (cons 4 (the ints nil))))))))))))))))))))))))))))))))))))))))
+    (list 4 7 11 8 12 13 6 10 15 9 14 13 13 14 15 9 10 6 1 2 4 3 5 6 1 3 6 2 5 4 11 12 13 7 8 4 4)))
 
 (define *answer* (ref (listof ints @heap) @heap) (new nil))
 

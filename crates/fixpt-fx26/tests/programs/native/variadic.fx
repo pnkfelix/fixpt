@@ -14,5 +14,6 @@
 (define spread (subr (maxeff spin (read (globals adder total))) (int (listof int acyclic)) int)
   (lambda (k xs) (apply (adder k) xs)))
 (+ (add-up) (* 10 (add-up 1 2 3)))
+;; cons-chain: apply over a list in @heap
 (+ (apply (adder 1000) (the (listof int @heap) (cons 5 (cons 6 nil)))) (spread 7 (cons 1 nil)))
 (sum-of-calls 2000 0)

@@ -29,6 +29,7 @@
                      (else (ack (- m 1) (ack m (- n 1))))))))
     ack))
 (define built (subr pure (int) (listof int acyclic))
+  ;; cons-chain: built in r, then frozen
   (lambda (n) (letfreeze r (the (listof int r) (cons n (cons (+ n 1) nil))))))
 (let ((two-leaves (sum node (product (l (sum leaf 1)) (r (sum leaf 2)))))
       (even (if (ev 10) 1 0)))

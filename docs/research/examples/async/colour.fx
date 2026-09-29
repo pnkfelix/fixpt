@@ -24,6 +24,7 @@
   (lambda (s)
     (+ (extract s v) (prompt g ((extract s k) #u) (lambda (s2) (sum-all s2))))))
 
+;; cons-chain: in @l, which for-each reads
 (define xs (listof int @l) (cons 1 (cons 2 (cons 3 nil))))
 
 ;; Suspending: each element goes to the consumer, which sums them.

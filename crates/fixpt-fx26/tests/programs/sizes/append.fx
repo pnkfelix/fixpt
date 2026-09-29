@@ -12,7 +12,9 @@
   (letrec ((len (subr pure ((nlist int finite)) int)
              (lambda (xs) (if (null? xs) 0 (+ 1 (len (cdr xs)))))))
     len))
+;; cons-chain: an (nlist int n): list gives no size
 (define two (nlist int 2) (cons 1 (cons 2 nil)))
+;; cons-chain: an (nlist int n): list gives no size
 (define three (nlist int 3) (cons 3 (cons 4 (cons 5 nil))))
 (define five (nlist int 5) (app two three))
 (len five)

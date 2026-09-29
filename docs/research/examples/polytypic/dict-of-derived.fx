@@ -33,6 +33,6 @@
                (lambda (xs) (and (not (null? xs)) (or ((extract d eq) x (car xs)) (go (cdr xs)))))))
       (go xs))))
 (define xss (listof (listof int acyclic) acyclic)
-  (cons (cons 1 nil) (cons (cons 2 (cons 3 nil)) nil)))
-(member (list-d int-d) (cons 2 (cons 3 nil)) xss)
+  (list (list 1) (list 2 3)))
+(member (list-d int-d) (list 2 3) xss)
 ((extract (list-d (list-d int-d)) show) xss)

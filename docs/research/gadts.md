@@ -313,7 +313,8 @@ is what dynamic typing with GADTs rests on. `polytypic.md` weighs the two.
 ```
 (define-type (rep (a type)) (productof (show (subr pure (a) string))))
 (define r-int (rep int) (product (show (lambda ((n int)) (int->string n)))))
-(define r-pair (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (productof (l a) (r b)))))
+(define r-pair
+  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (productof (l a) (r b)))))
   (lambda (ra rb) (product (show (lambda ((p (productof (l a) (r b)))) … ((extract ra show) (extract p l)) …)))))
 ```
 
@@ -373,8 +374,10 @@ sort of sizes (decision 5, N5): `(nlist t n)` is a list of `n` elements.
 ```
 (define head (poly ((t type) (n size)) (subr pure ((nlist t (+ n 1))) t))
   (lambda (xs) (car xs)))
+(define tail (poly ((t type) (n size)) (subr pure ((nlist t (+ n 1))) (nlist t n)))
+  (lambda (xs) (cdr xs)))
 (define three (nlist int 3) (cons 1 (cons 2 (cons 3 nil))))
-(head three)
+(+ (head three) (head (tail three)))
 ```
 
 `((proj head int 0) (the (nlist int 0) nil))` is refused
@@ -415,16 +418,21 @@ count f (More x t) = f x + count (\(y, z) -> f y + f z) t
 ```
 
 **Today** (`nest-polyrec.fx`): `nest` must be generative, since its
-structure never closes into a cycle (N1); `count` calls itself at `(productof
-(l a) (r a))`, which its declared `poly` allows.
+structure never closes into a cycle (N1); `count` calls itself at `(pair a)`,
+that is `(productof (l a) (r a))`, which its declared `poly` allows.
 
 ```
-(define-generative (nest (a type)) (sumof (none unit) (more (productof (hd a) (tl (nest (productof (l a) (r a))))))))
+(define-type (pair (a type)) (productof (l a) (r a)))
+(define-generative (nest (a type))
+  (sumof (none unit) (more (productof (hd a) (tl (nest (pair a)))))))
 (define* count (poly ((a type)) (subr spin ((subr pure (a) int) (nest a)) int))
   (lambda (f n)
     (tagcase (down-nest n)
       (none u 0)
-      (more (hd tl) (+ (f hd) (count (lambda ((p (productof (l a) (r a)))) (+ (f (extract p l)) (f (extract p r)))) tl))))))
+      (more (hd tl)
+        (+ (f hd)
+           (count (lambda ((p (pair a))) (+ (f (extract p l)) (f (extract p r))))
+                  tl))))))
 ```
 
 Decision 3's lemma for it, `nest-up`, is `tests/programs/lemmas/nest.fx`: the
@@ -437,7 +445,7 @@ the index is thrown away (`phantom-transparent.fx`, accepted):
 
 ```
 (define-type (counted (i type)) (listof int acyclic))
-(define from-zero (counted zero) (cons 0 (cons 1 nil)))
+(define from-zero (counted zero) (list 0 1))
 (define from-one (counted one) from-zero)          ; accepted: both are lists
 ```
 
@@ -446,7 +454,7 @@ Made generative (N1), invariant by default (N2), it is refused
 
 ```
 (define-generative (counted (i type)) (listof int acyclic))
-(define from-zero (counted zero) (up-counted (cons 0 (cons 1 nil))))
+(define from-zero (counted zero) (up-counted (list 0 1)))
 (define from-one (counted one) from-zero)          ; refused: (counted zero)
 ```
 

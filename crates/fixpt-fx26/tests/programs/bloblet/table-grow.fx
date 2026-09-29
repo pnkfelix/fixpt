@@ -13,4 +13,4 @@
   (lambda (i acc) (if (= i 1000) acc (sum-back (+ i 1) (+ acc (table-ref t (key i) -1))))))
 (fill 0)
 (let ((nope (if (table-has? t "nope") 1 0)))
-  (the (listof int @o) (cons (table-count t) (cons (sum-back 0 0) (cons nope nil)))))
+  (list (table-count t) (sum-back 0 0) nope))

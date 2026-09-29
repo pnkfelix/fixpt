@@ -7,4 +7,5 @@
   (lambda (xs) (apply list xs)))
 (define words (listof string acyclic) (list "a" "b"))
 (+ (* 100 (total (list 1 2 3 4 5 6 7 8 9 10)))
+   ;; cons-chain: apply over a list in @heap
    (+ (* 10 (total (make 1 2))) (+ (total (list)) (total (spread (cons 4 (cons 5 nil)))))))

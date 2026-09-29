@@ -3,5 +3,5 @@
 (define-type zero (sumof (zero unit)))
 (define-type one (sumof (one unit)))
 (define-generative (counted (i type)) (listof int acyclic))
-(define from-zero (counted zero) (up-counted (cons 0 (cons 1 nil))))
+(define from-zero (counted zero) (up-counted (list 0 1)))
 (define from-one (counted one) from-zero)

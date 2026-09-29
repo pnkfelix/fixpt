@@ -646,7 +646,8 @@ procedure that writes a ref, its call has `(write @r)` and no control
 effect. One definition, one compilation:
 
 ```scheme
-(define for-each (poly ((e effect)) (subr (maxeff e spin (read @l)) ((subr e (int) unit) (listof int @l)) unit))
+(define for-each
+  (poly ((e effect)) (subr (maxeff e spin (read @l)) ((subr e (int) unit) (listof int @l)) unit))
   (plambda ((e effect))
     (lambda (f xs)
       (letrec ((go (subr (maxeff e spin (read @l)) ((listof int @l)) unit)
@@ -725,7 +726,8 @@ abort finds it after any number of suspensions. A second task sets the
 flag; `ticker` would count for ever.
 
 ```scheme
-(define scope (prompt-tag (sumof (done int) (cancelled unit)) unit (maxeff D (goto @p) (comefrom @p)) @c)
+(define-type outcome (sumof (done int) (cancelled unit)))
+(define scope (prompt-tag outcome unit (maxeff D (goto @p) (comefrom @p)) @c)
   (make-continuation-prompt-tag))
 (define stop? (ref bool @q) (new #f))
 
@@ -790,6 +792,8 @@ region `s` is bound by `letregion`, and every task writes the arena.
 ```scheme
 (define-type (stask (s region) (r region))
   (composable unit unit (maxeff spin (read s) (write s) (alloc s) (write r)) s))
+(define-type (sched-tag (s region) (r region))
+  (prompt-tag unit (stask s r) (maxeff spin (read s) (write s) (alloc s) (write r)) s))
 
 (define squares (subr spin (int) int)
   (lambda (k)
@@ -797,8 +801,7 @@ region `s` is bound by `letregion`, and every task writes the arena.
       (let ((out (the (arrayof int r) (rmake-array r k 0))))
         (begin
           (letregion s
-            (let* ((sched (the (prompt-tag unit (stask s r) (maxeff spin (read s) (write s) (alloc s) (write r)) s)
-                               (make-continuation-prompt-tag)))
+            (let* ((sched (the (sched-tag s r) (make-continuation-prompt-tag)))
                    … queue, park!, yield! …)
               (letrec ((spawn-all … (prompt sched (begin (yield!) (array-set! out i (* i i))) park!) …)
                        (run! …))

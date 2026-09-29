@@ -307,7 +307,7 @@ FX-26 today (`dict-of-derived.fx`). The dictionary is a product, and
 (define member
   (poly ((t type) (e effect)) (subr e ((eqd t e) t (listof t acyclic)) bool))
   …)
-(member (list-d int-d) (cons 2 (cons 3 nil)) xss)          ; #t
+(member (list-d int-d) (list 2 3) xss)                     ; #t
 ((extract (list-d (list-d int-d)) show) xss)               ; ((1) (2 3))
 ```
 
@@ -473,8 +473,11 @@ ints (`datum-model.fx`):
   (letrec ((eq (subr pure (datum datum) bool)
              (lambda (x y)
                (cond ((datum-pair? x)
-                      (and (datum-pair? y) (eq (datum-car x) (datum-car y)) (eq (datum-cdr x) (datum-cdr y))))
-                     ((datum-int? x) (and (datum-int? y) (= (datum-int-value x) (datum-int-value y))))
+                      (and (datum-pair? y)
+                           (eq (datum-car x) (datum-car y))
+                           (eq (datum-cdr x) (datum-cdr y))))
+                     ((datum-int? x)
+                      (and (datum-int? y) (= (datum-int-value x) (datum-int-value y))))
                      …))))
     eq))
 (datum=? (tree->datum t1) (tree->datum (node (leaf 1) (node (leaf 2) (leaf 4)))))   ; #f

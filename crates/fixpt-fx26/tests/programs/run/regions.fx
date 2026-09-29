@@ -18,4 +18,5 @@
                  (lambda (xs acc) (if (null? xs) acc (add-up (cdr xs) (+ acc (car xs)))))))
         (add-up (build n nil) 0)))))
 
+;; cons-chain: the list is in @l
 (the (listof int @l) (cons (add-to 41) (cons (total 100) nil)))

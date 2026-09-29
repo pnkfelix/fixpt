@@ -21,6 +21,4 @@
         (icell-put! od (lambda ((k int)) (if (= k 0) #f ((icell-get ev) (- k 1)))))
         ((icell-get ev) n)))))
 
-(the (listof bool @l)
-     (cons ((icell-get even-cell) 10)
-           (cons ((icell-get odd-cell) 10) (cons (parity 7) (cons (parity 1000) nil)))))
+(list ((icell-get even-cell) 10) ((icell-get odd-cell) 10) (parity 7) (parity 1000))

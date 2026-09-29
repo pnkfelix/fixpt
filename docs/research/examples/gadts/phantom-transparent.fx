@@ -5,6 +5,6 @@
 (define-type zero (sumof (zero unit)))
 (define-type one (sumof (one unit)))
 (define-type (counted (i type)) (listof int acyclic))
-(define from-zero (counted zero) (cons 0 (cons 1 nil)))
+(define from-zero (counted zero) (list 0 1))
 (define from-one (counted one) from-zero)
 (car from-one)

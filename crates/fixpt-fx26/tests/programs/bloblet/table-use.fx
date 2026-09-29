@@ -7,7 +7,8 @@
         #u
         (begin (table-set! counts (car xs) (+ 1 (table-ref counts (car xs) 0)))
                (count-all (cdr xs))))))
+;; cons-chain: count-all takes a list in @l
 (count-all (cons 'a (cons 'b (cons 'a (cons 'c (cons 'a nil))))))
 (let ((a (table-ref counts 'a 0))
       (z (table-ref counts 'z 0)))
-  (the (listof int @o) (cons a (cons z (cons (table-count counts) nil)))))
+  (list a z (table-count counts)))
