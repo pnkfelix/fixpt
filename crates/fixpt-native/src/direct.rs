@@ -137,11 +137,12 @@ struct DState {
 }
 
 /// The traps this code raises, by code.
-const TRAPS: [&str; 5] = ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed"];
+const TRAPS: [&str; 6] = ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed", "car or cdr of nil"];
 const OUT_OF_FUEL: u32 = 1;
 const STACK_OVERFLOW: u32 = 2;
 const OVERFLOW: u32 = 3;
 const PRIM_FAILED: u32 = 4;
+const NOT_A_PAIR: u32 = 5;
 
 /// What a call-out does: `cons`; a runtime primitive of `n` arguments; a
 /// native closure over `n` values of the code in the state's `aux`.
@@ -1202,8 +1203,13 @@ impl Compiling<'_> {
                     }
                 }
                 "op1" => match ROUTINES[k(o(0))].0 {
-                    "pair-car" => a.e(ldur(RESULT, RESULT, -1)),
-                    "pair-cdr" => a.e(ldur(RESULT, RESULT, 7)),
+                    // A list may be `nil`: `car` of it traps.
+                    r @ ("pair-car" | "pair-cdr") => {
+                        a.e(and_low(X16, RESULT, 3));
+                        a.e(cmp_imm(X16, fixpt_heap::value::TAG_PAIR as u32));
+                        trap(&mut a, &mut stubs, NOT_A_PAIR, Cond::Ne);
+                        a.e(ldur(RESULT, RESULT, if r == "pair-car" { -1 } else { 7 }));
+                    }
                     r => return decline(format!("op1 {r}")),
                 },
                 "op2" | "op2imm" => {

@@ -695,8 +695,10 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(str_pre(X15, DSP, 8));
             a.cont();
         }
+        // A list may be `nil`: `car` of it traps, as the Rust machine's does.
         "pair-car" | "pair-cdr" => {
             a.e(ldr(X15, DSP, 0));
+            a.check_tag(X15, TAG_PAIR, Trap::Type { routine: name });
             a.e(add(X14, BASE, X15));
             a.e(ldur(X15, X14, if name == "pair-car" { -1 } else { 7 }));
             a.e(str(X15, DSP, 0));

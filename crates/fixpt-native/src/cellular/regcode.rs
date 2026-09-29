@@ -615,6 +615,10 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
             "store" => a.slot(reg(k(o(0))), k(o(1)), true),
             "op1" => match ROUTINES[k(o(0))].0 {
                 r @ ("pair-car" | "pair-cdr") => {
+                    // A list may be `nil`: `car` of it traps.
+                    a.e(and_low(X13, RESULT, 3));
+                    a.e(cmp_imm(X13, TAG_PAIR as u32));
+                    a.trap_if(Cond::Ne, Trap::Type { routine: if r == "pair-car" { "pair-car" } else { "pair-cdr" } });
                     a.e(ldur(RESULT, RESULT, if r == "pair-car" { -1 } else { 7 }));
                 }
                 r => return Err(format!("op1 {r} in register code")),

@@ -283,3 +283,43 @@ fn fx26_checks_compiles_and_evaluates_a_file_or_text() {
     let (ok, out) = fixpt(&["--dialect", "fx26", "--fx26-run", "cellular", "--eval", "(+ 1 2)"], "");
     assert!(ok && out.contains("3 : "), "{out}");
 }
+
+/// `car` of `nil`, whose type (a list) allows it, traps on every machine
+/// instead of reading below address 0: machine code used to load from the
+/// pair without a look at it, and crashed.
+#[test]
+fn car_of_nil_traps_on_every_machine() {
+    let program = "(define xs (listof int @heap) nil)\n(car xs)\n";
+    let machines: [&[&str]; 6] = [
+        &[],
+        &["--fx26-run", "cellular"],
+        &["--fx26-run", "cellular", "--cellular-machine", "native"],
+        &["--fx26-run", "cellular", "--cellular-machine", "native-compiled"],
+        &["--fx26-run", "cellular", "--cellular-machine", "registers"],
+        &["--fx26-run", "cellular", "--calling-convention", "native"],
+    ];
+    // All at once: each loads the front end.
+    let children: Vec<_> = machines
+        .iter()
+        .map(|m| {
+            let mut child = Command::new(FIXPT)
+                .args(["--dialect", "fx26"])
+                .args(*m)
+                .args(["eval", "-"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("fixpt starts");
+            use std::io::Write as _;
+            child.stdin.take().expect("piped").write_all(program.as_bytes()).expect("writes");
+            (m, child)
+        })
+        .collect();
+    for (m, child) in children {
+        let out = child.wait_with_output().expect("finishes");
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.code().is_some(), "{m:?}: killed by a signal: {text}");
+        assert!(text.contains("pair-car") || text.contains("car or cdr of nil") || text.contains("expected a pair"), "{m:?}: {text}");
+    }
+}

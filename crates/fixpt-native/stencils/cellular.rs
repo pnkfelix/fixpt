@@ -555,14 +555,9 @@ int_arith!(st_int_sub, R_INT_SUB, |a, b| {
 });
 int_arith!(st_int_less, R_INT_LESS, |a, b| (if (a as i64) < (b as i64) { TRUE } else { FALSE }, false));
 
-routine!(st_pair_car, |base, ip, cur, dsp, rsp, st, fp, w| {
-    unsafe { wr(dsp, rd(base.wrapping_add(rd(dsp)).wrapping_sub(1))) };
-    next!(base, ip, cur, dsp, rsp, st, fp)
-});
-routine!(st_pair_cdr, |base, ip, cur, dsp, rsp, st, fp, w| {
-    unsafe { wr(dsp, rd(base.wrapping_add(rd(dsp)).wrapping_sub(1) + 8)) };
-    next!(base, ip, cur, dsp, rsp, st, fp)
-});
+// A list may be `nil`: `car` of it traps, as `car`'s does.
+pair_part!(st_pair_car, R_PAIR_CAR, 0);
+pair_part!(st_pair_cdr, R_PAIR_CDR, 8);
 
 routine!(st_field, |base, ip, cur, dsp, rsp, st, fp, w| {
     let k = unsafe { rd(ip) };

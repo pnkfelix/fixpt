@@ -538,9 +538,11 @@
          (n-e (arm-csel n-x15 n-x16 n-x15 11))
          (n-e (arm-str-pre n-x15 n-dsp 8))
          (n-cont-code)))
+      ;; A list may be `nil`: `car` of it traps, as the Rust machine's does.
       ((or (= n routine-pair-car) (= n routine-pair-cdr))
        (begin
          (n-e (arm-ldr n-x15 n-dsp 0))
+         (n-check-tag n-x15 n-tag-pair n-trap-type n)
          (n-e (arm-add n-x14 n-base n-x15))
          (n-e (arm-ldur n-x15 n-x14 (if (= n routine-pair-car) -1 7)))
          (n-e (arm-str n-x15 n-dsp 0))

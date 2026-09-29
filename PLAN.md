@@ -1818,7 +1818,9 @@ as an ordered queue. Smaller friction is in `TODO.md` §§ 12–15.
    runs Scheme's `+`) and every compiled machine traps on overflow, so
    the machines disagree; they must agree on the bignum answer.
 2. **Fixed-width integers:** `i32`, `i64`, `u32`, `u64`, for machine
-   words, bit operations and speed where the width is the point.
+   words, bit operations and speed where the width is the point. Their
+   arithmetic **wraps** (the user's, 2026-09-29). `int` arithmetic that
+   overflows a fixnum **promotes** to a bignum.
 3. **Floats: `f32` and `f64`.** An `f64` is boxed where a uniform word is
    needed (the heap's flonum, a 16-byte bloblet), not by changing the
    runtime's representation; unboxed where the types allow
@@ -1864,7 +1866,13 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   sign.
 - A redefinition check in the harness-only session path (`knot-spin`).
 
-**Q2. Integers.**
+**Q2. Integers**, in this order: (a) every path traps alike; (b) the
+fixed-width integers, wrapping; (c) a bignum library written in FX-26,
+limbs `u32` computed in `u64`, so it never overflows into bignums itself
+(Larceny's bignums are Scheme too, `src/Lib/Common/bignums.sch`); (d) the
+machines' overflow paths call it, and big literals are built as constants.
+The lowered path keeps the Scheme engine's bignums, an oracle for the
+library.
 - Lowering and every machine agree now: overflow traps everywhere
   (lower `+ - *` to overflow-checked primitives), with a test that
   overflows on purpose. Then:
@@ -1876,7 +1884,7 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   (`int` is still `int`); the compilers' constant folding must not
   assume 61 bits; the front end's machine-word arithmetic moves to `i64`
   or `u64`.
-- `i32`, `u32`, `i64`, `u64`: wrapping or checked? (to ask). `i32`/`u32`
+- `i32`, `u32`, `i64`, `u64`, whose arithmetic wraps. `i32`/`u32`
   immediate (a word's upper half, a subtag); `i64`/`u64` raw in native
   registers and in frame slots outside the stack map, boxed as a
   bloblet with an 8-byte suffix in uniform positions, like `f64`. Bit
