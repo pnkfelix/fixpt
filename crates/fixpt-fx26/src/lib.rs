@@ -38,6 +38,14 @@ pub const COMPILER_EXPS: &str = include_str!("compile-exps.fx");
 /// for each lambda, as its word's twin, when `c-registers` is set.
 pub const REGCODE: &str = include_str!("regcode.fx");
 
+/// Register code's other parts, in order: expressions and their helpers;
+/// the expressions' compiler proper, one recursive group; and the entry.
+pub const REGCODE_PARTS: [(&str, &str); 3] = [
+    ("regcode-exps.fx", include_str!("regcode-exps.fx")),
+    ("regcode-core.fx", include_str!("regcode-core.fx")),
+    ("regcode-entry.fx", include_str!("regcode-entry.fx")),
+];
+
 /// The standard operations the compiler written in FX-26 runs as runtime
 /// primitives, generated from the lowering's table.
 pub const STANDARD_OPS: &str = include_str!("standard.fx");
@@ -78,7 +86,7 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 21] = [
+pub const FRONT_END_FILES: [(&str, &str); 24] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("table.fx", TABLE),
@@ -97,6 +105,9 @@ pub const FRONT_END_FILES: [(&str, &str); 21] = [
     ("compile.fx", COMPILER),
     ("compile-exps.fx", COMPILER_EXPS),
     ("regcode.fx", REGCODE),
+    REGCODE_PARTS[0],
+    REGCODE_PARTS[1],
+    REGCODE_PARTS[2],
     ("arm64.fx", ARM64),
     ("native-layout.fx", NATIVE_LAYOUT),
     ("native.fx", NATIVE),
