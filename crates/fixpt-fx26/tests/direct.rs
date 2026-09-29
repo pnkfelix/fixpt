@@ -20,7 +20,8 @@ struct Ran {
     /// The procedure's own instructions, one to a line.
     code: String,
     /// How many collections its run made.
-    collections: u64,
+    /// Major and minor collections the run made.
+    collections: (u64, u64),
     /// Words in the heap's code area in use just after the run, and after
     /// a collection then, when nothing refers to the code any more.
     code_words: (usize, usize),
@@ -76,7 +77,7 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
         }
         let procs = match m.compile(&mut rt.heap, closure) {
             Ok(p) => p,
-            Err(e) => return Ran { direct: Err(format!("declined: {e}")), rust, code: String::new(), collections: 0, code_words: (0, 0) },
+            Err(e) => return Ran { direct: Err(format!("declined: {e}")), rust, code: String::new(), collections: (0, 0), code_words: (0, 0) },
         };
         let p = procs[0].1;
         let code: String = m.instructions(&rt.heap, p).iter().enumerate().map(|(i, w)| disassemble(*w, i as i64) + "\n").collect();
@@ -84,9 +85,9 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
             eprintln!("{code}");
         }
         let vals: Vec<Value> = args.iter().map(|a| Value::fixnum(*a)).collect();
-        let before = rt.heap.gc_count;
+        let before = (rt.heap.gc_count, rt.heap.minor_count);
         let direct = m.call(rt, p, &vals, fuel).map(|v| fixpt_runtime::write_value(&rt.heap, v)).map_err(|DirectTrap { what, .. }| what);
-        let collections = rt.heap.gc_count - before;
+        let collections = (rt.heap.gc_count - before.0, rt.heap.minor_count - before.1);
         let after_run = rt.heap.code_words().0;
         rt.heap.collect(&mut []);
         Ran { direct, rust, code, collections, code_words: (after_run, rt.heap.code_words().0) }
@@ -214,13 +215,19 @@ fn lists_made_in_call_outs_survive_collection() {
         let r = run_collecting(&bench("lists"), "rounds", &[30, 0], FUEL, gc_every);
         assert_eq!(r.direct, Ok(r.rust.clone()), "collecting every {gc_every:?}:\n{}", r.code);
         if let Some(n) = gc_every {
-            assert!(r.collections >= 30 * 1000 / n, "{} collections", r.collections);
+            assert!(r.collections.0 + r.collections.1 >= 30 * 1000 / n, "{:?} collections", r.collections);
         }
         // The code lived through the run's collections, and is reclaimed
         // by the first one after, when nothing refers to it.
         let (after_run, after_collect) = r.code_words;
         assert!(after_run > 0 && after_collect == 0, "code-area words in use: {:?}", r.code_words);
     }
+    // With no policy, a run that fills the nursery several times collects
+    // it alone each time: its call-outs make the collection that is due,
+    // not a major one (they did, and `paraffins` took 57 s, not 10).
+    let r = run_collecting(&bench("lists"), "rounds", &[3000, 0], FUEL, None);
+    assert_eq!(r.direct, Ok(r.rust.clone()));
+    assert!(r.collections.1 >= 3 && r.collections.0 == 0, "(major, minor) collections: {:?}", r.collections);
 }
 
 /// A runtime primitive that fails says why, as a trap.
@@ -456,10 +463,11 @@ fn native_session_adapters_aborts_and_stack_maps() {
         let after = heap(&mut s);
         seen.push((after.0 - before.0, after.1 - before.1));
     }
-    // As many collections each; `keep`'s copy the array each time, and
-    // `drop`'s do not.
+    // As many major collections each (three policy collections in four
+    // are minor, and the array, old, is not copied by those); `keep`'s
+    // copy the array each time, and `drop`'s do not.
     let ((n0, c0), (n1, c1)) = (seen[0], seen[1]);
-    assert!(n0 >= 10 && n0.abs_diff(n1) <= 1, "{seen:?}");
+    assert!(n0 >= 5 && n0.abs_diff(n1) <= 1, "{seen:?}");
     assert!(c1 > c0 + 100_000 * (n1 - 1), "{seen:?}");
     // A frame of 70 slots, past what a header's mask holds: traced whole,
     // under those collections (`programs/native/wide-frame.fx`).

@@ -73,12 +73,12 @@ fn cons_calls_out_and_survives_collection() {
     let root = heap.push_root(w);
     let mut m = NativeMachine::new();
     // Collections of either kind, if the heap has a nursery.
-    let before = heap.gc_count + heap.minor_count;
+    let before = heap.collections();
     for _ in 0..3 {
         let w = heap.root_at(root);
         assert_eq!(m.run(&mut heap, w, &[fx(3000)], FUEL).unwrap(), [fx(4501500)]);
     }
-    let during = heap.gc_count + heap.minor_count - before;
+    let during = heap.collections() - before;
     eprintln!("collections while the native machine ran: {during}");
     assert!(during > 0, "the test is meant to collect under native code");
     // By now the heap has grown to hold what is live three times over, so

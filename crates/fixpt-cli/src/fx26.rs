@@ -499,6 +499,62 @@ pub fn eval_program(backend: Backend, name: &str, text: &str) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
+    let report = std::env::var_os("FIXPT_GC_REPORT").is_some();
+    let before = GcStats::of(&mut session);
+    let code = eval_program_in(&mut session, name, text);
+    if report {
+        GcStats::of(&mut session).since(&before);
+    }
+    code
+}
+
+/// What the heap has done, for `FIXPT_GC_REPORT`.
+struct GcStats {
+    time: std::time::Instant,
+    major: u64,
+    minor: u64,
+    nanos: u64,
+    minor_nanos: u64,
+    allocated: u64,
+    copied: u64,
+    minor_copied: u64,
+}
+
+impl GcStats {
+    fn of(s: &mut Fx26Session) -> GcStats {
+        let h = &s.scheme.runtime_unrooted().heap;
+        GcStats {
+            time: std::time::Instant::now(),
+            major: h.gc_count,
+            minor: h.minor_count,
+            nanos: h.gc_nanos,
+            minor_nanos: h.minor_nanos,
+            allocated: h.allocated(),
+            copied: h.words_copied,
+            minor_copied: h.minor_words_copied,
+        }
+    }
+
+    /// On stderr: what the heap did since `b`, the front end's loading
+    /// left out.
+    fn since(&self, b: &GcStats) {
+        let ms = |n: u64| n as f64 / 1e6;
+        let mw = |n: u64| n as f64 / 1e6;
+        eprintln!(
+            "; the program: {:.3} s; {} major collection(s), {:.1} ms; {} minor, {:.1} ms; {:.1} M words allocated; copied {:.1} M by major, {:.1} M by minor",
+            self.time.duration_since(b.time).as_secs_f64(),
+            self.major - b.major,
+            ms((self.nanos - b.nanos) - (self.minor_nanos - b.minor_nanos)),
+            self.minor - b.minor,
+            ms(self.minor_nanos - b.minor_nanos),
+            mw(self.allocated - b.allocated),
+            mw((self.copied - b.copied) - (self.minor_copied - b.minor_copied)),
+            mw(self.minor_copied - b.minor_copied),
+        );
+    }
+}
+
+fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str) -> i32 {
     let forms = match session.checker.read_in(FileId(0), text) {
         Ok(f) => f,
         Err(e) => {
@@ -516,7 +572,7 @@ pub fn eval_program(backend: Backend, name: &str, text: &str) -> i32 {
     for out in outs {
         match out {
             Ok(out) => {
-                show(&session, &out, false);
+                show(session, &out, false);
                 if out.value.is_err() {
                     return 1;
                 }

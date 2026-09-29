@@ -401,9 +401,10 @@ pub struct Profile {
 
 impl Profile {
     fn count(&mut self, heap: &Heap, word: Value) {
-        if heap.gc_count != self.gc_count {
+        // Keyed by address: any collection, minor too, may move a word.
+        if heap.collections() != self.gc_count {
             self.names.clear();
-            self.gc_count = heap.gc_count;
+            self.gc_count = heap.collections();
         }
         let name = self.names.entry(word.raw()).or_insert_with(|| {
             let sym = heap.bloblet_slot(word, WORD_NAME);

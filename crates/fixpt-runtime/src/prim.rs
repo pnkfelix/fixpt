@@ -997,7 +997,8 @@ prims! {
     // ---- the collector, observed ----
     // How many collections there have been, and how many words they copied:
     // for tests and tools that want to see the collector at work.
-    "%gc-count", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.gc_count as i64)));
+    // Collections made, minor and major.
+    "%gc-count", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.collections() as i64)));
     "%gc-words-copied", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.words_copied as i64)));
     // Collect at every nth safepoint as well as when full; 0 for only when
     // full. For sweeping collections through a program to find rooting bugs.

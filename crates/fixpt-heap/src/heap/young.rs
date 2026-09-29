@@ -209,8 +209,11 @@ impl Heap {
         self.nursery_top = NURSERY_BASE;
         self.minor_count += 1;
         self.words_copied += free as u64;
+        self.minor_words_copied += free as u64;
         self.top_after_gc = self.top;
-        self.gc_nanos += started.elapsed().as_nanos() as u64;
+        let nanos = started.elapsed().as_nanos() as u64;
+        self.gc_nanos += nanos;
+        self.minor_nanos += nanos;
     }
 
     /// That every young reference in the old space is on a dirty card: what

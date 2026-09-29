@@ -1936,3 +1936,21 @@ declined have no declines left. Native, one run each, seconds:
 | `parsing`             |  125.2 |  15.7 |
 | `graphs`              |   29.0 |  13.6 |
 | `mlton/ratio-regions` |    3.8 |   4.2 |
+
+## Native call-outs collect what is due (2026-09-29)
+
+Counted with the new `FIXPT_GC_REPORT=1 fixpt eval`, `paraffins` made
+657 major collections natively and 8 minor, copying 23 400 M words; the
+lowered program, 12 major and 1095 minor. The native call-out called
+`Heap::collect`, the major collection, whenever a collection was due,
+which with the nursery meant every time it filled. It calls
+`collect_due` now:
+
+| `paraffins`        | seconds | major | minor | copied (M words), major / minor |
+| ------------------ | -------:| -----:| -----:| -------------------------------:|
+| native, before     |    56.3 |   657 |     8 |                    23 403 / 3.9 |
+| native, after      |     9.7 |     8 |   664 |                   328.3 / 691.5 |
+| lowered            |    17.4 |    12 |  1095 |                   323.4 / 688.1 |
+
+The `direct` test binary, which runs native code under collections, went
+from 12 s to 5 s.

@@ -139,8 +139,15 @@ fn fixpoint_as_register_code() {
         if std::env::var_os("FIXPT_GC_REPORT").is_some() {
             let h = &sc.runtime_unrooted().heap;
             eprintln!(
-                "collections {}, {:.1} ms; words allocated {}, copied {}; semispace now {} words",
-                h.gc_count, h.gc_nanos as f64 / 1e6, h.allocated(), h.words_copied, h.semispace_words()
+                "collections {} ({} minor), {:.1} ms ({:.1} minor); words allocated {}, copied {} ({} minor); semispace now {} words",
+                h.collections(),
+                h.minor_count,
+                h.gc_nanos as f64 / 1e6,
+                h.minor_nanos as f64 / 1e6,
+                h.allocated(),
+                h.words_copied,
+                h.minor_words_copied,
+                h.semispace_words()
             );
         }
         let (tag, stage2) = sc.view(|v| {
@@ -676,7 +683,7 @@ fn probe_phases_as_register_code() {
         // what the collections found live).
         let mut lap = |sc: &mut fixpt_scheme::Session, what: &str| {
             let h = &sc.runtime_unrooted().heap;
-            let now = (h.gc_count, h.gc_nanos, h.allocated(), h.words_copied);
+            let now = (h.collections(), h.gc_nanos, h.allocated(), h.words_copied);
             eprintln!(
                 "{what:>8}: {:.3} s, {} collection(s), {:.1} ms; {:.1} M words allocated, {:.1} M copied",
                 t.elapsed().as_secs_f64(),

@@ -26,6 +26,8 @@ pub(super) struct CodeArea {
     /// Words allocated since the last collection, which counts toward the
     /// next as a semispace's allocation does.
     pub(super) taken: usize,
+    /// Words allocated since the heap was made.
+    pub(super) allocated: u64,
 }
 
 /// Whether word `i` of the heap's memory is in the code area.
@@ -70,6 +72,7 @@ impl Heap {
         }
         self.code.used += n;
         self.code.taken += n;
+        self.code.allocated += n as u64;
         if let Some(k) = self.code.free.iter().position(|&(_, len)| len >= n) {
             let (start, len) = self.code.free[k];
             if len > n {

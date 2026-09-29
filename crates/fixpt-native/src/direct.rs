@@ -1809,7 +1809,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         let mut roots = native_frames(st);
         roots.push(&mut args);
         roots.push(&mut code);
-        rt.heap.collect(&mut roots);
+        rt.heap.collect_due(&mut roots);
     }
     let out = match c {
         Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),

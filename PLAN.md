@@ -91,12 +91,19 @@ are in the last section, "Log: the glance's details", and in
   its cost growing with the stack; an inlined `extract` from an earlier
   form getting field -1; frames too large for one `stp`; register
   exhaustion on long operand chains; more than 8 values in register
-  code; a product argument slow natively; an 8 MB native stack. Left: native
-  collection slows as live data grows (`paraffins`
-  57 s native, 20 s lowered); precise globals effects doubled `set.fx`'s
-  native time. Collections counted by
-  `gc_count` leave out minor ones (`%gc-count`, the phase probe), and the
-  engine profile's name cache is keyed on major collections only.
+  code; a product argument slow natively; an 8 MB native stack; native
+  call-outs making major collections where a minor one was due
+  (`paraffins` 56 s native, now 9.7; lowered 17). Left: precise globals
+  effects doubled `set.fx`'s native time. Q3's counts done: minor
+  collections counted, their copying and time apart, regions and code in
+  `allocated()`, and `FIXPT_GC_REPORT=1 fixpt eval FILE`.
+- **A soundness hole in size inference** (found writing the GADT note's
+  examples, `docs/research/examples/gadts/vec-head-hole.fx`): `head` of
+  `(poly ((t type) (n size)) (subr pure ((nlist t (+ n 1))) t))` applied
+  to `(the (nlist int 0) nil)` passes both checkers when `n` is inferred
+  (`n + 1 = 0` has no solution, so `n` is left `finite`, and `(+ finite
+  1)` is `finite`, which size 0 fits), then fails at run time. Given
+  explicitly, `(proj head int 0)` is refused. To fix before Q2.
 
 **Next**, roughly in order. First the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
@@ -1880,9 +1887,13 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   ten million frames. Segmenting it (the async note's stack segments) is
   for later. A collection still walks every native frame, so a deep
   stack makes each minor collection slow; a watermark would fix that.
-- Native collection slows as live data grows (`paraffins` 57 s native,
-  20 s lowered; a 12M-object live set 24 s against 6.5 s for 2M x 6).
-  Count collections and time them first (Q3).
+- Fixed (2026-09-29): native collection slowed as live data grew
+  (`paraffins` 57 s native, 20 s lowered). Counted (Q3): 657 major
+  collections copying 23 400 M words, 8 minor. The native call-out made
+  `collect`, a major collection, whenever one was due, so every nursery
+  that filled was collected with the whole heap. It makes the one due
+  now: 8 major, 664 minor, 9.7 s. Test: a native run that fills the
+  nursery makes minor collections only.
 - Precise globals effects made `set.fx` 2x slower natively (7.2 -> 14 s),
   and doubled `peval`'s check time; cause unknown.
 - Fixed (2026-09-29): a standard operation as a value takes the arity of
@@ -1920,10 +1931,11 @@ library.
 - Unblocks `pi`, `chudnovsky`, `pidigits`, `smith-normal-form`.
 
 **Q3. Telemetry, stage 1** (`docs/research/telemetry.md`): fix the counts
-first (minor collections counted with major ones in `%gc-count`, the
-phase probe and `FIXPT_GC_REPORT`; `words_copied` split into promoted and
-copied; region and code-area allocation in `allocated()`; the engine
-profile's name cache keyed on every collection). Then peak live words,
+first. Done (2026-09-29): minor collections counted with major ones
+(`Heap::collections`, `%gc-count`, the phase probe, `FIXPT_GC_REPORT`,
+which `fixpt eval` now reads too); `minor_words_copied` and
+`minor_nanos` apart; region and code-area allocation in `allocated()`;
+the engine profile's name cache keyed on every collection. Then peak live words,
 pause times per kind, `FIXPT_GC_TRACE`/`FIXPT_GC_SUMMARY`, and
 allocation and collection columns in `fixpt bench`. Stage 2: the FX-26
 operations under an `@telemetry` effect, and `black-box`.

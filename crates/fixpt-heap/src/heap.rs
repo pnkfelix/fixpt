@@ -233,9 +233,13 @@ pub struct Heap {
     /// For each card of the semispaces, where the first object starting in
     /// it starts, plus one; 0 for none.
     crossing: fixpt_memmgmt::Words,
-    /// Minor collections made; whether the collection due is a major one;
-    /// and, under the stress policy, how many policy collections were made.
+    /// Minor collections made, the words they copied (part of
+    /// `words_copied`) and their time (part of `gc_nanos`); whether the
+    /// collection due is a major one; and, under the stress policy, how
+    /// many policy collections were made.
     pub minor_count: u64,
+    pub minor_words_copied: u64,
+    pub minor_nanos: u64,
     due_major: bool,
     policy_count: u64,
     /// Check, before each minor collection, that every young reference in
@@ -288,6 +292,8 @@ impl Heap {
             cards: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the card table"),
             crossing: fixpt_memmgmt::Words::new(young::SEMI_CARDS / 8).expect("address space for the crossing map"),
             minor_count: 0,
+            minor_words_copied: 0,
+            minor_nanos: 0,
             due_major: false,
             policy_count: 0,
             verify_barrier: std::env::var("FIXPT_VERIFY_BARRIER").is_ok_and(|v| v == "1"),
@@ -1366,9 +1372,19 @@ impl Heap {
         }
     }
 
-    /// Words allocated since the heap was made.
+    /// Words allocated since the heap was made: in the semispaces and the
+    /// nursery, in regions, and in the code area.
     pub fn allocated(&self) -> u64 {
-        self.words_allocated + self.top.saturating_sub(self.top_after_gc) as u64 + (self.nursery_top - NURSERY_BASE) as u64
+        self.words_allocated
+            + self.top.saturating_sub(self.top_after_gc) as u64
+            + (self.nursery_top - NURSERY_BASE) as u64
+            + self.region_words()
+            + self.code.allocated
+    }
+
+    /// Collections made, minor and major.
+    pub fn collections(&self) -> u64 {
+        self.gc_count + self.minor_count
     }
 
     /// The semispace's size in words, for reports.
