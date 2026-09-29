@@ -211,7 +211,8 @@ fn the_fx26_repl_compiles_in_the_native_convention() {
         "75025 : int",
         "42 : int",
         "#<native-closure",
-        "adds x0, x1, #8",
+        // A lambda applied at once is a `let`: `(+ 41 1)`, folded.
+        "movz x0, #0x150",
         // State kept from form to form: each is compiled alone, against
         // the globals the ones before made.
         "1041 : int",

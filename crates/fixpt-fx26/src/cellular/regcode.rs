@@ -642,32 +642,11 @@ impl Compiler<'_> {
                 }
                 self.r_exp(g, *last, env, te, tail)?;
             }
-            Exp::Let { bindings, body } => {
-                let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
-                let inits: Vec<Option<ExpId>> = bindings.iter().map(|(_, i)| Some(*i)).collect();
-                let mut inner = te.clone();
-                inner.extend(bindings.iter().map(|(n, _)| (*n, Loc::Slot(usize::MAX))));
-                let body_collects = !g.leaf && self.r_collects(body, &inner, g.this.map(|(t, _)| t), tail);
-                let in_regs = self.r_in_regs(g, &inits, te, body_collects);
-                let mut bound = Vec::new();
-                for ((n, init), reg) in bindings.iter().zip(in_regs) {
-                    // A constant is bound as itself.
-                    if let Some(v) = self.r_const(env, *init) {
-                        bound.push((*n, RLoc::Const(v)));
-                        continue;
-                    }
-                    self.r_exp(g, *init, env, te, false)?;
-                    bound.push((*n, Self::r_keep(g, reg)?));
-                }
-                for (n, l) in bound {
-                    env.push((n, l));
-                    te.push((n, Loc::Slot(usize::MAX)));
-                }
-                self.r_exp(g, body, env, te, tail)?;
-                env.truncate(depth);
-                te.truncate(tdepth);
-                g.next_reg = regs;
-                g.next_slot = slots;
+            Exp::Let { bindings, body } => self.r_let(g, &bindings, body, env, te, tail)?,
+            // A lambda applied at once: a `let` (`applied_lambda`).
+            Exp::App { fun, args } if let Some((ps, lbody)) = self.applied_lambda(fun, args.len()) => {
+                let bindings: Vec<(Sym, ExpId)> = ps.into_iter().zip(args.iter().copied()).collect();
+                self.r_let(g, &bindings, lbody, env, te, tail)?;
             }
             Exp::Extract(p, _) => {
                 let i = *self.c.facts.field_index.get(&x)?;
@@ -827,6 +806,38 @@ impl Compiler<'_> {
             }
             Exp::App { fun, args } => self.r_app(g, fun, &args, env, te, tail)?,
         }
+        Some(())
+    }
+
+    /// A `let`: each value made, in the scope outside, and kept in a
+    /// register where no call comes before the body is done with it (else
+    /// the frame); a constant bound as itself.
+    fn r_let(&mut self, g: &mut Gen, bindings: &[(Sym, ExpId)], body: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
+        let inits: Vec<Option<ExpId>> = bindings.iter().map(|(_, i)| Some(*i)).collect();
+        let mut inner = te.clone();
+        inner.extend(bindings.iter().map(|(n, _)| (*n, Loc::Slot(usize::MAX))));
+        let body_collects = !g.leaf && self.r_collects(body, &inner, g.this.map(|(t, _)| t), tail);
+        let in_regs = self.r_in_regs(g, &inits, te, body_collects);
+        let mut bound = Vec::new();
+        for ((n, init), reg) in bindings.iter().zip(in_regs) {
+            // A constant is bound as itself.
+            if let Some(v) = self.r_const(env, *init) {
+                bound.push((*n, RLoc::Const(v)));
+                continue;
+            }
+            self.r_exp(g, *init, env, te, false)?;
+            bound.push((*n, Self::r_keep(g, reg)?));
+        }
+        for (n, l) in bound {
+            env.push((n, l));
+            te.push((n, Loc::Slot(usize::MAX)));
+        }
+        self.r_exp(g, body, env, te, tail)?;
+        env.truncate(depth);
+        te.truncate(tdepth);
+        g.next_reg = regs;
+        g.next_slot = slots;
         Some(())
     }
 

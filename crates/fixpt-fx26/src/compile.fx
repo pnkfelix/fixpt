@@ -405,11 +405,32 @@
       (e-lambda (ps body a b) (the (listof exp @k) (cons x nil)))
       (e-rlambda (r l a b) (the (listof exp @k) (cons x nil)))
       (else y nil))))
+(define c-count-exps (subr (read @globals) ((listof exp acyclic)) int)
+  (lambda (es) (if (null? es) 0 (+ 1 (c-count-exps (cdr es))))))
+(define c-count-params (subr (read @globals) ((listof (productof (1 symbol) (2 syns-a)) acyclic)) int)
+  (lambda (ps) (if (null? ps) 0 (+ 1 (c-count-params (cdr ps))))))
+;; Parameters `ps` bound to `args`, as a `let` binds.
+(define c-param-bindings (subr (maxeff (read @globals) (read @k) (alloc @k) spin) ((listof (productof (1 symbol) (2 syns-a)) acyclic) (listof exp acyclic)) (listof (productof (1 symbol) (2 exp)) acyclic))
+  (lambda (ps args) (if (null? ps) nil (cons (product (1 (extract (car ps) 1)) (2 (car args))) (c-param-bindings (cdr ps) (cdr args))))))
+;; A plain lambda (under forms that compile to nothing) applied at once to
+;; as many arguments as it has parameters, as the Rust compiler's
+;; `applied_lambda` finds it: the `let` it is, its bindings and body, in a
+;; list of one; none if `f` is no such lambda.
+(define c-applied-let (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp (listof exp acyclic)) (listof (productof (1 (listof (productof (1 symbol) (2 exp)) acyclic)) (2 exp)) @k))
+  (lambda (f args)
+    (let ((lam (c-lambda-of f)))
+      (if (null? lam)
+          nil
+          (tagcase (car lam)
+            (e-lambda (ps body a b)
+              (if (= (c-count-params ps) (c-count-exps args))
+                  (the (listof (productof (1 (listof (productof (1 symbol) (2 exp)) acyclic)) (2 exp)) @k)
+                    (cons (product (1 (c-param-bindings ps args)) (2 body)) nil))
+                  nil))
+            (else y nil))))))
 
 (define c-mentions? (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp symbol) bool)
   (lambda (x n) (c-member? (c-free x nil nil) n)))
-(define c-count-exps (subr (read @globals) ((listof exp acyclic)) int)
-  (lambda (es) (if (null? es) 0 (+ 1 (c-count-exps (cdr es))))))
 
 ;; Whether every use of `f` in `x` is a call with `n` arguments in tail
 ;; position, which the compiler makes a loop.
@@ -485,8 +506,6 @@
                         depth (+ k 1) i body nps)))))
 (define c-count-letrec (subr (read @globals) ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-letrec (cdr bs))))))
-(define c-count-params (subr (read @globals) ((listof (productof (1 symbol) (2 syns-a)) acyclic)) int)
-  (lambda (ps) (if (null? ps) 0 (+ 1 (c-count-params (cdr ps))))))
 (define c-length (subr (maxeff (read @globals) (read @k) spin) (syms) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (c-length (cdr xs))))))
 (define c-nth-binding
@@ -992,7 +1011,10 @@
           (tagcase l
             (e-lambda (ps body la lb) (begin (c-lambda ps body e depth c nil (the (listof exp @k) (cons r nil))) (c-done c tail)))
             (else y (c-fail "an rlambda's lambda"))))
-        (e-app (f args a b) (c-app f args e depth c tail))
+        ;; A lambda applied at once: a `let` (`c-applied-let`).
+        (e-app (f args a b)
+          (let ((l (c-applied-let f args)))
+            (if (null? l) (c-app f args e depth c tail) (c-let (extract (car l) 1) (extract (car l) 2) e depth c tail))))
         (e-plambda (d body a b) (c-exp body e depth c tail))
         ;; The region's name bound in a slot, as a `let`'s, to a region
         ;; entered (an arena, or a reap), and left with the body's value,
@@ -1020,9 +1042,7 @@
               (c-emit c (i-label no))
               (c-exp el e depth c tail)
               (c-emit c (i-label end)))))
-        (e-let (bs body a b)
-          (let* ((inner (c-let-bind bs e e depth c)) (n (c-count-let bs)))
-            (begin (c-exp body inner (+ depth n) c tail) (c-unbind c depth n tail))))
+        (e-let (bs body a b) (c-let bs body e depth c tail))
         (e-letrec (bs body a b) (c-letrec-or-lift bs body a b e depth c tail))
         (e-begin (es a b) (c-begin es e depth c tail))
         (e-prompt (t body h a b)
@@ -1066,6 +1086,11 @@
           (c-letrec-patch made depth 0 c)
           (c-exp body (c-letrec-slots bs e depth) (+ depth n) c tail)
           (c-unbind c depth n tail)))))
+  ;; A `let`: each value pushed, in the scope outside; the names are the slots.
+  (c-let (subr (maxeff compiles spin) ((listof (productof (1 symbol) (2 exp)) acyclic) exp cenv int code bool) unit)
+    (lambda (bs body e depth c tail)
+      (let* ((inner (c-let-bind bs e e depth c)) (n (c-count-let bs)))
+        (begin (c-exp body inner (+ depth n) c tail) (c-unbind c depth n tail)))))
   ;; Whether the `letrec` at `a`–`b` is lambda-lifted, deciding the first
   ;; time it is asked (by its stack code: its register code asks again, and
   ;; has the same answer and words): its members' `c-lifts` indices if so, in

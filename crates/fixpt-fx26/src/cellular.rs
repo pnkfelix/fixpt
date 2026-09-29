@@ -502,6 +502,12 @@ impl<'a> Compiler<'a> {
                 self.lambda(&ps, body, e, depth, code, None, Some(region))?;
                 self.done(code, tail);
             }
+            // A lambda applied at once, to as many arguments as it has
+            // parameters: a `let`, with no closure made and no call.
+            Exp::App { fun, args } if let Some((ps, lbody)) = self.applied_lambda(fun, args.len()) => {
+                let bindings: Vec<(Sym, ExpId)> = ps.into_iter().zip(args.iter().copied()).collect();
+                self.let_(&bindings, lbody, e, depth, code, tail)?;
+            }
             Exp::App { fun, args } => self.app(fun, &args, e, depth, code, tail)?,
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => {
                 self.exp(body, e, depth, code, tail)?
@@ -533,17 +539,7 @@ impl<'a> Compiler<'a> {
                 self.exp(els, e, depth, code, tail)?;
                 code.push(Item::Label(end));
             }
-            Exp::Let { bindings, body } => {
-                // Each value pushed, in the scope outside; the names are the slots.
-                let mut inner = e.clone();
-                for (i, (n, init)) in bindings.iter().enumerate() {
-                    self.exp(*init, e, depth + i, code, false)?;
-                    inner.push((*n, Loc::Slot(depth + i)));
-                }
-                let n = bindings.len();
-                self.exp(body, &inner, depth + n, code, tail)?;
-                self.unbind(code, depth, n, tail);
-            }
+            Exp::Let { bindings, body } => self.let_(&bindings, body, e, depth, code, tail)?,
             Exp::Letrec { bindings, body } if self.lift(x, &bindings, body, e, tail)?.is_some() => {
                 let ks = self.lift(x, &bindings, body, e, tail)?.expect("lifted");
                 let mut inner = e.clone();
@@ -1105,6 +1101,30 @@ impl<'a> Compiler<'a> {
     }
 
     // ---------------------------------------------------- applications
+
+    /// A `let`: each value pushed, in the scope outside; the names are the
+    /// slots.
+    fn let_(&mut self, bindings: &[(Sym, ExpId)], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
+        let mut inner = e.clone();
+        for (i, (n, init)) in bindings.iter().enumerate() {
+            self.exp(*init, e, depth + i, code, false)?;
+            inner.push((*n, Loc::Slot(depth + i)));
+        }
+        let n = bindings.len();
+        self.exp(body, &inner, depth + n, code, tail)?;
+        self.unbind(code, depth, n, tail);
+        Ok(())
+    }
+
+    /// The parameters and body of `f`, when it is a plain lambda (under
+    /// forms that compile to nothing) of `n` parameters: applied to `n`
+    /// arguments, it is a `let` of them.
+    pub(crate) fn applied_lambda(&self, f: ExpId, n: usize) -> Option<(Vec<Sym>, ExpId)> {
+        match self.lambda_of(f)? {
+            (ps, body, None) if ps.len() == n => Some((ps, body)),
+            _ => None,
+        }
+    }
 
     fn app(&mut self, f: ExpId, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         if let (true, Some(t), Exp::Var(n)) = (tail, self.this, self.c.arena.exp_at(f)) {

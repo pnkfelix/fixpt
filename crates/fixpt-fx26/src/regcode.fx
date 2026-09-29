@@ -942,15 +942,7 @@
               (r-emit g (r-label end))))))
         (e-begin (es a b)
           (if (null? es) (begin (r-op1 g rop-const (wcell-unit)) (r-done g tail)) (r-begin g es env te tail)))
-        (e-let (bs body a b)
-          (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
-                 (body-collects (and (not (extract g leaf)) (r-collects body (r-local-names te bs) (extract g this) tail)))
-                 (flags (r-in-regs g (r-let-inits bs) 0 te body-collects)))
-            (let ((bound (r-let-bind g bs env te flags)))
-              (begin
-                (r-exp g body (r-bind-all bound env) (r-local-all bound te) tail)
-                (set (extract g nreg) regs)
-                (set (extract g nslot) slots)))))
+        (e-let (bs body a b) (r-let g bs body env te tail))
         (e-extract (p l a b)
           (let ((i (c-field-at a b)))
             (if (< i 0)
@@ -983,7 +975,10 @@
                 (r-exp g body (r-bind-lifted bs (car ks) env) (c-bind-lifted bs (car ks) te) tail)
                 ;; A leaf makes no closure; join points it may have.
                 (if (and (extract g leaf) (not (r-all? (r-join-flags bs body tail)))) (r-decline) (r-letrec g bs body env te tail)))))
-        (e-app (f args a b) (r-app g f args env te tail)))))))
+        ;; A lambda applied at once: a `let` (`c-applied-let`).
+        (e-app (f args a b)
+          (let ((l (c-applied-let f args)))
+            (if (null? l) (r-app g f args env te tail) (r-let g (extract (car l) 1) (extract (car l) 2) env te tail)))))))))
 ;; Code that goes to `label` if `x` is `when` (true: anything but #f), and
 ;; on if not: a test as jumps. `and` and `or` (`if`s, as the parser makes
 ;; them), `not` and constants make no boolean, and are tested no more than
@@ -1753,6 +1748,18 @@
           (r-join-bodies g bs places env2 te2 tail)
           (set (extract g nslot) slots)
           (set (extract g nreg) regs)))))
+;; A `let`: each value made, in the scope outside, and kept in a register
+;; where no call comes before the body is done with it (else the frame).
+(r-let (subr (maxeff compiles spin) (rgen (listof (productof (1 symbol) (2 exp)) acyclic) exp renv cenv bool) unit)
+  (lambda (g bs body env te tail)
+    (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
+           (body-collects (and (not (extract g leaf)) (r-collects body (r-local-names te bs) (extract g this) tail)))
+           (flags (r-in-regs g (r-let-inits bs) 0 te body-collects)))
+      (let ((bound (r-let-bind g bs env te flags)))
+        (begin
+          (r-exp g body (r-bind-all bound env) (r-local-all bound te) tail)
+          (set (extract g nreg) regs)
+          (set (extract g nslot) slots))))))
   ;; A join point's call: each argument made and kept (a register in a
   ;; leaf, else a frame slot), then each into its parameter's place, and a
   ;; jump.

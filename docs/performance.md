@@ -1743,3 +1743,20 @@ benchmarks unchanged: their loops are globals, not `letrec`s.
 
 Found on the way: an error loading the front end now says where in its
 files (`front_end_location`), not at the user's input's first character.
+
+## A lambda applied at once is a `let` (2026-09-28)
+
+`((lambda ((y int)) …) 3)` made a closure and called it, through the
+unknown procedure's path. Both compilers, stack and register code alike,
+now compile a plain lambda (under forms that compile to nothing) applied
+to as many arguments as it has parameters as the `let` it is
+(`applied_lambda`, `c-applied-let`): the arguments made in order, bound,
+and the body in their scope, in tail position if the call was. Register
+code then keeps a constant argument as a constant, and folds with it.
+
+The user's example, `(lambda () ((lambda ((y int)) (lambda ((x int)) (+ y
+x))) 3))` natively: three code objects of 54, 44 and 8 instructions → two
+of 43 and 8. `,native ((lambda ((x int)) (+ x 1)) 41)` is now `movz x0,
+#0x150`, 42. The front end has no such applications; its self-compile is
+unchanged. Analyses (free names, whether code calls) still see an
+application there, and so are only cautious.

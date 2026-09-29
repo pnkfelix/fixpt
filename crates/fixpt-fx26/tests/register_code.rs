@@ -390,3 +390,18 @@ fn letrec_procedures_only_called_are_lifted() {
         assert!(code.contains("branch →"), "{who}:\n{code}");
     }
 }
+
+/// A lambda applied at once is a `let`: no closure is made for it, and
+/// nothing is called. Both compilers.
+#[test]
+fn a_lambda_applied_at_once_is_a_let() {
+    let text = "(define* f (subr pure (int) int) (lambda (n) ((lambda ((y int)) (+ y n)) 3))) (f 4)";
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    for (who, code) in [("FX-26", fx26), ("Rust", rust)] {
+        let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
+        let f = &code[code.find("\nword lambda@").expect("f's word") + 1..];
+        let f = &f[..f[1..].find("\nword ").map_or(f.len(), |i| i + 1)];
+        assert!(!f.contains("closure") && !f.contains("lambda word") && !f.contains("invoke") && !f.contains("call"), "{who}:\n{f}");
+    }
+}
