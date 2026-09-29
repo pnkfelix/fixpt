@@ -916,7 +916,11 @@
             ((string=? name "array-set!")
              (begin (c-op c routine-swap) (c-int c 2) (c-op c routine-int-add) (c-op c routine-swap)
                     (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
-            ((string=? name "array-length") (begin (c-prim c "%bloblet-fields" 1) (c-int c 1) (c-op c routine-int-sub)))
+            ;; `(apply f xs)`: `f` is a `vsubr`, a closure of `%vlambda`'s over the
+;; procedure of one list, free value 0; that procedure, called with `xs`.
+((string=? name "apply")
+ (begin (c-op c routine-swap) (c-op1 c routine-field (wcell-int cellular-closure-free0)) (c-op1 c routine-tcall (wcell-int 1))))
+((string=? name "array-length") (begin (c-prim c "%bloblet-fields" 1) (c-int c 1) (c-op c routine-int-sub)))
             ((or (string=? name "modulo") (string=? name "quotient")
                  (string=? name "char->integer")
                  (string=? name "integer->char") (string=? name "string-append") (string=? name "string-length")

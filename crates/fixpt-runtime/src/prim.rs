@@ -992,6 +992,24 @@ prims! {
     "%fx26-u64-not", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "not", Width::U64));
     "%fx26-int->u64", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "from", Width::U64));
     "%fx26-u64->int", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "to", Width::U64));
+    // FX-26's `vlambda` (`%vlambda`): `f`, a procedure of one list, as a
+    // variadic one, a cellular closure over `f` of the word `rest; free 0;
+    // ttailcall 1`: however many arguments it is called with (the frame's
+    // count), their list, given to `f` in its place.
+    "%fx26-vlambda", 1, Some(1), simple!(|rt, a| {
+        use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD};
+        let f = |n: u64| Value::fixnum(n as i64);
+        let cells = [f(routine("rest")), f(routine("free")), Value::fixnum(0), f(routine("ttailcall")), Value::fixnum(1)];
+        let name = rt.heap.intern("vlambda");
+        let word = match rt.heap.make_cellular_word(name, &cells) {
+            Ok(w) => w,
+            Err(e) => return rt.fail(&e, &[a[0]]),
+        };
+        let c = rt.heap.make_bloblet(fixpt_heap::layout::kind("cellular-closure"), 2, 0, true);
+        rt.heap.set_bloblet_slot(c, CLOSURE_WORD, word);
+        rt.heap.set_bloblet_slot(c, CLOSURE_FREE0, a[0]);
+        Ok(c)
+    });
     // FX-26's `string-compare`: -1, 0 or 1, as `a[0]` comes before, is, or
     // comes after `a[1]`, character by character.
     "%fx26-string-compare", 2, Some(2), simple!(|rt, a| {

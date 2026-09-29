@@ -60,6 +60,13 @@ fn a_redefinition_assigns() {
     assert_eq!(run(include_str!("programs/run/redefinition.fx")), "8");
 }
 
+/// Variadic procedures: `vlambda`, calls of any number of arguments, and
+/// `apply` (`programs/run/variadic.fx`).
+#[test]
+fn variadic_procedures_run() {
+    assert_eq!(run(include_str!("programs/run/variadic.fx")), "1011");
+}
+
 #[test]
 fn recursion_and_state_run() {
     assert_eq!(run(include_str!("programs/run/recursion.fx")), "(55 . 1000)");

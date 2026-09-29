@@ -136,6 +136,7 @@
 (define routine-pair-car int 46)  ; ( pair -- a ), a pair
 (define routine-pair-cdr int 47)  ; ( pair -- b ), a pair
 (define routine-field int 48)  ; ( obj -- x ), field k of a bloblet that has it; k the next cell
+(define routine-rest int 49)  ; ( -- list ), this frame's values, from slot 0, as a list
 
 ;;; Register code's instructions by number, and how many registers it has.
 (define rop-args int 0)  ; 1: entered with n arguments in REG1…REGn; first, and only first (arities are static: nothing is checked)

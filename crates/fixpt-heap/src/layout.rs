@@ -329,6 +329,9 @@ pub mod cellular {
         ("pair-car", "( pair -- a ), a pair"),
         ("pair-cdr", "( pair -- b ), a pair"),
         ("field", "( obj -- x ), field k of a bloblet that has it; k the next cell"),
+        // A variadic procedure's (`vsubr`, `vlambda`): however many values
+        // it was called with, the frame's count, as a list.
+        ("rest", "( -- list ), this frame's values, from slot 0, as a list"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 

@@ -31,6 +31,9 @@ use crate::parse::DScope;
 use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
 use std::collections::{HashMap, HashSet};
 
+/// `vsubr`'s declaration: generative type 0, in both checkers.
+pub const VSUBR: &str = "(vsubr (e effect +) (t type -) (r type +)) (subr e ((listof t acyclic)) r)";
+
 /// A `define-generative`: its name, parameters, their variance, and the
 /// representation, a type over the parameters.
 #[derive(Clone, Debug)]
@@ -292,6 +295,12 @@ impl Checker {
             globals_effects: true,
             global_slots: HashSet::new(),
         };
+        // FX-87's variadic procedure type, `(vsubr E T R)`: the first
+        // generative type, in both checkers, whose insides nothing sees
+        // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
+        // their list). `vlambda` makes one; `apply` calls one on a list.
+        let forms = c.read(VSUBR).expect("reads");
+        c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`vsubr` is wrong: {e}"));
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
         }

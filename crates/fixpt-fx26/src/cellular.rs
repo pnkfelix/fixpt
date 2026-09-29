@@ -1333,6 +1333,14 @@ impl<'a> Compiler<'a> {
                 self.prim(code, "%bloblet-set!", 3)?;
                 self.unit_after(code);
             }
+            // `(apply f xs)`: `f` is a `vsubr`, a closure of `%vlambda`'s
+            // over the procedure of one list, free value 0; that procedure,
+            // called with `xs`.
+            "apply" => {
+                self.op(code, "swap");
+                self.op1(code, "field", Value::fixnum(fixpt_heap::layout::cellular::CLOSURE_FREE0 as i64));
+                self.op1(code, "tcall", Value::fixnum(1));
+            }
             "array-length" => {
                 self.prim(code, "%bloblet-fields", 1)?;
                 self.int(code, 1);

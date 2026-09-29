@@ -1978,6 +1978,16 @@ library.
   the front end's word arithmetic.
 - Unblocks `pi`, `chudnovsky`, `pidigits`, `smith-normal-form`.
 
+**Variadic procedures** (the user's request, 2026-09-29): FX-87's
+`(vsubr E T R)`, `vlambda` and `apply`, the count passed at every call
+(the user's choice, Larceny's way, so that `apply` spreads a list). Done:
+both checkers (`vsubr` generative type 0, variadic calls, `vlambda` read as
+`%vlambda` of a one-list lambda), the lowering (Scheme's), and every
+machine through a cellular wrapper and the routine `rest`
+(`docs/fx26.md`, "Variadic procedures"). To do: `vlambda` bodies as
+native code, entered with the count in a register at every native call;
+a standard `list`; fixed parameters before the rest.
+
 **Q3. Telemetry, stage 1** (`docs/research/telemetry.md`): fix the counts
 first. Done (2026-09-29): minor collections counted with major ones
 (`Heap::collections`, `%gc-count`, the phase probe, `FIXPT_GC_REPORT`,

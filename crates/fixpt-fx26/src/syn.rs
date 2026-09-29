@@ -269,7 +269,7 @@ pub fn check_with_fx26_checker(scheme: &mut Session, standard: Handle, file: Fil
 /// The initial environment of [`crate::standard`], read by the FX-26
 /// reader, as `(name type)` for each binding: what `check-program` takes.
 pub fn read_standard(scheme: &mut Session) -> R<Handle> {
-    let text: String = crate::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let text = crate::standard::standard_text();
     read_to_syns(scheme, FileId(0), &text)
 }
 

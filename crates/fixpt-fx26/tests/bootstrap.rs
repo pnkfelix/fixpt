@@ -109,7 +109,7 @@ fn fixpoint_as_register_code() {
         s.scheme.set_gc_every(n);
     }
     let text = fixpt_fx26::bootstrap_program();
-    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let standard = fixpt_fx26::standard::standard_text();
     let mut c = fixpt_fx26::Checker::new();
     let forms = c.read_in(FileId(0), &text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
@@ -176,7 +176,7 @@ fn fixpoint_on(machine: fixpt_runtime::RunWord) {
     s.scheme.engine.set_step_limit(None);
     s.scheme.runtime_unrooted().run_word = Some(machine);
     let text = fixpt_fx26::bootstrap_program();
-    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let standard = fixpt_fx26::standard::standard_text();
     let t = std::time::Instant::now();
     let lap = |what: &str| eprintln!("{what}: {:.1} s", t.elapsed().as_secs_f64());
     s.scheme.scope(|sc| {
@@ -229,7 +229,7 @@ fn probe_stage2() {
         Ok(p) => std::fs::read_to_string(p).unwrap(),
         Err(_) => fixpt_fx26::TABLE.to_string(),
     };
-    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let standard = fixpt_fx26::standard::standard_text();
     s.scheme.scope(|sc| {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
@@ -264,7 +264,7 @@ fn comparison() {
     use fixpt_fx26::session::{BOOTSTRAP_PREFIX, load_bootstrap_program};
     use fixpt_scheme::{Handle, Session};
     let text = fixpt_fx26::bootstrap_program();
-    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let standard = fixpt_fx26::standard::standard_text();
     let mut rows: Vec<(String, [f64; 4])> = Vec::new();
 
     // Rust: reading, then checking, which parses as it goes.
@@ -463,7 +463,7 @@ fn fixpoint_with_words_compiled_by_fx26() {
     s.scheme.engine.set_step_limit(None);
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_as_is);
     let text = fixpt_fx26::bootstrap_program();
-    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let standard = fixpt_fx26::standard::standard_text();
     let t = std::time::Instant::now();
     let lap = |what: &str| eprintln!("{what}: {:.1} s", t.elapsed().as_secs_f64());
     s.scheme.scope(|sc| {
@@ -608,7 +608,7 @@ fn probe_profile_check() {
     s.scheme.engine.set_step_limit(None);
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_as_is);
     let text = fixpt_fx26::bootstrap_program();
-    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let standard = fixpt_fx26::standard::standard_text();
     s.scheme.scope(|sc| {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
@@ -654,7 +654,7 @@ fn probe_phases_as_register_code() {
     s.scheme.engine.set_step_limit(None);
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
     let text = fixpt_fx26::bootstrap_program();
-    let standard: String = fixpt_fx26::standard::ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect();
+    let standard = fixpt_fx26::standard::standard_text();
     let mut c = fixpt_fx26::Checker::new();
     let forms = c.read_in(FileId(0), &text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");

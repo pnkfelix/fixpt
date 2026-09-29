@@ -933,6 +933,28 @@ impl Checker {
                 };
                 self.parse_lambda(span, params, body)
             }
+            // A variadic procedure, FX-87's: `(vlambda xs body …)`, or with
+            // the arguments' type, `(vlambda (xs T) body …)`, is
+            // `(%vlambda (lambda ((xs (listof T acyclic))) body …))`, the
+            // procedure of the list of its arguments made a `vsubr`.
+            "vlambda" => {
+                let [_, param, body @ ..] = &items[..] else {
+                    return Err(FxError::at(span, "`(vlambda name body …)` or `(vlambda (name type) body …)`"));
+                };
+                let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+                let param = match param.as_proper_list() {
+                    Some([name, t]) => {
+                        let list = Syntax::list(span, vec![sym(self, "listof"), t.clone(), sym(self, "acyclic")]);
+                        Syntax::list(span, vec![name.clone(), list])
+                    }
+                    _ if param.as_symbol().is_some() => param.clone(),
+                    _ => return Err(FxError::at(param.span, "`(vlambda name body …)` or `(vlambda (name type) body …)`")),
+                };
+                let mut lambda = vec![sym(self, "lambda"), Syntax::list(span, vec![param])];
+                lambda.extend(body.iter().cloned());
+                let call = Syntax::list(span, vec![sym(self, "%vlambda"), Syntax::list(span, lambda)]);
+                self.parse_exp(&call)
+            }
             "rlambda" => {
                 let [_, region, params, body @ ..] = &items[..] else {
                     return Err(FxError::at(span, "`(rlambda region ((name type) …) body …)`"));

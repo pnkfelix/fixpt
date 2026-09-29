@@ -915,6 +915,12 @@ impl Machine {
                 let v = *self.ds.get(r.fp + i).ok_or(Trap::Field { routine: name })?;
                 self.ds.push(v);
             }
+            REST => {
+                let vs: Vec<Value> = self.ds.get(r.fp..).ok_or(Trap::Underflow { routine: name })?.to_vec();
+                let heap = cx.heap();
+                let l = heap.list_from(&vs);
+                self.ds.push(l);
+            }
             SLOT_SET => {
                 let i = Self::operand(cx.heap(), r).as_fixnum() as usize;
                 let x = self.pop(name)?;
@@ -1310,6 +1316,7 @@ const CAR: i64 = routine("car") as i64;
 const CDR: i64 = routine("cdr") as i64;
 const SLOT: i64 = routine("slot") as i64;
 const SLOT_SET: i64 = routine("slot!") as i64;
+const REST: i64 = routine("rest") as i64;
 const FREE: i64 = routine("free") as i64;
 const RETURN: i64 = routine("return") as i64;
 const GLOBAL: i64 = routine("global") as i64;

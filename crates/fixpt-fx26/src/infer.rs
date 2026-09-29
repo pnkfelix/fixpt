@@ -484,6 +484,23 @@ impl Checker {
             done = cached;
         }
         let callee = self.arena.get(ft).clone();
+        // A `vsubr` (generative type 0): any number of arguments, each of
+        // its element type.
+        if let Ty::Named { which: 0, args: ds } = &callee
+            && let [D::Effect(latent), D::Type(elem), D::Type(result)] = &ds[..]
+        {
+            let (latent, elem, result) = (latent.clone(), *elem, *result);
+            let mut effect = fe;
+            for (i, a) in args.iter().enumerate() {
+                effect = effect.union(&self.check(*a, elem).map_err(|err| self.as_argument(err, *a, i))?);
+            }
+            let mut effect = effect.union(&latent);
+            if self.may_spin(fun, ft, args) {
+                effect.0.insert(Atom::Spin);
+            }
+            let effect = self.mask(e, &effect, result);
+            return Ok((result, effect));
+        }
         let Some((latent, params, result)) = callee.as_subr() else {
             return Err(FxError::at(span, format!("not a subroutine: {}", self.show_ty(ft))));
         };

@@ -43,6 +43,8 @@
   (a-read k-region) (a-write k-region) (a-alloc k-region)
   (a-goto k-region) (a-comefrom k-region) (a-await k-region) (a-spin) (a-var int))
 (define-type k-eff (listof k-atom acyclic))
+;; A `vsubr`'s effect, element and result, in a list: one or none.
+(define-type k-vsub (listof (productof (1 k-eff) (2 int) (3 int)) acyclic))
 
 (define-type k-ids (listof int acyclic))
 ;; A binder: a description variable and its kind, 0 region, 1 effect, 2 type.
@@ -5345,7 +5347,28 @@
                      (let ((inst (k-instantiate (extract rf 1) args expected a b done-t done-e)))
                        (begin (k-no-knot inst a b) inst)))
                    (else y (extract rf 1))))
-             (callee (k-as-subr ft)))
+             (callee (k-as-subr ft))
+             ;; A `vsubr` (generative type 0): its effect, element and
+             ;; result, in a list; none for anything else.
+             (variadic (tagcase (k-get ft)
+                         (ty-named (g ds)
+                           (if (and (= g 0) (= (k-length ds) 3))
+                               (tagcase (car ds)
+                                 (de (le) (tagcase (car (cdr ds))
+                                            (dt (et) (tagcase (car (cdr (cdr ds)))
+                                                       (dt (rt) (the k-vsub (cons (product (1 le) (2 et) (3 rt)) nil)))
+                                                       (else z (the k-vsub nil))))
+                                            (else z (the k-vsub nil))))
+                                 (else z (the k-vsub nil)))
+                               (the k-vsub nil)))
+                         (else y (the k-vsub nil)))))
+        (if (not (null? variadic))
+            ;; Any number of arguments, each of the element type.
+            (let* ((v (car variadic))
+                   (e (k-vapp-args args (extract v 2) 0 (extract rf 2)))
+                   (e (k-union e (extract v 1)))
+                   (e (if (k-may-spin? f ft args) (k-insert (a-spin) e) e)))
+              (k-te (extract v 3) (k-mask x e (extract v 3))))
         (if (null? callee)
             (k-fail (string-append "not a subroutine: " (k-show-ty ft)) a b)
             (let ((params (extract (car callee) 2)))
@@ -5355,7 +5378,7 @@
                          (e (k-union e (extract (car callee) 1)))
                          (e (if (k-may-spin? f ft args) (k-insert (a-spin) e) e))
                          (result (extract (car callee) 3)))
-                    (k-te result (k-mask x e result)))))))))
+                    (k-te result (k-mask x e result))))))))))
   (k-app-args (subr (maxeff checks spin) (kxs k-ids int (arrayof int @t) (arrayof k-eff @t) k-eff) k-eff)
     (lambda (args params i done-t done-e e)
       (if (null? args)
@@ -5372,6 +5395,12 @@
                                    (begin (k-convert-at arg t (car c)) (array-ref done-e i)))))
                          (k-check-argument arg p i))))
             (k-app-args (cdr args) (cdr params) (+ i 1) done-t done-e (k-union e ae))))))
+  ;; A `vsubr` call's arguments, each checked as its element type `t`.
+  (k-vapp-args (subr (maxeff checks spin) (kxs int int k-eff) k-eff)
+    (lambda (args t i e)
+      (if (null? args)
+          e
+          (k-vapp-args (cdr args) t (+ i 1) (k-union e (k-check-argument (car args) t i))))))
   ;; An argument that failed to check is reported as that argument.
   (k-check-argument (subr (maxeff checks spin) (kx int int) k-eff)
     (lambda (arg p i)
@@ -5764,10 +5793,13 @@
   (lambda (entries)
     (if (null? entries)
         #u
-        (let* ((pair (k-items (car entries) "a standard binding"))
-               (t (k-parse-type (k-nth pair 1))))
-          (let ((n (k-name-of (car pair) "a name")))
-            (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std))) (k-standard (cdr entries))))))))
+        (let ((pair (k-items (car entries) "a standard binding")))
+          ;; `vsubr`'s declaration first: generative type 0, as in the Rust
+          ;; checker (`check::VSUBR`), with no `up-` or `down-`.
+          (if (and (syn-symbol? (car pair)) (string=? (syn-name (car pair)) "define-generative"))
+              (begin (k-define-generative (k-nth pair 1) (k-nth pair 2)) (k-standard (cdr entries)))
+              (let ((t (k-parse-type (k-nth pair 1))) (n (k-name-of (car pair) "a name")))
+                (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std))) (k-standard (cdr entries)))))))))
 
 (define-type k-out (listof string acyclic))
 (define k-push-binders (subr kstate (k-binders) unit)

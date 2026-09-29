@@ -143,6 +143,11 @@
 (define at-least (subr parses ((listof syn acyclic) int string int int) unit)
   (lambda (items n shape a b) (if (< (len items) n) (pfail-at shape a b) #u)))
 
+(define mk-symbol (subr (read @globals) (string int int) syn) (lambda (n a b) (atom (datum-symbol n) a b)))
+(define syn-datums (subr (maxeff (read @globals) (read @s)) ((listof syn acyclic)) (listof datum acyclic))
+  (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
+(define mk-list (subr (maxeff (read @globals) (read @s)) ((listof syn acyclic) int int) syn)
+  (lambda (items a b) (lst items (datum-list (syn-datums items)) a b)))
 (define parse-params (subr parses (syn) (listof (productof (1 symbol) (2 syns-a)) acyclic))
   (lambda (ps)
     (if (syn-nil? ps)
@@ -209,6 +214,24 @@
         ((symbol=? head 'lambda)
          (begin (at-least items 3 "`(lambda ((name type) …) body …)`" a b)
                 (e-lambda (parse-params (nth items 1)) (parse-body (drop items 2) a b) a b)))
+        ;; A variadic procedure, FX-87's: `(vlambda xs body …)`, or with the
+        ;; arguments' type `(vlambda (xs T) body …)`, is
+        ;; `(%vlambda (lambda ((xs (listof T acyclic))) body …))`.
+        ((symbol=? head 'vlambda)
+         (begin (at-least items 3 "`(vlambda name body …)` or `(vlambda (name type) body …)`" a b)
+                (let* ((given (nth items 1))
+                       (param (if (syn-symbol? given)
+                                  (product (1 (syn-symbol given)) (2 (the syns-a nil)))
+                                  (let ((pair (syn-items given "a parameter")))
+                                    (if (= (len pair) 2)
+                                        (let ((ty (mk-list (the (listof syn acyclic)
+                                                             (cons (mk-symbol "listof" a b) (cons (nth pair 1) (cons (mk-symbol "acyclic" a b) nil))))
+                                                           a b)))
+                                          (product (1 (syn-symbol (car pair))) (2 (the syns-a (cons ty nil)))))
+                                        (pfail "`(vlambda name body …)` or `(vlambda (name type) body …)`" given))))))
+                  (e-app (e-var '%vlambda a b)
+                         (cons (e-lambda (cons param nil) (parse-body (drop items 2) a b) a b) nil)
+                         a b))))
         ((symbol=? head 'rlambda)
          (begin (at-least items 3 "`(rlambda region ((name type) …) body …)`" a b)
                 (let ((r (parse-exp (nth items 1))))
@@ -523,12 +546,7 @@
 (define datatype? (subr (maxeff (read @globals) (read @s)) (syn) bool)
   (lambda (s) (tagcase s (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) 'define-datatype))) (else x #f))))
 
-(define mk-symbol (subr (read @globals) (string int int) syn) (lambda (n a b) (atom (datum-symbol n) a b)))
 (define mk-int (subr (read @globals) (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
-(define syn-datums (subr (maxeff (read @globals) (read @s)) ((listof syn acyclic)) (listof datum acyclic))
-  (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
-(define mk-list (subr (maxeff (read @globals) (read @s)) ((listof syn acyclic) int int) syn)
-  (lambda (items a b) (lst items (datum-list (syn-datums items)) a b)))
 
 ;; `(1 m1) (2 m2) …`, from `i`.
 (define dt-labelled (subr (maxeff (read @globals) (read @s) (alloc @s)) ((listof syn acyclic) int int int) (listof syn acyclic))

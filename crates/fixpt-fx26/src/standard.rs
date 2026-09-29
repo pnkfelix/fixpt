@@ -151,6 +151,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("u64-not", "(subr pure (u64) u64)"),
     ("int->u64", "(subr pure (int) u64)"),
     ("u64->int", "(subr pure (u64) int)"),
+    // Variadic procedures (`vsubr`, `vlambda`): FX-87's.
+    ("%vlambda", "(poly ((e effect) (t type) (r type)) (subr pure ((subr e ((listof t acyclic)) r)) (vsubr e t r)))"),
+    ("apply", "(poly ((e effect) (t type) (r type) (g region)) (subr (maxeff e (read g)) ((vsubr e t r) (listof t g)) r))"),
     ("string-compare", "(subr pure (string string) int)"),
     ("string-search", "(subr pure (string string int) int)"),
     ("symbol-compare", "(subr pure (symbol symbol) int)"),
@@ -298,3 +301,11 @@ pub const ENTRIES: &[(&str, &str)] = &[
            (subr (maxeff (read q) (alloc l)) ((composable t a d r) (mark-key v q)) (listof v l))))",
     ),
 ];
+
+/// The initial environment as text, for the checker written in FX-26:
+/// `vsubr`'s declaration (`check::VSUBR`, generative type 0), then
+/// `(name type)` for each binding.
+pub fn standard_text() -> String {
+    let decl = format!("(define-generative {})\n", crate::check::VSUBR);
+    decl + &ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect::<String>()
+}

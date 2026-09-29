@@ -31,6 +31,11 @@
 ;;; kind `product` (37) and `sum` (36), so that what one is can be told.
 (define (%fx26-product . fields) (apply %make-frozen 37 fields))
 (define (%fx26-sum tag v) (%make-frozen 36 tag v))
+;; A `vsubr` (`vlambda`): Scheme's own variadic procedure, giving `f` the
+;; list of its arguments; `apply`, Scheme's. (The cellular machines have
+;; runtime primitives of these names, which this Scheme shadows.)
+(define (%fx26-vlambda f) (lambda xs (f xs)))
+(define (%fx26-apply v xs) (apply v xs))
 (define (%fx26-no-arm v) (error "tagcase: no arm for this value" v))
 
 

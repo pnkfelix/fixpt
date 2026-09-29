@@ -43,6 +43,9 @@
   (v-sum symbol val)
   (v-clo (listof (productof (1 symbol) (2 syns-a)) acyclic) exp (listof (pairof symbol (bloblet (fields val) @v) @v) @v))
   (v-prim symbol)
+  ;; A variadic procedure (`vlambda`): the procedure of the list of its
+  ;; arguments.
+  (v-vsubr val)
   (v-tag (prompt-tag val val (maxeff (read @globals) spin (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
   (v-cont (composable val val (maxeff (read @globals) spin (read @v) (write @v) (alloc @v) (read @x) (write @x) (alloc @x)) @x))
   (v-esc (subr (goto @x) (val) void))
@@ -101,6 +104,9 @@
   (lambda (v) (tagcase v (v-cont (k) k) (else x (efail "a composable continuation is expected")))))
 
 ;; The evaluator's list of values, as the program's.
+;; The arguments of a call, as the list value a `vlambda` is given.
+(define vals->val (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (vals) val)
+  (lambda (xs) (if (null? xs) (v-nil) (v-pair (make-bloblet 0 (car xs) (vals->val (cdr xs)))))))
 (define list->val (subr (maxeff (read @globals) (read @x) (alloc @v) spin) ((listof val @x)) val)
   (lambda (xs) (if (null? xs) (v-nil) (v-pair (make-bloblet 0 (car xs) (list->val (cdr xs)))))))
 
@@ -114,7 +120,7 @@
 
 ;; The primitives the evaluator has, between spaces.
 (define primitive-names string
-  " + - * = < > <= >= not modulo quotient cons rcons rnew rmake-array rmake-icell car cdr null? set-car! set-cdr! new get set make-icell icell-put! icell-get char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc ")
+  " + - * = < > <= >= not modulo quotient cons rcons rnew rmake-array rmake-icell car cdr null? set-car! set-cdr! new get set make-icell icell-put! icell-get char=? char->integer integer->char string-append string-length string-ref string=? string->symbol symbol->string symbol=? char->string make-array array-ref array-set! array-length make-continuation-prompt-tag abort-current-continuation call-with-composable-continuation make-continuation-mark-key with-mark first-mark current-marks marks-of cwcc %vlambda apply ")
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
 (define occurs? (subr (maxeff (read @globals) spin) (string string int) bool)
@@ -218,6 +224,11 @@
             ((string=? n ">=") (cmp2 xs (lambda (a b) (>= a b))))
             ((string=? n "not") (v-bool (not (as-bool (arg xs 0)))))
             ((string=? n "cons") (v-pair (make-bloblet 0 (arg xs 0) (arg xs 1))))
+            ((string=? n "%vlambda") (v-vsubr (arg xs 0)))
+            ((string=? n "apply")
+             (tagcase (arg xs 0)
+               (v-vsubr (g) (apply-val g (the vals (cons (arg xs 1) nil))))
+               (else y (efail "apply: not a variadic procedure"))))
             ;; Regions are erased: an allocation in one is the heap's.
             ((or (string=? n "rcons") (string=? n "rnew") (string=? n "rmake-array") (string=? n "rmake-icell"))
              (apply-prim (substring n 1 (string-length n)) (cdr xs)))
@@ -277,6 +288,7 @@
       (tagcase f
         (v-clo (ps body e) (eval body (bind ps xs e)))
         (v-prim (n) (apply-prim (symbol->string n) xs))
+        (v-vsubr (g) (apply-val g (the vals (cons (vals->val xs) nil))))
         (v-cont (k) (k (arg xs 0)))
         (v-esc (k) (k (arg xs 0)))
         (else x (efail "not a subroutine")))))
@@ -501,6 +513,7 @@
         (v-product (fs) (string-append "#<product of " (string-append (int->string (length-pairs fs)) ">")))
         (v-sum (t x) (string-append "#<sum " (string-append (symbol->string t) ">")))
         (v-clo (ps body e) "#<procedure>")
+        (v-vsubr (g) "#<procedure>")
         (v-prim (n) "#<procedure>")
         (v-tag (t) "#<prompt-tag>")
         (v-cont (k) "#<continuation>")
