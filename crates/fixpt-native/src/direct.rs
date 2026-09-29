@@ -131,6 +131,9 @@ struct DState {
     /// The machine's common making of a closure by call-out
     /// (`common_closure`), where it runs.
     closure: u64,
+    /// The heap's card table, biased (`Heap::card_table_address`), for the
+    /// write barrier.
+    cards: u64,
 }
 
 /// The traps this code raises, by code.
@@ -589,6 +592,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
         words: rt.heap.words_address() as u64,
         alloc_limit: rt.heap.inline_limit() as u64,
         regions: Value::fixnum(rt.heap.live_regions() as i64).raw(),
+        cards: rt.heap.card_table_address() as u64,
         ..DState::default()
     };
     for (i, a) in args.iter().enumerate() {
@@ -1129,6 +1133,7 @@ impl Compiling<'_> {
                     let f = self.field(p, Field::Cell(o(0)));
                     ldr_field(&mut a, X9, f);
                     a.e(stur(RESULT, X9, field_off(2)));
+                    a.es(&card_mark(X9, field_off(2), ST, st_off(offset_of!(DState, cards)), X16, X17));
                 }
                 "lexical" => {
                     let from = match clo_slot.filter(|_| framed[i]) {
@@ -1288,6 +1293,7 @@ impl Compiling<'_> {
                         return decline("a field too far".into());
                     }
                     a.e(stur(reg(o(1)), RESULT, off));
+                    a.es(&card_mark(RESULT, off, ST, st_off(offset_of!(DState, cards)), X16, X17));
                 }
                 // Control, on the native stack (`docs/research/
                 // native-conventions.md`, step 5). A prompt, and a mark, is a

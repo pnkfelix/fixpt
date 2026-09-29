@@ -112,6 +112,10 @@
                (arm-sum5 #xD3400000 (arm-f lsb 16) (arm-f (- (+ lsb width) 1) 10) (arm-f (arm-reg n) 5) (arm-reg d)))))
 (define arm-asr-imm (subr (maxeff (read @globals) spin) (int int int) int)
   (lambda (d n s) (arm-check (and (>= s 0) (< s 64)) (arm-sum4 #x9340FC00 (arm-f s 16) (arm-f (arm-reg n) 5) (arm-reg d)))))
+(define arm-lsr-imm (subr (maxeff (read @globals) spin) (int int int) int)
+  (lambda (d n s) (arm-check (and (>= s 0) (< s 64)) (arm-sum4 #xD340FC00 (arm-f s 16) (arm-f (arm-reg n) 5) (arm-reg d)))))
+;; `strb wt, [xn]`.
+(define arm-strb (subr (maxeff (read @globals) spin) (int int) int) (lambda (t n) (arm-sum3 #x39000000 (arm-f (arm-reg n) 5) (arm-reg t))))
 (define arm-csel (subr (maxeff (read @globals) spin) (int int int int) int)
   (lambda (d n m c) (arm-sum5 #x9A800000 (arm-f (arm-reg m) 16) (arm-f c 12) (arm-f (arm-reg n) 5) (arm-reg d))))
 

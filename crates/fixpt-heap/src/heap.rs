@@ -29,6 +29,7 @@ use std::collections::{HashMap, HashSet};
 
 mod code;
 mod regions;
+mod young;
 pub use regions::REGION_SLOTS;
 
 /// What a main header says, with a large header's extension read too.
@@ -141,10 +142,21 @@ const ARENA_BASE: usize = 2 * MAX_SEMI_WORDS;
 const ARENA_WORDS: usize = 1 << 31;
 const REAP_BASE: usize = ARENA_BASE + ARENA_WORDS;
 const REAP_WORDS: usize = 1 << 31;
-/// Past the reaps' area, the code area (`code`): bloblets that never move,
-/// collected by marking and sweeping.
-const CODE_BASE: usize = REAP_BASE + REAP_WORDS;
+/// Past the reaps' area, the nursery (`young`): where a generational heap
+/// allocates everything first.
+const NURSERY_BASE: usize = REAP_BASE + REAP_WORDS;
+const NURSERY_MAX: usize = 1 << 30;
+/// Last, the code area (`code`): bloblets that never move, collected by
+/// marking and sweeping. Last, since native code takes a callee whose code
+/// is at or past the code area's start to be native code.
+const CODE_BASE: usize = NURSERY_BASE + NURSERY_MAX;
 const CODE_WORDS: usize = 1 << 27;
+/// The whole of the heap's memory, in words.
+const MEM_WORDS: usize = CODE_BASE + CODE_WORDS;
+/// How many words the nursery takes before a safepoint collects it: 8 MB.
+/// Measured on the front end's self-compile (`docs/performance.md`); from
+/// 1M words up the times were about the same.
+const DEFAULT_NURSERY_WORDS: usize = 1 << 20;
 
 /// Collect when the active semispace is at least this full at a safepoint.
 const COLLECT_THRESHOLD: f64 = 0.75;
@@ -208,6 +220,27 @@ pub struct Heap {
     pub gc_nanos: u64,
     pub words_allocated: u64,
     top_after_gc: usize,
+
+    /// The nursery (`young`, `docs/research/generational-gc.md`): whether
+    /// there is one; its next free word; and how many words it takes
+    /// before a safepoint collects it alone.
+    generational: bool,
+    nursery_top: usize,
+    nursery_words: usize,
+    /// One byte per card of 64 words of `mem`: 1 where a store may have put
+    /// a young reference since the last collection (the remembered set).
+    cards: fixpt_memmgmt::Words,
+    /// For each card of the semispaces, where the first object starting in
+    /// it starts, plus one; 0 for none.
+    crossing: fixpt_memmgmt::Words,
+    /// Minor collections made; whether the collection due is a major one;
+    /// and, under the stress policy, how many policy collections were made.
+    pub minor_count: u64,
+    due_major: bool,
+    policy_count: u64,
+    /// Check, before each minor collection, that every young reference in
+    /// the old space is on a dirty card: for tests.
+    pub verify_barrier: bool,
 }
 
 impl Default for Heap {
@@ -223,8 +256,11 @@ impl Heap {
 
     pub fn with_semispace(semi: usize) -> Heap {
         let semi = semi.max(1024);
-        let mem = fixpt_memmgmt::Words::new(CODE_BASE + CODE_WORDS).expect("address space for the heap");
+        let mem = fixpt_memmgmt::Words::new(MEM_WORDS).expect("address space for the heap");
         let base = mem.words().as_ptr() as usize / 8;
+        // A nursery of `DEFAULT_NURSERY_WORDS`, or of `FIXPT_NURSERY` words if
+        // that is set; none if it is 0.
+        let nursery_words = std::env::var("FIXPT_NURSERY").ok().and_then(|n| n.parse::<usize>().ok()).unwrap_or(DEFAULT_NURSERY_WORDS);
         Heap {
             mem,
             base,
@@ -246,14 +282,23 @@ impl Heap {
             gc_nanos: 0,
             words_allocated: 0,
             top_after_gc: 0,
+            generational: nursery_words > 0,
+            nursery_top: NURSERY_BASE,
+            nursery_words: nursery_words.max(1024),
+            cards: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the card table"),
+            crossing: fixpt_memmgmt::Words::new(young::SEMI_CARDS / 8).expect("address space for the crossing map"),
+            minor_count: 0,
+            due_major: false,
+            policy_count: 0,
+            verify_barrier: std::env::var("FIXPT_VERIFY_BARRIER").is_ok_and(|v| v == "1"),
         }
     }
 
     // ------------------------------------------------------------------ stats
-    /// Live words in the active semispace.
+    /// Live words in the active semispace, and in the nursery.
     #[inline]
     pub fn used(&self) -> usize {
-        self.top - self.active
+        self.top - self.active + (self.nursery_top - NURSERY_BASE)
     }
     #[inline]
     pub fn capacity(&self) -> usize {
@@ -281,9 +326,14 @@ impl Heap {
     pub fn slot(&self, rel: usize) -> Value {
         Value(self.word(rel))
     }
+    /// A value stored into word `rel` of an object: the write barrier
+    /// marks its card when it puts a young reference into the old space.
     #[inline]
     pub fn set_slot(&mut self, rel: usize, v: Value) {
         self.set_word(rel, v.raw());
+        if self.generational && v.is_ref() && young::is_young(v.index() - self.base) && rel < 2 * MAX_SEMI_WORDS {
+            self.mark_card(rel);
+        }
     }
 
     /// Where the heap's memory starts: word `i` of it, as the heap counts
@@ -316,6 +366,12 @@ impl Heap {
         if let Some(h) = self.regions.target
             && let Some(at) = self.regions.bump(h, n)
         {
+            return at;
+        }
+        if self.generational {
+            let at = self.nursery_top;
+            assert!(at + n <= MEM_WORDS, "the nursery is full: {n} words more");
+            self.nursery_top += n;
             return at;
         }
         if self.top + n > self.active + self.semi {
@@ -1071,6 +1127,16 @@ impl Heap {
     /// every live `Value` reachable from `extra_roots` or the heap's own roots.
     pub fn maybe_collect(&mut self, extra_roots: &mut [&mut [Value]]) {
         if self.collection_due() {
+            self.collect_due(extra_roots);
+        }
+    }
+
+    /// The collection [`collection_due`](Heap::collection_due) said is due:
+    /// of the nursery alone, or of everything.
+    pub fn collect_due(&mut self, extra_roots: &mut [&mut [Value]]) {
+        if self.generational && !self.due_major {
+            self.collect_minor(extra_roots);
+        } else {
             self.collect(extra_roots);
         }
     }
@@ -1088,14 +1154,21 @@ impl Heap {
             || self.code.taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
         self.safepoints += 1;
         let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
-        full || policy
+        let nursery_full = self.generational && self.nursery_top - NURSERY_BASE >= self.nursery_words;
+        // Under the stress policy, a generational heap's policy collections
+        // are minor ones, but every fourth, which is major.
+        if policy {
+            self.policy_count += 1;
+        }
+        self.due_major = full || (policy && (!self.generational || self.policy_count.is_multiple_of(4)));
+        full || policy || nursery_full
     }
 
     /// Cheney semispace copy. Compacts, which is also what makes a dumped image
     /// contiguous and relocation-free.
     pub fn collect(&mut self, extra_roots: &mut [&mut [Value]]) {
         let started = std::time::Instant::now();
-        self.words_allocated += self.top.saturating_sub(self.top_after_gc) as u64;
+        self.words_allocated += self.top.saturating_sub(self.top_after_gc) as u64 + (self.nursery_top - NURSERY_BASE) as u64;
         let from = self.active;
         let to = if self.active == 0 { MAX_SEMI_WORDS } else { 0 };
         let mem = self.mem.words_mut();
@@ -1113,6 +1186,9 @@ impl Heap {
             code_marks: HashSet::new(),
             code_gray: Vec::new(),
             regions: &mut self.regions,
+            minor: false,
+            crossing: &mut self.crossing,
+            last_card: usize::MAX,
         };
 
         // `scan` and `c.free` are relative to `to`.
@@ -1133,6 +1209,7 @@ impl Heap {
                 }
                 c.free = pad;
                 scan = pad;
+                c.crossed(to, pad);
             }
         }
 
@@ -1248,6 +1325,9 @@ impl Heap {
         self.top = to + free;
         self.gc_count += 1;
         self.words_copied += free as u64;
+        // The nursery emptied into the old space; no card of it dirty.
+        self.nursery_top = NURSERY_BASE;
+        self.clear_cards(to, to + free);
 
         // Keep headroom in proportion to what is live: a semispace at least
         // three times it, so that the next collection comes after at least
@@ -1265,7 +1345,7 @@ impl Heap {
     /// For machine code that allocates without calling in (`fixpt-native`):
     /// where `top` is. The address holds while the heap does not move.
     pub fn top_address(&mut self) -> *mut usize {
-        &mut self.top
+        if self.generational { &mut self.nursery_top } else { &mut self.top }
     }
 
     /// How far machine code may take `top` before it must call in to
@@ -1277,12 +1357,18 @@ impl Heap {
     /// Rust machine.) 0 while a policy collects at every safepoint, or
     /// collection is inhibited: then every allocation calls in.
     pub fn inline_limit(&self) -> usize {
-        if self.gc_every > 0 || self.inhibited > 0 { 0 } else { self.active + (self.semi as f64 * COLLECT_THRESHOLD) as usize }
+        if self.gc_every > 0 || self.inhibited > 0 {
+            0
+        } else if self.generational {
+            NURSERY_BASE + self.nursery_words
+        } else {
+            self.active + (self.semi as f64 * COLLECT_THRESHOLD) as usize
+        }
     }
 
     /// Words allocated since the heap was made.
     pub fn allocated(&self) -> u64 {
-        self.words_allocated + self.top.saturating_sub(self.top_after_gc) as u64
+        self.words_allocated + self.top.saturating_sub(self.top_after_gc) as u64 + (self.nursery_top - NURSERY_BASE) as u64
     }
 
     /// The semispace's size in words, for reports.
@@ -1330,7 +1416,12 @@ impl Heap {
     #[inline(always)]
     fn copy_out(mem: &mut [u64], c: &mut Copier, v: Value) -> Value {
         let i = v.index() - c.base;
-        let reap = if (c.from..c.from + MAX_SEMI_WORDS).contains(&i) {
+        let young = young::is_young(i);
+        // A minor collection copies the nursery's objects, and only them.
+        if c.minor && !young {
+            return v;
+        }
+        let reap = if young || (c.from..c.from + MAX_SEMI_WORDS).contains(&i) {
             None
         } else if code::in_code_area(i) {
             // It never moves: marked, and scanned once.
@@ -1413,9 +1504,17 @@ impl Heap {
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
         assert_eq!(self.live_regions(), 0, "an image is made with no region live");
         assert_eq!(self.code.used, 0, "an image cannot yet carry the code area (docs/object-model.md, \"A collected code area\")");
+        // The old space, then the nursery after it, as one run of words.
+        let old = self.top - self.active;
         let shift = ((self.base + self.active) as u64) << 3;
-        let rebase = |v: Value| if v.is_ref() { Value(v.raw() - shift) } else { v };
+        let young_shift = ((self.base + NURSERY_BASE) as u64 - old as u64) << 3;
+        let rebase = |v: Value| match v.is_ref() {
+            true if young::is_young(v.index() - self.base) => Value(v.raw() - young_shift),
+            true => Value(v.raw() - shift),
+            false => v,
+        };
         let mut words = self.mem.words()[self.active..self.top].to_vec();
+        words.extend_from_slice(&self.mem.words()[NURSERY_BASE..self.nursery_top]);
         map_refs(&mut words, rebase);
         let all = |vs: &[Value]| vs.iter().map(|v| rebase(*v)).collect::<Vec<_>>();
         (words, all(&self.globals), all(&self.symbols), all(&self.roots))
@@ -1457,6 +1556,7 @@ impl Heap {
         heap.mem.words_mut()[..words.len()].copy_from_slice(words);
         map_refs(&mut heap.mem.words_mut()[..words.len()], relocate);
         heap.top = words.len();
+        heap.cross_all(0, words.len());
         heap.globals = globals.into_iter().map(relocate).collect();
         heap.symbols = symbols.into_iter().map(relocate).collect();
         heap.roots = roots.into_iter().map(relocate).collect();
@@ -1473,6 +1573,7 @@ impl Heap {
     /// tests — it is the cheapest way to catch a scan that desynchronised.
     pub fn verify(&self) -> Result<(), String> {
         self.verify_range(self.active, self.top)?;
+        self.verify_range(NURSERY_BASE, self.nursery_top).map_err(|e| format!("in the nursery: {e}"))?;
         for (lo, hi) in self.regions.ranges() {
             self.verify_range(lo, hi).map_err(|e| format!("in a region: {e}"))?;
         }
@@ -1555,7 +1656,7 @@ impl Heap {
         if v.is_ref() {
             // A bloblet with no suffix is pointed at one past its last field,
             // which for the last object in the heap is the top itself.
-            let (lo, hi) = (self.active, self.top);
+            let (lo, hi) = if young::is_young(self.ix(v)) { (NURSERY_BASE, self.nursery_top) } else { (self.active, self.top) };
             let beyond = if v.is_bloblet() { self.ix(v) > hi || self.ix(v) <= lo } else { self.ix(v) >= hi || self.ix(v) < lo };
             if beyond {
                 return Err(format!("dangling reference {v:?} at word {at}"));
@@ -1603,6 +1704,13 @@ struct Copier<'r> {
     code_marks: HashSet<usize>,
     code_gray: Vec<usize>,
     regions: &'r mut regions::Regions,
+    /// Whether this is a minor collection, which copies the nursery's
+    /// objects to the end of the old space and nothing else.
+    minor: bool,
+    /// The crossing map, kept as objects are copied into the old space; and
+    /// the card the last one started in.
+    crossing: &'r mut fixpt_memmgmt::Words,
+    last_card: usize,
 }
 
 impl Copier<'_> {
@@ -1625,6 +1733,7 @@ impl Copier<'_> {
         }
         let at = self.to + self.free;
         self.free += n;
+        self.crossed(at, n);
         at
     }
 }

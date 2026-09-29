@@ -215,6 +215,31 @@ pub fn movk(d: Reg, imm16: u32, hw: u32) -> u32 {
     assert!(imm16 < 1 << 16 && hw < 4);
     0xF280_0000 | hw << 21 | imm16 << 5 | r(d)
 }
+/// `lsr xd, xn, #s`.
+pub fn lsr_imm(d: Reg, n: Reg, s: u32) -> u32 {
+    assert!(s < 64);
+    0xD340_FC00 | s << 16 | r(n) << 5 | r(d)
+}
+/// `strb wt, [xn]`.
+pub fn strb(t: Reg, n: Reg) -> u32 {
+    0x3900_0000 | r(n) << 5 | r(t)
+}
+/// The write barrier after a value is stored at `[obj, #off]`
+/// (`docs/research/generational-gc.md`): that word's card marked, in the
+/// card table whose biased address (`Heap::card_table_address`) is at
+/// `[state, #cards]`. `t1` and `t2` are the caller's to lose; `obj` may be
+/// one of them.
+pub fn card_mark(obj: Reg, off: i64, state: Reg, cards: u32, t1: Reg, t2: Reg) -> Vec<u32> {
+    assert!(off.unsigned_abs() < 4096, "a field's offset in reach of one `add`");
+    vec![
+        if off < 0 { sub_imm(t1, obj, off.unsigned_abs() as u32) } else { add_imm(t1, obj, off as u32) },
+        lsr_imm(t1, t1, 9),
+        ldr(t2, state, cards),
+        add(t2, t2, t1),
+        movz(t1, 1, 0),
+        strb(t1, t2),
+    ]
+}
 /// Load any 64-bit constant: `movz` then as many `movk`s as needed.
 pub fn mov_imm64(d: Reg, v: u64) -> Vec<u32> {
     let mut out = vec![movz(d, (v & 0xffff) as u32, 0)];

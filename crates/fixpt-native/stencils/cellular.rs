@@ -39,6 +39,11 @@ unsafe fn wr(a: u64, v: u64) {
     unsafe { *(a as *mut u64) = v }
 }
 
+#[inline(always)]
+unsafe fn wr8(a: u64, v: u8) {
+    unsafe { *(a as *mut u8) = v }
+}
+
 /// Routine `n8 / 8`: a fixnum's bits are already the table offset.
 #[inline(always)]
 unsafe fn routine(st: *mut State, n8: u64) -> Routine {
@@ -283,7 +288,10 @@ routine!(st_global, |base, ip, cur, dsp, rsp, st, fp, w| {
 
 routine!(st_global_set, |base, ip, cur, dsp, rsp, st, fp, w| {
     let g = unsafe { rd(ip) };
-    unsafe { wr(base.wrapping_add(g).wrapping_sub(4 + 16), rd(dsp)) };
+    let at = base.wrapping_add(g).wrapping_sub(4 + 16);
+    unsafe { wr(at, rd(dsp)) };
+    // The write barrier: the card of the word written marked.
+    unsafe { wr8((*st).cards.wrapping_add(at >> 9), 1) };
     next!(base, ip - 8, cur, dsp + 8, rsp, st, fp)
 });
 

@@ -99,34 +99,34 @@ a copy. If that shows in the numbers, a survivor space can come later.
 ## 3. The write barrier and the remembered set: cards
 
 An old object gets a pointer to a young one only by a store into it,
-after its promotion. Each such store marks the object's **card** (512
-bytes of the heap's address range) in a byte table, one byte per card:
+after its promotion. Each such store marks the **card** of the word
+written (512 bytes of the heap's address range) in a byte table, one byte
+per card (`card_mark` in `fixpt-native/src/arm64.rs`):
 
 ```
-lsr  x17, obj, #9        the card of the object's reference
+sub  x13, obj, #-off       the word written
+lsr  x13, x13, #9          its card
 ldr  x16, [state, #cards]  the table, biased by the heap's base
-mov  w15, #1
-strb w15, [x16, x17]
+add  x16, x16, x13
+movz x13, #1
+strb w13, [x16]
 ```
 
-That is four or five instructions, no branch and no call-out. It is safe
+That is six instructions, with no branch and no call-out. It is safe
 anywhere, a leaf included, and idempotent: a loop that stores into the
-same object marks one card, however often it stores. The table is as
-large as the heap's reserved range needs (one byte per 512 bytes), and
-the system commits it as it is written.
+same object marks one card, however often it stores. The table covers
+the heap's whole reserved range, one byte per 512 bytes, and the system
+commits it as it is written. The heap's own barrier (`set_slot`) marks a
+card only for a young value stored into the old space.
 
 A minor collection scans the dirty cards of the old semispace. For each
-one it traces every object that overlaps the card, all of its fields, and
-then clears the card. To find the first object in a card, the old space
+one it traces the fields that lie on the card, of every object that
+overlaps it, and then clears the card. To find the first object in a card, the old space
 keeps a **crossing map**: for each card, where the first object starting
 in it starts. The collector fills it as it copies objects into the old
 space, since both kinds of collection place them there in order. Parsing
 from that point works because the first word at any object boundary is a
 header or a pair's first value (`value.rs`, tag 110 reserved).
-
-Marking the card of the object's reference, not of the field written,
-covers both: an object overlaps every card that holds one of its fields
-and its reference.
 
 **Where the barrier goes**, everywhere a value is stored into an object
 that already exists:
@@ -159,6 +159,29 @@ at a minor collection.
 - **Stack maps**: a test that a large object held only by a dead slot is
   not kept by a collection in a later call, and the native tests under
   `gc_every`.
+
+## As built (2026-09-29)
+
+- **Where the nursery is.** In `mem` after the reaps and before the code
+  area. The code area must come last, since native code takes any callee
+  whose code is at or past the code area's start to be native code. With
+  the nursery after it, a cellular word made young was jumped into.
+- **The crossing map's byte.** 0: nothing known yet. 1 to 64: where the
+  first object starting on the card starts, plus one. Past 64: none
+  starts there, and the one covering the card starts at least
+  `2^(b - 65)` cards back. A walk back over a large array then takes a
+  logarithm of its length in steps. The first version walked back card by
+  card, and traced every field of the array to find the card's few. The
+  compile phase's minor collections then cost 152 ms (a 256K-word
+  nursery); now 41 ms.
+- **The policy.** `FIXPT_NURSERY` sets the nursery's size in words (0 for
+  none); the default is 2^20 (8 MB). Under `gc_every`, three policy
+  collections in four are minor. `FIXPT_VERIFY_BARRIER=1` (or
+  `Heap::verify_barrier`) runs the verifier before each minor collection.
+- **Tested.** The whole suite with a 64K-word nursery and the verifier on;
+  `fixpt-scheme` under `gc-stress` with it; `fixpt-heap/tests/nursery.rs`.
+  With the barrier left out of `set_slot`, three of that file's four
+  tests fail in the verifier.
 
 ## Order of work
 

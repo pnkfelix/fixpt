@@ -1884,3 +1884,36 @@ or not it then collected (`maybe_collect`). It now asks the heap first
 (ms, best of 3; the rest unchanged. `lists-region` calls out for each
 region `cons`, 20 deep and more; `captures` takes continuations, whose
 copy reads each frame's mask directly.)
+
+## A nursery, a card-marking write barrier (2026-09-29)
+
+The heap is generational (`docs/research/generational-gc.md` §2–3):
+everything is allocated in a nursery of 2^20 words, and a safepoint that
+finds it full collects it alone, promoting what is live to the end of
+the old semispace. The remembered set is a card table (a byte per 64
+words), which a barrier after each store into an existing object marks.
+That is `Heap::set_slot` for the Rust side, and six instructions after
+`field!`, `global!`, `setfield` and `setglbl` in each machine that stores
+inline (the hand, compiled and stencil machines, the register machine, the
+native compiler).
+
+The front end's self-compile, as register code (`probe_phases_as_register_code`),
+by the nursery's size in words:
+
+| nursery | read  | parse | check | compile | total | of which collecting |
+| ------- | -----:| -----:| -----:| -------:| -----:| -------------------:|
+| none    | 0.053 | 0.006 | 0.547 |   0.153 | 0.759 |                80.8 |
+| 512K    | 0.050 | 0.006 | 0.522 |   0.148 | 0.726 |                70.7 |
+| 1M      | 0.054 | 0.004 | 0.500 |   0.139 | 0.697 |                46.4 |
+| 2M      | 0.050 | 0.005 | 0.513 |   0.134 | 0.702 |                53.7 |
+| 4M      | 0.054 | 0.012 | 0.488 |   0.133 | 0.687 |                41.5 |
+
+(seconds, and milliseconds collecting.) Where a major collection falls
+moves each row by a few milliseconds. The read, whose data nearly all
+lives on, pays for copying it twice (9 ms collecting → 18); the check and
+the compile, which make much that dies young, gain. 1M is the default.
+
+The benchmarks: native `closures` 25.5 → 20.6 ms, `lists` 11.3 → 8.0;
+register code's `lists` 9.3 → 6.0, `closures` 19.4 → 15.0; the rest the
+same. The barrier's six instructions are not seen: no benchmark stores
+much into old objects.

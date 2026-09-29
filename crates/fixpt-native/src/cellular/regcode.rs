@@ -287,6 +287,7 @@ impl Asm {
                 self.cbnz(X13, slow);
                 self.e(sub(X11, 1, 2));
                 self.e(stur(3, X11, -4));
+                self.es(&card_mark(X11, -4, ST, off(offset_of!(State, cards)), X13, X16));
                 self.value(RESULT, Value::UNSPECIFIED);
             }
             // `char-whitespace?` of an ASCII character: tab to carriage
@@ -575,6 +576,9 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 a.cell(X16, f(0), fields);
                 a.e(mov(X11, X16));
                 a.e(if name == "global" { ldur(RESULT, X11, field_off(2)) } else { stur(RESULT, X11, field_off(2)) });
+                if name == "setglbl" {
+                    a.es(&card_mark(X11, field_off(2), ST, off(offset_of!(State, cards)), X13, X16));
+                }
             }
             "reg" => a.e(mov(RESULT, reg(k(o(0))))),
             "setreg" => a.e(mov(reg(k(o(0))), RESULT)),
@@ -649,9 +653,11 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                 let off = field_off(k(o(0)));
                 if off >= -256 {
                     a.e(stur(reg(k(o(1))), X11, off));
+                    a.es(&card_mark(X11, off, ST, super::off(offset_of!(State, cards)), X13, X16));
                 } else {
                     a.sub_const(X16, X11, -off as u64);
                     a.e(str(reg(k(o(1))), X16, 0));
+                    a.es(&card_mark(X16, 0, ST, super::off(offset_of!(State, cards)), X13, X16));
                 }
             }
             "prim" | "lambda" | "cellular" => {

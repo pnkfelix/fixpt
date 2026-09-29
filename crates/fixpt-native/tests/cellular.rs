@@ -65,15 +65,20 @@ fn a_loop() {
 #[test]
 fn cons_calls_out_and_survives_collection() {
     let mut heap = Heap::with_semispace(1024);
+    // As small a nursery, if the heap has one.
+    if heap.is_generational() {
+        heap.set_nursery(1024);
+    }
     let w = examples::sum_by_list(&mut heap);
     let root = heap.push_root(w);
     let mut m = NativeMachine::new();
-    let before = heap.gc_count;
+    // Collections of either kind, if the heap has a nursery.
+    let before = heap.gc_count + heap.minor_count;
     for _ in 0..3 {
         let w = heap.root_at(root);
         assert_eq!(m.run(&mut heap, w, &[fx(3000)], FUEL).unwrap(), [fx(4501500)]);
     }
-    let during = heap.gc_count - before;
+    let during = heap.gc_count + heap.minor_count - before;
     eprintln!("collections while the native machine ran: {during}");
     assert!(during > 0, "the test is meant to collect under native code");
     // By now the heap has grown to hold what is live three times over, so

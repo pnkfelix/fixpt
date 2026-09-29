@@ -787,6 +787,7 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             } else {
                 a.e(ldr_post(X15, DSP, 8));
                 a.e(stur(X15, X11, field_off(2)));
+                a.es(&card_mark(X11, field_off(2), ST, off(offset_of!(State, cards)), X13, X16));
             }
             a.cont();
         }
@@ -971,7 +972,7 @@ pub fn fx26_module() -> String {
         ("n-st-ds-base", offset_of!(State, ds_base)), ("n-st-ds-limit", offset_of!(State, ds_limit)),
         ("n-st-rs-limit", offset_of!(State, rs_limit)), ("n-st-fp", offset_of!(State, fp)), ("n-st-clo", offset_of!(State, clo)),
         ("n-st-resume", offset_of!(State, resume)), ("n-st-trap", offset_of!(State, trap)),
-        ("n-st-exit", offset_of!(State, exit)),
+        ("n-st-exit", offset_of!(State, exit)), ("n-st-cards", offset_of!(State, cards)),
     ] {
         c(name, o as i64, "a State field's offset");
     }
@@ -1450,6 +1451,7 @@ impl Stacks {
             top: heap.top_address() as u64,
             alloc_limit: heap.inline_limit() as u64,
             regions: heap.region_table_address() as u64,
+            cards: heap.card_table_address() as u64,
             leaf_link: 0,
         }
     }

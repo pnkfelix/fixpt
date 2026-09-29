@@ -30,6 +30,7 @@ pub fn disassemble(w: u32, at: i64) -> String {
         _ if is(0xFFE0_0C00, 0xF800_0000) => format!("stur {}, [{}, #{imm9}]", x(d), sp(n)),
         _ if is(0xFFC0_0000, 0xF940_0000) => format!("ldr {}, [{}, #{}]", x(d), sp(n), imm12 * 8),
         _ if is(0xFFC0_0000, 0xF900_0000) => format!("str {}, [{}, #{}]", x(d), sp(n), imm12 * 8),
+        _ if is(0xFFC0_0000, 0x3900_0000) => format!("strb w{d}, [{}, #{imm12}]", sp(n)),
         _ if is(0xFF00_0000, 0x5800_0000) => format!("ldr {}, {}", x(d), target(at, imm19)),
         _ if is(0xFFE0_FC00, 0xF860_6800) => format!("ldr {}, [{}, {}]", x(d), sp(n), x(m)),
         _ if is(0xFFC0_0000, 0xA980_0000) => format!("stp {}, {}, [{}, #{imm7}]!", x(d), x(t2), sp(n)),

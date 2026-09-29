@@ -144,6 +144,18 @@
 
 ;; Field `k` of the bloblet whose `suffix + 4` is in a register.
 (define n-field-off (subr pure (int) int) (lambda (k) (- 0 (+ 4 (* 8 k)))))
+;; The write barrier after a value is stored at `[obj, #off]`, as the Rust
+;; machine's `card_mark` makes it: that word's card marked in the card
+;; table, whose biased address is the state's `cards`; `x13` and `x16` lost.
+(define n-card-mark (subr (maxeff assembles spin) (int int) unit)
+  (lambda (obj off)
+    (begin
+      (n-e (if (< off 0) (arm-sub-imm n-x13 obj (- 0 off)) (arm-add-imm n-x13 obj off)))
+      (n-e (arm-lsr-imm n-x13 n-x13 9))
+      (n-e (arm-ldr n-x16 n-st n-st-cards))
+      (n-e (arm-add n-x16 n-x16 n-x13))
+      (n-e (arm-movz n-x13 1 0))
+      (n-e (arm-strb n-x13 n-x16)))))
 
 ;; Dispatch on the cell in x9: the tail of `NEXT`.
 (define n-run-word-in-w (subr (maxeff assembles spin) () unit)
@@ -561,7 +573,7 @@
          (n-e (arm-add n-x11 n-base n-x13))
          (if (= n routine-global)
              (begin (n-e (arm-ldur n-x15 n-x11 (n-field-off 2))) (n-e (arm-str-pre n-x15 n-dsp -8)))
-             (begin (n-e (arm-ldr-post n-x15 n-dsp 8)) (n-e (arm-stur n-x15 n-x11 (n-field-off 2)))))
+             (begin (n-e (arm-ldr-post n-x15 n-dsp 8)) (n-e (arm-stur n-x15 n-x11 (n-field-off 2))) (n-card-mark n-x11 (n-field-off 2))))
          (n-cont-code)))
       ((or (= n routine-call) (= n routine-tailcall) (= n routine-tcall) (= n routine-ttailcall)) (n-call n))
       ((= n routine-return)

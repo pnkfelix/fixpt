@@ -50,6 +50,9 @@ pub struct State {
     /// The heap's table of each region's current chunk, `[fill, end]` by
     /// handle, in words from the base (`Heap::region_table_address`).
     pub regions: u64,
+    /// The heap's card table, biased (`Heap::card_table_address`): the
+    /// write barrier marks the card of each word a store writes.
+    pub cards: u64,
     /// The routines' addresses, by number, for machines that find them
     /// through the state rather than a register.
     pub routines: [u64; ROUTINE_SLOTS],

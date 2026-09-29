@@ -41,7 +41,7 @@ are in the last section, "Log: the glance's details", and in
   (`%fx26-convert`), and a procedure of the other convention is called as
   through `fx` (2026-09-29). Closures and pairs made inline; one common
   trap, foreign call and closure call-out per machine. Of every test
-  program's forms, as the REPL runs them, 115 expressions run as machine
+  program's forms, as the REPL runs them, 117 expressions run as machine
   code; the three declined call `stay-cellular` by design.
 - **Tools**: `fixpt check|compile|eval INPUT` (both checkers, both
   compilers); `sexp-edit`, `edit` included; the phase probe
@@ -49,13 +49,15 @@ are in the last section, "Log: the glance's details", and in
   word.
 
 **In progress**
-- **The collector and native code** (the user's, 2026-09-29;
-  `docs/research/generational-gc.md`): stack maps are done (each native
-  frame's header word, a mask of its live slots, stored before each call
-  and call-out; slots no longer cleared on entry). Next: a card-marking
-  write barrier and the cards as the remembered set, then a nursery with
-  minor collections that promote everything live. There is one
-  generation today.
+- **The collector** (the user's, 2026-09-29;
+  `docs/research/generational-gc.md`): done, all four. Stack maps (each
+  native frame's header word, a mask of its live slots); a card-marking
+  write barrier in the heap and in every machine that stores inline; the
+  cards as the remembered set, with a crossing map; a nursery of 2^20
+  words, collected alone, everything live promoted at once. The
+  self-compile 0.759 → 0.697 s. Later, if the numbers ask: a survivor
+  space (the read phase copies its data twice), card-limited scanning of
+  the regions and the code area, which a minor collection scans whole.
 - **The native convention, after step 4**: steps 6 (checks where work is
   unbounded; retire `native-compiled` and register code's twins) and 7
   (the closure experiment). A copy of polymorphic code per convention
@@ -77,8 +79,9 @@ are in the last section, "Log: the glance's details", and in
    lifting (the check phase 14% less allocation).
 2. Versions of bodies with closures; guards per segment between
    `comefrom`s (the user's).
-3. The rest of known calls; a nursery with a write barrier; heap sizing
-   (a collection landing in a phase is a step in its time).
+3. The rest of known calls; heap sizing (a collection landing in a phase
+   is a step in its time). (The nursery and its write barrier: done,
+   2026-09-29.)
 4. Soundness obligations: effect soundness (T3) in full, lemma erasure
    (T4), termination of code free of `spin` (T5), space bounds (T6).
 5. Sizes N5c: inequalities, "at most n" results, array bounds.
