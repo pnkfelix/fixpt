@@ -31,8 +31,13 @@ pub const EVALUATOR: &str = include_str!("evaluator.fx");
 /// The compiler from FX-26 to cellular words, written in FX-26.
 pub const COMPILER: &str = include_str!("compile.fx");
 
-/// Its second part: expressions, programs, inlining.
-pub const COMPILER_EXPS: &str = include_str!("compile-exps.fx");
+/// Its other parts, in order: lambda lifting and the standard operations;
+/// expressions; inlining and programs.
+pub const COMPILER_PARTS: [(&str, &str); 3] = [
+    ("compile-lift.fx", include_str!("compile-lift.fx")),
+    ("compile-exps.fx", include_str!("compile-exps.fx")),
+    ("compile-programs.fx", include_str!("compile-programs.fx")),
+];
 
 /// The register compiler written in FX-26 (PLAN.md 13h′ (e)): register code
 /// for each lambda, as its word's twin, when `c-registers` is set.
@@ -86,7 +91,7 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 24] = [
+pub const FRONT_END_FILES: [(&str, &str); 26] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("table.fx", TABLE),
@@ -103,7 +108,9 @@ pub const FRONT_END_FILES: [(&str, &str); 24] = [
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),
     ("compile.fx", COMPILER),
-    ("compile-exps.fx", COMPILER_EXPS),
+    COMPILER_PARTS[0],
+    COMPILER_PARTS[1],
+    COMPILER_PARTS[2],
     ("regcode.fx", REGCODE),
     REGCODE_PARTS[0],
     REGCODE_PARTS[1],

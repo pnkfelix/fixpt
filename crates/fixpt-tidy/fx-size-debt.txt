@@ -16,8 +16,6 @@ crates/fixpt-fx26/src/regcode.fx                                     525   51
 crates/fixpt-fx26/src/regcode-exps.fx                                654   98
 crates/fixpt-fx26/src/regcode-core.fx                                926   93
 crates/fixpt-fx26/src/regcode-entry.fx                               201   26
-crates/fixpt-fx26/src/compile.fx                                     972  157
-crates/fixpt-fx26/src/compile-exps.fx                                858  118
 crates/fixpt-fx26/src/parser.fx                                       682   96
 crates/fixpt-fx26/src/eager-reader.fx                                 678   51
 crates/fixpt-fx26/src/evaluator.fx                                    545   53
