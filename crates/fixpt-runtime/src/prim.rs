@@ -119,6 +119,14 @@ fn int(rt: &mut Runtime, v: Value) -> Outcome<i64> {
     rt.type_error("an exact integer that fits a machine word", v)
 }
 
+/// A radix, 2 to 36.
+fn radix(rt: &mut Runtime, v: Value) -> Outcome<u32> {
+    match int(rt, v)? {
+        r @ 2..=36 => Ok(r as u32),
+        _ => rt.fail("a radix is from 2 to 36", &[v]),
+    }
+}
+
 /// `%sro`'s work, given the engine's stacks as extra roots.
 pub fn sro(rt: &mut Runtime, kind: Value, limit: Value, extra: &[&[Value]]) -> Outcome<Value> {
     let kind = if kind.is_false() {
@@ -744,17 +752,22 @@ prims! {
         let s = get_string(rt, a[1])?;
         Ok(Value::boolean(s.contains(c)))
     });
+    // FX-26's `parse-number`: the number `a[0]` spells in radix `a[1]`
+    // (2 to 36), sign and all, in a list; or none.
     "%fx26-parse-number", 2, Some(2), simple!(|rt, a| {
         let s = get_string(rt, a[0])?;
-        let radix = int(rt, a[1])? as u32;
+        let radix = radix(rt, a[1])?;
         match fixpt_read::reader::parse_number(&s, radix, None) {
             Some(n) => { let v = crate::num_from_literal(rt, &n); Ok(rt.heap.cons(v, Value::NULL)) }
             None => Ok(Value::NULL),
         }
     });
-    "%fx26-parse-int", 2, Some(2), simple!(|rt, a| {
+    // FX-26's `parse-nat`: the natural number `a[0]` spells in radix
+    // `a[1]` (2 to 36); or -1, for anything else (a sign included: signed
+    // numbers are `parse-number`'s).
+    "%fx26-parse-nat", 2, Some(2), simple!(|rt, a| {
         let s = get_string(rt, a[0])?;
-        let radix = int(rt, a[1])? as u32;
+        let radix = radix(rt, a[1])?;
         let n = fixpt_read::reader::parse_number(&s, radix, None).map(|n| crate::num_from_literal(rt, &n));
         Ok(match n { Some(v) if v.is_fixnum() && v.as_fixnum() >= 0 => v, _ => Value::fixnum(-1) })
     });
@@ -1012,6 +1025,13 @@ prims! {
         let name = get_string(rt, a[0])?;
         let n = PRIMITIVES.iter().position(|p| p.name == name && matches!(p.kind, PrimKind::Simple(_)));
         Ok(Value::fixnum(n.map_or(-1, |n| n as i64)))
+    });
+    // How many arguments the runtime primitive named `a[0]` takes, if it is
+    // one `%runtime-primitive` finds and takes a fixed number; else -1.
+    "%runtime-primitive-arity", 1, Some(1), simple!(|rt, a| {
+        let name = get_string(rt, a[0])?;
+        let p = PRIMITIVES.iter().find(|p| p.name == name && matches!(p.kind, PrimKind::Simple(_)));
+        Ok(Value::fixnum(p.filter(|p| p.max == Some(p.min)).map_or(-1, |p| p.min as i64)))
     });
     // Run a word with the arguments in a list on its data stack; the value it
     // leaves on top.

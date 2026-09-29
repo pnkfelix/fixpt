@@ -858,7 +858,7 @@
   (lambda (c k) (if (<= k 0) #u (begin (c-op c routine-drop) (c-drops c (- k 1))))))
 
 ;; How many arguments a standard operation takes, or -1 if it is not one.
-(define c-arity (subr pure (string) int)
+(define c-arity (subr (read (globals standard-primitive)) (string) int)
   (lambda (n)
     (cond ((or (string=? n "make-continuation-prompt-tag") (string=? n "make-continuation-mark-key")) 0)
           ((or (string=? n "car") (string=? n "cdr") (string=? n "null?") (string=? n "not") (string=? n "new")
@@ -874,7 +874,11 @@
                (string=? n "string-ref") (string=? n "make-array") (string=? n "abort-current-continuation")
                (string=? n "call-with-composable-continuation") (string=? n "first-mark") (string=? n "marks-of"))
            2)
-          (else -1))))
+          ;; The rest: the arity of the runtime primitive it runs as, if that
+          ;; takes a fixed number (`char-downcase`).
+          (else
+           (let ((p (standard-primitive n)))
+             (if (or (string=? p "") (string=? p "%fx26-identity")) -1 (runtime-primitive-arity p)))))))
 
 (define c-standard-on (subr compiles (string int code) unit)
   (lambda (name n c)

@@ -94,8 +94,7 @@ are in the last section, "Log: the glance's details", and in
   code. Left: a product argument is slow natively; the native stack is a
   fixed 8 MB; native collection slows as live data grows (`paraffins`
   57 s native, 20 s lowered); precise globals effects doubled `set.fx`'s
-  native time; `parse-int` panics on a bad radix; a standard operation as
-  a value is still declined for some operations. Collections counted by
+  native time. Collections counted by
   `gc_count` leave out minor ones (`%gc-count`, the phase probe), and the
   engine profile's name cache is keyed on major collections only.
 
@@ -1880,9 +1879,11 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   Count collections and time them first (Q3).
 - Precise globals effects made `set.fx` 2x slower natively (7.2 -> 14 s),
   and doubled `peval`'s check time; cause unknown.
-- A standard operation as a value is still declined for some operations
-  (`char-downcase`); `parse-int` panics on a bad radix and cannot take a
-  sign.
+- Fixed (2026-09-29): a standard operation as a value takes the arity of
+  the runtime primitive it runs as (`runtime-primitive-arity`), so
+  `char-downcase` and the like are values in both compilers; `parse-int`
+  is `parse-nat` (a natural number or -1; signed numbers are
+  `parse-number`'s), and a radix past 2…36 fails instead of panicking.
 - A redefinition check in the harness-only session path (`knot-spin`).
 
 **Q2. Integers**, in this order: (a) every path traps alike; (b) the

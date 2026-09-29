@@ -29,7 +29,7 @@
 ;;;   characters.
 ;;; - `case` on characters is `char=?` and `char-in?`; `case` on token kinds
 ;;;   is `symbol=?` and a search of a list made once.
-;;; - `string->number` is `parse-int`: nboyer.sch's numbers are all decimal
+;;; - `string->number` is `parse-nat`: nboyer.sch's numbers are all decimal
 ;;;   integers with no sign.
 ;;; - `(char? c)` in state12 is always true, and is #t here.
 ;;; - The error procedures stop the run with an error (an index out of
@@ -755,7 +755,7 @@
 
     (makeNum (subr pe () datum)
       (lambda ()
-        (datum-int (parse-int (get tokenValue) 10))))
+        (datum-int (parse-nat (get tokenValue) 10))))
 
     (makeString (subr pe () datum)
       (lambda ()

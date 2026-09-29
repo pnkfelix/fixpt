@@ -289,8 +289,28 @@ fn fx26_checks_compiles_and_evaluates_a_file_or_text() {
 /// pair without a look at it, and crashed.
 #[test]
 fn car_of_nil_traps_on_every_machine() {
-    let program = "(define xs (listof int @heap) nil)\n(car xs)\n";
-    let machines: [&[&str]; 6] = [
+    for (m, text) in on_every_machine("(define xs (listof int @heap) nil)\n(car xs)\n") {
+        assert!(text.contains("pair-car") || text.contains("car or cdr of nil") || text.contains("expected a pair"), "{m:?}: {text}");
+    }
+}
+
+/// A standard operation as a value, of any runtime primitive's
+/// (`char-downcase`), on every machine; `parse-nat` of a bad radix fails
+/// there, instead of panicking (`programs/standard-values.fx`).
+#[test]
+fn standard_values_and_parse_nat_on_every_machine() {
+    for (m, text) in on_every_machine(include_str!("programs/standard-values.fx")) {
+        assert!(text.contains("\"hello\" : string"), "{m:?}: {text}");
+        assert!(text.contains("254 : int"), "{m:?}: {text}");
+        assert!(text.contains("a radix is from 2 to 36"), "{m:?}: {text}");
+    }
+}
+
+/// `program` run by `fixpt eval` on every machine, all at once (each
+/// loads the front end): each machine's options and what it printed, none
+/// killed by a signal.
+fn on_every_machine(program: &str) -> Vec<(&'static [&'static str], String)> {
+    let machines: [&'static [&'static str]; 6] = [
         &[],
         &["--fx26-run", "cellular"],
         &["--fx26-run", "cellular", "--cellular-machine", "native"],
@@ -298,7 +318,6 @@ fn car_of_nil_traps_on_every_machine() {
         &["--fx26-run", "cellular", "--cellular-machine", "registers"],
         &["--fx26-run", "cellular", "--calling-convention", "native"],
     ];
-    // All at once: each loads the front end.
     let children: Vec<_> = machines
         .iter()
         .map(|m| {
@@ -313,13 +332,16 @@ fn car_of_nil_traps_on_every_machine() {
                 .expect("fixpt starts");
             use std::io::Write as _;
             child.stdin.take().expect("piped").write_all(program.as_bytes()).expect("writes");
-            (m, child)
+            (*m, child)
         })
         .collect();
-    for (m, child) in children {
-        let out = child.wait_with_output().expect("finishes");
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        assert!(out.status.code().is_some(), "{m:?}: killed by a signal: {text}");
-        assert!(text.contains("pair-car") || text.contains("car or cdr of nil") || text.contains("expected a pair"), "{m:?}: {text}");
-    }
+    children
+        .into_iter()
+        .map(|(m, child)| {
+            let out = child.wait_with_output().expect("finishes");
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(out.status.code().is_some(), "{m:?}: killed by a signal: {text}");
+            (m, text)
+        })
+        .collect()
 }

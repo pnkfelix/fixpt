@@ -85,7 +85,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("string->list", "(poly ((r region)) (subr (alloc r) (string) (listof char r)))"),
     ("reverse", "(poly ((r1 region) (r2 region)) (poly ((t type)) (subr (maxeff (read r1) (alloc r2)) ((listof t r1)) (listof t r2))))"),
     ("parse-number", "(poly ((r region)) (subr (alloc r) (string int) (listof datum r)))"),
-    ("parse-int", "(subr pure (string int) int)"),
+    ("parse-nat", "(subr pure (string int) int)"),
     ("datum-char", "(subr pure (char) datum)"),
     ("datum-string", "(subr pure (string) datum)"),
     ("datum-symbol", "(subr pure (string) datum)"),
@@ -186,6 +186,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("wglobal=?", "(subr pure (wglobal wglobal) bool)"),
     // A runtime primitive's number, for `prim`, or -1.
     ("runtime-primitive", "(subr pure (string) int)"),
+    ("runtime-primitive-arity", "(subr pure (string) int)"),
     (
         "make-continuation-prompt-tag",
         "(poly ((r region)) (poly ((a type) (h type) (d effect))

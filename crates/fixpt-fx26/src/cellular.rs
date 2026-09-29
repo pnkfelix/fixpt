@@ -1206,7 +1206,12 @@ impl<'a> Compiler<'a> {
             "+" | "-" | "*" | "<" | ">" | "<=" | ">=" | "=" | "modulo" | "quotient" | "cons" | "set-car!" | "set-cdr!"
             | "set" | "char=?" | "string-append" | "string=?" | "symbol=?" | "wglobal=?" | "array-ref" | "string-ref" | "make-array"
             | "abort-current-continuation" | "call-with-composable-continuation" | "first-mark" | "marks-of" => Some(2),
-            _ => None,
+            // The rest: the arity of the runtime primitive it runs as, if
+            // that takes a fixed number (`char-downcase`).
+            _ => standard_primitive(n).filter(|p| *p != "%fx26-identity").and_then(|p| {
+                let d = &fixpt_runtime::PRIMITIVES[fixpt_engine::cellular::runtime_primitive(p)?];
+                (d.max == Some(d.min)).then_some(d.min)
+            }),
         }
     }
 
