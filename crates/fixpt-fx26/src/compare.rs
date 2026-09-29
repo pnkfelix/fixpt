@@ -120,7 +120,13 @@ pub fn both_compilers(s: &mut Fx26Session, text: &str) -> R<(Result<String, Stri
         sc.make(|m| {
             let mut comp = crate::cellular::Compiler::new(m.heap(), &c, text);
             comp.registers = true;
-            rust = comp.program(&tops).map(|w| fixpt_runtime::disasm::disassemble(m.heap(), w));
+            rust = comp.program(&tops).map(|w| {
+                // What register code declined, and why: a procedure without
+                // it runs as cellular code, however it is called.
+                let declined: String =
+                    comp.register_report.iter().filter_map(|(n, why)| why.as_ref().map(|w| format!("; `{n}`: no register code: {w}\n"))).collect();
+                format!("{declined}{}", fixpt_runtime::disasm::disassemble(m.heap(), w))
+            });
             Value::NULL
         });
         Ok((fx26, rust))

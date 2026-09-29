@@ -89,9 +89,9 @@ are in the last section, "Log: the glance's details", and in
   right; queue Q1). Fixed (2026-09-29): `car` of `nil` crashing machine
   code; a native abort not finding a prompt cellular code installed, and
   its cost growing with the stack; an inlined `extract` from an earlier
-  form getting field -1. Left: register code declines above 8
-  free values, arguments or fields, and frames too large for one `stp`,
-  silently; a product argument is slow natively; the native stack is a
+  form getting field -1; frames too large for one `stp`; register
+  exhaustion on long operand chains. Left: register code declines above
+  8 free values, arguments or fields; a product argument is slow natively; the native stack is a
   fixed 8 MB; native collection slows as live data grows (`paraffins`
   57 s native, 20 s lowered); precise globals effects doubled `set.fx`'s
   native time; `parse-int` panics on a bad radix; a standard operation as
@@ -1853,10 +1853,14 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   by name. Other facts keyed by position (conversions, effect summaries)
   are still lost in such bodies; separate compilation's S2 generalizes
   the fix.
-- Register code declines, silently, above 8 free values, arguments or
-  product/bloblet fields, prompt bodies included, and on frames too large
-  for one `stp`; and says so only at run time, by byte offset. Pass the
-  rest on the stack; name the procedure; say it when compiling.
+- Register code declines above 8 free values, arguments or
+  product/bloblet fields, prompt bodies included. Pass the rest on the
+  stack. Fixed (2026-09-29): frames too large for one `stp` (two
+  instructions now; a frame past 60 slots is unmapped, header -1, zeroed
+  on entry and traced whole, `native/wide-frame.fx`); a long right-nested
+  operand chain ran out of registers (the operand's register is now taken
+  after the operand is computed); `fixpt compile` names each definition
+  the Rust compiler made no register code for, and why.
 - A product argument is slow natively (10M calls: 3.4 s against 0.5 s).
 - The native stack is a fixed 8 MB (`STACK_WORDS`); deep non-tail
   recursion that runs lowered overflows natively. Grow it, or segment it

@@ -1550,9 +1550,15 @@
               (cond
                 ((not (null? v)) (begin (r-exp g a env te #f) (product (1 v) (2 (the (listof int @k) nil)))))
                 ((>= breg 0) (begin (r-exp g a env te #f) (product (1 (the (listof wcell @k) nil)) (2 (the (listof int @k) (cons breg nil))))))
+                ;; `b` first (`a` has no effect, and sees none), made before
+                ;; its register is taken: a chain of operations nested in
+                ;; their second operands then needs one register, not one a
+                ;; level.
                 ((r-simple? a)
-                 (let ((k (r-reg g)))
-                   (begin (r-into g b k env te) (r-exp g a env te #f)
+                 (let ((k (if (r-simple? b)
+                              (let ((k (r-reg g))) (begin (r-into g b k env te) k))
+                              (begin (r-exp g b env te #f) (let ((k (r-reg g))) (begin (r-opn g rop-setreg k) k))))))
+                   (begin (r-exp g a env te #f)
                           (product (1 (the (listof wcell @k) nil)) (2 (the (listof int @k) (cons k nil)))))))
                 (else
                  (begin

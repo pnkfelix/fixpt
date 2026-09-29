@@ -396,7 +396,8 @@ fn conversions_make_adapters_in_cellular_code() {
 /// whole; and a frame's stack map (`docs/research/generational-gc.md`): a
 /// large array in a slot dead across a call that collects is not copied
 /// by those collections; kept live across it, it is, each time
-/// (`programs/native/dead-slot.fx`).
+/// (`programs/native/dead-slot.fx`); and a frame too wide for its map
+/// (`programs/native/wide-frame.fx`).
 #[test]
 fn native_session_adapters_aborts_and_stack_maps() {
     let mut s = session(true);
@@ -433,6 +434,10 @@ fn native_session_adapters_aborts_and_stack_maps() {
     let ((n0, c0), (n1, c1)) = (seen[0], seen[1]);
     assert!(n0 >= 10 && n0.abs_diff(n1) <= 1, "{seen:?}");
     assert!(c1 > c0 + 100_000 * (n1 - 1), "{seen:?}");
+    // A frame of 70 slots, past what a header's mask holds: traced whole,
+    // under those collections (`programs/native/wide-frame.fx`).
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/wide-frame.fx")).expect("reads");
+    assert_eq!(values_of(&mut s, &forms), ["2485", "37450000"], "wide frame");
 }
 
 /// `run_native`, collecting every 97 safepoints while the native code runs

@@ -1669,8 +1669,19 @@ impl Compiler<'_> {
             self.r_exp(g, a, env, te, false)?;
             out = (None, Some(k));
         } else if self.r_simple(a) {
-            let k = g.reg()?;
-            self.r_into(g, b, k, env, te)?;
+            // `b` first (`a` has no effect, and sees none), made before its
+            // register is taken: a chain of operations nested in their
+            // second operands then needs one register, not one a level.
+            let k = if self.r_simple(b) {
+                let k = g.reg()?;
+                self.r_into(g, b, k, env, te)?;
+                k
+            } else {
+                self.r_exp(g, b, env, te, false)?;
+                let k = g.reg()?;
+                g.op("setreg", &[Gen::n(k)]);
+                k
+            };
             self.r_exp(g, a, env, te, false)?;
             out = (None, Some(k));
         } else {

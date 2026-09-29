@@ -956,9 +956,12 @@ impl Compiling<'_> {
         // The frame: the link and return address, its stack map (a header,
         // the mask of the slots traced), register code's slots, then this
         // code bloblet and the closure running.
-        if frame.is_some_and(|m| 24 + 8 * (m + 2) > 504) {
-            return decline("a frame too large for one `stp`".into());
+        if frame.is_some_and(|m| 24 + 8 * (m + 2) > 4080) {
+            return decline("a frame too large".into());
         }
+        // A frame of more slots than a fixnum's mask has bits has no stack
+        // map: all its slots are traced, and cleared as it is made.
+        let unmapped = frame.is_some_and(|m| m + 2 > 60);
         let size = frame.map(|m| (24 + 8 * (m as u32 + 2)).div_ceil(16) * 16);
         let self_slot = frame.map(|m| 24 + 8 * m as u32);
         let clo_slot = frame.map(|m| 24 + 8 * (m as u32 + 1));
@@ -973,7 +976,7 @@ impl Compiling<'_> {
             let mut succ: Vec<Vec<usize>> = vec![Vec::new(); ns];
             for (si, &i) in starts.iter().enumerate() {
                 let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
-                let bit = |j: usize| 1u64 << cells[i + 1 + j].as_fixnum();
+                let bit = |j: usize| 1u64.checked_shl(cells[i + 1 + j].as_fixnum() as u32).unwrap_or(0);
                 match op {
                     "stack" => uses[si] |= bit(0),
                     "load" => uses[si] |= bit(1),
@@ -1053,9 +1056,9 @@ impl Compiling<'_> {
                 && framed[i]
                 && (matches!(op, "prim" | "cellular" | "lambda" | "invokeself") || op == "invoke")
             {
-                let map = live_out[si - 1] | 1 << m | if captures { 1 << (m + 1) } else { 0 };
+                let map = if unmapped { u64::MAX } else { live_out[si - 1] | 1 << m | if captures { 1 << (m + 1) } else { 0 } };
                 if map_stored != Some(map) {
-                    a.es(&mov_imm64(X16, Value::fixnum(map as i64).raw()));
+                    a.es(&mov_imm64(X16, Value::fixnum(if unmapped { -1 } else { map as i64 }).raw()));
                     a.e(str(X16, FRAME, 16));
                     map_stored = Some(map);
                 }
@@ -1182,14 +1185,26 @@ impl Compiling<'_> {
                 // way (no register compiler makes one) is cleared.
                 "save" => {
                     let size = size.expect("a frame") as i64;
-                    a.e(stp_pre(FRAME, LINK, SP, -size));
+                    // One `stp` reaches 504 bytes; past that, `sub` first.
+                    if size <= 504 {
+                        a.e(stp_pre(FRAME, LINK, SP, -size));
+                    } else {
+                        a.e(sub_imm(SP, SP, size as u32));
+                        a.e(stp(FRAME, LINK, SP, 0));
+                    }
                     a.e(add_imm(FRAME, SP, 0));
                     a.e(cmp_sp(LIMIT));
                     trap(&mut a, &mut stubs, STACK_OVERFLOW, Cond::Lo);
                     map_stored = None;
-                    let unwritten = live_out[si - 1];
-                    for k in (0..64).filter(|k| unwritten & (1 << k) != 0) {
-                        a.e(str(XZR, FRAME, 24 + 8 * k));
+                    if unmapped {
+                        for off in (24..size as u32).step_by(8) {
+                            a.e(str(XZR, FRAME, off));
+                        }
+                    } else {
+                        let unwritten = live_out[si - 1];
+                        for k in (0..64).filter(|k| unwritten & (1 << k) != 0) {
+                            a.e(str(XZR, FRAME, 24 + 8 * k));
+                        }
                     }
                     ldr_field(&mut a, X9, 1);
                     a.e(str(X9, FRAME, self_slot.expect("a frame")));
@@ -1197,7 +1212,15 @@ impl Compiling<'_> {
                         a.e(str(CLO, FRAME, clo_slot.expect("a frame")));
                     }
                 }
-                "pop" => a.e(ldp_post(FRAME, LINK, SP, size.expect("a frame") as i64)),
+                "pop" => {
+                    let size = size.expect("a frame") as i64;
+                    if size <= 504 {
+                        a.e(ldp_post(FRAME, LINK, SP, size));
+                    } else {
+                        a.e(ldp(FRAME, LINK, SP, 0));
+                        a.e(add_imm(SP, SP, size as u32));
+                    }
+                }
                 "stack" => a.e(ldr(RESULT, FRAME, 24 + 8 * k(o(0)) as u32)),
                 "setstk" => a.e(str(RESULT, FRAME, 24 + 8 * k(o(0)) as u32)),
                 "load" => a.e(ldr(reg(o(0)), FRAME, 24 + 8 * k(o(1)) as u32)),
@@ -1954,9 +1977,10 @@ fn capture(rt: &mut fixpt_runtime::Runtime, st: &DState, frames: &[(u64, u64)], 
         // is kept as the fixnum 0: the vector is traced. (A control
         // frame's marker is where the map would be: all of it is kept.)
         let head = Value(word(fp + 16));
-        let map = if head.is_fixnum() { head.as_fixnum() as u64 } else { u64::MAX };
+        let all = !head.is_fixnum() || head.as_fixnum() < 0;
+        let map = if all { u64::MAX } else { head.as_fixnum() as u64 };
         words.extend((fp + 16..stop).step_by(8).enumerate().map(|(j, at)| {
-            if j == 0 || (j <= 64 && map & (1 << (j - 1)) != 0) { Value(word(at)) } else { Value::fixnum(0) }
+            if j == 0 || all || (j <= 64 && map & (1 << (j - 1)) != 0) { Value(word(at)) } else { Value::fixnum(0) }
         }));
     }
     let heap = &mut rt.heap;
@@ -2053,6 +2077,10 @@ fn traced(fp: u64, end: u64) -> Vec<(u64, usize)> {
     let head = Value(word(fp + 16));
     if !head.is_fixnum() {
         return vec![(fp + 16, n)];
+    }
+    // A frame too large for a mask: every slot.
+    if head.as_fixnum() < 0 {
+        return vec![(fp + 24, n - 1)];
     }
     let map = head.as_fixnum() as u64;
     let mut runs: Vec<(u64, usize)> = Vec::new();
