@@ -1187,22 +1187,79 @@ impl Checker {
     /// variables of kind `data`. No procedure, no storage that can be
     /// written, no generative type.
     pub(crate) fn is_data(&self, t: TyId) -> bool {
-        self.data_walk(t, &mut HashSet::new())
+        self.data_walk(t, &mut HashSet::new(), None)
     }
 
-    fn data_walk(&self, t: TyId, seen: &mut HashSet<TyId>) -> bool {
+    /// Whether `t` is data at `place` (a place variable, or `heap`): data
+    /// whose frozen parts are in the heap or in `place`, so that reading it
+    /// reads no other place (`(t data p)`, F13).
+    pub(crate) fn is_data_at(&self, t: TyId, place: Region) -> bool {
+        self.data_walk(t, &mut HashSet::new(), Some(place))
+    }
+
+    /// Where data at region `r` is: the place it is frozen into, or the
+    /// place or region it was made at, or else the heap.
+    fn data_place(r: Region) -> Region {
+        match r {
+            Region::Frozen(Some(p), _) | Region::Var(p) => Region::Var(p),
+            _ => Region::Heap,
+        }
+    }
+
+    /// Where the data a `data` variable stands for is: its bound, or the heap.
+    fn data_var_place(&self, v: DVar) -> Region {
+        self.arena.bound(v).unwrap_or(Region::Heap)
+    }
+
+    fn data_walk(&self, t: TyId, seen: &mut HashSet<TyId>, place: Option<Region>) -> bool {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return true;
         }
+        let here = |q: Region| place.is_none_or(|p| q == Region::Heap || q == p);
         match self.arena.get(t).clone() {
             Ty::Base(_) | Ty::Nat(_) | Ty::Void => true,
-            Ty::Var(v) => self.arena.is_data_var(v),
-            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.data_walk(*x, seen)),
-            Ty::Pair(a, b, r) => r.is_frozen() && self.data_walk(a, seen) && self.data_walk(b, seen),
-            Ty::Bloblet { fields, frozen, .. } => frozen && fields.iter().all(|f| self.data_walk(*f, seen)),
-            Ty::NList { elem, .. } => self.data_walk(elem, seen),
+            Ty::Var(v) => self.arena.is_data_var(v) && here(self.data_var_place(v)),
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.data_walk(*x, seen, place)),
+            Ty::Pair(a, b, r) => {
+                r.is_frozen() && here(Self::data_place(r)) && self.data_walk(a, seen, place) && self.data_walk(b, seen, place)
+            }
+            Ty::Bloblet { fields, frozen, region } => {
+                frozen && here(Self::data_place(region)) && fields.iter().all(|f| self.data_walk(*f, seen, place))
+            }
+            Ty::NList { elem, region, .. } => here(Self::data_place(region)) && self.data_walk(elem, seen, place),
             _ => false,
+        }
+    }
+
+    /// The places, other than the heap, that data `t`'s parts are in.
+    pub(crate) fn data_places(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<Region>) {
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return;
+        }
+        let mut note = |q: Region| {
+            if q != Region::Heap && !out.contains(&q) {
+                out.push(q);
+            }
+        };
+        match self.arena.get(t).clone() {
+            Ty::Var(v) if self.arena.is_data_var(v) => note(self.data_var_place(v)),
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().for_each(|(_, x)| self.data_places(*x, seen, out)),
+            Ty::Pair(a, b, r) => {
+                note(Self::data_place(r));
+                self.data_places(a, seen, out);
+                self.data_places(b, seen, out);
+            }
+            Ty::Bloblet { fields, region, .. } => {
+                note(Self::data_place(region));
+                fields.iter().for_each(|f| self.data_places(*f, seen, out));
+            }
+            Ty::NList { elem, region, .. } => {
+                note(Self::data_place(region));
+                self.data_places(elem, seen, out);
+            }
+            _ => {}
         }
     }
 

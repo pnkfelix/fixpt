@@ -126,13 +126,19 @@
       (let ((r (k-parse-region s)))
         (if (k-place? r) r (k-sfail (k-not-place r) s))))))
 
+;; What a binder may be.
+(define k-binder-shapes string
+  (string-append "a binder is `(name kind)`, `(name region place)` "
+                 "or `(name data place)`"))
 ;; A binder's bound, none or one, from what follows its kind: `(r region
 ;; p)` is a region that won't outlive `p`, a place bound before it.
 (define k-parse-bound (subr (maxeff checks spin) (k-syns int) k-regions)
   (lambda (rest kind)
     (cond ((null? rest) (the k-regions nil))
-          ((= kind 0) (the k-regions (cons (k-parse-place (car rest)) nil)))
-          (else (k-sfail "only a region binder has a bound: `(name region place)`" (car rest))))))
+          ((or (= kind 0) (= kind 4)) (the k-regions (cons (k-parse-place (car rest)) nil)))
+          (else (k-sfail (string-append "only a region or data binder has a bound: "
+                                        "`(name region place)` or `(name data place)`")
+                         (car rest))))))
 ;; Note region variable `v`'s bound, if it has one.
 (define k-note-bound (subr kstate (int k-regions) unit)
   (lambda (v bound)
@@ -151,7 +157,7 @@
                      (pushed (k-push-desc name (ds-var v kind)))
                      (rest (k-binders-each (cdr bs))))
                 (cons (product (1 v) (2 kind)) rest))
-              (k-sfail "a binder is `(name kind)`, or `(name region place)`" (car bs)))))))
+              (k-sfail k-binder-shapes (car bs)))))))
 
 ;; `((name kind) …)`, binding each name for the rest of the reading.
 (define k-parse-binders (subr (maxeff checks spin) (syn) k-binders)

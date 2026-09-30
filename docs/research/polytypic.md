@@ -984,7 +984,8 @@ minutes is spent only on small programs.
     `data`-kinded constant. `certify-acyclic`, and any run-time generic
     over `data`, would have the same problem. Should it be recorded in
     `soundness-findings.md` and fixed, for instance by giving `data`
-    binders a region or place of their own?
+    binders a region or place of their own? (Done, 2026-09-30: F13,
+    `(t data p)`; see `soundness-findings.md`.)
 
 ## Sources
 

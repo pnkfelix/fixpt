@@ -153,3 +153,20 @@ fn eq_takes_frozen_data_but_an_eqtable_does_not() {
     let t = "(the (eqtable (listof int const) int const @t) (make-eqtable (pair-identity)))";
     assert_eq!(check(&format!("(eqtable-has? {t} {build})")), Err("this writes frozen data, whose region is `const`".to_string()));
 }
+
+/// F13 (`docs/research/soundness-findings.md`): a `data` binder is data at a
+/// place, `(t data p)`, or in the heap, `(t data)`; `acyclic?` and
+/// `length-is?` read the place. A closure walking arena data cannot leave
+/// the arena (`programs/regions/acyclic-walk-escapes.fx`), heap data stays
+/// `pure`, and place data needs a binder with its place.
+#[test]
+fn data_is_at_a_place() {
+    let escapes = include_str!("programs/regions/acyclic-walk-escapes.fx");
+    assert_eq!(check(escapes).unwrap_err(), "the value of `letrena p` would outlive its region: its type is (subr (read (const p)) () bool)");
+    assert_eq!(check("(acyclic? (the (listof int acyclic) nil))"), Ok(vec!["bool ! pure".to_string()]));
+    let same = "(define same (poly ((t data)) (subr pure (t) t)) (lambda (x) x))";
+    let placed = "(letrena a (car (same (letfreeze (r a) (the (listof int r) (rcons a 1 nil))))))";
+    assert_eq!(check(&format!("{same} {placed}")).unwrap_err(), "`t` is bound as data at heap, and a (listof int (acyclic a)) is data in another place");
+    let same_at = "(define same (poly ((p place) (t data p)) (subr pure (t) t)) (lambda (x) x))";
+    assert_eq!(check(&format!("{same_at} {placed}")), Ok(vec!["int ! (read (globals same))".to_string()]));
+}

@@ -927,19 +927,26 @@ impl Checker {
             r => r,
         };
         for (v, k) in kinds {
-            // A `data` binder takes only data.
-            if *k == Kind::Data
-                && let Some(D::Type(t)) = map.get(v)
-                && !self.is_data(*t)
-            {
-                return Err(FxError::at(
-                    span,
-                    format!(
-                        "`{}` is bound as data, and a {} is not data",
-                        self.interner.name(self.arena.dvar_name(*v)),
-                        self.show_ty(*t)
-                    ),
-                ));
+            // A `data` binder takes only data, at its place: the heap, or
+            // the place its bound says (F13).
+            if *k == Kind::Data {
+                let Some(D::Type(t)) = map.get(v) else { continue };
+                let name = self.interner.name(self.arena.dvar_name(*v));
+                if !self.is_data(*t) {
+                    return Err(FxError::at(span, format!("`{name}` is bound as data, and a {} is not data", self.show_ty(*t))));
+                }
+                let place = region(self.arena.bound(*v).unwrap_or(Region::Heap));
+                if !self.is_data_at(*t, place) {
+                    return Err(FxError::at(
+                        span,
+                        format!(
+                            "`{name}` is bound as data at {}, and a {} is data in another place",
+                            self.show_region(place),
+                            self.show_ty(*t)
+                        ),
+                    ));
+                }
+                continue;
             }
             let Some(b) = self.arena.bound(*v) else { continue };
             let (r, b) = (region(Region::Var(*v)), region(b));
@@ -982,6 +989,28 @@ impl Checker {
     /// `pure`.
     fn finish(&self, u: &Unknowns, span: fixpt_read::Span, ft: TyId) -> R<HashMap<DVar, D>> {
         let mut map = u.solved.clone();
+        // A `data` binder's place nothing else says is where its data is:
+        // the one place its parts are in, or the heap (F13).
+        for (v, k) in &u.kinds {
+            if *k == Kind::Data
+                && let Some(Region::Var(p)) = self.arena.bound(*v)
+                && !map.contains_key(&p)
+                && u.kinds.iter().any(|(w, _)| *w == p)
+                && let Some(D::Type(t)) = map.get(v)
+            {
+                let mut places = Vec::new();
+                self.data_places(*t, &mut std::collections::HashSet::new(), &mut places);
+                match places[..] {
+                    [] => {
+                        map.insert(p, D::Region(Region::Heap));
+                    }
+                    [q] => {
+                        map.insert(p, D::Region(q));
+                    }
+                    _ => {}
+                }
+            }
+        }
         for (v, k) in &u.kinds {
             if map.contains_key(v) {
                 continue;

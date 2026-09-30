@@ -92,39 +92,6 @@
   (lambda (kinds solved)
     (begin (k-default-bounded kinds kinds solved) (k-default-free kinds kinds solved))))
 
-;; Each bounded region binder, as solved, won't outlive its bound, as solved;
-;; or an error saying which would.
-;; Whether `t` is data: built only from base types, `datum`, products and
-;; sums, and pairs and bloblets that are frozen, of data; and type variables
-;; of kind `data`.
-;; Whether `r` is frozen data's region.
-(define k-frozen-region? (subr pure (k-region) bool)
-  (lambda (r) (tagcase r (r-frozen (p f) #t) (else y #f))))
-(define-rec
-  (k-data-walk (subr (maxeff kstate spin) (int int) bool)
-    (lambda (t seen)
-      (let ((t (k-resolve t)))
-        (if (k-visit? t seen)
-            #t
-            (tagcase (k-get t)
-              (ty-base (s) #t)
-              (ty-void () #t)
-              (ty-var (v) (k-data-var? v))
-              (ty-product (ps) (k-data-parts ps seen))
-              (ty-sum (ps) (k-data-parts ps seen))
-              (ty-pair (a b r) (and (k-frozen-region? r) (k-data-walk a seen) (k-data-walk b seen)))
-              (ty-bloblet (fs z r) (and z (k-data-list fs seen)))
-              (ty-nlist (e z r) (k-data-walk e seen))
-              (ty-nat (z) #t)
-              (else y #f))))))
-  (k-data-parts (subr (maxeff kstate spin) (k-parts int) bool)
-    (lambda (ps seen)
-      (or (null? ps) (and (k-data-walk (extract (car ps) 2) seen) (k-data-parts (cdr ps) seen)))))
-  (k-data-list (subr (maxeff kstate spin) (k-ids int) bool)
-    (lambda (ts seen)
-      (or (null? ts) (and (k-data-walk (car ts) seen) (k-data-list (cdr ts) seen))))))
-(define k-is-data? (subr (maxeff kstate spin) (int) bool)
-  (lambda (t) (k-data-walk t (k-new-epoch))))
 ;; `t` with its frozen regions made acyclic: what data `acyclic?` has found
 ;; acyclic is.
 (define k-fin-region (subr (read @globals) (k-region) k-region)
@@ -182,15 +149,6 @@
 ;; Whether `xs` is one argument.
 (define k-sc-one-arg? (subr (read @t) (kxs) bool)
   (lambda (xs) (and (not (null? xs)) (null? (cdr xs)))))
-;; `data` binder `v`, as `m` solves it, takes only data; or an error.
-(define k-check-data (subr (maxeff checks spin) (int k-map int int) unit)
-  (lambda (v m a b)
-    (let* ((f (k-map-find m v))
-           (t (if (null? f) -1 (tagcase (cdr (car f)) (dt (t) t) (else z -1)))))
-      (if (or (< t 0) (k-is-data? t))
-          #u
-          (k-fail (k-cat4 (k-quote-dvar v) " is bound as data, and a " (k-show-ty t) " is not data")
-                  a b)))))
 ;; Region binder `v`, as `m` solves it, won't outlive its bound, as solved;
 ;; or an error.
 (define k-check-bound (subr (maxeff checks spin) (int k-region k-map int int) unit)
@@ -207,9 +165,11 @@
         #u
         (let* ((v (extract (car kinds) 1)) (bd (k-bound-of v)))
           (begin
-            ;; A `data` binder takes only data.
-            (if (= (extract (car kinds) 2) 4) (k-check-data v m a b) #u)
-            (if (null? bd) #u (k-check-bound v (car bd) m a b))
+            ;; A `data` binder takes only data, at its place (F13); a region
+            ;; binder won't outlive its bound.
+            (cond ((= (extract (car kinds) 2) 4) (k-check-data v bd m a b))
+                  ((null? bd) #u)
+                  (else (k-check-bound v (car bd) m a b)))
             (k-check-bounds (cdr kinds) m a b))))))
 ;; A size binder instantiated as `finite` is sound only where it stands for
 ;; one size a caller supplies (`docs/research/soundness-findings.md`, F4): as
@@ -407,7 +367,8 @@
 
 ;; The whole solution: every type binder solved, effects defaulting to pure.
 (define k-finish (subr (maxeff checks spin) (k-binders k-solved int int int) k-map)
-  (lambda (kinds solved a b ft) (k-finish-each kinds (get solved) a b ft)))
+  (lambda (kinds solved a b ft)
+    (k-finish-each kinds (k-data-places-solved kinds kinds (get solved)) a b ft)))
 
 ;; Solve a size binder: a pattern `v + k` against a size `s` gives
 ;; `v = s - k` (`finite` stays `finite`).

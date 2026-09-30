@@ -266,8 +266,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // `(acyclic e (x body) else)` is these two: whether data has no cycle,
     // and, of a variable just found to have none, its value at `finite`
     // where it was `const` (`docs/research/confirmation.md`, CF0).
-    ("acyclic?", "(poly ((t data)) (subr pure (t) bool))"),
-    ("certify-acyclic", "(poly ((t data)) (subr pure (t) t))"),
+    // Each walks data at a place, so reads it: pure at the heap, where
+    // reading frozen data is, and naming the place otherwise (F13).
+    ("acyclic?", "(poly ((p place) (t data p)) (subr (read (const p)) (t) bool))"),
+    ("certify-acyclic", "(poly ((p place) (t data p)) (subr pure (t) t))"),
     // `(confirm-nat e (n body) else)` is these two: whether an integer is no
     // less than 0, and, where `nat?` has just said so of a variable, its
     // value as a `nat`.
@@ -276,8 +278,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // `(confirm-length e n (x body) else)` is these two: whether a frozen
     // list is proper and has `n` elements; and, of a variable just found
     // so, its value as a `(nlist T n)` (`docs/research/sizes.md`).
-    ("length-is?", "(poly ((l data)) (subr pure (l int) bool))"),
-    ("certify-length", "(poly ((l data)) (subr pure (l int) l))"),
+    ("length-is?", "(poly ((p place) (l data p)) (subr (read (const p)) (l int) bool))"),
+    ("certify-length", "(poly ((p place) (l data p)) (subr pure (l int) l))"),
     ("datum-pair?", "(subr pure (datum) bool)"),
     ("datum-null?", "(subr pure (datum) bool)"),
     ("datum-car", "(subr pure (datum) datum)"),

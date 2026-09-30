@@ -126,15 +126,18 @@ impl Checker {
             let (name, kind, bound) = match pair {
                 [name, kind] => (name, kind, None),
                 [name, kind, bound] => (name, kind, Some(bound)),
-                _ => return Err(FxError::at(b.span, "a binder is `(name kind)`, or `(name region place)`")),
+                _ => return Err(FxError::at(b.span, "a binder is `(name kind)`, `(name region place)` or `(name data place)`")),
             };
             let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a binder's name"))?;
             let kind = self.parse_kind(kind)?;
             // `(r region p)`: a region that won't outlive `p`, a place
-            // bound before it.
+            // bound before it. `(t data p)`: data at `p` or the heap
+            // (`docs/research/shapes.md`; F13).
             let bound = match bound {
-                Some(p) if kind == Kind::Region => Some(self.parse_place(p)?),
-                Some(p) => return Err(FxError::at(p.span, "only a region binder has a bound: `(name region place)`")),
+                Some(p) if matches!(kind, Kind::Region | Kind::Data) => Some(self.parse_place(p)?),
+                Some(p) => {
+                    return Err(FxError::at(p.span, "only a region or data binder has a bound: `(name region place)` or `(name data place)`"));
+                }
                 None => None,
             };
             let v = self.arena.dvar_of(name, kind);

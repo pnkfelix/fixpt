@@ -132,10 +132,10 @@ are in the last section, "Log: the glance's details", and in
 **Next**, roughly in order. **Soundness first** (the user's, 2026-09-30):
 whatever is known or suspected to let a checked program go wrong comes
 before everything else, known holes before proofs.
-- S1. **The `acyclic?` gap** (found by Q8's note, `docs/research/polytypic.md`):
-  a closure calling `acyclic?` on data frozen into an arena escapes the
-  arena, checked `pure`. Reproduce, fix in both checkers, add it to
-  `soundness-findings.md` as F13.
+- S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
+  use-after-free on every path, and fixed in both checkers with data at a
+  place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
+  places and shapes as three axes).
 - S2. **The proof notes' status is stale**: `soundness.md`'s table still
   says F8 and F9 are open (C3 "F8 breaks it", T3 "F9 gap", T5 "F8/F9
   open"), where `soundness-findings.md` has both fixed and tested.

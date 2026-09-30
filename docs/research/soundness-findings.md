@@ -20,23 +20,24 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 
 ## Status
 
-| item | status                                                                                                                                                                                                                                                                                      |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1   | fixed: `known` is by binding (its place in `env`; in `check.fx`, a flag beside each binding), forgotten as its scope ends                                                                                                                                                                   |
-| F2   | fixed: reading data frozen into a place is an effect on it, masked where the place is not seen; only heap-frozen reads are pure                                                                                                                                                             |
-| F3   | fixed: a `cwcc` call says `spin` unless its receiver's continuation can only be called while `cwcc` runs; a kept composable continuation is refused by the knot rule                                                                                                                        |
-| F4   | fixed: a size binder may be `finite` only as the size of at most one parameter's own `(nlist T n)` or `(nat n)`, and nowhere else supplied                                                                                                                                                  |
-| F5   | fixed: past the depth bound, the self-application test says the procedure may loop                                                                                                                                                                                                          |
-| F6   | fixed: `no-escape` only where the value is first-order data                                                                                                                                                                                                                                 |
-| F7   | fixed: a continuation keeps how many regions were live when taken; reinstated whole, it ends those entered since, in both cellular[^cellular] machines                                                                                                                                      |
-| A1   | holds for the constructs present (the syntactic rule is the stronger)                                                                                                                                                                                                                       |
-| A2   | fixed: a generative type whose representation is one of what it is given is no constructor for the recursive-type rule                                                                                                                                                                      |
-| A3   | holds by construction: every `datum` is made by FX-26's own constructors (fresh pairs of acyclic data; lists checked proper, cycle-safely) or its reader; the host passes no datum in. The contract for Scheme code calling an `fx:` global directly is that a `datum` it passes is acyclic |
-| F8   | fixed: a `nat` binding's size may be forgotten only where the escaping type gives it back (no negative or invariant occurrence); otherwise an error. Both checkers. Test `sizes/nat-forget-taken.fx`                                                                                        |
-| F9   | fixed: a `cwcc` call also says `spin` when its receiver's latent effect has a `comefrom`, since a continuation captured inside it could carry a call of `k` past `cwcc`'s return. Both checkers. Test `terminate/cwcc-captures.fx`                                                          |
-| F10  | fixed (2026-09-29): a size binder solved from `n + k` against a size `s` is `s - k`, and must be shown no less than 0 by the facts in scope; `head` of an empty list solved `n = -1`. Both checkers. Tests `sizes/solved-*.fx`                                                              |
-| F11  | fixed (2026-09-29): `apply` gave a `vlambda` the caller's list, typed `acyclic` though writable; a `set-cdr!` made it cyclic and a `pure` walk looped. `apply` now copies (a cycle is an error) unless the list is at `acyclic`. Tests `run/apply-fresh.fx`, `native/apply-cyclic.fx`       |
-| F12  | fixed (2026-09-29): `u64->int`, `i64->int` and `quotient` gave a bignum `int`, which compiled code took for a fixnum (the register machine added one as a pointer). Failed "integer overflow" at first; since 2026-09-30 every machine takes bignum `int`s                                  |
+| item | status                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1   | fixed: `known` is by binding (its place in `env`; in `check.fx`, a flag beside each binding), forgotten as its scope ends                                                                                                                                                                                                                                                                                                                                     |
+| F2   | fixed: reading data frozen into a place is an effect on it, masked where the place is not seen; only heap-frozen reads are pure                                                                                                                                                                                                                                                                                                                               |
+| F3   | fixed: a `cwcc` call says `spin` unless its receiver's continuation can only be called while `cwcc` runs; a kept composable continuation is refused by the knot rule                                                                                                                                                                                                                                                                                          |
+| F4   | fixed: a size binder may be `finite` only as the size of at most one parameter's own `(nlist T n)` or `(nat n)`, and nowhere else supplied                                                                                                                                                                                                                                                                                                                    |
+| F5   | fixed: past the depth bound, the self-application test says the procedure may loop                                                                                                                                                                                                                                                                                                                                                                            |
+| F6   | fixed: `no-escape` only where the value is first-order data                                                                                                                                                                                                                                                                                                                                                                                                   |
+| F7   | fixed: a continuation keeps how many regions were live when taken; reinstated whole, it ends those entered since, in both cellular[^cellular] machines                                                                                                                                                                                                                                                                                                        |
+| A1   | holds for the constructs present (the syntactic rule is the stronger)                                                                                                                                                                                                                                                                                                                                                                                         |
+| A2   | fixed: a generative type whose representation is one of what it is given is no constructor for the recursive-type rule                                                                                                                                                                                                                                                                                                                                        |
+| A3   | holds by construction: every `datum` is made by FX-26's own constructors (fresh pairs of acyclic data; lists checked proper, cycle-safely) or its reader; the host passes no datum in. The contract for Scheme code calling an `fx:` global directly is that a `datum` it passes is acyclic                                                                                                                                                                   |
+| F8   | fixed: a `nat` binding's size may be forgotten only where the escaping type gives it back (no negative or invariant occurrence); otherwise an error. Both checkers. Test `sizes/nat-forget-taken.fx`                                                                                                                                                                                                                                                          |
+| F9   | fixed: a `cwcc` call also says `spin` when its receiver's latent effect has a `comefrom`, since a continuation captured inside it could carry a call of `k` past `cwcc`'s return. Both checkers. Test `terminate/cwcc-captures.fx`                                                                                                                                                                                                                            |
+| F10  | fixed (2026-09-29): a size binder solved from `n + k` against a size `s` is `s - k`, and must be shown no less than 0 by the facts in scope; `head` of an empty list solved `n = -1`. Both checkers. Tests `sizes/solved-*.fx`                                                                                                                                                                                                                                |
+| F11  | fixed (2026-09-29): `apply` gave a `vlambda` the caller's list, typed `acyclic` though writable; a `set-cdr!` made it cyclic and a `pure` walk looped. `apply` now copies (a cycle is an error) unless the list is at `acyclic`. Tests `run/apply-fresh.fx`, `native/apply-cyclic.fx`                                                                                                                                                                         |
+| F12  | fixed (2026-09-29): `u64->int`, `i64->int` and `quotient` gave a bignum `int`, which compiled code took for a fixnum (the register machine added one as a pointer). Failed "integer overflow" at first; since 2026-09-30 every machine takes bignum `int`s                                                                                                                                                                                                    |
+| F13  | fixed (2026-09-30): `acyclic?` and `length-is?`, typed `pure` over any `data`, hid a read of data frozen into a place; a closure walking arena data escaped the arena and, called later, walked what another arena put there (a frozen one-element list reported cyclic, every path). A `data` binder is now data at a place, `(t data p)`, or in the heap; both read `(const p)`. Both checkers. Tests `regions/acyclic-walk-escapes.fx`, `tests/regions.rs` |
 
 **Re-verification of F1–F7, A2, A3 against d83face** (fresh offline build,
 2026-09-27). F1: the name-shadowing probe (`known.fx`) is now rejected
@@ -491,6 +492,43 @@ computation reads).
 
 **Not a memory-safety problem**, like F1/F3/F5: the loop is well behaved
 but for ending.
+
+## F13 — `acyclic?` hid a read of data frozen into a place
+
+Found 2026-09-29 writing `docs/research/polytypic.md` (§7, item 10);
+shown a use-after-free and fixed 2026-09-30.
+
+`acyclic?` was `(poly ((t data)) (subr pure (t) bool))`, and `length-is?`
+the same shape. Both walk their argument, so both read the data; where it
+is frozen into the heap that read is pure, but data frozen into an arena's
+place dies with the arena, and F2's rule, which gives such a read the
+effect `(read (const p))`, never saw a read made inside a primitive whose
+type named no region. So this checked in both checkers:
+
+```
+(letrena p
+  (let ((x (letfreeze (r p) (the (listof int r) (rcons p 1 nil)))))
+    (lambda () (acyclic? x))))
+```
+
+The closure's type, `(subr pure () bool)`, names no `p`, so it left the
+arena. Called after a later arena had reused the chunk and made a cyclic
+pair where `x` had been, it answered `#f`, a frozen one-element list
+reported cyclic, on the lowered and native paths alike (the collector
+never follows a pointer into an arena, which is why its chunks are reused
+at once; shifting the new pair by one slot gave `#t` again). A closure that
+only holds such data, never reading it, is safe: the collector does not
+trace it, and nothing reads it (checked, and probed under collections).
+
+**Fix.** A `data` binder is data at a place (`docs/research/shapes.md`):
+`(t data p)` takes data whose frozen parts are in the heap or in place `p`,
+and plain `(t data)` data in the heap only. `acyclic?` and `length-is?`
+are `(poly ((p place) (t data p)) (subr (read (const p)) …))`: at `heap`
+the read is of heap-frozen data and dropped, so heap uses are still
+`pure`; at an arena's place it names the place, and the escape is refused.
+`p` is solved from `t`, the one place its frozen parts are in, or `heap`.
+`certify-acyclic` and `certify-length` read nothing and take data anywhere.
+Both checkers (`is_data_at`, `data_places`; `check-data.fx`).
 
 ## Assumptions the proof makes
 
