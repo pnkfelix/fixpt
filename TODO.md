@@ -629,8 +629,7 @@ It reaches bloblets, and the evaluator has it. And `(eqtable k v kr r)`,
 made with an `(identity k kr)` dictionary that only the standard
 procedures make, its operations writing the keys' region, hashed by
 address and restamped by the collection count. The ports'
-workarounds are retired and `equal` is ported (2026-09-30); `dynamic`
-waits on a program split over files. Left: maybe an equality kind, as
+workarounds are retired and `equal` and `dynamic` are ported (2026-09-30). Left: maybe an equality kind, as
 SML's `''a`, to refuse `eq?` on procedures; tables keyed by bloblets;
 `uniqueof` for interning, and the two-level tables, both below; and,
 maybe never (the user's, 2026-09-30), an `eqv?` as R7RS has it (numbers
