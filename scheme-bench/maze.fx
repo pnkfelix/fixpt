@@ -49,17 +49,14 @@
 ;;; \_/ \ / \_/ \_/
 ;;;
 ;;; What the port changed, and why:
-;;; - FX-26 has no `eq?` on mutable data. The union-find code compares
-;;;   sets (pairs) with `eq?`, and the depth-first search compares cells.
-;;;   Both are here a write probe, which allocates nothing: write one
-;;;   object, see whether the other changed, and write it back
-;;;   (`same-set?`, `same-cell?`).
 ;;; - A cell's parent is a cell or #f. A cell here is a pair: its car the
 ;;;   record of its other fields (a bloblet), its cdr its parent, so that
 ;;;   `nil` is the cell that is not there, and a cell is a list of cells up
 ;;;   to the root. Larceny's cell is one six-slot vector (a tag and five
 ;;;   fields); this one is a pair and a four-field bloblet. Walls and hex
-;;;   arrays are bloblets, the vectors' tag symbols left out.
+;;;   arrays are bloblets, the vectors' tag symbols left out. Cells, like
+;;;   sets, are pairs at a writable region, so `eq?` of them is exact, as
+;;;   Scheme's is of vectors and pairs.
 ;;; - `pick-entrances` starts entrance and exit at -1, where Larceny starts
 ;;;   them at #f; the first bottom cell always replaces them.
 ;;; - `dig-maze`'s continuation is given #u, where Larceny gives it #f; the
@@ -67,7 +64,6 @@
 ;;; - `harr` (which makes a hex array of unspecified elements) and
 ;;;   `harr-for-each`, never used, are left out, as are the wall setters.
 ;;; - Larceny's `run` is `run-maze` here, since `run` repeats it.
-;;; - `list->vector` of walls is written out (`list->array`).
 ;;; - A definition sees only those before it, so `bit-test`,
 ;;;   `for-each-hex-child`, `dot/space`, `display-hexbottom` and `pmaze`
 ;;;   come earlier or later than in Larceny's file.
@@ -93,9 +89,6 @@
            (let* ((q (quotient x y))
                   (r (- x (* q y))))
              (if (= r 0) q (- q 1)))))))
-
-(define remainder (subr pure (int int) int)
-  (lambda (x y) (- x (* (quotient x y) y))))
 
 (define* mod (subr pure (int int) int)
   (lambda (x y)
@@ -201,16 +194,6 @@
 (define base-set (subr (alloc @heap) (int) uset)
   (lambda (nelts) (cons nelts nil)))
 
-;;; `(eq? r s)`, for sets: a car is a size, never 0, so write 0 in r's
-;;; and see whether s's is 0.
-(define same-set? (subr (maxeff (read @heap) (write @heap)) (uset uset) bool)
-  (lambda (r s)
-    (let ((rv (car r)))
-      (begin (set-car! r 0)
-             (let ((same (= (car s) 0)))
-               (begin (set-car! r rv)
-                      same))))))
-
 ;;; Sets are chained together through cdr links. Last guy in the chain
 ;;; is the root of the set.
 
@@ -220,19 +203,19 @@
                (lambda (r)                                            ; in the list. That's
                  (let ((next (cdr r)))                                ; the root r.
                    (if (not (null? next)) (lp next) r))))
-             (zip (subr (maxeff (read @heap) (write @heap) spin (read (globals same-set?))) (uset uset) unit)
+             (zip (subr (maxeff (read @heap) (write @heap) spin) (uset uset) unit)
                (lambda (r x)                    ; Now zip down the list again,
                  (let ((next (cdr x)))          ; changing everyone's cdr to r.
-                   (if (not (same-set? r next))
+                   (if (not (eq? r next))
                        (begin (set-cdr! x r)
                               (zip r next))
                        #u)))))
       (let ((r (lp s)))
-        (begin (if (not (same-set? r s)) (zip r s) #u)
+        (begin (if (not (eq? r s)) (zip r s) #u)
                r)))))                   ; Then return r.
 
 (define* set-equal? (subr (maxeff (read @heap) (write @heap) spin) (uset uset) bool)
-  (lambda (s1 s2) (same-set? (get-set-root s1) (get-set-root s2))))
+  (lambda (s1 s2) (eq? (get-set-root s1) (get-set-root s2))))
 
 (define* set-size (subr (maxeff (read @heap) (write @heap) spin) (uset) int)
   (lambda (s) (car (get-set-root s))))
@@ -300,19 +283,6 @@
 (define cell:mark (subr (read @heap) (cell) bool) (lambda (o) (bloblet-ref (car o) 3)))
 (define set-cell:mark (subr (maxeff (read @heap) (write @heap)) (cell bool) unit) (lambda (o v) (bloblet-set! (car o) 3 v)))
 
-;;; `(eq? a b)`, for cells, b perhaps #f: flip a's mark and see whether
-;;; b's flips too.
-(define* same-cell? (subr (maxeff (read @heap) (write @heap)) (cell cell) bool)
-  (lambda (a b)
-    (if (null? b)
-        #f
-        (let* ((am (cell:mark a))
-               (bm (cell:mark b)))
-          (begin (set-cell:mark a (not am))
-                 (let ((same (if bm (not (cell:mark b)) (cell:mark b))))
-                   (begin (set-cell:mark a am)
-                          same)))))))
-
 ;;; Iterates in reverse order.
 
 (define vector-for-each-rev
@@ -331,7 +301,7 @@
 
 (define* permute-vec! (subr (maxeff (read @heap) (write @heap) spin) ((arrayof wall @heap) rstate) (arrayof wall @heap))
   (lambda (v random-state)
-    (letrec ((lp (subr (maxeff (read @heap) (write @heap) spin (read (globals random-int rand div mod remainder))) (int) unit)
+    (letrec ((lp (subr (maxeff (read @heap) (write @heap) spin (read (globals random-int rand div mod))) (int) unit)
                (lambda (i)
                  (if (> i 1)
                      (let ((elt-i (array-ref v i))
@@ -347,7 +317,7 @@
 
 (define-effect dig (maxeff (read @heap) (write @heap) spin (goto @k)
                            (read (globals wall:owner wall:neighbor wall:bit cell:reachable cell:walls set-cell:walls
-                                          set-equal? same-set? get-set-root union! set-size bitwise-not bitwise-and div odd?))))
+                                          set-equal? get-set-root union! set-size bitwise-not bitwise-and div odd?))))
 
 (define* dig-maze (subr (maxeff (read @heap) (write @heap) spin) ((arrayof wall @heap) int) unit)
   (lambda (walls ncells)
@@ -384,9 +354,9 @@
 ;;; algorithm will diverge.
 
 (define-effect hexes (maxeff (read @heap) (write @heap) spin
-                             (read (globals cell:walls cell:id cell:mark set-cell:mark cell:parent set-cell:parent same-cell?
+                             (read (globals cell:walls cell:id cell:mark set-cell:mark cell:parent set-cell:parent
                                             harr:nrows harr:ncols harr:elts href bit-test bitwise-and
-                                            south-west south south-east div mod remainder odd?))))
+                                            south-west south south-east div mod odd?))))
 
 (define-type harr (bloblet (fields int int (arrayof cell @heap)) @heap))
 
@@ -396,7 +366,7 @@
                (lambda (node parent)
                  (begin (set-cell:parent node parent)
                         (do-children (lambda ((child cell))
-                                       (if (not (same-cell? child parent))
+                                       (if (not (eq? child parent))
                                            (search child node)
                                            #u))
                                      maze node)))))
@@ -561,21 +531,6 @@
 (define* gen-maze-array (subr tabulate (int int) harr)
   (lambda (r c)
     (harr-tabulate r c (lambda ((x int) (y int)) (make-cell (base-set 1) (cons x y))))))
-
-;;; `list->vector`, of walls.
-(define* list->array (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin) ((listof wall @heap)) (arrayof wall @heap))
-  (lambda (l)
-    (letrec ((len (subr (maxeff (read @heap) spin) ((listof wall @heap) int) int)
-               (lambda (l n) (if (null? l) n (len (cdr l) (+ n 1)))))
-             (fill (subr (maxeff (read @heap) (write @heap) spin) ((arrayof wall @heap) (listof wall @heap) int) unit)
-               (lambda (v l i)
-                 (if (null? l)
-                     #u
-                     (begin (array-set! v i (car l))
-                            (fill v (cdr l) (+ i 1)))))))
-      (let ((v (the (arrayof wall @heap) (make-array (len l 0) (car l)))))
-        (begin (fill v l 0)
-               v)))))
 
 (define-effect walling (maxeff (read @heap) (write @heap) (alloc @heap) spin
                                (read (globals href make-wall bitwise-and div odd? harr:elts harr:ncols south-west south south-east))))

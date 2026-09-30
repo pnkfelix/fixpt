@@ -31,10 +31,8 @@
 ;;;   built once when the program is loaded, as Scheme's quoted constants
 ;;;   are. `translate-term` makes a new `var` or `num` of an atom where
 ;;;   Scheme returns the atom itself (setup only).
-;;; - A symbol-record is a bloblet of the symbol and its lemmas. FX-26 has
-;;;   no `eq?` on mutable data, so `symbol-record-equal?` compares the
-;;;   records' symbols (`symbol=?`), which is the same test, since each
-;;;   symbol has one record.
+;;; - A symbol-record is a bloblet of the symbol and its lemmas, where
+;;;   Scheme has a two-slot vector.
 ;;; - Association lists hold pairs, and `assq`'s #f is `nil`. Scheme's
 ;;;   `assq` of a number in `unify-subst` (whose keys are all symbols) walks
 ;;;   the list and fails; the port goes straight to the number case.
@@ -43,13 +41,17 @@
 ;;; - `add-lemma`'s `(error …)` for a lemma not of the form `(equal (f …)
 ;;;   …)` does nothing here; every lemma is of that form.
 ;;; - `test-boyer` gives -1 where Scheme gives #f (not a tautology).
-;;; - Baker's sharing cons, `scons`, asks `eq?` of terms and argument
-;;;   lists, which FX-26 cannot ask. What it asks is whether `rewrite` or
-;;;   `rewrite-args` gave back the very term or list it was given; each
-;;;   otherwise gives something new (a lemma's right side, after
-;;;   `apply-subst`, is always a new `app`). So each says so in a ref,
-;;;   `unchanged`, and `scons` reads it: the same answers, and the same
-;;;   allocation, as the original.
+;;; - Baker's sharing cons, `scons`, makes argument lists; `rewrite`'s own
+;;;   `(scons (car term) … term)`, whose car is always the same, is written
+;;;   out as the `app` it makes. `eq?` of argument lists (pairs) and of
+;;;   symbol-records is exact, as in Scheme, but a term, a datatype's value,
+;;;   is immutable: there `eq?`'s #t means equal and its #f says nothing,
+;;;   since a compiler may copy one. That changes nothing but allocation:
+;;;   `scons` gives back its `original` only if it is equal to what it
+;;;   would make, and makes an equal list otherwise, so the answer is the
+;;;   same whatever `eq?` says of terms. Compiled, `eq?` is the machine's
+;;;   `eq`, and `rewrite` gives back the very term it is given when no
+;;;   lemma applies, so the allocation is the original's.
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Note:  The version of this benchmark that appears in Dick Gabriel's book
@@ -368,9 +370,8 @@
 (define get-name (subr (read @heap) (symrec) symbol)
   (lambda (symbol-record) (bloblet-ref symbol-record 0)))
 
-;; Scheme's `eq?` of the two records: each symbol has one record.
-(define symbol-record-equal? (subr (read @heap) (symrec symrec) bool)
-  (lambda (r1 r2) (symbol=? (bloblet-ref r1 0) (bloblet-ref r2 0))))
+(define symbol-record-equal? (subr pure (symrec symrec) bool)
+  (lambda (r1 r2) (eq? r1 r2)))
 
 (define* symbol->symbol-record (subr mutates (symbol) symrec)
   (lambda (sym)
@@ -543,7 +544,7 @@
           (else
            (tagcase x
              (app (f args)
-               (if (symbol-record-equal? f (get if-constructor))
+               (if (eq? f (get if-constructor))
                    (cond ((truep (term-cadr x)
                                  true-lst)
                           (tautologyp (term-caddr x)
@@ -583,7 +584,7 @@
         (app (f2 args2)
           (tagcase term1
             (app (f1 args1)
-              (if (symbol-record-equal? f1 f2)
+              (if (eq? f1 f2)
                   (one-way-unify1-lst args1 args2)
                   #f))
             (else y #f))))))
@@ -608,49 +609,39 @@
 ; allocation if the result is already in hand.
 ; The REWRITE and REWRITE-ARGS procedures have been modified to
 ; use SCONS instead of CONS.
-;
-; Here `(eq? x (car original))` and `(eq? y (cdr original))` are what
-; `unchanged` said, after `x` and after `y` were computed: `same-x?` and
-; `same-y?`. `scons` says in turn whether it gave back `original`.
 
-(define unchanged (ref bool @heap) (new #t))
-
-(define scons-args (subr (maxeff (write @heap) (alloc @heap) (read (globals unchanged))) (term bool terms bool terms) terms)
-  (lambda (x same-x? y same-y? original)
-    (if (and same-x? same-y?)
-        (begin (set unchanged #t) original)
-        (begin (set unchanged #f) (cons x y)))))
+(define scons (subr (maxeff (read @heap) (alloc @heap)) (term terms terms) terms)
+  (lambda (x y original)
+    (if (and (eq? x (car original))
+             (eq? y (cdr original)))
+        original
+        (cons x y))))
 
 (define-rec
-  (rewrite (subr (maxeff mutates (read (globals app apply-subst apply-subst-lst assq-subst get-lemmas one-way-unify one-way-unify1 one-way-unify1-lst rewrite rewrite-args rewrite-count rewrite-with-lemmas scons-args symbol-record-equal? term-args-equal? term-caddr term-cadr term-equal? unchanged unify-subst))) (term) term)
+  (rewrite (subr (maxeff mutates (read (globals app apply-subst apply-subst-lst assq-subst get-lemmas one-way-unify one-way-unify1 one-way-unify1-lst rewrite rewrite-args rewrite-count rewrite-with-lemmas scons symbol-record-equal? term-args-equal? term-caddr term-cadr term-equal? unify-subst))) (term) term)
     (lambda (term)
       (set rewrite-count (+ (get rewrite-count) 1))
       (tagcase term
         (app (f args)
-          (let ((y (rewrite-args args)))
-            ;; (scons (car term) y term): the car is always the same.
-            (rewrite-with-lemmas (if (get unchanged) term (app f y))
-                                 (get-lemmas f))))
-        (else x (set unchanged #t) term))))
-  (rewrite-args (subr (maxeff mutates (read (globals app apply-subst apply-subst-lst assq-subst get-lemmas one-way-unify one-way-unify1 one-way-unify1-lst rewrite rewrite-args rewrite-count rewrite-with-lemmas scons-args symbol-record-equal? term-args-equal? term-caddr term-cadr term-equal? unchanged unify-subst))) (terms) terms)
+          ;; (scons (car term) (rewrite-args (cdr term)) term), whose car is
+          ;; always the same.
+          (rewrite-with-lemmas (let ((y (rewrite-args args)))
+                                 (if (eq? y args) term (app f y)))
+                               (get-lemmas f)))
+        (else x term))))
+  (rewrite-args (subr (maxeff mutates (read (globals app apply-subst apply-subst-lst assq-subst get-lemmas one-way-unify one-way-unify1 one-way-unify1-lst rewrite rewrite-args rewrite-count rewrite-with-lemmas scons symbol-record-equal? term-args-equal? term-caddr term-cadr term-equal? unify-subst))) (terms) terms)
     (lambda (lst)
       (cond ((null? lst)
-             (set unchanged #t)
              nil)
-            (else (let* ((x (rewrite (car lst)))
-                         (same-x? (get unchanged))
-                         (y (rewrite-args (cdr lst))))
-                    (scons-args x same-x? y (get unchanged) lst))))))
-  ;; Whether it gives back the term it was given, when `rewrite` asks,
-  ;; `unchanged` still says: no lemma applied. A lemma makes a new term.
-  (rewrite-with-lemmas (subr (maxeff mutates (read (globals app apply-subst apply-subst-lst assq-subst get-lemmas one-way-unify one-way-unify1 one-way-unify1-lst rewrite rewrite-args rewrite-count rewrite-with-lemmas scons-args symbol-record-equal? term-args-equal? term-caddr term-cadr term-equal? unchanged unify-subst))) (term terms) term)
+            (else (scons (rewrite (car lst))
+                         (rewrite-args (cdr lst))
+                         lst)))))
+  (rewrite-with-lemmas (subr (maxeff mutates (read (globals app apply-subst apply-subst-lst assq-subst get-lemmas one-way-unify one-way-unify1 one-way-unify1-lst rewrite rewrite-args rewrite-count rewrite-with-lemmas scons symbol-record-equal? term-args-equal? term-caddr term-cadr term-equal? unify-subst))) (term terms) term)
     (lambda (term lst)
       (cond ((null? lst)
              term)
             ((one-way-unify term (term-cadr (car lst)))
-             (let ((r (rewrite (apply-subst (get unify-subst) (term-caddr (car lst))))))
-               (set unchanged #f)
-               r))
+             (rewrite (apply-subst (get unify-subst) (term-caddr (car lst)))))
             (else (rewrite-with-lemmas term (cdr lst)))))))
 
 (define* tautp (subr mutates (term) bool)

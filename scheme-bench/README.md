@@ -52,7 +52,7 @@ lowered): `pi` now takes 0.6 s in all.
 | `listsort`   | #t                                               | 8.1      | Larceny's `sort!!`                                                       |
 | `lseq`       | (135 324 351)                                    | 14.2     | `cwcc`                                                                   |
 | `matrix`     | (((1 1 1 1 1) (1 1 1 1 -1) (1 1 1 -1 1) (1 1 -1… | 9.5      |                                                                          |
-| `maze`       | (#\space #\space #\space #\_ #\space #\space #\… | 10.6     | `eq?` by write probe; 2 procedures run as cellular code                  |
+| `maze`       | (#\space #\space #\space #\_ #\space #\space #\… | 1.8      | `eq?` on sets and cells, as the original (2026-09-30)                    |
 | `mazefun`    | ((_ * _ _ _ _ _ _ _ _ _) (_ * * * * * * * _ * *… | 5.0      |                                                                          |
 | `mperm`      | 199584000                                        | 46.9     | input file's expected value is stale; answer is Larceny's check for N=10 |
 | `nboyer`     | 51507739                                         | 8.3      | rule base as constructors                                                |
@@ -66,7 +66,7 @@ lowered): `pi` now takes 0.6 s in all.
 | `puzzle`     | 2005                                             | 6.8      |                                                                          |
 | `quicksort`  | #t                                               | 9.7      | float RNG computed exactly in integers                                   |
 | `rlist`      | ((x0 x1 x2 x3 x4 x5 x6))                         | 3.2      |                                                                          |
-| `sboyer`     | 51507739                                         | 4.0      | Baker's `scons` via an "unchanged" flag                                  |
+| `sboyer`     | 51507739                                         | 1.6      | Baker's `scons` by `eq?` (2026-09-30); terms immutable, so sharing only  |
 | `scheme`     | ("eight" "eighteen" "eleven" "fifteen" "five" "… | 21.3     | float and port primitives are stubs never called                         |
 | `set`        | (x0 x1 x2 x3 x4 x5)                              | 13.4     | hash table written in FX-26                                              |
 | `stream`     | (49 168 175)                                     | 9.1      | macros expanded by hand                                                  |
