@@ -224,3 +224,27 @@ fn bloblets_travel_in_heap_images() {
     assert_eq!(loaded.bloblet_bytes(b), b"code");
     assert!(loaded.bloblet_has_trailer(b));
 }
+
+/// `copy_graph_from`, as the front end's cache uses it: a graph copied into
+/// a heap with other things in it keeps its sharing and its cycles, a
+/// suffix's raw bytes, and an interned symbol stays interned (the one the
+/// new heap has by that name).
+#[test]
+fn a_graph_copied_between_heaps() {
+    let mut from = Heap::new();
+    let (s, f) = (from.make_string("abc"), from.make_flonum(2.5));
+    let sym = from.intern("shared-name");
+    let v = from.vector_from(&[s, s, f, sym]);
+    let cell = from.cons(v, Value::NULL);
+    from.set_cdr(cell, cell);
+    let mut to = Heap::new();
+    clutter(&mut to);
+    let there = to.intern("shared-name");
+    let c = to.copy_graph_from(&from, cell);
+    to.verify().unwrap_or_else(|e| panic!("unsound after the copy: {e}"));
+    assert_eq!(to.cdr(c), c, "the cycle");
+    let v = to.car(c);
+    assert_eq!(to.obj_ref(v, 0), to.obj_ref(v, 1), "the sharing");
+    assert_eq!(to.string_to_rust(to.obj_ref(v, 0)), "abc");
+    assert_eq!((to.flonum_value(to.obj_ref(v, 2)), to.obj_ref(v, 3)), (2.5, there));
+}

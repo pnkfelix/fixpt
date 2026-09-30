@@ -54,8 +54,9 @@ are in the last section, "Log: the glance's details", and in
   Benchmarks Game (sources and provenance), 42 ported (2026-09-30: `pi`,
   `chudnovsky`, `pidigits`, `pidigits5`, `smith-normal-form` and
   `DLXSimulator`, which bignums and `u32` unblocked; `md5` and
-  `psdes-random` redone in `u32`). Native start-up is 0.5 s (2026-09-30;
-  it had grown to 2.7 s: `docs/performance.md`, "Start-up"). Each README lists
+  `psdes-random` redone in `u32`). Native start-up is 0.19 s (2026-09-30;
+  it had grown to 2.7 s; the front end's register code is now cached:
+  `docs/performance.md`, "Start-up" and "The front end cached"). Each README lists
   answers, native times, and what blocks the rest (mostly floats, file
   I/O, `eq?` on mutable objects, bignums).
 - **Research notes** (2026-09-29, sources checked): `docs/research/floats.md`
@@ -134,8 +135,9 @@ bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
 `u32`/`u64`, wrapping, their operations in line natively, `i64` and `u64`
 raw in native registers, `int` a bignum, a fixnum version of native code;
 left: big literals); Q3 telemetry's counts;
-Q4 floats (`f64` boxed, `f32`); Q5 `eq?` and address-hashed tables (Larceny's tablets);
-Q6 flat arrays; Q7 `consof` and disjoint unions; Q8 generic operations
+Q4 floats (done: `f64` boxed, `f32` an immediate); the front end's
+register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (Larceny's tablets);
+Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction. Then, as before:
 1. Done (2026-09-28): an immediately applied lambda as a `let`;

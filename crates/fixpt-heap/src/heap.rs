@@ -1016,6 +1016,71 @@ impl Heap {
         b
     }
 
+    /// A copy, in this heap, of everything `root` reaches in heap `from`:
+    /// pairs and bloblets alike, sharing and cycles kept, raw suffixes as
+    /// they are, frozen flags too; an interned symbol is this heap's symbol
+    /// of the same name. For carrying compiled code between heaps (a cache
+    /// of it in an image of its own). Nothing collects meanwhile: allocation
+    /// never does. Code in a code area is not carried; its reference, if
+    /// any, would be, and must be none.
+    pub fn copy_graph_from(&mut self, from: &Heap, root: Value) -> Value {
+        use std::collections::hash_map::Entry;
+        // First every object is made, empty; then the fields are filled in.
+        let mut made: HashMap<u64, Value> = HashMap::new();
+        let mut order: Vec<Value> = Vec::new();
+        let mut todo = vec![root];
+        while let Some(v) = todo.pop() {
+            if !v.is_ref() {
+                continue;
+            }
+            let Entry::Vacant(slot) = made.entry(v.raw()) else { continue };
+            if v.is_pair() {
+                slot.insert(self.cons(Value::NULL, Value::NULL));
+                order.push(v);
+                todo.extend([from.car(v), from.cdr(v)]);
+                continue;
+            }
+            if from.is_a(v, ObjType::Symbol) && from.symbol_index.contains_key(&from.symbol_name(v)) {
+                let name = from.symbol_name(v);
+                slot.insert(self.intern(&name));
+                continue;
+            }
+            let head = from.bloblet_head(v);
+            let trailer = from.bloblet_has_trailer(v);
+            let copy = self.make_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer);
+            slot.insert(copy);
+            order.push(v);
+            for k in (1 + trailer as usize)..=head.fields {
+                todo.push(from.slot(from.ix(v) - k));
+            }
+        }
+        let map = |x: Value| if x.is_ref() { made[&x.raw()] } else { x };
+        for v in order {
+            let copy = made[&v.raw()];
+            if v.is_pair() {
+                let (a, d) = (map(from.car(v)), map(from.cdr(v)));
+                self.set_car(copy, a);
+                self.set_cdr(copy, d);
+                continue;
+            }
+            let head = from.bloblet_head(v);
+            let trailer = from.bloblet_has_trailer(v);
+            for k in (1 + trailer as usize)..=head.fields {
+                let x = map(from.slot(from.ix(v) - k));
+                self.set_bloblet_slot(copy, k, x);
+            }
+            for j in 0..head.bytes.div_ceil(8) {
+                let w = from.word(from.ix(v) + j);
+                let at = self.ix(copy) + j;
+                self.set_word(at, w);
+            }
+            if head.fields_frozen || head.suffix_frozen {
+                self.freeze_bloblet(copy, head.fields_frozen, head.suffix_frozen);
+            }
+        }
+        map(root)
+    }
+
     /// Freeze a bloblet's fields, its suffix, or both. There is no thawing.
     pub fn freeze_bloblet(&mut self, v: Value, fields: bool, suffix: bool) {
         let main = self.bloblet_main(v);

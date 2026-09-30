@@ -2158,3 +2158,31 @@ in both at every instruction's start, so nothing is converted.
 (`fib`'s argument is new at each call, and tested at each.) All 93
 benchmark ports give their READMEs' answers natively; `earley` now takes
 5.2 s in all (104 s in its README), `paraffins` 7.8 s (57.4).
+
+## The front end cached (2026-09-30)
+
+A session whose front end runs as register code checked the whole front
+end with the Rust checker and compiled it at every start (0.33 s of the
+0.49). The compiled word is now kept (`TODO.md` §21.1): copied out of the
+session's heap into a heap of its own (`Heap::copy_graph_from`, which
+re-interns symbols by name) and written as a heap image to the user's
+cache directory (`~/Library/Caches/fixpt/` on macOS, `$XDG_CACHE_HOME/fixpt`
+or `~/.cache/fixpt` elsewhere), one file for each executable. The file
+begins with a key, a hash of the front end's text and of the executable's
+size and time, so a rebuilt `fixpt` never reads an older one's code but
+replaces it; `FIXPT_NO_CACHE=1` turns the cache off. Our own code needs no
+verifying: the check is there for the facts the register compiler reads.
+The image is 9.5 MB (1.18 M words), and its CRC-32, a bit at a time, took
+about 35 ms of the load; with a table built at compile time the whole
+load, verification included, is 22 ms.
+
+| stage (empty program, native)                        | before |  cached |
+| ---------------------------------------------------- | ------:| -------:|
+| the reader and parser checked, lowered and loaded    | 0.05 s |  0.05 s |
+| the front end checked and compiled                   | 0.33 s |       — |
+| its image read and verified, and copied in           |      — |  0.03 s |
+| the front end run (its globals made)                 | 0.04 s |  0.04 s |
+| total, wall clock                                    | 0.50 s |  0.19 s |
+
+The first run of a new executable pays 0.28 s more, to write the image.
+The ports give the same answers with the cache and without.

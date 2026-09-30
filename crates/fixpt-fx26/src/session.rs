@@ -217,6 +217,61 @@ fn load_lowered(scheme: &mut Session, text: &str) -> Result<(), String> {
     compiled.load_into(scheme)
 }
 
+/// Where the front end's register code is cached, if anywhere, and the key
+/// its file must start with: a heap image in the user's cache directory, one
+/// file for each executable, named by a hash of its path, and the key a hash
+/// of the front end's text and of the executable's size and time, so that a
+/// rebuilt compiler never reads what an older one made, but replaces it.
+/// `FIXPT_NO_CACHE` turns it off.
+fn front_end_cache(text: &str) -> Option<(std::path::PathBuf, u64)> {
+    use std::hash::{Hash, Hasher};
+    if std::env::var_os("FIXPT_NO_CACHE").is_some() {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let meta = std::fs::metadata(&exe).ok()?;
+    let mut name = std::collections::hash_map::DefaultHasher::new();
+    exe.hash(&mut name);
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    (text, meta.len(), meta.modified().ok()).hash(&mut key);
+    let home = std::env::var_os("HOME")?;
+    let dir = match std::env::var_os("XDG_CACHE_HOME") {
+        Some(d) => std::path::PathBuf::from(d),
+        None if cfg!(target_os = "macos") => std::path::Path::new(&home).join("Library/Caches"),
+        None => std::path::Path::new(&home).join(".cache"),
+    }
+    .join("fixpt");
+    Some((dir.join(format!("front-end-{:016x}.img", name.finish())), key.finish()))
+}
+
+/// The front end's compiled word `w`, copied out of `heap` into a heap of
+/// its own and written to `path` as an image after `key`: by a temporary
+/// file renamed, so that a reader never sees half of one. Caches not used
+/// for a month (their executables gone, most likely) are removed. Any
+/// failure only means no cache.
+fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::path::Path, key: u64) {
+    let mut alone = fixpt_heap::Heap::new();
+    let copy = alone.copy_graph_from(heap, w);
+    alone.push_root(copy);
+    let mut bytes = key.to_le_bytes().to_vec();
+    bytes.extend(fixpt_heap::image::dump(&alone));
+    let Some(dir) = path.parent() else { return };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    if std::fs::write(&tmp, &bytes).is_ok() && std::fs::rename(&tmp, path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    let month = std::time::Duration::from_secs(30 * 24 * 3600);
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let age = e.metadata().and_then(|m| m.accessed().or(m.modified())).ok().and_then(|t| t.elapsed().ok());
+        if age.is_some_and(|a| a > month) && e.file_name().to_string_lossy().starts_with("front-end-") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// The global prefix the bootstrap program is loaded under.
 pub const BOOTSTRAP_PREFIX: &str = "fx26-boot:";
 
@@ -748,23 +803,41 @@ impl Fx26Session {
         let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
         let fields: Vec<String> = Self::FRONT_ENTRIES.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
         let text = format!("{}\n(product {})\n", crate::front_end(), fields.join(" "));
-        let mut c = Checker::new();
-        let forms = c.read_in(FileId(0), &text)?;
-        let done = c.declare_ahead(&forms)?;
-        let mut tops = Vec::new();
-        for (f, done) in forms.iter().zip(done) {
-            if !done {
-                tops.extend(c.top_all(f)?);
+        // Checked and compiled once for this executable and this front end,
+        // then kept (`front_end_cache`); read back from there after.
+        let cache = front_end_cache(&text);
+        let cached = cache.as_ref().and_then(|(p, key)| {
+            let b = std::fs::read(p).ok()?;
+            (b.get(..8)? == key.to_le_bytes()).then(|| fixpt_heap::image::load(&b[8..]).ok())?
+        });
+        let mut checked = None;
+        if cached.is_none() {
+            let mut c = Checker::new();
+            let forms = c.read_in(FileId(0), &text)?;
+            let done = c.declare_ahead(&forms)?;
+            let mut tops = Vec::new();
+            for (f, done) in forms.iter().zip(done) {
+                if !done {
+                    tops.extend(c.top_all(f)?);
+                }
             }
+            checked = Some((c, tops));
         }
         let limit = self.step_limit();
         self.scheme.engine.set_step_limit(None);
         let pieces = self.scheme.scope(|sc| {
             let mut compiled = Err(String::new());
             let word = sc.make(|m| {
-                let mut comp = crate::cellular::Compiler::new(m.heap(), &c, &text);
-                comp.registers = true;
-                compiled = comp.program(&tops);
+                if let Some(from) = &cached {
+                    compiled = Ok(m.heap().copy_graph_from(from, from.roots_slice()[0]));
+                } else if let Some((c, tops)) = &checked {
+                    let mut comp = crate::cellular::Compiler::new(m.heap(), c, &text);
+                    comp.registers = true;
+                    compiled = comp.program(tops);
+                    if let (Ok(w), Some((path, key))) = (&compiled, &cache) {
+                        save_front_end(m.heap(), *w, path, *key);
+                    }
+                }
                 compiled.clone().unwrap_or(fixpt_heap::Value::FALSE)
             });
             compiled.map_err(|e| format!("the front end as register code: {e}"))?;

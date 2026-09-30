@@ -680,12 +680,13 @@ information carried in the code would let the check be done once, the
 code cached, and later passes merely verify it.
 
 To do:
-1. **Cache the front end's register code**, keyed by a hash of its text
-   and of the compiler (a heap image: `dump-heap` and image verification
-   exist). Our own code, built with the binary, needs no verifying: the
-   check is there for the facts the register compiler reads (fields of
-   `extract`, conversions, effect summaries, `apply` sharing), not for
-   safety. Start-up would drop to about 0.1 s.
+1. Done (2026-09-30): **the front end's register code cached**, a heap
+   image in the user's cache directory, keyed by a hash of its text and
+   of the executable (`docs/performance.md`, "The front end cached").
+   Our own code, built with the binary, needs no verifying: the check is
+   there for the facts the register compiler reads (fields of `extract`,
+   conversions, effect summaries, `apply` sharing), not for safety.
+   Start-up 0.50 → 0.19 s.
 2. **Verifiable register code, for separate compilation (PLAN Q9)**:
    annotations a verifier checks in one linear pass, as the JVM's stack
    maps, WebAssembly's validation, Typed Assembly Language and

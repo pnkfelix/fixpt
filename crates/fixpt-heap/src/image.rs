@@ -190,17 +190,28 @@ pub fn extract_embedded(exe_bytes: &[u8]) -> Option<&[u8]> {
     Some(&exe_bytes[start..tail])
 }
 
-/// CRC-32 (IEEE), computed without a static table: the table is small and this
-/// runs once per image, so the bit-at-a-time form keeps the dependency count at
-/// zero for no measurable cost.
+/// CRC-32 (IEEE), a byte at a time from a table the compiler builds, so
+/// that no dependency is needed: a cached front end's image is 9.5 MB, which
+/// the bit-at-a-time form took 40 ms over.
 pub fn crc32(data: &[u8]) -> u32 {
+    const TABLE: [u32; 256] = {
+        let mut t = [0u32; 256];
+        let mut i = 0;
+        while i < 256 {
+            let mut c = i as u32;
+            let mut k = 0;
+            while k < 8 {
+                c = if c & 1 != 0 { (c >> 1) ^ 0xedb8_8320 } else { c >> 1 };
+                k += 1;
+            }
+            t[i] = c;
+            i += 1;
+        }
+        t
+    };
     let mut crc: u32 = 0xffff_ffff;
     for b in data {
-        crc ^= *b as u32;
-        for _ in 0..8 {
-            let mask = (crc & 1).wrapping_neg();
-            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
-        }
+        crc = (crc >> 8) ^ TABLE[((crc ^ *b as u32) & 0xff) as usize];
     }
     !crc
 }
