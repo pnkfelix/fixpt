@@ -588,7 +588,27 @@ made with an `(identity k kr)` dictionary that only the standard
 procedures make, hashed by address and restamped by the collection count.
 Left: identity of bloblets (records), which the evaluator written in
 FX-26 would need, since its pairs and refs are bloblets; retiring the
-ports' workarounds; porting `equal` and `dynamic`. The notes as they were:
+ports' workarounds; porting `equal` and `dynamic`; and the two-level
+tables below. The notes as they were:
+
+**Later: an `eqtable` in two tablets, as Larceny's** (the user's,
+2026-09-30; the single stamp is fine for now). With one stamp, the first
+operation after any collection relinks every entry, though a minor
+collection moves none of the old keys: a large, long-lived table used in
+a loop that allocates pays O(entries) every nursery's worth (8 MB). Our
+heap suits the split: a minor collection promotes everything live, so old
+keys move only at a major one, and every young key has left the nursery
+after one minor collection; the heap counts the two apart (`gc_count`,
+`minor_count`).
+- An old tablet stamped with the major count, a young one with the total.
+- A key goes into the young tablet if it is in the nursery (the heap
+  would need a cheap test for that), otherwise the old.
+- On a stale stamp: after a minor collection, rehash only the young
+  tablet, its entries into the old; after a major one, both.
+- Check whether a collection ever moves what a `letrena` region holds,
+  before its keys count as old.
+- First, a benchmark: a million old keys looked up in a loop that
+  allocates, to show the cost now and that the split removes it.
 
 FX-26 has no identity test. Wanted by:
 - the benchmark ports (PLAN Q5 lists `browse`, `conform`, `maze`, `sboyer`,

@@ -2097,7 +2097,8 @@ data by the rule already in both checkers; `eq` in line on every machine.
 standard procedures make, hashed by address, one stamp (the collection
 count) where Larceny has tablets. Left: bloblets' identity (records; the
 evaluator's pairs and refs are bloblets), the ports' workarounds, and
-`equal` and `dynamic`. What was planned:
+`equal` and `dynamic`; later, Larceny's old and young tablets, so that a
+minor collection rehashes only young keys (`TODO.md` §19). What was planned:
 Every batch of ports hit the missing identity test (`equal`, `dynamic`
 blocked; workarounds in `browse`, `conform`, `maze`, `sboyer`, `peval`,
 `logic`, `boyer`, `hashtable0`). A typed `eq?` per kind of mutable
