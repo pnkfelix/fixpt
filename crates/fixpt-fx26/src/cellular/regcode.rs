@@ -389,7 +389,9 @@ impl Compiler<'_> {
             ("<=", 2) => op2("int-less", true, true),
             (">=", 2) => op2("int-less", false, true),
             ("=", 2) => op2("int-eq", false, false),
-            ("char=?" | "symbol=?" | "wglobal=?", 2) => op2("eq", false, false),
+            ("char=?" | "symbol=?" | "wglobal=?" | "pair-eq?" | "ref-eq?" | "array-eq?" | "icell-eq?", 2) => {
+                op2("eq", false, false)
+            }
             ("not", 1) => Some(Std::Op2Imm("eq", Value::FALSE)),
             ("null?" | "datum-null?", 1) => Some(Std::Op2Imm("eq", Value::NULL)),
             ("car" | "datum-car", 1) => Some(Std::Op1("pair-car")),

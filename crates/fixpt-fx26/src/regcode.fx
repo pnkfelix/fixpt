@@ -397,14 +397,20 @@
               (or (or (starts "%fx26-f64") (starts "%fx26-f32")) (starts "%fx26-int->")))))))
 ;; Whether runtime primitive `name` never collects (`fixpt_runtime::never_collects`): FX-26's
 ;; `*`, `quotient` and `modulo`, the fixed-width integers' and floats' operations, and a flat
-;; array's element and length, which register code calls with its values in registers.
-(define r-never-collects? (subr (read (globals r-fixed-width-op?)) (string) bool)
+;; array's element and length, and an eqtable's operations of one or two, which register code
+;; calls with its values in registers.
+;; Whether `name` is an eqtable's operation of one or two arguments.
+(define r-eqtable-quick? (subr pure (string) bool)
+  (lambda (name)
+    (or (string=? name "%fx26-eqtable-has?")
+        (or (string=? name "%fx26-eqtable-count") (string=? name "%fx26-eqtable-delete!")))))
+(define r-never-collects? (subr (read (globals r-eqtable-quick? r-fixed-width-op?)) (string) bool)
   (lambda (name)
     (let ((is (lambda ((s string)) (string=? name s))))
       (or (or (is "%fx26-mul") (or (is "%fx26-quotient") (is "modulo")))
           (or (or (is "%fx26-string->f64")
                   (or (is "%fx26-flatarray-ref") (is "%fx26-flatarray-length")))
-              (r-fixed-width-op? name))))))
+              (or (r-eqtable-quick? name) (r-fixed-width-op? name)))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never
 ;; collects and takes one or two.
 (define r-prim-std (subr (read @globals) (string int int) rstd)
@@ -414,11 +420,8 @@
             ((and (<= n 2) (r-never-collects? name)) (s-pure p))
             (else (s-prim p))))))
 
-;; Whether `name` is an equality `op2 eq` does, of the same word: of characters, symbols or
-;; globals. (`=`, of ints, which may be bignums, is `int-eq`'s.)
-(define r-eq-name? (subr (read @globals) (string) bool)
-  (lambda (name)
-    (or (string=? name "char=?") (or (string=? name "symbol=?") (string=? name "wglobal=?")))))
+;; Whether `name` is an equality `op2 eq` does (`std-eq-name?`).
+(define r-eq-name? (subr (read @globals) (string) bool) (lambda (name) (std-eq-name? name)))
 ;; Whether `name` makes a box: a prompt tag or a mark key.
 (define r-box-name? (subr (read @globals) (string) bool)
   (lambda (name)

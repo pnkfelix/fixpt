@@ -35,6 +35,14 @@
 ;; What compiling may do: read the trees, build code on @k, and give up.
 (define-effect compiles (maxeff c-emits (read @t) (goto @y)))
 
+;; Whether `name` is an equality of the same word, as `eq` does it: of characters, symbols or
+;; globals, or the identity of two mutable objects (`pair-eq?` and kin). (`=`, of ints, which
+;; may be bignums, is `int-eq`'s.)
+(define std-eq-name? (subr pure (string) bool)
+  (lambda (n)
+    (or (string=? n "char=?") (string=? n "symbol=?") (string=? n "wglobal=?")
+        (string=? n "pair-eq?") (string=? n "ref-eq?") (string=? n "array-eq?")
+        (string=? n "icell-eq?"))))
 ;; The parser's lists: a lambda's parameters, a `let`'s bindings (and a
 ;; product's fields, and a `tagcase`'s else), a `letrec`'s, a `tagcase`'s
 ;; arms, and expressions.

@@ -293,7 +293,7 @@
 ;;; -------------------------------------------------- standard operations
 
 ;; How many arguments a standard operation takes, or -1 if it is not one.
-(define c-arity (subr (read (globals standard-primitive)) (string) int)
+(define c-arity (subr (read (globals standard-primitive std-eq-name?)) (string) int)
   (lambda (n)
     (cond ((or (string=? n "make-continuation-prompt-tag")
                (string=? n "make-continuation-mark-key"))
@@ -309,7 +309,7 @@
                (string=? n "<=") (string=? n ">=") (string=? n "=") (string=? n "modulo")
                (string=? n "quotient") (string=? n "cons") (string=? n "set-car!")
                (string=? n "set-cdr!") (string=? n "char=?") (string=? n "string-append")
-               (string=? n "string=?") (string=? n "symbol=?") (string=? n "wglobal=?")
+               (string=? n "string=?") (std-eq-name? n)
                (string=? n "array-ref") (string=? n "string-ref") (string=? n "make-array")
                (string=? n "abort-current-continuation") (string=? n "set") (string=? n "marks-of")
                (string=? n "call-with-composable-continuation") (string=? n "first-mark"))
@@ -342,8 +342,7 @@
           ;; Ints may be bignums, compared by value; characters are immediates, so compared as
           ;; symbols are.
           ((string=? name "=") (c-op c routine-int-eq))
-          ((or (string=? name "symbol=?") (or (string=? name "wglobal=?") (string=? name "char=?")))
-           (c-op c routine-eq))
+          ((std-eq-name? name) (c-op c routine-eq))
           ((string=? name "cons") (c-op c routine-cons))
           ((string=? name "car") (c-op c routine-pair-car))
           ((string=? name "cdr") (c-op c routine-pair-cdr))
@@ -395,7 +394,7 @@
 
 ;; Whether a standard name has a value: an operation of an arity, or `list`,
 ;; a `vsubr`.
-(define c-has-standard-value? (subr (read (globals c-arity standard-primitive)) (string) bool)
+(define* c-has-standard-value? (subr pure (string) bool)
   (lambda (n) (or (string=? n "list") (>= (c-arity n) 0))))
 
 ;; Word `w`, with register code as standard operation `op` of `n` arguments

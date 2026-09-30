@@ -161,6 +161,9 @@ pub const KINDS: &[Kind] = &[
     // 2, a fixnum; the elements raw in the suffix, 4 or 8 bytes each, which
     // no collection scans and no store marks.
     Kind { name: "flat-array", code: 42, traced: true },
+    // A table keyed by identity (`eqtable`, `fixpt_runtime::eqtable`): its
+    // stamp, count and buckets in fields 1 to 3.
+    Kind { name: "eqtable", code: 43, traced: true },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.

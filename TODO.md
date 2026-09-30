@@ -579,6 +579,17 @@ global holds. Every other path gives 1. Found writing F11's test
 
 ## 19. `eq?`: identity (the user's, 2026-09-29; PLAN Q5)
 
+*Done (2026-09-30), the type chosen here for the user to review
+(`docs/fx26.md`, "Identity"):* one test per kind of mutable object
+(`pair-eq?`, `ref-eq?`, `array-eq?`, `icell-eq?`), with the effect of a
+write of the objects' region, so that the frozen-write rule already in both
+checkers keeps identity from immutable data; and `(eqtable k v kr r)`,
+made with an `(identity k kr)` dictionary that only the standard
+procedures make, hashed by address and restamped by the collection count.
+Left: identity of bloblets (records), which the evaluator written in
+FX-26 would need, since its pairs and refs are bloblets; retiring the
+ports' workarounds; porting `equal` and `dynamic`. The notes as they were:
+
 FX-26 has no identity test. Wanted by:
 - the benchmark ports (PLAN Q5 lists `browse`, `conform`, `maze`, `sboyer`,
   `peval`, `logic`, `boyer`, `hashtable0`);

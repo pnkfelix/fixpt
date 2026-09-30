@@ -136,7 +136,8 @@ bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
 raw in native registers, `int` a bignum, a fixnum version of native code;
 left: big literals); Q3 telemetry's counts;
 Q4 floats (done: `f64` boxed, `f32` an immediate); the front end's
-register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (Larceny's tablets);
+register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (done:
+`pair-eq?` and kin, `eqtable`; left: bloblets' identity, the ports' workarounds);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction. Then, as before:
@@ -2088,9 +2089,15 @@ of its own kind), and native code must save `d8`-`d15` or not use them.
   arrays".
 
 **Q5. Identity: `eq?` on mutable objects, and address-hashed tables.**
-(The type is still open: `TODO.md` §19 sets FX-91's opt-in `uniqueof`
-beside one `eq?` per kind of mutable object, and says why immutable data
-must stay out of reach.)
+Done (2026-09-30; `docs/fx26.md`, "Identity"; the type chosen for the
+user to review, `TODO.md` §19): `pair-eq?`, `ref-eq?`, `array-eq?` and
+`icell-eq?`, each a write of its region, which keeps identity from frozen
+data by the rule already in both checkers; `eq` in line on every machine.
+`(eqtable k v kr r)`, keyed by a dictionary `(identity k kr)` only the
+standard procedures make, hashed by address, one stamp (the collection
+count) where Larceny has tablets. Left: bloblets' identity (records; the
+evaluator's pairs and refs are bloblets), the ports' workarounds, and
+`equal` and `dynamic`. What was planned:
 Every batch of ports hit the missing identity test (`equal`, `dynamic`
 blocked; workarounds in `browse`, `conform`, `maze`, `sboyer`, `peval`,
 `logic`, `boyer`, `hashtable0`). A typed `eq?` per kind of mutable

@@ -243,6 +243,8 @@ fn put(
             } else if kind == "sum" {
                 let tag = heap.bloblet_slot(v, 2);
                 out.push_str(&format!("#<sum {}>", write_value(heap, tag)));
+            } else if kind == "eqtable" {
+                out.push_str(&format!("#<eqtable of {}>", crate::eqtable::count(heap, v)));
             } else if kind == "product" {
                 out.push_str(&format!("#<product of {}>", h.fields - 1));
             } else if h.kind == fixpt_heap::layout::cellular::KIND {

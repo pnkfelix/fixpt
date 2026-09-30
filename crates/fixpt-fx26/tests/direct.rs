@@ -316,6 +316,21 @@ fn floats_as_the_rust_machine_gives_them() {
     assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "{:?} against {}", r.direct, r.rust);
 }
 
+/// Identity (PLAN.md Q5, `programs/native/identity.fx`): `pair-eq?` and
+/// kin in line, and a union-find whose roots are found by it, as the Rust
+/// machine gives them, and with its nodes moved by collections; and tables
+/// keyed by identity (`programs/native/eqtables.fx`).
+#[test]
+fn identity_as_the_rust_machine_gives_it() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/identity"), "identity", &[300], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+        // Tables keyed by identity, their keys moved between operations.
+        let r = run_collecting(&program("native/eqtables"), "eqtables", &[500], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+}
+
 /// A leaf's registers and link, kept around a call with no collection: `b`
 /// lives across a product past a fixnum, which the primitive makes.
 #[test]

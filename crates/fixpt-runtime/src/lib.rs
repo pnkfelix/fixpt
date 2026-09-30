@@ -7,6 +7,7 @@
 
 pub mod cmarks;
 pub mod disasm;
+pub mod eqtable;
 pub mod equal;
 pub mod error;
 pub mod num;

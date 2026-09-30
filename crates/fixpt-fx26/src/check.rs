@@ -40,6 +40,14 @@ pub const FLATLAYOUT: &str = "(flatlayout (t type)) int";
 /// safety's analyses (its regions), opaque to anything else; its elements
 /// raw at run time, as its layout says.
 pub const FLATARRAYOF: &str = "(flatarrayof (t type) (r region)) (arrayof t r)";
+/// A kind of key that has identity (Q5), generative type 3: `k`, a mutable
+/// object at `r`, which only the standard dictionaries (`pair-identity` and
+/// kin) are made for; nothing at run time.
+pub const IDENTITY: &str = "(identity (k type) (r region)) int";
+/// A table keyed by identity (Q5), generative type 4: keys `k` at `kr`,
+/// values `v`, the table in `r`; to safety's analyses, entries of both in
+/// `r`, and opaque to anything else (`fixpt_runtime::eqtable`).
+pub const EQTABLE: &str = "(eqtable (k type) (v type) (kr region) (r region)) (arrayof (pairof k v r) r)";
 
 /// A `define-generative`: its name, parameters, their variance, and the
 /// representation, a type over the parameters.
@@ -317,7 +325,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }

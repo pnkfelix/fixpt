@@ -313,6 +313,30 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("make-icell", "(poly ((r region)) (poly ((t type)) (subr (alloc r) () (icell t r))))"),
     ("icell-put!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((icell t r) t) unit)))"),
     ("icell-get", "(poly ((r region)) (poly ((t type)) (subr (await r) ((icell t r)) t)))"),
+    // Identity (PLAN.md Q5, `docs/fx26.md`, "Identity"): whether two
+    // mutable objects are the same one. Its effect is a write of their
+    // region, so that it is refused where that region is frozen (`const`,
+    // `acyclic`, a place): immutable data has no identity, since the
+    // compilers may share it or copy it.
+    ("pair-eq?", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) (pairof t1 t2 r)) bool)))"),
+    ("ref-eq?", "(poly ((r region)) (poly ((t type)) (subr (write r) ((ref t r) (ref t r)) bool)))"),
+    ("array-eq?", "(poly ((r region)) (poly ((t type)) (subr (write r) ((arrayof t r) (arrayof t r)) bool)))"),
+    ("icell-eq?", "(poly ((r region)) (poly ((t type)) (subr (write r) ((icell t r) (icell t r)) bool)))"),
+    // The kinds of key that have identity, and tables keyed by it, hashed
+    // by address: identity is a write of the keys' region, as above.
+    ("pair-identity", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr pure () (identity (pairof t1 t2 r) r))))"),
+    ("ref-identity", "(poly ((r region)) (poly ((t type)) (subr pure () (identity (ref t r) r))))"),
+    ("array-identity", "(poly ((r region)) (poly ((t type)) (subr pure () (identity (arrayof t r) r))))"),
+    ("icell-identity", "(poly ((r region)) (poly ((t type)) (subr pure () (identity (icell t r) r))))"),
+    ("make-eqtable", "(poly ((kr region) (r region)) (poly ((k type) (v type)) (subr (alloc r) ((identity k kr)) (eqtable k v kr r))))"),
+    ("eqtable-ref", "(poly ((kr region) (r region)) (poly ((k type) (v type)) (subr (maxeff (read r) (write kr)) ((eqtable k v kr r) k v) v)))"),
+    ("eqtable-has?", "(poly ((kr region) (r region)) (poly ((k type) (v type)) (subr (maxeff (read r) (write kr)) ((eqtable k v kr r) k) bool)))"),
+    ("eqtable-count", "(poly ((kr region) (r region)) (poly ((k type) (v type)) (subr (read r) ((eqtable k v kr r)) int)))"),
+    (
+        "eqtable-set!",
+        "(poly ((kr region) (r region)) (poly ((k type) (v type)) (subr (maxeff (write r) (alloc r) (write kr)) ((eqtable k v kr r) k v) unit)))",
+    ),
+    ("eqtable-delete!", "(poly ((kr region) (r region)) (poly ((k type) (v type)) (subr (maxeff (write r) (write kr)) ((eqtable k v kr r) k) unit)))"),
     // Cellular code (`layout::cellular`), for the compiler written in
     // FX-26. A word is immutable once made, so making one is pure; a word
     // that is not one (`Heap::make_cellular_word`) is an error when run.
@@ -391,10 +415,16 @@ pub const ENTRIES: &[(&str, &str)] = &[
 
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
-/// `FLATLAYOUT`, `FLATARRAYOF`: 0, 1 and 2), then
+/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`: 0 to 4), then
 /// `(name type)` for each binding.
 pub fn standard_text() -> String {
-    let decl: String = [crate::check::VSUBR, crate::check::FLATLAYOUT, crate::check::FLATARRAYOF]
+    let decl: String = [
+        crate::check::VSUBR,
+        crate::check::FLATLAYOUT,
+        crate::check::FLATARRAYOF,
+        crate::check::IDENTITY,
+        crate::check::EQTABLE,
+    ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))
         .collect();

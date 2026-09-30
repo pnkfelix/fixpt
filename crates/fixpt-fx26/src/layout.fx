@@ -64,6 +64,7 @@
 (define kind-register-code int 40)
 (define kind-native-closure int 41)
 (define kind-flat-array int 42)
+(define kind-eqtable int 43)
 (define kind-extension int 255)
 
 ;;; A closure's fields, and an environment frame's, by negative offset.

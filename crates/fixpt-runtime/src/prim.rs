@@ -428,11 +428,13 @@ fn flat_at(rt: &mut Runtime, a: Value, i: Value) -> Outcome<usize> {
 /// Whether primitive `name` never collects, and so may be called from
 /// code whose live values are in registers, not in a frame (register code's
 /// `prim1`, `prim2`, `prim2imm`): FX-26's `*`, `quotient` and `modulo`, and
-/// the fixed-width integers' operations. It may allocate (an `i64` past a
+/// the fixed-width integers' operations, and an `eqtable`'s that take one or
+/// two (a rehash relinks what it has). It may allocate (an `i64` past a
 /// fixnum is a bignum), since allocation never collects: a collection waits
 /// for the next point that may. It may fail, which ends the run.
 pub fn never_collects(name: &str) -> bool {
     matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64" | "%fx26-flatarray-ref" | "%fx26-flatarray-length")
+        || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
         || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
@@ -1251,6 +1253,22 @@ prims! {
     "%fx26-flatarray-length", 1, Some(1), simple!(|rt, a| {
         let n = rt.heap.flat_array_len(a[0]);
         Ok(Value::fixnum(n as i64))
+    });
+    // Identity (PLAN.md Q5): a key kind's dictionary, which says nothing at
+    // run time, and tables keyed by identity, hashed by address
+    // (`crate::eqtable`).
+    "%fx26-address-identity", 0, Some(0), simple!(|_rt, _a| Ok(Value::fixnum(0)));
+    "%fx26-make-eqtable", 1, Some(1), simple!(|rt, _a| Ok(crate::eqtable::make(&mut rt.heap)));
+    "%fx26-eqtable-ref", 3, Some(3), simple!(|rt, a| Ok(crate::eqtable::get(&mut rt.heap, a[0], a[1], a[2])));
+    "%fx26-eqtable-has?", 2, Some(2), simple!(|rt, a| Ok(Value::boolean(crate::eqtable::has(&mut rt.heap, a[0], a[1]))));
+    "%fx26-eqtable-count", 1, Some(1), simple!(|rt, a| Ok(Value::fixnum(crate::eqtable::count(&rt.heap, a[0]))));
+    "%fx26-eqtable-set!", 3, Some(3), simple!(|rt, a| {
+        crate::eqtable::set(&mut rt.heap, a[0], a[1], a[2]);
+        Ok(Value::UNIT)
+    });
+    "%fx26-eqtable-delete!", 2, Some(2), simple!(|rt, a| {
+        crate::eqtable::delete(&mut rt.heap, a[0], a[1]);
+        Ok(Value::UNIT)
     });
     // Whether a datum is an `f64`, and it as one (the reader's atoms).
     "%fx26-datum-f64?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.obj_type(a[0]) == Some(ObjType::Flonum))));

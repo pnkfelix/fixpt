@@ -140,3 +140,17 @@ fn a_letfreeze_freezes_its_regions_data() {
         .unwrap_err()
         .contains("could still write its region's data"));
 }
+
+/// Identity (PLAN.md Q5) is a write of its region, so frozen data has none:
+/// the compilers may share or copy it. A region-polymorphic use is refused
+/// where its region is made `const`, as a write is.
+#[test]
+fn frozen_data_has_no_identity() {
+    let build = "(letfreeze r (the (listof int r) (cons 1 nil)))";
+    assert_eq!(check(&format!("(let ((xs {build})) (pair-eq? xs xs))")), Err("this writes frozen data, whose region is `const`".to_string()));
+    assert_eq!(check("(let ((p (the (pairof int int @h) (cons 1 2)))) (pair-eq? p p))"), Ok(vec!["bool ! pure".to_string()]));
+    let same = "(define same? (poly ((r region)) (subr (write r) ((listof int r)) bool)) (plambda ((r region)) (lambda (xs) (pair-eq? xs xs))))";
+    assert_eq!(check(&format!("{same} ((proj same? const) {build})")), Err("this writes frozen data, whose region is `const`".to_string()));
+    let t = "(the (eqtable (listof int const) int const @t) (make-eqtable (pair-identity)))";
+    assert_eq!(check(&format!("(eqtable-has? {t} {build})")), Err("this writes frozen data, whose region is `const`".to_string()));
+}
