@@ -1320,7 +1320,9 @@ impl<'a> Compiler<'a> {
                 self.lit(code, f);
                 self.op(code, "eq");
             }
-            "=" | "symbol=?" | "wglobal=?" | "char=?" => self.op(code, "eq"),
+            // Ints may be bignums, compared by value.
+            "=" => self.op(code, "int-eq"),
+            "symbol=?" | "wglobal=?" | "char=?" => self.op(code, "eq"),
             "cons" => self.op(code, "cons"),
             "car" => self.op(code, "pair-car"),
             "cdr" => self.op(code, "pair-cdr"),

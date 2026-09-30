@@ -848,12 +848,36 @@ impl Machine {
             }
             // This machine is the oracle: the typed routines keep the
             // checks their types make needless, so a wrong type traps here.
-            ADD | SUB | LESS | INT_ADD | INT_SUB | INT_LESS => {
+            // `int`'s, on exact integers: a bignum past a fixnum (PLAN.md,
+            // Q2); anything else traps.
+            INT_ADD | INT_SUB | INT_LESS | INT_EQ => {
+                let b = self.pop(name)?;
+                let a = self.pop(name)?;
+                let fast = match n {
+                    _ if !(a.is_fixnum() && b.is_fixnum()) => None,
+                    INT_ADD => Value::try_fixnum(a.as_fixnum() + b.as_fixnum()),
+                    INT_SUB => Value::try_fixnum(a.as_fixnum() - b.as_fixnum()),
+                    INT_LESS => Some(Value::boolean(a.as_fixnum() < b.as_fixnum())),
+                    _ => Some(Value::boolean(a == b)),
+                };
+                let op = match n {
+                    INT_ADD => "add",
+                    INT_SUB => "sub",
+                    INT_LESS => "less",
+                    _ => "eq",
+                };
+                let v = match fast {
+                    Some(v) => v,
+                    None => fixpt_runtime::num::int_op(cx.heap(), op, a, b).ok_or(Trap::Type { routine: name })?,
+                };
+                self.ds.push(v);
+            }
+            ADD | SUB | LESS => {
                 let b = self.fix(name)?;
                 let a = self.fix(name)?;
                 let v = match n {
-                    ADD | INT_ADD => Value::try_fixnum(a + b).ok_or(Trap::Overflow { routine: name })?,
-                    SUB | INT_SUB => Value::try_fixnum(a - b).ok_or(Trap::Overflow { routine: name })?,
+                    ADD => Value::try_fixnum(a + b).ok_or(Trap::Overflow { routine: name })?,
+                    SUB => Value::try_fixnum(a - b).ok_or(Trap::Overflow { routine: name })?,
                     _ => Value::boolean(a < b),
                 };
                 self.ds.push(v);
@@ -1338,6 +1362,7 @@ const UNDEFINED: i64 = routine("undefined") as i64;
 const INT_ADD: i64 = routine("int-add") as i64;
 const INT_SUB: i64 = routine("int-sub") as i64;
 const INT_LESS: i64 = routine("int-less") as i64;
+const INT_EQ: i64 = routine("int-eq") as i64;
 const PAIR_CAR: i64 = routine("pair-car") as i64;
 const PAIR_CDR: i64 = routine("pair-cdr") as i64;
 const FIELD: i64 = routine("field") as i64;

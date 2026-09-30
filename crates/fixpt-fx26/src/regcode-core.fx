@@ -244,7 +244,7 @@
                  ;; (Asked only where it can matter, and a literal first:
                  ;; what is known is looked up, and that costs.)
                  (literal (r-literal? x))
-                 (commutes (or (= r routine-int-add) (= r routine-eq)))
+                 (commutes (or (= r routine-int-add) (or (= r routine-eq) (= r routine-int-eq))))
                  (free-x (and swap (r-free-operand? env x)))
                  (free-y (and swap (and (not free-x) (r-free-operand? env y)))))
             (begin

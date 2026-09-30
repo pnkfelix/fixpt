@@ -323,8 +323,8 @@ pub mod cellular {
         // Typed primitives: operations whose operands the checker has typed,
         // without the tests the types make needless. Overflow is still
         // checked; a machine that is an oracle may check the rest too.
-        ("int-add", "( a b -- a+b ), ints: overflow checked"),
-        ("int-sub", "( a b -- a-b ), ints: overflow checked"),
+        ("int-add", "( a b -- a+b ), ints: a bignum past a fixnum"),
+        ("int-sub", "( a b -- a-b ), ints: a bignum past a fixnum"),
         ("int-less", "( a b -- a<b ), ints"),
         ("pair-car", "( pair -- a ), a pair"),
         ("pair-cdr", "( pair -- b ), a pair"),
@@ -332,6 +332,7 @@ pub mod cellular {
         // A variadic procedure's (`vsubr`, `vlambda`): however many values
         // it was called with, the frame's count, as a list.
         ("rest", "( -- list ), this frame's values, from slot 0, as a list"),
+        ("int-eq", "( a b -- a=b ), ints, fixnums or bignums"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 

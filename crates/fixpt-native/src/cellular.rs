@@ -678,22 +678,35 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(str(X15, DSP, 0));
             a.cont();
         }
-        // Typed: the checker has proved the operands' types.
+        // Typed: the checker has proved the operands ints. Fixnums here; a
+        // bignum, or a sum past a fixnum, the Rust machine's (PLAN.md, Q2).
         "int-add" | "int-sub" => {
+            let slow = a.label();
             a.e(ldp(X13, X14, DSP, 0));
+            a.e(orr(X15, X13, X14));
+            a.e(tst_low(X15, 3));
+            a.b_cond(Cond::Ne, slow);
             a.e(if name == "int-add" { adds(X15, X14, X13) } else { subs(X15, X14, X13) });
-            a.trap_if(Cond::Vs, Trap::Overflow { routine: name });
+            a.b_cond(Cond::Vs, slow);
             a.e(str_pre(X15, DSP, 8));
             a.cont();
+            a.bind(slow);
+            a.callout(n as u64);
         }
-        "int-less" => {
+        "int-less" | "int-eq" => {
+            let slow = a.label();
             a.e(ldp(X13, X14, DSP, 0));
+            a.e(orr(X15, X13, X14));
+            a.e(tst_low(X15, 3));
+            a.b_cond(Cond::Ne, slow);
             a.e(cmp(X14, X13));
             a.value(X16, Value::TRUE);
             a.value(X15, Value::FALSE);
-            a.e(csel(X15, X16, X15, Cond::Lt));
+            a.e(csel(X15, X16, X15, if name == "int-less" { Cond::Lt } else { Cond::Eq }));
             a.e(str_pre(X15, DSP, 8));
             a.cont();
+            a.bind(slow);
+            a.callout(n as u64);
         }
         // A list may be `nil`: `car` of it traps, as the Rust machine's does.
         "pair-car" | "pair-cdr" => {

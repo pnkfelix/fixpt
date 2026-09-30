@@ -131,15 +131,26 @@ fn the_identity_is_a_move_and_a_return() {
     assert_eq!(r.code, "mov x0, x1\nret\n");
 }
 
-/// Adding one is one instruction, and its check of overflow.
+/// Adding one is one instruction, with its checks: that the operand is a
+/// fixnum, and of overflow; either goes out of the way, to a bignum.
 #[test]
-fn adding_one_checks_only_overflow() {
+fn adding_one_checks_its_operand_and_overflow() {
     let r = run("(define* inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[41], FUEL);
     assert_eq!(r.direct, Ok("42".into()));
-    assert!(r.code.starts_with("adds x0, x1, #8\nb.vs @3\nret\n"), "{}", r.code);
+    assert!(r.code.starts_with("tst x1, #0x7\nb.ne @5\nadds x0, x1, #8\nb.vs @5\nret\n"), "{}", r.code);
     let r = run("(define* inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[(1 << 60) - 1], FUEL);
-    assert_eq!(r.direct, Err("integer overflow".into()));
-    assert!(r.rust.starts_with("!!"), "{}", r.rust);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("1152921504606846976".into()), "1152921504606846976"));
+    let r = run("(define* acc (subr pure (int int) int) (lambda (x y) (- x (- y x))))", "acc", &[-(1 << 60), (1 << 59)], FUEL);
+    assert_eq!(r.direct, Ok(r.rust.clone()));
+}
+
+/// A report: `helpers`' `run`, its code. `cargo test --release -p
+/// fixpt-fx26 --test direct -- --ignored show_helpers --nocapture`.
+#[test]
+#[ignore = "a report"]
+fn show_helpers() {
+    let r = run(&bench("helpers"), "run", &[0, 30, 0], FUEL);
+    println!("{}", r.code);
 }
 
 /// The benchmarks' procedures, as the Rust machine runs them.
@@ -254,7 +265,8 @@ fn fixed_width_operations_as_the_rust_machine_gives_them() {
 /// `i64` and `u64` raw in registers (`programs/native/raw-64.fx`): a loop's
 /// variable raw around it; one live across a call, boxed into the frame and
 /// unboxed again; ways meeting raw and boxed; bignums boxed on the way out;
-/// under collections too. Division by zero and `T->int` past a fixnum fail.
+/// under collections too. Division by zero fails; `T->int` past a fixnum is
+/// a bignum.
 #[test]
 fn i64_and_u64_raw_in_registers() {
     for gc_every in [None, Some(7)] {
@@ -264,7 +276,7 @@ fn i64_and_u64_raw_in_registers() {
     let defs = "(define* q (subr pure (int int) int) (lambda (a b) (u64->int (u64-quotient (int->u64 a) (int->u64 b)))))";
     assert!(matches!(&run(defs, "q", &[7, 0], FUEL).direct, Err(m) if m.contains("zero")));
     let defs = "(define* w (subr pure (int) int) (lambda (a) (i64->int (i64* (int->i64 a) (int->i64 a)))))";
-    assert!(matches!(&run(defs, "w", &[1 << 31], FUEL).direct, Err(m) if m.contains("overflow")));
+    assert_eq!(run(defs, "w", &[1 << 31], FUEL).direct, Ok("4611686018427387904".into()));
 }
 
 /// A leaf's registers and link, kept around a call with no collection: `b`
@@ -278,17 +290,19 @@ fn a_leaf_keeps_its_registers_around_a_primitive() {
     assert!(matches!(&run(defs, "q", &[7, 0], FUEL).direct, Err(m) if m.contains("zero")));
 }
 
-/// Past a fixnum, `quotient` (the least fixnum's by −1) and `u64->int` fail,
-/// as `+` and `*` do, on the Rust machine too: an `int` is a fixnum until it
-/// may be a bignum (PLAN.md, Q2), and code that adds one must not see one.
+/// An `int` is a bignum past a fixnum (PLAN.md, Q2), as native code makes
+/// it: sums, products and quotients past one, `=` and `<` on bignums made
+/// apart, back to fixnums, and the 64-bit types' conversions
+/// (`programs/run/bignums.fx`); as the Rust machine does, collecting often
+/// too, since the bignums are made where registers hold values.
 #[test]
-fn int_overflow_from_quotient_and_conversions_fails() {
+fn ints_are_bignums_natively() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("run/bignums"), "bignums", &[0], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
     let defs = "(define* q (subr pure (int int) int) (lambda (a b) (quotient a b)))";
-    let r = run(defs, "q", &[-(1 << 60), -1], FUEL);
-    assert!(matches!(&r.direct, Err(m) if m.contains("overflow")) && r.rust.contains("overflow"), "{:?} {}", r.direct, r.rust);
-    let defs = "(define* w (subr pure (int) int) (lambda (a) (+ (u64->int (int->u64 a)) 1)))";
-    let r = run(defs, "w", &[-1], FUEL);
-    assert!(matches!(&r.direct, Err(m) if m.contains("overflow")) && r.rust.contains("overflow"), "{:?} {}", r.direct, r.rust);
+    assert_eq!(run(defs, "q", &[-(1 << 60), -1], FUEL).direct, Ok("1152921504606846976".into()));
 }
 
 /// An array's element, by `field@`: inline in range, and out of range

@@ -74,7 +74,10 @@ impl StencilMachine {
             let other = set.stencils.iter().find(|s| s.0 == "other").expect("st_other").1;
             set.stencils.iter().find(|s| s.0 == name).map_or(other, |s| s.1)
         };
-        let total: usize = ROUTINES.len() * 16 + set.stencils.iter().map(|s| s.1.len().next_multiple_of(16)).sum::<usize>();
+        // Room for each routine's copy (the call-out's, for one with none of
+        // its own), and `start`'s.
+        let total: usize = ROUTINES.iter().map(|(name, _)| find(&stencil_name(name)).len().next_multiple_of(16)).sum::<usize>()
+            + find("start").len().next_multiple_of(16);
         let mut space = CodeSpace::new(total).expect("a code space");
         let mut place = |code: &[u8]| {
             let at = space.alloc(code.len(), 16).expect("room");

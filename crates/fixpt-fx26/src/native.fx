@@ -502,6 +502,41 @@
 
 ;;; ------------------------------------------------------------ routines
 
+;; `x13` = top, `x14` = the one below; to `slow` unless both are fixnums.
+(define n-both-fixnums (subr (maxeff assembles spin) (int) unit)
+  (lambda (slow)
+    (begin
+      (n-e (arm-ldp n-x13 n-x14 n-dsp 0))
+      (n-e (arm-orr n-x15 n-x13 n-x14))
+      (n-e (arm-tst-low n-x15 3))
+      (n-b-cond 1 slow))))
+;; `int-add` or `int-sub` (routine `n`) on two fixnums; the Rust machine's on a bignum, or past a
+;; fixnum.
+(define n-int-arith (subr (maxeff assembles spin) (int) unit)
+  (lambda (n)
+    (let ((slow (n-label)))
+      (begin
+        (n-both-fixnums slow)
+        (n-e (if (= n routine-int-add) (arm-adds n-x15 n-x14 n-x13) (arm-subs n-x15 n-x14 n-x13)))
+        (n-b-cond 6 slow)
+        (n-e (arm-str-pre n-x15 n-dsp 8))
+        (n-cont-code)
+        (n-bind slow)
+        (n-callout n)))))
+;; `int-less` or `int-eq` (routine `n`) on two fixnums; the Rust machine's on a bignum.
+(define n-int-compare (subr (maxeff assembles spin) (int) unit)
+  (lambda (n)
+    (let ((slow (n-label)))
+      (begin
+        (n-both-fixnums slow)
+        (n-e (arm-cmp n-x14 n-x13))
+        (n-value n-x16 n-true)
+        (n-value n-x15 n-false)
+        (n-e (arm-csel n-x15 n-x16 n-x15 (if (= n routine-int-less) 11 0)))
+        (n-e (arm-str-pre n-x15 n-dsp 8))
+        (n-cont-code)
+        (n-bind slow)
+        (n-callout n)))))
 ;; Routine `n`'s code, going on to the next cell's.
 (define n-routine (subr (maxeff assembles spin) (int) unit)
   (lambda (n)
@@ -575,23 +610,10 @@
          (n-e (arm-ldur n-x15 n-x14 (if (= n routine-car) -1 7)))
          (n-e (arm-str n-x15 n-dsp 0))
          (n-cont-code)))
-      ;; Typed: the checker has proved the operands' types.
-      ((or (= n routine-int-add) (= n routine-int-sub))
-       (begin
-         (n-e (arm-ldp n-x13 n-x14 n-dsp 0))
-         (n-e (if (= n routine-int-add) (arm-adds n-x15 n-x14 n-x13) (arm-subs n-x15 n-x14 n-x13)))
-         (n-trap-if 6 n-trap-overflow n)
-         (n-e (arm-str-pre n-x15 n-dsp 8))
-         (n-cont-code)))
-      ((= n routine-int-less)
-       (begin
-         (n-e (arm-ldp n-x13 n-x14 n-dsp 0))
-         (n-e (arm-cmp n-x14 n-x13))
-         (n-value n-x16 n-true)
-         (n-value n-x15 n-false)
-         (n-e (arm-csel n-x15 n-x16 n-x15 11))
-         (n-e (arm-str-pre n-x15 n-dsp 8))
-         (n-cont-code)))
+      ;; Typed: the checker has proved the operands ints. Fixnums here; a bignum, or a sum past a
+      ;; fixnum, the Rust machine's (PLAN.md, Q2).
+      ((or (= n routine-int-add) (= n routine-int-sub)) (n-int-arith n))
+      ((or (= n routine-int-less) (= n routine-int-eq)) (n-int-compare n))
       ;; A list may be `nil`: `car` of it traps, as the Rust machine's does.
       ((or (= n routine-pair-car) (= n routine-pair-cdr))
        (begin

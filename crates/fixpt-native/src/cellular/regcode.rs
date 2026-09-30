@@ -33,6 +33,29 @@ fn reg(k: usize) -> Reg {
 }
 
 impl Asm {
+    /// `RESULT` := primitive `p` (one that never collects) of `RESULT` and
+    /// `y`, called in Rust (`pure_call`) with no safepoint, REG1…REG8 and
+    /// the link kept on the machine stack around it; its failure a trap.
+    fn pure_call(&mut self, p: usize, y: Reg) {
+        self.e(mov(X14, y));
+        for r in [1, 3, 5, 7] {
+            self.e(stp_pre(r, r + 1, SP, -16));
+        }
+        self.e(stp_pre(LR, 31, SP, -16));
+        self.e(mov(3, X14));
+        self.e(mov(2, RESULT));
+        self.e(mov(0, ST));
+        self.es(&mov_imm64(1, p as u64));
+        self.e(ldr(X16, ST, off(offset_of!(State, pure))));
+        self.e(blr(X16));
+        self.e(mov(X13, 1));
+        self.e(ldp_post(LR, 31, SP, 16));
+        for r in [7, 5, 3, 1] {
+            self.e(ldp_post(r, r + 1, SP, 16));
+        }
+        self.e(cmp_imm(X13, 0));
+        self.trap_if(Cond::Ne, Trap::Prim(String::new()));
+    }
     /// `IP` := the address of the running register word's field `fields`,
     /// its last, from which field `f` is `8 × (fields − f)` bytes up.
     fn pool(&mut self, fields: usize) {
@@ -653,18 +676,42 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     }
                     X13
                 };
-                match ROUTINES[k(o(0))].0 {
-                    r @ ("int-add" | "int-sub") => {
-                        a.e(if r == "int-add" { adds(RESULT, RESULT, other) } else { subs(RESULT, RESULT, other) });
-                        a.trap_if(Cond::Vs, Trap::Overflow { routine: if r == "int-add" { "int-add" } else { "int-sub" } });
+                // Ints: fixnums here; a bignum, or a sum past a fixnum, the
+                // runtime's, called with no safepoint (PLAN.md, Q2).
+                let r = ROUTINES[k(o(0))].0;
+                let slow_prim = match r {
+                    "int-add" => Some("%fx26-add"),
+                    "int-sub" => Some("%fx26-sub"),
+                    "int-less" => Some("%fx26-int-less"),
+                    "int-eq" => Some("%fx26-int-eq"),
+                    _ => None,
+                };
+                let (slow, done) = (a.label(), a.label());
+                if slow_prim.is_some() {
+                    a.e(orr(X15, RESULT, other));
+                    a.e(tst_low(X15, 3));
+                    a.b_cond(Cond::Ne, slow);
+                }
+                match r {
+                    "int-add" | "int-sub" => {
+                        a.e(if r == "int-add" { adds(X15, RESULT, other) } else { subs(X15, RESULT, other) });
+                        a.b_cond(Cond::Vs, slow);
+                        a.e(mov(RESULT, X15));
                     }
-                    r @ ("int-less" | "eq") => {
+                    "int-less" | "eq" | "int-eq" => {
                         a.e(cmp(RESULT, other));
                         a.value(X16, Value::TRUE);
                         a.value(X15, Value::FALSE);
-                        a.e(csel(RESULT, X16, X15, if r == "eq" { Cond::Eq } else { Cond::Lt }));
+                        a.e(csel(RESULT, X16, X15, if r == "int-less" { Cond::Lt } else { Cond::Eq }));
                     }
                     r => return Err(format!("{name} {r} in register code")),
+                }
+                if let Some(pn) = slow_prim {
+                    a.b(done);
+                    a.bind(slow);
+                    let p = fixpt_runtime::PRIMITIVES.iter().position(|d| d.name == pn).expect("a primitive");
+                    a.pure_call(p, other);
+                    a.bind(done);
                 }
             }
             // A primitive that never collects: called with no safepoint,
@@ -687,24 +734,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     }
                     _ => X13,
                 };
-                a.e(mov(X14, y));
-                for r in [1, 3, 5, 7] {
-                    a.e(stp_pre(r, r + 1, SP, -16));
-                }
-                a.e(stp_pre(LR, 31, SP, -16));
-                a.e(mov(3, X14));
-                a.e(mov(2, RESULT));
-                a.e(mov(0, ST));
-                a.es(&mov_imm64(1, p as u64));
-                a.e(ldr(X16, ST, off(offset_of!(State, pure))));
-                a.e(blr(X16));
-                a.e(mov(X13, 1));
-                a.e(ldp_post(LR, 31, SP, 16));
-                for r in [7, 5, 3, 1] {
-                    a.e(ldp_post(r, r + 1, SP, 16));
-                }
-                a.e(cmp_imm(X13, 0));
-                a.trap_if(Cond::Ne, Trap::Prim(String::new()));
+                a.pure_call(p, y);
             }
             "field" => {
                 a.field_of(RESULT, RESULT, k(o(0)));

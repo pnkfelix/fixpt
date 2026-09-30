@@ -150,13 +150,12 @@ struct DState {
 }
 
 /// The traps this code raises, by code.
-const TRAPS: [&str; 7] = ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed", "car or cdr of nil", "division by zero"];
+const TRAPS: [&str; 6] = ["", "out of fuel", "stack overflow", "a primitive failed", "car or cdr of nil", "division by zero"];
 const OUT_OF_FUEL: u32 = 1;
 const STACK_OVERFLOW: u32 = 2;
-const OVERFLOW: u32 = 3;
-const PRIM_FAILED: u32 = 4;
-const NOT_A_PAIR: u32 = 5;
-const DIVIDED_BY_ZERO: u32 = 6;
+const PRIM_FAILED: u32 = 3;
+const NOT_A_PAIR: u32 = 4;
+const DIVIDED_BY_ZERO: u32 = 5;
 
 /// What a call-out does: `cons`; a runtime primitive of `n` arguments; a
 /// native closure over `n` values of the code in the state's `aux`.
@@ -1106,6 +1105,7 @@ impl Compiling<'_> {
         let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
         let mut edge_stubs: Vec<(Label, Vec<usize>, Label)> = Vec::new();
+        let mut int_slows: Vec<IntSlow> = Vec::new();
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
             let unbox = si_at.get(&to).map(|&t| reps::unboxes(&reps_out[from], &reps_in[t])).unwrap_or_default();
             if unbox.is_empty() {
@@ -1379,20 +1379,57 @@ impl Compiling<'_> {
                         d = reg(cells[j + 1]);
                         si += 1;
                     }
-                    match (r, small) {
-                        ("int-add", Some(n)) => a.e(adds_imm(d, x, n)),
-                        ("int-add", None) => a.e(adds(d, x, other)),
-                        ("int-sub", Some(n)) => a.e(subs_imm(d, x, n)),
-                        ("int-sub", None) => a.e(subs(d, x, other)),
-                        ("int-less" | "eq", Some(n)) => a.e(cmp_imm(x, n)),
-                        ("int-less" | "eq", None) => a.e(cmp(x, other)),
+                    // Ints: fixnums here; a bignum, or a sum past a fixnum,
+                    // the runtime's, called with no collection, out of the
+                    // way (`IntSlow`; PLAN.md, Q2).
+                    let prim = match r {
+                        "int-add" => Some("%fx26-add"),
+                        "int-sub" => Some("%fx26-sub"),
+                        "int-less" => Some("%fx26-int-less"),
+                        "int-eq" => Some("%fx26-int-eq"),
+                        "eq" => None,
                         _ => return decline(format!("{op} {r}")),
                     }
-                    let cond = if r == "eq" { Cond::Eq } else { Cond::Lt };
+                    .map(|n| fixpt_runtime::PRIMITIVES.iter().position(|d| d.name == n).expect("a primitive"))
+                    // `=` with a fixnum is the same word: a bignum is never
+                    // one that would fit a fixnum.
+                    .filter(|_| !(r == "int-eq" && op == "op2imm" && o(1).is_fixnum()));
+                    let (entry, back) = (a.label(), a.label());
+                    let mut slow = IntSlow { entry, overflow: None, back, x, y: other, imm: small, into: d, prim: 0, sub: r == "int-sub", branch: None };
+                    if prim.is_some() {
+                        if small.is_some() || other == x {
+                            a.e(tst_low(x, 3));
+                        } else {
+                            a.e(orr(X13, x, other));
+                            a.e(tst_low(X13, 3));
+                        }
+                        a.to(entry, Fix::If(Cond::Ne));
+                    }
+                    // The sum in its register, which the slow path undoes to
+                    // the operand if it is that; in a scratch one if it is the
+                    // other operand's, which could not be.
+                    let dst = if small.is_none() && d == other { X13 } else { d };
+                    match (r, small) {
+                        ("int-add", Some(n)) => a.e(adds_imm(dst, x, n)),
+                        ("int-add", None) => a.e(adds(dst, x, other)),
+                        ("int-sub", Some(n)) => a.e(subs_imm(dst, x, n)),
+                        ("int-sub", None) => a.e(subs(dst, x, other)),
+                        (_, Some(n)) => a.e(cmp_imm(x, n)),
+                        (_, None) => a.e(cmp(x, other)),
+                    }
+                    let cond = if r == "int-less" { Cond::Lt } else { Cond::Eq };
                     match r {
-                        "int-add" | "int-sub" => trap(&mut a, &mut stubs, OVERFLOW, Cond::Vs),
+                        "int-add" | "int-sub" => {
+                            let ov = a.label();
+                            a.to(ov, Fix::If(Cond::Vs));
+                            if dst != d {
+                                a.e(mov(d, dst));
+                            }
+                            slow.overflow = Some(ov);
+                        }
                         // A test that only a branch reads: the branch on the
-                        // flags, with no boolean made.
+                        // flags, with no boolean made (on the slow path, on
+                        // the boolean the call made).
                         _ => match joinable(si - 1) {
                             Some(j)
                                 if matches!(op_at(j), "branchf" | "brancht")
@@ -1403,23 +1440,31 @@ impl Compiling<'_> {
                                 let to = (j as i64 + 2 + cells[j + 1].as_fixnum()) as usize;
                                 // `branchf` goes where the test fails; `brancht`
                                 // where it holds.
-                                let cond = match (op_at(j), r) {
-                                    ("branchf", "eq") => Cond::Ne,
-                                    ("branchf", _) => Cond::Ge,
-                                    (_, "eq") => Cond::Eq,
-                                    _ => Cond::Lt,
+                                let taken_if_true = op_at(j) == "brancht";
+                                let cond = match (taken_if_true, cond) {
+                                    (false, Cond::Eq) => Cond::Ne,
+                                    (false, _) => Cond::Ge,
+                                    (true, c) => c,
                                 };
                                 let l = edge(&mut a, si, to);
                                 a.to(l, Fix::If(cond));
+                                slow.branch = Some((l, taken_if_true));
+                                slow.into = RESULT;
                                 si += 1;
                             }
                             _ => {
                                 a.es(&mov_imm64(X9, Value::TRUE.raw()));
                                 a.es(&mov_imm64(X17, Value::FALSE.raw()));
                                 a.e(csel(RESULT, X9, X17, cond));
+                                slow.into = RESULT;
                             }
                         },
                     }
+                    if let Some(p) = prim {
+                        slow.prim = p;
+                        int_slows.push(slow);
+                    }
+                    a.bind(back);
                 }
                 "field" => {
                     let off = field_off(k(o(0)));
@@ -1610,7 +1655,11 @@ impl Compiling<'_> {
                             }
                             _ => X17,
                         };
-                        raw_fast(&mut a, &mut stubs, signed, what, y);
+                        if what == "->int" {
+                            box_reg(&mut a, self.callouts, RESULT, signed);
+                        } else {
+                            raw_fast(&mut a, &mut stubs, signed, what, y);
+                        }
                         continue;
                     }
                     let y = match op {
@@ -1869,6 +1918,10 @@ impl Compiling<'_> {
             }
         }
         a.bind(labels[cells.len()]);
+        // The ints' slow paths.
+        for slow in int_slows {
+            slow.emit(&mut a, self.callouts, &mut stubs);
+        }
         // The ways in that unbox first.
         for (l, unbox, to) in edge_stubs {
             a.bind(l);
@@ -1919,6 +1972,62 @@ impl Compiling<'_> {
         self.procs[p].code = a.finish()?;
         self.procs[p].len = own;
         Ok(())
+    }
+}
+
+/// The slow path of an `int` operation (`op2`): a bignum operand, or a
+/// sum past a fixnum, given to the runtime (`int_op`), with no collection.
+struct IntSlow {
+    /// Where an operand is no fixnum; where the sum overflowed, in `into`,
+    /// if it is a sum or difference; where to go on.
+    entry: Label,
+    overflow: Option<Label>,
+    back: Label,
+    /// The operands (the second a register, or a small constant), where the
+    /// value goes, the primitive, and whether it subtracts.
+    x: Reg,
+    y: Reg,
+    imm: Option<u32>,
+    into: Reg,
+    prim: usize,
+    sub: bool,
+    /// A comparison a branch reads: where it goes, and whether when true.
+    branch: Option<(Label, bool)>,
+}
+
+impl IntSlow {
+    fn emit(&self, a: &mut Asm, callouts: &mut Vec<Callout>, stubs: &mut Vec<(Label, u32)>) {
+        // A sum written over its operand: the operand again, the wrapped
+        // sum undone.
+        if let Some(ov) = self.overflow {
+            a.bind(ov);
+            if self.into == self.x {
+                match (self.imm, self.sub) {
+                    (Some(n), false) => a.e(sub_imm(self.x, self.into, n)),
+                    (Some(n), true) => a.e(add_imm(self.x, self.into, n)),
+                    (None, false) => a.e(sub(self.x, self.into, self.y)),
+                    (None, true) => a.e(add(self.x, self.into, self.y)),
+                }
+            }
+        }
+        a.bind(self.entry);
+        let y = match self.imm {
+            Some(n) => {
+                a.e(movz(X16, n, 0));
+                X16
+            }
+            None => self.y,
+        };
+        pure_call(a, callouts, Callout::Pure { p: self.prim, n: 2 }, &[self.x, y], self.into);
+        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+        a.e(cmp_imm(X9, 0));
+        trap_at(a, stubs, PRIM_FAILED, Cond::Ne);
+        if let Some((l, when_true)) = self.branch {
+            a.es(&mov_imm64(X16, Value::TRUE.raw()));
+            a.e(cmp(RESULT, X16));
+            a.to(l, Fix::If(if when_true { Cond::Eq } else { Cond::Ne }));
+        }
+        a.to(self.back, Fix::B);
     }
 }
 
@@ -2004,9 +2113,9 @@ fn convert(a: &mut Asm, callouts: &mut Vec<Callout>, cs: &[Convert]) {
 
 /// An `i64` (signed) or `u64` operation `what` (as `reps::raw_op` names
 /// it) on raw `RESULT` and `y` (raw, or a shift's count, a fixnum), into
-/// `RESULT`: raw, or a value (a comparison's boolean; `T->int`'s fixnum,
-/// which past one fails as `+` does). Its arithmetic wraps, as the
-/// machine's does. Uses X13 to X16.
+/// `RESULT`: raw, or a comparison's boolean (`T->int` is a boxing,
+/// `box_reg`). Its arithmetic wraps, as the machine's does. Uses X13 to
+/// X16.
 fn raw_fast(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, signed: bool, what: &str, y: Reg) {
     let x = RESULT;
     let compare = |c: Cond| match (c, signed) {
@@ -2066,21 +2175,8 @@ fn raw_fast(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, signed: bool, what: &str
                 _ => lsrv(RESULT, x, X13),
             });
         }
-        _ => {
-            // `->int`.
-            if signed {
-                a.e(lsl_imm(X16, x, 3));
-                a.e(asr_imm(X13, X16, 3));
-                a.e(cmp(X13, x));
-                trap_at(a, stubs, OVERFLOW, Cond::Ne);
-                a.e(mov(RESULT, X16));
-            } else {
-                a.e(lsr_imm(X13, x, 60));
-                a.e(cmp_imm(X13, 0));
-                trap_at(a, stubs, OVERFLOW, Cond::Ne);
-                a.e(lsl_imm(RESULT, x, 3));
-            }
-        }
+        // `->int` is `box_reg`'s.
+        _ => unreachable!("a 64-bit operation"),
     }
 }
 

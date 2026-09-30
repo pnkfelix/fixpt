@@ -370,6 +370,29 @@ pub enum RoundMode {
     Round,
 }
 
+/// FX-26's `int` operation `op` (`add`, `sub`, `mul`, `quotient`,
+/// `modulo`, `less`, `eq`) on exact integers, fixnums or bignums: what every
+/// machine's slow path computes, and the lowering's primitives. A result
+/// that fits a fixnum is one. None where an operand is no exact integer, or
+/// a divisor is 0. It allocates, and never collects.
+pub fn int_op(heap: &mut Heap, op: &str, a: Value, b: Value) -> Option<Value> {
+    let (x, y) = (N::load(heap, a)?, N::load(heap, b)?);
+    if !(x.is_exact() && x.is_integer() && y.is_exact() && y.is_integer()) {
+        return None;
+    }
+    let n = match op {
+        "add" => x.add(&y),
+        "sub" => x.sub(&y),
+        "mul" => x.mul(&y),
+        "quotient" => x.quotient(&y).ok()?,
+        "modulo" => x.modulo(&y).ok()?,
+        "less" => return Some(Value::boolean(x.cmp_num(&y) == Some(std::cmp::Ordering::Less))),
+        "eq" => return Some(Value::boolean(x.num_eq(&y))),
+        _ => return None,
+    };
+    Some(n.store(heap))
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum NumError {
     DivideByZero,

@@ -120,11 +120,30 @@ fn int(rt: &mut Runtime, v: Value) -> Outcome<i64> {
 }
 
 /// `op` on two fixnums, a fixnum or "integer overflow".
-fn fx26_arith(rt: &mut Runtime, a: &[Value], op: fn(i64, i64) -> Option<i64>) -> Outcome<Value> {
-    let (x, y) = (int(rt, a[0])?, int(rt, a[1])?);
-    match op(x, y).and_then(Value::try_fixnum) {
+/// FX-26's `int` operation `op` (`crate::num::int_op`): on exact integers,
+/// a bignum past a fixnum (PLAN.md, Q2).
+fn fx26_int(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
+    // Fixnums, the common case, at once.
+    if a[0].is_fixnum() && a[1].is_fixnum() {
+        let (x, y) = (a[0].as_fixnum(), a[1].as_fixnum());
+        let fast = match op {
+            "add" => x.checked_add(y).and_then(Value::try_fixnum),
+            "sub" => x.checked_sub(y).and_then(Value::try_fixnum),
+            "mul" => x.checked_mul(y).and_then(Value::try_fixnum),
+            "less" => Some(Value::boolean(x < y)),
+            "eq" => Some(Value::boolean(x == y)),
+            _ => None,
+        };
+        if let Some(v) = fast {
+            return Ok(v);
+        }
+    }
+    if matches!(op, "quotient" | "modulo") && a[1] == Value::fixnum(0) {
+        return rt.fail("division by zero", &[a[0], a[1]]);
+    }
+    match crate::num::int_op(&mut rt.heap, op, a[0], a[1]) {
         Some(v) => Ok(v),
-        None => rt.fail("integer overflow", &[a[0], a[1]]),
+        None => rt.type_error("an exact integer", if a[0].is_fixnum() { a[1] } else { a[0] }),
     }
 }
 
@@ -267,14 +286,9 @@ fn fixed_op(rt: &mut Runtime, a: &[Value], op: &str, w: Width) -> Outcome<Value>
             let low = i128::try_from(low).expect("under 2^64");
             return Ok(exact_out(rt, w.wrap(low)));
         }
-        // `T->int`: an `int` is a fixnum until it may be a bignum (PLAN.md,
-        // Q2), so past one it fails, as `+` does.
         "to" => {
             let x = fixed_in(rt, a[0], w)?;
-            return match i64::try_from(x).ok().and_then(Value::try_fixnum) {
-                Some(v) => Ok(v),
-                None => rt.fail("integer overflow", &[a[0]]),
-            };
+            return Ok(exact_out(rt, x));
         }
         _ => {}
     }
@@ -1079,18 +1093,15 @@ prims! {
         let Some((start, _)) = s.char_indices().chain(std::iter::once((s.len(), ' '))).nth(from.max(0) as usize) else { return Ok(Value::fixnum(-1)) };
         Ok(Value::fixnum(s[start..].find(&sub).map_or(-1, |b| from.max(0) + s[start..start + b].chars().count() as i64)))
     });
-    // FX-26's `+`, `-` and `*`: on fixnums, and failing past them ("integer
-    // overflow"), as every machine's code does (PLAN.md, Q2).
-    "%fx26-add", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_add));
-    "%fx26-sub", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_sub));
-    "%fx26-mul", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_mul));
-    // And `quotient`: the least fixnum's by −1 is past one.
-    "%fx26-quotient", 2, Some(2), simple!(|rt, a| {
-        if a[1] == Value::fixnum(0) {
-            return rt.fail("division by zero", &[a[0], a[1]]);
-        }
-        fx26_arith(rt, a, i64::checked_div)
-    });
+    // FX-26's `+`, `-`, `*` and `quotient`: `int` is an exact integer, a
+    // bignum past a fixnum, on every machine (PLAN.md, Q2).
+    "%fx26-add", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "add"));
+    "%fx26-sub", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "sub"));
+    "%fx26-mul", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "mul"));
+    "%fx26-quotient", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "quotient"));
+    // `<` and `=` on ints, for machines' slow paths (a bignum).
+    "%fx26-int-less", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "less"));
+    "%fx26-int-eq", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "eq"));
     // FX-26's `parse-number`: the number `a[0]` spells in radix `a[1]`
     // (2 to 36), sign and all, in a list; or none.
     "%fx26-parse-number", 2, Some(2), simple!(|rt, a| {

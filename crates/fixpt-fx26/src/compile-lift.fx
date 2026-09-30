@@ -339,9 +339,10 @@
           ((string=? name ">") (begin (c-op c routine-swap) (c-op c routine-int-less)))
           ((string=? name "<=") (begin (c-op c routine-swap) (c-op c routine-int-less) (c-not c)))
           ((string=? name ">=") (begin (c-op c routine-int-less) (c-not c)))
-          ;; Characters are immediates, so compared as symbols are.
-          ((or (string=? name "=") (or (string=? name "symbol=?") (string=? name "wglobal=?"))
-               (string=? name "char=?"))
+          ;; Ints may be bignums, compared by value; characters are immediates, so compared as
+          ;; symbols are.
+          ((string=? name "=") (c-op c routine-int-eq))
+          ((or (string=? name "symbol=?") (or (string=? name "wglobal=?") (string=? name "char=?")))
            (c-op c routine-eq))
           ((string=? name "cons") (c-op c routine-cons))
           ((string=? name "car") (c-op c routine-pair-car))

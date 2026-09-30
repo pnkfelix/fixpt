@@ -128,7 +128,8 @@ are in the last section, "Log: the glance's details", and in
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
 bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
 `u32`/`u64`, wrapping, their operations in line natively, `i64` and `u64`
-raw in native registers; left: `int` a bignum); Q3 telemetry's counts;
+raw in native registers, `int` a bignum; left: a fixnum version of native
+code, big literals); Q3 telemetry's counts;
 Q4 floats (`f64` boxed, `f32`); Q5 `eq?` and address-hashed tables (Larceny's tablets);
 Q6 flat arrays; Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
@@ -1969,7 +1970,25 @@ library.
   too, is `%fx26-mul`. Test `overflow_traps_on_every_machine`. The
   lowered column of `fixpt bench` got faster (fixnum primitives, not the
   generic ones). Then:
-- `int` as a bignum: the fixnum fast path stays one `adds` and a branch;
+- Done (2026-09-30, the user's "make int a bignum first"): `int` is an
+  exact integer on every path (`docs/fx26.md`, "`int` is a bignum").
+  Built on the runtime's bignums (`num::int_op`, `num_bigint`, which the
+  lowered path already used), not (c)'s library in FX-26, which can
+  replace it later behind the same call-outs: faster natively, and the
+  machines agree with the lowered path by construction. Every machine's
+  `int-add`, `int-sub`, `int-less` and a new `int-eq` (for `=`, which
+  compiled to `eq`, the same word) keep the fixnums' case in line and
+  call the runtime otherwise, with no collection; stencils and the hand
+  machine by their call-out. Tests `ints_are_bignums_on_every_machine`,
+  `ints_are_bignums_natively`, `bignums_run`. The cost, natively: each
+  `int` add or compare tests its operands' tags (`helpers` 2.1 → 3.8 ms,
+  `loop` 4.5 → 6.6, `fib` 2.2 → 2.8, measured old against new). Next for
+  that: a fixnum version of a procedure's code, in which a value tested
+  once stays known, and an overflow or a bignum goes over to the general
+  version (native only). Not done: literals past a fixnum (neither
+  parser reads one; `(* 1000000000000 1000000000000)` does); the FX-26
+  evaluator has no fixed-width operations. The first plan was: the fixnum
+  fast path stays one `adds` and a branch;
   the branch goes to a call-out that makes or uses a bignum (the Scheme
   engine's `N::Big` and `num_bigint`) instead of trapping. Comparison,
   `=`, `quotient`/`modulo`, hashing and printing take bignums;
@@ -1995,7 +2014,8 @@ library.
   `i64->int`) gave a bignum `int`, and `quotient` of the least fixnum by
   −1 one too, which compiled code, taking `int` for a fixnum, added as a
   pointer (the register machine answered wrongly): both now fail
-  "integer overflow", as `+` and `*` do, until `int` is a bignum. And the
+  "integer overflow", as `+` and `*` did, until `int` was a bignum (then
+  they gave bignums). And the
   register machine's inline `modulo` read a bignum as a fixnum.
 - Done (2026-09-30, the user's "storing 64 bits in registers"): `i64`
   and `u64` raw in native registers, and only there (`fixpt_native::

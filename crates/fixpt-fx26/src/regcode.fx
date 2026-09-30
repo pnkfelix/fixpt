@@ -412,12 +412,11 @@
             ((and (<= n 2) (r-never-collects? name)) (s-pure p))
             (else (s-prim p))))))
 
-;; Whether `name` is an equality `op2` does: of integers, characters,
-;; symbols or globals.
+;; Whether `name` is an equality `op2 eq` does, of the same word: of characters, symbols or
+;; globals. (`=`, of ints, which may be bignums, is `int-eq`'s.)
 (define r-eq-name? (subr (read @globals) (string) bool)
   (lambda (name)
-    (or (string=? name "=")
-        (or (string=? name "char=?") (or (string=? name "symbol=?") (string=? name "wglobal=?"))))))
+    (or (string=? name "char=?") (or (string=? name "symbol=?") (string=? name "wglobal=?")))))
 ;; Whether `name` makes a box: a prompt tag or a mark key.
 (define r-box-name? (subr (read @globals) (string) bool)
   (lambda (name)
@@ -449,6 +448,7 @@
             ((is ">" 2) (s-op2 routine-int-less #t #f))
             ((is "<=" 2) (s-op2 routine-int-less #t #t))
             ((is ">=" 2) (s-op2 routine-int-less #f #t))
+            ((is "=" 2) (s-op2 routine-int-eq #f #f))
             ((and (r-eq-name? name) (= n 2)) (s-op2 routine-eq #f #f))
             ((is "not" 1) (s-op2imm routine-eq (wcell-bool #f)))
             ((or (is "null?" 1) (is "datum-null?" 1)) (s-op2imm routine-eq (wcell-nil)))

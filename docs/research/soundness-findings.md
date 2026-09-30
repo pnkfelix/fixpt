@@ -36,7 +36,7 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 | F9   | fixed: a `cwcc` call also says `spin` when its receiver's latent effect has a `comefrom`, since a continuation captured inside it could carry a call of `k` past `cwcc`'s return. Both checkers. Test `terminate/cwcc-captures.fx`                                                          |
 | F10  | fixed (2026-09-29): a size binder solved from `n + k` against a size `s` is `s - k`, and must be shown no less than 0 by the facts in scope; `head` of an empty list solved `n = -1`. Both checkers. Tests `sizes/solved-*.fx`                                                              |
 | F11  | fixed (2026-09-29): `apply` gave a `vlambda` the caller's list, typed `acyclic` though writable; a `set-cdr!` made it cyclic and a `pure` walk looped. `apply` now copies (a cycle is an error) unless the list is at `acyclic`. Tests `run/apply-fresh.fx`, `native/apply-cyclic.fx`       |
-| F12  | fixed (2026-09-29): `u64->int`, `i64->int`, and `quotient` of the least fixnum by -1, gave a bignum `int`, which compiled code takes for a fixnum (the register machine added one as a pointer). They fail "integer overflow" now. Test `int_overflow_from_quotient_and_conversions_fails`  |
+| F12  | fixed (2026-09-29): `u64->int`, `i64->int` and `quotient` gave a bignum `int`, which compiled code took for a fixnum (the register machine added one as a pointer). Failed "integer overflow" at first; since 2026-09-30 every machine takes bignum `int`s                                  |
 
 **Re-verification of F1–F7, A2, A3 against d83face** (fresh offline build,
 2026-09-27). F1: the name-shadowing probe (`known.fx`) is now rejected

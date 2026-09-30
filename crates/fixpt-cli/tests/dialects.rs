@@ -306,12 +306,12 @@ fn standard_values_and_parse_nat_on_every_machine() {
     }
 }
 
-/// Overflow past a fixnum fails alike on every machine, the lowered
-/// program too, which promoted to a bignum (`programs/overflow.fx`).
+/// Past a fixnum, an `int` is a bignum alike on every machine, the lowered
+/// program too (`programs/overflow.fx`).
 #[test]
-fn overflow_traps_on_every_machine() {
+fn ints_are_bignums_on_every_machine() {
     for (m, text) in on_every_machine(include_str!("programs/overflow.fx")) {
-        assert!(text.contains("overflow") && !text.contains("1180591620717411303424"), "{m:?}: {text}");
+        assert!(text.contains("1180591620717411303424 : int"), "{m:?}: {text}");
     }
 }
 

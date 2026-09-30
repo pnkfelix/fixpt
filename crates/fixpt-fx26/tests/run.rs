@@ -75,6 +75,13 @@ fn list_runs() {
     assert_eq!(run(include_str!("programs/run/list-regions.fx")), "54");
 }
 
+/// `int` is a bignum past a fixnum, lowered too (`programs/run/bignums.fx`).
+#[test]
+fn bignums_run() {
+    let v = run(include_str!("programs/run/bignums.fx"));
+    assert!(v.starts_with("(265252859812191058636308480000000 354224848179261915075 1 1 0 5 30 "), "{v}");
+}
+
 /// `apply` gives a variadic procedure a fresh list (F11): one that is at
 /// `acyclic` as its type says, not the caller's, which may be written after.
 /// A cyclic list is an error, not a loop.

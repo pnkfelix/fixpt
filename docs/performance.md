@@ -2052,3 +2052,25 @@ The operations are then the machine's: `add`, `mul`, `eor`, `udiv`,
 | ---------------------------------- | --------------:| ----:|
 | FNV-1a in `u64`                    |         1586.8 | 11.0 |
 | FNV-1a in `u32` (unchanged)        |           12.0 | 12.0 |
+
+## `int` is a bignum: the cost of the tag tests (2026-09-30)
+
+An `int` add, subtract or compare now tests that its operands are
+fixnums (`orr` of the two, `tst` of the tag bits, a branch) before the
+fixnums' instruction; overflow or a bignum goes out of the way, to the
+runtime with no collection. `=` against a fixnum constant needs no test
+(a bignum never has a fixnum's value), nor does an operand added to
+itself need two. Measured old against new, back to back, natively:
+
+| ms, native | before | after |
+| ---------- | ------:| -----:|
+| `helpers`  |    2.1 |   3.8 |
+| `loop`     |    4.5 |   6.6 |
+| `fib`      |    2.2 |   2.8 |
+| `lists`    |    8.5 |   7.0 |
+
+(Comparing words first for `=`, and testing both operands only when they
+differ, was tried and was slower: a loop's test is mostly of different
+words.) The way back: a version of a procedure's code for fixnums, in
+which a value tested once stays known, and whose slow paths go over to the
+general version.

@@ -388,7 +388,8 @@ impl Compiler<'_> {
             (">", 2) => op2("int-less", true, false),
             ("<=", 2) => op2("int-less", true, true),
             (">=", 2) => op2("int-less", false, true),
-            ("=" | "char=?" | "symbol=?" | "wglobal=?", 2) => op2("eq", false, false),
+            ("=", 2) => op2("int-eq", false, false),
+            ("char=?" | "symbol=?" | "wglobal=?", 2) => op2("eq", false, false),
             ("not", 1) => Some(Std::Op2Imm("eq", Value::FALSE)),
             ("null?" | "datum-null?", 1) => Some(Std::Op2Imm("eq", Value::NULL)),
             ("car" | "datum-car", 1) => Some(Std::Op1("pair-car")),
@@ -1083,7 +1084,7 @@ impl Compiler<'_> {
                     let free = |c: &mut Self, e: ExpId| c.r_simple(e) || c.r_const(env, e).is_some();
                     if swap && !free(self, x) && !free(self, y) {
                         self.r_binary_swapped(g, r, x, y, env, te)?;
-                    } else if swap || (matches!(r, "int-add" | "eq") && literal(self, x) && self.r_const(env, y).is_none()) {
+                    } else if swap || (matches!(r, "int-add" | "eq" | "int-eq") && literal(self, x) && self.r_const(env, y).is_none()) {
                         self.r_binary(g, r, y, x, env, te)?;
                     } else {
                         self.r_binary(g, r, x, y, env, te)?;

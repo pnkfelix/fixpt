@@ -535,8 +535,10 @@ macro_rules! int_arith {
         routine!($name, |base, ip, cur, dsp, rsp, st, fp, w| {
             let ($b, $a) = unsafe { (rd(dsp), rd(dsp + 8)) };
             let (x, overflowed): (u64, bool) = $op;
-            if overflowed {
-                return unsafe { trap(st, TRAP_OVERFLOW, $r, base, ip, cur, dsp, rsp, fp) };
+            // A bignum, or a sum past a fixnum: the Rust side's, which
+            // makes or compares bignums (PLAN.md, Q2).
+            if overflowed || ($a | $b) & TAG_MASK != 0 {
+                callout!($r, base, ip, cur, dsp, rsp, st, fp)
             }
             let dsp = dsp + 8;
             unsafe { wr(dsp, x) };
@@ -554,6 +556,7 @@ int_arith!(st_int_sub, R_INT_SUB, |a, b| {
     (x as u64, o)
 });
 int_arith!(st_int_less, R_INT_LESS, |a, b| (if (a as i64) < (b as i64) { TRUE } else { FALSE }, false));
+int_arith!(st_int_eq, R_INT_EQ, |a, b| (if a == b { TRUE } else { FALSE }, false));
 
 // A list may be `nil`: `car` of it traps, as `car`'s does.
 pair_part!(st_pair_car, R_PAIR_CAR, 0);
