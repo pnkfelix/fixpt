@@ -670,6 +670,22 @@ So in a region the same program takes two thirds of the time: nothing
 is copied, and the chunk, reused round after round, stays in cache. The
 other machines call in for every `rcons`, as before.
 
+### `rcons` inline natively too (2026-09-29)
+
+The native compiler (`fixpt_native::direct`, the `native` column of
+`fixpt bench`) came after that change and never had it: every `rcons` was
+a call-out, and `lists-region` took 60 ms natively, eight times the
+register machine's 7.5 ms, while `lists` took 8.4. It now does as
+register code does, from the same table (`DState::region_table`), calling
+in for the same cases.
+
+| machine | `lists` | `lists-region` |
+| ------- | ------- | -------------- |
+| native  | 8.5 ms  | 60.3 → 7.0 ms  |
+
+Test `native/region-cons.fx`, in the native session test, under
+collections.
+
 ### After regions as values, closures in regions, escapes and reaps
 
 Nothing measured moved. Lowered, a `letrena` is now a `dynamic-wind` (so

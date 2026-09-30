@@ -137,6 +137,9 @@ struct DState {
     /// Set by a call of what is not native code that came back with an
     /// abort to a prompt in these frames: `common_foreign` resumes there.
     foreign_resume: u64,
+    /// The heap's table of each region's current chunk, `[fill, end]` by
+    /// handle (`Heap::region_table_address`), for `rcons` made inline.
+    region_table: u64,
 }
 
 /// The traps this code raises, by code.
@@ -628,6 +631,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
         alloc_limit: rt.heap.inline_limit() as u64,
         regions: Value::fixnum(rt.heap.live_regions() as i64).raw(),
         cards: rt.heap.card_table_address() as u64,
+        region_table: rt.heap.region_table_address() as u64,
         ..DState::default()
     };
     for (i, a) in args.iter().enumerate() {
@@ -1564,6 +1568,32 @@ impl Compiling<'_> {
                     // short of the collection's threshold; else the call-out.
                     let done = a.label();
                     let slow = a.label();
+                    // `rcons`, likewise, in the region's current chunk, when
+                    // its handle (in `x1`) has a slot in the heap's table
+                    // and the chunk has room: its fill bumped by two words.
+                    // Anything else calls in: `#f`, the heap's; a region
+                    // with no chunk yet, or a full one (its fill and end are
+                    // 0 when it has none). As the cellular machine's does.
+                    if let Callout::Prim { p, n: 3 } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "%region-cons"
+                    {
+                        a.e(tst_low(1, 3));
+                        a.to(slow, Fix::If(Cond::Ne));
+                        a.e(cmp_imm(1, 8 * fixpt_heap::heap::REGION_SLOTS as u32));
+                        a.to(slow, Fix::If(Cond::Hs));
+                        a.e(ldr(X13, ST, st_off(offset_of!(DState, region_table))));
+                        a.e(add_lsl(X13, X13, 1, 1));
+                        a.e(ldp(X14, X15, X13, 0));
+                        a.e(add_imm(X16, X14, 2));
+                        a.e(cmp(X16, X15));
+                        a.to(slow, Fix::If(Cond::Hi));
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
+                        a.e(add_lsl(X11, X9, X14, 3));
+                        a.e(stp(2, 3, X11, 0));
+                        a.e(str(X16, X13, 0));
+                        a.e(add_imm(RESULT, X11, fixpt_heap::value::TAG_PAIR as u32));
+                        a.to(done, Fix::B);
+                    }
                     if let Callout::Cons = c {
                         a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
                         a.e(ldr(X14, X13, 0));

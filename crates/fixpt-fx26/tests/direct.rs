@@ -485,6 +485,9 @@ fn native_session_adapters_aborts_and_stack_maps() {
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!(values, ["25", "1012", "-154", "119", "1025", "1001"], "many values");
     assert_eq!(fell, ["cell10", "from-cell"], "only those that stay cellular do");
+    // `rcons` made inline, in regions' chunks, under those collections too.
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/region-cons.fx")).expect("reads");
+    assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["500100000".to_string()], vec![]), "region-cons");
     // Deep recursion, under those collections too.
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/deep.fx")).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["500000500000".to_string()], vec![]), "deep");
