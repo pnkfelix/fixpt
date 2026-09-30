@@ -75,6 +75,7 @@ pub struct Checker {
     string: TyId,
     unit: TyId,
     char_: TyId,
+    f64_: TyId,
     symbol: TyId,
     /// How deep in abbreviation expansions parsing is, to stop one that
     /// mentions itself.
@@ -257,6 +258,10 @@ impl Checker {
         for fixed in ["i32", "u32", "i64", "u64"] {
             basic(fixed);
         }
+        // IEEE binary64 and binary32 (`docs/fx26.md`, "Floats"): a boxed
+        // flonum, and an immediate of its own.
+        let f64_ = basic("f64");
+        basic("f32");
         let void = arena.ty(Ty::Void);
         let mut c = Checker {
             arena,
@@ -274,6 +279,7 @@ impl Checker {
             string,
             unit,
             char_,
+            f64_,
             symbol,
             expanding: 0,
             knots: Vec::new(),
@@ -483,6 +489,7 @@ impl Checker {
             Exp::Bool(_) => Ok((self.bool_, Effect::pure())),
             Exp::Str(_) => Ok((self.string, Effect::pure())),
             Exp::Char(_) => Ok((self.char_, Effect::pure())),
+            Exp::Float(_) => Ok((self.f64_, Effect::pure())),
             Exp::Symbol(_) => Ok((self.symbol, Effect::pure())),
             Exp::Unit => Ok((self.unit, Effect::pure())),
             Exp::Lambda { .. } => self.synth_lambda(e, None),
@@ -938,7 +945,7 @@ impl Checker {
                     out.push(s);
                 }
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
             Exp::Lambda { params, body } => {
                 let depth = bound.len();
                 bound.extend(params.iter().map(|(n, _)| *n));

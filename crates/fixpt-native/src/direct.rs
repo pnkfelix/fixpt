@@ -49,7 +49,7 @@ use std::collections::HashMap;
 use std::mem::offset_of;
 
 mod reps;
-use reps::{Convert, Rep};
+use reps::{Convert, RawOp, Rep};
 
 const RESULT: Reg = 0;
 const ST: Reg = 24;
@@ -207,6 +207,9 @@ enum Callout {
     Box { signed: bool },
     /// An exact integer's low 64 bits, raw (0 for anything else).
     Unbox,
+    /// An `f64`'s bits (argument 0, not a value) as a flonum, where the
+    /// inline allocation had no room.
+    BoxF64,
 }
 
 impl Callout {
@@ -214,7 +217,7 @@ impl Callout {
         match self {
             Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
             Callout::Capture { whole } => if whole { 1 } else { 2 },
-            Callout::CurrentMarks | Callout::Box { .. } | Callout::Unbox => 1,
+            Callout::CurrentMarks | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 => 1,
             Callout::Foreign | Callout::ClosureAny | Callout::Rest => 0,
             Callout::Prim { n, .. } | Callout::Pure { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
@@ -1104,7 +1107,7 @@ impl Compiling<'_> {
         let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
         let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
-        let mut edge_stubs: Vec<(Label, Vec<usize>, Label)> = Vec::new();
+        let mut edge_stubs: Vec<(Label, Vec<(usize, Rep)>, Label)> = Vec::new();
         let mut int_slows: Vec<IntSlow> = Vec::new();
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
             let unbox = si_at.get(&to).map(|&t| reps::unboxes(&reps_out[from], &reps_in[t])).unwrap_or_default();
@@ -1121,8 +1124,8 @@ impl Compiling<'_> {
             // Falling in from the instruction before, the registers it
             // leaves as values that are raw here unboxed.
             if si > 0 && !matches!(op_at(starts[si - 1]), "branch" | "return" | "tailinvoke") {
-                for r in reps::unboxes(&reps_out[si - 1], &reps_in[si]) {
-                    unbox_reg(&mut a, self.callouts, r as Reg);
+                for (r, rep) in reps::unboxes(&reps_out[si - 1], &reps_in[si]) {
+                    unbox_to(&mut a, self.callouts, r as Reg, rep);
                 }
             }
             si += 1;
@@ -1634,7 +1637,15 @@ impl Compiling<'_> {
                     // An `i64` or `u64` operation: its operands raw where it
                     // takes them so (unboxed already, as `reps` said), a
                     // constant made so here.
-                    if let Some((signed, what)) = reps::raw_op(name) {
+                    if let Some(RawOp::F64 { what }) = reps::raw_op(name) {
+                        match what {
+                            "from-int" => f64_of_int(&mut a, self.callouts, pn),
+                            "->int" => int_of_f64(&mut a, self.callouts, &mut stubs, pn),
+                            _ => f64_fast(&mut a, what, if op == "prim2" { reg(o(1)) } else { RESULT }),
+                        }
+                        continue;
+                    }
+                    if let Some(RawOp::Int { signed, what }) = reps::raw_op(name) {
                         let y = match op {
                             "prim2" => reg(o(1)),
                             "prim2imm" => {
@@ -1925,8 +1936,8 @@ impl Compiling<'_> {
         // The ways in that unbox first.
         for (l, unbox, to) in edge_stubs {
             a.bind(l);
-            for r in unbox {
-                unbox_reg(&mut a, self.callouts, r as Reg);
+            for (r, rep) in unbox {
+                unbox_to(&mut a, self.callouts, r as Reg, rep);
             }
             a.to(to, Fix::B);
         }
@@ -2105,10 +2116,140 @@ fn unbox_reg(a: &mut Asm, callouts: &mut Vec<Callout>, r: Reg) {
 fn convert(a: &mut Asm, callouts: &mut Vec<Callout>, cs: &[Convert]) {
     for c in cs {
         match *c {
-            Convert::Box { r, signed } => box_reg(a, callouts, r as Reg, signed),
-            Convert::Unbox { r } => unbox_reg(a, callouts, r as Reg),
+            Convert::Box { r, rep: Rep::Raw { signed } } => box_reg(a, callouts, r as Reg, signed),
+            Convert::Box { r, .. } => box_f64(a, callouts, r as Reg),
+            Convert::Unbox { r, rep } => unbox_to(a, callouts, r as Reg, rep),
         }
     }
+}
+
+/// Register `r`'s value unboxed to `rep`.
+fn unbox_to(a: &mut Asm, callouts: &mut Vec<Callout>, r: Reg, rep: Rep) {
+    match rep {
+        Rep::F64 => unbox_f64(a, r),
+        _ => unbox_reg(a, callouts, r),
+    }
+}
+
+/// Register `r`'s flonum unboxed, in place: its double's bits, the word its
+/// pointer is 4 past. Anything but a bloblet (a register dead where ways
+/// meet may hold anything) gives 0, and is not read.
+fn unbox_f64(a: &mut Asm, r: Reg) {
+    let (other, done) = (a.label(), a.label());
+    a.e(and_low(X16, r, 3));
+    a.e(cmp_imm(X16, fixpt_heap::value::TAG_BLOBLET as u32));
+    a.to(other, Fix::If(Cond::Ne));
+    a.e(ldur(r, r, -4));
+    a.to(done, Fix::B);
+    a.bind(other);
+    a.e(movz(r, 0, 0));
+    a.bind(done);
+}
+
+/// Register `r`'s raw `f64` boxed, in place: a flonum from the free space
+/// when there is room short of the collection's threshold (a header and the
+/// bits, as `Heap::make_flonum` makes it), else by a call-out that does not
+/// collect. Uses X11 and X13 to X17.
+fn box_f64(a: &mut Asm, callouts: &mut Vec<Callout>, r: Reg) {
+    let (slow, done) = (a.label(), a.label());
+    a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
+    a.e(ldr(X14, X13, 0));
+    a.e(ldr(X15, ST, st_off(offset_of!(DState, alloc_limit))));
+    a.e(add_imm(X16, X14, 2));
+    a.e(cmp(X16, X15));
+    a.to(slow, Fix::If(Cond::Hi));
+    a.e(ldr(X17, ST, st_off(offset_of!(DState, words))));
+    a.e(add_lsl(X11, X17, X14, 3));
+    let header = fixpt_heap::value::make_header(fixpt_heap::ObjType::Flonum as u8, 0, 8);
+    a.es(&mov_imm64(X17, header));
+    a.e(str(X17, X11, 0));
+    a.e(str(r, X11, 8));
+    a.e(str(X16, X13, 0));
+    a.e(add_imm(r, X11, 8 + fixpt_heap::value::TAG_BLOBLET as u32));
+    a.to(done, Fix::B);
+    a.bind(slow);
+    pure_call(a, callouts, Callout::BoxF64, &[r], r);
+    a.bind(done);
+}
+
+/// `int->f64` (primitive `p`) of the int in `RESULT`, raw into `RESULT`: a
+/// fixnum's by `scvtf`, correctly rounded; a bignum's by the primitive.
+fn f64_of_int(a: &mut Asm, callouts: &mut Vec<Callout>, p: usize) {
+    let (slow, done) = (a.label(), a.label());
+    a.e(tst_low(RESULT, 3));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(asr_imm(X13, RESULT, 3));
+    a.e(scvtf(16, X13));
+    a.e(fmov_from_d(RESULT, 16));
+    a.to(done, Fix::B);
+    a.bind(slow);
+    pure_call(a, callouts, Callout::Pure { p, n: 1 }, &[RESULT], RESULT);
+    unbox_f64(a, RESULT);
+    a.bind(done);
+}
+
+/// `f64->int` (primitive `p`) of the raw `f64` in `RESULT`, into `RESULT`:
+/// by `fcvtzs` where that is exact and a fixnum; else the primitive's, on the
+/// boxed value (a bignum, or its failure: not an integer).
+fn int_of_f64(a: &mut Asm, callouts: &mut Vec<Callout>, stubs: &mut Vec<(Label, u32)>, p: usize) {
+    let (slow, done) = (a.label(), a.label());
+    a.e(fmov_to_d(16, RESULT));
+    a.e(fcvtzs(X13, 16));
+    a.e(scvtf(17, X13));
+    a.e(fcmp(16, 17));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(lsl_imm(X14, X13, 3));
+    a.e(asr_imm(X15, X14, 3));
+    a.e(cmp(X15, X13));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(mov(RESULT, X14));
+    a.to(done, Fix::B);
+    a.bind(slow);
+    box_f64(a, callouts, RESULT);
+    pure_call(a, callouts, Callout::Pure { p, n: 1 }, &[RESULT], RESULT);
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+    a.e(cmp_imm(X9, 0));
+    trap_at(a, stubs, PRIM_FAILED, Cond::Ne);
+    a.bind(done);
+}
+
+/// An `f64` operation `what` (as `reps::raw_op` names it), on raw `RESULT`
+/// and `y`, into `RESULT`: raw, or a comparison's boolean. By way of `d16`
+/// and `d17`, which nothing else keeps anything in.
+fn f64_fast(a: &mut Asm, what: &str, y: Reg) {
+    const D16: Reg = 16;
+    const D17: Reg = 17;
+    a.e(fmov_to_d(D16, RESULT));
+    a.e(fmov_to_d(D17, y));
+    let test = match what {
+        "<" => Some(Cond::Mi),
+        "<=" => Some(Cond::Ls),
+        ">" => Some(Cond::Gt),
+        ">=" => Some(Cond::Ge),
+        "=" => Some(Cond::Eq),
+        _ => None,
+    };
+    if let Some(c) = test {
+        a.e(fcmp(D16, D17));
+        a.es(&mov_imm64(X13, Value::TRUE.raw()));
+        a.es(&mov_imm64(X14, Value::FALSE.raw()));
+        a.e(csel(RESULT, X13, X14, c));
+        return;
+    }
+    a.e(match what {
+        "+" => fadd(D16, D16, D17),
+        "-" => fsub(D16, D16, D17),
+        "*" => fmul(D16, D16, D17),
+        "/" => fdiv(D16, D16, D17),
+        "-abs" => fabs(D16, D16),
+        "-neg" => fneg(D16, D16),
+        "-sqrt" => fsqrt(D16, D16),
+        "-floor" => frintm(D16, D16),
+        "-ceiling" => frintp(D16, D16),
+        "-truncate" => frintz(D16, D16),
+        _ => frintn(D16, D16),
+    });
+    a.e(fmov_from_d(RESULT, D16));
 }
 
 /// An `i64` (signed) or `u64` operation `what` (as `reps::raw_op` names
@@ -2384,7 +2525,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let mut code = [Value(st.code)];
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
-    if !matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox) && rt.heap.collection_due() {
+    if !matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64) && rt.heap.collection_due() {
         let mut roots = native_frames(st);
         roots.push(&mut args);
         roots.push(&mut code);
@@ -2397,6 +2538,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             fixpt_runtime::integer_value(rt, if signed { bits as i64 as i128 } else { bits as i128 }).raw()
         }
         Callout::Unbox => fixpt_runtime::low_64_bits(rt, args[0]),
+        Callout::BoxF64 => rt.heap.make_flonum(f64::from_bits(args[0].raw())).raw(),
         Callout::Closure { .. } | Callout::ClosureAny => native_closure(&mut rt.heap, Value(st.aux), &args).raw(),
         Callout::RegionClosure { n } => {
             let h = if args[0].is_fixnum() { args[0].as_fixnum() as usize } else { usize::MAX };

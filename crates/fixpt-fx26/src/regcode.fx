@@ -247,7 +247,7 @@
          (tagcase x
            (e-var (n a b) (not (c-has-standard-value? (symbol->string n))))
            (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t)
-           (e-sym (v a b) #t) (e-unit (a b) #t) (e-str (v a b) #t)
+           (e-sym (v a b) #t) (e-unit (a b) #t) (e-str (v a b) #t) (e-float (v a b) #t)
            (else y #f)))))
 
 ;; A constant's cell.
@@ -387,14 +387,15 @@
 
 ;;; ------------------------------------------------------ standard names
 
-;; Whether runtime primitive `name` is a fixed-width integers' operation (`%fx26-u32*`,
-;; `%fx26-int->i64`).
+;; Whether runtime primitive `name` is one of the fixed-width integers' or of `f64`'s operations
+;; (`%fx26-u32*`, `%fx26-int->i64`, `%fx26-f64+`).
 (define r-fixed-width-op? (subr pure (string) bool)
   (lambda (name)
     (let ((starts (lambda ((s string)) (= (string-search name s 0) 0))))
       (or (starts "%fx26-i32")
           (or (starts "%fx26-u32")
-              (or (starts "%fx26-i64") (or (starts "%fx26-u64") (starts "%fx26-int->"))))))))
+              (or (starts "%fx26-i64")
+                  (or (starts "%fx26-u64") (or (starts "%fx26-f64") (starts "%fx26-int->")))))))))
 ;; Whether runtime primitive `name` never collects (`fixpt_runtime::never_collects`): FX-26's
 ;; `*`, `quotient` and `modulo`, and the fixed-width integers' operations, which register code
 ;; calls with its values in registers.
@@ -402,7 +403,8 @@
   (lambda (name)
     (or (string=? name "%fx26-mul")
         (or (string=? name "%fx26-quotient")
-            (or (string=? name "modulo") (r-fixed-width-op? name))))))
+            (or (string=? name "modulo")
+                (or (string=? name "%fx26-string->f64") (r-fixed-width-op? name)))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never
 ;; collects and takes one or two.
 (define r-prim-std (subr (read @globals) (string int int) rstd)

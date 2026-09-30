@@ -549,7 +549,7 @@ impl Compiler<'_> {
             Exp::Var(n) if self.where_is(e, n).is_none() && Self::has_standard_value(self.name(n)) => {
                 !tail || self.name(n) == "list"
             }
-            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => false,
+            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => false,
             // A closure made as the value: its call-out may collect, but
             // nothing is used after it (`r_lambda`).
             Exp::Lambda { .. } if tail => false,
@@ -630,7 +630,7 @@ impl Compiler<'_> {
             // Not a name a standard operation has, which may be one made a
             // value, a closure.
             Exp::Var(n) => !Self::has_standard_value(self.name(*n)),
-            Exp::Int(_) | Exp::Bool(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit | Exp::Str(_) => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit | Exp::Str(_) | Exp::Float(_) => true,
             _ => false,
         };
         plain && self.c.facts.conversion_code(x).is_none()
@@ -702,6 +702,11 @@ impl Compiler<'_> {
             }
             Exp::Str(s) => {
                 let v = self.heap.make_string(&s);
+                g.op("const", &[v]);
+                g.done(tail);
+            }
+            Exp::Float(x) => {
+                let v = self.heap.make_flonum(x);
                 g.op("const", &[v]);
                 g.done(tail);
             }

@@ -2068,6 +2068,15 @@ frame slots; float arrays as flat arrays (Q6); calling convention for
 float arguments later, if measurements ask. Before floats in frames:
 continuation capture must keep raw words (a captured frame as a bloblet
 of its own kind), and native code must save `d8`-`d15` or not use them.
+- Done (2026-09-30, the user's: named `f64` and `f32`, literals `2.`):
+  `f64` on every path, the evaluator's included (`docs/fx26.md`, "Floats:
+  `f64`"): base types `f64`, `f32` in both checkers; literals through both
+  readers and parsers, both checkers and all four compilers; 33 operations
+  as runtime primitives; natively raw in registers by `reps` (bits in `x`
+  registers, each operation through `d16`/`d17`; never in frame slots, so
+  neither continuations nor `d8`-`d15` needed changing). `sumfp`-like, 10M
+  steps: 757 ms lowered, 31 ms native. Next: `f32` with an immediate tag
+  of its own (the user's), then `flatarrayof` (Q6).
 
 **Q5. Identity: `eq?` on mutable objects, and address-hashed tables.**
 (The type is still open: `TODO.md` §19 sets FX-91's opt-in `uniqueof`

@@ -24,6 +24,9 @@ pub fn show_value(v: Local<'_>) -> String {
     if let Some(c) = v.char() {
         return format!("{c:?}");
     }
+    if let Some(x) = v.flonum() {
+        return fixpt_runtime::num::format_flonum(x);
+    }
     if let Some(items) = v.list() {
         let parts: Vec<String> = items.into_iter().map(show_value).collect();
         return format!("({})", parts.join(" "));
@@ -121,6 +124,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
         Exp::Bool(x) => format!("(e-bool {} {a} {b})", if x { "#t" } else { "#f" }),
         Exp::Str(s) => format!("(e-str {s:?} {a} {b})"),
         Exp::Char(ch) => format!("(e-char {ch:?} {a} {b})"),
+        Exp::Float(x) => format!("(e-float {} {a} {b})", fixpt_runtime::num::format_flonum(x)),
         Exp::Symbol(s) => format!("(e-sym {} {a} {b})", name(s)),
         Exp::Unit => format!("(e-unit {a} {b})"),
         Exp::Lambda { params, body } => {

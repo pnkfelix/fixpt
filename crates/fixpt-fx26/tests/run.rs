@@ -75,6 +75,12 @@ fn list_runs() {
     assert_eq!(run(include_str!("programs/run/list-regions.fx")), "54");
 }
 
+/// `f64` literals and operations, lowered (`programs/run/floats.fx`).
+#[test]
+fn floats_run() {
+    assert_eq!(run(include_str!("programs/run/floats.fx")), "1414211");
+}
+
 /// `int` is a bignum past a fixnum, lowered too (`programs/run/bignums.fx`).
 #[test]
 fn bignums_run() {

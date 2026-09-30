@@ -1,5 +1,6 @@
-//! Where native code keeps `i64` and `u64` values: raw, as the machine's 64
-//! bits, in registers only (`RESULT`, REG1…REG8), and as the value they are
+//! Where native code keeps `i64`, `u64` and `f64` values: raw, as the
+//! machine's 64 bits (an `f64`'s moved into a `d` register for each
+//! operation), in registers only (`RESULT`, REG1…REG8), and as the value they are
 //! everywhere else (the exact integer: a fixnum, or a bignum past 60 bits).
 //! Register code does not say which: it is the same for every machine, and
 //! its registers hold values. This pass says, instruction by instruction,
@@ -7,7 +8,8 @@
 //!
 //! - an operation of `i64` or `u64` (`prim1`, `prim2`, `prim2imm` of such a
 //!   primitive) takes its operands raw and gives its value raw, a
-//!   comparison and `T->int` excepted;
+//!   comparison and `T->int` excepted; so does one of `f64` the machine does
+//!   exactly as IEEE says (`raw_op`), a comparison excepted;
 //! - `reg`, `setreg` and `movereg` move a register as it is;
 //! - anything else that reads a register reads it as a value: a raw one is
 //!   boxed first, in its register. So nothing raw is stored in a frame,
@@ -31,6 +33,14 @@ pub(super) enum Rep {
     Value,
     /// An `i64` (signed) or `u64`'s 64 bits.
     Raw { signed: bool },
+    /// An `f64`'s 64 bits.
+    F64,
+}
+
+impl Rep {
+    fn raw(self) -> bool {
+        matches!(self, Rep::Raw { .. } | Rep::F64)
+    }
 }
 
 /// `RESULT`, then REG1…REG8.
@@ -40,22 +50,41 @@ pub(super) type Reps = [Rep; 9];
 pub(super) fn join(a: &Reps, b: &Reps) -> Reps {
     std::array::from_fn(|r| match (a[r], b[r]) {
         (Rep::Undefined, x) | (x, Rep::Undefined) => x,
-        (x @ Rep::Raw { .. }, _) | (_, x @ Rep::Raw { .. }) => x,
+        (x, _) | (_, x) if x.raw() => x,
         _ => Rep::Value,
     })
 }
 
-/// The registers a way into `to` must unbox: a value there, raw at `to`.
-pub(super) fn unboxes(from: &Reps, to: &Reps) -> Vec<usize> {
-    (0..9).filter(|&r| from[r] == Rep::Value && matches!(to[r], Rep::Raw { .. })).collect()
+/// The registers a way into `to` must unbox, and to what: a value there,
+/// raw at `to`.
+pub(super) fn unboxes(from: &Reps, to: &Reps) -> Vec<(usize, Rep)> {
+    (0..9).filter(|&r| from[r] == Rep::Value && to[r].raw()).map(|r| (r, to[r])).collect()
 }
 
-/// A 64-bit integer operation, by its primitive's name (`%fx26-u64*`,
-/// `%fx26-int->i64`): whether its type is signed, and what it does (the
-/// name after the type, `*` or `-xor`; `from` for `int->T`).
-pub(super) fn raw_op(name: &str) -> Option<(bool, &str)> {
+/// An operation native code does on raw operands, by its primitive's name:
+/// an `i64` or `u64` one (`%fx26-u64*`, `%fx26-int->i64`), or one of `f64`
+/// the machine does exactly as the runtime does (arithmetic, `abs`, `neg`,
+/// `sqrt`, the roundings, comparisons: IEEE's own; not `min` and `max`,
+/// whose signed zeros may differ, nor the elementary functions).
+#[derive(Clone, Copy)]
+pub(super) enum RawOp<'n> {
+    /// Whether signed, and the name after the type (`*`, `-xor`; `from` for
+    /// `int->T`).
+    Int { signed: bool, what: &'n str },
+    /// The name after `f64`.
+    F64 { what: &'n str },
+}
+
+pub(super) fn raw_op(name: &str) -> Option<RawOp<'_>> {
     let rest = name.strip_prefix("%fx26-")?;
-    let (t, op) = match rest.strip_prefix("int->") {
+    if rest == "int->f64" {
+        return Some(RawOp::F64 { what: "from-int" });
+    }
+    if let Some(what) = rest.strip_prefix("f64") {
+        let native = ["+", "-", "*", "/", "-abs", "-neg", "-sqrt", "-floor", "-ceiling", "-truncate", "-round", "<", "<=", ">", ">=", "=", "->int"];
+        return native.contains(&what).then_some(RawOp::F64 { what });
+    }
+    let (t, what) = match rest.strip_prefix("int->") {
         Some(t) => (t, "from"),
         None => (rest.get(..3)?, &rest[3..]),
     };
@@ -64,24 +93,35 @@ pub(super) fn raw_op(name: &str) -> Option<(bool, &str)> {
         "u64" => false,
         _ => return None,
     };
-    Some((signed, op))
+    Some(RawOp::Int { signed, what })
 }
 
-/// What a 64-bit operation takes and gives: its first operand raw (all of
-/// them, `int->T`'s int too, which unboxing wraps); its second raw but for a
-/// shift's count; its value raw but for a comparison's and `T->int`'s.
-fn raw_shape(signed: bool, op: &str) -> (Rep, Rep, Rep) {
-    let raw = Rep::Raw { signed };
-    let second = if matches!(op, "-shl" | "-shr") { Rep::Value } else { raw };
-    let result = if matches!(op, "<" | "<=" | ">" | ">=" | "=" | "->int") { Rep::Value } else { raw };
-    (raw, second, result)
+/// What a raw operation takes and gives. An integer one: its first operand
+/// raw (all of them, `int->T`'s int too, which unboxing wraps); its second
+/// raw but for a shift's count; its value raw but for a comparison's and
+/// `T->int`'s. An `f64` one: its operands raw, and its value but for a
+/// comparison's.
+fn raw_shape(op: RawOp<'_>) -> (Rep, Rep, Rep) {
+    let compare = |w: &str| matches!(w, "<" | "<=" | ">" | ">=" | "=");
+    match op {
+        RawOp::Int { signed, what } => {
+            let raw = Rep::Raw { signed };
+            let second = if matches!(what, "-shl" | "-shr") { Rep::Value } else { raw };
+            let result = if compare(what) || what == "->int" { Rep::Value } else { raw };
+            (raw, second, result)
+        }
+        // `int->f64` takes an int; `f64->int` gives one.
+        RawOp::F64 { what: "from-int" } => (Rep::Value, Rep::Value, Rep::F64),
+        RawOp::F64 { what } => (Rep::F64, Rep::F64, if compare(what) || what == "->int" { Rep::Value } else { Rep::F64 }),
+    }
 }
 
-/// A conversion before an instruction: register `r` boxed, or unboxed.
+/// A conversion before an instruction: register `r`, raw as `rep` says,
+/// boxed; or a value unboxed to `rep`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(super) enum Convert {
-    Box { r: usize, signed: bool },
-    Unbox { r: usize },
+    Box { r: usize, rep: Rep },
+    Unbox { r: usize, rep: Rep },
 }
 
 /// Instruction `op`, operands `o`, on `reps`: the conversions it needs
@@ -91,8 +131,8 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
     let k = |j: usize| o(j).as_fixnum() as usize;
     let mut need = |reps: &mut Reps, r: usize, want: Rep| {
         match (reps[r], want) {
-            (Rep::Raw { signed }, Rep::Value) => first.push(Convert::Box { r, signed }),
-            (Rep::Value, Rep::Raw { .. }) => first.push(Convert::Unbox { r }),
+            (rep, Rep::Value) if rep.raw() => first.push(Convert::Box { r, rep }),
+            (Rep::Value, rep) if rep.raw() => first.push(Convert::Unbox { r, rep }),
             _ => {}
         }
         if reps[r] != Rep::Undefined {
@@ -121,7 +161,7 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
         "setstk" | "setglbl" | "return" | "branchf" | "brancht" => need(reps, 0, Rep::Value),
         "prim1" | "prim2" | "prim2imm" => {
             let (x, y, out) = match raw_op(prim(k(0))) {
-                Some((signed, what)) => raw_shape(signed, what),
+                Some(op) => raw_shape(op),
                 None => (Rep::Value, Rep::Value, Rep::Value),
             };
             need(reps, 0, x);

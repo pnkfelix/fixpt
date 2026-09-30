@@ -279,6 +279,19 @@ fn i64_and_u64_raw_in_registers() {
     assert_eq!(run(defs, "w", &[1 << 31], FUEL).direct, Ok("4611686018427387904".into()));
 }
 
+/// `f64` natively (`programs/native/floats.fx`): raw in registers around a
+/// loop, boxed into the frame across a call, raw and boxed ways meeting,
+/// IEEE's special values, and the runtime's operations beside the
+/// machine's; as the Rust machine gives them, collecting often too, since
+/// boxes are made where registers hold values.
+#[test]
+fn floats_as_the_rust_machine_gives_them() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/floats"), "floats", &[1000], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+}
+
 /// A leaf's registers and link, kept around a call with no collection: `b`
 /// lives across a product past a fixnum, which the primitive makes.
 #[test]

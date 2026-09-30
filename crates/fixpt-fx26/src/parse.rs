@@ -911,6 +911,7 @@ impl Checker {
             Datum::Str(t) => return Ok(self.arena.exp(span, Exp::Str(t.clone()))),
             Datum::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
             Datum::Char(c) => return Ok(self.arena.exp(span, Exp::Char(*c))),
+            Datum::Number(fixpt_read::Num::Real(x)) => return Ok(self.arena.exp(span, Exp::Float(*x))),
             Datum::Symbol(sym) => {
                 // `#u` reads as a symbol; `#t` and `#f` did too in FX-87's
                 // profile, which FX-26 used to be read with.

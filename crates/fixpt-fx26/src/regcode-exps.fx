@@ -436,6 +436,7 @@
         (e-var (n a b)
           (and (r-standard-value? e n) (or (not tail) (string=? (symbol->string n) "list"))))
         (e-int (n a b) #f) (e-bool (v a b) #f) (e-str (v a b) #f) (e-char (v a b) #f)
+        (e-float (v a b) #f)
         ;; Join points only: no closure made, and their calls are jumps.
         (e-letrec (bs body a b)
           (if (and tail (r-all? (r-join-flags bs body #t)))

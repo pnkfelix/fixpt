@@ -25,6 +25,7 @@
         (e-bool (v a b) (r-const-value g (wcell-bool v) tail))
         (e-char (v a b) (r-const-value g (wcell-char v) tail))
         (e-str (s a b) (r-const-value g (wcell-string s) tail))
+        (e-float (x a b) (r-const-value g (wcell-f64 x) tail))
         (e-sym (s a b) (r-const-value g (wcell-symbol s) tail))
         (e-unit (a b) (r-const-value g (wcell-unit) tail))
         (e-plambda (d body a b) (r-exp g body env te tail))

@@ -633,7 +633,7 @@ impl Checker {
             Exp::If { test, then, els } => all(vec![test, then, els]),
             Exp::Begin(items) | Exp::Bloblet { args: items, .. } => all(items),
             Exp::Product(fields) => all(fields.into_iter().map(|(_, x)| x).collect()),
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => true,
         }
     }
 

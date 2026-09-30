@@ -23,6 +23,8 @@ pub enum Cond {
     Hs = 2,
     /// Unsigned <.
     Lo = 3,
+    /// Negative: after `fcmp`, less than (false when unordered).
+    Mi = 4,
     Vs = 6,
     Vc = 7,
     /// Unsigned >.
@@ -344,6 +346,83 @@ pub fn asrv(d: Reg, n: Reg, m: Reg) -> u32 {
     0x9AC0_2800 | r(m) << 16 | r(n) << 5 | r(d)
 }
 
+// ------------------------------------------------------- floating point
+// `d` registers are numbered as `x` ones; each takes a double.
+
+/// `fmov dd, xn`: the bits, into a `d` register.
+pub fn fmov_to_d(d: Reg, n: Reg) -> u32 {
+    0x9E67_0000 | r(n) << 5 | r(d)
+}
+/// `fmov xd, dn`: the bits, out of a `d` register.
+pub fn fmov_from_d(d: Reg, n: Reg) -> u32 {
+    0x9E66_0000 | r(n) << 5 | r(d)
+}
+/// A double's two-operand operation, `op` one of `fadd`'s kin (bits 15..10).
+fn fp2(op: u32, d: Reg, n: Reg, m: Reg) -> u32 {
+    0x1E60_0800 | op << 12 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `fadd dd, dn, dm`.
+pub fn fadd(d: Reg, n: Reg, m: Reg) -> u32 {
+    fp2(2, d, n, m)
+}
+/// `fsub dd, dn, dm`.
+pub fn fsub(d: Reg, n: Reg, m: Reg) -> u32 {
+    fp2(3, d, n, m)
+}
+/// `fmul dd, dn, dm`.
+pub fn fmul(d: Reg, n: Reg, m: Reg) -> u32 {
+    fp2(0, d, n, m)
+}
+/// `fdiv dd, dn, dm`.
+pub fn fdiv(d: Reg, n: Reg, m: Reg) -> u32 {
+    fp2(1, d, n, m)
+}
+/// A double's one-operand operation, `op` in bits 20..15.
+fn fp1(op: u32, d: Reg, n: Reg) -> u32 {
+    0x1E60_4000 | op << 15 | r(n) << 5 | r(d)
+}
+/// `fabs dd, dn`.
+pub fn fabs(d: Reg, n: Reg) -> u32 {
+    fp1(1, d, n)
+}
+/// `fneg dd, dn`.
+pub fn fneg(d: Reg, n: Reg) -> u32 {
+    fp1(2, d, n)
+}
+/// `fsqrt dd, dn`.
+pub fn fsqrt(d: Reg, n: Reg) -> u32 {
+    fp1(3, d, n)
+}
+/// `frintn dd, dn`: to the nearest, ties to even.
+pub fn frintn(d: Reg, n: Reg) -> u32 {
+    fp1(8, d, n)
+}
+/// `frintp dd, dn`: toward +∞.
+pub fn frintp(d: Reg, n: Reg) -> u32 {
+    fp1(9, d, n)
+}
+/// `frintm dd, dn`: toward −∞.
+pub fn frintm(d: Reg, n: Reg) -> u32 {
+    fp1(10, d, n)
+}
+/// `frintz dd, dn`: toward zero.
+pub fn frintz(d: Reg, n: Reg) -> u32 {
+    fp1(11, d, n)
+}
+/// `fcmp dn, dm`: unordered (a NaN) sets C and V, so `mi`, `ls`, `gt`, `ge`
+/// and `eq` are all false then.
+pub fn fcmp(n: Reg, m: Reg) -> u32 {
+    0x1E60_2000 | r(m) << 16 | r(n) << 5
+}
+/// `scvtf dd, xn`: a signed integer, correctly rounded.
+pub fn scvtf(d: Reg, n: Reg) -> u32 {
+    0x9E62_0000 | r(n) << 5 | r(d)
+}
+/// `fcvtzs xd, dn`: toward zero, saturating.
+pub fn fcvtzs(d: Reg, n: Reg) -> u32 {
+    0x9E78_0000 | r(n) << 5 | r(d)
+}
+
 /// `ret`.
 pub fn ret() -> u32 {
     0xD65F_03C0
@@ -387,5 +466,21 @@ mod tests {
         assert_eq!(lslv(0, 1, 2), 0x9ac22020);
         assert_eq!(lsrv(13, 14, 15), 0x9acf25cd);
         assert_eq!(asrv(0, 1, 2), 0x9ac22820);
+        assert_eq!(fmov_to_d(16, 1), 0x9e670030);
+        assert_eq!(fmov_from_d(0, 16), 0x9e660200);
+        assert_eq!(fadd(16, 16, 17), 0x1e712a10);
+        assert_eq!(fsub(16, 16, 17), 0x1e713a10);
+        assert_eq!(fmul(16, 16, 17), 0x1e710a10);
+        assert_eq!(fdiv(16, 16, 17), 0x1e711a10);
+        assert_eq!(fabs(16, 16), 0x1e60c210);
+        assert_eq!(fneg(16, 16), 0x1e614210);
+        assert_eq!(fsqrt(16, 16), 0x1e61c210);
+        assert_eq!(frintm(16, 16), 0x1e654210);
+        assert_eq!(frintp(16, 16), 0x1e64c210);
+        assert_eq!(frintz(16, 16), 0x1e65c210);
+        assert_eq!(frintn(16, 16), 0x1e644210);
+        assert_eq!(fcmp(16, 17), 0x1e712200);
+        assert_eq!(scvtf(16, 13), 0x9e6201b0);
+        assert_eq!(fcvtzs(13, 16), 0x9e78020d);
     }
 }

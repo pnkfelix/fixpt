@@ -261,6 +261,74 @@ pub fn low_64_bits(rt: &Runtime, v: Value) -> u64 {
     }
 }
 
+/// An `f64`: a flonum's double.
+fn f64_in(rt: &mut Runtime, v: Value) -> Outcome<f64> {
+    if rt.heap.obj_type(v) == Some(ObjType::Flonum) { Ok(rt.heap.flonum_value(v)) } else { rt.type_error("an f64", v) }
+}
+
+/// FX-26's `f64` operation `op` (`docs/fx26.md`, "Floats"): IEEE binary64,
+/// round to nearest even, nothing trapping; each result a new flonum.
+fn f64_op(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
+    let x = f64_in(rt, a[0])?;
+    let unary = match op {
+        "abs" => Some(x.abs()),
+        "neg" => Some(-x),
+        "sqrt" => Some(x.sqrt()),
+        "floor" => Some(x.floor()),
+        "ceiling" => Some(x.ceil()),
+        "truncate" => Some(x.trunc()),
+        "round" => Some(x.round_ties_even()),
+        "exp" => Some(x.exp()),
+        "log" => Some(x.ln()),
+        "sin" => Some(x.sin()),
+        "cos" => Some(x.cos()),
+        "tan" => Some(x.tan()),
+        "asin" => Some(x.asin()),
+        "acos" => Some(x.acos()),
+        "atan" => Some(x.atan()),
+        _ => None,
+    };
+    if let Some(r) = unary {
+        return Ok(rt.heap.make_flonum(r));
+    }
+    match op {
+        "nan?" => return Ok(Value::boolean(x.is_nan())),
+        "infinite?" => return Ok(Value::boolean(x.is_infinite())),
+        "finite?" => return Ok(Value::boolean(x.is_finite())),
+        "->string" => {
+            let s = crate::num::format_flonum(x);
+            return Ok(rt.heap.make_string(&s));
+        }
+        // An integral value, exactly: a bignum past a fixnum.
+        "->int" => {
+            if !(x.is_finite() && x.fract() == 0.0) {
+                return rt.fail("f64->int: not an integer", &[a[0]]);
+            }
+            let b = <num_bigint::BigInt as num_traits::FromPrimitive>::from_f64(x).expect("finite and integral");
+            return Ok(crate::num::N::big(b).store(&mut rt.heap));
+        }
+        _ => {}
+    }
+    let y = f64_in(rt, a[1])?;
+    let r = match op {
+        "add" => x + y,
+        "sub" => x - y,
+        "mul" => x * y,
+        "div" => x / y,
+        "min" => x.min(y),
+        "max" => x.max(y),
+        "atan2" => x.atan2(y),
+        "expt" => x.powf(y),
+        "lt" => return Ok(Value::boolean(x < y)),
+        "le" => return Ok(Value::boolean(x <= y)),
+        "gt" => return Ok(Value::boolean(x > y)),
+        "ge" => return Ok(Value::boolean(x >= y)),
+        "eq" => return Ok(Value::boolean(x == y)),
+        _ => unreachable!("an f64 operation"),
+    };
+    Ok(rt.heap.make_flonum(r))
+}
+
 /// Whether primitive `name` never collects, and so may be called from
 /// code whose live values are in registers, not in a frame (register code's
 /// `prim1`, `prim2`, `prim2imm`): FX-26's `*`, `quotient` and `modulo`, and
@@ -268,8 +336,8 @@ pub fn low_64_bits(rt: &Runtime, v: Value) -> u64 {
 /// fixnum is a bignum), since allocation never collects: a collection waits
 /// for the next point that may. It may fail, which ends the run.
 pub fn never_collects(name: &str) -> bool {
-    matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo")
-        || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-int->"].iter().any(|p| name.starts_with(p))
+    matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64")
+        || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
 /// Operation `op` of the fixed-width integers of width `w`.
@@ -967,6 +1035,61 @@ prims! {
         let s = get_string(rt, a[1])?;
         Ok(Value::boolean(s.contains(c)))
     });
+    // `f64`, IEEE binary64, on flonums (`docs/fx26.md`, "Floats").
+    "%fx26-f64+", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "add"));
+    "%fx26-f64-", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "sub"));
+    "%fx26-f64*", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "mul"));
+    "%fx26-f64/", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "div"));
+    "%fx26-f64-min", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "min"));
+    "%fx26-f64-max", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "max"));
+    "%fx26-f64-atan2", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "atan2"));
+    "%fx26-f64-expt", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "expt"));
+    "%fx26-f64<", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "lt"));
+    "%fx26-f64<=", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "le"));
+    "%fx26-f64>", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "gt"));
+    "%fx26-f64>=", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "ge"));
+    "%fx26-f64=", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "eq"));
+    "%fx26-f64-abs", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "abs"));
+    "%fx26-f64-neg", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "neg"));
+    "%fx26-f64-sqrt", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "sqrt"));
+    "%fx26-f64-floor", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "floor"));
+    "%fx26-f64-ceiling", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "ceiling"));
+    "%fx26-f64-truncate", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "truncate"));
+    "%fx26-f64-round", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "round"));
+    "%fx26-f64-exp", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "exp"));
+    "%fx26-f64-log", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "log"));
+    "%fx26-f64-sin", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "sin"));
+    "%fx26-f64-cos", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "cos"));
+    "%fx26-f64-tan", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "tan"));
+    "%fx26-f64-asin", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "asin"));
+    "%fx26-f64-acos", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "acos"));
+    "%fx26-f64-atan", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "atan"));
+    "%fx26-f64-nan?", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "nan?"));
+    "%fx26-f64-infinite?", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "infinite?"));
+    "%fx26-f64-finite?", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "finite?"));
+    "%fx26-f64->string", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "->string"));
+    "%fx26-f64->int", 1, Some(1), simple!(|rt, a| f64_op(rt, a, "->int"));
+    // `int->f64`, correctly rounded, of any exact integer.
+    "%fx26-int->f64", 1, Some(1), simple!(|rt, a| {
+        match exact_bigint(rt, a[0]) {
+            Some(b) => {
+                let x = num_traits::ToPrimitive::to_f64(&b).unwrap_or(f64::NAN);
+                Ok(rt.heap.make_flonum(x))
+            }
+            None => rt.type_error("an exact integer", a[0]),
+        }
+    });
+    // `string->f64`: Rust's correctly rounded reading; a list of it, or none.
+    "%fx26-string->f64", 1, Some(1), simple!(|rt, a| {
+        let s = get_string(rt, a[0])?;
+        match fixpt_read::reader::parse_number(&s, 10, None) {
+            Some(fixpt_read::Num::Real(x)) => { let v = rt.heap.make_flonum(x); Ok(rt.heap.cons(v, Value::NULL)) }
+            Some(fixpt_read::Num::Int(n)) => { let v = rt.heap.make_flonum(n as f64); Ok(rt.heap.cons(v, Value::NULL)) }
+            _ => Ok(Value::NULL),
+        }
+    });
+    // Whether a datum is an `f64`, and it as one (the reader's atoms).
+    "%fx26-datum-f64?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.obj_type(a[0]) == Some(ObjType::Flonum))));
     // The fixed-width integers, `i32`, `u32`, `i64`, `u64` (PLAN.md, Q2 b):
     // wrapping arithmetic, on values that are the integers they stand for.
     "%fx26-i32+", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "add", Width::I32));

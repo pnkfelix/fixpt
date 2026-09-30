@@ -288,7 +288,7 @@ impl Walk<'_> {
                     self.escapes.get_or_insert((self.current, m));
                 }
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
             Exp::App { fun, args } => {
                 let callee = match self.c.arena.exp_at(strip(self.c, fun)) {
                     Exp::Var(s) => self.member(*s),

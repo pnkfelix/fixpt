@@ -1,0 +1,31 @@
+;;; `f64` on every machine, and natively raw in registers (`reps`): a loop's
+;;; float raw around the loop; one live across a call, boxed into the frame;
+;;; ways meeting raw and boxed; IEEE's special values; and the operations
+;;; the machine does itself against those the runtime does.
+(define-type strings (listof string @heap))
+(define* zeta2 (subr spin (int) f64)
+  (lambda (n)
+    (letrec ((loop (subr spin (int f64) f64)
+               (lambda (i acc)
+                 (if (> i n)
+                     acc
+                     (loop (+ i 1) (f64+ acc (f64/ 1. (f64* (int->f64 i) (int->f64 i)))))))))
+      (loop 1 0.))))
+(define* half (subr pure (f64) f64) (lambda (x) (f64* x .5)))
+(define* halves (subr spin (int f64) f64)
+  (lambda (n x) (if (= n 0) x (halves (- n 1) (f64+ (half x) 1.)))))
+(define* pick (subr pure (f64 bool) f64) (lambda (x c) (f64-sqrt (if c (f64+ x 1.) x))))
+(define* show (subr pure (f64) string) (lambda (x) (f64->string x)))
+(define* floats (subr (maxeff (alloc @heap) spin) (int) strings)
+  (lambda (n)
+    (let ((z (zeta2 n)) (inf (f64/ 1. 0.)) (nan (f64- (f64/ 1. 0.) (f64/ 1. 0.))))
+      (list (show z) (show (halves n 3.)) (show (pick 8. #t)) (show (pick 9. #f))
+            (show (f64-neg 0.)) (show (f64-round 2.5)) (show (f64-round -3.5))
+            (show (f64-floor -1.5)) (show (f64-ceiling -1.5)) (show (f64-truncate -1.5))
+            (show inf) (show nan) (if (f64< nan 1.) "lt" "not lt") (if (f64= nan nan) "eq" "ne")
+            (if (f64<= 1. 1.) "le" "gt") (if (f64>= 2. 1.) "ge" "lt") (if (f64> 0. -0.) "gt" "ng")
+            (show (f64-min 1. 2.)) (show (f64-max 1. 2.)) (show (f64-exp 1.))
+            (show (f64-atan2 1. 1.))
+            (int->string (f64->int (f64* 1e20 10.))) (show (int->f64 (* 99999999999 99999999999)))
+            (show (f64-abs -2.25)) (show (f64- 0.1 0.3))))))
+(floats 1000)

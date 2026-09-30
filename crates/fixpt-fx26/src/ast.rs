@@ -353,6 +353,8 @@ pub enum Exp {
     Bool(bool),
     Str(String),
     Char(char),
+    /// An `f64` literal: `2.`, `1.5`, `1e10`.
+    Float(f64),
     /// `'name`: a symbol.
     Symbol(Sym),
     Unit,

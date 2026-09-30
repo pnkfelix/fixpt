@@ -220,6 +220,7 @@
         (e-int (n a b) (begin (c-int c n) (c-done c tail)))
         (e-bool (v a b) (begin (c-lit c (wcell-bool v)) (c-done c tail)))
         (e-str (s a b) (begin (c-lit c (wcell-string s)) (c-done c tail)))
+        (e-float (x a b) (begin (c-lit c (wcell-f64 x)) (c-done c tail)))
         (e-char (ch a b) (begin (c-lit c (wcell-char ch)) (c-done c tail)))
         (e-sym (s a b) (begin (c-lit c (wcell-symbol s)) (c-done c tail)))
         (e-unit (a b) (begin (c-lit c (wcell-unit)) (c-done c tail)))

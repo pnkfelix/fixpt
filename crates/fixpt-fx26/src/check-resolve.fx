@@ -67,6 +67,7 @@
   (lambda (e)
     (tagcase e
       (e-var (s a b) a) (e-int (n a b) a) (e-bool (v a b) a) (e-str (v a b) a) (e-char (v a b) a)
+      (e-float (v a b) a)
       (e-sym (v a b) a) (e-unit (a b) a) (e-lambda (ps x a b) a) (e-app (f xs a b) a)
       (e-plambda (bs x a b) a) (e-proj (x ds a b) a) (e-if (p c d a b) a) (e-letrec (bs x a b) a)
       (e-let (bs x a b) a) (e-begin (xs a b) a) (e-prompt (t x h a b) a) (e-the (t x a b) a)
@@ -77,6 +78,7 @@
   (lambda (e)
     (tagcase e
       (e-var (s a b) b) (e-int (n a b) b) (e-bool (v a b) b) (e-str (v a b) b) (e-char (v a b) b)
+      (e-float (v a b) b)
       (e-sym (v a b) b) (e-unit (a b) b) (e-lambda (ps x a b) b) (e-app (f xs a b) b)
       (e-plambda (bs x a b) b) (e-proj (x ds a b) b) (e-if (p c d a b) b) (e-letrec (bs x a b) b)
       (e-let (bs x a b) b) (e-begin (xs a b) b) (e-prompt (t x h a b) b) (e-the (t x a b) b)
@@ -135,6 +137,7 @@
         (e-bool (v a b) (x-const k-bool (if v 1 0) a b))
         (e-str (v a b) (x-const k-string 0 a b))
         (e-char (v a b) (x-const k-char 0 a b))
+        (e-float (v a b) (x-const k-f64 0 a b))
         (e-sym (v a b) (x-const k-symbol 0 a b))
         (e-unit (a b) (x-const k-unit 0 a b))
         (e-lambda (ps body a b)
@@ -361,8 +364,9 @@
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
-      ;; 10 to 13; `void` 14, `k-void`.
+      ;; 10 to 15; `void` 16, `k-void`.
       (k-basic "i32") (k-basic "u32") (k-basic "i64") (k-basic "u64")
+      (k-basic "f64") (k-basic "f32")
       (k-ty-new (ty-void))
       #u)))
 (define n-copy-memo (subr (maxeff kreads (write @t) spin) (k-region-lists k-region-lists int) unit)

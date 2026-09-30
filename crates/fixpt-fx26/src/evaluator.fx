@@ -34,6 +34,7 @@
   (v-bool bool)
   (v-str string)
   (v-char char)
+  (v-f64 f64)
   (v-sym symbol)
   (v-unit)
   (v-nil)
@@ -103,6 +104,8 @@
   (lambda (v) (tagcase v (v-str (s) s) (else x (efail-expected "a string")))))
 (define as-char (subr evals (val) char)
   (lambda (v) (tagcase v (v-char (c) c) (else x (efail-expected "a char")))))
+(define as-f64 (subr evals (val) f64)
+  (lambda (v) (tagcase v (v-f64 (x) x) (else y (efail-expected "an f64")))))
 (define as-sym (subr evals (val) symbol)
   (lambda (v) (tagcase v (v-sym (s) s) (else x (efail-expected "a symbol")))))
 (define as-pair (subr evals (val) vpair)
@@ -157,6 +160,13 @@
           (k-cat3 "make-continuation-prompt-tag abort-current-continuation "
                   "call-with-composable-continuation make-continuation-mark-key with-mark "
                   "first-mark current-marks marks-of cwcc %vlambda apply list ")))
+;; `f64`'s, as `ev-f64-prim` does them.
+(define f64-primitive-names string
+  (k-cat4 " f64+ f64- f64* f64/ f64-min f64-max f64-atan2 f64-expt f64< f64<= f64> f64>= f64= "
+          "f64-nan? f64-infinite? f64-finite? int->f64 f64->int f64->string string->f64 "
+          (k-cat3 "f64-abs f64-neg f64-sqrt f64-floor f64-ceiling f64-truncate f64-round "
+                  "f64-exp f64-log f64-sin f64-cos f64-tan f64-asin f64-acos f64-atan " "")
+          ""))
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
 (define occurs? (subr (maxeff (read @globals) spin) (string string int) bool)
@@ -166,7 +176,9 @@
              (occurs? needle hay (+ i 1))))))
 
 (define primitive? (subr (maxeff (read @globals) spin) (string) bool)
-  (lambda (n) (occurs? (string-append " " (string-append n " ")) primitive-names 0)))
+  (lambda (n)
+    (let ((padded (string-append " " (string-append n " "))))
+      (or (occurs? padded primitive-names 0) (occurs? padded f64-primitive-names 0)))))
 
 ;; A standard name: a primitive, or `nil`.
 (define standard (subr (maxeff evals spin) (symbol) val)
@@ -265,6 +277,49 @@
 (define ev-abort (subr (maxeff (read @globals) evals spin) (vals) val)
   (lambda (xs) (abort-current-continuation (as-tag (arg xs 0)) (arg xs 1))))
 
+;; `f64`'s operations, by shape, on the arguments `xs`.
+(define f64-2 (subr (maxeff evals spin) (vals (subr pure (f64 f64) f64)) val)
+  (lambda (xs f) (v-f64 (f (as-f64 (arg xs 0)) (as-f64 (arg xs 1))))))
+(define f64-1 (subr (maxeff evals spin) (vals (subr pure (f64) f64)) val)
+  (lambda (xs f) (v-f64 (f (as-f64 (arg xs 0))))))
+(define f64-cmp (subr (maxeff evals spin) (vals (subr pure (f64 f64) bool)) val)
+  (lambda (xs f) (v-bool (f (as-f64 (arg xs 0)) (as-f64 (arg xs 1))))))
+(define f64-test (subr (maxeff evals spin) (vals (subr pure (f64) bool)) val)
+  (lambda (xs f) (v-bool (f (as-f64 (arg xs 0))))))
+(define* ev-f64-unary (subr (maxeff evals spin) (string vals) val)
+  (lambda (n xs)
+    (let ((is (lambda ((s string)) (string=? n s))))
+      (cond ((is "f64-abs") (f64-1 xs f64-abs)) ((is "f64-neg") (f64-1 xs f64-neg))
+            ((is "f64-sqrt") (f64-1 xs f64-sqrt)) ((is "f64-floor") (f64-1 xs f64-floor))
+            ((is "f64-ceiling") (f64-1 xs f64-ceiling))
+            ((is "f64-truncate") (f64-1 xs f64-truncate))
+            ((is "f64-round") (f64-1 xs f64-round)) ((is "f64-exp") (f64-1 xs f64-exp))
+            ((is "f64-log") (f64-1 xs f64-log)) ((is "f64-sin") (f64-1 xs f64-sin))
+            ((is "f64-cos") (f64-1 xs f64-cos)) ((is "f64-tan") (f64-1 xs f64-tan))
+            ((is "f64-asin") (f64-1 xs f64-asin)) ((is "f64-acos") (f64-1 xs f64-acos))
+            ((is "f64-atan") (f64-1 xs f64-atan))
+            (else (efail (string-append "not in the evaluator yet: " n)))))))
+;; The `f64` operation named `n`, on `xs`; or none such.
+(define* ev-f64-prim (subr (maxeff evals spin) (string vals) val)
+  (lambda (n xs)
+    (let ((is (lambda ((s string)) (string=? n s))))
+      (cond ((is "f64+") (f64-2 xs f64+)) ((is "f64-") (f64-2 xs f64-))
+            ((is "f64*") (f64-2 xs f64*)) ((is "f64/") (f64-2 xs f64/))
+            ((is "f64-min") (f64-2 xs f64-min)) ((is "f64-max") (f64-2 xs f64-max))
+            ((is "f64-atan2") (f64-2 xs f64-atan2)) ((is "f64-expt") (f64-2 xs f64-expt))
+            ((is "f64<") (f64-cmp xs f64<)) ((is "f64<=") (f64-cmp xs f64<=))
+            ((is "f64>") (f64-cmp xs f64>)) ((is "f64>=") (f64-cmp xs f64>=))
+            ((is "f64=") (f64-cmp xs f64=))
+            ((is "f64-nan?") (f64-test xs f64-nan?))
+            ((is "f64-infinite?") (f64-test xs f64-infinite?))
+            ((is "f64-finite?") (f64-test xs f64-finite?))
+            ((is "int->f64") (v-f64 (int->f64 (as-int (arg xs 0)))))
+            ((is "f64->int") (v-int (f64->int (as-f64 (arg xs 0)))))
+            ((is "f64->string") (v-str (f64->string (as-f64 (arg xs 0)))))
+            ((is "string->f64")
+             (let ((l (string->f64 (as-str (arg xs 0)))))
+               (if (null? l) (v-nil) (v-cons (v-f64 (car l)) (v-nil)))))
+            (else (ev-f64-unary n xs))))))
 ;; `e` with each binding's name bound, holding #u.
 (define open-letrec (subr (maxeff (read @globals) evals) (exp-letrec-bs env) env)
   (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (extend (extract (car bs) 1) (v-unit) e)))))
@@ -352,7 +407,7 @@
             ((string=? n "current-marks") (list->val (current-marks (as-key (arg xs 0)))))
             ((string=? n "marks-of")
              (list->val (marks-of (as-cont (arg xs 0)) (as-key (arg xs 1)))))
-            (else (efail (string-append "not in the evaluator yet: " n))))))
+            (else (ev-f64-prim n xs)))))
   ;; `f` applied to `x` alone.
   (apply1 (subr (maxeff (read @globals) evals spin) (val val) val)
     (lambda (f x) (apply-val f (the vals (cons x nil)))))
@@ -389,6 +444,7 @@
         (e-bool (v a b) (v-bool v))
         (e-str (s a b) (v-str s))
         (e-char (c a b) (v-char c))
+        (e-float (x a b) (v-f64 x))
         (e-sym (s a b) (v-sym s))
         (e-unit (a b) (v-unit))
         (e-lambda (ps body a b) (v-clo ps body e))
@@ -608,6 +664,7 @@
         (v-bool (b) (if b "#t" "#f"))
         (v-str (s) (string-append "\"" (string-append s "\"")))
         (v-char (c) (string-append "#\\" (char->string c)))
+        (v-f64 (x) (f64->string x))
         (v-sym (s) (symbol->string s))
         (v-unit () "#u")
         (v-nil () "()")

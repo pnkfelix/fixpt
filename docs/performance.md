@@ -2101,3 +2101,19 @@ the tests' default) loads all of it, as before. Whole runs: `md5` 3.0 →
 0.71 s, `pi` 2.9 → 0.59 s. The test suite went from about 147 to 135 s.
 What is left of start-up is mostly the second check of the whole front
 end, by the Rust checker, for the register compiler.
+
+## `f64` raw in native registers (2026-09-30)
+
+`f64` is the heap's boxed flonum; native code's `reps` pass keeps one raw
+(its bits in an `x` register) between operations, as it does `i64` and
+`u64`, and moves it into `d16`/`d17` for each: `fadd`, `fdiv`, `fsqrt`,
+`frintn`, `fcmp` and the rest. Boxing is inline, two words from the free
+space; unboxing a load. `int->f64` of a fixnum is `scvtf`; `f64->int`
+`fcvtzs`, checked exact and a fixnum. The sum of `1/i` for `i` to 10
+million:
+
+| ms       | lowered | registers | native |
+| -------- | -------:| ---------:| ------:|
+| `sumfp`  |   757.1 |     620.9 |   30.9 |
+
+(Native before `int->f64` was inline: 208.9, a call-out an iteration.)

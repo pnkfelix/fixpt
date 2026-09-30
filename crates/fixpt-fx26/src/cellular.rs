@@ -422,7 +422,7 @@ impl<'a> Compiler<'a> {
                 }
                 self.free(scrutinee, bound, acc);
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
         }
     }
 
@@ -492,6 +492,11 @@ impl<'a> Compiler<'a> {
             }
             Exp::Char(ch) => {
                 self.lit(code, Value::char(ch));
+                self.done(code, tail);
+            }
+            Exp::Float(x) => {
+                let v = self.heap.make_flonum(x);
+                self.lit(code, v);
                 self.done(code, tail);
             }
             Exp::Symbol(s) => {
@@ -864,7 +869,7 @@ impl<'a> Compiler<'a> {
                 let n = all(&arms.iter().map(|a| a.body).collect::<Vec<_>>(), self.inline_room(scrutinee, n));
                 all(&els.map(|(_, b)| b).into_iter().collect::<Vec<_>>(), n)
             }
-            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => n,
+            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => n,
         }
     }
 
@@ -907,7 +912,7 @@ impl<'a> Compiler<'a> {
                     && els.is_none_or(|(y, b)| y != p && y != f && self.call_only(b, p, f, k, n, arity))
             }
             Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } => false,
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => true,
         }
     }
 
@@ -946,7 +951,7 @@ impl<'a> Compiler<'a> {
                     && arms.iter().all(|a| a.names().contains(&f) || self.called_only(a.body, f, n))
                     && els.is_none_or(|(y, b)| y == f || self.called_only(b, f, n))
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => true,
         }
     }
 
@@ -1109,7 +1114,7 @@ impl<'a> Compiler<'a> {
                     && arms.iter().all(|a| a.names().contains(&f) || self.loops_only(a.body, f, n, tail))
                     && els.is_none_or(|(y, b)| y == f || self.loops_only(b, f, n, tail))
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => true,
         }
     }
 
