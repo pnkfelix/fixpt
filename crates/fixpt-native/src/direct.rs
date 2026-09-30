@@ -48,6 +48,9 @@ use fixpt_heap::{Heap, Value};
 use std::collections::HashMap;
 use std::mem::offset_of;
 
+mod reps;
+use reps::{Convert, Rep};
+
 const RESULT: Reg = 0;
 const ST: Reg = 24;
 const FUEL: Reg = 28;
@@ -140,19 +143,20 @@ struct DState {
     /// The heap's table of each region's current chunk, `[fill, end]` by
     /// handle (`Heap::region_table_address`), for `rcons` made inline.
     region_table: u64,
-    /// REG1…REG8, the closure and the link, kept here around a call-out
-    /// that never collects (`Callout::Pure`): as they are, since nothing
-    /// moves.
-    kept: [u64; 10],
+    /// REG1…REG8, the closure, the link and `RESULT`, kept here around a
+    /// call-out that never collects (`Callout::Pure`, `Box`, `Unbox`): as
+    /// they are, raw or not, since nothing moves.
+    kept: [u64; 12],
 }
 
 /// The traps this code raises, by code.
-const TRAPS: [&str; 6] = ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed", "car or cdr of nil"];
+const TRAPS: [&str; 7] = ["", "out of fuel", "stack overflow", "integer overflow", "a primitive failed", "car or cdr of nil", "division by zero"];
 const OUT_OF_FUEL: u32 = 1;
 const STACK_OVERFLOW: u32 = 2;
 const OVERFLOW: u32 = 3;
 const PRIM_FAILED: u32 = 4;
 const NOT_A_PAIR: u32 = 5;
+const DIVIDED_BY_ZERO: u32 = 6;
 
 /// What a call-out does: `cons`; a runtime primitive of `n` arguments; a
 /// native closure over `n` values of the code in the state's `aux`.
@@ -199,6 +203,11 @@ enum Callout {
     /// (`fixpt_runtime::never_collects`), from `prim1`, `prim2` or
     /// `prim2imm`: no collection first, the registers kept in the state.
     Pure { p: usize, n: usize },
+    /// An `i64` (signed) or `u64`'s raw 64 bits (argument 0, not a value)
+    /// as the integer it is, a bignum past a fixnum (`reps`).
+    Box { signed: bool },
+    /// An exact integer's low 64 bits, raw (0 for anything else).
+    Unbox,
 }
 
 impl Callout {
@@ -206,7 +215,7 @@ impl Callout {
         match self {
             Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
             Callout::Capture { whole } => if whole { 1 } else { 2 },
-            Callout::CurrentMarks => 1,
+            Callout::CurrentMarks | Callout::Box { .. } | Callout::Unbox => 1,
             Callout::Foreign | Callout::ClosureAny | Callout::Rest => 0,
             Callout::Prim { n, .. } | Callout::Pure { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
@@ -1090,12 +1099,41 @@ impl Compiling<'_> {
         let mut src = RESULT;
         // A global about to be called: the call to make.
         let mut pending: Option<Field> = None;
+        // Where `i64` and `u64` values are raw (`reps`): the registers as
+        // each instruction starts, and ends; the ways into an instruction
+        // that must unbox some first, each a stub of its own.
+        let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name);
+        let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
+        let mut edge_stubs: Vec<(Label, Vec<usize>, Label)> = Vec::new();
+        let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
+            let unbox = si_at.get(&to).map(|&t| reps::unboxes(&reps_out[from], &reps_in[t])).unwrap_or_default();
+            if unbox.is_empty() {
+                return labels[to];
+            }
+            let l = a.label();
+            edge_stubs.push((l, unbox, labels[to]));
+            l
+        };
         let mut si = 0;
         while si < starts.len() {
             let i = starts[si];
+            // Falling in from the instruction before, the registers it
+            // leaves as values that are raw here unboxed.
+            if si > 0 && !matches!(op_at(starts[si - 1]), "branch" | "return" | "tailinvoke") {
+                for r in reps::unboxes(&reps_out[si - 1], &reps_in[si]) {
+                    unbox_reg(&mut a, self.callouts, r as Reg);
+                }
+            }
             si += 1;
             a.bind(labels[i]);
             let op = op_at(i);
+            {
+                let o = |j: usize| cells[i + 1 + j];
+                let mut reps = reps_in[si - 1];
+                let first = reps::step(op, &o, &prim_name, &mut reps);
+                convert(&mut a, self.callouts, &first);
+            }
             if target[i] {
                 map_stored = None;
             }
@@ -1201,7 +1239,8 @@ impl Compiling<'_> {
                         a.to(held, Fix::If(Cond::Eq));
                         a.e(ldur(X11, X11, field_off(fixpt_heap::layout::cellular::CODE_SOURCE)));
                         a.e(cmp(X11, X16));
-                        a.to(labels[to], Fix::If(Cond::Ne));
+                        let l = edge(&mut a, si - 1, to);
+                        a.to(l, Fix::If(Cond::Ne));
                         a.bind(held);
                     }
                 }
@@ -1226,7 +1265,7 @@ impl Compiling<'_> {
                     a.e(ldur(RESULT, from, off));
                 }
                 "reg" => match joinable(si - 1) {
-                    Some(j) if matches!(op_at(j), "op2" | "op2imm") => {
+                    Some(j) if matches!(op_at(j), "op2" | "op2imm") && !matches!(reps_in[si - 1][k(o(0)).min(8)], Rep::Raw { .. }) => {
                         src = reg(o(0));
                         continue;
                     }
@@ -1370,7 +1409,8 @@ impl Compiling<'_> {
                                     (_, "eq") => Cond::Eq,
                                     _ => Cond::Lt,
                                 };
-                                a.to(labels[to], Fix::If(cond));
+                                let l = edge(&mut a, si, to);
+                                a.to(l, Fix::If(cond));
                                 si += 1;
                             }
                             _ => {
@@ -1542,9 +1582,36 @@ impl Compiling<'_> {
                 // call-out with no collection, the registers kept around it.
                 "prim1" | "prim2" | "prim2imm" => {
                     let pn = k(o(0));
-                    let name = fixpt_runtime::PRIMITIVES.get(pn).map(|d| d.name).unwrap_or("?");
+                    let name = fixpt_runtime::PRIMITIVES.get(pn).map_or("?", |d| d.name);
                     if !fixpt_runtime::never_collects(name) {
                         return decline(format!("`{op}` of `{name}`, which may collect"));
+                    }
+                    // An `i64` or `u64` operation: its operands raw where it
+                    // takes them so (unboxed already, as `reps` said), a
+                    // constant made so here.
+                    if let Some((signed, what)) = reps::raw_op(name) {
+                        let y = match op {
+                            "prim2" => reg(o(1)),
+                            "prim2imm" => {
+                                let v = o(1);
+                                let count = matches!(what, "-shl" | "-shr");
+                                if v.is_fixnum() && !count {
+                                    a.es(&mov_imm64(X17, v.as_fixnum() as u64));
+                                } else if v.is_fixnum() || v.raw() & 7 == 3 {
+                                    a.es(&mov_imm64(X17, v.raw()));
+                                } else {
+                                    let f = self.field(p, Field::Const(v));
+                                    ldr_field(&mut a, X17, f);
+                                    if !count {
+                                        unbox_reg(&mut a, self.callouts, X17);
+                                    }
+                                }
+                                X17
+                            }
+                            _ => X17,
+                        };
+                        raw_fast(&mut a, &mut stubs, signed, what, y);
+                        continue;
                     }
                     let y = match op {
                         "prim2" => reg(o(1)),
@@ -1566,24 +1633,7 @@ impl Compiling<'_> {
                     }
                     a.bind(slow);
                     let n = if op == "prim1" { 1 } else { 2 };
-                    let c = self.callouts.len();
-                    self.callouts.push(Callout::Pure { p: pn, n });
-                    let args = offset_of!(DState, args) as u32;
-                    a.e(str(RESULT, ST, args));
-                    if n == 2 {
-                        a.e(str(y, ST, args + 8));
-                    }
-                    let kept = offset_of!(DState, kept) as u32;
-                    let pairs = [(1, 2), (3, 4), (5, 6), (7, 8), (CLO, LINK)];
-                    a.e(add_imm(X16, ST, kept));
-                    for (j, &(r1, r2)) in pairs.iter().enumerate() {
-                        a.e(stp(r1, r2, X16, 16 * j as i64));
-                    }
-                    call_out(&mut a, c);
-                    a.e(add_imm(X16, ST, kept));
-                    for (j, &(r1, r2)) in pairs.iter().enumerate() {
-                        a.e(ldp(r1, r2, X16, 16 * j as i64));
-                    }
+                    pure_call(&mut a, self.callouts, Callout::Pure { p: pn, n }, &[RESULT, y][..n], RESULT);
                     a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
                     a.e(cmp_imm(X9, 0));
                     trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
@@ -1802,22 +1852,31 @@ impl Compiling<'_> {
                 "return" => a.e(ret()),
                 "branch" | "branchf" | "brancht" => {
                     let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
+                    let l = edge(&mut a, si - 1, to);
                     if op != "branch" {
                         a.es(&mov_imm64(X16, Value::FALSE.raw()));
                         a.e(cmp(RESULT, X16));
-                        a.to(labels[to], Fix::If(if op == "branchf" { Cond::Eq } else { Cond::Ne }));
+                        a.to(l, Fix::If(if op == "branchf" { Cond::Eq } else { Cond::Ne }));
                     } else {
                         if back_to[to] {
                             a.e(subs_imm(FUEL, FUEL, 1));
                             trap(&mut a, &mut stubs, OUT_OF_FUEL, Cond::Lo);
                         }
-                        a.to(labels[to], Fix::B);
+                        a.to(l, Fix::B);
                     }
                 }
                 other => return decline(format!("`{other}`")),
             }
         }
         a.bind(labels[cells.len()]);
+        // The ways in that unbox first.
+        for (l, unbox, to) in edge_stubs {
+            a.bind(l);
+            for r in unbox {
+                unbox_reg(&mut a, self.callouts, r as Reg);
+            }
+            a.to(to, Fix::B);
+        }
         let own = a.code.len();
         // The calls of what is not native code, out of the way: the common
         // routine, in a frame of its own with nothing in it, calls out with
@@ -1863,14 +1922,165 @@ impl Compiling<'_> {
     }
 }
 
-/// A fixed-width integer type's width and whether it is signed.
-fn fixed_type(t: &str) -> Option<(u32, bool)> {
-    match t {
-        "i32" => Some((32, true)),
-        "u32" => Some((32, false)),
-        "i64" => Some((64, true)),
-        "u64" => Some((64, false)),
+/// A trap of kind `code` where `c` holds, by a stub of its own.
+fn trap_at(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, code: u32, c: Cond) {
+    let l = a.label();
+    stubs.push((l, code));
+    a.to(l, Fix::If(c));
+}
+
+/// Call-out `c`, which never collects, on `args` (registers, put in the
+/// state), its value into `into`: `RESULT`, REG1…REG8, the closure and the
+/// link kept in the state around it, as they are (raw or not: nothing
+/// moves), and put back.
+fn pure_call(a: &mut Asm, callouts: &mut Vec<Callout>, c: Callout, args: &[Reg], into: Reg) {
+    let n = callouts.len();
+    callouts.push(c);
+    let base = offset_of!(DState, args) as u32;
+    for (j, &r) in args.iter().enumerate() {
+        a.e(str(r, ST, base + 8 * j as u32));
+    }
+    let pairs = [(1, 2), (3, 4), (5, 6), (7, 8), (CLO, LINK), (RESULT, XZR)];
+    let kept = offset_of!(DState, kept) as u32;
+    a.e(add_imm(X16, ST, kept));
+    for (j, &(r1, r2)) in pairs.iter().enumerate() {
+        a.e(stp(r1, r2, X16, 16 * j as i64));
+    }
+    call_out(a, n);
+    a.e(mov(X17, RESULT));
+    a.e(add_imm(X16, ST, kept));
+    for (j, &(r1, r2)) in pairs.iter().enumerate() {
+        a.e(ldp(r1, r2, X16, 16 * j as i64));
+    }
+    if into != X17 {
+        a.e(mov(into, X17));
+    }
+}
+
+/// Register `r`'s raw `i64` (signed) or `u64` boxed, in place: a fixnum
+/// where it fits, else a bignum, made by a call-out.
+fn box_reg(a: &mut Asm, callouts: &mut Vec<Callout>, r: Reg, signed: bool) {
+    let (slow, done) = (a.label(), a.label());
+    if signed {
+        a.e(lsl_imm(X16, r, 3));
+        a.e(asr_imm(X13, X16, 3));
+        a.e(cmp(X13, r));
+        a.to(slow, Fix::If(Cond::Ne));
+        a.e(mov(r, X16));
+    } else {
+        a.e(lsr_imm(X13, r, 60));
+        a.e(cmp_imm(X13, 0));
+        a.to(slow, Fix::If(Cond::Ne));
+        a.e(lsl_imm(r, r, 3));
+    }
+    a.to(done, Fix::B);
+    a.bind(slow);
+    pure_call(a, callouts, Callout::Box { signed }, &[r], r);
+    a.bind(done);
+}
+
+/// Register `r`'s exact integer unboxed, in place: its low 64 bits, a
+/// fixnum's by a shift, a bignum's by a call-out.
+fn unbox_reg(a: &mut Asm, callouts: &mut Vec<Callout>, r: Reg) {
+    let (slow, done) = (a.label(), a.label());
+    a.e(tst_low(r, 3));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(asr_imm(r, r, 3));
+    a.to(done, Fix::B);
+    a.bind(slow);
+    pure_call(a, callouts, Callout::Unbox, &[r], r);
+    a.bind(done);
+}
+
+/// The conversions `reps` asks for before an instruction.
+fn convert(a: &mut Asm, callouts: &mut Vec<Callout>, cs: &[Convert]) {
+    for c in cs {
+        match *c {
+            Convert::Box { r, signed } => box_reg(a, callouts, r as Reg, signed),
+            Convert::Unbox { r } => unbox_reg(a, callouts, r as Reg),
+        }
+    }
+}
+
+/// An `i64` (signed) or `u64` operation `what` (as `reps::raw_op` names
+/// it) on raw `RESULT` and `y` (raw, or a shift's count, a fixnum), into
+/// `RESULT`: raw, or a value (a comparison's boolean; `T->int`'s fixnum,
+/// which past one fails as `+` does). Its arithmetic wraps, as the
+/// machine's does. Uses X13 to X16.
+fn raw_fast(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, signed: bool, what: &str, y: Reg) {
+    let x = RESULT;
+    let compare = |c: Cond| match (c, signed) {
+        (Cond::Lt, false) => Cond::Lo,
+        (Cond::Le, false) => Cond::Ls,
+        (Cond::Gt, false) => Cond::Hi,
+        (Cond::Ge, false) => Cond::Hs,
+        (c, _) => c,
+    };
+    let test = match what {
+        "<" => Some(Cond::Lt),
+        "<=" => Some(Cond::Le),
+        ">" => Some(Cond::Gt),
+        ">=" => Some(Cond::Ge),
+        "=" => Some(Cond::Eq),
         _ => None,
+    };
+    if let Some(c) = test {
+        a.e(cmp(x, y));
+        a.es(&mov_imm64(X13, Value::TRUE.raw()));
+        a.es(&mov_imm64(X14, Value::FALSE.raw()));
+        a.e(csel(RESULT, X13, X14, compare(c)));
+        return;
+    }
+    let nonzero = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>| {
+        a.e(cmp_imm(y, 0));
+        trap_at(a, stubs, DIVIDED_BY_ZERO, Cond::Eq);
+    };
+    match what {
+        // `int->T`: its operand unboxed is it, wrapped.
+        "from" => {}
+        "+" => a.e(add(RESULT, x, y)),
+        "-" => a.e(sub(RESULT, x, y)),
+        "*" => a.e(mul(RESULT, x, y)),
+        "-and" => a.e(and(RESULT, x, y)),
+        "-or" => a.e(orr(RESULT, x, y)),
+        "-xor" => a.e(eor(RESULT, x, y)),
+        "-not" => {
+            a.e(sub(RESULT, XZR, x));
+            a.e(sub_imm(RESULT, RESULT, 1));
+        }
+        "-quotient" => {
+            nonzero(a, stubs);
+            a.e(if signed { sdiv(RESULT, x, y) } else { udiv(RESULT, x, y) });
+        }
+        "-remainder" => {
+            nonzero(a, stubs);
+            a.e(if signed { sdiv(X13, x, y) } else { udiv(X13, x, y) });
+            a.e(msub(RESULT, X13, y, x));
+        }
+        // The count, a fixnum, modulo 64.
+        "-shl" | "-shr" => {
+            a.e(ubfx(X13, y, 3, 6));
+            a.e(match (what, signed) {
+                ("-shl", _) => lslv(RESULT, x, X13),
+                (_, true) => asrv(RESULT, x, X13),
+                _ => lsrv(RESULT, x, X13),
+            });
+        }
+        _ => {
+            // `->int`.
+            if signed {
+                a.e(lsl_imm(X16, x, 3));
+                a.e(asr_imm(X13, X16, 3));
+                a.e(cmp(X13, x));
+                trap_at(a, stubs, OVERFLOW, Cond::Ne);
+                a.e(mov(RESULT, X16));
+            } else {
+                a.e(lsr_imm(X13, x, 60));
+                a.e(cmp_imm(X13, 0));
+                trap_at(a, stubs, OVERFLOW, Cond::Ne);
+                a.e(lsl_imm(RESULT, x, 3));
+            }
+        }
     }
 }
 
@@ -1885,12 +2095,12 @@ fn wrap32(a: &mut Asm, signed: bool) {
     }
 }
 
-/// The fast path of primitive `name`, one that never collects, on `RESULT`
-/// and `y`, into `RESULT`, going to `slow` for what it leaves to the
-/// primitive (a bignum, a zero divisor, a result past a fixnum): false if
-/// it has none. An `i32` or `u32` is the fixnum of its value, so its
-/// arithmetic is the fixnums' then wrapped; an `i64` or `u64` is too while
-/// it fits one. Uses X13 to X16.
+/// The fast path of primitive `name`, one that never collects and no
+/// operation of `i64` or `u64` (those are `raw_fast`'s), on `RESULT` and
+/// `y`, into `RESULT`, going to `slow` for what it leaves to the primitive
+/// (a bignum, a zero divisor, a result past a fixnum): false if it has
+/// none. An `i32` or `u32` is the fixnum of its value, so its arithmetic is
+/// the fixnums' then wrapped. Uses X13 to X16.
 fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     let x = RESULT;
     let fixnum = |a: &mut Asm, r: Reg| {
@@ -1902,13 +2112,13 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(tst_low(X13, 3));
         a.to(slow, Fix::If(Cond::Ne));
     };
-    let boolean = |a: &mut Asm, c: Cond| {
-        a.es(&mov_imm64(X13, Value::TRUE.raw()));
-        a.es(&mov_imm64(X14, Value::FALSE.raw()));
-        a.e(csel(RESULT, X13, X14, c));
+    let nonzero = |a: &mut Asm| {
+        a.e(cmp_imm(y, 0));
+        a.to(slow, Fix::If(Cond::Eq));
     };
     // A product in 61 bits, or `slow`: the high word only the low's sign.
-    let times = |a: &mut Asm| {
+    if name == "%fx26-mul" {
+        fixnums(a);
         a.e(asr_imm(X14, y, 3));
         a.e(mul(X13, x, X14));
         a.e(smulh(X15, x, X14));
@@ -1916,14 +2126,6 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(cmp(X15, X16));
         a.to(slow, Fix::If(Cond::Ne));
         a.e(mov(RESULT, X13));
-    };
-    let nonzero = |a: &mut Asm| {
-        a.e(cmp_imm(y, 0));
-        a.to(slow, Fix::If(Cond::Eq));
-    };
-    if name == "%fx26-mul" {
-        fixnums(a);
-        times(a);
         return true;
     }
     // A quotient past a fixnum (the least one's by −1) is the primitive's;
@@ -1952,23 +2154,18 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         return true;
     }
     let Some(rest) = name.strip_prefix("%fx26-") else { return false };
-    if let Some(t) = rest.strip_prefix("int->") {
-        let Some((w, signed)) = fixed_type(t) else { return false };
+    let signed = |t: &str| match t {
+        "i32" => Some(true),
+        "u32" => Some(false),
+        _ => None,
+    };
+    if let Some(s) = rest.strip_prefix("int->").and_then(signed) {
         fixnum(a, x);
-        if w == 32 {
-            wrap32(a, signed);
-        } else if !signed {
-            a.e(cmp_imm(x, 0));
-            a.to(slow, Fix::If(Cond::Lt));
-        }
+        wrap32(a, s);
         return true;
     }
-    let Some((w, signed)) = rest.get(..3).and_then(fixed_type) else { return false };
-    let compare = |c: Cond| move |a: &mut Asm| {
-        a.e(cmp(x, y));
-        boolean(a, c);
-    };
-    let cmp_to = match &rest[3..] {
+    let Some(s) = rest.get(..3).and_then(signed) else { return false };
+    let test = match &rest[3..] {
         "<" => Some(Cond::Lt),
         "<=" => Some(Cond::Le),
         ">" => Some(Cond::Gt),
@@ -1976,104 +2173,59 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         "=" => Some(Cond::Eq),
         _ => None,
     };
-    if let Some(c) = cmp_to {
-        if w == 64 {
-            fixnums(a);
-        }
-        compare(c)(a);
+    if let Some(c) = test {
+        a.e(cmp(x, y));
+        a.es(&mov_imm64(X13, Value::TRUE.raw()));
+        a.es(&mov_imm64(X14, Value::FALSE.raw()));
+        a.e(csel(RESULT, X13, X14, c));
         return true;
     }
-    match (w, &rest[3..]) {
-        (32, "->int") => {}
-        // Past a fixnum, the primitive's failure.
-        (64, "->int") => fixnum(a, x),
-        (32, "+") => {
+    match &rest[3..] {
+        "->int" => {}
+        "+" => {
             a.e(add(RESULT, x, y));
-            wrap32(a, signed);
+            wrap32(a, s);
         }
-        (32, "-") => {
+        "-" => {
             a.e(sub(RESULT, x, y));
-            wrap32(a, signed);
+            wrap32(a, s);
         }
-        (32, "*") => {
+        "*" => {
             a.e(asr_imm(X13, y, 3));
             a.e(mul(RESULT, x, X13));
-            wrap32(a, signed);
+            wrap32(a, s);
         }
-        (32, "-quotient") => {
+        "-quotient" => {
             nonzero(a);
             a.e(sdiv(X13, x, y));
             a.e(lsl_imm(RESULT, X13, 3));
-            wrap32(a, signed);
+            wrap32(a, s);
         }
-        (32, "-not") => {
-            a.e(sub(RESULT, XZR, x));
-            a.e(sub_imm(RESULT, RESULT, 8));
-            wrap32(a, signed);
-        }
-        (32, "-shl") => {
-            fixnum(a, y);
-            a.e(ubfx(X13, y, 3, 5));
-            a.e(lslv(RESULT, x, X13));
-            wrap32(a, signed);
-        }
-        (_, "-remainder") => {
-            if w == 64 {
-                fixnums(a);
-            }
+        "-remainder" => {
             nonzero(a);
             a.e(sdiv(X13, x, y));
             a.e(msub(RESULT, X13, y, x));
         }
-        (_, "-and" | "-or" | "-xor") => {
-            if w == 64 {
-                fixnums(a);
-            }
-            a.e(match &rest[3..] {
-                "-and" => and(RESULT, x, y),
-                "-or" => orr(RESULT, x, y),
-                _ => eor(RESULT, x, y),
-            });
-        }
-        // An arithmetic or logical shift right, the tag's bits cleared.
-        (_, "-shr") => {
-            if w == 64 {
-                fixnums(a);
-            } else {
-                fixnum(a, y);
-            }
-            a.e(ubfx(X13, y, 3, if w == 32 { 5 } else { 6 }));
-            a.e(if signed { asrv(X14, x, X13) } else { lsrv(X14, x, X13) });
-            a.e(and_bits(RESULT, X14, 3, 61));
-        }
-        (64, "+" | "-") => {
-            fixnums(a);
-            a.e(if &rest[3..] == "+" { adds(X13, x, y) } else { subs(X13, x, y) });
-            a.to(slow, Fix::If(Cond::Vs));
-            if !signed {
-                a.e(cmp_imm(X13, 0));
-                a.to(slow, Fix::If(Cond::Lt));
-            }
-            a.e(mov(RESULT, X13));
-        }
-        (64, "*") => {
-            fixnums(a);
-            times(a);
-        }
-        (64, "-quotient") => {
-            fixnums(a);
-            nonzero(a);
-            a.e(sdiv(X13, x, y));
-            a.e(lsl_imm(X14, X13, 3));
-            a.e(asr_imm(X15, X14, 3));
-            a.e(cmp(X15, X13));
-            a.to(slow, Fix::If(Cond::Ne));
-            a.e(mov(RESULT, X14));
-        }
-        (64, "-not") if signed => {
-            fixnum(a, x);
+        "-and" => a.e(and(RESULT, x, y)),
+        "-or" => a.e(orr(RESULT, x, y)),
+        "-xor" => a.e(eor(RESULT, x, y)),
+        "-not" => {
             a.e(sub(RESULT, XZR, x));
             a.e(sub_imm(RESULT, RESULT, 8));
+            wrap32(a, s);
+        }
+        "-shl" => {
+            fixnum(a, y);
+            a.e(ubfx(X13, y, 3, 5));
+            a.e(lslv(RESULT, x, X13));
+            wrap32(a, s);
+        }
+        // An arithmetic or logical shift right, the tag's bits cleared.
+        "-shr" => {
+            fixnum(a, y);
+            a.e(ubfx(X13, y, 3, 5));
+            a.e(if s { asrv(X14, x, X13) } else { lsrv(X14, x, X13) });
+            a.e(and_bits(RESULT, X14, 3, 61));
         }
         _ => return false,
     }
@@ -2136,7 +2288,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let mut code = [Value(st.code)];
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
-    if !matches!(c, Callout::Pure { .. }) && rt.heap.collection_due() {
+    if !matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox) && rt.heap.collection_due() {
         let mut roots = native_frames(st);
         roots.push(&mut args);
         roots.push(&mut code);
@@ -2144,6 +2296,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     }
     let out = match c {
         Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),
+        Callout::Box { signed } => {
+            let bits = args[0].raw();
+            fixpt_runtime::integer_value(rt, if signed { bits as i64 as i128 } else { bits as i128 }).raw()
+        }
+        Callout::Unbox => fixpt_runtime::low_64_bits(rt, args[0]),
         Callout::Closure { .. } | Callout::ClosureAny => native_closure(&mut rt.heap, Value(st.aux), &args).raw(),
         Callout::RegionClosure { n } => {
             let h = if args[0].is_fixnum() { args[0].as_fixnum() as usize } else { usize::MAX };

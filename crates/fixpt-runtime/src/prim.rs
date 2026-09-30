@@ -223,6 +223,25 @@ fn exact_out(rt: &mut Runtime, x: i128) -> Value {
     crate::num::N::big(num_bigint::BigInt::from(x)).store(&mut rt.heap)
 }
 
+/// The integer `x` as the runtime keeps it: a fixnum where it fits, else a
+/// bignum. For native code's `i64` and `u64`, boxed.
+pub fn integer_value(rt: &mut Runtime, x: i128) -> Value {
+    exact_out(rt, x)
+}
+
+/// An exact integer's low 64 bits, two's complement: an `i64` or `u64`
+/// raw, or `int->u64` wrapping. 0 for what is no exact integer.
+pub fn low_64_bits(rt: &Runtime, v: Value) -> u64 {
+    match exact_bigint(rt, v) {
+        Some(b) => {
+            let m = num_bigint::BigInt::from(1u8) << 64;
+            let low = ((b % &m) + &m) % &m;
+            u64::try_from(low).expect("under 2^64")
+        }
+        None => 0,
+    }
+}
+
 /// Whether primitive `name` never collects, and so may be called from
 /// code whose live values are in registers, not in a frame (register code's
 /// `prim1`, `prim2`, `prim2imm`): FX-26's `*`, `quotient` and `modulo`, and

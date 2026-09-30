@@ -1,0 +1,32 @@
+;;; `i64` and `u64` raw in native registers (`fixpt_native::direct`,
+;;; `reps`): a loop's variable raw around the loop; kept across a call, so
+;;; boxed into the frame and unboxed again; ways meeting where one is raw
+;;; and one is a value; negative and past a fixnum, boxed as bignums.
+(define-type ints (listof int @heap))
+(define* fnv (subr spin (int) u64)
+  (lambda (n)
+    (letrec ((loop (subr spin (int u64) u64)
+               (lambda (i h)
+                 (if (= i n)
+                     h
+                     (loop (+ i 1) (u64* (u64-xor h (int->u64 i)) (int->u64 1099511628211)))))))
+      (loop 0 (u64-or (u64-shl (int->u64 3421674724) 32) (int->u64 2216829733))))))
+(define* twice (subr pure (int) int) (lambda (i) (* i 2)))
+(define* across (subr spin (int) i64)
+  (lambda (n)
+    (letrec ((loop (subr (maxeff spin (read (globals twice))) (int i64) i64)
+               (lambda (i h)
+                 (if (= i n)
+                     h
+                     (loop (+ i 1) (i64- (i64* h (int->i64 -1103515245)) (int->i64 (twice i))))))))
+      (loop 0 (int->i64 -7)))))
+(define* pick (subr pure (u64 bool) u64)
+  (lambda (h c) (u64* (if c (u64+ h (int->u64 1)) h) (int->u64 3))))
+(define* halves (subr pure (u64) int)
+  (lambda (h) (+ (u64->int (u64-shr h 32)) (u64->int (u64-and h (int->u64 4294967295))))))
+(define* raw-64 (subr (maxeff (alloc @heap) spin) (int) ints)
+  (lambda (n)
+    (let ((h (fnv n)) (g (across n)))
+      (list (halves h) (halves (pick h #t)) (halves (pick h #f)) (i64->int (i64-shr g 40))
+            (if (i64< g (int->i64 0)) 1 0) (i64->int (i64-and g (int->i64 1048575)))))))
+(raw-64 1000)

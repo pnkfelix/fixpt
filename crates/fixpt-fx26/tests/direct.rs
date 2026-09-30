@@ -251,6 +251,22 @@ fn fixed_width_operations_as_the_rust_machine_gives_them() {
     }
 }
 
+/// `i64` and `u64` raw in registers (`programs/native/raw-64.fx`): a loop's
+/// variable raw around it; one live across a call, boxed into the frame and
+/// unboxed again; ways meeting raw and boxed; bignums boxed on the way out;
+/// under collections too. Division by zero and `T->int` past a fixnum fail.
+#[test]
+fn i64_and_u64_raw_in_registers() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/raw-64"), "raw-64", &[1000], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+    let defs = "(define* q (subr pure (int int) int) (lambda (a b) (u64->int (u64-quotient (int->u64 a) (int->u64 b)))))";
+    assert!(matches!(&run(defs, "q", &[7, 0], FUEL).direct, Err(m) if m.contains("zero")));
+    let defs = "(define* w (subr pure (int) int) (lambda (a) (i64->int (i64* (int->i64 a) (int->i64 a)))))";
+    assert!(matches!(&run(defs, "w", &[1 << 31], FUEL).direct, Err(m) if m.contains("overflow")));
+}
+
 /// A leaf's registers and link, kept around a call with no collection: `b`
 /// lives across a product past a fixnum, which the primitive makes.
 #[test]

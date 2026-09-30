@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-09-29)
+## At a glance (kept current; last updated 2026-09-30)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -127,9 +127,9 @@ are in the last section, "Log: the glance's details", and in
 **Next**, roughly in order. First the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
 bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
-`u32`/`u64`, wrapping, their operations in line natively; left: `i64` and
-`u64` unboxed, then `int` a bignum); Q3 telemetry's counts; Q4 floats (`f64`
-boxed, `f32`); Q5 `eq?` and address-hashed tables (Larceny's tablets);
+`u32`/`u64`, wrapping, their operations in line natively, `i64` and `u64`
+raw in native registers; left: `int` a bignum); Q3 telemetry's counts;
+Q4 floats (`f64` boxed, `f32`); Q5 `eq?` and address-hashed tables (Larceny's tablets);
 Q6 flat arrays; Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction. Then, as before:
@@ -1997,8 +1997,16 @@ library.
   pointer (the register machine answered wrongly): both now fail
   "integer overflow", as `+` and `*` do, until `int` is a bignum. And the
   register machine's inline `modulo` read a bignum as a fixnum.
-- Left: `i64` and `u64` unboxed (FNV-1a in `u64` is 1.6 s natively, a
-  bignum each step). The plan was: `i32`/`u32`
+- Done (2026-09-30, the user's "storing 64 bits in registers"): `i64`
+  and `u64` raw in native registers, and only there (`fixpt_native::
+  direct`'s `reps` pass over register code, which is unchanged): boxed
+  (the exact integer, as everywhere else) where a value is read, so no
+  frame, heap object or collection sees raw bits; unboxed on the ways
+  into a place where they are raw, so a loop's variable stays raw. FNV-1a
+  in `u64`, 10M steps: 1587 → 11 ms natively. Not done, and not needed
+  yet: raw in frame slots (a raw value live across a call is boxed into
+  the frame), raw across calls, and a boxed form other than the exact
+  integer. The first plan was: `i32`/`u32`
   immediate (a word's upper half, a subtag); `i64`/`u64` raw in native
   registers and in frame slots outside the stack map, boxed as a
   bloblet with an 8-byte suffix in uniform positions, like `f64`. Bit

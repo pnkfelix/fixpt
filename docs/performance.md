@@ -2017,4 +2017,38 @@ literal, so that `(u32* h (int->u32 16777619))` is `prim2imm`.
 
 (`before` is native too. The register machine calls each one in Rust; it is
 not a speed target. A `u64` past 60 bits is a bignum, so FNV-1a in `u64`
-still allocates each step: `i64` and `u64` unboxed are the next step.)
+still allocated each step: see the next section.)
+
+## `i64` and `u64` raw in native registers (2026-09-30)
+
+An `i64` or `u64` is its exact integer everywhere (a bignum past 60 bits),
+so FNV-1a in `u64` made a bignum each step, even with its operations in
+line: 1.6 s for 10 million steps. The user asked for "storing 64 bits in
+registers".
+
+Native code (`fixpt_native::direct`, its `reps` pass) now keeps them raw
+in registers, and only there. Register code is unchanged (it is the same
+for every machine, and its registers hold values); the native compiler
+works out, forward over each procedure's register code, which registers
+hold raw 64 bits:
+
+- an operation of `i64` or `u64` takes its operands raw and gives its
+  value raw (a comparison and `T->int` give values); `int->T` is an
+  unboxing, which wraps;
+- `reg`, `setreg` and `movereg` move a register as it is;
+- whatever else reads a register reads a value: a raw one is boxed first,
+  in place (a fixnum where it fits, else a bignum by a call-out that does
+  not collect). So nothing raw is stored in a frame, passed, returned or
+  kept in the heap, and no collection sees raw bits;
+- where ways meet, a register raw on one way is raw after, and the ways
+  where it is a value unbox it (in line, or in a stub on a branch): a
+  loop's variable is unboxed once, on the way in, and stays raw around
+  the loop.
+
+The operations are then the machine's: `add`, `mul`, `eor`, `udiv`,
+`lsrv`, and unsigned comparisons for `u64`.
+
+| 10 million iterations, native (ms) | values in line |  raw |
+| ---------------------------------- | --------------:| ----:|
+| FNV-1a in `u64`                    |         1586.8 | 11.0 |
+| FNV-1a in `u32` (unchanged)        |           12.0 | 12.0 |

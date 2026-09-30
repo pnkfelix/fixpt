@@ -17,7 +17,7 @@ pub mod runtime;
 
 pub use error::{Outcome, Thrown};
 pub use num::N;
-pub use prim::{never_collects, EngineOp, PrimDef, PrimKind, PRIMITIVES};
+pub use prim::{integer_value, low_64_bits, never_collects, EngineOp, PrimDef, PrimKind, PRIMITIVES};
 pub use print::{display_value, write_value};
 pub use runtime::{CallNative, MachineCode, NativeExit, RunWord, Runtime, Sink};
 
