@@ -442,6 +442,43 @@ impl Checker {
         Ok((t, eff))
     }
 
+    /// A `letrec`: its group checked at the types declared, then its body,
+    /// checked against `expected` where one is given (as a `let`'s is), or
+    /// synthesised.
+    pub(crate) fn letrec(&mut self, e: ExpId, bindings: &[(Sym, TyId, ExpId)], body: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
+        let depth = self.env.len();
+        self.env.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
+        self.known.extend(bindings.iter().enumerate().map(|(i, (n, _, _))| (*n, depth + i)));
+        let rdepth = self.recursive.len();
+        // Only lambdas: then nothing runs before every binding
+        // exists, and no one sees the knot tied.
+        if let Some((n, _, init)) = bindings.iter().find(|(_, _, init)| !self.is_lambda(*init)) {
+            self.truncate_env(depth);
+            return Err(FxError::at(self.arena.span_of(*init), letrec_not_lambda(self.interner.name(*n))));
+        }
+        // A group whose every run ends needs no `spin`.
+        self.note_termination(bindings);
+        let r = (|| {
+            let mut eff = Effect::pure();
+            for (n, t, init) in bindings {
+                let ie = self.check(*init, *t).map_err(|err| self.declared_error(*n, *t, *init, err))?;
+                eff = eff.union(&ie);
+            }
+            // The body's calls of the group are not recursion.
+            self.recursive.truncate(rdepth);
+            let (bt, be) = match expected {
+                Some(want) => (want, self.check(body, want)?),
+                None => self.synth(body)?,
+            };
+            Ok((bt, eff.union(&be)))
+        })();
+        self.recursive.truncate(rdepth);
+        self.truncate_env(depth);
+        let (t, eff) = r?;
+        let eff = self.mask(e, &eff, t);
+        Ok((t, eff))
+    }
+
     /// `eff` with what it does to data frozen in the heap taken out, since
     /// reading it and making it are pure; or an error, if it writes frozen
     /// data. What it does to data frozen into a place stays: the place
@@ -604,36 +641,7 @@ impl Checker {
                 let eff = self.mask(e, &te.union(&ae).union(&be), t);
                 Ok((t, eff))
             }
-            Exp::Letrec { bindings, body } => {
-                let depth = self.env.len();
-                self.env.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
-                self.known.extend(bindings.iter().enumerate().map(|(i, (n, _, _))| (*n, depth + i)));
-                let rdepth = self.recursive.len();
-                // Only lambdas: then nothing runs before every binding
-                // exists, and no one sees the knot tied.
-                if let Some((n, _, init)) = bindings.iter().find(|(_, _, init)| !self.is_lambda(*init)) {
-                    self.truncate_env(depth);
-                    return Err(FxError::at(self.arena.span_of(*init), letrec_not_lambda(self.interner.name(*n))));
-                }
-                // A group whose every run ends needs no `spin`.
-                self.note_termination(&bindings);
-                let r = (|| {
-                    let mut eff = Effect::pure();
-                    for (n, t, init) in &bindings {
-                        let ie = self.check(*init, *t).map_err(|err| self.declared_error(*n, *t, *init, err))?;
-                        eff = eff.union(&ie);
-                    }
-                    // The body's calls of the group are not recursion.
-                    self.recursive.truncate(rdepth);
-                    let (bt, be) = self.synth(body)?;
-                    Ok((bt, eff.union(&be)))
-                })();
-                self.recursive.truncate(rdepth);
-                self.truncate_env(depth);
-                let (t, eff) = r?;
-                let eff = self.mask(e, &eff, t);
-                Ok((t, eff))
-            }
+            Exp::Letrec { bindings, body } => self.letrec(e, &bindings, body, None),
             Exp::Let { bindings, body } => {
                 let mut eff = Effect::pure();
                 let mut bound = Vec::new();

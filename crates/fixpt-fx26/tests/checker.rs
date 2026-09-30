@@ -79,6 +79,19 @@ fn small_programs() {
     let _ = both("(if 1 2 3)");
     let _ = both("(+ 1 #t)");
     let _ = both("(lambda (x) x)");
+    // A `letrec`'s body is checked against what is expected, as a `let`'s
+    // is (PLAN.md Q11): `nil` in one branch knows which list it is.
+    let lr = "(define* f (subr (alloc @l) (bool) (listof int @l))\n  (lambda (b) (letrec ((g (subr pure () int) (lambda () 1))) (if b nil (cons (g) nil)))))";
+    assert!(both(lr).is_ok(), "{lr}");
+}
+
+/// A text the FX-26 reader does not finish is blamed where the Rust reader
+/// places it, not at 1:1 (PLAN.md Q11, `TODO.md` §15).
+#[test]
+fn reader_errors_say_where() {
+    let at = |p: &str| common::with_own(|s| s.check_with_own_checker(p).err()).map(|e| (e.message, e.span.start));
+    assert_eq!(at("(define x 1)\n(+ x 1))"), Some(("unbalanced `)`".to_string(), 20)));
+    assert_eq!(at("(define x 1)\n(define y (+ x 2)\n(+ y 1)"), Some(("unterminated list, expected `)`".to_string(), 13)));
 }
 
 /// A shape conflict between a polymorphic call's result and what its context

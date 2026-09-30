@@ -777,6 +777,17 @@
           (x-begin (xs xa xb)
             (let ((e (k-check-seq xs expected nil)))
               (k-mask x e expected)))
+          ;; A `letrec`'s body, as a `let`'s, against what is expected.
+          (x-letrec (bs body xa xb)
+            (let ((saved (k-mark)) (rsaved (get k-recursive)))
+              (begin
+                (k-bind-letrec bs)
+                (k-letrec-lambdas bs)
+                (k-note-ending bs (k-termination bs))
+                (let* ((ie (k-check-letrec bs))
+                       (restored (set k-recursive rsaved))
+                       (e (k-check body expected)))
+                  (begin (k-unbind-to saved) (k-mask x (k-union ie e) expected))))))
           (x-let (bs body xa xb)
             (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
               (begin

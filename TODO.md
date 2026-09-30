@@ -490,8 +490,8 @@ ones (identity, integers, floats, unions) are items of their own.
 ## 13. Checker limitations the ports met
 
 Each has a small reproduction in the port that met it:
-- A `letrec` body is not checked against the type expected of it (a
-  `let` body is): `(letrec (…) (if b nil (cons (g) nil)))` fails with
+- Done (2026-09-30), both checkers: a `letrec` body is checked against
+  the type expected of it, as a `let` body is. It was not: `(letrec (…) (if b nil (cons (g) nil)))` fails with
   "argument 2 must be a t2, which is not yet known here". Every port
   wraps such bodies in `(the T …)`.
 - A `cons` in one branch of an `if`, or bound by a `let`, gets a fresh
@@ -533,8 +533,9 @@ operations by dictionary (`PLAN.md` Q8).
 
 ## 15. Tools the ports wished for
 
-- The FX-26 reader reports an unbalanced parenthesis at 1:1 ("did not
-  read the whole text"), wherever it is.
+- Done (2026-09-30): the FX-26 reader reported an unbalanced parenthesis
+  at 1:1 ("did not read the whole text"), wherever it was. A text it does
+  not finish is now blamed where the Rust reader places it.
 - `sexp-edit order` printed nothing for a forward use that `check`
   reports as unbound.
 - A procedure that falls back to cellular code is named only by a byte

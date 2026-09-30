@@ -283,6 +283,13 @@ pub fn read_to_syns(scheme: &mut Session, file: FileId, text: &str) -> R<Handle>
     let name = |n: &str| format!("{READER_PREFIX}{n}");
     let status = scheme.call_global(&name("eager-status"), &[st]).map_err(|e| fail(e.to_string()))?;
     if scheme.view(|v| v.get(status).symbol_name()).as_deref() != Some("complete") {
+        // Where and why, as the Rust reader says: the two agree on what
+        // reads (`tests/syn.rs`), and it places its errors, where an
+        // unfinished read here has no one place to blame.
+        let mut interner = fixpt_read::Interner::new();
+        if let Err(e) = fixpt_read::Reader::new(text, file, fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() {
+            return Err(FxError::at(e.span, e.message));
+        }
         return Err(fail("the FX-26 reader did not read the whole text".into()));
     }
     scheme.call_global(&name("eager-state-syntax"), &[st]).map_err(|e| fail(e.to_string()))

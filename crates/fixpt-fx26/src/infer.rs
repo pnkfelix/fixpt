@@ -199,6 +199,8 @@ impl Checker {
                 eff = eff.union(&self.check(*last, expected)?);
                 Ok(self.mask(e, &eff, expected))
             }
+            // A `letrec`'s body, as a `let`'s, against what is expected.
+            Exp::Letrec { bindings, body } => Ok(self.letrec(e, &bindings, body, Some(expected))?.1),
             Exp::Let { bindings, body } => {
                 let mut eff = Effect::pure();
                 let mut bound = Vec::new();
