@@ -2187,7 +2187,10 @@ in "Next".)
 
 **Q9. Separate compilation** (`docs/research/separate-compilation.md`),
 and with it modules, which the prelude and an FX-26 standard library wait
-on (`TODO.md` §22):
+on (`TODO.md` §22). `docs/research/modules.md` (2026-09-30): second-class
+units now, as Sheldon's `input` layer, with macros in units and their
+interfaces; Sheldon's first-class modules later, as values units export;
+open questions for the user in its §7:
 S0 a saved heap image of the loaded front end, keyed by a hash of its
 files and the binary; S1 checker snapshots at file boundaries; S2 facts
 keyed by (file, offset) (with Q1's `extract` fix); S3 an optional
