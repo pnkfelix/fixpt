@@ -342,7 +342,7 @@ pub fn order(texts: &[(String, SyntaxProfile)]) -> Result<Vec<Early>, String> {
     for (k, (text, profile)) in texts.iter().enumerate() {
         let (forms, _) = read(text, *profile)?;
         for d in definitions(text, *profile)? {
-            if matches!(d.kind.as_str(), "define" | "define-rec") {
+            if matches!(d.kind.as_str(), "define" | "define*" | "define-rec") {
                 let group = forms
                     .iter()
                     .find(|f| (f.span.start as usize) <= d.start && d.start < f.span.end as usize)

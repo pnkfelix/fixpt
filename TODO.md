@@ -546,11 +546,16 @@ operations by dictionary (`PLAN.md` Q8).
 - Done (2026-09-30): the FX-26 reader reported an unbalanced parenthesis
   at 1:1 ("did not read the whole text"), wherever it was. A text it does
   not finish is now blamed where the Rust reader places it.
-- `sexp-edit order` printed nothing for a forward use that `check`
-  reports as unbound.
+- Done (2026-09-30): `sexp-edit order` printed nothing for a forward use
+  that `check` reports as unbound: it did not count a `define*` as a
+  definition.
 - A procedure that falls back to cellular code is named only by a byte
   offset (`lambda@59`), and only at run time; say it when compiling,
-  with the procedure's name and why.
+  with the procedure's name and why. (2026-09-30: a definition that the
+  native compiler declines is said at once, as it is checked, with its
+  name and why; left: naming an inner lambda by the `let` or `letrec`
+  binding it has, `go@59`, in both compilers alike, since their words
+  must agree, and in register code's.)
 - Native start-up grows with program size (2.9–3.5 s before the first
   iteration for `boyer`, `ratio-regions`, `tyan`; 6.3 s for `parsing`
   with its 28 KB string): separate compilation's saved front-end image
