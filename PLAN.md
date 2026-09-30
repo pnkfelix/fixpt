@@ -141,9 +141,12 @@ before everything else, known holes before proofs.
   refused, both checkers agreeing. `soundness.md` reconciled: C3 proved on
   both size paths, T3's remaining caveat stated as §4.6's, T5 conjectured
   with no known counterexample; F10–F13 added to its tables.
-- S3. **A2's depth bounds**: unfolding generative types stops at depth 64
-  (`lemma.rs` `unfold_all`), the F5 pattern elsewhere; check that giving
-  up only ever refuses, never accepts, in both checkers.
+- S3. Done (2026-09-30): **the depth bounds**. Each of the five, in both
+  checkers, gives up by refusing or asking for `spin` or a proof, never by
+  accepting (`soundness-findings.md`, after A2); subtyping has none (a
+  coinductive trail). The re-check found the FX-26 checker without the
+  Rust one's Fourier–Motzkin step, so the two disagreed on chained size
+  facts; ported.
 - S4. **A3, the host's `datum`s**: acyclic by contract only (Scheme calling
   an `fx:` global); a `read` with datum labels would break it. Enforce at
   the boundary, or certify what such a `read` makes.

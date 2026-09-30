@@ -557,6 +557,32 @@ and size-change walks that unfold `N` bound their recursion by depth (64),
 which is the F5 pattern in another place (`lemma.rs:118–126`
 `unfold_all`, `check.rs:1059` `unfold`).
 
+**The depth bounds, re-checked (2026-09-30, PLAN S3).** Every place either
+checker gives up at a bound, and what giving up means; each refuses or asks
+for more (`spin`, a proof), never accepts:
+
+| bound                                   | where (Rust; FX-26)                                | giving up says                                 |
+| --------------------------------------- | -------------------------------------------------- | ---------------------------------------------- |
+| self-application walk, depth 64         | `infer.rs` `cyclic`; `check-subtype.fx`            | the procedure may loop: `spin` (F5)            |
+| lemma unfolding of generative types, 64 | `lemma.rs` `unfold_all`; `check-program.fx`        | a name is left, not a sum or product: no proof |
+| type-family expansion, depth 64         | `parse.rs`; `check-syntax.fx`                      | an error: "expands without end"                |
+| size-change graphs, 4000                | `terminate.rs` `MOST_GRAPHS`; `check-terminate.fx` | termination not shown: `spin`                  |
+| Fourier–Motzkin constraints, 64         | `sizes.rs` `refuted_below`; `check-print.fx`       | `a ≥ 0` not shown: a size or `nat` is refused  |
+
+Subtyping has no depth bound: it compares recursive types coinductively,
+over a trail of the pairs assumed (FX-87's, Amadio and Cardelli's), which is
+sound for the contractive types A2's `grounded` check admits. The note above
+("the subtyping and size-change walks … bound their recursion by depth") is
+out of date.
+
+The re-check found the checkers apart: the Rust checker's `size_nonneg`
+ended in Fourier–Motzkin elimination (`refuted_below`, since 2026-09-28),
+whose comment said "the FX-26 checker's is this, step for step", but the
+FX-26 checker had none, so `a - c` under `a ≥ b` and `b ≥ c` was a `nat` to
+one and an `int` to the other. Not unsound (the FX-26 checker was the
+stricter), but the two must agree. Ported, step for step
+(`k-refuted-below?`); tests `sizes/chained-facts*.fx`.
+
 **A3 — `datum` values from the host are acyclic.** Size-change and
 `acyclic?` treat `datum` as data. A cyclic datum built by the Scheme host
 and handed in (`docs/fx26.md` notes "a `read` that makes cycles from datum

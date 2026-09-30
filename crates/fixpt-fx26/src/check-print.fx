@@ -277,12 +277,121 @@
          (or (and (not (extract (car fs) 2))
                   (k-plainly-nonneg? (k-size-add-scaled a (k-reduced (extract (car fs) 1)) -1)))
              (k-nonneg-by-fact? a (cdr fs))))))
-;; Whether the facts show `a ≥ 0`: plainly, or with a fact `f ≥ 0` to spare.
+;; Fourier–Motzkin, as the Rust checker's `refuted_below` (`src/sizes.rs`),
+;; step for step: whether the inequalities in scope, with every size a
+;; natural, leave no room for `a ≤ -1`.
+(define-type k-lins (listof k-size acyclic))
+;; `gcd(a, b)` of naturals, Euclid's, counting down `fuel` (100 is more
+;; steps than any pair of 64-bit numbers takes).
+(define k-gcd (subr (read @globals) (int int nat) int)
+  (lambda (a b fuel)
+    (cond ((= b 0) a) ((= fuel 0) 1) (else (k-gcd b (remainder a b) (- fuel 1))))))
+(define k-abs (subr pure (int) int) (lambda (n) (if (< n 0) (- 0 n) n)))
+(define k-terms-gcd (subr (read @globals) (k-terms int) int)
+  (lambda (ts g) (if (null? ts) g (k-terms-gcd (cdr ts) (k-gcd g (k-abs (cdr (car ts))) 100)))))
+(define k-terms-div (subr (read @globals) (k-terms int) k-terms)
+  (lambda (ts g)
+    (if (null? ts)
+        nil
+        (let ((t (the (pairof int int acyclic) (cons (car (car ts)) (quotient (cdr (car ts)) g)))))
+          (the k-terms (cons t (k-terms-div (cdr ts) g)))))))
+;; `c ≥ 0` as integers allow: its coefficients divided by their gcd, its
+;; constant rounded down after the same division.
+(define* k-tightened (subr pure (k-size) k-size)
+  (lambda (c)
+    (tagcase c
+      (sz-lin (k ts)
+        (let ((g (k-terms-gcd ts 0)))
+          (if (<= g 1) c (sz-lin (quotient (- k (modulo k g)) g) (k-terms-div ts g)))))
+      (else y c))))
+;; Variable `v` added to the sorted `vs`, once.
+(define k-var-into (subr (read @globals) (k-ids int) k-ids)
+  (lambda (vs v)
+    (cond ((null? vs) (the k-ids (cons v nil)))
+          ((= (car vs) v) vs)
+          ((< v (car vs)) (the k-ids (cons v vs)))
+          (else (the k-ids (cons (car vs) (k-var-into (cdr vs) v)))))))
+(define k-terms-vars (subr (read @globals) (k-terms k-ids) k-ids)
+  (lambda (ts vs) (if (null? ts) vs (k-terms-vars (cdr ts) (k-var-into vs (car (car ts)))))))
+;; The variables of `cs`, sorted, each once.
+(define k-lins-vars (subr (read @globals) (k-lins k-ids) k-ids)
+  (lambda (cs vs)
+    (if (null? cs)
+        vs
+        (let ((more (tagcase (car cs) (sz-lin (k ts) (k-terms-vars ts vs)) (else y vs))))
+          (k-lins-vars (cdr cs) more)))))
+(define k-lins-append (subr (read @globals) (k-lins k-lins) k-lins)
+  (lambda (xs ys) (if (null? xs) ys (the k-lins (cons (car xs) (k-lins-append (cdr xs) ys))))))
+;; `v ≥ 0` for each of `vs`.
+(define k-lins-of-vars (subr (read @globals) (k-ids) k-lins)
+  (lambda (vs)
+    (if (null? vs) nil (the k-lins (cons (k-size-var (car vs)) (k-lins-of-vars (cdr vs)))))))
+(define k-coef-in (subr (read @globals) (k-size int) int)
+  (lambda (c v) (tagcase c (sz-lin (k ts) (k-coef-of ts v)) (else y 0))))
+(define k-sign (subr pure (int) int) (lambda (n) (cond ((< n 0) -1) ((> n 0) 1) (else 0))))
+;; Those of `cs` whose coefficient of `v` has the sign `s` (-1, 0 or 1).
+(define k-lins-signed (subr (read @globals) (k-lins int int) k-lins)
+  (lambda (cs v s)
+    (cond ((null? cs) nil)
+          ((= (k-sign (k-coef-in (car cs) v)) s)
+           (the k-lins (cons (car cs) (k-lins-signed (cdr cs) v s))))
+          (else (k-lins-signed (cdr cs) v s)))))
+;; `p` with each of `ns`, scaled so that `v` cancels, tightened, onto `acc`.
+(define k-lins-cancel (subr (read @globals) (k-size k-lins int k-lins) k-lins)
+  (lambda (p ns v acc)
+    (if (null? ns)
+        acc
+        (let* ((n (car ns)) (x (k-coef-in p v)) (y (- 0 (k-coef-in n v)))
+               (c (k-tightened (k-size-add-scaled (k-size-add-scaled (k-size-lit 0) p y) n x))))
+          (k-lins-cancel p (cdr ns) v (the k-lins (cons c acc)))))))
+(define k-lins-combined (subr (read @globals) (k-lins k-lins int k-lins) k-lins)
+  (lambda (ps ns v acc)
+    (if (null? ps) acc (k-lins-combined (cdr ps) ns v (k-lins-cancel (car ps) ns v acc)))))
+;; How many of `cs` there are, and `n`.
+(define k-lins-count (subr (read @globals) (k-lins int) int)
+  (lambda (cs n) (if (null? cs) n (k-lins-count (cdr cs) (+ n 1)))))
+;; Whether some constraint of `cs` is a constant below 0.
+(define k-lins-contradict? (subr (read @globals) (k-lins) bool)
+  (lambda (cs)
+    (and (not (null? cs))
+         (or (tagcase (car cs) (sz-lin (k ts) (and (null? ts) (< k 0))) (else y #f))
+             (k-lins-contradict? (cdr cs))))))
+;; Each of `vs`, lowest first, eliminated from `cs`; giving up past 64.
+(define k-fm-eliminate (subr (read @globals) (k-lins k-ids) bool)
+  (lambda (cs vs)
+    (if (null? vs)
+        (k-lins-contradict? cs)
+        (let* ((v (car vs))
+               (next (k-lins-combined (k-lins-signed cs v 1) (k-lins-signed cs v -1) v
+                                      (k-lins-signed cs v 0))))
+          (if (> (k-lins-count next 0) 64) #f (k-fm-eliminate next (cdr vs)))))))
+;; The inequalities in scope, oldest first, reduced, `finite` left out.
+(define k-fact-lins (subr kreads ((listof k-size-fact acyclic)) k-lins)
+  (lambda (fs)
+    (cond ((null? fs) nil)
+          ((extract (car fs) 2) (k-fact-lins (cdr fs)))
+          (else (let ((c (k-reduced (extract (car fs) 1))))
+                  (tagcase c
+                    (sz-lin (k ts) (the k-lins (cons c (k-fact-lins (cdr fs)))))
+                    (else y (k-fact-lins (cdr fs)))))))))
+(define* k-refuted-below? (subr kreads (k-size) bool)
+  (lambda (a)
+    (tagcase a
+      (sz-lin (k ts)
+        (let* ((facts (k-fact-lins (the (listof k-size-fact acyclic) (reverse (get k-size-facts)))))
+               (below (k-size-add-scaled (k-size-lit -1) a -1))
+               (cs (k-lins-append facts (the k-lins (cons below nil))))
+               (vs (k-lins-vars cs nil)))
+          (k-fm-eliminate (k-lins-append cs (k-lins-of-vars vs)) vs)))
+      (else y #f))))
+;; Whether the facts show `a ≥ 0`: plainly, or with a fact `f ≥ 0` to spare, or
+;; by Fourier–Motzkin.
 (define k-size-nonneg? (subr kreads (k-size) bool)
   (lambda (a0)
     (let ((a (k-reduced a0)))
       (or (k-plainly-nonneg? a)
-          (k-nonneg-by-fact? a (the (listof k-size-fact acyclic) (reverse (get k-size-facts))))))))
+          (k-nonneg-by-fact? a (the (listof k-size-fact acyclic) (reverse (get k-size-facts))))
+          (k-refuted-below? a)))))
 ;; Whether the facts reduce `s` to 0.
 (define k-size-zero? (subr kreads (k-size) bool)
   (lambda (s) (k-size=? (k-reduced s) (k-size-lit 0))))
