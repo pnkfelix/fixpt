@@ -617,15 +617,32 @@ in `check-synth.fx`):
    fires before the result is ever compared with the context, which would
    have said the true thing.
 
+The problem is general, not `list`'s or `cons`'s (the user's point). `unify`
+walks a pattern against an actual type only to solve unknowns, and says
+nothing when their shapes differ. Every use of it in inference ignores such
+a conflict. In `infer.rs` those are:
+- the expected type against the result;
+- each argument against its parameter, in both passes;
+- a polymorphic argument instantiated at its parameter;
+- `instantiate_against` (a polymorphic variable at an expected type).
+
+`k-unify`'s uses in the FX-26 checker are the same. Any polymorphic call can
+show it: `(car xs)` where a `string` is wanted and `xs` holds ints;
+`(map f xs)` where an `int` is wanted; a projection at the wrong type. The
+error then comes from whatever fails next, an unknown not solved or a later
+subtype check, not from the conflict itself.
+
 To do:
-1. **Report a shape conflict found while unifying the result with the
-   expected type**, at once, as the mismatch it is: "argument 2 is a pair,
-   `(pairof int ? r)`, where an `int` is expected". No choice of the
-   unknowns could make a pair an `int`. Merely unsolved unknowns stay a
-   hint, as now. (Alternatively, defer "not yet known" errors until the
-   result has been checked against the context; reporting at once is
-   simpler and names the right place.) For the standard `list` with a
-   `cons` or `list` argument, a hint: "did you mean `(cons 1 (cons 2 nil))`,
+1. **Make `unify` report a shape conflict**: a type constructor against a
+   different one, as opposed to an unknown merely left unsolved. Each of its
+   uses should then report it at once, as the mismatch it is, naming what was
+   being matched: "argument 2 is a pair, `(pairof int ? r)`, where an `int`
+   is expected". No choice of the unknowns could make a pair an `int`.
+   Unsolved unknowns stay a hint, as now. (Alternatively, defer "not yet
+   known" errors until the result has been checked against the context;
+   reporting at once is simpler and names the right place.) Then add hints
+   where a common mistake has an obvious repair, such as the standard `list`
+   given a `cons` or `list` argument: "did you mean `(cons 1 (cons 2 nil))`,
    or `(list 1 2)`?"
 2. **Keep checking after an error**, to report the errors that follow from the
    same mistake, which often point at the true one. Both checkers now stop at
