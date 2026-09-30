@@ -129,7 +129,31 @@ are in the last section, "Log: the glance's details", and in
   (FX-87's `standard.fx`, FX-91's `fx-module.fx`) are exempt (the user's).
   Later: a lint for indentation (`TODO.md` §16).
 
-**Next**, roughly in order. First the queue in "The queue after the
+**Next**, roughly in order. **Soundness first** (the user's, 2026-09-30):
+whatever is known or suspected to let a checked program go wrong comes
+before everything else, known holes before proofs.
+- S1. **The `acyclic?` gap** (found by Q8's note, `docs/research/polytypic.md`):
+  a closure calling `acyclic?` on data frozen into an arena escapes the
+  arena, checked `pure`. Reproduce, fix in both checkers, add it to
+  `soundness-findings.md` as F13.
+- S2. **The proof notes' status is stale**: `soundness.md`'s table still
+  says F8 and F9 are open (C3 "F8 breaks it", T3 "F9 gap", T5 "F8/F9
+  open"), where `soundness-findings.md` has both fixed and tested.
+  Reconcile, re-verifying F8 and F9 against today's checkers.
+- S3. **A2's depth bounds**: unfolding generative types stops at depth 64
+  (`lemma.rs` `unfold_all`), the F5 pattern elsewhere; check that giving
+  up only ever refuses, never accepts, in both checkers.
+- S4. **A3, the host's `datum`s**: acyclic by contract only (Scheme calling
+  an `fx:` global); a `read` with datum labels would break it. Enforce at
+  the boundary, or certify what such a `read` makes.
+- S5. **The proof obligations** (item 4 below, moved here): T3 in full (a
+  composable continuation's effect need not describe what its frames
+  touch), T4 lemma erasure, T5 termination of `spin`-free code (a logical
+  relation over region levels, and size-change proved), T6 space (a
+  harness measuring space against `S_place`). Probe each new rule with
+  the soundness agent before building on it.
+
+Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
 bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
 `u32`/`u64`, wrapping, their operations in line natively, `i64` and `u64`
@@ -149,8 +173,7 @@ friction. Then, as before:
 3. The rest of known calls; heap sizing (a collection landing in a phase
    is a step in its time). (The nursery and its write barrier: done,
    2026-09-29.)
-4. Soundness obligations: effect soundness (T3) in full, lemma erasure
-   (T4), termination of code free of `spin` (T5), space bounds (T6).
+4. Moved to the top, as S5 (2026-09-30): the soundness obligations.
 5. Sizes N5c: inequalities, "at most n" results, array bounds.
 6. The front end written in FX-26: quick wins, then the split into
    `src/fx-rsmirror/` and `src/fx-idiomatic/`.
@@ -2152,9 +2175,8 @@ revised by decision 4): first the standard environment's gaps (`bool=?`,
 `array->list`); then generic `equal`, `hash`, `->datum`, `compare`,
 `map`/`fold` as one definition each over a type representation or a
 dictionary passed at run time, with the compilers specializing only
-where it is known. Record and fix the `acyclic?` soundness gap it found
-(a closure calling `acyclic?` on data frozen into an arena escapes it,
-checked as `pure`).
+where it is known. (The `acyclic?` soundness gap it found is S1, first
+in "Next".)
 
 **Q9. Separate compilation** (`docs/research/separate-compilation.md`):
 S0 a saved heap image of the loaded front end, keyed by a hash of its
