@@ -379,14 +379,66 @@
 
 ;; The top-level forms of a program.
 (define-type k-tops (listof top acyclic))
-;; The first pass: abbreviations, so that types can refer to each other in
-;; any order. Values cannot: a definition sees only those before it.
-(define k-ahead (subr (maxeff checks spin) (k-tops) unit)
+(define k-declare-each (subr (maxeff checks spin) (k-tops) unit)
   (lambda (forms)
     (if (null? forms)
         #u
-        (begin (k-declare (car forms)) (k-ahead (cdr forms))))))
+        (begin (k-declare (car forms)) (k-declare-each (cdr forms))))))
+(define k-names-reversed (subr (read @globals) (k-names k-names) k-names)
+  (lambda (xs acc) (if (null? xs) acc (k-names-reversed (cdr xs) (cons (car xs) acc)))))
+;; The names simple `define-type`s give, in order, each as often as given.
+(define k-ahead-names-of (subr (maxeff (read @globals) spin) (k-tops k-names) k-names)
+  (lambda (forms acc)
+    (if (null? forms)
+        (k-names-reversed acc nil)
+        (k-ahead-names-of
+         (cdr forms)
+         (tagcase (car forms)
+           (t-define-type (name def a b)
+             (if (syn-symbol? name) (cons (string->symbol (syn-name name)) acc) acc))
+           (else y acc))))))
+;; How many times `n` is among `ns`.
+(define k-name-count (subr (read @globals) (k-names symbol) int)
+  (lambda (ns n)
+    (cond ((null? ns) 0)
+          ((symbol=? (car ns) n) (+ 1 (k-name-count (cdr ns) n)))
+          (else (k-name-count (cdr ns) n)))))
+;; A slot in scope for each of `ns` given once among `all`, first first.
+(define* k-ahead-declare (subr (maxeff checks spin) (k-names k-names) unit)
+  (lambda (ns all)
+    (if (null? ns)
+        #u
+        (begin
+          (if (= (k-name-count all (car ns)) 1)
+              (let ((slot (k-slot)))
+                (begin (k-push-desc (car ns) (ds-rec slot))
+                       (set k-ahead-names (cons (cons (car ns) slot) (get k-ahead-names)))))
+              #u)
+          (k-ahead-declare (cdr ns) all)))))
+(define k-filled-reversed (subr (read @globals) (k-filled k-filled) k-filled)
+  (lambda (xs acc) (if (null? xs) acc (k-filled-reversed (cdr xs) (cons (car xs) acc)))))
+(define* k-ground-filled (subr (maxeff checks spin) (k-filled) unit)
+  (lambda (fs)
+    (if (null? fs)
+        #u
+        (begin (k-grounded (extract (car fs) 1) (extract (car fs) 2) (extract (car fs) 3))
+               (k-ground-filled (cdr fs))))))
 
+;; The first pass: abbreviations, so that types can refer to each other in
+;; any order. Values cannot: a definition sees only those before it. Each
+;; abbreviation defined once, by name, is in scope before any is read, and
+;; checked grounded once all are.
+(define* k-ahead (subr (maxeff checks spin) (k-tops) unit)
+  (lambda (forms)
+    (let ((names (k-ahead-names-of forms nil)))
+      (begin
+        (set k-ahead-names nil)
+        (set k-ahead-filled nil)
+        (k-ahead-declare names names)
+        (k-declare-each forms)
+        (set k-ahead-names nil)
+        (let ((filled (get k-ahead-filled)))
+          (begin (set k-ahead-filled nil) (k-ground-filled (k-filled-reversed filled nil))))))))
 (define k-line (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int k-eff) string)
   (lambda (t e) (k-cat3 (k-show-ty t) " ! " (k-show-effect e))))
 ;; The line for a definition of `name`, of type `t` and effect `e`.

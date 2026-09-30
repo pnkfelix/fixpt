@@ -893,13 +893,47 @@
 
 ;; `(define-type name type)`: `name` stands for the type from here on, and
 ;; may appear in its own definition.
-(define k-define-type (subr (maxeff checks spin) (symbol syn int int) int)
-  (lambda (name def a b)
-    (let ((slot (k-slot)))
+;; While a program's types are declared ahead (`k-ahead`): each
+;; abbreviation's slot, made before any is read so that they may name each
+;; other in any order; and those filled, with where, to check grounded once
+;; all are.
+(define-type k-ahead-slots (listof (pairof symbol int @t) acyclic))
+(define-type k-filled (listof (productof (1 int) (2 int) (3 int)) acyclic))
+(define k-ahead-names (ref k-ahead-slots @t) (new nil))
+(define k-ahead-filled (ref k-filled @t) (new nil))
+;; `xs` less `name`'s entry.
+(define k-ahead-drop (subr (maxeff kreads (alloc @t)) (k-ahead-slots symbol) k-ahead-slots)
+  (lambda (xs name)
+    (cond ((null? xs) nil)
+          ((symbol=? (car (car xs)) name) (cdr xs))
+          (else (cons (car xs) (k-ahead-drop (cdr xs) name))))))
+(define k-ahead-find (subr kreads (k-ahead-slots symbol) int)
+  (lambda (xs name)
+    (cond ((null? xs) -1)
+          ((symbol=? (car (car xs)) name) (cdr (car xs)))
+          (else (k-ahead-find (cdr xs) name)))))
+;; `name`'s slot declared ahead, taken from those waiting; or -1.
+(define* k-ahead-take (subr kstate (symbol) int)
+  (lambda (name)
+    (let ((found (k-ahead-find (get k-ahead-names) name)))
       (begin
-        (k-push-desc name (ds-rec slot))
-        (let ((t (k-parse-type def)))
-          (begin (k-set-link slot t) (k-grounded slot a b) slot))))))
+        (if (>= found 0) (set k-ahead-names (k-ahead-drop (get k-ahead-names) name)) #u)
+        found))))
+(define* k-define-type (subr (maxeff checks spin) (symbol syn int int) int)
+  (lambda (name def a b)
+    (let ((ahead (k-ahead-take name)))
+      (if (>= ahead 0)
+          ;; Declared ahead: its slot is in scope already; fill it, and check
+          ;; it grounded once every slot is filled.
+          (let ((t (k-parse-type def)))
+            (begin (k-set-link ahead t)
+                   (set k-ahead-filled (cons (product (1 ahead) (2 a) (3 b)) (get k-ahead-filled)))
+                   ahead))
+          (let ((slot (k-slot)))
+            (begin
+              (k-push-desc name (ds-rec slot))
+              (let ((t (k-parse-type def)))
+                (begin (k-set-link slot t) (k-grounded slot a b) slot))))))))
 
 ;; A `proj` argument: which kind it is shows in its shape, or, for a bare
 ;; name, in how the name is bound.

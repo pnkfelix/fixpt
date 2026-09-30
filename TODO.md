@@ -500,9 +500,13 @@ Each has a small reproduction in the port that met it:
   against the solved result type. (2026-09-30: the `let` case is what
   bidirectional checking gives, since a binding has no expected type;
   the error says to give one with `the`. Left as it is.)
-- A `define-type` or `define-datatype` cannot name a type defined after
-  it, though `docs/fx26.md` says types are declared ahead: two datatypes
-  cannot refer to each other.
+- Done (2026-09-30), both checkers: a `define-type` or `define-datatype`
+  could not name a type defined after it, though `docs/fx26.md` says types
+  are declared ahead, so two datatypes could not refer to each other. Each
+  abbreviation defined once by name now has its slot in scope before any
+  is read, and every cycle is checked to pass through a constructor once
+  all are filled (`recursive/types-in-any-order.fx`,
+  `recursive/type-cycle-of-names.fx`).
 - Done (2026-09-30), both checkers: a `plambda` under a `let` was refused
   against its expected `poly`; a `let` now passes the `poly` to its body,
   and must itself be pure, as a `plambda` body must.

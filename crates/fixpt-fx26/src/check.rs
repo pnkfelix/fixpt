@@ -141,6 +141,11 @@ pub struct Checker {
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
     pub(crate) standard_len: usize,
+    /// While a program's types are declared ahead (`declare_ahead`), each
+    /// abbreviation's slot, made before any is read so that they may name
+    /// each other in any order; and those filled, to check once all are.
+    pub(crate) ahead: Vec<(Sym, TyId)>,
+    pub(crate) ahead_filled: Vec<(TyId, fixpt_read::Span)>,
     /// What checking proved about each expression, for lowering to carry.
     pub facts: NodeFacts,
     /// The regions `private-regions` made this program's own.
@@ -313,6 +318,8 @@ impl Checker {
             conv_default: conv,
             fresh_regions: 0,
             standard_len: 0,
+            ahead: Vec::new(),
+            ahead_filled: Vec::new(),
             facts: NodeFacts::default(),
             private_regions: Vec::new(),
             masking: true,

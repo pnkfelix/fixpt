@@ -772,6 +772,37 @@ impl Checker {
     /// form, whether it is finished with (the abbreviations are). The second
     /// pass is `top` on the rest, in order.
     pub fn declare_ahead(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
+        // Each type abbreviation defined once, by name, is in scope before
+        // any is read, so that types may name each other in any order.
+        let mut names: Vec<Sym> = Vec::new();
+        let mut twice: Vec<Sym> = Vec::new();
+        for f in forms {
+            let items = f.as_proper_list().unwrap_or(&[]);
+            if let [h, n, _] = items
+                && h.as_symbol().is_some_and(|h| self.interner.name(h) == "define-type")
+                && let Some(n) = n.as_symbol()
+            {
+                if names.contains(&n) { twice.push(n) } else { names.push(n) }
+            }
+        }
+        self.ahead.clear();
+        self.ahead_filled.clear();
+        for n in names.into_iter().filter(|n| !twice.contains(n)) {
+            let slot = self.arena.ty(crate::ast::Ty::Link(None));
+            self.dscope.push((n, crate::parse::DScope::Rec(slot)));
+            self.ahead.push((n, slot));
+        }
+        let r = self.declare_each(forms);
+        self.ahead.clear();
+        let filled = std::mem::take(&mut self.ahead_filled);
+        let done = r?;
+        for (slot, span) in filled {
+            self.grounded(slot, span)?;
+        }
+        Ok(done)
+    }
+
+    fn declare_each(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
         let mut done = Vec::new();
         for f in forms {
             let items = f.as_proper_list().unwrap_or(&[]);

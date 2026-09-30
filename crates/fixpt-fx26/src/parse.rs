@@ -548,7 +548,7 @@ impl Checker {
     }
 
     /// A name defined as another name, round a loop, describes nothing.
-    fn grounded(&self, slot: TyId, span: fixpt_read::Span) -> R<()> {
+    pub(crate) fn grounded(&self, slot: TyId, span: fixpt_read::Span) -> R<()> {
         let mut seen = std::collections::HashSet::new();
         let mut id = slot;
         loop {
@@ -838,6 +838,15 @@ impl Checker {
     /// and may appear in its own definition — a one-binding `dletrec` that
     /// stays in scope.
     pub(crate) fn define_type(&mut self, name: Sym, def: &Syntax, span: fixpt_read::Span) -> R<TyId> {
+        // Declared ahead: its slot is in scope already; fill it, and check
+        // it grounded once every slot is filled.
+        if let Some(i) = self.ahead.iter().position(|(n, _)| *n == name) {
+            let (_, slot) = self.ahead.remove(i);
+            let t = self.parse_type(def)?;
+            self.arena.set_link(slot, t);
+            self.ahead_filled.push((slot, span));
+            return Ok(slot);
+        }
         let slot = self.arena.ty(Ty::Link(None));
         let depth = self.dscope.len();
         self.dscope.push((name, DScope::Rec(slot)));
