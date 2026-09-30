@@ -13,13 +13,13 @@ To run one as machine code:
 fixpt eval --step-limit none --fx26-run cellular --calling-convention native scheme-bench/NAME.fx
 ```
 
-## Ported: 49 of 75
+## Ported: 51 of 75
 
 Every port passes both checkers, gives Larceny's answer natively, and
 agrees with the program lowered to Scheme (at smaller counts where the
 full one takes long). Times are one native run each, alone, on
-2026-09-29, wall clock including about 1.8 s of start-up (reading,
-checking and compiling the program).
+2026-09-29 (`pi` and `chudnovsky` on 2026-09-30), wall clock including
+about 1.8 s of start-up (reading, checking and compiling the program).
 
 | benchmark    | answer (the last form's value)                   | native s | notes                                                                    |
 | ------------ | ------------------------------------------------ | -------- | ------------------------------------------------------------------------ |
@@ -27,6 +27,7 @@ checking and compiling the program).
 | `array1`     | 1000000                                          | 25.7     |                                                                          |
 | `browse`     | (837 177 1090 617 661 749 628 56 826 408 1035 4… | 12.3     | `item` datatype; `eq?` of items approximated                             |
 | `bv2string`  | 0                                                | 19.8     | UTF-8 codecs written in the file; bytevectors are byte bloblets          |
+| `chudnovsky` | (3141592653589793238462643383279502884197169399… | 3.0      | its one float made exact; integer square root, `expt` in the file        |
 | `conform`    | ("(((b v d) ^ a) v c)" "(c ^ d)" "(b v (a ^ d))… | 14.3     | each node gets an id field (no `eq?`)                                    |
 | `cpstak`     | 12                                               | 11.6     |                                                                          |
 | `ctak`       | 9                                                | 119.0    | `cwcc`                                                                   |
@@ -57,6 +58,7 @@ checking and compiling the program).
 | `paraffins`  | 5731580                                          | 57.4     |                                                                          |
 | `parsing`    | (should return this list)                        | 15.7     | 28 KB input as a string in the file; was 125.2 s (more than 8 values)    |
 | `peval`      | (lambda () (list (quote z) (quote y) (quote x) … | 17.7     | `/` dropped (needs rationals); in-file reader for the examples           |
+| `pi`         | ((314159265358979323846264338327950288419716939… | 2.9      | `exact-integer-sqrt` (Newton) and `expt` in the file                     |
 | `primes`     | (2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59… | 9.1      |                                                                          |
 | `puzzle`     | 2005                                             | 6.8      |                                                                          |
 | `quicksort`  | #t                                               | 9.7      | float RNG computed exactly in integers                                   |
@@ -73,7 +75,7 @@ checking and compiling the program).
 | `vecsort`    | #t                                               | 7.8      |                                                                          |
 | `vector`     | ((x0 x1 x2 x3 x4 x5 x6 x7))                      | 11.8     |                                                                          |
 
-## Not ported: 26
+## Not ported: 24
 
 Each needs something FX-26 does not have, at its core (not as a tool the
 port could carry itself):
@@ -89,8 +91,6 @@ port could carry itself):
 | `ray`        | floats, output port                                                                 |
 | `simplex`    | floats                                                                              |
 | `pnpoly`     | floats                                                                              |
-| `pi`         | bignums                                                                             |
-| `chudnovsky` | bignums (and one float)                                                             |
 | `sum1`       | floats, file input, `read`                                                          |
 | `cat`        | file input and output                                                               |
 | `wc`         | file input                                                                          |
@@ -111,8 +111,9 @@ Floats would unblock the most: 12 need them, and 7 of those
 nothing else. Then a file input port with `read-char`, which alone
 unblocks `wc`, `bibfreq`, `bibfreq2` and `charset`. Then an identity test
 (`eq?` on mutable objects), for `equal` and `dynamic`, and to retire the
-workarounds in `browse`, `conform`, `maze` and `sboyer`. Then bignums,
-for `pi` and `chudnovsky`. See `docs/research/floats.md`.
+workarounds in `browse`, `conform`, `maze` and `sboyer`. (Bignums, which
+blocked `pi` and `chudnovsky`, came to `int` on 2026-09-30.) See
+`docs/research/floats.md`.
 
 ## Copyright
 

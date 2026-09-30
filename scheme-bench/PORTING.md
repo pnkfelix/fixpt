@@ -57,8 +57,8 @@ say what and why in the header:
   (`docs/fx26.md`, "Control, typed").
 - **`hide`**: a global input, as above.
 
-What FX-26 does not have: floating point, bignums (integers are 61-bit
-fixnums, overflow checked), file and string I/O, hash tables as a
+What FX-26 does not have: floating point (`int` is exact, of any size:
+bignums past 61 bits), file and string I/O, hash tables as a
 standard operation (a port may carry a small one of its own, written in
 FX-26; `crates/fixpt-fx26/src/table.fx` is an example). A benchmark that
 needs one of those in its core is **not ported**: report it, with the
