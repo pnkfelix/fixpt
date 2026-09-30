@@ -66,4 +66,7 @@ pub struct State {
     /// runs: the call-out's `blr` takes `x30`, and a leaf has no frame to
     /// keep it in. Call-outs from a leaf do not nest.
     pub leaf_link: u64,
+    /// Where `pure_call` is: register code's `prim1`, `prim2` and `prim2imm`
+    /// call a primitive that never collects there, with no safepoint.
+    pub pure: u64,
 }

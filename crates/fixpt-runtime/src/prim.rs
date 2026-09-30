@@ -223,6 +223,17 @@ fn exact_out(rt: &mut Runtime, x: i128) -> Value {
     crate::num::N::big(num_bigint::BigInt::from(x)).store(&mut rt.heap)
 }
 
+/// Whether primitive `name` never collects, and so may be called from
+/// code whose live values are in registers, not in a frame (register code's
+/// `prim1`, `prim2`, `prim2imm`): FX-26's `*`, `quotient` and `modulo`, and
+/// the fixed-width integers' operations. It may allocate (an `i64` past a
+/// fixnum is a bignum), since allocation never collects: a collection waits
+/// for the next point that may. It may fail, which ends the run.
+pub fn never_collects(name: &str) -> bool {
+    matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo")
+        || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-int->"].iter().any(|p| name.starts_with(p))
+}
+
 /// Operation `op` of the fixed-width integers of width `w`.
 fn fixed_op(rt: &mut Runtime, a: &[Value], op: &str, w: Width) -> Outcome<Value> {
     match op {
@@ -237,9 +248,14 @@ fn fixed_op(rt: &mut Runtime, a: &[Value], op: &str, w: Width) -> Outcome<Value>
             let low = i128::try_from(low).expect("under 2^64");
             return Ok(exact_out(rt, w.wrap(low)));
         }
+        // `T->int`: an `int` is a fixnum until it may be a bignum (PLAN.md,
+        // Q2), so past one it fails, as `+` does.
         "to" => {
             let x = fixed_in(rt, a[0], w)?;
-            return Ok(exact_out(rt, x));
+            return match i64::try_from(x).ok().and_then(Value::try_fixnum) {
+                Some(v) => Ok(v),
+                None => rt.fail("integer overflow", &[a[0]]),
+            };
         }
         _ => {}
     }
@@ -1049,6 +1065,13 @@ prims! {
     "%fx26-add", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_add));
     "%fx26-sub", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_sub));
     "%fx26-mul", 2, Some(2), simple!(|rt, a| fx26_arith(rt, a, i64::checked_mul));
+    // And `quotient`: the least fixnum's by −1 is past one.
+    "%fx26-quotient", 2, Some(2), simple!(|rt, a| {
+        if a[1] == Value::fixnum(0) {
+            return rt.fail("division by zero", &[a[0], a[1]]);
+        }
+        fx26_arith(rt, a, i64::checked_div)
+    });
     // FX-26's `parse-number`: the number `a[0]` spells in radix `a[1]`
     // (2 to 36), sign and all, in a list; or none.
     "%fx26-parse-number", 2, Some(2), simple!(|rt, a| {

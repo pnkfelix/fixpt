@@ -304,6 +304,46 @@ pub fn eor(d: Reg, n: Reg, m: Reg) -> u32 {
     0xCA00_0000 | r(m) << 16 | r(n) << 5 | r(d)
 }
 
+/// `udiv xd, xn, xm`: `n / m`, unsigned.
+pub fn udiv(d: Reg, n: Reg, m: Reg) -> u32 {
+    0x9AC0_0800 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `mul xd, xn, xm`: the low 64 bits of `n × m`.
+pub fn mul(d: Reg, n: Reg, m: Reg) -> u32 {
+    0x9B00_7C00 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `smulh xd, xn, xm`: the high 64 bits of the signed `n × m`.
+pub fn smulh(d: Reg, n: Reg, m: Reg) -> u32 {
+    0x9B40_7C00 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `and xd, xn, xm`.
+pub fn and(d: Reg, n: Reg, m: Reg) -> u32 {
+    0x8A00_0000 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `and xd, xn, #mask`, the mask `width` ones from bit `lsb` (a run that
+/// does not wrap, and is not all 64).
+pub fn and_bits(d: Reg, n: Reg, lsb: u32, width: u32) -> u32 {
+    assert!(width >= 1 && lsb + width <= 64 && width < 64);
+    0x9240_0000 | ((64 - lsb) % 64) << 16 | (width - 1) << 10 | r(n) << 5 | r(d)
+}
+/// `lsl xd, xn, #s`.
+pub fn lsl_imm(d: Reg, n: Reg, s: u32) -> u32 {
+    assert!(s < 64);
+    0xD340_0000 | ((64 - s) % 64) << 16 | (63 - s) << 10 | r(n) << 5 | r(d)
+}
+/// `lslv xd, xn, xm`: shift left by `m` modulo 64.
+pub fn lslv(d: Reg, n: Reg, m: Reg) -> u32 {
+    0x9AC0_2000 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `lsrv xd, xn, xm`.
+pub fn lsrv(d: Reg, n: Reg, m: Reg) -> u32 {
+    0x9AC0_2400 | r(m) << 16 | r(n) << 5 | r(d)
+}
+/// `asrv xd, xn, xm`.
+pub fn asrv(d: Reg, n: Reg, m: Reg) -> u32 {
+    0x9AC0_2800 | r(m) << 16 | r(n) << 5 | r(d)
+}
+
 /// `ret`.
 pub fn ret() -> u32 {
     0xD65F_03C0
@@ -332,5 +372,20 @@ mod tests {
         assert_eq!(msub(16, 13, 14, 15), 0x9b0ebdb0);
         assert_eq!(eor(0, 1, 2), 0xca020020);
         assert_eq!(eor(13, 14, 15), 0xca0f01cd);
+        assert_eq!(udiv(0, 1, 2), 0x9ac20820);
+        assert_eq!(udiv(13, 14, 15), 0x9acf09cd);
+        assert_eq!(mul(0, 1, 2), 0x9b027c20);
+        assert_eq!(mul(13, 14, 15), 0x9b0f7dcd);
+        assert_eq!(smulh(0, 1, 2), 0x9b427c20);
+        assert_eq!(smulh(13, 14, 15), 0x9b4f7dcd);
+        assert_eq!(and(0, 1, 2), 0x8a020020);
+        assert_eq!(and(13, 14, 15), 0x8a0f01cd);
+        assert_eq!(and_bits(0, 1, 3, 32), 0x927d7c20);
+        assert_eq!(and_bits(13, 14, 3, 61), 0x927df1cd);
+        assert_eq!(lsl_imm(0, 1, 29), 0xd3638820);
+        assert_eq!(lsl_imm(13, 14, 3), 0xd37df1cd);
+        assert_eq!(lslv(0, 1, 2), 0x9ac22020);
+        assert_eq!(lsrv(13, 14, 15), 0x9acf25cd);
+        assert_eq!(asrv(0, 1, 2), 0x9ac22820);
     }
 }

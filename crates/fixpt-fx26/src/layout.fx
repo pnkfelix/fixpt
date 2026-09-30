@@ -189,4 +189,9 @@
 ;; 0: entered with any number of arguments, their count in a register (x9, natively), in REG1…REGn
 ;; (past REGS, a list of the rest in the last); first, instead of args, and only first
 (define rop-vargs int 30)
+;; 1: RESULT := runtime primitive p applied to RESULT: one that never collects
+;; (`fixpt_runtime::never_collects`), so that no register need be in the frame
+(define rop-prim1 int 31)
+(define rop-prim2 int 32)  ; 2: RESULT := such a primitive p applied to RESULT and REGk
+(define rop-prim2imm int 33)  ; 2: RESULT := such a primitive p applied to RESULT and x
 (define register-regs int 8)

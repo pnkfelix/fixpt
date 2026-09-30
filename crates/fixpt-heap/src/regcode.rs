@@ -68,6 +68,8 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
             "field" => o(0).is_fixnum() && o(0).as_fixnum() >= 2,
             "setfield" => o(0).is_fixnum() && o(0).as_fixnum() >= 2 && reg(o(1)),
             "prim" => count(o(0), i64::MAX) && many(o(1)),
+            "prim1" | "prim2imm" => count(o(0), i64::MAX),
+            "prim2" => count(o(0), i64::MAX) && reg(o(1)),
             "lambda" => heap.is_cellular_word(o(0)) && many(o(1)),
             "invoke" | "tailinvoke" | "invokeself" => many(o(0)),
             "cellular" => count(o(0), ROUTINES.len() as i64 - 1) && many(o(1)),

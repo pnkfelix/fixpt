@@ -96,6 +96,9 @@
   (s-field int)
   ;; A call-out: a runtime primitive, or a cellular routine.
   (s-prim int)
+  ;; A runtime primitive of one or two operands that never collects: in
+  ;; line, as `prim1`, `prim2` or `prim2imm`, its operands as `op2`'s.
+  (s-pure int)
   (s-cellular int)
   ;; Its argument itself (`%fx26-identity`).
   (s-identity)
@@ -384,10 +387,30 @@
 
 ;;; ------------------------------------------------------ standard names
 
-;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`.
+;; Whether runtime primitive `name` is a fixed-width integers' operation (`%fx26-u32*`,
+;; `%fx26-int->i64`).
+(define r-fixed-width-op? (subr pure (string) bool)
+  (lambda (name)
+    (let ((starts (lambda ((s string)) (= (string-search name s 0) 0))))
+      (or (starts "%fx26-i32")
+          (or (starts "%fx26-u32")
+              (or (starts "%fx26-i64") (or (starts "%fx26-u64") (starts "%fx26-int->"))))))))
+;; Whether runtime primitive `name` never collects (`fixpt_runtime::never_collects`): FX-26's
+;; `*`, `quotient` and `modulo`, and the fixed-width integers' operations, which register code
+;; calls with its values in registers.
+(define r-never-collects? (subr (read (globals r-fixed-width-op?)) (string) bool)
+  (lambda (name)
+    (or (string=? name "%fx26-mul")
+        (or (string=? name "%fx26-quotient")
+            (or (string=? name "modulo") (r-fixed-width-op? name))))))
+;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never
+;; collects and takes one or two.
 (define r-prim-std (subr (read @globals) (string int int) rstd)
   (lambda (name n k)
-    (let ((p (runtime-primitive name))) (if (and (>= p 0) (= n k)) (s-prim p) (s-none)))))
+    (let ((p (runtime-primitive name)))
+      (cond ((not (and (>= p 0) (= n k))) (s-none))
+            ((and (<= n 2) (r-never-collects? name)) (s-pure p))
+            (else (s-prim p))))))
 
 ;; Whether `name` is an equality `op2` does: of integers, characters,
 ;; symbols or globals.
@@ -404,7 +427,7 @@
 ;; compiler, one register code calls out to as well.
 (define r-prim-name? (subr (read @globals) (string) bool)
   (lambda (name)
-    (or (string=? name "modulo") (string=? name "quotient")
+    (or (string=? name "modulo")
         (string=? name "char->integer") (string=? name "integer->char")
         (string=? name "string-append") (string=? name "string-length")
         (string=? name "string-ref") (string=? name "substring")
@@ -486,6 +509,18 @@
   (lambda (xs acc) (if (null? xs) acc (r-rev-consts (cdr xs) (cons (car xs) acc)))))
 (define c-length-consts (subr rscans (rconsts) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (c-length-consts (cdr xs))))))
+;; Whether constant `c` is an integer that fits the fixed-width type `name` converts to
+;; (`int->u32`, and so on): then it is its own conversion, the type's value the fixnum.
+(define r-fits-fixed? (subr pure (string rconst) bool)
+  (lambda (name c)
+    (tagcase c
+      (rc-int (n)
+        (cond ((string=? name "int->i32") (and (>= n -2147483648) (<= n 2147483647)))
+              ((string=? name "int->u32") (and (>= n 0) (<= n 4294967295)))
+              ((string=? name "int->i64") #t)
+              ((string=? name "int->u64") (>= n 0))
+              (else #f)))
+      (else y #f))))
 ;; Standard operation `name` on constants `vs`, folded, if it is one that
 ;; folds.
 (define r-fold (subr (maxeff rreads (alloc @k)) (string rconsts) rconsts)
@@ -510,13 +545,15 @@
              (tagcase (car vs)
                (rc-char (x) (tagcase (car (cdr vs)) (rc-char (y) (bool (char=? x y))) (else z nil)))
                (else z nil)))
+            ((and one (r-fits-fixed? name (car vs))) vs)
             (else nil)))))
 (define-rec
   ;; `x`'s value, if it is a constant that needs no allocation when it
   ;; runs, as the Rust compiler's `r_const` says: a literal, a name bound to
   ;; one, `nil`, a standard operation on constants folded (`+` and `-` on
   ;; integers under 2^30 in size, which cannot overflow; comparisons; `not`;
-  ;; `null?`; `char=?`), or a sum or product of constants, made now, once.
+  ;; `null?`; `char=?`; `int->u32` and its kin of an integer that fits), or a
+  ;; sum or product of constants, made now, once.
   (r-known (subr rbuilds (renv exp) rconsts)
     (lambda (env x)
       (tagcase x

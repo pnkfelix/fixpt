@@ -1053,6 +1053,40 @@ extern "C" fn callout(st: *mut State, n: u64) -> u64 {
     out
 }
 
+/// What `pure_call` gives: the value, and whether the primitive failed.
+#[repr(C)]
+pub(crate) struct PureOut {
+    v: u64,
+    failed: u64,
+}
+
+/// Register code's call of primitive `p`, one that never collects
+/// (`fixpt_runtime::never_collects`), on `x`, and `y` if it takes two: no
+/// safepoint, so the machine's registers need not be where a collection
+/// would find them. A failure's message is kept for the trap to report.
+pub(crate) extern "C" fn pure_call(st: *mut State, p: u64, x: u64, y: u64) -> PureOut {
+    // SAFETY: `st` is the state the machine runs with; its `rt`, when not
+    // 0, the runtime `run_in_runtime` holds exclusively.
+    let st = unsafe { &mut *st };
+    let fail = |m: String| {
+        LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m));
+        PureOut { v: 0, failed: 1 }
+    };
+    if st.rt == 0 {
+        return fail("no runtime to call a primitive in".into());
+    }
+    let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
+    let def = &fixpt_runtime::PRIMITIVES[p as usize];
+    let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return fail(format!("`{}` needs an engine", def.name)) };
+    let mut args = if def.min == 1 { vec![Value(x)] } else { vec![Value(x), Value(y)] };
+    let out = match f(rt, &mut args) {
+        Ok(v) => PureOut { v: v.raw(), failed: 0 },
+        Err(t) => fail(fixpt_engine::cellular::describe(rt, t.obj)),
+    };
+    st.alloc_limit = rt.heap.inline_limit() as u64;
+    out
+}
+
 fn callout_on(st: &mut State, n: u64, name: &'static str, heap: &mut Heap, ds: &mut [Value], rs: &mut [Value]) -> u64 {
     if !matches!(name, "field@" | "field!" | "cons") {
         let result = match name {
@@ -1455,6 +1489,7 @@ impl Stacks {
             regions: heap.region_table_address() as u64,
             cards: heap.card_table_address() as u64,
             leaf_link: 0,
+            pure: pure_call as *const () as u64,
         }
     }
 

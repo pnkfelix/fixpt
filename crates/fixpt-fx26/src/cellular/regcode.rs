@@ -90,6 +90,10 @@ enum Std {
     Field(i64),
     /// A call-out: a runtime primitive, or a cellular routine.
     Prim(i64),
+    /// A runtime primitive of one or two operands that never collects
+    /// (`fixpt_runtime::never_collects`): in line, as `prim1`, `prim2` or
+    /// `prim2imm`, its operands as `op2`'s.
+    Pure(i64),
     Cellular(&'static str),
     /// Its argument itself (`%fx26-identity`).
     Identity,
@@ -416,8 +420,13 @@ impl Compiler<'_> {
                 let prim = Value::fixnum(routine("prim") as i64);
                 match tmp[..] {
                     [] if n == 1 => Some(Std::Identity),
-                    [super::Item::Cell(r), super::Item::Cell(p), super::Item::Cell(k)] if r == prim => {
-                        Some(Std::Prim(p.as_fixnum())).filter(|_| k.as_fixnum() as usize == n)
+                    [super::Item::Cell(r), super::Item::Cell(p), super::Item::Cell(k)] if r == prim && k.as_fixnum() as usize == n => {
+                        let d = fixpt_runtime::PRIMITIVES.get(p.as_fixnum() as usize);
+                        if (n == 1 || n == 2) && d.is_some_and(|d| fixpt_runtime::never_collects(d.name)) {
+                            Some(Std::Pure(p.as_fixnum()))
+                        } else {
+                            Some(Std::Prim(p.as_fixnum()))
+                        }
                     }
                     _ => None,
                 }
@@ -463,6 +472,14 @@ impl Compiler<'_> {
             }
             Std::Identity => g.op("reg", &[Gen::n(1)]),
             Std::Prim(p) => g.op("prim", &[Value::fixnum(p), Gen::n(n)]),
+            Std::Pure(p) => {
+                g.op("reg", &[Gen::n(1)]);
+                if n == 1 {
+                    g.op("prim1", &[Value::fixnum(p)]);
+                } else {
+                    g.op("prim2", &[Value::fixnum(p), Gen::n(2)]);
+                }
+            }
             Std::Cellular("cons") => g.op("cellular", &[r("cons"), Gen::n(n)]),
             _ => return None,
         }
@@ -569,7 +586,7 @@ impl Compiler<'_> {
                         let name = self.name(*n).to_string();
                         matches!(
                             self.r_standard(&name, args.len()),
-                            Some(Std::Op1(_) | Std::Op2 { .. } | Std::Op2Imm(..) | Std::Field(_) | Std::Identity | Std::Set)
+                            Some(Std::Op1(_) | Std::Op2 { .. } | Std::Op2Imm(..) | Std::Field(_) | Std::Identity | Std::Set | Std::Pure(_))
                         )
                     }
                     _ => false,
@@ -1091,6 +1108,15 @@ impl Compiler<'_> {
                     let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
                     self.r_call_out(g, "prim", p, &es, env, te)?;
                 }
+                Std::Pure(p) if args.len() == 1 => {
+                    self.r_exp(g, args[0], env, te, false)?;
+                    g.op("prim1", &[Value::fixnum(p)]);
+                }
+                Std::Pure(p) => match self.r_operands(g, args[0], args[1], env, te, true)? {
+                    (Some(v), _) => g.op("prim2imm", &[Value::fixnum(p), v]),
+                    (None, Some(k)) => g.op("prim2", &[Value::fixnum(p), Gen::n(k)]),
+                    (None, None) => return None,
+                },
                 // In tail position a mark replaces this frame's, as stack
                 // code's `withmark-tail` does: the arguments made, the frame
                 // left, and the call-out, which calls the thunk as a tail
@@ -1806,8 +1832,9 @@ impl Compiler<'_> {
     /// `x`'s value, if it is a constant that needs no allocation when it
     /// runs: a literal, a name bound to one, `nil`, a standard operation on
     /// constants folded (`+` and `-` on integers under 2^30 in size, which
-    /// cannot overflow; comparisons; `not`; `null?`; `char=?`), or a sum or
-    /// product of constants, made now, once. (Frozen, and FX-26 has no
+    /// cannot overflow; comparisons; `not`; `null?`; `char=?`; `int->u32`
+    /// and its kin of an integer that fits), or a sum or product of
+    /// constants, made now, once. (Frozen, and FX-26 has no
     /// `eq?`, so no run can tell it from one it made itself.)
     fn r_const(&mut self, env: &[(Sym, RLoc)], x: ExpId) -> O<Value> {
         match self.c.arena.exp_at(x).clone() {
@@ -1845,6 +1872,18 @@ impl Compiler<'_> {
                     "not" if vs.len() == 1 => Some(Value::boolean(vs[0] == Value::FALSE)),
                     "null?" if vs.len() == 1 => Some(Value::boolean(vs[0] == Value::NULL)),
                     "char=?" if vs.len() == 2 && vs.iter().all(|v| v.is_char()) => Some(Value::boolean(vs[0] == vs[1])),
+                    // A fixed-width integer is the fixnum of its value: an
+                    // integer that fits the type is its own conversion.
+                    "int->i32" | "int->u32" | "int->i64" | "int->u64" if vs.len() == 1 && vs[0].is_fixnum() => {
+                        let n = vs[0].as_fixnum();
+                        let fits = match name.as_str() {
+                            "int->i32" => i32::try_from(n).is_ok(),
+                            "int->u32" => u32::try_from(n).is_ok(),
+                            "int->i64" => true,
+                            _ => n >= 0,
+                        };
+                        fits.then_some(vs[0])
+                    }
                     _ => None,
                 }
             }

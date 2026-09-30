@@ -259,6 +259,10 @@
         (s-op2imm (r v) (begin (r-exp g (car args) env te #f) (r-op2imm g r v)))
         (s-field (k) (begin (r-exp g (car args) env te #f) (r-opn g rop-field k)))
         (s-prim (p) (r-call-out g rop-prim p (r-exp-args args) env te))
+        (s-pure (p)
+          (if (null? (cdr args))
+              (begin (r-exp g (car args) env te #f) (r-opn g rop-prim1 p))
+              (r-pure2 g p (car args) (car (cdr args)) env te)))
         ;; (A mark in tail position is `r-withmark-tail`'s.)
         (s-cellular (r) (r-call-out g rop-cellular r (r-exp-args args) env te))
         (s-identity () (r-exp g (car args) env te #f))
@@ -522,6 +526,14 @@
       (let ((o (r-operands g a b env te #t)))
         (cond ((not (null? (extract o 1))) (r-op2imm g r (car (extract o 1))))
               ((not (null? (extract o 2))) (r-opnn g rop-op2 r (car (extract o 2))))
+              (else (r-decline))))))
+  ;; RESULT := primitive p (one that never collects) of `a` and `b`, as
+  ;; `r-binary`, by `prim2` or `prim2imm`.
+  (r-pure2 (subr rcompiles (rgen int exp exp renv cenv) unit)
+    (lambda (g p a b env te)
+      (let ((o (r-operands g a b env te #t)))
+        (cond ((not (null? (extract o 1))) (r-op2 g rop-prim2imm (wcell-int p) (car (extract o 1))))
+              ((not (null? (extract o 2))) (r-opnn g rop-prim2 p (car (extract o 2))))
               (else (r-decline))))))
   ;; RESULT := r(y, x), `x` evaluated first, as written: for an operation
   ;; whose operands trade places, where they may not run in the other

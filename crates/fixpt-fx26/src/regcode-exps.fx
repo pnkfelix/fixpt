@@ -411,7 +411,7 @@
         (and (null? (c-where e n))
              (tagcase (r-standard (symbol->string n) (c-count-exps args))
                (s-op1 (r) #t) (s-op2 (r w z) #t) (s-op2imm (r v) #t) (s-field (k) #t)
-               (s-identity () #t) (s-set () #t) (else y #f))))
+               (s-identity () #t) (s-set () #t) (s-pure (p) #t) (else y #f))))
       (else y #f))))
 ;; Whether `name` is a global in `e`, and not one whose body is being
 ;; inlined.

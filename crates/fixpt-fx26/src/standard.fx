@@ -26,7 +26,7 @@
       ((string=? n ">=") ">=")
       ((string=? n "*") "%fx26-mul")
       ((string=? n "modulo") "modulo")
-      ((string=? n "quotient") "quotient")
+      ((string=? n "quotient") "%fx26-quotient")
       ((string=? n "not") "not")
       ((string=? n "char-whitespace?") "char-whitespace?")
       ((string=? n "char-numeric?") "char-numeric?")

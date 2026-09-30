@@ -1988,3 +1988,33 @@ register-code column above it is the bootstrap probe's, which reads the
 program with the compiled reader too.) The front end's work in a native
 run of `set.fx` with no iterations: 9.8 s before, 5.0 s after the
 quadratic fixes, 0.65 s as register code.
+
+## Primitives that never collect, in line (2026-09-29)
+
+The fixed-width integers' operations (`u32*`, `u32-xor`, `int->u32`, …),
+and `int`'s `*`, `quotient` and `modulo`, were runtime primitives called
+through `prim`, which may collect: register code kept every live value in
+the frame around each one, and native code switched to Rust's stack and
+back. FNV-1a over 10 million numbers in `u32` took 1.4 s natively.
+
+`fixpt_runtime::never_collects` names them now, and register code calls
+them with `prim1`, `prim2` and `prim2imm` (`RESULT := p(RESULT, REGk)`, as
+`op2`), which are no safepoint: the values stay in registers, and a loop
+of them is a leaf. Native code does each in a few instructions where it
+can (an `i32` or `u32` is the fixnum of its value: the fixnums' arithmetic,
+then wrapped by one `and`, or a shift pair if signed; an `i64` or `u64`
+while it fits a fixnum), and otherwise calls the primitive without a
+collection, REG1…REG8, the closure and the link kept in the state. It may
+allocate a bignum: allocation never collects, only safepoints do. Both
+compilers also fold `int->T` of a literal that fits the type, to the
+literal, so that `(u32* h (int->u32 16777619))` is `prim2imm`.
+
+| 10 million iterations (ms)                 | before | after, native | registers |
+| ------------------------------------------ | ------:| -------------:| ---------:|
+| FNV-1a in `u32`                            | 1385.6 |          12.0 |     825.8 |
+| FNV-1a in `u64` (mostly bignums)           | 3903.9 |        1586.8 |    2631.1 |
+| `int`: `*`, `+`, `modulo`                  |  485.5 |          41.9 |     426.8 |
+
+(`before` is native too. The register machine calls each one in Rust; it is
+not a speed target. A `u64` past 60 bits is a bignum, so FNV-1a in `u64`
+still allocates each step: `i64` and `u64` unboxed are the next step.)

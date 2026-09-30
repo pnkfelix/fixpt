@@ -378,7 +378,7 @@
                   (c-op1 c routine-tcall (wcell-int 1))))
           ((string=? name "array-length")
            (begin (c-prim c "%bloblet-fields" 1) (c-int c 1) (c-op c routine-int-sub)))
-          ((or (string=? name "modulo") (string=? name "quotient") (string=? name "char->integer")
+          ((or (string=? name "modulo") (string=? name "char->integer")
                (string=? name "integer->char") (string=? name "string-append")
                (string=? name "string-length") (string=? name "string-ref")
                (string=? name "substring") (string=? name "string=?")

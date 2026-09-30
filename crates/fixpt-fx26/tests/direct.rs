@@ -238,6 +238,43 @@ fn a_primitive_that_fails_says_why() {
     assert!(matches!(&r.direct, Err(m) if m.contains("zero")), "{:?}\n{}", r.direct, r.code);
 }
 
+/// The fixed-width integers' operations (`prim1`, `prim2`, `prim2imm`), in
+/// line where they can be and called with no collection where not, on every
+/// type's edge values, bignums among them, as the Rust machine gives them
+/// (`programs/native/fixed-width-ops.fx`); and so under collections, which
+/// the bignums the calls make must live through.
+#[test]
+fn fixed_width_operations_as_the_rust_machine_gives_them() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/fixed-width-ops"), "fixed-width-ops", &[0], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+}
+
+/// A leaf's registers and link, kept around a call with no collection: `b`
+/// lives across a product past a fixnum, which the primitive makes.
+#[test]
+fn a_leaf_keeps_its_registers_around_a_primitive() {
+    let defs = "(define* f (subr pure (int int) int)\n  (lambda (a b) (if (u64< (u64* (int->u64 a) (int->u64 b)) (int->u64 b)) a b)))";
+    let r = run(defs, "f", &[-1, 5], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("5".into()), "5"), "{}", r.code);
+    let defs = "(define* q (subr pure (int int) int) (lambda (a b) (u32->int (u32-quotient (int->u32 a) (int->u32 b)))))";
+    assert!(matches!(&run(defs, "q", &[7, 0], FUEL).direct, Err(m) if m.contains("zero")));
+}
+
+/// Past a fixnum, `quotient` (the least fixnum's by −1) and `u64->int` fail,
+/// as `+` and `*` do, on the Rust machine too: an `int` is a fixnum until it
+/// may be a bignum (PLAN.md, Q2), and code that adds one must not see one.
+#[test]
+fn int_overflow_from_quotient_and_conversions_fails() {
+    let defs = "(define* q (subr pure (int int) int) (lambda (a b) (quotient a b)))";
+    let r = run(defs, "q", &[-(1 << 60), -1], FUEL);
+    assert!(matches!(&r.direct, Err(m) if m.contains("overflow")) && r.rust.contains("overflow"), "{:?} {}", r.direct, r.rust);
+    let defs = "(define* w (subr pure (int) int) (lambda (a) (+ (u64->int (int->u64 a)) 1)))";
+    let r = run(defs, "w", &[-1], FUEL);
+    assert!(matches!(&r.direct, Err(m) if m.contains("overflow")) && r.rust.contains("overflow"), "{:?} {}", r.direct, r.rust);
+}
+
 /// An array's element, by `field@`: inline in range, and out of range
 /// the call-out says so, as the Rust machine does.
 #[test]

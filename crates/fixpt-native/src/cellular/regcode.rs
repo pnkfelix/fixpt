@@ -443,8 +443,13 @@ impl Asm {
             // 8: the quotient's sign rounded toward zero, the remainder the
             // divisor's sign, as Scheme's `modulo` has it. Division by zero
             // is the call-out's to report.
+            // Fixnums only: a bignum (`u64->int` makes one) is the
+            // primitive's.
             "modulo" => {
                 let end = self.label();
+                self.e(orr(X13, 1, 2));
+                self.e(tst_low(X13, 3));
+                self.b_cond(Cond::Ne, slow);
                 self.cbz(2, slow);
                 self.e(sdiv(X13, 1, 2));
                 self.e(msub(RESULT, X13, 2, 1));
@@ -661,6 +666,45 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
                     }
                     r => return Err(format!("{name} {r} in register code")),
                 }
+            }
+            // A primitive that never collects: called with no safepoint,
+            // REG1…REG8 and the link kept on the machine stack around it.
+            "prim1" | "prim2" | "prim2imm" => {
+                let p = k(o(0));
+                if !fixpt_runtime::PRIMITIVES.get(p).is_some_and(|d| fixpt_runtime::never_collects(d.name)) {
+                    return Err(format!("`{name}` of primitive {p}, which may collect"));
+                }
+                let y = match name {
+                    "prim2" => reg(k(o(1))),
+                    "prim2imm" => {
+                        let v = o(1);
+                        if v.is_fixnum() || v.raw() & 7 == 3 {
+                            a.es(&mov_imm64(X13, v.raw()));
+                        } else {
+                            a.cell(X13, f(1), fields);
+                        }
+                        X13
+                    }
+                    _ => X13,
+                };
+                a.e(mov(X14, y));
+                for r in [1, 3, 5, 7] {
+                    a.e(stp_pre(r, r + 1, SP, -16));
+                }
+                a.e(stp_pre(LR, 31, SP, -16));
+                a.e(mov(3, X14));
+                a.e(mov(2, RESULT));
+                a.e(mov(0, ST));
+                a.es(&mov_imm64(1, p as u64));
+                a.e(ldr(X16, ST, off(offset_of!(State, pure))));
+                a.e(blr(X16));
+                a.e(mov(X13, 1));
+                a.e(ldp_post(LR, 31, SP, 16));
+                for r in [7, 5, 3, 1] {
+                    a.e(ldp_post(r, r + 1, SP, 16));
+                }
+                a.e(cmp_imm(X13, 0));
+                a.trap_if(Cond::Ne, Trap::Prim(String::new()));
             }
             "field" => {
                 a.field_of(RESULT, RESULT, k(o(0)));

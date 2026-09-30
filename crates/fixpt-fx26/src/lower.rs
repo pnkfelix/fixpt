@@ -68,7 +68,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     (">=", ">=", true),
     ("*", "%fx26-mul", true),
     ("modulo", "modulo", true),
-    ("quotient", "quotient", true),
+    ("quotient", "%fx26-quotient", true),
     ("not", "not", true),
     ("char=?", "char=?", true),
     ("char-whitespace?", "char-whitespace?", true),

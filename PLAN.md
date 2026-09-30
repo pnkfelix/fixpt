@@ -126,8 +126,9 @@ are in the last section, "Log: the glance's details", and in
 
 **Next**, roughly in order. First the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
-bugs; Q2 integers (lowering and machines agree, then `int` a bignum,
-then `i32`/`i64`/`u32`/`u64`); Q3 telemetry's counts; Q4 floats (`f64`
+bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
+`u32`/`u64`, wrapping, their operations in line natively; left: `i64` and
+`u64` unboxed, then `int` a bignum); Q3 telemetry's counts; Q4 floats (`f64`
 boxed, `f32`); Q5 `eq?` and address-hashed tables (Larceny's tablets);
 Q6 flat arrays; Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
@@ -1983,9 +1984,21 @@ library.
   (`docs/fx26.md`, "Fixed-width integers"; test
   `fixed_width_integers_on_every_machine`). An `i32`/`u32` is the fixnum
   of its value (the user's choice, over an immediate with a subtag; so
-  `f32` should be asked again); an `i64`/`u64` the exact integer. Left:
-  the operations inline, one instruction each, on the machines; `i64`
-  and `u64` unboxed. The plan was: `i32`/`u32`
+  `f32` should be asked again); an `i64`/`u64` the exact integer.
+- Done (2026-09-29, the user's "the i32/i64/u32/u64 parts first"): the
+  operations in line. They, and `int`'s `*`, `quotient` and `modulo`,
+  never collect (`fixpt_runtime::never_collects`); register code calls
+  them by `prim1`/`prim2`/`prim2imm`, values kept in registers, and native
+  code does each in a few instructions, else calls it with no collection.
+  FNV-1a in `u32`, 10M steps: 1386 → 12 ms natively; an `int` loop of
+  `*` and `modulo`, 486 → 42 ms. Found on the way: `u64->int` (and
+  `i64->int`) gave a bignum `int`, and `quotient` of the least fixnum by
+  −1 one too, which compiled code, taking `int` for a fixnum, added as a
+  pointer (the register machine answered wrongly): both now fail
+  "integer overflow", as `+` and `*` do, until `int` is a bignum. And the
+  register machine's inline `modulo` read a bignum as a fixnum.
+- Left: `i64` and `u64` unboxed (FNV-1a in `u64` is 1.6 s natively, a
+  bignum each step). The plan was: `i32`/`u32`
   immediate (a word's upper half, a subtag); `i64`/`u64` raw in native
   registers and in frame slots outside the stack map, boxed as a
   bloblet with an 8-byte suffix in uniform positions, like `f64`. Bit
