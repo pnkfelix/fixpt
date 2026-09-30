@@ -56,11 +56,12 @@ impl Checker {
         let span = self.arena.span_of(e);
         let expected_ty = self.arena.get(expected).clone();
         match self.arena.exp_at(e).clone() {
-            // Against a `poly` type, anything but a `plambda` is checked with
+            // Against a `poly` type, anything but a `plambda` (or a `let`,
+            // below, which passes the `poly` to its body) is checked with
             // the binders held abstract, as though it were wrapped in a
             // `plambda` binding them — so it must be pure, as a `plambda`
             // body must.
-            _ if matches!(expected_ty, Ty::Poly { .. }) && !matches!(self.arena.exp_at(e), Exp::PLambda { .. }) => {
+            _ if matches!(expected_ty, Ty::Poly { .. }) && !matches!(self.arena.exp_at(e), Exp::PLambda { .. } | Exp::Let { .. }) => {
                 let Ty::Poly { body, .. } = expected_ty else { unreachable!() };
                 let eff = self.check(e, body)?;
                 if !self.generalizable(e, &eff) {
@@ -223,7 +224,13 @@ impl Checker {
                 let r = self.check(body, expected);
                 self.truncate_env(depth);
                 self.skolems.truncate(named);
-                Ok(self.mask(e, &eff.union(&r?), expected))
+                let eff = self.mask(e, &eff.union(&r?), expected);
+                // A `let` whose value is polymorphic (a `plambda` under it,
+                // say) must be pure, as a `plambda` body must.
+                if matches!(expected_ty, Ty::Poly { .. }) && !self.generalizable(e, &eff) {
+                    return Err(FxError::at(span, format!("a polymorphic value must be pure, and this has {}", self.show_effect(&eff))));
+                }
+                Ok(eff)
             }
             _ => {
                 let (t, eff) = self.synth(e)?;

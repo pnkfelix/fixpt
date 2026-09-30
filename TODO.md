@@ -497,16 +497,22 @@ Each has a small reproduction in the port that met it:
 - A `cons` in one branch of an `if`, or bound by a `let`, gets a fresh
   region instead of the one the other branch or the expected type
   fixes; a lambda passed to a polymorphic procedure is not checked
-  against the solved result type.
+  against the solved result type. (2026-09-30: the `let` case is what
+  bidirectional checking gives, since a binding has no expected type;
+  the error says to give one with `the`. Left as it is.)
 - A `define-type` or `define-datatype` cannot name a type defined after
   it, though `docs/fx26.md` says types are declared ahead: two datatypes
   cannot refer to each other.
-- A `plambda` under a `let` is refused against its expected `poly`.
-- `define*` without `spin` on a recursive procedure says "it does not
-  check (a mistake of the checker's)"; the real problem is the missing
-  `spin`. The native path also refuses, "may reach itself through a
-  global", some top-level recursive procedures without `spin` that the
-  lowered path accepts.
+- Done (2026-09-30), both checkers: a `plambda` under a `let` was refused
+  against its expected `poly`; a `let` now passes the `poly` to its body,
+  and must itself be pure, as a `plambda` body must.
+- Done (2026-09-30): `define*` without `spin` on a recursive procedure
+  said "it does not check (a mistake of the checker's)"; it now says the
+  real problem, the missing `spin`, since only the second check sees the
+  recursion. The native path was also said to refuse, "may reach itself
+  through a global", some top-level recursive procedures without `spin`
+  that the lowered path accepts: not reproduced (a countdown on an `int`
+  is refused alike on every path); a port's own case would be needed.
 - `length` accepts only frozen `nlist`s, so every port over `@heap`
   lists writes its own.
 

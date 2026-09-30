@@ -83,6 +83,9 @@ fn small_programs() {
     // is (PLAN.md Q11): `nil` in one branch knows which list it is.
     let lr = "(define* f (subr (alloc @l) (bool) (listof int @l))\n  (lambda (b) (letrec ((g (subr pure () int) (lambda () 1))) (if b nil (cons (g) nil)))))";
     assert!(both(lr).is_ok(), "{lr}");
+    // A `let` passes a `poly` to its body, a `plambda` here, and must be pure.
+    let pl = "(define id (poly ((t type)) (subr pure (t) t))\n  (let ((k 1)) (plambda ((t type)) (lambda (x) x))))\n((proj id int) 5)";
+    assert!(both(pl).is_ok(), "{pl}");
 }
 
 /// A text the FX-26 reader does not finish is blamed where the Rust reader

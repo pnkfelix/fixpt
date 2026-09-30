@@ -604,13 +604,14 @@
           #u
           (begin (set k-recursive (cons (cons name t) rsaved)) (k-note-why g why))))))
 ;; What `define*` says when `name`, found to be a `tf`, does not check at
-;; it, as `m` says.
+;; it, as `m` says: the program's error, since only that check sees a call
+;; of `name` as recursion.
 (define k-star-mistake (subr (maxeff kreads (alloc @t) spin) (symbol int string) string)
   (lambda (name tf m)
     (k-cat5 (k-cat3 "`define*` found `" (symbol->string name) "` to be a ") (k-show-ty tf)
-            ", and checked at it, it does not check (a mistake of the checker's): " m "")))
+            ": " m "")))
 ;; The effect of `name`, the lambda `x` of `define*`, checked again at `tf`,
-;; the type found: one that fails is the checker's mistake.
+;; the type found.
 (define k-star-checked (subr (maxeff checks spin) (symbol int kx) k-eff)
   (lambda (name tf x)
     (let ((r (k-saying (lambda () (k-te tf (k-check-declared name tf x)))

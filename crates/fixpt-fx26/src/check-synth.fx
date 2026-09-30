@@ -692,8 +692,16 @@
     (lambda (x expected)
       (let* ((et (k-get expected))
              (poly? (tagcase et (ty-poly (bs body) #t) (else y #f)))
-             (plambda? (tagcase x (x-plambda (bs body a b) #t) (else y #f))))
+             (plambda? (tagcase x (x-plambda (bs body a b) #t) (else y #f)))
+             ;; A `let` passes a `poly` to its body, and must then be pure.
+             (let? (tagcase x (x-let (bs body a b) #t) (else y #f))))
         (cond
+          ((and poly? let?)
+           (let ((e (k-check-node x expected et)))
+             (if (k-generalizable? x e)
+                 e
+                 (k-fail-effect "a polymorphic value must be pure, and this has " e
+                                (k-start x) (k-end x)))))
           ((and poly? (not plambda?))
            (tagcase et
              (ty-poly (bs body)
