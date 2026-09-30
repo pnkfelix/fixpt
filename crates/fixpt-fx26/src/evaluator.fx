@@ -174,7 +174,9 @@
   (k-cat4 " f32+ f32- f32* f32/ f32-min f32-max f32< f32<= f32> f32>= f32= "
           "f32-abs f32-neg f32-sqrt f32-floor f32-ceiling f32-truncate f32-round "
           "f32-nan? f32-infinite? f32-finite? "
-          "int->f32 f32->int f32->string f32->f64 f64->f32 int->string "))
+          (k-cat3 "int->f32 f32->int f32->string f32->f64 f64->f32 int->string "
+                  "make-flatarray flatarray-ref flatarray-set! flatarray-length "
+                  "i32-flat u32-flat i64-flat u64-flat f32-flat f64-flat ")))
 ;; `f32`'s, as `ev-f32-prim` does them.
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
@@ -296,6 +298,17 @@
   (lambda (xs f) (v-bool (f (as-f64 (arg xs 0)) (as-f64 (arg xs 1))))))
 (define f64-test (subr (maxeff evals spin) (vals (subr pure (f64) bool)) val)
   (lambda (xs f) (v-bool (f (as-f64 (arg xs 0))))))
+;; Flat arrays: here, arrays of their values; a layout, its number.
+(define* ev-flat-prim (subr (maxeff evals spin) (string vals) val)
+  (lambda (n xs)
+    (let ((is (lambda ((s string)) (string=? n s))))
+      (cond ((is "make-flatarray") (v-array (make-array (as-int (arg xs 1)) (arg xs 2))))
+            ((is "flatarray-ref") (array-ref (as-array (arg xs 0)) (as-int (arg xs 1))))
+            ((is "flatarray-set!") (ev-array-set! xs))
+            ((is "flatarray-length") (v-int (array-length (as-array (arg xs 0)))))
+            ((is "i32-flat") (v-int 0)) ((is "u32-flat") (v-int 1)) ((is "i64-flat") (v-int 2))
+            ((is "u64-flat") (v-int 3)) ((is "f32-flat") (v-int 4)) ((is "f64-flat") (v-int 5))
+            (else (efail (string-append "not in the evaluator yet: " n)))))))
 ;; `f32`'s operations, by shape.
 (define f32-2 (subr (maxeff evals spin) (vals (subr pure (f32 f32) f32)) val)
   (lambda (xs f) (v-f32 (f (as-f32 (arg xs 0)) (as-f32 (arg xs 1))))))
@@ -327,7 +340,7 @@
             ((is "int->string") (v-str (int->string (as-int (x)))))
             ((is "f32->f64") (v-f64 (f32->f64 (as-f32 (x)))))
             ((is "f64->f32") (v-f32 (f64->f32 (as-f64 (x)))))
-            (else (efail (string-append "not in the evaluator yet: " n)))))))
+            (else (ev-flat-prim n xs))))))
 (define* ev-f64-unary (subr (maxeff evals spin) (string vals) val)
   (lambda (n xs)
     (let ((is (lambda ((s string)) (string=? n s))))

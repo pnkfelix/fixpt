@@ -1106,6 +1106,7 @@ impl Compiling<'_> {
         // that must unbox some first, each a stub of its own.
         let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
         let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name);
+        let raw_refs = reps::raw_refs(&cells, &starts, &prim_name);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
         let mut edge_stubs: Vec<(Label, Vec<(usize, Rep)>, Label)> = Vec::new();
         let mut int_slows: Vec<IntSlow> = Vec::new();
@@ -1134,7 +1135,7 @@ impl Compiling<'_> {
             {
                 let o = |j: usize| cells[i + 1 + j];
                 let mut reps = reps_in[si - 1];
-                let first = reps::step(op, &o, &prim_name, &mut reps);
+                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], &mut reps);
                 convert(&mut a, self.callouts, &first);
             }
             if target[i] {
@@ -1637,6 +1638,25 @@ impl Compiling<'_> {
                     // An `i64` or `u64` operation: its operands raw where it
                     // takes them so (unboxed already, as `reps` said), a
                     // constant made so here.
+                    // An element only `f64` operations use: its bits.
+                    if name == "%fx26-flatarray-ref" && raw_refs[si - 1] {
+                        let y = if op == "prim2" { reg(o(1)) } else {
+                            a.es(&mov_imm64(X17, o(1).raw()));
+                            X17
+                        };
+                        let (slow, done) = (a.label(), a.label());
+                        flat_element(&mut a, RESULT, y, slow);
+                        a.e(ldr_x8(RESULT, X15, X14));
+                        a.to(done, Fix::B);
+                        a.bind(slow);
+                        pure_call(&mut a, self.callouts, Callout::Pure { p: pn, n: 2 }, &[RESULT, y], RESULT);
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+                        a.e(cmp_imm(X9, 0));
+                        trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
+                        unbox_f64(&mut a, RESULT);
+                        a.bind(done);
+                        continue;
+                    }
                     if let Some(RawOp::F64 { what }) = reps::raw_op(name) {
                         match what {
                             "from-int" => f64_of_int(&mut a, self.callouts, pn),
@@ -1764,6 +1784,14 @@ impl Compiling<'_> {
                         a.e(add_imm(RESULT, X11, fixpt_heap::value::TAG_PAIR as u32));
                         a.to(done, Fix::B);
                     }
+                    // A raw `f64` to store is boxed only if the call-out
+                    // must do it.
+                    let raw_store = reps_in[si - 1][3] == Rep::F64;
+                    if let Callout::Prim { p, n: 3 } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "%fx26-flatarray-set!"
+                    {
+                        flat_set(&mut a, slow, done, raw_store);
+                    }
                     if let Callout::Cons = c {
                         a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
                         a.e(ldr(X14, X13, 0));
@@ -1827,6 +1855,9 @@ impl Compiling<'_> {
                         a.to(done, Fix::B);
                     }
                     a.bind(slow);
+                    if raw_store && matches!(c, Callout::Prim { p, n: 3 } if fixpt_runtime::PRIMITIVES[p].name == "%fx26-flatarray-set!") {
+                        box_f64(&mut a, self.callouts, 3);
+                    }
                     // A closure the free space had no room for: the
                     // machine's common routine makes it.
                     if let (Callout::Closure { n }, Some(f)) = (c, code_field) {
@@ -2213,6 +2244,153 @@ fn int_of_f64(a: &mut Asm, callouts: &mut Vec<Callout>, stubs: &mut Vec<(Label, 
     a.bind(done);
 }
 
+/// `out` := how many elements the flat array in `arr` has (untagged): its
+/// suffix's bytes, from its header 28 bytes before its pointer (a flat
+/// array has one field and a trailer), over its elements' size, from its
+/// layout in field 2. Uses X11 and X16 (not X17, where a constant operand
+/// may be).
+fn flat_count(a: &mut Asm, arr: Reg, out: Reg) {
+    use fixpt_heap::layout::*;
+    a.e(ldur(out, arr, -28));
+    a.e(lsr_imm(out, out, 32));
+    a.e(ldur(X16, arr, field_off(2)));
+    a.e(lsr_imm(X16, X16, 3));
+    // The 8-byte layouts, as bits of a word: 2 plus that bit is the shift.
+    let wide = [FLAT_I64, FLAT_U64, FLAT_F64].iter().fold(0u32, |m, c| m | 1 << c);
+    a.e(movz(X11, wide, 0));
+    a.e(lsrv(X11, X11, X16));
+    a.e(and_low(X11, X11, 1));
+    a.e(add_imm(X11, X11, 2));
+    a.e(lsrv(out, out, X11));
+}
+
+/// Where a flat array's elements are, and element `index` (in `y`, a
+/// value): X14 the index, X15 the suffix, X16 the layout, as a fixnum; to
+/// `slow` unless the index is a fixnum in range.
+fn flat_element(a: &mut Asm, arr: Reg, y: Reg, slow: Label) {
+    a.e(tst_low(y, 3));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(asr_imm(X14, y, 3));
+    flat_count(a, arr, X13);
+    a.e(cmp(X14, X13));
+    a.to(slow, Fix::If(Cond::Hs));
+    a.e(ldur(X16, arr, field_off(2)));
+    a.e(sub_imm(X15, arr, fixpt_heap::value::TAG_BLOBLET as u32));
+}
+
+/// `flatarray-ref` of the flat array in `RESULT` at `y`, into `RESULT`, by
+/// its layout: an `f64` boxed from the free space (`slow`, the primitive's,
+/// when there is no room), an `f32` an immediate, a 32-bit integer its
+/// fixnum, a 64-bit one its fixnum where it is one (else `slow`).
+fn flat_ref(a: &mut Asm, y: Reg, slow: Label) {
+    use fixpt_heap::layout::*;
+    let end = a.label();
+    flat_element(a, RESULT, y, slow);
+    let is = |a: &mut Asm, code: i64, not: Label| {
+        a.e(cmp_imm(X16, (code << 3) as u32));
+        a.to(not, Fix::If(Cond::Ne));
+    };
+    let (not_f64, not_f32, not_i32, not_u32) = (a.label(), a.label(), a.label(), a.label());
+    is(a, FLAT_F64, not_f64);
+    a.e(ldr_x8(X9, X15, X14));
+    a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
+    a.e(ldr(X14, X13, 0));
+    a.e(ldr(X15, ST, st_off(offset_of!(DState, alloc_limit))));
+    a.e(add_imm(X16, X14, 2));
+    a.e(cmp(X16, X15));
+    a.to(slow, Fix::If(Cond::Hi));
+    a.e(ldr(X17, ST, st_off(offset_of!(DState, words))));
+    a.e(add_lsl(X11, X17, X14, 3));
+    a.es(&mov_imm64(X17, fixpt_heap::value::make_header(fixpt_heap::ObjType::Flonum as u8, 0, 8)));
+    a.e(str(X17, X11, 0));
+    a.e(str(X9, X11, 8));
+    a.e(str(X16, X13, 0));
+    a.e(add_imm(RESULT, X11, 8 + fixpt_heap::value::TAG_BLOBLET as u32));
+    a.to(end, Fix::B);
+    a.bind(not_f64);
+    is(a, FLAT_F32, not_f32);
+    a.e(ldr_w4(X13, X15, X14));
+    a.e(lsl_imm(X13, X13, 32));
+    a.e(add_imm(RESULT, X13, (Value::f32(0.0).raw() & 0xff) as u32));
+    a.to(end, Fix::B);
+    a.bind(not_f32);
+    is(a, FLAT_I32, not_i32);
+    a.e(ldrsw_4(X13, X15, X14));
+    a.e(lsl_imm(RESULT, X13, 3));
+    a.to(end, Fix::B);
+    a.bind(not_i32);
+    is(a, FLAT_U32, not_u32);
+    a.e(ldr_w4(X13, X15, X14));
+    a.e(lsl_imm(RESULT, X13, 3));
+    a.to(end, Fix::B);
+    // `i64` or `u64`: a fixnum where it fits one.
+    a.bind(not_u32);
+    a.e(ldr_x8(X13, X15, X14));
+    let unsigned = a.label();
+    a.e(cmp_imm(X16, (FLAT_U64 << 3) as u32));
+    a.to(unsigned, Fix::If(Cond::Eq));
+    a.e(lsl_imm(X14, X13, 3));
+    a.e(asr_imm(X15, X14, 3));
+    a.e(cmp(X15, X13));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(mov(RESULT, X14));
+    a.to(end, Fix::B);
+    a.bind(unsigned);
+    a.e(lsr_imm(X15, X13, 60));
+    a.e(cmp_imm(X15, 0));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(lsl_imm(RESULT, X13, 3));
+    a.bind(end);
+}
+
+/// `flatarray-set!` of the flat array in `x1` at `x2` to `x3`, as its
+/// layout keeps it: to `slow` (the call-out) for an index out of range, or
+/// a 64-bit integer that is a bignum; else unit into `RESULT`, and to `done`.
+/// `raw`: the value is an `f64`'s bits, so the array's elements are `f64`s.
+fn flat_set(a: &mut Asm, slow: Label, done: Label, raw: bool) {
+    use fixpt_heap::layout::*;
+    let (v, stored) = (3 as Reg, a.label());
+    flat_element(a, 1, 2, slow);
+    let is = |a: &mut Asm, code: i64, not: Label| {
+        a.e(cmp_imm(X16, (code << 3) as u32));
+        a.to(not, Fix::If(Cond::Ne));
+    };
+    if raw {
+        a.e(str_x8(v, X15, X14));
+        a.es(&mov_imm64(RESULT, Value::UNIT.raw()));
+        a.to(done, Fix::B);
+        return;
+    }
+    let (not_f64, not_f32, wide) = (a.label(), a.label(), a.label());
+    is(a, FLAT_F64, not_f64);
+    a.e(ldur(X13, v, -(fixpt_heap::value::TAG_BLOBLET as i64)));
+    a.e(str_x8(X13, X15, X14));
+    a.to(stored, Fix::B);
+    a.bind(not_f64);
+    is(a, FLAT_F32, not_f32);
+    a.e(lsr_imm(X13, v, 32));
+    a.e(str_w4(X13, X15, X14));
+    a.to(stored, Fix::B);
+    // A 32-bit integer is the fixnum of its value; a 64-bit one may be a
+    // bignum, the call-out's.
+    a.bind(not_f32);
+    a.e(cmp_imm(X16, (FLAT_I64 << 3) as u32));
+    a.to(wide, Fix::If(Cond::Eq));
+    a.e(cmp_imm(X16, (FLAT_U64 << 3) as u32));
+    a.to(wide, Fix::If(Cond::Eq));
+    a.e(asr_imm(X13, v, 3));
+    a.e(str_w4(X13, X15, X14));
+    a.to(stored, Fix::B);
+    a.bind(wide);
+    a.e(tst_low(v, 3));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(asr_imm(X13, v, 3));
+    a.e(str_x8(X13, X15, X14));
+    a.bind(stored);
+    a.es(&mov_imm64(RESULT, Value::UNIT.raw()));
+    a.to(done, Fix::B);
+}
+
 /// An `f32` operation `what` (the name after `f32`) on the immediates in
 /// `RESULT` and `y`, into `RESULT`: each unboxed by a shift into `s16` and
 /// `s17`, the result boxed by a shift and the subtag's add. False for one
@@ -2436,6 +2614,15 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.bind(signed);
         }
         a.e(mov(RESULT, X14));
+        return true;
+    }
+    if name == "%fx26-flatarray-length" {
+        flat_count(a, x, X13);
+        a.e(lsl_imm(RESULT, X13, 3));
+        return true;
+    }
+    if name == "%fx26-flatarray-ref" {
+        flat_ref(a, y, slow);
         return true;
     }
     let Some(rest) = name.strip_prefix("%fx26-") else { return false };

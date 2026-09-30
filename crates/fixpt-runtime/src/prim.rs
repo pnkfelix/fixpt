@@ -388,6 +388,43 @@ fn f32_op(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
     Ok(Value::f32(r))
 }
 
+/// A value of a flat array's element layout (`fixpt_heap::layout::FLAT_*`),
+/// as the bits the array keeps.
+fn flat_bits_of(rt: &mut Runtime, code: i64, v: Value) -> Outcome<u64> {
+    use fixpt_heap::layout::*;
+    Ok(match code {
+        FLAT_I32 | FLAT_U32 => fixed_in(rt, v, if code == FLAT_I32 { Width::I32 } else { Width::U32 })? as u64 & 0xffff_ffff,
+        FLAT_I64 | FLAT_U64 => fixed_in(rt, v, if code == FLAT_I64 { Width::I64 } else { Width::U64 })? as u64,
+        FLAT_F32 => f32_in(rt, v)?.to_bits() as u64,
+        _ => f64_in(rt, v)?.to_bits(),
+    })
+}
+
+/// The value bits of layout `code` stand for.
+fn flat_value(rt: &mut Runtime, code: i64, bits: u64) -> Value {
+    use fixpt_heap::layout::*;
+    match code {
+        FLAT_I32 => Value::fixnum(bits as u32 as i32 as i64),
+        FLAT_U32 => Value::fixnum(bits as u32 as i64),
+        FLAT_I64 => exact_out(rt, bits as i64 as i128),
+        FLAT_U64 => exact_out(rt, bits as i128),
+        FLAT_F32 => Value::f32(f32::from_bits(bits as u32)),
+        _ => rt.heap.make_flonum(f64::from_bits(bits)),
+    }
+}
+
+/// A flat array, and index `i` in its range.
+fn flat_at(rt: &mut Runtime, a: Value, i: Value) -> Outcome<usize> {
+    if !(a.is_bloblet() && rt.heap.bloblet_kind(a) == fixpt_heap::layout::kind("flat-array")) {
+        return rt.type_error("a flat array", a);
+    }
+    let n = rt.heap.flat_array_len(a);
+    match i.is_fixnum().then(|| i.as_fixnum()) {
+        Some(k) if k >= 0 && (k as usize) < n => Ok(k as usize),
+        _ => rt.fail("flatarray: index out of range", &[a, i]),
+    }
+}
+
 /// Whether primitive `name` never collects, and so may be called from
 /// code whose live values are in registers, not in a frame (register code's
 /// `prim1`, `prim2`, `prim2imm`): FX-26's `*`, `quotient` and `modulo`, and
@@ -395,7 +432,7 @@ fn f32_op(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
 /// fixnum is a bignum), since allocation never collects: a collection waits
 /// for the next point that may. It may fail, which ends the run.
 pub fn never_collects(name: &str) -> bool {
-    matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64")
+    matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64" | "%fx26-flatarray-ref" | "%fx26-flatarray-length")
         || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
@@ -1178,6 +1215,42 @@ prims! {
     "%fx26-int->f32", 1, Some(1), simple!(|rt, a| match exact_bigint(rt, a[0]) {
         Some(b) => Ok(Value::f32(num_traits::ToPrimitive::to_f32(&b).unwrap_or(f32::NAN))),
         None => rt.type_error("an exact integer", a[0]),
+    });
+    // Flat arrays (`flatarrayof`, Q6): made by a layout, elements raw.
+    "%fx26-flat-i32", 0, Some(0), simple!(|_rt, _a| Ok(Value::fixnum(fixpt_heap::layout::FLAT_I32)));
+    "%fx26-flat-u32", 0, Some(0), simple!(|_rt, _a| Ok(Value::fixnum(fixpt_heap::layout::FLAT_U32)));
+    "%fx26-flat-i64", 0, Some(0), simple!(|_rt, _a| Ok(Value::fixnum(fixpt_heap::layout::FLAT_I64)));
+    "%fx26-flat-u64", 0, Some(0), simple!(|_rt, _a| Ok(Value::fixnum(fixpt_heap::layout::FLAT_U64)));
+    "%fx26-flat-f32", 0, Some(0), simple!(|_rt, _a| Ok(Value::fixnum(fixpt_heap::layout::FLAT_F32)));
+    "%fx26-flat-f64", 0, Some(0), simple!(|_rt, _a| Ok(Value::fixnum(fixpt_heap::layout::FLAT_F64)));
+    "%fx26-make-flatarray", 3, Some(3), simple!(|rt, a| {
+        let code = int(rt, a[0])?;
+        let n = match int(rt, a[1])? { n if n >= 0 => n as usize, _ => return rt.fail("make-flatarray: a negative length", &[a[1]]) };
+        let bits = flat_bits_of(rt, code, a[2])?;
+        let arr = rt.heap.make_flat_array(code, n);
+        if bits != 0 {
+            for i in 0..n {
+                rt.heap.set_flat_bits(arr, i, bits);
+            }
+        }
+        Ok(arr)
+    });
+    "%fx26-flatarray-ref", 2, Some(2), simple!(|rt, a| {
+        let i = flat_at(rt, a[0], a[1])?;
+        let code = rt.heap.flat_array_code(a[0]);
+        let bits = rt.heap.flat_bits(a[0], i);
+        Ok(flat_value(rt, code, bits))
+    });
+    "%fx26-flatarray-set!", 3, Some(3), simple!(|rt, a| {
+        let i = flat_at(rt, a[0], a[1])?;
+        let code = rt.heap.flat_array_code(a[0]);
+        let bits = flat_bits_of(rt, code, a[2])?;
+        rt.heap.set_flat_bits(a[0], i, bits);
+        Ok(Value::UNIT)
+    });
+    "%fx26-flatarray-length", 1, Some(1), simple!(|rt, a| {
+        let n = rt.heap.flat_array_len(a[0]);
+        Ok(Value::fixnum(n as i64))
     });
     // Whether a datum is an `f64`, and it as one (the reader's atoms).
     "%fx26-datum-f64?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.obj_type(a[0]) == Some(ObjType::Flonum))));

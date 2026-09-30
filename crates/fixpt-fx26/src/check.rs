@@ -33,6 +33,13 @@ use std::collections::{HashMap, HashSet};
 
 /// `vsubr`'s declaration: generative type 0, in both checkers.
 pub const VSUBR: &str = "(vsubr (e effect +) (t type -) (r type +)) (subr e ((listof t acyclic)) r)";
+/// A flat array's element layout (Q6), generative type 1: what `t` is kept
+/// as, a number at run time; nothing sees inside it.
+pub const FLATLAYOUT: &str = "(flatlayout (t type)) int";
+/// A flat array (`flatarrayof`, Q6), generative type 2: an array to
+/// safety's analyses (its regions), opaque to anything else; its elements
+/// raw at run time, as its layout says.
+pub const FLATARRAYOF: &str = "(flatarrayof (t type) (r region)) (arrayof t r)";
 
 /// A `define-generative`: its name, parameters, their variance, and the
 /// representation, a type over the parameters.
@@ -310,8 +317,10 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        let forms = c.read(VSUBR).expect("reads");
-        c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`vsubr` is wrong: {e}"));
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF] {
+            let forms = c.read(decl).expect("reads");
+            c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
+        }
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
         }

@@ -2117,3 +2117,18 @@ million:
 | `sumfp`  |   757.1 |     620.9 |   30.9 |
 
 (Native before `int->f64` was inline: 208.9, a call-out an iteration.)
+
+## Flat arrays natively (2026-09-30)
+
+`flatarray-ref`, `-set!` and `-length` are in line natively, by the
+array's layout (field 2) and its suffix's length (the header's). A read
+made a box for an `f64` element, which the `f64` operation using it then
+opened: a backward pass beside `reps` (`raw_refs`) now finds a read whose
+element only `f64` operations use (so the program's types make it an
+`f64`), which loads the bits alone; a raw `f64` is stored as it is.
+
+| a million f64s summed, 100 times (ms) | lowered | native |
+| ------------------------------------- | -------:| ------:|
+| every read a call-out                 |  8016.9 | 4942.6 |
+| in line, each element boxed           |       — | 3393.3 |
+| in line, raw                          |  8063.3 |  295.9 |

@@ -157,7 +157,27 @@ pub const KINDS: &[Kind] = &[
     // closure has its word, and free value `i` at `CLOSURE_FREE0 + i`, as
     // there.
     Kind { name: "native-closure", code: 41, traced: true },
+    // A flat array (`flatarrayof`): its element's layout (`FLAT_*`) in field
+    // 2, a fixnum; the elements raw in the suffix, 4 or 8 bytes each, which
+    // no collection scans and no store marks.
+    Kind { name: "flat-array", code: 42, traced: true },
 ];
+
+/// A flat array's element layouts: what `(flatlayout T)` is at run time.
+pub const FLAT_I32: i64 = 0;
+pub const FLAT_U32: i64 = 1;
+pub const FLAT_I64: i64 = 2;
+pub const FLAT_U64: i64 = 3;
+pub const FLAT_F32: i64 = 4;
+pub const FLAT_F64: i64 = 5;
+
+/// An element's size in bytes, by layout.
+pub const fn flat_size(code: i64) -> usize {
+    match code {
+        FLAT_I32 | FLAT_U32 | FLAT_F32 => 4,
+        _ => 8,
+    }
+}
 
 pub const KIND_EXTENSION: u8 = 255;
 

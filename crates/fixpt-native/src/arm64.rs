@@ -97,6 +97,26 @@ pub fn ldr_lit(t: Reg, words: i64) -> u32 {
 pub fn ldr_reg(t: Reg, n: Reg, m: Reg) -> u32 {
     0xF860_6800 | r(m) << 16 | r(n) << 5 | r(t)
 }
+/// `ldr xt, [xn, xm, lsl #3]`: element `m` of 8-byte ones.
+pub fn ldr_x8(t: Reg, n: Reg, m: Reg) -> u32 {
+    0xF860_7800 | r(m) << 16 | r(n) << 5 | r(t)
+}
+/// `ldr wt, [xn, xm, lsl #2]`: element `m` of 4-byte ones, zero-extended.
+pub fn ldr_w4(t: Reg, n: Reg, m: Reg) -> u32 {
+    0xB860_7800 | r(m) << 16 | r(n) << 5 | r(t)
+}
+/// `ldrsw xt, [xn, xm, lsl #2]`: the same, sign-extended.
+pub fn ldrsw_4(t: Reg, n: Reg, m: Reg) -> u32 {
+    0xB8A0_7800 | r(m) << 16 | r(n) << 5 | r(t)
+}
+/// `str xt, [xn, xm, lsl #3]`.
+pub fn str_x8(t: Reg, n: Reg, m: Reg) -> u32 {
+    0xF820_7800 | r(m) << 16 | r(n) << 5 | r(t)
+}
+/// `str wt, [xn, xm, lsl #2]`.
+pub fn str_w4(t: Reg, n: Reg, m: Reg) -> u32 {
+    0xB820_7800 | r(m) << 16 | r(n) << 5 | r(t)
+}
 /// `stp xt, xt2, [xn, #imm]!`, `imm` a multiple of 8.
 pub fn stp_pre(t: Reg, t2: Reg, n: Reg, imm: i64) -> u32 {
     assert!(imm % 8 == 0);
@@ -496,6 +516,11 @@ mod tests {
         assert_eq!(fcmp(16, 17), 0x1e712200);
         assert_eq!(scvtf(16, 13), 0x9e6201b0);
         assert_eq!(fcvtzs(13, 16), 0x9e78020d);
+        assert_eq!(ldr_x8(13, 14, 15), 0xf86f79cd);
+        assert_eq!(ldr_w4(13, 14, 15), 0xb86f79cd);
+        assert_eq!(ldrsw_4(13, 14, 15), 0xb8af79cd);
+        assert_eq!(str_x8(13, 14, 15), 0xf82f79cd);
+        assert_eq!(str_w4(13, 14, 15), 0xb82f79cd);
         assert_eq!(fmov_to_s(16, 13), 0x1e2701b0);
         assert_eq!(fmov_from_s(13, 16), 0x1e26020d);
         assert_eq!(single(fadd(16, 16, 17)), 0x1e312a10);

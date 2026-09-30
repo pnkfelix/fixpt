@@ -148,6 +148,17 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("f32->string", "(subr pure (f32) string)"),
     ("f32->f64", "(subr pure (f32) f64)"),
     ("f64->f32", "(subr pure (f64) f32)"),
+    // Flat arrays (Q6): made by a layout, the elements raw.
+    ("make-flatarray", "(poly ((r region)) (poly ((t type)) (subr (alloc r) ((flatlayout t) int t) (flatarrayof t r))))"),
+    ("flatarray-ref", "(poly ((r region)) (poly ((t type)) (subr (read r) ((flatarrayof t r) int) t)))"),
+    ("flatarray-set!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((flatarrayof t r) int t) unit)))"),
+    ("flatarray-length", "(poly ((r region)) (poly ((t type)) (subr pure ((flatarrayof t r)) nat)))"),
+    ("i32-flat", "(subr pure () (flatlayout i32))"),
+    ("u32-flat", "(subr pure () (flatlayout u32))"),
+    ("i64-flat", "(subr pure () (flatlayout i64))"),
+    ("u64-flat", "(subr pure () (flatlayout u64))"),
+    ("f32-flat", "(subr pure () (flatlayout f32))"),
+    ("f64-flat", "(subr pure () (flatlayout f64))"),
     // The fixed-width integers (PLAN.md, Q2 b): wrapping arithmetic.
     ("i32+", "(subr pure (i32 i32) i32)"),
     ("i32-", "(subr pure (i32 i32) i32)"),
@@ -379,9 +390,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
 ];
 
 /// The initial environment as text, for the checker written in FX-26:
-/// `vsubr`'s declaration (`check::VSUBR`, generative type 0), then
+/// the standard generative types' declarations (`check::VSUBR`,
+/// `FLATLAYOUT`, `FLATARRAYOF`: 0, 1 and 2), then
 /// `(name type)` for each binding.
 pub fn standard_text() -> String {
-    let decl = format!("(define-generative {})\n", crate::check::VSUBR);
+    let decl: String = [crate::check::VSUBR, crate::check::FLATLAYOUT, crate::check::FLATARRAYOF]
+        .iter()
+        .map(|d| format!("(define-generative {d})\n"))
+        .collect();
     decl + &ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect::<String>()
 }

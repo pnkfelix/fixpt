@@ -2079,8 +2079,9 @@ of its own kind), and native code must save `d8`-`d15` or not use them.
 - Done (2026-09-30): `f32`, an immediate of its own (subtag 9, the bits in
   the upper half; the user's choice over the fixnum shape), 25 operations
   and conversions on every path and the evaluator (which also gained
-  `int->string`); natively in line in `s` registers. Next: `flatarrayof`
-  (Q6).
+  `int->string`); natively in line in `s` registers.
+- Done (2026-09-30, with Q6): `(flatarrayof T R)`, `docs/fx26.md`, "Flat
+  arrays".
 
 **Q5. Identity: `eq?` on mutable objects, and address-hashed tables.**
 (The type is still open: `TODO.md` §19 sets FX-91's opt-in `uniqueof`
@@ -2106,7 +2107,17 @@ collection counter that counts minor collections (Q3's fix) and a
 major-only one, both readable cheaply; and a type story (the counters
 under `@telemetry`, or a table type whose operations carry the effect).
 
-**Q6. Flat arrays and a `flat` kind** (the user's idea, 2026-09-29): a
+**Q6. Flat arrays and a `flat` kind** (the user's idea, 2026-09-29).
+Done (2026-09-30) as `(flatarrayof T R)` of the scalar flat types, with no
+kind: a standard generative type over `(arrayof T R)`, self-describing at
+run time, so that its operations are polymorphic in `T`, and made by a
+layout, `(flatlayout T)`, which only flat types have (dictionary passing).
+Natively in line; an `f64` element read raw where only `f64` operations
+use it (a backward demand pass beside `reps`), and stored raw. A sum over
+a million `f64`s, 100 times: 3375 ms (a box per element) → 296 ms native,
+8063 lowered. Left: products and sums of flat data flattened (unboxed
+data types, the user's question), region allocation (`rmake-flatarray`).
+The first idea was: a
 kind for types that carry no references (`int` as fixnums, `bool`,
 `char`, the fixed-width integers, `f32`, `f64`, products of those),
 and arrays of them as a bloblet suffix: no scanning by the collector, no

@@ -124,9 +124,95 @@ pub(super) enum Convert {
     Unbox { r: usize, rep: Rep },
 }
 
+/// How a register's value is used from a point on: not at all, only as a
+/// raw `f64` (an operand of an `f64` operation `raw_op` does), or otherwise.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(super) enum Demand {
+    None,
+    F64,
+    Other,
+}
+
+type Demands = [Demand; 9];
+
+/// What instruction `op` asks of the registers before it, given what is
+/// asked of them after (`after`): backward, as liveness is, each use joined
+/// in and each definition clearing its register. Moves pass the demand on;
+/// an operand of an `f64` operation asks for a raw `f64`; anything else,
+/// conservatively, for a value. Only a genuine `f64` operand asks for one,
+/// so that a flat array's element read raw is an `f64`'s by the program's
+/// types.
+fn demand_step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, after: &Demands) -> Demands {
+    let k = |j: usize| o(j).as_fixnum() as usize;
+    let mut d = *after;
+    let def = |d: &mut Demands, r: usize| d[r] = Demand::None;
+    let use_ = |d: &mut Demands, r: usize, how: Demand| d[r] = d[r].max(how);
+    let mv = |d: &mut Demands, from: usize, to: usize| {
+        let how = d[to];
+        d[to] = Demand::None;
+        if from != 0 || to != 0 {
+            d[from] = d[from].max(how);
+        }
+    };
+    let regs = |n: usize| 1..=n.min(8);
+    match op {
+        "args" => regs(k(0)).for_each(|r| def(&mut d, r)),
+        "vargs" => regs(8).for_each(|r| def(&mut d, r)),
+        "const" | "global" | "lexical" | "stack" => def(&mut d, 0),
+        "load" => def(&mut d, k(0)),
+        "reg" if k(0) == 0 => def(&mut d, 0),
+        "reg" => mv(&mut d, k(0), 0),
+        "setreg" => mv(&mut d, 0, k(0)),
+        "movereg" if k(0) == 0 => def(&mut d, k(1)),
+        "movereg" => mv(&mut d, k(0), k(1)),
+        "store" => use_(&mut d, k(0), Demand::Other),
+        "setstk" | "setglbl" | "return" | "branchf" | "brancht" => use_(&mut d, 0, Demand::Other),
+        "op1" | "op2imm" | "field" | "op2" | "setfield" => {
+            def(&mut d, 0);
+            use_(&mut d, 0, Demand::Other);
+            if matches!(op, "op2" | "setfield") {
+                use_(&mut d, k(1), Demand::Other);
+            }
+        }
+        "prim1" | "prim2" | "prim2imm" => {
+            let (x, y) = match raw_op(prim(k(0))) {
+                Some(op @ RawOp::F64 { .. }) => {
+                    let (x, y, _) = raw_shape(op);
+                    let how = |r: Rep| if r == Rep::F64 { Demand::F64 } else { Demand::Other };
+                    (how(x), how(y))
+                }
+                _ => (Demand::Other, Demand::Other),
+            };
+            def(&mut d, 0);
+            use_(&mut d, 0, x);
+            if op == "prim2" {
+                use_(&mut d, k(1), y);
+            }
+        }
+        "prim" | "lambda" | "cellular" | "invoke" | "tailinvoke" | "invokeself" => {
+            let n = if matches!(op, "prim" | "lambda" | "cellular") { k(1) } else { k(0) };
+            d = [Demand::None; 9];
+            if matches!(op, "invoke" | "tailinvoke") {
+                use_(&mut d, 0, Demand::Other);
+            }
+            regs(n).for_each(|r| use_(&mut d, r, Demand::Other));
+        }
+        "branch" | "global-guard" | "save" | "pop" => {}
+        _ => d = [Demand::Other; 9],
+    }
+    d
+}
+
+/// Whether instruction `op` reads a flat array's element (`flatarray-ref`).
+fn is_flat_ref(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str) -> bool {
+    matches!(op, "prim2" | "prim2imm") && prim(o(0).as_fixnum() as usize) == "%fx26-flatarray-ref"
+}
+
 /// Instruction `op`, operands `o`, on `reps`: the conversions it needs
 /// first, and `reps` after it. `prim` names a primitive by number.
-pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, reps: &mut Reps) -> Vec<Convert> {
+/// `raw_ref`: whether a `flatarray-ref` here gives its element raw, an
+/// `f64`'s bits, since only `f64` operations use it (`demand_step`).
+pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, raw_ref: bool, reps: &mut Reps) -> Vec<Convert> {
     let mut first = Vec::new();
     let k = |j: usize| o(j).as_fixnum() as usize;
     let mut need = |reps: &mut Reps, r: usize, want: Rep| {
@@ -168,7 +254,7 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
             if op == "prim2" {
                 need(reps, k(1), y);
             }
-            reps[0] = out;
+            reps[0] = if raw_ref && is_flat_ref(op, o, prim) { Rep::F64 } else { out };
         }
         // Calls and call-outs: their operands values; the registers then
         // undefined, `RESULT` the value.
@@ -177,7 +263,10 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
             if matches!(op, "invoke" | "tailinvoke") {
                 need(reps, 0, Rep::Value);
             }
-            regs(n).for_each(|r| need(reps, r, Rep::Value));
+            // `flatarray-set!` takes a raw `f64` to store as it is.
+            let set = op == "prim" && prim(k(0)) == "%fx26-flatarray-set!";
+            let keep = set && reps[3] == Rep::F64;
+            regs(n).filter(|&r| !(keep && r == 3)).for_each(|r| need(reps, r, Rep::Value));
             *reps = [Rep::Undefined; 9];
             reps[0] = Rep::Value;
         }
@@ -194,6 +283,7 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
 /// and where it ends, over the procedure's cells, from the fixpoint of
 /// `step` and `join`. `starts` are where the instructions start.
 pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> (Vec<Reps>, Vec<Reps>) {
+    let raw_refs = raw_refs(cells, starts, prim);
     let ns = starts.len();
     let at: std::collections::HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
     let succ = |si: usize| -> Vec<usize> {
@@ -219,7 +309,7 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
             let Some(mut reps) = ins[si] else { continue };
             let i = starts[si];
             let o = |j: usize| cells[i + 1 + j];
-            step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, &mut reps);
+            step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, raw_refs[si], &mut reps);
             outs[si] = reps;
             for t in succ(si) {
                 let new = match &ins[t] {
@@ -237,4 +327,62 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
         }
     }
     (ins.into_iter().map(|r| r.unwrap_or([Rep::Undefined; 9])).collect(), outs)
+}
+
+/// Successors of each instruction, by index into `starts`.
+fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
+    let ns = starts.len();
+    let at: std::collections::HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
+    (0..ns)
+        .map(|si| {
+            let i = starts[si];
+            let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
+            let to = || at.get(&((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize)).copied();
+            let next = (si + 1 < ns).then_some(si + 1);
+            match op {
+                "return" | "tailinvoke" => vec![],
+                "branch" => to().into_iter().collect(),
+                "branchf" | "brancht" | "global-guard" => next.into_iter().chain(to()).collect(),
+                _ => next.into_iter().collect(),
+            }
+        })
+        .collect()
+}
+
+/// Which instructions are a `flatarray-ref` whose element only `f64`
+/// operations use: the backward fixpoint of `demand_step`, over the ways
+/// out of each instruction.
+pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> Vec<bool> {
+    let ns = starts.len();
+    let succ = successors(cells, starts);
+    let mut before = vec![[Demand::None; 9]; ns];
+    loop {
+        let mut changed = false;
+        for si in (0..ns).rev() {
+            let mut after = [Demand::None; 9];
+            for &t in &succ[si] {
+                for r in 0..9 {
+                    after[r] = after[r].max(before[t][r]);
+                }
+            }
+            let i = starts[si];
+            let o = |j: usize| cells[i + 1 + j];
+            let d = demand_step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, &after);
+            if d != before[si] {
+                before[si] = d;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    (0..ns)
+        .map(|si| {
+            let i = starts[si];
+            let o = |j: usize| cells[i + 1 + j];
+            let after = succ[si].iter().fold(Demand::None, |m, &t| m.max(before[t][0]));
+            is_flat_ref(OPS[cells[i].as_fixnum() as usize].0, &o, prim) && after == Demand::F64
+        })
+        .collect()
 }

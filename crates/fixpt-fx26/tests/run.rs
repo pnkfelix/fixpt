@@ -88,6 +88,13 @@ fn f32_runs() {
     assert!(v.starts_with("(\"99.99905\" \"0.33333334\" \"0.3333333432674408\" \"16777216.0\" \"16777216\""), "{v}");
 }
 
+/// Flat arrays of floats, lowered (`programs/run/flat-arrays.fx`).
+#[test]
+fn flat_arrays_run() {
+    let v = run(include_str!("programs/run/flat-arrays.fx"));
+    assert_eq!(v, "(\"5.1873775176396215\" \"0.01\" \"0.5\" \"0.25\" \"100\")");
+}
+
 /// `int` is a bignum past a fixnum, lowered too (`programs/run/bignums.fx`).
 #[test]
 fn bignums_run() {

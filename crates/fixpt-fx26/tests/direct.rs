@@ -84,6 +84,10 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
         if std::env::var("DIRECT_SHOW").is_ok() {
             eprintln!("{code}");
         }
+        // Compiled only, not run (`show_code`: its arguments are made up).
+        if std::env::var("SHOW_FILE").is_ok() {
+            return Ran { direct: Err("not run".into()), rust, code, collections: (0, 0), code_words: (0, 0) };
+        }
         let vals: Vec<Value> = args.iter().map(|a| Value::fixnum(*a)).collect();
         let before = (rt.heap.gc_count, rt.heap.minor_count);
         let direct = m.call(rt, p, &vals, fuel).map(|v| fixpt_runtime::write_value(&rt.heap, v)).map_err(|DirectTrap { what, .. }| what);
@@ -144,13 +148,23 @@ fn adding_one_checks_its_operand_and_overflow() {
     assert_eq!(r.direct, Ok(r.rust.clone()));
 }
 
-/// A report: `helpers`' `run`, its code. `cargo test --release -p
-/// fixpt-fx26 --test direct -- --ignored show_helpers --nocapture`.
+/// A report: a procedure's native code, `helpers`' `run` unless
+/// `SHOW_FILE` (a program's path, its definitions all but the last line)
+/// and `SHOW_NAME` say. `cargo test --release -p fixpt-fx26 --test direct
+/// -- --ignored show_code --nocapture`.
 #[test]
 #[ignore = "a report"]
-fn show_helpers() {
-    let r = run(&bench("helpers"), "run", &[0, 30, 0], FUEL);
-    println!("{}", r.code);
+fn show_code() {
+    let defs = match std::env::var("SHOW_FILE") {
+        Ok(f) => {
+            let text = std::fs::read_to_string(f).expect("reads");
+            let lines: Vec<&str> = text.trim_end().lines().collect();
+            lines[..lines.len() - 1].join("\n")
+        }
+        Err(_) => bench("helpers"),
+    };
+    let name = std::env::var("SHOW_NAME").unwrap_or_else(|_| "run".into());
+    println!("{}", direct_only(&defs, &name, &[0, 30, 0], FUEL).code);
 }
 
 /// The benchmarks' procedures, as the Rust machine runs them.
@@ -290,6 +304,13 @@ fn floats_as_the_rust_machine_gives_them() {
         let r = run_collecting(&program("native/floats"), "floats", &[1000], FUEL, gc_every);
         assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
     }
+    // Flat arrays, of floats and of integers, natively.
+    for (p, f) in [("run/flat-arrays", "flat"), ("native/flat-ints", "flat-ints")] {
+        let r = run_collecting(&program(p), f, &[100], FUEL, Some(7));
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "{p}: {:?} against {}", r.direct, r.rust);
+    }
+    let defs = "(define* at (subr (alloc @heap) (int) f64) (lambda (i) (flatarray-ref (make-flatarray (f64-flat) 3 1.) i)))";
+    assert!(matches!(&run(defs, "at", &[3], FUEL).direct, Err(m) if m.contains("out of range")));
     // `f32`, immediates, in line (`programs/run/f32.fx`).
     let r = run(&program("run/f32"), "f32s", &[1000], FUEL);
     assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "{:?} against {}", r.direct, r.rust);

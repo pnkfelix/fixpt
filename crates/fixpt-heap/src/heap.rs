@@ -911,6 +911,40 @@ impl Heap {
         Ok(())
     }
 
+    /// A flat array of `n` elements of layout `code` (`layout::FLAT_*`),
+    /// all bits zero.
+    pub fn make_flat_array(&mut self, code: i64, n: usize) -> Value {
+        let a = self.make_bloblet(layout::kind("flat-array"), 1, n * layout::flat_size(code), true);
+        self.set_bloblet_slot(a, 2, Value::fixnum(code));
+        a
+    }
+    /// A flat array's layout (`layout::FLAT_*`).
+    pub fn flat_array_code(&self, a: Value) -> i64 {
+        self.bloblet_slot(a, 2).as_fixnum()
+    }
+    /// A flat array's length.
+    pub fn flat_array_len(&self, a: Value) -> usize {
+        self.bloblet_head(a).bytes / layout::flat_size(self.flat_array_code(a))
+    }
+    /// Element `i`'s bits (zero-extended if 4 bytes wide); in range.
+    pub fn flat_bits(&self, a: Value, i: usize) -> u64 {
+        if layout::flat_size(self.flat_array_code(a)) == 8 {
+            self.word(self.ix(a) + i)
+        } else {
+            (self.word(self.ix(a) + i / 2) >> ((i % 2) * 32)) as u32 as u64
+        }
+    }
+    /// Element `i` := `bits` (their low 32, if 4 bytes wide); in range.
+    pub fn set_flat_bits(&mut self, a: Value, i: usize, bits: u64) {
+        if layout::flat_size(self.flat_array_code(a)) == 8 {
+            self.set_word(self.ix(a) + i, bits);
+        } else {
+            let (wi, shift) = (self.ix(a) + i / 2, (i % 2) * 32);
+            let w = (self.word(wi) & !(0xffff_ffffu64 << shift)) | ((bits & 0xffff_ffff) << shift);
+            self.set_word(wi, w);
+        }
+    }
+
     /// The whole suffix, as bytes.
     pub fn bloblet_bytes(&self, v: Value) -> Vec<u8> {
         let n = self.bloblet_head(v).bytes;
