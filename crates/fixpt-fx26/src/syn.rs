@@ -474,6 +474,18 @@ fn atom(interner: &mut Interner, v: Local<'_>) -> Option<Datum> {
     if let Some(n) = v.fixnum() {
         return Some(Datum::Number(Num::Int(n)));
     }
+    // A bignum: as the Rust reader has an integer, a word's if it fits one.
+    if v.obj_type() == Some(fixpt_heap::ObjType::Bignum) {
+        let written = v.write();
+        let (negative, digits) = match written.strip_prefix('-') {
+            Some(d) => (true, d.to_string()),
+            None => (false, written.clone()),
+        };
+        return Some(Datum::Number(match written.parse::<i64>() {
+            Ok(n) => Num::Int(n),
+            Err(_) => Num::Big { negative, digits, radix: 10 },
+        }));
+    }
     if v.is_true() || v.is_false() {
         return Some(Datum::Bool(v.is_true()));
     }

@@ -308,6 +308,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("datum-cdr", "(subr pure (datum) datum)"),
     ("datum-symbol?", "(subr pure (datum) bool)"),
     ("datum-symbol-name", "(subr pure (datum) string)"),
+    // Whether a datum is an integer of any size, a bignum too; its value
+    // is `datum-int-value`'s.
+    ("datum-integer?", "(subr pure (datum) bool)"),
     ("datum-int?", "(subr pure (datum) bool)"),
     ("datum-int-value", "(subr pure (datum) int)"),
     ("datum-string?", "(subr pure (datum) bool)"),

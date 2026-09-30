@@ -290,6 +290,33 @@
     (if fields
         (parse-names (syn-items bind "the names an arm binds"))
         (the names (cons (syn-symbol bind) nil)))))
+;; An integer literal past a fixnum, `v`, as arithmetic on fixnums, which
+;; every path does, bignums included (PLAN.md Q2): `(- 0 x)` for a
+;; negative; else, in base 10⁹, `(+ (* rest 1000000000) last)`, `rest`
+;; again so until it is a fixnum. The Rust parser's `big_literal`, node for
+;; node: here the limbs are peeled off, least first, then built outwards.
+(define big-literal (subr (maxeff (read @globals) spin) (int int int) exp)
+  (lambda (v a b)
+    (letrec ((call (subr (maxeff (read @globals) spin) (symbol exp exp) exp)
+                   (lambda (f x y)
+                     (e-app (e-var f a b) (the exp-list (cons x (the exp-list (cons y nil)))) a b)))
+             (fixnum? (subr spin (int) bool)
+                      (lambda (n) (and (<= n 1152921504606846975) (>= n -1152921504606846976))))
+             ;; The limbs below the first fixnum, most significant first.
+             (peel (subr (maxeff (read @globals) spin) (int (listof int acyclic)) exp)
+                   (lambda (n limbs)
+                     (if (fixnum? n)
+                         (build (e-int n a b) limbs)
+                         (peel (quotient n 1000000000) (cons (remainder n 1000000000) limbs)))))
+             (build (subr (maxeff (read @globals) spin) (exp (listof int acyclic)) exp)
+                    (lambda (acc limbs)
+                      (if (null? limbs)
+                          acc
+                          (let ((scaled (call '* acc (e-int 1000000000 a b))))
+                            (build (call '+ scaled (e-int (car limbs) a b)) (cdr limbs)))))))
+      (cond ((fixnum? v) (e-int v a b))
+            ((< v 0) (call '- (e-int 0 a b) (peel (- 0 v) nil)))
+            (else (peel v nil))))))
 
 ;;; ------------------------------------------------------------ expressions
 
@@ -307,6 +334,7 @@
       (tagcase s
         (atom (d a b)
           (cond ((datum-int? d) (e-int (datum-int-value d) a b))
+                ((datum-integer? d) (big-literal (datum-int-value d) a b))
                 ((datum-string? d) (e-str (datum-string-value d) a b))
                 ((datum-bool? d) (e-bool (datum-bool-value d) a b))
                 ((datum-char? d) (e-char (datum-char-value d) a b))

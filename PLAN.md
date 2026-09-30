@@ -161,8 +161,8 @@ Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
 bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
 `u32`/`u64`, wrapping, their operations in line natively, `i64` and `u64`
-raw in native registers, `int` a bignum, a fixnum version of native code;
-left: big literals); Q3 telemetry's counts (stage 1 done);
+raw in native registers, `int` a bignum, a fixnum version of native code,
+literals past a fixnum); Q3 telemetry's counts (stage 1 done);
 Q4 floats (done: `f64` boxed, `f32` an immediate); the front end's
 register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (done:
 one pure `eq?`, `eqtable`; left: the ports' workarounds);

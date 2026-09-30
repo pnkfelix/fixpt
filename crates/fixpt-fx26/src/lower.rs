@@ -285,6 +285,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("datum-symbol?", "symbol?", false),
     ("datum-symbol-name", "symbol->string", false),
     ("datum-int?", "%fx26-fixnum?", false),
+    ("datum-integer?", "exact-integer?", false),
     ("datum-int-value", "%fx26-identity", false),
     ("datum-string?", "string?", false),
     ("datum-string-value", "%fx26-identity", false),

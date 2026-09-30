@@ -241,6 +241,7 @@
       ((string=? n "datum-symbol?") "symbol?")
       ((string=? n "datum-symbol-name") "symbol->string")
       ((string=? n "datum-int?") "%fx26-fixnum?")
+      ((string=? n "datum-integer?") "exact-integer?")
       ((string=? n "datum-int-value") "%fx26-identity")
       ((string=? n "datum-string?") "string?")
       ((string=? n "datum-string-value") "%fx26-identity")

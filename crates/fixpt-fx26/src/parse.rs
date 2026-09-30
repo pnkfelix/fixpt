@@ -11,6 +11,11 @@ use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
 
+/// A fixnum's range, as the heap's (`fixpt_heap::Value::try_fixnum`): an
+/// integer literal past it is a bignum, made by arithmetic.
+const FIXNUM_MAX: i64 = (1 << 60) - 1;
+const FIXNUM_MIN: i64 = -(1 << 60);
+
 /// What a description name means where it is used.
 #[derive(Clone, Debug)]
 pub enum DScope {
@@ -916,10 +921,67 @@ impl Checker {
     }
 
     // ---------------------------------------------------------- expressions
+    /// An integer literal past a fixnum, `negative` and of `digits` in
+    /// `radix`, as arithmetic on fixnums: `(- 0 x)` for a negative; else,
+    /// in base 10⁹, `(+ (* rest 1000000000) last)`, `rest` again so until
+    /// it is a fixnum. The FX-26 parser's `big-literal`, node for node.
+    fn big_literal(&mut self, negative: bool, digits: &str, radix: u32, span: fixpt_read::Span) -> ExpId {
+        // The value in base 10⁹, most significant limb first.
+        let mut limbs: Vec<u64> = vec![0];
+        for c in digits.chars() {
+            let mut carry = c.to_digit(radix).unwrap_or(0) as u64;
+            for l in limbs.iter_mut().rev() {
+                let x = *l * radix as u64 + carry;
+                *l = x % 1_000_000_000;
+                carry = x / 1_000_000_000;
+            }
+            while carry > 0 {
+                limbs.insert(0, carry % 1_000_000_000);
+                carry /= 1_000_000_000;
+            }
+        }
+        let value = |ls: &[u64]| -> Option<i128> {
+            (ls.len() <= 4).then(|| ls.iter().fold(0i128, |v, l| v * 1_000_000_000 + *l as i128))
+        };
+        if let Some(v) = value(&limbs) {
+            let v = if negative { -v } else { v };
+            if (FIXNUM_MIN as i128..=FIXNUM_MAX as i128).contains(&v) {
+                return self.arena.exp(span, Exp::Int(v as i64));
+            }
+        }
+        let op = |p: &mut Self, name: &str, args: Vec<ExpId>| {
+            let fun = p.arena.exp(span, Exp::Var(p.interner.intern(name)));
+            p.arena.exp(span, Exp::App { fun, args })
+        };
+        if negative {
+            let zero = self.arena.exp(span, Exp::Int(0));
+            let x = self.big_literal(false, digits, radix, span);
+            return op(self, "-", vec![zero, x]);
+        }
+        let (rest, last) = limbs.split_at(limbs.len() - 1);
+        let rest_digits: String = if rest.is_empty() {
+            "0".into()
+        } else {
+            rest.iter().enumerate().map(|(i, l)| if i == 0 { l.to_string() } else { format!("{l:09}") }).collect()
+        };
+        let hi = self.big_literal(false, &rest_digits, 10, span);
+        let base = self.arena.exp(span, Exp::Int(1_000_000_000));
+        let scaled = op(self, "*", vec![hi, base]);
+        let lo = self.arena.exp(span, Exp::Int(last[0] as i64));
+        op(self, "+", vec![scaled, lo])
+    }
+
     pub fn parse_exp(&mut self, s: &Syntax) -> R<ExpId> {
         let span = s.span;
         match &s.datum {
-            Datum::Number(fixpt_read::Num::Int(n)) => return Ok(self.arena.exp(span, Exp::Int(*n))),
+            Datum::Number(fixpt_read::Num::Int(n)) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => return Ok(self.arena.exp(span, Exp::Int(*n))),
+            // An integer literal past a fixnum: arithmetic on fixnums, which
+            // every path does, bignums included (PLAN.md Q2).
+            Datum::Number(fixpt_read::Num::Int(n)) => {
+                let digits = (*n as i128).unsigned_abs().to_string();
+                return Ok(self.big_literal(*n < 0, &digits, 10, span));
+            }
+            Datum::Number(fixpt_read::Num::Big { negative, digits, radix }) => return Ok(self.big_literal(*negative, digits, *radix, span)),
             Datum::Str(t) => return Ok(self.arena.exp(span, Exp::Str(t.clone()))),
             Datum::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
             Datum::Char(c) => return Ok(self.arena.exp(span, Exp::Char(*c))),
