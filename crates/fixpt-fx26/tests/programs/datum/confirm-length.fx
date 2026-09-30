@@ -3,8 +3,7 @@
 (define line (subr pure (int) (listof int const))
   (lambda (n)
     (letfreeze r
-      ;; cons-chain: built in r, then frozen
-      (let ((ys (the (listof int r) (cons 1 (cons 2 (cons 3 nil))))))
+      (let ((ys (the (listof int r) (list 1 2 3))))
         (begin (set-car! ys n) ys)))))
 (define second (subr pure ((nlist int 3)) int) (lambda (v) (car (cdr v))))
 (define* f (subr pure ((listof int const)) int)

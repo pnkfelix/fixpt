@@ -8,8 +8,7 @@
     len))
 (define first (subr pure ((listof int const)) int) (lambda (xs) (car xs)))
 (define built (subr pure (int) (listof int acyclic))
-  ;; cons-chain: built in r, then frozen
-  (lambda (n) (letfreeze r (the (listof int r) (cons n (cons (+ n 1) nil))))))
+  (lambda (n) (letfreeze r (the (listof int r) (list n (+ n 1))))))
 (define changed (subr pure (int) (listof int const))
   (lambda (n)
     (letfreeze r

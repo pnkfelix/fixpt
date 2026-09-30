@@ -170,7 +170,7 @@
 (define con-x-s term (CON x-s))
 
 (define list1 (subr (alloc @heap) (term) terms) (lambda (a) (cons a nil)))
-(define list2 (subr (alloc @heap) (term term) terms) (lambda (a b) (cons a (cons b nil))))
+(define list2 (subr (alloc @heap) (term term) terms) (lambda (a b) (list a b)))
 
 (define* exists (subr solving ((subr solving (term) unit)) unit)
   (lambda (sc) (sc (REF (the var (new (NONE)))))))

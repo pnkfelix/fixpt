@@ -355,12 +355,12 @@
   (lambda (state)
     (let* ((lo (extract (extract state mlen) lo))
            (hi (extract (extract state mlen) hi))
-           (bits (pack-little (the (listof int @l) (cons lo (cons hi nil)))))
+           (bits (pack-little (list lo hi)))
            (index (array-length (extract state buf)))
            (pad-len (if (< index 56) (- 56 index) (- 120 index)))
            (state (update state (PADDING pad-len)))
            (dg (extract (update state bits) digest)))
-      (pack-little (the (listof int @l) (cons (extract dg A) (cons (extract dg B) (cons (extract dg C) (cons (extract dg D) nil)))))))))
+      (pack-little (list (extract dg A) (extract dg B) (extract dg C) (extract dg D))))))
 
 (define hxd string "0123456789abcdef")
 

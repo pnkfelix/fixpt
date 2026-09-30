@@ -354,21 +354,19 @@
   (lambda (s v y x)
     (let ((h (rr-h s)) (m1 (rr-m1 s)) (m2 (rr-m2 s)))
       (matrix-set h y x
-        (+ 1 (min (the ints
-                    (cons (if (= x (- (rr-width s) 1))
-                              m1
-                              (if (ef-right s y x) (matrix-ref h y (+ x 1)) m2))
-                    (cons (if (= x 0)
-                              m1
-                              (if (ef-left s y x) (matrix-ref h y (- x 1)) m2))
-                    (cons (if (= y (- (rr-height s) 1))
-                              m1
-                              (if (ef-down s y x) (matrix-ref h (+ y 1) x) m2))
-                    (cons (if (= y 0)
-                              m1
-                              (if (ef-up s y x) (matrix-ref h (- y 1) x) m2))
-                    (cons (if (ef-t s v y x) 0 m2)
-                          nil))))))))))))
+        (+ 1 (min (list (if (= x (- (rr-width s) 1))
+                            m1
+                            (if (ef-right s y x) (matrix-ref h y (+ x 1)) m2))
+                        (if (= x 0)
+                            m1
+                            (if (ef-left s y x) (matrix-ref h y (- x 1)) m2))
+                        (if (= y (- (rr-height s) 1))
+                            m1
+                            (if (ef-down s y x) (matrix-ref h (+ y 1) x) m2))
+                        (if (= y 0)
+                            m1
+                            (if (ef-up s y x) (matrix-ref h (- y 1) x) m2))
+                        (if (ef-t s v y x) 0 m2))))))))
 
 (define-datatype queue (qnil) (qcons point (ref queue @heap)))
 
@@ -464,16 +462,14 @@
           (letrec ((report (subr rreff (string int) unit)
                      (lambda (control i)
                        (pormat control
-                               (the pvs
-                                 (cons (pint (get pushes))
-                                 (cons (plural (get pushes) "es")
-                                 (cons (pint (get lifts))
-                                 (cons (plural (get lifts) "s")
-                                 (cons (pint (get relabels))
-                                 (cons (plural (get relabels) "s")
-                                 (cons (pint i)
-                                 (cons (plural i "s")
-                                       nil))))))))))))
+                               (list (pint (get pushes))
+                                     (plural (get pushes) "es")
+                                     (pint (get lifts))
+                                     (plural (get lifts) "s")
+                                     (pint (get relabels))
+                                     (plural (get relabels) "s")
+                                     (pint i)
+                                     (plural i "s")))))
                    (loop (subr rreff (int bool) unit)
                      (lambda (i p)
                        (if (and (zero (modulo i 6)) (not p))
@@ -607,7 +603,7 @@
                                      (loop lg-v 1)))))
                          (begin
                            (pormat "LG-V=~s, V-MAX=~s, V=~s~%"
-                                   (the pvs (cons (pint lg-v) (cons (pint v-max) (cons (pint v) nil)))))
+                                   (list (pint lg-v) (pint v-max) (pint v)))
                            (preflow-push s v)
                            (loop (- lg-v 1)
                                  (if (min-cut-includes-every-edge-to-t s) v v-max))))))))

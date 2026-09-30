@@ -11,8 +11,7 @@
 (define line (subr pure (int) (listof int const))
   (lambda (n)
     (letfreeze r
-      ;; cons-chain: built in r, then frozen
-      (let ((ys (the (listof int r) (cons 1 (cons 2 (cons 3 nil))))))
+      (let ((ys (the (listof int r) (list 1 2 3))))
         (begin (set-car! ys n) ys)))))
 (define total (poly ((n size)) (subr pure ((nlist int n)) int))
   (plambda ((n size))

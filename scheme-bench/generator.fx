@@ -81,7 +81,7 @@
                                                                     (if (= (+ (* a a) (* b b)) (* c c))
                                                                         (begin (set count (+ (get count) 1))
                                                                                (if (> (get count) nth)
-                                                                                   (return (cons a (cons b (cons c nil))))
+                                                                                   (return (list a b c))
                                                                                    #u))
                                                                         #u)
                                                                     (b-loop (b-values))))))))

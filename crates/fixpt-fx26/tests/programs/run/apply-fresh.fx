@@ -7,7 +7,7 @@
     (letrec ((go (subr pure ((listof int acyclic) int) int)
                (lambda (ys n) (if (null? ys) n (go (cdr ys) (+ n 1))))))
       (go ys 0))))
-(define xs (listof int @heap) (cons 1 (cons 2 nil)))
+(define xs (listof int @heap) (list 1 2))
 (define ys (listof int acyclic) (apply list xs))
 (set-cdr! (cdr xs) xs)
 (define zs (listof int acyclic) (apply list ys))

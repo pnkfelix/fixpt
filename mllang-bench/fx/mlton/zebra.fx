@@ -75,7 +75,7 @@
 (define* append-ints (subr (maxeff (read @heap) (alloc @heap) spin) (ints ints) ints)
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-ints (cdr xs) ys)))))
 
-(define poss ints (cons 1 (cons 2 (cons 3 (cons 4 (cons 5 nil))))))
+(define poss ints (list 1 2 3 4 5))
 (define first pos-option (some 1))
 (define middle pos-option (some 3))
 
@@ -116,11 +116,11 @@
 
 (define* search (subr zeff () int)
   (lambda ()
-    (let* ((cigarettes (init (cons 'Blend (cons 'BlueMaster (cons 'Dunhill (cons 'PallMall (cons 'Prince nil)))))))
-           (colors (init (cons 'Blue (cons 'Green (cons 'Red (cons 'White (cons 'Yellow nil)))))))
-           (drinks (init (cons 'Beer (cons 'Coffee (cons 'Milk (cons 'Tea (cons 'Water nil)))))))
-           (nationalities (init (cons 'Dane (cons 'English (cons 'German (cons 'Norwegian (cons 'Swede nil)))))))
-           (pets (init (cons 'Bird (cons 'Cat (cons 'Dog (cons 'Horse (cons 'Zebra nil)))))))
+    (let* ((cigarettes (init (list 'Blend 'BlueMaster 'Dunhill 'PallMall 'Prince)))
+           (colors (init (list 'Blue 'Green 'Red 'White 'Yellow)))
+           (drinks (init (list 'Beer 'Coffee 'Milk 'Tea 'Water)))
+           (nationalities (init (list 'Dane 'English 'German 'Norwegian 'Swede)))
+           (pets (init (list 'Bird 'Cat 'Dog 'Horse 'Zebra)))
            (num (the (ref int @heap) (new 0))))
       (letrec ((smoke (subr zeff (symbol) pos-option) (lambda (x) (find cigarettes x)))
                (color (subr zeff (symbol) pos-option) (lambda (x) (find colors x)))

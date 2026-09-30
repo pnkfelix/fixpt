@@ -199,13 +199,13 @@
 (define* cv (subr pure (int) cterm) (lambda (v) (cvar v)))
 (define* c0 (subr pure (string) cterm) (lambda (p) (cprop p nil)))
 (define* c1 (subr (alloc @heap) (string cterm) cterm) (lambda (p a) (cprop p (cons a nil))))
-(define* c2 (subr (alloc @heap) (string cterm cterm) cterm) (lambda (p a b) (cprop p (cons a (cons b nil)))))
+(define* c2 (subr (alloc @heap) (string cterm cterm) cterm) (lambda (p a b) (cprop p (list a b))))
 (define* c3 (subr (alloc @heap) (string cterm cterm cterm) cterm)
-  (lambda (p a b c) (cprop p (cons a (cons b (cons c nil))))))
+  (lambda (p a b c) (cprop p (list a b c))))
 (define* c4 (subr (alloc @heap) (string cterm cterm cterm cterm) cterm)
-  (lambda (p a b c d) (cprop p (cons a (cons b (cons c (cons d nil)))))))
+  (lambda (p a b c d) (cprop p (list a b c d))))
 (define* c6 (subr (alloc @heap) (string cterm cterm cterm cterm cterm cterm) cterm)
-  (lambda (p a b c d e f) (cprop p (cons a (cons b (cons c (cons d (cons e (cons f nil)))))))))
+  (lambda (p a b c d e f) (cprop p (list a b c d e f))))
 
 (define* add-lemmas (subr bo () unit)
   (lambda ()
@@ -371,7 +371,7 @@
            (b22 (product (v 22) (t (cterm-to-term
                                     (c2 "lt" (c2 "remainder" (cv 0) (cv 1))
                                         (c2 "member" (cv 0) (c1 "length" (cv 1)))))))))
-      (cons b23 (cons b24 (cons b25 (cons b20 (cons b22 nil))))))))
+      (list b23 b24 b25 b20 b22))))
 
 (define subst subst (the-subst))
 

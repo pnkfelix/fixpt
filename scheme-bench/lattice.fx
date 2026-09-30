@@ -253,7 +253,7 @@
                    (int) int)
   (lambda (k)
     (let* ((l2
-            (make-lattice (cons (sym 'low) (cons (sym 'high) nil))
+            (make-lattice (list (sym 'low) (sym 'high))
                           (lambda (lhs rhs)
                             (tagcase lhs
                               (sym (lhs)

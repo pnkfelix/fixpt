@@ -112,8 +112,10 @@ are in the last section, "Log: the glance's details", and in
   every machine, natively with the count in `x9`; `list` in the standard
   library, its pairs made in line natively, at any region (the user's
   choice). A soundness hole found and fixed (F11): `apply` now copies its
-  list unless it is at `acyclic`. Next: the code and benchmarks
-  rewritten to use it (perhaps with a lint for `(cons A (cons B … nil))`).
+  list unless it is at `acyclic`. The front end, the test programs, the
+  examples and the benchmarks now write their lists with `list` (a lint
+  for `(cons A (cons B … nil))` in the front end). What is left: an
+  `(nlist int n)`, where `list` gives no size, and pairs that are not lists.
 - **`.fx` size limits** (the user's, 2026-09-29): 1000 lines and 100
   characters, met by extracting subroutines and splitting files, never by
   re-wrapping (`fixpt_tidy::fx_size`, debt in `fx-size-debt.txt`). Every

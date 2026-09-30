@@ -81,7 +81,7 @@
                  (loop (subr (maxeff (read @h) (alloc @h) spin (read (globals NONE SOME val-of))) (int int int) (listof int @h))
                    (lambda (i ac1 ac2)
                      (if (= i 0)
-                         (cons ac1 (cons ac2 nil))
+                         (list ac1 ac2)
                          (loop (- i 1) (+ ac1 (peek l1)) (+ ac2 (peek l2)))))))
           (loop rounds 0 0))))))
 

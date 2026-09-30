@@ -194,10 +194,10 @@
 
 (define scheme-syntactic-keywords objs
   (symbols
-    (cons 'quote (cons 'quasiquote (cons 'unquote (cons 'unquote-splicing
-    (cons 'lambda (cons 'if (cons 'set! (cons 'cond (cons '=> (cons 'else (cons 'and (cons 'or
-    (cons 'case (cons 'let (cons 'let* (cons 'letrec (cons 'begin (cons 'do (cons 'define
-    (cons 'define-macro nil))))))))))))))))))))))
+    (list 'quote 'quasiquote 'unquote 'unquote-splicing
+          'lambda 'if 'set! 'cond '=> 'else 'and 'or
+          'case 'let 'let* 'letrec 'begin 'do 'define
+          'define-macro)))
 
 ;; The symbols the compiler makes forms with.
 (define s-quasiquote obj (osym 'quasiquote))

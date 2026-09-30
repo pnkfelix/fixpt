@@ -26,5 +26,4 @@
                      (plambda ((t type)) (rlambda r ((x t)) x)))))
         (+ ((proj id int) n) ((proj id int) n))))))
 
-;; cons-chain: the list is in @l
-(the (listof int @l) (cons (adders 10) (cons (twice 21) nil)))
+(the (listof int @l) (list (adders 10) (twice 21)))

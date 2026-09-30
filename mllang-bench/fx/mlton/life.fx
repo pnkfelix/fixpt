@@ -134,9 +134,9 @@
 (define* neighbours (subr (maxeff (read @l) (alloc @l)) (coord) coords)
   (lambda (c)
     (let ((i (car c)) (j (cdr c)))
-      (cons (pt (- i 1) (- j 1)) (cons (pt (- i 1) j) (cons (pt (- i 1) (+ j 1))
-      (cons (pt i (- j 1)) (cons (pt i (+ j 1))
-      (cons (pt (+ i 1) (- j 1)) (cons (pt (+ i 1) j) (cons (pt (+ i 1) (+ j 1)) nil)))))))))))
+      (list (pt (- i 1) (- j 1)) (pt (- i 1) j) (pt (- i 1) (+ j 1))
+            (pt i (- j 1)) (pt i (+ j 1))
+            (pt (+ i 1) (- j 1)) (pt (+ i 1) j) (pt (+ i 1) (+ j 1))))))
 
 (define xstart int 0)
 (define ystart int 0)
@@ -173,15 +173,15 @@
 (define* coords-of (subr (maxeff (read @l) (alloc @l) spin (read (globals pt))) ((listof int @l)) coords)
   (lambda (l) (if (null? l) nil (cons (pt (car l) (car (cdr l))) (coords-of (cdr (cdr l)))))))
 
-(define glider coords (coords-of (the (listof int @l) (cons 0 (cons 0 (cons 0 (cons 2 (cons 1 (cons 1 (cons 1 (cons 2 (cons 2 (cons 1 nil)))))))))))))
-(define bail coords (coords-of (the (listof int @l) (cons 0 (cons 0 (cons 0 (cons 1 (cons 1 (cons 0 (cons 1 (cons 1 nil)))))))))))
+(define glider coords (coords-of (list 0 0 0 2 1 1 1 2 2 1)))
+(define bail coords (coords-of (list 0 0 0 1 1 0 1 1)))
 
 (define* barberpole (subr (maxeff (read @l) (alloc @l) spin (read @globals)) (int) coords)
   (lambda (n)
     (letrec ((f (subr (maxeff (read @l) (alloc @l) spin (read @globals)) (int) coords)
                (lambda (i)
                  (if (= i n)
-                     (cons (pt (- (+ n n) 1) (+ n n)) (cons (pt (+ n n) (+ n n)) nil))
+                     (list (pt (- (+ n n) 1) (+ n n)) (pt (+ n n) (+ n n)))
                      (cons (pt (+ i i) (+ (+ i i) 1)) (cons (pt (+ (+ i i) 2) (+ (+ i i) 1)) (f (+ i 1))))))))
       (the coords (cons (pt 0 0) (cons (pt 1 0) (f 0)))))))
 
@@ -194,12 +194,11 @@
   (lambda (g i) (if (= i 0) g (nthgen (mk-nextgen-fn neighbours g) (- i 1)))))
 
 (define gun coords
-  (mkgen (coords-of (the (listof int @l)
-    (cons 2 (cons 20 (cons 3 (cons 19 (cons 3 (cons 21 (cons 4 (cons 18 (cons 4 (cons 22 (cons 4 (cons 23 (cons 4 (cons 32 (cons 5 (cons 7 (cons 5 (cons 8 (cons 5 (cons 18
-    (cons 5 (cons 22 (cons 5 (cons 23 (cons 5 (cons 29 (cons 5 (cons 30 (cons 5 (cons 31 (cons 5 (cons 32 (cons 5 (cons 36 (cons 6 (cons 7 (cons 6 (cons 8 (cons 6 (cons 18
-    (cons 6 (cons 22 (cons 6 (cons 23 (cons 6 (cons 28 (cons 6 (cons 29 (cons 6 (cons 30 (cons 6 (cons 31 (cons 6 (cons 36 (cons 7 (cons 19 (cons 7 (cons 21 (cons 7 (cons 28
-    (cons 7 (cons 31 (cons 7 (cons 40 (cons 7 (cons 41 (cons 8 (cons 20 (cons 8 (cons 28 (cons 8 (cons 29 (cons 8 (cons 30 (cons 8 (cons 31 (cons 8 (cons 40 (cons 8 (cons 41
-    (cons 9 (cons 29 (cons 9 (cons 30 (cons 9 (cons 31 (cons 9 (cons 32 nil))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+  (mkgen (coords-of (list 2 20 3 19 3 21 4 18 4 22 4 23 4 32 5 7 5 8 5 18
+                          5 22 5 23 5 29 5 30 5 31 5 32 5 36 6 7 6 8 6 18
+                          6 22 6 23 6 28 6 29 6 30 6 31 6 36 7 19 7 21 7 28
+                          7 31 7 40 7 41 8 20 8 28 8 29 8 30 8 31 8 40 8 41
+                          9 29 9 30 9 31 9 32))))
 
 (define* app (subr (maxeff (read @l) (alloc @l) spin (read @globals) (read @c) (write @c)) ((subr (maxeff (read @c) (write @c)) (string) unit) strings) unit)
   (lambda (f l) (if (null? l) #u (begin (f (car l)) (app f (cdr l))))))

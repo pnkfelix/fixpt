@@ -100,7 +100,7 @@
 
 ;; (vector-append a b), through vector-concatenate:aux.
 (define* vector-append (subr vecs (setv setv) setv)
-  (lambda (a b) (concatenate-sets (cons a (cons b nil)))))
+  (lambda (a b) (concatenate-sets (list a b))))
 
 (define* vector->list (subr vecs (setvv) (listof setv @heap))
   (lambda (v)

@@ -457,7 +457,7 @@
        0)))
 
 (define args ints
-  (cons 0 (cons 1 (cons 2 (cons 3 (cons 4 (cons 5 (cons 6 (cons 7 (cons 8 (cons 9 (cons 10 (cons 11 nil)))))))))))))
+  (list 0 1 2 3 4 5 6 7 8 9 10 11))
 
 (define* doit (subr cg () ints)
   (lambda ()

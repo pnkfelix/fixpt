@@ -6,8 +6,7 @@
 (define* total (subr (maxeff (read @l) spin) ((listof int @l) int) int)
   (lambda (xs acc) (if (null? xs) acc (total (cdr xs) (+ acc (car xs))))))
 (define* test (subr (maxeff (alloc @l) (read @l) spin) (int) int)
-  ;; cons-chain: map1 takes a list in @l
-  (lambda (k) (total (map1 (lambda ((x int)) (+ x k)) (cons 1 (cons 2 (cons 3 nil)))) 0)))
+  (lambda (k) (total (map1 (lambda ((x int)) (+ x k)) (list 1 2 3)) 0)))
 (test 10)
 (define* map1
   (subr (maxeff (read @l) (alloc @l) spin) ((subr pure (int) int) (listof int @l)) (listof int @l))

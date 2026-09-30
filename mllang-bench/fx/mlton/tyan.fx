@@ -397,9 +397,8 @@
                                                               (else
                                                                (the (children t) (cons (car kids) (j (cdr kids)))))))))))
                                        (cond ((smaller-var vp vp2)
-                                              (mt a2 (the (children t)
-                                                       (cons (product (vp (grab-var vp)) (child (mt (none) trie)))
-                                                             (cons (product (vp vp) (child (i m (mi-empty-trie)))) nil)))))
+                                              (mt a2 (list (product (vp (grab-var vp)) (child (mt (none) trie)))
+                                                           (product (vp vp) (child (i m (mi-empty-trie)))))))
                                              ((smaller-var vp2 vp)
                                               (i (the ints (cons (grab-var vp2) (cons vp m))) mt0))
                                              (else (mt a2 (j trie))))))))))))))
@@ -805,11 +804,10 @@
                          mi
                          ;; note: i nullify entries to reclaim space
                          (begin
-                           (pr (the strings
-                                 (cons "DEGREE " (cons (int->string d) (cons " with "
-                                 (cons (int->string (num-pairs (array-ref (get pairs) d) 0)) (cons " pairs "
-                                 (cons (if (>= d (array-length fs)) "0" (int->string (len (array-ref fs d))))
-                                 (cons " generators to do" nil)))))))))
+                           (pr (list "DEGREE " (int->string d) " with "
+                                     (int->string (num-pairs (array-ref (get pairs) d) 0)) " pairs "
+                                     (if (>= d (array-length fs)) "0" (int->string (len (array-ref fs d))))
+                                     " generators to do"))
                            (set tasksleft (num-pairs (array-ref (get pairs) d) 0))
                            (if (>= d (array-length fs))
                                #u
@@ -824,11 +822,10 @@
                                  (if (>= d (array-length fs))
                                      #u
                                      (begin (app-try (array-ref fs d)) (array-set! fs d nil)))
-                                 (pr (the strings
-                                       (cons "maybe " (cons (int->string (get maybe-pairs)) (cons " prime "
-                                       (cons (int->string (get prime-pairs))
-                                       (cons " using " (cons (int->string (get used-pairs))
-                                       (cons "; found " (cons (int->string (get new-gens)) nil))))))))))))
+                                 (pr (list "maybe " (int->string (get maybe-pairs)) " prime "
+                                           (int->string (get prime-pairs))
+                                           " using " (int->string (get used-pairs))
+                                           "; found " (int->string (get new-gens))))))
                            (gb (+ d 1)))))))
           (gb 0))))))
 
@@ -920,9 +917,9 @@
            (fs (grab g)))
       (letrec ((info (subr teff (poly) string)
                  (lambda (f)
-                   (let ((s (string-concat (the strings (cons (m-display (p-lead-mono f))
-                                                        (cons " + " (cons (int->string (- (p-num-terms f) 1))
-                                                        (cons " terms\n" nil))))))))
+                   (let ((s (string-concat (list (m-display (p-lead-mono f))
+                                                 " + " (int->string (- (p-num-terms f) 1))
+                                                 " terms\n"))))
                      (begin (print s) s))))
                (app (subr teff (polys) strings)
                  (lambda (l) (if (null? l) nil (let ((s (info (car l)))) (the strings (cons s (app (cdr l)))))))))
@@ -936,11 +933,10 @@
 (define* doit (subr teff (int) strings)
   (lambda (n)
     (let ((u6 (map-parse-poly
-                (the strings
-                  (cons "abcdef-g6" (cons "a+b+c+d+e+f" (cons "ab+bc+cd+de+ef+fa"
-                  (cons "abc+bcd+cde+def+efa+fab"
-                  (cons "abcd+bcde+cdef+defa+efab+fabc"
-                  (cons "abcde+bcdef+cdefa+defab+efabc+fabcd" nil)))))))))
+                (list "abcdef-g6" "a+b+c+d+e+f" "ab+bc+cd+de+ef+fa"
+                      "abc+bcd+cde+def+efa+fab"
+                      "abcd+bcde+cdef+defa+efab+fabc"
+                      "abcde+bcdef+cdefa+defab+efabc+fabcd")))
           (result (the (ref strings @heap) (new nil))))
       (letrec ((loop (subr teff (int) strings)
                  (lambda (n) (if (= n 0) (get result) (begin (set result (gb u6)) (loop (- n 1)))))))

@@ -889,8 +889,8 @@
 
 (define* test (subr (maxeff ear (read (globals parse->trees))) (symbols) int)
   (lambda (input)
-    (let ((p (make-parser (cons (cons 's (cons (cons 'a nil) (cons (cons 's (cons 's nil)) nil))) nil) ; '( (s (a) (s s)) )
-                          (lambda (l) (map (lambda (x) (cons x (cons x nil))) l)))))
+    (let ((p (make-parser (cons (cons 's (list (cons 'a nil) (list 's 's))) nil) ; '( (s (a) (s s)) )
+                          (lambda (l) (map (lambda (x) (list x x)) l)))))
       (let ((x (p input))
             (n (length input)))
         (length (parse->trees x 's 0 n))))))

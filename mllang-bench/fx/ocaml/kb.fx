@@ -271,7 +271,7 @@
 ;; We need to print terms with variables independently from input terms
 ;; obtained by parsing. We give arbitrary names v1,v2,... to their variables.
 
-(define infixes (listof string @heap) (cons "+" (cons "*" nil)))
+(define infixes (listof string @heap) (list "+" "*"))
 
 (define-rec
   (pretty-term (subr kb (term) unit)
@@ -707,33 +707,32 @@
 
 (define* leaf (subr pure (string) term) (lambda (s) (t-term s nil)))
 (define* app1 (subr (alloc @heap) (string term) term) (lambda (s a) (t-term s (cons a nil))))
-(define* app2 (subr (alloc @heap) (string term term) term) (lambda (s a b) (t-term s (cons a (cons b nil)))))
+(define* app2 (subr (alloc @heap) (string term term) term) (lambda (s a b) (t-term s (list a b))))
 
 (define* geom-rules (subr (alloc @heap) () rules)
   (lambda ()
     (let ((v1 (t-var 1)) (v2 (t-var 2)) (v3 (t-var 3)))
-      (cons (product (number 1) (numvars 1)
+      (list (product (number 1) (numvars 1)
                      (lhs (app2 "*" (leaf "U") v1))
                      (rhs v1))
-      (cons (product (number 2) (numvars 1)
+            (product (number 2) (numvars 1)
                      (lhs (app2 "*" (app1 "I" v1) v1))
                      (rhs (leaf "U")))
-      (cons (product (number 3) (numvars 3)
+            (product (number 3) (numvars 3)
                      (lhs (app2 "*" (app2 "*" v1 v2) v3))
                      (rhs (app2 "*" v1 (app2 "*" v2 v3))))
-      (cons (product (number 4) (numvars 0)
+            (product (number 4) (numvars 0)
                      (lhs (app2 "*" (leaf "A") (leaf "B")))
                      (rhs (app2 "*" (leaf "B") (leaf "A"))))
-      (cons (product (number 5) (numvars 0)
+            (product (number 5) (numvars 0)
                      (lhs (app2 "*" (leaf "C") (leaf "C")))
                      (rhs (leaf "U")))
-      (cons (product (number 6) (numvars 0)
+            (product (number 6) (numvars 0)
                      (lhs (app2 "*" (leaf "C") (app2 "*" (leaf "A") (app1 "I" (leaf "C")))))
                      (rhs (app1 "I" (leaf "A"))))
-      (cons (product (number 7) (numvars 0)
+            (product (number 7) (numvars 0)
                      (lhs (app2 "*" (leaf "C") (app2 "*" (leaf "B") (app1 "I" (leaf "C")))))
-                     (rhs (leaf "B")))
-            nil))))))))))
+                     (rhs (leaf "B")))))))
 
 (define group-rank (subr pure (string) int)
   (lambda (s)

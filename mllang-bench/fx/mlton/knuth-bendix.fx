@@ -311,7 +311,7 @@
 ;; We need to print terms with variables independently from input terms
 ;; obtained by parsing. We give arbitrary names v1,v2,... to their variables.
 
-(define INFIXES strings (cons "+" (cons "*" nil)))
+(define INFIXES strings (list "+" "*"))
 
 (define-rec
   (pretty-term (subr kb (term) unit)
@@ -683,21 +683,20 @@
   (lambda (k v M N) (product (1 k) (2 (product (1 v) (2 (product (1 M) (2 N))))))))
 (define* t0 (subr (alloc @heap) (string) term) (lambda (f) (Term f nil)))
 (define* t1 (subr (alloc @heap) (string term) term) (lambda (f a) (Term f (cons a nil))))
-(define* t2 (subr (alloc @heap) (string term term) term) (lambda (f a b) (Term f (cons a (cons b nil)))))
+(define* t2 (subr (alloc @heap) (string term term) term) (lambda (f a b) (Term f (list a b))))
 
 (define Geom-rules rules
-  (cons (r 1 1 (t2 "*" (t0 "U") (Var 1)) (Var 1))
-  (cons (r 2 1 (t2 "*" (t1 "I" (Var 1)) (Var 1)) (t0 "U"))
-  (cons (r 3 3 (t2 "*" (t2 "*" (Var 1) (Var 2)) (Var 3))
+  (list (r 1 1 (t2 "*" (t0 "U") (Var 1)) (Var 1))
+        (r 2 1 (t2 "*" (t1 "I" (Var 1)) (Var 1)) (t0 "U"))
+        (r 3 3 (t2 "*" (t2 "*" (Var 1) (Var 2)) (Var 3))
                (t2 "*" (Var 1) (t2 "*" (Var 2) (Var 3))))
-  (cons (r 4 0 (t2 "*" (t0 "A") (t0 "B"))
+        (r 4 0 (t2 "*" (t0 "A") (t0 "B"))
                (t2 "*" (t0 "B") (t0 "A")))
-  (cons (r 5 0 (t2 "*" (t0 "C") (t0 "C")) (t0 "U"))
-  (cons (r 6 0 (t2 "*" (t0 "C") (t2 "*" (t0 "A") (t1 "I" (t0 "C"))))
+        (r 5 0 (t2 "*" (t0 "C") (t0 "C")) (t0 "U"))
+        (r 6 0 (t2 "*" (t0 "C") (t2 "*" (t0 "A") (t1 "I" (t0 "C"))))
                (t1 "I" (t0 "A")))
-  (cons (r 7 0 (t2 "*" (t0 "C") (t2 "*" (t0 "B") (t1 "I" (t0 "C"))))
-               (t0 "B"))
-  nil))))))))
+        (r 7 0 (t2 "*" (t0 "C") (t2 "*" (t0 "B") (t1 "I" (t0 "C"))))
+               (t0 "B"))))
 
 (define* Group-rank (subr kb (string) int)
   (lambda (s)

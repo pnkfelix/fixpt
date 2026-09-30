@@ -183,15 +183,15 @@
 (define* cp1 (subr (alloc @heap) (string cterm) cterm)
   (lambda (n a) (cprop n (the cterms (cons a nil)))))
 (define* cp2 (subr (alloc @heap) (string cterm cterm) cterm)
-  (lambda (n a b) (cprop n (the cterms (cons a (cons b nil))))))
+  (lambda (n a b) (cprop n (list a b))))
 (define* cp3 (subr (alloc @heap) (string cterm cterm cterm) cterm)
-  (lambda (n a b c) (cprop n (the cterms (cons a (cons b (cons c nil)))))))
+  (lambda (n a b c) (cprop n (list a b c))))
 (define* cp4 (subr (alloc @heap) (string cterm cterm cterm cterm) cterm)
-  (lambda (n a b c d) (cprop n (the cterms (cons a (cons b (cons c (cons d nil))))))))
+  (lambda (n a b c d) (cprop n (list a b c d))))
 (define* cp5 (subr (alloc @heap) (string cterm cterm cterm cterm cterm) cterm)
-  (lambda (n a b c d e) (cprop n (the cterms (cons a (cons b (cons c (cons d (cons e nil)))))))))
+  (lambda (n a b c d e) (cprop n (list a b c d e))))
 (define* cp6 (subr (alloc @heap) (string cterm cterm cterm cterm cterm cterm) cterm)
-  (lambda (n a b c d e f) (cprop n (the cterms (cons a (cons b (cons c (cons d (cons e (cons f nil))))))))))
+  (lambda (n a b c d e f) (cprop n (list a b c d e f))))
 
 (define rules unit
   (begin
@@ -594,16 +594,14 @@
 (define* p1 (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin (read @globals)) (string term) term)
   (lambda (n a) (prop (get-head n) (the terms (cons a nil)))))
 (define* p2 (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin (read @globals)) (string term term) term)
-  (lambda (n a b) (prop (get-head n) (the terms (cons a (cons b nil))))))
+  (lambda (n a b) (prop (get-head n) (list a b))))
 
 (define subst bindings
-  (the bindings
-    (cons (bind 23 (p1 "f" (p2 "plus" (p2 "plus" (var 0) (var 1)) (p2 "plus" (var 2) (p0 "zero")))))
-    (cons (bind 24 (p1 "f" (p2 "times" (p2 "times" (var 0) (var 1)) (p2 "plus" (var 2) (var 3)))))
-    (cons (bind 25 (p1 "f" (p1 "reverse" (p2 "append" (p2 "append" (var 0) (var 1)) (p0 "nil")))))
-    (cons (bind 20 (p2 "equal" (p2 "plus" (var 0) (var 1)) (p2 "difference" (var 23) (var 24))))
-    (cons (bind 22 (p2 "lt" (p2 "remainder" (var 0) (var 1)) (p2 "member" (var 0) (p1 "length" (var 1)))))
-          nil)))))))
+  (list (bind 23 (p1 "f" (p2 "plus" (p2 "plus" (var 0) (var 1)) (p2 "plus" (var 2) (p0 "zero")))))
+        (bind 24 (p1 "f" (p2 "times" (p2 "times" (var 0) (var 1)) (p2 "plus" (var 2) (var 3)))))
+        (bind 25 (p1 "f" (p1 "reverse" (p2 "append" (p2 "append" (var 0) (var 1)) (p0 "nil")))))
+        (bind 20 (p2 "equal" (p2 "plus" (var 0) (var 1)) (p2 "difference" (var 23) (var 24))))
+        (bind 22 (p2 "lt" (p2 "remainder" (var 0) (var 1)) (p2 "member" (var 0) (p1 "length" (var 1)))))))
 
 (define term term
   (p2 "implies"

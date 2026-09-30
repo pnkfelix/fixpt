@@ -296,10 +296,9 @@
 (define database (listof symbol @heap)
   (randomize
    (init 100 10 4
-         (cons (cons (sym 'a) (cons (sym 'a) (cons (sym 'a) (cons (sym 'b) (cons (sym 'b) (cons (sym 'b) (cons (sym 'b) (cons (sym 'a) (cons (sym 'a) (cons (sym 'a) (cons (sym 'a) (cons (sym 'a) (cons (sym 'b) (cons (sym 'b) (cons (sym 'a) (cons (sym 'a) (cons (sym 'a) (the items nil))))))))))))))))))
-           (cons (cons (sym 'a) (cons (sym 'a) (cons (sym 'b) (cons (sym 'b) (cons (sym 'b) (cons (sym 'b) (cons (sym 'a) (cons (sym 'a) (cons (lst (cons (sym 'a) (cons (sym 'a) (the items nil)))) (cons (lst (cons (sym 'b) (cons (sym 'b) (the items nil)))) (the items nil)))))))))))
-           (cons (cons (sym 'a) (cons (sym 'a) (cons (sym 'a) (cons (sym 'b) (cons (lst (cons (sym 'b) (cons (sym 'a) (the items nil)))) (cons (sym 'b) (cons (sym 'a) (cons (sym 'b) (cons (sym 'a) (the items nil))))))))))
-           (the (listof items @heap) nil)))))))
+         (list (list (sym 'a) (sym 'a) (sym 'a) (sym 'b) (sym 'b) (sym 'b) (sym 'b) (sym 'a) (sym 'a) (sym 'a) (sym 'a) (sym 'a) (sym 'b) (sym 'b) (sym 'a) (sym 'a) (sym 'a))
+               (list (sym 'a) (sym 'a) (sym 'b) (sym 'b) (sym 'b) (sym 'b) (sym 'a) (sym 'a) (lst (list (sym 'a) (sym 'a))) (lst (list (sym 'b) (sym 'b))))
+               (list (sym 'a) (sym 'a) (sym 'a) (sym 'b) (lst (list (sym 'b) (sym 'a))) (sym 'b) (sym 'a) (sym 'b) (sym 'a))))))
 
 (define* investigate (subr (maxeff matches (read (globals get-property lookup properties))) ((listof symbol @heap) value) unit)
   (lambda (units pats)
@@ -337,10 +336,9 @@
 ;; The inputs, where no compiler can fold them (Larceny's `hide`): globals,
 ;; which a later definition may replace.
 (define input1 value
-  (cons (cons (sym '*a) (cons (sym '?b) (cons (sym '*b) (cons (sym '?b) (cons (sym 'a) (cons (sym '*a) (cons (sym 'a) (cons (sym '*b) (cons (sym '*a) (the items nil))))))))))
-  (cons (cons (sym '*a) (cons (sym '*b) (cons (sym '*b) (cons (sym '*a) (cons (lst (cons (sym '*a) (the items nil))) (cons (lst (cons (sym '*b) (the items nil))) (the items nil)))))))
-  (cons (cons (sym '?) (cons (sym '?) (cons (sym '*) (cons (lst (cons (sym 'b) (cons (sym 'a) (the items nil)))) (cons (sym '*) (cons (sym '?) (cons (sym '?) (the items nil))))))))
-  (the (listof items @heap) nil)))))
+  (list (list (sym '*a) (sym '?b) (sym '*b) (sym '?b) (sym 'a) (sym '*a) (sym 'a) (sym '*b) (sym '*a))
+        (list (sym '*a) (sym '*b) (sym '*b) (sym '*a) (lst (cons (sym '*a) (the items nil))) (lst (cons (sym '*b) (the items nil))))
+        (list (sym '?) (sym '?) (sym '*) (lst (list (sym 'b) (sym 'a))) (sym '*) (sym '?) (sym '?))))
 (define iterations int 2000)
 
 (define* run (subr (maxeff matches (read (globals browse investigate get-property lookup properties database input1)))

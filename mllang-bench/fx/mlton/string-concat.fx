@@ -44,6 +44,6 @@
                        result
                        (loop (- n 1)
                              (foldl (lambda (c s) (+ s (char->integer c))) 0
-                                    (concat (the (listof string @l) (cons s (cons s (cons s nil)))))))))))
+                                    (concat (list s s s))))))))
         (loop n -1)))))
 (doit iterations)

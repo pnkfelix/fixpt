@@ -57,6 +57,6 @@
                        result
                        (loop (- n 1)
                              (foldl (lambda (x y) (+ x y)) 0
-                                    (concat (the (listof ints @l) (cons v (cons v nil))))))))))
+                                    (concat (list v v))))))))
         (loop n -1)))))
 (doit iterations)

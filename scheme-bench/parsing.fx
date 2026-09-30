@@ -40,23 +40,23 @@
 
 (define-type syms (listof symbol @heap))
 (define* syms5 (subr (alloc @heap) (symbol symbol symbol symbol symbol) syms)
-  (lambda (a b c d e) (cons a (cons b (cons c (cons d (cons e nil)))))))
+  (lambda (a b c d e) (list a b c d e)))
 (define* one-of? (subr (maxeff (read @heap) spin) (symbol syms) bool)
   (lambda (t l) (if (null? l) #f (if (symbol=? t (car l)) #t (one-of? t (cdr l))))))
 
 ;; The kinds of token each `case` of the parser tests for.
 (define k-compound syms (cons 'splicing (syms5 'comma 'backquote 'quote 'lparen 'vecstart)))
 (define k-simple syms (syms5 'boolean 'number 'character 'string 'id))
-(define k-list syms (cons 'lparen (cons 'quote (cons 'backquote (cons 'comma (cons 'splicing nil))))))
-(define k-abbrev syms (cons 'splicing (cons 'comma (cons 'backquote (cons 'quote nil)))))
+(define k-list syms (list 'lparen 'quote 'backquote 'comma 'splicing))
+(define k-abbrev syms (list 'splicing 'comma 'backquote 'quote))
 (define k-datum-start syms
-  (cons 'id (cons 'string (cons 'character (cons 'number (cons 'boolean
-    (cons 'vecstart (cons 'lparen (cons 'quote (cons 'backquote (cons 'comma (cons 'splicing nil))))))))))))
+  (list 'id 'string 'character 'number 'boolean
+        'vecstart 'lparen 'quote 'backquote 'comma 'splicing))
 (define k-list3 syms (cons 'rparen (cons 'period k-datum-start)))
-(define k-rparen-period syms (cons 'rparen (cons 'period nil)))
+(define k-rparen-period syms (list 'rparen 'period))
 (define k-valued syms (syms5 'boolean 'character 'id 'number 'string))
-(define k-expected syms (cons 'backquote (cons 'boolean (cons 'character (cons 'comma (cons 'id (cons 'lparen
-  (cons 'number (cons 'quote (cons 'splicing (cons 'string (cons 'vecstart nil))))))))))))
+(define k-expected syms (list 'backquote 'boolean 'character 'comma 'id 'lparen
+                              'number 'quote 'splicing 'string 'vecstart))
 
 (define datum-nil datum (datum-list (the (listof datum @heap) nil)))
 (define sym-quasiquote datum (datum-symbol "quasiquote"))

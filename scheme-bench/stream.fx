@@ -163,7 +163,7 @@
                                                                           ;; (stream-cons (list a b c) (loop3 (stream-cdr strm3)))
                                                                           (new (new (sum eager
                                                                             (cons (new (new (sum lazy (lambda ()
-                                                                                    (new (new (sum eager (cons a (cons b (cons c nil))))))))))
+                                                                                    (new (new (sum eager (list a b c))))))))
                                                                                   (new (new (sum lazy (lambda () (loop3 (stream-cdr strm3))))))))))
                                                                           (loop3 (stream-cdr strm3)))))))))))))
                                                  (loop3 (stream-range a n))))))))))))

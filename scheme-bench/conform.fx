@@ -661,13 +661,13 @@
       (set a (make-node a0 nil))
       (set b (make-node b0 nil))
       (set-blue-edges! (get a) (cons (make-blue-edge 'phi any-node (get b)) nil))
-      (set-blue-edges! (get b) (cons (make-blue-edge 'phi any-node (get a))
-                                     (cons (make-blue-edge 'theta any-node (get b)) nil)))
+      (set-blue-edges! (get b) (list (make-blue-edge 'phi any-node (get a))
+                                     (make-blue-edge 'theta any-node (get b))))
       (set c (make-node c0 nil))
       (set d (make-node d0 nil))
       (set-blue-edges! (get c) (cons (make-blue-edge 'theta any-node (get b)) nil))
-      (set-blue-edges! (get d) (cons (make-blue-edge 'phi any-node (get c))
-                                     (cons (make-blue-edge 'theta any-node (get d)) nil)))
+      (set-blue-edges! (get d) (list (make-blue-edge 'phi any-node (get c))
+                                     (make-blue-edge 'theta any-node (get d))))
       #u)))                             ; '(made a b c d)
 
 (define* test (subr cf (datum datum datum datum) (listof string @heap))
@@ -675,7 +675,7 @@
     (begin
       (setup a0 b0 c0 d0)
       (map name
-           (graph-nodes (make-lattice (make-graph (cons (get a) (cons (get b) (cons (get c) (cons (get d) (cons any-node (cons none-node nil)))))))))))))
+           (graph-nodes (make-lattice (make-graph (list (get a) (get b) (get c) (get d) any-node none-node))))))))
 
 ;; The inputs, where no compiler can fold them (Larceny's `hide`): globals,
 ;; which a later definition may replace. `(a b "c" "d")`:

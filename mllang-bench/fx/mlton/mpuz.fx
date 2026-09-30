@@ -67,7 +67,7 @@
   (lambda (a b c d e)
     (let* ((letters
             ((proj list-fold string chars)
-             (the strings (cons a (cons b (cons c (cons d (cons e nil)))))) nil
+             (list a b c d e) nil
              (lambda (s letters)
                ((proj string-fold chars)
                 s letters
@@ -85,7 +85,7 @@
                              ((proj list-foreach char)
                               letters
                               (lambda (c)
-                                (print (concat (the strings (cons (char->string c) (cons " = " (cons (int->string (letter-value c)) (cons " " nil)))))))))
+                                (print (concat (list (char->string c) " = " (int->string (letter-value c)) " ")))))
                              (print "\n"))))
            (test-ok (lambda ()
                       (let* ((b0 (letter-value (string-ref b 1)))
@@ -101,7 +101,7 @@
                                  (= (+ c (* d 10)) e))
                             (print-result)
                             #u))))
-           (values (list-map (the (listof int @h) (cons 0 (cons 1 (cons 2 (cons 3 (cons 4 (cons 5 (cons 6 (cons 7 (cons 8 (cons 9 nil)))))))))))
+           (values (list-map (list 0 1 2 3 4 5 6 7 8 9)
                              (lambda (v) (product (v v) (r (the (ref bool @h) (new #f))))))))
       ;; Try all assignments of values to letters.
       (letrec ((loop (subr (maxeff (read @h) (write @h) (alloc @h) spin (read @globals)) (chars) unit)
