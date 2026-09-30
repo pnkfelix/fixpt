@@ -681,7 +681,7 @@
 ; - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 (define scheme-global-environment env
-  (cons (the chain nil)    ; environment chain
+  (cons (the chain no-pair)    ; environment chain
         (the macros nil))) ; macros
 
 (define* scheme-add-macro (subr (maxeff (read @heap) (write @heap) (alloc @heap)) (obj obj) obj)

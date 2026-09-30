@@ -56,7 +56,7 @@
 (define-type node (pairof (pairof node node @heap) (pairof int int @heap) @heap))
 
 (define make-empty-node (subr (alloc @heap) () node)
-  (lambda () (cons (cons (the node nil) (the node nil)) (cons 0 0))))
+  (lambda () (cons (cons (the node no-pair) (the node no-pair)) (cons 0 0))))
 
 (define make-node (subr (alloc @heap) (node node) node)
   (lambda (l r) (cons (cons l r) (cons 0 0))))

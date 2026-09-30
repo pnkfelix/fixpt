@@ -291,7 +291,7 @@
   (poly ((v type)) (subr (maxeff (read @heap) spin (read (globals node-eq? assq))) (node (listof (pairof node v @heap) @heap)) (pairof node v @heap)))
   (plambda ((v type))
     (lambda (x l)
-      (cond ((null? l) nil)
+      (cond ((null? l) no-pair)
             ((node-eq? x (car (car l))) (car l))
             (else (assq x (cdr l)))))))
 
@@ -301,8 +301,8 @@
     (let ((one (assq x (cdr table))))
       (if (not (null? one))
           (let ((two (assq y (cdr one))))
-            (if (not (null? two)) two nil))
-          nil))))
+            (if (not (null? two)) two no-pair))
+          no-pair))))
 
 (define* insert! (subr cf (table node node node) unit)
   (lambda (table x y value)

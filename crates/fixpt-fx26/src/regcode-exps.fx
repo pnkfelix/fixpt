@@ -813,7 +813,7 @@
 (define r-var-value (subr rcompiles (rgen rlocs symbol bool) unit)
   (lambda (g l n tail)
     (if (null? l)
-        (if (string=? (symbol->string n) "nil")
+        (if (std-nil-name? (symbol->string n))
             (r-op1 g rop-const (wcell-nil))
             (r-standard-value g (symbol->string n) tail))
         (tagcase (car l)

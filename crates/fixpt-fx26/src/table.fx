@@ -20,6 +20,10 @@
   (bloblet (fields (key-hash k) (key-same k) (bucket-array k v r) int) r))
 
 
+;; Whether `n` names the empty list: `nil`, or `no-pair`, the same value at
+;; any pair type (`standard.rs`).
+(define std-nil-name? (subr pure (string) bool)
+  (lambda (n) (or (string=? n "nil") (string=? n "no-pair"))))
 (define symbol-hash (subr pure (symbol) int) (lambda (s) (symbol-name-hash s)))
 
 (define make-table
@@ -35,7 +39,7 @@
     (subr (maxeff (read @globals) (read r)) ((bucket k v r) k (key-same k)) (pairof k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((b (bucket k v r)) (key k) (same (key-same k)))
-      (cond ((null? b) nil)
+      (cond ((null? b) no-pair)
             ((same (car (car b)) key) (car b))
             (else (bucket-find (cdr b) key same)))))))
 

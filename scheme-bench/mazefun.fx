@@ -268,7 +268,7 @@
                (make-matrix n m (lambda (i j)
                                   (if (and (even? i) (even? j))
                                       (cons i j)
-                                      nil))))
+                                      no-pair))))
               (possible-holes
                (concat
                 (for 0 n (lambda (i)

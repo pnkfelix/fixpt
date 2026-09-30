@@ -76,7 +76,7 @@ fn a_type_abbreviation_may_take_parameters() {
     assert!(err.contains("takes 2 description(s), and has 1"), "{err}");
     // Mentioning itself with the same descriptions: a knot.
     assert_eq!(
-        check("(define-type (loop (a type)) (pairof (loop a) a @r)) (the (loop int) nil)"),
+        check("(define-type (loop (a type)) (pairof (loop a) a @r)) (the (loop int) no-pair)"),
         "(mu %1 (pairof %1 int @r)) ! pure"
     );
     // With others, an expansion that would never end.

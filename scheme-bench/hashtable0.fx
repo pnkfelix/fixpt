@@ -78,7 +78,7 @@
 ;; The entry for `key` in a bucket, or nil.
 (define* bucket-find (subr tables (bucket key) entry)
   (lambda (b key)
-    (cond ((null? b) nil)
+    (cond ((null? b) no-pair)
           ((same-key? (car (car b)) key) (car b))
           (else (bucket-find (cdr b) key)))))
 

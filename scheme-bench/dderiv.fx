@@ -54,7 +54,7 @@
     (letrec ((loop (subr (maxeff (read @heap) spin) (plist) (pairof symbol method @heap))
                (lambda (x)
                  (if (null? x)
-                     nil
+                     no-pair
                      (let ((pair (car x)))
                        (if (symbol=? (car pair) key)
                            pair

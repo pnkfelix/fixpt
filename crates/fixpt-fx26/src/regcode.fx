@@ -526,7 +526,7 @@
         (e-var (n a b)
           (let ((l (r-where env n)))
             (if (null? l)
-                (if (string=? (symbol->string n) "nil") (r-known-as (rc-nil)) nil)
+                (if (std-nil-name? (symbol->string n)) (r-known-as (rc-nil)) nil)
                 (tagcase (car l) (rl-const (c) (r-known-as c)) (else y nil)))))
         (e-the (d body a b) (r-known env body))
         (e-plambda (d body a b) (r-known env body))

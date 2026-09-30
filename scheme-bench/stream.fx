@@ -64,9 +64,9 @@
 
 ;; (stream-delay (cons 'stream 'null)), for each element type
 (define stream-null-int (stream int)
-  (new (new (sum lazy (lambda () (new (new (sum eager (the (pare int) nil)))))))))
+  (new (new (sum lazy (lambda () (new (new (sum eager (the (pare int) no-pair)))))))))
 (define stream-null-ints (stream ints)
-  (new (new (sum lazy (lambda () (new (new (sum eager (the (pare ints) nil)))))))))
+  (new (new (sum lazy (lambda () (new (new (sum eager (the (pare ints) no-pair)))))))))
 
 (define* stream-null?
   (poly ((t type)) (subr thunks ((stream t)) bool))

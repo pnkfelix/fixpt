@@ -42,7 +42,14 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("stay-cellular", "(poly ((t type)) (subr pure (t) t))"),
     ("set-car!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) t1) unit)))"),
     ("set-cdr!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) t2) unit)))"),
-    ("nil", "(poly ((r region)) (poly ((t1 type) (t2 type)) (pairof t1 t2 r)))"),
+    // The empty list, of any element type at any region: `(proj nil @r
+    // int)`. (It was any pair type, FX-87's `null ≤ pairof`, which `proj`
+    // needed the tail's type for, the list's own; until PLAN Q7's `null`
+    // and unions, `nil` is a list.)
+    ("nil", "(poly ((r region) (t type)) (listof t r))"),
+    // The absent pair: `nil`, at any pair type, for "a pair, or none" (a
+    // table's entry, say). `nil`'s type until 2026-09-29.
+    ("no-pair", "(poly ((r region) (t1 type) (t2 type)) (pairof t1 t2 r))"),
     ("null?", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr pure ((pairof t1 t2 r)) bool)))"),
     ("+", "(subr pure (int int) int)"),
     ("-", "(subr pure (int int) int)"),

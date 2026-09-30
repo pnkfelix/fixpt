@@ -172,7 +172,7 @@
 (define standard (subr (maxeff evals spin) (symbol) val)
   (lambda (name)
     (let ((s (symbol->string name)))
-      (cond ((string=? s "nil") (v-nil))
+      (cond ((std-nil-name? s) (v-nil))
             ((primitive? s) (v-prim name))
             (else (efail (k-cat3 "unbound variable `" s "`")))))))
 

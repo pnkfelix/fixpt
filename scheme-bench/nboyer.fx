@@ -345,7 +345,7 @@
 
 (define* assq-record (subr (maxeff (read @heap) spin) (symbol records) (pairof symbol symrec @heap))
   (lambda (sym l)
-    (cond ((null? l) nil)
+    (cond ((null? l) no-pair)
           ((symbol=? sym (car (car l))) (car l))
           (else (assq-record sym (cdr l))))))
 
@@ -437,7 +437,7 @@
 
 (define* assq-subst (subr (maxeff (read @heap) spin) (symbol subst) (pairof symbol term @heap))
   (lambda (sym l)
-    (cond ((null? l) nil)
+    (cond ((null? l) no-pair)
           ((symbol=? sym (car (car l))) (car l))
           (else (assq-subst sym (cdr l))))))
 

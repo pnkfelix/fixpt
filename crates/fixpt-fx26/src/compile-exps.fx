@@ -212,7 +212,7 @@
           (let ((l (c-where e n)))
             (begin
               (if (null? l)
-                  (if (string=? (symbol->string n) "nil")
+                  (if (std-nil-name? (symbol->string n))
                       (c-lit c (wcell-nil))
                       (c-standard-value (symbol->string n) c))
                   (c-load c (car l)))

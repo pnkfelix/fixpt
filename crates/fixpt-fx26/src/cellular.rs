@@ -469,7 +469,7 @@ impl<'a> Compiler<'a> {
             Exp::Var(n) => {
                 match self.where_is(e, n) {
                     Some(l) => self.load(code, l),
-                    None if self.name(n) == "nil" => self.lit(code, Value::NULL),
+                    None if matches!(self.name(n), "nil" | "no-pair") => self.lit(code, Value::NULL),
                     None => {
                         let name = self.name(n).to_string();
                         self.standard_value(&name, code)?;

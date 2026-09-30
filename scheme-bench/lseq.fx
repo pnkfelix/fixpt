@@ -76,7 +76,7 @@
       ;; otherwise, return an improper list with one value and the generator
       ;; in the tail, which is how we represent unrealized lseqs
       (if (eof-object? value)
-          nil
+          no-pair
           (cons value (sum gen gen))))))
 
 ;;; Car on lseqs is the same as on lists
@@ -93,8 +93,8 @@
           (cond
             ;; If the generator is exhausted, replace it with () and return ()
             ((eof-object? obj)
-             (begin (set-cdr! lseq (sum seq (the lseq nil)))
-                    nil))
+             (begin (set-cdr! lseq (sum seq (the lseq no-pair)))
+                    no-pair))
             ;; Otherwise, make a new pair of the value and the generator
             ;; and patch it in to the cdr
             (else (let ((result (the lseq (cons obj (cdr lseq)))))

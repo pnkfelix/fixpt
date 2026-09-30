@@ -52,7 +52,7 @@
       (letrec ((loop (subr (maxeff (read @heap) spin) ((listof (pairof symbol v @heap) @heap)) (pairof symbol v @heap))
                  (lambda (x)
                    (if (null? x)
-                       nil
+                       no-pair
                        (let ((pair (car x)))
                          (if (symbol=? (car pair) key)
                              pair
@@ -212,7 +212,7 @@
 
 (define* assq (subr (maxeff (read @heap) spin) (symbol alist) (pairof symbol item @heap))
   (lambda (key l)
-    (cond ((null? l) nil)
+    (cond ((null? l) no-pair)
           ((symbol=? (car (car l)) key) (car l))
           (else (assq key (cdr l))))))
 

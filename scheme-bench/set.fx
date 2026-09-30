@@ -83,7 +83,7 @@
   (poly ((k type)) (subr cmps ((bucket k) k (subr cmps (k k) bool)) (entry k)))
   (plambda ((k type))
     (lambda (b key same)
-      (cond ((null? b) nil)
+      (cond ((null? b) no-pair)
             ((same (car (car b)) key) (car b))
             (else (bucket-find (cdr b) key same))))))
 

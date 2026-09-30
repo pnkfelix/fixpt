@@ -60,15 +60,15 @@
 (define s-times sx (sum sy '*))
 
 ;; `car' of what is not a pair: an error, as in Scheme.
-(define* no-pair (subr (read @heap) () sx) (lambda () (car (the sxpair nil))))
+(define* not-a-pair (subr (read @heap) () sx) (lambda () (car (the sxpair no-pair))))
 
 (define* scons (subr (alloc @heap) (sx sx) sx) (lambda (a d) (sum pr (cons a d))))
-(define* scar (subr (read @heap) (sx) sx) (lambda (x) (tagcase x (pr p (car p)) (else y (no-pair)))))
-(define* scdr (subr (read @heap) (sx) sx) (lambda (x) (tagcase x (pr p (cdr p)) (else y (no-pair)))))
+(define* scar (subr (read @heap) (sx) sx) (lambda (x) (tagcase x (pr p (car p)) (else y (not-a-pair)))))
+(define* scdr (subr (read @heap) (sx) sx) (lambda (x) (tagcase x (pr p (cdr p)) (else y (not-a-pair)))))
 (define* sset-car! (subr (maxeff (read @heap) (write @heap)) (sx sx) unit)
-  (lambda (x v) (tagcase x (pr p (set-car! p v)) (else y (begin (no-pair) #u)))))
+  (lambda (x v) (tagcase x (pr p (set-car! p v)) (else y (begin (not-a-pair) #u)))))
 (define* sset-cdr! (subr (maxeff (read @heap) (write @heap)) (sx sx) unit)
-  (lambda (x v) (tagcase x (pr p (set-cdr! p v)) (else y (begin (no-pair) #u)))))
+  (lambda (x v) (tagcase x (pr p (set-cdr! p v)) (else y (begin (not-a-pair) #u)))))
 (define* scaar (subr (read @heap) (sx) sx) (lambda (x) (scar (scar x))))
 (define* scadr (subr (read @heap) (sx) sx) (lambda (x) (scar (scdr x))))
 (define* scdar (subr (read @heap) (sx) sx) (lambda (x) (scdr (scar x))))
@@ -88,9 +88,9 @@
 (define* sym-is? (subr pure (sx symbol) bool)
   (lambda (x s) (tagcase x (sy y (symbol=? y s)) (else y #f))))
 (define* sym-of (subr (read @heap) (sx) symbol)
-  (lambda (x) (tagcase x (sy s s) (else y (begin (no-pair) 'error)))))
+  (lambda (x) (tagcase x (sy s s) (else y (begin (not-a-pair) 'error)))))
 (define* num-of (subr (read @heap) (sx) int)
-  (lambda (x) (tagcase x (nm n n) (else y (begin (no-pair) 0)))))
+  (lambda (x) (tagcase x (nm n n) (else y (begin (not-a-pair) 0)))))
 (define* sbool (subr pure (bool) sx) (lambda (b) (if b strue sfalse)))
 
 (define* slist1 (subr (alloc @heap) (sx) sx) (lambda (a) (scons a snil)))
@@ -140,7 +140,7 @@
 ;; What the partial evaluator reads: the globals from here to `simplify!'.
 (define-effect evaluator
   (read (globals snil strue sfalse not-constant the-probe s-quote s-lambda
-     s-let s-list s-plus s-times no-pair scons scar scdr sset-car! sset-cdr!
+     s-let s-list s-plus s-times not-a-pair scons scar scdr sset-car! sset-cdr!
      scaar scadr scdar scddr scaddr scdddr scadar scadddr scaddar spair?
      snull? ssymbol? snumber? sfalse? sym-is? sym-of num-of sbool slist1
      slist2 slist3 same-pair? seq? sequal? slength slist-ref sappend sassq
@@ -152,7 +152,7 @@
      peval simplify!)))
 
 (define-effect sxlib
-  (read (globals no-pair scons scar scdr spair? snull? snil sfalse strue sbool)))
+  (read (globals not-a-pair scons scar scdr spair? snull? snil sfalse strue sbool)))
 
 (define smap (poly ((e effect)) (subr (maxeff e sxe sxlib) ((subr e (sx) sx) sx) sx))
   (lambda (f l)
@@ -349,7 +349,7 @@
           ((sym-is? (scaar env) 'lambda)
            (if (smemq var (scadar env)) (scar env) (binding-frame var (scdr env))))
           (else
-           (begin (no-pair) sfalse))))) ; "ill-formed environment"
+           (begin (not-a-pair) sfalse))))) ; "ill-formed environment"
 
 (define* bound-expr (subr sxe (sx sx) sx)
   (lambda (var frame)
@@ -358,7 +358,7 @@
           ((sym-is? (scar frame) 'lambda)
            not-constant)
           (else
-           (no-pair))))) ; "ill-formed frame"
+           (not-a-pair))))) ; "ill-formed frame"
 
 (define* add-binding (subr sxe (sx sx sx) sx)
   (lambda (val frame name)
@@ -469,7 +469,7 @@
 
 (define* passq (subr (maxeff (read @heap) spin) (symbol (listof (pairof symbol prim @heap) @heap)) (pairof symbol prim @heap))
   (lambda (name l)
-    (cond ((null? l) nil)
+    (cond ((null? l) no-pair)
           ((symbol=? (car (car l)) name) (car l))
           (else (passq name (cdr l))))))
 

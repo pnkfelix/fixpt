@@ -644,7 +644,7 @@ impl Compiler<'_> {
                     Some(RLoc::Free(i)) => g.op("lexical", &[Gen::n(i)]),
                     Some(RLoc::Global(c)) => g.op("global", &[c]),
                     Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_) | RLoc::Join(_) | RLoc::Lifted(_)) => return None,
-                    None if self.name(n) == "nil" => g.op("const", &[Value::NULL]),
+                    None if matches!(self.name(n), "nil" | "no-pair") => g.op("const", &[Value::NULL]),
                     // A standard operation as a value: its closure, of the
                     // word the stack code makes for it, and that word's
                     // register code. A leaf makes it only in tail position.
@@ -1816,7 +1816,7 @@ impl Compiler<'_> {
             Exp::Char(c) => Some(Value::char(c)),
             Exp::Var(n) => match self.r_where(env, n) {
                 Some(RLoc::Const(v)) => Some(v),
-                None if self.name(n) == "nil" => Some(Value::NULL),
+                None if matches!(self.name(n), "nil" | "no-pair") => Some(Value::NULL),
                 _ => None,
             },
             Exp::The { exp: body, .. } | Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.r_const(env, body),
