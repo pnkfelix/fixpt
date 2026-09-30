@@ -2168,7 +2168,9 @@ kind by a layout descriptor passed at run time (decision 4); flat arrays
 at statically known element types first. Name to settle (`flat`, `bits`,
 `plain`; `(flat-arrayof T R)` or a representation chosen by kind).
 
-**Q7. Logical types, restricted** (`docs/research/logical-types.md`):
+**Q7. Logical types, restricted** (`docs/research/logical-types.md`),
+and with them facts through the disjunctive side of `or` and `and`
+(occurrence typing; the conjunctive side is done, 2026-09-30):
 first `consof`, a pair that is not `nil`, which `null?` narrows to (and
 which lets native `car` stay one load); then unions of members with
 disjoint run-time shapes, `(union T …)`, introduced only by subsumption

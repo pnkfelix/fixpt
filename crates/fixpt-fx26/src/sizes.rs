@@ -239,8 +239,26 @@ impl Checker {
     /// `(null? xs)`, `xs : (nlist T n)`: `n = 0`, or `n - 1 ≥ 0`. A
     /// comparison of naturals: `(< a b)`, `b - a - 1 ≥ 0`, or `a - b ≥ 0`;
     /// `(= a 0)`, `a = 0`, or, a natural not 0, `a - 1 ≥ 0`.
+    ///
+    /// An `or`, `(if a #t b)`, shows when it does not hold what `a` and `b`
+    /// both show so; an `and`, `(if a b #f)`, when it holds what both show
+    /// then; `(not x)` what `x` shows, swapped. Only these conjunctions: what
+    /// an `or` shows when it holds is a disjunction, which facts cannot say
+    /// (that waits on logical types, PLAN.md Q7).
     pub(crate) fn test_facts(&self, test: ExpId) -> (Vec<SizeFact>, Vec<SizeFact>) {
         let none = (vec![], vec![]);
+        if let Exp::If { test: a, then, els } = self.arena.exp_at(test) {
+            let (ta, ea) = self.test_facts(*a);
+            if matches!(self.arena.exp_at(*then), Exp::Bool(true)) {
+                let (_, eb) = self.test_facts(*els);
+                return (vec![], [ea, eb].concat());
+            }
+            if matches!(self.arena.exp_at(*els), Exp::Bool(false)) {
+                let (tb, _) = self.test_facts(*then);
+                return ([ta, tb].concat(), vec![]);
+            }
+            return none;
+        }
         let Exp::App { fun, args } = self.arena.exp_at(test) else { return none };
         let Exp::Var(op) = self.arena.exp_at(*fun) else { return none };
         if !self.is_standard(*op) {
@@ -248,6 +266,10 @@ impl Checker {
         }
         let ge = |lin: Size| vec![SizeFact { lin, eq: false }];
         match (self.interner.name(*op), &args[..]) {
+            ("not", [x]) => {
+                let (t, e) = self.test_facts(*x);
+                (e, t)
+            }
             ("null?", [a]) => {
                 let Exp::Var(v) = self.arena.exp_at(*a) else { return none };
                 let Some(t) = self.lookup(*v) else { return none };

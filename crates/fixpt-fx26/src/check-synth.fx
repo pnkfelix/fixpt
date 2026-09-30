@@ -78,21 +78,6 @@
           ((and (k-nat-ty? tc) (k-nat-ty? td)) (k-ty-new (ty-nat (sz-finite))))
           (else
            (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
-;; What `p` shows about sizes when it holds, and when not (each none or
-;; one). `(null? xs)`, `xs : (nlist T n)`: `n = 0`, or `n - 1 ≥ 0`. A
-;; comparison of naturals: `(< a b)`, `b - a - 1 ≥ 0`, or `a - b ≥ 0`;
-;; `(= a 0)`, `a = 0`, or, a natural not 0, `a - 1 ≥ 0`.
-(define k-test-facts (subr (maxeff kreads (alloc @t) spin) (kx) k-branch-facts)
-  (lambda (p)
-    (let ((none (k-branch-facts-of nil nil)))
-      (tagcase p
-        (x-app (f args a b)
-          (tagcase f
-            (x-var (op fa fb) (if (k-std? op) (k-std-test-facts (symbol->string op) args) none))
-            (else y none)))
-        (else y none)))))
-(define k-with-fact (subr (alloc @t) (k-fact-list k-fact-list) k-fact-list)
-  (lambda (f fs) (if (null? f) fs (the k-fact-list (cons (car f) fs)))))
 ;; If `p` is `(name v)`, `name` standard, the variable, as the binding it is
 ;; (none or one).
 (define k-certifying-test (subr (maxeff kreads (alloc @t) spin) (kx string) k-named)
@@ -137,7 +122,7 @@
            (pushed (k-push-certified p))
            (facts (k-test-facts p))
            (fsaved (get k-size-facts))
-           (fyes (set k-size-facts (k-with-fact (car facts) fsaved))))
+           (fyes (set k-size-facts (k-with-facts (car facts) fsaved))))
       (product (1 certs) (2 fsaved) (3 facts)))))
 ;; After it, before the branch where `p` does not: nothing certified, and what `p` shows so.
 (define k-enter-else (subr kstate (k-tested) unit)
@@ -147,7 +132,7 @@
         (set k-certified (extract certs 1))
         (set k-certified-lengths (extract certs 2))
         (set k-certified-nats (extract certs 3))
-        (set k-size-facts (k-with-fact (cdr (extract tested 3)) fsaved))))))
+        (set k-size-facts (k-with-facts (cdr (extract tested 3)) fsaved))))))
 ;; After both: the facts as they were.
 (define k-leave-test (subr kstate (k-tested) unit) (lambda (t) (set k-size-facts (extract t 2))))
 ;; Whether `args` are one variable, as the binding it is, among `cs`.

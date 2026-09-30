@@ -526,10 +526,14 @@ Each has a small reproduction in the port that met it:
   is refused alike on every path); a port's own case would be needed.
 - `length` accepts only frozen `nlist`s, so every port over `@heap`
   lists writes its own. (2026-09-30: `list-length`, at any region.)
-- Facts learned from a test are not learned through `or` (found
-  2026-09-30): in the else of `(if (or (= n 0) (null? xs)) …)`, `n ≥ 1` is
-  not known, so `(- n 1)` is no `nat`; separate `cond` arms work. Both
-  checkers alike.
+- Facts learned from a test were not learned through `or` (found
+  2026-09-30): in the else of `(if (or (= n 0) (null? xs)) …)`, `n ≥ 1` was
+  not known. Done the same day, both checkers, the conjunctive half (the
+  user's): the else of an `or` knows what both its tests show when false,
+  the then of an `and` what both show when true, and `not` swaps them. The
+  disjunctive half (the then of an `or`, the else of an `and`) waits on
+  logical types and occurrence typing, Q7. Tests `sizes/and-or-not-facts.fx`,
+  `sizes/or-then-refused.fx`.
 
 ## 14. Standard operations the ports wrote themselves
 
