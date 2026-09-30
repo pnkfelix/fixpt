@@ -512,6 +512,16 @@ Each has a small reproduction in the port that met it:
 
 ## 14. Standard operations the ports wrote themselves
 
+*Mostly done (2026-09-30; `docs/fx26.md`, "Standard operations the ports
+wanted"):* `remainder`, `zero?`, `max`, `min`, `bool=?`, `char<?` and its
+three kin, `char-upcase`, `string<?` and its three kin, `error`, `append`,
+`list-length` (any region), `array->list` and `list->array`, on every
+machine and, but for the list and array ones, in the evaluator. `list`
+and `eq?` came earlier. Left: `map`, `for-each` and `fold`, which take
+procedures and so cannot be runtime primitives: they wait on a standard
+prelude written in FX-26 (a question for the user); `string-ci<?`; a
+`make-array` with no fill; n-ary `string-append`; mutable strings.
+
 `remainder`, `zero?`, `list`, `append`, `map`, `for-each`, `fold`,
 `max`, `min`, `char<?`, `char-upcase`, `string<?`, `string-ci<?`,
 `vector->list`/`list->vector` (`array->list`/`list->array`), a
@@ -588,11 +598,12 @@ It reaches bloblets, and the evaluator has it. And `(eqtable k v kr r)`,
 made with an `(identity k kr)` dictionary that only the standard
 procedures make, its operations writing the keys' region, hashed by
 address and restamped by the collection count. Left: retiring the ports'
-workarounds; porting `equal` and `dynamic`; an `eqv?` (R7RS: numbers and
-characters by value), for tables of any key; maybe an equality kind, as
+workarounds; porting `equal` and `dynamic`; maybe an equality kind, as
 SML's `''a`, to refuse `eq?` on procedures; tables keyed by bloblets;
-`uniqueof` for interning, and the two-level tables, both below. The notes
-as they were:
+`uniqueof` for interning, and the two-level tables, both below; and,
+maybe never (the user's, 2026-09-30), an `eqv?` as R7RS has it (numbers
+and characters by value, otherwise `eq?`), for tables keyed by any value
+(PLAN.md "Next", item 11). The notes as they were:
 
 **Later: `uniqueof`, for interning** (the user's, 2026-09-30). Interning
 (hash-consing) needs exact identity, so that `eq?` is structural equality,

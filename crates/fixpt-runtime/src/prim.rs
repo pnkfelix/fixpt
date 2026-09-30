@@ -138,7 +138,7 @@ fn fx26_int(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
             return Ok(v);
         }
     }
-    if matches!(op, "quotient" | "modulo") && a[1] == Value::fixnum(0) {
+    if matches!(op, "quotient" | "modulo" | "remainder") && a[1] == Value::fixnum(0) {
         return rt.fail("division by zero", &[a[0], a[1]]);
     }
     match crate::num::int_op(&mut rt.heap, op, a[0], a[1]) {
@@ -1407,6 +1407,50 @@ prims! {
     // `<` and `=` on ints, for machines' slow paths (a bignum).
     "%fx26-int-less", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "less"));
     "%fx26-int-eq", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "eq"));
+    // What the benchmark ports wrote for themselves (PLAN.md Q11, TODO §14),
+    // each of a fixed arity, for compiled code to call.
+    "%fx26-remainder", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "remainder"));
+    "%fx26-zero?", 1, Some(1), simple!(|rt, a| { let _ = &rt; Ok(Value::boolean(a[0] == Value::fixnum(0))) });
+    "%fx26-max", 2, Some(2), simple!(|rt, a| {
+        let less = fx26_int(rt, a, "less")?;
+        Ok(if less.is_true() { a[1] } else { a[0] })
+    });
+    "%fx26-min", 2, Some(2), simple!(|rt, a| {
+        let less = fx26_int(rt, a, "less")?;
+        Ok(if less.is_true() { a[0] } else { a[1] })
+    });
+    "%fx26-char<?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_char(rt, a[0])?, get_char(rt, a[1])?); Ok(Value::boolean(x < y)) });
+    "%fx26-char<=?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_char(rt, a[0])?, get_char(rt, a[1])?); Ok(Value::boolean(x <= y)) });
+    "%fx26-char>?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_char(rt, a[0])?, get_char(rt, a[1])?); Ok(Value::boolean(x > y)) });
+    "%fx26-char>=?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_char(rt, a[0])?, get_char(rt, a[1])?); Ok(Value::boolean(x >= y)) });
+    "%fx26-string<?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?); Ok(Value::boolean(x < y)) });
+    "%fx26-string<=?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?); Ok(Value::boolean(x <= y)) });
+    "%fx26-string>?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?); Ok(Value::boolean(x > y)) });
+    "%fx26-string>=?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?); Ok(Value::boolean(x >= y)) });
+    // `(error message)`: the run fails, with the message.
+    "%fx26-error", 1, Some(1), simple!(|rt, a| { let m = get_string(rt, a[0])?; rt.fail(&m, &[]) });
+    // Two lists, the first copied (a cycle in it is an error, not a loop).
+    "%fx26-append", 2, Some(2), simple!(|rt, a| {
+        let Some(front) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a proper list", a[0]) };
+        let mut acc = a[1];
+        for v in front.into_iter().rev() { acc = rt.heap.cons(v, acc); }
+        Ok(acc)
+    });
+    // An array's elements as a list, and a list's as an array (`runtime.scm`'s
+    // layout: a plain bloblet, element `i` in field `i + 2`).
+    "%fx26-array->list", 1, Some(1), simple!(|rt, a| {
+        let b = bloblet(rt, a[0])?;
+        let n = rt.heap.bloblet_head(b).fields - 1;
+        let mut acc = Value::NULL;
+        for i in (0..n).rev() { let x = rt.heap.bloblet_slot(b, i + 2); acc = rt.heap.cons(x, acc); }
+        Ok(acc)
+    });
+    "%fx26-list->array", 1, Some(1), simple!(|rt, a| {
+        let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a proper list", a[0]) };
+        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, items.len(), 0, true);
+        for (i, x) in items.into_iter().enumerate() { rt.heap.set_bloblet_slot(b, i + 2, x); }
+        Ok(b)
+    });
     // FX-26's `parse-number`: the number `a[0]` spells in radix `a[1]`
     // (2 to 36), sign and all, in a list; or none.
     "%fx26-parse-number", 2, Some(2), simple!(|rt, a| {

@@ -331,6 +331,22 @@ fn identity_as_the_rust_machine_gives_it() {
     }
 }
 
+/// The standard operations the ports wrote themselves (PLAN.md Q11,
+/// `programs/native/standard-ops.fx`), as the Rust machine gives them;
+/// `error` fails the run with its message; `append` of a cyclic list fails
+/// rather than loops.
+#[test]
+fn standard_ops_as_the_rust_machine_gives_them() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/standard-ops"), "standard-ops", &[5], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+    let defs = "(define* f (subr pure (int) int) (lambda (b) (if (zero? b) (error \"f: zero\") b)))";
+    assert!(matches!(&run(defs, "f", &[0], FUEL).direct, Err(m) if m.contains("f: zero")));
+    let defs = "(define* g (subr (maxeff (read @l) (write @l) (alloc @l)) (int) nat)\n  (lambda (n) (let ((xs (the (listof int @l) (list n 2))))\n    (begin (set-cdr! (cdr xs) xs) (list-length (append xs xs))))))";
+    assert!(matches!(&run(defs, "g", &[1], FUEL).direct, Err(m) if m.contains("proper list")));
+}
+
 /// A leaf's registers and link, kept around a call with no collection: `b`
 /// lives across a product past a fixnum, which the primitive makes.
 #[test]

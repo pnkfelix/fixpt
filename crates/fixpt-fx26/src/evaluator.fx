@@ -163,6 +163,10 @@
           (k-cat3 "make-continuation-prompt-tag abort-current-continuation "
                   "call-with-composable-continuation make-continuation-mark-key with-mark "
                   "first-mark current-marks marks-of cwcc %vlambda apply list ")))
+;; What the ports wrote themselves, as `ev-std-prim` does them.
+(define std-primitive-names string
+  (string-append " remainder zero? max min bool=? char<? char<=? char>? char>=? char-upcase "
+                 "string<? string<=? string>? string>=? error "))
 ;; `f64`'s, as `ev-f64-prim` does them.
 (define f64-primitive-names string
   (k-cat4 " f64+ f64- f64* f64/ f64-min f64-max f64-atan2 f64-expt f64< f64<= f64> f64>= f64= "
@@ -190,7 +194,9 @@
   (lambda (n)
     (let ((padded (string-append " " (string-append n " "))))
       (or (occurs? padded primitive-names 0)
-          (or (occurs? padded f64-primitive-names 0) (occurs? padded f32-primitive-names 0))))))
+          (or (occurs? padded f64-primitive-names 0)
+              (or (occurs? padded f32-primitive-names 0)
+                  (occurs? padded std-primitive-names 0)))))))
 
 ;; A standard name: a primitive, or `nil`.
 (define standard (subr (maxeff evals spin) (symbol) val)
@@ -298,6 +304,31 @@
   (lambda (xs f) (v-bool (f (as-f64 (arg xs 0)) (as-f64 (arg xs 1))))))
 (define f64-test (subr (maxeff evals spin) (vals (subr pure (f64) bool)) val)
   (lambda (xs f) (v-bool (f (as-f64 (arg xs 0))))))
+;; What the benchmark ports wrote for themselves (PLAN.md Q11), as the
+;; machines have them: each by the standard operation of the same name.
+(define* ev-std-prim (subr (maxeff evals spin) (string vals) val)
+  (lambda (n xs)
+    (let ((is (lambda ((s string)) (string=? n s)))
+          (c2 (lambda ((f (subr pure (char char) bool)))
+                (v-bool (f (as-char (arg xs 0)) (as-char (arg xs 1))))))
+          (s2 (lambda ((f (subr pure (string string) bool)))
+                (v-bool (f (as-str (arg xs 0)) (as-str (arg xs 1)))))))
+      (cond ((is "remainder") (int2 xs (lambda (a b) (remainder a b))))
+            ((is "zero?") (v-bool (zero? (as-int (arg xs 0)))))
+            ((is "max") (int2 xs (lambda (a b) (max a b))))
+            ((is "min") (int2 xs (lambda (a b) (min a b))))
+            ((is "bool=?") (v-bool (bool=? (as-bool (arg xs 0)) (as-bool (arg xs 1)))))
+            ((is "char<?") (c2 (lambda (a b) (char<? a b))))
+            ((is "char<=?") (c2 (lambda (a b) (char<=? a b))))
+            ((is "char>?") (c2 (lambda (a b) (char>? a b))))
+            ((is "char>=?") (c2 (lambda (a b) (char>=? a b))))
+            ((is "char-upcase") (v-char (char-upcase (as-char (arg xs 0)))))
+            ((is "string<?") (s2 (lambda (a b) (string<? a b))))
+            ((is "string<=?") (s2 (lambda (a b) (string<=? a b))))
+            ((is "string>?") (s2 (lambda (a b) (string>? a b))))
+            ((is "string>=?") (s2 (lambda (a b) (string>=? a b))))
+            ((is "error") (efail (as-str (arg xs 0))))
+            (else (efail (string-append "not in the evaluator yet: " n)))))))
 ;; Flat arrays: here, arrays of their values; a layout, its number.
 (define* ev-flat-prim (subr (maxeff evals spin) (string vals) val)
   (lambda (n xs)
@@ -308,7 +339,7 @@
             ((is "flatarray-length") (v-int (array-length (as-array (arg xs 0)))))
             ((is "i32-flat") (v-int 0)) ((is "u32-flat") (v-int 1)) ((is "i64-flat") (v-int 2))
             ((is "u64-flat") (v-int 3)) ((is "f32-flat") (v-int 4)) ((is "f64-flat") (v-int 5))
-            (else (efail (string-append "not in the evaluator yet: " n)))))))
+            (else (ev-std-prim n xs))))))
 ;; `f32`'s operations, by shape.
 (define f32-2 (subr (maxeff evals spin) (vals (subr pure (f32 f32) f32)) val)
   (lambda (xs f) (v-f32 (f (as-f32 (arg xs 0)) (as-f32 (arg xs 1))))))

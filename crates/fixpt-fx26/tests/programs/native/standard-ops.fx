@@ -1,0 +1,30 @@
+;;; The standard operations the benchmark ports wrote for themselves (PLAN.md
+;;; Q11, TODO §14): integer, character and string comparisons, `error`, and
+;;; lists and arrays at any region; bignums where ints may be ones.
+(define-type strings (listof string @heap))
+(define* yes-no (subr pure (bool) string) (lambda (b) (if b "yes" "no")))
+(define* ints (subr (alloc @heap) (int) strings)
+  (lambda (n)
+    (let ((big (* n (* 1000000000000 1000000000000))))
+      (list (int->string (remainder -7 2)) (int->string (remainder big 7)) (yes-no (zero? (- n n)))
+            (int->string (max n -3)) (int->string (min big n)) (yes-no (bool=? (zero? n) #f))))))
+(define* chars (subr (alloc @heap) () strings)
+  (lambda ()
+    (list (yes-no (char<? #\a #\b)) (yes-no (char<=? #\b #\a)) (yes-no (char>? #\z #\a))
+          (yes-no (char>=? #\a #\a)) (char->string (char-upcase #\q))
+          (yes-no (string<? "apple" "apricot")) (yes-no (string<=? "b" "a"))
+          (yes-no (string>? "b" "a")) (yes-no (string>=? "a" "a")))))
+(define* lists (subr (maxeff (read @l) (write @l) (alloc @l) (alloc @heap)) (int) strings)
+  (lambda (n)
+    (let* ((xs (the (listof int @l) (list 1 2 3)))
+           (ys (append xs (the (listof int @l) (list n))))
+           (a (the (arrayof int @l) (list->array ys)))
+           (zs (the (listof int @l) (array->list a))))
+      (begin
+        (array-set! a 0 9)
+        (list (int->string (list-length ys)) (int->string (array-length a)) (int->string (car zs))
+              (int->string (array-ref a 0)) (int->string (car (cdr (cdr (cdr ys))))))))))
+(define* standard-ops
+  (subr (maxeff (read @l) (write @l) (alloc @l) (read @heap) (alloc @heap)) (int) strings)
+  (lambda (n) (append (ints n) (append (chars) (lists n)))))
+(standard-ops 5)

@@ -28,6 +28,9 @@ fn small_programs() {
     assert_eq!(both("(letrec ((even (subr spin (int) bool) (lambda (n) (if (= n 0) #t (odd (- n 1))))) (odd (subr spin (int) bool) (lambda (n) (if (= n 0) #f (even (- n 1)))))) (even 10))"), "#t");
     assert_eq!(both("(string-append \"ab\" (symbol->string 'cd))"), "\"abcd\"");
     assert_eq!(both("(sum a 1)"), "#<sum a>");
+    // What the ports wrote themselves (PLAN.md Q11).
+    assert_eq!(both("(list (remainder -7 2) (max 3 (min 9 4)) (if (zero? 0) 1 0))"), "(-1 4 1)");
+    assert_eq!(both("(if (and (bool=? #t #t) (char<? #\\a #\\b) (string>=? \"b\" \"a\")) 1 0)"), "1");
 }
 
 #[test]

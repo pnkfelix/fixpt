@@ -162,7 +162,7 @@ raw in native registers, `int` a bignum, a fixnum version of native code;
 left: big literals); Q3 telemetry's counts;
 Q4 floats (done: `f64` boxed, `f32` an immediate); the front end's
 register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (done:
-one pure `eq?`, `eqtable`; left: `eqv?`, the ports' workarounds);
+one pure `eq?`, `eqtable`; left: the ports' workarounds);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction. Then, as before:
@@ -184,6 +184,9 @@ friction. Then, as before:
    M8 docs and polish.
 9. Fixed-width integers: now Q2 (the user's, 2026-09-29).
 10. Far future: a k-CFA, for what the types do not already say.
+11. Maybe never (the user's, 2026-09-30): `eqv?`, R7RS's (numbers and
+    characters by value, otherwise `eq?`), for tables keyed by any value
+    (`TODO.md` §19).
 
 **Decided with the user (2026-09-29)**: `int` becomes a bignum;
 `i32`/`i64`/`u32`/`u64` for fixed widths; `f32` and `f64` (`f64` boxed
@@ -2119,8 +2122,8 @@ atoms, and on immutable data and procedures `#t` only if equal (the
 user's choice); `eq` in line on every machine, and in the evaluator.
 `(eqtable k v kr r)`, keyed by a dictionary `(identity k kr)` only the
 standard procedures make, hashed by address, one stamp (the collection
-count) where Larceny has tablets. Left: `eqv?`, the ports' workarounds,
-and `equal` and `dynamic`; later, `uniqueof` for interning (identity with
+count) where Larceny has tablets. Left: the ports' workarounds, and
+`equal` and `dynamic`; maybe never, `eqv?` (item 11 of "Next"); later, `uniqueof` for interning (identity with
 contents read purely, `TODO.md` §19), and Larceny's old and young tablets, so that a
 minor collection rehashes only young keys (`TODO.md` §19). What was planned:
 Every batch of ports hit the missing identity test (`equal`, `dynamic`
@@ -2193,7 +2196,10 @@ stack segments. Before building: check continuation capture across nested
 machine runs, and settle which reading of the soundness note's
 `(Region)` rule is meant. Its open questions are the user's.
 
-**Q11. Language friction the ports hit** (`TODO.md` §§ 12–15): local `letrec`
+**Q11. Language friction the ports hit** (`TODO.md` §§ 12–15). Begun
+2026-09-30: the standard operations of §14 (`docs/fx26.md`, "Standard
+operations the ports wanted"), but `map`/`for-each`/`fold`, which wait on
+a prelude written in FX-26. The list as it was: local `letrec`
 effects must list every global read transitively (infer them as
 `define*` does); a `letrec` body is not checked against the expected
 type; types cannot name types defined after them; one answer type per
