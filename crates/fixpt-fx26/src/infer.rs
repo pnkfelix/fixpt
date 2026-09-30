@@ -251,7 +251,7 @@ impl Checker {
         }
         Err(FxError::at(
             self.arena.span_of(e),
-            format!("a {} is expected here, and this is a {}", self.show_ty(want), self.show_ty(got)),
+            format!("a {} is expected here, and this is a {}{}", self.show_ty(want), self.show_ty(got), self.effect_delta(got, want)),
         ))
     }
 
@@ -706,12 +706,11 @@ impl Checker {
 
     /// An argument that failed to check is reported as that argument.
     fn as_argument(&self, err: FxError, a: ExpId, i: usize) -> FxError {
-        if err.span == self.arena.span_of(a) && err.message.contains(" is expected here") {
-            // One `a ` only: the type may itself be called `a`.
-            let Some(rest) = err.message.strip_prefix("a ") else { return err };
-            if let Some((want, got)) = rest.split_once(" is expected here, and this is a ") {
-                return FxError::at(err.span, format!("argument {} is a {got}, where a {want} is expected", i + 1));
-            }
+        // One `a ` only: the type may itself be called `a`.
+        if err.span == self.arena.span_of(a)
+            && let Some((want, got, delta)) = crate::check::expected_and_found(&err.message)
+        {
+            return FxError::at(err.span, format!("argument {} is a {got}, where a {want} is expected{delta}", i + 1));
         }
         err
     }

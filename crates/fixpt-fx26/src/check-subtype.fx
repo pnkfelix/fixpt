@@ -543,6 +543,7 @@
 
 ;;; ------------------------------------------------------------ errors
 
+(define k-newline string (char->string (integer->char 10)))
 ;; Run `f`, and if it fails at `a`..`b` with "a W is expected here, and
 ;; this is a G", fail instead with what `say` makes of W and G.
 (define k-expected-split (subr (maxeff (read @globals) spin) (string) string)
@@ -561,11 +562,15 @@
       (tagcase r
         (k-done (te) te)
         (k-err (m ea eb)
-          (let* ((rest (k-expected-split m)) (at (k-find-sub rest k-sep 0)))
+          ;; Its second line, an effect's delta, apart, and put back last.
+          (let* ((nl (string-search m k-newline 0))
+                 (first (if (< nl 0) m (substring m 0 nl)))
+                 (delta (if (< nl 0) "" (substring m nl (string-length m))))
+                 (rest (k-expected-split first)) (at (k-find-sub rest k-sep 0)))
             (if (and (= ea a) (= eb b) (not (string=? rest "")) (>= at 0))
                 (let ((w (substring rest 0 at))
                       (g (substring rest (+ at (string-length k-sep)) (string-length rest))))
-                  (k-fail (say m w g) ea eb))
+                  (k-fail (string-append (say m w g) delta) ea eb))
                 (k-fail m ea eb))))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 ;; The same, for any error at `a`..`b`.
@@ -610,6 +615,32 @@
         (cv-cellular () (k-note-conversion x (+ n 1)))
         (cv-native () (k-note-conversion x (+ n 2)))
         (else y #u)))))
+;; The latent effect of `t`, a `subr` under any `poly`s, in a list; or none.
+(define-type k-effs (listof k-eff acyclic))
+(define k-latent-of (subr (maxeff kstate spin) (int) k-effs)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-poly (bs body) (k-latent-of body))
+      (ty-subr (e ps r cv) (the k-effs (cons e nil)))
+      (else y nil))))
+;; The atoms of `g` that `w` does not cover.
+(define k-uncovered (subr (maxeff kstate spin) (k-eff k-eff) k-eff)
+  (lambda (g w)
+    (cond ((null? g) nil)
+          ((k-within? (k-one (car g)) w) (k-uncovered (cdr g) w))
+          (else (the k-eff (cons (car g) (k-uncovered (cdr g) w)))))))
+;; The second line of an "is expected here" message, where `got` and `want`
+;; are procedures: the atoms of `got`'s latent effect that `want`'s does not
+;; cover (`Checker::effect_delta`).
+(define* k-effect-delta (subr (maxeff kstate spin) (int int) string)
+  (lambda (got want)
+    (let ((g (k-latent-of got)) (w (k-latent-of want)))
+      (if (or (null? g) (null? w))
+          ""
+          (let ((beyond (k-uncovered (car g) (car w))))
+            (if (null? beyond)
+                ""
+                (k-cat3 k-newline "  beyond what is expected, it has " (k-show-effect beyond))))))))
 ;; `got ≤ want`, or an error at `x` saying so.
 (define k-expect (subr (maxeff checks spin) (kx int int) unit)
   (lambda (x got want)
@@ -617,7 +648,9 @@
         #u
         (let ((c (k-conversion got want)))
           (if (null? c)
-              (k-fail (k-expected-here (k-show-ty want) (k-show-ty got)) (k-start x) (k-end x))
+              (k-fail (string-append (k-expected-here (k-show-ty want) (k-show-ty got))
+                                     (k-effect-delta got want))
+                      (k-start x) (k-end x))
               (k-convert-at x got (car c)))))))
 ;; Bind each, the first first.
 (define k-bind-all (subr (maxeff kstate spin) (k-bindings) unit)

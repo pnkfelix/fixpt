@@ -86,6 +86,11 @@ fn small_programs() {
     // A `let` passes a `poly` to its body, a `plambda` here, and must be pure.
     let pl = "(define id (poly ((t type)) (subr pure (t) t))\n  (let ((k 1)) (plambda ((t type)) (lambda (x) x))))\n((proj id int) 5)";
     assert!(both(pl).is_ok(), "{pl}");
+    // An effect mismatch says, on a line of its own, what is beyond what is
+    // expected.
+    let dl = "(define* twice (subr pure (int) int) (lambda (n) (* 2 n)))\n(define* apply1 (subr pure ((subr pure (int) int)) int) (lambda (f) (f 1)))\n(apply1 (lambda ((n int)) (twice n)))";
+    let e = both(dl).expect_err("refused");
+    assert!(e.0.ends_with("\n  beyond what is expected, it has (read (globals twice))"), "{e:?}");
 }
 
 /// A text the FX-26 reader does not finish is blamed where the Rust reader
@@ -230,6 +235,11 @@ fn globals_agree_when_read() {
         let mut c = Checker::new();
         c.globals_effects = true;
         let rust = canon(rust_check_in(c, &program));
+        // A local `letrec`'s globals found, through a call of a sibling.
+        if path.ends_with("letrec-reads-found.fx") {
+            let want = "define f : (subr (read (globals twice)) (nat) int) ! pure";
+            assert!(ours.as_ref().is_ok_and(|ls| ls.iter().any(|l| l == want)), "{ours:?}");
+        }
         if path.ends_with("inferred.fx") {
             let want = "define clamp : (subr (read (globals below limit)) (int) int) ! pure";
             assert!(ours.as_ref().is_ok_and(|ls| ls.iter().any(|l| l == want)), "{ours:?}");

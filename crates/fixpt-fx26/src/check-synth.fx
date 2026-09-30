@@ -60,11 +60,6 @@
 ;; Note, for the compiler, that the `extract` at `a`..`b` takes part `i`.
 (define k-note-extract (subr kstate (int int int) unit)
   (lambda (a b i) (set k-extracts (cons (product (1 a) (2 b) (3 i)) (get k-extracts)))))
-;; Note of the recursive group `bs` whether it needs `spin`, and why: `why`, "" if not.
-(define k-note-ending (subr (maxeff kstate spin) (k-letrec-bs string) unit)
-  (lambda (bs why)
-    (let ((spins (not (string=? why ""))))
-      (begin (k-note-letrec bs spins) (if spins (k-note-why bs why) #u)))))
 ;; `inner`, under binders `bs`, with `m` for them, each within its bound and finite if need be.
 (define k-subst-checked (subr (maxeff checks spin) (k-binders k-map int int int) int)
   (lambda (bs m inner a b)
@@ -308,12 +303,10 @@
         (x-letrec (bs body a b)
           (let ((saved (k-mark)) (rsaved (get k-recursive)))
             (begin
-              (k-bind-letrec bs)
               ;; A group whose every run ends needs no `spin`.
-              (k-letrec-lambdas bs)
-              (k-note-ending bs (k-termination bs))
+              (k-bind-group bs)
               ;; The body's calls of the group are not recursion.
-              (let* ((ie (k-check-letrec bs))
+              (let* ((ie (k-letrec-checked bs saved rsaved k-check k-check-letrec))
                      (restored (set k-recursive rsaved))
                      (rb (k-synth body)))
                 (begin
@@ -789,10 +782,8 @@
           (x-letrec (bs body xa xb)
             (let ((saved (k-mark)) (rsaved (get k-recursive)))
               (begin
-                (k-bind-letrec bs)
-                (k-letrec-lambdas bs)
-                (k-note-ending bs (k-termination bs))
-                (let* ((ie (k-check-letrec bs))
+                (k-bind-group bs)
+                (let* ((ie (k-letrec-checked bs saved rsaved k-check k-check-letrec))
                        (restored (set k-recursive rsaved))
                        (e (k-check body expected)))
                   (begin (k-unbind-to saved) (k-mask x (k-union ie e) expected))))))

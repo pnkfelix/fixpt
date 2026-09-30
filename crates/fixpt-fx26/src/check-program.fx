@@ -603,21 +603,6 @@
                  (k-break-all (cdr ns) why))))))
 (define k-lines-append (subr (read @globals) (k-out k-out) k-out)
   (lambda (xs ys) (if (null? xs) ys (the k-out (cons (car xs) (k-lines-append (cdr xs) ys))))))
-;; `t`, a `subr` under any `poly`s, with `extra` in its latent effect; -1 if
-;; `t` is not one.
-(define k-with-latent (subr (maxeff kstate spin) (int k-eff) int)
-  (lambda (t extra)
-    (tagcase (k-get (k-resolve t))
-      (ty-poly (bs body)
-        (let ((b (k-with-latent body extra))) (if (< b 0) -1 (k-ty-new (ty-poly bs b)))))
-      (ty-subr (e ps r cv) (k-ty-new (ty-subr (k-union e extra) ps r cv)))
-      (else y -1))))
-;; The atoms of `e` on globals.
-(define k-globals-of (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-eff) k-eff)
-  (lambda (e)
-    (cond ((null? e) nil)
-          ((k-globals-atom? (car e)) (the k-eff (cons (car e) (k-globals-of (cdr e)))))
-          (else (k-globals-of (cdr e))))))
 ;; `n`'s innermost binding, now of type `t`.
 (define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (table-set! (get k-env) n (cons t (cdr (table-ref (get k-env) n nil))))))

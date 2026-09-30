@@ -465,6 +465,13 @@ each header says what its port worked around. The same things came up
 in batch after batch. In `PLAN.md` they are queue item Q11; the bigger
 ones (identity, integers, floats, unions) are items of their own.
 
+- Done (2026-09-30), both checkers: a local `letrec`'s procedures need
+  not name the globals they read (the user's choice: inferred, with no
+  starred form); where the group does not check at its types, the globals
+  each reads are found as `define*` finds them, round by round until calls
+  of each other add none, and the group checked at those types. And an
+  effect mismatch now prints, after both whole types, a line with what is
+  beyond what is expected. `define-rec` is still as it was. As it was:
 - **Globals listed transitively.** A local `letrec` procedure's effect
   must name every global it reads, and every global its callees read,
   datatype constructors included: a loop calling `ocons` must say

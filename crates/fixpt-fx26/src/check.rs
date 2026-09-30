@@ -453,6 +453,15 @@ impl Checker {
     /// checked against `expected` where one is given (as a `let`'s is), or
     /// synthesised.
     pub(crate) fn letrec(&mut self, e: ExpId, bindings: &[(Sym, TyId, ExpId)], body: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
+        self.letrec_with(e, bindings, body, expected, true)
+    }
+
+    /// [`letrec`](Self::letrec), and if a procedure of the group does not
+    /// check at its type, and `infer`, the group again at its types with
+    /// the globals each reads found, as `define*` finds them
+    /// ([`letrec_found`](Self::letrec_found)); the first error if that
+    /// finds nothing new.
+    fn letrec_with(&mut self, e: ExpId, bindings: &[(Sym, TyId, ExpId)], body: ExpId, expected: Option<TyId>, infer: bool) -> R<(TyId, Effect)> {
         let depth = self.env.len();
         self.env.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
         self.known.extend(bindings.iter().enumerate().map(|(i, (n, _, _))| (*n, depth + i)));
@@ -465,25 +474,95 @@ impl Checker {
         }
         // A group whose every run ends needs no `spin`.
         self.note_termination(bindings);
+        // An error, and whether a procedure of the group made it.
         let r = (|| {
             let mut eff = Effect::pure();
             for (n, t, init) in bindings {
-                let ie = self.check(*init, *t).map_err(|err| self.declared_error(*n, *t, *init, err))?;
+                let ie = self.check(*init, *t).map_err(|err| (self.declared_error(*n, *t, *init, err), true))?;
                 eff = eff.union(&ie);
             }
             // The body's calls of the group are not recursion.
             self.recursive.truncate(rdepth);
             let (bt, be) = match expected {
-                Some(want) => (want, self.check(body, want)?),
-                None => self.synth(body)?,
+                Some(want) => (want, self.check(body, want).map_err(|err| (err, false))?),
+                None => self.synth(body).map_err(|err| (err, false))?,
             };
             Ok((bt, eff.union(&be)))
         })();
         self.recursive.truncate(rdepth);
         self.truncate_env(depth);
-        let (t, eff) = r?;
+        let (t, eff) = match r {
+            Ok(r) => r,
+            Err((err, true)) if infer => match self.letrec_found(bindings) {
+                Some(found) => return self.letrec_with(e, &found, body, expected, false),
+                None => return Err(err),
+            },
+            Err((err, _)) => return Err(err),
+        };
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
+    }
+
+    /// A `letrec` group's types with the globals each procedure reads put
+    /// in its latent effect, as `define*` finds them for a definition: each
+    /// checked as though its type said it read any global, and the globals
+    /// its body read taken, again until the group's calls of each other
+    /// add none. `None` if that fails, or adds nothing.
+    fn letrec_found(&mut self, bindings: &[(Sym, TyId, ExpId)]) -> Option<Vec<(Sym, TyId, ExpId)>> {
+        let any = Effect::atom(Atom::Read(Region::Globals));
+        let mut types: Vec<TyId> = bindings.iter().map(|b| b.1).collect();
+        for _ in 0..=bindings.len() + 1 {
+            let depth = self.env.len();
+            self.env.extend(bindings.iter().zip(&types).map(|((n, _, _), t)| (*n, *t)));
+            self.known.extend(bindings.iter().enumerate().map(|(i, (n, _, _))| (*n, depth + i)));
+            let rdepth = self.recursive.len();
+            let group: Vec<(Sym, TyId, ExpId)> = bindings.iter().zip(&types).map(|((n, _, x), t)| (*n, *t, *x)).collect();
+            self.note_termination(&group);
+            let mut next = Vec::new();
+            let mut ok = true;
+            for (i, (_, declared, init)) in bindings.iter().enumerate() {
+                let wide = self.with_latent(types[i], &any).unwrap_or(types[i]);
+                if self.check(*init, wide).is_err() {
+                    ok = false;
+                    break;
+                }
+                let reads = self.globals_read_by(*init);
+                next.push(self.with_latent(*declared, &reads).unwrap_or(*declared));
+            }
+            self.recursive.truncate(rdepth);
+            self.truncate_env(depth);
+            if !ok {
+                return None;
+            }
+            let same = |a: &[TyId], b: &[TyId]| a.iter().zip(b).all(|(x, y)| self.latent_of(*x) == self.latent_of(*y));
+            if same(&next, &types) {
+                let declared: Vec<TyId> = bindings.iter().map(|b| b.1).collect();
+                if same(&next, &declared) {
+                    return None;
+                }
+                return Some(bindings.iter().zip(next).map(|((n, _, x), t)| (*n, t, *x)).collect());
+            }
+            types = next;
+        }
+        None
+    }
+
+    /// The latent effect of `t`, a `subr` under any `poly`s.
+    pub(crate) fn latent_of(&self, t: TyId) -> Option<Effect> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Poly { body, .. } => self.latent_of(*body),
+            Ty::Subr { effect, .. } => Some(effect.clone()),
+            _ => None,
+        }
+    }
+
+    /// The second line of an "is expected here" message, where `got` and
+    /// `want` are procedures: the atoms of `got`'s latent effect that
+    /// `want`'s does not cover, which the two whole types can bury.
+    pub(crate) fn effect_delta(&self, got: TyId, want: TyId) -> String {
+        let (Some(g), Some(w)) = (self.latent_of(got), self.latent_of(want)) else { return String::new() };
+        let beyond = Effect(g.0.into_iter().filter(|a| !Effect::atom(*a).within(&w)).collect());
+        if beyond.is_pure() { String::new() } else { format!("\n  beyond what is expected, it has {}", self.show_effect(&beyond)) }
     }
 
     /// `eff` with what it does to data frozen in the heap taken out, since
@@ -2239,14 +2318,11 @@ impl Checker {
         };
         // Checked against the answer type, so that what the body needs to
         // know — an operator's binders, a `nil` — it is told.
-        let be = self.check(body, answer).map_err(|err| {
-            match err.message.strip_prefix("a ").and_then(|m| m.split_once(" is expected here, and this is a ")) {
-                Some((want, got)) if err.span == self.arena.span_of(body) => FxError::at(
-                    err.span,
-                    format!("the tag's prompts deliver a {want}, and this body is a {got}"),
-                ),
-                _ => err,
+        let be = self.check(body, answer).map_err(|err| match expected_and_found(&err.message) {
+            Some((want, got, delta)) if err.span == self.arena.span_of(body) => {
+                FxError::at(err.span, format!("the tag's prompts deliver a {want}, and this body is a {got}{delta}"))
             }
+            _ => err,
         })?;
         let own = Effect([Atom::Goto(region), Atom::Comefrom(region)].into_iter().collect());
         let beyond = Effect(be.0.iter().copied().filter(|a| !Effect::atom(*a).within(&bound) && !own.contains(*a)).collect());
@@ -2263,18 +2339,12 @@ impl Checker {
         // A handler written as a `lambda` is told what it takes and gives.
         let (ht, he) = if matches!(self.arena.exp_at(handler), Exp::Lambda { params, .. } if params.len() == 1) {
             let Exp::Lambda { body: hbody, .. } = self.arena.exp_at(handler).clone() else { unreachable!() };
-            self.synth_lambda_as(handler, Some(&[payload]), Some(answer)).map_err(|err| {
-                match err.message.strip_prefix("a ").and_then(|m| m.split_once(" is expected here, and this is a ")) {
-                    Some((_, got)) if err.span == self.arena.span_of(hbody) => FxError::at(
-                        err.span,
-                        format!(
-                            "the handler must take a {} to a {}, and this gives a {got}",
-                            self.show_ty(payload),
-                            self.show_ty(answer)
-                        ),
-                    ),
-                    _ => err,
-                }
+            self.synth_lambda_as(handler, Some(&[payload]), Some(answer)).map_err(|err| match expected_and_found(&err.message) {
+                Some((_, got, delta)) if err.span == self.arena.span_of(hbody) => FxError::at(
+                    err.span,
+                    format!("the handler must take a {} to a {}, and this gives a {got}{delta}", self.show_ty(payload), self.show_ty(answer)),
+                ),
+                _ => err,
             })?
         } else {
             self.synth(handler)?
@@ -2316,6 +2386,18 @@ impl Checker {
 /// What a recursive binding that is not a lambda is told.
 pub fn letrec_not_lambda(name: &str) -> String {
     format!("`{name}` is bound recursively, so it must be a lambda: nothing may run before every binding exists")
+}
+
+/// A message "a W is expected here, and this is a G", its second line (an
+/// effect's delta, [`Checker::effect_delta`]) apart: W, G, and that line
+/// with its newline, or "".
+pub(crate) fn expected_and_found(message: &str) -> Option<(&str, &str, &str)> {
+    let (first, delta) = match message.find('\n') {
+        Some(i) => (&message[..i], &message[i..]),
+        None => (message, ""),
+    };
+    let (want, got) = first.strip_prefix("a ")?.split_once(" is expected here, and this is a ")?;
+    Some((want, got, delta))
 }
 
 /// What a `letrena` or `letreap` whose value would outlive its region is

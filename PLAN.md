@@ -2204,10 +2204,10 @@ machine runs, and settle which reading of the soundness note's
 operations the ports wanted"), but `map`/`for-each`/`fold`, which wait on
 a prelude written in FX-26; `letrec` bodies checked against the expected
 type; reader errors placed; a `let` passing a `poly` to its body; types
-naming types defined after them; `define*`'s missing-`spin` error. Waiting
-on the user: `letrec` effects inferred (implicitly, or a starred form),
-the shape of effect-mismatch errors, a prelude for `map` and kin, prompt
-answer types, `quote` of non-symbols, shadowed standard names. The list as
+naming types defined after them; `define*`'s missing-`spin` error; a local
+`letrec`'s globals inferred; effect mismatches with a line of what is
+beyond. Waiting on the user: a prelude for `map` and kin, prompt answer
+types, `quote` of non-symbols, shadowed standard names. The list as
 it was: local `letrec`
 effects must list every global read transitively (infer them as
 `define*` does); a `letrec` body is not checked against the expected

@@ -671,7 +671,7 @@ impl Checker {
 
     /// The globals lambda `e`'s body reads, as checking found it: what a
     /// call of it reads.
-    fn globals_read_by(&self, mut e: crate::ast::ExpId) -> Effect {
+    pub(crate) fn globals_read_by(&self, mut e: crate::ast::ExpId) -> Effect {
         use crate::ast::Exp;
         let body = loop {
             match self.arena.exp_at(e) {
