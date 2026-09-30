@@ -670,3 +670,46 @@ To do:
      and is itself reported no further, so that one mistake does not cascade
      into noise;
    - both checkers agreeing on the list of errors, not only on the first.
+
+## 21. Checked once, verified after: a cache, then certificates (the user's, 2026-09-30)
+
+Native start-up is 0.49 s (`docs/performance.md`, "Start-up"): 0.27 s of
+it the one Rust check of the whole front end, 0.06 s its compilation to
+register code, 0.04 s its run. The user asked whether type and effect
+information carried in the code would let the check be done once, the
+code cached, and later passes merely verify it.
+
+To do:
+1. **Cache the front end's register code**, keyed by a hash of its text
+   and of the compiler (a heap image: `dump-heap` and image verification
+   exist). Our own code, built with the binary, needs no verifying: the
+   check is there for the facts the register compiler reads (fields of
+   `extract`, conversions, effect summaries, `apply` sharing), not for
+   safety. Start-up would drop to about 0.1 s.
+2. **Verifiable register code, for separate compilation (PLAN Q9)**:
+   annotations a verifier checks in one linear pass, as the JVM's stack
+   maps, WebAssembly's validation, Typed Assembly Language and
+   proof-carrying code do. In order of difficulty:
+   - types of registers and slots at entry and at branch targets;
+   - each word's latent effect, the instructions' effects summed within it;
+   - regions (entered and left, `letfreeze`, `acyclic`), which register
+     code now forgets: typed as capabilities (Walker, Crary and
+     Morrisett), a design, not an extension;
+   - termination, below.
+   The verifier joins the checkers in what must be right; the soundness
+   notes would then need "verified code is safe", not only "checked source
+   is".
+3. **Termination as a checkable proof**, so that the size-change search is
+   not trusted:
+   - each edge of a call's graph with its local reason (a `cdr` of a
+     parameter at `acyclic`; `n - 1` under a test bounding `n` below), which
+     a verifier checks against the code and its types (regions first);
+   - the closure's success as a ranking function, lexicographic in
+     practice (Lee, "Ranking functions for size-change termination",
+     TOPLAS 2009: every group that passes has one, possibly large), checked
+     by one pass over the call edges; `up`'s ranking is `bound − i`;
+   - where no small ranking is found, the graphs themselves, the verifier
+     redoing the closure under the same limit (`MOST_GRAPHS`).
+   First, cheaply: have `terminate.rs` try to extract a lexicographic
+   ranking from each group that passes, over the test programs, the front
+   end and the benchmark ports, and report those it cannot.
