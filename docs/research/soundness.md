@@ -20,19 +20,23 @@ Literature is cited from memory unless a local copy is named
 ## 0. Results at a glance
 
 Second round (2026-09-27), after the F1–F7/A2 fixes (commits 0f0a61e,
-d83face) were verified against a fresh offline build.
+d83face) were verified against a fresh offline build. Third (2026-09-30):
+F8 and F9, closed in 9f877ba the same day as the second round, re-verified
+against today's checkers (their probes and tests refused, both checkers
+agreeing); F10–F13, found and fixed since, brought in. No counterexample
+to any result below is known.
 
 | result                                                    | status                                                 |
 | --------------------------------------------------------- | ------------------------------------------------------ |
 | T0 elaboration of the checker's derivations into core K26 | sketched; rule-1 masking proved, rule-2 sketched       |
 | T1 progress                                               | proved (memory fragment); control cases now in full    |
 | T2 preservation                                           | proved (memory fragment); control cases now in full    |
-| C1 no dead place is ever read, written or allocated into  | proved from T1–T2                                      |
-| C2 frozen data is never written; `finite` data is acyclic | proved from T1–T2                                      |
-| C3 sizes and `nat` values are exact                       | proved for the core and the `proj` path; F8 breaks it  |
-| T3 effect soundness (masking hides only fresh state)      | sketched; frozen part now proved (F2 fix); F9 gap      |
+| C1 no dead place is ever read, written or allocated into  | proved from T1–T2; F13 fixed                           |
+| C2 frozen data is never written; `finite` data is acyclic | proved from T1–T2; F11 fixed                           |
+| C3 sizes and `nat` values are exact                       | proved: `proj` and scope paths (F8, F10 fixed)         |
+| T3 effect soundness (masking hides only fresh state)      | sketched; frozen part proved (F2, F13); §4.6 caveat    |
 | T4 lemmas are erasable                                    | sketched                                               |
-| T5 termination of `spin`-free code                        | conjectured; F1/F4/F5 obstacles cleared, F8/F9 open    |
+| T5 termination of `spin`-free code                        | conjectured; F1/F3/F4/F5/F8/F9 fixed, none known open  |
 | T6 space safety of places (in `soundness-regions.md`)     | conjectured; F7 fixed, so its counterexample is closed |
 
 ## 1. The core calculus K26
@@ -751,8 +755,9 @@ throw). ∎
 memory invariants*: no case reads a dead place, writes frozen data, or
 mistypes a value. What they do **not** establish is termination. A
 composable re-entered by its own return (F9 in
-`soundness-findings.md`) is well typed at every step and never stuck; it
-simply runs forever. That is consistent with T1–T2 and is a T5 concern.
+`soundness-findings.md`, since fixed: a `cwcc` call whose receiver can
+`comefrom` says `spin`) was well typed at every step and never stuck; it
+simply ran forever. That is consistent with T1–T2 and is a T5 concern.
 
 ### 4.5 What the two theorems give
 
@@ -799,9 +804,11 @@ holds only if `comefrom ρ`/`goto ρ` on the continuation's region are read
 as covering the state its frames hold. Every call of a composable has
 those atoms (`ast.rs:249–253`), so what the REPL licence and the compiler's
 reordering rely on still holds; but `D` alone is not a complete description
-of what calling a continuation does, and F9 (`soundness-findings.md`) shows
-this gap has teeth for *termination* (a composable re-entered by its own
-return). For the memory/read claim of T3, the composable's control atoms
+of what calling a continuation does, and F9 (`soundness-findings.md`)
+showed this gap had teeth for *termination* (a composable re-entered by its
+own return; fixed in the checkers by `spin`, but `D` is still not closed
+under what the frames touch, so the gap remains in T3's statement). For the
+memory/read claim of T3, the composable's control atoms
 suffice; for a full effect description, `D` would have to be closed under
 what the continuation's frames touch.
 
@@ -885,17 +892,17 @@ the result). It is *incomplete*: it rejects some sound uses (e.g. `n` the
 size of one parameter and also, positively, inside another parameter that
 is a thunk's result), which is acceptable for a checker.
 
-**Soundness statement (proved, modulo F8).** With the rule enforced at
-every place a size binder is fixed, Lemma 4.3 holds for sizes: a fact in
-`Φ` about `n` stays true when `n` is replaced by a natural, and the
-`finite`/open case never equates two distinct supplied sizes, so (I6) is
-preserved. **The proviso is F8**: the rule is enforced on the
-`proj`/instantiation path but *not* on the skolem-forgetting path
-(`forget_nats`), where a plain-`nat` binding's skolem is sent to `finite`
-with no positional check. There a skolem in a negative position leaks, (I6)
-fails, and a `pure` countdown loops (`soundness-findings.md`, F8). So C3
-and the size clause of T5 hold **only once `forget_nats` applies the same
-`finite_size_ok` check**.
+**Soundness statement (proved).** With the rule enforced at every place a
+size binder is fixed, Lemma 4.3 holds for sizes: a fact in `Φ` about `n`
+stays true when `n` is replaced by a natural, and the `finite`/open case
+never equates two distinct supplied sizes, so (I6) is preserved. Until
+9f877ba the rule was enforced on the `proj`/instantiation path but not on
+the skolem-forgetting path (`forget_nats`), where a skolem in a negative
+position leaked, (I6) failed, and a `pure` countdown looped
+(`soundness-findings.md`, F8). Now a `nat` binding's size is forgotten only
+where the escaping type gives it back, in both checkers, and the probes are
+refused (re-verified 2026-09-30). F10 closed a second path: a size solved
+from `n + k` must be shown no less than 0 by the facts in scope.
 
 **`nat` skolems in the calculus.** K26 models a plain-`nat` binding as an
 existential opened for the scope: `let x = e in b` with `e : nat` binds
@@ -907,8 +914,8 @@ learned about `n̂` inside the scope (from comparisons, N5d) are discharged
 at the boundary: they are true of the actual value, and are dropped, not
 exported. Size-change may use `n̂ ≥ 0` as a lower bound for a `nat`
 parameter it counts down, which is sound because a `nat` value is a
-genuine natural — again, *provided* no F8 leak has put a non-natural into a
-`nat`.
+genuine natural (F8 and F10 closed the two ways a non-natural reached a
+`nat`).
 
 ## 5. `spin` and termination
 
@@ -926,14 +933,13 @@ a procedure kept in a region whose latent effect reads that region must say
 `spin` (`no_knot`, `check.rs:1190–1274`).
 
 **Theorem T5 (termination).** *Conjectured.* Statement: if `⊢ e : τ ! φ`
-with `spin ∉ φ`, the F8 and F9 fixes applied, and every `datum` from the
-host acyclic, then every run of `e` from a well-typed store ends in a value
-or `error`.
+with `spin ∉ φ`, and every `datum` from the host acyclic, then every run
+of `e` from a well-typed store ends in a value or `error`.
 
 **What the fixes settled, and what remains.** Of the four obstacles below,
-the F1, F4 and F5 fixes discharge parts of 2 and 4 at the level of the
-*checker's rules being the ones a proof would assume*; two concrete
-counterexamples remain (F8, F9), each with a fix identified.
+the F1, F3, F4, F5, F8 and F9 fixes discharge parts of all four at the
+level of *the checker's rules being the ones a proof would assume*. No
+counterexample is known; the proof itself is not written.
 
 1. **A unary logical relation**, indexed by types and by a *level* for
    each region: a closure is terminating at `(subr φ …)` if applying it to
@@ -953,22 +959,24 @@ counterexamples remain (F8, F9), each with a fix identified.
    continuation is `spin` unless its receiver only *calls* it while `cwcc`
    runs (`escape_only`), and a stored composable is refused by the knot
    rule — both now tested. So a *directly* stored-and-re-entered
-   continuation is caught (`cwcc-store.fx` is `spin`). **F9 is the
-   residual hole**: a `cwcc` continuation that `escape_only` clears can
-   still loop when its own return re-composes a stored composable. The
-   relation must treat a `comefrom ρ` whose continuation can outlive its
-   prompt (be stored, or captured by an enclosing `cwcc`) as possible
-   non-termination; `escape_only` is the rule to strengthen.
+   continuation is caught (`cwcc-store.fx` is `spin`). F9 was the
+   residual hole: a `cwcc` continuation that `escape_only` cleared could
+   still loop when its own return re-composed a stored composable. Fixed
+   (9f877ba) as proposed: a `cwcc` call also says `spin` when its
+   receiver's latent effect has a `comefrom`, so the relation may treat
+   such a `comefrom ρ` as possible non-termination
+   (`terminate/cwcc-captures.fx`).
 2. **Size-change soundness**: the Lee–Jones–Ben-Amram theorem, plus
    well-foundedness of each measure: parts of immutable finite data
    (corollary C2 and the acyclicity of sums and products), integers
    bounded by a test, and `nat` (by I6). **The F4 fix makes the `nat`
-   measure sound on the instantiation path**; **F8 is the residual hole**:
-   the skolem-forgetting path (`forget_nats`) can still put a non-natural
-   into a `nat`, defeating the "bounded below by 0" measure and looping a
-   `pure` countdown (`f8-full.fx`). The fix is to apply the F4 positional
-   check in `forget_nats` too.
-3. **Control.** Subsumed by point 1 after the F3 fix; the residual is F9.
+   measure sound on the instantiation path**, and the F8 fix on the
+   skolem-forgetting path (`forget_nats`), which could put a non-natural
+   into a `nat` and loop a `pure` countdown (`f8-full.fx`, now refused);
+   F10 on the solving path. F11 matters here too: `apply` handed a
+   `vlambda` a writable list typed `acyclic`, which a write made cyclic
+   under a `pure` walk; it now copies.
+3. **Control.** Subsumed by point 1 after the F3 and F9 fixes.
 4. **Known procedures.** The exemption of "known" callees from the
    self-application test now refers to a *binding* (env position), not a
    `(name, type)` pair, and is forgotten as its scope ends (`truncate_env`,
@@ -980,30 +988,35 @@ counterexamples remain (F8, F9), each with a fix identified.
 A proof of T5 along these lines is a substantial piece of work: the
 relation is not step-indexed (it must prove termination), and the store
 makes it Kripke-style over worlds of region levels. Ahmed's and Boudol's
-work are the nearest precedents we know of, from memory. **With F8 and F9
-open, T5 is not merely unproved but false as the checker stands**; both
-have concrete fixes, and neither touches type or memory safety (T1–T2 hold
-regardless).
+work are the nearest precedents we know of, from memory. Until 9f877ba,
+with F8 and F9 open, T5 was not merely unproved but false as the checker
+stood; both are fixed and re-verified (2026-09-30), so T5 is conjectured
+with no known counterexample. Neither touched type or memory safety (T1–T2
+hold regardless).
 
 ## 6. Where the proof and the checkers part
 
 Details, with file and line and a short program where one was tried, are
 in `docs/research/soundness-findings.md`. In short:
 
-| id  | what                                                                               | kind                  | status (2026-09-27)                   |
-| --- | ---------------------------------------------------------------------------------- | --------------------- | ------------------------------------- |
-| F1  | "known" callees exempt from `spin` by name and type, not by binding                | `spin` unsound        | fixed (0f0a61e); re-verified          |
-| F2  | reads of frozen data dropped from effects, so a closure forgets its place          | memory unsafe         | fixed (d83face); re-verified          |
-| F3  | a continuation stored and re-entered loops with no `spin`                          | `spin` unsound        | fixed (d83face); but see F9           |
-| F4  | size binders instantiated with `finite` on the `proj` path                         | sizes and `nat` wrong | fixed (0f0a61e); but see F8           |
-| F5  | the self-application test gives up at depth 64 and answers "not cyclic"            | `spin` unsound        | fixed (0f0a61e); re-verified          |
-| F6  | the `no-escape` fact is claimed for data a returned closure still holds            | latent                | fixed (d83face): first-order only     |
-| F7  | the cellular engine's throw does not end the places it leaves                      | space                 | fixed (d83face): `CONT_REGIONS`       |
-| F8  | `forget_nats` sends a `nat` skolem to `finite` in a negative position, no F4 check | `spin` + sizes wrong  | **NEW, open**; `pure` loop shown      |
-| F9  | a `cwcc` continuation cleared by `escape_only` loops through a stored composable   | `spin` unsound        | **NEW, suspected**; `pure` loop shown |
-| A1  | K26 reads masking side conditions over derivation types, the checker over syntax   | proof assumption      | holds for constructs present          |
-| A2  | cycles through a generative name count as contractive                              | proof assumption      | fixed (d83face): `grounded`           |
-| A3  | `datum` values from the host are acyclic                                           | proof assumption      | holds by construction                 |
+| id  | what                                                                               | kind                  | status (2026-09-30)               |
+| --- | ---------------------------------------------------------------------------------- | --------------------- | --------------------------------- |
+| F1  | "known" callees exempt from `spin` by name and type, not by binding                | `spin` unsound        | fixed (0f0a61e); re-verified      |
+| F2  | reads of frozen data dropped from effects, so a closure forgets its place          | memory unsafe         | fixed (d83face); re-verified      |
+| F3  | a continuation stored and re-entered loops with no `spin`                          | `spin` unsound        | fixed (d83face); and see F9       |
+| F4  | size binders instantiated with `finite` on the `proj` path                         | sizes and `nat` wrong | fixed (0f0a61e); and see F8       |
+| F5  | the self-application test gives up at depth 64 and answers "not cyclic"            | `spin` unsound        | fixed (0f0a61e); re-verified      |
+| F6  | the `no-escape` fact is claimed for data a returned closure still holds            | latent                | fixed (d83face): first-order only |
+| F7  | the cellular engine's throw does not end the places it leaves                      | space                 | fixed (d83face): `CONT_REGIONS`   |
+| F8  | `forget_nats` sends a `nat` skolem to `finite` in a negative position, no F4 check | `spin` + sizes wrong  | fixed (9f877ba); re-verified      |
+| F9  | a `cwcc` continuation cleared by `escape_only` loops through a stored composable   | `spin` unsound        | fixed (9f877ba); re-verified      |
+| F10 | a size solved from `n + k` could be negative (`head` of `nil` solved `n = -1`)     | sizes and `nat` wrong | fixed (2026-09-29)                |
+| F11 | `apply` gave a `vlambda` a writable list typed `acyclic`                           | `spin` unsound        | fixed (2026-09-29): copies        |
+| F12 | a bignum `int` taken for a fixnum by compiled code                                 | compiler, not typing  | fixed (2026-09-29/30)             |
+| F13 | `acyclic?` and `length-is?` hid a read of data frozen into a place                 | memory unsafe         | fixed (2026-09-30): `(t data p)`  |
+| A1  | K26 reads masking side conditions over derivation types, the checker over syntax   | proof assumption      | holds for constructs present      |
+| A2  | cycles through a generative name count as contractive                              | proof assumption      | fixed (d83face): `grounded`       |
+| A3  | `datum` values from the host are acyclic                                           | proof assumption      | holds by construction             |
 
 [^cellular]: "Cellular" would be called "threaded" in the Forth community: code as
 a sequence of cells (references to routines, and their operands), run by an inner

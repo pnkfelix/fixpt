@@ -136,10 +136,11 @@ before everything else, known holes before proofs.
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
   places and shapes as three axes).
-- S2. **The proof notes' status is stale**: `soundness.md`'s table still
-  says F8 and F9 are open (C3 "F8 breaks it", T3 "F9 gap", T5 "F8/F9
-  open"), where `soundness-findings.md` has both fixed and tested.
-  Reconcile, re-verifying F8 and F9 against today's checkers.
+- S2. Done (2026-09-30): **the proof notes' status**. F8 and F9 (closed
+  in 9f877ba) re-verified against today's checkers: their probes and tests
+  refused, both checkers agreeing. `soundness.md` reconciled: C3 proved on
+  both size paths, T3's remaining caveat stated as §4.6's, T5 conjectured
+  with no known counterexample; F10–F13 added to its tables.
 - S3. **A2's depth bounds**: unfolding generative types stops at depth 64
   (`lemma.rs` `unfold_all`), the F5 pattern elsewhere; check that giving
   up only ever refuses, never accepts, in both checkers.
