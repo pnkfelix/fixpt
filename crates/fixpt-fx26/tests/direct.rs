@@ -496,7 +496,7 @@ fn native_session_adapters_aborts_and_stack_maps() {
     // `list`, called and as a value, likewise.
     let forms = s.checker.read_in(FileId(0), include_str!("programs/run/list.fx")).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["5539".to_string()], vec![]), "list");
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/list-regions.fx")).expect("reads");
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/run/list-regions.fx")).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms).0.last().map(String::as_str), Some("54"), "list-regions");
     // `apply` copies a list that may be written (F11), and a cyclic one is an
     // error, as machine code too.

@@ -586,7 +586,16 @@ impl Fx26Session {
                     .to_string(),
                 None => code,
             };
-            if !matches!(top, Top::Exp(_)) && !out.starts_with("!! ") {
+            // What the next form's run starts from (the evaluator keeps no
+            // state between forms): every definition, and every expression
+            // that writes, whose write a later form may see. It has no I/O,
+            // so a write replayed does just what it did.
+            let writes = |c: &crate::check::Checked| c.effect.0.iter().any(|a| matches!(a, crate::ast::Atom::Write(_)));
+            let replay = match &top {
+                Top::Exp(c) => writes(c),
+                _ => true,
+            };
+            if replay && !out.starts_with("!! ") {
                 self.defined26.push_str(&form_text);
                 self.defined26.push('\n');
             }

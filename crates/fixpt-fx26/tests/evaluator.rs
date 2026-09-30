@@ -96,3 +96,16 @@ fn every_program(wanted: impl Fn(&str) -> bool) {
     }
     assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
 }
+
+/// Form by form, as the REPL and `fixpt eval --fx26-run evaluate` run a
+/// program: the evaluator keeps no state between forms, so a write in one
+/// must be replayed before the next (TODO §18).
+#[test]
+fn a_write_is_seen_by_the_next_form() {
+    use fixpt_fx26::session::Strategy;
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.strategy = Strategy::Evaluate;
+    let forms = s.checker.read_in(fixpt_read::FileId(0), include_str!("programs/run/evaluator-writes.fx")).expect("reads");
+    let last = s.run_forms(&forms).expect("runs").pop().expect("forms").expect("runs");
+    assert_eq!(last.value, Ok(Some("21".to_string())));
+}

@@ -72,7 +72,7 @@ fn variadic_procedures_run() {
 #[test]
 fn list_runs() {
     assert_eq!(run(include_str!("programs/run/list.fx")), "5539");
-    assert_eq!(run(include_str!("programs/native/list-regions.fx")), "54");
+    assert_eq!(run(include_str!("programs/run/list-regions.fx")), "54");
 }
 
 /// `apply` gives a variadic procedure a fresh list (F11): one that is at

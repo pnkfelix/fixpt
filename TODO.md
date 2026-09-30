@@ -565,6 +565,12 @@ lists, which is where this pays.
 
 ## 18. The FX-26 evaluator's `set-cdr!` on a global's list (found 2026-09-29)
 
+*Fixed (2026-09-29).* The evaluator keeps no state between forms: each form
+is run after the text of those before it, and that text held definitions
+only, so an expression's write was lost. Now an expression whose effect
+writes is kept in that text too (the evaluator has no I/O, so a write
+replayed does just what it did). Test `run/evaluator-writes.fx`.
+
 In `fixpt eval --fx26-run evaluate`, after `(define xs (listof int @heap)
 (cons 1 (cons 2 nil)))` and `(set-cdr! (cdr xs) xs)`, `(car (cdr (cdr xs)))`
 fails with "a pair is expected": the write does not reach the list the
