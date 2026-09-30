@@ -49,9 +49,14 @@ are in the last section, "Log: the glance's details", and in
   word.
 
 - **Reference benchmarks** (2026-09-29, not in the per-commit bench):
-  `scheme-bench/`, 49 of Larceny's 75 R7RS benchmarks ported; and
+  `scheme-bench/`, 51 of Larceny's 75 R7RS benchmarks ported; and
   `mllang-bench/`, MLton's suite, OCaml's classic programs and the
-  Benchmarks Game (sources and provenance), 38 ported. Each README lists
+  Benchmarks Game (sources and provenance), 42 ported (2026-09-30: `pi`,
+  `chudnovsky`, `pidigits`, `pidigits5`, `smith-normal-form` and
+  `DLXSimulator`, which bignums and `u32` unblocked; `md5` and
+  `psdes-random` redone in `u32`). Native start-up is about 2.7 s, not
+  the READMEs' 1.8 s: it grew on 2026-09-29, before `nil`'s change (not
+  yet bisected). Each README lists
   answers, native times, and what blocks the rest (mostly floats, file
   I/O, `eq?` on mutable objects, bignums).
 - **Research notes** (2026-09-29, sources checked): `docs/research/floats.md`
