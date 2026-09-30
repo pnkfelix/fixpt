@@ -2185,7 +2185,9 @@ dictionary passed at run time, with the compilers specializing only
 where it is known. (The `acyclic?` soundness gap it found is S1, first
 in "Next".)
 
-**Q9. Separate compilation** (`docs/research/separate-compilation.md`):
+**Q9. Separate compilation** (`docs/research/separate-compilation.md`),
+and with it modules, which the prelude and an FX-26 standard library wait
+on (`TODO.md` §22):
 S0 a saved heap image of the loaded front end, keyed by a hash of its
 files and the binary; S1 checker snapshots at file boundaries; S2 facts
 keyed by (file, offset) (with Q1's `extract` fix); S3 an optional
@@ -2206,8 +2208,10 @@ a prelude written in FX-26; `letrec` bodies checked against the expected
 type; reader errors placed; a `let` passing a `poly` to its body; types
 naming types defined after them; `define*`'s missing-`spin` error; a local
 `letrec`'s globals inferred; effect mismatches with a line of what is
-beyond. Waiting on the user: a prelude for `map` and kin, prompt answer
-types, `quote` of non-symbols, shadowed standard names. The list as
+beyond. A prelude for `map` and kin, and moving primitives out of Rust
+into an FX-26 standard library, waits on modules (the user's; `TODO.md`
+§22, with what was measured). Waiting on the user: prompt answer types,
+`quote` of non-symbols, shadowed standard names. The list as
 it was: local `letrec`
 effects must list every global read transitively (infer them as
 `define*` does); a `letrec` body is not checked against the expected

@@ -525,7 +525,11 @@ Each has a small reproduction in the port that met it:
   that the lowered path accepts: not reproduced (a countdown on an `int`
   is refused alike on every path); a port's own case would be needed.
 - `length` accepts only frozen `nlist`s, so every port over `@heap`
-  lists writes its own.
+  lists writes its own. (2026-09-30: `list-length`, at any region.)
+- Facts learned from a test are not learned through `or` (found
+  2026-09-30): in the else of `(if (or (= n 0) (null? xs)) …)`, `n ≥ 1` is
+  not known, so `(- n 1)` is no `nat`; separate `cond` arms work. Both
+  checkers alike.
 
 ## 14. Standard operations the ports wrote themselves
 
@@ -807,3 +811,48 @@ To do:
    First, cheaply: have `terminate.rs` try to extract a lexicographic
    ranking from each group that passes, over the test programs, the front
    end and the benchmark ports, and report those it cannot.
+
+## 22. A prelude, and a standard library in FX-26, after modules (the user's, 2026-09-30)
+
+The user wants as much as can be moved out of Rust into FX-26: `map`,
+`for-each` and `fold` first (they take procedures, so they cannot be
+runtime primitives, which cannot call back into FX-26), then what is a
+primitive today only for want of a library (`append`, `reverse`,
+`array->list`, `list->array`, `max`, `min`, `zero?`, the comparisons), one
+at a time, each kept only if native code stays in the ballpark.
+
+**Waits on modules** (the user's): a prelude's names must not mix with the
+REPL's globals. A module would give it separate names, exports that
+cannot be reassigned (so that using `map` is a constant, adding no `(read
+(globals map))` to a caller's effect, as a global would), and one check
+and compilation, cached as the front end's register code is (Q9: `(unit
+…)` files with `.fxi` interfaces). The prelude is then the first module
+every program imports. Open with the user: first-class modules, as
+FX-91's, or second-class units; how the REPL opens one.
+
+What was measured and found (2026-09-30), for when it is built:
+- **Native speed.** `append`, a list's length and `max` written in FX-26
+  against the Rust primitives, 20,000 rounds over 1000-element lists:
+  0.380 s against 0.355 s, about 7% slower, the same allocation (44.7 M
+  words) and collections. In the ballpark.
+- **Termination without `spin`.** A walk of a list at a writable region
+  needs `spin` (it may have been made cyclic), where a primitive checks for
+  a cycle and fails instead. A library walk avoids it in two phases, one
+  `letrec` group: first a fuel of, say, 1024 steps counted down; only if
+  the list is longer, the rest's length by a cycle-checking pass
+  (`list-length`), then that many steps. Each loop counts down a natural
+  and the first hands over to the second once, so size-change accepts it:
+  the type is `(subr (read @l) (ints) int)`, as a primitive's. Lists under
+  the threshold pay a counter; longer ones one more pass over the rest; a
+  cycle always passes the threshold and fails as the primitives do. If the
+  procedure mapped lengthens the list, the second phase stops at the
+  length it found. (Resetting the fuel within one procedure does not
+  check: that call makes nothing smaller.) Prototype:
+  `docs/research/examples/fuel-walk.fx`.
+- **Step limits.** A primitive is one step; a library procedure is every
+  step it takes, so a program near FX-26's default limit (20M) may need
+  more fuel than before. Only interpreted paths count.
+- **Stack depth.** A naive recursive `append` recurses as deep as the list
+  is long; library procedures that build lists should use an accumulator
+  and reverse, so that a long list cannot overflow the native stack.
+
