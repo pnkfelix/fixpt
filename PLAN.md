@@ -2096,7 +2096,8 @@ user's choice); `eq` in line on every machine, and in the evaluator.
 `(eqtable k v kr r)`, keyed by a dictionary `(identity k kr)` only the
 standard procedures make, hashed by address, one stamp (the collection
 count) where Larceny has tablets. Left: `eqv?`, the ports' workarounds,
-and `equal` and `dynamic`; later, Larceny's old and young tablets, so that a
+and `equal` and `dynamic`; later, `uniqueof` for interning (identity with
+contents read purely, `TODO.md` §19), and Larceny's old and young tablets, so that a
 minor collection rehashes only young keys (`TODO.md` §19). What was planned:
 Every batch of ports hit the missing identity test (`equal`, `dynamic`
 blocked; workarounds in `browse`, `conform`, `maze`, `sboyer`, `peval`,

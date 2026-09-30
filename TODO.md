@@ -590,8 +590,34 @@ procedures make, its operations writing the keys' region, hashed by
 address and restamped by the collection count. Left: retiring the ports'
 workarounds; porting `equal` and `dynamic`; an `eqv?` (R7RS: numbers and
 characters by value), for tables of any key; maybe an equality kind, as
-SML's `''a`, to refuse `eq?` on procedures; tables keyed by bloblets; and
-the two-level tables below. The notes as they were:
+SML's `''a`, to refuse `eq?` on procedures; tables keyed by bloblets;
+`uniqueof` for interning, and the two-level tables, both below. The notes
+as they were:
+
+**Later: `uniqueof`, for interning** (the user's, 2026-09-30). Interning
+(hash-consing) needs exact identity, so that `eq?` is structural equality,
+and contents read purely, so that interned values act as values. Today
+each is had only without the other: immutable data reads purely, but
+`eq?` of it is only "`#t` if equal"; a bloblet never written has exact
+identity, but each read costs `(read r)`, which spreads to everything that
+looks at the structure (a checker's types, say), and it is not `data`.
+Symbols have both, as a special case. FX-87 and FX-91 had the general one
+(`GiffordHistory/mit-psrg-fx/fx87/dist/standard.scm`, lines 225–244;
+`crates/fixpt-fx91/src/fx-module.fx`):
+- `(uniqueof t)`, a standard generative type;
+  `unique : (subr (alloc @uniqueof) (t) (uniqueof t))`, `value` pure, and
+  `eq?` exact on it.
+- The allocation is at a global region, as FX-87's `@uniqueof`, not a
+  region parameter: a `letregion` or `letfreeze` could mask an allocation
+  at `r`, leaving a pure expression a compiler may fold or merge, which
+  exact identity forbids. (Our reading; the sources give no reason.)
+  FX-91's `init` effect does the same work.
+- An interning table: `intern`, given a hash and an equality on `t` (a
+  dictionary), gives the existing node or makes one with `unique`; its
+  effect `(alloc @uniqueof)` and the table's region's.
+- Weak references, which we do not have, or an interning table keeps every
+  node it made alive.
+
 
 **Later: an `eqtable` in two tablets, as Larceny's** (the user's,
 2026-09-30; the single stamp is fine for now). With one stamp, the first
