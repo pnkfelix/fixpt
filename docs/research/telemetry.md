@@ -76,16 +76,16 @@ Every file was run with `fixpt check FILE` (both checkers, which agree on
 all of them) and `fixpt eval FILE`, under a 60-second limit, with the
 binary in `target/release` on 2026-09-29:
 
-| File                        | Shows                                                         | `fixpt check`     | `fixpt eval`          |
-| --------------------------- | ------------------------------------------------------------- | ----------------- | --------------------- |
-| `time-fib.fx`               | two clock reads around `fib 25`; pinning with `black-box`     | passes            | `76025`               |
-| `pure-refused.fx`           | a `pure` procedure that reads a clock                         | refused, as meant | (refused)             |
-| `masked-not.fx`             | `letregion` masks its own region, never `@telemetry`          | passes            | `1000` (stub clock)   |
-| `count-collections.fx`      | collections and words allocated while building a list         | passes            | `0` (stub counters)   |
-| `black-box.fx`              | a benchmark loop, dropped, hoisted and pinned                 | passes            | `0`                   |
-| `run-with-stats.fx`         | the typed thunk runner, on a pure and an allocating thunk     | passes            | `5000125025`          |
-| `place-words.fx`            | words allocated in one arena, read inside its body            | passes            | `0` (stub counter)    |
-| `place-escape-refused.fx`   | the same reading kept for after the arena ends                | refused, as meant | (refused)             |
+| File                      | Shows                                                     | `fixpt check`     | `fixpt eval`        |
+| ------------------------- | --------------------------------------------------------- | ----------------- | ------------------- |
+| `time-fib.fx`             | two clock reads around `fib 25`; pinning with `black-box` | passes            | `76025`             |
+| `pure-refused.fx`         | a `pure` procedure that reads a clock                     | refused, as meant | (refused)           |
+| `masked-not.fx`           | `letregion` masks its own region, never `@telemetry`      | passes            | `1000` (stub clock) |
+| `count-collections.fx`    | collections and words allocated while building a list     | passes            | `0` (stub counters) |
+| `black-box.fx`            | a benchmark loop, dropped, hoisted and pinned             | passes            | `0`                 |
+| `run-with-stats.fx`       | the typed thunk runner, on a pure and an allocating thunk | passes            | `5000125025`        |
+| `place-words.fx`          | words allocated in one arena, read inside its body        | passes            | `0` (stub counter)  |
+| `place-escape-refused.fx` | the same reading kept for after the arena ends            | refused, as meant | (refused)           |
 
 The snippets from other runtimes: the Python, Node and Java ones were run
 here (Python 3.14.7, Node 26.0.0, OpenJDK 21.0.11). The Chez, Racket,
@@ -568,25 +568,30 @@ column in a commit's bench table where time cannot.
 
 ## What fixpt measures today
 
-| What                   | Where                         | Updated                                       | Notes                                                                    |
-| ---------------------- | ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------------ |
-| `gc_count`             | `Heap` (heap.rs)              | end of each **major** collection (`collect`)  | Majors only since the nursery landed                                     |
-| `minor_count`          | `Heap`                        | end of each minor collection (young.rs)       |                                                                          |
-| `words_copied`         | `Heap`                        | both kinds                                    | Minor promotions and major copies summed                                 |
-| `gc_nanos`             | `Heap`                        | both kinds, `Instant` around each             | Wall-clock time; minor and major summed; no maximum                      |
-| `allocated()`          | `Heap`                        | computed from `words_allocated` and the tops  | Nursery and semispace only; exact even with inline allocation            |
-| `region_words()`       | `Heap` (regions.rs)           | at chunk turnover and region exit, plus fills | Arenas and reaps together; no per-region total once a chunk is full      |
-| `region_in_use(h)`     | `Heap`                        | computed                                      | Per live region; for a reap, after a collection, only what was reachable |
-| `used()`, `capacity()` | `Heap`                        | computed                                      | Instantaneous; no peak is kept                                           |
-| code area `used`       | `CodeArea` (code.rs)          | on allocation and sweep                       | Not exposed                                                              |
-| `%gc-count`            | runtime primitive (prim.rs)   |                                               | Scheme only; returns `gc_count`, so majors only                          |
-| `%gc-words-copied`     | runtime primitive             |                                               | Scheme only                                                              |
-| `%gc-every!`           | runtime primitive             |                                               | Stress policy                                                            |
-| `%sro`                 | engine primitive              |                                               | Larceny's SRO. Deliberately in no language's standard environment        |
-| `Profile`              | fixpt-engine cellular.rs      | per cell, Rust machine only                   | Cells run and words allocated, by word (`FIXPT_PROFILE`)                 |
-| callout counts         | fixpt-native cellular.rs      | per call-out                                  | `FIXPT_CALLOUTS`, instrumented build path                                |
-| phase laps             | fixpt-fx26 tests/bootstrap.rs | per phase                                     | `probe_phases_as_register_code`; `FIXPT_GC_REPORT`, `FIXPT_TIME_PHASES`  |
-| `run-word` time        | prim.rs `%run-word`           | per run                                       | `FIXPT_TIME_WORDS`                                                       |
+| What                                 | Where                         | Updated                                       | Notes                                                                    |
+| ------------------------------------ | ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------------ |
+| `gc_count`                           | `Heap` (heap.rs)              | end of each **major** collection (`collect`)  | Majors only since the nursery landed                                     |
+| `minor_count`                        | `Heap`                        | end of each minor collection (young.rs)       |                                                                          |
+| `words_copied`                       | `Heap`                        | both kinds                                    | Minor promotions and major copies summed                                 |
+| `gc_nanos`                           | `Heap`                        | both kinds, `Instant` around each             | Wall-clock time; minor and major summed                                  |
+| `max_major_nanos`, `max_minor_nanos` | `Heap`                        | end of each collection of that kind           | The longest pause of each kind (stage 1, 2026-09-30)                     |
+| `peak_words`                         | `Heap`                        | start of each collection                      | Most words in use, sampled when the heap is fullest (stage 1)            |
+| `trace`                              | `Heap`                        | set by `FIXPT_GC_TRACE`                       | A line per collection on stderr: kind, pause, copied, in use (stage 1)   |
+| `allocated()`                        | `Heap`                        | computed from `words_allocated` and the tops  | Nursery and semispace only; exact even with inline allocation            |
+| `region_words()`                     | `Heap` (regions.rs)           | at chunk turnover and region exit, plus fills | Arenas and reaps together; no per-region total once a chunk is full      |
+| `region_in_use(h)`                   | `Heap`                        | computed                                      | Per live region; for a reap, after a collection, only what was reachable |
+| `used()`, `capacity()`               | `Heap`                        | computed                                      | Instantaneous; the peak is `peak_words`                                  |
+| code area `used`                     | `CodeArea` (code.rs)          | on allocation and sweep                       | Not exposed                                                              |
+| `%gc-count`                          | runtime primitive (prim.rs)   |                                               | Scheme only; returns `gc_count`, so majors only                          |
+| `%gc-words-copied`                   | runtime primitive             |                                               | Scheme only                                                              |
+| `%gc-every!`                         | runtime primitive             |                                               | Stress policy                                                            |
+| `%sro`                               | engine primitive              |                                               | Larceny's SRO. Deliberately in no language's standard environment        |
+| `Profile`                            | fixpt-engine cellular.rs      | per cell, Rust machine only                   | Cells run and words allocated, by word (`FIXPT_PROFILE`)                 |
+| callout counts                       | fixpt-native cellular.rs      | per call-out                                  | `FIXPT_CALLOUTS`, instrumented build path                                |
+| phase laps                           | fixpt-fx26 tests/bootstrap.rs | per phase                                     | `probe_phases_as_register_code`; `FIXPT_GC_REPORT`, `FIXPT_TIME_PHASES`  |
+| summary                              | fixpt-cli fx26.rs             | at the end of `fixpt eval`                    | `FIXPT_GC_SUMMARY` (or `FIXPT_GC_REPORT`); with the peak and pauses      |
+| `fixpt bench` columns                | fixpt-cli bench.rs            | the native run's last                         | `M words` allocated and `GCs`, minor and major (stage 1)                 |
+| `run-word` time                      | prim.rs `%run-word`           | per run                                       | `FIXPT_TIME_WORDS`                                                       |
 
 There are no clocks at all in the Scheme runtime or FX-26's standard
 environment. FX-26's standard environment has no output either, so an FX-26

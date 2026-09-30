@@ -92,8 +92,14 @@ pub fn command(args: &[String]) -> i32 {
     }
     let mut header = vec!["program".to_string(), "answer".to_string()];
     header.extend(machines.iter().map(|m| m.to_string()));
+    if machines.contains(&"native") {
+        header.extend(["M words".to_string(), "GCs".to_string()]);
+    }
     print_table(&header, &rows);
     println!("\nbest of {runs} run(s), in milliseconds; the answer is the lowered program's.");
+    if machines.contains(&"native") {
+        println!("M words: millions of words the native run allocated; GCs: its collections, minor and major.");
+    }
     for n in notes {
         println!("{n}");
     }
@@ -130,6 +136,7 @@ fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<S
         }
     };
     let (c, tops) = checked(text)?;
+    let mut work = None;
     for m in machines {
         let got = match *m {
             "lowered" => Some((answer.clone(), t_lowered)),
@@ -138,9 +145,18 @@ fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<S
             "stencils" => on_machine(text, &c, &tops, runs, fixpt_native::stencil::run_word, false),
             "compiled" => on_machine(text, &c, &tops, runs, fixpt_native::cellular::run_word_compiled, false),
             "registers" => on_machine(text, &c, &tops, runs, fixpt_native::cellular::run_word_registers, true),
-            _ => in_native_convention(text, runs),
+            _ => in_native_convention(text, runs).map(|(v, t, w)| {
+                work = Some(w);
+                (v, t)
+            }),
         };
         out.push(cell(m, got));
+    }
+    if machines.contains(&"native") {
+        match work {
+            Some((words, gcs)) => out.extend([format!("{:.1}", words as f64 / 1e6), gcs.to_string()]),
+            None => out.extend(["—".to_string(), "—".to_string()]),
+        }
     }
     Ok(out)
 }
@@ -192,8 +208,10 @@ fn on_machine(text: &str, c: &Checker, tops: &[Top], runs: usize, run: Run, regi
 
 /// A program whose last line calls a procedure on integers, that procedure
 /// compiled in the native convention (`fixpt_native::direct`) and called
-/// so: what it gave, and the best time; or nothing, if it is declined.
-fn in_native_convention(text: &str, runs: usize) -> Option<(String, f64)> {
+/// so: what it gave, and the best time, and the words it allocated and the
+/// collections it made (the last run's: the same in each); or nothing, if
+/// it is declined.
+fn in_native_convention(text: &str, runs: usize) -> Option<(String, f64, (u64, u64))> {
     let lines: Vec<&str> = text.trim_end().lines().collect();
     let call = lines.last()?.trim().strip_prefix('(')?.strip_suffix(')')?;
     let mut parts = call.split_whitespace();
@@ -218,7 +236,14 @@ fn in_native_convention(text: &str, runs: usize) -> Option<(String, f64)> {
         });
         let rt = sc.runtime_unrooted();
         let p = m.compile(&mut rt.heap, closure).ok()?[0].1;
-        Some(best(runs, || m.call(rt, p, &args, u64::MAX >> 1).map(|v| fixpt_runtime::write_value(&rt.heap, v)).unwrap_or_else(|t| format!("!! {}", t.what))))
+        let mut work = (0, 0);
+        let (v, t) = best(runs, || {
+            let (a0, g0) = (rt.heap.allocated(), rt.heap.collections());
+            let v = m.call(rt, p, &args, u64::MAX >> 1).map(|v| fixpt_runtime::write_value(&rt.heap, v)).unwrap_or_else(|t| format!("!! {}", t.what));
+            work = (rt.heap.allocated() - a0, rt.heap.collections() - g0);
+            v
+        });
+        Some((v, t, work))
     })
 }
 

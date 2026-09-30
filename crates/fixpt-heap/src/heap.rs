@@ -242,6 +242,14 @@ pub struct Heap {
     pub minor_nanos: u64,
     due_major: bool,
     policy_count: u64,
+    /// Telemetry (`docs/research/telemetry.md`, stage 1): the longest pause
+    /// of each kind, in nanoseconds; the most words in use, sampled as each
+    /// collection starts, which is when the heap is fullest; and whether to
+    /// write a line for each collection to stderr (`FIXPT_GC_TRACE`).
+    pub max_major_nanos: u64,
+    pub max_minor_nanos: u64,
+    pub peak_words: u64,
+    pub trace: bool,
     /// Check, before each minor collection, that every young reference in
     /// the old space is on a dirty card: for tests.
     pub verify_barrier: bool,
@@ -294,6 +302,10 @@ impl Heap {
             minor_count: 0,
             minor_words_copied: 0,
             minor_nanos: 0,
+            max_major_nanos: 0,
+            max_minor_nanos: 0,
+            peak_words: 0,
+            trace: false,
             due_major: false,
             policy_count: 0,
             verify_barrier: std::env::var("FIXPT_VERIFY_BARRIER").is_ok_and(|v| v == "1"),
@@ -1273,6 +1285,8 @@ impl Heap {
     /// contiguous and relocation-free.
     pub fn collect(&mut self, extra_roots: &mut [&mut [Value]]) {
         let started = std::time::Instant::now();
+        let before = self.used();
+        self.peak_words = self.peak_words.max(before as u64);
         self.words_allocated += self.top.saturating_sub(self.top_after_gc) as u64 + (self.nursery_top - NURSERY_BASE) as u64;
         let from = self.active;
         let to = if self.active == 0 { MAX_SEMI_WORDS } else { 0 };
@@ -1444,7 +1458,26 @@ impl Heap {
             self.grow(free * LIVE_RATIO);
         }
         self.top_after_gc = self.top;
-        self.gc_nanos += started.elapsed().as_nanos() as u64;
+        let nanos = started.elapsed().as_nanos() as u64;
+        self.gc_nanos += nanos;
+        self.max_major_nanos = self.max_major_nanos.max(nanos);
+        self.traced("major", self.gc_count, nanos, free, before);
+    }
+
+    /// For `FIXPT_GC_TRACE`: a line for the collection just made, of `kind`
+    /// and number `n`, which took `nanos` and copied `copied` words, the
+    /// heap having `before` words in use as it started.
+    pub(crate) fn traced(&self, kind: &str, n: u64, nanos: u64, copied: usize, before: usize) {
+        if self.trace {
+            let m = |w: usize| w as f64 / 1e6;
+            eprintln!(
+                "; gc {kind} {n}: {:.2} ms, {:.2} M words copied, {:.2} M in use before, {:.2} M after",
+                nanos as f64 / 1e6,
+                m(copied),
+                m(before),
+                m(self.used())
+            );
+        }
     }
 
     /// For machine code that allocates without calling in (`fixpt-native`):

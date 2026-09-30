@@ -103,6 +103,8 @@ impl Heap {
     /// regions' and code area's objects, and the old space's dirty cards.
     pub(super) fn collect_minor(&mut self, extra_roots: &mut [&mut [Value]]) {
         let started = std::time::Instant::now();
+        let before = self.used();
+        self.peak_words = self.peak_words.max(before as u64);
         if self.verify_barrier {
             self.verify_remembered().unwrap_or_else(|e| panic!("the write barrier missed a store: {e}"));
         }
@@ -214,6 +216,8 @@ impl Heap {
         let nanos = started.elapsed().as_nanos() as u64;
         self.gc_nanos += nanos;
         self.minor_nanos += nanos;
+        self.max_minor_nanos = self.max_minor_nanos.max(nanos);
+        self.traced("minor", self.minor_count, nanos, free, before);
     }
 
     /// That every young reference in the old space is on a dirty card: what

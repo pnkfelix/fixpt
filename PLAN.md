@@ -162,7 +162,7 @@ benchmark ports and the research (2026-09-29)", below: Q1 native-path
 bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
 `u32`/`u64`, wrapping, their operations in line natively, `i64` and `u64`
 raw in native registers, `int` a bignum, a fixnum version of native code;
-left: big literals); Q3 telemetry's counts;
+left: big literals); Q3 telemetry's counts (stage 1 done);
 Q4 floats (done: `f64` boxed, `f32` an immediate); the front end's
 register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (done:
 one pure `eq?`, `eqtable`; left: the ports' workarounds);
@@ -2086,8 +2086,12 @@ passes its count in `x9`; `apply` in both register compilers
 in line by register code (same day). To do: fixed parameters before the
 rest.
 
-**Q3. Telemetry, stage 1** (`docs/research/telemetry.md`): fix the counts
-first. Done (2026-09-29): minor collections counted with major ones
+**Q3. Telemetry, stage 1** (`docs/research/telemetry.md`): done
+(2026-09-30): the longest pause of each kind, the peak of words in use,
+`FIXPT_GC_TRACE` (a line per collection), `FIXPT_GC_SUMMARY` (the report,
+with those), and `M words` and `GCs` columns for the native run in
+`fixpt bench`. Stage 2 (the FX-26 operations, `@telemetry`, `black-box`)
+waits on the user's answers in the note. Fix the counts first. Done (2026-09-29): minor collections counted with major ones
 (`Heap::collections`, `%gc-count`, the phase probe, `FIXPT_GC_REPORT`,
 which `fixpt eval` now reads too); `minor_words_copied` and
 `minor_nanos` apart; region and code-area allocation in `allocated()`;

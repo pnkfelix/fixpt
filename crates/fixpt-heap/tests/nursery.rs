@@ -105,3 +105,21 @@ fn stores_across_generations_survive_many_collections() {
     h.verify().unwrap();
     assert!(h.minor_count > 10 && h.gc_count > 3, "{} minor, {} major", h.minor_count, h.gc_count);
 }
+
+/// Telemetry (`docs/research/telemetry.md`, stage 1): the most words in use
+/// is sampled as each collection starts, so it is at least what was live
+/// then; and the longest pause of each kind is counted apart.
+#[test]
+fn the_peak_and_the_longest_pauses_are_kept() {
+    let mut h = heap();
+    let mut roots = [list(&mut h, 1000)];
+    let before = h.used() as u64;
+    h.collect_due(&mut [&mut roots]);
+    h.collect(&mut [&mut roots]);
+    assert!(h.peak_words >= before, "{} < {before}", h.peak_words);
+    assert!(h.minor_count + h.gc_count >= 1);
+    if h.gc_count > 0 {
+        assert!(h.max_major_nanos > 0 && h.max_major_nanos <= h.gc_nanos);
+    }
+    assert_eq!(sum(&h, roots[0]), 500500);
+}

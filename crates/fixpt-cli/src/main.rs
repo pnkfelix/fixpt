@@ -412,6 +412,8 @@ pub(crate) fn apply_gc_policy(session: &mut Session) {
     if let Some(l) = STEP_LIMIT.get() {
         session.engine.set_step_limit(*l);
     }
+    // A line on stderr for each collection (`docs/research/telemetry.md`).
+    session.runtime_unrooted().heap.trace = std::env::var_os("FIXPT_GC_TRACE").is_some();
 }
 
 fn split_flags(args: &[String]) -> (Flags, Vec<String>) {

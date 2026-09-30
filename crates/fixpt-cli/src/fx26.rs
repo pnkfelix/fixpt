@@ -503,7 +503,9 @@ pub fn eval_program(backend: Backend, name: &str, text: &str) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
-    let report = std::env::var_os("FIXPT_GC_REPORT").is_some();
+    // `FIXPT_GC_SUMMARY` (or its older name, `FIXPT_GC_REPORT`): what the
+    // heap did while the program ran, at its end.
+    let report = std::env::var_os("FIXPT_GC_SUMMARY").is_some() || std::env::var_os("FIXPT_GC_REPORT").is_some();
     let before = GcStats::of(&mut session);
     let code = eval_program_in(&mut session, name, text);
     if report {
@@ -522,6 +524,9 @@ struct GcStats {
     allocated: u64,
     copied: u64,
     minor_copied: u64,
+    peak: u64,
+    max_major: u64,
+    max_minor: u64,
 }
 
 impl GcStats {
@@ -536,6 +541,9 @@ impl GcStats {
             allocated: h.allocated(),
             copied: h.words_copied,
             minor_copied: h.minor_words_copied,
+            peak: h.peak_words,
+            max_major: h.max_major_nanos,
+            max_minor: h.max_minor_nanos,
         }
     }
 
@@ -554,6 +562,13 @@ impl GcStats {
             mw(self.allocated - b.allocated),
             mw((self.copied - b.copied) - (self.minor_copied - b.minor_copied)),
             mw(self.minor_copied - b.minor_copied),
+        );
+        // Since the session began: the front end's loading included.
+        eprintln!(
+            "; longest pause {:.2} ms major, {:.2} ms minor; at most {:.1} M words in use",
+            ms(self.max_major),
+            ms(self.max_minor),
+            mw(self.peak)
         );
     }
 }
