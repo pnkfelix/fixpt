@@ -54,9 +54,8 @@ are in the last section, "Log: the glance's details", and in
   Benchmarks Game (sources and provenance), 42 ported (2026-09-30: `pi`,
   `chudnovsky`, `pidigits`, `pidigits5`, `smith-normal-form` and
   `DLXSimulator`, which bignums and `u32` unblocked; `md5` and
-  `psdes-random` redone in `u32`). Native start-up is about 2.7 s, not
-  the READMEs' 1.8 s: it grew on 2026-09-29, before `nil`'s change (not
-  yet bisected). Each README lists
+  `psdes-random` redone in `u32`). Native start-up is 0.5 s (2026-09-30;
+  it had grown to 2.7 s: `docs/performance.md`, "Start-up"). Each README lists
   answers, native times, and what blocks the rest (mostly floats, file
   I/O, `eq?` on mutable objects, bignums).
 - **Research notes** (2026-09-29, sources checked): `docs/research/floats.md`

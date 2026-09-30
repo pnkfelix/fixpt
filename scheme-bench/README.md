@@ -19,7 +19,10 @@ Every port passes both checkers, gives Larceny's answer natively, and
 agrees with the program lowered to Scheme (at smaller counts where the
 full one takes long). Times are one native run each, alone, on
 2026-09-29 (`pi` and `chudnovsky` on 2026-09-30), wall clock including
-about 1.8 s of start-up (reading, checking and compiling the program).
+about 1.8 s of start-up (reading, checking and compiling the program), or
+2.7 s for `pi` and `chudnovsky`. Start-up is about 0.5 s since 2026-09-30
+(the front end's checker and compilers are no longer also loaded
+lowered): `pi` now takes 0.6 s in all.
 
 | benchmark    | answer (the last form's value)                   | native s | notes                                                                    |
 | ------------ | ------------------------------------------------ | -------- | ------------------------------------------------------------------------ |

@@ -195,8 +195,23 @@ pub const READER_PREFIX: &str = "fx26-reader:";
 /// then load it into `scheme`, under [`READER_PREFIX`]. It runs on every
 /// keystroke, so nothing of it may run before the licence says it can.
 pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
+    load_lowered(scheme, &crate::front_end())
+}
+
+/// The reader and parser alone (the front end's first files, which need
+/// none after them), lowered and loaded: all a session whose checker and
+/// compilers run as register code runs lowered. A tenth of the front end,
+/// and of its loading, which is most of a session's start.
+fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
+    let text = crate::FRONT_END_FILES[..2].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
+    load_lowered(scheme, &text)
+}
+
+/// `text`, the front end or its first files, checked, licensed as the
+/// reader, lowered and loaded.
+fn load_lowered(scheme: &mut Session, text: &str) -> Result<(), String> {
     // An error in the front end says where in its files.
-    let mut compiled = compile_program_as(&crate::front_end(), READER_PREFIX)
+    let mut compiled = compile_program_as(text, READER_PREFIX)
         .map_err(|e| format!("the front end, {}: {}", crate::front_end_location(e.span.start as usize), e.message))?;
     compiled.checker.reader_licence()?;
     compiled.load_into(scheme)
@@ -789,11 +804,15 @@ impl Fx26Session {
     /// program's convention.
     fn own_pieces(&mut self) -> R<()> {
         let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
-        if !self.scheme.is_bound(&format!("{READER_PREFIX}check-program")) {
+        if self.front_end_compiled {
+            if !self.scheme.is_bound(&format!("{READER_PREFIX}eager-start-fx26")) {
+                load_reader_alone(&mut self.scheme).map_err(fail)?;
+            }
+            if !self.scheme.is_bound("fx26-native:check-program") {
+                self.front_end_as_register_code()?;
+            }
+        } else if !self.scheme.is_bound(&format!("{READER_PREFIX}check-program")) {
             load_eager_reader(&mut self.scheme).map_err(fail)?;
-        }
-        if self.front_end_compiled && !self.scheme.is_bound("fx26-native:check-program") {
-            self.front_end_as_register_code()?;
         }
         let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.native_convention));
         self.scheme.call_global(&format!("{READER_PREFIX}check-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;

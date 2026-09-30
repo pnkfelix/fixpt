@@ -31,7 +31,9 @@ Every port passes both checkers, runs natively, and agrees with the
 program lowered to Scheme. Times are one native run each, alone, on
 2026-09-29 (`DLXSimulator`, `md5`, `pidigits`, `pidigits5`,
 `psdes-random` and `smith-normal-form` on 2026-09-30), wall clock
-including about 1.8 to 3.5 s of start-up.
+including about 1.8 to 3.5 s of start-up. Start-up is about 0.5 s since
+2026-09-30 (the front end's checker and compilers are no longer also
+loaded lowered): subtract about 2.2 s from a time here for today's.
 
 | benchmark                      | answer                                          | native s | count and notes                                             |
 | ------------------------------ | ----------------------------------------------- | -------- | ----------------------------------------------------------- |

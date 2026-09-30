@@ -2074,3 +2074,30 @@ differ, was tried and was slower: a loop's test is mostly of different
 words.) The way back: a version of a procedure's code for fixnums, in
 which a value tested once stays known, and whose slow paths go over to the
 general version.
+
+## Start-up: the front end loaded lowered only where it runs so (2026-09-30)
+
+Both benchmark agents saw native start-up near 2.7 s, against the
+READMEs' 1.8 s. Bisected, on an empty program: 1.89 s up to `4d16831`,
+2.30 s at `ec2a436` ("The session's FX-26 checker and compilers run as
+register code", which said a tiny program would start 0.2 to 0.45 s
+later), and 2.7 s by `8747c9d` as the front end grew. Timed by stage:
+
+| stage (empty program, native)                               |   before |  after |
+| ----------------------------------------------------------- | --------:| ------:|
+| the whole front end checked and lowered                     |   0.31 s |      — |
+| the whole front end loaded into the Scheme engine           |   1.91 s |      — |
+| the reader and parser checked, lowered and loaded           |        — | 0.05 s |
+| the front end checked again, compiled to register code, run |   0.37 s | 0.37 s |
+| total, wall clock                                           |   2.83 s | 0.49 s |
+
+Since `ec2a436`, a session's checker and compilers run as register code,
+but the session still loaded the whole front end lowered, for the reader
+alone, which stays lowered (the eager reader steps it, character by
+character). It now loads the reader and parser (the front end's first two
+files, which need nothing after them, and which the reader's licence
+covers). A session whose front end runs lowered (`FIXPT_FRONT_END_LOWERED=1`,
+the tests' default) loads all of it, as before. Whole runs: `md5` 3.0 →
+0.71 s, `pi` 2.9 → 0.59 s. The test suite went from about 147 to 135 s.
+What is left of start-up is mostly the second check of the whole front
+end, by the Rust checker, for the register compiler.
