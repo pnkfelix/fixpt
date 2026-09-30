@@ -13,7 +13,7 @@ To run one as machine code:
 fixpt eval --step-limit none --fx26-run cellular --calling-convention native scheme-bench/NAME.fx
 ```
 
-## Ported: 51 of 75
+## Ported: 52 of 75
 
 Every port passes both checkers, gives Larceny's answer natively, and
 agrees with the program lowered to Scheme (at smaller counts where the
@@ -28,10 +28,10 @@ lowered): `pi` now takes 0.6 s in all.
 | ------------ | ------------------------------------------------ | -------- | ------------------------------------------------------------------------ |
 | `ack`        | 32765                                            | 6.1      |                                                                          |
 | `array1`     | 1000000                                          | 25.7     |                                                                          |
-| `browse`     | (837 177 1090 617 661 749 628 56 826 408 1035 4… | 12.3     | `item` datatype; `eq?` of items approximated                             |
+| `browse`     | (837 177 1090 617 661 749 628 56 826 408 1035 4… | 10.0     | `item` datatype; `eq?` of their symbols or (mutable) lists (2026-09-30)  |
 | `bv2string`  | 0                                                | 19.8     | UTF-8 codecs written in the file; bytevectors are byte bloblets          |
 | `chudnovsky` | (3141592653589793238462643383279502884197169399… | 3.0      | its one float made exact; integer square root, `expt` in the file        |
-| `conform`    | ("(((b v d) ^ a) v c)" "(c ^ d)" "(b v (a ^ d))… | 14.3     | each node gets an id field (no `eq?`)                                    |
+| `conform`    | ("(((b v d) ^ a) v c)" "(c ^ d)" "(b v (a ^ d))… | 3.5      | nodes, edges, graphs are bloblets; `eq?` of nodes (2026-09-30)           |
 | `cpstak`     | 12                                               | 11.6     |                                                                          |
 | `ctak`       | 9                                                | 119.0    | `cwcc`                                                                   |
 | `dderiv`     | (+ (* (* 3 x x) (+ (/ 0 3) (/ 1 x) (/ 1 x))) (*… | 11.9     | small hash table in the file                                             |
@@ -40,6 +40,7 @@ lowered): `pi` now takes 0.6 s in all.
 | `diviter`    | 500                                              | 4.5      |                                                                          |
 | `divrec`     | 500                                              | 8.1      |                                                                          |
 | `earley`     | 2674440                                          | 104.0    | n=15; was 761.4 s, 11 procedures cellular (more than 8 values)           |
+| `equal`      | #t                                               | 7.7      | Larceny's `equal?` in the file; an `eqtable` per kind (2026-09-30)       |
 | `fib`        | 102334155                                        | 3.3      |                                                                          |
 | `fibc`       | 832040                                           | 31.0     | `cwcc`                                                                   |
 | `gcbench`    | 0                                                | 9.4      | float ballast kept as small boxed ints                                   |
@@ -78,43 +79,43 @@ lowered): `pi` now takes 0.6 s in all.
 | `vecsort`    | #t                                               | 7.8      |                                                                          |
 | `vector`     | ((x0 x1 x2 x3 x4 x5 x6 x7))                      | 11.8     |                                                                          |
 
-## Not ported: 24
+## Not ported: 23
 
 Each needs something FX-26 does not have, at its core (not as a tool the
 port could carry itself):
 
-| benchmark    | what it needs                                                                       |
-| ------------ | ----------------------------------------------------------------------------------- |
-| `fibfp`      | floats                                                                              |
-| `sumfp`      | floats                                                                              |
-| `fft`        | floats                                                                              |
-| `mbrot`      | floats                                                                              |
-| `mbrotZ`     | floats, complex numbers                                                             |
-| `nucleic`    | floats                                                                              |
-| `ray`        | floats, output port                                                                 |
-| `simplex`    | floats                                                                              |
-| `pnpoly`     | floats                                                                              |
-| `sum1`       | floats, file input, `read`                                                          |
-| `cat`        | file input and output                                                               |
-| `wc`         | file input                                                                          |
-| `read1`      | file input, `read`                                                                  |
-| `tail`       | file ports, `read-line`                                                             |
-| `bibfreq`    | file input                                                                          |
-| `bibfreq2`   | file input                                                                          |
-| `charset`    | file input (4.4 MB)                                                                 |
-| `equal`      | `eq?` and an identity hash on mutable, cyclic data                                  |
-| `read0`      | the host's `read` on string ports, exception handlers                               |
-| `text`       | file input, SRFI 135 text library, floats                                           |
-| `dynamic`    | identity of mutable pairs (union-find), reads its input each iteration; ~2300 lines |
-| `slatex`     | file I/O is the benchmark                                                           |
-| `compiler`   | 11 200 lines: identity `eq?`, mutable strings, floats, file ports                   |
+| benchmark  | what it needs                                                                               |
+| ---------- | ------------------------------------------------------------------------------------------- |
+| `fibfp`    | floats                                                                                      |
+| `sumfp`    | floats                                                                                      |
+| `fft`      | floats                                                                                      |
+| `mbrot`    | floats                                                                                      |
+| `mbrotZ`   | floats, complex numbers                                                                     |
+| `nucleic`  | floats                                                                                      |
+| `ray`      | floats, output port                                                                         |
+| `simplex`  | floats                                                                                      |
+| `pnpoly`   | floats                                                                                      |
+| `sum1`     | floats, file input, `read`                                                                  |
+| `cat`      | file input and output                                                                       |
+| `wc`       | file input                                                                                  |
+| `read1`    | file input, `read`                                                                          |
+| `tail`     | file ports, `read-line`                                                                     |
+| `bibfreq`  | file input                                                                                  |
+| `bibfreq2` | file input                                                                                  |
+| `charset`  | file input (4.4 MB)                                                                         |
+| `read0`    | the host's `read` on string ports, exception handlers                                       |
+| `text`     | file input, SRFI 135 text library, floats                                                   |
+| `dynamic`  | over 1000 lines of input data and ~2000 of program: needs several files (identity is there) |
+| `slatex`   | file I/O is the benchmark                                                                   |
+| `compiler` | 11 200 lines: identity `eq?`, mutable strings, floats, file ports                           |
 
 Floats would unblock the most: 12 need them, and 7 of those
 (`fibfp`, `sumfp`, `fft`, `mbrot`, `nucleic`, `simplex`, `pnpoly`) need
 nothing else. Then a file input port with `read-char`, which alone
-unblocks `wc`, `bibfreq`, `bibfreq2` and `charset`. Then an identity test
-(`eq?` on mutable objects), for `equal` and `dynamic`, and to retire the
-workarounds in `browse`, `conform`, `maze` and `sboyer`. (Bignums, which
+unblocks `wc`, `bibfreq`, `bibfreq2` and `charset`. The identity test
+(`eq?`) came on 2026-09-30: `equal` is ported, the workarounds in
+`browse`, `conform`, `maze` and `sboyer` are gone, and `dynamic` waits
+only on a way to split a program over files. (Bignums, which
 blocked `pi` and `chudnovsky`, came to `int` on 2026-09-30.) See
 `docs/research/floats.md`.
 

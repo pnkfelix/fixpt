@@ -13,10 +13,10 @@
 ;;;
 ;;; The original's vectors used as records (nodes, blue edges, graphs) are
 ;;; bloblets, FX-26's mutable records, with the same fields in the same
-;;; order. FX-26 cannot compare two bloblets by identity, and `eq?` of
-;;; nodes is what the benchmark runs on (`memq`, `assq`, `adjoin`, the
-;;; ANY and NONE tests): so a node has one more field, first, a number
-;;; that is its own, and `eq?` of nodes (`node-eq?`) compares those.
+;;; order; `eq?` of nodes, what the benchmark runs on (`memq`, `assq`,
+;;; `adjoin`, the ANY and NONE tests), is exact, since bloblets at a
+;;; writable region are mutable objects. `memq` and `adjoin` are
+;;; polymorphic, of nodes and of operations (symbols).
 ;;; The names given to `make-node` are symbols or strings in the original;
 ;;; here a `datum`, as `test`'s arguments are. A node's blue edges, which
 ;;; the original starts as `'NOT-A-NODE-YET` (or `#t`, for NONE), start
@@ -25,17 +25,16 @@
 ;;; returns the entry, or `nil` for `#f`, and `meet` and `join` take its
 ;;; `cdr`; `lookup-op` returns the list of edges starting with the one
 ;;; found, or `nil` for `'()`, and `sig` takes its `car`. The edge
-;;; getters' and setters' `error`s, never reached, return `nil` or do
-;;; nothing (FX-26 has no `error`), as `find-canonical-representative`'s
-;;; returns NONE. `make-lattice`'s printing, off in the benchmark, is left
-;;; out. `setup`'s globals `a` `b` `c` `d`, which it `set!`s, are
-;;; references, and its value, `'(made a b c d)`, unused, is `#u`.
-;;; `make-graph`, variadic, takes a list. `map`, `for-each`, `append`,
-;;; `memq`, `assq` and `length` are written out; `map` is polymorphic.
+;;; setters' `'OK`, for NONE, unused, is `#u`, and the `error`s, never
+;;; reached, take only a message. `make-lattice`'s printing, off in the
+;;; benchmark, is left out. `setup`'s globals `a` `b` `c` `d`, which it
+;;; `set!`s, are references, and its value, `'(made a b c d)`, unused, is
+;;; `#u`. `make-graph`, variadic, takes a list. `map`, `for-each`, `memq`
+;;; and `assq` are written out, polymorphic.
 ;;; Larceny checks the result with `equal?` against its input file; here
 ;;; the list of names is the program's value.
 
-(define-type node (bloblet (fields int string (listof node @heap) (listof node @heap)
+(define-type node (bloblet (fields string (listof node @heap) (listof node @heap)
                                   (listof (bloblet (fields symbol node node) @heap) @heap))
                           @heap))
 (define-type edge (bloblet (fields symbol node node) @heap))
@@ -49,8 +48,8 @@
 ;; recurse, and call each other.
 (define-effect cf
   (maxeff (read @heap) (write @heap) (alloc @heap) spin
-          (read (globals map for-each append length node-eq? memq adjoin memq-op adjoin-op eliminate intersect union
-                         sort-list node-count make-internal-node internal-node-name
+          (read (globals map for-each memq adjoin eliminate intersect union
+                         sort-list make-internal-node internal-node-name
                          internal-node-green-edges internal-node-red-edges internal-node-blue-edges
                          set-internal-node-name! set-internal-node-green-edges!
                          set-internal-node-red-edges! set-internal-node-blue-edges!
@@ -86,12 +85,6 @@
                  (lambda (l) (if (null? l) #u (begin (f (car l)) (loop (cdr l)))))))
         (loop l)))))
 
-(define* append (subr (maxeff (read @heap) (alloc @heap) spin) (nodes nodes) nodes)
-  (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append (cdr xs) ys)))))
-
-(define* length (subr (maxeff (read @heap) spin) (nodes) int)
-  (lambda (l) (if (null? l) 0 (+ 1 (length (cdr l))))))
-
 ;;; Functional and unstable
 
 (define* sort-list (subr cf (nodes (subr cf (node node) bool)) nodes)
@@ -117,74 +110,61 @@
                               (merge (cdr one) two)))))))
       (loop obj))))
 
-;; `eq?` of nodes: their numbers.
-(define* node-eq? (subr (read @heap) (node node) bool)
-  (lambda (x y) (= (bloblet-ref x 0) (bloblet-ref y 0))))
-
-(define* memq (subr cf (node nodes) bool)
-  (lambda (x l)
-    (cond ((null? l) #f)
-          ((node-eq? x (car l)) #t)
-          (else (memq x (cdr l))))))
+;; `memq` and `adjoin`, of nodes and of operations (symbols).
+(define memq
+  (poly ((t type))
+    (subr (maxeff (read @heap) spin (read (globals memq))) (t (listof t @heap)) bool))
+  (plambda ((t type))
+    (lambda (x l)
+      (cond ((null? l) #f)
+            ((eq? x (car l)) #t)
+            (else (memq x (cdr l)))))))
 
 ;; SET OPERATIONS
 ; (representation as lists with distinct elements)
 
-(define* adjoin (subr cf (node nodes) nodes)
-  (lambda (element set)
-    (if (memq element set) set (cons element set))))
+(define adjoin
+  (poly ((t type))
+    (subr (maxeff (read @heap) (alloc @heap) spin (read (globals memq)))
+          (t (listof t @heap)) (listof t @heap)))
+  (plambda ((t type))
+    (lambda (element set)
+      (if (memq element set) set (cons element set)))))
 
 (define* eliminate (subr cf (node nodes) nodes)
   (lambda (element set)
     (cond ((null? set) set)
-          ((node-eq? element (car set)) (cdr set))
+          ((eq? element (car set)) (cdr set))
           (else (cons (car set) (eliminate element (cdr set)))))))
 
-;; Of operations, symbols: the same, with `symbol=?` for `eq?`.
-(define* memq-op (subr (maxeff (read @heap) spin) (symbol (listof symbol @heap)) bool)
-  (lambda (x l)
-    (cond ((null? l) #f)
-          ((symbol=? x (car l)) #t)
-          (else (memq-op x (cdr l))))))
-
-(define* adjoin-op (subr (maxeff (read @heap) (alloc @heap) spin (read (globals memq-op))) (symbol (listof symbol @heap)) (listof symbol @heap))
-  (lambda (element set)
-    (if (memq-op element set) set (cons element set))))
-
-(define* intersect (subr (maxeff (read @heap) (alloc @heap) spin (read (globals memq-op))) ((listof symbol @heap) (listof symbol @heap)) (listof symbol @heap))
+(define* intersect (subr (maxeff (read @heap) (alloc @heap) spin (read (globals memq))) ((listof symbol @heap) (listof symbol @heap)) (listof symbol @heap))
   (lambda (list1 list2)
-    (letrec ((loop (subr (maxeff (read @heap) (alloc @heap) spin (read (globals memq-op))) ((listof symbol @heap)) (listof symbol @heap))
+    (letrec ((loop (subr (maxeff (read @heap) (alloc @heap) spin (read (globals memq))) ((listof symbol @heap)) (listof symbol @heap))
                (lambda (l)
                  (cond ((null? l) nil)
-                       ((memq-op (car l) list2) (cons (car l) (loop (cdr l))))
+                       ((memq (car l) list2) (cons (car l) (loop (cdr l))))
                        (else (loop (cdr l)))))))
       (loop list1))))
 
-(define* union (subr (maxeff (read @heap) (alloc @heap) spin (read (globals memq-op adjoin-op))) ((listof symbol @heap) (listof symbol @heap)) (listof symbol @heap))
+(define* union (subr (maxeff (read @heap) (alloc @heap) spin (read (globals memq adjoin))) ((listof symbol @heap) (listof symbol @heap)) (listof symbol @heap))
   (lambda (list1 list2)
     (if (null? list1)
         list2
         (union (cdr list1)
-               (adjoin-op (car list1) list2)))))
+               (adjoin (car list1) list2)))))
 
 ;; GRAPH NODES
 
-;; The next node's number.
-(define node-count (ref int @heap) (new 0))
-
-(define* make-internal-node (subr (maxeff (read @heap) (write @heap) (alloc @heap)) (string nodes nodes (listof edge @heap)) node)
-  (lambda (name green red blue)
-    (begin
-      (set node-count (+ (get node-count) 1))
-      (make-bloblet 0 (get node-count) name green red blue))))
-(define* internal-node-name (subr (read @heap) (node) string) (lambda (node) (bloblet-ref node 1)))
-(define* internal-node-green-edges (subr (read @heap) (node) nodes) (lambda (node) (bloblet-ref node 2)))
-(define* internal-node-red-edges (subr (read @heap) (node) nodes) (lambda (node) (bloblet-ref node 3)))
-(define* internal-node-blue-edges (subr (read @heap) (node) (listof edge @heap)) (lambda (node) (bloblet-ref node 4)))
-(define* set-internal-node-name! (subr (write @heap) (node string) unit) (lambda (node name) (bloblet-set! node 1 name)))
-(define* set-internal-node-green-edges! (subr (write @heap) (node nodes) unit) (lambda (node edges) (bloblet-set! node 2 edges)))
-(define* set-internal-node-red-edges! (subr (write @heap) (node nodes) unit) (lambda (node edges) (bloblet-set! node 3 edges)))
-(define* set-internal-node-blue-edges! (subr (write @heap) (node (listof edge @heap)) unit) (lambda (node edges) (bloblet-set! node 4 edges)))
+(define* make-internal-node (subr (alloc @heap) (string nodes nodes (listof edge @heap)) node)
+  (lambda (name green red blue) (make-bloblet 0 name green red blue)))
+(define* internal-node-name (subr (read @heap) (node) string) (lambda (node) (bloblet-ref node 0)))
+(define* internal-node-green-edges (subr (read @heap) (node) nodes) (lambda (node) (bloblet-ref node 1)))
+(define* internal-node-red-edges (subr (read @heap) (node) nodes) (lambda (node) (bloblet-ref node 2)))
+(define* internal-node-blue-edges (subr (read @heap) (node) (listof edge @heap)) (lambda (node) (bloblet-ref node 3)))
+(define* set-internal-node-name! (subr (write @heap) (node string) unit) (lambda (node name) (bloblet-set! node 0 name)))
+(define* set-internal-node-green-edges! (subr (write @heap) (node nodes) unit) (lambda (node edges) (bloblet-set! node 1 edges)))
+(define* set-internal-node-red-edges! (subr (write @heap) (node nodes) unit) (lambda (node edges) (bloblet-set! node 2 edges)))
+(define* set-internal-node-blue-edges! (subr (write @heap) (node (listof edge @heap)) unit) (lambda (node edges) (bloblet-set! node 3 edges)))
 
 (define* make-node (subr cf (datum (listof edge @heap)) node)   ; User's constructor
   (lambda (name blue-edges)
@@ -200,10 +180,10 @@
 ;; FX-26 definition sees only those before it.)
 
 (define none-node node (make-node (datum-symbol "none") nil))
-(define* none-node? (subr (read @heap) (node) bool) (lambda (node) (node-eq? node none-node)))
+(define* none-node? (subr (read @heap) (node) bool) (lambda (node) (eq? node none-node)))
 
 (define any-node node (make-node (datum-symbol "any") nil))
-(define* any-node? (subr (read @heap) (node) bool) (lambda (node) (node-eq? node any-node)))
+(define* any-node? (subr (read @heap) (node) bool) (lambda (node) (eq? node any-node)))
 
 ;; `make-edge-getter`, and each getter it makes, which ANY and NONE
 ;; refuse.
@@ -213,7 +193,7 @@
     (lambda (selector)
       (lambda ((node node))
         (if (or (none-node? node) (any-node? node))
-            nil                         ; (error #f "Can't get edges from the ANY or NONE nodes")
+            (error "Can't get edges from the ANY or NONE nodes")
             (selector node))))))
 (define red-edges (subr cf (node) nodes) (make-edge-getter internal-node-red-edges))
 (define green-edges (subr cf (node) nodes) (make-edge-getter internal-node-green-edges))
@@ -226,7 +206,7 @@
   (plambda ((t type))
     (lambda (mutator!)
       (lambda ((node node) (value (listof t @heap)))
-        (cond ((any-node? node) #u)     ; (error #f "Can't set edges from the ANY node")
+        (cond ((any-node? node) (error "Can't set edges from the ANY node"))
               ((none-node? node) #u)    ; 'OK
               (else (mutator! node value)))))))
 (define set-red-edges! (subr cf (node nodes) unit) (make-edge-setter set-internal-node-red-edges!))
@@ -265,7 +245,7 @@
     (letrec ((loop (subr cf ((listof edge @heap)) (listof edge @heap))
                (lambda (edges)
                  (cond ((null? edges) nil)
-                       ((symbol=? op (operation (car edges))) edges)
+                       ((eq? op (operation (car edges))) edges)
                        (else (loop (cdr edges)))))))
       (loop (blue-edges node)))))
 
@@ -288,11 +268,11 @@
 (define* make-empty-table (subr (alloc @heap) () table) (lambda () (cons 'TABLE nil)))
 
 (define assq
-  (poly ((v type)) (subr (maxeff (read @heap) spin (read (globals node-eq? assq))) (node (listof (pairof node v @heap) @heap)) (pairof node v @heap)))
+  (poly ((v type)) (subr (maxeff (read @heap) spin (read (globals assq))) (node (listof (pairof node v @heap) @heap)) (pairof node v @heap)))
   (plambda ((v type))
     (lambda (x l)
       (cond ((null? l) no-pair)
-            ((node-eq? x (car (car l))) (car l))
+            ((eq? x (car (car l))) (car l))
             (else (assq x (cdr l)))))))
 
 ;; The entry for `x` and `y`, or `nil` for `#f`.
@@ -337,17 +317,7 @@
 (define* copy-graph (subr cf (graph) graph)
   (lambda (g)
     (letrec ((copy-list (subr cf (nodes) nodes)
-               (lambda (l)                ; (vector->list (list->vector l))
-                 (let ((v (the (arrayof node @heap) (make-array (length l) any-node))))
-                   (letrec ((fill (subr cf (nodes int) unit)
-                              (lambda (l i)
-                                (if (null? l) #u (begin (array-set! v i (car l)) (fill (cdr l) (+ i 1))))))
-                            (unfill (subr cf (int nodes) nodes)
-                              (lambda (i acc)
-                                (if (< i 0) acc (unfill (- i 1) (cons (array-ref v i) acc))))))
-                     (begin
-                       (fill l 0)
-                       (unfill (- (array-length v) 1) nil)))))))
+               (lambda (l) (array->list (the (arrayof node @heap) (list->array l))))))
       (make-internal-graph
        (copy-list (graph-nodes g))
        (already-met g)
@@ -490,7 +460,7 @@
   (lambda (element classification)
     (letrec ((loop (subr cf ((listof nodes @heap)) node)
                (lambda (classes)
-                 (cond ((null? classes) none-node) ; (error #f "Can't classify" element)
+                 (cond ((null? classes) (error "Can't classify")) ; element too, in the original
                        ((memq element (car classes)) (car (car classes)))
                        (else (loop (cdr classes)))))))
       (loop classification))))
@@ -523,7 +493,7 @@
              (fix-table (subr cf (table) table)
                (lambda (table)
                  (letrec ((canonical? (subr cf (node) bool)
-                            (lambda (node) (node-eq? node (find-canonical-representative node classes))))
+                            (lambda (node) (eq? node (find-canonical-representative node classes))))
                           (fix-line (subr cf (line) line)
                             (lambda (line)
                               (letrec ((filter-and-fix (subr cf (line) line)
@@ -574,7 +544,7 @@
   (meet (subr cf (graph node node) node)
     (lambda (graph node1 node2)
       (let ((found (lookup (already-met graph) node1 node2)))
-        (cond ((node-eq? node1 node2) node1)
+        (cond ((eq? node1 node2) node1)
               ((or (any-node? node1) (any-node? node2)) any-node) ; canonicalize
               ((none-node? node1) node2)
               ((none-node? node2) node1)
@@ -598,7 +568,7 @@
   (join (subr cf (graph node node) node)
     (lambda (graph node1 node2)
       (let ((found (lookup (already-joined graph) node1 node2)))
-        (cond ((node-eq? node1 node2) node1)
+        (cond ((eq? node1 node2) node1)
               ((any-node? node1) node2)
               ((any-node? node2) node1)
               ((or (none-node? node1) (none-node? node2)) none-node) ; canonicalize
@@ -639,14 +609,14 @@
                (lambda (g count)
                  (let ((lattice (step g)))
                    (let* ((new-g (reduce lattice))
-                          (new-count (length (graph-nodes new-g))))
+                          (new-count (list-length (graph-nodes new-g))))
                      (if (= new-count count)
                          new-g
                          (loop new-g new-count)))))))
       (let ((graph
              (make-graph
               (adjoin any-node (adjoin none-node (graph-nodes (clean-graph g)))))))
-        (loop graph (length (graph-nodes graph)))))))
+        (loop graph (list-length (graph-nodes graph)))))))
 
 ;; DEBUG and TEST
 

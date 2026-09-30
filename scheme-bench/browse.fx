@@ -19,13 +19,14 @@
 ;;; `item` is a `define-datatype` of a symbol or a list of items, and the
 ;;; lists stay mutable lists, since `init` makes the list of patterns
 ;;; circular and `randomize` and `append-to-tail!` splice lists in place.
-;;; `eq?` of two items (`item-eq?`) is `symbol=?` of symbols; of lists,
-;;; which FX-26 cannot compare by identity, it is true only of two empty
-;;; ones, as `eq?` is of the lists that can meet here (a pattern's and a
-;;; datum's lists are never the same pair). A `*` variable's binding, a
-;;; list, is kept in the association list as an item, `(lst l)`, so that
-;;; both kinds of binding are one type. `my-match` returns `'()` in one
-;;; case where it otherwise returns a boolean; only its truth is ever used,
+;;; `eq?` of two items (`item-eq?`) is `eq?` of their symbols or of their
+;;; lists: an item, a sum, is immutable, and FX-26's `eq?` says nothing of
+;;; two unequal sums, but the pairs within are mutable, so `eq?` of them
+;;; is exact, as Scheme's is. A `*` variable's binding, a list, is kept in
+;;; the association list as an item, `(lst l)`, so that both kinds of
+;;; binding are one type (`item-list` takes the list back out).
+;;; `my-match` returns `'()` in one case where it otherwise returns a
+;;; boolean; only its truth is ever used,
 ;;; and `'()` is true, so here it returns `#t` there. Its `symbol->string`
 ;;; of an empty list, an error in the original, is never reached; here that
 ;;; case is `#f`. A property whose value is `#f` has `nil`; `get` of none
@@ -34,8 +35,8 @@
 ;;; which the original `set!`s, are references. `do` loops, and the
 ;;; `set!`s of their variables, are loops passing the new values on.
 ;;; `tree-copy` of the list of patterns copies the same pairs as the
-;;; original's, at two types. `length`, `append` and `assq` are
-;;; written out. The inputs are built in the file.
+;;; original's, at two types. `assq` is written out. The inputs are built
+;;; in the file.
 
 (define-datatype item (sym symbol) (lst (listof item @heap)))
 (define-type items (listof item @heap))
@@ -54,7 +55,7 @@
                    (if (null? x)
                        no-pair
                        (let ((pair (car x)))
-                         (if (symbol=? (car pair) key)
+                         (if (eq? (car pair) key)
                              pair
                              (loop (cdr x))))))))
         (loop table)))))
@@ -171,23 +172,18 @@
 (define* browse-random (subr (maxeff (read @heap) (write @heap)) () int)
   (lambda ()
     (begin
-      (set *rand* (modulo (* (get *rand*) 17) 251))
+      (set *rand* (remainder (* (get *rand*) 17) 251))
       (get *rand*))))
 
-(define* length (subr (maxeff (read @heap) spin) ((listof symbol @heap)) int)
-  (lambda (l)
-    (letrec ((loop (subr (maxeff (read @heap) spin) ((listof symbol @heap) int) int)
-               (lambda (l n) (if (null? l) n (loop (cdr l) (+ n 1))))))
-      (loop l 0))))
 
 (define* randomize (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin) ((listof symbol @heap)) (listof symbol @heap))
   (lambda (l)
-    (letrec ((loop (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin (read (globals browse-random length *rand*)))
+    (letrec ((loop (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin (read (globals browse-random *rand*)))
                          ((listof symbol @heap) (listof symbol @heap)) (listof symbol @heap))
                (lambda (l a)
                  (if (null? l)
                      a
-                     (let ((n (modulo (browse-random) (length l))))
+                     (let ((n (remainder (browse-random) (list-length l))))
                        (if (= n 0)
                            (loop (cdr l) (cons (car l) a))
                            (letrec ((find (subr (maxeff (read @heap) spin) (int (listof symbol @heap)) (listof symbol @heap))
@@ -199,29 +195,32 @@
                                    (loop l a)))))))))))
       (loop l nil))))
 
+;; `eq?` of two items: of their symbols, or of their lists, which stay
+;; mutable pairs, so that `eq?` of them is exact.
 (define* item-eq? (subr pure (item item) bool)
   (lambda (x y)
     (tagcase x
-      (sym (s) (tagcase y (sym (t) (symbol=? s t)) (lst (l) #f)))
-      (lst (l) (tagcase y (sym (t) #f) (lst (m) (and (null? l) (null? m))))))))
+      (sym (s) (tagcase y (sym (t) (eq? s t)) (lst (l) #f)))
+      (lst (l) (tagcase y (sym (t) #f) (lst (m) (eq? l m)))))))
 
 (define* is? (subr pure (item symbol) bool)
-  (lambda (x s) (tagcase x (sym (t) (symbol=? t s)) (lst (l) #f))))
+  (lambda (x s) (tagcase x (sym (t) (eq? t s)) (lst (l) #f))))
 
 (define-type alist (listof (pairof symbol item @heap) @heap))
 
 (define* assq (subr (maxeff (read @heap) spin) (symbol alist) (pairof symbol item @heap))
   (lambda (key l)
     (cond ((null? l) no-pair)
-          ((symbol=? (car (car l)) key) (car l))
+          ((eq? (car (car l)) key) (car l))
           (else (assq key (cdr l))))))
 
-(define* append (subr (maxeff (read @heap) (alloc @heap) spin) (items items) items)
-  (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append (cdr xs) ys)))))
 
+;; A `*` variable's binding, as a list.
+(define* item-list (subr pure (item) items)
+  (lambda (x) (tagcase x (lst (l) l) (sym (s) (the items nil)))))
 (define-effect matches
   (maxeff (read @heap) (write @heap) (alloc @heap) spin
-          (read (globals my-match item-eq? is? assq append append-to-tail! sym lst))))
+          (read (globals my-match item-eq? is? assq append-to-tail! sym lst))))
 
 (define* my-match (subr matches (items items alist) bool)
   (lambda (pat dat alist)
@@ -255,7 +254,7 @@
                               #\*)
                       (let ((val (assq s alist)))
                         (cond ((not (null? val))
-                               (my-match (append (tagcase (cdr val) (sym (t) nil) (lst (l) l))
+                               (my-match (append (item-list (cdr val))
                                                  (cdr pat))
                                          dat alist))
                               (else

@@ -165,7 +165,8 @@ raw in native registers, `int` a bignum, a fixnum version of native code,
 literals past a fixnum); Q3 telemetry's counts (stage 1 done);
 Q4 floats (done: `f64` boxed, `f32` an immediate); the front end's
 register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (done:
-one pure `eq?`, `eqtable`; left: the ports' workarounds);
+one pure `eq?`, `eqtable`; `equal` ported, four ports' workarounds retired;
+`dynamic` waits on multi-file programs);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction. Then, as before:
@@ -2129,8 +2130,10 @@ atoms, and on immutable data and procedures `#t` only if equal (the
 user's choice); `eq` in line on every machine, and in the evaluator.
 `(eqtable k v kr r)`, keyed by a dictionary `(identity k kr)` only the
 standard procedures make, hashed by address, one stamp (the collection
-count) where Larceny has tablets. Left: the ports' workarounds, and
-`equal` and `dynamic`; maybe never, `eqv?` (item 11 of "Next"); later, `uniqueof` for interning (identity with
+count) where Larceny has tablets. Ports (2026-09-30): `browse`,
+`conform`, `maze` and `sboyer` use `eq?` as the originals do, and `equal`
+is ported; `dynamic` is too big for one file (input data over 1000
+lines) and waits on a way to split a program. Maybe never, `eqv?` (item 11 of "Next"); later, `uniqueof` for interning (identity with
 contents read purely, `TODO.md` §19), and Larceny's old and young tablets, so that a
 minor collection rehashes only young keys (`TODO.md` §19). What was planned:
 Every batch of ports hit the missing identity test (`equal`, `dynamic`
