@@ -1070,7 +1070,7 @@ impl Compiling<'_> {
         };
         // The stack map stored where a collection may come, unless the same
         // one is stored already on the only way here.
-        let mut map_stored: Option<u64> = None;
+        let mut map_stored: Option<u64>;
         let mut a = Asm::new();
         let entry = a.label();
         let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
@@ -1098,35 +1098,58 @@ impl Compiling<'_> {
         let sets_first = |j: usize| matches!(op_at(j), "const" | "reg" | "stack" | "global" | "lexical");
         let ignores = |j: usize| sets_first(j) || matches!(op_at(j), "invokeself");
         let joinable = |si: usize| starts.get(si + 1).copied().filter(|&j| !target[j]);
-        let mut src = RESULT;
-        // A global about to be called: the call to make.
-        let mut pending: Option<Field> = None;
         // Where `i64` and `u64` values are raw (`reps`): the registers as
         // each instruction starts, and ends; the ways into an instruction
         // that must unbox some first, each a stub of its own.
         let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name);
         let raw_refs = reps::raw_refs(&cells, &starts, &prim_name);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
-        let mut edge_stubs: Vec<(Label, Vec<(usize, Rep)>, Label)> = Vec::new();
+        // A procedure with `int` operations gets a fixnum version first, where
+        // a value tested once stays known (`reps`, `Rep::Fix`), and whose
+        // tests and overflows go over to the general version, at the same
+        // instruction: the registers and frame are the same in both there.
+        let has_int = starts.iter().any(|&i| matches!(op_at(i), "op2" | "op2imm") && reps::int_routine(cells[i + 1].as_fixnum() as usize));
+        let live = reps::live_in(&cells, &starts, &prim_name);
+        let labels_g = labels;
+        let labels_f: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
+        let versions: &[bool] = if has_int { &[true, false] } else { &[false] };
+        let mut edge_stubs: Vec<(Label, Vec<(usize, Rep)>, Vec<usize>, Label, Label)> = Vec::new();
         let mut int_slows: Vec<IntSlow> = Vec::new();
+        for &fast in versions {
+        let labels = if fast { &labels_f } else { &labels_g };
+        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast);
+        let mut src = RESULT;
+        let mut pending: Option<Field> = None;
+        map_stored = None;
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
-            let unbox = si_at.get(&to).map(|&t| reps::unboxes(&reps_out[from], &reps_in[t])).unwrap_or_default();
-            if unbox.is_empty() {
+            let (unbox, check) = match si_at.get(&to) {
+                Some(&t) => (
+                    reps::unboxes(&reps_out[from], &reps_in[t]),
+                    if fast { reps::checks(&reps_out[from], &reps_in[t], &live[t]) } else { vec![] },
+                ),
+                None => (vec![], vec![]),
+            };
+            if unbox.is_empty() && check.is_empty() {
                 return labels[to];
             }
             let l = a.label();
-            edge_stubs.push((l, unbox, labels[to]));
+            edge_stubs.push((l, unbox, check, labels[to], labels_g[to]));
             l
         };
         let mut si = 0;
         while si < starts.len() {
             let i = starts[si];
             // Falling in from the instruction before, the registers it
-            // leaves as values that are raw here unboxed.
+            // leaves as values that are raw here unboxed; in the fixnum
+            // version, those it leaves unknown that are known here tested.
             if si > 0 && !matches!(op_at(starts[si - 1]), "branch" | "return" | "tailinvoke") {
                 for (r, rep) in reps::unboxes(&reps_out[si - 1], &reps_in[si]) {
                     unbox_to(&mut a, self.callouts, r as Reg, rep);
+                }
+                if fast {
+                    for r in reps::checks(&reps_out[si - 1], &reps_in[si], &live[si]) {
+                        check_fixnum(&mut a, r as Reg, labels_g[i]);
+                    }
                 }
             }
             si += 1;
@@ -1135,8 +1158,10 @@ impl Compiling<'_> {
             {
                 let o = |j: usize| cells[i + 1 + j];
                 let mut reps = reps_in[si - 1];
-                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], &mut reps);
-                convert(&mut a, self.callouts, &first);
+                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], fast, &mut reps);
+                // `RESULT`, where a `reg` just before left it in its register
+                // (`src`), is tested there.
+                convert(&mut a, self.callouts, &first, labels_g[i], src);
             }
             if target[i] {
                 map_stored = None;
@@ -1371,6 +1396,7 @@ impl Compiling<'_> {
                         }
                     };
                     let r = ROUTINES[k(o(0))].0;
+                    let fast_int = fast && reps::int_routine(k(o(0)));
                     // A sum or difference only moved on to a register, and
                     // then not read: made in that register.
                     let mut d = RESULT;
@@ -1396,8 +1422,9 @@ impl Compiling<'_> {
                     }
                     .map(|n| fixpt_runtime::PRIMITIVES.iter().position(|d| d.name == n).expect("a primitive"))
                     // `=` with a fixnum is the same word: a bignum is never
-                    // one that would fit a fixnum.
-                    .filter(|_| !(r == "int-eq" && op == "op2imm" && o(1).is_fixnum()));
+                    // one that would fit a fixnum. In the fixnum version,
+                    // the operands are known fixnums: no test, no slow path.
+                    .filter(|_| !fast_int && !(r == "int-eq" && op == "op2imm" && o(1).is_fixnum()));
                     let (entry, back) = (a.label(), a.label());
                     let mut slow = IntSlow { entry, overflow: None, back, x, y: other, imm: small, into: d, prim: 0, sub: r == "int-sub", branch: None };
                     if prim.is_some() {
@@ -1412,7 +1439,10 @@ impl Compiling<'_> {
                     // The sum in its register, which the slow path undoes to
                     // the operand if it is that; in a scratch one if it is the
                     // other operand's, which could not be.
-                    let dst = if small.is_none() && d == other { X13 } else { d };
+                    // (In the fixnum version, not over an operand either: an
+                    // overflow goes over to the general version of this
+                    // instruction, which does it again.)
+                    let dst = if (small.is_none() && d == other) || (fast_int && d == x) { X13 } else { d };
                     match (r, small) {
                         ("int-add", Some(n)) => a.e(adds_imm(dst, x, n)),
                         ("int-add", None) => a.e(adds(dst, x, other)),
@@ -1423,6 +1453,12 @@ impl Compiling<'_> {
                     }
                     let cond = if r == "int-less" { Cond::Lt } else { Cond::Eq };
                     match r {
+                        "int-add" | "int-sub" if fast_int => {
+                            a.to(labels_g[i], Fix::If(Cond::Vs));
+                            if dst != d {
+                                a.e(mov(d, dst));
+                            }
+                        }
                         "int-add" | "int-sub" => {
                             let ov = a.label();
                             a.to(ov, Fix::If(Cond::Vs));
@@ -1960,15 +1996,20 @@ impl Compiling<'_> {
             }
         }
         a.bind(labels[cells.len()]);
+        }
         // The ints' slow paths.
         for slow in int_slows {
             slow.emit(&mut a, self.callouts, &mut stubs);
         }
-        // The ways in that unbox first.
-        for (l, unbox, to) in edge_stubs {
+        // The ways in that unbox first, or test for fixnums (going over to
+        // the general version where one is not).
+        for (l, unbox, check, to, general) in edge_stubs {
             a.bind(l);
             for (r, rep) in unbox {
                 unbox_to(&mut a, self.callouts, r as Reg, rep);
+            }
+            for r in check {
+                check_fixnum(&mut a, r as Reg, general);
             }
             a.to(to, Fix::B);
         }
@@ -2143,15 +2184,25 @@ fn unbox_reg(a: &mut Asm, callouts: &mut Vec<Callout>, r: Reg) {
     a.bind(done);
 }
 
-/// The conversions `reps` asks for before an instruction.
-fn convert(a: &mut Asm, callouts: &mut Vec<Callout>, cs: &[Convert]) {
+/// The conversions `reps` asks for before an instruction; a test for a
+/// fixnum going to `general` (the instruction in the general version) where
+/// it fails.
+/// `result` is where `RESULT`'s value is (`src`).
+fn convert(a: &mut Asm, callouts: &mut Vec<Callout>, cs: &[Convert], general: Label, result: Reg) {
     for c in cs {
         match *c {
             Convert::Box { r, rep: Rep::Raw { signed } } => box_reg(a, callouts, r as Reg, signed),
             Convert::Box { r, .. } => box_f64(a, callouts, r as Reg),
             Convert::Unbox { r, rep } => unbox_to(a, callouts, r as Reg, rep),
+            Convert::Check { r } => check_fixnum(a, if r == 0 { result } else { r as Reg }, general),
         }
     }
+}
+
+/// Register `r` tested for a fixnum, to `general` if it is not one.
+fn check_fixnum(a: &mut Asm, r: Reg, general: Label) {
+    a.e(tst_low(r, 3));
+    a.to(general, Fix::If(Cond::Ne));
 }
 
 /// Register `r`'s value unboxed to `rep`.

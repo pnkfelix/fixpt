@@ -2132,3 +2132,29 @@ element only `f64` operations use (so the program's types make it an
 | every read a call-out                 |  8016.9 | 4942.6 |
 | in line, each element boxed           |       — | 3393.3 |
 | in line, raw                          |  8063.3 |  295.9 |
+
+## A fixnum version of native code (2026-09-30)
+
+With `int` a bignum, each add or compare tested its operands' tags. A
+procedure with `int` operations now gets two versions of its native code:
+a fixnum version first, then the general one. In the fixnum version the
+`reps` pass also knows which registers hold fixnums (`Rep::Fix`:
+constants, and `int` sums and differences, whose overflow leaves the
+version): an operation on known operands tests nothing, and an unknown one
+is tested once, after which it is known. Where ways meet the knowledge is
+optimistic (a loop's variable, known on the way around, is known at the
+head), the ways that do not know it testing it if it is live (a backward
+pass). A test that fails, or an overflow, goes over to the general
+version at the same instruction: the registers and the frame are the same
+in both at every instruction's start, so nothing is converted.
+
+| ms, native | before `int` was a bignum | bignum | fixnum version |
+| ---------- | -------------------------:| ------:| --------------:|
+| `helpers`  |                       2.1 |    3.8 |            2.0 |
+| `loop`     |                       4.5 |    6.6 |            4.0 |
+| `fib`      |                       2.2 |    2.8 |            2.6 |
+| `lists`    |                       8.5 |    7.0 |            6.0 |
+
+(`fib`'s argument is new at each call, and tested at each.) All 93
+benchmark ports give their READMEs' answers natively; `earley` now takes
+5.2 s in all (104 s in its README), `paraffins` 7.8 s (57.4).

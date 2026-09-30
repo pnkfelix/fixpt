@@ -132,8 +132,8 @@ are in the last section, "Log: the glance's details", and in
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
 bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
 `u32`/`u64`, wrapping, their operations in line natively, `i64` and `u64`
-raw in native registers, `int` a bignum; left: a fixnum version of native
-code, big literals); Q3 telemetry's counts;
+raw in native registers, `int` a bignum, a fixnum version of native code;
+left: big literals); Q3 telemetry's counts;
 Q4 floats (`f64` boxed, `f32`); Q5 `eq?` and address-hashed tables (Larceny's tablets);
 Q6 flat arrays; Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
@@ -1986,10 +1986,12 @@ library.
   machine by their call-out. Tests `ints_are_bignums_on_every_machine`,
   `ints_are_bignums_natively`, `bignums_run`. The cost, natively: each
   `int` add or compare tests its operands' tags (`helpers` 2.1 → 3.8 ms,
-  `loop` 4.5 → 6.6, `fib` 2.2 → 2.8, measured old against new). Next for
-  that: a fixnum version of a procedure's code, in which a value tested
-  once stays known, and an overflow or a bignum goes over to the general
-  version (native only). Not done: literals past a fixnum (neither
+  `loop` 4.5 → 6.6, `fib` 2.2 → 2.8, measured old against new). Done
+  (2026-09-30): a fixnum version of each procedure's native code with
+  `int` operations, in which a value tested once stays known and an
+  overflow or a bignum goes over to the general version at the same
+  instruction (`docs/performance.md`, "A fixnum version of native code"):
+  `helpers` 2.0, `loop` 4.0, `fib` 2.6. Not done: literals past a fixnum (neither
   parser reads one; `(* 1000000000000 1000000000000)` does); the FX-26
   evaluator has no fixed-width operations. The first plan was: the fixnum
   fast path stays one `adds` and a branch;

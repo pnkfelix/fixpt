@@ -21,6 +21,7 @@
 //! on another is unboxed on that way): a loop's variable stays raw around
 //! the loop.
 
+use fixpt_heap::layout::cellular::ROUTINES;
 use fixpt_heap::layout::regcode::OPS;
 use fixpt_heap::Value;
 
@@ -35,6 +36,11 @@ pub(super) enum Rep {
     Raw { signed: bool },
     /// An `f64`'s 64 bits.
     F64,
+    /// A value known to be a fixnum: in a procedure's fixnum version only
+    /// (`fast`), where an `int` operation's operands so known are not
+    /// tested, and its value, overflow going over to the general version,
+    /// is one.
+    Fix,
 }
 
 impl Rep {
@@ -51,6 +57,9 @@ pub(super) fn join(a: &Reps, b: &Reps) -> Reps {
     std::array::from_fn(|r| match (a[r], b[r]) {
         (Rep::Undefined, x) | (x, Rep::Undefined) => x,
         (x, _) | (_, x) if x.raw() => x,
+        // Optimistic: known where either way knows it, the other way testing
+        // it (`checks`), if it is live.
+        (Rep::Fix, _) | (_, Rep::Fix) => Rep::Fix,
         _ => Rep::Value,
     })
 }
@@ -58,7 +67,13 @@ pub(super) fn join(a: &Reps, b: &Reps) -> Reps {
 /// The registers a way into `to` must unbox, and to what: a value there,
 /// raw at `to`.
 pub(super) fn unboxes(from: &Reps, to: &Reps) -> Vec<(usize, Rep)> {
-    (0..9).filter(|&r| from[r] == Rep::Value && to[r].raw()).map(|r| (r, to[r])).collect()
+    (0..9).filter(|&r| matches!(from[r], Rep::Value | Rep::Fix) && to[r].raw()).map(|r| (r, to[r])).collect()
+}
+
+/// The registers a way into `to` must test for a fixnum, in a fixnum
+/// version: a value there, known at `to`, and `live` there.
+pub(super) fn checks(from: &Reps, to: &Reps, live: &[bool; 9]) -> Vec<usize> {
+    (0..9).filter(|&r| from[r] == Rep::Value && to[r] == Rep::Fix && live[r]).collect()
 }
 
 /// An operation native code does on raw operands, by its primitive's name:
@@ -122,6 +137,9 @@ fn raw_shape(op: RawOp<'_>) -> (Rep, Rep, Rep) {
 pub(super) enum Convert {
     Box { r: usize, rep: Rep },
     Unbox { r: usize, rep: Rep },
+    /// In a fixnum version: register `r` tested for a fixnum, the general
+    /// version taking over at this instruction if it is not.
+    Check { r: usize },
 }
 
 /// How a register's value is used from a point on: not at all, only as a
@@ -212,13 +230,18 @@ fn is_flat_ref(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
 /// first, and `reps` after it. `prim` names a primitive by number.
 /// `raw_ref`: whether a `flatarray-ref` here gives its element raw, an
 /// `f64`'s bits, since only `f64` operations use it (`demand_step`).
-pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, raw_ref: bool, reps: &mut Reps) -> Vec<Convert> {
+/// `fast`: in a procedure's fixnum version.
+pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, raw_ref: bool, fast: bool, reps: &mut Reps) -> Vec<Convert> {
     let mut first = Vec::new();
     let k = |j: usize| o(j).as_fixnum() as usize;
     let mut need = |reps: &mut Reps, r: usize, want: Rep| {
         match (reps[r], want) {
+            // A known fixnum is a value already, and stays known.
+            (Rep::Fix, Rep::Value) => return,
             (rep, Rep::Value) if rep.raw() => first.push(Convert::Box { r, rep }),
-            (Rep::Value, rep) if rep.raw() => first.push(Convert::Unbox { r, rep }),
+            (Rep::Value | Rep::Fix, rep) if rep.raw() => first.push(Convert::Unbox { r, rep }),
+            (Rep::Value, Rep::Fix) => first.push(Convert::Check { r }),
+            (rep, Rep::Fix) if rep.raw() => first.extend([Convert::Box { r, rep }, Convert::Check { r }]),
             _ => {}
         }
         if reps[r] != Rep::Undefined {
@@ -229,12 +252,22 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
     match op {
         "args" => regs(k(0)).for_each(|r| reps[r] = Rep::Value),
         "vargs" => regs(8).for_each(|r| reps[r] = Rep::Value),
+        "const" if fast && o(0).is_fixnum() => reps[0] = Rep::Fix,
         "const" | "global" | "lexical" | "stack" => reps[0] = Rep::Value,
         "reg" => reps[0] = if k(0) == 0 { Rep::Value } else { reps[k(0)] },
         "setreg" => reps[k(0)] = reps[0],
         "movereg" => reps[k(1)] = if k(0) == 0 { Rep::Value } else { reps[k(0)] },
         "load" => reps[k(0)] = Rep::Value,
         "store" => need(reps, k(0), Rep::Value),
+        // In a fixnum version, `int`'s operations: operands known (tested
+        // first where they are not), a sum or difference one too.
+        "op2" | "op2imm" if fast && int_routine(k(0)) => {
+            need(reps, 0, Rep::Fix);
+            if op == "op2" {
+                need(reps, k(1), Rep::Fix);
+            }
+            reps[0] = if matches!(ROUTINES[k(0)].0, "int-add" | "int-sub") { Rep::Fix } else { Rep::Value };
+        }
         "op1" | "op2imm" | "field" => {
             need(reps, 0, Rep::Value);
             reps[0] = Rep::Value;
@@ -282,7 +315,13 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
 /// Each instruction's registers where it starts (by instruction, in order),
 /// and where it ends, over the procedure's cells, from the fixpoint of
 /// `step` and `join`. `starts` are where the instructions start.
-pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> (Vec<Reps>, Vec<Reps>) {
+/// Whether cellular routine `n` is one of `int`'s that a fixnum version does
+/// without testing its operands.
+pub(super) fn int_routine(n: usize) -> bool {
+    matches!(ROUTINES.get(n).map(|r| r.0), Some("int-add" | "int-sub" | "int-less" | "int-eq"))
+}
+
+pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, fast: bool) -> (Vec<Reps>, Vec<Reps>) {
     let raw_refs = raw_refs(cells, starts, prim);
     let ns = starts.len();
     let at: std::collections::HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
@@ -309,7 +348,7 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
             let Some(mut reps) = ins[si] else { continue };
             let i = starts[si];
             let o = |j: usize| cells[i + 1 + j];
-            step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, raw_refs[si], &mut reps);
+            step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, raw_refs[si], fast, &mut reps);
             outs[si] = reps;
             for t in succ(si) {
                 let new = match &ins[t] {
@@ -353,6 +392,27 @@ fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
 /// operations use: the backward fixpoint of `demand_step`, over the ways
 /// out of each instruction.
 pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> Vec<bool> {
+    let (before, succ) = demands(cells, starts, prim);
+    let ns = starts.len();
+    (0..ns)
+        .map(|si| {
+            let i = starts[si];
+            let o = |j: usize| cells[i + 1 + j];
+            let after = succ[si].iter().fold(Demand::None, |m, &t| m.max(before[t][0]));
+            is_flat_ref(OPS[cells[i].as_fixnum() as usize].0, &o, prim) && after == Demand::F64
+        })
+        .collect()
+}
+
+/// Which registers each instruction's value is used from (live, as it
+/// starts), from `demands`.
+pub(super) fn live_in(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> Vec<[bool; 9]> {
+    demands(cells, starts, prim).0.iter().map(|d| std::array::from_fn(|r| d[r] != Demand::None)).collect()
+}
+
+/// What each instruction asks of the registers as it starts (the backward
+/// fixpoint of `demand_step`), and each instruction's successors.
+fn demands(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> (Vec<Demands>, Vec<Vec<usize>>) {
     let ns = starts.len();
     let succ = successors(cells, starts);
     let mut before = vec![[Demand::None; 9]; ns];
@@ -377,12 +437,5 @@ pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -
             break;
         }
     }
-    (0..ns)
-        .map(|si| {
-            let i = starts[si];
-            let o = |j: usize| cells[i + 1 + j];
-            let after = succ[si].iter().fold(Demand::None, |m, &t| m.max(before[t][0]));
-            is_flat_ref(OPS[cells[i].as_fixnum() as usize].0, &o, prim) && after == Demand::F64
-        })
-        .collect()
+    (before, succ)
 }
