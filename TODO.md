@@ -579,17 +579,19 @@ global holds. Every other path gives 1. Found writing F11's test
 
 ## 19. `eq?`: identity (the user's, 2026-09-29; PLAN Q5)
 
-*Done (2026-09-30), the type chosen here for the user to review
-(`docs/fx26.md`, "Identity"):* one test per kind of mutable object
-(`pair-eq?`, `ref-eq?`, `array-eq?`, `icell-eq?`), with the effect of a
-write of the objects' region, so that the frozen-write rule already in both
-checkers keeps identity from immutable data; and `(eqtable k v kr r)`,
+*Done (2026-09-30; `docs/fx26.md`, "Identity"):* one `eq?`, `(poly ((t
+type)) (subr pure (t t) bool))` (the user's choice, after a first version
+with one test per kind of mutable object, each a write of its region):
+exact on mutable objects and atoms; on immutable data and procedures `#t`
+means equal and `#f` nothing (OCaml's `==`, R6RS's `eqv?` on procedures).
+It reaches bloblets, and the evaluator has it. And `(eqtable k v kr r)`,
 made with an `(identity k kr)` dictionary that only the standard
-procedures make, hashed by address and restamped by the collection count.
-Left: identity of bloblets (records), which the evaluator written in
-FX-26 would need, since its pairs and refs are bloblets; retiring the
-ports' workarounds; porting `equal` and `dynamic`; and the two-level
-tables below. The notes as they were:
+procedures make, its operations writing the keys' region, hashed by
+address and restamped by the collection count. Left: retiring the ports'
+workarounds; porting `equal` and `dynamic`; an `eqv?` (R7RS: numbers and
+characters by value), for tables of any key; maybe an equality kind, as
+SML's `''a`, to refuse `eq?` on procedures; tables keyed by bloblets; and
+the two-level tables below. The notes as they were:
 
 **Later: an `eqtable` in two tablets, as Larceny's** (the user's,
 2026-09-30; the single stamp is fine for now). With one stamp, the first

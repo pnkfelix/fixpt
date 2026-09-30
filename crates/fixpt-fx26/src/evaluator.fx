@@ -159,7 +159,7 @@
           (k-cat3 "cons rcons rnew rmake-array rmake-icell car cdr null? set-car! set-cdr! "
                   "new get set make-icell icell-put! icell-get char=? char->integer integer->char "
                   "string-append string-length string-ref string=? string->symbol symbol->string ")
-          "symbol=? char->string make-array array-ref array-set! array-length "
+          "symbol=? eq? char->string make-array array-ref array-set! array-length "
           (k-cat3 "make-continuation-prompt-tag abort-current-continuation "
                   "call-with-composable-continuation make-continuation-mark-key with-mark "
                   "first-mark current-marks marks-of cwcc %vlambda apply list ")))
@@ -379,6 +379,25 @@
 (define open-letrec (subr (maxeff (read @globals) evals) (exp-letrec-bs env) env)
   (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (extend (extract (car bs) 1) (v-unit) e)))))
 
+;; `eq?` of two values, as the machines have it: the same mutable object; atoms the same word;
+;; anything else (products, sums, procedures) #f, which `eq?` allows of immutable data.
+(define ev-eq? (subr pure (val val) bool)
+  (lambda (a b)
+    (tagcase a
+      (v-int (x) (tagcase b (v-int (y) (eq? x y)) (else o #f)))
+      (v-bool (x) (tagcase b (v-bool (y) (eq? x y)) (else o #f)))
+      (v-char (x) (tagcase b (v-char (y) (eq? x y)) (else o #f)))
+      (v-sym (x) (tagcase b (v-sym (y) (eq? x y)) (else o #f)))
+      (v-str (x) (tagcase b (v-str (y) (eq? x y)) (else o #f)))
+      (v-unit () (tagcase b (v-unit () #t) (else o #f)))
+      (v-nil () (tagcase b (v-nil () #t) (else o #f)))
+      (v-pair (x) (tagcase b (v-pair (y) (eq? x y)) (else o #f)))
+      (v-ref (x) (tagcase b (v-ref (y) (eq? x y)) (else o #f)))
+      (v-array (x) (tagcase b (v-array (y) (eq? x y)) (else o #f)))
+      (v-icell (x) (tagcase b (v-icell (y) (eq? x y)) (else o #f)))
+      (v-blob (x bytes) (tagcase b (v-blob (y ybytes) (eq? x y)) (else o #f)))
+      (else o #f))))
+
 (define-rec
   (apply-prim (subr (maxeff (read @globals) evals spin) (string vals) val)
     (lambda (n xs)
@@ -442,6 +461,7 @@
             ((string=? n "string->symbol") (v-sym (string->symbol (as-str (arg xs 0)))))
             ((string=? n "symbol->string") (v-str (symbol->string (as-sym (arg xs 0)))))
             ((string=? n "symbol=?") (v-bool (symbol=? (as-sym (arg xs 0)) (as-sym (arg xs 1)))))
+            ((string=? n "eq?") (v-bool (ev-eq? (arg xs 0) (arg xs 1))))
             ((string=? n "make-array") (v-array (make-array (as-int (arg xs 0)) (arg xs 1))))
             ((string=? n "array-ref") (array-ref (as-array (arg xs 0)) (as-int (arg xs 1))))
             ((string=? n "array-set!") (ev-array-set! xs))

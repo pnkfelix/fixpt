@@ -39,6 +39,8 @@ fn test_programs() {
         include_str!("programs/bloblet/array-sum.fx"),
         include_str!("programs/bloblet/else-narrows.fx"),
         include_str!("programs/run/recursion.fx"),
+        // `eq?`, which the evaluator has as the machines do.
+        include_str!("programs/native/identity.fx"),
     ] {
         both(p);
     }

@@ -137,7 +137,7 @@ raw in native registers, `int` a bignum, a fixnum version of native code;
 left: big literals); Q3 telemetry's counts;
 Q4 floats (done: `f64` boxed, `f32` an immediate); the front end's
 register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (done:
-`pair-eq?` and kin, `eqtable`; left: bloblets' identity, the ports' workarounds);
+one pure `eq?`, `eqtable`; left: `eqv?`, the ports' workarounds);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction. Then, as before:
@@ -2089,15 +2089,14 @@ of its own kind), and native code must save `d8`-`d15` or not use them.
   arrays".
 
 **Q5. Identity: `eq?` on mutable objects, and address-hashed tables.**
-Done (2026-09-30; `docs/fx26.md`, "Identity"; the type chosen for the
-user to review, `TODO.md` §19): `pair-eq?`, `ref-eq?`, `array-eq?` and
-`icell-eq?`, each a write of its region, which keeps identity from frozen
-data by the rule already in both checkers; `eq` in line on every machine.
+Done (2026-09-30; `docs/fx26.md`, "Identity"; `TODO.md` §19): one `eq?`,
+`(poly ((t type)) (subr pure (t t) bool))`, exact on mutable objects and
+atoms, and on immutable data and procedures `#t` only if equal (the
+user's choice); `eq` in line on every machine, and in the evaluator.
 `(eqtable k v kr r)`, keyed by a dictionary `(identity k kr)` only the
 standard procedures make, hashed by address, one stamp (the collection
-count) where Larceny has tablets. Left: bloblets' identity (records; the
-evaluator's pairs and refs are bloblets), the ports' workarounds, and
-`equal` and `dynamic`; later, Larceny's old and young tablets, so that a
+count) where Larceny has tablets. Left: `eqv?`, the ports' workarounds,
+and `equal` and `dynamic`; later, Larceny's old and young tablets, so that a
 minor collection rehashes only young keys (`TODO.md` §19). What was planned:
 Every batch of ports hit the missing identity test (`equal`, `dynamic`
 blocked; workarounds in `browse`, `conform`, `maze`, `sboyer`, `peval`,

@@ -1219,8 +1219,7 @@ impl<'a> Compiler<'a> {
             | "symbol->string" | "string->symbol" | "char->string" | "array-length" | "current-marks" | "cwcc" => Some(1),
             "with-mark" | "array-set!" | "substring" => Some(3),
             "+" | "-" | "*" | "<" | ">" | "<=" | ">=" | "=" | "modulo" | "quotient" | "cons" | "set-car!" | "set-cdr!"
-            | "set" | "char=?" | "string-append" | "string=?" | "symbol=?" | "wglobal=?" | "pair-eq?" | "ref-eq?"
-            | "array-eq?" | "icell-eq?" | "array-ref" | "string-ref" | "make-array"
+            | "set" | "char=?" | "string-append" | "string=?" | "symbol=?" | "wglobal=?" | "eq?" | "array-ref" | "string-ref" | "make-array"
             | "abort-current-continuation" | "call-with-composable-continuation" | "first-mark" | "marks-of" => Some(2),
             // The rest: the arity of the runtime primitive it runs as, if
             // that takes a fixed number (`char-downcase`).
@@ -1328,7 +1327,7 @@ impl<'a> Compiler<'a> {
             }
             // Ints may be bignums, compared by value.
             "=" => self.op(code, "int-eq"),
-            "symbol=?" | "wglobal=?" | "char=?" | "pair-eq?" | "ref-eq?" | "array-eq?" | "icell-eq?" => self.op(code, "eq"),
+            "symbol=?" | "wglobal=?" | "char=?" | "eq?" => self.op(code, "eq"),
             "cons" => self.op(code, "cons"),
             "car" => self.op(code, "pair-car"),
             "cdr" => self.op(code, "pair-cdr"),

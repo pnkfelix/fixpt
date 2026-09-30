@@ -313,17 +313,16 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("make-icell", "(poly ((r region)) (poly ((t type)) (subr (alloc r) () (icell t r))))"),
     ("icell-put!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((icell t r) t) unit)))"),
     ("icell-get", "(poly ((r region)) (poly ((t type)) (subr (await r) ((icell t r)) t)))"),
-    // Identity (PLAN.md Q5, `docs/fx26.md`, "Identity"): whether two
-    // mutable objects are the same one. Its effect is a write of their
-    // region, so that it is refused where that region is frozen (`const`,
-    // `acyclic`, a place): immutable data has no identity, since the
-    // compilers may share it or copy it.
-    ("pair-eq?", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((pairof t1 t2 r) (pairof t1 t2 r)) bool)))"),
-    ("ref-eq?", "(poly ((r region)) (poly ((t type)) (subr (write r) ((ref t r) (ref t r)) bool)))"),
-    ("array-eq?", "(poly ((r region)) (poly ((t type)) (subr (write r) ((arrayof t r) (arrayof t r)) bool)))"),
-    ("icell-eq?", "(poly ((r region)) (poly ((t type)) (subr (write r) ((icell t r) (icell t r)) bool)))"),
+    // Identity (PLAN.md Q5, `docs/fx26.md`, "Identity"): whether two values
+    // are the same object. Exact on mutable objects, which no compiler
+    // copies or merges; on immutable data and procedures, which compilers
+    // may share, copy or rebuild, `#t` means the two are equal and `#f`
+    // says nothing (OCaml's `==`, R6RS's `eqv?` on procedures).
+    ("eq?", "(poly ((t type)) (subr pure (t t) bool))"),
     // The kinds of key that have identity, and tables keyed by it, hashed
-    // by address: identity is a write of the keys' region, as above.
+    // by address. A table's key kind is a mutable object's, and its
+    // operations write the keys' region, so that no table is keyed by
+    // frozen data, whose lookups would depend on what the compilers shared.
     ("pair-identity", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr pure () (identity (pairof t1 t2 r) r))))"),
     ("ref-identity", "(poly ((r region)) (poly ((t type)) (subr pure () (identity (ref t r) r))))"),
     ("array-identity", "(poly ((r region)) (poly ((t type)) (subr pure () (identity (arrayof t r) r))))"),
