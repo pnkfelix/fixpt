@@ -46,10 +46,15 @@ and run with `fixpt eval`; syntax marked `; PROPOSED` exists nowhere.
 - **Where it breaks:**
   1. *Expansive* families, whose recursion mentions the family at a
      growing argument (nested types; an existential whose index grows,
-     like `fst : exp (a × b) → exp a`): subtyping is undecidable
-     (`nonregular-subtyping-survey.md` §2). They stay generative, as
-     today, or get family-application nodes compared by congruence, with
-     lemmas where congruence is not enough.
+     like `fst : exp (a × b) → exp a`): subtyping between them is
+     undecidable (`nonregular-subtyping-survey.md` §2). That need not
+     mean refusing them. §3.5 takes the user's position: accept them as
+     family-application nodes, compared by congruence at a variance the
+     checker derives, then by lemmas, then by unfolding within a depth
+     bound, with three answers: proved, refuted with a path, or unknown
+     with the growing chain. Only "unknown" asks for a lemma, and it is
+     never taken as "yes". Of the three expansive families worked there,
+     one comparison needs a lemma the programmer writes.
   2. *Size arithmetic past linear*, or facts the checker's
      Fourier–Motzkin step does not find: lemmas, of a new kind (§3.4).
   3. *Correlations inside one tag* (Castagna's `WrongTree`: a red node
@@ -70,8 +75,11 @@ and run with `fixpt eval`; syntax marked `; PROPOSED` exists nowhere.
   must mean more than its structure**, which is the split Unison and Roc
   have reached from the other side (§5), and the one Freeman and Pfenning
   already drew in 1991, with the default the other way (§1.2).
-- **Lemmas must supply** (§3.4): subtyping between expansive families
-  (the existing `proves` lemmas, unchanged in kind); index facts the
+- **Lemmas must supply** (§3.4, §3.5): subtyping between expansive
+  families where the checker's own generalization fails (the existing
+  `proves` lemmas; their body rule carries over, and today's checker
+  proves them for generative nested families, `seq-lemmas.fx` and
+  `term-lemmas.fx`); index facts the
   decision procedure misses (new: equations over sizes, proved by a
   *terminating* function, since induction, unlike FX-26's coinductive
   subtyping lemmas, is unsound if the proof may loop); and cases the
@@ -205,7 +213,8 @@ P ::= (= T T)          a type equation
   sum has that tag or it does not. A sum left with no variants is empty;
   `(sumof)` is accepted today, and a `tagcase` on it needs no arms (a
   scratch probe).
-- **Existentials** are binders like a `poly`'s, compared under a binder
+- **Existentials** are binders like a `poly`'s (an `exists` with no
+  `when` hides a type without constraining it), compared under a binder
   environment as `poly` bodies already are (`recursive-subtyping.md`,
   "Where this stands"). Kinds `type` and `size` first; `region` and
   `effect` existentials are left out (§4.1).
@@ -306,7 +315,11 @@ recursion, which a declared `poly` already allows (`gadts.md` E6).
   within the arm, `a` is `T` (the expected type `a` of the arm's body is
   `int`). `T₁ = T₂`, neither a variable: decompose, since FX-26's type
   formers are injective (a sum by its tags and their payloads, a product
-  by its labels, a `subr` by its effect, parameters and result). A clash
+  by its labels, a `subr` by its effect, parameters and result). A
+  family application is *not* injective in general (a phantom parameter,
+  or one reachable only through an empty type), so an equation between
+  two applications is decomposed by unfolding them, never by equating
+  their arguments (§3.5). A clash
   refutes the guard: the arm is unreachable, and not required. This is
   the "given" half of GHC's approach, and FX-26 has the signature in hand
   (`gadts.md`, "What N4 would have to teach the checker", point 2).
@@ -499,19 +512,20 @@ negation.
 
 ### 3.3 What the checker does where it cannot decide
 
-- **Expansive families** are refused as structural families, as today
-  ("`grow` expands without end"). Where one is wanted, it is
-  `define-generative` (N1), compared by name and arguments. The
-  unmerged prototype (`nonregular-prototype.md`) is the other road: a
-  family application as a node (`Ty::App`), congruence first, unfolding
-  on demand within a budget, and three answers, proved, refuted with a
-  path, or unknown with the growing chain. Dunfield and Krishnaswami
+- **Expansive families** are refused today ("`grow` expands without
+  end"), and where one is wanted it is `define-generative` (N1),
+  compared by name and arguments. Proposed instead (§3.5): accept them,
+  as the unmerged prototype (`nonregular-prototype.md`) did, as a family
+  application node (`Ty::App`), with congruence first, lemmas next,
+  unfolding on demand within a depth bound last, and three answers,
+  proved, refuted with a path, or unknown with the growing chain; an
+  unknown refuses the program and says which lemma would close it.
+  Dunfield and Krishnaswami
   propose the same laziness for user type constructors: "treat
   user-defined type constructors like List as monotypes, expanding the
   definition only as needed: when checking an expression against a user
   type constructor, and for pattern matching" ("Discussion and related
-  work", under "Extensions"). With
-  guards, an "unknown" is where a lemma goes.
+  work", under "Extensions").
 - **Size facts not found** leave a size `finite` or an arm required, as
   today (`sizes.md`: "Anything not shown is not assumed").
 - **Union and intersection rules** are the syntactic ones of
@@ -529,7 +543,7 @@ existence lets subtyping use `A ≤ B` where its rules fail.
 
 | What is missing                              | What the lemma states               | Proof obligation                              | Existing mechanism?                                |
 | -------------------------------------------- | ----------------------------------- | --------------------------------------------- | -------------------------------------------------- |
-| subtyping between expansive families         | `(<= (F X) (G Y))` given `(<= X Y)` | guarded structural identity, may not end      | yes, unchanged in kind                             |
+| subtyping the checker leaves unknown         | `(<= (F X) (G Y))` given hypotheses | guarded structural identity, may not end      | yes; needs family nodes to match against (§3.5)    |
 | a guard or size fact the procedure misses    | `(= s s′)`, `(<= s s′)` over sizes  | a *terminating* proof by induction            | no: new propositions, and totality                 |
 | an arm the checker cannot show unreachable   | that a guard is unsatisfiable       | as the row above, concluding a contradiction  | no; or write the arm with `error`                  |
 | union and intersection rules' incompleteness | `(<= A B)` between two data types   | guarded identity, with `typecase` in the body | yes, once `typecase` exists (`logical-types` §6.3) |
@@ -537,13 +551,9 @@ existence lets subtyping use `A ≤ B` where its rules fail.
 - **Subtyping lemmas stay coinductive.** Subtyping is a greatest fixed
   point, so a proof that uses itself under a constructor it rebuilt is
   productive, and termination is not needed; that is why today's lemmas
-  may say `spin`. The body needs no `up`/`down` over structural sums:
-  `tagcase` and `sum` rebuild them directly. Today's checker already
-  accepts a structural `tree-up` (a scratch probe, not kept: it checks,
-  both checkers agreeing, though a structural family needs no lemma to
-  widen). For guarded variants the identity rebuilds each variant under
-  the same guard, with the lemma's hypotheses; I believe the existing
-  shape check carries over, but have not tried.
+  may say `spin`. §3.5 works this out for expansive families, where the
+  proof calls itself at a growing argument: which parts of today's
+  body rule carry over, which do not, and why coinduction stays sound.
 - **Index lemmas must be inductive, and so must end.** `(= (+ n m) (+ m
   n))` proved by recursion on a natural is an induction; a "proof" that
   loops proves anything, and once erased nothing would catch it. Liquid
@@ -568,10 +578,411 @@ existence lets subtyping use `A ≤ B` where its rules fail.
   which adds the instantiated conclusion to `body`'s facts; erased.
 
 **So: the existing mechanism suffices for subtyping** (rows one and
-four); **index lemmas need an extension**: equations over sizes as
+four), once expansive families exist as nodes a lemma can name (§3.5);
+**index lemmas need an extension**: equations over sizes as
 propositions, totality in place of guardedness, and an explicit form
 to apply one. That extension waits on a program that needs arithmetic
 beyond linear facts; none of the examples above does.
+
+### 3.5 Expansive families, accepted: proved, refuted, unknown, and lemmas
+
+Added 2026-09-30, at the user's request. §3.4 said subtyping lemmas
+cover expansive families "unchanged in kind", while the checker refuses
+such a family where it is defined (`family-expansive-refused.fx`:
+"`grow` expands without end"), so a lemma about one never gets the
+chance. The user's position: accept expansive families; the checker
+answers proved, refuted or unknown, and only "unknown" demands a lemma.
+This section takes that position seriously.
+
+#### 3.5.1 The position, on its merits
+
+It holds up, under six conditions, each argued below:
+
+1. **Same family, never unknown.** `(F A) ≤ (F B)` is decided by
+   congruence at a variance the checker derives when `F` is defined
+   (§3.5.2), with no unfolding. Most questions a program asks are of
+   this kind, and none of them needs a budget or a lemma.
+2. **The checker generalizes before it asks.** When unfolding two
+   different families grows a chain, the checker anti-unifies it into a
+   candidate lemma and tries to prove that with its variables opaque, as
+   the prototype did (`nonregular-prototype.md`, "Lemmas"). Only if that
+   fails is the answer "unknown".
+3. **Unknown refuses.** A budget that runs out is never "yes"; the
+   program is refused with a message that names the lemma to write
+   (§3.5.5). This is S3's rule for every depth bound (PLAN.md, "Next",
+   S3: each "gives up by refusing or asking for `spin` or a proof, never
+   by accepting").
+4. **The budget is a property of paths, not of search order**, so that
+   the two checkers answer alike (§3.5.6).
+5. **Safety analyses read the definition, never the unfolding**
+   (§3.5.2), since unfolding an expansive family does not end.
+6. **A family application is not injective** in unification and guard
+   equations (§2.4).
+
+What it buys over "generative only": nested and indexed types that are
+`data` (read, printed, confirmed, sent: §4.2), with no `up-`/`down-`,
+related structurally to other types (a nested sequence to a list, a
+typed term to an untyped one) by the checker or by one lemma. What it
+costs: a budget in subtyping, where today there is none ("subtyping has
+none (a coinductive trail)", S3), and so programs near the bound whose
+fate depends on it; GHC warns of the same for its reduction depth
+("any upper bound you could choose might fail unpredictably with minor
+updates", quoted in `nonregular-subtyping-survey.md` §5). Condition 1
+keeps that to questions between different families.
+
+#### 3.5.2 What lifting the ban takes, in both checkers
+
+The prototype (`nonregular-prototype.md`, branch
+`worktree-agent-a2bb056cff956c295`, Rust only) built most of the
+Rust half. What is needed, each in `check.rs`/`infer.rs` and in
+`check.fx`'s files:
+
+| Piece                  | What it does                                                                                    | Prototype had it?                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
+| family node            | `Ty::App { family, args }`, interned; `ty-app` in `check.fx`'s arena; printed by name           | yes (Rust)                          |
+| definition             | a mention at other descriptions becomes a node, where today it is refused                       | yes                                 |
+| unfolding on demand    | `whnf` at `tagcase`, `extract`, checking against an expected type, unification                  | yes                                 |
+| derived variance       | per parameter, a greatest fixed point, proved once per family (below)                           | no: arguments compared invariantly  |
+| subtyping order        | congruence; then lemmas by family pair; then generalization; then unfolding within the bound    | congruence, unfolding, generalizing |
+| three answers          | proved; refuted with a path; unknown with the chain and the lemma tried                         | yes                                 |
+| the bound              | depth of family unfoldings along one path, the same number in both checkers                     | a count of 200 per question         |
+| memo tables            | refutations kept (a failure is unconditional); "unknown" never kept as success                  | memoized unfolding                  |
+| lemmas naming families | `lemma_may_apply` and `match_ty` match `Ty::App` by family, as they match `Ty::Named` today     | no: lemmas only found               |
+| safety analyses        | regions, `no_knot`, `writes_in`, `cyclic`, `data`-ness from the definition, parameters symbolic | assumed no regions in bodies        |
+| size-change            | a `tagcase` on a node unfolds one step; the fields are parts                                    | not needed there                    |
+| unification            | two nodes of one family: unfold, do not equate arguments                                        | matched arguments first             |
+
+Notes:
+
+- **Derived variance.** For each parameter, start by assuming it
+  covariant (and, separately, contravariant), and check the family's
+  body against that assumption, with the family's own applications
+  compared by the assumed variance: a coinductive proof of `∀a b. a ≤ b
+  ⇒ (F a) ≤ (F b)`, arguments opaque. On failure, weaken to invariant
+  and repeat until nothing changes. For `seq`, the body's `(seq (pair
+  a))` needs `(pair a) ≤ (pair b)`, which follows from `a ≤ b`: `seq` is
+  covariant, with no unfolding. This is GHC's role inference, "it
+  starts with the role information of the built-in constants … and
+  propagates roles until it finds a fixpoint" (Breitner, Eisenberg,
+  Peyton Jones and Weirich, JFP 2016, §4.5), which handles nested types
+  the same way: a parameter passed to the family's own application
+  inherits that application's role. A parameter a guard mentions comes
+  out invariant, as §0 said it should. It replaces the variance lemmas
+  `seq-up` and `term-up` of §3.5.3.
+- **Safety through a node.** Generative types already show the way:
+  "the analyses of what a value holds look through the name …; for what
+  the name was given, cautiously" (`docs/fx26.md`, generative types).
+  A family node is the same: the regions, writable parts and knots of
+  `(F D …)` are those of `F`'s body with the parameters standing for
+  what `D …` hold, computed from the definition once. Walking the
+  unfolding would not end.
+- **What stays sound.** The only new way to say "yes" is congruence at
+  a variance that was proved, or a lemma that was proved; unfolding
+  says "yes" only when the trail closes, as today. A bound reached says
+  "unknown", which refuses. A lemma is tried with the trail restored on
+  failure, as the lemma rule already does (`recursive-subtyping.md`,
+  "The hazard for the future").
+
+#### 3.5.3 Three families, with their lemmas
+
+Each is given as it checks today, generative, where it can be, and as
+it would read structurally, marked `; PROPOSED`.
+
+**(a) The nested sequence**, `(seq a) = nil | cons a (seq (pair a))`
+(Bird and Meertens' `Nest`; `gadts.md` E6). Today, generative
+(`seq-lemmas.fx`, both checkers agree): two lemmas, each calling itself
+at the growing argument `(pair a)` with a coercion for pairs built from
+the one it was given.
+
+```
+(define-type (pair (a type)) (productof (l a) (r a)))
+(define-generative (seq (a type))
+  (sumof (nil unit) (cons (productof (hd a) (tl (seq (pair a)))))))
+(define* seq-up (proves (poly ((a type) (b type)) (<= (seq a) (seq b)) (<= a b)))
+  (lambda (f s)
+    (up-seq (tagcase (down-seq s)
+              (nil u (sum nil u))
+              (cons (hd tl)
+                (sum cons (product (hd (f hd))
+                                   (tl (seq-up (lambda ((p (pair a)))
+                                                 (product (l (f (extract p l)))
+                                                          (r (f (extract p r)))))
+                                               tl)))))))))
+;; seq-twin, the same body with up-seq2: (seq a) <= (seq2 b) given a <= b
+(define small (seq (sumof (x int))) …)
+(define wide (seq (sumof (x int) (y bool))) small)        ; by seq-up
+(define other (seq2 (sumof (x int) (y bool))) small)      ; by seq-twin
+```
+
+Structurally, `seq-up` is not needed (derived variance) and `seq-twin`
+is what the checker's generalization finds (the prototype found this
+very lemma, "`∀x1. (nest (productof (l x1) (r x1))) ≤ (nest2 …)`", for
+`nest-same.fx`). The one a programmer must write relates the sequence
+to a type of another shape: a `(seq int)` is a list of perfect trees
+of ints.
+
+```
+(define-type (seq (a type))                                               ; PROPOSED
+  (sumof (nil unit) (cons (productof (hd a) (tl (seq (pair a)))))))       ; accepted
+(define-type tree (mu t (union int (pair t))))                            ; Q7's unions
+(define-type (lst (e type)) (sumof (nil unit) (cons (productof (hd e) (tl (lst e))))))
+(define* seq-flat (proves (poly ((x type)) (<= (seq x) (lst tree)) (<= x tree)))
+  (lambda (f s)
+    (tagcase s
+      (nil u (sum nil u))
+      (cons (hd tl)
+        (sum cons (product (hd (f hd))
+                           (tl (seq-flat (lambda ((p (pair x)))
+                                           (product (l (f (extract p l)))
+                                                    (r (f (extract p r)))))
+                                         tl))))))))
+(define flat (lst tree) (the (seq int) …))    ; by seq-flat: int <= tree
+```
+
+The checker cannot find `seq-flat`: the chain `(seq int) ≤ (lst
+tree)`, `(seq (pair int)) ≤ (lst tree)`, … generalizes to `∀x. (seq x)
+≤ (lst tree)`, which is false without a hypothesis, and the prototype's
+hypotheses come only "from pairing the two sides' new variables"
+(`nonregular-subtyping-survey.md` §3); here the right side has none.
+The hypothesis `x ≤ tree` is the programmer's idea. (Deciding a
+non-regular type against a regular one is decidable in principle,
+EXPTIME-complete by Kučera and Mayr, *from memory* via the survey §2;
+a lemma is far simpler to check.)
+
+**(b) De Bruijn terms**, `(term v)`, whose `lam` body has one more free
+variable, `(term (maybe v))` (Bird and Paterson). Today, generative
+(`term-lemmas.fx`): the variance lemma hands itself a coercion for
+`maybe` that takes a sum apart and rebuilds it (inside a `the (maybe
+b)`, since the arms alone synthesize two different one-tag sums). With it, a closed
+term, a `(term void)`, is a term in any context, since `void ≤ int`;
+without it, that is refused (`term-without-lemma-refused.fx`); and a
+coercion that turns `some x` into `none` is refused as no identity
+(`term-lemma-refused.fx`: "each arm rebuilds its own tag").
+
+```
+(define-type (maybe (v type)) (sumof (none unit) (some v)))
+(define-generative (term (v type))
+  (sumof (var v) (app (productof (f (term v)) (x (term v)))) (lam (term (maybe v)))))
+(define* term-up (proves (poly ((a type) (b type)) (<= (term a) (term b)) (<= a b)))
+  (lambda (f t)
+    (up-term (tagcase (down-term t)
+               (var x (sum var (f x)))
+               (app (g x) (sum app (product (f (term-up f g)) (x (term-up f x)))))
+               (lam body
+                 (sum lam (term-up (lambda ((m (maybe a)))
+                                     (the (maybe b)
+                                       (tagcase m
+                                         (none u (sum none u))
+                                         (some x (sum some (f x))))))
+                                   body)))))))
+(define id-term (term void) (up-term (sum lam (up-term (sum var (sum none #u))))))
+(define in-context (term int) id-term)                     ; by term-up
+```
+
+Structurally, `term`'s variance is derived (covariant: `(maybe a) ≤
+(maybe b)` from `a ≤ b`), and `(define in-context (term int) id-term)`
+needs no lemma at all.
+
+**(c) A guarded family: well-typed terms in a typed context.** The
+context `g` grows under `lam`, so `tm` is expansive; `idx`, a typed
+de Bruijn index, is not (its recursion is at an existential).
+
+```
+(define-type (idx (g type) (t type))                                      ; PROPOSED
+  (sumof (here  (exists ((g2 type)) (when (= g (productof (hd t) (tl g2))))) unit)
+         (there (exists ((s type) (g2 type)) (when (= g (productof (hd s) (tl g2)))))
+                (idx g2 t))))
+(define-type (tm (g type) (t type))
+  (sumof (var (idx g t))
+         (app (exists ((s type))) (productof (f (tm g (subr pure (s) t))) (x (tm g s))))
+         (lam (exists ((s type) (u type)) (when (= t (subr pure (s) u))))
+              (tm (productof (hd s) (tl g)) u))))
+(define-type nat-ix (sumof (here unit) (there nat-ix)))
+(define-type uterm (sumof (var nat-ix) (app (productof (f uterm) (x uterm))) (lam uterm)))
+(define* tm-erase (proves (poly ((g type) (t type)) (<= (tm g t) uterm)))
+  (lambda (e)
+    (tagcase e
+      (var i (sum var i))                         ; (idx g t) <= nat-ix: by the rules
+      (app (f x) (sum app (product (f (tm-erase f)) (x (tm-erase x)))))  ; s fresh
+      (lam b (sum lam (tm-erase b))))))           ; s, u fresh; t = (subr pure (s) u)
+```
+
+A typed term is an untyped term, the same value: whatever prints,
+compares or serializes `uterm`s takes `tm`s for nothing. `(idx g t) ≤
+nat-ix` needs no lemma: the pair it reaches again, `(idx g2 t) ≤
+nat-ix`, is the first up to renaming the existential. `(tm g t) ≤
+uterm` does not close on the trail (the context grows), but the
+checker's generalization finds `tm-erase` itself: the chain generalizes
+to `∀x y. (tm x y) ≤ uterm`, and with `x`, `y` opaque each arm closes by
+that very hypothesis, under the constructor it rebuilt. So `tm-erase`
+is optional; written, it is documentation the checker verifies. (`app`'s
+`exists` has no `when`: its argument's type is hidden, not constrained.)
+
+**What carries over from today's body rule.** Today's rule
+(`crates/fixpt-fx26/src/lemma.rs`, `rebuild` and `proof_coercion`):
+
+| Part of the rule                                                               | (a) `seq`                          | (b) `term`                                   | (c) `tm`, guarded           |
+| ------------------------------------------------------------------------------ | ---------------------------------- | -------------------------------------------- | --------------------------- |
+| `up-`/`down-` stripped as conversions                                          | none to strip                      | none to strip                                | none to strip               |
+| generative types unfolded (`unfold_all`)                                       | family nodes unfolded the same way | same                                         | same                        |
+| each arm rebuilds its own tag, fields in order                                 | carries                            | carries                                      | carries                     |
+| a hypothesis or proof applied only to what was given at that place             | carries                            | carries                                      | carries                     |
+| itself used only under a constructor it rebuilt                                | carries, at `(pair x)`             | carries, at `(maybe a)`                      | carries, at a grown context |
+| coercions: a hypothesis, a proof, itself, or a rebuilding lambda               | carries (`pair`)                   | carries (`maybe`, a `tagcase` in the lambda) | none needed                 |
+| effect `spin`, never run, erased                                               | carries                            | carries                                      | carries                     |
+| matched by head: `Ty::Named` of one name                                       | needs `Ty::App`                    | needs `Ty::App`                              | needs `Ty::App`             |
+| arms bind existentials; the arm's guard is a fact while rebuilding             | —                                  | —                                            | new                         |
+| the rebuilt variant's guard is shown at the target type                        | —                                  | —                                            | new, by ordinary typing     |
+| used where the rules *fail*; for structural families, where they are *unknown* | changes                            | changes                                      | changes                     |
+
+The body rule itself carries over unchanged; what changes is around it:
+lemmas must be able to name a family node, arms of a guarded family
+bind existentials and bring their guards as facts (which the typing of
+the body already needs, §2.4), and the subtyping rule must consult a
+lemma before unfolding, or when unfolding is unknown, rather than only
+where the rules fail outright. Checking a lemma's body never needs the
+lemma: the recursive call's result is an application of the target
+family at the very arguments the rebuilt field expects, so the body
+types by congruence.
+
+#### 3.5.4 Is coinduction still sound at growing arguments?
+
+My argument, to go to the soundness agent before anything is built.
+
+- **The claim** a lemma makes is `∀x̄. H(x̄) ⇒ F[x̄] ≤ G[x̄]`, over types
+  as trees, regular or not.
+- **The relation.** Let `R` be `≤` together with every pair `(F[σ̄],
+  G[σ̄])` whose instance `σ̄` satisfies the hypotheses `H`. Subtyping is
+  the greatest relation closed under one step of the structural rules
+  (a simulation), so it suffices that `R` is closed under that step.
+- **The step.** Take a pair `(F[σ̄], G[σ̄])`. The body, checked with
+  `x̄` rigid, takes `F[x̄]` apart one constructor and rebuilds each
+  variant of `G[x̄]` with the same tag. Each field is either (i) related
+  by the ordinary rules or a hypothesis, which holds of `σ̄` by `H`, or
+  (ii) a recursive use at a new instance `τ̄` (`(pair x)`, `(maybe a)`,
+  a grown context), whose hypotheses `H(τ̄)` the body had to supply as
+  coercions built from the ones it was given. Since the body typed with
+  `x̄` opaque, the same holds at `σ̄`: `H(τ̄[σ̄])` follows from
+  `H(σ̄)`, so the field pair is in `R`. So `R` is closed, and `R ⊆ ≤`.
+- **Growth does not matter.** `R` is defined by the quantified
+  statement, not by a finite set of trees, so the instances `τ̄` may grow
+  without bound. Regularity is what makes the *algorithmic* trail finite
+  (Brandt and Henglein axiomatize regular recursive types, by their
+  abstract); the proof principle, as Kozen and Silva state it, is for
+  coterms in general, and its soundness needs only two things, which
+  they name: "one can appeal to the coinductive hypothesis as
+  long as there has been progress in observing the elements …
+  (guardedness) and there is no further analysis of the tails
+  (opacity)" (MSCS 2016, §3.1). Guardedness is "itself used only under a
+  constructor it rebuilt"; opacity is "a proof applied only to what was
+  given at that place", whose result is put into a field and never
+  taken apart.
+- **Quantified coinductive hypotheses have a precedent.** Cretin and
+  Rémy's Fcc proves coercions by coinduction (rule PropFix: "if P is
+  true assuming P in the unguarded coinduction environment, then P is
+  true"), where a hypothesis may be used only once guarded by the
+  η-expansion rules "that decompose computational types", and
+  propositions may be quantified (PropForIntro), so a hypothesis can be
+  used at another instance; they prove it sound by step-indexing (LICS
+  2014, fig. 6 and its text). Their recursive types are μ-types, not
+  nested families, so the growing case is my extrapolation.
+- **GHC chose otherwise, for a reason FX-26 does not have.** Its
+  `Coercible` solver "would refrain from building recursive evidence …
+  for Coercible it would simply cause the program to loop when executed"
+  (Breitner et al., §7.2); `coerce` runs its evidence. FX-26's lemmas are
+  never run, and their existence is the proof, so recursive evidence is
+  harmless: its effect is `spin` precisely because it is not called.
+- **Where I am less sure.** (1) The guard in the prototype was "some
+  pair of constructors above", not a check per use
+  (`nonregular-prototype.md`, "Soundness caveats"); the lemma rule's
+  per-use `guarded` flag is the one to keep. (2) Guarded families: the
+  argument needs the arm's guard to hold of `σ̄` whenever the variant is
+  inhabited, which is the semantic reading of a guard (§8, first
+  bullet). (3) Fields of procedure type are rebuilt by a lambda
+  (η-expansion), which is the identity up to typing, not up to `eq?`;
+  harmless for an erased proof, but worth the agent's look. (4)
+  Derived variance (§3.5.2) is the same argument with `H` = `a ≤ b`, so
+  it stands or falls with this one.
+
+#### 3.5.5 What an "unknown" says
+
+The prototype's message (`nonregular-prototype.md`, "Unknown") showed
+that naming the growth `X ↦ C[X]` is what makes an unknown readable.
+For §3.5.3 (a) without `seq-flat`, proposed:
+
+```
+! flat.fx:9:17: `flat` is declared a (lst tree): is a (seq int) one?
+  — undecided, not refuted: no path of 16 unfoldings closes.
+  The comparisons on one path grew, each step X ↦ (pair X) on the left:
+      (seq int) ≤ (lst tree)
+      (seq (pair int)) ≤ (lst tree)
+      (seq (pair (pair int))) ≤ (lst tree)
+  Generalized: (seq x) ≤ (lst tree) for every x. That is not provable
+  as it stands: at field `hd` it needs x ≤ tree, which nothing gives.
+  A lemma that would close it, if you can prove it:
+      (proves (poly ((x type)) (<= (seq x) (lst tree)) (<= x tree)))
+  used here with x = int, where int ≤ tree holds.
+```
+
+What it must contain:
+- the question, and that it is **undecided, not refuted**;
+- the bound, as a number of unfoldings on one path;
+- the chain, compressed to its first pairs and its growth;
+- the generalized goal the checker tried, and the first subgoal that
+  failed with the variables opaque: that subgoal is the missing
+  hypothesis;
+- the lemma to write, as a `proves` type the programmer can paste, and
+  the instance at which it would be used, with its hypotheses checked.
+
+The checker can suggest the hypothesis because proving the generalized
+goal with opaque variables fails at a specific leaf, `x ≤ tree`; making
+that leaf a hypothesis and proving the rest is what the programmer's
+lemma then does. So the message's lemma type is found mechanically; its
+body is the programmer's (and is itself mechanical, the family's
+rebuild, which a later tool could write).
+
+#### 3.5.6 Ergonomics and cost
+
+Lemmas each example needs:
+
+| Family        | Question                   | Generative, today | Structural, proposed        |
+| ------------- | -------------------------- | ----------------- | --------------------------- |
+| `seq`         | `(seq A) ≤ (seq B)`        | `seq-up`          | none: derived variance      |
+| `seq`, `seq2` | `(seq A) ≤ (seq2 B)`       | `seq-twin`        | none: found by generalizing |
+| `seq`, `lst`  | `(seq int) ≤ (lst tree)`   | not expressible   | `seq-flat`, written         |
+| `term`        | `(term void) ≤ (term int)` | `term-up`         | none: derived variance      |
+| `tm`, `uterm` | `(tm g t) ≤ uterm`         | not expressible   | none: found by generalizing |
+
+One lemma in five questions, against three today with less said. The
+common lemmas, variance and twins, are derived: variance by the fixed
+point of §3.5.2, twins by anti-unification and an opaque proof. What is
+left for the programmer is a relation to a type of another shape that
+needs a side condition the checker cannot invent.
+
+**Cost.** Only questions between two *different* families, or a family
+and a structure, reach unfolding; same-family questions cost what
+comparing their arguments costs. The prototype's worst example took
+0.31 s for the whole run, lemma search included, and every other under
+0.01 s, with a budget of 200 unfoldings (`nonregular-prototype.md`,
+"The examples"); the front end has no expansive families, so it would
+pay nothing. Derived variance costs one proof per family, at its
+definition. Lemma candidates are indexed by their pair of families.
+What the budget costs is predictability:
+
+- **The two checkers must agree on "unknown".** A global count of
+  unfoldings depends on the order of exploration, which two
+  implementations will not share exactly. A bound on the depth of
+  family unfoldings along each path does not: a question is unknown
+  when some path reaches depth `k` without closing or failing, however
+  it was reached. `k` is a constant of the language (16 in the sample),
+  not a flag.
+- **Refutations first.** A path that fails before the bound is a "no"
+  with a witness, whatever other paths do; a breadth-first search finds
+  the shortest (`nonregular-subtyping-survey.md` §5).
+- **Stability.** A program that passes only because some path closed
+  at depth 15 may stop passing when a type grows. The message's advice
+  is then a lemma, which removes the dependence: with it the question is
+  proved without unfolding.
 
 ## 4. Interactions with the rest of FX-26
 
@@ -785,10 +1196,17 @@ subtyping for what the front end writes; good messages.
    equations and sizes only, until a program asks for a covariant index.
 4. **Same-tag unions** (two payloads under one tag, CDuce's products).
    Recommendation: refuse, and keep sums tag-deterministic (§3.2).
-5. **Expansive structural families.** Options: stay refused, generative
-   only (today); merge the prototype's family nodes with congruence,
-   budget and found lemmas. Recommendation: stay refused until a program
-   needs a nested type that must also be `data`.
+5. **Expansive structural families** (§3.5). Options: (a) stay refused,
+   generative only (today); (b) accept them as family nodes compared by
+   congruence at a derived variance, with every other question between
+   them refused; (c) as (b), plus the checker's own generalization,
+   unfolding within a depth bound, and the programmer's lemmas where the
+   answer is "unknown". Recommendation: (c), reached through (b). (b)
+   alone already needs no lemma for `seq`'s or `term`'s variance, or for
+   `tm`'s erasure (§3.5.3), and is decidable; (c) adds the budget, and
+   with it the one kind of question two checkers must be made to
+   answer alike (§3.5.6). The soundness argument (§3.5.4) goes to the
+   soundness agent first.
 6. **Index lemmas** (§3.4): propositions over sizes, proved by a
    terminating `pure` function, applied with `by`. Recommendation: design
    them with N5c, when inequalities first need a fact the procedure
@@ -819,6 +1237,14 @@ subtyping for what the front end writes; good messages.
   singleton types and Hilbert's tenth problem are from memory or from
   `nonregular-subtyping-survey.md`, which was itself from memory.
 - The printf example's effects, and a `letrec` binding a `poly` (§2.5).
+- The coinductive soundness of lemmas at growing arguments (§3.5.4) is
+  my argument, resting on Kozen and Silva's account of guardedness and
+  opacity and on Cretin and Rémy's quantified coinduction; neither
+  treats non-regular families, and Brandt and Henglein's paper itself I
+  know only through Kozen and Silva. The derived variance (§3.5.2), the
+  checker's own generalization finding `tm-erase` (§3.5.3), and the
+  depth bound's cost (§3.5.6) are argued, not run: no family nodes
+  exist, and the prototype branch was not rebuilt for this note.
 - I did not read Dunfield's thesis (CMU-CS-07-129), which unifies
   datasorts, indices, unions and intersections and is probably the
   closest precedent: no copy was found.
@@ -858,6 +1284,11 @@ Read 2026-09-30. Local copies are under `docs/research/papers/`
 | Roc mini-tutorial (new compiler)                                                                                                                                                                                                                                                                                                             | https://github.com/roc-lang/roc/blob/main/docs/mini-tutorial-new-compiler.md                                                         | read in part: "Tag union types", "Nominal types"; little detail                                           |
 | TypeScript Handbook, "Narrowing" (discriminated unions, exhaustiveness)                                                                                                                                                                                                                                                                      | https://www.typescriptlang.org/docs/handbook/2/narrowing.html                                                                        | read in part, through a fetch summary with quotes                                                         |
 | TypeScript Handbook, "Symbols" (`unique symbol`)                                                                                                                                                                                                                                                                                             | https://www.typescriptlang.org/docs/handbook/symbols.html                                                                            | read in part, through a fetch summary with quotes                                                         |
+| D. Kozen, A. Silva, "Practical coinduction", MSCS 2016                                                                                                                                                                                                                                                                                       | `papers/kozen-silva-mscs16-practical-coinduction.pdf`, from https://www.cs.cornell.edu/~kozen/Papers/Structural.pdf                  | read in part: §3.1–3.2, §4.1 (guardedness and opacity)                                                    |
+| J. Cretin, D. Rémy, "System F with coercion constraints", CSL-LICS 2014                                                                                                                                                                                                                                                                      | `papers/cretin-remy-lics14-coercion-constraints.pdf`, from http://gallium.inria.fr/~remy/coercions/Cretin-Remy!fcc@lics2014.pdf      | read in part: abstract, contributions, the propositions and coercions judgments (PropFix, guarding)       |
+| J. Breitner, R. Eisenberg, S. Peyton Jones, S. Weirich, "Safe zero-cost coercions for Haskell", JFP 2016                                                                                                                                                                                                                                     | `papers/breitner-eisenberg-pj-weirich-jfp16-safe-coercions.pdf`, from https://www.seas.upenn.edu/~sweirich/papers/coercible-JFP.pdf  | read in part: §4.5 (role inference), §6.4, §7.2                                                           |
+| M. Brandt, F. Henglein, "Coinductive axiomatization of recursive type equality and subtyping", TLCA 1997                                                                                                                                                                                                                                     | download refused (Springer returned HTML); search abstract                                                                           | abstract only, and as Kozen and Silva describe it                                                         |
+| PLAN.md, "Next", S3; `crates/fixpt-fx26/src/lemma.rs`                                                                                                                                                                                                                                                                                        | this repository                                                                                                                      | read (S3's entry; `rebuild`, `proof_coercion`, `lemma_may_apply`, `unfold_all`)                           |
 | J. Garrigue, J. Le Normand, GADT exhaustiveness undecidable, 2015                                                                                                                                                                                                                                                                            | cited by Dunfield and Krishnaswami 2019, §4                                                                                          | not read                                                                                                  |
 | M. Maher, equality over infinite trees, 1988; S. Vorobyov, nonelementary bound, 1996                                                                                                                                                                                                                                                         | cited by Simonet and Pottier, p. 37                                                                                                  | not read                                                                                                  |
 | H. Seidl, EXPTIME-completeness of tree-automata inequivalence, 1990                                                                                                                                                                                                                                                                          | cited by Davies, §1.6.8                                                                                                              | not read                                                                                                  |
