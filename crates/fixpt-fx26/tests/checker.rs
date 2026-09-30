@@ -81,6 +81,15 @@ fn small_programs() {
     let _ = both("(lambda (x) x)");
 }
 
+/// A shape conflict between a polymorphic call's result and what its context
+/// expects is the error, before any binder left unsolved (`TODO.md` §20):
+/// once, "argument 2 must be a t2, which is not yet known here".
+#[test]
+fn a_shape_conflict_is_the_error() {
+    let e = both("(list 1 (cons 2 nil))").expect_err("refused");
+    assert_eq!(e.0, "this is a (pairof int ? r), where a int is expected", "{e:?}");
+}
+
 #[test]
 #[ignore = "a probe: the checker's helpers one by one"]
 fn probe_helpers() {

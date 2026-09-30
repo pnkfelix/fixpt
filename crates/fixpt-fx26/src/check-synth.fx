@@ -624,8 +624,12 @@
                   (begin
                     (if (>= expected 0) (k-unify result expected kinds solved (k-new-trail)) #u)
                     (k-inst-asked args params 0 kinds solved done)
+                    ;; A shape conflict is the error to report, before any
+                    ;; binder is found unsolved (`TODO.md` §20).
+                    (k-result-shape expected result kinds solved a b)
+                    (k-inst-shapes args params 0 kinds solved (extract done 1))
                     (k-inst-told args params 0 kinds solved done)
-                    (k-inst-shapes args params 0 solved (extract done 1))
+                    (k-inst-shapes args params 0 kinds solved (extract done 1))
                     (k-default-regions kinds solved)
                     (k-subst-checked kinds (k-finish kinds solved a b ft) inner a b))))))))
   ;; What the arguments are, except the ones that need to be told.

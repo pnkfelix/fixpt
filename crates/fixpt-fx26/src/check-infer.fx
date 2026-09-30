@@ -430,19 +430,48 @@
             ((and (= p 0) (= a 19)) #f)
             (else (not (= p a)))))))
 
+;; Each type binder of `kinds` not yet solved, onto `acc`, mapped to `?`.
+(define* k-holes (subr (maxeff kstate spin) (k-binders k-solved k-map) k-map)
+  (lambda (kinds solved acc)
+    (if (null? kinds)
+        acc
+        (let* ((v (extract (car kinds) 1))
+               (open (and (= (extract (car kinds) 2) 2) (null? (k-map-find (get solved) v))))
+               (hole (the (pairof int k-desc @t) (cons v (dt (k-ty-new (ty-base '?)))))))
+          (k-holes (cdr kinds) solved (if open (the k-map (cons hole acc)) acc))))))
+;; `t` as a message shows it, each type binder not yet solved shown as `?`:
+;; what it is is not known, and its name is the callee's own.
+(define k-show-open (subr (maxeff kstate spin) (int k-binders k-solved) string)
+  (lambda (t kinds solved) (k-show-ty (k-subst t (k-holes kinds solved (the k-map nil))))))
+;; Whether no instantiation of a callee's `result` could fit `want`, what the
+;; context expects, by their outermost shapes. An unknown fits anything; a
+;; pair may be told to be a `nlist`.
+(define k-result-misfits? (subr (maxeff kmakes spin) (int int) bool)
+  (lambda (want result)
+    (let ((w (k-ty-rank want)) (r (k-ty-rank result)))
+      (cond ((= r 2) #f) ((and (= w 18) (= r 6)) #f) (else (k-wrong-shape? want result))))))
 ;; An argument of the wrong shape altogether is the error to report, before
 ;; any binder it left unsolved.
-(define k-inst-shapes (subr (maxeff checks spin) (kxs k-ids int k-solved (arrayof int @t)) unit)
-  (lambda (args params i solved done-t)
+(define k-inst-shapes
+  (subr (maxeff checks spin) (kxs k-ids int k-binders k-solved (arrayof int @t)) unit)
+  (lambda (args params i kinds solved done-t)
     (if (null? args)
         #u
         (let ((t (array-ref done-t i)))
           (if (and (>= t 0) (k-wrong-shape? (car params) t))
-              (let ((p (k-subst (car params) (get solved))))
+              (let ((p (k-show-open (k-subst (car params) (get solved)) kinds solved)))
                 (k-fail (k-cat5 "argument " (int->string (+ i 1)) " is a " (k-show-ty t)
-                                (k-cat3 ", where a " (k-show-ty p) " is expected"))
+                                (k-cat3 ", where a " p " is expected"))
                         (k-start (car args)) (k-end (car args))))
-              (k-inst-shapes (cdr args) (cdr params) (+ i 1) solved done-t))))))
+              (k-inst-shapes (cdr args) (cdr params) (+ i 1) kinds solved done-t))))))
+;; The error that the callee's `result` cannot fit `expected`, what the
+;; context expects, by their outermost shapes; none if it may.
+(define k-result-shape (subr (maxeff checks spin) (int int k-binders k-solved int int) unit)
+  (lambda (expected result kinds solved a b)
+    (if (and (>= expected 0) (k-result-misfits? expected result))
+        (let ((got (k-show-open (k-subst result (get solved)) kinds solved)))
+          (k-fail (k-cat5 "this is a " got ", where a " (k-show-ty expected) " is expected") a b))
+        #u)))
 
 ;; Whether `t` mentions a binder of any kind not yet solved.
 (define k-open-region? (subr kreads (k-region k-binders k-solved) bool)

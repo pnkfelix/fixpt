@@ -773,6 +773,19 @@ impl Checker {
             self.unify(params[i], t, &mut u, &mut HashSet::new());
             done[i] = Some((t, eff));
         }
+        // A shape conflict is the error to report, before any binder is
+        // found unsolved (`TODO.md` §20): the result against what the
+        // context expects, which `unify` only uses as a hint, then each
+        // argument found so far against its parameter.
+        if let Some(want) = expected
+            && self.result_misfits(want, result)
+        {
+            let map = self.partial_map(&u);
+            let got = self.subst(result, &map);
+            let got = self.show_open(got, &u);
+            return Err(FxError::at(span, format!("this is a {got}, where a {} is expected", self.show_ty(want))));
+        }
+        self.shape_errors(args, &params, &done, &u)?;
         // The arguments that needed telling: each is checked against its
         // parameter as solved so far, and what it turns out to be solves more.
         for (i, a) in args.iter().enumerate() {
@@ -831,18 +844,7 @@ impl Checker {
         }
         // An argument of the wrong shape altogether is the error to report,
         // before any binder it left unsolved.
-        for (i, a) in args.iter().enumerate() {
-            if let Some((t, _)) = done[i]
-                && self.wrong_shape(params[i], t)
-            {
-                let map = self.partial_map(&u);
-                let p = self.subst(params[i], &map);
-                return Err(FxError::at(
-                    self.arena.span_of(*a),
-                    format!("argument {} is a {}, where a {} is expected", i + 1, self.show_ty(t), self.show_ty(p)),
-                ));
-            }
-        }
+        self.shape_errors(args, &params, &done, &u)?;
         self.default_regions(&mut u);
         let map = self.finish(&u, span, ft)?;
         self.check_bounds(&u.kinds, &map, span)?;
@@ -1014,6 +1016,47 @@ impl Checker {
 
     /// Whether no instantiation of `pattern` could fit `actual`: they are
     /// different constructors.
+    /// An argument of the wrong shape altogether, among those found: the
+    /// error, naming it.
+    fn shape_errors(&mut self, args: &[ExpId], params: &[TyId], done: &[Synthesised], u: &Unknowns) -> R<()> {
+        for (i, a) in args.iter().enumerate() {
+            if let Some((t, _)) = done[i]
+                && self.wrong_shape(params[i], t)
+            {
+                let map = self.partial_map(u);
+                let p = self.subst(params[i], &map);
+                let p = self.show_open(p, u);
+                return Err(FxError::at(
+                    self.arena.span_of(*a),
+                    format!("argument {} is a {}, where a {} is expected", i + 1, self.show_ty(t), p),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether no instantiation of a callee's `result` could fit `want`,
+    /// what the context expects, by their outermost shapes. An unknown
+    /// fits anything; a pair may be told to be a `nlist`.
+    fn result_misfits(&self, want: TyId, result: TyId) -> bool {
+        let (w, r) = (self.arena.resolve(want), self.arena.resolve(result));
+        match (self.arena.get(w), self.arena.get(r)) {
+            (_, Ty::Var(_)) | (Ty::NList { .. }, Ty::Pair(..)) => false,
+            _ => self.wrong_shape(w, r),
+        }
+    }
+
+    /// `t` as a message shows it, each type binder not yet solved shown as
+    /// `?`: what it is is not known, and its name is the callee's own.
+    fn show_open(&mut self, t: TyId, u: &Unknowns) -> String {
+        let hole = self.interner.intern("?");
+        let hole = self.arena.ty(Ty::Base(hole));
+        let open: HashMap<DVar, D> =
+            u.kinds.iter().filter(|(v, k)| matches!(k, Kind::Type) && !u.solved.contains_key(v)).map(|(v, _)| (*v, D::Type(hole))).collect();
+        let t = self.subst(t, &open);
+        self.show_ty(t)
+    }
+
     fn wrong_shape(&self, pattern: TyId, actual: TyId) -> bool {
         let (p, a) = (self.arena.get(pattern).clone(), self.arena.get(actual).clone());
         match (&p, &a) {

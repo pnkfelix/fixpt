@@ -609,6 +609,18 @@ The type is to be decided. Points either way:
 
 ## 20. Shape conflicts during inference are errors, and checking goes on (the user's, 2026-09-29)
 
+*Part 1 done (2026-09-29), in both checkers.* After the first pass over a
+polymorphic call's arguments, before any binder can be found unsolved:
+- the callee's result is checked against the expected type by outermost
+  shape;
+- then the arguments found so far, against their parameters.
+
+A conflict is the error, with each unsolved type binder shown as `?`:
+`(list 1 (cons 2 nil))` is now "this is a (pairof int ? r), where a int is
+expected" (test `a_shape_conflict_is_the_error`). `unify` itself still says
+nothing: the check is by outermost shape, `wrong_shape`'s, at the two points
+that matter. Still to do: deeper conflicts, the hint for `list`, and part 2.
+
 `(list 1 (cons 2 nil))`, a real type error, is reported as "argument 2 must
 be a t2, which is not yet known here". That is an error about `cons`'s own
 type variables, which the user never wrote. Found by the `list` rewrite of

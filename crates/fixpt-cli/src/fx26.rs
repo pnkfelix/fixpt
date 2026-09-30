@@ -887,7 +887,7 @@ mod speculative {
         assert!(n[0].error);
         // The argument itself, and the pair `+` needs one element of.
         assert_eq!(n[0].span, Some((10, 11)), "{n:?}");
-        assert_eq!(n[0].message, "argument 1 is a int, where a (pairof int t2 r) is expected");
+        assert_eq!(n[0].message, "argument 1 is a int, where a (pairof int ? r) is expected");
     }
 
     #[test]
