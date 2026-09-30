@@ -329,6 +329,65 @@ fn f64_op(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
     Ok(rt.heap.make_flonum(r))
 }
 
+/// An `f32`: an immediate's binary32.
+fn f32_in(rt: &mut Runtime, v: Value) -> Outcome<f32> {
+    if v.is_f32() { Ok(v.as_f32()) } else { rt.type_error("an f32", v) }
+}
+
+/// FX-26's `f32` operation `op`: IEEE binary32, round to nearest even,
+/// nothing trapping; each result an immediate, allocating nothing (`->string`
+/// and a bignum from `->int` excepted).
+fn f32_op(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
+    let x = f32_in(rt, a[0])?;
+    let unary = match op {
+        "abs" => Some(x.abs()),
+        "neg" => Some(-x),
+        "sqrt" => Some(x.sqrt()),
+        "floor" => Some(x.floor()),
+        "ceiling" => Some(x.ceil()),
+        "truncate" => Some(x.trunc()),
+        "round" => Some(x.round_ties_even()),
+        _ => None,
+    };
+    if let Some(r) = unary {
+        return Ok(Value::f32(r));
+    }
+    match op {
+        "nan?" => return Ok(Value::boolean(x.is_nan())),
+        "infinite?" => return Ok(Value::boolean(x.is_infinite())),
+        "finite?" => return Ok(Value::boolean(x.is_finite())),
+        "->string" => {
+            let s = crate::num::format_f32(x);
+            return Ok(rt.heap.make_string(&s));
+        }
+        "->f64" => return Ok(rt.heap.make_flonum(x as f64)),
+        "->int" => {
+            if !(x.is_finite() && x.fract() == 0.0) {
+                return rt.fail("f32->int: not an integer", &[a[0]]);
+            }
+            let b = <num_bigint::BigInt as num_traits::FromPrimitive>::from_f32(x).expect("finite and integral");
+            return Ok(crate::num::N::big(b).store(&mut rt.heap));
+        }
+        _ => {}
+    }
+    let y = f32_in(rt, a[1])?;
+    let r = match op {
+        "add" => x + y,
+        "sub" => x - y,
+        "mul" => x * y,
+        "div" => x / y,
+        "min" => x.min(y),
+        "max" => x.max(y),
+        "lt" => return Ok(Value::boolean(x < y)),
+        "le" => return Ok(Value::boolean(x <= y)),
+        "gt" => return Ok(Value::boolean(x > y)),
+        "ge" => return Ok(Value::boolean(x >= y)),
+        "eq" => return Ok(Value::boolean(x == y)),
+        _ => unreachable!("an f32 operation"),
+    };
+    Ok(Value::f32(r))
+}
+
 /// Whether primitive `name` never collects, and so may be called from
 /// code whose live values are in registers, not in a frame (register code's
 /// `prim1`, `prim2`, `prim2imm`): FX-26's `*`, `quotient` and `modulo`, and
@@ -337,7 +396,7 @@ fn f64_op(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
 /// for the next point that may. It may fail, which ends the run.
 pub fn never_collects(name: &str) -> bool {
     matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64")
-        || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-int->"].iter().any(|p| name.starts_with(p))
+        || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
 /// Operation `op` of the fixed-width integers of width `w`.
@@ -1087,6 +1146,38 @@ prims! {
             Some(fixpt_read::Num::Int(n)) => { let v = rt.heap.make_flonum(n as f64); Ok(rt.heap.cons(v, Value::NULL)) }
             _ => Ok(Value::NULL),
         }
+    });
+    // `f32`, IEEE binary32, immediates (`docs/fx26.md`, "Floats").
+    "%fx26-f32+", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "add"));
+    "%fx26-f32-", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "sub"));
+    "%fx26-f32*", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "mul"));
+    "%fx26-f32/", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "div"));
+    "%fx26-f32-min", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "min"));
+    "%fx26-f32-max", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "max"));
+    "%fx26-f32<", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "lt"));
+    "%fx26-f32<=", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "le"));
+    "%fx26-f32>", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "gt"));
+    "%fx26-f32>=", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "ge"));
+    "%fx26-f32=", 2, Some(2), simple!(|rt, a| f32_op(rt, a, "eq"));
+    "%fx26-f32-abs", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "abs"));
+    "%fx26-f32-neg", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "neg"));
+    "%fx26-f32-sqrt", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "sqrt"));
+    "%fx26-f32-floor", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "floor"));
+    "%fx26-f32-ceiling", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "ceiling"));
+    "%fx26-f32-truncate", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "truncate"));
+    "%fx26-f32-round", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "round"));
+    "%fx26-f32-nan?", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "nan?"));
+    "%fx26-f32-infinite?", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "infinite?"));
+    "%fx26-f32-finite?", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "finite?"));
+    "%fx26-f32->string", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "->string"));
+    "%fx26-f32->int", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "->int"));
+    "%fx26-f32->f64", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "->f64"));
+    "%fx26-f64->f32", 1, Some(1), simple!(|rt, a| { let x = f64_in(rt, a[0])?; Ok(Value::f32(x as f32)) });
+    // `int->f32`, correctly rounded (not through an f64, which would round
+    // twice).
+    "%fx26-int->f32", 1, Some(1), simple!(|rt, a| match exact_bigint(rt, a[0]) {
+        Some(b) => Ok(Value::f32(num_traits::ToPrimitive::to_f32(&b).unwrap_or(f32::NAN))),
+        None => rt.type_error("an exact integer", a[0]),
     });
     // Whether a datum is an `f64`, and it as one (the reader's atoms).
     "%fx26-datum-f64?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.obj_type(a[0]) == Some(ObjType::Flonum))));

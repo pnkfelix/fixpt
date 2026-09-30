@@ -81,6 +81,13 @@ fn floats_run() {
     assert_eq!(run(include_str!("programs/run/floats.fx")), "1414211");
 }
 
+/// `f32`, an immediate, rounded at each step (`programs/run/f32.fx`).
+#[test]
+fn f32_runs() {
+    let v = run(include_str!("programs/run/f32.fx"));
+    assert!(v.starts_with("(\"99.99905\" \"0.33333334\" \"0.3333333432674408\" \"16777216.0\" \"16777216\""), "{v}");
+}
+
 /// `int` is a bignum past a fixnum, lowered too (`programs/run/bignums.fx`).
 #[test]
 fn bignums_run() {

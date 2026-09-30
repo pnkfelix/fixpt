@@ -56,6 +56,8 @@ const IMM_UNSPECIFIED: u64 = 5;
 const IMM_DEFAULT: u64 = 6;
 const IMM_UNBOUND: u64 = 7;
 const IMM_CHAR: u64 = 8;
+/// An IEEE binary32 (FX-26's `f32`), its bits in the word's upper half.
+const IMM_F32: u64 = 9;
 
 const IMM_SHIFT: u32 = 3;
 const IMM_MASK: u64 = 0b1_1111;
@@ -209,6 +211,21 @@ impl Value {
         char::from_u32((self.0 >> IMM_PAYLOAD_SHIFT) as u32).expect("valid char payload")
     }
 
+    /// An `f32`: its bits in bits 32..64, so that unboxing is one shift (or
+    /// a 4-byte load of a word's upper half), under subtag 9.
+    #[inline]
+    pub const fn f32(x: f32) -> Value {
+        Value::imm(IMM_F32, (x.to_bits() as u64) << (32 - IMM_PAYLOAD_SHIFT))
+    }
+    #[inline]
+    pub const fn is_f32(self) -> bool {
+        self.is_imm(IMM_F32)
+    }
+    #[inline]
+    pub fn as_f32(self) -> f32 {
+        f32::from_bits((self.0 >> 32) as u32)
+    }
+
     // --------------------------------------------------------- GC-private bits
     #[inline]
     pub(crate) const fn forward(index: usize) -> Value {
@@ -238,6 +255,7 @@ impl fmt::Debug for Value {
                 IMM_DEFAULT => f.write_str("#<default>"),
                 IMM_UNBOUND => f.write_str("#<unbound>"),
                 IMM_CHAR => write!(f, "#\\{}", self.as_char()),
+                IMM_F32 => write!(f, "{}f32", self.as_f32()),
                 s => write!(f, "#<immediate {s}>"),
             },
             TAG_FORWARD => write!(f, "#<forward @{}>", self.index()),

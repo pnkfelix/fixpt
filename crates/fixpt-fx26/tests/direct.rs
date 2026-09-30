@@ -290,6 +290,9 @@ fn floats_as_the_rust_machine_gives_them() {
         let r = run_collecting(&program("native/floats"), "floats", &[1000], FUEL, gc_every);
         assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
     }
+    // `f32`, immediates, in line (`programs/run/f32.fx`).
+    let r = run(&program("run/f32"), "f32s", &[1000], FUEL);
+    assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "{:?} against {}", r.direct, r.rust);
 }
 
 /// A leaf's registers and link, kept around a call with no collection: `b`

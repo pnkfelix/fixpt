@@ -35,6 +35,7 @@
   (v-str string)
   (v-char char)
   (v-f64 f64)
+  (v-f32 f32)
   (v-sym symbol)
   (v-unit)
   (v-nil)
@@ -106,6 +107,8 @@
   (lambda (v) (tagcase v (v-char (c) c) (else x (efail-expected "a char")))))
 (define as-f64 (subr evals (val) f64)
   (lambda (v) (tagcase v (v-f64 (x) x) (else y (efail-expected "an f64")))))
+(define as-f32 (subr evals (val) f32)
+  (lambda (v) (tagcase v (v-f32 (x) x) (else y (efail-expected "an f32")))))
 (define as-sym (subr evals (val) symbol)
   (lambda (v) (tagcase v (v-sym (s) s) (else x (efail-expected "a symbol")))))
 (define as-pair (subr evals (val) vpair)
@@ -164,9 +167,15 @@
 (define f64-primitive-names string
   (k-cat4 " f64+ f64- f64* f64/ f64-min f64-max f64-atan2 f64-expt f64< f64<= f64> f64>= f64= "
           "f64-nan? f64-infinite? f64-finite? int->f64 f64->int f64->string string->f64 "
-          (k-cat3 "f64-abs f64-neg f64-sqrt f64-floor f64-ceiling f64-truncate f64-round "
-                  "f64-exp f64-log f64-sin f64-cos f64-tan f64-asin f64-acos f64-atan " "")
-          ""))
+          "f64-abs f64-neg f64-sqrt f64-floor f64-ceiling f64-truncate f64-round "
+          "f64-exp f64-log f64-sin f64-cos f64-tan f64-asin f64-acos f64-atan "))
+;; `f32`'s, as `ev-f32-prim` does them.
+(define f32-primitive-names string
+  (k-cat4 " f32+ f32- f32* f32/ f32-min f32-max f32< f32<= f32> f32>= f32= "
+          "f32-abs f32-neg f32-sqrt f32-floor f32-ceiling f32-truncate f32-round "
+          "f32-nan? f32-infinite? f32-finite? "
+          "int->f32 f32->int f32->string f32->f64 f64->f32 int->string "))
+;; `f32`'s, as `ev-f32-prim` does them.
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
 (define occurs? (subr (maxeff (read @globals) spin) (string string int) bool)
@@ -178,7 +187,8 @@
 (define primitive? (subr (maxeff (read @globals) spin) (string) bool)
   (lambda (n)
     (let ((padded (string-append " " (string-append n " "))))
-      (or (occurs? padded primitive-names 0) (occurs? padded f64-primitive-names 0)))))
+      (or (occurs? padded primitive-names 0)
+          (or (occurs? padded f64-primitive-names 0) (occurs? padded f32-primitive-names 0))))))
 
 ;; A standard name: a primitive, or `nil`.
 (define standard (subr (maxeff evals spin) (symbol) val)
@@ -286,6 +296,38 @@
   (lambda (xs f) (v-bool (f (as-f64 (arg xs 0)) (as-f64 (arg xs 1))))))
 (define f64-test (subr (maxeff evals spin) (vals (subr pure (f64) bool)) val)
   (lambda (xs f) (v-bool (f (as-f64 (arg xs 0))))))
+;; `f32`'s operations, by shape.
+(define f32-2 (subr (maxeff evals spin) (vals (subr pure (f32 f32) f32)) val)
+  (lambda (xs f) (v-f32 (f (as-f32 (arg xs 0)) (as-f32 (arg xs 1))))))
+(define f32-1 (subr (maxeff evals spin) (vals (subr pure (f32) f32)) val)
+  (lambda (xs f) (v-f32 (f (as-f32 (arg xs 0))))))
+(define f32-cmp (subr (maxeff evals spin) (vals (subr pure (f32 f32) bool)) val)
+  (lambda (xs f) (v-bool (f (as-f32 (arg xs 0)) (as-f32 (arg xs 1))))))
+(define f32-test (subr (maxeff evals spin) (vals (subr pure (f32) bool)) val)
+  (lambda (xs f) (v-bool (f (as-f32 (arg xs 0))))))
+;; The `f32` operation named `n`, on `xs`; or none such.
+(define* ev-f32-prim (subr (maxeff evals spin) (string vals) val)
+  (lambda (n xs)
+    (let ((is (lambda ((s string)) (string=? n s))) (x (lambda () (arg xs 0))))
+      (cond ((is "f32+") (f32-2 xs f32+)) ((is "f32-") (f32-2 xs f32-))
+            ((is "f32*") (f32-2 xs f32*)) ((is "f32/") (f32-2 xs f32/))
+            ((is "f32-min") (f32-2 xs f32-min)) ((is "f32-max") (f32-2 xs f32-max))
+            ((is "f32<") (f32-cmp xs f32<)) ((is "f32<=") (f32-cmp xs f32<=))
+            ((is "f32>") (f32-cmp xs f32>)) ((is "f32>=") (f32-cmp xs f32>=))
+            ((is "f32=") (f32-cmp xs f32=)) ((is "f32-abs") (f32-1 xs f32-abs))
+            ((is "f32-neg") (f32-1 xs f32-neg)) ((is "f32-sqrt") (f32-1 xs f32-sqrt))
+            ((is "f32-floor") (f32-1 xs f32-floor)) ((is "f32-ceiling") (f32-1 xs f32-ceiling))
+            ((is "f32-truncate") (f32-1 xs f32-truncate)) ((is "f32-round") (f32-1 xs f32-round))
+            ((is "f32-nan?") (f32-test xs f32-nan?))
+            ((is "f32-infinite?") (f32-test xs f32-infinite?))
+            ((is "f32-finite?") (f32-test xs f32-finite?))
+            ((is "int->f32") (v-f32 (int->f32 (as-int (x)))))
+            ((is "f32->int") (v-int (f32->int (as-f32 (x)))))
+            ((is "f32->string") (v-str (f32->string (as-f32 (x)))))
+            ((is "int->string") (v-str (int->string (as-int (x)))))
+            ((is "f32->f64") (v-f64 (f32->f64 (as-f32 (x)))))
+            ((is "f64->f32") (v-f32 (f64->f32 (as-f64 (x)))))
+            (else (efail (string-append "not in the evaluator yet: " n)))))))
 (define* ev-f64-unary (subr (maxeff evals spin) (string vals) val)
   (lambda (n xs)
     (let ((is (lambda ((s string)) (string=? n s))))
@@ -298,7 +340,7 @@
             ((is "f64-cos") (f64-1 xs f64-cos)) ((is "f64-tan") (f64-1 xs f64-tan))
             ((is "f64-asin") (f64-1 xs f64-asin)) ((is "f64-acos") (f64-1 xs f64-acos))
             ((is "f64-atan") (f64-1 xs f64-atan))
-            (else (efail (string-append "not in the evaluator yet: " n)))))))
+            (else (ev-f32-prim n xs))))))
 ;; The `f64` operation named `n`, on `xs`; or none such.
 (define* ev-f64-prim (subr (maxeff evals spin) (string vals) val)
   (lambda (n xs)
@@ -665,6 +707,7 @@
         (v-str (s) (string-append "\"" (string-append s "\"")))
         (v-char (c) (string-append "#\\" (char->string c)))
         (v-f64 (x) (f64->string x))
+        (v-f32 (x) (f32->string x))
         (v-sym (s) (symbol->string s))
         (v-unit () "#u")
         (v-nil () "()")

@@ -2075,8 +2075,12 @@ of its own kind), and native code must save `d8`-`d15` or not use them.
   as runtime primitives; natively raw in registers by `reps` (bits in `x`
   registers, each operation through `d16`/`d17`; never in frame slots, so
   neither continuations nor `d8`-`d15` needed changing). `sumfp`-like, 10M
-  steps: 757 ms lowered, 31 ms native. Next: `f32` with an immediate tag
-  of its own (the user's), then `flatarrayof` (Q6).
+  steps: 757 ms lowered, 31 ms native.
+- Done (2026-09-30): `f32`, an immediate of its own (subtag 9, the bits in
+  the upper half; the user's choice over the fixnum shape), 25 operations
+  and conversions on every path and the evaluator (which also gained
+  `int->string`); natively in line in `s` registers. Next: `flatarrayof`
+  (Q6).
 
 **Q5. Identity: `eq?` on mutable objects, and address-hashed tables.**
 (The type is still open: `TODO.md` §19 sets FX-91's opt-in `uniqueof`

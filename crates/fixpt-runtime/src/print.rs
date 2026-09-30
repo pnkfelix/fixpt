@@ -116,6 +116,10 @@ fn put(
             _ if v == Value::UNSPECIFIED => "#<unspecified>",
             _ if v == Value::DEFAULT => "#<default>",
             _ if v.is_unbound() => "#<unbound>",
+            _ if v.is_f32() => {
+                out.push_str(&crate::num::format_f32(v.as_f32()));
+                return;
+            }
             _ if v.is_char() => {
                 if write {
                     put_char(out, v.as_char());

@@ -412,6 +412,19 @@ impl std::fmt::Display for NumError {
     }
 }
 
+/// An `f32`, as `format_flonum` writes a double: the shortest decimal that
+/// reads back as the same binary32.
+pub fn format_f32(x: f32) -> String {
+    if x.is_nan() {
+        return "+nan.0".into();
+    }
+    if x.is_infinite() {
+        return if x > 0.0 { "+inf.0".into() } else { "-inf.0".into() };
+    }
+    let s = format!("{x}");
+    if s.contains(['.', 'e', 'E']) { s } else { format!("{s}.0") }
+}
+
 /// R7RS `number->string` on an inexact value must produce something `read`
 /// turns back into an inexact number, so an integral flonum keeps its `.0`.
 pub fn format_flonum(x: f64) -> String {

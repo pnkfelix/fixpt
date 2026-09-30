@@ -2213,6 +2213,54 @@ fn int_of_f64(a: &mut Asm, callouts: &mut Vec<Callout>, stubs: &mut Vec<(Label, 
     a.bind(done);
 }
 
+/// An `f32` operation `what` (the name after `f32`) on the immediates in
+/// `RESULT` and `y`, into `RESULT`: each unboxed by a shift into `s16` and
+/// `s17`, the result boxed by a shift and the subtag's add. False for one
+/// the runtime does (`min`, `max`, conversions): nothing is emitted.
+fn f32_fast(a: &mut Asm, what: &str, y: Reg) -> bool {
+    let test = match what {
+        "<" => Some(Cond::Mi),
+        "<=" => Some(Cond::Ls),
+        ">" => Some(Cond::Gt),
+        ">=" => Some(Cond::Ge),
+        "=" => Some(Cond::Eq),
+        _ => None,
+    };
+    let op = match what {
+        "+" => Some(fadd(16, 16, 17)),
+        "-" => Some(fsub(16, 16, 17)),
+        "*" => Some(fmul(16, 16, 17)),
+        "/" => Some(fdiv(16, 16, 17)),
+        "-abs" => Some(fabs(16, 16)),
+        "-neg" => Some(fneg(16, 16)),
+        "-sqrt" => Some(fsqrt(16, 16)),
+        "-floor" => Some(frintm(16, 16)),
+        "-ceiling" => Some(frintp(16, 16)),
+        "-truncate" => Some(frintz(16, 16)),
+        "-round" => Some(frintn(16, 16)),
+        _ => None,
+    };
+    if test.is_none() && op.is_none() {
+        return false;
+    }
+    a.e(lsr_imm(X13, RESULT, 32));
+    a.e(fmov_to_s(16, X13));
+    a.e(lsr_imm(X14, y, 32));
+    a.e(fmov_to_s(17, X14));
+    if let Some(c) = test {
+        a.e(single(fcmp(16, 17)));
+        a.es(&mov_imm64(X13, Value::TRUE.raw()));
+        a.es(&mov_imm64(X14, Value::FALSE.raw()));
+        a.e(csel(RESULT, X13, X14, c));
+        return true;
+    }
+    a.e(single(op.expect("an operation")));
+    a.e(fmov_from_s(X13, 16));
+    a.e(lsl_imm(X13, X13, 32));
+    a.e(add_imm(RESULT, X13, (Value::f32(0.0).raw() & 0xff) as u32));
+    true
+}
+
 /// An `f64` operation `what` (as `reps::raw_op` names it), on raw `RESULT`
 /// and `y`, into `RESULT`: raw, or a comparison's boolean. By way of `d16`
 /// and `d17`, which nothing else keeps anything in.
@@ -2391,6 +2439,9 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         return true;
     }
     let Some(rest) = name.strip_prefix("%fx26-") else { return false };
+    if let Some(what) = rest.strip_prefix("f32") {
+        return f32_fast(a, what, y);
+    }
     let signed = |t: &str| match t {
         "i32" => Some(true),
         "u32" => Some(false),

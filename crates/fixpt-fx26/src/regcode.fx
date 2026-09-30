@@ -387,15 +387,14 @@
 
 ;;; ------------------------------------------------------ standard names
 
-;; Whether runtime primitive `name` is one of the fixed-width integers' or of `f64`'s operations
-;; (`%fx26-u32*`, `%fx26-int->i64`, `%fx26-f64+`).
+;; Whether runtime primitive `name` is one of the fixed-width integers', `f64`'s or `f32`'s
+;; operations (`%fx26-u32*`, `%fx26-int->i64`, `%fx26-f64+`).
 (define r-fixed-width-op? (subr pure (string) bool)
   (lambda (name)
     (let ((starts (lambda ((s string)) (= (string-search name s 0) 0))))
-      (or (starts "%fx26-i32")
-          (or (starts "%fx26-u32")
-              (or (starts "%fx26-i64")
-                  (or (starts "%fx26-u64") (or (starts "%fx26-f64") (starts "%fx26-int->")))))))))
+      (or (or (starts "%fx26-i32") (starts "%fx26-u32"))
+          (or (or (starts "%fx26-i64") (starts "%fx26-u64"))
+              (or (or (starts "%fx26-f64") (starts "%fx26-f32")) (starts "%fx26-int->")))))))
 ;; Whether runtime primitive `name` never collects (`fixpt_runtime::never_collects`): FX-26's
 ;; `*`, `quotient` and `modulo`, and the fixed-width integers' operations, which register code
 ;; calls with its values in registers.

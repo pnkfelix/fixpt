@@ -423,6 +423,20 @@ pub fn fcvtzs(d: Reg, n: Reg) -> u32 {
     0x9E78_0000 | r(n) << 5 | r(d)
 }
 
+/// A double's floating-point instruction (`fadd`, `fsqrt`, `fcmp`, …) on
+/// single precision instead: the `s` registers of the same numbers.
+pub fn single(w: u32) -> u32 {
+    w & !0x0040_0000
+}
+/// `fmov sd, wn`: 32 bits into an `s` register.
+pub fn fmov_to_s(d: Reg, n: Reg) -> u32 {
+    0x1E27_0000 | r(n) << 5 | r(d)
+}
+/// `fmov wd, sn`: 32 bits out of one, zero-extended.
+pub fn fmov_from_s(d: Reg, n: Reg) -> u32 {
+    0x1E26_0000 | r(n) << 5 | r(d)
+}
+
 /// `ret`.
 pub fn ret() -> u32 {
     0xD65F_03C0
@@ -482,5 +496,13 @@ mod tests {
         assert_eq!(fcmp(16, 17), 0x1e712200);
         assert_eq!(scvtf(16, 13), 0x9e6201b0);
         assert_eq!(fcvtzs(13, 16), 0x9e78020d);
+        assert_eq!(fmov_to_s(16, 13), 0x1e2701b0);
+        assert_eq!(fmov_from_s(13, 16), 0x1e26020d);
+        assert_eq!(single(fadd(16, 16, 17)), 0x1e312a10);
+        assert_eq!(single(fdiv(16, 16, 17)), 0x1e311a10);
+        assert_eq!(single(fsqrt(16, 16)), 0x1e21c210);
+        assert_eq!(single(frintn(16, 16)), 0x1e244210);
+        assert_eq!(single(fcmp(16, 17)), 0x1e312200);
+        assert_eq!(single(fneg(16, 16)), 0x1e214210);
     }
 }
