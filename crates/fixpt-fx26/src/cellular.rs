@@ -147,6 +147,10 @@ pub struct Compiler<'a> {
     /// The top-level definition whose body is being compiled: its name and
     /// arity.
     own_now: Option<(Sym, usize)>,
+    /// While deciding whether a body is a leaf: a plain call in tail
+    /// position, its arguments collecting nothing, counts as no call
+    /// (`regcode::r_leaf_tail_call`).
+    tail_calls_leave: bool,
 }
 
 /// A global procedure whose parameter `param` is only called (with
@@ -228,6 +232,7 @@ impl<'a> Compiler<'a> {
             assume: None,
             summaries: None,
             own_now: None,
+            tail_calls_leave: false,
         }
     }
 

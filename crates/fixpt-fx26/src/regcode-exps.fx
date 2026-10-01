@@ -270,6 +270,10 @@
 (define-type r-assumption (pairof wglobal tword @k))
 (define-type r-assumptions (listof r-assumption acyclic))
 (define r-assuming (ref bool @k) (new #f))
+;; While deciding whether a body is a leaf: whether a plain call in tail
+;; position, its arguments collecting nothing, counts as no call
+;; (`r-leaf-tail-call`). As the Rust compiler's `tail_calls_leave`.
+(define r-tail-calls-leave (ref bool @k) (new #f))
 ;; Whether a call of itself through its global was made a loop, in the body
 ;; being compiled's fast version.
 (define r-looped (ref bool @k) (new #f))
@@ -422,6 +426,24 @@
            (and (tagcase (car l) (at-global (c) #t) (else y #f))
                 (not (c-member? (get c-inlining) name)))))))
 
+;; Whether a call of `f` with `n` arguments is a plain `invoke`: not a
+;; standard operation, an inlined or specialized global's, or a lifted
+;; procedure's, each compiled its own way. As `r_plain_callee`.
+(define r-plain-callee? (subr rcompiles (exp int cenv) bool)
+  (lambda (f n e)
+    (tagcase f
+      (e-var (name a b)
+        (let ((l (c-where e name)))
+          (and (not (null? l))
+               (tagcase (car l)
+                 (at-global (c)
+                   (and (null? (r-inline-named (get c-inlines) name n))
+                        (null? (r-special-named (get c-specials) name n))))
+                 (at-slot (i) #t)
+                 (at-free (i) #t)
+                 (else y #f)))))
+      (else y #t))))
+
 (define-rec
   ;; Whether evaluating `x` may call or call out, and so collect: a
   ;; conversion calls out.
@@ -469,9 +491,17 @@
           (let* ((args-collect (r-collects-all args e this))
                  ;; A loop: a call of the procedure itself, in tail position.
                  (loop-call (and tail (r-self-call? f args e this)))
-                 (inline (r-inline-op? f args e)))
+                 (inline (r-inline-op? f args e))
+                 (n (c-count-exps args))
+                 ;; A plain call in tail position, deciding a leaf: nothing
+                 ;; is used after it, so it needs no frame.
+                 (leaves (and (get r-tail-calls-leave)
+                              (and tail
+                                   (and (< n register-regs)
+                                        (and (r-plain-callee? f n e)
+                                             (not (r-collects f e this #f))))))))
             (or args-collect
-                (not (or loop-call (or inline (r-call-is-free? f (c-count-exps args) e tail)))))))
+                (not (or loop-call (or inline (or leaves (r-call-is-free? f n e tail))))))))
         (else y #t))))
   (r-collects-all (subr rcompiles (exps cenv rthis) bool)
     (lambda (es e this)

@@ -1142,15 +1142,15 @@ locally).
 is the last line's call compiled in the native convention alone; `—`
 where the last line is not a call on integer literals.
 
-| program      | answer         | lowered |  rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| -----:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   116.0 |  49.2 | 14.5 |     14.3 |     12.5 |       9.3 |   21.9 |
-| closures     | 6003000000     |   344.0 | 686.4 | 75.7 |     86.3 |     60.2 |      24.7 |      — |
-| fib          | 832040         |   180.7 | 212.5 | 16.1 |     20.7 |     13.2 |       5.8 |    2.4 |
-| lists-region | 1501500000     |   334.6 | 311.7 | 96.6 |    112.7 |     83.5 |       7.0 |  157.9 |
-| lists        | 1501500000     |   300.2 | 467.1 | 54.8 |     63.7 |     47.5 |      13.5 |   16.6 |
-| loop         | 49999995000000 |   739.5 | 450.3 | 64.6 |     91.6 |     41.9 |       5.5 |    4.4 |
-| tak          | 9              |    52.1 |  78.1 |  6.6 |     10.5 |      4.5 |       1.9 |    1.2 |
+| program      | answer         | lowered | rust  | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | ----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 116.0   | 49.2  | 14.5 | 14.3     | 12.5     | 9.3       | 21.9   |
+| closures     | 6003000000     | 344.0   | 686.4 | 75.7 | 86.3     | 60.2     | 24.7      | —      |
+| fib          | 832040         | 180.7   | 212.5 | 16.1 | 20.7     | 13.2     | 5.8       | 2.4    |
+| lists-region | 1501500000     | 334.6   | 311.7 | 96.6 | 112.7    | 83.5     | 7.0       | 157.9  |
+| lists        | 1501500000     | 300.2   | 467.1 | 54.8 | 63.7     | 47.5     | 13.5      | 16.6   |
+| loop         | 49999995000000 | 739.5   | 450.3 | 64.6 | 91.6     | 41.9     | 5.5       | 4.4    |
+| tak          | 9              | 52.1    | 78.1  | 6.6  | 10.5     | 4.5      | 1.9       | 1.2    |
 
 What it says of the native convention: calls (`fib`, `tak`, `loop`) are
 fastest there; `lists-region` is twenty times register code's, since its
@@ -1191,8 +1191,8 @@ unbinding are seven routines, as dear as the call they save.
 end; the other benchmarks' procedures are recursive, and do not change.
 
 | program | registers before | registers after | native before | native after |
-| ------- | ----------------:| ---------------:| -------------:| ------------:|
-| helpers |             27.0 |            12.5 |          11.2 |          7.1 |
+| ------- | ---------------: | --------------: | ------------: | -----------: |
+| helpers | 27.0             | 12.5            | 11.2          | 7.1          |
 
 The front end has 8814 call sites inlined (in 479 procedures; `arm-sum`,
 `arm-reg`, `r-emit`, `syn-start`, `k-err` most), but compiling itself as
@@ -1204,16 +1204,16 @@ they are loops now.
 
 `fixpt bench`:
 
-| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   114.6 |   50.0 | 15.3 |     14.2 |     12.0 |       9.0 |   22.5 |
-| closures     | 6003000000     |   343.9 |  703.5 | 74.8 |     84.8 |     59.7 |      25.4 |      — |
-| fib          | 832040         |   180.6 |  219.4 | 15.8 |     22.9 |     13.7 |       5.9 |    2.5 |
-| helpers      | 12000000       |   852.6 | 1305.1 | 89.2 |    106.4 |     54.8 |      12.5 |    7.1 |
-| lists-region | 1501500000     |   333.9 |  311.5 | 97.5 |    108.8 |     83.0 |       7.3 |  158.0 |
-| lists        | 1501500000     |   300.4 |  482.1 | 54.5 |     59.9 |     47.3 |      13.5 |   16.8 |
-| loop         | 49999995000000 |   736.2 |  444.7 | 64.5 |     88.8 |     40.5 |       5.5 |    4.3 |
-| tak          | 9              |    52.0 |   80.9 |  6.5 |      9.5 |      4.5 |       1.9 |    1.2 |
+| program      | answer         | lowered | rust   | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | -----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 114.6   | 50.0   | 15.3 | 14.2     | 12.0     | 9.0       | 22.5   |
+| closures     | 6003000000     | 343.9   | 703.5  | 74.8 | 84.8     | 59.7     | 25.4      | —      |
+| fib          | 832040         | 180.6   | 219.4  | 15.8 | 22.9     | 13.7     | 5.9       | 2.5    |
+| helpers      | 12000000       | 852.6   | 1305.1 | 89.2 | 106.4    | 54.8     | 12.5      | 7.1    |
+| lists-region | 1501500000     | 333.9   | 311.5  | 97.5 | 108.8    | 83.0     | 7.3       | 158.0  |
+| lists        | 1501500000     | 300.4   | 482.1  | 54.5 | 59.9     | 47.3     | 13.5      | 16.8   |
+| loop         | 49999995000000 | 736.2   | 444.7  | 64.5 | 88.8     | 40.5     | 5.5       | 4.3    |
+| tak          | 9              | 52.0    | 80.9   | 6.5  | 9.5      | 4.5      | 1.9       | 1.2    |
 
 ## Specializing a procedure at a lambda argument (2026-09-28)
 
@@ -1243,10 +1243,10 @@ with the arity it is called with.
 `closures` now ends `(main 3000)`, the same work, so the native
 convention measures it too:
 
-| closures      | before | after |
-| ------------- | ------:| -----:|
-| registers     |   24.0 |  19.0 |
-| native        |   29.8 |  33.1 |
+| closures  | before | after |
+| --------- | -----: | ----: |
+| registers | 24.0   | 19.0  |
+| native    | 29.8   | 33.1  |
 
 Natively it is slower: the copy keeps the lambda's parameter and `k` in
 frame slots (stored, zeroed on entry, loaded), where the original called
@@ -1256,16 +1256,16 @@ body in registers when no call comes between.
 
 `fixpt bench`:
 
-| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   114.7 |   49.4 | 14.5 |     14.5 |     12.8 |       9.4 |   22.6 |
-| closures     | 6003000000     |   345.0 |  697.2 | 75.9 |     77.8 |     60.8 |      19.1 |   33.5 |
-| fib          | 832040         |   181.5 |  213.8 | 16.0 |     22.0 |     13.5 |       5.7 |    2.5 |
-| helpers      | 12000000       |   868.6 | 1285.5 | 90.0 |     95.5 |     55.7 |      12.2 |    7.2 |
-| lists-region | 1501500000     |   334.7 |  313.1 | 97.8 |    103.1 |     83.5 |       7.2 |  158.4 |
-| lists        | 1501500000     |   298.2 |  470.3 | 54.5 |     55.5 |     47.2 |      13.5 |   17.0 |
-| loop         | 49999995000000 |   738.5 |  461.5 | 65.8 |     68.7 |     39.1 |       5.6 |    4.6 |
-| tak          | 9              |    51.3 |   78.0 |  6.6 |      8.6 |      4.5 |       1.9 |    1.2 |
+| program      | answer         | lowered | rust   | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | -----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 114.7   | 49.4   | 14.5 | 14.5     | 12.8     | 9.4       | 22.6   |
+| closures     | 6003000000     | 345.0   | 697.2  | 75.9 | 77.8     | 60.8     | 19.1      | 33.5   |
+| fib          | 832040         | 181.5   | 213.8  | 16.0 | 22.0     | 13.5     | 5.7       | 2.5    |
+| helpers      | 12000000       | 868.6   | 1285.5 | 90.0 | 95.5     | 55.7     | 12.2      | 7.2    |
+| lists-region | 1501500000     | 334.7   | 313.1  | 97.8 | 103.1    | 83.5     | 7.2       | 158.4  |
+| lists        | 1501500000     | 298.2   | 470.3  | 54.5 | 55.5     | 47.2     | 13.5      | 17.0   |
+| loop         | 49999995000000 | 738.5   | 461.5  | 65.8 | 68.7     | 39.1     | 5.6       | 4.6    |
+| tak          | 9              | 51.3    | 78.0   | 6.6  | 8.6      | 4.5      | 1.9       | 1.2    |
 
 ## Common subexpressions: measured, not built (2026-09-28)
 
@@ -1275,9 +1275,9 @@ every path before it, with no name in it bound again between), the pure
 expressions computed again:
 
 | where                        | pure ops only | with `car`, `cdr` |
-| ---------------------------- | -------------:| -----------------:|
-| the front end (~900 globals) |           109 |               443 |
-| every benchmark              |             0 |                 0 |
+| ---------------------------- | ------------: | ----------------: |
+| the front end (~900 globals) | 109           | 443               |
+| every benchmark              | 0             | 0                 |
 
 Pure ops: arithmetic, comparisons, `not`, `null?`, and `extract` of a
 product, which is frozen. The front end's most repeated are `(extract g
@@ -1315,16 +1315,16 @@ same (19–20 ms). The rest of the benchmarks and the front end compiling
 itself as register code (0.80 s) are unchanged: their `let`s mostly
 live across calls.
 
-| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   117.5 |   49.9 | 14.3 |     14.5 |     12.5 |       9.1 |   22.5 |
-| closures     | 6003000000     |   344.1 |  688.2 | 75.2 |     72.6 |     59.7 |      20.1 |   31.1 |
-| fib          | 832040         |   182.0 |  214.7 | 15.8 |     23.6 |     13.3 |       5.6 |    2.4 |
-| helpers      | 12000000       |   873.8 | 1291.6 | 90.5 |     88.1 |     55.4 |      12.5 |    7.2 |
-| lists-region | 1501500000     |   333.2 |  313.8 | 96.9 |    101.0 |     84.2 |       7.3 |  157.4 |
-| lists        | 1501500000     |   298.9 |  472.8 | 54.4 |     55.6 |     47.0 |      13.6 |   17.0 |
-| loop         | 49999995000000 |   735.8 |  473.6 | 65.1 |     66.3 |     46.6 |       5.5 |    4.2 |
-| tak          | 9              |    51.5 |   78.9 |  6.5 |      9.3 |      4.4 |       1.9 |    1.2 |
+| program      | answer         | lowered | rust   | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | -----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 117.5   | 49.9   | 14.3 | 14.5     | 12.5     | 9.1       | 22.5   |
+| closures     | 6003000000     | 344.1   | 688.2  | 75.2 | 72.6     | 59.7     | 20.1      | 31.1   |
+| fib          | 832040         | 182.0   | 214.7  | 15.8 | 23.6     | 13.3     | 5.6       | 2.4    |
+| helpers      | 12000000       | 873.8   | 1291.6 | 90.5 | 88.1     | 55.4     | 12.5      | 7.2    |
+| lists-region | 1501500000     | 333.2   | 313.8  | 96.9 | 101.0    | 84.2     | 7.3       | 157.4  |
+| lists        | 1501500000     | 298.9   | 472.8  | 54.4 | 55.6     | 47.0     | 13.6      | 17.0   |
+| loop         | 49999995000000 | 735.8   | 473.6  | 65.1 | 66.3     | 46.6     | 5.5       | 4.2    |
+| tak          | 9              | 51.5    | 78.9   | 6.5  | 9.3      | 4.4      | 1.9       | 1.2    |
 
 ## Constants propagated and folded, with inlining (2026-09-28)
 
@@ -1352,16 +1352,16 @@ costs what the load does.
 `helpers`: register code 12.5 → 10.9 ms, native 7.2 → 6.9 ms; the rest
 unchanged.
 
-| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   118.8 |   49.4 | 14.4 |     14.2 |     12.5 |       9.3 |   22.4 |
-| closures     | 6003000000     |   344.2 |  691.5 | 76.2 |     80.1 |     60.3 |      21.7 |   31.0 |
-| fib          | 832040         |   181.1 |  215.8 | 16.0 |     22.5 |     12.9 |       5.6 |    2.5 |
-| helpers      | 12000000       |   865.3 | 1291.8 | 90.5 |     98.6 |     55.3 |      10.9 |    6.9 |
-| lists-region | 1501500000     |   334.0 |  312.7 | 98.2 |    104.8 |     83.5 |       7.4 |  158.7 |
-| lists        | 1501500000     |   299.7 |  467.6 | 54.5 |     59.2 |     47.2 |      13.5 |   17.0 |
-| loop         | 49999995000000 |   735.3 |  453.4 | 64.6 |     84.0 |     41.3 |       5.6 |    4.5 |
-| tak          | 9              |    52.0 |   79.4 |  6.5 |      9.4 |      4.4 |       1.9 |    1.2 |
+| program      | answer         | lowered | rust   | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | -----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 118.8   | 49.4   | 14.4 | 14.2     | 12.5     | 9.3       | 22.4   |
+| closures     | 6003000000     | 344.2   | 691.5  | 76.2 | 80.1     | 60.3     | 21.7      | 31.0   |
+| fib          | 832040         | 181.1   | 215.8  | 16.0 | 22.5     | 12.9     | 5.6       | 2.5    |
+| helpers      | 12000000       | 865.3   | 1291.8 | 90.5 | 98.6     | 55.3     | 10.9      | 6.9    |
+| lists-region | 1501500000     | 334.0   | 312.7  | 98.2 | 104.8    | 83.5     | 7.4       | 158.7  |
+| lists        | 1501500000     | 299.7   | 467.6  | 54.5 | 59.2     | 47.2     | 13.5      | 17.0   |
+| loop         | 49999995000000 | 735.3   | 453.4  | 64.6 | 84.0     | 41.3     | 5.6       | 4.5    |
+| tak          | 9              | 52.0    | 79.4   | 6.5  | 9.4      | 4.4      | 1.9       | 1.2    |
 
 ## A procedure's calls of itself, guarded (2026-09-28)
 
@@ -1377,26 +1377,26 @@ global's of the same name (FX-26 has no equality on globals to tell).
 Both compilers alike (`r_self_guarded`, `r-self-guarded`, which the
 specialized copies' self-calls now share).
 
-| benchmark    | registers before | after | native before | after |
-| ------------ | ----------------:| -----:| -------------:| -----:|
-| lists        |             13.5 |   9.3 |          17.0 |  12.0 |
-| helpers      |             10.9 |   8.9 |           6.9 |   5.5 |
-| closures     |       about 20   |  18.0 |          31.0 |  26.1 |
-| fib          |              5.6 |   5.4 |           2.5 |   2.4 |
+| benchmark | registers before | after | native before | after |
+| --------- | ---------------: | ----: | ------------: | ----: |
+| lists     | 13.5             | 9.3   | 17.0          | 12.0  |
+| helpers   | 10.9             | 8.9   | 6.9           | 5.5   |
+| closures  | about 20         | 18.0  | 31.0          | 26.1  |
+| fib       | 5.6              | 5.4   | 2.5           | 2.4   |
 
 The front end compiling itself as register code: the same (0.87–0.90 s
 this hour, HEAD and this alike).
 
-| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   113.1 |   48.7 | 15.2 |     14.8 |     12.9 |       9.5 |   21.9 |
-| closures     | 6003000000     |   341.9 |  681.0 | 75.0 |     79.5 |     60.0 |      18.0 |   26.1 |
-| fib          | 832040         |   180.9 |  211.9 | 16.1 |     21.7 |     13.3 |       5.4 |    2.4 |
-| helpers      | 12000000       |   871.5 | 1272.8 | 90.0 |    102.0 |     55.9 |       8.9 |    5.5 |
-| lists-region | 1501500000     |   334.4 |  313.5 | 98.5 |    105.5 |     83.8 |       7.2 |  159.0 |
-| lists        | 1501500000     |   300.3 |  464.8 | 54.5 |     59.6 |     47.1 |       9.3 |   12.0 |
-| loop         | 49999995000000 |   734.4 |  452.6 | 64.7 |     71.8 |     43.2 |       5.6 |    4.6 |
-| tak          | 9              |    52.1 |   77.9 |  6.5 |      9.0 |      4.4 |       1.8 |    1.2 |
+| program      | answer         | lowered | rust   | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | -----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 113.1   | 48.7   | 15.2 | 14.8     | 12.9     | 9.5       | 21.9   |
+| closures     | 6003000000     | 341.9   | 681.0  | 75.0 | 79.5     | 60.0     | 18.0      | 26.1   |
+| fib          | 832040         | 180.9   | 211.9  | 16.1 | 21.7     | 13.3     | 5.4       | 2.4    |
+| helpers      | 12000000       | 871.5   | 1272.8 | 90.0 | 102.0    | 55.9     | 8.9       | 5.5    |
+| lists-region | 1501500000     | 334.4   | 313.5  | 98.5 | 105.5    | 83.8     | 7.2       | 159.0  |
+| lists        | 1501500000     | 300.3   | 464.8  | 54.5 | 59.6     | 47.1     | 9.3       | 12.0   |
+| loop         | 49999995000000 | 734.4   | 452.6  | 64.7 | 71.8     | 43.2     | 5.6       | 4.6    |
+| tak          | 9              | 52.1    | 77.9   | 6.5  | 9.0      | 4.4      | 1.8       | 1.2    |
 
 ## Lifting out of loops: measured, not built (2026-09-28)
 
@@ -1408,10 +1408,10 @@ invariant: parameters passed unchanged to every call of itself, values
 captured from outside, constants. Those in the head, before the first
 branch, run every iteration, so lifting them keeps what runs:
 
-| where                     | loops | invariant | in the head |
-| ------------------------- | -----:| ---------:| -----------:|
-| the front end             |   311 |        21 |           3 |
-| every benchmark           |    13 |         2 |           1 |
+| where           | loops | invariant | in the head |
+| --------------- | ----: | --------: | ----------: |
+| the front end   | 311   | 21        | 3           |
+| every benchmark | 13    | 2         | 1           |
 
 About half the front end's are `car` or `cdr`, which a `set-car!` in the
 loop would change (the effect system would have to say not). The rest
@@ -1473,16 +1473,16 @@ points, a walk of its body each time it is asked, and it is asked
 repeatedly (`r-collects` is called on the same subtrees many times).
 Not asymptotic; a cache of the answer per `letrec` would remove it.
 
-| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   113.3 |   49.5 | 14.4 |     14.0 |     12.7 |       9.1 |   23.0 |
-| closures     | 6003000000     |   349.4 |  691.3 | 75.3 |     82.5 |     62.5 |      19.9 |   27.7 |
-| fib          | 832040         |   181.9 |  213.4 | 16.1 |     22.5 |     13.2 |       5.0 |    2.4 |
-| helpers      | 12000000       |   868.7 | 1286.4 | 89.1 |    115.8 |     58.1 |       9.1 |    6.0 |
-| lists-region | 1501500000     |   337.1 |  315.5 | 98.4 |    112.3 |     83.5 |       7.1 |  156.3 |
-| lists        | 1501500000     |   298.2 |  466.4 | 55.2 |     68.4 |     47.4 |       9.3 |   12.4 |
-| loop         | 49999995000000 |   735.0 |  457.1 | 64.3 |     96.3 |     53.2 |       4.8 |    4.2 |
-| tak          | 9              |    52.0 |   78.1 |  6.6 |     11.6 |      4.5 |       1.7 |    1.2 |
+| program      | answer         | lowered | rust   | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | -----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 113.3   | 49.5   | 14.4 | 14.0     | 12.7     | 9.1       | 23.0   |
+| closures     | 6003000000     | 349.4   | 691.3  | 75.3 | 82.5     | 62.5     | 19.9      | 27.7   |
+| fib          | 832040         | 181.9   | 213.4  | 16.1 | 22.5     | 13.2     | 5.0       | 2.4    |
+| helpers      | 12000000       | 868.7   | 1286.4 | 89.1 | 115.8    | 58.1     | 9.1       | 6.0    |
+| lists-region | 1501500000     | 337.1   | 315.5  | 98.4 | 112.3    | 83.5     | 7.1       | 156.3  |
+| lists        | 1501500000     | 298.2   | 466.4  | 55.2 | 68.4     | 47.4     | 9.3       | 12.4   |
+| loop         | 49999995000000 | 735.0   | 457.1  | 64.3 | 96.3     | 53.2     | 4.8       | 4.2    |
+| tak          | 9              | 52.0    | 78.1   | 6.6  | 11.6     | 4.5      | 1.7       | 1.2    |
 
 ## Globals found by name in a table, not a list (2026-09-28)
 
@@ -1507,16 +1507,16 @@ are locals; that is asked of the locals alone now, too.
 The front end compiling itself as register code, same hour, before join
 points and now: 0.91–0.94 s → 0.75 s.
 
-| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   116.2 |   50.0 | 15.5 |     14.9 |     12.3 |       9.0 |   22.8 |
-| closures     | 6003000000     |   344.6 |  699.1 | 75.6 |     77.8 |     60.3 |      19.6 |   27.6 |
-| fib          | 832040         |   181.0 |  218.4 | 15.9 |     23.5 |     13.2 |       5.0 |    2.4 |
-| helpers      | 12000000       |   865.5 | 1312.7 | 89.4 |     99.7 |     56.2 |       9.0 |    6.1 |
-| lists-region | 1501500000     |   335.7 |  313.4 | 99.9 |    108.2 |     85.3 |       7.2 |  159.1 |
-| lists        | 1501500000     |   300.3 |  480.1 | 54.9 |     57.4 |     47.2 |       9.3 |   12.5 |
-| loop         | 49999995000000 |   739.5 |  447.9 | 66.4 |     75.9 |     48.6 |       4.9 |    4.6 |
-| tak          | 9              |    52.2 |   80.9 |  6.6 |      9.7 |      4.5 |       1.7 |    1.2 |
+| program      | answer         | lowered | rust   | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | -----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 116.2   | 50.0   | 15.5 | 14.9     | 12.3     | 9.0       | 22.8   |
+| closures     | 6003000000     | 344.6   | 699.1  | 75.6 | 77.8     | 60.3     | 19.6      | 27.6   |
+| fib          | 832040         | 181.0   | 218.4  | 15.9 | 23.5     | 13.2     | 5.0       | 2.4    |
+| helpers      | 12000000       | 865.5   | 1312.7 | 89.4 | 99.7     | 56.2     | 9.0       | 6.1    |
+| lists-region | 1501500000     | 335.7   | 313.4  | 99.9 | 108.2    | 85.3     | 7.2       | 159.1  |
+| lists        | 1501500000     | 300.3   | 480.1  | 54.9 | 57.4     | 47.2     | 9.3       | 12.5   |
+| loop         | 49999995000000 | 739.5   | 447.9  | 66.4 | 75.9     | 48.6     | 4.9       | 4.6    |
+| tak          | 9              | 52.2    | 80.9   | 6.6  | 9.7      | 4.5      | 1.7       | 1.2    |
 
 ## Versions: one guard per global, at the start (2026-09-28)
 
@@ -1557,10 +1557,10 @@ compiler with the facts (`checked-extracts`, `rust_facts`: `(a b n)`,
 negative `n` a summary).
 
 | benchmark | registers before | after | native before | after |
-| --------- | ----------------:| -----:| -------------:| -----:|
-| helpers   |              9.0 |   2.8 |           6.1 |   2.0 |
-| lists     |              9.3 |   8.5 |          12.1 |  10.5 |
-| closures  |             19.6 |  17.6 |          27.6 |  24.0 |
+| --------- | ---------------: | ----: | ------------: | ----: |
+| helpers   | 9.0              | 2.8   | 6.1           | 2.0   |
+| lists     | 9.3              | 8.5   | 12.1          | 10.5  |
+| closures  | 19.6             | 17.6  | 27.6          | 24.0  |
 
 `helpers`'s `run` is now, in its fast version, a loop in registers with
 `step`, `sum2` and `dbl` inlined into it, and `(dbl 2)` folded to 4. The
@@ -1568,16 +1568,16 @@ front end compiling itself: 0.70–0.71 s → 0.76–0.77 s (same hour),
 the compiler's own work: filling the summaries' table (0.01 s), asking
 whether a fast version pays, and compiling those that do (0.03 s).
 
-| program      | answer         | lowered |   rust | hand | stencils | compiled | registers | native |
-| ------------ | -------------- | -------:| ------:| ----:| --------:| --------:| ---------:| ------:|
-| captures     | 420000         |   111.8 |   49.1 | 14.6 |     14.5 |     12.4 |       9.2 |   21.9 |
-| closures     | 6003000000     |   343.2 |  699.4 | 75.7 |     85.0 |     60.3 |      17.6 |   24.0 |
-| fib          | 832040         |   180.5 |  213.7 | 16.1 |     22.0 |     13.5 |       4.9 |    2.4 |
-| helpers      | 12000000       |   865.5 | 1274.3 | 89.3 |    110.0 |     55.2 |       2.8 |    2.3 |
-| lists-region | 1501500000     |   332.8 |  314.4 | 96.9 |    111.8 |     82.8 |       7.2 |  156.5 |
-| lists        | 1501500000     |   297.8 |  470.1 | 54.7 |     65.9 |     47.4 |       8.5 |   10.5 |
-| loop         | 49999995000000 |   736.0 |  452.2 | 64.5 |     89.7 |     41.2 |       4.7 |    4.3 |
-| tak          | 9              |    51.6 |   78.0 |  6.6 |      8.7 |      4.5 |       1.7 |    1.2 |
+| program      | answer         | lowered | rust   | hand | stencils | compiled | registers | native |
+| ------------ | -------------- | ------: | -----: | ---: | -------: | -------: | --------: | -----: |
+| captures     | 420000         | 111.8   | 49.1   | 14.6 | 14.5     | 12.4     | 9.2       | 21.9   |
+| closures     | 6003000000     | 343.2   | 699.4  | 75.7 | 85.0     | 60.3     | 17.6      | 24.0   |
+| fib          | 832040         | 180.5   | 213.7  | 16.1 | 22.0     | 13.5     | 4.9       | 2.4    |
+| helpers      | 12000000       | 865.5   | 1274.3 | 89.3 | 110.0    | 55.2     | 2.8       | 2.3    |
+| lists-region | 1501500000     | 332.8   | 314.4  | 96.9 | 111.8    | 82.8     | 7.2       | 156.5  |
+| lists        | 1501500000     | 297.8   | 470.1  | 54.7 | 65.9     | 47.4     | 8.5       | 10.5   |
+| loop         | 49999995000000 | 736.0   | 452.2  | 64.5 | 89.7     | 41.2     | 4.7       | 4.3    |
+| tak          | 9              | 51.6    | 78.0   | 6.6  | 8.7      | 4.5      | 1.7       | 1.2    |
 
 ## A nested lambda compiled once (2026-09-28)
 
@@ -1744,10 +1744,10 @@ Measured against a baseline re-measured back to back (three runs each),
 the front end on itself, as register code:
 
 | phase   | words before | after  | collections | time before | after   |
-| ------- | ------------:| ------:| ----------- | -----------:| -------:|
-| read    |       14.5 M | 13.1 M | 5 → 5       |     0.061 s | 0.061 s |
-| check   |       21.4 M | 18.4 M | 3 → 2       |     0.534 s | 0.530 s |
-| compile |       26.1 M | 27.3 M | 1 → 1       |     0.125 s | 0.132 s |
+| ------- | -----------: | -----: | ----------- | ----------: | ------: |
+| read    | 14.5 M       | 13.1 M | 5 → 5       | 0.061 s     | 0.061 s |
+| check   | 21.4 M       | 18.4 M | 3 → 2       | 0.534 s     | 0.530 s |
+| compile | 26.1 M       | 27.3 M | 1 → 1       | 0.125 s     | 0.132 s |
 
 About 5% less allocation in all, one collection fewer; the time about the
 same. The Rust compiler alone lifting (the front end not yet grown by the
@@ -1840,10 +1840,10 @@ callee's kind, as a call through `fx` does.
 What a call through an adapter costs, 10^6 calls of `(lambda (x) (+ x 1))`
 from a cellular loop (the `rust` machine):
 
-| callee                              | time    |
-| ----------------------------------- | -------:|
-| a cellular closure, an unknown call | 0.11 s  |
-| a native adapter over it            | 0.53 s  |
+| callee                              | time   |
+| ----------------------------------- | -----: |
+| a cellular closure, an unknown call | 0.11 s |
+| a native adapter over it            | 0.53 s |
 
 About 0.4 µs a call more: cellular code calls native code through the
 runtime's `call_native`, and the adapter calls the cellular closure through
@@ -1891,11 +1891,11 @@ or not it then collected (`maybe_collect`). It now asks the heap first
 (`collection_due`), and walks only for a collection. Native times:
 
 | program      | before | after |
-| ------------ | ------:| -----:|
-| captures     |   18.0 |  14.4 |
-| lists-region |  155.5 |  55.4 |
-| fib          |    2.3 |   2.2 |
-| tak          |    1.2 |   1.0 |
+| ------------ | -----: | ----: |
+| captures     | 18.0   | 14.4  |
+| lists-region | 155.5  | 55.4  |
+| fib          | 2.3    | 2.2   |
+| tak          | 1.2    | 1.0   |
 
 (ms, best of 3; the rest unchanged. `lists-region` calls out for each
 region `cons`, 20 deep and more; `captures` takes continuations, whose
@@ -1917,12 +1917,12 @@ The front end's self-compile, as register code (`probe_phases_as_register_code`)
 by the nursery's size in words:
 
 | nursery | read  | parse | check | compile | total | of which collecting |
-| ------- | -----:| -----:| -----:| -------:| -----:| -------------------:|
-| none    | 0.053 | 0.006 | 0.547 |   0.153 | 0.759 |                80.8 |
-| 512K    | 0.050 | 0.006 | 0.522 |   0.148 | 0.726 |                70.7 |
-| 1M      | 0.054 | 0.004 | 0.500 |   0.139 | 0.697 |                46.4 |
-| 2M      | 0.050 | 0.005 | 0.513 |   0.134 | 0.702 |                53.7 |
-| 4M      | 0.054 | 0.012 | 0.488 |   0.133 | 0.687 |                41.5 |
+| ------- | ----: | ----: | ----: | ------: | ----: | ------------------: |
+| none    | 0.053 | 0.006 | 0.547 | 0.153   | 0.759 | 80.8                |
+| 512K    | 0.050 | 0.006 | 0.522 | 0.148   | 0.726 | 70.7                |
+| 1M      | 0.054 | 0.004 | 0.500 | 0.139   | 0.697 | 46.4                |
+| 2M      | 0.050 | 0.005 | 0.513 | 0.134   | 0.702 | 53.7                |
+| 4M      | 0.054 | 0.012 | 0.488 | 0.133   | 0.687 | 41.5                |
 
 (seconds, and milliseconds collecting.) Where a major collection falls
 moves each row by a few milliseconds. The read, whose data nearly all
@@ -1947,11 +1947,11 @@ cell instead of failing its callers, the reference benchmarks that
 declined have no declines left. Native, one run each, seconds:
 
 | benchmark             | before | after |
-| --------------------- | ------:| -----:|
-| `earley`              |  761.4 | 104.0 |
-| `parsing`             |  125.2 |  15.7 |
-| `graphs`              |   29.0 |  13.6 |
-| `mlton/ratio-regions` |    3.8 |   4.2 |
+| --------------------- | -----: | ----: |
+| `earley`              | 761.4  | 104.0 |
+| `parsing`             | 125.2  | 15.7  |
+| `graphs`              | 29.0   | 13.6  |
+| `mlton/ratio-regions` | 3.8    | 4.2   |
 
 ## Native call-outs collect what is due (2026-09-29)
 
@@ -1962,11 +1962,11 @@ lowered program, 12 major and 1095 minor. The native call-out called
 which with the nursery meant every time it filled. It calls
 `collect_due` now:
 
-| `paraffins`        | seconds | major | minor | copied (M words), major / minor |
-| ------------------ | -------:| -----:| -----:| -------------------------------:|
-| native, before     |    56.3 |   657 |     8 |                    23 403 / 3.9 |
-| native, after      |     9.7 |     8 |   664 |                   328.3 / 691.5 |
-| lowered            |    17.4 |    12 |  1095 |                   323.4 / 688.1 |
+| `paraffins`    | seconds | major | minor | copied (M words), major / minor |
+| -------------- | ------: | ----: | ----: | ------------------------------: |
+| native, before | 56.3    | 657   | 8     | 23 403 / 3.9                    |
+| native, after  | 9.7     | 8     | 664   | 328.3 / 691.5                   |
+| lowered        | 17.4    | 12    | 1095  | 323.4 / 688.1                   |
 
 The `direct` test binary, which runs native code under collections, went
 from 12 s to 5 s.
@@ -1978,10 +1978,10 @@ takes milliseconds. On `scheme-bench/set.fx`, whose effects name up to 17
 globals:
 
 | the FX-26 checker                               | as lowered Scheme | as register code | the Rust checker |
-| ----------------------------------------------- | -----------------:| ----------------:| ----------------:|
-| before                                          |            4.96 s |           0.41 s |          0.026 s |
-| name order, type printing, union, subset linear |            3.18 s |          0.112 s |          0.026 s |
-| the session's front end as register code        |                 — |           0.31 s |          0.026 s |
+| ----------------------------------------------- | ----------------: | ---------------: | ---------------: |
+| before                                          | 4.96 s            | 0.41 s           | 0.026 s          |
+| name order, type printing, union, subset linear | 3.18 s            | 0.112 s          | 0.026 s          |
+| the session's front end as register code        | —                 | 0.31 s           | 0.026 s          |
 
 (The last row is `fixpt check`'s own timing, `FIXPT_TIME_PHASES=1`; the
 register-code column above it is the bootstrap probe's, which reads the
@@ -2009,11 +2009,11 @@ allocate a bignum: allocation never collects, only safepoints do. Both
 compilers also fold `int->T` of a literal that fits the type, to the
 literal, so that `(u32* h (int->u32 16777619))` is `prim2imm`.
 
-| 10 million iterations (ms)                 | before | after, native | registers |
-| ------------------------------------------ | ------:| -------------:| ---------:|
-| FNV-1a in `u32`                            | 1385.6 |          12.0 |     825.8 |
-| FNV-1a in `u64` (mostly bignums)           | 3903.9 |        1586.8 |    2631.1 |
-| `int`: `*`, `+`, `modulo`                  |  485.5 |          41.9 |     426.8 |
+| 10 million iterations (ms)       | before | after, native | registers |
+| -------------------------------- | -----: | ------------: | --------: |
+| FNV-1a in `u32`                  | 1385.6 | 12.0          | 825.8     |
+| FNV-1a in `u64` (mostly bignums) | 3903.9 | 1586.8        | 2631.1    |
+| `int`: `*`, `+`, `modulo`        | 485.5  | 41.9          | 426.8     |
 
 (`before` is native too. The register machine calls each one in Rust; it is
 not a speed target. A `u64` past 60 bits is a bignum, so FNV-1a in `u64`
@@ -2048,10 +2048,10 @@ hold raw 64 bits:
 The operations are then the machine's: `add`, `mul`, `eor`, `udiv`,
 `lsrv`, and unsigned comparisons for `u64`.
 
-| 10 million iterations, native (ms) | values in line |  raw |
-| ---------------------------------- | --------------:| ----:|
-| FNV-1a in `u64`                    |         1586.8 | 11.0 |
-| FNV-1a in `u32` (unchanged)        |           12.0 | 12.0 |
+| 10 million iterations, native (ms) | values in line | raw  |
+| ---------------------------------- | -------------: | ---: |
+| FNV-1a in `u64`                    | 1586.8         | 11.0 |
+| FNV-1a in `u32` (unchanged)        | 12.0           | 12.0 |
 
 ## `int` is a bignum: the cost of the tag tests (2026-09-30)
 
@@ -2063,11 +2063,11 @@ runtime with no collection. `=` against a fixnum constant needs no test
 itself need two. Measured old against new, back to back, natively:
 
 | ms, native | before | after |
-| ---------- | ------:| -----:|
-| `helpers`  |    2.1 |   3.8 |
-| `loop`     |    4.5 |   6.6 |
-| `fib`      |    2.2 |   2.8 |
-| `lists`    |    8.5 |   7.0 |
+| ---------- | -----: | ----: |
+| `helpers`  | 2.1    | 3.8   |
+| `loop`     | 4.5    | 6.6   |
+| `fib`      | 2.2    | 2.8   |
+| `lists`    | 8.5    | 7.0   |
 
 (Comparing words first for `=`, and testing both operands only when they
 differ, was tried and was slower: a loop's test is mostly of different
@@ -2083,13 +2083,13 @@ READMEs' 1.8 s. Bisected, on an empty program: 1.89 s up to `4d16831`,
 register code", which said a tiny program would start 0.2 to 0.45 s
 later), and 2.7 s by `8747c9d` as the front end grew. Timed by stage:
 
-| stage (empty program, native)                               |   before |  after |
-| ----------------------------------------------------------- | --------:| ------:|
-| the whole front end checked and lowered                     |   0.31 s |      — |
-| the whole front end loaded into the Scheme engine           |   1.91 s |      — |
-| the reader and parser checked, lowered and loaded           |        — | 0.05 s |
-| the front end checked again, compiled to register code, run |   0.37 s | 0.37 s |
-| total, wall clock                                           |   2.83 s | 0.49 s |
+| stage (empty program, native)                               | before | after  |
+| ----------------------------------------------------------- | -----: | -----: |
+| the whole front end checked and lowered                     | 0.31 s | —      |
+| the whole front end loaded into the Scheme engine           | 1.91 s | —      |
+| the reader and parser checked, lowered and loaded           | —      | 0.05 s |
+| the front end checked again, compiled to register code, run | 0.37 s | 0.37 s |
+| total, wall clock                                           | 2.83 s | 0.49 s |
 
 Since `ec2a436`, a session's checker and compilers run as register code,
 but the session still loaded the whole front end lowered, for the reader
@@ -2112,9 +2112,9 @@ space; unboxing a load. `int->f64` of a fixnum is `scvtf`; `f64->int`
 `fcvtzs`, checked exact and a fixnum. The sum of `1/i` for `i` to 10
 million:
 
-| ms       | lowered | registers | native |
-| -------- | -------:| ---------:| ------:|
-| `sumfp`  |   757.1 |     620.9 |   30.9 |
+| ms      | lowered | registers | native |
+| ------- | ------: | --------: | -----: |
+| `sumfp` | 757.1   | 620.9     | 30.9   |
 
 (Native before `int->f64` was inline: 208.9, a call-out an iteration.)
 
@@ -2128,10 +2128,10 @@ element only `f64` operations use (so the program's types make it an
 `f64`), which loads the bits alone; a raw `f64` is stored as it is.
 
 | a million f64s summed, 100 times (ms) | lowered | native |
-| ------------------------------------- | -------:| ------:|
-| every read a call-out                 |  8016.9 | 4942.6 |
-| in line, each element boxed           |       — | 3393.3 |
-| in line, raw                          |  8063.3 |  295.9 |
+| ------------------------------------- | ------: | -----: |
+| every read a call-out                 | 8016.9  | 4942.6 |
+| in line, each element boxed           | —       | 3393.3 |
+| in line, raw                          | 8063.3  | 295.9  |
 
 ## A fixnum version of native code (2026-09-30)
 
@@ -2149,11 +2149,11 @@ version at the same instruction: the registers and the frame are the same
 in both at every instruction's start, so nothing is converted.
 
 | ms, native | before `int` was a bignum | bignum | fixnum version |
-| ---------- | -------------------------:| ------:| --------------:|
-| `helpers`  |                       2.1 |    3.8 |            2.0 |
-| `loop`     |                       4.5 |    6.6 |            4.0 |
-| `fib`      |                       2.2 |    2.8 |            2.6 |
-| `lists`    |                       8.5 |    7.0 |            6.0 |
+| ---------- | ------------------------: | -----: | -------------: |
+| `helpers`  | 2.1                       | 3.8    | 2.0            |
+| `loop`     | 4.5                       | 6.6    | 4.0            |
+| `fib`      | 2.2                       | 2.8    | 2.6            |
+| `lists`    | 8.5                       | 7.0    | 6.0            |
 
 (`fib`'s argument is new at each call, and tested at each.) All 93
 benchmark ports give their READMEs' answers natively; `earley` now takes
@@ -2176,13 +2176,38 @@ The image is 9.5 MB (1.18 M words), and its CRC-32, a bit at a time, took
 about 35 ms of the load; with a table built at compile time the whole
 load, verification included, is 22 ms.
 
-| stage (empty program, native)                        | before |  cached |
-| ---------------------------------------------------- | ------:| -------:|
-| the reader and parser checked, lowered and loaded    | 0.05 s |  0.05 s |
-| the front end checked and compiled                   | 0.33 s |       — |
-| its image read and verified, and copied in           |      — |  0.03 s |
-| the front end run (its globals made)                 | 0.04 s |  0.04 s |
-| total, wall clock                                    | 0.50 s |  0.19 s |
+| stage (empty program, native)                     | before | cached |
+| ------------------------------------------------- | -----: | -----: |
+| the reader and parser checked, lowered and loaded | 0.05 s | 0.05 s |
+| the front end checked and compiled                | 0.33 s | —      |
+| its image read and verified, and copied in        | —      | 0.03 s |
+| the front end run (its globals made)              | 0.04 s | 0.04 s |
+| total, wall clock                                 | 0.50 s | 0.19 s |
 
 The first run of a new executable pays 0.28 s more, to write the image.
 The ports give the same answers with the cache and without.
+
+## Tail calls in leaves (2026-10-01)
+
+A procedure whose only calls are plain calls in tail position, their
+arguments collecting nothing, is now a leaf: no frame, its parameters
+kept in registers, and the call's arguments moved into REG1…REGn at once
+(the parallel moves loops already used), the procedure into RESULT, and
+`tailinvoke`. `(lambda (f x y) (f x y))` was a frame, three stores, three
+loads and a pop around the jump; it is three `mov`s and the jump. It makes
+281 of the front end's 2940 bodies leaves, and 24 of the test programs'
+261. Both register compilers, word for word; where a leaf runs out of
+registers, the body is made as before.
+
+Measured old against new back to back, natively: no benchmark moves past
+run-to-run noise (about ±2%), nor does checking a large file. Wrappers
+and argument shuffles are where it applies, and they are not where the
+time goes; kept because it is right, and tidier code to read.
+
+| benchmark | old (s)     | new (s)     |
+| --------- | ----------- | ----------- |
+| browse    | 10.48 10.07 | 10.05 10.27 |
+| conform   | 3.59 3.57   | 3.50 3.62   |
+| earley    | 5.21 5.13   | 5.12 5.13   |
+| nboyer    | 5.87 6.01   | 5.85 5.85   |
+| destruc   | 24.64 24.51 | 24.06 23.93 |

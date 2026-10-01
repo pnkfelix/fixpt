@@ -320,7 +320,12 @@
                    (r-decline)
                    (let ((i (car (r-inlined env f n))))
                      (r-inline g (car i) (cdr i) f args env te tail))))
-              ((extract g leaf) (r-decline))
+              ((extract g leaf)
+               (if (and tail
+                        (and (< n register-regs)
+                             (and (null? (r-specialized env f args)) (< (r-lifted-at env f) 0))))
+                   ((get r-leaf-call) g f args env te)
+                   (r-decline)))
               ((not (null? (r-specialized env f args)))
                (let ((i (car (r-specialized env f args))))
                  (r-specialize g (extract i 1) (extract i 2) (extract i 3) args env te tail)))

@@ -3,8 +3,9 @@
 //! as its cellular word's twin.
 //!
 //! Where values live, the first way: a procedure that neither calls nor
-//! calls out (a leaf, loops aside) keeps its parameters, its `let`s and its
-//! temporaries in registers. Any other keeps its parameters and `let`s in
+//! calls out (a leaf, loops aside, and plain calls in tail position, made
+//! by moving the arguments into place: `r_leaf_tail_call`) keeps its
+//! parameters, its `let`s and its temporaries in registers. Any other keeps its parameters and `let`s in
 //! its frame, made on entry, since a call or a call-out may collect and
 //! then only the frame holds values; its registers are only temporaries,
 //! and arguments on their way to a call. What this compiler does not do yet
@@ -297,6 +298,24 @@ impl Compiler<'_> {
         // Past `REGS` parameters, the rest come as a list in REG8, taken
         // apart into the frame.
         let leaf = params.len() <= REGS && !self.r_collects(body, inner, this, true);
+        // A leaf too where its only calls are plain tail calls; made so
+        // first, and if that runs out of registers, made as before.
+        if !leaf && params.len() <= REGS {
+            self.tail_calls_leave = true;
+            let leaves = !self.r_collects(body, inner, this, true);
+            self.tail_calls_leave = false;
+            if leaves {
+                let declined = self.declined.clone();
+                if let Some(g) = self.register_body_as(params, body, inner, this, own, true) {
+                    return Some(g);
+                }
+                self.declined = declined;
+            }
+        }
+        self.register_body_as(params, body, inner, this, own, leaf)
+    }
+
+    fn register_body_as(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>, leaf: bool) -> O<Gen> {
         let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new(), looped: false };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
@@ -592,7 +611,10 @@ impl Compiler<'_> {
                     }
                     _ => false,
                 };
-                args_collect || !(loop_call || inline || self.r_call_is_free(fun, args.len(), e, tail))
+                // A plain call in tail position, deciding a leaf: nothing
+                // is used after it, so it needs no frame (`r_leaf_tail_call`).
+                let leaves = self.tail_calls_leave && tail && args.len() < REGS && self.r_plain_callee(fun, args.len(), e) && !self.r_collects(fun, e, this, false);
+                args_collect || !(loop_call || inline || leaves || self.r_call_is_free(fun, args.len(), e, tail))
             }
             _ => true,
         }
@@ -621,6 +643,20 @@ impl Compiler<'_> {
         self.inlining.pop();
         self.genv_limit = outer;
         !collects
+    }
+
+    /// Whether a call of `fun` with `n` arguments is a plain `invoke`: not a
+    /// standard operation, an inlined or specialized global's, or a lifted
+    /// procedure's, each compiled its own way.
+    fn r_plain_callee(&self, fun: ExpId, n: usize, e: &Env) -> bool {
+        let Exp::Var(name) = *self.c.arena.exp_at(fun) else { return true };
+        match self.where_is(e, name) {
+            None | Some(Loc::Lifted(_) | Loc::Loop | Loc::Pending(_)) => false,
+            Some(Loc::Global(_)) => {
+                !self.inlines.iter().any(|i| i.name == name && i.params.len() == n) && !self.specials.iter().any(|s| s.name == name && s.params.len() == n)
+            }
+            Some(_) => true,
+        }
     }
 
     /// Whether `x` is a variable or a constant: evaluated in `RESULT` alone,
@@ -1197,6 +1233,9 @@ impl Compiler<'_> {
                 return self.decline("a call in a leaf");
             }
             return self.r_inline(g, k, cell, f, args, env, te, tail);
+        }
+        if g.leaf && tail && args.len() < REGS && self.r_specialized(env, f, args).is_none() && !matches!(self.r_var(env, f), Some(RLoc::Lifted(_))) {
+            return self.r_leaf_tail_call(g, f, args, env, te);
         }
         if g.leaf {
             return self.decline("a call in a leaf");
@@ -2158,6 +2197,85 @@ impl Compiler<'_> {
         }
         g.op("lambda", &[w, Gen::n(fv.len())]);
         Some(patches)
+    }
+
+    /// A call in tail position in a leaf, which has no frame: the arguments
+    /// that are not in registers and not simple made first, in order, each
+    /// into a register of its own, above REG1…REGn; then all moved to REG1…REGn at once
+    /// (`r_par_moves`); then the simple ones, which read no register, into
+    /// theirs; the procedure in RESULT; and the call. The procedure goes to
+    /// RESULT before the moves where nothing after them uses RESULT.
+    fn r_leaf_tail_call(&mut self, g: &mut Gen, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        // Registers of its own above the arguments' as well as the leaf's.
+        let regs = g.next_reg;
+        g.next_reg = regs.max(args.len());
+        let (mut moves, mut late) = (Vec::new(), Vec::new());
+        for (i, a) in args.iter().enumerate() {
+            match self.r_var(env, *a) {
+                Some(RLoc::Reg(r)) => {
+                    if r != i + 1 {
+                        moves.push((r, i + 1));
+                    }
+                }
+                _ if self.r_simple(*a) => late.push((i + 1, *a)),
+                _ => {
+                    self.r_exp(g, *a, env, te, false)?;
+                    let Some(t) = g.reg() else { return self.decline("a leaf's tail call, out of registers") };
+                    g.op("setreg", &[Gen::n(t)]);
+                    moves.push((t, i + 1));
+                }
+            }
+        }
+        let written = |k: usize, moves: &[(usize, usize)], late: &[(usize, ExpId)]| moves.iter().any(|m| m.1 == k) || late.iter().any(|l| l.0 == k);
+        // Whether RESULT is free while the moves are made and after.
+        let quiet = late.is_empty() && !Self::r_moves_cycle(&moves);
+        // Where the procedure is once the moves are made: in RESULT already,
+        // a register, or (`None`) to be fetched, reading no register.
+        let fun: Option<Option<usize>> = match self.r_var(env, f) {
+            Some(RLoc::Reg(r)) if !written(r, &moves, &late) => Some(Some(r)),
+            Some(RLoc::Reg(r)) if quiet => {
+                g.op("reg", &[Gen::n(r)]);
+                Some(None)
+            }
+            Some(RLoc::Reg(r)) => {
+                let Some(t) = g.reg() else { return self.decline("a leaf's tail call, out of registers") };
+                moves.push((r, t));
+                Some(Some(t))
+            }
+            _ if self.r_simple(f) => None,
+            _ => {
+                self.r_exp(g, f, env, te, false)?;
+                if quiet {
+                    Some(None)
+                } else {
+                    let Some(t) = g.reg() else { return self.decline("a leaf's tail call, out of registers") };
+                    g.op("setreg", &[Gen::n(t)]);
+                    Some(Some(t))
+                }
+            }
+        };
+        Self::r_par_moves(g, moves);
+        for (k, a) in late {
+            self.r_into(g, a, k, env, te)?;
+        }
+        match fun {
+            Some(Some(r)) => g.op("reg", &[Gen::n(r)]),
+            Some(None) => {}
+            None => self.r_exp(g, f, env, te, false)?,
+        }
+        g.op("tailinvoke", &[Gen::n(args.len())]);
+        g.next_reg = regs;
+        Some(())
+    }
+
+    /// Whether register moves (source, destination) form a cycle: some left
+    /// when every move whose destination no other reads is taken away.
+    fn r_moves_cycle(ms: &[(usize, usize)]) -> bool {
+        let mut ms = ms.to_vec();
+        while let Some(k) = (0..ms.len()).find(|&k| !ms.iter().enumerate().any(|(m, (s, _))| m != k && *s == ms[k].1)) {
+            ms.remove(k);
+        }
+        !ms.is_empty()
     }
 
     /// Register moves (source, destination; source 0 is RESULT), made so

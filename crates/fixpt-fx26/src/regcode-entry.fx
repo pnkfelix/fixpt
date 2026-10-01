@@ -102,23 +102,22 @@
           (let* ((o (car own))
                  (me (product (1 (extract o 1)) (2 (extract o 2)) (3 n) (4 own-at))))
             (begin (set r-own-now (cons me nil)) (r-emit g (r-label own-at))))))))
-;; A lambda's body in register code, not yet assembled, in a list; none where
-;; this compiler declines. In a fast version, where a call inlined or of
-;; itself in tail position is no call, a leaf maybe where the plain one is
-;; not.
-(define r-register-body (subr rcompiles (exp-params exp cenv rthis rowner) rgens)
-  (lambda (ps body inner this own)
+;; What a body's register code starts from, made afresh for each try.
+(define r-body-reset! (subr rcompiles (rowner int) unit)
+  (lambda (own n)
+    (begin
+      (set r-declined #f)
+      (set r-looped #f)
+      (set r-spec-at (the rlocs nil))
+      (set r-own-now (the (listof rown @k) nil))
+      (set r-own-name (r-own-name-of own n)))))
+;; The body as a leaf, or not, as `leaf` says (`r-register-body`).
+(define r-register-body-as (subr rcompiles (exp-params exp cenv rthis rowner bool) rgens)
+  (lambda (ps body inner this own leaf)
     (let ((n (c-count-params ps)))
       (begin
-        (set r-declined #f)
-        (set r-looped #f)
-        (set r-spec-at (the rlocs nil))
-        (set r-own-now (the (listof rown @k) nil))
-        (set r-own-name (r-own-name-of own n))
-        ;; Past `register-regs` parameters, the rest come as a list in the
-        ;; last register, taken apart into the frame.
-        (let* ((leaf (and (<= n register-regs) (not (r-collects body inner this #t))))
-               (spec-at (if (null? this) 0 1))
+        (r-body-reset! own n)
+        (let* ((spec-at (if (null? this) 0 1))
                (own-at (+ spec-at (if (null? (get c-spec-now)) 0 1)))
                (g (r-new-gen leaf 0 (+ own-at (if (null? own) 0 1)) this)))
           (begin
@@ -131,6 +130,30 @@
                 (r-starts g env this own n spec-at own-at)
                 (r-exp g body env inner #t)
                 (if (get r-declined) (the rgens nil) (the rgens (cons g nil)))))))))))
+;; Whether `body` is a leaf once plain tail calls count as no call.
+(define r-leaves? (subr rcompiles (exp cenv rthis) bool)
+  (lambda (body inner this)
+    (begin
+      (set r-tail-calls-leave #t)
+      (let ((l (not (r-collects body inner this #t)))) (begin (set r-tail-calls-leave #f) l)))))
+;; A lambda's body in register code, not yet assembled, in a list; none where
+;; this compiler declines. In a fast version, where a call inlined or of
+;; itself in tail position is no call, a leaf maybe where the plain one is
+;; not. A leaf too where its only calls are plain tail calls: made so
+;; first, and if that declines (out of registers), made as before. As the
+;; Rust compiler's `register_body_in`.
+(define r-register-body (subr rcompiles (exp-params exp cenv rthis rowner) rgens)
+  (lambda (ps body inner this own)
+    (let ((n (c-count-params ps)))
+      (begin
+        (r-body-reset! own n)
+        ;; Past `register-regs` parameters, the rest come as a list in the
+        ;; last register, taken apart into the frame.
+        (let ((leaf (and (<= n register-regs) (not (r-collects body inner this #t)))))
+          (if (or leaf (> n register-regs) (not (r-leaves? body inner this)))
+              (r-register-body-as ps body inner this own leaf)
+              (let ((gs (r-register-body-as ps body inner this own #t)))
+                (if (null? gs) (r-register-body-as ps body inner this own #f) gs))))))))
 ;; The body compiled once, as ever.
 (define r-plain-code (subr rcompiles (exp-params exp cenv rthis rowner) wcells)
   (lambda (ps body inner this own)
@@ -237,6 +260,62 @@
                  (set r-own-now outer-own) (set r-own-name outer-name)
                  cells))))))
 
+(define-rec
+  ;; A call in tail position in a leaf, which has no frame, as the Rust
+  ;; compiler's `r_leaf_tail_call`: the arguments sorted (`r-leaf-args`);
+  ;; the procedure into RESULT now if nothing after the moves uses RESULT,
+  ;; else kept in a register; the moves; the simple arguments; the call.
+  ;; Its own registers are above REG1…REGn.
+  (r-leaf-tail-call (subr rcompiles (rgen exp exps renv cenv) unit)
+    (lambda (g f args env te)
+      (let* ((nreg (extract g nreg))
+             (regs (get nreg))
+             ;; Registers of its own above the arguments' as well as the leaf's.
+             (above (set nreg (max regs (c-count-exps args))))
+             (made (r-leaf-args g args env te 1))
+             (late (extract made late))
+             (quiet (and (null? late) (not (r-moves-cycle? (extract made moves)))))
+             (fr (r-reg-of (r-plain-var-loc env f)))
+             (written (and (> fr 0) (r-written? fr (extract made moves) late)))
+             ;; Where the procedure is after the moves: a register; 0, to
+             ;; be fetched; -1, in RESULT.
+             (at (cond ((and (> fr 0) (not written)) fr)
+                       ((and written quiet) (begin (r-opn g rop-reg fr) -1))
+                       (written (r-reg g))
+                       ((r-simple? f) 0)
+                       (else (begin (r-exp g f env te #f) (if quiet -1 (r-keep-in-reg g))))))
+             (moves (if (and written (not quiet))
+                        (r-moves-snoc (extract made moves) fr at)
+                        (extract made moves))))
+        (begin
+          (r-par-moves g moves)
+          (r-late-into g late env te)
+          (cond ((> at 0) (r-opn g rop-reg at)) ((= at 0) (r-exp g f env te #f)) (else #u))
+          (r-opn g rop-tailinvoke (c-count-exps args))
+          (set nreg regs)))))
+  ;; A leaf's tail call's arguments from REGk: one in a register moved from
+  ;; there; a simple one left for after the moves; any other made now, in
+  ;; order, into a register of its own, and moved from there.
+  (r-leaf-args (subr rcompiles (rgen exps renv cenv int) rleaf)
+    (lambda (g args env te k)
+      (if (null? args)
+          (r-rleaf (the rmoves nil) (the rlate nil))
+          (let* ((a (car args)) (r (r-reg-of (r-plain-var-loc env a))))
+            (cond ((> r 0)
+                   (let ((rest (r-leaf-args g (cdr args) env te (+ k 1))))
+                     (if (= r k) rest (r-leaf-move rest r k))))
+                  ((r-simple? a) (r-leaf-late (r-leaf-args g (cdr args) env te (+ k 1)) k a))
+                  (else
+                   (let ((t (begin (r-exp g a env te #f) (r-keep-in-reg g))))
+                     (r-leaf-move (r-leaf-args g (cdr args) env te (+ k 1)) t k))))))))
+  ;; Each simple argument of `late` into its register.
+  (r-late-into (subr rcompiles (rgen rlate renv cenv) unit)
+    (lambda (g late env te)
+      (if (null? late)
+          #u
+          (let ((one (car late)))
+            (begin (r-into g (cdr one) (car one) env te) (r-late-into g (cdr late) env te)))))))
+(set r-leaf-call r-leaf-tail-call)
 (set c-register-code r-register-code)
 (set c-standard-register-code r-standard-word)
 

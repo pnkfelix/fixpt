@@ -3,7 +3,9 @@
 ;;; the lambda's word's twin: the MacScheme machine's instructions
 ;;; (`layout::regcode`, the `rop-` numbers), made from the same trees.
 ;;;
-;;; A leaf (a procedure that neither calls nor calls out, loops aside) keeps
+;;; A leaf (a procedure that neither calls nor calls out, loops aside, and
+;;; plain calls in tail position, made by moving the arguments into place:
+;;; `r-leaf-tail-call`) keeps
 ;;; its parameters, its `let`s and its temporaries in registers; any other
 ;;; keeps its parameters and `let`s in a frame made on entry, since a call or
 ;;; a call-out may collect, and then only the frame holds values. What this
@@ -373,6 +375,48 @@
               (tagcase (car l)
                 (rl-reg (r) (if (= r (+ j 1)) rest (cons (the rmove (cons r (+ j 1))) rest)))
                 (else y rest)))))))
+
+;; A leaf's tail call's arguments, as `r-leaf-args` sorts them: the moves
+;; of those in registers, or made into one, to REG1…REGn; and the simple
+;; ones, each with its register, made after the moves.
+(define-type rlate (listof (pairof int exp @k) @k))
+(define-type rleaf (productof (moves rmoves) (late rlate)))
+;; A leaf's tail call's arguments, sorted.
+(define r-rleaf (subr (read @globals) (rmoves rlate) rleaf)
+  (lambda (ms late) (product (moves ms) (late late))))
+;; `rest` with the move of `s` to REGk first, or the simple argument `a`.
+(define r-leaf-move (subr (maxeff (read @globals) (alloc @k)) (rleaf int int) rleaf)
+  (lambda (rest s k)
+    (let ((m (the rmove (cons s k)))) (r-rleaf (cons m (extract rest moves)) (extract rest late)))))
+(define r-leaf-late (subr (maxeff (read @globals) (alloc @k)) (rleaf int exp) rleaf)
+  (lambda (rest k a) (r-rleaf (extract rest moves) (cons (cons k a) (extract rest late)))))
+;; The register `l` is, or 0 if it is none.
+(define r-reg-of (subr rreads (rlocs) int)
+  (lambda (l) (if (null? l) 0 (tagcase (car l) (rl-reg (r) r) (else y 0)))))
+;; Whether register moves form a cycle: some left when every move whose
+;; destination no other reads is taken away. As `r_moves_cycle`.
+(define r-moves-cycle? (subr rbuilds (rmoves) bool)
+  (lambda (ms)
+    (and (not (null? ms))
+         (let ((k (r-free-move ms ms 0)))
+           (or (< k 0) (r-moves-cycle? (r-drop-move ms k 0)))))))
+;; Whether a move of `ms`, or a simple argument of `late`, writes REGk.
+(define r-written? (subr rscans (int rmoves rlate) bool)
+  (lambda (k ms late)
+    (cond ((not (null? ms)) (or (= (cdr (car ms)) k) (r-written? k (cdr ms) late)))
+          ((null? late) #f)
+          (else (or (= (car (car late)) k) (r-written? k ms (cdr late)))))))
+;; A leaf's tail call (`r-leaf-tail-call`, in `regcode-entry.fx`), which
+;; `r-call` makes through this, set once it is defined.
+(define r-leaf-call
+  (ref (subr rcompiles (rgen exp exps renv cenv) unit) @k)
+  (new (lambda (g f args env te) (r-decline))))
+;; `ms` with the move of `s` to `d` last.
+(define r-moves-snoc (subr rbuilds (rmoves int int) rmoves)
+  (lambda (ms s d)
+    (if (null? ms)
+        (the rmoves (cons (the rmove (cons s d)) nil))
+        (cons (car ms) (r-moves-snoc (cdr ms) s d)))))
 
 ;; Whether `f` is the procedure running, called with its arity: its own
 ;; name, still bound where the procedure knows itself to be.
