@@ -155,6 +155,69 @@ fn every_test_program() {
     assert!(unparsed.len() <= 5 && agreed >= 150, "only {agreed} compared; not parsed: {unparsed:?}");
 }
 
+/// What is wrong with a message's shape, if anything (`docs/fx26.md`,
+/// "Messages"): its first line must stand alone, since the REPL shows only
+/// that line under a form as it is typed, and later lines are indented
+/// details.
+fn message_shape(message: &str) -> Option<&'static str> {
+    let mut lines = message.split('\n');
+    let first = lines.next().unwrap_or("");
+    if first.trim().is_empty() {
+        Some("the first line is empty")
+    } else if first.starts_with(' ') || first.ends_with(' ') {
+        Some("the first line has space around it")
+    } else if first.ends_with(':') {
+        Some("the first line is a header, not the error")
+    } else if lines.any(|l| !l.starts_with("  ") || l.trim().is_empty()) {
+        Some("a later line is blank or not indented two spaces")
+    } else {
+        None
+    }
+}
+
+/// Every refusal in the test programs, and in the tests' inline programs,
+/// has a first line that stands alone. The checkers agree word for word
+/// (`every_test_program`), so the Rust checker's messages speak for both.
+#[test]
+fn messages_have_a_usable_first_line() {
+    assert!(message_shape("a is expected\n  beyond, b").is_none());
+    for bad in ["", "in this definition:\n  a", "a\nb", "a\n\n  b"] {
+        assert!(message_shape(bad).is_some(), "{bad:?}");
+    }
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests");
+    let mut programs: Vec<(String, String)> = Vec::new();
+    for entry in std::fs::read_dir(format!("{dir}/programs")).unwrap() {
+        let sub = entry.unwrap().path();
+        let Ok(files) = std::fs::read_dir(&sub) else { continue };
+        for f in files {
+            let path = f.unwrap().path();
+            if path.extension().is_some_and(|x| x == "fx") {
+                programs.push((path.display().to_string(), std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|x| x == "rs") {
+            for l in literals(&std::fs::read_to_string(&path).unwrap()) {
+                programs.push((path.display().to_string(), l));
+            }
+        }
+    }
+    let (mut refused, mut report) = (0, Vec::new());
+    for (name, p) in &programs {
+        if let Err((message, ..)) = rust_check(p) {
+            refused += 1;
+            if let Some(why) = message_shape(&message) {
+                report.push(format!("{name}: {why}: {message:?}"));
+            }
+        }
+    }
+    eprintln!("{refused} refusals looked at");
+    assert!(refused >= 100, "only {refused} refusals found");
+    assert!(report.is_empty(), "messages whose first line does not stand alone:\n{}", report.join("\n"));
+}
+
 /// The front end's checker run as register code
 /// (`Fx26Session::front_end_compiled`) says what it says run as lowered
 /// Scheme, on programs that check and one that does not.
