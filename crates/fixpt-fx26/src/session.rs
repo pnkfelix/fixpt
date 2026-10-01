@@ -25,6 +25,9 @@ pub const DEFAULT_STEP_LIMIT: u64 = 20_000_000;
 
 pub struct Fx26Session {
     pub checker: Checker,
+    /// REPL entries of type definitions that name types not defined yet:
+    /// held, unrun, until those are (`Fx26Session::consider`).
+    pub pending: Vec<Pending>,
     pub scheme: Session,
     pub globals: Globals,
     /// How checked forms run.
@@ -102,6 +105,26 @@ pub enum Speculation {
     NotLicensed(String),
     /// A definition: running one early would define it.
     NotAnExpression,
+}
+
+/// A REPL entry that defines types naming types not defined yet: held as
+/// it was read, and run with the entries that complete it.
+#[derive(Debug, Clone)]
+pub struct Pending {
+    pub forms: Vec<Syntax>,
+    /// What it defines: types, and values (a datatype's constructors).
+    pub defines: Vec<String>,
+}
+
+/// What entering a REPL entry does, given the entries pending.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Consider {
+    /// It runs as any entry does.
+    Run,
+    /// It completes the pending entries: they and it run together.
+    Completes(Vec<String>),
+    /// It waits too: these types are not defined yet.
+    Pends(Vec<String>),
 }
 
 /// Check and lower one top-level form, keeping what it defines, alone: not
@@ -392,6 +415,7 @@ impl Fx26Session {
             defined26: String::new(),
             step_limit: Some(DEFAULT_STEP_LIMIT),
             speculation_limit: Some(SPECULATION_STEP_LIMIT),
+            pending: Vec::new(),
         })
     }
 
@@ -447,6 +471,66 @@ impl Fx26Session {
         }
     }
 
+    /// What entering `forms`, a REPL entry, would do with the entries
+    /// pending: run alone if it checks alone, or if it defines no type; with
+    /// them, if together they lack nothing; else wait, if it defines a type
+    /// and only types are missing. Nothing is kept.
+    pub fn consider(&mut self, forms: &[Syntax]) -> Consider {
+        let c = &mut self.checker;
+        let defines_type = forms.iter().any(|f| f.as_proper_list().and_then(|l| l.first()?.as_symbol()).is_some_and(|h| c.interner.name(h) == "define-type"));
+        if !defines_type {
+            return Consider::Run;
+        }
+        let alone = c.missing_types(forms);
+        if alone.as_ref().is_some_and(|m| m.is_empty()) {
+            return Consider::Run;
+        }
+        let names = |c: &Checker, ms: Vec<Sym>| ms.into_iter().map(|m| c.interner.name(m).to_string()).collect::<Vec<_>>();
+        if !self.pending.is_empty() {
+            let group: Vec<Syntax> = self.pending.iter().flat_map(|p| p.forms.iter().cloned()).chain(forms.iter().cloned()).collect();
+            match self.checker.missing_types(&group) {
+                Some(m) if m.is_empty() => return Consider::Completes(self.pending.iter().flat_map(|p| p.defines.iter().cloned()).collect()),
+                Some(m) => return Consider::Pends(names(&self.checker, m)),
+                None => {}
+            }
+        }
+        match alone {
+            Some(m) if !m.is_empty() => Consider::Pends(names(&self.checker, m)),
+            _ => Consider::Run,
+        }
+    }
+
+    /// `forms`, an entry `consider` said waits, held.
+    pub fn hold(&mut self, forms: &[Syntax]) {
+        let c = &self.checker;
+        let mut defines = Vec::new();
+        for f in forms {
+            let l = f.as_proper_list().unwrap_or(&[]);
+            match (l.first().and_then(|h| h.as_symbol()).map(|h| c.interner.name(h)), l.get(1).and_then(|n| n.as_symbol())) {
+                (Some("define-type"), Some(n)) => defines.push(c.interner.name(n).to_string()),
+                _ => defines.extend(c.defined_names(f).into_iter().map(|n| c.interner.name(n).to_string())),
+            }
+        }
+        self.pending.push(Pending { forms: forms.to_vec(), defines });
+    }
+
+    /// The pending entries, and `forms` after them, run as a program's
+    /// forms are; none pending after.
+    pub fn complete(&mut self, forms: &[Syntax]) -> R<Vec<R<Outcome>>> {
+        let group: Vec<Syntax> = std::mem::take(&mut self.pending).into_iter().flat_map(|p| p.forms).chain(forms.iter().cloned()).collect();
+        self.run_forms(&group)
+    }
+
+    /// What the pending entries still lack, as `consider` would find it.
+    pub fn awaiting(&mut self) -> Vec<String> {
+        let group: Vec<Syntax> = self.pending.iter().flat_map(|p| p.forms.iter().cloned()).collect();
+        if group.is_empty() {
+            return Vec::new();
+        }
+        let m = self.checker.missing_types(&group).unwrap_or_default();
+        m.into_iter().map(|m| self.checker.interner.name(m).to_string()).collect()
+    }
+
     /// An expression (text), licensed, run early by the pieces written in
     /// FX-26 as `run_checked` runs one, on the speculation budget: natively
     /// if it can be, else as cellular code, or by the evaluator.
@@ -490,15 +574,17 @@ impl Fx26Session {
     pub fn run_forms(&mut self, forms: &[Syntax]) -> R<Vec<R<Outcome>>> {
         let done = self.checker.declare_ahead(forms)?;
         // The type definitions, declared ahead, are the pieces written in
-        // FX-26's too, first and in order, as the REPL gives them.
+        // FX-26's too, first: all in one text, so that its checker declares
+        // them ahead as well, and they may name each other.
         if self.strategy != Strategy::Lower {
-            for (f, _) in forms.iter().zip(&done).filter(|(_, d)| **d) {
-                let text = format!("{}\n", fixpt_read::write_syntax(f, &self.checker.interner));
-                if self.strategy == Strategy::Evaluate {
-                    self.defined26.push_str(&text);
-                } else if let Some(e) = self.compile_form_showing(&text, false)?.0.strip_prefix("!! ") {
-                    return Err(FxError::at(f.span, e.to_string()));
-                }
+            let ahead: Vec<&Syntax> = forms.iter().zip(&done).filter(|(_, d)| **d).map(|(f, _)| f).collect();
+            let text: String = ahead.iter().map(|f| format!("{}\n", fixpt_read::write_syntax(f, &self.checker.interner))).collect();
+            if self.strategy == Strategy::Evaluate {
+                self.defined26.push_str(&text);
+            } else if let (Some(first), false) = (ahead.first(), text.is_empty())
+                && let Some(e) = self.compile_form_showing(&text, false)?.0.strip_prefix("!! ")
+            {
+                return Err(FxError::at(first.span, e.to_string()));
             }
         }
         // What the reader made of a `define-generative` declared ahead (its

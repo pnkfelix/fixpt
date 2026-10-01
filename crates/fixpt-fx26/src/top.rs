@@ -802,6 +802,42 @@ impl Checker {
         Ok(done)
     }
 
+    /// The type names `forms`, checked together as a program's types are,
+    /// lack: none if they check; the names whose absence alone stops them,
+    /// found by standing an `int` in for each as it is found missing; or
+    /// `None` if something else is wrong. Nothing is kept.
+    pub fn missing_types(&mut self, forms: &[Syntax]) -> Option<Vec<Sym>> {
+        let mut missing: Vec<Sym> = Vec::new();
+        for _ in 0..32 {
+            let span = forms.first()?.span;
+            let mut group: Vec<Syntax> = missing
+                .iter()
+                .map(|m| {
+                    let w = |c: &mut Checker, n: &str| Syntax::symbol(span, c.interner.intern(n));
+                    Syntax::list(span, vec![w(self, "define-type"), Syntax::symbol(span, *m), w(self, "int")])
+                })
+                .collect();
+            group.extend(forms.iter().cloned());
+            let r = self.scratch(|c| -> R<()> {
+                let done = c.declare_ahead(&group)?;
+                for (f, d) in group.iter().zip(done) {
+                    if !d {
+                        c.top(f)?;
+                    }
+                }
+                Ok(())
+            });
+            let Err(e) = r else { return Some(missing) };
+            let name = e.message.strip_prefix('`').and_then(|m| m.strip_suffix("` is not a type"))?;
+            let sym = self.interner.intern(name);
+            if missing.contains(&sym) {
+                return None;
+            }
+            missing.push(sym);
+        }
+        None
+    }
+
     fn declare_each(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
         let mut done = Vec::new();
         for f in forms {

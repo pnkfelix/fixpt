@@ -515,6 +515,45 @@ fn speculation_reads_compiled_globals() {
     }
 }
 
+/// Types that name each other run in a compiled session as in a file: the
+/// pieces written in FX-26 are given them together.
+#[test]
+fn types_naming_each_other_run_compiled() {
+    let mut s = session(true);
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/recursive/types-in-any-order.fx")).expect("reads");
+    let out = values_of(&mut s, &forms);
+    assert!(out.last().is_some_and(|v| v.starts_with("(#<sum some>)")), "{out:?}");
+}
+
+/// At the REPL, a datatype naming one not defined yet waits for it, and runs
+/// with the entry that defines it; lowered, and compiled natively.
+#[test]
+fn an_entry_waits_for_the_types_it_names() {
+    use fixpt_fx26::session::{Consider, Fx26Session as S};
+    let entry = |s: &mut S, text: &str| s.checker.read_in(FileId(0), text).expect("reads");
+    for native in [None, Some(true)] {
+        let mut s = match native {
+            None => Fx26Session::with_backend(Backend::Bytecode).expect("starts"),
+            Some(n) => session(n),
+        };
+        let tree = entry(&mut s, "(define-datatype tree (leaf int) (node forest))");
+        assert_eq!(s.consider(&tree), Consider::Pends(vec!["forest".into()]));
+        s.hold(&tree);
+        assert_eq!(s.awaiting(), ["forest"]);
+        // Something unrelated runs as ever, and leaves it waiting.
+        let other = entry(&mut s, "(define-type n int)");
+        assert_eq!(s.consider(&other), Consider::Run);
+        let forest = entry(&mut s, "(define-datatype forest (fnil) (fcons tree forest))");
+        assert_eq!(s.consider(&forest), Consider::Completes(vec!["tree".into(), "leaf".into(), "node".into()]));
+        for o in s.complete(&forest).expect("runs") {
+            assert!(o.as_ref().is_ok_and(|o| o.value.is_ok()), "{:?}", o.err().map(|e| e.message));
+        }
+        assert!(s.pending.is_empty());
+        let use_it = entry(&mut s, "(node (fcons (leaf 1) (fnil)))");
+        assert_eq!(values_of(&mut s, &use_it), ["#<sum node>"], "native {native:?}");
+    }
+}
+
 /// The values `forms` give, run in `s` (a failure as `error: …`).
 fn values_of(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> Vec<String> {
     s.run_forms(forms)

@@ -215,6 +215,19 @@ pub fn repl(backend: Backend) -> i32 {
             }
             _ => (false, text),
         };
+        // `,pending [clear]`: the entries waiting on types not defined yet.
+        if let Some(arg) = text.trim().strip_prefix(",pending") {
+            match arg.trim() {
+                "" if session.pending.is_empty() => println!("; nothing is pending"),
+                "" => println!("{}", pending_line(&mut session)),
+                "clear" => {
+                    session.pending.clear();
+                    println!("; nothing is pending");
+                }
+                _ => println!("; `,pending` shows the entries waiting on types not defined yet; `,pending clear` drops them"),
+            }
+            continue;
+        }
         // `,native NAME [ARG…]`: NAME's procedure in the native convention.
         if let Some(rest) = text.trim().strip_prefix(",native") {
             native(&mut session, rest);
@@ -295,6 +308,21 @@ pub fn repl(backend: Backend) -> i32 {
                 continue;
             }
         };
+        // An entry of types naming types not defined yet waits for them; the
+        // one that supplies the last runs with every entry waiting.
+        use fixpt_fx26::session::Consider;
+        match session.consider(&forms) {
+            Consider::Pends(_) => {
+                session.hold(&forms);
+                println!("{}", pending_line(&mut session));
+                continue;
+            }
+            Consider::Completes(names) => {
+                complete_pending(&mut session, &forms, &names, &name, &text, show_code);
+                continue;
+            }
+            Consider::Run => {}
+        }
         for form in &forms {
             if let Some(lines) = answer_hole(&mut session.checker, form) {
                 for l in lines {
@@ -314,9 +342,52 @@ pub fn repl(backend: Backend) -> i32 {
                     _ => show(&session, &out, show_code),
                 },
                 Ok(out) => show(&session, &out, show_code),
-                Err(e) => eprintln!("{}", located(&name, &text, &e)),
+                Err(e) => {
+                    eprintln!("{}", located(&name, &text, &e));
+                    if let Some(note) = pending_note(&mut session, &e.message) {
+                        eprintln!("{note}");
+                    }
+                }
             }
         }
+        // What this entry defined may be what the entries waiting lacked.
+        if !session.pending.is_empty() && session.awaiting().is_empty() {
+            let names: Vec<String> = session.pending.iter().flat_map(|p| p.defines.clone()).collect();
+            complete_pending(&mut session, &[], &names, &name, &text, show_code);
+        }
+    }
+}
+
+/// The entries waiting, and what for, as a line.
+fn pending_line(session: &mut Fx26Session) -> String {
+    let quote = |ns: &[String]| ns.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
+    let defines: Vec<String> = session.pending.iter().flat_map(|p| p.defines.clone()).collect();
+    format!("; pending: {}, awaiting definitions of: {}", quote(&defines), quote(&session.awaiting()))
+}
+
+/// For a refusal that names something an entry waiting defines: that it
+/// is waiting, and for what.
+fn pending_note(session: &mut Fx26Session, message: &str) -> Option<String> {
+    let first = message.lines().next().unwrap_or("");
+    let waiting = session.pending.iter().flat_map(|p| p.defines.clone()).find(|d| first.contains(&format!("`{d}`")))?;
+    let awaiting: Vec<String> = session.awaiting().iter().map(|n| format!("`{n}`")).collect();
+    Some(format!("  `{waiting}` is pending, awaiting definitions of: {}", awaiting.join(", ")))
+}
+
+/// The entries waiting, with `forms`, run now that nothing is missing.
+fn complete_pending(session: &mut Fx26Session, forms: &[Syntax], names: &[String], name: &str, text: &str, show_code: bool) {
+    match session.complete(forms) {
+        Ok(outs) => {
+            for o in outs {
+                match o {
+                    Ok(out) => show(session, &out, show_code),
+                    Err(e) => eprintln!("{}", located(name, text, &e)),
+                }
+            }
+            let names: Vec<String> = names.iter().map(|n| format!("`{n}`")).collect();
+            println!("; no longer pending: {}", names.join(", "));
+        }
+        Err(e) => eprintln!("{}", located(name, text, &e)),
     }
 }
 
@@ -883,8 +954,33 @@ impl crate::lineedit::Oracle for Oracle<'_> {
 }
 
 fn speculative_notes(session: &mut Fx26Session, text: &str, p: &crate::speculate::Partial) -> Vec<Note> {
+    let notes = speculative_notes_now(session, text, p);
+    if !notes.is_empty() || session.pending.is_empty() {
+        return notes;
+    }
+    // Nothing else to say: what is waiting, and for what.
+    let line = pending_line(session);
+    vec![Note { span: None, message: line.trim_start_matches("; ").to_string(), error: false }]
+}
+
+fn speculative_notes_now(session: &mut Fx26Session, text: &str, p: &crate::speculate::Partial) -> Vec<Note> {
     let c = &mut session.checker;
     let Ok(forms) = c.read_in(FileId(0), &p.closed) else { return Vec::new() };
+    // A finished entry of types that names types not defined yet would wait,
+    // or complete what is waiting: said before what checking it alone finds.
+    if p.finished(text) {
+        use fixpt_fx26::session::Consider;
+        let quote = |ns: Vec<String>| ns.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
+        let message = match session.consider(&forms) {
+            Consider::Pends(m) => Some(format!("pending when entered, awaiting definitions of: {}", quote(m))),
+            Consider::Completes(n) => Some(format!("completes what is pending: {}", quote(n))),
+            Consider::Run => None,
+        };
+        if let Some(message) = message {
+            return vec![Note { span: None, message, error: false }];
+        }
+    }
+    let c = &mut session.checker;
     // Each form is tried in the environment the ones before it would make,
     // and all of it is forgotten afterwards.
     let error = try_all(c, &forms, &mut |e| {
@@ -1067,6 +1163,21 @@ mod speculative {
         }
         // An operator could be anything: nothing is said.
         assert_eq!(next_after("(f ("), "");
+    }
+
+    /// A type naming one not defined yet would wait: said as it is typed,
+    /// and then, while it waits, what it awaits; and what completes it.
+    #[test]
+    fn what_is_pending_is_said_while_typing() {
+        let mut s = session();
+        let tree = "(define-datatype tree (leaf int) (node forest))";
+        assert_eq!(notes_in(&mut s, tree)[0].message, "pending when entered, awaiting definitions of: `forest`");
+        let forms = s.checker.read_in(FileId(0), tree).expect("reads");
+        s.hold(&forms);
+        assert_eq!(notes_in(&mut s, "(+ 1 ")[0].message.split(" wants ").next(), Some("argument 2 of +"), "other notes first");
+        assert_eq!(notes_in(&mut s, "(")[0].message, "pending: `tree`, `leaf`, `node`, awaiting definitions of: `forest`");
+        let forest = "(define-datatype forest (fnil) (fcons tree forest))";
+        assert_eq!(notes_in(&mut s, forest)[0].message, "completes what is pending: `tree`, `leaf`, `node`");
     }
 
     #[test]
