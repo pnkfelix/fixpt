@@ -640,9 +640,16 @@ impl Fx26Session {
             let mut note = String::new();
             if let (Some(run), Top::Exp(_), Strategy::Cellular) = (self.native_runner, &top, self.strategy) {
                 let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
-                let written = |rt: &mut fixpt_runtime::Runtime, clo| match run(rt, clo, fuel) {
-                    NativeRun::Ran(v) => Ok(v.map(|v| fixpt_runtime::write_value(&rt.heap, v))),
-                    NativeRun::Declined(why) => Err(why),
+                let written = |rt: &mut fixpt_runtime::Runtime, clo| {
+                    // The runner compiles to machine code first, and counts
+                    // that as compiling; the rest is the run.
+                    let (start, compiled) = (std::time::Instant::now(), rt.compile_nanos);
+                    let ran = run(rt, clo, fuel);
+                    rt.run_nanos += (start.elapsed().as_nanos() as u64).saturating_sub(rt.compile_nanos - compiled);
+                    match ran {
+                        NativeRun::Ran(v) => Ok(v.map(|v| fixpt_runtime::write_value(&rt.heap, v))),
+                        NativeRun::Declined(why) => Err(why),
+                    }
                 };
                 match self.with_thunk(&form_text, written)? {
                     Ok(Ok(value)) => {
@@ -740,7 +747,10 @@ impl Fx26Session {
         }
         let is_define = matches!(top, Top::Define { .. } | Top::DefineRec { .. });
         let (printed, value) = self.scheme.scope(|s| {
+            // The lowered Scheme's own compiling, quick, is counted as run.
+            let start = std::time::Instant::now();
             let (printed, result) = s.eval_capturing("<fx26>", &code);
+            s.runtime_unrooted().run_nanos += start.elapsed().as_nanos() as u64;
             let value = match result {
                 Ok(_) if is_define => Ok(None),
                 Ok(v) => Ok(Some(s.write(v))),
@@ -972,7 +982,12 @@ impl Fx26Session {
             c
         });
         let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
-        let r = self.with_thunk(init, |rt, clo| match run(rt, clo, fuel) {
+        let r = self.with_thunk(init, |rt, clo| match {
+            let (start, compiled) = (std::time::Instant::now(), rt.compile_nanos);
+            let ran = run(rt, clo, fuel);
+            rt.run_nanos += (start.elapsed().as_nanos() as u64).saturating_sub(rt.compile_nanos - compiled);
+            ran
+        } {
             NativeRun::Ran(Ok(v)) => {
                 let g = rt.heap.root_at(at);
                 rt.heap.set_bloblet_slot(g, 2, v);
@@ -1042,7 +1057,7 @@ impl Fx26Session {
         let text = self.checker.interner.name(name).to_string();
         let sym = self.scheme.make(|m| m.heap().intern(&text));
         let cells = self.scheme.call_global(&format!("{READER_PREFIX}compile-global-cell"), &[sym]).map_err(fail)?;
-        let mut r = Ok(());
+        let (mut r, mut nanos) = (Ok(()), 0);
         self.scheme.make(|m| {
             let cells = m.get(cells);
             if !cells.is_pair() {
@@ -1053,13 +1068,17 @@ impl Fx26Session {
             let g = heap.car(cells);
             let v = heap.bloblet_slot(g, 2);
             if v.is_bloblet() && heap.bloblet_kind(v) == fixpt_heap::layout::kind("cellular-closure") {
-                match compile(heap, v) {
+                let start = std::time::Instant::now();
+                let compiled = compile(heap, v);
+                nanos = start.elapsed().as_nanos() as u64;
+                match compiled {
                     Ok(native) => heap.set_bloblet_slot(g, 2, native),
                     Err(why) => r = Err(why),
                 }
             }
             fixpt_heap::Value::FALSE
         });
+        self.scheme.runtime_unrooted().compile_nanos += nanos;
         Ok(r)
     }
 

@@ -568,30 +568,32 @@ column in a commit's bench table where time cannot.
 
 ## What fixpt measures today
 
-| What                                 | Where                         | Updated                                       | Notes                                                                    |
-| ------------------------------------ | ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------------ |
-| `gc_count`                           | `Heap` (heap.rs)              | end of each **major** collection (`collect`)  | Majors only since the nursery landed                                     |
-| `minor_count`                        | `Heap`                        | end of each minor collection (young.rs)       |                                                                          |
-| `words_copied`                       | `Heap`                        | both kinds                                    | Minor promotions and major copies summed                                 |
-| `gc_nanos`                           | `Heap`                        | both kinds, `Instant` around each             | Wall-clock time; minor and major summed                                  |
-| `max_major_nanos`, `max_minor_nanos` | `Heap`                        | end of each collection of that kind           | The longest pause of each kind (stage 1, 2026-09-30)                     |
-| `peak_words`                         | `Heap`                        | start of each collection                      | Most words in use, sampled when the heap is fullest (stage 1)            |
-| `trace`                              | `Heap`                        | set by `FIXPT_GC_TRACE`                       | A line per collection on stderr: kind, pause, copied, in use (stage 1)   |
-| `allocated()`                        | `Heap`                        | computed from `words_allocated` and the tops  | Nursery and semispace only; exact even with inline allocation            |
-| `region_words()`                     | `Heap` (regions.rs)           | at chunk turnover and region exit, plus fills | Arenas and reaps together; no per-region total once a chunk is full      |
-| `region_in_use(h)`                   | `Heap`                        | computed                                      | Per live region; for a reap, after a collection, only what was reachable |
-| `used()`, `capacity()`               | `Heap`                        | computed                                      | Instantaneous; the peak is `peak_words`                                  |
-| code area `used`                     | `CodeArea` (code.rs)          | on allocation and sweep                       | Not exposed                                                              |
-| `%gc-count`                          | runtime primitive (prim.rs)   |                                               | Scheme only; returns `gc_count`, so majors only                          |
-| `%gc-words-copied`                   | runtime primitive             |                                               | Scheme only                                                              |
-| `%gc-every!`                         | runtime primitive             |                                               | Stress policy                                                            |
-| `%sro`                               | engine primitive              |                                               | Larceny's SRO. Deliberately in no language's standard environment        |
-| `Profile`                            | fixpt-engine cellular.rs      | per cell, Rust machine only                   | Cells run and words allocated, by word (`FIXPT_PROFILE`)                 |
-| callout counts                       | fixpt-native cellular.rs      | per call-out                                  | `FIXPT_CALLOUTS`, instrumented build path                                |
-| phase laps                           | fixpt-fx26 tests/bootstrap.rs | per phase                                     | `probe_phases_as_register_code`; `FIXPT_GC_REPORT`, `FIXPT_TIME_PHASES`  |
-| summary                              | fixpt-cli fx26.rs             | at the end of `fixpt eval`                    | `FIXPT_GC_SUMMARY` (or `FIXPT_GC_REPORT`); with the peak and pauses      |
-| `fixpt bench` columns                | fixpt-cli bench.rs            | the native run's last                         | `M words` allocated and `GCs`, minor and major (stage 1)                 |
-| `run-word` time                      | prim.rs `%run-word`           | per run                                       | `FIXPT_TIME_WORDS`                                                       |
+| What                                 | Where                         | Updated                                        | Notes                                                                      |
+| ------------------------------------ | ----------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
+| `gc_count`                           | `Heap` (heap.rs)              | end of each **major** collection (`collect`)   | Majors only since the nursery landed                                       |
+| `minor_count`                        | `Heap`                        | end of each minor collection (young.rs)        |                                                                            |
+| `words_copied`                       | `Heap`                        | both kinds                                     | Minor promotions and major copies summed                                   |
+| `gc_nanos`                           | `Heap`                        | both kinds, `Instant` around each              | Wall-clock time; minor and major summed                                    |
+| `max_major_nanos`, `max_minor_nanos` | `Heap`                        | end of each collection of that kind            | The longest pause of each kind (stage 1, 2026-09-30)                       |
+| `peak_words`                         | `Heap`                        | start of each collection                       | Most words in use, sampled when the heap is fullest (stage 1)              |
+| `trace`                              | `Heap`                        | set by `FIXPT_GC_TRACE`                        | A line per collection on stderr: kind, pause, copied, in use (stage 1)     |
+| `allocated()`                        | `Heap`                        | computed from `words_allocated` and the tops   | Nursery and semispace only; exact even with inline allocation              |
+| `region_words()`                     | `Heap` (regions.rs)           | at chunk turnover and region exit, plus fills  | Arenas and reaps together; no per-region total once a chunk is full        |
+| `region_in_use(h)`                   | `Heap`                        | computed                                       | Per live region; for a reap, after a collection, only what was reachable   |
+| `used()`, `capacity()`               | `Heap`                        | computed                                       | Instantaneous; the peak is `peak_words`                                    |
+| code area `used`                     | `CodeArea` (code.rs)          | on allocation and sweep                        | Not exposed                                                                |
+| `%gc-count`                          | runtime primitive (prim.rs)   |                                                | Scheme only; returns `gc_count`, so majors only                            |
+| `%gc-words-copied`                   | runtime primitive             |                                                | Scheme only                                                                |
+| `%gc-every!`                         | runtime primitive             |                                                | Stress policy                                                              |
+| `%sro`                               | engine primitive              |                                                | Larceny's SRO. Deliberately in no language's standard environment          |
+| `Profile`                            | fixpt-engine cellular.rs      | per cell, Rust machine only                    | Cells run and words allocated, by word (`FIXPT_PROFILE`)                   |
+| callout counts                       | fixpt-native cellular.rs      | per call-out                                   | `FIXPT_CALLOUTS`, instrumented build path                                  |
+| phase laps                           | fixpt-fx26 tests/bootstrap.rs | per phase                                      | `probe_phases_as_register_code`; `FIXPT_GC_REPORT`, `FIXPT_TIME_PHASES`    |
+| summary                              | fixpt-cli fx26.rs             | at the end of `fixpt eval`                     | `FIXPT_GC_SUMMARY` (or `FIXPT_GC_REPORT`); with the peak and pauses        |
+| `fixpt bench` columns                | fixpt-cli bench.rs            | the native run's last                          | `M words` allocated and `GCs`, minor and major (stage 1)                   |
+| `run-word` time                      | prim.rs `%run-word`           | per run                                        | `FIXPT_TIME_WORDS`                                                         |
+| `run_nanos`, `compile_nanos`         | `Runtime` (runtime.rs)        | around each form's run and its code generation | The FX-26 REPL's, natively, as cellular words, or lowered (2026-09-30)     |
+| `,time E`                            | fixpt-cli fx26.rs             | per form                                       | Check, codegen and run times, then allocation and collections, for E alone |
 
 There are no clocks at all in the Scheme runtime or FX-26's standard
 environment. FX-26's standard environment has no output either, so an FX-26

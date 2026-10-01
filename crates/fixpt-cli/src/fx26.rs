@@ -205,6 +205,16 @@ pub fn repl(backend: Backend) -> i32 {
             }
             continue;
         }
+        // `,time E`: E run as any form is, then how long its code ran, and
+        // what the heap did meanwhile.
+        let (timing, text) = match text.trim().strip_prefix(",time") {
+            Some(e) if e.starts_with(char::is_whitespace) && !e.trim().is_empty() => (true, e.trim().to_string()),
+            Some(e) if e.trim().is_empty() => {
+                println!("; `,time E`: run E, then say how long it took to check, generate code for and run, and its collections");
+                continue;
+            }
+            _ => (false, text),
+        };
         // `,native NAME [ARG…]`: NAME's procedure in the native convention.
         if let Some(rest) = text.trim().strip_prefix(",native") {
             native(&mut session, rest);
@@ -292,7 +302,13 @@ pub fn repl(backend: Backend) -> i32 {
                 }
                 continue;
             }
-            match session.run(form) {
+            let before = timing.then(|| GcStats::start_form(&mut session));
+            let ran = session.run(form);
+            if let Some(b) = before {
+                GcStats::of(&mut session).form_since(&b);
+                GcStats::end_form(&mut session, &b);
+            }
+            match ran {
                 Ok(out) if disassembling => match &out.value {
                     Ok(Some(v)) => print!("{}", unwrite_string(v)),
                     _ => show(&session, &out, show_code),
@@ -514,9 +530,11 @@ pub fn eval_program(backend: Backend, name: &str, text: &str) -> i32 {
     code
 }
 
-/// What the heap has done, for `FIXPT_GC_REPORT`.
+/// What the heap has done, for `FIXPT_GC_REPORT` and `,time`.
 struct GcStats {
     time: std::time::Instant,
+    run: u64,
+    compile: u64,
     major: u64,
     minor: u64,
     nanos: u64,
@@ -531,9 +549,13 @@ struct GcStats {
 
 impl GcStats {
     fn of(s: &mut Fx26Session) -> GcStats {
-        let h = &s.scheme.runtime_unrooted().heap;
+        let rt = s.scheme.runtime_unrooted();
+        let (run, compile) = (rt.run_nanos, rt.compile_nanos);
+        let h = &rt.heap;
         GcStats {
             time: std::time::Instant::now(),
+            run,
+            compile,
             major: h.gc_count,
             minor: h.minor_count,
             nanos: h.gc_nanos,
@@ -545,6 +567,53 @@ impl GcStats {
             max_major: h.max_major_nanos,
             max_minor: h.max_minor_nanos,
         }
+    }
+
+    /// Before a form `,time` runs: the longest pauses and the peak, kept
+    /// for the session, start again from nothing, so that they are the
+    /// form's own; `b.max_*` and `b.peak` keep the session's.
+    fn start_form(s: &mut Fx26Session) -> GcStats {
+        let b = GcStats::of(s);
+        let h = &mut s.scheme.runtime_unrooted().heap;
+        (h.max_major_nanos, h.max_minor_nanos, h.peak_words) = (0, 0, 0);
+        b
+    }
+
+    /// After it: the session's longest pauses and peak again, counting the
+    /// form's.
+    fn end_form(s: &mut Fx26Session, b: &GcStats) {
+        let h = &mut s.scheme.runtime_unrooted().heap;
+        h.max_major_nanos = h.max_major_nanos.max(b.max_major);
+        h.max_minor_nanos = h.max_minor_nanos.max(b.max_minor);
+        h.peak_words = h.peak_words.max(b.peak);
+    }
+
+    /// What `,time` says of one form, run since `b`.
+    fn form_since(&self, b: &GcStats) {
+        println!("{}", self.form_line(b));
+    }
+
+    /// One line, the form's phases in the order they happen: checking
+    /// (reading, both checkers, lowering: what is neither of the others),
+    /// code generation, and the run; then the heap's part in it.
+    fn form_line(&self, b: &GcStats) -> String {
+        let ms = |n: u64| n as f64 / 1e6;
+        let all = self.time.duration_since(b.time).as_nanos() as u64;
+        let (run, codegen) = (self.run - b.run, self.compile - b.compile);
+        let check = all.saturating_sub(run + codegen);
+        let mut line = format!("; check {:.3} ms, codegen {:.3} ms, run {:.3} ms", ms(check), ms(codegen), ms(run));
+        line.push_str(&format!("; {:.3} M words allocated", (self.allocated - b.allocated) as f64 / 1e6));
+        let (major, minor) = (self.major - b.major, self.minor - b.minor);
+        let major_ns = (self.nanos - b.nanos) - (self.minor_nanos - b.minor_nanos);
+        let mut gcs = Vec::new();
+        if major > 0 {
+            gcs.push(format!("{major} major, {:.2} ms (longest {:.2})", ms(major_ns), ms(self.max_major)));
+        }
+        if minor > 0 {
+            gcs.push(format!("{minor} minor, {:.2} ms (longest {:.2})", ms(self.minor_nanos - b.minor_nanos), ms(self.max_minor)));
+        }
+        line.push_str(&if gcs.is_empty() { "; no collections".to_string() } else { format!("; {}", gcs.join("; ")) });
+        line
     }
 
     /// On stderr: what the heap did since `b`, the front end's loading
@@ -1152,7 +1221,10 @@ fn listing(m: &fixpt_native::direct::DirectMachine, heap: &fixpt_heap::Heap, pro
 fn run_native(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     use fixpt_fx26::session::NativeRun;
     fixpt_native::direct::with_machine(|m| {
-        let procs = match m.compile(&mut rt.heap, closure) {
+        let start = std::time::Instant::now();
+        let compiled = m.compile(&mut rt.heap, closure);
+        rt.compile_nanos += start.elapsed().as_nanos() as u64;
+        let procs = match compiled {
             Ok(p) => p,
             Err(why) => return NativeRun::Declined(why),
         };

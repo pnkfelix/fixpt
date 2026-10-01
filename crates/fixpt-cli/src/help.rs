@@ -211,6 +211,7 @@ fn overview(h: &dyn Helpful) {
         rows.push((",native NAME [ARG…]", "NAME's procedure in the native convention: its machine code, and called on ARGs (under --fx26-run cellular)"));
         rows.push((",redefine b|r", "whether the next redefinition that would break definitions breaks them or is refused"));
         rows.push((",step-limit [N|none]", "show or set how many steps a form may take"));
+        rows.push((",time E", "run E, then how long it took to check, generate code for and run, and its collections"));
     }
     rows.push((",quit", "leave"));
     for (cmd, what) in rows {

@@ -116,7 +116,9 @@ pub fn compile_with_fx26_compiler_showing(
         }
         let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
         let runs = s.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
+        let start = std::time::Instant::now();
         let result = s.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts]).map_err(|e| fail(e.to_string()))?;
+        s.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
         let (tag, word) = s.view(|v| {
             let r = v.get(result);
             let tag = r.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();
@@ -141,7 +143,9 @@ pub fn compile_with_fx26_compiler_showing(
         }
         let no_args = s.make(|_| Value::NULL);
         s.runtime_unrooted().word_fuel = steps.unwrap_or(u64::MAX);
+        let start = std::time::Instant::now();
         let run = s.call_global("%run-word", &[word, no_args]);
+        s.runtime_unrooted().run_nanos += start.elapsed().as_nanos() as u64;
         s.runtime_unrooted().word_fuel = u64::MAX;
         match run {
             Ok(v) => Ok((s.write(v), words)),
@@ -368,7 +372,9 @@ pub fn compile_to_word_with_registers(scheme: &mut Session, file: FileId, text: 
 pub fn compile_checked_to_word(scheme: &mut Session, file: FileId, facts: Handle) -> R<Result<Handle, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let runs = scheme.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
+    let start = std::time::Instant::now();
     let result = scheme.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts]).map_err(|e| fail(e.to_string()))?;
+    scheme.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
     word_of(scheme, result)
 }
 

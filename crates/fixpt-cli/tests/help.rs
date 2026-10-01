@@ -39,6 +39,20 @@ fn repl_with(dialect: Option<&str>, engine: Option<&str>, input: &str) -> String
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// `,time E` runs E as any form is, and says how long each phase took and
+/// what the heap did, on one line before E's value.
+#[test]
+fn time_reports_each_phase() {
+    let defs = "(define* f (subr spin (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))\n";
+    let out = repl(Some("fx26"), &format!("{defs},time (f 15)\n,time\n"));
+    let line = out.lines().find(|l| l.contains("; check ")).unwrap_or_else(|| panic!("{out}"));
+    for part in ["check ", " ms, codegen ", " ms, run ", " M words allocated", "collections"] {
+        assert!(line.contains(part), "{part:?} in {line:?}");
+    }
+    assert!(out.contains("610 : int"), "E's value as well: {out}");
+    assert!(out.contains("`,time E`: run E"), "bare `,time` says how to use it: {out}");
+}
+
 #[test]
 fn every_dialect_lists_its_commands() {
     for d in [None, Some("fx87"), Some("fx91")] {

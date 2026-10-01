@@ -56,6 +56,13 @@ pub struct Runtime {
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
     pub word_fuel: u64,
+    /// Nanoseconds spent running forms' code, as the FX-26 REPL runs it
+    /// (natively, or a cellular word), checking and compiling left out:
+    /// what `,time` reports.
+    pub run_nanos: u64,
+    /// Nanoseconds spent compiling them: by the compiler written in FX-26,
+    /// and to machine code.
+    pub compile_nanos: u64,
 }
 
 /// Run cellular word `word` with `args` on its data stack; its value, or
@@ -130,6 +137,8 @@ impl Runtime {
             call_native: None,
             adapt: None,
             word_fuel: u64::MAX,
+            run_nanos: 0,
+            compile_nanos: 0,
         }
     }
 
@@ -214,6 +223,8 @@ impl Runtime {
             call_native: None,
             adapt: None,
             word_fuel: u64::MAX,
+            run_nanos: 0,
+            compile_nanos: 0,
         }
     }
 }
