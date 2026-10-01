@@ -942,6 +942,103 @@ impl Checker {
     }
 }
 
+/// The names a hole is read as while the REPL asks what goes there: in an
+/// expression, an arm, and a tag. None of them can be written in a program,
+/// and they mean nothing unless [`Checker::describe_hole`] set them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Holes {
+    /// The hole itself, where it stands.
+    pub exp: Sym,
+    /// The body of the `else` arm a hole in arm position becomes.
+    pub arm: Sym,
+    /// What that `else` arm binds: the tags no arm has taken.
+    pub arm_var: Sym,
+    /// The tag of `(sum ⟨hole⟩)`.
+    pub tag: Sym,
+}
+
+/// Replace the first `,help` (or `,?`) in `s` by `hole`; where it was.
+fn mark_hole(s: &mut Syntax, interner: &fixpt_read::Interner, hole: Sym) -> Option<Span> {
+    use fixpt_read::Datum;
+    let Datum::List { items, tail } = &mut s.datum else { return None };
+    if let [u, h] = &items[..]
+        && tail.is_none()
+        && u.as_symbol().is_some_and(|u| interner.name(u) == "unquote")
+        && h.as_symbol().is_some_and(|h| matches!(interner.name(h), "help" | "?"))
+    {
+        s.datum = Datum::Symbol(hole);
+        return Some(s.span);
+    }
+    items.iter_mut().chain(tail.as_deref_mut()).find_map(|i| mark_hole(i, interner, hole))
+}
+
+impl Checker {
+    /// What goes where the `,help` hole in `form` is, as the grammar and the
+    /// types around it say: the type an expression there must have, the tags
+    /// an arm or a `sum` there may take, or the shape the form around it
+    /// must have. `None` if nothing is known. Nothing is kept.
+    ///
+    /// `forms` are the same form written more than one way (with fillers
+    /// after the hole, or not): the first that reaches the hole answers;
+    /// else the narrowest refusal around the hole, of all of them.
+    pub fn describe_hole(&mut self, forms: &[Syntax]) -> Option<String> {
+        let holes = Holes {
+            exp: self.interner.intern("%hole"),
+            arm: self.interner.intern("%hole-arm"),
+            arm_var: self.interner.intern("%arm"),
+            tag: self.interner.intern("%hole-tag"),
+        };
+        let mut around: Option<FxError> = None;
+        for form in forms {
+            let mut form = form.clone();
+            let Some(at) = mark_hole(&mut form, &self.interner, holes.exp) else { continue };
+            self.holes = Some(holes);
+            self.hole_hint = None;
+            let error = self.try_top(&form, |_, r| r.err());
+            self.holes = None;
+            if let Some(hint) = self.hole_hint.take() {
+                return Some(hint);
+            }
+            // The shape the form around the hole must have, if what the
+            // checker refused is around it.
+            // The texts agree up to the hole, so the refusal that starts
+            // nearest it is of the innermost form.
+            if let Some(e) = error.filter(|e| e.span.start <= at.start && at.end <= e.span.end)
+                && around.as_ref().is_none_or(|a| e.span.start > a.span.start)
+            {
+                around = Some(e);
+            }
+        }
+        around.map(|e| e.message.strip_prefix("expected ").unwrap_or(&e.message).to_string())
+    }
+
+    /// If `e` is the hole, say what it must be (`expected`, if checked
+    /// against a type) and stop checking there.
+    pub(crate) fn at_hole(&mut self, e: crate::ast::ExpId, expected: Option<TyId>) -> R<()> {
+        use crate::ast::{Exp, Ty};
+        let Some(h) = self.holes else { return Ok(()) };
+        let tags = |c: &Checker, vs: &[(Sym, TyId)]| vs.iter().map(|(l, t)| format!("`{}` ({})", c.interner.name(*l), c.show_ty(*t))).collect::<Vec<_>>().join(", ");
+        let hint = match self.arena.exp_at(e).clone() {
+            Exp::Var(s) if s == h.exp => match expected {
+                Some(t) => format!("an expression of type {}", self.show_ty(t)),
+                None => "an expression".to_string(),
+            },
+            Exp::Var(s) if s == h.arm => match self.lookup(h.arm_var).map(|t| self.arena.get(t).clone()) {
+                Some(Ty::Sum(rest)) if rest.is_empty() => "nothing: every tag has an arm".to_string(),
+                Some(Ty::Sum(rest)) => format!("an arm `(tag name body …)` for {}, or `(else name body …)`", tags(self, &rest)),
+                _ => "an arm `(tag name body …)`, or `(else name body …)`".to_string(),
+            },
+            Exp::Sum(tag, _) if tag == h.tag => match expected.map(|t| self.arena.get(t).clone()) {
+                Some(Ty::Sum(vs)) => format!("a tag, then its value: {}", tags(self, &vs)),
+                _ => "a tag, then an expression".to_string(),
+            },
+            _ => return Ok(()),
+        };
+        self.hole_hint = Some(hint);
+        Err(FxError::at(self.arena.span_of(e), "the hole"))
+    }
+}
+
 /// The words FX-26 reserves: syntax, and the parts of descriptions.
 pub const KEYWORDS: &[&str] = &[
     "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define*", "define-type", "define-generative",

@@ -99,6 +99,12 @@ pub struct Checker {
     /// it and the slot its type will fill: a use inside with the same
     /// descriptions is that slot, a knot (regular recursion).
     pub(crate) knots: Vec<(Sym, Vec<crate::parse::FamilyArg>, TyId)>,
+    /// While the REPL asks what goes where the cursor is
+    /// (`Checker::describe_hole`), the names the hole is read as; `None`
+    /// otherwise, so that no program ever sees a hole.
+    pub(crate) holes: Option<crate::top::Holes>,
+    /// What the hole was found to want, once checking reached it.
+    pub(crate) hole_hint: Option<String>,
     /// Why each member of a recursive group that may not end may not: said
     /// when its declared type leaves out `spin`.
     pub(crate) spin_why: Vec<((Sym, TyId), String)>,
@@ -303,6 +309,8 @@ impl Checker {
             symbol,
             expanding: 0,
             knots: Vec::new(),
+            holes: None,
+            hole_hint: None,
             spin_why: Vec::new(),
             generatives: Vec::new(),
             transparent: Vec::new(),
@@ -443,6 +451,9 @@ impl Checker {
     // ------------------------------------------------------------ synthesis
     /// What `e` is, and what evaluating it does.
     pub fn synth(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        if self.holes.is_some() {
+            self.at_hole(e, None)?;
+        }
         let (t, eff) = self.synth_node(e)?;
         let eff = self.frozen(e, eff)?;
         self.facts.effects.insert(e, eff.clone());

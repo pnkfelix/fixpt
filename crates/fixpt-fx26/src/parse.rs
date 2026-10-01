@@ -292,6 +292,7 @@ impl Checker {
                 Some(DScope::Var(v, Kind::Type | Kind::Data)) => Ok(self.arena.ty(Ty::Var(v))),
                 Some(DScope::Rec(t)) => Ok(t),
                 Some(DScope::Generative(g)) => self.apply_generative(s, g, &[]),
+                _ if self.holes.is_some_and(|h| h.exp == sym) => Err(FxError::at(s.span, "expected a type")),
                 _ => Err(FxError::at(s.span, format!("`{}` is not a type", self.name(sym)))),
             };
         }
@@ -1295,6 +1296,13 @@ impl Checker {
                 Ok(self.arena.exp(span, Exp::Extract(e, label)))
             }
             "sum" => {
+                // `(sum ⟨hole⟩)`: the hole is a tag; the payload, nothing yet.
+                if let (Some(h), [_, tag]) = (self.holes, &items[..])
+                    && tag.as_symbol() == Some(h.exp)
+                {
+                    let unit = self.arena.exp(span, Exp::Unit);
+                    return Ok(self.arena.exp(span, Exp::Sum(h.tag, unit)));
+                }
                 let [_, tag, e] = &items[..] else {
                     return Err(FxError::at(span, "`(sum tag expression)`"));
                 };
@@ -1409,6 +1417,15 @@ impl Checker {
         let mut arms: Vec<Arm> = Vec::new();
         let mut els = None;
         for (i, c) in clauses.iter().enumerate() {
+            // An arm still to be written: an `else` whose body is the hole,
+            // so that what it binds says which tags are left.
+            if let Some(h) = self.holes
+                && c.as_symbol() == Some(h.exp)
+            {
+                let body = self.arena.exp(c.span, Exp::Var(h.arm));
+                els = Some((h.arm_var, body));
+                break;
+            }
             let parts = self.items(c, "a tagcase arm")?.to_vec();
             let [tag, bind, body @ ..] = &parts[..] else {
                 return Err(FxError::at(c.span, "a tagcase arm is `(tag name body …)`"));
@@ -1458,6 +1475,9 @@ impl Checker {
                 .to_vec()
                 .iter()
                 .map(|p| {
+                    if self.holes.is_some_and(|h| p.as_symbol() == Some(h.exp)) {
+                        return Err(FxError::at(p.span, "a parameter is `name` or `(name type)`"));
+                    }
                     if let Some(name) = p.as_symbol() {
                         return Ok((name, None));
                     }

@@ -38,6 +38,18 @@ pub struct Partial {
     /// goes: `(f a b ,help)`. `None` when no list is open, or when the hole
     /// would be the operator.
     pub hole_form: Option<String>,
+    /// The whole form, closed, with the hole where the next item of the
+    /// innermost open list goes: what is around it, bindings and expected
+    /// types, says what may go there. `None` when no list is open, or in
+    /// quoted data.
+    pub with_hole: Option<String>,
+    /// The same, with a filler after the hole in every list around it, so
+    /// that a form missing its later parts does not hide what the hole's
+    /// own list wants: `(the (subr ,help %fill) %fill)`.
+    pub with_fill: Option<String>,
+    /// Whether the hole is the first item of its list: an operator, or the
+    /// first of a list of bindings.
+    pub hole_first: bool,
 }
 
 impl Partial {
@@ -115,11 +127,25 @@ pub fn partial(text: &str, profile: SyntaxProfile) -> Option<Partial> {
             .is_some_and(|t| t.kind == TokenKind::Quote);
         (!quoted).then(|| format!("{} ,help{close}", inner.trim_end()))
     });
+    // The hole in the whole form: wherever a list is open and not quoted,
+    // even as its first item, which the operator hint above leaves alone.
+    let quoted_at = |at: usize| toks.iter().rev().find(|t| t.end <= at && t.kind != TokenKind::Whitespace).is_some_and(|t| t.kind == TokenKind::Quote);
+    let hole_first = stack.last().is_some_and(|&(at, _)| text[at + 1..kept].trim().is_empty());
+    let (with_hole, with_fill) = match stack.last() {
+        Some(&(at, _)) if !quoted_at(at) => {
+            let fill: String = stack.iter().rev().map(|&(_, c)| format!(" %fill{c}")).collect();
+            (Some(format!("{} ,help{closers}", typed.trim_end())), Some(format!("{} ,help{fill}", typed.trim_end())))
+        }
+        _ => (None, None),
+    };
     Some(Partial {
         closed,
         kept,
         open_at: stack.iter().map(|&(p, _)| p).collect(),
         hole_form,
+        with_hole,
+        with_fill,
+        hole_first,
     })
 }
 
@@ -141,6 +167,12 @@ mod tests {
         let p = partial("(+ 1 (car 5) 1", P).expect("checkable");
         assert_eq!(p.closed, "(+ 1 (car 5) )");
         assert_eq!(p.hole_form.as_deref(), Some("(+ 1 (car 5) ,help)"));
+        let p = partial("(f (g 1 ", P).expect("checkable");
+        assert_eq!(p.with_hole.as_deref(), Some("(f (g 1 ,help))"), "the hole in the whole form");
+        assert_eq!(p.with_fill.as_deref(), Some("(f (g 1 ,help %fill) %fill)"));
+        let p = partial("(lambda (", P).expect("checkable");
+        assert!(p.hole_first && p.hole_form.is_none());
+        assert_eq!(p.with_hole.as_deref(), Some("(lambda ( ,help))"));
     }
 
     #[test]

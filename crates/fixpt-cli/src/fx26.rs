@@ -850,6 +850,14 @@ fn speculative_notes(session: &mut Fx26Session, text: &str, p: &crate::speculate
         let op = fixpt_read::write_syntax(&items[0], &c.interner);
         Some(format!("argument {at} of {op} wants {want}"))
     });
+    // Else what the grammar and the types around the hole say goes there.
+    let hint = hint.or_else(|| {
+        let forms: Vec<Syntax> =
+            [&p.with_hole, &p.with_fill].into_iter().flatten().filter_map(|t| c.read_in(FileId(0), t).ok()?.into_iter().next()).collect();
+        let next = c.describe_hole(&forms)?;
+        // An operator could be anything; saying so says nothing.
+        (!(p.hole_first && next == "an expression")).then(|| format!("next: {next}"))
+    });
     hint.map(|message| vec![Note { span: None, message, error: false }]).unwrap_or_default()
 }
 
@@ -952,6 +960,44 @@ mod speculative {
     fn the_hint_solves_what_the_arguments_so_far_determine() {
         assert_eq!(notes("(car ")[0].message, "argument 1 of car wants (pairof t1 t2 r)");
         assert_eq!(notes("(set-car! (cons 1 #t) ")[0].message.split(" wants ").nth(1), Some("int"));
+    }
+
+    /// The hint under a form being typed, in a session where `t` is a sum
+    /// of `x` and `y` and `v` one of them.
+    fn next_after(text: &str) -> String {
+        let mut s = session();
+        let defs = "(define-type t (sumof (x int) (y int))) (define v (the t (sum x 3)))";
+        for f in s.checker.read_in(FileId(0), defs).expect("reads") {
+            s.checker.top(&f).expect("checks");
+        }
+        notes_in(&mut s, text).first().map(|n| n.message.clone()).unwrap_or_default()
+    }
+
+    /// What goes next, from the grammar and the types around the hole.
+    #[test]
+    fn the_hint_says_what_goes_next() {
+        let cases = [
+            // The tags an arm may still take, and none once all have one.
+            ("(tagcase v ", "an arm `(tag name body …)` for `x` (int), `y` (int), or `(else name body …)`"),
+            ("(tagcase v (x n n) ", "an arm `(tag name body …)` for `y` (int), or `(else name body …)`"),
+            ("(tagcase v (x n n) (y m m) ", "nothing: every tag has an arm"),
+            ("(lambda ((w t)) (tagcase w (y k k) ", "an arm `(tag name body …)` for `x` (int), or `(else name body …)`"),
+            // The tags of the sum expected, then the payload's type.
+            ("(the t (sum ", "a tag, then its value: `x` (int), `y` (int)"),
+            ("(the t (sum x ", "an expression of type int"),
+            ("(the int (if #t 1 ", "an expression of type int"),
+            ("(the int (tagcase v (x n n) (y m ", "an expression of type int"),
+            // The shape of the form the hole is in, innermost first.
+            ("(if ", "`(if test then else)`"),
+            ("(lambda (", "a parameter is `name` or `(name type)`"),
+            ("(the (subr ", "`(subr effect (param …) result)`"),
+            ("(define-type u ", "a type"),
+        ];
+        for (text, want) in cases {
+            assert_eq!(next_after(text), format!("next: {want}"), "{text}");
+        }
+        // An operator could be anything: nothing is said.
+        assert_eq!(next_after("(f ("), "");
     }
 
     #[test]
