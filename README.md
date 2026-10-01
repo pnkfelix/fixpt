@@ -14,6 +14,38 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list,
 [`docs/divergences.md`](docs/divergences.md) for every intentional difference
 from the references.
 
+## Reading a `fixpt bench` table
+
+Commit messages carry a table like this one, from `fixpt bench`: FX-26
+programs (`crates/fixpt-fx26/tests/programs/bench`), each run every way
+this repository has of running FX-26, best of 3, in milliseconds.
+
+```
+| program | answer | lowered | rust  | hand | stencils | compiled | registers | native | M words | GCs |
+| fib     | 832040 | 121.5   | 209.5 | 16.1 | 21.8     | 13.2     | 6.0       | 2.7    | 0.0     | 0   |
+```
+
+Every column but `lowered` and `native` runs *cellular words*: the code
+the compiler written in FX-26 (`compile.fx`) makes, a small stack-machine
+code. The columns differ in what runs those words.
+
+| column      | what ran the program                                                                                                                                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `answer`    | the value of the program's last line, from the lowered run; a run whose answer differs has `✗` beside its time                                                                            |
+| `lowered`   | the program lowered to Scheme by the Rust front end, run on the Scheme engine's bytecode VM: the baseline, and the reference answer                                                       |
+| `rust`      | cellular words interpreted by the machine written in Rust (`fixpt-engine` `cellular.rs`)                                                                                                  |
+| `hand`      | the same words interpreted by the hand-encoded arm64 machine: an interpreter whose routines are machine code (`fixpt-native` `cellular.rs`)                                               |
+| `stencils`  | the stencil (copy-and-patch) machine, built from compiled Rust stencils (`fixpt-native` `stencil.rs`; the stencils need nightly to build, and a build without them leaves the column out) |
+| `compiled`  | the hand machine, with each word compiled to arm64 before it runs                                                                                                                         |
+| `registers` | the same, running each lambda's *register code* (its values in machine registers, not on the data stack) where it has some                                                                |
+| `native`    | the native calling convention: the procedure the last line calls compiled straight to arm64 (`fixpt-native` `direct.rs`) and called; `—` if declined                                      |
+| `M words`   | millions of words the `native` run allocated                                                                                                                                              |
+| `GCs`       | collections during the `native` run, minor and major                                                                                                                                      |
+
+`native` is the one that counts for speed; the others are kept running as
+references and to catch disagreements. `fixpt bench --help` says the same,
+and `docs/performance.md` keeps the history.
+
 ## Status
 
 |                                                  |                                                                                                                                                                                                                                                                                                 |
