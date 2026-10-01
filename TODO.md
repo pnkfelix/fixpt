@@ -860,3 +860,27 @@ What was measured and found (2026-09-30), for when it is built:
   is long; library procedures that build lists should use an accumulator
   and reverse, so that a long list cannot overflow the native stack.
 
+
+## 23. What trailers cost fields-only bloblets: measure, someday (the user's, 2026-09-30)
+
+Not now; a measurement to take at some point. Nearly every bloblet is
+made with a trailer, fields-only data too (sums, products, records: a
+zero-length suffix): a 2-field sum is 4 words where it could be 3.
+Statically typed code reaching a known field never needs the header; the
+trailer serves the collector and dynamic checks (`docs/object-model.md`,
+"The fast path: the trailer"). The one bloblet without one, the
+`eqtable` record (`fixpt-runtime` `eqtable.rs`), lacks it by oversight.
+
+The measurement, or something like it: on the scheme-bench and
+mllang-bench ports, how many allocations are fields-only, and what share
+of words allocated their trailers are. Only if that share is large is
+either change worth weighing:
+- drop the trailer where the layout is static, and let the collector and
+  dynamic accessors take the backward scan;
+- or point at the header for fields-only bloblets, reviving tag `010`
+  (`layout.rs`: "retired: pointed at an object's header"), chosen per
+  object at allocation and kept for its life, so that each object has one
+  pointer form and `eq?` stays a comparison of bits. Field offsets then
+  do not depend on *F*. The cost is two object tags wherever one is
+  tested. Find first why the uniform suffix pointer won when that tag was
+  retired.
