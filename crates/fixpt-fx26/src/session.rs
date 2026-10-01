@@ -430,6 +430,11 @@ impl Fx26Session {
             Ok(code) => code,
             Err(s) => return s,
         };
+        // Run as the session runs forms: the definitions before it are where
+        // its strategy put them, not in the lowered program's globals.
+        if self.strategy != Strategy::Lower {
+            return self.speculate_own(&fixpt_read::write_syntax(form, &self.checker.interner));
+        }
         self.scheme.engine.set_step_limit(self.speculation_limit);
         let result = self.scheme.scope(|s| {
             let (_, result) = s.eval_capturing("<fx26-speculative>", &code);
@@ -440,6 +445,43 @@ impl Fx26Session {
             Ok(v) => Speculation::Value(v),
             Err(e) => Speculation::Failed(e.to_string()),
         }
+    }
+
+    /// An expression (text), licensed, run early by the pieces written in
+    /// FX-26 as `run_checked` runs one, on the speculation budget: natively
+    /// if it can be, else as cellular code, or by the evaluator.
+    fn speculate_own(&mut self, text: &str) -> Speculation {
+        let saved = self.step_limit;
+        self.step_limit = self.speculation_limit;
+        let r = self.run_expression_own(text);
+        self.step_limit = saved;
+        self.scheme.engine.set_step_limit(saved);
+        self.scheme.scope(|s| s.runtime_unrooted().heap.region_exit(0));
+        match r {
+            Ok(Ok(v)) => Speculation::Value(v),
+            Ok(Err(e)) | Err(FxError { message: e, .. }) => Speculation::Failed(e),
+        }
+    }
+
+    fn run_expression_own(&mut self, text: &str) -> R<Result<String, String>> {
+        if let (Some(run), Strategy::Cellular) = (self.native_runner, self.strategy) {
+            let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
+            let written = |rt: &mut fixpt_runtime::Runtime, clo| match run(rt, clo, fuel) {
+                NativeRun::Ran(v) => Ok(v.map(|v| fixpt_runtime::write_value(&rt.heap, v))),
+                NativeRun::Declined(why) => Err(why),
+            };
+            if let Ok(Ok(value)) = self.with_thunk(text, written)? {
+                return Ok(value);
+            }
+        }
+        let out = match self.strategy {
+            Strategy::Evaluate => self.eval_with_own_evaluator(&format!("{}{text}\n", self.defined26))?,
+            _ => self.compile_form_showing(&format!("{text}\n"), false)?.0,
+        };
+        Ok(match out.strip_prefix("!! ") {
+            Some(e) => Err(e.to_string()),
+            None => Ok(out),
+        })
     }
 
     /// Run the forms of a whole program, its type abbreviations first. One

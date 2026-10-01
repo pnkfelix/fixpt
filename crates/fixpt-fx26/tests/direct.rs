@@ -494,6 +494,27 @@ fn session(native: bool) -> Fx26Session {
     s
 }
 
+/// A form run early, as the REPL does while it is typed, reads the globals
+/// the forms before it defined, where this session's strategy put them: not
+/// the lowered program's, which compiled sessions never fill. Then runs for
+/// real to the same value.
+#[test]
+fn speculation_reads_compiled_globals() {
+    use fixpt_fx26::session::Speculation;
+    for native in [false, true] {
+        let mut s = session(native);
+        let defs = "(define-type t (sumof (x int) (y int)))\n(define x (sum x 3))";
+        let forms = s.checker.read_in(FileId(0), defs).expect("reads");
+        values_of(&mut s, &forms);
+        let e = "((lambda ((f (subr (read (globals x)) (t) t))) (f (sum y 4))) (lambda ((y t)) x))";
+        let form = s.checker.read_in(FileId(0), e).expect("reads").remove(0);
+        let early = s.speculate(&form);
+        assert!(matches!(&early, Speculation::Value(_)), "native {native}: {early:?}");
+        let ran = values_of(&mut s, &[form]);
+        assert_eq!(early, Speculation::Value(ran[0].clone()), "native {native}");
+    }
+}
+
 /// The values `forms` give, run in `s` (a failure as `error: …`).
 fn values_of(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> Vec<String> {
     s.run_forms(forms)
