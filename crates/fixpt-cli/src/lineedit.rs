@@ -217,6 +217,15 @@ pub fn layout(
     }
 }
 
+/// The one row a note under the form takes: its first line, cut to fit.
+/// Raw mode turns a newline into a bare line feed, which would break the
+/// row arithmetic (and the column), so a message of several lines shows only
+/// its first; the rest is printed in full when the form is entered.
+pub fn note_row(message: &str, width: usize) -> String {
+    let first = message.lines().next().unwrap_or("");
+    format!("; {first}").chars().take(width.max(8) - 1).collect()
+}
+
 /// Accumulate lines until the form is balanced. The prompts are still printed,
 /// so a transcript of a piped session reads the way the session looked.
 fn read_plain(prompt: &str, continuation: &str, oracle: &mut dyn Oracle, initial: &str) -> Line {
@@ -725,7 +734,7 @@ mod raw {
             // row, so it cannot wrap and throw the arithmetic off.
             let mut below = last_screen_row;
             if let Some((message, style)) = below_note {
-                let note: String = format!("; {message}").chars().take(width - 1).collect();
+                let note = super::note_row(&message, width);
                 out.push_str("\r\n");
                 out.push_str(style);
                 out.push_str(&note);
@@ -1020,7 +1029,16 @@ impl raw::Editor {
 
 #[cfg(test)]
 mod layout_tests {
-    use super::{layout, Layout};
+    use super::{layout, note_row, Layout};
+
+    /// A note of several lines (an effect mismatch and its delta) keeps to
+    /// one row: a newline in raw mode would leave the cursor mid-screen.
+    #[test]
+    fn a_note_is_one_row() {
+        let m = "argument 1 is a b, where a c is expected\n  beyond what is expected, it has d";
+        assert_eq!(note_row(m, 80), "; argument 1 is a b, where a c is expected");
+        assert_eq!(note_row(m, 12), "; argument ");
+    }
 
     /// Nothing wraps: a screen row is a logical line, which is what the old
     /// arithmetic assumed and the only case it got right.
