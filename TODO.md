@@ -884,3 +884,34 @@ either change worth weighing:
   do not depend on *F*. The cost is two object tags wherever one is
   tested. Find first why the uniform suffix pointer won when that tag was
   retired.
+
+## 24. A peephole pass over register code, if the frame traffic is worth it (the user's, 2026-10-01)
+
+In each register compiler (the Rust one, `cellular/regcode.rs`, and the
+FX-26 one, `regcode*.fx`, word for word), over the items made before they
+are assembled, where branches still go to labels and nothing needs moving:
+- `store k s … load j s` becomes `movereg k j`, and `stack s` becomes
+  `reg k`, where REGk is untouched between (no call, no call-out, no
+  write of it);
+- a `load j s` of the slot REGj was just stored to goes;
+- a store to a slot never read after it goes;
+- `save` and `pop` go once no slot is used.
+
+This is most of what keeping parameters in registers until the first call
+would buy in procedures that keep a frame, without changing how either
+compiler generates code. A peephole cannot reorder, so shuffles whose
+values are fetched after their registers are overwritten keep the frame;
+those are what tail calls in leaves (2026-10-01, `docs/performance.md`)
+already handle in the generators.
+
+First, the data: what share of the instructions native code runs are a
+frame's loads, stores, saves and pops. Tail calls in leaves removed this
+kind of work and measured nothing, so build the pass only if the share is
+large. Register code runs only on the native machines, which have no
+counters; the ways in:
+- `FIXPT_PROFILE` on the Rust cellular machine counts cells by word. The
+  stack code's slot cells are a proxy for register code's frame traffic,
+  not the same thing.
+- A counting build of `direct.rs`, an increment per frame `ldr`/`str`
+  and per instruction run, behind a feature; or a small register code
+  interpreter in Rust, written only to count (exact, and slow).
