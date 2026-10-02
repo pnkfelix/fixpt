@@ -97,25 +97,33 @@ fn every_program_compiled() {
 }
 
 /// The same programs, compiled once more and run on each machine: the
-/// hand-encoded native machine, and the stencils at -O2. Control, and
-/// everything else a native machine has no code for, runs there through
-/// the Rust machine (the round trip).
+/// hand-encoded native machine, its words compiled by the Rust assembler
+/// or by `native.fx`, or run as register code; and the stencils at -O2.
+/// Control, and everything else a native machine has no code for, runs
+/// there through the Rust machine (the round trip).
 #[test]
 fn every_program_on_every_machine() {
     type Run = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, &[fixpt_heap::Value]) -> Result<fixpt_heap::Value, String>;
-    let machines: [(&str, Run); 3] = [
-        ("native", fixpt_native::cellular::run_word),
-        ("native, words compiled", fixpt_native::cellular::run_word_compiled),
-        ("stencils", fixpt_native::stencil::run_word),
+    // Each: its name, its machine, whether the compiler makes register
+    // code for it, and how code `native.fx` makes is placed, if it makes it.
+    type Place = Option<fixpt_runtime::PlaceCode>;
+    let machines: [(&str, Run, bool, Place); 5] = [
+        ("native", fixpt_native::cellular::run_word, false, None),
+        ("native, words compiled", fixpt_native::cellular::run_word_compiled, false, None),
+        ("native, words compiled by native.fx", fixpt_native::cellular::run_word_as_is, false, Some(fixpt_native::cellular::place_word)),
+        ("register code", fixpt_native::cellular::run_word_registers, true, None),
+        ("stencils", fixpt_native::stencil::run_word, false, None),
     ];
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
     // A session for each machine, for every program.
     let mut sessions: Vec<Fx26Session> = machines
         .iter()
-        .map(|(_, run)| {
+        .map(|(_, run, registers, place)| {
             let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
             s.scheme.runtime_unrooted().run_word = Some(*run);
+            s.scheme.runtime_unrooted().place_code = *place;
+            s.register_code = *registers;
             s
         })
         .collect();
@@ -129,7 +137,7 @@ fn every_program_on_every_machine() {
                 Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
                 Err(_) => continue,
             };
-            for ((name, _), s) in machines.iter().zip(&mut sessions) {
+            for ((name, ..), s) in machines.iter().zip(&mut sessions) {
                 let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
                 if compiled.as_deref() != Ok(lowered.as_str()) {
                     let file = path.file_name().unwrap().to_string_lossy().to_string();
