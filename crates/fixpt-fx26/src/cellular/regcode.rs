@@ -545,7 +545,7 @@ impl Compiler<'_> {
     /// Whether evaluating `x` may call or call out, and so collect. Loops
     /// do not; declined forms are said to, which does not matter.
     fn r_collects(&mut self, x: ExpId, e: &Env, this: Option<This>, tail: bool) -> bool {
-        if self.c.facts.conversion_code(x).is_some() {
+        if self.c.facts.changed(x) {
             return true;
         }
         match self.c.arena.exp_at(x).clone() {
@@ -669,7 +669,7 @@ impl Compiler<'_> {
             Exp::Int(_) | Exp::Bool(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit | Exp::Str(_) | Exp::Float(_) => true,
             _ => false,
         };
-        plain && self.c.facts.conversion_code(x).is_none()
+        plain && !self.c.facts.changed(x)
     }
 
     /// `x`'s value into `RESULT`; in tail position, returned.
@@ -678,6 +678,29 @@ impl Compiler<'_> {
         // `%fx26-convert` with what it is converted to.
         if let Some(k) = self.c.facts.conversion_code(x) {
             self.r_prim(g, "%fx26-convert", &[Arg::AsIs(x), Arg::V(Value::fixnum(k))], env, te)?;
+            g.done(tail);
+            return Some(());
+        }
+        // A module reshaped (`Checker::reshape`): kept in a slot, its values
+        // the type wanted has into slots, and a product of them.
+        if let Some(at) = self.c.facts.reshaped.get(&x).cloned() {
+            if g.leaf {
+                return self.decline("a module reshaped in a leaf");
+            }
+            let slots = g.next_slot;
+            self.r_exp_as_is(g, x, env, te, false)?;
+            let m = g.slot();
+            g.op("setstk", &[Gen::n(m)]);
+            let mut args = vec![Arg::V(Value::fixnum(37))];
+            for i in &at {
+                g.op("stack", &[Gen::n(m)]);
+                g.op("field", &[Value::fixnum(*i as i64 + 2)]);
+                let s = g.slot();
+                g.op("setstk", &[Gen::n(s)]);
+                args.push(Arg::Slot(s));
+            }
+            self.r_prim(g, "%make-frozen", &args, env, te)?;
+            g.next_slot = slots;
             g.done(tail);
             return Some(());
         }
@@ -1955,7 +1978,7 @@ impl Compiler<'_> {
     /// Where `x` is, if it is a variable.
     fn r_var(&self, env: &[(Sym, RLoc)], x: ExpId) -> O<RLoc> {
         match self.c.arena.exp_at(x) {
-            Exp::Var(n) if self.c.facts.conversion_code(x).is_none() => self.r_where(env, *n),
+            Exp::Var(n) if !self.c.facts.changed(x) => self.r_where(env, *n),
             _ => None,
         }
     }

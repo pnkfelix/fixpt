@@ -500,6 +500,20 @@ impl<'a> Compiler<'a> {
             self.done(code, tail);
             return Ok(());
         }
+        // A module reshaped (`Checker::reshape`): made, then a product of
+        // the values the type wanted has, by position.
+        if let Some(at) = self.c.facts.reshaped.get(&x).cloned() {
+            self.exp_as_is(x, e, depth, code, false)?;
+            self.int(code, 37);
+            for i in &at {
+                self.op1(code, "slot", Value::fixnum(depth as i64));
+                self.field(code, *i as i64 + 2);
+            }
+            self.prim(code, "%make-frozen", 1 + at.len())?;
+            self.unbind(code, depth, 1, false);
+            self.done(code, tail);
+            return Ok(());
+        }
         self.exp_as_is(x, e, depth, code, tail)
     }
 

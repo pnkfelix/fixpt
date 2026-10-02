@@ -247,6 +247,24 @@ impl Checker {
         }
     }
 
+    /// A module of type `got` made one of type `want`, which has fewer of
+    /// its values or the same in another order: each of `want`'s values'
+    /// position in `got`, if `got`'s values so chosen fit `want`.
+    pub(crate) fn reshape(&mut self, got: TyId, want: TyId) -> Option<Vec<usize>> {
+        let (Ty::Module { abs, descs, vals }, Ty::Module { vals: wanted, .. }) =
+            (self.arena.get(self.arena.resolve(got)).clone(), self.arena.get(self.arena.resolve(want)).clone())
+        else {
+            return None;
+        };
+        let at: Vec<usize> = wanted.iter().map(|(n, _)| vals.iter().position(|(m, _)| m == n)).collect::<Option<_>>()?;
+        if at.len() == vals.len() && at.iter().enumerate().all(|(i, k)| i == *k) {
+            return None;
+        }
+        let chosen = at.iter().map(|k| vals[*k]).collect();
+        let t = self.arena.ty(Ty::Module { abs, descs, vals: chosen });
+        self.subtype(t, want).then_some(at)
+    }
+
     /// Whether `v` was made for a module's abstract type as it was bound.
     pub(crate) fn is_module_var(&self, v: DVar) -> bool {
         self.module_vars.contains(&v)

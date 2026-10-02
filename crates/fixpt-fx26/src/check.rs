@@ -209,6 +209,10 @@ pub struct NodeFacts {
     pub apply_shares: HashSet<ExpId>,
     /// Each `with`'s module's values, in order: lowering binds them.
     pub with_vals: HashMap<ExpId, Vec<Sym>>,
+    /// Modules given where a type with fewer values, or the same in
+    /// another order, is wanted: for each value the wanted type has, its
+    /// position in the module given. Made into a module of that layout.
+    pub reshaped: HashMap<ExpId, Vec<usize>>,
 }
 
 impl NodeFacts {
@@ -219,6 +223,7 @@ impl NodeFacts {
         self.no_escape.retain(|e| e.0 < first);
         self.field_index.retain(|e, _| e.0 < first);
         self.with_vals.retain(|e, _| e.0 < first);
+        self.reshaped.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
         self.apply_shares.retain(|e| e.0 < first);
     }
@@ -227,6 +232,12 @@ impl NodeFacts {
     /// arity times 4, plus 1 to make it `cellular` or 2 to make it
     /// `native`. None if `e` is not converted to one of those; a
     /// conversion to `fx` or to a binder does nothing at run time.
+    /// Whether `e`'s value is changed as it is given: converted to a
+    /// convention, or a module reshaped.
+    pub fn changed(&self, e: ExpId) -> bool {
+        self.converted.contains_key(&e) || self.reshaped.contains_key(&e)
+    }
+
     pub fn conversion_code(&self, e: ExpId) -> Option<i64> {
         match self.converted.get(&e)? {
             (Conv::Cellular, n) => Some(4 * *n as i64 + 1),
@@ -1990,24 +2001,11 @@ impl Checker {
                     _ => false,
                 })
             }
-            // Modules of the same components, in order (`first-class-modules.md`,
-            // M1): the abstract types paired as binders, as a `poly`'s are;
-            // descriptions the same; values covariant.
+            // Modules: their values the same, in order, since a module is
+            // a product of them; their types fewer, an abstract one met by
+            // a transparent one (`first-class-modules.md`, M4).
             (Ty::Module { abs: aa, descs: da, vals: va }, Ty::Module { abs: ab, descs: db, vals: vb }) => {
-                let names = |a: &[(Sym, DVar)]| a.iter().map(|(n, _)| *n).collect::<Vec<_>>();
-                if names(&aa) != names(&ab) || da.len() != db.len() || va.len() != vb.len() {
-                    return false;
-                }
-                let mut inner = env.clone();
-                for (i, ((_, x), (_, y))) in aa.iter().zip(&ab).enumerate() {
-                    let n = st.labels.len() as u32;
-                    let l = *st.labels.entry((a, b, i)).or_insert(DVar(u32::MAX - n));
-                    inner.a.insert(*x, l);
-                    inner.b.insert(*y, l);
-                }
-                let iflip = inner.flip();
-                da.iter().zip(&db).all(|((n, x), (m, y))| n == m && self.sub(*x, *y, &inner, st) && self.sub(*y, *x, &iflip, st))
-                    && va.iter().zip(&vb).all(|((n, x), (m, y))| n == m && self.sub(*x, *y, &inner, st))
+                self.module_sub((a, b), (&aa, &da, &va), (&ab, &db, &vb), env, st)
             }
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
@@ -2036,6 +2034,58 @@ impl Checker {
             }
             _ => false,
         }
+    }
+
+    /// Module type `a` ≤ `b`: each abstract type of `b`'s an abstract type
+    /// of `a`'s (paired as a `poly`'s binders are) or a transparent one
+    /// (`b`'s abstract type is then what `a` says it is); each description
+    /// of `b`'s one of `a`'s, the same; and their values the same names, in
+    /// order, each `a`'s a subtype of `b`'s, since a module is a product of
+    /// its values. Fewer values, or another order, `expect` makes by
+    /// reshaping (`Checker::reshape`).
+    fn module_sub(&mut self, (a, b): (TyId, TyId), (aa, da, va): ModuleView, (ab, db, vb): ModuleView, env: &BinderEnv, st: &mut SubState) -> bool {
+        if aa.iter().any(|(n, _)| db.iter().any(|(m, _)| m == n)) || va.len() != vb.len() || va.iter().zip(vb).any(|((n, _), (m, _))| n != m) {
+            return false;
+        }
+        let mut inner = env.clone();
+        for (i, (n, y)) in ab.iter().enumerate() {
+            match aa.iter().find(|(m, _)| m == n) {
+                Some((_, x)) => {
+                    let k = st.labels.len() as u32;
+                    let l = *st.labels.entry((a, b, i)).or_insert(DVar(u32::MAX - k));
+                    inner.a.insert(*x, l);
+                    inner.b.insert(*y, l);
+                }
+                None if da.iter().any(|(m, _)| m == n) => {}
+                None => return false,
+            }
+        }
+        let (bd, bv) = match st.modules.get(&(a, b)) {
+            Some(parts) => parts.clone(),
+            None => {
+                // `b`'s abstract types that `a` defines: those definitions,
+                // `a`'s own abstract types in them named as paired.
+                let to_label: HashMap<DVar, D> = inner.a.iter().map(|(x, l)| (*x, D::Type(self.arena.ty(Ty::Var(*l))))).collect();
+                let mut by: HashMap<DVar, D> = HashMap::new();
+                for (n, y) in ab {
+                    if !aa.iter().any(|(m, _)| m == n)
+                        && let Some((_, d)) = da.iter().find(|(m, _)| m == n)
+                    {
+                        let d = self.subst(*d, &to_label);
+                        by.insert(*y, D::Type(d));
+                    }
+                }
+                let parts: ModuleParts = (
+                    db.iter().map(|(n, t)| (*n, self.subst(*t, &by))).collect(),
+                    vb.iter().map(|(n, t)| (*n, self.subst(*t, &by))).collect(),
+                );
+                st.modules.insert((a, b), parts.clone());
+                parts
+            }
+        };
+        let flip = inner.flip();
+        bd.iter().all(|(n, y)| da.iter().find(|(m, _)| m == n).is_some_and(|(_, x)| self.sub(*x, *y, &inner, st) && self.sub(*y, *x, &flip, st)))
+            && va.iter().zip(&bv).all(|((_, x), (_, y))| self.sub(*x, *y, &inner, st))
     }
 
     // ---------------------------------------------------------- substitution
@@ -2510,7 +2560,15 @@ pub fn region_captured(form: &str, r: &str, eff: &str) -> String {
 struct SubState {
     trail: HashSet<(TyId, TyId, BinderEnv)>,
     labels: HashMap<(TyId, TyId, usize), DVar>,
+    /// For a pair of module types met before, the wanted one's
+    /// descriptions and values with its abstract types the given one's
+    /// transparent ones: made once, so that a recursive type meets the same
+    /// pair again, which the trail catches.
+    modules: HashMap<(TyId, TyId), ModuleParts>,
 }
+
+type ModuleParts = (Vec<(Sym, TyId)>, Vec<(Sym, TyId)>);
+type ModuleView<'a> = (&'a [(Sym, DVar)], &'a [(Sym, TyId)], &'a [(Sym, TyId)]);
 
 /// For each side of a subtype question, the `poly` binders in scope, each
 /// mapped to the name its pair of binders was given.

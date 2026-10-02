@@ -252,6 +252,10 @@ impl Checker {
             self.convert_at(e, c, n);
             return Ok(());
         }
+        if let Some(at) = self.reshape(got, want) {
+            self.facts.reshaped.insert(e, at);
+            return Ok(());
+        }
         Err(FxError::at(
             self.arena.span_of(e),
             format!("a {} is expected here, and this is a {}{}", self.show_ty(want), self.show_ty(got), self.effect_delta(got, want)),

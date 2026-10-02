@@ -172,6 +172,12 @@ products and `let`s, if the checker gives them those.
 
 M1 alone is usable at the REPL (lowered). Each later stage keeps both
 checkers in agreement before the next begins, as the rest of FX-26 does.
+M4 as built: a module is a product of its values, so a type with fewer
+of them, or the same in another order, has another layout. Where a module
+is given at such a type (`expect`), the checker records a reshaping and
+the compilers make a product of the values that type has, by position;
+deeper inside types only what needs nothing done fits (fewer types,
+transparent ones made abstract, the values the same in order).
 Subtyping comes before functors (the user's, 2026-10-01): a module given
 where a module type with fewer components is wanted needs it already, with
 no dependent types at all, and FX-91's own tests are mostly of that shape.
