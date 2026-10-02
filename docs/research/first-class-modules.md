@@ -161,12 +161,20 @@ products and `let`s, if the checker gives them those.
 | M1    | `module`, `moduleof`, `with`, `select` on variables; abstract, transparent and value components; types | Rust checker, lowering; REPL                |
 | M2    | the same in the FX-26 checker and parser, the checkers agreeing                                        | `check-*.fx`, `parser.fx`                   |
 | M3    | both compilers and native code: modules as products, `with` as `extract`s                              | `cellular.rs`, `compile*.fx`, register code |
-| M4    | dependent subroutines (named parameters), application by path, `let` opacity                           | both checkers                               |
-| M5    | abstract regions and effects; `plambda` over regions making modules                                    | both checkers                               |
-| M6    | dot shorthand; paths through module components; subtyping of module types (width, `abs` by `desc`)     | reader, both checkers                       |
+| M4    | subtyping of module types: width, and a transparent component where an abstract one is expected        | both checkers                               |
+| M5    | dependent subroutines (named parameters), application by path, `let` opacity                           | both checkers                               |
+| M6    | dot shorthand; paths through module components                                                         | reader, both checkers                       |
+| later | abstract regions and effects; `plambda` over regions making modules                                    | both checkers                               |
 
 M1 alone is usable at the REPL (lowered). Each later stage keeps both
 checkers in agreement before the next begins, as the rest of FX-26 does.
+Subtyping comes before functors (the user's, 2026-10-01): a module given
+where a module type with fewer components is wanted needs it already, with
+no dependent types at all, and FX-91's own tests are mostly of that shape.
+Abstract regions and effects are not needed for a first deliverable:
+without them a module's types name the regions it was made at, as any
+value's do; they come when the front end's `@k` and `@t`, or another
+client, needs them.
 
 ## Open questions
 
@@ -180,8 +188,7 @@ checkers in agreement before the next begins, as the rest of FX-26 does.
    file-level layer `separate-compilation.md` proposes, should it come.
 2. **Subtyping of module types.** FX-91 lets a module be used where a
    type with fewer components, or a component abstract where it is known,
-   is expected. Recommendation: width and `desc`-to-`abs` from M6; exact
-   match before.
+   is expected. Decided: M4, before functors; exact match before it.
 3. **Opening by `with` only, or also an `open`-like import of a module
    into the REPL's globals?** Recommendation: `with` only; a REPL import
    would make module components globals, which the sealing decision
