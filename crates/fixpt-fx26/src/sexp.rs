@@ -174,6 +174,9 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
             };
             format!("(e-bloblet {n} {i} {} {a} {b})", list(args.iter().map(|x| go(*x)).collect()))
         }
+        // Not in the parser written in FX-26 yet (`first-class-modules.md`, M2).
+        Exp::Module(_) => format!("(e-module {a} {b})"),
+        Exp::With { module, body } => format!("(e-with {} {} {a} {b})", name(module), go(body)),
         Exp::Product(fields) => {
             let fs = fields.iter().map(|(l, x)| format!("[{} {}]", name(*l), go(*x))).collect();
             format!("(e-product {} {a} {b})", list(fs))

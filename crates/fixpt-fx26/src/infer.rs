@@ -311,6 +311,12 @@ impl Checker {
                 }
             }
         }
+        // A parameter's type may name a module in scope, not (yet) another
+        // parameter (`first-class-modules.md`, M5).
+        let span = self.arena.span_of(e);
+        for (_, t) in typed.iter_mut() {
+            *t = self.resolve_selects_outside(*t, &params.iter().map(|(n, _)| *n).collect::<Vec<_>>(), span)?;
+        }
         let depth = self.env.len();
         let named = self.skolems.len();
         for (n, t) in &typed {
@@ -629,7 +635,7 @@ impl Checker {
             Exp::App { fun, args } => {
                 (matches!(self.arena.exp_at(fun), Exp::Var(s) if *s == k) || self.only_called(fun, k)) && all(args)
             }
-            Exp::Lambda { .. } | Exp::PLambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } => {
+            Exp::Lambda { .. } | Exp::PLambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } | Exp::Module(_) | Exp::With { .. } => {
                 !self.free_vars(e).contains(&k)
             }
             Exp::Let { bindings, body } => {
@@ -1155,6 +1161,11 @@ impl Checker {
                     stack.extend(parts.iter().map(|(_, t)| *t));
                     false
                 }
+                Ty::Module { descs, vals, .. } => {
+                    stack.extend(descs.iter().chain(&vals).map(|(_, t)| *t));
+                    false
+                }
+                Ty::Select(..) => false,
                 Ty::PromptTag { answer: x, payload: y, effect: e, region: r }
                 | Ty::Composable { arg: x, answer: y, effect: e, region: r } => {
                     stack.extend([x, y]);
@@ -1209,7 +1220,8 @@ impl Checker {
             Ty::Pair(a, b, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) => false,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) => false,
+            Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) if self.walk_vars(*x, seen, hit))),
             Ty::NList { elem, .. } => self.walk_vars(elem, seen, hit),
         }

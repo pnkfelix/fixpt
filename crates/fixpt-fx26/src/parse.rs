@@ -6,7 +6,7 @@
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
-use crate::ast::{Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
+use crate::ast::{Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, Effect, Exp, ExpId, Kind, ModItem, Region, RegionForm, Size, Ty, TyId, Variance};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
@@ -496,6 +496,18 @@ impl Checker {
                 }
                 let product = self.head(&items) == Some("productof");
                 Ok(self.arena.ty(if product { Ty::Product(parts) } else { Ty::Sum(parts) }))
+            }
+            // `(moduleof (abs t type) … (desc d T) … (val x T) …)`: each
+            // abstract type a binder, in scope in what follows it.
+            "moduleof" => self.parse_moduleof(s.span, &items[1..]),
+            "select" => {
+                let [_, m, n] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(select module name)`"));
+                };
+                let (Some(m), Some(n)) = (m.as_symbol(), n.as_symbol()) else {
+                    return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
+                };
+                Ok(self.arena.ty(Ty::Select(m, n)))
             }
             "arrayof" => {
                 let [_, t, r] = &items[..] else {
@@ -1272,6 +1284,15 @@ impl Checker {
                 let name = name.to_string();
                 self.parse_bloblet(span, &name, &items[1..])
             }
+            "module" => self.parse_module(span, &items[1..]),
+            "with" => {
+                let [_, m, body @ ..] = &items[..] else {
+                    return Err(FxError::at(span, "`(with module body …)`"));
+                };
+                let module = m.as_symbol().ok_or_else(|| FxError::at(m.span, "`with` opens a module named by a variable"))?;
+                let body = self.parse_body(span, body)?;
+                Ok(self.arena.exp(span, Exp::With { module, body }))
+            }
             "product" => {
                 let mut fields = Vec::new();
                 for p in &items[1..] {
@@ -1398,6 +1419,123 @@ impl Checker {
 
     /// A label or tag: a symbol, or a positive integer, as FX-91's
     /// `define-datatype` numbers a variant's members.
+    /// A `moduleof`'s components (`docs/research/first-class-modules.md`):
+    /// `(abs t type)` or `(abs (t …) type)`, `(desc d T)`, `(val x T)`, each
+    /// name once; the abstract types in scope in what follows them.
+    fn parse_moduleof(&mut self, span: fixpt_read::Span, comps: &[Syntax]) -> R<TyId> {
+        let depth = self.dscope.len();
+        let r = self.parse_moduleof_in(span, comps);
+        self.dscope.truncate(depth);
+        r
+    }
+
+    fn parse_moduleof_in(&mut self, span: fixpt_read::Span, comps: &[Syntax]) -> R<TyId> {
+        let usage = "`(moduleof (abs t type) … (desc d type) … (val x type) …)`";
+        let (mut abs, mut descs, mut vals): (Vec<(Sym, DVar)>, Vec<(Sym, TyId)>, Vec<(Sym, TyId)>) = (Vec::new(), Vec::new(), Vec::new());
+        let mut seen: Vec<Sym> = Vec::new();
+        for c in comps {
+            let parts = self.items(c, "a module component")?.to_vec();
+            let [head, name, what] = &parts[..] else {
+                return Err(FxError::at(c.span, usage));
+            };
+            let names: Vec<Sym> = match (name.as_symbol(), name.as_proper_list()) {
+                (Some(n), _) => vec![n],
+                (None, Some(ns)) if self.head(&parts) == Some("abs") => ns.iter().filter_map(|n| n.as_symbol()).collect(),
+                _ => return Err(FxError::at(name.span, "a component's name")),
+            };
+            for n in &names {
+                if seen.contains(n) {
+                    return Err(FxError::at(c.span, format!("`{}` appears twice", self.name(*n))));
+                }
+                seen.push(*n);
+            }
+            match self.head(&parts) {
+                Some("abs") => {
+                    if what.as_symbol().map(|k| self.name(k)) != Some("type") {
+                        return Err(FxError::at(what.span, "an abstract component is a `type`, for now"));
+                    }
+                    for n in names {
+                        let v = self.arena.dvar_of(n, Kind::Type);
+                        self.dscope.push((n, DScope::Var(v, Kind::Type)));
+                        abs.push((n, v));
+                    }
+                }
+                Some("desc") => {
+                    let t = self.parse_type(what)?;
+                    self.dscope.push((names[0], DScope::Rec(t)));
+                    descs.push((names[0], t));
+                }
+                Some("val") => vals.push((names[0], self.parse_type(what)?)),
+                _ => return Err(FxError::at(head.span, usage)),
+            }
+        }
+        let _ = span;
+        Ok(self.arena.ty(Ty::Module { abs, descs, vals }))
+    }
+
+    /// A `module`'s items, in order, each seeing those before it:
+    /// `(define-generative t T)`, `(define-type d T)`, `(define x e)`,
+    /// `(define x T e)` and `(define-rec (f T e) …)`.
+    fn parse_module(&mut self, span: fixpt_read::Span, forms: &[Syntax]) -> R<ExpId> {
+        let depth = self.dscope.len();
+        let r = self.parse_module_in(forms);
+        self.dscope.truncate(depth);
+        Ok(self.arena.exp(span, Exp::Module(r?)))
+    }
+
+    fn parse_module_in(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
+        let mut out = Vec::new();
+        for f in forms {
+            let parts = self.items(f, "a module's definition")?.to_vec();
+            let name_of = |p: &Self, s: &Syntax| s.as_symbol().ok_or_else(|| FxError::at(s.span, "a name")).map(|n| (n, p.name(n).to_string()));
+            match (self.head(&parts), &parts[..]) {
+                (Some("define-generative"), [_, n, rep]) => {
+                    let (name, text) = name_of(self, n)?;
+                    let var = self.arena.dvar_of(name, Kind::Type);
+                    self.dscope.push((name, DScope::Var(var, Kind::Type)));
+                    let rep = self.parse_type(rep)?;
+                    let (up, down) = (self.interner.intern(&format!("up-{text}")), self.interner.intern(&format!("down-{text}")));
+                    out.push(ModItem::Abs { name, var, rep, up, down });
+                }
+                (Some("define-type"), [_, n, t]) => {
+                    let (name, _) = name_of(self, n)?;
+                    let ty = self.parse_type(t)?;
+                    self.dscope.push((name, DScope::Rec(ty)));
+                    out.push(ModItem::Desc { name, ty });
+                }
+                (Some("define"), [_, n, init]) => {
+                    let (name, _) = name_of(self, n)?;
+                    out.push(ModItem::Val { name, ty: None, init: self.parse_exp(init)? });
+                }
+                (Some("define"), [_, n, t, init]) => {
+                    let (name, _) = name_of(self, n)?;
+                    let ty = self.parse_type(t)?;
+                    out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp(init)? });
+                }
+                (Some("define-rec"), [_, bs @ ..]) => {
+                    let mut group = Vec::new();
+                    for b in bs {
+                        let triple = self.items(b, "`(name type expression)`")?.to_vec();
+                        let [n, t, init] = &triple[..] else {
+                            return Err(FxError::at(b.span, "`(define-rec (name type expression) …)`"));
+                        };
+                        let (name, _) = name_of(self, n)?;
+                        let ty = self.parse_type(t)?;
+                        group.push((name, ty, self.parse_exp(init)?));
+                    }
+                    out.push(ModItem::Rec(group));
+                }
+                _ => {
+                    return Err(FxError::at(
+                        f.span,
+                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define x [T] e)` and `(define-rec (f T e) …)`",
+                    ));
+                }
+            }
+        }
+        Ok(out)
+    }
+
     fn label(&mut self, s: &Syntax) -> R<Sym> {
         if let Some(x) = s.as_symbol() {
             return Ok(x);

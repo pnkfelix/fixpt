@@ -403,6 +403,15 @@ impl Checker {
                 size(&s, pol, bad);
                 self.size_walk(elem, pol, v, bad, seen);
             }
+            Ty::Module { descs, vals, .. } => {
+                for (_, x) in descs {
+                    self.size_walk(x, Polarity::Inv, v, bad, seen);
+                }
+                for (_, x) in vals {
+                    self.size_walk(x, pol, v, bad, seen);
+                }
+            }
+            Ty::Select(..) => {}
             Ty::Named { args, .. } => {
                 for d in args {
                     match d {
@@ -447,6 +456,10 @@ impl Checker {
     /// given one, a variable of its own, named after the variable, so that
     /// tests of it can teach facts. The variable is pushed on `skolems`.
     pub(crate) fn name_nat(&mut self, name: Sym, t: TyId) -> TyId {
+        // A module's abstract types are named too, for this binding.
+        if matches!(self.arena.get(self.arena.resolve(t)), Ty::Module { .. }) {
+            return self.name_module(name, t);
+        }
         if !matches!(self.arena.get(self.arena.resolve(t)), Ty::Nat(Size::Finite)) {
             return t;
         }
@@ -465,7 +478,17 @@ impl Checker {
         if self.skolems.len() == depth {
             return Ok(t);
         }
-        let named: Vec<DVar> = self.skolems.drain(depth..).collect();
+        let mut named: Vec<DVar> = self.skolems.drain(depth..).collect();
+        // A module's abstract type cannot be forgotten: nothing may leave
+        // its binding's scope still mentioning it.
+        if let Some(v) = named.iter().find(|v| self.is_module_var(**v) && self.mentions_var(t, **v)) {
+            let name = self.interner.name(self.arena.dvar_name(*v)).to_string();
+            return Err(crate::error::FxError::at(
+                span,
+                format!("this is a {}, and `{name}` is a module's abstract type, not known outside the scope where the module is named", self.show_ty(t)),
+            ));
+        }
+        named.retain(|v| !self.is_module_var(*v));
         for v in &named {
             let mut bad = 0;
             self.size_walk(t, Polarity::Pos, *v, &mut bad, &mut HashSet::new());

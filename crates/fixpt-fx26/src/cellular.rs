@@ -356,6 +356,22 @@ impl<'a> Compiler<'a> {
             b
         };
         match self.c.arena.exp_at(x).clone() {
+            // Never compiled (M3): their parts' names, over-counted.
+            Exp::Module(items) => {
+                for item in items {
+                    match item {
+                        crate::ast::ModItem::Val { init, .. } => self.free(init, bound, acc),
+                        crate::ast::ModItem::Rec(group) => group.iter().for_each(|(_, _, init)| self.free(*init, bound, acc)),
+                        _ => {}
+                    }
+                }
+            }
+            Exp::With { module, body } => {
+                if !bound.contains(&module) {
+                    adjoin(acc, module);
+                }
+                self.free(body, bound, acc);
+            }
             Exp::Var(n) => {
                 if !bound.contains(&n) {
                     adjoin(acc, n);
@@ -471,6 +487,7 @@ impl<'a> Compiler<'a> {
 
     fn exp_as_is(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         match self.c.arena.exp_at(x).clone() {
+            Exp::Module(_) | Exp::With { .. } => return Err("modules are not compiled yet (`first-class-modules.md`, M3): run with the lowering".into()),
             Exp::Var(n) => {
                 match self.where_is(e, n) {
                     Some(l) => self.load(code, l),
@@ -860,7 +877,7 @@ impl<'a> Compiler<'a> {
         }
         let all = |xs: &[ExpId], n: i64| xs.iter().fold(n, |n, a| if n < 0 { n } else { self.inline_room(*a, n) });
         match self.c.arena.exp_at(x).clone() {
-            Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } => -1,
+            Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } | Exp::Module(_) | Exp::With { .. } => -1,
             Exp::App { fun, args } => all(&args, self.inline_room(fun, n)),
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.inline_room(body, n),
             Exp::LetRegion { body, .. } => self.inline_room(body, n),
@@ -884,6 +901,8 @@ impl<'a> Compiler<'a> {
     fn call_only(&self, x: ExpId, p: Sym, f: Sym, k: usize, n: usize, arity: &mut Option<usize>) -> bool {
         let all = |xs: &[ExpId], arity: &mut Option<usize>| xs.iter().all(|a| self.call_only(*a, p, f, k, n, arity));
         match self.c.arena.exp_at(x).clone() {
+            // Not compiled yet (M3): said of no module.
+            Exp::Module(_) | Exp::With { .. } => false,
             Exp::Var(m) => m != p,
             Exp::App { fun, args } => match *self.c.arena.exp_at(fun) {
                 Exp::Var(m) if m == p => {
@@ -926,6 +945,8 @@ impl<'a> Compiler<'a> {
     fn called_only(&self, x: ExpId, f: Sym, n: usize) -> bool {
         let all = |xs: &[ExpId]| xs.iter().all(|a| self.called_only(*a, f, n));
         match self.c.arena.exp_at(x).clone() {
+            // Not compiled yet (M3): said of no module.
+            Exp::Module(_) | Exp::With { .. } => false,
             Exp::Var(m) => m != f,
             Exp::App { fun, args } => {
                 all(&args)
@@ -1083,6 +1104,8 @@ impl<'a> Compiler<'a> {
     fn loops_only(&self, x: ExpId, f: Sym, n: usize, tail: bool) -> bool {
         let all = |xs: &[ExpId]| xs.iter().all(|a| self.loops_only(*a, f, n, false));
         match self.c.arena.exp_at(x).clone() {
+            // Not compiled yet (M3): said of no module.
+            Exp::Module(_) | Exp::With { .. } => false,
             Exp::Var(m) => m != f,
             Exp::Lambda { params, body } => params.iter().any(|(p, _)| *p == f) || !self.mentions(body, f),
             Exp::App { fun, args } => {

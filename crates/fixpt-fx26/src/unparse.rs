@@ -164,6 +164,21 @@ impl Checker {
                 format!("(poly ({}) {})", bs.join(" "), self.show_ty_on(body, path))
             }
             Ty::Ref(a, r) => format!("(ref {} {})", self.show_ty_on(a, path), self.show_region(r)),
+            Ty::Module { abs, descs, vals } => {
+                let mut out = String::from("(moduleof");
+                for (n, _) in &abs {
+                    out.push_str(&format!(" (abs {} type)", self.interner.name(*n)));
+                }
+                for (n, x) in descs.iter() {
+                    out.push_str(&format!(" (desc {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
+                }
+                for (n, x) in vals.iter() {
+                    out.push_str(&format!(" (val {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
+                }
+                out.push(')');
+                out
+            }
+            Ty::Select(m, n) => format!("(select {} {})", self.interner.name(m), self.interner.name(n)),
             Ty::Product(parts) | Ty::Sum(parts) => {
                 let head = if matches!(self.arena.get(t), Ty::Product(_)) { "productof" } else { "sumof" };
                 let ps: Vec<String> =

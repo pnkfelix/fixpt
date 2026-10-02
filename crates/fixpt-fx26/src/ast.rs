@@ -239,6 +239,16 @@ pub enum Ty {
     /// `size` elements, or some number if `size` is `finite`
     /// (`docs/research/sizes.md`).
     NList { elem: TyId, size: Size, region: Region },
+    /// `(moduleof (abs t type) … (desc d T) … (val x T) …)`: the type of a
+    /// module (`docs/research/first-class-modules.md`). The abstract types
+    /// are binders, in scope in the descriptions and the values' types;
+    /// a variable of this type has them renamed for itself as it is bound,
+    /// each named `m..t`, which is what `(select m t)` is.
+    Module { abs: Vec<(Sym, DVar)>, descs: Vec<(Sym, TyId)>, vals: Vec<(Sym, TyId)> },
+    /// `(select m t)` as written: what component `t` of the module `m` is
+    /// is found where the type is checked, `m` being bound then
+    /// (`Checker::resolve_selects`). Never compared unresolved.
+    Select(Sym, Sym),
 }
 
 /// A list's length, as far as it is known: some number (`finite`), or a
@@ -401,6 +411,26 @@ pub enum Exp {
     /// `(tagcase e (tag x body) … [(else y body)])`: each arm sees the
     /// value its tag carries; `else` sees the sum of the tags not named.
     TagCase { scrutinee: ExpId, arms: Vec<Arm>, els: Option<(Sym, ExpId)> },
+    /// `(module item …)`: a module, its items in order, each seeing those
+    /// before it (`docs/research/first-class-modules.md`).
+    Module(Vec<ModItem>),
+    /// `(with m body …)`: the body, with the values of module `m`, a
+    /// variable, in scope by their names.
+    With { module: Sym, body: ExpId },
+}
+
+/// One item of a `module`.
+#[derive(Clone, Debug)]
+pub enum ModItem {
+    /// `(define-generative t rep)`: an abstract type, `var` in the module
+    /// and a binder of its type; `up-t` and `down-t`, the module's own.
+    Abs { name: Sym, var: DVar, rep: TyId, up: Sym, down: Sym },
+    /// `(define-type d T)`: a transparent description.
+    Desc { name: Sym, ty: TyId },
+    /// `(define x e)` or `(define x T e)`: a value.
+    Val { name: Sym, ty: Option<TyId>, init: ExpId },
+    /// `(define-rec (f T e) …)`: values that call each other.
+    Rec(Vec<(Sym, TyId, ExpId)>),
 }
 
 /// One arm of a `tagcase`.

@@ -169,7 +169,11 @@ one pure `eq?`, `eqtable`; `equal` and `dynamic` ported, four ports'
 workarounds retired);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
-friction. Then, as before:
+friction; Q12 first-class modules, beside globals
+(`docs/research/first-class-modules.md`: M1 done 2026-10-01, the Rust
+checker and lowering; M2 the FX-26 checker, M3 the compilers, M4 module
+subtyping, M5 dependent subroutines, M6 dot shorthand, M7 a file is a
+module). Then, as before:
 1. Done (2026-09-28): an immediately applied lambda as a `let`;
    procedures that only make a closure as frameless leaves; lambda
    lifting (the check phase 14% less allocation).

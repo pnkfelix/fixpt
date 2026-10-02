@@ -107,6 +107,13 @@ pub enum Speculation {
     NotAnExpression,
 }
 
+/// Whether `s` has a `module`, `moduleof`, `with` or `select` form in it.
+fn mentions_modules(s: &Syntax, interner: &fixpt_read::Interner) -> bool {
+    let Some(items) = s.as_proper_list() else { return false };
+    items.first().and_then(|h| h.as_symbol()).is_some_and(|h| matches!(interner.name(h), "module" | "moduleof" | "with" | "select"))
+        || items.iter().any(|i| mentions_modules(i, interner))
+}
+
 /// A REPL entry that defines types naming types not defined yet: held as
 /// it was read, and run with the entries that complete it.
 #[derive(Debug, Clone)]
@@ -629,6 +636,11 @@ impl Fx26Session {
     /// redefinition that would break definitions goes ahead is the driver's
     /// to decide (`Redefine`): asked, or said ahead, before anything changes.
     fn run_defining(&mut self, form: &Syntax) -> R<Outcome> {
+        // The pieces written in FX-26 have no modules yet
+        // (`docs/research/first-class-modules.md`, M2 and M3).
+        if self.strategy != Strategy::Lower && mentions_modules(form, &self.checker.interner) {
+            return Err(FxError::at(form.span, "modules run lowered only, for now: without `--fx26-run`; the FX-26 checker and compilers have none yet"));
+        }
         let names = self.checker.defined_names(form);
         let shown = |c: &Checker, ns: &[Sym]| ns.iter().map(|n| format!("`{}`", c.interner.name(*n))).collect::<Vec<_>>().join(", ");
         if names.iter().any(|n| self.checker.global_type(*n).is_some())

@@ -461,6 +461,36 @@ impl Lowerer<'_> {
         }
     }
 
+    /// A module's items from the first, each in the scope of those before
+    /// it, then the product of its values, `vals` gathering their names.
+    fn module_items(&mut self, items: &[crate::ast::ModItem], vals: &mut Vec<Sym>) -> String {
+        use crate::ast::ModItem;
+        let Some((first, rest)) = items.split_first() else {
+            let fields: Vec<String> = vals.iter().map(|n| self.var(*n)).collect();
+            return format!("(%fx26-product {})", fields.join(" "));
+        };
+        match first {
+            ModItem::Desc { .. } => self.module_items(rest, vals),
+            ModItem::Abs { up, down, .. } => {
+                self.locals.extend([*up, *down]);
+                let (u, d) = (self.local(*up), self.local(*down));
+                format!("(let (({u} (lambda (x) x)) ({d} (lambda (x) x))) {})", self.module_items(rest, vals))
+            }
+            ModItem::Val { name, init, .. } => {
+                let init = self.go(*init);
+                self.locals.push(*name);
+                vals.push(*name);
+                format!("(let (({} {init})) {})", self.local(*name), self.module_items(rest, vals))
+            }
+            ModItem::Rec(group) => {
+                self.locals.extend(group.iter().map(|(n, _, _)| *n));
+                vals.extend(group.iter().map(|(n, _, _)| *n));
+                let bs: Vec<String> = group.iter().map(|(n, _, init)| format!("({} {})", self.local(*n), self.go(*init))).collect();
+                format!("(letrec* ({}) {})", bs.join(" "), self.module_items(rest, vals))
+            }
+        }
+    }
+
     fn body(&mut self, bound: &[Sym], e: ExpId) -> String {
         let depth = self.locals.len();
         self.locals.extend_from_slice(bound);
@@ -552,6 +582,21 @@ impl Lowerer<'_> {
             Exp::Product(fields) => {
                 let a: Vec<String> = fields.iter().map(|(_, x)| self.go(*x)).collect();
                 format!("(%fx26-product {})", a.join(" "))
+            }
+            // A module is a product of its values, in order; its own
+            // conversions the identity (`docs/research/first-class-modules.md`).
+            Exp::Module(items) => {
+                let depth = self.locals.len();
+                let out = self.module_items(&items, &mut Vec::new());
+                self.locals.truncate(depth);
+                out
+            }
+            // `with`: the module's values, by position, as locals.
+            Exp::With { module, body } => {
+                let names = self.c.facts.with_vals.get(&e).cloned().unwrap_or_default();
+                let m = self.var(module);
+                let bs: Vec<String> = names.iter().enumerate().map(|(i, n)| format!("({} (%bloblet-ref {m} {}))", self.local(*n), i + 2)).collect();
+                format!("(let ({}) {})", bs.join(" "), self.body(&names, body))
             }
             Exp::Extract(x, _) => {
                 let i = self.c.facts.field_index[&e];

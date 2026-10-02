@@ -167,6 +167,7 @@ pub mod licence;
 pub mod lemma;
 pub mod lower;
 mod sizes;
+mod modules;
 pub mod parse;
 pub mod session;
 pub mod sexp;

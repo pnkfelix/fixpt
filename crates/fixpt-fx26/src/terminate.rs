@@ -326,6 +326,38 @@ impl Walk<'_> {
                 self.walk(els);
                 self.guards.truncate(depth);
             }
+            // A module's values made, and a `with`'s module named, each as
+            // any expression or variable is.
+            Exp::Module(items) => {
+                let depth = self.scope.len();
+                for item in items {
+                    match item {
+                        crate::ast::ModItem::Abs { up, down, .. } => self.scope.extend([(up, Vec::new()), (down, Vec::new())]),
+                        crate::ast::ModItem::Desc { .. } => {}
+                        crate::ast::ModItem::Val { name, init, .. } => {
+                            self.walk(init);
+                            self.scope.push((name, Vec::new()));
+                        }
+                        crate::ast::ModItem::Rec(group) => {
+                            self.scope.extend(group.iter().map(|(n, _, _)| (*n, Vec::new())));
+                            for (_, _, init) in &group {
+                                self.walk(*init);
+                            }
+                        }
+                    }
+                }
+                self.scope.truncate(depth);
+            }
+            Exp::With { module, body } => {
+                if let Some(m) = self.member(module) {
+                    self.escapes.get_or_insert((self.current, m));
+                }
+                let names: Vec<Sym> = self.c.facts.with_vals.get(&e).cloned().unwrap_or_default();
+                let depth = self.scope.len();
+                self.scope.extend(names.into_iter().map(|n| (n, Vec::new())));
+                self.walk(body);
+                self.scope.truncate(depth);
+            }
             Exp::Letrec { bindings, body } => {
                 let depth = self.scope.len();
                 self.scope.extend(bindings.iter().map(|(n, _, _)| (*n, Vec::new())));

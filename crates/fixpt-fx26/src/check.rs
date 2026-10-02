@@ -135,6 +135,12 @@ pub struct Checker {
     /// The sizes given to `nat` variables of no known size, innermost last
     /// (`Checker::name_nat`).
     pub(crate) skolems: Vec<DVar>,
+    /// Of those, the ones made for a module's abstract types as it was
+    /// bound (`Checker::name_module`): not forgotten, but kept from leaving.
+    pub(crate) module_vars: HashSet<DVar>,
+    /// While a type's `select`s are resolved (`Checker::resolve_selects`):
+    /// what each is; empty otherwise.
+    pub(crate) select_map: HashMap<(Sym, Sym), TyId>,
     /// The program's convention (set by [`Checker::with_convention`]):
     /// what a subroutine type that names none has, and what a convention
     /// nothing solves defaults to
@@ -201,6 +207,8 @@ pub struct NodeFacts {
     /// procedure may have that list itself, since nothing can write it.
     /// Every other `apply` copies its list.
     pub apply_shares: HashSet<ExpId>,
+    /// Each `with`'s module's values, in order: lowering binds them.
+    pub with_vals: HashMap<ExpId, Vec<Sym>>,
 }
 
 impl NodeFacts {
@@ -210,6 +218,7 @@ impl NodeFacts {
         self.standard_operator.retain(|e, _| e.0 < first);
         self.no_escape.retain(|e| e.0 < first);
         self.field_index.retain(|e, _| e.0 < first);
+        self.with_vals.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
         self.apply_shares.retain(|e| e.0 < first);
     }
@@ -323,6 +332,8 @@ impl Checker {
             certified_lengths: Vec::new(),
             size_facts: Vec::new(),
             skolems: Vec::new(),
+            module_vars: HashSet::new(),
+            select_map: HashMap::new(),
             conv_default: conv,
             fresh_regions: 0,
             standard_len: 0,
@@ -464,7 +475,12 @@ impl Checker {
     /// checked against `expected` where one is given (as a `let`'s is), or
     /// synthesised.
     pub(crate) fn letrec(&mut self, e: ExpId, bindings: &[(Sym, TyId, ExpId)], body: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
-        self.letrec_with(e, bindings, body, expected, true)
+        let span = self.arena.span_of(e);
+        let mut resolved = Vec::new();
+        for (n, t, init) in bindings {
+            resolved.push((*n, self.resolve_selects(*t, span)?, *init));
+        }
+        self.letrec_with(e, &resolved, body, expected, true)
     }
 
     /// [`letrec`](Self::letrec), and if a procedure of the group does not
@@ -647,6 +663,7 @@ impl Checker {
             Exp::RLambda { region, lambda } => self.synth_rlambda(e, region, lambda, None),
             Exp::App { fun, args } => self.synth_app(e, fun, &args, None),
             Exp::The { ty, exp } => {
+                let ty = self.resolve_selects(ty, span)?;
                 let eff = self.check(exp, ty)?;
                 Ok((ty, eff))
             }
@@ -767,6 +784,8 @@ impl Checker {
                 Ok((t, eff))
             }
             Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
+            Exp::Module(items) => self.synth_module(e, &items),
+            Exp::With { module, body } => self.synth_with(e, module, body),
             // The region's name is a variable too, of type `(place r)`,
             // when the form makes a place: to allocate in (`rcons`).
             Exp::LetRegion { form, region, body } => {
@@ -930,6 +949,7 @@ impl Checker {
 
     /// Bind `name`, at top level, to a value of type `t`: a global.
     pub(crate) fn push_global(&mut self, name: Sym, t: TyId) {
+        let t = self.name_module(name, t);
         self.global_slots.insert(self.env.len());
         self.env.push((name, t));
     }
@@ -1104,6 +1124,37 @@ impl Checker {
                 self.free_into(body, bound, out);
                 bound.truncate(depth);
             }
+            Exp::Module(items) => {
+                let depth = bound.len();
+                for item in &items {
+                    match item {
+                        crate::ast::ModItem::Abs { up, down, .. } => bound.extend([*up, *down]),
+                        crate::ast::ModItem::Desc { .. } => {}
+                        crate::ast::ModItem::Val { name, init, .. } => {
+                            self.free_into(*init, bound, out);
+                            bound.push(*name);
+                        }
+                        crate::ast::ModItem::Rec(group) => {
+                            bound.extend(group.iter().map(|(n, _, _)| *n));
+                            for (_, _, init) in group {
+                                self.free_into(*init, bound, out);
+                            }
+                        }
+                    }
+                }
+                bound.truncate(depth);
+            }
+            // The names the module gives, once it is checked; before, none,
+            // so that what may be its values counts as free.
+            Exp::With { module, body } => {
+                if !bound.contains(&module) && !out.contains(&module) {
+                    out.push(module);
+                }
+                let depth = bound.len();
+                bound.extend(self.facts.with_vals.get(&e).into_iter().flatten().copied());
+                self.free_into(body, bound, out);
+                bound.truncate(depth);
+            }
             Exp::Let { bindings, body } => {
                 for (_, init) in &bindings {
                     self.free_into(*init, bound, out);
@@ -1170,8 +1221,13 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) => {}
             Ty::Link(Some(_)) => unreachable!("resolved"),
+            Ty::Module { descs, vals, .. } => {
+                for (_, x) in descs.iter().chain(&vals) {
+                    self.regions_walk(*x, seen, out);
+                }
+            }
             Ty::Subr { effect, params, result, .. } => {
                 out.extend(effect.0.iter().filter_map(|a| a.region()));
                 for p in params {
@@ -1934,6 +1990,25 @@ impl Checker {
                     _ => false,
                 })
             }
+            // Modules of the same components, in order (`first-class-modules.md`,
+            // M1): the abstract types paired as binders, as a `poly`'s are;
+            // descriptions the same; values covariant.
+            (Ty::Module { abs: aa, descs: da, vals: va }, Ty::Module { abs: ab, descs: db, vals: vb }) => {
+                let names = |a: &[(Sym, DVar)]| a.iter().map(|(n, _)| *n).collect::<Vec<_>>();
+                if names(&aa) != names(&ab) || da.len() != db.len() || va.len() != vb.len() {
+                    return false;
+                }
+                let mut inner = env.clone();
+                for (i, ((_, x), (_, y))) in aa.iter().zip(&ab).enumerate() {
+                    let n = st.labels.len() as u32;
+                    let l = *st.labels.entry((a, b, i)).or_insert(DVar(u32::MAX - n));
+                    inner.a.insert(*x, l);
+                    inner.b.insert(*y, l);
+                }
+                let iflip = inner.flip();
+                da.iter().zip(&db).all(|((n, x), (m, y))| n == m && self.sub(*x, *y, &inner, st) && self.sub(*y, *x, &iflip, st))
+                    && va.iter().zip(&vb).all(|((n, x), (m, y))| n == m && self.sub(*x, *y, &inner, st))
+            }
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
                     return false;
@@ -1979,6 +2054,7 @@ impl Checker {
         let ty = self.arena.get(t).clone();
         match ty {
             Ty::Base(_) | Ty::Void | Ty::Link(None) => return t,
+            Ty::Select(m, n) => return self.select_map.get(&(m, n)).copied().unwrap_or(t),
             Ty::Var(v) => {
                 return match map.get(&v) {
                     Some(D::Type(x)) => *x,
@@ -2025,6 +2101,11 @@ impl Checker {
             Ty::MarkKey(t, r) => Ty::MarkKey(self.subst_memo(t, map, memo), region(r)),
             Ty::Product(parts) => Ty::Product(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),
             Ty::Sum(parts) => Ty::Sum(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),
+            Ty::Module { abs, descs, vals } => Ty::Module {
+                abs,
+                descs: descs.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect(),
+                vals: vals.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect(),
+            },
             Ty::Bloblet { fields, frozen, region: r } => Ty::Bloblet {
                 fields: fields.iter().map(|f| self.subst_memo(*f, map, memo)).collect(),
                 frozen,
@@ -2203,7 +2284,7 @@ impl Checker {
     }
 
     /// Run `f` with `bound` in scope.
-    fn in_scope<T>(&mut self, bound: &[(Sym, TyId)], f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+    pub(crate) fn in_scope<T>(&mut self, bound: &[(Sym, TyId)], f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
         let depth = self.env.len();
         self.env.extend_from_slice(bound);
         let r = f(self);

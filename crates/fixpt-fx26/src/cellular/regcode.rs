@@ -691,6 +691,7 @@ impl Compiler<'_> {
             return Some(());
         }
         match self.c.arena.exp_at(x).clone() {
+            Exp::Module(_) | Exp::With { .. } => return self.decline("a module (`first-class-modules.md`, M3)"),
             Exp::Var(n) => {
                 match self.r_where(env, n) {
                     Some(RLoc::Reg(k)) => g.op("reg", &[Gen::n(k)]),

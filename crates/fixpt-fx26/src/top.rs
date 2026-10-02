@@ -546,6 +546,7 @@ impl Checker {
                 self.pending_lemma = None;
                 let written = ty;
                 let ty = self.parse_type(ty)?;
+                let ty = self.resolve_selects(ty, written.span)?;
                 // Checked as though it said it read any globals; what it
                 // reads is then taken from its body.
                 let declared = ty;
@@ -697,7 +698,9 @@ impl Checker {
                     return Err(FxError::at(b.span, "a define-rec binding is `(name type lambda)`"));
                 };
                 let name = self.binder_name(name)?;
+                let span = ty.span;
                 let ty = self.parse_type(ty)?;
+                let ty = self.resolve_selects(ty, span)?;
                 self.push_global(name, ty);
                 self.known.insert((name, self.env.len() - 1));
                 parts.push((name, ty, init.clone()));
@@ -1081,7 +1084,7 @@ pub const KEYWORDS: &[&str] = &[
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
-    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase",
+    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet",
 ];
