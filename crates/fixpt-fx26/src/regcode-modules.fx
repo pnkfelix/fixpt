@@ -30,7 +30,7 @@
         vals
         (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
           (cond
-            ((= k 1) (r-module-items g (cdr items) sc vals))
+            ((or (= k 1) (< k 0) (> k 3)) (r-module-items g (cdr items) sc vals))
             ((= k 0)
              (let* ((up (begin (r-exp g (car xs) (car sc) (cdr sc) #f)
                                (r-keep-named g (c-converter "up-" (car ns)) sc)))

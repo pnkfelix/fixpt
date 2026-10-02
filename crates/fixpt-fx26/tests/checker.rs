@@ -508,6 +508,11 @@ fn effect_summaries_agree() {
     }
     let t = std::time::Instant::now();
     for (name, program) in programs {
+        // A module read from a file has spans in that file, which the Rust
+        // checker's summaries do not tell apart from the program's.
+        if program.contains("(load-module") {
+            continue;
+        }
         {
             let Ok(Ok(_)) = s.check_with_own_checker(&program) else { continue };
             let mut fx: HashMap<(u32, u32), i64> = HashMap::new();

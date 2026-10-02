@@ -172,9 +172,10 @@ by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction; Q12 first-class modules, beside globals
 (`docs/research/first-class-modules.md`: M1 done 2026-10-01, the Rust
 checker and lowering; M2 done 2026-10-01, the FX-26 parser and checker,
-the checkers agreeing; M3 the compilers, M4 module
-subtyping, M5 dependent subroutines, M6 dot shorthand, M7 a file is a
-module). Then, as before:
+the checkers agreeing; M3 (the compilers), M4 (module subtyping), M5
+(dependent procedures) and M7 (`load-module`) done 2026-10-01 in both
+checkers, both compilers and the evaluator written in FX-26; M6 dot
+shorthand next). Then, as before:
 1. Done (2026-09-28): an immediately applied lambda as a `let`;
    procedures that only make a closure as frameless leaves; lambda
    lifting (the check phase 14% less allocation).

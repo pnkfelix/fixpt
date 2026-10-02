@@ -226,7 +226,7 @@ pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
 /// compilers run as register code runs lowered. A tenth of the front end,
 /// and of its loading, which is most of a session's start.
 fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
-    let text = crate::FRONT_END_FILES[..2].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
+    let text = crate::FRONT_END_FILES[..3].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
     load_lowered(scheme, &text)
 }
 
@@ -923,9 +923,9 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 21] = [
+    pub const FRONT_ENTRIES: [&'static str; 22] = [
         "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
-        "check-globals-effects!", "parse-program", "run-checked", "compile-program", "compile-checked", "compile-registers!",
+        "check-globals-effects!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
         "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
         "arm-ret", "arm-mov-imm64",
     ];
@@ -1015,6 +1015,8 @@ impl Fx26Session {
     /// program's convention.
     fn own_pieces(&mut self) -> R<()> {
         let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
+        // A `load-module`'s path is from where the Rust checker's is.
+        crate::syn::set_load_base(self.checker.base_dir.clone());
         if self.front_end_compiled {
             if !self.scheme.is_bound(&format!("{READER_PREFIX}eager-start-fx26")) {
                 load_reader_alone(&mut self.scheme).map_err(fail)?;

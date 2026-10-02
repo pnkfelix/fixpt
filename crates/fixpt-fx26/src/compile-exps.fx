@@ -157,7 +157,7 @@
 (define c-word-symbol (subr c-walks ((listof string @k) exp) symbol)
   (lambda (named body)
     (string->symbol
-      (if (null? named) (string-append "lambda@" (int->string (exp-start body))) (car named)))))
+      (if (null? named) (string-append "lambda@" (c-place-name (exp-start body))) (car named)))))
 
 ;; `cells` as word `w`'s register twin, unless there are none.
 (define c-twin! (subr c-emits (tword (listof wcell @k)) unit)
@@ -353,7 +353,7 @@
                    (c-unbind c depth (- d depth) tail)))
           (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
             (cond
-              ((= k 1) (c-module (cdr items) e depth d vals c tail))
+              ((or (= k 1) (< k 0) (> k 3)) (c-module (cdr items) e depth d vals c tail))
               ((= k 0)
                (let* ((up (begin (c-exp (car xs) e d c #f)
                                  (c-extend (c-converter "up-" (car ns)) (at-slot d) e)))

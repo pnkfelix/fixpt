@@ -13,6 +13,8 @@ use fixpt_heap::Value;
 use fixpt_read::{Datum, FileId, Interner, Num, Span, Syntax};
 use fixpt_scheme::{Handle, Local, Session};
 use fixpt_scheme::eager::EagerReader;
+use std::collections::HashMap;
+use crate::ast::ExpId;
 
 /// Read `text` with the FX-26 reader, already loaded into `scheme` (see
 /// [`crate::session::load_eager_reader`]), interning names in `interner`.
@@ -305,6 +307,7 @@ pub fn read_to_syns(scheme: &mut Session, file: FileId, text: &str) -> R<Handle>
 /// scope; or the check's error.
 pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     let mut c = crate::Checker::new();
+    c.base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let forms = c.read_in(file, text)?;
     let done = c.declare_ahead(&forms)?;
     for (f, done) in forms.iter().zip(done) {
@@ -312,31 +315,59 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
             c.top_defining(f)?;
         }
     }
+    // Where a span is, as the pieces written in FX-26 have it: in
+    // characters; in a module's file (`load-module`), past that file's base.
     let offsets = byte_offsets(text);
-    let char_at = |byte: u32| offsets.partition_point(|&o| o < byte as usize) as i64;
+    let files: HashMap<FileId, Vec<usize>> = c.loaded.values().map(|(_, t, f)| (*f, byte_offsets(t))).collect();
+    let at = |f: FileId, byte: u32| -> i64 {
+        match files.get(&f) {
+            Some(o) if f != file => LOAD_BASE_STEP * (f.0 as i64 - 1000) + o.partition_point(|&x| x < byte as usize) as i64,
+            _ => offsets.partition_point(|&o| o < byte as usize) as i64,
+        }
+    };
+    let place = |e: ExpId| {
+        let span = c.arena.span_of(e);
+        (at(span.file, span.start), at(span.file, span.end))
+    };
     let facts: Vec<(i64, i64, i64)> = c
         .facts
         .field_index
         .iter()
         .map(|(e, i)| {
-            let span = c.arena.span_of(*e);
-            (char_at(span.start), char_at(span.end), *i as i64)
+            let (a, b) = place(*e);
+            (a, b, *i as i64)
         })
         .collect();
-    // And each expression's effect summary, as -1 - s (`checked-extracts`).
+    // And each expression's effect summary, as -1 - s (`checked-extracts`):
+    // `Checker::effect_summaries`, by span in its file.
+    let mut summaries: HashMap<(i64, i64), i64> = HashMap::new();
+    for (e, eff) in &c.facts.effects {
+        use crate::ast::{Atom, Region};
+        let s = if eff.is_pure() {
+            0
+        } else if eff.0.iter().all(|a| matches!(a, Atom::Read(_))) {
+            1
+        } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
+            3
+        } else {
+            2
+        };
+        let k = summaries.entry(place(*e)).or_insert(s);
+        *k = (*k).max(s);
+    }
     let facts: Vec<(i64, i64, i64)> = facts
         .into_iter()
-        .chain(c.effect_summaries().into_iter().map(|((a, b), s)| (char_at(a), char_at(b), -1 - s as i64)))
+        .chain(summaries.into_iter().map(|((a, b), s)| (a, b, -1 - s)))
         // And each conversion, as -1000 - its code (`k-convert-at`).
         .chain(c.facts.converted.keys().filter_map(|e| {
-            let span = c.arena.span_of(*e);
-            c.facts.conversion_code(*e).map(|k| (char_at(span.start), char_at(span.end), -1000 - k))
+            let (a, b) = place(*e);
+            c.facts.conversion_code(*e).map(|k| (a, b, -1000 - k))
         }))
         // And each `apply` of a list at `acyclic`, as -500
         // (`k-note-apply-shares`).
         .chain(c.facts.apply_shares.iter().map(|e| {
-            let span = c.arena.span_of(*e);
-            (char_at(span.start), char_at(span.end), -500)
+            let (a, b) = place(*e);
+            (a, b, -500)
         }))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
@@ -344,13 +375,13 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     // (`checked-withs!`): the checker's record, which the compiler reads.
     let mut withs = scheme.make(|_| Value::NULL);
     for (e, names) in &c.facts.with_vals {
-        let span = c.arena.span_of(*e);
+        let (wa, wb) = place(*e);
         let mut ns = scheme.make(|_| Value::NULL);
         for n in names.iter().rev() {
             let sym = scheme.make(|m| m.heap().intern(c.interner.name(*n)));
             ns = scheme.call_global("cons", &[sym, ns]).map_err(|e| fail(e.to_string()))?;
         }
-        let (a, b) = (scheme.make(|_| Value::fixnum(char_at(span.start))), scheme.make(|_| Value::fixnum(char_at(span.end))));
+        let (a, b) = (scheme.make(|_| Value::fixnum(wa)), scheme.make(|_| Value::fixnum(wb)));
         let tag = scheme.make(|_| Value::fixnum(37));
         let one = scheme.call_global("%make-frozen", &[tag, a, b, ns]).map_err(|e| fail(e.to_string()))?;
         withs = scheme.call_global("cons", &[one, withs]).map_err(|e| fail(e.to_string()))?;
@@ -358,14 +389,14 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     scheme.call_global(&format!("{READER_PREFIX}checked-withs!"), &[withs]).map_err(|e| fail(e.to_string()))?;
     // And each module reshaped, with the positions it keeps (`checked-reshapes!`).
     let mut reshapes = scheme.make(|_| Value::NULL);
-    for (e, at) in &c.facts.reshaped {
-        let span = c.arena.span_of(*e);
+    for (e, keep) in &c.facts.reshaped {
+        let (ra, rb) = place(*e);
         let mut ks = scheme.make(|_| Value::NULL);
-        for k in at.iter().rev() {
+        for k in keep.iter().rev() {
             let k = scheme.make(|_| Value::fixnum(*k as i64));
             ks = scheme.call_global("cons", &[k, ks]).map_err(|e| fail(e.to_string()))?;
         }
-        let (a, b) = (scheme.make(|_| Value::fixnum(char_at(span.start))), scheme.make(|_| Value::fixnum(char_at(span.end))));
+        let (a, b) = (scheme.make(|_| Value::fixnum(ra)), scheme.make(|_| Value::fixnum(rb)));
         let tag = scheme.make(|_| Value::fixnum(37));
         let one = scheme.call_global("%make-frozen", &[tag, a, b, ks]).map_err(|e| fail(e.to_string()))?;
         reshapes = scheme.call_global("cons", &[one, reshapes]).map_err(|e| fail(e.to_string()))?;
@@ -437,6 +468,7 @@ fn word_of(scheme: &mut Session, result: Handle) -> R<Result<Handle, String>> {
 /// caller's scope.
 fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    supply_loaded(scheme, file, text)?;
     let syns = read_to_syns(scheme, file, text)?;
     let result = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[syns]).map_err(|e| fail(e.to_string()))?;
     let (tag, err) = scheme.view(|v| {
@@ -459,6 +491,92 @@ fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         let payload = m.heap().bloblet_slot(r, 3);
         m.heap().bloblet_slot(payload, 2)
     }))
+}
+
+thread_local! {
+    /// Where a `load-module`'s relative path is from, for the pieces written
+    /// in FX-26: the program's directory, or none for the current one.
+    static LOAD_BASE: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Set where `load-module`'s relative paths are from (`Checker::base_dir`).
+pub fn set_load_base(dir: Option<std::path::PathBuf>) {
+    LOAD_BASE.with(|b| *b.borrow_mut() = dir);
+}
+
+/// The positions of one module file and the next apart, in the parser
+/// written in FX-26 (`parser-load.fx`'s `load-base`).
+const LOAD_BASE_STEP: i64 = 1_000_000_000;
+
+/// Each `(load-module "path")` in `forms`, in order: where it starts, and
+/// the path.
+fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, String)>) {
+    for f in forms {
+        let Some(items) = f.as_proper_list() else { continue };
+        if let [head, path] = items
+            && head.as_symbol().is_some_and(|h| interner.name(h) == "load-module")
+            && let Datum::Str(p) = &path.datum
+        {
+            out.push((f.span.start, p.to_string()));
+        }
+        load_modules_in(items, interner, out);
+    }
+}
+
+/// What FX-26 code cannot do itself, done for it, as a system call would:
+/// each file `text`'s `load-module`s name read, and read by the reader
+/// written in FX-26, then handed to the parser written in FX-26
+/// (`loaded-files!`): by where the form starts, the file's base (0 if it
+/// was not read), its path, why not, its forms and its text. A file read is
+/// a module's in order, as the Rust checker numbers them.
+fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let mut interner = Interner::new();
+    let Ok(forms) = fixpt_read::Reader::new(text, file, fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() else {
+        return Ok(());
+    };
+    let mut loads = Vec::new();
+    load_modules_in(&forms, &interner, &mut loads);
+    let offsets = byte_offsets(text);
+    let char_at = |byte: u32| offsets.partition_point(|&o| o < byte as usize) as i64;
+    let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
+    let mut list = scheme.make(|_| Value::NULL);
+    let mut read = 0;
+    for (start, path) in loads {
+        let at = match &base_dir {
+            Some(d) if std::path::Path::new(&path).is_relative() => d.join(&path),
+            _ => std::path::PathBuf::from(&path),
+        };
+        let (base, why, syns, ftext) = match std::fs::read_to_string(&at) {
+            Err(e) => (0, format!("cannot read `{path}`: {e}"), scheme.make(|_| Value::NULL), String::new()),
+            Ok(ftext) => match read_to_syns(scheme, FileId(1001 + read), &ftext) {
+                Err(e) => {
+                    let before = &ftext[..(e.span.start as usize).min(ftext.len())];
+                    let line = before.matches('\n').count() + 1;
+                    let col = before.chars().rev().take_while(|c| *c != '\n').count() + 1;
+                    (0, format!("in `{path}`, {line}:{col}: {}", e.message), scheme.make(|_| Value::NULL), ftext)
+                }
+                Ok(syns) => {
+                    read += 1;
+                    (LOAD_BASE_STEP * read as i64, String::new(), syns, ftext)
+                }
+            },
+        };
+        let string = |sc: &mut Session, t: &str| sc.make(|m| m.heap().string_from_chars(&t.chars().collect::<Vec<_>>()));
+        let fields = [
+            scheme.make(|_| Value::fixnum(37)),
+            scheme.make(|_| Value::fixnum(char_at(start))),
+            scheme.make(|_| Value::fixnum(base)),
+            string(scheme, &why),
+            string(scheme, &path),
+            syns,
+            string(scheme, &ftext),
+        ];
+        let one = scheme.call_global("%make-frozen", &fields).map_err(|e| fail(e.to_string()))?;
+        list = scheme.call_global("cons", &[one, list]).map_err(|e| fail(e.to_string()))?;
+    }
+    scheme.call_global(&format!("{READER_PREFIX}loaded-files!"), &[list]).map_err(|e| fail(e.to_string()))?;
+    Ok(())
 }
 
 /// The byte offset of each character, and of the end.

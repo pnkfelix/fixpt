@@ -411,12 +411,13 @@
 (define ev-reshapes (ref k-reshape-list @v) (new nil))
 ;; The positions a module reshaped from `a` to `b` keeps, in a list of one;
 ;; none if it is not reshaped.
+(define-type ev-at (listof k-ids @v))
 (define ev-reshape-in
-  (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (k-reshape-list int int) (listof k-ids @v))
+  (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (k-reshape-list int int) ev-at)
   (lambda (rs a b)
     (cond ((null? rs) nil)
           ((and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
-           (the (listof k-ids @v) (cons (extract (car rs) 3) nil)))
+           (the ev-at (cons (extract (car rs) 3) nil)))
           (else (ev-reshape-in (cdr rs) a b)))))
 (define nth-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
   (lambda (fs i)
@@ -649,7 +650,7 @@
           (v-product (reverse-fields vs nil))
           (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
             (cond
-              ((= k 1) (eval-module (cdr items) e vs))
+              ((or (= k 1) (< k 0) (> k 3)) (eval-module (cdr items) e vs))
               ((= k 0)
                (let* ((n (symbol->string (car ns)))
                       (up (extend (string->symbol (string-append "up-" n)) (eval (car xs) e) e))

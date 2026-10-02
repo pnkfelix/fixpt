@@ -329,6 +329,16 @@
             ((< v 0) (call '- (e-int 0 a b) (peel (- 0 v) nil)))
             (else (peel v nil))))))
 
+;; Whether `s` is a string literal; and the string it is.
+(define syn-string? (subr pure (syn) bool)
+  (lambda (s) (tagcase s (atom (d a b) (datum-string? d)) (else x #f))))
+(define syn-string (subr pure (syn) string)
+  (lambda (s)
+    (tagcase s (atom (d a b) (if (datum-string? d) (datum-string-value d) "")) (else x ""))))
+;; A `load-module`'s items, from the file it names, read where the form is
+;; (`parser-load.fx`, which sets this).
+(define parse-load-module (ref (subr (maxeff parses spin) (string int int) mod-items) @s)
+  (new (lambda (path a b) (the mod-items nil))))
 ;; `t` alone in a list.
 (define one-syn (subr (read @globals) (syn) syns-a) (lambda (t) (cons t nil)))
 ;; A module's item, of one name.
@@ -485,6 +495,15 @@
          (begin (arity items 4 "`(prompt tag body handler)`" a b)
                 (e-prompt (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b)))
         ((symbol=? head 'module) (e-module (parse-module-items (cdr items)) a b))
+        ;; `(load-module "file")`: the file's forms, a module's items
+        ;; (`parser-load.fx`).
+        ((symbol=? head 'load-module)
+         (begin (arity items 2 "`(load-module \"file\")`" a b)
+                (if (syn-string? (nth items 1))
+                    (e-module ((get parse-load-module) (syn-string (nth items 1)) a b) a b)
+                    (pfail (string-append "`(load-module \"file\")`: "
+                                          "the file's name, as a string")
+                           (nth items 1)))))
         ((symbol=? head 'with)
          (begin (at-least items 2 "`(with module body …)`" a b)
                 (if (syn-symbol? (nth items 1))

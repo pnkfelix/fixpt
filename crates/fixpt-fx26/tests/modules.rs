@@ -1,23 +1,19 @@
-//! First-class modules, stages M1 and M2
-//! (`docs/research/first-class-modules.md`): each program in
-//! `programs/modules` says on its first line what it gives, `;; => value`,
-//! or what its refusal says, `;; ! words`, lowered. Both checkers agree on
-//! each (`tests/checker.rs`, `every_test_program`).
+//! First-class modules (`docs/research/first-class-modules.md`, M1 to M7):
+//! each program in `programs/modules` says on its first line what it gives,
+//! `;; => value`, or what its refusal says, `;; ! words`, lowered. Both
+//! checkers agree on each (`tests/checker.rs`, `every_test_program`), and
+//! both compilers make the same words (`tests/rust_compiler.rs`).
 
 mod common;
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 
-/// The module programs: those both checkers have (`programs/modules`), and
-/// those only the Rust one has yet (`programs/modules-next`, M4 and M5,
-/// moved in as the checker written in FX-26 has them).
+/// The module programs (`programs/modules`), each of which both checkers
+/// agree on (`checker.rs`).
 fn programs() -> Vec<std::path::PathBuf> {
-    let mut names = Vec::new();
-    for dir in ["modules", "modules-next"] {
-        let dir = format!("{}/tests/programs/{dir}", env!("CARGO_MANIFEST_DIR"));
-        names.extend(std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()));
-    }
+    let dir = format!("{}/tests/programs/modules", env!("CARGO_MANIFEST_DIR"));
+    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
     names.sort();
     names
 }

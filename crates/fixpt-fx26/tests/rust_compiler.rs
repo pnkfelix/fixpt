@@ -19,9 +19,15 @@ thread_local! {
     static REGISTER_WORDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// Where a module program's `load-module` paths are from: its directory.
+fn modules_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/modules"))
+}
+
 /// The Rust checker's forms for `text`, and the checker, or why not.
 fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
     let mut c = Checker::new();
+    c.base_dir = Some(modules_dir());
     let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
     let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
     let mut tops = Vec::new();
@@ -43,6 +49,7 @@ fn compare(s: &mut Fx26Session, text: &str) -> Option<Result<(), String>> {
 /// made by both compilers' register compilers and compared too.
 fn compare_with(s: &mut Fx26Session, text: &str, registers: bool) -> Option<Result<(), String>> {
     let (c, tops) = checked(text).ok()?;
+    fixpt_fx26::syn::set_load_base(Some(modules_dir()));
     Some(s.scheme.scope(|sc| {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), text).map_err(|e| e.message)?;
         let theirs = if registers {

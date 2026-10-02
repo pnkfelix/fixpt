@@ -896,7 +896,7 @@
   (lambda (sp lbody)
     (the (listof string @k)
       (cons (string-append (symbol->string (extract sp 1))
-                           (string-append "@lambda@" (int->string (exp-start lbody))))
+                           (string-append "@lambda@" (c-place-name (exp-start lbody))))
             nil))))
 ;; A lambda's word, and the names it captures.
 (define-type rmade (productof (1 tword) (2 syms)))

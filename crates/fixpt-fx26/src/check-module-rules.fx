@@ -86,6 +86,7 @@
                (k (extract it 1))
                (next (cond
                        ((= k 0) (k-module-abs it a b made))
+                       ((or (< k 0) (> k 3)) made)
                        ((= k 1)
                         (let ((t (k-resolve-selects (car (extract it 4)) a b)))
                           (k-made-of (extract made 1)
@@ -108,7 +109,7 @@
                       a b))))))
 ;; `(module item …)`: each item checked in the scope of those before it;
 ;; the module's type, its abstract types bound in it.
-(define k-synth-module (subr (maxeff checks spin) (kx k-items int int) k-te)
+(define k-synth-module-here (subr (maxeff checks spin) (kx k-items int int) k-te)
   (lambda (x items a b)
     (let* ((saved (k-mark))
            (named (get k-skolems))
@@ -122,6 +123,18 @@
            (abs (k-parts-reversed (extract made 1) nil))
            (t (k-ty-new (ty-module abs (k-parts-reversed (extract made 2) nil) vs))))
       (k-te-masked x t (extract made 4)))))
+;; The same; a module read from a file (`load-module`, M7) seeing only the
+;; standard environment, what is wrong in it said where it is read.
+(define k-synth-module (subr (maxeff checks spin) (kx k-items int int) k-te)
+  (lambda (x items a b)
+    (let ((k (if (null? items) 0 (extract (car items) 1))))
+      (if (< k 4)
+          (k-synth-module-here x items a b)
+          (let ((got (the (ref k-te @t) (new (k-te 0 nil)))) (hid (get k-hide-mark)))
+            (begin (set k-hide-mark (k-mark))
+                   (k-in-loaded (lambda () (set got (k-synth-module-here x items a b))) k a b)
+                   (set k-hide-mark hid)
+                   (get got)))))))
 
 ;;; ------------------------------------------------------------ with
 
@@ -351,7 +364,7 @@
           (cond ((= k 0)
                  (let ((inner (k-sc-hide-names (k-conversions-onto (car ns) nil) sc)))
                    (k-sc-walk-items (cdr items) inner gs)))
-                ((= k 1) (k-sc-walk-items (cdr items) sc gs))
+                ((or (= k 1) (< k 0) (> k 3)) (k-sc-walk-items (cdr items) sc gs))
                 ((= k 2)
                  (begin (k-sc-walk-list (extract it 5) sc gs)
                         (k-sc-walk-items (cdr items) (k-sc-hide-names ns sc) gs)))

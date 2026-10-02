@@ -487,12 +487,26 @@
                          ((k-breaks? (car bs) s d) (the k-strings (cons (extract (car bs) 3) nil)))
                          (else (go (cdr bs)))))))
         (go (get k-broken))))))
+;; While a module read from a file is checked (`load-module`, M7): how many
+;; bindings there were as it began, of which it sees only the standard
+;; ones; -1 otherwise. And the standard description names.
+(define k-hide-mark (ref int @t) (new -1))
+(define k-std-dscope (ref k-scope @t) (new nil))
+;; How many of the newest `n` names bound, `ns`, are `s`.
+(define k-bound-since (subr (maxeff (read @globals) (read @t) spin) (k-names symbol int) int)
+  (lambda (ns s n)
+    (cond ((or (null? ns) (<= n 0)) 0)
+          ((symbol=? (car ns) s) (+ 1 (k-bound-since (cdr ns) s (- n 1))))
+          (else (k-bound-since (cdr ns) s (- n 1))))))
 ;; What `s` is where it is used: its innermost binding; none, if that is
-;; broken.
+;; broken. While a module read from a file is checked, a binding made
+;; before it began only if it is a standard one.
 (define k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s)
-    (let ((st (table-ref (get k-env) s nil)))
-      (if (or (null? st) (not (null? (k-broken-why s)))) -1 (car st)))))
+    (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
+      (cond ((or (null? st) (not (null? (k-broken-why s)))) -1)
+            ((or (< mark 0) (> (k-bound-since (get k-trail) s (- (get k-depth) mark)) 0)) (car st))
+            (else (k-find (get k-std) s))))))
 ;; The same, broken or not.
 (define k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))

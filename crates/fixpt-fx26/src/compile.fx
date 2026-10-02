@@ -166,6 +166,15 @@
 (define c-changed? (subr (maxeff (read @globals) (read @k)) (exp) bool)
   (lambda (x)
     (or (>= (c-conversion-at x) 0) (c-reshaped-in? (get c-reshapes) (exp-start x) (exp-end x)))))
+;; Where an expression starting at `at` is, as a word's name says it: the
+;; position; or, in a module's file (`load-module`, M7), `file:position`,
+;; the file numbered as the Rust checker numbers them.
+(define c-place-name (subr (read @globals) (int) string)
+  (lambda (at)
+    (if (< at load-base)
+        (int->string at)
+        (string-append (int->string (+ 1000 (quotient at load-base)))
+                       (string-append ":" (int->string (remainder at load-base)))))))
 ;; An abstract type `n`'s conversion, `prefix` `up-` or `down-`.
 (define c-converter (subr (read @globals) (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
@@ -563,7 +572,7 @@
           acc
           (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
             (cond
-              ((= k 1) (c-free-items (cdr items) bound acc))
+              ((or (= k 1) (< k 0) (> k 3)) (c-free-items (cdr items) bound acc))
               ((= k 0)
                (let* ((up (the syms (cons (c-converter "up-" (car ns)) bound)))
                       (o (c-free (car (cdr xs)) up (c-free (car xs) bound acc))))

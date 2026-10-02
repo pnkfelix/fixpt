@@ -113,7 +113,8 @@
 (define k-resolve-item (subr (maxeff checks spin) (mod-item) k-item)
   (lambda (it)
     (let ((k (extract it 1)) (ns (extract it 2)) (ts (extract it 3)) (xs (extract it 4)))
-      (cond ((= k 0)
+      (cond ((or (< k 0) (> k 3)) (k-item-of k ns -1 nil nil))
+            ((= k 0)
              (let* ((v (k-new-dvar-of (car ns) 2))
                     (pushed (k-push-desc (car ns) (ds-var v 2)))
                     (rep (k-parse-type (car ts))))
@@ -134,12 +135,38 @@
         nil
         (let* ((x (k-resolve-item (car items))) (rest (k-resolve-items (cdr items))))
           (cons x rest)))))
+;; Run `f`; an error it makes in the file read at `base` (`load-module`)
+;; said at `a`..`b`, with where in the file, as the Rust checker says it.
+(define-type k-thunk-unit (subr (maxeff checks spin) () unit))
+(define k-in-loaded (subr (maxeff checks spin) (k-thunk-unit int int int) unit)
+  (lambda (f base a b)
+    (let ((r (prompt k-tag (begin (f) (k-done (k-te 0 nil))) (lambda (r) r))))
+      (tagcase r
+        (k-err (m ea eb)
+          (if (and (>= ea base) (< ea (+ base load-base)))
+              (k-fail (in-loaded (get loaded) base m ea) a b)
+              (k-fail m ea eb)))
+        (else y #u)))))
+;; What a module's first item says of where it was read: from its file, at
+;; a base (> 3); not, and why (-1); or not from a file (0 to 3).
+(define k-items-kind (subr pure (mod-items) int)
+  (lambda (items) (if (null? items) 0 (extract (car items) 1))))
 ;; `(module item …)`: each item read in the scope of the descriptions
-;; before it.
+;; before it; read from a file, of the standard ones only.
 (define k-resolve-module-items (subr (maxeff checks spin) (mod-items int int) kx)
   (lambda (items a b)
-    (let* ((saved (get k-dscope)) (xs (k-resolve-items items)))
-      (begin (set k-dscope saved) (x-module xs a b)))))
+    (let ((k (k-items-kind items)) (saved (get k-dscope)))
+      (cond
+        ((< k 0) (k-fail (symbol->string (car (extract (car items) 2))) a b))
+        ((> k 3)
+         (let ((got (the (ref k-items @t) (new nil))))
+           (begin (set k-dscope (get k-std-dscope))
+                  (k-in-loaded (lambda () (set got (k-resolve-items items))) k a b)
+                  (set k-dscope saved)
+                  (x-module (get got) a b))))
+        (else
+         (let ((xs (k-resolve-items items)))
+           (begin (set k-dscope saved) (x-module xs a b))))))))
 (set k-resolve-module k-resolve-module-items)
 
 ;;; ------------------------------------------------------------ walking types

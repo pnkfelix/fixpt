@@ -901,7 +901,8 @@
 (define check-program (subr (maxeff (read @globals) checks spin) (syns-a k-tops) k-result)
   (lambda (standard forms)
     (prompt k-tag
-      (begin (k-reset) (k-standard standard) (k-ahead forms) (k-ok (k-forms forms nil)))
+      (begin (k-reset) (k-standard standard) (set k-std-dscope (get k-dscope))
+             (k-ahead forms) (k-ok (k-forms forms nil)))
       (lambda (r) r))))
 
 ;; The entry point for more of a program, form by form, as the REPL gives
