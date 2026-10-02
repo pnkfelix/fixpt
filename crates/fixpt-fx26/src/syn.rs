@@ -145,6 +145,9 @@ pub fn compile_with_fx26_compiler_showing(
         }
         let no_args = s.make(|_| Value::NULL);
         s.runtime_unrooted().word_fuel = steps.unwrap_or(u64::MAX);
+        if let Err(why) = assemble_by_fx26(s, word) {
+            return Ok((format!("!! native.fx: {why}"), words));
+        }
         let start = std::time::Instant::now();
         let run = s.call_global("%run-word", &[word, no_args]);
         s.runtime_unrooted().run_nanos += start.elapsed().as_nanos() as u64;
@@ -160,6 +163,73 @@ pub fn compile_with_fx26_compiler_showing(
             }
         }
     })
+}
+
+/// When the runtime places code made elsewhere (its `place_code`): every
+/// word made of cells that `word` reaches through its cells and operands,
+/// compiled to machine code by the compiler written in FX-26 (`native.fx`'s
+/// `native-assemble`) and placed, as `fixpt_native`'s `compile_reachable`
+/// does with the compiler written in Rust. The time is compiling's.
+fn assemble_by_fx26(s: &mut Session, word: Handle) -> Result<(), String> {
+    use fixpt_heap::layout::cellular::{CLOSURE_WORD, ROUTINE_DOCOL, WORD_CELL0, WORD_ENTRY};
+    let Some(place) = s.runtime_unrooted().place_code else { return Ok(()) };
+    let start = std::time::Instant::now();
+    // Found where nothing can collect, then rooted: running the compiler
+    // may collect.
+    let mut found = Vec::new();
+    s.make(|m| {
+        let first = m.get(word);
+        let heap = m.heap();
+        let closure = fixpt_heap::layout::kind("cellular-closure");
+        let (mut todo, mut seen) = (vec![first], std::collections::HashSet::new());
+        while let Some(w) = todo.pop() {
+            if !seen.insert(w.raw()) {
+                continue;
+            }
+            let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum() as u64;
+            if entry != ROUTINE_DOCOL && entry < fixpt_heap::layout::cellular::PRIMITIVES as u64 {
+                continue;
+            }
+            for k in WORD_CELL0..=heap.bloblet_head(w).fields {
+                let v = heap.bloblet_slot(w, k);
+                if heap.is_cellular_word(v) {
+                    todo.push(v);
+                } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
+                    todo.push(heap.bloblet_slot(v, CLOSURE_WORD));
+                }
+            }
+            if entry == ROUTINE_DOCOL {
+                found.push(w);
+            }
+        }
+        Value::NULL
+    });
+    let words: Vec<Handle> = found.into_iter().map(|w| s.make(|_| w)).collect();
+    // The code reaches the machine's common trap and exit through the
+    // state, so where it goes does not change it.
+    let far = s.make(|_| Value::fixnum(0));
+    for w in words {
+        let assembled = s.call_global(&format!("{READER_PREFIX}native-assemble"), &[w, far, far]);
+        let assembled = assembled.map_err(|e| e.to_string())?;
+        let (code, starts) = s.view(|v| {
+            let r = v.get(assembled);
+            let ints = |l: Option<Local>| -> Vec<i64> {
+                let l = l.and_then(|l| l.list()).unwrap_or_default();
+                l.iter().filter_map(|x| x.fixnum()).collect()
+            };
+            (ints(r.field(2)), ints(r.field(3)))
+        });
+        let code: Vec<u32> = code.into_iter().map(|x| x as u32).collect();
+        let mut placed = Ok(());
+        s.make(|m| {
+            let w = m.get(w);
+            placed = place(m.heap(), w, &code, &starts);
+            Value::NULL
+        });
+        placed?;
+    }
+    s.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
+    Ok(())
 }
 
 /// Check, compile and run `text`, a program whose last form names a global,
@@ -189,6 +259,7 @@ pub fn with_last_value<T>(
             Ok(w) => w,
             Err(m) => return Ok(Err(format!("compile: {m}"))),
         };
+        assemble_by_fx26(s, word).map_err(|why| fail(format!("native.fx: {why}")))?;
         let no_args = s.make(|_| Value::NULL);
         let v = match s.call_global("%run-word", &[word, no_args]) {
             Ok(v) => v,

@@ -36,6 +36,11 @@ pub struct Runtime {
     /// (`Fx26Session::front_end_as_register_code`): a machine that runs
     /// register code, whatever machine runs the program; `run_word` if none.
     pub front_end_run_word: Option<RunWord>,
+    /// How a word's machine code, made by the compiler written in FX-26
+    /// (`native.fx`), is placed in the native machine that `run_word` runs
+    /// on (`fixpt-native` installs it). None: that machine, if it compiles,
+    /// makes its own, with the compiler written in Rust.
+    pub place_code: Option<PlaceCode>,
     /// How that machine shows a word's machine code, or what stands for it
     /// (`,disassemble-asm`); none for a machine that has none.
     pub machine_code: Option<MachineCode>,
@@ -68,6 +73,11 @@ pub struct Runtime {
 /// Run cellular word `word` with `args` on its data stack; its value, or
 /// why it stopped.
 pub type RunWord = fn(&mut Runtime, Value, &[Value]) -> Result<Value, String>;
+
+/// Place `code`, a word's machine code, in a machine's code space, and make
+/// the word's entry name it; `starts[i]` is where cell `i`'s code starts,
+/// in instructions, or -1.
+pub type PlaceCode = fn(&mut Heap, Value, &[u32], &[i64]) -> Result<(), String>;
 
 /// Call native closure `closure` with `args`: its value, or how it left.
 /// Every value the caller holds must be rooted, since the call may collect.
@@ -131,6 +141,7 @@ impl Runtime {
             error_rtd_root,
             run_word: None,
             front_end_run_word: None,
+            place_code: None,
             machine_code: None,
             show_machine_code: false,
             native_code: None,
@@ -217,6 +228,7 @@ impl Runtime {
             error_rtd_root: ERROR_RTD_ROOT,
             run_word: None,
             front_end_run_word: None,
+            place_code: None,
             machine_code: None,
             show_machine_code: false,
             native_code: None,

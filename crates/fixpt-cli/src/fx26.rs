@@ -80,6 +80,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         s.scheme.runtime_unrooted().run_word = Some(*m);
     }
     s.scheme.runtime_unrooted().machine_code = crate::CELLULAR_MACHINE_CODE.get().copied().flatten();
+    s.scheme.runtime_unrooted().place_code = crate::CELLULAR_PLACE_CODE.get().copied().flatten();
     s.register_code = crate::CELLULAR_MACHINE_NAME.get().is_some_and(|n| n.contains("register code"));
     s.redefine = Some(ask_redefine);
     if crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) {
@@ -270,7 +271,7 @@ pub fn repl(backend: Backend) -> i32 {
             if crate::CELLULAR_MACHINE_CODE.get().copied().flatten().is_none() {
                 println!("; {name} interprets the cells: it has no machine code for a word to show.");
                 if name.contains("hand-encoded") {
-                    println!(";   `--cellular-machine native-compiled`, or `registers`, compiles each word.");
+                    println!(";   `--cellular-machine native-compiled`, `fx-compiled` or `registers` compiles each word.");
                 }
             }
         }

@@ -1844,6 +1844,17 @@ pub fn with_machine<R>(f: impl FnOnce(&mut NativeMachine) -> R) -> R {
     MACHINE.with(|m| f(m.borrow_mut().get_or_insert_with(NativeMachine::new)))
 }
 
+/// Place `code`, a word's machine code made elsewhere (by the compiler
+/// written in FX-26, `native.fx`), in the machine [`run_word`] uses on
+/// this thread: the runtime's `place_code`. The code reaches the machine's
+/// common trap and exit through the state, so it may go anywhere.
+pub fn place_word(heap: &mut Heap, word: Value, code: &[u32], starts: &[i64]) -> Result<(), String> {
+    with_machine(|m| {
+        let (at, _) = m.reserve(code.len())?;
+        m.install(heap, word, at, code, starts)
+    })
+}
+
 /// [`run_word`], always compiling what it runs: for `%run-word`'s hook.
 pub fn run_word_compiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
     run_word_as(rt, word, args, true)

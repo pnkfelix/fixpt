@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-09-30)
+## At a glance (kept current; last updated 2026-10-02)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -16,6 +16,12 @@ are in the last section, "Log: the glance's details", and in
   compiler written in FX-26, bootstrapped to a fixpoint, on
   cellular[^cellular] machines in Rust and arm64. The Rust versions stay
   as oracles: both checkers, and both compilers, must agree.
+- **FX all the way down** (2026-10-02; README, "Which compiler makes the
+  machine code"): `--cellular-machine fx-compiled` makes the REPL's words
+  arm64 with `native.fx` in place of the Rust `assemble_word`, which stays
+  as its oracle and for comparison; only placing the code, and the
+  runtime, are Rust. Retiring `native-compiled` (step 6, below) would
+  retire this with it, or keep the cells' assembler for it.
 - **FX-26's type system** (2026-09-27; `docs/fx26.md`): places and regions,
   `letfreeze`; `acyclic` data (named `finite` until 2026-09-28,
   `docs/research/acyclic-regions.md`); `spin` with size-change

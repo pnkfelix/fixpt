@@ -1,7 +1,8 @@
 //! First-class modules run the same way in every run mode
 //! (`docs/research/first-class-modules.md`): lowered (the default), by the
 //! evaluator written in FX-26, and compiled by the compiler written in FX-26
-//! to cellular words run on each cellular machine, with each calling
+//! to cellular words run on each cellular machine (compiled to machine code
+//! by the compiler written in Rust, or by `native.fx`), with each calling
 //! convention. Each program, given whole to `fixpt eval` and typed form by
 //! form at the REPL, gives the lowered answer its first line says.
 
@@ -17,12 +18,13 @@ const PROGRAMS: [&str; 4] = ["load", "functor-max", "width", "region-parameter"]
 const AT_THE_REPL: [&str; 2] = ["load", "functor-max"];
 
 /// Each run mode, as options.
-const MODES: [&[&str]; 9] = [
+const MODES: [&[&str]; 10] = [
     &[],
     &["--fx26-run", "evaluate"],
     &["--fx26-run", "cellular"],
     &["--fx26-run", "cellular", "--cellular-machine", "native"],
     &["--fx26-run", "cellular", "--cellular-machine", "native-compiled"],
+    &["--fx26-run", "cellular", "--cellular-machine", "fx-compiled"],
     &["--fx26-run", "cellular", "--cellular-machine", "registers"],
     &["--fx26-run", "cellular", "--cellular-machine", "stencils"],
     &["--fx26-run", "cellular", "--calling-convention", "native"],
