@@ -49,9 +49,12 @@ impl Checker {
             match item.clone() {
                 // Its representation seen only through its own conversions,
                 // which stay inside the module.
-                ModItem::Abs { name, var, rep, up, down } => {
+                ModItem::Abs { name, var, rep, up, down, up_fn, down_fn } => {
                     let rep = self.resolve_selects(rep, span)?;
                     let t = self.arena.ty(Ty::Var(var));
+                    let identity = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![rep], result: rep });
+                    self.check(up_fn, identity)?;
+                    self.check(down_fn, identity)?;
                     let up_t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![rep], result: t });
                     let down_t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![t], result: rep });
                     self.env.push((up, up_t));

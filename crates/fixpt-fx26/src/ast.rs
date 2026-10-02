@@ -423,8 +423,10 @@ pub enum Exp {
 #[derive(Clone, Debug)]
 pub enum ModItem {
     /// `(define-generative t rep)`: an abstract type, `var` in the module
-    /// and a binder of its type; `up-t` and `down-t`, the module's own.
-    Abs { name: Sym, var: DVar, rep: TyId, up: Sym, down: Sym },
+    /// and a binder of its type; `up-t` and `down-t`, the module's own,
+    /// each made by `(lambda (x) x)` (`up_fn`, `down_fn`, spanning the
+    /// form), checked as the identity on `rep` and bound at `t`.
+    Abs { name: Sym, var: DVar, rep: TyId, up: Sym, down: Sym, up_fn: ExpId, down_fn: ExpId },
     /// `(define-type d T)`: a transparent description.
     Desc { name: Sym, ty: TyId },
     /// `(define x e)` or `(define x T e)`: a value.

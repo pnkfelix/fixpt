@@ -1495,7 +1495,14 @@ impl Checker {
                     self.dscope.push((name, DScope::Var(var, Kind::Type)));
                     let rep = self.parse_type(rep)?;
                     let (up, down) = (self.interner.intern(&format!("up-{text}")), self.interner.intern(&format!("down-{text}")));
-                    out.push(ModItem::Abs { name, var, rep, up, down });
+                    // Each conversion the identity, made as a closure is.
+                    let x = self.interner.intern("x");
+                    let identity = |p: &mut Self| {
+                        let body = p.arena.exp(f.span, Exp::Var(x));
+                        p.arena.exp(f.span, Exp::Lambda { params: vec![(x, None)], body })
+                    };
+                    let (up_fn, down_fn) = (identity(self), identity(self));
+                    out.push(ModItem::Abs { name, var, rep, up, down, up_fn, down_fn });
                 }
                 (Some("define-type"), [_, n, t]) => {
                     let (name, _) = name_of(self, n)?;
