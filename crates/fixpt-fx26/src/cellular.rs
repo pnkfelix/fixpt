@@ -861,8 +861,14 @@ impl<'a> Compiler<'a> {
         self.this = outer;
         compiled?;
         // Named for where its body starts, so that a profile can say which.
-        let start = self.char_at[self.c.arena.span_of(body).start as usize];
-        let name = named.unwrap_or_else(|| format!("lambda@{start}"));
+        // (A body read from another file, a module's, `load-module`: named
+        // for that file and where in it.)
+        let span = self.c.arena.span_of(body);
+        let start = self.char_at.get(span.start as usize).copied().filter(|_| span.file.0 == 0).unwrap_or(u32::MAX);
+        let name = named.unwrap_or_else(|| match self.char_at.get(span.start as usize) {
+            Some(start) if span.file.0 == 0 => format!("lambda@{start}"),
+            _ => format!("lambda@{}:{}", span.file.0, span.start),
+        });
         let w = self.assemble(&body_code, &name)?;
         // For bisecting a fault: with `FIXPT_REG_RANGE=lo-hi,…`, only the
         // lambdas whose bodies start in those character ranges get register

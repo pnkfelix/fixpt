@@ -30,6 +30,8 @@ fn module_programs_do_as_they_say() {
         let text = std::fs::read_to_string(&path).unwrap();
         let first = text.lines().next().unwrap_or("");
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        // A `load-module`'s path is from the program's directory.
+        s.checker.base_dir = path.parent().map(|d| d.to_path_buf());
         let got = match s.run_program(&text) {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => Err(e.to_string()),
@@ -58,8 +60,9 @@ fn the_rust_compiler_runs_modules_as_lowered() {
     use fixpt_fx26::{Checker, Top};
     use fixpt_heap::Value;
     use fixpt_read::FileId;
-    let checked = |text: &str| -> Result<(Checker, Vec<Top>), String> {
+    let checked = |text: &str, dir: Option<std::path::PathBuf>| -> Result<(Checker, Vec<Top>), String> {
         let mut c = Checker::new();
+        c.base_dir = dir;
         let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
         let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
         let mut tops = Vec::new();
@@ -74,8 +77,10 @@ fn the_rust_compiler_runs_modules_as_lowered() {
     let (mut wrong, mut ran) = (Vec::new(), 0);
     for path in names {
         let text = std::fs::read_to_string(&path).unwrap();
-        let Ok((c, tops)) = checked(&text) else { continue };
+        let dir = path.parent().map(|d| d.to_path_buf());
+        let Ok((c, tops)) = checked(&text, dir.clone()) else { continue };
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.checker.base_dir = dir;
         let Ok(Ok(lowered)) = s.run_program(&text) else { continue };
         // Its cellular words on the machine written in Rust; and its
         // register code too, on the hand-encoded machine.

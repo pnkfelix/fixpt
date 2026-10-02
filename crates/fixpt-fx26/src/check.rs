@@ -156,6 +156,18 @@ pub struct Checker {
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
     pub(crate) standard_len: usize,
+    /// How many description names the standard environment has.
+    pub(crate) standard_dscope: usize,
+    /// While a module read from a file is checked (`load-module`, M7): the
+    /// bindings, and the description names, past the standard ones and
+    /// before it, which it may not see.
+    pub(crate) hidden: Option<((usize, usize), (usize, usize))>,
+    /// Modules read from files: each one's path and text, and the file id
+    /// its spans have.
+    pub(crate) loaded: HashMap<ExpId, (String, String, fixpt_read::FileId)>,
+    /// Where a `load-module`'s relative path is from: the program's own
+    /// directory, when it was read from a file; else the current one.
+    pub base_dir: Option<std::path::PathBuf>,
     /// While a program's types are declared ahead (`declare_ahead`), each
     /// abbreviation's slot, made before any is read so that they may name
     /// each other in any order; and those filled, to check once all are.
@@ -352,6 +364,10 @@ impl Checker {
             conv_default: conv,
             fresh_regions: 0,
             standard_len: 0,
+            standard_dscope: 0,
+            hidden: None,
+            loaded: HashMap::new(),
+            base_dir: None,
             ahead: Vec::new(),
             ahead_filled: Vec::new(),
             facts: NodeFacts::default(),
@@ -374,6 +390,7 @@ impl Checker {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
         }
         c.standard_len = c.env.len();
+        c.standard_dscope = c.dscope.len();
         c
     }
 
@@ -437,7 +454,8 @@ impl Checker {
     /// What `s` is where it is used: its innermost binding; nothing, if that
     /// is a global broken by a redefinition (`broken`).
     pub(crate) fn lookup(&self, s: Sym) -> Option<TyId> {
-        let i = self.env.iter().rposition(|(n, _)| *n == s)?;
+        let hidden = self.hidden.map(|(e, _)| e);
+        let i = (0..self.env.len()).rev().find(|i| self.env[*i].0 == s && !hidden.is_some_and(|(a, b)| (a..b).contains(i)))?;
         if self.broken.get(&s).is_some_and(|(b, _)| *b == i) {
             return None;
         }

@@ -72,7 +72,11 @@ impl Checker {
     }
 
     fn lookup_desc(&self, s: Sym) -> Option<DScope> {
-        self.dscope.iter().rev().find(|(n, _)| *n == s).map(|(_, d)| d.clone())
+        let hidden = self.hidden.map(|(_, d)| d);
+        (0..self.dscope.len())
+            .rev()
+            .find(|i| self.dscope[*i].0 == s && !hidden.is_some_and(|(a, b)| (a..b).contains(i)))
+            .map(|i| self.dscope[i].1.clone())
     }
 
     fn items<'s>(&self, s: &'s Syntax, what: &str) -> R<&'s [Syntax]> {
@@ -1300,6 +1304,17 @@ impl Checker {
                 self.parse_bloblet(span, &name, &items[1..])
             }
             "module" => self.parse_module(span, &items[1..]),
+            // `(load-module "file")`: the file's forms, a module's items,
+            // seeing only the standard environment (M7).
+            "load-module" => {
+                let [_, path] = &items[..] else {
+                    return Err(FxError::at(span, "`(load-module \"file\")`"));
+                };
+                let Datum::Str(path) = &path.datum else {
+                    return Err(FxError::at(path.span, "`(load-module \"file\")`: the file's name, as a string"));
+                };
+                self.parse_load_module(span, path)
+            }
             "with" => {
                 let [_, m, body @ ..] = &items[..] else {
                     return Err(FxError::at(span, "`(with module body …)`"));
@@ -1519,6 +1534,44 @@ impl Checker {
         }
         let _ = span;
         Ok(self.arena.ty(Ty::Module { abs, descs, vals }))
+    }
+
+    /// `(load-module "path")`: the file read, its forms a module's items,
+    /// parsed seeing only the standard description names; recorded, so
+    /// that checking it sees only the standard values too.
+    fn parse_load_module(&mut self, span: fixpt_read::Span, path: &str) -> R<ExpId> {
+        let at = match &self.base_dir {
+            Some(d) if std::path::Path::new(path).is_relative() => d.join(path),
+            _ => std::path::PathBuf::from(path),
+        };
+        let text = std::fs::read_to_string(&at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?;
+        let file = fixpt_read::FileId(1 + self.loaded.len() as u32 + 1000);
+        let at_file = |e: FxError, c: &Self| c.in_loaded(e, span, path, &text, file);
+        let forms = match self.read_module_file(file, &text) {
+            Ok(f) => f,
+            Err(e) => return Err(at_file(e, self)),
+        };
+        let (depth, standard) = (self.dscope.len(), self.standard_dscope);
+        let outer = self.hidden.replace(((0, 0), (standard, depth)));
+        let r = self.parse_module_in(&forms);
+        self.dscope.truncate(depth);
+        self.hidden = outer;
+        let items = r.map_err(|e| at_file(e, self))?;
+        let e = self.arena.exp(span, Exp::Module(items));
+        self.loaded.insert(e, (path.to_string(), text.clone(), file));
+        Ok(e)
+    }
+
+    /// An error in a module's file, said at the `load-module` that reads it,
+    /// with where in the file.
+    pub(crate) fn in_loaded(&self, e: FxError, span: fixpt_read::Span, path: &str, text: &str, file: fixpt_read::FileId) -> FxError {
+        if e.span.file != file {
+            return e;
+        }
+        let before = &text[..(e.span.start as usize).min(text.len())];
+        let line = before.matches('\n').count() + 1;
+        let col = before.chars().rev().take_while(|c| *c != '\n').count() + 1;
+        FxError::at(span, format!("in `{path}`, {line}:{col}: {}", e.message))
     }
 
     /// A `module`'s items, in order, each seeing those before it:

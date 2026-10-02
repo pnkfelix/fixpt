@@ -593,6 +593,8 @@ pub fn eval_program(backend: Backend, name: &str, text: &str) -> i32 {
     // `FIXPT_GC_SUMMARY` (or its older name, `FIXPT_GC_REPORT`): what the
     // heap did while the program ran, at its end.
     let report = std::env::var_os("FIXPT_GC_SUMMARY").is_some() || std::env::var_os("FIXPT_GC_REPORT").is_some();
+    // A `load-module`'s relative path is from the program's directory.
+    session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
     let before = GcStats::of(&mut session);
     let code = eval_program_in(&mut session, name, text);
     if report {

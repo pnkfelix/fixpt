@@ -274,6 +274,20 @@ impl Checker {
         self.expand_forms(forms)
     }
 
+    /// A module's file (`load-module`) read: its `define-datatype`s
+    /// expanded, its `define-generative`s left as they are, a module's own.
+    pub(crate) fn read_module_file(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
+        let mut interner = std::mem::take(&mut self.interner);
+        let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
+        self.interner = interner;
+        let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+        let mut out = Vec::new();
+        for f in forms {
+            self.expand_datatype(f, &mut out)?;
+        }
+        Ok(out)
+    }
+
     /// What is expanded as it is read (`define-datatype`), for forms read
     /// some other way: by the reader written in FX-26 (`crate::syn`).
     pub fn expand_forms(&mut self, forms: Vec<Syntax>) -> R<Vec<Syntax>> {
@@ -1084,7 +1098,7 @@ pub const KEYWORDS: &[&str] = &[
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
-    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select",
+    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet",
 ];

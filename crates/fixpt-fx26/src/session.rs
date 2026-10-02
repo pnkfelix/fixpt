@@ -110,7 +110,7 @@ pub enum Speculation {
 /// Whether `s` has a `module`, `moduleof`, `with` or `select` form in it.
 fn mentions_modules(s: &Syntax, interner: &fixpt_read::Interner) -> bool {
     let Some(items) = s.as_proper_list() else { return false };
-    items.first().and_then(|h| h.as_symbol()).is_some_and(|h| matches!(interner.name(h), "module" | "moduleof" | "with" | "select"))
+    items.first().and_then(|h| h.as_symbol()).is_some_and(|h| matches!(interner.name(h), "module" | "moduleof" | "with" | "select" | "load-module"))
         || items.iter().any(|i| mentions_modules(i, interner))
 }
 
