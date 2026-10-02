@@ -68,13 +68,15 @@ pub const NATIVE: &str = include_str!("native.fx");
 
 /// The checker written in FX-26, over the parser's trees, in files of its
 /// parts, in order: types and effects, printing, reading descriptions,
-/// resolving them, subtyping, instantiation, termination, the rules, and
-/// programs.
-pub const CHECKER_FILES: [(&str, &str); 12] = [
+/// resolving them, errors, modules' descriptions, subtyping, instantiation,
+/// termination, the rules, modules' rules, and programs.
+pub const CHECKER_FILES: [(&str, &str); 15] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-print.fx", include_str!("check-print.fx")),
     ("check-syntax.fx", include_str!("check-syntax.fx")),
     ("check-resolve.fx", include_str!("check-resolve.fx")),
+    ("check-errors.fx", include_str!("check-errors.fx")),
+    ("check-modules.fx", include_str!("check-modules.fx")),
     ("check-subtype.fx", include_str!("check-subtype.fx")),
     ("check-data.fx", include_str!("check-data.fx")),
     ("check-infer.fx", include_str!("check-infer.fx")),
@@ -82,6 +84,7 @@ pub const CHECKER_FILES: [(&str, &str); 12] = [
     ("check-letrec.fx", include_str!("check-letrec.fx")),
     ("check-facts.fx", include_str!("check-facts.fx")),
     ("check-synth.fx", include_str!("check-synth.fx")),
+    ("check-module-rules.fx", include_str!("check-module-rules.fx")),
     ("check-program.fx", include_str!("check-program.fx")),
 ];
 
@@ -94,7 +97,7 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 29] = [
+pub const FRONT_END_FILES: [(&str, &str); 32] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("table.fx", TABLE),
@@ -110,6 +113,9 @@ pub const FRONT_END_FILES: [(&str, &str); 29] = [
     CHECKER_FILES[9],
     CHECKER_FILES[10],
     CHECKER_FILES[11],
+    CHECKER_FILES[12],
+    CHECKER_FILES[13],
+    CHECKER_FILES[14],
     ("evaluator.fx", EVALUATOR),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),

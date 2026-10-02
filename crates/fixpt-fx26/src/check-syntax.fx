@@ -465,6 +465,12 @@
 (define k-ds-applied? (subr pure (k-ds) bool)
   (lambda (d) (tagcase d (ds-abbrev (ps body) #t) (ds-gen (g) #t) (else x #f))))
 
+;; `(moduleof …)` and `(select m t)`, read by `check-modules.fx`, which sets this.
+(define k-module-type-head? (subr pure (symbol) bool)
+  (lambda (hd) (or (symbol=? hd 'moduleof) (symbol=? hd 'select))))
+(define k-parse-module-type (ref (subr (maxeff checks spin) (syn k-syns symbol) int) @t)
+  (new (lambda (s items hd) (k-sfail "expected a type" s))))
+
 (define-rec
   (k-parse-types (subr (maxeff checks spin) (k-syns) k-ids)
     (lambda (xs)
@@ -697,6 +703,7 @@
                    (let* ((fs (k-parse-types (cdr parts))) (r (k-parse-region (k-nth items 2))))
                      (k-ty-new (ty-bloblet fs (string=? which "frozen") r)))
                    (k-sfail "`(fields type …)` or `(frozen type …)`" fields)))))
+          ((k-module-type-head? hd) ((get k-parse-module-type) s items hd))
           ((symbol=? hd 'productof) (k-ty-new (ty-product (k-parse-parts (cdr items) nil))))
           ((symbol=? hd 'sumof) (k-ty-new (ty-sum (k-parse-parts (cdr items) nil))))
           ((symbol=? hd 'arrayof)

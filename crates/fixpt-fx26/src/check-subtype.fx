@@ -172,6 +172,11 @@
 ;; Each lemma that fits a pair of types: its hypotheses, instantiated.
 (define-type k-instances (listof k-hyps acyclic))
 
+;; Modules' types compared, by `check-module-rules.fx`, which sets this.
+(define-type k-sub-rule
+  (subr (maxeff kstate spin) (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool))
+(define k-sub-module (ref k-sub-rule @t) (new (lambda (a b ta tb ea eb trail labels) #f)))
+
 (define-rec
   (k-subs-contra (subr (maxeff kstate spin) (k-ids k-ids k-benv k-benv k-strail k-labels) bool)
     (lambda (xs ys ea eb trail labels)
@@ -492,6 +497,7 @@
                 (ty-named (h ys)
                   (and (= g h) (k-sub-descs xs ys (extract (k-gen-of g) 3) ea eb trail labels)))
                 (else z #f)))
+            (ty-module (abs ds vs) ((get k-sub-module) a b ta tb ea eb trail labels))
             (else z #f)))))
   ;; Generative type arguments `xs ≤ ys`, each as its variance in `vs` says.
   (k-sub-descs (subr (maxeff kstate spin)
@@ -658,10 +664,11 @@
     (if (null? bs) #u (begin (k-bind (car (car bs)) (cdr (car bs))) (k-bind-all (cdr bs))))))
 ;; `t` for a variable being bound to it: a `nat` of no known size is given
 ;; one, a variable of its own named after the variable, so that tests of it
-;; can teach facts.
+;; can teach facts; and a module's abstract types are named too.
 (define k-name-nat (subr (maxeff kstate spin) (symbol int) int)
   (lambda (name t)
     (tagcase (k-get (k-resolve t))
+      (ty-module (abs ds vs) (k-name-module name t))
       (ty-nat (z)
         (tagcase z
           (sz-finite ()
@@ -895,7 +902,9 @@
         (x-if (p c d a b) (and (k-only-called? p k) (k-only-called? c k) (k-only-called? d k)))
         (x-begin (xs a b) (k-only-called-list? xs k))
         (x-bloblet (o i xs a b) (k-only-called-list? xs k))
-        (x-product (fs a b) (k-only-called-lets? fs k)))))
+        (x-product (fs a b) (k-only-called-lets? fs k))
+        (x-module (items a b) (not (k-has-name? (k-free-vars x) k)))
+        (x-with (m body a b) (not (k-has-name? (k-free-vars x) k))))))
   (k-only-called-list? (subr kmakes (kxs symbol) bool)
     (lambda (xs k)
       (or (null? xs) (and (k-only-called? (car xs) k) (k-only-called-list? (cdr xs) k)))))

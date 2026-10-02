@@ -32,7 +32,8 @@
       (x-let (bs e a b) a) (x-begin (xs a b) a) (x-prompt (t e h a b) a) (x-the (t e a b) a)
       (x-convention (c e a b) a) (x-bloblet (o i xs a b) a) (x-product (fs a b) a)
       (x-extract (e l a b) a) (x-sum (l e a b) a) (x-tagcase (e arms els a b) a)
-      (x-letregion (k r i e a b) a) (x-rlambda (r l a b) a))))
+      (x-letregion (k r i e a b) a) (x-rlambda (r l a b) a)
+      (x-module (items a b) a) (x-with (m e a b) a))))
 (define k-end (subr pure (kx) int)
   (lambda (x)
     (tagcase x
@@ -41,7 +42,8 @@
       (x-let (bs e a b) b) (x-begin (xs a b) b) (x-prompt (t e h a b) b) (x-the (t e a b) b)
       (x-convention (c e a b) b) (x-bloblet (o i xs a b) b) (x-product (fs a b) b)
       (x-extract (e l a b) b) (x-sum (l e a b) b) (x-tagcase (e arms els a b) b)
-      (x-letregion (k r i e a b) b) (x-rlambda (r l a b) b))))
+      (x-letregion (k r i e a b) b) (x-rlambda (r l a b) b)
+      (x-module (items a b) b) (x-with (m e a b) b))))
 (define k-same-span? (subr (read @globals) (kx int int) bool)
   (lambda (x a b) (and (= (k-start x) a) (= (k-end x) b))))
 
@@ -73,7 +75,8 @@
       (e-let (bs x a b) a) (e-begin (xs a b) a) (e-prompt (t x h a b) a) (e-the (t x a b) a)
       (e-convention (c x a b) a) (e-bloblet (o i xs a b) a) (e-product (fs a b) a)
       (e-extract (x l a b) a) (e-sum (l x a b) a) (e-tagcase (x arms els a b) a)
-      (e-letregion (k r i x a b) a) (e-rlambda (r l a b) a))))
+      (e-letregion (k r i x a b) a) (e-rlambda (r l a b) a)
+      (e-module (items a b) a) (e-with (m x a b) a))))
 (define exp-end (subr pure (exp) int)
   (lambda (e)
     (tagcase e
@@ -84,7 +87,8 @@
       (e-let (bs x a b) b) (e-begin (xs a b) b) (e-prompt (t x h a b) b) (e-the (t x a b) b)
       (e-convention (c x a b) b) (e-bloblet (o i xs a b) b) (e-product (fs a b) b)
       (e-extract (x l a b) b) (e-sum (l x a b) b) (e-tagcase (x arms els a b) b)
-      (e-letregion (k r i x a b) b) (e-rlambda (r l a b) b))))
+      (e-letregion (k r i x a b) b) (e-rlambda (r l a b) b)
+      (e-module (items a b) b) (e-with (m x a b) b))))
 
 ;; A `plambda`'s region and place binders: each won't outlive what is bound
 ;; around it (`lives`), and each is around what its body binds.
@@ -121,6 +125,10 @@
 ;; won't.
 (define k-place-lives (subr kmakes (k-region) k-ids)
   (lambda (place) (tagcase place (r-var (p) (cons p (k-outer-of p))) (else y nil))))
+
+;; A `module`'s items read, by `check-modules.fx`, which sets this.
+(define k-resolve-module (ref (subr (maxeff checks spin) (mod-items int int) kx) @t)
+  (new (lambda (items a b) (k-fail "a module" a b))))
 
 (define-rec
   (k-resolve-all (subr (maxeff checks spin) ((listof exp acyclic)) kxs)
@@ -199,7 +207,9 @@
           (let* ((sx (k-resolve-exp s))
                  (rarms (k-resolve-arms arms nil))
                  (rels (k-resolve-let els)))
-            (x-tagcase sx rarms rels a b))))))
+            (x-tagcase sx rarms rels a b)))
+        (e-module (items a b) ((get k-resolve-module) items a b))
+        (e-with (m body a b) (x-with m (k-resolve-exp body) a b)))))
   (k-resolve-letrec (subr (maxeff checks spin) (exp-letrec-bs) k-letrec-bs)
     (lambda (bs)
       (if (null? bs)
@@ -362,6 +372,7 @@
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil)
       (set k-conversions nil) (k-reset-facts)
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
+      (set k-with-vals nil) (set k-module-vars nil) (set k-select-map nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       ;; 10 to 15; `void` 16, `k-void`.
@@ -414,6 +425,8 @@
                   (ty-product (ps) (k-regions-parts ps seen out))
                   (ty-sum (ps) (k-regions-parts ps seen out))
                   (ty-nlist (e z r) (begin (add r) (walk e)))
+                  (ty-module (abs ds vs)
+                    (begin (k-regions-parts ds seen out) (k-regions-parts vs seen out)))
                   ;; Transparent to safety: what its representation holds,
                   ;; its parameters' regions standing for what it was given.
                   (ty-named (g ds)
@@ -479,6 +492,21 @@
   (lambda (bs bound)
     (if (null? bs) bound (k-let-names (cdr bs) (cons (extract (car bs) 1) bound)))))
 
+;; `up-t` and `down-t`, an abstract type `t`'s conversions, onto `bound`.
+(define k-conversion-name (subr (read @globals) (string symbol) symbol)
+  (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
+(define k-conversions-onto (subr kmakes (symbol k-names) k-names)
+  (lambda (n bound)
+    (cons (k-conversion-name "down-" n) (cons (k-conversion-name "up-" n) bound))))
+;; The names an item binds for those after it, onto `bound`: an abstract
+;; type's conversions, a value's name, a group's.
+(define k-item-bound (subr kmakes (k-item k-names) k-names)
+  (lambda (it bound)
+    (let ((k (extract it 1)) (ns (extract it 2)))
+      (cond ((= k 0) (k-conversions-onto (car ns) bound))
+            ((= k 1) bound)
+            (else (k-names-onto ns bound))))))
+
 (define-rec
   (k-free-list (subr kmakes (kxs k-names k-names) k-names)
     (lambda (xs bound out)
@@ -511,7 +539,21 @@
         (x-sum (l body a b) (k-free-into body bound out))
         (x-tagcase (s arms els a b)
           (let ((o (k-free-arms arms bound (k-free-into s bound out))))
-            (k-free-else els bound o))))))
+            (k-free-else els bound o)))
+        (x-module (items a b) (k-free-module items bound out))
+        ;; The module, and the body, which sees its values once checked.
+        (x-with (m body a b) (k-free-into body (k-names-onto (k-with-names a b) bound)
+                                          (k-note m bound out))))))
+  ;; A module's free variables, onto `out`: each item's, those before it
+  ;; bound; a group's, its own names bound.
+  (k-free-module (subr kmakes (k-items k-names k-names) k-names)
+    (lambda (items bound out)
+      (if (null? items)
+          out
+          (let* ((it (car items))
+                 (inner (k-item-bound it bound))
+                 (o (k-free-list (extract it 5) (if (= (extract it 1) 3) inner bound) out)))
+            (k-free-module (cdr items) inner o)))))
   (k-free-letrec (subr kmakes (k-letrec-bs k-names k-names) k-names)
     (lambda (bs bound out)
       (if (null? bs)
@@ -635,7 +677,20 @@
             (x-sum (l body a b) (k-unseen body bound rs))
             (x-tagcase (s arms els a b)
               (let ((o (k-unseen-arms arms bound (k-unseen s bound rs))))
-                (k-unseen-else els bound o)))))))
+                (k-unseen-else els bound o)))
+            (x-module (items a b) (k-unseen-module items bound rs))
+            (x-with (m body a b)
+              (let ((o (k-unseen (x-var m a b) bound rs)))
+                (k-unseen body (k-names-onto (k-with-names a b) bound) o)))))))
+  ;; The same walk of a module's items.
+  (k-unseen-module (subr (maxeff kstate spin) (k-items k-names k-regions) k-regions)
+    (lambda (items bound rs)
+      (if (null? items)
+          rs
+          (let* ((it (car items))
+                 (inner (k-item-bound it bound))
+                 (o (k-unseen-list (extract it 5) (if (= (extract it 1) 3) inner bound) rs)))
+            (k-unseen-module (cdr items) inner o)))))
   (k-unseen-letrec (subr (maxeff kstate spin) (k-letrec-bs k-names k-regions) k-regions)
     (lambda (bs bound rs)
       (if (null? bs)
@@ -761,7 +816,8 @@
       (ty-ref (x r) 5) (ty-pair (x y r) 6) (ty-tag (x y e r) 7) (ty-comp (x y e r) 8)
       (ty-markkey (x r) 9) (ty-product (ps) 10) (ty-sum (ps) 11) (ty-array (x r) 12)
       (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16)
-      (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19))))
+      (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19)
+      (ty-module (abs ds vs) 20) (ty-select (m n) 21))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.
 (define k-lemma-head? (subr (maxeff kreads spin) (k-binders int int) bool)
@@ -803,6 +859,7 @@
               (ty-var (v)
                 (let ((f (k-map-find m v)))
                   (if (null? f) t (tagcase (cdr (car f)) (dt (x) x) (else y t)))))
+              (ty-select (mod n) (k-select-of mod n t))
               (else y
                 (let ((slot (k-slot)))
                   (begin
@@ -839,6 +896,9 @@
           (ty-named (g ds) (ty-named g (k-subst-descs ds m memo)))
           (ty-nlist (e z r) (ty-nlist (sub e) (k-subst-size z m) (reg r)))
           (ty-nat (z) (ty-nat (k-subst-size z m)))
+          (ty-module (abs ds vs)
+            (let* ((ds2 (k-subst-parts ds m memo)) (vs2 (k-subst-parts vs m memo)))
+              (ty-module abs ds2 vs2)))
           (else z (k-get t))))))
   (k-subst-descs (subr (maxeff kstate spin) (k-descs k-map (ref k-pairs @t)) k-descs)
     (lambda (ds m memo)
@@ -909,74 +969,3 @@
           ((null? ys) #f)
           (else (and (= (extract (car xs) 2) (extract (car ys) 2))
                      (k-same-kinds? (cdr xs) (cdr ys)))))))
-
-;;; ------------------------------------------------------------ errors
-;; The error `m` at expression `x`.
-(define k-fail-at (subr checks (string kx) void) (lambda (m x) (k-fail m (k-start x) (k-end x))))
-;; The error `what` followed by type `t`, at `a`..`b`, or at expression `x`.
-(define k-fail-ty (subr (maxeff checks spin) (string int int int) void)
-  (lambda (what t a b) (k-fail (string-append what (k-show-ty t)) a b)))
-(define k-fail-ty-at (subr (maxeff checks spin) (string int kx) void)
-  (lambda (what t x) (k-fail-ty what t (k-start x) (k-end x))))
-;; The error `what` followed by effect `e`, at `a`..`b`.
-(define k-fail-effect (subr (maxeff checks spin) (string k-eff int int) void)
-  (lambda (what e a b) (k-fail (string-append what (k-show-effect e)) a b)))
-;; The error that a `plambda`'s body has effect `e`, at `a`..`b`.
-(define k-fail-impure-plambda (subr (maxeff checks spin) (k-eff int int) void)
-  (lambda (e a b)
-    (k-fail-effect "a `plambda` body must be pure, and this one has " e a b)))
-;; The error that a `t` has no `what` `l` (a part or a tag), at `a`..`b`.
-(define k-fail-no-part (subr (maxeff checks spin) (int string symbol int int) void)
-  (lambda (t what l a b)
-    (k-fail (k-cat4 "a " (k-show-ty t) what (k-quote (symbol->string l))) a b)))
-;; The error that a subroutine of `want` parameters is expected, and this `form` has `n`.
-(define k-fail-arity (subr checks (int string int int int) void)
-  (lambda (want form n a b)
-    (k-fail (k-cat5 "a subroutine of " (int->string want) " parameter(s) is expected, and this `"
-                    form (k-cat3 "` has " (int->string n) "")) a b)))
-;; The error that a call has `got` arguments, where `want` are expected.
-(define k-fail-arg-count (subr checks (int int int int) void)
-  (lambda (want got a b)
-    (k-fail (k-cat4 "expected " (int->string want) " argument(s), got " (int->string got)) a b)))
-;; Why argument `i` (from 0), a `got`, will not do where a `want` is expected.
-(define k-argument-error (subr (read @globals) (int string string) string)
-  (lambda (i got want)
-    (let ((n (int->string (+ i 1))))
-      (k-cat5 "argument " n " is a " got (k-cat3 ", where a " want " is expected")))))
-;; The error that argument `i` (from 0), `arg`, must be a `t`, not yet known.
-(define k-fail-not-known (subr (maxeff checks spin) (kx int int) void)
-  (lambda (arg i t)
-    (let ((why (k-cat3 ", which is not yet known here; " "give the other arguments first, "
-                       "or `proj` the operator")))
-      (k-fail-at (k-cat5 "argument " (int->string (+ i 1)) " must be a " (k-show-ty t) why) arg))))
-;; The error that `certify-length` is given a `t`, not a frozen list, at `x`.
-(define k-fail-not-frozen (subr (maxeff checks spin) (int kx) void)
-  (lambda (t x) (k-fail-ty-at "`certify-length` takes a frozen list, and this is a " t x)))
-;; The error that `certify-acyclic` is given a `t`, which is not data, at `x`.
-(define k-fail-not-data (subr (maxeff checks spin) (int kx) void)
-  (lambda (t x)
-    (k-fail-at (k-cat3 "`certify-acyclic` takes data, and a " (k-show-ty t) " is not data") x)))
-;; The error that a bloblet of type `bt` cannot be changed, being frozen.
-(define k-fail-frozen (subr (maxeff checks spin) (int int int) void)
-  (lambda (bt a b)
-    (k-fail (k-cat3 "a " (k-show-ty bt) " cannot be changed: its fields are frozen") a b)))
-;; The error that a prompt's `body` has effect `beyond`, which the tag's `bound` does not allow.
-(define k-fail-beyond (subr (maxeff checks spin) (kx k-eff k-eff) void)
-  (lambda (body bound beyond)
-    (k-fail-at (k-cat4 "the tag allows its delimited computations " (k-show-effect bound)
-                       ", and this body also has " (k-show-effect beyond)) body)))
-;; Why a `proj` giving descriptions `ds` does not fit a `poly` binding `bs`.
-(define k-proj-count-error (subr (read @globals) (k-binders (listof k-desc acyclic)) string)
-  (lambda (bs ds)
-    (k-cat5 "this `poly` binds " (int->string (k-length bs)) " description(s); `proj` gave "
-            (int->string (k-length ds)) "")))
-;; What a prompt's body is, a `got`, where the tag's prompts deliver a `want`.
-(define k-prompt-body-error (subr (read @globals) (string string) string)
-  (lambda (want got) (k-cat4 "the tag's prompts deliver a " want ", and this body is a " got)))
-;; What a handler is told, to take a `payload` to an `answer`; and what it gives instead, a `got`.
-(define k-handler-wants (subr (maxeff kreads (alloc @t) spin) (int int) string)
-  (lambda (payload answer)
-    (k-cat4 "the handler must take a " (k-show-ty payload) " to a " (k-show-ty answer))))
-(define k-handler-gives (subr (maxeff kreads (alloc @t) spin) (int int string) string)
-  (lambda (payload answer got)
-    (k-cat4 (k-handler-wants payload answer) ", and this gives a " got "")))

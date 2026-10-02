@@ -474,6 +474,9 @@
 (define k-sc-escape (subr kstate (int) unit)
   (lambda (m)
     (if (null? (get k-sc-escapes)) (set k-sc-escapes (cons (cons (get k-sc-current) m) nil)) #u)))
+;; A `module` or a `with` walked, by `check-module-rules.fx`, which sets this.
+(define k-sc-walk-module (ref (subr (maxeff kstate spin) (kx k-tscope k-guards) unit) @t)
+  (new (lambda (x sc gs) #u)))
 (define-rec
   (k-sc-walk-list (subr (maxeff kstate spin) (kxs k-tscope k-guards) unit)
     (lambda (xs sc gs)
@@ -544,7 +547,9 @@
           (let ((whole (k-sc-tracked e sc)))
             (begin (k-sc-walk e sc gs)
                    (k-sc-walk-arms arms whole sc gs)
-                   (k-sc-walk-else els whole sc gs))))))))
+                   (k-sc-walk-else els whole sc gs))))
+        (x-module (items a b) ((get k-sc-walk-module) x sc gs))
+        (x-with (m body a b) ((get k-sc-walk-module) x sc gs))))))
 
 (define k-sc-compose-one (subr kstate (k-edge k-graph k-graph) k-graph)
   (lambda (e b out)

@@ -104,7 +104,14 @@
   (ty-nlist int k-size k-region)
   ;; `(nat size)`: a natural, exactly `size`; `nat` is `(nat finite)`.
   ;; Every one is an `int` (`docs/research/sizes.md`, N5d).
-  (ty-nat k-size))
+  (ty-nat k-size)
+  ;; `(moduleof (abs t type) … (desc d T) … (val x T) …)`: a module's type
+  ;; (`docs/research/first-class-modules.md`): its abstract types, each a
+  ;; name and a type variable, binders in its descriptions and values.
+  (ty-module k-parts k-parts k-parts)
+  ;; `(select m t)` as written, resolved where it is checked
+  ;; (`k-resolve-selects`).
+  (ty-select symbol symbol))
 
 (define-type k-map (listof (pairof int k-desc @t) acyclic))
 
@@ -156,8 +163,16 @@
   (x-extract kx symbol int int)
   (x-sum symbol kx int int)
   (x-tagcase kx (listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic)
-             (listof (productof (1 symbol) (2 kx)) acyclic) int int))
+             (listof (productof (1 symbol) (2 kx)) acyclic) int int)
+  ;; `module`: each item what it is (as `e-module`'s), its names, an
+  ;; abstract type's variable (else -1), its types, and its expressions.
+  (x-module (listof (productof (1 int) (2 k-names) (3 int) (4 k-ids) (5 (listof kx acyclic)))
+                    acyclic)
+            int int)
+  (x-with symbol kx int int))
 (define-type kxs (listof kx acyclic))
+(define-type k-item (productof (1 int) (2 k-names) (3 int) (4 k-ids) (5 kxs)))
+(define-type k-items (listof k-item acyclic))
 
 ;; A type and an effect.
 (define-type k-te (productof (1 int) (2 k-eff)))
@@ -604,6 +619,36 @@
   (lambda (e) (or (null? e) (and (k-read-atom? (car e)) (k-reads-only? (cdr e))))))
 (define k-summary (subr (read @globals) (k-eff) int)
   (lambda (e) (cond ((null? e) 0) ((k-reads-only? e) 1) ((k-disrupts? e) 3) (else 2))))
+
+;; Each `with` checked, where it is, and its module's values' names, newest
+;; first: a `with`'s body sees them, once checking has found them.
+(define-type k-with-noted (productof (1 int) (2 int) (3 k-names)))
+(define-type k-with-list (listof k-with-noted acyclic))
+(define k-with-vals (ref k-with-list @t) (new nil))
+(define k-with-names-in (subr (maxeff (read @globals) (read @t)) (k-with-list int int) k-names)
+  (lambda (ws a b)
+    (cond ((null? ws) nil)
+          ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b)) (extract (car ws) 3))
+          (else (k-with-names-in (cdr ws) a b)))))
+(define k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names)
+  (lambda (a b) (k-with-names-in (get k-with-vals) a b)))
+;; The type variables made for modules' abstract types as each module was
+;; bound (`k-name-module`): not forgotten, but kept from leaving.
+(define k-module-vars (ref k-ids @t) (new nil))
+;; While a type's `select`s are resolved (`k-resolve-selects`): what each
+;; is, `(m t)` and the type; none otherwise.
+(define-type k-selected (productof (1 symbol) (2 symbol) (3 int)))
+(define-type k-selects (listof k-selected acyclic))
+(define k-select-map (ref k-selects @t) (new nil))
+(define k-select-in (subr (maxeff (read @globals) (read @t)) (k-selects symbol symbol int) int)
+  (lambda (ss m n t)
+    (cond ((null? ss) t)
+          ((and (symbol=? (extract (car ss) 1) m) (symbol=? (extract (car ss) 2) n))
+           (extract (car ss) 3))
+          (else (k-select-in (cdr ss) m n t)))))
+;; What `(select m n)`, node `t`, is while selects are resolved; else `t`.
+(define k-select-of (subr (maxeff (read @globals) (read @t)) (symbol symbol int) int)
+  (lambda (m n t) (k-select-in (get k-select-map) m n t)))
 
 ;;; ------------------------------------------------------------ effects
 

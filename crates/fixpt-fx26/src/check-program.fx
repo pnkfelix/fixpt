@@ -446,14 +446,18 @@
   (lambda (name t e) (k-cat4 "define " (symbol->string name) " : " (k-line t e))))
 (define k-push-lines (subr (maxeff kreads (alloc @t)) (k-out k-out) k-out)
   (lambda (lines out) (if (null? lines) out (k-push-lines (cdr lines) (cons (car lines) out)))))
+;; Bind `n`, at top level, to a value of type `t`: a global, a module's
+;; abstract types named for it.
+(define k-bind-named-global (subr (maxeff kstate spin) (symbol int) unit)
+  (lambda (n t) (k-bind-global n (k-name-module n t))))
 ;; A `define-rec`'s bindings: names, written types, and lambdas.
 (define-type k-rec-forms (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
 (define k-rec-types (subr (maxeff checks spin) (k-rec-forms) k-ids)
   (lambda (bs)
     (if (null? bs)
         nil
-        (let* ((t (k-parse-type (extract (car bs) 2)))
-               (bound (k-bind-global (extract (car bs) 1) t))
+        (let* ((t (k-select-syn (k-parse-type (extract (car bs) 2)) (extract (car bs) 2)))
+               (bound (k-bind-named-global (extract (car bs) 1) t))
                (noted (k-note-known (extract (car bs) 1) 0)))
           (cons t (k-rec-types (cdr bs)))))))
 ;; Each lambda, read under its signature: a lambda, or an error.
@@ -672,7 +676,7 @@
     ;; A lambda is in scope in itself, as a `letrec`
     ;; binding is; anything else is not.
     (let* ((reset (set k-pending-lemma nil))
-           (t (k-parse-type written))
+           (t (k-select-syn (k-parse-type written) written))
            ;; `define*`: checked as though its type read
            ;; `@globals`, which finds what it reads.
            (star (not (null? star-syns)))
@@ -687,7 +691,7 @@
            (lambda-ok (k-star-lambda star x))
            (u (set k-last-uses (k-free-into x nil nil)))
            (restored (set k-dscope saved))
-           (bound (if (k-lambda? x) (k-bind-global name t) #u))
+           (bound (if (k-lambda? x) (k-bind-named-global name t) #u))
            (rsaved (get k-recursive))
            ;; A lambda whose every run ends needs no `spin`.
            (noted (if (k-lambda? x)
@@ -715,7 +719,7 @@
                        #u))
            (popped (set k-recursive rsaved))
            (proved (if (null? lemma) #u (k-note-lemma (car lemma) name t x)))
-           (after (if (k-lambda? x) #u (k-bind-global name tf))))
+           (after (if (k-lambda? x) #u (k-bind-named-global name tf))))
       (cons (k-define-line name tf e) nil))))
 ;; `(define name init)`, of no type written: its line.
 (define k-define-untyped (subr (maxeff checks spin) (symbol exp) k-out)
@@ -723,7 +727,7 @@
     (let* ((x (k-resolve-exp init))
            (u (set k-last-uses (k-free-into x nil nil)))
            (r (k-synth x)))
-      (begin (k-bind-global name (extract r 1))
+      (begin (k-bind-named-global name (extract r 1))
              (if (k-lambda? x) (k-note-known name 0) #u)
              (cons (k-define-line name (extract r 1) (extract r 2)) nil)))))
 ;; One top-level form's lines: what each definition and expression is.

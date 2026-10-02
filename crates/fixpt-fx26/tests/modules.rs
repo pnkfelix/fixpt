@@ -1,8 +1,8 @@
-//! First-class modules, stage M1 (`docs/research/first-class-modules.md`):
-//! each program in `programs/modules` says on its first line what it gives,
-//! `;; => value`, or what its refusal says, `;; ! words`, lowered. Kept in
-//! files: the checker written in FX-26 has no modules yet (M2), and the
-//! tests compare both checkers on every literal program in these sources.
+//! First-class modules, stages M1 and M2
+//! (`docs/research/first-class-modules.md`): each program in
+//! `programs/modules` says on its first line what it gives, `;; => value`,
+//! or what its refusal says, `;; ! words`, lowered. Both checkers agree on
+//! each (`tests/checker.rs`, `every_test_program`).
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
@@ -32,6 +32,6 @@ fn module_programs_do_as_they_say() {
             wrong.push(format!("{}: says `{first}`, gives {got:?}", path.display()));
         }
     }
-    assert!(seen >= 10, "only {seen} programs");
+    assert!(seen >= 30, "only {seen} programs");
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }

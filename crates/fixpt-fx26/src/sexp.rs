@@ -7,7 +7,7 @@
 //! [`show_top`] prints the Rust parser's tree in exactly that shape, from the
 //! parser's datatypes in `parser.fx`, with spans in characters.
 
-use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, RegionForm};
+use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, ModItem, RegionForm};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
@@ -174,8 +174,27 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
             };
             format!("(e-bloblet {n} {i} {} {a} {b})", list(args.iter().map(|x| go(*x)).collect()))
         }
-        // Not in the parser written in FX-26 yet (`first-class-modules.md`, M2).
-        Exp::Module(_) => format!("(e-module {a} {b})"),
+        // Each item what it is (0 `define-generative`, 1 `define-type`, 2
+        // `define`, 3 `define-rec`), its names, types and expressions.
+        Exp::Module(items) => {
+            let shown = items
+                .iter()
+                .map(|item| match item {
+                    ModItem::Abs { name: n, up_fn, down_fn, .. } => format!("[0 ({}) (_) ({} {})]", name(*n), go(*up_fn), go(*down_fn)),
+                    ModItem::Desc { name: n, .. } => format!("[1 ({}) (_) ()]", name(*n)),
+                    ModItem::Val { name: n, ty, init } => {
+                        format!("[2 ({}) {} ({})]", name(*n), if ty.is_some() { "(_)" } else { "()" }, go(*init))
+                    }
+                    ModItem::Rec(group) => format!(
+                        "[3 {} {} {}]",
+                        list(group.iter().map(|(n, _, _)| name(*n)).collect()),
+                        list(vec!["_".into(); group.len()]),
+                        list(group.iter().map(|(_, _, x)| go(*x)).collect())
+                    ),
+                })
+                .collect();
+            format!("(e-module {} {a} {b})", list(shown))
+        }
         Exp::With { module, body } => format!("(e-with {} {} {a} {b})", name(module), go(body)),
         Exp::Product(fields) => {
             let fs = fields.iter().map(|(l, x)| format!("[{} {}]", name(*l), go(*x))).collect();

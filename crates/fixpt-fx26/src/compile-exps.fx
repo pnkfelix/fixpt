@@ -292,7 +292,10 @@
         (e-sum (t v a b)
           (begin (c-int c 36) (c-lit c (wcell-symbol t)) (c-exp v e (+ depth 2) c #f)
                  (c-prim c "%make-frozen" 3) (c-done c tail)))
-        (e-tagcase (s arms els a b) (c-tagcase s arms els e depth c tail)))))
+        (e-tagcase (s arms els a b) (c-tagcase s arms els e depth c tail))
+        ;; Not yet (`docs/research/first-class-modules.md`, M3).
+        (e-module (items a b) (c-fail "modules are not compiled yet"))
+        (e-with (m body a b) (c-fail "modules are not compiled yet")))))
   (c-begin (subr (maxeff compiles spin) (exps cenv int code bool) unit)
     (lambda (es e depth c tail)
       (cond ((null? es) (begin (c-lit c (wcell-unit)) (c-done c tail)))

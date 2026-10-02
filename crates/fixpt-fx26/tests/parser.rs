@@ -63,6 +63,11 @@ fn the_parsers_agree_on_real_programs() {
         include_str!("programs/bloblet/point.fx"),
         include_str!("programs/bloblet/array-sum.fx"),
         include_str!("programs/bloblet/else-narrows.fx"),
+        include_str!("programs/modules/counter.fx"),
+        include_str!("programs/modules/parameter.fx"),
+        include_str!("programs/modules/rec.fx"),
+        include_str!("programs/modules/select.fx"),
+        include_str!("programs/modules/transparent.fx"),
         fixpt_fx26::TABLE,
     ] {
         same_trees(&mut s, text);
@@ -77,6 +82,30 @@ fn a_parse_error_says_where() {
     assert_eq!((err.span.start, err.span.end), (0, 8));
     let err = s.parse_with_own_parser("(cond (#t 1))").expect_err("no else");
     assert!(err.message.contains("must end with an `else`"), "{}", err.message);
+}
+
+/// A `module` or a `with` the parsers refuse, each saying the same, at the
+/// same place, as the Rust checker reading it.
+#[test]
+fn module_parse_errors_agree() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    for text in [
+        "(module (define))",
+        "(module 5)",
+        "(module (define-rec 5))",
+        "(module (define-rec (f int)))",
+        "(module (define-generative (t) int))",
+        "(module (define-type 3 int))",
+        "(with (module (define x 1)) x)",
+        "(with)",
+        "(define m (module)) (with m)",
+    ] {
+        let ours = s.parse_with_own_parser(text).expect_err("refused");
+        let mut c = Checker::new();
+        let forms = c.read_in(FileId(0), text).expect("reads");
+        let rust = forms.iter().find_map(|f| c.top(f).err()).expect("refused");
+        assert_eq!((ours.message, ours.span.start, ours.span.end), (rust.message, rust.span.start, rust.span.end), "{text}");
+    }
 }
 
 /// What the comparison compares, spelled out once.

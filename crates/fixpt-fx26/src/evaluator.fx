@@ -575,7 +575,10 @@
         (e-product (fs a b) (v-product (eval-fields fs e)))
         (e-extract (p l a b) (field-of (eval p e) l))
         (e-sum (t v a b) (v-sum t (eval v e)))
-        (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e)))))
+        (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e))
+        ;; Not yet (`docs/research/first-class-modules.md`, M3).
+        (e-module (items a b) (efail "modules are not evaluated yet"))
+        (e-with (m body a b) (efail "modules are not evaluated yet")))))
   (eval-let (subr (maxeff (read @globals) evals spin) (exp-let-bs env env) env)
     (lambda (bs outer e)
       (if (null? bs)
