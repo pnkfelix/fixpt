@@ -913,6 +913,8 @@
     (prompt k-tag
       (begin (set k-extracts nil)
              (set k-effect-notes nil)
+             (set k-with-vals nil)
+             (set k-reshapes nil)
              (set k-runs nil)
              (k-ahead forms)
              (k-ok (k-forms forms nil)))

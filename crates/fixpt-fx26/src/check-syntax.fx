@@ -623,9 +623,9 @@
         (begin
           (k-shape (= (k-length items) 4) "`(subr effect (param …) result)`" s)
           (let* ((e (k-parse-effect (k-nth items 1)))
-                 (ps (k-parse-types (k-items-or-nil (k-nth items 2) "parameter types")))
-                 (r (k-parse-type (k-nth items 3))))
-            (k-ty-new (ty-subr e ps r cv)))))))
+                 (ts ((get k-parse-params) (k-items-or-nil (k-nth items 2) "parameter types")
+                                           (k-nth items 3))))
+            (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv)))))))
   ;; `(proves prop)`.
   (k-parse-proves-type (subr (maxeff checks spin) (syn k-syns) int)
     (lambda (s items)

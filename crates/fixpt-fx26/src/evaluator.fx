@@ -887,18 +887,21 @@
                 (k-cat3 head " " (show-items q (- fuel 1)))))
           (else x (k-cat3 head " . " (show-val-in tail (- fuel 1)))))))))
 
+;; A whole program begins with no globals, and no names kept.
+(define ev-begin! (subr stores (k-reshape-list) unit)
+  (lambda (rs) (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs))))
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), run; its value shown, or
-;; its error.
+;; its error. A whole program, as each is.
 (define run-checked (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
   (lambda (runs)
-    (tagcase (begin (set ev-reshapes (get k-reshapes)) (eval-runs runs))
+    (tagcase (begin (ev-begin! (get k-reshapes)) (eval-runs runs))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
   (lambda (tops)
-    (tagcase (begin (set ev-reshapes nil) (eval-program tops))
+    (tagcase (begin (ev-begin! nil) (eval-program tops))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))

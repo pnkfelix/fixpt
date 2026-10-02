@@ -111,7 +111,11 @@
   (ty-module k-parts k-parts k-parts)
   ;; `(select m t)` as written, resolved where it is checked
   ;; (`k-resolve-selects`).
-  (ty-select symbol symbol))
+  (ty-select symbol symbol)
+  ;; `(select $k t)`: in a procedure's type, the type `t` of its `k`th
+  ;; parameter (from 0), a module: a dependent procedure, a functor
+  ;; (`first-class-modules.md`, M5). A call puts the argument's for it.
+  (ty-param int symbol))
 
 (define-type k-map (listof (pairof int k-desc @t) acyclic))
 
@@ -662,6 +666,28 @@
 ;; What `(select m n)`, node `t`, is while selects are resolved; else `t`.
 (define k-select-of (subr (maxeff (read @globals) (read @t)) (symbol symbol int) int)
   (lambda (m n t) (k-select-in (get k-select-map) m n t)))
+;; While a dependent procedure's parameters are given (`k-instantiate-params`):
+;; what each `(select $k n)` is, `(k n)` and the type; none otherwise.
+(define-type k-param-given (productof (1 int) (2 symbol) (3 int)))
+(define-type k-params-given (listof k-param-given acyclic))
+(define k-param-map (ref k-params-given @t) (new nil))
+(define k-param-in (subr (maxeff (read @globals) (read @t)) (k-params-given int symbol int) int)
+  (lambda (ps k n t)
+    (cond ((null? ps) t)
+          ((and (= (extract (car ps) 1) k) (symbol=? (extract (car ps) 2) n)) (extract (car ps) 3))
+          (else (k-param-in (cdr ps) k n t)))))
+;; What `(select $k n)`, node `t`, is while parameters are given; else `t`.
+(define k-param-sel-of (subr (maxeff (read @globals) (read @t)) (int symbol int) int)
+  (lambda (k n t) (k-param-in (get k-param-map) k n t)))
+;; A `subr` type's parameter types and result, read (`check-modules.fx`'s
+;; `k-read-params`, which sets this): its types, the result last.
+(define k-parse-params (ref (subr (maxeff checks spin) ((listof syn acyclic) syn) k-ids) @t)
+  (new (lambda (ps r) nil)))
+;; `ts` but its last; and its last (-1 if none).
+(define k-ids-but-last (subr (maxeff (read @globals) (alloc @t) spin) (k-ids) k-ids)
+  (lambda (ts) (if (or (null? ts) (null? (cdr ts))) nil (cons (car ts) (k-ids-but-last (cdr ts))))))
+(define k-ids-last (subr (maxeff (read @globals) spin) (k-ids) int)
+  (lambda (ts) (cond ((null? ts) -1) ((null? (cdr ts)) (car ts)) (else (k-ids-last (cdr ts))))))
 
 ;;; ------------------------------------------------------------ effects
 

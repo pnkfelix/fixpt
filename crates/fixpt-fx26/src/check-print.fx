@@ -561,7 +561,8 @@
         (ty-module (abs ds vs)
           (k-cat5 "(moduleof" (k-show-abs abs) (k-show-comps "desc" ds p) (k-show-comps "val" vs p)
                   ")"))
-        (ty-select (m n) (k-cat5 "(select " (symbol->string m) " " (symbol->string n) ")")))))
+        (ty-select (m n) (k-cat5 "(select " (symbol->string m) " " (symbol->string n) ")"))
+        (ty-param (k n) (k-cat5 "(select $" (int->string (+ k 1)) " " (symbol->string n) ")")))))
   ;; A module type's components of kind `what`: ` (what name type)` each.
   (k-show-comps (subr kbuilds (string k-parts k-ids) string)
     (lambda (what ps p)

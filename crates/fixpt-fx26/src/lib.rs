@@ -71,7 +71,7 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// parts, in order: types and effects, printing, reading descriptions,
 /// resolving them, errors, modules' descriptions, subtyping, instantiation,
 /// termination, the rules, modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 15] = [
+pub const CHECKER_FILES: [(&str, &str); 16] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-print.fx", include_str!("check-print.fx")),
     ("check-syntax.fx", include_str!("check-syntax.fx")),
@@ -79,6 +79,7 @@ pub const CHECKER_FILES: [(&str, &str); 15] = [
     ("check-errors.fx", include_str!("check-errors.fx")),
     ("check-modules.fx", include_str!("check-modules.fx")),
     ("check-subtype.fx", include_str!("check-subtype.fx")),
+    ("check-dependent.fx", include_str!("check-dependent.fx")),
     ("check-data.fx", include_str!("check-data.fx")),
     ("check-infer.fx", include_str!("check-infer.fx")),
     ("check-terminate.fx", include_str!("check-terminate.fx")),
@@ -98,7 +99,7 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 33] = [
+pub const FRONT_END_FILES: [(&str, &str); 34] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("table.fx", TABLE),
@@ -117,6 +118,7 @@ pub const FRONT_END_FILES: [(&str, &str); 33] = [
     CHECKER_FILES[12],
     CHECKER_FILES[13],
     CHECKER_FILES[14],
+    CHECKER_FILES[15],
     ("evaluator.fx", EVALUATOR),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),

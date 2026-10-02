@@ -361,28 +361,19 @@
     (cond ((null? found) nil)
           ((k-has-name? params (extract (car found) 1)) (cons (car found) nil))
           (else (k-select-from (cdr found) params)))))
-;; The types of a `lambda`'s parameters `typed`, at `a`..`b`, resolved: a
-;; parameter's type may name a module in scope, not (yet) another parameter
-;; (`first-class-modules.md`, M5).
-(define k-params-selected (subr (maxeff checks spin) (k-bindings k-names int int) k-bindings)
-  (lambda (typed params a b)
-    (if (null? typed)
-        nil
-        (let* ((n (car (car typed)))
-               (t (cdr (car typed)))
-               (dependent (k-select-from (k-selects-in t) params))
-               (r (if (null? dependent)
-                      (k-resolve-selects t a b)
-                      (let ((s (car dependent)))
-                        (k-fail (string-append
-                                 (k-select-shown (extract s 1) (extract s 2))
-                                 (string-append " names a parameter of the same `lambda`: "
-                                                "a dependent type, not supported yet"))
-                                a b))))
-               (rest (k-params-selected (cdr typed) params a b)))
-          (cons (cons n r) rest)))))
+;; `t` resolved, at `a`..`b`, where `params` are not yet bound, and so may
+;; not be selected from: one that names the parameter it is the type of, or
+;; a later one.
+(define k-resolve-outside (subr (maxeff checks spin) (int k-names int int) int)
+  (lambda (t params a b)
+    (let ((dependent (k-select-from (k-selects-in t) params)))
+      (if (null? dependent)
+          (k-resolve-selects t a b)
+          (let ((s (car dependent)))
+            (k-fail (string-append
+                     (k-select-shown (extract s 1) (extract s 2))
+                     (string-append " names a parameter of the same `lambda`: "
+                                    "a dependent type, not supported yet"))
+                    a b))))))
 (define k-binding-names (subr kmakes (k-bindings) k-names)
   (lambda (bs) (if (null? bs) nil (cons (car (car bs)) (k-binding-names (cdr bs))))))
-;; A `lambda`'s parameters, at `a`..`b`, their types resolved.
-(define k-selected-params (subr (maxeff checks spin) (k-bindings int int) k-bindings)
-  (lambda (typed a b) (k-params-selected typed (k-binding-names typed) a b)))

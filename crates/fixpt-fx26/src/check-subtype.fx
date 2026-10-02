@@ -498,6 +498,7 @@
                   (and (= g h) (k-sub-descs xs ys (extract (k-gen-of g) 3) ea eb trail labels)))
                 (else z #f)))
             (ty-module (abs ds vs) ((get k-sub-module) a b ta tb ea eb trail labels))
+            (ty-param (k x) ((get k-sub-module) a b ta tb ea eb trail labels))
             (else z #f)))))
   ;; Generative type arguments `xs ≤ ys`, each as its variance in `vs` says.
   (k-sub-descs (subr (maxeff kstate spin)

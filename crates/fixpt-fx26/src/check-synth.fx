@@ -393,19 +393,21 @@
     (lambda (x hint result)
       (tagcase x
         (x-lambda (ps body a b)
-          (let* ((typed (k-selected-params (k-param-types ps hint a b) a b))
+          (let* ((given (k-param-types ps hint a b))
                  (saved (k-mark))
-                 (named (get k-skolems)))
-            (begin
-              (k-bind-named typed)
-              (let* ((r (if (>= result 0)
-                            (k-te-masked body result (k-check body result))
-                            (k-masked body (k-synth body)))))
-                (begin
-                  (k-unbind-to saved)
-                  (set k-last-latent (extract r 2))
-                  (let ((res (k-forget-nats named (extract r 1) a b)))
-                    (k-te (k-new-subr (extract r 2) (k-binding-types typed) res) nil)))))))
+                 (named (get k-skolems))
+                 ;; Bound in order, a dependent procedure's (`check-modules.fx`).
+                 (dep (k-bind-params given a b))
+                 (typed (extract dep 1))
+                 (want (if (>= result 0) (k-instantiate-params result (extract dep 2)) -1)))
+            (let* ((r (if (>= want 0)
+                          (k-te-masked body want (k-check body want))
+                          (k-masked body (k-synth body)))))
+              (begin
+                (k-unbind-to saved)
+                (set k-last-latent (extract r 2))
+                (let ((res (k-forget-nats named (k-result-back (extract r 1) (extract dep 3)) a b)))
+                  (k-te (k-new-subr (extract r 2) (k-binding-types typed) res) nil))))))
         (else y (k-fail-at "a lambda" x)))))
   ;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
   ;; result types if it is a subroutine's, with `(read R)` in its latent
@@ -541,7 +543,7 @@
                      (let ((inst (k-instantiate (extract rf 1) args expected a b done)))
                        (begin (k-no-knot inst a b) inst)))
                    (else y (extract rf 1))))
-             (callee (k-as-subr ft))
+             (callee (k-dependent-callee (k-as-subr ft) args a b))
              (variadic (k-vsubr-parts ft)))
         (cond
           ;; Any number of arguments, each of the element type.

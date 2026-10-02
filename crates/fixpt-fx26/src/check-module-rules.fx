@@ -267,6 +267,8 @@
 (define k-sub-modules k-sub-rule
   (lambda (a b ta tb ea eb trail labels)
     (tagcase ta
+      ;; `(select $k x)`: only itself.
+      (ty-param (k x) (tagcase tb (ty-param (j y) (and (= k j) (symbol=? x y))) (else z #f)))
       (ty-module (aa da va)
         (tagcase tb
           (ty-module (ab db vb)
