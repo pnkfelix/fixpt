@@ -91,17 +91,22 @@
          (k-syms=? (extract m 3) params) (k-syms=? (extract m 4) own) (k-syms=? (extract m 6) fv))))
 
 ;; The word the stack code of the body being compiled made for this lambda,
-;; if it made one here, and the names it captures.
+;; if it made one here, and the names it captures: the first made, of two
+;; alike (a module's `up-` and `down-` conversions, of one span), as the
+;; Rust compiler finds it.
 (define c-made-word (subr c-walks (c-params exp cenv syms) (listof c-closing @k))
   (lambda (ps body e own0)
     (let ((fv (c-lambda-captured ps body e))
           (params (c-bind-params ps nil)) (own (c-own-of ps own0)))
       (letrec ((find (subr c-walks ((listof c-made @k)) (listof c-closing @k))
                  (lambda (ms)
-                   (cond ((null? ms) nil)
-                         ((c-made-for? (car ms) body params own fv)
-                          (cons (product (1 (extract (car ms) 5)) (2 fv)) nil))
-                         (else (find (cdr ms)))))))
+                   (if (null? ms)
+                       nil
+                       (let ((older (find (cdr ms))))
+                         (cond ((not (null? older)) older)
+                               ((c-made-for? (car ms) body params own fv)
+                                (cons (product (1 (extract (car ms) 5)) (2 fv)) nil))
+                               (else nil)))))))
         (find (get c-made-reuse))))))
 
 ;; What `r` holds, taken: `r` is left holding `empty`.
@@ -189,6 +194,27 @@
     (tagcase f
       (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) ""))
       (else y ""))))
+
+;; Each slot of `ss`, newest first, pushed, the oldest first: how many.
+(define c-slots-load (subr (maxeff c-emits spin) ((listof int @k) code) int)
+  (lambda (ss c)
+    (if (null? ss)
+        0
+        (let ((n (c-slots-load (cdr ss) c)))
+          (begin (c-op1 c routine-slot (wcell-int (car ss))) (+ n 1))))))
+;; `vals` with the `n` slots from `d` on it, newest first.
+(define c-slots-from
+  (subr (maxeff (read @globals) (alloc @k) spin) (int int (listof int @k)) (listof int @k))
+  (lambda (d n vals) (if (= n 0) vals (c-slots-from (+ d 1) (- n 1) (cons d vals)))))
+;; A `with`'s module, at `l`, its values `ns` from field `i` on, each into
+;; the next slot from `depth`: `e` with them bound.
+(define c-with-fields (subr (maxeff compiles spin) (syms loc cenv int int code) cenv)
+  (lambda (ns l e depth i c)
+    (if (null? ns)
+        e
+        (begin (c-load c l) (c-field c (+ i 2))
+               (let ((inner (c-extend (car ns) (at-slot (+ depth i)) e)))
+                 (c-with-fields (cdr ns) l inner depth (+ i 1) c))))))
 
 (define-rec
   (c-exps (subr (maxeff compiles spin) (exps cenv int code) int)
@@ -293,9 +319,51 @@
           (begin (c-int c 36) (c-lit c (wcell-symbol t)) (c-exp v e (+ depth 2) c #f)
                  (c-prim c "%make-frozen" 3) (c-done c tail)))
         (e-tagcase (s arms els a b) (c-tagcase s arms els e depth c tail))
-        ;; Not yet (`docs/research/first-class-modules.md`, M3).
-        (e-module (items a b) (c-fail "modules are not compiled yet"))
-        (e-with (m body a b) (c-fail "modules are not compiled yet")))))
+        (e-module (items a b) (c-module items e depth depth nil c tail))
+        (e-with (m body a b) (c-with m body a b e depth c tail)))))
+  ;; A module (`docs/research/first-class-modules.md`): its items bound in
+  ;; slots in order from `depth`, as a `let`'s and a `letrec`'s are, `d` the
+  ;; next and `vals` the values' slots (newest first); then the product of
+  ;; its values.
+  (c-module
+    (subr (maxeff compiles spin) (mod-items cenv int int (listof int @k) code bool) unit)
+    (lambda (items e depth d vals c tail)
+      (if (null? items)
+          (let ((n (begin (c-int c 37) (c-slots-load vals c))))
+            (begin (c-prim c "%make-frozen" (+ 1 n))
+                   (c-done c tail)
+                   (c-unbind c depth (- d depth) tail)))
+          (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
+            (cond
+              ((= k 1) (c-module (cdr items) e depth d vals c tail))
+              ((= k 0)
+               (let* ((up (begin (c-exp (car xs) e d c #f)
+                                 (c-extend (c-converter "up-" (car ns)) (at-slot d) e)))
+                      (down (begin (c-exp (car (cdr xs)) up (+ d 1) c #f)
+                                   (c-extend (c-converter "down-" (car ns)) (at-slot (+ d 1)) up))))
+                 (c-module (cdr items) down depth (+ d 2) vals c tail)))
+              ((= k 2)
+               (begin (c-exp (car xs) e d c #f)
+                      (c-module (cdr items) (c-extend (car ns) (at-slot d) e) depth (+ d 1)
+                                (cons d vals) c tail)))
+              (else
+               (let* ((bs (c-rec-of ns (extract it 3) xs))
+                      (n (c-count-letrec bs))
+                      (made (c-letrec-make bs bs e d 0 c)))
+                 (begin (c-letrec-patch made d 0 c)
+                        (c-module (cdr items) (c-letrec-slots bs e d) depth (+ d n)
+                                  (c-slots-from d n vals) c tail)))))))))
+  ;; `with`: the module's values, by position, in slots from `depth`; then
+  ;; the body.
+  (c-with (subr (maxeff compiles spin) (symbol exp int int cenv int code bool) unit)
+    (lambda (m body a b e depth c tail)
+      (let ((ns (c-with-at a b)) (l (c-where e m)))
+        (cond ((null? ns) (c-fail "a `with` the checker did not see"))
+              ((null? l) (c-fail "a `with` of an unbound module"))
+              (else
+               (let ((inner (c-with-fields (car ns) (car l) e depth 0 c)))
+                 (begin (c-exp body inner (+ depth (c-length (car ns))) c tail)
+                        (c-unbind c depth (c-length (car ns)) tail))))))))
   (c-begin (subr (maxeff compiles spin) (exps cenv int code bool) unit)
     (lambda (es e depth c tail)
       (cond ((null? es) (begin (c-lit c (wcell-unit)) (c-done c tail)))

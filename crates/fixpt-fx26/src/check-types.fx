@@ -632,6 +632,10 @@
           (else (k-with-names-in (cdr ws) a b)))))
 (define k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names)
   (lambda (a b) (k-with-names-in (get k-with-vals) a b)))
+;; For a driver: what `with`s another checker saw, as `k-with-vals` keeps
+;; them, for a compiler given that checker's facts.
+(define checked-withs! (subr (maxeff (read @globals) (write @t)) (k-with-list) unit)
+  (lambda (ws) (set k-with-vals ws)))
 ;; The type variables made for modules' abstract types as each module was
 ;; bound (`k-name-module`): not forgotten, but kept from leaving.
 (define k-module-vars (ref k-ids @t) (new nil))

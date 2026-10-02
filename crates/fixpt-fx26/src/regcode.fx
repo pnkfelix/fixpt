@@ -126,6 +126,10 @@
 (define r-decline (subr (maxeff (read @globals) (write @k)) () unit)
   (lambda () (set r-declined #t)))
 
+;; A module or a `with` (`regcode-modules.fx`, which sets this).
+(define r-module-code (ref (subr rcompiles (rgen exp renv cenv bool) unit) @k)
+  (new (lambda (g x env te tail) (r-decline))))
+
 (define r-emit (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen ritem) unit)
   (lambda (g i) (let ((items (extract g items))) (set items (cons i (get items))))))
 (define r-op0 (subr emits (rgen int) unit)

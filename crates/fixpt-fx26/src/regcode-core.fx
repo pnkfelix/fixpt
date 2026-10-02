@@ -93,9 +93,9 @@
             (if (null? l)
                 (r-app g f args a b env te tail)
                 (r-let g (extract (car l) 1) (extract (car l) 2) env te tail))))
-        ;; Not yet (`docs/research/first-class-modules.md`, M3).
-        (e-module (items a b) (r-decline))
-        (e-with (m body a b) (r-decline)))))))
+        ;; `regcode-modules.fx`'s.
+        (e-module (items a b) ((get r-module-code) g x env te tail))
+        (e-with (m body a b) ((get r-module-code) g x env te tail)))))))
   ;; The region's name bound, as a `let`'s, to a region entered (never in a
   ;; leaf), and left with the body's value, which is so not in tail
   ;; position.

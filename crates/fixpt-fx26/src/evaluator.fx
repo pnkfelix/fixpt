@@ -407,6 +407,30 @@
                (if (null? l) (v-nil) (v-cons (v-f64 (car l)) (v-nil)))))
             (else (ev-f64-unary n xs))))))
 ;; `e` with each binding's name bound, holding #u.
+;; `fs` reversed, onto `acc`.
+(define reverse-fields
+  (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (vfields vfields) vfields)
+  (lambda (fs acc) (if (null? fs) acc (reverse-fields (cdr fs) (cons (car fs) acc)))))
+;; A module's `define-rec` item as a `letrec`'s bindings.
+(define rec-bindings (subr (maxeff (read @globals) spin) (names syns-a exp-list) exp-letrec-bs)
+  (lambda (ns ts xs)
+    (if (null? ns)
+        nil
+        (let ((rest (rec-bindings (cdr ns) (cdr ts) (cdr xs))))
+          (cons (product (1 (car ns)) (2 (car ts)) (3 (car xs))) rest)))))
+;; The values of `ns`, in `e`, onto `vs`, newest first.
+(define rec-values (subr (maxeff evals spin) (names env vfields) vfields)
+  (lambda (ns e vs)
+    (if (null? ns)
+        vs
+        (rec-values (cdr ns) e (cons (cons (car ns) (bloblet-ref (find-cell e (car ns)) 0)) vs)))))
+;; `e` with each of module `m`'s values bound to its name, in order.
+(define bind-module (subr (maxeff evals spin) (val env) env)
+  (lambda (m e)
+    (letrec ((go (subr (maxeff (read @globals) evals spin) (vfields env) env)
+               (lambda (fs e)
+                 (if (null? fs) e (go (cdr fs) (extend (car (car fs)) (cdr (car fs)) e))))))
+      (tagcase m (v-product (fs) (go fs e)) (else x (efail-expected "a module"))))))
 (define open-letrec (subr (maxeff (read @globals) evals) (exp-letrec-bs env) env)
   (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (extend (extract (car bs) 1) (v-unit) e)))))
 
@@ -577,8 +601,32 @@
         (e-sum (t v a b) (v-sum t (eval v e)))
         (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e))
         ;; Not yet (`docs/research/first-class-modules.md`, M3).
-        (e-module (items a b) (efail "modules are not evaluated yet"))
-        (e-with (m body a b) (efail "modules are not evaluated yet")))))
+        ;; A module: a product of its values, in order, each labelled by its
+        ;; name; its abstract types' conversions the identity.
+        (e-module (items a b) (eval-module items e nil))
+        ;; `with`: the module's values, by position, bound by their names.
+        (e-with (m body a b) (eval body (bind-module (lookup e m) e))))))
+  ;; A module's items, each in the scope of those before it, `vs` its
+  ;; values so far (newest first).
+  (eval-module (subr (maxeff (read @globals) evals spin) (mod-items env vfields) val)
+    (lambda (items e vs)
+      (if (null? items)
+          (v-product (reverse-fields vs nil))
+          (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
+            (cond
+              ((= k 1) (eval-module (cdr items) e vs))
+              ((= k 0)
+               (let* ((n (symbol->string (car ns)))
+                      (up (extend (string->symbol (string-append "up-" n)) (eval (car xs) e) e))
+                      (down (string->symbol (string-append "down-" n))))
+                 (eval-module (cdr items) (extend down (eval (car (cdr xs)) up) up) vs)))
+              ((= k 2)
+               (let ((v (eval (car xs) e)))
+                 (eval-module (cdr items) (extend (car ns) v e) (cons (cons (car ns) v) vs))))
+              (else
+               (let* ((bs (rec-bindings ns (extract it 3) xs)) (inner (open-letrec bs e)))
+                 (begin (fill-letrec bs inner)
+                        (eval-module (cdr items) inner (rec-values ns inner vs))))))))))
   (eval-let (subr (maxeff (read @globals) evals spin) (exp-let-bs env env) env)
     (lambda (bs outer e)
       (if (null? bs)

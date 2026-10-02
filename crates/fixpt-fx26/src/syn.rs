@@ -340,6 +340,22 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         }))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    // And each `with`'s module's values' names, by where it is
+    // (`checked-withs!`): the checker's record, which the compiler reads.
+    let mut withs = scheme.make(|_| Value::NULL);
+    for (e, names) in &c.facts.with_vals {
+        let span = c.arena.span_of(*e);
+        let mut ns = scheme.make(|_| Value::NULL);
+        for n in names.iter().rev() {
+            let sym = scheme.make(|m| m.heap().intern(c.interner.name(*n)));
+            ns = scheme.call_global("cons", &[sym, ns]).map_err(|e| fail(e.to_string()))?;
+        }
+        let (a, b) = (scheme.make(|_| Value::fixnum(char_at(span.start))), scheme.make(|_| Value::fixnum(char_at(span.end))));
+        let tag = scheme.make(|_| Value::fixnum(37));
+        let one = scheme.call_global("%make-frozen", &[tag, a, b, ns]).map_err(|e| fail(e.to_string()))?;
+        withs = scheme.call_global("cons", &[one, withs]).map_err(|e| fail(e.to_string()))?;
+    }
+    scheme.call_global(&format!("{READER_PREFIX}checked-withs!"), &[withs]).map_err(|e| fail(e.to_string()))?;
     let mut list = scheme.make(|_| Value::NULL);
     for (a, b, i) in facts {
         let args = [37, a, b, i].map(|n| scheme.make(|_| Value::fixnum(n)));

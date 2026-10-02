@@ -72,7 +72,7 @@ fn every_program_compiled() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
     let mut ran = 0;
-    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum"] {
+    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum", "modules"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
@@ -119,7 +119,7 @@ fn every_program_on_every_machine() {
             s
         })
         .collect();
-    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum"] {
+    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum", "modules"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {

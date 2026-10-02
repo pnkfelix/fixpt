@@ -89,7 +89,7 @@ fn compare_with(s: &mut Fx26Session, text: &str, registers: bool) -> Option<Resu
 fn programs() -> Vec<(String, String)> {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut out = Vec::new();
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "datum"] {
+    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "datum", "modules"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for p in names {
