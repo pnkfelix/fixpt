@@ -9,7 +9,7 @@
 //! `tailcall`. A variable is resolved once: to a slot, a free value, a
 //! global's cell, or, for `letrec`'s, a box in a slot or free value.
 
-use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
+use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, TyId};
 use std::collections::HashMap;
 use crate::check::Checker;
 use crate::top::Top;
@@ -356,21 +356,39 @@ impl<'a> Compiler<'a> {
             b
         };
         match self.c.arena.exp_at(x).clone() {
-            // Never compiled (M3): their parts' names, over-counted.
+            // A module's items each see those before them.
             Exp::Module(items) => {
+                let mut inner = bound.to_vec();
                 for item in items {
                     match item {
-                        crate::ast::ModItem::Val { init, .. } => self.free(init, bound, acc),
-                        crate::ast::ModItem::Rec(group) => group.iter().for_each(|(_, _, init)| self.free(*init, bound, acc)),
-                        _ => {}
+                        crate::ast::ModItem::Desc { .. } => {}
+                        crate::ast::ModItem::Abs { up, down, up_fn, down_fn, .. } => {
+                            self.free(up_fn, &inner, acc);
+                            inner = with(&inner, &[up]);
+                            self.free(down_fn, &inner, acc);
+                            inner = with(&inner, &[down]);
+                        }
+                        crate::ast::ModItem::Val { name, init, .. } => {
+                            self.free(init, &inner, acc);
+                            inner = with(&inner, &[name]);
+                        }
+                        crate::ast::ModItem::Rec(group) => {
+                            let names: Vec<Sym> = group.iter().map(|(n, _, _)| *n).collect();
+                            inner = with(&inner, &names);
+                            for (_, _, init) in &group {
+                                self.free(*init, &inner, acc);
+                            }
+                        }
                     }
                 }
             }
+            // The module, then the body, the module's values bound in it.
             Exp::With { module, body } => {
                 if !bound.contains(&module) {
                     adjoin(acc, module);
                 }
-                self.free(body, bound, acc);
+                let names = self.c.facts.with_vals.get(&x).cloned().unwrap_or_default();
+                self.free(body, &with(bound, &names), acc);
             }
             Exp::Var(n) => {
                 if !bound.contains(&n) {
@@ -487,7 +505,6 @@ impl<'a> Compiler<'a> {
 
     fn exp_as_is(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         match self.c.arena.exp_at(x).clone() {
-            Exp::Module(_) | Exp::With { .. } => return Err("modules are not compiled yet (`first-class-modules.md`, M3): run with the lowering".into()),
             Exp::Var(n) => {
                 match self.where_is(e, n) {
                     Some(l) => self.load(code, l),
@@ -587,35 +604,59 @@ impl<'a> Compiler<'a> {
                 self.exp(body, &inner, depth, code, tail)?;
             }
             Exp::Letrec { bindings, body } => {
-                // Every binding is a lambda (the checker says so). Each
-                // closure is made in its slot, with a placeholder for a
-                // sibling not made yet; then each placeholder is patched
-                // with its sibling. Nothing runs in between, so no one sees
-                // the knot tied. A name used only in calls of itself that
-                // are loops is not captured at all.
+                let inner = self.letrec_group(&bindings, e, depth, code)?;
                 let n = bindings.len();
-                let mut patches = Vec::new();
-                for (i, (name, _, init)) in bindings.iter().enumerate() {
-                    let (ps, lbody, region) = self.lambda_of(*init).ok_or("a letrec binds only lambdas")?;
-                    let mut own = e.clone();
-                    for (k, (g, _, _)) in bindings.iter().enumerate() {
-                        let loops = k == i && self.loops_only(lbody, *g, ps.len(), true);
-                        own.push((*g, if loops { Loc::Loop } else { Loc::Pending(depth + k) }));
-                    }
-                    patches.push(self.lambda(&ps, lbody, &own, depth + i, code, Some(*name), region)?);
-                }
-                for (i, ps) in patches.iter().enumerate() {
-                    for &(j, sibling) in ps {
-                        self.op1(code, "slot", Value::fixnum(sibling as i64));
-                        self.op1(code, "slot", Value::fixnum((depth + i) as i64));
-                        self.int(code, (CLOSURE_FREE0 + j) as i64);
-                        self.op(code, "field!");
-                    }
-                }
-                let mut inner = e.clone();
-                inner.extend(bindings.iter().enumerate().map(|(k, (g, _, _))| (*g, Loc::Slot(depth + k))));
                 self.exp(body, &inner, depth + n, code, tail)?;
                 self.unbind(code, depth, n, tail);
+            }
+            // A module: its items bound in slots in order, as a `let`'s and
+            // a `letrec`'s are, then the product of its values
+            // (`docs/research/first-class-modules.md`).
+            Exp::Module(items) => {
+                let (mut inner, mut d, mut vals) = (e.clone(), depth, Vec::new());
+                for item in &items {
+                    match item {
+                        crate::ast::ModItem::Desc { .. } => {}
+                        crate::ast::ModItem::Abs { up, down, up_fn, down_fn, .. } => {
+                            for (n, f) in [(*up, *up_fn), (*down, *down_fn)] {
+                                self.exp(f, &inner, d, code, false)?;
+                                inner.push((n, Loc::Slot(d)));
+                                d += 1;
+                            }
+                        }
+                        crate::ast::ModItem::Val { name, init, .. } => {
+                            self.exp(*init, &inner, d, code, false)?;
+                            inner.push((*name, Loc::Slot(d)));
+                            vals.push(d);
+                            d += 1;
+                        }
+                        crate::ast::ModItem::Rec(group) => {
+                            inner = self.letrec_group(group, &inner, d, code)?;
+                            vals.extend(d..d + group.len());
+                            d += group.len();
+                        }
+                    }
+                }
+                self.int(code, 37);
+                for s in &vals {
+                    self.op1(code, "slot", Value::fixnum(*s as i64));
+                }
+                self.prim(code, "%make-frozen", 1 + vals.len())?;
+                self.done(code, tail);
+                self.unbind(code, depth, d - depth, tail);
+            }
+            // `with`: the module's values, by position, in slots.
+            Exp::With { module, body } => {
+                let names = self.c.facts.with_vals.get(&x).cloned().ok_or("a `with` the checker did not see")?;
+                let m = self.where_is(e, module).ok_or("a `with` of an unbound module")?;
+                let mut inner = e.clone();
+                for (i, n) in names.iter().enumerate() {
+                    self.load(code, m);
+                    self.field(code, i as i64 + 2);
+                    inner.push((*n, Loc::Slot(depth + i)));
+                }
+                self.exp(body, &inner, depth + names.len(), code, tail)?;
+                self.unbind(code, depth, names.len(), tail);
             }
             Exp::Begin(items) => self.begin(&items, e, depth, code, tail)?,
             Exp::Prompt { tag, body, handler } => {
@@ -1150,6 +1191,37 @@ impl<'a> Compiler<'a> {
 
     /// A `let`: each value pushed, in the scope outside; the names are the
     /// slots.
+    /// A `letrec`'s group, its closures made in slots from `depth`: the
+    /// environment with them bound. Every binding is a lambda (the checker
+    /// says so). Each closure is made in its slot, with a placeholder for a
+    /// sibling not made yet; then each placeholder is patched with its
+    /// sibling. Nothing runs in between, so no one sees the knot tied. A
+    /// name used only in calls of itself that are loops is not captured at
+    /// all.
+    fn letrec_group(&mut self, bindings: &[(Sym, TyId, ExpId)], e: &Env, depth: usize, code: &mut Vec<Item>) -> R<Env> {
+        let mut patches = Vec::new();
+        for (i, (name, _, init)) in bindings.iter().enumerate() {
+            let (ps, lbody, region) = self.lambda_of(*init).ok_or("a letrec binds only lambdas")?;
+            let mut own = e.clone();
+            for (k, (g, _, _)) in bindings.iter().enumerate() {
+                let loops = k == i && self.loops_only(lbody, *g, ps.len(), true);
+                own.push((*g, if loops { Loc::Loop } else { Loc::Pending(depth + k) }));
+            }
+            patches.push(self.lambda(&ps, lbody, &own, depth + i, code, Some(*name), region)?);
+        }
+        for (i, ps) in patches.iter().enumerate() {
+            for &(j, sibling) in ps {
+                self.op1(code, "slot", Value::fixnum(sibling as i64));
+                self.op1(code, "slot", Value::fixnum((depth + i) as i64));
+                self.int(code, (CLOSURE_FREE0 + j) as i64);
+                self.op(code, "field!");
+            }
+        }
+        let mut inner = e.clone();
+        inner.extend(bindings.iter().enumerate().map(|(k, (g, _, _))| (*g, Loc::Slot(depth + k))));
+        Ok(inner)
+    }
+
     fn let_(&mut self, bindings: &[(Sym, ExpId)], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         let mut inner = e.clone();
         for (i, (n, init)) in bindings.iter().enumerate() {

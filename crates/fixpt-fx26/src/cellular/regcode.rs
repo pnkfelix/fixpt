@@ -691,7 +691,6 @@ impl Compiler<'_> {
             return Some(());
         }
         match self.c.arena.exp_at(x).clone() {
-            Exp::Module(_) | Exp::With { .. } => return self.decline("a module (`first-class-modules.md`, M3)"),
             Exp::Var(n) => {
                 match self.r_where(env, n) {
                     Some(RLoc::Reg(k)) => g.op("reg", &[Gen::n(k)]),
@@ -881,6 +880,8 @@ impl Compiler<'_> {
                 g.done(tail);
             }
             Exp::TagCase { scrutinee, arms, els } => self.r_tagcase(g, scrutinee, &arms, els, env, te, tail)?,
+            Exp::Module(items) => self.r_module(g, &items, env, te, tail)?,
+            Exp::With { module, body } => self.r_with(g, x, module, body, env, te, tail)?,
             // Lifted as its stack code lifted it (`Compiler::lift`).
             Exp::Letrec { bindings, body } if self.r_lifted(x).is_some() => {
                 let ks = self.r_lifted(x).expect("lifted");
@@ -986,6 +987,105 @@ impl Compiler<'_> {
     /// A `let`: each value made, in the scope outside, and kept in a
     /// register where no call comes before the body is done with it (else
     /// the frame); a constant bound as itself.
+    /// A module (`docs/research/first-class-modules.md`): its items kept in
+    /// frame slots in order, as its stack code keeps them, a `define-rec`'s
+    /// closures as a `letrec`'s are (with no join points); then the product
+    /// of its values.
+    fn r_module(&mut self, g: &mut Gen, items: &[crate::ast::ModItem], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        use crate::ast::ModItem;
+        if g.leaf {
+            return self.decline("a module in a leaf");
+        }
+        let (depth, tdepth, slots) = (env.len(), te.len(), g.next_slot);
+        let mut vals = vec![Arg::V(Value::fixnum(37))];
+        let bind = |g: &mut Gen, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, n: Sym| {
+            let s = g.slot();
+            g.op("setstk", &[Gen::n(s)]);
+            env.push((n, RLoc::Slot(s)));
+            te.push((n, Loc::Slot(usize::MAX)));
+            s
+        };
+        for item in items {
+            match item {
+                ModItem::Desc { .. } => {}
+                ModItem::Abs { up, down, up_fn, down_fn, .. } => {
+                    for (n, f) in [(*up, *up_fn), (*down, *down_fn)] {
+                        self.r_exp(g, f, env, te, false)?;
+                        bind(g, env, te, n);
+                    }
+                }
+                ModItem::Val { name, init, .. } => {
+                    self.r_exp(g, *init, env, te, false)?;
+                    vals.push(Arg::Slot(bind(g, env, te, *name)));
+                }
+                ModItem::Rec(group) => {
+                    let at: Vec<usize> = group.iter().map(|_| g.slot()).collect();
+                    let mut patches = Vec::new();
+                    for (i, (name, _, init)) in group.iter().enumerate() {
+                        let (ps, lbody, region) = self.lambda_of(*init)?;
+                        let (mut own_env, mut own_te) = (env.clone(), te.clone());
+                        for (k, (sib, _, _)) in group.iter().enumerate() {
+                            let loops = k == i && self.loops_only(lbody, *sib, ps.len(), true);
+                            own_env.push((*sib, if loops { RLoc::Loop } else { RLoc::Pending(at[k]) }));
+                            own_te.push((*sib, if loops { Loc::Loop } else { Loc::Pending(at[k]) }));
+                        }
+                        let p = self.r_lambda(g, &ps, lbody, &mut own_env, &mut own_te, Some(*name), region, false)?;
+                        g.op("setstk", &[Gen::n(at[i])]);
+                        patches.push(p);
+                    }
+                    for (i, ps) in patches.iter().enumerate() {
+                        for &(j, sibling) in ps {
+                            g.op("load", &[Gen::n(1), Gen::n(sibling)]);
+                            g.op("stack", &[Gen::n(at[i])]);
+                            g.op("setfield", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64), Gen::n(1)]);
+                        }
+                    }
+                    for (k, (n, _, _)) in group.iter().enumerate() {
+                        env.push((*n, RLoc::Slot(at[k])));
+                        te.push((*n, Loc::Slot(usize::MAX)));
+                        vals.push(Arg::Slot(at[k]));
+                    }
+                }
+            }
+        }
+        self.r_prim(g, "%make-frozen", &vals, env, te)?;
+        env.truncate(depth);
+        te.truncate(tdepth);
+        g.next_slot = slots;
+        g.done(tail);
+        Some(())
+    }
+
+    /// `with`: the module's values, by position, kept in frame slots; then
+    /// the body.
+    #[allow(clippy::too_many_arguments)]
+    fn r_with(&mut self, g: &mut Gen, x: ExpId, module: Sym, body: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        if g.leaf {
+            return self.decline("a `with` in a leaf");
+        }
+        let names = self.c.facts.with_vals.get(&x)?.clone();
+        let (depth, tdepth, slots) = (env.len(), te.len(), g.next_slot);
+        let at: Vec<usize> = names.iter().map(|_| g.slot()).collect();
+        for (i, n) in names.iter().enumerate() {
+            match self.r_where(env, module)? {
+                RLoc::Reg(k) => g.op("reg", &[Gen::n(k)]),
+                RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
+                RLoc::Free(k) => g.op("lexical", &[Gen::n(k)]),
+                RLoc::Global(c) => g.op("global", &[c]),
+                _ => return self.decline("a `with` of a module not in a place"),
+            }
+            g.op("field", &[Value::fixnum(i as i64 + 2)]);
+            g.op("setstk", &[Gen::n(at[i])]);
+            env.push((*n, RLoc::Slot(at[i])));
+            te.push((*n, Loc::Slot(usize::MAX)));
+        }
+        self.r_exp(g, body, env, te, tail)?;
+        env.truncate(depth);
+        te.truncate(tdepth);
+        g.next_slot = slots;
+        Some(())
+    }
+
     fn r_let(&mut self, g: &mut Gen, bindings: &[(Sym, ExpId)], body: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
         let inits: Vec<Option<ExpId>> = bindings.iter().map(|(_, i)| Some(*i)).collect();
