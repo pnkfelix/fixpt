@@ -16,14 +16,29 @@ twice: modules' stages M1–M7 (`first-class-modules.md`), tail calls in
 leaves, the hole hints. One KFX26 source producing both would remove
 the doubling; the agreement tests would become tests of the translation.
 
-## Higher kinds stay out
+## Higher kinds, as Rust's generic associated types
 
-Rust has no higher-kinded types (generic associated types and trait
-encodings only approximate them), so a KFX26 program using them would
-have no straightforward Rust rendering; and the front end, first-order
-code over concrete trees and tables, does not need them.
-`higher-kinds.md`'s Path 2 can still exist in full FX-26, outside the
-kernel.
+Rust has no general higher-kinded types, but it has generic associated
+types (GATs), which are the restricted form `higher-kinds.md` calls Path
+2: an abstract type constructor as a component of an interface, applied
+where it is declared. The correspondence (the user's motivation for
+asking about `type -> type`):
+
+| Rust                                                 | FX-26, Path 2                                                              |
+| ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| a trait with `type Pointer<T>;`                      | a `moduleof` with `(abs pointer (=> type type))`                           |
+| an `impl` of the trait                               | a module                                                                   |
+| `fn f<P: PointerFamily>(…)` using `P::Pointer<u8>`   | a dependent procedure on a module parameter, `(select $1 pointer)` at `u8` |
+| `type Item<'a> where Self: 'a;` (a lending iterator) | an abstract component of kind region → type: regions as lifetimes          |
+
+So KFX26 keeps higher kinds in Path 2's shape only: abstract type
+constructors as module components, applied where declared (the scoped
+rule of `higher-kinds.md`'s open question 2, which is what keeps the
+mapping to GATs direct). It leaves out Path 1's free-standing `(poly ((f
+(=> type type))) …)`, which Rust cannot say. The lending iterator wants
+kind region → type, which brings in the question, deferred so far, of
+abstract region components (`higher-kinds.md`, open question 3;
+`first-class-modules.md`, "later").
 
 ## How FX-26 maps to Rust
 
