@@ -80,8 +80,11 @@ has type
 
 ### Selection and opening
 
-- `(with m body)` makes `m`'s value components, and its descriptions as
-  `(select m …)`, the names in scope in `body`.
+- `(with m body)` makes `m`'s value components the names in scope in
+  `body`. Its types are written `(select m t)` there as anywhere: FX-91's
+  `with` opens descriptions too, but then a body cannot be parsed until
+  `m`'s type is known (FX-91 keeps such bodies unparsed until then); M1
+  opens values only, so every body is parsed before it is checked.
 - `(select m t)` in a type, an effect or a region. `m` must be a *path*:
   a variable bound to a module, or `(select p n)` for a module component
   `n` of path `p`. Two selects are equal iff their paths are the same
