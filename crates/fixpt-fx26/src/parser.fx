@@ -65,7 +65,16 @@
   (e-sum symbol exp int int)
   ;; Arms: the tag, whether it takes a product apart, the names, the body.
   (e-tagcase exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic)
-             (listof (productof (1 symbol) (2 exp)) acyclic) int int))
+             (listof (productof (1 symbol) (2 exp)) acyclic) int int)
+  ;; `(module item …)` (`docs/research/first-class-modules.md`): each item
+  ;; what it is (0 `define-generative`, 1 `define-type`, 2 `define`, 3
+  ;; `define-rec`), the names it defines, their types (a `define`'s, none or
+  ;; one), and its expressions: the values, or an abstract type's two
+  ;; conversions, each `(lambda (x) x)` spanning the item.
+  (e-module (listof (productof (1 int) (2 names) (3 syns-a) (4 (listof exp acyclic))) acyclic)
+            int int)
+  ;; `(with module body …)`: the body, with the module's values in scope.
+  (e-with symbol exp int int))
 
 ;; A top-level form. A definition's type is a list of none or one; a
 ;; `define*`'s, of it and the `define*`.
@@ -89,6 +98,8 @@
 (define-type let-list (listof (productof (1 symbol) (2 exp)) acyclic))
 (define-type arm-list (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
 (define-type top-list (listof top acyclic))
+(define-type mod-item (productof (1 int) (2 names) (3 syns-a) (4 exp-list)))
+(define-type mod-items (listof mod-item acyclic))
 
 (define-datatype presult (p-ok (listof top acyclic)) (p-err string int int))
 
@@ -318,6 +329,27 @@
             ((< v 0) (call '- (e-int 0 a b) (peel (- 0 v) nil)))
             (else (peel v nil))))))
 
+;; `t` alone in a list.
+(define one-syn (subr (read @globals) (syn) syns-a) (lambda (t) (cons t nil)))
+;; A module's item, of one name.
+(define mod-item-of (subr (read @globals) (int symbol syns-a exp-list) mod-item)
+  (lambda (k name ts xs) (product (1 k) (2 (the names (cons name nil))) (3 ts) (4 xs))))
+;; `(lambda (x) x)`, spanning `a`..`b`: an abstract type's conversion.
+(define identity-at (subr (read @globals) (int int) exp)
+  (lambda (a b)
+    (let ((x (product (1 'x) (2 (the syns-a nil)))))
+      (e-lambda (the param-list (cons x nil)) (e-var 'x a b) a b))))
+(define module-usage string
+  (string-append "a module holds `(define-generative t T)`, `(define-type d T)`, "
+                 "`(define x [T] e)` and `(define-rec (f T e) …)`"))
+;; A `define-rec`'s names, types and expressions, each in order.
+(define rec-names (subr (read @globals) (letrec-list) names)
+  (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (rec-names (cdr bs))))))
+(define rec-types (subr (read @globals) (letrec-list) syns-a)
+  (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 2) (rec-types (cdr bs))))))
+(define rec-inits (subr (read @globals) (letrec-list) exp-list)
+  (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 3) (rec-inits (cdr bs))))))
+
 ;;; ------------------------------------------------------------ expressions
 
 (define-rec
@@ -452,6 +484,12 @@
         ((symbol=? head 'prompt)
          (begin (arity items 4 "`(prompt tag body handler)`" a b)
                 (e-prompt (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b)))
+        ((symbol=? head 'module) (e-module (parse-module-items (cdr items)) a b))
+        ((symbol=? head 'with)
+         (begin (at-least items 2 "`(with module body …)`" a b)
+                (if (syn-symbol? (nth items 1))
+                    (e-with (syn-symbol (nth items 1)) (parse-body (drop items 2) a b) a b)
+                    (pfail "`with` opens a module named by a variable" (nth items 1)))))
         (else (let ((f (parse-exp (car items)))) (e-app f (parse-exps (cdr items)) a b))))))
   ;; Item `i`, an expression.
   (parse-nth (subr (maxeff parses spin) (syns-a int) exp)
@@ -619,7 +657,39 @@
                        (let* ((y (syn-symbol (nth parts 1))) (body (parse-arm-body parts c)))
                          (cons (product (1 y) (2 body)) nil))
                        (pfail "`else` binds one name" (nth parts 1))))))
-            (else (parse-else (cdr cs)))))))
+            (else (parse-else (cdr cs))))))
+  ;; A `module`'s items, in order.
+  (parse-module-items (subr (maxeff parses spin) (syns-a) mod-items)
+    (lambda (fs)
+      (if (null? fs)
+          nil
+          (let* ((item (parse-module-item (car fs))) (rest (parse-module-items (cdr fs))))
+            (cons item rest)))))
+  ;; `(define-generative t T)`, `(define-type d T)`, `(define x e)`, `(define
+  ;; x T e)` or `(define-rec (f T e) …)`.
+  (parse-module-item (subr (maxeff parses spin) (syn) mod-item)
+    (lambda (f)
+      (let* ((parts (syn-items f "a module's definition"))
+             (n (len parts))
+             (head (if (null? parts) '|()| (syn-head (car parts)))))
+        (cond ((and (symbol=? head 'define-generative) (= n 3))
+               (let* ((name (syn-symbol (nth parts 1)))
+                      (up (identity-at (syn-start f) (syn-end f)))
+                      (down (identity-at (syn-start f) (syn-end f))))
+                 (mod-item-of 0 name (one-syn (nth parts 2)) (list up down))))
+              ((and (symbol=? head 'define-type) (= n 3))
+               (mod-item-of 1 (syn-symbol (nth parts 1)) (one-syn (nth parts 2)) nil))
+              ((and (symbol=? head 'define) (= n 3))
+               (let* ((name (syn-symbol (nth parts 1))) (init (parse-exp (nth parts 2))))
+                 (mod-item-of 2 name (the syns-a nil) (the exp-list (cons init nil)))))
+              ((and (symbol=? head 'define) (= n 4))
+               (let* ((name (syn-symbol (nth parts 1))) (init (parse-exp (nth parts 3))))
+                 (mod-item-of 2 name (one-syn (nth parts 2)) (the exp-list (cons init nil)))))
+              ((symbol=? head 'define-rec)
+               (let ((bs (parse-typed-bindings (cdr parts) "`(name type expression)`"
+                                               "`(define-rec (name type expression) …)`")))
+                 (product (1 3) (2 (rec-names bs)) (3 (rec-types bs)) (4 (rec-inits bs)))))
+              (else (pfail module-usage f)))))))
 
 ;; A `define-rec`'s bindings, as a `letrec`'s are.
 (define parse-rec-bindings (subr (maxeff parses spin) (syns-a) letrec-list)

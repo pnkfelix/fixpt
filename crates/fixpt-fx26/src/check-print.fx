@@ -466,6 +466,13 @@
 (define k-conv-prefix (subr kreads (k-conv) string)
   (lambda (cv) (if (k-conv=? cv (get k-conv-default)) "" (k-cat3 "(conv " (k-conv-show cv) ") "))))
 
+;; A module type's abstract types: ` (abs t type)` each.
+(define k-show-abs (subr kbuilds (k-parts) string)
+  (lambda (ps)
+    (if (null? ps)
+        ""
+        (k-cat4 " (abs " (symbol->string (extract (car ps) 1)) " type)" (k-show-abs (cdr ps))))))
+
 (define-rec
   (k-show-on (subr kbuilds (int k-ids) string)
     (lambda (t path)
@@ -550,7 +557,18 @@
           (tagcase z (sz-finite () "nat") (else y (k-cat3 "(nat " (k-show-size z) ")"))))
         (ty-named (g ds)
           (let ((name (symbol->string (extract (k-gen-of g) 1))))
-            (if (null? ds) name (k-cat5 "(" name " " (k-join (k-show-descs ds p) " ") ")"))))))))
+            (if (null? ds) name (k-cat5 "(" name " " (k-join (k-show-descs ds p) " ") ")"))))
+        (ty-module (abs ds vs)
+          (k-cat5 "(moduleof" (k-show-abs abs) (k-show-comps "desc" ds p) (k-show-comps "val" vs p)
+                  ")"))
+        (ty-select (m n) (k-cat5 "(select " (symbol->string m) " " (symbol->string n) ")")))))
+  ;; A module type's components of kind `what`: ` (what name type)` each.
+  (k-show-comps (subr kbuilds (string k-parts k-ids) string)
+    (lambda (what ps p)
+      (if (null? ps)
+          ""
+          (let ((one (k-cat5 " (" what " " (symbol->string (extract (car ps) 1)) " ")))
+            (k-cat4 one (k-show-on (extract (car ps) 2) p) ")" (k-show-comps what (cdr ps) p)))))))
 
 ;; A type. One `define-type` named prints as its name; any other recursive
 ;; type as `(mu %d …)`, `%d` naming the cycle.

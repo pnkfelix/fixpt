@@ -235,6 +235,9 @@
              (let ((wants (k-handler-wants payload answer)))
                (k-fail-at (k-cat4 wants "; it is a " (k-show-ty ht) "") handler)))))))
 
+;; `module` and `with`, `check-module-rules.fx`'s, which sets this.
+(define k-module-rules (ref (subr (maxeff checks spin) (kx) k-te) @t)
+  (new (lambda (x) (k-fail-at "a module" x))))
 ;;; ------------------------------------------------------------ the rules
 (define-rec
   (k-synth (subr (maxeff checks spin) (kx) k-te)
@@ -250,7 +253,7 @@
         (x-const (t v a b) (k-te t nil))
         (x-lambda (ps body a b) (k-synth-lambda-as x nil -1))
         (x-app (f args a b) (k-synth-app x f args -1))
-        (x-the (t e a b) (k-te t (k-check e t)))
+        (x-the (t0 e a b) (let ((t (k-resolve-selects t0 a b))) (k-te t (k-check e t))))
         (x-convention (c e a b)
           (let* ((r (k-synth e)) (t (k-resolve (extract r 1))))
             (tagcase (k-get t)
@@ -285,8 +288,8 @@
                        (t (k-join-branches (extract rc 1) (extract rd 1) a b))
                        (e (k-union (extract rp 2) (k-union (extract rc 2) (extract rd 2)))))
                   (k-te-masked x t e)))))
-        (x-letrec (bs body a b)
-          (let ((saved (k-mark)) (rsaved (get k-recursive)))
+        (x-letrec (bs0 body a b)
+          (let ((saved (k-mark)) (rsaved (get k-recursive)) (bs (k-letrec-selected bs0 a b)))
             (begin
               ;; A group whose every run ends needs no `spin`.
               (k-bind-group bs)
@@ -342,7 +345,9 @@
                  (t (k-ty-new (ty-sum (cons (product (1 l) (2 (extract r 1))) nil)))))
             (k-te-masked x t (extract r 2))))
         (x-tagcase (s arms els a b) (k-synth-tagcase x s arms els -1))
-        (x-begin (xs a b) (k-masked x (k-synth-seq xs k-unit nil))))))
+        (x-begin (xs a b) (k-masked x (k-synth-seq xs k-unit nil)))
+        (x-module (items a b) ((get k-module-rules) x))
+        (x-with (m body a b) ((get k-module-rules) x)))))
   (k-synth-seq (subr (maxeff checks spin) (kxs int k-eff) k-te)
     (lambda (xs last e)
       (if (null? xs)
@@ -388,7 +393,9 @@
     (lambda (x hint result)
       (tagcase x
         (x-lambda (ps body a b)
-          (let* ((typed (k-param-types ps hint a b)) (saved (k-mark)) (named (get k-skolems)))
+          (let* ((typed (k-selected-params (k-param-types ps hint a b) a b))
+                 (saved (k-mark))
+                 (named (get k-skolems)))
             (begin
               (k-bind-named typed)
               (let* ((r (if (>= result 0)
@@ -764,8 +771,8 @@
             (let ((e (k-check-seq xs expected nil)))
               (k-mask x e expected)))
           ;; A `letrec`'s body, as a `let`'s, against what is expected.
-          (x-letrec (bs body xa xb)
-            (let ((saved (k-mark)) (rsaved (get k-recursive)))
+          (x-letrec (bs0 body xa xb)
+            (let ((saved (k-mark)) (rsaved (get k-recursive)) (bs (k-letrec-selected bs0 a b)))
               (begin
                 (k-bind-group bs)
                 (let* ((ie (k-letrec-checked bs saved rsaved k-check k-check-letrec))
