@@ -411,7 +411,7 @@ impl Checker {
                     self.size_walk(x, pol, v, bad, seen);
                 }
             }
-            Ty::Select(..) => {}
+            Ty::Select(..) | Ty::ParamSel(..) => {}
             Ty::Named { args, .. } => {
                 for d in args {
                     match d {

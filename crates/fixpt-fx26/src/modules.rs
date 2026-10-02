@@ -196,7 +196,7 @@ impl Checker {
         self.resolve_selects(t, span)
     }
 
-    fn selects_in(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(Sym, Sym)>) {
+    pub(crate) fn selects_in(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(Sym, Sym)>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
@@ -232,7 +232,7 @@ impl Checker {
     /// The types `t` is made of, one level down.
     pub(crate) fn ty_kids(&self, t: TyId) -> Vec<TyId> {
         match self.arena.get(self.arena.resolve(t)) {
-            Ty::Base(_) | Ty::Void | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::Link(_) => Vec::new(),
+            Ty::Base(_) | Ty::Void | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::Link(_) => Vec::new(),
             Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).collect(),
             Ty::Poly { body, .. } => vec![*body],
             Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
@@ -263,6 +263,80 @@ impl Checker {
         let chosen = at.iter().map(|k| vals[*k]).collect();
         let t = self.arena.ty(Ty::Module { abs, descs, vals: chosen });
         self.subtype(t, want).then_some(at)
+    }
+
+    /// A module-typed binding's types, by component name: each abstract
+    /// type as named for the binding, each transparent one as it is.
+    pub(crate) fn module_types(&mut self, mt: TyId) -> Vec<(Sym, TyId)> {
+        match self.arena.get(self.arena.resolve(mt)).clone() {
+            Ty::Module { abs, descs, .. } => {
+                let mut out: Vec<(Sym, TyId)> = abs.iter().map(|(n, v)| (*n, self.arena.ty(Ty::Var(*v)))).collect();
+                out.extend(descs);
+                out
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// `t` with each `(select $k x)` what `map` says it is.
+    pub(crate) fn instantiate_params(&mut self, t: TyId, map: &HashMap<(usize, Sym), TyId>) -> TyId {
+        if map.is_empty() {
+            return t;
+        }
+        let outer = std::mem::replace(&mut self.param_map, map.clone());
+        let r = self.subst(t, &HashMap::new());
+        self.param_map = outer;
+        r
+    }
+
+    fn param_sels(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(usize, Sym)>) {
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return;
+        }
+        if let Ty::ParamSel(k, n) = self.arena.get(t) {
+            if !out.contains(&(*k, *n)) {
+                out.push((*k, *n));
+            }
+            return;
+        }
+        for k in self.ty_kids(t) {
+            self.param_sels(k, seen, out);
+        }
+    }
+
+    /// A dependent procedure's parameter and result types for a call with
+    /// `args`: each `(select $k x)` the type `x` of the module the `k`th
+    /// argument names. That argument must be a module's name, which gives
+    /// its types their identity.
+    pub(crate) fn dependent_args(&mut self, params: &[TyId], result: TyId, args: &[ExpId], span: Span) -> R<(Vec<TyId>, TyId)> {
+        let mut found = Vec::new();
+        let mut seen = HashSet::new();
+        for t in params.iter().chain([&result]) {
+            self.param_sels(*t, &mut seen, &mut found);
+        }
+        if found.is_empty() {
+            return Ok((params.to_vec(), result));
+        }
+        let mut map = HashMap::new();
+        for (k, x) in found {
+            let named = match args.get(k).map(|a| self.arena.exp_at(*a).clone()) {
+                Some(crate::ast::Exp::Var(v)) => self.lookup(v).map(|t| (v, t)),
+                _ => None,
+            };
+            let Some((v, mt)) = named else {
+                return Err(FxError::at(
+                    span,
+                    format!("argument {} is a module the procedure's types depend on: give it by name (bind it with `let` first)", k + 1),
+                ));
+            };
+            let Some((_, t)) = self.module_types(mt).into_iter().find(|(n, _)| *n == x) else {
+                return Err(FxError::at(span, format!("`{}` has no type `{}`", self.interner.name(v), self.interner.name(x))));
+            };
+            map.insert((k, x), t);
+        }
+        let params = params.iter().map(|p| self.instantiate_params(*p, &map)).collect();
+        Ok((params, self.instantiate_params(result, &map)))
     }
 
     /// Whether `v` was made for a module's abstract type as it was bound.

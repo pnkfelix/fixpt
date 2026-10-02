@@ -315,18 +315,37 @@ impl Checker {
                 }
             }
         }
-        // A parameter's type may name a module in scope, not (yet) another
-        // parameter (`first-class-modules.md`, M5).
+        // Bound in order: a parameter's type may name a module in scope, or
+        // an earlier parameter (`(select m t)`), a dependent procedure
+        // (`first-class-modules.md`, M5). What it names of an earlier one is,
+        // in the procedure's type, `(select $k t)`; a type told it (`hint`,
+        // `result`) says it so, and is given the earlier parameter's.
         let span = self.arena.span_of(e);
-        for (_, t) in typed.iter_mut() {
-            *t = self.resolve_selects_outside(*t, &params.iter().map(|(n, _)| *n).collect::<Vec<_>>(), span)?;
-        }
+        let names: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
         let depth = self.env.len();
         let named = self.skolems.len();
-        for (n, t) in &typed {
-            let t = self.name_nat(*n, *t);
-            self.env.push((*n, t));
+        let (mut given, mut back): (HashMap<(usize, Sym), TyId>, HashMap<DVar, D>) = (HashMap::new(), HashMap::new());
+        for (j, (n, t)) in typed.iter_mut().enumerate() {
+            let resolved = match self.resolve_selects_outside(*t, &names[j..], span) {
+                Ok(r) => r,
+                Err(err) => {
+                    self.truncate_env(depth);
+                    self.skolems.truncate(named);
+                    return Err(err);
+                }
+            };
+            let resolved = self.instantiate_params(resolved, &given);
+            let bound = self.name_nat(*n, resolved);
+            self.env.push((*n, bound));
+            *t = if back.is_empty() { resolved } else { self.subst(resolved, &back) };
+            if let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(bound)).clone() {
+                for (a, w) in abs {
+                    given.insert((j, a), self.arena.ty(Ty::Var(w)));
+                    back.insert(w, D::Type(self.arena.ty(Ty::ParamSel(j, a))));
+                }
+            }
         }
+        let result = result.map(|r| self.instantiate_params(r, &given));
         // The body's effect is masked *with the parameters in scope*: they
         // are free in the body, so what reaches them stays.
         let r = match result {
@@ -335,6 +354,9 @@ impl Checker {
         };
         self.truncate_env(depth);
         let span = self.arena.span_of(e);
+        // What the result says of a parameter's types, it says as the
+        // procedure's type does.
+        let r = r.map(|(t, latent)| (if back.is_empty() { t } else { self.subst(t, &back) }, latent));
         let r = r.and_then(|(t, latent)| Ok((self.forget_nats(named, t, span)?, latent)));
         self.skolems.truncate(named);
         let (result, latent) = r?;
@@ -526,6 +548,9 @@ impl Checker {
         let Some((latent, params, result)) = callee.as_subr() else {
             return Err(FxError::at(span, format!("not a subroutine: {}", self.show_ty(ft))));
         };
+        // A dependent procedure: its types given the modules its arguments
+        // name.
+        let (params, result) = self.dependent_args(&params, result, args, span)?;
         // `apply` of a list at `acyclic`: no copy.
         if matches!(self.facts.standard_operator.get(&e), Some(s) if self.interner.name(*s) == "apply")
             && let [_, list] = params[..]
@@ -1169,7 +1194,7 @@ impl Checker {
                     stack.extend(descs.iter().chain(&vals).map(|(_, t)| *t));
                     false
                 }
-                Ty::Select(..) => false,
+                Ty::Select(..) | Ty::ParamSel(..) => false,
                 Ty::PromptTag { answer: x, payload: y, effect: e, region: r }
                 | Ty::Composable { arg: x, answer: y, effect: e, region: r } => {
                     stack.extend([x, y]);
@@ -1224,7 +1249,7 @@ impl Checker {
             Ty::Pair(a, b, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) => false,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
             Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) if self.walk_vars(*x, seen, hit))),
             Ty::NList { elem, .. } => self.walk_vars(elem, seen, hit),

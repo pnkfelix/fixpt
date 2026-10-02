@@ -51,6 +51,12 @@ pub enum FamilyArg {
     Conv(Conv),
 }
 
+/// The heads of the type forms `parse_type_node` reads.
+const TYPE_FORMS: &[&str] = &[
+    "arrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "pairof", "place",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof",
+];
+
 impl Checker {
     fn name(&self, s: Sym) -> &str {
         self.interner.name(s)
@@ -320,16 +326,25 @@ impl Checker {
                     return Err(FxError::at(s.span, "`(subr effect (param …) result)`"));
                 };
                 let effect = self.parse_effect(effect)?;
-                let params = match &params.datum {
+                let ps = match &params.datum {
                     Datum::Nil => Vec::new(),
-                    _ => self
-                        .items(params, "parameter types")?
-                        .to_vec()
-                        .iter()
-                        .map(|p| self.parse_type(p))
-                        .collect::<R<Vec<_>>>()?,
+                    _ => self.items(params, "parameter types")?.to_vec(),
                 };
+                // A parameter may be named, `(name type)`, for the types after
+                // it to select from: a dependent procedure (M5).
+                let mut names: Vec<Option<Sym>> = Vec::new();
+                let mut params = Vec::new();
+                for p in &ps {
+                    let (name, t) = match self.named_param(p) {
+                        Some((n, t)) => (Some(n), t),
+                        None => (None, p.clone()),
+                    };
+                    let t = self.parse_type(&t)?;
+                    params.push(self.select_params(t, &names));
+                    names.push(name);
+                }
                 let result = self.parse_type(result)?;
+                let result = self.select_params(result, &names);
                 Ok(self.arena.ty(Ty::Subr { conv, effect, params, result }))
             }
             // `(proves (<= A B))`, or `(proves (poly (binder …) (<= A B)
@@ -1419,6 +1434,39 @@ impl Checker {
 
     /// A label or tag: a symbol, or a positive integer, as FX-91's
     /// `define-datatype` numbers a variant's members.
+    /// A procedure type's parameter written `(name type)`: its name and
+    /// type, where `name` names no type or type form.
+    fn named_param(&self, p: &Syntax) -> Option<(Sym, Syntax)> {
+        let [n, t] = p.as_proper_list()? else { return None };
+        let n = n.as_symbol()?;
+        let name = self.name(n);
+        (!TYPE_FORMS.contains(&name) && !crate::top::KEYWORDS.contains(&name) && self.lookup_desc(n).is_none() && !self.base.contains_key(&n))
+            .then(|| (n, t.clone()))
+    }
+
+    /// `t` with each `(select m x)` of a parameter named before it, the
+    /// `k`th, made `(select $k x)`.
+    fn select_params(&mut self, t: TyId, names: &[Option<Sym>]) -> TyId {
+        if names.iter().all(|n| n.is_none()) {
+            return t;
+        }
+        let mut found = Vec::new();
+        self.selects_in(t, &mut std::collections::HashSet::new(), &mut found);
+        let mut sel = std::collections::HashMap::new();
+        for (m, x) in found {
+            if let Some(k) = names.iter().rposition(|n| *n == Some(m)) {
+                sel.insert((m, x), self.arena.ty(Ty::ParamSel(k, x)));
+            }
+        }
+        if sel.is_empty() {
+            return t;
+        }
+        let outer = std::mem::replace(&mut self.select_map, sel);
+        let r = self.subst(t, &std::collections::HashMap::new());
+        self.select_map = outer;
+        r
+    }
+
     /// A `moduleof`'s components (`docs/research/first-class-modules.md`):
     /// `(abs t type)` or `(abs (t …) type)`, `(desc d T)`, `(val x T)`, each
     /// name once; the abstract types in scope in what follows them.

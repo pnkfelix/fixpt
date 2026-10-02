@@ -249,6 +249,10 @@ pub enum Ty {
     /// is found where the type is checked, `m` being bound then
     /// (`Checker::resolve_selects`). Never compared unresolved.
     Select(Sym, Sym),
+    /// `(select $k t)`: in a procedure's type, the type `t` of its `k`th
+    /// parameter (from 0), a module: a dependent procedure, a functor
+    /// (`first-class-modules.md`, M5). A call puts the argument's for it.
+    ParamSel(usize, Sym),
 }
 
 /// A list's length, as far as it is known: some number (`finite`), or a

@@ -179,6 +179,7 @@ impl Checker {
                 out
             }
             Ty::Select(m, n) => format!("(select {} {})", self.interner.name(m), self.interner.name(n)),
+            Ty::ParamSel(k, n) => format!("(select ${} {})", k + 1, self.interner.name(n)),
             Ty::Product(parts) | Ty::Sum(parts) => {
                 let head = if matches!(self.arena.get(t), Ty::Product(_)) { "productof" } else { "sumof" };
                 let ps: Vec<String> =

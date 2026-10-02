@@ -141,6 +141,9 @@ pub struct Checker {
     /// While a type's `select`s are resolved (`Checker::resolve_selects`):
     /// what each is; empty otherwise.
     pub(crate) select_map: HashMap<(Sym, Sym), TyId>,
+    /// While a dependent procedure's parameters are given (`Checker::
+    /// instantiate_params`): what each `(select $k t)` is; empty otherwise.
+    pub(crate) param_map: HashMap<(usize, Sym), TyId>,
     /// The program's convention (set by [`Checker::with_convention`]):
     /// what a subroutine type that names none has, and what a convention
     /// nothing solves defaults to
@@ -345,6 +348,7 @@ impl Checker {
             skolems: Vec::new(),
             module_vars: HashSet::new(),
             select_map: HashMap::new(),
+            param_map: HashMap::new(),
             conv_default: conv,
             fresh_regions: 0,
             standard_len: 0,
@@ -1232,7 +1236,7 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
             Ty::Link(Some(_)) => unreachable!("resolved"),
             Ty::Module { descs, vals, .. } => {
                 for (_, x) in descs.iter().chain(&vals) {
@@ -2007,6 +2011,7 @@ impl Checker {
             (Ty::Module { abs: aa, descs: da, vals: va }, Ty::Module { abs: ab, descs: db, vals: vb }) => {
                 self.module_sub((a, b), (&aa, &da, &va), (&ab, &db, &vb), env, st)
             }
+            (Ty::ParamSel(k, x), Ty::ParamSel(j, y)) => k == j && x == y,
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
                     return false;
@@ -2105,6 +2110,7 @@ impl Checker {
         match ty {
             Ty::Base(_) | Ty::Void | Ty::Link(None) => return t,
             Ty::Select(m, n) => return self.select_map.get(&(m, n)).copied().unwrap_or(t),
+            Ty::ParamSel(k, n) => return self.param_map.get(&(k, n)).copied().unwrap_or(t),
             Ty::Var(v) => {
                 return match map.get(&v) {
                     Some(D::Type(x)) => *x,
