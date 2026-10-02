@@ -215,6 +215,28 @@ pub fn repl(backend: Backend) -> i32 {
             }
             _ => (false, text),
         };
+        // `,load FILE`: the file's forms run as a file's are (its types
+        // declared ahead), each shown as an entry's is; a `load-module` in
+        // it is from the file's directory.
+        if let Some(arg) = text.trim().strip_prefix(",load")
+            && (arg.is_empty() || arg.starts_with(char::is_whitespace))
+        {
+            let path = arg.trim().trim_matches('"');
+            if path.is_empty() {
+                println!("; `,load FILE`: run the file's forms here, as `fixpt eval` runs a file");
+                continue;
+            }
+            match std::fs::read_to_string(path) {
+                Ok(t) => {
+                    let dir = std::path::Path::new(path).parent().map(|d| d.to_path_buf());
+                    let outer = std::mem::replace(&mut session.checker.base_dir, dir);
+                    eval_program_in(&mut session, path, &t);
+                    session.checker.base_dir = outer;
+                }
+                Err(e) => println!("; cannot read `{path}`: {e}"),
+            }
+            continue;
+        }
         // `,pending [clear]`: the entries waiting on types not defined yet.
         if let Some(arg) = text.trim().strip_prefix(",pending") {
             match arg.trim() {

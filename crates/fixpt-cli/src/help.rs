@@ -208,6 +208,7 @@ fn overview(h: &dyn Helpful) {
         rows.push((",disassemble E", "E's cellular code (under --fx26-run cellular)"));
         rows.push((",disassemble-asm E", "the same, and each word's machine code (or its stencils' source)"));
         rows.push((",inliners NAME", "the globals whose register code inlines NAME's calls"));
+        rows.push((",load FILE", "run the file's forms here, as `fixpt eval` runs a file"));
         rows.push((",native NAME [ARG…]", "NAME's procedure in the native convention: its machine code, and called on ARGs (under --fx26-run cellular)"));
         rows.push((",pending [clear]", "the entries of types waiting on types not defined yet, or drop them"));
         rows.push((",redefine b|r", "whether the next redefinition that would break definitions breaks them or is refused"));

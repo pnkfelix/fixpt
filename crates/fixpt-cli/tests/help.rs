@@ -39,6 +39,19 @@ fn repl_with(dialect: Option<&str>, engine: Option<&str>, input: &str) -> String
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// `,load FILE` runs a file's forms at the REPL, which then knows what
+/// they define.
+#[test]
+fn load_runs_a_files_forms() {
+    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/modules/counter.fx");
+    let out = repl(Some("fx26"), &format!(",load {file}\n(with counter (value zero))\n,load\n,load no-such-file.fx\n"));
+    assert!(out.contains("counter : (moduleof"), "the file's definitions shown: {out}");
+    assert!(out.contains("2 : int"), "and its last form's value: {out}");
+    assert!(out.contains("0 : int"), "and what it defined known after: {out}");
+    assert!(out.contains("`,load FILE`"), "bare `,load` says how: {out}");
+    assert!(out.contains("cannot read `no-such-file.fx`"), "{out}");
+}
+
 /// `,time E` runs E as any form is, and says how long each phase took and
 /// what the heap did, on one line before E's value.
 #[test]
