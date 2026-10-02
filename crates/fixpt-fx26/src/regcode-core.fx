@@ -7,12 +7,13 @@
   ;; what it is converted to.
   (r-exp (subr rcompiles (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
-      (let ((k (c-conversion-at x)))
-        (if (< k 0)
-            (r-exp-as-is g x env te tail)
-            (begin
-              (r-prim g "%fx26-convert" (r-args-2 (a-as-is x) (a-v (wcell-int k))) env te)
-              (r-done g tail))))))
+      (let ((k (c-conversion-at x)) (r (c-reshape-at x)))
+        (cond ((>= k 0)
+               (begin
+                 (r-prim g "%fx26-convert" (r-args-2 (a-as-is x) (a-v (wcell-int k))) env te)
+                 (r-done g tail)))
+              ((not (null? r)) ((get r-reshape-code) g x (car r) env te tail))
+              (else (r-exp-as-is g x env te tail))))))
   ;; `x`'s value into RESULT; in tail position, returned.
   (r-exp-as-is (subr rcompiles (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
@@ -93,9 +94,9 @@
             (if (null? l)
                 (r-app g f args a b env te tail)
                 (r-let g (extract (car l) 1) (extract (car l) 2) env te tail))))
-        ;; Not yet (`docs/research/first-class-modules.md`, M3).
-        (e-module (items a b) (r-decline))
-        (e-with (m body a b) (r-decline)))))))
+        ;; `regcode-modules.fx`'s.
+        (e-module (items a b) ((get r-module-code) g x env te tail))
+        (e-with (m body a b) ((get r-module-code) g x env te tail)))))))
   ;; The region's name bound, as a `let`'s, to a region entered (never in a
   ;; leaf), and left with the body's value, which is so not in tail
   ;; position.

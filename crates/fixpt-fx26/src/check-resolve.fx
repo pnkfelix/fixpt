@@ -372,7 +372,8 @@
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil)
       (set k-conversions nil) (k-reset-facts)
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
-      (set k-with-vals nil) (set k-module-vars nil) (set k-select-map nil)
+      (set k-with-vals nil) (set k-module-vars nil) (set k-select-map nil) (set k-reshapes nil)
+      (set k-hide-mark -1) (set k-param-map nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       ;; 10 to 15; `void` 16, `k-void`.
@@ -504,7 +505,7 @@
   (lambda (it bound)
     (let ((k (extract it 1)) (ns (extract it 2)))
       (cond ((= k 0) (k-conversions-onto (car ns) bound))
-            ((= k 1) bound)
+            ((or (= k 1) (< k 0) (> k 3)) bound)
             (else (k-names-onto ns bound))))))
 
 (define-rec
@@ -817,7 +818,7 @@
       (ty-markkey (x r) 9) (ty-product (ps) 10) (ty-sum (ps) 11) (ty-array (x r) 12)
       (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16)
       (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19)
-      (ty-module (abs ds vs) 20) (ty-select (m n) 21))))
+      (ty-module (abs ds vs) 20) (ty-select (m n) 21) (ty-param (k n) 22))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.
 (define k-lemma-head? (subr (maxeff kreads spin) (k-binders int int) bool)
@@ -860,6 +861,7 @@
                 (let ((f (k-map-find m v)))
                   (if (null? f) t (tagcase (cdr (car f)) (dt (x) x) (else y t)))))
               (ty-select (mod n) (k-select-of mod n t))
+              (ty-param (k n) (k-param-sel-of k n t))
               (else y
                 (let ((slot (k-slot)))
                   (begin

@@ -111,7 +111,11 @@
   (ty-module k-parts k-parts k-parts)
   ;; `(select m t)` as written, resolved where it is checked
   ;; (`k-resolve-selects`).
-  (ty-select symbol symbol))
+  (ty-select symbol symbol)
+  ;; `(select $k t)`: in a procedure's type, the type `t` of its `k`th
+  ;; parameter (from 0), a module: a dependent procedure, a functor
+  ;; (`first-class-modules.md`, M5). A call puts the argument's for it.
+  (ty-param int symbol))
 
 (define-type k-map (listof (pairof int k-desc @t) acyclic))
 
@@ -483,12 +487,26 @@
                          ((k-breaks? (car bs) s d) (the k-strings (cons (extract (car bs) 3) nil)))
                          (else (go (cdr bs)))))))
         (go (get k-broken))))))
+;; While a module read from a file is checked (`load-module`, M7): how many
+;; bindings there were as it began, of which it sees only the standard
+;; ones; -1 otherwise. And the standard description names.
+(define k-hide-mark (ref int @t) (new -1))
+(define k-std-dscope (ref k-scope @t) (new nil))
+;; How many of the newest `n` names bound, `ns`, are `s`.
+(define k-bound-since (subr (maxeff (read @globals) (read @t) spin) (k-names symbol int) int)
+  (lambda (ns s n)
+    (cond ((or (null? ns) (<= n 0)) 0)
+          ((symbol=? (car ns) s) (+ 1 (k-bound-since (cdr ns) s (- n 1))))
+          (else (k-bound-since (cdr ns) s (- n 1))))))
 ;; What `s` is where it is used: its innermost binding; none, if that is
-;; broken.
+;; broken. While a module read from a file is checked, a binding made
+;; before it began only if it is a standard one.
 (define k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s)
-    (let ((st (table-ref (get k-env) s nil)))
-      (if (or (null? st) (not (null? (k-broken-why s)))) -1 (car st)))))
+    (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
+      (cond ((or (null? st) (not (null? (k-broken-why s)))) -1)
+            ((or (< mark 0) (> (k-bound-since (get k-trail) s (- (get k-depth) mark)) 0)) (car st))
+            (else (k-find (get k-std) s))))))
 ;; The same, broken or not.
 (define k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))
@@ -632,6 +650,19 @@
           (else (k-with-names-in (cdr ws) a b)))))
 (define k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names)
   (lambda (a b) (k-with-names-in (get k-with-vals) a b)))
+;; Each module given where a type of fewer values, or the same in another
+;; order, is wanted (`k-reshape-at`): where, and for each value that type
+;; has, its position in the module given. Made into a module of that layout.
+(define-type k-reshaped (productof (1 int) (2 int) (3 k-ids)))
+(define-type k-reshape-list (listof k-reshaped acyclic))
+(define k-reshapes (ref k-reshape-list @t) (new nil))
+;; For a driver: the same as another checker found them.
+(define checked-reshapes! (subr (maxeff (read @globals) (write @t)) (k-reshape-list) unit)
+  (lambda (rs) (set k-reshapes rs)))
+;; For a driver: what `with`s another checker saw, as `k-with-vals` keeps
+;; them, for a compiler given that checker's facts.
+(define checked-withs! (subr (maxeff (read @globals) (write @t)) (k-with-list) unit)
+  (lambda (ws) (set k-with-vals ws)))
 ;; The type variables made for modules' abstract types as each module was
 ;; bound (`k-name-module`): not forgotten, but kept from leaving.
 (define k-module-vars (ref k-ids @t) (new nil))
@@ -649,6 +680,28 @@
 ;; What `(select m n)`, node `t`, is while selects are resolved; else `t`.
 (define k-select-of (subr (maxeff (read @globals) (read @t)) (symbol symbol int) int)
   (lambda (m n t) (k-select-in (get k-select-map) m n t)))
+;; While a dependent procedure's parameters are given (`k-instantiate-params`):
+;; what each `(select $k n)` is, `(k n)` and the type; none otherwise.
+(define-type k-param-given (productof (1 int) (2 symbol) (3 int)))
+(define-type k-params-given (listof k-param-given acyclic))
+(define k-param-map (ref k-params-given @t) (new nil))
+(define k-param-in (subr (maxeff (read @globals) (read @t)) (k-params-given int symbol int) int)
+  (lambda (ps k n t)
+    (cond ((null? ps) t)
+          ((and (= (extract (car ps) 1) k) (symbol=? (extract (car ps) 2) n)) (extract (car ps) 3))
+          (else (k-param-in (cdr ps) k n t)))))
+;; What `(select $k n)`, node `t`, is while parameters are given; else `t`.
+(define k-param-sel-of (subr (maxeff (read @globals) (read @t)) (int symbol int) int)
+  (lambda (k n t) (k-param-in (get k-param-map) k n t)))
+;; A `subr` type's parameter types and result, read (`check-modules.fx`'s
+;; `k-read-params`, which sets this): its types, the result last.
+(define k-parse-params (ref (subr (maxeff checks spin) ((listof syn acyclic) syn) k-ids) @t)
+  (new (lambda (ps r) nil)))
+;; `ts` but its last; and its last (-1 if none).
+(define k-ids-but-last (subr (maxeff (read @globals) (alloc @t) spin) (k-ids) k-ids)
+  (lambda (ts) (if (or (null? ts) (null? (cdr ts))) nil (cons (car ts) (k-ids-but-last (cdr ts))))))
+(define k-ids-last (subr (maxeff (read @globals) spin) (k-ids) int)
+  (lambda (ts) (cond ((null? ts) -1) ((null? (cdr ts)) (car ts)) (else (k-ids-last (cdr ts))))))
 
 ;;; ------------------------------------------------------------ effects
 

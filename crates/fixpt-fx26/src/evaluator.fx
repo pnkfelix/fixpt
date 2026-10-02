@@ -407,6 +407,60 @@
                (if (null? l) (v-nil) (v-cons (v-f64 (car l)) (v-nil)))))
             (else (ev-f64-unary n xs))))))
 ;; `e` with each binding's name bound, holding #u.
+;; The modules to reshape (`k-reshapes`), as `run-checked` was given them.
+(define ev-reshapes (ref k-reshape-list @v) (new nil))
+;; The positions a module reshaped from `a` to `b` keeps, in a list of one;
+;; none if it is not reshaped.
+(define-type ev-at (listof k-ids @v))
+(define ev-reshape-in
+  (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (k-reshape-list int int) ev-at)
+  (lambda (rs a b)
+    (cond ((null? rs) nil)
+          ((and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
+           (the ev-at (cons (extract (car rs) 3) nil)))
+          (else (ev-reshape-in (cdr rs) a b)))))
+(define nth-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
+  (lambda (fs i)
+    (cond ((null? fs) (efail "no such field"))
+          ((= i 0) (car fs))
+          (else (nth-field (cdr fs) (- i 1))))))
+;; Module `v` as `at` (in a list of one) reshapes it: its values at those
+;; positions; as it is, if none.
+(define reshape-val (subr (maxeff (read @globals) evals spin) (val (listof k-ids @v)) val)
+  (lambda (v at)
+    (if (null? at)
+        v
+        (tagcase v
+          (v-product (fs)
+            (letrec ((pick (subr (maxeff (read @globals) evals spin) (k-ids) vfields)
+                       (lambda (ks)
+                         (if (null? ks) nil (cons (nth-field fs (car ks)) (pick (cdr ks)))))))
+              (v-product (pick (car at)))))
+          (else x (efail-expected "a module"))))))
+;; `fs` reversed, onto `acc`.
+(define reverse-fields
+  (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (vfields vfields) vfields)
+  (lambda (fs acc) (if (null? fs) acc (reverse-fields (cdr fs) (cons (car fs) acc)))))
+;; A module's `define-rec` item as a `letrec`'s bindings.
+(define rec-bindings (subr (maxeff (read @globals) spin) (names syns-a exp-list) exp-letrec-bs)
+  (lambda (ns ts xs)
+    (if (null? ns)
+        nil
+        (let ((rest (rec-bindings (cdr ns) (cdr ts) (cdr xs))))
+          (cons (product (1 (car ns)) (2 (car ts)) (3 (car xs))) rest)))))
+;; The values of `ns`, in `e`, onto `vs`, newest first.
+(define rec-values (subr (maxeff evals spin) (names env vfields) vfields)
+  (lambda (ns e vs)
+    (if (null? ns)
+        vs
+        (rec-values (cdr ns) e (cons (cons (car ns) (bloblet-ref (find-cell e (car ns)) 0)) vs)))))
+;; `e` with each of module `m`'s values bound to its name, in order.
+(define bind-module (subr (maxeff evals spin) (val env) env)
+  (lambda (m e)
+    (letrec ((go (subr (maxeff (read @globals) evals spin) (vfields env) env)
+               (lambda (fs e)
+                 (if (null? fs) e (go (cdr fs) (extend (car (car fs)) (cdr (car fs)) e))))))
+      (tagcase m (v-product (fs) (go fs e)) (else x (efail-expected "a module"))))))
 (define open-letrec (subr (maxeff (read @globals) evals) (exp-letrec-bs env) env)
   (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (extend (extract (car bs) 1) (v-unit) e)))))
 
@@ -542,7 +596,13 @@
       (cond ((null? es) (v-unit))
             ((null? (cdr es)) (eval (car es) e))
             (else (begin (eval (car es) e) (eval-begin (cdr es) e))))))
+  ;; `x`'s value; a module reshaped where the checker said so
+  ;; (`k-reshape-at`), a product of the values its type wanted, by position.
   (eval (subr (maxeff (read @globals) evals spin) (exp env) val)
+    (lambda (x e)
+      (let ((v (eval-node x e)) (rs (get ev-reshapes)))
+        (if (null? rs) v (reshape-val v (ev-reshape-in rs (exp-start x) (exp-end x)))))))
+  (eval-node (subr (maxeff (read @globals) evals spin) (exp env) val)
     (lambda (x e)
       (tagcase x
         (e-var (n a b) (lookup e n))
@@ -577,8 +637,32 @@
         (e-sum (t v a b) (v-sum t (eval v e)))
         (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e))
         ;; Not yet (`docs/research/first-class-modules.md`, M3).
-        (e-module (items a b) (efail "modules are not evaluated yet"))
-        (e-with (m body a b) (efail "modules are not evaluated yet")))))
+        ;; A module: a product of its values, in order, each labelled by its
+        ;; name; its abstract types' conversions the identity.
+        (e-module (items a b) (eval-module items e nil))
+        ;; `with`: the module's values, by position, bound by their names.
+        (e-with (m body a b) (eval body (bind-module (lookup e m) e))))))
+  ;; A module's items, each in the scope of those before it, `vs` its
+  ;; values so far (newest first).
+  (eval-module (subr (maxeff (read @globals) evals spin) (mod-items env vfields) val)
+    (lambda (items e vs)
+      (if (null? items)
+          (v-product (reverse-fields vs nil))
+          (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
+            (cond
+              ((or (= k 1) (< k 0) (> k 3)) (eval-module (cdr items) e vs))
+              ((= k 0)
+               (let* ((n (symbol->string (car ns)))
+                      (up (extend (string->symbol (string-append "up-" n)) (eval (car xs) e) e))
+                      (down (string->symbol (string-append "down-" n))))
+                 (eval-module (cdr items) (extend down (eval (car (cdr xs)) up) up) vs)))
+              ((= k 2)
+               (let ((v (eval (car xs) e)))
+                 (eval-module (cdr items) (extend (car ns) v e) (cons (cons (car ns) v) vs))))
+              (else
+               (let* ((bs (rec-bindings ns (extract it 3) xs)) (inner (open-letrec bs e)))
+                 (begin (fill-letrec bs inner)
+                        (eval-module (cdr items) inner (rec-values ns inner vs))))))))))
   (eval-let (subr (maxeff (read @globals) evals spin) (exp-let-bs env env) env)
     (lambda (bs outer e)
       (if (null? bs)
@@ -804,18 +888,21 @@
                 (k-cat3 head " " (show-items q (- fuel 1)))))
           (else x (k-cat3 head " . " (show-val-in tail (- fuel 1)))))))))
 
+;; A whole program begins with no globals, and no names kept.
+(define ev-begin! (subr stores (k-reshape-list) unit)
+  (lambda (rs) (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs))))
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), run; its value shown, or
-;; its error.
-(define run-checked (subr (maxeff evals spin) ((listof k-run acyclic)) string)
+;; its error. A whole program, as each is.
+(define run-checked (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
   (lambda (runs)
-    (tagcase (eval-runs runs)
+    (tagcase (begin (ev-begin! (get k-reshapes)) (eval-runs runs))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
   (lambda (tops)
-    (tagcase (eval-program tops)
+    (tagcase (begin (ev-begin! nil) (eval-program tops))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))

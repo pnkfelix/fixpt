@@ -62,7 +62,7 @@ fn a_letrec_procedure_calls_itself_directly() {
 #[test]
 fn every_test_program_has_well_formed_register_code() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "bench", "datum"] {
+    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "bench", "datum", "modules"] {
         for p in std::fs::read_dir(format!("{dir}/{sub}")).unwrap() {
             let path = p.unwrap().path();
             let text = std::fs::read_to_string(&path).unwrap();
@@ -104,7 +104,7 @@ fn runs_as_lowered(gc_every: Option<u64>) {
     use fixpt_heap::Value;
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let (mut report, mut ran) = (Vec::new(), 0);
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "bench", "datum"] {
+    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "bench", "datum", "modules"] {
         let mut paths: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|p| p.unwrap().path()).collect();
         paths.sort();
         for path in paths {

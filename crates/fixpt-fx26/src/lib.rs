@@ -25,6 +25,10 @@ pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 /// compiled with it, as one program ([`front_end`]).
 pub const PARSER: &str = include_str!("parser.fx");
 
+/// The parser's `load-module` (`docs/research/first-class-modules.md`, M7),
+/// written in FX-26: the files a program names, as the driver read them.
+pub const PARSER_LOAD: &str = include_str!("parser-load.fx");
+
 /// The evaluator written in FX-26, which runs the parser's trees.
 pub const EVALUATOR: &str = include_str!("evaluator.fx");
 
@@ -45,9 +49,10 @@ pub const REGCODE: &str = include_str!("regcode.fx");
 
 /// Register code's other parts, in order: expressions and their helpers;
 /// the expressions' compiler proper, one recursive group; and the entry.
-pub const REGCODE_PARTS: [(&str, &str); 3] = [
+pub const REGCODE_PARTS: [(&str, &str); 4] = [
     ("regcode-exps.fx", include_str!("regcode-exps.fx")),
     ("regcode-core.fx", include_str!("regcode-core.fx")),
+    ("regcode-modules.fx", include_str!("regcode-modules.fx")),
     ("regcode-entry.fx", include_str!("regcode-entry.fx")),
 ];
 
@@ -70,7 +75,7 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// parts, in order: types and effects, printing, reading descriptions,
 /// resolving them, errors, modules' descriptions, subtyping, instantiation,
 /// termination, the rules, modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 15] = [
+pub const CHECKER_FILES: [(&str, &str); 16] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-print.fx", include_str!("check-print.fx")),
     ("check-syntax.fx", include_str!("check-syntax.fx")),
@@ -78,6 +83,7 @@ pub const CHECKER_FILES: [(&str, &str); 15] = [
     ("check-errors.fx", include_str!("check-errors.fx")),
     ("check-modules.fx", include_str!("check-modules.fx")),
     ("check-subtype.fx", include_str!("check-subtype.fx")),
+    ("check-dependent.fx", include_str!("check-dependent.fx")),
     ("check-data.fx", include_str!("check-data.fx")),
     ("check-infer.fx", include_str!("check-infer.fx")),
     ("check-terminate.fx", include_str!("check-terminate.fx")),
@@ -97,9 +103,10 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 32] = [
+pub const FRONT_END_FILES: [(&str, &str); 35] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
+    ("parser-load.fx", PARSER_LOAD),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
     CHECKER_FILES[1],
@@ -116,6 +123,7 @@ pub const FRONT_END_FILES: [(&str, &str); 32] = [
     CHECKER_FILES[12],
     CHECKER_FILES[13],
     CHECKER_FILES[14],
+    CHECKER_FILES[15],
     ("evaluator.fx", EVALUATOR),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),
@@ -127,6 +135,7 @@ pub const FRONT_END_FILES: [(&str, &str); 32] = [
     REGCODE_PARTS[0],
     REGCODE_PARTS[1],
     REGCODE_PARTS[2],
+    REGCODE_PARTS[3],
     ("arm64.fx", ARM64),
     ("native-layout.fx", NATIVE_LAYOUT),
     ("native.fx", NATIVE),

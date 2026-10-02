@@ -901,7 +901,8 @@
 (define check-program (subr (maxeff (read @globals) checks spin) (syns-a k-tops) k-result)
   (lambda (standard forms)
     (prompt k-tag
-      (begin (k-reset) (k-standard standard) (k-ahead forms) (k-ok (k-forms forms nil)))
+      (begin (k-reset) (k-standard standard) (set k-std-dscope (get k-dscope))
+             (k-ahead forms) (k-ok (k-forms forms nil)))
       (lambda (r) r))))
 
 ;; The entry point for more of a program, form by form, as the REPL gives
@@ -913,6 +914,8 @@
     (prompt k-tag
       (begin (set k-extracts nil)
              (set k-effect-notes nil)
+             (set k-with-vals nil)
+             (set k-reshapes nil)
              (set k-runs nil)
              (k-ahead forms)
              (k-ok (k-forms forms nil)))

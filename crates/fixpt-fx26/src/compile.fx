@@ -126,6 +126,68 @@
     (let ((e (table-ref (get c-fact-table) a (the c-span (cons -1 -1)))))
       (if (= (car e) b) (cdr e) -1))))
 
+;; Each `with` the checker saw (its `k-with-vals`, as `c-set-facts!` took
+;; them): where it starts and ends, and its module's values' names, in
+;; order.
+;; And each module reshaped (`k-reshapes`), as `c-set-facts!` took them.
+(define c-reshapes (ref k-reshape-list @k) (new nil))
+(define c-withs (ref k-with-list @k) (new nil))
+(define-type c-with-names (listof syms @k))
+(define c-with-in
+  (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-with-list int int) c-with-names)
+  (lambda (ws a b)
+    (cond ((null? ws) nil)
+          ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b))
+           (the c-with-names (cons (extract (car ws) 3) nil)))
+          (else (c-with-in (cdr ws) a b)))))
+;; The values' names of the `with` from `a` to `b`, in a list of one; none
+;; if the checker did not see it.
+(define c-with-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) c-with-names)
+  (lambda (a b) (c-with-in (get c-withs) a b)))
+;; The positions of the values a module reshaped from `a` to `b` keeps, in
+;; a list of one; none if it is not reshaped.
+(define c-reshape-in
+  (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-reshape-list int int) (listof k-ids @k))
+  (lambda (rs a b)
+    (cond ((null? rs) nil)
+          ((and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
+           (the (listof k-ids @k) (cons (extract (car rs) 3) nil)))
+          (else (c-reshape-in (cdr rs) a b)))))
+(define c-reshape-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (exp) (listof k-ids @k))
+  (lambda (x) (c-reshape-in (get c-reshapes) (exp-start x) (exp-end x))))
+;; Whether one of `rs` reshapes the module from `a` to `b`.
+(define c-reshaped-in? (subr (maxeff (read @globals) (read @k)) (k-reshape-list int int) bool)
+  (lambda (rs a b)
+    (and (not (null? rs))
+         (or (and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
+             (c-reshaped-in? (cdr rs) a b)))))
+;; Whether `x`'s value is changed as it is given: converted to a
+;; convention, or a module reshaped.
+(define c-changed? (subr (maxeff (read @globals) (read @k)) (exp) bool)
+  (lambda (x)
+    (or (>= (c-conversion-at x) 0) (c-reshaped-in? (get c-reshapes) (exp-start x) (exp-end x)))))
+;; Where an expression starting at `at` is, as a word's name says it: the
+;; position; or, in a module's file (`load-module`, M7), `file:position`,
+;; the file numbered as the Rust checker numbers them.
+(define c-place-name (subr (read @globals) (int) string)
+  (lambda (at)
+    (if (< at load-base)
+        (int->string at)
+        (string-append (int->string (+ 1000 (quotient at load-base)))
+                       (string-append ":" (int->string (remainder at load-base)))))))
+;; An abstract type `n`'s conversion, `prefix` `up-` or `down-`.
+(define c-converter (subr (read @globals) (string symbol) symbol)
+  (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
+
+;; A module's `define-rec` item as a `letrec`'s bindings: its names, types
+;; and lambdas, in order.
+(define c-rec-of (subr c-walks (names syns-a exps) c-recs)
+  (lambda (ns ts xs)
+    (if (null? ns)
+        nil
+        (let ((rest (c-rec-of (cdr ns) (cdr ts) (cdr xs))))
+          (cons (product (1 (car ns)) (2 (car ts)) (3 (car xs))) rest)))))
+
 ;;; ----------------------------------------------------------------- code
 
 (define-datatype item
@@ -433,6 +495,8 @@
       (set c-lifts (make-table c-int-hash c-int=?))
       (set c-lift-count 0)
       (set c-lifted (make-table c-int-hash c-int=?))
+      (set c-withs (get k-with-vals))
+      (set c-reshapes (get k-reshapes))
       (c-fill-facts fs))))
 
 (define c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool)
@@ -495,7 +559,30 @@
         (e-sum (t v a b) (c-free v bound acc))
         (e-tagcase (s arms els a b)
           (c-free s bound (c-free-arms arms bound (c-free-else els bound acc))))
+        ;; A module's items each see those before them.
+        (e-module (items a b) (c-free-items items bound acc))
+        ;; The module, then the body, the module's values bound in it.
+        (e-with (m body a b)
+          (let ((ns (c-with-at a b)) (acc (if (c-member? bound m) acc (c-adjoin acc m))))
+            (c-free body (if (null? ns) bound (c-names (car ns) bound)) acc)))
         (else y acc))))
+  (c-free-items (subr c-walks (mod-items syms syms) syms)
+    (lambda (items bound acc)
+      (if (null? items)
+          acc
+          (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
+            (cond
+              ((or (= k 1) (< k 0) (> k 3)) (c-free-items (cdr items) bound acc))
+              ((= k 0)
+               (let* ((up (the syms (cons (c-converter "up-" (car ns)) bound)))
+                      (o (c-free (car (cdr xs)) up (c-free (car xs) bound acc))))
+                 (c-free-items (cdr items) (the syms (cons (c-converter "down-" (car ns)) up)) o)))
+              ((= k 2)
+               (let ((o (c-free (car xs) bound acc)))
+                 (c-free-items (cdr items) (the syms (cons (car ns) bound)) o)))
+              (else
+               (let ((inner (c-names ns bound)))
+                 (c-free-items (cdr items) inner (c-free-all xs inner acc)))))))))
   (c-free-arms
     (subr c-walks (c-cases syms syms) syms)
     (lambda (arms bound acc)
@@ -651,6 +738,10 @@
           (and (c-calls-only s f n #f loops)
                (c-calls-only-arms arms f n tail loops)
                (c-calls-only-else els f n tail loops)))
+        ;; Said of no module (as the Rust compiler's `loops_only` and
+        ;; `called_only` say).
+        (e-module (items a b) #f)
+        (e-with (m body a b) #f)
         (else y #t))))
   ;; The same for the body of a lambda or a prompt in `x`: where `loops`
   ;; asks, no call there is in tail position, so it may not mention `f`.

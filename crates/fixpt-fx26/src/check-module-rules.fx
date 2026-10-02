@@ -86,6 +86,7 @@
                (k (extract it 1))
                (next (cond
                        ((= k 0) (k-module-abs it a b made))
+                       ((or (< k 0) (> k 3)) made)
                        ((= k 1)
                         (let ((t (k-resolve-selects (car (extract it 4)) a b)))
                           (k-made-of (extract made 1)
@@ -108,7 +109,7 @@
                       a b))))))
 ;; `(module item …)`: each item checked in the scope of those before it;
 ;; the module's type, its abstract types bound in it.
-(define k-synth-module (subr (maxeff checks spin) (kx k-items int int) k-te)
+(define k-synth-module-here (subr (maxeff checks spin) (kx k-items int int) k-te)
   (lambda (x items a b)
     (let* ((saved (k-mark))
            (named (get k-skolems))
@@ -122,6 +123,18 @@
            (abs (k-parts-reversed (extract made 1) nil))
            (t (k-ty-new (ty-module abs (k-parts-reversed (extract made 2) nil) vs))))
       (k-te-masked x t (extract made 4)))))
+;; The same; a module read from a file (`load-module`, M7) seeing only the
+;; standard environment, what is wrong in it said where it is read.
+(define k-synth-module (subr (maxeff checks spin) (kx k-items int int) k-te)
+  (lambda (x items a b)
+    (let ((k (if (null? items) 0 (extract (car items) 1))))
+      (if (< k 4)
+          (k-synth-module-here x items a b)
+          (let ((got (the (ref k-te @t) (new (k-te 0 nil)))) (hid (get k-hide-mark)))
+            (begin (set k-hide-mark (k-mark))
+                   (k-in-loaded (lambda () (set got (k-synth-module-here x items a b))) k a b)
+                   (set k-hide-mark hid)
+                   (get got)))))))
 
 ;;; ------------------------------------------------------------ with
 
@@ -165,47 +178,177 @@
 
 ;;; ------------------------------------------------------------ subtyping
 
-;; A module type's abstract types, as binders of kind `type`.
-(define k-abs-binders (subr (maxeff (read @globals) (alloc @t)) (k-parts) k-binders)
-  (lambda (ps)
-    (if (null? ps) nil (cons (product (1 (extract (car ps) 2)) (2 2)) (k-abs-binders (cdr ps))))))
-(define k-same-comp-names? (subr kreads (k-parts k-parts) bool)
+;; The type part `n` of `ps` is, or -1.
+(define k-part-of (subr (maxeff kreads spin) (k-parts symbol) int)
+  (lambda (ps n)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
+          (else (k-part-of (cdr ps) n)))))
+;; Whether a name of `xs` is one of `ys`'s.
+(define k-comps-meet? (subr (maxeff kreads spin) (k-parts k-parts) bool)
+  (lambda (xs ys)
+    (and (not (null? xs))
+         (or (>= (k-part-of ys (extract (car xs) 1)) 0) (k-comps-meet? (cdr xs) ys)))))
+;; Whether `xs` and `ys` are values of the same names, in order.
+(define k-same-names? (subr (maxeff kreads spin) (k-parts k-parts) bool)
   (lambda (xs ys)
     (if (null? xs)
         (null? ys)
         (and (not (null? ys))
              (symbol=? (extract (car xs) 1) (extract (car ys) 1))
-             (k-same-comp-names? (cdr xs) (cdr ys))))))
-;; Components `xs` and `ys`, pairwise of one name, each the same type
-;; (`same`) or each `x ≤ y`.
-(define k-comps-sub?
-  (subr (maxeff kstate spin) (bool k-parts k-parts k-benv k-benv k-strail k-labels) bool)
-  (lambda (same xs ys ea eb trail labels)
-    (or (null? xs)
-        (let ((x (extract (car xs) 2)) (y (extract (car ys) 2)))
-          (and (symbol=? (extract (car xs) 1) (extract (car ys) 1))
-               (if same (k-inv x y ea eb trail labels) (k-sub x y ea eb trail labels))
-               (k-comps-sub? same (cdr xs) (cdr ys) ea eb trail labels))))))
-;; Modules of the same components, in order (`first-class-modules.md`, M1):
-;; the abstract types paired as binders, as a `poly`'s are; descriptions
-;; the same; values covariant.
+             (k-same-names? (cdr xs) (cdr ys))))))
+;; Each abstract type of `ab` (from position `i`) paired with `aa`'s of its
+;; name, as a `poly`'s binders are, in the environments `es`; or met by a
+;; description of `da`'s. None, if one is neither.
+(define k-pair-abs
+  (subr (maxeff kstate spin) (k-parts k-parts k-parts int int int k-benvs k-labels)
+        (listof k-benvs acyclic))
+  (lambda (ab aa da a b i es labels)
+    (if (null? ab)
+        (the (listof k-benvs acyclic) (cons es nil))
+        (let* ((n (extract (car ab) 1)) (x (k-part-of aa n)))
+          (cond
+            ((>= x 0)
+             (let* ((l (k-label labels a b i))
+                    (ea (k-benv-set (car es) x l))
+                    (eb (k-benv-set (cdr es) (extract (car ab) 2) l)))
+               (k-pair-abs (cdr ab) aa da a b (+ i 1) (the k-benvs (cons ea eb)) labels)))
+            ((>= (k-part-of da n) 0) (k-pair-abs (cdr ab) aa da a b (+ i 1) es labels))
+            (else nil))))))
+;; Each binder named in `ea`, as the type of the name its pair was given.
+(define k-labels-map (subr (maxeff kstate spin) (k-benv) k-map)
+  (lambda (ea)
+    (if (null? ea)
+        nil
+        (let ((t (k-ty-new (ty-var (cdr (car ea))))))
+          (the k-map (cons (cons (car (car ea)) (dt t)) (k-labels-map (cdr ea))))))))
+;; `b`'s abstract types (`ab`) that `a` defines (`da`, not abstract in `aa`):
+;; each as that definition, `m` naming `a`'s own abstract types in it.
+(define k-defined-map (subr (maxeff kstate spin) (k-parts k-parts k-parts k-map) k-map)
+  (lambda (ab aa da m)
+    (if (null? ab)
+        nil
+        (let* ((n (extract (car ab) 1))
+               (d (if (>= (k-part-of aa n) 0) -1 (k-part-of da n)))
+               (rest (k-defined-map (cdr ab) aa da m)))
+          (if (< d 0)
+              rest
+              (the k-map (cons (cons (extract (car ab) 2) (dt (k-subst d m))) rest)))))))
+;; For the pair of module types `a` and `b`, met before in this question, the
+;; wanted one's descriptions and values with its abstract types the given
+;; one's transparent ones: made once, so that a recursive type meets the same
+;; pair again, which the trail catches. Kept with the question's labels, at
+;; position -1, as a module type of no abstract types.
+(define k-module-memo (subr (maxeff kreads spin) (k-label-list int int) int)
+  (lambda (ls a b)
+    (cond ((null? ls) -1)
+          ((k-label-of? (car ls) a b -1) (extract (car ls) 4))
+          (else (k-module-memo (cdr ls) a b)))))
+(define k-module-parts
+  (subr (maxeff kstate spin) (int int k-parts k-parts k-parts k-parts k-parts k-benv k-labels) int)
+  (lambda (a b aa da ab db vb ea labels)
+    (let ((known (k-module-memo (get labels) a b)))
+      (if (>= known 0)
+          known
+          (let* ((by (k-defined-map ab aa da (k-labels-map ea)))
+                 (bd (k-subst-each db by))
+                 (bv (k-subst-each vb by))
+                 (t (k-ty-new (ty-module nil bd bv))))
+            (begin (set labels (cons (product (1 a) (2 b) (3 -1) (4 t)) (get labels))) t))))))
+;; Each description of `bd` one of `da`'s, the same.
+(define k-descs-same?
+  (subr (maxeff kstate spin) (k-parts k-parts k-benv k-benv k-strail k-labels) bool)
+  (lambda (bd da ea eb trail labels)
+    (or (null? bd)
+        (let ((x (k-part-of da (extract (car bd) 1))))
+          (and (>= x 0) (k-inv x (extract (car bd) 2) ea eb trail labels)
+               (k-descs-same? (cdr bd) da ea eb trail labels))))))
+;; Each value of `va` a subtype of `bv`'s, pairwise.
+(define k-vals-sub?
+  (subr (maxeff kstate spin) (k-parts k-parts k-benv k-benv k-strail k-labels) bool)
+  (lambda (va bv ea eb trail labels)
+    (or (null? va)
+        (and (k-sub (extract (car va) 2) (extract (car bv) 2) ea eb trail labels)
+             (k-vals-sub? (cdr va) (cdr bv) ea eb trail labels)))))
+;; Module type `a` ≤ `b` (`first-class-modules.md`, M4): each abstract type
+;; of `b`'s an abstract type of `a`'s (paired as a `poly`'s binders are) or
+;; a transparent one (`b`'s abstract type is then what `a` says it is); each
+;; description of `b`'s one of `a`'s, the same; and their values the same
+;; names, in order, each `a`'s a subtype of `b`'s, since a module is a
+;; product of its values. Fewer values, or another order, `k-expect` makes by
+;; reshaping (`k-reshape`).
 (define k-sub-modules k-sub-rule
   (lambda (a b ta tb ea eb trail labels)
     (tagcase ta
+      ;; `(select $k x)`: only itself.
+      (ty-param (k x) (tagcase tb (ty-param (j y) (and (= k j) (symbol=? x y))) (else z #f)))
       (ty-module (aa da va)
         (tagcase tb
           (ty-module (ab db vb)
-            (and (k-same-comp-names? aa ab)
-                 (= (k-length da) (k-length db))
-                 (= (k-length va) (k-length vb))
-                 (let* ((es (the k-benvs (cons ea eb)))
-                        (ba (k-abs-binders aa))
-                        (named (k-name-binders ba (k-abs-binders ab) a b 0 es labels)))
-                   (and (k-comps-sub? #t da db (car named) (cdr named) trail labels)
-                        (k-comps-sub? #f va vb (car named) (cdr named) trail labels)))))
+            (and (not (k-comps-meet? aa db))
+                 (k-same-names? va vb)
+                 (let ((paired (k-pair-abs ab aa da a b 0 (the k-benvs (cons ea eb)) labels)))
+                   (and (not (null? paired))
+                        (let* ((ia (car (car paired))) (ib (cdr (car paired)))
+                               (parts (k-module-parts a b aa da ab db vb ia labels)))
+                          (tagcase (k-get parts)
+                            (ty-module (none bd bv)
+                              (and (k-descs-same? bd da ia ib trail labels)
+                                   (k-vals-sub? va bv ia ib trail labels)))
+                            (else z #f)))))))
           (else z #f)))
       (else z #f))))
 (set k-sub-module k-sub-modules)
+
+;; Where in `vs` the value named `n` first is, from `i`; or -1.
+(define k-val-position (subr (maxeff kreads spin) (k-parts symbol int) int)
+  (lambda (vs n i)
+    (cond ((null? vs) -1)
+          ((symbol=? (extract (car vs) 1) n) i)
+          (else (k-val-position (cdr vs) n (+ i 1))))))
+;; Each of `wanted`'s values' position in `vs`; none if one is not there.
+(define k-positions (subr (maxeff kreads (alloc @t) spin) (k-parts k-parts) (listof k-ids acyclic))
+  (lambda (wanted vs)
+    (if (null? wanted)
+        (the (listof k-ids acyclic) (cons (the k-ids nil) nil))
+        (let ((k (k-val-position vs (extract (car wanted) 1) 0))
+              (rest (k-positions (cdr wanted) vs)))
+          (if (or (< k 0) (null? rest))
+              nil
+              (the (listof k-ids acyclic) (cons (the k-ids (cons k (car rest))) nil)))))))
+;; Whether `at` is each position of `n`, in order, from `i`.
+(define k-in-order? (subr (maxeff (read @globals) spin) (k-ids int int) bool)
+  (lambda (at n i) (if (null? at) (= i n) (and (= (car at) i) (k-in-order? (cdr at) n (+ i 1))))))
+;; The values of `vs` at positions `at`.
+(define k-vals-at (subr (maxeff kreads (alloc @t) spin) (k-parts k-ids) k-parts)
+  (lambda (vs at) (if (null? at) nil (cons (k-nth vs (car at)) (k-vals-at vs (cdr at))))))
+;; A module of type `got` made one of type `want`, which has fewer of its
+;; values or the same in another order: each of `want`'s values' position in
+;; `got`, if `got`'s values so chosen fit `want`; none otherwise.
+(define k-reshape (subr (maxeff kstate spin) (int int) (listof k-ids acyclic))
+  (lambda (got want)
+    (tagcase (k-get got)
+      (ty-module (abs ds vs)
+        (tagcase (k-get want)
+          (ty-module (wa wd wanted)
+            (let ((at (k-positions wanted vs)))
+              (if (or (null? at) (k-in-order? (car at) (k-length vs) 0))
+                  nil
+                  (let ((t (k-ty-new (ty-module abs ds (k-vals-at vs (car at))))))
+                    (if (k-subtype t want) at nil)))))
+          (else z nil)))
+      (else z nil))))
+;; Where `x`, of type `got`, is wanted as a `want`: reshaped, if it may be,
+;; and noted so (`k-reshapes`).
+(define k-reshape-at (subr (maxeff checks spin) (kx int int) bool)
+  (lambda (x got want)
+    (let ((at (k-reshape got want)))
+      (if (null? at)
+          #f
+          (begin (set k-reshapes (cons (product (1 (k-start x)) (2 (k-end x)) (3 (car at)))
+                                       (get k-reshapes)))
+                 #t)))))
+(set k-reshape-hook k-reshape-at)
 
 ;;; ------------------------------------------------------------ termination
 
@@ -221,7 +364,7 @@
           (cond ((= k 0)
                  (let ((inner (k-sc-hide-names (k-conversions-onto (car ns) nil) sc)))
                    (k-sc-walk-items (cdr items) inner gs)))
-                ((= k 1) (k-sc-walk-items (cdr items) sc gs))
+                ((or (= k 1) (< k 0) (> k 3)) (k-sc-walk-items (cdr items) sc gs))
                 ((= k 2)
                  (begin (k-sc-walk-list (extract it 5) sc gs)
                         (k-sc-walk-items (cdr items) (k-sc-hide-names ns sc) gs)))
