@@ -147,6 +147,11 @@ fn fx26_int(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
     }
 }
 
+/// The name of the word `%run-word` makes to call a closure, run once: a
+/// machine that compiles what it runs compiles what this reaches, not it,
+/// whose code would never be freed.
+pub const CALL_CLOSURE: &str = "call-closure";
+
 /// `%run-word`'s work, by the machine `run`.
 fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Outcome<Value> {
     let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
@@ -162,7 +167,7 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
             cells.extend([f(routine("lit")), *x]);
         }
         cells.extend([f(routine("lit")), a[0], f(routine("call")), f(args.len() as u64), f(routine("exit"))]);
-        let name = rt.heap.intern("call-closure");
+        let name = rt.heap.intern(CALL_CLOSURE);
         match rt.heap.make_cellular_word(name, &cells) {
             Ok(w) => (w, Vec::new()),
             Err(e) => return rt.fail(&e, &[a[0]]),

@@ -16,9 +16,18 @@ from the references.
 
 ## Reading a `fixpt bench` table
 
-Commit messages carry a table like this one, from `fixpt bench`: FX-26
-programs (`crates/fixpt-fx26/tests/programs/bench`), each run every way
-this repository has of running FX-26, best of 3, in milliseconds.
+Commit messages carry two tables from `fixpt bench`: how long FX-26
+programs (`crates/fixpt-fx26/tests/programs/bench`) take to run, and how
+long they, and the front end, take to compile. Times are best of 3, in
+milliseconds.
+
+### The run table
+
+Each program run every way this repository has of running FX-26, the run
+alone: checking and compiling, to words and to machine code, are done
+before the clock starts. (Before 2026-10-02 the `lowered` column also
+counted checking and lowering, and so was higher; `docs/performance.md`
+has the history.)
 
 ```
 | program | answer | lowered | rust  | hand | stencils | compiled | registers | native | M words | GCs |
@@ -43,8 +52,40 @@ code. The columns differ in what runs those words.
 | `GCs`       | collections during the `native` run, minor and major                                                                                                                                      |
 
 `native` is the one that counts for speed; the others are kept running as
-references and to catch disagreements. `fixpt bench --help` says the same,
-and `docs/performance.md` keeps the history.
+references and to catch disagreements.
+
+### The compile table
+
+```
+| program   | check  | lower | words | arm64 | registers | native | fx read | fx parse | fx check | fx words | fx arm64 | fx M words | fx GCs |
+| fib       | 0.43   | 0.01  | 0.04  | 0.01  | 0.01      | 0.02   | 0.64    | 0.02     | 1.13     | 0.20     | 0.45     | 0.1        | 0      |
+| front end | 393.10 | 15.60 | 67.50 | 7.00  | 19.20     | —      | 4871.30 | 21.20    | 1366.70  | 746.80   | 984.30   | 326.7      | 311    |
+```
+
+Each phase of compiling, timed alone, from what the phase before made.
+The left half is the Rust front end and back ends; the `fx` half is the
+pieces written in FX-26, run as the REPL runs them. The last row is the
+front end itself (its files and bootstrap): the one large program, where
+compile-time changes show.
+
+| column       | what was timed                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| `check`      | the Rust checker, reading included                                                               |
+| `lower`      | lowering what it checked to Scheme                                                               |
+| `words`      | the Rust compiler to cellular words, register code included                                      |
+| `arm64`      | every word's cells assembled to arm64 by the Rust `assemble_word` (not placed)                   |
+| `registers`  | the same, a word's register code where it has some                                               |
+| `native`     | `direct.rs` compiling the procedure the run table's `native` column calls; `—` where it has none |
+| `fx read`    | the reader written in FX-26: lowered, on the bytecode engine, as the REPL runs it                |
+| `fx parse`   | the parser written in FX-26, as the front end's register code                                    |
+| `fx check`   | the checker written in FX-26, likewise                                                           |
+| `fx words`   | the compiler written in FX-26, register code included                                            |
+| `fx arm64`   | every word's cells assembled to arm64 by `native.fx` (not placed), as `fx-compiled` does         |
+| `fx M words` | millions of words the `fx` phases allocated                                                      |
+| `fx GCs`     | their collections, minor and major                                                               |
+
+`fixpt bench --help` says the same, `--tables run` or `--tables compile`
+prints one, and `docs/performance.md` keeps the history.
 
 ## Status
 
@@ -453,9 +494,10 @@ The rest of the detail:
   for word over the whole front end). It takes longer to make them: `,time`
   counts that as codegen. `native.fx` has no register code, so
   `fx-compiled` runs words' cells, as `native-compiled` does.
-- **`fixpt bench`** compiles its programs with the Rust compiler
-  (`fixpt_fx26::cellular::Compiler`), so all its compiled columns are Rust
-  in both stages.
+- **`fixpt bench`**'s run table compiles its programs with the Rust
+  compiler (`fixpt_fx26::cellular::Compiler`), so all its compiled
+  columns are Rust in both stages. Its compile table times both
+  compilers' phases, `native.fx` included.
 - **The front end** (the reader, checker and compilers written in FX-26)
   runs as register code, compiled by the Rust compiler and made arm64 by
   the Rust register-code assembler, whatever `--cellular-machine` says. It

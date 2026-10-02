@@ -1695,7 +1695,17 @@ impl NativeMachine {
             if entry != ROUTINE_DOCOL && entry < PRIMITIVES as u64 {
                 continue;
             }
-            for k in WORD_CELL0..=heap.bloblet_head(w).fields {
+            // The word `%run-word` made to call a closure is run once, as
+            // cells: compiled, it would hold code space and a slot for good.
+            // Only the closure it calls is code; the rest of its operands
+            // are the arguments, data, though they may be words.
+            let fields = heap.bloblet_head(w).fields;
+            if w == word && heap.symbol_name(heap.bloblet_slot(w, WORD_NAME)) == fixpt_runtime::prim::CALL_CLOSURE {
+                // `… lit closure call n exit`
+                todo.push(heap.bloblet_slot(heap.bloblet_slot(w, fields - 3), CLOSURE_WORD));
+                continue;
+            }
+            for k in WORD_CELL0..=fields {
                 let v = heap.bloblet_slot(w, k);
                 if heap.is_cellular_word(v) {
                     todo.push(v);

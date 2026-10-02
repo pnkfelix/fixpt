@@ -166,42 +166,62 @@ pub fn compile_with_fx26_compiler_showing(
 }
 
 /// When the runtime places code made elsewhere (its `place_code`): every
-/// word made of cells that `word` reaches through its cells and operands,
-/// compiled to machine code by the compiler written in FX-26 (`native.fx`'s
-/// `native-assemble`) and placed, as `fixpt_native`'s `compile_reachable`
-/// does with the compiler written in Rust. The time is compiling's.
+/// word made of cells that `word` reaches, compiled to machine code by the
+/// compiler written in FX-26 and placed ([`assemble_reachable_by_fx26`]).
+/// The time is compiling's.
 fn assemble_by_fx26(s: &mut Session, word: Handle) -> Result<(), String> {
-    use fixpt_heap::layout::cellular::{CLOSURE_WORD, ROUTINE_DOCOL, WORD_CELL0, WORD_ENTRY};
     let Some(place) = s.runtime_unrooted().place_code else { return Ok(()) };
     let start = std::time::Instant::now();
+    let r = assemble_reachable_by_fx26(s, word, &mut |heap, w, code, starts| place(heap, w, code, starts));
+    s.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
+    r
+}
+
+/// The words made of cells (not yet compiled) that `word` reaches through
+/// its cells and operands, `word` too if it is one: what `fixpt_native`'s
+/// `compile_reachable` compiles.
+pub fn cell_words_reachable(heap: &fixpt_heap::Heap, word: Value) -> Vec<Value> {
+    use fixpt_heap::layout::cellular::{CLOSURE_WORD, PRIMITIVES, ROUTINE_DOCOL, WORD_CELL0, WORD_ENTRY};
+    let closure = fixpt_heap::layout::kind("cellular-closure");
+    let (mut todo, mut seen, mut found) = (vec![word], std::collections::HashSet::new(), Vec::new());
+    while let Some(w) = todo.pop() {
+        if !seen.insert(w.raw()) {
+            continue;
+        }
+        let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum() as u64;
+        if entry != ROUTINE_DOCOL && entry < PRIMITIVES as u64 {
+            continue;
+        }
+        for k in WORD_CELL0..=heap.bloblet_head(w).fields {
+            let v = heap.bloblet_slot(w, k);
+            if heap.is_cellular_word(v) {
+                todo.push(v);
+            } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
+                todo.push(heap.bloblet_slot(v, CLOSURE_WORD));
+            }
+        }
+        if entry == ROUTINE_DOCOL {
+            found.push(w);
+        }
+    }
+    found
+}
+
+/// Every word made of cells that `word` reaches
+/// ([`cell_words_reachable`]), compiled to machine code by the compiler
+/// written in FX-26 (`native.fx`'s `native-assemble`) and given to `place`
+/// with the heap: its instructions, and where each cell's start.
+pub fn assemble_reachable_by_fx26(
+    s: &mut Session,
+    word: Handle,
+    place: &mut dyn FnMut(&mut fixpt_heap::Heap, Value, &[u32], &[i64]) -> Result<(), String>,
+) -> Result<(), String> {
     // Found where nothing can collect, then rooted: running the compiler
     // may collect.
     let mut found = Vec::new();
     s.make(|m| {
         let first = m.get(word);
-        let heap = m.heap();
-        let closure = fixpt_heap::layout::kind("cellular-closure");
-        let (mut todo, mut seen) = (vec![first], std::collections::HashSet::new());
-        while let Some(w) = todo.pop() {
-            if !seen.insert(w.raw()) {
-                continue;
-            }
-            let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum() as u64;
-            if entry != ROUTINE_DOCOL && entry < fixpt_heap::layout::cellular::PRIMITIVES as u64 {
-                continue;
-            }
-            for k in WORD_CELL0..=heap.bloblet_head(w).fields {
-                let v = heap.bloblet_slot(w, k);
-                if heap.is_cellular_word(v) {
-                    todo.push(v);
-                } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
-                    todo.push(heap.bloblet_slot(v, CLOSURE_WORD));
-                }
-            }
-            if entry == ROUTINE_DOCOL {
-                found.push(w);
-            }
-        }
+        found = cell_words_reachable(m.heap(), first);
         Value::NULL
     });
     let words: Vec<Handle> = found.into_iter().map(|w| s.make(|_| w)).collect();
@@ -228,7 +248,6 @@ fn assemble_by_fx26(s: &mut Session, word: Handle) -> Result<(), String> {
         });
         placed?;
     }
-    s.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
     Ok(())
 }
 
@@ -512,8 +531,13 @@ pub fn compile_checked_to_word(scheme: &mut Session, file: FileId, facts: Handle
 }
 
 pub fn compile_to_word(scheme: &mut Session, file: FileId, text: &str, facts: Handle) -> R<Result<Handle, String>> {
-    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let tops = parse_to_trees(scheme, file, text)?;
+    compile_trees_to_word(scheme, file, tops, facts)
+}
+
+/// The same, from the program's trees ([`parse_syns`]).
+pub fn compile_trees_to_word(scheme: &mut Session, file: FileId, tops: Handle, facts: Handle) -> R<Result<Handle, String>> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let result = scheme.call_global(&format!("{READER_PREFIX}compile-program"), &[tops, facts]).map_err(|e| fail(e.to_string()))?;
     word_of(scheme, result)
 }
@@ -538,9 +562,15 @@ fn word_of(scheme: &mut Session, result: Handle) -> R<Result<Handle, String>> {
 /// The parser's trees for `text`: a list of `top`s, as a handle in the
 /// caller's scope.
 fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
-    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     supply_loaded(scheme, file, text)?;
     let syns = read_to_syns(scheme, file, text)?;
+    parse_syns(scheme, file, text, syns)
+}
+
+/// What the parser written in FX-26 makes of `syns`, read from `text`
+/// ([`read_to_syns`]): the program's trees, or where it is wrong.
+pub fn parse_syns(scheme: &mut Session, file: FileId, text: &str, syns: Handle) -> R<Handle> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let result = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[syns]).map_err(|e| fail(e.to_string()))?;
     let (tag, err) = scheme.view(|v| {
         let r = v.get(result);

@@ -2211,3 +2211,56 @@ time goes; kept because it is right, and tidier code to read.
 | earley    | 5.21 5.13   | 5.12 5.13   |
 | nboyer    | 5.87 6.01   | 5.85 5.85   |
 | destruc   | 24.64 24.51 | 24.06 23.93 |
+
+## Compile time in the bench (2026-10-02)
+
+`fixpt bench` prints two tables now (README, "Reading a `fixpt bench`
+table"), both in every commit message, so that a change's cost to
+compiling shows beside what it does to running.
+
+The run table is the run alone in every column. Two columns changed how
+they measure:
+- `lowered` counted the Rust checker and lowering until now. It is now the
+  lowered Scheme's evaluation only, the bytecode engine's own quick
+  compile included. The bench programs are small, so the change is small:
+  fib 125.5 → 120.8, captures 105.6 → 105.1.
+- `compiled` and `registers` compiled their words to arm64 in the first of
+  their runs. The best of 3 hid that, but `--runs 1` did not. They are now
+  compiled before the clock starts.
+
+The compile table times each phase alone. Its last row is the front end
+itself, its files and bootstrap (best of 3, ms):
+
+| phase             | Rust  | FX-26  |
+| ----------------- | ----- | ------ |
+| read              | —     | 4974.6 |
+| parse             | —     | 23.0   |
+| check             | 394.0 | 1385.0 |
+| lower             | 14.8  | —      |
+| words             | 70.1  | 756.8  |
+| arm64 (cells)     | 7.0   | 978.9  |
+| arm64 (registers) | 19.7  | —      |
+
+The Rust `check` includes reading. What stands out:
+- **The FX-26 reader** runs lowered on the bytecode engine, as the REPL
+  runs it, and takes 5 s on the front end's 1.0 M characters: the slowest
+  phase by far. It is the one piece not run as register code (above,
+  "Start-up").
+- **`native.fx`** takes 140 times as long as `assemble_word` (979 ms
+  against 7 ms). It allocates heavily: most of the `fx` phases' 327 M words
+  and 311 collections.
+- The FX-26 checker is 3.5 times the Rust one, and the FX-26 compiler 11
+  times.
+
+Building this found a leak. Every call into the front end
+(`%run-front-end`), and every `%run-word` of a closure, makes a
+`call-closure` word: `lit` per argument, then `lit closure call n exit`.
+The register machine compiled that word, and every word among its
+arguments, into code space and a native slot that are never freed. That
+was 2–5 KB a call; with the front end's own 26 MB of the 32 MB code space,
+a few thousand calls filled it. A long REPL session under `--fx26-run
+cellular` would have hit "the code space is full". It also meant that
+`fx-compiled`'s first `native-assemble` had the Rust assembler compile the
+whole program it was given before `native.fx`'s code replaced it.
+`compile_reachable_as` now runs that word as cells and follows only the
+closure it calls.
