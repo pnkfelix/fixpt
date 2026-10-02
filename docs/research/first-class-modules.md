@@ -156,15 +156,16 @@ products and `let`s, if the checker gives them those.
 
 ## Stages
 
-| stage | what                                                                                                   | where                                       |
-| ----- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| M1    | `module`, `moduleof`, `with`, `select` on variables; abstract, transparent and value components; types | Rust checker, lowering; REPL                |
-| M2    | the same in the FX-26 checker and parser, the checkers agreeing                                        | `check-*.fx`, `parser.fx`                   |
-| M3    | both compilers and native code: modules as products, `with` as `extract`s                              | `cellular.rs`, `compile*.fx`, register code |
-| M4    | subtyping of module types: width, and a transparent component where an abstract one is expected        | both checkers                               |
-| M5    | dependent subroutines (named parameters), application by path, `let` opacity                           | both checkers                               |
-| M6    | dot shorthand; paths through module components                                                         | reader, both checkers                       |
-| later | abstract regions and effects; `plambda` over regions making modules                                    | both checkers                               |
+| stage | what                                                                                                      | where                                       |
+| ----- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| M1    | `module`, `moduleof`, `with`, `select` on variables; abstract, transparent and value components; types    | Rust checker, lowering; REPL                |
+| M2    | the same in the FX-26 checker and parser, the checkers agreeing                                           | `check-*.fx`, `parser.fx`                   |
+| M3    | both compilers and native code: modules as products, `with` as `extract`s                                 | `cellular.rs`, `compile*.fx`, register code |
+| M4    | subtyping of module types: width, and a transparent component where an abstract one is expected           | both checkers                               |
+| M5    | dependent subroutines (named parameters), application by path, `let` opacity                              | both checkers                               |
+| M6    | dot shorthand; paths through module components                                                            | reader, both checkers                       |
+| M7    | a file is a module: `(load-module "file")`, checked as a `module` that sees only the standard environment | both checkers, REPL                         |
+| later | abstract regions and effects; `plambda` over regions making modules                                       | both checkers                               |
 
 M1 alone is usable at the REPL (lowered). Each later stage keeps both
 checkers in agreement before the next begins, as the rest of FX-26 does.
@@ -175,6 +176,28 @@ Abstract regions and effects are not needed for a first deliverable:
 without them a module's types name the regions it was made at, as any
 value's do; they come when the front end's `@k` and `@t`, or another
 client, needs them.
+
+## A file is a module (M7), and separate compilation
+
+Separate compilation is not part of M1–M7 (the user's, 2026-10-01). It
+needs what `separate-compilation.md` lays out (facts keyed by file and
+offset, content stamps, a carrier for compiled words with import tables,
+cutoff by interface), a project of its own with no client yet. The two
+meet in one place, which M7 builds and Q9 later caches:
+- `(load-module "file")` reads the file, checks it as one `(module …)`,
+  and gives its value, as FX-91's `(load "file")` does
+  (`tests/conformance/fx91/cases/tests.fx`: `(let ((m (load "tests.fx")))
+  (with m x))`), and Sheldon's `(input "file")`.
+- **Its interface is its type.** The `moduleof` printed is the interface
+  file: no format of its own, so long as `moduleof` can say everything a
+  file exports.
+- **A module file sees only the standard environment**, not the REPL's
+  globals, as Sheldon's files saw only a fixed library: so a file means
+  the same in every session, and can be compiled once and loaded anywhere.
+  A module made at the REPL closes over what it likes, as any value does.
+- Its compiled form, later: the code that builds the module's product, its
+  type, and a stamp; loaded without checking again when the stamp says the
+  file and what it was checked against are unchanged.
 
 ## Open questions
 
