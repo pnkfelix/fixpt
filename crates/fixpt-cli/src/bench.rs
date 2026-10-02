@@ -12,11 +12,10 @@ use fixpt_read::FileId;
 use std::time::Instant;
 
 const USAGE: &str = "\
-usage: fixpt bench [--runs N] [--machines LIST] [--tables LIST] [FILE...]
+usage: fixpt bench [--runs N] [--machines LIST] [--tables LIST] [--front-end] [FILE...]
 
 Times FX-26 programs, best of N runs (default 3), and prints two tables.
-With no FILE, the benchmarks in crates/fixpt-fx26/tests/programs/bench,
-and in the compile table the front end too.
+With no FILE, the benchmarks in crates/fixpt-fx26/tests/programs/bench.
 
 The run table: each way of running them, the run alone (checking and
 compiling are done before the clock starts); an answer that differs from
@@ -32,9 +31,9 @@ the lowered one is marked `✗`. Machines (--machines, default: all):
               last line calls, on integer literals, compiled and called
               (`—` if the last line is not such a call, or it is declined)
 
-The compile table: each phase alone, for each program and (with no FILE)
-for the front end, the FX-26 reader, checker and compilers with their
-bootstrap:
+The compile table: each phase alone, for each program; with --front-end,
+also for the front end (the FX-26 reader, checker and compilers with
+their bootstrap), once (about 10 s, most of it the lowered reader):
   check       the Rust checker (reading included)
   lower       lowering what it checked to Scheme
   words       the Rust compiler to cellular words, register code included
@@ -60,7 +59,7 @@ type Run = fn(&mut fixpt_runtime::Runtime, Value, &[Value]) -> Result<Value, Str
 /// `fixpt bench …`: an exit code.
 pub fn command(args: &[String]) -> i32 {
     let (mut runs, mut wanted, mut files) = (3usize, None::<Vec<String>>, Vec::new());
-    let (mut run_table, mut compile_table) = (true, true);
+    let (mut run_table, mut compile_table, mut front_end) = (true, true, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -82,6 +81,7 @@ pub fn command(args: &[String]) -> i32 {
                 }
                 None => return usage("`--tables` wants a list"),
             },
+            "--front-end" => front_end = true,
             "-h" | "--help" => {
                 print!("{USAGE}");
                 return 0;
@@ -103,7 +103,6 @@ pub fn command(args: &[String]) -> i32 {
     if fixpt_native::stencil::opt_levels().is_empty() {
         machines.retain(|m| *m != "stencils");
     }
-    let front_end = files.is_empty();
     if files.is_empty() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/bench");
         let Ok(entries) = std::fs::read_dir(dir) else { return usage("no FILE, and the benchmarks are not where this build expects") };
@@ -395,7 +394,9 @@ fn compile_table_of(programs: &[(String, String)], runs: usize, with_front_end: 
     let mut rows = Vec::new();
     for (name, text) in programs.iter().chain(with_front_end.then_some(&front_end)) {
         eprintln!("fixpt bench: compiling {name}…");
-        match compile_row(&mut fx, name, text, runs, name != &front_end.0) {
+        // The front end's phases take seconds: once is enough.
+        let (runs, native) = if name == &front_end.0 { (1, false) } else { (runs, true) };
+        match compile_row(&mut fx, name, text, runs, native) {
             Ok(r) => rows.push(r),
             Err(e) => {
                 eprintln!("fixpt bench: compiling {name}: {e}");
@@ -411,7 +412,8 @@ fn compile_table_of(programs: &[(String, String)], runs: usize, with_front_end: 
         .map(|h| h.to_string())
         .collect();
     print_table(&header, &rows, 1);
-    println!("\ncompile phases alone: best of {runs} run(s), in milliseconds; fx M words and GCs: the fx phases' (the last run's).");
+    let once = if with_front_end { "; the front end once" } else { "" };
+    println!("\ncompile phases alone: best of {runs} run(s){once}, in milliseconds; fx M words and GCs: the fx phases' (the last run's).");
     0
 }
 

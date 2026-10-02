@@ -2228,8 +2228,10 @@ they measure:
   their runs. The best of 3 hid that, but `--runs 1` did not. They are now
   compiled before the clock starts.
 
-The compile table times each phase alone. Its last row is the front end
-itself, its files and bootstrap (best of 3, ms):
+The compile table times each phase alone. With `--front-end` (opt-in:
+it adds about 10 s, too much for every commit) a last row is the front
+end itself, its files and bootstrap (here best of 3, ms; it is now run
+once):
 
 | phase             | Rust  | FX-26  |
 | ----------------- | ----- | ------ |

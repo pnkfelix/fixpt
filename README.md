@@ -18,8 +18,7 @@ from the references.
 
 Commit messages carry two tables from `fixpt bench`: how long FX-26
 programs (`crates/fixpt-fx26/tests/programs/bench`) take to run, and how
-long they, and the front end, take to compile. Times are best of 3, in
-milliseconds.
+long they take to compile. Times are best of 3, in milliseconds.
 
 ### The run table
 
@@ -64,9 +63,11 @@ references and to catch disagreements.
 
 Each phase of compiling, timed alone, from what the phase before made.
 The left half is the Rust front end and back ends; the `fx` half is the
-pieces written in FX-26, run as the REPL runs them. The last row is the
-front end itself (its files and bootstrap): the one large program, where
-compile-time changes show.
+pieces written in FX-26, run as the REPL runs them. With `--front-end`,
+a last row is the front end itself (its files and bootstrap), compiled
+once: about 10 s more, half of it the reader, which runs lowered. It is
+left out of the commit tables to keep the loop quick; turn it on to look
+into compile time.
 
 | column       | what was timed                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------ |
