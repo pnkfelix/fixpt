@@ -356,6 +356,21 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         withs = scheme.call_global("cons", &[one, withs]).map_err(|e| fail(e.to_string()))?;
     }
     scheme.call_global(&format!("{READER_PREFIX}checked-withs!"), &[withs]).map_err(|e| fail(e.to_string()))?;
+    // And each module reshaped, with the positions it keeps (`checked-reshapes!`).
+    let mut reshapes = scheme.make(|_| Value::NULL);
+    for (e, at) in &c.facts.reshaped {
+        let span = c.arena.span_of(*e);
+        let mut ks = scheme.make(|_| Value::NULL);
+        for k in at.iter().rev() {
+            let k = scheme.make(|_| Value::fixnum(*k as i64));
+            ks = scheme.call_global("cons", &[k, ks]).map_err(|e| fail(e.to_string()))?;
+        }
+        let (a, b) = (scheme.make(|_| Value::fixnum(char_at(span.start))), scheme.make(|_| Value::fixnum(char_at(span.end))));
+        let tag = scheme.make(|_| Value::fixnum(37));
+        let one = scheme.call_global("%make-frozen", &[tag, a, b, ks]).map_err(|e| fail(e.to_string()))?;
+        reshapes = scheme.call_global("cons", &[one, reshapes]).map_err(|e| fail(e.to_string()))?;
+    }
+    scheme.call_global(&format!("{READER_PREFIX}checked-reshapes!"), &[reshapes]).map_err(|e| fail(e.to_string()))?;
     let mut list = scheme.make(|_| Value::NULL);
     for (a, b, i) in facts {
         let args = [37, a, b, i].map(|n| scheme.make(|_| Value::fixnum(n)));

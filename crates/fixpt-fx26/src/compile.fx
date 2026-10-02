@@ -129,6 +129,8 @@
 ;; Each `with` the checker saw (its `k-with-vals`, as `c-set-facts!` took
 ;; them): where it starts and ends, and its module's values' names, in
 ;; order.
+;; And each module reshaped (`k-reshapes`), as `c-set-facts!` took them.
+(define c-reshapes (ref k-reshape-list @k) (new nil))
 (define c-withs (ref k-with-list @k) (new nil))
 (define-type c-with-names (listof syms @k))
 (define c-with-in
@@ -142,6 +144,28 @@
 ;; if the checker did not see it.
 (define c-with-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) c-with-names)
   (lambda (a b) (c-with-in (get c-withs) a b)))
+;; The positions of the values a module reshaped from `a` to `b` keeps, in
+;; a list of one; none if it is not reshaped.
+(define c-reshape-in
+  (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-reshape-list int int) (listof k-ids @k))
+  (lambda (rs a b)
+    (cond ((null? rs) nil)
+          ((and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
+           (the (listof k-ids @k) (cons (extract (car rs) 3) nil)))
+          (else (c-reshape-in (cdr rs) a b)))))
+(define c-reshape-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (exp) (listof k-ids @k))
+  (lambda (x) (c-reshape-in (get c-reshapes) (exp-start x) (exp-end x))))
+;; Whether one of `rs` reshapes the module from `a` to `b`.
+(define c-reshaped-in? (subr (maxeff (read @globals) (read @k)) (k-reshape-list int int) bool)
+  (lambda (rs a b)
+    (and (not (null? rs))
+         (or (and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
+             (c-reshaped-in? (cdr rs) a b)))))
+;; Whether `x`'s value is changed as it is given: converted to a
+;; convention, or a module reshaped.
+(define c-changed? (subr (maxeff (read @globals) (read @k)) (exp) bool)
+  (lambda (x)
+    (or (>= (c-conversion-at x) 0) (c-reshaped-in? (get c-reshapes) (exp-start x) (exp-end x)))))
 ;; An abstract type `n`'s conversion, `prefix` `up-` or `down-`.
 (define c-converter (subr (read @globals) (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
@@ -463,6 +487,7 @@
       (set c-lift-count 0)
       (set c-lifted (make-table c-int-hash c-int=?))
       (set c-withs (get k-with-vals))
+      (set c-reshapes (get k-reshapes))
       (c-fill-facts fs))))
 
 (define c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool)

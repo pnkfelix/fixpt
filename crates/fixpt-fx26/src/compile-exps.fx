@@ -195,6 +195,13 @@
       (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) ""))
       (else y ""))))
 
+;; The module in slot `depth`'s fields at positions `at`, pushed.
+(define c-reshape-fields (subr (maxeff compiles spin) (k-ids int code) unit)
+  (lambda (at depth c)
+    (if (null? at)
+        #u
+        (begin (c-op1 c routine-slot (wcell-int depth)) (c-field c (+ (car at) 2))
+               (c-reshape-fields (cdr at) depth c)))))
 ;; Each slot of `ss`, newest first, pushed, the oldest first: how many.
 (define c-slots-load (subr (maxeff c-emits spin) ((listof int @k) code) int)
   (lambda (ss c)
@@ -226,11 +233,22 @@
   ;; to `%fx26-convert` with what it is converted to.
   (c-exp (subr (maxeff compiles spin) (exp cenv int code bool) unit)
     (lambda (x e depth c tail)
-      (let ((k (c-conversion-at x)))
-        (if (< k 0)
-            (c-exp-as-is x e depth c tail)
-            (begin (c-exp-as-is x e depth c #f) (c-int c k)
-                   (c-prim c "%fx26-convert" 2) (c-done c tail))))))
+      (let ((k (c-conversion-at x)) (r (c-reshape-at x)))
+        (cond ((>= k 0)
+               (begin (c-exp-as-is x e depth c #f) (c-int c k)
+                      (c-prim c "%fx26-convert" 2) (c-done c tail)))
+              ((not (null? r)) (c-reshape x (car r) e depth c tail))
+              (else (c-exp-as-is x e depth c tail))))))
+  ;; A module reshaped (`k-reshape-at`): made, then a product of the values
+  ;; the type wanted has, by position `at`.
+  (c-reshape (subr (maxeff compiles spin) (exp k-ids cenv int code bool) unit)
+    (lambda (x at e depth c tail)
+      (begin (c-exp-as-is x e depth c #f)
+             (c-int c 37)
+             (c-reshape-fields at depth c)
+             (c-prim c "%make-frozen" (+ 1 (k-length at)))
+             (c-unbind c depth 1 #f)
+             (c-done c tail))))
   (c-exp-as-is (subr (maxeff compiles spin) (exp cenv int code bool) unit)
     (lambda (x e depth c tail)
       (tagcase x

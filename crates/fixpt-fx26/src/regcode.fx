@@ -129,6 +129,9 @@
 ;; A module or a `with` (`regcode-modules.fx`, which sets this).
 (define r-module-code (ref (subr rcompiles (rgen exp renv cenv bool) unit) @k)
   (new (lambda (g x env te tail) (r-decline))))
+;; A module reshaped, as `k-ids` says (`regcode-modules.fx`, which sets this).
+(define r-reshape-code (ref (subr rcompiles (rgen exp k-ids renv cenv bool) unit) @k)
+  (new (lambda (g x at env te tail) (r-decline))))
 
 (define r-emit (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen ritem) unit)
   (lambda (g i) (let ((items (extract g items))) (set items (cons i (get items))))))
@@ -231,7 +234,7 @@
   (lambda (env f) (tagcase f (e-var (n a b) (r-where env n)) (else y nil))))
 ;; The same, if `f` is not converted either.
 (define r-plain-var-loc (subr rbuilds (renv exp) rlocs)
-  (lambda (env f) (if (< (c-conversion-at f) 0) (r-var-loc env f) nil)))
+  (lambda (env f) (if (c-changed? f) nil (r-var-loc env f))))
 ;; The global the variable `f` is, in a list; none if it is no global.
 (define r-var-global (subr rbuilds (renv exp) (listof wglobal @k))
   (lambda (env f)
@@ -249,7 +252,7 @@
 ;; value, a closure); and not converted.
 (define r-simple? (subr rreads (exp) bool)
   (lambda (x)
-    (and (< (c-conversion-at x) 0)
+    (and (not (c-changed? x))
          (tagcase x
            (e-var (n a b) (not (c-has-standard-value? (symbol->string n))))
            (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t)

@@ -407,6 +407,35 @@
                (if (null? l) (v-nil) (v-cons (v-f64 (car l)) (v-nil)))))
             (else (ev-f64-unary n xs))))))
 ;; `e` with each binding's name bound, holding #u.
+;; The modules to reshape (`k-reshapes`), as `run-checked` was given them.
+(define ev-reshapes (ref k-reshape-list @v) (new nil))
+;; The positions a module reshaped from `a` to `b` keeps, in a list of one;
+;; none if it is not reshaped.
+(define ev-reshape-in
+  (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (k-reshape-list int int) (listof k-ids @v))
+  (lambda (rs a b)
+    (cond ((null? rs) nil)
+          ((and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
+           (the (listof k-ids @v) (cons (extract (car rs) 3) nil)))
+          (else (ev-reshape-in (cdr rs) a b)))))
+(define nth-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
+  (lambda (fs i)
+    (cond ((null? fs) (efail "no such field"))
+          ((= i 0) (car fs))
+          (else (nth-field (cdr fs) (- i 1))))))
+;; Module `v` as `at` (in a list of one) reshapes it: its values at those
+;; positions; as it is, if none.
+(define reshape-val (subr (maxeff (read @globals) evals spin) (val (listof k-ids @v)) val)
+  (lambda (v at)
+    (if (null? at)
+        v
+        (tagcase v
+          (v-product (fs)
+            (letrec ((pick (subr (maxeff (read @globals) evals spin) (k-ids) vfields)
+                       (lambda (ks)
+                         (if (null? ks) nil (cons (nth-field fs (car ks)) (pick (cdr ks)))))))
+              (v-product (pick (car at)))))
+          (else x (efail-expected "a module"))))))
 ;; `fs` reversed, onto `acc`.
 (define reverse-fields
   (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (vfields vfields) vfields)
@@ -566,7 +595,13 @@
       (cond ((null? es) (v-unit))
             ((null? (cdr es)) (eval (car es) e))
             (else (begin (eval (car es) e) (eval-begin (cdr es) e))))))
+  ;; `x`'s value; a module reshaped where the checker said so
+  ;; (`k-reshape-at`), a product of the values its type wanted, by position.
   (eval (subr (maxeff (read @globals) evals spin) (exp env) val)
+    (lambda (x e)
+      (let ((v (eval-node x e)) (rs (get ev-reshapes)))
+        (if (null? rs) v (reshape-val v (ev-reshape-in rs (exp-start x) (exp-end x)))))))
+  (eval-node (subr (maxeff (read @globals) evals spin) (exp env) val)
     (lambda (x e)
       (tagcase x
         (e-var (n a b) (lookup e n))
@@ -855,15 +890,15 @@
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), run; its value shown, or
 ;; its error.
-(define run-checked (subr (maxeff evals spin) ((listof k-run acyclic)) string)
+(define run-checked (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
   (lambda (runs)
-    (tagcase (eval-runs runs)
+    (tagcase (begin (set ev-reshapes (get k-reshapes)) (eval-runs runs))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
   (lambda (tops)
-    (tagcase (eval-program tops)
+    (tagcase (begin (set ev-reshapes nil) (eval-program tops))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))

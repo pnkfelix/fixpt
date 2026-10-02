@@ -647,17 +647,22 @@
             (if (null? beyond)
                 ""
                 (k-cat3 k-newline "  beyond what is expected, it has " (k-show-effect beyond))))))))
+;; A module reshaped where it is wanted at a type of fewer values
+;; (`check-module-rules.fx`'s `k-reshape-at`, which sets this).
+(define k-reshape-hook (ref (subr (maxeff checks spin) (kx int int) bool) @t)
+  (new (lambda (x got want) #f)))
 ;; `got ≤ want`, or an error at `x` saying so.
 (define k-expect (subr (maxeff checks spin) (kx int int) unit)
   (lambda (x got want)
     (if (k-subtype got want)
         #u
         (let ((c (k-conversion got want)))
-          (if (null? c)
-              (k-fail (string-append (k-expected-here (k-show-ty want) (k-show-ty got))
-                                     (k-effect-delta got want))
-                      (k-start x) (k-end x))
-              (k-convert-at x got (car c)))))))
+          (cond ((not (null? c)) (k-convert-at x got (car c)))
+                (((get k-reshape-hook) x got want) #u)
+                (else
+                 (k-fail (string-append (k-expected-here (k-show-ty want) (k-show-ty got))
+                                        (k-effect-delta got want))
+                         (k-start x) (k-end x))))))))
 ;; Bind each, the first first.
 (define k-bind-all (subr (maxeff kstate spin) (k-bindings) unit)
   (lambda (bs)

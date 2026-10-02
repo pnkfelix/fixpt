@@ -112,3 +112,28 @@
       (e-with (m body a b) (r-with g m body a b env te tail))
       (else y (r-decline)))))
 (set r-module-code r-module-or-with)
+;; `args` reversed, onto `acc`.
+(define r-args-reversed (subr rbuilds (rargs rargs) rargs)
+  (lambda (args acc)
+    (if (null? args) acc (r-args-reversed (cdr args) (the rargs (cons (car args) acc))))))
+;; A module reshaped (`k-reshape-at`): kept in a slot, its values the type
+;; wanted has (by position `at`) into slots, and a product of them. Declined
+;; in a leaf.
+(define r-reshape-fields (subr rcompiles (rgen int k-ids rargs) rargs)
+  (lambda (g m at args)
+    (if (null? at)
+        args
+        (begin (r-opn g rop-stack m) (r-opn g rop-field (+ (car at) 2))
+               (let ((s (r-keep-in-slot g)))
+                 (r-reshape-fields g m (cdr at) (the rargs (cons (a-slot s) args))))))))
+(define r-reshape (subr rcompiles (rgen exp k-ids renv cenv bool) unit)
+  (lambda (g x at env te tail)
+    (if (extract g leaf)
+        (r-decline)
+        (let* ((slots (get (extract g nslot)))
+               (m (begin (r-exp-as-is g x env te #f) (r-keep-in-slot g)))
+               (args (r-reshape-fields g m at nil)))
+          (begin (r-make-frozen g 37 (r-args-reversed args nil) env te)
+                 (set (extract g nslot) slots)
+                 (r-done g tail))))))
+(set r-reshape-code r-reshape)

@@ -372,7 +372,7 @@
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil)
       (set k-conversions nil) (k-reset-facts)
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
-      (set k-with-vals nil) (set k-module-vars nil) (set k-select-map nil)
+      (set k-with-vals nil) (set k-module-vars nil) (set k-select-map nil) (set k-reshapes nil)
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       ;; 10 to 15; `void` 16, `k-void`.

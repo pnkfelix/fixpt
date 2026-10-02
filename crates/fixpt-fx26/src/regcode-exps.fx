@@ -449,7 +449,7 @@
   ;; conversion calls out.
   (r-collects (subr rcompiles (exp cenv rthis bool) bool)
     (lambda (x e this tail)
-      (or (>= (c-conversion-at x) 0) (r-collects-as-is x e this tail))))
+      (or (c-changed? x) (r-collects-as-is x e this tail))))
   ;; Whether evaluating `x` may call or call out, and so collect. Loops do
   ;; not; declined forms are said to, which does not matter.
   (r-collects-as-is (subr rcompiles (exp cenv rthis bool) bool)

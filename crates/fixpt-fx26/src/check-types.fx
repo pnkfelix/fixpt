@@ -632,6 +632,15 @@
           (else (k-with-names-in (cdr ws) a b)))))
 (define k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names)
   (lambda (a b) (k-with-names-in (get k-with-vals) a b)))
+;; Each module given where a type of fewer values, or the same in another
+;; order, is wanted (`k-reshape-at`): where, and for each value that type
+;; has, its position in the module given. Made into a module of that layout.
+(define-type k-reshaped (productof (1 int) (2 int) (3 k-ids)))
+(define-type k-reshape-list (listof k-reshaped acyclic))
+(define k-reshapes (ref k-reshape-list @t) (new nil))
+;; For a driver: the same as another checker found them.
+(define checked-reshapes! (subr (maxeff (read @globals) (write @t)) (k-reshape-list) unit)
+  (lambda (rs) (set k-reshapes rs)))
 ;; For a driver: what `with`s another checker saw, as `k-with-vals` keeps
 ;; them, for a compiler given that checker's facts.
 (define checked-withs! (subr (maxeff (read @globals) (write @t)) (k-with-list) unit)
