@@ -2266,3 +2266,13 @@ cellular` would have hit "the code space is full". It also meant that
 whole program it was given before `native.fx`'s code replaced it.
 `compile_reachable_as` now runs that word as cells and follows only the
 closure it calls.
+
+A mid-sized program, compiled only, joins the compile table by default:
+`scheme-bench/peval.fx`, 954 lines, a partial evaluator. Of the ports
+between 400 and 1000 lines it has the largest Rust `words` and
+`registers` times and the largest `fx words`; each phase repeats within
+about 2%; it adds half a second. First figures (ms): check 12.6, lower
+0.5, words 2.8, arm64 0.26, registers 0.95; fx read 240, fx parse 0.17,
+fx check 52, fx words 13, fx arm64 37; 13.6 M words, 13 collections.
+Surveying the ports found a crash, `ocaml/boyer` under register code
+(PLAN, B1).

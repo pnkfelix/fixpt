@@ -61,7 +61,12 @@ references and to catch disagreements.
 | front end | 393.10 | 15.60 | 67.50 | 7.00  | 19.20     | —      | 4871.30 | 21.20    | 1366.70  | 746.80   | 984.30   | 326.7      | 311    |
 ```
 
-Each phase of compiling, timed alone, from what the phase before made.
+Each phase of compiling, timed alone, from what the phase before made,
+for the bench programs and for `scheme-bench/peval.fx`, a partial
+evaluator of 954 lines (compile table only). The bench programs compile
+in a millisecond or less, too little to follow; `peval` is large enough
+that each phase is well clear of noise (about 2% run to run), and does
+the front end's kind of work.
 The left half is the Rust front end and back ends; the `fx` half is the
 pieces written in FX-26, run as the REPL runs them. With `--front-end`,
 a last row is the front end itself (its files and bootstrap), compiled

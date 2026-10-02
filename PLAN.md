@@ -162,6 +162,15 @@ before everything else, known holes before proofs.
   relation over region levels, and size-change proved), T6 space (a
   harness measuring space against `S_place`). Probe each new rule with
   the soundness agent before building on it.
+- B1. **A crash: register code's long branches** (found 2026-10-02 by
+  `fixpt bench`). `--cellular-machine registers eval
+  mllang-bench/fx/ocaml/boyer.fx` panics, "441625 does not fit 19
+  signed bits": `assemble_register_word` places its trap stubs, slow
+  paths and near exit at the end of the word, and in a word of some
+  hundreds of thousands of instructions a conditional branch to them is
+  out of range (±1 MB). The cells' assembler gives each cell a jump of its
+  own for this; register code needs the same, or stubs flushed every so
+  often with a branch around them, and so does a `branchf` to a far cell.
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path

@@ -15,7 +15,9 @@ const USAGE: &str = "\
 usage: fixpt bench [--runs N] [--machines LIST] [--tables LIST] [--front-end] [FILE...]
 
 Times FX-26 programs, best of N runs (default 3), and prints two tables.
-With no FILE, the benchmarks in crates/fixpt-fx26/tests/programs/bench.
+With no FILE, the benchmarks in crates/fixpt-fx26/tests/programs/bench,
+and in the compile table scheme-bench/peval.fx too: a program of a size
+whose compiling, unlike theirs, takes long enough to follow over time.
 
 The run table: each way of running them, the run alone (checking and
 compiling are done before the clock starts); an answer that differs from
@@ -103,6 +105,7 @@ pub fn command(args: &[String]) -> i32 {
     if fixpt_native::stencil::opt_levels().is_empty() {
         machines.retain(|m| *m != "stencils");
     }
+    let mid_sized = files.is_empty();
     if files.is_empty() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/bench");
         let Ok(entries) = std::fs::read_dir(dir) else { return usage("no FILE, and the benchmarks are not where this build expects") };
@@ -127,6 +130,14 @@ pub fn command(args: &[String]) -> i32 {
     if compile_table {
         if run_table {
             println!();
+        }
+        // A mid-sized program, compiled only: what its run takes says less.
+        if mid_sized {
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scheme-bench/peval.fx");
+            match std::fs::read_to_string(path) {
+                Ok(text) => programs.push(("peval".to_string(), text)),
+                Err(e) => eprintln!("fixpt bench: no peval ({e}), so no mid-sized program"),
+            }
         }
         return compile_table_of(&programs, runs, front_end);
     }
