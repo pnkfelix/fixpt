@@ -27,19 +27,91 @@
 (define k-items-or-nil (subr checks (syn string) k-syns)
   (lambda (s what) (if (k-nil-syn? s) nil (k-items s what))))
 
-(define k-parse-kind (subr checks (syn) int)
-  (lambda (s)
-    (let ((n (if (syn-symbol? s) (syn-name s) ""))
-          (usage "a kind is `region`, `place`, `effect`, `type`, `data`, `size` or `conv`"))
-      (cond ((string=? n "region") 0)
-            ((string=? n "place") 3)
-            ((string=? n "effect") 1)
-            ((string=? n "type") 2)
-            ((string=? n "data") 4)
-            ((string=? n "size") 5)
-            ((string=? n "conv") 6)
-            (else (k-sfail usage s))))))
+;; Whether kind `k` describes values, or makes what does: a type, data, or
+;; a description function (which may give one).
+(define k-typed-kind? (subr pure (int) bool)
+  (lambda (k) (or (= k 2) (= k 4) (>= k 100))))
+(define k-any-typed-kind? (subr (read @globals) (k-ids) bool)
+  (lambda (ks) (and (not (null? ks)) (or (k-typed-kind? (car ks)) (k-any-typed-kind? (cdr ks))))))
+;; Syntax `xs`, none of them empty, less the last.
+(define k-syns-but-last (subr (read @globals) (k-syns) k-syns)
+  (lambda (xs) (if (null? (cdr xs)) nil (cons (car xs) (k-syns-but-last (cdr xs))))))
+(define k-last-syn (subr (read @globals) (k-syns) syn)
+  (lambda (xs) (if (null? (cdr xs)) (car xs) (k-last-syn (cdr xs)))))
 
+
+;; What a kind is, what a description function gives, and what one to an
+;; effect takes, as errors say.
+(define k-kind-usage string
+  "a kind is `region`, `place`, `effect`, `type`, `data`, `size`, `conv` or `(=> kind … kind)`")
+(define k-fun-result-usage string
+  "a description function gives a type, an effect, or another description function")
+(define k-effect-fun-usage string
+  "a description function to an effect takes regions, places, effects, sizes and conventions")
+(define-rec
+  (k-parse-kind (subr (maxeff checks spin) (syn) int)
+    (lambda (s)
+      (let ((n (if (syn-symbol? s) (syn-name s) ""))
+            (usage k-kind-usage))
+        (cond ((string=? n "region") 0)
+              ((string=? n "place") 3)
+              ((string=? n "effect") 1)
+              ((string=? n "type") 2)
+              ((string=? n "data") 4)
+              ((string=? n "size") 5)
+              ((string=? n "conv") 6)
+              ((syn-symbol? s) (k-sfail usage s))
+              (else (k-parse-arrow-kind s usage))))))
+  ;; `(=> k1 … kn k)`: a description function's kind (`check-kinds.fx`).
+  (k-parse-arrow-kind (subr (maxeff checks spin) (syn string) int)
+    (lambda (s usage)
+      (let ((items (tagcase s (lst (items d a b) items) (else x (the k-syns nil)))))
+        (if (or (< (k-length items) 3) (not (string=? (k-symbol-head items) "=>")))
+            (k-sfail usage s)
+            (let* ((ks (k-syns-but-last (cdr items)))
+                   (last (k-last-syn (cdr items)))
+                   (params (k-parse-kinds ks))
+                   (result (k-parse-kind last)))
+              (cond ((or (= result 0) (= result 3) (= result 5) (= result 6))
+                     (k-sfail k-fun-result-usage last))
+                    ((and (= result 1) (k-any-typed-kind? params))
+                     (k-sfail k-effect-fun-usage s))
+                    (else (k-arrow params result))))))))
+  (k-parse-kinds (subr (maxeff checks spin) (k-syns) k-ids)
+    (lambda (xs)
+      (if (null? xs)
+          nil
+          (let* ((k (k-parse-kind (car xs))) (rest (k-parse-kinds (cdr xs))))
+            (the k-ids (cons k rest)))))))
+
+;; Description functions read, applied, and applied in effects, by
+;; `check-kinds.fx`, which sets these.
+(define k-fun-reader (ref (subr (maxeff checks spin) (syn int) int) @t)
+  (new (lambda (s k) (k-sfail "expected a description function" s))))
+(define k-app-reader (ref (subr (maxeff checks spin) (syn int k-syns) int) @t)
+  (new (lambda (s f args) (k-sfail "expected a type" s))))
+(define k-effect-app-reader (ref (subr (maxeff checks spin) (syn k-syns) (listof k-eff acyclic)) @t)
+  (new (lambda (s items) nil)))
+;; What `name`, a description function, says written where a type is.
+(define k-not-applied (subr (maxeff kreads (alloc @t) spin) (string int) string)
+  (lambda (n k)
+    (k-cat5 (k-quote n) " is a description function, of kind " (k-kind-text k)
+            ": it is applied, " (k-quote (k-cat3 "(" n " …)")))))
+;; The parameters' names and kinds of a type form that is also a description
+;; function written alone, `listof`; none for any other name.
+(define k-ctor-params (subr (read @globals) (string) (listof k-params acyclic))
+  (lambda (n)
+    (letrec ((one (subr (read @globals) (symbol int) k-params)
+                  (lambda (x k) (the k-params (cons (product (1 x) (2 k)) nil)))))
+      ;; Type `x` and region `r`.
+      (let ((typed (lambda ((x symbol)) (the k-params (cons (product (1 x) (2 2)) (one 'r 0))))))
+        (cond ((or (string=? n "ref") (string=? n "icell") (string=? n "listof")
+                   (string=? n "arrayof") (string=? n "mark-key"))
+               (the (listof k-params acyclic) (cons (typed 't) nil)))
+              ((string=? n "pairof")
+               (the (listof k-params acyclic)
+                    (cons (the k-params (cons (product (1 'a) (2 2)) (typed 'b))) nil)))
+              (else nil))))))
 ;; `@globals`, or `(globals g …)` as the regions of each `g`, in a list of
 ;; one; none if `s` is neither.
 (define k-global-names (subr (maxeff checks spin) (k-syns) k-regions)
@@ -203,8 +275,12 @@
     (lambda (s)
       (if (syn-symbol? s)
           (k-effect-named s)
-          (let* ((items (k-items s "an effect")) (head (k-head items)))
-            (cond ((string=? head "maxeff") (k-effects (cdr items)))
+          (let* ((items (k-items s "an effect"))
+                 (head (k-head items))
+                 ;; `(e d …)`: a description function to an effect, applied.
+                 (applied ((get k-effect-app-reader) s items)))
+            (cond ((not (null? applied)) (car applied))
+                  ((string=? head "maxeff") (k-effects (cdr items)))
                   ((k-atom-head? head)
                    (if (= (k-length items) 2)
                        (k-effect-atom head (k-nth items 1))
@@ -327,9 +403,37 @@
                 (else (k-grounded-from (car h) (cons id seen) a b)))))
       (else x #u))))
 
+;; Whether `start` is reached again from `id` through forwarding links,
+;; `poly`s and the types given to functions applied: a cycle with no
+;; constructor on it.
+(define-rec
+  (k-through-apps? (subr (maxeff kstate spin) (int int (ref k-ids @t)) bool)
+    (lambda (id start seen)
+      (if (k-has-id? (get seen) id)
+          #f
+          (begin
+            (set seen (cons id (get seen)))
+            (let ((next (tagcase (k-raw id)
+                          (ty-link (to) to)
+                          (ty-poly (bs x) (the k-ids (cons x nil)))
+                          (ty-app (f ds) (k-desc-types ds))
+                          (else y (the k-ids nil)))))
+              (k-any-reaches? next start seen))))))
+  (k-any-reaches? (subr (maxeff kstate spin) (k-ids int (ref k-ids @t)) bool)
+    (lambda (xs start seen)
+      (and (not (null? xs))
+           (or (= (car xs) start) (k-through-apps? (car xs) start seen)
+               (k-any-reaches? (cdr xs) start seen))))))
 ;; A name defined as another name, round a loop, describes nothing.
 (define k-grounded (subr (maxeff checks spin) (int int int) unit)
-  (lambda (slot a b) (k-grounded-from slot nil a b)))
+  (lambda (slot a b)
+    ;; A description function applied is no constructor either: what it
+    ;; gives may be what it was given, so a cycle through applications alone
+    ;; may be no type at all once the function is known (Rémy's condition:
+    ;; recursion only at the base kind; `check-kinds.fx`).
+    (if (k-through-apps? slot slot (the (ref k-ids @t) (new nil)))
+        (k-fail-ungrounded a b)
+        (k-grounded-from slot nil a b))))
 (define k-dletrec-no-knot (subr (maxeff checks spin) (k-slots syn) unit)
   (lambda (ss s)
     (if (null? ss)
@@ -344,7 +448,7 @@
                (k-dletrec-grounded (cdr ss) s)))))
 ;; A type family's parameters: each one's name and kind.
 (define-type k-params (listof (productof (1 symbol) (2 int)) acyclic))
-(define k-family-params (subr checks (k-syns) k-params)
+(define k-family-params (subr (maxeff checks spin) (k-syns) k-params)
   (lambda (ps)
     (if (null? ps)
         nil
@@ -358,7 +462,7 @@
 
 ;; `(define-type (name (param kind) …) type)`: nothing is read until it is
 ;; used.
-(define k-define-family (subr checks (symbol k-syns syn) unit)
+(define k-define-family (subr (maxeff checks spin) (symbol k-syns syn) unit)
   (lambda (name params body) (k-push-desc name (ds-abbrev (k-family-params params) body))))
 ;; Push a scope's entries, the first first.
 (define k-push-all (subr kstate (k-scope) unit)
@@ -378,6 +482,7 @@
       (ds-eff (a) (tagcase y (ds-eff (b) (k-eff=? a b)) (else z #f)))
       (ds-size (a) (tagcase y (ds-size (b) (k-size=? a b)) (else z #f)))
       (ds-conv (a) (tagcase y (ds-conv (b) (k-conv=? a b)) (else z #f)))
+      (ds-fun (a) (tagcase y (ds-fun (b) (= (k-resolve a) (k-resolve b))) (else z #f)))
       (else z #f))))
 (define k-scope=? (subr (maxeff kreads spin) (k-scope k-scope) bool)
   (lambda (xs ys)
@@ -463,7 +568,13 @@
 ;; Whether a name meaning `d` stands for a type when applied to
 ;; descriptions: a type family, or a generative type.
 (define k-ds-applied? (subr pure (k-ds) bool)
-  (lambda (d) (tagcase d (ds-abbrev (ps body) #t) (ds-gen (g) #t) (else x #f))))
+  (lambda (d)
+    (tagcase d
+      (ds-abbrev (ps body) #t)
+      (ds-gen (g) #t)
+      (ds-var (v k) (>= k 100))
+      (ds-fun (f) #t)
+      (else x #f))))
 
 ;; `(moduleof …)` and `(select m t)`, read by `check-modules.fx`, which sets this.
 (define k-module-type-head? (subr pure (symbol) bool)
@@ -471,6 +582,13 @@
 (define k-parse-module-type (ref (subr (maxeff checks spin) (syn k-syns symbol) int) @t)
   (new (lambda (s items hd) (k-sfail "expected a type" s))))
 
+;; Type family `name`, used at `s`, expanding without end.
+(define k-endless (subr (maxeff checks spin) (syn symbol) void)
+  (lambda (s name)
+    (k-sfail (k-cat3 (k-quote (symbol->string name))
+                     " expands without end: "
+                     "a type family may mention itself only with the same descriptions")
+             s)))
 (define-rec
   (k-parse-types (subr (maxeff checks spin) (k-syns) k-ids)
     (lambda (xs)
@@ -577,6 +695,7 @@
                           ((= k 3) (dr (k-parse-place (car args))))
                           ((= k 5) (dz (k-parse-size (car args))))
                           ((= k 6) (dc (k-parse-conv (car args))))
+                          ((>= k 100) (df ((get k-fun-reader) (car args) k)))
                           (else (de (k-parse-effect (car args))))))
                  (rest (k-gen-args (cdr ps) (cdr args))))
             (cons d rest)))))
@@ -594,7 +713,12 @@
                  (if (null? d)
                      (k-sfail (no) s)
                      (tagcase (car d)
-                       (ds-var (v k) (if (k-type-kind? k) (k-ty-new (ty-var v)) (k-sfail (no) s)))
+                       (ds-var (v k)
+                         (cond ((k-type-kind? k) (k-ty-new (ty-var v)))
+                               ((k-arrow-kind? k) (k-sfail (k-not-applied n k) s))
+                               (else (k-sfail (no) s))))
+                       (ds-fun (f)
+                         (let ((k (k-fun-kind f))) (k-sfail (k-not-applied n (if (< k 0) 2 k)) s)))
                        (ds-rec (t) t)
                        (ds-gen (g) (k-apply-gen s g nil))
                        (else x (k-sfail (no) s))))))))))
@@ -607,12 +731,18 @@
                  (abbrev (if (symbol=? hd '|()|)
                              (the (listof k-ds acyclic) nil)
                              (k-lookup-desc hd))))
-            (if (and (not (null? abbrev)) (k-ds-applied? (car abbrev)))
-                (tagcase (car abbrev)
-                  (ds-abbrev (ps body) (k-expand-abbrev s hd ps body (cdr items)))
-                  (ds-gen (g) (k-apply-gen s g (cdr items)))
-                  (else x (k-sfail "an abbreviation" s)))
-                (k-parse-type-form s items hd))))))
+            (cond ((and (not (null? abbrev)) (k-ds-applied? (car abbrev)))
+                   (tagcase (car abbrev)
+                     (ds-abbrev (ps body) (k-expand-abbrev s hd ps body (cdr items)))
+                     (ds-gen (g) (k-apply-gen s g (cdr items)))
+                     ;; A description function applied (`check-kinds.fx`).
+                     (ds-var (v k) ((get k-app-reader) s (k-ty-new (ty-var v)) (cdr items)))
+                     (ds-fun (f) ((get k-app-reader) s f (cdr items)))
+                     (else x (k-sfail "an abbreviation" s))))
+                  ;; `((dlambda …) d …)` and `((select m f) d …)`.
+                  ((and (not (null? items)) (tagcase (car items) (lst (xs d a b) #t) (else x #f)))
+                   ((get k-app-reader) s ((get k-fun-reader) (car items) -1) (cdr items)))
+                  (else (k-parse-type-form s items hd)))))))
   ;; `(subr effect (param …) result)`, or with a convention first, `(subr
   ;; (conv C) effect (param …) result)`; left out, it is the program's.
   (k-parse-subr (subr (maxeff checks spin) (syn k-syns) int)
@@ -767,28 +897,28 @@
       (cond
         ((not (= (k-length args) (k-length ps)))
          (k-sfail (k-arity-message name (k-length ps) (k-length args)) s))
-        ((> (get k-expanding) 64)
-         (k-sfail (k-cat3 (k-quote (symbol->string name))
-                          " expands without end: "
-                          "a type family may mention itself only with the same descriptions")
-                  s))
-        (else
-         (let* ((bound (k-abbrev-args ps args))
-                (knot (k-knot-of (get k-knots) name bound)))
-           (if (>= knot 0)
-               knot
-               (let* ((saved (get k-dscope)) (slot (k-slot)) (kept (get k-knots)))
-                 (begin
-                   (set k-knots (cons (product (1 name) (2 bound) (3 slot)) kept))
-                   (k-push-all bound)
-                   (set k-expanding (+ (get k-expanding) 1))
-                   (let ((t (k-parse-type body)))
-                     (begin (set k-expanding (- (get k-expanding) 1))
-                            (set k-dscope saved)
-                            (set k-knots kept)
-                            (k-set-link slot t)
-                            (k-grounded slot (syn-start s) (syn-end s))
-                            slot))))))))))
+        ((> (get k-expanding) 64) (k-endless s name))
+        (else (k-expand-bound s name body (k-abbrev-args ps args))))))
+  ;; The family `name`'s body, read with its parameters bound as `bound`
+  ;; says: a use inside with the same descriptions is the slot its type
+  ;; will fill, a knot.
+  (k-expand-bound (subr (maxeff checks spin) (syn symbol syn k-scope) int)
+    (lambda (s name body bound)
+      (let ((knot (k-knot-of (get k-knots) name bound)))
+        (if (>= knot 0)
+            knot
+            (let* ((saved (get k-dscope)) (slot (k-slot)) (kept (get k-knots)))
+              (begin
+                (set k-knots (cons (product (1 name) (2 bound) (3 slot)) kept))
+                (k-push-all bound)
+                (set k-expanding (+ (get k-expanding) 1))
+                (let ((t (k-parse-type body)))
+                  (begin (set k-expanding (- (get k-expanding) 1))
+                         (set k-dscope saved)
+                         (set k-knots kept)
+                         (k-set-link slot t)
+                         (k-grounded slot (syn-start s) (syn-end s))
+                         slot))))))))
   (k-abbrev-args (subr (maxeff checks spin) (k-params k-syns) k-scope)
     (lambda (ps args)
       (if (null? ps)
@@ -799,104 +929,10 @@
                           ((= k 3) (ds-region (k-parse-place (car args))))
                           ((= k 5) (ds-size (k-parse-size (car args))))
                           ((= k 6) (ds-conv (k-parse-conv (car args))))
+                          ((>= k 100) (ds-fun ((get k-fun-reader) (car args) k)))
                           (else (ds-eff (k-parse-effect (car args))))))
                  (rest (k-abbrev-args (cdr ps) (cdr args))))
             (cons (cons (extract (car ps) 1) d) rest))))))
-
-(define k-all-ints? (subr (read @globals) (k-ids int) bool)
-  (lambda (xs n) (or (null? xs) (and (= (car xs) n) (k-all-ints? (cdr xs) n)))))
-;; What parameter `v`, declared of variance `want`, says when it occurs
-;; where it may not in generative type `name`.
-(define k-variance-message (subr kreads (int int symbol) string)
-  (lambda (v want name)
-    (k-cat4 (k-quote (k-dvar-string v)) " is declared "
-            (if (= want 0) "covariant (+)" "contravariant (-)")
-            (k-cat3 " in " (k-quote (symbol->string name)) ", but occurs where it may not"))))
-;; Whether parameter `v` of `gen`, declared of variance `want` (0 or 1),
-;; occurs in its representation only so.
-(define k-check-param-variance (subr (maxeff checks spin) (k-gen int int syn) unit)
-  (lambda (gen v want s)
-    (let ((found (the k-pols-found (new nil))))
-      (begin
-        (k-polarity (extract gen 4) v 0 (the k-seen-pol (new nil)) found)
-        (if (k-all-ints? (get found) want)
-            #u
-            (k-sfail (k-variance-message v want (extract gen 1)) s))))))
-;; Whether the `g`th generative type's representation bears out the variance
-;; declared for its parameters.
-(define k-check-variance (subr (maxeff checks spin) (int syn) unit)
-  (lambda (g s)
-    (let ((gen (k-gen-of g)))
-      (letrec ((each (subr (maxeff checks spin) (k-binders k-ids) unit)
-                     (lambda (bs vs)
-                       (if (null? bs)
-                           #u
-                           (let ((v (extract (car bs) 1)) (want (car vs)))
-                             (begin
-                               (if (= want 2) #u (k-check-param-variance gen v want s))
-                               (each (cdr bs) (cdr vs))))))))
-        (each (extract gen 2) (extract gen 3))))))
-;; `(define-generative (name (param kind [+|-]) …) rep)`, or with no
-;; parameters `(define-generative name rep)`: a new type, equal only to
-;; itself, converted by `up-name` and `down-name`.
-;; A parameter's variance, from its items `(name kind [+|-])`: 0
-;; covariant, 1 contravariant, 2 invariant (none given).
-(define k-parse-variance (subr (maxeff checks spin) (k-syns syn) int)
-  (lambda (items p)
-    (let ((n (k-length items)))
-      (cond ((= n 2) 2)
-            ((= n 3)
-             (let ((x (k-nth items 2)))
-               (cond ((and (syn-symbol? x) (string=? (syn-name x) "+")) 0)
-                     ((and (syn-symbol? x) (string=? (syn-name x) "-")) 1)
-                     (else (k-sfail "a parameter's variance is `+` or `-`" x)))))
-            (else
-             (k-sfail "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`" p))))))
-;; A region or place parameter `p` of kind `kind` must be invariant
-;; (`v` 2): it names where data is.
-(define k-check-invariant (subr checks (int int syn) unit)
-  (lambda (v kind p)
-    (if (and (not (= v 2)) (or (= kind 0) (= kind 3)))
-        (k-sfail "a region or place parameter is invariant: it names where data is" p)
-        #u)))
-(define k-gen-params (subr (maxeff checks spin) (k-syns int) (productof (1 k-binders) (2 k-ids)))
-  (lambda (ps depth)
-    (if (null? ps)
-        (product (1 (the k-binders nil)) (2 (the k-ids nil)))
-        (let* ((p (car ps))
-               (items (k-items p "a parameter"))
-               (v (k-parse-variance items p))
-               (name (k-name-of (car items) "a parameter's name"))
-               (kind (k-parse-kind (k-nth items 1)))
-               (checked (k-check-invariant v kind p))
-               (dv (k-new-dvar-of name kind))
-               (pushed (k-push-desc name (ds-var dv kind)))
-               (rest (k-gen-params (cdr ps) depth)))
-          (product (1 (the k-binders (cons (product (1 dv) (2 kind)) (extract rest 1))))
-                   (2 (the k-ids (cons v (extract rest 2)))))))))
-(define k-define-generative (subr (maxeff checks spin) (syn syn) symbol)
-  (lambda (head rep)
-    (let* ((hs (tagcase head (lst (items d a b) items) (else x (the k-syns nil))))
-           (name-syn (if (null? hs) head (car hs)))
-           (ps (if (null? hs) (the k-syns nil) (cdr hs)))
-           (name (k-name-of name-syn "a generative type's name"))
-           (saved (get k-dscope))
-           (params (k-gen-params ps 0))
-           (g (get k-ngens))
-           (slot (k-slot))
-           (gen (product (1 name) (2 (extract params 1)) (3 (extract params 2)) (4 slot))))
-      (begin
-        (set k-gens (cons gen (get k-gens)))
-        (set k-ngens (+ g 1))
-        ;; In scope in its own representation: recursion through the name.
-        (k-push-desc name (ds-gen g))
-        (let ((r (k-parse-type rep)))
-          (begin
-            (set k-dscope saved)
-            (k-set-link slot r)
-            (k-check-variance g rep)
-            (k-push-desc name (ds-gen g))
-            name))))))
 
 ;; `(define-type name type)`: `name` stands for the type from here on, and
 ;; may appear in its own definition.
@@ -941,53 +977,3 @@
               (k-push-desc name (ds-rec slot))
               (let ((t (k-parse-type def)))
                 (begin (k-set-link slot t) (k-grounded slot a b) slot))))))))
-
-;; A `proj` argument: which kind it is shows in its shape, or, for a bare
-;; name, in how the name is bound.
-;; A convention, if name `s` is one of FX-26's own; else a type.
-(define k-parse-conv-or-type (subr (maxeff checks spin) (syn) k-desc)
-  (lambda (s)
-    (let ((n (syn-name s)))
-      (if (or (string=? n "cellular") (string=? n "native") (string=? n "fx"))
-          (dc (k-parse-conv s))
-          (dt (k-parse-type s))))))
-;; What name `s`, meaning `d` (none or one), is as a `proj` argument: by how
-;; it is bound; if it is not bound as a description, a convention or a type.
-(define k-parse-d-bound (subr (maxeff checks spin) (syn (listof k-ds acyclic)) k-desc)
-  (lambda (s d)
-    (if (null? d)
-        (k-parse-conv-or-type s)
-        (tagcase (car d)
-          (ds-var (v k)
-            (cond ((or (= k 0) (= k 3)) (dr (r-var v)))
-                  ((= k 1) (de (k-one (a-var v))))
-                  ((= k 5) (dz (k-size-var v)))
-                  ((= k 6) (dc (cv-var v)))
-                  (else (k-parse-conv-or-type s))))
-          (ds-eff (e) (de e))
-          (ds-size (z) (dz z))
-          (ds-conv (c) (dc c))
-          (else x (k-parse-conv-or-type s))))))
-;; A `proj` argument that is a name.
-(define k-parse-d-name (subr (maxeff checks spin) (syn) k-desc)
-  (lambda (s)
-    (let* ((n (syn-name s)) (sym (string->symbol n)))
-      (cond ((k-at-name? n) (dr (k-region-constant sym)))
-            ((string=? n "pure") (de nil))
-            ((string=? n "spin") (de (k-one (a-spin))))
-            ((string=? n "const") (dr (r-frozen -1 #f)))
-            ((string=? n "acyclic") (dr (r-frozen -1 #t)))
-            ((string=? n "finite") (dz (sz-finite)))
-            ((string=? n "heap") (dr (r-heap)))
-            (else (k-parse-d-bound s (k-lookup-desc sym)))))))
-(define k-parse-d (subr (maxeff checks spin) (syn) k-desc)
-  (lambda (s)
-    (cond ((tagcase s (atom (d a b) (datum-int? d)) (else x #f))
-           ;; A natural number can only be a size.
-           (dz (k-parse-size s)))
-          ((syn-symbol? s) (k-parse-d-name s))
-          (else
-           (let ((hd (k-head (k-items s "a description"))))
-             (cond ((or (k-atom-head? hd) (string=? hd "maxeff")) (de (k-parse-effect s)))
-                   ((or (string=? hd "+") (string=? hd "-")) (dz (k-parse-size s)))
-                   (else (dt (k-parse-type s)))))))))

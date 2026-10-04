@@ -75,17 +75,23 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// parts, in order: types and effects, printing, reading descriptions,
 /// resolving them, errors, modules' descriptions, subtyping, instantiation,
 /// termination, the rules, modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 16] = [
+pub const CHECKER_FILES: [(&str, &str); 22] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-print.fx", include_str!("check-print.fx")),
     ("check-syntax.fx", include_str!("check-syntax.fx")),
+    ("check-args.fx", include_str!("check-args.fx")),
+    ("check-generative.fx", include_str!("check-generative.fx")),
     ("check-resolve.fx", include_str!("check-resolve.fx")),
+    ("check-mask.fx", include_str!("check-mask.fx")),
+    ("check-kinds.fx", include_str!("check-kinds.fx")),
     ("check-errors.fx", include_str!("check-errors.fx")),
     ("check-modules.fx", include_str!("check-modules.fx")),
     ("check-subtype.fx", include_str!("check-subtype.fx")),
+    ("check-calls.fx", include_str!("check-calls.fx")),
     ("check-dependent.fx", include_str!("check-dependent.fx")),
     ("check-data.fx", include_str!("check-data.fx")),
     ("check-infer.fx", include_str!("check-infer.fx")),
+    ("check-close.fx", include_str!("check-close.fx")),
     ("check-terminate.fx", include_str!("check-terminate.fx")),
     ("check-letrec.fx", include_str!("check-letrec.fx")),
     ("check-facts.fx", include_str!("check-facts.fx")),
@@ -103,7 +109,7 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 35] = [
+pub const FRONT_END_FILES: [(&str, &str); 41] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("parser-load.fx", PARSER_LOAD),
@@ -124,6 +130,12 @@ pub const FRONT_END_FILES: [(&str, &str); 35] = [
     CHECKER_FILES[13],
     CHECKER_FILES[14],
     CHECKER_FILES[15],
+    CHECKER_FILES[16],
+    CHECKER_FILES[17],
+    CHECKER_FILES[18],
+    CHECKER_FILES[19],
+    CHECKER_FILES[20],
+    CHECKER_FILES[21],
     ("evaluator.fx", EVALUATOR),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),
@@ -178,6 +190,7 @@ pub const TABLE: &str = include_str!("table.fx");
 pub mod check;
 pub mod compare;
 pub mod infer;
+mod kinds;
 pub mod licence;
 pub mod lemma;
 pub mod lower;

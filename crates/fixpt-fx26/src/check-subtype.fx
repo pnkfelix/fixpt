@@ -81,21 +81,45 @@
 ;; `r ≤ s` for frozen data, each by its side's environment.
 (define k-benv-frozen-le? (subr (maxeff kreads spin) (k-region k-region k-benv k-benv) bool)
   (lambda (r s ea eb) (k-frozen-le? (k-benv-region ea r) (k-benv-region eb s))))
-(define k-benv-effect (subr kmakes (k-benv k-eff) k-eff)
-  (lambda (env e)
-    (if (or (null? env) (null? e))
-        e
-        (let ((x (car e)) (rest (k-benv-effect env (cdr e))))
-          (cons (tagcase x
-                  (a-read (r) (a-read (k-benv-region env r)))
-                  (a-write (r) (a-write (k-benv-region env r)))
-                  (a-alloc (r) (a-alloc (k-benv-region env r)))
-                  (a-goto (r) (a-goto (k-benv-region env r)))
-                  (a-comefrom (r) (a-comefrom (k-benv-region env r)))
-                  (a-await (r) (a-await (k-benv-region env r)))
-                  (a-spin () x)
-                  (a-var (v) (a-var (k-benv-var env v))))
-                rest)))))
+;; Whether `g` is the `x` of a dependent procedure's `k`th parameter.
+(define k-param-is? (subr (maxeff kreads spin) (int int symbol) bool)
+  (lambda (g k x) (tagcase (k-get g) (ty-param (j y) (and (= k j) (symbol=? x y))) (else z #f))))
+;; Whether `g` is `(select m x)` as written.
+(define k-select-is? (subr (maxeff kreads spin) (int symbol symbol) bool)
+  (lambda (g m x)
+    (tagcase (k-get g) (ty-select (n y) (and (symbol=? m n) (symbol=? x y))) (else z #f))))
+;; Convention `c` by an environment.
+(define k-benv-conv (subr kreads (k-benv k-conv) k-conv)
+  (lambda (env c) (tagcase c (cv-var (v) (cv-var (k-benv-var env v))) (else y c))))
+(define-rec
+  (k-benv-effect (subr (maxeff kmakes spin) (k-benv k-eff) k-eff)
+    (lambda (env e)
+      (if (or (null? env) (null? e))
+          e
+          (let ((x (car e)) (rest (k-benv-effect env (cdr e))))
+            (cons (tagcase x
+                    (a-read (r) (a-read (k-benv-region env r)))
+                    (a-write (r) (a-write (k-benv-region env r)))
+                    (a-alloc (r) (a-alloc (k-benv-region env r)))
+                    (a-goto (r) (a-goto (k-benv-region env r)))
+                    (a-comefrom (r) (a-comefrom (k-benv-region env r)))
+                    (a-await (r) (a-await (k-benv-region env r)))
+                    (a-spin () x)
+                    (a-var (v) (a-var (k-benv-var env v)))
+                    ;; Its variable, and what it was given, as named here.
+                    (a-app (v ds) (a-app (k-benv-var env v) (k-benv-eargs env ds))))
+                  rest)))))
+  (k-benv-eargs (subr (maxeff kmakes spin) (k-benv k-descs) k-descs)
+    (lambda (env ds)
+      (if (null? ds)
+          nil
+          (let* ((d (tagcase (car ds)
+                      (dr (r) (dr (k-benv-region env r)))
+                      (de (e) (de (k-benv-effect env e)))
+                      (dc (c) (dc (k-benv-conv env c)))
+                      (else y (car ds))))
+                 (rest (k-benv-eargs env (cdr ds))))
+            (the k-descs (cons d rest)))))))
 ;; What one subtype question remembers: the pairs assumed (FX-87's trail),
 ;; each with the environments it was asked under; and the names given to
 ;; pairs of `poly` binders, by the pair of nodes and the position.
@@ -177,6 +201,9 @@
   (subr (maxeff kstate spin) (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool))
 (define k-sub-module (ref k-sub-rule @t) (new (lambda (a b ta tb ea eb trail labels) #f)))
 
+;; Whether effects `d` and `e` are the same, each by its side's environment.
+(define k-benv-eff=? (subr (maxeff kmakes spin) (k-eff k-eff k-benv k-benv) bool)
+  (lambda (d e ea eb) (k-eff=? (k-benv-effect ea d) (k-benv-effect eb e))))
 (define-rec
   (k-subs-contra (subr (maxeff kstate spin) (k-ids k-ids k-benv k-benv k-strail k-labels) bool)
     (lambda (xs ys ea eb trail labels)
@@ -329,7 +356,8 @@
                    (dr (r) (tagcase y (dr (q) (k-match-region bs r q m)) (else z #f)))
                    (de (d) (tagcase y (de (e) (k-match-effect bs d e m)) (else z #f)))
                    (dz (a) (tagcase y (dz (b) (k-size=? a b)) (else z #f)))
-                   (dc (a) (tagcase y (dc (b) (k-conv=? a b)) (else z #f)))))
+                   (dc (a) (tagcase y (dc (b) (k-conv=? a b)) (else z #f)))
+                   (df (a) #f)))
                (k-match-descs l (cdr xs) (cdr ys) m seen)))))
   ;; Whether binder `v` may stand for `d`, as recorded in `m`: recorded now
   ;; if it stands for nothing yet, or already for the same.
@@ -497,6 +525,17 @@
                 (ty-named (h ys)
                   (and (= g h) (k-sub-descs xs ys (extract (k-gen-of g) 3) ea eb trail labels)))
                 (else z #f)))
+            ;; A description function applied: the same function, given
+            ;; the same descriptions (FX-91's congruence).
+            (ty-app (f xs)
+              (tagcase tb
+                (ty-app (g ys)
+                  (and (= (k-length xs) (k-length ys)) (k-fun-same? f g ea eb trail labels)
+                       (k-ds-same? xs ys ea eb trail labels)))
+                (else z #f)))
+            ;; Two description functions (a module's transparent ones).
+            (ty-lam (bs x)
+              (tagcase tb (ty-lam (cs y) (k-fun-same? a b ea eb trail labels)) (else z #f)))
             (ty-module (abs ds vs) ((get k-sub-module) a b ta tb ea eb trail labels))
             (ty-param (k x) ((get k-sub-module) a b ta tb ea eb trail labels))
             (else z #f)))))
@@ -523,7 +562,8 @@
                                  (else (k-eff=? d2 e2)))))
                        (else z #f)))
                    (dz (m) (tagcase (car ys) (dz (n) (k-size-eq? m n)) (else z #f)))
-                   (dc (c) (tagcase (car ys) (dc (d) (k-conv-same? c d ea eb)) (else z #f)))))
+                   (dc (c) (tagcase (car ys) (dc (d) (k-conv-same? c d ea eb)) (else z #f)))
+                   (df (f) (k-d-same? (car xs) (car ys) ea eb trail labels))))
                (k-sub-descs (cdr xs) (cdr ys) (cdr vs) ea eb trail labels)))))
   (k-sub-fields (subr (maxeff kstate spin) (k-ids k-ids bool k-benv k-benv k-strail k-labels) bool)
     (lambda (fa fb frozen ea eb trail labels)
@@ -541,7 +581,45 @@
       (cond ((null? sa) #t)
             (else (let ((y (k-part-find sb (extract (car sa) 1))))
                     (and (>= y 0) (k-sub (extract (car sa) 2) y ea eb trail labels)
-                         (k-sub-sum (cdr sa) sb ea eb trail labels))))))))
+                         (k-sub-sum (cdr sa) sb ea eb trail labels)))))))
+  ;; Whether descriptions `x` and `y` are the same, each by its side's
+  ;; environment: types each a subtype of the other.
+  (k-d-same? (subr (maxeff kstate spin) (k-desc k-desc k-benv k-benv k-strail k-labels) bool)
+    (lambda (x y ea eb trail labels)
+      (tagcase x
+        (dt (a) (tagcase y (dt (b) (k-inv a b ea eb trail labels)) (else z #f)))
+        (dr (r) (tagcase y (dr (s) (k-benv-region=? r s ea eb)) (else z #f)))
+        (de (d) (tagcase y (de (e) (k-benv-eff=? d e ea eb)) (else z #f)))
+        (dz (m) (tagcase y (dz (n) (k-size-eq? m n)) (else z #f)))
+        (dc (c) (tagcase y (dc (d) (k-conv-same? c d ea eb)) (else z #f)))
+        (df (f) (tagcase y (df (g) (k-fun-same? f g ea eb trail labels)) (else z #f))))))
+  (k-ds-same? (subr (maxeff kstate spin) (k-descs k-descs k-benv k-benv k-strail k-labels) bool)
+    (lambda (xs ys ea eb trail labels)
+      (or (null? xs)
+          (and (k-d-same? (car xs) (car ys) ea eb trail labels)
+               (k-ds-same? (cdr xs) (cdr ys) ea eb trail labels)))))
+  ;; Whether description functions `f` and `g` are the same, each by its
+  ;; side's environment: the same variable, or `dlambda`s of the same kinds
+  ;; whose bodies are the same, their parameters named alike. They are
+  ;; reduced and eta-contracted as they are made, so nothing else is.
+  (k-fun-same? (subr (maxeff kstate spin) (int int k-benv k-benv k-strail k-labels) bool)
+    (lambda (f g ea eb trail labels)
+      (let ((f (k-resolve f)) (g (k-resolve g)))
+        (if (and (= f g) (null? ea) (null? eb))
+            #t
+            (tagcase (k-get f)
+              (ty-var (x) (tagcase (k-get g) (ty-var (y) (k-benv-var=? x y ea eb)) (else z #f)))
+              ;; A dependent procedure's parameter's, or a `select` as written.
+              (ty-param (k x) (k-param-is? g k x))
+              (ty-select (m x) (k-select-is? g m x))
+              (ty-lam (pa ba)
+                (tagcase (k-get g)
+                  (ty-lam (pb bb)
+                    (and (= (k-length pa) (k-length pb)) (k-same-kinds? pa pb)
+                         (let ((named (k-name-binders pa pb f g 0 (cons ea eb) labels)))
+                           (k-d-same? ba bb (car named) (cdr named) trail labels))))
+                  (else z #f)))
+              (else z #f)))))))
 (define k-part-index (subr kreads (k-parts symbol int) int)
   (lambda (ps l i)
     (cond ((null? ps) -1)
@@ -763,28 +841,28 @@
             " is bound recursively, so it must be a lambda: "
             "nothing may run before every binding exists")))
 
-;; Whether description `d` is of kind `k`, as a binder of that kind takes.
-(define k-desc-of-kind? (subr kreads (k-desc int) bool)
-  (lambda (d k)
-    (tagcase d
-      (dr (r) (or (= k 0) (and (= k 3) (k-place? r))))
-      (de (e) (= k 1))
-      (dt (t) (or (= k 2) (= k 4)))
-      (dz (z) (= k 5))
-      (dc (c) (= k 6)))))
 ;; Binder `v`'s name, quoted.
 (define k-quote-dvar (subr kreads (int) string)
   (lambda (v) (k-quote (symbol->string (k-dvar-name v)))))
-(define k-proj-map (subr checks (k-binders k-descs int int) k-map)
+;; Description `d`, given where one of kind `k` is wanted: a `select` given
+;; for a description function, resolved, and taken as one.
+(define k-select-fun (subr (maxeff checks spin) (k-desc int int int) k-desc)
+  (lambda (d k a b)
+    (let ((t (tagcase d (dt (x) x) (df (x) x) (else y -1))))
+      (if (and (k-arrow-kind? k) (>= t 0) (tagcase (k-get t) (ty-select (m n) #t) (else y #f)))
+          (df (k-resolve-selects t a b))
+          d))))
+(define k-proj-map (subr (maxeff checks spin) (k-binders k-descs int int) k-map)
   (lambda (bs ds a b)
     (if (null? bs)
         nil
         (let* ((v (extract (car bs) 1)) (k (extract (car bs) 2))
-               (d (car ds))
+               ;; A function given as a `select`: resolved first.
+               (d (k-select-fun (car ds) k a b))
                (ok (k-desc-of-kind? d k)))
           (if ok
               (cons (cons v d) (k-proj-map (cdr bs) (cdr ds) a b))
-              (k-fail (k-cat4 (k-quote-dvar v) " is bound as a " (k-kind-debug k)
+              (k-fail (k-cat4 (k-quote-dvar v) " is bound as a " (k-kind-word k)
                               ", and the description given is not one")
                       a b))))))
 (define k-param-types (subr checks (k-typed-params k-ids int int) k-bindings)
@@ -814,177 +892,3 @@
 (define k-needs-telling? (subr kreads (kx) bool)
   (lambda (x)
     (tagcase x (x-lambda (ps body a b) (or (null? ps) (k-some-untyped? ps))) (else y #f))))
-
-;;; ------------------------------------------------------------ calls that may not end
-
-;; Whether a procedure of type `t` could be given itself: a cycle in `t`
-;; runs through a parameter of a procedure (or the argument of a
-;; continuation). A type that is merely recursive, as a list is, does not let
-;; anything loop. `path`: the nodes on the way down, newest first, each with
-;; whether it was reached through a parameter.
-(define-type k-cpath (listof (pairof int bool @t) acyclic))
-(define k-on-path? (subr kreads (k-cpath int) bool)
-  (lambda (path t) (and (not (null? path)) (or (= (car (car path)) t) (k-on-path? (cdr path) t)))))
-;; Whether a node newer than `t` on the path was reached through a parameter.
-(define k-newer-param? (subr kreads (k-cpath int) bool)
-  (lambda (path t)
-    (and (not (= (car (car path)) t)) (or (cdr (car path)) (k-newer-param? (cdr path) t)))))
-(define-rec
-  (k-cyclic-from? (subr (maxeff kstate spin) (int bool k-cpath) bool)
-    (lambda (t by path)
-      (let ((t (k-resolve t)))
-        (cond ((k-on-path? path t) (or by (k-newer-param? path t)))
-              ;; Too deep to follow: it may loop, the cautious answer.
-              ((> (k-length path) 64) #t)
-              (else
-               (let ((p (the k-cpath (cons (cons t by) path))))
-                 (tagcase (k-get t)
-                   (ty-subr (e ps r cv) (or (k-cyclic-list? ps #t p) (k-cyclic-from? r #f p)))
-                   (ty-comp (x a e r) (or (k-cyclic-from? x #t p) (k-cyclic-from? a #f p)))
-                   (ty-tag (a h e r) (or (k-cyclic-from? a #f p) (k-cyclic-from? h #f p)))
-                   (ty-poly (bs x) (k-cyclic-from? x #f p))
-                   (ty-ref (a r) (k-cyclic-from? a #f p))
-                   (ty-array (a r) (k-cyclic-from? a #f p))
-                   (ty-icell (a r) (k-cyclic-from? a #f p))
-                   (ty-markkey (a r) (k-cyclic-from? a #f p))
-                   (ty-pair (a b r) (or (k-cyclic-from? a #f p) (k-cyclic-from? b #f p)))
-                   (ty-bloblet (fs z r) (k-cyclic-list? fs #f p))
-                   (ty-product (ps) (k-cyclic-parts? ps p))
-                   (ty-sum (ps) (k-cyclic-parts? ps p))
-                   ;; Through its representation; what it was given,
-                   ;; cautiously, as if taken as a parameter.
-                   (ty-named (g ds)
-                     (or (k-cyclic-from? (extract (k-gen-of g) 4) #f p)
-                         (k-cyclic-list? (k-desc-types ds) #t p)))
-                   (ty-nlist (e z r) (k-cyclic-from? e #f p))
-                   (else x #f))))))))
-  (k-cyclic-list? (subr (maxeff kstate spin) (k-ids bool k-cpath) bool)
-    (lambda (ts by path)
-      (and (not (null? ts))
-           (or (k-cyclic-from? (car ts) by path) (k-cyclic-list? (cdr ts) by path)))))
-  (k-cyclic-parts? (subr (maxeff kstate spin) (k-parts k-cpath) bool)
-    (lambda (ps path)
-      (and (not (null? ps))
-           (or (k-cyclic-from? (extract (car ps) 2) #f path) (k-cyclic-parts? (cdr ps) path))))))
-(define k-cyclic? (subr (maxeff kstate spin) (int) bool)
-  (lambda (t) (k-cyclic-from? t #f nil)))
-;; `f` under any projections and ascriptions.
-(define k-under (subr (read @globals) (kx) kx)
-  (lambda (f)
-    (tagcase f
-      (x-proj (body ds a b) (k-under body))
-      (x-the (t body a b) (k-under body))
-      (else y f))))
-;; Whether `k` is named in `x` only as the operator of calls, evaluated as
-;; `x` is: not under a `lambda` (which could be called later) or a prompt
-;; (whose captures could be composed later).
-(define-rec
-  (k-only-called? (subr kmakes (kx symbol) bool)
-    (lambda (x k)
-      (tagcase x
-        (x-var (s a b) (not (symbol=? s k)))
-        (x-const (t v a b) #t)
-        (x-app (f args a b)
-          (and (or (tagcase f (x-var (s fa fb) (symbol=? s k)) (else y #f)) (k-only-called? f k))
-               (k-only-called-list? args k)))
-        (x-lambda (ps body a b) (not (k-has-name? (k-free-vars x) k)))
-        (x-plambda (bs body a b) (not (k-has-name? (k-free-vars x) k)))
-        (x-rlambda (r l a b) (not (k-has-name? (k-free-vars x) k)))
-        (x-letrec (bs body a b) (not (k-has-name? (k-free-vars x) k)))
-        (x-prompt (t body h a b) (not (k-has-name? (k-free-vars x) k)))
-        (x-let (bs body a b)
-          (and (k-only-called-lets? bs k)
-               (or (k-has-name? (k-let-names bs nil) k) (k-only-called? body k))))
-        (x-letregion (m r i body a b) (or (symbol=? (k-dvar-name r) k) (k-only-called? body k)))
-        (x-tagcase (s arms els a b)
-          (and (k-only-called? s k)
-               (k-only-called-arms? arms k)
-               (k-only-called-else? els k)))
-        (x-proj (body ds a b) (k-only-called? body k))
-        (x-the (t body a b) (k-only-called? body k))
-        (x-convention (c body a b) (k-only-called? body k))
-        (x-extract (body l a b) (k-only-called? body k))
-        (x-sum (l body a b) (k-only-called? body k))
-        (x-if (p c d a b) (and (k-only-called? p k) (k-only-called? c k) (k-only-called? d k)))
-        (x-begin (xs a b) (k-only-called-list? xs k))
-        (x-bloblet (o i xs a b) (k-only-called-list? xs k))
-        (x-product (fs a b) (k-only-called-lets? fs k))
-        (x-module (items a b) (not (k-has-name? (k-free-vars x) k)))
-        (x-with (m body a b) (not (k-has-name? (k-free-vars x) k))))))
-  (k-only-called-list? (subr kmakes (kxs symbol) bool)
-    (lambda (xs k)
-      (or (null? xs) (and (k-only-called? (car xs) k) (k-only-called-list? (cdr xs) k)))))
-  (k-only-called-lets? (subr kmakes (k-let-bs symbol) bool)
-    (lambda (bs k)
-      (or (null? bs)
-          (and (k-only-called? (extract (car bs) 2) k) (k-only-called-lets? (cdr bs) k)))))
-  (k-only-called-arms? (subr kmakes (k-arms symbol) bool)
-    (lambda (arms k)
-      (or (null? arms)
-          (and (or (k-has-name? (extract (car arms) 3) k) (k-only-called? (extract (car arms) 4) k))
-               (k-only-called-arms? (cdr arms) k)))))
-  ;; A `tagcase`'s `else` arm, if any, unless its variable is `k`.
-  (k-only-called-else? (subr kmakes (k-let-bs symbol) bool)
-    (lambda (els k)
-      (or (null? els)
-          (symbol=? (extract (car els) 1) k)
-          (k-only-called? (extract (car els) 2) k)))))
-;; Whether an effect has a `comefrom`.
-(define k-has-comefrom? (subr kreads (k-eff) bool)
-  (lambda (e)
-    (and (not (null? e))
-         (or (tagcase (car e) (a-comefrom (r) #t) (else y #f)) (k-has-comefrom? (cdr e))))))
-;; Whether the receiver of `cwcc` at type `ft` may capture a continuation:
-;; its latent effect has a `comefrom`. Unknown counts as may.
-(define k-receiver-captures? (subr (maxeff kmakes spin) (int) bool)
-  (lambda (ft)
-    (let ((c (k-as-subr ft)))
-      (or (null? c) (null? (extract (car c) 2))
-          (let ((r (k-as-subr (k-resolve (car (extract (car c) 2))))))
-            (or (null? r) (k-has-comefrom? (extract (car r) 1))))))))
-;; Whether `r`, given to `cwcc`, is a `lambda` whose continuation can only
-;; be called while `cwcc` runs, so can only leave it
-;; (`docs/research/soundness-findings.md`, F3).
-(define k-escape-only? (subr kmakes (kx) bool)
-  (lambda (r)
-    (tagcase r
-      (x-the (t body a b) (k-escape-only? body))
-      (x-lambda (ps body a b)
-        (and (not (null? ps)) (null? (cdr ps)) (k-only-called? body (extract (car ps) 1))))
-      (else y #f))))
-;; The name `f` is, under any projections and ascriptions, if a variable.
-(define k-callee-name (subr (maxeff (read @globals) (alloc @t)) (kx) (listof symbol acyclic))
-  (lambda (f)
-    (tagcase f
-      (x-proj (body ds a b) (k-callee-name body))
-      (x-the (t body a b) (k-callee-name body))
-      (x-var (n a b) (the (listof symbol acyclic) (cons n nil)))
-      (else y (the (listof symbol acyclic) nil)))))
-;; Whether `f` names a known procedure.
-(define k-known-callee? (subr (maxeff kstate spin) (kx) bool)
-  (lambda (f)
-    (let ((s (k-callee-name f)))
-      (and (not (null? s)) (let ((t (k-lookup (car s)))) (and (>= t 0) (k-known? (car s))))))))
-;; Whether a call of `f` (instantiated to `ft`) may run for an unbounded
-;; time beyond what its latent effect says: a call, in a recursive group's
-;; lambdas, of the group; or a call through a recursive type of anything but
-;; known code (self-application loops with no store at all). A knot through
-;; the store needs nothing here: `k-no-knot` makes its type say `spin`.
-(define k-may-spin? (subr (maxeff kstate spin) (kx int kxs) bool)
-  (lambda (f ft args)
-    (let* ((s (k-callee-name f))
-           (t (if (null? s) -1 (k-lookup (car s)))))
-      (cond ;; A continuation called after `cwcc` has returned comes back to
-            ;; it again, as often as it is called: only one that can only
-            ;; leave needs no `spin`.
-            ;; And the receiver must capture no continuation, which could
-            ;; hold a call of `k` and be run after `cwcc` returns (F9): a
-            ;; `comefrom` in its latent effect, `cwcc`'s `e` as solved.
-            ((and (>= t 0) (string=? (symbol->string (car s)) "cwcc")
-                  (k-named-has? (get k-std) (car s) t))
-             (or (k-receiver-captures? ft)
-                 (not (and (not (null? args)) (null? (cdr args)) (k-escape-only? (car args))))))
-            ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
-            ((and (>= t 0) (or (k-known? (car s)) (k-named-has? (get k-std) (car s) t))) #f)
-            ((k-lambda? (k-under f)) #f)
-            (else (k-cyclic? ft))))))

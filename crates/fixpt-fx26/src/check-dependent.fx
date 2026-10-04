@@ -74,7 +74,7 @@
         'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
         'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module
         'define-datatype 'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte
-        'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet))
+        'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=>))
 ;; A procedure type's parameter written `(name type)`, where `name` names no
 ;; type or type form: its name, in a list of one; none if it is not one.
 (define k-param-name (subr (maxeff kreads (alloc @t) (read @s) spin) (syn) k-names)
@@ -228,7 +228,8 @@
                (walked (begin (k-param-sels-each ps seen out) (k-param-sels-from r seen out))))
           (if (null? (get out))
               c
-              (let ((given (k-args-given (k-given-reversed (get out) nil) args a b)))
-                (cons (product (1 (extract (car c) 1)) (2 (k-instantiate-all ps given))
-                               (3 (k-instantiate-params r given)))
-                      nil)))))))
+              (let* ((given (k-args-given (k-given-reversed (get out) nil) args a b))
+                     (ps2 (k-instantiate-all ps given))
+                     (r2 (k-instantiate-params r given)))
+                (begin (k-check-apps-each (k-ids-then ps2 r2) (the (ref k-ids @t) (new nil)) a b)
+                       (cons (product (1 (extract (car c) 1)) (2 ps2) (3 r2)) nil))))))))

@@ -1250,6 +1250,10 @@ impl Fx26Session {
         self.own_pieces()?;
         let standard = self.standard26()?;
         self.own_begun = false;
+        // The compiler, too, sees none of the globals made before.
+        self.scheme
+            .call_global(&format!("{READER_PREFIX}compile-forget-globals!"), &[])
+            .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
         self.compile_showing_in(Some(standard), text, show)
     }
 

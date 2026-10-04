@@ -521,6 +521,14 @@ impl Checker {
                     self.define_type_family(n, &params, def)?;
                     return Ok(Top::DefineTypeFamily { name: n });
                 }
+                // `(define-type name (dlambda …))`: a name for a description
+                // function (`crate::kinds`).
+                if def.as_proper_list().and_then(|d| d.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "dlambda") {
+                    let n = self.binder_name(name)?;
+                    let f = self.parse_fun(def, None)?;
+                    self.dscope.push((n, crate::parse::DScope::Fun(f)));
+                    return Ok(Top::DefineTypeFamily { name: n });
+                }
                 let name = self.binder_name(name)?;
                 let ty = self.define_type(name, def, form.span)?;
                 Ok(Top::DefineType { name, ty })
@@ -795,9 +803,13 @@ impl Checker {
         let mut twice: Vec<Sym> = Vec::new();
         for f in forms {
             let items = f.as_proper_list().unwrap_or(&[]);
-            if let [h, n, _] = items
+            // A description function, `(define-type f (dlambda …))`, is no
+            // type to declare: it is read where it is defined.
+            let dlambda = |d: &Syntax| d.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "dlambda");
+            if let [h, n, d] = items
                 && h.as_symbol().is_some_and(|h| self.interner.name(h) == "define-type")
                 && let Some(n) = n.as_symbol()
+                && !dlambda(d)
             {
                 if names.contains(&n) { twice.push(n) } else { names.push(n) }
             }
@@ -926,7 +938,7 @@ impl Checker {
             let entry = match d {
                 DScope::Rec(t) => ("type", format!("{n} = {}", self.show_definition(*t))),
                 DScope::Abbrev { params, body } => {
-                    let ps: Vec<String> = params.iter().map(|(p, k)| format!("({} {})", self.interner.name(*p), kind_name(*k))).collect();
+                    let ps: Vec<String> = params.iter().map(|(p, k)| format!("({} {})", self.interner.name(*p), self.show_kind(*k))).collect();
                     ("family", format!("({n} {}) = {}", ps.join(" "), fixpt_read::write_syntax(body, &self.interner)))
                 }
                 DScope::Eff(e) => ("effect", format!("{n} = {}", self.show_effect(e))),
@@ -942,12 +954,13 @@ impl Checker {
                                 crate::ast::Variance::Contra => " -",
                                 crate::ast::Variance::Inv => "",
                             };
-                            format!("({} {}{mark})", self.interner.name(self.arena.dvar_name(*v)), kind_name(*k))
+                            format!("({} {}{mark})", self.interner.name(self.arena.dvar_name(*v)), self.show_kind(*k))
                         })
                         .collect();
                     let head = if ps.is_empty() { n.clone() } else { format!("({n} {})", ps.join(" ")) };
                     ("generative", format!("{head} = {}", self.show_ty(family.rep)))
                 }
+                DScope::Fun(t) => ("function", format!("{n} = {}", self.show_ty(*t))),
                 DScope::Private(_) => ("region", n.clone()),
                 DScope::Var(..) | DScope::Region(_) | DScope::SizeVal(_) | DScope::ConvVal(_) => continue,
             };
@@ -1100,19 +1113,6 @@ pub const KEYWORDS: &[&str] = &[
     "composable", "mark-key", "listof", "cond", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
     "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
-    "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet",
+    "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet", "dlambda", "=>",
 ];
 
-/// A kind as a program writes it.
-fn kind_name(k: crate::ast::Kind) -> &'static str {
-    use crate::ast::Kind;
-    match k {
-        Kind::Region => "region",
-        Kind::Place => "place",
-        Kind::Effect => "effect",
-        Kind::Type => "type",
-        Kind::Data => "data",
-        Kind::Size => "size",
-        Kind::Conv => "conv",
-    }
-}

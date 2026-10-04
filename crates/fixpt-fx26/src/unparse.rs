@@ -1,6 +1,6 @@
 //! Printing descriptions, in FX-87's notation.
 
-use crate::ast::{Atom, Effect, Kind, Region, Ty, TyId};
+use crate::ast::{Atom, Effect, Region, Ty, TyId};
 use crate::check::Checker;
 
 impl Checker {
@@ -19,6 +19,15 @@ impl Checker {
         }
     }
 
+    fn show_earg(&self, a: &crate::ast::EArg) -> String {
+        match a {
+            crate::ast::EArg::Region(r) => self.show_region(*r),
+            crate::ast::EArg::Effect(e) => self.show_effect(e),
+            crate::ast::EArg::Size(z) => self.show_size(z),
+            crate::ast::EArg::Conv(c) => self.show_conv(*c),
+        }
+    }
+
     pub fn show_atom(&self, a: Atom) -> String {
         let (op, r) = match a {
             Atom::Read(r) => ("read", r),
@@ -29,6 +38,11 @@ impl Checker {
             Atom::Await(r) => ("await", r),
             Atom::Var(v) => return self.interner.name(self.arena.dvar_name(v)).to_string(),
             Atom::Spin => return "spin".to_string(),
+            Atom::App(n) => {
+                let (head, args) = self.arena.effect_apps.parts(n);
+                let ds: Vec<String> = args.iter().map(|a| self.show_earg(a)).collect();
+                return format!("({} {})", self.interner.name(self.arena.dvar_name(head)), ds.join(" "));
+            }
         };
         format!("({op} {})", self.show_region(r))
     }
@@ -122,6 +136,17 @@ impl Checker {
         self.show_ty_body(t, path)
     }
 
+    /// A description as written, inside a type being shown.
+    fn show_d_on(&self, d: &crate::ast::D, path: &mut Vec<TyId>) -> String {
+        match d {
+            crate::ast::D::Type(x) | crate::ast::D::Fun(x) => self.show_ty_on(*x, path),
+            crate::ast::D::Region(r) => self.show_region(*r),
+            crate::ast::D::Effect(e) => self.show_effect(e),
+            crate::ast::D::Size(z) => self.show_size(z),
+            crate::ast::D::Conv(c) => self.show_conv(*c),
+        }
+    }
+
     fn show_ty_body(&self, t: TyId, path: &mut Vec<TyId>) -> String {
         // A node met again on the way down is a cycle: named by its depth,
         // and written `(mu %d …)` where the cycle starts.
@@ -146,15 +171,7 @@ impl Checker {
                 let bs: Vec<String> = binders
                     .iter()
                     .map(|(v, k)| {
-                        let k = match k {
-                            Kind::Region => "region",
-                            Kind::Place => "place",
-                            Kind::Effect => "effect",
-                            Kind::Type => "type",
-                            Kind::Data => "data",
-                            Kind::Conv => "conv",
-                            Kind::Size => "size",
-                        };
+                        let k = self.show_kind(*k);
                         match self.arena.bound(*v) {
                             Some(b) => format!("({} {k} {})", self.interner.name(self.arena.dvar_name(*v)), self.show_region(b)),
                             None => format!("({} {k})", self.interner.name(self.arena.dvar_name(*v))),
@@ -166,8 +183,9 @@ impl Checker {
             Ty::Ref(a, r) => format!("(ref {} {})", self.show_ty_on(a, path), self.show_region(r)),
             Ty::Module { abs, descs, vals } => {
                 let mut out = String::from("(moduleof");
-                for (n, _) in &abs {
-                    out.push_str(&format!(" (abs {} type)", self.interner.name(*n)));
+                for (n, v) in &abs {
+                    let k = self.arena.dvar_kind_known(*v).unwrap_or(crate::ast::Kind::Type);
+                    out.push_str(&format!(" (abs {} {})", self.interner.name(*n), self.show_kind(k)));
                 }
                 for (n, x) in descs.iter() {
                     out.push_str(&format!(" (desc {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
@@ -230,18 +248,18 @@ impl Checker {
                 if args.is_empty() {
                     name
                 } else {
-                    let ds: Vec<String> = args
-                        .iter()
-                        .map(|d| match d {
-                            crate::ast::D::Type(x) => self.show_ty_on(*x, path),
-                            crate::ast::D::Region(r) => self.show_region(*r),
-                            crate::ast::D::Effect(e) => self.show_effect(e),
-                            crate::ast::D::Size(z) => self.show_size(z),
-                            crate::ast::D::Conv(c) => self.show_conv(*c),
-                        })
-                        .collect();
+                    let ds: Vec<String> = args.iter().map(|d| self.show_d_on(d, path)).collect();
                     format!("({name} {})", ds.join(" "))
                 }
+            }
+            Ty::App { fun, args } => {
+                let ds: Vec<String> = args.iter().map(|d| self.show_d_on(d, path)).collect();
+                format!("({} {})", self.show_ty_on(fun, path), ds.join(" "))
+            }
+            Ty::Lam { params, body } => {
+                let ps: Vec<String> =
+                    params.iter().map(|(v, k)| format!("({} {})", self.interner.name(self.arena.dvar_name(*v)), self.show_kind(*k))).collect();
+                format!("(dlambda ({}) {})", ps.join(" "), self.show_d_on(&body, path))
             }
             Ty::Pair(a, b, r) => format!(
                 "(pairof {} {} {})",

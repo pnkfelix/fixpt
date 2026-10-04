@@ -411,7 +411,17 @@ impl Checker {
                     self.size_walk(x, pol, v, bad, seen);
                 }
             }
-            Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Select(..) | Ty::ParamSel(..) | Ty::Lam { .. } => {}
+            // What a description function is given, it may use either way.
+            Ty::App { args, .. } => {
+                for d in args {
+                    match d {
+                        D::Size(s) => size(&s, Polarity::Inv, bad),
+                        D::Type(x) => self.size_walk(x, Polarity::Inv, v, bad, seen),
+                        _ => {}
+                    }
+                }
+            }
             Ty::Named { args, .. } => {
                 for d in args {
                     match d {

@@ -27,17 +27,43 @@
 ;; `(op r)`: an atom on region `r`.
 (define k-region-atom-show (subr kreads (string k-region) string)
   (lambda (op r) (k-cat5 "(" op " " (k-region-show r) ")")))
-(define k-atom-show (subr kreads (k-atom) string)
-  (lambda (a)
-    (tagcase a
-      (a-read (r) (k-region-atom-show "read" r))
-      (a-write (r) (k-region-atom-show "write" r))
-      (a-alloc (r) (k-region-atom-show "alloc" r))
-      (a-goto (r) (k-region-atom-show "goto" r))
-      (a-comefrom (r) (k-region-atom-show "comefrom" r))
-      (a-await (r) (k-region-atom-show "await" r))
-      (a-spin () "spin")
-      (a-var (v) (k-dvar-string v)))))
+(define-rec
+  (k-atom-show (subr kreads (k-atom) string)
+    (lambda (a)
+      (tagcase a
+        (a-read (r) (k-region-atom-show "read" r))
+        (a-write (r) (k-region-atom-show "write" r))
+        (a-alloc (r) (k-region-atom-show "alloc" r))
+        (a-goto (r) (k-region-atom-show "goto" r))
+        (a-comefrom (r) (k-region-atom-show "comefrom" r))
+        (a-await (r) (k-region-atom-show "await" r))
+        (a-spin () "spin")
+        (a-var (v) (k-dvar-string v))
+        (a-app (v ds) (k-cat4 "(" (k-dvar-string v) (k-eargs-show ds) ")")))))
+  ;; What an effect application was given, each after a space.
+  (k-eargs-show (subr kreads (k-descs) string)
+    (lambda (ds)
+      (if (null? ds)
+          ""
+          (k-cat3 " "
+                  (tagcase (car ds)
+                    (dr (r) (k-region-show r))
+                    (de (e) (k-eff-show-plain e))
+                    (dz (z) (tagcase z (sz-finite () "finite") (sz-lin (k ts) (int->string k))))
+                    (dc (c) (tagcase c
+                              (cv-cellular () "cellular") (cv-native () "native") (cv-fx () "fx")
+                              (cv-var (v) (k-dvar-string v))))
+                    (else y "?"))
+                  (k-eargs-show (cdr ds))))))
+  ;; An effect inside one given an effect function: `pure`, an atom, or
+  ;; `(maxeff …)`.
+  (k-eff-show-plain (subr kreads (k-eff) string)
+    (lambda (e)
+      (cond ((null? e) "pure")
+            ((null? (cdr e)) (k-atom-show (car e)))
+            (else (k-cat3 "(maxeff" (k-atoms-plain e) ")")))))
+  (k-atoms-plain (subr kreads (k-eff) string)
+    (lambda (e) (if (null? e) "" (k-cat3 " " (k-atom-show (car e)) (k-atoms-plain (cdr e)))))))
 (define k-atoms-show (subr kreads (k-eff) string)
   (lambda (e) (if (null? e) "" (k-cat3 " " (k-atom-show (car e)) (k-atoms-show (cdr e))))))
 (define k-strings-append (subr (read @globals) (k-strings k-strings) k-strings)
@@ -118,9 +144,6 @@
 ;; For a driver: whether the program's convention is native.
 (define check-conv-native! (subr (maxeff (read @globals) (write @t)) (bool) unit)
   (lambda (on) (set k-conv-default (if on (cv-native) (cv-cellular)))))
-;; A convention as a number: one of FX-26's own, or its binder.
-(define k-conv-code (subr pure (k-conv) int)
-  (lambda (c) (tagcase c (cv-cellular () -1) (cv-native () -2) (cv-fx () -3) (cv-var (v) v))))
 (define k-conv=? (subr (read @globals) (k-conv k-conv) bool)
   (lambda (a b) (= (k-conv-code a) (k-conv-code b))))
 ;; As Rust's `{:?}` writes a kind.
@@ -133,6 +156,22 @@
           ((= k 5) "Size")
           ((= k 6) "Conv")
           (else "Type"))))
+(define-rec
+  ;; A kind as it is written: `type`, or `(=> type type)`.
+  (k-kind-text (subr (maxeff kreads (alloc @t) spin) (int) string)
+    (lambda (k)
+      (let ((a (k-arrow-parts k)))
+        (if (null? a)
+            (k-kind-name k)
+            (k-cat5 "(=> " (k-join (k-kinds-text (car (car a))) " ") " " (k-kind-text (cdr (car a)))
+                    ")")))))
+  (k-kinds-text (subr (maxeff kreads (alloc @t) spin) (k-ids) k-strings)
+    (lambda (ks)
+      (if (null? ks) nil (cons (k-kind-text (car ks)) (k-kinds-text (cdr ks)))))))
+;; A kind as the older messages name it, `Region`, `Type`, …; an arrow
+;; kind as it is written.
+(define k-kind-word (subr (maxeff kreads (alloc @t) spin) (int) string)
+  (lambda (k) (if (k-arrow-kind? k) (k-kind-text k) (k-kind-debug k))))
 ;; Whether a region is a place: a variable bound as one.
 (define k-place? (subr (maxeff (read @globals) (read @t)) (k-region) bool)
   (lambda (r) (tagcase r (r-var (v) (k-place-var? v)) (r-heap () #t) (else x #f))))
@@ -151,11 +190,11 @@
                     (else (k-abbrev-in (cdr ds) (cons n seen) t))))
             (else y (k-abbrev-in (cdr ds) seen t)))))))
 ;; Binder `v` of kind `kind`: `(name kind)`, or `(name region bound)`.
-(define k-binder-show (subr (maxeff kreads (alloc @t)) (int int) string)
+(define k-binder-show (subr kbuilds (int int) string)
   (lambda (v kind)
-    (let* ((b (k-bound-of v)) (named (k-cat3 (k-dvar-string v) " " (k-kind-name kind))))
+    (let* ((b (k-bound-of v)) (named (k-cat3 (k-dvar-string v) " " (k-kind-text kind))))
       (if (null? b) (k-cat3 "(" named ")") (k-cat5 "(" named " " (k-region-show (car b)) ")")))))
-(define k-show-binders (subr (maxeff kreads (alloc @t)) (k-binders) k-strings)
+(define k-show-binders (subr kbuilds (k-binders) k-strings)
   (lambda (bs)
     (if (null? bs)
         nil
@@ -172,7 +211,6 @@
         (or (>= (k-find-sub s (k-cat3 " " name ")") 0) 0)
             (or (>= (k-find-sub s (k-cat3 "(" name " ") 0) 0)
                 (>= (k-find-sub s (k-cat3 "(" name ")") 0) 0))))))
-(define-type k-terms (listof (pairof int int acyclic) acyclic))
 ;; Sizes: a literal, `finite`, one more or less, and whether one list's
 ;; size is another's.
 (define k-size-lit (subr (read @globals) (int) k-size) (lambda (k) (sz-lin k nil)))
@@ -466,12 +504,16 @@
 (define k-conv-prefix (subr kreads (k-conv) string)
   (lambda (cv) (if (k-conv=? cv (get k-conv-default)) "" (k-cat3 "(conv " (k-conv-show cv) ") "))))
 
+;; Abstract type `n`, variable `v`: ` (abs n kind)`.
+(define k-show-abs-one (subr kbuilds (symbol int) string)
+  (lambda (n v) (k-cat5 " (abs " (symbol->string n) " " (k-kind-text (k-dvar-kind v)) ")")))
 ;; A module type's abstract types: ` (abs t type)` each.
 (define k-show-abs (subr kbuilds (k-parts) string)
   (lambda (ps)
     (if (null? ps)
         ""
-        (k-cat4 " (abs " (symbol->string (extract (car ps) 1)) " type)" (k-show-abs (cdr ps))))))
+        (string-append (k-show-abs-one (extract (car ps) 1) (extract (car ps) 2))
+                       (k-show-abs (cdr ps))))))
 
 (define-rec
   (k-show-on (subr kbuilds (int k-ids) string)
@@ -495,7 +537,8 @@
         (dr (r) (k-region-show r))
         (de (e) (k-show-effect e))
         (dz (z) (k-show-size z))
-        (dc (c) (k-conv-show c)))))
+        (dc (c) (k-conv-show c))
+        (df (f) (k-show-on f p)))))
   (k-show-descs (subr kbuilds (k-descs k-ids) k-strings)
     (lambda (ds p)
       (if (null? ds)
@@ -562,7 +605,10 @@
           (k-cat5 "(moduleof" (k-show-abs abs) (k-show-comps "desc" ds p) (k-show-comps "val" vs p)
                   ")"))
         (ty-select (m n) (k-cat5 "(select " (symbol->string m) " " (symbol->string n) ")"))
-        (ty-param (k n) (k-cat5 "(select $" (int->string (+ k 1)) " " (symbol->string n) ")")))))
+        (ty-param (k n) (k-cat5 "(select $" (int->string (+ k 1)) " " (symbol->string n) ")"))
+        (ty-app (g ds) (k-cat5 "(" (k-show-on g p) " " (k-join (k-show-descs ds p) " ") ")"))
+        (ty-lam (bs body)
+          (k-cat5 "(dlambda (" (k-join (k-show-binders bs) " ") ") " (k-show-desc body p) ")")))))
   ;; A module type's components of kind `what`: ` (what name type)` each.
   (k-show-comps (subr kbuilds (string k-parts k-ids) string)
     (lambda (what ps p)
@@ -571,6 +617,9 @@
           (let ((one (k-cat5 " (" what " " (symbol->string (extract (car ps) 1)) " ")))
             (k-cat4 one (k-show-on (extract (car ps) 2) p) ")" (k-show-comps what (cdr ps) p)))))))
 
+;; Whether type `t` is variable `v`.
+(define k-type-is-var? (subr (maxeff kreads spin) (int int) bool)
+  (lambda (t v) (tagcase (k-get t) (ty-var (w) (= w v)) (else y #f))))
 ;; A type. One `define-type` named prints as its name; any other recursive
 ;; type as `(mu %d …)`, `%d` naming the cycle.
 (define k-show-ty (subr kbuilds (int) string)
@@ -580,6 +629,21 @@
 
 ;; Regions storage is kept in, for `k-knot-in`.
 (define-type k-kept (listof k-region acyclic))
+;; The types in description `d`, for analyses that look through what a
+;; value holds: a type itself, or a `dlambda`'s body's (its parameters
+;; standing for what it is given).
+(define k-d-types (subr (maxeff kreads spin) (k-desc) k-ids)
+  (lambda (d)
+    (tagcase d
+      (dt (t) (the k-ids (cons t nil)))
+      (df (f) (tagcase (k-get f) (ty-lam (bs body) (k-d-types body)) (else y nil)))
+      (else y nil))))
+;; `xs` before `ys`.
+(define k-ids-onto (subr (maxeff (read @globals) (alloc @t)) (k-ids k-ids) k-ids)
+  (lambda (xs ys) (if (null? xs) ys (the k-ids (cons (car xs) (k-ids-onto (cdr xs) ys))))))
+;; The types in descriptions `ds`, each as `k-d-types` finds them.
+(define k-ds-types (subr (maxeff kreads (alloc @t) spin) (k-descs) k-ids)
+  (lambda (ds) (if (null? ds) nil (k-ids-onto (k-d-types (car ds)) (k-ds-types (cdr ds))))))
 (define k-kept-has? (subr (maxeff kreads spin) (k-kept k-region) bool)
   (lambda (rs r) (and (not (null? rs)) (or (k-region=? (car rs) r) (k-kept-has? (cdr rs) r)))))
 (define k-kept-add (subr kbuilds (k-kept k-region) k-kept)
@@ -616,6 +680,7 @@
                 (ty-comp (b a e r) (begin (walk b) (walk a)))
                 (ty-named (g ds) (begin (walk (extract (k-gen-of g) 4)) (walks (k-desc-types ds))))
                 (ty-nlist (e z r) (walk e))
+                (ty-app (f ds) (walks (k-ds-types ds)))
                 (else x #u)))))))
   (k-storage-walks (subr (maxeff kstate spin) (k-ids int (ref k-kept @t)) unit)
     (lambda (ts seen out)
@@ -643,12 +708,16 @@
   (lambda (xs ys)
     (if (null? xs) ys (the k-regions (cons (car xs) (k-append-regions (cdr xs) ys))))))
 ;; Whether `a` reads or awaits a region `kept` has.
+;; `@globals` among the regions kept stands for every region (no procedure
+;; is kept in globals' bindings).
 (define k-reads-in? (subr (maxeff kreads spin) (k-kept k-atom) bool)
   (lambda (kept a)
-    (tagcase a
-      (a-read (r) (k-kept-has? kept r))
-      (a-await (r) (k-kept-has? kept r))
-      (else y #f))))
+    (letrec ((in? (subr (maxeff kreads spin) (k-region) bool)
+                  (lambda (r)
+                    (or (k-kept-has? kept r)
+                        (and (k-kept-has? kept (r-globals)) (not (k-frozen? r))
+                             (not (k-globals-region? r)))))))
+      (tagcase a (a-read (r) (in? r)) (a-await (r) (in? r)) (else y #f)))))
 ;; The region of the first of `xs` that reads or awaits one `kept` has,
 ;; alone in a list; none if none does.
 (define k-first-read-in (subr kbuilds (k-kept k-eff) k-regions)
@@ -720,6 +789,16 @@
                          (k (k-kept-extend kept (k-append-regions held (k-desc-regions ds))))
                          (x (k-knot-in rep kept seen)))
                     (if (null? x) (k-knot-list (k-desc-types ds) k seen) x)))
+                ;; A module's abstract type constructor applied: its
+                ;; representation, unseen, may keep what it was given
+                ;; anywhere. A `poly`'s variable applied is checked as it is
+                ;; instantiated.
+                (ty-app (f ds)
+                  (let ((anywhere (tagcase (k-get f)
+                                    (ty-var (v) (k-has-id? (get k-abstract-funs) v))
+                                    (else z #f))))
+                    (k-knot-list (k-ds-types ds) (if anywhere (k-kept-add kept (r-globals)) kept)
+                                 seen)))
                 (else y (the k-knot nil))))))))
   ;; `x`, or, if that is none, the knot in `t`.
   (k-knot-then (subr (maxeff kstate spin) (k-knot int k-kept k-kseen) k-knot)
@@ -762,73 +841,72 @@
     (and (not (null? e))
          (or (and (k-has-region? (car e)) (k-reg-is? (k-atom-region (car e)) v))
              (k-eff-region-var? (cdr e) v)))))
-(define k-pol-seen? (subr kreads ((listof (pairof int int @t) acyclic) int int) bool)
-  (lambda (xs t at)
-    (and (not (null? xs))
-         (or (and (= (car (car xs)) t) (= (cdr (car xs)) at)) (k-pol-seen? (cdr xs) t at)))))
-;; Where a walk for polarities puts each it finds.
-(define-type k-pols-found (ref k-ids @t))
+(define k-eff-regions-of (subr (read @globals) (k-eff) k-regions)
+  (lambda (e)
+    (cond ((null? e) nil)
+          ((k-has-region? (car e)) (cons (k-atom-region (car e)) (k-eff-regions-of (cdr e))))
+          (else (k-eff-regions-of (cdr e))))))
+;; The regions a description names outright: a region, an effect's atoms',
+;; and a `dlambda`'s body's.
+(define k-d-regions (subr (maxeff kreads spin) (k-desc) k-regions)
+  (lambda (d)
+    (tagcase d
+      (dr (r) (the k-regions (cons r nil)))
+      (de (e) (k-eff-regions-of e))
+      (df (f) (tagcase (k-get f) (ty-lam (bs body) (k-d-regions body)) (else y nil)))
+      (else y nil))))
+;; The effects a description is or names: an effect, or a `dlambda`'s
+;; body's.
+(define k-d-effects (subr (maxeff kreads spin) (k-desc) (listof k-eff acyclic))
+  (lambda (d)
+    (tagcase d
+      (de (e) (the (listof k-eff acyclic) (cons e nil)))
+      (df (f) (tagcase (k-get f) (ty-lam (bs body) (k-d-effects body)) (else y nil)))
+      (else y nil))))
+(define k-terms-name? (subr (read @globals) (k-terms int) bool)
+  (lambda (ts v) (and (not (null? ts)) (or (= (car (car ts)) v) (k-terms-name? (cdr ts) v)))))
+;; Whether an effect application in `e` names variable `v`.
 (define-rec
-  (k-polarity (subr (maxeff kstate spin) (int int int k-seen-pol k-pols-found) unit)
-    (lambda (t v at seen found)
-      (let ((t (k-resolve t)))
-        (if (k-pol-seen? (get seen) t at)
-            #u
-            (letrec ((push (subr kstate (int) unit) (lambda (p) (set found (cons p (get found)))))
-                     (reg (subr kstate (k-region) unit)
-                          (lambda (r) (if (k-reg-is? r v) (push 2) #u)))
-                     (eff (subr kstate (k-eff int) unit)
-                          (lambda (e p)
-                            (begin (if (k-eff-var? e v) (push p) #u)
-                                   (if (k-eff-region-var? e v) (push 2) #u))))
-                     (go (subr (maxeff kstate spin) (int int) unit)
-                         (lambda (x p) (k-polarity x v p seen found)))
-                     (gos (subr (maxeff kstate spin) (k-ids int) unit)
-                          (lambda (xs p) (k-polarities xs v p seen found))))
-              (begin
-                (set seen (cons (cons t at) (get seen)))
-                (tagcase (k-get t)
-                  (ty-var (x) (if (= x v) (push at) #u))
-                  (ty-subr (e ps r cv) (begin (eff e at) (gos ps (k-flip at)) (go r at)))
-                  (ty-poly (bs body) (go body at))
-                  (ty-ref (a r) (begin (reg r) (go a 2)))
-                  (ty-array (a r) (begin (reg r) (go a 2)))
-                  (ty-icell (a r) (begin (reg r) (go a 2)))
-                  (ty-markkey (a r) (begin (reg r) (go a 2)))
-                  (ty-pair (a b r)
-                    (let ((p (if (k-frozen? r) at 2))) (begin (reg r) (go a p) (go b p))))
-                  (ty-bloblet (fs z r) (begin (reg r) (gos fs (if z at 2))))
-                  (ty-product (ps) (k-polarity-parts ps v at seen found))
-                  (ty-sum (ps) (k-polarity-parts ps v at seen found))
-                  (ty-tag (a h e r) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
-                  (ty-comp (a h e r) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
-                  (ty-place (r) (reg r))
-                  (ty-named (g ds) (k-polarity-descs ds (extract (k-gen-of g) 3) v at seen found))
-                  (ty-nlist (e z r) (begin (reg r) (go e at)))
-                  (else y #u))))))))
-  (k-polarities (subr (maxeff kstate spin) (k-ids int int k-seen-pol k-pols-found) unit)
-    (lambda (ts v at seen found)
-      (if (null? ts)
-          #u
-          (begin (k-polarity (car ts) v at seen found) (k-polarities (cdr ts) v at seen found)))))
-  (k-polarity-parts (subr (maxeff kstate spin) (k-parts int int k-seen-pol k-pols-found) unit)
-    (lambda (ps v at seen found)
-      (if (null? ps)
-          #u
-          (begin (k-polarity (extract (car ps) 2) v at seen found)
-                 (k-polarity-parts (cdr ps) v at seen found)))))
-  (k-polarity-descs (subr (maxeff kstate spin) (k-descs k-ids int int k-seen-pol k-pols-found) unit)
-    (lambda (ds ws v at seen found)
-      (if (null? ds)
-          #u
-          (let* ((w (car ws))
-                 (p (cond ((or (= w 2) (= at 2)) 2) ((= w 0) at) (else (k-flip at)))))
-            (begin
-              (tagcase (car ds)
-                (dt (x) (k-polarity x v p seen found))
-                (dr (r) (if (k-reg-is? r v) (set found (cons 2 (get found))) #u))
-                (de (e) (begin (if (k-eff-var? e v) (set found (cons p (get found))) #u)
-                               (if (k-eff-region-var? e v) (set found (cons 2 (get found))) #u)))
-                (dz (z) #u)
-                (dc (c) #u))
-              (k-polarity-descs (cdr ds) (cdr ws) v at seen found)))))))
+  (k-eff-app-var? (subr (maxeff kreads spin) (k-eff int) bool)
+    (lambda (e v)
+      (and (not (null? e))
+           (or (tagcase (car e) (a-app (h ds) (k-app-mentions? h ds v)) (else y #f))
+               (k-eff-app-var? (cdr e) v)))))
+  (k-app-mentions? (subr (maxeff kreads spin) (int k-descs int) bool)
+    (lambda (h ds v) (or (= h v) (k-eargs-mention? ds v))))
+  (k-eargs-mention? (subr (maxeff kreads spin) (k-descs int) bool)
+    (lambda (ds v)
+      (and (not (null? ds))
+           (or (tagcase (car ds)
+                 (dr (r) (k-reg-is? r v))
+                 (de (e) (or (k-eff-var? e v) (k-eff-region-var? e v) (k-eff-app-var? e v)))
+                 (dz (z) (tagcase z (sz-lin (k ts) (k-terms-name? ts v)) (else y #f)))
+                 (dc (c) (tagcase c (cv-var (w) (= w v)) (else y #f)))
+                 (else y #f))
+               (k-eargs-mention? (cdr ds) v))))))
+(define k-regions-name? (subr (read @globals) (k-regions int) bool)
+  (lambda (rs v) (and (not (null? rs)) (or (k-reg-is? (car rs) v) (k-regions-name? (cdr rs) v)))))
+(define k-effs-name? (subr kreads ((listof k-eff acyclic) int) bool)
+  (lambda (es v) (and (not (null? es)) (or (k-eff-var? (car es) v) (k-effs-name? (cdr es) v)))))
+(define-rec
+  ;; The kind of description function `f`, where it is known: -1 for a
+  ;; `select` not yet resolved.
+  (k-fun-kind (subr (maxeff kstate spin) (int) int)
+    (lambda (f)
+      (tagcase (k-get f)
+        (ty-var (v) (k-dvar-kind v))
+        (ty-lam (bs body)
+          (let ((r (k-d-kind body))) (if (< r 0) -1 (k-arrow (k-binder-kinds bs) r))))
+        ;; A function that gives a function, applied.
+        (ty-app (g ds) (k-arrow-result (k-fun-kind g)))
+        (else x -1))))
+  ;; The kind a description is of, where it is known.
+  (k-d-kind (subr (maxeff kstate spin) (k-desc) int)
+    (lambda (d)
+      (tagcase d
+        (dr (r) (if (k-place? r) 3 0))
+        (de (e) 1)
+        (dt (t) 2)
+        (dz (z) 5)
+        (dc (c) 6)
+        (df (f) (k-fun-kind f))))))

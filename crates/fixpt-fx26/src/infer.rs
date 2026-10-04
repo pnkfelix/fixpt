@@ -90,6 +90,7 @@ impl Checker {
                             Kind::Type | Kind::Data => D::Type(self.arena.ty(Ty::Var(*va))),
                             Kind::Size => D::Size(Size::var(*va)),
                             Kind::Conv => D::Conv(crate::ast::Conv::Var(*va)),
+                            Kind::Arrow(_) => D::Fun(self.arena.ty(Ty::Var(*va))),
                         };
                         (*vb, d)
                     })
@@ -728,11 +729,11 @@ impl Checker {
                 // as if taken as a parameter.
                 Ty::Named { which, args } => [(c.generatives[*which as usize].rep, false)]
                     .into_iter()
-                    .chain(args.iter().filter_map(|d| match d {
-                        D::Type(x) => Some((*x, true)),
-                        _ => None,
-                    }))
+                    .chain(args.iter().flat_map(|d| c.d_types(d)).map(|x| (x, true)))
                     .collect(),
+                // A description function applied, unseen: what it was
+                // given, cautiously, as if taken as a parameter.
+                Ty::App { args, .. } => args.iter().flat_map(|d| c.d_types(d)).map(|x| (x, true)).collect(),
                 _ => vec![],
             };
             let r = kids.into_iter().any(|(k, p)| walk(c, k, p, path));
@@ -1073,7 +1074,7 @@ impl Checker {
                 Kind::Size => {
                     map.insert(*v, D::Size(Size::Finite));
                 }
-                Kind::Type | Kind::Data | Kind::Place => {
+                Kind::Type | Kind::Data | Kind::Place | Kind::Arrow(_) => {
                     return Err(FxError::at(
                         span,
                         format!(
@@ -1135,7 +1136,8 @@ impl Checker {
     fn wrong_shape(&self, pattern: TyId, actual: TyId) -> bool {
         let (p, a) = (self.arena.get(pattern).clone(), self.arena.get(actual).clone());
         match (&p, &a) {
-            (Ty::Var(_), _) | (_, Ty::Void) => false,
+            // An application may become anything its function gives.
+            (Ty::Var(_) | Ty::App { .. }, _) | (_, Ty::Void) => false,
             (Ty::Subr { .. }, _) => a.as_subr().is_none(),
             // A `nlist` is a list.
             (Ty::Pair(..), Ty::NList { .. }) => false,
@@ -1152,8 +1154,20 @@ impl Checker {
         let effect = |e: &Effect| {
             e.0.iter().any(|a| match *a {
                 Atom::Var(v) => open(v),
+                Atom::App(n) => self.arena.effect_apps.mentions(n, &open),
                 a => a.region().is_some_and(region),
             })
+        };
+        // A description: whether it is open, its types onto `stack`.
+        let d_hit = |d: &D, stack: &mut Vec<TyId>| match d {
+            D::Type(x) | D::Fun(x) => {
+                stack.push(*x);
+                false
+            }
+            D::Region(r) => region(*r),
+            D::Effect(e) => effect(e),
+            D::Size(z) => matches!(z, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
+            D::Conv(c) => matches!(c, crate::ast::Conv::Var(v) if open(*v)),
         };
         let mut seen = HashSet::new();
         let mut stack = vec![t];
@@ -1206,19 +1220,12 @@ impl Checker {
                     stack.push(elem);
                     region(r) || matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v)))
                 }
-                Ty::Named { args, .. } => {
-                    let mut hit = false;
-                    for d in args {
-                        match d {
-                            D::Type(x) => stack.push(x),
-                            D::Region(r) => hit |= region(r),
-                            D::Effect(e) => hit |= effect(&e),
-                            D::Size(z) => hit |= matches!(&z, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
-                            D::Conv(c) => hit |= matches!(c, crate::ast::Conv::Var(v) if open(v)),
-                        }
-                    }
-                    hit
+                Ty::Named { args, .. } => args.iter().fold(false, |hit, d| d_hit(d, &mut stack) || hit),
+                Ty::App { fun, args } => {
+                    stack.push(fun);
+                    args.iter().fold(false, |hit, d| d_hit(d, &mut stack) || hit)
                 }
+                Ty::Lam { body, .. } => d_hit(&body, &mut stack),
             };
             if hit {
                 return true;
@@ -1251,7 +1258,11 @@ impl Checker {
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
             Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
             Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).any(|(_, t)| self.walk_vars(*t, seen, hit)),
-            Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) if self.walk_vars(*x, seen, hit))),
+            Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) | D::Fun(x) if self.walk_vars(*x, seen, hit))),
+            Ty::App { fun, args } => {
+                self.walk_vars(fun, seen, hit) || args.iter().any(|d| matches!(d, D::Type(x) | D::Fun(x) if self.walk_vars(*x, seen, hit)))
+            }
+            Ty::Lam { body, .. } => matches!(body, D::Type(x) | D::Fun(x) if self.walk_vars(x, seen, hit)),
             Ty::NList { elem, .. } => self.walk_vars(elem, seen, hit),
         }
     }
@@ -1354,18 +1365,55 @@ impl Checker {
                 };
                 self.unify(t2, tail, u, trail);
             }
-            (Ty::Named { which: g, args: xs }, Ty::Named { which: h, args: ys }) if g == h => {
-                for (x, y) in xs.iter().zip(&ys) {
-                    match (x, y) {
-                        (D::Type(x), D::Type(y)) => self.unify(*x, *y, u, trail),
-                        (D::Region(r), D::Region(s)) => self.unify_region(*r, *s, u),
-                        (D::Effect(d), D::Effect(e)) => self.unify_effect(d, e, u),
-                        (D::Conv(c), D::Conv(d)) => self.unify_conv(*c, *d, u),
-                        _ => {}
-                    }
+            (Ty::Named { which: g, args: xs }, Ty::Named { which: h, args: ys }) if g == h => self.unify_ds(&xs, &ys, u, trail),
+            // A function applied, against another applied to as many: the
+            // function, if it is a binder still to be found, is the other's;
+            // what each was given, matched. Nothing else is solved for: a
+            // function binder applied, against any other type, waits for
+            // `proj` or `the` (FX-91's choice, and Jones's).
+            (Ty::App { fun: f, args: xs }, Ty::App { fun: g, args: ys }) if xs.len() == ys.len() => {
+                if let Ty::Var(v) = self.arena.get(f).clone()
+                    && u.is_unknown(v)
+                    && !u.solved.contains_key(&v)
+                {
+                    u.solved.insert(v, D::Fun(g));
                 }
+                self.unify_ds(&xs, &ys, u, trail);
+            }
+            // The same against a generative type applied: the function is
+            // the generative type's, given what it is given.
+            (Ty::App { fun: f, args: xs }, Ty::Named { which, args: ys }) if xs.len() == ys.len() => {
+                if let Ty::Var(v) = self.arena.get(f).clone()
+                    && u.is_unknown(v)
+                    && !u.solved.contains_key(&v)
+                    && let Some(g) = self.generative_fun(which, self.arena.dvar_kind(v))
+                {
+                    u.solved.insert(v, D::Fun(g));
+                }
+                self.unify_ds(&xs, &ys, u, trail);
             }
             _ => {}
+        }
+    }
+
+    /// Descriptions matched pairwise, as `unify` matches types.
+    fn unify_ds(&mut self, xs: &[D], ys: &[D], u: &mut Unknowns, trail: &mut HashSet<(TyId, TyId)>) {
+        for (x, y) in xs.iter().zip(ys) {
+            match (x, y) {
+                (D::Type(x), D::Type(y)) => self.unify(*x, *y, u, trail),
+                (D::Region(r), D::Region(s)) => self.unify_region(*r, *s, u),
+                (D::Effect(d), D::Effect(e)) => self.unify_effect(d, e, u),
+                (D::Conv(c), D::Conv(d)) => self.unify_conv(*c, *d, u),
+                (D::Fun(f), D::Fun(g)) => {
+                    if let Ty::Var(v) = self.arena.get(*f).clone()
+                        && u.is_unknown(v)
+                        && !u.solved.contains_key(&v)
+                    {
+                        u.solved.insert(v, D::Fun(*g));
+                    }
+                }
+                _ => {}
+            }
         }
     }
 

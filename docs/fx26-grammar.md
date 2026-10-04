@@ -64,6 +64,7 @@ program    ::= top-form*
 top-form   ::= definition
              | "(" "define-type" name type ")"
              | "(" "define-type" "(" name param+ ")" type ")"        ; a type family
+             | "(" "define-type" name dlambda ")"                    ; a description function
              | "(" "define-generative" name type ")"
              | "(" "define-generative" "(" name gen-param+ ")" type ")"
              | "(" "define-datatype" dt-head variant+ ")"
@@ -99,6 +100,9 @@ variant    ::= "(" name type* ")"
 
 ```
 kind       ::= "region" | "place" | "effect" | "type" | "data" | "size" | "conv"
+             | "(" "=>" kind+ kind ")"     ; a description function's: what it takes, what it gives
+               { it gives a type, data, an effect, or another function;
+                 one that gives an effect takes no types or data }
 
 binders    ::= "(" binder* ")"
 binder     ::= "(" name kind ")"
@@ -112,8 +116,24 @@ A *description* is whatever a binder can be bound to: a type, a region, an
 effect, a size or a convention.
 
 ```
-description ::= type | region | effect | size | convention
+description ::= type | region | effect | size | convention | function
+
+function   ::= fun-var                                 { bound with an arrow kind }
+             | fun-name                                { define-type of a dlambda }
+             | family-name | generative-name          { with parameters, not applied }
+             | "ref" | "icell" | "pairof" | "listof" | "arrayof" | "mark-key"
+             | dlambda
+             | "(" "select" module-var name ")"       { a module's type constructor }
+             | "(" function description+ ")"         { one that gives a function }
+
+dlambda    ::= "(" "dlambda" binders description ")"  { at least one binder }
 ```
+
+A description function is applied where a type or an effect is written,
+`(function description …)`: a `dlambda` applied is reduced, one that only
+applies a function to its parameters in order is that function, and a
+variable applied stays an application, equal only to one of the same
+function to equal descriptions (`docs/research/higher-kinds.md`).
 
 Which one is meant shows in its shape (`@x` is a region, `(read …)` an
 effect, a natural literal a size), or for a bare name, in how the name is
@@ -151,6 +171,7 @@ type       ::= base-type
              | "(" "mu" name type ")"
              | "(" "moduleof" module-component* ")"
              | "(" "select" module-var name ")"
+             | "(" function description+ ")"          { a function to a type, applied }
 
 base-type  ::= "int" | "bool" | "char" | "string" | "unit" | "symbol" | "datum"
              | "i32" | "u32" | "i64" | "u64" | "f64" | "f32"
@@ -166,8 +187,10 @@ conv-form  ::= "(" "conv" convention ")"
 proposition ::= "(" "<=" type type ")"
               | "(" "poly" binders "(" "<=" type type ")" ("(" "<=" type type ")")* ")"
 
-module-component ::= "(" "abs" (name | "(" name+ ")") "type" ")"   ; abstract, in scope after
-                   | "(" "desc" name type ")"                        ; transparent
+module-component ::= "(" "abs" (name | "(" name+ ")") abs-kind ")"   ; abstract, in scope after
+                   | "(" "desc" name (type | dlambda) ")"             ; transparent
+
+abs-kind   ::= "type" | "(" "=>" kind+ "type" ")"   ; an abstract type, or type constructor
                    | "(" "val" name type ")"
 
 label      ::= name | positive-integer
@@ -176,6 +199,10 @@ label      ::= name | positive-integer
 - A recursive type (`dletrec`, `mu`, a self-mentioning `define-type`) must
   go through a constructor, not only through names.
 - A type family may mention itself only with the same descriptions.
+- A recursive type may not go through applications alone: `(define-type
+  (fix (f (=> type type))) (f (fix f)))` is refused.
+- A module's `define-generative` with parameters is an abstract type
+  constructor: its `up-name` and `down-name` are polymorphic in them.
 - The standard environment defines these generative types, used as
   `(name description …)`: `(vsubr effect type type)` (a variadic
   procedure: its effect, each argument's type, its result), `(flatlayout
@@ -206,6 +233,7 @@ effect     ::= "pure"
              | "(" ("read" | "write") (region | globals) ")"
              | "(" ("alloc" | "goto" | "comefrom" | "await") region ")"
              | "(" "maxeff" effect* ")"                   ; union
+             | "(" function description+ ")"              { a function to an effect, applied }
 
 globals    ::= "@globals"                                 ; every global
              | "(" "globals" name+ ")"                    ; those globals
@@ -285,7 +313,8 @@ arm        ::= "(" label name body ")"                  ; binds the payload
 else-arm   ::= "(" "else" name body ")"                 { last }
 
 module-item ::= "(" "define-generative" name type ")"
-              | "(" "define-type" name type ")"
+              | "(" "define-generative" "(" name param+ ")" type ")"  ; a type constructor
+              | "(" "define-type" name (type | dlambda) ")"
               | "(" "define" name [type] expression ")"
               | "(" "define-rec" rec-binding+ ")"
 

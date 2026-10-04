@@ -39,6 +39,9 @@ pub enum DScope {
     /// A region constant `private-regions` made the program's own: `@s` in
     /// the program is this fresh region, which nothing else can name.
     Private(Region),
+    /// A name for a description function: `define-type` of a `dlambda`,
+    /// or a type family's parameter of an arrow kind given one.
+    Fun(TyId),
 }
 
 /// A description given a type family, as a key for its knot.
@@ -49,6 +52,7 @@ pub enum FamilyArg {
     Eff(crate::ast::Effect),
     Size(Size),
     Conv(Conv),
+    Fun(TyId),
 }
 
 /// The heads of the type forms `parse_type_node` reads.
@@ -71,7 +75,7 @@ impl Checker {
         }
     }
 
-    fn lookup_desc(&self, s: Sym) -> Option<DScope> {
+    pub(crate) fn lookup_desc(&self, s: Sym) -> Option<DScope> {
         let hidden = self.hidden.map(|(_, d)| d);
         (0..self.dscope.len())
             .rev()
@@ -95,7 +99,24 @@ impl Checker {
     }
 
     // --------------------------------------------------------------- kinds
-    fn parse_kind(&self, s: &Syntax) -> R<Kind> {
+    pub(crate) fn parse_kind(&mut self, s: &Syntax) -> R<Kind> {
+        let usage = "a kind is `region`, `place`, `effect`, `type`, `data`, `size`, `conv` or `(=> kind … kind)`";
+        // `(=> k1 … kn k)`: a description function's (`crate::kinds`).
+        if let Some([head, ks @ .., result]) = s.as_proper_list()
+            && head.as_symbol().is_some_and(|h| self.name(h) == "=>")
+            && !ks.is_empty()
+        {
+            let params = ks.iter().map(|k| self.parse_kind(k)).collect::<R<Vec<_>>>()?;
+            let at = result.span;
+            let result = self.parse_kind(result)?;
+            if matches!(result, Kind::Region | Kind::Place | Kind::Size | Kind::Conv) {
+                return Err(FxError::at(at, "a description function gives a type, an effect, or another description function"));
+            }
+            if result == Kind::Effect && params.iter().any(|k| matches!(k, Kind::Type | Kind::Data | Kind::Arrow(_))) {
+                return Err(FxError::at(s.span, "a description function to an effect takes regions, places, effects, sizes and conventions"));
+            }
+            return Ok(self.arena.arrow(params, result));
+        }
         match s.as_symbol().map(|k| self.name(k)) {
             Some("region") => Ok(Kind::Region),
             Some("place") => Ok(Kind::Place),
@@ -104,7 +125,7 @@ impl Checker {
             Some("data") => Ok(Kind::Data),
             Some("size") => Ok(Kind::Size),
             Some("conv") => Ok(Kind::Conv),
-            _ => Err(FxError::at(s.span, "a kind is `region`, `place`, `effect`, `type`, `data`, `size` or `conv`")),
+            _ => Err(FxError::at(s.span, usage)),
         }
     }
 
@@ -134,7 +155,7 @@ impl Checker {
     }
 
     /// `((I K) …)`, binding each name for the rest of the parse.
-    fn parse_binders(&mut self, s: &Syntax) -> R<Vec<(DVar, Kind)>> {
+    pub(crate) fn parse_binders(&mut self, s: &Syntax) -> R<Vec<(DVar, Kind)>> {
         let mut out = Vec::new();
         for b in self.items(s, "binders")? {
             let pair = self.items(b, "a binder")?;
@@ -228,7 +249,7 @@ impl Checker {
     }
 
     // ------------------------------------------------------------- effects
-    pub(crate) fn parse_effect(&self, s: &Syntax) -> R<Effect> {
+    pub(crate) fn parse_effect(&mut self, s: &Syntax) -> R<Effect> {
         if let Some(sym) = s.as_symbol() {
             if self.name(sym) == "pure" {
                 return Ok(Effect::pure());
@@ -242,7 +263,12 @@ impl Checker {
                 _ => Err(FxError::at(s.span, format!("`{}` is not an effect", self.name(sym)))),
             };
         }
-        let items = self.items(s, "an effect")?;
+        let items = self.items(s, "an effect")?.to_vec();
+        // `(e d …)`: a description function to an effect, applied.
+        if let Some(e) = self.effect_app(s, &items)? {
+            return Ok(e);
+        }
+        let items = &items[..];
         let head = self.head(items).unwrap_or("");
         let atom = |c: fn(Region) -> Atom| -> R<Effect> {
             let [_, r] = items else {
@@ -302,6 +328,11 @@ impl Checker {
                 Some(DScope::Var(v, Kind::Type | Kind::Data)) => Ok(self.arena.ty(Ty::Var(v))),
                 Some(DScope::Rec(t)) => Ok(t),
                 Some(DScope::Generative(g)) => self.apply_generative(s, g, &[]),
+                Some(DScope::Var(_, k @ Kind::Arrow(_))) => Err(self.not_applied(s, sym, k)),
+                Some(DScope::Fun(f)) => {
+                    let k = self.fun_kind(f).unwrap_or(Kind::Type);
+                    Err(self.not_applied(s, sym, k))
+                }
                 _ if self.holes.is_some_and(|h| h.exp == sym) => Err(FxError::at(s.span, "expected a type")),
                 _ => Err(FxError::at(s.span, format!("`{}` is not a type", self.name(sym)))),
             };
@@ -311,8 +342,20 @@ impl Checker {
             match self.lookup_desc(head) {
                 Some(DScope::Abbrev { params, body }) => return self.expand_abbrev(s, head, &params, &body, &items[1..]),
                 Some(DScope::Generative(g)) => return self.apply_generative(s, g, &items[1..]),
+                Some(DScope::Var(v, Kind::Arrow(_))) => {
+                    let f = self.arena.ty(Ty::Var(v));
+                    return self.parse_app(s, f, &items[1..]);
+                }
+                Some(DScope::Fun(f)) => return self.parse_app(s, f, &items[1..]),
                 _ => {}
             }
+        }
+        // `((dlambda …) d …)` and `((select m f) d …)`: a function applied.
+        if let Some(head) = items.first()
+            && head.as_proper_list().is_some()
+        {
+            let f = self.parse_fun(head, None)?;
+            return self.parse_app(s, f, &items[1..]);
         }
         match self.head(&items).unwrap_or("") {
             // `(subr effect (param …) result)`, or with a convention first,
@@ -586,6 +629,13 @@ impl Checker {
 
     /// A name defined as another name, round a loop, describes nothing.
     pub(crate) fn grounded(&self, slot: TyId, span: fixpt_read::Span) -> R<()> {
+        // A description function applied is no constructor either: what it
+        // gives may be what it was given, so a cycle through applications
+        // alone may be no type at all once the function is known (Rémy's
+        // condition: recursion only at the base kind; `crate::kinds`).
+        if self.through_apps(slot, slot, &mut std::collections::HashSet::new()) {
+            return Err(FxError::at(span, "a recursive type must be built from a constructor, not only from names"));
+        }
         let mut seen = std::collections::HashSet::new();
         let mut id = slot;
         loop {
@@ -607,6 +657,22 @@ impl Checker {
             }
             id = next;
         }
+    }
+
+    /// Whether `start` is reached again from `id` through forwarding links,
+    /// `poly`s and the descriptions given to functions applied: a cycle
+    /// with no constructor on it.
+    fn through_apps(&self, id: TyId, start: TyId, seen: &mut std::collections::HashSet<TyId>) -> bool {
+        if !seen.insert(id) {
+            return false;
+        }
+        let next: Vec<TyId> = match self.arena.get_raw(id) {
+            Ty::Link(Some(n)) => vec![*n],
+            Ty::Poly { body, .. } => vec![*body],
+            Ty::App { args, .. } => args.iter().filter_map(|d| if let D::Type(t) = d { Some(*t) } else { None }).collect(),
+            _ => Vec::new(),
+        };
+        next.into_iter().any(|n| n == start || self.through_apps(n, start, seen))
     }
 
     /// The type the `which`th generative type, given `args`, is at its
@@ -700,6 +766,10 @@ impl Checker {
                 Kind::Conv => {
                     let c = self.parse_conv(a)?;
                     (DScope::ConvVal(c), crate::parse::FamilyArg::Conv(c))
+                }
+                Kind::Arrow(_) => {
+                    let f = self.parse_fun(a, Some(*k))?;
+                    (DScope::Fun(f), crate::parse::FamilyArg::Fun(self.arena.resolve(f)))
                 }
             };
             bound.push((*p, d));
@@ -811,6 +881,7 @@ impl Checker {
                 Kind::Effect => D::Effect(self.parse_effect(a)?),
                 Kind::Size => D::Size(self.parse_size(a)?),
                 Kind::Conv => D::Conv(self.parse_conv(a)?),
+                Kind::Arrow(_) => D::Fun(self.parse_fun(a, Some(*k))?),
             });
         }
         let t = self.arena.ty(Ty::Named { which: g, args: ds });
@@ -851,6 +922,10 @@ impl Checker {
             if v != Variance::Inv && matches!(kind, Kind::Region | Kind::Place) {
                 self.dscope.truncate(depth);
                 return Err(FxError::at(p.span, "a region or place parameter is invariant: it names where data is"));
+            }
+            if v != Variance::Inv && matches!(kind, Kind::Arrow(_)) {
+                self.dscope.truncate(depth);
+                return Err(FxError::at(p.span, "a description function parameter is invariant"));
             }
             let dv = self.arena.dvar_of(n, kind);
             self.dscope.push((n, DScope::Var(dv, kind)));
@@ -901,7 +976,7 @@ impl Checker {
     /// region, `pure` and `(read …)`, `(maxeff …)` and the like are effects —
     /// or, for a bare name, in how the name is bound; the checker confirms it
     /// against the binder when it sees the `poly` being projected.
-    fn parse_d(&mut self, s: &Syntax) -> R<D> {
+    pub(crate) fn parse_d(&mut self, s: &Syntax) -> R<D> {
         // A natural number can only be a size.
         if self.literal_int(s).is_some() {
             return Ok(D::Size(self.parse_size(s)?));
@@ -930,6 +1005,10 @@ impl Checker {
                 return Ok(D::Region(Region::Heap));
             }
             return match self.lookup_desc(sym) {
+                Some(DScope::Var(_, Kind::Arrow(_)) | DScope::Fun(_)) => Ok(D::Fun(self.parse_fun(s, None)?)),
+                Some(DScope::Abbrev { params, .. }) if !params.is_empty() => Ok(D::Fun(self.parse_fun(s, None)?)),
+                Some(DScope::Generative(g)) if !self.generatives[g as usize].params.is_empty() => Ok(D::Fun(self.parse_fun(s, None)?)),
+                None if crate::kinds::CONSTRUCTORS.iter().any(|(n, _)| *n == name) => Ok(D::Fun(self.parse_fun(s, None)?)),
                 Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(D::Region(Region::Var(v))),
                 Some(DScope::Var(v, Kind::Effect)) => Ok(D::Effect(Effect::atom(Atom::Var(v)))),
                 Some(DScope::Eff(e)) => Ok(D::Effect(e)),
@@ -943,6 +1022,7 @@ impl Checker {
         }
         let items = self.items(s, "a description")?;
         match self.head(items).unwrap_or("") {
+            "dlambda" => Ok(D::Fun(self.parse_fun(s, None)?)),
             "const" | "acyclic" => Ok(D::Region(self.parse_region(s)?)),
             "+" | "-" => Ok(D::Size(self.parse_size(s)?)),
             "read" | "write" | "alloc" | "goto" | "comefrom" | "maxeff" => {
@@ -1514,14 +1594,28 @@ impl Checker {
             }
             match self.head(&parts) {
                 Some("abs") => {
-                    if what.as_symbol().map(|k| self.name(k)) != Some("type") {
-                        return Err(FxError::at(what.span, "an abstract component is a `type`, for now"));
-                    }
+                    // A type, or a type constructor: a description function
+                    // to a type (`crate::kinds`).
+                    let kind = match what.as_symbol().map(|k| self.name(k)) {
+                        Some("type") => Kind::Type,
+                        _ => match self.parse_kind(what) {
+                            Ok(k) if self.arena.arrow_parts(k).is_some_and(|(_, r)| r == Kind::Type) => k,
+                            _ => return Err(FxError::at(what.span, "an abstract component is a `type`, or a type constructor `(=> kind … type)`, for now")),
+                        },
+                    };
                     for n in names {
-                        let v = self.arena.dvar_of(n, Kind::Type);
-                        self.dscope.push((n, DScope::Var(v, Kind::Type)));
+                        let v = self.arena.dvar_of(n, kind);
+                        if kind != Kind::Type {
+                            self.abstract_funs.insert(v);
+                        }
+                        self.dscope.push((n, DScope::Var(v, kind)));
                         abs.push((n, v));
                     }
+                }
+                Some("desc") if self.head(&self.items(what, "").unwrap_or(&[]).to_vec()) == Some("dlambda") => {
+                    let f = self.parse_fun(what, None)?;
+                    self.dscope.push((names[0], DScope::Fun(f)));
+                    descs.push((names[0], f));
                 }
                 Some("desc") => {
                     let t = self.parse_type(what)?;
@@ -1591,10 +1685,34 @@ impl Checker {
             let name_of = |p: &Self, s: &Syntax| s.as_symbol().ok_or_else(|| FxError::at(s.span, "a name")).map(|n| (n, p.name(n).to_string()));
             match (self.head(&parts), &parts[..]) {
                 (Some("define-generative"), [_, n, rep]) => {
+                    // `(define-generative (t (p k) …) rep)`: a type
+                    // constructor, its representation a function of the
+                    // parameters (`crate::kinds`).
+                    let (n, params) = match n.as_proper_list() {
+                        Some([n, ps @ ..]) if !ps.is_empty() => (n, Some(Syntax::list(f.span, ps.to_vec()))),
+                        _ => (n, None),
+                    };
                     let (name, text) = name_of(self, n)?;
-                    let var = self.arena.dvar_of(name, Kind::Type);
-                    self.dscope.push((name, DScope::Var(var, Kind::Type)));
-                    let rep = self.parse_type(rep)?;
+                    let depth = self.dscope.len();
+                    let binders = match &params {
+                        Some(ps) => self.parse_binders(ps)?,
+                        None => Vec::new(),
+                    };
+                    self.dscope.truncate(depth);
+                    let kind = if binders.is_empty() { Kind::Type } else { self.arena.arrow(binders.iter().map(|(_, k)| *k).collect(), Kind::Type) };
+                    let var = self.arena.dvar_of(name, kind);
+                    if kind != Kind::Type {
+                        self.abstract_funs.insert(var);
+                    }
+                    self.dscope.push((name, DScope::Var(var, kind)));
+                    let inner = self.dscope.len();
+                    for (v, k) in &binders {
+                        self.dscope.push((self.arena.dvar_name(*v), DScope::Var(*v, *k)));
+                    }
+                    let rep = self.parse_type(rep);
+                    self.dscope.truncate(inner);
+                    let rep = rep?;
+                    let rep = if binders.is_empty() { rep } else { self.arena.ty(Ty::Lam { params: binders, body: D::Type(rep) }) };
                     let (up, down) = (self.interner.intern(&format!("up-{text}")), self.interner.intern(&format!("down-{text}")));
                     // Each conversion the identity, made as a closure is.
                     let x = self.interner.intern("x");
@@ -1604,6 +1722,12 @@ impl Checker {
                     };
                     let (up_fn, down_fn) = (identity(self), identity(self));
                     out.push(ModItem::Abs { name, var, rep, up, down, up_fn, down_fn });
+                }
+                (Some("define-type"), [_, n, t]) if self.head(t.as_proper_list().unwrap_or(&[])) == Some("dlambda") => {
+                    let (name, _) = name_of(self, n)?;
+                    let ty = self.parse_fun(t, None)?;
+                    self.dscope.push((name, DScope::Fun(ty)));
+                    out.push(ModItem::Desc { name, ty });
                 }
                 (Some("define-type"), [_, n, t]) => {
                     let (name, _) = name_of(self, n)?;

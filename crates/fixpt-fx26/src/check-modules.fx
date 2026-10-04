@@ -18,6 +18,8 @@
   (lambda (ps acc) (if (null? ps) acc (k-parts-reversed (cdr ps) (cons (car ps) acc)))))
 
 (define k-moduleof-usage string "`(moduleof (abs t type) … (desc d type) … (val x type) …)`")
+(define k-abs-usage string
+  "an abstract component is a `type`, or a type constructor `(=> kind … type)`, for now")
 ;; The names among `xs`; what is not one is passed over.
 (define k-syn-symbols (subr (maxeff (read @globals) (read @s) (alloc @t)) (k-syns) k-names)
   (lambda (xs)
@@ -39,14 +41,48 @@
     (cond ((null? names) seen)
           ((k-has-name? seen (car names)) (k-sfail (k-twice (symbol->string (car names))) c))
           (else (k-names-once (cdr names) (cons (car names) seen) c)))))
-;; Abstract types `names`, each a type variable in scope from here, onto `abs`.
-(define k-abs-bound (subr (maxeff kstate spin) (k-names k-parts) k-parts)
-  (lambda (names abs)
+;; Kind `s`, or -1 where `k-parse-kind` would refuse it: for a reader that
+;; gives its own message instead (`moduleof`'s `abs`).
+(define-rec
+  (k-try-kind (subr (maxeff kstate (read @s) spin) (syn) int)
+    (lambda (s)
+      (let ((n (if (syn-symbol? s) (syn-name s) "")))
+        (cond ((string=? n "region") 0)
+              ((string=? n "place") 3)
+              ((string=? n "effect") 1)
+              ((string=? n "type") 2)
+              ((string=? n "data") 4)
+              ((string=? n "size") 5)
+              ((string=? n "conv") 6)
+              ((syn-symbol? s) -1)
+              (else (k-try-arrow-kind s))))))
+  (k-try-arrow-kind (subr (maxeff kstate (read @s) spin) (syn) int)
+    (lambda (s)
+      (let ((items (tagcase s (lst (items d a b) items) (else x (the k-syns nil)))))
+        (if (or (< (k-length items) 3) (not (string=? (k-symbol-head items) "=>")))
+            -1
+            (let* ((params (k-try-kinds (k-syns-but-last (cdr items))))
+                   (result (k-try-kind (k-last-syn (cdr items)))))
+              (cond ((or (k-has-id? params -1) (< result 0)) -1)
+                    ((or (= result 0) (= result 3) (= result 5) (= result 6)) -1)
+                    ((and (= result 1) (k-any-typed-kind? params)) -1)
+                    (else (k-arrow params result))))))))
+  (k-try-kinds (subr (maxeff kstate (read @s) spin) (k-syns) k-ids)
+    (lambda (xs)
+      (if (null? xs)
+          nil
+          (let* ((k (k-try-kind (car xs))) (rest (k-try-kinds (cdr xs))))
+            (the k-ids (cons k rest)))))))
+;; Abstract types `names`, each a variable of kind `k`, in scope from here,
+;; onto `abs`; a type constructor among `k-abstract-funs`.
+(define k-abs-bound (subr (maxeff kstate spin) (k-names int k-parts) k-parts)
+  (lambda (names k abs)
     (if (null? names)
         abs
-        (let* ((n (car names)) (v (k-new-dvar-of n 2)))
-          (begin (k-push-desc n (ds-var v 2))
-                 (k-abs-bound (cdr names) (cons (product (1 n) (2 v)) abs)))))))
+        (let* ((n (car names)) (v (k-new-dvar-of n k)))
+          (begin (if (= k 2) #u (set k-abstract-funs (cons v (get k-abstract-funs))))
+                 (k-push-desc n (ds-var v k))
+                 (k-abs-bound (cdr names) k (cons (product (1 n) (2 v)) abs)))))))
 ;; `(name type)` onto `ps`.
 (define k-part-onto (subr (alloc @t) (symbol int k-parts) k-parts)
   (lambda (n t ps) (cons (product (1 n) (2 t)) ps)))
@@ -65,9 +101,14 @@
                (seen (k-names-once names seen c))
                (what (k-nth parts 2)))
           (cond ((string=? head "abs")
-                 (if (and (syn-symbol? what) (string=? (syn-name what) "type"))
-                     (k-moduleof-comps (cdr cs) (k-abs-bound names abs) ds vs seen)
-                     (k-sfail "an abstract component is a `type`, for now" what)))
+                 (let ((k (k-try-kind what)))
+                   (if (or (= k 2) (and (k-arrow-kind? k) (= (k-arrow-result k) 2)))
+                       (k-moduleof-comps (cdr cs) (k-abs-bound names k abs) ds vs seen)
+                       (k-sfail k-abs-usage what))))
+                ((and (string=? head "desc") (string=? (k-list-head what) "dlambda"))
+                 (let ((f (k-parse-fun what -1)))
+                   (begin (k-push-desc (car names) (ds-fun f))
+                          (k-moduleof-comps (cdr cs) abs (k-part-onto (car names) f ds) vs seen))))
                 ((string=? head "desc")
                  (let ((t (k-parse-type what)))
                    (begin (k-push-desc (car names) (ds-rec t))
@@ -76,13 +117,6 @@
                  (let ((t (k-parse-type what)))
                    (k-moduleof-comps (cdr cs) abs ds (k-part-onto (car names) t vs) seen)))
                 (else (k-sfail k-moduleof-usage (car parts))))))))
-;; `(select m t)`: as written, for checking to resolve where `m` is bound.
-(define k-parse-select (subr (maxeff checks spin) (syn k-syns) int)
-  (lambda (s items)
-    (cond ((not (= (k-length items) 3)) (k-sfail "`(select module name)`" s))
-          ((and (syn-symbol? (k-nth items 1)) (syn-symbol? (k-nth items 2)))
-           (k-ty-new (ty-select (syn-head (k-nth items 1)) (syn-head (k-nth items 2)))))
-          (else (k-sfail "`(select module name)`: a module's name, and a component's" s)))))
 ;; `(moduleof …)`, each abstract type a binder in scope in what follows it;
 ;; or `(select m t)`.
 (define k-read-module-type (subr (maxeff checks spin) (syn k-syns symbol) int)
@@ -108,17 +142,50 @@
 ;; A module item as `x-module` has it.
 (define k-item-of (subr (maxeff (read @globals) (alloc @t)) (int names int k-ids kxs) k-item)
   (lambda (k ns v ts xs) (product (1 k) (2 (k-copy-names ns)) (3 v) (4 ts) (5 xs))))
+(define k-push-binders (subr kstate (k-binders) unit)
+  (lambda (bs)
+    (if (null? bs)
+        #u
+        (let ((v (extract (car bs) 1)))
+          (begin (k-push-desc (k-dvar-name v) (ds-var v (extract (car bs) 2)))
+                 (k-push-binders (cdr bs)))))))
+;; A module's `define-generative`: an abstract type, a type variable in scope
+;; from here, its representation read in that scope; or, with parameters
+;; (its head after its representation in `ts`), a type constructor: its
+;; parameters read, then it, a variable of an arrow kind, and its
+;; representation a `dlambda` of them (`check-kinds.fx`).
+(define k-resolve-abstract (subr (maxeff checks spin) (k-names syns-a exp-list) k-item)
+  (lambda (ns ts xs)
+    (if (null? (cdr ts))
+        (let* ((v (k-new-dvar-of (car ns) 2))
+               (pushed (k-push-desc (car ns) (ds-var v 2)))
+               (rep (k-parse-type (car ts))))
+          (k-item-of 0 ns v (the k-ids (cons rep nil)) (k-resolve-all xs)))
+        (let* ((ps (cdr (k-items (car (cdr ts)) "a module's definition")))
+               (saved (get k-dscope))
+               (bs (k-binders-each ps))
+               (restored (set k-dscope saved))
+               (kind (k-arrow (k-binder-kinds bs) 2))
+               (v (k-new-dvar-of (car ns) kind))
+               (noted (set k-abstract-funs (cons v (get k-abstract-funs))))
+               (pushed (k-push-desc (car ns) (ds-var v kind)))
+               (inner (get k-dscope))
+               (bound (k-push-binders bs))
+               (rep (k-parse-type (car ts)))
+               (back (set k-dscope inner))
+               (lam (k-ty-new (ty-lam bs (dt rep)))))
+          (k-item-of 0 ns v (the k-ids (cons lam nil)) (k-resolve-all xs))))))
 ;; One item: an abstract type a type variable in scope from here (with
 ;; its representation read in that scope), and a transparent one an alias.
 (define k-resolve-item (subr (maxeff checks spin) (mod-item) k-item)
   (lambda (it)
     (let ((k (extract it 1)) (ns (extract it 2)) (ts (extract it 3)) (xs (extract it 4)))
       (cond ((or (< k 0) (> k 3)) (k-item-of k ns -1 nil nil))
-            ((= k 0)
-             (let* ((v (k-new-dvar-of (car ns) 2))
-                    (pushed (k-push-desc (car ns) (ds-var v 2)))
-                    (rep (k-parse-type (car ts))))
-               (k-item-of k ns v (the k-ids (cons rep nil)) (k-resolve-all xs))))
+            ((= k 0) (k-resolve-abstract ns ts xs))
+            ((and (= k 1) (string=? (k-list-head (car ts)) "dlambda"))
+             (let ((f (k-parse-fun (car ts) -1)))
+               (begin (k-push-desc (car ns) (ds-fun f))
+                      (k-item-of k ns -1 (the k-ids (cons f nil)) nil))))
             ((= k 1)
              (let ((t (k-parse-type (car ts))))
                (begin (k-push-desc (car ns) (ds-rec t))
@@ -178,6 +245,13 @@
 ;; `ts`, and `t` after them.
 (define k-ids-then (subr (maxeff (read @globals) (alloc @t)) (k-ids int) k-ids)
   (lambda (ts t) (if (null? ts) (cons t nil) (cons (car ts) (k-ids-then (cdr ts) t)))))
+;; The types and functions among descriptions `ds`.
+(define k-desc-kids (subr (maxeff (read @globals) (alloc @t)) (k-descs) k-ids)
+  (lambda (ds)
+    (if (null? ds)
+        nil
+        (let ((rest (k-desc-kids (cdr ds))))
+          (tagcase (car ds) (dt (x) (cons x rest)) (df (x) (cons x rest)) (else y rest))))))
 ;; The types `t` is made of, one level down.
 (define k-ty-kids (subr (maxeff kmakes spin) (int) k-ids)
   (lambda (t)
@@ -194,10 +268,57 @@
       (ty-product (ps) (k-parts-onto ps nil))
       (ty-sum (ps) (k-parts-onto ps nil))
       (ty-bloblet (fs z r) fs)
-      (ty-named (g ds) (k-desc-types ds))
+      (ty-named (g ds) (k-desc-kids ds))
+      (ty-app (f ds) (the k-ids (cons f (k-desc-kids ds))))
+      (ty-lam (bs x) (k-desc-kids (the k-descs (cons x nil))))
       (ty-nlist (e z r) (the k-ids (cons e nil)))
       (ty-module (abs ds vs) (k-parts-onto ds (k-parts-onto vs nil)))
       (else y nil))))
+;; Descriptions `ds`, the `i`th on, each of the kind of `ks` it is given for.
+(define k-check-app-args (subr (maxeff checks spin) (string k-descs k-ids int int int) unit)
+  (lambda (shown ds ks i a b)
+    (cond ((null? ds) #u)
+          ((not (k-desc-of-kind? (car ds) (car ks)))
+           (k-fail (k-cat5 shown " takes a " (k-kind-text (car ks)) " as description "
+                           (int->string i))
+                   a b))
+          (else (k-check-app-args shown (cdr ds) (cdr ks) (+ i 1) a b)))))
+;; Function `f` applied to `ds`, at `a`..`b`: given as many descriptions as
+;; it takes, each of the kind it takes, and giving a type.
+(define k-check-app (subr (maxeff checks spin) (int k-descs int int) unit)
+  (lambda (f ds a b)
+    (let ((k (k-fun-kind f)) (shown (k-quote (k-show-ty f))))
+      (cond ((< k 0) #u)
+            ((not (k-arrow-kind? k))
+             (k-fail (string-append shown " is not a description function: it is applied") a b))
+            ((not (= (k-length (k-arrow-params k)) (k-length ds)))
+             (k-fail (k-cat5 shown " takes " (int->string (k-length (k-arrow-params k)))
+                             " description(s), and has " (int->string (k-length ds)))
+                     a b))
+            ((not (or (= (k-arrow-result k) 2) (= (k-arrow-result k) 4)))
+             (k-fail (k-cat4 shown " gives a description of kind "
+                             (k-kind-text (k-arrow-result k)) ", not a type")
+                     a b))
+            (else (k-check-app-args shown ds (k-arrow-params k) 1 a b))))))
+;; Each description function applied in `t` given what it takes, at
+;; `a`..`b`: checked where a `select` has just said what the function is.
+(define-rec
+  (k-check-apps-from (subr (maxeff checks spin) (int (ref k-ids @t) int int) unit)
+    (lambda (t seen a b)
+      (let ((t (k-resolve t)))
+        (if (k-has-id? (get seen) t)
+            #u
+            (begin
+              (set seen (cons t (get seen)))
+              (tagcase (k-get t) (ty-app (f ds) (k-check-app f ds a b)) (else y #u))
+              (k-check-apps-each (k-ty-kids t) seen a b))))))
+  (k-check-apps-each (subr (maxeff checks spin) (k-ids (ref k-ids @t) int int) unit)
+    (lambda (ts seen a b)
+      (if (null? ts)
+          #u
+          (begin (k-check-apps-from (car ts) seen a b) (k-check-apps-each (cdr ts) seen a b))))))
+(define k-check-apps (subr (maxeff checks spin) (int int int) unit)
+  (lambda (t a b) (k-check-apps-from t (the (ref k-ids @t) (new nil)) a b)))
 ;; Whether type variable `v` is somewhere in `t`, or in `ts`; `seen`, the
 ;; nodes walked.
 (define-rec
@@ -236,10 +357,12 @@
     (if (null? abs)
         (product (1 (the k-parts nil)) (2 (the k-map nil)))
         (let* ((a (extract (car abs) 1))
-               (w (k-new-dvar-of (string->symbol (string-append prefix (symbol->string a))) 2))
+               (k (k-dvar-kind (extract (car abs) 2)))
+               (w (k-new-dvar-of (string->symbol (string-append prefix (symbol->string a))) k))
                (noted (begin (set k-skolems (cons w (get k-skolems)))
-                             (set k-module-vars (cons w (get k-module-vars)))))
-               (to (dt (k-ty-new (ty-var w))))
+                             (set k-module-vars (cons w (get k-module-vars)))
+                             (if (= k 2) #u (set k-abstract-funs (cons w (get k-abstract-funs))))))
+               (to (if (= k 2) (dt (k-ty-new (ty-var w))) (df (k-ty-new (ty-var w)))))
                (rest (k-rename-abs prefix (cdr abs))))
           (product (1 (the k-parts (cons (product (1 a) (2 w)) (extract rest 1))))
                    (2 (the k-map (cons (cons (extract (car abs) 2) to) (extract rest 2)))))))))
@@ -368,7 +491,7 @@
             (begin
               (set k-select-map (k-selection found a b))
               (let ((r (k-subst t nil)))
-                (begin (set k-select-map outer) r))))))))
+                (begin (set k-select-map outer) (k-check-apps r a b) r))))))))
 ;; The same for a type written as `s`, at `s`.
 (define k-select-syn (subr (maxeff checks spin) (int syn) int)
   (lambda (t s) (k-resolve-selects t (syn-start s) (syn-end s))))

@@ -28,6 +28,11 @@ fn replaces_and_inserts_by_name_and_refuses_what_does_not_read() {
     assert!(out.contains(";; new\n(define z int 1)\n(define b"));
     let out = se::insert_after(SAMPLE, P, "c", "(e (subr pure () int) (lambda () 1))").unwrap();
     assert!(out.contains("(c n))))") || out.contains("\n  (e (subr pure () int)"));
+    // A whole definition beside a group's member goes beside the group.
+    let out = se::insert_before(SAMPLE, P, "c", "(define z int 1)").unwrap();
+    assert!(out.contains("(define z int 1)\n(define-rec"), "{out}");
+    let out = se::insert_after(SAMPLE, P, "c", ";; z\n(define z int 1)").unwrap();
+    assert!(out.find("(define z").unwrap() > out.find("(d (subr").unwrap(), "{out}");
 }
 
 #[test]
@@ -38,6 +43,17 @@ fn moves_a_definition_with_its_comments() {
     assert!(b < a, "{out}");
     let out = se::move_before(SAMPLE, P, "a", "s").unwrap();
     assert!(out.find(";; A comment about `a`.").unwrap() > out.find("(define-rec").unwrap(), "{out}");
+}
+
+#[test]
+fn moves_a_whole_form_to_another_file() {
+    // A member of a `define-rec` takes its whole group, comments and all.
+    let other = ";; z\n(define z int 9)\n";
+    let (from, to) = se::move_to(SAMPLE, other, P, "d", "z").unwrap();
+    assert!(!from.contains("(define-rec") && from.contains("(define a"), "{from}");
+    let group = to.find("(define-rec").unwrap();
+    assert!(group < to.find(";; z").unwrap() && to.contains("(d ") && to.contains("(c "), "{to}");
+    assert!(se::move_to(SAMPLE, other, P, "d", "nowhere").is_err());
 }
 
 #[test]

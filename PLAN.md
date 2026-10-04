@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-02)
+## At a glance (kept current; last updated 2026-10-04)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -29,6 +29,12 @@ are in the last section, "Log: the glance's details", and in
   sizes (`nlist`, `nat`). Globals are a region; redefinition follows one
   rule at the REPL and in files, in both checkers; the REPL is
   incremental.
+- **Higher kinds** (2026-10-04; `docs/fx26.md`, "Higher kinds";
+  `docs/research/higher-kinds.md`): arrow kinds `(=> k … k)`, `dlambda`,
+  applications in types and effects, abstract type constructors in
+  modules; past FX-91: functions to effects, and over regions, sizes and
+  conventions. Both checkers agree on 25 test programs; Okasaki's `STACK`
+  as written (`tests/programs/higher-kinds/okasaki-stack.fx`).
 - **Soundness** (`docs/research/soundness*.md`): a formal core with
   progress and preservation proved, control included; holes F1–F9 and A2
   found and fixed.
@@ -2253,6 +2259,17 @@ prompt tag; `quote` takes only symbols; no `error`; missing `remainder`,
 `char-upcase`, `vector->list`, `list->vector`; `length` only on frozen
 lists; `sum` is reserved; standard names silently shadowed; reader errors
 always at 1:1; effect-mismatch messages print both whole sets.
+
+Found porting higher kinds (2026-10-04): the Rust checker interns an
+effect function's application as an atom (`EffectApps`); the FX-26
+checker cannot, since interning writes the arena, and substitution and
+printing say they write nothing. It compares the applications
+structurally instead, which works but costs. Two ways the language could
+take interning back without the coupling: allocation that may return an
+equal object made before (hash-consing), whose effect is `(alloc r)`, not
+a write; or storage that only grows, an `(extend r)` effect that a reader
+of `r` need not fear, since nothing it saw changes. Either would serve
+any memo table that only adds.
 
 ## Log: the glance's details (moved here 2026-09-28)
 

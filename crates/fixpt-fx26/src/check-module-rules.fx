@@ -13,20 +13,31 @@
   (lambda (abs ds vs e) (product (1 abs) (2 ds) (3 vs) (4 e))))
 ;; An abstract type `t`, its representation seen only through its own
 ;; conversions, which stay inside the module: each the identity, made as a
-;; closure is, checked on its representation and bound at `t`.
+;; closure is, checked on its representation and bound at `t`. A type
+;; constructor's representation is a `dlambda` of its parameters: its
+;; conversions are polymorphic in them, as FX-91's at a higher kind.
 (define k-module-abs (subr (maxeff checks spin) (k-item int int k-made) k-made)
   (lambda (it a b made)
     (let* ((n (car (extract it 2)))
            (v (extract it 3))
-           (rep (k-resolve-selects (car (extract it 4)) a b))
-           (t (k-ty-new (ty-var v)))
+           (whole (car (extract it 4)))
+           (bs (tagcase (k-get whole) (ty-lam (bs body) bs) (else x (the k-binders nil))))
+           (inner (tagcase (k-get whole)
+                    (ty-lam (bs body) (tagcase body (dt (t) t) (else x whole)))
+                    (else x whole)))
+           (rep (k-resolve-selects inner a b))
+           (var (k-ty-new (ty-var v)))
+           (t (if (null? bs) var (k-ty-new (ty-app var (k-binders-as-descs bs)))))
            (identity (k-new-subr nil (the k-ids (cons rep nil)) rep))
            (fns (extract it 5))
            (up (k-check (car fns) identity))
-           (down (k-check (car (cdr fns)) identity)))
+           (down (k-check (car (cdr fns)) identity))
+           (up-t (k-new-subr nil (the k-ids (cons rep nil)) t))
+           (down-t (k-new-subr nil (the k-ids (cons t nil)) rep)))
       (begin
-        (k-bind (k-conversion-name "up-" n) (k-new-subr nil (the k-ids (cons rep nil)) t))
-        (k-bind (k-conversion-name "down-" n) (k-new-subr nil (the k-ids (cons t nil)) rep))
+        (k-bind (k-conversion-name "up-" n) (if (null? bs) up-t (k-ty-new (ty-poly bs up-t))))
+        (k-bind (k-conversion-name "down-" n)
+                (if (null? bs) down-t (k-ty-new (ty-poly bs down-t))))
         (k-made-of (k-part-onto n v (extract made 1)) (extract made 2) (extract made 3)
                    (extract made 4))))))
 ;; A value: checked against its type, if it has one, or found; bound, its
@@ -208,6 +219,7 @@
         (the (listof k-benvs acyclic) (cons es nil))
         (let* ((n (extract (car ab) 1)) (x (k-part-of aa n)))
           (cond
+            ((and (>= x 0) (not (= (k-dvar-kind x) (k-dvar-kind (extract (car ab) 2))))) nil)
             ((>= x 0)
              (let* ((l (k-label labels a b i))
                     (ea (k-benv-set (car es) x l))
@@ -215,13 +227,18 @@
                (k-pair-abs (cdr ab) aa da a b (+ i 1) (the k-benvs (cons ea eb)) labels)))
             ((>= (k-part-of da n) 0) (k-pair-abs (cdr ab) aa da a b (+ i 1) es labels))
             (else nil))))))
+;; Type `t` as the description that stands for variable `v`: a function, if
+;; `v` is of an arrow kind.
+(define k-as-kind (subr kreads (int int) k-desc)
+  (lambda (v t) (if (k-arrow-kind? (k-dvar-kind v)) (df t) (dt t))))
 ;; Each binder named in `ea`, as the type of the name its pair was given.
 (define k-labels-map (subr (maxeff kstate spin) (k-benv) k-map)
   (lambda (ea)
     (if (null? ea)
         nil
         (let ((t (k-ty-new (ty-var (cdr (car ea))))))
-          (the k-map (cons (cons (car (car ea)) (dt t)) (k-labels-map (cdr ea))))))))
+          (the k-map (cons (cons (car (car ea)) (k-as-kind (car (car ea)) t))
+                           (k-labels-map (cdr ea))))))))
 ;; `b`'s abstract types (`ab`) that `a` defines (`da`, not abstract in `aa`):
 ;; each as that definition, `m` naming `a`'s own abstract types in it.
 (define k-defined-map (subr (maxeff kstate spin) (k-parts k-parts k-parts k-map) k-map)
@@ -233,7 +250,8 @@
                (rest (k-defined-map (cdr ab) aa da m)))
           (if (< d 0)
               rest
-              (the k-map (cons (cons (extract (car ab) 2) (dt (k-subst d m))) rest)))))))
+              (let ((y (extract (car ab) 2)))
+                (the k-map (cons (cons y (k-as-kind y (k-subst d m))) rest))))))))
 ;; For the pair of module types `a` and `b`, met before in this question, the
 ;; wanted one's descriptions and values with its abstract types the given
 ;; one's transparent ones: made once, so that a recursive type meets the same

@@ -353,6 +353,13 @@
 (define-type c-kept-globals (listof (pairof symbol wglobal acyclic) acyclic))
 
 (define c-reuse (ref c-kept-globals @k) (new nil))
+;; For a driver: a whole program from here, which sees none of the globals
+;; made before it, as its checker begins again.
+(define compile-forget-globals!
+  (subr (maxeff (read (globals c-genv-index c-reuse make-table symbol-hash)) (write @k) (alloc @k))
+        () unit)
+  (lambda ()
+    (begin (set c-genv-index (make-table symbol-hash symbol=?)) (set c-reuse nil))))
 
 ;; The global kept for `n`, if any.
 (define c-kept (subr (read @globals) (c-kept-globals symbol) (listof wglobal acyclic))

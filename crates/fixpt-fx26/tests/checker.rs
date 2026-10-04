@@ -130,7 +130,7 @@ fn probe_helpers() {
 fn every_test_program() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let (mut report, mut unparsed, mut agreed) = (Vec::new(), Vec::new(), 0);
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate", "generative", "lemmas", "sizes", "conventions", "redefine", "modules"] {
+    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate", "generative", "lemmas", "sizes", "conventions", "redefine", "modules", "higher-kinds"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
@@ -501,7 +501,7 @@ fn effect_summaries_agree() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let (mut report, mut both, mut only_fx, mut only_rust) = (Vec::new(), 0, 0, 0);
     let mut programs = Vec::new();
-    for sub in ["run", "bench", "bidirectional", "control", "pldi89", "datum", "modules"] {
+    for sub in ["run", "bench", "bidirectional", "control", "pldi89", "datum", "modules", "higher-kinds"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         programs.extend(names.into_iter().map(|p| (format!("{sub}/{}", p.file_name().unwrap().to_string_lossy()), std::fs::read_to_string(&p).unwrap())));

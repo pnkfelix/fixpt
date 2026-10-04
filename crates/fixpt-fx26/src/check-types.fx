@@ -47,7 +47,11 @@
 
 (define-datatype k-atom
   (a-read k-region) (a-write k-region) (a-alloc k-region)
-  (a-goto k-region) (a-comefrom k-region) (a-await k-region) (a-spin) (a-var int))
+  (a-goto k-region) (a-comefrom k-region) (a-await k-region) (a-spin) (a-var int)
+  ;; `(e d …)`: a description function to an effect, a variable, applied
+  ;; to descriptions, none a type (`check-kinds.fx`): an unknown effect, as
+  ;; a variable is.
+  (a-app int (listof k-desc acyclic)))
 (define-type k-eff (listof k-atom acyclic))
 ;; A `vsubr`'s effect, element and result, in a list: one or none.
 (define-type k-vsub (listof (productof (1 k-eff) (2 int) (3 int)) acyclic))
@@ -66,9 +70,14 @@
 ;; `cellular`, `native`, `fx`, or a binder.
 (define-datatype k-conv (cv-cellular) (cv-native) (cv-fx) (cv-var int))
 
-(define-datatype k-size (sz-finite) (sz-lin int (listof (pairof int int acyclic) acyclic)))
+;; A size's terms: each a variable and its coefficient.
+(define-type k-terms (listof (pairof int int acyclic) acyclic))
+(define-datatype k-size (sz-finite) (sz-lin int k-terms))
 
-(define-datatype k-desc (dr k-region) (de k-eff) (dt int) (dz k-size) (dc k-conv))
+(define-datatype k-desc (dr k-region) (de k-eff) (dt int) (dz k-size) (dc k-conv)
+  ;; A description function: a `dlambda`, a variable of an arrow kind, or a
+  ;; `select` of a module's (`check-kinds.fx`).
+  (df int))
 (define-type k-descs (listof k-desc acyclic))
 
 (define-datatype k-ty
@@ -115,7 +124,12 @@
   ;; `(select $k t)`: in a procedure's type, the type `t` of its `k`th
   ;; parameter (from 0), a module: a dependent procedure, a functor
   ;; (`first-class-modules.md`, M5). A call puts the argument's for it.
-  (ty-param int symbol))
+  (ty-param int symbol)
+  ;; `(dlambda ((x k) …) d)`: a description function; and `(f d …)`, one
+  ;; applied that cannot be reduced, `f` a variable or a `select`
+  ;; (`check-kinds.fx`).
+  (ty-lam k-binders k-desc)
+  (ty-app int (listof k-desc acyclic)))
 
 (define-type k-map (listof (pairof int k-desc @t) acyclic))
 
@@ -132,7 +146,10 @@
   (ds-eff k-eff)
   (ds-private k-region)
   ;; A convention given for an abbreviation's convention parameter.
-  (ds-conv k-conv))
+  (ds-conv k-conv)
+  ;; A name for a description function: `define-type` of a `dlambda`, or a
+  ;; type family's parameter of an arrow kind given one.
+  (ds-fun int))
 
 ;;; ------------------------------------------------------------ expressions
 ;;; The parser's trees with their descriptions read. Each ends with where it
@@ -310,17 +327,81 @@
 ;; The same for `nat?`: the variables it has just found no less than 0.
 (define k-certified-nats (ref (listof (pairof symbol int @t) acyclic) @t) (new nil))
 (define k-certified-lengths (ref (listof k-cert-len acyclic) @t) (new nil))
+;; The arrow kinds made so far, newest first: each its parameters' kinds and
+;; its result's. Kind 100 + n is the nth; kinds below are the
+;; base kinds (0 region, 1 effect, 2 type, 3 place, 4 data, 5 size, 6 conv).
+(define-type k-arrow-kind (pairof k-ids int @t))
+(define k-arrows (ref (listof k-arrow-kind acyclic) @t) (new nil))
+(define k-narrows (ref int @t) (new 0))
+(define k-ids=? (subr (read @globals) (k-ids k-ids) bool)
+  (lambda (xs ys)
+    (cond ((null? xs) (null? ys))
+          ((null? ys) #f)
+          (else (and (= (car xs) (car ys)) (k-ids=? (cdr xs) (cdr ys)))))))
+;; The kind of the arrow `ps` to `r` among `as`, `n` of them, newest first;
+;; or -1.
+(define k-arrow-find (subr kreads ((listof k-arrow-kind acyclic) k-ids int int) int)
+  (lambda (as ps r n)
+    (cond ((null? as) -1)
+          ((and (= (cdr (car as)) r) (k-ids=? (car (car as)) ps)) (+ 100 (- n 1)))
+          (else (k-arrow-find (cdr as) ps r (- n 1))))))
+;; The arrow kind `(=> ps … r)`, interned.
+(define k-arrow (subr (maxeff kstate spin) (k-ids int) int)
+  (lambda (ps r)
+    (let ((found (k-arrow-find (get k-arrows) ps r (get k-narrows))))
+      (if (>= found 0)
+          found
+          (let ((n (get k-narrows)))
+            (begin
+              (set k-arrows (cons (cons ps r) (get k-arrows)))
+              (set k-narrows (+ n 1))
+              (+ 100 n)))))))
+;; An arrow kind's parameters' kinds and result's, none or one: none for a
+;; base kind, or none known (-1).
+(define k-arrow-parts (subr kreads (int) (listof k-arrow-kind acyclic))
+  (lambda (k)
+    (if (< k 100)
+        nil
+        (cons (k-nth (get k-arrows) (- (- (get k-narrows) 1) (- k 100))) nil))))
+(define k-arrow-kind? (subr pure (int) bool) (lambda (k) (>= k 100)))
+;; The kind an arrow kind gives, or -1 for any other.
+(define k-arrow-result (subr kreads (int) int)
+  (lambda (k) (let ((a (k-arrow-parts k))) (if (null? a) -1 (cdr (car a))))))
+;; The kinds an arrow kind takes, or none for any other.
+(define k-arrow-params (subr kreads (int) k-ids)
+  (lambda (k) (let ((a (k-arrow-parts k))) (if (null? a) nil (car (car a))))))
+;; Binders' kinds.
+(define k-binder-kinds (subr (read @globals) (k-binders) k-ids)
+  (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 2) (k-binder-kinds (cdr bs))))))
+;; Each description variable of an arrow kind, with its kind (`check-kinds.fx`).
+(define k-arrow-vars (ref (listof (pairof int int @t) acyclic) @t) (new nil))
+;; The description-function variables that are a module's abstract type
+;; constructors, whose representations no one outside can see: what is
+;; given to one is kept, cautiously, everywhere (`k-knot-in`).
+(define k-abstract-funs (ref k-ids @t) (new nil))
 (define k-new-dvar-of (subr kstate (symbol int) int)
   (lambda (name kind)
     (let ((v (k-new-dvar name)))
       (begin (if (= kind 3) (set k-places (cons v (get k-places))) #u)
              (if (= kind 4) (set k-datas (cons v (get k-datas))) #u)
+             (if (>= kind 100) (set k-arrow-vars (cons (cons v kind) (get k-arrow-vars))) #u)
              v))))
 ;; Which description variables are of kind `data`.
 (define k-data-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-datas) v)))
 (define k-place-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-places) v)))
+;; Each description variable of an arrow kind, with its kind
+;; (`k-new-dvar-of` notes them).
+(define k-dvar-kind (subr kreads (int) int)
+  (lambda (v)
+    (letrec ((find (subr kreads ((listof (pairof int int @t) acyclic)) int)
+                     (lambda (xs)
+                       (cond ((null? xs) -1)
+                             ((= (car (car xs)) v) (cdr (car xs)))
+                             (else (find (cdr xs)))))))
+      (let ((a (find (get k-arrow-vars))))
+        (cond ((>= a 0) a) ((k-place-var? v) 3) ((k-data-var? v) 4) (else 2))))))
 ;; Each bounded region binder's bound: `(r region p)`, a region that won't
 ;; outlive `p` (`docs/research/places-and-regions.md`).
 (define-type k-bounded (listof (pairof int k-region @t) acyclic))
@@ -627,6 +708,7 @@
          (or (tagcase (car e)
                (a-comefrom (r) #t)
                (a-var (v) #t)
+               (a-app (v ds) #t)
                (a-write (r) (k-globals-region? r))
                (else y #f))
              (k-disrupts? (cdr e))))))
@@ -737,30 +819,94 @@
     (tagcase a
       (a-read (r) 0) (a-write (r) 1) (a-alloc (r) 2)
       (a-goto (r) 3) (a-comefrom (r) 4) (a-await (r) 5)
-      (a-spin () 6) (a-var (v) 7))))
+      (a-spin () 6) (a-var (v) 7) (a-app (v ds) 8))))
 ;; The atom's region; a variable's is none, shown as a binder -1.
 (define k-atom-region (subr (read @globals) (k-atom) k-region)
   (lambda (a)
     (tagcase a
       (a-read (r) r) (a-write (r) r) (a-alloc (r) r)
       (a-goto (r) r) (a-comefrom (r) r) (a-await (r) r)
-      (a-spin () (r-var -1)) (a-var (v) (r-var -1)))))
+      (a-spin () (r-var -1)) (a-var (v) (r-var -1)) (a-app (v ds) (r-var -1)))))
 (define k-has-region? (subr (read @globals) (k-atom) bool) (lambda (a) (< (k-atom-rank a) 6)))
 ;; The effect variable an atom is, or -1.
 (define k-atom-var (subr pure (k-atom) int)
   (lambda (a) (tagcase a (a-var (v) v) (else y -1))))
-(define k-atom-cmp (subr (maxeff (read @globals) spin) (k-atom k-atom) int)
-  (lambda (a b)
-    (let ((c (k-int-cmp (k-atom-rank a) (k-atom-rank b))))
-      (cond ((not (= c 0)) c)
-            ((k-has-region? a) (k-region-cmp (k-atom-region a) (k-atom-region b)))
-            (else (k-int-cmp (k-atom-var a) (k-atom-var b)))))))
+;; What orders two atoms of one rank with no region: a variable's number,
+;; or an effect application's.
+(define k-atom-key (subr pure (k-atom) int)
+  (lambda (a) (tagcase a (a-var (v) v) (a-app (v ds) v) (else y -1))))
+;; A convention as a number: one of FX-26's own, or its binder.
+(define k-conv-code (subr pure (k-conv) int)
+  (lambda (c) (tagcase c (cv-cellular () -1) (cv-native () -2) (cv-fx () -3) (cv-var (v) v))))
+;; What an effect application was given; none for any other atom.
+(define k-atom-args (subr pure (k-atom) (listof k-desc acyclic))
+  (lambda (a) (tagcase a (a-app (v ds) ds) (else y nil))))
+;; Descriptions given an effect function, ranked by kind.
+(define k-earg-rank (subr pure (k-desc) int)
+  (lambda (d) (tagcase d (dr (r) 0) (de (e) 1) (dz (z) 2) (dc (c) 3) (else y 4))))
+(define k-terms-cmp (subr (maxeff (read @globals) spin) (k-terms k-terms) int)
+  (lambda (ts us)
+    (cond ((null? ts) (if (null? us) 0 -1))
+          ((null? us) 1)
+          (else
+           (let ((c (k-int-cmp (car (car ts)) (car (car us)))))
+             (cond ((not (= c 0)) c)
+                   ((not (= (cdr (car ts)) (cdr (car us))))
+                    (k-int-cmp (cdr (car ts)) (cdr (car us))))
+                   (else (k-terms-cmp (cdr ts) (cdr us)))))))))
+;; Sizes in order: `finite` first, then by constant and terms.
+(define k-size-cmp (subr (maxeff (read @globals) spin) (k-size k-size) int)
+  (lambda (m n)
+    (tagcase m
+      (sz-finite () (tagcase n (sz-finite () 0) (else y -1)))
+      (sz-lin (k ts)
+        (tagcase n
+          (sz-finite () 1)
+          (sz-lin (j us)
+            (let ((c (k-int-cmp k j)))
+              (if (= c 0) (k-terms-cmp ts us) c))))))))
+;; Atoms in order: by rank; then by region, or by variable, an effect
+;; application by what it was given after its variable.
+(define-rec
+  (k-atom-cmp (subr (maxeff (read @globals) spin) (k-atom k-atom) int)
+    (lambda (a b)
+      (let ((c (k-int-cmp (k-atom-rank a) (k-atom-rank b))))
+        (cond ((not (= c 0)) c)
+              ((k-has-region? a) (k-region-cmp (k-atom-region a) (k-atom-region b)))
+              (else
+               (let ((d (k-int-cmp (k-atom-key a) (k-atom-key b))))
+                 (if (= d 0) (k-eargs-cmp (k-atom-args a) (k-atom-args b)) d)))))))
+  (k-eargs-cmp (subr (maxeff (read @globals) spin) (k-descs k-descs) int)
+    (lambda (xs ys)
+      (cond ((null? xs) (if (null? ys) 0 -1))
+            ((null? ys) 1)
+            (else
+             (let ((c (k-earg-cmp (car xs) (car ys))))
+               (if (= c 0) (k-eargs-cmp (cdr xs) (cdr ys)) c))))))
+  (k-earg-cmp (subr (maxeff (read @globals) spin) (k-desc k-desc) int)
+    (lambda (x y)
+      (let ((c (k-int-cmp (k-earg-rank x) (k-earg-rank y))))
+        (if (not (= c 0))
+            c
+            (tagcase x
+              (dr (r) (tagcase y (dr (s) (k-region-cmp r s)) (else z 0)))
+              (de (e) (tagcase y (de (f) (k-effs-cmp e f)) (else z 0)))
+              (dz (m) (tagcase y (dz (n) (k-size-cmp m n)) (else z 0)))
+              (dc (a) (tagcase y (dc (b) (k-int-cmp (k-conv-code a) (k-conv-code b))) (else z 0)))
+              (else z 0))))))
+  (k-effs-cmp (subr (maxeff (read @globals) spin) (k-eff k-eff) int)
+    (lambda (e f)
+      (cond ((null? e) (if (null? f) 0 -1))
+            ((null? f) 1)
+            (else
+             (let ((c (k-atom-cmp (car e) (car f))))
+               (if (= c 0) (k-effs-cmp (cdr e) (cdr f)) c)))))))
 (define k-atom-with (subr (read @globals) (k-atom k-region) k-atom)
   (lambda (a r)
     (tagcase a
       (a-read (x) (a-read r)) (a-write (x) (a-write r)) (a-alloc (x) (a-alloc r))
       (a-goto (x) (a-goto r)) (a-comefrom (x) (a-comefrom r)) (a-await (x) (a-await r))
-      (a-spin () a) (a-var (v) a))))
+      (a-spin () a) (a-var (v) a) (a-app (v ds) a))))
 ;; Whether `a` comes before `b`, and whether they are one atom.
 (define k-atom<? (subr (maxeff (read @globals) spin) (k-atom k-atom) bool)
   (lambda (a b) (< (k-atom-cmp a b) 0)))

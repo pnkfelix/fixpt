@@ -2276,3 +2276,19 @@ about 2%; it adds half a second. First figures (ms): check 12.6, lower
 fx check 52, fx words 13, fx arm64 37; 13.6 M words, 13 collections.
 Surveying the ports found a crash, `ocaml/boyer` under register code
 (PLAN, B1).
+
+## Higher kinds: what the checkers pay (2026-10-04)
+
+Higher kinds add cases to the checkers' walks, and the FX-26 checker
+compares effect functions' applications structurally (no intern table;
+`PLAN.md`, Q11). On peval, the compile table's mid-sized program, best of
+3, against the commit before:
+
+| phase    | before (ms) | after (ms) | change |
+| -------- | ----------: | ---------: | -----: |
+| check    | 12.25       | 12.69      | +3.6%  |
+| fx check | 51.36       | 52.05      | +1.3%  |
+| fx words | 12.62       | 13.04      | +3.3%  |
+
+Run times are unchanged within noise: higher kinds are erased before
+lowering, and a program that uses none takes the paths it took.

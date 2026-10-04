@@ -692,10 +692,18 @@
              (n (len parts))
              (head (if (null? parts) '|()| (syn-head (car parts)))))
         (cond ((and (symbol=? head 'define-generative) (= n 3))
-               (let* ((name (syn-symbol (nth parts 1)))
+               ;; `(define-generative (t (p k) …) T)`: a type constructor, its
+               ;; head kept after its representation for the checker to read.
+               (let* ((head (nth parts 1))
+                      (hs (tagcase head (lst (xs d a b) xs) (else x (the syns-a nil))))
+                      (params? (and (not (null? hs)) (not (null? (cdr hs)))))
+                      (name (syn-symbol (if params? (car hs) head)))
                       (up (identity-at (syn-start f) (syn-end f)))
-                      (down (identity-at (syn-start f) (syn-end f))))
-                 (mod-item-of 0 name (one-syn (nth parts 2)) (list up down))))
+                      (down (identity-at (syn-start f) (syn-end f)))
+                      (ts (if params?
+                              (the syns-a (list (nth parts 2) head))
+                              (one-syn (nth parts 2)))))
+                 (mod-item-of 0 name ts (list up down))))
               ((and (symbol=? head 'define-type) (= n 3))
                (mod-item-of 1 (syn-symbol (nth parts 1)) (one-syn (nth parts 2)) nil))
               ((and (symbol=? head 'define) (= n 3))

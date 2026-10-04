@@ -25,7 +25,7 @@
 //! **Prompts** delimit control on their tag's region, under a condition of
 //! their own: see `synth_prompt`.
 
-use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
+use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, EArg, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
 use crate::error::{FxError, R};
 use crate::parse::DScope;
 use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
@@ -138,6 +138,10 @@ pub struct Checker {
     /// Of those, the ones made for a module's abstract types as it was
     /// bound (`Checker::name_module`): not forgotten, but kept from leaving.
     pub(crate) module_vars: HashSet<DVar>,
+    /// The description-function variables that are a module's abstract
+    /// type constructors, whose representations no one outside can see:
+    /// what is given to one is kept, cautiously, everywhere (`knot_in`).
+    pub(crate) abstract_funs: HashSet<DVar>,
     /// While a type's `select`s are resolved (`Checker::resolve_selects`):
     /// what each is; empty otherwise.
     pub(crate) select_map: HashMap<(Sym, Sym), TyId>,
@@ -359,6 +363,7 @@ impl Checker {
             size_facts: Vec::new(),
             skolems: Vec::new(),
             module_vars: HashSet::new(),
+            abstract_funs: HashSet::new(),
             select_map: HashMap::new(),
             param_map: HashMap::new(),
             conv_default: conv,
@@ -658,7 +663,7 @@ impl Checker {
                 0
             } else if eff.0.iter().all(|a| matches!(a, Atom::Read(_))) {
                 1
-            } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
+            } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::App(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
                 3
             } else {
                 2
@@ -728,14 +733,16 @@ impl Checker {
                 }
                 let mut map = HashMap::new();
                 for ((v, k), d) in binders.iter().zip(args) {
-                    let ok = match (k, &d) {
-                        (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type | Kind::Data, D::Type(_)) => true,
-                        (Kind::Size, D::Size(_)) | (Kind::Conv, D::Conv(_)) => true,
-                        (Kind::Place, D::Region(r)) => self.arena.is_place(*r),
-                        _ => false,
+                    // A function given as a `select`: resolved first.
+                    let d = match d {
+                        D::Fun(f) | D::Type(f) if matches!(k, Kind::Arrow(_)) && matches!(self.arena.get(f), Ty::Select(..)) => {
+                            D::Fun(self.resolve_selects(f, span)?)
+                        }
+                        d => d,
                     };
-                    if !ok {
-                        return Err(FxError::at(span, format!("`{}` is bound as a {k:?}, and the description given is not one", self.interner.name(self.arena.dvar_name(*v)))));
+                    if !self.d_fits(&d, *k) {
+                        let word = self.kind_word(*k);
+                        return Err(FxError::at(span, format!("`{}` is bound as a {word}, and the description given is not one", self.interner.name(self.arena.dvar_name(*v)))));
                     }
                     map.insert(*v, d);
                 }
@@ -1256,6 +1263,22 @@ impl Checker {
         match self.arena.get(t).clone() {
             Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
             Ty::Link(Some(_)) => unreachable!("resolved"),
+            // A description function applied, which cannot be looked into:
+            // what it was given; a function, what its body names.
+            Ty::App { args: ds, .. } => {
+                for d in &ds {
+                    for x in self.d_types(d) {
+                        self.regions_walk(x, seen, out);
+                    }
+                    out.extend(self.d_regions(d));
+                }
+            }
+            Ty::Lam { body, .. } => {
+                for x in self.d_types(&body) {
+                    self.regions_walk(x, seen, out);
+                }
+                out.extend(self.d_regions(&body));
+            }
             Ty::Module { descs, vals, .. } => {
                 for (_, x) in descs.iter().chain(&vals) {
                     self.regions_walk(*x, seen, out);
@@ -1322,6 +1345,12 @@ impl Checker {
                         D::Effect(e) => out.extend(e.0.iter().filter_map(|a| a.region())),
                         D::Conv(_) => {}
                         D::Size(_) => {}
+                        D::Fun(_) => {
+                            for x in self.d_types(&d) {
+                                self.regions_walk(x, seen, out);
+                            }
+                            out.extend(self.d_regions(&d));
+                        }
                     }
                 }
             }
@@ -1364,11 +1393,9 @@ impl Checker {
             Ty::PromptTag { answer: a, payload: b, .. } | Ty::Composable { arg: a, answer: b, .. } => vec![a, b],
             Ty::Named { which, args } => [self.generatives[which as usize].rep]
                 .into_iter()
-                .chain(args.into_iter().filter_map(|d| match d {
-                    D::Type(x) => Some(x),
-                    _ => None,
-                }))
+                .chain(args.iter().flat_map(|d| self.d_types(d)))
                 .collect(),
+            Ty::App { args, .. } => args.iter().flat_map(|d| self.d_types(d)).collect(),
             _ => vec![],
         };
         for k in kids {
@@ -1585,6 +1612,21 @@ impl Checker {
         Ok(())
     }
 
+    /// `v` anywhere in description `d`, given to a description function,
+    /// which may use what it is given either way: invariantly.
+    fn polarity_fun(&self, d: &D, v: DVar, seen: &mut HashSet<(TyId, u8)>, found: &mut Vec<Variance>) {
+        for x in self.d_types(d) {
+            self.polarity(x, v, Variance::Inv, seen, found);
+        }
+        let mentions = |r: &Region| matches!(r, Region::Var(x) | Region::Frozen(Some(x), _) if *x == v);
+        if self.d_regions(d).iter().any(mentions)
+            || self.d_effects(d).iter().any(|e| e.0.contains(&Atom::Var(v)))
+            || matches!(d, D::Fun(f) if matches!(self.arena.get(*f), Ty::Var(x) if *x == v))
+        {
+            found.push(Variance::Inv);
+        }
+    }
+
     /// Each polarity at which `v` occurs in `t`, reached at polarity `at`.
     fn polarity(&self, t: TyId, v: DVar, at: Variance, seen: &mut HashSet<(TyId, u8)>, found: &mut Vec<Variance>) {
         let t = self.arena.resolve(t);
@@ -1604,6 +1646,10 @@ impl Checker {
         let eff = |e: &Effect, p: Variance, found: &mut Vec<Variance>| {
             if e.0.iter().any(|a| matches!(a, Atom::Var(x) if *x == v)) {
                 found.push(p);
+            }
+            // In an effect function applied: either way.
+            if e.0.iter().any(|a| matches!(a, Atom::App(n) if self.arena.effect_apps.mentions(*n, &|x| x == v))) {
+                found.push(Variance::Inv);
             }
             if e.0.iter().any(|a| matches!(a.region(), Some(Region::Var(x)) if x == v)) {
                 found.push(Variance::Inv);
@@ -1670,7 +1716,17 @@ impl Checker {
                         D::Region(r) => reg(*r, found),
                         D::Effect(e) => eff(e, p, found),
                         D::Size(_) | D::Conv(_) => {}
+                        D::Fun(_) => self.polarity_fun(d, v, seen, found),
                     }
+                }
+            }
+            // What a description function is given, it may use either way.
+            Ty::App { fun, args } => {
+                if matches!(self.arena.get(fun), Ty::Var(x) if *x == v) {
+                    found.push(Variance::Inv);
+                }
+                for d in &args {
+                    self.polarity_fun(d, v, seen, found);
                 }
             }
             _ => {}
@@ -1713,8 +1769,12 @@ impl Checker {
             if e.0.contains(&Atom::Spin) {
                 return None;
             }
+            // `@globals` among the regions kept stands for every region
+            // (no procedure is kept in globals' bindings).
+            let everywhere = kept.contains(&Region::Globals);
             e.0.iter().find_map(|a| match a {
                 Atom::Read(r) | Atom::Await(r) if kept.contains(r) => Some(*r),
+                Atom::Read(r) | Atom::Await(r) if everywhere && !r.is_frozen() && !r.is_globals() => Some(*r),
                 _ => None,
             })
         };
@@ -1756,12 +1816,15 @@ impl Checker {
                         k.push(r);
                     }
                 }
-                self.knot_in(rep, kept, seen).or_else(|| {
-                    args.iter().find_map(|d| match d {
-                        D::Type(x) => self.knot_in(*x, &k, seen),
-                        _ => None,
-                    })
-                })
+                self.knot_in(rep, kept, seen).or_else(|| args.iter().flat_map(|d| self.d_types(d)).find_map(|x| self.knot_in(x, &k, seen)))
+            }
+            // A module's abstract type constructor applied: its
+            // representation, unseen, may keep what it was given anywhere.
+            // A `poly`'s variable applied is checked as it is instantiated.
+            Ty::App { fun, args } => {
+                let abstract_head = matches!(self.arena.get(fun), Ty::Var(v) if self.abstract_funs.contains(v));
+                let k = if abstract_head { with(Region::Globals) } else { kept.to_vec() };
+                args.iter().flat_map(|d| self.d_types(d)).find_map(|x| self.knot_in(x, &k, seen))
             }
             _ => None,
         }
@@ -1793,11 +1856,20 @@ impl Checker {
                 Ty::Named { which, args } => {
                     let mut kids = vec![self.generatives[*which as usize].rep];
                     for d in args {
-                        match d {
-                            D::Type(x) => kids.push(*x),
-                            D::Region(x) => given |= *x == r,
-                            D::Effect(e) => given |= e.0.contains(&Atom::Write(r)),
-                            D::Size(_) | D::Conv(_) => {}
+                        kids.extend(self.d_types(d));
+                        given |= self.d_writes(d, r);
+                    }
+                    (vec![], kids)
+                }
+                // A description function applied, unseen: it may write
+                // whatever it was given.
+                Ty::App { args, .. } => {
+                    let mut kids = Vec::new();
+                    for d in args {
+                        kids.extend(self.d_types(d));
+                        if self.d_writes(d, r) {
+                            given = true;
+                            writes_param = true;
                         }
                     }
                     (vec![], kids)
@@ -1816,6 +1888,52 @@ impl Checker {
     }
 
     // ------------------------------------------------------------- subtyping
+    /// Whether descriptions `x` and `y` are the same under `env`: types
+    /// each a subtype of the other.
+    fn d_same(&mut self, x: &D, y: &D, env: &BinderEnv, st: &mut SubState) -> bool {
+        match (x, y) {
+            (D::Type(x), D::Type(y)) => self.sub(*x, *y, env, st) && self.sub(*y, *x, &env.flip(), st),
+            (D::Region(r), D::Region(s)) => env.region(&env.a, *r) == env.region(&env.b, *s),
+            (D::Effect(d), D::Effect(e)) => env.effect(&env.a, d, &self.arena.effect_apps) == env.effect(&env.b, e, &self.arena.effect_apps),
+            (D::Size(m), D::Size(n)) => self.size_eq(m, n),
+            (D::Conv(Conv::Var(x)), D::Conv(Conv::Var(y))) => env.var(&env.a, *x) == env.var(&env.b, *y),
+            (D::Conv(c), D::Conv(d)) => c == d,
+            (D::Fun(f), D::Fun(g)) => self.fun_same(*f, *g, env, st),
+            _ => false,
+        }
+    }
+
+    /// Whether description functions `f` and `g` are the same under `env`:
+    /// the same variable, or `dlambda`s of the same kinds whose bodies are
+    /// the same, their parameters named alike. They are reduced and
+    /// eta-contracted as they are made, so nothing else is.
+    fn fun_same(&mut self, f: TyId, g: TyId, env: &BinderEnv, st: &mut SubState) -> bool {
+        let (f, g) = (self.arena.resolve(f), self.arena.resolve(g));
+        if f == g && env.is_empty() {
+            return true;
+        }
+        match (self.arena.get(f).clone(), self.arena.get(g).clone()) {
+            (Ty::Var(x), Ty::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
+            // A dependent procedure's parameter's, or a `select` as written.
+            (Ty::ParamSel(k, x), Ty::ParamSel(j, y)) => k == j && x == y,
+            (Ty::Select(m, x), Ty::Select(n, y)) => m == n && x == y,
+            (Ty::Lam { params: pa, body: ba }, Ty::Lam { params: pb, body: bb }) => {
+                if pa.len() != pb.len() || pa.iter().zip(&pb).any(|((_, k), (_, l))| k != l) {
+                    return false;
+                }
+                let mut inner = env.clone();
+                for (i, ((va, _), (vb, _))) in pa.iter().zip(&pb).enumerate() {
+                    let n = st.labels.len() as u32;
+                    let l = *st.labels.entry((f, g, i)).or_insert(DVar(u32::MAX - n));
+                    inner.a.insert(*va, l);
+                    inner.b.insert(*vb, l);
+                }
+                self.d_same(&ba, &bb, &inner, st)
+            }
+            _ => false,
+        }
+    }
+
     /// `a ≤ b`. Recursive types are compared coinductively: a pair already
     /// being compared is assumed to hold, which is what makes comparing two
     /// cycles terminate — FX-87's `trail`, Amadio and Cardelli's assumption
@@ -1867,8 +1985,9 @@ impl Checker {
         let (ta, tb) = (self.arena.get(a).clone(), self.arena.get(b).clone());
         let ra = |r: Region| env.region(&env.a, r);
         let rb = |r: Region| env.region(&env.b, r);
-        let ea = |e: &Effect| env.effect(&env.a, e);
-        let eb = |e: &Effect| env.effect(&env.b, e);
+        let apps = self.arena.effect_apps.clone();
+        let ea = |e: &Effect| env.effect(&env.a, e, &apps);
+        let eb = |e: &Effect| env.effect(&env.b, e, &apps);
         let flip = env.flip();
         // Inside a generative type's own conversions, its name is its
         // representation; everywhere else it is only itself.
@@ -2020,8 +2139,14 @@ impl Checker {
                         Variance::Contra => eb(e).within(&ea(d)),
                         Variance::Inv => ea(d) == eb(e),
                     },
+                    (D::Fun(f), D::Fun(g)) => self.fun_same(*f, *g, env, st),
                     _ => false,
                 })
+            }
+            // A description function applied: the same function, given
+            // the same descriptions (FX-91's congruence).
+            (Ty::App { fun: f, args: xa }, Ty::App { fun: g, args: xb }) => {
+                xa.len() == xb.len() && self.fun_same(f, g, env, st) && xa.iter().zip(&xb).all(|(x, y)| self.d_same(x, y, env, st))
             }
             // Modules: their values the same, in order, since a module is
             // a product of them; their types fewer, an abstract one met by
@@ -2030,6 +2155,8 @@ impl Checker {
                 self.module_sub((a, b), (&aa, &da, &va), (&ab, &db, &vb), env, st)
             }
             (Ty::ParamSel(k, x), Ty::ParamSel(j, y)) => k == j && x == y,
+            // Two description functions (a module's transparent ones).
+            (Ty::Lam { .. }, Ty::Lam { .. }) => self.fun_same(a, b, env, st),
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
                 if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
                     return false;
@@ -2073,6 +2200,7 @@ impl Checker {
         let mut inner = env.clone();
         for (i, (n, y)) in ab.iter().enumerate() {
             match aa.iter().find(|(m, _)| m == n) {
+                Some((_, x)) if self.arena.dvar_kind_known(*x) != self.arena.dvar_kind_known(*y) => return false,
                 Some((_, x)) => {
                     let k = st.labels.len() as u32;
                     let l = *st.labels.entry((a, b, i)).or_insert(DVar(u32::MAX - k));
@@ -2088,14 +2216,22 @@ impl Checker {
             None => {
                 // `b`'s abstract types that `a` defines: those definitions,
                 // `a`'s own abstract types in them named as paired.
-                let to_label: HashMap<DVar, D> = inner.a.iter().map(|(x, l)| (*x, D::Type(self.arena.ty(Ty::Var(*l))))).collect();
+                let to_label: HashMap<DVar, D> = inner
+                    .a
+                    .iter()
+                    .map(|(x, l)| {
+                        let t = self.arena.ty(Ty::Var(*l));
+                        (*x, if matches!(self.arena.dvar_kind_known(*x), Some(Kind::Arrow(_))) { D::Fun(t) } else { D::Type(t) })
+                    })
+                    .collect();
                 let mut by: HashMap<DVar, D> = HashMap::new();
                 for (n, y) in ab {
                     if !aa.iter().any(|(m, _)| m == n)
                         && let Some((_, d)) = da.iter().find(|(m, _)| m == n)
                     {
                         let d = self.subst(*d, &to_label);
-                        by.insert(*y, D::Type(d));
+                        let d = if matches!(self.arena.dvar_kind_known(*y), Some(Kind::Arrow(_))) { D::Fun(d) } else { D::Type(d) };
+                        by.insert(*y, d);
                     }
                 }
                 let parts: ModuleParts = (
@@ -2119,6 +2255,25 @@ impl Checker {
         self.subst_memo(t, map, &mut HashMap::new())
     }
 
+    /// A description substituted into, sharing `memo` with the type it is
+    /// part of.
+    pub(crate) fn subst_d_memo(&mut self, d: &D, map: &HashMap<DVar, D>, memo: &mut HashMap<TyId, TyId>) -> D {
+        match d {
+            D::Type(t) => D::Type(self.subst_memo(*t, map, memo)),
+            D::Fun(f) => D::Fun(self.subst_memo(*f, map, memo)),
+            D::Region(r) => D::Region(subst_region(*r, map)),
+            D::Effect(e) => D::Effect(subst_effect(e, map, &self.arena)),
+            D::Size(z) => D::Size(crate::sizes::subst_size(z, map)),
+            D::Conv(c) => D::Conv(match c {
+                Conv::Var(v) => match map.get(v) {
+                    Some(D::Conv(by)) => *by,
+                    _ => *c,
+                },
+                c => *c,
+            }),
+        }
+    }
+
     fn subst_memo(&mut self, t: TyId, map: &HashMap<DVar, D>, memo: &mut HashMap<TyId, TyId>) -> TyId {
         let t = self.arena.resolve(t);
         if let Some(&n) = memo.get(&t) {
@@ -2131,13 +2286,27 @@ impl Checker {
             Ty::ParamSel(k, n) => return self.param_map.get(&(k, n)).copied().unwrap_or(t),
             Ty::Var(v) => {
                 return match map.get(&v) {
-                    Some(D::Type(x)) => *x,
+                    Some(D::Type(x) | D::Fun(x)) => *x,
                     _ => t,
                 };
             }
             _ => {}
         }
         let slot = self.arena.ty(Ty::Link(None));
+        // A function applied, given what it is substituted by: reduced, if
+        // it is a `dlambda` now.
+        if let Ty::App { fun, args } = &ty {
+            memo.insert(t, slot);
+            let f = self.subst_memo(*fun, map, memo);
+            let args: Vec<D> = args.iter().map(|d| self.subst_d_memo(d, map, memo)).collect();
+            let to = match self.apply_fun(f, args) {
+                D::Type(x) => x,
+                // A function to another kind, in a type: left as it was.
+                _ => t,
+            };
+            self.arena.set_link(slot, to);
+            return slot;
+        }
         memo.insert(t, slot);
         let region = |r: Region| subst_region(r, map);
         let new = match ty {
@@ -2149,7 +2318,7 @@ impl Checker {
                     },
                     c => c,
                 };
-                let effect = subst_effect(&effect, map);
+                let effect = subst_effect(&effect, map, &self.arena);
                 let params = params.iter().map(|p| self.subst_memo(*p, map, memo)).collect();
                 let result = self.subst_memo(result, map, memo);
                 Ty::Subr { conv, effect, params, result }
@@ -2163,13 +2332,13 @@ impl Checker {
             Ty::PromptTag { answer, payload, effect, region: r } => Ty::PromptTag {
                 answer: self.subst_memo(answer, map, memo),
                 payload: self.subst_memo(payload, map, memo),
-                effect: subst_effect(&effect, map),
+                effect: subst_effect(&effect, map, &self.arena),
                 region: region(r),
             },
             Ty::Composable { arg, answer, effect, region: r } => Ty::Composable {
                 arg: self.subst_memo(arg, map, memo),
                 answer: self.subst_memo(answer, map, memo),
-                effect: subst_effect(&effect, map),
+                effect: subst_effect(&effect, map, &self.arena),
                 region: region(r),
             },
             Ty::MarkKey(t, r) => Ty::MarkKey(self.subst_memo(t, map, memo), region(r)),
@@ -2189,25 +2358,8 @@ impl Checker {
                 Ty::NList { elem: self.subst_memo(elem, map, memo), size: crate::sizes::subst_size(&size, map), region: region(r) }
             }
             Ty::Nat(size) => Ty::Nat(crate::sizes::subst_size(&size, map)),
-            Ty::Named { which, args } => Ty::Named {
-                which,
-                args: args
-                    .iter()
-                    .map(|d| match d {
-                        D::Type(t) => D::Type(self.subst_memo(*t, map, memo)),
-                        D::Region(r) => D::Region(region(*r)),
-                        D::Effect(e) => D::Effect(subst_effect(e, map)),
-                        D::Size(z) => D::Size(crate::sizes::subst_size(z, map)),
-                        D::Conv(c) => D::Conv(match c {
-                            Conv::Var(v) => match map.get(v) {
-                                Some(D::Conv(by)) => *by,
-                                _ => *c,
-                            },
-                            c => *c,
-                        }),
-                    })
-                    .collect(),
-            },
+            Ty::Named { which, args } => Ty::Named { which, args: args.iter().map(|d| self.subst_d_memo(d, map, memo)).collect() },
+            Ty::Lam { params, body } => Ty::Lam { params, body: self.subst_d_memo(&body, map, memo) },
             other => other,
         };
         let id = self.arena.ty(new);
@@ -2232,10 +2384,36 @@ pub(crate) fn subst_region(r: Region, map: &HashMap<DVar, D>) -> Region {
     }
 }
 
+/// What an effect function is given, substituted into.
+fn subst_earg(a: &EArg, map: &HashMap<DVar, D>, arena: &crate::ast::Arena) -> EArg {
+    match a {
+        EArg::Region(r) => EArg::Region(subst_region(*r, map)),
+        EArg::Effect(e) => EArg::Effect(subst_effect(e, map, arena)),
+        EArg::Size(z) => EArg::Size(crate::sizes::subst_size(z, map)),
+        EArg::Conv(c) => EArg::Conv(match c {
+            Conv::Var(v) => match map.get(v) {
+                Some(D::Conv(by)) => *by,
+                _ => *c,
+            },
+            c => *c,
+        }),
+    }
+}
+
+/// What an effect function is given, as a description.
+pub(crate) fn earg_d(a: EArg) -> D {
+    match a {
+        EArg::Region(r) => D::Region(r),
+        EArg::Effect(e) => D::Effect(e),
+        EArg::Size(z) => D::Size(z),
+        EArg::Conv(c) => D::Conv(c),
+    }
+}
+
 /// An effect substituted into. A read, allocation or await at data frozen
 /// into the heap is pure (`Checker::frozen`), and so is dropped: a region
 /// variable instantiated at `acyclic` or `const` leaves none behind.
-fn subst_effect(e: &Effect, map: &HashMap<DVar, D>) -> Effect {
+pub(crate) fn subst_effect(e: &Effect, map: &HashMap<DVar, D>, arena: &crate::ast::Arena) -> Effect {
     let mut out = Effect::pure();
     for a in &e.0 {
         let sub_r = |r: Region| subst_region(r, map);
@@ -2256,6 +2434,23 @@ fn subst_effect(e: &Effect, map: &HashMap<DVar, D>) -> Effect {
             Atom::Comefrom(r) => Effect::atom(Atom::Comefrom(sub_r(r))),
             Atom::Await(r) => Effect::atom(Atom::Await(sub_r(r))),
             Atom::Spin => Effect::atom(Atom::Spin),
+            // An effect function applied: given what it is substituted by,
+            // reduced if that is a `dlambda`.
+            Atom::App(n) => {
+                let (head, args) = arena.effect_apps.parts(n);
+                let args: Vec<EArg> = args.iter().map(|x| subst_earg(x, map, arena)).collect();
+                match map.get(&head) {
+                    Some(D::Fun(f)) => match arena.get(*f) {
+                        Ty::Var(w) => Effect::atom(arena.effect_apps.atom(*w, args)),
+                        Ty::Lam { params, body: D::Effect(body) } if params.len() == args.len() => {
+                            let given: HashMap<DVar, D> = params.iter().map(|(v, _)| *v).zip(args.into_iter().map(earg_d)).collect();
+                            subst_effect(body, &given, arena)
+                        }
+                        _ => Effect::atom(*a),
+                    },
+                    _ => Effect::atom(arena.effect_apps.atom(head, args)),
+                }
+            }
         };
         out = out.union(&piece);
     }
@@ -2620,7 +2815,7 @@ impl BinderEnv {
             c => c,
         }
     }
-    fn effect(&self, side: &std::collections::BTreeMap<DVar, DVar>, e: &Effect) -> Effect {
+    fn effect(&self, side: &std::collections::BTreeMap<DVar, DVar>, e: &Effect, apps: &crate::ast::EffectApps) -> Effect {
         if side.is_empty() {
             return e.clone();
         }
@@ -2636,6 +2831,20 @@ impl BinderEnv {
                     Atom::Comefrom(x) => Atom::Comefrom(r(x)),
                     Atom::Await(x) => Atom::Await(r(x)),
                     Atom::Spin => Atom::Spin,
+                    // Its variable, and what it was given, as named here.
+                    Atom::App(n) => {
+                        let (head, args) = apps.parts(n);
+                        let args = args
+                            .into_iter()
+                            .map(|x| match x {
+                                EArg::Region(x) => EArg::Region(r(x)),
+                                EArg::Effect(e) => EArg::Effect(self.effect(side, &e, apps)),
+                                EArg::Conv(Conv::Var(v)) => EArg::Conv(Conv::Var(self.var(side, v))),
+                                x => x,
+                            })
+                            .collect();
+                        apps.atom(self.var(side, head), args)
+                    }
                 })
                 .collect(),
         )

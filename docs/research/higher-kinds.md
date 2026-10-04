@@ -13,6 +13,17 @@ Every FX-26 program shown as "today" is a file under
 `target/release/fixpt check` (both checkers agree) and run with
 `target/release/fixpt eval`; syntax marked `; PROPOSED` exists nowhere.
 
+## Status (2026-10-04): both paths built
+
+Built in both checkers, which agree on every program in
+`crates/fixpt-fx26/tests/programs/higher-kinds/`: Path 1 (arrow kinds in
+the core, §5) and Path 2 (a module's abstract component of an arrow kind,
+§6), together, and past FX-91 in one direction: a description function may
+give an effect (`(=> region effect)`), applied inside effects as an atom
+of its own. Inference is first-order, as §5.3 recommends. The rules that
+keep it sound (§5.4 to §5.7) are in `docs/fx26.md`, "Higher kinds". What
+this note says below about the code is as it was on 2026-10-02.
+
 ## 0. The answer, up front
 
 - **Both paths are buildable; neither is free, and they are not the same

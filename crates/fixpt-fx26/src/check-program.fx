@@ -20,13 +20,6 @@
                 (begin (k-bind-std n t) (k-standard (cdr entries)))))))))
 
 (define-type k-out (listof string acyclic))
-(define k-push-binders (subr kstate (k-binders) unit)
-  (lambda (bs)
-    (if (null? bs)
-        #u
-        (let ((v (extract (car bs) 1)))
-          (begin (k-push-desc (k-dvar-name v) (ds-var v (extract (car bs) 2)))
-                 (k-push-binders (cdr bs)))))))
 
 ;; Put the binders of every `poly` at the top of `t` in scope for reading.
 (define k-bind-signature (subr (maxeff kstate spin) (int) unit)
@@ -357,12 +350,17 @@
   (lambda (form)
     (tagcase form
       (t-define-type (name def a b)
-        (if (syn-symbol? name)
-            (begin (k-define-type (k-name-of name "expected a name") def a b) #u)
+        (cond
+          ;; `(define-type f (dlambda …))`: a name for a description function.
+          ((and (syn-symbol? name) (string=? (k-list-head def) "dlambda"))
+           (k-push-desc (k-name-of name "expected a name") (ds-fun (k-parse-fun def -1))))
+          ((syn-symbol? name)
+            (begin (k-define-type (k-name-of name "expected a name") def a b) #u))
+          (else
             (let ((items (k-items name "a type definition")))
               (if (null? items)
                   (k-sfail "expected a name" name)
-                  (k-define-family (k-name-of (car items) "expected a name") (cdr items) def)))))
+                  (k-define-family (k-name-of (car items) "expected a name") (cdr items) def))))))
       (t-define-effect (name def a b)
         (let* ((n (k-name-of name "expected a name"))
                (e (k-parse-effect def)))
@@ -387,7 +385,7 @@
 (define k-names-reversed (subr (read @globals) (k-names k-names) k-names)
   (lambda (xs acc) (if (null? xs) acc (k-names-reversed (cdr xs) (cons (car xs) acc)))))
 ;; The names simple `define-type`s give, in order, each as often as given.
-(define k-ahead-names-of (subr (maxeff (read @globals) spin) (k-tops k-names) k-names)
+(define k-ahead-names-of (subr (maxeff (read @globals) (read @s) spin) (k-tops k-names) k-names)
   (lambda (forms acc)
     (if (null? forms)
         (k-names-reversed acc nil)
@@ -395,7 +393,9 @@
          (cdr forms)
          (tagcase (car forms)
            (t-define-type (name def a b)
-             (if (syn-symbol? name) (cons (string->symbol (syn-name name)) acc) acc))
+             (if (and (syn-symbol? name) (not (string=? (k-list-head def) "dlambda")))
+                 (cons (string->symbol (syn-name name)) acc)
+                 acc))
            (else y acc))))))
 ;; How many times `n` is among `ns`.
 (define k-name-count (subr (read @globals) (k-names symbol) int)

@@ -30,6 +30,12 @@ pub enum Kind {
     Size,
     /// How a procedure is called (`docs/research/native-conventions.md`).
     Conv,
+    /// `(=> k1 … kn k)`: a description function, from descriptions of the
+    /// kinds `k1 … kn` to one of kind `k` (`docs/research/higher-kinds.md`;
+    /// FX-91's `(->> k1 … kn)`, whose result is always `type`). The number
+    /// is its place in the arena's table of arrow kinds, interned, so that
+    /// two arrow kinds are equal exactly when their numbers are.
+    Arrow(u32),
 }
 
 /// How a procedure is called: a cellular closure, run by an inner
@@ -127,7 +133,67 @@ pub enum Atom {
     Spin,
     /// An effect variable.
     Var(DVar),
+    /// `(e d …)`: a description function to an effect, a variable, applied
+    /// (`crate::kinds`): the `n`th application interned (`Arena::effect_apps`).
+    /// An unknown effect, as a variable is, until the variable is
+    /// substituted.
+    App(u32),
 }
+
+/// What a description function to an effect is given: no types, so that
+/// an effect is substituted into without the checker.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum EArg {
+    Region(Region),
+    Effect(Effect),
+    Size(Size),
+    Conv(Conv),
+}
+
+/// The effect applications made so far, each once, so that equal
+/// applications are one atom: an arena's, shared (`Rc`) so that what
+/// renames binders while comparing can make more.
+#[derive(Clone, Default, Debug)]
+pub struct EffectApps(std::rc::Rc<std::cell::RefCell<Vec<(DVar, Vec<EArg>)>>>);
+
+impl EffectApps {
+    /// The atom for `head` applied to `args`.
+    pub fn atom(&self, head: DVar, args: Vec<EArg>) -> Atom {
+        let mut t = self.0.borrow_mut();
+        let n = match t.iter().position(|(h, a)| *h == head && *a == args) {
+            Some(n) => n,
+            None => {
+                t.push((head, args));
+                t.len() - 1
+            }
+        };
+        Atom::App(n as u32)
+    }
+
+    /// An effect application's variable and what it was given.
+    pub fn parts(&self, n: u32) -> (DVar, Vec<EArg>) {
+        self.0.borrow()[n as usize].clone()
+    }
+
+    /// Whether `hit` holds of a variable an effect application names: its
+    /// own, or one in what it was given.
+    pub fn mentions(&self, n: u32, hit: &dyn Fn(DVar) -> bool) -> bool {
+        let (head, args) = self.parts(n);
+        hit(head)
+            || args.iter().any(|a| match a {
+                EArg::Region(Region::Var(v) | Region::Frozen(Some(v), _)) => hit(*v),
+                EArg::Effect(e) => e.0.iter().any(|x| match *x {
+                    Atom::Var(v) => hit(v),
+                    Atom::App(m) => self.mentions(m, hit),
+                    x => matches!(x.region(), Some(Region::Var(v) | Region::Frozen(Some(v), _)) if hit(v)),
+                }),
+                EArg::Size(Size::Lin { terms, .. }) => terms.iter().any(|(v, _)| hit(*v)),
+                EArg::Conv(Conv::Var(v)) => hit(*v),
+                _ => false,
+            })
+    }
+}
+
 
 impl Atom {
     pub fn region(self) -> Option<Region> {
@@ -135,7 +201,7 @@ impl Atom {
             Atom::Read(r) | Atom::Write(r) | Atom::Alloc(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) => {
                 Some(r)
             }
-            Atom::Var(_) | Atom::Spin => None,
+            Atom::Var(_) | Atom::Spin | Atom::App(_) => None,
         }
     }
 }
@@ -253,6 +319,17 @@ pub enum Ty {
     /// parameter (from 0), a module: a dependent procedure, a functor
     /// (`first-class-modules.md`, M5). A call puts the argument's for it.
     ParamSel(usize, Sym),
+    /// `(dlambda ((x k) …) d)`: a description function, of kind `(=> k …
+    /// k′)` where `d` is of kind `k′`. Not a type: it stands only where a
+    /// description of an arrow kind is wanted, as a [`D::Fun`], and is
+    /// applied by substituting what it is given for its parameters
+    /// (`Checker::apply_fun`). Transparent: equal to whatever it reduces to.
+    Lam { params: Vec<(DVar, Kind)>, body: D },
+    /// `(f d …)`, a description function applied, where `f` cannot be
+    /// reduced: a variable of an arrow kind (a `poly`'s binder, a module's
+    /// abstract type constructor), or a `select` not yet resolved. Equal
+    /// only to an application of the same `f` to equal descriptions.
+    App { fun: TyId, args: Vec<D> },
 }
 
 /// A list's length, as far as it is known: some number (`finite`), or a
@@ -355,6 +432,9 @@ pub enum D {
     Type(TyId),
     Size(Size),
     Conv(Conv),
+    /// A description function: a [`Ty::Lam`], a variable of an arrow kind,
+    /// or a `select` of a module's type constructor.
+    Fun(TyId),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -508,6 +588,13 @@ pub struct Arena {
     /// The region and place variables bound around each one's binder, which
     /// it won't outlive: the order of lifetimes, by nesting.
     dvar_outer: Vec<Vec<DVar>>,
+    /// Each description variable's kind, as `dvar_of` was told it.
+    dvar_kinds: Vec<Kind>,
+    /// The arrow kinds, interned: `Kind::Arrow(n)` is the `n`th, its
+    /// parameters' kinds and its result's.
+    arrows: Vec<(Vec<Kind>, Kind)>,
+    /// The effect applications, interned.
+    pub effect_apps: EffectApps,
 }
 
 impl Arena {
@@ -556,7 +643,39 @@ impl Arena {
         self.dvar_data.push(false);
         self.dvar_bounds.push(None);
         self.dvar_outer.push(Vec::new());
+        self.dvar_kinds.push(Kind::Type);
         DVar(self.dvar_names.len() as u32 - 1)
+    }
+
+    /// The arrow kind `(=> params … result)`, interned.
+    pub fn arrow(&mut self, params: Vec<Kind>, result: Kind) -> Kind {
+        let at = match self.arrows.iter().position(|(p, r)| *p == params && *r == result) {
+            Some(i) => i,
+            None => {
+                self.arrows.push((params, result));
+                self.arrows.len() - 1
+            }
+        };
+        Kind::Arrow(at as u32)
+    }
+
+    /// An arrow kind's parameters' kinds and result's; `None` for another.
+    pub fn arrow_parts(&self, k: Kind) -> Option<(&[Kind], Kind)> {
+        match k {
+            Kind::Arrow(n) => self.arrows.get(n as usize).map(|(p, r)| (&p[..], *r)),
+            _ => None,
+        }
+    }
+
+    /// Description variable `v`'s kind.
+    pub fn dvar_kind(&self, v: DVar) -> Kind {
+        self.dvar_kinds[v.0 as usize]
+    }
+
+    /// The same, or `None` for a variable the arena did not make: a label
+    /// subtyping names a pair of binders by.
+    pub fn dvar_kind_known(&self, v: DVar) -> Option<Kind> {
+        self.dvar_kinds.get(v.0 as usize).copied()
     }
 
     /// A description variable of kind `kind`.
@@ -564,6 +683,7 @@ impl Arena {
         let v = self.dvar(name);
         self.dvar_places[v.0 as usize] = kind == Kind::Place;
         self.dvar_data[v.0 as usize] = kind == Kind::Data;
+        self.dvar_kinds[v.0 as usize] = kind;
         v
     }
 
@@ -630,6 +750,7 @@ impl Arena {
         self.dvar_data.truncate(mark.dvars);
         self.dvar_bounds.truncate(mark.dvars);
         self.dvar_outer.truncate(mark.dvars);
+        self.dvar_kinds.truncate(mark.dvars);
     }
 }
 

@@ -62,13 +62,34 @@ impl Checker {
                 // Its representation seen only through its own conversions,
                 // which stay inside the module.
                 ModItem::Abs { name, var, rep, up, down, up_fn, down_fn } => {
+                    // A type constructor's representation is a `dlambda` of
+                    // its parameters: its conversions are polymorphic in
+                    // them, as FX-91's at a higher kind (`crate::kinds`).
+                    let (binders, rep) = match self.arena.get(rep).clone() {
+                        Ty::Lam { params, body: D::Type(body) } => (params, body),
+                        _ => (Vec::new(), rep),
+                    };
                     let rep = self.resolve_selects(rep, span)?;
-                    let t = self.arena.ty(Ty::Var(var));
+                    let t = if binders.is_empty() {
+                        self.arena.ty(Ty::Var(var))
+                    } else {
+                        let f = self.arena.ty(Ty::Var(var));
+                        let args = binders.iter().map(|(v, k)| self.var_d(*v, *k)).collect();
+                        self.arena.ty(Ty::App { fun: f, args })
+                    };
                     let identity = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![rep], result: rep });
                     self.check(up_fn, identity)?;
                     self.check(down_fn, identity)?;
                     let up_t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![rep], result: t });
                     let down_t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![t], result: rep });
+                    let (up_t, down_t) = if binders.is_empty() {
+                        (up_t, down_t)
+                    } else {
+                        (
+                            self.arena.ty(Ty::Poly { binders: binders.clone(), body: up_t }),
+                            self.arena.ty(Ty::Poly { binders, body: down_t }),
+                        )
+                    };
                     self.env.push((up, up_t));
                     self.env.push((down, down_t));
                     abs.push((name, var));
@@ -146,10 +167,18 @@ impl Checker {
         let mut fresh = Vec::new();
         for (a, v) in &abs {
             let named = self.interner.intern(&format!("{n}..{}", self.interner.name(*a)));
-            let w = self.arena.dvar_of(named, Kind::Type);
+            let kind = self.arena.dvar_kind(*v);
+            let w = self.arena.dvar_of(named, kind);
             self.skolems.push(w);
             self.module_vars.insert(w);
-            map.insert(*v, D::Type(self.arena.ty(Ty::Var(w))));
+            let d = match kind {
+                Kind::Type => D::Type(self.arena.ty(Ty::Var(w))),
+                _ => {
+                    self.abstract_funs.insert(w);
+                    D::Fun(self.arena.ty(Ty::Var(w)))
+                }
+            };
+            map.insert(*v, d);
             fresh.push((*a, w));
         }
         let descs = descs.iter().map(|(d, x)| (*d, self.subst(*x, &map))).collect();
@@ -186,7 +215,44 @@ impl Checker {
         let outer = std::mem::replace(&mut self.select_map, sel);
         let r = self.subst(t, &HashMap::new());
         self.select_map = outer;
+        self.check_apps(r, span)?;
         Ok(r)
+    }
+
+    /// Each description function applied in `t` given what it takes:
+    /// checked where a `select` has just said what the function is.
+    pub(crate) fn check_apps(&mut self, t: TyId, span: Span) -> R<()> {
+        let mut stack = vec![t];
+        let mut seen = HashSet::new();
+        while let Some(t) = stack.pop() {
+            let t = self.arena.resolve(t);
+            if !seen.insert(t) {
+                continue;
+            }
+            if let Ty::App { fun, args } = self.arena.get(t).clone() {
+                let shown = self.show_ty(fun);
+                let parts = self.fun_kind(fun).map(|k| self.arena.arrow_parts(k).map(|(p, r)| (p.to_vec(), r)));
+                match parts {
+                    Some(None) => return Err(FxError::at(span, format!("`{shown}` is not a description function: it is applied"))),
+                    Some(Some((params, result))) => {
+                        if params.len() != args.len() {
+                            return Err(FxError::at(span, format!("`{shown}` takes {} description(s), and has {}", params.len(), args.len())));
+                        }
+                        if !matches!(result, Kind::Type | Kind::Data) {
+                            return Err(FxError::at(span, format!("`{shown}` gives a description of kind {}, not a type", self.show_kind(result))));
+                        }
+                        for (i, (d, k)) in args.iter().zip(params).enumerate() {
+                            if !self.d_fits(d, k) {
+                                return Err(FxError::at(span, format!("`{shown}` takes a {} as description {}", self.show_kind(k), i + 1)));
+                            }
+                        }
+                    }
+                    None => {}
+                }
+            }
+            stack.extend(self.ty_kids(t));
+        }
+        Ok(())
     }
 
     /// The same, where `params` are about to be bound and so may not be
@@ -253,7 +319,10 @@ impl Checker {
             Ty::Composable { arg, answer, .. } => vec![*arg, *answer],
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, x)| *x).collect(),
             Ty::Bloblet { fields, .. } => fields.clone(),
-            Ty::Named { args, .. } => args.iter().filter_map(|d| if let D::Type(x) = d { Some(*x) } else { None }).collect(),
+            Ty::Named { args, .. } => args.iter().filter_map(|d| if let D::Type(x) | D::Fun(x) = d { Some(*x) } else { None }).collect(),
+            Ty::App { fun, args } => [*fun].into_iter().chain(args.iter().filter_map(|d| if let D::Type(x) | D::Fun(x) = d { Some(*x) } else { None })).collect(),
+            Ty::Lam { body: D::Type(x) | D::Fun(x), .. } => vec![*x],
+            Ty::Lam { .. } => Vec::new(),
             Ty::NList { elem, .. } => vec![*elem],
             Ty::Module { descs, vals, .. } => descs.iter().chain(vals).map(|(_, x)| *x).collect(),
         }
@@ -347,8 +416,12 @@ impl Checker {
             };
             map.insert((k, x), t);
         }
-        let params = params.iter().map(|p| self.instantiate_params(*p, &map)).collect();
-        Ok((params, self.instantiate_params(result, &map)))
+        let params: Vec<TyId> = params.iter().map(|p| self.instantiate_params(*p, &map)).collect();
+        let result = self.instantiate_params(result, &map);
+        for t in params.iter().chain([&result]) {
+            self.check_apps(*t, span)?;
+        }
+        Ok((params, result))
     }
 
     /// Whether `v` was made for a module's abstract type as it was bound.

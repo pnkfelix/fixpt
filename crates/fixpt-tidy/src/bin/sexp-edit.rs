@@ -36,7 +36,7 @@ fn write(path: &str, text: &str) -> Result<(), String> {
 }
 
 fn run(args: &[String]) -> Result<(), String> {
-    let usage = "usage: sexp-edit list|find|check|replace|insert-before|insert-after|move|delete|rename|edit|order …";
+    let usage = "usage: sexp-edit list|find|check|replace|insert-before|insert-after|move|move-to|delete|rename|edit|order …";
     let (cmd, rest) = args.split_first().ok_or(usage)?;
     let at = |text: &str, i: usize| {
         let (l, c) = se::line_col(text, i);
@@ -88,6 +88,16 @@ fn run(args: &[String]) -> Result<(), String> {
             let out = se::move_before(&text, se::profile_for(file), name, other).map_err(|e| format!("{file}: {e}"))?;
             write(file, &out)?;
             println!("{file}: moved `{name}` before `{other}`");
+            Ok(())
+        }
+        // The whole top-level form holding `name` (its `define-rec` group,
+        // if it is a member), with its comments, into another file.
+        ("move-to", [file, name, other, anchor]) => {
+            let (from, to) = (slurp(file)?, slurp(other)?);
+            let (from2, to2) = se::move_to(&from, &to, se::profile_for(file), name, anchor).map_err(|e| format!("{file} → {other}: {e}"))?;
+            write(file, &from2)?;
+            write(other, &to2)?;
+            println!("{file}: moved `{name}`'s form to {other}, before `{anchor}`'s");
             Ok(())
         }
         ("delete", [file, name]) => {

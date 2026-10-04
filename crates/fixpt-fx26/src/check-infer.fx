@@ -206,6 +206,8 @@
                 (ty-nat (z) (k-size-bad z pol v))
                 (ty-nlist (e z r) (+ (k-size-bad z pol v) (k-size-walk e pol v seen)))
                 (ty-named (g ds) (k-size-walk-descs ds v seen))
+                ;; What a description function is given, it may use either way.
+                (ty-app (f ds) (k-size-walk-descs ds v seen))
                 (ty-subr (e ps r cv)
                   (+ (k-size-walk-list ps (- 0 pol) v seen) (k-size-walk r pol v seen)))
                 (ty-poly (bs body) (k-size-walk body pol v seen))
@@ -386,7 +388,8 @@
 (define k-wrong-shape? (subr (maxeff kmakes spin) (int int) bool)
   (lambda (pattern actual)
     (let ((p (k-ty-rank pattern)) (a (k-ty-rank actual)))
-      (cond ((or (= p 2) (= a 1)) #f)
+      ;; An application may become anything its function gives.
+      (cond ((or (= p 2) (= p 24) (= a 1)) #f)
             ((= p 3) (null? (k-as-subr actual)))
             ((and (= p 6) (= a 18)) #f)
             ;; A `nat` is an `int`.
@@ -443,24 +446,46 @@
       (r-var (v) (k-open? kinds solved v))
       (r-frozen (p f) (and (>= p 0) (k-open? kinds solved p)))
       (else y #f))))
+;; Whether a size's terms mention a variable still to be solved.
+(define k-terms-open? (subr (maxeff kreads spin) (k-terms k-binders k-solved) bool)
+  (lambda (xs kinds solved)
+    (and (not (null? xs))
+         (or (k-open? kinds solved (car (car xs))) (k-terms-open? (cdr xs) kinds solved)))))
+;; Whether a size mentions a variable still to be solved.
+(define k-size-open? (subr (maxeff kreads spin) (k-size k-binders k-solved) bool)
+  (lambda (z kinds solved)
+    (tagcase z (sz-lin (k ts) (k-terms-open? ts kinds solved)) (else w #f))))
 (define k-open-conv? (subr kreads (k-conv k-binders k-solved) bool)
   (lambda (c kinds solved) (tagcase c (cv-var (v) (k-open? kinds solved v)) (else y #f))))
-;; Whether an atom mentions a binder not yet solved.
-(define k-open-atom? (subr kreads (k-atom k-binders k-solved) bool)
-  (lambda (a kinds solved)
-    (tagcase a
-      (a-var (v) (k-open? kinds solved v))
-      (else y (k-open-region? (k-atom-region a) kinds solved)))))
-(define k-open-effect? (subr kreads (k-eff k-binders k-solved) bool)
-  (lambda (e kinds solved)
-    (cond ((null? e) #f)
-          ((k-open-atom? (car e) kinds solved) #t)
-          (else (k-open-effect? (cdr e) kinds solved)))))
+;; Whether an atom, an effect, or what an effect function was given,
+;; mentions a binder not yet solved.
+(define-rec
+  (k-open-atom? (subr (maxeff kreads spin) (k-atom k-binders k-solved) bool)
+    (lambda (a kinds solved)
+      (tagcase a
+        (a-var (v) (k-open? kinds solved v))
+        (a-app (v ds) (or (k-open? kinds solved v) (k-eargs-open? ds kinds solved)))
+        (else y (k-open-region? (k-atom-region a) kinds solved)))))
+  (k-open-effect? (subr (maxeff kreads spin) (k-eff k-binders k-solved) bool)
+    (lambda (e kinds solved)
+      (cond ((null? e) #f)
+            ((k-open-atom? (car e) kinds solved) #t)
+            (else (k-open-effect? (cdr e) kinds solved)))))
+  (k-eargs-open? (subr (maxeff kreads spin) (k-descs k-binders k-solved) bool)
+    (lambda (ds kinds solved)
+      (and (not (null? ds))
+           (or (tagcase (car ds)
+                 (dr (r) (k-open-region? r kinds solved))
+                 (de (e) (k-open-effect? e kinds solved))
+                 (dz (z) (k-size-open? z kinds solved))
+                 (dc (c) (k-open-conv? c kinds solved))
+                 (else y #f))
+               (k-eargs-open? (cdr ds) kinds solved))))))
 (define k-push-ids (subr kmakes (k-ids k-ids) k-ids)
   (lambda (xs onto) (if (null? xs) onto (cons (car xs) (k-push-ids (cdr xs) onto)))))
 (define k-push-parts (subr kmakes (k-parts k-ids) k-ids)
   (lambda (ps onto) (if (null? ps) onto (cons (extract (car ps) 2) (k-push-parts (cdr ps) onto)))))
-(define k-descs-open? (subr kreads (k-descs k-binders k-solved) bool)
+(define k-descs-open? (subr (maxeff kreads spin) (k-descs k-binders k-solved) bool)
   (lambda (ds kinds solved)
     (and (not (null? ds))
          (or (tagcase (car ds)
@@ -469,15 +494,6 @@
                (dc (c) (k-open-conv? c kinds solved))
                (else y #f))
              (k-descs-open? (cdr ds) kinds solved)))))
-;; Whether a size's terms mention a variable still to be solved.
-(define k-terms-open? (subr (maxeff kstate spin) (k-terms k-binders k-solved) bool)
-  (lambda (xs kinds solved)
-    (and (not (null? xs))
-         (or (k-open? kinds solved (car (car xs))) (k-terms-open? (cdr xs) kinds solved)))))
-;; Whether a size mentions a variable still to be solved.
-(define k-size-open? (subr (maxeff kstate spin) (k-size k-binders k-solved) bool)
-  (lambda (z kinds solved)
-    (tagcase z (sz-lin (k ts) (k-terms-open? ts kinds solved)) (else w #f))))
 (define k-any-walk (subr (maxeff kstate spin) (k-ids int k-binders k-solved) bool)
   (lambda (stack seen kinds solved)
     (if (null? stack)
@@ -488,7 +504,12 @@
               (letrec ((reg (subr kreads (k-region) bool)
                             (lambda (r) (k-open-region? r kinds solved)))
                        (go (subr (maxeff kstate spin) (k-ids) bool)
-                           (lambda (s) (k-any-walk s seen kinds solved))))
+                           (lambda (s) (k-any-walk s seen kinds solved)))
+                       ;; Descriptions `ds` given, and then `xs`.
+                       (given (subr (maxeff kstate spin) (k-descs k-ids) bool)
+                              (lambda (ds xs)
+                                (or (k-descs-open? ds kinds solved)
+                                    (go (k-push-ids (k-desc-kids ds) xs))))))
                 (tagcase (k-get t)
                   (ty-var (v) (or (k-open? kinds solved v) (go rest)))
                   (ty-subr (e ps r cv)
@@ -508,8 +529,9 @@
                     (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-comp (x y e r)
                     (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
-                  (ty-named (g ds)
-                    (or (k-descs-open? ds kinds solved) (go (k-push-ids (k-desc-types ds) rest))))
+                  (ty-named (g ds) (given ds rest))
+                  (ty-app (g ds) (given ds (cons g rest)))
+                  (ty-lam (bs body) (given (the k-descs (cons body nil)) rest))
                   (ty-nlist (e z r) (or (reg r) (k-size-open? z kinds solved) (go (cons e rest))))
                   (ty-nat (z) (or (k-size-open? z kinds solved) (go rest)))
                   (ty-module (abs ds vs) (go (k-push-parts ds (k-push-parts vs rest))))
@@ -542,7 +564,9 @@
                   (ty-pair (a b r) (or (w a) (w b)))
                   (ty-tag (a b e r) (or (w a) (w b)))
                   (ty-comp (a b e r) (or (w a) (w b)))
-                  (ty-named (g ds) (ws (k-desc-types ds)))
+                  (ty-named (g ds) (ws (k-desc-kids ds)))
+                  (ty-app (g ds) (or (w g) (ws (k-desc-kids ds))))
+                  (ty-lam (bs body) (ws (k-desc-kids (the k-descs (cons body nil)))))
                   (ty-nlist (e z r) (w e))
                   (ty-module (abs ds vs) (ws (k-push-parts ds (k-push-parts vs nil))))
                   (else y #f))))))))
@@ -618,6 +642,23 @@
 ;;; Matching: solve binders in `pattern` so that `actual` fits it. Never
 ;;; fails; what cannot be matched is left for the subtype check after.
 
+;; A function binder `f` still to be found takes function `g`.
+(define k-unify-fun (subr (maxeff kstate spin) (int int k-binders k-solved) unit)
+  (lambda (f g kinds solved)
+    (tagcase (k-get f)
+      (ty-var (v) (if (k-open? kinds solved v) (k-solve solved v (df g)) #u))
+      (else y #u))))
+;; A function binder `f` still to be found takes the `h`th generative type,
+;; as a function, if it is of `f`'s kind.
+(define k-unify-fun-gen (subr (maxeff kstate spin) (int int k-binders k-solved) unit)
+  (lambda (f h kinds solved)
+    (tagcase (k-get f)
+      (ty-var (v)
+        (if (k-open? kinds solved v)
+            (let ((g (k-generative-fun h (k-dvar-kind v))))
+              (if (>= g 0) (k-solve solved v (df g)) #u))
+            #u))
+      (else y #u))))
 ;; A type binder takes the actual type `a`; one already solved takes it
 ;; only if it is strictly above what it was.
 (define k-unify-var (subr (maxeff kstate spin) (int int k-binders k-solved) unit)
@@ -652,7 +693,9 @@
                (ur (subr kstate (k-region k-region) unit)
                    (lambda (r s) (k-unify-region r s kinds solved)))
                (ue (subr (maxeff kstate spin) (k-eff k-eff) unit)
-                   (lambda (e f) (k-unify-effect e f kinds solved))))
+                   (lambda (e f) (k-unify-effect e f kinds solved)))
+               (uds (subr (maxeff kstate spin) (k-descs k-descs) unit)
+                    (lambda (xs ys) (k-unify-descs xs ys kinds solved trail))))
         (tagcase pt
           (ty-var (v) (k-unify-var v a kinds solved))
           (ty-subr (pe pp pr pc)
@@ -709,6 +752,24 @@
             (tagcase at
               (ty-named (h ys) (if (= g h) (k-unify-descs xs ys kinds solved trail) #u))
               (else z #u)))
+          ;; A function applied, against another applied to as many: the
+          ;; function, if it is a binder still to be found, is the other's;
+          ;; what each was given, matched. Nothing else is solved for: a
+          ;; function binder applied, against any other type, waits for
+          ;; `proj` or `the` (FX-91's choice, and Jones's).
+          (ty-app (f xs)
+            (tagcase at
+              (ty-app (g ys)
+                (if (= (k-length xs) (k-length ys))
+                    (begin (k-unify-fun f g kinds solved) (uds xs ys))
+                    #u))
+              ;; The same against a generative type applied: the function is
+              ;; the generative type's, given what it is given.
+              (ty-named (h ys)
+                (if (= (k-length xs) (k-length ys))
+                    (begin (k-unify-fun-gen f h kinds solved) (uds xs ys))
+                    #u))
+              (else z #u)))
           (else z #u)))))
   (k-unify-descs (subr (maxeff kstate spin) (k-descs k-descs k-binders k-solved k-trail) unit)
     (lambda (xs ys kinds solved trail)
@@ -720,7 +781,8 @@
               (dr (r) (tagcase (car ys) (dr (q) (k-unify-region r q kinds solved)) (else z #u)))
               (de (d) (tagcase (car ys) (de (e) (k-unify-effect d e kinds solved)) (else z #u)))
               (dz (m) #u)
-              (dc (c) (tagcase (car ys) (dc (d) (k-unify-conv c d kinds solved)) (else z #u))))
+              (dc (c) (tagcase (car ys) (dc (d) (k-unify-conv c d kinds solved)) (else z #u)))
+              (df (f) (tagcase (car ys) (df (g) (k-unify-fun f g kinds solved)) (else z #u))))
             (k-unify-descs (cdr xs) (cdr ys) kinds solved trail)))))
   (k-unify-lists (subr (maxeff kstate spin) (k-ids k-ids k-binders k-solved k-trail) unit)
     (lambda (xs ys kinds solved trail)
@@ -820,145 +882,3 @@
   (lambda (body tag r)
     (let ((tv (the k-names (tagcase tag (x-var (s a b) (cons s nil)) (else y nil)))))
       (k-none-reach? (k-free-vars body) tv r))))
-
-;;; ------------------------------------------------------------ synthesis
-
-;; `(letrena r …)`'s or `(letreap r …)`'s body, of type `t` and effect `e`,
-;; closed: its value
-;; may not mention `r`, and no continuation captured in it may outlive it;
-;; what it does to `r` is masked, as nothing outside can name `r`.
-(define k-close-region (subr (maxeff checks spin) (kx string int int k-eff int int) k-te)
-  (lambda (x form r t e a b)
-    (let ((name (k-cat3 form " " (symbol->string (k-dvar-name r)))))
-      (if (k-has-region-in? (k-regions-in t) (r-var r))
-          (k-fail (k-cat4 "the value of `" name "` would outlive its region: its type is "
-                          (k-show-ty t))
-                  a b)
-          (let ((masked (k-mask x e t)))
-            (if (k-has-comefrom? masked)
-                (k-fail (k-cat4 "a continuation captured in `" name
-                                "` could outlive its region: its effect is "
-                                (k-show-effect masked))
-                        a b)
-                (k-te t masked)))))))
-
-;; Whether an effect writes region `r`.
-(define k-eff-writes? (subr (maxeff kreads spin) (k-eff k-region) bool)
-  (lambda (e r)
-    (and (not (null? e))
-         (or (tagcase (car e) (a-write (x) (k-region=? x r)) (else y #f))
-             (k-eff-writes? (cdr e) r)))))
-;; A generative type's representation writing one of its parameters writes
-;; whatever it was given: cautiously, any region given any. Whether some
-;; effect in a walk wrote a parameter, and whether some generative type was
-;; given the region.
-(define k-wrote-param (ref bool @t) (new #f))
-(define k-given (ref bool @t) (new #f))
-(define k-eff-writes-param? (subr kreads (k-eff) bool)
-  (lambda (e)
-    (and (not (null? e))
-         (or (tagcase (car e)
-               (a-write (x) (k-gen-region? x))
-               (a-var (v) (k-gen-param? v))
-               (else y #f))
-             (k-eff-writes-param? (cdr e))))))
-(define k-eff-writes-noting? (subr (maxeff kstate spin) (k-eff k-region) bool)
-  (lambda (e r)
-    (begin
-      (if (k-eff-writes-param? e) (set k-wrote-param #t) #u)
-      (k-eff-writes? e r))))
-(define k-note-given (subr (maxeff kstate spin) (k-descs k-region) unit)
-  (lambda (ds r)
-    (if (null? ds)
-        #u
-        (begin
-          (tagcase (car ds)
-            (dr (x) (if (k-region=? x r) (set k-given #t) #u))
-            (de (e) (if (k-eff-writes? e r) (set k-given #t) #u))
-            (else y #u))
-          (k-note-given (cdr ds) r)))))
-;; Whether a latent effect anywhere in `t` writes `r`: what a `letfreeze`'s
-;; value may not do to its region.
-(define-rec
-  (k-writes-in (subr (maxeff kstate spin) (int k-region int) bool)
-    (lambda (t r seen)
-      (let ((t (k-resolve t)))
-        (if (k-visit? t seen)
-            #f
-            (tagcase (k-get t)
-              (ty-subr (e ps x cv)
-                (or (k-eff-writes-noting? e r) (k-writes-list ps r seen) (k-writes-in x r seen)))
-              (ty-tag (a h e x)
-                (or (k-eff-writes-noting? e r) (k-writes-in a r seen) (k-writes-in h r seen)))
-              (ty-comp (b a e x)
-                (or (k-eff-writes-noting? e r) (k-writes-in a r seen) (k-writes-in b r seen)))
-              (ty-poly (bs body) (k-writes-in body r seen))
-              (ty-ref (a x) (k-writes-in a r seen))
-              (ty-array (a x) (k-writes-in a r seen))
-              (ty-icell (a x) (k-writes-in a r seen))
-              (ty-markkey (a x) (k-writes-in a r seen))
-              (ty-pair (a b x) (or (k-writes-in a r seen) (k-writes-in b r seen)))
-              (ty-bloblet (fs z x) (k-writes-list fs r seen))
-              (ty-product (ps) (k-writes-parts ps r seen))
-              (ty-sum (ps) (k-writes-parts ps r seen))
-              (ty-nlist (e z x) (k-writes-in e r seen))
-              (ty-named (g ds)
-                (begin (k-note-given ds r)
-                       (or (k-writes-in (extract (k-gen-of g) 4) r seen)
-                           (k-writes-list (k-desc-types ds) r seen))))
-              (else x #f))))))
-  (k-writes-list (subr (maxeff kstate spin) (k-ids k-region int) bool)
-    (lambda (ts r seen)
-      (and (not (null? ts)) (or (k-writes-in (car ts) r seen) (k-writes-list (cdr ts) r seen)))))
-  (k-writes-parts (subr (maxeff kstate spin) (k-parts k-region int) bool)
-    (lambda (ps r seen)
-      (and (not (null? ps))
-           (or (k-writes-in (extract (car ps) 2) r seen) (k-writes-parts (cdr ps) r seen))))))
-
-(define k-any-frozen? (subr kreads (k-eff) bool)
-  (lambda (e) (and (not (null? e)) (or (k-frozen-atom? (car e)) (k-any-frozen? (cdr e))))))
-(define k-writes-frozen? (subr kreads (k-eff) bool)
-  (lambda (e)
-    (and (not (null? e))
-         (or (and (k-frozen-atom? (car e)) (= (k-atom-rank (car e)) 1))
-             (k-writes-frozen? (cdr e))))))
-;; Whether an atom reads, allocates or awaits data frozen in the heap,
-;; which never ends: that is pure.
-(define k-pure-on-const? (subr (read @globals) (k-atom) bool)
-  (lambda (a)
-    (and (k-frozen-atom? a)
-         (let ((k (k-atom-rank a))) (or (= k 0) (or (= k 2) (= k 5))))
-         (tagcase (k-atom-region a) (r-frozen (p f) (< p 0)) (else y #f)))))
-;; `e` without its reads, allocations and awaits on `const`, which are pure.
-(define k-drop-frozen (subr kmakes (k-eff) k-eff)
-  (lambda (e)
-    (cond ((null? e) nil)
-          ;; Only data frozen in the heap, which never ends; what is done to
-          ;; data frozen into a place stays, until masking removes it.
-          ((k-pure-on-const? (car e)) (k-drop-frozen (cdr e)))
-          (else (cons (car e) (k-drop-frozen (cdr e)))))))
-;; `x`'s effect `e`, noted.
-(define k-note-effect (subr kstate (kx k-eff) unit)
-  (lambda (x e)
-    (let ((fact (product (1 (k-start x)) (2 (k-end x)) (3 (k-summary e)))))
-      (set k-effect-notes (the k-facts (cons fact (get k-effect-notes)))))))
-;; `e`, the effect of `x`, with what it does to frozen data taken out; or an
-;; error, if it writes it.
-(define k-frozen (subr checks (kx k-eff) k-eff)
-  (lambda (x e)
-    (cond ((not (k-any-frozen? e)) e)
-          ((k-writes-frozen? e)
-           (k-fail "this writes frozen data, whose region is `const`" (k-start x) (k-end x)))
-          (else (k-drop-frozen e)))))
-
-;; A `letfreeze r`'s value, of type `t`, as it leaves: `r` made `const`,
-;; unless something in it could still write `r`.
-(define k-frozen-result (subr (maxeff checks spin) (int k-region bool int int int) int)
-  (lambda (r into written t a b)
-    (if (begin (set k-wrote-param #f) (set k-given #f)
-               (or (k-writes-in t (r-var r) (k-new-epoch)) (and (get k-wrote-param) (get k-given))))
-        (k-fail (k-cat4 "the value of `letfreeze " (symbol->string (k-dvar-name r))
-                        "` could still write its region's data: its type is " (k-show-ty t))
-                a b)
-        (let ((frozen (tagcase into (r-frozen (p f) (r-frozen p (not written))) (else y into))))
-          (k-subst t (the k-map (cons (cons r (dr frozen)) nil)))))))

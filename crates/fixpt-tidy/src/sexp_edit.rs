@@ -175,11 +175,19 @@ pub fn replace(text: &str, profile: SyntaxProfile, name: &str, new: &str) -> Res
     splice(text, profile, from, d.end, &indent(new, column_of(text, from)))
 }
 
+/// Where to put `new` beside the definition `name`: the definition, or,
+/// where `new` holds whole definitions (`(define …`) and `name` is a member
+/// of a `define-rec` group, which cannot hold them, the group.
+fn target(text: &str, profile: SyntaxProfile, name: &str, new: &str) -> Result<Found, String> {
+    let defines = new.lines().map(str::trim_start).find(|l| !l.is_empty() && !l.starts_with(';')).is_some_and(|l| l.starts_with("(define"));
+    if defines { top_form(text, profile, name) } else { find(text, profile, name) }
+}
+
 /// Insert `new`, whole forms (and comments), before the definition `name`
 /// and its comments, at its indentation.
 pub fn insert_before(text: &str, profile: SyntaxProfile, name: &str, new: &str) -> Result<String, String> {
     whole(new, profile, None)?;
-    let d = find(text, profile, name)?;
+    let d = target(text, profile, name, new)?;
     let col = column_of(text, d.lead);
     let by = format!("{}\n{}", indent(new, col), " ".repeat(col));
     splice(text, profile, d.lead, d.lead, &by)
@@ -189,7 +197,7 @@ pub fn insert_before(text: &str, profile: SyntaxProfile, name: &str, new: &str) 
 /// indentation.
 pub fn insert_after(text: &str, profile: SyntaxProfile, name: &str, new: &str) -> Result<String, String> {
     whole(new, profile, None)?;
-    let d = find(text, profile, name)?;
+    let d = target(text, profile, name, new)?;
     let col = column_of(text, d.lead);
     let by = format!("\n{}{}", " ".repeat(col), indent(new, col));
     splice(text, profile, d.end, d.end, &by)
@@ -226,6 +234,44 @@ pub fn move_before(text: &str, profile: SyntaxProfile, name: &str, other: &str) 
     let out = format!("{}{}{}", &without[..line], block, &without[line..]);
     check(&out, profile).map_err(|e| format!("the move would not read: {e}"))?;
     Ok(out)
+}
+
+/// The top-level form holding the definition `name`: the definition
+/// itself, or, for a member of a `define-rec`, the whole group; with the
+/// comment block above it.
+pub fn top_form(text: &str, profile: SyntaxProfile, name: &str) -> Result<Found, String> {
+    let d = find(text, profile, name)?;
+    let (forms, _) = read(text, profile)?;
+    let f = forms
+        .iter()
+        .find(|f| (f.span.start as usize) <= d.start && d.end <= (f.span.end as usize))
+        .ok_or_else(|| format!("`{name}` is in no top-level form"))?;
+    let (start, end) = (f.span.start as usize, f.span.end as usize);
+    Ok(Found { name: d.name, kind: d.kind, start, end, lead: lead_of(text, start) })
+}
+
+/// Move the top-level form holding `name` (its whole `define-rec` group, if
+/// it is a member), with its comments, out of `from` and into `to`, just
+/// before the top-level form holding `anchor`: both texts, as they would
+/// be. Refused unless both read.
+pub fn move_to(from: &str, to: &str, profile: SyntaxProfile, name: &str, anchor: &str) -> Result<(String, String), String> {
+    let d = top_form(from, profile, name)?;
+    let a = top_form(to, profile, anchor)?;
+    let start = from[..d.lead].rfind('\n').map_or(0, |i| i + 1);
+    let end = from[d.end..].find('\n').map_or(from.len(), |i| d.end + i + 1);
+    if !from[start..d.lead].trim().is_empty() || !from[d.end..end].trim().is_empty() {
+        return Err(format!("`{name}`'s form shares a line with other text"));
+    }
+    let mut block = from[start..end].to_string();
+    if !block.ends_with('\n') {
+        block.push('\n');
+    }
+    let without = format!("{}{}", &from[..start], &from[end..]);
+    check(&without, profile).map_err(|e| format!("the source would not read: {e}"))?;
+    let line = to[..a.lead].rfind('\n').map_or(0, |i| i + 1);
+    let with = format!("{}{}{}", &to[..line], block, &to[line..]);
+    check(&with, profile).map_err(|e| format!("the destination would not read: {e}"))?;
+    Ok((without, with))
 }
 
 /// The lists `frag` opens less those it closes (strings, characters and

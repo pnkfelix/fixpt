@@ -437,7 +437,7 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
             0
         } else if eff.0.iter().all(|a| matches!(a, Atom::Read(_))) {
             1
-        } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
+        } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::App(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
             3
         } else {
             2
