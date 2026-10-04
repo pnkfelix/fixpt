@@ -26,7 +26,7 @@ asking about `type -> type`):
 
 | Rust                                                 | FX-26, Path 2                                                              |
 | ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| a trait with `type Pointer<T>;`                      | a `moduleof` with `(abs pointer (=> type type))`                           |
+| a trait with `type Pointer<T>;`                      | a `moduleof` with `(abs pointer (=> (type) type))`                         |
 | an `impl` of the trait                               | a module                                                                   |
 | `fn f<P: PointerFamily>(…)` using `P::Pointer<u8>`   | a dependent procedure on a module parameter, `(select $1 pointer)` at `u8` |
 | `type Item<'a> where Self: 'a;` (a lending iterator) | an abstract component of kind region → type: regions as lifetimes          |
@@ -35,7 +35,7 @@ So KFX26 keeps higher kinds in Path 2's shape only: abstract type
 constructors as module components, applied where declared (the scoped
 rule of `higher-kinds.md`'s open question 2, which is what keeps the
 mapping to GATs direct). It leaves out Path 1's free-standing `(poly ((f
-(=> type type))) …)`, which Rust cannot say. The lending iterator wants
+(=> (type) type))) …)`, which Rust cannot say. The lending iterator wants
 kind region → type, which brings in the question, deferred so far, of
 abstract region components (`higher-kinds.md`, open question 3;
 `first-class-modules.md`, "later").

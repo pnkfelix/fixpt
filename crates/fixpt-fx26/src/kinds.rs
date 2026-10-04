@@ -1,5 +1,5 @@
 //! Higher kinds (`docs/research/higher-kinds.md`): description functions,
-//! of arrow kinds `(=> k1 … kn k)`, made by `dlambda` and applied to
+//! of arrow kinds `(=> (k1 … kn) k)`, made by `dlambda` and applied to
 //! descriptions. FX-91's `(->> k1 … kn)` and `dlambda`, with the result of
 //! any kind, not only a type.
 //!
@@ -45,7 +45,7 @@ pub(crate) const CONSTRUCTORS: &[(&str, &[(&str, Kind)])] = &[
 ];
 
 impl Checker {
-    /// A kind as it is written: `type`, or `(=> type type)`.
+    /// A kind as it is written: `type`, or `(=> (type) type)`.
     pub(crate) fn show_kind(&self, k: Kind) -> String {
         match k {
             Kind::Region => "region".into(),
@@ -58,7 +58,7 @@ impl Checker {
             Kind::Arrow(_) => {
                 let (params, result) = self.arena.arrow_parts(k).expect("an arrow");
                 let ps: Vec<String> = params.iter().map(|p| self.show_kind(*p)).collect();
-                format!("(=> {} {})", ps.join(" "), self.show_kind(result))
+                format!("(=> ({}) {})", ps.join(" "), self.show_kind(result))
             }
         }
     }

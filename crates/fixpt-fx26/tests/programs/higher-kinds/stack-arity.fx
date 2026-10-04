@@ -1,7 +1,7 @@
 ;; ! `list-stack..stack` takes 1 description(s), and has 2
 ;; A module's type constructor, selected, applied as its kind says.
 (define-type stack-sig
-  (moduleof (abs stack (=> type type))
+  (moduleof (abs stack (=> (type) type))
             (val empty (poly ((a type)) (stack a)))
             (val is-empty (poly ((a type)) (subr (read @heap) ((stack a)) bool)))
             (val push (poly ((a type)) (subr (alloc @heap) (a (stack a)) (stack a))))

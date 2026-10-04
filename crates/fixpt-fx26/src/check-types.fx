@@ -345,7 +345,7 @@
     (cond ((null? as) -1)
           ((and (= (cdr (car as)) r) (k-ids=? (car (car as)) ps)) (+ 100 (- n 1)))
           (else (k-arrow-find (cdr as) ps r (- n 1))))))
-;; The arrow kind `(=> ps … r)`, interned.
+;; The arrow kind `(=> (ps …) r)`, interned.
 (define k-arrow (subr (maxeff kstate spin) (k-ids int) int)
   (lambda (ps r)
     (let ((found (k-arrow-find (get k-arrows) ps r (get k-narrows))))

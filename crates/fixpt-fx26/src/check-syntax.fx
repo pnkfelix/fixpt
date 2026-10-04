@@ -33,21 +33,28 @@
   (lambda (k) (or (= k 2) (= k 4) (>= k 100))))
 (define k-any-typed-kind? (subr (read @globals) (k-ids) bool)
   (lambda (ks) (and (not (null? ks)) (or (k-typed-kind? (car ks)) (k-any-typed-kind? (cdr ks))))))
-;; Syntax `xs`, none of them empty, less the last.
-(define k-syns-but-last (subr (read @globals) (k-syns) k-syns)
-  (lambda (xs) (if (null? (cdr xs)) nil (cons (car xs) (k-syns-but-last (cdr xs))))))
-(define k-last-syn (subr (read @globals) (k-syns) syn)
-  (lambda (xs) (if (null? (cdr xs)) (car xs) (k-last-syn (cdr xs)))))
 
 
 ;; What a kind is, what a description function gives, and what one to an
 ;; effect takes, as errors say.
 (define k-kind-usage string
-  "a kind is `region`, `place`, `effect`, `type`, `data`, `size`, `conv` or `(=> kind … kind)`")
+  "a kind is `region`, `place`, `effect`, `type`, `data`, `size`, `conv` or `(=> (kind …) kind)`")
 (define k-fun-result-usage string
   "a description function gives a type, an effect, or another description function")
 (define k-effect-fun-usage string
   "a description function to an effect takes regions, places, effects, sizes and conventions")
+;; `(=> (k1 … kn) k)` as written: its parameters' kinds and its result's, in
+;; a list of one; none if `s` is not of that shape, or takes nothing.
+(define-type k-arrow-syns (listof (pairof k-syns syn @t) acyclic))
+(define k-arrow-syntax (subr (maxeff kreads (read @s) (alloc @t) spin) (syn) k-arrow-syns)
+  (lambda (s)
+    (let ((items (tagcase s (lst (items d a b) items) (else x (the k-syns nil)))))
+      (if (and (= (k-length items) 3) (string=? (k-symbol-head items) "=>"))
+          (tagcase (k-nth items 1)
+            (lst (ps d a b)
+              (if (null? ps) nil (the k-arrow-syns (list (cons ps (k-nth items 2))))))
+            (else x nil))
+          nil))))
 (define-rec
   (k-parse-kind (subr (maxeff checks spin) (syn) int)
     (lambda (s)
@@ -62,15 +69,14 @@
               ((string=? n "conv") 6)
               ((syn-symbol? s) (k-sfail usage s))
               (else (k-parse-arrow-kind s usage))))))
-  ;; `(=> k1 … kn k)`: a description function's kind (`check-kinds.fx`).
+  ;; `(=> (k1 … kn) k)`: a description function's kind (`check-kinds.fx`).
   (k-parse-arrow-kind (subr (maxeff checks spin) (syn string) int)
     (lambda (s usage)
-      (let ((items (tagcase s (lst (items d a b) items) (else x (the k-syns nil)))))
-        (if (or (< (k-length items) 3) (not (string=? (k-symbol-head items) "=>")))
+      (let ((parts (k-arrow-syntax s)))
+        (if (null? parts)
             (k-sfail usage s)
-            (let* ((ks (k-syns-but-last (cdr items)))
-                   (last (k-last-syn (cdr items)))
-                   (params (k-parse-kinds ks))
+            (let* ((last (cdr (car parts)))
+                   (params (k-parse-kinds (car (car parts))))
                    (result (k-parse-kind last)))
               (cond ((or (= result 0) (= result 3) (= result 5) (= result 6))
                      (k-sfail k-fun-result-usage last))

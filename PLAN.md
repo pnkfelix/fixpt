@@ -30,7 +30,7 @@ are in the last section, "Log: the glance's details", and in
   rule at the REPL and in files, in both checkers; the REPL is
   incremental.
 - **Higher kinds** (2026-10-04; `docs/fx26.md`, "Higher kinds";
-  `docs/research/higher-kinds.md`): arrow kinds `(=> k … k)`, `dlambda`,
+  `docs/research/higher-kinds.md`): arrow kinds `(=> (k …) k)`, `dlambda`,
   applications in types and effects, abstract type constructors in
   modules; past FX-91: functions to effects, and over regions, sizes and
   conventions. Both checkers agree on 25 test programs; Okasaki's `STACK`

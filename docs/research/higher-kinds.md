@@ -22,7 +22,10 @@ the core, §5) and Path 2 (a module's abstract component of an arrow kind,
 give an effect (`(=> region effect)`), applied inside effects as an atom
 of its own. Inference is first-order, as §5.3 recommends. The rules that
 keep it sound (§5.4 to §5.7) are in `docs/fx26.md`, "Higher kinds". What
-this note says below about the code is as it was on 2026-10-02.
+this note says below about the code is as it was on 2026-10-02. The syntax
+taken differs from the proposal below: an arrow kind is written `(=> (k1 …
+kn) k)`, its parameters' kinds in a list, as a `lambda`'s are, not
+`(=> k1 … kn k)`.
 
 ## 0. The answer, up front
 

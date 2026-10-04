@@ -157,14 +157,14 @@
           ((= k 6) "Conv")
           (else "Type"))))
 (define-rec
-  ;; A kind as it is written: `type`, or `(=> type type)`.
+  ;; A kind as it is written: `type`, or `(=> (type) type)`.
   (k-kind-text (subr (maxeff kreads (alloc @t) spin) (int) string)
     (lambda (k)
       (let ((a (k-arrow-parts k)))
         (if (null? a)
             (k-kind-name k)
-            (k-cat5 "(=> " (k-join (k-kinds-text (car (car a))) " ") " " (k-kind-text (cdr (car a)))
-                    ")")))))
+            (k-cat5 "(=> (" (k-join (k-kinds-text (car (car a))) " ") ") "
+                    (k-kind-text (cdr (car a))) ")")))))
   (k-kinds-text (subr (maxeff kreads (alloc @t) spin) (k-ids) k-strings)
     (lambda (ks)
       (if (null? ks) nil (cons (k-kind-text (car ks)) (k-kinds-text (cdr ks)))))))

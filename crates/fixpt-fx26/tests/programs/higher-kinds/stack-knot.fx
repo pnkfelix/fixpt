@@ -2,7 +2,7 @@
 ;; A procedure given to an abstract type constructor may be kept anywhere
 ;; its unseen representation keeps it: one that reads must say `spin`.
 (define-type stack-sig
-  (moduleof (abs stack (=> type type))
+  (moduleof (abs stack (=> (type) type))
             (val empty (poly ((a type)) (stack a)))
             (val is-empty (poly ((a type)) (subr (read @heap) ((stack a)) bool)))
             (val push (poly ((a type)) (subr (alloc @heap) (a (stack a)) (stack a))))

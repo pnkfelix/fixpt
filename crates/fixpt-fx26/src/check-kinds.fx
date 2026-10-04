@@ -1,6 +1,6 @@
 ;;; The checker, in FX-26: higher kinds (`docs/research/higher-kinds.md`),
 ;;; the Rust checker's `kinds.rs`. Description functions, of arrow kinds
-;;; `(=> k1 … kn k)`, made by `dlambda` and applied to descriptions: a
+;;; `(=> (k1 … kn) k)`, made by `dlambda` and applied to descriptions: a
 ;;; `dlambda` applied is reduced (beta), one that only applies a function to
 ;;; its parameters is that function (eta), and a variable applied is an
 ;;; application, `ty-app`, equal only to one of the same function to equal

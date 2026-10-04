@@ -5,7 +5,7 @@
 ;; What walking a list and building another may do.
 (define-effect walks (maxeff (read @heap) (alloc @heap) spin))
 (define-type container
-  (moduleof (abs f (=> type type))
+  (moduleof (abs f (=> (type) type))
             (val wrap (poly ((a type)) (subr (alloc @heap) (a) (f a))))
             (val size (poly ((a type)) (subr (maxeff (read @heap) spin) ((f a)) int)))
             (val fmap (poly ((a type) (b type))

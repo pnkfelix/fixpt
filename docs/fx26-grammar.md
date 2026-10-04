@@ -100,7 +100,7 @@ variant    ::= "(" name type* ")"
 
 ```
 kind       ::= "region" | "place" | "effect" | "type" | "data" | "size" | "conv"
-             | "(" "=>" kind+ kind ")"     ; a description function's: what it takes, what it gives
+             | "(" "=>" "(" kind+ ")" kind ")"   ; a description function's: what it takes, what it gives
                { it gives a type, data, an effect, or another function;
                  one that gives an effect takes no types or data }
 
@@ -190,7 +190,7 @@ proposition ::= "(" "<=" type type ")"
 module-component ::= "(" "abs" (name | "(" name+ ")") abs-kind ")"   ; abstract, in scope after
                    | "(" "desc" name (type | dlambda) ")"             ; transparent
 
-abs-kind   ::= "type" | "(" "=>" kind+ "type" ")"   ; an abstract type, or type constructor
+abs-kind   ::= "type" | "(" "=>" "(" kind+ ")" "type" ")"   ; an abstract type, or type constructor
                    | "(" "val" name type ")"
 
 label      ::= name | positive-integer
@@ -200,7 +200,7 @@ label      ::= name | positive-integer
   go through a constructor, not only through names.
 - A type family may mention itself only with the same descriptions.
 - A recursive type may not go through applications alone: `(define-type
-  (fix (f (=> type type))) (f (fix f)))` is refused.
+  (fix (f (=> (type) type))) (f (fix f)))` is refused.
 - A module's `define-generative` with parameters is an abstract type
   constructor: its `up-name` and `down-name` are polymorphic in them.
 - The standard environment defines these generative types, used as

@@ -19,7 +19,7 @@
 
 (define k-moduleof-usage string "`(moduleof (abs t type) … (desc d type) … (val x type) …)`")
 (define k-abs-usage string
-  "an abstract component is a `type`, or a type constructor `(=> kind … type)`, for now")
+  "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")
 ;; The names among `xs`; what is not one is passed over.
 (define k-syn-symbols (subr (maxeff (read @globals) (read @s) (alloc @t)) (k-syns) k-names)
   (lambda (xs)
@@ -58,11 +58,11 @@
               (else (k-try-arrow-kind s))))))
   (k-try-arrow-kind (subr (maxeff kstate (read @s) spin) (syn) int)
     (lambda (s)
-      (let ((items (tagcase s (lst (items d a b) items) (else x (the k-syns nil)))))
-        (if (or (< (k-length items) 3) (not (string=? (k-symbol-head items) "=>")))
+      (let ((parts (k-arrow-syntax s)))
+        (if (null? parts)
             -1
-            (let* ((params (k-try-kinds (k-syns-but-last (cdr items))))
-                   (result (k-try-kind (k-last-syn (cdr items)))))
+            (let* ((params (k-try-kinds (car (car parts))))
+                   (result (k-try-kind (cdr (car parts)))))
               (cond ((or (k-has-id? params -1) (< result 0)) -1)
                     ((or (= result 0) (= result 3) (= result 5) (= result 6)) -1)
                     ((and (= result 1) (k-any-typed-kind? params)) -1)

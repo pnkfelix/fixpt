@@ -100,10 +100,11 @@ impl Checker {
 
     // --------------------------------------------------------------- kinds
     pub(crate) fn parse_kind(&mut self, s: &Syntax) -> R<Kind> {
-        let usage = "a kind is `region`, `place`, `effect`, `type`, `data`, `size`, `conv` or `(=> kind … kind)`";
-        // `(=> k1 … kn k)`: a description function's (`crate::kinds`).
-        if let Some([head, ks @ .., result]) = s.as_proper_list()
+        let usage = "a kind is `region`, `place`, `effect`, `type`, `data`, `size`, `conv` or `(=> (kind …) kind)`";
+        // `(=> (k1 … kn) k)`: a description function's (`crate::kinds`).
+        if let Some([head, ks, result]) = s.as_proper_list()
             && head.as_symbol().is_some_and(|h| self.name(h) == "=>")
+            && let Some(ks) = ks.as_proper_list()
             && !ks.is_empty()
         {
             let params = ks.iter().map(|k| self.parse_kind(k)).collect::<R<Vec<_>>>()?;
@@ -1600,7 +1601,7 @@ impl Checker {
                         Some("type") => Kind::Type,
                         _ => match self.parse_kind(what) {
                             Ok(k) if self.arena.arrow_parts(k).is_some_and(|(_, r)| r == Kind::Type) => k,
-                            _ => return Err(FxError::at(what.span, "an abstract component is a `type`, or a type constructor `(=> kind … type)`, for now")),
+                            _ => return Err(FxError::at(what.span, "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")),
                         },
                     };
                     for n in names {

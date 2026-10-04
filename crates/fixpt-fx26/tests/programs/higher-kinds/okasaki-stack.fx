@@ -1,11 +1,11 @@
 ;; => (3 2 1)
 ;; Okasaki's STACK signature (Purely Functional Data Structures, 2.1), as
-;; written: `stack` an abstract type constructor of kind (=> type type),
+;; written: `stack` an abstract type constructor of kind (=> (type) type),
 ;; one module whose operations are polymorphic in the element type. Its
 ;; encodings without higher kinds, and what they lack, are
 ;; `modules/stack-by-poly.fx` and `modules/stack-by-functor.fx`.
 (define-type stack-sig
-  (moduleof (abs stack (=> type type))
+  (moduleof (abs stack (=> (type) type))
             (val empty (poly ((a type)) (stack a)))
             (val is-empty (poly ((a type)) (subr (read @heap) ((stack a)) bool)))
             (val push (poly ((a type)) (subr (alloc @heap) (a (stack a)) (stack a))))
