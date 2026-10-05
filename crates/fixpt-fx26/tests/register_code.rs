@@ -424,3 +424,18 @@ fn a_procedure_that_only_makes_a_closure_is_a_leaf() {
     let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
     assert_eq!(fx26, rust);
 }
+
+/// A module's member re-exported, `(define inc (with m inc))`, is inlined
+/// where the re-export is called, behind the global's guard, as a global
+/// defined as the lambda is: else each call is a full call (`TODO.md` §38).
+/// Both compilers.
+#[test]
+fn a_reexported_module_member_is_inlined() {
+    let text = include_str!("programs/run/reexport-inlined.fx");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    for (who, code) in [("FX-26", fx26), ("Rust", rust)] {
+        let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
+        assert!(code.contains("global-guard inc"), "{who}:\n{code}");
+    }
+}

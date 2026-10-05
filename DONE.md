@@ -529,3 +529,28 @@ takes 19.5 s (one code collection), the suite 3.5 minutes. Test:
 `fixpt-native/tests/code_gc.rs`,
 `running_placed_code_does_not_collect_at_every_run` (100 major
 collections in 100 runs without the fix; at most one with it).
+
+## 38. A re-export of a module member inlined, as the member (2026-10-05)
+
+The pilot (`TODO.md` §34) re-exported `table.fx`'s procedures as
+`(define table-ref (with tables table-ref))`. Its "no measurable cost" was
+the user's doubt, rightly: a call of such a global compiled to a full call
+(`global` and `invoke`), where a global defined as the lambda is inlined
+behind a guard. A loop calling a one-line procedure, 400 M calls on
+register code: 0.68 s direct, 1.06 s re-exported. Two source-level
+workarounds were tried and were slower, an eta-expanded wrapper (1.41 s)
+and one closing over the module, `(let ((m m)) (lambda …))` (1.40 s):
+neither makes the member's value known where it is called.
+
+Now both compilers note, while a top-level `(define m (module …))` is
+compiled, each member that is a lambda naming no other member (its word,
+parameters, body, and the globals it sees: `module_members`, `modules`;
+`c-module-members`, `c-collecting`, `c-modules`); a global defined as
+`(with m f)` is then inlined where called as `f` would be, if small, not
+calling itself and not staying cellular, behind the same guard, the
+global holding the member's closure (`reexport_inline`,
+`c-reexport-inline!`). The loop: 0.65 s re-exported. A module inside a
+member notes nothing; a module defined again forgets its members. Test
+`tests/register_code.rs`, `a_reexported_module_member_is_inlined`,
+`programs/run/reexport-inlined.fx`, both compilers. What is left is
+`TODO.md` §38.

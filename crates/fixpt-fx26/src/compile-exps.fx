@@ -60,6 +60,32 @@
 
 (define c-prev-word (ref (listof tword @k) @k) (new nil))
 
+;; A top-level `(define m (module …))`'s members that are lambdas naming no
+;; other member, each as a `c-inline`, to be inlined, if small, where a
+;; re-export `(define f (with m f))` is called (`TODO.md` §38), as the Rust
+;; compiler's `module_members`: in `c-module-members` between the
+;; definition and its module, a list of one list; in `c-collecting` while
+;; that module's own items are compiled, a module inside one of them noting
+;; nothing.
+(define c-module-members (ref (listof c-inlinables @k) @k) (new nil))
+(define c-collecting (ref (listof c-inlinables @k) @k) (new nil))
+;; Member `n` noted, its value `x` just compiled where `e` is in scope, if
+;; it is a lambda naming no other member.
+(define c-note-member! (subr (maxeff c-walks (write @k)) (symbol exp cenv) unit)
+  (lambda (n x e)
+    (let ((ms (get c-collecting)) (l (c-lambda-of x)))
+      (if (or (null? ms) (null? l))
+          #u
+          (tagcase (car l)
+            (e-lambda (ps body a b)
+              (if (null? (c-lambda-captured ps body e))
+                  (let* ((word (car (get c-last-word)))
+                         (it (product (1 n) (2 word) (3 ps) (4 body) (5 (c-genv-now)))))
+                    (set c-collecting (the (listof c-inlinables @k)
+                                        (list (the c-inlinables (cons it (car ms)))))))
+                  #u))
+            (else y #u))))))
+
 ;; A lambda's word, made by the stack code of the body it is in: where its
 ;; body starts and ends, its parameters, its own name, the word, and the
 ;; names it captures.
@@ -337,7 +363,13 @@
           (begin (c-int c 36) (c-lit c (wcell-symbol t)) (c-exp v e (+ depth 2) c #f)
                  (c-prim c "%make-frozen" 3) (c-done c tail)))
         (e-tagcase (s arms els a b) (c-tagcase s arms els e depth c tail))
-        (e-module (items a b) (c-module items e depth depth nil c tail))
+        (e-module (items a b)
+          (let ((outer (get c-collecting)))
+            (begin (set c-collecting (get c-module-members))
+                   (set c-module-members nil)
+                   (c-module items e depth depth nil c tail)
+                   (set c-module-members (get c-collecting))
+                   (set c-collecting outer))))
         (e-with (m body a b) (c-with m body a b e depth c tail)))))
   ;; A module (`docs/research/first-class-modules.md`): its items bound in
   ;; slots in order from `depth`, as a `let`'s and a `letrec`'s are, `d` the
@@ -362,6 +394,7 @@
                  (c-module (cdr items) down depth (+ d 2) vals c tail)))
               ((= k 2)
                (begin (c-exp (car xs) e d c #f)
+                      (c-note-member! (car ns) (car xs) e)
                       (c-module (cdr items) (c-extend (car ns) (at-slot d) e) depth (+ d 1)
                                 (cons d vals) c tail)))
               (else

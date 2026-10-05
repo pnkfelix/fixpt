@@ -867,25 +867,20 @@ recursion without `define-rec`; the `handlers` case refused.
 Deferred because: just designed; then the pilot (§34) goes on without
 its `define-rec`s.
 
-## 38. A name re-exported from a module loses the compilers' inlining (found 2026-10-05)
+## 38. Re-exported module members that name other members (found 2026-10-05)
 
-`(define inc (with m inc))`, `m` a global defined by a `module` form and
-`inc` a lambda in it: a call of the global `inc` compiles to `global inc`
-and `invoke`, where `inc` defined directly gets guarded inlining
-(`global-guard inc #<cellular-word inc> else …`, the body behind it).
-Measured, a loop of calls of a one-line procedure: on register code 100 M
-calls 0.28 s against 0.38 s (the loop itself about 1.7× slower); natively
-400 M calls 0.51 s against 0.58 s (about 20%). The self-compile with
-`table.fx` a module (§34's pilot) showed nothing, its table operations
-being too small a share; the checker's files, whose small helpers are
-called everywhere, would show it.
+A re-export of a member that names no other member is inlined now
+(`DONE.md` §38). Left, deliberately (the user's: the re-exports are a
+crutch while the front end moves into modules; fast enough, not every
+cycle):
+- **A member that names another member** is still called, not inlined:
+  its body, inlined outside the module, would name a member that is only
+  a slot of the module's code. To inline it, the compiler would compile
+  such a name as the member's field of the module in its global (two
+  loads), behind a guard on that global; or make a top-level module's
+  members hidden globals.
+- **Native code** does not inline re-exports: the loop of `DONE.md` §38
+  natively, 400 M calls, 0.57 s against 0.51 s direct, unchanged.
 
-To do, in both compilers alike: a global whose definition is `(with m
-f)` (or `(select m f)` where that is a value), `m` a global made by a
-`module` form not redefined since, and `f` a lambda in it, compiles as
-`f` would: inlined behind the same guard on the global, its entry known
-for direct calls; and a use of a module member inside its own module,
-likewise. Then measure again, the loop above, before moving the
-checker's files.
+Measure a hot file moved into a module before doing either.
 
-Deferred because: the pilot went first; this comes before the hot files.

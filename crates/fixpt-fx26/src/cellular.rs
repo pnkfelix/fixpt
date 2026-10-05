@@ -130,6 +130,14 @@ pub struct Compiler<'a> {
     inlining: Vec<Sym>,
     /// The word of the lambda compiled last.
     last_word: Value,
+    /// While a top-level `(define m (module …))` is compiled: its members
+    /// that are lambdas naming no other member, each with its word,
+    /// parameters and body, to be inlined, if small, where a re-export
+    /// `(define f (with m f))` is called (`TODO.md` §38).
+    module_members: Option<Vec<(Sym, Value, Vec<Sym>, ExpId)>>,
+    /// Each top-level module's such members, by its global, with how many
+    /// globals their bodies see.
+    modules: Vec<(Sym, usize, Vec<(Sym, Value, Vec<Sym>, ExpId)>)>,
     /// The global procedures a call in register code may specialize at a
     /// lambda argument (`regcode::r_specialize`).
     specials: Vec<Special>,
@@ -225,6 +233,8 @@ impl<'a> Compiler<'a> {
             genv_limit: None,
             inlining: Vec::new(),
             last_word: Value::FALSE,
+            module_members: None,
+            modules: Vec::new(),
             specials: Vec::new(),
             spec: None,
             word_name: None,
@@ -627,6 +637,9 @@ impl<'a> Compiler<'a> {
             // a `letrec`'s are, then the product of its values
             // (`docs/research/first-class-modules.md`).
             Exp::Module(items) => {
+                // Only the outermost module of a top-level definition notes
+                // its members (`module_members`).
+                let mut members = self.module_members.take();
                 let (mut inner, mut d, mut vals) = (e.clone(), depth, Vec::new());
                 for item in &items {
                     match item {
@@ -640,6 +653,15 @@ impl<'a> Compiler<'a> {
                         }
                         crate::ast::ModItem::Val { name, init, .. } => {
                             self.exp(*init, &inner, d, code, false)?;
+                            // A lambda naming no other member (the checks of
+                            // size are where a re-export is seen, as the FX-26
+                            // compiler's, whose come later in its files).
+                            if let Some(ms) = members.as_mut()
+                                && let Some((params, body, None)) = self.lambda_of(*init)
+                                && self.captured(&params, body, &inner).is_empty()
+                            {
+                                ms.push((*name, self.last_word, params, body));
+                            }
                             inner.push((*name, Loc::Slot(d)));
                             vals.push(d);
                             d += 1;
@@ -658,6 +680,7 @@ impl<'a> Compiler<'a> {
                 self.prim(code, "%make-frozen", 1 + vals.len())?;
                 self.done(code, tail);
                 self.unbind(code, depth, d - depth, tail);
+                self.module_members = members;
             }
             // `with`: the module's values, by position, in slots.
             Exp::With { module, body } => {
@@ -914,6 +937,22 @@ impl<'a> Compiler<'a> {
         match text {
             Some(t) => t[..(span.start as usize).min(t.len())].chars().count() as u32,
             None => span.start,
+        }
+    }
+
+    /// `(define name (with m f))`, `m` a top-level module whose member `f`
+    /// is small and names no other member: `name` inlined where called as
+    /// `f` is, behind the same guard, the global holding `f`'s closure
+    /// (`TODO.md` §38). Members that name others are called.
+    fn reexport_inline(&mut self, name: Sym, exp: ExpId) {
+        let Exp::With { module, body } = *self.c.arena.exp_at(exp) else { return };
+        let Exp::Var(f) = *self.c.arena.exp_at(body) else { return };
+        let Some((_, genv_len, ms)) = self.modules.iter().find(|(m, _, _)| *m == module) else { return };
+        let Some((_, word, params, body)) = ms.iter().find(|(n, _, _, _)| *n == f) else { return };
+        let (word, params, body, genv_len) = (*word, params.clone(), *body, *genv_len);
+        let stays = self.c.interner.get("stay-cellular").is_some_and(|s| self.mentions(body, s));
+        if !stays && self.inline_room(body, INLINE_LIMIT) >= 0 && !self.mentions(body, f) {
+            self.inlines.push(Inline { name, word, params, body, genv_len });
         }
     }
 
@@ -1694,9 +1733,23 @@ impl<'a> Compiler<'a> {
                     // whatever the name is defined as when the call is made
                     // (`docs/fx26.md`, "Redefinition"). A procedure that must
                     // call itself binds itself locally, with `letrec`.
+                    // A module defined again no longer says what its
+                    // re-exports are.
+                    self.modules.retain(|(m, _, _)| m != name);
                     let g = if !recursive {
+                        let is_module = matches!(self.c.arena.exp_at(*exp), Exp::Module(_));
+                        if is_module {
+                            self.module_members = Some(Vec::new());
+                        }
+                        let genv_len = self.genv.len();
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
-                        self.global_for(*name, *assigns)
+                        if let (true, Some(ms)) = (is_module, self.module_members.take()) {
+                            self.modules.push((*name, genv_len, ms));
+                        }
+                        let g = self.global_for(*name, *assigns);
+                        // After its global, which forgets what the name was.
+                        self.reexport_inline(*name, *exp);
+                        g
                     } else {
                         let g = self.global_for(*name, *assigns);
                         if let Some((_, _, None)) = self.lambda_of(*exp) {

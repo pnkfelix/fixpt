@@ -494,6 +494,59 @@
            (set c-defining (the (listof symbol @k) nil))
            (c-record-inline n ps body))))
 
+;; Each top-level module's members noted (`c-module-members`), by its
+;; global, as the Rust compiler's `modules` (`TODO.md` §38).
+(define-type c-module-list (listof (productof (1 symbol) (2 c-inlinables)) acyclic))
+(define c-modules (ref c-module-list @k) (new nil))
+(define c-modules-without (subr c-builds (c-module-list symbol) c-module-list)
+  (lambda (ms m)
+    (cond ((null? ms) ms)
+          ((symbol=? (extract (car ms) 1) m) (c-modules-without (cdr ms) m))
+          (else (the c-module-list (cons (car ms) (c-modules-without (cdr ms) m)))))))
+;; Whether `x` is a `module` form.
+(define c-module? (subr (read @globals) (exp) bool)
+  (lambda (x) (tagcase x (e-module (items a b) #t) (else y #f))))
+;; After `(define m (module …))` is compiled: its members noted, kept by `m`.
+(define c-keep-module! (subr c-emits (symbol) unit)
+  (lambda (m)
+    (let ((ms (get c-module-members)))
+      (begin (set c-module-members nil)
+             (if (null? ms)
+                 #u
+                 (let ((entry (product (1 m) (2 (car ms)))))
+                   (set c-modules (the c-module-list (cons entry (get c-modules))))))))))
+;; The members `m`, a top-level module, has noted, or none.
+(define c-members-of (subr c-builds (c-module-list symbol) c-inlinables)
+  (lambda (ms m)
+    (cond ((null? ms) nil)
+          ((symbol=? (extract (car ms) 1) m) (extract (car ms) 2))
+          (else (c-members-of (cdr ms) m)))))
+;; `n`, a re-export of member `f` of `ms`: inlined where called as `f` is,
+;; if small, not calling itself and not staying cellular.
+(define c-alias-inline! (subr (maxeff c-emits spin) (symbol symbol c-inlinables) unit)
+  (lambda (n f ms)
+    (cond ((null? ms) #u)
+          ((symbol=? (extract (car ms) 1) f)
+           (let* ((it (car ms)) (body (c-resolve-extracts (extract it 4))))
+             (if (and (not (c-mentions? body 'stay-cellular))
+                      (>= (c-inline-room body c-inline-limit) 0)
+                      (not (c-mentions? body f)))
+                 (let ((alias (product (1 n) (2 (extract it 2)) (3 (extract it 3)) (4 body)
+                                       (5 (extract it 5)))))
+                   (set c-inlines (the c-inlinables (cons alias (get c-inlines)))))
+                 #u)))
+          (else (c-alias-inline! n f (cdr ms))))))
+;; `(define n (with m f))`, `m` a top-level module whose member `f` is a
+;; lambda naming no other member: `n` inlined where called, as the Rust
+;; compiler's `reexport_inline`.
+(define c-reexport-inline! (subr (maxeff c-emits spin) (symbol exp) unit)
+  (lambda (n x)
+    (tagcase x
+      (e-with (m body a b)
+        (tagcase body
+          (e-var (f fa fb) (c-alias-inline! n f (c-members-of (get c-modules) m)))
+          (else y #u)))
+      (else y #u))))
 ;; Each form in turn; the last expression's value is left on the stack.
 (define c-tops (subr (maxeff compiles spin) ((listof top acyclic) code bool) bool)
   (lambda (ts c has-value)
@@ -503,9 +556,18 @@
           (t-define (n ty x a b)
             (begin
               (if has-value (c-op c routine-drop) #u)
+              ;; A module defined again no longer says what its re-exports are.
+              (set c-modules (c-modules-without (get c-modules) n))
               (if (or (null? ty) (null? (c-lambda-of x)))
-                  (begin (c-exp x (the cenv nil) 0 c #f)
-                         (c-op1 c routine-global! (wcell-global (c-push-global n))))
+                  (begin (if (c-module? x)
+                             (set c-module-members (the (listof c-inlinables @k) (list nil)))
+                             #u)
+                         (c-exp x (the cenv nil) 0 c #f)
+                         (if (c-module? x) (c-keep-module! n) #u)
+                         ;; After its global, which forgets what `n` was.
+                         (let ((g (c-push-global n)))
+                           (begin (c-reexport-inline! n x)
+                                  (c-op1 c routine-global! (wcell-global g)))))
                   ;; A lambda: its global first, so that it can call itself,
                   ;; through the global, as any use of it does
                   ;; (`docs/fx26.md`, "Redefinition").
