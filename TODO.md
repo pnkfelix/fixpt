@@ -765,6 +765,26 @@ exported (31 in 9); `define*` in modules (33 in 13); top-level `(set hook
 impl)` forward references between files (16 in 7). A first pilot,
 `table.fx`, needs none of them.
 
+**The pilot, done (2026-10-05): `table.fx` is a module.** Its six type
+abbreviations stay at the top level, where it and other files name them;
+its procedures are `(define tables (module …))`; the seven names other
+files (and `tests/table.rs`) use are re-exported, `(define table-ref
+(with tables table-ref))`, and its helpers stay inside. No other file
+changed. Both checkers, both compilers, the bootstrap fixpoints and the
+register-code cache all hold; the native REPL's 20 reloads of
+`okasaki.fx` print the same. The self-compile, three runs each, the
+module against the file as it was: check 1.214–1.221 s against
+1.213–1.236 s, compile 0.360–0.364 s against 0.369–0.376 s, so no cost
+measurable. What it found:
+- a module's `define` does not see its own name (§37): the three
+  recursive procedures are one-member `define-rec`s until §37 is built;
+- a parameterised type re-exported, `(define-type (table (k type) …)
+  ((select tables table) k v r))`, fails when used, "`r` is not a type",
+  in both checkers: a top-level family whose body applies a selected
+  function to its region parameter. Applying `(select m f)` directly to
+  `@heap` works. Why the types stay at the top level; to fix before a
+  file's types move into its module.
+
 ## 35. Provenance in the names of our code (the user's, 2026-10-05)
 
 `FIXPT_SYMBOLS` names (`docs/performance.md`, "Profiling with `sample`")
