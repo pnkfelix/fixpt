@@ -198,7 +198,8 @@ before everything else, known holes before proofs.
   (the user's choice; a wart, regions as parameters being what KFX26's
   `&mut State` would be), `table.fx` the pilot (done: a module, at no
   measurable cost; types re-exported through a family fail on a region
-  argument, `TODO.md` §34), which found that a
+  argument, `TODO.md` §34; and a re-exported name loses inlining, a call
+  of it 1.2–1.7× slower, §38, before the checker's files), which found that a
   module's definitions do not see themselves (`TODO.md` §37: FX-91's
   mutual visibility, its initialization hazard refused statically by
   reachability; designed with the user, to build); and A3 (S4), checked

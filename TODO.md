@@ -866,3 +866,26 @@ recursion without `define-rec`; the `handlers` case refused.
 
 Deferred because: just designed; then the pilot (§34) goes on without
 its `define-rec`s.
+
+## 38. A name re-exported from a module loses the compilers' inlining (found 2026-10-05)
+
+`(define inc (with m inc))`, `m` a global defined by a `module` form and
+`inc` a lambda in it: a call of the global `inc` compiles to `global inc`
+and `invoke`, where `inc` defined directly gets guarded inlining
+(`global-guard inc #<cellular-word inc> else …`, the body behind it).
+Measured, a loop of calls of a one-line procedure: on register code 100 M
+calls 0.28 s against 0.38 s (the loop itself about 1.7× slower); natively
+400 M calls 0.51 s against 0.58 s (about 20%). The self-compile with
+`table.fx` a module (§34's pilot) showed nothing, its table operations
+being too small a share; the checker's files, whose small helpers are
+called everywhere, would show it.
+
+To do, in both compilers alike: a global whose definition is `(with m
+f)` (or `(select m f)` where that is a value), `m` a global made by a
+`module` form not redefined since, and `f` a lambda in it, compiles as
+`f` would: inlined behind the same guard on the global, its entry known
+for direct calls; and a use of a module member inside its own module,
+likewise. Then measure again, the loop above, before moving the
+checker's files.
+
+Deferred because: the pilot went first; this comes before the hot files.
