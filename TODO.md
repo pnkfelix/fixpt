@@ -970,3 +970,35 @@ the run (also `^C` for §25, and a sampling point for a profiler).
 
 Deferred because: the user is not yet sure which debugger they want; the
 first two steps serve both.
+
+## 27. The collector's next spaces: static, large objects, and regions that reclaim everything (the user's, 2026-10-05; PLAN Q16)
+
+What the heap has today (`crates/fixpt-heap/src/heap.rs`): a nursery,
+minor collections promoting into one old semispace through a card-marking
+write barrier; major collections a Cheney copy of everything live; the
+regions' arenas and reaps; and the non-moving code area. What it lacks:
+
+- **A static area.** What lives forever (a loaded image: the standard
+  library, the FX-26 front end the REPL loads) is in the old space, copied
+  by every major collection. The user's idea: a static area, never
+  collected, with a remembered set of its own for what it points into the
+  collected generations. Larceny has a static area
+  (`~/Dev/LangPlay/accomplice`, `src/Rts/Sys/static-heap.c`): to read
+  before designing ours.
+- **A large-object space.** Every object is bump-allocated and copied,
+  however big. Past a size, an object would get blocks of its own (whole
+  pages), never moved: swept when the heap owns it.
+- **Regions that reclaim everything they allocated.** The user's
+  semantics for `letrena` and `letreap`: leaving the scope reclaims at
+  once every object still allocated in it. Today
+  (`heap/regions.rs`, its module comment) an object bigger than a chunk
+  (64 KiB), or one allocated once the region's area is full, goes to the
+  heap instead, to be reclaimed only when a collection finds it dead. With
+  a large-object space, a large object allocated in a region is owned by
+  the region and freed with its chunks when the scope ends (a reap's
+  address range kept back, as its chunks are, until a collection finds no
+  reference into it; its pages given back at once). The area being full
+  (2^31 words reserved) is then an out-of-memory error, not a fallback.
+
+Deferred because: a design to agree with the user first; each changes the
+collector's core.

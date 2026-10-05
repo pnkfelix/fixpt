@@ -191,6 +191,12 @@ before everything else, known holes before proofs.
   sent forms' errors, `flymake` over `fixpt check -`, `eldoc` for
   globals' types; ERT tests in `editors/emacs/run-tests.sh`). Next:
   `fixpt lsp` for `eglot`.
+- G. **The collector's next spaces** (the user's, 2026-10-05): queue Q16.
+  A static area for what lives forever (no more re-copying the front end
+  at each major collection); a large-object space; and `letrena`/`letreap`
+  reclaiming at scope exit everything they allocated, large objects too
+  (today an object past a 64 KiB chunk goes to the heap). Design first,
+  with the user.
 - D. **Debugging compiled code** (the user's, 2026-10-05): queue Q15,
   `docs/research/debugging.md`: names for `lldb` first, then spans through
   the compilers, then a choice between `lldb` and a debugger of our own.
@@ -208,7 +214,8 @@ workarounds retired);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction; Q13 what `okasaki.fx` found (2026-10-05, below Q11); Q14
-Emacs and Q15 debugging (2026-10-05, below Q13); Q12
+Emacs, Q15 debugging and Q16 the collector's spaces (2026-10-05, below
+Q13); Q12
 first-class modules, beside globals
 (`docs/research/first-class-modules.md`: M1 done 2026-10-01, the Rust
 checker and lowering; M2 done 2026-10-01, the FX-26 parser and checker,
@@ -2439,6 +2446,15 @@ interface, Mach-O objects with symbols, the code registry always on.
 debugger and for run-time errors). 3. The user's choice: `lldb` lines and
 formatters for tagged values, or a debugger of our own in the REPL over
 every machine, starting with a fuel trap that calls out and resumes.
+
+**Q16. The collector's next spaces** (the user's, 2026-10-05; `TODO.md`
+§27). A static area, never collected, with its own remembered set, for
+what lives forever (Larceny has one, to read first); a large-object space of
+non-moving blocks; and regions whose scope's end reclaims every object
+allocated in it, the large ones included: an object too big for a chunk
+owned by its region in the large-object space, not sent to the heap as
+`heap/regions.rs` does today. One design, to agree with the user before
+building.
 
 ## Log: the glance's details (moved here 2026-09-28)
 
