@@ -505,3 +505,23 @@ region fresh at each load (`@r.2`), so that it makes a new global (19),
 which nothing uses. Test:
 `programs/redefine/private-again.fx`, `tests/redefine.rs`
 `private_regions_declared_again_are_the_same`, lowered and compiled.
+
+## 31. The bootstrap test's six minutes (2026-10-05; PLAN B2)
+
+`fixpoint_with_words_compiled_by_fx26` (`crates/fixpt-fx26/tests/bootstrap.rs`)
+took about 347 s, most of a 9-minute suite. Sampled (macOS `sample`), the
+time was all collection: `Heap::collect`, `copy_object` and `memmove`,
+called from `collect_for_code` under `run_word_as_is`, a full major
+collection at every `%run-word`, 5,428 of them. The cause, from the code
+collection of the same day (`4e11a7b`): `collect_for_code` collected the
+heap when the code was due to be collected, but only compiling
+(`compile_reachable_as`) collected the code and reset the trigger. The
+test places its code from elsewhere (`install`, what FX-26's `native.fx`
+assembles) and runs words as they are, compiling nothing; once 8 MB was
+placed, the code stayed due, and every run collected the heap.
+
+Now `collect_for_code` collects the code right after the heap. The test
+takes 19.5 s (one code collection), the suite 3.5 minutes. Test:
+`fixpt-native/tests/code_gc.rs`,
+`running_placed_code_does_not_collect_at_every_run` (100 major
+collections in 100 runs without the fix; at most one with it).

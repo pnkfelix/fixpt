@@ -1983,7 +1983,7 @@ pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value],
             return out?.last().copied().ok_or_else(|| "the word left nothing".to_string());
         };
         let m = m.get_or_insert_with(NativeMachine::new);
-        let (word, args) = collect_for_code(m, rt, word, args);
+        let (word, args) = collect_for_code(m, rt, word, args)?;
         if compile {
             m.compile_reachable(&mut rt.heap, word)?;
         }
@@ -1994,17 +1994,21 @@ pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value],
     })
 }
 
-/// Before compiling more into `m`: if its code is due to be collected,
-/// first the heap, so that the words that died are known to be dead
-/// (`word` and `args` rooted, and moved on); the code then, as compiling
-/// begins. A heap whose collection is held off is left alone.
-fn collect_for_code(m: &NativeMachine, rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> (Value, Vec<Value>) {
+/// Before running in `m`: if its code is due to be collected, first the
+/// heap, so that the words that died are known to be dead (`word` and
+/// `args` rooted, and moved on), then the code, here and not only as
+/// compiling begins: a run that compiles nothing, of code placed from
+/// elsewhere (`install`), would otherwise find it due at every run, and
+/// collect the heap every time. Between runs of `m`, so no return address
+/// points into its code. A heap whose collection is held off is left alone.
+fn collect_for_code(m: &mut NativeMachine, rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<(Value, Vec<Value>), String> {
     let mut word = [word];
     let mut args = args.to_vec();
     if m.code_collection_due() && !rt.heap.collection_inhibited() {
         rt.heap.collect(&mut [&mut word, &mut args]);
+        m.collect_code(&mut rt.heap)?;
     }
-    (word[0], args)
+    Ok((word[0], args))
 }
 
 /// [`run_word`], compiling what it runs, and running as register code
@@ -2016,7 +2020,7 @@ pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[
             return out?.last().copied().ok_or_else(|| "the word left nothing".to_string());
         };
         let m = m.get_or_insert_with(NativeMachine::new);
-        let (word, args) = collect_for_code(m, rt, word, args);
+        let (word, args) = collect_for_code(m, rt, word, args)?;
         m.compile_reachable_as(&mut rt.heap, word, true)?;
         let fuel = rt.word_fuel;
         let out = m.run_in_runtime(rt, word, &args, fuel).map_err(|t| format!("{t:?}"));

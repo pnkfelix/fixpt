@@ -177,10 +177,10 @@ before everything else, known holes before proofs.
   out of range (±1 MB). The cells' assembler gives each cell a jump of its
   own for this; register code needs the same, or stubs flushed every so
   often with a branch around them, and so does a `branchf` to a far cell.
-- B2. **The bootstrap test takes six minutes** (high priority, the
-  user's; `TODO.md` §31): `fixpoint_with_words_compiled_by_fx26` is about
-  347 s of a 9-minute suite, which took 3.5 minutes earlier on
-  2026-10-05. Re-measure across the day's collector commits first.
+- B2. Done (2026-10-05; `DONE.md` §31): **the bootstrap test took six
+  minutes**, a major collection at every run of placed code, since the
+  code collection's trigger was reset only by compiling. 347 → 19.5 s;
+  the suite 9 → 3.5 minutes.
 - O. **What a day of writing `okasaki.fx` found** (the user's,
   2026-10-05): queue Q13, eighteen items. First O1 (a typo in a type
   read silently as a named parameter), O3 (`list-length` missing from
@@ -1558,8 +1558,10 @@ at the top of `fixpt-native/src/cellular.rs`), so collecting copies each
 word whose weak reference (`Heap::weak_add`, kept up by every collection)
 says it is alive into a fresh space, rewrites its slot's table entry and
 its resume table, and lets the dead words' slots go; when 8 MB, and more
-than was live, has been installed since, the heap is collected first. The
-space is 256 MiB reserved. `crates/fixpt-native/tests/code_gc.rs` passes,
+than was live, has been installed since, the heap is collected first,
+then the code, before the next run (until 2026-10-05's fix, `DONE.md`
+§31, only before compiling, so a run of placed code collected the heap at
+every run). The space is 256 MiB reserved. `crates/fixpt-native/tests/code_gc.rs` passes,
 unignored. `FIXPT_CODE_TRACE=1` reports each collection.
 
 Seen in use (2026-10-05, Q13's O2): a REPL with `--fx26-run cellular

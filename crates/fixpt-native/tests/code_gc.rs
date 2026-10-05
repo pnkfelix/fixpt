@@ -38,3 +38,42 @@ fn generated_code_that_is_dropped_is_reclaimed() {
         }
     }
 }
+
+/// Code placed from elsewhere (`install`, as the compiler written in FX-26
+/// places what it assembles), then words run as they are, compiling
+/// nothing: once the code is due to be collected, the first run collects
+/// the heap and the code, and the runs after it neither. It was the heap
+/// alone, at every run, the code staying due: a major collection per run,
+/// which made the bootstrap test take six minutes (TODO §31).
+#[test]
+fn running_placed_code_does_not_collect_at_every_run() {
+    let mut rt = Runtime::new();
+    // More than the code collection's threshold (8 MB), placed.
+    let mut placed = 0;
+    while placed < 9 << 20 {
+        let w = fresh_word(&mut rt, 0, 2000);
+        let (code, _) = fixpt_native::cellular::assemble_word(&rt.heap, w, [0, 0]).expect("assembles");
+        fixpt_native::cellular::with_machine(|m| {
+            let (at, far) = m.reserve(code.len()).expect("room");
+            let (code, starts) = fixpt_native::cellular::assemble_word(&rt.heap, w, far).expect("assembles");
+            m.install(&mut rt.heap, w, at, &code, &starts).expect("installs");
+        });
+        placed += 4 * code.len();
+    }
+    assert!(fixpt_native::cellular::with_machine(|m| m.code_collection_due()));
+    let w = fresh_word(&mut rt, 7, 1);
+    let (code, _) = fixpt_native::cellular::assemble_word(&rt.heap, w, [0, 0]).expect("assembles");
+    fixpt_native::cellular::with_machine(|m| {
+        let (at, far) = m.reserve(code.len()).expect("room");
+        let (code, starts) = fixpt_native::cellular::assemble_word(&rt.heap, w, far).expect("assembles");
+        m.install(&mut rt.heap, w, at, &code, &starts).expect("installs");
+    });
+    let at = rt.heap.push_root(w);
+    let before = rt.heap.gc_count;
+    for _ in 0..100 {
+        let w = rt.heap.root_at(at);
+        assert_eq!(fixpt_native::cellular::run_word_as_is(&mut rt, w, &[]), Ok(Value::fixnum(7)));
+    }
+    assert!(rt.heap.gc_count - before <= 1, "{} major collections in 100 runs", rt.heap.gc_count - before);
+    assert!(!fixpt_native::cellular::with_machine(|m| m.code_collection_due()));
+}

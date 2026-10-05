@@ -674,23 +674,6 @@ holds things, without knowing beforehand what should be dead.
 Deferred because: the debugger (§26) is the first client; item 1 is small
 and could come first.
 
-## 31. The bootstrap test takes six minutes: find why (high priority; the user's, 2026-10-05)
-
-`fixpoint_with_words_compiled_by_fx26` (`crates/fixpt-fx26/tests/bootstrap.rs`)
-takes about 347 s, most of a full `cargo test --release` that now takes
-about 9 minutes, against the 2-minute budget. Earlier on 2026-10-05 the
-whole suite took about 3.5 minutes, so something since then made this test
-slow; it is as slow at `2d332b4`, before re-runs waited. Suspects, in the
-order of the day's commits: collecting the code area by copying, with
-weak references in the heap (`4e11a7b`: `collect_for_code` collects the
-heap before code is compiled, when code has been installed past the
-threshold), and the three retention fixes (`ae4a249`: `c-genv-prune!`,
-the session's handles released). First re-measure at `4e11a7b^`,
-`4e11a7b` and `ae4a249` back to back, and count collections
-(`FIXPT_CODE_TRACE=1`, `FIXPT_GC_REPORT=1`) before guessing.
-
-Deferred because: the user's choice, after O12 and O13; it is next.
-
 ## 32. Remove `,redefine b|r` (the user's, 2026-10-05)
 
 `,redefine b|r` says ahead what the next redefinition that would break
