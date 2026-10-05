@@ -8,6 +8,9 @@
 ;;; that `alloc`, `goto` and `comefrom` on a region the result mentions stay
 ;;; (ranks 2 to 4; `await`, like `read`, does not).
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-mask-module (module
 ;; Whether an atom is on `const`, the frozen region.
 (define k-frozen-atom? (subr (read @globals) (k-atom) bool)
   (lambda (a) (and (k-has-region? a) (tagcase (k-atom-region a) (r-frozen (p f) #t) (else y #f)))))
@@ -172,4 +175,7 @@
                (sought (k-sought e in-result nil)))
           (if (null? sought)
               e
-              (k-keep e (k-unseen x nil sought) in-result))))))
+              (k-keep e (k-unseen x nil sought) in-result))))))))
+
+(define k-frozen-atom? (with check-mask-module k-frozen-atom?))
+(define k-mask (with check-mask-module k-mask))
