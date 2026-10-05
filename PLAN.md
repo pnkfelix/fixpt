@@ -178,11 +178,13 @@ before everything else, known holes before proofs.
   own for this; register code needs the same, or stubs flushed every so
   often with a branch around them, and so does a `branchf` to a far cell.
 - O. **What a day of writing `okasaki.fx` found** (the user's,
-  2026-10-05): queue Q13, fourteen items. First O1 (a typo in a type
+  2026-10-05): queue Q13, eighteen items. First O1 (a typo in a type
   read silently as a named parameter), O3 (`list-length` missing from
   the FX-26 evaluator) and O4 (globals rebound with `let` to avoid their
   read effect); then O5 (`call/ec`) and O8 (a variadic `string-append`).
   O2: the REPL's code space fills after about 31 `,load`s of one file.
+  O15–O18, found documenting the grammar: the checkers disagree in three
+  corners, and a module may define a name twice.
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
@@ -2283,7 +2285,7 @@ a write; or storage that only grows, an `(extend r)` effect that a reader
 of `r` need not fear, since nothing it saw changes. Either would serve
 any memo table that only adds.
 
-**Q13. What `okasaki.fx` found** (the user's day of writing Okasaki's
+**Q13. What `okasaki.fx` found, and the grammar's review** (the user's day of writing Okasaki's
 queues with higher kinds and modules, `~/Dev/Fixpt/okasaki.fx`,
 2026-10-05; each claim checked against the build of that day). By
 urgency: O1, O3, O4; then O5, O8; the rest as they come.
@@ -2351,6 +2353,32 @@ urgency: O1, O3, O4; then O5, O8; the rest as they come.
   characters, `sig-queue` printed in full several times over, "broken
   since redefined" nested in itself. Print named types by name; show
   where two types differ, not both whole; do not nest.
+
+Found while documenting the grammar's modules (2026-10-05, each checked
+with `fixpt check`):
+
+- O15. **The checkers disagree** (they must agree): `(await r)` as a
+  `proj` argument (Rust: "expected a type", as `parse_d` has no `await`
+  case; FX-26 takes it as an effect); a `load-module` inside a loaded
+  file (Rust accepts; FX-26: "cannot read …: it was not read"); a
+  parameterised `define-datatype` in a loaded file (both refuse, at 1:1
+  and 1:18).
+- O16. **A module may define a name twice**: `(module (define x 1)
+  (define x 2))` checks, as `(moduleof (val x int) (val x int))`, which
+  `moduleof` itself refuses ("appears twice"). Also `(abs () type)`, an
+  empty list of names, is accepted.
+- O17. **A dependent `subr` whose type applies a selected function**:
+  `(subr pure ((q M) ((select q f) int)) int)` does not fit a `lambda`
+  `((q M) (l ((select q f) int)))`: the declared type keeps the
+  application, the `lambda`'s has it reduced to `(listof int @heap)`.
+  Likely a bug: reduce both, or compare after resolving.
+- O18. **Lesser messages**: a variance mark on a module's
+  `define-generative` parameter says "only a region or data binder has a
+  bound…" (the module path reads plain binders; say variance is for top
+  level); an effect function applied as a `proj` argument, `(rw @heap)`,
+  is refused as "not a type" (`parse_d` tries a type); `modules.rs`'s
+  `resolve_selects_outside` says a same-`lambda` `select` is "not
+  supported yet", which seems no longer reachable.
 
 Answered along the way, nothing to file: the file's two `QUESTION`
 modules (`list2-queue-aa`, `-aaa`) check now that higher kinds are in,
