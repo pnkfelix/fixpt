@@ -915,3 +915,56 @@ counters; the ways in:
 - A counting build of `direct.rs`, an increment per frame `ldr`/`str`
   and per instruction run, behind a feature; or a small register code
   interpreter in Rust, written only to count (exact, and slow).
+
+## 25. Emacs: a mode, an LSP server, a REPL that lasts (the user's, 2026-10-05; PLAN Q14)
+
+The user edits in Emacs, stock 30.2 with no configuration of its own:
+`eglot`, `flymake`, `eldoc`, `xref`, `completion-at-point` and
+`project.el` built in, `project.el` already knowing this repository. So
+the most for the least Elisp is an LSP server that `eglot` drives, beside
+a small major mode and a comint REPL. In order:
+
+1. **`editors/emacs/fx26-mode.el`, no change to `fixpt`.** Font-lock for
+   kinds, effects and `@regions`; indentation for `define-rec`,
+   `plambda`, `tagcase`, `moduleof`, `dlambda` and kin; `run-fx26`, a
+   comint REPL (send defun, region, file); a stopgap `flymake` backend
+   piping the buffer to `fixpt check -`. Pipes already work: the REPL reads
+   plainly when stdin is not a terminal (`fixpt-cli/src/lineedit.rs`), and a
+   breaking redefinition answers `b` with no one to ask (`ask_redefine`).
+   Loading it needs `~/.emacs.d/init.el`, which does not exist: ask the
+   user before making it.
+2. **`fixpt lsp`.** JSON read and written by hand (`fixpt` has no external
+   crates); diagnostics from both checkers with start and end, in
+   characters (Emacs counts characters; our messages use `…`); hover with
+   the type and effect at point, which needs the checker to keep types by
+   span (it keeps only effects by span, `Checker::effect_summaries`);
+   definitions' spans for `xref`; names in scope for completion. The
+   speculative checker (`fixpt-cli/src/speculate.rs`) already checks
+   half-typed forms and believes only errors about finished subforms: what
+   diagnostics on each keystroke want.
+3. **What a REPL running all day needs.** `,at FILE LINE COL` before a sent
+   form, so its errors point at the buffer and not at `<fx26:N>`; output,
+   results, errors and notes kept apart (tagged, or `--format sexp`, which
+   Elisp's `read` takes as is); `C-c C-c` (SIGINT) stopping a running form,
+   by the resumable fuel trap of §26; and Q13's O2, O12 and O13, since a
+   session that reloads on every save fills the code space in about 31
+   loads today.
+
+Deferred because: step 1 first, to learn what the user actually reaches
+for before building the server.
+
+## 26. Debugging compiled code: names for `lldb`, then decide (the user's, 2026-10-05; PLAN Q15)
+
+`docs/research/debugging.md`. `lldb` already unwinds through native
+frames (verified); every compiled frame is a bare address. In order:
+names through the GDB JIT interface (in-memory Mach-O objects with
+symbols, the registry `fixpt-native/src/faults.rs` keeps under
+`FIXPT_FAULTS` made always on); source spans carried through both
+compilers (for `lldb`'s lines and for our own debugger alike, and for
+run-time errors' locations); then the user decides between `lldb` lines
+and formatters, and a debugger of our own in the REPL, whose first piece
+would be a fuel trap that calls out and resumes rather than abandoning
+the run (also `^C` for §25, and a sampling point for a profiler).
+
+Deferred because: the user is not yet sure which debugger they want; the
+first two steps serve both.

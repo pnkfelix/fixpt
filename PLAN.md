@@ -185,6 +185,12 @@ before everything else, known holes before proofs.
   O2: the REPL's code space fills after about 31 `,load`s of one file.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
+- E. **Emacs** (the user's, 2026-10-05): queue Q14. Next: step 1,
+  `editors/emacs/fx26-mode.el` (major mode, comint REPL, a `flymake`
+  backend over `fixpt check -`); then `fixpt lsp` for `eglot`.
+- D. **Debugging compiled code** (the user's, 2026-10-05): queue Q15,
+  `docs/research/debugging.md`: names for `lldb` first, then spans through
+  the compilers, then a choice between `lldb` and a debugger of our own.
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
@@ -198,7 +204,8 @@ one pure `eq?`, `eqtable`; `equal` and `dynamic` ported, four ports'
 workarounds retired);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
-friction; Q13 what `okasaki.fx` found (2026-10-05, below Q11); Q12
+friction; Q13 what `okasaki.fx` found (2026-10-05, below Q11); Q14
+Emacs and Q15 debugging (2026-10-05, below Q13); Q12
 first-class modules, beside globals
 (`docs/research/first-class-modules.md`: M1 done 2026-10-01, the Rust
 checker and lowering; M2 done 2026-10-01, the FX-26 parser and checker,
@@ -2385,6 +2392,28 @@ modules (`list2-queue-aa`, `-aaa`) check now that higher kinds are in,
 once their typos are fixed; `call-with-l2q` needs `(comefrom @raise)`
 because `cwcc` captures, and `spin` because its escape is passed into
 `lambda`s.
+
+**Q14. Emacs** (the user's, 2026-10-05; `TODO.md` §25). The user edits in
+stock Emacs 30.2 (`eglot`, `flymake`, `eldoc`, `xref`, `project.el` built
+in; no configuration of their own). Three steps:
+1. `editors/emacs/fx26-mode.el`, with no change to `fixpt`: font-lock and
+   indentation; `run-fx26`, a comint REPL; a stopgap `flymake` backend
+   over `fixpt check -`. To load it, `~/.emacs.d/init.el` (ask first).
+2. `fixpt lsp` for `eglot`: diagnostics from both checkers (start and
+   end, in characters), hover with type and effect (the checker to keep
+   types by span), definitions, completion. JSON by hand: no crates.
+3. The REPL for a whole day's use: `,at FILE LINE COL` for sent forms'
+   errors; results, output and notes kept apart (`--format sexp`); SIGINT
+   stopping a form (Q15's resumable fuel trap); and Q13's O2, O12, O13.
+
+**Q15. Debugging compiled code** (the user's, 2026-10-05;
+`docs/research/debugging.md`, `TODO.md` §26). `lldb` already unwinds
+through native frames; frames have no names. 1. Names: the GDB JIT
+interface, Mach-O objects with symbols, the code registry always on.
+2. Spans through both compilers (lines for `lldb`, locations for our own
+debugger and for run-time errors). 3. The user's choice: `lldb` lines and
+formatters for tagged values, or a debugger of our own in the REPL over
+every machine, starting with a fuel trap that calls out and resumes.
 
 ## Log: the glance's details (moved here 2026-09-28)
 
