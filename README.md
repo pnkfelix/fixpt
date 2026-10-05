@@ -182,6 +182,14 @@ what you want when re-reading is not affordable — and it would be a fitting us
 of this engine's own re-entrant `call/cc`. [`TODO.md`](TODO.md) §1 records what
 it would take and when it would start to matter.
 
+### In Emacs
+
+`editors/emacs/fx26-mode.el` edits FX-26 in Emacs: highlighting and
+indentation, both checkers as you type (`flymake`), and `M-x run-fx26`, a
+REPL that a definition, a region or the file is sent to, with errors
+linked to where they were sent from (`fixpt --emacs repl`). Setting it up:
+`editors/emacs/README.md`.
+
 ## What a front end proves, the compiler uses
 
 FX-87 and FX-91 know things Scheme cannot. Their checkers resolve every name to

@@ -22,6 +22,16 @@ fn line_col(text: &str, at: usize) -> (usize, usize) {
     (line, col)
 }
 
+/// `FILE LINE COL`, as `,at` takes it: the file's name may hold spaces;
+/// the line and column are its last two words, each 1 or more.
+fn parse_origin(arg: &str) -> Option<(String, usize, usize)> {
+    let mut words = arg.trim().rsplitn(3, char::is_whitespace);
+    let col = words.next()?.parse::<usize>().ok().filter(|c| *c >= 1)?;
+    let line = words.next()?.parse::<usize>().ok().filter(|l| *l >= 1)?;
+    let file = words.next()?.trim().trim_matches('"');
+    (!file.is_empty()).then(|| (file.to_string(), line, col))
+}
+
 fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
     let (line, col) = line_col(text, e.span.start as usize);
     format!("{name}:{line}:{col}: {}", e.message)
@@ -159,11 +169,15 @@ pub fn repl(backend: Backend) -> i32 {
     let mut show_code = false;
     let mut disassembling;
     let mut n = 0usize;
+    // `--emacs`: where the next form was sent from (`,at`), as a file's name
+    // and its line and column, so that its errors are said there.
+    let emacs = crate::EMACS.get().copied().unwrap_or(false);
+    let mut origin: Option<(String, usize, usize)> = None;
     loop {
         reader.set_completions(known_names(&session.checker));
         let line = {
             let mut oracle = Oracle { session: &mut session, reader: eager.as_mut() };
-            reader.read_with("fx26> ", "     | ", &mut oracle, "")
+            reader.read_with("fx26> ", if emacs { "" } else { "     | " }, &mut oracle, "")
         };
         let text = match line {
             Line::Eof => {
@@ -173,6 +187,15 @@ pub fn repl(backend: Backend) -> i32 {
             Line::Interrupted | Line::Ask { .. } => continue,
             Line::Form(text) => text,
         };
+        // `,at FILE LINE COL` (with `--emacs`): the next form is from FILE,
+        // starting at LINE and COL.
+        if emacs && let Some(arg) = text.trim().strip_prefix(",at ") {
+            match parse_origin(arg) {
+                Some(o) => origin = Some(o),
+                None => println!("; `,at FILE LINE COL`: where the next form was sent from"),
+            }
+            continue;
+        }
         if let Some(ask) = crate::help::parse(&text) {
             crate::help::answer(&mut session.checker, &ask);
             continue;
@@ -323,7 +346,12 @@ pub fn repl(backend: Backend) -> i32 {
             _ => {}
         }
         n += 1;
-        let name = format!("<fx26:{n}>");
+        // Sent from a file (`,at`): read where it stands there, so that
+        // each position in it is the file's.
+        let (name, text) = match origin.take() {
+            Some((file, line, col)) => (file, format!("{}{}{text}", "\n".repeat(line - 1), " ".repeat(col - 1))),
+            None => (format!("<fx26:{n}>"), text),
+        };
         let forms = match session.checker.read_in(FileId(0), &text) {
             Ok(f) => f,
             Err(e) => {

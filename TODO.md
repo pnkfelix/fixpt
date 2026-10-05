@@ -924,7 +924,9 @@ The user edits in Emacs, stock 30.2 with no configuration of its own:
 the most for the least Elisp is an LSP server that `eglot` drives, beside
 a small major mode and a comint REPL. In order:
 
-1. **`editors/emacs/fx26-mode.el`, no change to `fixpt`.** Font-lock for
+1. **`editors/emacs/fx26-mode.el`** — done (2026-10-05), with `--emacs`
+   for what `fixpt` does differently (the user's wish), `,at` for sent
+   forms' errors among it; `editors/emacs/README.md`. As planned: Font-lock for
    kinds, effects and `@regions`; indentation for `define-rec`,
    `plambda`, `tagcase`, `moduleof`, `dlambda` and kin; `run-fx26`, a
    comint REPL (send defun, region, file); a stopgap `flymake` backend

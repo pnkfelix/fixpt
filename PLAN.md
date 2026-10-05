@@ -185,9 +185,12 @@ before everything else, known holes before proofs.
   O2: the REPL's code space fills after about 31 `,load`s of one file.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
-- E. **Emacs** (the user's, 2026-10-05): queue Q14. Next: step 1,
-  `editors/emacs/fx26-mode.el` (major mode, comint REPL, a `flymake`
-  backend over `fixpt check -`); then `fixpt lsp` for `eglot`.
+- E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:
+  `editors/emacs/fx26-mode.el` (highlighting, the repository's
+  indentation, `run-fx26` over `fixpt --emacs repl` with `,at` placing
+  sent forms' errors, `flymake` over `fixpt check -`, `eldoc` for
+  globals' types; ERT tests in `editors/emacs/run-tests.sh`). Next:
+  `fixpt lsp` for `eglot`.
 - D. **Debugging compiled code** (the user's, 2026-10-05): queue Q15,
   `docs/research/debugging.md`: names for `lldb` first, then spans through
   the compilers, then a choice between `lldb` and a debugger of our own.
@@ -2396,9 +2399,14 @@ because `cwcc` captures, and `spin` because its escape is passed into
 **Q14. Emacs** (the user's, 2026-10-05; `TODO.md` §25). The user edits in
 stock Emacs 30.2 (`eglot`, `flymake`, `eldoc`, `xref`, `project.el` built
 in; no configuration of their own). Three steps:
-1. `editors/emacs/fx26-mode.el`, with no change to `fixpt`: font-lock and
-   indentation; `run-fx26`, a comint REPL; a stopgap `flymake` backend
-   over `fixpt check -`. To load it, `~/.emacs.d/init.el` (ask first).
+1. Done (2026-10-05): `editors/emacs/fx26-mode.el` and its README:
+   font-lock; indentation (re-indenting the front end changes 3% of its
+   lines, where the source is irregular); `run-fx26`, a comint REPL over a
+   pipe; `flymake` over `fixpt check -`; `eldoc` with globals' types. The
+   user's wish: what `fixpt` does for Emacs is behind `--emacs` (no
+   continuation prompt; `,at FILE LINE COL` before a sent form, so its
+   errors are said there). Loaded by `~/.emacs.d/init.el`, made with the
+   user's leave.
 2. `fixpt lsp` for `eglot`: diagnostics from both checkers (start and
    end, in characters), hover with type and effect (the checker to keep
    types by span), definitions, completion. JSON by hand: no crates.

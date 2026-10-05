@@ -364,3 +364,26 @@ fn on_every_machine(program: &str) -> Vec<(&'static [&'static str], String)> {
         })
         .collect()
 }
+
+/// `--emacs` (`editors/emacs/fx26-mode.el`): no continuation prompt, and
+/// `,at FILE LINE COL` makes the next form's errors name where it was
+/// sent from; the form after it is the REPL's own again.
+#[test]
+fn the_fx26_repl_for_emacs_places_errors_where_forms_were_sent_from() {
+    use std::io::Write as _;
+    let mut child = Command::new(FIXPT)
+        .args(["--dialect", "fx26", "--emacs", "repl"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    let input = include_str!("programs/emacs-at.repl");
+    child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
+    let out = child.wait_with_output().expect("finishes");
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(!stdout.contains("     | "), "a continuation prompt:\n{stdout}");
+    assert!(stdout.contains("fx26> 3 : "), "{stdout}");
+    assert!(stderr.contains("/some dir/f.fx:41:8: argument 1 is a int"), "{stderr}");
+    assert!(stderr.contains("<fx26:3>:1:6: argument 1 is a int"), "{stderr}");
+}

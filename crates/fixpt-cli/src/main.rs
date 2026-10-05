@@ -76,6 +76,10 @@ options:
   --step-limit N|none            how many evaluation steps a form may take before
                                  it is stopped, or no limit (default: 20000000
                                  for FX-87, FX-91 and FX-26; none for Scheme)
+  --emacs                        the FX-26 REPL as Emacs drives it over a pipe
+                                 (`editors/emacs/fx26-mode.el`): no continuation
+                                 prompt, and `,at FILE LINE COL` before a form to
+                                 have its errors said at FILE:LINE:COL
   --speculation-step-limit N|none
                                  the same for the FX-26 REPL's run of a form as it
                                  is typed (default: 200000); with none, typing a
@@ -199,6 +203,7 @@ fn run(args: &[String]) -> i32 {
         Some("fx-compiled") => Some(fixpt_native::cellular::place_word as fixpt_runtime::PlaceCode),
         _ => None,
     });
+    let _ = EMACS.set(flags.emacs);
     let _ = NATIVE_CONVENTION.set(match flags.calling_convention.as_deref() {
         None | Some("cellular") => false,
         Some("native") => true,
@@ -383,6 +388,7 @@ struct Flags {
     calling_convention: Option<String>,
     step_limit: Option<String>,
     speculation_step_limit: Option<String>,
+    emacs: bool,
 }
 
 /// `--fx26-run`, for every FX-26 session this process starts.
@@ -399,6 +405,8 @@ pub(crate) static CELLULAR_MACHINE_NAME: std::sync::OnceLock<&'static str> = std
 /// `--calling-convention native`, for every FX-26 session this process
 /// starts.
 pub(crate) static NATIVE_CONVENTION: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+/// `--emacs`: the REPL as Emacs drives it (`editors/emacs/fx26-mode.el`).
+pub(crate) static EMACS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// `--gc-every`, for every heap this process starts.
 pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -440,6 +448,7 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         calling_convention: None,
         step_limit: None,
         speculation_step_limit: None,
+        emacs: false,
     };
     let mut rest = Vec::new();
     let mut i = 0;
@@ -459,6 +468,12 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         ("-o", |f, v| f.out = Some(v)),
     ];
     'outer: while i < args.len() {
+        // Flags that take no value.
+        if args[i] == "--emacs" {
+            flags.emacs = true;
+            i += 1;
+            continue;
+        }
         for (name, set) in named {
             if args[i] == name && i + 1 < args.len() {
                 set(&mut flags, args[i + 1].clone());
