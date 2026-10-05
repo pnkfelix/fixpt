@@ -194,6 +194,14 @@ pub struct Checker {
     /// names: what a redefinition finds the users of a name in
     /// (`Checker::top_defining`).
     pub(crate) defs: Vec<crate::top::Definition>,
+    /// Whether a redefinition that makes a new global leaves the
+    /// definitions that use the name as they are, out of date, instead of
+    /// checking them again (`Checker::top_defining`): what the REPL asks
+    /// for, re-running them when told (`,rerun-outdated`).
+    pub defer_reruns: bool,
+    /// The definitions out of date (`defer_reruns`): each one's names, and
+    /// the names it uses that were defined again since, at new globals.
+    pub(crate) outdated: Vec<(Vec<Sym>, Vec<Sym>)>,
     /// Whether naming a global reads its binding, `(read (globals g))`, as
     /// the language will say once every program says so (off until then).
     pub globals_effects: bool,
@@ -380,6 +388,8 @@ impl Checker {
             masking: true,
             broken: HashMap::new(),
             defs: Vec::new(),
+            defer_reruns: false,
+            outdated: Vec::new(),
             globals_effects: true,
             global_slots: HashSet::new(),
         };

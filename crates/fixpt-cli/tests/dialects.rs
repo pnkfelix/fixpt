@@ -387,3 +387,34 @@ fn the_fx26_repl_for_emacs_places_errors_where_forms_were_sent_from() {
     assert!(stderr.contains("/some dir/f.fx:41:8: argument 1 is a int"), "{stderr}");
     assert!(stderr.contains("<fx26:3>:1:6: argument 1 is a int"), "{stderr}");
 }
+
+/// At the REPL, a redefinition at another type leaves the definitions that
+/// use the name out of date, as they were, until `,rerun-outdated` (TODO
+/// §29): `g` keeps the old `f`, and so `h` works; run again while `f`
+/// takes a string, `g` does not check and stays as it was; once `f` takes
+/// an int again, it runs again, and `h` sees it. In the native convention,
+/// so that both checkers defer.
+#[test]
+fn the_fx26_repl_reruns_outdated_definitions_when_asked() {
+    use std::io::Write as _;
+    let mut child = Command::new(FIXPT)
+        .args(["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", "registers", "--calling-convention", "native", "repl"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    let input = include_str!("programs/rerun-outdated.repl");
+    child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
+    let out = child.wait_with_output().expect("finishes");
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let said = |s: &str| assert!(stdout.contains(s), "not said: {s}\n{stdout}\n{stderr}");
+    said("; out of date (1), using what was defined again: `g`; `,rerun-outdated` runs them again");
+    said("fx26> 3 : int");
+    said("; `g` uses `f`, defined again since at another type");
+    said("; `g` stays out of date: argument 1 is a int, where a string is expected");
+    said("; `g` redefined: every use sees the new one");
+    said("fx26> 200 : int");
+    said("fx26> ; nothing is out of date");
+    assert!(!stdout.contains("run again, as they use it"), "{stdout}");
+}

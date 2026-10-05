@@ -1,0 +1,11 @@
+(define f (subr pure (int) int) (lambda (n) (+ n 1)))
+(define g (subr (read (globals f)) (int) int) (lambda (n) (f n)))
+(define h (subr (read (globals f g)) (int) int) (lambda (n) (g (* n 2))))
+(define f (subr pure (string) int) (lambda (s) (string-length s)))
+(h 1)
+,list-outdated
+,rerun-outdated
+(define f (subr pure (int) int) (lambda (n) (* n 100)))
+,rerun-outdated
+(h 1)
+,list-outdated

@@ -100,13 +100,20 @@ impl Checker {
     pub fn top_defining(&mut self, form: &Syntax) -> R<Defining> {
         let names = self.defined_names(form);
         let olds: Vec<(Sym, TyId)> = names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
-        let users = if olds.is_empty() { Vec::new() } else { self.users_of(&names) };
+        let users = if olds.is_empty() || self.defer_reruns { Vec::new() } else { self.users_of(&names) };
+        let direct = if olds.is_empty() || !self.defer_reruns { Vec::new() } else { self.direct_users_of(&names) };
         let mut top = self.top(form)?;
         let assigns = !olds.is_empty() && self.fits_old(&top, &olds);
         set_assigns(&mut top, assigns);
         self.record(form, &top);
         let mut done = Defining { run: vec![(top, form.clone())], broken: Vec::new() };
         if olds.is_empty() || assigns {
+            return Ok(done);
+        }
+        if self.defer_reruns {
+            for d in direct {
+                self.note_outdated(d.names, &names);
+            }
             return Ok(done);
         }
         let shown = |c: &Checker, ns: &[Sym]| ns.iter().map(|n| format!("`{}`", c.interner.name(*n))).collect::<Vec<_>>().join(", ");
@@ -142,10 +149,10 @@ impl Checker {
     /// a driver to decide whether a redefinition that would break
     /// definitions goes ahead.
     pub fn try_defining(&mut self, form: &Syntax) -> R<Defining> {
-        let (mark, broken, defs) = (self.mark(), self.broken.clone(), self.defs.clone());
+        let (mark, broken, defs, outdated) = (self.mark(), self.broken.clone(), self.defs.clone(), self.outdated.clone());
         let r = self.top_defining(form);
         self.rollback(mark);
-        (self.broken, self.defs) = (broken, defs);
+        (self.broken, self.defs, self.outdated) = (broken, defs, outdated);
         r
     }
 
@@ -248,6 +255,35 @@ impl Checker {
         out
     }
 
+    /// The definitions that use `names` themselves, oldest first: what a
+    /// redefinition of them leaves out of date, when re-runs wait
+    /// (`defer_reruns`). Those that use these see them as they are.
+    fn direct_users_of(&self, names: &[Sym]) -> Vec<Definition> {
+        self.defs.iter().filter(|d| !d.names.iter().any(|n| names.contains(n)) && d.uses.iter().any(|u| names.contains(u))).cloned().collect()
+    }
+
+    /// The definition of `names` out of date, since `redefined`, which it
+    /// uses, were defined again at new globals.
+    fn note_outdated(&mut self, names: Vec<Sym>, redefined: &[Sym]) {
+        match self.outdated.iter_mut().find(|(ns, _)| *ns == names) {
+            Some((_, since)) => since.extend(redefined.iter().filter(|r| !since.contains(r)).collect::<Vec<_>>()),
+            None => self.outdated.push((names, redefined.to_vec())),
+        }
+    }
+
+    /// The definitions out of date (`defer_reruns`), oldest first: each
+    /// one's names, the names it uses that were defined again since, and
+    /// its form, to run again.
+    pub fn outdated(&self) -> Vec<(Vec<Sym>, Vec<Sym>, Syntax)> {
+        self.defs
+            .iter()
+            .filter_map(|d| {
+                let (_, since) = self.outdated.iter().find(|(ns, _)| *ns == d.names)?;
+                Some((d.names.clone(), since.clone(), d.form.clone()))
+            })
+            .collect()
+    }
+
     /// `form`, checked as `top`, recorded as the definition of its names now.
     fn record(&mut self, form: &Syntax, top: &Top) {
         let (names, exps): (Vec<Sym>, Vec<crate::ast::ExpId>) = match top {
@@ -255,6 +291,8 @@ impl Checker {
             Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, _, e)| (*n, *e)).unzip(),
             _ => return,
         };
+        // Defined again, so up to date.
+        self.outdated.retain(|(ns, _)| !ns.iter().any(|n| names.contains(n)));
         let mut uses = Vec::new();
         for e in exps {
             self.free_into(e, &mut Vec::new(), &mut uses);

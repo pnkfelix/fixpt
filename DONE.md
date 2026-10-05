@@ -454,3 +454,36 @@ old definitions die (PLAN Q13, O2), so a session that reloads on every save
 lasts: 300 reloads of a 370-line file, checked. Loaded by
 `~/.emacs.d/init.el`, made with the user's leave. Steps 2 and 3 are
 `TODO.md` §25.
+
+## 29. Re-runs wait at the REPL (2026-10-05; PLAN Q13 O12)
+
+A redefinition at a type not every use can take made a new global and
+checked and ran again, on the spot, every earlier definition using the
+name, in both checkers (`Checker::top_defining`, `k-defining`). Over a
+`,load` of a file whose later forms use earlier ones, that is quadratic:
+redefining form *i* re-ran forms *i+1 … n*, each of which the same load
+then defined again. A second load of `okasaki.fx` re-ran 13, one
+redefinition re-running 10 forms redefined a few lines later.
+
+Now, at the REPL (the user's plan), re-runs wait (`docs/fx26.md`,
+"Redefinition"):
+- a redefinition that makes a new global leaves the definitions that use
+  the name themselves *out of date*: they keep the old global, neither
+  checked nor run again, so nothing is broken and nothing reads a value at
+  a type it was not checked at; defining one again brings it up to date;
+- after a form that changes what is out of date, the REPL says so: "; out
+  of date (1), using what was defined again: `g`; `,rerun-outdated` runs
+  them again";
+- `,list-outdated` names each, with what it uses that was defined again;
+  `,rerun-outdated` defines each again, oldest first, until none is left
+  that has not been tried; one that does not check stays out of date,
+  usable, saying why;
+- both checkers take it as a setting, `Checker::defer_reruns` and
+  `check-defer-reruns!`, which `Fx26Session::set_defer_reruns` sets; files
+  run by `fixpt eval` and `check` keep the rule as it was.
+
+Measured, 20 `,load`s of `okasaki.fx` in one native REPL: re-runs 133 (399
+definitions) → 0, breakages from them (O13's regions) → 0, total 6.4 →
+5.3 s (start-up and the first load are 3.5 s; each reload 0.15 → 0.09 s).
+Test: `fixpt-cli/tests/dialects.rs`,
+`the_fx26_repl_reruns_outdated_definitions_when_asked`.

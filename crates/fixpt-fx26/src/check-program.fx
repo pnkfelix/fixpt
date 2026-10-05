@@ -871,20 +871,29 @@
                        (k-break-all (extract u 1) why))
                      (k-rerun (cdr users) ns lines)))
             (else y (k-rerun (cdr users) ns lines)))))))
+;; Whether a redefinition that makes a new global leaves the definitions
+;; that use the name as they are, out of date, rather than checking them
+;; again (`k-rerun`): what the REPL asks for, re-running them when told
+;; (`,rerun-outdated`), as the Rust checker's `defer_reruns`.
+(define k-defer-reruns (ref bool @t) (new #f))
+;; For a driver: whether re-runs wait.
+(define check-defer-reruns! (subr (maxeff (read @globals) (write @t)) (bool) unit)
+  (lambda (on) (set k-defer-reruns on)))
 ;; A top-level form, checked under redefinition: its lines, and those of
 ;; the definitions it has run again.
 (define k-defining (subr (maxeff checks spin) (top) k-out)
   (lambda (form)
     (let* ((ns (k-top-names form))
            (olds (k-old-types ns))
-           (users (if (null? olds) (the k-def-list nil) (k-users-of ns)))
+           (defer (get k-defer-reruns))
+           (users (if (or (null? olds) defer) (the k-def-list nil) (k-users-of ns)))
            (reset (set k-last-uses nil))
            (lines (k-top-lines form))
            (knot (k-no-reaching-itself form ns (not (null? olds))))
            (assigns (and (not (null? olds)) (k-fits-old? olds)))
            (recorded (k-record form ns))
            (ran (k-note-run form assigns)))
-      (if (or (null? olds) assigns) lines (k-rerun users ns lines)))))
+      (if (or (null? olds) assigns defer) lines (k-rerun users ns lines)))))
 
 
 ;; The second pass: definitions and expressions, in order, each under

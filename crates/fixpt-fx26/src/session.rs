@@ -44,6 +44,8 @@ pub struct Fx26Session {
     native_convention: bool,
     /// Whether naming a global reads it (`set_globals_effects`).
     globals_effects: bool,
+    /// Whether re-runs wait (`set_defer_reruns`).
+    defer_reruns: bool,
     /// Whether the form running is one the pieces written in FX-26 made
     /// already (`run_forms`).
     own_made: bool,
@@ -405,6 +407,7 @@ impl Fx26Session {
             native_runner: None,
             native_compiler: None,
             globals_effects: true,
+            defer_reruns: false,
             own_made: false,
             own_begun: false,
             redefine: None,
@@ -908,6 +911,40 @@ impl Fx26Session {
         self.native_convention = on;
         self.checker = Checker::with_convention(if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
         self.checker.globals_effects = self.globals_effects;
+        self.checker.defer_reruns = self.defer_reruns;
+    }
+
+    /// Whether a redefinition that makes a new global leaves the
+    /// definitions that use the name out of date, as they were, for
+    /// [`rerun_outdated`](Self::rerun_outdated) to run again when asked,
+    /// rather than running them again at once: in both checkers
+    /// (`Checker::defer_reruns`). What the REPL does, so that a load does
+    /// not run again what it is about to define again.
+    pub fn set_defer_reruns(&mut self, on: bool) {
+        self.defer_reruns = on;
+        self.checker.defer_reruns = on;
+    }
+
+    /// The definitions out of date (`set_defer_reruns`), oldest first: the
+    /// names each defines, and those it uses that were defined again since.
+    pub fn outdated(&self) -> Vec<(Vec<String>, Vec<String>)> {
+        let names = |ns: &[Sym]| ns.iter().map(|n| self.checker.interner.name(*n).to_string()).collect();
+        self.checker.outdated().iter().map(|(ns, since, _)| (names(ns), names(since))).collect()
+    }
+
+    /// Each definition out of date run again, oldest first, as though
+    /// written again, until none is left that has not been tried: one may
+    /// leave others out of date in its turn. Each one's names, and what
+    /// running it did; one that does not check stays out of date.
+    pub fn rerun_outdated(&mut self) -> Vec<(Vec<String>, R<Outcome>)> {
+        let mut tried: Vec<Vec<Sym>> = Vec::new();
+        let mut outs = Vec::new();
+        while let Some((ns, _, form)) = self.checker.outdated().into_iter().find(|(ns, _, _)| !tried.contains(ns)) {
+            let out = self.run(&form);
+            outs.push((ns.iter().map(|n| self.checker.interner.name(*n).to_string()).collect(), out));
+            tried.push(ns);
+        }
+        outs
     }
 
     /// Whether naming a global reads it, `(read (globals g))`, in both
@@ -926,9 +963,9 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 22] = [
+    pub const FRONT_ENTRIES: [&'static str; 23] = [
         "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
-        "check-globals-effects!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
+        "check-globals-effects!", "check-defer-reruns!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
         "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
         "arm-ret", "arm-mov-imm64",
     ];
@@ -1038,6 +1075,8 @@ impl Fx26Session {
             self.scheme.call_global(&format!("{READER_PREFIX}check-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;
             let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.globals_effects));
             self.scheme.call_global(&format!("{READER_PREFIX}check-globals-effects!"), &[on]).map_err(|e| fail(e.to_string()))?;
+            let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.defer_reruns));
+            self.scheme.call_global(&format!("{READER_PREFIX}check-defer-reruns!"), &[on]).map_err(|e| fail(e.to_string()))?;
             Ok(())
         })();
         self.scheme.release_to(mark);

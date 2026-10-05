@@ -182,7 +182,8 @@ before everything else, known holes before proofs.
   read silently as a named parameter), O3 (`list-length` missing from
   the FX-26 evaluator) and O4 (globals rebound with `let` to avoid their
   read effect); then O5 (`call/ec`) and O8 (a variadic `string-append`).
-  O2 done: the REPL's code is collected, and old definitions die.
+  O2 done: the REPL's code is collected, and old definitions die. O12
+  done: at the REPL, re-runs wait for `,rerun-outdated`.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:
@@ -2380,7 +2381,9 @@ urgency: O1, O3, O4; then O5, O8; the rest as they come.
   `f`). Can masking hide allocation in a structure's own region? Could a
   little linearity, static or checked at run time, let `reverse` work in
   place?
-- O12 (`TODO.md` §29). **Re-running dependents during a load.** A second load of the file
+- O12 (`DONE.md` §29). Done (2026-10-05): at the REPL re-runs wait for
+  `,rerun-outdated`, with `,list-outdated` and a note when what is out of
+  date changes. **Re-running dependents during a load.** A second load of the file
   re-runs dependents 13 times, one redefinition re-running 10 forms the
   load redefines a few lines later. The user's choice: re-run on request,
   the REPL showing how many re-runs wait; at least, never re-run within a

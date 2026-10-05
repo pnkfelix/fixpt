@@ -56,12 +56,17 @@ LINE COL` before a form: what is sent from a buffer is preceded by one, so
 its errors name the file, line and column it came from, and
 `compilation-shell-minor-mode` makes them links (`RET` or a click).
 
+A redefinition at another type leaves what uses the name out of date,
+keeping the old one, rather than running it again at once, so a reload
+runs each form once: the REPL says what is out of date, `,list-outdated`
+says why, and `,rerun-outdated` runs them again (`docs/fx26.md`,
+"Redefinition").
+
 What is not there yet (PLAN Q14, `TODO.md` §25): hover types for any
 expression, not only globals, and completion, which wait for `fixpt lsp`;
 `C-c C-c` stopping a running form, which waits for a fuel trap that
-resumes (Q15); and quieter reloads, which wait on Q13's O12 (re-running
-dependents the load is about to redefine) and O13 (`private-regions` new
-on each load).
+resumes (Q15); and O13 (`private-regions` new on each load, `TODO.md`
+§30).
 
 ## Tests
 

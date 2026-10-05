@@ -173,7 +173,18 @@ pub fn repl(backend: Backend) -> i32 {
     // and its line and column, so that its errors are said there.
     let emacs = crate::EMACS.get().copied().unwrap_or(false);
     let mut origin: Option<(String, usize, usize)> = None;
+    // A redefinition at another type leaves the definitions that use the
+    // name out of date, keeping the old global, until `,rerun-outdated`:
+    // so that a load does not run again what it will define again.
+    session.set_defer_reruns(true);
+    let mut outdated_said = Vec::new();
     loop {
+        // Said when what is out of date changes.
+        let outdated = session.outdated();
+        if outdated != outdated_said && !outdated.is_empty() {
+            println!("{}", outdated_line(&outdated));
+        }
+        outdated_said = outdated;
         reader.set_completions(known_names(&session.checker));
         let line = {
             let mut oracle = Oracle { session: &mut session, reader: eager.as_mut() };
@@ -212,6 +223,36 @@ pub fn repl(backend: Backend) -> i32 {
                     continue;
                 }
             };
+            continue;
+        }
+        // `,list-outdated`: the definitions out of date, and why each is.
+        if text.trim() == ",list-outdated" {
+            let outdated = session.outdated();
+            if outdated.is_empty() {
+                println!("; nothing is out of date");
+            }
+            for (names, since) in outdated {
+                println!("; {} uses {}, defined again since at another type", quoted(&names), quoted(&since));
+            }
+            continue;
+        }
+        // `,rerun-outdated`: each definition out of date run again.
+        if text.trim() == ",rerun-outdated" {
+            for (names, out) in session.rerun_outdated() {
+                match out {
+                    Ok(out) => {
+                        print!("{}", out.printed);
+                        if let Err(e) = &out.value {
+                            println!("; {} failed as it ran again: {e}", quoted(&names));
+                        }
+                    }
+                    Err(e) => println!("; {} stays out of date: {}", quoted(&names), e.message.lines().next().unwrap_or("")),
+                }
+            }
+            outdated_said = Vec::new();
+            if session.outdated().is_empty() {
+                println!("; nothing is out of date");
+            }
             continue;
         }
         // `,inliners NAME`: the globals whose code inlines NAME's calls.
@@ -440,6 +481,19 @@ fn complete_pending(session: &mut Fx26Session, forms: &[Syntax], names: &[String
         }
         Err(e) => eprintln!("{}", located(name, text, &e)),
     }
+}
+
+/// Names as messages show them: `a`, `b`.
+fn quoted(names: &[String]) -> String {
+    names.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
+}
+
+/// What is out of date, said in one line.
+fn outdated_line(outdated: &[(Vec<String>, Vec<String>)]) -> String {
+    let names: Vec<String> = outdated.iter().flat_map(|(ns, _)| ns.clone()).collect();
+    let n = names.len();
+    let shown = if n <= 6 { quoted(&names) } else { format!("{}, …", quoted(&names[..5])) };
+    format!("; out of date ({n}), using what was defined again: {shown}; `,rerun-outdated` runs them again")
 }
 
 /// A redefinition that would break definitions, asked about at a terminal
