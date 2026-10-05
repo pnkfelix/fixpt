@@ -94,7 +94,7 @@ fn small_programs() {
 }
 
 /// A text the FX-26 reader does not finish is blamed where the Rust reader
-/// places it, not at 1:1 (PLAN.md Q11, `TODO.md` §15).
+/// places it, not at 1:1 (PLAN.md Q11, `DONE.md` §15).
 #[test]
 fn reader_errors_say_where() {
     let at = |p: &str| common::with_own(|s| s.check_with_own_checker(p).err()).map(|e| (e.message, e.span.start));
@@ -103,7 +103,7 @@ fn reader_errors_say_where() {
 }
 
 /// A shape conflict between a polymorphic call's result and what its context
-/// expects is the error, before any binder left unsolved (`TODO.md` §20):
+/// expects is the error, before any binder left unsolved (`DONE.md` §20):
 /// once, "argument 2 must be a t2, which is not yet known here".
 #[test]
 fn a_shape_conflict_is_the_error() {

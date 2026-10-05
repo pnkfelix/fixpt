@@ -209,7 +209,7 @@ bugs (done); Q2 integers (done: every path traps alike; `i32`/`i64`/
 raw in native registers, `int` a bignum, a fixnum version of native code,
 literals past a fixnum); Q3 telemetry's counts (stage 1 done);
 Q4 floats (done: `f64` boxed, `f32` an immediate); the front end's
-register code cached (done, `TODO.md` §21.1); Q5 `eq?` and address-hashed tables (done:
+register code cached (done, `DONE.md` §21); Q5 `eq?` and address-hashed tables (done:
 one pure `eq?`, `eqtable`; `equal` and `dynamic` ported, four ports'
 workarounds retired);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
@@ -537,7 +537,7 @@ and `dynamic-wind` extents, each recorded as the frame depth and stack height it
 belongs to. That is what supports SRFI 226's composable continuations and
 aborts, and it keeps exception handlers out of globals. The representation is
 shared, so the two engines agree on it by construction. Added 2026-09-24,
-after M7; `TODO.md` §9 has the details and what is still approximate.
+after M7; `DONE.md` §9 has the details, `TODO.md` §9 what is still approximate.
 
 Every conformance test runs under **both** engines and the results must agree —
 differential testing is the main defence against engine-specific bugs.
@@ -2194,7 +2194,7 @@ of its own kind), and native code must save `d8`-`d15` or not use them.
   arrays".
 
 **Q5. Identity: `eq?` on mutable objects, and address-hashed tables.**
-Done (2026-09-30; `docs/fx26.md`, "Identity"; `TODO.md` §19): one `eq?`,
+Done (2026-09-30; `docs/fx26.md`, "Identity"; `DONE.md` §19): one `eq?`,
 `(poly ((t type)) (subr pure (t t) bool))`, exact on mutable objects and
 atoms, and on immutable data and procedures `#t` only if equal (the
 user's choice); `eq` in line on every machine, and in the evaluator.
@@ -2282,7 +2282,7 @@ stack segments. Before building: check continuation capture across nested
 machine runs, and settle which reading of the soundness note's
 `(Region)` rule is meant. Its open questions are the user's.
 
-**Q11. Language friction the ports hit** (`TODO.md` §§ 12–15). Begun
+**Q11. Language friction the ports hit** (`TODO.md` and `DONE.md`, §§ 12–15). Begun
 2026-09-30: the standard operations of §14 (`docs/fx26.md`, "Standard
 operations the ports wanted"), but `map`/`for-each`/`fold`, which wait on
 a prelude written in FX-26; `letrec` bodies checked against the expected

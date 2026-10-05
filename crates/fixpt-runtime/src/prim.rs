@@ -1412,7 +1412,7 @@ prims! {
     // `<` and `=` on ints, for machines' slow paths (a bignum).
     "%fx26-int-less", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "less"));
     "%fx26-int-eq", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "eq"));
-    // What the benchmark ports wrote for themselves (PLAN.md Q11, TODO §14),
+    // What the benchmark ports wrote for themselves (PLAN.md Q11, DONE.md §14),
     // each of a fixed arity, for compiled code to call.
     "%fx26-remainder", 2, Some(2), simple!(|rt, a| fx26_int(rt, a, "remainder"));
     "%fx26-zero?", 1, Some(1), simple!(|rt, a| { let _ = &rt; Ok(Value::boolean(a[0] == Value::fixnum(0))) });

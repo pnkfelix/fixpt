@@ -2163,7 +2163,7 @@ benchmark ports give their READMEs' answers natively; `earley` now takes
 
 A session whose front end runs as register code checked the whole front
 end with the Rust checker and compiled it at every start (0.33 s of the
-0.49). The compiled word is now kept (`TODO.md` §21.1): copied out of the
+0.49). The compiled word is now kept (`DONE.md` §21): copied out of the
 session's heap into a heap of its own (`Heap::copy_graph_from`, which
 re-interns symbols by name) and written as a heap image to the user's
 cache directory (`~/Library/Caches/fixpt/` on macOS, `$XDG_CACHE_HOME/fixpt`

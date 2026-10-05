@@ -94,7 +94,7 @@ fn reports_values_used_before_their_definitions() {
     // A parameter of the same name is no use of the definition.
     let shadow = "(define f (subr pure (int) int) (lambda (g) g))\n(define g int 1)\n";
     assert!(se::order(&[(shadow.to_string(), P)]).unwrap().is_empty());
-    // A `define*` is a definition too (it was missed, TODO.md §15).
+    // A `define*` is a definition too (it was missed, DONE.md §15).
     let star = "(define f (subr pure () int) (lambda () (h 1)))\n(define* h (subr pure (int) int) (lambda (n) n))\n";
     let early = se::order(&[(star.to_string(), P)]).unwrap();
     assert_eq!(early.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["h"]);

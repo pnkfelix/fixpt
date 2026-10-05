@@ -612,7 +612,7 @@
                     (if (>= expected 0) (k-unify result expected kinds solved (k-new-trail)) #u)
                     (k-inst-asked args params 0 kinds solved done)
                     ;; A shape conflict is the error to report, before any
-                    ;; binder is found unsolved (`TODO.md` §20).
+                    ;; binder is found unsolved (`DONE.md` §20).
                     (k-result-shape expected result kinds solved a b)
                     (k-inst-shapes args params 0 kinds solved (extract done 1))
                     (k-inst-told args params 0 kinds solved done)

@@ -1,5 +1,5 @@
 ;;; The standard operations the benchmark ports wrote for themselves (PLAN.md
-;;; Q11, TODO §14): integer, character and string comparisons, `error`, and
+;;; Q11, DONE.md §14): integer, character and string comparisons, `error`, and
 ;;; lists and arrays at any region; bignums where ints may be ones.
 (define-type strings (listof string @heap))
 (define* yes-no (subr pure (bool) string) (lambda (b) (if b "yes" "no")))

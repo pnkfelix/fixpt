@@ -178,9 +178,10 @@ which goes further: parse *as each character arrives*, and use continuations to
 back out of the recursive descent when the user hits backspace. `fixpt` re-reads
 the buffer from scratch instead, which is microseconds for a REPL-sized form and
 needs no parser state kept between keystrokes. The continuation-based version is
-what you want when re-reading is not affordable — and it would be a fitting use
-of this engine's own re-entrant `call/cc`. [`TODO.md`](TODO.md) §1 records what
-it would take and when it would start to matter.
+what you want when re-reading is not affordable, and a fitting use of this
+engine's own re-entrant `call/cc`: it is built now, `eager-reader.scm`
+([`DONE.md`](DONE.md) §1, with what it was for and when it starts to
+matter).
 
 ### In Emacs
 
@@ -309,7 +310,7 @@ the next one.
 This needs the form to be syntactically complete, which is not how anyone types
 it: `(vector-ref v ,help` — asking while still writing — cannot be read at all.
 The information wanted is in the *parser's stack* rather than in the text, which
-is [`TODO.md`](TODO.md) §1's third and sharpest motivation.
+is why the Scheme REPL reads eagerly: [`DONE.md`](DONE.md) §1.
 
 ## Trying FX-91
 

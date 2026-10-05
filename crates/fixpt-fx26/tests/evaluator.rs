@@ -104,7 +104,7 @@ fn every_program(wanted: impl Fn(&str) -> bool) {
 
 /// Form by form, as the REPL and `fixpt eval --fx26-run evaluate` run a
 /// program: the evaluator keeps no state between forms, so a write in one
-/// must be replayed before the next (TODO §18).
+/// must be replayed before the next (DONE.md §18).
 #[test]
 fn a_write_is_seen_by_the_next_form() {
     use fixpt_fx26::session::Strategy;

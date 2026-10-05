@@ -821,7 +821,7 @@ impl Checker {
             done[i] = Some((t, eff));
         }
         // A shape conflict is the error to report, before any binder is
-        // found unsolved (`TODO.md` §20): the result against what the
+        // found unsolved (`DONE.md` §20): the result against what the
         // context expects, which `unify` only uses as a hint, then each
         // argument found so far against its parameter.
         if let Some(want) = expected
