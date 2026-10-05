@@ -375,6 +375,40 @@
           ((symbol=? (car (car ks)) n) (c-unkeep (cdr ks) n))
           (else (the c-kept-globals (cons (car ks) (c-unkeep (cdr ks) n)))))))
 
+;; The counts of globals the bodies that may yet be inlined (`xs`), or
+;; specialized (`ys`), saw when they were written: the limits a lookup of a
+;; global may be made at (`c-global-find`) as definitions are made, when no
+;; inlining or specialization is under way.
+(define c-inline-limits (subr c-builds (c-inlinables) (listof int acyclic))
+  (lambda (xs) (if (null? xs) nil (cons (extract (car xs) 5) (c-inline-limits (cdr xs))))))
+(define c-special-limits (subr c-builds (c-specializables) (listof int acyclic))
+  (lambda (ys) (if (null? ys) nil (cons (extract (car ys) 5) (c-special-limits (cdr ys))))))
+;; `xs` before `ys`.
+(define c-ints-onto (subr c-builds ((listof int acyclic) (listof int acyclic)) (listof int acyclic))
+  (lambda (xs ys) (if (null? xs) ys (cons (car xs) (c-ints-onto (cdr xs) ys)))))
+(define c-genv-limits (subr c-builds () (listof int acyclic))
+  (lambda () (c-ints-onto (c-inline-limits (get c-inlines)) (c-special-limits (get c-specials)))))
+;; Whether one of `limits` is past `lo` and no more than `hi`.
+(define c-limit-in? (subr c-builds ((listof int acyclic) int int) bool)
+  (lambda (limits lo hi)
+    (and (not (null? limits))
+         (or (and (< lo (car limits)) (<= (car limits) hi)) (c-limit-in? (cdr limits) lo hi)))))
+;; Of `es`, a name's globals, newest first, each older than the one made
+;; `upper`th: those a lookup at one of `limits` still finds. A lookup at
+;; limit L finds the newest made before L, so a global made `i`th is found
+;; only by a limit past `i` and no more than the next newer one's: kept,
+;; any other would hold its value, and what that reaches, for good.
+(define c-genv-needed (subr c-builds (c-globals-made int (listof int acyclic)) c-globals-made)
+  (lambda (es upper limits)
+    (if (null? es)
+        nil
+        (let ((i (car (car es))) (rest (c-genv-needed (cdr es) (car (car es)) limits)))
+          (if (c-limit-in? limits i upper) (the c-globals-made (cons (car es) rest)) rest)))))
+;; `n`'s globals, before its `i`th is made: those no lookup can find let go.
+(define c-genv-prune! (subr c-emits (symbol int) unit)
+  (lambda (n i)
+    (let ((made (table-ref (get c-genv-index) n nil)))
+      (table-set! (get c-genv-index) n (c-genv-needed made i (c-genv-limits))))))
 ;; `n`'s global for a definition of it: the one kept for it, if one was;
 ;; else a new one, which later uses of `n` refer to.
 (define c-push-global (subr c-emits (symbol) wglobal)
@@ -384,7 +418,8 @@
                        (c-kept (get c-reuse) n))))
       (if (null? kept)
           (let ((g (make-global n)) (i (get c-genv-count)))
-            (begin (c-genv-push! n i g)
+            (begin (c-genv-prune! n i)
+                   (c-genv-push! n i g)
                    (set c-genv-count (+ i 1))
                    g))
           (begin (set c-reuse (c-unkeep (get c-reuse) n)) (car kept))))))
@@ -515,6 +550,9 @@
         (begin
           (c-set-facts! facts)
           (set c-this-params -1)
+          ;; The lambdas made so far are the last program's: let them go.
+          (set c-made-now (the (listof c-made @k) nil))
+          (set c-made-reuse (the (listof c-made @k) nil))
           (if (forms c) #u (c-lit c (wcell-unit)))
           (c-op c routine-exit)
           (c-ok (c-assemble c (string->symbol "program")))))

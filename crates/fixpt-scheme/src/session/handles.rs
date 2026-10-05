@@ -56,6 +56,20 @@ impl Session {
         self.rt.heap.root_at(i)
     }
 
+    /// How deep the explicit roots are now: for [`release_to`](Session::release_to),
+    /// where a [`scope`](Session::scope) cannot be used (its caller owns
+    /// more than the session).
+    pub fn root_mark(&self) -> usize {
+        self.rt.heap.root_count()
+    }
+
+    /// Release the handles made, and the roots pushed, since `mark`
+    /// ([`root_mark`](Session::root_mark)), as the end of a scope does.
+    pub fn release_to(&mut self, mark: usize) {
+        self.rt.heap.pop_roots_to(mark);
+        self.handle_stamps.truncate(mark);
+    }
+
     /// Run `f`; the handles it makes are released when it returns (so are
     /// any roots anything in it pushed). Keep what `f` computes as Rust data
     /// or as handles made before the scope.

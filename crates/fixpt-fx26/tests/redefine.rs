@@ -85,3 +85,49 @@ fn a_knot_through_a_kept_procedure_is_refused() {
     let out = run(&mut s, include_str!("programs/redefine/knot-kept.fx"));
     assert!(out[2].contains("calling `f` reads `f`, so `f` may reach itself through a global"), "{out:?}");
 }
+
+/// Redefining a procedure over and over at the REPL, as reloading a file
+/// does, compiled to native code as `fixpt --fx26-run cellular
+/// --cellular-machine registers --calling-convention native repl` runs it:
+/// what the old definitions made dies. Neither the session's explicit roots
+/// (handles a form made and kept) nor the live words (the compiler written
+/// in FX-26 keeping every lambda made, or every global ever made for a
+/// name) grow with the number of redefinitions.
+#[test]
+fn redefining_lets_the_old_definitions_die() {
+    use fixpt_heap::{SroKind, layout::cellular::KIND};
+    let mut s = session();
+    s.strategy = Strategy::Cellular;
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    s.front_end_compiled = true;
+    s.set_native_convention(true);
+    s.native_runner = Some(run_native);
+    s.native_compiler = Some(fixpt_native::direct::compile_closure);
+    s.register_code = true;
+    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+    let text = "(define f (subr pure (int) (subr pure (int) int)) (lambda (x) (lambda (y) (+ x y))))\n((f 1) 2)\n";
+    let mut seen = Vec::new();
+    for round in 0..24 {
+        let out = run(&mut s, text);
+        assert_eq!(out.last().map(|o| o.ends_with('3')), Some(true), "round {round}: {out:?}");
+        let rt = s.scheme.runtime_unrooted();
+        rt.heap.collect(&mut []);
+        let words = rt.heap.sro(SroKind::Kind(KIND), None, &[]).len();
+        seen.push((rt.heap.root_count(), words));
+    }
+    // After the first few rounds (the front end compiled, the standard
+    // procedures used), nothing grows.
+    let settled = seen[8];
+    assert!(seen[8..].iter().all(|x| *x == settled), "roots and live words, round by round: {seen:?}");
+}
+
+fn run_native(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
+    use fixpt_fx26::session::NativeRun;
+    fixpt_native::direct::with_machine(|m| match m.compile(&mut rt.heap, closure) {
+        Err(why) => NativeRun::Declined(why),
+        Ok(procs) => NativeRun::Ran(m.call(rt, procs[0].1, &[], fuel).map_err(|t| t.what)),
+    })
+    .unwrap_or_else(|e| NativeRun::Ran(Err(e)))
+}

@@ -182,7 +182,7 @@ before everything else, known holes before proofs.
   read silently as a named parameter), O3 (`list-length` missing from
   the FX-26 evaluator) and O4 (globals rebound with `let` to avoid their
   read effect); then O5 (`call/ec`) and O8 (a variadic `string-append`).
-  O2: the REPL's code space fills after about 31 `,load`s of one file.
+  O2 done: the REPL's code is collected, and old definitions die.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:
@@ -2327,10 +2327,15 @@ urgency: O1, O3, O4; then O5, O8; the rest as they come.
 - O2. **The code space fills on reloading.** *(Code collected,
   2026-10-05: the cellular machines' code is now collected by copying,
   Larceny's way, `NativeMachine::collect_code`; 300 reloads, no code-space
-  error. What is left: about 280 loads exhaust the 65,536 native slots,
-  because old definitions stay reachable (nearly every word of every load
-  survives a collection); the likely holder is the FX-26 compiler's
-  `c-genv-index`, which keeps every global ever made.)* Reproduced: about 31
+  error. Then the old definitions were found to stay reachable, found
+  with `Heap::path_to` and `sro_referrers` (SRO's trace, with who refers
+  to what): the FX-26 compiler's `c-made-now` kept every top-level lambda
+  ever made; its `c-genv-index` every global ever made for a name, though
+  a lookup can find only those a body that may yet be inlined saw; and
+  the session's handles, made outside any scope, rooted each form's
+  globals for good. All three fixed (2026-10-05): 300 reloads, live code
+  steady at the front end's ~25 MB, `tests/redefine.rs`
+  `redefining_lets_the_old_definitions_die`.)* Reproduced: about 31
   `,load`s of the file in one REPL started with `--dialect fx26
   --fx26-run cellular --cellular-machine registers --calling-convention
   native` (noted under "A collected code area"). Code is never reclaimed, and O12's re-runs compile several

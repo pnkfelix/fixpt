@@ -690,8 +690,11 @@ impl Fx26Session {
         if self.own_begun {
             let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
             let text = self.checker.interner.name(name).to_string();
+            let mark = self.scheme.root_mark();
             let sym = self.scheme.make(|m| m.heap().intern(&text));
-            self.scheme.call_global(&format!("{READER_PREFIX}compile-keep-global!"), &[sym]).map_err(fail)?;
+            let r = self.scheme.call_global(&format!("{READER_PREFIX}compile-keep-global!"), &[sym]).map_err(fail);
+            self.scheme.release_to(mark);
+            r?;
         }
         Ok(())
     }
@@ -1027,11 +1030,18 @@ impl Fx26Session {
         } else if !self.scheme.is_bound(&format!("{READER_PREFIX}check-program")) {
             load_eager_reader(&mut self.scheme).map_err(fail)?;
         }
-        let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.native_convention));
-        self.scheme.call_global(&format!("{READER_PREFIX}check-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;
-        let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.globals_effects));
-        self.scheme.call_global(&format!("{READER_PREFIX}check-globals-effects!"), &[on]).map_err(|e| fail(e.to_string()))?;
-        Ok(())
+        // The handles below are this call's: released at its end (what
+        // was loaded above stays, made before the mark).
+        let mark = self.scheme.root_mark();
+        let r = (|| {
+            let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.native_convention));
+            self.scheme.call_global(&format!("{READER_PREFIX}check-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;
+            let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.globals_effects));
+            self.scheme.call_global(&format!("{READER_PREFIX}check-globals-effects!"), &[on]).map_err(|e| fail(e.to_string()))?;
+            Ok(())
+        })();
+        self.scheme.release_to(mark);
+        r
     }
 
     /// The value of the global `name`, as the forms defined so far make it,
@@ -1055,6 +1065,23 @@ impl Fx26Session {
     fn native_define(&mut self, name: &str, form: &str, init: &str, run: NativeRunner) -> R<Result<(), NativeRun>> {
         self.own_pieces()?;
         let standard = self.next_standard()?;
+        // What is loaded is loaded, above; the handles below are this
+        // definition's, released at its end: kept, the global's cell would
+        // keep each old definition alive, its code with it.
+        let mark = self.scheme.root_mark();
+        let r = self.native_define_in(standard, name, form, init, run);
+        self.scheme.release_to(mark);
+        r
+    }
+
+    fn native_define_in(
+        &mut self,
+        standard: Option<fixpt_scheme::Handle>,
+        name: &str,
+        form: &str,
+        init: &str,
+        run: NativeRunner,
+    ) -> R<Result<(), NativeRun>> {
         if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, FileId(0), form)? {
             return Ok(Err(NativeRun::Declined(format!("check: {why}"))));
         }
@@ -1141,12 +1168,13 @@ impl Fx26Session {
     }
 
     fn compile_global_natively(&mut self, name: Sym, compile: NativeCompiler) -> R<Result<(), String>> {
+        self.released(|s| {
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
-        let text = self.checker.interner.name(name).to_string();
-        let sym = self.scheme.make(|m| m.heap().intern(&text));
-        let cells = self.scheme.call_global(&format!("{READER_PREFIX}compile-global-cell"), &[sym]).map_err(fail)?;
+        let text = s.checker.interner.name(name).to_string();
+        let sym = s.scheme.make(|m| m.heap().intern(&text));
+        let cells = s.scheme.call_global(&format!("{READER_PREFIX}compile-global-cell"), &[sym]).map_err(fail)?;
         let (mut r, mut nanos) = (Ok(()), 0);
-        self.scheme.make(|m| {
+        s.scheme.make(|m| {
             let cells = m.get(cells);
             if !cells.is_pair() {
                 r = Err(format!("`{text}` has no global"));
@@ -1166,8 +1194,20 @@ impl Fx26Session {
             }
             fixpt_heap::Value::FALSE
         });
-        self.scheme.runtime_unrooted().compile_nanos += nanos;
+        s.scheme.runtime_unrooted().compile_nanos += nanos;
         Ok(r)
+        })
+    }
+
+    /// Run `f`, then release the handles it made (and the roots it pushed):
+    /// for work done for one form, whose handles would otherwise root what
+    /// they hold for the rest of the session. Anything that must last (what
+    /// a lazy load makes, `standard26`) is made before.
+    fn released<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.scheme.root_mark();
+        let r = f(self);
+        self.scheme.release_to(mark);
+        r
     }
 
     /// `text` checked and compiled as the next form of this session's
@@ -1176,15 +1216,17 @@ impl Fx26Session {
         self.own_pieces()?;
         self.scheme.engine.set_step_limit(None);
         let standard = self.next_standard()?;
-        let on = self.scheme.make(|_| fixpt_heap::Value::TRUE);
+        self.released(|s| {
+        let on = s.scheme.make(|_| fixpt_heap::Value::TRUE);
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
-        self.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[on]).map_err(fail)?;
-        let r = crate::syn::with_last_value(&mut self.scheme, standard, FileId(0), text, f);
-        self.own_begun |= !matches!(&r, Ok(Err(m)) if m.starts_with("check:"));
-        let off = self.scheme.make(|_| fixpt_heap::Value::boolean(self.register_code));
-        self.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(fail)?;
-        self.scheme.engine.set_step_limit(self.step_limit);
+        s.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[on]).map_err(fail)?;
+        let r = crate::syn::with_last_value(&mut s.scheme, standard, FileId(0), text, f);
+        s.own_begun |= !matches!(&r, Ok(Err(m)) if m.starts_with("check:"));
+        let off = s.scheme.make(|_| fixpt_heap::Value::boolean(s.register_code));
+        s.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(fail)?;
+        s.scheme.engine.set_step_limit(s.step_limit);
         r
+        })
     }
 
     /// Check `text` with the checker written in FX-26 (read and parsed in
@@ -1203,10 +1245,11 @@ impl Fx26Session {
     /// last checked (`checked-effects`): each expression's start, end (in
     /// characters) and effect summary, newest first.
     pub fn own_effect_summaries(&mut self) -> R<Vec<(i64, i64, i64)>> {
+        self.released(|s| {
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
-        let notes = self.scheme.call_global(&format!("{READER_PREFIX}checked-effects"), &[]).map_err(fail)?;
+        let notes = s.scheme.call_global(&format!("{READER_PREFIX}checked-effects"), &[]).map_err(fail)?;
         let mut out = Vec::new();
-        self.scheme.make(|m| {
+        s.scheme.make(|m| {
             let mut l = m.get(notes);
             let heap = m.heap();
             while l.is_pair() {
@@ -1217,6 +1260,7 @@ impl Fx26Session {
             fixpt_heap::Value::FALSE
         });
         Ok(out)
+        })
     }
 
     /// Compile `text` to a cellular word with the compiler written in FX-26
@@ -1259,14 +1303,16 @@ impl Fx26Session {
 
     fn compile_showing_in(&mut self, standard: Option<fixpt_scheme::Handle>, text: &str, show: bool) -> R<(String, Option<String>)> {
         self.own_pieces()?;
-        self.scheme.engine.set_step_limit(None);
-        let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.register_code));
-        self.scheme
+        self.released(|s| {
+        s.scheme.engine.set_step_limit(None);
+        let on = s.scheme.make(|_| fixpt_heap::Value::boolean(s.register_code));
+        s.scheme
             .call_global(&format!("{READER_PREFIX}compile-registers!"), &[on])
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
-        let r = crate::syn::compile_with_fx26_compiler_showing(&mut self.scheme, standard, FileId(0), text, show, self.step_limit);
-        self.scheme.engine.set_step_limit(self.step_limit);
+        let r = crate::syn::compile_with_fx26_compiler_showing(&mut s.scheme, standard, FileId(0), text, show, s.step_limit);
+        s.scheme.engine.set_step_limit(s.step_limit);
         r
+        })
     }
 
     /// [`run_program`](Self::run_program), reading with the reader written

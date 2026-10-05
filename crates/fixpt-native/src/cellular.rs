@@ -1608,6 +1608,8 @@ pub struct NativeMachine {
     /// (as Larceny's code space is: `0524c5d6` in its repository).
     since_collect: usize,
     live_after: usize,
+    /// Words compiled into this machine so far.
+    compiled: usize,
 }
 
 /// Code installed past which, and past what was live, the code is collected.
@@ -1617,6 +1619,8 @@ pub const CODE_COLLECT_BYTES: usize = 8 << 20;
 /// heap (which heap, by [`Heap::serial`]), and where its code and its table
 /// of where to resume are, in bytes.
 struct Installed {
+    /// Which word this was compiled, in order, in this machine.
+    seq: usize,
     slot: usize,
     heap: u64,
     weak: usize,
@@ -1659,6 +1663,7 @@ impl NativeMachine {
             free_slots: Vec::new(),
             since_collect: 0,
             live_after: 0,
+            compiled: 0,
         }
     }
 
@@ -1700,6 +1705,20 @@ impl NativeMachine {
         self.entry = self.entry - self.machine_at + m_at;
         self.machine_at = m_at;
         let docol = self.table[ROUTINE_DOCOL as usize];
+        // `FIXPT_CODE_TRACE_SEQ=N`: why the first word compiled at or after
+        // the Nth that is still alive is: for finding what keeps code.
+        if let Some(n) = std::env::var("FIXPT_CODE_TRACE_SEQ").ok().and_then(|n| n.parse::<usize>().ok())
+            && let Some((w, v)) = self.installed.iter().filter(|w| w.seq >= n && w.heap == heap.serial()).find_map(|w| {
+                let v = heap.weak_get(w.weak)?;
+                let name = std::env::var("FIXPT_CODE_TRACE_NAME").unwrap_or_default();
+                heap.describe(v).contains(&name).then_some((w, v))
+            })
+        {
+            eprintln!("; word {} ({}) is alive:", w.seq, heap.describe(v));
+            for step in heap.path_to(v, &[]).unwrap_or_else(|| vec!["(not reached from the heap's roots)".into()]) {
+                eprintln!(";   {step}");
+            }
+        }
         let mut code_of = CODE_OF_SLOT.lock().expect("not poisoned");
         let mut kept = Vec::with_capacity(self.installed.len());
         for w in std::mem::take(&mut self.installed) {
@@ -1815,7 +1834,8 @@ impl NativeMachine {
         self.slots.push(slot);
         heap.set_bloblet_slot(word, WORD_ENTRY, Value::fixnum(slot as i64));
         let weak = heap.weak_add(word);
-        self.installed.push(Installed { slot, heap: heap.serial(), weak, code: (at, 4 * code.len()), resume: (rt_at, 8 * table_len) });
+        self.compiled += 1;
+        self.installed.push(Installed { seq: self.compiled, slot, heap: heap.serial(), weak, code: (at, 4 * code.len()), resume: (rt_at, 8 * table_len) });
         self.since_collect += 4 * code.len() + 8 * table_len;
         Ok(())
     }
