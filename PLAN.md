@@ -190,12 +190,9 @@ before everything else, known holes before proofs.
   the suite 9 → 3.5 minutes.
 - N. **Next, the user's order (2026-10-05)**: B1 (done); T3's
   continuation gap probed (done: real in the statement, harmless,
-  `soundness.md` §4.6, `control/frames-hold-private-state.fx`); O16
-  (done: a soundness hole, now a static error) (a module
-  defining a name twice: a static error); O15's `await` as a `proj`
-  argument and parameterised `define-datatype` in a loaded file (the
-  checkers must agree); `load-module` from a loaded file (FX-26), which
-  moving the front end to modules will need; `TODO.md` §34, with
+  `soundness.md` §4.6, `control/frames-hold-private-state.fx`); O16 (done:
+  a soundness hole, now a static error); O15's three disagreements and
+  `load-module` from a loaded file (done); then `TODO.md` §34, with
   `private-regions` restricted to `module` forms; and A3 (S4), checking
   whether a cyclic `datum` can reach FX-26 today.
 - O. **What a day of writing `okasaki.fx` found** (the user's,
@@ -2425,7 +2422,18 @@ urgency: O1, O3, O4; then O5, O8; the rest as they come.
 Found while documenting the grammar's modules (2026-10-05, each checked
 with `fixpt check`):
 
-- O15. **The checkers disagree** (they must agree): `(await r)` as a
+- O15. Done (2026-10-05): the checkers agree on all three. `(await r)` is
+  an effect among the Rust checker's descriptions; a parameterised
+  `define-type` in a module is the `dlambda` it means, in both parsers, so
+  a `define-datatype` with parameters reads in a module's file; a loaded
+  file's `load-module`s are from its directory, the driver supplying
+  nested files to the FX-26 parser, numbered in the order the Rust
+  checker begins them (`Checker::files_read`). Found on the way: `fixpt
+  check` and `compile` took `load-module` paths from the current
+  directory (now from the file's, as `eval`), and the Rust compiler named
+  a loaded file's lambdas by byte where the FX-26 one counts characters.
+  Not done: a `define-datatype` inside a `module` form (both refuse it
+  alike). As it was: **The checkers disagree** (they must agree): `(await r)` as a
   `proj` argument (Rust: "expected a type", as `parse_d` has no `await`
   case; FX-26 takes it as an effect); a `load-module` inside a loaded
   file (Rust accepts; FX-26: "cannot read …: it was not read"); a
