@@ -1026,7 +1026,9 @@ impl Checker {
             "dlambda" => Ok(D::Fun(self.parse_fun(s, None)?)),
             "const" | "acyclic" => Ok(D::Region(self.parse_region(s)?)),
             "+" | "-" => Ok(D::Size(self.parse_size(s)?)),
-            "read" | "write" | "alloc" | "goto" | "comefrom" | "maxeff" => {
+            // Every atom `parse_effect` reads, as the FX-26 checker's
+            // `k-atom-head?` (PLAN.md Q13, O15).
+            "read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "maxeff" => {
                 Ok(D::Effect(self.parse_effect(s)?))
             }
             _ => Ok(D::Type(self.parse_type(s)?)),
