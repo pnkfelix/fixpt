@@ -218,6 +218,31 @@
 ;; a base (> 3); not, and why (-1); or not from a file (0 to 3).
 (define k-items-kind (subr pure (mod-items) int)
   (lambda (items) (if (null? items) 0 (extract (car items) 1))))
+;; The names a module's item defines, a generative type's two conversions
+;; with it, as the Rust checker's `defined_twice` counts them.
+(define k-item-names (subr (maxeff (read @globals) (alloc @t)) (mod-item) k-names)
+  (lambda (it)
+    (if (= (extract it 1) 0)
+        (let* ((n (car (extract it 2))) (s (symbol->string n)))
+          (the k-names (list n (string->symbol (string-append "up-" s))
+                             (string->symbol (string-append "down-" s)))))
+        (extract it 2))))
+;; The first name of `items`, in order, that one before it defines too: a
+;; module defining a name twice has no type (`moduleof` refuses it), and
+;; which definition a use got would depend on the path that ran it.
+(define k-defined-twice (subr (maxeff kreads (alloc @t)) (mod-items k-names) k-names)
+  (lambda (items seen)
+    (letrec ((first (subr (maxeff (read @globals) (read @t)) (k-names) k-names)
+               (lambda (ns)
+                 (cond ((null? ns) nil)
+                       ((k-has-name? seen (car ns)) (the k-names (list (car ns))))
+                       (else (first (cdr ns)))))))
+      (if (null? items)
+          nil
+          (let* ((ns (k-item-names (car items))) (twice (first ns)))
+            (if (null? twice)
+                (k-defined-twice (cdr items) (k-names-onto ns seen))
+                twice))))))
 ;; `(module item …)`: each item read in the scope of the descriptions
 ;; before it; read from a file, of the standard ones only.
 (define k-resolve-module-items (subr (maxeff checks spin) (mod-items int int) kx)
@@ -225,6 +250,10 @@
     (let ((k (k-items-kind items)) (saved (get k-dscope)))
       (cond
         ((< k 0) (k-fail (symbol->string (car (extract (car items) 2))) a b))
+        ((not (null? (k-defined-twice items nil)))
+         (k-fail (string-append (k-quote (symbol->string (car (k-defined-twice items nil))))
+                                " is defined twice in this module")
+                 a b))
         ((> k 3)
          (let ((got (the (ref k-items @t) (new nil))))
            (begin (set k-dscope (get k-std-dscope))

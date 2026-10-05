@@ -1652,6 +1652,7 @@ impl Checker {
         self.dscope.truncate(depth);
         self.hidden = outer;
         let items = r.map_err(|e| at_file(e, self))?;
+        self.defined_twice(span, &items)?;
         let e = self.arena.exp(span, Exp::Module(items));
         self.loaded.insert(e, (path.to_string(), text.clone(), file));
         Ok(e)
@@ -1676,7 +1677,30 @@ impl Checker {
         let depth = self.dscope.len();
         let r = self.parse_module_in(forms);
         self.dscope.truncate(depth);
-        Ok(self.arena.exp(span, Exp::Module(r?)))
+        let items = r?;
+        self.defined_twice(span, &items)?;
+        Ok(self.arena.exp(span, Exp::Module(items)))
+    }
+
+    /// A module that defines a name twice is refused: it has no type
+    /// (`moduleof` refuses a name twice), and which of the two a use got
+    /// would depend on the path that ran it (one the first, another the
+    /// last). A generative type's conversions, `up-t` and `down-t`, count.
+    /// As the FX-26 checker's `k-defined-twice`.
+    fn defined_twice(&self, span: fixpt_read::Span, items: &[ModItem]) -> R<()> {
+        let mut seen: Vec<Sym> = Vec::new();
+        for item in items {
+            let names: Vec<Sym> = match item {
+                ModItem::Abs { name, up, down, .. } => vec![*name, *up, *down],
+                ModItem::Desc { name, .. } | ModItem::Val { name, .. } => vec![*name],
+                ModItem::Rec(bs) => bs.iter().map(|(n, _, _)| *n).collect(),
+            };
+            if let Some(n) = names.iter().find(|n| seen.contains(n)) {
+                return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.name(*n))));
+            }
+            seen.extend(names);
+        }
+        Ok(())
     }
 
     fn parse_module_in(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {

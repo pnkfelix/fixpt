@@ -190,7 +190,8 @@ before everything else, known holes before proofs.
   the suite 9 → 3.5 minutes.
 - N. **Next, the user's order (2026-10-05)**: B1 (done); T3's
   continuation gap probed (done: real in the statement, harmless,
-  `soundness.md` §4.6, `control/frames-hold-private-state.fx`); O16 (a module
+  `soundness.md` §4.6, `control/frames-hold-private-state.fx`); O16
+  (done: a soundness hole, now a static error) (a module
   defining a name twice: a static error); O15's `await` as a `proj`
   argument and parameterised `define-datatype` in a loaded file (the
   checkers must agree); `load-module` from a loaded file (FX-26), which
@@ -2430,7 +2431,13 @@ with `fixpt check`):
   file (Rust accepts; FX-26: "cannot read …: it was not read"); a
   parameterised `define-datatype` in a loaded file (both refuse, at 1:1
   and 1:18).
-- O16. **A module may define a name twice**: `(module (define x 1)
+- O16. Done in part (2026-10-05): a module defining a name twice (a
+  generative type's `up-t` and `down-t` counted) is refused, "`x` is
+  defined twice in this module", in both checkers, a `load-module`'s file
+  too (`modules/defined-twice*.fx`). It was a soundness hole: with `(define
+  x int 1) (define x string "s")`, a function taking `(moduleof (val x
+  int))` got 42 natively and "expected an exact integer" lowered. Left:
+  `(abs () type)`. As it was: **A module may define a name twice**: `(module (define x 1)
   (define x 2))` checks, as `(moduleof (val x int) (val x int))`, which
   `moduleof` itself refuses ("appears twice"). Also `(abs () type)`, an
   empty list of names, is accepted.
