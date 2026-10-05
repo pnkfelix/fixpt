@@ -230,6 +230,17 @@ flat  ≤  tree  ≤  acyclic  ≤  graphic  ≤  (the top)
 So the question this axis answers is what can be done with a value:
 walked without `spin`, copied, compared structurally, printed, sent.
 
+Names, undecided (the user's ideas, 2026-10-05):
+- **`serial`** for the graphic level, in place of `graphic` (or `data`):
+  it names the boundary that matters, what can be serialized and sent,
+  and the top is exactly what cannot.
+- **`linear`** for the tree level: each object reachable along one path
+  only. A caution: "linear" already means used exactly once in linear
+  types (and FX-26 may want a little linearity, Q13 O11), which is a
+  property of how a value is used, not of its shape; the two are related
+  (a unique parent is what a linear reference preserves), so the clash
+  may be a reason for it or against it.
+
 **Axis 2: how the type itself is defined** (to name: *metatype*, *meta*,
 *source*, *reflect*). A property of the type's definition, not of its
 values, and purely static. The example is polytypism as PolyP has it:

@@ -708,8 +708,8 @@ Deferred because: the user's choice; nothing is wrong meanwhile.
 ## 33. Shape and how a type is defined: two axes, two kinds (the user's, 2026-10-05)
 
 `docs/research/shapes.md`, "Two axes, not one". The shape of the run-time
-values (flat ≤ tree, no sharing ≤ acyclic ≤ graphic, today's `data` ≤ a
-top with functions and generative types, which cannot be sent over the
+values (flat ≤ tree, no sharing, perhaps `linear` ≤ acyclic ≤ graphic,
+today's `data`, perhaps `serial` ≤ a top with functions and generative types, which cannot be sent over the
 wire) is one property; how the type itself is defined (PolyP's
 fixed points of one-parameter functors ≤ regular ≤ `type`, purely static,
 with casts of no run-time effect between definitions of the same
