@@ -1002,3 +1002,53 @@ regions' arenas and reaps; and the non-moving code area. What it lacks:
 
 Deferred because: a design to agree with the user first; each changes the
 collector's core.
+
+## 28. Introspecting the heap from inside: SRO with referrers, typed (the user's, 2026-10-05; PLAN Q15)
+
+The retention leak of 2026-10-05 (PLAN Q13, O2) was found by asking the
+heap, from Rust, who refers to what: `Heap::sro_referrers(kind, N, …)`,
+the user's generalisation of SRO, gives every reachable object up to N of
+its referrers (an object and field, or a root), or "more than N"; one
+trace, no target. Walking back from every object of a kind (all live
+cellular words, say) and tallying what the walks pass through finds what
+holds things, without knowing beforehand what should be dead.
+
+1. **From the Scheme REPL.** `%sro-referrers kind limit` (and `%path-to
+   obj`), as `%sro` is an engine operation (`fixpt-runtime/src/prim.rs`:
+   only the engine knows its stacks), and a test that finds the
+   `c-made-now` leak again from Scheme, against the old compiler.
+2. **From FX-26, typed.** What is expressible now: each object as an
+   opaque mirror, `heap-object`, a standard type as `identity` and
+   `eqtable` are (identity, its kind, its field count; holding a weak
+   reference, so asking does not keep the answer alive); a referrer as a
+   `sumof` (root, global, symbol, a field of a mirror, many); the table in
+   a region the caller names, an arena say. What is not: the effect.
+   Introspection reads every region, private ones too, which masking says
+   no one outside can observe; and its answer depends on reachability,
+   which collection timing and the optimizer (inlining, CSE, constants made
+   once) change. So a new effect atom, `(introspect)`:
+   - never masked: a function that introspects is never pure, whatever it
+     allocates privately;
+   - in effect summaries with `comefrom` and global writes, so that no
+     transformation moves, merges or drops across it;
+   - outside the formal core's soundness claim, as `datum`'s acyclicity
+     is by contract (A3), or given a semantics there that says what it may
+     observe.
+3. **What delimits it.** Who may introspect what, so that a library's
+   private regions or abstract types are not laid open to any caller.
+   Racket's answers, *from memory, to check* (a research agent may read
+   the Racket reference): **inspectors** (`make-inspector`,
+   `current-inspector`) make a struct transparent only to an inspector
+   superior to the one it was made under, and reflection opaque to others;
+   code inspectors the same for compiled code. **Custodians** group and
+   shut down resources (threads, ports) and account and limit memory per
+   group. **Guardians** (Chez Scheme's; Racket's wills and executors) say
+   when an object has become unreachable, which our weak references
+   already do in part. For FX-26 the question is how an inspector-like
+   capability shows in types: perhaps `(introspect r)` on a region (an
+   inspector as a region one must be given), so that what a scope
+   allocates privately stays out of reach unless it hands the capability
+   out.
+
+Deferred because: the debugger (§26) is the first client; item 1 is small
+and could come first.

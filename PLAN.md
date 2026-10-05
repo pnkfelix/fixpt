@@ -199,7 +199,8 @@ before everything else, known holes before proofs.
   with the user.
 - D. **Debugging compiled code** (the user's, 2026-10-05): queue Q15,
   `docs/research/debugging.md`: names for `lldb` first, then spans through
-  the compilers, then a choice between `lldb` and a debugger of our own.
+  the compilers, then a choice between `lldb` and a debugger of our own;
+  and introspection from inside, an `(introspect)` effect (`TODO.md` §28).
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
@@ -2451,6 +2452,14 @@ interface, Mach-O objects with symbols, the code registry always on.
 debugger and for run-time errors). 3. The user's choice: `lldb` lines and
 formatters for tagged values, or a debugger of our own in the REPL over
 every machine, starting with a fuel trap that calls out and resumes.
+4. Introspection from inside (the user's; `TODO.md` §28): SRO with
+referrers (`Heap::sro_referrers`, up to N referrers of every object, or
+"many") as a Scheme primitive first; then typed in FX-26, with an opaque
+`heap-object` mirror type and a new effect atom, `(introspect)`, never
+masked and a barrier to transformations, since introspection reads every
+region, private ones too, and sees what collection and optimization
+change. What delimits it to be designed, after Racket's inspectors (and
+its custodians and guardians: from memory, to check).
 
 **Q16. The collector's next spaces** (the user's, 2026-10-05; `TODO.md`
 §27). A static area, never collected, with its own remembered set, for
