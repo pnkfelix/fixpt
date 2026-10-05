@@ -159,7 +159,8 @@ before everything else, known holes before proofs.
   coinductive trail). The re-check found the FX-26 checker without the
   Rust one's Fourier–Motzkin step, so the two disagreed on chained size
   facts; ported.
-- S4. **A3, the host's `datum`s**: acyclic by contract only (Scheme calling
+- S4. (Checked 2026-10-05, item N: unreachable from FX-26 programs.)
+  **A3, the host's `datum`s**: acyclic by contract only (Scheme calling
   an `fx:` global); a `read` with datum labels would break it. Enforce at
   the boundary, or certify what such a `read` makes.
 - S5. **The proof obligations** (item 4 below, moved here): T3 in full (a
@@ -193,8 +194,13 @@ before everything else, known holes before proofs.
   `soundness.md` §4.6, `control/frames-hold-private-state.fx`); O16 (done:
   a soundness hole, now a static error); O15's three disagreements and
   `load-module` from a loaded file (done); then `TODO.md` §34, with
-  `private-regions` restricted to `module` forms; and A3 (S4), checking
-  whether a cyclic `datum` can reach FX-26 today.
+  `private-regions` restricted to `module` forms; and A3 (S4), checked
+  (2026-10-05): no FX-26 program can make a cyclic `datum` (every
+  constructor is pure over acyclic parts, and `datum-list` of a list made
+  cyclic with `set-cdr!` fails, "expected a list", lowered and natively);
+  only Rust or Scheme code calling an `fx:` global directly could pass one,
+  the contract S4 is about. Found: the FX-26 evaluator has no `datum-int`
+  (`--fx26-run evaluate`, "unbound variable"), as O3 found `list-length`.
 - O. **What a day of writing `okasaki.fx` found** (the user's,
   2026-10-05): queue Q13, eighteen items. First O1 (a typo in a type
   read silently as a named parameter), O3 (`list-length` missing from
