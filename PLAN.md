@@ -199,7 +199,8 @@ before everything else, known holes before proofs.
   `&mut State` would be), `table.fx` the pilot (done: a module, at no
   measurable cost; types re-exported through a family failed on a region
   argument, fixed, and a family's name re-exported, `(define-type t
-  (select m t))`, applies; a re-exported name lost inlining, a call 1.7×
+  (select m t))`, applies, so `table.fx`'s types moved in too, check
+  1.5% slower; a re-exported name lost inlining, a call 1.7×
   slower on register code, now inlined when the member names no other,
   `DONE.md` §38), which found that a
   module's definitions did not see themselves (done, `DONE.md` §37: a

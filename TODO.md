@@ -787,6 +787,15 @@ measurable. What it found:
   tests `modules/family-alias.fx`, `modules/family-region-param.fx`). The
   types can move into the module.
 
+**The pilot, again (2026-10-05).** `table.fx`'s six types are now inside
+`tables`, its three one-member `define-rec`s plain `define`s (§37), and
+the one type other files name re-exported, `(define-type table (select
+tables table))`. The self-compile as register code, back to back, three
+runs before and six after (`tests/bootstrap.rs`, `comparison`): check
+1.21–1.22 s against 1.23–1.24 s, about 1.5% slower; compile 0.15 s both.
+Probably each use of `(table …)` elsewhere now going through a `select`
+resolved at its use; not looked into.
+
 ## 35. Provenance in the names of our code (the user's, 2026-10-05)
 
 `FIXPT_SYMBOLS` names (`docs/performance.md`, "Profiling with `sample`")
