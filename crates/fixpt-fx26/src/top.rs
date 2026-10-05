@@ -519,11 +519,19 @@ impl Checker {
                     if !self.interner.name(name).starts_with('@') {
                         return Err(FxError::at(r.span, "a region constant is written `@name`"));
                     }
-                    let base = self.interner.name(name).to_string();
-                    let fresh = self.fresh_region_named(&base);
-                    self.dscope.push((name, crate::parse::DScope::Private(fresh)));
-                    self.private_regions.push(fresh);
-                    regions.push(fresh);
+                    // Declared private again, as by a file loaded again: the
+                    // same program, over the same regions.
+                    let region = match self.lookup_desc(name) {
+                        Some(crate::parse::DScope::Private(r)) => r,
+                        _ => {
+                            let base = self.interner.name(name).to_string();
+                            let fresh = self.fresh_region_named(&base);
+                            self.private_regions.push(fresh);
+                            fresh
+                        }
+                    };
+                    self.dscope.push((name, crate::parse::DScope::Private(region)));
+                    regions.push(region);
                 }
                 Ok(Top::PrivateRegions { regions })
             }

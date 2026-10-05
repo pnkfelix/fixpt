@@ -131,3 +131,40 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel:
     })
     .unwrap_or_else(|e| NativeRun::Ran(Err(e)))
 }
+
+/// `private-regions` declared again, as by a file loaded again, binds the
+/// regions the program already has (TODO §30): `xs`, made before, is still
+/// a list `total`, defined after, takes. Compiled, so that the checker
+/// written in FX-26 agrees.
+#[test]
+fn private_regions_declared_again_are_the_same() {
+    for strategy in [Strategy::Lower, Strategy::Cellular] {
+        let mut s = session();
+        s.strategy = strategy;
+        let out = run(&mut s, include_str!("programs/redefine/private-again.fx"));
+        assert_eq!(out.last().map(|s| s.as_str()), Some("30"), "{strategy:?}: {out:?}");
+    }
+}
+
+/// With re-runs waiting, as at the REPL (TODO §29), compiled: `g` keeps
+/// the old `f` and is out of date, not run again by the compiler written
+/// in FX-26; `,rerun-outdated` runs it, once `f` takes an int again.
+#[test]
+fn reruns_wait_when_asked_compiled() {
+    let mut s = session();
+    s.strategy = Strategy::Cellular;
+    s.set_defer_reruns(true);
+    let out = run(&mut s, "(define f (subr pure (int) int) (lambda (n) (+ n 1)))\n(define* g (subr pure (int) int) (lambda (n) (f n)))\n(define f (subr pure (string) int) (lambda (s) (string-length s)))\n(g 1)");
+    assert!(!out[2].contains("run again") && !out[2].contains("broken"), "{out:?}");
+    assert_eq!(out[3], "2", "`g` keeps the old `f`: {out:?}");
+    assert_eq!(s.outdated(), vec![(vec!["g".to_string()], vec!["f".to_string()])]);
+    let again = s.rerun_outdated();
+    assert!(again.len() == 1 && again[0].1.is_err(), "`g` does not check against the new `f`");
+    assert_eq!(s.outdated().len(), 1, "and stays out of date");
+    let out = run(&mut s, "(define f (subr pure (int) int) (lambda (n) (* n 100)))\n(g 1)");
+    assert_eq!(out[1], "2", "still the old `f`: {out:?}");
+    let again = s.rerun_outdated();
+    assert!(again.len() == 1 && again[0].1.is_ok(), "{:?}", again.iter().map(|(n, o)| (n, o.as_ref().err().map(|e| &e.message))).collect::<Vec<_>>());
+    assert!(s.outdated().is_empty());
+    assert_eq!(run(&mut s, "(g 1)"), ["100"]);
+}

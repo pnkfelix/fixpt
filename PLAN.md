@@ -183,7 +183,8 @@ before everything else, known holes before proofs.
   the FX-26 evaluator) and O4 (globals rebound with `let` to avoid their
   read effect); then O5 (`call/ec`) and O8 (a variadic `string-append`).
   O2 done: the REPL's code is collected, and old definitions die. O12
-  done: at the REPL, re-runs wait for `,rerun-outdated`.
+  done: at the REPL, re-runs wait for `,rerun-outdated`. O13 done: a file
+  loaded again keeps its private regions.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:
@@ -2388,7 +2389,8 @@ urgency: O1, O3, O4; then O5, O8; the rest as they come.
   load redefines a few lines later. The user's choice: re-run on request,
   the REPL showing how many re-runs wait; at least, never re-run within a
   load what the load is about to redefine.
-- O13 (`TODO.md` §30). **`private-regions` makes new regions on every load**: `@q`
+- O13 (`DONE.md` §30). Done (2026-10-05): declared again, a private region
+  is the one the program has. **`private-regions` makes new regions on every load**: `@q`
   becomes `@q.4` on the second load, so re-run dependents, still typed at
   `@q.1`, fail until the load redefines them. Declaring an existing
   private region again should bind the same one.

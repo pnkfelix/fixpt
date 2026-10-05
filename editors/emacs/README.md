@@ -65,8 +65,7 @@ says why, and `,rerun-outdated` runs them again (`docs/fx26.md`,
 What is not there yet (PLAN Q14, `TODO.md` §25): hover types for any
 expression, not only globals, and completion, which wait for `fixpt lsp`;
 `C-c C-c` stopping a running form, which waits for a fuel trap that
-resumes (Q15); and O13 (`private-regions` new on each load, `TODO.md`
-§30).
+resumes (Q15).
 
 ## Tests
 

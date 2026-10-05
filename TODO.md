@@ -569,8 +569,7 @@ a small major mode and a comint REPL. After `fx26-mode`:
 3. **The rest of what a REPL running all day needs.** Output, results,
    errors and notes kept apart (tagged, or `--format sexp`, which Elisp's
    `read` takes as is); `C-c C-c` (SIGINT) stopping a running form, by the
-   resumable fuel trap of §26; and §30 (`private-regions` making new
-   regions on each load).
+   resumable fuel trap of §26.
 
 Deferred because: the user is to use step 1 first, to learn what they
 actually reach for before the server is built.
@@ -674,15 +673,3 @@ holds things, without knowing beforehand what should be dead.
 
 Deferred because: the debugger (§26) is the first client; item 1 is small
 and could come first.
-
-## 30. `private-regions` makes new regions on every load (the user's, 2026-10-05; PLAN Q13 O13)
-
-`(private-regions @q)` read again, by a second `,load` of the same file,
-makes `@q` a new private region (`@q.4`), so definitions still typed at
-the old one (`@q.1`) and those defined again at the new one no longer fit
-together: a re-run dependent fails until the load redefines it, and a
-value made before the load cannot be passed to a procedure defined by it.
-Declaring a region the program already has as private again should bind
-the same one, in both checkers (`top.rs`'s `private-regions`,
-`check-program.fx`'s `k-private`), so that a reload is the same program
-over the same regions. A file that means fresh regions can name new ones.

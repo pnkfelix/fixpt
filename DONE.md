@@ -487,3 +487,21 @@ definitions) → 0, breakages from them (O13's regions) → 0, total 6.4 →
 5.3 s (start-up and the first load are 3.5 s; each reload 0.15 → 0.09 s).
 Test: `fixpt-cli/tests/dialects.rs`,
 `the_fx26_repl_reruns_outdated_definitions_when_asked`.
+
+## 30. Private regions declared again are the same (2026-10-05; PLAN Q13 O13)
+
+`(private-regions @q)` read again, by a second `,load` of the same file,
+made `@q` a new private region (`@q.4`), so definitions still typed at the
+old one (`@q.1`) and those defined again at the new one no longer fitted
+together: a re-run dependent failed until the load redefined it, and a
+value made before the load could not be passed to a procedure defined by
+it. Now a region the program already has as private, declared private
+again, stands for the same one, in both checkers (`top.rs`'s
+`private-regions`, `check-program.fx`'s `k-private-region`): a reload is
+the same program over the same regions (`docs/fx26.md`, "Redefinition").
+Twenty loads of `okasaki.fx` now show only `@q.1`, and its redefinitions
+assign their globals (380), but for `expects`, whose inferred type names a
+region fresh at each load (`@r.2`), so that it makes a new global (19),
+which nothing uses. Test:
+`programs/redefine/private-again.fx`, `tests/redefine.rs`
+`private_regions_declared_again_are_the_same`, lowered and compiled.
