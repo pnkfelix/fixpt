@@ -168,7 +168,14 @@ before everything else, known holes before proofs.
   relation over region levels, and size-change proved), T6 space (a
   harness measuring space against `S_place`). Probe each new rule with
   the soundness agent before building on it.
-- B1. **A crash: register code's long branches** (found 2026-10-02 by
+- B1. Done (2026-10-05): a word whose conditional branches cannot reach
+  (±2^18 instructions) is assembled again with each as the opposite
+  condition over a `b` (`Asm::long_branches`, `branches_fit`), in both
+  the cells' and register code's assemblers; the native convention's
+  refuses such a procedure, which runs as cellular code. `ocaml/boyer`
+  gives 30 on every machine (`tests/dialects.rs`,
+  `a_word_too_long_for_its_branches_runs`). As it was:
+  **A crash: register code's long branches** (found 2026-10-02 by
   `fixpt bench`). `--cellular-machine registers eval
   mllang-bench/fx/ocaml/boyer.fx` panics, "441625 does not fit 19
   signed bits": `assemble_register_word` places its trap stubs, slow
@@ -181,6 +188,15 @@ before everything else, known holes before proofs.
   minutes**, a major collection at every run of placed code, since the
   code collection's trigger was reset only by compiling. 347 → 19.5 s;
   the suite 9 → 3.5 minutes.
+- N. **Next, the user's order (2026-10-05)**: B1 (done); then probe T3's
+  continuation gap (`soundness.md` §4.6: does a composable
+  continuation's effect hide what its frames touch?); O16 (a module
+  defining a name twice: a static error); O15's `await` as a `proj`
+  argument and parameterised `define-datatype` in a loaded file (the
+  checkers must agree); `load-module` from a loaded file (FX-26), which
+  moving the front end to modules will need; `TODO.md` §34, with
+  `private-regions` restricted to `module` forms; and A3 (S4), checking
+  whether a cyclic `datum` can reach FX-26 today.
 - O. **What a day of writing `okasaki.fx` found** (the user's,
   2026-10-05): queue Q13, eighteen items. First O1 (a typo in a type
   read silently as a named parameter), O3 (`list-length` missing from

@@ -556,6 +556,14 @@ impl Asm {
 /// instruction's code after another; and where each cell's resume point
 /// is (`-1` for none), for [`NativeMachine::install`].
 pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(Vec<u32>, Vec<i64>), String> {
+    assemble_register_word_as(heap, rw, far, false)
+}
+
+/// [`assemble_register_word`], with every conditional branch long if
+/// `long`: a word of hundreds of thousands of instructions has branches
+/// to its trap stubs and slow paths, placed at its end, that a conditional
+/// branch's ±1 MB cannot reach (PLAN.md B1, `mllang-bench/fx/ocaml/boyer.fx`).
+fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) -> Result<(Vec<u32>, Vec<i64>), String> {
     let fields = heap.bloblet_head(rw).fields;
     let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(rw, k)).collect();
     let mut starts = vec![false; cells.len() + 1];
@@ -565,6 +573,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
         i += 1 + OPS[cells[i].as_fixnum() as usize].1;
     }
     let mut a = Asm::new();
+    a.long_branches = long;
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
     let mut resume = vec![-1i64; cells.len()];
     let far_exit = a.exit_common;
@@ -965,6 +974,9 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     a.e(ldr(X16, ST, off(offset_of!(State, exit))));
     a.e(br(X16));
     let _ = (far, far_exit, starts, REGS);
+    if !long && !a.branches_fit() {
+        return assemble_register_word_as(heap, rw, far, true);
+    }
     Ok((a.finish(), resume))
 }
 

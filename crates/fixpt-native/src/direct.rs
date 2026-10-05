@@ -405,11 +405,14 @@ struct Asm {
     code: Vec<u32>,
     labels: Vec<Option<usize>>,
     fixups: Vec<(usize, Label, Fix)>,
+    /// A field loaded from further than `ldr`'s 19 bits reach: the code is
+    /// refused (`finish`), and the procedure runs as cellular code.
+    too_far: bool,
 }
 
 impl Asm {
     fn new() -> Asm {
-        Asm { code: Vec::new(), labels: Vec::new(), fixups: Vec::new() }
+        Asm { code: Vec::new(), labels: Vec::new(), fixups: Vec::new(), too_far: false }
     }
     fn e(&mut self, w: u32) {
         self.code.push(w);
@@ -430,6 +433,20 @@ impl Asm {
         self.code.push(NOP);
     }
     fn finish(mut self) -> Result<Vec<u32>, String> {
+        // Too long for what a branch or a load reaches (`b.cond`, `adr`
+        // and `ldr` have ±2^18 instructions): refused, not a panic, so
+        // that the procedure runs as cellular code, saying why (PLAN.md B1).
+        let too_far = || format!("its code, {} instructions, is too long for a branch or load to reach across", self.code.len());
+        if self.too_far {
+            return Err(too_far());
+        }
+        for &(at, l, f) in &self.fixups {
+            let to = self.labels[l.0].ok_or("a label never placed")? as i64;
+            let reach = if matches!(f, Fix::B | Fix::Bl) { 1i64 << 25 } else { 1i64 << 18 };
+            if !(-reach..reach).contains(&(to - at as i64)) {
+                return Err(too_far());
+            }
+        }
         for (at, l, f) in std::mem::take(&mut self.fixups) {
             let to = self.labels[l.0].ok_or("a label never placed")?;
             let d = to as i64 - at as i64;
@@ -2788,7 +2805,13 @@ fn call_out(a: &mut Asm, n: usize) {
 /// `k` is `8k` bytes before the code's first instruction.
 fn ldr_field(a: &mut Asm, t: Reg, k: usize) {
     let at = a.code.len() as i64;
-    a.e(ldr_lit(t, -2 * k as i64 - at));
+    let d = -2 * k as i64 - at;
+    if d < -(1 << 18) {
+        a.too_far = true;
+        a.e(0xD503_201F); // nop: refused at `finish`
+    } else {
+        a.e(ldr_lit(t, d));
+    }
 }
 
 /// Field `k` of the bloblet whose `suffix + 4` is in a register, as an

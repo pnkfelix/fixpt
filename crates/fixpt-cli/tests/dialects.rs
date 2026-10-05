@@ -418,3 +418,21 @@ fn the_fx26_repl_reruns_outdated_definitions_when_asked() {
     said("fx26> ; nothing is out of date");
     assert!(!stdout.contains("run again, as they use it"), "{stdout}");
 }
+
+/// A word too long for a conditional branch to reach its end (PLAN.md B1):
+/// `ocaml/boyer`'s largest register word is over 441,000 instructions,
+/// and its branches to the trap stubs placed at its end panicked, "does
+/// not fit 19 signed bits". Such a word is assembled again with long
+/// branches; native code too long is refused and runs as cellular code.
+#[test]
+fn a_word_too_long_for_its_branches_runs() {
+    let boyer = concat!(env!("CARGO_MANIFEST_DIR"), "/../../mllang-bench/fx/ocaml/boyer.fx");
+    for convention in ["cellular", "native"] {
+        let out = Command::new(FIXPT)
+            .args(["--dialect", "fx26", "--step-limit", "none", "--fx26-run", "cellular", "--cellular-machine", "registers", "--calling-convention", convention, "eval", boyer])
+            .output()
+            .expect("fixpt runs");
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(stdout.lines().last().is_some_and(|l| l.starts_with("30 : int")), "{convention}:\n{stdout}\n{stderr}");
+    }
+}

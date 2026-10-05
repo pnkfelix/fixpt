@@ -126,6 +126,10 @@ struct Asm {
     /// Register code with a frame: how far below `FP` its link is, which
     /// `x30` is loaded from again after anything that may change it.
     link: Option<usize>,
+    /// Every conditional branch to a label as the opposite condition over
+    /// a `b`: for a word too long for their 19 bits (±1 MB), which
+    /// [`Asm::branches_fit`] finds after a first assembly.
+    long_branches: bool,
 }
 
 impl Asm {
@@ -141,6 +145,7 @@ impl Asm {
             target: None,
             at: 0,
             link: None,
+            long_branches: false,
         };
         a.trap_common = a.label();
         a.exit_common = a.label();
@@ -174,13 +179,39 @@ impl Asm {
         self.to(l, bl(0));
     }
     fn b_cond(&mut self, c: Cond, l: Label) {
-        self.to(l, b_cond(c, 0));
+        if self.long_branches {
+            // The opposite condition (its low bit flipped) past the `b`.
+            self.e(b_cond(c, 2) ^ 1);
+            self.b(l);
+        } else {
+            self.to(l, b_cond(c, 0));
+        }
     }
     fn cbnz(&mut self, t: Reg, l: Label) {
-        self.to(l, cbnz(t, 0));
+        if self.long_branches {
+            self.e(cbz(t, 2));
+            self.b(l);
+        } else {
+            self.to(l, cbnz(t, 0));
+        }
     }
     fn cbz(&mut self, t: Reg, l: Label) {
-        self.to(l, cbz(t, 0));
+        if self.long_branches {
+            self.e(cbnz(t, 2));
+            self.b(l);
+        } else {
+            self.to(l, cbz(t, 0));
+        }
+    }
+    /// Whether every branch to a label reaches it: a conditional one has
+    /// 19 bits, ±2^18 instructions, `b` and `bl` 26. A word whose do not
+    /// is assembled again with `long_branches`.
+    fn branches_fit(&self) -> bool {
+        self.fixups.iter().all(|&(at, l)| {
+            let d = self.labels[l].map_or(0, |to| to - at as i64);
+            let bits = if self.code[at] & 0x7C00_0000 == 0x1400_0000 { 26 } else { 19 };
+            (-(1i64 << (bits - 1))..(1i64 << (bits - 1))).contains(&d)
+        })
     }
     /// Trap with `trap` if `c` holds.
     fn trap_if(&mut self, c: Cond, trap: Trap) {
@@ -897,6 +928,11 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
 /// that is an operand. [`NativeMachine::compile_word`] places it; the
 /// compiler written in FX-26 must make exactly this.
 pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32>, Vec<i64>), String> {
+    assemble_word_as(heap, word, far, false)
+}
+
+/// [`assemble_word`], with every conditional branch long if `long`.
+fn assemble_word_as(heap: &Heap, word: Value, far: [i64; 2], long: bool) -> Result<(Vec<u32>, Vec<i64>), String> {
     let fields = heap.bloblet_head(word).fields;
     let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(word, k)).collect();
     // Where each instruction starts.
@@ -907,6 +943,7 @@ pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32
         i += if cells[i].is_fixnum() { 1 + fixpt_heap::layout::cellular::operands(ROUTINES[cells[i].as_fixnum() as usize].0) } else { 1 };
     }
     let mut a = Asm::new();
+    a.long_branches = long;
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
     // The machine's common exit is a conditional branch away from some
     // routines, too far from a large word's code: each cell's goes to a
@@ -965,6 +1002,10 @@ pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32
     a.bind(ec);
     a.e(ldr(X16, ST, off(offset_of!(State, exit))));
     a.e(br(X16));
+    // Too long for a conditional branch to reach (B1): again, long.
+    if !long && !a.branches_fit() {
+        return assemble_word_as(heap, word, far, true);
+    }
     let at: Vec<i64> = (0..cells.len()).map(|i| if starts[i] { a.labels[labels[i].0].expect("bound") } else { -1 }).collect();
     Ok((a.finish(), at))
 }
