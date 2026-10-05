@@ -3,6 +3,9 @@
 ;;; checker, `check-types.fx` first (moved out of `check-syntax.fx`,
 ;;; 2026-10-04).
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-args-module (module
 ;; Name or `dlambda` `s`, a description function.
 (define k-fun-d (subr (maxeff checks spin) (syn) k-desc)
   (lambda (s) (df ((get k-fun-reader) s -1))))
@@ -61,4 +64,6 @@
              (cond ((string=? hd "dlambda") (k-fun-d s))
                    ((or (k-atom-head? hd) (string=? hd "maxeff")) (de (k-parse-effect s)))
                    ((or (string=? hd "+") (string=? hd "-")) (dz (k-parse-size s)))
-                   (else (dt (k-parse-type s)))))))))
+                   (else (dt (k-parse-type s)))))))))))
+
+(define k-parse-d (with check-args-module k-parse-d))
