@@ -437,6 +437,18 @@ collection that moves the field's value; the native machines compiling
 into the area, so the test above passes; closures as code bloblets whose
 captured values are fields their code reads PC-relatively.
 
+**The cellular machines' code, collected by copying** (2026-10-05). The
+native and register code of cellular words still goes in a `CodeSpace`,
+not in this area, but it is collected now, as Larceny's code space is
+(`~/Dev/LangPlay/accomplice`, `f15e8caa`): a word's code is
+position-independent, reaching everything outside itself through the state
+or the table, so a collection copies each word still alive into a fresh
+space and rewrites only what points at it: its slot's entry in the table
+and its table of where to resume. Which words are alive, the heap says by
+weak references (`Heap::weak_add`), which each collection moves on or
+clears. Code is collected when 8 MB, and more than was live after the last
+time, has been installed since; or when a word does not fit.
+
 ## The header
 
 One word, for all but enormous bloblets:

@@ -1027,7 +1027,7 @@ impl NativeMachine {
             return Ok(true);
         }
         let (code, _) = assemble_register_word(heap, rw, [0, 0])?;
-        let (at, far) = self.reserve(code.len())?;
+        let (at, far) = self.reserve_collecting(heap, code.len())?;
         let (code, resume) = assemble_register_word(heap, rw, far)?;
         dump(heap, rw, at, &code);
         self.install(heap, rw, at, &code, &resume)?;
@@ -1040,7 +1040,7 @@ impl NativeMachine {
             return Ok(true);
         }
         let adapter = assemble_adapter(n, slot);
-        let (at, _) = self.reserve(adapter.len())?;
+        let (at, _) = self.reserve_collecting(heap, adapter.len())?;
         let cells = heap.bloblet_head(word).fields + 1 - WORD_CELL0;
         let mut starts = vec![-1i64; cells];
         starts[0] = 0;

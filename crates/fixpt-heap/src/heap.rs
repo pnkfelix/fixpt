@@ -86,6 +86,38 @@ fn read_head(mem: &[u64], at: usize) -> Head {
 /// make sound (`docs/object-model.md`). A forwarding pointer at `p - 1`
 /// means the collector has been here already, and is returned as `Err` with
 /// its target: where the main header went, relative to to-space.
+/// The next heap's [`serial`](Heap::serial).
+static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// What a weak reference to an object that died becomes.
+pub const WEAK_DEAD: Value = Value::fixnum(-1);
+
+/// After a collection has copied everything live out of `from` (the
+/// nursery, if `minor`): each of `weak` that pointed there moved on to its
+/// object's new place, or, if the object was not copied, [`WEAK_DEAD`].
+/// Before `from` is reused, while its forwarding pointers are there.
+fn update_weak(mem: &[u64], base: usize, weak: &mut [Value], from: usize, minor: bool) {
+    for w in weak.iter_mut() {
+        if !w.is_ref() {
+            continue;
+        }
+        let i = w.index() - base;
+        let moving = young::is_young(i) || (!minor && (from..from + MAX_SEMI_WORDS).contains(&i));
+        if !moving {
+            continue;
+        }
+        *w = if w.is_pair() {
+            let first = Value(mem[i]);
+            if first.is_forward() { Value::pair(first.index() + base) } else { WEAK_DEAD }
+        } else {
+            match find_main(mem, i) {
+                Err(new_main) => Value::bloblet(new_main + 1 + read_head(mem, new_main).fields + base),
+                Ok(_) => WEAK_DEAD,
+            }
+        };
+    }
+}
+
 #[inline]
 fn find_main(mem: &[u64], p: usize) -> Result<usize, usize> {
     let w = mem[p - 1];
@@ -192,6 +224,17 @@ pub struct Heap {
 
     /// Explicit roots held by native code across a safepoint.
     roots: Vec<Value>,
+    /// Weak references ([`weak_add`](Heap::weak_add)): each collection
+    /// moves an entry on with its object, or, if the object died, clears
+    /// it (to [`WEAK_DEAD`]). What a collection does not move (the code
+    /// area, regions, the old space in a minor collection) is taken as
+    /// alive.
+    weak: Vec<Value>,
+    /// The entries of `weak` released, for reuse.
+    weak_free: Vec<usize>,
+    /// Which heap this is, among those this process has made: for a
+    /// weak reference held outside, to be read only in its own heap.
+    serial: u64,
     /// While positive, [`maybe_collect`](Heap::maybe_collect) does nothing and
     /// the heap grows instead. For native code that holds `Value`s outside any
     /// root set across a call into Scheme — the macro expander, calling a
@@ -283,6 +326,9 @@ impl Heap {
             semi,
             top: 0,
             roots: Vec::new(),
+            weak: Vec::new(),
+            weak_free: Vec::new(),
+            serial: NEXT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             inhibited: 0,
             globals: Vec::new(),
             symbols: Vec::new(),
@@ -1213,6 +1259,11 @@ impl Heap {
         self.inhibited -= 1;
     }
 
+    /// Whether collection is held off ([`inhibit_collection`](Heap::inhibit_collection)).
+    pub fn collection_inhibited(&self) -> bool {
+        self.inhibited > 0
+    }
+
     /// Every Value the heap itself roots, for `sro`.
     pub(crate) fn roots_for_sro(&self) -> Vec<Value> {
         self.roots.iter().chain(&self.globals).chain(&self.symbols).copied().collect()
@@ -1279,6 +1330,40 @@ impl Heap {
         }
         self.due_major = full || (policy && (!self.generational || self.policy_count.is_multiple_of(4)));
         full || policy || nursery_full
+    }
+
+    /// Which heap this is, among those this process has made.
+    pub fn serial(&self) -> u64 {
+        self.serial
+    }
+
+    /// A weak reference to `v`, a pair or bloblet: its number, for
+    /// [`weak_get`](Heap::weak_get). It does not keep `v` alive.
+    pub fn weak_add(&mut self, v: Value) -> usize {
+        assert!(v.is_ref(), "a weak reference is to an object");
+        match self.weak_free.pop() {
+            Some(i) => {
+                self.weak[i] = v;
+                i
+            }
+            None => {
+                self.weak.push(v);
+                self.weak.len() - 1
+            }
+        }
+    }
+
+    /// Weak reference `i`'s object, where it is now; `None` once a
+    /// collection has found it dead.
+    pub fn weak_get(&self, i: usize) -> Option<Value> {
+        let v = self.weak[i];
+        v.is_ref().then_some(v)
+    }
+
+    /// Weak reference `i` no longer wanted: its number may be given again.
+    pub fn weak_release(&mut self, i: usize) {
+        self.weak[i] = WEAK_DEAD;
+        self.weak_free.push(i);
     }
 
     /// Cheney semispace copy. Compacts, which is also what makes a dumped image
@@ -1399,6 +1484,7 @@ impl Heap {
                 break;
             }
         }
+        update_weak(mem, self.base, &mut self.weak, from, false);
         let Copier { free, new, marked, code_marks, .. } = c;
         self.sweep_code(&code_marks);
         // Ended reaps' chunks no reference was found into may be reused;

@@ -1537,6 +1537,17 @@ each committed:
    `docs/performance.md`, "Closures: what copying code into each would
    cost").
 
+Done for the cellular machines (2026-10-05): their code space is
+collected by copying, as Larceny's is (`~/Dev/LangPlay/accomplice`,
+`f15e8caa` and `0524c5d6`): a word's code is position-independent (stated
+at the top of `fixpt-native/src/cellular.rs`), so collecting copies each
+word whose weak reference (`Heap::weak_add`, kept up by every collection)
+says it is alive into a fresh space, rewrites its slot's table entry and
+its resume table, and lets the dead words' slots go; when 8 MB, and more
+than was live, has been installed since, the heap is collected first. The
+space is 256 MiB reserved. `crates/fixpt-native/tests/code_gc.rs` passes,
+unignored. `FIXPT_CODE_TRACE=1` reports each collection.
+
 Seen in use (2026-10-05, Q13's O2): a REPL with `--fx26-run cellular
 --cellular-machine registers --calling-convention native` fills the 32 MiB
 code space after about 31 `,load`s of a 370-line file, about 1 MiB a load,
@@ -2306,7 +2317,13 @@ urgency: O1, O3, O4; then O5, O8; the rest as they come.
   syntax), and nothing complains. Refuse a named parameter no later type
   `select`s from, or say "did you mean `queueof`?" for a name one edit
   from a bound type, or give named parameters a syntax of their own.
-- O2. **The code space fills on reloading.** Reproduced: about 31
+- O2. **The code space fills on reloading.** *(Code collected,
+  2026-10-05: the cellular machines' code is now collected by copying,
+  Larceny's way, `NativeMachine::collect_code`; 300 reloads, no code-space
+  error. What is left: about 280 loads exhaust the 65,536 native slots,
+  because old definitions stay reachable (nearly every word of every load
+  survives a collection); the likely holder is the FX-26 compiler's
+  `c-genv-index`, which keeps every global ever made.)* Reproduced: about 31
   `,load`s of the file in one REPL started with `--dialect fx26
   --fx26-run cellular --cellular-machine registers --calling-convention
   native` (noted under "A collected code area"). Code is never reclaimed, and O12's re-runs compile several

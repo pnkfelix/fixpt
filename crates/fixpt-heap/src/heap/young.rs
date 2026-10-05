@@ -202,6 +202,7 @@ impl Heap {
         while scan < c.free {
             scan += Self::scan_one(mem, old_top + scan, &mut c);
         }
+        super::update_weak(mem, self.base, &mut self.weak, NURSERY_BASE, true);
         let free = c.free;
         self.top = old_top + free;
         assert!(self.top - self.active <= MAX_SEMI_WORDS, "the old space is full");

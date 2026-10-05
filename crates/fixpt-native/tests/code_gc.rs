@@ -25,7 +25,6 @@ fn fresh_word(rt: &mut Runtime, n: i64, pairs: usize) -> Value {
 /// collections between: several times what one code space holds, so that
 /// it passes only if dead words' machine code is reclaimed.
 #[test]
-#[ignore = "the cellular machines still compile into a CodeSpace; code in the native convention is collected (crates/fixpt-fx26/tests/direct.rs)"]
 fn generated_code_that_is_dropped_is_reclaimed() {
     let mut rt = Runtime::new();
     let mut m = NativeMachine::new();

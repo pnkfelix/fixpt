@@ -159,6 +159,14 @@ impl CodeSpace {
         unsafe { (self.rw.add(at) as *mut u64).write_volatile(v) };
     }
 
+    /// The bytes at `at..at+len`, as written: for copying them elsewhere.
+    pub fn bytes(&self, at: Offset, len: usize) -> &[u8] {
+        self.check(at, len);
+        // SAFETY: in bounds (checked); the RW view lives as long as `self`,
+        // and is written only through `&mut self`.
+        unsafe { std::slice::from_raw_parts(self.rw.add(at), len) }
+    }
+
     pub fn read_u64(&self, at: Offset) -> u64 {
         assert!(at.is_multiple_of(8));
         self.check(at, 8);
