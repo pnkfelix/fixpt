@@ -732,6 +732,7 @@ fn control_on_native_frames() {
         ("bench/captures", "420000"),
         ("run/marks-of", "(7)"),
         ("control/private-mark", "1"),
+        ("control/frames-hold-private-state", "13"),
         ("run/tail-marks", "(1 2)"),
     ];
     // One session, loading the front end once: each program after the

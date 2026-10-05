@@ -812,6 +812,26 @@ memory/read claim of T3, the composable's control atoms
 suffice; for a full effect description, `D` would have to be closed under
 what the continuation's frames touch.
 
+**Probed (2026-10-05): the gap is real in the statement, and harmless.**
+`tests/programs/control/frames-hold-private-state.fx` is a witness. Inside
+a prompt, a counter at `@z`, a region named nowhere else, so that masking
+hides the body's effects on it; a composable continuation captured there
+gets out through a ref; calling it twice gives 12 and then 13. `again`,
+which calls it, has the effect `(maxeff (goto @p) (comefrom @p) (read @s)
+(write @s) (alloc @s) …)`: no `@z`, though the run reads and writes a
+location at `@z`. Both checkers agree, and every machine runs it so. So
+T3 as stated is false. What it does not break: the location is reachable
+only through the continuation's frames (that is why masking hid it), and
+every call of a composable has `goto` and `comefrom` on its tag's region,
+so no transformation, effect summary or licence takes such a call as
+pure, and another location at `@z` is a different one. The other routes
+to private state in frames are refused: capturing inside `letregion`,
+`letrena` or `letreap` is an error ("a continuation captured in
+`letregion r` could outlive its region"). The statement to prove is
+therefore T3 with "every location of `dom σ` … reachable other than
+through a continuation's frames", or with `comefrom ρ` read as covering
+what the frames of continuations at `ρ` hold.
+
 ### 4.7 Recursive and generative types
 
 Equi-recursive types are graphs. K26 requires them **contractive**: every

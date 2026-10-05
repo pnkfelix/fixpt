@@ -188,9 +188,9 @@ before everything else, known holes before proofs.
   minutes**, a major collection at every run of placed code, since the
   code collection's trigger was reset only by compiling. 347 → 19.5 s;
   the suite 9 → 3.5 minutes.
-- N. **Next, the user's order (2026-10-05)**: B1 (done); then probe T3's
-  continuation gap (`soundness.md` §4.6: does a composable
-  continuation's effect hide what its frames touch?); O16 (a module
+- N. **Next, the user's order (2026-10-05)**: B1 (done); T3's
+  continuation gap probed (done: real in the statement, harmless,
+  `soundness.md` §4.6, `control/frames-hold-private-state.fx`); O16 (a module
   defining a name twice: a static error); O15's `await` as a `proj`
   argument and parameterised `define-datatype` in a loaded file (the
   checkers must agree); `load-module` from a loaded file (FX-26), which
