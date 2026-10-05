@@ -44,7 +44,13 @@ this repository; `M-x customize-group RET fx26` sets another
 
 ## The REPL
 
-`M-x run-fx26` runs `fixpt --dialect fx26 --emacs repl` in `*fx26*`.
+`M-x run-fx26` runs, in `*fx26*`, `fixpt --dialect fx26 --fx26-run
+cellular --cellular-machine registers --calling-convention native --emacs
+repl`: forms compiled to native code by register code. Until compiled code
+is reclaimed (PLAN Q13, O2), the code space fills after some dozens of
+`,load`s; `M-x fx26-restart-repl` starts afresh. Without the three
+cellular flags (`fx26-repl-arguments`) the REPL runs lowered Scheme, slower
+and without that limit.
 With `--emacs`, `fixpt` prints no continuation prompt, and takes `,at FILE
 LINE COL` before a form: what is sent from a buffer is preceded by one, so
 its errors name the file, line and column it came from, and

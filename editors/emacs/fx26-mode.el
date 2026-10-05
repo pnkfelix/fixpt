@@ -44,10 +44,14 @@ When nil, the one in `exec-path', or else the repository's release build
 next to this file."
   :type '(choice (const :tag "Find it" nil) file))
 
-(defcustom fx26-repl-arguments '("--dialect" "fx26" "--emacs" "repl")
-  "Arguments for the REPL.
-Add flags such as \"--fx26-run\" \"cellular\" before \"repl\"; keep
-\"--emacs\"."
+(defcustom fx26-repl-arguments
+  '("--dialect" "fx26" "--fx26-run" "cellular" "--cellular-machine" "registers"
+    "--calling-convention" "native" "--emacs" "repl")
+  "Arguments for the REPL: native code, by register code, by default.
+Keep \"--emacs\".  Machine code is not yet reclaimed (PLAN Q13, O2):
+after some dozens of loads the code space is full, and
+`fx26-restart-repl' starts afresh.  Without the cellular flags the REPL
+runs lowered Scheme, slower, with no such limit."
   :type '(repeat string))
 
 (defcustom fx26-check-arguments '("check" "-")
@@ -272,6 +276,18 @@ after code, at `comment-column'."
   (interactive (list (or buffer-file-name (read-file-name "Load FX-26 file: "))))
   (when (and buffer-file-name (buffer-modified-p)) (save-buffer))
   (comint-send-string (fx26--process) (format ",load %s\n" (expand-file-name file))))
+
+(defun fx26-restart-repl ()
+  "Stop the REPL and start a fresh one: for when its code space is full."
+  (interactive)
+  (when-let ((proc (get-buffer-process fx26-repl-buffer-name)))
+    (delete-process proc))
+  (when-let ((buffer (get-buffer fx26-repl-buffer-name)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert "\n;; restarted\n"))))
+  (run-fx26))
 
 (defun fx26-switch-to-repl ()
   "Switch to the REPL, starting it if need be."
