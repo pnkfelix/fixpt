@@ -196,7 +196,10 @@ before everything else, known holes before proofs.
   `load-module` from a loaded file (done); then `TODO.md` §34: the front
   end into modules a file at a time, regions as program-wide names first
   (the user's choice; a wart, regions as parameters being what KFX26's
-  `&mut State` would be), `table.fx` the pilot; and A3 (S4), checked
+  `&mut State` would be), `table.fx` the pilot, which found that a
+  module's definitions do not see themselves (`TODO.md` §37: FX-91's
+  mutual visibility, its initialization hazard refused statically by
+  reachability; designed with the user, to build); and A3 (S4), checked
   (2026-10-05): no FX-26 program can make a cyclic `datum` (every
   constructor is pure over acyclic parts, and `datum-list` of a list made
   cyclic with `set-cdr!` fails, "expected a list", lowered and natively);

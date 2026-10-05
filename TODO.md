@@ -797,3 +797,52 @@ comment says), and analyze only them.
 
 Deferred because: the front end's loading, the cost the suite paid, is
 fixed; this is the general case.
+
+## 37. A module's definitions see each other, as FX-91's (the user's, 2026-10-05)
+
+In FX-26 a module's items are read in order, each seeing those before
+it, and a definition does not see its own name: recursion needs
+`(define-rec (f T e) …)`, even for one procedure. FX-26's own top level
+differs (a typed `define` of a lambda sees itself), and so does FX-91,
+whose report (§2.3.11, `module`) makes a module's values "successively
+evaluated and … mutually recursive": every definition's type is in scope
+in every definition. Found moving `table.fx` into a module (§34).
+
+**The design (agreed with the user).**
+- Every definition in a module whose value is a lambda (under `the`,
+  `plambda`, conventions) and whose type is written is visible everywhere
+  in the module, itself included: together they are one recursive group,
+  made first. `define-rec` stays accepted, and is no longer needed.
+- Every other definition is visible only after it, and its initializer
+  may read only definitions before it; it may name the group's lambdas
+  anywhere.
+- **The initialization hazard.** FX-91's dynamic semantics is stuck when
+  an initializer reaches a definition not yet evaluated, and our FX-91
+  port fails at run time ("f is used before it is defined") although the
+  module's type says pure: `(module (define a (f)) (define f (lambda ()
+  b)) (define b 1))`. FX-26 refuses it statically, by reachability: for
+  each non-lambda definition, the lambdas its initializer may reach (those
+  it names, those they name, and those named by the initializers of
+  earlier definitions it reads, since a value may carry a closure) must
+  read no non-lambda definition at or after it. Lambdas' positions never
+  matter; a module without a genuine initialization cycle is accepted
+  once its non-lambda definitions are in dependency order, and the error
+  names the definition to move earlier. Conservative where a value only
+  stores a closure (`(define handlers (list f g))` with `f` reading
+  `handlers`): rejected, though it would run; pass the table as an
+  argument, or fill it through a ref after.
+- Forward references need written types (as `define-rec`'s); FX-91 also
+  infers mutually recursive untyped definitions, which FX-26 does not.
+- A first rule, refusing any lambda's read of a non-lambda definition
+  after the first that runs module code, was dropped: it refuses the
+  common, safe pattern of state built by the module's own procedures and
+  read by others, and no reordering fixes it.
+
+Everywhere: both checkers (the rule in both, its message the same), the
+lowering, both compilers and the evaluator (the group made first, then
+the rest in order). Tests: the stuck FX-91 module refused, saying which
+definition; the `build`/`std`/`lookup` pattern accepted; self- and mutual
+recursion without `define-rec`; the `handlers` case refused.
+
+Deferred because: just designed; then the pilot (§34) goes on without
+its `define-rec`s.
