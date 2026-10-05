@@ -4,6 +4,9 @@
 
 ;;; ------------------------------------------------------------ synthesis
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-close-module (module
 ;; `(letrena r …)`'s or `(letreap r …)`'s body, of type `t` and effect `e`,
 ;; closed: its value
 ;; may not mention `r`, and no continuation captured in it may outlive it;
@@ -151,4 +154,9 @@
                         "` could still write its region's data: its type is " (k-show-ty t))
                 a b)
         (let ((frozen (tagcase into (r-frozen (p f) (r-frozen p (not written))) (else y into))))
-          (k-subst t (the k-map (cons (cons r (dr frozen)) nil)))))))
+          (k-subst t (the k-map (cons (cons r (dr frozen)) nil)))))))))
+
+(define k-close-region (with check-close-module k-close-region))
+(define k-note-effect (with check-close-module k-note-effect))
+(define k-frozen (with check-close-module k-frozen))
+(define k-frozen-result (with check-close-module k-frozen-result))
