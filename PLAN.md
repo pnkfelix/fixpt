@@ -193,8 +193,10 @@ before everything else, known holes before proofs.
   continuation gap probed (done: real in the statement, harmless,
   `soundness.md` §4.6, `control/frames-hold-private-state.fx`); O16 (done:
   a soundness hole, now a static error); O15's three disagreements and
-  `load-module` from a loaded file (done); then `TODO.md` §34, with
-  `private-regions` restricted to `module` forms; and A3 (S4), checked
+  `load-module` from a loaded file (done); then `TODO.md` §34: the front
+  end into modules a file at a time, regions as program-wide names first
+  (the user's choice; a wart, regions as parameters being what KFX26's
+  `&mut State` would be), `table.fx` the pilot; and A3 (S4), checked
   (2026-10-05): no FX-26 program can make a cyclic `datum` (every
   constructor is pure over acyclic parts, and `datum-list` of a list made
   cyclic with `set-cdr!` fails, "expected a list", lowered and natively);

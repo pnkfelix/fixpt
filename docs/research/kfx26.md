@@ -66,7 +66,10 @@ As the front end uses each:
 1. **The memory model.** Trees as immutable values (`Rc` or `Box` in
    Rust); mutable state only in one region per phase, rendered as one
    `&mut State`. The front end is written so already: `@t` the
-   checker's, `@k` the compiler's.
+   checker's, `@k` the compiler's. (2026-10-05: moving the front end
+   into modules, its files name those regions as program-wide names, a
+   wart; a region passed as a parameter, which also works, is what a
+   `&mut State` would be. `TODO.md` §34.)
 2. **Errors.** Control restricted to the one abort-to-error pattern,
    which becomes `Result`.
 3. **Annotations.** Which Rust choices are said in types or comments:

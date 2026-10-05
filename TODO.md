@@ -733,6 +733,38 @@ To check:
 Deferred because: the user's question, to answer before the REPL relies
 on reloads of more than one file.
 
+**Where it is going (2026-10-05, with the user).** The fix is to move the
+front end's files, and programs like `okasaki.fx`, into modules, a file at
+a time, with only the program that assembles them declaring private
+regions. Two ways for a module to reach the regions its state is in were
+weighed, both working today:
+- **Regions as parameters**: the file a `plambda` over its regions whose
+  body is a thunk building the module, `(plambda ((t region)) (lambda ()
+  (module …)))`, instantiated by the program with its own (checked: both
+  checkers, both paths). Any number of instances; loadable with
+  `load-module`, which sees only the standard environment; an interface
+  that stands alone, as separate compilation (Q9) wants. The cost: `@t`
+  becomes `t` in the file's text.
+- **Regions as program-wide names**: one top-level `(private-regions @t
+  …)` ahead of the files, each an inline `(define m (module …))` that names
+  `@t` directly. No change to the files' text beyond the wrapper; one
+  instance; not loadable by `load-module` (`@t` is unbound there).
+
+**Chosen first: program-wide names** (the user's). **A wart to keep in
+mind**: modules depend on ambient region names, so they cannot be
+loaded, instantiated twice or compiled apart; and KFX26
+(`docs/research/kfx26.md`, "Decisions to make first", 1) renders a
+phase's state as one `&mut State`, which a region parameter is and an
+ambient region is not (a `static`, in Rust). KFX26's plan may well decide
+for parameters; revisit then, a file at a time.
+
+The other blockers to moving files into modules, found surveying the
+front end (`fixpt front-end-files`): `define-datatype` in `module` forms
+(25 in 8 files); `define-effect` in modules, and effect abbreviations
+exported (31 in 9); `define*` in modules (33 in 13); top-level `(set hook
+impl)` forward references between files (16 in 7). A first pilot,
+`table.fx`, needs none of them.
+
 ## 35. Provenance in the names of our code (the user's, 2026-10-05)
 
 `FIXPT_SYMBOLS` names (`docs/performance.md`, "Profiling with `sample`")
