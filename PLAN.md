@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-04)
+## At a glance (kept current; last updated 2026-10-05)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -177,6 +177,12 @@ before everything else, known holes before proofs.
   out of range (±1 MB). The cells' assembler gives each cell a jump of its
   own for this; register code needs the same, or stubs flushed every so
   often with a branch around them, and so does a `branchf` to a far cell.
+- O. **What a day of writing `okasaki.fx` found** (the user's,
+  2026-10-05): queue Q13, fourteen items. First O1 (a typo in a type
+  read silently as a named parameter), O3 (`list-length` missing from
+  the FX-26 evaluator) and O4 (globals rebound with `let` to avoid their
+  read effect); then O5 (`call/ec`) and O8 (a variadic `string-append`).
+  O2: the REPL's code space fills after about 31 `,load`s of one file.
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
@@ -190,7 +196,8 @@ one pure `eq?`, `eqtable`; `equal` and `dynamic` ported, four ports'
 workarounds retired);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions; Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
-friction; Q12 first-class modules, beside globals
+friction; Q13 what `okasaki.fx` found (2026-10-05, below Q11); Q12
+first-class modules, beside globals
 (`docs/research/first-class-modules.md`: M1 done 2026-10-01, the Rust
 checker and lowering; M2 done 2026-10-01, the FX-26 parser and checker,
 the checkers agreeing; M3 (the compilers), M4 (module subtyping), M5
@@ -1518,6 +1525,11 @@ each committed:
    `docs/performance.md`, "Closures: what copying code into each would
    cost").
 
+Seen in use (2026-10-05, Q13's O2): a REPL with `--fx26-run cellular
+--cellular-machine registers --calling-convention native` fills the 32 MiB
+code space after about 31 `,load`s of a 370-line file, about 1 MiB a load,
+several times what one compile needs because of O12's re-runs.
+
 The alternative, running code from the semispaces, was set aside because
 bloblets can live in a non-moving area the collector traces; it stays open
 should fragmentation call for moving code.
@@ -2270,6 +2282,81 @@ equal object made before (hash-consing), whose effect is `(alloc r)`, not
 a write; or storage that only grows, an `(extend r)` effect that a reader
 of `r` need not fear, since nothing it saw changes. Either would serve
 any memo table that only adds.
+
+**Q13. What `okasaki.fx` found** (the user's day of writing Okasaki's
+queues with higher kinds and modules, `~/Dev/Fixpt/okasaki.fx`,
+2026-10-05; each claim checked against the build of that day). By
+urgency: O1, O3, O4; then O5, O8; the rest as they come.
+
+- O1. **A typo in a type is read as a named parameter.** `(subr pure
+  ((queueuof a)) unit)`, `queueof` misspelt, is a dependent procedure
+  taking a parameter *named* `queueuof` of type `a` (M5's `(name type)`
+  syntax), and nothing complains. Refuse a named parameter no later type
+  `select`s from, or say "did you mean `queueof`?" for a name one edit
+  from a bound type, or give named parameters a syntax of their own.
+- O2. **The code space fills on reloading.** Reproduced: about 31
+  `,load`s of the file in one REPL started with `--dialect fx26
+  --fx26-run cellular --cellular-machine registers --calling-convention
+  native` (noted under "A collected code area"). Code is never reclaimed, and O12's re-runs compile several
+  times per load. The collected code area is the cure; short of it,
+  reclaim a word's code when its definition is replaced and nothing
+  reaches it.
+- O3. **`list-length` is missing from the evaluator written in FX-26**:
+  `--fx26-run evaluate` fails, "unbound variable `list-length`"; every
+  other path has it.
+- O4. **Reading a global is an effect, so globals are rebound with
+  `let`** (the file's `(let ((call-with-l2q call-with-l2q) …) …)`
+  throughout). Treat a global never redefined as a constant; or infer a
+  declared type's `(read (globals …))` part, as `define*` does; or let a
+  declared effect leave it out.
+- O5. **`call/ec`, an escape-only continuation.** As convenient as
+  `cwcc` (no tag to thread, the answer type inferred), without its
+  `comefrom` and `spin`: calling the escape after `call/ec` returns is an
+  error at run time, not a re-entry. A fresh region per `call/ec`, masked
+  where it does not escape, would also retire the file's single `@raise`
+  (its "no `runion`" workaround). A tag and a prompt underneath.
+- O6. **Prompts' types are awkward**: a tag's answer type and bound `D`
+  must be fixed where it is made, before the prompt says what they are.
+  Infer them from the prompt when the tag is `let`-bound beside it. Also
+  to reproduce: "even when I fully parameterize over effect f, it still
+  says the tag wants its delimited continuations to be pure".
+- O7. **`length` and `list-length`.** `length` takes only an `nlist`,
+  and its error prints the wanted type as `(nlist ? n)`. Rename (`length`
+  for `listof`, `nlist-length` for the sized one), or make an `nlist` a
+  subtype of a `listof` so one name serves both; print unknowns readably.
+- O8. **`string-append` takes two arguments** ("expected 2 argument(s),
+  got 3"); with `vsubr` it can take any number, retiring the file's
+  `string-append6`.
+- O9. **A module is not checked against the signature it is defined at.**
+  Given `(define m sig (module …))`, read each item against `sig`'s type
+  for it, so that `empty` and `snoc` need no annotation; and say what
+  differs when they do not fit.
+- O10. **A form for where it is written**: the file and line as a
+  string, beside continuation marks such as the file's `src-ctxt`.
+- O11. **Effects of functional data structures** (a research note, not
+  code): `grow` lands in unexpected places (`tail`, which moves `r` to
+  `f`). Can masking hide allocation in a structure's own region? Could a
+  little linearity, static or checked at run time, let `reverse` work in
+  place?
+- O12. **Re-running dependents during a load.** A second load of the file
+  re-runs dependents 13 times, one redefinition re-running 10 forms the
+  load redefines a few lines later. The user's choice: re-run on request,
+  the REPL showing how many re-runs wait; at least, never re-run within a
+  load what the load is about to redefine.
+- O13. **`private-regions` makes new regions on every load**: `@q`
+  becomes `@q.4` on the second load, so re-run dependents, still typed at
+  `@q.1`, fail until the load redefines them. Declaring an existing
+  private region again should bind the same one.
+- O14. **Error messages too long to read**: one was over 5,000
+  characters, `sig-queue` printed in full several times over, "broken
+  since redefined" nested in itself. Print named types by name; show
+  where two types differ, not both whole; do not nest.
+
+Answered along the way, nothing to file: the file's two `QUESTION`
+modules (`list2-queue-aa`, `-aaa`) check now that higher kinds are in,
+once their typos are fixed; `call-with-l2q` needs `(comefrom @raise)`
+because `cwcc` captures, and `spin` because its escape is passed into
+`lambda`s.
 
 ## Log: the glance's details (moved here 2026-09-28)
 
