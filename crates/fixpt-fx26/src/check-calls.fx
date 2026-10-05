@@ -4,6 +4,9 @@
 
 ;;; ------------------------------------------------------------ calls that may not end
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-calls-module (module
 ;; Whether a procedure of type `t` could be given itself: a cycle in `t`
 ;; runs through a parameter of a procedure (or the argument of a
 ;; continuation). A type that is merely recursive, as a list is, does not let
@@ -177,4 +180,9 @@
             ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
             ((and (>= t 0) (or (k-known? (car s)) (k-named-has? (get k-std) (car s) t))) #f)
             ((k-lambda? (k-under f)) #f)
-            (else (k-cyclic? ft))))))
+            (else (k-cyclic? ft))))))))
+
+(define k-under (with check-calls-module k-under))
+(define k-has-comefrom? (with check-calls-module k-has-comefrom?))
+(define k-callee-name (with check-calls-module k-callee-name))
+(define k-may-spin? (with check-calls-module k-may-spin?))
