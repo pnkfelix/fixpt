@@ -4,6 +4,9 @@
 
 ;;; ------------------------------------------------------------ polarity
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-generative-module (module
 ;; Where, in a generative type's representation, each of its parameters
 ;; appears: covariantly, contravariantly, or both (moved out of
 ;; `check-print.fx`, 2026-10-04).
@@ -199,4 +202,6 @@
             (k-set-link slot r)
             (k-check-variance g rep)
             (k-push-desc name (ds-gen g))
-            name))))))
+            name))))))))
+
+(define k-define-generative (with check-generative-module k-define-generative))
