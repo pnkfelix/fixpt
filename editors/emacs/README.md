@@ -46,11 +46,11 @@ this repository; `M-x customize-group RET fx26` sets another
 
 `M-x run-fx26` runs, in `*fx26*`, `fixpt --dialect fx26 --fx26-run
 cellular --cellular-machine registers --calling-convention native --emacs
-repl`: forms compiled to native code by register code. Until compiled code
-is reclaimed (PLAN Q13, O2), the code space fills after some dozens of
-`,load`s; `M-x fx26-restart-repl` starts afresh. Without the three
-cellular flags (`fx26-repl-arguments`) the REPL runs lowered Scheme, slower
-and without that limit.
+repl`: forms compiled to native code by register code; the code of what
+you redefine is collected, so reloading on every save can go on all day
+(300 reloads of a 370-line file, checked). `M-x fx26-restart-repl` starts
+afresh. Without the three cellular flags (`fx26-repl-arguments`) the REPL
+runs lowered Scheme, slower.
 With `--emacs`, `fixpt` prints no continuation prompt, and takes `,at FILE
 LINE COL` before a form: what is sent from a buffer is preceded by one, so
 its errors name the file, line and column it came from, and
@@ -59,8 +59,9 @@ its errors name the file, line and column it came from, and
 What is not there yet (PLAN Q14, `TODO.md` §25): hover types for any
 expression, not only globals, and completion, which wait for `fixpt lsp`;
 `C-c C-c` stopping a running form, which waits for a fuel trap that
-resumes (Q15); and a REPL that lasts all day, which waits on Q13's O2,
-O12 and O13 (reloading fills the code space after about 31 loads).
+resumes (Q15); and quieter reloads, which wait on Q13's O12 (re-running
+dependents the load is about to redefine) and O13 (`private-regions` new
+on each load).
 
 ## Tests
 
