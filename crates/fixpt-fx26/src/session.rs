@@ -315,9 +315,11 @@ impl Compiled {
         if !scheme.is_bound("%fx26-unit") {
             scheme.eval_str("<fx26-runtime>", RUNTIME).map_err(|e| e.to_string())?;
         }
-        for c in &self.code {
-            scheme.eval_str("<fx26>", c).map_err(|e| e.to_string())?;
-        }
+        // All in one evaluation: each recompiles the whole of the session's
+        // program so far (`Prepared::update`), so one per form made loading
+        // the front end quadratic in its forms.
+        let all: String = self.code.iter().flat_map(|c| [c.as_str(), "\n"]).collect();
+        scheme.eval_str("<fx26>", &all).map_err(|e| e.to_string())?;
         Ok(())
     }
 }

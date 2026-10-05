@@ -2315,3 +2315,16 @@ compares effect functions' applications structurally (no intern table;
 
 Run times are unchanged within noise: higher kinds are erased before
 lowering, and a program that uses none takes the paths it took.
+
+## Loading the lowered front end in one evaluation (2026-10-05)
+
+Profiled with `sample` (above), a bare `fixpt --dialect fx26 repl` spent
+3.2 s starting, 89% of it loading the reader and front end as lowered
+Scheme (`load_eager_reader`), and most of that in the Scheme engine's own
+compiler: `assign::convert` cloning vectors, `malloc` and `free`, dropping
+`Program`s. `Compiled::load_into` evaluated each lowered form with its own
+`eval_str`, and every evaluation re-analyzes and recompiles the session's
+whole program so far (`Prepared::update`), so loading N forms was
+quadratic in N. Now they are evaluated in one call. Start-up 3.2 → 0.5 s
+(CPU); most tests start such a session, and the suite went from 3:26 to
+1:40. Each evaluation still recompiles the whole program (`TODO.md` §36).

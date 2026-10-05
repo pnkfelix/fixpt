@@ -747,3 +747,21 @@ field on the word, or a tag given to `install` by whoever assembled it.
 
 Deferred because: names first; add provenance when a profile needs to
 tell the two apart.
+
+## 36. A Scheme session recompiles its whole program at every evaluation (found 2026-10-05)
+
+`Session::eval_forms_raw` keeps one program arena for the session; each
+evaluation expands the new forms into it, then runs `fixpt_core::analyze`
+over all of it and `Prepared::update`, which compiles all of it again
+(`build_thunk` → `compile` → `assign::convert`, which clones it). So the
+k-th evaluation costs in proportion to everything evaluated before it, and
+a session of N evaluations is quadratic. Loading the lowered front end
+form by form was 3 s of every session's start until it was done in one
+evaluation (`docs/performance.md`, "Loading the lowered front end in one
+evaluation"); the Scheme REPL, and anything that evaluates form by form,
+still pays it. Compile only the new top-level forms, against what earlier
+ones defined (their closures already hold their own code, as `update`'s
+comment says), and analyze only them.
+
+Deferred because: the front end's loading, the cost the suite paid, is
+fixed; this is the general case.
