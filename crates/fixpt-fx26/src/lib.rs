@@ -174,6 +174,9 @@ pub fn front_end_location(at: usize) -> String {
 /// compiled by the front end. See [`bootstrap_program`].
 pub const BOOTSTRAP: &str = include_str!("bootstrap.fx");
 
+/// Where the front end's files are in the source tree this was built from.
+pub const SOURCE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+
 /// The front end with its driver after it, as the last expression: compiled
 /// to a word and run, it gives the driver.
 pub fn bootstrap_program() -> String {
