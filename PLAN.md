@@ -2380,12 +2380,12 @@ urgency: O1, O3, O4; then O5, O8; the rest as they come.
   `f`). Can masking hide allocation in a structure's own region? Could a
   little linearity, static or checked at run time, let `reverse` work in
   place?
-- O12. **Re-running dependents during a load.** A second load of the file
+- O12 (`TODO.md` §29). **Re-running dependents during a load.** A second load of the file
   re-runs dependents 13 times, one redefinition re-running 10 forms the
   load redefines a few lines later. The user's choice: re-run on request,
   the REPL showing how many re-runs wait; at least, never re-run within a
   load what the load is about to redefine.
-- O13. **`private-regions` makes new regions on every load**: `@q`
+- O13 (`TODO.md` §30). **`private-regions` makes new regions on every load**: `@q`
   becomes `@q.4` on the second load, so re-run dependents, still typed at
   `@q.1`, fail until the load redefines them. Declaring an existing
   private region again should bind the same one.

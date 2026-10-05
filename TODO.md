@@ -675,3 +675,47 @@ holds things, without knowing beforehand what should be dead.
 
 Deferred because: the debugger (§26) is the first client; item 1 is small
 and could come first.
+
+## 29. Redefinition re-runs dependents at once, quadratic over a load (the user's, 2026-10-05; PLAN Q13 O12)
+
+A redefinition at a type not every use can take makes a new global, and
+every earlier definition that uses the name is checked and run again on
+the spot, in both checkers (`Checker::top_defining`, `k-defining`), the
+compilers and the evaluator running what they say. Over a `,load` of a
+file whose later forms use earlier ones, redefining form *i* re-runs forms
+*i+1 … n*, each of which the same load then defines again: O(n²) re-runs
+where n definitions are wanted. A second load of `okasaki.fx` re-ran 13,
+one redefinition re-running 10 forms redefined a few lines later; and each
+re-run compiles, which is what filled the code space before it was
+collected.
+
+The user's plan: at the REPL, re-runs wait until asked for.
+- A redefinition that makes a new global leaves the definitions that use
+  the name **out of date**: they keep the old global, as code holding an
+  old procedure already does, so nothing reads a value at a type it was
+  not checked at. They are not checked again, so nothing is broken either.
+  Only the direct users are out of date: one that uses an out-of-date
+  definition sees it as it is.
+- `,list-outdated` names them, with what each uses that was redefined;
+  `,rerun-outdated` defines each again, oldest first, by the usual rule,
+  until none is left that checks (one that does not stays out of date,
+  usable, with why).
+- After a form that leaves some out of date, the REPL says how many and
+  how to re-run them.
+- Files run by `fixpt eval` and `check` keep the rule as it is
+  (`docs/fx26.md`, "Redefinition"); both checkers take the deferral as a
+  setting, so that they stay in step.
+
+First, measure: re-runs and time for the 300-load test, before and after.
+
+## 30. `private-regions` makes new regions on every load (the user's, 2026-10-05; PLAN Q13 O13)
+
+`(private-regions @q)` read again, by a second `,load` of the same file,
+makes `@q` a new private region (`@q.4`), so definitions still typed at
+the old one (`@q.1`) and those defined again at the new one no longer fit
+together: a re-run dependent fails until the load redefines it, and a
+value made before the load cannot be passed to a procedure defined by it.
+Declaring a region the program already has as private again should bind
+the same one, in both checkers (`top.rs`'s `private-regions`,
+`check-program.fx`'s `k-private`), so that a reload is the same program
+over the same regions. A file that means fresh regions can name new ones.
