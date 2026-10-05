@@ -33,6 +33,7 @@
                   ((= k 5) (dz (k-size-var v)))
                   ((= k 6) (dc (cv-var v)))
                   (else (k-parse-conv-or-type s))))
+          (ds-region (r) (dr r))
           (ds-eff (e) (de e))
           (ds-size (z) (dz z))
           (ds-conv (c) (dc c))

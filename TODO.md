@@ -776,14 +776,16 @@ register-code cache all hold; the native REPL's 20 reloads of
 module against the file as it was: check 1.214–1.221 s against
 1.213–1.236 s, compile 0.360–0.364 s against 0.369–0.376 s, so no cost
 measurable. What it found:
-- a module's `define` does not see its own name (§37): the three
-  recursive procedures are one-member `define-rec`s until §37 is built;
+- a module's `define` did not see its own name: fixed, a module's values
+  now see each other as a `letrec*`'s (`DONE.md` §37);
 - a parameterised type re-exported, `(define-type (table (k type) …)
-  ((select tables table) k v r))`, fails when used, "`r` is not a type",
-  in both checkers: a top-level family whose body applies a selected
-  function to its region parameter. Applying `(select m f)` directly to
-  `@heap` works. Why the types stay at the top level; to fix before a
-  file's types move into its module.
+  ((select tables table) k v r))`, failed when used, "`r` is not a type",
+  in both checkers: a region parameter bound while a family expands was
+  not read as a region where the head was a `select`. Fixed (2026-10-05),
+  and `(define-type table (select tables table))` now names the family
+  itself, applied as the `select` is (`parse_type_node`, `k-select-alias`;
+  tests `modules/family-alias.fx`, `modules/family-region-param.fx`). The
+  types can move into the module.
 
 ## 35. Provenance in the names of our code (the user's, 2026-10-05)
 

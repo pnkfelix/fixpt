@@ -348,6 +348,12 @@ impl Checker {
                     return self.parse_app(s, f, &items[1..]);
                 }
                 Some(DScope::Fun(f)) => return self.parse_app(s, f, &items[1..]),
+                // A name for a module's family, `(define-type f (select m
+                // f))`, applied: as `((select m f) d …)` (`TODO.md` §34).
+                Some(DScope::Rec(t)) if matches!(self.arena.get(self.arena.resolve(t)), Ty::Select(..)) => {
+                    let f = self.arena.resolve(t);
+                    return self.parse_app(s, f, &items[1..]);
+                }
                 _ => {}
             }
         }
@@ -1011,6 +1017,7 @@ impl Checker {
                 Some(DScope::Generative(g)) if !self.generatives[g as usize].params.is_empty() => Ok(D::Fun(self.parse_fun(s, None)?)),
                 None if crate::kinds::CONSTRUCTORS.iter().any(|(n, _)| *n == name) => Ok(D::Fun(self.parse_fun(s, None)?)),
                 Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(D::Region(Region::Var(v))),
+                Some(DScope::Region(r)) => Ok(D::Region(r)),
                 Some(DScope::Var(v, Kind::Effect)) => Ok(D::Effect(Effect::atom(Atom::Var(v)))),
                 Some(DScope::Eff(e)) => Ok(D::Effect(e)),
                 Some(DScope::Var(v, Kind::Size)) => Ok(D::Size(Size::var(v))),

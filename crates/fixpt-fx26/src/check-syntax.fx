@@ -582,6 +582,17 @@
       (ds-fun (f) #t)
       (else x #f))))
 
+;; The `select` a name meaning `d` (none or one) is defined as, `(define-type
+;; f (select m f))`, if it is: applied, it is that `select` applied, as
+;; `((select m f) d …)` is (`TODO.md` §34); else -1.
+(define k-select-alias (subr (maxeff kreads spin) ((listof k-ds acyclic)) int)
+  (lambda (d)
+    (if (null? d)
+        -1
+        (tagcase (car d)
+          (ds-rec (t) (tagcase (k-get t) (ty-select (m n) (k-resolve t)) (else y -1)))
+          (else x -1)))))
+
 ;; `(moduleof …)` and `(select m t)`, read by `check-modules.fx`, which sets this.
 (define k-module-type-head? (subr pure (symbol) bool)
   (lambda (hd) (or (symbol=? hd 'moduleof) (symbol=? hd 'select))))
@@ -736,7 +747,8 @@
                  (hd (if (null? items) '|()| (syn-head (car items))))
                  (abbrev (if (symbol=? hd '|()|)
                              (the (listof k-ds acyclic) nil)
-                             (k-lookup-desc hd))))
+                             (k-lookup-desc hd)))
+                 (alias (k-select-alias abbrev)))
             (cond ((and (not (null? abbrev)) (k-ds-applied? (car abbrev)))
                    (tagcase (car abbrev)
                      (ds-abbrev (ps body) (k-expand-abbrev s hd ps body (cdr items)))
@@ -745,6 +757,7 @@
                      (ds-var (v k) ((get k-app-reader) s (k-ty-new (ty-var v)) (cdr items)))
                      (ds-fun (f) ((get k-app-reader) s f (cdr items)))
                      (else x (k-sfail "an abbreviation" s))))
+                  ((>= alias 0) ((get k-app-reader) s alias (cdr items)))
                   ;; `((dlambda …) d …)` and `((select m f) d …)`.
                   ((and (not (null? items)) (tagcase (car items) (lst (xs d a b) #t) (else x #f)))
                    ((get k-app-reader) s ((get k-fun-reader) (car items) -1) (cdr items)))

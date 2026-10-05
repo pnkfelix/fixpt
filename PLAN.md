@@ -197,8 +197,9 @@ before everything else, known holes before proofs.
   end into modules a file at a time, regions as program-wide names first
   (the user's choice; a wart, regions as parameters being what KFX26's
   `&mut State` would be), `table.fx` the pilot (done: a module, at no
-  measurable cost; types re-exported through a family fail on a region
-  argument, `TODO.md` §34; a re-exported name lost inlining, a call 1.7×
+  measurable cost; types re-exported through a family failed on a region
+  argument, fixed, and a family's name re-exported, `(define-type t
+  (select m t))`, applies; a re-exported name lost inlining, a call 1.7×
   slower on register code, now inlined when the member names no other,
   `DONE.md` §38), which found that a
   module's definitions did not see themselves (done, `DONE.md` §37: a
