@@ -26,6 +26,29 @@ is a subset, about a minute:
 The full `fixpt-scheme` suite under it takes well over an hour, mostly the
 eager-reader tests, and is run only at milestones.
 
+**Profiling with `sample`, our code named** (2026-10-05). macOS's
+`sample PID SECONDS -file OUT` names every Rust frame, but shows machine
+code we made as `???  (in <unknown binary>)` and an address. With
+`FIXPT_SYMBOLS=FILE` set (`%p` in it the process id), `fixpt` writes each
+piece of machine code it places, and where a code collection moves it, as
+`START LEN NAME` lines (`fixpt_native::symbols`): the cellular machine's
+routines by name, each compiled word (`word k-check`, `register word
+k-check`), the native convention's procedures (`native k-check`) and
+stubs. `fixpt-symbolize FILE… -- OUT` (in `fixpt-tidy`) then names those
+frames, `k-check  (in fixpt code) + 644`, and adds a summary of the samples
+at the top of the stack by name, with waiting threads set apart. A global
+defined as a lambda gives its word its own name in both compilers
+(`name_word_for`, `c-name-for!`); an inner lambda is still named for where
+its body starts, `lambda@N` (`TODO.md` §15). For example:
+
+```text
+FIXPT_SYMBOLS=/tmp/syms.%p fixpt … & sample $! 10 -file /tmp/s.txt
+fixpt-symbolize /tmp/syms.* -- /tmp/s.txt | less
+```
+
+Take the pid of the process started (`$!`), never one found by name: the
+user's own REPL, under Emacs, has the same name.
+
 Measurements are on the development machine, as best of several runs.
 Debug builds are what `cargo test` runs; release numbers come from
 `cargo run --release`.

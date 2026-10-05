@@ -1626,6 +1626,8 @@ struct Installed {
     weak: usize,
     code: (Offset, usize),
     resume: (Offset, usize),
+    /// What it is, for a fault or a profiler to say (`crate::symbols`).
+    name: String,
 }
 
 impl Drop for NativeMachine {
@@ -1648,7 +1650,7 @@ impl NativeMachine {
         let docol = table[ROUTINE_DOCOL as usize];
         table.resize(NATIVE_SLOTS, docol);
         let resume = vec![0; NATIVE_SLOTS];
-        NativeMachine {
+        let m = NativeMachine {
             entry: at + 4 * entry,
             machine_at: at,
             commons,
@@ -1664,6 +1666,25 @@ impl NativeMachine {
             since_collect: 0,
             live_after: 0,
             compiled: 0,
+        };
+        m.note_machine();
+        m
+    }
+
+    /// The machine's own code, named for profilers (`crate::symbols`):
+    /// its entry and common exits, then each routine, by name.
+    fn note_machine(&self) {
+        if !crate::symbols::enabled() {
+            return;
+        }
+        let start = self.space.exec_addr(self.machine_at) as u64;
+        let end = start + 4 * self.machine_len as u64;
+        let first = self.table[0];
+        crate::symbols::note(start as usize, (first - start) as usize, "cellular machine: entry and exits");
+        for (n, (name, _)) in ROUTINES.iter().enumerate() {
+            let from = self.table[n];
+            let to = ROUTINES.get(n + 1).map_or(end, |_| self.table[n + 1]);
+            crate::symbols::note(from as usize, (to - from) as usize, &format!("cellular machine: {name}"));
         }
     }
 
@@ -1742,13 +1763,14 @@ impl NativeMachine {
             self.table[w.slot] = old_exec(&new, at);
             self.resume[w.slot] = old_exec(&new, rt_at);
             code_of.insert(w.slot, (new.exec_addr(at), w.code.1 / 4));
-            crate::faults::note(new.exec_addr(at), w.code.1, format!("word in slot {}", w.slot));
+            crate::faults::note(new.exec_addr(at), w.code.1, w.name.clone());
             kept.push(Installed { code: (at, w.code.1), resume: (rt_at, w.resume.1), ..w });
         }
         drop(code_of);
         new.flush(0, new.used());
         self.installed = kept;
         self.space = new;
+        self.note_machine();
         self.since_collect = 0;
         self.live_after = self.space.used();
         if std::env::var_os("FIXPT_CODE_TRACE").is_some() {
@@ -1812,7 +1834,7 @@ impl NativeMachine {
         self.space.write_code(at, code);
         self.space.flush(at, 4 * code.len());
         let what = format!("{} {}", if heap.is_register_word(word) { "register word" } else { "word" }, heap.symbol_name(heap.bloblet_slot(word, WORD_NAME)));
-        crate::faults::note(self.space.exec_addr(at), 4 * code.len(), what);
+        crate::faults::note(self.space.exec_addr(at), 4 * code.len(), what.clone());
         // Where to resume, by k: each instruction's start.
         let table_len = fields + 2;
         let rt_at = self.space.alloc(8 * table_len, 8).ok_or("the code space is full")?;
@@ -1835,7 +1857,7 @@ impl NativeMachine {
         heap.set_bloblet_slot(word, WORD_ENTRY, Value::fixnum(slot as i64));
         let weak = heap.weak_add(word);
         self.compiled += 1;
-        self.installed.push(Installed { seq: self.compiled, slot, heap: heap.serial(), weak, code: (at, 4 * code.len()), resume: (rt_at, 8 * table_len) });
+        self.installed.push(Installed { seq: self.compiled, slot, heap: heap.serial(), weak, code: (at, 4 * code.len()), resume: (rt_at, 8 * table_len), name: what });
         self.since_collect += 4 * code.len() + 8 * table_len;
         Ok(())
     }

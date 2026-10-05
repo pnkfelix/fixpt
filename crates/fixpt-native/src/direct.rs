@@ -334,6 +334,7 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
     let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
     heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
     heap.flush_code(blob);
+    crate::symbols::note(heap.code_exec_address(blob), bytes.len(), "native convention: an adapter");
     Ok(native_closure(heap, blob, &[f]))
 }
 
@@ -528,6 +529,12 @@ impl DirectMachine {
         let closure = space.alloc(4 * code.len(), 16).ok_or("no room for the common closure")?;
         space.write_code(closure, &code);
         space.flush(closure, 4 * code.len());
+        let stub = |at: usize, len: usize, what: &str| crate::symbols::note(space.exec_addr(at), 4 * len, &format!("native convention: {what}"));
+        stub(entry, trampoline().len(), "trampoline");
+        stub(mark_ret, pop_mark.len(), "a mark's return");
+        stub(trap_stub, common_trap().len(), "common trap");
+        stub(foreign, common_foreign(0).len(), "common foreign call");
+        stub(closure, common_closure(1).len(), "common closure");
         Ok(DirectMachine { space, entry, mark_ret, trap_stub, foreign, closure, stack: vec![0; STACK_WORDS], callouts })
     }
 
@@ -576,6 +583,9 @@ impl DirectMachine {
             let bytes: Vec<u8> = p.code.iter().flat_map(|i| i.to_le_bytes()).collect();
             heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
             heap.flush_code(blob);
+            if crate::symbols::enabled() {
+                crate::symbols::note(heap.code_exec_address(blob), bytes.len(), &format!("native {}", p.name));
+            }
         }
         let entry = native_closure(heap, blobs[first], &free);
         Ok(procs

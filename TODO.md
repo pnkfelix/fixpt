@@ -275,10 +275,14 @@ What is built: `DONE.md` §14.
 
 ## 15. Tools the ports wished for
 
-- **Inner lambdas named by their binding.** A procedure that falls back to
-  cellular code is named only by a byte offset (`lambda@59`). Name it by the
-  `let` or `letrec` binding it has, `go@59`, in both compilers alike, since
-  their words must agree, and in register code's.
+- **Inner lambdas named by their binding.** A global defined as a lambda
+  names its word now (`DONE.md` §15); an inner lambda is still named only
+  by a byte offset (`lambda@59`), in profiles too. Name it by the `let` or
+  `letrec` binding it has and the global it is in, `k-check/go@59`, in
+  both compilers alike, since their words must agree, and in register
+  code's. And the native REPL compiles a definition as a thunk, `(lambda
+  () init)`, so its own lambda is an inner one there: name it for the
+  definition too.
 - **Start-up that grows with the program.** Before the front end was cached,
   native start-up was 2.9–3.5 s before the first iteration for `boyer`,
   `ratio-regions`, `tyan`, and 6.3 s for `parsing` with its 28 KB string.
@@ -702,3 +706,44 @@ is checked.
 
 Deferred because: the user's, to think through before designing; it bears
 on Q8's generic operations and on shapes' syntax, both open.
+
+## 34. Private regions shared by two files: is the licence still sound? (the user's, 2026-10-05)
+
+Since `DONE.md` §30, a region declared private again stands for the one
+the program already has, so that a file loaded again is the same program.
+But two different files loaded into one REPL that both declare `@q`
+private now share it. `private-regions` is what the licence (`licence.rs`;
+`docs/fx26.md`, "A licence is masking relative to an observer") rests on:
+what a program does to its own regions is masked from everything outside
+it, by construction, since nothing else can name them. That is what lets
+the REPL run the eager reader's entry points speculatively, as each
+character is typed. With `@q` shared, the second file's code can read what
+the first's wrote, which the first's licence called unobservable.
+
+To check:
+- whether anything relies on it beyond the speculation driver (masking of
+  private regions' effects in types; effect summaries; the compilers);
+- whether a counterexample exists: a licensed expression of file A whose
+  run, speculative, is observed by file B through a shared `@q`;
+- if so, the fix: key a private region by the file that declares it (its
+  path, or its `load-module` identity), so that the same file loaded again
+  gets its regions back and another file gets its own; or refuse a second
+  file's declaration of a name already private.
+
+Deferred because: the user's question, to answer before the REPL relies
+on reloads of more than one file.
+
+## 35. Provenance in the names of our code (the user's, 2026-10-05)
+
+`FIXPT_SYMBOLS` names (`docs/performance.md`, "Profiling with `sample`")
+say what kind of code a frame is (`word`, `register word`, `native`, the
+machines' routines and stubs), not which compiler made it (the Rust one or
+the one written in FX-26), which assembler placed it (`assemble_word` or
+`native.fx`), nor how (inlining, specialization, versions). A profile
+comparing the oracles with the FX-26 pieces wants that. The map's name is
+free text, so the cheap form is a tag, `k-check [register code; FX-26
+compiler; Rust assembler]`; the word records none of it, so it needs a
+field on the word, or a tag given to `install` by whoever assembled it.
+
+Deferred because: names first; add provenance when a profile needs to
+tell the two apart.

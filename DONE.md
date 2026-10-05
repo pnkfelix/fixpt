@@ -332,6 +332,10 @@ machine and, but for the list and array ones, in the evaluator. `list` and
   the native compiler declines is now said at once, as it is checked, with
   its name and why. Inner lambdas are `TODO.md` §15.
 - Native start-up: the front end's own part is cached (§21, 0.50 → 0.19 s).
+- A global defined as a lambda names its word for itself, in both compilers
+  (`name_word_for`, `c-name-for!`; 2026-10-05), not `lambda@N`: what a
+  disassembly, a fault and a profile show (`FIXPT_SYMBOLS` and
+  `fixpt-symbolize`, `docs/performance.md`, "Profiling with `sample`").
 
 ## 16. FX source sizes: the lint
 

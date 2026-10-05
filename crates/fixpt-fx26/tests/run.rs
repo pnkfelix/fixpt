@@ -178,7 +178,7 @@ fn cellular_forms_show_their_new_words() {
     let forms = s.checker.read_in(fixpt_read::FileId(0), &text).expect("reads");
     let codes: Vec<String> = forms.iter().map(|f| s.run(f).expect("runs").code).collect();
     let words = |c: &str| c.lines().filter(|l| l.starts_with("word ")).map(|l| l.split(' ').nth(1).unwrap().to_string()).collect::<Vec<_>>();
-    assert_eq!(words(&codes[0]), ["program", "lambda@45"], "{}", codes[0]);
+    assert_eq!(words(&codes[0]), ["program", "sq"], "{}", codes[0]);
     assert_eq!(words(&codes[1]), ["program"], "{}", codes[1]);
 }
 

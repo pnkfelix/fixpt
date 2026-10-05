@@ -629,7 +629,10 @@ fn probe_profile_check() {
     });
     let top = LAST_PROFILE.with(|p| p.borrow().clone());
     let total: u64 = top.iter().map(|(_, n)| n).sum();
-    let in_checker: u64 = top.iter().filter(|(w, _)| w.strip_prefix("lambda@").is_some_and(|at| locate_char(&text, at.parse().unwrap_or(0)).starts_with("check-"))).map(|(_, n)| n).sum();
+    // A global's own lambda is named for it (`k-…` the checker's); an
+    // inner one for where its body starts.
+    let checker = |w: &str| w.starts_with("k-") || w.strip_prefix("lambda@").is_some_and(|at| locate_char(&text, at.parse().unwrap_or(0)).starts_with("check-"));
+    let in_checker: u64 = top.iter().filter(|(w, _)| checker(w)).map(|(_, n)| n).sum();
     eprintln!("{total} cells in all, {in_checker} in the checker's code (check-*.fx)");
     for (w, n) in top.iter().take(40) {
         let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();

@@ -460,11 +460,27 @@
         nil
         (let ((g (c-push-global (extract (car bs) 1)))) (cons g (c-rec-globals (cdr bs)))))))
 
+;; The next lambda's word named for global `n`.
+(define c-name-word! (subr c-emits (symbol) unit)
+  (lambda (n) (set c-word-name (the (listof string @k) (cons (symbol->string n) nil)))))
+;; The next lambda's word named for global `n`, when `x`, its definition, is
+;; a lambda, rather than for where its body starts: so that a profile, a
+;; disassembly or a fault says which procedure. As the Rust compiler's
+;; `name_word_for`.
+(define c-name-for! (subr c-emits (symbol exp) unit)
+  (lambda (n x)
+    (let ((l (c-lambda-of x)))
+      (if (null? l)
+          #u
+          (tagcase (car l)
+            (e-lambda (ps body a b) (c-name-word! n))
+            (else y #u))))))
 (define c-rec-fill (subr (maxeff compiles spin) (c-recs (listof wglobal @k) code) unit)
   (lambda (bs gs c)
     (if (null? bs)
         #u
-        (begin (c-exp (extract (car bs) 3) (the cenv nil) 0 c #f)
+        (begin (c-name-for! (extract (car bs) 1) (extract (car bs) 3))
+               (c-exp (extract (car bs) 3) (the cenv nil) 0 c #f)
                (c-op1 c routine-global! (wcell-global (car gs)))
                (c-rec-fill (cdr bs) (cdr gs) c)))))
 
@@ -473,6 +489,7 @@
 (define c-define-lambda (subr (maxeff compiles spin) (symbol c-params exp code) unit)
   (lambda (n ps body c)
     (begin (set c-defining (the (listof symbol @k) (cons n nil)))
+           (c-name-word! n)
            (c-lambda ps body (the cenv nil) 0 c (the syms nil) (the c-region nil))
            (set c-defining (the (listof symbol @k) nil))
            (c-record-inline n ps body))))

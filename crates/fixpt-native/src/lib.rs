@@ -17,6 +17,7 @@ pub mod codespace;
 mod control;
 pub mod stencil;
 pub mod faults;
+pub mod symbols;
 pub mod cellular;
 pub mod direct;
 

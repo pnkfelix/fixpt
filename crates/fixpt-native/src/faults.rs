@@ -9,7 +9,10 @@ use std::sync::Mutex;
 /// and what it is.
 static PIECES: Mutex<Vec<(usize, usize, String)>> = Mutex::new(Vec::new());
 
+/// `len` bytes of code at `start` are `what`: for a fault there to say,
+/// and for profilers to name (`crate::symbols`).
 pub fn note(start: usize, len: usize, what: String) {
+    crate::symbols::note(start, len, &what);
     if std::env::var_os("FIXPT_FAULTS").is_some() {
         install();
         if let Ok(mut p) = PIECES.lock() {

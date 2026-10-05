@@ -906,6 +906,13 @@ impl<'a> Compiler<'a> {
     /// The parameters and body of `x`, when it is a lambda under any type
     /// abstractions, ascriptions and conversions, which compile to nothing; and its
     /// region, when it is an `rlambda`.
+    /// The next lambda's word named for global `name`, whose definition it
+    /// is, rather than for where its body starts: so that a profile, a
+    /// disassembly or a fault says which procedure (`fixpt_native::symbols`).
+    fn name_word_for(&mut self, name: Sym) {
+        self.word_name = Some(self.c.interner.name(name).to_string());
+    }
+
     fn lambda_of(&self, mut x: ExpId) -> Option<(Vec<Sym>, ExpId, Option<ExpId>)> {
         let mut region = None;
         loop {
@@ -1683,6 +1690,7 @@ impl<'a> Compiler<'a> {
                         let g = self.global_for(*name, *assigns);
                         if let Some((_, _, None)) = self.lambda_of(*exp) {
                             self.defining = Some(*name);
+                            self.name_word_for(*name);
                         }
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
                         self.defining = None;
@@ -1725,7 +1733,10 @@ impl<'a> Compiler<'a> {
                         self.op(&mut code, "drop");
                     }
                     let gs: Vec<Value> = bindings.iter().map(|(n, _, _)| self.global_for(*n, *assigns)).collect();
-                    for ((_, _, e), g) in bindings.iter().zip(gs) {
+                    for ((n, _, e), g) in bindings.iter().zip(gs) {
+                        if let Some((_, _, None)) = self.lambda_of(*e) {
+                            self.name_word_for(*n);
+                        }
                         self.exp(*e, &Vec::new(), 0, &mut code, false)?;
                         self.op1(&mut code, "global!", g);
                     }

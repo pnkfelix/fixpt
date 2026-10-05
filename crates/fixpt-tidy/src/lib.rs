@@ -23,6 +23,7 @@ pub mod cons_chain;
 pub mod fx_size;
 pub mod recursion;
 pub mod sexp_edit;
+pub mod symbolize;
 
 use std::path::{Path, PathBuf};
 
