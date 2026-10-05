@@ -107,11 +107,11 @@
 ;; member), and whether it is a typed lambda.
 (define-type c-mval (productof (1 symbol) (2 exp) (3 int) (4 bool)))
 (define-type c-mvals (listof c-mval @k))
-(define c-mval (subr (alloc @k) (symbol exp int bool c-mvals) c-mvals)
+(define c-mv-onto (subr (alloc @k) (symbol exp int bool c-mvals) c-mvals)
   (lambda (n x k l rest) (cons (product (1 n) (2 x) (3 k) (4 l)) rest)))
 (define c-mvals-group (subr (maxeff (read @globals) (alloc @k)) (names exps c-mvals) c-mvals)
   (lambda (ns xs rest)
-    (if (null? ns) rest (c-mval (car ns) (car xs) 3 #t (c-mvals-group (cdr ns) (cdr xs) rest)))))
+    (if (null? ns) rest (c-mv-onto (car ns) (car xs) 3 #t (c-mvals-group (cdr ns) (cdr xs) rest)))))
 ;; The values `items` make, in order.
 (define c-module-values (subr (maxeff (read @globals) (alloc @k)) (mod-items) c-mvals)
   (lambda (items)
@@ -120,11 +120,11 @@
         (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4))
                (rest (c-module-values (cdr items))))
           (cond ((= k 0)
-                 (c-mval (c-converter "up-" (car ns)) (car xs) 0 #f
-                         (c-mval (c-converter "down-" (car ns)) (car (cdr xs)) 0 #f rest)))
+                 (c-mv-onto (c-converter "up-" (car ns)) (car xs) 0 #f
+                           (c-mv-onto (c-converter "down-" (car ns)) (car (cdr xs)) 0 #f rest)))
                 ((= k 2)
                  (let ((l (and (not (null? (extract it 3))) (c-checked-lambda? (car xs)))))
-                   (c-mval (car ns) (car xs) 2 l rest)))
+                   (c-mv-onto (car ns) (car xs) 2 l rest)))
                 ((= k 3) (c-mvals-group ns xs rest))
                 (else rest))))))
 ;; Each value's name, and its slot, from `d`.
