@@ -1,6 +1,9 @@
 ;;; The checker, in FX-26: the rules, each expression's type and effect.
 ;;; Part of the checker, `check-types.fx` first (PLAN.md §11, step 10).
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-synth-module (module
 ;; The error that a `tagcase`, `x`, has no arm for the variants `rest`.
 (define k-fail-no-arm (subr (maxeff checks spin) (k-parts kx) void)
   (lambda (rest x)
@@ -974,4 +977,14 @@
                            (k-start hbody) (k-end hbody)
                            (lambda (m want got) (k-handler-gives payload answer got)))
               (k-synth h)))
-        (else y (k-synth h))))))
+        (else y (k-synth h))))))))
+
+(define k-note-apply-shares (with check-synth-module k-note-apply-shares))
+(define-type k-done (select check-synth-module k-done))
+(define k-te-masked (with check-synth-module k-te-masked))
+(define k-new-subr (with check-synth-module k-new-subr))
+(define k-module-rules (with check-synth-module k-module-rules))
+(define k-synth (with check-synth-module k-synth))
+(define k-check-letrec (with check-synth-module k-check-letrec))
+(define k-check-declared (with check-synth-module k-check-declared))
+(define k-check (with check-synth-module k-check))
