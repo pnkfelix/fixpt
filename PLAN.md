@@ -177,6 +177,10 @@ before everything else, known holes before proofs.
   out of range (±1 MB). The cells' assembler gives each cell a jump of its
   own for this; register code needs the same, or stubs flushed every so
   often with a branch around them, and so does a `branchf` to a far cell.
+- B2. **The bootstrap test takes six minutes** (high priority, the
+  user's; `TODO.md` §31): `fixpoint_with_words_compiled_by_fx26` is about
+  347 s of a 9-minute suite, which took 3.5 minutes earlier on
+  2026-10-05. Re-measure across the day's collector commits first.
 - O. **What a day of writing `okasaki.fx` found** (the user's,
   2026-10-05): queue Q13, eighteen items. First O1 (a typo in a type
   read silently as a named parameter), O3 (`list-length` missing from

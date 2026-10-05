@@ -201,6 +201,75 @@ and a closure that walks place data cannot leave the place.
 name, or `heap`). In this note's terms, `(t data p)` is "graph shape at
 place `p`", so it carries over whatever the syntax becomes.
 
+## Two axes, not one: shape, and how a type is defined (the user's, 2026-10-05)
+
+Not designed yet; a note of the user's thinking, to tease apart before
+the syntax above is settled. There are two distinct properties a type can
+have, and so probably two distinct kinds, to be named, indicated and
+composed in type expressions explicitly.
+
+**Axis 1: the shape of the run-time values.** A bound on what the values
+themselves look like in memory. The lattice above, refined:
+
+```
+flat  ≤  tree  ≤  acyclic  ≤  graphic  ≤  (the top)
+```
+
+- **flat**: no references.
+- **tree** (name to choose): references, but no sharing: every heap
+  object has a unique parent. New: the lattice above has no level
+  between flat and acyclic.
+- **acyclic**: sharing, but no cycles.
+- **graphic**: cycles too, but no functions and no generated names:
+  today's `data` kind, perhaps renamed so in this framing (the "graph"
+  level above).
+- **the top**: anything, functions and generative types included: values
+  tied to the local environment's transient characteristics, which cannot
+  be serialized, sent over the wire and meaningfully rebuilt.
+
+So the question this axis answers is what can be done with a value:
+walked without `spin`, copied, compared structurally, printed, sent.
+
+**Axis 2: how the type itself is defined** (to name: *metatype*, *meta*,
+*source*, *reflect*). A property of the type's definition, not of its
+values, and purely static. The example is polytypism as PolyP has it:
+every type there is the fixed point of a single-parameter functor. Two
+distinct definitions can describe the same final structure once the
+intermediate functors' names are taken out of the picture, and any value
+can then be cast between them with no run-time effect. So "polytypic
+(PolyP's)", "regular", and `type` itself form a chain, or a lattice, of
+how a type is defined, each admitting more definitions than the one
+below.
+- Function types may move a type along this axis, but how is not yet
+  clear. (An observation to check, not the user's: a functor whose
+  parameter appears only in covariant positions, such as the result of a
+  function type, `r -> a` in `a`, is still a functor; one with it in a
+  contravariant position, `a -> r`, is not; and PolyP's regular types are
+  sums of products only.)
+- Part of the notion is a clear separation between a type parameter and
+  what it resolves to: polytypic operations apply to a functor applied to
+  a function type, since that function is abstracted away as the
+  parameter. What matters is the definition's structure, not the
+  arguments it is applied to.
+
+**Why they are separate.** One axis bounds values; the other classifies
+definitions. A regular, polytypic type may be applied to functions (top
+of axis 1); a flat type may be defined in any way at all. Today `data` is
+the only kind on either axis, and it mixes them: it bounds shape
+(`graphic`) and, by refusing functions and generative types, says
+something about definitions too. Two senses of "generative", above, are
+the same tension: a nominal type is about the definition, a location
+about the value.
+
+**To do.** Name both axes and their levels; say how each is written (a
+binder's kind, a bound on it, or both, `(t graphic p)` beside something
+like `(f regular)` on a functor of kind `(=> (type) type)`); say how they
+compose, and where each is checked (axis 1 by construction and
+certification, as `acyclic` is; axis 2 from the definition, as the
+checkers' kinds already are). Related: `docs/research/polytypic.md`
+(PolyP's `cata`, and why FX-26 fixed the functor before higher kinds),
+Q8's generic operations, and the higher kinds now in both checkers.
+
 ## Sources
 
 | source                                                                                                                | where                                                                                          | seen        |

@@ -673,3 +673,49 @@ holds things, without knowing beforehand what should be dead.
 
 Deferred because: the debugger (§26) is the first client; item 1 is small
 and could come first.
+
+## 31. The bootstrap test takes six minutes: find why (high priority; the user's, 2026-10-05)
+
+`fixpoint_with_words_compiled_by_fx26` (`crates/fixpt-fx26/tests/bootstrap.rs`)
+takes about 347 s, most of a full `cargo test --release` that now takes
+about 9 minutes, against the 2-minute budget. Earlier on 2026-10-05 the
+whole suite took about 3.5 minutes, so something since then made this test
+slow; it is as slow at `2d332b4`, before re-runs waited. Suspects, in the
+order of the day's commits: collecting the code area by copying, with
+weak references in the heap (`4e11a7b`: `collect_for_code` collects the
+heap before code is compiled, when code has been installed past the
+threshold), and the three retention fixes (`ae4a249`: `c-genv-prune!`,
+the session's handles released). First re-measure at `4e11a7b^`,
+`4e11a7b` and `ae4a249` back to back, and count collections
+(`FIXPT_CODE_TRACE=1`, `FIXPT_GC_REPORT=1`) before guessing.
+
+Deferred because: the user's choice, after O12 and O13; it is next.
+
+## 32. Remove `,redefine b|r` (the user's, 2026-10-05)
+
+`,redefine b|r` says ahead what the next redefinition that would break
+definitions does, and `ask_redefine` asks it at a terminal
+(`fixpt-cli/src/fx26.rs`; `Fx26Session::next_redefine`, `Redefine`). At
+the REPL re-runs now wait (`DONE.md` §29), so no redefinition breaks
+anything there, and neither is ever reached. Remove the command, the
+question and their help line; keep `Redefine` only if a session that
+re-runs at once still wants to refuse (the `tests/redefine.rs` cases
+`keeping_a_value_and_refusing` use it), else remove it too, and the
+paragraph of `docs/fx26.md`, "Redefinition", that describes it.
+
+Deferred because: the user's choice; nothing is wrong meanwhile.
+
+## 33. Shape and how a type is defined: two axes, two kinds (the user's, 2026-10-05)
+
+`docs/research/shapes.md`, "Two axes, not one". The shape of the run-time
+values (flat ≤ tree, no sharing ≤ acyclic ≤ graphic, today's `data` ≤ a
+top with functions and generative types, which cannot be sent over the
+wire) is one property; how the type itself is defined (PolyP's
+fixed points of one-parameter functors ≤ regular ≤ `type`, purely static,
+with casts of no run-time effect between definitions of the same
+structure) is another. `data` mixes them today. To do: name both, say how
+each is written in type expressions and how they compose, and where each
+is checked.
+
+Deferred because: the user's, to think through before designing; it bears
+on Q8's generic operations and on shapes' syntax, both open.
