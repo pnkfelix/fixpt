@@ -80,6 +80,13 @@ impl Engine {
             Engine::Bytecode(v) => v.step_limit = limit,
         }
     }
+
+    pub fn step_limit(&self) -> Option<u64> {
+        match self {
+            Engine::Ast(i) => i.step_limit,
+            Engine::Bytecode(v) => v.step_limit,
+        }
+    }
 }
 
 pub struct Session {

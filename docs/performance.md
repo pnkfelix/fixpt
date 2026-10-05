@@ -2328,3 +2328,25 @@ whole program so far (`Prepared::update`), so loading N forms was
 quadratic in N. Now they are evaluated in one call. Start-up 3.2 → 0.5 s
 (CPU); most tests start such a session, and the suite went from 3:26 to
 1:40. Each evaluation still recompiles the whole program (`TODO.md` §36).
+
+## The reader as register code too (2026-10-05)
+
+Profiled with names (above), a native REPL's `,load` spent most of its time
+in the bytecode engine (`Vm::drive`): the FX-26 pieces are given each form
+as text and read it themselves, and the reader stayed lowered Scheme, fed
+from Rust a character at a time (`EagerReader`), while the checker and
+compilers ran as register code. Now the reader has an entry point that
+reads a whole text inside FX-26, `read-text` (as `bootstrap.fx`'s `b-read`
+does), one of `FRONT_ENTRIES`, so that it runs as register code with the
+rest of the front end; `syn::read_to_syns` calls it, with no step limit,
+as reading the whole text is many steps where a character was a few. The
+REPL's keystrokes still go through the eager reader as before. Native
+REPL, `okasaki.fx` (370 lines), best of runs:
+
+| what                     | before | after  |
+| ------------------------ | -----: | -----: |
+| start-up and one `,load` | 1.64 s | 0.69 s |
+| each `,load` after       | 57 ms  | 14 ms  |
+
+The output of 20 loads is the same. The suite 1:40 → 1:23; the Emacs
+mode's tests 4.2 → 1.1 s.

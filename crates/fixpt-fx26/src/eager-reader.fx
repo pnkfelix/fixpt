@@ -810,3 +810,14 @@
          (lambda () (read-top (make-cursor (cons (next-char 0 nil) nil) 0 nil nil))))))))
 (define eager-start (subr reading () state) (lambda () (start-reading #f)))
 (define eager-start-fx26 (subr reading () state) (lambda () (start-reading #t)))
+
+;; For a driver: every form of `text`, as the reader reads it with a newline
+;; after, or nothing if it does not read to the end (the driver says where,
+;; from a reader that places errors). All of it in here, so that the front
+;; end run as register code reads as register code (`read_to_syns`).
+(define read-text (subr (maxeff reading asks (read @s) (alloc @s)) (string) (listof syns acyclic))
+  (lambda (text)
+    (let ((st (eager-feed (eager-feed-string (eager-start-fx26) text) (integer->char 10))))
+      (if (string=? (datum-symbol-name (eager-status st)) "complete")
+          (list (eager-state-syntax st))
+          nil))))

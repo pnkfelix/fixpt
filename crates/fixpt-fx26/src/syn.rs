@@ -373,12 +373,26 @@ pub fn read_standard(scheme: &mut Session) -> R<Handle> {
 /// in the caller's scope.
 pub fn read_to_syns(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    let mut reader =
-        EagerReader::attach_starting(scheme, READER_PREFIX, "eager-start-fx26").map_err(|e| fail(e.to_string()))?;
-    let st = reader.state_after(scheme, text, true).map_err(|e| fail(e.to_string()))?;
-    let name = |n: &str| format!("{READER_PREFIX}{n}");
-    let status = scheme.call_global(&name("eager-status"), &[st]).map_err(|e| fail(e.to_string()))?;
-    if scheme.view(|v| v.get(status).symbol_name()).as_deref() != Some("complete") {
+    // The whole text read inside FX-26 (`read-text`), not fed from here a
+    // character at a time: so that with the front end run as register code
+    // (`FRONT_ENTRIES`) the reader is too, not lowered Scheme.
+    // With no step limit: it is licensed code, and a text ends (as
+    // `Fx26Session::read_with_own_reader`). Fed a character at a time,
+    // each call was a few steps; the whole text is many.
+    let s = scheme.make(|m| m.heap().make_string(text));
+    let limit = scheme.engine.step_limit();
+    scheme.engine.set_step_limit(None);
+    let read = scheme.call_global(&format!("{READER_PREFIX}read-text"), &[s]);
+    scheme.engine.set_step_limit(limit);
+    let read = read.map_err(|e| fail(e.to_string()))?;
+    // Its forms, the list's one element, or `#f` for none.
+    let mut read_all = false;
+    let forms = scheme.make(|m| {
+        let l = m.get(read);
+        read_all = !l.is_null();
+        if read_all { m.heap().car(l) } else { fixpt_heap::Value::FALSE }
+    });
+    if !read_all {
         // Where and why, as the Rust reader says: the two agree on what
         // reads (`tests/syn.rs`), and it places its errors, where an
         // unfinished read here has no one place to blame.
@@ -388,7 +402,7 @@ pub fn read_to_syns(scheme: &mut Session, file: FileId, text: &str) -> R<Handle>
         }
         return Err(fail("the FX-26 reader did not read the whole text".into()));
     }
-    scheme.call_global(&name("eager-state-syntax"), &[st]).map_err(|e| fail(e.to_string()))
+    Ok(forms)
 }
 
 /// What the Rust checker finds about `text` that the compiler written in
