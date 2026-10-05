@@ -2,6 +2,10 @@
 ;;; Part of the checker, `check-types.fx` first (PLAN.md §11, step 10).
 
 ;;; ------------------------------------------------------------ errors
+
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-errors-module (module
 ;; The error `m` at expression `x`.
 (define k-fail-at (subr checks (string kx) void) (lambda (m x) (k-fail m (k-start x) (k-end x))))
 ;; The error `what` followed by type `t`, at `a`..`b`, or at expression `x`.
@@ -70,4 +74,23 @@
     (k-cat4 "the handler must take a " (k-show-ty payload) " to a " (k-show-ty answer))))
 (define k-handler-gives (subr (maxeff kreads (alloc @t) spin) (int int string) string)
   (lambda (payload answer got)
-    (k-cat4 (k-handler-wants payload answer) ", and this gives a " got "")))
+    (k-cat4 (k-handler-wants payload answer) ", and this gives a " got "")))))
+
+(define k-fail-at (with check-errors-module k-fail-at))
+(define k-fail-ty (with check-errors-module k-fail-ty))
+(define k-fail-ty-at (with check-errors-module k-fail-ty-at))
+(define k-fail-effect (with check-errors-module k-fail-effect))
+(define k-fail-impure-plambda (with check-errors-module k-fail-impure-plambda))
+(define k-fail-no-part (with check-errors-module k-fail-no-part))
+(define k-fail-arity (with check-errors-module k-fail-arity))
+(define k-fail-arg-count (with check-errors-module k-fail-arg-count))
+(define k-argument-error (with check-errors-module k-argument-error))
+(define k-fail-not-known (with check-errors-module k-fail-not-known))
+(define k-fail-not-frozen (with check-errors-module k-fail-not-frozen))
+(define k-fail-not-data (with check-errors-module k-fail-not-data))
+(define k-fail-frozen (with check-errors-module k-fail-frozen))
+(define k-fail-beyond (with check-errors-module k-fail-beyond))
+(define k-proj-count-error (with check-errors-module k-proj-count-error))
+(define k-prompt-body-error (with check-errors-module k-prompt-body-error))
+(define k-handler-wants (with check-errors-module k-handler-wants))
+(define k-handler-gives (with check-errors-module k-handler-gives))
