@@ -1,11 +1,12 @@
 # FX-26: a grammar
 
 A reference grammar for FX-26 as the front ends accept it today
-(2026-10-02). It is written from the Rust parser, which is the reference
+(2026-10-05). It is written from the Rust parser, which is the reference
 (`crates/fixpt-fx26/src/parse.rs` for types and expressions,
-`crates/fixpt-fx26/src/top.rs` for top-level forms). The parser written in
-FX-26 (`parser.fx`, `parser-load.fx`) agrees with it form for form.
-`docs/fx26.md` says what the forms mean.
+`kinds.rs` for description functions, `modules.rs` for what a module's
+types are checked as, `top.rs` for top-level forms). The parser written in
+FX-26 (`parser.fx`, `parser-load.fx`) agrees with it on the forms below,
+bar a few corners at the edges. `docs/fx26.md` says what the forms mean.
 
 It is not context-free, and does not try to be. FX-26 is read as
 S-expressions first, and a name means what its binding makes it: the same
@@ -101,8 +102,9 @@ variant    ::= "(" name type* ")"
 ```
 kind       ::= "region" | "place" | "effect" | "type" | "data" | "size" | "conv"
              | "(" "=>" "(" kind+ ")" kind ")"   ; a description function's: what it takes, what it gives
-               { it gives a type, data, an effect, or another function;
-                 one that gives an effect takes no types or data }
+               { at least one kind in the list, each any kind, an arrow kind included;
+                 it gives a type, data, an effect, or another function;
+                 one that gives an effect takes no types, data or functions }
 
 binders    ::= "(" binder* ")"
 binder     ::= "(" name kind ")"
@@ -124,9 +126,11 @@ function   ::= fun-var                                 { bound with an arrow kin
              | "ref" | "icell" | "pairof" | "listof" | "arrayof" | "mark-key"
              | dlambda
              | "(" "select" module-var name ")"       { a module's type constructor }
-             | "(" function description+ ")"         { one that gives a function }
+             | "(" fun-var-or-name description+ ")"  { one that gives a function }
 
 dlambda    ::= "(" "dlambda" binders description ")"  { at least one binder }
+
+fun-var-or-name ::= fun-var | fun-name                { a name bound to a function }
 ```
 
 A description function is applied where a type or an effect is written,
@@ -170,7 +174,8 @@ type       ::= base-type
              | "(" "dletrec" "(" ("(" name type ")")* ")" type ")"
              | "(" "mu" name type ")"
              | "(" "moduleof" module-component* ")"
-             | "(" "select" module-var name ")"
+             | "(" "select" module-var name ")"        { module-var: a variable bound to a module;
+                                                         name: its `abs` or `desc` component }
              | "(" function description+ ")"          { a function to a type, applied }
 
 base-type  ::= "int" | "bool" | "char" | "string" | "unit" | "symbol" | "datum"
@@ -187,15 +192,31 @@ conv-form  ::= "(" "conv" convention ")"
 proposition ::= "(" "<=" type type ")"
               | "(" "poly" binders "(" "<=" type type ")" ("(" "<=" type type ")")* ")"
 
-module-component ::= "(" "abs" (name | "(" name+ ")") abs-kind ")"   ; abstract, in scope after
-                   | "(" "desc" name (type | dlambda) ")"             ; transparent
+module-component ::= "(" "abs" (name | "(" name+ ")") abs-kind ")"   ; abstract; in scope after
+                   | "(" "desc" name (type | dlambda) ")"             ; transparent; in scope after
+                   | "(" "val" name type ")"                          ; a value; not in scope in types
+                   { each name once, across all three }
 
-abs-kind   ::= "type" | "(" "=>" "(" kind+ ")" "type" ")"   ; an abstract type, or type constructor
-                   | "(" "val" name type ")"
+abs-kind   ::= "type"                             ; an abstract type
+             | "(" "=>" "(" kind+ ")" "type" ")"  ; an abstract type constructor
 
 label      ::= name | positive-integer
 ```
 
+- `moduleof`'s components may come in any order, but a type in one may
+  mention only the `abs` and `desc` names before it. A `desc` is a type or
+  a `dlambda`, not a function's bare name (`(desc f listof)` is refused).
+  An `abs` is a `type` or a constructor to `type`: no `data`, and no
+  function that gives a function.
+- A module's type fits another's that has fewer values, or the same in
+  another order, or `abs` where it has `desc`; not the reverse, nor a
+  constructor for a type (`docs/fx26.md`, Modules).
+- `(select m n)` is read where a type is written; `m` must be a variable
+  that is bound to a module there, and `n` one of its `abs` or `desc`
+  names, or it is refused. A procedure type's parameter written `(name
+  type)` may be selected from by the types after it in the `subr`, its
+  result included; the checkers show that as `(select $1 t)`, which is
+  not input.
 - A recursive type (`dletrec`, `mu`, a self-mentioning `define-type`) must
   go through a constructor, not only through names.
 - A type family may mention itself only with the same descriptions.
@@ -233,7 +254,9 @@ effect     ::= "pure"
              | "(" ("read" | "write") (region | globals) ")"
              | "(" ("alloc" | "goto" | "comefrom" | "await") region ")"
              | "(" "maxeff" effect* ")"                   ; union
-             | "(" function description+ ")"              { a function to an effect, applied }
+             | "(" effect-function description+ ")"       { applied; the description's kind is its parameter's }
+
+effect-function ::= fun-var | fun-name | dlambda      { one that gives an effect; not a `select` }
 
 globals    ::= "@globals"                                 ; every global
              | "(" "globals" name+ ")"                    ; those globals
@@ -313,7 +336,7 @@ arm        ::= "(" label name body ")"                  ; binds the payload
 else-arm   ::= "(" "else" name body ")"                 { last }
 
 module-item ::= "(" "define-generative" name type ")"
-              | "(" "define-generative" "(" name param+ ")" type ")"  ; a type constructor
+              | "(" "define-generative" "(" name binder+ ")" type ")"  ; a type constructor
               | "(" "define-type" name (type | dlambda) ")"
               | "(" "define" name [type] expression ")"
               | "(" "define-rec" rec-binding+ ")"
@@ -327,6 +350,26 @@ bloblet-form ::= "(" "make-bloblet" expression expression* ")"           ; bytes
                | "(" "bloblet-set-byte!" expression expression expression ")"
                | "(" "bloblet-bytes" expression ")"
 ```
+
+- A `module` holds only the five items above, each seeing those before it.
+  Not `define*`, `define-effect`, `private-regions`, `define-datatype`, a
+  type family `(define-type (f p) …)`, a bare expression, or a variance
+  mark (`(a type +)`) on a `define-generative`'s parameter.
+- A module's `define-generative` makes `up-name` and `down-name` for the
+  items after it, and for them alone: `with` does not bring them out. A
+  `define-rec` binds only `lambda`s. A `module` is an expression, and may
+  be an item's value.
+- `(with m body)`: `m` is a variable bound to a module, not an
+  expression. It puts the module's `val` names in scope in `body`, which
+  is one or more expressions (no definitions); its types are named with
+  `select`, not by name.
+- `(load-module "file")`: the file is a string literal, and its forms are
+  `module-item`s, as if written in a `module`, and also a
+  `define-datatype` with no parameters. A file with any other top-level
+  form or a bare expression is refused. It sees only the standard
+  environment. A relative path is from the program's directory (the
+  current one at the REPL); an error in the file is said at the
+  `load-module`, with where in the file.
 
 Derived forms, as the parser expands them:
 
