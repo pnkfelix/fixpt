@@ -169,6 +169,10 @@ pub struct Checker {
     /// Modules read from files: each one's path and text, and the file id
     /// its spans have.
     pub(crate) loaded: HashMap<ExpId, (String, String, fixpt_read::FileId)>,
+    /// How many module files have been read: the next one's number, in the
+    /// order they are begun, a file a loaded file loads after it, as the
+    /// driver supplies them to the parser written in FX-26 (`syn.rs`).
+    pub(crate) files_read: u32,
     /// Where a `load-module`'s relative path is from: the program's own
     /// directory, when it was read from a file; else the current one.
     pub base_dir: Option<std::path::PathBuf>,
@@ -380,6 +384,7 @@ impl Checker {
             standard_dscope: 0,
             hidden: None,
             loaded: HashMap::new(),
+            files_read: 0,
             base_dir: None,
             ahead: Vec::new(),
             ahead_filled: Vec::new(),

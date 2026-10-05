@@ -80,7 +80,10 @@
 (define top-item (subr parses (top) mod-item)
   (lambda (t)
     (tagcase t
-      (t-define-type (head sum a b) (mod-item-of 1 (syn-symbol head) (one-syn sum) nil))
+      (t-define-type (head sum a b)
+        (if (param-head? head)
+            (param-desc-item a b head sum)
+            (mod-item-of 1 (syn-symbol head) (one-syn sum) nil)))
       (t-define (n tys x a b) (mod-item-of 2 n tys (the exp-list (cons x nil))))
       (else y (pfail-at module-usage 0 0)))))
 (define tops-items (subr (maxeff parses spin) (top-list mod-items) mod-items)

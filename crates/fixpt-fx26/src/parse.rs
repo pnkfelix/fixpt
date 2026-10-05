@@ -1642,7 +1642,8 @@ impl Checker {
             _ => std::path::PathBuf::from(path),
         };
         let text = std::fs::read_to_string(&at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?;
-        let file = fixpt_read::FileId(1 + self.loaded.len() as u32 + 1000);
+        self.files_read += 1;
+        let file = fixpt_read::FileId(self.files_read + 1000);
         let at_file = |e: FxError, c: &Self| c.in_loaded(e, span, path, &text, file);
         let forms = match self.read_module_file(file, &text) {
             Ok(f) => f,
@@ -1650,7 +1651,10 @@ impl Checker {
         };
         let (depth, standard) = (self.dscope.len(), self.standard_dscope);
         let outer = self.hidden.replace(((0, 0), (standard, depth)));
+        // Its own `load-module`s are from its directory.
+        let outer_dir = std::mem::replace(&mut self.base_dir, at.parent().map(|d| d.to_path_buf()));
         let r = self.parse_module_in(&forms);
+        self.base_dir = outer_dir;
         self.dscope.truncate(depth);
         self.hidden = outer;
         let items = r.map_err(|e| at_file(e, self))?;
@@ -1749,6 +1753,20 @@ impl Checker {
                     };
                     let (up_fn, down_fn) = (identity(self), identity(self));
                     out.push(ModItem::Abs { name, var, rep, up, down, up_fn, down_fn });
+                }
+                // `(define-type (d (p k) …) T)`, a parameterised
+                // description, is `(define-type d (dlambda ((p k) …) T))`:
+                // what a `define-datatype` with parameters expands to, in a
+                // `load-module`'s file too (PLAN.md Q13, O15). As the FX-26
+                // parser's `parse-module-item`.
+                (Some("define-type"), [_, head, t]) if head.as_proper_list().is_some_and(|h| h.len() > 1) => {
+                    let h = head.as_proper_list().unwrap_or(&[]);
+                    let (name, _) = name_of(self, &h[0])?;
+                    let dlambda = Syntax::symbol(head.span, self.interner.intern("dlambda"));
+                    let fun = Syntax::list(f.span, vec![dlambda, Syntax::list(head.span, h[1..].to_vec()), t.clone()]);
+                    let ty = self.parse_fun(&fun, None)?;
+                    self.dscope.push((name, DScope::Fun(ty)));
+                    out.push(ModItem::Desc { name, ty });
                 }
                 (Some("define-type"), [_, n, t]) if self.head(t.as_proper_list().unwrap_or(&[])) == Some("dlambda") => {
                     let (name, _) = name_of(self, n)?;

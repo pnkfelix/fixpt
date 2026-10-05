@@ -646,6 +646,28 @@ fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, St
 /// a module's in order, as the Rust checker numbers them.
 fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
+    let mut list = scheme.make(|_| Value::NULL);
+    let mut read = 0;
+    supply_loaded_in(scheme, file, text, 0, base_dir, &mut read, &mut list)?;
+    scheme.call_global(&format!("{READER_PREFIX}loaded-files!"), &[list]).map_err(|e| fail(e.to_string()))?;
+    Ok(())
+}
+
+/// [`supply_loaded`] for the `load-module`s of `text`, a program or a file
+/// read at `base` (its positions moved past the program's by it), whose
+/// relative paths are from `dir`: each file read, then those it loads, in
+/// the order the Rust checker begins them (`Checker::files_read`).
+fn supply_loaded_in(
+    scheme: &mut Session,
+    file: FileId,
+    text: &str,
+    base: i64,
+    dir: Option<std::path::PathBuf>,
+    read: &mut u32,
+    list: &mut fixpt_scheme::Handle,
+) -> R<()> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut interner = Interner::new();
     let Ok(forms) = fixpt_read::Reader::new(text, file, fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() else {
         return Ok(());
@@ -654,17 +676,14 @@ fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
     load_modules_in(&forms, &interner, &mut loads);
     let offsets = byte_offsets(text);
     let char_at = |byte: u32| offsets.partition_point(|&o| o < byte as usize) as i64;
-    let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
-    let mut list = scheme.make(|_| Value::NULL);
-    let mut read = 0;
     for (start, path) in loads {
-        let at = match &base_dir {
+        let at = match &dir {
             Some(d) if std::path::Path::new(&path).is_relative() => d.join(&path),
             _ => std::path::PathBuf::from(&path),
         };
-        let (base, why, syns, ftext) = match std::fs::read_to_string(&at) {
+        let (file_base, why, syns, ftext) = match std::fs::read_to_string(&at) {
             Err(e) => (0, format!("cannot read `{path}`: {e}"), scheme.make(|_| Value::NULL), String::new()),
-            Ok(ftext) => match read_to_syns(scheme, FileId(1001 + read), &ftext) {
+            Ok(ftext) => match read_to_syns(scheme, FileId(1001 + *read), &ftext) {
                 Err(e) => {
                     let before = &ftext[..(e.span.start as usize).min(ftext.len())];
                     let line = before.matches('\n').count() + 1;
@@ -672,25 +691,28 @@ fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
                     (0, format!("in `{path}`, {line}:{col}: {}", e.message), scheme.make(|_| Value::NULL), ftext)
                 }
                 Ok(syns) => {
-                    read += 1;
-                    (LOAD_BASE_STEP * read as i64, String::new(), syns, ftext)
+                    *read += 1;
+                    (LOAD_BASE_STEP * *read as i64, String::new(), syns, ftext)
                 }
             },
         };
         let string = |sc: &mut Session, t: &str| sc.make(|m| m.heap().string_from_chars(&t.chars().collect::<Vec<_>>()));
         let fields = [
             scheme.make(|_| Value::fixnum(37)),
-            scheme.make(|_| Value::fixnum(char_at(start))),
-            scheme.make(|_| Value::fixnum(base)),
+            scheme.make(|_| Value::fixnum(base + char_at(start))),
+            scheme.make(|_| Value::fixnum(file_base)),
             string(scheme, &why),
             string(scheme, &path),
             syns,
             string(scheme, &ftext),
         ];
         let one = scheme.call_global("%make-frozen", &fields).map_err(|e| fail(e.to_string()))?;
-        list = scheme.call_global("cons", &[one, list]).map_err(|e| fail(e.to_string()))?;
+        *list = scheme.call_global("cons", &[one, *list]).map_err(|e| fail(e.to_string()))?;
+        // The files it loads, from its directory, at its positions.
+        if file_base > 0 {
+            supply_loaded_in(scheme, FileId(1000 + *read), &ftext, file_base, at.parent().map(|d| d.to_path_buf()), read, list)?;
+        }
     }
-    scheme.call_global(&format!("{READER_PREFIX}loaded-files!"), &[list]).map_err(|e| fail(e.to_string()))?;
     Ok(())
 }
 

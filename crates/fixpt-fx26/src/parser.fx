@@ -344,6 +344,23 @@
 ;; A module's item, of one name.
 (define mod-item-of (subr (read @globals) (int symbol syns-a exp-list) mod-item)
   (lambda (k name ts xs) (product (1 k) (2 (the names (cons name nil))) (3 ts) (4 xs))))
+;; Whether a `define-type`'s head is `(d (p k) …)`: a name with parameters.
+(define param-head? (subr (maxeff (read @globals) (read @s)) (syn) bool)
+  (lambda (head)
+    (tagcase head
+      (lst (xs d a b) (and (not (null? xs)) (not (null? (cdr xs)))))
+      (else x #f))))
+;; `(define-type (d (p k) …) T)` in a module, at `a`..`b`: `(define-type d
+;; (dlambda ((p k) …) T))`, what a `define-datatype` with parameters expands
+;; to, in a `load-module`'s file too, as the Rust parser's `parse_module_in`.
+(define param-desc-item (subr parses (int int syn syn) mod-item)
+  (lambda (a b head t)
+    (let* ((hs (tagcase head (lst (xs d a b) xs) (else x (the syns-a nil))))
+           (ha (syn-start head))
+           (hb (syn-end head))
+           (params (mk-list (cdr hs) ha hb))
+           (fun (mk-list (list (mk-symbol "dlambda" ha hb) params t) a b)))
+      (mod-item-of 1 (syn-symbol (car hs)) (one-syn fun) nil))))
 ;; `(lambda (x) x)`, spanning `a`..`b`: an abstract type's conversion.
 (define identity-at (subr (read @globals) (int int) exp)
   (lambda (a b)
@@ -704,6 +721,8 @@
                               (the syns-a (list (nth parts 2) head))
                               (one-syn (nth parts 2)))))
                  (mod-item-of 0 name ts (list up down))))
+              ((and (symbol=? head 'define-type) (= n 3) (param-head? (nth parts 1)))
+               (param-desc-item (syn-start f) (syn-end f) (nth parts 1) (nth parts 2)))
               ((and (symbol=? head 'define-type) (= n 3))
                (mod-item-of 1 (syn-symbol (nth parts 1)) (one-syn (nth parts 2)) nil))
               ((and (symbol=? head 'define) (= n 3))

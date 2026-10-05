@@ -619,6 +619,8 @@ pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
+    // A `load-module`'s path is from the file's directory, as `eval`'s is.
+    session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
     let (fx26, rust) = match fixpt_fx26::compare::both_checkers(&mut session, text) {
         Ok(both) => both,
         Err(e) => {
@@ -655,6 +657,7 @@ pub fn compile(backend: Backend, name: &str, text: &str) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
+    session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
     let (fx26, rust, declined) = match fixpt_fx26::compare::both_compilers_declining(&mut session, text) {
         Ok(both) => both,
         Err(e) => {

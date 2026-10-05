@@ -960,6 +960,7 @@ impl Fx26Session {
     pub fn fresh_checker(&self) -> Checker {
         let mut c = Checker::with_convention(if self.native_convention { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
         c.globals_effects = self.globals_effects;
+        c.base_dir = self.checker.base_dir.clone();
         c
     }
 

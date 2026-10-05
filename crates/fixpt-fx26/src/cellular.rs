@@ -867,7 +867,7 @@ impl<'a> Compiler<'a> {
         let start = self.char_at.get(span.start as usize).copied().filter(|_| span.file.0 == 0).unwrap_or(u32::MAX);
         let name = named.unwrap_or_else(|| match self.char_at.get(span.start as usize) {
             Some(start) if span.file.0 == 0 => format!("lambda@{start}"),
-            _ => format!("lambda@{}:{}", span.file.0, span.start),
+            _ => format!("lambda@{}:{}", span.file.0, self.loaded_char_at(span)),
         });
         let w = self.assemble(&body_code, &name)?;
         // For bisecting a fault: with `FIXPT_REG_RANGE=lo-hi,…`, only the
@@ -906,6 +906,17 @@ impl<'a> Compiler<'a> {
     /// The parameters and body of `x`, when it is a lambda under any type
     /// abstractions, ascriptions and conversions, which compile to nothing; and its
     /// region, when it is an `rlambda`.
+    /// Where `span` starts in its module's file (`load-module`), in
+    /// characters, as the FX-26 compiler places it; in bytes if the file is
+    /// not one the checker read.
+    fn loaded_char_at(&self, span: fixpt_read::Span) -> u32 {
+        let text = self.c.loaded.values().find(|(_, _, f)| *f == span.file).map(|(_, t, _)| t.as_str());
+        match text {
+            Some(t) => t[..(span.start as usize).min(t.len())].chars().count() as u32,
+            None => span.start,
+        }
+    }
+
     /// The next lambda's word named for global `name`, whose definition it
     /// is, rather than for where its body starts: so that a profile, a
     /// disassembly or a fault says which procedure (`fixpt_native::symbols`).
