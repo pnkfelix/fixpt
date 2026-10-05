@@ -43,6 +43,11 @@ fn moves_a_definition_with_its_comments() {
     assert!(b < a, "{out}");
     let out = se::move_before(SAMPLE, P, "a", "s").unwrap();
     assert!(out.find(";; A comment about `a`.").unwrap() > out.find("(define-rec").unwrap(), "{out}");
+    // A whole definition moved before a group's member goes before the
+    // group, not into it.
+    let out = se::move_before(SAMPLE, P, "s", "c").unwrap();
+    assert!(out.find("(define s").unwrap() < out.find("(define-rec").unwrap(), "{out}");
+    assert!(se::check(&out, P).is_ok());
 }
 
 #[test]

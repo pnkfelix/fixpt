@@ -28,6 +28,7 @@ pub const PARSER: &str = include_str!("parser.fx");
 /// The parser's `load-module` (`docs/research/first-class-modules.md`, M7),
 /// written in FX-26: the files a program names, as the driver read them.
 pub const PARSER_LOAD: &str = include_str!("parser-load.fx");
+pub const PARSER_MODULES: &str = include_str!("parser-modules.fx");
 
 /// The evaluator written in FX-26, which runs the parser's trees.
 pub const EVALUATOR: &str = include_str!("evaluator.fx");
@@ -109,10 +110,11 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 41] = [
+pub const FRONT_END_FILES: [(&str, &str); 42] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("parser-load.fx", PARSER_LOAD),
+    ("parser-modules.fx", PARSER_MODULES),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
     CHECKER_FILES[1],
@@ -199,6 +201,7 @@ pub mod lemma;
 pub mod lower;
 mod sizes;
 mod modules;
+mod modorder;
 pub mod parse;
 pub mod session;
 pub mod sexp;

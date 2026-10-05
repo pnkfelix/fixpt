@@ -339,6 +339,10 @@
 ;; (`parser-load.fx`, which sets this).
 (define parse-load-module (ref (subr (maxeff parses spin) (string int int) mod-items) @s)
   (new (lambda (path a b) (the mod-items nil))))
+;; A module's items, its typed lambda definitions naming themselves each a
+;; `define-rec` of one (`parser-modules.fx`, which sets this).
+(define module-own-names (ref (subr (maxeff parses spin) (mod-items) mod-items) @s)
+  (new (lambda (items) items)))
 ;; `t` alone in a list.
 (define one-syn (subr (read @globals) (syn) syns-a) (lambda (t) (cons t nil)))
 ;; A module's item, of one name.
@@ -511,7 +515,8 @@
         ((symbol=? head 'prompt)
          (begin (arity items 4 "`(prompt tag body handler)`" a b)
                 (e-prompt (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b)))
-        ((symbol=? head 'module) (e-module (parse-module-items (cdr items)) a b))
+        ((symbol=? head 'module)
+         (e-module ((get module-own-names) (parse-module-items (cdr items))) a b))
         ;; `(load-module "file")`: the file's forms, a module's items
         ;; (`parser-load.fx`).
         ((symbol=? head 'load-module)

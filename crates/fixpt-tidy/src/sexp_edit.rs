@@ -219,7 +219,10 @@ pub fn delete(text: &str, profile: SyntaxProfile, name: &str) -> Result<String, 
 /// Move the definition `name`, with its comments, to just before `other`.
 pub fn move_before(text: &str, profile: SyntaxProfile, name: &str, other: &str) -> Result<String, String> {
     let d = find(text, profile, name)?;
-    let o = find(text, profile, other)?;
+    // A top-level definition goes before the top-level form holding
+    // `other`: before a `define-rec` whose member it is, not into it.
+    let top_level = top_form(text, profile, name).is_ok_and(|t| t.lead == d.lead);
+    let o = if top_level { top_form(text, profile, other)? } else { find(text, profile, other)? };
     if o.lead >= d.lead && o.lead < d.end {
         return Err(format!("`{other}` is inside `{name}`"));
     }

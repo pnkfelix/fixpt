@@ -1659,6 +1659,7 @@ impl Checker {
         self.hidden = outer;
         let items = r.map_err(|e| at_file(e, self))?;
         self.defined_twice(span, &items)?;
+        let items = self.module_own_names(items);
         let e = self.arena.exp(span, Exp::Module(items));
         self.loaded.insert(e, (path.to_string(), text.clone(), file));
         Ok(e)
@@ -1685,6 +1686,8 @@ impl Checker {
         self.dscope.truncate(depth);
         let items = r?;
         self.defined_twice(span, &items)?;
+        // A typed lambda definition sees its own name.
+        let items = self.module_own_names(items);
         Ok(self.arena.exp(span, Exp::Module(items)))
     }
 

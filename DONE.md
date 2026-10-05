@@ -554,3 +554,33 @@ member notes nothing; a module defined again forgets its members. Test
 `tests/register_code.rs`, `a_reexported_module_member_is_inlined`,
 `programs/run/reexport-inlined.fx`, both compilers. What is left is
 `TODO.md` §38.
+
+## 37. A module's typed lambda definitions see their own names (2026-10-05)
+
+Found moving `table.fx` into a module (`TODO.md` §34): a module's `define`
+did not see its own name, so one recursive procedure needed a `define-rec`
+of one, where at the top level a typed `define` of a lambda sees itself.
+Now a module is as the top level: definitions in order, each seeing those
+before it; a typed lambda definition sees its own name; procedures that
+call each other are a `define-rec` (ML's structures: `val`s in order, `fun
+f` recursive, `fun f … and g …` mutual). Each parser makes a typed lambda
+definition whose value names itself a `define-rec` of one
+(`module_own_names` in `modorder.rs`; `mo-own-names` in
+`parser-modules.fx`, a new file of the front end, through the hook
+`module-own-names`), which the checkers, the lowering, the compilers and
+the evaluator already know: its calls of itself direct, checked to end as
+a `define-rec`'s members are. One that does not name itself stays a
+definition, so a re-export of it may still be inlined (§38). Whether a
+value names itself is its free names, syntactically, a `with` binding none
+(the parser does not know a module's names); both parsers walk alike.
+Tests `modules/own-name.fx`, `modules/later-unbound.fx`.
+
+What was designed first and not built: FX-91's mutual visibility (its
+report §2.3.11), every typed lambda seeing every definition, the
+initialization hazard (FX-91's semantics stuck, our FX-91 port failing at
+run time, "f is used before it is defined", though the module's type says
+pure) refused statically by reachability, the parser reordering a
+module's items into the order they are made. The user wanted the
+author's order kept, and only the self-reference. Found on the way:
+`sexp-edit move` put a top-level definition moved before a `define-rec`'s
+member inside the group; it goes before the group now.
