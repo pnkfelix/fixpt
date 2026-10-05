@@ -202,7 +202,8 @@ before everything else, known holes before proofs.
   slower on register code, now inlined when the member names no other,
   `DONE.md` §38), which found that a
   module's definitions did not see themselves (done, `DONE.md` §37: a
-  typed lambda definition sees its own name, as at the top level); and A3 (S4), checked
+  module's values see each other, as a `letrec*`'s, a value made too soon
+  refused statically); and A3 (S4), checked
   (2026-10-05): no FX-26 program can make a cyclic `datum` (every
   constructor is pure over acyclic parts, and `datum-list` of a list made
   cyclic with `set-cdr!` fails, "expected a list", lowered and natively);

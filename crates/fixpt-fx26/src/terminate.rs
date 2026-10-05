@@ -326,24 +326,28 @@ impl Walk<'_> {
                 self.walk(els);
                 self.guards.truncate(depth);
             }
-            // A module's values made, and a `with`'s module named, each as
-            // any expression or variable is.
+            // A module's values made, all its names in scope (a `letrec*`'s),
+            // and a `with`'s module named, each as any expression or
+            // variable is.
             Exp::Module(items) => {
                 let depth = self.scope.len();
+                for item in &items {
+                    match item {
+                        crate::ast::ModItem::Abs { up, down, .. } => self.scope.extend([(*up, Vec::new()), (*down, Vec::new())]),
+                        crate::ast::ModItem::Desc { .. } => {}
+                        crate::ast::ModItem::Val { name, .. } => self.scope.push((*name, Vec::new())),
+                        crate::ast::ModItem::Rec(group) => self.scope.extend(group.iter().map(|(n, _, _)| (*n, Vec::new()))),
+                    }
+                }
                 for item in items {
                     match item {
-                        crate::ast::ModItem::Abs { up, down, .. } => self.scope.extend([(up, Vec::new()), (down, Vec::new())]),
-                        crate::ast::ModItem::Desc { .. } => {}
-                        crate::ast::ModItem::Val { name, init, .. } => {
-                            self.walk(init);
-                            self.scope.push((name, Vec::new()));
-                        }
+                        crate::ast::ModItem::Val { init, .. } => self.walk(init),
                         crate::ast::ModItem::Rec(group) => {
-                            self.scope.extend(group.iter().map(|(n, _, _)| (*n, Vec::new())));
                             for (_, _, init) in &group {
                                 self.walk(*init);
                             }
                         }
+                        _ => {}
                     }
                 }
                 self.scope.truncate(depth);

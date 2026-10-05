@@ -109,10 +109,6 @@
 (define loaded-error (subr (read @globals) (string) mod-items)
   (lambda (m) (cons (mod-item-of -1 (string->symbol m) (the syns-a nil) nil) nil)))
 
-;; A module's file's forms, at `a`..`b`, as the module they are: its typed
-;; lambda definitions naming themselves `define-rec`s (`parser-modules.fx`).
-(define loaded-module (subr (maxeff parses spin) (syns-a int int) exp)
-  (lambda (forms a b) (e-module ((get module-own-names) (file-items forms)) a b)))
 ;; `(load-module "path")`, at `a`..`b`: the module's items, after its mark;
 ;; or why it could not be read.
 (define parse-loaded (subr (maxeff parses spin) (string int int) mod-items)
@@ -126,7 +122,7 @@
                 (forms (syns-moved (extract (car f) 5) base))
                 ;; The items, as a form's, out of the prompt that catches
                 ;; what is wrong in them.
-                (r (prompt parse-tag (p-ok (cons (t-exp (loaded-module forms a b)) nil))
+                (r (prompt parse-tag (p-ok (cons (t-exp (e-module (file-items forms) a b)) nil))
                            (lambda (r) r))))
            (tagcase r
              (p-err (m x y)

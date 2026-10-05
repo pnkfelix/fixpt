@@ -461,34 +461,46 @@ impl Lowerer<'_> {
         }
     }
 
-    /// A module's items from the first, each in the scope of those before
-    /// it, then the product of its values, `vals` gathering their names.
+    /// A module's items, a `letrec*` of them all (`crate::modorder`), then
+    /// the product of its values, `vals` gathering their names.
     fn module_items(&mut self, items: &[crate::ast::ModItem], vals: &mut Vec<Sym>) -> String {
         use crate::ast::ModItem;
-        let Some((first, rest)) = items.split_first() else {
-            let fields: Vec<String> = vals.iter().map(|n| self.var(*n)).collect();
-            return format!("(%fx26-product {})", fields.join(" "));
-        };
-        match first {
-            ModItem::Desc { .. } => self.module_items(rest, vals),
-            ModItem::Abs { up, down, .. } => {
-                self.locals.extend([*up, *down]);
-                let (u, d) = (self.local(*up), self.local(*down));
-                format!("(let (({u} (lambda (x) x)) ({d} (lambda (x) x))) {})", self.module_items(rest, vals))
-            }
-            ModItem::Val { name, init, .. } => {
-                let init = self.go(*init);
-                self.locals.push(*name);
-                vals.push(*name);
-                format!("(let (({} {init})) {})", self.local(*name), self.module_items(rest, vals))
-            }
-            ModItem::Rec(group) => {
-                self.locals.extend(group.iter().map(|(n, _, _)| *n));
-                vals.extend(group.iter().map(|(n, _, _)| *n));
-                let bs: Vec<String> = group.iter().map(|(n, _, init)| format!("({} {})", self.local(*n), self.go(*init))).collect();
-                format!("(letrec* ({}) {})", bs.join(" "), self.module_items(rest, vals))
+        for item in items {
+            match item {
+                ModItem::Desc { .. } => {}
+                ModItem::Abs { up, down, .. } => self.locals.extend([*up, *down]),
+                ModItem::Val { name, .. } => {
+                    self.locals.push(*name);
+                    vals.push(*name);
+                }
+                ModItem::Rec(group) => {
+                    self.locals.extend(group.iter().map(|(n, _, _)| *n));
+                    vals.extend(group.iter().map(|(n, _, _)| *n));
+                }
             }
         }
+        let mut bs = Vec::new();
+        for item in items {
+            match item {
+                ModItem::Desc { .. } => {}
+                ModItem::Abs { up, down, .. } => {
+                    bs.push(format!("({} (lambda (x) x))", self.local(*up)));
+                    bs.push(format!("({} (lambda (x) x))", self.local(*down)));
+                }
+                ModItem::Val { name, init, .. } => {
+                    let init = self.go(*init);
+                    bs.push(format!("({} {init})", self.local(*name)));
+                }
+                ModItem::Rec(group) => {
+                    for (n, _, init) in group {
+                        let init = self.go(*init);
+                        bs.push(format!("({} {init})", self.local(*n)));
+                    }
+                }
+            }
+        }
+        let fields: Vec<String> = vals.iter().map(|n| self.var(*n)).collect();
+        format!("(letrec* ({}) (%fx26-product {}))", bs.join(" "), fields.join(" "))
     }
 
     fn body(&mut self, bound: &[Sym], e: ExpId) -> String {

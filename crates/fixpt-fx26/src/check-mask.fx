@@ -101,15 +101,15 @@
             (x-with (m body a b)
               (let ((o (k-unseen (x-var m a b) bound rs)))
                 (k-unseen body (k-names-onto (k-with-names a b) bound) o)))))))
-  ;; The same walk of a module's items.
+  ;; The same walk of a module's items, every item's names bound, as a
+  ;; `letrec*`'s.
   (k-unseen-module (subr (maxeff kstate spin) (k-items k-names k-regions) k-regions)
+    (lambda (items bound rs) (k-unseen-items items (k-items-bound items bound) rs)))
+  (k-unseen-items (subr (maxeff kstate spin) (k-items k-names k-regions) k-regions)
     (lambda (items bound rs)
       (if (null? items)
           rs
-          (let* ((it (car items))
-                 (inner (k-item-bound it bound))
-                 (o (k-unseen-list (extract it 5) (if (= (extract it 1) 3) inner bound) rs)))
-            (k-unseen-module (cdr items) inner o)))))
+          (k-unseen-items (cdr items) bound (k-unseen-list (extract (car items) 5) bound rs)))))
   (k-unseen-letrec (subr (maxeff kstate spin) (k-letrec-bs k-names k-regions) k-regions)
     (lambda (bs bound rs)
       (if (null? bs)

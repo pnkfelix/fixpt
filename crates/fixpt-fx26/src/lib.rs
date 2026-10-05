@@ -28,7 +28,6 @@ pub const PARSER: &str = include_str!("parser.fx");
 /// The parser's `load-module` (`docs/research/first-class-modules.md`, M7),
 /// written in FX-26: the files a program names, as the driver read them.
 pub const PARSER_LOAD: &str = include_str!("parser-load.fx");
-pub const PARSER_MODULES: &str = include_str!("parser-modules.fx");
 
 /// The evaluator written in FX-26, which runs the parser's trees.
 pub const EVALUATOR: &str = include_str!("evaluator.fx");
@@ -76,7 +75,7 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// parts, in order: types and effects, printing, reading descriptions,
 /// resolving them, errors, modules' descriptions, subtyping, instantiation,
 /// termination, the rules, modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 22] = [
+pub const CHECKER_FILES: [(&str, &str); 23] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-print.fx", include_str!("check-print.fx")),
     ("check-syntax.fx", include_str!("check-syntax.fx")),
@@ -97,6 +96,7 @@ pub const CHECKER_FILES: [(&str, &str); 22] = [
     ("check-letrec.fx", include_str!("check-letrec.fx")),
     ("check-facts.fx", include_str!("check-facts.fx")),
     ("check-synth.fx", include_str!("check-synth.fx")),
+    ("check-modorder.fx", include_str!("check-modorder.fx")),
     ("check-module-rules.fx", include_str!("check-module-rules.fx")),
     ("check-program.fx", include_str!("check-program.fx")),
 ];
@@ -114,7 +114,6 @@ pub const FRONT_END_FILES: [(&str, &str); 42] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("parser-load.fx", PARSER_LOAD),
-    ("parser-modules.fx", PARSER_MODULES),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
     CHECKER_FILES[1],
@@ -138,6 +137,7 @@ pub const FRONT_END_FILES: [(&str, &str); 42] = [
     CHECKER_FILES[19],
     CHECKER_FILES[20],
     CHECKER_FILES[21],
+    CHECKER_FILES[22],
     ("evaluator.fx", EVALUATOR),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),

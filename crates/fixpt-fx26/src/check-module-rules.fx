@@ -53,42 +53,67 @@
            (bound (k-bind n (k-name-nat n (extract r 1)))))
       (k-made-of (extract made 1) (extract made 2) (k-part-onto n (extract r 1) (extract made 3))
                  (k-union (extract made 4) (extract r 2))))))
-;; A group's bindings, each type resolved at `a`..`b` in turn.
-(define k-group-bindings (subr (maxeff checks spin) (k-names k-ids kxs int int) k-letrec-bs)
-  (lambda (ns ts xs a b)
-    (if (null? ns)
+;; The bindings of lambdas `ls`, each type resolved at `a`..`b` in turn.
+(define k-mod-bindings (subr (maxeff checks spin) (k-mlams int int) k-letrec-bs)
+  (lambda (ls a b)
+    (if (null? ls)
         nil
-        (let* ((t (k-resolve-selects (car ts) a b))
-               (rest (k-group-bindings (cdr ns) (cdr ts) (cdr xs) a b)))
-          (cons (product (1 (car ns)) (2 t) (3 (car xs))) rest)))))
-;; Every one of `bs` a `lambda`, or an error at the first that is not.
-(define k-group-lambdas (subr checks (k-letrec-bs) unit)
-  (lambda (bs)
-    (cond ((null? bs) #u)
-          ((k-lambda? (extract (car bs) 3)) (k-group-lambdas (cdr bs)))
-          (else (k-fail-at (k-cat3 "`" (symbol->string (extract (car bs) 1))
-                                   "`, in a `define-rec`, is a `lambda`")
-                           (extract (car bs) 3))))))
-(define k-parts-of-group (subr (maxeff (read @globals) (alloc @t)) (k-letrec-bs k-parts) k-parts)
-  (lambda (bs ps)
+        (let* ((t (k-resolve-selects (extract (car ls) 2) a b))
+               (rest (k-mod-bindings (cdr ls) a b)))
+          (cons (product (1 (extract (car ls) 1)) (2 t) (3 (extract (car ls) 3))) rest)))))
+;; Each of `bs` bound, known, a definition's type named as a value's is.
+(define k-mod-bind (subr (maxeff kstate spin) (k-letrec-bs k-mlams) unit)
+  (lambda (bs ls)
     (if (null? bs)
-        ps
-        (k-parts-of-group (cdr bs) (k-part-onto (extract (car bs) 1) (extract (car bs) 2) ps)))))
-;; `(define-rec (f T e) …)`: every name in scope first, known; then each
-;; `lambda` checked against its type, a group whose every run ends needing
-;; no `spin`.
-(define k-module-group (subr (maxeff checks spin) (k-item int int k-made) k-made)
-  (lambda (it a b made)
-    (let* ((bs (k-group-bindings (extract it 2) (extract it 4) (extract it 5) a b))
-           (rsaved (get k-recursive))
-           (bound (k-bind-letrec bs))
-           (lambdas (k-group-lambdas bs))
-           (noted (k-note-ending bs (k-termination bs)))
-           (e (k-check-letrec bs))
-           (restored (set k-recursive rsaved)))
-      (k-made-of (extract made 1) (extract made 2) (k-parts-of-group bs (extract made 3))
-                 (k-union (extract made 4) e)))))
-;; Items `items`, each in the scope of those before it.
+        #u
+        (let ((n (extract (car bs) 1)) (t (extract (car bs) 2)))
+          (begin (k-bind n (if (extract (car ls) 5) t (k-name-nat n t)))
+                 (k-note-known n 0)
+                 (k-mod-bind (cdr bs) (cdr ls)))))))
+;; Each lambda of `bs` checked against its type, in the scope of every
+;; item, with its recursive group (of `gs`, `k-mod-groups`) checked to end,
+;; as a `define-rec`'s members are.
+(define k-mod-check-lambdas (subr (maxeff checks spin) (k-letrec-bs k-mlams k-groups) k-eff)
+  (lambda (bs ls gs)
+    (if (null? bs)
+        nil
+        (let* ((n (extract (car bs) 1)) (t (extract (car bs) 2)) (init (extract (car bs) 3))
+               (group (car gs))
+               (rsaved (get k-recursive))
+               (noted (if (null? group) #u (k-note-ending group (k-termination group))))
+               (e (if (extract (car ls) 5) (k-check-declared n t init) (k-check init t)))
+               (restored (set k-recursive rsaved)))
+          (k-union e (k-mod-check-lambdas (cdr bs) (cdr ls) (cdr gs)))))))
+;; The type part `n` of `ps` is, or -1.
+(define k-part-of (subr (maxeff kreads spin) (k-parts symbol) int)
+  (lambda (ps n)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
+          (else (k-part-of (cdr ps) n)))))
+;; The type `bs` gives `n`.
+(define k-bs-type (subr (read @globals) (k-letrec-bs symbol) int)
+  (lambda (bs n)
+    (if (symbol=? (extract (car bs) 1) n) (extract (car bs) 2) (k-bs-type (cdr bs) n))))
+;; Names `ns`, each at its type in `bs`, onto `out`.
+(define k-bs-parts (subr (maxeff (read @globals) (alloc @t)) (k-names k-letrec-bs k-parts) k-parts)
+  (lambda (ns bs out)
+    (if (null? ns)
+        out
+        (let ((t (k-bs-type bs (car ns)))) (k-bs-parts (cdr ns) bs (k-part-onto (car ns) t out))))))
+;; The module's values, in written order, onto `out` (newest first): a
+;; lambda's at its type in `bs`, another's as made, in `vs`.
+(define k-mod-vals (subr kbuilds (k-items k-parts k-letrec-bs k-parts) k-parts)
+  (lambda (items vs bs out)
+    (if (null? items)
+        out
+        (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2))
+               (more (cond ((k-lambda-item? it) (k-bs-parts ns bs out))
+                           ((= k 2) (k-part-onto (car ns) (k-part-of vs (car ns)) out))
+                           ((= k 3) (k-bs-parts ns bs out))
+                           (else out))))
+          (k-mod-vals (cdr items) vs bs more)))))
+;; Items `items` but typed lambdas, each in the scope of those before it
+;; and of the typed lambdas.
 (define k-module-items (subr (maxeff checks spin) (k-items int int k-made) k-made)
   (lambda (items a b made)
     (if (null? items)
@@ -103,8 +128,10 @@
                           (k-made-of (extract made 1)
                                      (k-part-onto (car (extract it 2)) t (extract made 2))
                                      (extract made 3) (extract made 4))))
+                       ;; Typed lambdas are checked after the rest.
+                       ((k-lambda-item? it) made)
                        ((= k 2) (k-module-val it a b made))
-                       (else (k-module-group it a b made)))))
+                       (else made))))
           (k-module-items (cdr items) a b next)))))
 ;; Each value's type, `vs`, mentions none of `inner`, the sizes and abstract
 ;; types named inside the module; or an error at `a`..`b`.
@@ -118,22 +145,32 @@
               (k-fail (k-cat5 "`" (symbol->string (extract (car vs) 1)) "`'s type mentions `"
                               (k-dvar-string v) "`, which is not known outside the module")
                       a b))))))
-;; `(module item …)`: each item checked in the scope of those before it;
-;; the module's type, its abstract types bound in it.
+;; `(module item …)`, as a `letrec*` (`check-modorder.fx`): its typed
+;; lambdas bound first, at their written types; every other item checked in
+;; order, in the scope of those and the items before it; then the lambdas,
+;; in the scope of everything. The module's type, its abstract types bound
+;; in it.
 (define k-synth-module-here (subr (maxeff checks spin) (kx k-items int int) k-te)
   (lambda (x items a b)
     (let* ((saved (k-mark))
            (named (get k-skolems))
+           (ls (k-mod-lambdas items))
+           (recs (k-mod-recs-lambdas ls))
+           (hazards (k-mod-hazards items ls))
+           (bs (k-mod-bindings ls a b))
+           (bound (k-mod-bind bs ls))
            (made (k-module-items items a b (k-made-of nil nil nil nil)))
+           (es (k-mod-edges ls ls))
+           (le (k-mod-check-lambdas bs ls (k-mod-groups (k-mod-reaches es es) bs bs)))
            (unbound (k-unbind-to saved))
-           (vs (k-parts-reversed (extract made 3) nil))
+           (vs (k-parts-reversed (k-mod-vals items (extract made 3) bs nil) nil))
            ;; A component's module, bound inside, has abstract types no one
            ;; outside can name.
            (known (k-vals-known vs (k-named-since named (get k-skolems) nil) a b))
            (popped (set k-skolems named))
            (abs (k-parts-reversed (extract made 1) nil))
            (t (k-ty-new (ty-module abs (k-parts-reversed (extract made 2) nil) vs))))
-      (k-te-masked x t (extract made 4)))))
+      (k-te-masked x t (k-union (extract made 4) le)))))
 ;; The same; a module read from a file (`load-module`, M7) seeing only the
 ;; standard environment, what is wrong in it said where it is read.
 (define k-synth-module (subr (maxeff checks spin) (kx k-items int int) k-te)
@@ -189,12 +226,6 @@
 
 ;;; ------------------------------------------------------------ subtyping
 
-;; The type part `n` of `ps` is, or -1.
-(define k-part-of (subr (maxeff kreads spin) (k-parts symbol) int)
-  (lambda (ps n)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
-          (else (k-part-of (cdr ps) n)))))
 ;; Whether a name of `xs` is one of `ys`'s.
 (define k-comps-meet? (subr (maxeff kreads spin) (k-parts k-parts) bool)
   (lambda (xs ys)
@@ -373,23 +404,18 @@
 ;; `sc` with `ns` hidden: bound, and none of the group's.
 (define k-sc-hide-names (subr kstate (k-names k-tscope) k-tscope)
   (lambda (ns sc) (if (null? ns) sc (k-sc-hide-names (cdr ns) (k-sc-bind (car ns) nil sc)))))
-;; A module's values made, each as any expression is.
-(define k-sc-walk-items (subr (maxeff kstate spin) (k-items k-tscope k-guards) unit)
+;; A module's values made, each as any expression is, every item's names
+;; in scope, as a `letrec*`'s.
+(define k-sc-walk-values (subr (maxeff kstate spin) (k-items k-tscope k-guards) unit)
   (lambda (items sc gs)
     (if (null? items)
         #u
-        (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)))
-          (cond ((= k 0)
-                 (let ((inner (k-sc-hide-names (k-conversions-onto (car ns) nil) sc)))
-                   (k-sc-walk-items (cdr items) inner gs)))
-                ((or (= k 1) (< k 0) (> k 3)) (k-sc-walk-items (cdr items) sc gs))
-                ((= k 2)
-                 (begin (k-sc-walk-list (extract it 5) sc gs)
-                        (k-sc-walk-items (cdr items) (k-sc-hide-names ns sc) gs)))
-                (else
-                 (let ((inner (k-sc-hide-names ns sc)))
-                   (begin (k-sc-walk-list (extract it 5) inner gs)
-                          (k-sc-walk-items (cdr items) inner gs)))))))))
+        (let ((k (extract (car items) 1)))
+          (begin (if (or (= k 2) (= k 3)) (k-sc-walk-list (extract (car items) 5) sc gs) #u)
+                 (k-sc-walk-values (cdr items) sc gs))))))
+(define k-sc-walk-items (subr (maxeff kstate spin) (k-items k-tscope k-guards) unit)
+  (lambda (items sc gs)
+    (k-sc-walk-values items (k-sc-hide-names (k-items-bound items nil) sc) gs)))
 ;; A module's values made, and a `with`'s module named, each as any
 ;; expression or variable is.
 (define k-sc-walk-modular (subr (maxeff kstate spin) (kx k-tscope k-guards) unit)

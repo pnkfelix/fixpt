@@ -228,7 +228,7 @@ pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
 /// compilers run as register code runs lowered. A tenth of the front end,
 /// and of its loading, which is most of a session's start.
 fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
-    let text = crate::FRONT_END_FILES[..4].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
+    let text = crate::FRONT_END_FILES[..3].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
     load_lowered(scheme, &text)
 }
 

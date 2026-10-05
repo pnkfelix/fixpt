@@ -461,6 +461,32 @@
                (lambda (fs e)
                  (if (null? fs) e (go (cdr fs) (extend (car (car fs)) (cdr (car fs)) e))))))
       (tagcase m (v-product (fs) (go fs e)) (else x (efail-expected "a module"))))))
+;; An abstract type `n`'s conversions' names.
+(define conversion-names (subr (read @globals) (string) names)
+  (lambda (n)
+    (the names (list (string->symbol (string-append "up-" n))
+                     (string->symbol (string-append "down-" n))))))
+;; The names a module's items define, in order.
+(define module-names (subr (maxeff (read @globals) (alloc @v) spin) (mod-items) names)
+  (lambda (items)
+    (if (null? items)
+        nil
+        (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2))
+               (rest (module-names (cdr items))))
+          (cond ((= k 0) (append (conversion-names (symbol->string (car ns))) rest))
+                ((or (= k 2) (= k 3)) (append ns rest))
+                (else rest))))))
+;; Each of `ns` bound in `e`, holding #u.
+(define open-names (subr (maxeff (read @globals) evals) (names env) env)
+  (lambda (ns e) (if (null? ns) e (open-names (cdr ns) (extend (car ns) (v-unit) e)))))
+;; A module's values, from `e`, onto `vs`, newest first: its definitions'.
+(define module-values (subr (maxeff evals spin) (mod-items env vfields) vfields)
+  (lambda (items e vs)
+    (if (null? items)
+        vs
+        (let ((k (extract (car items) 1)))
+          (module-values (cdr items) e
+                         (if (or (= k 2) (= k 3)) (rec-values (extract (car items) 2) e vs) vs))))))
 (define open-letrec (subr (maxeff (read @globals) evals) (exp-letrec-bs env) env)
   (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (extend (extract (car bs) 1) (v-unit) e)))))
 
@@ -639,30 +665,34 @@
         ;; Not yet (`docs/research/first-class-modules.md`, M3).
         ;; A module: a product of its values, in order, each labelled by its
         ;; name; its abstract types' conversions the identity.
-        (e-module (items a b) (eval-module items e nil))
+        (e-module (items a b) (eval-module items e))
         ;; `with`: the module's values, by position, bound by their names.
         (e-with (m body a b) (eval body (bind-module (lookup e m) e))))))
-  ;; A module's items, each in the scope of those before it, `vs` its
-  ;; values so far (newest first).
-  (eval-module (subr (maxeff (read @globals) evals spin) (mod-items env vfields) val)
-    (lambda (items e vs)
+  ;; A module's items, as a `letrec*`'s (`DONE.md` §37): every name first,
+  ;; holding #u; then each item's values, in order, in the scope of all.
+  (eval-module (subr (maxeff (read @globals) evals spin) (mod-items env) val)
+    (lambda (items e)
+      (let ((inner (open-names (module-names items) e)))
+        (begin (fill-module items inner)
+               (v-product (reverse-fields (module-values items inner nil) nil))))))
+  (fill-module (subr (maxeff (read @globals) evals spin) (mod-items env) unit)
+    (lambda (items e)
       (if (null? items)
-          (v-product (reverse-fields vs nil))
+          #u
           (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
-            (cond
-              ((or (= k 1) (< k 0) (> k 3)) (eval-module (cdr items) e vs))
-              ((= k 0)
-               (let* ((n (symbol->string (car ns)))
-                      (up (extend (string->symbol (string-append "up-" n)) (eval (car xs) e) e))
-                      (down (string->symbol (string-append "down-" n))))
-                 (eval-module (cdr items) (extend down (eval (car (cdr xs)) up) up) vs)))
-              ((= k 2)
-               (let ((v (eval (car xs) e)))
-                 (eval-module (cdr items) (extend (car ns) v e) (cons (cons (car ns) v) vs))))
-              (else
-               (let* ((bs (rec-bindings ns (extract it 3) xs)) (inner (open-letrec bs e)))
-                 (begin (fill-letrec bs inner)
-                        (eval-module (cdr items) inner (rec-values ns inner vs))))))))))
+            (begin
+              (cond ((= k 0)
+                     (fill-cells (conversion-names (symbol->string (car ns))) xs e))
+                    ((or (= k 2) (= k 3)) (fill-cells ns xs e))
+                    (else #u))
+              (fill-module (cdr items) e))))))
+  ;; Each value of `xs`, into its name's cell in `e`.
+  (fill-cells (subr (maxeff (read @globals) evals spin) (names exp-list env) unit)
+    (lambda (ns xs e)
+      (if (null? ns)
+          #u
+          (begin (bloblet-set! (find-cell e (car ns)) 0 (eval (car xs) e))
+                 (fill-cells (cdr ns) (cdr xs) e)))))
   (eval-let (subr (maxeff (read @globals) evals spin) (exp-let-bs env env) env)
     (lambda (bs outer e)
       (if (null? bs)

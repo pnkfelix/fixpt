@@ -1010,10 +1010,11 @@ impl Compiler<'_> {
     /// A `let`: each value made, in the scope outside, and kept in a
     /// register where no call comes before the body is done with it (else
     /// the frame); a constant bound as itself.
-    /// A module (`docs/research/first-class-modules.md`): its items kept in
-    /// frame slots in order, as its stack code keeps them, a `define-rec`'s
-    /// closures as a `letrec`'s are (with no join points); then the product
-    /// of its values.
+    /// A module (`docs/research/first-class-modules.md`): its items made in
+    /// frame slots in order, as its stack code makes them, a `letrec*`'s
+    /// (`crate::modorder`): a lambda naming an item not made yet captures it
+    /// once it is made, as a `letrec`'s siblings are (with no join points);
+    /// then the product of its values.
     fn r_module(&mut self, g: &mut Gen, items: &[crate::ast::ModItem], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         use crate::ast::ModItem;
         if g.leaf {
@@ -1021,54 +1022,54 @@ impl Compiler<'_> {
         }
         let (depth, tdepth, slots) = (env.len(), te.len(), g.next_slot);
         let mut vals = vec![Arg::V(Value::fixnum(37))];
-        let bind = |g: &mut Gen, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, n: Sym| {
-            let s = g.slot();
-            g.op("setstk", &[Gen::n(s)]);
-            env.push((n, RLoc::Slot(s)));
-            te.push((n, Loc::Slot(usize::MAX)));
-            s
-        };
-        for item in items {
+        let lambdas = self.c.module_lambdas(items);
+        // Each item's values: name, value, whether a typed lambda, and the
+        // slot it is kept in.
+        let mut made: Vec<(Sym, ExpId, bool, usize, bool)> = Vec::new();
+        for (i, item) in items.iter().enumerate() {
+            let is_lambda = |n: Sym| lambdas.iter().any(|(m, _, _, at)| *m == n && *at == i);
             match item {
                 ModItem::Desc { .. } => {}
                 ModItem::Abs { up, down, up_fn, down_fn, .. } => {
-                    for (n, f) in [(*up, *up_fn), (*down, *down_fn)] {
-                        self.r_exp(g, f, env, te, false)?;
-                        bind(g, env, te, n);
-                    }
+                    made.push((*up, *up_fn, false, g.slot(), false));
+                    made.push((*down, *down_fn, false, g.slot(), false));
                 }
-                ModItem::Val { name, init, .. } => {
-                    self.r_exp(g, *init, env, te, false)?;
-                    vals.push(Arg::Slot(bind(g, env, te, *name)));
-                }
+                ModItem::Val { name, init, .. } => made.push((*name, *init, is_lambda(*name), g.slot(), true)),
                 ModItem::Rec(group) => {
-                    let at: Vec<usize> = group.iter().map(|_| g.slot()).collect();
-                    let mut patches = Vec::new();
-                    for (i, (name, _, init)) in group.iter().enumerate() {
-                        let (ps, lbody, region) = self.lambda_of(*init)?;
-                        let (mut own_env, mut own_te) = (env.clone(), te.clone());
-                        for (k, (sib, _, _)) in group.iter().enumerate() {
-                            let loops = k == i && self.loops_only(lbody, *sib, ps.len(), true);
-                            own_env.push((*sib, if loops { RLoc::Loop } else { RLoc::Pending(at[k]) }));
-                            own_te.push((*sib, if loops { Loc::Loop } else { Loc::Pending(at[k]) }));
-                        }
-                        let p = self.r_lambda(g, &ps, lbody, &mut own_env, &mut own_te, Some(*name), region, false)?;
-                        g.op("setstk", &[Gen::n(at[i])]);
-                        patches.push(p);
-                    }
-                    for (i, ps) in patches.iter().enumerate() {
-                        for &(j, sibling) in ps {
-                            g.op("load", &[Gen::n(1), Gen::n(sibling)]);
-                            g.op("stack", &[Gen::n(at[i])]);
-                            g.op("setfield", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64), Gen::n(1)]);
-                        }
-                    }
-                    for (k, (n, _, _)) in group.iter().enumerate() {
-                        env.push((*n, RLoc::Slot(at[k])));
-                        te.push((*n, Loc::Slot(usize::MAX)));
-                        vals.push(Arg::Slot(at[k]));
+                    for (n, _, x) in group {
+                        made.push((*n, *x, true, g.slot(), true));
                     }
                 }
+            }
+        }
+        // Closures to finish: (closure's slot, free value, slot it waits for).
+        let mut waiting: Vec<(usize, usize, usize)> = Vec::new();
+        for k in 0..made.len() {
+            let (n, x, lambda, at, val) = made[k];
+            let later: Vec<(Sym, usize)> = made[k..].iter().map(|(m, _, _, s, _)| (*m, *s)).collect();
+            if lambda && self.names_any(x, &later) {
+                let (ps, lbody, region) = self.lambda_of(x)?;
+                let (mut own_env, mut own_te) = (env.clone(), te.clone());
+                for (m, s) in &later {
+                    let loops = *m == n && self.loops_only(lbody, n, ps.len(), true);
+                    own_env.push((*m, if loops { RLoc::Loop } else { RLoc::Pending(*s) }));
+                    own_te.push((*m, if loops { Loc::Loop } else { Loc::Pending(*s) }));
+                }
+                let p = self.r_lambda(g, &ps, lbody, &mut own_env, &mut own_te, Some(n), region, false)?;
+                waiting.extend(p.into_iter().map(|(j, s)| (at, j, s)));
+            } else {
+                self.r_exp(g, x, env, te, false)?;
+            }
+            g.op("setstk", &[Gen::n(at)]);
+            env.push((n, RLoc::Slot(at)));
+            te.push((n, Loc::Slot(usize::MAX)));
+            if val {
+                vals.push(Arg::Slot(at));
+            }
+            for (c, j, _) in waiting.iter().filter(|(_, _, s)| *s == at) {
+                g.op("load", &[Gen::n(1), Gen::n(at)]);
+                g.op("stack", &[Gen::n(*c)]);
+                g.op("setfield", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64), Gen::n(1)]);
             }
         }
         self.r_prim(g, "%make-frozen", &vals, env, te)?;

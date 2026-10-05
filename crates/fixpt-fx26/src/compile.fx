@@ -179,15 +179,6 @@
 (define c-converter (subr (read @globals) (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
 
-;; A module's `define-rec` item as a `letrec`'s bindings: its names, types
-;; and lambdas, in order.
-(define c-rec-of (subr c-walks (names syns-a exps) c-recs)
-  (lambda (ns ts xs)
-    (if (null? ns)
-        nil
-        (let ((rest (c-rec-of (cdr ns) (cdr ts) (cdr xs))))
-          (cons (product (1 (car ns)) (2 (car ts)) (3 (car xs))) rest)))))
-
 ;;; ----------------------------------------------------------------- code
 
 (define-datatype item
@@ -520,6 +511,20 @@
 (define c-names (subr c-builds (names syms) syms)
   (lambda (ns bound) (if (null? ns) bound (c-names (cdr ns) (cons (car ns) bound)))))
 
+;; Every name a module's `items` define, onto `bound`: an abstract type's
+;; conversions, a definition's, a `define-rec`'s members'.
+(define c-module-bound (subr c-builds (mod-items syms) syms)
+  (lambda (items bound)
+    (if (null? items)
+        bound
+        (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2))
+               (more (cond ((= k 0)
+                            (the syms (cons (c-converter "down-" (car ns))
+                                            (cons (c-converter "up-" (car ns)) bound))))
+                           ((or (= k 2) (= k 3)) (c-names ns bound))
+                           (else bound))))
+          (c-module-bound (cdr items) more)))))
+
 ;; The expressions `bs` binds, in order: a `let`'s values, or a product's
 ;; fields.
 (define c-bound-exps (subr c-walks (c-binds) exps)
@@ -559,8 +564,8 @@
         (e-sum (t v a b) (c-free v bound acc))
         (e-tagcase (s arms els a b)
           (c-free s bound (c-free-arms arms bound (c-free-else els bound acc))))
-        ;; A module's items each see those before them.
-        (e-module (items a b) (c-free-items items bound acc))
+        ;; A module's items see all of them, as a `letrec*`'s.
+        (e-module (items a b) (c-free-items items (c-module-bound items bound) acc))
         ;; The module, then the body, the module's values bound in it.
         (e-with (m body a b)
           (let ((ns (c-with-at a b)) (acc (if (c-member? bound m) acc (c-adjoin acc m))))
@@ -570,19 +575,11 @@
     (lambda (items bound acc)
       (if (null? items)
           acc
-          (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
-            (cond
-              ((or (= k 1) (< k 0) (> k 3)) (c-free-items (cdr items) bound acc))
-              ((= k 0)
-               (let* ((up (the syms (cons (c-converter "up-" (car ns)) bound)))
-                      (o (c-free (car (cdr xs)) up (c-free (car xs) bound acc))))
-                 (c-free-items (cdr items) (the syms (cons (c-converter "down-" (car ns)) up)) o)))
-              ((= k 2)
-               (let ((o (c-free (car xs) bound acc)))
-                 (c-free-items (cdr items) (the syms (cons (car ns) bound)) o)))
-              (else
-               (let ((inner (c-names ns bound)))
-                 (c-free-items (cdr items) inner (c-free-all xs inner acc)))))))))
+          (let ((k (extract (car items) 1)))
+            (c-free-items (cdr items) bound
+                          (if (or (= k 0) (= k 2) (= k 3))
+                              (c-free-all (extract (car items) 4) bound acc)
+                              acc))))))
   (c-free-arms
     (subr c-walks (c-cases syms syms) syms)
     (lambda (arms bound acc)

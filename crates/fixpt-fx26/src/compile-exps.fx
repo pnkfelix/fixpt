@@ -86,6 +86,102 @@
                   #u))
             (else y #u))))))
 
+;;; ---------------------------------------------------------- modules
+;;; A module's items are made in slots in order, as a `letrec*`'s
+;;; (`DONE.md` §37): a typed lambda naming an item not made yet captures it
+;;; once it is made, as a `letrec`'s siblings are. The Rust compiler's
+;;; `Exp::Module` arm and `module_closure`, step for step.
+
+;; Whether `x` is a lambda as the checkers say (`k-lambda?`): under type
+;; abstractions and ascriptions.
+(define c-checked-lambda? (subr (read @globals) (exp) bool)
+  (lambda (x)
+    (tagcase x
+      (e-lambda (ps body a b) #t)
+      (e-rlambda (r l a b) #t)
+      (e-plambda (d body a b) (c-checked-lambda? body))
+      (e-the (d body a b) (c-checked-lambda? body))
+      (else y #f))))
+;; A value a module's item makes: its name, its expression, the item's kind
+;; (0 an abstract type's conversion, 2 a definition, 3 a `define-rec`'s
+;; member), and whether it is a typed lambda.
+(define-type c-mval (productof (1 symbol) (2 exp) (3 int) (4 bool)))
+(define-type c-mvals (listof c-mval @k))
+(define c-mval (subr (alloc @k) (symbol exp int bool c-mvals) c-mvals)
+  (lambda (n x k l rest) (cons (product (1 n) (2 x) (3 k) (4 l)) rest)))
+(define c-mvals-group (subr (maxeff (read @globals) (alloc @k)) (names exps c-mvals) c-mvals)
+  (lambda (ns xs rest)
+    (if (null? ns) rest (c-mval (car ns) (car xs) 3 #t (c-mvals-group (cdr ns) (cdr xs) rest)))))
+;; The values `items` make, in order.
+(define c-module-values (subr (maxeff (read @globals) (alloc @k)) (mod-items) c-mvals)
+  (lambda (items)
+    (if (null? items)
+        nil
+        (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4))
+               (rest (c-module-values (cdr items))))
+          (cond ((= k 0)
+                 (c-mval (c-converter "up-" (car ns)) (car xs) 0 #f
+                         (c-mval (c-converter "down-" (car ns)) (car (cdr xs)) 0 #f rest)))
+                ((= k 2)
+                 (let ((l (and (not (null? (extract it 3))) (c-checked-lambda? (car xs)))))
+                   (c-mval (car ns) (car xs) 2 l rest)))
+                ((= k 3) (c-mvals-group ns xs rest))
+                (else rest))))))
+;; Each value's name, and its slot, from `d`.
+(define-type c-mslots (listof (pairof symbol int @k) @k))
+(define c-module-slots (subr c-walks (c-mvals int) c-mslots)
+  (lambda (vs d)
+    (if (null? vs)
+        nil
+        (cons (cons (extract (car vs) 1) d) (c-module-slots (cdr vs) (+ d 1))))))
+(define c-find-slot (subr c-walks (c-mslots symbol) c-mslots)
+  (lambda (ss n)
+    (cond ((null? ss) nil)
+          ((symbol=? (car (car ss)) n) ss)
+          (else (c-find-slot (cdr ss) n)))))
+;; Whether `x` names any of `later`'s.
+(define c-names-any? (subr c-walks (exp c-mslots) bool)
+  (lambda (x later)
+    (letrec ((any (subr c-walks (syms) bool)
+                  (lambda (ns)
+                    (and (not (null? ns))
+                         (or (not (null? (c-find-slot later (car ns)))) (any (cdr ns)))))))
+      (any (c-free x nil nil)))))
+;; Item `n`'s lambda's scope while it is made: each of `later` pending, and
+;; itself a loop if it only calls itself in loops.
+(define c-module-own (subr c-walks (symbol cenv c-mslots exp int) cenv)
+  (lambda (n e later body nps)
+    (if (null? later)
+        e
+        (let* ((m (car (car later)))
+               (loops (and (symbol=? m n) (c-loops-only body n nps #t))))
+          (c-module-own n (c-extend m (if loops (at-loop 0) (at-pending (cdr (car later)))) e)
+                        (cdr later) body nps)))))
+;; Closures to finish: the closure's slot, its free value, and the slot it
+;; waits for.
+(define-type c-waits (listof (productof (1 int) (2 int) (3 int)) @k))
+;; `ws` and, after them, the patches `ps` of the closure in slot `d`.
+(define c-waits-onto (subr c-walks (c-waits int patches) c-waits)
+  (lambda (ws d ps)
+    (if (null? ps)
+        ws
+        (c-waits-onto (append ws (the c-waits (list (product (1 d) (2 (car (car ps)))
+                                                             (3 (cdr (car ps)))))))
+                      d (cdr ps)))))
+;; Each closure of `ws` waiting for slot `d`, given it.
+(define c-give-waiting (subr (maxeff compiles spin) (c-waits int code) unit)
+  (lambda (ws d c)
+    (if (null? ws)
+        #u
+        (let ((w (car ws)))
+          (begin
+            (if (= (extract w 3) d)
+                (begin (c-op1 c routine-slot (wcell-int d))
+                       (c-op1 c routine-slot (wcell-int (extract w 1)))
+                       (c-field-set c (+ cellular-closure-free0 (extract w 2))))
+                #u)
+            (c-give-waiting (cdr ws) d c))))))
+
 ;; A lambda's word, made by the stack code of the body it is in: where its
 ;; body starts and ends, its parameters, its own name, the word, and the
 ;; names it captures.
@@ -235,10 +331,6 @@
         0
         (let ((n (c-slots-load (cdr ss) c)))
           (begin (c-op1 c routine-slot (wcell-int (car ss))) (+ n 1))))))
-;; `vals` with the `n` slots from `d` on it, newest first.
-(define c-slots-from
-  (subr (maxeff (read @globals) (alloc @k) spin) (int int (listof int @k)) (listof int @k))
-  (lambda (d n vals) (if (= n 0) vals (c-slots-from (+ d 1) (- n 1) (cons d vals)))))
 ;; A `with`'s module, at `l`, its values `ns` from field `i` on, each into
 ;; the next slot from `depth`: `e` with them bound.
 (define c-with-fields (subr (maxeff compiles spin) (syms loc cenv int int code) cenv)
@@ -367,43 +459,56 @@
           (let ((outer (get c-collecting)))
             (begin (set c-collecting (get c-module-members))
                    (set c-module-members nil)
-                   (c-module items e depth depth nil c tail)
+                   (c-module items e depth c tail)
                    (set c-module-members (get c-collecting))
                    (set c-collecting outer))))
         (e-with (m body a b) (c-with m body a b e depth c tail)))))
-  ;; A module (`docs/research/first-class-modules.md`): its items bound in
-  ;; slots in order from `depth`, as a `let`'s and a `letrec`'s are, `d` the
-  ;; next and `vals` the values' slots (newest first); then the product of
-  ;; its values.
-  (c-module
-    (subr (maxeff compiles spin) (mod-items cenv int int (listof int @k) code bool) unit)
-    (lambda (items e depth d vals c tail)
-      (if (null? items)
-          (let ((n (begin (c-int c 37) (c-slots-load vals c))))
-            (begin (c-prim c "%make-frozen" (+ 1 n))
-                   (c-done c tail)
-                   (c-unbind c depth (- d depth) tail)))
-          (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
-            (cond
-              ((or (= k 1) (< k 0) (> k 3)) (c-module (cdr items) e depth d vals c tail))
-              ((= k 0)
-               (let* ((up (begin (c-exp (car xs) e d c #f)
-                                 (c-extend (c-converter "up-" (car ns)) (at-slot d) e)))
-                      (down (begin (c-exp (car (cdr xs)) up (+ d 1) c #f)
-                                   (c-extend (c-converter "down-" (car ns)) (at-slot (+ d 1)) up))))
-                 (c-module (cdr items) down depth (+ d 2) vals c tail)))
-              ((= k 2)
-               (begin (c-exp (car xs) e d c #f)
-                      (c-note-member! (car ns) (car xs) e)
-                      (c-module (cdr items) (c-extend (car ns) (at-slot d) e) depth (+ d 1)
-                                (cons d vals) c tail)))
-              (else
-               (let* ((bs (c-rec-of ns (extract it 3) xs))
-                      (n (c-count-letrec bs))
-                      (made (c-letrec-make bs bs e d 0 c)))
-                 (begin (c-letrec-patch made d 0 c)
-                        (c-module (cdr items) (c-letrec-slots bs e d) depth (+ d n)
-                                  (c-slots-from d n vals) c tail)))))))))
+  ;; A module (`docs/research/first-class-modules.md`): its items made in
+  ;; slots in order from `depth`, as a `letrec*`'s (`c-module-make`); then
+  ;; the product of its values.
+  (c-module (subr (maxeff compiles spin) (mod-items cenv int code bool) unit)
+    (lambda (items e depth c tail)
+      (let* ((vs (c-module-values items))
+             (made (c-module-make vs e depth (c-module-slots vs depth) nil nil c))
+             (n (begin (c-int c 37) (c-slots-load (extract made 2) c))))
+        (begin (c-prim c "%make-frozen" (+ 1 n))
+               (c-done c tail)
+               (c-unbind c depth (- (extract made 1) depth) tail)))))
+  ;; Values `vs` made in slots from `d`, `later` theirs, `ws` the closures
+  ;; waiting, `vals` the values' slots (newest first): the next slot, and
+  ;; the values' slots.
+  (c-module-make
+    (subr (maxeff compiles spin) (c-mvals cenv int c-mslots c-waits (listof int @k) code)
+          (productof (1 int) (2 (listof int @k))))
+    (lambda (vs e d later ws vals c)
+      (if (null? vs)
+          (product (1 d) (2 vals))
+          (let* ((v (car vs)) (n (extract v 1)) (x (extract v 2)) (k (extract v 3))
+                 (ps (if (and (extract v 4) (c-names-any? x later))
+                         (c-module-closure n x e later d c)
+                         (begin (c-exp x e d c #f)
+                                (if (= k 2) (c-note-member! n x e) #u)
+                                (the patches nil))))
+                 (waits (c-waits-onto ws d ps))
+                 (given (c-give-waiting waits d c)))
+            (c-module-make (cdr vs) (c-extend n (at-slot d) e) (+ d 1) (cdr later) waits
+                           (if (= k 0) vals (cons d vals)) c)))))
+  ;; Item `n`'s lambda `x`, made in slot `d` in `e`, naming items of `later`
+  ;; not made yet, itself among them: those captured as a `letrec`'s
+  ;; siblings are, to be given once made. What it gives: as `c-lambda`'s.
+  (c-module-closure (subr (maxeff compiles spin) (symbol exp cenv c-mslots int code) patches)
+    (lambda (n x e later d c)
+      (let ((own (the syms (cons n nil))))
+        (tagcase (car (c-lambda-of x))
+          (e-lambda (ps body a b)
+            (c-lambda ps body (c-module-own n e later body (c-count-params ps)) d c own nil))
+          (e-rlambda (r l a b)
+            (tagcase l
+              (e-lambda (ps body la lb)
+                (c-lambda ps body (c-module-own n e later body (c-count-params ps)) d c own
+                          (the c-region (cons r nil))))
+              (else y (c-fail "an rlambda's lambda"))))
+          (else y (c-fail "a module's typed lambda is a lambda"))))))
   ;; `with`: the module's values, by position, in slots from `depth`; then
   ;; the body.
   (c-with (subr (maxeff compiles spin) (symbol exp int int cenv int code bool) unit)

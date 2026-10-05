@@ -75,8 +75,10 @@ has type
   `t` read as `(select m t)`. This is FX-91's `desc`, and the sharing
   story Sheldon's own system lacked.
 - **Value components** are `define`, `define*` and `define-rec` inside the
-  module, each seeing those before it, as at top level. They are never
-  redefined: a module's definitions are fixed once it is made.
+  module. They see each other, as a `letrec*`'s (`DONE.md` §37): made in
+  the order written, a typed lambda naming any of them, any other value
+  reaching only those made before it (refused statically otherwise). They
+  are never redefined: a module's definitions are fixed once it is made.
 
 ### Selection and opening
 

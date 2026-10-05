@@ -516,6 +516,10 @@
       (cond ((= k 0) (k-conversions-onto (car ns) bound))
             ((or (= k 1) (< k 0) (> k 3)) bound)
             (else (k-names-onto ns bound))))))
+;; Every name `items` define, onto `bound`.
+(define k-items-bound (subr kmakes (k-items k-names) k-names)
+  (lambda (items bound)
+    (if (null? items) bound (k-items-bound (cdr items) (k-item-bound (car items) bound)))))
 
 (define-rec
   (k-free-list (subr kmakes (kxs k-names k-names) k-names)
@@ -554,16 +558,15 @@
         ;; The module, and the body, which sees its values once checked.
         (x-with (m body a b) (k-free-into body (k-names-onto (k-with-names a b) bound)
                                           (k-note m bound out))))))
-  ;; A module's free variables, onto `out`: each item's, those before it
-  ;; bound; a group's, its own names bound.
+  ;; A module's free variables, onto `out`: each item's, every item's names
+  ;; bound, as a `letrec*`'s (`check-modorder.fx`).
   (k-free-module (subr kmakes (k-items k-names k-names) k-names)
+    (lambda (items bound out) (k-free-items items (k-items-bound items bound) out)))
+  (k-free-items (subr kmakes (k-items k-names k-names) k-names)
     (lambda (items bound out)
       (if (null? items)
           out
-          (let* ((it (car items))
-                 (inner (k-item-bound it bound))
-                 (o (k-free-list (extract it 5) (if (= (extract it 1) 3) inner bound) out)))
-            (k-free-module (cdr items) inner o)))))
+          (k-free-items (cdr items) bound (k-free-list (extract (car items) 5) bound out)))))
   (k-free-letrec (subr kmakes (k-letrec-bs k-names k-names) k-names)
     (lambda (bs bound out)
       (if (null? bs)

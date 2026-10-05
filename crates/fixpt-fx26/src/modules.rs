@@ -53,11 +53,32 @@ impl Checker {
         Ok((t, eff))
     }
 
+    /// A module's items, as `letrec*`'s (`crate::modorder`): its typed
+    /// lambdas bound first, at their written types; every other item checked
+    /// in order, in the scope of all of those and the items before it; then
+    /// the lambdas, in the scope of everything, each with its recursive group
+    /// (`module_groups`) checked to end, as a `define-rec`'s members are.
     #[allow(clippy::type_complexity)]
     fn synth_module_items(&mut self, items: &[ModItem], span: Span) -> R<(Vec<(Sym, DVar)>, Vec<(Sym, TyId)>, Vec<(Sym, TyId)>, Effect)> {
-        let (mut abs, mut descs, mut vals) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut abs, mut descs) = (Vec::new(), Vec::new());
         let mut eff = Effect::pure();
-        for item in items {
+        let mut lambdas = self.module_lambdas(items);
+        if let Some((n, _, init, _)) = lambdas.iter().find(|(_, _, init, i)| matches!(items[*i], ModItem::Rec(_)) && !self.is_lambda(*init)) {
+            return Err(FxError::at(self.arena.span_of(*init), format!("`{}`, in a `define-rec`, is a `lambda`", self.interner.name(*n))));
+        }
+        self.module_hazards(items, &lambdas)?;
+        for l in lambdas.iter_mut() {
+            l.1 = self.resolve_selects(l.1, span)?;
+        }
+        let base = self.env.len();
+        for (k, (n, t, _, i)) in lambdas.iter().enumerate() {
+            let bound = if matches!(items[*i], ModItem::Val { .. }) { self.name_nat(*n, *t) } else { *t };
+            self.env.push((*n, bound));
+            self.known.insert((*n, base + k));
+        }
+        // The values each item has, at its type, in written order.
+        let mut typed: Vec<(usize, Sym, TyId)> = Vec::new();
+        for (i, item) in items.iter().enumerate() {
             match item.clone() {
                 // Its representation seen only through its own conversions,
                 // which stay inside the module.
@@ -95,6 +116,7 @@ impl Checker {
                     abs.push((name, var));
                 }
                 ModItem::Desc { name, ty } => descs.push((name, self.resolve_selects(ty, span)?)),
+                ModItem::Val { name, .. } if lambdas.iter().any(|(n, _, _, at)| *n == name && *at == i) => {}
                 ModItem::Val { name, ty, init } => {
                     let (t, ie) = match ty {
                         Some(t) => {
@@ -106,34 +128,28 @@ impl Checker {
                     eff = eff.union(&ie);
                     let bound = self.name_nat(name, t);
                     self.env.push((name, bound));
-                    vals.push((name, t));
+                    typed.push((i, name, t));
                 }
-                ModItem::Rec(group) => {
-                    let mut bindings = Vec::new();
-                    for (n, t, init) in group {
-                        bindings.push((n, self.resolve_selects(t, span)?, init));
-                    }
-                    let base = self.env.len();
-                    self.env.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
-                    self.known.extend(bindings.iter().enumerate().map(|(i, (n, _, _))| (*n, base + i)));
-                    if let Some((n, _, init)) = bindings.iter().find(|(_, _, init)| !self.is_lambda(*init)) {
-                        return Err(FxError::at(self.arena.span_of(*init), format!("`{}`, in a `define-rec`, is a `lambda`", self.interner.name(*n))));
-                    }
-                    let rdepth = self.recursive.len();
-                    self.note_termination(&bindings);
-                    let r = (|| {
-                        let mut ge = Effect::pure();
-                        for (n, t, init) in &bindings {
-                            ge = ge.union(&self.check(*init, *t).map_err(|err| self.declared_error(*n, *t, *init, err))?);
-                        }
-                        Ok(ge)
-                    })();
-                    self.recursive.truncate(rdepth);
-                    eff = eff.union(&r?);
-                    vals.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
-                }
+                ModItem::Rec(_) => {}
             }
         }
+        let groups = self.module_groups(&lambdas);
+        for (k, (n, t, init, i)) in lambdas.iter().enumerate() {
+            let group: Vec<(Sym, TyId, ExpId)> = groups[k].iter().map(|g| (lambdas[*g].0, lambdas[*g].1, lambdas[*g].2)).collect();
+            let rdepth = self.recursive.len();
+            if !group.is_empty() {
+                self.note_termination(&group);
+            }
+            let r = match items[*i] {
+                ModItem::Rec(_) => self.check(*init, *t).map_err(|err| self.declared_error(*n, *t, *init, err)),
+                _ => self.check(*init, *t),
+            };
+            self.recursive.truncate(rdepth);
+            eff = eff.union(&r?);
+            typed.push((*i, *n, *t));
+        }
+        typed.sort_by_key(|(i, ..)| *i);
+        let vals = typed.into_iter().map(|(_, n, t)| (n, t)).collect();
         Ok((abs, descs, vals, eff))
     }
 

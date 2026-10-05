@@ -1,157 +1,145 @@
-//! A module's typed lambda definitions see their own names (`TODO.md`
-//! §37), as a typed `define` of a lambda does at the top level: otherwise a
-//! module's definitions are in order, each seeing those before it, and
-//! procedures that call each other are a `define-rec`. The parser makes each
-//! typed lambda definition whose value names itself a `define-rec` of one,
-//! which the checkers, the lowering, the compilers and the evaluator all
-//! know: its calls of itself direct, checked to end as a `define-rec`'s
-//! members are. One that does not name itself stays a definition (and may
-//! be inlined where a re-export of it is called, `DONE.md` §38). Names are
-//! free names, syntactically; a `with` binds none of them, as the parser
-//! does not know a module's names. The FX-26 parser's `module-own-names`
-//! (`parser-modules.fx`) is this, step for step.
+//! A module's definitions see each other, as `letrec*`'s (`TODO.md` §37):
+//! every name a module defines is in scope in all of it, and its items are
+//! made in the order written. A typed lambda's value (a definition's, or a
+//! `define-rec` member's) may name any item, earlier or later: it does not
+//! run when it is made. Every other item's value runs then, so it may reach
+//! only items made before it: those it names, and those named by the
+//! lambdas it reaches, followed through them. A module breaking that is
+//! refused (`module_hazards`), naming the chain; nothing is reordered.
+//! What a value names is its free variables (`free_vars`; a `with` inside
+//! not checked yet binds none), followed in the order of the items they
+//! name. The FX-26 checker's `k-mod-hazards` (`check-modorder.fx`) is this,
+//! step for step.
 
-use crate::ast::{Exp, ExpId, ModItem};
+use crate::ast::{ExpId, ModItem, TyId};
 use crate::check::Checker;
+use crate::error::{FxError, R};
 use fixpt_read::Sym;
 
+/// A module's typed lambdas: name, written type, value, and the item it
+/// is written in.
+pub(crate) type Lambdas = Vec<(Sym, TyId, ExpId, usize)>;
+
 impl Checker {
-    /// `items`, each typed lambda definition naming itself a `define-rec`
-    /// of one, as the module says above.
-    pub(crate) fn module_own_names(&self, items: Vec<ModItem>) -> Vec<ModItem> {
-        items
-            .into_iter()
-            .map(|item| match item {
-                ModItem::Val { name, ty: Some(ty), init } if self.is_lambda(init) && self.names_itself(name, init) => {
-                    ModItem::Rec(vec![(name, ty, init)])
-                }
-                other => other,
-            })
-            .collect()
-    }
-
-    /// Whether `name` is free in `init`.
-    fn names_itself(&self, name: Sym, init: ExpId) -> bool {
+    /// The typed lambdas of `items`, in written order: each definition of
+    /// a lambda with a written type, and each `define-rec` member.
+    pub(crate) fn module_lambdas(&self, items: &[ModItem]) -> Lambdas {
         let mut out = Vec::new();
-        self.free_names(init, &mut Vec::new(), &mut out);
-        out.contains(&name)
+        for (i, item) in items.iter().enumerate() {
+            match item {
+                ModItem::Val { name, ty: Some(ty), init } if self.is_lambda(*init) => out.push((*name, *ty, *init, i)),
+                ModItem::Rec(bs) => out.extend(bs.iter().map(|(n, t, e)| (*n, *t, *e, i))),
+                _ => {}
+            }
+        }
+        out
     }
 
-    /// The names free in `x`, in the order first met, syntactically: a
-    /// `lambda`, `let`, `letrec` and `tagcase` arm bind theirs; a `with`
-    /// binds none (its module's names are not known here), its module's
-    /// name being one of them; a module inside binds all its items' names.
-    pub(crate) fn free_names(&self, x: ExpId, bound: &mut Vec<Sym>, out: &mut Vec<Sym>) {
-        let depth = bound.len();
-        match self.arena.exp_at(x).clone() {
-            Exp::Var(n) => {
-                if !bound.contains(&n) && !out.contains(&n) {
-                    out.push(n);
-                }
+    /// Each name `items` define, and the item defining it.
+    fn module_places(items: &[ModItem]) -> Vec<(Sym, usize)> {
+        let mut out = Vec::new();
+        for (i, item) in items.iter().enumerate() {
+            match item {
+                ModItem::Val { name, .. } => out.push((*name, i)),
+                ModItem::Rec(bs) => out.extend(bs.iter().map(|(n, _, _)| (*n, i))),
+                ModItem::Abs { up, down, .. } => out.extend([(*up, i), (*down, i)]),
+                ModItem::Desc { .. } => {}
             }
-            Exp::Lambda { params, body } => {
-                bound.extend(params.iter().map(|(n, _)| *n));
-                self.free_names(body, bound, out);
-            }
-            Exp::App { fun, args } => {
-                self.free_names(fun, bound, out);
-                for a in args {
-                    self.free_names(a, bound, out);
-                }
-            }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::LetRegion { body, .. } => self.free_names(body, bound, out),
-            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.free_names(exp, bound, out),
-            Exp::RLambda { region, lambda } => {
-                self.free_names(region, bound, out);
-                self.free_names(lambda, bound, out);
-            }
-            Exp::If { test, then, els } => {
-                for e in [test, then, els] {
-                    self.free_names(e, bound, out);
-                }
-            }
-            Exp::Letrec { bindings, body } => {
-                bound.extend(bindings.iter().map(|(n, _, _)| *n));
-                for (_, _, e) in &bindings {
-                    self.free_names(*e, bound, out);
-                }
-                self.free_names(body, bound, out);
-            }
-            Exp::Let { bindings, body } => {
-                for (_, e) in &bindings {
-                    self.free_names(*e, bound, out);
-                }
-                bound.extend(bindings.iter().map(|(n, _)| *n));
-                self.free_names(body, bound, out);
-            }
-            Exp::Begin(es) => {
-                for e in es {
-                    self.free_names(e, bound, out);
-                }
-            }
-            Exp::Prompt { tag, body, handler } => {
-                for e in [tag, body, handler] {
-                    self.free_names(e, bound, out);
-                }
-            }
-            Exp::Bloblet { args, .. } => {
-                for e in args {
-                    self.free_names(e, bound, out);
-                }
-            }
-            Exp::Product(fs) => {
-                for (_, e) in fs {
-                    self.free_names(e, bound, out);
-                }
-            }
-            Exp::Extract(p, _) => self.free_names(p, bound, out),
-            Exp::Sum(_, v) => self.free_names(v, bound, out),
-            Exp::TagCase { scrutinee, arms, els } => {
-                self.free_names(scrutinee, bound, out);
-                for arm in &arms {
-                    let d = bound.len();
-                    bound.extend(arm.names());
-                    self.free_names(arm.body, bound, out);
-                    bound.truncate(d);
-                }
-                if let Some((y, e)) = els {
-                    bound.push(y);
-                    self.free_names(e, bound, out);
-                }
-            }
-            Exp::Module(items) => {
-                for item in &items {
-                    match item {
-                        ModItem::Val { name, .. } => bound.push(*name),
-                        ModItem::Rec(bs) => bound.extend(bs.iter().map(|(n, _, _)| *n)),
-                        ModItem::Abs { up, down, .. } => bound.extend([*up, *down]),
-                        ModItem::Desc { .. } => {}
-                    }
-                }
-                for item in &items {
-                    match item {
-                        ModItem::Val { init, .. } => self.free_names(*init, bound, out),
-                        ModItem::Rec(bs) => {
-                            for (_, _, e) in bs {
-                                self.free_names(*e, bound, out);
-                            }
-                        }
-                        ModItem::Abs { up_fn, down_fn, .. } => {
-                            self.free_names(*up_fn, bound, out);
-                            self.free_names(*down_fn, bound, out);
-                        }
-                        ModItem::Desc { .. } => {}
-                    }
-                }
-            }
-            Exp::With { module, body } => {
-                if !bound.contains(&module) && !out.contains(&module) {
-                    out.push(module);
-                }
-                self.free_names(body, bound, out);
-            }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
         }
-        bound.truncate(depth);
+        out
+    }
+
+    /// The names free in `x` that the module defines, in written order.
+    fn module_names_in(&self, x: ExpId, places: &[(Sym, usize)]) -> Vec<Sym> {
+        let free = self.free_vars(x);
+        places.iter().filter(|(n, _)| free.contains(n)).map(|(n, _)| *n).collect()
+    }
+
+    /// Refused: an item that is not a typed lambda whose value may reach,
+    /// when it is made, an item not made yet (itself included).
+    pub(crate) fn module_hazards(&self, items: &[ModItem], lambdas: &Lambdas) -> R<()> {
+        let places = Self::module_places(items);
+        let place = |n: Sym| places.iter().find(|(m, _)| *m == n).map(|(_, i)| *i);
+        let lambda = |n: Sym| lambdas.iter().position(|(m, ..)| *m == n);
+        for (i, item) in items.iter().enumerate() {
+            let ModItem::Val { name, init, .. } = item else { continue };
+            if lambda(*name).is_some_and(|k| lambdas[k].3 == i) {
+                continue;
+            }
+            // Breadth first from the value's names, through lambdas, each
+            // name with the one it was reached from.
+            let mut seen: Vec<(Sym, Option<usize>)> = Vec::new();
+            for n in self.module_names_in(*init, &places) {
+                seen.push((n, None));
+            }
+            let mut k = 0;
+            while k < seen.len() {
+                let n = seen[k].0;
+                let at = place(n).expect("a module's name");
+                if at >= i {
+                    let mut chain = vec![n];
+                    let mut from = seen[k].1;
+                    while let Some(f) = from {
+                        chain.push(seen[f].0);
+                        from = seen[f].1;
+                    }
+                    chain.reverse();
+                    return Err(FxError::at(self.arena.span_of(*init), self.too_soon(*name, &chain)));
+                }
+                if let Some(l) = lambda(n) {
+                    for m in self.module_names_in(lambdas[l].2, &places) {
+                        if !seen.iter().any(|(s, _)| *s == m) {
+                            seen.push((m, Some(k)));
+                        }
+                    }
+                }
+                k += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// What is said of `x`, whose value reaches `chain`'s last name, not
+    /// made yet, through the lambdas before it.
+    fn too_soon(&self, x: Sym, chain: &[Sym]) -> String {
+        let name = |n: &Sym| format!("`{}`", self.interner.name(*n));
+        let last = chain.last().expect("a chain");
+        let mut s = format!("{} uses {}", name(&x), name(&chain[0]));
+        for n in &chain[1..] {
+            s.push_str(&format!(", which uses {}", name(n)));
+        }
+        if *last == x {
+            s.push_str(", before it is made");
+        } else if chain.len() == 1 {
+            s.push_str(", defined after it");
+        } else {
+            s.push_str(&format!(", defined after {}", name(&x)));
+        }
+        s
+    }
+
+    /// For each of `lambdas`, the lambdas (positions, in written order) of
+    /// its recursive group: those it reaches that reach it, by the names
+    /// their values hold; empty if it is in none.
+    pub(crate) fn module_groups(&self, lambdas: &Lambdas) -> Vec<Vec<usize>> {
+        let n = lambdas.len();
+        let edges: Vec<Vec<usize>> = lambdas
+            .iter()
+            .map(|(_, _, e, _)| self.free_vars(*e).iter().filter_map(|m| lambdas.iter().position(|(l, ..)| l == m)).collect())
+            .collect();
+        let reach: Vec<Vec<bool>> = (0..n)
+            .map(|from| {
+                let mut seen = vec![false; n];
+                let mut stack = edges[from].clone();
+                while let Some(t) = stack.pop() {
+                    if !seen[t] {
+                        seen[t] = true;
+                        stack.extend(&edges[t]);
+                    }
+                }
+                seen
+            })
+            .collect();
+        (0..n).map(|a| (0..n).filter(|b| reach[a][*b] && reach[*b][a]).collect()).collect()
     }
 }

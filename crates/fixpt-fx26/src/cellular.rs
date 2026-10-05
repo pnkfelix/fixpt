@@ -366,25 +366,27 @@ impl<'a> Compiler<'a> {
             b
         };
         match self.c.arena.exp_at(x).clone() {
-            // A module's items each see those before them.
+            // A module's items see all of them, as a `letrec*`'s.
             Exp::Module(items) => {
-                let mut inner = bound.to_vec();
+                let mut names = Vec::new();
+                for item in &items {
+                    match item {
+                        crate::ast::ModItem::Desc { .. } => {}
+                        crate::ast::ModItem::Abs { up, down, .. } => names.extend([*up, *down]),
+                        crate::ast::ModItem::Val { name, .. } => names.push(*name),
+                        crate::ast::ModItem::Rec(group) => names.extend(group.iter().map(|(n, _, _)| *n)),
+                    }
+                }
+                let inner = with(bound, &names);
                 for item in items {
                     match item {
                         crate::ast::ModItem::Desc { .. } => {}
-                        crate::ast::ModItem::Abs { up, down, up_fn, down_fn, .. } => {
+                        crate::ast::ModItem::Abs { up_fn, down_fn, .. } => {
                             self.free(up_fn, &inner, acc);
-                            inner = with(&inner, &[up]);
                             self.free(down_fn, &inner, acc);
-                            inner = with(&inner, &[down]);
                         }
-                        crate::ast::ModItem::Val { name, init, .. } => {
-                            self.free(init, &inner, acc);
-                            inner = with(&inner, &[name]);
-                        }
+                        crate::ast::ModItem::Val { init, .. } => self.free(init, &inner, acc),
                         crate::ast::ModItem::Rec(group) => {
-                            let names: Vec<Sym> = group.iter().map(|(n, _, _)| *n).collect();
-                            inner = with(&inner, &names);
                             for (_, _, init) in &group {
                                 self.free(*init, &inner, acc);
                             }
@@ -633,43 +635,68 @@ impl<'a> Compiler<'a> {
                 self.exp(body, &inner, depth + n, code, tail)?;
                 self.unbind(code, depth, n, tail);
             }
-            // A module: its items bound in slots in order, as a `let`'s and
-            // a `letrec`'s are, then the product of its values
+            // A module: its items made in slots in order, as a `letrec*`'s
+            // (`crate::modorder`): a lambda naming an item not made yet
+            // captures it once it is made, as a `letrec`'s siblings are
+            // (`module_closure`); then the product of its values
             // (`docs/research/first-class-modules.md`).
             Exp::Module(items) => {
                 // Only the outermost module of a top-level definition notes
                 // its members (`module_members`).
                 let mut members = self.module_members.take();
-                let (mut inner, mut d, mut vals) = (e.clone(), depth, Vec::new());
+                let lambdas = self.c.module_lambdas(&items);
+                let is_lambda = |n: Sym, i: usize| lambdas.iter().any(|(m, _, _, at)| *m == n && *at == i);
+                // Each name's slot, in written order.
+                let mut slots: Vec<(Sym, usize)> = Vec::new();
                 for item in &items {
+                    let d = depth + slots.len();
                     match item {
                         crate::ast::ModItem::Desc { .. } => {}
-                        crate::ast::ModItem::Abs { up, down, up_fn, down_fn, .. } => {
-                            for (n, f) in [(*up, *up_fn), (*down, *down_fn)] {
-                                self.exp(f, &inner, d, code, false)?;
-                                inner.push((n, Loc::Slot(d)));
-                                d += 1;
-                            }
-                        }
-                        crate::ast::ModItem::Val { name, init, .. } => {
-                            self.exp(*init, &inner, d, code, false)?;
+                        crate::ast::ModItem::Abs { up, down, .. } => slots.extend([(*up, d), (*down, d + 1)]),
+                        crate::ast::ModItem::Val { name, .. } => slots.push((*name, d)),
+                        crate::ast::ModItem::Rec(group) => slots.extend(group.iter().enumerate().map(|(k, (n, _, _))| (*n, d + k))),
+                    }
+                }
+                let (mut inner, mut made, mut vals) = (e.clone(), 0, Vec::new());
+                // Closures to finish: (closure's slot, free value, slot it waits for).
+                let mut waiting: Vec<(usize, usize, usize)> = Vec::new();
+                for (i, item) in items.iter().enumerate() {
+                    let made_here: Vec<(Sym, ExpId)> = match item {
+                        crate::ast::ModItem::Desc { .. } => Vec::new(),
+                        crate::ast::ModItem::Abs { up, down, up_fn, down_fn, .. } => vec![(*up, *up_fn), (*down, *down_fn)],
+                        crate::ast::ModItem::Val { name, init, .. } => vec![(*name, *init)],
+                        crate::ast::ModItem::Rec(group) => group.iter().map(|(n, _, x)| (*n, *x)).collect(),
+                    };
+                    for (n, x) in made_here {
+                        let d = depth + made;
+                        let later: Vec<(Sym, usize)> = slots[made..].to_vec();
+                        if is_lambda(n, i) && self.names_any(x, &later) {
+                            let ps = self.module_closure(n, x, &inner, &later, d, code)?;
+                            waiting.extend(ps.into_iter().map(|(j, s)| (d, j, s)));
+                        } else {
+                            self.exp(x, &inner, d, code, false)?;
                             // A lambda naming no other member (the checks of
                             // size are where a re-export is seen, as the FX-26
                             // compiler's, whose come later in its files).
-                            if let Some(ms) = members.as_mut()
-                                && let Some((params, body, None)) = self.lambda_of(*init)
+                            if matches!(item, crate::ast::ModItem::Val { .. })
+                                && let Some(ms) = members.as_mut()
+                                && let Some((params, body, None)) = self.lambda_of(x)
                                 && self.captured(&params, body, &inner).is_empty()
                             {
-                                ms.push((*name, self.last_word, params, body));
+                                ms.push((n, self.last_word, params, body));
                             }
-                            inner.push((*name, Loc::Slot(d)));
-                            vals.push(d);
-                            d += 1;
                         }
-                        crate::ast::ModItem::Rec(group) => {
-                            inner = self.letrec_group(group, &inner, d, code)?;
-                            vals.extend(d..d + group.len());
-                            d += group.len();
+                        inner.push((n, Loc::Slot(d)));
+                        if !matches!(item, crate::ast::ModItem::Abs { .. }) {
+                            vals.push(d);
+                        }
+                        made += 1;
+                        // Each closure that waited for this one, given it.
+                        for (c, j, _) in waiting.iter().filter(|(_, _, s)| *s == d) {
+                            self.op1(code, "slot", Value::fixnum(d as i64));
+                            self.op1(code, "slot", Value::fixnum(*c as i64));
+                            self.int(code, (CLOSURE_FREE0 + j) as i64);
+                            self.op(code, "field!");
                         }
                     }
                 }
@@ -679,7 +706,7 @@ impl<'a> Compiler<'a> {
                 }
                 self.prim(code, "%make-frozen", 1 + vals.len())?;
                 self.done(code, tail);
-                self.unbind(code, depth, d - depth, tail);
+                self.unbind(code, depth, made, tail);
                 self.module_members = members;
             }
             // `with`: the module's values, by position, in slots.
@@ -1297,6 +1324,27 @@ impl<'a> Compiler<'a> {
         let mut inner = e.clone();
         inner.extend(bindings.iter().enumerate().map(|(k, (g, _, _))| (*g, Loc::Slot(depth + k))));
         Ok(inner)
+    }
+
+    /// Whether `x` names any of `later` (a module's items not made yet).
+    pub(crate) fn names_any(&self, x: ExpId, later: &[(Sym, usize)]) -> bool {
+        let mut free = Vec::new();
+        self.free(x, &[], &mut free);
+        free.iter().any(|m| later.iter().any(|(l, _)| l == m))
+    }
+
+    /// Module item `n`'s lambda `x`, made at `depth` in `e`, naming items
+    /// of `later` (with their slots), not made yet, itself among them: those
+    /// captured as a `letrec`'s siblings are, to be given once made. What
+    /// it gives: as `lambda`'s.
+    fn module_closure(&mut self, n: Sym, x: ExpId, e: &Env, later: &[(Sym, usize)], depth: usize, code: &mut Vec<Item>) -> R<Vec<(usize, usize)>> {
+        let (ps, lbody, region) = self.lambda_of(x).ok_or("a module's typed lambda is a lambda")?;
+        let mut own = e.clone();
+        for (m, s) in later {
+            let loops = *m == n && self.loops_only(lbody, n, ps.len(), true);
+            own.push((*m, if loops { Loc::Loop } else { Loc::Pending(*s) }));
+        }
+        self.lambda(&ps, lbody, &own, depth, code, Some(n), region)
     }
 
     fn let_(&mut self, bindings: &[(Sym, ExpId)], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {

@@ -1179,22 +1179,26 @@ impl Checker {
                 self.free_into(body, bound, out);
                 bound.truncate(depth);
             }
+            // Every item sees every name, as a `letrec*`'s (`crate::modorder`).
             Exp::Module(items) => {
                 let depth = bound.len();
                 for item in &items {
                     match item {
                         crate::ast::ModItem::Abs { up, down, .. } => bound.extend([*up, *down]),
                         crate::ast::ModItem::Desc { .. } => {}
-                        crate::ast::ModItem::Val { name, init, .. } => {
-                            self.free_into(*init, bound, out);
-                            bound.push(*name);
-                        }
+                        crate::ast::ModItem::Val { name, .. } => bound.push(*name),
+                        crate::ast::ModItem::Rec(group) => bound.extend(group.iter().map(|(n, _, _)| *n)),
+                    }
+                }
+                for item in &items {
+                    match item {
+                        crate::ast::ModItem::Val { init, .. } => self.free_into(*init, bound, out),
                         crate::ast::ModItem::Rec(group) => {
-                            bound.extend(group.iter().map(|(n, _, _)| *n));
                             for (_, _, init) in group {
                                 self.free_into(*init, bound, out);
                             }
                         }
+                        _ => {}
                     }
                 }
                 bound.truncate(depth);

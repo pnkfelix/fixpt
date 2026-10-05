@@ -555,32 +555,47 @@ member notes nothing; a module defined again forgets its members. Test
 `programs/run/reexport-inlined.fx`, both compilers. What is left is
 `TODO.md` §38.
 
-## 37. A module's typed lambda definitions see their own names (2026-10-05)
+## 37. A module's values see each other, as a `letrec*`'s (2026-10-05)
 
 Found moving `table.fx` into a module (`TODO.md` §34): a module's `define`
-did not see its own name, so one recursive procedure needed a `define-rec`
-of one, where at the top level a typed `define` of a lambda sees itself.
-Now a module is as the top level: definitions in order, each seeing those
-before it; a typed lambda definition sees its own name; procedures that
-call each other are a `define-rec` (ML's structures: `val`s in order, `fun
-f` recursive, `fun f … and g …` mutual). Each parser makes a typed lambda
-definition whose value names itself a `define-rec` of one
-(`module_own_names` in `modorder.rs`; `mo-own-names` in
-`parser-modules.fx`, a new file of the front end, through the hook
-`module-own-names`), which the checkers, the lowering, the compilers and
-the evaluator already know: its calls of itself direct, checked to end as
-a `define-rec`'s members are. One that does not name itself stays a
-definition, so a re-export of it may still be inlined (§38). Whether a
-value names itself is its free names, syntactically, a `with` binding none
-(the parser does not know a module's names); both parsers walk alike.
-Tests `modules/own-name.fx`, `modules/later-unbound.fx`.
+did not see its own name, and its definitions saw only those before them.
+The user's intent was `letrec*`: every name a module defines in scope in
+all of it, its items made in the order written, nothing reordered (the
+author keeps the order), and an item made too soon refused statically.
 
-What was designed first and not built: FX-91's mutual visibility (its
-report §2.3.11), every typed lambda seeing every definition, the
-initialization hazard (FX-91's semantics stuck, our FX-91 port failing at
-run time, "f is used before it is defined", though the module's type says
-pure) refused statically by reachability, the parser reordering a
-module's items into the order they are made. The user wanted the
-author's order kept, and only the self-reference. Found on the way:
-`sexp-edit move` put a top-level definition moved before a `define-rec`'s
-member inside the group; it goes before the group now.
+The rule (`modorder.rs`, the FX-26 checker's `check-modorder.fx`): a
+typed lambda (a `define` with a type whose value is a lambda, or a
+`define-rec` member) may name any item, earlier or later, as it does not
+run when it is made; procedures calling each other need no `define-rec`.
+Any other value is made when its item is, so what it names, and what the
+lambdas it names name, followed through them, must all be made before it:
+otherwise the module is refused, naming the chain, `` `y` uses `get-x`,
+which uses `x`, defined after `y` ``. It follows names, not calls, so
+`(define v int (if #f (g) 0))` before `g` is refused too; moving `g` up
+is the remedy. A lambda's recursion is found by what the typed lambdas
+name: each one in a cycle is checked to end with its cycle, as a
+`define-rec`'s members are, and says `spin` if that may not.
+
+Downstream, with no reordering: each checker binds the typed lambdas at
+their written types first, checks every other item in order, then the
+lambdas, in the scope of everything; the module's type lists its values
+in written order. The lowering is one `letrec*`. The evaluator opens
+every name's cell first and fills them in order. Both compilers make the
+items in their slots in order (stack and register code alike); a lambda
+naming an item not made yet captures a placeholder, patched as soon as
+that item is made (as a `letrec`'s siblings are), and the rule guarantees
+nothing runs it before then. Every walk of a module's names (free
+variables in both checkers and both compilers, masking, the termination
+walk) binds all of them for every item. Tests `modules/forward.fx`,
+`modules/mutual.fx`, `modules/own-name.fx`, `modules/made-too-soon.fx`,
+`modules/made-too-soon-through.fx`, `modules/named-too-soon.fx`.
+
+How it got here: first built, and committed (`9957fa0`), as only "a typed
+lambda definition sees its own name", the parser making it a `define-rec`
+of one, from a misreading of "the author keeps the order" as "each item
+sees those before it". A version reordering items in the parser into the
+order they are made was designed and dropped: the user wanted no
+reordering, the rule enforced downstream. Found on the way: `sexp-edit
+move` put a top-level definition moved before a `define-rec`'s member
+inside the group; it goes before the group now.
+

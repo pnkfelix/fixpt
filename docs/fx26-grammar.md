@@ -351,7 +351,11 @@ bloblet-form ::= "(" "make-bloblet" expression expression* ")"           ; bytes
                | "(" "bloblet-bytes" expression ")"
 ```
 
-- A `module` holds only the five items above, each seeing those before it.
+- A `module` holds only the five items above. Its types each see those
+  before them; its values see each other, as a `letrec*`'s: a typed
+  lambda (a `define` with a type, or a `define-rec` member) may name any
+  of them, but any other value, made as its item is, may not reach one
+  not made yet, through the lambdas it names (refused, naming the chain).
   Not `define*`, `define-effect`, `private-regions`, `define-datatype`, a
   type family `(define-type (f p) …)`, a bare expression, or a variance
   mark (`(a type +)`) on a `define-generative`'s parameter.
