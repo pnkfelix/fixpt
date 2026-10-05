@@ -796,6 +796,20 @@ runs before and six after (`tests/bootstrap.rs`, `comparison`): check
 Probably each use of `(table …)` elsewhere now going through a `select`
 resolved at its use; not looked into.
 
+**First of the files that need nothing new (2026-10-05): `check-facts.fx`**,
+four procedures in `(define test-facts (module …))`, the two
+`check-synth.fx` calls re-exported (neither inlined: both name
+themselves). Back to back, new, old, new, three runs each: check
+1.20–1.23 s, 1.22–1.23 s, 1.23 s; compile 0.15 s throughout. No cost
+measurable; but its procedures are called once a test, not in the
+checker's inner loops, so a hotter file is the real test of re-exports
+(§38's remainder). Items are indented two spaces under `(define m
+(module`, so a file's lines stay within 100 columns. The other files that
+need nothing new: `check-args`, `check-generative`, `check-mask`,
+`check-errors`, `check-calls`, `check-close`, `check-synth`, `layout`,
+`standard`, `compile-exps`, `compile-programs`, `regcode-core`,
+`native-layout`.
+
 ## 35. Provenance in the names of our code (the user's, 2026-10-05)
 
 `FIXPT_SYMBOLS` names (`docs/performance.md`, "Profiling with `sample`")
