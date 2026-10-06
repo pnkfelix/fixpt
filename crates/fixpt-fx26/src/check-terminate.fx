@@ -905,8 +905,6 @@
                                    ((= (k-size-as-lit x) 0) (k-ge-fact (k-size-plus y -1)))
                                    (else (the k-fact-list nil)))))
                      (k-branch-facts-of (k-eq-fact (k-size-add-scaled x y -1)) no)))))))))
-;; What `length-is?` has just confirmed: a variable, its binding, the length.
-(define-type k-cert-len (productof (1 symbol) (2 int) (3 k-size)))
 (define-type k-cert-lens (listof k-cert-len acyclic))
 ;; `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the
 ;; variable, its binding, and the length, a natural literal or a variable

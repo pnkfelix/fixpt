@@ -21,8 +21,6 @@
 ;; Looking at the checker's tables (`kreads`), and building more in their
 ;; region.
 (define-effect kmakes (maxeff kreads (alloc @t)))
-;; Pairs of integers.
-(define-type k-pairs (listof (pairof int int @t) acyclic))
 
 (define k-start (subr pure (kx) int)
   (lambda (x)

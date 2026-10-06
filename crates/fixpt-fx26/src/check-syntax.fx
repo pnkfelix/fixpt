@@ -190,8 +190,6 @@
         #u
         (begin (k-grounded (car (car ss)) (syn-start s) (syn-end s))
                (k-dletrec-grounded (cdr ss) s)))))
-;; A type family's parameters: each one's name and kind.
-(define-type k-params (listof (productof (1 symbol) (2 int)) acyclic))
 (define k-family-params (subr (maxeff checks spin) (k-syns) k-params)
   (lambda (ps)
     (if (null? ps)

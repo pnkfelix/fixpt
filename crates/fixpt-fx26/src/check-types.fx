@@ -326,6 +326,8 @@
 (define k-skolems (ref k-ids @t) (new nil))
 ;; The same for `nat?`: the variables it has just found no less than 0.
 (define k-certified-nats (ref (listof (pairof symbol int @t) acyclic) @t) (new nil))
+;; What `length-is?` has just confirmed: a variable, its binding, the length.
+(define-type k-cert-len (productof (1 symbol) (2 int) (3 k-size)))
 (define k-certified-lengths (ref (listof k-cert-len acyclic) @t) (new nil))
 ;; The arrow kinds made so far, newest first: each its parameters' kinds and
 ;; its result's. Kind 100 + n is the nth; kinds below are the

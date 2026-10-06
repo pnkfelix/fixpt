@@ -108,6 +108,8 @@
             ": it is applied, " (k-quote (k-cat3 "(" n " …)")))))
 ;; The parameters' names and kinds of a type form that is also a description
 ;; function written alone, `listof`; none for any other name.
+;; A type family's parameters: each one's name and kind.
+(define-type k-params (listof (productof (1 symbol) (2 int)) acyclic))
 (define k-ctor-params (subr (read @globals) (string) (listof k-params acyclic))
   (lambda (n)
     (letrec ((one (subr (read @globals) (symbol int) k-params)
