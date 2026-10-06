@@ -2,6 +2,9 @@
 ;;; `if` on a comparison, a `null?` or a length (`sizes.rs`).
 ;;; Part of the checker, `check-types.fx` first (PLAN.md §11, step 10).
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-test-facts-module (module
 ;; What a test shows when it holds, and when not.
 (define-type k-fact-list (listof k-size-fact acyclic))
 (define-type k-branch-facts (pairof k-fact-list k-fact-list acyclic))
@@ -147,4 +150,18 @@
       (cond ((string=? name "null?") (if (k-sc-one-arg? args) (k-null-facts (car args)) none))
             ((and (k-comparison? name) (k-sc-two? args))
              (k-compare-facts name (car args) (car (cdr args))))
-            (else none)))))
+            (else none)))))))
+
+(define-type k-fact-list (select check-test-facts-module k-fact-list))
+(define-type k-branch-facts (select check-test-facts-module k-branch-facts))
+(define k-branch-facts-of (with check-test-facts-module k-branch-facts-of))
+(define-type k-maybe-size (select check-test-facts-module k-maybe-size))
+(define k-size-any? (with check-test-facts-module k-size-any?))
+(define-type k-cert-lens (select check-test-facts-module k-cert-lens))
+(define k-length-arg (with check-test-facts-module k-length-arg))
+(define k-cert-len-has? (with check-test-facts-module k-cert-len-has?))
+(define k-length-test (with check-test-facts-module k-length-test))
+(define k-natural-by-itself? (with check-test-facts-module k-natural-by-itself?))
+(define k-operand-size (with check-test-facts-module k-operand-size))
+(define k-nat-arith-size (with check-test-facts-module k-nat-arith-size))
+(define k-std-test-facts (with check-test-facts-module k-std-test-facts))
