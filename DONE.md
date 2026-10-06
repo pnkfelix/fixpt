@@ -336,6 +336,13 @@ machine and, but for the list and array ones, in the evaluator. `list` and
   (`name_word_for`, `c-name-for!`; 2026-10-05), not `lambda@N`: what a
   disassembly, a fault and a profile show (`FIXPT_SYMBOLS` and
   `fixpt-symbolize`, `docs/performance.md`, "Profiling with `sample`").
+- An inner lambda was named only by where its body starts, `lambda@N`
+  (2026-10-06): it is named within the one it is in now, for the `letrec`
+  or `let` name it is bound to, or `lambda`, and where its body starts,
+  `k-mentions-token?/from@174485`, in both compilers alike
+  (`scope_name`/`bind_name`, `c-scope-name`/`c-bind-name`). The probe's
+  profile says the file and line of each (`word_at`). What is left, the
+  native REPL's definitions, is `TODO.md` §15.
 
 ## 16. FX source sizes: the lint
 

@@ -585,6 +585,13 @@ fn profiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Res
     m.ds.pop().ok_or_else(|| "the word left nothing".into())
 }
 
+/// Where an inner lambda's word's body starts, by its name, `outer/go@N`:
+/// `N`, a character of the program. (Not a body from another file's,
+/// `@F:N`, nor a global's, named for it alone.)
+fn word_at(w: &str) -> Option<usize> {
+    w.rsplit_once('@').and_then(|(_, at)| at.parse().ok())
+}
+
 /// Where character `at` of the bootstrap program is, as `file:line`.
 fn locate_char(text: &str, at: usize) -> String {
     let parts: Vec<(&str, &str)> = fixpt_fx26::FRONT_END_FILES.into_iter().chain([("bootstrap.fx", fixpt_fx26::BOOTSTRAP)]).collect();
@@ -637,12 +644,12 @@ fn probe_profile_check() {
     let top = LAST_PROFILE.with(|p| p.borrow().clone());
     let total: u64 = top.iter().map(|(_, n)| n).sum();
     // A global's own lambda is named for it (`k-…` the checker's); an
-    // inner one for where its body starts.
-    let checker = |w: &str| w.starts_with("k-") || w.strip_prefix("lambda@").is_some_and(|at| locate_char(&text, at.parse().unwrap_or(0)).starts_with("check-"));
+    // inner one within it, and for where its body starts (`k-…/go@N`).
+    let checker = |w: &str| w.starts_with("k-") || word_at(w).is_some_and(|at| locate_char(&text, at).starts_with("check-"));
     let in_checker: u64 = top.iter().filter(|(w, _)| checker(w)).map(|(_, n)| n).sum();
     eprintln!("{total} cells in all, {in_checker} in the checker's code (check-*.fx)");
     for (w, n) in top.iter().take(40) {
-        let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();
+        let at = word_at(w).map(|a| locate_char(&text, a)).unwrap_or_default();
         eprintln!("{n:>12} {:>5.1}%  {w} {at}", 100.0 * *n as f64 / total as f64);
     }
 }
@@ -737,7 +744,7 @@ fn probe_phases_as_register_code() {
                 let total: u64 = top.iter().map(|(_, n)| n).sum();
                 eprintln!("{phase}: {total} {what}, by word");
                 for (w, n) in top.iter().take(if std::env::var_os("FIXPT_PROFILE_ALL").is_some() { usize::MAX } else { 20 }) {
-                    let at = w.strip_prefix("lambda@").and_then(|a| a.parse().ok()).map(|a| locate_char(&text, a)).unwrap_or_default();
+                    let at = word_at(w).map(|a| locate_char(&text, a)).unwrap_or_default();
                     eprintln!("{n:>12}  {w} {at}");
                 }
             }

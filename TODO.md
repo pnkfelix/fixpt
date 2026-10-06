@@ -275,14 +275,13 @@ What is built: `DONE.md` §14.
 
 ## 15. Tools the ports wished for
 
-- **Inner lambdas named by their binding.** A global defined as a lambda
-  names its word now (`DONE.md` §15); an inner lambda is still named only
-  by a byte offset (`lambda@59`), in profiles too. Name it by the `let` or
-  `letrec` binding it has and the global it is in, `k-check/go@59`, in
-  both compilers alike, since their words must agree, and in register
-  code's. And the native REPL compiles a definition as a thunk, `(lambda
-  () init)`, so its own lambda is an inner one there: name it for the
-  definition too.
+- **The native REPL's definitions named.** Inner lambdas are named within
+  their definitions now (`DONE.md` §15), but the native REPL compiles a
+  definition as a thunk, `(lambda () init)`, so its words are
+  `lambda@N` and `lambda/lambda@N` there. Name them for the definition by
+  telling the compiler, not by rewriting the text: bound by a `let`, the
+  definition compiled differently, and no longer inlined
+  (`direct.rs`, `inlined_calls_see_a_redefinition`).
 - **Start-up that grows with the program.** Before the front end was cached,
   native start-up was 2.9–3.5 s before the first iteration for `boyer`,
   `ratio-regions`, `tyan`, and 6.3 s for `parsing` with its 28 KB string.

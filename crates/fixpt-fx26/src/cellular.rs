@@ -145,6 +145,12 @@ pub struct Compiler<'a> {
     spec: Option<Spec>,
     /// The name the next lambda's word gets, if not where its body starts.
     word_name: Option<String>,
+    /// The name of the lambda whose body is compiled, without where it
+    /// starts: an inner lambda's word is named within it, `outer/inner@N`.
+    scope_name: Option<String>,
+    /// While a `let`'s binding's init is compiled, the binding's name: the
+    /// first lambda compiled in it is named for it.
+    bind_name: Option<Sym>,
     /// The top-level definition whose lambda is compiled next: its name.
     defining: Option<Sym>,
     /// While a body's fast version is compiled (`regcode::register_code`):
@@ -238,6 +244,8 @@ impl<'a> Compiler<'a> {
             specials: Vec::new(),
             spec: None,
             word_name: None,
+            scope_name: None,
+            bind_name: None,
             defining: None,
             assume: None,
             summaries: None,
@@ -883,6 +891,21 @@ impl<'a> Compiler<'a> {
 
     fn lambda_word_in(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
         let named = self.word_name.take();
+        let bound = self.bind_name.take();
+        // Named for the definition it is in, and the name it is bound to
+        // there (`letrec`'s or `let`'s), or `lambda`: `k-check/walk`. Its
+        // inner lambdas are named within it.
+        let base = named.clone().unwrap_or_else(|| {
+            let inner = own.or(bound).map_or("lambda", |f| self.c.interner.name(f));
+            self.scope_name.as_ref().map_or_else(|| inner.to_string(), |s| format!("{s}/{inner}"))
+        });
+        let outer_scope = self.scope_name.replace(base.clone());
+        let r = self.lambda_word_named(params, body, e, own, named, base);
+        self.scope_name = outer_scope;
+        r
+    }
+
+    fn lambda_word_named(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>, named: Option<String>, base: String) -> R<(Value, Vec<Sym>)> {
         let defining = self.defining.take();
         let fv = self.captured(params, body, e);
         // A parameter of the same name hides the procedure.
@@ -910,14 +933,14 @@ impl<'a> Compiler<'a> {
         let compiled = self.exp(body, &inner, params.len(), &mut body_code, true);
         self.this = outer;
         compiled?;
-        // Named for where its body starts, so that a profile can say which.
-        // (A body read from another file, a module's, `load-module`: named
-        // for that file and where in it.)
+        // Unless a global's, named for where its body starts too, so that a
+        // profile can say which. (A body read from another file, a
+        // module's, `load-module`: named for that file and where in it.)
         let span = self.c.arena.span_of(body);
         let start = self.char_at.get(span.start as usize).copied().filter(|_| span.file.0 == 0).unwrap_or(u32::MAX);
         let name = named.unwrap_or_else(|| match self.char_at.get(span.start as usize) {
-            Some(start) if span.file.0 == 0 => format!("lambda@{start}"),
-            _ => format!("lambda@{}:{}", span.file.0, self.loaded_char_at(span)),
+            Some(start) if span.file.0 == 0 => format!("{base}@{start}"),
+            _ => format!("{base}@{}:{}", span.file.0, self.loaded_char_at(span)),
         });
         let w = self.assemble(&body_code, &name)?;
         // For bisecting a fault: with `FIXPT_REG_RANGE=lo-hi,…`, only the
@@ -1350,7 +1373,10 @@ impl<'a> Compiler<'a> {
     fn let_(&mut self, bindings: &[(Sym, ExpId)], body: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         let mut inner = e.clone();
         for (i, (n, init)) in bindings.iter().enumerate() {
-            self.exp(*init, e, depth + i, code, false)?;
+            self.bind_name = Some(*n);
+            let r = self.exp(*init, e, depth + i, code, false);
+            self.bind_name = None;
+            r?;
             inner.push((*n, Loc::Slot(depth + i)));
         }
         let n = bindings.len();

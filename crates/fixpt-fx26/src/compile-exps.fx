@@ -57,6 +57,12 @@
 
 ;; The name the next lambda's word gets, if not where its body starts.
 (define c-word-name (ref (listof string @k) @k) (new nil))
+;; The name of the lambda whose body is compiled, without where it starts:
+;; an inner lambda's word is named within it, `outer/inner@N`.
+(define c-scope-name (ref (listof string @k) @k) (new nil))
+;; While a `let`'s binding's init is compiled, the binding's name: the first
+;; lambda compiled in it is named for it.
+(define c-bind-name (ref (listof symbol @k) @k) (new nil))
 
 ;; The word of the lambda compiled last, in a list; and of the one before.
 (define c-last-word (ref (listof tword @k) @k) (new nil))
@@ -283,12 +289,27 @@
            (set c-this-params (extract me 3)) (set c-this-start start)
            (set c-this-added (extract me 4)))))
 
-;; A lambda's word's name: `named`'s, if it has one; else where its body
-;; starts, so that a profile can say which.
-(define c-word-symbol (subr c-walks ((listof string @k) exp) symbol)
-  (lambda (named body)
+;; A lambda's word's name, but for where its body starts: `named`'s, if it
+;; has one (a global's); else for the definition it is in, and the name
+;; it is bound to there (`own`, `letrec`'s, or `bound`, `let`'s), or
+;; `lambda`: `k-check/walk`.
+(define c-word-base (subr c-emits ((listof string @k) syms (listof symbol @k)) string)
+  (lambda (named own bound)
+    (if (null? named)
+        (let ((inner (cond ((not (null? own)) (symbol->string (car own)))
+                           ((not (null? bound)) (symbol->string (car bound)))
+                           (else "lambda")))
+              (scope (get c-scope-name)))
+          (if (null? scope) inner (string-append (string-append (car scope) "/") inner)))
+        (car named))))
+;; A lambda's word's name: `named`'s, if it has one; else `base` and where
+;; its body starts, so that a profile can say which.
+(define c-word-symbol (subr c-walks (string (listof string @k) exp) symbol)
+  (lambda (base named body)
     (string->symbol
-      (if (null? named) (string-append "lambda@" (c-place-name (exp-start body))) (car named)))))
+      (if (null? named)
+          (string-append base (string-append "@" (c-place-name (exp-start body))))
+          (car named)))))
 
 ;; `cells` as word `w`'s register twin, unless there are none.
 (define c-twin! (subr c-emits (tword (listof wcell @k)) unit)
@@ -540,7 +561,9 @@
     (lambda (bs outer inner depth c)
       (if (null? bs)
           inner
-          (begin (c-exp (extract (car bs) 2) outer depth c #f)
+          (begin (set c-bind-name (the (listof symbol @k) (cons (extract (car bs) 1) nil)))
+                 (c-exp (extract (car bs) 2) outer depth c #f)
+                 (set c-bind-name nil)
                  (c-let-bind (cdr bs) outer (c-extend (extract (car bs) 1) (at-slot depth) inner)
                              (+ depth 1) c)))))
   (c-letrec (subr (maxeff compiles spin) (c-recs exp cenv int code bool) unit)
@@ -665,6 +688,7 @@
   (c-lambda-word-in (subr (maxeff compiles spin) (c-params exp cenv syms) c-closing)
     (lambda (ps body e own0)
       (let* ((named (c-take c-word-name (the (listof string @k) nil)))
+             (bound (c-take c-bind-name (the (listof symbol @k) nil)))
              (defining (c-take c-defining (the (listof symbol @k) nil)))
              (fv (c-lambda-captured ps body e))
              ;; The parameters a lifting added, first (`c-lift`).
@@ -675,17 +699,21 @@
              (n (c-count-params ps))
              (body-code (the code (new nil)))
              (outer (c-this-saved)) (outer-start (get c-this-start))
-             (this (c-this-of own inner n added)))
+             (this (c-this-of own inner n added))
+             (base (c-word-base named own0 bound))
+             (outer-scope (get c-scope-name)))
         (begin
+          (set c-scope-name (the (listof string @k) (cons base nil)))
           (if (null? this)
               (set c-this-params -1)
               (let ((start (c-fresh)))
                 (begin (c-this-enter! (car this) start) (c-emit body-code (i-label start)))))
           (c-exp body inner n body-code #t)
           (c-this-enter! outer outer-start)
-          (let ((w (c-assemble body-code (c-word-symbol named body))))
+          (let ((w (c-assemble body-code (c-word-symbol base named body))))
             (begin
               (c-register-twin! w ps body inner this defining)
+              (set c-scope-name outer-scope)
               (product (1 w) (2 fv))))))))
   ;;; ------------------------------------------------------------ applications
   (c-app (subr (maxeff compiles spin) (exp exps cenv int code bool) unit)

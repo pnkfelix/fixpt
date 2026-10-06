@@ -38,8 +38,10 @@ stubs. `fixpt-symbolize FILE… -- OUT` (in `fixpt-tidy`) then names those
 frames, `k-check  (in fixpt code) + 644`, and adds a summary of the samples
 at the top of the stack by name, with waiting threads set apart. A global
 defined as a lambda gives its word its own name in both compilers
-(`name_word_for`, `c-name-for!`); an inner lambda is still named for where
-its body starts, `lambda@N` (`TODO.md` §15). For example:
+(`name_word_for`, `c-name-for!`); an inner lambda within the one it is in,
+by the `letrec` or `let` name it is bound to (or `lambda`) and where its
+body starts: `k-mentions-token?/from@174485`. The probe's cell profile
+adds the file and line, `check-print.fx:226`. For example:
 
 ```text
 FIXPT_SYMBOLS=/tmp/syms.%p fixpt … & sample $! 10 -file /tmp/s.txt
