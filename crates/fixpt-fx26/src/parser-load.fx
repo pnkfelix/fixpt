@@ -1,7 +1,8 @@
 ;;; The FX-26 parser, in FX-26: `(load-module "file")` (`docs/research/
 ;;; first-class-modules.md`, M7), as the Rust parser's `parse_load_module`
-;;; reads it: the file's forms a module's items, its `define-datatype`s
-;;; expanded and its `define-generative`s left a module's own. After
+;;; reads it: the file's forms a module's items, as an inline module's are
+;;; (`parse-module-items`: its `define-datatype`s expanded, its
+;;; `define-generative`s left a module's own). After
 ;;; `parser.fx`, which reaches it through `parse-load-module`.
 ;;;
 ;;; FX-26 code reads no files: the driver reads each file a program's
@@ -75,25 +76,6 @@
             (string-append (str3 "in `" path "`, ")
                            (str3 (text-place text (- at base)) ": " m)))))))
 
-;; A file's form, as a module's items: a datatype's type and constructors,
-;; as the program's would be (`parse-datatype`); anything else one item.
-(define top-item (subr parses (top) mod-item)
-  (lambda (t)
-    (tagcase t
-      (t-define-type (head sum a b)
-        (if (param-head? head)
-            (param-desc-item a b head sum)
-            (mod-item-of 1 (syn-symbol head) (one-syn sum) nil)))
-      (t-define (n tys x a b) (mod-item-of 2 n tys (the exp-list (cons x nil))))
-      (else y (pfail-at module-usage 0 0)))))
-(define tops-items (subr (maxeff parses spin) (top-list mod-items) mod-items)
-  (lambda (ts rest) (if (null? ts) rest (cons (top-item (car ts)) (tops-items (cdr ts) rest)))))
-(define file-items (subr (maxeff parses spin) (syns-a) mod-items)
-  (lambda (fs)
-    (cond ((null? fs) nil)
-          ((datatype? (car fs)) (tops-items (parse-datatype (car fs)) (file-items (cdr fs))))
-          (else (let ((it (parse-module-item (car fs)))) (cons it (file-items (cdr fs))))))))
-
 ;; The items of a form that is a module.
 (define module-items-of (subr pure (top) mod-items)
   (lambda (t)
@@ -122,8 +104,8 @@
                 (forms (syns-moved (extract (car f) 5) base))
                 ;; The items, as a form's, out of the prompt that catches
                 ;; what is wrong in them.
-                (r (prompt parse-tag (p-ok (cons (t-exp (e-module (file-items forms) a b)) nil))
-                           (lambda (r) r))))
+                (made (lambda () (t-exp (e-module (parse-module-items forms) a b))))
+                (r (prompt parse-tag (p-ok (cons (made) nil)) (lambda (r) r))))
            (tagcase r
              (p-err (m x y)
                (if (>= x base)

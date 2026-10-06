@@ -1717,6 +1717,13 @@ impl Checker {
     /// `(define-generative t T)`, `(define-type d T)`, `(define x e)`,
     /// `(define x T e)` and `(define-rec (f T e) …)`.
     fn parse_module(&mut self, span: fixpt_read::Span, forms: &[Syntax]) -> R<ExpId> {
+        // Its `define-datatype`s expanded, as a program's and a module
+        // file's are (`expand_datatype`).
+        let mut expanded = Vec::new();
+        for f in forms {
+            self.expand_datatype(f.clone(), &mut expanded)?;
+        }
+        let forms = &expanded[..];
         let depth = self.dscope.len();
         let r = self.parse_module_in(forms);
         self.dscope.truncate(depth);

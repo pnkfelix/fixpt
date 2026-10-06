@@ -408,7 +408,7 @@ impl Checker {
     /// `(define-datatype (name (param kind) …) …)` has parameters: a type
     /// family, which its variants may mention with the same parameters, and
     /// constructors polymorphic in them.
-    fn expand_datatype(&mut self, form: Syntax, out: &mut Vec<Syntax>) -> R<()> {
+    pub(crate) fn expand_datatype(&mut self, form: Syntax, out: &mut Vec<Syntax>) -> R<()> {
         let items = form.as_proper_list().unwrap_or(&[]).to_vec();
         if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) != Some("define-datatype") {
             out.push(form);

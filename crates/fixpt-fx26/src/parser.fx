@@ -380,6 +380,105 @@
 
 ;;; ------------------------------------------------------------ expressions
 
+;;; FX-91's `(define-datatype name (tag type …) …)`, expanded as the Rust
+;;; reader expands it (`top.rs`'s `expand_datatype`), as syntax, into the
+;;; forms it stands for: a sum of products, each variant's members labelled
+;;; from 1, `(define-type name (sumof (tag (productof (1 T) …)) …))`, and a
+;;; constructor per tag, `(define tag (subr pure (T …) name) (lambda (%x1 …)
+;;; (sum tag (product (1 %x1) …))))`. Where the form is: a program's, a
+;;; module's, or a module file's, each parsing what it is made into.
+
+(define datatype? (subr (maxeff (read @globals) (read @s)) (syn) bool)
+  (lambda (s) (form-of? s 'define-datatype)))
+
+(define mk-int (subr (read @globals) (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
+;; `(keyword item …)`; `(subr pure (member …) result)`; and `(poly (binder
+;; …) body)`: each spanning `a`..`b`.
+(define mk-form (subr (maxeff (read @globals) (read @s)) (string syns-a int int) syn)
+  (lambda (keyword items a b) (mk-list (cons (mk-symbol keyword a b) items) a b)))
+(define mk-pure-subr (subr (maxeff (read @globals) (read @s)) (syns-a syn int int) syn)
+  (lambda (members result a b)
+    (let ((pure (mk-symbol "pure" a b)) (args (mk-list members a b)))
+      (mk-form "subr" (list pure args result) a b))))
+(define mk-poly (subr (maxeff (read @globals) (read @s)) (syns-a syn int int) syn)
+  (lambda (binders body a b)
+    (mk-form "poly" (list (mk-list binders a b) body) a b)))
+;; A constructor's parameters, `%x1 …`, from `i`.
+(define dt-vars (subr (maxeff (read @globals) (read @s) (alloc @s)) (syns-a int int int) syns-a)
+  (lambda (ms i a b)
+    (if (null? ms)
+        nil
+        (let ((x (mk-symbol (string-append "%x" (int->string i)) a b)))
+          (cons x (dt-vars (cdr ms) (+ i 1) a b))))))
+;; `(1 m1) (2 m2) …`, from `i`.
+(define dt-labelled (subr (maxeff (read @globals) (read @s) (alloc @s)) (syns-a int int int) syns-a)
+  (lambda (ms i a b)
+    (if (null? ms)
+        nil
+        (let* ((pair (mk-list (list (mk-int i a b) (car ms)) a b))
+               (rest (dt-labelled (cdr ms) (+ i 1) a b)))
+          (cons pair rest)))))
+;; Each variant's arm of the sum, `(tag (productof (1 T) …))`.
+(define dt-arms (subr parses (syns-a int int) syns-a)
+  (lambda (vs a b)
+    (if (null? vs)
+        nil
+        (let* ((v (car vs)) (parts (syn-items v "a variant")))
+          (if (or (null? parts) (not (syn-symbol? (car parts))))
+              (pfail "a variant is `(tag type …)`" v)
+              (let* ((prod (mk-form "productof" (dt-labelled (cdr parts) 1 a b) a b))
+                     (arm (mk-list (list (car parts) prod) a b))
+                     (rest (dt-arms (cdr vs) a b)))
+                (cons arm rest)))))))
+;; Each constructor: of type `(subr pure (member …) used)`, where `used` is
+;; the type as it is used, `name` or `(name param …)`; polymorphic in the
+;; parameters if there are any (`family?`).
+(define dt-constructors (subr parses (syn bool syns-a syns-a int int) syns-a)
+  (lambda (used family? params vs a b)
+    (if (null? vs)
+        nil
+        (let* ((parts (syn-items (car vs) "a variant"))
+               (tag (car parts))
+               (members (cdr parts))
+               (mono (mk-pure-subr members used a b))
+               (ty (if family? (mk-poly params mono a b) mono))
+               (xs (dt-vars members 1 a b))
+               (fields (mk-form "product" (dt-labelled xs 1 a b) a b))
+               (body (mk-form "sum" (list tag fields) a b))
+               (make (mk-form "lambda" (list (mk-list xs a b) body) a b))
+               (ctor (mk-form "define" (list tag ty make) a b))
+               (rest (dt-constructors used family? params (cdr vs) a b)))
+          (cons ctor rest)))))
+;; The parameters' names, from `(name kind) …`.
+(define dt-param-names (subr parses (syns-a) syns-a)
+  (lambda (ps)
+    (if (null? ps)
+        nil
+        (let ((p (syn-items (car ps) "a parameter")))
+          (if (and (= (len p) 2) (syn-symbol? (car p)))
+              (cons (car p) (dt-param-names (cdr ps)))
+              (pfail "a parameter is `(name kind)`" (car ps)))))))
+;; `(define-datatype name (tag type …) …)`, or with parameters,
+;; `(define-datatype (name (param kind) …) …)`, a type family, which its
+;; variants may mention with the same parameters: the forms it stands for.
+(define expand-datatype (subr parses (syn) syns-a)
+  (lambda (s)
+    (let* ((items (syn-items s "a datatype")) (a (syn-start s)) (b (syn-end s))
+           (usage "`(define-datatype name (tag type …) …)`"))
+      (if (< (len items) 3)
+          (pfail usage s)
+          (let* ((head (nth items 1))
+                 (family? (not (syn-symbol? head)))
+                 (hs (if family? (syn-items head "a datatype's name") (the syns-a nil)))
+                 (name (cond ((not family?) head)
+                             ((and (not (null? hs)) (syn-symbol? (car hs))) (car hs))
+                             (else (pfail usage s))))
+                 (params (if family? (cdr hs) (the syns-a nil)))
+                 (used (if family? (mk-list (cons name (dt-param-names params)) a b) name))
+                 (sum (mk-form "sumof" (dt-arms (drop items 2) a b) a b))
+                 (ctors (dt-constructors used family? params (drop items 2) a b)))
+            (cons (mk-form "define-type" (list head sum) a b) ctors))))))
+
 (define-rec
   (parse-exps (subr (maxeff parses spin) (syns-a) exp-list)
     (lambda (xs) (if (null? xs) nil (cons (parse-exp (car xs)) (parse-exps (cdr xs))))))
@@ -696,12 +795,13 @@
                        (pfail "`else` binds one name" (nth parts 1))))))
             (else (parse-else (cdr cs))))))
   ;; A `module`'s items, in order.
+  ;; A module's forms, its `define-datatype`s expanded.
   (parse-module-items (subr (maxeff parses spin) (syns-a) mod-items)
     (lambda (fs)
-      (if (null? fs)
-          nil
-          (let* ((item (parse-module-item (car fs))) (rest (parse-module-items (cdr fs))))
-            (cons item rest)))))
+      (cond ((null? fs) nil)
+            ((datatype? (car fs)) (parse-module-items (append (expand-datatype (car fs)) (cdr fs))))
+            (else (let* ((item (parse-module-item (car fs))) (rest (parse-module-items (cdr fs))))
+                    (cons item rest))))))
   ;; `(define-generative t T)`, `(define-type d T)`, `(define x e)`, `(define
   ;; x T e)` or `(define-rec (f T e) …)`.
   (parse-module-item (subr (maxeff parses spin) (syn) mod-item)
@@ -800,107 +900,6 @@
                (t-private-regions regions (syn-start s) (syn-end s))))
             (else (t-exp (parse-exp s)))))))
 
-;;; FX-91's `(define-datatype name (tag type …) …)`, expanded as the Rust
-;;; reader expands it (`top.rs`): a sum of products, each variant's members
-;;; labelled from 1, and a constructor per tag, `(tag e …)`. What it makes
-;;; is written where the form is.
-
-(define datatype? (subr (maxeff (read @globals) (read @s)) (syn) bool)
-  (lambda (s) (form-of? s 'define-datatype)))
-
-(define mk-int (subr (read @globals) (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
-;; `(keyword item …)`; `(subr pure (member …) result)`; and `(poly (binder
-;; …) body)`: each spanning `a`..`b`.
-(define mk-form (subr (maxeff (read @globals) (read @s)) (string syns-a int int) syn)
-  (lambda (keyword items a b) (mk-list (cons (mk-symbol keyword a b) items) a b)))
-(define mk-pure-subr (subr (maxeff (read @globals) (read @s)) (syns-a syn int int) syn)
-  (lambda (members result a b)
-    (let ((pure (mk-symbol "pure" a b)) (args (mk-list members a b)))
-      (mk-form "subr" (list pure args result) a b))))
-(define mk-poly (subr (maxeff (read @globals) (read @s)) (syns-a syn int int) syn)
-  (lambda (binders body a b)
-    (mk-form "poly" (list (mk-list binders a b) body) a b)))
-;; The name of a constructor's `i`th parameter: `%x<i>`.
-(define dt-var (subr (read @globals) (int) symbol)
-  (lambda (i) (string->symbol (string-append "%x" (int->string i)))))
-
-;; `(1 m1) (2 m2) …`, from `i`.
-(define dt-labelled (subr (maxeff (read @globals) (read @s) (alloc @s)) (syns-a int int int) syns-a)
-  (lambda (ms i a b)
-    (if (null? ms)
-        nil
-        (let* ((pair (mk-list (list (mk-int i a b) (car ms)) a b))
-               (rest (dt-labelled (cdr ms) (+ i 1) a b)))
-          (cons pair rest)))))
-(define dt-arms (subr parses (syns-a int int) syns-a)
-  (lambda (vs a b)
-    (if (null? vs)
-        nil
-        (let* ((v (car vs)) (parts (syn-items v "a variant")))
-          (if (or (null? parts) (not (syn-symbol? (car parts))))
-              (pfail "a variant is `(tag type …)`" v)
-              (let* ((prod (mk-form "productof" (dt-labelled (cdr parts) 1 a b) a b))
-                     (arm (mk-list (list (car parts) prod) a b))
-                     (rest (dt-arms (cdr vs) a b)))
-                (cons arm rest)))))))
-(define dt-params (subr (maxeff (read @globals) (read @s)) (syns-a int) param-list)
-  (lambda (ms i)
-    (if (null? ms)
-        nil
-        (cons (product (1 (dt-var i)) (2 (the syns-a nil))) (dt-params (cdr ms) (+ i 1))))))
-(define dt-fields (subr (maxeff (read @globals) (read @s)) (syns-a int int int) let-list)
-  (lambda (ms i a b)
-    (if (null? ms)
-        nil
-        (cons (product (1 (string->symbol (int->string i))) (2 (e-var (dt-var i) a b)))
-              (dt-fields (cdr ms) (+ i 1) a b)))))
-;; Each constructor: of type `(subr pure (member …) used)`, where `used` is
-;; the type as it is used, `name` or `(name param …)`; polymorphic in the
-;; parameters if there are any (`family?`).
-(define dt-constructors (subr parses (syn bool syns-a syns-a int int) top-list)
-  (lambda (used family? params vs a b)
-    (if (null? vs)
-        nil
-        (let* ((parts (syn-items (car vs) "a variant"))
-               (tag (car parts))
-               (members (cdr parts))
-               (mono (mk-pure-subr members used a b))
-               (ty (if family? (mk-poly params mono a b) mono))
-               (body (e-sum (syn-symbol tag) (e-product (dt-fields members 1 a b) a b) a b))
-               (make (e-lambda (dt-params members 1) body a b))
-               (ctor (t-define (syn-symbol tag) (the syns-a (cons ty nil)) make a b))
-               (rest (dt-constructors used family? params (cdr vs) a b)))
-          (cons ctor rest)))))
-;; The parameters' names, from `(name kind) …`.
-(define dt-param-names (subr parses (syns-a) syns-a)
-  (lambda (ps)
-    (if (null? ps)
-        nil
-        (let ((p (syn-items (car ps) "a parameter")))
-          (if (and (= (len p) 2) (syn-symbol? (car p)))
-              (cons (car p) (dt-param-names (cdr ps)))
-              (pfail "a parameter is `(name kind)`" (car ps)))))))
-;; `(define-datatype name (tag type …) …)`, or with parameters,
-;; `(define-datatype (name (param kind) …) …)`: a type family, which its
-;; variants may mention with the same parameters.
-(define parse-datatype (subr parses (syn) top-list)
-  (lambda (s)
-    (let* ((items (syn-items s "a datatype")) (a (syn-start s)) (b (syn-end s))
-           (usage "`(define-datatype name (tag type …) …)`"))
-      (if (< (len items) 3)
-          (pfail usage s)
-          (let* ((head (nth items 1))
-                 (family? (not (syn-symbol? head)))
-                 (hs (if family? (syn-items head "a datatype's name") (the syns-a nil)))
-                 (name (cond ((not family?) head)
-                             ((and (not (null? hs)) (syn-symbol? (car hs))) (car hs))
-                             (else (pfail usage s))))
-                 (params (if family? (cdr hs) (the syns-a nil)))
-                 (used (if family? (mk-list (cons name (dt-param-names params)) a b) name))
-                 (sum (mk-form "sumof" (dt-arms (drop items 2) a b) a b))
-                 (ctors (dt-constructors used family? params (drop items 2) a b)))
-            (cons (t-define-type head sum a b) ctors))))))
-
 (define append-tops (subr (read @globals) (top-list top-list) top-list)
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))
 
@@ -956,12 +955,15 @@
                  (down (gen-conversion "down-" n (conv used rep) identity a b)))
             (list (t-define-generative head rep a b) up down))))))
 
+;; Each of `xs`, parsed as a top-level form.
+(define parse-each-top (subr (maxeff parses spin) (syns-a) top-list)
+  (lambda (xs) (if (null? xs) nil (cons (parse-top (car xs)) (parse-each-top (cdr xs))))))
 ;; What top-level form `x` makes: a generative type's or a datatype's
 ;; several forms, or one.
 (define parse-made (subr (maxeff parses spin) (syn) top-list)
   (lambda (x)
     (cond ((generative? x) (parse-generative x))
-          ((datatype? x) (parse-datatype x))
+          ((datatype? x) (parse-each-top (expand-datatype x)))
           (else (the top-list (cons (parse-top x) nil))))))
 
 (define parse-tops (subr (maxeff parses spin) (syns-a) top-list)
