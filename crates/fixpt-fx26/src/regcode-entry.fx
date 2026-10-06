@@ -260,62 +260,6 @@
                  (set r-own-now outer-own) (set r-own-name outer-name)
                  cells))))))
 
-(define-rec
-  ;; A call in tail position in a leaf, which has no frame, as the Rust
-  ;; compiler's `r_leaf_tail_call`: the arguments sorted (`r-leaf-args`);
-  ;; the procedure into RESULT now if nothing after the moves uses RESULT,
-  ;; else kept in a register; the moves; the simple arguments; the call.
-  ;; Its own registers are above REG1…REGn.
-  (r-leaf-tail-call (subr rcompiles (rgen exp exps renv cenv) unit)
-    (lambda (g f args env te)
-      (let* ((nreg (extract g nreg))
-             (regs (get nreg))
-             ;; Registers of its own above the arguments' as well as the leaf's.
-             (above (set nreg (max regs (c-count-exps args))))
-             (made (r-leaf-args g args env te 1))
-             (late (extract made late))
-             (quiet (and (null? late) (not (r-moves-cycle? (extract made moves)))))
-             (fr (r-reg-of (r-plain-var-loc env f)))
-             (written (and (> fr 0) (r-written? fr (extract made moves) late)))
-             ;; Where the procedure is after the moves: a register; 0, to
-             ;; be fetched; -1, in RESULT.
-             (at (cond ((and (> fr 0) (not written)) fr)
-                       ((and written quiet) (begin (r-opn g rop-reg fr) -1))
-                       (written (r-reg g))
-                       ((r-simple? f) 0)
-                       (else (begin (r-exp g f env te #f) (if quiet -1 (r-keep-in-reg g))))))
-             (moves (if (and written (not quiet))
-                        (r-moves-snoc (extract made moves) fr at)
-                        (extract made moves))))
-        (begin
-          (r-par-moves g moves)
-          (r-late-into g late env te)
-          (cond ((> at 0) (r-opn g rop-reg at)) ((= at 0) (r-exp g f env te #f)) (else #u))
-          (r-opn g rop-tailinvoke (c-count-exps args))
-          (set nreg regs)))))
-  ;; A leaf's tail call's arguments from REGk: one in a register moved from
-  ;; there; a simple one left for after the moves; any other made now, in
-  ;; order, into a register of its own, and moved from there.
-  (r-leaf-args (subr rcompiles (rgen exps renv cenv int) rleaf)
-    (lambda (g args env te k)
-      (if (null? args)
-          (r-rleaf (the rmoves nil) (the rlate nil))
-          (let* ((a (car args)) (r (r-reg-of (r-plain-var-loc env a))))
-            (cond ((> r 0)
-                   (let ((rest (r-leaf-args g (cdr args) env te (+ k 1))))
-                     (if (= r k) rest (r-leaf-move rest r k))))
-                  ((r-simple? a) (r-leaf-late (r-leaf-args g (cdr args) env te (+ k 1)) k a))
-                  (else
-                   (let ((t (begin (r-exp g a env te #f) (r-keep-in-reg g))))
-                     (r-leaf-move (r-leaf-args g (cdr args) env te (+ k 1)) t k))))))))
-  ;; Each simple argument of `late` into its register.
-  (r-late-into (subr rcompiles (rgen rlate renv cenv) unit)
-    (lambda (g late env te)
-      (if (null? late)
-          #u
-          (let ((one (car late)))
-            (begin (r-into g (cdr one) (car one) env te) (r-late-into g (cdr late) env te)))))))
-(set r-leaf-call r-leaf-tail-call)
 
 ;; Whether the compiler makes register code from now on: for a driver.
 (define compile-registers! (subr (maxeff (read @globals) (write @k)) (bool) unit)

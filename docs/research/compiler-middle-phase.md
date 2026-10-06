@@ -237,7 +237,13 @@ green, the self-compile measured.
    The self-compile: compile 0.283–0.285 s, 45 collections (0.282 s, 46
    before step 4); check 1.106–1.116 s.
 5. The register compiler's own three hooks, regrouped as the checker's
-   cycles are.
+   cycles are. *Done, 2026-10-06*: `r-module-code`, `r-reshape-code` and
+   `r-leaf-call` closed one knot with `regcode-core.fx`'s recursive group
+   (every one of its 50 members in the recursion around `r-exp`), which
+   the module code and a leaf's tail call joined; their helpers stay in
+   `regcode-modules.fx`, now before it. The file is 1127 lines, over the
+   1000-line limit by the user's decision, to be revisited (`TODO.md`
+   §41: pass the recursion, a functor module, or a seam in the group).
 
 ## Open
 

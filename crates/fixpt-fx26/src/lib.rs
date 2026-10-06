@@ -60,13 +60,13 @@ pub const COMPILER_DRIVER: [(&str, &str); 2] = [
 pub const REGCODE: &str = include_str!("regcode.fx");
 
 /// Register code's other parts, in order: expressions; the helpers of the
-/// expressions' compiler proper; it, one recursive group; modules; and the
-/// entry.
+/// expressions' compiler proper; modules' helpers; it, one recursive group
+/// (modules and a leaf's tail calls in it); and the entry.
 pub const REGCODE_PARTS: [(&str, &str); 5] = [
     ("regcode-exps.fx", include_str!("regcode-exps.fx")),
     ("regcode-helpers.fx", include_str!("regcode-helpers.fx")),
-    ("regcode-core.fx", include_str!("regcode-core.fx")),
     ("regcode-modules.fx", include_str!("regcode-modules.fx")),
+    ("regcode-core.fx", include_str!("regcode-core.fx")),
     ("regcode-entry.fx", include_str!("regcode-entry.fx")),
 ];
 

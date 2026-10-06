@@ -1,5 +1,7 @@
 ;;; Register code, in FX-26: the expressions' compiler proper, one
-;;; recursive group. After `regcode-exps.fx`.
+;;; recursive group, modules and a leaf's tail calls included. After
+;;; `regcode-modules.fx`. Over the size limit by the user's decision
+;;; (2026-10-06, `crates/fixpt-tidy/fx-size-debt.txt`), to be revisited.
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
@@ -15,7 +17,7 @@
                (begin
                  (r-prim g "%fx26-convert" (r-args-2 (a-as-is x) (a-v (wcell-int k))) env te)
                  (r-done g tail)))
-              ((not (null? r)) ((get r-reshape-code) g x (car r) env te tail))
+              ((not (null? r)) (r-reshape g x (car r) env te tail))
               (else (r-exp-as-is g x env te tail))))))
   ;; `x`'s value into RESULT; in tail position, returned.
   (r-exp-as-is (subr rcompiles (rgen exp renv cenv bool) unit)
@@ -98,8 +100,8 @@
                 (r-app g f args a b env te tail)
                 (r-let g (extract (car l) 1) (extract (car l) 2) env te tail))))
         ;; `regcode-modules.fx`'s.
-        (e-module (items a b) ((get r-module-code) g x env te tail))
-        (e-with (m body a b) ((get r-module-code) g x env te tail)))))))
+        (e-module (items a b) (r-module-or-with g x env te tail))
+        (e-with (m body a b) (r-module-or-with g x env te tail)))))))
   ;; The region's name bound, as a `let`'s, to a region entered (never in a
   ;; leaf), and left with the body's value, which is so not in tail
   ;; position.
@@ -331,7 +333,7 @@
                (if (and tail
                         (and (< n register-regs)
                              (and (null? (r-special-of a b env f args)) (< (r-lifted-at env f) 0))))
-                   ((get r-leaf-call) g f args env te)
+                   (r-leaf-tail-call g f args env te)
                    (r-decline)))
               ((not (null? (r-special-of a b env f args)))
                (let ((i (car (r-special-of a b env f args))))
@@ -975,7 +977,140 @@
              (own (r-sibling-env all at i 0 lbody n env te))
              ;; The closure's own name, as it knows itself.
              (self (the syms (cons name nil))))
-        (r-lambda g ps lbody (extract own 1) (extract own 2) self region #f)))))))
+        (r-lambda g ps lbody (extract own 1) (extract own 2) self region #f))))
+  ;;; ------------------------------------------------------------- modules
+  ;;; (`docs/research/first-class-modules.md`, stage M3), as the Rust
+  ;;; compiler's `r_module` and `r_with` make them; their helpers in
+  ;;; `regcode-modules.fx`.
+  ;; Item `n`'s lambda `x`, naming items of `later` not made yet: those
+  ;; captured as a `letrec`'s siblings are, to be given once made.
+  (r-module-closure (subr rcompiles (rgen symbol exp r-scopes c-mslots) patches)
+    (lambda (g n x sc later)
+      (let ((self (the syms (cons n nil))))
+        (tagcase (car (c-lambda-of x))
+          (e-lambda (ps lbody a b)
+            (let ((own (r-module-own n sc later lbody (c-count-params ps))))
+              (r-lambda g ps lbody (car own) (cdr own) self (the maybe-exp nil) #f)))
+          (e-rlambda (r l a b)
+            (tagcase l
+              (e-lambda (ps lbody la lb)
+                (let ((own (r-module-own n sc later lbody (c-count-params ps))))
+                  (r-lambda g ps lbody (car own) (cdr own) self (r-just-exp r) #f)))
+              (else y (begin (r-decline) (the patches nil)))))
+          (else y (begin (r-decline) (the patches nil)))))))
+  ;; Values `vs` made in their slots, `later`, in order, as a `letrec*`'s
+  ;; (`DONE.md` §37): a typed lambda naming an item not made yet captures it
+  ;; once it is made; `ws` the closures waiting, `vals` the values' slots so
+  ;; far (newest first): all of them.
+  (r-module-make (subr rcompiles (rgen c-mvals r-scopes c-mslots c-waits rints) rints)
+    (lambda (g vs sc later ws vals)
+      (if (null? vs)
+          vals
+          (let* ((v (car vs)) (n (extract v 1)) (x (extract v 2)) (s (cdr (car later)))
+                 (ps (if (and (extract v 4) (c-names-any? x later))
+                         (r-module-closure g n x sc later)
+                         (begin (r-exp g x (car sc) (cdr sc) #f) (the patches nil))))
+                 (kept (r-opn g rop-setstk s))
+                 (inner (the r-scopes (cons (r-bind n (rl-slot s) (car sc)) (r-local (cdr sc) n))))
+                 (waits (c-waits-onto ws s ps))
+                 (given (r-give-waiting g waits s)))
+            (r-module-make g (cdr vs) inner (cdr later) waits
+                           (if (= (extract v 3) 0) vals (the rints (cons s vals))))))))
+  ;; A module: its items made in frame slots in order, as its stack code
+  ;; makes them; then the product of its values. Declined in a leaf.
+  (r-module (subr rcompiles (rgen mod-items renv cenv bool) unit)
+    (lambda (g items env te tail)
+      (if (extract g leaf)
+          (r-decline)
+          (let* ((slots (get (extract g nslot)))
+                 (vs (c-module-values items))
+                 (later (r-module-slots g vs))
+                 (vals (r-module-make g vs (the r-scopes (cons env te)) later nil nil)))
+            (begin (r-make-frozen g 37 (r-slots-oldest vals nil) env te)
+                   (set (extract g nslot) slots)
+                   (r-done g tail))))))
+  ;; `with`: the module's values, by position, kept in frame slots; then the
+  ;; body. Declined in a leaf.
+  (r-with (subr rcompiles (rgen symbol exp int int renv cenv bool) unit)
+    (lambda (g m body a b env te tail)
+      (let ((ns (c-with-at a b)))
+        (if (or (extract g leaf) (null? ns))
+            (r-decline)
+            (let* ((slots (get (extract g nslot)))
+                   (at (r-slots-for g (car ns)))
+                   (sc (r-with-fields g m (car ns) at 0 (the r-scopes (cons env te)))))
+              (begin (r-exp g body (car sc) (cdr sc) tail) (set (extract g nslot) slots)))))))
+  (r-module-or-with (subr rcompiles (rgen exp renv cenv bool) unit)
+    (lambda (g x env te tail)
+      (tagcase x
+        (e-module (items a b) (r-module g items env te tail))
+        (e-with (m body a b) (r-with g m body a b env te tail))
+        (else y (r-decline)))))
+  (r-reshape (subr rcompiles (rgen exp k-ids renv cenv bool) unit)
+    (lambda (g x at env te tail)
+      (if (extract g leaf)
+          (r-decline)
+          (let* ((slots (get (extract g nslot)))
+                 (m (begin (r-exp-as-is g x env te #f) (r-keep-in-slot g)))
+                 (args (r-reshape-fields g m at nil)))
+            (begin (r-make-frozen g 37 (r-args-reversed args nil) env te)
+                   (set (extract g nslot) slots)
+                   (r-done g tail))))))
+  ;;; ------------------------------------------------- a leaf's tail call
+  ;; A call in tail position in a leaf, which has no frame, as the Rust
+  ;; compiler's `r_leaf_tail_call`: the arguments sorted (`r-leaf-args`);
+  ;; the procedure into RESULT now if nothing after the moves uses RESULT,
+  ;; else kept in a register; the moves; the simple arguments; the call.
+  ;; Its own registers are above REG1…REGn.
+  (r-leaf-tail-call (subr rcompiles (rgen exp exps renv cenv) unit)
+    (lambda (g f args env te)
+      (let* ((nreg (extract g nreg))
+             (regs (get nreg))
+             ;; Registers of its own above the arguments' as well as the leaf's.
+             (above (set nreg (max regs (c-count-exps args))))
+             (made (r-leaf-args g args env te 1))
+             (late (extract made late))
+             (quiet (and (null? late) (not (r-moves-cycle? (extract made moves)))))
+             (fr (r-reg-of (r-plain-var-loc env f)))
+             (written (and (> fr 0) (r-written? fr (extract made moves) late)))
+             ;; Where the procedure is after the moves: a register; 0, to
+             ;; be fetched; -1, in RESULT.
+             (at (cond ((and (> fr 0) (not written)) fr)
+                       ((and written quiet) (begin (r-opn g rop-reg fr) -1))
+                       (written (r-reg g))
+                       ((r-simple? f) 0)
+                       (else (begin (r-exp g f env te #f) (if quiet -1 (r-keep-in-reg g))))))
+             (moves (if (and written (not quiet))
+                        (r-moves-snoc (extract made moves) fr at)
+                        (extract made moves))))
+        (begin
+          (r-par-moves g moves)
+          (r-late-into g late env te)
+          (cond ((> at 0) (r-opn g rop-reg at)) ((= at 0) (r-exp g f env te #f)) (else #u))
+          (r-opn g rop-tailinvoke (c-count-exps args))
+          (set nreg regs)))))
+  ;; A leaf's tail call's arguments from REGk: one in a register moved from
+  ;; there; a simple one left for after the moves; any other made now, in
+  ;; order, into a register of its own, and moved from there.
+  (r-leaf-args (subr rcompiles (rgen exps renv cenv int) rleaf)
+    (lambda (g args env te k)
+      (if (null? args)
+          (r-rleaf (the rmoves nil) (the rlate nil))
+          (let* ((a (car args)) (r (r-reg-of (r-plain-var-loc env a))))
+            (cond ((> r 0)
+                   (let ((rest (r-leaf-args g (cdr args) env te (+ k 1))))
+                     (if (= r k) rest (r-leaf-move rest r k))))
+                  ((r-simple? a) (r-leaf-late (r-leaf-args g (cdr args) env te (+ k 1)) k a))
+                  (else
+                   (let ((t (begin (r-exp g a env te #f) (r-keep-in-reg g))))
+                     (r-leaf-move (r-leaf-args g (cdr args) env te (+ k 1)) t k))))))))
+  ;; Each simple argument of `late` into its register.
+  (r-late-into (subr rcompiles (rgen rlate renv cenv) unit)
+    (lambda (g late env te)
+      (if (null? late)
+          #u
+          (let ((one (car late)))
+            (begin (r-into g (cdr one) (car one) env te) (r-late-into g (cdr late) env te)))))))))
 
 (define r-exp (with regcode-core-module r-exp))
 (define r-exp-as-is (with regcode-core-module r-exp-as-is))

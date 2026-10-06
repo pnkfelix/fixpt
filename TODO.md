@@ -950,5 +950,17 @@ program and the front end's last hook cycle between them goes:
 Steps 1–4 done in both compilers (2026-10-06): copies memoized, the
 procedure table, every call decided in the plan (inlined bodies and
 copies included), and twins as a phase, the hooks `c-register-code` and
-`c-standard-register-code` gone. Next, step 5: the register compiler's
-own three hooks (`regcode-modules.fx`, `regcode-entry.fx`).
+`c-standard-register-code` gone. Step 5 (2026-10-06): the register
+compiler's own three hooks (`r-module-code`, `r-reshape-code`,
+`r-leaf-call`) removed by folding their knot into `regcode-core.fx`'s
+recursive group, 1127 lines, over the 1000-line limit by the user's
+decision (`crates/fixpt-tidy/fx-size-debt.txt`).
+
+To revisit (the user's: "we can think about coming back here and
+addressing this in a cleaner way later"): bring `regcode-core.fx` back
+under the limit without hooks. The options weighed: pass the recursion
+explicitly (the module and leaf-call code take `r-exp`, `r-exp-as-is`,
+`r-lambda`, `r-make-frozen`, `r-into` as parameters, and move before the
+core); the same as a functor module (M5) over the core's procedures; or
+split the core group at a seam (calls, inlining and specialization,
+~300 lines) with the recursion passed across it.

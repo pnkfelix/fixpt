@@ -130,12 +130,6 @@
 (define r-decline (subr (maxeff (read @globals) (write @k)) () unit)
   (lambda () (set r-declined #t)))
 
-;; A module or a `with` (`regcode-modules.fx`, which sets this).
-(define r-module-code (ref (subr rcompiles (rgen exp renv cenv bool) unit) @k)
-  (new (lambda (g x env te tail) (r-decline))))
-;; A module reshaped, as `k-ids` says (`regcode-modules.fx`, which sets this).
-(define r-reshape-code (ref (subr rcompiles (rgen exp k-ids renv cenv bool) unit) @k)
-  (new (lambda (g x at env te tail) (r-decline))))
 
 (define r-emit (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen ritem) unit)
   (lambda (g i) (let ((items (extract g items))) (set items (cons i (get items))))))
@@ -417,11 +411,6 @@
     (cond ((not (null? ms)) (or (= (cdr (car ms)) k) (r-written? k (cdr ms) late)))
           ((null? late) #f)
           (else (or (= (car (car late)) k) (r-written? k ms (cdr late)))))))
-;; A leaf's tail call (`r-leaf-tail-call`, in `regcode-entry.fx`), which
-;; `r-call` makes through this, set once it is defined.
-(define r-leaf-call
-  (ref (subr rcompiles (rgen exp exps renv cenv) unit) @k)
-  (new (lambda (g f args env te) (r-decline))))
 ;; `ms` with the move of `s` to `d` last.
 (define r-moves-snoc (subr rbuilds (rmoves int int) rmoves)
   (lambda (ms s d)
@@ -760,8 +749,6 @@
 (define-type rgen (select regcode-module rgen))
 (define r-declined (with regcode-module r-declined))
 (define r-decline (with regcode-module r-decline))
-(define r-module-code (with regcode-module r-module-code))
-(define r-reshape-code (with regcode-module r-reshape-code))
 (define r-emit (with regcode-module r-emit))
 (define r-op0 (with regcode-module r-op0))
 (define r-op1 (with regcode-module r-op1))
@@ -801,7 +788,6 @@
 (define r-reg-of (with regcode-module r-reg-of))
 (define r-moves-cycle? (with regcode-module r-moves-cycle?))
 (define r-written? (with regcode-module r-written?))
-(define r-leaf-call (with regcode-module r-leaf-call))
 (define r-moves-snoc (with regcode-module r-moves-snoc))
 (define r-self-known? (with regcode-module r-self-known?))
 (define r-add-name? (with regcode-module r-add-name?))
