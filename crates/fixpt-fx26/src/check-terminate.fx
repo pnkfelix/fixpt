@@ -12,6 +12,9 @@
 ;;; `acyclic` region, datums), and integers counting down to a bound below or
 ;;; up to one above. A member named but not called escapes, and fails.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-terminate-module (module
 ;; What is known of a value, relative to a parameter of the member walked:
 ;; the parameter, or (strictly) a part of it, of a type; or the integer
 ;; parameter plus an offset.
@@ -840,4 +843,25 @@
   (lambda (bs)
     (cond ((null? bs) #u)
           ((k-lambda? (extract (car bs) 3)) (k-letrec-lambdas (cdr bs)))
-          (else (k-fail-not-lambda (extract (car bs) 1) (extract (car bs) 3))))))
+          (else (k-fail-not-lambda (extract (car bs) 1) (extract (car bs) 3))))))))
+
+(define-type k-tscope (select check-terminate-module k-tscope))
+(define-type k-guards (select check-terminate-module k-guards))
+(define k-sc-member (with check-terminate-module k-sc-member))
+(define k-op-either? (with check-terminate-module k-op-either?))
+(define k-sc-one? (with check-terminate-module k-sc-one?))
+(define k-sc-two? (with check-terminate-module k-sc-two?))
+(define k-sc-bind (with check-terminate-module k-sc-bind))
+(define k-sc-escape (with check-terminate-module k-sc-escape))
+(define k-sc-walk-module (with check-terminate-module k-sc-walk-module))
+(define k-sc-walk-list (with check-terminate-module k-sc-walk-list))
+(define k-sc-walk (with check-terminate-module k-sc-walk))
+(define k-std? (with check-terminate-module k-std?))
+(define k-nat-ty? (with check-terminate-module k-nat-ty?))
+(define-type k-texts (select check-terminate-module k-texts))
+(define k-termination (with check-terminate-module k-termination))
+(define k-note-why (with check-terminate-module k-note-why))
+(define-type k-thunk (select check-terminate-module k-thunk))
+(define k-declaring (with check-terminate-module k-declaring))
+(define k-fail-not-lambda (with check-terminate-module k-fail-not-lambda))
+(define k-letrec-lambdas (with check-terminate-module k-letrec-lambdas))
