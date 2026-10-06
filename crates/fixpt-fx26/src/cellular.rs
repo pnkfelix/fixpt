@@ -160,6 +160,11 @@ pub struct Compiler<'a> {
     /// Whether the register code being made is a planned lambda's, of the
     /// form being compiled (step 3): its call sites are the plan's.
     r_in_plan: bool,
+    /// While the plan is made: the names whose bodies it is inlining, on the
+    /// way to where it is (3b).
+    plan_inlining: Vec<Sym>,
+    /// `inlining`'s, as `inlines`'s indices: the path through the plan.
+    inlining_ks: Vec<usize>,
     /// The specialized copies made, by the procedure's word, the lambda's
     /// span, what it captures and the globals it sees (`r_specialize`).
     spec_copies: HashMap<(u64, u32, u32, Vec<Sym>, Option<usize>), Value>,
@@ -272,6 +277,8 @@ impl<'a> Compiler<'a> {
             plan_checks: 0,
             twin_depth: 0,
             r_in_plan: false,
+            plan_inlining: Vec::new(),
+            inlining_ks: Vec::new(),
             spec: None,
             word_name: None,
             scope_name: None,

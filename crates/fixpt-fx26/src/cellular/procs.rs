@@ -38,6 +38,11 @@ pub(crate) struct Plan {
     /// Each call of a global, by where it is (step 3): what register code
     /// may do with it.
     pub calls: HashMap<(u32, u32, u32), Called>,
+    /// The bodies its calls inline, each planned as register code compiles
+    /// it there (3b), by `inlines`'s index: once for every call of it here,
+    /// what it decides depending on the callee and the path to it, not on
+    /// the call.
+    pub inlined: HashMap<usize, Plan>,
 }
 
 /// A call of a global, as planned: the small procedure it may be inlined
@@ -226,7 +231,8 @@ impl Compiler<'_> {
             return;
         }
         let n = args.len();
-        let inline = self.inlines.iter().position(|i| i.name == name && i.params.len() == n);
+        // Not a body being inlined on the way here (`r_inlined`'s guard).
+        let inline = self.inlines.iter().position(|i| i.name == name && i.params.len() == n).filter(|_| !self.plan_inlining.contains(&name));
         let special = self.specials.iter().position(|s| s.name == name && s.params.len() == n).and_then(|k| {
             let lam = args[self.specials[k].param];
             match self.c.arena.exp_at(lam) {
@@ -235,6 +241,37 @@ impl Compiler<'_> {
             }
         });
         plan.calls.insert(self.span_key(x), Called { inline, special });
+        if let Some(k) = inline
+            && !plan.inlined.contains_key(&k)
+        {
+            let sub = self.plan_inlined(k, name);
+            plan.inlined.insert(k, sub);
+        }
+    }
+
+    /// The body of `inlines[k]`, `name`'s, planned as `r_inline` compiles it:
+    /// its parameters local, in the globals it saw, `name` not inlined in
+    /// it again. (An inlined body makes no closure: `inline_room`.)
+    fn plan_inlined(&mut self, k: usize, name: Sym) -> Plan {
+        let (body, genv_len) = (self.inlines[k].body, self.inlines[k].genv_len);
+        let env: Env = self.inlines[k].params.iter().map(|p| (*p, SLOT)).collect();
+        let mut sub = Plan::default();
+        let outer = self.genv_limit.replace(genv_len);
+        self.plan_inlining.push(name);
+        self.plan_exp(body, &env, false, &mut sub);
+        self.plan_inlining.pop();
+        self.genv_limit = outer;
+        sub
+    }
+
+    /// The plan of where register code is now: the form's, or, inside an
+    /// inlined body, that body's there, along the path to it.
+    fn plan_here(&self) -> Option<&Plan> {
+        let mut p = self.plan.as_ref()?;
+        for k in &self.inlining_ks {
+            p = p.inlined.get(k)?;
+        }
+        Some(p)
     }
 
     /// Call `x` as the plan decided it, where its call sites are the plan's:
@@ -242,10 +279,10 @@ impl Compiler<'_> {
     /// or copy; a call of no global, none planned, as neither. None
     /// elsewhere, where register code decides.
     pub(crate) fn planned_call(&self, x: ExpId) -> Option<Called> {
-        if !self.r_in_plan || !self.inlining.is_empty() || self.spec.is_some() {
+        if !self.r_in_plan || self.spec.is_some() {
             return None;
         }
-        let plan = self.plan.as_ref()?;
+        let plan = self.plan_here()?;
         Some(plan.calls.get(&self.span_key(x)).copied().unwrap_or(Called { inline: None, special: None }))
     }
 
@@ -253,13 +290,17 @@ impl Compiler<'_> {
     /// planned lambda's twin outside any inlined body or copy, against the
     /// plan.
     pub(crate) fn plan_check_call(&mut self, x: ExpId, got: Called) {
-        if !self.r_in_plan || !self.inlining.is_empty() || self.spec.is_some() {
+        if !self.r_in_plan || self.spec.is_some() {
             return;
         }
-        let Some(plan) = &self.plan else { return };
-        self.plan_checks += 1;
+        let Some(plan) = self.plan_here() else {
+            let msg = format!("call at {:?}: no plan along {:?}", self.span_key(x), self.inlining_ks);
+            self.plan_mismatches.push(msg);
+            return;
+        };
         let key = self.span_key(x);
         let planned = plan.calls.get(&key).copied().unwrap_or(Called { inline: None, special: None });
+        self.plan_checks += 1;
         if planned != got {
             let msg = format!("call at {key:?}: planned {planned:?}, decided {got:?}");
             self.plan_mismatches.push(msg);

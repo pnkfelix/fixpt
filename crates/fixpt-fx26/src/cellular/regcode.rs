@@ -1501,7 +1501,9 @@ impl Compiler<'_> {
         }
         let outer = (g.this.take(), self.genv_limit.replace(genv_len));
         self.inlining.push(name);
+        self.inlining_ks.push(k);
         let inlined = self.r_exp(g, body, &mut own_env, &mut own_te, tail);
+        self.inlining_ks.pop();
         self.inlining.pop();
         (g.this, self.genv_limit) = outer;
         inlined?;
