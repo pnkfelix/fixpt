@@ -4,6 +4,9 @@
 ;;; only (`docs/research/shapes.md`; `soundness-findings.md`, F13). The
 ;;; Rust checker's `is_data`, `is_data_at` and `data_places`, rule for rule.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-data-module (module
 ;; Whether `r` is frozen data's region.
 (define k-frozen-region? (subr pure (k-region) bool)
   (lambda (r) (tagcase r (r-frozen (p f) #t) (else y #f))))
@@ -153,4 +156,8 @@
              (k-fail (k-cat5 (k-quote-dvar v) " is bound as data at " (k-region-show place)
                              ", and a " (k-cat3 (k-show-ty t) " is data in another place" ""))
                      a b))
-            (else #u)))))
+            (else #u)))))))
+
+(define k-is-data? (with check-data-module k-is-data?))
+(define k-data-places-solved (with check-data-module k-data-places-solved))
+(define k-check-data (with check-data-module k-check-data))
