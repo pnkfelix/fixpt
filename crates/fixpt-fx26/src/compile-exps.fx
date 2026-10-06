@@ -6,6 +6,9 @@
 ;;; value pushed is slot `depth`. In tail position, code ends the word: with
 ;;; a `tailcall`, or with `return` after the value.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define compile-exps-module (module
 ;; Each captured name's value, as the closure will hold it, free value `j`
 ;; on; a sibling not made yet is a placeholder, and one of the patches.
 (define c-push-all (subr (maxeff compiles spin) (syms cenv int int code) patches)
@@ -780,4 +783,26 @@
                   (c-unbind c depth (+ n 1) tail)
                   (if tail #u (c-emit c (i-branch end)))))
               (c-emit c (i-label next))
-              (c-arms (cdr arms) els e depth c tail end)))))))
+              (c-arms (cdr arms) els e depth c tail end)))))))))
+
+(define c-defining (with compile-exps-module c-defining))
+(define c-own-now (with compile-exps-module c-own-now))
+(define c-word-name (with compile-exps-module c-word-name))
+(define c-last-word (with compile-exps-module c-last-word))
+(define c-prev-word (with compile-exps-module c-prev-word))
+(define c-module-members (with compile-exps-module c-module-members))
+(define-type c-mvals (select compile-exps-module c-mvals))
+(define c-module-values (with compile-exps-module c-module-values))
+(define-type c-mslots (select compile-exps-module c-mslots))
+(define c-names-any? (with compile-exps-module c-names-any?))
+(define-type c-waits (select compile-exps-module c-waits))
+(define c-waits-onto (with compile-exps-module c-waits-onto))
+(define-type c-made (select compile-exps-module c-made))
+(define c-made-now (with compile-exps-module c-made-now))
+(define c-made-reuse (with compile-exps-module c-made-reuse))
+(define-type c-region (select compile-exps-module c-region))
+(define c-made-word (with compile-exps-module c-made-word))
+(define c-exp (with compile-exps-module c-exp))
+(define c-lift (with compile-exps-module c-lift))
+(define c-lambda (with compile-exps-module c-lambda))
+(define c-lambda-word (with compile-exps-module c-lambda-word))
