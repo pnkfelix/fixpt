@@ -1353,19 +1353,26 @@ impl Compiler<'_> {
         }
         // A call: the arguments into REG1…REGn, the procedure in RESULT.
         // An inlined call: in a fast version, no call, so in a leaf too.
-        if let Some((k, cell)) = self.r_inlined(env, f, args.len()) {
+        if self.plan_check {
+            let got = super::procs::Called {
+                inline: self.r_inlined(env, f, args.len()).map(|(k, _)| k),
+                special: self.r_specialized(env, f, args).map(|(k, _, lam)| (k, lam)),
+            };
+            self.plan_check_call(x, got);
+        }
+        if let Some((k, cell)) = self.r_inline_of(x, env, f, args) {
             if self.assume.is_none() && g.leaf {
                 return self.decline("a call in a leaf");
             }
             return self.r_inline(g, k, cell, f, args, env, te, tail);
         }
-        if g.leaf && tail && args.len() < REGS && self.r_specialized(env, f, args).is_none() && !matches!(self.r_var(env, f), Some(RLoc::Lifted(_))) {
+        if g.leaf && tail && args.len() < REGS && self.r_special_of(x, env, f, args).is_none() && !matches!(self.r_var(env, f), Some(RLoc::Lifted(_))) {
             return self.r_leaf_tail_call(g, f, args, env, te);
         }
         if g.leaf {
             return self.decline("a call in a leaf");
         }
-        if let Some((k, cell, lam)) = self.r_specialized(env, f, args) {
+        if let Some((k, cell, lam)) = self.r_special_of(x, env, f, args) {
             return self.r_specialize(g, k, cell, lam, args, env, te, tail);
         }
         // A lifted procedure's call: the names it would have captured,
@@ -1406,6 +1413,34 @@ impl Compiler<'_> {
 
     /// Which of `inlines`, and its global's cell, when `f` names one of
     /// them, taking `n` arguments, whose body is not being inlined already.
+    /// Call `x` of `f`: the small procedure it is inlined as, and its global's
+    /// cell, as the plan decided (step 3), in a planned lambda's own code;
+    /// else as `r_inlined` decides here, in an inlined body or a copy.
+    fn r_inline_of(&self, x: ExpId, env: &[(Sym, RLoc)], f: ExpId, args: &[ExpId]) -> O<(usize, Value)> {
+        match self.planned_call(x) {
+            Some(called) => {
+                let k = called.inline?;
+                let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+                let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
+                Some((k, cell))
+            }
+            None => self.r_inlined(env, f, args.len()),
+        }
+    }
+
+    /// The same for the procedure it is specialized as, with the lambda.
+    fn r_special_of(&self, x: ExpId, env: &[(Sym, RLoc)], f: ExpId, args: &[ExpId]) -> O<(usize, Value, ExpId)> {
+        match self.planned_call(x) {
+            Some(called) => {
+                let (k, lam) = called.special?;
+                let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+                let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
+                Some((k, cell, lam))
+            }
+            None => self.r_specialized(env, f, args),
+        }
+    }
+
     fn r_inlined(&self, env: &[(Sym, RLoc)], f: ExpId, n: usize) -> O<(usize, Value)> {
         let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
         let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };

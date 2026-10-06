@@ -35,6 +35,18 @@ pub(crate) struct Planned {
 pub(crate) struct Plan {
     pub procs: HashMap<((u32, u32, u32), Vec<Sym>), Planned>,
     pub lifts: HashMap<(u32, u32, u32), Option<Vec<Vec<Sym>>>>,
+    /// Each call of a global, by where it is (step 3): what register code
+    /// may do with it.
+    pub calls: HashMap<(u32, u32, u32), Called>,
+}
+
+/// A call of a global, as planned: the small procedure it may be inlined
+/// as (`inlines`'s index), and the procedure it may be specialized as with
+/// the lambda argument (`specials`'s index, and the lambda).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Called {
+    pub inline: Option<usize>,
+    pub special: Option<(usize, ExpId)>,
 }
 
 /// A slot, as the walk's environments say where a name is: only its kind
@@ -85,6 +97,7 @@ impl Compiler<'_> {
                 self.plan_let(&bindings, lbody, e, tail, plan);
             }
             Exp::App { fun, args } => {
+                self.plan_call(x, fun, &args, e, plan);
                 self.plan_exps(&args, e, plan);
                 // A standard operation's name, or a lifted procedure's, is
                 // not compiled as a value.
@@ -199,6 +212,57 @@ impl Compiler<'_> {
                     self.plan_exp(body, &inner, tail, plan);
                 }
             }
+        }
+    }
+
+    /// A call of a global (step 3), as `r_inlined` and `r_specialized` see
+    /// it: the small procedure of its name and arity, if one may be inlined;
+    /// the procedure of its name and arity that may be specialized, if the
+    /// argument at its parameter is a lambda small enough, taking as many
+    /// arguments as it is called with.
+    fn plan_call(&mut self, x: ExpId, fun: ExpId, args: &[ExpId], e: &Env, plan: &mut Plan) {
+        let Exp::Var(name) = *self.c.arena.exp_at(fun) else { return };
+        if !matches!(self.where_is(e, name), Some(Loc::Global(_))) {
+            return;
+        }
+        let n = args.len();
+        let inline = self.inlines.iter().position(|i| i.name == name && i.params.len() == n);
+        let special = self.specials.iter().position(|s| s.name == name && s.params.len() == n).and_then(|k| {
+            let lam = args[self.specials[k].param];
+            match self.c.arena.exp_at(lam) {
+                Exp::Lambda { params, body } if params.len() == self.specials[k].arity && self.inline_room(*body, super::INLINE_LIMIT) >= 0 => Some((k, lam)),
+                _ => None,
+            }
+        });
+        plan.calls.insert(self.span_key(x), Called { inline, special });
+    }
+
+    /// Call `x` as the plan decided it, where its call sites are the plan's:
+    /// in a planned lambda's own register code, outside any inlined body
+    /// or copy; a call of no global, none planned, as neither. None
+    /// elsewhere, where register code decides.
+    pub(crate) fn planned_call(&self, x: ExpId) -> Option<Called> {
+        if !self.r_in_plan || !self.inlining.is_empty() || self.spec.is_some() {
+            return None;
+        }
+        let plan = self.plan.as_ref()?;
+        Some(plan.calls.get(&self.span_key(x)).copied().unwrap_or(Called { inline: None, special: None }))
+    }
+
+    /// In shadow (`FIXPT_PLAN_CHECK`), a call register code decides, in a
+    /// planned lambda's twin outside any inlined body or copy, against the
+    /// plan.
+    pub(crate) fn plan_check_call(&mut self, x: ExpId, got: Called) {
+        if !self.r_in_plan || !self.inlining.is_empty() || self.spec.is_some() {
+            return;
+        }
+        let Some(plan) = &self.plan else { return };
+        self.plan_checks += 1;
+        let key = self.span_key(x);
+        let planned = plan.calls.get(&key).copied().unwrap_or(Called { inline: None, special: None });
+        if planned != got {
+            let msg = format!("call at {key:?}: planned {planned:?}, decided {got:?}");
+            self.plan_mismatches.push(msg);
         }
     }
 

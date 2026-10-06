@@ -152,6 +152,9 @@ pub struct Compiler<'a> {
     /// How deep in register code the compile is: a lambda compiled there is
     /// not in the plan (its context is not the tree's).
     twin_depth: usize,
+    /// Whether the register code being made is a planned lambda's, of the
+    /// form being compiled (step 3): its call sites are the plan's.
+    r_in_plan: bool,
     /// The specialized copies made, by the procedure's word, the lambda's
     /// span, what it captures and the globals it sees (`r_specialize`).
     spec_copies: HashMap<(u64, u32, u32, Vec<Sym>, Option<usize>), Value>,
@@ -262,6 +265,7 @@ impl<'a> Compiler<'a> {
             plan_mismatches: Vec::new(),
             plan_checks: 0,
             twin_depth: 0,
+            r_in_plan: false,
             spec: None,
             word_name: None,
             scope_name: None,
@@ -987,9 +991,12 @@ impl<'a> Compiler<'a> {
         if self.registers && in_range != Some(false) {
             self.declined = None;
             let outer_reuse = std::mem::replace(&mut self.reuse, std::mem::take(&mut self.made));
+            let planned = self.twin_depth == 0 && self.planned_fv(params, body).is_some();
+            let in_plan = std::mem::replace(&mut self.r_in_plan, planned);
             self.twin_depth += 1;
             let cells = self.register_code(params, body, &inner, this, defining.map(|n| (n, w)));
             self.twin_depth -= 1;
+            self.r_in_plan = in_plan;
             self.reuse = outer_reuse;
             match cells {
                 Some(cells) => {
