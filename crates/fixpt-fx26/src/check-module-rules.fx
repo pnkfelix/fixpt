@@ -281,7 +281,7 @@
            (bound (k-mod-bind bs ls))
            (made (k-module-items items a b (k-made-of nil nil nil nil)))
            (es (k-mod-edges ls ls))
-           (gs (k-mod-groups (k-mod-reaches es es) bs bs))
+           (gs (k-mod-groups es bs bs))
            (checked (k-mod-check-lambdas bs ls gs nil (extract bound-ds 2)))
            (le (extract checked 1))
            (unbound (k-unbind-to saved))

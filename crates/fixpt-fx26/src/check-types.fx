@@ -225,11 +225,24 @@
   (lambda (a b c d e) (string-append a (k-cat4 b c d e))))
 (define k-quote (subr (read @globals) (string) string) (lambda (n) (k-cat3 "`" n "`")))
 
+;; `xs` joined, `sep` between each two: their characters gathered, last to
+;; first, into one list in an arena of its own, made a string once; so a long
+;; list costs its length, not its length squared, as appending each to the
+;; rest did (a module type's components, printed: `docs/performance.md`).
 (define k-join (subr (maxeff (read @globals) (read @t)) ((listof string acyclic) string) string)
   (lambda (xs sep)
-    (cond ((null? xs) "")
-          ((null? (cdr xs)) (car xs))
-          (else (k-cat3 (car xs) sep (k-join (cdr xs) sep))))))
+    (letrena r
+      (letrec ((chars (subr (alloc r) (string int (listof char r)) (listof char r))
+                 (lambda (s i acc)
+                   (if (< i 0) acc (chars s (- i 1) (rcons r (string-ref s i) acc)))))
+               (onto (subr (maxeff (alloc r) (read @t)) (string (listof char r)) (listof char r))
+                 (lambda (s acc) (chars s (- (string-length s) 1) acc)))
+               (all (subr (maxeff (alloc r) (read @t)) (k-strings (listof char r)) (listof char r))
+                 (lambda (xs acc)
+                   (cond ((null? xs) acc)
+                         ((null? (cdr xs)) (onto (car xs) acc))
+                         (else (onto (car xs) (onto sep (all (cdr xs) acc))))))))
+        (list->string (all xs nil))))))
 
 ;; Where `sub` first starts in `s` from `at`, or -1.
 (define k-find-sub (subr (maxeff (read @globals) spin) (string string int) int)

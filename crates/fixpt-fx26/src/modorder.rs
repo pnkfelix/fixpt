@@ -120,26 +120,64 @@ impl Checker {
 
     /// For each of `lambdas`, the lambdas (positions, in written order) of
     /// its recursive group: those it reaches that reach it, by the names
-    /// their values hold; empty if it is in none.
+    /// their values hold (its strongly connected component, if that is a
+    /// cycle); empty if it is in none.
     pub(crate) fn module_groups(&self, lambdas: &Lambdas) -> Vec<Vec<usize>> {
         let n = lambdas.len();
         let edges: Vec<Vec<usize>> = lambdas
             .iter()
             .map(|(_, _, e, _)| self.free_vars(*e).iter().filter_map(|m| lambdas.iter().position(|(l, ..)| l == m)).collect())
             .collect();
-        let reach: Vec<Vec<bool>> = (0..n)
-            .map(|from| {
-                let mut seen = vec![false; n];
-                let mut stack = edges[from].clone();
-                while let Some(t) = stack.pop() {
-                    if !seen[t] {
-                        seen[t] = true;
-                        stack.extend(&edges[t]);
+        // Their strongly connected components (Tarjan's), linear in the
+        // lambdas and edges; as the FX-26 checker's `k-mod-groups`. A lambda
+        // walked and not yet in a component is on the stack.
+        struct Walk<'a> {
+            edges: &'a [Vec<usize>],
+            index: Vec<Option<usize>>,
+            low: Vec<usize>,
+            comp: Vec<Option<usize>>,
+            stack: Vec<usize>,
+            count: usize,
+            comps: usize,
+        }
+        fn visit(w: &mut Walk, v: usize) {
+            w.index[v] = Some(w.count);
+            w.low[v] = w.count;
+            w.count += 1;
+            w.stack.push(v);
+            for &t in w.edges[v].iter() {
+                match w.index[t] {
+                    None => {
+                        visit(w, t);
+                        w.low[v] = w.low[v].min(w.low[t]);
+                    }
+                    Some(i) if w.comp[t].is_none() => w.low[v] = w.low[v].min(i),
+                    Some(_) => {}
+                }
+            }
+            if Some(w.low[v]) == w.index[v] {
+                while let Some(t) = w.stack.pop() {
+                    w.comp[t] = Some(w.comps);
+                    if t == v {
+                        break;
                     }
                 }
-                seen
+                w.comps += 1;
+            }
+        }
+        let mut w = Walk { edges: &edges, index: vec![None; n], low: vec![0; n], comp: vec![None; n], stack: Vec::new(), count: 0, comps: 0 };
+        for v in 0..n {
+            if w.index[v].is_none() {
+                visit(&mut w, v);
+            }
+        }
+        // A lambda's group: its component, if it is on a cycle (it names
+        // itself, or another is in its component).
+        (0..n)
+            .map(|a| {
+                let same: Vec<usize> = (0..n).filter(|b| w.comp[*b] == w.comp[a]).collect();
+                if same.len() > 1 || edges[a].contains(&a) { same } else { Vec::new() }
             })
-            .collect();
-        (0..n).map(|a| (0..n).filter(|b| reach[a][*b] && reach[*b][a]).collect()).collect()
+            .collect()
     }
 }

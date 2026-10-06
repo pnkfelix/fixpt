@@ -98,6 +98,21 @@ in the components after them; `k-mentions-token?`, asked of every node
 printed, scans for a token without making strings; and the FX-26 select
 code builds its error messages only for an error.
 
+**Printing a module type was quadratic in its components** (2026-10-06,
+`TODO.md` §34). With `check-types.fx` a module, check grew 1.16 s to
+1.37 s. The cell profile of the files up to it put the most new cells in
+`k-edges-of` (`check-modorder.fx`: a module's recursive groups found by
+reaching from each lambda in turn, lists, cubic in its 241 lambdas); made
+linear (Tarjan's components, in both checkers), it changed no time: a list
+walked is cheap on register code, and cells are work, not time. The words
+allocated were the clue: half again as many, in `k-cat3` and `k-cat4`, and
+`fixpt check` on those files printed one line of 18 K characters, the
+module's type, whose printer appended each component to the rest of the
+line, a copy per component. Now `k-join` gathers its strings' characters
+into one list, in an arena (`letrena`), made a string once, and a
+`moduleof`'s components and a product's or sum's parts are joined by it.
+The same output; check 1.42 s to 1.09 s, below the migration's start.
+
 **A fast path that branched to `ret`; a slow path nothing reached**
 (2026-10-06; the user's reading of `,disassemble-asm u32+`). In the
 native convention a pure operation's fast path ended `b done` over its

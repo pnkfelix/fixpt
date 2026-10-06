@@ -575,9 +575,13 @@
   (k-show-part (subr kbuilds ((productof (1 symbol) (2 int)) k-printing) string)
     (lambda (part path)
       (k-cat5 " (" (symbol->string (extract part 1)) " " (k-show-on (extract part 2) path) ")")))
+  ;; Each one's ` (label type)`, joined once (`k-join`: appending each to the
+  ;; rest was quadratic in a long product's or sum's parts).
   (k-show-parts (subr kbuilds (k-parts k-printing) string)
+    (lambda (ps path) (k-join (k-show-part-list ps path) "")))
+  (k-show-part-list (subr kbuilds (k-parts k-printing) k-strings)
     (lambda (ps path)
-      (if (null? ps) "" (string-append (k-show-part (car ps) path) (k-show-parts (cdr ps) path)))))
+      (if (null? ps) nil (cons (k-show-part (car ps) path) (k-show-part-list (cdr ps) path)))))
   (k-show-desc (subr kbuilds (k-desc k-printing) string)
     (lambda (d p)
       (tagcase d
@@ -660,17 +664,20 @@
         (ty-app (g ds) (k-cat5 "(" (k-show-on g p) " " (k-join (k-show-descs ds p) " ") ")"))
         (ty-lam (bs body)
           (k-cat5 "(dlambda (" (k-join (k-show-binders bs) " ") ") " (k-show-desc body p) ")")))))
-  ;; A module type's components of kind `what`: ` (what name type)` each.
-  ;; A description's name naming it in the components after it.
+  ;; A module type's components of kind `what`: ` (what name type)` each,
+  ;; joined once (`k-join`). A description's name naming it in the
+  ;; components after it.
   (k-show-comps (subr kbuilds (string k-parts k-printing) string)
+    (lambda (what ps p) (k-join (k-show-comp-list what ps p) "")))
+  (k-show-comp-list (subr kbuilds (string k-parts k-printing) k-strings)
     (lambda (what ps p)
       (if (null? ps)
-          ""
+          nil
           (let* ((one (k-cat5 " (" what " " (symbol->string (extract (car ps) 1)) " "))
                  (after (if (string=? what "desc") (k-printing-named p (list (car ps))) p))
                  (own (if (string=? what "desc") (extract (car ps) 1) '||)))
-            (k-cat4 one (k-show-comp (extract (car ps) 2) p own) ")"
-                    (k-show-comps what (cdr ps) after))))))
+            (cons (k-cat3 one (k-show-comp (extract (car ps) 2) p own) ")")
+                  (k-show-comp-list what (cdr ps) after))))))
   ;; A component's type; an effect, a description function of no parameters,
   ;; as the effect. A description shows what it is, not its own name `n` (a
   ;; value's, `||`, no name): a `define-type` alias of it, `(select m n)`, is
