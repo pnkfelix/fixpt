@@ -349,7 +349,19 @@ pub fn repl(backend: Backend) -> i32 {
             }
             Some(e) if !e.trim().is_empty() => {
                 disassembling = true;
-                format!("(disassemble {e})")
+                // A polymorphic value projected first, any description
+                // standing in for each binder: `proj` compiles to nothing,
+                // so the code shown is the same, and it is checked as
+                // written. (Its type not known, the error is the form's.)
+                match session.checker.stand_ins(e.trim()) {
+                    Ok((levels, places)) if !levels.is_empty() => {
+                        let projected = levels.iter().fold(e.trim().to_string(), |x, ins| format!("(proj {x} {})", ins.join(" ")));
+                        println!("; as {projected}: `proj` compiles to nothing");
+                        // A place stood in for is made around it.
+                        places.iter().rev().fold(format!("(disassemble {projected})"), |x, p| format!("(letrena {p} {x})"))
+                    }
+                    _ => format!("(disassemble {e})"),
+                }
             }
             _ => {
                 disassembling = false;

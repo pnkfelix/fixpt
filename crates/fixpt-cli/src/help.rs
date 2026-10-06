@@ -205,7 +205,7 @@ fn overview(h: &dyn Helpful) {
         rows.push((",returns TYPE", "what produces one"));
     }
     if h.dialect() == "FX-26" {
-        rows.push((",disassemble E", "E's cellular code (under --fx26-run cellular)"));
+        rows.push((",disassemble E", "E's cellular code (under --fx26-run cellular); polymorphic, projected first"));
         rows.push((",disassemble-asm E", "the same, and each word's machine code (or its stencils' source)"));
         rows.push((",inliners NAME", "the globals whose register code inlines NAME's calls"));
         rows.push((",list-outdated", "the definitions out of date: using a global since defined again at another type"));

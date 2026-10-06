@@ -460,6 +460,63 @@ impl Checker {
         Ok(Checked { ty, effect, exp: e })
     }
 
+    /// For showing the code of the one expression written `text`, whose
+    /// type may be polymorphic: for each of its `poly`s, outermost first, a
+    /// stand-in for each binder, in order, as `proj` takes them; none if it
+    /// is not polymorphic. `proj` compiles to nothing, so whatever stands
+    /// in, the code is the same: for a type `unit`, an effect `pure`, a
+    /// region `@heap` (one bounded by a binder before it, that one's), a
+    /// place one of the places named second, to be made around the
+    /// expression (`%p1`, …, by `letrena`), a size `0`, a convention the
+    /// program's, a description function one giving its result's. Checked
+    /// in scratch: nothing is kept.
+    pub fn stand_ins(&mut self, text: &str) -> R<(Vec<Vec<String>>, Vec<String>)> {
+        self.scratch(|c| {
+            let mut t = c.check_str(text)?.ty;
+            let mut given: Vec<(DVar, String)> = Vec::new();
+            let (mut levels, mut places) = (Vec::new(), Vec::new());
+            while let Ty::Poly { binders, body } = c.arena.get(c.arena.resolve(t)).clone() {
+                let mut level = Vec::new();
+                for (v, k) in binders {
+                    let s = match (k, c.arena.bound(v)) {
+                        (Kind::Region | Kind::Place, Some(Region::Var(w))) => {
+                            given.iter().find(|(x, _)| *x == w).map_or_else(|| "@heap".to_string(), |(_, s)| s.clone())
+                        }
+                        (Kind::Region | Kind::Place, Some(r)) => c.show_region(r),
+                        (Kind::Place, None) => {
+                            places.push(format!("%p{}", places.len() + 1));
+                            places.last().expect("pushed").clone()
+                        }
+                        _ => c.stand_in(k),
+                    };
+                    given.push((v, s.clone()));
+                    level.push(s);
+                }
+                levels.push(level);
+                t = body;
+            }
+            Ok((levels, places))
+        })
+    }
+
+    /// A description of kind `k` to stand in for any (`stand_ins`).
+    fn stand_in(&self, k: Kind) -> String {
+        match k {
+            Kind::Type | Kind::Data => "unit".into(),
+            Kind::Effect => "pure".into(),
+            Kind::Region | Kind::Place => "@heap".into(),
+            Kind::Size => "0".into(),
+            Kind::Conv => self.show_conv(self.conv_default),
+            Kind::Arrow(_) => match self.arena.arrow_parts(k) {
+                Some((ps, r)) => {
+                    let ps: Vec<String> = ps.iter().enumerate().map(|(i, p)| format!("(a{} {})", i + 1, self.show_kind(*p))).collect();
+                    format!("(dlambda ({}) {})", ps.join(" "), self.stand_in(r))
+                }
+                None => "unit".into(),
+            },
+        }
+    }
+
     /// A type written as text, for comparing against.
     pub fn type_of_str(&mut self, text: &str) -> R<TyId> {
         let forms = self.read(text)?;

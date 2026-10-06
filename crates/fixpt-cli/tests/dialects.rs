@@ -182,6 +182,36 @@ fn the_fx26_repl_shows_cellular_code() {
     }
 }
 
+/// `,disassemble` of a polymorphic value projects it first, any description
+/// standing in for each binder (`proj` compiles to nothing), a place made
+/// for one by `letrena`: no `proj` to write to see `cons`'s code.
+#[test]
+fn the_fx26_repl_disassembles_a_polymorphic_value_projected() {
+    use std::io::Write as _;
+    let mut child = Command::new(FIXPT)
+        .args(["--dialect", "fx26", "--fx26-run", "cellular", "repl"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    let app = "(define app (poly ((p place) (r region p) (e effect) (f (=> (type) type))) \
+               (subr e ((subr e ((f int)) int) (f int)) int)) \
+               (plambda ((p place) (r region p) (e effect) (f (=> (type) type))) (lambda (g x) (g x))))";
+    let input = format!(",disassemble cons\n{app}\n,disassemble app\n");
+    child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
+    let out = child.wait_with_output().expect("finishes");
+    let (out, err) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    for line in [
+        "; as (proj (proj cons @heap) unit unit)",
+        "word cons",
+        "; as (proj app %p1 %p1 pure (dlambda ((a1 type)) unit))",
+        "word app",
+    ] {
+        assert!(out.contains(line), "no `{line}` in:\n{out}\n{err}");
+    }
+}
+
 /// `--calling-convention native`: procedure types are native unless they
 /// say otherwise, and `,native` shows a procedure's code in that convention
 /// and calls it; what it cannot compile yet it says.

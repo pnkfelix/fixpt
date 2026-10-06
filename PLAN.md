@@ -232,8 +232,8 @@ before everything else, known holes before proofs.
   compilers' by a middle phase, `TODO.md` §41) and the three generated
   ones. Found on the way, fixed: a re-exported type printed whole at each
   use, which took check from 0.91 s to 28 s by the first file; types and
-  values named apart in modules. Open: `check-types.fx` as a module, check
-  1.16 → 1.37 s, to profile.
+  values named apart in modules; printing a module's type quadratic in
+  its components (check 1.42 → 1.09 s).
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:
   `editors/emacs/fx26-mode.el` (highlighting, the repository's
   indentation, `run-fx26` over `fixpt --emacs repl` with `,at` placing
