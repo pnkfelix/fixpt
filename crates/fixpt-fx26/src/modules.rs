@@ -134,11 +134,22 @@ impl Checker {
             }
         }
         let groups = self.module_groups(&lambdas);
+        // Whether each group may not end, and why: found once, for its first
+        // member (the group being the same for each of its members).
+        let mut ends: Vec<Option<Result<(), String>>> = vec![None; lambdas.len()];
         for (k, (n, t, init, i)) in lambdas.iter().enumerate() {
             let group: Vec<(Sym, TyId, ExpId)> = groups[k].iter().map(|g| (lambdas[*g].0, lambdas[*g].1, lambdas[*g].2)).collect();
             let rdepth = self.recursive.len();
-            if !group.is_empty() {
-                self.note_termination(&group);
+            if let Some(&first) = groups[k].first() {
+                if ends[first].is_none() {
+                    ends[first] = Some(self.termination(&group));
+                }
+                if let Some(Err(why)) = &ends[first] {
+                    for (m, mt, _) in &group {
+                        self.recursive.push((*m, *mt));
+                        self.spin_why.push(((*m, *mt), why.clone()));
+                    }
+                }
             }
             let r = match items[*i] {
                 ModItem::Rec(_) => self.check(*init, *t).map_err(|err| self.declared_error(*n, *t, *init, err)),

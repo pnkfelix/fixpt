@@ -70,20 +70,39 @@
           (begin (k-bind n (if (extract (car ls) 5) t (k-name-nat n t)))
                  (k-note-known n 0)
                  (k-mod-bind (cdr bs) (cdr ls)))))))
+;; Why each group found so far may not end ("" if it ends), by its first
+;; member's name.
+(define-type k-ends (listof (productof (1 symbol) (2 string)) acyclic))
+(define k-ends-of (subr (read @globals) (k-ends symbol) k-ends)
+  (lambda (ws n)
+    (cond ((null? ws) nil)
+          ((symbol=? (extract (car ws) 1) n) ws)
+          (else (k-ends-of (cdr ws) n)))))
+;; `ws` with why `group` may not end, found once for the group (the same
+;; for each of its members).
+(define k-ends-with (subr (maxeff kstate spin) (k-ends k-letrec-bs) k-ends)
+  (lambda (ws group)
+    (if (or (null? group) (not (null? (k-ends-of ws (extract (car group) 1)))))
+        ws
+        (the k-ends (cons (product (1 (extract (car group) 1)) (2 (k-termination group))) ws)))))
+;; Why `group`, found in `ws`, may not end.
+(define k-group-end (subr (read @globals) (k-ends k-letrec-bs) string)
+  (lambda (ws group) (extract (car (k-ends-of ws (extract (car group) 1))) 2)))
 ;; Each lambda of `bs` checked against its type, in the scope of every
 ;; item, with its recursive group (of `gs`, `k-mod-groups`) checked to end,
-;; as a `define-rec`'s members are.
-(define k-mod-check-lambdas (subr (maxeff checks spin) (k-letrec-bs k-mlams k-groups) k-eff)
-  (lambda (bs ls gs)
+;; as a `define-rec`'s members are; `ws` why the groups so far may not.
+(define k-mod-check-lambdas (subr (maxeff checks spin) (k-letrec-bs k-mlams k-groups k-ends) k-eff)
+  (lambda (bs ls gs ws)
     (if (null? bs)
         nil
         (let* ((n (extract (car bs) 1)) (t (extract (car bs) 2)) (init (extract (car bs) 3))
                (group (car gs))
+               (whys (k-ends-with ws group))
                (rsaved (get k-recursive))
-               (noted (if (null? group) #u (k-note-ending group (k-termination group))))
+               (noted (if (null? group) #u (k-note-ending group (k-group-end whys group))))
                (e (if (extract (car ls) 5) (k-check-declared n t init) (k-check init t)))
                (restored (set k-recursive rsaved)))
-          (k-union e (k-mod-check-lambdas (cdr bs) (cdr ls) (cdr gs)))))))
+          (k-union e (k-mod-check-lambdas (cdr bs) (cdr ls) (cdr gs) whys))))))
 ;; The type part `n` of `ps` is, or -1.
 (define k-part-of (subr (maxeff kreads spin) (k-parts symbol) int)
   (lambda (ps n)
@@ -161,7 +180,7 @@
            (bound (k-mod-bind bs ls))
            (made (k-module-items items a b (k-made-of nil nil nil nil)))
            (es (k-mod-edges ls ls))
-           (le (k-mod-check-lambdas bs ls (k-mod-groups (k-mod-reaches es es) bs bs)))
+           (le (k-mod-check-lambdas bs ls (k-mod-groups (k-mod-reaches es es) bs bs) nil))
            (unbound (k-unbind-to saved))
            (vs (k-parts-reversed (k-mod-vals items (extract made 3) bs nil) nil))
            ;; A component's module, bound inside, has abstract types no one
