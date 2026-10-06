@@ -84,10 +84,11 @@ struct This {
 type Env = Vec<(Sym, Loc)>;
 
 /// A word whose register code, its twin, is made once its form's words all
-/// are (step 4): a lambda's, with what its stack code knew and made; or a
-/// standard operation's as a value.
+/// are (step 4): a lambda's, with what its stack code knew and made (and,
+/// a specialized copy's, what it is specialized at, where in the plan, and
+/// the globals its procedure saw); or a standard operation's as a value.
 enum Twin {
-    Lambda { params: Vec<Sym>, body: ExpId, inner: Env, this: Option<This>, own: Option<(Sym, Value)>, name: String, w: Value, made: Vec<Made> },
+    Lambda { params: Vec<Sym>, body: ExpId, inner: Env, this: Option<This>, own: Option<(Sym, Value)>, name: String, w: Value, made: Vec<Made>, copy: Option<(Spec, procs::Step, usize)> },
     Standard { w: Value, name: String, op: String, n: usize },
 }
 
@@ -179,6 +180,9 @@ pub struct Compiler<'a> {
     spec_copies: HashMap<(u64, u32, u32, Vec<Sym>, Option<usize>), Value>,
     /// While a procedure specialized at a lambda is compiled: which.
     spec: Option<Spec>,
+    /// Each standard operation's word as a value, made once (step 4): the
+    /// stack code's, which register code uses too.
+    standard_words: HashMap<String, Value>,
     /// The words of the form being compiled whose twins are to be made,
     /// in the order their stack code was finished (step 4).
     twins: Vec<Twin>,
@@ -293,6 +297,7 @@ impl<'a> Compiler<'a> {
             plan_path: Vec::new(),
             spec: None,
             twins: Vec::new(),
+            standard_words: HashMap::new(),
             word_name: None,
             scope_name: None,
             bind_name: None,
@@ -924,7 +929,7 @@ impl<'a> Compiler<'a> {
         let span = self.c.arena.span_of(body);
         let own = own.filter(|f| !params.contains(f));
         let made = Made { span: (span.start, span.end), params: params.to_vec(), own, word: w, fv: fv.clone() };
-        if self.twin_depth == 0 {
+        if self.spec.is_none() {
             self.form_made.push(made.clone());
         }
         self.made.push(made);
@@ -1020,14 +1025,7 @@ impl<'a> Compiler<'a> {
         });
         if self.registers && in_range != Some(false) {
             let made = std::mem::take(&mut self.made);
-            let twin = Twin::Lambda { params: params.to_vec(), body, inner, this, own: defining.map(|n| (n, w)), name, w, made };
-            // A form's own words' twins after its words; a copy's (made in
-            // register code) at once, until the plan makes copies (4c).
-            if self.twin_depth == 0 {
-                self.twins.push(twin);
-            } else {
-                self.make_twin(twin)?;
-            }
+            self.twins.push(Twin::Lambda { params: params.to_vec(), body, inner, this, own: defining.map(|n| (n, w)), name, w, made, copy: None });
         }
         Ok((w, fv))
     }
@@ -1570,8 +1568,30 @@ impl<'a> Compiler<'a> {
     /// closure over a procedure of one list that copies it, as `datum-list`
     /// does (and its register code is `datum-list`'s). A copy, not the list
     /// itself: `apply` gives a list at `acyclic` as it is (F11), and `list`
-    /// may give it at any region, one that can be written.
+    /// may give it at any region, one that can be written. Its word made
+    /// once, the first time (`standard_word`).
     fn standard_value(&mut self, name: &str, code: &mut Vec<Item>) -> R<()> {
+        let w = self.standard_word(name)?;
+        self.op1(code, "closure", w);
+        code.push(Item::Cell(Value::fixnum(0)));
+        if name == "list" {
+            return self.prim(code, "%fx26-vlambda", 1);
+        }
+        Ok(())
+    }
+
+    /// The word of standard operation `name` as a value: made, with its
+    /// twin to be, unless it is made already.
+    fn standard_word(&mut self, name: &str) -> R<Value> {
+        if let Some(w) = self.standard_words.get(name) {
+            return Ok(*w);
+        }
+        let w = self.standard_word_made(name)?;
+        self.standard_words.insert(name.to_string(), w);
+        Ok(w)
+    }
+
+    fn standard_word_made(&mut self, name: &str) -> R<Value> {
         if name == "list" {
             let mut body = Vec::new();
             self.op1(&mut body, "slot", Value::fixnum(0));
@@ -1579,9 +1599,7 @@ impl<'a> Compiler<'a> {
             self.op(&mut body, "return");
             let w = self.assemble(&body, name)?;
             self.register_twin(w, name, "datum-list", 1)?;
-            self.op1(code, "closure", w);
-            code.push(Item::Cell(Value::fixnum(0)));
-            return self.prim(code, "%fx26-vlambda", 1);
+            return Ok(w);
         }
         let n = Self::arity(name).ok_or_else(|| format!("not yet compiled as a value: {name}"))?;
         let mut body = Vec::new();
@@ -1599,9 +1617,7 @@ impl<'a> Compiler<'a> {
         self.op(&mut body, "return");
         let w = self.assemble(&body, name)?;
         self.register_twin(w, name, name, n)?;
-        self.op1(code, "closure", w);
-        code.push(Item::Cell(Value::fixnum(0)));
-        Ok(())
+        Ok(w)
     }
 
     /// Register code for word `w`, named `name`, as standard operation `op`
@@ -1609,22 +1625,72 @@ impl<'a> Compiler<'a> {
     /// from: made with its form's other twins.
     fn register_twin(&mut self, w: Value, name: &str, op: &str, n: usize) -> R<()> {
         if self.registers {
-            let twin = Twin::Standard { w, name: name.to_string(), op: op.to_string(), n };
-            if self.twin_depth == 0 {
-                self.twins.push(twin);
-            } else {
-                self.make_twin(twin)?;
-            }
+            self.twins.push(Twin::Standard { w, name: name.to_string(), op: op.to_string(), n });
         }
         Ok(())
     }
 
-    /// The twins of the form's words, in order (step 4): register code, a
-    /// phase after the stack code.
+    /// The form's specialized copies, as its plan says, after its words;
+    /// then the twins of all of them, in order (step 4): register code, a
+    /// phase after the stack code, which makes no word.
     fn form_twins(&mut self) -> R<()> {
+        if self.registers
+            && let Some(plan) = &self.plan
+        {
+            let copies: Vec<_> = plan.copy_order.iter().filter_map(|key| Some((key.0, key.1, plan.copies.get(key)?.made_at.clone()?))).collect();
+            for (k, at, made_at) in copies {
+                self.make_copy(k, at, made_at)?;
+            }
+        }
         for twin in std::mem::take(&mut self.twins) {
             self.make_twin(twin)?;
         }
+        Ok(())
+    }
+
+    /// The copy of `specials[k]` made for the lambda at `at`, unless it is
+    /// made already (`spec_copies`): its procedure's body compiled again, in
+    /// the globals it saw, and named for the procedure and the lambda; its
+    /// twin, made with the others, is the specialized one.
+    fn make_copy(&mut self, k: usize, at: (u32, u32, u32), c: procs::CopyAt) -> R<()> {
+        let Exp::Lambda { params, body } = self.c.arena.exp_at(c.lam).clone() else { return Ok(()) };
+        let sp = &self.specials[k];
+        let span = self.c.arena.span_of(body);
+        let key = (sp.word.raw(), span.start, span.end, c.fv.clone(), c.genv);
+        if self.spec_copies.contains_key(&key) {
+            return Ok(());
+        }
+        let spec = Spec {
+            name: sp.name,
+            cell: c.cell,
+            word: sp.word,
+            param: sp.param,
+            param_name: sp.params[sp.param],
+            n: sp.params.len(),
+            arity: sp.arity,
+            lam_params: params.iter().map(|(n, _)| *n).collect(),
+            lam_body: body,
+            lam_fv: c.fv,
+            lam_genv: c.genv,
+        };
+        let (gparams, gbody, genv_len) = (sp.params.clone(), sp.body, sp.genv_len);
+        let at_char = match self.char_at.get(span.start as usize) {
+            Some(at) if span.file.0 == 0 => at.to_string(),
+            _ => format!("{}:{}", span.file.0, span.start),
+        };
+        self.word_name = Some(format!("{}@lambda@{at_char}", self.c.interner.name(sp.name)));
+        let outer = (self.spec.replace(spec.clone()), self.genv_limit.replace(genv_len));
+        let twins = self.twins.len();
+        let made = self.lambda_word(&gparams, gbody, &Vec::new(), None);
+        (self.spec, self.genv_limit) = outer;
+        let (copy, _) = made?;
+        // Its body makes no lambda (`inline_room`): its own twin is the last.
+        if self.twins.len() == twins + 1
+            && let Some(Twin::Lambda { copy, .. }) = self.twins.last_mut()
+        {
+            *copy = Some((spec, procs::Step::Copy(k, at), genv_len));
+        }
+        self.spec_copies.insert(key, copy);
         Ok(())
     }
 
@@ -1638,19 +1704,29 @@ impl<'a> Compiler<'a> {
                     self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
                 }
             }
-            Twin::Lambda { params, body, inner, this, own, name, w, made } => {
+            Twin::Lambda { params, body, inner, this, own, name, w, made, copy } => {
                 self.declined = None;
                 let outer_reuse = std::mem::replace(&mut self.reuse, made);
-                // A planned lambda, or a copy made where the plan's calls are.
-                let planned = if self.twin_depth == 0 {
-                    self.planned_fv(&params, body).is_some()
-                } else {
-                    self.r_in_plan && matches!(self.plan_path.last(), Some(procs::Step::Copy(..)))
-                };
+                // A planned lambda, or a copy: the plan's.
+                let planned = copy.is_some() || self.planned_fv(&params, body).is_some();
                 let in_plan = std::mem::replace(&mut self.r_in_plan, planned);
+                // A copy's in its own context: what it is specialized at, and
+                // the globals its procedure saw.
+                let copying = copy.is_some();
+                let outer = match copy {
+                    Some((spec, step, genv_len)) => {
+                        self.plan_path.push(step);
+                        (self.spec.replace(spec), self.genv_limit.replace(genv_len))
+                    }
+                    None => (self.spec.take(), self.genv_limit.take()),
+                };
                 self.twin_depth += 1;
                 let cells = self.register_code(&params, body, &inner, this, own);
                 self.twin_depth -= 1;
+                (self.spec, self.genv_limit) = outer;
+                if copying {
+                    self.plan_path.pop();
+                }
                 self.r_in_plan = in_plan;
                 self.reuse = outer_reuse;
                 match cells {

@@ -436,30 +436,35 @@
     (lambda (g sp cell lam args env te tail)
       (tagcase lam
         (e-lambda (lps lbody la lb)
-          (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
-                 (spec (r-spec-of sp cell lps lbody te))
-                 ;; Named for the procedure and the lambda.
-                 (made (r-spec-word sp spec lbody))
-                 (s (r-slot g))
-                 (n (c-count-exps args)))
-            (begin
-              (r-op2 g rop-lambda (wcell-word (extract made 1)) (wcell-int 0))
-              (r-opn g rop-setstk s)
-              (r-exp-args-into g args env te)
-              (let* ((call (r-new-label g)) (end (r-new-label g)))
-                (if (r-assume cell (extract sp 2))
-                    (begin (r-opn g rop-stack s) (r-invoke g n tail))
-                    (begin
-                      (r-guard g cell (extract sp 2) call)
-                      (r-opn g rop-stack s)
-                      (r-invoke g n tail)
-                      (if tail #u (r-emit g (r-branch #f end)))
-                      (r-emit g (r-label call))
-                      (r-op1 g rop-global (wcell-global cell))
-                      (r-invoke g n tail)
-                      (r-emit g (r-label end)))))
-              (r-restore g regs slots))))
+          ;; Made with the form's words, as the plan says (`c-make-copy`).
+          (let ((found (r-spec-word sp (r-spec-of sp cell lps lbody te) lbody)))
+            (if (null? found)
+                (r-decline)
+                (r-specialized-call g sp cell (extract (car found) 4) args env te tail))))
         (else y (r-decline)))))
+  ;; The same, with the copy's word `copy`.
+  (r-specialized-call (subr rcompiles (rgen c-special wglobal tword exps renv cenv bool) unit)
+    (lambda (g sp cell copy args env te tail)
+      (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
+             (s (r-slot g))
+             (n (c-count-exps args)))
+        (begin
+          (r-op2 g rop-lambda (wcell-word copy) (wcell-int 0))
+          (r-opn g rop-setstk s)
+          (r-exp-args-into g args env te)
+          (let* ((call (r-new-label g)) (end (r-new-label g)))
+            (if (r-assume cell (extract sp 2))
+                (begin (r-opn g rop-stack s) (r-invoke g n tail))
+                (begin
+                  (r-guard g cell (extract sp 2) call)
+                  (r-opn g rop-stack s)
+                  (r-invoke g n tail)
+                  (if tail #u (r-emit g (r-branch #f end)))
+                  (r-emit g (r-label call))
+                  (r-op1 g rop-global (wcell-global cell))
+                  (r-invoke g n tail)
+                  (r-emit g (r-label end)))))
+          (r-restore g regs slots)))))
   ;; In a procedure specialized at a lambda, a call of the parameter the
   ;; lambda is: the lambda's body, its parameters bound to the arguments and
   ;; the values its closure captured to those fields of the parameter's

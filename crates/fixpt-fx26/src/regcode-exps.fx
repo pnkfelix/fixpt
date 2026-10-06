@@ -353,32 +353,21 @@
           ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
            (the (listof c-inline acyclic) (cons (car xs) nil)))
           (else (r-inline-named (cdr xs) n k)))))
-;; The item made second, of those made (newest first, at least two).
-(define* r-next-to-oldest (subr (maxeff (read @k) spin) (items) item)
-  (lambda (xs) (if (null? (cdr (cdr xs))) (car xs) (r-next-to-oldest (cdr xs)))))
 ;; A standard operation as a value, into RESULT: its closure, of the word
-;; the stack code makes for it (`c-standard-value`), and that word's
+;; the stack code made for it (`c-standard-word`), and that word's
 ;; register code. A leaf makes it only in tail position. `list`'s, a
 ;; `vsubr`, is then given to `%fx26-vlambda`, a call-out: never in a leaf.
 (define r-standard-value (subr rcompiles (rgen string bool) unit)
   (lambda (g name tail)
-    (if (and (extract g leaf) (or (not tail) (string=? name "list")))
-        (r-decline)
-        (let ((made (the code (new nil))))
+    (let ((found (c-standard-word-of name)))
+      (if (or (null? found) (and (extract g leaf) (or (not tail) (string=? name "list"))))
+          (r-decline)
           (begin
-            (c-standard-value name made)
-            (let ((items (get made)))
-              (if (or (null? items) (null? (cdr items)))
-                  (r-decline)
-                  (tagcase (r-next-to-oldest items)
-                    (i-cell (w)
-                      (begin
-                        (r-op2 g rop-lambda w (wcell-int 0))
-                        (if (string=? name "list")
-                            (begin (r-opn g rop-setreg 1)
-                                   (r-opnn g rop-prim (runtime-primitive "%fx26-vlambda") 1))
-                            #u)))
-                    (else y (r-decline))))))))))
+            (r-op2 g rop-lambda (wcell-word (car found)) (wcell-int 0))
+            (if (string=? name "list")
+                (begin (r-opn g rop-setreg 1)
+                       (r-opnn g rop-prim (runtime-primitive "%fx26-vlambda") 1))
+                #u))))))
 ;; Whether `n`, not bound in `e`, is a standard operation as a value: a
 ;; closure made.
 (define r-standard-value? (subr rcompiles (cenv symbol) bool)

@@ -439,7 +439,11 @@
 (define-type c-join-answer (productof (1 int) (2 syms) (3 (listof bool acyclic))))
 
 (define c-join-memo (ref (table int c-join-answer @k) @k) (new (make-table c-int-hash c-int=?)))
-;; The specialized copies made (`r-spec-word`), by the lambda's span
+;; Each standard operation's word as a value, made once (step 4): the
+;; stack code's, which register code uses too.
+(define-type c-standard-word (productof (1 string) (2 tword)))
+(define c-standard-words (ref (listof c-standard-word @k) @k) (new nil))
+;; The specialized copies made (`c-make-copy`), by the lambda's span
 ;; (`c-span-key`): each the procedure's word, what the lambda captures, the
 ;; globals it sees, and the copy's word and what that captures.
 (define-type c-spec-copy (productof (1 tword) (2 syms) (3 int) (4 tword) (5 syms)))
@@ -494,6 +498,7 @@
       (set c-summary-table (make-table c-int-hash c-int=?))
       (set c-join-memo (make-table c-int-hash c-int=?))
       (set c-spec-made (make-table c-int-hash c-int=?))
+      (set c-standard-words nil)
       (set c-lifts (make-table c-int-hash c-int=?))
       (set c-lift-count 0)
       (set c-lifted (make-table c-int-hash c-int=?))
@@ -908,6 +913,8 @@
 (define-type c-spec-copy (select compile-module c-spec-copy))
 (define-type c-spec-copies (select compile-module c-spec-copies))
 (define c-spec-made (with compile-module c-spec-made))
+(define-type c-standard-word (select compile-module c-standard-word))
+(define c-standard-words (with compile-module c-standard-words))
 (define c-summary-at (with compile-module c-summary-at))
 (define c-set-facts! (with compile-module c-set-facts!))
 (define c-member? (with compile-module c-member?))

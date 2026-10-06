@@ -727,11 +727,10 @@ impl Compiler<'_> {
                     // register code. A leaf makes it only in tail position.
                     None if g.leaf && !tail => return self.decline("a standard operation as a value, in a leaf"),
                     None => {
-                        let mut made = Vec::new();
-                        if self.standard_value(&self.name(n).to_string(), &mut made).is_err() {
-                            return self.decline("a standard operation as a value");
-                        }
-                        let Some(super::Item::Cell(w)) = made.get(1).cloned() else { return None };
+                        // The stack code's word (`standard_word`).
+                        let Some(w) = self.standard_words.get(self.name(n)).copied() else {
+                            return self.decline("a standard operation as a value the stack code did not make");
+                        };
                         g.op("lambda", &[w, Gen::n(0)]);
                         // `list`'s, a `vsubr`: that closure given to
                         // `%fx26-vlambda`.
@@ -1572,46 +1571,13 @@ impl Compiler<'_> {
         let (regs, slots) = (g.next_reg, g.next_slot);
         let Exp::Lambda { params, body } = self.c.arena.exp_at(lam).clone() else { return None };
         let lam_params: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-        let sp = &self.specials[k];
-        let spec = super::Spec {
-            name: sp.name,
-            cell,
-            word: sp.word,
-            param: sp.param,
-            param_name: sp.params[sp.param],
-            n: sp.params.len(),
-            arity: sp.arity,
-            lam_fv: self.captured(&lam_params, body, te),
-            lam_params,
-            lam_body: body,
-            lam_genv: self.genv_limit,
-        };
-        let (params, gbody, genv_len) = (sp.params.clone(), sp.body, sp.genv_len);
-        // A copy is made once for the procedure, the lambda, what it
-        // captures and the globals it sees, however many times this body's
-        // register code is made (as `r-spec-word`'s callers).
+        // The copy for the procedure, the lambda, what it captures and the
+        // globals it sees, made with the form's words as the plan says
+        // (`make_copy`).
         let span = self.c.arena.span_of(body);
-        let key = (sp.word.raw(), span.start, span.end, spec.lam_fv.clone(), spec.lam_genv);
-        let copy = match self.spec_copies.get(&key) {
-            Some(copy) => *copy,
-            None => {
-                // The copy compiled apart: what this body assumes is not its.
-                let outer = (self.spec.replace(spec), self.genv_limit.replace(genv_len), self.declined.take(), self.assume.take());
-                // Named for the procedure and the lambda.
-                let at = match self.char_at.get(span.start as usize) {
-                    Some(at) if span.file.0 == 0 => at.to_string(),
-                    _ => format!("{}:{}", span.file.0, span.start),
-                };
-                self.word_name = Some(format!("{}@lambda@{at}", self.name(self.specials[k].name)));
-                let s = self.c.arena.span_of(lam);
-                self.plan_path.push(super::procs::Step::Copy(k, (s.file.0, s.start, s.end)));
-                let made = self.lambda_word(&params, gbody, &Vec::new(), None);
-                self.plan_path.pop();
-                (self.spec, self.genv_limit, self.declined, self.assume) = outer;
-                let (copy, _) = made.ok()?;
-                self.spec_copies.insert(key, copy);
-                copy
-            }
+        let key = (self.specials[k].word.raw(), span.start, span.end, self.captured(&lam_params, body, te), self.genv_limit);
+        let Some(copy) = self.spec_copies.get(&key).copied() else {
+            return self.decline("a copy the plan did not make");
         };
         let s = g.slot();
         g.op("lambda", &[copy, Gen::n(0)]);

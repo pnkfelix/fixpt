@@ -58,15 +58,6 @@
           ((symbol=? (extract (car xs) 1) n) (c-drop-special (cdr xs) n))
           (else (the c-specializables (cons (car xs) (c-drop-special (cdr xs) n)))))))
 
-;; A procedure being specialized at a lambda: its global's name, cell and
-;; word; the parameter's place and name; how many parameters; the lambda's
-;; arity, parameters and body, the names its closure captures in order, and
-;; the globals it sees.
-(define-type c-spec
-  (productof (1 symbol) (2 wglobal) (3 tword) (4 int) (5 symbol) (6 int) (7 int)
-             (8 c-params) (9 exp) (10 syms) (11 int)))
-
-(define c-spec-now (ref (listof c-spec @k) @k) (new nil))
 
 ;; The `k`th of `es`.
 (define c-nth (subr (read @globals) (exps int) exp)
@@ -142,15 +133,18 @@
 ;; lambda's body is: each one's context, planned as `r-specialize` compiles
 ;; it; the next, the lambda's body in it, as `r-spec-lambda` inlines it.
 (define c-plan-copies (ref (table int c-inlined-at @k) @k) (new (make-table c-int-hash c-int=?)))
+;; The form's copies, last first, each with what it is made for (step 4):
+;; the procedure, the lambda, the procedure's global, the names the
+;; lambda's closure captures, the globals it sees, and the copy's context.
+(define-type c-copy-at (productof (1 c-special) (2 exp) (3 wglobal) (4 syms) (5 int) (6 int)))
+(define c-plan-copy-order (ref (listof c-copy-at @k) @k) (new nil))
 (define c-plan-contexts (ref int @k) (new 1))
 (define c-no-calls (ref c-calls-at @k) (new (make-table c-int-hash c-int=?)))
 ;; While the plan is made: the context it is in, and the names whose bodies
-;; it is inlining on the way there. While register code is made: the
-;; contexts of the bodies it is inlining, innermost first (-1 where the
-;; plan has none).
+;; it is inlining on the way there. (While register code is made: the
+;; contexts it is in, `c-r-plan-ctx`.)
 (define c-plan-now (ref int @k) (new 0))
 (define c-plan-inlining (ref syms @k) (new nil))
-(define c-r-plan-ctx (ref (listof int @k) @k) (new nil))
 ;; The context `xs` lists for `n` and `k`, or -1.
 (define c-plan-find (subr c-walks (c-inlined-at symbol int) int)
   (lambda (xs n k)
@@ -308,22 +302,26 @@
                     (if (or (null? inl) (>= (c-plan-child (get c-plan-now) n k) 0))
                         #u
                         (p-inlined (car inl) k))
-                    (if (null? spl) #u (p-copy-once (car spl) n e)))))))
+                    (if (null? spl) #u (p-copy-once (car spl) n (car l) e)))))))
         (else y #u))))
-  ;; Call `s`'s copy, of `n`, planned unless it is in this context.
-  (p-copy-once (subr (maxeff compiles spin) (c-spec-call symbol cenv) unit)
-    (lambda (s n e)
+  ;; Call `s`'s copy, of `n`, at global `l`, planned unless it is in this
+  ;; context.
+  (p-copy-once (subr (maxeff compiles spin) (c-spec-call symbol loc cenv) unit)
+    (lambda (s n l e)
       (if (>= (c-plan-copy (get c-plan-now) n (c-lambda-key (extract s 2))) 0)
           #u
-          (p-copy (extract s 1) (extract s 2) e))))
+          (tagcase l
+            (at-global (cell) (p-copy (extract s 1) (extract s 2) cell e))
+            (else y #u)))))
   ;; The copy of `sp` made for lambda `lam`, in `e`, planned as
   ;; `r-specialize` compiles it, in a context of its own: the procedure's
   ;; body, its parameters local, in the globals it saw; then, in the next
   ;; context, the lambda's body, its parameters and what its closure
   ;; captures local, in the globals it sees here. Neither makes a closure
   ;; (`c-inline-room`), nor so has a lambda to specialize at.
-  (p-copy (subr (maxeff compiles spin) (c-special exp cenv) unit)
-    (lambda (sp lam e)
+  ;; In the form's own context, it is noted to be made (`c-form-copies`).
+  (p-copy (subr (maxeff compiles spin) (c-special exp wglobal cenv) unit)
+    (lambda (sp lam cell e)
       (tagcase lam
         (e-lambda (lps lbody la lb)
           (let ((c (get c-plan-contexts)) (outer (get c-plan-now))
@@ -334,6 +332,11 @@
               (table-set! (get c-plan-copies) outer
                           (cons (product (1 (extract sp 1)) (2 (c-lambda-key lam)) (3 c))
                                 (table-ref (get c-plan-copies) outer (the c-inlined-at nil))))
+              (if (= outer 0)
+                  (set c-plan-copy-order
+                       (cons (product (1 sp) (2 lam) (3 cell) (4 fv) (5 lam-genv) (6 c))
+                             (get c-plan-copy-order)))
+                  #u)
               (set c-plan-now c)
               (set c-genv (extract sp 5))
               (p-exp (extract sp 4) (p-slots (c-bind-params (extract sp 3) nil) (the cenv nil)) #f)
@@ -475,6 +478,7 @@
              (set c-plan-calls (make-table c-int-hash c-int=?))
              (set c-plan-inlined (make-table c-int-hash c-int=?))
              (set c-plan-copies (make-table c-int-hash c-int=?))
+             (set c-plan-copy-order nil)
              (set c-plan-contexts 1)
              (set c-plan-now 0)
              (set c-plan-inlining nil)
@@ -487,9 +491,85 @@
              (set c-twin-depth 0)
              (p-exp x (the cenv nil) #f)
              (set c-lift-count count)))))
+;; The `k`th of parameters `ps`' names.
+(define p-nth-param (subr (read @globals) (c-params int) symbol)
+  (lambda (ps k) (if (= k 0) (extract (car ps) 1) (p-nth-param (cdr ps) (- k 1)))))
+;; The one of `cs` made of procedure word `w` for a lambda capturing `fv` in
+;; globals `genv`, in a list; none if none was.
+(define c-spec-copy-find (subr c-walks (c-spec-copies tword syms int) c-spec-copies)
+  (lambda (cs w fv genv)
+    (cond ((null? cs) nil)
+          ((let ((c (car cs)))
+             (and (eq? (extract c 1) w) (k-syms=? (extract c 2) fv) (= (extract c 3) genv)))
+           (the c-spec-copies (cons (car cs) nil)))
+          (else (c-spec-copy-find (cdr cs) w fv genv)))))
+;; The copy `c` says, unless it is made already (`c-spec-made`): its
+;; procedure's body compiled again, in the globals it saw, and named for the
+;; procedure and the lambda; its twin, made with the others, is the
+;; specialized one, in the copy's context (step 4).
+(define c-make-copy (subr (maxeff compiles spin) (c-copy-at) unit)
+  (lambda (c)
+    (let ((sp (extract c 1)))
+      (tagcase (extract c 2)
+        (e-lambda (lps lbody la lb)
+          (let* ((key (c-span-key (exp-start lbody) (exp-end lbody)))
+                 (cs (table-ref (get c-spec-made) key (the c-spec-copies nil))))
+            (if (null? (c-spec-copy-find cs (extract sp 2) (extract c 4) (extract c 5)))
+                (c-make-copy-of c sp lps lbody key cs)
+                #u)))
+        (else y #u)))))
+(define c-make-copy-of
+  (subr (maxeff compiles spin) (c-copy-at c-special c-params exp int c-spec-copies) unit)
+  (lambda (c sp lps lbody key cs)
+    (let ((spec (the c-spec
+                  (product (1 (extract sp 1)) (2 (extract c 3)) (3 (extract sp 2))
+                           (4 (extract sp 6)) (5 (p-nth-param (extract sp 3) (extract sp 6)))
+                           (6 (c-count-params (extract sp 3))) (7 (extract sp 7))
+                           (8 lps) (9 lbody) (10 (extract c 4)) (11 (extract c 5)))))
+          (outer-spec (get c-spec-now)) (outer-genv (get c-genv))
+          (outer-made (get c-form-made)) (twins (get c-twins)))
+      (begin
+        (set c-spec-now (the (listof c-spec @k) (cons spec nil)))
+        (set c-genv (extract sp 5))
+        (set c-twins nil)
+        (set c-word-name
+             (the (listof string @k)
+               (cons (string-append (symbol->string (extract sp 1))
+                                    (string-append "@lambda@" (c-place-name (exp-start lbody))))
+                     nil)))
+        (let ((made (c-lambda-word (extract sp 3) (extract sp 4) (the cenv nil) (the syms nil))))
+          (begin
+            (set c-spec-now outer-spec) (set c-genv outer-genv) (set c-form-made outer-made)
+            ;; Its body makes no lambda (`c-inline-room`): its own twin, if
+            ;; any, is the one.
+            (set c-twins
+                 (if (null? (get c-twins))
+                     twins
+                     (cons (c-copy-twin (car (get c-twins)) spec (extract c 6) (extract sp 5))
+                           twins)))
+            (table-set! (get c-spec-made) key
+                        (cons (product (1 (extract sp 2)) (2 (extract c 4)) (3 (extract c 5))
+                                       (4 (extract made 1)) (5 (extract made 2)))
+                              cs))))))))
+;; Each of `cs`, last first, made in order.
+(define c-make-copies (subr (maxeff compiles spin) ((listof c-copy-at @k)) unit)
+  (lambda (cs) (if (null? cs) #u (begin (c-make-copies (cdr cs)) (c-make-copy (car cs))))))
+;; The form's specialized copies, as its plan says, after its words; then
+;; the twins of all of them, in order (step 4): register code, a phase after
+;; the stack code, which makes no word. (The standard operations' after the
+;; lambdas': no register code depends on another's.)
+(define c-form-twins (subr (maxeff compiles spin) () unit)
+  (lambda ()
+    (begin
+      (if (get c-registers) (c-make-copies (get c-plan-copy-order)) #u)
+      (let ((ts (get c-twins)) (ss (get c-standard-twins)))
+        (begin (set c-twins nil) (set c-standard-twins nil)
+               (c-make-twins ts) (c-make-standard-twins ss))))))
 ))
 
 (define c-plan-top (with compile-plan-module c-plan-top))
+(define c-form-twins (with compile-plan-module c-form-twins))
+(define c-spec-copy-find (with compile-plan-module c-spec-copy-find))
 (define c-inline-limit (with compile-plan-module c-inline-limit))
 (define c-inlines (with compile-plan-module c-inlines))
 (define c-inlining (with compile-plan-module c-inlining))
@@ -499,15 +579,12 @@
 (define-type c-specializables (select compile-plan-module c-specializables))
 (define c-specials (with compile-plan-module c-specials))
 (define c-drop-special (with compile-plan-module c-drop-special))
-(define-type c-spec (select compile-plan-module c-spec))
-(define c-spec-now (with compile-plan-module c-spec-now))
 (define c-nth (with compile-plan-module c-nth))
 (define c-inline-room (with compile-plan-module c-inline-room))
 (define-type c-spec-call (select compile-plan-module c-spec-call))
 (define-type c-spec-calls (select compile-plan-module c-spec-calls))
 (define-type c-called (select compile-plan-module c-called))
 (define c-planned-call (with compile-plan-module c-planned-call))
-(define c-r-plan-ctx (with compile-plan-module c-r-plan-ctx))
 (define c-plan-child (with compile-plan-module c-plan-child))
 (define c-plan-copy (with compile-plan-module c-plan-copy))
 (define c-lambda-key (with compile-plan-module c-lambda-key))

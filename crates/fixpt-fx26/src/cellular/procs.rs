@@ -47,9 +47,25 @@ pub(crate) struct Plan {
     /// and where the lambda is: each planned as register code compiles it,
     /// the lambda's body in it (`lam`).
     pub copies: HashMap<(usize, (u32, u32, u32)), Plan>,
+    /// The same keys, in the order the walk met them: the order the copies
+    /// are made in (step 4).
+    pub copy_order: Vec<(usize, (u32, u32, u32))>,
     /// In a copy's plan: the lambda's body, as it is inlined where the
     /// parameter is called (`r_spec_lambda`).
     pub lam: Option<Box<Plan>>,
+    /// In a copy's plan: what the copy is made for (step 4).
+    pub made_at: Option<CopyAt>,
+}
+
+/// What a specialized copy is made for, as `r_specialize` would find it:
+/// the lambda, the procedure's global, the names the lambda's closure
+/// captures, and the globals it sees.
+#[derive(Clone, Debug)]
+pub(crate) struct CopyAt {
+    pub lam: ExpId,
+    pub cell: Value,
+    pub fv: Vec<Sym>,
+    pub genv: Option<usize>,
 }
 
 /// A step on the way from a form's plan to where register code is (3b):
@@ -264,11 +280,14 @@ impl Compiler<'_> {
             let sub = self.plan_inlined(k, name);
             plan.inlined.insert(k, sub);
         }
-        if let Some((k, lam)) = special {
+        if let Some((k, lam)) = special
+            && let Some(Loc::Global(cell)) = self.where_is(e, name)
+        {
             let key = (k, self.span_key(lam));
             if !plan.copies.contains_key(&key) {
-                let sub = self.plan_copy(k, lam, e);
+                let sub = self.plan_copy(k, lam, cell, e);
                 plan.copies.insert(key, sub);
+                plan.copy_order.push(key);
             }
         }
     }
@@ -279,7 +298,7 @@ impl Compiler<'_> {
     /// and what its closure captures local, in the globals it sees here.
     /// Neither makes a closure (`inline_room`), nor so has a lambda to
     /// specialize at.
-    fn plan_copy(&mut self, k: usize, lam: ExpId, e: &Env) -> Plan {
+    fn plan_copy(&mut self, k: usize, lam: ExpId, cell: Value, e: &Env) -> Plan {
         let (body, genv_len) = (self.specials[k].body, self.specials[k].genv_len);
         let env: Env = self.specials[k].params.iter().map(|p| (*p, SLOT)).collect();
         let mut sub = Plan::default();
@@ -293,6 +312,7 @@ impl Compiler<'_> {
         let mut lam_plan = Plan::default();
         self.plan_exp(body, &inner, false, &mut lam_plan);
         sub.lam = Some(Box::new(lam_plan));
+        sub.made_at = Some(CopyAt { lam, cell, fv, genv: self.genv_limit });
         sub
     }
 

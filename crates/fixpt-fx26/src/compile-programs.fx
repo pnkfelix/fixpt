@@ -450,9 +450,9 @@
               (if has-value (c-op c routine-drop) #u)
               ;; A module defined again no longer says what its re-exports are.
               (set c-modules (c-modules-without (get c-modules) n))
-              (c-plan-top x)
               (if (or (null? ty) (null? (c-lambda-of x)))
-                  (begin (if (c-module? x)
+                  (begin (c-plan-top x)
+                         (if (c-module? x)
                              (set c-module-members (the (listof c-inlinables @k) (list nil)))
                              #u)
                          (c-exp x (the cenv nil) 0 c #f)
@@ -466,7 +466,8 @@
                   ;; through the global, as any use of it does
                   ;; (`docs/fx26.md`, "Redefinition").
                   (let ((g (c-push-global n)))
-                    (begin (tagcase (car (c-lambda-of x))
+                    (begin (c-plan-top x)
+                           (tagcase (car (c-lambda-of x))
                              (e-lambda (ps body la lb) (c-define-lambda n ps body c))
                              (else y (begin (c-exp x (the cenv nil) 0 c #f) (c-form-twins))))
                            (c-op1 c routine-global! (wcell-global g)))))

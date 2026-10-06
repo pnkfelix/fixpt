@@ -66,9 +66,6 @@
 ;; Whether the register code being made is a planned lambda's, of the form
 ;; being compiled (step 3): its call sites are the plan's.
 (define c-r-in-plan (ref bool @k) (new #f))
-;; Whether it is making a specialized copy where the plan's calls are: the
-;; copy's twin's are too (3b).
-(define c-r-copying (ref bool @k) (new #f))
 (define c-planned-in (subr c-walks (c-planneds syms) c-planneds)
   (lambda (ps names)
     (cond ((null? ps) nil)
@@ -471,35 +468,29 @@
   (lambda (w op n)
     (begin
       (if (get c-registers)
-          (let ((t (product (1 w) (2 op) (3 n))))
-            (if (= (get c-twin-depth) 0)
-                (set c-standard-twins (cons t (get c-standard-twins)))
-                (c-make-standard-twin t)))
+          (set c-standard-twins (cons (product (1 w) (2 op) (3 n)) (get c-standard-twins)))
           #u)
       w)))
 
-;; A closure, over no values, of `body` assembled as the word `name`, with
-;; register code as standard operation `op` of `n` arguments has it.
-(define c-standard-closure (subr (maxeff compiles spin) (code code string string int) unit)
-  (lambda (c body name op n)
-    (let ((w (c-register-twin (c-assemble body (string->symbol name)) op n)))
-      (begin (c-op1 c routine-closure (wcell-word w)) (c-emit c (i-cell (wcell-int 0)))))))
-;; A standard operation as a value: a closure of its arity whose body
-;; applies it to its parameters. `list` is a `vsubr`: `%vlambda`'s closure
-;; over a procedure of one list that copies it, as `datum-list` does (and its
-;; register code is `datum-list`'s). A copy, not the list itself: `apply`
-;; gives a list at `acyclic` as it is (F11), and `list` may give it at any
-;; region, one that can be written.
-(define c-standard-value (subr (maxeff compiles spin) (string code) unit)
-  (lambda (name c)
+;; `body` assembled as the word `name`, with register code as standard
+;; operation `op` of `n` arguments has it, to be.
+(define c-standard-assembled (subr (maxeff compiles spin) (code string string int) tword)
+  (lambda (body name op n) (c-register-twin (c-assemble body (string->symbol name)) op n)))
+;; A standard operation's word as a value: a procedure of its arity that
+;; applies it to its parameters. `list`'s, a `vsubr`'s, is of one list
+;; that it copies, as `datum-list` does (and its register code is
+;; `datum-list`'s). A copy, not the list itself: `apply` gives a list at
+;; `acyclic` as it is (F11), and `list` may give it at any region, one that
+;; can be written.
+(define c-standard-word-made (subr (maxeff compiles spin) (string) tword)
+  (lambda (name)
     (let ((n (c-arity name)) (body (the code (new nil))))
       (cond ((string=? name "list")
              (begin
                (c-op1 body routine-slot (wcell-int 0))
                (c-standard-on "datum-list" 1 body)
                (c-op body routine-return)
-               (c-standard-closure c body name "datum-list" 1)
-               (c-prim c "%fx26-vlambda" 1)))
+               (c-standard-assembled body name "datum-list" 1)))
             ((< n 0) (c-fail (string-append "not yet compiled as a value: " name)))
             (else
              (begin
@@ -512,7 +503,34 @@
                      (begin (c-int body 0) (params 0) (c-prim body "%make-bloblet-filled" 3))
                      (begin (params 0) (c-standard-on name n body))))
                (c-op body routine-return)
-               (c-standard-closure c body name name n)))))))
+               (c-standard-assembled body name name n)))))))
+;; The word of standard operation `name` as a value, made already, in a
+;; list; none if it is not.
+(define c-standard-word-of (subr c-walks (string) (listof tword @k))
+  (lambda (name)
+    (letrec ((find (subr c-walks ((listof c-standard-word @k)) (listof tword @k))
+               (lambda (ws)
+                 (cond ((null? ws) nil)
+                       ((string=? (extract (car ws) 1) name)
+                        (the (listof tword @k) (cons (extract (car ws) 2) nil)))
+                       (else (find (cdr ws)))))))
+      (find (get c-standard-words)))))
+;; The same, made unless it is made already.
+(define c-standard-word (subr (maxeff compiles spin) (string) tword)
+  (lambda (name)
+    (let ((found (c-standard-word-of name)))
+      (if (null? found)
+          (let ((w (c-standard-word-made name)))
+            (begin (set c-standard-words (cons (product (1 name) (2 w)) (get c-standard-words)))
+                   w))
+          (car found)))))
+;; A standard operation as a value: a closure of its word (`c-standard-word`),
+;; over no values; `list`'s given to `%fx26-vlambda`.
+(define c-standard-value (subr (maxeff compiles spin) (string code) unit)
+  (lambda (name c)
+    (let ((w (c-standard-word name)))
+      (begin (c-op1 c routine-closure (wcell-word w)) (c-emit c (i-cell (wcell-int 0)))
+             (if (string=? name "list") (c-prim c "%fx26-vlambda" 1) #u)))))
 
 (define c-count-names (subr (read @globals) (names) int)
   (lambda (ns) (if (null? ns) 0 (+ 1 (c-count-names (cdr ns))))))
@@ -546,6 +564,7 @@
 (define c-standard-on (with compile-lift-module c-standard-on))
 (define c-has-standard-value? (with compile-lift-module c-has-standard-value?))
 (define c-standard-value (with compile-lift-module c-standard-value))
+(define c-standard-word-of (with compile-lift-module c-standard-word-of))
 (define c-count-names (with compile-lift-module c-count-names))
 (define c-members (with compile-lift-module c-members))
 (define-type c-added (select compile-lift-module c-added))
@@ -558,4 +577,3 @@
 (define c-planned-fv (with compile-lift-module c-planned-fv))
 (define c-planned-lift (with compile-lift-module c-planned-lift))
 (define c-r-in-plan (with compile-lift-module c-r-in-plan))
-(define c-r-copying (with compile-lift-module c-r-copying))

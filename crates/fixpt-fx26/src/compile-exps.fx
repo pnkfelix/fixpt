@@ -324,50 +324,77 @@
 (define c-twin! (subr c-emits (tword (listof wcell @k)) unit)
   (lambda (w cells) (if (null? cells) #u (begin (set-register-twin w cells) #u))))
 
+;; A procedure being specialized at a lambda: its global's name, cell and
+;; word; the parameter's place and name; how many parameters; the lambda's
+;; arity, parameters and body, the names its closure captures in order, and
+;; the globals it sees.
+(define-type c-spec
+  (productof (1 symbol) (2 wglobal) (3 tword) (4 int) (5 symbol) (6 int) (7 int)
+             (8 c-params) (9 exp) (10 syms) (11 int)))
+;; While a copy's register code is made: which (one, or none).
+(define c-spec-now (ref (listof c-spec @k) @k) (new nil))
+;; While register code is made: the plan's contexts it is in (3b), innermost
+;; first (-1 where the plan has none).
+(define c-r-plan-ctx (ref (listof int @k) @k) (new nil))
+
+;; A specialized copy's twin's context: what it is specialized at, its
+;; plan's context, and the globals its procedure saw.
+(define-type c-copy-twin (productof (1 c-spec) (2 int) (3 int)))
 ;; A lambda's word whose register code, its twin, is made once its form's
 ;; words all are (step 4), with what its stack code knew and made: the
 ;; word, parameters, body, scope, the procedure it is, the definition it
-;; is (if one), and the words of the lambdas in it.
+;; is (if one), the words of the lambdas in it, and, a copy's, its context.
 (define-type c-twin
   (productof (1 tword) (2 c-params) (3 exp) (4 cenv) (5 (listof c-this @k))
-             (6 (listof symbol @k)) (7 (listof c-made @k))))
+             (6 (listof symbol @k)) (7 (listof c-made @k)) (8 (listof c-copy-twin @k))))
 ;; The form's, last first.
 (define c-twins (ref (listof c-twin @k) @k) (new nil))
-;; Register code for twin `t`, made with the words its stack code made.
+;; Twin `t` as a copy's, in context `ctx`, specialized as `spec` says, in
+;; globals `genv`.
+(define c-copy-twin (subr c-builds (c-twin c-spec int int) c-twin)
+  (lambda (t spec ctx genv)
+    (product (1 (extract t 1)) (2 (extract t 2)) (3 (extract t 3)) (4 (extract t 4))
+             (5 (extract t 5)) (6 (extract t 6)) (7 (extract t 7))
+             (8 (the (listof c-copy-twin @k) (cons (product (1 spec) (2 ctx) (3 genv)) nil))))))
+;; Register code for twin `t`, made with the words its stack code made; a
+;; copy's in its context.
 (define c-make-twin (subr (maxeff compiles spin) (c-twin) unit)
   (lambda (t)
-    (let ((w (extract t 1)) (ps (extract t 2)) (body (extract t 3)) (defining (extract t 6)))
+    (let ((w (extract t 1)) (ps (extract t 2)) (body (extract t 3)) (defining (extract t 6))
+          (copy (extract t 8))
+          (outer-spec (get c-spec-now)) (outer-genv (get c-genv)) (outer-ctx (get c-r-plan-ctx)))
       (begin
         (set c-own-now
              (if (null? defining)
                  (the (listof (productof (1 symbol) (2 tword)) @k) nil)
                  (cons (product (1 (car defining)) (2 w)) nil)))
+        (if (null? copy)
+            #u
+            (begin (set c-spec-now (the (listof c-spec @k) (cons (extract (car copy) 1) nil)))
+                   (set c-r-plan-ctx (cons (extract (car copy) 2) outer-ctx))
+                   (set c-genv (extract (car copy) 3))))
         (let* ((outer-reuse (get c-made-reuse))
                (outer-in-plan (get c-r-in-plan))
-               ;; A planned lambda, or a copy made where the plan's calls are.
-               (in-plan (if (= (get c-twin-depth) 0)
-                            (not (null? (c-planned-fv ps body)))
-                            (and outer-in-plan (get c-r-copying))))
+               ;; A planned lambda, or a copy: the plan's.
+               (in-plan (or (not (null? copy)) (not (null? (c-planned-fv ps body)))))
                (cells (begin (set c-made-reuse (extract t 7))
                              (set c-r-in-plan in-plan)
                              (set c-twin-depth (+ (get c-twin-depth) 1))
                              ((get c-register-code) ps body (extract t 4) (extract t 5)))))
           (begin (set c-twin-depth (- (get c-twin-depth) 1))
                  (set c-r-in-plan outer-in-plan)
+                 (set c-spec-now outer-spec) (set c-genv outer-genv) (set c-r-plan-ctx outer-ctx)
                  (set c-made-reuse outer-reuse) (c-twin! w cells)))))))
 ;; Register code for the lambda of `ps` and `body` as word `w`'s twin, when
-;; this compiler makes it (`c-registers`): a form's own words' after its
-;; words; a copy's (made in register code) at once, until the plan makes
-;; copies.
+;; this compiler makes it (`c-registers`): made after its form's words.
 (define c-register-twin!
   (subr (maxeff compiles spin) (tword c-params exp cenv (listof c-this @k) (listof symbol @k)) unit)
   (lambda (w ps body inner this defining)
     (if (get c-registers)
-        (let ((t (product (1 w) (2 ps) (3 body) (4 inner) (5 this) (6 defining)
-                          (7 (get c-made-now)))))
-          (if (= (get c-twin-depth) 0)
-              (set c-twins (cons t (get c-twins)))
-              (c-make-twin t)))
+        (set c-twins
+             (cons (product (1 w) (2 ps) (3 body) (4 inner) (5 this) (6 defining)
+                            (7 (get c-made-now)) (8 (the (listof c-copy-twin @k) nil)))
+                   (get c-twins)))
         #u)))
 ;; Each of `ts`, last first, made in order.
 (define c-make-twins (subr (maxeff compiles spin) ((listof c-twin @k)) unit)
@@ -375,14 +402,6 @@
 (define c-make-standard-twins (subr (maxeff compiles spin) ((listof c-standard-twin @k)) unit)
   (lambda (ts)
     (if (null? ts) #u (begin (c-make-standard-twins (cdr ts)) (c-make-standard-twin (car ts))))))
-;; The twins of the form's words, in order (step 4): register code, a phase
-;; after the stack code. (The standard operations' after the lambdas': no
-;; register code depends on another's.)
-(define c-form-twins (subr (maxeff compiles spin) () unit)
-  (lambda ()
-    (let ((ts (get c-twins)) (ss (get c-standard-twins)))
-      (begin (set c-twins nil) (set c-standard-twins nil)
-             (c-make-twins ts) (c-make-standard-twins ss)))))
 
 ;; A typed call of `n` arguments: in tail position, a tail call.
 (define c-typed-call (subr c-emits (code int bool) unit)
@@ -903,4 +922,9 @@
 (define c-own-scope (with compile-exps-module c-own-scope))
 (define c-form-made (with compile-exps-module c-form-made))
 (define c-twins (with compile-exps-module c-twins))
-(define c-form-twins (with compile-exps-module c-form-twins))
+(define c-make-twins (with compile-exps-module c-make-twins))
+(define c-copy-twin (with compile-exps-module c-copy-twin))
+(define c-make-standard-twins (with compile-exps-module c-make-standard-twins))
+(define-type c-spec (select compile-exps-module c-spec))
+(define c-spec-now (with compile-exps-module c-spec-now))
+(define c-r-plan-ctx (with compile-exps-module c-r-plan-ctx))

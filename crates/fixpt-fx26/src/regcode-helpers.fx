@@ -98,66 +98,17 @@
                (6 (c-count-params (extract sp 3)))
                (7 (extract sp 7)) (8 lps) (9 lbody)
                (10 (c-lambda-captured lps lbody te)) (11 (c-genv-now))))))
-;; The copy's word's name: the procedure's and the lambda's.
-(define r-spec-name (subr rcompiles (c-special exp) (listof string @k))
-  (lambda (sp lbody)
-    (the (listof string @k)
-      (cons (string-append (symbol->string (extract sp 1))
-                           (string-append "@lambda@" (c-place-name (exp-start lbody))))
-            nil))))
 ;; A lambda's word, and the names it captures.
 (define-type rmade (productof (1 tword) (2 syms)))
-;; The copy `spec` of `sp`'s procedure, for lambda body `lbody`, compiled
-;; apart: what this body assumes is not its; in the globals `sp` saw.
-(define r-spec-word-made (subr rcompiles (c-special c-spec exp) rmade)
+;; The copy `spec` of `sp`'s procedure, for lambda body `lbody`, in a
+;; list: made once, with the form's words, for the procedure, the lambda,
+;; what it captures and the globals it sees (`c-make-copy`); none if none
+;; was.
+(define r-spec-word (subr rcompiles (c-special c-spec exp) c-spec-copies)
   (lambda (sp spec lbody)
-    (let ((outer-spec (get c-spec-now)) (outer-genv (get c-genv))
-          (outer-assuming (get r-assuming)) (outer-assumed (get r-assumed))
-          (outer-ctx (get c-r-plan-ctx)) (outer-copying (get c-r-copying)))
-      (begin
-        ;; Its plan's, along the path here (3b).
-        (set c-r-plan-ctx
-             (cons (c-plan-copy (if (null? outer-ctx) 0 (car outer-ctx)) (extract sp 1)
-                                (c-span-key (exp-start lbody) (exp-end lbody)))
-                   outer-ctx))
-        (set c-r-copying #t)
-        (set r-assuming #f)
-        (set r-assumed (the r-assumptions nil))
-        (set c-spec-now (the (listof c-spec @k) (cons spec nil)))
-        (set c-genv (extract sp 5))
-        (set c-word-name (r-spec-name sp lbody))
-        (let ((made (c-lambda-word (extract sp 3) (extract sp 4) (the cenv nil) (the syms nil))))
-          (begin (set c-spec-now outer-spec) (set c-genv outer-genv)
-                 (set r-assuming outer-assuming) (set r-assumed outer-assumed)
-                 (set c-r-plan-ctx outer-ctx) (set c-r-copying outer-copying)
-                 made))))))
-;; The one of `cs` made of procedure word `w` for a lambda capturing `fv` in
-;; globals `genv`, in a list; none if none was.
-(define r-spec-copy-find (subr rcompiles (c-spec-copies tword syms int) c-spec-copies)
-  (lambda (cs w fv genv)
-    (cond ((null? cs) nil)
-          ((let ((c (car cs)))
-             (and (eq? (extract c 1) w) (k-syms=? (extract c 2) fv) (= (extract c 3) genv)))
-           (the c-spec-copies (cons (car cs) nil)))
-          (else (r-spec-copy-find (cdr cs) w fv genv)))))
-;; The copy `spec` of `sp`'s procedure, for lambda body `lbody`: made once
-;; for the procedure, the lambda, what it captures and the globals it sees,
-;; however many times this body's register code is made (`r_specialize`).
-(define r-spec-word (subr rcompiles (c-special c-spec exp) rmade)
-  (lambda (sp spec lbody)
-    (let* ((key (c-span-key (exp-start lbody) (exp-end lbody)))
-           (cs (table-ref (get c-spec-made) key (the c-spec-copies nil)))
-           (found (r-spec-copy-find cs (extract sp 2) (extract spec 10) (extract spec 11))))
-      (if (null? found)
-          (let ((made (r-spec-word-made sp spec lbody)))
-            (begin
-              (table-set! (get c-spec-made) key
-                          (cons (product (1 (extract sp 2)) (2 (extract spec 10))
-                                         (3 (extract spec 11)) (4 (extract made 1))
-                                         (5 (extract made 2)))
-                                cs))
-              made))
-          (the rmade (product (1 (extract (car found) 4)) (2 (extract (car found) 5))))))))
+    (c-spec-copy-find (table-ref (get c-spec-made) (c-span-key (exp-start lbody) (exp-end lbody))
+                                 (the c-spec-copies nil))
+                      (extract sp 2) (extract spec 10) (extract spec 11))))
 ;; Each free value of `fv` into REGj+1 (`r-reg-moves`, `r-free-regs`): the
 ;; patches for the siblings not made yet.
 (define r-free-into-regs (subr rcompiles (rgen syms renv) patches)
