@@ -10,6 +10,9 @@
 ;;; kept in step, so that it and cellular code mix freely; branches become
 ;;; jumps, and the dispatch between cells goes.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define native-module (module
 (define-effect assembles (maxeff (read @globals) (read @k) (write @k) (alloc @k)))
 ;; Writing the assembler's arrays, and looping; reading them to make lists.
 (define-effect n-writes (maxeff (read @globals) (read @k) (write @k) spin))
@@ -778,4 +781,7 @@
           (n-e (arm-ldr n-x16 n-st n-st-exit))
           (n-e (arm-br n-x16))
           (let ((at (n-starts-at (- cells 1) starts labels nil)))
-            (product (1 (n-finish)) (2 at))))))))
+            (product (1 (n-finish)) (2 at))))))))))
+
+(define-effect assembles (select native-module assembles))
+(define native-assemble (with native-module native-assemble))
