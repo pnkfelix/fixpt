@@ -1501,9 +1501,9 @@ impl Compiler<'_> {
         }
         let outer = (g.this.take(), self.genv_limit.replace(genv_len));
         self.inlining.push(name);
-        self.inlining_ks.push(k);
+        self.plan_path.push(super::procs::Step::Inline(k));
         let inlined = self.r_exp(g, body, &mut own_env, &mut own_te, tail);
-        self.inlining_ks.pop();
+        self.plan_path.pop();
         self.inlining.pop();
         (g.this, self.genv_limit) = outer;
         inlined?;
@@ -1603,7 +1603,10 @@ impl Compiler<'_> {
                     _ => format!("{}:{}", span.file.0, span.start),
                 };
                 self.word_name = Some(format!("{}@lambda@{at}", self.name(self.specials[k].name)));
+                let s = self.c.arena.span_of(lam);
+                self.plan_path.push(super::procs::Step::Copy(k, (s.file.0, s.start, s.end)));
                 let made = self.lambda_word(&params, gbody, &Vec::new(), None);
+                self.plan_path.pop();
                 (self.spec, self.genv_limit, self.declined, self.assume) = outer;
                 let (copy, _) = made.ok()?;
                 self.spec_copies.insert(key, copy);
@@ -1709,7 +1712,9 @@ impl Compiler<'_> {
         }
         let outer = self.genv_limit;
         self.genv_limit = sp.lam_genv;
+        self.plan_path.push(super::procs::Step::Lam);
         let done = self.r_exp(g, sp.lam_body, &mut own_env, &mut own_te, tail);
+        self.plan_path.pop();
         self.genv_limit = outer;
         done?;
         g.next_reg = regs;

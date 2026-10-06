@@ -182,6 +182,21 @@ green, the self-compile measured.
    check: no difference in 31051 decisions of the programs, 13543 of the
    front end. The self-compile, per phase: compile 0.272 → 0.281 s, 45 →
    46 collections, 47.4 → 47.8 M words; check 1.095 → 1.105 s.
+   *3b-0 done, both, 2026-10-06*: a join point's lambdas (its body
+   compiled inline in its `letrec`'s procedure) are found among every
+   word the form's stack code made (`form_made`, `c-form-made`), not made
+   again: 26 over the programs, none in the front end. Register code then
+   makes lambdas only inside an inlined body or a copy.
+   *3b-1 done, both, 2026-10-06*: an inlined callee's body is planned as
+   `r_inline` compiles it there (its parameters local, the globals it saw,
+   the names being inlined on the way not inlined again), once per callee
+   in each context; it makes no closure (`inline_room`), so only its calls
+   are planned. Rust nests the sub-plans (`Plan::inlined`, followed by
+   `inlining_ks`); FX-26 numbers the contexts (`c-plan-child`, followed by
+   `c-r-plan-ctx`). Shadow check: no difference in 41251 decisions of the
+   programs, 14417 of the front end. The self-compile: compile 0.282 s
+   both, 47.8 → 48.0 M words. *3b-2*, next: specialized copies (the
+   copy's body, the lambda argument it inlines).
 4. **Twins as a phase**: per form, every word first, then every twin; the
    register compiler no longer calls the stack compiler, and the stack
    compiler no longer calls it. Remove `c-register-code` and

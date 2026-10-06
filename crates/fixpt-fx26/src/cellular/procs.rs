@@ -43,6 +43,23 @@ pub(crate) struct Plan {
     /// what it decides depending on the callee and the path to it, not on
     /// the call.
     pub inlined: HashMap<usize, Plan>,
+    /// The specialized copies its calls make (3b), by `specials`'s index
+    /// and where the lambda is: each planned as register code compiles it,
+    /// the lambda's body in it (`lam`).
+    pub copies: HashMap<(usize, (u32, u32, u32)), Plan>,
+    /// In a copy's plan: the lambda's body, as it is inlined where the
+    /// parameter is called (`r_spec_lambda`).
+    pub lam: Option<Box<Plan>>,
+}
+
+/// A step on the way from a form's plan to where register code is (3b):
+/// into an inlined body, `inlines`'s index; into a specialized copy, as
+/// `Plan::copies` keys it; into the lambda's body in a copy.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Step {
+    Inline(usize),
+    Copy(usize, (u32, u32, u32)),
+    Lam,
 }
 
 /// A call of a global, as planned: the small procedure it may be inlined
@@ -247,6 +264,36 @@ impl Compiler<'_> {
             let sub = self.plan_inlined(k, name);
             plan.inlined.insert(k, sub);
         }
+        if let Some((k, lam)) = special {
+            let key = (k, self.span_key(lam));
+            if !plan.copies.contains_key(&key) {
+                let sub = self.plan_copy(k, lam, e);
+                plan.copies.insert(key, sub);
+            }
+        }
+    }
+
+    /// The copy of `specials[k]` made for `lam`, in `e`, planned as
+    /// `r_specialize` compiles it: the procedure's body, its parameters
+    /// local, in the globals it saw; and the lambda's body, its parameters
+    /// and what its closure captures local, in the globals it sees here.
+    /// Neither makes a closure (`inline_room`), nor so has a lambda to
+    /// specialize at.
+    fn plan_copy(&mut self, k: usize, lam: ExpId, e: &Env) -> Plan {
+        let (body, genv_len) = (self.specials[k].body, self.specials[k].genv_len);
+        let env: Env = self.specials[k].params.iter().map(|p| (*p, SLOT)).collect();
+        let mut sub = Plan::default();
+        let outer = self.genv_limit.replace(genv_len);
+        self.plan_exp(body, &env, false, &mut sub);
+        self.genv_limit = outer;
+        let Exp::Lambda { params, body } = self.c.arena.exp_at(lam).clone() else { return sub };
+        let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
+        let fv = self.captured(&ps, body, e);
+        let inner: Env = ps.iter().chain(&fv).map(|n| (*n, SLOT)).collect();
+        let mut lam_plan = Plan::default();
+        self.plan_exp(body, &inner, false, &mut lam_plan);
+        sub.lam = Some(Box::new(lam_plan));
+        sub
     }
 
     /// The body of `inlines[k]`, `name`'s, planned as `r_inline` compiles it:
@@ -265,36 +312,39 @@ impl Compiler<'_> {
     }
 
     /// The plan of where register code is now: the form's, or, inside an
-    /// inlined body, that body's there, along the path to it.
+    /// inlined body or a copy, that one's there, along the path to it.
     fn plan_here(&self) -> Option<&Plan> {
         let mut p = self.plan.as_ref()?;
-        for k in &self.inlining_ks {
-            p = p.inlined.get(k)?;
+        for step in &self.plan_path {
+            p = match step {
+                Step::Inline(k) => p.inlined.get(k)?,
+                Step::Copy(k, at) => p.copies.get(&(*k, *at))?,
+                Step::Lam => p.lam.as_deref()?,
+            };
         }
         Some(p)
     }
 
     /// Call `x` as the plan decided it, where its call sites are the plan's:
-    /// in a planned lambda's own register code, outside any inlined body
-    /// or copy; a call of no global, none planned, as neither. None
+    /// in a planned lambda's register code, or an inlined body's or a
+    /// copy's in it; a call of no global, none planned, as neither. None
     /// elsewhere, where register code decides.
     pub(crate) fn planned_call(&self, x: ExpId) -> Option<Called> {
-        if !self.r_in_plan || self.spec.is_some() {
+        if !self.r_in_plan {
             return None;
         }
         let plan = self.plan_here()?;
         Some(plan.calls.get(&self.span_key(x)).copied().unwrap_or(Called { inline: None, special: None }))
     }
 
-    /// In shadow (`FIXPT_PLAN_CHECK`), a call register code decides, in a
-    /// planned lambda's twin outside any inlined body or copy, against the
-    /// plan.
+    /// In shadow (`FIXPT_PLAN_CHECK`), a call register code decides, where
+    /// the plan's are, against the plan.
     pub(crate) fn plan_check_call(&mut self, x: ExpId, got: Called) {
-        if !self.r_in_plan || self.spec.is_some() {
+        if !self.r_in_plan {
             return;
         }
         let Some(plan) = self.plan_here() else {
-            let msg = format!("call at {:?}: no plan along {:?}", self.span_key(x), self.inlining_ks);
+            let msg = format!("call at {:?}: no plan along {:?}", self.span_key(x), self.plan_path);
             self.plan_mismatches.push(msg);
             return;
         };
