@@ -200,7 +200,10 @@ before everything else, known holes before proofs.
   measurable cost; types re-exported through a family failed on a region
   argument, fixed, and a family's name re-exported, `(define-type t
   (select m t))`, applies, so `table.fx`'s types moved in too, check
-  1.5% slower; a re-exported name lost inlining, a call 1.7×
+  1.5% slower; then the 13 files that need nothing new, but for the
+  three generated ones: run time unchanged, check 1.24 s → 1.65 s, checking
+  a large module superlinear, to fix next, `TODO.md` §34; a re-exported
+  name lost inlining, a call 1.7×
   slower on register code, now inlined when the member names no other,
   `DONE.md` §38), which found that a
   module's definitions did not see themselves (done, `DONE.md` §37: a

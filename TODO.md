@@ -810,6 +810,35 @@ need nothing new: `check-args`, `check-generative`, `check-mask`,
 `standard`, `compile-exps`, `compile-programs`, `regcode-core`,
 `native-layout`.
 
+**The rest of them (2026-10-05)**, one commit each, each timed new, old,
+new against the commit before (`tests/bootstrap.rs`, `comparison`):
+`check-synth`, `check-args`, `check-generative`, `check-mask`,
+`check-errors`, `check-calls`, `check-close`, `compile-exps`,
+`compile-programs`, `regcode-core`. Items unindented between `(define
+<file>-module (module` and `))`, so no line grows. Compile stayed 0.15 s
+throughout: the re-exports cost nothing measurable at run time. Check did
+not: 1.24 s before `compile-exps`, 1.65 s after `regcode-core` (+5%,
++12%, +6% for those three; the checker files' modules cost nothing
+measurable). Checking a large module grows faster than its size: to look
+into before more files move (`check-modorder.fx` and `modorder.rs`
+recompute a lambda's free variables at every reach, and the groups are
+found in time cubic in the lambdas). Found on the way, each fixed or set
+aside:
+- each lambda's recursive group was checked to end once per member
+  (fixed, `c71bbc2`: check 2.65 s → 1.31 s with `compile-exps`);
+- a module counts a type and a value of one name as defined twice, where
+  the top level keeps them apart (`c-mval`; renamed): to decide;
+- a second top-level `define-type` of a name already a type is taken
+  silently, its uses failing later and far away (`k-whys`): to refuse or
+  say;
+- a type re-exported from a module cannot be named by an earlier file,
+  though types are otherwise declared ahead (`c-inline`; moved to its
+  first user);
+- `layout.fx`, `standard.fx` and `native-layout.fx` are generated from
+  Rust tables (`tests/layout.rs`): their generators would write modules;
+  set aside, and mostly constants, which want checking that a re-exported
+  constant stays one to the compilers.
+
 ## 35. Provenance in the names of our code (the user's, 2026-10-05)
 
 `FIXPT_SYMBOLS` names (`docs/performance.md`, "Profiling with `sample`")
