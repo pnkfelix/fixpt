@@ -190,6 +190,10 @@
              (let ((t (k-parse-type (car ts))))
                (begin (k-push-desc (car ns) (ds-rec t))
                       (k-item-of k ns -1 (the k-ids (cons t nil)) nil))))
+            ;; A `define*`'s types its type and a mark: its variable -2.
+            ((and (= k 2) (not (null? ts)) (not (null? (cdr ts))))
+             (let* ((t (k-parse-types (the syns-a (cons (car ts) nil)))) (x (k-resolve-all xs)))
+               (k-item-of k ns -2 t x)))
             ((= k 2)
              (let* ((t (if (null? ts) (the k-ids nil) (k-parse-types ts))) (x (k-resolve-all xs)))
                (k-item-of k ns -1 t x)))

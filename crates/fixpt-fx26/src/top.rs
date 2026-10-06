@@ -804,7 +804,7 @@ impl Checker {
 
     /// Check `e` against `ty`, the type `name` is declared; an error at `e`
     /// itself says so.
-    fn check_declared(&mut self, name: Sym, ty: TyId, e: crate::ast::ExpId) -> R<Effect> {
+    pub(crate) fn check_declared(&mut self, name: Sym, ty: TyId, e: crate::ast::ExpId) -> R<Effect> {
         self.check(e, ty).map_err(|err| self.declared_error(name, ty, e, err))
     }
 

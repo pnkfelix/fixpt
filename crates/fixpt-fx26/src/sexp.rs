@@ -182,8 +182,10 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
                 .map(|item| match item {
                     ModItem::Abs { name: n, up_fn, down_fn, .. } => format!("[0 ({}) (_) ({} {})]", name(*n), go(*up_fn), go(*down_fn)),
                     ModItem::Desc { name: n, .. } => format!("[1 ({}) (_) ()]", name(*n)),
-                    ModItem::Val { name: n, ty, init } => {
-                        format!("[2 ({}) {} ({})]", name(*n), if ty.is_some() { "(_)" } else { "()" }, go(*init))
+                    // A `define*`'s types the type and a mark, `*`.
+                    ModItem::Val { name: n, ty, init, infer } => {
+                        let ts = if *infer { "(_ _)" } else if ty.is_some() { "(_)" } else { "()" };
+                        format!("[2 ({}) {ts} ({})]", name(*n), go(*init))
                     }
                     ModItem::Rec(group) => format!(
                         "[3 {} {} {}]",

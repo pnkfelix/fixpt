@@ -11,8 +11,8 @@
 ;; Reading the checker's tables and making lists.
 (define-effect kallocs (maxeff (read @globals) (alloc @t)))
 ;; A module's typed lambda: its name, written type, value, the item it is
-;; written in, and whether that is a `define-rec`.
-(define-type k-mlam (productof (1 symbol) (2 int) (3 kx) (4 int) (5 bool)))
+;; written in, whether that is a `define-rec`, and whether a `define*`.
+(define-type k-mlam (productof (1 symbol) (2 int) (3 kx) (4 int) (5 bool) (6 bool)))
 (define-type k-mlams (listof k-mlam acyclic))
 ;; A name a module defines, and the item defining it.
 (define-type k-places (listof (productof (1 symbol) (2 int)) acyclic))
@@ -28,7 +28,7 @@
         out
         (k-mlams-of-group (cdr ns) (cdr ts) (cdr xs) i
                           (the k-mlams (cons (product (1 (car ns)) (2 (car ts)) (3 (car xs))
-                                                      (4 i) (5 #t))
+                                                      (4 i) (5 #t) (6 #f))
                                              out))))))
 ;; The typed lambdas of `items`, from item `i`, onto `out` (newest first).
 (define k-mlams-from (subr kallocs (k-items int k-mlams) k-mlams)
@@ -40,7 +40,8 @@
                (more (cond ((k-lambda-item? it)
                             (the k-mlams (cons (product (1 (car (extract it 2)))
                                                         (2 (car (extract it 4)))
-                                                        (3 (car (extract it 5))) (4 i) (5 #f))
+                                                        (3 (car (extract it 5))) (4 i) (5 #f)
+                                                        (6 (= (extract it 3) -2)))
                                                out)))
                            ((= k 3) (k-mlams-of-group (extract it 2) (extract it 4) (extract it 5)
                                                       i out))
@@ -64,6 +65,15 @@
           (else (k-fail-at (k-cat3 "`" (symbol->string (extract (car ls) 1))
                                    "`, in a `define-rec`, is a `lambda`")
                            (extract (car ls) 3))))))
+
+;; A `define*` that is not a `lambda`, from `items`: an error at the first.
+(define k-mod-star-lambdas (subr checks (k-items) unit)
+  (lambda (items)
+    (cond ((null? items) #u)
+          ((and (= (extract (car items) 1) 2) (= (extract (car items) 3) -2)
+                (not (k-lambda? (car (extract (car items) 5)))))
+           (k-fail-at "`define*` defines a procedure: a `lambda`" (car (extract (car items) 5))))
+          (else (k-mod-star-lambdas (cdr items))))))
 
 ;;; ------------------------------------------------------------ places
 

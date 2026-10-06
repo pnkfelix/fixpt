@@ -27,7 +27,7 @@ impl Checker {
         let mut out = Vec::new();
         for (i, item) in items.iter().enumerate() {
             match item {
-                ModItem::Val { name, ty: Some(ty), init } if self.is_lambda(*init) => out.push((*name, *ty, *init, i)),
+                ModItem::Val { name, ty: Some(ty), init, .. } if self.is_lambda(*init) => out.push((*name, *ty, *init, i)),
                 ModItem::Rec(bs) => out.extend(bs.iter().map(|(n, t, e)| (*n, *t, *e, i))),
                 _ => {}
             }

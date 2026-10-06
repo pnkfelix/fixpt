@@ -368,7 +368,7 @@
       (e-lambda (the param-list (cons x nil)) (e-var 'x a b) a b))))
 (define module-usage string
   (string-append "a module holds `(define-generative t T)`, `(define-type d T)`, "
-                 "`(define x [T] e)` and `(define-rec (f T e) …)`"))
+                 "`(define x [T] e)`, `(define* f T e)` and `(define-rec (f T e) …)`"))
 ;; A `define-rec`'s names, types and expressions, each in order.
 (define rec-names (subr (read @globals) (letrec-list) names)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (rec-names (cdr bs))))))
@@ -731,6 +731,12 @@
               ((and (symbol=? head 'define) (= n 4))
                (let* ((name (syn-symbol (nth parts 1))) (init (parse-exp (nth parts 3))))
                  (mod-item-of 2 name (one-syn (nth parts 2)) (the exp-list (cons init nil)))))
+              ;; `(define* f T e)`: a `define`, its types the type and a mark.
+              ((and (symbol=? head 'define*) (= n 4))
+               (let* ((name (syn-symbol (nth parts 1))) (init (parse-exp (nth parts 3)))
+                      (mark (mk-symbol "*" (syn-start f) (syn-end f))))
+                 (mod-item-of 2 name (the syns-a (list (nth parts 2) mark))
+                              (the exp-list (cons init nil)))))
               ((symbol=? head 'define-rec)
                (let ((bs (parse-typed-bindings (cdr parts) "`(name type expression)`"
                                                "`(define-rec (name type expression) …)`")))

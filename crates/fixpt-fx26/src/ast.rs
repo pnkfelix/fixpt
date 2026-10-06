@@ -513,8 +513,9 @@ pub enum ModItem {
     Abs { name: Sym, var: DVar, rep: TyId, up: Sym, down: Sym, up_fn: ExpId, down_fn: ExpId },
     /// `(define-type d T)`: a transparent description.
     Desc { name: Sym, ty: TyId },
-    /// `(define x e)` or `(define x T e)`: a value.
-    Val { name: Sym, ty: Option<TyId>, init: ExpId },
+    /// `(define x e)` or `(define x T e)`: a value; with `infer`, `(define*
+    /// f T lambda)`, the globals it reads found and put in its type.
+    Val { name: Sym, ty: Option<TyId>, init: ExpId, infer: bool },
     /// `(define-rec (f T e) …)`: values that call each other.
     Rec(Vec<(Sym, TyId, ExpId)>),
 }

@@ -619,19 +619,6 @@
                  (k-break-all (cdr ns) why))))))
 (define k-lines-append (subr (read @globals) (k-out k-out) k-out)
   (lambda (xs ys) (if (null? xs) ys (the k-out (cons (car xs) (k-lines-append (cdr xs) ys))))))
-;; `n`'s innermost binding, now of type `t`.
-(define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
-  (lambda (n t) (table-set! (get k-env) n (cons t (cdr (table-ref (get k-env) n nil))))))
-;; What an error's message `m` is made into.
-(define-type k-say (subr (maxeff checks spin) (string) string))
-;; `f`'s value, or, if it fails, the error `say` makes of its message.
-(define k-saying (subr (maxeff (read @globals) checks spin) (k-thunk k-say) k-te)
-  (lambda (f say)
-    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
-      (tagcase r
-        (k-done (te) te)
-        (k-err (m ea eb) (k-fail (say m) ea eb))
-        (k-ok (xs) (k-fail "k-ok inside" 0 0))))))
 ;; An error at `written` unless `tw`, the type `define*` checks at, is a
 ;; `subr` (≥ 0).
 (define k-star-subr (subr checks (int syn) unit)
@@ -656,20 +643,6 @@
       (if (string=? why "")
           #u
           (begin (set k-recursive (cons (cons name t) rsaved)) (k-note-why g why))))))
-;; What `define*` says when `name`, found to be a `tf`, does not check at
-;; it, as `m` says: the program's error, since only that check sees a call
-;; of `name` as recursion.
-(define k-star-mistake (subr (maxeff kreads (alloc @t) spin) (symbol int string) string)
-  (lambda (name tf m)
-    (k-cat5 (k-cat3 "`define*` found `" (symbol->string name) "` to be a ") (k-show-ty tf)
-            ": " m "")))
-;; The effect of `name`, the lambda `x` of `define*`, checked again at `tf`,
-;; the type found.
-(define k-star-checked (subr (maxeff checks spin) (symbol int kx) k-eff)
-  (lambda (name tf x)
-    (let ((r (k-saying (lambda () (k-te tf (k-check-declared name tf x)))
-                       (lambda (m) (k-star-mistake name tf m)))))
-      (extract r 2))))
 ;; Lemma `l`, now of the names `named`.
 (define k-lemma-as (subr pure (k-lemma k-named) k-lemma)
   (lambda (l named)

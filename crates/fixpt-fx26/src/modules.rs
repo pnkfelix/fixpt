@@ -63,12 +63,28 @@ impl Checker {
         let (mut abs, mut descs) = (Vec::new(), Vec::new());
         let mut eff = Effect::pure();
         let mut lambdas = self.module_lambdas(items);
+        if let Some(init) = items.iter().find_map(|it| match it {
+            ModItem::Val { init, infer: true, .. } if !self.is_lambda(*init) => Some(*init),
+            _ => None,
+        }) {
+            return Err(FxError::at(self.arena.span_of(init), "`define*` defines a procedure: a `lambda`"));
+        }
         if let Some((n, _, init, _)) = lambdas.iter().find(|(_, _, init, i)| matches!(items[*i], ModItem::Rec(_)) && !self.is_lambda(*init)) {
             return Err(FxError::at(self.arena.span_of(*init), format!("`{}`, in a `define-rec`, is a `lambda`", self.interner.name(*n))));
         }
         self.module_hazards(items, &lambdas)?;
+        // A `define*`'s type as written, and the type it is checked at first,
+        // reading any global: what it reads is then found from its body.
+        let star = |i: usize| matches!(items[i], ModItem::Val { infer: true, .. });
+        let mut declared = Vec::new();
         for l in lambdas.iter_mut() {
             l.1 = self.resolve_selects(l.1, span)?;
+            declared.push(l.1);
+            if star(l.3) {
+                l.1 = self.with_latent(l.1, &Effect::atom(crate::ast::Atom::Read(crate::ast::Region::Globals))).ok_or_else(|| {
+                    FxError::at(self.arena.span_of(l.2), "`define*` finds what a procedure reads: its type is a `subr`")
+                })?;
+            }
         }
         let base = self.env.len();
         for (k, (n, t, _, i)) in lambdas.iter().enumerate() {
@@ -117,7 +133,7 @@ impl Checker {
                 }
                 ModItem::Desc { name, ty } => descs.push((name, self.resolve_selects(ty, span)?)),
                 ModItem::Val { name, .. } if lambdas.iter().any(|(n, _, _, at)| *n == name && *at == i) => {}
-                ModItem::Val { name, ty, init } => {
+                ModItem::Val { name, ty, init, .. } => {
                     let (t, ie) = match ty {
                         Some(t) => {
                             let t = self.resolve_selects(t, span)?;
@@ -137,8 +153,16 @@ impl Checker {
         // Whether each group may not end, and why: found once, for its first
         // member (the group being the same for each of its members).
         let mut ends: Vec<Option<Result<(), String>>> = vec![None; lambdas.len()];
-        for (k, (n, t, init, i)) in lambdas.iter().enumerate() {
+        for k in 0..lambdas.len() {
+            let (n, t, init, i) = lambdas[k];
             let group: Vec<(Sym, TyId, ExpId)> = groups[k].iter().map(|g| (lambdas[*g].0, lambdas[*g].1, lambdas[*g].2)).collect();
+            if star(i) {
+                let found = self.module_define_star(k, &lambdas, &group, &mut ends, groups[k].first().copied(), declared[k], base)?;
+                eff = eff.union(&found.1);
+                lambdas[k].1 = found.0;
+                typed.push((i, n, found.0));
+                continue;
+            }
             let rdepth = self.recursive.len();
             if let Some(&first) = groups[k].first() {
                 if ends[first].is_none() {
@@ -151,17 +175,68 @@ impl Checker {
                     }
                 }
             }
-            let r = match items[*i] {
-                ModItem::Rec(_) => self.check(*init, *t).map_err(|err| self.declared_error(*n, *t, *init, err)),
-                _ => self.check(*init, *t),
+            let r = match items[i] {
+                ModItem::Rec(_) => self.check(init, t).map_err(|err| self.declared_error(n, t, init, err)),
+                _ => self.check(init, t),
             };
             self.recursive.truncate(rdepth);
             eff = eff.union(&r?);
-            typed.push((*i, *n, *t));
+            typed.push((i, n, t));
         }
         typed.sort_by_key(|(i, ..)| *i);
         let vals = typed.into_iter().map(|(_, n, t)| (n, t)).collect();
         Ok((abs, descs, vals, eff))
+    }
+
+    /// Typed lambda `k` of a module, a `define*`, of type `declared` as
+    /// written, bound at `base + k` (until then at its type reading any
+    /// global; while first checked, at `declared`): checked at its type reading any global,
+    /// then at the type with the globals its body read, found, its binding
+    /// given that type, as a top-level `define*` is. Only a group of one
+    /// (itself, if it calls itself), as at the top level, where a `define*`
+    /// is in no `define-rec`. Its type found, and the effect.
+    #[allow(clippy::too_many_arguments)]
+    fn module_define_star(
+        &mut self,
+        k: usize,
+        lambdas: &crate::modorder::Lambdas,
+        group: &[(Sym, TyId, ExpId)],
+        ends: &mut [Option<Result<(), String>>],
+        first: Option<usize>,
+        declared: TyId,
+        base: usize,
+    ) -> R<(TyId, Effect)> {
+        let (n, wide, init, _) = lambdas[k];
+        if let Some((m, _, _)) = group.iter().find(|(m, _, _)| *m != n) {
+            return Err(FxError::at(
+                self.arena.span_of(init),
+                format!("`define*` `{}` is in a recursive group with `{}`: use `define`", self.interner.name(n), self.interner.name(*m)),
+            ));
+        }
+        let why = first.map(|f| ends[f].get_or_insert_with(|| self.termination(group)).clone());
+        let note = |c: &mut Self, t: TyId| {
+            if let Some(Err(why)) = &why {
+                c.recursive.push((n, t));
+                c.spin_why.push(((n, t), why.clone()));
+            }
+        };
+        // Bound at its type as written while it is first checked, as a
+        // top-level `define*` is: a call of itself reads nothing more.
+        self.env[base + k].1 = declared;
+        let rdepth = self.recursive.len();
+        note(self, wide);
+        let first_check = self.check_declared(n, wide, init);
+        self.recursive.truncate(rdepth);
+        first_check?;
+        let found = self.with_latent(declared, &self.globals_read_by(init)).expect("a subr");
+        self.env[base + k].1 = found;
+        note(self, found);
+        let again = self.check_declared(n, found, init).map_err(|err| {
+            let shown = self.show_ty(found);
+            FxError::at(err.span, format!("`define*` found `{}` to be a {shown}: {}", self.interner.name(n), err.message))
+        });
+        self.recursive.truncate(rdepth);
+        Ok((found, again?))
     }
 
     /// `(with m body)`: the body with `m`'s values in scope, by name, at

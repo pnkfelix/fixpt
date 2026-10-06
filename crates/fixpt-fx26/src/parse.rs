@@ -1789,12 +1789,13 @@ impl Checker {
                 }
                 (Some("define"), [_, n, init]) => {
                     let (name, _) = name_of(self, n)?;
-                    out.push(ModItem::Val { name, ty: None, init: self.parse_exp(init)? });
+                    out.push(ModItem::Val { name, ty: None, init: self.parse_exp(init)?, infer: false });
                 }
-                (Some("define"), [_, n, t, init]) => {
+                (Some(d @ ("define" | "define*")), [_, n, t, init]) => {
+                    let infer = d == "define*";
                     let (name, _) = name_of(self, n)?;
                     let ty = self.parse_type(t)?;
-                    out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp(init)? });
+                    out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp(init)?, infer });
                 }
                 (Some("define-rec"), [_, bs @ ..]) => {
                     let mut group = Vec::new();
@@ -1812,7 +1813,7 @@ impl Checker {
                 _ => {
                     return Err(FxError::at(
                         f.span,
-                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define x [T] e)` and `(define-rec (f T e) …)`",
+                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define x [T] e)`, `(define* f T e)` and `(define-rec (f T e) …)`",
                     ));
                 }
             }
