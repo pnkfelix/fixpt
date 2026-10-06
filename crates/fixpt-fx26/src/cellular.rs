@@ -16,6 +16,7 @@ use crate::top::Top;
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, ROUTINES, WORD_TWIN};
 
+mod procs;
 mod regcode;
 use fixpt_heap::{Heap, Value};
 use fixpt_read::Sym;
@@ -141,6 +142,16 @@ pub struct Compiler<'a> {
     /// The global procedures a call in register code may specialize at a
     /// lambda argument (`regcode::r_specialize`).
     specials: Vec<Special>,
+    /// With `FIXPT_PLAN_CHECK` set: each top-level form's procedures as the
+    /// middle phase decides them (`procs`), the stack code's decisions
+    /// checked against them, and where they differ.
+    plan_check: bool,
+    plan: Option<procs::Plan>,
+    pub plan_mismatches: Vec<String>,
+    plan_checks: usize,
+    /// How deep in register code the compile is: a lambda compiled there is
+    /// not in the plan (its context is not the tree's).
+    twin_depth: usize,
     /// The specialized copies made, by the procedure's word, the lambda's
     /// span, what it captures and the globals it sees (`r_specialize`).
     spec_copies: HashMap<(u64, u32, u32, Vec<Sym>, Option<usize>), Value>,
@@ -246,6 +257,11 @@ impl<'a> Compiler<'a> {
             modules: Vec::new(),
             specials: Vec::new(),
             spec_copies: HashMap::new(),
+            plan_check: std::env::var_os("FIXPT_PLAN_CHECK").is_some(),
+            plan: None,
+            plan_mismatches: Vec::new(),
+            plan_checks: 0,
+            twin_depth: 0,
             spec: None,
             word_name: None,
             scope_name: None,
@@ -911,7 +927,18 @@ impl<'a> Compiler<'a> {
 
     fn lambda_word_named(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>, named: Option<String>, base: String) -> R<(Value, Vec<Sym>)> {
         let defining = self.defining.take();
-        let fv = self.captured(params, body, e);
+        // What it captures, as the middle phase decided (`procs`); decided
+        // here only where it did not, in register code's own lambdas.
+        let fv = match self.planned_fv(body) {
+            Some(fv) => {
+                if self.plan_check {
+                    let found = self.captured(params, body, e);
+                    self.plan_check_lambda(params, body, own, &found);
+                }
+                fv
+            }
+            None => self.captured(params, body, e),
+        };
         // A parameter of the same name hides the procedure.
         let own = own.filter(|f| !params.contains(f));
         let added = std::mem::take(&mut self.lifting_added);
@@ -960,7 +987,9 @@ impl<'a> Compiler<'a> {
         if self.registers && in_range != Some(false) {
             self.declined = None;
             let outer_reuse = std::mem::replace(&mut self.reuse, std::mem::take(&mut self.made));
+            self.twin_depth += 1;
             let cells = self.register_code(params, body, &inner, this, defining.map(|n| (n, w)));
+            self.twin_depth -= 1;
             self.reuse = outer_reuse;
             match cells {
                 Some(cells) => {
@@ -1008,6 +1037,12 @@ impl<'a> Compiler<'a> {
         if !stays && self.inline_room(body, INLINE_LIMIT) >= 0 && !self.mentions(body, f) {
             self.inlines.push(Inline { name, word, params, body, genv_len });
         }
+    }
+
+    /// With `FIXPT_PLAN_CHECK`: top-level form `x`'s plan, for its compile to
+    /// be checked against.
+    fn plan_for(&mut self, x: ExpId) {
+        self.plan = Some(self.plan_top(x));
     }
 
     /// The next lambda's word named for global `name`, whose definition it
@@ -1164,7 +1199,18 @@ impl<'a> Compiler<'a> {
         if let Some(done) = self.lifted.get(&key) {
             return Ok(done.clone());
         }
-        let Some((lams, added)) = self.lift_plan(bindings, body, e, tail) else {
+        // As the middle phase decided, where it did (`procs`).
+        let planned = match self.planned_lift(x) {
+            Some(added) => {
+                if self.plan_check {
+                    let found = self.lift_plan(bindings, body, e, tail);
+                    self.plan_check_lift(x, found.as_ref().map(|(_, a)| a));
+                }
+                added.map(|added| (self.lift_lambdas(bindings), added))
+            }
+            None => self.lift_plan(bindings, body, e, tail),
+        };
+        let Some((lams, added)) = planned else {
             self.lifted.insert(key, None);
             return Ok(None);
         };
@@ -1820,6 +1866,7 @@ impl<'a> Compiler<'a> {
                             self.module_members = Some(Vec::new());
                         }
                         let genv_len = self.genv.len();
+                        self.plan_for(*exp);
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
                         if let (true, Some(ms)) = (is_module, self.module_members.take()) {
                             self.modules.push((*name, genv_len, ms));
@@ -1834,6 +1881,7 @@ impl<'a> Compiler<'a> {
                             self.defining = Some(*name);
                             self.name_word_for(*name);
                         }
+                        self.plan_for(*exp);
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
                         self.defining = None;
                         // Small enough, and not calling itself: inlined
@@ -1879,6 +1927,7 @@ impl<'a> Compiler<'a> {
                         if let Some((_, _, None)) = self.lambda_of(*e) {
                             self.name_word_for(*n);
                         }
+                        self.plan_for(*e);
                         self.exp(*e, &Vec::new(), 0, &mut code, false)?;
                         self.op1(&mut code, "global!", g);
                     }
@@ -1888,6 +1937,7 @@ impl<'a> Compiler<'a> {
                     if has_value {
                         self.op(&mut code, "drop");
                     }
+                    self.plan_for(k.exp);
                     self.exp(k.exp, &Vec::new(), 0, &mut code, false)?;
                     has_value = true;
                 }
@@ -1899,6 +1949,12 @@ impl<'a> Compiler<'a> {
             self.lit(&mut code, u);
         }
         self.op(&mut code, "exit");
+        if self.plan_check {
+            for m in &self.plan_mismatches {
+                eprintln!("PLAN differs: {m}");
+            }
+            eprintln!("PLAN checked {}, {} differ", self.plan_checks, self.plan_mismatches.len());
+        }
         self.assemble(&code, "program")
     }
 }

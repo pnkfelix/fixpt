@@ -144,7 +144,18 @@ green, the self-compile measured.
 2. **The procedure table, as a pre-pass**: every lambda met, in the order
    the stack walk meets them, with what each needs (captured names, lift
    plan, name); the stack compiler reads it instead of deciding as it
-   goes. Words unchanged.
+   goes. Words unchanged. *Rust done, 2026-10-06* (`cellular/procs.rs`): before each
+   top-level form is compiled, a walk with the stack compiler's scoping,
+   arm for arm, in environments whose places are only their kinds, decides
+   each lambda's captured names and each `letrec`'s lifting with the
+   compiler's own predicates; the stack compiler reads them, and decides
+   only for the lambdas register code compiles (an inlined body, a
+   specialized copy), whose context is not the tree's. Keyed by node, not
+   by place: a `define-datatype`'s constructors share their form's.
+   `FIXPT_PLAN_CHECK` re-decides beside the plan and says where they
+   differ: none, in 8088 lambdas and `letrec`s of the test programs and
+   bench suites and 2841 of the front end. peval's `words` 2.78 → 2.84–
+   2.89 ms. The FX-26 compiler next.
 3. **Decided call sites**: inlining and specialization decided in the
    pre-pass (the candidate lists and the call's argument trees are all it
    needs; the callee's register location is whether it is a known global),
