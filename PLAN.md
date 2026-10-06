@@ -225,16 +225,16 @@ before everything else, known holes before proofs.
   loaded again keeps its private regions.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
-- M. **The front end into modules** (`TODO.md` §34, 2026-10-06): 40 of
-  50 files are modules; the four too long split first. Left: the seven
-  files of cross-file hook cycles (the cycles removed, not hooked: the
-  checker's by regrouping each recursive knot into one file, the
-  compilers' by a middle phase, `TODO.md` §41, steps 1–4 of 5 done) and
-  the three generated ones. Found on the way, fixed: a re-exported type
+- M. **The front end into modules** (`TODO.md` §34, 2026-10-06): 42 of
+  50 files are modules; the four too long split first. Left: the five
+  checker files of cross-file hook cycles (to be removed by regrouping
+  each recursive knot into one file) and the three generated ones. The
+  compilers' hooks are gone, by a middle phase (`TODO.md` §41, all five
+  steps done; `regcode-core.fx` over the size limit by the user's
+  decision, to be revisited). Found on the way, fixed: a re-exported type
   printed whole at each use, which took check from 0.91 s to 28 s by the
-  first file; types and
-  values named apart in modules; printing a module's type quadratic in
-  its components (check 1.42 → 1.09 s).
+  first file; types and values named apart in modules; printing a
+  module's type quadratic in its components (check 1.42 → 1.09 s).
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:
   `editors/emacs/fx26-mode.el` (highlighting, the repository's
   indentation, `run-fx26` over `fixpt --emacs repl` with `,at` placing
