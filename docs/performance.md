@@ -96,6 +96,24 @@ in the components after them; `k-mentions-token?`, asked of every node
 printed, scans for a token without making strings; and the FX-26 select
 code builds its error messages only for an error.
 
+**A re-exported type was still a copy at each use** (2026-10-06, `TODO.md`
+§34). Migrating `eager-reader.fx`, the first file, took check from 1.89 s
+to 28.3 s; the files before it had crept 0.91 s to 1.89 s. `sample` put
+70% in `string_to_rust` under `%fx26-string-search`, from
+`k-mentions-token?`: printing. Checking prefixes of the front end
+(`FIXPT_PROBE_FILE`) found the cost wherever the parser's types were used,
+and `fixpt check` on eager-reader and the parser printed 810 K characters
+against 26 K: `syn`, and every type holding it, printed whole. The
+`select` node a re-export binds stayed a `select`, so each use's
+resolution rebuilt whatever led to it (the rest is kept since the entry
+above), a new node per use, which the printer, by node, never knew for a
+`define-type`'s. Now a `select` of a module whose binding is global is
+linked, once resolved, to what it names (`resolve_selects`,
+`k-link-global-select`); a family's is not, being read as the `select` it
+is, nor a local module's. Check 1.15 s with eager-reader a module, 1.13 s
+without (`modules/select-shown.fx`). Still to do: `%fx26-string-search`
+copies its whole string to Rust at each call.
+
 Measurements are on the development machine, as best of several runs.
 Debug builds are what `cargo test` runs; release numbers come from
 `cargo run --release`.

@@ -303,7 +303,7 @@ impl Checker {
             given.insert(v, D::Effect(self.selected_effect(m, n, span)?));
         }
         let mut sel = HashMap::new();
-        for (m, n) in found {
+        for (m, n, node) in found {
             let shown = |c: &Checker| format!("`(select {} {})`", c.interner.name(m), c.interner.name(n));
             let Some(mt) = self.lookup(m) else {
                 return Err(FxError::at(span, format!("{}: `{}` is not bound here", shown(self), self.interner.name(m))));
@@ -318,6 +318,16 @@ impl Checker {
                     return Err(FxError::at(span, format!("{}: `{}` has no type `{}`", shown(self), self.interner.name(m), self.interner.name(n))));
                 }
             };
+            // A global module's type, as `select` names it, is that node
+            // from now on: whatever leads to it is not rebuilt, and is
+            // shared, and shown by its name. (Not a family: one is read as
+            // the `select` it is.) A local module's may differ by scope.
+            if self.env.iter().rposition(|(x, _)| *x == m).is_some_and(|i| self.global_slots.contains(&i))
+                && !matches!(self.arena.get(to), Ty::Lam { .. })
+                && !matches!(self.arena.get(to), Ty::Var(v) if self.arena.dvar_kind(*v) != Kind::Type)
+            {
+                self.arena.set_link(node, to);
+            }
             sel.insert((m, n), to);
         }
         let outer = std::mem::replace(&mut self.select_map, sel);
@@ -496,7 +506,7 @@ impl Checker {
     pub(crate) fn resolve_selects_outside(&mut self, t: TyId, params: &[Sym], span: Span) -> R<TyId> {
         let mut found = Vec::new();
         self.selects_in(t, &mut HashSet::new(), &mut found);
-        if let Some((m, n)) = found.iter().find(|(m, _)| params.contains(m)) {
+        if let Some((m, n, _)) = found.iter().find(|(m, _, _)| params.contains(m)) {
             return Err(FxError::at(
                 span,
                 format!(
@@ -509,15 +519,13 @@ impl Checker {
         self.resolve_selects(t, span)
     }
 
-    pub(crate) fn selects_in(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(Sym, Sym)>) {
+    pub(crate) fn selects_in(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(Sym, Sym, TyId)>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
         }
         if let Ty::Select(m, n) = self.arena.get(t) {
-            if !out.contains(&(*m, *n)) {
-                out.push((*m, *n));
-            }
+            out.push((*m, *n, t));
             return;
         }
         for k in self.ty_kids(t) {

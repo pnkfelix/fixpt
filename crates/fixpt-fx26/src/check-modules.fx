@@ -502,7 +502,7 @@
 
 ;;; ------------------------------------------------------------ select
 
-;; Each `(select m n)` in `t`, as first met, onto `out` (newest first); the
+;; Each `(select m n)` node in `t`, onto `out` (newest first); the
 ;; nodes walked, `seen`.
 (define-rec
   (k-selects-from (subr (maxeff kstate spin) (int (ref k-ids @t) (ref k-selects @t)) unit)
@@ -513,10 +513,7 @@
             (begin
               (set seen (cons t (get seen)))
               (tagcase (k-get t)
-                (ty-select (m n)
-                  (if (>= (k-select-in (get out) m n -1) 0)
-                      #u
-                      (set out (cons (product (1 m) (2 n) (3 t)) (get out)))))
+                (ty-select (m n) (set out (cons (product (1 m) (2 n) (3 t)) (get out))))
                 (else y (k-selects-each (k-ty-kids t) seen out))))))))
   (k-selects-each (subr (maxeff kstate spin) (k-ids (ref k-ids @t) (ref k-selects @t)) unit)
     (lambda (ts seen out)
@@ -556,6 +553,19 @@
 ;; What an error about `(select m n)` starts with; made only for an error.
 (define k-select-prefix (subr (read @globals) (symbol symbol) string)
   (lambda (m n) (k-cat3 (k-select-shown m n) ": `" (symbol->string m))))
+;; A global module's type, as `select` node `node` names it: that node from
+;; now on, linked to `to`, so that whatever leads to it is not rebuilt, and
+;; is shared, and shown by its name. Not a family, which is read as the
+;; `select` it is; nor a local module's, which may differ by scope.
+(define k-link-global-select (subr (maxeff kstate spin) (symbol int int) unit)
+  (lambda (m node to)
+    (if (and (k-global? m)
+             (tagcase (k-get to)
+               (ty-lam (bs d) #f)
+               (ty-var (v) (= (k-dvar-kind v) 2))
+               (else y #t)))
+        (k-set-link node to)
+        #u)))
 ;; What each of `found` is where it is checked, at `a`..`b`.
 (define k-selection (subr (maxeff checks spin) (k-selects int int) k-selects)
   (lambda (found a b)
@@ -570,6 +580,7 @@
                          (else y (k-fail (k-cat4 (k-select-prefix m n) "` is a " (k-show-ty mt)
                                                  ", not a module")
                                          a b)))))
+               (linked (k-link-global-select m (extract (car found) 3) to))
                (rest (k-selection (cdr found) a b)))
           (cons (product (1 m) (2 n) (3 to)) rest)))))
 ;;; ------------------------------------------------------------ effects selected

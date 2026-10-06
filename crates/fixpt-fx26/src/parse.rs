@@ -1581,7 +1581,7 @@ impl Checker {
         let mut found = Vec::new();
         self.selects_in(t, &mut std::collections::HashSet::new(), &mut found);
         let mut sel = std::collections::HashMap::new();
-        for (m, x) in found {
+        for (m, x, _) in found {
             if let Some(k) = names.iter().rposition(|n| *n == Some(m)) {
                 sel.insert((m, x), self.arena.ty(Ty::ParamSel(k, x)));
             }
