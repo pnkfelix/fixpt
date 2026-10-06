@@ -454,14 +454,27 @@
 (define* c-has-standard-value? (subr pure (string) bool)
   (lambda (n) (or (string=? n "list") (>= (c-arity n) 0))))
 
+;; The standard operations' words of the form being compiled whose twins
+;; are to be made, last first (step 4): each word, operation and arity.
+(define-type c-standard-twin (productof (1 tword) (2 string) (3 int)))
+(define c-standard-twins (ref (listof c-standard-twin @k) @k) (new nil))
+;; Word `w`'s register code as standard operation `op` of `n` arguments has
+;; it as a value.
+(define c-make-standard-twin (subr (maxeff compiles spin) (c-standard-twin) unit)
+  (lambda (t)
+    (let ((cells ((get c-standard-register-code) (extract t 2) (extract t 3))))
+      (if (null? cells) #u (begin (set-register-twin (extract t 1) cells) #u)))))
 ;; Word `w`, with register code as standard operation `op` of `n` arguments
-;; has it as a value, for the native compiler to start from.
+;; has it as a value, for the native compiler to start from: made with its
+;; form's other twins.
 (define c-register-twin (subr (maxeff compiles spin) (tword string int) tword)
   (lambda (w op n)
     (begin
       (if (get c-registers)
-          (let ((cells ((get c-standard-register-code) op n)))
-            (if (null? cells) #u (begin (set-register-twin w cells) #u)))
+          (let ((t (product (1 w) (2 op) (3 n))))
+            (if (= (get c-twin-depth) 0)
+                (set c-standard-twins (cons t (get c-standard-twins)))
+                (c-make-standard-twin t)))
           #u)
       w)))
 
@@ -515,6 +528,9 @@
                           sum-slot (+ slot 1) (+ j 1) c)))))))
 
 (define c-span-key (with compile-lift-module c-span-key))
+(define-type c-standard-twin (select compile-lift-module c-standard-twin))
+(define c-standard-twins (with compile-lift-module c-standard-twins))
+(define c-make-standard-twin (with compile-lift-module c-make-standard-twin))
 (define c-lifted-at (with compile-lift-module c-lifted-at))
 (define c-lift-of (with compile-lift-module c-lift-of))
 (define c-lift-added (with compile-lift-module c-lift-added))

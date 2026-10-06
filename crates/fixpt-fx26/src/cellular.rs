@@ -83,6 +83,14 @@ struct This {
 
 type Env = Vec<(Sym, Loc)>;
 
+/// A word whose register code, its twin, is made once its form's words all
+/// are (step 4): a lambda's, with what its stack code knew and made; or a
+/// standard operation's as a value.
+enum Twin {
+    Lambda { params: Vec<Sym>, body: ExpId, inner: Env, this: Option<This>, own: Option<(Sym, Value)>, name: String, w: Value, made: Vec<Made> },
+    Standard { w: Value, name: String, op: String, n: usize },
+}
+
 /// The innermost binding of `n` in `e`.
 fn find(e: &[(Sym, Loc)], n: Sym) -> Option<Loc> {
     e.iter().rev().find(|(m, _)| *m == n).map(|(_, l)| *l)
@@ -171,6 +179,9 @@ pub struct Compiler<'a> {
     spec_copies: HashMap<(u64, u32, u32, Vec<Sym>, Option<usize>), Value>,
     /// While a procedure specialized at a lambda is compiled: which.
     spec: Option<Spec>,
+    /// The words of the form being compiled whose twins are to be made,
+    /// in the order their stack code was finished (step 4).
+    twins: Vec<Twin>,
     /// The name the next lambda's word gets, if not where its body starts.
     word_name: Option<String>,
     /// The name of the lambda whose body is compiled, without where it
@@ -281,6 +292,7 @@ impl<'a> Compiler<'a> {
             plan_inlining: Vec::new(),
             plan_path: Vec::new(),
             spec: None,
+            twins: Vec::new(),
             word_name: None,
             scope_name: None,
             bind_name: None,
@@ -1007,31 +1019,14 @@ impl<'a> Compiler<'a> {
             })
         });
         if self.registers && in_range != Some(false) {
-            self.declined = None;
-            let outer_reuse = std::mem::replace(&mut self.reuse, std::mem::take(&mut self.made));
-            // A planned lambda, or a copy made where the plan's calls are.
-            let planned = if self.twin_depth == 0 {
-                self.planned_fv(params, body).is_some()
+            let made = std::mem::take(&mut self.made);
+            let twin = Twin::Lambda { params: params.to_vec(), body, inner, this, own: defining.map(|n| (n, w)), name, w, made };
+            // A form's own words' twins after its words; a copy's (made in
+            // register code) at once, until the plan makes copies (4c).
+            if self.twin_depth == 0 {
+                self.twins.push(twin);
             } else {
-                self.r_in_plan && matches!(self.plan_path.last(), Some(procs::Step::Copy(..)))
-            };
-            let in_plan = std::mem::replace(&mut self.r_in_plan, planned);
-            self.twin_depth += 1;
-            let cells = self.register_code(params, body, &inner, this, defining.map(|n| (n, w)));
-            self.twin_depth -= 1;
-            self.r_in_plan = in_plan;
-            self.reuse = outer_reuse;
-            match cells {
-                Some(cells) => {
-                    let sym = self.heap.intern(&name);
-                    let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
-                    self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
-                    self.register_report.push((name, None));
-                }
-                None => {
-                    let why = self.declined.take().unwrap_or_else(|| "?".into());
-                    self.register_report.push((name, Some(why)));
-                }
+                self.make_twin(twin)?;
             }
         }
         Ok((w, fv))
@@ -1074,6 +1069,8 @@ impl<'a> Compiler<'a> {
     fn plan_for(&mut self, x: ExpId) {
         self.plan = Some(self.plan_top(x));
         self.form_made.clear();
+        // None of a form whose compile failed.
+        self.twins.clear();
     }
 
     /// The next lambda's word named for global `name`, whose definition it
@@ -1609,14 +1606,66 @@ impl<'a> Compiler<'a> {
 
     /// Register code for word `w`, named `name`, as standard operation `op`
     /// of `n` arguments has it as a value, for the native compiler to start
-    /// from.
+    /// from: made with its form's other twins.
     fn register_twin(&mut self, w: Value, name: &str, op: &str, n: usize) -> R<()> {
-        if self.registers
-            && let Some(cells) = self.r_standard_word(op, n)
-        {
-            let sym = self.heap.intern(name);
-            let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
-            self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
+        if self.registers {
+            let twin = Twin::Standard { w, name: name.to_string(), op: op.to_string(), n };
+            if self.twin_depth == 0 {
+                self.twins.push(twin);
+            } else {
+                self.make_twin(twin)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The twins of the form's words, in order (step 4): register code, a
+    /// phase after the stack code.
+    fn form_twins(&mut self) -> R<()> {
+        for twin in std::mem::take(&mut self.twins) {
+            self.make_twin(twin)?;
+        }
+        Ok(())
+    }
+
+    /// A word's twin made, or why not reported.
+    fn make_twin(&mut self, twin: Twin) -> R<()> {
+        match twin {
+            Twin::Standard { w, name, op, n } => {
+                if let Some(cells) = self.r_standard_word(&op, n) {
+                    let sym = self.heap.intern(&name);
+                    let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
+                    self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
+                }
+            }
+            Twin::Lambda { params, body, inner, this, own, name, w, made } => {
+                self.declined = None;
+                let outer_reuse = std::mem::replace(&mut self.reuse, made);
+                // A planned lambda, or a copy made where the plan's calls are.
+                let planned = if self.twin_depth == 0 {
+                    self.planned_fv(&params, body).is_some()
+                } else {
+                    self.r_in_plan && matches!(self.plan_path.last(), Some(procs::Step::Copy(..)))
+                };
+                let in_plan = std::mem::replace(&mut self.r_in_plan, planned);
+                self.twin_depth += 1;
+                let cells = self.register_code(&params, body, &inner, this, own);
+                self.twin_depth -= 1;
+                self.r_in_plan = in_plan;
+                self.reuse = outer_reuse;
+                match cells {
+                    Some(cells) => {
+                        let sym = self.heap.intern(&name);
+                        let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
+                        self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
+                        self.register_report.push((name, None));
+                    }
+                    None => {
+                        let why = self.declined.take().unwrap_or_else(|| "?".into());
+                        self.register_report.push((name, Some(why)));
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -1899,6 +1948,7 @@ impl<'a> Compiler<'a> {
                         let genv_len = self.genv.len();
                         self.plan_for(*exp);
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
+                        self.form_twins()?;
                         if let (true, Some(ms)) = (is_module, self.module_members.take()) {
                             self.modules.push((*name, genv_len, ms));
                         }
@@ -1914,6 +1964,7 @@ impl<'a> Compiler<'a> {
                         }
                         self.plan_for(*exp);
                         self.exp(*exp, &Vec::new(), 0, &mut code, false)?;
+                        self.form_twins()?;
                         self.defining = None;
                         // Small enough, and not calling itself: inlined
                         // where it is called. Not one that stays cellular
@@ -1960,6 +2011,7 @@ impl<'a> Compiler<'a> {
                         }
                         self.plan_for(*e);
                         self.exp(*e, &Vec::new(), 0, &mut code, false)?;
+                        self.form_twins()?;
                         self.op1(&mut code, "global!", g);
                     }
                     has_value = false;
@@ -1970,6 +2022,7 @@ impl<'a> Compiler<'a> {
                     }
                     self.plan_for(k.exp);
                     self.exp(k.exp, &Vec::new(), 0, &mut code, false)?;
+                    self.form_twins()?;
                     has_value = true;
                 }
                 _ => {}

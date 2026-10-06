@@ -481,6 +481,9 @@
              (set c-r-plan-ctx nil)
              (set c-planning #t)
              (set c-form-made nil)
+             ;; None of a form whose compile failed.
+             (set c-twins nil)
+             (set c-standard-twins nil)
              (set c-twin-depth 0)
              (p-exp x (the cenv nil) #f)
              (set c-lift-count count)))))

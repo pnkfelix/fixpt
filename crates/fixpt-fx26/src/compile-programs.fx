@@ -371,6 +371,7 @@
         (begin (c-name-for! (extract (car bs) 1) (extract (car bs) 3))
                (c-plan-top (extract (car bs) 3))
                (c-exp (extract (car bs) 3) (the cenv nil) 0 c #f)
+               (c-form-twins)
                (c-op1 c routine-global! (wcell-global (car gs)))
                (c-rec-fill (cdr bs) (cdr gs) c)))))
 
@@ -381,6 +382,7 @@
     (begin (set c-defining (the (listof symbol @k) (cons n nil)))
            (c-name-word! n)
            (c-lambda ps body (the cenv nil) 0 c (the syms nil) (the c-region nil))
+           (c-form-twins)
            (set c-defining (the (listof symbol @k) nil))
            (c-record-inline n ps body))))
 
@@ -454,6 +456,7 @@
                              (set c-module-members (the (listof c-inlinables @k) (list nil)))
                              #u)
                          (c-exp x (the cenv nil) 0 c #f)
+                         (c-form-twins)
                          (if (c-module? x) (c-keep-module! n) #u)
                          ;; After its global, which forgets what `n` was.
                          (let ((g (c-push-global n)))
@@ -465,7 +468,7 @@
                   (let ((g (c-push-global n)))
                     (begin (tagcase (car (c-lambda-of x))
                              (e-lambda (ps body la lb) (c-define-lambda n ps body c))
-                             (else y (c-exp x (the cenv nil) 0 c #f)))
+                             (else y (begin (c-exp x (the cenv nil) 0 c #f) (c-form-twins))))
                            (c-op1 c routine-global! (wcell-global g)))))
               (c-tops (cdr ts) c #f)))
           ;; Every name's global first; then each lambda, which runs nothing.
@@ -479,6 +482,7 @@
                    (set c-last-exp (the (listof exp @k) (cons x nil)))
                    (c-plan-top x)
                    (c-exp x (the cenv nil) 0 c #f)
+                   (c-form-twins)
                    (c-tops (cdr ts) c #t)))
           (else y (c-tops (cdr ts) c has-value))))))
 
