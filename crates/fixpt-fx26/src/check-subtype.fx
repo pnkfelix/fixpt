@@ -5,14 +5,8 @@
 ;;; `a ≤ b`. Recursive types are compared coinductively: a pair already
 ;;; being compared is assumed to hold.
 
+;; Its types, at top level: declared ahead, named anywhere.
 (define-type k-trail (ref k-pairs @t))
-(define k-bool=? (subr pure (bool bool) bool) (lambda (x y) (if x y (not y))))
-(define k-part-find (subr kreads (k-parts symbol) int)
-  (lambda (ps l)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2))
-          (else (k-part-find (cdr ps) l)))))
-
 ;; A subtype question's binder environment, for one side: each `poly`
 ;; binder in scope, by the name its pair of binders was given, so bodies are
 ;; compared as they are, not substituted, and a cycle through a `poly` comes
@@ -20,6 +14,37 @@
 (define-type k-benv k-pairs)
 ;; Both sides' environments.
 (define-type k-benvs (pairof k-benv k-benv @t))
+;; What one subtype question remembers: the pairs assumed (FX-87's trail),
+;; each with the environments it was asked under; and the names given to
+;; pairs of `poly` binders, by the pair of nodes and the position.
+(define-type k-assumed (listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) acyclic))
+(define-type k-strail (ref k-assumed @t))
+(define-type k-label-entry (productof (1 int) (2 int) (3 int) (4 int)))
+(define-type k-label-list (listof k-label-entry acyclic))
+(define-type k-labels (ref k-label-list @t))
+;; Each lemma that fits a pair of types: its hypotheses, instantiated.
+(define-type k-instances (listof k-hyps acyclic))
+
+;; Modules' types compared, by `check-module-rules.fx`, which sets this.
+(define-type k-sub-rule
+  (subr (maxeff kstate spin) (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool))
+;; A computation checked, and what makes a message of W and G.
+(define-type k-checking (subr (maxeff checks spin) () k-te))
+(define-type k-saying (subr (maxeff checks spin) (string string string) string))
+
+;; The latent effect of `t`, a `subr` under any `poly`s, in a list; or none.
+(define-type k-effs (listof k-eff acyclic))
+
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-subtype-module (module
+(define k-bool=? (subr pure (bool bool) bool) (lambda (x y) (if x y (not y))))
+(define k-part-find (subr kreads (k-parts symbol) int)
+  (lambda (ps l)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2))
+          (else (k-part-find (cdr ps) l)))))
+
 (define k-benv-var (subr kreads (k-benv int) int)
   (lambda (env v)
     (cond ((null? env) v)
@@ -120,14 +145,6 @@
                       (else y (car ds))))
                  (rest (k-benv-eargs env (cdr ds))))
             (the k-descs (cons d rest)))))))
-;; What one subtype question remembers: the pairs assumed (FX-87's trail),
-;; each with the environments it was asked under; and the names given to
-;; pairs of `poly` binders, by the pair of nodes and the position.
-(define-type k-assumed (listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) acyclic))
-(define-type k-strail (ref k-assumed @t))
-(define-type k-label-entry (productof (1 int) (2 int) (3 int) (4 int)))
-(define-type k-label-list (listof k-label-entry acyclic))
-(define-type k-labels (ref k-label-list @t))
 (define k-strail-has? (subr kreads (k-assumed int int k-benv k-benv) bool)
   (lambda (ps a b ea eb)
     (and (not (null? ps))
@@ -193,12 +210,6 @@
     (if (and (not (null? d)) (null? (cdr d)))
         (tagcase (car d) (a-var (x) (if (k-binder-has? bs x) x -1)) (else z -1))
         -1)))
-;; Each lemma that fits a pair of types: its hypotheses, instantiated.
-(define-type k-instances (listof k-hyps acyclic))
-
-;; Modules' types compared, by `check-module-rules.fx`, which sets this.
-(define-type k-sub-rule
-  (subr (maxeff kstate spin) (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool))
 (define k-sub-module (ref k-sub-rule @t) (new (lambda (a b ta tb ea eb trail labels) #f)))
 
 ;; Whether effects `d` and `e` are the same, each by its side's environment.
@@ -637,10 +648,6 @@
 ;; "a W is expected here, and this is a G", of `w` and `g`.
 (define k-expected-here (subr (read @globals) (string string) string)
   (lambda (w g) (k-cat4 "a " w k-sep g)))
-;; A computation checked, and what makes a message of W and G.
-(define-type k-checking (subr (maxeff checks spin) () k-te))
-(define-type k-saying (subr (maxeff checks spin) (string string string) string))
-
 (define k-rewriting (subr (maxeff checks spin) (k-checking int int k-saying) k-te)
   (lambda (f a b say)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
@@ -700,8 +707,6 @@
         (cv-cellular () (k-note-conversion x (+ n 1)))
         (cv-native () (k-note-conversion x (+ n 2)))
         (else y #u)))))
-;; The latent effect of `t`, a `subr` under any `poly`s, in a list; or none.
-(define-type k-effs (listof k-eff acyclic))
 (define k-latent-of (subr (maxeff kstate spin) (int) k-effs)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
@@ -891,4 +896,37 @@
 ;; A `lambda` missing parameter types, or a thunk: better told than asked.
 (define k-needs-telling? (subr kreads (kx) bool)
   (lambda (x)
-    (tagcase x (x-lambda (ps body a b) (or (null? ps) (k-some-untyped? ps))) (else y #f))))
+    (tagcase x (x-lambda (ps body a b) (or (null? ps) (k-some-untyped? ps))) (else y #f))))))
+
+(define k-part-find (with check-subtype-module k-part-find))
+(define k-benv-set (with check-subtype-module k-benv-set))
+(define k-label-of? (with check-subtype-module k-label-of?))
+(define k-label (with check-subtype-module k-label))
+(define k-nlist-tail (with check-subtype-module k-nlist-tail))
+(define k-sub-module (with check-subtype-module k-sub-module))
+(define k-inv (with check-subtype-module k-inv))
+(define k-sub (with check-subtype-module k-sub))
+(define k-subtype (with check-subtype-module k-subtype))
+(define k-part-index (with check-subtype-module k-part-index))
+(define k-rewriting (with check-subtype-module k-rewriting))
+(define k-conversion (with check-subtype-module k-conversion))
+(define k-convert-at (with check-subtype-module k-convert-at))
+(define k-latent-of (with check-subtype-module k-latent-of))
+(define k-reshape-hook (with check-subtype-module k-reshape-hook))
+(define k-expect (with check-subtype-module k-expect))
+(define k-bind-all (with check-subtype-module k-bind-all))
+(define k-name-nat (with check-subtype-module k-name-nat))
+(define k-bind-named (with check-subtype-module k-bind-named))
+(define k-note-letrec (with check-subtype-module k-note-letrec))
+(define k-naming-effect (with check-subtype-module k-naming-effect))
+(define k-bind-letrec (with check-subtype-module k-bind-letrec))
+(define k-lambda? (with check-subtype-module k-lambda?))
+(define k-note-let-lambdas (with check-subtype-module k-note-let-lambdas))
+(define k-generalizable? (with check-subtype-module k-generalizable?))
+(define k-letrec-not-lambda (with check-subtype-module k-letrec-not-lambda))
+(define k-quote-dvar (with check-subtype-module k-quote-dvar))
+(define k-proj-map (with check-subtype-module k-proj-map))
+(define k-param-types (with check-subtype-module k-param-types))
+(define k-binding-types (with check-subtype-module k-binding-types))
+(define k-some-untyped? (with check-subtype-module k-some-untyped?))
+(define k-needs-telling? (with check-subtype-module k-needs-telling?))
