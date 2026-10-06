@@ -3,6 +3,9 @@
 
 ;;; ------------------------------------------------------------- inlining
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define compile-programs-module (module
 ;; The most parser-tree nodes a body may have to be inlined
 ;; (`c-inline-room`).
 (define c-inline-limit int 20)
@@ -638,4 +641,21 @@
 ;; The entry point: a checked program's trees, and what checking found.
 (define compile-program
   (subr (maxeff compiles (comefrom @y) spin) ((listof top acyclic) k-facts) cresult)
-  (lambda (tops facts) (c-program (lambda (c) (c-tops tops c #f)) facts)))
+  (lambda (tops facts) (c-program (lambda (c) (c-tops tops c #f)) facts)))))
+
+(define c-inline-limit (with compile-programs-module c-inline-limit))
+(define c-inlines (with compile-programs-module c-inlines))
+(define c-inlining (with compile-programs-module c-inlining))
+(define-type c-special (select compile-programs-module c-special))
+(define c-specials (with compile-programs-module c-specials))
+(define-type c-spec (select compile-programs-module c-spec))
+(define c-spec-now (with compile-programs-module c-spec-now))
+(define c-nth (with compile-programs-module c-nth))
+(define c-inline-room (with compile-programs-module c-inline-room))
+(define compile-note-inline! (with compile-programs-module compile-note-inline!))
+(define compile-forget-globals! (with compile-programs-module compile-forget-globals!))
+(define compile-keep-global! (with compile-programs-module compile-keep-global!))
+(define compile-new-global (with compile-programs-module compile-new-global))
+(define compile-global-cell (with compile-programs-module compile-global-cell))
+(define compile-checked (with compile-programs-module compile-checked))
+(define compile-program (with compile-programs-module compile-program))
