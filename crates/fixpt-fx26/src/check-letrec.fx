@@ -3,6 +3,9 @@
 ;;; for a definition. The Rust checker's `letrec_with` and `letrec_found`,
 ;;; rule for rule.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-letrec-module (module
 ;; Note of the recursive group `bs` whether it needs `spin`, and why: `why`, "" if not.
 (define k-note-ending (subr (maxeff kstate spin) (k-letrec-bs string) unit)
   (lambda (bs why)
@@ -121,4 +124,10 @@
                   (if (null? found)
                       (k-fail m a b)
                       (begin (k-bind-group (car found)) (check-group (car found))))))))
-        (else y (k-fail "k-ok inside" 0 0))))))
+        (else y (k-fail "k-ok inside" 0 0))))))))
+
+(define k-note-ending (with check-letrec-module k-note-ending))
+(define k-with-latent (with check-letrec-module k-with-latent))
+(define k-globals-of (with check-letrec-module k-globals-of))
+(define k-bind-group (with check-letrec-module k-bind-group))
+(define k-letrec-checked (with check-letrec-module k-letrec-checked))
