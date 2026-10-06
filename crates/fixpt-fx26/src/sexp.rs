@@ -181,7 +181,11 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
                 .iter()
                 .map(|item| match item {
                     ModItem::Abs { name: n, up_fn, down_fn, .. } => format!("[0 ({}) (_) ({} {})]", name(*n), go(*up_fn), go(*down_fn)),
-                    ModItem::Desc { name: n, .. } => format!("[1 ({}) (_) ()]", name(*n)),
+                    // A `define-effect`'s types the effect and a mark.
+                    ModItem::Desc { name: n, ty } => {
+                        let ts = if c.desc_effect(*ty).is_some() { "(_ _)" } else { "(_)" };
+                        format!("[1 ({}) {ts} ()]", name(*n))
+                    }
                     // A `define*`'s types the type and a mark, `*`.
                     ModItem::Val { name: n, ty, init, infer } => {
                         let ts = if *infer { "(_ _)" } else if ty.is_some() { "(_)" } else { "()" };

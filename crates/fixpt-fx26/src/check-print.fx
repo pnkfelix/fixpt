@@ -628,7 +628,14 @@
       (if (null? ps)
           ""
           (let ((one (k-cat5 " (" what " " (symbol->string (extract (car ps) 1)) " ")))
-            (k-cat4 one (k-show-on (extract (car ps) 2) p) ")" (k-show-comps what (cdr ps) p)))))))
+            (k-cat4 one (k-show-comp (extract (car ps) 2) p) ")" (k-show-comps what (cdr ps) p))))))
+  ;; A component's type; an effect, a description function of no parameters,
+  ;; as the effect.
+  (k-show-comp (subr kbuilds (int k-ids) string)
+    (lambda (t p)
+      (tagcase (k-get t)
+        (ty-lam (bs body) (if (null? bs) (k-show-desc body p) (k-show-on t p)))
+        (else y (k-show-on t p))))))
 
 ;; Whether type `t` is variable `v`.
 (define k-type-is-var? (subr (maxeff kreads spin) (int int) bool)

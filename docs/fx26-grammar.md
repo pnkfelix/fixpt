@@ -351,7 +351,9 @@ bloblet-form ::= "(" "make-bloblet" expression expression* ")"           ; bytes
                | "(" "bloblet-bytes" expression ")"
 ```
 
-- A `module` holds only the five items above, and `define*`, as at the
+- A `module` holds `define-effect` too: `(desc e E)` in its type, and
+  `(select m e)` an effect outside it, resolved where types' `select`s
+  are. It holds only the five items above, `define-effect`, and `define*`, as at the
   top level: the globals the procedure reads found, a module's own names
   not among them (it may not be in a recursive group with others, as at
   the top level, where it is in no `define-rec`). Its types each see those

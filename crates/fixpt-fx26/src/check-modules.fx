@@ -86,6 +86,17 @@
 ;; `(name type)` onto `ps`.
 (define k-part-onto (subr (alloc @t) (symbol int k-parts) k-parts)
   (lambda (n t ps) (cons (product (1 n) (2 t)) ps)))
+;; Whether `s` is written as an effect: `pure`, `spin`, a name bound to one,
+;; or one of `k-parse-effect`'s atoms or `maxeff`.
+(define k-effect-shaped? (subr (maxeff kreads (read @s) (alloc @t) spin) (syn) bool)
+  (lambda (s)
+    (if (syn-symbol? s)
+        (let ((n (syn-name s)))
+          (or (string=? n "pure") (string=? n "spin")
+              (let ((d (k-lookup-desc (string->symbol n))))
+                (and (not (null? d))
+                     (tagcase (car d) (ds-eff (e) #t) (ds-var (v k) (= k 1)) (else x #f))))))
+        (let ((h (k-list-head s))) (or (k-atom-head? h) (string=? h "maxeff"))))))
 ;; A `moduleof`'s components `cs`, those before them read into `abs`, `ds`
 ;; and `vs` (newest first), their names `seen`.
 (define k-moduleof-comps (subr (maxeff checks spin) (k-syns k-parts k-parts k-parts k-names) int)
@@ -105,6 +116,11 @@
                    (if (or (= k 2) (and (k-arrow-kind? k) (= (k-arrow-result k) 2)))
                        (k-moduleof-comps (cdr cs) (k-abs-bound names k abs) ds vs seen)
                        (k-sfail k-abs-usage what))))
+                ;; `(desc e E)`, an effect, as a module's `define-effect` gives.
+                ((and (string=? head "desc") (k-effect-shaped? what))
+                 (let* ((e (k-parse-effect what)) (d (k-effect-desc e)))
+                   (begin (k-push-desc (car names) (ds-eff e))
+                          (k-moduleof-comps (cdr cs) abs (k-part-onto (car names) d ds) vs seen))))
                 ((and (string=? head "desc") (string=? (k-list-head what) "dlambda"))
                  (let ((f (k-parse-fun what -1)))
                    (begin (k-push-desc (car names) (ds-fun f))
@@ -182,6 +198,11 @@
     (let ((k (extract it 1)) (ns (extract it 2)) (ts (extract it 3)) (xs (extract it 4)))
       (cond ((or (< k 0) (> k 3)) (k-item-of k ns -1 nil nil))
             ((= k 0) (k-resolve-abstract ns ts xs))
+            ;; `(define-effect e E)`: its types the effect and a mark.
+            ((and (= k 1) (not (null? (cdr ts))))
+             (let ((e (k-parse-effect (car ts))))
+               (begin (k-push-desc (car ns) (ds-eff e))
+                      (k-item-of k ns -1 (the k-ids (cons (k-effect-desc e) nil)) nil))))
             ((and (= k 1) (string=? (k-list-head (car ts)) "dlambda"))
              (let ((f (k-parse-fun (car ts) -1)))
                (begin (k-push-desc (car ns) (ds-fun f))
@@ -512,18 +533,114 @@
                                          a b)))))
                (rest (k-selection (cdr found) a b)))
           (cons (product (1 m) (2 n) (3 to)) rest)))))
+;;; ------------------------------------------------------------ effects selected
+
+;; The entry of `ss` for variable `v`, or none.
+(define k-effect-sel-var (subr (maxeff (read @globals) (read @t)) (k-effect-sels int) k-effect-sels)
+  (lambda (ss v)
+    (cond ((null? ss) nil)
+          ((= (extract (car ss) 3) v) ss)
+          (else (k-effect-sel-var (cdr ss) v)))))
+;; `e`'s effect variables that stand for `(select m e)`s, onto `out`, each
+;; once.
+(define k-esels-note (subr (maxeff kstate spin) (k-eff (ref k-effect-sels @t)) unit)
+  (lambda (e out)
+    (if (null? e)
+        #u
+        (begin
+          (tagcase (car e)
+            (a-var (v)
+              (let ((sel (k-effect-sel-var (get k-effect-selects) v)))
+                (if (or (null? sel) (not (null? (k-effect-sel-var (get out) v))))
+                    #u
+                    (set out (cons (car sel) (get out))))))
+            (else y #u))
+          (k-esels-note (cdr e) out)))))
+;; The effects of descriptions `ds`, noted.
+(define k-esels-descs (subr (maxeff kstate spin) (k-descs (ref k-effect-sels @t)) unit)
+  (lambda (ds out)
+    (if (null? ds)
+        #u
+        (begin (tagcase (car ds) (de (e) (k-esels-note e out)) (else x #u))
+               (k-esels-descs (cdr ds) out)))))
+;; Each effect `(select m e)` in `t`, onto `out`; the nodes walked, `seen`.
+(define-rec
+  (k-esels-from (subr (maxeff kstate spin) (int (ref k-ids @t) (ref k-effect-sels @t)) unit)
+    (lambda (t seen out)
+      (let ((t (k-resolve t)))
+        (if (k-has-id? (get seen) t)
+            #u
+            (begin
+              (set seen (cons t (get seen)))
+              (tagcase (k-get t)
+                (ty-subr (e ps r cv) (k-esels-note e out))
+                (ty-tag (a h e r) (k-esels-note e out))
+                (ty-comp (a h e r) (k-esels-note e out))
+                (ty-lam (bs d) (k-esels-descs (the k-descs (list d)) out))
+                (ty-app (f ds) (k-esels-descs ds out))
+                (ty-named (g ds) (k-esels-descs ds out))
+                (else y #u))
+              (k-esels-each (k-ty-kids t) seen out))))))
+  (k-esels-each (subr (maxeff kstate spin) (k-ids (ref k-ids @t) (ref k-effect-sels @t)) unit)
+    (lambda (ts seen out)
+      (if (null? ts)
+          #u
+          (begin (k-esels-from (car ts) seen out) (k-esels-each (cdr ts) seen out))))))
+;; The effect `(select m e)`s in `t`, in the order met.
+(define k-effect-selects-in (subr (maxeff kstate spin) (int) k-effect-sels)
+  (lambda (t)
+    (if (null? (get k-effect-selects))
+        nil
+        (let ((out (the (ref k-effect-sels @t) (new nil))))
+          (begin (k-esels-from t (the (ref k-ids @t) (new nil)) out) (reverse (get out)))))))
+;; The effect a module's description `d` is, in a list; none if not one.
+(define k-desc-effect (subr (maxeff kreads spin) (int) (listof k-eff acyclic))
+  (lambda (d)
+    (tagcase (k-get d)
+      (ty-lam (bs body)
+        (if (null? bs)
+            (tagcase body
+              (de (e) (the (listof k-eff acyclic) (list e)))
+              (else x (the (listof k-eff acyclic) nil)))
+            (the (listof k-eff acyclic) nil)))
+      (else y (the (listof k-eff acyclic) nil)))))
+;; Module `m`'s effect `e`, as its type says, `m` bound here; or an error
+;; at `a`..`b`.
+(define k-selected-effect (subr (maxeff checks spin) (symbol symbol int int) k-eff)
+  (lambda (m e a b)
+    (let ((mt (k-lookup m)) (shown (k-cat3 (k-select-shown m e) ": `" (symbol->string m))))
+      (if (< mt 0)
+          (begin (k-fail (string-append shown "` is not bound here") a b) (the k-eff nil))
+          (tagcase (k-get mt)
+            (ty-module (abs ds vs)
+              (let* ((d (k-comp-find ds e))
+                     (x (if (< d 0) (the (listof k-eff acyclic) nil) (k-desc-effect d))))
+                (if (null? x)
+                    (let ((m (k-cat4 shown "` has no effect `" (symbol->string e) "`")))
+                      (begin (k-fail m a b) (the k-eff nil)))
+                    (car x))))
+            (else y (begin (k-fail (k-cat4 shown "` is a " (k-show-ty mt) ", not a module") a b)
+                           (the k-eff nil))))))))
+;; What each effect selected stands for, as a substitution.
+(define k-effects-given (subr (maxeff checks spin) (k-effect-sels int int) k-map)
+  (lambda (ss a b)
+    (if (null? ss)
+        nil
+        (let* ((x (car ss)) (e (k-selected-effect (extract x 1) (extract x 2) a b))
+               (rest (k-effects-given (cdr ss) a b)))
+          (the k-map (cons (cons (extract x 3) (de e)) rest))))))
 ;; `t` with each `(select m n)` in it replaced by what it is: `m`'s
 ;; abstract type `n`, as `m` was bound, or its description `n`. An error
 ;; at `a`..`b` if one is not.
 (define k-resolve-selects (subr (maxeff checks spin) (int int int) int)
   (lambda (t a b)
-    (let ((found (k-selects-in t)))
-      (if (null? found)
+    (let ((found (k-selects-in t)) (efound (k-effect-selects-in t)))
+      (if (and (null? found) (null? efound))
           t
-          (let ((outer (get k-select-map)))
+          (let ((given (k-effects-given efound a b)) (outer (get k-select-map)))
             (begin
               (set k-select-map (k-selection found a b))
-              (let ((r (k-subst t nil)))
+              (let ((r (k-subst t given)))
                 (begin (set k-select-map outer) (k-check-apps r a b) r))))))))
 ;; The same for a type written as `s`, at `s`.
 (define k-select-syn (subr (maxeff checks spin) (int syn) int)

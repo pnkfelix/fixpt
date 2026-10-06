@@ -188,7 +188,12 @@ impl Checker {
                     out.push_str(&format!(" (abs {} {})", self.interner.name(*n), self.show_kind(k)));
                 }
                 for (n, x) in descs.iter() {
-                    out.push_str(&format!(" (desc {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
+                    // An effect, a description function of no parameters.
+                    let shown = match self.arena.get(self.arena.resolve(*x)) {
+                        Ty::Lam { params, body: crate::ast::D::Effect(e) } if params.is_empty() => self.show_effect(e),
+                        _ => self.show_ty_on(*x, path),
+                    };
+                    out.push_str(&format!(" (desc {} {shown})", self.interner.name(*n)));
                 }
                 for (n, x) in vals.iter() {
                     out.push_str(&format!(" (val {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));

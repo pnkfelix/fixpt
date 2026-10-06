@@ -265,6 +265,17 @@ impl Checker {
             };
         }
         let items = self.items(s, "an effect")?.to_vec();
+        // `(select m e)`: module `m`'s effect `e`, found where the type it
+        // is in is checked, as a type's `select` is (`resolve_selects`).
+        if self.head(&items) == Some("select") {
+            let [_, m, e] = &items[..] else {
+                return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
+            };
+            let (Some(m), Some(e)) = (m.as_symbol(), e.as_symbol()) else {
+                return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
+            };
+            return Ok(Effect::atom(Atom::Var(self.effect_select(m, e))));
+        }
         // `(e d …)`: a description function to an effect, applied.
         if let Some(e) = self.effect_app(s, &items)? {
             return Ok(e);
@@ -979,6 +990,18 @@ impl Checker {
         r.map(|()| slot)
     }
 
+    /// Whether `s` is written as an effect: `pure`, `spin`, a name bound
+    /// to one, or one of `parse_effect`'s atoms or `maxeff`.
+    pub(crate) fn effect_shaped(&self, s: &Syntax) -> bool {
+        if let Some(sym) = s.as_symbol() {
+            return matches!(self.name(sym), "pure" | "spin") || matches!(self.lookup_desc(sym), Some(DScope::Eff(_) | DScope::Var(_, Kind::Effect)));
+        }
+        matches!(
+            self.head(self.items(s, "").unwrap_or(&[])),
+            Some("read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "maxeff")
+        )
+    }
+
     /// A `proj` argument. Which kind it is shows in its shape — `@x` is a
     /// region, `pure` and `(read …)`, `(maxeff …)` and the like are effects —
     /// or, for a bare name, in how the name is bound; the checker confirms it
@@ -1622,6 +1645,13 @@ impl Checker {
                         abs.push((n, v));
                     }
                 }
+                // `(desc e E)`, an effect, as a module's `define-effect` gives.
+                Some("desc") if self.effect_shaped(what) => {
+                    let e = self.parse_effect(what)?;
+                    self.dscope.push((names[0], DScope::Eff(e.clone())));
+                    let d = self.effect_desc(e);
+                    descs.push((names[0], d));
+                }
                 Some("desc") if self.head(&self.items(what, "").unwrap_or(&[]).to_vec()) == Some("dlambda") => {
                     let f = self.parse_fun(what, None)?;
                     self.dscope.push((names[0], DScope::Fun(f)));
@@ -1787,6 +1817,16 @@ impl Checker {
                     self.dscope.push((name, DScope::Rec(ty)));
                     out.push(ModItem::Desc { name, ty });
                 }
+                // `(define-effect e E)`: a transparent description of an
+                // effect, as `define-type`'s of a type: `(desc e E)` in the
+                // module's type, `(select m e)` outside.
+                (Some("define-effect"), [_, n, e]) => {
+                    let (name, _) = name_of(self, n)?;
+                    let e = self.parse_effect(e)?;
+                    self.dscope.push((name, DScope::Eff(e.clone())));
+                    let ty = self.effect_desc(e);
+                    out.push(ModItem::Desc { name, ty });
+                }
                 (Some("define"), [_, n, init]) => {
                     let (name, _) = name_of(self, n)?;
                     out.push(ModItem::Val { name, ty: None, init: self.parse_exp(init)?, infer: false });
@@ -1813,7 +1853,7 @@ impl Checker {
                 _ => {
                     return Err(FxError::at(
                         f.span,
-                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define x [T] e)`, `(define* f T e)` and `(define-rec (f T e) …)`",
+                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define-effect e E)`, `(define x [T] e)`, `(define* f T e)` and `(define-rec (f T e) …)`",
                     ));
                 }
             }

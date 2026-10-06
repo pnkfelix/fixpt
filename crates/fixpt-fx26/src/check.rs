@@ -142,6 +142,10 @@ pub struct Checker {
     /// type constructors, whose representations no one outside can see:
     /// what is given to one is kept, cautiously, everywhere (`knot_in`).
     pub(crate) abstract_funs: HashSet<DVar>,
+    /// Each `(select m e)` read as an effect: a variable of kind effect,
+    /// one for each, which `resolve_selects` replaces by module `m`'s
+    /// effect `e` (`crate::modules`).
+    pub(crate) effect_selects: Vec<((Sym, Sym), DVar)>,
     /// While a type's `select`s are resolved (`Checker::resolve_selects`):
     /// what each is; empty otherwise.
     pub(crate) select_map: HashMap<(Sym, Sym), TyId>,
@@ -376,6 +380,7 @@ impl Checker {
             skolems: Vec::new(),
             module_vars: HashSet::new(),
             abstract_funs: HashSet::new(),
+            effect_selects: Vec::new(),
             select_map: HashMap::new(),
             param_map: HashMap::new(),
             conv_default: conv,

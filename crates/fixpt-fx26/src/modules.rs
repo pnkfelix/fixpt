@@ -9,7 +9,7 @@
 //! that a `let`-bound module is opaque. Nothing that outlives a binding may
 //! mention its abstract types (`forget_nats`, which also forgets sizes).
 
-use crate::ast::{D, DVar, Effect, ExpId, Kind, ModItem, Ty, TyId};
+use crate::ast::{Atom, D, DVar, Effect, ExpId, Kind, ModItem, Ty, TyId};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Span, Sym};
@@ -293,8 +293,14 @@ impl Checker {
     pub(crate) fn resolve_selects(&mut self, t: TyId, span: Span) -> R<TyId> {
         let mut found = Vec::new();
         self.selects_in(t, &mut HashSet::new(), &mut found);
-        if found.is_empty() {
+        let effects = self.effect_selects_in(t);
+        if found.is_empty() && effects.is_empty() {
             return Ok(t);
+        }
+        // Each effect selected, what its module says it is.
+        let mut given: HashMap<DVar, D> = HashMap::new();
+        for (v, (m, n)) in effects {
+            given.insert(v, D::Effect(self.selected_effect(m, n, span)?));
         }
         let mut sel = HashMap::new();
         for (m, n) in found {
@@ -315,10 +321,92 @@ impl Checker {
             sel.insert((m, n), to);
         }
         let outer = std::mem::replace(&mut self.select_map, sel);
-        let r = self.subst(t, &HashMap::new());
+        let r = self.subst(t, &given);
         self.select_map = outer;
         self.check_apps(r, span)?;
         Ok(r)
+    }
+
+    /// The variable `(select m e)` read as an effect stands for, one for
+    /// each, named as written.
+    pub(crate) fn effect_select(&mut self, m: Sym, e: Sym) -> DVar {
+        if let Some((_, v)) = self.effect_selects.iter().find(|(k, _)| *k == (m, e)) {
+            return *v;
+        }
+        let shown = format!("(select {} {})", self.interner.name(m), self.interner.name(e));
+        let v = self.arena.dvar_of(self.interner.intern(&shown), Kind::Effect);
+        self.effect_selects.push(((m, e), v));
+        v
+    }
+
+    /// Module `m`'s effect `e`, as its type says, `m` bound here; or an
+    /// error at `span`.
+    fn selected_effect(&mut self, m: Sym, e: Sym, span: Span) -> R<Effect> {
+        let shown = |c: &Checker| format!("`(select {} {})`", c.interner.name(m), c.interner.name(e));
+        let Some(mt) = self.lookup(m) else {
+            return Err(FxError::at(span, format!("{}: `{}` is not bound here", shown(self), self.interner.name(m))));
+        };
+        let Ty::Module { descs, .. } = self.arena.get(self.arena.resolve(mt)).clone() else {
+            return Err(FxError::at(span, format!("{}: `{}` is a {}, not a module", shown(self), self.interner.name(m), self.show_ty(mt))));
+        };
+        match descs.iter().find(|(d, _)| *d == e).and_then(|(_, d)| self.desc_effect(*d)) {
+            Some(x) => Ok(x),
+            None => Err(FxError::at(span, format!("{}: `{}` has no effect `{}`", shown(self), self.interner.name(m), self.interner.name(e)))),
+        }
+    }
+
+    /// A module's description of an effect, `(define-effect e E)`'s: a
+    /// description function of no parameters (`crate::kinds`) giving it.
+    pub(crate) fn effect_desc(&mut self, e: Effect) -> TyId {
+        self.arena.ty(Ty::Lam { params: Vec::new(), body: D::Effect(e) })
+    }
+
+    /// The effect a module's description `d` is, if it is one.
+    pub(crate) fn desc_effect(&self, d: TyId) -> Option<Effect> {
+        match self.arena.get(self.arena.resolve(d)) {
+            Ty::Lam { params, body: D::Effect(e) } if params.is_empty() => Some(e.clone()),
+            _ => None,
+        }
+    }
+
+    /// The effect variables of `(select m e)`s in `t`, with what each selects.
+    fn effect_selects_in(&self, t: TyId) -> Vec<(DVar, (Sym, Sym))> {
+        let mut out: Vec<(DVar, (Sym, Sym))> = Vec::new();
+        if self.effect_selects.is_empty() {
+            return out;
+        }
+        let note = |e: &Effect, out: &mut Vec<(DVar, (Sym, Sym))>| {
+            for a in &e.0 {
+                if let Atom::Var(v) = a
+                    && let Some((k, _)) = self.effect_selects.iter().find(|(_, w)| w == v)
+                    && !out.iter().any(|(w, _)| w == v)
+                {
+                    out.push((*v, *k));
+                }
+            }
+        };
+        let mut stack = vec![t];
+        let mut seen = HashSet::new();
+        while let Some(t) = stack.pop() {
+            let t = self.arena.resolve(t);
+            if !seen.insert(t) {
+                continue;
+            }
+            match self.arena.get(t) {
+                Ty::Subr { effect, .. } | Ty::PromptTag { effect, .. } | Ty::Composable { effect, .. } => note(effect, &mut out),
+                Ty::Lam { body: D::Effect(e), .. } => note(e, &mut out),
+                Ty::App { args, .. } | Ty::Named { args, .. } => {
+                    for a in args {
+                        if let D::Effect(e) = a {
+                            note(e, &mut out);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            stack.extend(self.ty_kids(t));
+        }
+        out
     }
 
     /// Each description function applied in `t` given what it takes:
