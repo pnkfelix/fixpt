@@ -3,6 +3,9 @@
 ;;; them by the pieces `check-read.fx` gives before it. Part of the checker,
 ;;; `check-types.fx` first (PLAN.md §11, step 10).
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-syntax-module (module
 (define-rec
   (k-effects (subr (maxeff checks spin) (k-syns) k-eff)
     (lambda (xs)
@@ -757,5 +760,25 @@
     (if (null? fs)
         #u
         (begin (k-grounded (extract (car fs) 1) (extract (car fs) 2) (extract (car fs) 3))
-               (k-ground-filled (cdr fs))))))
+               (k-ground-filled (cdr fs))))))))
 
+(define k-parse-effect (with check-syntax-module k-parse-effect))
+(define k-shape (with check-syntax-module k-shape))
+(define k-define-family (with check-syntax-module k-define-family))
+(define k-knots (with check-syntax-module k-knots))
+(define k-list-head (with check-syntax-module k-list-head))
+(define k-parse-conv (with check-syntax-module k-parse-conv))
+(define k-twice (with check-syntax-module k-twice))
+(define k-type-kind? (with check-syntax-module k-type-kind?))
+(define k-parse-module-type (with check-syntax-module k-parse-module-type))
+(define k-endless (with check-syntax-module k-endless))
+(define k-parse-types (with check-syntax-module k-parse-types))
+(define k-parse-type (with check-syntax-module k-parse-type))
+(define k-parse-size (with check-syntax-module k-parse-size))
+(define k-expand-bound (with check-syntax-module k-expand-bound))
+(define k-ahead-names (with check-syntax-module k-ahead-names))
+(define k-ahead-filled (with check-syntax-module k-ahead-filled))
+(define k-define-type (with check-syntax-module k-define-type))
+(define k-ahead-declare (with check-syntax-module k-ahead-declare))
+(define k-filled-reversed (with check-syntax-module k-filled-reversed))
+(define k-ground-filled (with check-syntax-module k-ground-filled))
