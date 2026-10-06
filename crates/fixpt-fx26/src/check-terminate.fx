@@ -477,10 +477,33 @@
 (define k-sc-escape (subr kstate (int) unit)
   (lambda (m)
     (if (null? (get k-sc-escapes)) (set k-sc-escapes (cons (cons (get k-sc-current) m) nil)) #u)))
-;; A `module` or a `with` walked, by `check-module-rules.fx`, which sets this.
-(define k-sc-walk-module (ref (subr (maxeff kstate spin) (kx k-tscope k-guards) unit) @t)
-  (new (lambda (x sc gs) #u)))
+;; `sc` with `ns` hidden: bound, and none of the group's.
+(define k-sc-hide-names (subr kstate (k-names k-tscope) k-tscope)
+  (lambda (ns sc) (if (null? ns) sc (k-sc-hide-names (cdr ns) (k-sc-bind (car ns) nil sc)))))
 (define-rec
+  ;; A module's values made, each as any expression is, every item's names
+  ;; in scope, as a `letrec*`'s.
+  (k-sc-walk-values (subr (maxeff kstate spin) (k-items k-tscope k-guards) unit)
+    (lambda (items sc gs)
+      (if (null? items)
+          #u
+          (let ((k (extract (car items) 1)))
+            (begin (if (or (= k 2) (= k 3)) (k-sc-walk-list (extract (car items) 5) sc gs) #u)
+                   (k-sc-walk-values (cdr items) sc gs))))))
+  (k-sc-walk-items (subr (maxeff kstate spin) (k-items k-tscope k-guards) unit)
+    (lambda (items sc gs)
+      (k-sc-walk-values items (k-sc-hide-names (k-items-bound items nil) sc) gs)))
+  ;; A module's values made, and a `with`'s module named, each as any
+  ;; expression or variable is.
+  (k-sc-walk-modular (subr (maxeff kstate spin) (kx k-tscope k-guards) unit)
+    (lambda (x sc gs)
+      (tagcase x
+        (x-module (items a b) (k-sc-walk-items items sc gs))
+        (x-with (m body a b)
+          (let ((member (k-sc-member sc m)))
+            (begin (if (>= member 0) (k-sc-escape member) #u)
+                   (k-sc-walk body (k-sc-hide-names (k-with-names a b) sc) gs))))
+        (else y #u))))
   (k-sc-walk-list (subr (maxeff kstate spin) (kxs k-tscope k-guards) unit)
     (lambda (xs sc gs)
       (if (null? xs) #u (begin (k-sc-walk (car xs) sc gs) (k-sc-walk-list (cdr xs) sc gs)))))
@@ -551,8 +574,8 @@
             (begin (k-sc-walk e sc gs)
                    (k-sc-walk-arms arms whole sc gs)
                    (k-sc-walk-else els whole sc gs))))
-        (x-module (items a b) ((get k-sc-walk-module) x sc gs))
-        (x-with (m body a b) ((get k-sc-walk-module) x sc gs))))))
+        (x-module (items a b) (k-sc-walk-modular x sc gs))
+        (x-with (m body a b) (k-sc-walk-modular x sc gs))))))
 
 (define k-sc-compose-one (subr kstate (k-edge k-graph k-graph) k-graph)
   (lambda (e b out)
@@ -853,7 +876,6 @@
 (define k-sc-two? (with check-terminate-module k-sc-two?))
 (define k-sc-bind (with check-terminate-module k-sc-bind))
 (define k-sc-escape (with check-terminate-module k-sc-escape))
-(define k-sc-walk-module (with check-terminate-module k-sc-walk-module))
 (define k-sc-walk-list (with check-terminate-module k-sc-walk-list))
 (define k-sc-walk (with check-terminate-module k-sc-walk))
 (define k-std? (with check-terminate-module k-std?))

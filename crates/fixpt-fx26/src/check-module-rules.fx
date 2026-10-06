@@ -520,33 +520,3 @@
                                        (get k-reshapes)))
                  #t)))))
 (set k-reshape-hook k-reshape-at)
-
-;;; ------------------------------------------------------------ termination
-
-;; `sc` with `ns` hidden: bound, and none of the group's.
-(define k-sc-hide-names (subr kstate (k-names k-tscope) k-tscope)
-  (lambda (ns sc) (if (null? ns) sc (k-sc-hide-names (cdr ns) (k-sc-bind (car ns) nil sc)))))
-;; A module's values made, each as any expression is, every item's names
-;; in scope, as a `letrec*`'s.
-(define k-sc-walk-values (subr (maxeff kstate spin) (k-items k-tscope k-guards) unit)
-  (lambda (items sc gs)
-    (if (null? items)
-        #u
-        (let ((k (extract (car items) 1)))
-          (begin (if (or (= k 2) (= k 3)) (k-sc-walk-list (extract (car items) 5) sc gs) #u)
-                 (k-sc-walk-values (cdr items) sc gs))))))
-(define k-sc-walk-items (subr (maxeff kstate spin) (k-items k-tscope k-guards) unit)
-  (lambda (items sc gs)
-    (k-sc-walk-values items (k-sc-hide-names (k-items-bound items nil) sc) gs)))
-;; A module's values made, and a `with`'s module named, each as any
-;; expression or variable is.
-(define k-sc-walk-modular (subr (maxeff kstate spin) (kx k-tscope k-guards) unit)
-  (lambda (x sc gs)
-    (tagcase x
-      (x-module (items a b) (k-sc-walk-items items sc gs))
-      (x-with (m body a b)
-        (let ((member (k-sc-member sc m)))
-          (begin (if (>= member 0) (k-sc-escape member) #u)
-                 (k-sc-walk body (k-sc-hide-names (k-with-names a b) sc) gs))))
-      (else y #u))))
-(set k-sc-walk-module k-sc-walk-modular)
