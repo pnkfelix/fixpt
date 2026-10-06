@@ -927,9 +927,7 @@ Two parts, in both checkers (they must agree on what they print):
   keeps its arena (`Rc` would leak recursive types, which are cycles); for
   it, an occasional copying pass from the session's roots, renumbering.
 
-First, cheaply: the ids are made by unchecked casts (`TyId(len as u32 -
-1)`, `ExpId`, `DVar`, `generatives.len() as u32 - 1`), which would wrap
-silently past `u32::MAX`; make them checked, failing clearly.
+Done first: the ids are checked (`DONE.md` §39).
 
 ## 40. A call graph from the code, not from names (the user's, 2026-10-06)
 

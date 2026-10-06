@@ -550,7 +550,7 @@ impl Checker {
                 };
                 let name = self.define_generative(head, rep)?;
                 // Only its own conversions, which follow, see inside it.
-                let which = self.generatives.len() as u32 - 1;
+                let which = crate::ast::last_id(self.generatives.len(), "generative types");
                 for side in ["up-", "down-"] {
                     let n = self.interner.intern(&format!("{side}{}", self.interner.name(name)));
                     self.inside.push((n, which));

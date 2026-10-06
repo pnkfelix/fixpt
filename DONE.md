@@ -537,6 +537,14 @@ takes 19.5 s (one code collection), the suite 3.5 minutes. Test:
 `running_placed_code_does_not_collect_at_every_run` (100 major
 collections in 100 runs without the fix; at most one with it).
 
+## 39. A checker's ids checked (2026-10-06)
+
+The Rust checker's ids, `TyId`, `ExpId`, `DVar` and a generative type's
+number, were made by unchecked casts, `len as u32 - 1`, which past 2^32
+entries would wrap round and name an old entry. They are made by
+`ast::last_id` now, which fails saying so. Reclaiming the tables, so that
+a long session does not grow them without end, is `TODO.md` §39.
+
 ## 38. A re-export of a module member inlined, as the member (2026-10-05)
 
 The pilot (`TODO.md` §34) re-exported `table.fx`'s procedures as

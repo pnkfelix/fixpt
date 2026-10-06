@@ -598,10 +598,18 @@ pub struct Arena {
     pub effect_apps: EffectApps,
 }
 
+/// The id of the last of `len` entries of a table of `what`: ids are 32
+/// bits, and a checker's tables only grow while it lives (`TODO.md` §39),
+/// so past 2^32 entries this fails, saying so, rather than wrapping round to
+/// name an old entry.
+pub(crate) fn last_id(len: usize, what: &str) -> u32 {
+    u32::try_from(len - 1).unwrap_or_else(|_| panic!("more than 2^32 {what}: a checker's ids are 32 bits (TODO.md §39)"))
+}
+
 impl Arena {
     pub fn ty(&mut self, t: Ty) -> TyId {
         self.tys.push(t);
-        TyId(self.tys.len() as u32 - 1)
+        TyId(last_id(self.tys.len(), "types"))
     }
 
     /// Follow forwarding links to the type itself.
@@ -627,7 +635,7 @@ impl Arena {
 
     pub fn exp(&mut self, span: Span, e: Exp) -> ExpId {
         self.exps.push((span, e));
-        ExpId(self.exps.len() as u32 - 1)
+        ExpId(last_id(self.exps.len(), "expressions"))
     }
 
     pub fn exp_at(&self, id: ExpId) -> &Exp {
@@ -645,7 +653,7 @@ impl Arena {
         self.dvar_bounds.push(None);
         self.dvar_outer.push(Vec::new());
         self.dvar_kinds.push(Kind::Type);
-        DVar(self.dvar_names.len() as u32 - 1)
+        DVar(last_id(self.dvar_names.len(), "description variables"))
     }
 
     /// The arrow kind `(=> (params …) result)`, interned.
