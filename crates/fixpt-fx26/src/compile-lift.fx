@@ -4,6 +4,17 @@
 ;;; ------------------------------------------------------ lambda lifting
 ;;; As the Rust compiler's `lift`, `lift_plan` and `called_only`.
 
+;; Its types, at top level: declared ahead, named anywhere.
+;; While a `letrec` is planned to be lifted, by member: the names each
+;; takes, and the siblings each calls.
+(define-type c-added (arrayof syms @k))
+
+(define-type c-calls (arrayof (listof int @k) @k))
+
+
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define compile-lift-module (module
 ;; A `letrec`'s key in `c-lifted`: where it starts and ends.
 (define c-span-key (subr pure (int int) int) (lambda (a b) (+ (* a 4194304) b)))
 
@@ -114,12 +125,6 @@
     (cond ((null? bs) nil)
           ((c-member? free (extract (car bs) 1)) (cons k (c-sibling-indices free (cdr bs) (+ k 1))))
           (else (c-sibling-indices free (cdr bs) (+ k 1))))))
-
-;; While a `letrec` is planned to be lifted, by member: the names each
-;; takes, and the siblings each calls.
-(define-type c-added (arrayof syms @k))
-
-(define-type c-calls (arrayof (listof int @k) @k))
 
 ;; Each member's locals into `added`, the siblings it calls into `calls`,
 ;; from the `i`th of `bs`; whether every member's could be.
@@ -455,4 +460,23 @@
         (begin (c-op1 c routine-slot (wcell-int (+ sum-slot 1)))
                (c-field c (+ j 2))
                (c-members (cdr ns) (c-extend (car ns) (at-slot slot) e)
-                          sum-slot (+ slot 1) (+ j 1) c)))))
+                          sum-slot (+ slot 1) (+ j 1) c)))))))
+
+(define c-span-key (with compile-lift-module c-span-key))
+(define c-lifted-at (with compile-lift-module c-lifted-at))
+(define c-lift-of (with compile-lift-module c-lift-of))
+(define c-lift-added (with compile-lift-module c-lift-added))
+(define c-lifted-entries (with compile-lift-module c-lifted-entries))
+(define c-load-names (with compile-lift-module c-load-names))
+(define c-lift-plan (with compile-lift-module c-lift-plan))
+(define c-bind-lifted (with compile-lift-module c-bind-lifted))
+(define c-added-params (with compile-lift-module c-added-params))
+(define c-lift-closures (with compile-lift-module c-lift-closures))
+(define c-param-env (with compile-lift-module c-param-env))
+(define c-lambda-captured (with compile-lift-module c-lambda-captured))
+(define c-inner-env (with compile-lift-module c-inner-env))
+(define c-standard-on (with compile-lift-module c-standard-on))
+(define c-has-standard-value? (with compile-lift-module c-has-standard-value?))
+(define c-standard-value (with compile-lift-module c-standard-value))
+(define c-count-names (with compile-lift-module c-count-names))
+(define c-members (with compile-lift-module c-members))
