@@ -8,6 +8,9 @@
 ;;; refused, naming the chain; nothing is reordered. The Rust checker's
 ;;; `modorder.rs`, step for step; `check-module-rules.fx` uses it.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-modorder-module (module
 ;; Reading the checker's tables and making lists.
 (define-effect kallocs (maxeff (read @globals) (alloc @t)))
 ;; A module's typed lambda: its name, written type, value, the item it is
@@ -259,4 +262,18 @@
     (if (null? ls)
         nil
         (the k-groups (cons (k-mod-group rs (extract (car ls) 1) all)
-                            (k-mod-groups rs (cdr ls) all))))))
+                            (k-mod-groups rs (cdr ls) all))))))))
+
+(define-type k-mlam (select check-modorder-module k-mlam))
+(define-type k-mlams (select check-modorder-module k-mlams))
+(define-type k-places (select check-modorder-module k-places))
+(define k-lambda-item? (with check-modorder-module k-lambda-item?))
+(define k-mod-lambdas (with check-modorder-module k-mod-lambdas))
+(define k-mod-recs-lambdas (with check-modorder-module k-mod-recs-lambdas))
+(define k-mod-star-lambdas (with check-modorder-module k-mod-star-lambdas))
+(define k-place-of (with check-modorder-module k-place-of))
+(define k-mod-hazards (with check-modorder-module k-mod-hazards))
+(define k-mod-edges (with check-modorder-module k-mod-edges))
+(define k-mod-reaches (with check-modorder-module k-mod-reaches))
+(define-type k-groups (select check-modorder-module k-groups))
+(define k-mod-groups (with check-modorder-module k-mod-groups))
