@@ -554,21 +554,13 @@
 ;; Each of `cs`, last first, made in order.
 (define c-make-copies (subr (maxeff compiles spin) ((listof c-copy-at @k)) unit)
   (lambda (cs) (if (null? cs) #u (begin (c-make-copies (cdr cs)) (c-make-copy (car cs))))))
-;; The form's specialized copies, as its plan says, after its words; then
-;; the twins of all of them, in order (step 4): register code, a phase after
-;; the stack code, which makes no word. (The standard operations' after the
-;; lambdas': no register code depends on another's.)
-(define c-form-twins (subr (maxeff compiles spin) () unit)
-  (lambda ()
-    (begin
-      (if (get c-registers) (c-make-copies (get c-plan-copy-order)) #u)
-      (let ((ts (get c-twins)) (ss (get c-standard-twins)))
-        (begin (set c-twins nil) (set c-standard-twins nil)
-               (c-make-twins ts) (c-make-standard-twins ss))))))
+
 ))
 
 (define c-plan-top (with compile-plan-module c-plan-top))
-(define c-form-twins (with compile-plan-module c-form-twins))
+(define c-make-copies (with compile-plan-module c-make-copies))
+(define c-plan-copy-order (with compile-plan-module c-plan-copy-order))
+(define-type c-copy-at (select compile-plan-module c-copy-at))
 (define c-spec-copy-find (with compile-plan-module c-spec-copy-find))
 (define c-inline-limit (with compile-plan-module c-inline-limit))
 (define c-inlines (with compile-plan-module c-inlines))

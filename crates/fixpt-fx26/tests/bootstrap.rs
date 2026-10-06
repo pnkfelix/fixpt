@@ -25,7 +25,7 @@ fn the_compiler_compiles_the_front_end() {
 #[test]
 #[ignore = "a probe: the standard names the compiler has no way to run"]
 fn probe_uncovered() {
-    let compile = &std::iter::once(fixpt_fx26::COMPILER).chain(fixpt_fx26::COMPILER_PARTS.iter().map(|(_, t)| *t)).collect::<Vec<_>>().join("\n");
+    let compile = &std::iter::once(fixpt_fx26::COMPILER).chain(fixpt_fx26::COMPILER_PARTS.iter().chain(&fixpt_fx26::COMPILER_DRIVER).map(|(_, t)| *t)).collect::<Vec<_>>().join("\n");
     for (fx, scheme, _) in fixpt_fx26::lower::STANDARD {
         let prim = *scheme == "%fx26-identity" || fixpt_engine::cellular::runtime_primitive(scheme).is_some();
         let special = compile.contains(&format!("\"{fx}\""));
@@ -38,7 +38,7 @@ fn probe_uncovered() {
 #[test]
 #[ignore = "a probe: the runtime primitives the compiler names that are not there"]
 fn probe_primitives() {
-    let compile = &std::iter::once(fixpt_fx26::COMPILER).chain(fixpt_fx26::COMPILER_PARTS.iter().map(|(_, t)| *t)).collect::<Vec<_>>().join("\n");
+    let compile = &std::iter::once(fixpt_fx26::COMPILER).chain(fixpt_fx26::COMPILER_PARTS.iter().chain(&fixpt_fx26::COMPILER_DRIVER).map(|(_, t)| *t)).collect::<Vec<_>>().join("\n");
     let mut names: Vec<&str> = Vec::new();
     // `(c-prim c "name" …)` and `(c-prim c name n)` for the names listed
     // with it: every string literal in the compiler that could be one.

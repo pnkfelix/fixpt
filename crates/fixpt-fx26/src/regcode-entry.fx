@@ -316,8 +316,6 @@
           (let ((one (car late)))
             (begin (r-into g (cdr one) (car one) env te) (r-late-into g (cdr late) env te)))))))
 (set r-leaf-call r-leaf-tail-call)
-(set c-register-code r-register-code)
-(set c-standard-register-code r-standard-word)
 
 ;; Whether the compiler makes register code from now on: for a driver.
 (define compile-registers! (subr (maxeff (read @globals) (write @k)) (bool) unit)

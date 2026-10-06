@@ -345,18 +345,8 @@
 (define-type c-this (productof (1 symbol) (2 loc) (3 int) (4 int)))
 
 ;; Whether each lambda also gets register code (PLAN.md 13h′), as its word's
-;; twin; and the register compiler, `regcode.fx`, which sets itself here: a
-;; lambda's register cells, or none where it declines.
+;; twin, made after its form's words (`compile-twins.fx`).
 (define c-registers (ref bool @k) (new #f))
-
-(define c-register-code
-  (ref (subr (maxeff compiles spin) (c-params exp cenv (listof c-this @k)) (listof wcell @k)) @k)
-  (new (lambda (ps body inner this) (the (listof wcell @k) nil))))
-
-;; The same for a standard operation as a value, by its name and arity.
-(define c-standard-register-code
-  (ref (subr (maxeff compiles spin) (string int) (listof wcell @k)) @k)
-  (new (lambda (name n) (the (listof wcell @k) nil))))
 
 ;; Whether `l` is where the procedure being compiled is bound: its loop, or
 ;; the free value holding its closure.
@@ -894,8 +884,6 @@
 (define c-this-added (with compile-module c-this-added))
 (define-type c-this (select compile-module c-this))
 (define c-registers (with compile-module c-registers))
-(define c-register-code (with compile-module c-register-code))
-(define c-standard-register-code (with compile-module c-standard-register-code))
 (define c-this-loc? (with compile-module c-this-loc?))
 (define-type c-globals-made (select compile-module c-globals-made))
 (define c-genv-index (with compile-module c-genv-index))

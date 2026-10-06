@@ -225,11 +225,11 @@ before everything else, known holes before proofs.
   loaded again keeps its private regions.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
-- M. **The front end into modules** (`TODO.md` §34, 2026-10-06): 38 of
-  48 files are modules; the four too long split first. Left: the seven
+- M. **The front end into modules** (`TODO.md` §34, 2026-10-06): 40 of
+  50 files are modules; the four too long split first. Left: the seven
   files of cross-file hook cycles (the cycles removed, not hooked: the
   checker's by regrouping each recursive knot into one file, the
-  compilers' by a middle phase, `TODO.md` §41, steps 1–3 of 5 done) and
+  compilers' by a middle phase, `TODO.md` §41, steps 1–4 of 5 done) and
   the three generated ones. Found on the way, fixed: a re-exported type
   printed whole at each use, which took check from 0.91 s to 28 s by the
   first file; types and
@@ -1368,7 +1368,8 @@ the order it will be done. Each is committed when done, and marked here.
 5. **Register code from the compiler written in FX-26** (13h′ (e)).
    *(Done 2026-09-26: `src/regcode.fx`, a port of `cellular/regcode.rs`,
    called by `compile.fx` through `c-register-code` when `c-registers` is
-   set (`compile-registers!`); `set-register-twin` makes the register word.
+   set (`compile-registers!`; since the middle phase's step 4, 2026-10-06,
+   by the twin phase, `compile-twins.fx`, directly, with no hook); `set-register-twin` makes the register word.
    It declines where the Rust one does, noting it in a flag rather than
    returning early. Every test program's register code is the Rust
    compiler's, cell for cell (106 register words), and so is the whole

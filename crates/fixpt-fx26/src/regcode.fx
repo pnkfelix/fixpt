@@ -13,7 +13,8 @@
 ;;; alone: it notes that it declined (`r-declined`) and goes on, making
 ;;; nothing anyone keeps, where the Rust compiler returns `None`.
 ;;;
-;;; `compile.fx` calls it through `c-register-code`, which this sets.
+;;; The twin phase calls it (`compile-twins.fx`), after a form's words; it
+;;; calls no stack compiler.
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.

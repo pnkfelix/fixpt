@@ -947,6 +947,8 @@ back for words it needs (specialized copies). A middle phase would make
 the decisions they share once, so that each is a back end over a decided
 program and the front end's last hook cycle between them goes:
 `docs/research/compiler-middle-phase.md`, for review before any code.
-Steps 1–3 done in both compilers (2026-10-06): copies memoized, the
-procedure table, every call decided in the plan, inlined bodies and
-copies included. Next, step 4: twins as a phase.
+Steps 1–4 done in both compilers (2026-10-06): copies memoized, the
+procedure table, every call decided in the plan (inlined bodies and
+copies included), and twins as a phase, the hooks `c-register-code` and
+`c-standard-register-code` gone. Next, step 5: the register compiler's
+own three hooks (`regcode-modules.fx`, `regcode-entry.fx`).

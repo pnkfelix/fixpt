@@ -215,6 +215,27 @@ green, the self-compile measured.
    register compiler no longer calls the stack compiler, and the stack
    compiler no longer calls it. Remove `c-register-code` and
    `c-standard-register-code`; move the driver after register code.
+   *Done, both compilers, 2026-10-06*, in four commits:
+   - 4a: register code never made a lambda's word itself any more (none,
+     counted, since 3b-0); where it would, it declines.
+   - 4b: a form's twins are made after all its words, each noted with what
+     its stack code knew and made (`Twin`; `c-twin`), before the form's
+     procedure is noted to be inlined or specialized.
+   - 4c: specialized copies are made from the plan (`CopyAt`,
+     `make_copy`; `c-copy-at`, `c-make-copy`), after the form's words and
+     before the twins, each copy's twin made in the copy's context: the
+     56 copies register code made, no more. A standard operation's word as
+     a value is made once per compile and register code looks it up,
+     rather than making another beside the stack code's (fewer words: the
+     self-compile allocates 48.3 → 47.9 M words, 46 → 45 collections).
+     FX-26 planned a lambda definition before pushing its global, Rust
+     after; FX-26 now plans after.
+   - 4d: FX-26's twin phase is its own file, `compile-twins.fx`, after the
+     register compiler, which it calls directly; `compile-programs.fx`
+     follows it. The two hooks are gone. 40 of the front end's 50 files
+     are modules.
+   The self-compile: compile 0.283–0.285 s, 45 collections (0.282 s, 46
+   before step 4); check 1.106–1.116 s.
 5. The register compiler's own three hooks, regrouped as the checker's
    cycles are.
 
