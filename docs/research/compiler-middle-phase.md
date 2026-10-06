@@ -155,7 +155,18 @@ green, the self-compile measured.
    `FIXPT_PLAN_CHECK` re-decides beside the plan and says where they
    differ: none, in 8088 lambdas and `letrec`s of the test programs and
    bench suites and 2841 of the front end. peval's `words` 2.78 → 2.84–
-   2.89 ms. The FX-26 compiler next.
+   2.89 ms. *FX-26 done, 2026-10-06* (`compile-plan.fx`; the tables and
+   lookups in `compile-lift.fx`, read by `c-lambda-word-in` and `c-lift`):
+   the same walk, reusing the compiler's scope builders (`c-own-scope`,
+   `c-letrec-own`, `c-module-own`, …). Both key a lambda by where its body
+   is and its parameters' names, a `letrec` by where it is: FX-26's trees,
+   frozen data, have no identity to key a table by; checked to tell every
+   lambda apart. The self-compile, per phase (probe, new/old/new): check
+   1.083 → 1.095 s, 34 → 35 collections (the front end has the new file
+   to check); compile 0.258 → 0.273 s, 43 → 45 collections, 45.5 → 47.4
+   M words (the walk, its tables, the lookups): the price of a second walk
+   before anything is taken out; step 3 lets register code read the plan
+   instead of finding captures again.
 3. **Decided call sites**: inlining and specialization decided in the
    pre-pass (the candidate lists and the call's argument trees are all it
    needs; the callee's register location is whether it is a known global),

@@ -25,14 +25,16 @@ pub(crate) struct Planned {
     pub fv: Vec<Sym>,
 }
 
-/// A form's procedures, by their bodies; and each `letrec`'s lifting: the
-/// names each member takes first, or none if it is not lifted. By node, not
-/// by where it was written: lambdas a form expands to (a `define-datatype`'s
-/// constructors) share their form's place.
+/// A form's procedures, by where their bodies are and their parameters (the
+/// lambdas a form expands to, a `define-datatype`'s constructors, share its
+/// place; their parameters tell them apart); and each `letrec`'s lifting, by
+/// where it is (as `lifted` keeps it): the names each member takes first, or
+/// none if it is not lifted. As the FX-26 compiler's `c-plan-procs`, whose
+/// trees, frozen data, have no identity to key by.
 #[derive(Default)]
 pub(crate) struct Plan {
-    pub procs: HashMap<ExpId, Planned>,
-    pub lifts: HashMap<ExpId, Option<Vec<Vec<Sym>>>>,
+    pub procs: HashMap<((u32, u32, u32), Vec<Sym>), Planned>,
+    pub lifts: HashMap<(u32, u32, u32), Option<Vec<Vec<Sym>>>>,
 }
 
 /// A slot, as the walk's environments say where a name is: only its kind
@@ -40,6 +42,11 @@ pub(crate) struct Plan {
 const SLOT: Loc = Loc::Slot(0);
 
 impl Compiler<'_> {
+    fn span_key(&self, x: ExpId) -> (u32, u32, u32) {
+        let s = self.c.arena.span_of(x);
+        (s.file.0, s.start, s.end)
+    }
+
     /// The plan of top-level form `x`, compiled next, in no environment.
     /// The lifted procedures it would make are counted as the compile will
     /// make them, and forgotten after.
@@ -107,7 +114,7 @@ impl Compiler<'_> {
             }
             Exp::Let { bindings, body } => self.plan_let(&bindings, body, e, tail, plan),
             Exp::Letrec { bindings, body } => {
-                let key = x;
+                let key = self.span_key(x);
                 match self.lift_plan(&bindings, body, e, tail) {
                     Some((lams, added)) => {
                         // Each member's closure counted, as `lift` makes them.
@@ -253,7 +260,7 @@ impl Compiler<'_> {
     /// in the environment its word has, in tail position.
     fn plan_lambda(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>, plan: &mut Plan) {
         let fv = self.captured(params, body, e);
-        plan.procs.insert(body, Planned { params: params.to_vec(), own, fv: fv.clone() });
+        plan.procs.insert((self.span_key(body), params.to_vec()), Planned { params: params.to_vec(), own, fv: fv.clone() });
         let own = own.filter(|f| !params.contains(f));
         // Lifted procedures are known everywhere inside: they are constants.
         let mut inner: Env = e.iter().filter(|(_, l)| matches!(l, Loc::Lifted(_))).copied().collect();
@@ -267,11 +274,11 @@ impl Compiler<'_> {
 
     /// What the lambda of `body` captures, as the plan says, in the stack
     /// code's own walk; none in register code's, or a lambda not planned.
-    pub(crate) fn planned_fv(&self, body: ExpId) -> Option<Vec<Sym>> {
+    pub(crate) fn planned_fv(&self, params: &[Sym], body: ExpId) -> Option<Vec<Sym>> {
         if self.twin_depth > 0 || self.spec.is_some() {
             return None;
         }
-        self.plan.as_ref()?.procs.get(&body).map(|p| p.fv.clone())
+        self.plan.as_ref()?.procs.get(&(self.span_key(body), params.to_vec())).map(|p| p.fv.clone())
     }
 
     /// Whether the `letrec` `x` is lifted, as the plan says (the names each
@@ -281,7 +288,7 @@ impl Compiler<'_> {
         if self.twin_depth > 0 || self.spec.is_some() {
             return None;
         }
-        self.plan.as_ref()?.lifts.get(&x).cloned()
+        self.plan.as_ref()?.lifts.get(&self.span_key(x)).cloned()
     }
 
     /// A lifted `letrec`'s members' parameters and bodies (each is a plain
@@ -301,7 +308,7 @@ impl Compiler<'_> {
         }
         let Some(plan) = &self.plan else { return };
         self.plan_checks += 1;
-        let key = body;
+        let key = (self.span_key(body), params.to_vec());
         let got = Planned { params: params.to_vec(), own, fv: fv.to_vec() };
         match plan.procs.get(&key) {
             Some(p) if *p == got => {}
@@ -319,7 +326,7 @@ impl Compiler<'_> {
         }
         let Some(plan) = &self.plan else { return };
         self.plan_checks += 1;
-        let key = x;
+        let key = self.span_key(x);
         let planned = plan.lifts.get(&key);
         if planned.map(|p| p.as_ref()) != Some(added) {
             let msg = format!("letrec at {key:?}: planned {planned:?}, compiled {added:?}");

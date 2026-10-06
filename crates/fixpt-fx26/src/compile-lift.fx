@@ -43,6 +43,54 @@
           ((c-lifted? (cdr (car e))) (the cenv (cons (car e) (c-lifted-entries (cdr e)))))
           (else (c-lifted-entries (cdr e))))))
 
+;;; ------------------------------------------- the middle phase's plan
+;;; Before a top-level form is compiled, `compile-plan.fx` decides each
+;;; lambda's captured names and each `letrec`'s lifting
+;;; (`docs/research/compiler-middle-phase.md`, step 2), as the Rust
+;;; compiler's `cellular/procs.rs`; the stack code reads them here.
+
+;; A lambda as planned: its parameters' names, and the names it captures.
+(define-type c-planned (productof (1 syms) (2 syms)))
+(define-type c-planneds (listof c-planned @k))
+;; The form's lambdas, by where their bodies are (`c-span-key`), each with
+;; its parameters' names (a `define-datatype`'s constructors share their
+;; form's place); its `letrec`s' liftings, by where they are: none if not
+;; lifted, else each member's added names, as `c-lift-plan` gives them.
+(define c-plan-procs (ref (table int c-planneds @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-plan-lifts (ref (table int (listof c-added @k) @k) @k)
+  (new (make-table c-int-hash c-int=?)))
+;; Whether a plan is in force; and how deep in register code the compile is,
+;; whose own lambdas (an inlined body, a specialized copy) are not planned.
+(define c-planning (ref bool @k) (new #f))
+(define c-twin-depth (ref int @k) (new 0))
+(define c-planned-in (subr c-walks (c-planneds syms) c-planneds)
+  (lambda (ps names)
+    (cond ((null? ps) nil)
+          ((k-syms=? (extract (car ps) 1) names) (the c-planneds (cons (car ps) nil)))
+          (else (c-planned-in (cdr ps) names)))))
+;; What the lambda of `ps` and `body` captures, as planned, in a list; none
+;; where it was not planned, or in register code.
+(define c-planned-fv (subr c-walks (c-params exp) (listof syms @k))
+  (lambda (ps body)
+    (if (or (not (get c-planning)) (> (get c-twin-depth) 0))
+        nil
+        (let ((found (c-planned-in (table-ref (get c-plan-procs)
+                                              (c-span-key (exp-start body) (exp-end body))
+                                              (the c-planneds nil))
+                                   (c-bind-params ps nil))))
+          (if (null? found) nil (the (listof syms @k) (cons (extract (car found) 2) nil)))))))
+;; Whether the `letrec` at `a`-`b` is lifted, as planned, in a list: of what
+;; `c-lift-plan` would give; none where it was not planned, or in register
+;; code.
+(define c-planned-lift (subr c-walks (int int) (listof (listof c-added @k) @k))
+  (lambda (a b)
+    (let ((key (c-span-key a b)))
+      (if (or (not (get c-planning)) (> (get c-twin-depth) 0)
+              (not (table-has? (get c-plan-lifts) key)))
+          nil
+          (the (listof (listof c-added @k) @k)
+               (cons (table-ref (get c-plan-lifts) key (the (listof c-added @k) nil)) nil))))))
+
 ;; Each of `ns`' values pushed, from where `e` has it.
 (define c-load-names (subr (maxeff compiles spin) (syms cenv code) unit)
   (lambda (ns e c)
@@ -479,3 +527,11 @@
 (define c-count-names (with compile-lift-module c-count-names))
 (define c-members (with compile-lift-module c-members))
 (define-type c-added (select compile-lift-module c-added))
+(define-type c-planned (select compile-lift-module c-planned))
+(define-type c-planneds (select compile-lift-module c-planneds))
+(define c-plan-procs (with compile-lift-module c-plan-procs))
+(define c-plan-lifts (with compile-lift-module c-plan-lifts))
+(define c-planning (with compile-lift-module c-planning))
+(define c-twin-depth (with compile-lift-module c-twin-depth))
+(define c-planned-fv (with compile-lift-module c-planned-fv))
+(define c-planned-lift (with compile-lift-module c-planned-lift))

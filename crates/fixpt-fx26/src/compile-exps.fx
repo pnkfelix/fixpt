@@ -330,8 +330,10 @@
           (let* ((outer-reuse (get c-made-reuse))
                  (cells (begin (set c-made-reuse (get c-made-now))
                                (set c-made-now (the (listof c-made @k) nil))
+                               (set c-twin-depth (+ (get c-twin-depth) 1))
                                ((get c-register-code) ps body inner this))))
-            (begin (set c-made-reuse outer-reuse) (c-twin! w cells))))
+            (begin (set c-twin-depth (- (get c-twin-depth) 1))
+                   (set c-made-reuse outer-reuse) (c-twin! w cells))))
         #u)))
 
 ;; A typed call of `n` arguments: in tail position, a tail call.
@@ -587,7 +589,8 @@
       (let ((key (c-span-key a b)))
         (if (table-has? (get c-lifted) key)
             (table-ref (get c-lifted) key (the c-lifting nil))
-            (let ((plan (c-lift-plan bs body e tail)))
+            (let* ((planned (c-planned-lift a b))
+                   (plan (if (null? planned) (c-lift-plan bs body e tail) (car planned))))
               (if (null? plan)
                   (begin (table-set! (get c-lifted) key (the c-lifting nil)) (the c-lifting nil))
                   (let* ((added (car plan))
@@ -690,7 +693,10 @@
       (let* ((named (c-take c-word-name (the (listof string @k) nil)))
              (bound (c-take c-bind-name (the (listof symbol @k) nil)))
              (defining (c-take c-defining (the (listof symbol @k) nil)))
-             (fv (c-lambda-captured ps body e))
+             ;; What it captures, as the middle phase planned (`compile-plan.fx`);
+             ;; found here only where it did not, in register code's lambdas.
+             (planned (c-planned-fv ps body))
+             (fv (if (null? planned) (c-lambda-captured ps body e) (car planned)))
              ;; The parameters a lifting added, first (`c-lift`).
              (added (c-take c-lifting-added 0))
              ;; A parameter of the same name hides the procedure.
@@ -842,3 +848,8 @@
 (define c-lambda-word (with compile-exps-module c-lambda-word))
 (define-type c-inline (select compile-exps-module c-inline))
 (define-type c-inlinables (select compile-exps-module c-inlinables))
+(define c-own-of (with compile-exps-module c-own-of))
+(define c-standard-name (with compile-exps-module c-standard-name))
+(define c-module-slots (with compile-exps-module c-module-slots))
+(define c-module-own (with compile-exps-module c-module-own))
+(define c-own-scope (with compile-exps-module c-own-scope))

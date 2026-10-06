@@ -929,7 +929,7 @@ impl<'a> Compiler<'a> {
         let defining = self.defining.take();
         // What it captures, as the middle phase decided (`procs`); decided
         // here only where it did not, in register code's own lambdas.
-        let fv = match self.planned_fv(body) {
+        let fv = match self.planned_fv(params, body) {
             Some(fv) => {
                 if self.plan_check {
                     let found = self.captured(params, body, e);

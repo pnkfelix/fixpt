@@ -475,6 +475,7 @@
     (if (null? bs)
         #u
         (begin (c-name-for! (extract (car bs) 1) (extract (car bs) 3))
+               (c-plan-top (extract (car bs) 3))
                (c-exp (extract (car bs) 3) (the cenv nil) 0 c #f)
                (c-op1 c routine-global! (wcell-global (car gs)))
                (c-rec-fill (cdr bs) (cdr gs) c)))))
@@ -553,6 +554,7 @@
               (if has-value (c-op c routine-drop) #u)
               ;; A module defined again no longer says what its re-exports are.
               (set c-modules (c-modules-without (get c-modules) n))
+              (c-plan-top x)
               (if (or (null? ty) (null? (c-lambda-of x)))
                   (begin (if (c-module? x)
                              (set c-module-members (the (listof c-inlinables @k) (list nil)))
@@ -581,6 +583,7 @@
           (t-exp (x)
             (begin (if has-value (c-op c routine-drop) #u)
                    (set c-last-exp (the (listof exp @k) (cons x nil)))
+                   (c-plan-top x)
                    (c-exp x (the cenv nil) 0 c #f)
                    (c-tops (cdr ts) c #t)))
           (else y (c-tops (cdr ts) c has-value))))))

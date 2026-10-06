@@ -39,10 +39,11 @@ pub const EVALUATOR: &str = include_str!("evaluator.fx");
 pub const COMPILER: &str = include_str!("compile.fx");
 
 /// Its other parts, in order: lambda lifting and the standard operations;
-/// expressions; inlining and programs.
-pub const COMPILER_PARTS: [(&str, &str); 3] = [
+/// expressions; the middle phase's plan of a form; inlining and programs.
+pub const COMPILER_PARTS: [(&str, &str); 4] = [
     ("compile-lift.fx", include_str!("compile-lift.fx")),
     ("compile-exps.fx", include_str!("compile-exps.fx")),
+    ("compile-plan.fx", include_str!("compile-plan.fx")),
     ("compile-programs.fx", include_str!("compile-programs.fx")),
 ];
 
@@ -120,7 +121,7 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 48] = [
+pub const FRONT_END_FILES: [(&str, &str); 49] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("parser-top.fx", PARSER_TOP),
@@ -160,6 +161,7 @@ pub const FRONT_END_FILES: [(&str, &str); 48] = [
     COMPILER_PARTS[0],
     COMPILER_PARTS[1],
     COMPILER_PARTS[2],
+    COMPILER_PARTS[3],
     ("regcode.fx", REGCODE),
     REGCODE_PARTS[0],
     REGCODE_PARTS[1],

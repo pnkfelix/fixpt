@@ -948,3 +948,5 @@
 (define at-pending (with compile-module at-pending))
 (define at-loop (with compile-module at-loop))
 (define at-lifted (with compile-module at-lifted))
+(define c-int-hash (with compile-module c-int-hash))
+(define c-int=? (with compile-module c-int=?))
