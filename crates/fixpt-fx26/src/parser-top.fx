@@ -3,6 +3,9 @@
 
 ;;; ------------------------------------------------------------- top level
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define parser-top-module (module
 (define parse-top (subr (maxeff parses spin) (syn) top)
   (lambda (s)
     (let ((head (form-head s)))
@@ -108,4 +111,6 @@
 ;; @p, so the control effect stays in the type, as the reader's on @e do;
 ;; @p is this program's own, so that is still licensed.
 (define parse-program (subr (maxeff (read @globals) parses spin) (syns-a) presult)
-  (lambda (forms) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r))))
+  (lambda (forms) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r))))))
+
+(define parse-program (with parser-top-module parse-program))
