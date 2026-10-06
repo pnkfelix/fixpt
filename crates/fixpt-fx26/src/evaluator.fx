@@ -22,8 +22,12 @@
 ;;;
 ;;; Not yet: bloblets' frozen flags.
 
+
 (private-regions @v @x)
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define evaluator-module (module
 ;; What changing the program's store on @v may do, and what a delimited
 ;; part of the program may do, besides control on @x.
 (define-effect stores (maxeff (read @globals) (read @v) (write @v) (alloc @v)))
@@ -935,4 +939,20 @@
   (lambda (tops)
     (tagcase (begin (ev-begin! nil) (eval-program tops))
       (ev-ok (v) (show-val v))
-      (ev-err (m) (string-append "!! " m)))))
+      (ev-err (m) (string-append "!! " m)))))))
+
+(define-effect runs (select evaluator-module runs))
+(define-type val (select evaluator-module val))
+(define-type env (select evaluator-module env))
+(define-type vals (select evaluator-module vals))
+(define genv (with evaluator-module genv))
+(define cell (with evaluator-module cell))
+(define extend (with evaluator-module extend))
+(define arg (with evaluator-module arg))
+(define standard (with evaluator-module standard))
+(define lookup (with evaluator-module lookup))
+(define int2 (with evaluator-module int2))
+(define bind (with evaluator-module bind))
+(define apply1 (with evaluator-module apply1))
+(define eval (with evaluator-module eval))
+(define run-checked (with evaluator-module run-checked))
