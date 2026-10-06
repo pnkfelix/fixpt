@@ -13,6 +13,179 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define compile-plan-module (module
+;;; ------------------------------------------- what calls may become
+;;; The globals a call may be inlined as, or specialized as, as the program
+;;; loop (`compile-programs.fx`) notes them; the plan reads them (step 3),
+;;; and register code.
+
+;; The most parser-tree nodes a body may have to be inlined
+;; (`c-inline-room`).
+(define c-inline-limit int 20)
+
+(define c-inlines (ref c-inlinables @k) (new nil))
+
+;; The globals whose bodies are being inlined, which are not again.
+(define c-inlining (ref syms @k) (new nil))
+
+;; `xs` without `n`'s.
+(define c-drop-inline (subr c-builds (c-inlinables symbol) c-inlinables)
+  (lambda (xs n)
+    (cond ((null? xs) xs)
+          ((symbol=? (extract (car xs) 1) n) (c-drop-inline (cdr xs) n))
+          (else (the c-inlinables (cons (car xs) (c-drop-inline (cdr xs) n)))))))
+
+;; The most a procedure's body may have to be specialized at a lambda
+;; (`c-inline-room`).
+(define c-special-limit int 60)
+
+;; A global procedure whose parameter (6) is only called, with (7)
+;; arguments, or passed as itself to a call of the procedure: a call with a
+;; lambda there may run a copy of the procedure made for that lambda, the
+;; lambda's body inlined where the parameter is called (`regcode.fx`'s
+;; `r-specialize`). Its name, word, parameters, body and globals, as for
+;; `c-inline`.
+(define-type c-special
+  (productof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int) (6 int) (7 int)))
+
+(define-type c-specializables (listof c-special acyclic))
+
+(define c-specials (ref c-specializables @k) (new nil))
+
+;; `xs` without `n`'s.
+(define c-drop-special (subr c-builds (c-specializables symbol) c-specializables)
+  (lambda (xs n)
+    (cond ((null? xs) xs)
+          ((symbol=? (extract (car xs) 1) n) (c-drop-special (cdr xs) n))
+          (else (the c-specializables (cons (car xs) (c-drop-special (cdr xs) n)))))))
+
+;; A procedure being specialized at a lambda: its global's name, cell and
+;; word; the parameter's place and name; how many parameters; the lambda's
+;; arity, parameters and body, the names its closure captures in order, and
+;; the globals it sees.
+(define-type c-spec
+  (productof (1 symbol) (2 wglobal) (3 tword) (4 int) (5 symbol) (6 int) (7 int)
+             (8 c-params) (9 exp) (10 syms) (11 int)))
+
+(define c-spec-now (ref (listof c-spec @k) @k) (new nil))
+
+;; The `k`th of `es`.
+(define c-nth (subr (read @globals) (exps int) exp)
+  (lambda (es k) (if (= k 0) (car es) (c-nth (cdr es) (- k 1)))))
+
+;; How many of `n` parser-tree nodes are left once `x`'s are counted, as the
+;; Rust compiler's `inline_room` counts them: negative, and counted no
+;; further, once they run out, or at a form that makes a closure, which an
+;; inlined body would have to capture its slots in.
+(define-rec
+  (c-inline-room (subr (maxeff (read @globals) spin) (exp int) int)
+    (lambda (x n0)
+      (let ((n (- n0 1)))
+        (if (< n 0)
+            n
+            (tagcase x
+              (e-lambda (ps body a b) -1)
+              (e-rlambda (r l a b) -1)
+              (e-letrec (bs body a b) -1)
+              (e-prompt (t body h a b) -1)
+              (e-module (items a b) -1)
+              (e-with (m body a b) -1)
+              (e-app (f args a b) (c-inline-room-all args (c-inline-room f n)))
+              (e-plambda (d body a b) (c-inline-room body n))
+              (e-proj (body ds a b) (c-inline-room body n))
+              (e-the (d body a b) (c-inline-room body n))
+              (e-convention (cnv body a b) (c-inline-room body n))
+              (e-letregion (k r i body a b) (c-inline-room body n))
+              (e-if (t th el a b) (c-inline-room-if el (c-inline-room-if th (c-inline-room t n))))
+              (e-let (bs body a b) (c-inline-room-if body (c-inline-room-let bs n)))
+              (e-begin (es a b) (c-inline-room-all es n))
+              (e-bloblet (op i args a b) (c-inline-room-all args n))
+              (e-product (fs a b) (c-inline-room-let fs n))
+              (e-extract (p l a b) (c-inline-room p n))
+              (e-sum (t v a b) (c-inline-room v n))
+              (e-tagcase (s arms els a b)
+                (c-inline-room-else els (c-inline-room-arms arms (c-inline-room s n))))
+              (else y n))))))
+  ;; `x`'s nodes counted from `n`, unless none are left.
+  (c-inline-room-if (subr (maxeff (read @globals) spin) (exp int) int)
+    (lambda (x n) (if (< n 0) n (c-inline-room x n))))
+  (c-inline-room-all (subr (maxeff (read @globals) spin) (exps int) int)
+    (lambda (es n)
+      (if (or (null? es) (< n 0)) n (c-inline-room-all (cdr es) (c-inline-room (car es) n)))))
+  (c-inline-room-let (subr (maxeff (read @globals) spin) (c-binds int) int)
+    (lambda (bs n)
+      (if (or (null? bs) (< n 0))
+          n
+          (c-inline-room-let (cdr bs) (c-inline-room (extract (car bs) 2) n)))))
+  (c-inline-room-arms (subr (maxeff (read @globals) spin) (c-cases int) int)
+    (lambda (arms n)
+      (if (or (null? arms) (< n 0))
+          n
+          (c-inline-room-arms (cdr arms) (c-inline-room (extract (car arms) 4) n)))))
+  (c-inline-room-else (subr (maxeff (read @globals) spin) (c-binds int) int)
+    (lambda (els n) (if (or (null? els) (< n 0)) n (c-inline-room (extract (car els) 2) n)))))
+;; A call of a global, as planned (step 3): the small procedure it may be
+;; inlined as, and the procedure it may be specialized as with the lambda
+;; argument, each in a list of none or one; by where the call is.
+(define-type c-spec-call (productof (1 c-special) (2 exp)))
+(define-type c-spec-calls (listof c-spec-call @k))
+(define-type c-called (productof (1 (listof c-inline acyclic)) (2 c-spec-calls)))
+(define c-plan-calls (ref (table int c-called @k) @k) (new (make-table c-int-hash c-int=?)))
+;; The one of `xs` that `n`, taking `k` arguments, names, if any.
+(define p-inline-named (subr (maxeff (read @globals) (alloc @k)) (c-inlinables symbol int)
+                            (listof c-inline acyclic))
+  (lambda (xs n k)
+    (cond ((null? xs) nil)
+          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
+           (the (listof c-inline acyclic) (cons (car xs) nil)))
+          (else (p-inline-named (cdr xs) n k)))))
+(define p-special-named (subr (maxeff (read @globals) (alloc @k)) (c-specializables symbol int)
+                             (listof c-special acyclic))
+  (lambda (xs n k)
+    (cond ((null? xs) nil)
+          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
+           (the (listof c-special acyclic) (cons (car xs) nil)))
+          (else (p-special-named (cdr xs) n k)))))
+;; `sp` and the lambda argument at its parameter, in a list, when that is a
+;; lambda small enough to inline, taking as many arguments as it is called
+;; with.
+(define p-special-lambda (subr (maxeff c-builds spin) (c-special exps) c-spec-calls)
+  (lambda (sp args)
+    (let ((lam (c-nth args (extract sp 6))))
+      (tagcase lam
+        (e-lambda (ps body la lb)
+          (if (and (= (c-count-params ps) (extract sp 7))
+                   (>= (c-inline-room body c-inline-limit) 0))
+              (the c-spec-calls (cons (product (1 sp) (2 lam)) nil))
+              nil))
+        (else y nil)))))
+;; Call `f` `args` at `a`-`b`, in `e`, planned: as the Rust compiler's
+;; `plan_call`, and register code's `r-inlined` and `r-specialized`.
+(define p-call (subr (maxeff compiles spin) (exp exps int int cenv) unit)
+  (lambda (f args a b e)
+    (tagcase f
+      (e-var (n fa fb)
+        (let ((l (c-where e n)))
+          (if (or (null? l) (not (c-global? (car l))))
+              #u
+              (let* ((k (c-count-exps args))
+                     (sp (p-special-named (get c-specials) n k)))
+                (table-set! (get c-plan-calls) (c-span-key a b)
+                            (product (1 (p-inline-named (get c-inlines) n k))
+                                     (2 (if (null? sp) nil (p-special-lambda (car sp) args)))))))))
+      (else y #u))))
+;; Call `a`-`b` as planned, in a list, where call sites are the plan's: in
+;; a planned lambda's own register code, outside any inlined body or copy;
+;; a call of no global, planned as neither. None elsewhere, where register
+;; code decides.
+(define c-planned-call (subr c-builds (int int) (listof c-called @k))
+  (lambda (a b)
+    (if (or (not (get c-r-in-plan)) (not (null? (get c-inlining))) (not (null? (get c-spec-now))))
+        nil
+        (the (listof c-called @k)
+             (cons (table-ref (get c-plan-calls) (c-span-key a b)
+                              (the c-called (product (1 nil) (2 nil))))
+                   nil)))))
+
 ;; The names `ns` bound in slots, onto `e`: only their kind counts.
 (define p-slots (subr (maxeff (read @globals) (alloc @k)) (syms cenv) cenv)
   (lambda (ns e) (if (null? ns) e (p-slots (cdr ns) (c-extend (car ns) (at-slot 0) e)))))
@@ -44,7 +217,8 @@
           (e-app (f args a b)
             (let ((l (c-applied-let f args)))
               (if (null? l)
-                  (begin (p-exps args e)
+                  (begin (p-call f args a b e)
+                         (p-exps args e)
                          ;; A lifted procedure's name, or a standard one's, is
                          ;; not made as a value.
                          (if (and (< (c-lifted-at f e) 0) (string=? (c-standard-name f e) ""))
@@ -187,6 +361,7 @@
     (let ((count (get c-lift-count)))
       (begin (set c-plan-procs (make-table c-int-hash c-int=?))
              (set c-plan-lifts (make-table c-int-hash c-int=?))
+             (set c-plan-calls (make-table c-int-hash c-int=?))
              (set c-planning #t)
              (set c-twin-depth 0)
              (p-exp x (the cenv nil) #f)
@@ -194,3 +369,20 @@
 ))
 
 (define c-plan-top (with compile-plan-module c-plan-top))
+(define c-inline-limit (with compile-plan-module c-inline-limit))
+(define c-inlines (with compile-plan-module c-inlines))
+(define c-inlining (with compile-plan-module c-inlining))
+(define c-drop-inline (with compile-plan-module c-drop-inline))
+(define c-special-limit (with compile-plan-module c-special-limit))
+(define-type c-special (select compile-plan-module c-special))
+(define-type c-specializables (select compile-plan-module c-specializables))
+(define c-specials (with compile-plan-module c-specials))
+(define c-drop-special (with compile-plan-module c-drop-special))
+(define-type c-spec (select compile-plan-module c-spec))
+(define c-spec-now (with compile-plan-module c-spec-now))
+(define c-nth (with compile-plan-module c-nth))
+(define c-inline-room (with compile-plan-module c-inline-room))
+(define-type c-spec-call (select compile-plan-module c-spec-call))
+(define-type c-spec-calls (select compile-plan-module c-spec-calls))
+(define-type c-called (select compile-plan-module c-called))
+(define c-planned-call (with compile-plan-module c-planned-call))

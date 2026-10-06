@@ -63,6 +63,9 @@
 ;; whose own lambdas (an inlined body, a specialized copy) are not planned.
 (define c-planning (ref bool @k) (new #f))
 (define c-twin-depth (ref int @k) (new 0))
+;; Whether the register code being made is a planned lambda's, of the form
+;; being compiled (step 3): its call sites are the plan's.
+(define c-r-in-plan (ref bool @k) (new #f))
 (define c-planned-in (subr c-walks (c-planneds syms) c-planneds)
   (lambda (ps names)
     (cond ((null? ps) nil)
@@ -535,3 +538,4 @@
 (define c-twin-depth (with compile-lift-module c-twin-depth))
 (define c-planned-fv (with compile-lift-module c-planned-fv))
 (define c-planned-lift (with compile-lift-module c-planned-lift))
+(define c-r-in-plan (with compile-lift-module c-r-in-plan))

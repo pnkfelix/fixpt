@@ -171,7 +171,17 @@ green, the self-compile measured.
    pre-pass (the candidate lists and the call's argument trees are all it
    needs; the callee's register location is whether it is a known global),
    copies of inlined bodies made there with their names resolved. The
-   register compiler reads the decisions. Words unchanged.
+   register compiler reads the decisions. Words unchanged. *3a done, both compilers, 2026-10-06*: the plan decides each call
+   of a global (Rust `plan_call`; FX-26 `p-call`), and register code reads
+   it (`r_inline_of`, `r_special_of`; `r-inline-of`, `r-special-of`) in a
+   planned lambda's own code (`r_in_plan`, `c-r-in-plan`, set when its
+   register code starts), outside any inlined body or copy, which are
+   another form's tree and still decide where they are (3b). The
+   candidates (`c-inlines`, `c-specials`, `c-spec-now`) and the size
+   measure moved into `compile-plan.fx`, which reads them. Rust's shadow
+   check: no difference in 31051 decisions of the programs, 13543 of the
+   front end. The self-compile, per phase: compile 0.272 → 0.281 s, 45 →
+   46 collections, 47.4 → 47.8 M words; check 1.095 → 1.105 s.
 4. **Twins as a phase**: per form, every word first, then every twin; the
    register compiler no longer calls the stack compiler, and the stack
    compiler no longer calls it. Remove `c-register-code` and

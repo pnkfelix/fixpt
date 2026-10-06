@@ -224,7 +224,7 @@
               (else
                (let ((name (r-standard-name env f)))
                  (if (string=? name "")
-                     (r-call g f args env te tail)
+                     (r-call g f args a b env te tail)
                      (cond ((and tail (and (string=? name "with-mark") (= n 3)))
                             (r-withmark-tail g args env te))
                            ((and (string=? name "apply") (= n 2))
@@ -318,23 +318,23 @@
                        (r-opn g rop-stack s) (r-invoke g 1 tail)))
               (r-restore g regs slots))))))
   ;; A call: the arguments into REG1…REGn, the procedure in RESULT.
-  (r-call (subr rcompiles (rgen exp exps renv cenv bool) unit)
-    (lambda (g f args env te tail)
+  (r-call (subr rcompiles (rgen exp exps int int renv cenv bool) unit)
+    (lambda (g f args a b env te tail)
       (let ((n (c-count-exps args)))
         (cond ;; An inlined call: in a fast version, no call, so in a leaf too.
-              ((not (null? (r-inlined env f n)))
+              ((not (null? (r-inline-of a b env f n)))
                (if (and (not (get r-assuming)) (extract g leaf))
                    (r-decline)
-                   (let ((i (car (r-inlined env f n))))
+                   (let ((i (car (r-inline-of a b env f n))))
                      (r-inline g (car i) (cdr i) f args env te tail))))
               ((extract g leaf)
                (if (and tail
                         (and (< n register-regs)
-                             (and (null? (r-specialized env f args)) (< (r-lifted-at env f) 0))))
+                             (and (null? (r-special-of a b env f args)) (< (r-lifted-at env f) 0))))
                    ((get r-leaf-call) g f args env te)
                    (r-decline)))
-              ((not (null? (r-specialized env f args)))
-               (let ((i (car (r-specialized env f args))))
+              ((not (null? (r-special-of a b env f args)))
+               (let ((i (car (r-special-of a b env f args))))
                  (r-specialize g (extract i 1) (extract i 2) (extract i 3) args env te tail)))
               ;; A lifted procedure's call: the names it would have captured,
               ;; then the arguments, into REG1…REGn; its closure, a constant.

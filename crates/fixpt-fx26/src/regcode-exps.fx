@@ -400,6 +400,42 @@
                     (if (null? i) nil (the (listof rinline @k) (cons (cons (car i) cell) nil)))))
                 (else y nil)))))
       (else y nil))))
+;; The global `f` names here, in a list; none if it names none.
+(define r-global-of (subr rbuilds (renv exp) (listof wglobal @k))
+  (lambda (env f)
+    (tagcase f
+      (e-var (n fa fb)
+        (let ((l (r-where env n)))
+          (if (null? l)
+              nil
+              (tagcase (car l)
+                (rl-global (cell) (the (listof wglobal @k) (cons cell nil)))
+                (else y nil)))))
+      (else y nil))))
+;; Call `f` at `a`-`b`: the small procedure it is inlined as, and its
+;; global, as the plan decided (step 3), in a planned lambda's own code;
+;; else as `r-inlined` decides here, in an inlined body or a copy.
+(define r-inline-of (subr rbuilds (int int renv exp int) (listof rinline @k))
+  (lambda (a b env f k)
+    (let ((p (c-planned-call a b)))
+      (if (null? p)
+          (r-inlined env f k)
+          (let ((i (extract (car p) 1)) (g (r-global-of env f)))
+            (if (or (null? i) (null? g))
+                nil
+                (the (listof rinline @k) (cons (cons (car i) (car g)) nil))))))))
+;; The same for the procedure it is specialized as, with the lambda.
+(define r-special-of (subr rbuilds (int int renv exp exps) (listof rspecial @k))
+  (lambda (a b env f args)
+    (let ((p (c-planned-call a b)))
+      (if (null? p)
+          (r-specialized env f args)
+          (let ((s (extract (car p) 2)) (g (r-global-of env f)))
+            (if (or (null? s) (null? g))
+                nil
+                (the (listof rspecial @k)
+                     (cons (product (1 (extract (car s) 1)) (2 (car g)) (3 (extract (car s) 2)))
+                           nil))))))))
 ;; Whether `f`, applied to `args`, is the procedure itself: its own name, or
 ;; a loop's.
 (define r-self-call? (subr rcompiles (exp exps cenv rthis) bool)
@@ -866,3 +902,5 @@
 (define r-letrec-te-j (with regcode-exps-module r-letrec-te-j))
 (define r-letrec-patch (with regcode-exps-module r-letrec-patch))
 (define r-letrec-env-j (with regcode-exps-module r-letrec-env-j))
+(define r-inline-of (with regcode-exps-module r-inline-of))
+(define r-special-of (with regcode-exps-module r-special-of))

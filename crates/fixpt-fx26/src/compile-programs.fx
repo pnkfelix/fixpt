@@ -6,56 +6,6 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define compile-programs-module (module
-;; The most parser-tree nodes a body may have to be inlined
-;; (`c-inline-room`).
-(define c-inline-limit int 20)
-
-(define c-inlines (ref c-inlinables @k) (new nil))
-
-;; The globals whose bodies are being inlined, which are not again.
-(define c-inlining (ref syms @k) (new nil))
-
-;; `xs` without `n`'s.
-(define c-drop-inline (subr c-builds (c-inlinables symbol) c-inlinables)
-  (lambda (xs n)
-    (cond ((null? xs) xs)
-          ((symbol=? (extract (car xs) 1) n) (c-drop-inline (cdr xs) n))
-          (else (the c-inlinables (cons (car xs) (c-drop-inline (cdr xs) n)))))))
-
-;; The most a procedure's body may have to be specialized at a lambda
-;; (`c-inline-room`).
-(define c-special-limit int 60)
-
-;; A global procedure whose parameter (6) is only called, with (7)
-;; arguments, or passed as itself to a call of the procedure: a call with a
-;; lambda there may run a copy of the procedure made for that lambda, the
-;; lambda's body inlined where the parameter is called (`regcode.fx`'s
-;; `r-specialize`). Its name, word, parameters, body and globals, as for
-;; `c-inline`.
-(define-type c-special
-  (productof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int) (6 int) (7 int)))
-
-(define-type c-specializables (listof c-special acyclic))
-
-(define c-specials (ref c-specializables @k) (new nil))
-
-;; `xs` without `n`'s.
-(define c-drop-special (subr c-builds (c-specializables symbol) c-specializables)
-  (lambda (xs n)
-    (cond ((null? xs) xs)
-          ((symbol=? (extract (car xs) 1) n) (c-drop-special (cdr xs) n))
-          (else (the c-specializables (cons (car xs) (c-drop-special (cdr xs) n)))))))
-
-;; A procedure being specialized at a lambda: its global's name, cell and
-;; word; the parameter's place and name; how many parameters; the lambda's
-;; arity, parameters and body, the names its closure captures in order, and
-;; the globals it sees.
-(define-type c-spec
-  (productof (1 symbol) (2 wglobal) (3 tword) (4 int) (5 symbol) (6 int) (7 int)
-             (8 c-params) (9 exp) (10 syms) (11 int)))
-
-(define c-spec-now (ref (listof c-spec @k) @k) (new nil))
-
 ;; Two arities found: the same one, or -2 if they differ or either failed;
 ;; -1 is none found yet.
 (define c-arity-merge (subr pure (int int) int)
@@ -72,62 +22,6 @@
 ;; Whether `x` is the variable `p`.
 (define c-var-is? (subr (read @globals) (exp symbol) bool)
   (lambda (x p) (tagcase x (e-var (q qa qb) (symbol=? q p)) (else y #f))))
-
-;; The `k`th of `es`.
-(define c-nth (subr (read @globals) (exps int) exp)
-  (lambda (es k) (if (= k 0) (car es) (c-nth (cdr es) (- k 1)))))
-
-;; How many of `n` parser-tree nodes are left once `x`'s are counted, as the
-;; Rust compiler's `inline_room` counts them: negative, and counted no
-;; further, once they run out, or at a form that makes a closure, which an
-;; inlined body would have to capture its slots in.
-(define-rec
-  (c-inline-room (subr (maxeff (read @globals) spin) (exp int) int)
-    (lambda (x n0)
-      (let ((n (- n0 1)))
-        (if (< n 0)
-            n
-            (tagcase x
-              (e-lambda (ps body a b) -1)
-              (e-rlambda (r l a b) -1)
-              (e-letrec (bs body a b) -1)
-              (e-prompt (t body h a b) -1)
-              (e-module (items a b) -1)
-              (e-with (m body a b) -1)
-              (e-app (f args a b) (c-inline-room-all args (c-inline-room f n)))
-              (e-plambda (d body a b) (c-inline-room body n))
-              (e-proj (body ds a b) (c-inline-room body n))
-              (e-the (d body a b) (c-inline-room body n))
-              (e-convention (cnv body a b) (c-inline-room body n))
-              (e-letregion (k r i body a b) (c-inline-room body n))
-              (e-if (t th el a b) (c-inline-room-if el (c-inline-room-if th (c-inline-room t n))))
-              (e-let (bs body a b) (c-inline-room-if body (c-inline-room-let bs n)))
-              (e-begin (es a b) (c-inline-room-all es n))
-              (e-bloblet (op i args a b) (c-inline-room-all args n))
-              (e-product (fs a b) (c-inline-room-let fs n))
-              (e-extract (p l a b) (c-inline-room p n))
-              (e-sum (t v a b) (c-inline-room v n))
-              (e-tagcase (s arms els a b)
-                (c-inline-room-else els (c-inline-room-arms arms (c-inline-room s n))))
-              (else y n))))))
-  ;; `x`'s nodes counted from `n`, unless none are left.
-  (c-inline-room-if (subr (maxeff (read @globals) spin) (exp int) int)
-    (lambda (x n) (if (< n 0) n (c-inline-room x n))))
-  (c-inline-room-all (subr (maxeff (read @globals) spin) (exps int) int)
-    (lambda (es n)
-      (if (or (null? es) (< n 0)) n (c-inline-room-all (cdr es) (c-inline-room (car es) n)))))
-  (c-inline-room-let (subr (maxeff (read @globals) spin) (c-binds int) int)
-    (lambda (bs n)
-      (if (or (null? bs) (< n 0))
-          n
-          (c-inline-room-let (cdr bs) (c-inline-room (extract (car bs) 2) n)))))
-  (c-inline-room-arms (subr (maxeff (read @globals) spin) (c-cases int) int)
-    (lambda (arms n)
-      (if (or (null? arms) (< n 0))
-          n
-          (c-inline-room-arms (cdr arms) (c-inline-room (extract (car arms) 4) n)))))
-  (c-inline-room-else (subr (maxeff (read @globals) spin) (c-binds int) int)
-    (lambda (els n) (if (or (null? els) (< n 0)) n (c-inline-room (extract (car els) 2) n)))))
 
 ;; Whether `p` is, in `x`, only called, or passed as itself as argument `k`
 ;; of `n` to a call of `f`, nothing binding either name again, as the Rust
@@ -646,15 +540,6 @@
   (subr (maxeff compiles (comefrom @y) spin) ((listof top acyclic) k-facts) cresult)
   (lambda (tops facts) (c-program (lambda (c) (c-tops tops c #f)) facts)))))
 
-(define c-inline-limit (with compile-programs-module c-inline-limit))
-(define c-inlines (with compile-programs-module c-inlines))
-(define c-inlining (with compile-programs-module c-inlining))
-(define-type c-special (select compile-programs-module c-special))
-(define c-specials (with compile-programs-module c-specials))
-(define-type c-spec (select compile-programs-module c-spec))
-(define c-spec-now (with compile-programs-module c-spec-now))
-(define c-nth (with compile-programs-module c-nth))
-(define c-inline-room (with compile-programs-module c-inline-room))
 (define compile-note-inline! (with compile-programs-module compile-note-inline!))
 (define compile-forget-globals! (with compile-programs-module compile-forget-globals!))
 (define compile-keep-global! (with compile-programs-module compile-keep-global!))
