@@ -351,6 +351,9 @@ bloblet-form ::= "(" "make-bloblet" expression expression* ")"           ; bytes
                | "(" "bloblet-bytes" expression ")"
 ```
 
+- A module's type abbreviations are declared ahead, as a program's are:
+  they may name each other, and themselves, in any order, each checked
+  grounded once all are.
 - A `module` holds `define-effect` too: `(desc e E)` in its type, and
   `(select m e)` an effect outside it, resolved where types' `select`s
   are; and `define-datatype`, expanded as a program's is, into its type

@@ -420,33 +420,6 @@
                  (cons (string->symbol (syn-name name)) acc)
                  acc))
            (else y acc))))))
-;; How many times `n` is among `ns`.
-(define k-name-count (subr (read @globals) (k-names symbol) int)
-  (lambda (ns n)
-    (cond ((null? ns) 0)
-          ((symbol=? (car ns) n) (+ 1 (k-name-count (cdr ns) n)))
-          (else (k-name-count (cdr ns) n)))))
-;; A slot in scope for each of `ns` given once among `all`, first first.
-(define* k-ahead-declare (subr (maxeff checks spin) (k-names k-names) unit)
-  (lambda (ns all)
-    (if (null? ns)
-        #u
-        (begin
-          (if (= (k-name-count all (car ns)) 1)
-              (let ((slot (k-slot)))
-                (begin (k-push-desc (car ns) (ds-rec slot))
-                       (set k-ahead-names (cons (cons (car ns) slot) (get k-ahead-names)))))
-              #u)
-          (k-ahead-declare (cdr ns) all)))))
-(define k-filled-reversed (subr (read @globals) (k-filled k-filled) k-filled)
-  (lambda (xs acc) (if (null? xs) acc (k-filled-reversed (cdr xs) (cons (car xs) acc)))))
-(define* k-ground-filled (subr (maxeff checks spin) (k-filled) unit)
-  (lambda (fs)
-    (if (null? fs)
-        #u
-        (begin (k-grounded (extract (car fs) 1) (extract (car fs) 2) (extract (car fs) 3))
-               (k-ground-filled (cdr fs))))))
-
 ;; The first pass: abbreviations, so that types can refer to each other in
 ;; any order. Values cannot: a definition sees only those before it. Each
 ;; abbreviation defined once, by name, is in scope before any is read, and

@@ -1753,7 +1753,40 @@ impl Checker {
         Ok(())
     }
 
+    /// A module's items. Its type abbreviations are declared ahead, as a
+    /// program's are (`declare_ahead`): each defined once, by name, in
+    /// scope before any is read, so that they may name each other, and
+    /// themselves, in any order; each checked grounded once all are.
     fn parse_module_in(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
+        let outer = (std::mem::take(&mut self.ahead), std::mem::take(&mut self.ahead_filled));
+        let mut names: Vec<Sym> = Vec::new();
+        let mut twice: Vec<Sym> = Vec::new();
+        for f in forms {
+            let items = f.as_proper_list().unwrap_or(&[]);
+            if let [h, n, d] = items
+                && h.as_symbol().is_some_and(|h| self.name(h) == "define-type")
+                && let Some(n) = n.as_symbol()
+                && self.head(d.as_proper_list().unwrap_or(&[])) != Some("dlambda")
+            {
+                if names.contains(&n) { twice.push(n) } else { names.push(n) }
+            }
+        }
+        for n in names.into_iter().filter(|n| !twice.contains(n)) {
+            let slot = self.arena.ty(Ty::Link(None));
+            self.dscope.push((n, DScope::Rec(slot)));
+            self.ahead.push((n, slot));
+        }
+        let r = self.parse_module_items(forms).and_then(|out| {
+            for (slot, span) in std::mem::take(&mut self.ahead_filled) {
+                self.grounded(slot, span)?;
+            }
+            Ok(out)
+        });
+        (self.ahead, self.ahead_filled) = outer;
+        r
+    }
+
+    fn parse_module_items(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
         let mut out = Vec::new();
         for f in forms {
             let parts = self.items(f, "a module's definition")?.to_vec();
@@ -1818,10 +1851,10 @@ impl Checker {
                     self.dscope.push((name, DScope::Fun(ty)));
                     out.push(ModItem::Desc { name, ty });
                 }
+                // As a program's: declared ahead, or a knot of its own.
                 (Some("define-type"), [_, n, t]) => {
                     let (name, _) = name_of(self, n)?;
-                    let ty = self.parse_type(t)?;
-                    self.dscope.push((name, DScope::Rec(ty)));
+                    let ty = self.define_type(name, t, t.span)?;
                     out.push(ModItem::Desc { name, ty });
                 }
                 // `(define-effect e E)`: a transparent description of an

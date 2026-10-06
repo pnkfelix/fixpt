@@ -207,10 +207,10 @@
              (let ((f (k-parse-fun (car ts) -1)))
                (begin (k-push-desc (car ns) (ds-fun f))
                       (k-item-of k ns -1 (the k-ids (cons f nil)) nil))))
+            ;; As a program's: declared ahead, or a knot of its own.
             ((= k 1)
-             (let ((t (k-parse-type (car ts))))
-               (begin (k-push-desc (car ns) (ds-rec t))
-                      (k-item-of k ns -1 (the k-ids (cons t nil)) nil))))
+             (let ((t (k-define-type (car ns) (car ts) (syn-start (car ts)) (syn-end (car ts)))))
+               (k-item-of k ns -1 (the k-ids (cons t nil)) nil)))
             ;; A `define*`'s types its type and a mark: its variable -2.
             ((and (= k 2) (not (null? ts)) (not (null? (cdr ts))))
              (let* ((t (k-parse-types (the syns-a (cons (car ts) nil)))) (x (k-resolve-all xs)))
@@ -227,6 +227,38 @@
         nil
         (let* ((x (k-resolve-item (car items))) (rest (k-resolve-items (cdr items))))
           (cons x rest)))))
+;; The names a module's items give type abbreviations: each `define-type`
+;; of a name, but of a `dlambda` or an effect.
+(define k-module-type-names (subr (maxeff (read @globals) (read @s) (alloc @t)) (mod-items) k-names)
+  (lambda (items)
+    (if (null? items)
+        nil
+        (let* ((it (car items)) (ts (extract it 3)) (rest (k-module-type-names (cdr items))))
+          (if (and (= (extract it 1) 1) (null? (cdr ts))
+                   (not (string=? (k-list-head (car ts)) "dlambda")))
+              (the k-names (cons (car (extract it 2)) rest))
+              rest)))))
+;; A module's items, its type abbreviations declared ahead, as a program's
+;; are (`k-ahead`): each defined once, by name, in scope before any is
+;; read, so that they may name each other, and themselves, in any order;
+;; each checked grounded once all are.
+(define k-resolve-items-ahead (subr (maxeff checks spin) (mod-items) k-items)
+  (lambda (items)
+    (let* ((outer-names (get k-ahead-names)) (outer-filled (get k-ahead-filled))
+           (names (k-module-type-names items))
+           (cleared (begin (set k-ahead-names nil) (set k-ahead-filled nil)))
+           (declared (k-ahead-declare names names))
+           (got (the (ref k-items @t) (new nil)))
+           ;; What is wrong in the items, kept until the state outside is back.
+           (r (prompt k-tag (begin (set got (k-resolve-items items)) (k-done (k-te 0 nil)))
+                      (lambda (r) r)))
+           (filled (get k-ahead-filled)))
+      (begin (set k-ahead-names outer-names)
+             (set k-ahead-filled outer-filled)
+             (tagcase r
+               (k-err (m a b) (k-fail m a b))
+               (else y (k-ground-filled (k-filled-reversed filled nil))))
+             (get got)))))
 ;; Run `f`; an error it makes in the file read at `base` (`load-module`)
 ;; said at `a`..`b`, with where in the file, as the Rust checker says it.
 (define-type k-thunk-unit (subr (maxeff checks spin) () unit))
@@ -282,11 +314,11 @@
         ((> k 3)
          (let ((got (the (ref k-items @t) (new nil))))
            (begin (set k-dscope (get k-std-dscope))
-                  (k-in-loaded (lambda () (set got (k-resolve-items items))) k a b)
+                  (k-in-loaded (lambda () (set got (k-resolve-items-ahead items))) k a b)
                   (set k-dscope saved)
                   (x-module (get got) a b))))
         (else
-         (let ((xs (k-resolve-items items)))
+         (let ((xs (k-resolve-items-ahead items)))
            (begin (set k-dscope saved) (x-module xs a b))))))))
 (set k-resolve-module k-resolve-module-items)
 
