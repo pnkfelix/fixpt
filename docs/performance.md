@@ -56,7 +56,15 @@ For callers, the cell profile (`FIXPT_PROFILE_PHASE=check` on
 machine: cells, not time, but exact and comparable between two versions)
 now also counts cells by edge, a word's cells as entered from the word
 run before it (`Profile::edges`); `FIXPT_PROFILE_CALLERS=k-has-name?,…`
-prints each named word's callers by those cells.
+prints each named word's callers by those cells. Better, and to do when
+a profile next needs it: the Rust machine's return stack (`rs`) names
+every word a cell runs under, so each cell can be counted against the
+whole chain, as folded stacks (a flame graph's input) and inclusive counts
+per word. For time, not cells, a sampler could walk register code's own
+frames as the collector does (its stack maps), naming the chain `sample`
+stops at `run_in_runtime`. Continuation marks would say the same, tail
+calls collapsed as they should be, but only by marking every call in the
+code measured.
 
 **Printing a type was quadratic in the type names in scope** (2026-10-05,
 found moving the front end's files into modules, `TODO.md` §34). The
