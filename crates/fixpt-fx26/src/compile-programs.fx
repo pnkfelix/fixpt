@@ -7,14 +7,6 @@
 ;; (`c-inline-room`).
 (define c-inline-limit int 20)
 
-;; A small global procedure a call in register code may inline, guarded
-;; (`regcode.fx`'s `r-inline`): its name, word, parameters and body, and
-;; the globals as its body saw them.
-(define-type c-inline
-  (productof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int)))
-
-(define-type c-inlinables (listof c-inline acyclic))
-
 (define c-inlines (ref c-inlinables @k) (new nil))
 
 ;; The globals whose bodies are being inlined, which are not again.

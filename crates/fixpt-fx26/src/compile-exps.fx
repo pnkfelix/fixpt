@@ -63,6 +63,12 @@
 
 (define c-prev-word (ref (listof tword @k) @k) (new nil))
 
+;; A small global procedure a call in register code may inline, guarded
+;; (`regcode.fx`'s `r-inline`): its name, word, parameters and body, and
+;; the globals as its body saw them.
+(define-type c-inline
+  (productof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int)))
+(define-type c-inlinables (listof c-inline acyclic))
 ;; A top-level `(define m (module …))`'s members that are lambdas naming no
 ;; other member, each as a `c-inline`, to be inlined, if small, where a
 ;; re-export `(define f (with m f))` is called (`TODO.md` §38), as the Rust
@@ -806,3 +812,5 @@
 (define c-lift (with compile-exps-module c-lift))
 (define c-lambda (with compile-exps-module c-lambda))
 (define c-lambda-word (with compile-exps-module c-lambda-word))
+(define-type c-inline (select compile-exps-module c-inline))
+(define-type c-inlinables (select compile-exps-module c-inlinables))
