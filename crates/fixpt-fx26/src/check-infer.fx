@@ -7,11 +7,19 @@
 ;;; constrains is `pure`; a region binder nothing constrains is a fresh
 ;;; region.
 
+;; Its types, at top level: declared ahead, named anywhere.
 (define-type k-solved (ref k-map @t))
-(define k-append-binders (subr kmakes (k-binders k-binders) k-binders)
-  (lambda (xs ys) (if (null? xs) ys (cons (car xs) (k-append-binders (cdr xs) ys)))))
 ;; Binders, and the type under them.
 (define-type k-bound-body (productof (1 k-binders) (2 int)))
+(define-type k-seen-pol (ref k-pairs @t))
+;; A count of such occurrences, and of parameters sized by `v` alone.
+(define-type k-counts (productof (1 int) (2 int)))
+
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-infer-module (module
+(define k-append-binders (subr kmakes (k-binders k-binders) k-binders)
+  (lambda (xs ys) (if (null? xs) ys (cons (car xs) (k-append-binders (cdr xs) ys)))))
 (define k-binders-from (subr (maxeff kmakes spin) (int k-binders) k-bound-body)
   (lambda (t acc)
     (tagcase (k-get t)
@@ -191,7 +199,6 @@
   (lambda (z v) (tagcase z (sz-lin (k ts) (not (= (k-coef-of ts v) 0))) (else y #f))))
 (define k-size-bad (subr (read @globals) (k-size int int) int)
   (lambda (z pol v) (if (and (not (= pol 1)) (k-size-mentions? z v)) 1 0)))
-(define-type k-seen-pol (ref k-pairs @t))
 ;; How many occurrences of size variable `v` in `t` a caller supplies or
 ;; can write.
 (define-rec
@@ -247,8 +254,6 @@
                         (dt (x) (k-size-walk x 0 v seen))
                         (else y 0))))
             (+ here (k-size-walk-descs (cdr ds) v seen)))))))
-;; A count of such occurrences, and of parameters sized by `v` alone.
-(define-type k-counts (productof (1 int) (2 int)))
 ;; Parameter `p`'s, as a whole.
 (define k-size-whole (subr (maxeff kstate spin) (int int k-seen-pol) k-counts)
   (lambda (p v seen) (product (1 (k-size-walk p -1 v seen)) (2 0))))
@@ -881,4 +886,34 @@
 (define k-reaches-only? (subr (maxeff kstate spin) (kx kx k-region) bool)
   (lambda (body tag r)
     (let ((tv (the k-names (tagcase tag (x-var (s a b) (cons s nil)) (else y nil)))))
-      (k-none-reach? (k-free-vars body) tv r))))
+      (k-none-reach? (k-free-vars body) tv r))))))
+
+(define k-binders-of (with check-infer-module k-binders-of))
+(define k-default-regions (with check-infer-module k-default-regions))
+(define k-fin-region (with check-infer-module k-fin-region))
+(define k-finitized (with check-infer-module k-finitized))
+(define k-binding-depth (with check-infer-module k-binding-depth))
+(define k-certified-has? (with check-infer-module k-certified-has?))
+(define k-sc-one-arg? (with check-infer-module k-sc-one-arg?))
+(define k-check-bounds (with check-infer-module k-check-bounds))
+(define k-named-since (with check-infer-module k-named-since))
+(define k-forget-nats (with check-infer-module k-forget-nats))
+(define k-check-finite-sizes (with check-infer-module k-check-finite-sizes))
+(define k-finish (with check-infer-module k-finish))
+(define k-inst-shapes (with check-infer-module k-inst-shapes))
+(define k-result-shape (with check-infer-module k-result-shape))
+(define k-push-ids (with check-infer-module k-push-ids))
+(define k-mentions-any-unknown? (with check-infer-module k-mentions-any-unknown?))
+(define k-mentions-unknown-type? (with check-infer-module k-mentions-unknown-type?))
+(define k-any-unknown-type? (with check-infer-module k-any-unknown-type?))
+(define k-unify (with check-infer-module k-unify))
+(define k-instantiate-against (with check-infer-module k-instantiate-against))
+(define k-plambda-matches? (with check-infer-module k-plambda-matches?))
+(define k-same-labels? (with check-infer-module k-same-labels?))
+(define k-upper-bound (with check-infer-module k-upper-bound))
+(define k-part-names (with check-infer-module k-part-names))
+(define k-variants-not-named (with check-infer-module k-variants-not-named))
+(define k-cannot-take-apart (with check-infer-module k-cannot-take-apart))
+(define k-zip-fields (with check-infer-module k-zip-fields))
+(define k-beyond (with check-infer-module k-beyond))
+(define k-reaches-only? (with check-infer-module k-reaches-only?))
