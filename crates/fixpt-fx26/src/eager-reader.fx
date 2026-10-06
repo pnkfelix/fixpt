@@ -36,8 +36,12 @@
 ;; The reader's own regions: its data, its prompt tag, its mark key, and the
 ;; lists it hands back. Each is fresh for this program, and nothing outside
 ;; it can name one — which is what licenses running it on every keystroke.
+
 (private-regions @s @e @m @c)
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define eager-reader-module (module
 ;; What a reading procedure may do: allocate, read and write its own data,
 ;; mark, and suspend or fail through its prompt. A delimited parse does the
 ;; same, less the control on @e (`parsing`); looking at the data only reads
@@ -820,4 +824,45 @@
     (let ((st (eager-feed (eager-feed-string (eager-start-fx26) text) (integer->char 10))))
       (if (string=? (datum-symbol-name (eager-status st)) "complete")
           (list (eager-state-syntax st))
-          nil))))
+          nil))))))
+
+(define-effect marks (select eager-reader-module marks))
+(define-effect parsing (select eager-reader-module parsing))
+(define-effect reads (select eager-reader-module reads))
+(define-effect reading (select eager-reader-module reading))
+(define-type chars (select eager-reader-module chars))
+(define-type data (select eager-reader-module data))
+(define-type syn (select eager-reader-module syn))
+(define-type syns (select eager-reader-module syns))
+(define syn->datum (with eager-reader-module syn->datum))
+(define-type state (select eager-reader-module state))
+(define-type cursor (select eager-reader-module cursor))
+(define-type result (select eager-reader-module result))
+(define-type word (select eager-reader-module word))
+(define waiting (with eager-reader-module waiting))
+(define advance (with eager-reader-module advance))
+(define need (with eager-reader-module need))
+(define fail (with eager-reader-module fail))
+(define entry (with eager-reader-module entry))
+(define str3 (with eager-reader-module str3))
+(define eager-feed (with eager-reader-module eager-feed))
+(define eager-feed-string (with eager-reader-module eager-feed-string))
+(define eager-state-kind (with eager-reader-module eager-state-kind))
+(define eager-state-position (with eager-reader-module eager-state-position))
+(define eager-state-message (with eager-reader-module eager-state-message))
+(define eager-state-data (with eager-reader-module eager-state-data))
+(define eager-state-syntax (with eager-reader-module eager-state-syntax))
+(define-type context (select eager-reader-module context))
+(define-type closers (select eager-reader-module closers))
+(define-effect asks (select eager-reader-module asks))
+(define eager-context (with eager-reader-module eager-context))
+(define eager-status (with eager-reader-module eager-status))
+(define hole? (with eager-reader-module hole?))
+(define eager-hole-closers (with eager-reader-module eager-hole-closers))
+(define eager-start (with eager-reader-module eager-start))
+(define eager-start-fx26 (with eager-reader-module eager-start-fx26))
+(define read-text (with eager-reader-module read-text))
+(define atom (with eager-reader-module atom))
+(define lst (with eager-reader-module lst))
+(define dotted (with eager-reader-module dotted))
+(define vec (with eager-reader-module vec))
