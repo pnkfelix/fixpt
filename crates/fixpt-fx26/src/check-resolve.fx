@@ -299,7 +299,6 @@
 
 ;;; ------------------------------------------------------------ regions of types
 
-(define-type k-regions (listof k-region acyclic))
 (define k-has-region-in? (subr (maxeff kreads spin) (k-regions k-region) bool)
   (lambda (rs r)
     (cond ((null? rs) #f)

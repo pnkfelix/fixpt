@@ -461,6 +461,7 @@
         nil
         (let ((rest (k-desc-types (cdr ds))))
           (tagcase (car ds) (dt (x) (the k-ids (cons x rest))) (else y rest))))))
+(define-type k-regions (listof k-region acyclic))
 (define k-desc-regions (subr (maxeff (read @globals) (alloc @t)) (k-descs) k-regions)
   (lambda (ds)
     (if (null? ds)
