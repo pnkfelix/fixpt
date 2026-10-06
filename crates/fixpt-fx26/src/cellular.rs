@@ -141,6 +141,9 @@ pub struct Compiler<'a> {
     /// The global procedures a call in register code may specialize at a
     /// lambda argument (`regcode::r_specialize`).
     specials: Vec<Special>,
+    /// The specialized copies made, by the procedure's word, the lambda's
+    /// span, what it captures and the globals it sees (`r_specialize`).
+    spec_copies: HashMap<(u64, u32, u32, Vec<Sym>, Option<usize>), Value>,
     /// While a procedure specialized at a lambda is compiled: which.
     spec: Option<Spec>,
     /// The name the next lambda's word gets, if not where its body starts.
@@ -242,6 +245,7 @@ impl<'a> Compiler<'a> {
             module_members: None,
             modules: Vec::new(),
             specials: Vec::new(),
+            spec_copies: HashMap::new(),
             spec: None,
             word_name: None,
             scope_name: None,

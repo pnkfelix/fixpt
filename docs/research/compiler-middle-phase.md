@@ -129,7 +129,13 @@ green, the self-compile measured.
 
 1. **Memoize specialized copies** by (procedure, lambda span, globals) in
    both compilers. Small, and it settles the one expected change of words
-   first, on its own.
+   first, on its own. *Done, 2026-10-06*: keyed by the procedure's word, the
+   lambda's span, what it captures and the globals it sees
+   (`spec_copies`; `c-spec-made`, reset with the other span-keyed tables).
+   The front end's self-compile: time and collections per phase unchanged
+   (`tests/bootstrap.rs`'s probe: check 1.081 s and 1.086 s, 34
+   collections each; compile 0.254 s and 0.256 s, 45.5 M and 45.4 M words
+   allocated). How many copies it saves was not counted.
 2. **The procedure table, as a pre-pass**: every lambda met, in the order
    the stack walk meets them, with what each needs (captured names, lift
    plan, name); the stack compiler reads it instead of deciding as it
@@ -148,9 +154,10 @@ green, the self-compile measured.
 
 ## Open
 
-- **Whether the Rust compiler follows** the same structure or only keeps
-  making the same words. Following is more work now and less later: two
-  implementations of one design are compared more easily than two designs.
+- **The Rust compiler follows the same structure** (the user's,
+  2026-10-06), step by step with the FX-26 one, not only the same words:
+  two implementations of one design are compared more easily than two
+  designs.
 - **Step 3's genv.** Whether every place the register walk moves the
   globals limit is an inlined body or a specialized copy (the inventory
   found nothing else: `regcode-core.fx` 379–383, 473–475;

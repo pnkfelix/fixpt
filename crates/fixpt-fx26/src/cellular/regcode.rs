@@ -1550,18 +1550,29 @@ impl Compiler<'_> {
             lam_genv: self.genv_limit,
         };
         let (params, gbody, genv_len) = (sp.params.clone(), sp.body, sp.genv_len);
-        // The copy compiled apart: what this body assumes is not its.
-        let outer = (self.spec.replace(spec), self.genv_limit.replace(genv_len), self.declined.take(), self.assume.take());
-        // Named for the procedure and the lambda.
+        // A copy is made once for the procedure, the lambda, what it
+        // captures and the globals it sees, however many times this body's
+        // register code is made (as `r-spec-word`'s callers).
         let span = self.c.arena.span_of(body);
-        let at = match self.char_at.get(span.start as usize) {
-            Some(at) if span.file.0 == 0 => at.to_string(),
-            _ => format!("{}:{}", span.file.0, span.start),
+        let key = (sp.word.raw(), span.start, span.end, spec.lam_fv.clone(), spec.lam_genv);
+        let copy = match self.spec_copies.get(&key) {
+            Some(copy) => *copy,
+            None => {
+                // The copy compiled apart: what this body assumes is not its.
+                let outer = (self.spec.replace(spec), self.genv_limit.replace(genv_len), self.declined.take(), self.assume.take());
+                // Named for the procedure and the lambda.
+                let at = match self.char_at.get(span.start as usize) {
+                    Some(at) if span.file.0 == 0 => at.to_string(),
+                    _ => format!("{}:{}", span.file.0, span.start),
+                };
+                self.word_name = Some(format!("{}@lambda@{at}", self.name(self.specials[k].name)));
+                let made = self.lambda_word(&params, gbody, &Vec::new(), None);
+                (self.spec, self.genv_limit, self.declined, self.assume) = outer;
+                let (copy, _) = made.ok()?;
+                self.spec_copies.insert(key, copy);
+                copy
+            }
         };
-        self.word_name = Some(format!("{}@lambda@{at}", self.name(self.specials[k].name)));
-        let made = self.lambda_word(&params, gbody, &Vec::new(), None);
-        (self.spec, self.genv_limit, self.declined, self.assume) = outer;
-        let (copy, _) = made.ok()?;
         let s = g.slot();
         g.op("lambda", &[copy, Gen::n(0)]);
         g.op("setstk", &[Gen::n(s)]);

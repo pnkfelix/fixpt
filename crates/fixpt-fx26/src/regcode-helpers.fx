@@ -109,7 +109,7 @@
 (define-type rmade (productof (1 tword) (2 syms)))
 ;; The copy `spec` of `sp`'s procedure, for lambda body `lbody`, compiled
 ;; apart: what this body assumes is not its; in the globals `sp` saw.
-(define r-spec-word (subr rcompiles (c-special c-spec exp) rmade)
+(define r-spec-word-made (subr rcompiles (c-special c-spec exp) rmade)
   (lambda (sp spec lbody)
     (let ((outer-spec (get c-spec-now)) (outer-genv (get c-genv))
           (outer-assuming (get r-assuming)) (outer-assumed (get r-assumed)))
@@ -123,6 +123,33 @@
           (begin (set c-spec-now outer-spec) (set c-genv outer-genv)
                  (set r-assuming outer-assuming) (set r-assumed outer-assumed)
                  made))))))
+;; The one of `cs` made of procedure word `w` for a lambda capturing `fv` in
+;; globals `genv`, in a list; none if none was.
+(define r-spec-copy-find (subr rcompiles (c-spec-copies tword syms int) c-spec-copies)
+  (lambda (cs w fv genv)
+    (cond ((null? cs) nil)
+          ((let ((c (car cs)))
+             (and (eq? (extract c 1) w) (k-syms=? (extract c 2) fv) (= (extract c 3) genv)))
+           (the c-spec-copies (cons (car cs) nil)))
+          (else (r-spec-copy-find (cdr cs) w fv genv)))))
+;; The copy `spec` of `sp`'s procedure, for lambda body `lbody`: made once
+;; for the procedure, the lambda, what it captures and the globals it sees,
+;; however many times this body's register code is made (`r_specialize`).
+(define r-spec-word (subr rcompiles (c-special c-spec exp) rmade)
+  (lambda (sp spec lbody)
+    (let* ((key (c-span-key (exp-start lbody) (exp-end lbody)))
+           (cs (table-ref (get c-spec-made) key (the c-spec-copies nil)))
+           (found (r-spec-copy-find cs (extract sp 2) (extract spec 10) (extract spec 11))))
+      (if (null? found)
+          (let ((made (r-spec-word-made sp spec lbody)))
+            (begin
+              (table-set! (get c-spec-made) key
+                          (cons (product (1 (extract sp 2)) (2 (extract spec 10))
+                                         (3 (extract spec 11)) (4 (extract made 1))
+                                         (5 (extract made 2)))
+                                cs))
+              made))
+          (the rmade (product (1 (extract (car found) 4)) (2 (extract (car found) 5))))))))
 ;; The word lambda `ps` `body` compiles to: made already (`c-made-word`),
 ;; or now (`c-lambda-word`).
 (define r-made-word (subr rcompiles (exp-params exp cenv syms) rmade)

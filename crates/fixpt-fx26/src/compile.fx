@@ -439,6 +439,12 @@
 (define-type c-join-answer (productof (1 int) (2 syms) (3 (listof bool acyclic))))
 
 (define c-join-memo (ref (table int c-join-answer @k) @k) (new (make-table c-int-hash c-int=?)))
+;; The specialized copies made (`r-spec-word`), by the lambda's span
+;; (`c-span-key`): each the procedure's word, what the lambda captures, the
+;; globals it sees, and the copy's word and what that captures.
+(define-type c-spec-copy (productof (1 tword) (2 syms) (3 int) (4 tword) (5 syms)))
+(define-type c-spec-copies (listof c-spec-copy @k))
+(define c-spec-made (ref (table int c-spec-copies @k) @k) (new (make-table c-int-hash c-int=?)))
 
 ;; `es` with span end `b`'s summary at least `s`.
 (define c-end-max (subr c-builds (c-ends int int) c-ends)
@@ -487,6 +493,7 @@
       (set c-shares-table (make-table c-int-hash c-int=?))
       (set c-summary-table (make-table c-int-hash c-int=?))
       (set c-join-memo (make-table c-int-hash c-int=?))
+      (set c-spec-made (make-table c-int-hash c-int=?))
       (set c-lifts (make-table c-int-hash c-int=?))
       (set c-lift-count 0)
       (set c-lifted (make-table c-int-hash c-int=?))
@@ -898,6 +905,9 @@
 (define-type syms (select compile-module syms))
 (define-type c-join-answer (select compile-module c-join-answer))
 (define c-join-memo (with compile-module c-join-memo))
+(define-type c-spec-copy (select compile-module c-spec-copy))
+(define-type c-spec-copies (select compile-module c-spec-copies))
+(define c-spec-made (with compile-module c-spec-made))
 (define c-summary-at (with compile-module c-summary-at))
 (define c-set-facts! (with compile-module c-set-facts!))
 (define c-member? (with compile-module c-member?))
