@@ -181,13 +181,19 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
     // With `FIXPT_TIME_WORDS` set, how long each run took: the machine
     // alone, without the front end around it.
     let started = std::env::var_os("FIXPT_TIME_WORDS").map(|_| std::time::Instant::now());
+    // What was run, said if it fails: rooted, as the run may collect and
+    // move it (`a` is not traced).
+    let depth = rt.heap.root_count();
+    let at = rt.heap.push_root(a[0]);
     let out = run(rt, word, &args);
+    let ran = rt.heap.root_at(at);
+    rt.heap.pop_roots_to(depth);
     if let Some(t) = started {
         eprintln!("run-word: {:.6} s", t.elapsed().as_secs_f64());
     }
     match out {
         Ok(v) => Ok(v),
-        Err(e) => rt.fail(&format!("cellular word: {e}"), &[a[0]]),
+        Err(e) => rt.fail(&format!("cellular word: {e}"), &[ran]),
     }
 }
 
