@@ -3,6 +3,9 @@
 
 ;;; ------------------------------------------- helpers of the compiler proper
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define regcode-helpers-module (module
 ;; An expression, or none: a call's procedure (`r-args`), a closure's
 ;; region (`r-lambda`).
 (define-type maybe-exp (listof exp @k))
@@ -160,4 +163,32 @@
 (define r-known-cell (subr rbuilds (renv exp) wcells)
   (lambda (env x)
     (let ((k (r-known env x)))
-      (if (null? k) nil (the wcells (cons (r-const-cell (car k)) nil))))))
+      (if (null? k) nil (the wcells (cons (r-const-cell (car k)) nil))))))))
+
+(define-type maybe-exp (select regcode-helpers-module maybe-exp))
+(define r-just-exp (with regcode-helpers-module r-just-exp))
+(define r-args-2 (with regcode-helpers-module r-args-2))
+(define r-args-3 (with regcode-helpers-module r-args-3))
+(define r-const-value (with regcode-helpers-module r-const-value))
+(define r-unit (with regcode-helpers-module r-unit))
+(define r-op2imm (with regcode-helpers-module r-op2imm))
+(define r-add-imm (with regcode-helpers-module r-add-imm))
+(define r-negate (with regcode-helpers-module r-negate))
+(define r-index-field (with regcode-helpers-module r-index-field))
+(define r-restore (with regcode-helpers-module r-restore))
+(define r-var-value (with regcode-helpers-module r-var-value))
+(define r-literal? (with regcode-helpers-module r-literal?))
+(define r-free-operand? (with regcode-helpers-module r-free-operand?))
+(define r-deeper? (with regcode-helpers-module r-deeper?))
+(define r-lifted-closure (with regcode-helpers-module r-lifted-closure))
+(define r-unknowing (with regcode-helpers-module r-unknowing))
+(define r-spec-of (with regcode-helpers-module r-spec-of))
+(define r-spec-word (with regcode-helpers-module r-spec-word))
+(define r-made-word (with regcode-helpers-module r-made-word))
+(define r-free-into-regs (with regcode-helpers-module r-free-into-regs))
+(define r-collects-here? (with regcode-helpers-module r-collects-here?))
+(define r-spec-body-collects? (with regcode-helpers-module r-spec-body-collects?))
+(define-type roperands (select regcode-helpers-module roperands))
+(define r-imm-operand (with regcode-helpers-module r-imm-operand))
+(define r-reg-operand (with regcode-helpers-module r-reg-operand))
+(define r-known-cell (with regcode-helpers-module r-known-cell))
