@@ -3,6 +3,29 @@
 
 ;;; ------------------------------------------------------------ programs
 
+;; Its types, at top level: declared ahead, named anywhere.
+(define-type k-out (listof string acyclic))
+
+;; A place in what a proof was given: a variable and the labels extracted.
+(define-type k-pos (pairof symbol (listof symbol acyclic) @t))
+;; What checking a proof relies on: its own name, the names of its
+;; hypotheses, and what it proves, in words.
+(define-type k-proving (productof (1 symbol) (2 k-names) (3 string)))
+;; An arm of a `tagcase`: its tag, whether it takes the fields apart, the
+;; names it binds, and its body.
+(define-type k-case-arm (productof (1 symbol) (2 bool) (3 k-names) (4 kx)))
+;; The top-level forms of a program.
+(define-type k-tops (listof top acyclic))
+;; A `define-rec`'s bindings: names, written types, and lambdas.
+(define-type k-rec-forms (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
+(define-type k-run-list (listof k-run acyclic))
+(define-type k-def-list (listof k-def acyclic))
+;; The names of `ns` that are globals already, with their types.
+(define-type k-olds (listof (pairof symbol int acyclic) acyclic))
+
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-program-module (module
 ;; `n`, of type `t`, bound as a standard binding.
 (define k-bind-std (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std))))))
@@ -18,8 +41,6 @@
               (begin (k-define-generative (k-nth pair 1) (k-nth pair 2)) (k-standard (cdr entries)))
               (let ((t (k-parse-type (k-nth pair 1))) (n (k-name-of (car pair) "a name")))
                 (begin (k-bind-std n t) (k-standard (cdr entries)))))))))
-
-(define-type k-out (listof string acyclic))
 
 ;; Put the binders of every `poly` at the top of `t` in scope for reading.
 (define k-bind-signature (subr (maxeff kstate spin) (int) unit)
@@ -58,8 +79,6 @@
 ;;; hypotheses and proofs only to what was given at the same place, and uses
 ;;; itself only under a constructor.
 
-;; A place in what a proof was given: a variable and the labels extracted.
-(define-type k-pos (pairof symbol (listof symbol acyclic) @t))
 (define k-syms=? (subr (read @globals) ((listof symbol acyclic) (listof symbol acyclic)) bool)
   (lambda (xs ys)
     (if (null? xs)
@@ -111,9 +130,6 @@
           (tagcase (k-get t)
             (ty-named (g ds) (k-unfold-all (k-unfold g ds) (- n 1)))
             (else y t))))))
-;; What checking a proof relies on: its own name, the names of its
-;; hypotheses, and what it proves, in words.
-(define-type k-proving (productof (1 symbol) (2 k-names) (3 string)))
 ;; The error that `e` does not prove what `pv` is to, and why.
 (define k-proof-fail (subr checks (kx k-proving string) void)
   (lambda (e pv why) (k-fail-at (k-cat4 "this does not prove " (extract pv 3) ": " why) e)))
@@ -151,9 +167,6 @@
   (lambda (xs) (if (null? (cdr xs)) (car xs) (k-last (cdr xs)))))
 (define k-but-last (subr (maxeff (read @globals) (read @t) (alloc @t)) (kxs) kxs)
   (lambda (xs) (if (null? (cdr xs)) nil (the kxs (cons (car xs) (k-but-last (cdr xs)))))))
-;; An arm of a `tagcase`: its tag, whether it takes the fields apart, the
-;; names it binds, and its body.
-(define-type k-case-arm (productof (1 symbol) (2 bool) (3 k-names) (4 kx)))
 (define-rec
   ;; Whether `e0` rebuilds, as the identity, what was given at `at`, of type
   ;; `ty`; `guarded` once something has been rebuilt above it.
@@ -387,8 +400,6 @@
                               (cons (cons (k-prefixed "up-" n) g) (get k-inside))))))
       (else y #u))))
 
-;; The top-level forms of a program.
-(define-type k-tops (listof top acyclic))
 (define k-declare-each (subr (maxeff checks spin) (k-tops) unit)
   (lambda (forms)
     (if (null? forms)
@@ -462,8 +473,6 @@
 ;; abstract types named for it.
 (define k-bind-named-global (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (k-bind-global n (k-name-module n t))))
-;; A `define-rec`'s bindings: names, written types, and lambdas.
-(define-type k-rec-forms (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
 (define k-rec-types (subr (maxeff checks spin) (k-rec-forms) k-ids)
   (lambda (bs)
     (if (null? bs)
@@ -530,8 +539,6 @@
 ;;; by the same rule; each that does not is broken. To keep a value as it
 ;;; was, a program binds it: `(define d (let ((g g)) …))`.
 
-(define-type k-run-list (listof k-run acyclic))
-(define-type k-def-list (listof k-def acyclic))
 (define k-rev-runs (subr (read @globals) (k-run-list k-run-list) k-run-list)
   (lambda (xs acc) (if (null? xs) acc (k-rev-runs (cdr xs) (the k-run-list (cons (car xs) acc))))))
 ;; For a driver: what the program checked runs, in order (`compile-checked`,
@@ -557,8 +564,6 @@
                (lambda (ds)
                  (and (not (null? ds)) (or (k-has-name? (extract (car ds) 1) n) (go (cdr ds)))))))
       (go (get k-defs)))))
-;; The names of `ns` that are globals already, with their types.
-(define-type k-olds (listof (pairof symbol int acyclic) acyclic))
 (define k-old-types (subr (maxeff (read @globals) (read @t) spin) (k-names) k-olds)
   (lambda (ns)
     (cond ((null? ns) nil)
@@ -913,4 +918,14 @@
              (set k-runs nil)
              (k-ahead forms)
              (k-ok (k-forms forms nil)))
-      (lambda (r) r))))
+      (lambda (r) r))))))
+
+(define k-syms=? (with check-program-module k-syms=?))
+(define k-place-of (with check-program-module k-place-of))
+(define k-ahead (with check-program-module k-ahead))
+(define checked-tops (with check-program-module checked-tops))
+(define k-record (with check-program-module k-record))
+(define check-defer-reruns! (with check-program-module check-defer-reruns!))
+(define k-defining (with check-program-module k-defining))
+(define check-program (with check-program-module check-program))
+(define check-more (with check-program-module check-more))
