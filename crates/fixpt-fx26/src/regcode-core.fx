@@ -371,6 +371,7 @@
              (call (r-new-label g)) (end (r-new-label g))
              (outer-genv (get c-genv)) (outer-inlining (get c-inlining))
              (n (c-count-exps args))
+             (outer-ctx (get c-r-plan-ctx))
              ;; The procedure running is not known in the body.
              (h (r-unknowing g)))
         (let ((assumed (r-assume cell (extract i 2))))
@@ -378,7 +379,12 @@
             (if assumed #u (r-guard g cell (extract i 2) call))
             (set c-genv (extract i 5))
             (set c-inlining (cons (extract i 1) outer-inlining))
+            ;; Its plan's, along the path here (3b).
+            (set c-r-plan-ctx
+                 (cons (c-plan-child (if (null? outer-ctx) 0 (car outer-ctx)) (extract i 1) n)
+                       outer-ctx))
             (r-exp h (extract i 4) (extract bound 1) (extract bound 2) tail)
+            (set c-r-plan-ctx outer-ctx)
             (set c-inlining outer-inlining)
             (set c-genv outer-genv)
             (if assumed

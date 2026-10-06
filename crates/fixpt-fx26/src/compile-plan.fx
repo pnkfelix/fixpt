@@ -129,7 +129,43 @@
 (define-type c-spec-call (productof (1 c-special) (2 exp)))
 (define-type c-spec-calls (listof c-spec-call @k))
 (define-type c-called (productof (1 (listof c-inline acyclic)) (2 c-spec-calls)))
-(define c-plan-calls (ref (table int c-called @k) @k) (new (make-table c-int-hash c-int=?)))
+;; The plan's contexts (3b): the form's own, 0; and each body its calls
+;; inline, numbered, planned as register code compiles it there. Each one's
+;; calls, by where they are; and the bodies they inline, by name and arity:
+;; what an inlined body decides depending on the callee and the path to it,
+;; not on the call.
+(define-type c-calls-at (table int c-called @k))
+(define-type c-inlined-at (listof (productof (1 symbol) (2 int) (3 int)) @k))
+(define c-plan-calls (ref (table int c-calls-at @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-plan-inlined (ref (table int c-inlined-at @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-plan-contexts (ref int @k) (new 1))
+(define c-no-calls (ref c-calls-at @k) (new (make-table c-int-hash c-int=?)))
+;; While the plan is made: the context it is in, and the names whose bodies
+;; it is inlining on the way there. While register code is made: the
+;; contexts of the bodies it is inlining, innermost first (-1 where the
+;; plan has none).
+(define c-plan-now (ref int @k) (new 0))
+(define c-plan-inlining (ref syms @k) (new nil))
+(define c-r-plan-ctx (ref (listof int @k) @k) (new nil))
+;; Context `c`'s for the body of `n` taking `k` arguments, or -1.
+(define c-plan-child (subr c-walks (int symbol int) int)
+  (lambda (c n k)
+    (letrec ((find (subr c-walks (c-inlined-at) int)
+               (lambda (xs)
+                 (cond ((null? xs) -1)
+                       ((and (symbol=? (extract (car xs) 1) n) (= (extract (car xs) 2) k))
+                        (extract (car xs) 3))
+                       (else (find (cdr xs)))))))
+      (find (table-ref (get c-plan-inlined) c (the c-inlined-at nil))))))
+;; Call `a`-`b` noted as planned, in the context the plan is in.
+(define p-note-call (subr (maxeff c-emits spin) (int int c-called) unit)
+  (lambda (a b called)
+    (let ((c (get c-plan-now)))
+      (begin
+        (if (table-has? (get c-plan-calls) c)
+            #u
+            (table-set! (get c-plan-calls) c (make-table c-int-hash c-int=?)))
+        (table-set! (table-ref (get c-plan-calls) c (get c-no-calls)) (c-span-key a b) called)))))
 ;; The one of `xs` that `n`, taking `k` arguments, names, if any.
 (define p-inline-named (subr (maxeff (read @globals) (alloc @k)) (c-inlinables symbol int)
                             (listof c-inline acyclic))
@@ -158,33 +194,20 @@
               (the c-spec-calls (cons (product (1 sp) (2 lam)) nil))
               nil))
         (else y nil)))))
-;; Call `f` `args` at `a`-`b`, in `e`, planned: as the Rust compiler's
-;; `plan_call`, and register code's `r-inlined` and `r-specialized`.
-(define p-call (subr (maxeff compiles spin) (exp exps int int cenv) unit)
-  (lambda (f args a b e)
-    (tagcase f
-      (e-var (n fa fb)
-        (let ((l (c-where e n)))
-          (if (or (null? l) (not (c-global? (car l))))
-              #u
-              (let* ((k (c-count-exps args))
-                     (sp (p-special-named (get c-specials) n k)))
-                (table-set! (get c-plan-calls) (c-span-key a b)
-                            (product (1 (p-inline-named (get c-inlines) n k))
-                                     (2 (if (null? sp) nil (p-special-lambda (car sp) args)))))))))
-      (else y #u))))
 ;; Call `a`-`b` as planned, in a list, where call sites are the plan's: in
-;; a planned lambda's own register code, outside any inlined body or copy;
+;; a planned lambda's own register code, or a body inlined in it, outside
+;; any copy;
 ;; a call of no global, planned as neither. None elsewhere, where register
 ;; code decides.
 (define c-planned-call (subr c-builds (int int) (listof c-called @k))
   (lambda (a b)
-    (if (or (not (get c-r-in-plan)) (not (null? (get c-inlining))) (not (null? (get c-spec-now))))
-        nil
-        (the (listof c-called @k)
-             (cons (table-ref (get c-plan-calls) (c-span-key a b)
-                              (the c-called (product (1 nil) (2 nil))))
-                   nil)))))
+    (let ((c (if (null? (get c-r-plan-ctx)) 0 (car (get c-r-plan-ctx)))))
+      (if (or (not (get c-r-in-plan)) (not (null? (get c-spec-now))) (< c 0))
+          nil
+          (the (listof c-called @k)
+               (cons (table-ref (table-ref (get c-plan-calls) c (get c-no-calls)) (c-span-key a b)
+                                (the c-called (product (1 nil) (2 nil))))
+                     nil))))))
 
 ;; The names `ns` bound in slots, onto `e`: only their kind counts.
 (define p-slots (subr (maxeff (read @globals) (alloc @k)) (syms cenv) cenv)
@@ -251,6 +274,48 @@
             (let ((ns (c-with-at a b)))
               (if (null? ns) #u (p-exp body (p-slots (car ns) e) tail))))
           (else y #u)))))
+  ;; Call `f` `args` at `a`-`b`, in `e`, planned: as the Rust compiler's
+  ;; `plan_call`, and register code's `r-inlined` and `r-specialized`; a body
+  ;; it inlines planned too, once in each context.
+  (p-call (subr (maxeff compiles spin) (exp exps int int cenv) unit)
+    (lambda (f args a b e)
+      (tagcase f
+        (e-var (n fa fb)
+          (let ((l (c-where e n)))
+            (if (or (null? l) (not (c-global? (car l))))
+                #u
+                (let* ((k (c-count-exps args))
+                       (sp (p-special-named (get c-specials) n k))
+                       (spl (if (null? sp) (the c-spec-calls nil) (p-special-lambda (car sp) args)))
+                       ;; Not a body being inlined on the way here.
+                       (inl (if (c-member? (get c-plan-inlining) n)
+                                (the (listof c-inline acyclic) nil)
+                                (p-inline-named (get c-inlines) n k))))
+                  (begin
+                    (p-note-call a b (product (1 inl) (2 spl)))
+                    (if (or (null? inl) (>= (c-plan-child (get c-plan-now) n k) 0))
+                        #u
+                        (p-inlined (car inl) k)))))))
+        (else y #u))))
+  ;; The body of `i`, taking `k` arguments, planned as `r-inline` compiles
+  ;; it: its parameters local, in the globals it saw, its name not inlined in
+  ;; it again. (An inlined body makes no closure: `c-inline-room`.)
+  (p-inlined (subr (maxeff compiles spin) (c-inline int) unit)
+    (lambda (i k)
+      (let ((c (get c-plan-contexts)) (outer (get c-plan-now))
+            (outer-inlining (get c-plan-inlining)) (outer-genv (get c-genv)))
+        (begin
+          (set c-plan-contexts (+ c 1))
+          (table-set! (get c-plan-inlined) outer
+                      (cons (product (1 (extract i 1)) (2 k) (3 c))
+                            (table-ref (get c-plan-inlined) outer (the c-inlined-at nil))))
+          (set c-plan-now c)
+          (set c-plan-inlining (cons (extract i 1) outer-inlining))
+          (set c-genv (extract i 5))
+          (p-exp (extract i 4) (p-slots (c-bind-params (extract i 3) nil) (the cenv nil)) #f)
+          (set c-genv outer-genv)
+          (set c-plan-inlining outer-inlining)
+          (set c-plan-now outer)))))
   (p-begin (subr (maxeff compiles spin) (exps cenv bool) unit)
     (lambda (es e tail)
       (cond ((null? es) #u)
@@ -362,6 +427,11 @@
       (begin (set c-plan-procs (make-table c-int-hash c-int=?))
              (set c-plan-lifts (make-table c-int-hash c-int=?))
              (set c-plan-calls (make-table c-int-hash c-int=?))
+             (set c-plan-inlined (make-table c-int-hash c-int=?))
+             (set c-plan-contexts 1)
+             (set c-plan-now 0)
+             (set c-plan-inlining nil)
+             (set c-r-plan-ctx nil)
              (set c-planning #t)
              (set c-form-made nil)
              (set c-twin-depth 0)
@@ -387,3 +457,5 @@
 (define-type c-spec-calls (select compile-plan-module c-spec-calls))
 (define-type c-called (select compile-plan-module c-called))
 (define c-planned-call (with compile-plan-module c-planned-call))
+(define c-r-plan-ctx (with compile-plan-module c-r-plan-ctx))
+(define c-plan-child (with compile-plan-module c-plan-child))
