@@ -1,6 +1,9 @@
 ;;; Register code, in FX-26: specialized procedures' temporaries, and the
 ;;; entry. After `regcode-core.fx`.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define regcode-entry-module (module
 ;; Each argument into a frame slot of its own, in order: the slots.
 (define r-spec-temps (subr rcompiles (rgen exps renv cenv) rints)
   (lambda (g args env te)
@@ -263,4 +266,8 @@
 
 ;; Whether the compiler makes register code from now on: for a driver.
 (define compile-registers! (subr (maxeff (read @globals) (write @k)) (bool) unit)
-  (lambda (on) (set c-registers on)))
+  (lambda (on) (set c-registers on)))))
+
+(define r-standard-word (with regcode-entry-module r-standard-word))
+(define r-register-code (with regcode-entry-module r-register-code))
+(define compile-registers! (with regcode-entry-module compile-registers!))
