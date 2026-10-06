@@ -201,8 +201,8 @@ before everything else, known holes before proofs.
   argument, fixed, and a family's name re-exported, `(define-type t
   (select m t))`, applies, so `table.fx`'s types moved in too, check
   1.5% slower; then the 13 files that need nothing new, but for the
-  three generated ones: run time unchanged, check 1.24 s → 1.65 s, checking
-  a large module superlinear, to fix next, `TODO.md` §34; a re-exported
+  three generated ones: run time unchanged, check 1.24 s → 1.65 s, found
+  to be printing types, quadratic, fixed (check 0.99 s); a re-exported
   name lost inlining, a call 1.7×
   slower on register code, now inlined when the member names no other,
   `DONE.md` §38), which found that a

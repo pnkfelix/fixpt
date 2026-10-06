@@ -820,9 +820,10 @@ throughout: the re-exports cost nothing measurable at run time. Check did
 not: 1.24 s before `compile-exps`, 1.65 s after `regcode-core` (+5%,
 +12%, +6% for those three; the checker files' modules cost nothing
 measurable). Checking a large module grows faster than its size: to look
-into before more files move (`check-modorder.fx` and `modorder.rs`
-recompute a lambda's free variables at every reach, and the groups are
-found in time cubic in the lambdas). Found on the way, each fixed or set
+into before more files move. Found, profiling (`docs/performance.md`,
+"Printing a type was quadratic"): not the module code, but printing a
+type, quadratic in the type names in scope at each node, a module's type
+being large; fixed, check 0.99 s. Found on the way, each fixed or set
 aside:
 - each lambda's recursive group was checked to end once per member
   (fixed, `c71bbc2`: check 2.65 s → 1.31 s with `compile-exps`);

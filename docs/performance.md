@@ -49,6 +49,29 @@ fixpt-symbolize /tmp/syms.* -- /tmp/s.txt | less
 Take the pid of the process started (`$!`), never one found by name: the
 user's own REPL, under Emacs, has the same name.
 
+`sample` cannot say who called a word: register code calls register code
+with no native frame, so every stack of ours ends in `run_in_runtime`.
+For callers, the cell profile (`FIXPT_PROFILE_PHASE=check` on
+`tests/bootstrap.rs`'s `probe_phases_as_register_code`, on the Rust
+machine: cells, not time, but exact and comparable between two versions)
+now also counts cells by edge, a word's cells as entered from the word
+run before it (`Profile::edges`); `FIXPT_PROFILE_CALLERS=k-has-name?,…`
+prints each named word's callers by those cells.
+
+**Printing a type was quadratic in the type names in scope** (2026-10-05,
+found moving the front end's files into modules, `TODO.md` §34). The
+self-compile's check had grown from 1.24 s to 1.65 s as the compiler
+files became modules. The cell profile, before and after, put the growth
+(9.97 to 13.86 G cells) almost all in `k-has-name?` (+3.7 G), and its
+callers 8.7 G of 8.9 G in `k-abbrev-in`: at each node of a type it
+prints, the FX-26 checker looks for a `define-type` naming it, walking
+every binding in scope and keeping a list of the names seen, to skip
+those shadowed. Quadratic in the scope at every node; and the check's
+output prints every definition's type, a file's module's type being all
+its members' types. A match is rare, so it now walks once and looks for
+a shadowing binding only on a match. Check, the self-compile as register
+code: 1.65 s to 0.99–1.00 s, below where it was before any file moved.
+
 Measurements are on the development machine, as best of several runs.
 Debug builds are what `cargo test` runs; release numbers come from
 `cargo run --release`.

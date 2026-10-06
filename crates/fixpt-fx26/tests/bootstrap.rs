@@ -574,6 +574,13 @@ fn profiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Res
     LAST_PROFILE.with(|p| *p.borrow_mut() = top);
     let top = m.profile.as_ref().expect("profiling").top_allocating(usize::MAX);
     LAST_ALLOCATING.with(|p| *p.borrow_mut() = top);
+    // With `FIXPT_PROFILE_CALLERS` naming words, each one's callers, by the
+    // cells it ran entered from them.
+    for callee in std::env::var("FIXPT_PROFILE_CALLERS").unwrap_or_default().split(',').filter(|c| !c.is_empty()) {
+        for (caller, n) in m.profile.as_ref().expect("profiling").callers_of(callee, 15) {
+            eprintln!("{n:>12}  {callee} from {caller}");
+        }
+    }
     out?;
     m.ds.pop().ok_or_else(|| "the word left nothing".into())
 }

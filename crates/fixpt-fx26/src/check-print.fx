@@ -176,19 +176,29 @@
 (define k-place? (subr (maxeff (read @globals) (read @t)) (k-region) bool)
   (lambda (r) (tagcase r (r-var (v) (k-place-var? v)) (r-heap () #t) (else x #f))))
 
+;; Whether one of the first `i` bindings of `ds` is a `define-type` of `n`.
+(define k-rec-named-within? (subr (maxeff (read @globals) (read @t)) (k-scope int symbol) bool)
+  (lambda (ds i n)
+    (and (> i 0)
+         (not (null? ds))
+         (or (and (symbol=? (car (car ds)) n) (tagcase (cdr (car ds)) (ds-rec (d) #t) (else y #f)))
+             (k-rec-named-within? (cdr ds) (- i 1) n)))))
 ;; The name `define-type` gave `t`, innermost first: each name's innermost
-;; binding only.
-(define k-abbrev-in (subr kbuilds (k-scope k-names int) k-strings)
-  (lambda (ds seen t)
+;; binding only. `ds` is `all` from binding `i` on; a binding that matches
+;; is looked for again among those before it, matches being rare (once
+;; every binding was, which made printing a type quadratic in the names in
+;; scope at each of its nodes: `TODO.md` §34).
+(define k-abbrev-in (subr kbuilds (k-scope k-scope int int) k-strings)
+  (lambda (all ds i t)
     (if (null? ds)
         nil
         (let ((n (car (car ds))))
           (tagcase (cdr (car ds))
             (ds-rec (d)
-              (cond ((k-has-name? seen n) (k-abbrev-in (cdr ds) seen t))
-                    ((= (k-resolve d) t) (cons (symbol->string n) nil))
-                    (else (k-abbrev-in (cdr ds) (cons n seen) t))))
-            (else y (k-abbrev-in (cdr ds) seen t)))))))
+              (if (and (= (k-resolve d) t) (not (k-rec-named-within? all i n)))
+                  (cons (symbol->string n) nil)
+                  (k-abbrev-in all (cdr ds) (+ i 1) t)))
+            (else y (k-abbrev-in all (cdr ds) (+ i 1) t)))))))
 ;; Binder `v` of kind `kind`: `(name kind)`, or `(name region bound)`.
 (define k-binder-show (subr kbuilds (int int) string)
   (lambda (v kind)
@@ -518,7 +528,7 @@
 (define-rec
   (k-show-on (subr kbuilds (int k-ids) string)
     (lambda (t path)
-      (let* ((t (k-resolve t)) (name (k-abbrev-in (get k-dscope) nil t)))
+      (let* ((t (k-resolve t)) (name (k-abbrev-in (get k-dscope) (get k-dscope) 0 t)))
         (if (null? name) (k-show-body t path) (car name)))))
   (k-show-list (subr kbuilds (k-ids k-ids) k-strings)
     (lambda (ts path)

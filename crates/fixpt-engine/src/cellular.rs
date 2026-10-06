@@ -397,6 +397,11 @@ pub struct Profile {
     gc_count: u64,
     /// The heap's words allocated when the last cell began, and its word.
     last: (u64, Option<String>),
+    /// Cells run by each word as entered from another: the word run before
+    /// it, the word, and how many cells it ran so entered (a callee's cells
+    /// by caller; a return's, by callee, which is noise to ignore).
+    pub edges: HashMap<(String, String), u64>,
+    from: Option<String>,
 }
 
 impl Profile {
@@ -411,6 +416,12 @@ impl Profile {
             heap.symbol_name(sym)
         });
         *self.cells.entry(name.clone()).or_insert(0) += 1;
+        if self.last.1.as_ref() != Some(name) {
+            self.from = self.last.1.clone();
+        }
+        if let Some(from) = &self.from {
+            *self.edges.entry((from.clone(), name.clone())).or_insert(0) += 1;
+        }
         let now = heap.allocated();
         if let (before, Some(last)) = &self.last
             && now > *before
@@ -423,6 +434,15 @@ impl Profile {
     /// The `n` words that allocated the most, with how many words.
     pub fn top_allocating(&self, n: usize) -> Vec<(String, u64)> {
         let mut all: Vec<(String, u64)> = self.allocated.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        all.sort_by_key(|(_, v)| std::cmp::Reverse(*v));
+        all.truncate(n);
+        all
+    }
+
+    /// The `n` words that ran the most cells in `callee` on entering it,
+    /// with how many: its callers.
+    pub fn callers_of(&self, callee: &str, n: usize) -> Vec<(String, u64)> {
+        let mut all: Vec<(String, u64)> = self.edges.iter().filter(|((_, c), _)| c == callee).map(|((f, _), v)| (f.clone(), *v)).collect();
         all.sort_by_key(|(_, v)| std::cmp::Reverse(*v));
         all.truncate(n);
         all
