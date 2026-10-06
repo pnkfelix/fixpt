@@ -1,6 +1,9 @@
 ;;; Register code, in FX-26: the expressions' compiler proper, one
 ;;; recursive group. After `regcode-exps.fx`.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define regcode-core-module (module
 (define-rec
   ;; `x`'s value into RESULT; in tail position, returned. A procedure
   ;; converted to a convention is made, then given to `%fx26-convert` with
@@ -949,4 +952,18 @@
              (own (r-sibling-env all at i 0 lbody n env te))
              ;; The closure's own name, as it knows itself.
              (self (the syms (cons name nil))))
-        (r-lambda g ps lbody (extract own 1) (extract own 2) self region #f)))))
+        (r-lambda g ps lbody (extract own 1) (extract own 2) self region #f)))))))
+
+(define r-exp (with regcode-core-module r-exp))
+(define r-exp-as-is (with regcode-core-module r-exp-as-is))
+(define r-make-frozen (with regcode-core-module r-make-frozen))
+(define r-apply (with regcode-core-module r-apply))
+(define r-call (with regcode-core-module r-call))
+(define r-inline (with regcode-core-module r-inline))
+(define r-specialize (with regcode-core-module r-specialize))
+(define r-self-guarded (with regcode-core-module r-self-guarded))
+(define r-operands (with regcode-core-module r-operands))
+(define r-into (with regcode-core-module r-into))
+(define r-args (with regcode-core-module r-args))
+(define r-list (with regcode-core-module r-list))
+(define r-lambda (with regcode-core-module r-lambda))
