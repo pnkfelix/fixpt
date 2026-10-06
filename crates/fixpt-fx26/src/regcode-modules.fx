@@ -2,6 +2,9 @@
 ;;; stage M3); the module code itself is in `regcode-core.fx`'s group, which
 ;;; it recurs with. After `regcode-helpers.fx`.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define regcode-modules-module (module
 ;; Where names are, to register code and to the cellular compiler.
 (define-type r-scopes (pairof renv cenv @k))
 
@@ -84,4 +87,14 @@
         args
         (begin (r-opn g rop-stack m) (r-opn g rop-field (+ (car at) 2))
                (let ((s (r-keep-in-slot g)))
-                 (r-reshape-fields g m (cdr at) (the rargs (cons (a-slot s) args))))))))
+                 (r-reshape-fields g m (cdr at) (the rargs (cons (a-slot s) args))))))))))
+
+(define-type r-scopes (select regcode-modules-module r-scopes))
+(define r-slots-oldest (with regcode-modules-module r-slots-oldest))
+(define r-module-slots (with regcode-modules-module r-module-slots))
+(define r-module-own (with regcode-modules-module r-module-own))
+(define r-give-waiting (with regcode-modules-module r-give-waiting))
+(define r-with-fields (with regcode-modules-module r-with-fields))
+(define r-slots-for (with regcode-modules-module r-slots-for))
+(define r-args-reversed (with regcode-modules-module r-args-reversed))
+(define r-reshape-fields (with regcode-modules-module r-reshape-fields))
