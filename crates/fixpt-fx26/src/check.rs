@@ -767,6 +767,10 @@ impl Checker {
                         D::Fun(f) | D::Type(f) if matches!(k, Kind::Arrow(_)) && matches!(self.arena.get(f), Ty::Select(..)) => {
                             D::Fun(self.resolve_selects(f, span)?)
                         }
+                        // A type given, its `select`s resolved, as an
+                        // annotation's are: a type a module re-exports may be
+                        // inside it.
+                        D::Type(x) => D::Type(self.resolve_selects(x, span)?),
                         d => d,
                     };
                     if !self.d_fits(&d, *k) {

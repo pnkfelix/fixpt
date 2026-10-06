@@ -848,13 +848,16 @@
 (define k-quote-dvar (subr kreads (int) string)
   (lambda (v) (k-quote (symbol->string (k-dvar-name v)))))
 ;; Description `d`, given where one of kind `k` is wanted: a `select` given
-;; for a description function, resolved, and taken as one.
+;; for a description function, resolved, and taken as one; a type given,
+;; its `select`s resolved, as an annotation's are (a type a module
+;; re-exports may be inside it).
 (define k-select-fun (subr (maxeff checks spin) (k-desc int int int) k-desc)
   (lambda (d k a b)
     (let ((t (tagcase d (dt (x) x) (df (x) x) (else y -1))))
-      (if (and (k-arrow-kind? k) (>= t 0) (tagcase (k-get t) (ty-select (m n) #t) (else y #f)))
-          (df (k-resolve-selects t a b))
-          d))))
+      (cond ((and (k-arrow-kind? k) (>= t 0) (tagcase (k-get t) (ty-select (m n) #t) (else y #f)))
+             (df (k-resolve-selects t a b)))
+            ((tagcase d (dt (x) #t) (else y #f)) (dt (k-resolve-selects t a b)))
+            (else d)))))
 (define k-proj-map (subr (maxeff checks spin) (k-binders k-descs int int) k-map)
   (lambda (bs ds a b)
     (if (null? bs)
