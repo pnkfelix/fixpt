@@ -59,6 +59,7 @@ struct Lift {
 
 /// A lambda's word, made by the stack code of the body it is in: where
 /// its body is, its parameters and its own name, and the names it captures.
+#[derive(Clone)]
 struct Made {
     span: (u32, u32),
     params: Vec<Sym>,
@@ -112,6 +113,10 @@ pub struct Compiler<'a> {
     /// theirs, twice as many at every depth).
     made: Vec<Made>,
     reuse: Vec<Made>,
+    /// Every word the stack code of the form being compiled made (not
+    /// register code's): where register code compiles a body other than
+    /// the lambda's own, a join point's, it finds the words made in it here.
+    form_made: Vec<Made>,
     /// The procedures lambda-lifted; and, by where each `letrec` is, its
     /// members' (none if it is not lifted), so that its register code
     /// lifts it as its stack code did, with the same words.
@@ -248,6 +253,7 @@ impl<'a> Compiler<'a> {
             register_report: Vec::new(),
             made: Vec::new(),
             reuse: Vec::new(),
+            form_made: Vec::new(),
             lifts: Vec::new(),
             lifted: HashMap::new(),
             lifting_added: 0,
@@ -897,7 +903,11 @@ impl<'a> Compiler<'a> {
         let (w, fv) = made?;
         let span = self.c.arena.span_of(body);
         let own = own.filter(|f| !params.contains(f));
-        self.made.push(Made { span: (span.start, span.end), params: params.to_vec(), own, word: w, fv: fv.clone() });
+        let made = Made { span: (span.start, span.end), params: params.to_vec(), own, word: w, fv: fv.clone() };
+        if self.twin_depth == 0 {
+            self.form_made.push(made.clone());
+        }
+        self.made.push(made);
         Ok((w, fv))
     }
 
@@ -907,10 +917,10 @@ impl<'a> Compiler<'a> {
         let span = self.c.arena.span_of(body);
         let fv = self.captured(params, body, e);
         let own = own.filter(|f| !params.contains(f));
-        self.reuse
-            .iter()
-            .find(|m| m.span == (span.start, span.end) && m.params == params && m.own == own && m.fv == fv)
-            .map(|m| (m.word, fv))
+        // This body's own, first; then any the form's stack code made (a join
+        // point's body, compiled in its letrec's procedure's register code).
+        let same = |m: &&Made| m.span == (span.start, span.end) && m.params == params && m.own == own && m.fv == fv;
+        self.reuse.iter().find(same).or_else(|| self.form_made.iter().find(same)).map(|m| (m.word, fv))
     }
 
     fn lambda_word_in(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> R<(Value, Vec<Sym>)> {
@@ -1050,6 +1060,7 @@ impl<'a> Compiler<'a> {
     /// be checked against.
     fn plan_for(&mut self, x: ExpId) {
         self.plan = Some(self.plan_top(x));
+        self.form_made.clear();
     }
 
     /// The next lambda's word named for global `name`, whose definition it

@@ -210,6 +210,11 @@
 
 (define c-made-reuse (ref (listof c-made @k) @k) (new nil))
 
+;; Every word the stack code of the form being compiled made (not register
+;; code's): where register code compiles a body other than the lambda's
+;; own, a join point's, it finds the words made in it here.
+(define c-form-made (ref (listof c-made @k) @k) (new nil))
+
 ;; A lambda's word, and the names its closure captures, in order.
 (define-type c-closing (productof (1 tword) (2 syms)))
 
@@ -244,7 +249,11 @@
                                ((c-made-for? (car ms) body params own fv)
                                 (cons (product (1 (extract (car ms) 5)) (2 fv)) nil))
                                (else nil)))))))
-        (find (get c-made-reuse))))))
+        ;; This body's own, first; then any the form's stack code made (a
+        ;; join point's body, compiled in its `letrec`'s procedure's
+        ;; register code).
+        (let ((here (find (get c-made-reuse))))
+          (if (null? here) (find (get c-form-made)) here))))))
 
 ;; What `r` holds, taken: `r` is left holding `empty`.
 (define c-take
@@ -685,12 +694,12 @@
     (lambda (ps body e own0)
       (let* ((outer (c-take c-made-now (the (listof c-made @k) nil)))
              (made (c-lambda-word-in ps body e own0)))
-        (begin
-          (set c-made-now
-               (cons (product (1 (exp-start body)) (2 (exp-end body)) (3 (c-bind-params ps nil))
-                              (4 (c-own-of ps own0)) (5 (extract made 1)) (6 (extract made 2)))
-                     outer))
-          made))))
+        (let ((m (product (1 (exp-start body)) (2 (exp-end body)) (3 (c-bind-params ps nil))
+                          (4 (c-own-of ps own0)) (5 (extract made 1)) (6 (extract made 2)))))
+          (begin
+            (set c-made-now (cons m outer))
+            (if (= (get c-twin-depth) 0) (set c-form-made (cons m (get c-form-made))) #u)
+            made)))))
   ;; The same, with the words of the lambdas in it noted as made.
   (c-lambda-word-in (subr (maxeff compiles spin) (c-params exp cenv syms) c-closing)
     (lambda (ps body e own0)
@@ -857,3 +866,4 @@
 (define c-module-slots (with compile-exps-module c-module-slots))
 (define c-module-own (with compile-exps-module c-module-own))
 (define c-own-scope (with compile-exps-module c-own-scope))
+(define c-form-made (with compile-exps-module c-form-made))

@@ -363,6 +363,7 @@
              (set c-plan-lifts (make-table c-int-hash c-int=?))
              (set c-plan-calls (make-table c-int-hash c-int=?))
              (set c-planning #t)
+             (set c-form-made nil)
              (set c-twin-depth 0)
              (p-exp x (the cenv nil) #f)
              (set c-lift-count count)))))
