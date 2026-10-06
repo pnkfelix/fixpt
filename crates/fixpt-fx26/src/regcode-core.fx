@@ -474,10 +474,15 @@
              (bound (r-spec-args g (extract sp 8) args env te flags))
              (free-flags (r-drop-bools flags (c-count-exps args)))
              (all (r-spec-free g at captured 0 (extract bound 1) (extract bound 2) free-flags))
-             (outer (get c-genv)))
+             (outer (get c-genv)) (outer-ctx (get c-r-plan-ctx)))
         (begin
           (set c-genv (extract sp 11))
+          ;; Its plan's: the context after its copy's (3b).
+          (set c-r-plan-ctx
+               (cons (if (or (null? outer-ctx) (< (car outer-ctx) 0)) -1 (+ (car outer-ctx) 1))
+                     outer-ctx))
           (r-exp g (extract sp 9) (extract all 1) (extract all 2) tail)
+          (set c-r-plan-ctx outer-ctx)
           (set c-genv outer)
           (r-restore g regs slots)))))
   ;; Each of the lambda's parameters bound to its argument, made and kept,

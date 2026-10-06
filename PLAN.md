@@ -229,9 +229,10 @@ before everything else, known holes before proofs.
   48 files are modules; the four too long split first. Left: the seven
   files of cross-file hook cycles (the cycles removed, not hooked: the
   checker's by regrouping each recursive knot into one file, the
-  compilers' by a middle phase, `TODO.md` §41) and the three generated
-  ones. Found on the way, fixed: a re-exported type printed whole at each
-  use, which took check from 0.91 s to 28 s by the first file; types and
+  compilers' by a middle phase, `TODO.md` §41, steps 1–3 of 5 done) and
+  the three generated ones. Found on the way, fixed: a re-exported type
+  printed whole at each use, which took check from 0.91 s to 28 s by the
+  first file; types and
   values named apart in modules; printing a module's type quadratic in
   its components (check 1.42 → 1.09 s).
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:

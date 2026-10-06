@@ -138,6 +138,10 @@
 (define-type c-inlined-at (listof (productof (1 symbol) (2 int) (3 int)) @k))
 (define c-plan-calls (ref (table int c-calls-at @k) @k) (new (make-table c-int-hash c-int=?)))
 (define c-plan-inlined (ref (table int c-inlined-at @k) @k) (new (make-table c-int-hash c-int=?)))
+;; The copies its calls make, by the procedure's name and where the
+;; lambda's body is: each one's context, planned as `r-specialize` compiles
+;; it; the next, the lambda's body in it, as `r-spec-lambda` inlines it.
+(define c-plan-copies (ref (table int c-inlined-at @k) @k) (new (make-table c-int-hash c-int=?)))
 (define c-plan-contexts (ref int @k) (new 1))
 (define c-no-calls (ref c-calls-at @k) (new (make-table c-int-hash c-int=?)))
 ;; While the plan is made: the context it is in, and the names whose bodies
@@ -147,16 +151,25 @@
 (define c-plan-now (ref int @k) (new 0))
 (define c-plan-inlining (ref syms @k) (new nil))
 (define c-r-plan-ctx (ref (listof int @k) @k) (new nil))
+;; The context `xs` lists for `n` and `k`, or -1.
+(define c-plan-find (subr c-walks (c-inlined-at symbol int) int)
+  (lambda (xs n k)
+    (cond ((null? xs) -1)
+          ((and (symbol=? (extract (car xs) 1) n) (= (extract (car xs) 2) k)) (extract (car xs) 3))
+          (else (c-plan-find (cdr xs) n k)))))
 ;; Context `c`'s for the body of `n` taking `k` arguments, or -1.
 (define c-plan-child (subr c-walks (int symbol int) int)
-  (lambda (c n k)
-    (letrec ((find (subr c-walks (c-inlined-at) int)
-               (lambda (xs)
-                 (cond ((null? xs) -1)
-                       ((and (symbol=? (extract (car xs) 1) n) (= (extract (car xs) 2) k))
-                        (extract (car xs) 3))
-                       (else (find (cdr xs)))))))
-      (find (table-ref (get c-plan-inlined) c (the c-inlined-at nil))))))
+  (lambda (c n k) (c-plan-find (table-ref (get c-plan-inlined) c (the c-inlined-at nil)) n k)))
+;; Context `c`'s for the copy of `n` made for the lambda whose body is at
+;; `key`, or -1.
+(define c-plan-copy (subr c-walks (int symbol int) int)
+  (lambda (c n key) (c-plan-find (table-ref (get c-plan-copies) c (the c-inlined-at nil)) n key)))
+;; Where lambda `lam`'s body is.
+(define c-lambda-key (subr c-walks (exp) int)
+  (lambda (lam)
+    (tagcase lam
+      (e-lambda (ps body a b) (c-span-key (exp-start body) (exp-end body)))
+      (else y -1))))
 ;; Call `a`-`b` noted as planned, in the context the plan is in.
 (define p-note-call (subr (maxeff c-emits spin) (int int c-called) unit)
   (lambda (a b called)
@@ -195,14 +208,13 @@
               nil))
         (else y nil)))))
 ;; Call `a`-`b` as planned, in a list, where call sites are the plan's: in
-;; a planned lambda's own register code, or a body inlined in it, outside
-;; any copy;
+;; a planned lambda's register code, or an inlined body's or a copy's in it;
 ;; a call of no global, planned as neither. None elsewhere, where register
 ;; code decides.
 (define c-planned-call (subr c-builds (int int) (listof c-called @k))
   (lambda (a b)
     (let ((c (if (null? (get c-r-plan-ctx)) 0 (car (get c-r-plan-ctx)))))
-      (if (or (not (get c-r-in-plan)) (not (null? (get c-spec-now))) (< c 0))
+      (if (or (not (get c-r-in-plan)) (< c 0))
           nil
           (the (listof c-called @k)
                (cons (table-ref (table-ref (get c-plan-calls) c (get c-no-calls)) (c-span-key a b)
@@ -276,7 +288,7 @@
           (else y #u)))))
   ;; Call `f` `args` at `a`-`b`, in `e`, planned: as the Rust compiler's
   ;; `plan_call`, and register code's `r-inlined` and `r-specialized`; a body
-  ;; it inlines planned too, once in each context.
+  ;; it inlines, or a copy it makes, planned too, once in each context.
   (p-call (subr (maxeff compiles spin) (exp exps int int cenv) unit)
     (lambda (f args a b e)
       (tagcase f
@@ -295,7 +307,41 @@
                     (p-note-call a b (product (1 inl) (2 spl)))
                     (if (or (null? inl) (>= (c-plan-child (get c-plan-now) n k) 0))
                         #u
-                        (p-inlined (car inl) k)))))))
+                        (p-inlined (car inl) k))
+                    (if (null? spl) #u (p-copy-once (car spl) n e)))))))
+        (else y #u))))
+  ;; Call `s`'s copy, of `n`, planned unless it is in this context.
+  (p-copy-once (subr (maxeff compiles spin) (c-spec-call symbol cenv) unit)
+    (lambda (s n e)
+      (if (>= (c-plan-copy (get c-plan-now) n (c-lambda-key (extract s 2))) 0)
+          #u
+          (p-copy (extract s 1) (extract s 2) e))))
+  ;; The copy of `sp` made for lambda `lam`, in `e`, planned as
+  ;; `r-specialize` compiles it, in a context of its own: the procedure's
+  ;; body, its parameters local, in the globals it saw; then, in the next
+  ;; context, the lambda's body, its parameters and what its closure
+  ;; captures local, in the globals it sees here. Neither makes a closure
+  ;; (`c-inline-room`), nor so has a lambda to specialize at.
+  (p-copy (subr (maxeff compiles spin) (c-special exp cenv) unit)
+    (lambda (sp lam e)
+      (tagcase lam
+        (e-lambda (lps lbody la lb)
+          (let ((c (get c-plan-contexts)) (outer (get c-plan-now))
+                (outer-genv (get c-genv)) (lam-genv (c-genv-now))
+                (fv (c-lambda-captured lps lbody e)))
+            (begin
+              (set c-plan-contexts (+ c 2))
+              (table-set! (get c-plan-copies) outer
+                          (cons (product (1 (extract sp 1)) (2 (c-lambda-key lam)) (3 c))
+                                (table-ref (get c-plan-copies) outer (the c-inlined-at nil))))
+              (set c-plan-now c)
+              (set c-genv (extract sp 5))
+              (p-exp (extract sp 4) (p-slots (c-bind-params (extract sp 3) nil) (the cenv nil)) #f)
+              (set c-plan-now (+ c 1))
+              (set c-genv lam-genv)
+              (p-exp lbody (p-slots fv (p-slots (c-bind-params lps nil) (the cenv nil))) #f)
+              (set c-genv outer-genv)
+              (set c-plan-now outer))))
         (else y #u))))
   ;; The body of `i`, taking `k` arguments, planned as `r-inline` compiles
   ;; it: its parameters local, in the globals it saw, its name not inlined in
@@ -428,6 +474,7 @@
              (set c-plan-lifts (make-table c-int-hash c-int=?))
              (set c-plan-calls (make-table c-int-hash c-int=?))
              (set c-plan-inlined (make-table c-int-hash c-int=?))
+             (set c-plan-copies (make-table c-int-hash c-int=?))
              (set c-plan-contexts 1)
              (set c-plan-now 0)
              (set c-plan-inlining nil)
@@ -459,3 +506,5 @@
 (define c-planned-call (with compile-plan-module c-planned-call))
 (define c-r-plan-ctx (with compile-plan-module c-r-plan-ctx))
 (define c-plan-child (with compile-plan-module c-plan-child))
+(define c-plan-copy (with compile-plan-module c-plan-copy))
+(define c-lambda-key (with compile-plan-module c-lambda-key))

@@ -112,8 +112,15 @@
 (define r-spec-word-made (subr rcompiles (c-special c-spec exp) rmade)
   (lambda (sp spec lbody)
     (let ((outer-spec (get c-spec-now)) (outer-genv (get c-genv))
-          (outer-assuming (get r-assuming)) (outer-assumed (get r-assumed)))
+          (outer-assuming (get r-assuming)) (outer-assumed (get r-assumed))
+          (outer-ctx (get c-r-plan-ctx)) (outer-copying (get c-r-copying)))
       (begin
+        ;; Its plan's, along the path here (3b).
+        (set c-r-plan-ctx
+             (cons (c-plan-copy (if (null? outer-ctx) 0 (car outer-ctx)) (extract sp 1)
+                                (c-span-key (exp-start lbody) (exp-end lbody)))
+                   outer-ctx))
+        (set c-r-copying #t)
         (set r-assuming #f)
         (set r-assumed (the r-assumptions nil))
         (set c-spec-now (the (listof c-spec @k) (cons spec nil)))
@@ -122,6 +129,7 @@
         (let ((made (c-lambda-word (extract sp 3) (extract sp 4) (the cenv nil) (the syms nil))))
           (begin (set c-spec-now outer-spec) (set c-genv outer-genv)
                  (set r-assuming outer-assuming) (set r-assumed outer-assumed)
+                 (set c-r-plan-ctx outer-ctx) (set c-r-copying outer-copying)
                  made))))))
 ;; The one of `cs` made of procedure word `w` for a lambda capturing `fv` in
 ;; globals `genv`, in a list; none if none was.

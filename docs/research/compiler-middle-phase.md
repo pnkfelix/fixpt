@@ -195,8 +195,22 @@ green, the self-compile measured.
    `inlining_ks`); FX-26 numbers the contexts (`c-plan-child`, followed by
    `c-r-plan-ctx`). Shadow check: no difference in 41251 decisions of the
    programs, 14417 of the front end. The self-compile: compile 0.282 s
-   both, 47.8 → 48.0 M words. *3b-2*, next: specialized copies (the
-   copy's body, the lambda argument it inlines).
+   both, 47.8 → 48.0 M words.
+   *3b-2 done, both, 2026-10-06*: a specialized copy is planned as
+   `r_specialize` compiles it, in a context of its own (the procedure's
+   body, its parameters local, in the globals it saw), and the lambda's
+   body in it as `r_spec_lambda` inlines it (its parameters and what it
+   captures local, in the globals it sees at the call); neither has a
+   lambda, so neither specializes. Rust's path through the plan is steps
+   (`Step`: inlined body, copy, lambda); FX-26 numbers a copy's context
+   and the lambda's the next (`c-plan-copies`, `c-plan-copy`), and a copy
+   made where the plan's calls are has its twin read them
+   (`c-r-copying`). A new test program, `run/map-specialized-inlines.fx`,
+   has calls planned in all three. Shadow check: no difference in 41591
+   decisions; the front end makes no copy. The self-compile (new/old/new):
+   compile 0.284–0.288 s against 0.284–0.285 s, 46 collections each, 48.0
+   → 48.1 M words. *Step 3 done*: register code decides no call itself
+   where the plan's are.
 4. **Twins as a phase**: per form, every word first, then every twin; the
    register compiler no longer calls the stack compiler, and the stack
    compiler no longer calls it. Remove `c-register-code` and

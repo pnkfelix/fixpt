@@ -66,6 +66,9 @@
 ;; Whether the register code being made is a planned lambda's, of the form
 ;; being compiled (step 3): its call sites are the plan's.
 (define c-r-in-plan (ref bool @k) (new #f))
+;; Whether it is making a specialized copy where the plan's calls are: the
+;; copy's twin's are too (3b).
+(define c-r-copying (ref bool @k) (new #f))
 (define c-planned-in (subr c-walks (c-planneds syms) c-planneds)
   (lambda (ps names)
     (cond ((null? ps) nil)
@@ -539,3 +542,4 @@
 (define c-planned-fv (with compile-lift-module c-planned-fv))
 (define c-planned-lift (with compile-lift-module c-planned-lift))
 (define c-r-in-plan (with compile-lift-module c-r-in-plan))
+(define c-r-copying (with compile-lift-module c-r-copying))

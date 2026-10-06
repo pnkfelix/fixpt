@@ -338,7 +338,10 @@
                    (cons (product (1 (car defining)) (2 w)) nil)))
           (let* ((outer-reuse (get c-made-reuse))
                  (outer-in-plan (get c-r-in-plan))
-                 (in-plan (and (= (get c-twin-depth) 0) (not (null? (c-planned-fv ps body)))))
+                 ;; A planned lambda, or a copy made where the plan's calls are.
+                 (in-plan (if (= (get c-twin-depth) 0)
+                              (not (null? (c-planned-fv ps body)))
+                              (and outer-in-plan (get c-r-copying))))
                  (cells (begin (set c-made-reuse (get c-made-now))
                                (set c-made-now (the (listof c-made @k) nil))
                                (set c-r-in-plan in-plan)
