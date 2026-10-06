@@ -845,6 +845,12 @@ aside:
   wrapper and their re-exports: each to be split first. Loading the
   lowered front end now counts against no step limit (`7c7d276`): found
   when `check-program.fx`'s module passed a test's 100,000;
+- with a module's types declared ahead (`43483dd`), the files' types are
+  back inside their modules, re-exported by `select` where later files
+  name them; a type an earlier file names (`k-seen-pol`) moved to it.
+  `check-print.fx`'s second half is `check-holds.fx`. Cost found and
+  fixed: resolving a `select` rebuilt the whole type (`docs/
+  performance.md`); check 0.91 s;
 - `layout.fx`, `standard.fx` and `native-layout.fx` are generated from
   Rust tables (`tests/layout.rs`): their generators would write modules;
   set aside, and mostly constants, which want checking that a re-exported

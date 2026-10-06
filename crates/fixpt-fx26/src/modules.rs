@@ -321,10 +321,55 @@ impl Checker {
             sel.insert((m, n), to);
         }
         let outer = std::mem::replace(&mut self.select_map, sel);
-        let r = self.subst(t, &given);
+        // Only what leads to a `select` is rebuilt; the rest stays itself.
+        let keep = self.select_clean(t, &given);
+        let outer_keep = self.subst_keep.replace(keep);
+        let r = self.subst_memo(t, &given, &mut HashMap::new());
+        self.subst_keep = outer_keep;
         self.select_map = outer;
         self.check_apps(r, span)?;
         Ok(r)
+    }
+
+    /// The nodes of `t` from which no `select` is reached: none is, nor a
+    /// `(select $k t)`, nor an effect variable `given` replaces. Each node a
+    /// child of the one above it as `ty_kids` says, the walk the
+    /// substitution makes; so what it keeps holds nothing it would change.
+    fn select_clean(&self, t: TyId, given: &HashMap<DVar, D>) -> HashSet<TyId> {
+        let mut nodes: Vec<TyId> = Vec::new();
+        let mut seen: HashSet<TyId> = HashSet::new();
+        let mut stack = vec![self.arena.resolve(t)];
+        while let Some(n) = stack.pop() {
+            if !seen.insert(n) {
+                continue;
+            }
+            nodes.push(n);
+            stack.extend(self.ty_kids(n).into_iter().map(|k| self.arena.resolve(k)));
+        }
+        let names_given = |e: &Effect| e.0.iter().any(|a| matches!(a, Atom::Var(v) if given.contains_key(v)));
+        let mut dirty: HashSet<TyId> = nodes
+            .iter()
+            .copied()
+            .filter(|n| match self.arena.get(*n) {
+                Ty::Select(..) | Ty::ParamSel(..) => true,
+                Ty::Subr { effect, .. } | Ty::PromptTag { effect, .. } | Ty::Composable { effect, .. } => names_given(effect),
+                Ty::Lam { body: D::Effect(e), .. } => names_given(e),
+                Ty::App { args, .. } | Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Effect(e) if names_given(e))),
+                _ => false,
+            })
+            .collect();
+        loop {
+            let more: Vec<TyId> = nodes
+                .iter()
+                .copied()
+                .filter(|n| !dirty.contains(n) && self.ty_kids(*n).iter().any(|k| dirty.contains(&self.arena.resolve(*k))))
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            dirty.extend(more);
+        }
+        nodes.into_iter().filter(|n| !dirty.contains(n)).collect()
     }
 
     /// The variable `(select m e)` read as an effect stands for, one for

@@ -187,7 +187,8 @@
         expected
         (let ((found (k-upper-bound types types)))
           (if (< found 0)
-              (k-fail-at (string-append "the arms are " (k-join (k-show-list types nil) ", ")) x)
+              (let ((shown (k-join (k-show-list types k-printing-none) ", ")))
+                (k-fail-at (string-append "the arms are " shown) x))
               found)))))
 ;; The region a place of type `t` is at; an error at `a`..`b` if `t` is not a place.
 (define k-place-region (subr (maxeff checks spin) (int int int) k-region)

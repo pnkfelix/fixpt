@@ -72,6 +72,22 @@ its members' types. A match is rare, so it now walks once and looks for
 a shadowing binding only on a match. Check, the self-compile as register
 code: 1.65 s to 0.99–1.00 s, below where it was before any file moved.
 
+**Resolving a `select` rebuilt the whole type** (2026-10-06, `TODO.md`
+§34). With the front end's files' types inside their modules, re-exported
+by `(define-type t (select m t))`, check grew 1.05 s to 1.23 s and
+allocated 28% more (41 M to 52 M words). The cell profile put the growth
+in string building, printing; the output had grown to 564 K characters,
+one module's type 65 K, `k-ty` printed whole inside it though named: a
+type naming any re-export was rebuilt node by node by the substitution
+that resolves its `select`s, every node new, so nothing in it was
+`k-ty`'s any more. Now resolution rebuilds only the nodes that lead to a
+`select` (`select_clean`, `k-select-clean`); the rest stay themselves.
+Output 359 K, check 0.91 s, below where it was. On the way: a
+`moduleof` prints with its descriptions' names naming what they describe
+in the components after them; `k-mentions-token?`, asked of every node
+printed, scans for a token without making strings; and the FX-26 select
+code builds its error messages only for an error.
+
 Measurements are on the development machine, as best of several runs.
 Debug builds are what `cargo test` runs; release numbers come from
 `cargo run --release`.

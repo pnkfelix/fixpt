@@ -5,7 +5,9 @@
 ;;; `a ≤ b`. Recursive types are compared coinductively: a pair already
 ;;; being compared is assumed to hold.
 
-;; Its types, at top level: declared ahead, named anywhere.
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-subtype-module (module
 (define-type k-trail (ref k-pairs @t))
 ;; A subtype question's binder environment, for one side: each `poly`
 ;; binder in scope, by the name its pair of binders was given, so bodies are
@@ -34,10 +36,6 @@
 
 ;; The latent effect of `t`, a `subr` under any `poly`s, in a list; or none.
 (define-type k-effs (listof k-eff acyclic))
-
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-subtype-module (module
 (define k-bool=? (subr pure (bool bool) bool) (lambda (x y) (if x y (not y))))
 (define k-part-find (subr kreads (k-parts symbol) int)
   (lambda (ps l)
@@ -930,3 +928,11 @@
 (define k-binding-types (with check-subtype-module k-binding-types))
 (define k-some-untyped? (with check-subtype-module k-some-untyped?))
 (define k-needs-telling? (with check-subtype-module k-needs-telling?))
+(define-type k-trail (select check-subtype-module k-trail))
+(define-type k-benv (select check-subtype-module k-benv))
+(define-type k-benvs (select check-subtype-module k-benvs))
+(define-type k-strail (select check-subtype-module k-strail))
+(define-type k-label-list (select check-subtype-module k-label-list))
+(define-type k-labels (select check-subtype-module k-labels))
+(define-type k-sub-rule (select check-subtype-module k-sub-rule))
+(define-type k-saying (select check-subtype-module k-saying))

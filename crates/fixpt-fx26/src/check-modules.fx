@@ -361,31 +361,35 @@
       (ty-module (abs ds vs) (k-parts-onto ds (k-parts-onto vs nil)))
       (else y nil))))
 ;; Descriptions `ds`, the `i`th on, each of the kind of `ks` it is given for.
-(define k-check-app-args (subr (maxeff checks spin) (string k-descs k-ids int int int) unit)
-  (lambda (shown ds ks i a b)
+;; Function `f`, as an error says it: its type, quoted. Printed only for an
+;; error, as printing a type is not cheap.
+(define k-fun-shown (subr kbuilds (int) string) (lambda (f) (k-quote (k-show-ty f))))
+(define k-check-app-args (subr (maxeff checks spin) (int k-descs k-ids int int int) unit)
+  (lambda (f ds ks i a b)
     (cond ((null? ds) #u)
           ((not (k-desc-of-kind? (car ds) (car ks)))
-           (k-fail (k-cat5 shown " takes a " (k-kind-text (car ks)) " as description "
+           (k-fail (k-cat5 (k-fun-shown f) " takes a " (k-kind-text (car ks)) " as description "
                            (int->string i))
                    a b))
-          (else (k-check-app-args shown (cdr ds) (cdr ks) (+ i 1) a b)))))
+          (else (k-check-app-args f (cdr ds) (cdr ks) (+ i 1) a b)))))
 ;; Function `f` applied to `ds`, at `a`..`b`: given as many descriptions as
 ;; it takes, each of the kind it takes, and giving a type.
 (define k-check-app (subr (maxeff checks spin) (int k-descs int int) unit)
   (lambda (f ds a b)
-    (let ((k (k-fun-kind f)) (shown (k-quote (k-show-ty f))))
+    (let ((k (k-fun-kind f)))
       (cond ((< k 0) #u)
             ((not (k-arrow-kind? k))
-             (k-fail (string-append shown " is not a description function: it is applied") a b))
+             (k-fail (string-append (k-fun-shown f) " is not a description function: it is applied")
+                     a b))
             ((not (= (k-length (k-arrow-params k)) (k-length ds)))
-             (k-fail (k-cat5 shown " takes " (int->string (k-length (k-arrow-params k)))
+             (k-fail (k-cat5 (k-fun-shown f) " takes " (int->string (k-length (k-arrow-params k)))
                              " description(s), and has " (int->string (k-length ds)))
                      a b))
             ((not (or (= (k-arrow-result k) 2) (= (k-arrow-result k) 4)))
-             (k-fail (k-cat4 shown " gives a description of kind "
+             (k-fail (k-cat4 (k-fun-shown f) " gives a description of kind "
                              (k-kind-text (k-arrow-result k)) ", not a type")
                      a b))
-            (else (k-check-app-args shown ds (k-arrow-params k) 1 a b))))))
+            (else (k-check-app-args f ds (k-arrow-params k) 1 a b))))))
 ;; Each description function applied in `t` given what it takes, at
 ;; `a`..`b`: checked where a `select` has just said what the function is.
 (define-rec
@@ -549,6 +553,9 @@
             (else (k-fail (k-cat5 (k-select-shown m n) ": `" (symbol->string m) "` has no type `"
                                   (string-append (symbol->string n) "`"))
                           a b))))))
+;; What an error about `(select m n)` starts with; made only for an error.
+(define k-select-prefix (subr (read @globals) (symbol symbol) string)
+  (lambda (m n) (k-cat3 (k-select-shown m n) ": `" (symbol->string m))))
 ;; What each of `found` is where it is checked, at `a`..`b`.
 (define k-selection (subr (maxeff checks spin) (k-selects int int) k-selects)
   (lambda (found a b)
@@ -556,12 +563,12 @@
         nil
         (let* ((m (extract (car found) 1)) (n (extract (car found) 2))
                (mt (k-lookup m))
-               (shown (k-cat3 (k-select-shown m n) ": `" (symbol->string m)))
                (to (if (< mt 0)
-                       (k-fail (string-append shown "` is not bound here") a b)
+                       (k-fail (string-append (k-select-prefix m n) "` is not bound here") a b)
                        (tagcase (k-get mt)
                          (ty-module (abs ds vs) (k-select-component m n abs ds a b))
-                         (else y (k-fail (k-cat4 shown "` is a " (k-show-ty mt) ", not a module")
+                         (else y (k-fail (k-cat4 (k-select-prefix m n) "` is a " (k-show-ty mt)
+                                                 ", not a module")
                                          a b)))))
                (rest (k-selection (cdr found) a b)))
           (cons (product (1 m) (2 n) (3 to)) rest)))))
@@ -640,18 +647,22 @@
 ;; at `a`..`b`.
 (define k-selected-effect (subr (maxeff checks spin) (symbol symbol int int) k-eff)
   (lambda (m e a b)
-    (let ((mt (k-lookup m)) (shown (k-cat3 (k-select-shown m e) ": `" (symbol->string m))))
+    (let ((mt (k-lookup m)))
       (if (< mt 0)
-          (begin (k-fail (string-append shown "` is not bound here") a b) (the k-eff nil))
+          (begin (k-fail (string-append (k-select-prefix m e) "` is not bound here") a b)
+                 (the k-eff nil))
           (tagcase (k-get mt)
             (ty-module (abs ds vs)
               (let* ((d (k-comp-find ds e))
                      (x (if (< d 0) (the (listof k-eff acyclic) nil) (k-desc-effect d))))
                 (if (null? x)
-                    (let ((m (k-cat4 shown "` has no effect `" (symbol->string e) "`")))
-                      (begin (k-fail m a b) (the k-eff nil)))
+                    (let ((msg (k-cat4 (k-select-prefix m e) "` has no effect `"
+                                       (symbol->string e) "`")))
+                      (begin (k-fail msg a b) (the k-eff nil)))
                     (car x))))
-            (else y (begin (k-fail (k-cat4 shown "` is a " (k-show-ty mt) ", not a module") a b)
+            (else y (begin (k-fail (k-cat4 (k-select-prefix m e) "` is a " (k-show-ty mt)
+                                           ", not a module")
+                                   a b)
                            (the k-eff nil))))))))
 ;; What each effect selected stands for, as a substitution.
 (define k-effects-given (subr (maxeff checks spin) (k-effect-sels int int) k-map)
@@ -661,6 +672,82 @@
         (let* ((x (car ss)) (e (k-selected-effect (extract x 1) (extract x 2) a b))
                (rest (k-effects-given (cdr ss) a b)))
           (the k-map (cons (cons (extract x 3) (de e)) rest))))))
+;; Whether `e` names a variable `given` replaces.
+(define k-eff-given? (subr (maxeff kreads spin) (k-eff k-map) bool)
+  (lambda (e given)
+    (and (not (null? e))
+         (or (tagcase (car e) (a-var (v) (not (null? (k-map-find given v)))) (else y #f))
+             (k-eff-given? (cdr e) given)))))
+(define k-descs-given? (subr (maxeff kreads spin) (k-descs k-map) bool)
+  (lambda (ds given)
+    (and (not (null? ds))
+         (or (tagcase (car ds) (de (e) (k-eff-given? e given)) (else x #f))
+             (k-descs-given? (cdr ds) given)))))
+;; Whether node `n` is itself what a `select`'s resolution changes: a
+;; `select`, a `(select $k t)`, or an effect naming a variable `given`
+;; replaces.
+(define k-select-seed? (subr (maxeff kreads spin) (int k-map) bool)
+  (lambda (n given)
+    (tagcase (k-get n)
+      (ty-select (m s) #t)
+      (ty-param (k s) #t)
+      (ty-subr (e ps r cv) (k-eff-given? e given))
+      (ty-tag (a h e r) (k-eff-given? e given))
+      (ty-comp (a h e r) (k-eff-given? e given))
+      (ty-lam (bs d) (k-descs-given? (the k-descs (list d)) given))
+      (ty-app (f ds) (k-descs-given? ds given))
+      (ty-named (g ds) (k-descs-given? ds given))
+      (else y #f))))
+;; The nodes reached from `t`, through `k-ty-kids`, onto `out`; `e` the walk.
+(define-rec
+  (k-nodes-from (subr (maxeff kstate spin) (int int (ref k-ids @t)) unit)
+    (lambda (t e out)
+      (let ((t (k-resolve t)))
+        (if (k-visit? t e)
+            #u
+            (begin (set out (cons t (get out))) (k-nodes-each (k-ty-kids t) e out))))))
+  (k-nodes-each (subr (maxeff kstate spin) (k-ids int (ref k-ids @t)) unit)
+    (lambda (ts e out)
+      (if (null? ts) #u (begin (k-nodes-from (car ts) e out) (k-nodes-each (cdr ts) e out))))))
+;; Whether a child of `n` is marked `d`.
+(define k-kid-marked? (subr (maxeff kstate spin) (k-ids int) bool)
+  (lambda (ks d)
+    (and (not (null? ks)) (or (= (k-keep-at (k-resolve (car ks))) d) (k-kid-marked? (cdr ks) d)))))
+;; Each of `ns` not marked `d` with a child that is, marked `d`: whether any.
+(define k-mark-parents (subr (maxeff kstate spin) (k-ids int bool) bool)
+  (lambda (ns d changed)
+    (cond ((null? ns) changed)
+          ((and (not (= (k-keep-at (car ns)) d)) (k-kid-marked? (k-ty-kids (car ns)) d))
+           (begin (k-keep-set! (car ns) d) (k-mark-parents (cdr ns) d #t)))
+          (else (k-mark-parents (cdr ns) d changed)))))
+(define k-mark-until-still (subr (maxeff kstate spin) (k-ids int) unit)
+  (lambda (ns d) (if (k-mark-parents ns d #f) (k-mark-until-still ns d) #u)))
+;; Each of `ns` that is itself what resolving changes (`k-select-seed?`),
+;; marked `d`.
+(define k-mark-seeds (subr (maxeff kstate spin) (k-ids k-map int) unit)
+  (lambda (ns given d)
+    (if (null? ns)
+        #u
+        (begin (if (k-select-seed? (car ns) given) (k-keep-set! (car ns) d) #u)
+               (k-mark-seeds (cdr ns) given d)))))
+(define k-mark-kept (subr (maxeff kstate spin) (k-ids int int) unit)
+  (lambda (ns d k)
+    (if (null? ns)
+        #u
+        (begin (if (= (k-keep-at (car ns)) d) #u (k-keep-set! (car ns) k))
+               (k-mark-kept (cdr ns) d k)))))
+;; The nodes of `t` from which no `select` is reached, marked kept: the
+;; epoch they are marked with. As the Rust checker's `select_clean`.
+(define k-select-clean (subr (maxeff kstate spin) (int k-map) int)
+  (lambda (t given)
+    (let* ((out (the (ref k-ids @t) (new nil)))
+           (walked (k-nodes-from t (k-new-epoch) out))
+           (ns (get out))
+           (d (k-new-epoch))
+           (seeded (k-mark-seeds ns given d))
+           (spread (k-mark-until-still ns d))
+           (k (k-new-epoch)))
+      (begin (k-mark-kept ns d k) k))))
 ;; `t` with each `(select m n)` in it replaced by what it is: `m`'s
 ;; abstract type `n`, as `m` was bound, or its description `n`. An error
 ;; at `a`..`b` if one is not.
@@ -672,8 +759,15 @@
           (let ((given (k-effects-given efound a b)) (outer (get k-select-map)))
             (begin
               (set k-select-map (k-selection found a b))
-              (let ((r (k-subst t given)))
-                (begin (set k-select-map outer) (k-check-apps r a b) r))))))))
+              ;; Only what leads to a `select` is rebuilt; the rest stays
+              ;; itself.
+              (let* ((outer-keep (get k-subst-keep))
+                     (kept (set k-subst-keep (k-select-clean t given)))
+                     (r (k-subst-memo t given (the (ref k-pairs @t) (new nil)))))
+                (begin (set k-subst-keep outer-keep)
+                       (set k-select-map outer)
+                       (k-check-apps r a b)
+                       r))))))))
 ;; The same for a type written as `s`, at `s`.
 (define k-select-syn (subr (maxeff checks spin) (int syn) int)
   (lambda (t s) (k-resolve-selects t (syn-start s) (syn-end s))))

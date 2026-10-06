@@ -7,17 +7,14 @@
 ;;; constrains is `pure`; a region binder nothing constrains is a fresh
 ;;; region.
 
-;; Its types, at top level: declared ahead, named anywhere.
-(define-type k-solved (ref k-map @t))
-;; Binders, and the type under them.
-(define-type k-bound-body (productof (1 k-binders) (2 int)))
-(define-type k-seen-pol (ref k-pairs @t))
-;; A count of such occurrences, and of parameters sized by `v` alone.
-(define-type k-counts (productof (1 int) (2 int)))
-
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-infer-module (module
+(define-type k-solved (ref k-map @t))
+;; Binders, and the type under them.
+(define-type k-bound-body (productof (1 k-binders) (2 int)))
+;; A count of such occurrences, and of parameters sized by `v` alone.
+(define-type k-counts (productof (1 int) (2 int)))
 (define k-append-binders (subr kmakes (k-binders k-binders) k-binders)
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (k-append-binders (cdr xs) ys)))))
 (define k-binders-from (subr (maxeff kmakes spin) (int k-binders) k-bound-body)
@@ -917,3 +914,4 @@
 (define k-zip-fields (with check-infer-module k-zip-fields))
 (define k-beyond (with check-infer-module k-beyond))
 (define k-reaches-only? (with check-infer-module k-reaches-only?))
+(define-type k-solved (select check-infer-module k-solved))

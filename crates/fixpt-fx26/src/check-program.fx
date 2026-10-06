@@ -3,7 +3,9 @@
 
 ;;; ------------------------------------------------------------ programs
 
-;; Its types, at top level: declared ahead, named anywhere.
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-program-module (module
 (define-type k-out (listof string acyclic))
 
 ;; A place in what a proof was given: a variable and the labels extracted.
@@ -22,10 +24,6 @@
 (define-type k-def-list (listof k-def acyclic))
 ;; The names of `ns` that are globals already, with their types.
 (define-type k-olds (listof (pairof symbol int acyclic) acyclic))
-
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-program-module (module
 ;; `n`, of type `t`, bound as a standard binding.
 (define k-bind-std (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std))))))

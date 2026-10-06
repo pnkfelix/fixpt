@@ -121,6 +121,10 @@ impl Checker {
     }
 
     fn abbreviation(&self, t: TyId) -> Option<&str> {
+        let named = self.print_names.borrow().iter().rev().find(|(_, x)| self.arena.resolve(*x) == t).map(|(n, _)| *n);
+        if let Some(n) = named {
+            return Some(self.interner.name(n));
+        }
         self.type_names()
             .into_iter()
             .rev()
@@ -187,6 +191,8 @@ impl Checker {
                     let k = self.arena.dvar_kind_known(*v).unwrap_or(crate::ast::Kind::Type);
                     out.push_str(&format!(" (abs {} {})", self.interner.name(*n), self.show_kind(k)));
                 }
+                // Each description's name, after it, names what it is.
+                let mark = self.print_names.borrow().len();
                 for (n, x) in descs.iter() {
                     // An effect, a description function of no parameters.
                     let shown = match self.arena.get(self.arena.resolve(*x)) {
@@ -194,10 +200,12 @@ impl Checker {
                         _ => self.show_ty_on(*x, path),
                     };
                     out.push_str(&format!(" (desc {} {shown})", self.interner.name(*n)));
+                    self.print_names.borrow_mut().push((*n, *x));
                 }
                 for (n, x) in vals.iter() {
                     out.push_str(&format!(" (val {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
                 }
+                self.print_names.borrow_mut().truncate(mark);
                 out.push(')');
                 out
             }

@@ -309,3 +309,25 @@
         (let ((m (syn-head (k-nth items 1))) (e (syn-head (k-nth items 2))))
           (the (listof k-eff acyclic) (list (k-one (a-var (k-effect-select m e))))))
         (begin (k-sfail "`(select module name)`: a module's name, and a component's" s) nil))))
+
+;;; ------------------------------------------------------------ types kept as themselves
+
+;; While a type's `select`s are resolved (`k-resolve-selects`): its nodes
+;; that lead to none, each kept as itself rather than rebuilt by the
+;; substitution, so that what the type shares with others, a named type,
+;; it still shares. Marked in an array of their own, a walk's epoch each
+;; (`k-new-epoch`), as `k-visit?` marks: `k-subst-keep` the epoch of those
+;; kept, or -1. As the Rust checker's `subst_keep`.
+(define k-keep-marks (ref (arrayof int @t) @t) (new (make-array 512 0)))
+(define k-subst-keep (ref int @t) (new -1))
+;; Type `t`'s mark, the marks grown to hold it.
+(define k-keep-at (subr (maxeff kstate spin) (int) int)
+  (lambda (t)
+    (begin
+      (if (>= t (array-length (get k-keep-marks)))
+          (let ((bigger (the (arrayof int @t) (make-array (* 2 (array-length (get k-tys))) 0))))
+            (begin (k-copy-array (get k-keep-marks) bigger 0) (set k-keep-marks bigger)))
+          #u)
+      (array-ref (get k-keep-marks) t))))
+(define k-keep-set! (subr (maxeff kstate spin) (int int) unit)
+  (lambda (t e) (begin (k-keep-at t) (array-set! (get k-keep-marks) t e))))

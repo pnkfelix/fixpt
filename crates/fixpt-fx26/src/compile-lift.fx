@@ -4,17 +4,15 @@
 ;;; ------------------------------------------------------ lambda lifting
 ;;; As the Rust compiler's `lift`, `lift_plan` and `called_only`.
 
-;; Its types, at top level: declared ahead, named anywhere.
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define compile-lift-module (module
 ;; While a `letrec` is planned to be lifted, by member: the names each
 ;; takes, and the siblings each calls.
 (define-type c-added (arrayof syms @k))
 
 (define-type c-calls (arrayof (listof int @k) @k))
 
-
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define compile-lift-module (module
 ;; A `letrec`'s key in `c-lifted`: where it starts and ends.
 (define c-span-key (subr pure (int int) int) (lambda (a b) (+ (* a 4194304) b)))
 
@@ -480,3 +478,4 @@
 (define c-standard-value (with compile-lift-module c-standard-value))
 (define c-count-names (with compile-lift-module c-count-names))
 (define c-members (with compile-lift-module c-members))
+(define-type c-added (select compile-lift-module c-added))

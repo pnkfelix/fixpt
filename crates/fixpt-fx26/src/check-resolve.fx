@@ -752,7 +752,9 @@
 (define-rec
   (k-subst-memo (subr (maxeff kstate spin) (int k-map (ref k-pairs @t)) int)
     (lambda (t m memo)
-      (let* ((t (k-resolve t)) (done (k-memo-find (get memo) t)))
+      (let* ((t (k-resolve t))
+             (kept (and (>= (get k-subst-keep) 0) (= (k-keep-at t) (get k-subst-keep))))
+             (done (if kept t (k-memo-find (get memo) t))))
         (if (>= done 0)
             done
             (tagcase (k-get t)
@@ -857,8 +859,14 @@
 
 ;; `t` with each binder in `m` replaced. Recursive types are copied as
 ;; cycles: each node gets its slot before its children are built.
+;; A substitution of its own (a `dlambda` reduced inside another) keeps
+;; nothing of another's.
 (define k-subst (subr (maxeff kstate spin) (int k-map) int)
-  (lambda (t m) (k-subst-memo t m (the (ref k-pairs @t) (new nil)))))
+  (lambda (t m)
+    (let* ((keep (get k-subst-keep))
+           (off (set k-subst-keep -1))
+           (r (k-subst-memo t m (the (ref k-pairs @t) (new nil)))))
+      (begin (set k-subst-keep keep) r))))
 (define k-subst-hyps (subr (maxeff kstate spin) (k-hyps k-map) k-hyps)
   (lambda (hs m)
     (if (null? hs)

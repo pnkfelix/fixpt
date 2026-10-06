@@ -7,6 +7,7 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-generative-module (module
+(define-type k-seen-pol (ref k-pairs @t))
 ;; Where, in a generative type's representation, each of its parameters
 ;; appears: covariantly, contravariantly, or both (moved out of
 ;; `check-print.fx`, 2026-10-04).
@@ -205,3 +206,4 @@
             name))))))))
 
 (define k-define-generative (with check-generative-module k-define-generative))
+(define-type k-seen-pol (select check-generative-module k-seen-pol))

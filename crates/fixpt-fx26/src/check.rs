@@ -146,6 +146,13 @@ pub struct Checker {
     /// one for each, which `resolve_selects` replaces by module `m`'s
     /// effect `e` (`crate::modules`).
     pub(crate) effect_selects: Vec<((Sym, Sym), DVar)>,
+    /// While a `moduleof` is shown: its descriptions' names, each naming
+    /// what it describes in the components after it (`unparse`).
+    pub(crate) print_names: std::cell::RefCell<Vec<(Sym, TyId)>>,
+    /// While a type's `select`s are resolved: its nodes that lead to none,
+    /// each kept as itself rather than rebuilt (`resolve_selects`), so that
+    /// what the type shares with others, a named type, it still shares.
+    pub(crate) subst_keep: Option<HashSet<TyId>>,
     /// While a type's `select`s are resolved (`Checker::resolve_selects`):
     /// what each is; empty otherwise.
     pub(crate) select_map: HashMap<(Sym, Sym), TyId>,
@@ -381,6 +388,8 @@ impl Checker {
             module_vars: HashSet::new(),
             abstract_funs: HashSet::new(),
             effect_selects: Vec::new(),
+            print_names: std::cell::RefCell::new(Vec::new()),
+            subst_keep: None,
             select_map: HashMap::new(),
             param_map: HashMap::new(),
             conv_default: conv,
@@ -2276,7 +2285,12 @@ impl Checker {
     /// types are copied as cycles: each node is given its slot before its
     /// children are built.
     pub fn subst(&mut self, t: TyId, map: &HashMap<DVar, D>) -> TyId {
-        self.subst_memo(t, map, &mut HashMap::new())
+        // A substitution of its own (a `dlambda` reduced inside another)
+        // keeps nothing of another's.
+        let keep = self.subst_keep.take();
+        let r = self.subst_memo(t, map, &mut HashMap::new());
+        self.subst_keep = keep;
+        r
     }
 
     /// A description substituted into, sharing `memo` with the type it is
@@ -2298,8 +2312,11 @@ impl Checker {
         }
     }
 
-    fn subst_memo(&mut self, t: TyId, map: &HashMap<DVar, D>, memo: &mut HashMap<TyId, TyId>) -> TyId {
+    pub(crate) fn subst_memo(&mut self, t: TyId, map: &HashMap<DVar, D>, memo: &mut HashMap<TyId, TyId>) -> TyId {
         let t = self.arena.resolve(t);
+        if self.subst_keep.as_ref().is_some_and(|k| k.contains(&t)) {
+            return t;
+        }
         if let Some(&n) = memo.get(&t) {
             return n;
         }
