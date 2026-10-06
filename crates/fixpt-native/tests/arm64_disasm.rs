@@ -34,6 +34,8 @@ fn every_encoder_reads_back() {
         (cmp_sp(27), "cmp sp, x27"),
         (orr(1, 2, 3), "orr x1, x2, x3"),
         (and_low(1, 2, 3), "and x1, x2, #0x7"),
+        (and_bits(0, 0, 3, 32), "and x0, x0, #0x7fffffff8"),
+        (and_bits(13, 14, 3, 61), "and x13, x14, #0xfffffffffffffff8"),
         (tst_low(9, 3), "tst x9, #0x7"),
         (ubfx(1, 2, 3, 4), "ubfx x1, x2, #3, #4"),
         (asr_imm(1, 2, 3), "asr x1, x2, #3"),

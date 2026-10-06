@@ -98,6 +98,17 @@ in the components after them; `k-mentions-token?`, asked of every node
 printed, scans for a token without making strings; and the FX-26 select
 code builds its error messages only for an error.
 
+**A fast path that branched to `ret`; a slow path nothing reached**
+(2026-10-06; the user's reading of `,disassemble-asm u32+`). In the
+native convention a pure operation's fast path ended `b done` over its
+slow path, and `done` was often the procedure's `ret`; and `u32+`, whose
+fast path wraps and never fails, still had its 32-instruction call-out
+after it, unreached. Now the assembler makes a branch to a `ret` that
+`ret` (`direct.rs`, `Asm::finish`; nothing counts a code's returns, a
+return address being a call's), and a fast path that never names its
+slow label gets no slow path (`Asm::used`). `u32+`: 41 instructions to
+4. The disassembler now shows `and_bits`'s masks from any bit.
+
 **A re-exported type was still a copy at each use** (2026-10-06, `TODO.md`
 §34). Migrating `eager-reader.fx`, the first file, took check from 1.89 s
 to 28.3 s; the files before it had crept 0.91 s to 1.89 s. `sample` put

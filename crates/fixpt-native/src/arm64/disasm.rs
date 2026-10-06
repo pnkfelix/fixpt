@@ -52,7 +52,7 @@ pub fn disassemble(w: u32, at: i64) -> String {
         _ if is(0xFF20_0000, 0xAA00_0000) => three("orr"),
         _ if is(0xFF20_0000, 0xCA00_0000) => three("eor"),
         _ if is(0xFFFF_001F, 0xF240_001F) => format!("tst {}, #{:#x}", x(n), low_mask(w)),
-        _ if is(0xFFFF_0000, 0x9240_0000) => format!("and {}, {}, #{:#x}", x(d), x(n), low_mask(w)),
+        _ if is(0xFFC0_0000, 0x9240_0000) => format!("and {}, {}, #{:#x}", x(d), x(n), run_mask(w)),
         _ if is(0xFFC0_FC00, 0x9340_FC00) => format!("asr {}, {}, #{m}", x(d), x(n), m = (w >> 16) & 63),
         _ if is(0xFFC0_0000, 0xD340_0000) => {
             let (lsb, top) = ((w >> 16) & 63, (w >> 10) & 63);
@@ -102,6 +102,12 @@ fn target(at: i64, words: i64) -> String {
 fn low_mask(w: u32) -> u64 {
     let bits = ((w >> 10) & 63) + 1;
     if bits == 64 { u64::MAX } else { (1u64 << bits) - 1 }
+}
+
+/// The immediate of `and_bits` (and `and_low`): those low bits rotated
+/// right by `immr`, a run of ones from bit `(64 - immr) % 64`.
+fn run_mask(w: u32) -> u64 {
+    low_mask(w).rotate_right((w >> 16) & 63)
 }
 
 fn mov16(op: &str, w: u32) -> String {

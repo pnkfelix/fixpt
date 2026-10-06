@@ -427,6 +427,10 @@ impl Asm {
     fn bind(&mut self, l: Label) {
         self.labels[l.0] = Some(self.code.len());
     }
+    /// Whether a branch so far goes to `l`.
+    fn used(&self, l: Label) -> bool {
+        self.fixups.iter().any(|(_, x, _)| x.0 == l.0)
+    }
     /// A branch of kind `f` to `l`.
     fn to(&mut self, l: Label, f: Fix) {
         self.fixups.push((self.code.len(), l, f));
@@ -451,6 +455,10 @@ impl Asm {
             let to = self.labels[l.0].ok_or("a label never placed")?;
             let d = to as i64 - at as i64;
             self.code[at] = match f {
+                // A branch to a `ret` is that `ret`: a fast path that joins
+                // the slow one only to return (nothing counts a code's
+                // returns; a return address is a call's).
+                Fix::B if self.code[to] == ret() => ret(),
                 Fix::B => b(d),
                 Fix::Bl => bl(d),
                 Fix::If(c) => b_cond(c, d),
@@ -1771,15 +1779,20 @@ impl Compiling<'_> {
                         _ => X17,
                     };
                     let (slow, done) = (a.label(), a.label());
-                    if pure_fast(&mut a, name, y, slow) {
-                        a.to(done, Fix::B);
+                    let fast = pure_fast(&mut a, name, y, slow);
+                    // A fast path that never fails (`u32+` wraps) has no
+                    // slow one: nothing would reach it.
+                    if !fast || a.used(slow) {
+                        if fast {
+                            a.to(done, Fix::B);
+                        }
+                        a.bind(slow);
+                        let n = if op == "prim1" { 1 } else { 2 };
+                        pure_call(&mut a, self.callouts, Callout::Pure { p: pn, n }, &[RESULT, y][..n], RESULT);
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+                        a.e(cmp_imm(X9, 0));
+                        trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
                     }
-                    a.bind(slow);
-                    let n = if op == "prim1" { 1 } else { 2 };
-                    pure_call(&mut a, self.callouts, Callout::Pure { p: pn, n }, &[RESULT, y][..n], RESULT);
-                    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
-                    a.e(cmp_imm(X9, 0));
-                    trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
                     a.bind(done);
                 }
                 // A call-out: to Rust, on Rust's stack, which may collect;
