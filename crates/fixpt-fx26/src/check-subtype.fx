@@ -1,4 +1,4 @@
-;;; The checker, in FX-26: subtyping, errors, and calls that may not end.
+;;; The checker, in FX-26: subtyping, modules' included.
 ;;; Part of the checker, `check-types.fx` first (PLAN.md §11, step 10).
 
 ;;; ------------------------------------------------------------ subtyping
@@ -208,7 +208,6 @@
     (if (and (not (null? d)) (null? (cdr d)))
         (tagcase (car d) (a-var (x) (if (k-binder-has? bs x) x -1)) (else z -1))
         -1)))
-(define k-sub-module (ref k-sub-rule @t) (new (lambda (a b ta tb ea eb trail labels) #f)))
 
 ;; Whether effects `d` and `e` are the same, each by its side's environment.
 (define k-benv-eff=? (subr (maxeff kmakes spin) (k-eff k-eff k-benv k-benv) bool)
@@ -545,8 +544,8 @@
             ;; Two description functions (a module's transparent ones).
             (ty-lam (bs x)
               (tagcase tb (ty-lam (cs y) (k-fun-same? a b ea eb trail labels)) (else z #f)))
-            (ty-module (abs ds vs) ((get k-sub-module) a b ta tb ea eb trail labels))
-            (ty-param (k x) ((get k-sub-module) a b ta tb ea eb trail labels))
+            (ty-module (abs ds vs) (k-sub-modules a b ta tb ea eb trail labels))
+            (ty-param (k x) (k-sub-modules a b ta tb ea eb trail labels))
             (else z #f)))))
   ;; Generative type arguments `xs ≤ ys`, each as its variance in `vs` says.
   (k-sub-descs (subr (maxeff kstate spin)
@@ -635,302 +634,193 @@
           ((symbol=? (extract (car ps) 1) l) i)
           (else (k-part-index (cdr ps) l (+ i 1))))))
 
-;;; ------------------------------------------------------------ errors
-
-(define k-newline string (char->string (integer->char 10)))
-;; Run `f`, and if it fails at `a`..`b` with "a W is expected here, and
-;; this is a G", fail instead with what `say` makes of W and G.
-(define k-expected-split (subr (maxeff (read @globals) spin) (string) string)
-  (lambda (m) (if (= (string-search m "a " 0) 0) (substring m 2 (string-length m)) "")))
-(define k-sep string " is expected here, and this is a ")
-;; "a W is expected here, and this is a G", of `w` and `g`.
-(define k-expected-here (subr (read @globals) (string string) string)
-  (lambda (w g) (k-cat4 "a " w k-sep g)))
-(define k-rewriting (subr (maxeff checks spin) (k-checking int int k-saying) k-te)
-  (lambda (f a b say)
-    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
-      (tagcase r
-        (k-done (te) te)
-        (k-err (m ea eb)
-          ;; Its second line, an effect's delta, apart, and put back last.
-          (let* ((nl (string-search m k-newline 0))
-                 (first (if (< nl 0) m (substring m 0 nl)))
-                 (delta (if (< nl 0) "" (substring m nl (string-length m))))
-                 (rest (k-expected-split first)) (at (k-find-sub rest k-sep 0)))
-            (if (and (= ea a) (= eb b) (not (string=? rest "")) (>= at 0))
-                (let ((w (substring rest 0 at))
-                      (g (substring rest (+ at (string-length k-sep)) (string-length rest))))
-                  (k-fail (string-append (say m w g) delta) ea eb))
-                (k-fail m ea eb))))
-        (k-ok (xs) (k-fail "k-ok inside" a b))))))
-;; The same, for any error at `a`..`b`.
-(define k-prefixing (subr checks ((subr checks () k-te) int int (subr checks () string)) k-te)
-  (lambda (f a b prefix)
-    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
-      (tagcase r
-        (k-done (te) te)
-        (k-err (m ea eb)
-          (if (and (= ea a) (= eb b)) (k-fail (string-append (prefix) m) ea eb) (k-fail m ea eb)))
-        (k-ok (xs) (k-fail "k-ok inside" a b))))))
-
-;; The convention `want` asks of `got`, where a procedure differs from what
-;; is expected only in its convention, so that a conversion makes it one
-;; (`docs/research/native-conventions.md`).
-(define k-conversion (subr (maxeff checks spin) (int int) (listof k-conv acyclic))
+;;; ------------------------------------------------- modules compared
+;;; (`check-module-rules.fx` has the rest of their rules.)
+;; The type part `n` of `ps` is, or -1.
+(define k-part-of (subr (maxeff kreads spin) (k-parts symbol) int)
+  (lambda (ps n)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
+          (else (k-part-of (cdr ps) n)))))
+;; Whether a name of `xs` is one of `ys`'s.
+(define k-comps-meet? (subr (maxeff kreads spin) (k-parts k-parts) bool)
+  (lambda (xs ys)
+    (and (not (null? xs))
+         (or (>= (k-part-of ys (extract (car xs) 1)) 0) (k-comps-meet? (cdr xs) ys)))))
+;; Whether `xs` and `ys` are values of the same names, in order.
+(define k-same-names? (subr (maxeff kreads spin) (k-parts k-parts) bool)
+  (lambda (xs ys)
+    (if (null? xs)
+        (null? ys)
+        (and (not (null? ys))
+             (symbol=? (extract (car xs) 1) (extract (car ys) 1))
+             (k-same-names? (cdr xs) (cdr ys))))))
+;; Each abstract type of `ab` (from position `i`) paired with `aa`'s of its
+;; name, as a `poly`'s binders are, in the environments `es`; or met by a
+;; description of `da`'s. None, if one is neither.
+(define k-pair-abs
+  (subr (maxeff kstate spin) (k-parts k-parts k-parts int int int k-benvs k-labels)
+        (listof k-benvs acyclic))
+  (lambda (ab aa da a b i es labels)
+    (if (null? ab)
+        (the (listof k-benvs acyclic) (cons es nil))
+        (let* ((n (extract (car ab) 1)) (x (k-part-of aa n)))
+          (cond
+            ((and (>= x 0) (not (= (k-dvar-kind x) (k-dvar-kind (extract (car ab) 2))))) nil)
+            ((>= x 0)
+             (let* ((l (k-label labels a b i))
+                    (ea (k-benv-set (car es) x l))
+                    (eb (k-benv-set (cdr es) (extract (car ab) 2) l)))
+               (k-pair-abs (cdr ab) aa da a b (+ i 1) (the k-benvs (cons ea eb)) labels)))
+            ((>= (k-part-of da n) 0) (k-pair-abs (cdr ab) aa da a b (+ i 1) es labels))
+            (else nil))))))
+;; Type `t` as the description that stands for variable `v`: a function, if
+;; `v` is of an arrow kind.
+(define k-as-kind (subr kreads (int int) k-desc)
+  (lambda (v t) (if (k-arrow-kind? (k-dvar-kind v)) (df t) (dt t))))
+;; Each binder named in `ea`, as the type of the name its pair was given.
+(define k-labels-map (subr (maxeff kstate spin) (k-benv) k-map)
+  (lambda (ea)
+    (if (null? ea)
+        nil
+        (let ((t (k-ty-new (ty-var (cdr (car ea))))))
+          (the k-map (cons (cons (car (car ea)) (k-as-kind (car (car ea)) t))
+                           (k-labels-map (cdr ea))))))))
+;; `b`'s abstract types (`ab`) that `a` defines (`da`, not abstract in `aa`):
+;; each as that definition, `m` naming `a`'s own abstract types in it.
+(define k-defined-map (subr (maxeff kstate spin) (k-parts k-parts k-parts k-map) k-map)
+  (lambda (ab aa da m)
+    (if (null? ab)
+        nil
+        (let* ((n (extract (car ab) 1))
+               (d (if (>= (k-part-of aa n) 0) -1 (k-part-of da n)))
+               (rest (k-defined-map (cdr ab) aa da m)))
+          (if (< d 0)
+              rest
+              (let ((y (extract (car ab) 2)))
+                (the k-map (cons (cons y (k-as-kind y (k-subst d m))) rest))))))))
+;; For the pair of module types `a` and `b`, met before in this question, the
+;; wanted one's descriptions and values with its abstract types the given
+;; one's transparent ones: made once, so that a recursive type meets the same
+;; pair again, which the trail catches. Kept with the question's labels, at
+;; position -1, as a module type of no abstract types.
+(define k-module-memo (subr (maxeff kreads spin) (k-label-list int int) int)
+  (lambda (ls a b)
+    (cond ((null? ls) -1)
+          ((k-label-of? (car ls) a b -1) (extract (car ls) 4))
+          (else (k-module-memo (cdr ls) a b)))))
+(define k-module-parts
+  (subr (maxeff kstate spin) (int int k-parts k-parts k-parts k-parts k-parts k-benv k-labels) int)
+  (lambda (a b aa da ab db vb ea labels)
+    (let ((known (k-module-memo (get labels) a b)))
+      (if (>= known 0)
+          known
+          (let* ((by (k-defined-map ab aa da (k-labels-map ea)))
+                 (bd (k-subst-each db by))
+                 (bv (k-subst-each vb by))
+                 (t (k-ty-new (ty-module nil bd bv))))
+            (begin (set labels (cons (product (1 a) (2 b) (3 -1) (4 t)) (get labels))) t))))))
+;; Each description of `bd` one of `da`'s, the same.
+(define k-descs-same?
+  (subr (maxeff kstate spin) (k-parts k-parts k-benv k-benv k-strail k-labels) bool)
+  (lambda (bd da ea eb trail labels)
+    (or (null? bd)
+        (let ((x (k-part-of da (extract (car bd) 1))))
+          (and (>= x 0) (k-inv x (extract (car bd) 2) ea eb trail labels)
+               (k-descs-same? (cdr bd) da ea eb trail labels))))))
+;; Each value of `va` a subtype of `bv`'s, pairwise.
+(define k-vals-sub?
+  (subr (maxeff kstate spin) (k-parts k-parts k-benv k-benv k-strail k-labels) bool)
+  (lambda (va bv ea eb trail labels)
+    (or (null? va)
+        (and (k-sub (extract (car va) 2) (extract (car bv) 2) ea eb trail labels)
+             (k-vals-sub? (cdr va) (cdr bv) ea eb trail labels)))))
+;; Module type `a` ≤ `b` (`first-class-modules.md`, M4): each abstract type
+;; of `b`'s an abstract type of `a`'s (paired as a `poly`'s binders are) or
+;; a transparent one (`b`'s abstract type is then what `a` says it is); each
+;; description of `b`'s one of `a`'s, the same; and their values the same
+;; names, in order, each `a`'s a subtype of `b`'s, since a module is a
+;; product of its values. Fewer values, or another order, `k-expect` makes by
+;; reshaping (`k-reshape`).
+(define k-sub-modules k-sub-rule
+  (lambda (a b ta tb ea eb trail labels)
+    (tagcase ta
+      ;; `(select $k x)`: only itself.
+      (ty-param (k x) (tagcase tb (ty-param (j y) (and (= k j) (symbol=? x y))) (else z #f)))
+      (ty-module (aa da va)
+        (tagcase tb
+          (ty-module (ab db vb)
+            (and (not (k-comps-meet? aa db))
+                 (k-same-names? va vb)
+                 (let ((paired (k-pair-abs ab aa da a b 0 (the k-benvs (cons ea eb)) labels)))
+                   (and (not (null? paired))
+                        (let* ((ia (car (car paired))) (ib (cdr (car paired)))
+                               (parts (k-module-parts a b aa da ab db vb ia labels)))
+                          (tagcase (k-get parts)
+                            (ty-module (none bd bv)
+                              (and (k-descs-same? bd da ia ib trail labels)
+                                   (k-vals-sub? va bv ia ib trail labels)))
+                            (else z #f)))))))
+          (else z #f)))
+      (else z #f))))
+;; Where in `vs` the value named `n` first is, from `i`; or -1.
+(define k-val-position (subr (maxeff kreads spin) (k-parts symbol int) int)
+  (lambda (vs n i)
+    (cond ((null? vs) -1)
+          ((symbol=? (extract (car vs) 1) n) i)
+          (else (k-val-position (cdr vs) n (+ i 1))))))
+;; Each of `wanted`'s values' position in `vs`; none if one is not there.
+(define k-positions (subr (maxeff kreads (alloc @t) spin) (k-parts k-parts) (listof k-ids acyclic))
+  (lambda (wanted vs)
+    (if (null? wanted)
+        (the (listof k-ids acyclic) (cons (the k-ids nil) nil))
+        (let ((k (k-val-position vs (extract (car wanted) 1) 0))
+              (rest (k-positions (cdr wanted) vs)))
+          (if (or (< k 0) (null? rest))
+              nil
+              (the (listof k-ids acyclic) (cons (the k-ids (cons k (car rest))) nil)))))))
+;; Whether `at` is each position of `n`, in order, from `i`.
+(define k-in-order? (subr (maxeff (read @globals) spin) (k-ids int int) bool)
+  (lambda (at n i) (if (null? at) (= i n) (and (= (car at) i) (k-in-order? (cdr at) n (+ i 1))))))
+;; The values of `vs` at positions `at`.
+(define k-vals-at (subr (maxeff kreads (alloc @t) spin) (k-parts k-ids) k-parts)
+  (lambda (vs at) (if (null? at) nil (cons (k-nth vs (car at)) (k-vals-at vs (cdr at))))))
+;; A module of type `got` made one of type `want`, which has fewer of its
+;; values or the same in another order: each of `want`'s values' position in
+;; `got`, if `got`'s values so chosen fit `want`; none otherwise.
+(define k-reshape (subr (maxeff kstate spin) (int int) (listof k-ids acyclic))
   (lambda (got want)
-    (tagcase (k-get (k-resolve got))
-      (ty-subr (e ps r from)
-        (tagcase (k-get (k-resolve want))
-          (ty-subr (e2 ps2 r2 to)
-            (if (and (not (k-conv=? from to)) (k-subtype (k-ty-new (ty-subr e ps r to)) want))
-                (cons to nil)
-                nil))
-          (else y nil)))
-      (else y nil))))
-;; Conversion `code` at `x`'s span, among the facts `checked-extracts` gives.
-(define k-note-conversion (subr (maxeff checks spin) (kx int) unit)
-  (lambda (x code)
-    (let ((fact (product (1 (k-start x)) (2 (k-end x)) (3 (- -1000 code)))))
-      (set k-extracts (cons fact (get k-extracts))))))
-;; A conversion of `x`'s procedure, of type `t`, to `to`. To `fx` or to a
-;; convention binder it does nothing at run time; to `cellular` or `native`
-;; it is `%fx26-convert`, which gives the value if it is already one of
-;; those, and otherwise an adapter: a procedure of the convention asked
-;; for that calls it. The compiler learns of it as a fact at `x`'s span:
-;; -1000 less the arity times 4, plus 1 for `cellular` or 2 for `native`.
-(define k-convert-at (subr (maxeff checks spin) (kx int k-conv) unit)
-  (lambda (x t to)
-    (let ((n (tagcase (k-get (k-resolve t)) (ty-subr (e ps r cv) (* 4 (k-length ps))) (else y 0))))
-      (tagcase to
-        (cv-cellular () (k-note-conversion x (+ n 1)))
-        (cv-native () (k-note-conversion x (+ n 2)))
-        (else y #u)))))
-(define k-latent-of (subr (maxeff kstate spin) (int) k-effs)
-  (lambda (t)
-    (tagcase (k-get (k-resolve t))
-      (ty-poly (bs body) (k-latent-of body))
-      (ty-subr (e ps r cv) (the k-effs (cons e nil)))
-      (else y nil))))
-;; The atoms of `g` that `w` does not cover.
-(define k-uncovered (subr (maxeff kstate spin) (k-eff k-eff) k-eff)
-  (lambda (g w)
-    (cond ((null? g) nil)
-          ((k-within? (k-one (car g)) w) (k-uncovered (cdr g) w))
-          (else (the k-eff (cons (car g) (k-uncovered (cdr g) w)))))))
-;; The second line of an "is expected here" message, where `got` and `want`
-;; are procedures: the atoms of `got`'s latent effect that `want`'s does not
-;; cover (`Checker::effect_delta`).
-(define* k-effect-delta (subr (maxeff kstate spin) (int int) string)
-  (lambda (got want)
-    (let ((g (k-latent-of got)) (w (k-latent-of want)))
-      (if (or (null? g) (null? w))
-          ""
-          (let ((beyond (k-uncovered (car g) (car w))))
-            (if (null? beyond)
-                ""
-                (k-cat3 k-newline "  beyond what is expected, it has " (k-show-effect beyond))))))))
-;; A module reshaped where it is wanted at a type of fewer values
-;; (`check-module-rules.fx`'s `k-reshape-at`, which sets this).
-(define k-reshape-hook (ref (subr (maxeff checks spin) (kx int int) bool) @t)
-  (new (lambda (x got want) #f)))
-;; `got ≤ want`, or an error at `x` saying so.
-(define k-expect (subr (maxeff checks spin) (kx int int) unit)
+    (tagcase (k-get got)
+      (ty-module (abs ds vs)
+        (tagcase (k-get want)
+          (ty-module (wa wd wanted)
+            (let ((at (k-positions wanted vs)))
+              (if (or (null? at) (k-in-order? (car at) (k-length vs) 0))
+                  nil
+                  (let ((t (k-ty-new (ty-module abs ds (k-vals-at vs (car at))))))
+                    (if (k-subtype t want) at nil)))))
+          (else z nil)))
+      (else z nil))))
+;; Where `x`, of type `got`, is wanted as a `want`: reshaped, if it may be,
+;; and noted so (`k-reshapes`).
+(define k-reshape-at (subr (maxeff checks spin) (kx int int) bool)
   (lambda (x got want)
-    (if (k-subtype got want)
-        #u
-        (let ((c (k-conversion got want)))
-          (cond ((not (null? c)) (k-convert-at x got (car c)))
-                (((get k-reshape-hook) x got want) #u)
-                (else
-                 (k-fail (string-append (k-expected-here (k-show-ty want) (k-show-ty got))
-                                        (k-effect-delta got want))
-                         (k-start x) (k-end x))))))))
-;; Bind each, the first first.
-(define k-bind-all (subr (maxeff kstate spin) (k-bindings) unit)
-  (lambda (bs)
-    (if (null? bs) #u (begin (k-bind (car (car bs)) (cdr (car bs))) (k-bind-all (cdr bs))))))
-;; `t` for a variable being bound to it: a `nat` of no known size is given
-;; one, a variable of its own named after the variable, so that tests of it
-;; can teach facts; and a module's abstract types are named too.
-(define k-name-nat (subr (maxeff kstate spin) (symbol int) int)
-  (lambda (name t)
-    (tagcase (k-get (k-resolve t))
-      (ty-module (abs ds vs) (k-name-module name t))
-      (ty-nat (z)
-        (tagcase z
-          (sz-finite ()
-            (let ((v (k-new-dvar-of name 5)))
-              (begin (set k-skolems (cons v (get k-skolems))) (k-ty-new (ty-nat (k-size-var v))))))
-          (else w t)))
-      (else y t))))
-;; Bind each, the first first, a `nat` of no known size given one.
-(define k-bind-named (subr (maxeff kstate spin) (k-bindings) unit)
-  (lambda (bs)
-    (if (null? bs)
-        #u
-        (let ((n (car (car bs))) (t (cdr (car bs))))
-          (begin (k-bind n (k-name-nat n t)) (k-bind-named (cdr bs)))))))
-(define k-note-letrec (subr (maxeff kstate spin) (k-letrec-bs bool) unit)
-  (lambda (bs spins)
-    (if (null? bs)
-        #u
-        (let ((n (extract (car bs) 1)) (t (extract (car bs) 2)))
-          (begin (k-note-known n 0)
-                 (if spins (set k-recursive (cons (cons n t) (get k-recursive))) #u)
-                 (k-note-letrec (cdr bs) spins))))))
-;; The group's members are recursion that says `spin`, if `why` says it may
-;; not end, and why is kept for an error.
-;; Naming `s`: pure, but for a member of a recursive group that may not
-;; end, named in the group. Called, the call says `spin`; given away,
-;; whoever calls it could loop through it, so naming it does.
-(define k-naming-effect (subr (maxeff kmakes spin) (symbol int) k-eff)
-  (lambda (s t)
-    (let ((spins (if (k-named-has? (get k-recursive) s t) (k-one (a-spin)) (the k-eff nil))))
-      (if (and (get k-globals-effects) (k-global? s))
-          (k-insert (a-read (r-global s)) spins)
-          spins))))
-(define k-bind-letrec (subr (maxeff kstate spin) (k-letrec-bs) unit)
-  (lambda (bs)
-    (if (null? bs)
-        #u
-        (begin (k-bind (extract (car bs) 1) (extract (car bs) 2)) (k-bind-letrec (cdr bs))))))
-;; Whether `x` is a lambda, under any type abstractions and ascriptions.
-(define k-lambda? (subr (read @globals) (kx) bool)
-  (lambda (x)
-    (tagcase x
-      (x-lambda (ps body a b) #t)
-      (x-rlambda (r l a b) #t)
-      (x-plambda (bs e a b) (k-lambda? e))
-      (x-the (t e a b) (k-lambda? e))
-      (else y #f))))
-;; How many of `ns` are `n`.
-(define k-count-name (subr (read @globals) (k-names symbol) int)
-  (lambda (ns n)
-    (cond ((null? ns) 0)
-          ((symbol=? (car ns) n) (+ 1 (k-count-name (cdr ns) n)))
-          (else (k-count-name (cdr ns) n)))))
-;; Note each `let` binding of a lambda as known, once bound: of several of
-;; one name, each is as many from the innermost as come after it. The
-;; names, in order.
-(define k-note-let-lambdas (subr (maxeff kstate spin) (k-let-bs) k-names)
-  (lambda (bs)
-    (if (null? bs)
-        nil
-        (let* ((later (k-note-let-lambdas (cdr bs)))
-               (n (extract (car bs) 1))
-               (x (extract (car bs) 2))
-               (noted (if (k-lambda? x) (k-note-known n (k-count-name later n)) #u)))
-          (the k-names (cons n later))))))
-;; Whether a `plambda` body `x` with effect `e` may be generalized: pure, as
-;; the value restriction has it; or an `rlambda`, under ascriptions and other
-;; `plambda`s, whose effect only allocates. Making a closure makes no mutable
-;; data a type could be generalized over: it holds only variables bound
-;; outside.
-(define k-rlambda-under? (subr (read @globals) (kx) bool)
-  (lambda (x)
-    (tagcase x
-      (x-rlambda (r l a b) #t)
-      (x-plambda (bs e a b) (k-rlambda-under? e))
-      (x-the (t e a b) (k-rlambda-under? e))
-      (else y #f))))
-(define k-only-alloc? (subr kreads (k-eff) bool)
-  (lambda (e)
-    (or (null? e) (and (tagcase (car e) (a-alloc (r) #t) (else y #f)) (k-only-alloc? (cdr e))))))
-(define k-generalizable? (subr kreads (kx k-eff) bool)
-  (lambda (x e) (or (null? e) (and (k-rlambda-under? x) (k-only-alloc? e)))))
-(define k-letrec-not-lambda (subr (read @globals) (symbol) string)
-  (lambda (n)
-    (k-cat3 (k-quote (symbol->string n))
-            " is bound recursively, so it must be a lambda: "
-            "nothing may run before every binding exists")))
-
-;; Binder `v`'s name, quoted.
-(define k-quote-dvar (subr kreads (int) string)
-  (lambda (v) (k-quote (symbol->string (k-dvar-name v)))))
-;; Description `d`, given where one of kind `k` is wanted: a `select` given
-;; for a description function, resolved, and taken as one; a type given,
-;; its `select`s resolved, as an annotation's are (a type a module
-;; re-exports may be inside it).
-(define k-select-fun (subr (maxeff checks spin) (k-desc int int int) k-desc)
-  (lambda (d k a b)
-    (let ((t (tagcase d (dt (x) x) (df (x) x) (else y -1))))
-      (cond ((and (k-arrow-kind? k) (>= t 0) (tagcase (k-get t) (ty-select (m n) #t) (else y #f)))
-             (df (k-resolve-selects t a b)))
-            ((tagcase d (dt (x) #t) (else y #f)) (dt (k-resolve-selects t a b)))
-            (else d)))))
-(define k-proj-map (subr (maxeff checks spin) (k-binders k-descs int int) k-map)
-  (lambda (bs ds a b)
-    (if (null? bs)
-        nil
-        (let* ((v (extract (car bs) 1)) (k (extract (car bs) 2))
-               ;; A function given as a `select`: resolved first.
-               (d (k-select-fun (car ds) k a b))
-               (ok (k-desc-of-kind? d k)))
-          (if ok
-              (cons (cons v d) (k-proj-map (cdr bs) (cdr ds) a b))
-              (k-fail (k-cat4 (k-quote-dvar v) " is bound as a " (k-kind-word k)
-                              ", and the description given is not one")
-                      a b))))))
-(define k-param-types (subr checks (k-typed-params k-ids int int) k-bindings)
-  (lambda (ps hint a b)
-    (if (null? ps)
-        nil
-        (let* ((n (extract (car ps) 1)) (t (extract (car ps) 2))
-               (ty (cond ((not (null? t)) (car t))
-                         ((not (null? hint)) (car hint))
-                         (else (k-fail (k-cat5 "the type of parameter " (k-quote (symbol->string n))
-                                               " cannot be known here: write `(" (symbol->string n)
-                                               " type)`, or check the `lambda` against a type")
-                                       a b))))
-               (rest (k-param-types (cdr ps) (if (null? hint) hint (cdr hint)) a b)))
-          (cons (cons n ty) rest)))))
-(define k-binding-types (subr kmakes (k-bindings) k-ids)
-  (lambda (bs) (if (null? bs) nil (cons (cdr (car bs)) (k-binding-types (cdr bs))))))
-(define k-some-untyped? (subr kreads (k-typed-params) bool)
-  (lambda (ps)
-    (cond ((null? ps) #f)
-          ((null? (extract (car ps) 2)) #t)
-          (else (k-some-untyped? (cdr ps))))))
-
-(define k-unannotated? (subr kreads (kx) bool)
-  (lambda (x) (tagcase x (x-lambda (ps body a b) (k-some-untyped? ps)) (else y #f))))
-;; A `lambda` missing parameter types, or a thunk: better told than asked.
-(define k-needs-telling? (subr kreads (kx) bool)
-  (lambda (x)
-    (tagcase x (x-lambda (ps body a b) (or (null? ps) (k-some-untyped? ps))) (else y #f))))))
+    (let ((at (k-reshape got want)))
+      (if (null? at)
+          #f
+          (begin (set k-reshapes (cons (product (1 (k-start x)) (2 (k-end x)) (3 (car at)))
+                                       (get k-reshapes)))
+                 #t)))))))
 
 (define k-part-find (with check-subtype-module k-part-find))
 (define k-benv-set (with check-subtype-module k-benv-set))
 (define k-label-of? (with check-subtype-module k-label-of?))
 (define k-label (with check-subtype-module k-label))
 (define k-nlist-tail (with check-subtype-module k-nlist-tail))
-(define k-sub-module (with check-subtype-module k-sub-module))
 (define k-inv (with check-subtype-module k-inv))
 (define k-sub (with check-subtype-module k-sub))
 (define k-subtype (with check-subtype-module k-subtype))
 (define k-part-index (with check-subtype-module k-part-index))
-(define k-rewriting (with check-subtype-module k-rewriting))
-(define k-conversion (with check-subtype-module k-conversion))
-(define k-convert-at (with check-subtype-module k-convert-at))
-(define k-latent-of (with check-subtype-module k-latent-of))
-(define k-reshape-hook (with check-subtype-module k-reshape-hook))
-(define k-expect (with check-subtype-module k-expect))
-(define k-bind-all (with check-subtype-module k-bind-all))
-(define k-name-nat (with check-subtype-module k-name-nat))
-(define k-bind-named (with check-subtype-module k-bind-named))
-(define k-note-letrec (with check-subtype-module k-note-letrec))
-(define k-naming-effect (with check-subtype-module k-naming-effect))
-(define k-bind-letrec (with check-subtype-module k-bind-letrec))
-(define k-lambda? (with check-subtype-module k-lambda?))
-(define k-note-let-lambdas (with check-subtype-module k-note-let-lambdas))
-(define k-generalizable? (with check-subtype-module k-generalizable?))
-(define k-letrec-not-lambda (with check-subtype-module k-letrec-not-lambda))
-(define k-quote-dvar (with check-subtype-module k-quote-dvar))
-(define k-proj-map (with check-subtype-module k-proj-map))
-(define k-param-types (with check-subtype-module k-param-types))
-(define k-binding-types (with check-subtype-module k-binding-types))
-(define k-some-untyped? (with check-subtype-module k-some-untyped?))
-(define k-needs-telling? (with check-subtype-module k-needs-telling?))
 (define-type k-trail (select check-subtype-module k-trail))
 (define-type k-benv (select check-subtype-module k-benv))
 (define-type k-benvs (select check-subtype-module k-benvs))
@@ -939,3 +829,7 @@
 (define-type k-labels (select check-subtype-module k-labels))
 (define-type k-sub-rule (select check-subtype-module k-sub-rule))
 (define-type k-saying (select check-subtype-module k-saying))
+(define-type k-checking (select check-subtype-module k-checking))
+(define-type k-effs (select check-subtype-module k-effs))
+(define k-reshape-at (with check-subtype-module k-reshape-at))
+(define k-part-of (with check-subtype-module k-part-of))
