@@ -667,16 +667,25 @@
       (if (null? ps)
           ""
           (let* ((one (k-cat5 " (" what " " (symbol->string (extract (car ps) 1)) " "))
-                 (after (if (string=? what "desc") (k-printing-named p (list (car ps))) p)))
-            (k-cat4 one (k-show-comp (extract (car ps) 2) p) ")"
+                 (after (if (string=? what "desc") (k-printing-named p (list (car ps))) p))
+                 (own (if (string=? what "desc") (extract (car ps) 1) '||)))
+            (k-cat4 one (k-show-comp (extract (car ps) 2) p own) ")"
                     (k-show-comps what (cdr ps) after))))))
   ;; A component's type; an effect, a description function of no parameters,
-  ;; as the effect.
-  (k-show-comp (subr kbuilds (int k-printing) string)
-    (lambda (t p)
+  ;; as the effect. A description shows what it is, not its own name `n` (a
+  ;; value's, `||`, no name): a `define-type` alias of it, `(select m n)`, is
+  ;; named `n` too.
+  (k-show-comp (subr kbuilds (int k-printing symbol) string)
+    (lambda (t p n)
       (tagcase (k-get t)
         (ty-lam (bs body) (if (null? bs) (k-show-desc body p) (k-show-on t p)))
-        (else y (k-show-on t p))))))
+        (else y
+          (let* ((r (k-resolve t))
+                 (named (k-part-named (extract p 2) r))
+                 (name (if (null? named) (k-abbrev-in (get k-dscope) (get k-dscope) 0 r) named)))
+            (if (or (null? name) (string=? (car name) (symbol->string n)))
+                (k-show-body r p)
+                (car name))))))))
 
 ;; Whether type `t` is variable `v`.
 (define k-type-is-var? (subr (maxeff kreads spin) (int int) bool)

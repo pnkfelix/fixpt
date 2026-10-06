@@ -197,6 +197,11 @@ impl Checker {
                     // An effect, a description function of no parameters.
                     let shown = match self.arena.get(self.arena.resolve(*x)) {
                         Ty::Lam { params, body: crate::ast::D::Effect(e) } if params.is_empty() => self.show_effect(e),
+                        // What it is, not its own name: a `define-type` alias
+                        // of it, `(select m n)`, named `n` too.
+                        _ if self.abbreviation(self.arena.resolve(*x)) == Some(self.interner.name(*n)) => {
+                            self.show_ty_body(self.arena.resolve(*x), path)
+                        }
                         _ => self.show_ty_on(*x, path),
                     };
                     out.push_str(&format!(" (desc {} {shown})", self.interner.name(*n)));

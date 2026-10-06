@@ -1608,7 +1608,9 @@ impl Checker {
     fn parse_moduleof_in(&mut self, span: fixpt_read::Span, comps: &[Syntax]) -> R<TyId> {
         let usage = "`(moduleof (abs t type) … (desc d type) … (val x type) …)`";
         let (mut abs, mut descs, mut vals): (Vec<(Sym, DVar)>, Vec<(Sym, TyId)>, Vec<(Sym, TyId)>) = (Vec::new(), Vec::new(), Vec::new());
-        let mut seen: Vec<Sym> = Vec::new();
+        // Names given twice: as descriptions, or as values (a value may have
+        // a type's name).
+        let (mut seen, mut vseen): (Vec<Sym>, Vec<Sym>) = (Vec::new(), Vec::new());
         for c in comps {
             let parts = self.items(c, "a module component")?.to_vec();
             let [head, name, what] = &parts[..] else {
@@ -1619,6 +1621,7 @@ impl Checker {
                 (None, Some(ns)) if self.head(&parts) == Some("abs") => ns.iter().filter_map(|n| n.as_symbol()).collect(),
                 _ => return Err(FxError::at(name.span, "a component's name")),
             };
+            let seen = if self.head(&parts) == Some("val") { &mut vseen } else { &mut seen };
             for n in &names {
                 if seen.contains(n) {
                     return Err(FxError::at(c.span, format!("`{}` appears twice", self.name(*n))));
@@ -1735,20 +1738,24 @@ impl Checker {
     /// A module that defines a name twice is refused: it has no type
     /// (`moduleof` refuses a name twice), and which of the two a use got
     /// would depend on the path that ran it (one the first, another the
-    /// last). A generative type's conversions, `up-t` and `down-t`, count.
-    /// As the FX-26 checker's `k-defined-twice`.
+    /// last). Twice as a description, or twice as a value: a value may have
+    /// a type's name. A generative type's conversions, `up-t` and `down-t`,
+    /// count as values. As the FX-26 checker's `k-defined-twice`.
     fn defined_twice(&self, span: fixpt_read::Span, items: &[ModItem]) -> R<()> {
-        let mut seen: Vec<Sym> = Vec::new();
+        let (mut types, mut values): (Vec<Sym>, Vec<Sym>) = (Vec::new(), Vec::new());
         for item in items {
-            let names: Vec<Sym> = match item {
-                ModItem::Abs { name, up, down, .. } => vec![*name, *up, *down],
-                ModItem::Desc { name, .. } | ModItem::Val { name, .. } => vec![*name],
-                ModItem::Rec(bs) => bs.iter().map(|(n, _, _)| *n).collect(),
+            let (ts, vs): (Vec<Sym>, Vec<Sym>) = match item {
+                ModItem::Abs { name, up, down, .. } => (vec![*name], vec![*up, *down]),
+                ModItem::Desc { name, .. } => (vec![*name], vec![]),
+                ModItem::Val { name, .. } => (vec![], vec![*name]),
+                ModItem::Rec(bs) => (vec![], bs.iter().map(|(n, _, _)| *n).collect()),
             };
-            if let Some(n) = names.iter().find(|n| seen.contains(n)) {
+            let twice = ts.iter().find(|n| types.contains(n)).or_else(|| vs.iter().find(|n| values.contains(n)));
+            if let Some(n) = twice {
                 return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.name(*n))));
             }
-            seen.extend(names);
+            types.extend(ts);
+            values.extend(vs);
         }
         Ok(())
     }

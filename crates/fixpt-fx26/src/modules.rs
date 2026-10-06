@@ -318,16 +318,7 @@ impl Checker {
                     return Err(FxError::at(span, format!("{}: `{}` has no type `{}`", shown(self), self.interner.name(m), self.interner.name(n))));
                 }
             };
-            // A global module's type, as `select` names it, is that node
-            // from now on: whatever leads to it is not rebuilt, and is
-            // shared, and shown by its name. (Not a family: one is read as
-            // the `select` it is.) A local module's may differ by scope.
-            if self.env.iter().rposition(|(x, _)| *x == m).is_some_and(|i| self.global_slots.contains(&i))
-                && !matches!(self.arena.get(to), Ty::Lam { .. })
-                && !matches!(self.arena.get(to), Ty::Var(v) if self.arena.dvar_kind(*v) != Kind::Type)
-            {
-                self.arena.set_link(node, to);
-            }
+            self.link_global_select(m, node, to);
             sel.insert((m, n), to);
         }
         let outer = std::mem::replace(&mut self.select_map, sel);
@@ -339,6 +330,49 @@ impl Checker {
         self.select_map = outer;
         self.check_apps(r, span)?;
         Ok(r)
+    }
+
+    /// A global module's type, as `select` node `node` names it: that node
+    /// from now on, linked to `to`, so that whatever leads to it is not
+    /// rebuilt, and is shared, and shown by its name. Not a family, which is
+    /// read as the `select` it is; nor a local module's, which may differ by
+    /// scope. As the FX-26 checker's `k-link-global-select`.
+    fn link_global_select(&mut self, m: Sym, node: TyId, to: TyId) {
+        if self.env.iter().rposition(|(x, _)| *x == m).is_some_and(|i| self.global_slots.contains(&i))
+            && !matches!(self.arena.get(to), Ty::Lam { .. })
+            && !matches!(self.arena.get(to), Ty::Var(v) if self.arena.dvar_kind(*v) != Kind::Type)
+        {
+            self.arena.set_link(node, to);
+        }
+    }
+
+    /// Each `define-type` alias in scope, `(define-type t (select m t))`, of
+    /// the global module `m` just bound, linked now to what it names: the
+    /// aliases are declared ahead of `m`, and a type naming one shows by its
+    /// name from the first, not once some later resolution meets it. As the
+    /// FX-26 checker's `k-link-aliases`.
+    pub(crate) fn link_aliases(&mut self, m: Sym) {
+        let Some(mt) = self.lookup(m) else { return };
+        let Ty::Module { abs, descs, .. } = self.arena.get(self.arena.resolve(mt)).clone() else { return };
+        let nodes: Vec<(TyId, Sym)> = self
+            .dscope
+            .iter()
+            .filter_map(|(_, d)| match d {
+                crate::parse::DScope::Rec(t) => match self.arena.get(*t) {
+                    Ty::Select(x, n) if *x == m => Some((self.arena.resolve(*t), *n)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        for (node, n) in nodes {
+            let to = match (abs.iter().find(|(a, _)| *a == n), descs.iter().find(|(d, _)| *d == n)) {
+                (Some((_, v)), _) => self.arena.ty(Ty::Var(*v)),
+                (None, Some((_, d))) => *d,
+                (None, None) => continue,
+            };
+            self.link_global_select(m, node, to);
+        }
     }
 
     /// The nodes of `t` from which no `select` is reached: none is, nor a

@@ -1025,6 +1025,7 @@ impl Checker {
         let t = self.name_module(name, t);
         self.global_slots.insert(self.env.len());
         self.env.push((name, t));
+        self.link_aliases(name);
     }
 
     /// Whether the group `bindings` ends; if not, its members are recursion

@@ -97,10 +97,23 @@
                 (and (not (null? d))
                      (tagcase (car d) (ds-eff (e) #t) (ds-var (v k) (= k 1)) (else x #f))))))
         (let ((h (k-list-head s))) (or (k-atom-head? h) (string=? h "maxeff"))))))
+;; A `moduleof`'s description `what` of `name`, in scope in what follows it:
+;; `(desc e E)`, an effect, as a module's `define-effect` gives; a description
+;; function; or a type.
+(define k-moduleof-desc (subr (maxeff checks spin) (symbol syn) int)
+  (lambda (name what)
+    (cond ((k-effect-shaped? what)
+           (let* ((e (k-parse-effect what)) (d (k-effect-desc e)))
+             (begin (k-push-desc name (ds-eff e)) d)))
+          ((string=? (k-list-head what) "dlambda")
+           (let ((f (k-parse-fun what -1))) (begin (k-push-desc name (ds-fun f)) f)))
+          (else (let ((t (k-parse-type what))) (begin (k-push-desc name (ds-rec t)) t))))))
 ;; A `moduleof`'s components `cs`, those before them read into `abs`, `ds`
-;; and `vs` (newest first), their names `seen`.
-(define k-moduleof-comps (subr (maxeff checks spin) (k-syns k-parts k-parts k-parts k-names) int)
-  (lambda (cs abs ds vs seen)
+;; and `vs` (newest first), their names `seen` (types and effects) and `vseen`
+;; (values): a value may have a type's name.
+(define k-moduleof-comps
+  (subr (maxeff checks spin) (k-syns k-parts k-parts k-parts k-names k-names) int)
+  (lambda (cs abs ds vs seen vseen)
     (if (null? cs)
         (let ((ds (k-parts-reversed ds nil)) (vs (k-parts-reversed vs nil)))
           (k-ty-new (ty-module (k-parts-reversed abs nil) ds vs)))
@@ -109,29 +122,21 @@
                (shaped (k-shape (= (k-length parts) 3) k-moduleof-usage c))
                (head (k-symbol-head parts))
                (names (k-component-names (k-nth parts 1) head))
-               (seen (k-names-once names seen c))
+               (val? (string=? head "val"))
+               (seen (if val? seen (k-names-once names seen c)))
+               (vseen (if val? (k-names-once names vseen c) vseen))
                (what (k-nth parts 2)))
           (cond ((string=? head "abs")
                  (let ((k (k-try-kind what)))
                    (if (or (= k 2) (and (k-arrow-kind? k) (= (k-arrow-result k) 2)))
-                       (k-moduleof-comps (cdr cs) (k-abs-bound names k abs) ds vs seen)
+                       (k-moduleof-comps (cdr cs) (k-abs-bound names k abs) ds vs seen vseen)
                        (k-sfail k-abs-usage what))))
-                ;; `(desc e E)`, an effect, as a module's `define-effect` gives.
-                ((and (string=? head "desc") (k-effect-shaped? what))
-                 (let* ((e (k-parse-effect what)) (d (k-effect-desc e)))
-                   (begin (k-push-desc (car names) (ds-eff e))
-                          (k-moduleof-comps (cdr cs) abs (k-part-onto (car names) d ds) vs seen))))
-                ((and (string=? head "desc") (string=? (k-list-head what) "dlambda"))
-                 (let ((f (k-parse-fun what -1)))
-                   (begin (k-push-desc (car names) (ds-fun f))
-                          (k-moduleof-comps (cdr cs) abs (k-part-onto (car names) f ds) vs seen))))
                 ((string=? head "desc")
-                 (let ((t (k-parse-type what)))
-                   (begin (k-push-desc (car names) (ds-rec t))
-                          (k-moduleof-comps (cdr cs) abs (k-part-onto (car names) t ds) vs seen))))
+                 (let ((d (k-moduleof-desc (car names) what)))
+                   (k-moduleof-comps (cdr cs) abs (k-part-onto (car names) d ds) vs seen vseen)))
                 ((string=? head "val")
                  (let ((t (k-parse-type what)))
-                   (k-moduleof-comps (cdr cs) abs ds (k-part-onto (car names) t vs) seen)))
+                   (k-moduleof-comps (cdr cs) abs ds (k-part-onto (car names) t vs) seen vseen)))
                 (else (k-sfail k-moduleof-usage (car parts))))))))
 ;; `(moduleof …)`, each abstract type a binder in scope in what follows it;
 ;; or `(select m t)`.
@@ -139,7 +144,7 @@
   (lambda (s items hd)
     (if (symbol=? hd 'select)
         (k-parse-select s items)
-        (let* ((saved (get k-dscope)) (t (k-moduleof-comps (cdr items) nil nil nil nil)))
+        (let* ((saved (get k-dscope)) (t (k-moduleof-comps (cdr items) nil nil nil nil nil)))
           (begin (set k-dscope saved) t)))))
 (set k-parse-module-type k-read-module-type)
 
@@ -275,31 +280,39 @@
 ;; a base (> 3); not, and why (-1); or not from a file (0 to 3).
 (define k-items-kind (subr pure (mod-items) int)
   (lambda (items) (if (null? items) 0 (extract (car items) 1))))
-;; The names a module's item defines, a generative type's two conversions
-;; with it, as the Rust checker's `defined_twice` counts them.
-(define k-item-names (subr (maxeff (read @globals) (alloc @t)) (mod-item) k-names)
-  (lambda (it)
-    (if (= (extract it 1) 0)
-        (let* ((n (car (extract it 2))) (s (symbol->string n)))
-          (the k-names (list n (string->symbol (string-append "up-" s))
-                             (string->symbol (string-append "down-" s)))))
-        (extract it 2))))
-;; The first name of `items`, in order, that one before it defines too: a
-;; module defining a name twice has no type (`moduleof` refuses it), and
-;; which definition a use got would depend on the path that ran it.
-(define k-defined-twice (subr (maxeff kreads (alloc @t)) (mod-items k-names) k-names)
-  (lambda (items seen)
-    (letrec ((first (subr (maxeff (read @globals) (read @t)) (k-names) k-names)
-               (lambda (ns)
+;; The names a module's item defines as descriptions (`types`), or as values:
+;; a generative type's name is one, its two conversions values; as the Rust
+;; checker's `defined_twice` counts them.
+(define k-item-names (subr (maxeff (read @globals) (alloc @t)) (mod-item bool) k-names)
+  (lambda (it types)
+    (let ((k (extract it 1)))
+      (cond ((= k 0)
+             (let* ((n (car (extract it 2))) (s (symbol->string n)))
+               (if types
+                   (the k-names (list n))
+                   (the k-names (list (string->symbol (string-append "up-" s))
+                                      (string->symbol (string-append "down-" s)))))))
+            ((= k 1) (if types (extract it 2) (the k-names nil)))
+            (else (if types (the k-names nil) (extract it 2)))))))
+;; The first name of `items`, in order, that one before it defines too, as a
+;; description (`seen`) or as a value (`vseen`): a module defining a name
+;; twice has no type (`moduleof` refuses it), and which definition a use got
+;; would depend on the path that ran it. A value may have a type's name.
+(define k-defined-twice (subr (maxeff kreads (alloc @t)) (mod-items k-names k-names) k-names)
+  (lambda (items seen vseen)
+    (letrec ((first (subr (maxeff (read @globals) (read @t)) (k-names k-names) k-names)
+               (lambda (ns seen)
                  (cond ((null? ns) nil)
                        ((k-has-name? seen (car ns)) (the k-names (list (car ns))))
-                       (else (first (cdr ns)))))))
+                       (else (first (cdr ns) seen))))))
       (if (null? items)
           nil
-          (let* ((ns (k-item-names (car items))) (twice (first ns)))
-            (if (null? twice)
-                (k-defined-twice (cdr items) (k-names-onto ns seen))
-                twice))))))
+          (let* ((ts (k-item-names (car items) #t)) (vs (k-item-names (car items) #f))
+                 (twice (first ts seen)) (vtwice (first vs vseen)))
+            (cond ((not (null? twice)) twice)
+                  ((not (null? vtwice)) vtwice)
+                  (else (k-defined-twice (cdr items) (k-names-onto ts seen)
+                                         (k-names-onto vs vseen)))))))))
 ;; `(module item …)`: each item read in the scope of the descriptions
 ;; before it; read from a file, of the standard ones only.
 (define k-resolve-module-items (subr (maxeff checks spin) (mod-items int int) kx)
@@ -307,8 +320,8 @@
     (let ((k (k-items-kind items)) (saved (get k-dscope)))
       (cond
         ((< k 0) (k-fail (symbol->string (car (extract (car items) 2))) a b))
-        ((not (null? (k-defined-twice items nil)))
-         (k-fail (string-append (k-quote (symbol->string (car (k-defined-twice items nil))))
+        ((not (null? (k-defined-twice items nil nil)))
+         (k-fail (string-append (k-quote (symbol->string (car (k-defined-twice items nil nil))))
                                 " is defined twice in this module")
                  a b))
         ((> k 3)
@@ -566,6 +579,36 @@
                (else y #t)))
         (k-set-link node to)
         #u)))
+;; Module `m`'s component `n`, as select node `node` names it, linked.
+(define k-link-alias (subr (maxeff kstate spin) (symbol symbol int) unit)
+  (lambda (m n node)
+    (let ((mt (k-lookup m)))
+      (if (< mt 0)
+          #u
+          (tagcase (k-get mt)
+            (ty-module (abs ds vs)
+              (let ((v (k-comp-find abs n)) (d (k-comp-find ds n)))
+                (cond ((>= v 0) (k-link-global-select m node (k-ty-new (ty-var v))))
+                      ((>= d 0) (k-link-global-select m node d))
+                      (else #u))))
+            (else y #u))))))
+;; Each `define-type` alias in `ds`, `(define-type t (select m t))`, of the
+;; global module `m` just bound, linked now to what it names: the aliases are
+;; declared ahead of `m`, and a type naming one shows by its name from the
+;; first, not once some later resolution meets it. As the Rust checker's
+;; `link_aliases`.
+(define k-link-aliases (subr (maxeff kstate spin) (symbol k-scope) unit)
+  (lambda (m ds)
+    (if (null? ds)
+        #u
+        (begin
+          (tagcase (cdr (car ds))
+            (ds-rec (t)
+              (tagcase (k-get t)
+                (ty-select (x n) (if (symbol=? x m) (k-link-alias m n (k-resolve t)) #u))
+                (else y #u)))
+            (else z #u))
+          (k-link-aliases m (cdr ds))))))
 ;; What each of `found` is where it is checked, at `a`..`b`.
 (define k-selection (subr (maxeff checks spin) (k-selects int int) k-selects)
   (lambda (found a b)

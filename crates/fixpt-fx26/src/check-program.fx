@@ -443,7 +443,7 @@
 ;; Bind `n`, at top level, to a value of type `t`: a global, a module's
 ;; abstract types named for it.
 (define k-bind-named-global (subr (maxeff kstate spin) (symbol int) unit)
-  (lambda (n t) (k-bind-global n (k-name-module n t))))
+  (lambda (n t) (begin (k-bind-global n (k-name-module n t)) (k-link-aliases n (get k-dscope)))))
 (define k-rec-types (subr (maxeff checks spin) (k-rec-forms) k-ids)
   (lambda (bs)
     (if (null? bs)
