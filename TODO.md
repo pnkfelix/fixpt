@@ -835,6 +835,16 @@ aside:
 - a type re-exported from a module cannot be named by an earlier file,
   though types are otherwise declared ahead (`c-inline`; moved to its
   first user);
+- `define*` in a module (done, `41796d6`), then the files it alone
+  blocked: `check-data`, `check-letrec`, `check-print`, `check-subtype`,
+  `check-infer`, `check-program`, `compile-lift` (check 0.97 s to 1.06 s
+  over the nine; compile 0.15–0.16 s). A file's `define-type`s now stay at
+  top level, before its module, as they are declared ahead and named
+  before their definitions; earlier files' modules keep theirs inside.
+  `check-syntax.fx` and `regcode-exps.fx` would pass 1000 lines with the
+  wrapper and their re-exports: each to be split first. Loading the
+  lowered front end now counts against no step limit (`7c7d276`): found
+  when `check-program.fx`'s module passed a test's 100,000;
 - `layout.fx`, `standard.fx` and `native-layout.fx` are generated from
   Rust tables (`tests/layout.rs`): their generators would write modules;
   set aside, and mostly constants, which want checking that a re-exported
