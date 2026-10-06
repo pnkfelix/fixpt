@@ -239,7 +239,14 @@ fn load_lowered(scheme: &mut Session, text: &str) -> Result<(), String> {
     let mut compiled = compile_program_as(text, READER_PREFIX)
         .map_err(|e| format!("the front end, {}: {}", crate::front_end_location(e.span.start as usize), e.message))?;
     compiled.checker.reader_licence()?;
-    compiled.load_into(scheme)
+    // The front end is the session's own, licensed code: loading it is not
+    // the program's work, and counts against no step limit (as reading
+    // with it does not, `read_with_own_reader`).
+    let limit = scheme.engine.step_limit();
+    scheme.engine.set_step_limit(None);
+    let r = compiled.load_into(scheme);
+    scheme.engine.set_step_limit(limit);
+    r
 }
 
 /// Where the front end's register code is cached, if anywhere, and the key
