@@ -135,7 +135,12 @@ green, the self-compile measured.
    The front end's self-compile: time and collections per phase unchanged
    (`tests/bootstrap.rs`'s probe: check 1.081 s and 1.086 s, 34
    collections each; compile 0.254 s and 0.256 s, 45.5 M and 45.4 M words
-   allocated). How many copies it saves was not counted.
+   allocated). Counted (a temporary counter in `r_specialize`, over every
+   test program and both bench suites): 55 copies made and 5 reused, in
+   `scheme-bench/matrix.fx` (2), `mllang-bench/fx/ocaml/kb.fx` (2) and
+   `mllang-bench/fx/mlton/ratio-regions.fx` (1); the front end makes none,
+   having no call it specializes. What the step is for is step 3's: one
+   copy per key, for the middle phase to own.
 2. **The procedure table, as a pre-pass**: every lambda met, in the order
    the stack walk meets them, with what each needs (captured names, lift
    plan, name); the stack compiler reads it instead of deciding as it
