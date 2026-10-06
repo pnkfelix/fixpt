@@ -1,0 +1,162 @@
+# One set of decisions, two back ends
+
+Design note, 2026-10-06, with the user. For review before any code. It
+answers the last of the front end's cross-file hook cycles (`TODO.md`
+§34): the stack compiler and the register compiler calling each other.
+
+## Where we are
+
+Each compiler of FX-26 to cellular words is written twice, in Rust
+(`cellular.rs`, `cellular/regcode.rs`) and in FX-26 (`compile*.fx`,
+`regcode*.fx`), and the two must make the same words. Each is two
+compilers of the same trees:
+
+- the **stack compiler** makes every lambda's word: cells for the
+  interpreting machines;
+- the **register compiler** makes, for most of those words, a register
+  twin: the same lambda compiled again, from its tree (not from the cells),
+  for the machines that compile register code. A closure is of the stack
+  word; a machine that runs register code takes its twin, if it has one.
+
+They are not phases. Each time the stack compiler finishes a lambda's word
+it calls the register compiler for the twin (`lambda_word_in`;
+`c-lambda-word-in`, `c-register-twin!`, through the hook
+`c-register-code`), and the register compiler calls the stack compiler back
+when it needs a word not made yet (`r_lambda`, `r-made-word`) and for every
+specialized copy (`r_specialize`, `r-spec-word`). That cycle is why the FX
+files need the hooks `c-register-code` and `c-standard-register-code`.
+
+What is shared is mostly decided already in one place, and asked twice:
+
+| Decision                          | Where decided                                   | How                                    |
+| --------------------------------- | ----------------------------------------------- | -------------------------------------- |
+| a lambda's shape, free values     | `lambda_of`, `captured`; `c-lambda-of`, `c-lambda-captured` | pure, of the tree and the env |
+| where a name lives                | `where_is`; `c-where`                           | the env, and the globals visible       |
+| lambda lifting of a `letrec`      | `lift`; `c-lift`                                | the stack walk, on first visit, cached by span |
+| joins                             | `r_join_ok`; `c-join-ok?`                       | pure (FX memoizes it)                  |
+| an applied lambda as a `let`      | `applied_lambda`; `c-applied-let`               | pure                                   |
+| constants, conversions, reshapes  | the checker's facts (`c-set-facts!`)            | tables, up front                       |
+| what may be inlined, specialized  | after each definition (`c-record-inline`)       | lists, filled as definitions are made  |
+| whether *this call* is inlined    | the register walk (`r_inline`; `r-inline`)      | at the call                            |
+| whether *this call* is specialized| the register walk (`r_specialize`; `r-specialized`) | at the call, making a word then    |
+
+The coupling that remains is in four places:
+
+1. **Specialization makes words in the middle of the register walk.** A
+   call of a recursive higher-order global at a known lambda argument gets
+   a copy of the procedure: its stack word (the body compiled again, under
+   the definition's globals, named `f@lambda@N`) and its specialized twin,
+   made then, with no memo; so a body whose twin is tried twice (the fast
+   and the plain version, a leaf retried as not one) makes its copies
+   twice.
+2. **The globals a lookup sees move with the walk.** An inlined body, or a
+   specialized copy, sees the globals of its definition, not of the call
+   site: the register walk sets `genv_limit` / `c-genv` around them. One
+   tree node resolves differently at each inlined site.
+3. **Order.** The lists of what may be inlined or specialized gain a
+   definition only once its word and twin exist; lifting is decided by the
+   stack walk's first visit; inner twins are made before the outer word is
+   assembled.
+4. **Words are matched by key.** The register compiler finds an inner
+   lambda's word by span, parameters, own name and free values
+   (`made`/`reuse`), so its own env must reproduce the stack env's exactly.
+
+## The proposal
+
+A **middle phase** between the checker and the compilers: one walk that
+makes every decision the two compilers share, and writes them down, so
+that each compiler is a back end over a decided program and neither calls
+the other.
+
+What it produces, for each top-level form:
+
+- **A table of procedures.** Every lambda the form makes (lifted members
+  included), every specialized copy, every standard operation used as a
+  value: each with its parameters, its body, its own name, its captured
+  names and their places, its lift plan, its name for profiles
+  (`outer/inner@N`), and the globals its body sees. A procedure is made
+  once; a copy is keyed by (procedure specialized, lambda argument), so a
+  body tried twice finds it.
+- **Decided call sites.** At each call: plain, inlined (with the inlined
+  copy of the body, its names resolved for its definition), or specialized
+  (naming the copy in the table). The stack back end compiles every call
+  as plain, as now; the register back end follows the decision.
+- **Resolved names.** Each variable: local slot, free value, loop, global
+  `k`, or standard, as `where_is` says, in the context the node is compiled
+  in. An inlined copy is a copy of the subtree with its own resolutions, so
+  no back end moves the globals limit.
+- **The facts**, as now: tables keyed by span.
+
+Then, per form:
+
+1. the stack back end makes each procedure's word, in the table's order;
+2. the register back end makes each procedure's twin, attached to its word,
+   in the same order;
+3. the form's inline and specialization candidates are recorded.
+
+In FX-26 the middle phase is a file (or files) between `compile-lift.fx`
+and the back ends; the program driver (`compile-program`, `c-tops`) moves
+after `regcode-entry.fx`. The hook `c-register-code` goes, and so does
+`c-standard-register-code`: a standard operation's procedure is in the
+table like any other. What is left is three hooks inside the register
+compiler (`r-module-code`, `r-reshape-code`, `r-leaf-call`), its own
+recursion across its files, for the per-file regrouping the other cycles
+get.
+
+## What changes, and what must not
+
+**Words.** The agreement tests compare the two implementations' words, so
+both change together, step by step, each step keeping them equal. Two
+changes of output are expected and wanted:
+
+- specialized copies made once per (procedure, lambda), not per visit:
+  fewer words, the same code;
+- names that are the same as now (`f@lambda@N`, `outer/inner@N`), assigned
+  in the middle phase.
+
+Everything else must come out the same: which words, their cells, their
+twins, and the order they are made in (the table is in the order the stack
+walk meets lambdas now, post-order, inner first).
+
+**Speed.** One more walk of each form, and copies of inlined bodies made
+once instead of re-walked under a moved limit. Measured against
+the self-compile's compile phase (0.21 s) and peval's at each step.
+
+## Steps
+
+Each one a commit, both implementations, agreement tests and the suite
+green, the self-compile measured.
+
+1. **Memoize specialized copies** by (procedure, lambda span, globals) in
+   both compilers. Small, and it settles the one expected change of words
+   first, on its own.
+2. **The procedure table, as a pre-pass**: every lambda met, in the order
+   the stack walk meets them, with what each needs (captured names, lift
+   plan, name); the stack compiler reads it instead of deciding as it
+   goes. Words unchanged.
+3. **Decided call sites**: inlining and specialization decided in the
+   pre-pass (the candidate lists and the call's argument trees are all it
+   needs; the callee's register location is whether it is a known global),
+   copies of inlined bodies made there with their names resolved. The
+   register compiler reads the decisions. Words unchanged.
+4. **Twins as a phase**: per form, every word first, then every twin; the
+   register compiler no longer calls the stack compiler, and the stack
+   compiler no longer calls it. Remove `c-register-code` and
+   `c-standard-register-code`; move the driver after register code.
+5. The register compiler's own three hooks, regrouped as the checker's
+   cycles are.
+
+## Open
+
+- **Whether the Rust compiler follows** the same structure or only keeps
+  making the same words. Following is more work now and less later: two
+  implementations of one design are compared more easily than two designs.
+- **Step 3's genv.** Whether every place the register walk moves the
+  globals limit is an inlined body or a specialized copy (the inventory
+  found nothing else: `regcode-core.fx` 379–383, 473–475;
+  `regcode-helpers.fx` 117, 148; `regcode-exps.fx` 543; `regcode.rs` 640,
+  1554, 1638, 1663) is to be confirmed by reading each.
+- **Known divergences** to settle first, harmless or not: only the FX
+  compiler resolves `extract`s in recorded bodies (`c-resolve-extracts`)
+  and memoizes joins (`c-join-memo`); the two save and restore the register
+  compiler's state around a specialization differently.

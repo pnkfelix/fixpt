@@ -905,3 +905,47 @@ cycle):
 
 Measure a hot file moved into a module before doing either.
 
+## 39. A checker's arena grows for the whole session (the user's, 2026-10-06)
+
+Every type node, binder and generative type a checker makes is an entry
+in a vector (`Arena`'s `tys`, `Checker::generatives`; the FX-26 checker's
+`k-tys` and its tables), named by its index, and none is ever removed: in
+a long REPL session, the types of definitions since redefined, and every
+form's intermediate types, stay. An index names nothing a collector can
+see, so the heap's collector cannot help, nor can a weak table keyed by
+them.
+
+Two parts, in both checkers (they must agree on what they print):
+- **A nursery per REPL form**: check each form in a scratch arena, copy
+  what the new globals reach into the session's, drop the rest. Most of a
+  form's types (inference variables, intermediate and error-path types)
+  die with it. Old generations, a generative type redefined, stay.
+- **The FX-26 checker's types as heap objects**, pointing at each other,
+  links included, instead of indices into `k-tys`: the heap's collector
+  then reclaims what nothing reaches, and the tables that must not keep a
+  type alive (memo and fact tables) become weak tables. The Rust checker
+  keeps its arena (`Rc` would leak recursive types, which are cycles); for
+  it, an occasional copying pass from the session's roots, renumbering.
+
+First, cheaply: the ids are made by unchecked casts (`TyId(len as u32 -
+1)`, `ExpId`, `DVar`, `generatives.len() as u32 - 1`), which would wrap
+silently past `u32::MAX`; make them checked, failing clearly.
+
+## 40. A call graph from the code, not from names (the user's, 2026-10-06)
+
+The front end's cycles were found by a regular expression over names
+(definitions, and the names their bodies mention): enough to size the
+cycles, not to trust. A tool that extracts the real call graph of an FX-26
+program, from the checked trees (a call's callee known statically, or by
+a control-flow analysis such as k-CFA where it is a value), would serve
+the cycle work (`TODO.md` §34), dead-code checks and the profiler's
+callers.
+
+## 41. One set of decisions, two back ends (the user's, 2026-10-06)
+
+The stack and register compilers call each other: the register compiler
+makes each word's twin as the stack compiler makes the word, and calls it
+back for words it needs (specialized copies). A middle phase would make
+the decisions they share once, so that each is a back end over a decided
+program and the front end's last hook cycle between them goes:
+`docs/research/compiler-middle-phase.md`, for review before any code.

@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-05)
+## At a glance (kept current; last updated 2026-10-06)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -225,6 +225,15 @@ before everything else, known holes before proofs.
   loaded again keeps its private regions.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
+- M. **The front end into modules** (`TODO.md` §34, 2026-10-06): 38 of
+  48 files are modules; the four too long split first. Left: the seven
+  files of cross-file hook cycles (the cycles removed, not hooked: the
+  checker's by regrouping each recursive knot into one file, the
+  compilers' by a middle phase, `TODO.md` §41) and the three generated
+  ones. Found on the way, fixed: a re-exported type printed whole at each
+  use, which took check from 0.91 s to 28 s by the first file; types and
+  values named apart in modules. Open: `check-types.fx` as a module, check
+  1.16 → 1.37 s, to profile.
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:
   `editors/emacs/fx26-mode.el` (highlighting, the repository's
   indentation, `run-fx26` over `fixpt --emacs repl` with `,at` placing
