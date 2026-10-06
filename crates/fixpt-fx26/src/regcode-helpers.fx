@@ -158,12 +158,6 @@
                                 cs))
               made))
           (the rmade (product (1 (extract (car found) 4)) (2 (extract (car found) 5))))))))
-;; The word lambda `ps` `body` compiles to: made already (`c-made-word`),
-;; or now (`c-lambda-word`).
-(define r-made-word (subr rcompiles (exp-params exp cenv syms) rmade)
-  (lambda (ps body te own)
-    (let ((m (c-made-word ps body te own)))
-      (if (null? m) (c-lambda-word ps body te own) (car m)))))
 ;; Each free value of `fv` into REGj+1 (`r-reg-moves`, `r-free-regs`): the
 ;; patches for the siblings not made yet.
 (define r-free-into-regs (subr rcompiles (rgen syms renv) patches)
@@ -219,7 +213,6 @@
 (define r-unknowing (with regcode-helpers-module r-unknowing))
 (define r-spec-of (with regcode-helpers-module r-spec-of))
 (define r-spec-word (with regcode-helpers-module r-spec-word))
-(define r-made-word (with regcode-helpers-module r-made-word))
 (define r-free-into-regs (with regcode-helpers-module r-free-into-regs))
 (define r-collects-here? (with regcode-helpers-module r-collects-here?))
 (define r-spec-body-collects? (with regcode-helpers-module r-spec-body-collects?))

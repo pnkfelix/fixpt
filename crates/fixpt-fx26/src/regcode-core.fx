@@ -751,30 +751,37 @@
   ;; index and the sibling's frame slot.
   ;; A leaf makes a closure only as its value, in tail position (`tail`): its
   ;; call-out, where the free space has no room, may collect, and then
-  ;; nothing but the closure is used after.
+  ;; nothing but the closure is used after. The lambda's word is one the
+  ;; stack code made (`c-made-word`); register code makes none.
   (r-lambda (subr rcompiles (rgen exp-params exp renv cenv syms maybe-exp bool) patches)
     (lambda (g ps body env te own region tail)
       (if (and (extract g leaf) (not (and tail (null? region))))
           (begin (r-decline) (the patches nil))
-          (let* ((made (r-made-word ps body te own))
-                 (w (extract made 1))
-                 (fv (extract made 2))
-                 (n (c-length fv)))
-            (if (null? region)
-                ;; Past `register-regs`, the rest a list, as a call's
-                ;; arguments are (`r-args`).
-                (if (> n register-regs)
-                    (let ((pa (r-free-args fv env 0)))
-                      (begin (r-args g (extract pa 1) env te (the maybe-exp nil))
-                             (r-op2 g rop-lambda (wcell-word w) (wcell-int n))
-                             (extract pa 2)))
-                    (let ((patches (r-free-into-regs g fv env)))
-                      (begin (r-op2 g rop-lambda (wcell-word w) (wcell-int n)) patches)))
-                (let* ((pa (r-free-args fv env 0))
-                       (ops (r-append-arg (extract pa 1) (a-v (wcell-word w)))))
-                  (begin
-                    (r-prim g "%region-closure" (the rargs (cons (a-e (car region)) ops)) env te)
-                    (extract pa 2))))))))
+          (let ((m (c-made-word ps body te own)))
+            (if (null? m)
+                (begin (r-decline) (the patches nil))
+                (r-lambda-made g (car m) env te region))))))
+  ;; The closure of word and free values `made`.
+  (r-lambda-made (subr rcompiles (rgen (productof (1 tword) (2 syms)) renv cenv maybe-exp) patches)
+    (lambda (g made env te region)
+      (let* ((w (extract made 1))
+             (fv (extract made 2))
+             (n (c-length fv)))
+        (if (null? region)
+            ;; Past `register-regs`, the rest a list, as a call's
+            ;; arguments are (`r-args`).
+            (if (> n register-regs)
+                (let ((pa (r-free-args fv env 0)))
+                  (begin (r-args g (extract pa 1) env te (the maybe-exp nil))
+                         (r-op2 g rop-lambda (wcell-word w) (wcell-int n))
+                         (extract pa 2)))
+                (let ((patches (r-free-into-regs g fv env)))
+                  (begin (r-op2 g rop-lambda (wcell-word w) (wcell-int n)) patches)))
+            (let* ((pa (r-free-args fv env 0))
+                   (ops (r-append-arg (extract pa 1) (a-v (wcell-word w)))))
+              (begin
+                (r-prim g "%region-closure" (the rargs (cons (a-e (car region)) ops)) env te)
+                (extract pa 2)))))))
   ;; Arrays, and the tag and key makers: as the stack compiler does them.
   (r-special (subr rcompiles (rgen string exps renv cenv) unit)
     (lambda (g what args env te)

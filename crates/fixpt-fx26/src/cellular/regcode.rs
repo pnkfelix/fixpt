@@ -2315,9 +2315,9 @@ impl Compiler<'_> {
         if g.leaf && !(tail && region.is_none()) {
             return None;
         }
-        let (w, fv) = match self.made_word(ps, body, te, own) {
-            Some(made) => made,
-            None => self.lambda_word(ps, body, te, own).ok()?,
+        // A word the stack code made: register code makes none.
+        let Some((w, fv)) = self.made_word(ps, body, te, own) else {
+            return self.decline("a lambda the stack code did not make");
         };
         // In a region, or past `REGS` (the rest a list, as a call's
         // arguments are, `r_args`): the free values as a call-out's operands.
