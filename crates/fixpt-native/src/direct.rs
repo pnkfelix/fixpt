@@ -961,7 +961,9 @@ impl Compiling<'_> {
     /// runs, as Larceny's code reads its globals, so that a later
     /// definition is seen; but a cellular closure (a procedure the cellular
     /// machine made), which native code cannot call, is compiled and bound
-    /// now, as a native closure of its procedure.
+    /// now, as a native closure of its procedure: used while the cell still
+    /// holds that closure when the code runs, its uses test (`global`,
+    /// `invoke`), as the code may outlive a later definition.
     fn global_value(&mut self, cell: Value) -> Result<Field, String> {
         let v = self.heap.bloblet_slot(cell, 2);
         // Not defined yet (a definition of itself, being compiled): what its
@@ -1117,6 +1119,10 @@ impl Compiling<'_> {
         // arguments, and whether a tail call), which calls the common
         // routine that calls out for it.
         let mut foreign: Vec<(Label, Label, usize, bool)> = Vec::new();
+        // Each call of a global bound when compiled whose cell holds
+        // something else when the code runs: out of the way, the call
+        // through the cell (with the call's stub, and where to come back).
+        let mut cell_slows: Vec<(Label, Label, Label)> = Vec::new();
         // Where a call-out that does not return goes on (an abort), if one
         // does here.
         let (resume_at, mut uses_resume) = (a.label(), false);
@@ -1155,6 +1161,9 @@ impl Compiling<'_> {
         let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast);
         let mut src = RESULT;
         let mut pending: Option<Field> = None;
+        // The global the pending call was bound to as compiled: its cell,
+        // and what it held then.
+        let mut bound: Option<(Value, Value)> = None;
         map_stored = None;
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
             let (unbox, check) = match si_at.get(&to) {
@@ -1260,74 +1269,78 @@ impl Compiling<'_> {
                 }
                 "global" => {
                     let cell = o(0);
+                    let held = self.heap.bloblet_slot(cell, 2);
                     let g = self.global_value(cell).map_err(|e| format!("`{name}` calls {e}"))?;
                     if called(i).is_some() {
+                        if !matches!(g, Field::Cell(_)) {
+                            bound = Some((cell, held));
+                        }
                         pending = Some(g);
                     } else {
-                        match g {
-                            Field::Cell(c) => {
-                                let f = self.field(p, Field::Cell(c));
-                                ldr_field(&mut a, X9, f);
-                                a.e(ldur(RESULT, X9, field_off(2)));
-                            }
+                        // What the cell holds when the code runs; the
+                        // native closure bound, where that is still what it
+                        // held when compiled: a later definition is seen.
+                        let fc = self.field(p, Field::Cell(cell));
+                        ldr_field(&mut a, X9, fc);
+                        a.e(ldur(RESULT, X9, field_off(2)));
+                        if !matches!(g, Field::Cell(_)) {
+                            let other = a.label();
+                            let fh = self.field(p, Field::Const(held));
+                            ldr_field(&mut a, X16, fh);
+                            a.e(cmp(RESULT, X16));
+                            a.to(other, Fix::If(Cond::Ne));
                             // A procedure's code alone is no value: its
                             // closure, over nothing.
-                            Field::Code(q) => {
-                                let f = self.field(p, Field::Closure(q, vec![]));
-                                ldr_field(&mut a, RESULT, f);
-                            }
-                            g => {
-                                let f = self.field(p, g);
-                                ldr_field(&mut a, RESULT, f);
-                            }
+                            let f = match g {
+                                Field::Code(q) => self.field(p, Field::Closure(q, vec![])),
+                                g => self.field(p, g),
+                            };
+                            ldr_field(&mut a, RESULT, f);
+                            a.bind(other);
                         }
                     }
                 }
-                // Decided here where the cell holds a cellular closure, as
-                // that global's value is when this code is made
-                // (`global_value`): nothing, where it is a closure of the
-                // word; else the test, which the code runs: the value's field
-                // 2, a cellular closure's word or a native closure's code,
-                // whose field 2 is the word it was compiled from.
+                // Always the test, which the code runs, as this code may
+                // outlive a later definition of the global: the value's
+                // field 2, a cellular closure's word or a native closure's
+                // code, whose field 2 is the word it was compiled from.
                 "global-guard" => {
                     let (cell, w, to) = (o(0), o(1), (i as i64 + 4 + o(2).as_fixnum()) as usize);
-                    if !self.closure_parts(self.heap.bloblet_slot(cell, 2)).is_some_and(|(word, _)| word == w) {
-                        let held = a.label();
-                        let fc = self.field(p, Field::Cell(cell));
-                        ldr_field(&mut a, X9, fc);
-                        a.e(ldur(X11, X9, field_off(2)));
-                        a.e(ldur(X11, X11, field_off(CLOSURE_WORD)));
-                        let fw = self.field(p, Field::Const(w));
-                        ldr_field(&mut a, X16, fw);
-                        a.e(cmp(X11, X16));
-                        a.to(held, Fix::If(Cond::Eq));
-                        a.e(ldur(X11, X11, field_off(fixpt_heap::layout::cellular::CODE_SOURCE)));
-                        a.e(cmp(X11, X16));
-                        let l = edge(&mut a, si - 1, to);
-                        a.to(l, Fix::If(Cond::Ne));
-                        a.bind(held);
-                    }
+                    let held = a.label();
+                    let fc = self.field(p, Field::Cell(cell));
+                    ldr_field(&mut a, X9, fc);
+                    a.e(ldur(X11, X9, field_off(2)));
+                    a.e(ldur(X11, X11, field_off(CLOSURE_WORD)));
+                    let fw = self.field(p, Field::Const(w));
+                    ldr_field(&mut a, X16, fw);
+                    a.e(cmp(X11, X16));
+                    a.to(held, Fix::If(Cond::Eq));
+                    a.e(ldur(X11, X11, field_off(fixpt_heap::layout::cellular::CODE_SOURCE)));
+                    a.e(cmp(X11, X16));
+                    let l = edge(&mut a, si - 1, to);
+                    a.to(l, Fix::If(Cond::Ne));
+                    a.bind(held);
                 }
-                // Decided here as `global-guard` is, where the cell holds the
-                // constant when this code is made: nothing; else the test,
-                // of the same word: an immediate in place, an object from
-                // this code's fields, which a collection keeps up to date.
+                // Always the test, when the code runs: this code may outlive
+                // a later write of the global (a native closure kept in a
+                // global across a REPL's forms), so what the cell holds now
+                // decides nothing. The same word: an immediate in place, an
+                // object from this code's fields, which a collection keeps
+                // up to date.
                 "value-guard" => {
                     let (cell, v, to) = (o(0), o(1), (i as i64 + 4 + o(2).as_fixnum()) as usize);
-                    if self.heap.bloblet_slot(cell, 2) != v {
-                        let fc = self.field(p, Field::Cell(cell));
-                        ldr_field(&mut a, X9, fc);
-                        a.e(ldur(X11, X9, field_off(2)));
-                        if v.is_bloblet() || v.is_pair() {
-                            let fv = self.field(p, Field::Const(v));
-                            ldr_field(&mut a, X16, fv);
-                        } else {
-                            a.es(&mov_imm64(X16, v.raw()));
-                        }
-                        a.e(cmp(X11, X16));
-                        let l = edge(&mut a, si - 1, to);
-                        a.to(l, Fix::If(Cond::Ne));
+                    let fc = self.field(p, Field::Cell(cell));
+                    ldr_field(&mut a, X9, fc);
+                    a.e(ldur(X11, X9, field_off(2)));
+                    if v.is_bloblet() || v.is_pair() {
+                        let fv = self.field(p, Field::Const(v));
+                        ldr_field(&mut a, X16, fv);
+                    } else {
+                        a.es(&mov_imm64(X16, v.raw()));
                     }
+                    a.e(cmp(X11, X16));
+                    let l = edge(&mut a, si - 1, to);
+                    a.to(l, Fix::If(Cond::Ne));
                 }
                 "setglbl" => {
                     let f = self.field(p, Field::Cell(o(0)));
@@ -1999,29 +2012,58 @@ impl Compiling<'_> {
                         a.e(cmp(X16, X17));
                         a.to(stub, Fix::If(Cond::Lo));
                     };
-                    match pending.take() {
-                        Some(Field::Code(q)) => {
-                            let f = self.field(p, Field::Code(q));
-                            ldr_field(&mut a, X16, f);
+                    // A global bound as compiled: while its cell holds what
+                    // it held then, as bound; else, out of the way, through
+                    // the cell, as what it holds now.
+                    if let Some((cell, held)) = bound.take() {
+                        let (slow, join) = (a.label(), a.label());
+                        let fc = self.field(p, Field::Cell(cell));
+                        ldr_field(&mut a, X9, fc);
+                        a.e(ldur(CLO, X9, field_off(2)));
+                        let fh = self.field(p, Field::Const(held));
+                        ldr_field(&mut a, X16, fh);
+                        a.e(cmp(CLO, X16));
+                        a.to(slow, Fix::If(Cond::Ne));
+                        match pending.take() {
+                            Some(Field::Code(q)) => {
+                                let f = self.field(p, Field::Code(q));
+                                ldr_field(&mut a, X16, f);
+                            }
+                            Some(g) => {
+                                let f = self.field(p, g);
+                                ldr_field(&mut a, CLO, f);
+                                a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                            }
+                            None => unreachable!("a global bound is called"),
                         }
-                        // Through the global's cell, when the code runs: what
-                        // it holds then, native code or not.
-                        Some(Field::Cell(c)) => {
-                            let f = self.field(p, Field::Cell(c));
-                            ldr_field(&mut a, X9, f);
-                            a.e(ldur(CLO, X9, field_off(2)));
-                            not_native(&mut a);
-                            foreign.push((stub, after, k(o(0)), tail));
-                        }
-                        Some(g) => {
-                            let f = self.field(p, g);
-                            ldr_field(&mut a, CLO, f);
-                            a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
-                        }
-                        None => {
-                            a.e(mov(CLO, RESULT));
-                            not_native(&mut a);
-                            foreign.push((stub, after, k(o(0)), tail));
+                        a.bind(join);
+                        cell_slows.push((slow, join, stub));
+                        foreign.push((stub, after, k(o(0)), tail));
+                    } else {
+                        match pending.take() {
+                            Some(Field::Code(q)) => {
+                                let f = self.field(p, Field::Code(q));
+                                ldr_field(&mut a, X16, f);
+                            }
+                            // Through the global's cell, when the code runs: what
+                            // it holds then, native code or not.
+                            Some(Field::Cell(c)) => {
+                                let f = self.field(p, Field::Cell(c));
+                                ldr_field(&mut a, X9, f);
+                                a.e(ldur(CLO, X9, field_off(2)));
+                                not_native(&mut a);
+                                foreign.push((stub, after, k(o(0)), tail));
+                            }
+                            Some(g) => {
+                                let f = self.field(p, g);
+                                ldr_field(&mut a, CLO, f);
+                                a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                            }
+                            None => {
+                                a.e(mov(CLO, RESULT));
+                                not_native(&mut a);
+                                foreign.push((stub, after, k(o(0)), tail));
+                            }
                         }
                     }
                     // The count, for a variadic callee (`vargs`), Larceny's
@@ -2081,6 +2123,14 @@ impl Compiling<'_> {
         // goes there to return from it to this procedure's caller.
         // Each call of what is not native code: to the machine's common
         // routine (`common_foreign`), with the arguments' count.
+        for (slow, join, stub) in &cell_slows {
+            a.bind(*slow);
+            a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
+            a.e(cmp(X16, X17));
+            a.to(*stub, Fix::If(Cond::Lo));
+            a.to(*join, Fix::B);
+        }
         for (stub, after, n, tail) in &foreign {
             a.bind(*stub);
             a.e(movz(X9, *n as u32, 0));

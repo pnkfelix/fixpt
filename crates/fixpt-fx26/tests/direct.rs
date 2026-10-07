@@ -627,7 +627,8 @@ fn conversions_make_adapters_in_cellular_code() {
     assert_eq!(adapters_in(&mut session(false)), ADAPTED);
 }
 
-/// In one native session: conversions (as above); an `extract` inlined
+/// In one native session: conversions (as above); a global redefined
+/// after native code bound it (`programs/native/redefined.fx`); an `extract` inlined
 /// from an earlier form (`programs/native/inlined-extract.fx`), whose caller
 /// keeps its register code; aborts across machines
 /// (`programs/native/aborts.fx`): from native code to a prompt cellular
@@ -645,6 +646,10 @@ fn conversions_make_adapters_in_cellular_code() {
 fn native_session_adapters_aborts_and_stack_maps() {
     let mut s = session(true);
     assert_eq!(adapters_in(&mut s), ADAPTED, "adapters");
+    // Native code bound to a global as compiled, the global redefined
+    // after (`programs/native/redefined.fx`): the new definition, seen.
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/redefined.fx")).expect("reads");
+    assert_eq!(values_of(&mut s, &forms), ["3", "201", "3", "201"], "redefined");
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/aborts.fx")).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!(values, ["15", "105", "400200"], "aborts");

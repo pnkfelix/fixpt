@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-06)
+## At a glance (kept current; last updated 2026-10-07)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -36,7 +36,7 @@ are in the last section, "Log: the glance's details", and in
   conventions. Both checkers agree on 25 test programs; Okasaki's `STACK`
   as written (`tests/programs/higher-kinds/okasaki-stack.fx`).
 - **Soundness** (`docs/research/soundness*.md`): a formal core with
-  progress and preservation proved, control included; holes F1–F9 and A2
+  progress and preservation proved, control included; holes F1–F14 and A2
   found and fixed.
 - **M13, the compilers** (`docs/performance.md`): the Rust compiler to
   cellular words; register code (the MacScheme machine); guarded inlining,
