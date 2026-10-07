@@ -4,6 +4,9 @@
 ;;; (`check-module-rules.fx`'s helpers before it). Part of the checker,
 ;;; `check-types.fx` first (PLAN.md §11, step 10).
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-rules-module (module
 (define-rec
   (k-synth (subr (maxeff checks spin) (kx) k-te)
     (lambda (x)
@@ -932,4 +935,8 @@
       (tagcase x
         (x-module (items a b) (k-synth-module x items a b))
         (x-with (m body a b) (k-synth-with x m body a b))
-        (else y (k-fail-at "a module" x))))))
+        (else y (k-fail-at "a module" x))))))))
+
+(define k-synth (with check-rules-module k-synth))
+(define k-check-declared (with check-rules-module k-check-declared))
+(define k-star-checked (with check-rules-module k-star-checked))
