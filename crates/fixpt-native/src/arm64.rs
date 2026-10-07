@@ -145,6 +145,11 @@ pub fn add_imm(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0x9100_0000 | imm << 10 | r(n) << 5 | r(d)
 }
+/// `add xd, xn, #imm, lsl #12` (0..4096): `imm` 4 KB pages.
+pub fn add_imm_pages(d: Reg, n: Reg, imm: u32) -> u32 {
+    assert!(imm < 4096);
+    0x9140_0000 | imm << 10 | r(n) << 5 | r(d)
+}
 /// `sub xd, xn, #imm` (0..4096).
 pub fn sub_imm(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);

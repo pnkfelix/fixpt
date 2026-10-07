@@ -130,7 +130,7 @@ impl Heap {
             return None;
         }
         let data = self.bloblet_slot(v, CLOSURE_FREE0);
-        (self.obj_type(data) == Some(crate::ObjType::Vector) && self.obj_len(data) == 5 && self.obj_ref(data, 0) == NATIVE_CONT_MARK).then_some(data)
+        (self.obj_type(data) == Some(crate::ObjType::Vector) && self.obj_len(data) == 6 && self.obj_ref(data, 0) == NATIVE_CONT_MARK).then_some(data)
     }
 
     /// The continuation `v` is, or wraps: a closure over exactly one

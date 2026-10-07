@@ -147,6 +147,51 @@ struct DState {
     /// call-out that never collects (`Callout::Pure`, `Box`, `Unbox`): as
     /// they are, raw or not, since nothing moves.
     kept: [u64; 12],
+    /// The stack cache (`docs/research/deep-recursion.md`): the rest of
+    /// this run's frames, older than any on the stack, copied into the
+    /// heap as a chain of chunks (`CH_*`): the chunk (or `#f`), where in it
+    /// the next frame starts, and where that frame resumes; and the most
+    /// words a run's frames may take.
+    cont: u64,
+    cont_at: u64,
+    cont_pc: u64,
+    max_words: u64,
+    /// What the run's outermost frame links to and returns to: the
+    /// trampoline's frame and its return.
+    bottom_link: u64,
+    bottom_ret: u64,
+    /// The machine's underflow and overflow routines, where they run.
+    underflow: u64,
+    overflow: u64,
+    /// What the stack cache did (`StackStats`).
+    stats: StackStats,
+}
+
+/// What the stack cache did: overflows, and the frames and words they
+/// copied into the heap; underflows (and aborts and continuations put back),
+/// and the frames they restored.
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
+pub struct StackStats {
+    pub overflows: u64,
+    pub frames_flushed: u64,
+    pub words_flushed: u64,
+    pub underflows: u64,
+    pub frames_restored: u64,
+}
+
+impl std::ops::AddAssign for StackStats {
+    fn add_assign(&mut self, o: StackStats) {
+        self.overflows += o.overflows;
+        self.frames_flushed += o.frames_flushed;
+        self.words_flushed += o.words_flushed;
+        self.underflows += o.underflows;
+        self.frames_restored += o.frames_restored;
+    }
+}
+
+/// What this thread's stack caches have done, every run so far.
+pub fn stack_stats() -> StackStats {
+    STATS.with(|s| s.get())
 }
 
 /// The traps this code raises, by code.
@@ -210,6 +255,13 @@ enum Callout {
     /// An `f64`'s bits (argument 0, not a value) as a flonum, where the
     /// inline allocation had no room.
     BoxF64,
+    /// The stack cache's underflow (`common_underflow`): frames restored
+    /// from the chain. No collection: the registers are kept raw.
+    Underflow,
+    /// Its overflow (`common_overflow`): the run's frames but the newest
+    /// copied into the heap, that one moved to the cache's top. No
+    /// collection, as for `Underflow`.
+    Overflow,
 }
 
 impl Callout {
@@ -218,7 +270,7 @@ impl Callout {
             Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
             Callout::Capture { whole } => if whole { 1 } else { 2 },
             Callout::CurrentMarks | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 => 1,
-            Callout::Foreign | Callout::ClosureAny | Callout::Rest => 0,
+            Callout::Foreign | Callout::ClosureAny | Callout::Rest | Callout::Underflow | Callout::Overflow => 0,
             Callout::Prim { n, .. } | Callout::Pure { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
     }
@@ -266,6 +318,8 @@ thread_local! {
     static CALLED_OUT: std::cell::Cell<Option<(Runner, u64)>> = const { std::cell::Cell::new(None) };
     /// The run of native code innermost, if one is running.
     static RUNNING: std::cell::Cell<Option<Runner>> = const { std::cell::Cell::new(None) };
+    /// What this thread's stack caches have done (`stack_stats`).
+    static STATS: std::cell::Cell<StackStats> = std::cell::Cell::new(StackStats::default());
 }
 
 /// What a run of native code needs of its machine: where the trampoline,
@@ -277,8 +331,13 @@ struct Runner {
     trap_stub: u64,
     foreign: u64,
     closure: u64,
+    underflow: u64,
+    overflow: u64,
     table: u64,
     stack_lo: u64,
+    /// The stack cache's size, and the most its chain may hold, in words.
+    cache_words: u64,
+    max_words: u64,
 }
 
 /// The continuation, and its value, that the last call that trapped threw
@@ -386,6 +445,40 @@ fn st_off(f: usize) -> u32 {
 /// it is touched.
 const STACK_WORDS: usize = 1 << 26;
 const STACK_SLACK: u64 = 64 * 1024;
+
+/// The stack cache's size by default, in words: half the stack (256 MB,
+/// which the system commits only as it is touched), so that a recursion
+/// that fitted before the cache fits in it, untouched by it; and the most
+/// words a run's frames may take in all: 2^28 (2 GB).
+/// `FIXPT_NATIVE_STACK_CACHE` and `FIXPT_NATIVE_STACK_MAX` (words) say
+/// otherwise.
+const CACHE_WORDS: u64 = 1 << 25;
+const MAX_STACK_WORDS: u64 = 1 << 28;
+
+fn stack_words_wanted() -> (u64, u64) {
+    let get = |k: &str, d: u64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+    (get("FIXPT_NATIVE_STACK_CACHE", CACHE_WORDS).clamp(1024, STACK_WORDS as u64 / 2), get("FIXPT_NATIVE_STACK_MAX", MAX_STACK_WORDS))
+}
+
+/// Restoring frames from the chain: at least one, and on until this many
+/// words, so that each underflow is worth its call-out (Hieb, Dybvig and
+/// Bruggeman's copy bound).
+const RESTORE_WORDS: usize = 256;
+
+/// A chunk of the stack cache's chain, a vector: the next chunk and where
+/// in it the next frame starts (`#f` and 0 at the chain's end); the words
+/// of frames from there on; then frames, each as it was on the stack, its
+/// link its size (a fixnum), its second word a fixnum (a return address, a
+/// landing, or 0), and its words from the third on those its stack map says
+/// are dead the fixnum 0. A chunk's last frame's second word is where the
+/// next resumes.
+const CH_NEXT: usize = 0;
+const CH_NEXT_AT: usize = 1;
+const CH_REST: usize = 2;
+const CH_FRAMES: usize = 3;
+/// About the most words of frames a chunk holds: so that a chain mostly
+/// restored keeps little more than it needs alive.
+const CHUNK_WORDS: usize = 1 << 12;
 
 #[derive(Copy, Clone)]
 struct Label(usize);
@@ -500,7 +593,14 @@ pub struct DirectMachine {
     /// The common making of a closure by call-out, which every code's
     /// closures go to when the inline path has no room.
     closure: Offset,
+    /// Where a return off the stack cache's top goes, its frames restored
+    /// from the chain; and where a procedure whose frame passed the
+    /// cache's limit goes, the rest flushed into the heap.
+    underflow: Offset,
+    overflow: Offset,
     stack: Vec<u64>,
+    cache_words: u64,
+    max_words: u64,
     /// What each call-out any compiled code makes does, by number.
     callouts: Vec<Callout>,
 }
@@ -544,8 +644,9 @@ impl DirectMachine {
         space.write_code(trap_stub, &code);
         space.flush(trap_stub, 4 * code.len());
         // Call-out 0: what is not native code, called (`common_foreign`);
-        // 1: a closure made (`common_closure`).
-        let callouts = vec![Callout::Foreign, Callout::ClosureAny];
+        // 1: a closure made (`common_closure`); 2 and 3: the stack cache's
+        // underflow and overflow (`common_underflow`, `common_overflow`).
+        let callouts = vec![Callout::Foreign, Callout::ClosureAny, Callout::Underflow, Callout::Overflow];
         let code = common_foreign(0);
         let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
         space.write_code(foreign, &code);
@@ -554,13 +655,44 @@ impl DirectMachine {
         let closure = space.alloc(4 * code.len(), 16).ok_or("no room for the common closure")?;
         space.write_code(closure, &code);
         space.flush(closure, 4 * code.len());
+        let code = common_underflow(2);
+        let underflow = space.alloc(4 * code.len(), 16).ok_or("no room for the underflow")?;
+        space.write_code(underflow, &code);
+        space.flush(underflow, 4 * code.len());
+        let code = common_overflow(3);
+        let overflow = space.alloc(4 * code.len(), 16).ok_or("no room for the overflow")?;
+        space.write_code(overflow, &code);
+        space.flush(overflow, 4 * code.len());
         let stub = |at: usize, len: usize, what: &str| crate::symbols::note(space.exec_addr(at), 4 * len, &format!("native convention: {what}"));
+        stub(underflow, common_underflow(2).len(), "stack cache underflow");
+        stub(overflow, common_overflow(3).len(), "stack cache overflow");
         stub(entry, trampoline().len(), "trampoline");
         stub(mark_ret, pop_mark.len(), "a mark's return");
         stub(trap_stub, common_trap().len(), "common trap");
         stub(foreign, common_foreign(0).len(), "common foreign call");
         stub(closure, common_closure(1).len(), "common closure");
-        Ok(DirectMachine { space, entry, mark_ret, trap_stub, foreign, closure, stack: vec![0; STACK_WORDS], callouts })
+        let (cache_words, max_words) = stack_words_wanted();
+        Ok(DirectMachine {
+            space,
+            entry,
+            mark_ret,
+            trap_stub,
+            foreign,
+            closure,
+            underflow,
+            overflow,
+            stack: vec![0; STACK_WORDS],
+            cache_words,
+            max_words,
+            callouts,
+        })
+    }
+
+    /// The stack cache's size, and the most words a run's frames may take
+    /// in all (on the stack and in the heap), past which it overflows.
+    pub fn set_stack_words(&mut self, cache: u64, max: u64) {
+        self.cache_words = cache.clamp(1024, STACK_WORDS as u64 / 2);
+        self.max_words = max;
     }
 
     /// Compile `closure`'s procedure, and every procedure it calls or
@@ -645,8 +777,12 @@ impl DirectMachine {
             trap_stub: self.space.exec_addr(self.trap_stub) as u64,
             foreign: self.space.exec_addr(self.foreign) as u64,
             closure: self.space.exec_addr(self.closure) as u64,
+            underflow: self.space.exec_addr(self.underflow) as u64,
+            overflow: self.space.exec_addr(self.overflow) as u64,
             table: self.callouts.as_ptr() as u64,
             stack_lo: self.stack.as_ptr() as u64,
+            cache_words: self.cache_words,
+            max_words: self.max_words,
         }
     }
 
@@ -675,7 +811,13 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     THROWN.with(|t| t.set(None));
     let mut st = DState {
         stack_top: top,
-        stack_limit: r.stack_lo + STACK_SLACK,
+        // The cache: this run's part of the stack, below which a frame's
+        // entry flushes the rest into the heap.
+        stack_limit: (r.stack_lo + STACK_SLACK).max(top.saturating_sub(8 * r.cache_words)),
+        cont: Value::FALSE.raw(),
+        max_words: r.max_words,
+        underflow: r.underflow,
+        overflow: r.overflow,
         fuel,
         callout: callout as *const () as u64,
         rt: rt as *mut fixpt_runtime::Runtime as u64,
@@ -710,6 +852,11 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     let outer = RUNNING.replace(Some(*r));
     let v = entry(&mut st as *mut DState as u64, target, 0, 0);
     RUNNING.set(outer);
+    STATS.with(|s| {
+        let mut t = s.get();
+        t += st.stats;
+        s.set(t);
+    });
     if st.trap != 0 {
         let what = match LAST_MESSAGE.with(|m| m.borrow_mut().take()) {
             Some(m) if st.trap == PRIM_FAILED as u64 => m,
@@ -748,10 +895,81 @@ fn trampoline() -> Vec<u32> {
     }
     // The count, for a variadic procedure (`vargs`).
     a.e(ldr(X9, ST, st_off(offset_of!(DState, nargs))));
+    // What the outermost frame links and returns to, for the stack cache
+    // to give a frame it restores last.
+    let back = a.label();
+    a.e(str(FRAME, ST, st_off(offset_of!(DState, bottom_link))));
+    a.to(back, Fix::Adr(X17));
+    a.e(str(X17, ST, st_off(offset_of!(DState, bottom_ret))));
     a.e(blr(X16));
+    a.bind(back);
     a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
     leave(&mut a);
-    a.finish().expect("no labels")
+    a.finish().expect("labels bound")
+}
+
+/// The stack cache's underflow: where the last frame on the cache returns
+/// (its return address this routine's), its value in `RESULT` (REG1…REG8
+/// kept too): call-out `n` (`Callout::Underflow`) restores frames from the
+/// chain onto the cache, and there, the innermost's code resumes. One for
+/// the machine.
+fn common_underflow(n: usize) -> Vec<u32> {
+    let mut a = Asm::new();
+    let kept = offset_of!(DState, kept) as u32;
+    for r in 0..9u32 {
+        a.e(str(r as Reg, ST, kept + 8 * r));
+    }
+    call_out(&mut a, n);
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+    let failed = a.label();
+    a.e(cmp_imm(X9, 0));
+    a.to(failed, Fix::If(Cond::Ne));
+    for r in 0..9u32 {
+        a.e(ldr(r as Reg, ST, kept + 8 * r));
+    }
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, resume_sp))));
+    a.e(add_imm(SP, X9, 0));
+    a.e(ldr(FRAME, ST, st_off(offset_of!(DState, resume_fp))));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, resume_pc))));
+    a.e(br(X16));
+    a.bind(failed);
+    a.e(movz(X9, PRIM_FAILED, 0));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
+    a.e(br(X16));
+    a.finish().expect("labels bound")
+}
+
+/// The stack cache's overflow: from a procedure's entry whose frame, just
+/// pushed, passed the cache's limit (by `bl`, from the site's stub, whose
+/// return is where the entry goes on): every register it may need kept,
+/// call-out `n` (`Callout::Overflow`) copies the run's other frames into
+/// the heap and moves this one to the cache's top; back with the stack and
+/// frame where it is now. One for the machine.
+fn common_overflow(n: usize) -> Vec<u32> {
+    let mut a = Asm::new();
+    let kept = offset_of!(DState, kept) as u32;
+    for r in 0..11u32 {
+        a.e(str(r as Reg, ST, kept + 8 * r));
+    }
+    a.e(str(LINK, ST, kept + 88));
+    call_out(&mut a, n);
+    a.e(ldr(LINK, ST, kept + 88));
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+    let failed = a.label();
+    a.e(cmp_imm(X9, 0));
+    a.to(failed, Fix::If(Cond::Ne));
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, resume_sp))));
+    a.e(add_imm(SP, X9, 0));
+    a.e(ldr(FRAME, ST, st_off(offset_of!(DState, resume_fp))));
+    for r in 0..11u32 {
+        a.e(ldr(r as Reg, ST, kept + 8 * r));
+    }
+    a.e(ret());
+    a.bind(failed);
+    a.e(movz(X9, PRIM_FAILED, 0));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
+    a.e(br(X16));
+    a.finish().expect("labels bound")
 }
 
 /// The common trap: the trap's kind (in X9) recorded, and where (the
@@ -1121,6 +1339,9 @@ impl Compiling<'_> {
         // arguments, and whether a tail call), which calls the common
         // routine that calls out for it.
         let mut foreign: Vec<(Label, Label, usize, bool)> = Vec::new();
+        // Each frame's entry past the stack cache's limit: its stub, and
+        // where it comes back to.
+        let mut overflows: Vec<(Label, Label)> = Vec::new();
         // Each call of a global bound when compiled whose cell holds
         // something else when the code runs: out of the way, the call
         // through the cell (with the call's stub, and where to come back).
@@ -1367,8 +1588,14 @@ impl Compiling<'_> {
                         a.e(stp(FRAME, LINK, SP, 0));
                     }
                     a.e(add_imm(FRAME, SP, 0));
+                    // Past the stack cache's limit: the rest flushed into
+                    // the heap, and this frame moved to the cache's top
+                    // (`common_overflow`).
                     a.e(cmp_sp(LIMIT));
-                    trap(&mut a, &mut stubs, STACK_OVERFLOW, Cond::Lo);
+                    let (over, back) = (a.label(), a.label());
+                    a.to(over, Fix::If(Cond::Lo));
+                    a.bind(back);
+                    overflows.push((over, back));
                     map_stored = None;
                     if unmapped {
                         for off in (24..size as u32).step_by(8) {
@@ -1608,7 +1835,11 @@ impl Compiling<'_> {
                     let control_frame = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, second: Reg, marker: Value, last: Option<u32>| {
                         a.e(stp_pre(FRAME, second, SP, -(CONTROL_FRAME as i64)));
                         a.e(add_imm(FRAME, SP, 0));
-                        a.e(cmp_sp(LIMIT));
+                        // A control frame may pass the cache's limit by
+                        // half the slack: the next procedure's frame
+                        // flushes it with the rest.
+                        a.e(add_imm_pages(X16, SP, (STACK_SLACK / 2 / 4096) as u32));
+                        a.e(cmp(X16, LIMIT));
                         trap(a, stubs, STACK_OVERFLOW, Cond::Lo);
                         a.es(&mov_imm64(X16, marker.raw()));
                         a.e(str(X16, FRAME, 16));
@@ -2124,6 +2355,12 @@ impl Compiling<'_> {
         if uses_resume {
             a.bind(resume_at);
             resume(&mut a);
+        }
+        for (over, back) in &overflows {
+            a.bind(*over);
+            a.e(ldr(X16, ST, st_off(offset_of!(DState, overflow))));
+            a.e(blr(X16));
+            a.to(*back, Fix::B);
         }
         // The traps, out of the way: a stub per site, calling its kind's
         // stub, which goes to the machine's common trap (`common_trap`),
@@ -2910,11 +3147,15 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let mut code = [Value(st.code)];
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
-    if !matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64) && rt.heap.collection_due() {
+    let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow);
+    if !quiet && rt.heap.collection_due() {
+        let mut cont = [Value(st.cont)];
         let mut roots = native_frames(st);
         roots.push(&mut args);
         roots.push(&mut code);
+        roots.push(&mut cont);
         rt.heap.collect_due(&mut roots);
+        st.cont = cont[0].raw();
     }
     let out = match c {
         Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),
@@ -2937,12 +3178,14 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             let held: Vec<Value> = native_frames(st).iter().flat_map(|s| s.iter().copied()).collect();
             let kept = rt.heap.vector_from(&held);
             let at = rt.heap.push_root(kept);
+            rt.heap.push_root(Value(st.cont));
             // A native call from the cellular code runs below these frames.
             let runner = RUNNING.get().expect("native code is running");
             let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));
             let r = fixpt_engine::cellular::call_value(rt, *f, args);
             CALLED_OUT.set(outer);
             let kept = rt.heap.root_at(at);
+            st.cont = rt.heap.root_at(at + 1).raw();
             rt.heap.pop_roots_to(at);
             let mut i = 0;
             for s in native_frames(st) {
@@ -2991,29 +3234,33 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             abort_to(rt, st, args[0], args[1]);
             0
         }
+        Callout::Underflow => match restore(&rt.heap, st, cont_pos(st)) {
+            Ok((fp, pc)) => {
+                st.stats.underflows += 1;
+                (st.resume_sp, st.resume_fp, st.resume_pc) = (fp, fp, pc);
+                0
+            }
+            Err(why) => failed(st, why),
+        },
+        Callout::Overflow => overflow(&mut rt.heap, st),
         Callout::Capture { whole } => {
             // `f`, moved by a collection, where the code reads it.
             st.args[0] = args[0].raw();
-            let frames = frames_of(st);
-            let end = if whole {
-                Some(st.stack_top)
+            let k = if whole {
+                Some(capture_whole(rt, st))
             } else {
-                frames.iter().find(|&&(fp, end)| is_control(fp, end, PROMPT_MARK, args[1])).map(|&(fp, _)| fp)
+                capture_delimited(rt, st, args[1])
             };
-            match end {
-                Some(end) => capture(rt, st, &frames, end, whole).raw(),
+            match k {
+                Some(k) => k.raw(),
                 None => failed(st, "call-with-composable-continuation: no prompt for this tag".into()),
             }
         }
         Callout::Reinstate => reinstate(rt, st, args[1], args[0]),
         Callout::Rest => rt.heap.list_from(&args).raw(),
-        Callout::FirstMark => {
-            let found = frames_of(st).into_iter().find(|&(fp, end)| is_control(fp, end, MARK_MARK, args[0]));
-            found.map_or(args[1], |(fp, _)| Value(word(fp + 32))).raw()
-        }
+        Callout::FirstMark => run_marks(&rt.heap, st, args[0]).first().copied().unwrap_or(args[1]).raw(),
         Callout::CurrentMarks => {
-            let marks: Vec<Value> =
-                frames_of(st).into_iter().filter(|&(fp, end)| is_control(fp, end, MARK_MARK, args[0])).map(|(fp, _)| Value(word(fp + 32))).collect();
+            let marks = run_marks(&rt.heap, st, args[0]);
             rt.heap.list_from(&marks).raw()
         }
         Callout::MarksOf => match marks_of(&rt.heap, args[0], args[1]) {
@@ -3043,13 +3290,29 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
 }
 
 /// An abort to `tag` with `v`: to the innermost prompt for it in this run's
-/// frames, whose frame is put on top and resumed at its landing, with what
-/// the regions entered inside it held gone (whether it was is the result);
-/// or, none here, out of this run, to the machine that called it, which
-/// looks further (`ABORTED`; the run traps).
+/// frames, on the stack or in the stack cache's chain, whose frame is put
+/// on top and resumed at its landing, with what the regions entered inside
+/// it held gone (whether it was is the result); or, none here, out of this
+/// run, to the machine that called it, which looks further (`ABORTED`; the
+/// run traps).
 fn abort_to(rt: &mut fixpt_runtime::Runtime, st: &mut DState, tag: Value, v: Value) -> bool {
-    match frames(st).find(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag)) {
-        Some((pf, _)) => {
+    let on_stack = frames(st).find(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag)).map(|(pf, _)| pf);
+    let pf = match on_stack {
+        Some(pf) => Some(pf),
+        // In the chain: every frame newer dropped, the prompt's restored.
+        None => match records(&rt.heap, cont_pos(st)).into_iter().find(|r| r.is_control(PROMPT_MARK, tag)) {
+            Some(r) => match restore(&rt.heap, st, r.pos()) {
+                Ok((pf, _)) => Some(pf),
+                Err(why) => {
+                    failed(st, why);
+                    return false;
+                }
+            },
+            None => None,
+        },
+    };
+    match pf {
+        Some(pf) => {
             rt.heap.region_exit(Value(word(pf + 40)).as_fixnum() as usize);
             (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (pf, pf, word(pf + 8), v.raw());
             true
@@ -3071,8 +3334,8 @@ fn failed(st: &mut DState, why: String) -> u64 {
 
 /// The word at `at`, on the native stack.
 fn word(at: u64) -> u64 {
-    // SAFETY: a word of a frame on the native stack, which the call-out's
-    // caller made and which lives while it runs.
+    // SAFETY: a word of the native stack, above its limit, which no Rust
+    // code holds while the call-out runs.
     unsafe { *(at as *const u64) }
 }
 
@@ -3082,15 +3345,22 @@ fn set_word(at: u64, w: u64) {
     unsafe { *(at as *mut u64) = w }
 }
 
-/// Each native frame, innermost first, from the one that called out: where
-/// it starts, and where it ends (its caller's frame, or the stack's top).
+/// Each native frame on the stack, innermost first, from the one that
+/// called out: where it starts, and where it ends (its caller's frame, or
+/// the stack's top). The run's older frames may be in the stack cache's
+/// chain (`st.cont`).
 fn frames_of(st: &DState) -> Vec<(u64, u64)> {
     frames(st).collect()
 }
 
 /// The same, one at a time, so that a search stops where it finds.
 fn frames(st: &DState) -> impl Iterator<Item = (u64, u64)> + use<> {
-    let (top, mut fp) = (st.stack_top, st.fp);
+    frames_from(st.fp, st.stack_top)
+}
+
+/// The frames from the one at `fp` (a native frame of the run whose top is
+/// `top`) on.
+fn frames_from(mut fp: u64, top: u64) -> impl Iterator<Item = (u64, u64)> {
     std::iter::from_fn(move || {
         if fp == 0 || fp >= top {
             return None;
@@ -3108,95 +3378,458 @@ fn is_control(fp: u64, end: u64, marker: Value, key: Value) -> bool {
     end - fp == CONTROL_FRAME && word(fp + 16) == marker.raw() && word(fp + 24) == key.raw()
 }
 
-/// The continuation of the frames from the one that called out up to `end`
-/// (the stack's top, or a prompt's frame), resumed where the state's
-/// `ret_pc` says: a native closure of the continuation procedure (the
-/// state's `aux`) over what it holds. The frames are kept as values: each
-/// frame's link as an offset from the first (or -1, for the last, whose
-/// link and return address are those of whoever gives the continuation a
-/// value), its return address as a fixnum, its slots as they are.
-fn capture(rt: &mut fixpt_runtime::Runtime, st: &DState, frames: &[(u64, u64)], end: u64, whole: bool) -> Value {
-    let base = st.fp;
-    let mut words = Vec::new();
-    for &(fp, stop) in frames.iter().take_while(|&&(fp, _)| fp < end) {
-        let link = word(fp);
-        words.push(Value::fixnum(if link > fp && link < end { (link - base) as i64 } else { -1 }));
-        words.push(Value::fixnum(word(fp + 8) as i64));
-        // What the frame's stack map does not trace, dead or not a value,
-        // is kept as the fixnum 0: the vector is traced. (A control
-        // frame's marker is where the map would be: all of it is kept.)
-        let head = Value(word(fp + 16));
-        let all = !head.is_fixnum() || head.as_fixnum() < 0;
-        let map = if all { u64::MAX } else { head.as_fixnum() as u64 };
-        words.extend((fp + 16..stop).step_by(8).enumerate().map(|(j, at)| {
-            if j == 0 || all || (j <= 64 && map & (1 << (j - 1)) != 0) { Value(word(at)) } else { Value::fixnum(0) }
-        }));
-    }
-    let heap = &mut rt.heap;
-    let saved = heap.vector_from(&words);
-    let regions = Value::fixnum(heap.live_regions() as i64);
-    let data = heap.vector_from(&[CONT_MARK, saved, Value::fixnum(st.ret_pc as i64), regions, Value::boolean(whole)]);
-    native_closure(heap, Value(st.aux), &[data])
+/// A place in the stack cache's chain: a chunk, where in it a frame starts,
+/// and where that frame resumes; or the chain's end (`#f`). And, once
+/// looked up, where the chunk's words are and how many: nothing collects
+/// while a place is walked, so they stay where they are.
+#[derive(Clone, Copy)]
+struct Pos {
+    chunk: Value,
+    at: usize,
+    pc: u64,
+    words: *const u64,
+    len: usize,
 }
 
-/// Continuation `k` given `v`: its frames put back, and the state told to
-/// resume where it was taken. A whole one replaces the native stack, its
-/// last frame returning where the current last one does, and ends the
-/// regions entered since it was taken; a delimited one goes on top of the
-/// continuation procedure's caller (the frame that procedure made is
-/// where), its last frame returning to that caller.
-fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Value) -> u64 {
-    let heap = &mut rt.heap;
-    let data = heap.bloblet_slot(k, CLOSURE_FREE0);
-    let (saved, pc, regions, whole) = (heap.obj_ref(data, 1), heap.obj_ref(data, 2), heap.obj_ref(data, 3), heap.obj_ref(data, 4) == Value::TRUE);
-    let n = heap.obj_len(saved);
-    let (end, outer_link, outer_lr) = if whole {
-        let &(last, _) = frames_of(st).last().expect("a frame");
-        (st.stack_top, word(last), word(last + 8))
-    } else {
-        (st.fp + 16, word(st.fp), word(st.fp + 8))
-    };
-    let base = end - 8 * n as u64;
+const END: Pos = Pos::new(Value::FALSE, 0, 0);
+
+impl Pos {
+    const fn new(chunk: Value, at: usize, pc: u64) -> Pos {
+        Pos { chunk, at, pc, words: std::ptr::null(), len: 0 }
+    }
+}
+
+/// The rest of this run's frames, in the heap.
+fn cont_pos(st: &DState) -> Pos {
+    Pos::new(Value(st.cont), st.cont_at as usize, st.cont_pc)
+}
+
+fn set_cont(st: &mut DState, p: Pos) {
+    (st.cont, st.cont_at, st.cont_pc) = (p.chunk.raw(), p.at as u64, p.pc);
+}
+
+/// A frame of the chain: its chunk, where in it it starts, its words, its
+/// second word, where it resumes, and where its chunk's words are.
+#[derive(Clone, Copy)]
+struct Rec {
+    chunk: Value,
+    at: usize,
+    n: usize,
+    w8: u64,
+    pc: u64,
+    words: *const u64,
+}
+
+impl Rec {
+    /// Its `j`th word from the third on.
+    fn word(&self, j: usize) -> Value {
+        // SAFETY: within its chunk (`j < n - 2`), which does not move
+        // while the chain is walked.
+        Value(unsafe { *self.words.add(self.at + 2 + j) })
+    }
+    /// Whether it is left by a return to its second word (a procedure's
+    /// frame, a stub's, a mark's in tail position), not popped by the code
+    /// of the frame it is in (a prompt's, a mark's).
+    fn returns(&self) -> bool {
+        if self.n != CONTROL_FRAME as usize / 8 {
+            return true;
+        }
+        let m = self.word(0);
+        !(m == PROMPT_MARK || (m == MARK_MARK && self.w8 == 0))
+    }
+    fn is_control(&self, marker: Value, key: Value) -> bool {
+        self.n == CONTROL_FRAME as usize / 8 && self.word(0) == marker && self.word(1) == key
+    }
+    fn is_tail_mark(&self) -> bool {
+        self.n == CONTROL_FRAME as usize / 8 && self.word(0) == MARK_MARK && self.w8 != 0
+    }
+    fn pos(&self) -> Pos {
+        Pos::new(self.chunk, self.at, self.pc)
+    }
+}
+
+/// The frame at `p`, and the place after it; none at the chain's end.
+fn step(heap: &Heap, p: Pos) -> Option<(Rec, Pos)> {
+    let (mut chunk, mut at, mut words, mut len) = (p.chunk, p.at, p.words, p.len);
+    if chunk == Value::FALSE {
+        return None;
+    }
+    if words.is_null() {
+        let w = heap.obj_words(chunk);
+        (words, len) = (w.as_ptr(), w.len());
+    }
+    while at >= len {
+        // SAFETY: the chunk's header words, which do not move while the
+        // chain is walked.
+        let (next, next_at) = unsafe { (Value(*words.add(CH_NEXT)), Value(*words.add(CH_NEXT_AT)).as_fixnum() as usize) };
+        if next == Value::FALSE {
+            return None;
+        }
+        let w = heap.obj_words(next);
+        (chunk, at, words, len) = (next, next_at, w.as_ptr(), w.len());
+    }
+    // SAFETY: a frame's first two words, within its chunk.
+    let (n, w8) = unsafe { (Value(*words.add(at)).as_fixnum() as usize, Value(*words.add(at + 1)).as_fixnum() as u64) };
+    Some((Rec { chunk, at, n, w8, pc: p.pc, words }, Pos { chunk, at: at + n, pc: w8, words, len }))
+}
+
+/// Each frame of the chain from `p`, newest first.
+fn records(heap: &Heap, mut p: Pos) -> Vec<Rec> {
+    let mut out = Vec::new();
+    while let Some((r, q)) = step(heap, p) {
+        out.push(r);
+        p = q;
+    }
+    out
+}
+
+/// How many words of frames the chain from `p` holds.
+fn chain_words(heap: &Heap, p: Pos) -> u64 {
+    if p.chunk == Value::FALSE {
+        return 0;
+    }
+    (heap.obj_len(p.chunk) - p.at.min(heap.obj_len(p.chunk))) as u64 + heap.obj_ref(p.chunk, CH_REST).as_fixnum() as u64
+}
+
+/// The stack map of the frame from `fp` to `end`: the mask of the words
+/// from its third on that are values to keep (the third itself, the map or
+/// a control frame's marker, always; all of a control frame, and of one
+/// too wide for a map). What it leaves out, dead or not a value, a chunk
+/// keeps as the fixnum 0.
+fn kept_mask(fp: u64, end: u64) -> u64 {
+    if end - fp <= 16 {
+        return 0;
+    }
+    let head = Value(word(fp + 16));
+    if !head.is_fixnum() || head.as_fixnum() < 0 { u64::MAX } else { (head.as_fixnum() as u64) << 1 | 1 }
+}
+
+/// The stack's `frames`, innermost first, copied into the heap onto the
+/// chain at `tail` (older than they), in chunks of about `CHUNK_WORDS`:
+/// each frame as it was, its link its size, its dead words 0; the
+/// outermost's second word `last` (where the chain at `tail` resumes, if
+/// that frame's own says the underflow). Where the innermost is, its `pc`
+/// for the caller to say. Allocates and never collects, so what the frames
+/// and `tail` hold stays where it is.
+fn chunks_of(heap: &mut Heap, frames: &[(u64, u64)], last: u64, tail: Pos) -> Pos {
+    let (mut next, mut rest) = ((tail.chunk, tail.at), chain_words(heap, tail));
+    let mut i = frames.len();
+    while i > 0 {
+        let (mut j, mut w) = (i, 0);
+        while j > 0 {
+            let (fp, end) = frames[j - 1];
+            let fw = ((end - fp) / 8) as usize;
+            if w > 0 && w + fw > CHUNK_WORDS {
+                break;
+            }
+            w += fw;
+            j -= 1;
+        }
+        // Frames `j..i`, a word at a time: which frame, and where in it.
+        let (mut f, mut k, mut mask) = (j, 0usize, kept_mask(frames[j].0, frames[j].1));
+        let outermost = frames.len() - 1;
+        let chunk = heap.vector_with(CH_FRAMES + w, |at| match at {
+            CH_NEXT => next.0,
+            CH_NEXT_AT => Value::fixnum(next.1 as i64),
+            CH_REST => Value::fixnum(rest as i64),
+            _ => {
+                let (fp, end) = frames[f];
+                let v = match k {
+                    0 => Value::fixnum(((end - fp) / 8) as i64),
+                    1 => Value::fixnum(if f == outermost { last } else { word(fp + 8) } as i64),
+                    _ => {
+                        let j = k - 2;
+                        if j >= 64 || mask & (1 << j) != 0 { Value(word(fp + 8 * k as u64)) } else { Value::fixnum(0) }
+                    }
+                };
+                k += 1;
+                if fp + 8 * k as u64 == end && f + 1 < i {
+                    f += 1;
+                    k = 0;
+                    mask = kept_mask(frames[f].0, frames[f].1);
+                }
+                v
+            }
+        });
+        next = (chunk, CH_FRAMES);
+        rest += w as u64;
+        i = j;
+    }
+    Pos::new(next.0, next.1, 0)
+}
+
+/// The second word the outermost of this run's frames on the stack should
+/// have in the chain: where the chain resumes, if there is one (the frame's
+/// own says the underflow), else its own (the bottom's).
+fn outermost_second(st: &DState, outermost: u64) -> u64 {
+    if step_nonempty(st) { st.cont_pc } else { word(outermost + 8) }
+}
+
+fn step_nonempty(st: &DState) -> bool {
+    st.cont != Value::FALSE.raw()
+}
+
+/// Frames restored from the chain at `p` onto the run's empty stack cache,
+/// at its top: at least one, and on to `RESTORE_WORDS`, never ending with
+/// one its code pops (whose code is in the frame outside it), nor above a
+/// mark in tail position (which a mark in tail position in the frame above
+/// it finds directly under its own, to replace). The last links and
+/// returns to the bottom if the chain ends there, else returns through the
+/// underflow. The rest of the chain is the run's. Where the innermost is,
+/// and where it resumes.
+fn restore(heap: &Heap, st: &mut DState, p: Pos) -> Result<(u64, u64), String> {
+    let (mut recs, mut words, mut q) = (Vec::with_capacity(64), 0, p);
+    while let Some((r, nq)) = step(heap, q) {
+        let returns = r.returns();
+        recs.push((r, returns));
+        words += r.n;
+        q = nq;
+        if words >= RESTORE_WORDS && returns && !step(heap, q).is_some_and(|(r2, _)| r2.is_tail_mark()) {
+            break;
+        }
+    }
+    if recs.is_empty() {
+        return Err("the stack cache has nothing to restore".into());
+    }
+    let more = step(heap, q).is_some();
+    let (link, ret) = if more { (0, st.underflow) } else { (st.bottom_link, st.bottom_ret) };
+    let base = place(st, &recs, words, st.stack_top, link, ret)?;
+    set_cont(st, if more { q } else { END });
+    st.stats.frames_restored += recs.len() as u64;
+    Ok((base, recs[0].0.pc))
+}
+
+/// Frames `recs` (each with whether it is left by a return), `words` in all,
+/// put on the stack ending at `end`, innermost lowest: the last linking to
+/// `link` and, if left by a return, returning to `ret`; each other to the
+/// next, returning as it did. Where the innermost is.
+fn place(st: &DState, recs: &[(Rec, bool)], words: usize, end: u64, link: u64, ret: u64) -> Result<u64, String> {
+    let base = end - 8 * words as u64;
     if base < st.stack_limit {
+        return Err("stack overflow".into());
+    }
+    let mut fp = base;
+    for (i, &(r, returns)) in recs.iter().enumerate() {
+        let last = i + 1 == recs.len();
+        put_frame(r, fp, if last { link } else { fp + 8 * r.n as u64 }, if last && returns { ret } else { r.w8 });
+        fp += 8 * r.n as u64;
+    }
+    Ok(base)
+}
+
+/// Frame `r` put on the stack at `fp`, linking to `link`, its second word
+/// `second`.
+fn put_frame(r: Rec, fp: u64, link: u64, second: u64) {
+    set_word(fp, link);
+    set_word(fp + 8, second);
+    // SAFETY: words of the native stack, above its limit, which no Rust
+    // code holds while the call-out runs; the frame's, in its chunk.
+    unsafe { std::ptr::copy_nonoverlapping(r.words.add(r.at + 2), (fp + 16) as *mut u64, r.n - 2) };
+}
+
+/// The stack cache's overflow, from the entry of the procedure whose frame
+/// (at `st.fp`, its link and return address in it) passed the limit: the
+/// run's other frames copied into the heap onto the chain, and this one
+/// moved to the cache's top, returning through the underflow. A frame too
+/// large for the cache, or frames past the most a run may have, overflow
+/// the stack.
+fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
+    let (f0, top) = (st.fp, st.stack_top);
+    // The frames kept: this one, and the marks in tail position it is
+    // under, which a mark in tail position in it finds directly under its
+    // frame, to replace (`withmark-tail`).
+    let mut keep: Vec<(u64, u64)> = Vec::new();
+    for (fp, end) in frames_from(f0, top) {
+        if keep.is_empty() || is_tail_mark(fp, end) {
+            keep.push((fp, end));
+        } else {
+            break;
+        }
+    }
+    let (outer, kept_end) = *keep.last().expect("this frame");
+    let caller = word(outer);
+    if !(caller > outer && caller < top && caller == kept_end) {
         return failed(st, "stack overflow".into());
     }
-    let mut at = 0;
-    while at < n {
-        let link = heap.obj_ref(saved, at).as_fixnum();
-        let next = if link < 0 { n } else { link as usize / 8 };
-        set_word(base + 8 * at as u64, if link < 0 { outer_link } else { base + link as u64 });
-        set_word(base + 8 * at as u64 + 8, if link < 0 { outer_lr } else { heap.obj_ref(saved, at + 1).as_fixnum() as u64 });
-        for j in at + 2..next {
-            set_word(base + 8 * j as u64, heap.obj_ref(saved, j).raw());
-        }
-        at = next;
+    let size = kept_end - f0;
+    let frames: Vec<(u64, u64)> = frames_from(caller, top).collect();
+    let words: u64 = frames.iter().map(|&(a, b)| (b - a) / 8).sum();
+    if chain_words(heap, cont_pos(st)) + words + size / 8 > st.max_words {
+        return failed(st, "stack overflow".into());
     }
-    if whole {
-        heap.region_exit(regions.as_fixnum() as usize);
+    let last = outermost_second(st, frames.last().expect("a frame").0);
+    let mut p = chunks_of(heap, &frames, last, cont_pos(st));
+    p.pc = word(outer + 8);
+    set_cont(st, p);
+    st.stats.overflows += 1;
+    st.stats.frames_flushed += frames.len() as u64;
+    st.stats.words_flushed += words;
+    let to = top - size;
+    // SAFETY: both on the native stack, above its limit, which no Rust
+    // code holds while the call-out runs.
+    unsafe { std::ptr::copy(f0 as *const u64, to as *mut u64, (size / 8) as usize) };
+    // Their links moved with them; the outermost's to nothing, returning
+    // through the underflow.
+    let moved = |a: u64| a - f0 + to;
+    for &(fp, _) in &keep[..keep.len() - 1] {
+        set_word(moved(fp), moved(word(moved(fp))));
     }
-    (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (base, base, pc.as_fixnum() as u64, v.raw());
+    set_word(moved(outer), 0);
+    set_word(moved(outer) + 8, st.underflow);
+    (st.resume_sp, st.resume_fp) = (to, to);
     0
 }
 
+/// Whether the frame from `fp` to `end` is a mark's in tail position: a
+/// control frame of `MARK_MARK` left by a return to its second word.
+fn is_tail_mark(fp: u64, end: u64) -> bool {
+    end - fp == CONTROL_FRAME && word(fp + 16) == MARK_MARK.raw() && word(fp + 8) != 0
+}
+
+/// A continuation's data, around `p`, the chain of its frames.
+fn continuation(rt: &mut fixpt_runtime::Runtime, st: &DState, p: Pos, whole: bool) -> Value {
+    let heap = &mut rt.heap;
+    let regions = Value::fixnum(heap.live_regions() as i64);
+    let data = heap.vector_from(&[CONT_MARK, p.chunk, Value::fixnum(p.at as i64), Value::fixnum(p.pc as i64), regions, Value::boolean(whole)]);
+    native_closure(heap, Value(st.aux), &[data])
+}
+
+/// A continuation's chain.
+fn continuation_pos(heap: &Heap, data: Value) -> Pos {
+    Pos::new(heap.obj_ref(data, 1), heap.obj_ref(data, 2).as_fixnum() as usize, heap.obj_ref(data, 3).as_fixnum() as u64)
+}
+
+/// The whole continuation of the frames from the one that called out,
+/// resumed where the state's `ret_pc` says: a native closure of the
+/// continuation procedure (the state's `aux`) over its chain, the frames on
+/// the stack copied onto the run's.
+fn capture_whole(rt: &mut fixpt_runtime::Runtime, st: &DState) -> Value {
+    let frames = frames_of(st);
+    let last = outermost_second(st, frames.last().expect("a frame").0);
+    let mut p = chunks_of(&mut rt.heap, &frames, last, cont_pos(st));
+    p.pc = st.ret_pc;
+    continuation(rt, st, p, true)
+}
+
+/// A continuation's frames, delimited by the innermost prompt for `tag`:
+/// those on the stack before it; or all of them and a copy of the chain's
+/// before it, in one chunk; none if no prompt for `tag` is in this run.
+fn capture_delimited(rt: &mut fixpt_runtime::Runtime, st: &DState, tag: Value) -> Option<Value> {
+    let frames = frames_of(st);
+    if let Some(j) = frames.iter().position(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag)) {
+        let last = word(frames[j - 1].0 + 8);
+        let mut p = chunks_of(&mut rt.heap, &frames[..j], last, END);
+        p.pc = st.ret_pc;
+        return Some(continuation(rt, st, p, false));
+    }
+    let recs = records(&rt.heap, cont_pos(st));
+    let j = recs.iter().position(|r| r.is_control(PROMPT_MARK, tag))?;
+    let tail = copy_records(&mut rt.heap, &recs[..j], END);
+    let last = outermost_second(st, frames.last().expect("a frame").0);
+    let mut p = chunks_of(&mut rt.heap, &frames, last, tail);
+    p.pc = st.ret_pc;
+    Some(continuation(rt, st, p, false))
+}
+
+/// Frames `recs` of a chain copied into one new chunk onto `tail`.
+fn copy_records(heap: &mut Heap, recs: &[Rec], tail: Pos) -> Pos {
+    let rest = chain_words(heap, tail);
+    let mut v = vec![tail.chunk, Value::fixnum(tail.at as i64), Value::fixnum(rest as i64)];
+    for r in recs {
+        v.extend((0..r.n).map(|k| heap.obj_ref(r.chunk, r.at + k)));
+    }
+    let chunk = heap.vector_from(&v);
+    Pos::new(chunk, CH_FRAMES, recs.first().map_or(tail.pc, |r| r.pc))
+}
+
+/// Continuation `k` given `v`: its frames put back, and the state told to
+/// resume where it was taken. A whole one replaces this run's frames (its
+/// last returning where this run's outermost does) and ends the regions
+/// entered since it was taken; a delimited one goes on top of the
+/// continuation procedure's caller (the frame that procedure made is
+/// where), its last frame returning to that caller: on the stack if it
+/// fits, as it mostly does; else the caller's frames copied onto the chain,
+/// and a copy of `k`'s onto them.
+fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Value) -> u64 {
+    let heap = &mut rt.heap;
+    let data = heap.bloblet_slot(k, CLOSURE_FREE0);
+    let (kp, regions, whole) = (continuation_pos(heap, data), heap.obj_ref(data, 4), heap.obj_ref(data, 5) == Value::TRUE);
+    let to = if whole {
+        heap.region_exit(regions.as_fixnum() as usize);
+        kp
+    } else {
+        let (link, ret) = (word(st.fp), word(st.fp + 8));
+        // Its words, then, if they fit, its frames, with no list made.
+        let (mut words, mut q) = (0u64, kp);
+        while let Some((r, nq)) = step(heap, q) {
+            words += r.n as u64;
+            q = nq;
+        }
+        let base = st.fp + 16 - 8 * words;
+        if base >= st.stack_limit {
+            let (mut fp, mut q) = (base, kp);
+            while let Some((r, nq)) = step(heap, q) {
+                let next = fp + 8 * r.n as u64;
+                let last = next == st.fp + 16;
+                put_frame(r, fp, if last { link } else { next }, if last && r.returns() { ret } else { r.w8 });
+                st.stats.frames_restored += 1;
+                (fp, q) = (next, nq);
+            }
+            (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (base, base, kp.pc, v.raw());
+            return 0;
+        }
+        let recs: Vec<(Rec, bool)> = records(heap, kp).into_iter().map(|r| (r, r.returns())).collect();
+        let below: Vec<(u64, u64)> = if link > st.fp && link < st.stack_top { frames_from(link, st.stack_top).collect() } else { Vec::new() };
+        let rest = if below.is_empty() {
+            cont_pos(st)
+        } else {
+            let last = outermost_second(st, below.last().expect("a frame").0);
+            let mut p = chunks_of(heap, &below, last, cont_pos(st));
+            p.pc = ret;
+            p
+        };
+        // `k`'s last returns where the caller resumes.
+        let mut p = copy_records(heap, &recs.iter().map(|r| r.0).collect::<Vec<_>>(), rest);
+        let len = heap.obj_len(p.chunk);
+        let mut at = CH_FRAMES;
+        while at < len {
+            let n = heap.obj_ref(p.chunk, at).as_fixnum() as usize;
+            if at + n == len {
+                heap.obj_set(p.chunk, at + 1, Value::fixnum(rest.pc as i64));
+            }
+            at += n;
+        }
+        p.pc = kp.pc;
+        p
+    };
+    match restore(heap, st, to) {
+        Ok((fp, pc)) => {
+            (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (fp, fp, pc, v.raw());
+            0
+        }
+        Err(why) => failed(st, why),
+    }
+}
+
+/// The marks for `key` in this run, innermost first: on the stack, then in
+/// the chain.
+fn run_marks(heap: &Heap, st: &DState, key: Value) -> Vec<Value> {
+    let mut out: Vec<Value> = frames(st).filter(|&(fp, end)| is_control(fp, end, MARK_MARK, key)).map(|(fp, _)| Value(word(fp + 32))).collect();
+    out.extend(chain_marks(heap, cont_pos(st), key));
+    out
+}
+
+/// The marks for `key` in the chain from `p`, newest first.
+fn chain_marks(heap: &Heap, p: Pos, key: Value) -> Vec<Value> {
+    records(heap, p).into_iter().filter(|r| r.is_control(MARK_MARK, key)).map(|r| r.word(2)).collect()
+}
+
 /// The marks for `key` continuation `k` took, innermost first: a native
-/// continuation's, from its frames; a cellular one's, from its return
+/// continuation's, from its chain; a cellular one's, from its return
 /// stack's entries. None if `k` is neither.
 fn marks_of(heap: &Heap, k: Value, key: Value) -> Option<Vec<Value>> {
-    {
-        if let Some(data) = heap.native_continuation_of(k) {
-            let saved = heap.obj_ref(data, 1);
-            let n = heap.obj_len(saved);
-            let (mut out, mut at) = (Vec::new(), 0);
-            while at < n {
-                let link = heap.obj_ref(saved, at).as_fixnum();
-                let next = if link < 0 { n } else { link as usize / 8 };
-                if next - at == CONTROL_FRAME as usize / 8 && heap.obj_ref(saved, at + 2) == MARK_MARK && heap.obj_ref(saved, at + 3) == key {
-                    out.push(heap.obj_ref(saved, at + 4));
-                }
-                at = next;
-            }
-            return Some(out);
-        }
+    if let Some(data) = heap.native_continuation_of(k) {
+        return Some(chain_marks(heap, continuation_pos(heap, data), key));
     }
     let c = heap.continuation_of(k)?;
     let rs = heap.bloblet_slot(c, fixpt_heap::layout::cellular::CONT_RS);

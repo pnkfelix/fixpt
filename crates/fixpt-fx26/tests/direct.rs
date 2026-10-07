@@ -37,15 +37,21 @@ fn run(defs: &str, name: &str, args: &[i64], fuel: u64) -> Ran {
 fn run_collecting(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u64>) -> Ran {
     let call = format!("({name} {})", args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(" "));
     let rust = on_rust_machine(&format!("{defs}\n{call}"));
-    Ran { rust, ..direct_in(defs, name, args, fuel, gc_every) }
+    Ran { rust, ..direct_in(defs, name, args, fuel, gc_every, None) }
+}
+
+/// The same without the Rust machine's run, on a stack cache of `stack.0`
+/// words whose run may take `stack.1` in all.
+fn direct_stack(defs: &str, name: &str, args: &[i64], fuel: u64, stack: (u64, u64)) -> Ran {
+    direct_in(defs, name, args, fuel, None, Some(stack))
 }
 
 /// The same without the Rust machine's run: for what it would not finish.
 fn direct_only(defs: &str, name: &str, args: &[i64], fuel: u64) -> Ran {
-    direct_in(defs, name, args, fuel, None)
+    direct_in(defs, name, args, fuel, None, None)
 }
 
-fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u64>) -> Ran {
+fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u64>, stack: Option<(u64, u64)>) -> Ran {
     let rust = String::new();
     let text = format!("{defs}\n{name}");
     let mut c = Checker::new();
@@ -54,6 +60,9 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
     let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let mut m = DirectMachine::new().expect("maps");
+    if let Some((cache, max)) = stack {
+        m.set_stack_words(cache, max);
+    }
     s.scheme.scope(|sc| {
         let w = sc.make(|h| {
             let mut comp = fixpt_fx26::cellular::Compiler::new(h.heap(), &c, &text);
@@ -192,8 +201,10 @@ fn calls_between_procedures() {
 fn fuel_and_stack_run_out() {
     let forever = "(define* forever (subr spin (int) int) (lambda (n) (forever (+ n 1))))";
     assert_eq!(direct_only(forever, "forever", &[0], 100_000).direct, Err("out of fuel".into()));
+    // Past the most a run's frames may take, with the stack cache's chain:
+    // here 2^20 words, through a cache of 4096.
     let deep = "(define* deep (subr spin (int) int) (lambda (n) (+ 1 (deep n))))";
-    assert_eq!(run(deep, "deep", &[0], FUEL).direct, Err("stack overflow".into()));
+    assert_eq!(direct_stack(deep, "deep", &[0], FUEL, (4096, 1 << 20)).direct, Err("stack overflow".into()));
 }
 
 /// Higher-order code: a global's procedure passed as a value and called
@@ -781,6 +792,35 @@ fn native_session_adapters_aborts_and_stack_maps() {
 
 /// `run_native`, collecting every 97 safepoints while the native code runs
 /// (not while the front end compiles it).
+/// Deep recursion through a small stack cache
+/// (`docs/research/deep-recursion.md`): 4096 words, so that each program's
+/// frames are flushed into the heap many times over and restored as they
+/// return, collecting often as they run (`programs/native/deep-control.fx`):
+/// values the flushed frames hold; an abort to a prompt among them; a
+/// mark read through them; a composable continuation of them, taken and
+/// run twice.
+#[test]
+fn deep_recursion_through_the_stack_cache() {
+    fixpt_native::direct::with_machine(|m| m.set_stack_words(4096, 1 << 26)).expect("a machine");
+    let mut s = session(true);
+    s.native_runner = Some(run_native_collecting);
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/deep-control.fx")).expect("reads");
+    let before = fixpt_native::direct::stack_stats();
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    assert_eq!(values, ["5000049999", "1007", "50005", "60001", "60000"], "deep control");
+    assert_eq!(fell, Vec::<String>::new(), "all native");
+    // `level`'s frames, on a cache of 4098 words, overflow at the entry of
+    // a thunk a mark in tail position called: the mark's frame moves with
+    // the thunk's, which replaces it (it was 60087, with 87 marks too many).
+    fixpt_native::direct::with_machine(|m| m.set_stack_words(4098, 1 << 26)).expect("a machine");
+    let forms = s.checker.read_in(FileId(0), "(level 30000)").expect("reads");
+    assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["60000".to_string()], vec![]), "tail marks");
+    // Each program's frames went through the heap, and came back.
+    let after = fixpt_native::direct::stack_stats();
+    assert!(after.overflows - before.overflows > 100 && after.underflows - before.underflows > 1000, "{before:?} {after:?}");
+    fixpt_native::direct::with_machine(|m| m.set_stack_words(1 << 25, 1 << 28)).expect("a machine");
+}
+
 fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     let was = std::mem::replace(&mut rt.heap.gc_every, 97);
     let r = run_native(rt, closure, fuel);

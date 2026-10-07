@@ -2629,3 +2629,31 @@ only showing an effect needed: `k-globals-shown` sorts the names in
 Atom ordering (`k-atom-cmp`, `k-merge`) is now about 6% of the phase's
 samples, from about 25%. The rest of the gap to the Rust checker (12.7 ms)
 is spread across the checker's register code and its call-outs.
+
+## Deep recursion natively: a copying stack cache (2026-10-07)
+
+Native code ran on a fixed stack of 2^26 words and overflowed between 5M
+and 20M frames. Now half of it is a cache, past which the run's frames go
+to the heap as a chain of chunks and come back as it returns
+(`docs/research/deep-recursion.md`, `DONE.md` §52):
+
+| `,native down N` |         before |  after |
+| ---------------- | -------------: | -----: |
+| 5M               |          41 ms |  41 ms |
+| 20M              | stack overflow | 426 ms |
+| 50M              | stack overflow | 1.07 s |
+
+About 20 ns a frame flushed and restored; nothing added to a call or a
+return. Getting there: one heap object per frame cost 75 ns a frame,
+mostly `malloc` (a Rust `Vec` per frame on the way to the heap); 27 ns
+written in place; then chunks of frames as they were on the stack, read
+through the chunk's payload once looked up, 20 ns. `obj_len` per word
+read had been the largest single cost.
+
+Continuations got cheaper on the way: `captures` (a composable
+continuation taken and resumed 20 calls deep, 20 000 times), natively,
+11.4 → 9.0 ms, back to back. A continuation is one chunk, copied whole
+onto the stack when put back (`ptr::copy_nonoverlapping` from the chunk's
+payload), where it was a vector put back a word at a time.
+`Heap::vector_with` now writes each element once with no barrier (a new
+object's stores need none), which the chunks are made with.

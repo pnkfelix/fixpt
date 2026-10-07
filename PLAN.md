@@ -260,12 +260,12 @@ weighed with the other items, not ahead of them.
   the compilers, then a choice between `lldb` and a debugger of our own;
   and introspection from inside, an `(introspect)` effect (`TODO.md` §28).
 - R. **Deep recursion in native code** (the user's, 2026-10-07; `TODO.md`
-  §52, §53): the native convention's fixed stack overflows between 5M and
-  20M frames, where Scheme recurses as deep as its heap allows. Two
-  designs to weigh with the user: Larceny's stack cache, flushed in
-  place, or stack segments that never move, collected by mark-sweep. For
-  either, first: native frames laid out as bloblets at compile time,
-  traced words then raw ones (§53).
+  §52, §53): done as a copying stack cache (`DONE.md` §52): native code
+  recurses as deep as the heap allows (50M frames in 1.07 s; it overflowed
+  past 5M-20M), and continuations got cheaper (`captures` 11.4 → 9.0 ms).
+  Next: the flush in place in the nursery, Larceny's (the never-moving
+  segments set aside, the user's), with frames laid out as bloblets
+  (§53); the underflow in line; a nested run's room.
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path

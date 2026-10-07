@@ -640,12 +640,23 @@ impl Heap {
     /// A vector of `n` elements, element `i` being `f(i)`: for filling one
     /// from somewhere that is not a slice, without making one first.
     pub fn vector_with(&mut self, n: usize, mut f: impl FnMut(usize) -> Value) -> Value {
-        let v = self.alloc(ObjType::Vector, n, Value::UNSPECIFIED);
-        let base = self.payload_base(v);
+        // Laid out as `alloc` lays out a vector, each element written once.
+        // A store into an object this new needs no barrier, as `cons`'s
+        // need none: it is not in the old space unless the heap has no
+        // nursery, and then no cards.
+        let main = self.put_header(ObjType::Vector as u8, n + 1, 0);
         for i in 0..n {
-            self.set_slot(base + i, f(i));
+            let w = f(i).raw();
+            self.set_word(main + 1 + i, w);
         }
-        v
+        self.set_word(main + 1 + n, Self::trailer_word(n + 1));
+        self.blob_v(main + 2 + n)
+    }
+
+    /// Object `o`'s payload words, as they are: for copying many at once.
+    pub fn obj_words(&self, o: Value) -> &[u64] {
+        let base = self.payload_base(o);
+        &self.mem.words()[base..base + self.obj_len(o)]
     }
 
     /// An object's payload, in order, with its base found once.

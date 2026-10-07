@@ -614,3 +614,61 @@ reordering, the rule enforced downstream. Found on the way: `sexp-edit
 move` put a top-level definition moved before a `define-rec`'s member
 inside the group; it goes before the group now.
 
+
+## 52. Deep recursion in native code: a copying stack cache (2026-10-07)
+
+The native convention ran on one fixed stack of 2^26 words and trapped
+"stack overflow" between 5M and 20M frames of `(+ 1 (down (- n 1)))`,
+where Scheme recurses as deep as its heap allows. Now a run's part of the
+stack is a cache (`docs/research/deep-recursion.md`, "The first version";
+`fixpt-native/src/direct.rs`):
+
+- **Overflow**, at a procedure's entry whose frame passed the cache's
+  limit: `common_overflow` keeps the registers and calls out; every other
+  frame of the run is copied into the heap as the stack cache's chain, in
+  chunks of about 4096 words, each frame as it was on the stack (its link
+  its size, its dead words 0); the new frame (with any marks in tail
+  position under it) moves to the cache's top, its return address the
+  underflow's.
+- **Underflow**: a return off the cache's top lands in `common_underflow`,
+  which restores frames from the chain, at least one and on to 256 words,
+  never ending above a prompt's or a mark's frame its owner pops, nor
+  above a mark in tail position, and resumes the innermost.
+- **Control** sees the chain as the rest of the stack: an abort finds a
+  prompt there and restores from it; `first-mark`, `current-marks` and
+  `marks-of` read marks there; a whole continuation is the stack's frames
+  in a chunk onto the chain (shared, never changed); a delimited one, the
+  frames up to its prompt, copying the chain's part when the prompt is in
+  the chain. Putting back a delimited continuation copies its frames onto
+  the stack directly when they fit, as before.
+- **Sizes**: the cache is half the stack (2^25 words) by default, so
+  that what fitted before runs as before; a run's frames may take 2^28
+  words in all. `FIXPT_NATIVE_STACK_CACHE` and `FIXPT_NATIVE_STACK_MAX`,
+  or `DirectMachine::set_stack_words`, say otherwise. `stack_stats()`
+  counts overflows, frames flushed, underflows and frames restored.
+
+| `down` to depth |         before |  after | cellular registers |
+| --------------- | -------------: | -----: | -----------------: |
+| 5M              |          41 ms |  41 ms |                    |
+| 20M             | stack overflow | 426 ms |       about 700 ms |
+| 50M             | stack overflow | 1.07 s |        about 2.1 s |
+
+Natively, through `,native`; a frame past the cache costs about 20 ns to
+flush and restore. `captures` (a continuation taken and resumed 20 calls
+deep, 20 000 times) went from 11.4 to 9.0 ms natively: a continuation is
+now one chunk of frames as they were, copied onto the stack in one copy
+each, where it was a vector rebuilt a word at a time.
+
+Tests: `deep_recursion_through_the_stack_cache` (`direct.rs`,
+`programs/native/deep-control.fx`), on a cache of 4096 words, collecting
+every 97 safepoints: values held across 100 000 frames flushed and
+restored; an abort to a flushed prompt; a mark read through flushed
+frames; a composable continuation of 20 000 flushed frames taken and run
+twice; and a mark in tail position under a thunk whose frame overflowed,
+replaced, not duplicated (on a cache of 4098 words, where the overflows
+fall there: without keeping the mark's frame with the thunk's, 60087, 87
+marks too many). `fuel_and_stack_run_out` overflows past 2^20 words.
+
+On the way: `Heap::vector_with` writes each element once, with no barrier
+(a new object's stores need none, as `cons`'s); `Heap::obj_words` gives an
+object's payload to copy whole.
