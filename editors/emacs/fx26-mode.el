@@ -86,7 +86,7 @@ Scheme, slower."
   "Forms that define a name.")
 
 (defconst fx26--special-forms
-  '("lambda" "plambda" "vlambda" "rlambda" "dlambda" "proj" "if" "cond" "else"
+  '("lambda" "plambda" "vlambda" "rlambda" "dlambda" "proj" "if" "cond" "case" "else"
     "and" "or" "let" "let*" "letrec" "begin" "the" "quote" "tagcase" "product"
     "extract" "sum" "prompt" "module" "with" "load-module" "private-regions"
     "letregion" "letfreeze" "letrena" "letreap" "convention")
@@ -140,7 +140,7 @@ Scheme, slower."
   (let ((table (make-hash-table :test #'equal)))
     (dolist (spec '(;; Forms that bind or open something, then a body.
                     ("lambda" . 1) ("plambda" . 1) ("vlambda" . 1) ("rlambda" . 1)
-                    ("dlambda" . 1) ("let" . 1) ("let*" . 1) ("letrec" . 1)
+                    ("dlambda" . 1) ("let" . 1) ("let*" . 1) ("letrec" . 1) ("case" . 1)
                     ("letregion" . 1) ("letfreeze" . 1) ("letrena" . 1) ("letreap" . 1)
                     ("tagcase" . 1) ("with" . 1) ("the" . 1) ("poly" . 1) ("prompt" . 1)
                     ("with-mark" . 2) ("convention" . 1)

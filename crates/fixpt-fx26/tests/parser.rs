@@ -68,6 +68,7 @@ fn the_parsers_agree_on_real_programs() {
         include_str!("programs/modules/rec.fx"),
         include_str!("programs/modules/select.fx"),
         include_str!("programs/modules/transparent.fx"),
+        include_str!("programs/run/case.fx"),
         fixpt_fx26::TABLE,
     ] {
         same_trees(&mut s, text);
@@ -99,6 +100,34 @@ fn module_parse_errors_agree() {
         "(with (module (define x 1)) x)",
         "(with)",
         "(define m (module)) (with m)",
+    ] {
+        let ours = s.parse_with_own_parser(text).expect_err("refused");
+        let mut c = Checker::new();
+        let forms = c.read_in(FileId(0), text).expect("reads");
+        let rust = forms.iter().find_map(|f| c.top(f).err()).expect("refused");
+        assert_eq!((ours.message, ours.span.start, ours.span.end), (rust.message, rust.span.start, rust.span.end), "{text}");
+    }
+}
+
+/// A `case` the parsers refuse (`TODO.md` §46), each saying the same, at
+/// the same place.
+#[test]
+fn case_parse_errors_agree() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    for text in [
+        "(case)",
+        "(case 1)",
+        "(case 1 ((1) 2))",
+        "(case 1 ((1) 2) (else 3) (else 4))",
+        "(case 1 (() 2) (else 4))",
+        "(case 1 (3 3) (else 4))",
+        "(case 1 ((1) 2) ((1) 3) (else 4))",
+        "(case 1 ((1) 2) ((a) 3) (else 4))",
+        "(case 'a ((a b a) 2) (else 4))",
+        "(case 1 ((#u) 2) (else 4))",
+        "(case 1 ((1.5) 2) (else 4))",
+        "(case 1 (((1)) 2) (else 4))",
+        "(case #t ((#t #f #t) 2) (else 4))",
     ] {
         let ours = s.parse_with_own_parser(text).expect_err("refused");
         let mut c = Checker::new();

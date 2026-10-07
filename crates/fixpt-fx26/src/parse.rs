@@ -1260,6 +1260,7 @@ impl Checker {
             }
             "begin" => self.parse_body(span, &items[1..]),
             "cond" => self.parse_cond(span, &items[1..]),
+            "case" => self.parse_case(span, &items[1..]),
             // `(acyclic e (x body) else)`: `(let ((%acyclic-value e)) (if
             // (acyclic? %acyclic-value) (let ((x (certify-acyclic
             // %acyclic-value))) body) else))`.
@@ -1558,6 +1559,97 @@ impl Checker {
             out = self.arena.exp(c.span, Exp::If { test, then, els: out });
         }
         Ok(out)
+    }
+
+    /// `(case key ((datum …) e …) … (else e …))` on atoms (`TODO.md` §46):
+    /// `(let ((%case-key key)) …)` and a chain of `if`s, each datum compared
+    /// by its kind's equality: `=` on integers, `char=?`, `string=?`,
+    /// `symbol=?`, `bool=?`. The data are of one kind and distinct, and the
+    /// `else` is required, as `cond`'s is.
+    fn parse_case(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let usage = "`(case key ((datum …) expression …) … (else expression …))`";
+        let [key, clauses @ ..] = items else {
+            return Err(FxError::at(span, usage));
+        };
+        let Some((last, init)) = clauses.split_last() else {
+            return Err(FxError::at(span, "a `case` needs at least an `else` clause"));
+        };
+        let parts = self.items(last, "a case clause")?.to_vec();
+        if parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) != Some("else") {
+            return Err(FxError::at(last.span, "a `case` must end with an `else` clause: FX has no unspecified value"));
+        }
+        let key = self.parse_exp(key)?;
+        let tmp = self.interner.intern("%case-key");
+        let (mut kind, mut seen) = (None, std::collections::HashSet::new());
+        let mut arms = Vec::new();
+        for c in init {
+            let parts = self.items(c, "a case clause")?.to_vec();
+            let [data, body @ ..] = &parts[..] else {
+                return Err(FxError::at(c.span, "a case clause is `((datum …) expression …)`"));
+            };
+            let data = self.items(data, "a case clause's data, `(datum …)`")?.to_vec();
+            if data.is_empty() {
+                return Err(FxError::at(c.span, "a case clause has at least one datum"));
+            }
+            let mut tests = Vec::new();
+            for d in &data {
+                let (k, eq, lit, text) = self.case_datum(d)?;
+                if *kind.get_or_insert(k) != k {
+                    return Err(FxError::at(d.span, "a `case`'s data are all of one kind: integers, characters, strings, symbols or booleans"));
+                }
+                if !seen.insert(text) {
+                    return Err(FxError::at(d.span, "a datum appears twice in this `case`"));
+                }
+                let f = self.interner.intern(eq);
+                let f = self.arena.exp(d.span, Exp::Var(f));
+                let a = self.arena.exp(d.span, Exp::Var(tmp));
+                tests.push(self.arena.exp(d.span, Exp::App { fun: f, args: vec![a, lit] }));
+            }
+            arms.push((c.span, tests, body.to_vec()));
+        }
+        // The bodies first to last, then the `else`'s, as the FX-26 parser.
+        let mut thens = Vec::new();
+        for (cspan, _, body) in &arms {
+            thens.push(self.parse_body(*cspan, body)?);
+        }
+        let mut out = self.parse_body(last.span, &parts[1..])?;
+        for ((cspan, tests, _), then) in arms.into_iter().zip(thens).rev() {
+            let mut tests = tests.into_iter().rev();
+            let mut test = tests.next().expect("a datum");
+            for t in tests {
+                let yes = self.arena.exp(cspan, Exp::Bool(true));
+                test = self.arena.exp(cspan, Exp::If { test: t, then: yes, els: test });
+            }
+            out = self.arena.exp(cspan, Exp::If { test, then, els: out });
+        }
+        Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, key)], body: out }))
+    }
+
+    /// A `case` datum: its kind, its kind's equality, its literal, and a
+    /// text that tells it from the others.
+    fn case_datum(&mut self, d: &Syntax) -> R<(u8, &'static str, ExpId, String)> {
+        let bad = "a `case` datum is an integer, a character, a string, a symbol or a boolean";
+        let (kind, eq, text) = match &d.datum {
+            Datum::Number(fixpt_read::Num::Int(n)) => (0, "=", format!("{n}")),
+            Datum::Number(fixpt_read::Num::Big { negative, digits, radix }) => {
+                (0, "=", format!("{negative}:{radix}:{}", digits.trim_start_matches('0')))
+            }
+            Datum::Char(c) => (1, "char=?", format!("{c}")),
+            Datum::Str(t) => (2, "string=?", t.clone()),
+            Datum::Bool(b) => (4, "bool=?", format!("{b}")),
+            Datum::Symbol(sym) => match self.name(*sym) {
+                "#t" => (4, "bool=?", "true".to_string()),
+                "#f" => (4, "bool=?", "false".to_string()),
+                "#u" => return Err(FxError::at(d.span, bad)),
+                n => {
+                    let text = n.to_string();
+                    let lit = self.arena.exp(d.span, Exp::Symbol(*sym));
+                    return Ok((3, "symbol=?", lit, text));
+                }
+            },
+            _ => return Err(FxError::at(d.span, bad)),
+        };
+        Ok((kind, eq, self.parse_exp(d)?, text))
     }
 
     /// A label or tag: a symbol, or a positive integer, as FX-91's

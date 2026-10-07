@@ -96,6 +96,74 @@
   (lambda (m) (cons (mod-item-of -1 (string->symbol m) (the syns-a nil) nil) nil)))
 
 ;;; ------------------------------------------------------------ expressions
+;; A `case` datum's kind (`TODO.md` §46): 0 an integer, 1 a character, 2
+;; a string, 3 a symbol, 4 a boolean, and -1 none of these.
+(define case-kind (subr (read @globals) (syn) int)
+  (lambda (s)
+    (tagcase s
+      (atom (d a b)
+        (cond ((or (datum-int? d) (datum-integer? d)) 0)
+              ((datum-char? d) 1)
+              ((datum-string? d) 2)
+              ((datum-bool? d) 4)
+              ((datum-symbol? d)
+               (let ((n (datum->symbol d)))
+                 (cond ((or (symbol=? n sym-true) (symbol=? n sym-false)) 4)
+                       ((symbol=? n sym-unit) -1)
+                       (else 3))))
+              (else -1)))
+      (else x -1))))
+;; A boolean datum's value, read as a literal or as `#t`.
+(define case-bool (subr (read @globals) (datum) bool)
+  (lambda (d) (if (datum-bool? d) (datum-bool-value d) (symbol=? (datum->symbol d) sym-true))))
+;; Whether two data of kind `k` are the same.
+(define case-same? (subr (read @globals) (int syn syn) bool)
+  (lambda (k s t)
+    (let ((d (syn->datum s)) (e (syn->datum t)))
+      (cond ((= k 0) (= (datum-int-value d) (datum-int-value e)))
+            ((= k 1) (char=? (datum-char-value d) (datum-char-value e)))
+            ((= k 2) (string=? (datum-string-value d) (datum-string-value e)))
+            ((= k 3) (symbol=? (datum->symbol d) (datum->symbol e)))
+            (else (bool=? (case-bool d) (case-bool e)))))))
+(define case-seen? (subr (read @globals) (int syn syns-a) bool)
+  (lambda (k s seen)
+    (and (not (null? seen)) (or (case-same? k s (car seen)) (case-seen? k s (cdr seen))))))
+;; A clause's data, checked against those before it, `seen`, last first;
+;; and `seen` with them.
+(define case-datums (subr parses (syns-a syns-a) syns-a)
+  (lambda (data seen)
+    (if (null? data)
+        seen
+        (let* ((d (car data)) (k (case-kind d)))
+          (if (= k -1)
+              (pfail "a `case` datum is an integer, a character, a string, a symbol or a boolean" d)
+              #u)
+          (if (and (not (null? seen)) (not (= k (case-kind (car seen)))))
+              (pfail (string-append "a `case`'s data are all of one kind: integers, characters, "
+                                    "strings, symbols or booleans")
+                     d)
+              #u)
+          (if (case-seen? k d seen) (pfail "a datum appears twice in this `case`" d) #u)
+          (case-datums (cdr data) (cons d seen))))))
+;; The clauses before a `case`'s `else`, each `((datum …) expression …)`.
+(define case-clauses (subr parses (syns-a syns-a) unit)
+  (lambda (clauses seen)
+    (if (null? (cdr clauses))
+        #u
+        (let* ((c (car clauses)) (parts (syn-items c "a case clause")))
+          (if (null? parts) (pfail "a case clause is `((datum …) expression …)`" c) #u)
+          (let ((data (syn-items (car parts) "a case clause's data, `(datum …)`")))
+            (if (null? data) (pfail "a case clause has at least one datum" c) #u)
+            (case-clauses (cdr clauses) (case-datums data seen)))))))
+;; A `case`'s last clause, which must be `else`.
+(define case-else (subr parses (syn) unit)
+  (lambda (c)
+    (let ((parts (syn-items c "a case clause")))
+      (if (and (not (null? parts)) (symbol=? (syn-head (car parts)) 'else))
+          #u
+          (pfail "a `case` must end with an `else` clause: FX has no unspecified value" c)))))
+(define case-last (subr pure (syns-a) syn)
+  (lambda (xs) (if (null? (cdr xs)) (car xs) (case-last (cdr xs)))))
 (define-rec
   (parse-exps (subr (maxeff parses spin) (syns-a) exp-list)
     (lambda (xs) (if (null? xs) nil (cons (parse-exp (car xs)) (parse-exps (cdr xs))))))
@@ -169,6 +237,7 @@
                        (parse-body (drop items 2) a b) a b)))
         ((symbol=? head 'begin) (parse-body (cdr items) a b))
         ((symbol=? head 'cond) (parse-cond (cdr items) a b))
+        ((symbol=? head 'case) (parse-case (cdr items) a b))
         ;; `(confirm-length e k (x body) else)`: `(let ((%confirm-value e))
         ;; (if (length-is? %confirm-value k) (let ((x (certify-length
         ;; %confirm-value k))) body) else))`.
@@ -352,6 +421,41 @@
             ((null? (cdr xs)) (parse-exp (car xs)))
             (else (let* ((x (parse-exp (car xs))) (rest (parse-or (cdr xs) a b)))
                     (e-if x (e-bool #t a b) rest a b))))))
+  ;; `(case key ((datum …) e …) … (else e …))` on atoms (`TODO.md` §46):
+  ;; `(let ((%case-key key)) …)` and nested `if`s, each datum compared by
+  ;; its kind's equality. The data are of one kind and distinct, and the
+  ;; `else` is required, as `cond`'s is.
+  (parse-case (subr (maxeff parses spin) (syns-a int int) exp)
+    (lambda (xs a b)
+      (cond ((null? xs)
+             (pfail-at "`(case key ((datum …) expression …) … (else expression …))`" a b))
+            ((null? (cdr xs)) (pfail-at "a `case` needs at least an `else` clause" a b))
+            (else
+             (begin (case-else (case-last (cdr xs)))
+                    (let ((key (parse-exp (car xs))))
+                      (case-clauses (cdr xs) nil)
+                      (e-let (one-let '%case-key key) (parse-case-arms (cdr xs)) a b)))))))
+  (parse-case-arms (subr (maxeff parses spin) (syns-a) exp)
+    (lambda (clauses)
+      (let* ((c (car clauses)) (parts (syn-items c "a case clause"))
+             (ca (syn-start c)) (cb (syn-end c)))
+        (if (null? (cdr clauses))
+            (parse-body (cdr parts) ca cb)
+            (let* ((test (case-tests (syn-items (car parts) "data") ca cb))
+                   (then (parse-body (cdr parts) ca cb)))
+              (e-if test then (parse-case-arms (cdr clauses)) ca cb))))))
+  ;; `(if d1 #t (if d2 #t … dn))`, each `di` the key compared with a datum.
+  (case-tests (subr (maxeff parses spin) (syns-a int int) exp)
+    (lambda (data ca cb)
+      (let ((t (case-test (car data))))
+        (if (null? (cdr data)) t (e-if t (e-bool #t ca cb) (case-tests (cdr data) ca cb) ca cb)))))
+  (case-test (subr (maxeff parses spin) (syn) exp)
+    (lambda (d)
+      (let* ((da (syn-start d)) (db (syn-end d)) (k (case-kind d))
+             (eq (cond ((= k 0) '=) ((= k 1) 'char=?) ((= k 2) 'string=?)
+                       ((= k 3) 'symbol=?) (else 'bool=?)))
+             (lit (if (= k 3) (e-sym (syn-head d) da db) (parse-exp d))))
+        (e-app (e-var eq da db) (list (e-var '%case-key da db) lit) da db))))
   (parse-bloblet (subr (maxeff parses spin) (symbol syns-a int int) exp)
     (lambda (op args a b)
       (let ((n (len args)))

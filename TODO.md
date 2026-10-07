@@ -1316,3 +1316,41 @@ characters, a compare chain or a hash on interned symbols (`eq`), a test
 of the length first on strings. Typing is plain: the key's type, the data
 of it, every arm's result the `case`'s. Both checkers, both compilers, the
 lowering (Scheme's own `case`) and the evaluator.
+
+**First step, done (2026-10-07):** `case` as a derived form in both
+parsers, as `cond` is: `(let ((%case-key key)) …)` and a chain of `if`s,
+each datum compared by its kind's equality (`=`, `char=?`, `string=?`,
+`symbol=?`, `bool=?`), several data to a clause as an `or`. The data are
+of one kind and distinct, floats and `#u` refused, `else` required; the
+parsers agree on the trees and on each refusal
+(`tests/parser.rs`, `case_parse_errors_agree`), and
+`programs/run/case.fx` answers the same lowered, on the Rust machine and
+natively. Every checker, compiler and machine sees only what it already
+handled. **Left:** the dispatch, as a recognition of comparison chains on
+one variable in the compilers, which helps a hand-written `cond` as much;
+then the front end's own `cond`s on a symbol rewritten as `case`; a key
+named `%case-key` in a clause body sees the key, not the outer binding.
+
+**Prior art (the user's pointer):** Clinger, "Rapid Case Dispatch in
+Scheme", Scheme Workshop 2006 (`docs/research/papers/case-dispatch/`,
+gitignored; `SOURCES.md` there). Larceny's Twobit recovers the clauses
+from `if` chains of `eq?`/`eqv?`/`memq`/`memv` on one variable, so it
+helps code with no `case` in it (p. 64); below 12 constants it keeps the
+sequential search (p. 64; `src/Compiler/pass2if.sch:15-21`). Otherwise it
+dispatches three times: on the type (characters, symbols, other
+constants, then fixnums), to a clause index, then by binary search on
+that index (p. 63, fig. 1). Fixnums and characters (as their codes) get
+a range check, then a table if `hi - lo < 5 × intervals`, else a binary
+search on intervals (p. 65; `pass2if.sch:454`). Symbols get a closed hash
+table probed in straight-line code to the largest distance the compiler
+found (`pass2if.sch:572`). The hash is computed at intern time and stored
+in the symbol (p. 65; `Lib/Common/oblist.sch:36`); it is a function of the
+name alone, `string-hash` (`Lib/Common/string.sch:269`), which Twobit
+duplicates by hand (`pass2if.sch:764-794`). At 1000 symbols the result was
+.13 s against 3.94 s sequentially, per million dispatches (Table 1, p. 68).
+Ours already has that hash: each symbol's slot 1 is FNV-1a of its name,
+made by `intern` (`crates/fixpt-heap/src/heap.rs:1196`), so a compiler can
+compute it from the datum. One function shared by the heap and the
+compilers keeps the two the same, with no copy to keep in sync. FX-26 is
+typed, so the dispatch on the type is not needed: the key's type is the
+data's kind.

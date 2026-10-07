@@ -1,0 +1,22 @@
+;;; `case` on atoms (`TODO.md` §46): symbols, integers (a bignum among
+;;; them), characters, strings and booleans, several data to a clause, and
+;;; the `else` taken; each answer a digit of the score.
+(define* sym-class (subr pure (symbol) int)
+  (lambda (s) (case s ((a) 1) ((b c) 2) (else 3))))
+(define* int-class (subr pure (int) int)
+  (lambda (n) (case n ((0) 1) ((1 2 3) 2) ((100000000000000000000) 3) (else 4))))
+(define* char-class (subr pure (char) int)
+  (lambda (c) (case c ((#\a #\e #\i) 1) ((#\space) 2) (else 3))))
+(define* string-class (subr pure (string) int)
+  (lambda (s) (case s (("x") 1) (("yy" "z") 2) (else 3))))
+(define* bool-class (subr pure (bool) int)
+  (lambda (b) (case b ((#t) 1) (else 2))))
+(define* score (subr pure () int)
+  (lambda ()
+    (let ((d (lambda ((acc int) (k int)) (+ (* acc 10) k))))
+      (d (d (d (d (d (d (d (d (d (d (sym-class 'a) (sym-class 'c)) (sym-class 'q))
+                                 (int-class 0)) (int-class 3))
+                           (int-class 100000000000000000000)) (int-class -7))
+                  (char-class #\space)) (string-class "z")) (bool-class #f))
+         (string-class "w")))))
+(score)

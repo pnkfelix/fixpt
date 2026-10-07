@@ -26,7 +26,8 @@ are in the last section, "Log: the glance's details", and in
   `letfreeze`; `acyclic` data (named `finite` until 2026-09-28,
   `docs/research/acyclic-regions.md`); `spin` with size-change
   termination; parametric and generative types; lemmas; the `data` kind;
-  sizes (`nlist`, `nat`). Globals are a region; redefinition follows one
+  sizes (`nlist`, `nat`); `case` on atoms (2026-10-07, a derived form;
+  its dispatch is `TODO.md` §46). Globals are a region; redefinition follows one
   rule at the REPL and in files, in both checkers; the REPL is
   incremental.
 - **Higher kinds** (2026-10-04; `docs/fx26.md`, "Higher kinds";

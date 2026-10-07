@@ -75,6 +75,12 @@ fn list_runs() {
     assert_eq!(run(include_str!("programs/run/list-regions.fx")), "54");
 }
 
+/// `case` on each kind of atom, lowered (`programs/run/case.fx`).
+#[test]
+fn case_dispatches_on_atoms() {
+    assert_eq!(run(include_str!("programs/run/case.fx")), "12312342223");
+}
+
 /// `f64` literals and operations, lowered (`programs/run/floats.fx`).
 #[test]
 fn floats_run() {

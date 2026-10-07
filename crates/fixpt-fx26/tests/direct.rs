@@ -396,6 +396,15 @@ fn unrolled_constant_lists_answer_as_searched() {
     assert_eq!((r.direct, r.rust.as_str()), (Ok("-1".into()), "-1"), "{}", r.code);
 }
 
+/// `case` on each kind of atom (`programs/run/case.fx`): the same answer
+/// natively and on the Rust machine.
+#[test]
+fn case_answers_natively() {
+    let defs = include_str!("programs/run/case.fx").trim_end().trim_end_matches("(score)");
+    let r = run(defs, "score", &[], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("12312342223".into()), "12312342223"), "{}", r.code);
+}
+
 /// A module's member folded through a `with`, then the module redefined
 /// (`TODO.md` §42): its global written again, the guard fails, and the
 /// plain version reads the new module's member.
