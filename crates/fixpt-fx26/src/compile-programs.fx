@@ -208,7 +208,19 @@
                    (set c-specials
                         (the c-specializables
                           (cons (c-special-of n ps body (car found)) (get c-specials)))))))
-            (else #u)))))
+            (else #u))
+      (c-note-unroll! n ps body))))
+;; Small and calling itself: unrolled where called with a constant list, as
+;; the Rust compiler's `unrolls` (`TODO.md` §44).
+(define c-note-unroll! (subr (maxeff c-emits spin) (symbol c-params exp) unit)
+  (lambda (n ps body)
+    (if (and (not (null? (get c-last-word)))
+             (and (c-mentions? body n)
+                  (and (>= (c-inline-room body c-inline-limit) 0)
+                       (not (c-mentions? body 'stay-cellular)))))
+        (table-set! (get c-unrolls) n
+                    (the c-inlinables (cons (c-inline-of n ps body) (c-unrolls-of n))))
+        #u)))
 
 ;; The expression compiled last, in a list (for `compile-note-inline!`).
 (define c-last-exp (ref (listof exp @k) @k) (new nil))
@@ -230,6 +242,7 @@
                     (tagcase (car l)
                       (e-lambda (ps body la lb)
                         (begin (set c-inlines (c-drop-inline (get c-inlines) n))
+                               (table-set! (get c-unrolls) n nil)
                                (set c-specials (c-drop-special (get c-specials) n))
                                (set c-last-word w)
                                (c-record-inline n ps body)))
@@ -303,6 +316,7 @@
 (define c-push-global (subr c-emits (symbol) wglobal)
   (lambda (n)
     (let ((kept (begin (set c-inlines (c-drop-inline (get c-inlines) n))
+                       (table-set! (get c-unrolls) n nil)
                        (set c-specials (c-drop-special (get c-specials) n))
                        (c-kept (get c-reuse) n))))
       (if (null? kept)
@@ -373,8 +387,11 @@
 (define c-const-of (subr (maxeff compiles spin) (exp) rconsts)
   (lambda (x)
     (let ((lit (c-literal-of x)))
-      (if (not (null? lit))
-          lit
+      (cond
+        ((not (null? lit)) lit)
+        ;; A list nothing writes, of literals: made once, here.
+        ((c-frozen-define-at (exp-start x) (exp-end x)) (c-const-list x))
+        (else
           (tagcase x
             (e-var (n a b)
               (let ((l (c-where (the cenv nil) n)))
@@ -385,7 +402,96 @@
                       (else y nil)))))
             (e-with (m body a b)
               (tagcase body (e-var (f fa fb) (c-member-const m f)) (else y nil)))
+            (else y nil)))))))
+;; The list `x` makes, in a list, if it is one of literals (integers,
+;; booleans, characters, symbols): `nil`, `(list e …)`, `(cons e l)`, a
+;; global that is such a list, or a call of a small procedure noted to be
+;; inlined (`c-inlines`) whose body makes one from its arguments. As the
+;; Rust compiler's `const_list`.
+(define c-const-list (subr (maxeff compiles spin) (exp) rconsts)
+  (lambda (x)
+    (let ((v (c-const-value x (the c-const-env nil) 0)))
+      (if (and (not (null? v)) (tagcase (car v) (rc-pair (a d) #t) (rc-nil () #t) (else y #f)))
+          v
+          nil))))
+(define-type c-const-env (listof (pairof symbol rconst @k) @k))
+(define c-const-in (subr c-lists (c-const-env symbol) rconsts)
+  (lambda (e n)
+    (cond ((null? e) nil)
+          ((symbol=? (car (car e)) n) (the rconsts (cons (cdr (car e)) nil)))
+          (else (c-const-in (cdr e) n)))))
+;; What `x` is, as constant data, where its names are `env`'s: as the Rust
+;; compiler's `const_value`, at most 16 calls deep.
+(define c-const-value (subr (maxeff compiles spin) (exp c-const-env int) rconsts)
+  (lambda (x env depth)
+    (let ((lit (c-literal-of x)))
+      (if (not (null? lit))
+          lit
+          (tagcase x
+            (e-sym (s a b) (the rconsts (cons (rc-sym s) nil)))
+            (e-the (d body a b) (c-const-value body env depth))
+            (e-plambda (d body a b) (c-const-value body env depth))
+            (e-proj (body ds a b) (c-const-value body env depth))
+            (e-var (n a b)
+              (let ((k (c-const-in env n)))
+                (if (not (null? k))
+                    k
+                    (let ((l (c-where (the cenv nil) n)))
+                      (if (null? l)
+                          (if (std-nil-name? (symbol->string n))
+                              (the rconsts (cons (rc-nil) nil))
+                              nil)
+                          (tagcase (car l)
+                            (at-global (g) (r-const-in (get r-const-globals) g))
+                            (else y nil)))))))
+            (e-app (f args a b)
+              (tagcase f
+                (e-var (fname fa fb)
+                  (let ((vs (c-const-values args env depth nil)))
+                    (cond ((not (null? (c-const-in env fname))) nil)
+                          ((null? vs) nil)
+                          ((null? (c-where (the cenv nil) fname)) (c-const-standard fname (car vs)))
+                          (else (c-const-call fname (car vs) depth)))))
+                (else y nil)))
             (else y nil))))))
+;; Each of `es`' constants, in order, in a list; none if one is not one.
+(define c-const-values
+  (subr (maxeff compiles spin) (exps c-const-env int rconsts) (listof rconsts @k))
+  (lambda (es env depth acc)
+    (if (null? es)
+        (the (listof rconsts @k) (cons (r-rev-consts acc nil) nil))
+        (let ((v (c-const-value (car es) env depth)))
+          (if (null? v) nil (c-const-values (cdr es) env depth (cons (car v) acc)))))))
+;; `list` or `cons` of constants `vs`.
+(define c-const-standard (subr (maxeff compiles spin) (symbol rconsts) rconsts)
+  (lambda (f vs)
+    (cond ((string=? (symbol->string f) "list") (the rconsts (cons (c-const-list-of vs) nil)))
+          ((and (string=? (symbol->string f) "cons") (= (c-length-consts vs) 2))
+           (tagcase (car (cdr vs))
+             (rc-pair (x d) (the rconsts (cons (rc-pair (car vs) (car (cdr vs))) nil)))
+             (rc-nil () (the rconsts (cons (rc-pair (car vs) (car (cdr vs))) nil)))
+             (else y nil)))
+          (else nil))))
+(define c-const-list-of (subr (maxeff compiles spin) (rconsts) rconst)
+  (lambda (vs) (if (null? vs) (rc-nil) (rc-pair (car vs) (c-const-list-of (cdr vs))))))
+;; A call of a small procedure noted to be inlined, on constants `vs`: its
+;; body, its parameters the arguments, in the globals it saw.
+(define c-const-call (subr (maxeff compiles spin) (symbol rconsts int) rconsts)
+  (lambda (f vs depth)
+    (let ((i (r-inline-named (get c-inlines) f (c-length-consts vs) (get c-genv))))
+      (if (or (null? i) (>= depth 16))
+          nil
+          (let* ((outer (get c-genv))
+                 (inner (c-const-bind (extract (car i) 3) vs))
+                 (set-genv (set c-genv (extract (car i) 5)))
+                 (v (c-const-value (extract (car i) 4) inner (+ depth 1))))
+            (begin (set c-genv outer) v))))))
+(define c-const-bind (subr (maxeff compiles spin) (c-params rconsts) c-const-env)
+  (lambda (ps vs)
+    (if (or (null? ps) (null? vs))
+        nil
+        (the c-const-env
+          (cons (cons (extract (car ps) 1) (car vs)) (c-const-bind (cdr ps) (cdr vs)))))))
 ;; Each module's literal members, and one module's.
 (define-type c-mconsts (listof r-module-const @k))
 (define-type c-members (listof r-member-const @k))
@@ -395,6 +501,16 @@
     (cond ((null? cs) cs)
           ((wglobal=? (car (car cs)) g) (c-consts-without (cdr cs) g))
           (else (the r-const-list (cons (car cs) (c-consts-without (cdr cs) g)))))))
+(define c-note-const-list! (subr (maxeff compiles spin) (wglobal rconst) unit)
+  (lambda (g c)
+    (let ((n (wglobal-name g)))
+      (table-set! (get r-const-lists) n
+                  (the r-const-list (cons (cons g c) (table-ref (get r-const-lists) n nil)))))))
+(define c-forget-const-list! (subr (maxeff compiles spin) (wglobal) unit)
+  (lambda (g)
+    (let ((n (wglobal-name g)))
+      (table-set! (get r-const-lists) n
+                  (c-consts-without (table-ref (get r-const-lists) n nil) g)))))
 (define c-modules-consts-without (subr c-lists (c-mconsts wglobal) c-mconsts)
   (lambda (ms g)
     (cond ((null? ms) ms)
@@ -417,9 +533,13 @@
     (let ((k (c-const-of x)))
       (begin
         (set r-const-globals (c-consts-without (get r-const-globals) g))
+        (c-forget-const-list! g)
         (if (null? k)
             #u
-            (set r-const-globals (the r-const-list (cons (cons g (car k)) (get r-const-globals)))))
+            (begin
+              (if (r-const-list? (car k)) (c-note-const-list! g (car k)) #u)
+              (set r-const-globals
+                   (the r-const-list (cons (cons g (car k)) (get r-const-globals))))))
         (set r-module-consts (c-modules-consts-without (get r-module-consts) g))
         (tagcase x
           (e-module (items a b)
@@ -629,6 +749,7 @@
           ;; Constants are a program's own, as the Rust compiler's are
           ;; (`TODO.md` §42; at the REPL, none yet).
           (set r-const-globals nil)
+          (set r-const-lists (make-table symbol-hash symbol=?))
           (set r-module-consts nil)
           ;; So are the counts of writes the guards expect.
           (set c-writes (make-table symbol-hash symbol=?))

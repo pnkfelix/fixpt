@@ -1529,6 +1529,7 @@ prims! {
         Ok(f)
     });
     "%fx26-sum-cell", 2, Some(2), simple!(|rt, a| Ok(rt.heap.make_frozen(SUM_KIND, &a[..2])));
+    "%fx26-pair-cell", 2, Some(2), simple!(|rt, a| Ok(rt.heap.cons(a[0], a[1])));
     "%fx26-product-cell", 1, Some(1), simple!(|rt, a| {
         let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };
         Ok(rt.heap.make_frozen(PRODUCT_KIND, &items))

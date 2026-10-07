@@ -384,6 +384,18 @@ fn array_elements_in_and_out_of_range() {
     assert!(matches!(&r.direct, Err(m) if m.contains("field")), "{:?} (the Rust machine: {})\n{}", r.direct, r.rust, r.code);
 }
 
+/// Constant lists unrolled (`programs/run/unrolled-lists.fx`): the same
+/// answers natively and on the Rust machine; and, the list redefined, the
+/// guard fails and the search sees the new one.
+#[test]
+fn unrolled_constant_lists_answer_as_searched() {
+    let defs = include_str!("programs/run/unrolled-lists.fx").trim_end().trim_end_matches("(score)");
+    let r = run(defs, "score", &[], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("211".into()), "211"), "{}", r.code);
+    let r = run(&format!("{defs}(define k syms (list 'q))\n"), "score", &[], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("-1".into()), "-1"), "{}", r.code);
+}
+
 /// A module's member folded through a `with`, then the module redefined
 /// (`TODO.md` §42): its global written again, the guard fails, and the
 /// plain version reads the new module's member.

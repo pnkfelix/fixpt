@@ -391,6 +391,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("wcell-self", "(subr pure () wcell)"),
     ("wcell-nil", "(subr pure () wcell)"),
     ("wcell-sum", "(subr pure (symbol wcell) wcell)"),
+    // A pair of constants, made while compiling: a constant list's
+    // (`TODO.md` §44).
+    ("wcell-pair", "(subr pure (wcell wcell) wcell)"),
     // A lambda-lifted procedure's closure, over nothing, its word to come;
     // and its word, once compiled.
     ("wcell-closure", "(subr pure () wcell)"),

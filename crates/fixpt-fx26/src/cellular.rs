@@ -139,6 +139,9 @@ pub struct Compiler<'a> {
     /// each one's name, word, parameters, body, and how many globals there
     /// were when its body was compiled, which are those its names see.
     inlines: Vec<Inline>,
+    /// Small global procedures that call themselves: unrolled where called
+    /// with a constant list (`regcode::r_unroll`, `TODO.md` §44).
+    unrolls: Vec<Inline>,
     /// While an inlined body is compiled: how many globals it sees.
     genv_limit: Option<usize>,
     /// The globals whose bodies are being inlined, which are not again.
@@ -271,6 +274,9 @@ struct Inline {
 const INLINE_LIMIT: i64 = 20;
 /// The most a procedure's body may have to be specialized at a lambda.
 const SPECIAL_LIMIT: i64 = 60;
+/// The most a procedure is unrolled within itself over a constant list
+/// (`regcode::r_unroll`): the longest list it unrolls is one shorter.
+const UNROLL_LIMIT: usize = 16;
 
 type R<T> = Result<T, String>;
 
@@ -295,6 +301,7 @@ impl<'a> Compiler<'a> {
             lifting_added: 0,
             declined: None,
             inlines: Vec::new(),
+            unrolls: Vec::new(),
             genv_limit: None,
             inlining: Vec::new(),
             last_word: Value::FALSE,
@@ -2029,9 +2036,13 @@ impl<'a> Compiler<'a> {
 
     /// The constant a top-level definition's expression is, if it is one: a
     /// literal; a constant global; a re-export of a module's literal member.
-    fn const_of(&self, x: ExpId) -> Option<Value> {
+    fn const_of(&mut self, x: ExpId) -> Option<Value> {
         if let Some(v) = self.literal_of(x) {
             return Some(v);
+        }
+        // A list nothing writes, of literals: made once, here.
+        if self.c.facts.frozen_defines.contains(&x) {
+            return self.const_list(x);
         }
         match self.c.arena.exp_at(x).clone() {
             Exp::Var(n) => match self.where_is(&Vec::new(), n) {
@@ -2042,6 +2053,71 @@ impl<'a> Compiler<'a> {
                 let Exp::Var(f) = *self.c.arena.exp_at(body) else { return None };
                 let Some(Loc::Global(g)) = self.where_is(&Vec::new(), module) else { return None };
                 self.module_consts.get(&g.raw())?.iter().find(|(n, _)| *n == f).map(|(_, v)| *v)
+            }
+            _ => None,
+        }
+    }
+
+    /// The list `x` makes, if it is one of literals (integers, booleans,
+    /// characters, symbols): `nil`, `(list e …)`, `(cons e l)`, a global
+    /// that is such a list, or a call of a small procedure noted to be
+    /// inlined (`inlines`) whose body makes one from its arguments, so that
+    /// a helper that builds a list is seen through as register code sees
+    /// through it. Made in the heap now, as constant data (it is at a
+    /// region nothing writes: `frozen_defines`).
+    fn const_list(&mut self, x: ExpId) -> Option<Value> {
+        let v = self.const_value(x, &[], 0)?;
+        (v.is_pair() || v == Value::NULL).then_some(v)
+    }
+
+    /// What `x` is, as constant data, where its names are `env`'s values:
+    /// a literal, a symbol, a list of such, or a call of a procedure of
+    /// `inlines` on such, at most `UNROLL_LIMIT` calls deep.
+    fn const_value(&mut self, x: ExpId, env: &[(Sym, Value)], depth: usize) -> Option<Value> {
+        if let Some(v) = self.literal_of(x) {
+            return Some(v);
+        }
+        match self.c.arena.exp_at(x).clone() {
+            Exp::Symbol(s) => {
+                let name = self.c.interner.name(s).to_string();
+                Some(self.heap.intern(&name))
+            }
+            Exp::The { exp: body, .. } | Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.const_value(body, env, depth),
+            Exp::Var(n) => {
+                if let Some((_, v)) = env.iter().rev().find(|(m, _)| *m == n) {
+                    return Some(*v);
+                }
+                match self.where_is(&Vec::new(), n) {
+                    None if self.name(n) == "nil" => Some(Value::NULL),
+                    Some(Loc::Global(g)) => self.const_globals.get(&g.raw()).copied(),
+                    _ => None,
+                }
+            }
+            Exp::App { fun, args } => {
+                let Exp::Var(f) = *self.c.arena.exp_at(fun) else { return None };
+                if env.iter().any(|(m, _)| *m == f) {
+                    return None;
+                }
+                let vs: Vec<Value> = args.iter().map(|a| self.const_value(*a, env, depth)).collect::<Option<_>>()?;
+                if self.where_is(&Vec::new(), f).is_none() {
+                    return match (self.name(f), &vs[..]) {
+                        ("list", _) => Some(vs.iter().rev().fold(Value::NULL, |d, a| self.heap.cons(*a, d))),
+                        ("cons", [a, d]) if d.is_pair() || *d == Value::NULL => Some(self.heap.cons(*a, *d)),
+                        _ => None,
+                    };
+                }
+                // A small procedure noted to be inlined: its body, its
+                // parameters the arguments, in the globals it saw.
+                let k = self.inlines.iter().position(|i| i.name == f && i.params.len() == vs.len() && self.sees(i.genv_len))?;
+                if depth >= UNROLL_LIMIT {
+                    return None;
+                }
+                let (body, genv_len) = (self.inlines[k].body, self.inlines[k].genv_len);
+                let inner: Vec<(Sym, Value)> = self.inlines[k].params.iter().copied().zip(vs).collect();
+                let outer = self.genv_limit.replace(genv_len);
+                let v = self.const_value(body, &inner, depth + 1);
+                self.genv_limit = outer;
+                v
             }
             _ => None,
         }
@@ -2107,6 +2183,7 @@ impl<'a> Compiler<'a> {
     fn global_for(&mut self, n: Sym, assigns: bool) -> Value {
         self.inlines.retain(|i| i.name != n);
         self.specials.retain(|i| i.name != n);
+        self.unrolls.retain(|i| i.name != n);
         match self.global(n, self.genv.len()) {
             Some(Loc::Global(g)) if assigns => g,
             _ => self.push_global(n),
@@ -2193,6 +2270,16 @@ impl<'a> Compiler<'a> {
                                 let (word, genv_len) = (self.last_word, self.genv.len());
                                 self.specials.push(Special { name: *name, word, params, body, genv_len, param, arity });
                             }
+                        }
+                        // Small and calling itself: unrolled where called
+                        // with a constant list.
+                        if let Some((params, body, None)) = self.lambda_of(*exp)
+                            && self.mentions(body, *name)
+                            && self.inline_room(body, INLINE_LIMIT) >= 0
+                            && !stays(self, body)
+                        {
+                            let genv_len = self.genv.len();
+                            self.unrolls.push(Inline { name: *name, params, body, genv_len });
                         }
                         g
                     };

@@ -1409,6 +1409,12 @@ impl Compiler<'_> {
             };
             self.plan_check_call(x, got);
         }
+        if let Some((k, cell, known)) = self.r_unrolled(env, f, args) {
+            if self.assume.is_none() && g.leaf {
+                return self.decline("a call in a leaf");
+            }
+            return self.r_unroll(g, k, cell, known, f, args, env, te, tail);
+        }
         if let Some((k, cell)) = self.r_inline_of(x, env, f, args) {
             if self.assume.is_none() && g.leaf {
                 return self.decline("a call in a leaf");
@@ -1498,6 +1504,129 @@ impl Compiler<'_> {
         }
         let k = self.inlines.iter().position(|i| i.name == name && i.params.len() == n && self.sees(i.genv_len))?;
         Some((k, cell))
+    }
+
+    /// Which of `unrolls` `f` names, its global's cell, and each argument's
+    /// constant list (`const_list`) where it is one, with the global it
+    /// came from if it was read from one: when `f` names one, called with
+    /// at least one such argument, and not unrolled more than
+    /// `UNROLL_LIMIT` deep here (`TODO.md` §44).
+    fn r_unrolled(&mut self, env: &[(Sym, RLoc)], f: ExpId, args: &[ExpId]) -> O<(usize, Value, Vec<Option<(Value, Option<Value>)>>)> {
+        let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+        let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
+        let k = self.unrolls.iter().position(|i| i.name == name && i.params.len() == args.len() && self.sees(i.genv_len))?;
+        if self.inlining.iter().filter(|n| **n == name).count() >= super::UNROLL_LIMIT {
+            return None;
+        }
+        let list = |v: &Value| v.is_pair() || *v == Value::NULL;
+        let mut known = Vec::new();
+        for a in args {
+            known.push(match self.r_const(env, *a) {
+                Some(v) if list(&v) => Some((v, None)),
+                Some(_) => None,
+                None => match *self.c.arena.exp_at(*a) {
+                    Exp::Var(n) => match self.r_where(env, n) {
+                        Some(RLoc::Global(g)) => self.const_globals.get(&g.raw()).copied().filter(list).map(|v| (v, Some(g))),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+            });
+        }
+        // Its body writes no global, so a guard checked at the outermost
+        // call holds within (`r_unroll`).
+        let body = self.unrolls[k].body;
+        (known.iter().any(Option::is_some) && self.summary_of(body) < 3).then_some((k, cell, known))
+    }
+
+    /// A call of `unrolls[k]` with a constant list: its body inlined, each
+    /// such argument known, so that `null?`, `car` and `cdr` of it fold and
+    /// its call of itself on the rest is unrolled in turn, until the list
+    /// ends and the test that ends it is decided. Behind guards, to the
+    /// call: on the procedure's global, at the outermost call only (its
+    /// body writes no global), and on each global a list was read from.
+    /// Not planned: each level knows a different list, so the calls within
+    /// are decided here (`r_in_plan` off).
+    #[allow(clippy::too_many_arguments)]
+    fn r_unroll(&mut self, g: &mut Gen, k: usize, cell: Value, known: Vec<Option<(Value, Option<Value>)>>, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        let (regs, slots) = (g.next_reg, g.next_slot);
+        let (name, body, genv_len) = (self.unrolls[k].name, self.unrolls[k].body, self.unrolls[k].genv_len);
+        let params = self.unrolls[k].params.clone();
+        let (mut own_env, mut own_te, mut slow) = (Vec::new(), Vec::new(), Vec::new());
+        let mut guarded = Vec::new();
+        if !self.inlining.contains(&name) {
+            guarded.push(cell);
+        }
+        for ((p, a), kn) in params.iter().zip(args).zip(&known) {
+            own_te.push((*p, Loc::Slot(usize::MAX)));
+            if let Some((v, from)) = kn {
+                // The call, where a guard fails: a list read from a global
+                // read from it again, as the guard fails where it was
+                // written since; one made here, given as it is.
+                own_env.push((*p, RLoc::Const(*v)));
+                slow.push(if from.is_some() { Arg::E(*a) } else { Arg::V(*v) });
+                guarded.extend(from);
+                continue;
+            }
+            if let Some(v) = self.r_const(env, *a) {
+                own_env.push((*p, RLoc::Const(v)));
+                slow.push(Arg::V(v));
+                continue;
+            }
+            match self.r_var(env, *a) {
+                Some(l @ (RLoc::Slot(_) | RLoc::Free(_))) => {
+                    own_env.push((*p, l));
+                    slow.push(Arg::E(*a));
+                }
+                Some(l @ RLoc::Reg(_)) if self.assume.is_some() => {
+                    own_env.push((*p, l));
+                    slow.push(Arg::E(*a));
+                }
+                _ => {
+                    self.r_exp(g, *a, env, te, false)?;
+                    let l = Self::r_keep(g, g.leaf)?;
+                    own_env.push((*p, l));
+                    slow.push(match l {
+                        RLoc::Slot(s) => Arg::Slot(s),
+                        _ => Arg::E(*a),
+                    });
+                }
+            }
+        }
+        let (call, end) = (g.label(), g.label());
+        let mut any_guard = false;
+        for c in guarded {
+            if !self.r_assume(c) {
+                self.r_guard(g, c, call);
+                any_guard = true;
+            }
+        }
+        let outer = (g.this.take(), self.genv_limit.replace(genv_len), std::mem::replace(&mut self.r_in_plan, false));
+        self.inlining.push(name);
+        let inlined = self.r_exp(g, body, &mut own_env, &mut own_te, tail);
+        self.inlining.pop();
+        (g.this, self.genv_limit, self.r_in_plan) = outer;
+        inlined?;
+        if !any_guard {
+            g.next_reg = regs;
+            g.next_slot = slots;
+            return Some(());
+        }
+        if !tail {
+            g.items.push(RItem::Branch(false, end));
+        }
+        g.items.push(RItem::Label(call));
+        self.r_args(g, &slow, env, te, Some(f))?;
+        if tail {
+            g.leave();
+            g.op("tailinvoke", &[Gen::n(args.len())]);
+        } else {
+            g.op("invoke", &[Gen::n(args.len())]);
+        }
+        g.items.push(RItem::Label(end));
+        g.next_reg = regs;
+        g.next_slot = slots;
+        Some(())
     }
 
     /// A call of a small global procedure, inlined: the arguments made and
@@ -2115,6 +2244,10 @@ impl Compiler<'_> {
                     "=" => int2().map(|(a, b)| Value::boolean(a == b)),
                     "not" if vs.len() == 1 => Some(Value::boolean(vs[0] == Value::FALSE)),
                     "null?" if vs.len() == 1 => Some(Value::boolean(vs[0] == Value::NULL)),
+                    // A constant list is at a region nothing writes
+                    // (`const_list`): its parts are constants too.
+                    "car" if vs.len() == 1 && vs[0].is_pair() => Some(self.heap.car(vs[0])),
+                    "cdr" if vs.len() == 1 && vs[0].is_pair() => Some(self.heap.cdr(vs[0])),
                     "char=?" if vs.len() == 2 && vs.iter().all(|v| v.is_char()) => Some(Value::boolean(vs[0] == vs[1])),
                     // A fixed-width integer is the fixnum of its value: an
                     // integer that fits the type is its own conversion.

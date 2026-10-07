@@ -28,7 +28,9 @@
 ;;;   string_accumulator 0 n)` makes the string from a list of those
 ;;;   characters.
 ;;; - `case` on characters is `char=?` and `char-in?`; `case` on token kinds
-;;;   is `symbol=?` and a search of a list made once.
+;;;   is `symbol=?` and a search of a list made once, at `acyclic`, which
+;;;   nothing writes: so the compilers unroll the search into the tests a
+;;;   `case` makes (`TODO.md` §44).
 ;;; - `string->number` is `parse-nat`: nboyer.sch's numbers are all decimal
 ;;;   integers with no sign.
 ;;; - `(char? c)` in state12 is always true, and is #t here.
@@ -38,10 +40,10 @@
 
 (define-effect pe (maxeff (read @heap) (write @heap) (alloc @heap) spin (read @globals)))
 
-(define-type syms (listof symbol @heap))
-(define* syms5 (subr (alloc @heap) (symbol symbol symbol symbol symbol) syms)
+(define-type syms (listof symbol acyclic))
+(define* syms5 (subr (alloc acyclic) (symbol symbol symbol symbol symbol) syms)
   (lambda (a b c d e) (list a b c d e)))
-(define* one-of? (subr (maxeff (read @heap) spin) (symbol syms) bool)
+(define* one-of? (subr spin (symbol syms) bool)
   (lambda (t l) (if (null? l) #f (if (symbol=? t (car l)) #t (one-of? t (cdr l))))))
 
 ;; The kinds of token each `case` of the parser tests for.

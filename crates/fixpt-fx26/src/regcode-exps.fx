@@ -975,5 +975,7 @@
 (define r-letrec-te-j (with regcode-exps-module r-letrec-te-j))
 (define r-letrec-patch (with regcode-exps-module r-letrec-patch))
 (define r-letrec-env-j (with regcode-exps-module r-letrec-env-j))
+(define-type rinline (select regcode-exps-module rinline))
 (define r-inline-of (with regcode-exps-module r-inline-of))
+(define r-inline-named (with regcode-exps-module r-inline-named))
 (define r-special-of (with regcode-exps-module r-special-of))

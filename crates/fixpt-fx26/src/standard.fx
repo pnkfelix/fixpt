@@ -293,6 +293,7 @@
       ((string=? n "wcell-self") "%default-object")
       ((string=? n "wcell-nil") "%fx26-nil-cell")
       ((string=? n "wcell-sum") "%fx26-sum-cell")
+      ((string=? n "wcell-pair") "%fx26-pair-cell")
       ((string=? n "wcell-closure") "%fx26-closure-cell")
       ((string=? n "close-over-word!") "%fx26-close-over-word!")
       ((string=? n "wcell-product") "%fx26-product-cell")

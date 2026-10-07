@@ -1171,3 +1171,30 @@ fold (reading frozen heap data is pure); and a call of a small recursive
 procedure with a constant list argument is unrolled, inlining it once
 for each element, bounded by the list's length and a size limit: the
 simplifier above, its first customer.
+
+Built (2026-10-07): constant lists, folded and unrolled, both compilers.
+- Both checkers note each top-level definition typed a list in a frozen
+  region (`frozen_defines`, the fact -501); its value, if built of
+  literals, is made once as constant data (`const_list`; `c-const-list`),
+  seen through calls of small procedures noted for inlining, so a helper
+  that builds a list (`parsing.fx`'s `syms5`) is no obstacle (the user's
+  question: "why aren't we inlining sym5?"). `nil` is a constant list.
+- `car` and `cdr` of a constant pair fold (`r_const`; `r-fold`).
+- A small procedure that calls itself (`unrolls`; `c-unrolls`, by name) is
+  unrolled where called with a constant list, a constant here or a global
+  holding one: its body inlined with the list known, its call of itself on
+  the rest unrolled in turn, at most 16 deep, until the test that ends the
+  list is decided. Behind guards on the procedure's global (at the
+  outermost call only; its body writes no global) and each global a list
+  was read from; where one fails, the call, the list read from its global
+  again. Not planned: each level knows a different list.
+- The FX-26 compiler keeps its constant lists apart from the other
+  constants, by name, and its unroll notes by name (the user's: segregate
+  what a call asks of, rather than a flag to skip asking).
+
+`parsing.fx`'s token sets typed `acyclic` (the user's approval): register
+code 91.7 / 92.0 → 84.0 / 83.6 ms at 100 iterations, against HEAD back to
+back; the hand-unrolled version, 82.5–82.9. The front end compiled by
+FX-26 (`fx words`): 265.4 / 261.5 → 273.5 / 265.3 ms, the front end itself
+1.2% longer. Tests: `programs/run/unrolled-lists.fx` (`register_code.rs`,
+`direct.rs`, with `k` redefined).

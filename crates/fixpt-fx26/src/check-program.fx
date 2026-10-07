@@ -674,6 +674,7 @@
                                (k-note-alone name tf x rsaved))
                         #u))
            (e (if star (k-star-checked name tf x) e0))
+           (frozen (k-note-frozen-define tf x))
            (closed (if (>= inside 0)
                        (begin (set k-transparent (cdr (get k-transparent)))
                               (set k-conversions (cons (cons name t) (get k-conversions))))

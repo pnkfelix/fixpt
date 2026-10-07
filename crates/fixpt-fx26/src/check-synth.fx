@@ -16,6 +16,17 @@
     (tagcase (k-get t)
       (ty-pair (a d r) (tagcase r (r-frozen (p finite) finite) (else y #f)))
       (else y #f))))
+;; Note, for the compilers, that a top-level definition's value `x`, of
+;; type `t`, is a list in a frozen region (`acyclic` or `const`): data
+;; nothing writes, which they may make once if it is made of literals; the
+;; fact -501 (`c-fill-facts`). As the Rust checker's `frozen_defines`.
+(define k-note-frozen-define (subr (maxeff checks spin) (int kx) unit)
+  (lambda (t x)
+    (if (tagcase (k-get t)
+          (ty-pair (a d r) (tagcase r (r-frozen (p finite) #t) (else y #f)))
+          (else y #f))
+        (set k-extracts (cons (product (1 (k-start x)) (2 (k-end x)) (3 -501)) (get k-extracts)))
+        #u)))
 ;; Note, for the compilers, that the call `x` of `f` (on parameters
 ;; `params`) is `apply` of a list at `acyclic`, which it need not copy: the
 ;; fact -500 (`c-fill-facts`). Every other `apply` copies its list, so that
@@ -242,6 +253,7 @@
 ))
 
 (define k-note-apply-shares (with check-synth-module k-note-apply-shares))
+(define k-note-frozen-define (with check-synth-module k-note-frozen-define))
 (define-type k-done (select check-synth-module k-done))
 (define k-te-masked (with check-synth-module k-te-masked))
 (define k-new-subr (with check-synth-module k-new-subr))

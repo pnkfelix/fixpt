@@ -324,10 +324,10 @@
     (lambda (g f args a b env te tail)
       (let ((n (c-count-exps args)))
         (cond ;; An inlined call: in a fast version, no call, so in a leaf too.
-              ((not (null? (r-inline-of a b env f n)))
+              ((not (null? (r-inline-or-unroll a b env f args n)))
                (if (and (not (get r-assuming)) (extract g leaf))
                    (r-decline)
-                   (let ((i (car (r-inline-of a b env f n))))
+                   (let ((i (car (r-inline-or-unroll a b env f args n))))
                      (r-inline g (car i) (cdr i) f args env te tail))))
               ((extract g leaf)
                (if (and tail
@@ -376,9 +376,8 @@
              (outer-ctx (get c-r-plan-ctx))
              ;; The procedure running is not known in the body.
              (h (r-unknowing g)))
-        (let ((assumed (r-assume cell)))
+        (let ((assumed (not (r-guards-for g cell f call))))
           (begin
-            (if assumed #u (r-guard g cell call))
             (set c-genv (extract i 5))
             (set c-inlining (cons (extract i 1) outer-inlining))
             ;; Its plan's, along the path here (3b).
@@ -407,7 +406,7 @@
       (if (or (null? ps) (null? args))
           (product (1 (the renv nil)) (2 (the cenv nil)) (3 (the rargs nil)))
           (let* ((p (extract (car ps) 1)) (a (car args))
-                 (k (r-known env a))
+                 (k (r-known-arg env a))
                  (l (if (null? k) (r-var-loc env a) (the rlocs (cons (rl-const (car k)) nil))))
                  (kept (if (null? l)
                            (the rlocs nil)
@@ -422,7 +421,7 @@
                  (here (if (null? kept)
                            (begin (r-exp g a env te #f) (r-keep g (extract g leaf)))
                            (car kept)))
-                 (arg (cond ((not (null? k)) (a-v (r-const-cell (car k))))
+                 (arg (cond ((not (null? k)) (r-known-slow a (car k)))
                             ((null? kept) (tagcase here (rl-slot (s) (a-slot s)) (else y (a-e a))))
                             (else (a-e a))))
                  (rest (r-inline-args g (cdr ps) (cdr args) env te)))

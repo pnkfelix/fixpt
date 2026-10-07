@@ -23,6 +23,11 @@
 (define c-inline-limit int 20)
 
 (define c-inlines (ref c-inlinables @k) (new nil))
+;; Small global procedures that call themselves: unrolled where called with
+;; a constant list (`r-unrolled`, `TODO.md` §44); by name, as a call asks.
+(define c-unrolls (ref (table symbol c-inlinables @k) @k) (new (make-table symbol-hash symbol=?)))
+(define c-unrolls-of (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables)
+  (lambda (n) (table-ref (get c-unrolls) n nil)))
 
 ;; The globals whose bodies are being inlined, which are not again.
 (define c-inlining (ref syms @k) (new nil))
@@ -576,6 +581,8 @@
 (define c-spec-copy-find (with compile-plan-module c-spec-copy-find))
 (define c-inline-limit (with compile-plan-module c-inline-limit))
 (define c-inlines (with compile-plan-module c-inlines))
+(define c-unrolls (with compile-plan-module c-unrolls))
+(define c-unrolls-of (with compile-plan-module c-unrolls-of))
 (define c-inlining (with compile-plan-module c-inlining))
 (define c-drop-inline (with compile-plan-module c-drop-inline))
 (define c-sees? (with compile-plan-module c-sees?))

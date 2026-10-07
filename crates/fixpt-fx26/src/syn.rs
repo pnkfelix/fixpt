@@ -473,6 +473,12 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
             let (a, b) = place(*e);
             (a, b, -500)
         }))
+        // And each definition's value that is a list nothing writes, as
+        // -501 (`k-note-frozen-define`).
+        .chain(c.facts.frozen_defines.iter().map(|e| {
+            let (a, b) = place(*e);
+            (a, b, -501)
+        }))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     // And each `with`'s module's values it names, and their positions, by

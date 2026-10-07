@@ -9,6 +9,133 @@
 ;; An expression, or none: a call's procedure (`r-args`), a closure's
 ;; region (`r-lambda`).
 (define-type maybe-exp (listof exp @k))
+;; A call unrolled over a constant list (`r-unrolled`, as the Rust
+;; compiler's `r_unroll`, `TODO.md` §44): its procedure's expression, each
+;; argument that is a global holding a constant list, with it (one that is
+;; a constant here `r-known` finds), and the globals to guard. `r-inline`
+;; compiles it, reading these (`r-known-arg`,
+;; `r-guards-for`); newest first, as a call's arguments may hold others.
+(define-type r-unroll-known (listof (pairof exp rconst @k) @k))
+(define-type r-wglobals (listof wglobal @k))
+(define-type r-unroll-found (productof (1 r-unroll-known) (2 r-wglobals) (3 bool)))
+(define-type r-unroll-hook (productof (1 exp) (2 r-unroll-known) (3 r-wglobals)))
+(define r-unroll-hooks (ref (listof r-unroll-hook @k) @k) (new nil))
+;; The procedure `f` names, if one of `c-unrolls`, with its global, called
+;; on `args` with at least one constant list (a constant, or a global that
+;; is one), not unrolled 16 deep here, and its body writing no global: in a
+;; list, the call's hook noted. As the Rust compiler's `r_unrolled`.
+(define r-unrolled (subr (maxeff emits spin) (renv exp exps) (listof rinline @k))
+  (lambda (env f args)
+    (tagcase f
+      (e-var (n a b)
+        (let ((l (r-where env n)))
+          (if (null? l)
+              nil
+              (tagcase (car l)
+                (rl-global (cell)
+                  (let ((i (r-inline-named (c-unrolls-of n) n (c-count-exps args) (get c-genv))))
+                    (if (or (null? i) (>= (r-count-name (get c-inlining) n 0) 16))
+                        nil
+                        (r-unroll-noted f n cell (car i) (r-unroll-knowns env args)))))
+                (else y nil)))))
+      (else y nil))))
+(define r-count-name (subr rscans (syms symbol int) int)
+  (lambda (ns n k)
+    (if (null? ns) k (r-count-name (cdr ns) n (if (symbol=? (car ns) n) (+ k 1) k)))))
+;; The hook of a call of `i` (`n`'s, in `cell`) that unrolls, noted: its
+;; guards, the procedure's global unless within its own unrolling, then
+;; each global a list was read from.
+(define r-unroll-noted
+  (subr (maxeff emits spin) (exp symbol wglobal c-inline r-unroll-found) (listof rinline @k))
+  (lambda (f n cell i ks)
+    (let ((body (extract i 4)))
+      (if (or (not (extract ks 3)) (>= (c-summary-at (exp-start body) (exp-end body)) 3))
+          nil
+          (let* ((own (if (c-member? (get c-inlining) n)
+                          (the r-wglobals nil)
+                          (the r-wglobals (cons cell nil))))
+                 (h (product (1 f) (2 (extract ks 1)) (3 (r-wglobals-append own (extract ks 2)))))
+                 (rest (get r-unroll-hooks))
+                 (same (and (not (null? rest)) (r-same-exp? (extract (car rest) 1) f)))
+                 (under (if same (cdr rest) rest)))
+            (begin (set r-unroll-hooks (cons h under))
+                   (the (listof rinline @k) (cons (cons i cell) nil))))))))
+(define r-wglobals-append (subr rbuilds (r-wglobals r-wglobals) r-wglobals)
+  (lambda (xs ys) (if (null? xs) ys (cons (car xs) (r-wglobals-append (cdr xs) ys)))))
+;; Each of `args` that is a global holding a constant list, with it, and
+;; those globals, in order; and whether any argument is a constant list.
+(define r-unroll-knowns (subr (maxeff emits spin) (renv exps) r-unroll-found)
+  (lambda (env args)
+    (if (null? args)
+        (product (1 (the r-unroll-known nil)) (2 (the r-wglobals nil)) (3 #f))
+        (let* ((a (car args)) (rest (r-unroll-knowns env (cdr args)))
+               (k (r-known env a))
+               (g (if (null? k) (r-unroll-global env a) (the r-unroll-globals nil)))
+               (c (cond ((not (null? k)) k)
+                        ((null? g) (the rconsts nil))
+                        (else (the rconsts (cons (cdr (car g)) nil))))))
+          (cond ((or (null? c) (not (r-const-list? (car c)))) rest)
+                ((null? g) (product (1 (extract rest 1)) (2 (extract rest 2)) (3 #t)))
+                (else (product (1 (the r-unroll-known (cons (cons a (car c)) (extract rest 1))))
+                               (2 (the r-wglobals (cons (car (car g)) (extract rest 2))))
+                               (3 #t))))))))
+;; The global `a` names and its constant, if it is one.
+(define-type r-unroll-globals (listof (pairof wglobal rconst @k) @k))
+(define r-unroll-global (subr rbuilds (renv exp) r-unroll-globals)
+  (lambda (env a)
+    (tagcase a
+      (e-var (n x y)
+        (let ((l (r-where env n)))
+          (if (null? l)
+              nil
+              (tagcase (car l)
+                (rl-global (g)
+                  (let ((c (r-const-in (table-ref (get r-const-lists) (wglobal-name g) nil) g)))
+                    (if (null? c) nil (the r-unroll-globals (cons (cons g (car c)) nil)))))
+                (else z nil)))))
+      (else z nil))))
+(define r-const-list? (subr pure (rconst) bool)
+  (lambda (c) (tagcase c (rc-pair (a d) #t) (rc-nil () #t) (else y #f))))
+;; An inlined call's argument `a` as a constant: the unrolled call's, if it
+;; is one of its globals' lists; else what `r-known` says. And as the
+;; call's argument, where a guard fails: a global's read again, as the
+;; guard fails where it was written since; else the constant.
+(define r-known-slow (subr rbuilds (exp rconst) rarg)
+  (lambda (a k)
+    (let ((h (get r-unroll-hooks)))
+      (if (or (null? h) (null? (r-unroll-known-of (extract (car h) 2) a)))
+          (a-v (r-const-cell k))
+          (a-e a)))))
+(define r-known-arg (subr rbuilds (renv exp) rconsts)
+  (lambda (env a)
+    (let* ((h (get r-unroll-hooks))
+           (k (if (null? h) (the rconsts nil) (r-unroll-known-of (extract (car h) 2) a))))
+      (if (null? k) (r-known env a) k))))
+(define r-unroll-known-of (subr rbuilds (r-unroll-known exp) rconsts)
+  (lambda (ks a)
+    (cond ((null? ks) nil)
+          ((r-same-exp? (car (car ks)) a) (the rconsts (cons (cdr (car ks)) nil)))
+          (else (r-unroll-known-of (cdr ks) a)))))
+;; An inlined call of `f`'s guards, each to `call` unless assumed: on its
+;; global `cell`, or, for a call unrolled, its hook's (taken off); whether
+;; any was made.
+(define r-guards-for (subr (maxeff emits spin) (rgen wglobal exp int) bool)
+  (lambda (g cell f call)
+    (let* ((h (get r-unroll-hooks))
+           (mine (and (not (null? h)) (r-same-exp? (extract (car h) 1) f)))
+           (cells (if mine (extract (car h) 3) (the r-wglobals (cons cell nil)))))
+      (begin (if mine (set r-unroll-hooks (cdr h)) #u)
+             (r-guard-all g cells call #f)))))
+(define r-guard-all (subr (maxeff emits spin) (rgen r-wglobals int bool) bool)
+  (lambda (g cs call any)
+    (cond ((null? cs) any)
+          ((r-assume (car cs)) (r-guard-all g (cdr cs) call any))
+          (else (begin (r-guard g (car cs) call) (r-guard-all g (cdr cs) call #t))))))
+;; A call's inlining: unrolled, if `r-unrolled` says so; else as planned.
+(define r-inline-or-unroll
+  (subr (maxeff emits spin) (int int renv exp exps int) (listof rinline @k))
+  (lambda (a b env f args n)
+    (let ((u (r-unrolled env f args))) (if (null? u) (r-inline-of a b env f n) u))))
 (define r-just-exp (subr (alloc @k) (exp) maybe-exp)
   (lambda (x) (the maybe-exp (cons x nil))))
 ;; A call-out's operands: `a` and `b`, or `a`, `b` and `c`.
@@ -171,3 +298,8 @@
 (define r-imm-operand (with regcode-helpers-module r-imm-operand))
 (define r-reg-operand (with regcode-helpers-module r-reg-operand))
 (define r-known-cell (with regcode-helpers-module r-known-cell))
+(define r-known-arg (with regcode-helpers-module r-known-arg))
+(define r-known-slow (with regcode-helpers-module r-known-slow))
+(define r-const-list? (with regcode-helpers-module r-const-list?))
+(define r-guards-for (with regcode-helpers-module r-guards-for))
+(define r-inline-or-unroll (with regcode-helpers-module r-inline-or-unroll))

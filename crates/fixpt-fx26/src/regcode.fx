@@ -55,7 +55,11 @@
 ;; Where a variable is, to register code.
 ;; A constant that needs no allocation when it runs, as register code may
 ;; know one: a sum or product of constants is made while compiling, once.
-(define-datatype rconst (rc-int int) (rc-bool bool) (rc-char char) (rc-nil) (rc-data wcell))
+(define-datatype rconst
+  (rc-int int) (rc-bool bool) (rc-char char) (rc-nil) (rc-data wcell)
+  ;; A symbol, and a pair of constants: the parts of a constant list
+  ;; (`TODO.md` §44), made where a cell needs it.
+  (rc-sym symbol) (rc-pair rconst rconst))
 (define-type rconsts (listof rconst @k))
 ;; The globals defined as constants (`TODO.md` §42), each cell and value,
 ;; newest first; each module's literal members, by the module's global; and,
@@ -65,6 +69,11 @@
 (define-type r-const-global (pairof wglobal rconst @k))
 (define-type r-const-list (listof r-const-global @k))
 (define r-const-globals (ref r-const-list @k) (new nil))
+;; The globals defined as constant lists (`c-const-list`), apart from the
+;; rest, by their names: what `r-unrolled` asks of a call's arguments,
+;; without going through every constant.
+(define-type r-const-list-table (table symbol r-const-list @k))
+(define r-const-lists (ref r-const-list-table @k) (new (make-table symbol-hash symbol=?)))
 (define-type r-member-const (pairof symbol rconst @k))
 (define-type r-module-const (pairof wglobal (listof r-member-const @k) @k))
 (define r-module-consts (ref (listof r-module-const @k) @k) (new nil))
@@ -301,14 +310,16 @@
            (else y #f)))))
 
 ;; A constant's cell.
-(define r-const-cell (subr pure (rconst) wcell)
+(define r-const-cell (subr spin (rconst) wcell)
   (lambda (c)
     (tagcase c
       (rc-int (n) (wcell-int n))
       (rc-bool (v) (wcell-bool v))
       (rc-char (v) (wcell-char v))
       (rc-nil () (wcell-nil))
-      (rc-data (w) w))))
+      (rc-data (w) w)
+      (rc-sym (s) (wcell-symbol s))
+      (rc-pair (a d) (wcell-pair (r-const-cell a) (r-const-cell d))))))
 ;; Constants' cells, in order.
 (define r-const-cells (subr rbuilds (rconsts) wcells)
   (lambda (cs) (if (null? cs) nil (cons (r-const-cell (car cs)) (r-const-cells (cdr cs))))))
@@ -633,6 +644,12 @@
             ((and ints (string=? name "=")) (bool (= (car a) (car b))))
             ((and one (string=? name "not")) (bool (r-const-false? (car vs))))
             ((and one (string=? name "null?")) (bool (tagcase (car vs) (rc-nil () #t) (else y #f))))
+            ;; A constant list is at a region nothing writes: its parts are
+            ;; constants too.
+            ((and one (string=? name "car"))
+             (tagcase (car vs) (rc-pair (x d) (the rconsts (cons x nil))) (else y nil)))
+            ((and one (string=? name "cdr"))
+             (tagcase (car vs) (rc-pair (x d) (the rconsts (cons d nil))) (else y nil)))
             ((and two (string=? name "char=?"))
              (tagcase (car vs)
                (rc-char (x) (tagcase (car (cdr vs)) (rc-char (y) (bool (char=? x y))) (else z nil)))
@@ -808,6 +825,7 @@
 (define-type r-const-global (select regcode-module r-const-global))
 (define-type r-const-list (select regcode-module r-const-list))
 (define r-const-globals (with regcode-module r-const-globals))
+(define r-const-lists (with regcode-module r-const-lists))
 (define-type r-member-const (select regcode-module r-member-const))
 (define r-module-consts (with regcode-module r-module-consts))
 (define r-member-const (with regcode-module r-member-const))
@@ -847,6 +865,8 @@
 (define r-standard-name (with regcode-module r-standard-name))
 (define r-adds? (with regcode-module r-adds?))
 (define r-known (with regcode-module r-known))
+(define r-rev-consts (with regcode-module r-rev-consts))
+(define c-length-consts (with regcode-module c-length-consts))
 (define r-same-exp? (with regcode-module r-same-exp?))
 (define-type rsplits (select regcode-module rsplits))
 (define r-split-app (with regcode-module r-split-app))
@@ -891,8 +911,12 @@
 (define s-apply (with regcode-module s-apply))
 (define s-list (with regcode-module s-list))
 (define s-none (with regcode-module s-none))
+(define-type rconst (select regcode-module rconst))
 (define-type rconsts (select regcode-module rconsts))
 (define-type r-module-const (select regcode-module r-module-const))
 (define rc-int (with regcode-module rc-int))
 (define rc-bool (with regcode-module rc-bool))
 (define rc-char (with regcode-module rc-char))
+(define rc-sym (with regcode-module rc-sym))
+(define rc-nil (with regcode-module rc-nil))
+(define rc-pair (with regcode-module rc-pair))

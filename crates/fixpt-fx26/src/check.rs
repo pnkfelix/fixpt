@@ -249,6 +249,11 @@ pub struct NodeFacts {
     /// procedure may have that list itself, since nothing can write it.
     /// Every other `apply` copies its list.
     pub apply_shares: HashSet<ExpId>,
+    /// Each top-level definition's value whose type is a list in a frozen
+    /// region (`acyclic`, `const`): data nothing writes, which the
+    /// compilers may make once, as constant data, where it is made of
+    /// literals (`TODO.md` §44).
+    pub frozen_defines: HashSet<ExpId>,
     /// Each `with`'s module's values its body names, each with its
     /// position in the module, in order: what lowering and the compilers
     /// bind.
@@ -270,6 +275,7 @@ impl NodeFacts {
         self.reshaped.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
         self.apply_shares.retain(|e| e.0 < first);
+        self.frozen_defines.retain(|e| e.0 < first);
     }
 
     /// What the compilers give `%fx26-convert` for `e`'s conversion: its

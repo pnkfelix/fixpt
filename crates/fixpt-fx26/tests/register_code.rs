@@ -440,6 +440,35 @@ fn a_reexported_module_member_is_inlined() {
     }
 }
 
+/// A search of a constant list, nothing writing it, unrolled where the list
+/// is known (`programs/run/unrolled-lists.fx`, `TODO.md` §44): the list
+/// made by `list`, by a small helper seen through, or by `cons` onto
+/// another; each call's tests in line, behind guards on the procedure's
+/// global and the list's. Both compilers, the same code.
+#[test]
+fn constant_lists_are_unrolled_through_helpers() {
+    let text = include_str!("programs/run/unrolled-lists.fx");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    let (fx26, rust) = (fx26.expect("FX-26 compiles"), rust.expect("Rust compiles"));
+    assert_eq!(fx26, rust);
+    // `nil` is a constant list too: its search is `#f` behind the guards.
+    let none = rust.split("\nword in-none ").nth(1).expect("in-none");
+    let none = none.split("its register code").nth(1).expect("its register code");
+    assert!(none.contains("global-guard k-none written 1") && none.contains("const #f"), "in-none:\n{none}");
+    for (word, list, elems) in [("in-k", "k", ["a", "b", "c"]), ("in-helper", "k-helper", ["p", "q", "r"])] {
+        let code = rust.split(&format!("\nword {word} ")).nth(1).expect("the word");
+        let code = code.split("its register code").nth(1).expect("its register code");
+        let code = code.split("\nword ").next().unwrap_or(code);
+        for want in [format!("global-guard one-of? written 1"), format!("global-guard {list} written 1")] {
+            assert!(code.contains(&want), "{word}: {want}:\n{code}");
+        }
+        for e in elems {
+            assert!(code.contains(&format!("op2imm eq {e}")), "{word}: {e} tested in line:\n{code}");
+        }
+    }
+}
+
 /// A module's literal members folded through a `with` in a fast version
 /// (`TODO.md` §42), behind one `global-guard` of the module's global: the
 /// test decided, the sum an immediate; and the plain version, a leaf, keeps

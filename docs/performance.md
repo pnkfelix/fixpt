@@ -2523,3 +2523,27 @@ this, back to back, twice (ms):
 The first version kept the counts in a list, appended at each of the
 front end's 4479 definitions and searched at each: 262 and 272 ms. The
 benchmarks' run times are unchanged.
+
+## Constant lists, unrolled (2026-10-07)
+
+`parsing.fx` decides a token's kind by `(one-of? t k-list)`, a search of a
+list made once, where the Scheme original has `case`. With the lists typed
+`acyclic` (nothing writes them), both compilers make such a list once, as
+constant data, while compiling, seeing through small helpers that build it;
+fold `car` and `cdr` of it; and unroll a small procedure that calls itself
+where it is called with one, into the tests a `case` makes, behind guards on
+the procedure's global and the list's (`TODO.md` §44). Register code, at
+100 iterations, best of 5, against HEAD back to back:
+
+| run | HEAD    | unrolled | by hand |
+| --- | ------: | -------: | ------: |
+| 1   | 91.7 ms | 84.0 ms  |         |
+| 2   | 92.0 ms | 83.6 ms  |         |
+| —   |         |          | 82.9 ms |
+
+The guards are the rest. Compiling: the FX-26 compiler asks of every call
+whether it unrolls; its unroll notes and constant lists are kept by name,
+apart from the other constants, so asking is a table lookup (a list of
+every constant global, searched per argument, was the first try). The
+front end compiled by FX-26, `fx words`: 265.4 / 261.5 → 273.5 / 265.3 ms,
+with the front end itself 1.2% longer.

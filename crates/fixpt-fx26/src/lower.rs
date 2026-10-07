@@ -338,6 +338,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("wcell-self", "%default-object", false),
     ("wcell-nil", "%fx26-nil-cell", false),
     ("wcell-sum", "%fx26-sum-cell", false),
+    ("wcell-pair", "%fx26-pair-cell", false),
     ("wcell-closure", "%fx26-closure-cell", false),
     ("close-over-word!", "%fx26-close-over-word!", false),
     ("wcell-product", "%fx26-product-cell", false),
