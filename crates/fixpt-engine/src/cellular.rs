@@ -402,6 +402,9 @@ pub struct Profile {
     /// by caller; a return's, by callee, which is noise to ignore).
     pub edges: HashMap<(String, String), u64>,
     from: Option<String>,
+    /// Each global read (`global`), by its name: how many times
+    /// (`TODO.md` §42, what folding constants would save).
+    pub globals: HashMap<String, u64>,
 }
 
 impl Profile {
@@ -992,6 +995,9 @@ impl Machine {
                 let heap = cx.heap();
                 let g = Self::operand(heap, r);
                 let v = heap.bloblet_slot(g, 2);
+                if let Some(p) = &mut self.profile {
+                    *p.globals.entry(heap.symbol_name(heap.bloblet_slot(g, 3))).or_insert(0) += 1;
+                }
                 self.ds.push(v);
             }
             GLOBAL_SET => {

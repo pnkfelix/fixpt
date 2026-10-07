@@ -990,3 +990,19 @@ defined by a module (`layout-module` and its kin), where nothing outside
 the module can assign them. Measure first: how many `global` loads of
 constants the self-compile and the native compiler run, and what folding
 them saves.
+
+Measured (2026-10-07; `FIXPT_PROFILE_PHASE` with `FIXPT_PROFILE_GLOBALS`,
+which counts each `global` read by name on the Rust machine): of the
+self-compile's global reads, constants are few. Check: 34.5 M reads, 31 K
+of constants (0.1%, seven of them: `k-int`, `k-bool`, …). Compile: 6.8 M
+reads, 420 K of constants (6.2%, 73: `routine-slot`, `register-regs`,
+`rop-field`, …). Natively each is a load or two: folding them all would
+save about a millisecond of the self-compile. Statically, 932 uses of 229
+constant globals, 601 in `native.fx` (arm64's register numbers), 94 an
+operand of arithmetic or a comparison; none reached through a `with` in
+a procedure body (a path, the user's: to generalize to when it occurs).
+`native.fx`, which the self-compile does not run, is not measured yet.
+What the reads are instead: procedures, at calls. Check reads `k-resolve`
+9.6 M times, `k-get` 5.2 M, `k-has-id?` 3.3 M: a call of a global through
+its cell, a check that it holds a closure, and the call. That is PLAN's
+"the rest of known calls", worth more than this.

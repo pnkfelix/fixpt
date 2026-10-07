@@ -574,6 +574,15 @@ fn profiled(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Res
     LAST_PROFILE.with(|p| *p.borrow_mut() = top);
     let top = m.profile.as_ref().expect("profiling").top_allocating(usize::MAX);
     LAST_ALLOCATING.with(|p| *p.borrow_mut() = top);
+    // With `FIXPT_PROFILE_GLOBALS` naming a file, each global read and how
+    // often, appended to it (`TODO.md` §42).
+    if let Some(path) = std::env::var_os("FIXPT_PROFILE_GLOBALS") {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).expect("the globals file opens");
+        for (name, n) in &m.profile.as_ref().expect("profiling").globals {
+            writeln!(f, "{n} {name}").expect("writes");
+        }
+    }
     // With `FIXPT_PROFILE_CALLERS` naming words, each one's callers, by the
     // cells it ran entered from them.
     for callee in std::env::var("FIXPT_PROFILE_CALLERS").unwrap_or_default().split(',').filter(|c| !c.is_empty()) {
