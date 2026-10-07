@@ -13,6 +13,9 @@
 ;;; multiple of `load-base`, so that what is said of a place in it can say
 ;;; which file and where.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define parser-exps-module (module
 ;; What the driver read for each `load-module`, by where the form starts:
 ;; the file's base (0 if it could not be read or read), its path, why not
 ;; (`cannot read …`, or where in it reading failed), its forms, and its
@@ -503,4 +506,13 @@
             ((= n 3)
              (let ((name (syn-symbol (nth items 1))))
                (t-define name (the syns-a nil) (parse-exp (nth items 2)) a b)))
-            (else (pfail "`(define name type expression)` or `(define name expression)`" s))))))
+            (else (pfail "`(define name type expression)` or `(define name expression)`" s))))))))
+
+(define loaded (with parser-exps-module loaded))
+(define loaded-files! (with parser-exps-module loaded-files!))
+(define load-base (with parser-exps-module load-base))
+(define in-loaded (with parser-exps-module in-loaded))
+(define parse-exp (with parser-exps-module parse-exp))
+(define parse-module-item (with parser-exps-module parse-module-item))
+(define parse-rec-bindings (with parser-exps-module parse-rec-bindings))
+(define parse-define (with parser-exps-module parse-define))
