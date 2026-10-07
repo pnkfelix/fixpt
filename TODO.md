@@ -1198,3 +1198,18 @@ back; the hand-unrolled version, 82.5–82.9. The front end compiled by
 FX-26 (`fx words`): 265.4 / 261.5 → 273.5 / 265.3 ms, the front end itself
 1.2% longer. Tests: `programs/run/unrolled-lists.fx` (`register_code.rs`,
 `direct.rs`, with `k` redefined).
+
+The planted case's gaps closed (2026-10-07, the user's "smaller, self
+contained thing" first), both compilers: `*` folds on constants whose
+product is under 2^30; `x + 0`, `0 + x`, `x - 0`, `x * 1`, `1 * x` are `x`
+(`r_identity_arg`); and a comparison of places and literal constants that
+an `if` around decided is known in its arms (`RLoc::Test` in Rust's
+environment, `rl-test` in FX-26's: scoped as bindings are, so not seen in
+an inlined body or a lambda). The planted case's fast version: 72 → 53
+cells, the second test and `+ 0` gone, `(* k 2)` the constant 6
+(`register_code.rs`, `identities_decided_tests_and_products_fold`). The
+FX-26 compiler's cost: the front end's `fx words` 264.3 / 264.2 → 272.6 /
+272.5 ms, 3%; a first version that keyed decided tests by a symbol made
+from a string cost 10% (the key built at every comparison `r-known` sees),
+the second compares structurally, and only for comparisons. To look at
+again with §43.

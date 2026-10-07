@@ -119,7 +119,11 @@
   ;; (`c-join-ok?`): where its parameters are, and its label.
   (rl-join (listof rloc @k) int)
   ;; A lambda-lifted procedure (`at-lifted`): only called.
-  (rl-lifted int))
+  (rl-lifted int)
+  ;; No name's place: a test an `if` around decided, true or false
+  ;; (`r-knowing`): its comparison's name and operands, each a place or a
+  ;; constant, as they were there.
+  (rl-test string (listof rloc @k) bool))
 (define-type rlocs (listof rloc @k))
 (define-type renv (listof (pairof symbol rloc @k) @k))
 
@@ -642,6 +646,9 @@
             ((and ints (string=? name "<=")) (bool (<= (car a) (car b))))
             ((and ints (string=? name ">=")) (bool (>= (car a) (car b))))
             ((and ints (string=? name "=")) (bool (= (car a) (car b))))
+            ((and ints (string=? name "*"))
+             (let ((p (* (car a) (car b))))
+               (if (r-small? p) (int p) nil)))
             ((and one (string=? name "not")) (bool (r-const-false? (car vs))))
             ((and one (string=? name "null?")) (bool (tagcase (car vs) (rc-nil () #t) (else y #f))))
             ;; A constant list is at a region nothing writes: its parts are
@@ -684,14 +691,61 @@
           (let ((vs (r-known-fields env fs nil)))
             (if (null? vs) nil (r-known-as (rc-data (wcell-product (r-const-cells (car vs))))))))
         (e-app (f args a b)
-          (let ((name (r-standard-name env f)))
-            (if (string=? name "")
-                nil
+          (let* ((name (r-standard-name env f))
+                 (decided (if (r-test-name? name) (r-known-test env x) (the rconsts nil))))
+            (cond
+              ((not (null? decided)) decided)
+              ((string=? name "") nil)
+              (else
                 (let ((vs (r-knowns env args nil)))
                   (if (or (null? vs) (not (= (c-length-consts (car vs)) (c-count-exps args))))
                       nil
-                      (r-fold name (car vs)))))))
+                      (r-fold name (car vs))))))))
         (else y nil))))
+  ;; Test `x`'s value, where an `if` around has decided it (`r-knowing`),
+  ;; as a constant: compared with each test decided, by name and operands.
+  ;; As the Rust compiler's `r_known_test`.
+  (r-known-test (subr rbuilds (renv exp) rconsts)
+    (lambda (env x)
+      (if (not (r-tests-in? env))
+          nil
+          (let ((d (r-test-desc env x)))
+            (if (null? d) nil (r-decided env (car d)))))))
+  ;; What test `x` is, to know it again: its comparison's name and each
+  ;; operand, a place (a register, frame slot or free value) or literal
+  ;; constant, in a list; none if it is not such a test.
+  (r-test-desc (subr rbuilds (renv exp) (listof rtest @k))
+    (lambda (env x)
+      (tagcase x
+        (e-app (f args a b)
+          (let ((name (r-standard-name env f)))
+            (if (not (r-test-name? name))
+                nil
+                (let ((ops (r-test-operands env args)))
+                  (if (null? ops) nil (cons (cons name (car ops)) nil))))))
+        (else y nil))))
+  ;; Each operand's place or constant, in order, in a list; none if one is
+  ;; neither.
+  (r-test-operands (subr rbuilds (renv exps) (listof rlocs @k))
+    (lambda (env args)
+      (if (null? args)
+          (cons (the rlocs nil) nil)
+          (let ((one (r-test-operand env (car args))) (rest (r-test-operands env (cdr args))))
+            (if (or (null? one) (null? rest)) nil (cons (cons (car one) (car rest)) nil))))))
+  (r-test-operand (subr rbuilds (renv exp) rlocs)
+    (lambda (env a)
+      (let ((k (r-known env a)))
+        (if (null? k)
+            (let ((l (r-plain-var-loc env a)))
+              (if (null? l)
+                  nil
+                  (tagcase (car l)
+                    (rl-reg (i) l) (rl-slot (i) l) (rl-free (i) l)
+                    (else y nil))))
+            (tagcase (car k)
+              (rc-pair (x d) nil)
+              (rc-data (w) nil)
+              (else y (cons (rl-const (car k)) nil)))))))
   ;; Each of `es`' constants, in order, onto `acc` reversed, in a list; none
   ;; if one is not a constant.
   (r-knowns (subr rbuilds (renv exps rconsts) (listof rconsts @k))
@@ -709,41 +763,57 @@
             (if (null? c) nil (r-known-fields env (cdr fs) (cons (car c) acc))))))))
 
 
+;; A test's description: its comparison's name, and its operands.
+(define-type rtest (pairof string rlocs @k))
+;; Whether a test an `if` decided is in scope in `env`.
+(define r-tests-in? (subr rscans (renv) bool)
+  (lambda (env)
+    (and (not (null? env))
+         (or (tagcase (cdr (car env)) (rl-test (n o v) #t) (else y #f)) (r-tests-in? (cdr env))))))
+;; The value of the test `d` describes, if one in `env` is it, the newest.
+(define r-decided (subr rbuilds (renv rtest) rconsts)
+  (lambda (env d)
+    (if (null? env)
+        nil
+        (tagcase (cdr (car env))
+          (rl-test (n ops v)
+            (if (and (string=? n (car d)) (r-same-operands? ops (cdr d)))
+                (r-known-as (rc-bool v))
+                (r-decided (cdr env) d)))
+          (else y (r-decided (cdr env) d))))))
+(define r-same-operands? (subr rscans (rlocs rlocs) bool)
+  (lambda (xs ys)
+    (cond ((null? xs) (null? ys))
+          ((null? ys) #f)
+          (else (and (r-same-operand? (car xs) (car ys)) (r-same-operands? (cdr xs) (cdr ys)))))))
+(define r-same-operand? (subr pure (rloc rloc) bool)
+  (lambda (x y)
+    (tagcase x
+      (rl-reg (i) (tagcase y (rl-reg (j) (= i j)) (else z #f)))
+      (rl-slot (i) (tagcase y (rl-slot (j) (= i j)) (else z #f)))
+      (rl-free (i) (tagcase y (rl-free (j) (= i j)) (else z #f)))
+      (rl-const (c) (tagcase y (rl-const (d) (r-same-const? c d)) (else z #f)))
+      (else z #f))))
+(define r-same-const? (subr pure (rconst rconst) bool)
+  (lambda (c d)
+    (tagcase c
+      (rc-int (n) (tagcase d (rc-int (m) (= n m)) (else z #f)))
+      (rc-bool (v) (tagcase d (rc-bool (w) (eq? v w)) (else z #f)))
+      (rc-char (v) (tagcase d (rc-char (w) (char=? v w)) (else z #f)))
+      (rc-nil () (tagcase d (rc-nil () #t) (else z #f)))
+      (rc-sym (v) (tagcase d (rc-sym (w) (symbol=? v w)) (else z #f)))
+      (else z #f))))
+;; Whether `name` is a comparison a test's key may be of.
+(define r-test-name? (subr pure (string) bool)
+  (lambda (name)
+    (or (or (or (string=? name "<") (string=? name ">"))
+            (or (string=? name "<=") (string=? name ">=")))
+        (or (or (string=? name "=") (string=? name "eq?"))
+            (or (or (string=? name "symbol=?") (string=? name "char=?"))
+                (or (string=? name "null?") (string=? name "pair?")))))))
 ;; Whether `a` and `b` are the same expression: where they are.
 (define r-same-exp? (subr (read (globals exp-end exp-start)) (exp exp) bool)
   (lambda (a b) (and (= (exp-start a) (exp-start b)) (= (exp-end a) (exp-end b)))))
-;; An expression split as `core + k` (`r-split`), and such a split, if any.
-(define-type rsplit (productof (1 (listof exp @k)) (2 int)))
-(define-type rsplits (listof rsplit @k))
-(define-rec
-  ;; `x` as `core + k`: `core` the one operand of a chain of `+`, and of `-`
-  ;; of constants, that is not a constant (none if all are), and `k` the
-  ;; constants' sum, under 2^30 in size; else `x` itself and 0.
-  (r-split (subr rbuilds (renv exp) rsplit)
-    (lambda (env x)
-      (let* ((c (r-known env x))
-             (small (if (null? c) (the (listof int @k) nil) (r-const-small (car c)))))
-        (if (not (null? small))
-            (product (1 (the (listof exp @k) nil)) (2 (car small)))
-            (let ((s (tagcase x
-                       (e-app (f args a b) (r-split-app env (r-standard-name env f) args))
-                       (else y (the rsplits nil)))))
-              (if (null? s) (product (1 (the (listof exp @k) (cons x nil))) (2 0)) (car s)))))))
-  ;; The same for standard operation `name` applied to `args`, if it is
-  ;; such a chain.
-  (r-split-app (subr rbuilds (renv string exps) rsplits)
-    (lambda (env name args)
-      (if (or (not (= (c-count-exps args) 2)) (not (r-add-name? name)))
-          (the rsplits nil)
-          (let* ((sa (r-split env (car args))) (sb (r-split env (car (cdr args))))
-                 (pa (extract sa 1)) (pb (extract sb 1))
-                 (plus (string=? name "+"))
-                 (k (if plus (+ (extract sa 2) (extract sb 2)) (- (extract sa 2) (extract sb 2)))))
-            (cond ((and plus (and (not (null? pa)) (not (null? pb)))) nil)
-                  ((and (not plus) (not (null? pb))) nil)
-                  ((not (r-small? k)) nil)
-                  (else (the rsplits (cons (product (1 (if (null? pa) pb pa)) (2 k)) nil)))))))))
-
 ;;; ---------------------------------------------------------------- lists
 
 (define r-count-args (subr rscans (rargs) int)
@@ -865,11 +935,13 @@
 (define r-standard-name (with regcode-module r-standard-name))
 (define r-adds? (with regcode-module r-adds?))
 (define r-known (with regcode-module r-known))
+(define rl-test (with regcode-module rl-test))
+(define r-test-desc (with regcode-module r-test-desc))
+(define r-const-small (with regcode-module r-const-small))
+(define r-small? (with regcode-module r-small?))
 (define r-rev-consts (with regcode-module r-rev-consts))
 (define c-length-consts (with regcode-module c-length-consts))
 (define r-same-exp? (with regcode-module r-same-exp?))
-(define-type rsplits (select regcode-module rsplits))
-(define r-split-app (with regcode-module r-split-app))
 (define r-count-args (with regcode-module r-count-args))
 (define r-exp-args (with regcode-module r-exp-args))
 (define r-last-hard (with regcode-module r-last-hard))

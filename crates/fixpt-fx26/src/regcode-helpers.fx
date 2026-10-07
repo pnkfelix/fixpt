@@ -131,6 +131,66 @@
     (cond ((null? cs) any)
           ((r-assume (car cs)) (r-guard-all g (cdr cs) call any))
           (else (begin (r-guard g (car cs) call) (r-guard-all g (cdr cs) call #t))))))
+;; The operand an identity leaves, `x` of `x + 0`, `0 + x`, `x - 0`, `x * 1`
+;; or `1 * x`, in a list, if `name` applied to `args` is one. As the Rust
+;; compiler's `r_identity_arg`.
+(define r-identity-arg (subr rbuilds (renv string exps) (listof exp @k))
+  (lambda (env name args)
+    (if (or (not (= (c-count-exps args) 2))
+            (not (or (string=? name "+") (or (string=? name "-") (string=? name "*")))))
+        nil
+        (let* ((x (car args)) (y (car (cdr args)))
+               (a (r-known env x)) (b (r-known env y))
+               (is (lambda ((c rconsts) (n int))
+                     (and (not (null? c)) (tagcase (car c) (rc-int (k) (= k n)) (else z #f))))))
+          (cond ((and (string=? name "+") (is b 0)) (cons x nil))
+                ((and (string=? name "+") (is a 0)) (cons y nil))
+                ((and (string=? name "-") (is b 0)) (cons x nil))
+                ((and (string=? name "*") (is b 1)) (cons x nil))
+                ((and (string=? name "*") (is a 1)) (cons y nil))
+                (else nil))))))
+;; A call of lifted procedure `f`'s arguments: the names it would have
+;; captured, then `args` (`r-call`).
+(define r-lifted-call-args (subr rbuilds (renv exp exps) rargs)
+  (lambda (env f args) (r-name-args (c-lift-added (r-lifted-at env f)) (r-exp-args args))))
+;; `env` in an arm of an `if` on `t`, where it is `v`: the test decided, if
+;; it is a comparison of places and constants (`r-known-test`), bound to no
+;; name a program can write. As the Rust compiler's `RLoc::Test`.
+(define r-knowing (subr rbuilds (renv exp bool) renv)
+  (lambda (env t v)
+    (let ((d (r-test-desc env t)))
+      (if (null? d) env (r-bind '%if (rl-test (car (car d)) (cdr (car d)) v) env)))))
+;; An expression split as `core + k` (`r-split`), and such a split, if any.
+(define-type rsplit (productof (1 (listof exp @k)) (2 int)))
+(define-type rsplits (listof rsplit @k))
+(define-rec
+  ;; `x` as `core + k`: `core` the one operand of a chain of `+`, and of `-`
+  ;; of constants, that is not a constant (none if all are), and `k` the
+  ;; constants' sum, under 2^30 in size; else `x` itself and 0.
+  (r-split (subr rbuilds (renv exp) rsplit)
+    (lambda (env x)
+      (let* ((c (r-known env x))
+             (small (if (null? c) (the (listof int @k) nil) (r-const-small (car c)))))
+        (if (not (null? small))
+            (product (1 (the (listof exp @k) nil)) (2 (car small)))
+            (let ((s (tagcase x
+                       (e-app (f args a b) (r-split-app env (r-standard-name env f) args))
+                       (else y (the rsplits nil)))))
+              (if (null? s) (product (1 (the (listof exp @k) (cons x nil))) (2 0)) (car s)))))))
+  ;; The same for standard operation `name` applied to `args`, if it is
+  ;; such a chain.
+  (r-split-app (subr rbuilds (renv string exps) rsplits)
+    (lambda (env name args)
+      (if (or (not (= (c-count-exps args) 2)) (not (r-add-name? name)))
+          (the rsplits nil)
+          (let* ((sa (r-split env (car args))) (sb (r-split env (car (cdr args))))
+                 (pa (extract sa 1)) (pb (extract sb 1))
+                 (plus (string=? name "+"))
+                 (k (if plus (+ (extract sa 2) (extract sb 2)) (- (extract sa 2) (extract sb 2)))))
+            (cond ((and plus (and (not (null? pa)) (not (null? pb)))) nil)
+                  ((and (not plus) (not (null? pb))) nil)
+                  ((not (r-small? k)) nil)
+                  (else (the rsplits (cons (product (1 (if (null? pa) pb pa)) (2 k)) nil)))))))))
 ;; A call's inlining: unrolled, if `r-unrolled` says so; else as planned.
 (define r-inline-or-unroll
   (subr (maxeff emits spin) (int int renv exp exps int) (listof rinline @k))
@@ -303,3 +363,8 @@
 (define r-const-list? (with regcode-helpers-module r-const-list?))
 (define r-guards-for (with regcode-helpers-module r-guards-for))
 (define r-inline-or-unroll (with regcode-helpers-module r-inline-or-unroll))
+(define r-knowing (with regcode-helpers-module r-knowing))
+(define-type rsplits (select regcode-helpers-module rsplits))
+(define r-split-app (with regcode-helpers-module r-split-app))
+(define r-identity-arg (with regcode-helpers-module r-identity-arg))
+(define r-lifted-call-args (with regcode-helpers-module r-lifted-call-args))

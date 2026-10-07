@@ -47,10 +47,10 @@
           (let ((no (r-new-label g)) (end (r-new-label g)))
             (begin
               (r-branch-on g t #f no env te)
-              (r-exp g th env te tail)
+              (r-exp g th (r-knowing env t #t) te tail)
               (if tail #u (r-emit g (r-branch #f end)))
               (r-emit g (r-label no))
-              (r-exp g el env te tail)
+              (r-exp g el (r-knowing env t #f) te tail)
               (r-emit g (r-label end))))))
         (e-begin (es a b)
           (if (null? es) (r-const-value g (wcell-unit) tail) (r-begin g es env te tail)))
@@ -231,6 +231,8 @@
                             (r-withmark-tail g args env te))
                            ((and (string=? name "apply") (= n 2))
                             (r-apply g args env te tail (not (c-apply-shares-at a b))))
+                           ((not (null? (r-identity-arg env name args)))
+                            (r-exp g (car (r-identity-arg env name args)) env te tail))
                            (else (begin (r-standard-app g name args env te tail)
                                         (r-done g tail)))))))))))
   (r-standard-app (subr rcompiles (rgen string exps renv cenv bool) unit)
@@ -341,13 +343,11 @@
               ;; A lifted procedure's call: the names it would have captured,
               ;; then the arguments, into REG1…REGn; its closure, a constant.
               ((>= (r-lifted-at env f) 0)
-               (let* ((k (r-lifted-at env f))
-                      (all (r-name-args (c-lift-added k) (r-exp-args args)))
-                      (m (r-count-args all)))
+               (let ((all (r-lifted-call-args env f args)))
                  (begin
                    (r-args g all env te (the maybe-exp nil))
-                   (r-op1 g rop-const (r-lifted-closure k))
-                   (r-invoke g m tail))))
+                   (r-op1 g rop-const (r-lifted-closure (r-lifted-at env f)))
+                   (r-invoke g (r-count-args all) tail))))
               ;; A call of the procedure itself, not in tail position: by its
               ;; own entry, with no closure fetched.
               ((and (not tail) (r-self-known? g f n te))

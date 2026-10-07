@@ -219,6 +219,9 @@ pub struct Compiler<'a> {
     /// cells the form being compiled writes (`writes_expected`).
     writes: HashMap<u64, i64>,
     form_writes: Vec<Value>,
+    /// Tests a branch has decided, by what they compare (`regcode::r_test_key`):
+    /// the keys of the environment's `RLoc::Test`s.
+    test_keys: Vec<(String, Vec<(u8, u64)>)>,
     /// Each expression's effect summary, by span, once asked.
     summaries: Option<std::collections::HashMap<(u32, u32), u8>>,
     /// The top-level definition whose body is being compiled: its name and
@@ -330,6 +333,7 @@ impl<'a> Compiler<'a> {
             assume: None,
             writes: HashMap::new(),
             form_writes: Vec::new(),
+            test_keys: Vec::new(),
             summaries: None,
             own_now: None,
             tail_calls_leave: false,

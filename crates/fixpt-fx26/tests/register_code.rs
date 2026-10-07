@@ -440,6 +440,29 @@ fn a_reexported_module_member_is_inlined() {
     }
 }
 
+/// The gaps the survey's planted case showed (`TODO.md` §44), closed in a
+/// fast version, where `k` is the constant 3: `(+ x 0)` is `x`, the inner
+/// `(< x k)` is decided by the outer one, and `(* k 2)` is 6. Both
+/// compilers, the same code.
+#[test]
+fn identities_decided_tests_and_products_fold() {
+    let text = "(define k int 3)\n\
+                (define* f (subr (read (globals k)) (int) int)\n\
+                  (lambda (x) (if (< x k) (if (< x k) (+ x 0) 2) (* k 2))))\n";
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    let (fx26, rust) = (fx26.expect("FX-26 compiles"), rust.expect("Rust compiles"));
+    assert_eq!(fx26, rust);
+    let code = rust.split("\nword f ").nth(1).expect("f");
+    let code = code.split("its register code").nth(1).expect("its register code");
+    // The fast version: up to the guard's target, where the plain one is.
+    let plain_at = code.split("else → ").nth(1).and_then(|r| r.split_whitespace().next()).expect("a guard");
+    let fast = code.split(&format!("\n{:>8}: ", plain_at)).next().expect("the fast version");
+    assert!(!fast.contains("int-add 0"), "x + 0 kept:\n{code}");
+    assert!(fast.contains("const 6"), "3 * 2 not folded:\n{code}");
+    assert_eq!(fast.matches("op2imm int-less 3").count(), 1, "the test made twice:\n{code}");
+}
+
 /// A search of a constant list, nothing writing it, unrolled where the list
 /// is known (`programs/run/unrolled-lists.fx`, `TODO.md` §44): the list
 /// made by `list`, by a small helper seen through, or by `cons` onto

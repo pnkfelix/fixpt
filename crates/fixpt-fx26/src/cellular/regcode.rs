@@ -48,6 +48,9 @@ enum RLoc {
     Join(usize),
     /// A lambda-lifted procedure (`Loc::Lifted`): only called.
     Lifted(usize),
+    /// Not a name's place: test `test_keys[k]` decided, true or false, in
+    /// the arm of an `if` compiled under it (`r_known_test`).
+    Test(usize, bool),
 }
 
 /// An operand of a call-out: an expression, a constant, a procedure of
@@ -754,7 +757,7 @@ impl Compiler<'_> {
                     Some(RLoc::Slot(s)) => g.op("stack", &[Gen::n(s)]),
                     Some(RLoc::Free(i)) => g.op("lexical", &[Gen::n(i)]),
                     Some(RLoc::Global(c)) => g.op("global", &[c]),
-                    Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_) | RLoc::Join(_) | RLoc::Lifted(_)) => return None,
+                    Some(RLoc::Loop | RLoc::Pending(_) | RLoc::Const(_) | RLoc::Join(_) | RLoc::Lifted(_) | RLoc::Test(..)) => return None,
                     None if matches!(self.name(n), "nil" | "no-pair") => g.op("const", &[Value::NULL]),
                     // A standard operation as a value: its closure, of the
                     // word the stack code makes for it, and that word's
@@ -848,15 +851,31 @@ impl Compiler<'_> {
                 let arm = if self.r_const(env, test) == Some(Value::FALSE) { els } else { then };
                 self.r_exp(g, arm, env, te, tail)?;
             }
+            // Each arm knows the test decided (`r_known_test`).
             Exp::If { test, then, els } => {
                 let (no, end) = (g.label(), g.label());
                 self.r_branch_on(g, test, false, no, env, te)?;
+                let key = self.r_test_key(env, test).map(|k| {
+                    self.test_keys.push(k);
+                    self.test_keys.len() - 1
+                });
+                let at = self.c.interner.get("if").filter(|_| key.is_some());
+                if let (Some(k), Some(at)) = (key, at) {
+                    env.push((at, RLoc::Test(k, true)));
+                }
                 self.r_exp(g, then, env, te, tail)?;
+                if let (Some(k), Some(at)) = (key, at) {
+                    env.pop();
+                    env.push((at, RLoc::Test(k, false)));
+                }
                 if !tail {
                     g.items.push(RItem::Branch(false, end));
                 }
                 g.items.push(RItem::Label(no));
                 self.r_exp(g, els, env, te, tail)?;
+                if key.is_some() && at.is_some() {
+                    env.pop();
+                }
                 g.items.push(RItem::Label(end));
             }
             Exp::Begin(items) => {
@@ -1259,6 +1278,10 @@ impl Compiler<'_> {
             return self.r_self_guarded(g, cell, start, f, args, env, te, tail);
         }
         if let Some(name) = self.r_standard_name(env, f) {
+            // `x + 0`, `0 + x`, `x - 0`, `x * 1`, `1 * x`: `x`.
+            if let Some(x) = self.r_identity_arg(env, &name, args) {
+                return self.r_exp(g, x, env, te, tail);
+            }
             let Some(std) = self.r_standard(&name, args.len()) else {
                 return self.decline(&format!("standard `{name}`"));
             };
@@ -2230,6 +2253,9 @@ impl Compiler<'_> {
                 Some(self.heap.make_frozen(kind("product"), &vs))
             }
             Exp::App { fun, args } => {
+                if let Some(v) = self.r_known_test(env, x) {
+                    return Some(v);
+                }
                 let name = self.r_standard_name(env, fun)?;
                 let vs: Vec<Value> = args.iter().map(|a| self.r_const(env, *a)).collect::<O<_>>()?;
                 let small = |v: &Value| v.is_fixnum() && v.as_fixnum().abs() < 1 << 30;
@@ -2242,6 +2268,7 @@ impl Compiler<'_> {
                     "<=" => int2().map(|(a, b)| Value::boolean(a <= b)),
                     ">=" => int2().map(|(a, b)| Value::boolean(a >= b)),
                     "=" => int2().map(|(a, b)| Value::boolean(a == b)),
+                    "*" => int2().and_then(|(a, b)| Some(a * b).filter(|p| p.abs() < 1 << 30)).map(Value::fixnum),
                     "not" if vs.len() == 1 => Some(Value::boolean(vs[0] == Value::FALSE)),
                     "null?" if vs.len() == 1 => Some(Value::boolean(vs[0] == Value::NULL)),
                     // A constant list is at a region nothing writes
@@ -2264,6 +2291,64 @@ impl Compiler<'_> {
                     _ => None,
                 }
             }
+            _ => None,
+        }
+    }
+
+    /// What test `test` is, to know it again where a branch has decided it:
+    /// a comparison's name and each operand's place (a register, frame
+    /// slot or free value) or literal constant (an integer, boolean,
+    /// character, symbol or `nil`); none if it is not such a test.
+    fn r_test_key(&mut self, env: &[(Sym, RLoc)], test: ExpId) -> O<(String, Vec<(u8, u64)>)> {
+        let Exp::App { fun, args } = self.c.arena.exp_at(test).clone() else { return None };
+        let name = self.r_standard_name(env, fun)?;
+        if !matches!(name.as_str(), "<" | ">" | "<=" | ">=" | "=" | "eq?" | "symbol=?" | "char=?" | "null?" | "pair?") {
+            return None;
+        }
+        let mut key = Vec::new();
+        for a in &args {
+            key.push(match self.r_const(env, *a) {
+                Some(v) if v.is_fixnum() || v.is_char() || v == Value::TRUE || v == Value::FALSE || v == Value::NULL => (0, v.raw()),
+                Some(v) if v.is_bloblet() && self.heap.bloblet_kind(v) == kind("symbol") => (0, v.raw()),
+                Some(_) => return None,
+                None => match self.r_var(env, *a)? {
+                    RLoc::Reg(k) => (1, k as u64),
+                    RLoc::Slot(k) => (2, k as u64),
+                    RLoc::Free(k) => (3, k as u64),
+                    _ => return None,
+                },
+            });
+        }
+        Some((name, key))
+    }
+
+    /// Test `x`'s value, where an `if` around has decided it (the arm its
+    /// `RLoc::Test` says), as a constant.
+    fn r_known_test(&mut self, env: &[(Sym, RLoc)], x: ExpId) -> O<Value> {
+        if !env.iter().any(|(_, l)| matches!(l, RLoc::Test(..))) {
+            return None;
+        }
+        let key = self.r_test_key(env, x)?;
+        env.iter().rev().find_map(|(_, l)| match l {
+            RLoc::Test(k, v) if self.test_keys[*k] == key => Some(Value::boolean(*v)),
+            _ => None,
+        })
+    }
+
+    /// The operand an identity leaves, `x` of `x + 0`, `0 + x`, `x - 0`,
+    /// `x * 1` or `1 * x`, if `name` applied to `args` is one.
+    fn r_identity_arg(&mut self, env: &[(Sym, RLoc)], name: &str, args: &[ExpId]) -> O<ExpId> {
+        if args.len() != 2 || !matches!(name, "+" | "-" | "*") {
+            return None;
+        }
+        let (a, b) = (self.r_const(env, args[0]), self.r_const(env, args[1]));
+        let is = |v: O<Value>, n: i64| v == Some(Value::fixnum(n));
+        match name {
+            "+" if is(b, 0) => Some(args[0]),
+            "+" if is(a, 0) => Some(args[1]),
+            "-" if is(b, 0) => Some(args[0]),
+            "*" if is(b, 1) => Some(args[0]),
+            "*" if is(a, 1) => Some(args[1]),
             _ => None,
         }
     }
