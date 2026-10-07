@@ -141,9 +141,12 @@ are in the last section, "Log: the glance's details", and in
   (FX-87's `standard.fx`, FX-91's `fx-module.fx`) are exempt (the user's).
   Later: a lint for indentation (`TODO.md` §16).
 
-**Next**, roughly in order. **Soundness first** (the user's, 2026-09-30):
-whatever is known or suspected to let a checked program go wrong comes
-before everything else, known holes before proofs.
+**Next**, roughly in order. **Known soundness holes first** (the user's,
+2026-09-30, revised 2026-10-07): a known or concretely suspected way for
+a checked program to go wrong comes before everything else, performance
+included. Searching for unknown bugs, and proofs of soundness or
+correctness (S5), do not currently outweigh performance: they are
+weighed with the other items, not ahead of them.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
@@ -163,7 +166,9 @@ before everything else, known holes before proofs.
   **A3, the host's `datum`s**: acyclic by contract only (Scheme calling
   an `fx:` global); a `read` with datum labels would break it. Enforce at
   the boundary, or certify what such a `read` makes.
-- S5. **The proof obligations** (item 4 below, moved here): T3 in full (a
+- S5. **The proof obligations** (item 4 below; listed here with the
+  soundness work, but since 2026-10-07 no longer ahead of performance,
+  the user's): T3 in full (a
   composable continuation's effect need not describe what its frames
   touch), T4 lemma erasure, T5 termination of `spin`-free code (a logical
   relation over region levels, and size-change proved), T6 space (a
