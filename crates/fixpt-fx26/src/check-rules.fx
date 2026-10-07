@@ -204,14 +204,16 @@
   (k-synth-app (subr (maxeff checks spin) (kx kx kxs int) k-te)
     (lambda (x f args expected)
       (let ((op (begin (k-note-fx-plain-op (k-under f)) (k-std-op f))))
-        (cond ((string=? op "certify-acyclic") (k-certify x args))
-              ((string=? op "certify-length") (k-certify-length x args))
-              ((string=? op "certify-nat") (k-certify-nat x args))
-              ((and (k-op-either? op "+" "-") (k-sc-two? args)) (k-nat-arith x op args))
-              ((string=? op "cons")
-               (let ((r (k-nlist-cons x args expected)))
-                 (if (null? r) (k-synth-app-plain x f args expected) (car r))))
-              (else (k-synth-app-plain x f args expected))))))
+        (case op
+          (("certify-acyclic") (k-certify x args))
+          (("certify-length") (k-certify-length x args))
+          (("certify-nat") (k-certify-nat x args))
+          (("+" "-")
+           (if (k-sc-two? args) (k-nat-arith x op args) (k-synth-app-plain x f args expected)))
+          (("cons")
+           (let ((r (k-nlist-cons x args expected)))
+             (if (null? r) (k-synth-app-plain x f args expected) (car r))))
+          (else (k-synth-app-plain x f args expected))))))
   ;; `+` and `-` of naturals: a natural, of a size when both are known. Only
   ;; what has a type of its own is asked for it; anything else is told it
   ;; is an int, as for any call.
@@ -678,20 +680,20 @@
           (ty-bloblet (fields frozen region)
             (let* ((e (extract rb 2))
                    (te
-                    (cond
-                      ((string=? name "bloblet-ref")
+                    (case name
+                      (("bloblet-ref")
                        (let ((t (k-bloblet-field bt fields i a b)))
                          (if frozen (k-te t e) (k-te-reading t region e))))
-                      ((string=? name "bloblet-set!")
+                      (("bloblet-set!")
                        (let ((t (k-bloblet-field bt fields i a b)))
                          (if frozen
                              (k-fail-frozen bt a b)
                              (k-te-writing k-unit region (k-union e (k-check (car rest) t))))))
-                      ((string=? name "bloblet-freeze")
+                      (("bloblet-freeze")
                        (k-te-writing (k-ty-new (ty-bloblet fields #t region)) region e))
-                      ((string=? name "bloblet-byte")
+                      (("bloblet-byte")
                        (k-te-reading k-int region (k-union e (k-check (car rest) k-int))))
-                      ((string=? name "bloblet-set-byte!")
+                      (("bloblet-set-byte!")
                        (let* ((e1 (k-check (car rest) k-int)) (e2 (k-check (car (cdr rest)) k-int)))
                          (k-te-writing k-unit region (k-union e (k-union e1 e2)))))
                       (else (k-te k-int e)))))

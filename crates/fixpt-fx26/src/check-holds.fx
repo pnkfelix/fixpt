@@ -210,7 +210,7 @@
 
 ;; Each polarity (0 covariant, 1 contravariant, 2 invariant) at which `v`
 ;; occurs in `t`, reached at polarity `at`.
-(define k-flip (subr pure (int) int) (lambda (p) (cond ((= p 0) 1) ((= p 1) 0) (else 2))))
+(define k-flip (subr pure (int) int) (lambda (p) (case p ((0) 1) ((1) 0) (else 2))))
 (define k-reg-is? (subr pure (k-region int) bool)
   (lambda (r v) (tagcase r (r-var (x) (= x v)) (r-frozen (x f) (= x v)) (else y #f))))
 (define k-eff-var? (subr kreads (k-eff int) bool)

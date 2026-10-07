@@ -141,6 +141,19 @@ impl Lint<'_> {
                     }
                 }
             }
+            // `(case key ((datum …) e …) … (else e …))`: the key, then each
+            // clause's body, its data not code.
+            "case" => {
+                if let Some(k) = its.get(1) {
+                    self.visit(name, params, k, false);
+                }
+                for clause in its.iter().skip(2) {
+                    let c = items(clause);
+                    for (k, x) in c.iter().enumerate().skip(1) {
+                        self.visit(name, params, x, tail && k + 1 == c.len());
+                    }
+                }
+            }
             "tagcase" => {
                 if let Some(s) = its.get(1) {
                     self.visit(name, params, s, false);

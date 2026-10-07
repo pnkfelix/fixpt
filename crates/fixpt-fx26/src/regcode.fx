@@ -586,9 +586,9 @@
             ((r-prim-name? name) (r-prim-std name n n))
             (else
              (let ((p (standard-primitive name)))
-               (cond ((string=? p "%fx26-identity") (if (= n 1) (s-identity) (s-none)))
-                     ((string=? p "") (s-none))
-                     (else (r-prim-std p n n)))))))))
+               (case p (("%fx26-identity") (if (= n 1) (s-identity) (s-none)))
+                       (("") (s-none))
+                       (else (r-prim-std p n n)))))))))
 ;; The operator under the type abstractions, projections, ascriptions and
 ;; conversions, which compile to nothing: `((proj car @r) xs)` is `car`
 ;; applied.
@@ -623,11 +623,11 @@
   (lambda (name c)
     (tagcase c
       (rc-int (n)
-        (cond ((string=? name "int->i32") (and (>= n -2147483648) (<= n 2147483647)))
-              ((string=? name "int->u32") (and (>= n 0) (<= n 4294967295)))
-              ((string=? name "int->i64") #t)
-              ((string=? name "int->u64") (>= n 0))
-              (else #f)))
+        (case name (("int->i32") (and (>= n -2147483648) (<= n 2147483647)))
+                   (("int->u32") (and (>= n 0) (<= n 4294967295)))
+                   (("int->i64") #t)
+                   (("int->u64") (>= n 0))
+                   (else #f)))
       (else y #f))))
 ;; Standard operation `name` on constants `vs`, folded, if it is one that
 ;; folds.

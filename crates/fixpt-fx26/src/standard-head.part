@@ -8,4 +8,4 @@
 (define standard-primitive (subr pure (string) string)
   (lambda (n)
     (let ((k (string-length n)))
-    (cond
+    (case k

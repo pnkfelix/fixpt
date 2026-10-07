@@ -65,45 +65,45 @@
 ;; How many operand cells follow routine `n`.
 (define n-operands (subr pure (int) int)
   (lambda (n)
-    (cond
-      ((= n 3) 1)  ; lit
-      ((= n 4) 1)  ; branch
-      ((= n 5) 1)  ; 0branch
-      ((= n 20) 1)  ; slot
-      ((= n 21) 1)  ; slot!
-      ((= n 22) 1)  ; free
-      ((= n 23) 1)  ; global
-      ((= n 24) 1)  ; global!
-      ((= n 25) 2)  ; closure
-      ((= n 26) 1)  ; call
-      ((= n 27) 1)  ; tailcall
-      ((= n 29) 2)  ; prim
-      ((= n 39) 1)  ; tcall
-      ((= n 40) 1)  ; ttailcall
-      ((= n 48) 1)  ; field
+    (case n
+      ((3) 1)  ; lit
+      ((4) 1)  ; branch
+      ((5) 1)  ; 0branch
+      ((20) 1)  ; slot
+      ((21) 1)  ; slot!
+      ((22) 1)  ; free
+      ((23) 1)  ; global
+      ((24) 1)  ; global!
+      ((25) 2)  ; closure
+      ((26) 1)  ; call
+      ((27) 1)  ; tailcall
+      ((29) 2)  ; prim
+      ((39) 1)  ; tcall
+      ((40) 1)  ; ttailcall
+      ((48) 1)  ; field
       (else 0))))
 
 ;; Whether routine `n`'s call-out may leave the machine anywhere.
 (define n-control? (subr pure (int) bool)
   (lambda (n)
-    (cond
-      ((= n 0) #t)  ; docol
-      ((= n 1) #t)  ; exit
-      ((= n 2) #t)  ; halt
-      ((= n 6) #t)  ; execute
-      ((= n 26) #t)  ; call
-      ((= n 27) #t)  ; tailcall
-      ((= n 28) #t)  ; return
-      ((= n 30) #t)  ; prompt
-      ((= n 31) #t)  ; abort
-      ((= n 32) #t)  ; callcomp
-      ((= n 33) #t)  ; callcc
-      ((= n 34) #t)  ; withmark
-      ((= n 38) #t)  ; withmark-tail
-      ((= n 39) #t)  ; tcall
-      ((= n 40) #t)  ; ttailcall
-      ((= n 41) #t)  ; resume
-      ((= n 42) #t)  ; undefined
+    (case n
+      ((0) #t)  ; docol
+      ((1) #t)  ; exit
+      ((2) #t)  ; halt
+      ((6) #t)  ; execute
+      ((26) #t)  ; call
+      ((27) #t)  ; tailcall
+      ((28) #t)  ; return
+      ((30) #t)  ; prompt
+      ((31) #t)  ; abort
+      ((32) #t)  ; callcomp
+      ((33) #t)  ; callcc
+      ((34) #t)  ; withmark
+      ((38) #t)  ; withmark-tail
+      ((39) #t)  ; tcall
+      ((40) #t)  ; ttailcall
+      ((41) #t)  ; resume
+      ((42) #t)  ; undefined
       (else #f))))))
 
 (define n-base (with native-layout-module n-base))

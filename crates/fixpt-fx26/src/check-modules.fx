@@ -66,14 +66,14 @@
 (define k-item-names (subr (maxeff (read @globals) (alloc @t)) (mod-item bool) k-names)
   (lambda (it types)
     (let ((k (extract it 1)))
-      (cond ((= k 0)
-             (let* ((n (car (extract it 2))) (s (symbol->string n)))
-               (if types
-                   (the k-names (list n))
-                   (the k-names (list (string->symbol (string-append "up-" s))
-                                      (string->symbol (string-append "down-" s)))))))
-            ((= k 1) (if types (extract it 2) (the k-names nil)))
-            (else (if types (the k-names nil) (extract it 2)))))))
+      (case k ((0)
+               (let* ((n (car (extract it 2))) (s (symbol->string n)))
+                 (if types
+                     (the k-names (list n))
+                     (the k-names (list (string->symbol (string-append "up-" s))
+                                        (string->symbol (string-append "down-" s)))))))
+              ((1) (if types (extract it 2) (the k-names nil)))
+              (else (if types (the k-names nil) (extract it 2)))))))
 ;; The first name of `items`, in order, that one before it defines too, as a
 ;; description (`seen`) or as a value (`vseen`): a module defining a name
 ;; twice has no type (`moduleof` refuses it), and which definition a use got

@@ -364,7 +364,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
 /// as the identity, `%fx26-identity`. `src/standard.fx` is this, and a test
 /// keeps it so.
 pub fn standard_fx26_module() -> String {
-    // The definition's head, whose `cond` the clauses below complete: not
+    // The definition's head, whose `case` the clauses below complete: not
     // a whole FX-26 file, so not named as one.
     // By length first: a `cond` of a few hundred `string=?` was a tenth of
     // the front end's compiling (`TODO.md` §43). In the table's order
@@ -377,9 +377,14 @@ pub fn standard_fx26_module() -> String {
         }
     }
     for (len, names) in by_len {
-        out.push_str(&format!("      ((= k {len})\n       (cond\n"));
+        out.push_str(&format!("      (({len})\n       (case n\n"));
+        let mut seen = std::collections::HashSet::new();
         for (fx, scheme) in names {
-            out.push_str(&format!("         ((string=? n {fx:?}) {scheme:?})\n"));
+            // A `case`'s data are distinct: the first of a name, as the
+            // `cond` it was took.
+            if seen.insert(fx) {
+                out.push_str(&format!("         (({fx:?}) {scheme:?})\n"));
+            }
         }
         out.push_str("         (else \"\")))\n");
     }

@@ -1607,8 +1607,14 @@ impl Checker {
         if parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) != Some("else") {
             return Err(FxError::at(last.span, "a `case` must end with an `else` clause: FX has no unspecified value"));
         }
-        let key = self.parse_exp(key)?;
-        let tmp = self.fresh_name("%case-key", items);
+        // A variable, which nothing assigns, is compared as it is; any other
+        // key is bound once.
+        let key_span = key.span;
+        let direct = key.as_symbol().filter(|s| !matches!(self.name(*s), "#t" | "#f" | "#u")).filter(|_| !init.is_empty());
+        let (tmp, key) = match direct {
+            Some(s) => (s, None),
+            None => (self.fresh_name("%case-key", items), Some(self.parse_exp(key)?)),
+        };
         let (mut kind, mut seen) = (None, std::collections::HashSet::new());
         let mut arms = Vec::new();
         for c in init {
@@ -1630,7 +1636,7 @@ impl Checker {
                     return Err(FxError::at(d.span, "a datum appears twice in this `case`"));
                 }
                 let f = self.standard_ref_at(d.span, eq);
-                let a = self.arena.exp(d.span, Exp::Var(tmp));
+                let a = self.arena.exp(key_span, Exp::Var(tmp));
                 tests.push(self.arena.exp(d.span, Exp::App { fun: f, args: vec![a, lit] }));
             }
             arms.push((c.span, tests, body.to_vec()));
@@ -1650,7 +1656,10 @@ impl Checker {
             }
             out = self.arena.exp(cspan, Exp::If { test, then, els: out });
         }
-        Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, key)], body: out }))
+        Ok(match key {
+            Some(key) => self.arena.exp(span, Exp::Let { bindings: vec![(tmp, key)], body: out }),
+            None => out,
+        })
     }
 
     /// A `case` datum: its kind, its kind's equality, its literal, and a

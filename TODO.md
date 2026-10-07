@@ -1330,6 +1330,22 @@ handled. **Left:** the dispatch, as a recognition of comparison chains on
 one variable in the compilers, which helps a hand-written `cond` as much;
 then the front end's own `cond`s on a symbol rewritten as `case`.
 
+**Front end rewritten (2026-10-07).** Every `cond` in the front end that
+compares one variable with literals is a `case` (the generated
+`standard.fx` and `native-layout.fx` from their generators): 63 whole, 11
+whose other tests go in the `else`, moved after the literals only where
+each such test is a predicate on a literal set found disjoint from the
+literals after it (`region-form?`, `bloblet-form?`, `k-module-type-head?`,
+`std-eq-name?`, `region-prim?`, `+`/`-`), and `char-in?` on a literal
+string as its characters. A `case` on a variable compares it as it is,
+with no `let` (both parsers), so it compiles as the `cond` did: of the
+front end's 1294 words, all compile the same but `parse-form`,
+`k-parse-type-form`, `k-synth-app`, `apply-prim` (reordered) and
+`read-hash` (no `char-in?` scan). No nested `if`s compared one variable
+twice. The source is 8 KB smaller, its lines 4 fewer; the front end's
+times the same. Clauses keep the first on the `case`'s line, as fx26-mode
+indents it, where that fits in 100 columns.
+
 **Hygiene (the user, 2026-10-07).** An expansion's own variable is named
 for what its form does not mention (`fresh_name`, `fresh-name`: `%case-key`,
 else `%case-key1`, …), in `case`, `confirm-length`, `acyclic` and
@@ -1420,3 +1436,18 @@ in one branch joins to the other branch's list type.
   the same); `(with #%fx nil)` stops needing instantiation (§46).
 - Ties to Q7 (unions of atoms): `null` is the one-value atom type that
   unions like `(union symbol null)` would be built from.
+
+## 49. `sexp-edit indent`: re-indent as fx26-mode does (the user's, 2026-10-07)
+
+Rewriting the front end's `cond`s as `case` (§46) needed a one-off script
+to keep clauses aligned: `cond` becoming `case key` moves every later
+clause, and a shortened test moves what is aligned after it. An `indent`
+command in `sexp-edit` (by definition name, or a line range) would do it
+generally: Emacs's `lisp-indent-specform` rules with fx26-mode's table
+(`fx26-indent-specs`: a count of distinguished arguments, `defun`, the
+`define-rec` and `tagcase` members as definitions; otherwise the
+arguments lined up), so that what the tool writes is what TAB in Emacs
+would leave. One table for both, generated from one place, keeps them
+from drifting; a test that re-indents every front-end file and finds
+nothing to change keeps the files to it. It never rewraps a line: a line
+past 100 columns after re-indenting is reported, for extraction.

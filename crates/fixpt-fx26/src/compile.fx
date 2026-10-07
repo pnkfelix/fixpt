@@ -564,11 +564,11 @@
     (if (null? items)
         bound
         (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2))
-               (more (cond ((= k 0)
-                            (the syms (cons (c-converter "down-" (car ns))
-                                            (cons (c-converter "up-" (car ns)) bound))))
-                           ((or (= k 2) (= k 3)) (c-names ns bound))
-                           (else bound))))
+               (more (case k ((0)
+                              (the syms (cons (c-converter "down-" (car ns))
+                                              (cons (c-converter "up-" (car ns)) bound))))
+                             ((2 3) (c-names ns bound))
+                             (else bound))))
           (c-module-bound (cdr items) more)))))
 
 ;; The expressions `bs` binds, in order: a `let`'s values, or a product's

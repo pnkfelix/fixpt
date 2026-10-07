@@ -356,9 +356,9 @@
 ;; a convention, the program's; a size, some size.
 (define k-default-desc (subr kreads (int) k-desc)
   (lambda (k)
-    (cond ((= k 1) (de nil))
-          ((= k 6) (dc (get k-conv-default)))
-          (else (dz (sz-finite))))))
+    (case k ((1) (de nil))
+            ((6) (dc (get k-conv-default)))
+            (else (dz (sz-finite))))))
 (define k-finish-each (subr (maxeff checks spin) (k-binders k-map int int int) k-map)
   (lambda (kinds m a b ft)
     (if (null? kinds)

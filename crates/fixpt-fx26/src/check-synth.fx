@@ -68,7 +68,7 @@
 ;; The form a `letregion` of kind `k` is written as.
 (define k-region-form (subr pure (int) string)
   (lambda (k)
-    (cond ((= k 0) "letregion") ((= k 1) "letrena") ((= k 2) "letreap") (else "letfreeze"))))
+    (case k ((0) "letregion") ((1) "letrena") ((2) "letreap") (else "letfreeze"))))
 ;; Note, for the compiler, that the `extract` at `a`..`b` takes part `i`.
 (define k-note-extract (subr kstate (int int int) unit)
   (lambda (a b i) (set k-extracts (cons (product (1 a) (2 b) (3 i)) (get k-extracts)))))

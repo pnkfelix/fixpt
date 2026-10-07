@@ -59,15 +59,15 @@
       (if (or (null? xs) (null? ys) (k-size-any? (car xs)) (k-size-any? (car ys)))
           none
           (let ((x (car xs)) (y (car ys)))
-            (cond ((string=? op "<") (k-branch-facts-of (k-lt-fact x y) (k-le-fact y x)))
-                  ((string=? op "<=") (k-branch-facts-of (k-le-fact x y) (k-lt-fact y x)))
-                  ((string=? op ">") (k-branch-facts-of (k-lt-fact y x) (k-le-fact x y)))
-                  ((string=? op ">=") (k-branch-facts-of (k-le-fact y x) (k-lt-fact x y)))
-                  (else
-                   (let ((no (cond ((= (k-size-as-lit y) 0) (k-ge-fact (k-size-plus x -1)))
-                                   ((= (k-size-as-lit x) 0) (k-ge-fact (k-size-plus y -1)))
-                                   (else (the k-fact-list nil)))))
-                     (k-branch-facts-of (k-eq-fact (k-size-add-scaled x y -1)) no)))))))))
+            (case op (("<") (k-branch-facts-of (k-lt-fact x y) (k-le-fact y x)))
+                     (("<=") (k-branch-facts-of (k-le-fact x y) (k-lt-fact y x)))
+                     ((">") (k-branch-facts-of (k-lt-fact y x) (k-le-fact x y)))
+                     ((">=") (k-branch-facts-of (k-le-fact y x) (k-lt-fact x y)))
+                     (else
+                      (let ((no (cond ((= (k-size-as-lit y) 0) (k-ge-fact (k-size-plus x -1)))
+                                      ((= (k-size-as-lit x) 0) (k-ge-fact (k-size-plus y -1)))
+                                      (else (the k-fact-list nil)))))
+                        (k-branch-facts-of (k-eq-fact (k-size-add-scaled x y -1)) no)))))))))
 (define-type k-cert-lens (listof k-cert-len acyclic))
 ;; `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the
 ;; variable, its binding, and the length, a natural literal or a variable

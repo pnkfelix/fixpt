@@ -206,6 +206,9 @@
   ;; cons-chain: in `@k`, as `r-args-2`'s
   (lambda (a b c) (the rargs (cons a (cons b (cons c nil))))))
 
+;; `make-array`'s call-out's operands: the tag, 0; the length; the fill.
+(define r-make-array-ops (subr (maxeff (read @globals) (alloc @k)) (exps) rargs)
+  (lambda (args) (r-args-3 (a-v (wcell-int 0)) (a-e (car args)) (a-e (car (cdr args))))))
 ;; Constant `w` into RESULT; in tail position, returned.
 (define r-const-value (subr emits (rgen wcell bool) unit)
   (lambda (g w tail) (begin (r-op1 g rop-const w) (r-done g tail))))
@@ -345,6 +348,7 @@
 (define r-just-exp (with regcode-helpers-module r-just-exp))
 (define r-args-2 (with regcode-helpers-module r-args-2))
 (define r-args-3 (with regcode-helpers-module r-args-3))
+(define r-make-array-ops (with regcode-helpers-module r-make-array-ops))
 (define r-const-value (with regcode-helpers-module r-const-value))
 (define r-unit (with regcode-helpers-module r-unit))
 (define r-op2imm (with regcode-helpers-module r-op2imm))

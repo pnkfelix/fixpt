@@ -109,9 +109,9 @@
               (k-fail (k-cat3 "`" (symbol->string n) "` is not a region") a b)
               (tagcase (car d)
                 (ds-var (v k)
-                  (cond ((= k 3) (r-var v))
-                        ((= k 0) (k-fail (k-cat3 "`" (symbol->string n) "` is not a place") a b))
-                        (else (k-fail (k-cat3 "`" (symbol->string n) "` is not a region") a b))))
+                  (case k ((3) (r-var v))
+                          ((0) (k-fail (k-cat3 "`" (symbol->string n) "` is not a place") a b))
+                          (else (k-fail (k-cat3 "`" (symbol->string n) "` is not a region") a b))))
                 (else x (k-fail (k-cat3 "`" (symbol->string n) "` is not a region") a b))))))))
 ;; What a `letfreeze` into `place` freezes into: `(const p)` for its
 ;; place `p`, and for the heap, -1.

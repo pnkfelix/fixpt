@@ -349,32 +349,25 @@
 ;; How many arguments a standard operation takes, or -1 if it is not one.
 (define c-arity (subr (read (globals standard-primitive std-eq-name?)) (string) int)
   (lambda (n)
-    (cond ((or (string=? n "make-continuation-prompt-tag")
-               (string=? n "make-continuation-mark-key"))
-           0)
-          ((or (string=? n "car") (string=? n "cdr") (string=? n "null?") (string=? n "not")
-               (string=? n "new") (string=? n "get") (string=? n "char->integer")
-               (string=? n "integer->char") (string=? n "string-length") (string=? n "char->string")
-               (string=? n "symbol->string") (string=? n "string->symbol")
-               (string=? n "array-length") (string=? n "current-marks") (string=? n "cwcc"))
-           1)
-          ((or (string=? n "with-mark") (string=? n "array-set!") (string=? n "substring")) 3)
-          ((or (string=? n "+") (string=? n "-") (string=? n "*") (string=? n "<") (string=? n ">")
-               (string=? n "<=") (string=? n ">=") (string=? n "=") (string=? n "modulo")
-               (string=? n "quotient") (string=? n "cons") (string=? n "set-car!")
-               (string=? n "set-cdr!") (string=? n "char=?") (string=? n "string-append")
-               (string=? n "string=?") (std-eq-name? n)
-               (string=? n "array-ref") (string=? n "string-ref") (string=? n "make-array")
-               (string=? n "abort-current-continuation") (string=? n "set") (string=? n "marks-of")
-               (string=? n "call-with-composable-continuation") (string=? n "first-mark"))
-           2)
-          ;; The rest: the arity of the runtime primitive it runs as, if that
-          ;; takes a fixed number (`char-downcase`).
-          (else
-           (let ((p (standard-primitive n)))
-             (if (or (string=? p "") (string=? p "%fx26-identity"))
-                 -1
-                 (runtime-primitive-arity p)))))))
+    (case n
+      (("make-continuation-prompt-tag" "make-continuation-mark-key")
+       0)
+      (("car" "cdr" "null?" "not" "new" "get" "char->integer" "integer->char" "string-length"
+        "char->string" "symbol->string" "string->symbol" "array-length" "current-marks" "cwcc")
+       1)
+      (("with-mark" "array-set!" "substring") 3)
+      (("+" "-" "*" "<" ">" "<=" ">=" "=" "modulo" "quotient" "cons" "set-car!" "set-cdr!" "char=?"
+        "string-append" "string=?" "array-ref" "string-ref" "make-array"
+        "abort-current-continuation" "set" "marks-of" "call-with-composable-continuation"
+        "first-mark")
+       2)
+      (else
+       (cond ((std-eq-name? n) 2)
+             (else
+              (let ((p (standard-primitive n)))
+                (if (or (string=? p "") (string=? p "%fx26-identity"))
+                    -1
+                    (runtime-primitive-arity p)))))))))
 
 ;; The boolean on top negated.
 (define c-not (subr c-emits (code) unit)
@@ -387,64 +380,54 @@
 
 (define c-standard-on (subr compiles (string int code) unit)
   (lambda (name n c)
-    (cond ((string=? name "+") (c-op c routine-int-add))
-          ((string=? name "-") (c-op c routine-int-sub))
-          ((string=? name "<") (c-op c routine-int-less))
-          ((string=? name ">") (begin (c-op c routine-swap) (c-op c routine-int-less)))
-          ((string=? name "<=") (begin (c-op c routine-swap) (c-op c routine-int-less) (c-not c)))
-          ((string=? name ">=") (begin (c-op c routine-int-less) (c-not c)))
-          ;; Ints may be bignums, compared by value; characters are immediates, so compared as
-          ;; symbols are.
-          ((string=? name "=") (c-op c routine-int-eq))
-          ((std-eq-name? name) (c-op c routine-eq))
-          ((string=? name "cons") (c-op c routine-cons))
-          ((string=? name "car") (c-op c routine-pair-car))
-          ((string=? name "cdr") (c-op c routine-pair-cdr))
-          ((or (string=? name "set-car!") (string=? name "set-cdr!"))
-           (begin (c-prim c name 2) (c-unit-after c)))
-          ((string=? name "new") (c-prim c "%make-box" 1))
-          ;; A reference is a box: its value is field 2.
-          ((string=? name "get") (c-field c 2))
-          ((string=? name "set")
-           (begin (c-op c routine-swap) (c-field-set c 2) (c-lit c (wcell-unit))))
-          ((string=? name "null?") (begin (c-lit c (wcell-nil)) (c-op c routine-eq)))
-          ((string=? name "not") (c-not c))
-          ((string=? name "char->string") (c-prim c "string" 1))
-          ;; A tag or a key: a fresh object, compared by identity.
-          ((or (string=? name "make-continuation-prompt-tag")
-               (string=? name "make-continuation-mark-key"))
-           (begin (c-lit c (wcell-unit)) (c-prim c "%make-box" 1)))
-          ((string=? name "abort-current-continuation") (c-op c routine-abort))
-          ((string=? name "call-with-composable-continuation") (c-op c routine-callcomp))
-          ((string=? name "cwcc") (c-op c routine-callcc))
-          ((string=? name "with-mark") (c-op c routine-withmark))
-          ((string=? name "first-mark") (c-op c routine-firstmark))
-          ((string=? name "current-marks") (c-op c routine-currentmarks))
-          ((string=? name "marks-of") (c-op c routine-marksof))
-          ((string=? name "array-ref") (begin (c-array-index c) (c-op c routine-field-ref)))
-          ((string=? name "array-set!")
-           (begin (c-op c routine-swap) (c-array-index c) (c-op c routine-swap)
-                  (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
-          ;; `(apply f xs)`: `f` is a `vsubr`, a closure of `%vlambda`'s over the
-          ;; procedure of one list, free value 0; that procedure, called with `xs`.
-          ((string=? name "apply")
-           (begin (c-op c routine-swap) (c-field c cellular-closure-free0)
-                  (c-op1 c routine-tcall (wcell-int 1))))
-          ((string=? name "array-length")
-           (begin (c-prim c "%bloblet-fields" 1) (c-int c 1) (c-op c routine-int-sub)))
-          ((or (string=? name "modulo") (string=? name "char->integer")
-               (string=? name "integer->char") (string=? name "string-append")
-               (string=? name "string-length") (string=? name "string-ref")
-               (string=? name "substring") (string=? name "string=?")
-               (string=? name "string->symbol") (string=? name "symbol->string"))
-           (c-prim c name n))
-          ;; The rest, as the lowering runs them (`standard.fx`): a
-          ;; runtime primitive, or nothing at all.
-          (else
-           (let ((p (standard-primitive name)))
-             (cond ((string=? p "%fx26-identity") #u)
-                   ((string=? p "") (c-fail (string-append "not yet compiled: " name)))
-                   (else (c-prim c p n))))))))
+    (case name
+      (("+") (c-op c routine-int-add))
+      (("-") (c-op c routine-int-sub))
+      (("<") (c-op c routine-int-less))
+      ((">") (begin (c-op c routine-swap) (c-op c routine-int-less)))
+      (("<=") (begin (c-op c routine-swap) (c-op c routine-int-less) (c-not c)))
+      ((">=") (begin (c-op c routine-int-less) (c-not c)))
+      (("=") (c-op c routine-int-eq))
+      (("cons") (c-op c routine-cons))
+      (("car") (c-op c routine-pair-car))
+      (("cdr") (c-op c routine-pair-cdr))
+      (("set-car!" "set-cdr!")
+       (begin (c-prim c name 2) (c-unit-after c)))
+      (("new") (c-prim c "%make-box" 1))
+      (("get") (c-field c 2))
+      (("set")
+       (begin (c-op c routine-swap) (c-field-set c 2) (c-lit c (wcell-unit))))
+      (("null?") (begin (c-lit c (wcell-nil)) (c-op c routine-eq)))
+      (("not") (c-not c))
+      (("char->string") (c-prim c "string" 1))
+      (("make-continuation-prompt-tag" "make-continuation-mark-key")
+       (begin (c-lit c (wcell-unit)) (c-prim c "%make-box" 1)))
+      (("abort-current-continuation") (c-op c routine-abort))
+      (("call-with-composable-continuation") (c-op c routine-callcomp))
+      (("cwcc") (c-op c routine-callcc))
+      (("with-mark") (c-op c routine-withmark))
+      (("first-mark") (c-op c routine-firstmark))
+      (("current-marks") (c-op c routine-currentmarks))
+      (("marks-of") (c-op c routine-marksof))
+      (("array-ref") (begin (c-array-index c) (c-op c routine-field-ref)))
+      (("array-set!")
+       (begin (c-op c routine-swap) (c-array-index c) (c-op c routine-swap)
+              (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
+      (("apply")
+       (begin (c-op c routine-swap) (c-field c cellular-closure-free0)
+              (c-op1 c routine-tcall (wcell-int 1))))
+      (("array-length")
+       (begin (c-prim c "%bloblet-fields" 1) (c-int c 1) (c-op c routine-int-sub)))
+      (("modulo" "char->integer" "integer->char" "string-append" "string-length" "string-ref"
+        "substring" "string=?" "string->symbol" "symbol->string")
+       (c-prim c name n))
+      (else
+       (cond ((std-eq-name? name) (c-op c routine-eq))
+             (else
+              (let ((p (standard-primitive name)))
+                (case p (("%fx26-identity") #u)
+                        (("") (c-fail (string-append "not yet compiled: " name)))
+                        (else (c-prim c p n))))))))))
 
 ;; Whether a standard name has a value: an operation of an arity, or `list`,
 ;; a `vsubr`.

@@ -149,14 +149,14 @@
 (define k-parse-variance (subr (maxeff checks spin) (k-syns syn) int)
   (lambda (items p)
     (let ((n (k-length items)))
-      (cond ((= n 2) 2)
-            ((= n 3)
-             (let ((x (k-nth items 2)))
-               (cond ((and (syn-symbol? x) (string=? (syn-name x) "+")) 0)
-                     ((and (syn-symbol? x) (string=? (syn-name x) "-")) 1)
-                     (else (k-sfail "a parameter's variance is `+` or `-`" x)))))
-            (else
-             (k-sfail "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`" p))))))
+      (case n ((2) 2)
+              ((3)
+               (let ((x (k-nth items 2)))
+                 (cond ((and (syn-symbol? x) (string=? (syn-name x) "+")) 0)
+                       ((and (syn-symbol? x) (string=? (syn-name x) "-")) 1)
+                       (else (k-sfail "a parameter's variance is `+` or `-`" x)))))
+              (else
+               (k-sfail "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`" p))))))
 ;; A region or place parameter `p` of kind `kind` must be invariant
 ;; (`v` 2): it names where data is.
 (define k-check-invariant (subr checks (int int syn) unit)

@@ -211,12 +211,13 @@
 ;; The description of kind `k` that names binder `v`.
 (define k-binder-desc (subr (maxeff kstate spin) (int int) k-desc)
   (lambda (k v)
-    (cond ((or (= k 0) (= k 3)) (dr (r-var v)))
-          ((= k 1) (de (k-one (a-var v))))
-          ((= k 5) (dz (k-size-var v)))
-          ((= k 6) (dc (cv-var v)))
-          ((>= k 100) (df (k-ty-new (ty-var v))))
-          (else (dt (k-ty-new (ty-var v)))))))
+    (case k ((0 3) (dr (r-var v)))
+            ((1) (de (k-one (a-var v))))
+            ((5) (dz (k-size-var v)))
+            ((6) (dc (cv-var v)))
+            (else
+             (cond ((>= k 100) (df (k-ty-new (ty-var v))))
+                   (else (dt (k-ty-new (ty-var v)))))))))
 (define-rec
     ;; Description `d` substituted into.
     (k-subst-desc (subr (maxeff kstate spin) (k-desc k-map) k-desc)

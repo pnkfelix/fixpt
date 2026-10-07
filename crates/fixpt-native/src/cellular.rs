@@ -1075,19 +1075,19 @@ pub fn fx26_module() -> String {
         c(name, t.code().0 as i64, "a trap's code; a routine's number is its detail");
     }
     out.push_str("\n;; How many operand cells follow routine `n`.\n");
-    out.push_str("(define n-operands (subr pure (int) int)\n  (lambda (n)\n    (cond\n");
+    out.push_str("(define n-operands (subr pure (int) int)\n  (lambda (n)\n    (case n\n");
     for (i, (name, _)) in ROUTINES.iter().enumerate() {
         let k = fixpt_heap::layout::cellular::operands(name);
         if k > 0 {
-            out.push_str(&format!("      ((= n {i}) {k})  ; {name}\n"));
+            out.push_str(&format!("      (({i}) {k})  ; {name}\n"));
         }
     }
     out.push_str("      (else 0))))\n\n");
     out.push_str(";; Whether routine `n`'s call-out may leave the machine anywhere.\n");
-    out.push_str("(define n-control? (subr pure (int) bool)\n  (lambda (n)\n    (cond\n");
+    out.push_str("(define n-control? (subr pure (int) bool)\n  (lambda (n)\n    (case n\n");
     for (i, (name, _)) in ROUTINES.iter().enumerate() {
         if CONTROL_CALLOUTS.contains(name) {
-            out.push_str(&format!("      ((= n {i}) #t)  ; {name}\n"));
+            out.push_str(&format!("      (({i}) #t)  ; {name}\n"));
         }
     }
     out.push_str("      (else #f))))\n");
