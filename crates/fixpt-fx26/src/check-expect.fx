@@ -5,6 +5,9 @@
 
 ;;; ------------------------------------------------------------ errors
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-expect-module (module
 (define k-newline string (char->string (integer->char 10)))
 ;; Run `f`, and if it fails at `a`..`b` with "a W is expected here, and
 ;; this is a G", fail instead with what `say` makes of W and G.
@@ -261,4 +264,26 @@
 ;; A `lambda` missing parameter types, or a thunk: better told than asked.
 (define k-needs-telling? (subr kreads (kx) bool)
   (lambda (x)
-    (tagcase x (x-lambda (ps body a b) (or (null? ps) (k-some-untyped? ps))) (else y #f))))
+    (tagcase x (x-lambda (ps body a b) (or (null? ps) (k-some-untyped? ps))) (else y #f))))))
+
+(define k-rewriting (with check-expect-module k-rewriting))
+(define k-conversion (with check-expect-module k-conversion))
+(define k-convert-at (with check-expect-module k-convert-at))
+(define k-latent-of (with check-expect-module k-latent-of))
+(define k-expect (with check-expect-module k-expect))
+(define k-bind-all (with check-expect-module k-bind-all))
+(define k-name-nat (with check-expect-module k-name-nat))
+(define k-bind-named (with check-expect-module k-bind-named))
+(define k-note-letrec (with check-expect-module k-note-letrec))
+(define k-naming-effect (with check-expect-module k-naming-effect))
+(define k-bind-letrec (with check-expect-module k-bind-letrec))
+(define k-lambda? (with check-expect-module k-lambda?))
+(define k-note-let-lambdas (with check-expect-module k-note-let-lambdas))
+(define k-generalizable? (with check-expect-module k-generalizable?))
+(define k-letrec-not-lambda (with check-expect-module k-letrec-not-lambda))
+(define k-quote-dvar (with check-expect-module k-quote-dvar))
+(define k-proj-map (with check-expect-module k-proj-map))
+(define k-param-types (with check-expect-module k-param-types))
+(define k-binding-types (with check-expect-module k-binding-types))
+(define k-some-untyped? (with check-expect-module k-some-untyped?))
+(define k-needs-telling? (with check-expect-module k-needs-telling?))
