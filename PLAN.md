@@ -225,16 +225,18 @@ before everything else, known holes before proofs.
   loaded again keeps its private regions.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
-- M. **The front end into modules** (`TODO.md` §34, 2026-10-06): 42 of
-  50 files are modules; the four too long split first. Left: the five
-  checker files of cross-file hook cycles (to be removed by regrouping
-  each recursive knot into one file) and the three generated ones. The
-  compilers' hooks are gone, by a middle phase (`TODO.md` §41, all five
-  steps done; `regcode-core.fx` over the size limit by the user's
-  decision, to be revisited). Found on the way, fixed: a re-exported type
-  printed whole at each use, which took check from 0.91 s to 28 s by the
-  first file; types and values named apart in modules; printing a
-  module's type quadratic in its components (check 1.42 → 1.09 s).
+- M. **The front end into modules** (`TODO.md` §34, 2026-10-06): all 52
+  files are modules, the three generated ones by their generators; no
+  hooks are left between files (the compilers' by a middle phase,
+  `TODO.md` §41; the checker's by regrouping each knot into one file or
+  module). `regcode-core.fx` is over the size limit by the user's
+  decision, to be revisited. Open: a re-export, `(define x (with m x))`,
+  binds every value of its module, so a file's re-exports cost the square
+  of its size (the self-compile 1.549 -> 1.615 s for the generated
+  files); a `with` binding only what its body uses would fix it. Found on
+  the way, fixed: a re-exported type printed whole at each use (check
+  0.91 s -> 28 s); types and values named apart in modules; printing a
+  module's type quadratic in its components (check 1.42 -> 1.09 s).
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:
   `editors/emacs/fx26-mode.el` (highlighting, the repository's
   indentation, `run-fx26` over `fixpt --emacs repl` with `,at` placing
