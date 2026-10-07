@@ -1542,20 +1542,19 @@ to `FIXPT_NATIVE_STACK_MAX`, 2^28 words by default). Left:
   - Flushing beats scanning even copied twice: 4.5M deep (one overflow,
     33.6M words flushed, then all of it copied by one minor collection)
     took 458 ms; 3M deep, all in the cache, 2 118.
-  - So the copying cache pays both costs Larceny's design avoids: frames
+  - So the copying cache paid both costs Larceny's design avoids: frames
     in the cache scanned at every collection, frames past it copied
     twice. Larceny pays instead an underflow per frame returned to after
-    each collection. That, in place in the nursery, is the next step;
-    keeping this design would need the chunks put in the old space (cards
-    marked), a much smaller cache or Cheng's watermark, and the gathering
-    fixed.
-- **In place, in the nursery** (Larceny's, the user's direction): the stack
+    each collection. Adopted (the user's, 2026-10-07): stage 1, the stack
+    flushed at every collection, is done (`DONE.md` §52: 1M deep 732 →
+    88 ms); stage 2 is the next bullet, stage 3 the one after.
+- **Stage 2, in place, in the nursery** (Larceny's, the user's direction): the stack
   at the nursery's top, its pointer the heap's limit; a flush rewriting
   frames where they are, as chunks of the chain (§53 makes a frame one
   already), not copying them. The copying cache costs about 20 ns a frame
   flushed and restored; measure this against it. The never-moving
   segments, mark-swept, are set aside for now (the user's, 2026-10-07).
-- **Underflow in line**: the underflow is a call-out (two switches between
+- **Stage 3, underflow in line**: the underflow is a call-out (two switches between
   the native stack and Rust's) restoring up to 256 words; Larceny's
   `memory.s` gained 15-50% on deep recursion by doing it in assembly.
   Measure the window (Hieb, Dybvig and Bruggeman: "determined only by

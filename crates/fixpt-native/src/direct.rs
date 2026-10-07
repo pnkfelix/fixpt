@@ -167,12 +167,13 @@ struct DState {
     stats: StackStats,
 }
 
-/// What the stack cache did: overflows, and the frames and words they
-/// copied into the heap; underflows (and aborts and continuations put back),
-/// and the frames they restored.
+/// What the stack cache did: overflows and collections, and the frames and
+/// words they copied into the heap; underflows (and aborts and
+/// continuations put back), and the frames they restored.
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
 pub struct StackStats {
     pub overflows: u64,
+    pub collection_flushes: u64,
     pub frames_flushed: u64,
     pub words_flushed: u64,
     pub underflows: u64,
@@ -182,6 +183,7 @@ pub struct StackStats {
 impl std::ops::AddAssign for StackStats {
     fn add_assign(&mut self, o: StackStats) {
         self.overflows += o.overflows;
+        self.collection_flushes += o.collection_flushes;
         self.frames_flushed += o.frames_flushed;
         self.words_flushed += o.words_flushed;
         self.underflows += o.underflows;
@@ -452,7 +454,7 @@ const STACK_SLACK: u64 = 64 * 1024;
 /// words a run's frames may take in all: 2^28 (2 GB).
 /// `FIXPT_NATIVE_STACK_CACHE` and `FIXPT_NATIVE_STACK_MAX` (words) say
 /// otherwise.
-const CACHE_WORDS: u64 = 1 << 25;
+const CACHE_WORDS: u64 = 1 << 16;
 const MAX_STACK_WORDS: u64 = 1 << 28;
 
 fn stack_words_wanted() -> (u64, u64) {
@@ -3097,8 +3099,11 @@ fn call_out(a: &mut Asm, n: usize) {
     a.es(&mov_imm64(1, n as u64));
     a.e(ldr(X16, ST, st_off(offset_of!(DState, callout))));
     a.e(blr(X16));
+    // The stack and frame as the call-out left them: a collection flushes
+    // the frames into the heap and restores the innermost elsewhere.
     a.e(ldr(X9, ST, st_off(offset_of!(DState, native_sp))));
     a.e(add_imm(SP, X9, 0));
+    a.e(ldr(FRAME, ST, st_off(offset_of!(DState, fp))));
 }
 
 /// `t` := field `k` of the code bloblet being made, PC-relatively: field
@@ -3148,14 +3153,18 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
     let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow);
+    // A collection, Larceny's way (`docs/research/deep-recursion.md`): the
+    // run's frames flushed into the heap first, so that the collector reads
+    // no stack; then the innermost restored, where the code goes on.
     if !quiet && rt.heap.collection_due() {
+        flush_all(&mut rt.heap, st);
         let mut cont = [Value(st.cont)];
-        let mut roots = native_frames(st);
-        roots.push(&mut args);
-        roots.push(&mut code);
-        roots.push(&mut cont);
-        rt.heap.collect_due(&mut roots);
+        rt.heap.collect_due(&mut [&mut args, &mut code, &mut cont]);
         st.cont = cont[0].raw();
+        match restore(&rt.heap, st, cont_pos(st)) {
+            Ok((fp, _)) => (st.fp, st.native_sp) = (fp, fp),
+            Err(why) => return failed(st, why),
+        }
     }
     let out = match c {
         Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),
@@ -3678,6 +3687,24 @@ fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
     set_word(moved(outer) + 8, st.underflow);
     (st.resume_sp, st.resume_fp) = (to, to);
     0
+}
+
+/// Every frame of the run on the stack, from the one that called out (at
+/// `st.fp`, the stack's pointer too), copied onto the chain, leaving the
+/// stack empty: for a collection, after which `restore` puts the innermost
+/// back. Where the innermost resumes is not kept: the call-out returns to
+/// it.
+fn flush_all(heap: &mut Heap, st: &mut DState) {
+    debug_assert_eq!(st.fp, st.native_sp, "a call-out's frame is the stack's top");
+    let frames = frames_of(st);
+    let Some(&(outer, _)) = frames.last() else { return };
+    let words: u64 = frames.iter().map(|&(a, b)| (b - a) / 8).sum();
+    let last = outermost_second(st, outer);
+    let p = chunks_of(heap, &frames, last, cont_pos(st));
+    set_cont(st, p);
+    st.stats.collection_flushes += 1;
+    st.stats.frames_flushed += frames.len() as u64;
+    st.stats.words_flushed += words;
 }
 
 /// Whether the frame from `fp` to `end` is a mark's in tail position: a

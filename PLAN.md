@@ -263,9 +263,10 @@ weighed with the other items, not ahead of them.
   §52, §53): done as a copying stack cache (`DONE.md` §52): native code
   recurses as deep as the heap allows (50M frames in 1.07 s; it overflowed
   past 5M-20M), and continuations got cheaper (`captures` 11.4 → 9.0 ms).
-  Next: the flush in place in the nursery, Larceny's (the never-moving
-  segments set aside, the user's), with frames laid out as bloblets
-  (§53); the underflow in line; a nested run's room.
+  Adopted Larceny's design (the user's): stage 1, the stack flushed at
+  every collection, done (a deep stack's collections 732 → 88 ms at 1M
+  frames). Next: stage 2, the flush in place in the nursery, with frames
+  laid out as bloblets (§53); stage 3, the underflow in line.
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path

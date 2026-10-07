@@ -818,7 +818,7 @@ fn deep_recursion_through_the_stack_cache() {
     // Each program's frames went through the heap, and came back.
     let after = fixpt_native::direct::stack_stats();
     assert!(after.overflows - before.overflows > 100 && after.underflows - before.underflows > 1000, "{before:?} {after:?}");
-    fixpt_native::direct::with_machine(|m| m.set_stack_words(1 << 25, 1 << 28)).expect("a machine");
+    fixpt_native::direct::with_machine(|m| m.set_stack_words(1 << 16, 1 << 28)).expect("a machine");
 }
 
 fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {

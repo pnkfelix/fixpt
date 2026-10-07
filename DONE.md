@@ -672,3 +672,26 @@ marks too many). `fuel_and_stack_run_out` overflows past 2^20 words.
 On the way: `Heap::vector_with` writes each element once, with no barrier
 (a new object's stores need none, as `cons`'s); `Heap::obj_words` gives an
 object's payload to copy whole.
+
+**Then, Larceny's way, stage 1 (the user's, 2026-10-07): the stack flushed
+at every collection.** A collection a native call-out makes first copies
+the run's frames onto the chain (`flush_all`), collects with no stack to
+read (the chain, the call-out's arguments and its code the roots), then
+restores the innermost frames; the code takes its frame from the state
+after every call-out. The collector no longer scans frames, nor are
+their roots gathered (a `Vec` a frame, every collection: 17 ns a frame);
+so the cache is small, 2^16 words, all of it flushed at worst each time.
+`(dive D 200000)`, a recursion `D` deep allocating nothing, then 200 000
+lists of 100 at its bottom (about 38 minor collections):
+
+| depth `D` | before, ms | after, ms |
+| --------: | ---------: | --------: |
+|   100 000 |        100 |        47 |
+| 1 000 000 |        732 |        88 |
+| 3 000 000 |      2 118 |       216 |
+| 8 000 000 |      2 935 |       500 |
+
+The cost moves to recursion past the cache that allocates nothing, which
+the large cache had kept on the stack: `down` 5M deep 41 → 115 ms, 20M
+426 → 455 ms (about 15 ns a frame flushed and restored, whatever the
+cache's size, 2^16 to 2^20). Stage 2, in place, removes the flush's copy.

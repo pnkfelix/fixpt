@@ -2657,3 +2657,18 @@ onto the stack when put back (`ptr::copy_nonoverlapping` from the chunk's
 payload), where it was a vector put back a word at a time.
 `Heap::vector_with` now writes each element once with no barrier (a new
 object's stores need none), which the chunks are made with.
+
+## The native stack flushed at every collection (2026-10-07)
+
+Larceny's way, stage 1 (`DONE.md` §52): before a collection, the run's
+native frames are copied into the heap's chain, and after it the innermost
+restored; the collector reads no stack. Before, each collection took the
+frames as roots: the collector's scan about 1.4 ns a frame, and gathering
+them for it (a Rust `Vec` of a frame's live runs, a frame at a time) about
+17 ns a frame, each collection. A recursion `D` deep with about 38 minor
+collections at its bottom (`(dive D 200000)`): 1M deep 732 → 88 ms, 3M
+2 118 → 216 ms, 8M 2 935 → 500 ms. The cache is 2^16 words now, since a
+collection flushes all of it; recursion past it that allocates nothing
+pays about 15 ns a frame flushed and restored (`down` 5M 41 → 115 ms),
+which the in-place flush (stage 2) cuts. The benchmarks: unchanged, back
+to back.
