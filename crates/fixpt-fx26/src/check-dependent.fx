@@ -9,6 +9,9 @@
 ;;; it to select from (`first-class-modules.md`, M5): in its type, `(select
 ;;; $k t)`, the `k`th parameter's type `t`.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-dependent-module (module
 ;; `t` with each `(select $k n)` what `given` says it is.
 (define k-instantiate-params (subr (maxeff kstate spin) (int k-params-given) int)
   (lambda (t given)
@@ -151,4 +154,9 @@
                      (ps2 (k-instantiate-all ps given))
                      (r2 (k-instantiate-params r given)))
                 (begin (k-check-apps-each (k-ids-then ps2 r2) (the (ref k-ids @t) (new nil)) a b)
-                       (cons (product (1 (extract (car c) 1)) (2 ps2) (3 r2)) nil))))))))
+                       (cons (product (1 (extract (car c) 1)) (2 ps2) (3 r2)) nil))))))))))
+
+(define k-instantiate-params (with check-dependent-module k-instantiate-params))
+(define k-bind-params (with check-dependent-module k-bind-params))
+(define k-result-back (with check-dependent-module k-result-back))
+(define k-dependent-callee (with check-dependent-module k-dependent-callee))
