@@ -96,6 +96,26 @@
   (lambda (m) (cons (mod-item-of -1 (string->symbol m) (the syns-a nil) nil) nil)))
 
 ;;; ------------------------------------------------------------ expressions
+;; Whether `s` mentions the name `n` anywhere, quoted or not.
+(define syn-mentions? (subr spin (symbol syn) bool)
+  (lambda (n s)
+    (tagcase s
+      (atom (d a b) (and (datum-symbol? d) (symbol=? (datum->symbol d) n)))
+      (lst (items d a b) (syns-mention? n items))
+      (dotted (items t d a b) (or (syns-mention? n items) (syn-mentions? n t)))
+      (vec (items d a b) (syns-mention? n items)))))
+(define syns-mention? (subr spin (symbol syns-a) bool)
+  (lambda (n ss) (and (not (null? ss)) (or (syn-mentions? n (car ss)) (syns-mention? n (cdr ss))))))
+;; A name for an expansion's own variable that `forms` never mention:
+;; `base`, else `base1`, `base2` and so on. Its scope is within the form,
+;; and nothing refers to a name it does not write, so it captures nothing
+;; and nothing captures it.
+(define fresh-name (subr spin (string syns-a) symbol)
+  (lambda (base forms) (fresh-from base forms 0)))
+(define fresh-from (subr spin (string syns-a int) symbol)
+  (lambda (base forms i)
+    (let ((n (string->symbol (if (= i 0) base (string-append base (int->string i))))))
+      (if (syns-mention? n forms) (fresh-from base forms (+ i 1)) n))))
 ;; A `case` datum's kind (`TODO.md` §46): 0 an integer, 1 a character, 2
 ;; a string, 3 a symbol, 4 a boolean, and -1 none of these.
 (define case-kind (subr (read @globals) (syn) int)
@@ -155,6 +175,9 @@
           (let ((data (syn-items (car parts) "a case clause's data, `(datum …)`")))
             (if (null? data) (pfail "a case clause has at least one datum" c) #u)
             (case-clauses (cdr clauses) (case-datums data seen)))))))
+;; `(or t rest)`, spanning a clause.
+(define case-or (subr (read @globals) (exp exp int int) exp)
+  (lambda (t rest ca cb) (e-if t (e-bool #t ca cb) rest ca cb)))
 ;; A `case`'s last clause, which must be `else`.
 (define case-else (subr parses (syn) unit)
   (lambda (c)
@@ -346,7 +369,7 @@
              (e (parse-exp (nth items 1)))
              (body (parse-exp (nth arm 1)))
              (els (parse-exp (nth items (+ i 1))))
-             (tmp (string->symbol tmp-name))
+             (tmp (fresh-name tmp-name items))
              (then (e-let (one-let x (call-tmp cert tmp more a b)) body a b)))
         (e-let (one-let tmp e) (e-if (call-tmp test tmp more a b) then els a b) a b))))
   (parse-letrec-bindings (subr (maxeff parses spin) (syns-a) letrec-list)
@@ -432,30 +455,30 @@
             ((null? (cdr xs)) (pfail-at "a `case` needs at least an `else` clause" a b))
             (else
              (begin (case-else (case-last (cdr xs)))
-                    (let ((key (parse-exp (car xs))))
+                    (let ((key (parse-exp (car xs))) (k (fresh-name "%case-key" xs)))
                       (case-clauses (cdr xs) nil)
-                      (e-let (one-let '%case-key key) (parse-case-arms (cdr xs)) a b)))))))
-  (parse-case-arms (subr (maxeff parses spin) (syns-a) exp)
-    (lambda (clauses)
+                      (e-let (one-let k key) (parse-case-arms k (cdr xs)) a b)))))))
+  (parse-case-arms (subr (maxeff parses spin) (symbol syns-a) exp)
+    (lambda (k clauses)
       (let* ((c (car clauses)) (parts (syn-items c "a case clause"))
              (ca (syn-start c)) (cb (syn-end c)))
         (if (null? (cdr clauses))
             (parse-body (cdr parts) ca cb)
-            (let* ((test (case-tests (syn-items (car parts) "data") ca cb))
+            (let* ((test (case-tests k (syn-items (car parts) "data") ca cb))
                    (then (parse-body (cdr parts) ca cb)))
-              (e-if test then (parse-case-arms (cdr clauses)) ca cb))))))
+              (e-if test then (parse-case-arms k (cdr clauses)) ca cb))))))
   ;; `(if d1 #t (if d2 #t … dn))`, each `di` the key compared with a datum.
-  (case-tests (subr (maxeff parses spin) (syns-a int int) exp)
-    (lambda (data ca cb)
-      (let ((t (case-test (car data))))
-        (if (null? (cdr data)) t (e-if t (e-bool #t ca cb) (case-tests (cdr data) ca cb) ca cb)))))
-  (case-test (subr (maxeff parses spin) (syn) exp)
-    (lambda (d)
+  (case-tests (subr (maxeff parses spin) (symbol syns-a int int) exp)
+    (lambda (key data ca cb)
+      (let ((t (case-test key (car data))))
+        (if (null? (cdr data)) t (case-or t (case-tests key (cdr data) ca cb) ca cb)))))
+  (case-test (subr (maxeff parses spin) (symbol syn) exp)
+    (lambda (key d)
       (let* ((da (syn-start d)) (db (syn-end d)) (k (case-kind d))
              (eq (cond ((= k 0) '=) ((= k 1) 'char=?) ((= k 2) 'string=?)
                        ((= k 3) 'symbol=?) (else 'bool=?)))
              (lit (if (= k 3) (e-sym (syn-head d) da db) (parse-exp d))))
-        (e-app (e-var eq da db) (list (e-var '%case-key da db) lit) da db))))
+        (e-app (e-var eq da db) (list (e-var key da db) lit) da db))))
   (parse-bloblet (subr (maxeff parses spin) (symbol syns-a int int) exp)
     (lambda (op args a b)
       (let ((n (len args)))

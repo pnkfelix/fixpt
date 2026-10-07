@@ -81,6 +81,13 @@ fn case_dispatches_on_atoms() {
     assert_eq!(run(include_str!("programs/run/case.fx")), "12312342223");
 }
 
+/// An expansion's own variable captures nothing
+/// (`programs/sizes/fresh-temporaries.fx`): 3 + 3 + 4 + 5.
+#[test]
+fn expansions_capture_nothing() {
+    assert_eq!(run(include_str!("programs/sizes/fresh-temporaries.fx")), "15");
+}
+
 /// `f64` literals and operations, lowered (`programs/run/floats.fx`).
 #[test]
 fn floats_run() {

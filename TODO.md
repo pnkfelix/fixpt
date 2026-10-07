@@ -1328,8 +1328,29 @@ parsers agree on the trees and on each refusal
 natively. Every checker, compiler and machine sees only what it already
 handled. **Left:** the dispatch, as a recognition of comparison chains on
 one variable in the compilers, which helps a hand-written `cond` as much;
-then the front end's own `cond`s on a symbol rewritten as `case`; a key
-named `%case-key` in a clause body sees the key, not the outer binding.
+then the front end's own `cond`s on a symbol rewritten as `case`.
+
+**Hygiene (the user, 2026-10-07).** An expansion's own variable is named
+for what its form does not mention (`fresh_name`, `fresh-name`: `%case-key`,
+else `%case-key1`, …), in `case`, `confirm-length`, `acyclic` and
+`confirm-nat`, the same in both parsers; nothing refers to a name it does
+not write, so it captures nothing (`programs/sizes/fresh-temporaries.fx`;
+not under `run/`, which the FX-26 evaluator runs too: it has no
+`length-is?`, `acyclic?` or `nat?` yet, and `evaluator.fx` is at 992
+lines, so they wait on a split).
+**Left:** the names an expansion *calls* (`=`, `symbol=?`, `length-is?`,
+`certify-length`, `%vlambda`, …) can be shadowed or redefined:
+`(let ((= (lambda ((a int) (b int)) #t))) (case 2 ((1) 'one) (else
+'other)))` answers `one`. The plan: one reserved name, `#%fx`, a module of
+the standard bindings at their types, generated from the standard table,
+which no form may bind or define but any may use; the expansions call
+`(with #%fx =)`; every rule keyed on "the standard binding of `n`" (the
+checkers' `is_standard`, as in `certify-length`'s; the compilers'
+primitives) takes `(with #%fx n)` as that, with the code for `case.fx`
+the same as now to the instruction. With it, an audit of every rule keyed
+on a name, that each asks `is_standard` too; and of the `wcell-*` and
+`wglobal-*` words and `%vlambda`, the front end's machinery, which any
+program may call today.
 
 **Prior art (the user's pointer):** Clinger, "Rapid Case Dispatch in
 Scheme", Scheme Workshop 2006 (`docs/research/papers/case-dispatch/`,

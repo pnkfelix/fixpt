@@ -1287,10 +1287,12 @@ impl Checker {
                     let s = c.interner.intern(n);
                     c.arena.exp(span, Exp::Var(s))
                 };
-                let tmp = self.interner.intern("%confirm-value");
-                let (f, a, l) = (var(self, "length-is?"), var(self, "%confirm-value"), self.arena.exp(span, k.clone()));
+                let tmp = self.fresh_name("%confirm-value", &items);
+                let a = self.arena.exp(span, Exp::Var(tmp));
+                let (f, l) = (var(self, "length-is?"), self.arena.exp(span, k.clone()));
                 let test = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
-                let (f, a, l) = (var(self, "certify-length"), var(self, "%confirm-value"), self.arena.exp(span, k));
+                let a = self.arena.exp(span, Exp::Var(tmp));
+                let (f, l) = (var(self, "certify-length"), self.arena.exp(span, k));
                 let cert = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
                 let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
                 let branch = self.arena.exp(span, Exp::If { test, then, els });
@@ -1310,10 +1312,10 @@ impl Checker {
                     let s = c.interner.intern(n);
                     c.arena.exp(span, Exp::Var(s))
                 };
-                let tmp = self.interner.intern("%acyclic-value");
-                let (test_f, test_a) = (var(self, "acyclic?"), var(self, "%acyclic-value"));
+                let tmp = self.fresh_name("%acyclic-value", &items);
+                let (test_f, test_a) = (var(self, "acyclic?"), self.arena.exp(span, Exp::Var(tmp)));
                 let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
-                let (cert_f, cert_a) = (var(self, "certify-acyclic"), var(self, "%acyclic-value"));
+                let (cert_f, cert_a) = (var(self, "certify-acyclic"), self.arena.exp(span, Exp::Var(tmp)));
                 let cert = self.arena.exp(span, Exp::App { fun: cert_f, args: vec![cert_a] });
                 let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
                 let branch = self.arena.exp(span, Exp::If { test, then, els });
@@ -1336,10 +1338,10 @@ impl Checker {
                     let s = c.interner.intern(n);
                     c.arena.exp(span, Exp::Var(s))
                 };
-                let tmp = self.interner.intern("%nat-value");
-                let (test_f, test_a) = (var(self, "nat?"), var(self, "%nat-value"));
+                let tmp = self.fresh_name("%nat-value", &items);
+                let (test_f, test_a) = (var(self, "nat?"), self.arena.exp(span, Exp::Var(tmp)));
                 let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
-                let (cert_f, cert_a) = (var(self, "certify-nat"), var(self, "%nat-value"));
+                let (cert_f, cert_a) = (var(self, "certify-nat"), self.arena.exp(span, Exp::Var(tmp)));
                 let cert = self.arena.exp(span, Exp::App { fun: cert_f, args: vec![cert_a] });
                 let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
                 let branch = self.arena.exp(span, Exp::If { test, then, els });
@@ -1561,6 +1563,33 @@ impl Checker {
         Ok(out)
     }
 
+    /// A name for an expansion's own variable that `forms` never mention:
+    /// `base`, else `base1`, `base2` and so on. The variable's scope is
+    /// within the form, and nothing refers to a name it does not write, so
+    /// it captures nothing and nothing captures it.
+    fn fresh_name(&mut self, base: &str, forms: &[Syntax]) -> Sym {
+        fn mentions(s: &Syntax, out: &mut std::collections::HashSet<Sym>) {
+            match &s.datum {
+                Datum::Symbol(x) => {
+                    out.insert(*x);
+                }
+                Datum::List { items, tail } => {
+                    items.iter().for_each(|i| mentions(i, out));
+                    tail.iter().for_each(|t| mentions(t, out));
+                }
+                Datum::Vector(items) => items.iter().for_each(|i| mentions(i, out)),
+                _ => {}
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        forms.iter().for_each(|f| mentions(f, &mut seen));
+        (0..)
+            .map(|i| if i == 0 { base.to_string() } else { format!("{base}{i}") })
+            .map(|n| self.interner.intern(&n))
+            .find(|s| !seen.contains(s))
+            .expect("a name")
+    }
+
     /// `(case key ((datum …) e …) … (else e …))` on atoms (`TODO.md` §46):
     /// `(let ((%case-key key)) …)` and a chain of `if`s, each datum compared
     /// by its kind's equality: `=` on integers, `char=?`, `string=?`,
@@ -1579,7 +1608,7 @@ impl Checker {
             return Err(FxError::at(last.span, "a `case` must end with an `else` clause: FX has no unspecified value"));
         }
         let key = self.parse_exp(key)?;
-        let tmp = self.interner.intern("%case-key");
+        let tmp = self.fresh_name("%case-key", items);
         let (mut kind, mut seen) = (None, std::collections::HashSet::new());
         let mut arms = Vec::new();
         for c in init {
