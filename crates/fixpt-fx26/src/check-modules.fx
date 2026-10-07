@@ -13,140 +13,9 @@
 
 ;;; ------------------------------------------------------------ reading
 
-;; `ps` reversed, onto `acc`.
-(define k-parts-reversed (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts) k-parts)
-  (lambda (ps acc) (if (null? ps) acc (k-parts-reversed (cdr ps) (cons (car ps) acc)))))
 
-(define k-moduleof-usage string "`(moduleof (abs t type) … (desc d type) … (val x type) …)`")
-(define k-abs-usage string
-  "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")
-;; The names among `xs`; what is not one is passed over.
-(define k-syn-symbols (subr (maxeff (read @globals) (read @s) (alloc @t)) (k-syns) k-names)
-  (lambda (xs)
-    (cond ((null? xs) nil)
-          ((syn-symbol? (car xs)) (cons (syn-head (car xs)) (k-syn-symbols (cdr xs))))
-          (else (k-syn-symbols (cdr xs))))))
-;; A component's names: its name; or, an `abs`'s, the names in a list.
-(define k-component-names (subr (maxeff checks spin) (syn string) k-names)
-  (lambda (name head)
-    (if (syn-symbol? name)
-        (the k-names (cons (syn-head name) nil))
-        (tagcase name
-          (lst (items d a b)
-            (if (string=? head "abs") (k-syn-symbols items) (k-sfail "a component's name" name)))
-          (else x (k-sfail "a component's name" name))))))
-;; `seen` and `names`, each named once in component `c`.
-(define k-names-once (subr (maxeff checks spin) (k-names k-names syn) k-names)
-  (lambda (names seen c)
-    (cond ((null? names) seen)
-          ((k-has-name? seen (car names)) (k-sfail (k-twice (symbol->string (car names))) c))
-          (else (k-names-once (cdr names) (cons (car names) seen) c)))))
 ;; Kind `s`, or -1 where `k-parse-kind` would refuse it: for a reader that
 ;; gives its own message instead (`moduleof`'s `abs`).
-(define-rec
-  (k-try-kind (subr (maxeff kstate (read @s) spin) (syn) int)
-    (lambda (s)
-      (let ((n (if (syn-symbol? s) (syn-name s) "")))
-        (cond ((string=? n "region") 0)
-              ((string=? n "place") 3)
-              ((string=? n "effect") 1)
-              ((string=? n "type") 2)
-              ((string=? n "data") 4)
-              ((string=? n "size") 5)
-              ((string=? n "conv") 6)
-              ((syn-symbol? s) -1)
-              (else (k-try-arrow-kind s))))))
-  (k-try-arrow-kind (subr (maxeff kstate (read @s) spin) (syn) int)
-    (lambda (s)
-      (let ((parts (k-arrow-syntax s)))
-        (if (null? parts)
-            -1
-            (let* ((params (k-try-kinds (car (car parts))))
-                   (result (k-try-kind (cdr (car parts)))))
-              (cond ((or (k-has-id? params -1) (< result 0)) -1)
-                    ((or (= result 0) (= result 3) (= result 5) (= result 6)) -1)
-                    ((and (= result 1) (k-any-typed-kind? params)) -1)
-                    (else (k-arrow params result))))))))
-  (k-try-kinds (subr (maxeff kstate (read @s) spin) (k-syns) k-ids)
-    (lambda (xs)
-      (if (null? xs)
-          nil
-          (let* ((k (k-try-kind (car xs))) (rest (k-try-kinds (cdr xs))))
-            (the k-ids (cons k rest)))))))
-;; Abstract types `names`, each a variable of kind `k`, in scope from here,
-;; onto `abs`; a type constructor among `k-abstract-funs`.
-(define k-abs-bound (subr (maxeff kstate spin) (k-names int k-parts) k-parts)
-  (lambda (names k abs)
-    (if (null? names)
-        abs
-        (let* ((n (car names)) (v (k-new-dvar-of n k)))
-          (begin (if (= k 2) #u (set k-abstract-funs (cons v (get k-abstract-funs))))
-                 (k-push-desc n (ds-var v k))
-                 (k-abs-bound (cdr names) k (cons (product (1 n) (2 v)) abs)))))))
-;; `(name type)` onto `ps`.
-(define k-part-onto (subr (alloc @t) (symbol int k-parts) k-parts)
-  (lambda (n t ps) (cons (product (1 n) (2 t)) ps)))
-;; Whether `s` is written as an effect: `pure`, `spin`, a name bound to one,
-;; or one of `k-parse-effect`'s atoms or `maxeff`.
-(define k-effect-shaped? (subr (maxeff kreads (read @s) (alloc @t) spin) (syn) bool)
-  (lambda (s)
-    (if (syn-symbol? s)
-        (let ((n (syn-name s)))
-          (or (string=? n "pure") (string=? n "spin")
-              (let ((d (k-lookup-desc (string->symbol n))))
-                (and (not (null? d))
-                     (tagcase (car d) (ds-eff (e) #t) (ds-var (v k) (= k 1)) (else x #f))))))
-        (let ((h (k-list-head s))) (or (k-atom-head? h) (string=? h "maxeff"))))))
-;; A `moduleof`'s description `what` of `name`, in scope in what follows it:
-;; `(desc e E)`, an effect, as a module's `define-effect` gives; a description
-;; function; or a type.
-(define k-moduleof-desc (subr (maxeff checks spin) (symbol syn) int)
-  (lambda (name what)
-    (cond ((k-effect-shaped? what)
-           (let* ((e (k-parse-effect what)) (d (k-effect-desc e)))
-             (begin (k-push-desc name (ds-eff e)) d)))
-          ((string=? (k-list-head what) "dlambda")
-           (let ((f (k-parse-fun what -1))) (begin (k-push-desc name (ds-fun f)) f)))
-          (else (let ((t (k-parse-type what))) (begin (k-push-desc name (ds-rec t)) t))))))
-;; A `moduleof`'s components `cs`, those before them read into `abs`, `ds`
-;; and `vs` (newest first), their names `seen` (types and effects) and `vseen`
-;; (values): a value may have a type's name.
-(define k-moduleof-comps
-  (subr (maxeff checks spin) (k-syns k-parts k-parts k-parts k-names k-names) int)
-  (lambda (cs abs ds vs seen vseen)
-    (if (null? cs)
-        (let ((ds (k-parts-reversed ds nil)) (vs (k-parts-reversed vs nil)))
-          (k-ty-new (ty-module (k-parts-reversed abs nil) ds vs)))
-        (let* ((c (car cs))
-               (parts (k-items c "a module component"))
-               (shaped (k-shape (= (k-length parts) 3) k-moduleof-usage c))
-               (head (k-symbol-head parts))
-               (names (k-component-names (k-nth parts 1) head))
-               (val? (string=? head "val"))
-               (seen (if val? seen (k-names-once names seen c)))
-               (vseen (if val? (k-names-once names vseen c) vseen))
-               (what (k-nth parts 2)))
-          (cond ((string=? head "abs")
-                 (let ((k (k-try-kind what)))
-                   (if (or (= k 2) (and (k-arrow-kind? k) (= (k-arrow-result k) 2)))
-                       (k-moduleof-comps (cdr cs) (k-abs-bound names k abs) ds vs seen vseen)
-                       (k-sfail k-abs-usage what))))
-                ((string=? head "desc")
-                 (let ((d (k-moduleof-desc (car names) what)))
-                   (k-moduleof-comps (cdr cs) abs (k-part-onto (car names) d ds) vs seen vseen)))
-                ((string=? head "val")
-                 (let ((t (k-parse-type what)))
-                   (k-moduleof-comps (cdr cs) abs ds (k-part-onto (car names) t vs) seen vseen)))
-                (else (k-sfail k-moduleof-usage (car parts))))))))
-;; `(moduleof …)`, each abstract type a binder in scope in what follows it;
-;; or `(select m t)`.
-(define k-read-module-type (subr (maxeff checks spin) (syn k-syns symbol) int)
-  (lambda (s items hd)
-    (if (symbol=? hd 'select)
-        (k-parse-select s items)
-        (let* ((saved (get k-dscope)) (t (k-moduleof-comps (cdr items) nil nil nil nil nil)))
-          (begin (set k-dscope saved) t)))))
-(set k-parse-module-type k-read-module-type)
 
 ;; A `define-rec`'s types and expressions, each type read before its
 ;; expression, as the Rust parser reads them.
@@ -454,42 +323,6 @@
 
 ;;; ------------------------------------------------------------ walking types
 
-;; The types of parts `ps`, onto `tail`.
-(define k-parts-onto (subr (maxeff (read @globals) (alloc @t)) (k-parts k-ids) k-ids)
-  (lambda (ps tail)
-    (if (null? ps) tail (cons (extract (car ps) 2) (k-parts-onto (cdr ps) tail)))))
-;; `ts`, and `t` after them.
-(define k-ids-then (subr (maxeff (read @globals) (alloc @t)) (k-ids int) k-ids)
-  (lambda (ts t) (if (null? ts) (cons t nil) (cons (car ts) (k-ids-then (cdr ts) t)))))
-;; The types and functions among descriptions `ds`.
-(define k-desc-kids (subr (maxeff (read @globals) (alloc @t)) (k-descs) k-ids)
-  (lambda (ds)
-    (if (null? ds)
-        nil
-        (let ((rest (k-desc-kids (cdr ds))))
-          (tagcase (car ds) (dt (x) (cons x rest)) (df (x) (cons x rest)) (else y rest))))))
-;; The types `t` is made of, one level down.
-(define k-ty-kids (subr (maxeff kmakes spin) (int) k-ids)
-  (lambda (t)
-    (tagcase (k-get t)
-      (ty-subr (e ps r cv) (k-ids-then ps r))
-      (ty-poly (bs x) (the k-ids (cons x nil)))
-      (ty-ref (a r) (the k-ids (cons a nil)))
-      (ty-array (a r) (the k-ids (cons a nil)))
-      (ty-icell (a r) (the k-ids (cons a nil)))
-      (ty-markkey (a r) (the k-ids (cons a nil)))
-      (ty-pair (a d r) (k-ids-then (the k-ids (cons a nil)) d))
-      (ty-tag (a h e r) (k-ids-then (the k-ids (cons a nil)) h))
-      (ty-comp (x a e r) (k-ids-then (the k-ids (cons x nil)) a))
-      (ty-product (ps) (k-parts-onto ps nil))
-      (ty-sum (ps) (k-parts-onto ps nil))
-      (ty-bloblet (fs z r) fs)
-      (ty-named (g ds) (k-desc-kids ds))
-      (ty-app (f ds) (the k-ids (cons f (k-desc-kids ds))))
-      (ty-lam (bs x) (k-desc-kids (the k-descs (cons x nil))))
-      (ty-nlist (e z r) (the k-ids (cons e nil)))
-      (ty-module (abs ds vs) (k-parts-onto ds (k-parts-onto vs nil)))
-      (else y nil))))
 ;; Descriptions `ds`, the `i`th on, each of the kind of `ks` it is given for.
 ;; Function `f`, as an error says it: its type, quoted. Printed only for an
 ;; error, as printing a type is not cheap.
@@ -634,32 +467,6 @@
 
 ;; Each `(select m n)` node in `t`, onto `out` (newest first); the
 ;; nodes walked, `seen`.
-(define-rec
-  (k-selects-from (subr (maxeff kstate spin) (int (ref k-ids @t) (ref k-selects @t)) unit)
-    (lambda (t seen out)
-      (let ((t (k-resolve t)))
-        (if (k-has-id? (get seen) t)
-            #u
-            (begin
-              (set seen (cons t (get seen)))
-              (tagcase (k-get t)
-                (ty-select (m n) (set out (cons (product (1 m) (2 n) (3 t)) (get out))))
-                (else y (k-selects-each (k-ty-kids t) seen out))))))))
-  (k-selects-each (subr (maxeff kstate spin) (k-ids (ref k-ids @t) (ref k-selects @t)) unit)
-    (lambda (ts seen out)
-      (if (null? ts)
-          #u
-          (begin (k-selects-from (car ts) seen out) (k-selects-each (cdr ts) seen out))))))
-;; `ss` reversed, onto `acc`.
-(define k-selects-reversed
-  (subr (maxeff (read @globals) (alloc @t)) (k-selects k-selects) k-selects)
-  (lambda (ss acc) (if (null? ss) acc (k-selects-reversed (cdr ss) (cons (car ss) acc)))))
-;; The `select`s in `t`, in the order first met.
-(define k-selects-in (subr (maxeff kstate spin) (int) k-selects)
-  (lambda (t)
-    (let ((out (the (ref k-selects @t) (new nil))))
-      (begin (k-selects-from t (the (ref k-ids @t) (new nil)) out)
-             (k-selects-reversed (get out) nil)))))
 ;; `(select m n)`, as an error shows it.
 (define k-select-shown (subr (read @globals) (symbol symbol) string)
   (lambda (m n) (k-cat5 "`(select " (symbol->string m) " " (symbol->string n) ")`")))

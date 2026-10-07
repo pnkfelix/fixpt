@@ -1,38 +1,13 @@
-;;; The checker, in FX-26: descriptions read from their syntax into the arena:
-;;; effects, regions, types, and the expressions that hold them, reading
-;;; them by the pieces `check-read.fx` gives before it. Part of the checker,
+;;; The checker, in FX-26: what reading descriptions from their syntax into
+;;; the arena needs before it (`check-read-types.fx` reads them, by the
+;;; pieces `check-read.fx` gives): regions, effects' atoms, labels, `dletrec`
+;;; knots, `define-type`'s forward names. Part of the checker,
 ;;; `check-types.fx` first (PLAN.md §11, step 10).
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-syntax-module (module
 (define-rec
-  (k-effects (subr (maxeff checks spin) (k-syns) k-eff)
-    (lambda (xs)
-      (if (null? xs)
-          nil
-          (let* ((e (k-parse-effect (car xs))) (rest (k-effects (cdr xs)))) (k-union e rest)))))
-  (k-parse-effect (subr (maxeff checks spin) (syn) k-eff)
-    (lambda (s)
-      (if (syn-symbol? s)
-          (k-effect-named s)
-          (let* ((items (k-items s "an effect"))
-                 (head (k-head items))
-                 ;; `(select m e)`: module `m`'s effect `e`, found where the
-                 ;; type it is in is checked, as a type's `select` is.
-                 (selected (if (string=? head "select")
-                               (k-effect-selected s items)
-                               (the (listof k-eff acyclic) nil)))
-                 ;; `(e d …)`: a description function to an effect, applied.
-                 (applied (if (null? selected) ((get k-effect-app-reader) s items) selected)))
-            (cond ((not (null? selected)) (car selected))
-                  ((not (null? applied)) (car applied))
-                  ((string=? head "maxeff") (k-effects (cdr items)))
-                  ((k-atom-head? head)
-                   (if (= (k-length items) 2)
-                       (k-effect-atom head (k-nth items 1))
-                       (k-sfail (k-cat3 "`(" head " region)`") s)))
-                  (else (k-sfail "expected an effect" s)))))))
   ;; `(head x)`: one atom on region `x`; or, `x` being globals, one for
   ;; each.
   (k-effect-atom (subr (maxeff checks spin) (string syn) k-eff)
@@ -335,8 +310,6 @@
 ;; `(moduleof …)` and `(select m t)`, read by `check-modules.fx`, which sets this.
 (define k-module-type-head? (subr pure (symbol) bool)
   (lambda (hd) (or (symbol=? hd 'moduleof) (symbol=? hd 'select))))
-(define k-parse-module-type (ref (subr (maxeff checks spin) (syn k-syns symbol) int) @t)
-  (new (lambda (s items hd) (k-sfail "expected a type" s))))
 
 ;; Type family `name`, used at `s`, expanding without end.
 (define k-endless (subr (maxeff checks spin) (syn symbol) void)
@@ -346,33 +319,6 @@
                      "a type family may mention itself only with the same descriptions")
              s)))
 (define-rec
-  (k-parse-types (subr (maxeff checks spin) (k-syns) k-ids)
-    (lambda (xs)
-      (if (null? xs)
-          nil
-          (let* ((t (k-parse-type (car xs))) (rest (k-parse-types (cdr xs)))) (cons t rest)))))
-  (k-parse-parts (subr (maxeff checks spin) (k-syns k-parts) k-parts)
-    (lambda (ps done)
-      (if (null? ps)
-          (reverse done)
-          (let ((pair (k-items (car ps) "`(label type)`")))
-            (if (= (k-length pair) 2)
-                (let ((l (k-syn-label (car pair))))
-                  (if (k-has-label? done l)
-                      (k-sfail (k-twice (symbol->string l)) (car ps))
-                      (let ((t (k-parse-type (k-nth pair 1))))
-                        (k-parse-parts (cdr ps) (cons (product (1 l) (2 t)) done)))))
-                (k-sfail "`(label type)`" (car ps)))))))
-  ;; Storage written: a procedure kept there may not reach itself unsaid
-  ;; (`spin`).
-  (k-parse-type (subr (maxeff checks spin) (syn) int)
-    (lambda (s)
-      (let ((t (k-parse-type-node s)))
-        (begin
-          (if (and (not (syn-symbol? s)) (k-storage-head? (k-head (k-items s "a type"))))
-              (k-no-knot t (syn-start s) (syn-end s))
-              #u)
-          t))))
   ;; A size: a natural literal, or `finite`, some number not known.
   (k-parse-size (subr (maxeff checks spin) (syn) k-size)
     (lambda (s)
@@ -396,301 +342,13 @@
       (if (null? xs)
           out
           (k-parse-size-sum (cdr xs) (k-size-add-scaled out (k-parse-size (car xs)) 1)))))
-  ;; What `(proves prop)` states: the type of its proof, with the lemma kept
-  ;; pending for the definition it declares.
-  (k-parse-proves (subr (maxeff checks spin) (syn string) int)
-    (lambda (prop usage)
-      (let* ((items (k-items prop "a proposition"))
-             (head (k-symbol-head items))
-             (poly? (string=? head "poly"))
-             (shape (cond (poly? (if (>= (k-length items) 3) #u (k-sfail usage prop)))
-                          ((string=? head "<=") #u)
-                          (else (k-sfail usage prop))))
-             (bs (if poly? (k-parse-binders (k-nth items 1)) (the k-binders nil)))
-             (conc (k-le (if poly? (k-nth items 2) prop)))
-             (hyps (if poly? (k-les (cdr (cdr (cdr items)))) (the k-hyps nil)))
-             (spin (k-one (a-spin)))
-             (params (k-hyp-coercions hyps spin (the k-ids (cons (car conc) nil))))
-             (body (k-ty-new (ty-subr spin params (cdr conc) (get k-conv-default))))
-             (t (if (null? bs) body (k-ty-new (ty-poly bs body)))))
-        (begin
-          (set k-pending-lemma (cons (k-stated-lemma bs conc hyps) nil))
-          t))))
-  (k-le (subr (maxeff checks spin) (syn) (pairof int int @t))
-    (lambda (s)
-      (let ((items (k-items s "a proposition")))
-        (if (and (= (k-length items) 3) (string=? (k-symbol-head items) "<="))
-            (let* ((a (k-parse-type (k-nth items 1))) (b (k-parse-type (k-nth items 2))))
-              (cons a b))
-            (k-sfail "a proposition is `(<= type type)`" s)))))
-  (k-les (subr (maxeff checks spin) (k-syns) k-hyps)
-    (lambda (xs)
-      (if (null? xs) nil (let* ((h (k-le (car xs))) (rest (k-les (cdr xs)))) (cons h rest)))))
   (k-hyp-coercions (subr (maxeff checks spin) (k-hyps k-eff k-ids) k-ids)
     (lambda (hs spin tail)
       (if (null? hs)
           tail
           (let ((c (k-coercion (car hs) spin)))
             (cons c (k-hyp-coercions (cdr hs) spin tail))))))
-  ;; `(name d …)` for the `g`th generative type: a node, never expanded.
-  (k-apply-gen (subr (maxeff checks spin) (syn int k-syns) int)
-    (lambda (s g args)
-      (let* ((gen (k-gen-of g)) (ps (extract gen 2)))
-        (if (not (= (k-length args) (k-length ps)))
-            (k-sfail (k-arity-message (extract gen 1) (k-length ps) (k-length args)) s)
-            (let ((t (k-ty-new (ty-named g (k-gen-args ps args)))))
-              ;; What it holds may keep a procedure that reaches itself.
-              (begin (k-no-knot t (syn-start s) (syn-end s)) t))))))
-  (k-gen-args (subr (maxeff checks spin) (k-binders k-syns) k-descs)
-    (lambda (ps args)
-      (if (null? ps)
-          nil
-          (let* ((k (extract (car ps) 2))
-                 (d (cond ((k-type-kind? k) (dt (k-parse-type (car args))))
-                          ((= k 0) (dr (k-parse-region (car args))))
-                          ((= k 3) (dr (k-parse-place (car args))))
-                          ((= k 5) (dz (k-parse-size (car args))))
-                          ((= k 6) (dc (k-parse-conv (car args))))
-                          ((>= k 100) (df ((get k-fun-reader) (car args) k)))
-                          (else (de (k-parse-effect (car args))))))
-                 (rest (k-gen-args (cdr ps) (cdr args))))
-            (cons d rest)))))
-  ;; The type a name stands for.
-  (k-type-named (subr (maxeff checks spin) (syn) int)
-    (lambda (s)
-      (let* ((n (syn-name s)) (sym (string->symbol n)) (base (k-find (get k-base) sym)))
-        (cond ((string=? n "void") k-void)
-              ((and (string=? n "nat") (null? (k-lookup-desc sym)))
-               (k-ty-new (ty-nat (sz-finite))))
-              ((>= base 0) base)
-              (else
-               (let ((d (k-lookup-desc sym))
-                     (no (lambda () (string-append (k-quote n) " is not a type"))))
-                 (if (null? d)
-                     (k-sfail (no) s)
-                     (tagcase (car d)
-                       (ds-var (v k)
-                         (cond ((k-type-kind? k) (k-ty-new (ty-var v)))
-                               ((k-arrow-kind? k) (k-sfail (k-not-applied n k) s))
-                               (else (k-sfail (no) s))))
-                       (ds-fun (f)
-                         (let ((k (k-fun-kind f))) (k-sfail (k-not-applied n (if (< k 0) 2 k)) s)))
-                       (ds-rec (t) t)
-                       (ds-gen (g) (k-apply-gen s g nil))
-                       (else x (k-sfail (no) s))))))))))
-  (k-parse-type-node (subr (maxeff checks spin) (syn) int)
-    (lambda (s)
-      (if (syn-symbol? s)
-          (k-type-named s)
-          (let* ((items (k-items s "a type"))
-                 (hd (if (null? items) '|()| (syn-head (car items))))
-                 (abbrev (if (symbol=? hd '|()|)
-                             (the (listof k-ds acyclic) nil)
-                             (k-lookup-desc hd)))
-                 (alias (k-select-alias abbrev)))
-            (cond ((and (not (null? abbrev)) (k-ds-applied? (car abbrev)))
-                   (tagcase (car abbrev)
-                     (ds-abbrev (ps body) (k-expand-abbrev s hd ps body (cdr items)))
-                     (ds-gen (g) (k-apply-gen s g (cdr items)))
-                     ;; A description function applied (`check-kinds.fx`).
-                     (ds-var (v k) ((get k-app-reader) s (k-ty-new (ty-var v)) (cdr items)))
-                     (ds-fun (f) ((get k-app-reader) s f (cdr items)))
-                     (else x (k-sfail "an abbreviation" s))))
-                  ((>= alias 0) ((get k-app-reader) s alias (cdr items)))
-                  ;; `((dlambda …) d …)` and `((select m f) d …)`.
-                  ((and (not (null? items)) (tagcase (car items) (lst (xs d a b) #t) (else x #f)))
-                   ((get k-app-reader) s ((get k-fun-reader) (car items) -1) (cdr items)))
-                  (else (k-parse-type-form s items hd)))))))
-  ;; `(subr effect (param …) result)`, or with a convention first, `(subr
-  ;; (conv C) effect (param …) result)`; left out, it is the program's.
-  (k-parse-subr (subr (maxeff checks spin) (syn k-syns) int)
-    (lambda (s items)
-      (let* ((conv? (and (= (k-length items) 5) (string=? (k-list-head (k-nth items 1)) "conv")))
-             (cv (if conv? (k-parse-conv-form (k-nth items 1)) (get k-conv-default)))
-             (items (if conv? (the k-syns (cons (car items) (cdr (cdr items)))) items)))
-        (begin
-          (k-shape (= (k-length items) 4) "`(subr effect (param …) result)`" s)
-          (let* ((e (k-parse-effect (k-nth items 1)))
-                 (ts ((get k-parse-params) (k-items-or-nil (k-nth items 2) "parameter types")
-                                           (k-nth items 3))))
-            (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv)))))))
-  ;; `(proves prop)`.
-  (k-parse-proves-type (subr (maxeff checks spin) (syn k-syns) int)
-    (lambda (s items)
-      (let ((usage (string-append "`(proves (<= type type))` or `(proves (poly ((name kind) …) "
-                                  "(<= type type) (<= type type) …))`")))
-        (begin
-          (k-shape (= (k-length items) 2) usage s)
-          (let* ((saved (get k-dscope)) (t (k-parse-proves (k-nth items 1) usage)))
-            (begin (set k-dscope saved) t))))))
-  ;; A type written as a form, `(hd …)`, `hd` no family's name.
-  (k-parse-type-form (subr (maxeff checks spin) (syn k-syns symbol) int)
-    (lambda (s items hd)
-      (let ((n (k-length items)))
-        (cond
-          ((symbol=? hd 'subr) (k-parse-subr s items))
-          ((symbol=? hd 'proves) (k-parse-proves-type s items))
-          ((symbol=? hd 'poly)
-           (begin
-             (k-shape (= n 3) "`(poly ((name kind) …) type)`" s)
-             (let* ((saved (get k-dscope))
-                    (bs (k-parse-binders (k-nth items 1)))
-                    (body (k-parse-type (k-nth items 2))))
-               (begin (set k-dscope saved) (k-ty-new (ty-poly bs body))))))
-          ((symbol=? hd 'nlist)
-           (begin
-             (k-shape (or (= n 3) (= n 4)) "`(nlist type size)` or `(nlist type size place)`" s)
-             (let* ((e (k-parse-type (k-nth items 1)))
-                    (z (k-parse-size (k-nth items 2)))
-                    (r (if (= n 4)
-                           (k-frozen-into (k-parse-place (k-nth items 3)) #t)
-                           (r-frozen -1 #t))))
-               (k-ty-new (ty-nlist e z r)))))
-          ((symbol=? hd 'nat)
-           (begin
-             (k-shape (= n 2) "`(nat size)`" s)
-             (k-ty-new (ty-nat (k-parse-size (k-nth items 1))))))
-          ((symbol=? hd 'ref)
-           (begin
-             (k-shape (= n 3) "`(ref type region)`" s)
-             (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
-               (k-ty-new (ty-ref t r)))))
-          ((symbol=? hd 'pairof)
-           (begin
-             (k-shape (= n 4) "`(pairof type type region)`" s)
-             (let* ((a (k-parse-type (k-nth items 1))) (b (k-parse-type (k-nth items 2)))
-                    (r (k-parse-region (k-nth items 3))))
-               (k-ty-new (ty-pair a b r)))))
-          ((symbol=? hd 'dletrec) (k-parse-dletrec s items))
-          ((symbol=? hd 'mu) (k-parse-mu s items))
-          ((symbol=? hd 'listof)
-           (begin
-             (k-shape (= n 3) "`(listof type region)`" s)
-             (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2)))
-                    (slot (k-slot)) (pair (k-ty-new (ty-pair t slot r))))
-               (begin (k-set-link slot pair) slot))))
-          ((symbol=? hd 'prompt-tag)
-           (begin
-             (k-shape (= n 5) "`(prompt-tag answer payload effect region)`" s)
-             (let* ((a (k-parse-type (k-nth items 1))) (h (k-parse-type (k-nth items 2)))
-                    (e (k-parse-effect (k-nth items 3))) (r (k-parse-region (k-nth items 4))))
-               (k-ty-new (ty-tag a h e r)))))
-          ((symbol=? hd 'composable)
-           (begin
-             (k-shape (= n 5) "`(composable argument answer effect region)`" s)
-             (let* ((t (k-parse-type (k-nth items 1))) (a (k-parse-type (k-nth items 2)))
-                    (e (k-parse-effect (k-nth items 3))) (r (k-parse-region (k-nth items 4))))
-               (k-ty-new (ty-comp t a e r)))))
-          ((symbol=? hd 'bloblet)
-           (begin
-             (k-shape (= n 3) "`(bloblet (fields type …) region)`, or `(frozen type …)`" s)
-             (let* ((fields (k-nth items 1))
-                    (parts (k-items fields "`(fields type …)`"))
-                    (which (k-head parts)))
-               (if (or (string=? which "fields") (string=? which "frozen"))
-                   (let* ((fs (k-parse-types (cdr parts))) (r (k-parse-region (k-nth items 2))))
-                     (k-ty-new (ty-bloblet fs (string=? which "frozen") r)))
-                   (k-sfail "`(fields type …)` or `(frozen type …)`" fields)))))
-          ((k-module-type-head? hd) ((get k-parse-module-type) s items hd))
-          ((symbol=? hd 'productof) (k-ty-new (ty-product (k-parse-parts (cdr items) nil))))
-          ((symbol=? hd 'sumof) (k-ty-new (ty-sum (k-parse-parts (cdr items) nil))))
-          ((symbol=? hd 'arrayof)
-           (begin
-             (k-shape (= n 3) "`(arrayof type region)`" s)
-             (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
-               (k-ty-new (ty-array t r)))))
-          ((symbol=? hd 'icell)
-           (begin
-             (k-shape (= n 3) "`(icell type region)`" s)
-             (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
-               (k-ty-new (ty-icell t r)))))
-          ((symbol=? hd 'place)
-           (begin
-             (k-shape (= n 2) "`(place region)`" s)
-             (k-ty-new (ty-place (k-parse-place (k-nth items 1))))))
-          ((symbol=? hd 'mark-key)
-           (begin
-             (k-shape (= n 3) "`(mark-key type region)`" s)
-             (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
-               (k-ty-new (ty-markkey t r)))))
-          (else (k-sfail "expected a type" s))))))
-  ;; `(dletrec ((name type) …) type)`: each name gets a forwarding slot
-  ;; before any body is read, so the bodies can refer to it and each other.
-  (k-parse-dletrec (subr (maxeff checks spin) (syn k-syns) int)
-    (lambda (s items)
-      (begin
-        (k-shape (= (k-length items) 3) "`(dletrec ((name type) …) type)`" s)
-        (let* ((saved (get k-dscope))
-               (slots (k-dletrec-slots (k-items (k-nth items 1) "dletrec bindings")))
-               (filled (k-dletrec-fill slots))
-               (grounded (k-dletrec-grounded slots s))
-               (unknotted (k-dletrec-no-knot slots s))
-               (body (k-parse-type (k-nth items 2))))
-          (begin (set k-dscope saved) body)))))
-  ;; `(mu name type)`: a recursive type, anonymous; the same as `(dletrec
-  ;; ((name type)) name)`.
-  (k-parse-mu (subr (maxeff checks spin) (syn k-syns) int)
-    (lambda (s items)
-      (begin
-        (k-shape (= (k-length items) 3) "`(mu name type)`" s)
-        (let* ((name (k-name-of (k-nth items 1) "a name"))
-               (saved (get k-dscope))
-               (slot (k-slot))
-               (pushed (k-push-desc name (ds-rec slot)))
-               (t (k-parse-type (k-nth items 2)))
-               (restored (set k-dscope saved))
-               (filled (k-set-link slot t))
-               (grounded (k-grounded slot (syn-start s) (syn-end s))))
-          slot))))
-  (k-dletrec-fill (subr (maxeff checks spin) (k-slots) unit)
-    (lambda (ss)
-      (if (null? ss)
-          #u
-          (let ((t (k-parse-type (cdr (car ss)))))
-            (begin (k-set-link (car (car ss)) t) (k-dletrec-fill (cdr ss)))))))
-  ;; A use of a parametric abbreviation: its body, read with each parameter
-  ;; bound to the description given for it.
-  (k-expand-abbrev (subr (maxeff checks spin) (syn symbol k-params syn k-syns) int)
-    (lambda (s name ps body args)
-      (cond
-        ((not (= (k-length args) (k-length ps)))
-         (k-sfail (k-arity-message name (k-length ps) (k-length args)) s))
-        ((> (get k-expanding) 64) (k-endless s name))
-        (else (k-expand-bound s name body (k-abbrev-args ps args))))))
-  ;; The family `name`'s body, read with its parameters bound as `bound`
-  ;; says: a use inside with the same descriptions is the slot its type
-  ;; will fill, a knot.
-  (k-expand-bound (subr (maxeff checks spin) (syn symbol syn k-scope) int)
-    (lambda (s name body bound)
-      (let ((knot (k-knot-of (get k-knots) name bound)))
-        (if (>= knot 0)
-            knot
-            (let* ((saved (get k-dscope)) (slot (k-slot)) (kept (get k-knots)))
-              (begin
-                (set k-knots (cons (product (1 name) (2 bound) (3 slot)) kept))
-                (k-push-all bound)
-                (set k-expanding (+ (get k-expanding) 1))
-                (let ((t (k-parse-type body)))
-                  (begin (set k-expanding (- (get k-expanding) 1))
-                         (set k-dscope saved)
-                         (set k-knots kept)
-                         (k-set-link slot t)
-                         (k-grounded slot (syn-start s) (syn-end s))
-                         slot))))))))
-  (k-abbrev-args (subr (maxeff checks spin) (k-params k-syns) k-scope)
-    (lambda (ps args)
-      (if (null? ps)
-          nil
-          (let* ((k (extract (car ps) 2))
-                 (d (cond ((k-type-kind? k) (ds-rec (k-parse-type (car args))))
-                          ((= k 0) (ds-region (k-parse-region (car args))))
-                          ((= k 3) (ds-region (k-parse-place (car args))))
-                          ((= k 5) (ds-size (k-parse-size (car args))))
-                          ((= k 6) (ds-conv (k-parse-conv (car args))))
-                          ((>= k 100) (ds-fun ((get k-fun-reader) (car args) k)))
-                          (else (ds-eff (k-parse-effect (car args))))))
-                 (rest (k-abbrev-args (cdr ps) (cdr args))))
-            (cons (cons (extract (car ps) 1) d) rest))))))
+)
 
 ;; `(define-type name type)`: `name` stands for the type from here on, and
 ;; may appear in its own definition.
@@ -720,21 +378,6 @@
       (begin
         (if (>= found 0) (set k-ahead-names (k-ahead-drop (get k-ahead-names) name)) #u)
         found))))
-(define* k-define-type (subr (maxeff checks spin) (symbol syn int int) int)
-  (lambda (name def a b)
-    (let ((ahead (k-ahead-take name)))
-      (if (>= ahead 0)
-          ;; Declared ahead: its slot is in scope already; fill it, and check
-          ;; it grounded once every slot is filled.
-          (let ((t (k-parse-type def)))
-            (begin (k-set-link ahead t)
-                   (set k-ahead-filled (cons (product (1 ahead) (2 a) (3 b)) (get k-ahead-filled)))
-                   ahead))
-          (let ((slot (k-slot)))
-            (begin
-              (k-push-desc name (ds-rec slot))
-              (let ((t (k-parse-type def)))
-                (begin (k-set-link slot t) (k-grounded slot a b) slot))))))))
 ;; How many times `n` is among `ns`.
 (define k-name-count (subr (read @globals) (k-names symbol) int)
   (lambda (ns n)
@@ -762,7 +405,6 @@
         (begin (k-grounded (extract (car fs) 1) (extract (car fs) 2) (extract (car fs) 3))
                (k-ground-filled (cdr fs))))))))
 
-(define k-parse-effect (with check-syntax-module k-parse-effect))
 (define k-shape (with check-syntax-module k-shape))
 (define k-define-family (with check-syntax-module k-define-family))
 (define k-knots (with check-syntax-module k-knots))
@@ -770,15 +412,29 @@
 (define k-parse-conv (with check-syntax-module k-parse-conv))
 (define k-twice (with check-syntax-module k-twice))
 (define k-type-kind? (with check-syntax-module k-type-kind?))
-(define k-parse-module-type (with check-syntax-module k-parse-module-type))
 (define k-endless (with check-syntax-module k-endless))
-(define k-parse-types (with check-syntax-module k-parse-types))
-(define k-parse-type (with check-syntax-module k-parse-type))
 (define k-parse-size (with check-syntax-module k-parse-size))
-(define k-expand-bound (with check-syntax-module k-expand-bound))
 (define k-ahead-names (with check-syntax-module k-ahead-names))
 (define k-ahead-filled (with check-syntax-module k-ahead-filled))
-(define k-define-type (with check-syntax-module k-define-type))
 (define k-ahead-declare (with check-syntax-module k-ahead-declare))
 (define k-filled-reversed (with check-syntax-module k-filled-reversed))
 (define k-ground-filled (with check-syntax-module k-ground-filled))
+(define-type k-slots (select check-syntax-module k-slots))
+(define k-effect-atom (with check-syntax-module k-effect-atom))
+(define k-syn-label (with check-syntax-module k-syn-label))
+(define k-has-label? (with check-syntax-module k-has-label?))
+(define k-storage-head? (with check-syntax-module k-storage-head?))
+(define k-hyp-coercions (with check-syntax-module k-hyp-coercions))
+(define k-stated-lemma (with check-syntax-module k-stated-lemma))
+(define k-arity-message (with check-syntax-module k-arity-message))
+(define k-select-alias (with check-syntax-module k-select-alias))
+(define k-ds-applied? (with check-syntax-module k-ds-applied?))
+(define k-parse-conv-form (with check-syntax-module k-parse-conv-form))
+(define k-module-type-head? (with check-syntax-module k-module-type-head?))
+(define k-dletrec-slots (with check-syntax-module k-dletrec-slots))
+(define k-dletrec-grounded (with check-syntax-module k-dletrec-grounded))
+(define k-dletrec-no-knot (with check-syntax-module k-dletrec-no-knot))
+(define k-grounded (with check-syntax-module k-grounded))
+(define k-knot-of (with check-syntax-module k-knot-of))
+(define k-push-all (with check-syntax-module k-push-all))
+(define k-ahead-take (with check-syntax-module k-ahead-take))

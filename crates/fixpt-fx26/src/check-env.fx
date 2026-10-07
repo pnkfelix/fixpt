@@ -286,10 +286,6 @@
 ;; What `(select $k n)`, node `t`, is while parameters are given; else `t`.
 (define k-param-sel-of (subr (maxeff (read @globals) (read @t)) (int symbol int) int)
   (lambda (k n t) (k-param-in (get k-param-map) k n t)))
-;; A `subr` type's parameter types and result, read (`check-modules.fx`'s
-;; `k-read-params`, which sets this): its types, the result last.
-(define k-parse-params (ref (subr (maxeff checks spin) ((listof syn acyclic) syn) k-ids) @t)
-  (new (lambda (ps r) nil)))
 ;; `ts` but its last; and its last (-1 if none).
 (define k-ids-but-last (subr (maxeff (read @globals) (alloc @t) spin) (k-ids) k-ids)
   (lambda (ts) (if (or (null? ts) (null? (cdr ts))) nil (cons (car ts) (k-ids-but-last (cdr ts))))))
@@ -360,6 +356,5 @@
 (define k-param-map (with check-env-module k-param-map))
 (define k-param-in (with check-env-module k-param-in))
 (define k-param-sel-of (with check-env-module k-param-sel-of))
-(define k-parse-params (with check-env-module k-parse-params))
 (define k-ids-but-last (with check-env-module k-ids-but-last))
 (define k-ids-last (with check-env-module k-ids-last))

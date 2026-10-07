@@ -96,14 +96,6 @@
           (let* ((k (k-parse-kind (car xs))) (rest (k-parse-kinds (cdr xs))))
             (the k-ids (cons k rest)))))))
 
-;; Description functions read, applied, and applied in effects, by
-;; `check-kinds.fx`, which sets these.
-(define k-fun-reader (ref (subr (maxeff checks spin) (syn int) int) @t)
-  (new (lambda (s k) (k-sfail "expected a description function" s))))
-(define k-app-reader (ref (subr (maxeff checks spin) (syn int k-syns) int) @t)
-  (new (lambda (s f args) (k-sfail "expected a type" s))))
-(define k-effect-app-reader (ref (subr (maxeff checks spin) (syn k-syns) (listof k-eff acyclic)) @t)
-  (new (lambda (s items) nil)))
 ;; What `name`, a description function, says written where a type is.
 (define k-not-applied (subr (maxeff kreads (alloc @t) spin) (string int) string)
   (lambda (n k)
@@ -348,9 +340,6 @@
 (define k-any-typed-kind? (with check-read-module k-any-typed-kind?))
 (define k-arrow-syntax (with check-read-module k-arrow-syntax))
 (define k-parse-kind (with check-read-module k-parse-kind))
-(define k-fun-reader (with check-read-module k-fun-reader))
-(define k-app-reader (with check-read-module k-app-reader))
-(define k-effect-app-reader (with check-read-module k-effect-app-reader))
 (define k-not-applied (with check-read-module k-not-applied))
 (define-type k-params (select check-read-module k-params))
 (define k-ctor-params (with check-read-module k-ctor-params))

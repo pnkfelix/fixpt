@@ -7,8 +7,6 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-generative-module (module
-;; Pairs of integers.
-(define-type k-pairs (listof (pairof int int @t) acyclic))
 (define-type k-seen-pol (ref k-pairs @t))
 ;; Where, in a generative type's representation, each of its parameters
 ;; appears: covariantly, contravariantly, or both (moved out of
@@ -209,4 +207,3 @@
 
 (define k-define-generative (with check-generative-module k-define-generative))
 (define-type k-seen-pol (select check-generative-module k-seen-pol))
-(define-type k-pairs (select check-generative-module k-pairs))
