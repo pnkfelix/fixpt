@@ -175,10 +175,14 @@ impl Checker {
                 let nats = self.nat_test(test);
                 self.certified_nats.extend(nats);
                 let (yes, no) = self.test_facts(test);
+                let (narrow_yes, narrow_no) = self.narrowings(test);
                 let depth = self.size_facts.len();
+                let narrowed = self.narrowed.len();
                 self.size_facts.extend(yes);
+                self.narrowed.extend(narrow_yes);
                 let ae = self.check(then, expected);
                 self.size_facts.truncate(depth);
+                self.narrowed.truncate(narrowed);
                 if certified.is_some() {
                     self.certified.pop();
                 }
@@ -190,8 +194,10 @@ impl Checker {
                 }
                 let ae = ae?;
                 self.size_facts.extend(no);
+                self.narrowed.extend(narrow_no);
                 let be = self.check(els, expected);
                 self.size_facts.truncate(depth);
+                self.narrowed.truncate(narrowed);
                 let be = be?;
                 Ok(self.mask(e, &te.union(&ae).union(&be), expected))
             }
@@ -405,7 +411,7 @@ impl Checker {
             let (t, eff) = self.synth(args[0])?;
             let t = self.arena.resolve(t);
             let (elem, region) = match self.arena.get(t).clone() {
-                Ty::Pair(elem, tail, r) if self.arena.resolve(tail) == t && r.is_frozen() => (elem, r),
+                Ty::Pair(elem, tail, r, _) if self.arena.resolve(tail) == t && r.is_frozen() => (elem, r),
                 Ty::NList { elem, region, .. } => (elem, region),
                 _ => return Err(FxError::at(span, format!("`certify-length` takes a frozen list, and this is a {}", self.show_ty(t)))),
             };
@@ -562,7 +568,7 @@ impl Checker {
         // `apply` of a list at `acyclic`: no copy.
         if matches!(self.facts.standard_operator.get(&e), Some(s) if self.interner.name(*s) == "apply")
             && let [_, list] = params[..]
-            && matches!(self.arena.get(self.arena.resolve(list)), Ty::Pair(_, _, Region::Frozen(_, true)))
+            && matches!(self.arena.get(self.arena.resolve(list)), Ty::Pair(_, _, Region::Frozen(_, true), _))
         {
             self.facts.apply_shares.insert(e);
         }
@@ -734,7 +740,7 @@ impl Checker {
                 Ty::PromptTag { answer, payload, .. } => vec![(*answer, false), (*payload, false)],
                 Ty::Poly { body, .. } => vec![(*body, false)],
                 Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![(*a, false)],
-                Ty::Pair(a, b, _) => vec![(*a, false), (*b, false)],
+                Ty::Pair(a, b, _, _) => vec![(*a, false), (*b, false)],
                 Ty::Bloblet { fields, .. } => fields.iter().map(|f| (*f, false)).collect(),
                 Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| (*t, false)).collect(),
                 Ty::NList { elem, .. } => vec![(*elem, false)],
@@ -1205,7 +1211,7 @@ impl Checker {
                     region(r)
                 }
                 Ty::Place(r) => region(r),
-                Ty::Pair(x, y, r) => {
+                Ty::Pair(x, y, r, _) => {
                     stack.extend([x, y]);
                     region(r)
                 }
@@ -1266,7 +1272,7 @@ impl Checker {
             Ty::Ref(a, _) | Ty::MarkKey(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) => self.walk_vars(a, seen, hit),
             Ty::Bloblet { fields, .. } => fields.iter().any(|f| self.walk_vars(*f, seen, hit)),
             Ty::Product(parts) | Ty::Sum(parts) => parts.iter().any(|(_, t)| self.walk_vars(*t, seen, hit)),
-            Ty::Pair(a, b, _)
+            Ty::Pair(a, b, _, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
             Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
@@ -1303,8 +1309,18 @@ impl Checker {
                     u.solved.insert(v, D::Type(a));
                 }
                 Some(D::Type(prev)) => {
+                    // The larger, where it stands for a whole argument; in
+                    // a pair's contents, which are invariant, what it meets
+                    // there (an argument's element over the expected
+                    // type's: a non-`nil` pair where the context says one
+                    // may be `nil`).
                     let prev = *prev;
-                    if !self.subtype(a, prev) && self.subtype(prev, a) {
+                    let take = if self.unify_exact {
+                        prev != a && (self.subtype(a, prev) || self.subtype(prev, a))
+                    } else {
+                        !self.subtype(a, prev) && self.subtype(prev, a)
+                    };
+                    if take {
                         u.solved.insert(v, D::Type(a));
                     }
                 }
@@ -1332,10 +1348,12 @@ impl Checker {
                 self.unify(x, y, u, trail);
             }
             (Ty::Place(r), Ty::Place(s)) => self.unify_region(r, s, u),
-            (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) => {
+            (Ty::Pair(x1, x2, r, _), Ty::Pair(y1, y2, s, _)) => {
                 self.unify_region(r, s, u);
+                let outer = std::mem::replace(&mut self.unify_exact, true);
                 self.unify(x1, y1, u, trail);
                 self.unify(x2, y2, u, trail);
+                self.unify_exact = outer;
             }
             (Ty::Product(pp), Ty::Product(pa)) | (Ty::Sum(pp), Ty::Sum(pa)) => {
                 for (l, x) in &pp {
@@ -1369,7 +1387,7 @@ impl Checker {
                 self.unify_size(&m, &n, u);
             }
             (Ty::Nat(m), Ty::Nat(n)) => self.unify_size(&m, &n, u),
-            (Ty::Pair(x, t2, r), Ty::NList { elem: y, size, region: s }) => {
+            (Ty::Pair(x, t2, r, _), Ty::NList { elem: y, size, region: s }) => {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);
                 let tail = match size {

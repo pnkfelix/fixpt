@@ -37,7 +37,7 @@
                    (ty-array (a r) (k-cyclic-from? a #f p))
                    (ty-icell (a r) (k-cyclic-from? a #f p))
                    (ty-markkey (a r) (k-cyclic-from? a #f p))
-                   (ty-pair (a b r) (or (k-cyclic-from? a #f p) (k-cyclic-from? b #f p)))
+                   (ty-pair (a b r nl) (or (k-cyclic-from? a #f p) (k-cyclic-from? b #f p)))
                    (ty-bloblet (fs z r) (k-cyclic-list? fs #f p))
                    (ty-product (ps) (k-cyclic-parts? ps p))
                    (ty-sum (ps) (k-cyclic-parts? ps p))

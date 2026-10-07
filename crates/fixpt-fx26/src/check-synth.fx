@@ -14,7 +14,7 @@
 (define k-acyclic-list? (subr (maxeff kreads spin) (int) bool)
   (lambda (t)
     (tagcase (k-get t)
-      (ty-pair (a d r) (tagcase r (r-frozen (p finite) finite) (else y #f)))
+      (ty-pair (a d r nl) (tagcase r (r-frozen (p finite) finite) (else y #f)))
       (else y #f))))
 ;; Note, for the compilers, that a top-level definition's value `x`, of
 ;; type `t`, is a list in a frozen region (`acyclic` or `const`): data
@@ -23,7 +23,7 @@
 (define k-note-frozen-define (subr (maxeff checks spin) (int kx) unit)
   (lambda (t x)
     (if (tagcase (k-get t)
-          (ty-pair (a d r) (tagcase r (r-frozen (p finite) #t) (else y #f)))
+          (ty-pair (a d r nl) (tagcase r (r-frozen (p finite) #t) (else y #f)))
           (else y #f))
         (set k-extracts (cons (product (1 (k-start x)) (2 (k-end x)) (3 -501)) (get k-extracts)))
         #u)))
@@ -121,18 +121,61 @@
         (if (null? cert) #u (set k-certified (cons (car cert) (get k-certified))))
         (if (null? lens) #u (set k-certified-lengths (cons (car lens) (get k-certified-lengths))))
         (if (null? nats) #u (set k-certified-nats (cons (car nats) (get k-certified-nats))))))))
-;; What checking an `if`'s branches puts back as it goes: what was certified, and the size
-;; facts, before; and what its test shows when it holds, and when not.
-(define-type k-tested (productof (1 k-certs) (2 k-fact-list) (3 k-branch-facts)))
+;; What `p` narrows where it holds (`car`) and where not (`cdr`): the Rust
+;; checker's `narrowings`. `(null? v)`, `v` a variable whose pairs may be
+;; `nil`, makes `v` a pair that is not where it does not hold; through
+;; `not`, and through `and` and `or` (`(if a b #f)`, `(if a #t b)`) as
+;; `k-test-facts` goes.
+(define-type k-narrowing (pairof k-narrows k-narrows acyclic))
+(define k-narrows-append (subr (read @globals) (k-narrows k-narrows) k-narrows)
+  (lambda (xs ys)
+    (if (null? xs) ys (the k-narrows (cons (car xs) (k-narrows-append (cdr xs) ys))))))
+(define k-null-narrowing (subr (maxeff kstate spin) (kx) k-narrowing)
+  (lambda (p)
+    (let ((v (k-certifying-test p "null?")) (none (the k-narrowing (cons nil nil))))
+      (if (null? v)
+          none
+          (let* ((n (car (car v))) (d (cdr (car v))) (looked (k-lookup n)))
+            (if (< looked 0)
+                none
+                (tagcase (k-get (k-resolve looked))
+                  (ty-pair (a b r nl)
+                    (if nl
+                        (let ((not-nil (k-ty-new (ty-pair a b r #f))))
+                          (cons nil (the k-narrows (cons (product (1 n) (2 d) (3 not-nil)) nil))))
+                        none))
+                  (else y none))))))))
+(define k-narrowings (subr (maxeff kstate spin) (kx) k-narrowing)
+  (lambda (p)
+    (let ((none (the k-narrowing (cons nil nil))))
+      (tagcase p
+        (x-if (q c d a b)
+          (let ((nq (k-narrowings q)))
+            (cond ((k-bool-lit? c #t) (cons nil (k-narrows-append (cdr nq) (cdr (k-narrowings d)))))
+                  ((k-bool-lit? d #f) (cons (k-narrows-append (car nq) (car (k-narrowings c))) nil))
+                  (else none))))
+        (x-app (f args a b)
+          (if (and (string=? (k-std-op f) "not") (k-sc-one-arg? args))
+              (let ((ns (k-narrowings (car args)))) (cons (cdr ns) (car ns)))
+              (k-null-narrowing p)))
+        (else y none)))))
+;; What checking an `if`'s branches puts back as it goes: what was certified, the size
+;; facts, and what was narrowed, before; what its test shows when it holds, and when not;
+;; and what it narrows so.
+(define-type k-tested
+  (productof (1 k-certs) (2 k-fact-list) (3 k-branch-facts) (4 k-narrows) (5 k-narrowing)))
 ;; Before the branch where `p` holds: what it certifies, and the facts it shows, in force.
 (define k-enter-then (subr (maxeff kstate spin) (kx) k-tested)
   (lambda (p)
     (let* ((certs (k-certs-now))
            (pushed (k-push-certified p))
            (facts (k-test-facts p))
+           (narrowing (k-narrowings p))
            (fsaved (get k-size-facts))
-           (fyes (set k-size-facts (k-with-facts (car facts) fsaved))))
-      (product (1 certs) (2 fsaved) (3 facts)))))
+           (nsaved (get k-narrowed))
+           (fyes (set k-size-facts (k-with-facts (car facts) fsaved)))
+           (nyes (set k-narrowed (k-narrows-append (car narrowing) nsaved))))
+      (product (1 certs) (2 fsaved) (3 facts) (4 nsaved) (5 narrowing)))))
 ;; After it, before the branch where `p` does not: nothing certified, and what `p` shows so.
 (define k-enter-else (subr kstate (k-tested) unit)
   (lambda (tested)
@@ -141,9 +184,11 @@
         (set k-certified (extract certs 1))
         (set k-certified-lengths (extract certs 2))
         (set k-certified-nats (extract certs 3))
-        (set k-size-facts (k-with-facts (cdr (extract tested 3)) fsaved))))))
-;; After both: the facts as they were.
-(define k-leave-test (subr kstate (k-tested) unit) (lambda (t) (set k-size-facts (extract t 2))))
+        (set k-size-facts (k-with-facts (cdr (extract tested 3)) fsaved))
+        (set k-narrowed (k-narrows-append (cdr (extract tested 5)) (extract tested 4)))))))
+;; After both: the facts, and what was narrowed, as they were.
+(define k-leave-test (subr kstate (k-tested) unit)
+  (lambda (t) (begin (set k-size-facts (extract t 2)) (set k-narrowed (extract t 4)))))
 ;; Whether `args` are one variable, as the binding it is, among `cs`.
 (define k-certified-arg? (subr (maxeff kreads spin) (k-named kxs) bool)
   (lambda (cs args)

@@ -85,7 +85,7 @@
               (ty-array (a x) (k-writes-in a r seen))
               (ty-icell (a x) (k-writes-in a r seen))
               (ty-markkey (a x) (k-writes-in a r seen))
-              (ty-pair (a b x) (or (k-writes-in a r seen) (k-writes-in b r seen)))
+              (ty-pair (a b x nl) (or (k-writes-in a r seen) (k-writes-in b r seen)))
               (ty-bloblet (fs z x) (k-writes-list fs r seen))
               (ty-product (ps) (k-writes-parts ps r seen))
               (ty-sum (ps) (k-writes-parts ps r seen))

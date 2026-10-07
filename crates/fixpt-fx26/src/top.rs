@@ -700,7 +700,7 @@ impl Checker {
                         }
                         // A list nothing writes: the compilers may make it
                         // once, if it is made of literals.
-                        if matches!(self.arena.get(self.arena.resolve(ty)), crate::ast::Ty::Pair(_, _, Region::Frozen(..))) {
+                        if matches!(self.arena.get(self.arena.resolve(ty)), crate::ast::Ty::Pair(_, _, Region::Frozen(..), _)) {
                             self.facts.frozen_defines.insert(e);
                         }
                         Ok(Top::Define { name, ty, effect, exp: e, typed: true, inferred: infer, recursive, assigns: false })

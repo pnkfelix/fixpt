@@ -29,7 +29,7 @@
 ;;; Larceny checks the result with `equal?` against its input file; here
 ;;; the maze is the program's value, printed as Scheme prints it.
 
-(define-type pos (pairof int int @heap))
+(define-type pos (union nil (pairof int int @heap)))
 (define-type cave (listof (listof pos @heap) @heap))
 
 ;; What the maze's procedures do: read and build lists, recurse, and call

@@ -1452,6 +1452,10 @@ in one branch joins to the other branch's list type.
   the same); `(with #%fx nil)` stops needing instantiation (§46).
 - Ties to Q7 (unions of atoms): `null` is the one-value atom type that
   unions like `(union symbol null)` would be built from.
+- Q7's first stage (2026-10-07) made `pairof` non-`nil` and spells "a
+  pair, or none" `(union nil (pairof …))`, `nil` written as a type only
+  there so far. Its second stage, unions of disjoint shapes, needs `nil` as
+  a type of its own: this item is done with it.
 
 ## 49. `sexp-edit indent`: re-indent as fx26-mode does (the user's, 2026-10-07)
 

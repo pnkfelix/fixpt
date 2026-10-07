@@ -90,14 +90,21 @@
     (cond ((or (null? ns) (<= n 0)) 0)
           ((symbol=? (car ns) s) (+ 1 (k-bound-since (cdr ns) s (- n 1))))
           (else (k-bound-since (cdr ns) s (- n 1))))))
-;; What `s` is where it is used: its innermost binding; none, if that is
-;; broken. While a module read from a file is checked, a binding made
-;; before it began only if it is a standard one.
+;; The type a test narrowed binding `d` of `s` to (the innermost), or `t`.
+(define k-narrowed-of (subr (read @globals) (k-narrows symbol int int) int)
+  (lambda (ns s d t)
+    (cond ((null? ns) t)
+          ((and (symbol=? (extract (car ns) 1) s) (= (extract (car ns) 2) d)) (extract (car ns) 3))
+          (else (k-narrowed-of (cdr ns) s d t)))))
+;; What `s` is where it is used: its innermost binding, as a test may have
+;; narrowed it; none, if that is broken. While a module read from a file is
+;; checked, a binding made before it began only if it is a standard one.
 (define k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s)
     (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
       (cond ((or (null? st) (not (null? (k-broken-why s)))) -1)
-            ((or (< mark 0) (> (k-bound-since (get k-trail) s (- (get k-depth) mark)) 0)) (car st))
+            ((or (< mark 0) (> (k-bound-since (get k-trail) s (- (get k-depth) mark)) 0))
+             (k-narrowed-of (get k-narrowed) s (k-length st) (car st)))
             (else (k-std-type s))))))
 ;; The same, broken or not.
 (define k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int)

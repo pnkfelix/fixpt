@@ -575,6 +575,19 @@ ports are dominated by a `null?` of the same variable (they will stay
 bare) against those that are not (they gain a check), since native speed
 is what counts.
 
+**L0, as built (2026-10-07).** The user's answers (section 9): `pairof`
+itself non-`nil`, not a new `consof`; the pair that may be `nil` spelled
+`(union nil (pairof …))`, the one union so far; type variables in unions
+refused; a singleton `false` wanted (L1's stage 3). Both checkers carry
+the distinction as a flag on the pair type; `null?` narrows a variable's
+`else` (through `not`, `and`, `or`); the pair operations take the pair
+that may be `nil`. Not yet: `pair?` (there is none yet for lists), and the
+compilers' use of a `pairof` to leave out `car`'s check, which waits on
+counting the sites (above). One inference rule changed: inside a pair's
+contents, which are invariant, a binder solved already from the context
+takes what an argument says, where the two are related (`car` of a list's
+element where the context expects a pair that may be `nil`).
+
 ### 8.4 What not to do, and why
 
 - **General negation and a top type**: FX-26 values need not be

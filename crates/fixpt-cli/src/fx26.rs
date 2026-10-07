@@ -1197,7 +1197,7 @@ mod speculative {
         assert!(n[0].error);
         // The argument itself, and the pair `+` needs one element of.
         assert_eq!(n[0].span, Some((10, 11)), "{n:?}");
-        assert_eq!(n[0].message, "argument 1 is a int, where a (pairof int ? r) is expected");
+        assert_eq!(n[0].message, "argument 1 is a int, where a (union nil (pairof int ? r)) is expected");
     }
 
     #[test]
@@ -1245,7 +1245,7 @@ mod speculative {
     /// an int, its pair's first element is known, and the second is not.
     #[test]
     fn the_hint_solves_what_the_arguments_so_far_determine() {
-        assert_eq!(notes("(car ")[0].message, "argument 1 of car wants (pairof t1 t2 r)");
+        assert_eq!(notes("(car ")[0].message, "argument 1 of car wants (union nil (pairof t1 t2 r))");
         assert_eq!(notes("(set-car! (cons 1 #t) ")[0].message.split(" wants ").nth(1), Some("int"));
     }
 

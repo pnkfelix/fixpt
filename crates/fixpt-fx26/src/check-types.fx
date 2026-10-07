@@ -92,7 +92,9 @@
   (ty-subr k-eff k-ids int k-conv)
   (ty-poly k-binders int)
   (ty-ref int k-region)
-  (ty-pair int int k-region)
+  ;; head, tail, region, and whether it may be `nil` (`(union nil (pairof
+  ;; …))`, as a list's pairs are; `docs/research/logical-types.md`, L0)
+  (ty-pair int int k-region bool)
   ;; answer, payload, bound, region
   (ty-tag int int k-eff k-region)
   ;; argument, answer, effect, region
@@ -338,6 +340,13 @@
 ;; The variables `acyclic?` has just found acyclic, in the branch where it
 ;; did: each by name and by which binding it is (how deep its name's stack).
 (define k-certified (ref (listof (pairof symbol int @t) acyclic) @t) (new nil))
+;; The variables a test has narrowed, in the branch where it did: each by
+;; name and binding, and its type there (the Rust checker's `narrowed`).
+(define-type k-narrows (listof (productof (1 symbol) (2 int) (3 int)) acyclic))
+(define k-narrowed (ref k-narrows @t) (new nil))
+;; Whether `k-unify` is inside a pair's contents (the Rust checker's
+;; `unify_exact`).
+(define k-unify-exact (ref bool @t) (new #f))
 ;; The sizes given to `nat` variables of no known size, newest first
 ;; (`k-name-nat`).
 (define k-skolems (ref k-ids @t) (new nil))
@@ -832,6 +841,8 @@
 (define k-places (with check-types-module k-places))
 (define k-datas (with check-types-module k-datas))
 (define k-certified (with check-types-module k-certified))
+(define k-narrowed (with check-types-module k-narrowed))
+(define k-unify-exact (with check-types-module k-unify-exact))
 (define k-skolems (with check-types-module k-skolems))
 (define k-certified-nats (with check-types-module k-certified-nats))
 (define-type k-cert-len (select check-types-module k-cert-len))
@@ -854,6 +865,7 @@
 (define k-freezing (with check-types-module k-freezing))
 (define k-written (with check-types-module k-written))
 (define-type k-named (select check-types-module k-named))
+(define-type k-narrows (select check-types-module k-narrows))
 (define k-recursive (with check-types-module k-recursive))
 (define k-std (with check-types-module k-std))
 (define k-std-table (with check-types-module k-std-table))

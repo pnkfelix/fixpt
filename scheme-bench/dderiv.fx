@@ -49,9 +49,9 @@
 (define-type method (subr derives (datum) datum))
 (define-type plist (listof (pairof symbol method @heap) @heap))
 
-(define* lookup (subr (maxeff (read @heap) spin) (symbol plist) (pairof symbol method @heap))
+(define* lookup (subr (maxeff (read @heap) spin) (symbol plist) (union nil (pairof symbol method @heap)))
   (lambda (key table)
-    (letrec ((loop (subr (maxeff (read @heap) spin) (plist) (pairof symbol method @heap))
+    (letrec ((loop (subr (maxeff (read @heap) spin) (plist) (union nil (pairof symbol method @heap)))
                (lambda (x)
                  (if (null? x)
                      no-pair

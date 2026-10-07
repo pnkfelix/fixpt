@@ -228,7 +228,7 @@ impl Checker {
             Ty::Nat(crate::ast::Size::Finite) => "nat".to_string(),
             Ty::Nat(size) => format!("(nat {})", self.show_size(&size)),
             // FX-87's `listof`: a pair whose tail is itself.
-            Ty::Pair(a, b, r) if self.arena.resolve(b) == t => {
+            Ty::Pair(a, b, r, true) if self.arena.resolve(b) == t => {
                 format!("(listof {} {})", self.show_ty_on(a, path), self.show_region(r))
             }
             Ty::PromptTag { answer, payload, effect, region } => format!(
@@ -279,12 +279,10 @@ impl Checker {
                     params.iter().map(|(v, k)| format!("({} {})", self.interner.name(self.arena.dvar_name(*v)), self.show_kind(*k))).collect();
                 format!("(dlambda ({}) {})", ps.join(" "), self.show_d_on(&body, path))
             }
-            Ty::Pair(a, b, r) => format!(
-                "(pairof {} {} {})",
-                self.show_ty_on(a, path),
-                self.show_ty_on(b, path),
-                self.show_region(r)
-            ),
+            Ty::Pair(a, b, r, nil) => {
+                let pair = format!("(pairof {} {} {})", self.show_ty_on(a, path), self.show_ty_on(b, path), self.show_region(r));
+                if nil { format!("(union nil {pair})") } else { pair }
+            }
         };
         path.pop();
         if mentions_token(&out, &name) { format!("(mu {name} {out})") } else { out }

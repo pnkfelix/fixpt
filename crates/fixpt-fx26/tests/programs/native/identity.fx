@@ -66,7 +66,7 @@
     (let ((p (the node (cons 1 2))) (q (the node (cons 1 2)))
           (r (the (ref int @heap) (new 1))) (s (the (ref int @heap) (new 1)))
           (a (the (arrayof int @heap) (make-array 2 0))) (c (the (icell int @heap) (make-icell))))
-      (list (yes-no (eq? p p)) (yes-no (eq? p q)) (yes-no (eq? p no-pair))
+      (list (yes-no (eq? p p)) (yes-no (eq? p q)) (yes-no (eq? no-pair p))
             (yes-no (eq? r r)) (yes-no (eq? r s))
             (yes-no (eq? a a)) (yes-no (eq? a (make-array 2 0)))
             (yes-no (eq? c c)) (yes-no (eq? c (make-icell)))

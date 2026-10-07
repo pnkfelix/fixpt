@@ -245,7 +245,7 @@
             (let* ((r (k-synth (car args))) (t (k-resolve (extract r 1)))
                    (k (extract (car found) 3)))
               (tagcase (k-get t)
-                (ty-pair (e tail rg)
+                (ty-pair (e tail rg nl)
                   (if (and (= (k-resolve tail) t) (tagcase rg (r-frozen (p f) #t) (else y #f)))
                       (k-nlist-te e k rg (extract r 2))
                       (k-fail-not-frozen t x)))

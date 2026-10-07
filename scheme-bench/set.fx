@@ -63,7 +63,7 @@
 ;; A comparator: type test, equality, hash.
 (define-type (comparator (k type))
   (bloblet (fields (subr cmps (k) bool) (subr cmps (k k) bool) (subr cmps (k) int)) @heap))
-(define-type (entry (k type)) (pairof k int @heap))
+(define-type (entry (k type)) (union nil (pairof k int @heap)))
 (define-type (bucket (k type)) (listof (entry k) acyclic))
 ;; A hash table: its comparator's equality and hash, buckets, count.
 (define-type (table (k type))

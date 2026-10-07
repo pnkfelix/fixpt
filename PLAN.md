@@ -2316,8 +2316,10 @@ at statically known element types first. Name to settle (`flat`, `bits`,
 **Q7. Logical types, restricted** (`docs/research/logical-types.md`),
 and with them facts through the disjunctive side of `or` and `and`
 (occurrence typing; the conjunctive side is done, 2026-09-30):
-first `consof`, a pair that is not `nil`, which `null?` narrows to (and
-which lets native `car` stay one load); then unions of members with
+first the non-`nil` pair, which `null?` narrows to (done 2026-10-07:
+`pairof` itself, the user's choice; "a pair, or none" is `(union nil
+(pairof …))`; native `car` left checked until its sites are counted); then
+unions of members with
 disjoint run-time shapes, `(union T …)`, introduced only by subsumption
 and eliminated by narrowing a variable (`typecase`, shape predicates);
 intersections of procedure types (`overload`) later. Its open questions

@@ -315,8 +315,9 @@ impl Checker {
             (Ty::Named { which: g, args: xs }, Ty::Named { which: h, args: ys }) => {
                 g == h && xs.iter().zip(&ys).all(|(x, y)| self.match_d(l, x, y, map, seen))
             }
-            (Ty::Pair(a1, b1, r1), Ty::Pair(a2, b2, r2)) => {
-                self.match_region(l, r1, r2, map) && self.match_ty(l, a1, a2, map, seen) && self.match_ty(l, b1, b2, map, seen)
+            (Ty::Pair(a1, b1, r1, n1), Ty::Pair(a2, b2, r2, n2)) => {
+                n1 == n2
+                    && self.match_region(l, r1, r2, map) && self.match_ty(l, a1, a2, map, seen) && self.match_ty(l, b1, b2, map, seen)
             }
             (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 self.match_region(l, r, s, map) && self.match_ty(l, x, y, map, seen)

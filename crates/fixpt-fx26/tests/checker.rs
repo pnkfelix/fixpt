@@ -130,7 +130,7 @@ fn probe_helpers() {
 fn every_test_program() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let (mut report, mut unparsed, mut agreed) = (Vec::new(), Vec::new(), 0);
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate", "generative", "lemmas", "sizes", "conventions", "redefine", "modules", "higher-kinds"] {
+    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate", "generative", "lemmas", "sizes", "conventions", "redefine", "modules", "higher-kinds", "unions"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
@@ -268,14 +268,15 @@ fn the_standard_module_is_used_only_so() {
     }
 }
 
-/// The size programs that say, on their first line, that they are
-/// `Rejected` or `Accepted` are so, by the Rust checker (the FX-26 one
+/// The size and union programs that say, on their first line, that they
+/// are `Rejected` or `Accepted` are so, by the Rust checker (the FX-26 one
 /// agrees, `every_test_program`).
 #[test]
 fn size_programs_as_they_say() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/sizes");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut wrong = Vec::new();
-    for path in std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()) {
+    let paths = ["sizes", "unions"].iter().flat_map(|d| std::fs::read_dir(format!("{dir}/{d}")).unwrap().map(|e| e.unwrap().path()));
+    for path in paths {
         let program = std::fs::read_to_string(&path).unwrap();
         let refused = rust_check(&program).is_err();
         let said = if program.starts_with("; Rejected") {

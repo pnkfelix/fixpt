@@ -436,7 +436,7 @@ impl Checker {
                 self.size_walk(result, pol, v, bad, seen);
             }
             Ty::Poly { body, .. } => self.size_walk(body, pol, v, bad, seen),
-            Ty::Pair(x, y, r) => {
+            Ty::Pair(x, y, r, _) => {
                 let p = if r.is_frozen() { pol } else { Polarity::Inv };
                 self.size_walk(x, p, v, bad, seen);
                 self.size_walk(y, p, v, bad, seen);

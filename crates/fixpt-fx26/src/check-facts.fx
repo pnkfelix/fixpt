@@ -43,4 +43,5 @@
       (if (null? fs) acc (k-with-facts (cdr fs) (the k-fact-list (cons (car fs) acc))))))))
 
 (define k-test-facts (with test-facts k-test-facts))
+(define k-bool-lit? (with test-facts k-bool-lit?))
 (define k-with-facts (with test-facts k-with-facts))

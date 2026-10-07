@@ -58,7 +58,7 @@ pub enum FamilyArg {
 /// The heads of the type forms `parse_type_node` reads.
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "union",
 ];
 
 impl Checker {
@@ -318,7 +318,7 @@ impl Checker {
         let t = self.parse_type_node(s)?;
         // Storage written: a procedure kept there may not reach itself
         // unsaid (`spin`).
-        if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
+        if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "union" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
             self.no_knot(t, s.span)?;
         }
         Ok(t)
@@ -495,7 +495,20 @@ impl Checker {
                 let a = self.parse_type(a)?;
                 let b = self.parse_type(b)?;
                 let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Pair(a, b, r)))
+                Ok(self.arena.ty(Ty::Pair(a, b, r, false)))
+            }
+            // A union (`docs/research/logical-types.md`): so far only of
+            // `nil` and a pair, a pair that may be `nil`.
+            "union" => {
+                let pair = match &items[..] {
+                    [_, n, p] if n.as_symbol().is_some_and(|n| self.name(n) == "nil") => p,
+                    _ => return Err(FxError::at(s.span, "a union is, so far, `(union nil (pairof type type region))`")),
+                };
+                let p = self.parse_type(pair)?;
+                match self.arena.get(self.arena.resolve(p)).clone() {
+                    Ty::Pair(a, b, r, _) => Ok(self.arena.ty(Ty::Pair(a, b, r, true))),
+                    _ => Err(FxError::at(pair.span, "a union is, so far, `(union nil (pairof type type region))`")),
+                }
             }
             "dletrec" => self.parse_dletrec(s, &items),
             // `(mu name type)`: a recursive type, anonymous; the same as
@@ -515,15 +528,15 @@ impl Checker {
                 Ok(slot)
             }
             "listof" => {
-                // FX-87's `listof`: a pair whose tail is the list itself.
-                // Every `pairof` type also has the empty list, `nil`.
+                // FX-87's `listof`: a pair whose tail is the list itself, or
+                // the empty list, `nil`.
                 let [_, t, r] = &items[..] else {
                     return Err(FxError::at(s.span, "`(listof type region)`"));
                 };
                 let t = self.parse_type(t)?;
                 let r = self.parse_region(r)?;
                 let slot = self.arena.ty(Ty::Link(None));
-                let pair = self.arena.ty(Ty::Pair(t, slot, r));
+                let pair = self.arena.ty(Ty::Pair(t, slot, r, true));
                 self.arena.set_link(slot, pair);
                 Ok(slot)
             }

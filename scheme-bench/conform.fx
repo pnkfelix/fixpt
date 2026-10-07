@@ -268,7 +268,7 @@
 (define* make-empty-table (subr (alloc @heap) () table) (lambda () (cons 'TABLE nil)))
 
 (define assq
-  (poly ((v type)) (subr (maxeff (read @heap) spin (read (globals assq))) (node (listof (pairof node v @heap) @heap)) (pairof node v @heap)))
+  (poly ((v type)) (subr (maxeff (read @heap) spin (read (globals assq))) (node (listof (pairof node v @heap) @heap)) (union nil (pairof node v @heap))))
   (plambda ((v type))
     (lambda (x l)
       (cond ((null? l) no-pair)
@@ -276,7 +276,7 @@
             (else (assq x (cdr l)))))))
 
 ;; The entry for `x` and `y`, or `nil` for `#f`.
-(define* lookup (subr cf (table node node) (pairof node node @heap))
+(define* lookup (subr cf (table node node) (union nil (pairof node node @heap)))
   (lambda (table x y)
     (let ((one (assq x (cdr table))))
       (if (not (null? one))

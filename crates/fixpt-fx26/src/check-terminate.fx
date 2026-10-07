@@ -152,7 +152,7 @@
               (tagcase (k-ty-known t)
                 ;; A `nlist`'s tail is a `nlist` too: the same type serves.
                 (ty-nlist (e z r) (k-sc-smaller p (if head e t) rest))
-                (ty-pair (x y r)
+                (ty-pair (x y r nl)
                   (tagcase r
                     (r-frozen (q fin) (if fin (k-sc-smaller p (if head x y) rest) rest))
                     (else z rest)))
@@ -399,7 +399,7 @@
 (define k-sc-written-pair? (subr (maxeff kreads spin) (int) bool)
   (lambda (t)
     (tagcase (k-ty-known t)
-      (ty-pair (x y r) (tagcase r (r-frozen (q fin) (not fin)) (else z #t)))
+      (ty-pair (x y r nl) (tagcase r (r-frozen (q fin) (not fin)) (else z #t)))
       (else z #f))))
 ;; Whether `ks` knows of a pair at a region that is not `acyclic`.
 (define k-sc-any-written? (subr (maxeff (read @globals) (read @t) spin) (k-trs) bool)

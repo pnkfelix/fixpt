@@ -61,7 +61,7 @@
 (define-type codes (listof code @heap))
 (define-type case-code (subr ev (obj obj) obj))
 ;; The environment chain: '() or (enclosing-chain . frame).
-(define-type chain (pairof chain objs @heap))
+(define-type chain (union nil (pairof chain objs @heap)))
 (define-type macros (listof (pairof obj obj @heap) @heap))
 (define-type env (pairof chain macros @heap))
 (define-type cell (pairof obj obj @heap))

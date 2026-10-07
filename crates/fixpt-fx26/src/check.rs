@@ -132,6 +132,15 @@ pub struct Checker {
     /// The same for `length-is?`: each variable, its binding, and the
     /// length it was found to have.
     pub(crate) certified_lengths: Vec<(Sym, usize, Size)>,
+    /// The variables a test has narrowed, in the branch where it did: each
+    /// by name and binding, and its type there (`null?`'s `else`: a pair
+    /// that may be `nil`, now one that is not). `docs/research/
+    /// logical-types.md`, L0.
+    pub(crate) narrowed: Vec<(Sym, usize, TyId)>,
+    /// Whether `unify` is inside a pair's contents, which are invariant: a
+    /// binder solved already takes what it meets there, if the two are
+    /// related, since nothing else will check (`infer.rs`, `unify`).
+    pub(crate) unify_exact: bool,
     /// The sizes given to `nat` variables of no known size, innermost last
     /// (`Checker::name_nat`).
     pub(crate) skolems: Vec<DVar>,
@@ -400,6 +409,8 @@ impl Checker {
             certified: Vec::new(),
             certified_nats: Vec::new(),
             certified_lengths: Vec::new(),
+            narrowed: Vec::new(),
+            unify_exact: false,
             size_facts: Vec::new(),
             skolems: Vec::new(),
             module_vars: HashSet::new(),
@@ -568,7 +579,44 @@ impl Checker {
         if self.broken.get(&s).is_some_and(|(b, _)| *b == i) {
             return None;
         }
+        if let Some(&(_, _, t)) = self.narrowed.iter().rev().find(|(n, b, _)| *n == s && *b == i) {
+            return Some(t);
+        }
         Some(self.env[i].1)
+    }
+
+    /// What `test` narrows, where it holds and where it does not: `(null?
+    /// v)`, `v` a variable whose pairs may be `nil`, makes `v` a pair that
+    /// is not where it does not hold. Through `not`, and through `and` and
+    /// `or` (`(if a b #f)`, `(if a #t b)`) as `test_facts` goes: what both
+    /// sides narrow where an `and` holds, or an `or` does not.
+    pub(crate) fn narrowings(&mut self, test: ExpId) -> (Vec<(Sym, usize, TyId)>, Vec<(Sym, usize, TyId)>) {
+        let none = (vec![], vec![]);
+        if let Exp::If { test: a, then, els } = self.arena.exp_at(test).clone() {
+            let (ta, ea) = self.narrowings(a);
+            if matches!(self.arena.exp_at(then), Exp::Bool(true)) {
+                let (_, eb) = self.narrowings(els);
+                return (vec![], [ea, eb].concat());
+            }
+            if matches!(self.arena.exp_at(els), Exp::Bool(false)) {
+                let (tb, _) = self.narrowings(then);
+                return ([ta, tb].concat(), vec![]);
+            }
+            return none;
+        }
+        if let Exp::App { fun, args } = self.arena.exp_at(test).clone()
+            && let [x] = args[..]
+            && self.standard_ref(fun).is_some_and(|op| self.interner.name(op) == "not")
+        {
+            let (t, e) = self.narrowings(x);
+            return (e, t);
+        }
+        let Some((v, i)) = self.certifying_test(test, "null?") else { return none };
+        let t = self.arena.resolve(self.lookup(v).unwrap_or(self.env[i].1));
+        match self.arena.get(t).clone() {
+            Ty::Pair(a, b, r, true) => (vec![], vec![(v, i, self.arena.ty(Ty::Pair(a, b, r, false)))]),
+            _ => none,
+        }
     }
 
     /// The type of the global `s` as defined now, broken or not.
@@ -928,10 +976,14 @@ impl Checker {
                 let nats = self.nat_test(test);
                 self.certified_nats.extend(nats);
                 let (yes, no) = self.test_facts(test);
+                let (narrow_yes, narrow_no) = self.narrowings(test);
                 let depth = self.size_facts.len();
+                let narrowed = self.narrowed.len();
                 self.size_facts.extend(yes);
+                self.narrowed.extend(narrow_yes);
                 let a = self.synth(then);
                 self.size_facts.truncate(depth);
+                self.narrowed.truncate(narrowed);
                 if certified.is_some() {
                     self.certified.pop();
                 }
@@ -943,8 +995,10 @@ impl Checker {
                 }
                 let (a, ae) = a?;
                 self.size_facts.extend(no);
+                self.narrowed.extend(narrow_no);
                 let b = self.synth(els);
                 self.size_facts.truncate(depth);
+                self.narrowed.truncate(narrowed);
                 let (b, be) = b?;
                 let t = if self.subtype(a, b) {
                     b
@@ -1267,7 +1321,7 @@ impl Checker {
             }
             match self.arena.get(t) {
                 Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Place(_) => {}
-                Ty::Pair(a, b, _) => stack.extend([*a, *b]),
+                Ty::Pair(a, b, _, _) => stack.extend([*a, *b]),
                 Ty::NList { elem: a, .. } | Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) => stack.push(*a),
                 Ty::Bloblet { fields, .. } => stack.extend(fields),
                 Ty::Product(ps) | Ty::Sum(ps) => stack.extend(ps.iter().map(|(_, x)| *x)),
@@ -1469,7 +1523,7 @@ impl Checker {
             Ty::Place(r) => {
                 out.insert(r);
             }
-            Ty::Pair(a, b, r) => {
+            Ty::Pair(a, b, r, _) => {
                 out.insert(r);
                 self.regions_walk(a, seen, out);
                 self.regions_walk(b, seen, out);
@@ -1544,7 +1598,7 @@ impl Checker {
                 add(r, out);
                 vec![a]
             }
-            Ty::Pair(a, b, r) => {
+            Ty::Pair(a, b, r, _) => {
                 if !r.is_frozen() {
                     add(r, out);
                 }
@@ -1612,7 +1666,7 @@ impl Checker {
             Ty::Base(_) | Ty::Nat(_) | Ty::Void => true,
             Ty::Var(v) => self.arena.is_data_var(v) && here(self.data_var_place(v)),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.data_walk(*x, seen, place)),
-            Ty::Pair(a, b, r) => {
+            Ty::Pair(a, b, r, _) => {
                 r.is_frozen() && here(Self::data_place(r)) && self.data_walk(a, seen, place) && self.data_walk(b, seen, place)
             }
             Ty::Bloblet { fields, frozen, region } => {
@@ -1637,7 +1691,7 @@ impl Checker {
         match self.arena.get(t).clone() {
             Ty::Var(v) if self.arena.is_data_var(v) => note(self.data_var_place(v)),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().for_each(|(_, x)| self.data_places(*x, seen, out)),
-            Ty::Pair(a, b, r) => {
+            Ty::Pair(a, b, r, _) => {
                 note(Self::data_place(r));
                 self.data_places(a, seen, out);
                 self.data_places(b, seen, out);
@@ -1726,7 +1780,7 @@ impl Checker {
         let slot = self.arena.ty(Ty::Link(None));
         memo.insert(t, slot);
         let new = match ty {
-            Ty::Pair(a, b, r) => Ty::Pair(self.finitize_memo(a, memo), self.finitize_memo(b, memo), fin(r)),
+            Ty::Pair(a, b, r, n) => Ty::Pair(self.finitize_memo(a, memo), self.finitize_memo(b, memo), fin(r), n),
             Ty::Product(ps) => Ty::Product(ps.into_iter().map(|(l, x)| (l, self.finitize_memo(x, memo))).collect()),
             Ty::Sum(ps) => Ty::Sum(ps.into_iter().map(|(l, x)| (l, self.finitize_memo(x, memo))).collect()),
             Ty::Bloblet { fields, frozen, region } => Ty::Bloblet {
@@ -1846,7 +1900,7 @@ impl Checker {
                 reg(r, found);
                 self.polarity(a, v, Variance::Inv, seen, found);
             }
-            Ty::Pair(a, b, r) => {
+            Ty::Pair(a, b, r, _) => {
                 reg(r, found);
                 let p = if r.is_frozen() { at } else { Variance::Inv };
                 self.polarity(a, v, p, seen, found);
@@ -1952,7 +2006,7 @@ impl Checker {
         };
         match self.arena.get(t).clone() {
             Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => self.knot_in(a, &with(r), seen),
-            Ty::Pair(a, b, r) => {
+            Ty::Pair(a, b, r, _) => {
                 let k = if r.is_frozen() { kept.to_vec() } else { with(r) };
                 self.knot_in(a, &k, seen).or_else(|| self.knot_in(b, &k, seen))
             }
@@ -2021,7 +2075,7 @@ impl Checker {
                 Ty::Composable { arg, answer, effect, .. } => (vec![effect], vec![*arg, *answer]),
                 Ty::Poly { body, .. } => (vec![], vec![*body]),
                 Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => (vec![], vec![*a]),
-                Ty::Pair(a, b, _) => (vec![], vec![*a, *b]),
+                Ty::Pair(a, b, _, _) => (vec![], vec![*a, *b]),
                 Ty::NList { elem, .. } => (vec![], vec![*elem]),
                 Ty::Bloblet { fields, .. } => (vec![], fields.clone()),
                 Ty::Product(parts) | Ty::Sum(parts) => (vec![], parts.iter().map(|(_, t)| *t).collect()),
@@ -2220,11 +2274,13 @@ impl Checker {
             }
             // Frozen pairs cannot be written, so, as a frozen bloblet's
             // fields, their contents are covariant.
-            (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) if r.is_frozen() && Region::frozen_le(ra(r), rb(s)) => {
-                self.sub(x1, y1, env, st) && self.sub(x2, y2, env, st)
+            // A pair that may be `nil` fits only a pair that may be too.
+            (Ty::Pair(x1, x2, r, n), Ty::Pair(y1, y2, s, m)) if r.is_frozen() && Region::frozen_le(ra(r), rb(s)) => {
+                (!n || m) && self.sub(x1, y1, env, st) && self.sub(x2, y2, env, st)
             }
-            (Ty::Pair(x1, x2, r), Ty::Pair(y1, y2, s)) => {
-                ra(r) == rb(s)
+            (Ty::Pair(x1, x2, r, n), Ty::Pair(y1, y2, s, m)) => {
+                (!n || m)
+                    && ra(r) == rb(s)
                     && self.sub(x1, y1, env, st)
                     && self.sub(y1, x1, &flip, st)
                     && self.sub(x2, y2, env, st)
@@ -2279,7 +2335,11 @@ impl Checker {
             }
             // Any `nlist` is a finite list; a finite list is a `nlist` of some
             // length.
-            (Ty::NList { elem: x, size, region: r }, Ty::Pair(y, tail, s)) => {
+            (Ty::NList { elem: x, size, region: r }, Ty::Pair(y, tail, s, m)) => {
+                // Not `nil` only if of at least one element.
+                if !m && !self.size_le(&Size::lit(1), &size) {
+                    return false;
+                }
                 // Of no elements, it has no tail to compare.
                 // A `nlist` of some length has for its tail the same type.
                 let rest = match size {
@@ -2289,7 +2349,7 @@ impl Checker {
                 };
                 Region::frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && rest.is_none_or(|rest| self.sub(rest, tail, env, st))
             }
-            (Ty::Pair(x, tail, r), Ty::NList { elem: y, size: Size::Finite, region: s }) if matches!(r, Region::Frozen(_, true)) => {
+            (Ty::Pair(x, tail, r, _), Ty::NList { elem: y, size: Size::Finite, region: s }) if matches!(r, Region::Frozen(_, true)) => {
                 Region::frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && self.sub(tail, b, env, st)
             }
             // A generative type is related only to itself, argument by
@@ -2508,7 +2568,7 @@ impl Checker {
             Ty::Array(a, r) => Ty::Array(self.subst_memo(a, map, memo), region(r)),
             Ty::ICell(a, r) => Ty::ICell(self.subst_memo(a, map, memo), region(r)),
             Ty::Place(r) => Ty::Place(region(r)),
-            Ty::Pair(a, b, r) => Ty::Pair(self.subst_memo(a, map, memo), self.subst_memo(b, map, memo), region(r)),
+            Ty::Pair(a, b, r, n) => Ty::Pair(self.subst_memo(a, map, memo), self.subst_memo(b, map, memo), region(r), n),
             Ty::PromptTag { answer, payload, effect, region: r } => Ty::PromptTag {
                 answer: self.subst_memo(answer, map, memo),
                 payload: self.subst_memo(payload, map, memo),

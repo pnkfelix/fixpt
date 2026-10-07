@@ -46,7 +46,7 @@
                   (ty-array (a r) (begin (reg r) (go a 2)))
                   (ty-icell (a r) (begin (reg r) (go a 2)))
                   (ty-markkey (a r) (begin (reg r) (go a 2)))
-                  (ty-pair (a b r)
+                  (ty-pair (a b r nl)
                     (let ((p (if (k-frozen? r) at 2))) (begin (reg r) (go a p) (go b p))))
                   (ty-bloblet (fs z r) (begin (reg r) (gos fs (if z at 2))))
                   (ty-product (ps) (k-polarity-parts ps v at seen found))

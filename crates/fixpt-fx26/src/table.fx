@@ -16,6 +16,8 @@
   (module
     (define-type (bucket (k type) (v type) (r region)) (listof (pairof k v r) acyclic))
     (define-type (bucket-array (k type) (v type) (r region)) (arrayof (bucket k v r) r))
+    ;; A key's entry, or none: `nil`.
+    (define-type (entry (k type) (v type) (r region)) (union nil (pairof k v r)))
     ;; A key's hash, and whether two keys are the same.
     (define-type (key-hash (k type)) (subr pure (k) int))
     (define-type (key-same (k type)) (subr pure (k k) bool))
@@ -43,7 +45,7 @@
     ;;; The entry for `key` in a bucket, or nil.
     (define bucket-find
       (poly ((r region)) (poly ((k type) (v type))
-        (subr (maxeff (read @globals) (read r)) ((bucket k v r) k (key-same k)) (pairof k v r))))
+        (subr (maxeff (read @globals) (read r)) ((bucket k v r) k (key-same k)) (entry k v r))))
       (plambda ((r region)) (plambda ((k type) (v type))
         (lambda ((b (bucket k v r)) (key k) (same (key-same k)))
           (cond ((null? b) no-pair)
@@ -60,7 +62,7 @@
     ;;; The entry for `key` in `t`, or nil.
     (define table-entry
       (poly ((r region)) (poly ((k type) (v type))
-        (subr (maxeff (read @globals) (read r)) ((table k v r) k) (pairof k v r))))
+        (subr (maxeff (read @globals) (read r)) ((table k v r) k) (entry k v r))))
       (plambda ((r region)) (plambda ((k type) (v type))
         (lambda ((t (table k v r)) (key k))
           (let* ((buckets (bloblet-ref t 2))

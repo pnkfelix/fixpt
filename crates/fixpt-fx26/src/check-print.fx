@@ -577,6 +577,9 @@
            (the k-strings (cons (symbol->string (extract (car ps) 1)) nil)))
           (else (k-part-named (cdr ps) t)))))
 
+;; `pair` shown, as a pair that may be `nil` if `nl`.
+(define k-or-nil (subr kbuilds (bool string) string)
+  (lambda (nl pair) (if nl (k-cat3 "(union nil " pair ")") pair)))
 (define-rec
   (k-show-on (subr kbuilds (int k-printing) string)
     (lambda (t path)
@@ -654,10 +657,11 @@
         (ty-array (a r) (k-cat5 "(arrayof " (k-show-on a p) " " (k-region-show r) ")"))
         (ty-icell (a r) (k-cat5 "(icell " (k-show-on a p) " " (k-region-show r) ")"))
         (ty-place (r) (k-cat3 "(place " (k-region-show r) ")"))
-        (ty-pair (a b r)
-          (if (= (k-resolve b) t)
+        (ty-pair (a b r nl)
+          (if (and nl (= (k-resolve b) t))
               (k-cat5 "(listof " (k-show-on a p) " " (k-region-show r) ")")
-              (k-with-region (k-cat4 "(pairof " (k-show-on a p) " " (k-show-on b p)) r)))
+              (let ((shown (k-cat4 "(pairof " (k-show-on a p) " " (k-show-on b p))))
+                (k-or-nil nl (k-with-region shown r)))))
         (ty-tag (a h e r) (k-show-control "(prompt-tag " a h e r p))
         (ty-comp (a h e r) (k-show-control "(composable " a h e r p))
         (ty-markkey (a r) (k-cat5 "(mark-key " (k-show-on a p) " " (k-region-show r) ")"))

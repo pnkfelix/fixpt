@@ -47,10 +47,10 @@
 
 (define lookup
   (poly ((v type))
-    (subr (maxeff (read @heap) spin) (symbol (listof (pairof symbol v @heap) @heap)) (pairof symbol v @heap)))
+    (subr (maxeff (read @heap) spin) (symbol (listof (pairof symbol v @heap) @heap)) (union nil (pairof symbol v @heap))))
   (plambda ((v type))
     (lambda (key table)
-      (letrec ((loop (subr (maxeff (read @heap) spin) ((listof (pairof symbol v @heap) @heap)) (pairof symbol v @heap))
+      (letrec ((loop (subr (maxeff (read @heap) spin) ((listof (pairof symbol v @heap) @heap)) (union nil (pairof symbol v @heap)))
                  (lambda (x)
                    (if (null? x)
                        no-pair
@@ -208,7 +208,7 @@
 
 (define-type alist (listof (pairof symbol item @heap) @heap))
 
-(define* assq (subr (maxeff (read @heap) spin) (symbol alist) (pairof symbol item @heap))
+(define* assq (subr (maxeff (read @heap) spin) (symbol alist) (union nil (pairof symbol item @heap)))
   (lambda (key l)
     (cond ((null? l) no-pair)
           ((eq? (car (car l)) key) (car l))

@@ -155,7 +155,7 @@
         (ty-array (a r) (ty-array (sub a) (reg r)))
         (ty-icell (a r) (ty-icell (sub a) (reg r)))
         (ty-place (r) (ty-place (reg r)))
-        (ty-pair (a b r) (let* ((a2 (sub a)) (b2 (sub b))) (ty-pair a2 b2 (reg r))))
+        (ty-pair (a b r nl) (let* ((a2 (sub a)) (b2 (sub b))) (ty-pair a2 b2 (reg r) nl)))
         (ty-tag (a h e r)
           (let* ((a2 (sub a)) (h2 (sub h))) (ty-tag a2 h2 (k-subst-effect e m) (reg r))))
         (ty-comp (b a e r)

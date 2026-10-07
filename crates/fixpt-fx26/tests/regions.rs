@@ -147,10 +147,10 @@ fn a_letfreeze_freezes_its_regions_data() {
 /// keyed by frozen data, whose lookups would depend on what was shared.
 #[test]
 fn eq_takes_frozen_data_but_an_eqtable_does_not() {
-    let build = "(letfreeze r (the (listof int r) (cons 1 nil)))";
+    let build = "(letfreeze r (the (pairof int (listof int r) r) (cons 1 nil)))";
     assert_eq!(check(&format!("(let ((xs {build})) (eq? xs xs))")), Ok(vec!["bool ! pure".to_string()]));
     assert_eq!(check("(let ((p (the (pairof int int @h) (cons 1 2)))) (eq? p p))"), Ok(vec!["bool ! pure".to_string()]));
-    let t = "(the (eqtable (listof int const) int const @t) (make-eqtable (pair-identity)))";
+    let t = "(the (eqtable (pairof int (listof int const) const) int const @t) (make-eqtable (pair-identity)))";
     assert_eq!(check(&format!("(eqtable-has? {t} {build})")), Err("this writes frozen data, whose region is `const`".to_string()));
 }
 

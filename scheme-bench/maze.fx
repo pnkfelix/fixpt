@@ -260,7 +260,7 @@
 ;; A cell's fields but its parent: reachable, id, walls, mark.
 (define-type cfields (bloblet (fields uset (pairof int int @heap) int bool) @heap))
 ;; A cell, its parent the cdr; nil is no cell (Larceny's #f).
-(define-type cell (pairof cfields cell @heap))
+(define-type cell (union nil (pairof cfields cell @heap)))
 (define-type wall (bloblet (fields cell cell int) @heap))
 
 (define make-wall (subr (alloc @heap) (cell cell int) wall)

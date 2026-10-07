@@ -60,7 +60,7 @@
 (define s-times sx (sum sy '*))
 
 ;; `car' of what is not a pair: an error, as in Scheme.
-(define* not-a-pair (subr (read @heap) () sx) (lambda () (car (the sxpair no-pair))))
+(define* not-a-pair (subr (read @heap) () sx) (lambda () (car (the (union nil sxpair) no-pair))))
 
 (define* scons (subr (alloc @heap) (sx sx) sx) (lambda (a d) (sum pr (cons a d))))
 (define* scar (subr (read @heap) (sx) sx) (lambda (x) (tagcase x (pr p (car p)) (else y (not-a-pair)))))
@@ -467,7 +467,7 @@
                              (quot (sbool (ssymbol? (scar args))))
                              sfalse)))))
 
-(define* passq (subr (maxeff (read @heap) spin) (symbol (listof (pairof symbol prim @heap) @heap)) (pairof symbol prim @heap))
+(define* passq (subr (maxeff (read @heap) spin) (symbol (listof (pairof symbol prim @heap) @heap)) (union nil (pairof symbol prim @heap)))
   (lambda (name l)
     (cond ((null? l) no-pair)
           ((symbol=? (car (car l)) name) (car l))

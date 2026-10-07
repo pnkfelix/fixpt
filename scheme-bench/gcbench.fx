@@ -53,7 +53,7 @@
 ;;; - The displays (progress lines, "Failed") are left out: FX-26 has no
 ;;;   output. The result of the check is the value instead.
 
-(define-type node (pairof (pairof node node @heap) (pairof int int @heap) @heap))
+(define-type node (union nil (pairof (pairof node node @heap) (pairof int int @heap) @heap)))
 
 (define make-empty-node (subr (alloc @heap) () node)
   (lambda () (cons (cons (the node no-pair) (the node no-pair)) (cons 0 0))))

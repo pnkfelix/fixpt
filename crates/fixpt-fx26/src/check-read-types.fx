@@ -17,7 +17,7 @@
 ;; parameter's name.
 (define k-type-forms k-names
   (list 'arrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu 'nat 'nlist
-        'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr 'sumof))
+        'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr 'sumof 'union))
 (define k-keywords k-names
   (list 'lambda 'plambda 'proj 'if 'letrec 'let 'begin 'define 'define* 'define-type
         'define-generative 'subr 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write
@@ -239,14 +239,15 @@
            (k-shape (= n 4) "`(pairof type type region)`" s)
            (let* ((a (k-parse-type (k-nth items 1))) (b (k-parse-type (k-nth items 2)))
                   (r (k-parse-region (k-nth items 3))))
-             (k-ty-new (ty-pair a b r)))))
+             (k-ty-new (ty-pair a b r #f)))))
+        ((union) (k-parse-union s items))
         ((dletrec) (k-parse-dletrec s items))
         ((mu) (k-parse-mu s items))
         ((listof)
          (begin
            (k-shape (= n 3) "`(listof type region)`" s)
            (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2)))
-                  (slot (k-slot)) (pair (k-ty-new (ty-pair t slot r))))
+                  (slot (k-slot)) (pair (k-ty-new (ty-pair t slot r #t))))
              (begin (k-set-link slot pair) slot))))
         ((prompt-tag)
          (begin
@@ -309,6 +310,19 @@
         (begin (set k-dscope saved) body)))))
 ;; `(mu name type)`: a recursive type, anonymous; the same as `(dletrec
 ;; ((name type)) name)`.
+;; A union (`docs/research/logical-types.md`): so far only of `nil` and a
+;; pair, a pair that may be `nil`.
+(define k-union-shape string "a union is, so far, `(union nil (pairof type type region))`")
+(define k-parse-union (subr (maxeff checks spin) (syn k-syns) int)
+  (lambda (s items)
+    (begin
+      (k-shape (and (= (k-length items) 3) (syn-symbol? (k-nth items 1))
+                    (string=? (syn-name (k-nth items 1)) "nil"))
+               k-union-shape s)
+      (let* ((pair (k-nth items 2)) (p (k-resolve (k-parse-type pair))))
+        (tagcase (k-get p)
+          (ty-pair (a b r nl) (k-ty-new (ty-pair a b r #t)))
+          (else y (k-fail k-union-shape (syn-start pair) (syn-end pair))))))))
 (define k-parse-mu (subr (maxeff checks spin) (syn k-syns) int)
   (lambda (s items)
     (begin
@@ -530,8 +544,8 @@
               (("icell") (k-ty-new (ty-icell t r)))
               (("arrayof") (k-ty-new (ty-array t r)))
               (("mark-key") (k-ty-new (ty-markkey t r)))
-              (("pairof") (k-ty-new (ty-pair t (k-ty-new (ty-var second)) r)))
-              (else (let* ((slot (k-slot)) (pair (k-ty-new (ty-pair t slot r))))
+              (("pairof") (k-ty-new (ty-pair t (k-ty-new (ty-var second)) r #f)))
+              (else (let* ((slot (k-slot)) (pair (k-ty-new (ty-pair t slot r #t))))
                       (begin (k-set-link slot pair) slot)))))))
 (define k-params-names (subr (read @globals) (k-params) k-names)
   (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 1) (k-params-names (cdr ps))))))
@@ -867,7 +881,7 @@
       (ty-array (a r) (the k-ids (cons a nil)))
       (ty-icell (a r) (the k-ids (cons a nil)))
       (ty-markkey (a r) (the k-ids (cons a nil)))
-      (ty-pair (a d r) (k-ids-then (the k-ids (cons a nil)) d))
+      (ty-pair (a d r nl) (k-ids-then (the k-ids (cons a nil)) d))
       (ty-tag (a h e r) (k-ids-then (the k-ids (cons a nil)) h))
       (ty-comp (x a e r) (k-ids-then (the k-ids (cons x nil)) a))
       (ty-product (ps) (k-parts-onto ps nil))

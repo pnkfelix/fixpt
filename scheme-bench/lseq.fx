@@ -31,7 +31,7 @@
 (define-type ints (listof int @heap))
 ;; An lseq: nil, or a pair whose cdr is the rest, realized, or the
 ;; generator of the rest.
-(define-type lseq (pairof int (sumof (seq lseq) (gen gen)) @heap))
+(define-type lseq (union nil (pairof int (sumof (seq lseq) (gen gen)) @heap)))
 (define-type tail (sumof (seq lseq) (gen gen)))
 
 (define eof int (- -1152921504606846975 1))   ; the least fixnum

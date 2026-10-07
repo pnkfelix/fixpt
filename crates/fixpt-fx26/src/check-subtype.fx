@@ -324,9 +324,9 @@
               (tagcase tt
                 (ty-named (h ys) (and (= g h) (k-match-descs l xs ys m seen)))
                 (else z (same))))
-            (ty-pair (a1 b1 r1)
+            (ty-pair (a1 b1 r1 n1)
               (tagcase tt
-                (ty-pair (a2 b2 r2) (and (mr r1 r2) (mt a1 a2) (mt b1 b2)))
+                (ty-pair (a2 b2 r2 n2) (and (bool=? n1 n2) (mr r1 r2) (mt a1 a2) (mt b1 b2)))
                 (else z (same))))
             (ty-ref (x r) (tagcase tt (ty-ref (y q) (and (mr r q) (mt x y))) (else z (same))))
             (ty-array (x r) (tagcase tt (ty-array (y q) (and (mr r q) (mt x y))) (else z (same))))
@@ -449,10 +449,12 @@
                 (ty-icell (y s) (and (k-benv-region=? r s ea eb) (k-inv x y ea eb trail labels)))
                 (else z #f)))
             (ty-place (r) (tagcase tb (ty-place (s) (k-benv-region=? r s ea eb)) (else z #f)))
-            (ty-pair (x1 x2 r)
+            (ty-pair (x1 x2 r n)
               (tagcase tb
-                (ty-pair (y1 y2 s)
-                  (and (k-benv-frozen-le? r s ea eb)
+                ;; A pair that may be `nil` fits only a pair that may be too.
+                (ty-pair (y1 y2 s m)
+                  (and (or (not n) m)
+                       (k-benv-frozen-le? r s ea eb)
                        ;; Frozen pairs cannot be written, so, as a frozen
                        ;; bloblet's fields, their contents are covariant;
                        ;; and finite data may be seen as possibly cyclic.
@@ -516,9 +518,11 @@
                 (ty-nlist (y n s)
                   (and (k-benv-frozen-le? r s ea eb) (k-size-le? m n)
                        (k-sub x y ea eb trail labels)))
-                (ty-pair (y tail s)
+                (ty-pair (y tail s nm)
                   (let ((k (k-size-as-lit m)))
-                    (and (k-benv-frozen-le? r s ea eb)
+                    ;; Not `nil` only if of at least one element.
+                    (and (or nm (k-size-le? (k-size-lit 1) m))
+                         (k-benv-frozen-le? r s ea eb)
                          (k-sub x y ea eb trail labels)
                          (tagcase m
                            ;; A `nlist` of some length has for its tail the same type.

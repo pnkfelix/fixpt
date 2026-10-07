@@ -45,7 +45,7 @@
 ; the benefit of the Scheme community.
 
 (define-type key (pairof int datum acyclic))          ; (identity . object)
-(define-type entry (pairof key datum @heap))          ; (key . value)
+(define-type entry (union nil (pairof key datum @heap)))          ; (key . value)
 (define-type bucket (listof entry acyclic))
 (define-type table (bloblet (fields (arrayof bucket @heap) int) @heap))  ; buckets, count
 (define-effect tables (maxeff (read @heap) (write @heap) (alloc @heap) spin))

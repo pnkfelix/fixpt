@@ -515,7 +515,7 @@ impl Walk<'_> {
                     .filter_map(|k| {
                         let Tracked::Part { param, ty: Some(ty), .. } = k else { return None };
                         match arena.get(arena.resolve(ty)) {
-                            Ty::Pair(a, b, Region::Frozen(_, true)) => {
+                            Ty::Pair(a, b, Region::Frozen(_, true), _) => {
                                 Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *a } else { *b }) })
                             }
                             // A `nlist`'s tail is a `nlist` too: the same type
@@ -567,7 +567,7 @@ impl Walk<'_> {
             && args.len() == 1
             && self.tracked(args[0]).iter().any(|k| {
                 matches!(k, Tracked::Part { ty: Some(ty), .. }
-                    if matches!(arena.get(arena.resolve(*ty)), Ty::Pair(_, _, r) if !matches!(r, Region::Frozen(_, true))))
+                    if matches!(arena.get(arena.resolve(*ty)), Ty::Pair(_, _, r, _) if !matches!(r, Region::Frozen(_, true))))
             })
     }
 

@@ -255,7 +255,10 @@ pub enum Ty {
     Subr { conv: Conv, effect: Effect, params: Vec<TyId>, result: TyId },
     Poly { binders: Vec<(DVar, Kind)>, body: TyId },
     Ref(TyId, Region),
-    Pair(TyId, TyId, Region),
+    /// `(pairof A B R)`, a pair, when the last is false; when it is true,
+    /// a pair or `nil` (`(union nil (pairof A B R))`), as `listof`'s pairs
+    /// are (`docs/research/logical-types.md`, L0).
+    Pair(TyId, TyId, Region, bool),
     /// `(prompt-tag A H D R)`: a tag in region `R` whose prompts deliver an
     /// `A`, whose aborts carry an `H`, and whose delimited computations have
     /// effect at most `D`, besides their control effects on `R`.

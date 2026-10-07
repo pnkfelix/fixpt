@@ -41,7 +41,7 @@
 
 (define-type (promise (v type))
   (ref (ref (sumof (lazy (subr thunks () (promise v))) (eager v)) @heap) @heap))
-(define-type (pare (t type)) (pairof (promise t) (promise (pare t)) @heap))
+(define-type (pare (t type)) (union nil (pairof (promise t) (promise (pare t)) @heap)))
 (define-type (stream (t type)) (promise (pare t)))
 (define-type ints (listof int @heap))
 
