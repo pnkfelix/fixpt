@@ -2672,3 +2672,26 @@ collection flushes all of it; recursion past it that allocates nothing
 pays about 15 ns a frame flushed and restored (`down` 5M 41 → 115 ms),
 which the in-place flush (stage 2) cuts. The benchmarks: unchanged, back
 to back.
+
+## The native stack in the nursery, flushed in place (2026-10-07)
+
+Larceny's way, stage 2 (`DONE.md` §52): the native stack is the top of the
+nursery's range, and a flush makes the run's frames one object where they
+are (two words a frame rewritten, dead words zeroed), which the
+collection that follows moves out: one copy a frame, where stage 1 made
+two. An overflow collects, as Larceny's does, so the cache is the
+nursery's size, 2^20 words. Deep recursion made a cost of the minor
+collector show: it read the card table a byte per card over the whole old
+space, every collection, 2.4 ms with 64M words old; a word at a time,
+clean words skipped, it is a small part now.
+
+| measure                     | stage 1, ms | stage 2, ms |
+| --------------------------- | ----------: | ----------: |
+| `(dive 1000000 200000)`     |          88 |          65 |
+| `(dive 8000000 200000)`     |         500 |         334 |
+| `,native down 5000000`      |         115 |          99 |
+| `,native down 20000000`     |         455 |         413 |
+
+(`dive`: a recursion that deep, then about 38 minor collections at its
+bottom; before stage 1, 732 and 2 935 ms.) The benchmarks: the same, back
+to back.

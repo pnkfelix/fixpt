@@ -260,13 +260,12 @@ weighed with the other items, not ahead of them.
   the compilers, then a choice between `lldb` and a debugger of our own;
   and introspection from inside, an `(introspect)` effect (`TODO.md` §28).
 - R. **Deep recursion in native code** (the user's, 2026-10-07; `TODO.md`
-  §52, §53): done as a copying stack cache (`DONE.md` §52): native code
-  recurses as deep as the heap allows (50M frames in 1.07 s; it overflowed
-  past 5M-20M), and continuations got cheaper (`captures` 11.4 → 9.0 ms).
-  Adopted Larceny's design (the user's): stage 1, the stack flushed at
-  every collection, done (a deep stack's collections 732 → 88 ms at 1M
-  frames). Next: stage 2, the flush in place in the nursery, with frames
-  laid out as bloblets (§53); stage 3, the underflow in line.
+  §52; `DONE.md` §52, §53): Larceny's stack cache. Native code recurses as
+  deep as the heap allows (it overflowed past 5M-20M frames; 20M now in
+  0.41 s), its stack in the nursery, flushed in place at every collection
+  and overflow, so the collector reads no stack (a deep stack's
+  collections 732 → 65 ms at 1M frames); continuations cheaper
+  (`captures` 11.4 → 9.1 ms). Next: stage 3, the underflow in line.
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path

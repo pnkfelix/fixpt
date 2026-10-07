@@ -157,8 +157,19 @@ impl Heap {
                 at += Self::scan_one(mem, at, &mut c);
             }
         }
-        // The old space's dirty cards, each cleaned as it is scanned.
-        for card in lo >> CARD_SHIFT..old_top.div_ceil(CARD_WORDS) {
+        // The old space's dirty cards, each cleaned as it is scanned; the
+        // table read a word (eight cards) at a time, a clean word skipped
+        // whole, so that a large old space with few dirty cards costs little.
+        let (first, end) = (lo >> CARD_SHIFT, old_top.div_ceil(CARD_WORDS));
+        let mut card = first;
+        while card < end {
+            if card % 8 == 0 && card + 8 <= end && self.cards.words()[card >> 3] == 0 {
+                card += 8;
+                continue;
+            }
+            let this = card;
+            card += 1;
+            let card = this;
             if byte(&self.cards, card) == 0 {
                 continue;
             }

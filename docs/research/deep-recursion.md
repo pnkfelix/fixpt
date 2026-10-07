@@ -206,3 +206,22 @@ to 9.0 ms natively: one chunk copied whole each way.
 
 In place, in the nursery (Larceny's), and the underflow in line, are next
 (`TODO.md` §52), measured against this.
+
+## Larceny's design, adopted (2026-10-07)
+
+The user's direction, after measuring what the stack cost the collector
+(`TODO.md` §52): a deep stack in the cache was scanned at every collection
+(1.4 ns a frame) and its roots gathered first (17 ns a frame), and frames
+past it were copied into the nursery and again out of it.
+
+- **Stage 1**: the stack flushed at every collection (`flush_all`), the
+  innermost restored after; the collector reads no stack.
+- **Stage 2**: the stack in the nursery's range (`Heap::native_stack`),
+  flushed in place (`flush_in_place`, `Heap::vector_in_place`): one chunk
+  where the frames are, moved out by the collection that follows. An
+  overflow collects, Larceny's way; its site names the registers that hold
+  values, and its code bloblet. The cache is the nursery's size.
+- **Stage 3**, next: the underflow in line, without a call-out.
+
+Measured in `DONE.md` §52 and `docs/performance.md`.
+

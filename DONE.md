@@ -695,3 +695,56 @@ The cost moves to recursion past the cache that allocates nothing, which
 the large cache had kept on the stack: `down` 5M deep 41 → 115 ms, 20M
 426 → 455 ms (about 15 ns a frame flushed and restored, whatever the
 cache's size, 2^16 to 2^20). Stage 2, in place, removes the flush's copy.
+
+**Stage 2 (2026-10-07): the stack in the nursery, flushed in place.** The
+native stack is the heap's now (`Heap::native_stack`): the top 2^26 words
+of the nursery's range, which the nursery never allocates into. A flush
+makes the run's frames one chunk where they are (`flush_in_place`): its
+header (`Heap::vector_in_place`, with an extension word past 2^18
+fields) and its fields below the innermost frame, its trailer at the
+run's top, each frame's link its size, its return address a fixnum, its
+dead words 0. The chunk is then an object of the nursery, and the
+collection that follows moves it out: that is the one copy. An overflow
+collects, as Larceny's does. Its site says which registers hold values
+(`overflow_info`: the arguments, the closure if read, a variadic
+procedure's saved arguments), and passes its own code bloblet, since its
+frame has not stored it yet. So the cache is the nursery's size again,
+2^20 words: a collection per 2^20 words of frames.
+
+On the way, a cost that deep recursion exposed: every minor collection
+read the card table a byte per card over the whole old space, so its time
+grew with the old space (2.4 ms a collection with 64M words old). It now
+reads the table a word, eight cards, at a time, and skips clean words.
+
+| measure                     | stage 1, ms | stage 2, ms |
+| --------------------------- | ----------: | ----------: |
+| `(dive 1000000 200000)`     |          88 |          65 |
+| `(dive 8000000 200000)`     |         500 |         334 |
+| `,native down 5000000`      |         115 |          99 |
+| `,native down 20000000`     |         455 |         413 |
+
+`down` 50M frames is 300M words, past the default 2^28 the frames may
+take (`FIXPT_NATIVE_STACK_MAX`): it ran before only because the old cache,
+2^25 words, did not count; given room, 1.05 s. The benchmarks: the same,
+back to back. Tests: as before, and the Scheme engine's under
+`gc-stress`.
+
+## 53. Native frames as heap objects where they stand (2026-10-07)
+
+The user's ask: make it easy, even trivial, to make a native stack frame a
+heap object. Done as part of §52's stage 2, without a header a frame:
+
+- No raw word lives in a frame: register code keeps raw `i64`/`f64` in
+  registers only, boxing before a `setstk`
+  (`fixpt-native/src/direct/reps.rs:14-16`). Every word of a frame after
+  its link is a value but its return address.
+- So a run of frames is one object where it is (`flush_in_place`): a
+  header and three fields written below the innermost, a trailer at the
+  top, and in each frame two words rewritten (the link as its size, the
+  return address as a fixnum) and its dead words, by its stack map, made
+  0. Nothing is copied.
+
+Set aside: a bloblet header in each frame, stored by its entry (the
+first design, in `TODO.md` §53 as it was): one store more a call, for
+nothing that the run-as-one-object does not give. It would matter if a
+single frame had to be an object alone, which nothing needs yet.

@@ -1508,9 +1508,11 @@ infer the precise category of the lattice (`docs/research/shapes.md`):
 
 ## 52. Deep recursion in native code: what is left (the user's, 2026-10-07)
 
-The copying stack cache is done (`DONE.md` §52; `docs/research/
-deep-recursion.md`): native code recurses as deep as its heap allows (up
-to `FIXPT_NATIVE_STACK_MAX`, 2^28 words by default). Left:
+Larceny's stack cache, stages 1 and 2, is done (`DONE.md` §52;
+`docs/research/deep-recursion.md`): native code recurses as deep as its
+heap allows (up to `FIXPT_NATIVE_STACK_MAX`, 2^28 words by default), its
+stack in the nursery, flushed in place at every collection and overflow.
+Left:
 
 - **What the stack costs the collector, measured (2026-10-07).** Unlike
   Larceny, which flushes the stack at every collection, minor or major
@@ -1546,14 +1548,8 @@ to `FIXPT_NATIVE_STACK_MAX`, 2^28 words by default). Left:
     in the cache scanned at every collection, frames past it copied
     twice. Larceny pays instead an underflow per frame returned to after
     each collection. Adopted (the user's, 2026-10-07): stage 1, the stack
-    flushed at every collection, is done (`DONE.md` §52: 1M deep 732 →
-    88 ms); stage 2 is the next bullet, stage 3 the one after.
-- **Stage 2, in place, in the nursery** (Larceny's, the user's direction): the stack
-  at the nursery's top, its pointer the heap's limit; a flush rewriting
-  frames where they are, as chunks of the chain (§53 makes a frame one
-  already), not copying them. The copying cache costs about 20 ns a frame
-  flushed and restored; measure this against it. The never-moving
-  segments, mark-swept, are set aside for now (the user's, 2026-10-07).
+    flushed at every collection, and stage 2, in place in the nursery, are
+    done (`DONE.md` §52: 1M deep 732 → 88 → 65 ms); stage 3 is below.
 - **Stage 3, underflow in line**: the underflow is a call-out (two switches between
   the native stack and Rust's) restoring up to 256 words; Larceny's
   `memory.s` gained 15-50% on deep recursion by doing it in assembly.
@@ -1578,50 +1574,3 @@ to `FIXPT_NATIVE_STACK_MAX`, 2^28 words by default). Left:
   collect (discussed with `never_collects`) must count a frame-making entry
   as allocating.
 
-## 53. Native frames laid out as bloblets (the user's, 2026-10-07)
-
-Make a native frame trivially a bloblet (`docs/object-model.md`): the
-compiler lays out each procedure's frame so that its traced words are
-contiguous fields and its raw words a contiguous suffix. Worth having for
-either of §52's designs: a stack cache's flush rewrites almost nothing,
-and mark-sweep segments' frames are traced, and pointed at by
-continuations, as ordinary bloblets.
-
-```text
-sp → [header F,B] [link] [code] [slot 0 … slot F-4] [trailer] | [ret] [mask] [raw slots]
-      constant     tagged fields, contiguous                   | suffix: raw, contiguous
-```
-
-- The compiler numbers a procedure's slots by kind: every traced slot
-  among the fields, every raw one (unboxed `i64`/`f64`, if native code
-  keeps them in slots across calls; to check first) in the suffix. So `F`
-  and `B` are known when compiling, and the header is a constant the
-  prologue stores once: one store more than today.
-- Slots are addressed from `sp` (the header), at positive offsets, as
-  arm64's scaled `ldr`/`str` reach (up to 4095 words); a bloblet pointer
-  to the frame is `sp` + 8(F+1), tagged, a constant offset.
-- The link is a field: a tagged bloblet pointer to the caller's frame.
-  A tagged pointer is an index into the heap (`layout.rs`), so this needs
-  the stack inside the heap's range (the nursery's high end, §52's first
-  design, or a segment area, its second). The code bloblet is a field
-  too, which keeps the code alive and gives the return address its base.
-- Liveness varies by call site, so the mask stays, in the suffix, stored
-  before each call as now. Until it is flushed or traced, a frame need not
-  be a valid bloblet.
-- Making one valid, per frame: clear the slots the mask says are dead (to
-  a fixnum: dead slots keep nothing alive, `a_dead_slot_keeps_nothing_alive`,
-  and no unwritten word can carry the header tag, invariant 4), write the
-  trailer, and turn the return address into an offset from the code
-  field. No copying, no relinking. Larceny traces every slot, since its
-  slots always hold values; clearing dead ones is ours to add.
-- Found (step 1, 2026-10-07): no raw word lives in a frame. Register code
-  keeps raw `i64`/`f64` in registers only, boxing before a `setstk`
-  (`fixpt-native/src/direct/reps.rs:14-16`); every word after the link is
-  a value but the return address. So the suffix holds nothing raw but the
-  return address; and a chunk of §52's chain already holds frames as they
-  were on the stack, the link the size, dead words 0, the return address
-  a fixnum. What is left is a header in place, so that the frame is a
-  bloblet where it stands.
-- Steps: (2) the header in the native compiler's frames, with today's
-  stack (no change in behaviour, a frame one word larger: measure the
-  benchmarks); (3) "make valid" in place, as §52's in-place flush.

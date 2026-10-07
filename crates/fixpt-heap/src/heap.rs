@@ -182,6 +182,12 @@ const NURSERY_MAX: usize = 1 << 30;
 /// marking and sweeping. Last, since native code takes a callee whose code
 /// is at or past the code area's start to be native code.
 const CODE_BASE: usize = NURSERY_BASE + NURSERY_MAX;
+/// The nursery's range ends with the native convention's stack
+/// (`fixpt-native`'s stack cache, `docs/research/deep-recursion.md`), which
+/// the nursery never allocates into: so that frames flushed where they are
+/// become objects of the nursery, which a collection moves out.
+const NATIVE_STACK_WORDS: usize = 1 << 26;
+const NATIVE_STACK_BASE: usize = NURSERY_BASE + NURSERY_MAX - NATIVE_STACK_WORDS;
 const CODE_WORDS: usize = 1 << 27;
 /// The whole of the heap's memory, in words.
 const MEM_WORDS: usize = CODE_BASE + CODE_WORDS;
@@ -434,7 +440,7 @@ impl Heap {
         }
         if self.generational {
             let at = self.nursery_top;
-            assert!(at + n <= MEM_WORDS, "the nursery is full: {n} words more");
+            assert!(at + n <= NATIVE_STACK_BASE, "the nursery is full: {n} words more");
             self.nursery_top += n;
             return at;
         }
@@ -651,6 +657,45 @@ impl Heap {
         }
         self.set_word(main + 1 + n, Self::trailer_word(n + 1));
         self.blob_v(main + 2 + n)
+    }
+
+    /// The native convention's stack: the addresses of its lowest word and
+    /// one past its highest, at the nursery's top (`NATIVE_STACK_WORDS`).
+    pub fn native_stack(&self) -> (u64, u64) {
+        let at = |i: usize| self.mem.words().as_ptr() as u64 + 8 * i as u64;
+        (at(NATIVE_STACK_BASE), at(NATIVE_STACK_BASE + NATIVE_STACK_WORDS))
+    }
+
+    /// A vector of `n` elements made where its words are, on the native
+    /// stack: its header at address `at` (and, past what one header word
+    /// counts, an extension word before it), its elements (written already,
+    /// as values) after it, its trailer after them. An object of the nursery,
+    /// which the next collection moves out: for frames flushed where they
+    /// are (`fixpt-native`).
+    pub fn vector_in_place(&mut self, at: u64, n: usize) -> Value {
+        let main = ((at - self.mem.words().as_ptr() as u64) / 8) as usize;
+        assert!((NATIVE_STACK_BASE..NATIVE_STACK_BASE + NATIVE_STACK_WORDS).contains(&main), "on the native stack");
+        // Past what one header word counts, an extension word before it,
+        // as `put_header` makes: the caller leaves that word free too.
+        if (n + 1) as u64 > layout::H_FIELDS.max() {
+            let (x, h) = make_large_header(ObjType::Vector as u8, n + 1, 0);
+            self.set_word(main - 1, x);
+            self.set_word(main, h);
+        } else {
+            self.set_word(main, make_header(ObjType::Vector as u8, n + 1, 0));
+        }
+        self.set_word(main + 1 + n, Self::trailer_word(n + 1));
+        self.blob_v(main + 2 + n)
+    }
+
+    /// A collection now: of the nursery alone if there is one, else of
+    /// everything.
+    pub fn collect_young(&mut self, extra_roots: &mut [&mut [Value]]) {
+        if self.generational {
+            self.collect_minor(extra_roots);
+        } else {
+            self.collect(extra_roots);
+        }
     }
 
     /// Object `o`'s payload words, as they are: for copying many at once.

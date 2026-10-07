@@ -165,6 +165,11 @@ struct DState {
     overflow: u64,
     /// What the stack cache did (`StackStats`).
     stats: StackStats,
+    /// From an overflow's site: which registers its procedure's entry holds
+    /// values in (`overflow_info`), and its code bloblet, kept alive and
+    /// where they are by the collection the overflow makes.
+    overflow_info: u64,
+    overflow_code: u64,
 }
 
 /// What the stack cache did: overflows and collections, and the frames and
@@ -336,7 +341,6 @@ struct Runner {
     underflow: u64,
     overflow: u64,
     table: u64,
-    stack_lo: u64,
     /// The stack cache's size, and the most its chain may hold, in words.
     cache_words: u64,
     max_words: u64,
@@ -412,7 +416,7 @@ pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Valu
     let r = match CALLED_OUT.with(|c| c.get()) {
         Some((runner, sp)) => {
             let top = (sp - 16) & !15;
-            if top < runner.stack_lo + 2 * STACK_SLACK {
+            if top < rt.heap.native_stack().0 + 2 * STACK_SLACK {
                 return Err(fail("stack overflow".into()));
             }
             run(&runner, rt, p, args, fuel, top)
@@ -441,25 +445,25 @@ fn st_off(f: usize) -> u32 {
     f as u32
 }
 
-/// The native stack: plenty for deep recursion (512 MB, ten million frames
-/// of the smallest kind), with room below the limit for the frame that
-/// finds it has passed it. Zeroed memory, which the system commits only as
-/// it is touched.
-const STACK_WORDS: usize = 1 << 26;
+/// The native stack is the heap's (`Heap::native_stack`), at the nursery's
+/// top; a run's stack cache is part of it, with room below its limit for
+/// the frame that finds it has passed it, and a chunk's start.
+/// The most a stack cache may be.
+const MOST_CACHE_WORDS: u64 = 1 << 22;
 const STACK_SLACK: u64 = 64 * 1024;
 
-/// The stack cache's size by default, in words: half the stack (256 MB,
-/// which the system commits only as it is touched), so that a recursion
-/// that fitted before the cache fits in it, untouched by it; and the most
-/// words a run's frames may take in all: 2^28 (2 GB).
+/// The stack cache's size by default, in words: small, since every
+/// collection flushes all of it (Larceny's, `docs/research/
+/// deep-recursion.md`); and the most words a run's frames may take in all:
+/// 2^28 (2 GB).
 /// `FIXPT_NATIVE_STACK_CACHE` and `FIXPT_NATIVE_STACK_MAX` (words) say
 /// otherwise.
-const CACHE_WORDS: u64 = 1 << 16;
+const CACHE_WORDS: u64 = 1 << 20;
 const MAX_STACK_WORDS: u64 = 1 << 28;
 
 fn stack_words_wanted() -> (u64, u64) {
     let get = |k: &str, d: u64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
-    (get("FIXPT_NATIVE_STACK_CACHE", CACHE_WORDS).clamp(1024, STACK_WORDS as u64 / 2), get("FIXPT_NATIVE_STACK_MAX", MAX_STACK_WORDS))
+    (get("FIXPT_NATIVE_STACK_CACHE", CACHE_WORDS).clamp(1024, MOST_CACHE_WORDS), get("FIXPT_NATIVE_STACK_MAX", MAX_STACK_WORDS))
 }
 
 /// Restoring frames from the chain: at least one, and on until this many
@@ -600,7 +604,6 @@ pub struct DirectMachine {
     /// cache's limit goes, the rest flushed into the heap.
     underflow: Offset,
     overflow: Offset,
-    stack: Vec<u64>,
     cache_words: u64,
     max_words: u64,
     /// What each call-out any compiled code makes does, by number.
@@ -683,7 +686,6 @@ impl DirectMachine {
             closure,
             underflow,
             overflow,
-            stack: vec![0; STACK_WORDS],
             cache_words,
             max_words,
             callouts,
@@ -693,7 +695,7 @@ impl DirectMachine {
     /// The stack cache's size, and the most words a run's frames may take
     /// in all (on the stack and in the heap), past which it overflows.
     pub fn set_stack_words(&mut self, cache: u64, max: u64) {
-        self.cache_words = cache.clamp(1024, STACK_WORDS as u64 / 2);
+        self.cache_words = cache.clamp(1024, MOST_CACHE_WORDS);
         self.max_words = max;
     }
 
@@ -768,7 +770,9 @@ impl DirectMachine {
     /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
     /// heap its call-outs allocate in, collecting when they must.
     pub fn call(&mut self, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
-        let top = (self.stack.as_mut_ptr() as u64 + 8 * STACK_WORDS as u64) & !15;
+        // The heap's native stack (`Heap::native_stack`), with room at its
+        // top for a chunk's trailer (`flush_in_place`).
+        let top = (rt.heap.native_stack().1 - 16) & !15;
         run(&self.runner(), rt, p, args, fuel, top)
     }
 
@@ -782,7 +786,6 @@ impl DirectMachine {
             underflow: self.space.exec_addr(self.underflow) as u64,
             overflow: self.space.exec_addr(self.overflow) as u64,
             table: self.callouts.as_ptr() as u64,
-            stack_lo: self.stack.as_ptr() as u64,
             cache_words: self.cache_words,
             max_words: self.max_words,
         }
@@ -815,7 +818,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
         stack_top: top,
         // The cache: this run's part of the stack, below which a frame's
         // entry flushes the rest into the heap.
-        stack_limit: (r.stack_lo + STACK_SLACK).max(top.saturating_sub(8 * r.cache_words)),
+        stack_limit: (rt.heap.native_stack().0 + STACK_SLACK).max(top.saturating_sub(8 * r.cache_words)),
         cont: Value::FALSE.raw(),
         max_words: r.max_words,
         underflow: r.underflow,
@@ -943,10 +946,11 @@ fn common_underflow(n: usize) -> Vec<u32> {
 
 /// The stack cache's overflow: from a procedure's entry whose frame, just
 /// pushed, passed the cache's limit (by `bl`, from the site's stub, whose
-/// return is where the entry goes on): every register it may need kept,
-/// call-out `n` (`Callout::Overflow`) copies the run's other frames into
-/// the heap and moves this one to the cache's top; back with the stack and
-/// frame where it is now. One for the machine.
+/// return is where the entry goes on; its code bloblet in X16, which of its
+/// registers hold values in X17, `overflow_info`): every register it may
+/// need kept, call-out `n` (`Callout::Overflow`) flushes the run's other
+/// frames where they are, collects, and moves this one to the cache's top;
+/// back with the stack and frame where it is now. One for the machine.
 fn common_overflow(n: usize) -> Vec<u32> {
     let mut a = Asm::new();
     let kept = offset_of!(DState, kept) as u32;
@@ -954,6 +958,8 @@ fn common_overflow(n: usize) -> Vec<u32> {
         a.e(str(r as Reg, ST, kept + 8 * r));
     }
     a.e(str(LINK, ST, kept + 88));
+    a.e(str(X16, ST, st_off(offset_of!(DState, overflow_code))));
+    a.e(str(X17, ST, st_off(offset_of!(DState, overflow_info))));
     call_out(&mut a, n);
     a.e(ldr(LINK, ST, kept + 88));
     a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
@@ -2358,10 +2364,15 @@ impl Compiling<'_> {
             a.bind(resume_at);
             resume(&mut a);
         }
+        let info = overflow_info(self.procs[p].arity, captures);
         for (over, back) in &overflows {
             a.bind(*over);
-            a.e(ldr(X16, ST, st_off(offset_of!(DState, overflow))));
-            a.e(blr(X16));
+            // Through the link, which the frame holds already: X9 may be a
+            // variadic procedure's count.
+            ldr_field(&mut a, X16, 1);
+            a.es(&mov_imm64(X17, info));
+            a.e(ldr(LINK, ST, st_off(offset_of!(DState, overflow))));
+            a.e(blr(LINK));
             a.to(*back, Fix::B);
         }
         // The traps, out of the way: a stub per site, calling its kind's
@@ -3251,7 +3262,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             }
             Err(why) => failed(st, why),
         },
-        Callout::Overflow => overflow(&mut rt.heap, st),
+        Callout::Overflow => {
+            let r = overflow(&mut rt.heap, st);
+            st.words = rt.heap.words_address() as u64;
+            r
+        }
         Callout::Capture { whole } => {
             // `f`, moved by a collection, where the code reads it.
             st.args[0] = args[0].raw();
@@ -3636,12 +3651,22 @@ fn put_frame(r: Rec, fp: u64, link: u64, second: u64) {
     unsafe { std::ptr::copy_nonoverlapping(r.words.add(r.at + 2), (fp + 16) as *mut u64, r.n - 2) };
 }
 
+/// What an overflow's site says of its procedure's entry: how many of
+/// REG1…REG8 hold its arguments (bits 0-7), whether the closure in `CLO` is
+/// read (bit 8), whether it is variadic, its count in X9 and its arguments
+/// in the state's `args` too (bit 9).
+fn overflow_info(arity: usize, captures: bool) -> u64 {
+    let regs = if arity == usize::MAX { 1 << 9 } else { arity.min(8) as u64 };
+    regs | (captures as u64) << 8
+}
+
 /// The stack cache's overflow, from the entry of the procedure whose frame
-/// (at `st.fp`, its link and return address in it) passed the limit: the
-/// run's other frames copied into the heap onto the chain, and this one
-/// moved to the cache's top, returning through the underflow. A frame too
-/// large for the cache, or frames past the most a run may have, overflow
-/// the stack.
+/// (at `st.fp`, its link and return address in it) passed the limit,
+/// Larceny's way: the run's other frames flushed into the heap where they
+/// are, the nursery collected (which moves them out), and this frame (with
+/// the marks in tail position under it) put at the cache's top, returning
+/// through the underflow. A frame too large for the cache, or frames past
+/// the most a run may have, overflow the stack.
 fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
     let (f0, top) = (st.fp, st.stack_top);
     // The frames kept: this one, and the marks in tail position it is
@@ -3666,19 +3691,58 @@ fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
     if chain_words(heap, cont_pos(st)) + words + size / 8 > st.max_words {
         return failed(st, "stack overflow".into());
     }
+    // The kept frames aside, where the flush writes its chunk's start; the
+    // marks' words are values to keep.
+    let mut kept: Vec<Value> = (0..size / 8).map(|i| Value(word(f0 + 8 * i))).collect();
     let last = outermost_second(st, frames.last().expect("a frame").0);
-    let mut p = chunks_of(heap, &frames, last, cont_pos(st));
-    p.pc = word(outer + 8);
+    let mut p = flush_in_place(heap, &frames, last, cont_pos(st));
+    p.pc = kept[((outer - f0) / 8 + 1) as usize].raw();
     set_cont(st, p);
     st.stats.overflows += 1;
     st.stats.frames_flushed += frames.len() as u64;
     st.stats.words_flushed += words;
+    // The collection: the roots, what the entry holds (`overflow_info`).
+    let info = st.overflow_info;
+    let variadic = info & 1 << 9 != 0;
+    let n = if variadic { (st.nargs as usize).min(8) } else { (info & 0xff) as usize };
+    let mut regs: Vec<Value> = (1..=n).map(|r| Value(st.kept[r])).collect();
+    let mut saved: Vec<Value> = if variadic { st.args[..n].iter().map(|a| Value(*a)).collect() } else { Vec::new() };
+    let mut clo: Vec<Value> = if info & 1 << 8 != 0 { vec![Value(st.kept[CLO as usize])] } else { Vec::new() };
+    let mut code = [Value(st.overflow_code), Value(st.code)];
+    let mut cont = [Value(st.cont)];
+    {
+        let mut roots: Vec<&mut [Value]> = vec![&mut regs, &mut saved, &mut clo, &mut code, &mut cont];
+        // The marks' words, from the third on, in each kept frame but this.
+        let mut rest: &mut [Value] = &mut kept;
+        let mut at = 0u64;
+        for &(fp, end) in &keep {
+            let n = ((end - fp) / 8) as usize;
+            let (this, more) = rest.split_at_mut(n);
+            if fp != f0 {
+                roots.push(&mut this[2..]);
+            }
+            rest = more;
+            at += n as u64;
+        }
+        debug_assert_eq!(at * 8, size);
+        heap.collect_young(&mut roots);
+    }
+    for (r, v) in regs.iter().enumerate() {
+        st.kept[r + 1] = v.raw();
+    }
+    for (i, v) in saved.iter().enumerate() {
+        st.args[i] = v.raw();
+    }
+    if let Some(c) = clo.first() {
+        st.kept[CLO as usize] = c.raw();
+    }
+    (st.code, st.cont) = (code[1].raw(), cont[0].raw());
+    // The kept frames at the cache's top, their links moved with them; the
+    // outermost's to nothing, returning through the underflow.
     let to = top - size;
-    // SAFETY: both on the native stack, above its limit, which no Rust
-    // code holds while the call-out runs.
-    unsafe { std::ptr::copy(f0 as *const u64, to as *mut u64, (size / 8) as usize) };
-    // Their links moved with them; the outermost's to nothing, returning
-    // through the underflow.
+    for (i, v) in kept.iter().enumerate() {
+        set_word(to + 8 * i as u64, v.raw());
+    }
     let moved = |a: u64| a - f0 + to;
     for &(fp, _) in &keep[..keep.len() - 1] {
         set_word(moved(fp), moved(word(moved(fp))));
@@ -3689,18 +3753,48 @@ fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
     0
 }
 
+/// The stack's `frames`, innermost first, contiguous and the run's last,
+/// made a chunk of the chain onto `tail` where they are (Larceny's flush in
+/// place): its header and fields written below the innermost, its trailer
+/// at the run's top; each frame's link its size, its second word a fixnum
+/// (the outermost's `last`), its dead words 0. An object of the nursery,
+/// which the collection that must follow moves out. Where the innermost
+/// is, its `pc` for the caller to say.
+fn flush_in_place(heap: &mut Heap, frames: &[(u64, u64)], last: u64, tail: Pos) -> Pos {
+    let (lo, hi) = (frames[0].0, frames.last().expect("a frame").1);
+    let rest = chain_words(heap, tail);
+    set_word(lo - 8 * (CH_FRAMES - CH_NEXT) as u64, tail.chunk.raw());
+    set_word(lo - 8 * (CH_FRAMES - CH_NEXT_AT) as u64, Value::fixnum(tail.at as i64).raw());
+    set_word(lo - 8 * (CH_FRAMES - CH_REST) as u64, Value::fixnum(rest as i64).raw());
+    let outermost = frames.len() - 1;
+    for (f, &(fp, end)) in frames.iter().enumerate() {
+        let mask = kept_mask(fp, end);
+        let second = if f == outermost { last } else { word(fp + 8) };
+        set_word(fp, Value::fixnum(((end - fp) / 8) as i64).raw());
+        set_word(fp + 8, Value::fixnum(second as i64).raw());
+        for (j, at) in (fp + 16..end).step_by(8).enumerate() {
+            if j < 64 && mask & (1 << j) == 0 {
+                set_word(at, Value::fixnum(0).raw());
+            }
+        }
+    }
+    let n = CH_FRAMES + ((hi - lo) / 8) as usize;
+    let chunk = heap.vector_in_place(lo - 8 * (CH_FRAMES as u64 + 1), n);
+    Pos::new(chunk, CH_FRAMES, 0)
+}
+
 /// Every frame of the run on the stack, from the one that called out (at
-/// `st.fp`, the stack's pointer too), copied onto the chain, leaving the
-/// stack empty: for a collection, after which `restore` puts the innermost
-/// back. Where the innermost resumes is not kept: the call-out returns to
-/// it.
+/// `st.fp`, the stack's pointer too), flushed where it is onto the chain,
+/// leaving the stack empty: for a collection, which moves them out, after
+/// which `restore` puts the innermost back. Where the innermost resumes is
+/// not kept: the call-out returns to it.
 fn flush_all(heap: &mut Heap, st: &mut DState) {
     debug_assert_eq!(st.fp, st.native_sp, "a call-out's frame is the stack's top");
     let frames = frames_of(st);
     let Some(&(outer, _)) = frames.last() else { return };
     let words: u64 = frames.iter().map(|&(a, b)| (b - a) / 8).sum();
     let last = outermost_second(st, outer);
-    let p = chunks_of(heap, &frames, last, cont_pos(st));
+    let p = flush_in_place(heap, &frames, last, cont_pos(st));
     set_cont(st, p);
     st.stats.collection_flushes += 1;
     st.stats.frames_flushed += frames.len() as u64;
