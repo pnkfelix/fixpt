@@ -1550,12 +1550,18 @@ Left:
     each collection. Adopted (the user's, 2026-10-07): stage 1, the stack
     flushed at every collection, and stage 2, in place in the nursery, are
     done (`DONE.md` §52: 1M deep 732 → 88 → 65 ms); stage 3 is below.
-- **Stage 3, underflow in line**: the underflow is a call-out (two switches between
-  the native stack and Rust's) restoring up to 256 words; Larceny's
-  `memory.s` gained 15-50% on deep recursion by doing it in assembly.
-  Measure the window (Hieb, Dybvig and Bruggeman: "determined only by
-  experimentation") against one frame, as Clinger, Hartheimer and Ost
-  recommend.
+- **Stage 3, underflow in line: not worth it yet (measured 2026-10-07).**
+  Larceny's `memory.s` gained 15-50% on deep recursion by doing its
+  underflow in assembly, but it switched context for every frame; fixpt's
+  call-out restores up to 256 words each time. `,native down 150000000`
+  (3.75 s), by samples: the minor collections promoting the chunks about
+  33%, `memmove` (mostly theirs) 20%, the native code 17%, `restore`'s
+  copying 11%, `flush_in_place` 8%, the frames' list collected into a
+  `Vec` (`frames_from(…).collect()`, per overflow) 7%, the call-out
+  machinery 1%. The copying is the cost, not the call-out; the `Vec` is
+  the cheap win. Measure the window (Hieb, Dybvig and Bruggeman:
+  "determined only by experimentation") against one frame, as Clinger,
+  Hartheimer and Ost recommend, if underflows ever show.
 - **A nested run's room**: a native call from cellular code a native run
   called (`call_native`) runs below the outer run's frames; its overflow
   flushes only its own, so an outer run that filled the stack leaves it

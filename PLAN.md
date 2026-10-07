@@ -265,7 +265,8 @@ weighed with the other items, not ahead of them.
   0.41 s), its stack in the nursery, flushed in place at every collection
   and overflow, so the collector reads no stack (a deep stack's
   collections 732 → 65 ms at 1M frames); continuations cheaper
-  (`captures` 11.4 → 9.1 ms). Next: stage 3, the underflow in line.
+  (`captures` 11.4 → 9.1 ms). Stage 3, the underflow in line, measured
+  and set aside: its call-out is 1% of a deep recursion's time.
 
 Then the queue in "The queue after the
 benchmark ports and the research (2026-09-29)", below: Q1 native-path
