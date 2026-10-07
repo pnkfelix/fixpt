@@ -366,13 +366,24 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
 pub fn standard_fx26_module() -> String {
     // The definition's head, whose `cond` the clauses below complete: not
     // a whole FX-26 file, so not named as one.
+    // By length first: a `cond` of a few hundred `string=?` was a tenth of
+    // the front end's compiling (`TODO.md` §43). In the table's order
+    // within a length, so the first of a name still wins.
     let mut out = String::from(include_str!("standard-head.part"));
+    let mut by_len: std::collections::BTreeMap<usize, Vec<(&str, &str)>> = std::collections::BTreeMap::new();
     for (fx, scheme, _) in STANDARD {
         if *scheme == "%fx26-identity" || fixpt_engine::cellular::runtime_primitive(scheme).is_some() {
-            out.push_str(&format!("      ((string=? n {fx:?}) {scheme:?})\n"));
+            by_len.entry(fx.chars().count()).or_default().push((fx, scheme));
         }
     }
-    out.push_str("      (else \"\"))))\n");
+    for (len, names) in by_len {
+        out.push_str(&format!("      ((= k {len})\n       (cond\n"));
+        for (fx, scheme) in names {
+            out.push_str(&format!("         ((string=? n {fx:?}) {scheme:?})\n"));
+        }
+        out.push_str("         (else \"\")))\n");
+    }
+    out.push_str("      (else \"\")))))\n");
     fixpt_heap::layout::fx26_as_module("standard-module", &out)
 }
 

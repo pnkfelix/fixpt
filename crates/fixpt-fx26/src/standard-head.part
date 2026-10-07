@@ -3,7 +3,9 @@
 ;;; rewrites it.
 
 ;; The runtime primitive a standard operation runs as, `%fx26-identity`
-;; if it is the identity, or the empty string if neither.
+;; if it is the identity, or the empty string if neither: by the name's
+;; length first, then among the names of that length (`TODO.md` §43).
 (define standard-primitive (subr pure (string) string)
   (lambda (n)
+    (let ((k (string-length n)))
     (cond

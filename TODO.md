@@ -1074,6 +1074,33 @@ on an interpreter's counts); then a table where both grow with the
 program, and nothing where the list stays short (a module's members, a
 lambda's parameters).
 
+The survey, first pass (2026-10-07): the compile phase of the front end
+compiling itself, as register code on the Rust machine, cells by word
+(`FIXPT_PROFILE_PHASE=compile`, `tests/bootstrap.rs`'s
+`probe_phases_as_register_code`): 781.6 M cells. The searches at the top:
+
+| word                                   | cells  | share | its list                         |
+| -------------------------------------- | -----: | ----: | -------------------------------- |
+| `c-find`                               | 71.7 M | 9.2%  | a procedure's locals, per name   |
+| `standard-primitive`                   | 69.6 M | 8.9%  | a `cond` of 293 `string=?`       |
+| `c-with-in`, `c-with-places-in`        | 61.0 M | 7.8%  | every `with` (1431), per `with`  |
+| `exp-start`, `exp-end`                 | 67.1 M | 8.6%  | (a dispatch, not a search)       |
+| `r-where`                              | 26.8 M | 3.4%  | register code's locals, per name |
+| `c-member?`                            | 24.2 M | 3.1%  | free names, bound names          |
+| `p-inline-named` (and `r-inline-named`)| 22.3 M | 2.9%  | every inlining note, per call    |
+
+Done, where the list grows with the program or is large for nothing: the
+`with`s indexed by where each starts (`c-with-index`); `standard-primitive`
+generated as a `cond` on the name's length, then the names of that length;
+the inlining notes kept by name too (`c-inlines-by-name`, beside the list
+genv pruning walks). The compile phase: 781.6 M → 632.6 M cells (−19%);
+the front end compiled by FX-26 (`fx words`), back to back against HEAD,
+four runs: 273.8 / 280.9 / 313.4 / 284.4 → 251.9 / 249.5 / 278.5 / 255.0
+ms (about −10%). Left: `c-find` and `r-where`, scans of a procedure's
+locals, which grow with a procedure, not the program (a long `let*`
+pays); `c-member?`'s callers (17), sets of names kept as lists; and
+`c-genv-limits`, which walks every inlining note at each global made.
+
 ## 44. One simplifier: propagation, folding and reduction together (the user's, 2026-10-07)
 
 "We probably need to combine these things together. Eg arith eval yields
@@ -1213,3 +1240,79 @@ FX-26 compiler's cost: the front end's `fx words` 264.3 / 264.2 → 272.6 /
 from a string cost 10% (the key built at every comparison `r-known` sees),
 the second compares structurally, and only for comparisons. To look at
 again with §43.
+
+## 45. Cdr-coding frozen lists (the user's, 2026-10-07)
+
+The user's idea: we control the value representation, the allocator and
+the collector, so a list's spine could be laid out compactly: a cell whose
+successor is the next cell in memory, rather than a pointer to another
+pair. The classic design (Hansen 1969; Clark and Green 1977, who found most
+`cdr`s point to the very next cell; Bobrow and Clark 1979; the MIT Lisp
+Machine and the Symbolics 3600's 2-bit cdr codes; Li and Hudak 1986;
+Shao, Reppy and Appel, "Unrolling lists", LFP 1994, for typed languages
+with immutable lists). Papers, as they are found, under
+`docs/research/papers/cdr-coding/` with `SOURCES.md` (uncommitted).
+
+Why FX-26 may do better than the Lisp machines did: their cost was
+`rplacd` of a cell in the middle of a run, which needed forwarding
+("invisible") pointers that every access had to follow. FX-26's types say
+which lists nothing writes, `acyclic` and `const` (the constant lists of
+§44 among them), so compacting only those needs no forwarding at all; and
+`eq?` on frozen data already promises only that `#t` means equal
+(`docs/fx26.md`), so a run may be copied or shared.
+
+What it would take, and what to measure first:
+- A representation: a spare bit in a cell's car word, or a run as an
+  object kind of its own; `cdr` of a compacted cell the address of the next
+  cell, so a pair's identity stays its car's address.
+- The collector: a run copied as one object; pointers into its middle
+  (what `cdr` returns) mapped back to the run, or each cell able to find
+  its run's start.
+- Who makes runs: `list` of known length; the copying collector, copying a
+  frozen spine as one run (Clark and Green's data says copying already
+  almost lays lists out so); constant lists made while compiling.
+- Measure first: after a collection, how many frozen pairs' cdrs already
+  point to the adjacent cell, and how much of the benchmarks' and the
+  front end's time goes to walking frozen spines; then whether halving a
+  spine's words pays natively (`car`/`cdr` stay one load; the gain would
+  be cache and allocation).
+
+What the papers say (a research agent's reading, 2026-10-07;
+`docs/research/papers/cdr-coding/SOURCES.md`; Hansen, Clark and Green, and
+Li and Hudak are paywalled or unavailable, read at the abstract only):
+- Adjacency: Bobrow and Clark's Table II, five Interlisp programs: 53.7–
+  75.8% of cdrs within one cell before linearizing, about 99% to the next
+  cell after a cdr-first linearizing pass.
+- `rplacd` is the difficulty: about half of all cells see one, counting
+  the list primitives' own; the answer was the invisible cell (its car
+  forwards to the real cell), with `eq` made to see through it, and on
+  the CADR the car moved and a forwarding pointer left.
+- Collectors: a copying or compacting one builds the runs; Moon (LFP
+  1984) copies about depth-first, so children land near their parent.
+- Benefit claimed: about half the space, at little cost on microcoded
+  machines. Against it on modern machines: Shao, Reppy and Appel (1994)
+  find run-time cdr-coding unattractive, its tag test on every `car`
+  lengthening control dependences, and unroll immutable lists at compile
+  time instead (two items a cell: a quarter fewer words and loads for
+  lists past two, half the cdr links and nil tests). Read before quoting
+  their measurements. Nothing after the 1990s re-measures run-time
+  cdr-coding that the agent found.
+So for FX-26: the frozen subset removes the `rplacd` problem; Shao et
+al.'s point (a test on every `car`) is what to measure natively, and their
+compile-time unrolling, chosen by type, is the alternative to weigh.
+
+## 46. A `case` on atoms (the user's question, 2026-10-07)
+
+FX-26 dispatches on a sum's variants with `tagcase`, and on anything else
+with `cond`: there is no `case` on symbols, integers, characters or
+strings. Where a program means `case`, it writes a chain of comparisons
+or a search of a list: `parsing.fx`'s `(one-of? t k-list)`, whose Scheme
+original is `case` (§44 unrolls it back), and the generated
+`standard-primitive`, a `cond` of 293 `string=?` (§43 now splits it by
+length first). A `case` whose data are literals by definition would say
+what is meant, need no constant-list unrolling, and let the compilers
+choose the dispatch: a jump table or range test on small integers and
+characters, a compare chain or a hash on interned symbols (`eq`), a test
+of the length first on strings. Typing is plain: the key's type, the data
+of it, every arm's result the `case`'s. Both checkers, both compilers, the
+lowering (Scheme's own `case`) and the evaluator.

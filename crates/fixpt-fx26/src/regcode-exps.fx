@@ -459,7 +459,7 @@
               nil
               (tagcase (car l)
                 (rl-global (cell)
-                  (let ((i (r-inline-named (get c-inlines) n k (get c-genv))))
+                  (let ((i (r-inline-named (c-inlines-of n) n k (get c-genv))))
                     (if (null? i) nil (the (listof rinline @k) (cons (cons (car i) cell) nil)))))
                 (else y nil)))))
       (else y nil))))
@@ -539,7 +539,7 @@
           (and (not (null? l))
                (tagcase (car l)
                  (at-global (c)
-                   (and (null? (r-inline-named (get c-inlines) name n (get c-genv)))
+                   (and (null? (r-inline-named (c-inlines-of name) name n (get c-genv)))
                         (null? (r-special-named (get c-specials) name n (get c-genv)))))
                  (at-slot (i) #t)
                  (at-free (i) #t)
@@ -636,7 +636,7 @@
              (e-var (name a b)
                (and (r-global-callee? e name)
                     (or (and tail (and (null? (get c-inlining)) (r-own-is? name n)))
-                        (let ((i (r-inline-named (get c-inlines) name n (get c-genv))))
+                        (let ((i (r-inline-named (c-inlines-of name) name n (get c-genv))))
                           (and (not (null? i)) (not (r-inlined-collects? (car i) name tail)))))))
              (else y #f)))))
   ;; Whether the body of `i`, inlined procedure `name`, calls or calls out,

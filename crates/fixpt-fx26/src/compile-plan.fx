@@ -23,6 +23,21 @@
 (define c-inline-limit int 20)
 
 (define c-inlines (ref c-inlinables @k) (new nil))
+;; The same by name, as a call asks (`TODO.md` §43): kept with `c-inlines`
+;; by `c-note-inline!` and `c-forget-inline!`.
+(define c-inlines-by-name (ref (table symbol c-inlinables @k) @k)
+  (new (make-table symbol-hash symbol=?)))
+(define c-inlines-of (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables)
+  (lambda (n) (table-ref (get c-inlines-by-name) n nil)))
+(define c-note-inline! (subr c-emits (c-inline) unit)
+  (lambda (i)
+    (let ((n (extract i 1)))
+      (begin (set c-inlines (the c-inlinables (cons i (get c-inlines))))
+             (table-set! (get c-inlines-by-name) n (the c-inlinables (cons i (c-inlines-of n))))))))
+(define c-forget-inline! (subr c-emits (symbol) unit)
+  (lambda (n)
+    (begin (set c-inlines (c-drop-inline (get c-inlines) n))
+           (table-set! (get c-inlines-by-name) n nil))))
 ;; Small global procedures that call themselves: unrolled where called with
 ;; a constant list (`r-unrolled`, `TODO.md` §44); by name, as a call asks.
 (define c-unrolls (ref (table symbol c-inlinables @k) @k) (new (make-table symbol-hash symbol=?)))
@@ -313,7 +328,7 @@
                        ;; Not a body being inlined on the way here.
                        (inl (if (c-member? (get c-plan-inlining) n)
                                 (the (listof c-inline acyclic) nil)
-                                (p-inline-named (get c-inlines) n k (get c-genv)))))
+                                (p-inline-named (c-inlines-of n) n k (get c-genv)))))
                   (begin
                     (p-note-call a b (product (1 inl) (2 spl)))
                     (if (or (null? inl) (>= (c-plan-child (get c-plan-now) n k) 0))
@@ -581,6 +596,9 @@
 (define c-spec-copy-find (with compile-plan-module c-spec-copy-find))
 (define c-inline-limit (with compile-plan-module c-inline-limit))
 (define c-inlines (with compile-plan-module c-inlines))
+(define c-inlines-of (with compile-plan-module c-inlines-of))
+(define c-note-inline! (with compile-plan-module c-note-inline!))
+(define c-forget-inline! (with compile-plan-module c-forget-inline!))
 (define c-unrolls (with compile-plan-module c-unrolls))
 (define c-unrolls-of (with compile-plan-module c-unrolls-of))
 (define c-inlining (with compile-plan-module c-inlining))

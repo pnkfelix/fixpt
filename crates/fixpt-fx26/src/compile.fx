@@ -142,6 +142,19 @@
 ;; And each module reshaped (`k-reshapes`), as `c-set-facts!` took them.
 (define c-reshapes (ref k-reshape-list @k) (new nil))
 (define c-withs (ref k-with-list @k) (new nil))
+;; The same, by where each starts: a program's `with`s are many (a file's
+;; re-exports), and each is asked for once (`TODO.md` §43).
+(define-type c-with-table (table int k-with-list @k))
+(define c-with-index (ref c-with-table @k) (new (make-table c-int-hash c-int=?)))
+(define c-index-withs! (subr c-emits (k-with-list) unit)
+  (lambda (ws)
+    (if (null? ws)
+        #u
+        (let ((a (extract (car ws) 1)))
+          (begin (c-index-withs! (cdr ws))
+                 (table-set! (get c-with-index) a
+                             (the k-with-list
+                               (cons (car ws) (table-ref (get c-with-index) a nil)))))))))
 (define-type c-with-names (listof syms @k))
 (define c-with-in
   (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-with-list int int) c-with-names)
@@ -153,7 +166,7 @@
 ;; The values' names of the `with` from `a` to `b`, in a list of one; none
 ;; if the checker did not see it.
 (define c-with-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) c-with-names)
-  (lambda (a b) (c-with-in (get c-withs) a b)))
+  (lambda (a b) (c-with-in (table-ref (get c-with-index) a nil) a b)))
 ;; Their positions in the module, likewise.
 (define c-with-places-in
   (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-with-list int int) (listof k-ids @k))
@@ -164,7 +177,7 @@
           (else (c-with-places-in (cdr ws) a b)))))
 (define c-with-places-at
   (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) (listof k-ids @k))
-  (lambda (a b) (c-with-places-in (get c-withs) a b)))
+  (lambda (a b) (c-with-places-in (table-ref (get c-with-index) a nil) a b)))
 ;; The positions of the values a module reshaped from `a` to `b` keeps, in
 ;; a list of one; none if it is not reshaped.
 (define c-reshape-in
@@ -512,6 +525,8 @@
       (set c-lift-count 0)
       (set c-lifted (make-table c-int-hash c-int=?))
       (set c-withs (get k-with-vals))
+      (set c-with-index (make-table c-int-hash c-int=?))
+      (c-index-withs! (get k-with-vals))
       (set c-reshapes (get k-reshapes))
       (c-fill-facts fs))))
 

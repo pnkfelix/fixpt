@@ -200,7 +200,7 @@
             ;; Not one that stays cellular, which would make its callers so.
             ((c-mentions? body 'stay-cellular) #u)
             ((and (>= (c-inline-room body c-inline-limit) 0) (not (c-mentions? body n)))
-             (set c-inlines (the c-inlinables (cons (c-inline-of n ps body) (get c-inlines)))))
+             (c-note-inline! (c-inline-of n ps body)))
             ((>= (c-inline-room body c-special-limit) 0)
              (let ((found (c-first-call-only ps body n 0 (c-count-params ps))))
                (if (null? found)
@@ -241,7 +241,7 @@
                     #u
                     (tagcase (car l)
                       (e-lambda (ps body la lb)
-                        (begin (set c-inlines (c-drop-inline (get c-inlines) n))
+                        (begin (c-forget-inline! n)
                                (table-set! (get c-unrolls) n nil)
                                (set c-specials (c-drop-special (get c-specials) n))
                                (set c-last-word w)
@@ -315,7 +315,7 @@
 ;; else a new one, which later uses of `n` refer to.
 (define c-push-global (subr c-emits (symbol) wglobal)
   (lambda (n)
-    (let ((kept (begin (set c-inlines (c-drop-inline (get c-inlines) n))
+    (let ((kept (begin (c-forget-inline! n)
                        (table-set! (get c-unrolls) n nil)
                        (set c-specials (c-drop-special (get c-specials) n))
                        (c-kept (get c-reuse) n))))
@@ -478,7 +478,7 @@
 ;; body, its parameters the arguments, in the globals it saw.
 (define c-const-call (subr (maxeff compiles spin) (symbol rconsts int) rconsts)
   (lambda (f vs depth)
-    (let ((i (r-inline-named (get c-inlines) f (c-length-consts vs) (get c-genv))))
+    (let ((i (r-inline-named (c-inlines-of f) f (c-length-consts vs) (get c-genv))))
       (if (or (null? i) (>= depth 16))
           nil
           (let* ((outer (get c-genv))
@@ -635,7 +635,7 @@
                       (not (c-mentions? body f)))
                  (let ((alias (product (1 n) (2 (extract it 2)) (3 (extract it 3)) (4 body)
                                        (5 (extract it 5)))))
-                   (set c-inlines (the c-inlinables (cons alias (get c-inlines)))))
+                   (c-note-inline! alias))
                  #u)))
           (else (c-alias-inline! n f (cdr ms))))))
 ;; `(define n (with m f))`, `m` a top-level module whose member `f` is a
