@@ -1073,3 +1073,68 @@ it is searched, counted on the native path (`docs/performance.md`; not
 on an interpreter's counts); then a table where both grow with the
 program, and nothing where the list stays short (a module's members, a
 lambda's parameters).
+
+## 44. One simplifier: propagation, folding and reduction together (the user's, 2026-10-07)
+
+"We probably need to combine these things together. Eg arith eval yields
+more constants which can then be propagated, and so on." Constant
+propagation, arithmetic folding and reduction (`x*1`, `x+0`, constants
+combined across operations), and branch reduction (a known test; a test
+repeated on a path; `tagcase` on a known variant) each make work for the
+others, and inlining makes more for all of them; run as separate passes,
+each misses what the next would have shown it. The classic results:
+Wegman and Zadeck, "Constant Propagation with Conditional Branches"
+(TOPLAS 13(2), 1991), sparse conditional constant propagation, which
+finds more constants than propagation and dead-branch removal apart;
+Click and Cooper, "Combining Analyses, Combining Optimizations" (TOPLAS
+17(2), 1995), the general case; Twobit's pass 2 (Clinger), an iterated
+simplifier of inlining, folding, copy propagation and dead code removal.
+
+The shape: one simplifier per lambda body, in the middle phase (where
+the plan, inlining and specialization are decided for both back ends),
+before register code. An environment maps each name to a constant, a
+copy of another name, or unknown; each step does what applies (fold an
+operation, decide a test, drop an unused binding, inline a small known
+call, reduce an identity), and it repeats until nothing changes, within a
+bound, its growth kept as the inline limits keep it. Inside an arm the
+test is known (`x` is 0 in `(if (= x 0) …)`'s then-arm). It works under
+a fast version's assumptions, so the globals and module members folded
+behind guards (§42) join in; in a plain version it stops at a call's
+guard. Only what is pure is moved or dropped (the effect summaries), and
+integers are folded only where neither compiler can overflow. Both
+compilers, agreeing.
+
+First, a baseline (`fixpt regcode-survey`): what the register code made
+today still leaves to fold, decide or reduce, in the benchmarks and the
+front end, so the simplifier can be judged against it.
+
+The baseline (2026-10-07, `fixpt regcode-survey`, static counts over
+register code, the Rust compiler's, which FX-26's matches; what is known
+is forgotten where branches meet, so an under-count of what a simplifier
+that merges paths finds). The benchmarks: nothing left, in every
+category. The front end (2904 words, 439 786 cells), counts with those
+in loops in parentheses:
+
+| finding                                  | as made  | literals propagated |
+| ---------------------------------------- | -------- | ------------------- |
+| operation on constants                   | 2 (0)    | 59 (0)              |
+| branch on a constant                     | 0        | 30 (0)              |
+| identity (`+ 0`, `* 1`)                  | 0        | 0                   |
+| test repeated on a path                  | 1 (0)    | 1 (0)               |
+| pure operation repeated                  | 86 (52)  | 90 (52)             |
+| global load of a literal                 | 996 (80) | —                   |
+| global module's literal member read      | 263 (10) | —                   |
+
+"Literals propagated" (`--propagate`): the globals and module members
+holding literals taken as known everywhere, not only in fast versions,
+and `+ - * < = eq` on constants worked out, so what they make is known
+in turn. So in the code as written, the cascade is small: 59 operations
+and 30 branches more, none in a loop. What is left in loops is `car`
+taken twice (63 of the 86; list searches testing `(car (car xs))` and
+returning `(cdr (car xs))`), which common subexpressions do not merge,
+a pair's field not being known not to change; and 80 loads of literal
+globals. A planted case (`(if (< x k) (if (< x k) (+ x 0) 2) (* k 2))`)
+shows what is missing today: `(+ x 0)` kept, the second test kept, and
+`(* 3 2)` not folded even in the fast version that knows `k` (`*` is a
+primitive the folding does not know). What the survey cannot see is what
+inlining would expose once these are done; it counts what is there.

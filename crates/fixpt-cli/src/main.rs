@@ -7,6 +7,7 @@
 //! has no external dependencies at all.
 
 mod bench;
+mod survey;
 mod help;
 mod fx26;
 mod fx87;
@@ -136,6 +137,10 @@ fn run(args: &[String]) -> i32 {
     // `fixpt bench` takes options of its own.
     if args.first().is_some_and(|a| a == "bench") {
         return bench::command(&args[1..]);
+    }
+    // `fixpt regcode-survey`: what register code leaves to a simplifier.
+    if args.first().is_some_and(|a| a == "regcode-survey") {
+        return survey::command(&args[1..]);
     }
     let (flags, mut rest) = split_flags(args);
     // `--eval INPUT` and its kin are the commands `eval INPUT`, and so on.

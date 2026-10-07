@@ -227,7 +227,7 @@ fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<S
     Ok(out)
 }
 
-fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
+pub(crate) fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
     let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
