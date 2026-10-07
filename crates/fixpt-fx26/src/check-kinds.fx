@@ -10,6 +10,9 @@
 
 ;;; ------------------------------------------------------------ description functions
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-kinds-module (module
 ;; Whether description `d` is of kind `k`, as a binder of that kind takes; a
 ;; function whose kind is not known yet, a `select`, is let through.
 (define k-desc-of-kind? (subr (maxeff kstate spin) (k-desc int) bool)
@@ -41,4 +44,7 @@
           -1
           (let* ((fresh (k-fresh-binders ps))
                  (body (k-ty-new (ty-named g (k-binders-as-descs fresh)))))
-            (k-lam fresh (dt body)))))))
+            (k-lam fresh (dt body)))))))))
+
+(define k-desc-of-kind? (with check-kinds-module k-desc-of-kind?))
+(define k-generative-fun (with check-kinds-module k-generative-fun))
