@@ -1505,3 +1505,129 @@ infer the precise category of the lattice (`docs/research/shapes.md`):
   unions (§46): `flatomic ⊂ atomic`, `flatomic ⊂ flat`.
 - Both parsers, both checkers; the compilers make the datum once, as a
   frozen constant, and fold `car`/`cdr` through it as §44 does.
+
+## 52. Deep recursion in native code (the user's, 2026-10-07)
+
+A Scheme program recurses as deep as its heap allows; FX-26's native
+convention does not. Measured with `(define* down … (+ 1 (down (- n 1))))`:
+
+| machine                                 | depth 5M | depth 20M      | 300M         |
+| --------------------------------------- | -------- | -------------- | ------------ |
+| cellular (rust, native, registers)      | ok       | ok             | ok, 16 GB    |
+| native convention (`DirectMachine`)     | ok       | stack overflow | —            |
+
+- The native convention runs on one fixed stack of 2^26 words
+  (`STACK_WORDS`, `fixpt-native/src/direct.rs`); past it, a trap ends the
+  run. A non-tail `map` over a list of some millions overflows, where
+  Larceny would not. A call-out's `call_native` runs on the same stack,
+  below the frames it was called from, so nesting shares the limit.
+- The cellular machines grow their stack as a `Vec`: no overflow, but
+  memory the heap does not count or limit, and a capture still copies all
+  of it (PLAN.md queue item 7).
+- Done when: `down` at 300M runs natively, bounded by the heap, not by a
+  constant; and a capture no longer copies the whole stack. A test at a
+  depth past today's limit, within the suite's time budget.
+
+Two designs, to choose between with the user:
+
+1. **A stack cache, as Larceny's** (Hieb, Dybvig and Bruggeman, PLDI 1990;
+   Clinger, Hartheimer and Ost; Larceny's `src/Rts/Sys/stack.c`, read
+   2026-10-07). The stack lives at the high end of the nursery, growing
+   down toward the allocation pointer, so the stack pointer is the heap's
+   limit (one check, one register, for both). `stk_flush` turns frames
+   into heap objects *in place*: the size word a vector header, the
+   return address an offset from the code of the procedure saved in the
+   frame, the dynamic link a tagged pointer to the next frame. A minor
+   collection then copies the live ones out; every collection flushes
+   first, so the collector never walks a stack. Underflow
+   (`stk_restore_frame`) copies one frame back at a time.
+   - Its cost (the user's, from a parallel look at Larceny's overheads):
+     each return into a flushed frame is an underflow trap and a copy back,
+     after the collector copied it out. A deep recursion meeting frequent
+     minor collections pays both, again after each collection.
+2. **Frames that never move: stack segments collected by mark-sweep**
+   (the user's, 2026-10-07), in an area of their own, within the copying
+   collection, as the code area is (`docs/object-model.md`, "A collected
+   code area").
+   - Overflow allocates a new segment and links it (Chez's linked
+     segments; copy a few frames over, Bruggeman, Waddell and Dybvig, PLDI
+     1996, against a hot split). Returning off a segment's end switches
+     `sp` back: no copy.
+   - A capture marks the segment's frames shared and continues in a new
+     one; a continuation is a heap object pointing at its frames. One-shot
+     resumption (async's `suspend`) runs them in place. Multi-shot
+     (`cwcc`) must still copy a frame before running it again, since
+     running it writes its slots: Larceny's copy back, made only for
+     frames resumed a second time.
+   - Frames are traced where they are (by §53's layout, or their masks);
+     captured segments are reached through their continuations, and the
+     sweep frees the rest.
+   - Its cost: every minor collection scans the whole live stack, as
+     today, so a deep recursion makes each pay its depth. The known answer
+     is a watermark, frames below it unchanged since the last collection
+     and not rescanned, kept by a return barrier (Cheng, Harper and Lee,
+     "Generational stack collection and profile-driven pretenuring", PLDI
+     1998; to read).
+
+Either way:
+- The overflow check is at a callee's entry, before its frame exists, and
+  every caller stored its mask before calling: overflow adds no stack map,
+  only the callee's argument registers rooted while it is handled, as a
+  call-out's are.
+- What it costs others: handling overflow allocates, so it may collect.
+  Every frame-making entry becomes a possible collection point. "Never
+  collects" (an inference over FX procedures, discussed with
+  `never_collects`) would hold only for leaves, or for call trees of known
+  bounded depth whose stack check is hoisted to their root.
+- Questions: where a call-out's `call_native` nests (a flush or a segment
+  switch must stop at the boundary of the run that called out); whether
+  the cellular machines' `Vec` stacks get the same.
+- First: read the rest of Larceny's (`~/Dev/LangPlay/larceny`, read-only):
+  `stk_restore_frame`, the ARM millicode's overflow and underflow paths
+  (`src/Rts/Fence/arm-millicode.sx`), and how a callback into Scheme
+  nests; read Cheng, Harper and Lee; then measure, on `down` and on a
+  capture-heavy benchmark, what each design's costs would be, before
+  deciding.
+
+## 53. Native frames laid out as bloblets (the user's, 2026-10-07)
+
+Make a native frame trivially a bloblet (`docs/object-model.md`): the
+compiler lays out each procedure's frame so that its traced words are
+contiguous fields and its raw words a contiguous suffix. Worth having for
+either of §52's designs: a stack cache's flush rewrites almost nothing,
+and mark-sweep segments' frames are traced, and pointed at by
+continuations, as ordinary bloblets.
+
+```text
+sp → [header F,B] [link] [code] [slot 0 … slot F-4] [trailer] | [ret] [mask] [raw slots]
+      constant     tagged fields, contiguous                   | suffix: raw, contiguous
+```
+
+- The compiler numbers a procedure's slots by kind: every traced slot
+  among the fields, every raw one (unboxed `i64`/`f64`, if native code
+  keeps them in slots across calls; to check first) in the suffix. So `F`
+  and `B` are known when compiling, and the header is a constant the
+  prologue stores once: one store more than today.
+- Slots are addressed from `sp` (the header), at positive offsets, as
+  arm64's scaled `ldr`/`str` reach (up to 4095 words); a bloblet pointer
+  to the frame is `sp` + 8(F+1), tagged, a constant offset.
+- The link is a field: a tagged bloblet pointer to the caller's frame.
+  A tagged pointer is an index into the heap (`layout.rs`), so this needs
+  the stack inside the heap's range (the nursery's high end, §52's first
+  design, or a segment area, its second). The code bloblet is a field
+  too, which keeps the code alive and gives the return address its base.
+- Liveness varies by call site, so the mask stays, in the suffix, stored
+  before each call as now. Until it is flushed or traced, a frame need not
+  be a valid bloblet.
+- Making one valid, per frame: clear the slots the mask says are dead (to
+  a fixnum: dead slots keep nothing alive, `a_dead_slot_keeps_nothing_alive`,
+  and no unwritten word can carry the header tag, invariant 4), write the
+  trailer, and turn the return address into an offset from the code
+  field. No copying, no relinking. Larceny traces every slot, since its
+  slots always hold values; clearing dead ones is ours to add.
+- Steps: (1) check where raw values live across calls; (2) the layout in
+  the native compiler, the collector's frame walk and the continuation
+  copy reading it, with today's fixed stack (no change in behaviour, the
+  frame one word larger: measure the benchmarks); (3) "make valid" as a
+  routine, tested by checking frames as bloblets under `gc-stress`; then
+  §52 uses it.
