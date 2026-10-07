@@ -1148,3 +1148,26 @@ difference: the second `car` reads a word loaded a few instructions
 before, from L1, beside the comparison. Merging it would not need the
 pair immutable (nothing between the two reads writes anything, which the
 effect summaries say), but it is not worth building for time.
+
+List literals propagated (the user's idea, 2026-10-07): where a list is
+known, `car`, `cdr` and `null?` fold, and a recursion over it can be
+unrolled. Where it occurs: the front end, nowhere (3 `(list <literal>
+…)`); the benchmark ports, 82 in 17 files, nearly all built with computed
+elements (`dynamic.fx`'s `(list 'quote syntax-arg)`), the exception
+`parsing.fx`: eight global sets of token kinds, `(define k-list syms
+(list 'lparen 'quote …))`, each tested by `(one-of? t k-list)`, a
+recursion over the list. Unrolled by hand into `(or (symbol=? t 'lparen)
+…)` at its 10 sites, at 100 iterations, best of 5: register code 92.2 →
+81.7 ms, and 91.9 → 81.6 ms in the other order; compiled words 834 → 787
+ms. About 11% of the benchmark.
+
+What it takes: the list must be immutable by its type. `syms` is
+`(listof symbol @heap)`, which a `set-car!` anywhere may write; a list
+built in order may be `acyclic` with no `letfreeze` (`docs/fx26.md`,
+"Finite data"), so the port would say `(listof symbol acyclic)`. Then:
+a list of constants in `acyclic` or `const` is constant data, made once
+while compiling as sums and products are; `car`, `cdr`, `null?` of it
+fold (reading frozen heap data is pure); and a call of a small recursive
+procedure with a constant list argument is unrolled, inlining it once
+for each element, bounded by the list's length and a size limit: the
+simplifier above, its first customer.
