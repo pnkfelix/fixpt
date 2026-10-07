@@ -446,6 +446,16 @@ fn flat_at(rt: &mut Runtime, a: Value, i: Value) -> Outcome<usize> {
 pub fn never_collects(name: &str) -> bool {
     matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64" | "%fx26-flatarray-ref" | "%fx26-flatarray-length")
         || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
+        // Characters and strings looked at, never made (strings compared in
+        // place, `Heap::string_cmp`): each of a fixed arity, as `pure_call`
+        // passes by the primitive's.
+        || matches!(
+            name,
+            "char->integer" | "integer->char" | "string-length" | "string-ref" | "%string-hash" | "%symbol-hash"
+                | "%fx26-string-compare" | "%fx26-symbol-compare"
+                | "%fx26-string<?" | "%fx26-string<=?" | "%fx26-string>?" | "%fx26-string>=?"
+                | "%fx26-char<?" | "%fx26-char<=?" | "%fx26-char>?" | "%fx26-char>=?"
+        )
         || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
@@ -1715,13 +1725,8 @@ prims! {
         Ok(if v.is_fixnum() { v } else { Value::fixnum(0) })
     });
     "%string-hash", 1, Some(1), simple!(|rt, a| {
-        let s = get_string(rt, a[0])?;
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for c in s.chars() {
-            h ^= c as u64;
-            h = h.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-        Ok(Value::fixnum((h >> 4) as i64))
+        if !rt.heap.is_a(a[0], ObjType::String) { return rt.type_error("a string", a[0]); }
+        Ok(Value::fixnum((rt.heap.string_fnv(a[0]) >> 4) as i64))
     });
     // FX-26's immutable data: a bloblet of kind `sum` or `product` with these
     // fields, frozen, fields and suffix, as it is made.

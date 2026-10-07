@@ -80,20 +80,19 @@
       (else y nil))))
 ;; Each `(select $k x)` in `t`, as first met, onto `out`.
 (define-rec
-  (k-param-sels-from (subr (maxeff kstate spin) (int (ref k-ids @t) (ref k-params-given @t)) unit)
+  (k-param-sels-from (subr (maxeff kstate spin) (int k-seen (ref k-params-given @t)) unit)
     (lambda (t seen out)
       (let ((t (k-resolve t)))
-        (if (k-has-id? (get seen) t)
+        (if (k-seen? seen t)
             #u
             (begin
-              (set seen (cons t (get seen)))
               (tagcase (k-get t)
                 (ty-param (k x)
                   (if (>= (k-param-in (get out) k x -1) 0)
                       #u
                       (set out (cons (product (1 k) (2 x) (3 t)) (get out)))))
                 (else y (k-param-sels-each (k-ty-kids t) seen out))))))))
-  (k-param-sels-each (subr (maxeff kstate spin) (k-ids (ref k-ids @t) (ref k-params-given @t)) unit)
+  (k-param-sels-each (subr (maxeff kstate spin) (k-ids k-seen (ref k-params-given @t)) unit)
     (lambda (ts seen out)
       (if (null? ts)
           #u
@@ -146,14 +145,14 @@
         c
         (let* ((ps (extract (car c) 2)) (r (extract (car c) 3))
                (out (the (ref k-params-given @t) (new nil)))
-               (seen (the (ref k-ids @t) (new nil)))
+               (seen (k-new-seen))
                (walked (begin (k-param-sels-each ps seen out) (k-param-sels-from r seen out))))
           (if (null? (get out))
               c
               (let* ((given (k-args-given (k-given-reversed (get out) nil) args a b))
                      (ps2 (k-instantiate-all ps given))
                      (r2 (k-instantiate-params r given)))
-                (begin (k-check-apps-each (k-ids-then ps2 r2) (the (ref k-ids @t) (new nil)) a b)
+                (begin (k-check-apps-each (k-ids-then ps2 r2) (k-new-seen) a b)
                        (cons (product (1 (extract (car c) 1)) (2 ps2) (3 r2)) nil))))))))))
 
 (define k-instantiate-params (with check-dependent-module k-instantiate-params))

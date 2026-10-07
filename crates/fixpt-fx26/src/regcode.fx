@@ -508,11 +508,14 @@
         (or (string=? name "%fx26-eqtable-count") (string=? name "%fx26-eqtable-delete!")))))
 (define r-never-collects? (subr (read (globals r-eqtable-quick? r-fixed-width-op?)) (string) bool)
   (lambda (name)
-    (let ((is (lambda ((s string)) (string=? name s))))
-      (or (or (is "%fx26-mul") (or (is "%fx26-quotient") (is "modulo")))
-          (or (or (is "%fx26-string->f64")
-                  (or (is "%fx26-flatarray-ref") (is "%fx26-flatarray-length")))
-              (or (r-eqtable-quick? name) (r-fixed-width-op? name)))))))
+    (case name
+      (("%fx26-mul" "%fx26-quotient" "modulo" "%fx26-string->f64" "%fx26-flatarray-ref"
+        "%fx26-flatarray-length" "char->integer" "integer->char" "string-length" "string-ref"
+        "%string-hash" "%symbol-hash" "%fx26-string-compare" "%fx26-symbol-compare"
+        "%fx26-string<?" "%fx26-string<=?" "%fx26-string>?" "%fx26-string>=?"
+        "%fx26-char<?" "%fx26-char<=?" "%fx26-char>?" "%fx26-char>=?")
+       #t)
+      (else (or (r-eqtable-quick? name) (r-fixed-width-op? name))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never
 ;; collects and takes one or two.
 (define r-prim-std (subr (read @globals) (string int int) rstd)

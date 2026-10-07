@@ -359,22 +359,21 @@
 ;; Each description function applied in `t` given what it takes, at
 ;; `a`..`b`: checked where a `select` has just said what the function is.
 (define-rec
-  (k-check-apps-from (subr (maxeff checks spin) (int (ref k-ids @t) int int) unit)
+  (k-check-apps-from (subr (maxeff checks spin) (int k-seen int int) unit)
     (lambda (t seen a b)
       (let ((t (k-resolve t)))
-        (if (k-has-id? (get seen) t)
+        (if (k-seen? seen t)
             #u
             (begin
-              (set seen (cons t (get seen)))
               (tagcase (k-get t) (ty-app (f ds) (k-check-app f ds a b)) (else y #u))
               (k-check-apps-each (k-ty-kids t) seen a b))))))
-  (k-check-apps-each (subr (maxeff checks spin) (k-ids (ref k-ids @t) int int) unit)
+  (k-check-apps-each (subr (maxeff checks spin) (k-ids k-seen int int) unit)
     (lambda (ts seen a b)
       (if (null? ts)
           #u
           (begin (k-check-apps-from (car ts) seen a b) (k-check-apps-each (cdr ts) seen a b))))))
 (define k-check-apps (subr (maxeff checks spin) (int int int) unit)
-  (lambda (t a b) (k-check-apps-from t (the (ref k-ids @t) (new nil)) a b)))
+  (lambda (t a b) (k-check-apps-from t (k-new-seen) a b)))
 ;; Whether type variable `v` is somewhere in `t`, or in `ts`; `seen`, the
 ;; nodes walked.
 (define-rec
@@ -585,13 +584,12 @@
                (k-esels-descs (cdr ds) out)))))
 ;; Each effect `(select m e)` in `t`, onto `out`; the nodes walked, `seen`.
 (define-rec
-  (k-esels-from (subr (maxeff kstate spin) (int (ref k-ids @t) (ref k-effect-sels @t)) unit)
+  (k-esels-from (subr (maxeff kstate spin) (int k-seen (ref k-effect-sels @t)) unit)
     (lambda (t seen out)
       (let ((t (k-resolve t)))
-        (if (k-has-id? (get seen) t)
+        (if (k-seen? seen t)
             #u
             (begin
-              (set seen (cons t (get seen)))
               (tagcase (k-get t)
                 (ty-subr (e ps r cv) (k-esels-note e out))
                 (ty-tag (a h e r) (k-esels-note e out))
@@ -601,7 +599,7 @@
                 (ty-named (g ds) (k-esels-descs ds out))
                 (else y #u))
               (k-esels-each (k-ty-kids t) seen out))))))
-  (k-esels-each (subr (maxeff kstate spin) (k-ids (ref k-ids @t) (ref k-effect-sels @t)) unit)
+  (k-esels-each (subr (maxeff kstate spin) (k-ids k-seen (ref k-effect-sels @t)) unit)
     (lambda (ts seen out)
       (if (null? ts)
           #u
@@ -612,7 +610,7 @@
     (if (null? (get k-effect-selects))
         nil
         (let ((out (the (ref k-effect-sels @t) (new nil))))
-          (begin (k-esels-from t (the (ref k-ids @t) (new nil)) out) (reverse (get out)))))))
+          (begin (k-esels-from t (k-new-seen) out) (reverse (get out)))))))
 ;; The effect a module's description `d` is, in a list; none if not one.
 (define k-desc-effect (subr (maxeff kreads spin) (int) (listof k-eff acyclic))
   (lambda (d)

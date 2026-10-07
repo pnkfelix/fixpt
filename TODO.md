@@ -1451,3 +1451,23 @@ would leave. One table for both, generated from one place, keeps them
 from drifting; a test that re-indents every front-end file and finds
 nothing to change keeps the files to it. It never rewraps a line: a line
 past 100 columns after re-indenting is reported, for extraction.
+
+## 50. Sets for FX-26 code, imperative and persistent (the user's, 2026-10-07)
+
+The front end keeps sets as lists and searches them (`k-has-id?` over a
+walk's `seen`, `k-kseen-has?`, `k-sc-has?`, `k-named-has?`): §43's survey
+and the 2026-10-07 profile found them quadratic and hot, and their fixes
+each built a set on `table.fx` by hand (`k-seen`, the knot search's table
+by type, the size-change calls by members). A library, beside `table.fx`,
+with the hash or order passed as tables' are (dictionary passing):
+- **Imperative**: `(set K R)`, `set-add!`, `set-has?`, `set-add-new!`
+  (has it, and if not adds it: every walk's "seen"), `set-count`, a fold.
+  Small sets cost as much as a table: start as a short list and become a
+  table past a size, since most walks meet a handful of types.
+- **Persistent**: Clojure's hash array mapped trie for unordered sets, and
+  an ordered one (a balanced tree, or the sorted lists the checker now
+  merges, `k-merge`) where order matters: effects and regions kept sorted
+  (`k-atom-cmp`) so that equal sets compare equal. Shared structure, `acyclic`
+  so it can be frozen into a place.
+- Then: the hand-made ones above replaced, and §43's remaining searches
+  (`c-find`, `r-where`, `c-member?`) looked at again.

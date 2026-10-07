@@ -717,6 +717,21 @@ impl Heap {
         o
     }
 
+    /// FNV-1a of string `o`'s code points, each as a `u64`, in the heap: the
+    /// runtime's `%string-hash` before its shift, with nothing copied.
+    pub fn string_fnv(&self, o: Value) -> u64 {
+        let base = self.payload_base(o);
+        let n = self.word(base) as usize;
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for i in 0..n {
+            let w = self.word(base + 1 + i / 2);
+            let c = if i.is_multiple_of(2) { w & 0xffff_ffff } else { w >> 32 };
+            h ^= c;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h
+    }
+
     /// String `o`'s code points onto `out`, its body found once.
     pub fn string_points_into(&self, o: Value, out: &mut Vec<u32>) {
         let base = self.payload_base(o);

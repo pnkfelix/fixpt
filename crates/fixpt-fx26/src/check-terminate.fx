@@ -607,11 +607,30 @@
          (k-sc-same? (extract c 3) (extract d 3)))))
 (define k-sc-has? (subr kreads (k-calls k-call) bool)
   (lambda (cs c) (and (not (null? cs)) (or (k-sc-call=? (car cs) c) (k-sc-has? (cdr cs) c)))))
+;; A call's members, from and to, as one key.
+(define k-sc-key (subr (read @globals) (k-call) int)
+  (lambda (c) (+ (* (extract c 1) 65536) (extract c 2))))
+;; Whether `c` is among the calls in `seen` (by `k-sc-key`); if not, it is now.
+(define k-sc-seen? (subr kstate ((table int k-calls @t) k-call) bool)
+  (lambda (seen c)
+    (let ((here (table-ref seen (k-sc-key c) nil)))
+      (if (k-sc-has? here c) #t (begin (table-set! seen (k-sc-key c) (cons c here)) #f)))))
+(define k-sc-seen-all (subr kstate ((table int k-calls @t) k-calls) (table int k-calls @t))
+  (lambda (seen cs)
+    (if (null? cs) seen (begin (k-sc-seen? seen (car cs)) (k-sc-seen-all seen (cdr cs))))))
+;; `cs` without repeats, onto `out` in reverse: each call compared only with
+;; those of the same members (by `seen`, from and to), not every one kept.
+(define k-sc-dedup-in (subr kstate (k-calls k-calls (table int k-calls @t)) k-calls)
+  (lambda (cs out seen)
+    (if (null? cs)
+        out
+        (let* ((c (car cs)) (key (k-sc-key c)) (here (table-ref seen key nil)))
+          (if (k-sc-has? here c)
+              (k-sc-dedup-in (cdr cs) out seen)
+              (begin (table-set! seen key (cons c here))
+                     (k-sc-dedup-in (cdr cs) (cons c out) seen)))))))
 (define k-sc-dedup (subr kstate (k-calls k-calls) k-calls)
-  (lambda (cs out)
-    (cond ((null? cs) out)
-          ((k-sc-has? out (car cs)) (k-sc-dedup (cdr cs) out))
-          (else (k-sc-dedup (cdr cs) (cons (car cs) out))))))
+  (lambda (cs out) (k-sc-dedup-in cs out (make-table k-id-hash k-id=?))))
 ;; Whether `e` is a strict edge from a slot to itself.
 (define k-sc-strict-self? (subr (read @globals) (k-edge) bool)
   (lambda (e) (and (= (extract e 1) (extract e 2)) (extract e 3))))
@@ -630,22 +649,25 @@
 ;; A graph's closure may grow; beyond this many, the group does not pass.
 (define k-sc-most int 4000)
 (define-rec
-  (k-sc-close (subr kstate (k-calls k-calls int) bool)
-    (lambda (todo all n)
+  ;; `seen`: `all`, by `k-sc-key`, for whether a call is new.
+  (k-sc-close (subr kstate (k-calls k-calls int (table int k-calls @t)) bool)
+    (lambda (todo all n seen)
       (if (null? todo)
           (k-sc-ok? all)
           (let ((c (car todo)) (calls (get k-sc-calls)))
-            (k-sc-extend (extract c 1) (extract c 2) (extract c 3) calls (cdr todo) all n)))))
-  (k-sc-extend (subr kstate (int int k-graph k-calls k-calls k-calls int) bool)
-    (lambda (f g a calls todo all n)
-      (cond ((null? calls) (k-sc-close todo all n))
-            ((not (= (extract (car calls) 1) g)) (k-sc-extend f g a (cdr calls) todo all n))
+            (k-sc-extend (extract c 1) (extract c 2) (extract c 3) calls (cdr todo) all n seen)))))
+  (k-sc-extend
+    (subr kstate (int int k-graph k-calls k-calls k-calls int (table int k-calls @t)) bool)
+    (lambda (f g a calls todo all n seen)
+      (cond ((null? calls) (k-sc-close todo all n seen))
+            ((not (= (extract (car calls) 1) g)) (k-sc-extend f g a (cdr calls) todo all n seen))
             (else
              (let* ((rest (cdr calls)) (cg (k-sc-compose a (extract (car calls) 3) nil))
                     (h (extract (car calls) 2)) (new (product (1 f) (2 h) (3 cg))))
-               (cond ((k-sc-has? all new) (k-sc-extend f g a rest todo all n))
+               (cond ((k-sc-seen? seen new) (k-sc-extend f g a rest todo all n seen))
                      ((>= n k-sc-most) (begin (set k-sc-too-many #t) #f))
-                     (else (k-sc-extend f g a rest (cons new todo) (cons new all) (+ n 1))))))))))
+                     (else
+                      (k-sc-extend f g a rest (cons new todo) (cons new all) (+ n 1) seen)))))))))
 
 ;; A binding's lambda, under `plambda`, `the` and `rlambda`.
 (define k-sc-lambda-of (subr (read @globals) (kx) kx)
@@ -784,7 +806,8 @@
 (define k-sc-calls-why (subr kstate () string)
   (lambda ()
     (let ((all (k-sc-dedup (get k-sc-calls) nil)))
-      (cond ((k-sc-close all all (k-length all)) "")
+      (cond ((k-sc-close all all (k-length all) (k-sc-seen-all (make-table k-id-hash k-id=?) all))
+             "")
             ((get k-sc-too-many) "the calls combine in too many ways to follow")
             (else (k-sc-shrinks-why))))))
 ;; Whether every run of the group `bs` ends, so that calls within it need

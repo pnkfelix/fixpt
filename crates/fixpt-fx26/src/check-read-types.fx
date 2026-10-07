@@ -879,17 +879,16 @@
       (ty-nlist (e z r) (the k-ids (cons e nil)))
       (ty-module (abs ds vs) (k-parts-onto ds (k-parts-onto vs nil)))
       (else y nil))))
-(define k-selects-from (subr (maxeff kstate spin) (int (ref k-ids @t) (ref k-selects @t)) unit)
+(define k-selects-from (subr (maxeff kstate spin) (int k-seen (ref k-selects @t)) unit)
   (lambda (t seen out)
     (let ((t (k-resolve t)))
-      (if (k-has-id? (get seen) t)
+      (if (k-seen? seen t)
           #u
           (begin
-            (set seen (cons t (get seen)))
             (tagcase (k-get t)
               (ty-select (m n) (set out (cons (product (1 m) (2 n) (3 t)) (get out))))
               (else y (k-selects-each (k-ty-kids t) seen out))))))))
-(define k-selects-each (subr (maxeff kstate spin) (k-ids (ref k-ids @t) (ref k-selects @t)) unit)
+(define k-selects-each (subr (maxeff kstate spin) (k-ids k-seen (ref k-selects @t)) unit)
   (lambda (ts seen out)
     (if (null? ts)
         #u
@@ -902,7 +901,7 @@
 (define k-selects-in (subr (maxeff kstate spin) (int) k-selects)
   (lambda (t)
     (let ((out (the (ref k-selects @t) (new nil))))
-      (begin (k-selects-from t (the (ref k-ids @t) (new nil)) out)
+      (begin (k-selects-from t (k-new-seen) out)
              (k-selects-reversed (get out) nil)))))
 ;; A procedure type's parameter written `(name type)`, where `name` names no
 ;; type or type form: its name, in a list of one; none if it is not one.
