@@ -26,7 +26,7 @@
         'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
         'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module
         'define-datatype 'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte
-        'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=>))
+        'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=> 'case))
 (define k-no-name symbol '||)
 (define k-effects (subr (maxeff checks spin) (k-syns) k-eff)
   (lambda (xs)
