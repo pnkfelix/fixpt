@@ -42,7 +42,7 @@
 
 use crate::arm64::*;
 use crate::codespace::{CodeSpace, Offset};
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, ROUTINES, WORD_CELL0, WORD_TWIN};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_FIELDS, GLOBAL_WRITES, ROUTINES, WORD_CELL0, WORD_TWIN};
 use fixpt_heap::layout::regcode::OPS;
 use fixpt_heap::{Heap, Value};
 use std::collections::HashMap;
@@ -961,9 +961,10 @@ impl Compiling<'_> {
     /// runs, as Larceny's code reads its globals, so that a later
     /// definition is seen; but a cellular closure (a procedure the cellular
     /// machine made), which native code cannot call, is compiled and bound
-    /// now, as a native closure of its procedure: used while the cell still
-    /// holds that closure when the code runs, its uses test (`global`,
-    /// `invoke`), as the code may outlive a later definition.
+    /// now, as a native closure of its procedure: used while the cell has
+    /// not been written since, which its uses test (`global`, `invoke`), as
+    /// the code may outlive a later definition. A cell with no count of its
+    /// writes is read when the code runs.
     fn global_value(&mut self, cell: Value) -> Result<Field, String> {
         let v = self.heap.bloblet_slot(cell, 2);
         // Not defined yet (a definition of itself, being compiled): what its
@@ -971,6 +972,7 @@ impl Compiling<'_> {
         // A cellular closure of no register code (an adapter) cannot be
         // compiled: called through its cell, as what is not native code.
         if let Some((word, free)) = self.closure_parts(v)
+            && self.heap.bloblet_head(cell).fields >= GLOBAL_FIELDS
             && self.name(word) != "undefined"
             && self.heap.is_register_word(self.heap.bloblet_slot(word, WORD_TWIN))
             && !self.refused.contains(&word.raw())
@@ -1004,7 +1006,7 @@ impl Compiling<'_> {
             starts.push(i);
             let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
             match op {
-                "branch" | "branchf" | "brancht" | "global-guard" | "value-guard" => {
+                "branch" | "branchf" | "brancht" | "global-guard" => {
                     let to = i as i64 + 1 + n as i64 + cells[i + n].as_fixnum();
                     target[to as usize] = true;
                     if to <= i as i64 {
@@ -1036,7 +1038,7 @@ impl Compiling<'_> {
                 match op {
                     "save" => cur = true,
                     "pop" => cur = false,
-                    "branch" | "branchf" | "brancht" | "global-guard" | "value-guard" => {
+                    "branch" | "branchf" | "brancht" | "global-guard" => {
                         let to = (i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize;
                         known[to].get_or_insert(cur);
                     }
@@ -1085,7 +1087,7 @@ impl Compiling<'_> {
                 match op {
                     "return" | "tailinvoke" => {}
                     "branch" => succ[si].push(to()),
-                    "branchf" | "brancht" | "global-guard" | "value-guard" => succ[si].extend([si + 1, to()]),
+                    "branchf" | "brancht" | "global-guard" => succ[si].extend([si + 1, to()]),
                     _ if si + 1 < ns => succ[si].push(si + 1),
                     _ => {}
                 }
@@ -1162,7 +1164,7 @@ impl Compiling<'_> {
         let mut src = RESULT;
         let mut pending: Option<Field> = None;
         // The global the pending call was bound to as compiled: its cell,
-        // and what it held then.
+        // and how many times it had been written then.
         let mut bound: Option<(Value, Value)> = None;
         map_stored = None;
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
@@ -1269,25 +1271,26 @@ impl Compiling<'_> {
                 }
                 "global" => {
                     let cell = o(0);
-                    let held = self.heap.bloblet_slot(cell, 2);
+                    let writes = self.heap.bloblet_slot(cell, GLOBAL_WRITES);
                     let g = self.global_value(cell).map_err(|e| format!("`{name}` calls {e}"))?;
                     if called(i).is_some() {
                         if !matches!(g, Field::Cell(_)) {
-                            bound = Some((cell, held));
+                            bound = Some((cell, writes));
                         }
                         pending = Some(g);
                     } else {
                         // What the cell holds when the code runs; the
-                        // native closure bound, where that is still what it
-                        // held when compiled: a later definition is seen.
+                        // native closure bound, where the cell has not been
+                        // written since this code was compiled: a later
+                        // definition is seen.
                         let fc = self.field(p, Field::Cell(cell));
                         ldr_field(&mut a, X9, fc);
                         a.e(ldur(RESULT, X9, field_off(2)));
                         if !matches!(g, Field::Cell(_)) {
                             let other = a.label();
-                            let fh = self.field(p, Field::Const(held));
-                            ldr_field(&mut a, X16, fh);
-                            a.e(cmp(RESULT, X16));
+                            a.e(ldur(X11, X9, field_off(GLOBAL_WRITES)));
+                            a.es(&mov_imm64(X16, writes.raw()));
+                            a.e(cmp(X11, X16));
                             a.to(other, Fix::If(Cond::Ne));
                             // A procedure's code alone is no value: its
                             // closure, over nothing.
@@ -1301,43 +1304,15 @@ impl Compiling<'_> {
                     }
                 }
                 // Always the test, which the code runs, as this code may
-                // outlive a later definition of the global: the value's
-                // field 2, a cellular closure's word or a native closure's
-                // code, whose field 2 is the word it was compiled from.
+                // outlive a later definition of the global: how many times
+                // the cell has been written, against how many when the code
+                // was compiled.
                 "global-guard" => {
-                    let (cell, w, to) = (o(0), o(1), (i as i64 + 4 + o(2).as_fixnum()) as usize);
-                    let held = a.label();
+                    let (cell, n, to) = (o(0), o(1), (i as i64 + 4 + o(2).as_fixnum()) as usize);
                     let fc = self.field(p, Field::Cell(cell));
                     ldr_field(&mut a, X9, fc);
-                    a.e(ldur(X11, X9, field_off(2)));
-                    a.e(ldur(X11, X11, field_off(CLOSURE_WORD)));
-                    let fw = self.field(p, Field::Const(w));
-                    ldr_field(&mut a, X16, fw);
-                    a.e(cmp(X11, X16));
-                    a.to(held, Fix::If(Cond::Eq));
-                    a.e(ldur(X11, X11, field_off(fixpt_heap::layout::cellular::CODE_SOURCE)));
-                    a.e(cmp(X11, X16));
-                    let l = edge(&mut a, si - 1, to);
-                    a.to(l, Fix::If(Cond::Ne));
-                    a.bind(held);
-                }
-                // Always the test, when the code runs: this code may outlive
-                // a later write of the global (a native closure kept in a
-                // global across a REPL's forms), so what the cell holds now
-                // decides nothing. The same word: an immediate in place, an
-                // object from this code's fields, which a collection keeps
-                // up to date.
-                "value-guard" => {
-                    let (cell, v, to) = (o(0), o(1), (i as i64 + 4 + o(2).as_fixnum()) as usize);
-                    let fc = self.field(p, Field::Cell(cell));
-                    ldr_field(&mut a, X9, fc);
-                    a.e(ldur(X11, X9, field_off(2)));
-                    if v.is_bloblet() || v.is_pair() {
-                        let fv = self.field(p, Field::Const(v));
-                        ldr_field(&mut a, X16, fv);
-                    } else {
-                        a.es(&mov_imm64(X16, v.raw()));
-                    }
+                    a.e(ldur(X11, X9, field_off(GLOBAL_WRITES)));
+                    a.es(&mov_imm64(X16, n.raw()));
                     a.e(cmp(X11, X16));
                     let l = edge(&mut a, si - 1, to);
                     a.to(l, Fix::If(Cond::Ne));
@@ -1346,6 +1321,10 @@ impl Compiling<'_> {
                     let f = self.field(p, Field::Cell(o(0)));
                     ldr_field(&mut a, X9, f);
                     a.e(stur(RESULT, X9, field_off(2)));
+                    // One more write, for the guards (`global-guard`).
+                    a.e(ldur(X16, X9, field_off(GLOBAL_WRITES)));
+                    a.e(add_imm(X16, X16, Value::fixnum(1).raw() as u32));
+                    a.e(stur(X16, X9, field_off(GLOBAL_WRITES)));
                     a.es(&card_mark(X9, field_off(2), ST, st_off(offset_of!(DState, cards)), X16, X17));
                 }
                 "lexical" => {
@@ -2012,17 +1991,17 @@ impl Compiling<'_> {
                         a.e(cmp(X16, X17));
                         a.to(stub, Fix::If(Cond::Lo));
                     };
-                    // A global bound as compiled: while its cell holds what
-                    // it held then, as bound; else, out of the way, through
-                    // the cell, as what it holds now.
-                    if let Some((cell, held)) = bound.take() {
+                    // A global bound as compiled: while its cell has not
+                    // been written since, as bound; else, out of the way,
+                    // through the cell, as what it holds now.
+                    if let Some((cell, writes)) = bound.take() {
                         let (slow, join) = (a.label(), a.label());
                         let fc = self.field(p, Field::Cell(cell));
                         ldr_field(&mut a, X9, fc);
                         a.e(ldur(CLO, X9, field_off(2)));
-                        let fh = self.field(p, Field::Const(held));
-                        ldr_field(&mut a, X16, fh);
-                        a.e(cmp(CLO, X16));
+                        a.e(ldur(X11, X9, field_off(GLOBAL_WRITES)));
+                        a.es(&mov_imm64(X16, writes.raw()));
+                        a.e(cmp(X11, X16));
                         a.to(slow, Fix::If(Cond::Ne));
                         match pending.take() {
                             Some(Field::Code(q)) => {

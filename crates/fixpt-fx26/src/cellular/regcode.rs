@@ -77,8 +77,8 @@ enum RItem {
     BranchT(usize),
     /// The frame's size, known when the body is done.
     Frame,
-    /// `global-guard g w` to a label: unless global cell `g` holds a
-    /// closure made from word `w`.
+    /// `global-guard g n` to a label: unless global cell `g` has been
+    /// written `n` times (`Compiler::writes_expected`).
     Guard(Value, Value, usize),
 }
 
@@ -234,10 +234,10 @@ impl Compiler<'_> {
     /// writes no global). Only where the body makes no closure, so that
     /// compiling it twice compiles nothing else twice.
     pub(super) fn register_code(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>) -> O<Vec<Value>> {
-        if self.summary_of(body) < 3 && self.inline_room(body, i64::MAX / 2) >= 0 && self.r_fast_may_pay(params, body, inner, this, own) {
+        if self.summary_of(body) < 3 && self.room(body, i64::MAX / 2, true) >= 0 && self.r_fast_may_pay(params, body, inner, this, own) {
             // The constants it names folded, assumed first.
             let consts = self.r_consts_named(body, inner);
-            let (assumed, declined) = (self.assume.replace(consts.clone()), self.declined.take());
+            let (assumed, declined) = (self.assume.replace(consts.iter().map(|(c, _)| *c).collect()), self.declined.take());
             let outer_consts = std::mem::replace(&mut self.consts_now, consts);
             let fast = self.register_body(params, body, inner, this, own);
             self.consts_now = outer_consts;
@@ -251,14 +251,13 @@ impl Compiler<'_> {
                 let frame = fast.max_slot.max(plain.max_slot);
                 (fast.max_slot, plain.max_slot) = (frame, frame);
                 let (fast, plain) = (fast.assemble(), plain.assemble());
-                // `args n`, the guards, the fast body, the plain one.
+                // `args n`, the guards, the fast body, the plain one: each
+                // guard, that a global assumed has not been written since.
                 let plain_at = 2 + 4 * assumptions.len() as i64 + (fast.len() as i64 - 2);
                 let mut cells = fast[..2].to_vec();
-                for (k, (cell, word)) in assumptions.iter().enumerate() {
+                for (k, cell) in assumptions.iter().enumerate() {
                     let at = 2 + 4 * k as i64;
-                    // A word's closure, or a constant's value.
-                    let guard = if self.heap.is_cellular_word(*word) { "global-guard" } else { "value-guard" };
-                    cells.extend([Value::fixnum(op(guard) as i64), *cell, *word, Value::fixnum(plain_at - (at + 4))]);
+                    cells.extend([Value::fixnum(op("global-guard") as i64), *cell, self.writes_expected(*cell), Value::fixnum(plain_at - (at + 4))]);
                 }
                 cells.extend_from_slice(&fast[2..]);
                 cells.extend_from_slice(&plain[2..]);
@@ -645,6 +644,12 @@ impl Compiler<'_> {
                 let leaves = self.tail_calls_leave && tail && args.len() < REGS && self.r_plain_callee(fun, args.len(), e) && !self.r_collects(fun, e, this, false);
                 args_collect || !(loop_call || inline || leaves || self.r_call_is_free(fun, args.len(), e, tail))
             }
+            // A `with` only loads fields (`r_with`): as its body.
+            Exp::With { body, .. } => {
+                let mut inner = e.clone();
+                inner.extend(self.c.facts.with_vals.get(&x).into_iter().flatten().map(|(n, _)| (*n, Loc::Slot(usize::MAX))));
+                self.r_collects(body, &inner, this, tail)
+            }
             _ => true,
         }
     }
@@ -663,7 +668,7 @@ impl Compiler<'_> {
         if tail && self.own_now == Some((name, n)) && self.inlining.is_empty() {
             return true;
         }
-        let Some(k) = self.inlines.iter().position(|i| i.name == name && i.params.len() == n) else { return false };
+        let Some(k) = self.inlines.iter().position(|i| i.name == name && i.params.len() == n && self.sees(i.genv_len)) else { return false };
         let (body, genv_len) = (self.inlines[k].body, self.inlines[k].genv_len);
         let own: Env = self.inlines[k].params.iter().map(|p| (*p, Loc::Slot(usize::MAX))).collect();
         let outer = self.genv_limit.replace(genv_len);
@@ -682,7 +687,7 @@ impl Compiler<'_> {
         match self.where_is(e, name) {
             None | Some(Loc::Lifted(_) | Loc::Loop | Loc::Pending(_)) => false,
             Some(Loc::Global(_)) => {
-                !self.inlines.iter().any(|i| i.name == name && i.params.len() == n) && !self.specials.iter().any(|s| s.name == name && s.params.len() == n)
+                !self.inlines.iter().any(|i| i.name == name && i.params.len() == n && self.sees(i.genv_len)) && !self.specials.iter().any(|s| s.name == name && s.params.len() == n && self.sees(s.genv_len))
             }
             Some(_) => true,
         }
@@ -1111,15 +1116,31 @@ impl Compiler<'_> {
     /// `with`: the module's values the body names, by position, kept in
     /// frame slots; then the body.
     #[allow(clippy::too_many_arguments)]
+    /// In a leaf, in registers, as a `let`'s values are there. In a fast
+    /// version, a value that a global module's literal member is, the
+    /// constant, assumed behind a `global-guard` of the module's global: a
+    /// module is not changed, only another defined (`TODO.md` §42).
     fn r_with(&mut self, g: &mut Gen, x: ExpId, module: Sym, body: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
-        if g.leaf {
-            return self.decline("a `with` in a leaf");
-        }
         let names = self.c.facts.with_vals.get(&x)?.clone();
-        let (depth, tdepth, slots) = (env.len(), te.len(), g.next_slot);
-        let at: Vec<usize> = names.iter().map(|_| g.slot()).collect();
-        for (k, (n, i)) in names.iter().enumerate() {
-            match self.r_where(env, module)? {
+        let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
+        let place = self.r_where(env, module)?;
+        let lits = match place {
+            RLoc::Global(c) => self.module_consts.get(&c.raw()).cloned().unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        for (n, i) in &names {
+            let folded = match place {
+                RLoc::Global(c) => lits.iter().find(|(m, _)| m == n).map(|(_, v)| (c, *v)),
+                _ => None,
+            };
+            if let Some((c, v)) = folded
+                && self.r_assume(c)
+            {
+                env.push((*n, RLoc::Const(v)));
+                te.push((*n, Loc::Slot(usize::MAX)));
+                continue;
+            }
+            match place {
                 RLoc::Reg(k) => g.op("reg", &[Gen::n(k)]),
                 RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
                 RLoc::Free(k) => g.op("lexical", &[Gen::n(k)]),
@@ -1127,14 +1148,14 @@ impl Compiler<'_> {
                 _ => return self.decline("a `with` of a module not in a place"),
             }
             g.op("field", &[Value::fixnum(*i as i64 + 2)]);
-            g.op("setstk", &[Gen::n(at[k])]);
-            env.push((*n, RLoc::Slot(at[k])));
+            let l = Self::r_keep(g, g.leaf)?;
+            env.push((*n, l));
             te.push((*n, Loc::Slot(usize::MAX)));
         }
         self.r_exp(g, body, env, te, tail)?;
         env.truncate(depth);
         te.truncate(tdepth);
-        g.next_slot = slots;
+        (g.next_reg, g.next_slot) = (regs, slots);
         Some(())
     }
 
@@ -1223,19 +1244,19 @@ impl Compiler<'_> {
                 && args.len() == sp.n
                 && is_param(self, env, args[sp.param])
             {
-                return self.r_self_guarded(g, sp.cell, sp.word, start, f, args, env, te, tail);
+                return self.r_self_guarded(g, sp.cell, start, f, args, env, te, tail);
             }
         }
         // A top-level procedure calling itself through its global, its own
         // name not an inlined body's, which may name an older global.
-        if let Some((name, word, n, start)) = g.own
+        if let Some((name, _, n, start)) = g.own
             && self.inlining.is_empty()
             && args.len() == n
             && let Exp::Var(m) = *self.c.arena.exp_at(f)
             && m == name
             && let Some(RLoc::Global(cell)) = self.r_where(env, m)
         {
-            return self.r_self_guarded(g, cell, word, start, f, args, env, te, tail);
+            return self.r_self_guarded(g, cell, start, f, args, env, te, tail);
         }
         if let Some(name) = self.r_standard_name(env, f) {
             let Some(std) = self.r_standard(&name, args.len()) else {
@@ -1475,7 +1496,7 @@ impl Compiler<'_> {
         if self.inlining.contains(&name) {
             return None;
         }
-        let k = self.inlines.iter().position(|i| i.name == name && i.params.len() == n)?;
+        let k = self.inlines.iter().position(|i| i.name == name && i.params.len() == n && self.sees(i.genv_len))?;
         Some((k, cell))
     }
 
@@ -1488,7 +1509,7 @@ impl Compiler<'_> {
     #[allow(clippy::too_many_arguments)]
     fn r_inline(&mut self, g: &mut Gen, k: usize, cell: Value, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         let (regs, slots) = (g.next_reg, g.next_slot);
-        let (name, word, body, genv_len) = (self.inlines[k].name, self.inlines[k].word, self.inlines[k].body, self.inlines[k].genv_len);
+        let (name, body, genv_len) = (self.inlines[k].name, self.inlines[k].body, self.inlines[k].genv_len);
         let params = self.inlines[k].params.clone();
         let (mut own_env, mut own_te, mut slow) = (Vec::new(), Vec::new(), Vec::new());
         for (p, a) in params.iter().zip(args) {
@@ -1523,9 +1544,9 @@ impl Compiler<'_> {
             own_te.push((*p, Loc::Slot(usize::MAX)));
         }
         let (call, end) = (g.label(), g.label());
-        let assumed = self.r_assume(cell, word);
+        let assumed = self.r_assume(cell);
         if !assumed {
-            self.r_guard(g, cell, word, call);
+            self.r_guard(g, cell, call);
         }
         let outer = (g.this.take(), self.genv_limit.replace(genv_len));
         self.inlining.push(name);
@@ -1580,7 +1601,7 @@ impl Compiler<'_> {
         }
         let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
         let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
-        let k = self.specials.iter().position(|s| s.name == name && s.params.len() == args.len())?;
+        let k = self.specials.iter().position(|s| s.name == name && s.params.len() == args.len() && self.sees(s.genv_len))?;
         let lam = args[self.specials[k].param];
         match self.c.arena.exp_at(lam) {
             Exp::Lambda { params, body } if params.len() == self.specials[k].arity && self.inline_room(*body, super::INLINE_LIMIT) >= 0 => {
@@ -1614,15 +1635,14 @@ impl Compiler<'_> {
         let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
         self.r_args(g, &es, env, te, None)?;
         let (call, end) = (g.label(), g.label());
-        let word = self.specials[k].word;
-        if self.r_assume(cell, word) {
+        if self.r_assume(cell) {
             g.op("stack", &[Gen::n(s)]);
             self.r_invoke(g, args.len(), tail);
             g.next_reg = regs;
             g.next_slot = slots;
             return Some(());
         }
-        self.r_guard(g, cell, word, call);
+        self.r_guard(g, cell, call);
         g.op("stack", &[Gen::n(s)]);
         self.r_invoke(g, args.len(), tail);
         if !tail {
@@ -1638,14 +1658,16 @@ impl Compiler<'_> {
     }
 
     /// Whether the body being compiled is its fast version, which assumes
-    /// what the guard would test (`register_code`): if so, the assumption
+    /// what the guard would test (`register_code`): that global `cell`
+    /// holds what it held when compiled (a procedure inlined, a constant
+    /// folded, a module whose member is folded). If so, the assumption
     /// noted, for its guard at the start.
-    fn r_assume(&mut self, cell: Value, word: Value) -> bool {
+    fn r_assume(&mut self, cell: Value) -> bool {
         match &mut self.assume {
             Some(a) => {
                 // Each global once.
-                if !a.iter().any(|(c, _)| *c == cell) {
-                    a.push((cell, word));
+                if !a.contains(&cell) {
+                    a.push(cell);
                 }
                 true
             }
@@ -1654,9 +1676,9 @@ impl Compiler<'_> {
     }
 
     /// The guard of an inlined or specialized call: to `call` unless the
-    /// global `cell` holds a closure of `word`.
-    fn r_guard(&self, g: &mut Gen, cell: Value, word: Value, call: usize) {
-        g.items.push(RItem::Guard(cell, word, call));
+    /// global `cell` has not been written since.
+    fn r_guard(&self, g: &mut Gen, cell: Value, call: usize) {
+        g.items.push(RItem::Guard(cell, self.writes_expected(cell), call));
     }
 
     /// `n` arguments in registers, the procedure in RESULT: called, or in
@@ -1761,11 +1783,11 @@ impl Compiler<'_> {
     /// A procedure calling itself through its global `cell` (a top-level
     /// definition's, or, in a copy specialized at a lambda, with the
     /// parameter passed as itself): the arguments made; then, if the global
-    /// still holds a closure of `word` (its own, or the one the copy was
-    /// made from), this procedure again, by its own entry, or in tail
+    /// has not been written since (it holds its own closure, or the one the
+    /// copy was made from), this procedure again, by its own entry, or in tail
     /// position a loop back to `start`; else the global.
     #[allow(clippy::too_many_arguments)]
-    fn r_self_guarded(&mut self, g: &mut Gen, cell: Value, word: Value, start: usize, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+    fn r_self_guarded(&mut self, g: &mut Gen, cell: Value, start: usize, f: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         // In a fast version, a call in tail position is a loop, in a leaf
         // too.
         if g.leaf && (!(tail && self.assume.is_some()) || args.len() > REGS) {
@@ -1782,9 +1804,9 @@ impl Compiler<'_> {
                 self.r_exp(g, *a, env, te, false)?;
                 made.push(Self::r_keep(g, g.leaf)?);
             }
-            let assumed = self.r_assume(cell, word);
+            let assumed = self.r_assume(cell);
             if !assumed {
-                self.r_guard(g, cell, word, call);
+                self.r_guard(g, cell, call);
             }
             for (i, m) in made.iter().enumerate() {
                 match m {
@@ -1816,13 +1838,13 @@ impl Compiler<'_> {
         } else {
             let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
             self.r_args(g, &es, env, te, None)?;
-            if self.r_assume(cell, word) {
+            if self.r_assume(cell) {
                 g.op("invokeself", &[Gen::n(args.len())]);
                 g.next_reg = regs;
                 g.next_slot = slots;
                 return Some(());
             }
-            self.r_guard(g, cell, word, call);
+            self.r_guard(g, cell, call);
             g.op("invokeself", &[Gen::n(args.len())]);
             g.items.push(RItem::Branch(false, end));
             g.items.push(RItem::Label(call));

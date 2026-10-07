@@ -1038,3 +1038,38 @@ that are objects (only immediates are noted as constants so far). And
 the fast versions themselves are rare in the front end (2 procedures
 fold a constant), being kept only for leaves and loops whose effect
 allows: what folding unlocks there depends on that policy.
+
+One guard since (2026-10-07, the user's: one guard "that checks if the
+global was written", not one per kind of value; and no tracking of who
+depends on a write, which could leak, "keep the opening check"): a
+`global-guard g n` tests that `g` has been written `n` times, a count
+every machine's write adds to (`docs/performance.md`, "One guard"). So
+the guard is the same for a procedure, a constant of any kind (a list or
+array literal costs no more than an immediate) and a module. Constants
+reached by a path are folded now: a `with`'s member of a global module
+that is a literal, behind the module's guard; and a `with` in a leaf
+keeps its values in registers. Left: the REPL folds nothing yet (each
+form is compiled apart, and the session would have to tell the compiler
+the constants); constants that are objects (only literals are noted).
+
+## 43. A survey of list searches in the front end (the user's, 2026-10-07)
+
+"Seems like we keep hitting this": a list searched once per item of
+something that grows with the program, so the work is quadratic. Found
+one at a time so far: `c-field-index` (a table since), printing a type
+(quadratic in the type names in scope, `docs/performance.md`, "Printing
+a type was quadratic"), a `with` binding its whole module (only what its
+body names since), and the FX-26 compiler's count of writes (`c-writes`,
+a list appended at each of the front end's 4479 definitions and searched
+at each: `fx words` 252 → 262–272 ms, a table by name since). Survey the
+rest instead of waiting for the next. A first pass by pattern (a helper
+recurring on `(cdr …)` and comparing `(car (car …))`, or named `-in`,
+`-of`, `-named`, `-without`, `-find`) finds about 60 in the front end:
+13 in `compile-programs.fx`, 8 in `compile.fx`, 6 each in `regcode.fx`
+and `regcode-exps.fx`, 5 in `evaluator.fx`, 4 each in `compile-plan.fx`,
+`check-types.fx` and `check-terminate.fx`, and fewer elsewhere. For each:
+how long its list gets on the self-compile (the front end) and how often
+it is searched, counted on the native path (`docs/performance.md`; not
+on an interpreter's counts); then a table where both grow with the
+program, and nothing where the list stays short (a module's members, a
+lambda's parameters).

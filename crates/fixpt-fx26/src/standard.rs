@@ -398,6 +398,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("wcell-product", "(poly ((r region)) (subr (read r) ((listof wcell r)) wcell))"),
     // A global's cell, new: its value is the compiled program's to change.
     ("make-global", "(subr pure (symbol) wglobal)"),
+    // How many times a global has been written: what the compiler's guards
+    // test it against (`layout::cellular::GLOBAL_WRITES`). Only a program
+    // compiled changes it, as it runs, after it is compiled; so, to the
+    // compiler, the same each time it asks.
+    ("wglobal-writes", "(subr pure (wglobal) int)"),
+    // A global's name, as it was made (`make-global`).
+    ("wglobal-name", "(subr pure (wglobal) symbol)"),
     // Whether two globals are the one.
     ("wglobal=?", "(subr pure (wglobal wglobal) bool)"),
     // A runtime primitive's number, for `prim`, or -1.

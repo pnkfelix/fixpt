@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, ROUTINES, WORD_TWIN};
+use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, GLOBAL_FIELDS, GLOBAL_NAME, GLOBAL_VALUE, GLOBAL_WRITES, ROUTINES, WORD_TWIN};
 
 mod procs;
 mod regcode;
@@ -182,10 +182,11 @@ pub struct Compiler<'a> {
     spec: Option<Spec>,
     /// The globals defined as constants (`TODO.md` §42), by their cells: a
     /// literal, a re-export of a module's literal member, or another such
-    /// global; and each module's literal members. A fast version folds
-    /// those it names, behind a `value-guard` each (`register_code`).
+    /// global; and each module's literal members, by the module's global. A
+    /// fast version folds
+    /// those it names, behind a `global-guard` each (`register_code`).
     const_globals: HashMap<u64, Value>,
-    module_consts: HashMap<Sym, Vec<(Sym, Value)>>,
+    module_consts: HashMap<u64, Vec<(Sym, Value)>>,
     /// While a fast version is compiled: the constant globals it folds,
     /// each cell and value (`r_where`).
     consts_now: Vec<(Value, Value)>,
@@ -206,8 +207,15 @@ pub struct Compiler<'a> {
     /// The top-level definition whose lambda is compiled next: its name.
     defining: Option<Sym>,
     /// While a body's fast version is compiled (`regcode::register_code`):
-    /// the globals it assumes hold what they held, and what that was.
-    assume: Option<Vec<(Value, Value)>>,
+    /// the globals it assumes hold what they held, by their cells, each
+    /// once; what its `global-guard`s test, each that the cell has not been
+    /// written since (`writes_expected`).
+    assume: Option<Vec<Value>>,
+    /// How many times each global this program writes has been written
+    /// once the `global!`s emitted so far have run, by its cell; and the
+    /// cells the form being compiled writes (`writes_expected`).
+    writes: HashMap<u64, i64>,
+    form_writes: Vec<Value>,
     /// Each expression's effect summary, by span, once asked.
     summaries: Option<std::collections::HashMap<(u32, u32), u8>>,
     /// The top-level definition whose body is being compiled: its name and
@@ -240,7 +248,6 @@ struct Special {
 struct Spec {
     name: Sym,
     cell: Value,
-    word: Value,
     param: usize,
     param_name: Sym,
     n: usize,
@@ -255,7 +262,6 @@ struct Spec {
 /// (`regcode::r_inline`).
 struct Inline {
     name: Sym,
-    word: Value,
     params: Vec<Sym>,
     body: ExpId,
     genv_len: usize,
@@ -315,6 +321,8 @@ impl<'a> Compiler<'a> {
             bind_name: None,
             defining: None,
             assume: None,
+            writes: HashMap::new(),
+            form_writes: Vec::new(),
             summaries: None,
             own_now: None,
             tail_calls_leave: false,
@@ -1067,11 +1075,11 @@ impl<'a> Compiler<'a> {
         let Exp::With { module, body } = *self.c.arena.exp_at(exp) else { return };
         let Exp::Var(f) = *self.c.arena.exp_at(body) else { return };
         let Some((_, genv_len, ms)) = self.modules.iter().find(|(m, _, _)| *m == module) else { return };
-        let Some((_, word, params, body)) = ms.iter().find(|(n, _, _, _)| *n == f) else { return };
-        let (word, params, body, genv_len) = (*word, params.clone(), *body, *genv_len);
+        let Some((_, _, params, body)) = ms.iter().find(|(n, _, _, _)| *n == f) else { return };
+        let (params, body, genv_len) = (params.clone(), *body, *genv_len);
         let stays = self.c.interner.get("stay-cellular").is_some_and(|s| self.mentions(body, s));
         if !stays && self.inline_room(body, INLINE_LIMIT) >= 0 && !self.mentions(body, f) {
-            self.inlines.push(Inline { name, word, params, body, genv_len });
+            self.inlines.push(Inline { name, params, body, genv_len });
         }
     }
 
@@ -1117,24 +1125,32 @@ impl<'a> Compiler<'a> {
     /// no further, once they run out, or at a form that makes a closure,
     /// which an inlined body would have to capture its slots in.
     fn inline_room(&self, x: ExpId, n: i64) -> i64 {
+        self.room(x, n, false)
+    }
+
+    /// The same, a `with` counted as its body (`withs`): what a fast
+    /// version asks, since a `with` makes no closure (`TODO.md` §42: its
+    /// module's constants folded).
+    fn room(&self, x: ExpId, n: i64, withs: bool) -> i64 {
         let n = n - 1;
         if n < 0 {
             return n;
         }
-        let all = |xs: &[ExpId], n: i64| xs.iter().fold(n, |n, a| if n < 0 { n } else { self.inline_room(*a, n) });
+        let all = |xs: &[ExpId], n: i64| xs.iter().fold(n, |n, a| if n < 0 { n } else { self.room(*a, n, withs) });
         match self.c.arena.exp_at(x).clone() {
+            Exp::With { body, .. } if withs => self.room(body, n, withs),
             Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } | Exp::Module(_) | Exp::With { .. } => -1,
-            Exp::App { fun, args } => all(&args, self.inline_room(fun, n)),
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.inline_room(body, n),
-            Exp::LetRegion { body, .. } => self.inline_room(body, n),
-            Exp::If { test, then, els } => all(&[then, els], self.inline_room(test, n)),
+            Exp::App { fun, args } => all(&args, self.room(fun, n, withs)),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.room(body, n, withs),
+            Exp::LetRegion { body, .. } => self.room(body, n, withs),
+            Exp::If { test, then, els } => all(&[then, els], self.room(test, n, withs)),
             Exp::Let { bindings, body } => all(&[body], all(&bindings.iter().map(|(_, i)| *i).collect::<Vec<_>>(), n)),
             Exp::Begin(items) => all(&items, n),
             Exp::Bloblet { args, .. } => all(&args, n),
             Exp::Product(fields) => all(&fields.iter().map(|(_, x)| *x).collect::<Vec<_>>(), n),
-            Exp::Extract(x, _) | Exp::Sum(_, x) => self.inline_room(x, n),
+            Exp::Extract(x, _) | Exp::Sum(_, x) => self.room(x, n, withs),
             Exp::TagCase { scrutinee, arms, els } => {
-                let n = all(&arms.iter().map(|a| a.body).collect::<Vec<_>>(), self.inline_room(scrutinee, n));
+                let n = all(&arms.iter().map(|a| a.body).collect::<Vec<_>>(), self.room(scrutinee, n, withs));
                 all(&els.map(|(_, b)| b).into_iter().collect::<Vec<_>>(), n)
             }
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => n,
@@ -1676,7 +1692,6 @@ impl<'a> Compiler<'a> {
         let spec = Spec {
             name: sp.name,
             cell: c.cell,
-            word: sp.word,
             param: sp.param,
             param_name: sp.params[sp.param],
             n: sp.params.len(),
@@ -1991,9 +2006,10 @@ impl<'a> Compiler<'a> {
     fn push_global(&mut self, n: Sym) -> Value {
         let undefined = self.heap.undefined_closure();
         let name = self.heap.intern(self.c.interner.name(n));
-        let g = self.heap.make_bloblet(kind("bloblet"), 2, 0, true);
-        self.heap.set_bloblet_slot(g, 2, undefined);
-        self.heap.set_bloblet_slot(g, 3, name);
+        let g = self.heap.make_bloblet(kind("bloblet"), GLOBAL_FIELDS, 0, true);
+        self.heap.set_bloblet_slot(g, GLOBAL_VALUE, undefined);
+        self.heap.set_bloblet_slot(g, GLOBAL_NAME, name);
+        self.heap.set_bloblet_slot(g, GLOBAL_WRITES, Value::fixnum(0));
         self.genv_index.entry(n).or_default().push((self.genv.len(), Loc::Global(g)));
         self.genv.push((n, Loc::Global(g)));
         g
@@ -2024,20 +2040,21 @@ impl<'a> Compiler<'a> {
             },
             Exp::With { module, body } => {
                 let Exp::Var(f) = *self.c.arena.exp_at(body) else { return None };
-                self.module_consts.get(&module)?.iter().find(|(n, _)| *n == f).map(|(_, v)| *v)
+                let Some(Loc::Global(g)) = self.where_is(&Vec::new(), module) else { return None };
+                self.module_consts.get(&g.raw())?.iter().find(|(n, _)| *n == f).map(|(_, v)| *v)
             }
             _ => None,
         }
     }
 
-    /// After top-level definition `name` of `exp` set global `g`: whether
+    /// After a top-level definition of `exp` set global `g`: whether
     /// `g` is a constant now, and, if `exp` is a module, its literal members.
-    fn note_constant(&mut self, name: Sym, g: Value, exp: ExpId) {
+    fn note_constant(&mut self, g: Value, exp: ExpId) {
         self.const_globals.remove(&g.raw());
         if let Some(v) = self.const_of(exp) {
             self.const_globals.insert(g.raw(), v);
         }
-        self.module_consts.remove(&name);
+        self.module_consts.remove(&g.raw());
         if let Exp::Module(items) = self.c.arena.exp_at(exp).clone() {
             let lits: Vec<(Sym, Value)> = items
                 .iter()
@@ -2046,8 +2063,43 @@ impl<'a> Compiler<'a> {
                     _ => None,
                 })
                 .collect();
-            self.module_consts.insert(name, lits);
+            self.module_consts.insert(g.raw(), lits);
         }
+    }
+
+    /// Whether a procedure noted to be inlined or specialized when the
+    /// globals were `genv_len` long is the one its name means here: where a
+    /// body inlined is compiled, the globals as that body saw them
+    /// (`genv_limit`); a later definition of the name, which that body does
+    /// not see, has its own note. What the guards assume of the global is
+    /// then what was noted of it.
+    pub(super) fn sees(&self, genv_len: usize) -> bool {
+        self.genv_limit.is_none_or(|l| genv_len <= l)
+    }
+
+    /// A `global!` of `g` emitted: once it runs, `g` written once more.
+    fn wrote(&mut self, g: Value) {
+        let n = self.writes_now(g);
+        self.writes.insert(g.raw(), n + 1);
+        if let Some(k) = self.form_writes.iter().position(|c| *c == g) {
+            self.form_writes.remove(k);
+        }
+    }
+
+    /// How many times `g` has been written once the `global!`s emitted so
+    /// far have run: what its cell said before this program, and the
+    /// program's own.
+    fn writes_now(&self, g: Value) -> i64 {
+        self.writes.get(&g.raw()).copied().unwrap_or_else(|| self.heap.bloblet_slot(g, GLOBAL_WRITES).as_fixnum())
+    }
+
+    /// What a `global-guard` of `g` made now expects: how many times `g` has
+    /// been written once the form being compiled has run, its own writes
+    /// too. Code it makes may run before then, as the form runs, and its
+    /// fast version then falls back; but most runs are after, as a
+    /// procedure calling itself through its own global is.
+    pub(super) fn writes_expected(&self, g: Value) -> Value {
+        Value::fixnum(self.writes_now(g) + self.form_writes.iter().filter(|c| **c == g).count() as i64)
     }
 
     /// The global a definition of `n` sets: the one `n` has, if the
@@ -2080,6 +2132,12 @@ impl<'a> Compiler<'a> {
                     // A module defined again no longer says what its
                     // re-exports are.
                     self.modules.retain(|(m, _, _)| m != name);
+                    // The cell it writes, if one its body can name: one it
+                    // assigns, or its own, for a recursive one.
+                    self.form_writes = match self.global(*name, self.genv.len()) {
+                        Some(Loc::Global(g)) if *assigns => vec![g],
+                        _ => Vec::new(),
+                    };
                     let g = if !recursive {
                         let is_module = matches!(self.c.arena.exp_at(*exp), Exp::Module(_));
                         if is_module {
@@ -2095,11 +2153,12 @@ impl<'a> Compiler<'a> {
                         let g = self.global_for(*name, *assigns);
                         // After its global, which forgets what the name was.
                         self.reexport_inline(*name, *exp);
-                        self.note_constant(*name, g, *exp);
+                        self.note_constant(g, *exp);
                         g
                     } else {
                         let g = self.global_for(*name, *assigns);
-                        self.note_constant(*name, g, *exp);
+                        self.form_writes = vec![g];
+                        self.note_constant(g, *exp);
                         if let Some((_, _, None)) = self.lambda_of(*exp) {
                             self.defining = Some(*name);
                             self.name_word_for(*name);
@@ -2117,8 +2176,8 @@ impl<'a> Compiler<'a> {
                             && !self.mentions(body, *name)
                             && !stays(self, body)
                         {
-                            let (word, genv_len) = (self.last_word, self.genv.len());
-                            self.inlines.push(Inline { name: *name, word, params, body, genv_len });
+                            let genv_len = self.genv.len();
+                            self.inlines.push(Inline { name: *name, params, body, genv_len });
                         } else if let Some((params, body, None)) = self.lambda_of(*exp)
                             && self.inline_room(body, SPECIAL_LIMIT) >= 0
                             && !stays(self, body)
@@ -2138,6 +2197,7 @@ impl<'a> Compiler<'a> {
                         g
                     };
                     self.op1(&mut code, "global!", g);
+                    self.wrote(g);
                     has_value = false;
                 }
                 // Every name's global first; then each lambda, which runs
@@ -2147,8 +2207,9 @@ impl<'a> Compiler<'a> {
                         self.op(&mut code, "drop");
                     }
                     let gs: Vec<Value> = bindings.iter().map(|(n, _, _)| self.global_for(*n, *assigns)).collect();
-                    for ((n, _, e), g) in bindings.iter().zip(&gs) {
-                        self.note_constant(*n, *g, *e);
+                    self.form_writes = gs.clone();
+                    for ((_, _, e), g) in bindings.iter().zip(&gs) {
+                        self.note_constant(*g, *e);
                     }
                     for ((n, _, e), g) in bindings.iter().zip(gs) {
                         if let Some((_, _, None)) = self.lambda_of(*e) {
@@ -2158,6 +2219,7 @@ impl<'a> Compiler<'a> {
                         self.exp(*e, &Vec::new(), 0, &mut code, false)?;
                         self.form_twins()?;
                         self.op1(&mut code, "global!", g);
+                        self.wrote(g);
                     }
                     has_value = false;
                 }
@@ -2165,6 +2227,7 @@ impl<'a> Compiler<'a> {
                     if has_value {
                         self.op(&mut code, "drop");
                     }
+                    self.form_writes.clear();
                     self.plan_for(k.exp);
                     self.exp(k.exp, &Vec::new(), 0, &mut code, false)?;
                     self.form_twins()?;

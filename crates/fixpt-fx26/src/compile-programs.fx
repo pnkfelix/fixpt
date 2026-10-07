@@ -357,26 +357,16 @@
       (e-plambda (d body a b) (c-literal-of body))
       (e-proj (body ds a b) (c-literal-of body))
       (else y nil))))
-;; Module `m`'s literal members, in a list; none if it has none noted.
-(define-type c-members-at (listof (listof r-member-const @k) @k))
-(define c-module-consts-of
-  (subr c-lists ((listof r-module-const @k) symbol) c-members-at)
-  (lambda (ms m)
-    (cond ((null? ms) nil)
-          ((symbol=? (car (car ms)) m) (the c-members-at (cons (cdr (car ms)) nil)))
-          (else (c-module-consts-of (cdr ms) m)))))
-;; Member `f`'s literal of `cs`, in a list; none if it is not one.
-(define c-member-in
-  (subr c-lists ((listof r-member-const @k) symbol) rconsts)
-  (lambda (cs f)
-    (cond ((null? cs) nil)
-          ((symbol=? (car (car cs)) f) (the rconsts (cons (cdr (car cs)) nil)))
-          (else (c-member-in (cdr cs) f)))))
-;; Module `m`'s member `f`'s literal, in a list; none if it has none.
-(define c-member-const (subr c-lists (symbol symbol) rconsts)
+;; Module `m`'s member `f`'s literal, in a list; none if it has none: by
+;; the global `m` names, whose module's members were noted.
+(define c-member-const (subr (maxeff compiles spin) (symbol symbol) rconsts)
   (lambda (m f)
-    (let ((cs (c-module-consts-of (get r-module-consts) m)))
-      (if (null? cs) nil (c-member-in (car cs) f)))))
+    (let ((l (c-where (the cenv nil) m)))
+      (if (null? l)
+          nil
+          (tagcase (car l)
+            (at-global (g) (r-member-const g f))
+            (else y nil))))))
 ;; The constant a top-level definition's expression is, in a list: a
 ;; literal; a constant global; a re-export of a module's literal member. As
 ;; the Rust compiler's `const_of`.
@@ -405,11 +395,11 @@
     (cond ((null? cs) cs)
           ((wglobal=? (car (car cs)) g) (c-consts-without (cdr cs) g))
           (else (the r-const-list (cons (car cs) (c-consts-without (cdr cs) g)))))))
-(define c-modules-consts-without (subr c-lists (c-mconsts symbol) c-mconsts)
-  (lambda (ms n)
+(define c-modules-consts-without (subr c-lists (c-mconsts wglobal) c-mconsts)
+  (lambda (ms g)
     (cond ((null? ms) ms)
-          ((symbol=? (car (car ms)) n) (c-modules-consts-without (cdr ms) n))
-          (else (the c-mconsts (cons (car ms) (c-modules-consts-without (cdr ms) n)))))))
+          ((wglobal=? (car (car ms)) g) (c-modules-consts-without (cdr ms) g))
+          (else (the c-mconsts (cons (car ms) (c-modules-consts-without (cdr ms) g)))))))
 ;; A module's values' literals, in order.
 (define c-mvals-literal (subr c-lists (c-mvals) c-members)
   (lambda (vs)
@@ -419,28 +409,28 @@
           (if (null? lit)
               rest
               (the c-members (cons (cons (extract (car vs) 1) (car lit)) rest)))))))
-;; After top-level definition `n` of `x` set global `g`: whether `g` is a
+;; After a top-level definition of `x` set global `g`: whether `g` is a
 ;; constant now, and, if `x` is a module, its literal members. As the Rust
 ;; compiler's `note_constant`.
-(define c-note-constant! (subr (maxeff compiles spin) (symbol wglobal exp) unit)
-  (lambda (n g x)
+(define c-note-constant! (subr (maxeff compiles spin) (wglobal exp) unit)
+  (lambda (g x)
     (let ((k (c-const-of x)))
       (begin
         (set r-const-globals (c-consts-without (get r-const-globals) g))
         (if (null? k)
             #u
             (set r-const-globals (the r-const-list (cons (cons g (car k)) (get r-const-globals)))))
-        (set r-module-consts (c-modules-consts-without (get r-module-consts) n))
+        (set r-module-consts (c-modules-consts-without (get r-module-consts) g))
         (tagcase x
           (e-module (items a b)
             (set r-module-consts
-                 (cons (cons n (c-mvals-literal (c-module-values items))) (get r-module-consts))))
+                 (cons (cons g (c-mvals-literal (c-module-values items))) (get r-module-consts))))
           (else y #u))))))
 (define c-note-constants! (subr (maxeff compiles spin) (c-recs (listof wglobal @k)) unit)
   (lambda (bs gs)
     (if (or (null? bs) (null? gs))
         #u
-        (begin (c-note-constant! (extract (car bs) 1) (car gs) (extract (car bs) 3))
+        (begin (c-note-constant! (car gs) (extract (car bs) 3))
                (c-note-constants! (cdr bs) (cdr gs))))))
 (define c-rec-globals (subr c-emits (c-recs) (listof wglobal @k))
   (lambda (bs)
@@ -472,6 +462,7 @@
                (c-exp (extract (car bs) 3) (the cenv nil) 0 c #f)
                (c-form-twins)
                (c-op1 c routine-global! (wcell-global (car gs)))
+               (c-wrote! (car gs))
                (c-rec-fill (cdr bs) (cdr gs) c)))))
 
 ;; The lambda of `ps` and `body` that top-level definition `n` is, made at
@@ -549,6 +540,10 @@
               (if has-value (c-op c routine-drop) #u)
               ;; A module defined again no longer says what its re-exports are.
               (set c-modules (c-modules-without (get c-modules) n))
+              ;; The global it writes, if one its body can name: one kept.
+              (set c-form-writes
+                   (let ((k (c-kept (get c-reuse) n)))
+                     (if (null? k) nil (the (listof wglobal @k) (cons (car k) nil)))))
               (if (or (null? ty) (null? (c-lambda-of x)))
                   (begin (c-plan-top x)
                          (if (c-module? x)
@@ -560,28 +555,32 @@
                          ;; After its global, which forgets what `n` was.
                          (let ((g (c-push-global n)))
                            (begin (c-reexport-inline! n x)
-                                  (c-note-constant! n g x)
-                                  (c-op1 c routine-global! (wcell-global g)))))
+                                  (c-note-constant! g x)
+                                  (c-op1 c routine-global! (wcell-global g))
+                                  (c-wrote! g))))
                   ;; A lambda: its global first, so that it can call itself,
                   ;; through the global, as any use of it does
                   ;; (`docs/fx26.md`, "Redefinition").
                   (let ((g (c-push-global n)))
-                    (begin (c-note-constant! n g x)
+                    (begin (set c-form-writes (cons g nil))
+                           (c-note-constant! g x)
                            (c-plan-top x)
                            (tagcase (car (c-lambda-of x))
                              (e-lambda (ps body la lb) (c-define-lambda n ps body c))
                              (else y (begin (c-exp x (the cenv nil) 0 c #f) (c-form-twins))))
-                           (c-op1 c routine-global! (wcell-global g)))))
+                           (c-op1 c routine-global! (wcell-global g))
+                           (c-wrote! g))))
               (c-tops (cdr ts) c #f)))
           ;; Every name's global first; then each lambda, which runs nothing.
           (t-define-rec (bs a b)
             (begin
               (if has-value (c-op c routine-drop) #u)
               (let ((gs (c-rec-globals bs)))
-                (begin (c-note-constants! bs gs) (c-rec-fill bs gs c)))
+                (begin (set c-form-writes gs) (c-note-constants! bs gs) (c-rec-fill bs gs c)))
               (c-tops (cdr ts) c #f)))
           (t-exp (x)
             (begin (if has-value (c-op c routine-drop) #u)
+                   (set c-form-writes nil)
                    (set c-last-exp (the (listof exp @k) (cons x nil)))
                    (c-plan-top x)
                    (c-exp x (the cenv nil) 0 c #f)
@@ -631,6 +630,9 @@
           ;; (`TODO.md` §42; at the REPL, none yet).
           (set r-const-globals nil)
           (set r-module-consts nil)
+          ;; So are the counts of writes the guards expect.
+          (set c-writes (make-table symbol-hash symbol=?))
+          (set c-form-writes nil)
           (set c-this-params -1)
           ;; The lambdas made so far are the last program's: let them go.
           (set c-made-now (the (listof c-made @k) nil))

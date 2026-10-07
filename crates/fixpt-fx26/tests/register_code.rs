@@ -440,19 +440,44 @@ fn a_reexported_module_member_is_inlined() {
     }
 }
 
+/// A module's literal members folded through a `with` in a fast version
+/// (`TODO.md` §42), behind one `global-guard` of the module's global: the
+/// test decided, the sum an immediate; and the plain version, a leaf, keeps
+/// the values the `with` names in registers, as a `let`'s. Both compilers,
+/// the same code.
+#[test]
+fn module_members_are_folded_through_with() {
+    let text = "(define m (module (define k int 3) (define flag bool #t)))\n\
+                (define* step (subr (read (globals m)) (int) int)\n\
+                  (lambda (x) (with m (if flag (+ x k) (- x k)))))\n";
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (fx26, rust) = fixpt_fx26::compare::both_compilers(&mut s, text).expect("checks");
+    let (fx26, rust) = (fx26.expect("FX-26 compiles"), rust.expect("Rust compiles"));
+    assert_eq!(fx26, rust);
+    let step = rust.split("\nword step").nth(1).expect("step");
+    let step = step.split("its register code").nth(1).expect("its register code");
+    let (fast, plain) = step.split_once("return").expect("the fast version returns");
+    for want in ["global-guard m written 1", "op2imm int-add 3"] {
+        assert!(fast.contains(want), "{want}:\n{step}");
+    }
+    assert!(!fast.contains("branch"), "the test decided:\n{step}");
+    assert!(plain.contains("field 3") && plain.contains("setreg"), "in registers:\n{step}");
+}
+
 /// Constants folded in a fast version (`TODO.md` §42): `step` names `k`
 /// and `flag`, defined as literals, so its fast version assumes them, a
-/// `value-guard` each at its start, its test decided (the `else` gone) and
-/// its sum an immediate; the plain version reads the globals.
+/// `global-guard` each at its start (each written once, by its definition),
+/// its test decided (the `else` gone) and its sum an immediate; the plain
+/// version reads the globals.
 #[test]
-fn constants_are_folded_behind_value_guards() {
+fn constants_are_folded_behind_global_guards() {
     let out = shown(
         "(define k int 3)\n(define flag bool #t)\n\
          (define* step (subr pure (int) int) (lambda (x) (if flag (+ x k) (- x k))))\n",
     );
     let step = out.split("\nword step").nth(1).expect("step");
     let step = step.split("its register code").nth(1).expect("its register code");
-    for want in ["value-guard flag", "value-guard k", "op2imm int-add 3", "global k"] {
+    for want in ["global-guard flag written 1", "global-guard k written 1", "op2imm int-add 3", "global k"] {
         assert!(step.contains(want), "{want}:\n{step}");
     }
 }

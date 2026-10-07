@@ -211,11 +211,12 @@
           (if made (begin (r-done g #t) (r-assemble g)) none))))))
 ;; Whether a fast version of `body` is sound, as far as the body itself
 ;; says: no global can change during a run of it (its effect summary is
-;; less than 3); and it makes no closure (`c-inline-room`).
+;; less than 3); and it makes no closure (`c-room`, a `with`'s body
+;; counted, as it only loads fields).
 (define r-fast-sound? (subr rcompiles (exp) bool)
   (lambda (body)
     (and (< (c-summary-at (exp-start body) (exp-end body)) 3)
-         (>= (c-inline-room body 1000000000) 0))))
+         (>= (c-room body 1000000000 #t) 0))))
 ;; Whether the fast version made (`fast`, in a list) pays: it is a leaf, or
 ;; it loops.
 (define r-pays? (subr rreads (rgens) bool)

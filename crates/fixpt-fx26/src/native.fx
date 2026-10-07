@@ -185,6 +185,14 @@
       (n-e (arm-add n-x16 n-x16 n-x13))
       (n-e (arm-movz n-x13 1 0))
       (n-e (arm-strb n-x13 n-x16)))))
+;; One more write of the global cell in x11, for the guards
+;; (`global-guard`): its count of writes, a fixnum, one more; `x16` lost.
+(define n-bump-writes (subr (maxeff assembles spin) () unit)
+  (lambda ()
+    (begin
+      (n-e (arm-ldur n-x16 n-x11 (n-field-off global-writes)))
+      (n-e (arm-add-imm n-x16 n-x16 8))
+      (n-e (arm-stur n-x16 n-x11 (n-field-off global-writes))))))
 
 ;; Dispatch on the cell in x9: the tail of `NEXT`.
 (define n-run-word-in-w (subr (maxeff assembles spin) () unit)
@@ -657,6 +665,7 @@
              (begin
                (n-e (arm-ldr-post n-x15 n-dsp 8))
                (n-e (arm-stur n-x15 n-x11 (n-field-off 2)))
+               (n-bump-writes)
                (n-card-mark n-x11 (n-field-off 2))))
          (n-cont-code)))
       ((or (= n routine-call) (= n routine-tailcall) (= n routine-tcall) (= n routine-ttailcall))

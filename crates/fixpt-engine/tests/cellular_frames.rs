@@ -11,10 +11,12 @@ fn fx(n: i64) -> Value {
     Value::fixnum(n)
 }
 
-/// A one-field global cell.
+/// A global cell, as a program's are.
 fn cell(rt: &mut Runtime, v: Value) -> Value {
-    let c = rt.heap.make_bloblet(fixpt_heap::layout::kind("bloblet"), 1, 0, true);
+    use fixpt_heap::layout::cellular::{GLOBAL_FIELDS, GLOBAL_WRITES};
+    let c = rt.heap.make_bloblet(fixpt_heap::layout::kind("bloblet"), GLOBAL_FIELDS, 0, true);
     rt.heap.set_bloblet_slot(c, 2, v);
+    rt.heap.set_bloblet_slot(c, GLOBAL_WRITES, Value::fixnum(0));
     c
 }
 

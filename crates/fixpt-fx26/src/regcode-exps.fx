@@ -21,9 +21,10 @@
 (define r-at? (subr rreads (rlocs rloc) bool)
   (lambda (l at) (and (not (null? l)) (r-same-loc? (car l) at))))
 ;; The guard of an inlined or specialized call: to `call` unless the global
-;; `cell` holds a closure of `word`.
-(define r-guard (subr emits (rgen wglobal tword int) unit)
-  (lambda (g cell word call) (r-emit g (r-guard-to (wcell-global cell) (wcell-word word) call))))
+;; `cell` has not been written since.
+(define r-guard (subr (maxeff emits spin) (rgen wglobal int) unit)
+  (lambda (g cell call)
+    (r-emit g (r-guard-to (wcell-global cell) (wcell-int (c-writes-expected cell)) call))))
 ;; `n` arguments in registers, the procedure in RESULT: called, or in tail
 ;; position, the frame left first.
 (define r-invoke (subr emits (rgen int bool) unit)
@@ -48,12 +49,14 @@
   (lambda (g i k) (begin (r-opn g rop-lexical i) (r-opn g rop-setreg k))))
 ;; The one of `c-specials` that `n`, taking `k` arguments, names, if any.
 (define r-special-named
-  (subr (maxeff rreads (alloc @k)) ((listof c-special acyclic) symbol int) (listof c-special @k))
-  (lambda (xs n k)
+  (subr (maxeff rreads (alloc @k)) ((listof c-special acyclic) symbol int int)
+        (listof c-special @k))
+  (lambda (xs n k lim)
     (cond ((null? xs) nil)
-          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
+          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k)
+                (c-sees? lim (extract (car xs) 5)))
            (the (listof c-special @k) (cons (car xs) nil)))
-          (else (r-special-named (cdr xs) n k)))))
+          (else (r-special-named (cdr xs) n k lim)))))
 ;; Parameter `k` of `ps`.
 (define r-nth-param (subr (read @globals) (exp-params int) symbol)
   (lambda (ps k) (if (= k 0) (extract (car ps) 1) (r-nth-param (cdr ps) (- k 1)))))
@@ -89,7 +92,8 @@
                   nil
                   (tagcase (car l)
                     (rl-global (cell)
-                      (let ((sp (r-special-named (get c-specials) n (c-count-exps args))))
+                      (let ((sp (r-special-named (get c-specials) n (c-count-exps args)
+                                                 (get c-genv))))
                         (if (null? sp) nil (r-special-lambda (car sp) cell args))))
                     (else y nil)))))
           (else y nil)))))
@@ -268,14 +272,11 @@
         nil
         (let ((s (if (car joins) -1 (r-slot g)))) (cons s (r-letrec-slots-j g (cdr joins)))))))
 ;; While a body's fast version is compiled (`r-register-code`): whether, and
-;; the globals it assumes hold what they held and what that was, newest
-;; first, each once.
-;; What a fast version assumes a global holds: a closure of a word (for a
-;; call inlined, specialized, or of itself); or a constant's value, the same
-;; word (`TODO.md` §42).
-(define-datatype rguard (rg-word tword) (rg-value wcell))
-(define-type r-assumption (pairof wglobal rguard @k))
-(define-type r-assumptions (listof r-assumption acyclic))
+;; the globals it assumes hold what they held (a procedure inlined,
+;; specialized or called by itself; a constant folded; a module whose member
+;; is folded, `TODO.md` §42), newest first, each once: what its guards test,
+;; that each has not been written since.
+(define-type r-assumptions (listof wglobal acyclic))
 (define r-assuming (ref bool @k) (new #f))
 ;; While deciding whether a body is a leaf: whether a plain call in tail
 ;; position, its arguments collecting nothing, counts as no call
@@ -285,21 +286,54 @@
 ;; being compiled's fast version.
 (define r-looped (ref bool @k) (new #f))
 (define r-assumed (ref r-assumptions @k) (new nil))
+;; How many times each global this program writes has been written once the
+;; `global!`s emitted so far have run, by its name, newest first; and the
+;; globals the form being compiled writes. As the Rust compiler's `writes`
+;; and `form_writes`.
+(define-type c-write (pairof wglobal int @k))
+(define-type c-globals (listof wglobal @k))
+(define-type c-write-table (table symbol (listof c-write @k) @k))
+(define c-writes (ref c-write-table @k) (new (make-table symbol-hash symbol=?)))
+(define c-writes-of (subr rreads (wglobal) (listof c-write @k))
+  (lambda (g) (table-ref (get c-writes) (wglobal-name g) (the (listof c-write @k) nil))))
+(define c-form-writes (ref c-globals @k) (new nil))
+(define c-writes-in (subr rscans ((listof c-write @k) wglobal) int)
+  (lambda (xs g)
+    (cond ((null? xs) (wglobal-writes g))
+          ((wglobal=? (car (car xs)) g) (cdr (car xs)))
+          (else (c-writes-in (cdr xs) g)))))
+(define c-count-in (subr rscans (c-globals wglobal int) int)
+  (lambda (xs g n) (if (null? xs) n (c-count-in (cdr xs) g (if (wglobal=? (car xs) g) (+ n 1) n)))))
+;; What a `global-guard` of `g` made now expects: how many times `g` has
+;; been written once the form being compiled has run, its own writes too.
+;; As the Rust compiler's `writes_expected`.
+(define c-writes-expected (subr rscans (wglobal) int)
+  (lambda (g) (c-count-in (get c-form-writes) g (c-writes-in (c-writes-of g) g))))
+(define c-without-one (subr rbuilds (c-globals wglobal) c-globals)
+  (lambda (xs g)
+    (cond ((null? xs) xs)
+          ((wglobal=? (car xs) g) (cdr xs))
+          (else (the c-globals (cons (car xs) (c-without-one (cdr xs) g)))))))
+;; A `global!` of `g` emitted: once it runs, `g` written once more.
+(define c-wrote! (subr (maxeff emits spin) (wglobal) unit)
+  (lambda (g)
+    (let* ((ws (c-writes-of g)) (n (+ (c-writes-in ws g) 1)))
+      (begin
+        (table-set! (get c-writes) (wglobal-name g)
+                    (the (listof c-write @k) (cons (the c-write (cons g n)) ws)))
+        (set c-form-writes (c-without-one (get c-form-writes) g))))))
 (define r-assumed-has? (subr rreads (r-assumptions wglobal) bool)
   (lambda (xs cell)
-    (and (not (null? xs)) (or (wglobal=? (car (car xs)) cell) (r-assumed-has? (cdr xs) cell)))))
-;; That global `cell` holds a closure of `word`, assumed: noted.
-(define r-note-assumed (subr emits (wglobal tword) unit)
-  (lambda (cell word)
-    (set r-assumed (the r-assumptions (cons (the r-assumption (cons cell (rg-word word)))
-                                            (get r-assumed))))))
+    (and (not (null? xs)) (or (wglobal=? (car xs) cell) (r-assumed-has? (cdr xs) cell)))))
 ;; Whether the body being compiled is its fast version, which assumes what
 ;; the guard would test: if so, the assumption noted, for its guard at the
 ;; start.
-(define r-assume (subr emits (wglobal tword) bool)
-  (lambda (cell word)
+(define r-assume (subr emits (wglobal) bool)
+  (lambda (cell)
     (if (get r-assuming)
-        (begin (if (r-assumed-has? (get r-assumed) cell) #u (r-note-assumed cell word))
+        (begin (if (r-assumed-has? (get r-assumed) cell)
+                   #u
+                   (set r-assumed (the r-assumptions (cons cell (get r-assumed)))))
                #t)
         #f)))
 ;; The top-level definition whose body is being compiled: its name and
@@ -347,12 +381,9 @@
         rest
         (let ((rest (the wcells (cons (wcell-int (- plain-at (+ at 4)))
                                       (r-guard-cells (cdr xs) (+ at 4) plain-at rest))))
-              (c (wcell-global (car (car xs)))))
-          (tagcase (cdr (car xs))
-            (rg-word (w)
-              (the wcells (cons (wcell-int rop-global-guard) (cons c (cons (wcell-word w) rest)))))
-            (rg-value (v)
-              (the wcells (cons (wcell-int rop-value-guard) (cons c (cons v rest))))))))))
+              (c (wcell-global (car xs)))
+              (n (wcell-int (c-writes-expected (car xs)))))
+          (the wcells (cons (wcell-int rop-global-guard) (cons c (cons n rest))))))))
 ;; The names `e` binds, in order.
 (define r-cenv-names (subr rbuilds (cenv) syms)
   (lambda (e) (if (null? e) nil (cons (car (car e)) (r-cenv-names (cdr e))))))
@@ -385,18 +416,17 @@
   (lambda (cs acc)
     (if (null? cs)
         acc
-        (r-consts-assumed (cdr cs)
-                          (let ((v (rg-value (r-const-cell (cdr (car cs))))))
-                            (the r-assumptions
-                              (cons (the r-assumption (cons (car (car cs)) v)) acc)))))))
+        (r-consts-assumed (cdr cs) (the r-assumptions (cons (car (car cs)) acc))))))
 ;; The one of `c-inlines` that `n`, taking `k` arguments, names, if any.
 (define r-inline-named
-  (subr (maxeff rreads (alloc @k)) ((listof c-inline acyclic) symbol int) (listof c-inline acyclic))
-  (lambda (xs n k)
+  (subr (maxeff rreads (alloc @k)) ((listof c-inline acyclic) symbol int int)
+        (listof c-inline acyclic))
+  (lambda (xs n k lim)
     (cond ((null? xs) nil)
-          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
+          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k)
+                (c-sees? lim (extract (car xs) 5)))
            (the (listof c-inline acyclic) (cons (car xs) nil)))
-          (else (r-inline-named (cdr xs) n k)))))
+          (else (r-inline-named (cdr xs) n k lim)))))
 ;; A standard operation as a value, into RESULT: its closure, of the word
 ;; the stack code made for it (`c-standard-word`), and that word's
 ;; register code. A leaf makes it only in tail position. `list`'s, a
@@ -429,7 +459,7 @@
               nil
               (tagcase (car l)
                 (rl-global (cell)
-                  (let ((i (r-inline-named (get c-inlines) n k)))
+                  (let ((i (r-inline-named (get c-inlines) n k (get c-genv))))
                     (if (null? i) nil (the (listof rinline @k) (cons (cons (car i) cell) nil)))))
                 (else y nil)))))
       (else y nil))))
@@ -509,8 +539,8 @@
           (and (not (null? l))
                (tagcase (car l)
                  (at-global (c)
-                   (and (null? (r-inline-named (get c-inlines) name n))
-                        (null? (r-special-named (get c-specials) name n))))
+                   (and (null? (r-inline-named (get c-inlines) name n (get c-genv)))
+                        (null? (r-special-named (get c-specials) name n (get c-genv)))))
                  (at-slot (i) #t)
                  (at-free (i) #t)
                  (else y #f)))))
@@ -574,6 +604,10 @@
                                              (not (r-collects f e this #f))))))))
             (or args-collect
                 (not (or loop-call (or inline (or leaves (r-call-is-free? f n e tail))))))))
+        ;; A `with` only loads fields (`r-with`): as its body.
+        (e-with (m body a b)
+          (let ((ns (c-with-at a b)))
+            (r-collects body (if (null? ns) e (r-local-syms e (car ns))) this tail)))
         (else y #t))))
   (r-collects-all (subr rcompiles (exps cenv rthis) bool)
     (lambda (es e this)
@@ -602,7 +636,7 @@
              (e-var (name a b)
                (and (r-global-callee? e name)
                     (or (and tail (and (null? (get c-inlining)) (r-own-is? name n)))
-                        (let ((i (r-inline-named (get c-inlines) name n)))
+                        (let ((i (r-inline-named (get c-inlines) name n (get c-genv))))
                           (and (not (null? i)) (not (r-inlined-collects? (car i) name tail)))))))
              (else y #f)))))
   ;; Whether the body of `i`, inlined procedure `name`, calls or calls out,
@@ -903,6 +937,10 @@
 (define r-looped (with regcode-exps-module r-looped))
 (define r-assumed (with regcode-exps-module r-assumed))
 (define r-assume (with regcode-exps-module r-assume))
+(define c-writes (with regcode-exps-module c-writes))
+(define c-form-writes (with regcode-exps-module c-form-writes))
+(define c-writes-expected (with regcode-exps-module c-writes-expected))
+(define c-wrote! (with regcode-exps-module c-wrote!))
 (define-type rown-name (select regcode-exps-module rown-name))
 (define r-own-name (with regcode-exps-module r-own-name))
 (define r-self-moves (with regcode-exps-module r-self-moves))

@@ -389,6 +389,14 @@ pub mod cellular {
     /// was compiled from (`#f` if none), kept for showing it
     /// (`%disassemble`); field 1 is the bloblet itself.
     pub const CODE_SOURCE: usize = 2;
+    /// A global's cell, a plain bloblet: its value, its name (for showing),
+    /// and how many times it has been written, a fixnum that every
+    /// machine's `global!` and `setglbl` adds one to, and nothing else
+    /// changes; what `global-guard` tests.
+    pub const GLOBAL_VALUE: usize = 2;
+    pub const GLOBAL_NAME: usize = 3;
+    pub const GLOBAL_WRITES: usize = 4;
+    pub const GLOBAL_FIELDS: usize = 3;
 
     /// A cellular continuation's fields: the data stack's values and the
     /// return stack's entries it took (vectors), where it was (word, `k`,
@@ -474,13 +482,12 @@ pub mod regcode {
         ("branchf", 1, "the same if RESULT is #f"),
         ("cellular", 2, "cellular routine r with REG1…REGn as its data stack operands; RESULT := what it leaves; may collect"),
         ("invokeself", 1, "call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may collect"),
-        ("global-guard", 3, "unless global cell g holds a closure made from cellular word w (a cellular closure of w, or a native one whose code was compiled from w), skip the third operand's count of cells, counted after it; RESULT kept"),
+        ("global-guard", 3, "unless global cell g has been written n times (`cellular::GLOBAL_WRITES`), as when this code was compiled: what a fast version assumed of the global (a procedure inlined or specialized, a constant folded, a module's member folded through a `with`, `TODO.md` §42) it still holds; else skip the third operand's count of cells, counted after it; RESULT kept"),
         ("brancht", 1, "the same as branch if RESULT is not #f"),
         ("vargs", 0, "entered with any number of arguments, their count in a register (x9, natively), in REG1…REGn (past REGS, a list of the rest in the last); first, instead of args, and only first"),
         ("prim1", 1, "RESULT := runtime primitive p applied to RESULT: one that never collects (`fixpt_runtime::never_collects`), so that no register need be in the frame"),
         ("prim2", 2, "RESULT := such a primitive p applied to RESULT and REGk"),
         ("prim2imm", 2, "RESULT := such a primitive p applied to RESULT and x"),
-        ("value-guard", 3, "unless global cell g holds value v, the same word (a constant a fast version folded, `TODO.md` §42: an immediate, or an object by identity), skip the third operand's count of cells, counted after it; RESULT kept"),
     ];
 
     pub const fn op(name: &str) -> usize {
@@ -618,6 +625,8 @@ fn fx26_definitions() -> String {
     out.push_str(&format!("(define word-cell0 int {})\n", cellular::WORD_CELL0));
     out.push_str(&format!("(define cellular-closure-word int {})\n", cellular::CLOSURE_WORD));
     out.push_str(&format!("(define cellular-closure-free0 int {})\n", cellular::CLOSURE_FREE0));
+    out.push_str(&format!("(define global-value int {})\n", cellular::GLOBAL_VALUE));
+    out.push_str(&format!("(define global-writes int {})\n", cellular::GLOBAL_WRITES));
     for (i, (name, effect)) in cellular::ROUTINES.iter().enumerate() {
         commented(&mut out, &format!("(define routine-{} int {i})", fx_name(name)), effect);
     }

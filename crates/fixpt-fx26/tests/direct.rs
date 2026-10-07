@@ -384,10 +384,24 @@ fn array_elements_in_and_out_of_range() {
     assert!(matches!(&r.direct, Err(m) if m.contains("field")), "{:?} (the Rust machine: {})\n{}", r.direct, r.rust, r.code);
 }
 
+/// A module's member folded through a `with`, then the module redefined
+/// (`TODO.md` §42): its global written again, the guard fails, and the
+/// plain version reads the new module's member.
+#[test]
+fn a_folded_module_member_redefined_is_seen() {
+    let step = "(define m (module (define k int 3)))\n\
+                (define* step (subr (read (globals m)) (int) int) (lambda (x) (with m (+ x k))))\n";
+    let r = run(step, "step", &[4], FUEL);
+    assert_eq!(r.direct, Ok("7".into()), "{}", r.code);
+    let r = run(&format!("{step}(define m (module (define k int 5)))\n"), "step", &[4], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("9".into()), "9"), "{}", r.code);
+}
+
 /// A constant folded in a fast version, then redefined (`TODO.md` §42):
 /// each definition at the same type assigns its global, so when the machine
-/// code is made the cell no longer holds what the fast version assumed, its
-/// `value-guard` fails, and the plain version sees the value there is now.
+/// code runs the cell has been written since the fast version was compiled,
+/// its `global-guard` fails, and the plain version sees the value there is
+/// now.
 #[test]
 fn a_folded_constant_redefined_is_seen() {
     let step = "(define k int 3)\n(define flag bool #t)\n\

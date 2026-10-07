@@ -41,9 +41,11 @@ are in the last section, "Log: the glance's details", and in
 - **M13, the compilers** (`docs/performance.md`): the Rust compiler to
   cellular words; register code (the MacScheme machine); guarded inlining,
   specialization at a lambda, versions (a fast body under guards at its
-  start), join points; effect summaries in both checkers; constants folded,
-  constant data made once; operands in written order, constant chains
-  combined; tests compiled as jumps.
+  start; one guard, a global's count of writes, since 2026-10-07), join
+  points; effect summaries in both checkers; constants folded, global ones
+  and modules' members through `with` too, constant data made once;
+  operands in written order, constant chains combined; tests compiled as
+  jumps.
 - **The native convention** (`docs/research/native-conventions.md`), steps
   1–5 in large part (the collector's part of step 3 is below): conventions
   in types; native frames, `bl`/`ret`; code in the heap's collected code

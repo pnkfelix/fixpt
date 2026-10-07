@@ -27,6 +27,11 @@
 ;; The globals whose bodies are being inlined, which are not again.
 (define c-inlining (ref syms @k) (new nil))
 
+;; Whether a procedure noted to be inlined or specialized when the globals
+;; were `at` long is the one its name means where they are seen as `lim`
+;; long (`c-genv`; -1, all of them): as the Rust compiler's `sees`.
+(define c-sees? (subr pure (int int) bool) (lambda (lim at) (or (< lim 0) (<= at lim))))
+
 ;; `xs` without `n`'s.
 (define c-drop-inline (subr c-builds (c-inlinables symbol) c-inlinables)
   (lambda (xs n)
@@ -64,12 +69,13 @@
   (lambda (es k) (if (= k 0) (car es) (c-nth (cdr es) (- k 1)))))
 
 ;; How many of `n` parser-tree nodes are left once `x`'s are counted, as the
-;; Rust compiler's `inline_room` counts them: negative, and counted no
-;; further, once they run out, or at a form that makes a closure, which an
-;; inlined body would have to capture its slots in.
+;; Rust compiler's `room` counts them: negative, and counted no further,
+;; once they run out, or at a form that makes a closure, which an inlined
+;; body would have to capture its slots in; a `with` counted as its body if
+;; `w` (a fast version's question, `TODO.md` §42), else as such a form.
 (define-rec
-  (c-inline-room (subr (maxeff (read @globals) spin) (exp int) int)
-    (lambda (x n0)
+  (c-room (subr (maxeff (read @globals) spin) (exp int bool) int)
+    (lambda (x n0 w)
       (let ((n (- n0 1)))
         (if (< n 0)
             n
@@ -79,41 +85,44 @@
               (e-letrec (bs body a b) -1)
               (e-prompt (t body h a b) -1)
               (e-module (items a b) -1)
-              (e-with (m body a b) -1)
-              (e-app (f args a b) (c-inline-room-all args (c-inline-room f n)))
-              (e-plambda (d body a b) (c-inline-room body n))
-              (e-proj (body ds a b) (c-inline-room body n))
-              (e-the (d body a b) (c-inline-room body n))
-              (e-convention (cnv body a b) (c-inline-room body n))
-              (e-letregion (k r i body a b) (c-inline-room body n))
-              (e-if (t th el a b) (c-inline-room-if el (c-inline-room-if th (c-inline-room t n))))
-              (e-let (bs body a b) (c-inline-room-if body (c-inline-room-let bs n)))
-              (e-begin (es a b) (c-inline-room-all es n))
-              (e-bloblet (op i args a b) (c-inline-room-all args n))
-              (e-product (fs a b) (c-inline-room-let fs n))
-              (e-extract (p l a b) (c-inline-room p n))
-              (e-sum (t v a b) (c-inline-room v n))
+              (e-with (m body a b) (if w (c-room body n w) -1))
+              (e-app (f args a b) (c-room-all args (c-room f n w) w))
+              (e-plambda (d body a b) (c-room body n w))
+              (e-proj (body ds a b) (c-room body n w))
+              (e-the (d body a b) (c-room body n w))
+              (e-convention (cnv body a b) (c-room body n w))
+              (e-letregion (k r i body a b) (c-room body n w))
+              (e-if (t th el a b) (c-room-if el (c-room-if th (c-room t n w) w) w))
+              (e-let (bs body a b) (c-room-if body (c-room-let bs n w) w))
+              (e-begin (es a b) (c-room-all es n w))
+              (e-bloblet (op i args a b) (c-room-all args n w))
+              (e-product (fs a b) (c-room-let fs n w))
+              (e-extract (p l a b) (c-room p n w))
+              (e-sum (t v a b) (c-room v n w))
               (e-tagcase (s arms els a b)
-                (c-inline-room-else els (c-inline-room-arms arms (c-inline-room s n))))
+                (c-room-else els (c-room-arms arms (c-room s n w) w) w))
               (else y n))))))
   ;; `x`'s nodes counted from `n`, unless none are left.
-  (c-inline-room-if (subr (maxeff (read @globals) spin) (exp int) int)
-    (lambda (x n) (if (< n 0) n (c-inline-room x n))))
-  (c-inline-room-all (subr (maxeff (read @globals) spin) (exps int) int)
-    (lambda (es n)
-      (if (or (null? es) (< n 0)) n (c-inline-room-all (cdr es) (c-inline-room (car es) n)))))
-  (c-inline-room-let (subr (maxeff (read @globals) spin) (c-binds int) int)
-    (lambda (bs n)
+  (c-room-if (subr (maxeff (read @globals) spin) (exp int bool) int)
+    (lambda (x n w) (if (< n 0) n (c-room x n w))))
+  (c-room-all (subr (maxeff (read @globals) spin) (exps int bool) int)
+    (lambda (es n w)
+      (if (or (null? es) (< n 0)) n (c-room-all (cdr es) (c-room (car es) n w) w))))
+  (c-room-let (subr (maxeff (read @globals) spin) (c-binds int bool) int)
+    (lambda (bs n w)
       (if (or (null? bs) (< n 0))
           n
-          (c-inline-room-let (cdr bs) (c-inline-room (extract (car bs) 2) n)))))
-  (c-inline-room-arms (subr (maxeff (read @globals) spin) (c-cases int) int)
-    (lambda (arms n)
+          (c-room-let (cdr bs) (c-room (extract (car bs) 2) n w) w))))
+  (c-room-arms (subr (maxeff (read @globals) spin) (c-cases int bool) int)
+    (lambda (arms n w)
       (if (or (null? arms) (< n 0))
           n
-          (c-inline-room-arms (cdr arms) (c-inline-room (extract (car arms) 4) n)))))
-  (c-inline-room-else (subr (maxeff (read @globals) spin) (c-binds int) int)
-    (lambda (els n) (if (or (null? els) (< n 0)) n (c-inline-room (extract (car els) 2) n)))))
+          (c-room-arms (cdr arms) (c-room (extract (car arms) 4) n w) w))))
+  (c-room-else (subr (maxeff (read @globals) spin) (c-binds int bool) int)
+    (lambda (els n w) (if (or (null? els) (< n 0)) n (c-room (extract (car els) 2) n w)))))
+(define c-inline-room (subr (maxeff (read @globals) spin) (exp int) int)
+  (lambda (x n) (c-room x n #f)))
+
 ;; A call of a global, as planned (step 3): the small procedure it may be
 ;; inlined as, and the procedure it may be specialized as with the lambda
 ;; argument, each in a list of none or one; by where the call is.
@@ -174,20 +183,23 @@
             (table-set! (get c-plan-calls) c (make-table c-int-hash c-int=?)))
         (table-set! (table-ref (get c-plan-calls) c (get c-no-calls)) (c-span-key a b) called)))))
 ;; The one of `xs` that `n`, taking `k` arguments, names, if any.
-(define p-inline-named (subr (maxeff (read @globals) (alloc @k)) (c-inlinables symbol int)
+(define p-inline-named (subr (maxeff (read @globals) (alloc @k)) (c-inlinables symbol int int)
                             (listof c-inline acyclic))
-  (lambda (xs n k)
+  (lambda (xs n k lim)
     (cond ((null? xs) nil)
-          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
+          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k)
+                (c-sees? lim (extract (car xs) 5)))
            (the (listof c-inline acyclic) (cons (car xs) nil)))
-          (else (p-inline-named (cdr xs) n k)))))
-(define p-special-named (subr (maxeff (read @globals) (alloc @k)) (c-specializables symbol int)
-                             (listof c-special acyclic))
-  (lambda (xs n k)
+          (else (p-inline-named (cdr xs) n k lim)))))
+(define p-special-named
+  (subr (maxeff (read @globals) (alloc @k)) (c-specializables symbol int int)
+        (listof c-special acyclic))
+  (lambda (xs n k lim)
     (cond ((null? xs) nil)
-          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k))
+          ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k)
+                (c-sees? lim (extract (car xs) 5)))
            (the (listof c-special acyclic) (cons (car xs) nil)))
-          (else (p-special-named (cdr xs) n k)))))
+          (else (p-special-named (cdr xs) n k lim)))))
 ;; `sp` and the lambda argument at its parameter, in a list, when that is a
 ;; lambda small enough to inline, taking as many arguments as it is called
 ;; with.
@@ -291,12 +303,12 @@
             (if (or (null? l) (not (c-global? (car l))))
                 #u
                 (let* ((k (c-count-exps args))
-                       (sp (p-special-named (get c-specials) n k))
+                       (sp (p-special-named (get c-specials) n k (get c-genv)))
                        (spl (if (null? sp) (the c-spec-calls nil) (p-special-lambda (car sp) args)))
                        ;; Not a body being inlined on the way here.
                        (inl (if (c-member? (get c-plan-inlining) n)
                                 (the (listof c-inline acyclic) nil)
-                                (p-inline-named (get c-inlines) n k))))
+                                (p-inline-named (get c-inlines) n k (get c-genv)))))
                   (begin
                     (p-note-call a b (product (1 inl) (2 spl)))
                     (if (or (null? inl) (>= (c-plan-child (get c-plan-now) n k) 0))
@@ -566,6 +578,7 @@
 (define c-inlines (with compile-plan-module c-inlines))
 (define c-inlining (with compile-plan-module c-inlining))
 (define c-drop-inline (with compile-plan-module c-drop-inline))
+(define c-sees? (with compile-plan-module c-sees?))
 (define c-special-limit (with compile-plan-module c-special-limit))
 (define-type c-special (select compile-plan-module c-special))
 (define-type c-specializables (select compile-plan-module c-specializables))
@@ -573,6 +586,7 @@
 (define c-drop-special (with compile-plan-module c-drop-special))
 (define c-nth (with compile-plan-module c-nth))
 (define c-inline-room (with compile-plan-module c-inline-room))
+(define c-room (with compile-plan-module c-room))
 (define-type c-spec-call (select compile-plan-module c-spec-call))
 (define-type c-spec-calls (select compile-plan-module c-spec-calls))
 (define-type c-called (select compile-plan-module c-called))

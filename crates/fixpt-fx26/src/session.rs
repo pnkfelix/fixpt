@@ -1156,6 +1156,11 @@ impl Fx26Session {
             NativeRun::Ran(Ok(v)) => {
                 let g = rt.heap.root_at(at);
                 rt.heap.set_bloblet_slot(g, 2, v);
+                // A write, as `global!`'s, which the guards count: the
+                // global may be one kept, defined again.
+                let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
+                let n = rt.heap.bloblet_slot(g, w).as_fixnum();
+                rt.heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(n + 1));
                 Ok(())
             }
             other => Err(other),
@@ -1237,6 +1242,9 @@ impl Fx26Session {
                 let start = std::time::Instant::now();
                 let compiled = compile(heap, v);
                 nanos = start.elapsed().as_nanos() as u64;
+                // The same procedure, in the other convention: not counted
+                // as a write, so that what was compiled assuming the global
+                // holds it still holds (`global-guard`).
                 match compiled {
                     Ok(native) => heap.set_bloblet_slot(g, 2, native),
                     Err(why) => r = Err(why),

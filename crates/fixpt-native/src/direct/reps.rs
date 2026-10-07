@@ -215,7 +215,7 @@ fn demand_step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
             }
             regs(n).for_each(|r| use_(&mut d, r, Demand::Other));
         }
-        "branch" | "global-guard" | "value-guard" | "save" | "pop" => {}
+        "branch" | "global-guard" | "save" | "pop" => {}
         _ => d = [Demand::Other; 9],
     }
     d
@@ -303,7 +303,7 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
             *reps = [Rep::Undefined; 9];
             reps[0] = Rep::Value;
         }
-        "branch" | "global-guard" | "value-guard" | "save" | "pop" => {}
+        "branch" | "global-guard" | "save" | "pop" => {}
         _ => {
             // Any other: every register a value, to be safe.
             (0..9).for_each(|r| need(reps, r, Rep::Value));
@@ -333,7 +333,7 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
         match op {
             "return" | "tailinvoke" => vec![],
             "branch" => to().into_iter().collect(),
-            "branchf" | "brancht" | "global-guard" | "value-guard" => next.into_iter().chain(to()).collect(),
+            "branchf" | "brancht" | "global-guard" => next.into_iter().chain(to()).collect(),
             _ => next.into_iter().collect(),
         }
     };
@@ -381,7 +381,7 @@ fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
             match op {
                 "return" | "tailinvoke" => vec![],
                 "branch" => to().into_iter().collect(),
-                "branchf" | "brancht" | "global-guard" | "value-guard" => next.into_iter().chain(to()).collect(),
+                "branchf" | "brancht" | "global-guard" => next.into_iter().chain(to()).collect(),
                 _ => next.into_iter().collect(),
             }
         })

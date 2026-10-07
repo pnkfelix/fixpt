@@ -22,7 +22,7 @@
 
 use super::*;
 use fixpt_heap::layout::regcode::{OPS, REGS};
-use fixpt_heap::layout::cellular::{routine, WORD_TWIN};
+use fixpt_heap::layout::cellular::{routine, GLOBAL_WRITES, WORD_TWIN};
 
 const RESULT: Reg = 0;
 const X12: Reg = 12;
@@ -591,7 +591,7 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
     let mut j = 0;
     while j < cells.len() {
         let (name, n, _) = OPS[cells[j].as_fixnum() as usize];
-        if matches!(name, "branch" | "branchf" | "brancht" | "global-guard" | "value-guard") {
+        if matches!(name, "branch" | "branchf" | "brancht" | "global-guard") {
             let to = j as i64 + 1 + n as i64 + cells[j + n].as_fixnum();
             if to <= j as i64 {
                 loop_heads[to as usize] = true;
@@ -627,6 +627,10 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 a.e(mov(X11, X16));
                 a.e(if name == "global" { ldur(RESULT, X11, field_off(2)) } else { stur(RESULT, X11, field_off(2)) });
                 if name == "setglbl" {
+                    // One more write, for the guards (`global-guard`).
+                    a.e(ldur(X16, X11, field_off(GLOBAL_WRITES)));
+                    a.e(add_imm(X16, X16, Value::fixnum(1).raw() as u32));
+                    a.e(stur(X16, X11, field_off(GLOBAL_WRITES)));
                     a.es(&card_mark(X11, field_off(2), ST, off(offset_of!(State, cards)), X13, X16));
                 }
             }
@@ -936,29 +940,13 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     a.b(labels[to]);
                 }
             }
-            // The global's value's field 2: a cellular closure's word, or a
-            // native closure's code, whose field 2 is the word it was
-            // compiled from (`CODE_SOURCE`); a word's field 2 is no word.
+            // How many times the global has been written, against how many
+            // when this code was compiled.
             "global-guard" => {
                 let to = (i as i64 + 4 + o(2).as_fixnum()) as usize;
-                let held = a.label();
                 a.cell(X16, f(0), fields);
-                a.e(ldur(X11, X16, field_off(2)));
-                a.e(ldur(X12, X11, field_off(CLOSURE_WORD)));
-                a.cell(X16, f(1), fields);
-                a.e(cmp(X12, X16));
-                a.b_cond(Cond::Eq, held);
-                a.e(ldur(X12, X12, field_off(fixpt_heap::layout::cellular::CODE_SOURCE)));
-                a.e(cmp(X12, X16));
-                a.b_cond(Cond::Ne, labels[to]);
-                a.bind(held);
-            }
-            // The global's value against the constant a fast version folded.
-            "value-guard" => {
-                let to = (i as i64 + 4 + o(2).as_fixnum()) as usize;
-                a.cell(X16, f(0), fields);
-                a.e(ldur(X11, X16, field_off(2)));
-                a.cell(X16, f(1), fields);
+                a.e(ldur(X11, X16, field_off(GLOBAL_WRITES)));
+                a.es(&mov_imm64(X16, o(1).raw()));
                 a.e(cmp(X11, X16));
                 a.b_cond(Cond::Ne, labels[to]);
             }

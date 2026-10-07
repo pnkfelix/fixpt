@@ -58,15 +58,15 @@
 (define-datatype rconst (rc-int int) (rc-bool bool) (rc-char char) (rc-nil) (rc-data wcell))
 (define-type rconsts (listof rconst @k))
 ;; The globals defined as constants (`TODO.md` §42), each cell and value,
-;; newest first; each module's literal members, by the module's name; and,
+;; newest first; each module's literal members, by the module's global; and,
 ;; while a fast version is compiled, the constants it folds, each behind a
-;; `value-guard` (`r-fast-code`). As the Rust compiler's `const_globals`,
+;; `global-guard` (`r-fast-code`). As the Rust compiler's `const_globals`,
 ;; `module_consts` and `consts_now`.
 (define-type r-const-global (pairof wglobal rconst @k))
 (define-type r-const-list (listof r-const-global @k))
 (define r-const-globals (ref r-const-list @k) (new nil))
 (define-type r-member-const (pairof symbol rconst @k))
-(define-type r-module-const (pairof symbol (listof r-member-const @k) @k))
+(define-type r-module-const (pairof wglobal (listof r-member-const @k) @k))
 (define r-module-consts (ref (listof r-module-const @k) @k) (new nil))
 (define r-consts-now (ref r-const-list @k) (new nil))
 ;; Global `g`'s constant in `cs`, in a list; none if it has none.
@@ -75,6 +75,26 @@
     (cond ((null? cs) nil)
           ((wglobal=? (car (car cs)) g) (the rconsts (cons (cdr (car cs)) nil)))
           (else (r-const-in (cdr cs) g)))))
+;; The literal members of the module global `g` holds, in a list; none if it
+;; has none noted.
+(define-type r-members-at (listof (listof r-member-const @k) @k))
+(define r-module-consts-of (subr rbuilds ((listof r-module-const @k) wglobal) r-members-at)
+  (lambda (ms g)
+    (cond ((null? ms) nil)
+          ((wglobal=? (car (car ms)) g) (the r-members-at (cons (cdr (car ms)) nil)))
+          (else (r-module-consts-of (cdr ms) g)))))
+;; Member `f`'s literal of `cs`, in a list; none if it is not one.
+(define r-member-in (subr rbuilds ((listof r-member-const @k) symbol) rconsts)
+  (lambda (cs f)
+    (cond ((null? cs) nil)
+          ((symbol=? (car (car cs)) f) (the rconsts (cons (cdr (car cs)) nil)))
+          (else (r-member-in (cdr cs) f)))))
+;; Member `f`'s literal of the module global `g` holds, in a list; none if
+;; it has none.
+(define r-member-const (subr rbuilds (wglobal symbol) rconsts)
+  (lambda (g f)
+    (let ((cs (r-module-consts-of (get r-module-consts) g)))
+      (if (null? cs) nil (r-member-in (car cs) f)))))
 
 (define-datatype rloc
   (rl-reg int)
@@ -790,6 +810,7 @@
 (define r-const-globals (with regcode-module r-const-globals))
 (define-type r-member-const (select regcode-module r-member-const))
 (define r-module-consts (with regcode-module r-module-consts))
+(define r-member-const (with regcode-module r-member-const))
 (define r-consts-now (with regcode-module r-consts-now))
 (define r-const-in (with regcode-module r-const-in))
 (define r-bind (with regcode-module r-bind))

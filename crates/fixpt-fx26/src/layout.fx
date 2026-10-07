@@ -93,6 +93,8 @@
 (define word-cell0 int 5)
 (define cellular-closure-word int 2)
 (define cellular-closure-free0 int 3)
+(define global-value int 2)
+(define global-writes int 4)
 (define routine-docol int 0)  ; run a word's cells
 (define routine-exit int 1)  ; return to the calling word
 (define routine-halt int 2)  ; stop, leaving the data stack as the result
@@ -187,9 +189,10 @@
 ;; 1: call the procedure running (REG0) with REG1…REGn, by its own entry; RESULT := its value; may
 ;; collect
 (define rop-invokeself int 27)
-;; 3: unless global cell g holds a closure made from cellular word w (a cellular closure of w, or a
-;; native one whose code was compiled from w), skip the third operand's count of cells, counted
-;; after it; RESULT kept
+;; 3: unless global cell g has been written n times (`cellular::GLOBAL_WRITES`), as when this code
+;; was compiled: what a fast version assumed of the global (a procedure inlined or specialized, a
+;; constant folded, a module's member folded through a `with`, `TODO.md` §42) it still holds; else
+;; skip the third operand's count of cells, counted after it; RESULT kept
 (define rop-global-guard int 28)
 (define rop-brancht int 29)  ; 1: the same as branch if RESULT is not #f
 ;; 0: entered with any number of arguments, their count in a register (x9, natively), in REG1…REGn
@@ -200,10 +203,6 @@
 (define rop-prim1 int 31)
 (define rop-prim2 int 32)  ; 2: RESULT := such a primitive p applied to RESULT and REGk
 (define rop-prim2imm int 33)  ; 2: RESULT := such a primitive p applied to RESULT and x
-;; 3: unless global cell g holds value v, the same word (a constant a fast version folded, `TODO.md`
-;; §42: an immediate, or an object by identity), skip the third operand's count of cells, counted
-;; after it; RESULT kept
-(define rop-value-guard int 34)
 (define register-regs int 8)))
 
 (define tag-fixnum (with layout-module tag-fixnum))
@@ -281,6 +280,8 @@
 (define word-cell0 (with layout-module word-cell0))
 (define cellular-closure-word (with layout-module cellular-closure-word))
 (define cellular-closure-free0 (with layout-module cellular-closure-free0))
+(define global-value (with layout-module global-value))
+(define global-writes (with layout-module global-writes))
 (define routine-docol (with layout-module routine-docol))
 (define routine-exit (with layout-module routine-exit))
 (define routine-halt (with layout-module routine-halt))
@@ -366,5 +367,4 @@
 (define rop-prim1 (with layout-module rop-prim1))
 (define rop-prim2 (with layout-module rop-prim2))
 (define rop-prim2imm (with layout-module rop-prim2imm))
-(define rop-value-guard (with layout-module rop-value-guard))
 (define register-regs (with layout-module register-regs))

@@ -342,6 +342,8 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("close-over-word!", "%fx26-close-over-word!", false),
     ("wcell-product", "%fx26-product-cell", false),
     ("make-global", "%fx26-make-global", false),
+    ("wglobal-writes", "%fx26-global-writes", false),
+    ("wglobal-name", "%fx26-global-name", false),
     ("wglobal=?", "eq?", false),
     ("runtime-primitive", "%runtime-primitive", false),
     ("runtime-primitive-arity", "%runtime-primitive-arity", false),

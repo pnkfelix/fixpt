@@ -846,6 +846,10 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             } else {
                 a.e(ldr_post(X15, DSP, 8));
                 a.e(stur(X15, X11, field_off(2)));
+                // One more write, for the guards (`global-guard`).
+                a.e(ldur(X16, X11, field_off(fixpt_heap::layout::cellular::GLOBAL_WRITES)));
+                a.e(add_imm(X16, X16, Value::fixnum(1).raw() as u32));
+                a.e(stur(X16, X11, field_off(fixpt_heap::layout::cellular::GLOBAL_WRITES)));
                 a.es(&card_mark(X11, field_off(2), ST, off(offset_of!(State, cards)), X13, X16));
             }
             a.cont();

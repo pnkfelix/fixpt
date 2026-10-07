@@ -86,14 +86,10 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
                     return Err(format!("cell {i}: a guard's offset is a fixnum"));
                 }
                 branches.push((i, i as i64 + 4 + o(2).as_fixnum()));
-                o(0).is_bloblet() && heap.is_cellular_word(o(1))
-            }
-            "value-guard" => {
-                if !o(2).is_fixnum() {
-                    return Err(format!("cell {i}: a guard's offset is a fixnum"));
-                }
-                branches.push((i, i as i64 + 4 + o(2).as_fixnum()));
                 o(0).is_bloblet()
+                    && heap.bloblet_head(o(0)).fields >= crate::layout::cellular::GLOBAL_FIELDS
+                    && o(1).is_fixnum()
+                    && o(1).as_fixnum() >= 0
             }
             _ => true,
         };

@@ -2471,3 +2471,55 @@ Below the 1.549 s from before the day's module work began. The suite
 given the checker's record with the reshapes (`ev-begin!`), and binds a
 `with`'s whole module only where there is none (`run-program`, a program
 run unchecked).
+
+## One guard: a global not written since (2026-10-07)
+
+The fast versions had three guards: `global-guard g w` (the cell holds a
+closure of word `w`, cellular or compiled from it), `value-guard g v`
+(the cell holds `v`) and, for constants folded through a `with`,
+`field-guard g i v`. Now there is one, as the user asked: `global-guard g
+n`, that global `g` has been written `n` times. A global's cell has a
+third field, its count of writes (`layout::cellular::GLOBAL_WRITES`),
+which every machine's `global!` and `setglbl` adds one to: the Rust
+machine, the hand-encoded cells, `native.fx`, the stencils, the
+registers machine and `direct.rs`; and the REPL's definition in the
+native convention, which fills a cell itself. Installing a procedure's
+native closure in place of its cellular one is not a write: the same
+procedure. A guard is two loads, a move and a compare, whatever the
+global holds, a procedure, an immediate or a module.
+
+The compiler says what `n` will be: the count when the program is
+compiled (`wglobal-writes`), plus its own `global!`s emitted so far, plus
+the form's own (a procedure calling itself through its global runs after
+its definition's write; one called while the form runs falls back).
+Both compilers keep these per program (`writes`, `form_writes`;
+`c-writes`, a table by name, `c-form-writes`). A guard is then right
+only if what the compiler assumed of the global is what it held at that
+count, so knowledge is kept by the global it is of: an inline or
+specialization note is seen only where its definition is (`sees`,
+`c-sees?`: within the globals an inlined body was compiled with), and a
+module's literal members are kept by the module's global, not its name.
+Before, an inlined body naming an older `f` could inline a newer `f`'s
+body, the word guard then failing every time; with counts it would have
+been wrong, and the REPL test of redefinition at another type showed it.
+
+`direct.rs` binds a call of a global holding a cellular closure to that
+procedure's code (F14): it now tests the count too, so at the REPL, where
+the cell soon holds the procedure's native closure (no write), the bound
+call is still taken.
+
+On the same footing, `with` in register code: in a leaf, its values in
+registers, as a `let`'s, where it declined before; and in a fast version,
+a member of a global module that is a literal folded, the module's
+global assumed (`TODO.md` §42, constants reached by a path). Both
+compilers make the same code. The front end, compiled by FX-26, HEAD then
+this, back to back, twice (ms):
+
+| run | fx words HEAD | fx words | fx M words HEAD | fx M words | fx GCs HEAD | fx GCs |
+| --- | -------------:| --------:| ---------------:| ----------:| -----------:| ------:|
+| 1   |        251.97 |   255.57 |           127.6 |      128.0 |         122 |    124 |
+| 2   |        251.18 |   258.54 |           127.6 |      128.0 |         122 |    124 |
+
+The first version kept the counts in a list, appended at each of the
+front end's 4479 definitions and searched at each: 262 and 272 ms. The
+benchmarks' run times are unchanged.

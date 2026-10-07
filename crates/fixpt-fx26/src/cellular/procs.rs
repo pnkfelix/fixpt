@@ -265,8 +265,8 @@ impl Compiler<'_> {
         }
         let n = args.len();
         // Not a body being inlined on the way here (`r_inlined`'s guard).
-        let inline = self.inlines.iter().position(|i| i.name == name && i.params.len() == n).filter(|_| !self.plan_inlining.contains(&name));
-        let special = self.specials.iter().position(|s| s.name == name && s.params.len() == n).and_then(|k| {
+        let inline = self.inlines.iter().position(|i| i.name == name && i.params.len() == n && self.sees(i.genv_len)).filter(|_| !self.plan_inlining.contains(&name));
+        let special = self.specials.iter().position(|s| s.name == name && s.params.len() == n && self.sees(s.genv_len)).and_then(|k| {
             let lam = args[self.specials[k].param];
             match self.c.arena.exp_at(lam) {
                 Exp::Lambda { params, body } if params.len() == self.specials[k].arity && self.inline_room(*body, super::INLINE_LIMIT) >= 0 => Some((k, lam)),

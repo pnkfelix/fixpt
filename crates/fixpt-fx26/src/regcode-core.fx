@@ -216,13 +216,13 @@
               ((and (r-spec-param? env f) (= n (extract (car (get c-spec-now)) 7)))
                (r-spec-lambda g args env te tail))
               ((r-spec-self? env f args)
-               (let* ((sp (car (get c-spec-now))) (cell (extract sp 2)) (word (extract sp 3)))
-                 (r-self-guarded g cell word (get r-spec-start) f args env te tail)))
+               (let* ((sp (car (get c-spec-now))) (cell (extract sp 2)))
+                 (r-self-guarded g cell (get r-spec-start) f args env te tail)))
               ;; A top-level procedure calling itself through its global, its
               ;; own name not an inlined body's, which may name an older global.
               ((not (null? (r-own-self env f args)))
                (let ((o (car (get r-own-now))) (cell (car (r-own-self env f args))))
-                 (r-self-guarded g cell (extract o 2) (extract o 4) f args env te tail)))
+                 (r-self-guarded g cell (extract o 4) f args env te tail)))
               (else
                (let ((name (r-standard-name env f)))
                  (if (string=? name "")
@@ -376,9 +376,9 @@
              (outer-ctx (get c-r-plan-ctx))
              ;; The procedure running is not known in the body.
              (h (r-unknowing g)))
-        (let ((assumed (r-assume cell (extract i 2))))
+        (let ((assumed (r-assume cell)))
           (begin
-            (if assumed #u (r-guard g cell (extract i 2) call))
+            (if assumed #u (r-guard g cell call))
             (set c-genv (extract i 5))
             (set c-inlining (cons (extract i 1) outer-inlining))
             ;; Its plan's, along the path here (3b).
@@ -455,10 +455,10 @@
           (r-opn g rop-setstk s)
           (r-exp-args-into g args env te)
           (let* ((call (r-new-label g)) (end (r-new-label g)))
-            (if (r-assume cell (extract sp 2))
+            (if (r-assume cell)
                 (begin (r-opn g rop-stack s) (r-invoke g n tail))
                 (begin
-                  (r-guard g cell (extract sp 2) call)
+                  (r-guard g cell call)
                   (r-opn g rop-stack s)
                   (r-invoke g n tail)
                   (if tail #u (r-emit g (r-branch #f end)))
@@ -504,12 +504,12 @@
             (product (1 (r-bind p l (extract rest 1))) (2 (r-local (extract rest 2) p)))))))
   ;; A procedure calling itself through its global `cell` (a top-level
   ;; definition's, or, in a copy specialized at a lambda, with the parameter
-  ;; passed as itself): the arguments made; then, if the global still holds
-  ;; a closure of `word` (its own, or the one the copy was made from), this
-  ;; procedure again, by its own entry, or in tail position a loop back to
-  ;; `start`; else the global.
-  (r-self-guarded (subr rcompiles (rgen wglobal tword int exp exps renv cenv bool) unit)
-    (lambda (g cell word start f args env te tail)
+  ;; passed as itself): the arguments made; then, if the global has not
+  ;; been written since (it holds its own closure, or the one the copy was
+  ;; made from), this procedure again, by its own entry, or in tail
+  ;; position a loop back to `start`; else the global.
+  (r-self-guarded (subr rcompiles (rgen wglobal int exp exps renv cenv bool) unit)
+    (lambda (g cell start f args env te tail)
       (let ((n (c-count-exps args)))
         ;; In a fast version, a call in tail position is a loop, in a leaf too.
         (if (and (extract g leaf) (or (not (and tail (get r-assuming))) (> n register-regs)))
@@ -518,9 +518,9 @@
                    (call (r-new-label g)) (end (r-new-label g)))
               (begin
                 (if tail
-                    (let* ((made (r-self-temps g args env te)) (assumed (r-assume cell word)))
+                    (let* ((made (r-self-temps g args env te)) (assumed (r-assume cell)))
                       (begin
-                        (if assumed #u (r-guard g cell word call))
+                        (if assumed #u (r-guard g cell call))
                         (r-self-moves g made 0)
                         (r-emit g (r-branch #f start))
                         (if assumed
@@ -531,10 +531,10 @@
                               (r-invoke g n #t)))))
                     (begin
                       (r-exp-args-into g args env te)
-                      (if (r-assume cell word)
+                      (if (r-assume cell)
                           (r-opn g rop-invokeself n)
                           (begin
-                            (r-guard g cell word call)
+                            (r-guard g cell call)
                             (r-opn g rop-invokeself n)
                             (r-emit g (r-branch #f end))
                             (r-emit g (r-label call))
@@ -1029,17 +1029,17 @@
             (begin (r-make-frozen g 37 (r-slots-oldest vals nil) env te)
                    (set (extract g nslot) slots)
                    (r-done g tail))))))
-  ;; `with`: the module's values the body names, by position, kept in frame
-  ;; slots; then the body. Declined in a leaf.
+  ;; `with`: the module's values the body names, by position, each kept as
+  ;; a `let`'s value is (in a leaf, in a register), or folded in a fast
+  ;; version (`r-with-fields`); then the body. As the Rust compiler's `r_with`.
   (r-with (subr rcompiles (rgen symbol exp int int renv cenv bool) unit)
     (lambda (g m body a b env te tail)
       (let ((ns (c-with-at a b)) (ps (c-with-places-at a b)))
-        (if (or (extract g leaf) (null? ns) (null? ps))
+        (if (or (null? ns) (null? ps))
             (r-decline)
-            (let* ((slots (get (extract g nslot)))
-                   (at (r-slots-for g (car ns)))
-                   (sc (r-with-fields g m (car ns) (car ps) at (the r-scopes (cons env te)))))
-              (begin (r-exp g body (car sc) (cdr sc) tail) (set (extract g nslot) slots)))))))
+            (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
+                   (sc (r-with-fields g m env (car ns) (car ps) (the r-scopes (cons env te)))))
+              (begin (r-exp g body (car sc) (cdr sc) tail) (r-restore g regs slots)))))))
   (r-module-or-with (subr rcompiles (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
       (tagcase x

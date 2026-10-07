@@ -1533,17 +1533,34 @@ prims! {
         let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };
         Ok(rt.heap.make_frozen(PRODUCT_KIND, &items))
     });
-    // A global's cell: a plain bloblet whose field 2 is the value and whose
-    // field 3 is its name, for showing (`%disassemble`). Until its
+    // A global's cell: a plain bloblet whose field 2 is the value, whose
+    // field 3 is its name, for showing (`%disassemble`), and whose field 4
+    // counts its writes, for the guards (`layout::cellular::GLOBAL_WRITES`). Until its
     // definition runs it holds a procedure that traps when called. A checked
     // program never calls it then; if a compiler's mistake did, a typed call
     // would still meet a closure, and trap.
     "%fx26-make-global", 1, Some(1), simple!(|rt, a| {
         let undefined = rt.heap.undefined_closure();
-        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, 2, 0, true);
-        rt.heap.set_bloblet_slot(b, 2, undefined);
-        rt.heap.set_bloblet_slot(b, 3, a[0]);
+        use fixpt_heap::layout::cellular::{GLOBAL_FIELDS, GLOBAL_NAME, GLOBAL_VALUE, GLOBAL_WRITES};
+        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, GLOBAL_FIELDS, 0, true);
+        rt.heap.set_bloblet_slot(b, GLOBAL_VALUE, undefined);
+        rt.heap.set_bloblet_slot(b, GLOBAL_NAME, a[0]);
+        rt.heap.set_bloblet_slot(b, GLOBAL_WRITES, Value::fixnum(0));
         Ok(b)
+    });
+    "%fx26-global-writes", 1, Some(1), simple!(|rt, a| {
+        use fixpt_heap::layout::cellular::{GLOBAL_FIELDS, GLOBAL_WRITES};
+        if !a[0].is_bloblet() || rt.heap.bloblet_head(a[0]).fields < GLOBAL_FIELDS {
+            return rt.type_error("a global's cell", a[0]);
+        }
+        Ok(rt.heap.bloblet_slot(a[0], GLOBAL_WRITES))
+    });
+    "%fx26-global-name", 1, Some(1), simple!(|rt, a| {
+        use fixpt_heap::layout::cellular::{GLOBAL_FIELDS, GLOBAL_NAME};
+        if !a[0].is_bloblet() || rt.heap.bloblet_head(a[0]).fields < GLOBAL_FIELDS {
+            return rt.type_error("a global's cell", a[0]);
+        }
+        Ok(rt.heap.bloblet_slot(a[0], GLOBAL_NAME))
     });
     // An I-cell (Arvind's I-structures): a plain bloblet whose field 2 says
     // whether it is full and whose field 3 is its value. Written once; read

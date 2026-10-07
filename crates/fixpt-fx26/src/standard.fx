@@ -297,6 +297,8 @@
       ((string=? n "close-over-word!") "%fx26-close-over-word!")
       ((string=? n "wcell-product") "%fx26-product-cell")
       ((string=? n "make-global") "%fx26-make-global")
+      ((string=? n "wglobal-writes") "%fx26-global-writes")
+      ((string=? n "wglobal-name") "%fx26-global-name")
       ((string=? n "wglobal=?") "eq?")
       ((string=? n "runtime-primitive") "%runtime-primitive")
       ((string=? n "runtime-primitive-arity") "%runtime-primitive-arity")

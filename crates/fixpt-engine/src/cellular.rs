@@ -1003,7 +1003,12 @@ impl Machine {
             GLOBAL_SET => {
                 let g = Self::operand(cx.heap(), r);
                 let x = self.pop(name)?;
-                cx.heap().set_bloblet_slot(g, 2, x);
+                let heap = cx.heap();
+                heap.set_bloblet_slot(g, 2, x);
+                // One more write, for the guards (`global-guard`).
+                let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
+                let n = heap.bloblet_slot(g, w).as_fixnum();
+                heap.set_bloblet_slot(g, w, Value::fixnum(n + 1));
             }
             CLOSURE => {
                 self.safepoint(cx.heap(), r);

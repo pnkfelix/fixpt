@@ -58,21 +58,32 @@
             (else y (r-decline)))))))
 ;; Module `m`'s values `ns`, at positions `ps`, each into its slot of `at`:
 ;; the scopes with them.
-(define r-with-fields (subr rcompiles (rgen symbol syms k-ids rints r-scopes) r-scopes)
-  (lambda (g m ns ps at sc)
+(define r-with-fields (subr rcompiles (rgen symbol renv syms k-ids r-scopes) r-scopes)
+  (lambda (g m env ns ps sc)
     (if (or (null? ns) (null? ps))
         sc
-        (begin
-          (r-module-value g m (car sc))
-          (r-opn g rop-field (+ (car ps) 2))
-          (r-opn g rop-setstk (car at))
-          (let ((inner (the r-scopes (cons (r-bind (car ns) (rl-slot (car at)) (car sc))
-                                           (r-local (cdr sc) (car ns))))))
-            (r-with-fields g m (cdr ns) (cdr ps) (cdr at) inner))))))
-;; A frame slot for each of `ns`.
-(define r-slots-for (subr (maxeff emits spin) (rgen syms) rints)
-  (lambda (g ns)
-    (if (null? ns) nil (let ((s (r-slot g))) (the rints (cons s (r-slots-for g (cdr ns))))))))
+        (let* ((k (r-with-folded m env (car ns)))
+               (l (if (null? k)
+                      (begin (r-module-value g m env)
+                             (r-opn g rop-field (+ (car ps) 2))
+                             (r-keep g (extract g leaf)))
+                      (rl-const (car k))))
+               (inner (the r-scopes
+                        (cons (r-bind (car ns) l (car sc)) (r-local (cdr sc) (car ns))))))
+          (r-with-fields g m env (cdr ns) (cdr ps) inner)))))
+;; In a fast version, member `n` of module `m`, a global's whose literal
+;; members were noted: its literal, in a list, the global assumed; else
+;; none (`TODO.md` §42).
+(define r-with-folded (subr rcompiles (symbol renv symbol) rconsts)
+  (lambda (m env n)
+    (let ((l (r-where env m)))
+      (if (null? l)
+          nil
+          (tagcase (car l)
+            (rl-global (c)
+              (let ((k (r-member-const c n)))
+                (if (and (not (null? k)) (r-assume c)) k nil)))
+            (else y nil))))))
 
 ;; `args` reversed, onto `acc`.
 (define r-args-reversed (subr rbuilds (rargs rargs) rargs)
@@ -95,6 +106,5 @@
 (define r-module-own (with regcode-modules-module r-module-own))
 (define r-give-waiting (with regcode-modules-module r-give-waiting))
 (define r-with-fields (with regcode-modules-module r-with-fields))
-(define r-slots-for (with regcode-modules-module r-slots-for))
 (define r-args-reversed (with regcode-modules-module r-args-reversed))
 (define r-reshape-fields (with regcode-modules-module r-reshape-fields))

@@ -290,6 +290,10 @@ routine!(st_global_set, |base, ip, cur, dsp, rsp, st, fp, w| {
     let g = unsafe { rd(ip) };
     let at = base.wrapping_add(g).wrapping_sub(4 + 16);
     unsafe { wr(at, rd(dsp)) };
+    // One more write, for the guards (`global-guard`): field 4, two words
+    // below field 2.
+    let writes = at.wrapping_sub(16);
+    unsafe { wr(writes, rd(writes).wrapping_add(8)) };
     // The write barrier: the card of the word written marked.
     unsafe { wr8((*st).cards.wrapping_add(at >> 9), 1) };
     next!(base, ip - 8, cur, dsp + 8, rsp, st, fp)
