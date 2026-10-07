@@ -17,6 +17,9 @@
 ;; Kind `s`, or -1 where `k-parse-kind` would refuse it: for a reader that
 ;; gives its own message instead (`moduleof`'s `abs`).
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-modules-module (module
 ;; A `define-rec`'s types and expressions, each type read before its
 ;; expression, as the Rust parser reads them.
 (define-type k-rec-read (productof (1 k-ids) (2 kxs)))
@@ -780,4 +783,21 @@
                                     "a dependent type, not supported yet"))
                     a b))))))
 (define k-binding-names (subr kmakes (k-bindings) k-names)
-  (lambda (bs) (if (null? bs) nil (cons (car (car bs)) (k-binding-names (cdr bs))))))
+  (lambda (bs) (if (null? bs) nil (cons (car (car bs)) (k-binding-names (cdr bs))))))))
+
+(define k-push-binders (with check-modules-module k-push-binders))
+(define k-in-loaded (with check-modules-module k-in-loaded))
+(define k-defined-twice (with check-modules-module k-defined-twice))
+(define k-resolve-exp (with check-modules-module k-resolve-exp))
+(define k-check-apps-each (with check-modules-module k-check-apps-each))
+(define k-first-mentioned (with check-modules-module k-first-mentioned))
+(define k-subst-each (with check-modules-module k-subst-each))
+(define k-name-module (with check-modules-module k-name-module))
+(define k-unescaped (with check-modules-module k-unescaped))
+(define k-link-global-select (with check-modules-module k-link-global-select))
+(define k-link-aliases (with check-modules-module k-link-aliases))
+(define k-resolve-selects (with check-modules-module k-resolve-selects))
+(define k-select-syn (with check-modules-module k-select-syn))
+(define k-letrec-selected (with check-modules-module k-letrec-selected))
+(define k-resolve-outside (with check-modules-module k-resolve-outside))
+(define k-binding-names (with check-modules-module k-binding-names))
