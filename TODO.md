@@ -1487,3 +1487,19 @@ with the hash or order passed as tables' are (dictionary passing):
   so it can be frozen into a place.
 - Then: the hand-made ones above replaced, and §43's remaining searches
   (`c-find`, `r-where`, `c-member?`) looked at again.
+
+## 51. Quoted list literals, with their shape (the user's, 2026-10-07)
+
+FX-26 reads `'x` as a symbol and nothing more: `'((a b) c d)` is not an
+expression. Read it as constant data, made once (as §44's constant lists
+are), and typed by its shape: `(listof … acyclic)` for now, whatever the
+nesting (a `datum`, or nested `listof`s where the elements agree). Later,
+infer the precise category of the lattice (`docs/research/shapes.md`):
+- **tree** (acyclic, no sharing), **flat** (no pointers into the heap),
+  **atomic** (no parts: integers, characters, symbols, bignums), and
+  **flatomic**, the user's name for both flat and atomic (fixnums,
+  characters, booleans). Bignums and symbols are atomic but not flat: they
+  point into the heap. This refines the `atomic` kind planned with Q7's
+  unions (§46): `flatomic ⊂ atomic`, `flatomic ⊂ flat`.
+- Both parsers, both checkers; the compilers make the datum once, as a
+  frozen constant, and fold `car`/`cdr` through it as §44 does.
