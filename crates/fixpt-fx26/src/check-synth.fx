@@ -33,9 +33,7 @@
 ;; the variadic procedure's is one nothing else can write.
 (define k-note-apply-shares (subr (maxeff checks spin) (kx kx k-ids) unit)
   (lambda (x f params)
-    (let ((apply? (tagcase f
-                    (x-var (op a b) (and (k-std? op) (string=? (symbol->string op) "apply")))
-                    (else y #f))))
+    (let ((apply? (string=? (k-std-op f) "apply")))
       (if (and apply? (and (= (k-length params) 2) (k-acyclic-list? (car (cdr params)))))
           (set k-extracts (cons (product (1 (k-start x)) (2 (k-end x)) (3 -500)) (get k-extracts)))
           #u))))
@@ -98,14 +96,11 @@
   (lambda (p name)
     (tagcase p
       (x-app (f args a b)
-        (tagcase (k-under f)
-          (x-var (op fa fb)
-            (if (and (string=? (symbol->string op) name) (k-std? op) (k-sc-one-arg? args))
-                (tagcase (car args)
-                  (x-var (v va vb) (the k-named (cons (cons v (k-binding-depth v)) nil)))
-                  (else y nil))
-                nil))
-          (else y nil)))
+        (if (and (string=? (k-std-op (k-under f)) name) (k-sc-one-arg? args))
+            (tagcase (car args)
+              (x-var (v va vb) (the k-named (cons (cons v (k-binding-depth v)) nil)))
+              (else y nil))
+            nil))
       (else y nil))))
 ;; If `p` is `(acyclic? v)`, the variable, as the binding it is (none or one).
 (define k-acyclic-test (subr (maxeff kreads (alloc @t) spin) (kx) k-named)

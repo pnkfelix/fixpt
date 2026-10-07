@@ -98,12 +98,9 @@
   (lambda (p)
     (tagcase p
       (x-app (f args a b)
-        (tagcase f
-          (x-var (op fa fb)
-            (if (and (string=? (symbol->string op) "length-is?") (k-std? op) (k-sc-two? args))
-                (k-length-arg (car args) (car (cdr args)))
-                nil))
-          (else y nil)))
+        (if (and (string=? (k-std-op f) "length-is?") (k-sc-two? args))
+            (k-length-arg (car args) (car (cdr args)))
+            nil))
       (else y nil))))
 ;; Whether operation `n` may give a natural of a size by itself: `+`, `-` or a length.
 (define k-sizing-op? (subr (read @globals) (string) bool)
@@ -118,10 +115,7 @@
     (tagcase x
       (x-const (ty k a b) (= ty k-int))
       (x-var (v a b) #t)
-      (x-app (f args a b)
-        (tagcase f
-          (x-var (op fa fb) (and (k-sizing-op? (symbol->string op)) (k-std? op)))
-          (else y #f)))
+      (x-app (f args a b) (k-sizing-op? (k-std-op f)))
       (else y #f))))
 ;; The size an operand of `+` or `-` of type `t` is: a natural literal's,
 ;; or a `(nat s)`'s (none or one).

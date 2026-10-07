@@ -252,6 +252,22 @@ fn second_class_operations_are_named_only_to_call() {
     }
 }
 
+/// `#%fx` (`TODO.md` §46): only `(with #%fx name)`, of a standard name;
+/// a second-class operation through it only as an operator; never bound.
+/// Both checkers say the same, as `every_test_program` compares.
+#[test]
+fn the_standard_module_is_used_only_so() {
+    for (program, why) in [
+        ("(with #%fx cwcc)", "is named only to call it"),
+        ("(with #%fx (+ 1 2))", "names one standard binding"),
+        ("(with #%fx nope)", "names one standard binding"),
+        ("(let ((#%fx 1)) (with #%fx =))", "which nothing else may be"),
+    ] {
+        let err = both(program).expect_err(program);
+        assert!(err.0.contains(why), "{program}: {err:?}");
+    }
+}
+
 /// The size programs that say, on their first line, that they are
 /// `Rejected` or `Accepted` are so, by the Rust checker (the FX-26 one
 /// agrees, `every_test_program`).

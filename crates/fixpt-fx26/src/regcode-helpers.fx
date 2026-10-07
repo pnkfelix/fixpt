@@ -248,6 +248,15 @@
           (rl-global (c) (r-op1 g rop-global (wcell-global c)))
           (else y (r-decline))))))
 
+;; `(with #%fx n)` where `n` is shadowed (the checker made it the plain `n`
+;; elsewhere): the standard `n`'s value, as of a name bound nowhere
+;; (`TODO.md` §46). Any other `with` the checker did not see: declined.
+(define r-fx-value (subr rcompiles (rgen symbol exp bool) unit)
+  (lambda (g m body tail)
+    (let ((n (c-fx-name m body)))
+      (if (string=? n "")
+          (r-decline)
+          (begin (r-var-value g (the rlocs nil) (string->symbol n) tail) (r-done g tail))))))
 ;; Whether `x` is an integer, boolean or character literal.
 (define r-literal? (subr pure (exp) bool)
   (lambda (x) (tagcase x (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t) (else z #f))))
@@ -344,6 +353,7 @@
 (define r-index-field (with regcode-helpers-module r-index-field))
 (define r-restore (with regcode-helpers-module r-restore))
 (define r-var-value (with regcode-helpers-module r-var-value))
+(define r-fx-value (with regcode-helpers-module r-fx-value))
 (define r-literal? (with regcode-helpers-module r-literal?))
 (define r-free-operand? (with regcode-helpers-module r-free-operand?))
 (define r-deeper? (with regcode-helpers-module r-deeper?))

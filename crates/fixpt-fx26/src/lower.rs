@@ -467,6 +467,11 @@ impl Lowerer<'_> {
         if let Some(g) = self.globals.get(s) {
             return g.to_string();
         }
+        self.standard_var(s)
+    }
+
+    /// The standard binding of `s`, whatever binds `s` here.
+    fn standard_var(&self, s: Sym) -> String {
         let name = self.c.interner.name(s);
         match STANDARD.iter().find(|(n, _, _)| *n == name) {
             Some((_, scheme, _)) => scheme.to_string(),
@@ -619,6 +624,11 @@ impl Lowerer<'_> {
             }
             // `with`: the module's values the body names, by position, as
             // locals.
+            // `(with #%fx n)`: the standard `n` (`TODO.md` §46).
+            Exp::With { module, body } if self.c.is_fx_module(module) => match *self.c.arena.exp_at(body) {
+                Exp::Var(n) => self.standard_var(n),
+                _ => unreachable!("checked: `(with #%fx name)`"),
+            },
             Exp::With { module, body } => {
                 let used = self.c.facts.with_vals.get(&e).cloned().unwrap_or_default();
                 let m = self.var(module);

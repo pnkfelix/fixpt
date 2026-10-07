@@ -115,6 +115,87 @@
               (the (listof (pairof int int @k) @k) (cons (cons k a) nil))
               (c-first-call-only (cdr ps) body f (+ k 1) n))))))
 
+;; `x`, each `(with #%fx n)` in it that the checker found the plain `n`
+;; (the fact -502) made that `n`, at the `with`'s place: what the Rust
+;; checker gives its compilers (`Arena::replace`, `TODO.md` §46). Only the
+;; forms of a program that has such a fact are walked.
+(define-rec
+  (c-plain-fx (subr c-walks (exp) exp)
+    (lambda (x)
+      (tagcase x
+        (e-with (m body a b)
+          (tagcase body
+            (e-var (n c d) (if (c-plain-fx-at a b) (e-var n a b) x))
+            (else y (e-with m (c-plain-fx body) a b))))
+        (e-module (items a b) (e-module (c-plain-items items) a b))
+        (e-lambda (ps body a b) (e-lambda ps (c-plain-fx body) a b))
+        (e-app (f args a b) (e-app (c-plain-fx f) (c-plain-all args) a b))
+        (e-plambda (d body a b) (e-plambda d (c-plain-fx body) a b))
+        (e-proj (body ds a b) (e-proj (c-plain-fx body) ds a b))
+        (e-if (t c el a b) (e-if (c-plain-fx t) (c-plain-fx c) (c-plain-fx el) a b))
+        (e-letrec (bs body a b) (e-letrec (c-plain-recs bs) (c-plain-fx body) a b))
+        (e-let (bs body a b) (e-let (c-plain-named bs) (c-plain-fx body) a b))
+        (e-begin (es a b) (e-begin (c-plain-all es) a b))
+        (e-prompt (t body h a b) (e-prompt (c-plain-fx t) (c-plain-fx body) (c-plain-fx h) a b))
+        (e-letregion (k r p body a b) (e-letregion k r p (c-plain-fx body) a b))
+        (e-rlambda (r l a b) (e-rlambda (c-plain-fx r) (c-plain-fx l) a b))
+        (e-the (t body a b) (e-the t (c-plain-fx body) a b))
+        (e-convention (cv body a b) (e-convention cv (c-plain-fx body) a b))
+        (e-bloblet (op i args a b) (e-bloblet op i (c-plain-all args) a b))
+        (e-product (fs a b) (e-product (c-plain-named fs) a b))
+        (e-extract (p l a b) (e-extract (c-plain-fx p) l a b))
+        (e-sum (t v a b) (e-sum t (c-plain-fx v) a b))
+        (e-tagcase (s arms els a b)
+          (e-tagcase (c-plain-fx s) (c-plain-arms arms) (c-plain-named els) a b))
+        (else y x))))
+  (c-plain-all (subr c-walks (exps) exps)
+    (lambda (es)
+      (if (null? es) es (the exps (cons (c-plain-fx (car es)) (c-plain-all (cdr es)))))))
+  (c-plain-named (subr c-walks (c-binds) c-binds)
+    (lambda (bs)
+      (if (null? bs)
+          bs
+          (let ((x (c-plain-fx (extract (car bs) 2))))
+            (the c-binds
+              (cons (product (1 (extract (car bs) 1)) (2 x)) (c-plain-named (cdr bs))))))))
+  (c-plain-recs (subr c-walks (c-recs) c-recs)
+    (lambda (bs)
+      (if (null? bs)
+          bs
+          (let ((b (car bs)))
+            (the c-recs
+              (cons (product (1 (extract b 1)) (2 (extract b 2)) (3 (c-plain-fx (extract b 3))))
+                    (c-plain-recs (cdr bs))))))))
+  (c-plain-items (subr c-walks (mod-items) mod-items)
+    (lambda (items)
+      (if (null? items)
+          items
+          (let ((it (car items)))
+            (the mod-items
+              (cons (product (1 (extract it 1)) (2 (extract it 2)) (3 (extract it 3))
+                             (4 (c-plain-all (extract it 4))))
+                    (c-plain-items (cdr items))))))))
+  (c-plain-arms (subr c-walks (c-cases) c-cases)
+    (lambda (arms)
+      (if (null? arms)
+          arms
+          (let ((arm (car arms)))
+            (the c-cases
+              (cons (product (1 (extract arm 1)) (2 (extract arm 2)) (3 (extract arm 3))
+                             (4 (c-plain-fx (extract arm 4))))
+                    (c-plain-arms (cdr arms)))))))))
+
+;; A top-level form, as `c-plain-fx` makes its expressions.
+(define c-plain-top (subr c-walks (top) top)
+  (lambda (t)
+    (if (= (table-count (get c-plain-table)) 0)
+        t
+        (tagcase t
+          (t-define (n ty x a b) (t-define n ty (c-plain-fx x) a b))
+          (t-define-rec (bs a b) (t-define-rec (c-plain-recs bs) a b))
+          (t-exp (x) (t-exp (c-plain-fx x)))
+          (else y t)))))
+
 ;; `x`, each `extract` in it that the checker's facts give a field made the
 ;; `bloblet-ref` of that field, which compiles as it would: for a body kept
 ;; to be inlined or specialized in a later form, whose facts, keyed by
@@ -654,7 +735,7 @@
   (lambda (ts c has-value)
     (if (null? ts)
         has-value
-        (tagcase (car ts)
+        (tagcase (c-plain-top (car ts))
           (t-define (n ty x a b)
             (begin
               (if has-value (c-op c routine-drop) #u)

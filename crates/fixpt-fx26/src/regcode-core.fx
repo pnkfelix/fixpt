@@ -1035,7 +1035,7 @@
     (lambda (g m body a b env te tail)
       (let ((ns (c-with-at a b)) (ps (c-with-places-at a b)))
         (if (or (null? ns) (null? ps))
-            (r-decline)
+            (r-fx-value g m body tail)
             (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
                    (sc (r-with-fields g m env (car ns) (car ps) (the r-scopes (cons env te)))))
               (begin (r-exp g body (car sc) (cdr sc) tail) (r-restore g regs slots)))))))

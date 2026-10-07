@@ -153,6 +153,21 @@
       (x-the (t body a b) (k-callee-name body))
       (x-var (n a b) (the (listof symbol acyclic) (cons n nil)))
       (else y (the (listof symbol acyclic) nil)))))
+;; The standard name `x` refers to, "" if none: a variable that is the
+;; standard binding where it is used, or `(with #%fx n)` (`TODO.md` §46).
+;; Every rule for a standard operation asks this.
+(define k-std-op (subr (maxeff kreads spin) (kx) string)
+  (lambda (x)
+    (tagcase x
+      (x-var (s a b)
+        (let ((t (k-lookup s)))
+          (if (and (>= t 0) (k-named-has? (get k-std) s t)) (symbol->string s) "")))
+      (x-with (m body a b)
+        (tagcase body
+          (x-var (n c d)
+            (if (and (k-fx-module? m) (>= (k-find (get k-std) n) 0)) (symbol->string n) ""))
+          (else y "")))
+      (else y ""))))
 ;; Whether `f` names a known procedure.
 (define k-known-callee? (subr (maxeff kstate spin) (kx) bool)
   (lambda (f)
@@ -166,19 +181,21 @@
 (define k-may-spin? (subr (maxeff kstate spin) (kx int kxs) bool)
   (lambda (f ft args)
     (let* ((s (k-callee-name f))
-           (t (if (null? s) -1 (k-lookup (car s)))))
+           (t (if (null? s) -1 (k-lookup (car s))))
+           (std (k-std-op (k-under f))))
       (cond ;; A continuation called after `cwcc` has returned comes back to
             ;; it again, as often as it is called: only one that can only
             ;; leave needs no `spin`.
             ;; And the receiver must capture no continuation, which could
             ;; hold a call of `k` and be run after `cwcc` returns (F9): a
             ;; `comefrom` in its latent effect, `cwcc`'s `e` as solved.
-            ((and (>= t 0) (string=? (symbol->string (car s)) "cwcc")
-                  (k-named-has? (get k-std) (car s) t))
+            ;; `cwcc` is named nowhere else (F15), so every call of it is here.
+            ((string=? std "cwcc")
              (or (k-receiver-captures? ft)
                  (not (and (not (null? args)) (null? (cdr args)) (k-escape-only? (car args))))))
             ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
             ((and (>= t 0) (or (k-known? (car s)) (k-named-has? (get k-std) (car s) t))) #f)
+            ((not (string=? std "")) #f)
             ((k-lambda? (k-under f)) #f)
             (else (k-cyclic? ft))))))))
 
@@ -186,3 +203,4 @@
 (define k-has-comefrom? (with check-calls-module k-has-comefrom?))
 (define k-callee-name (with check-calls-module k-callee-name))
 (define k-may-spin? (with check-calls-module k-may-spin?))
+(define k-std-op (with check-calls-module k-std-op))

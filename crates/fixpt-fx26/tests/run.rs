@@ -88,6 +88,13 @@ fn expansions_capture_nothing() {
     assert_eq!(run(include_str!("programs/sizes/fresh-temporaries.fx")), "15");
 }
 
+/// `(with #%fx n)`, the standard `n` under shadowing
+/// (`programs/run/standard-refs.fx`): the last digit is the shadowing `=`'s.
+#[test]
+fn standard_refs_see_past_shadowing() {
+    assert_eq!(run(include_str!("programs/run/standard-refs.fx")), "123456");
+}
+
 /// `f64` literals and operations, lowered (`programs/run/floats.fx`).
 #[test]
 fn floats_run() {

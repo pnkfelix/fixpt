@@ -651,6 +651,14 @@
   (lambda (cur start what) (fail-at cur start (str3 "unknown `#` syntax: `#" what "`"))))
 (define bytes-message string "bytevector elements must be exact integers in 0..=255")
 
+;; FX-26's `#%fx`, the module of the standard bindings, `cur` at the `%`;
+;; no other `#%` spelling reads.
+(define read-fx-module (subr reading (cursor int) result)
+  (lambda (cur start)
+    (let* ((w (read-word cur)) (word (car w)))
+      (if (string=? word "%fx")
+          (atom-at (datum-symbol "#%fx") start (cdr w))
+          (unknown-hash (cdr w) start word)))))
 ;; `#t`, `#true`, `#f` or `#false`, `cur` at the letter.
 (define read-bool (subr reading (cursor int) result)
   (lambda (cur start)
@@ -770,6 +778,7 @@
                   ((char-in? c "tfTF") (read-bool cur start))
                   ((char-in? c "uU") (read-bytes start cur))
                   ((char-in? c "bBoOdDxXeEiI") (read-atom-from cur start "#"))
+                  ((and (char=? c #\%) (fx26?)) (read-fx-module cur start))
                   ((char-numeric? c)
                    (fail-at cur start "datum labels are not supported by the eager reader"))
                   (else (unknown-hash cur start (char-string c)))))))))

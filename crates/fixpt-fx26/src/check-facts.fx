@@ -30,13 +30,11 @@
                      (k-branch-facts-of (k-facts-append (car fq) (car (k-test-facts c))) nil))
                     (else none))))
           (x-app (f args a b)
-            (tagcase f
-              (x-var (op fa fb)
-                (cond ((not (k-std? op)) none)
-                      ((and (string=? (symbol->string op) "not") (k-sc-one-arg? args))
-                       (let ((fs (k-test-facts (car args)))) (k-branch-facts-of (cdr fs) (car fs))))
-                      (else (k-std-test-facts (symbol->string op) args))))
-              (else y none)))
+            (let ((op (k-std-op f)))
+              (cond ((string=? op "") none)
+                    ((and (string=? op "not") (k-sc-one-arg? args))
+                     (let ((fs (k-test-facts (car args)))) (k-branch-facts-of (cdr fs) (car fs))))
+                    (else (k-std-test-facts op args)))))
           (else y none)))))
   ;; `fs`, in order, onto `acc`, newest first: as the Rust checker's
   ;; `size_facts.extend`.

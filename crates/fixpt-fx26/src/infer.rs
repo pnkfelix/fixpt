@@ -382,6 +382,13 @@ impl Checker {
     /// polymorphic. `expected` is the type the application should have, when
     /// that is known; it helps solve the operator's binders.
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
+        // The operator `(with #%fx n)` noted plain where it is, by this rule
+        // whether or not the rules below look at the operator itself.
+        let mut op = fun;
+        while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(op) {
+            op = *body;
+        }
+        self.plain_fx(op);
         // `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where
         // `length-is?` has just found it so; nowhere else.
         if let Some(op) = self.standard_ref(fun)

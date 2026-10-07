@@ -118,7 +118,7 @@ impl Compiler<'_> {
     /// not in tail position.
     fn plan_exp(&mut self, x: ExpId, e: &Env, tail: bool, plan: &mut Plan) {
         let tail = tail && self.c.facts.conversion_code(x).is_none() && !self.c.facts.reshaped.contains_key(&x);
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
             Exp::Lambda { params, body } => {
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
@@ -126,7 +126,7 @@ impl Compiler<'_> {
             }
             Exp::RLambda { region, lambda } => {
                 self.plan_exp(region, e, false, plan);
-                let Exp::Lambda { params, body } = self.c.arena.exp_at(lambda).clone() else { return };
+                let Exp::Lambda { params, body } = self.exp_at(lambda).clone() else { return };
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
                 self.plan_lambda(&ps, body, e, None, plan);
             }
@@ -139,7 +139,7 @@ impl Compiler<'_> {
                 self.plan_exps(&args, e, plan);
                 // A standard operation's name, or a lifted procedure's, is
                 // not compiled as a value.
-                let compiled = match self.c.arena.exp_at(fun) {
+                let compiled = match self.exp_at(fun) {
                     Exp::Var(n) => !matches!(self.where_is(e, *n), None | Some(Loc::Lifted(_))),
                     _ => true,
                 };
@@ -259,7 +259,7 @@ impl Compiler<'_> {
     /// argument at its parameter is a lambda small enough, taking as many
     /// arguments as it is called with.
     fn plan_call(&mut self, x: ExpId, fun: ExpId, args: &[ExpId], e: &Env, plan: &mut Plan) {
-        let Exp::Var(name) = *self.c.arena.exp_at(fun) else { return };
+        let Exp::Var(name) = *self.exp_at(fun) else { return };
         if !matches!(self.where_is(e, name), Some(Loc::Global(_))) {
             return;
         }
@@ -268,7 +268,7 @@ impl Compiler<'_> {
         let inline = self.inlines.iter().position(|i| i.name == name && i.params.len() == n && self.sees(i.genv_len)).filter(|_| !self.plan_inlining.contains(&name));
         let special = self.specials.iter().position(|s| s.name == name && s.params.len() == n && self.sees(s.genv_len)).and_then(|k| {
             let lam = args[self.specials[k].param];
-            match self.c.arena.exp_at(lam) {
+            match self.exp_at(lam) {
                 Exp::Lambda { params, body } if params.len() == self.specials[k].arity && self.inline_room(*body, super::INLINE_LIMIT) >= 0 => Some((k, lam)),
                 _ => None,
             }
@@ -305,7 +305,7 @@ impl Compiler<'_> {
         let outer = self.genv_limit.replace(genv_len);
         self.plan_exp(body, &env, false, &mut sub);
         self.genv_limit = outer;
-        let Exp::Lambda { params, body } = self.c.arena.exp_at(lam).clone() else { return sub };
+        let Exp::Lambda { params, body } = self.exp_at(lam).clone() else { return sub };
         let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
         let fv = self.captured(&ps, body, e);
         let inner: Env = ps.iter().chain(&fv).map(|n| (*n, SLOT)).collect();

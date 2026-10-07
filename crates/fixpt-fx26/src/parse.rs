@@ -1283,10 +1283,7 @@ impl Checker {
                 };
                 let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
                 let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
-                let var = |c: &mut Checker, n: &str| {
-                    let s = c.interner.intern(n);
-                    c.arena.exp(span, Exp::Var(s))
-                };
+                let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
                 let tmp = self.fresh_name("%confirm-value", &items);
                 let a = self.arena.exp(span, Exp::Var(tmp));
                 let (f, l) = (var(self, "length-is?"), self.arena.exp(span, k.clone()));
@@ -1308,10 +1305,7 @@ impl Checker {
                 };
                 let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
                 let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
-                let var = |c: &mut Checker, n: &str| {
-                    let s = c.interner.intern(n);
-                    c.arena.exp(span, Exp::Var(s))
-                };
+                let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
                 let tmp = self.fresh_name("%acyclic-value", &items);
                 let (test_f, test_a) = (var(self, "acyclic?"), self.arena.exp(span, Exp::Var(tmp)));
                 let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
@@ -1334,10 +1328,7 @@ impl Checker {
                 };
                 let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
                 let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
-                let var = |c: &mut Checker, n: &str| {
-                    let s = c.interner.intern(n);
-                    c.arena.exp(span, Exp::Var(s))
-                };
+                let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
                 let tmp = self.fresh_name("%nat-value", &items);
                 let (test_f, test_a) = (var(self, "nat?"), self.arena.exp(span, Exp::Var(tmp)));
                 let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
@@ -1563,6 +1554,15 @@ impl Checker {
         Ok(out)
     }
 
+    /// `(with #%fx name)`: what an expansion calls, the standard binding,
+    /// whatever shadows or redefines `name` where it is (`TODO.md` §46).
+    fn standard_ref_at(&mut self, span: fixpt_read::Span, name: &str) -> ExpId {
+        let s = self.interner.intern(name);
+        let body = self.arena.exp(span, Exp::Var(s));
+        let module = self.interner.intern("#%fx");
+        self.arena.exp(span, Exp::With { module, body })
+    }
+
     /// A name for an expansion's own variable that `forms` never mention:
     /// `base`, else `base1`, `base2` and so on. The variable's scope is
     /// within the form, and nothing refers to a name it does not write, so
@@ -1629,8 +1629,7 @@ impl Checker {
                 if !seen.insert(text) {
                     return Err(FxError::at(d.span, "a datum appears twice in this `case`"));
                 }
-                let f = self.interner.intern(eq);
-                let f = self.arena.exp(d.span, Exp::Var(f));
+                let f = self.standard_ref_at(d.span, eq);
                 let a = self.arena.exp(d.span, Exp::Var(tmp));
                 tests.push(self.arena.exp(d.span, Exp::App { fun: f, args: vec![a, lit] }));
             }

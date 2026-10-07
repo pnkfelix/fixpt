@@ -269,8 +269,13 @@
       (else x (the syns-a nil)))))
 
 ;; A call `(f tmp more …)`, spanning `a`..`b`; and a `let`'s one binding.
+;; `(with #%fx f)`: what an expansion calls, the standard binding, whatever
+;; shadows or redefines `f` where it is (`TODO.md` §46).
+(define standard-ref (subr tree-builds (symbol int int) exp)
+  (lambda (f a b) (e-with '#%fx (e-var f a b) a b)))
 (define call-tmp (subr tree-builds (symbol symbol exp-list int int) exp)
-  (lambda (f tmp more a b) (e-app (e-var f a b) (the exp-list (cons (e-var tmp a b) more)) a b)))
+  (lambda (f tmp more a b)
+    (e-app (standard-ref f a b) (the exp-list (cons (e-var tmp a b) more)) a b)))
 (define one-let (subr (read @globals) (symbol exp) let-list)
   (lambda (name e) (the let-list (cons (product (1 name) (2 e)) nil))))
 
@@ -576,6 +581,7 @@
 (define region-name-error (with parser-module region-name-error))
 (define one-let (with parser-module one-let))
 (define call-tmp (with parser-module call-tmp))
+(define standard-ref (with parser-module standard-ref))
 (define field-index (with parser-module field-index))
 (define bloblet-untagged? (with parser-module bloblet-untagged?))
 (define arm-else? (with parser-module arm-else?))

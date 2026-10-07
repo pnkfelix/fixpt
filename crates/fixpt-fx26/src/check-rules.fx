@@ -203,9 +203,7 @@
   ;;; ------------------------------------------------------------ application
   (k-synth-app (subr (maxeff checks spin) (kx kx kxs int) k-te)
     (lambda (x f args expected)
-      (let ((op (tagcase f
-                  (x-var (op fa fb) (if (k-std? op) (symbol->string op) ""))
-                  (else y ""))))
+      (let ((op (begin (k-note-fx-plain-op (k-under f)) (k-std-op f))))
         (cond ((string=? op "certify-acyclic") (k-certify x args))
               ((string=? op "certify-length") (k-certify-length x args))
               ((string=? op "certify-nat") (k-certify-nat x args))
@@ -924,6 +922,8 @@
   (k-synth-with (subr (maxeff checks spin) (kx symbol kx int int) k-te)
     (lambda (x m body a b)
       (let ((mt (k-lookup m)) (shown (symbol->string m)))
+        (if (k-fx-module? m)
+            (k-synth-fx x mt body a b)
         (if (< mt 0)
             (k-fail (k-cat3 "`" shown "` is not bound") a b)
             (tagcase (k-get mt)
@@ -941,7 +941,36 @@
                   (k-te-masked x (extract r 1) (k-union naming (extract r 2)))))
               (else y
                 (let ((what (k-show-ty mt)))
-                  (k-fail (k-cat4 "`with` opens a module, and `" shown "` is a " what) a b))))))))
+                  (k-fail (k-cat4 "`with` opens a module, and `" shown "` is a " what) a b)))))))))
+  ;; `(with #%fx n)`: the standard `n`'s type, whatever binds `n` since.
+  (k-synth-fx (subr (maxeff checks spin) (kx int kx int int) k-te)
+    (lambda (x mt body a b)
+      (cond ((>= mt 0)
+             (k-fail "`#%fx` is the standard bindings' module, which nothing else may be" a b))
+            (else
+             (let ((t (tagcase body
+                        (x-var (n c d)
+                          (if (and (k-second-class? n) (not (k-operator? n a b)))
+                              (k-fail (k-named-only n) a b)
+                              (k-find (get k-std) n)))
+                        (else y -1))))
+               (if (< t 0)
+                   (k-fail "`(with #%fx name)` names one standard binding" a b)
+                   (begin (if (k-operator? (k-fx-name body) a b) #u (k-note-fx-plain body a b))
+                          (k-te t nil))))))))
+  ;; The operator `(with #%fx n)`, noted as `k-note-fx-plain` notes it, once.
+  (k-note-fx-plain-op (subr (maxeff checks spin) (kx) unit)
+    (lambda (f)
+      (tagcase f
+        (x-with (m body a b) (if (k-fx-module? m) (k-note-fx-plain body a b) #u))
+        (else y #u))))
+  ;; Where nothing shadows `n`, `(with #%fx n)` is the plain `n`: the fact
+  ;; -502, for the compiler (the Rust checker's `fx_plain`).
+  (k-note-fx-plain (subr (maxeff checks spin) (kx int int) unit)
+    (lambda (body a b)
+      (if (string=? (k-std-op body) "")
+          #u
+          (set k-extracts (cons (product (1 a) (2 b) (3 -502)) (get k-extracts))))))
   ;; The parts of `ps`, from position `i`, that `free` names, and their
   ;; positions: what a `with` binds.
   (k-with-used (subr (maxeff kreads (alloc @t)) (k-parts k-names int)

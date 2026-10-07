@@ -130,6 +130,14 @@
   (lambda (s)
     (string-append (string-append "`" (symbol->string s))
                    "` is named only to call it: its calls are checked where it is named")))
+;; Whether `m` is `#%fx`, the module of the standard bindings, which
+;; nothing binds: `(with #%fx n)` is the standard `n` wherever it is,
+;; shadowed or redefined (`TODO.md` §46).
+(define k-fx-module? (subr pure (symbol) bool)
+  (lambda (m) (string=? (symbol->string m) "#%fx")))
+;; The name a `(with #%fx n)`'s body names, `||` if none.
+(define k-fx-name (subr pure (kx) symbol)
+  (lambda (body) (tagcase body (x-var (n c d) n) (else y '||))))
 ;; An operator's mark: its variable's name and place, past `proj` and `the`.
 (define k-operator-mark (subr spin (kx) k-op-mark)
   (lambda (f)
@@ -137,6 +145,12 @@
       (x-var (s a b) (product (1 s) (2 a) (3 b)))
       (x-proj (body ds a b) (k-operator-mark body))
       (x-the (t e a b) (k-operator-mark e))
+      ;; `(with #%fx n)`: `n` at the `with`'s place.
+      (x-with (m body a b)
+        (tagcase body
+          (x-var (n c d)
+            (if (k-fx-module? m) (product (1 n) (2 a) (3 b)) (product (1 '||) (2 -1) (3 -1))))
+          (else y (product (1 '||) (2 -1) (3 -1)))))
       (else y (product (1 '||) (2 -1) (3 -1))))))
 ;; A flag, off, for a new innermost binding of `s`.
 (define k-push-flag (subr (maxeff kstate spin) (k-flags symbol) unit)
@@ -356,6 +370,8 @@
 (define k-operator? (with check-env-module k-operator?))
 (define k-named-only (with check-env-module k-named-only))
 (define k-operator-mark (with check-env-module k-operator-mark))
+(define k-fx-module? (with check-env-module k-fx-module?))
+(define k-fx-name (with check-env-module k-fx-name))
 (define k-bind (with check-env-module k-bind))
 (define k-mark (with check-env-module k-mark))
 (define k-unbind-to (with check-env-module k-unbind-to))

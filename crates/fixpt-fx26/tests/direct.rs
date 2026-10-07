@@ -405,6 +405,15 @@ fn case_answers_natively() {
     assert_eq!((r.direct, r.rust.as_str()), (Ok("12312342223".into()), "12312342223"), "{}", r.code);
 }
 
+/// `(with #%fx n)` under shadowing (`programs/run/standard-refs.fx`):
+/// the same natively and on the Rust machine.
+#[test]
+fn standard_refs_answer_natively() {
+    let defs = include_str!("programs/run/standard-refs.fx").trim_end().trim_end_matches("(score)");
+    let r = run(defs, "score", &[], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("123456".into()), "123456"), "{}", r.code);
+}
+
 /// A module's member folded through a `with`, then the module redefined
 /// (`TODO.md` §42): its global written again, the guard fails, and the
 /// plain version reads the new module's member.

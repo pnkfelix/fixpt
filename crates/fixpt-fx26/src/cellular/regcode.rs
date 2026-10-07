@@ -543,7 +543,7 @@ impl Compiler<'_> {
     /// `car` applied.
     fn r_operator(&self, mut f: ExpId) -> ExpId {
         loop {
-            match self.c.arena.exp_at(f) {
+            match self.exp_at(f) {
                 Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => f = *body,
                 _ => return f,
             }
@@ -551,8 +551,18 @@ impl Compiler<'_> {
     }
 
     fn r_standard_name(&self, env: &[(Sym, RLoc)], f: ExpId) -> O<String> {
-        match self.c.arena.exp_at(self.r_operator(f)) {
+        let f = self.r_operator(f);
+        match self.exp_at(f) {
             Exp::Var(n) if self.r_where(env, *n).is_none() => Some(self.name(*n).to_string()),
+            _ => self.r_fx_name(f).map(|n| self.name(n).to_string()),
+        }
+    }
+
+    /// The `n` of `(with #%fx n)`, the standard `n` (`TODO.md` §46).
+    fn r_fx_name(&self, x: ExpId) -> O<Sym> {
+        let Exp::With { module, body } = *self.exp_at(x) else { return None };
+        match *self.exp_at(body) {
+            Exp::Var(n) if self.c.is_fx_module(module) => Some(n),
             _ => None,
         }
     }
@@ -560,14 +570,14 @@ impl Compiler<'_> {
     /// Whether `f` is the procedure running, called with its arity: its own
     /// name, still bound where the procedure knows itself to be.
     fn r_self_known(&self, g: &Gen, f: ExpId, nargs: usize, te: &Env) -> bool {
-        match (g.this, self.c.arena.exp_at(f)) {
+        match (g.this, self.exp_at(f)) {
             (Some((t, _)), Exp::Var(n)) => *n == t.name && find(te, *n) == Some(t.loc) && t.added + nargs == t.params,
             _ => false,
         }
     }
 
     fn r_self_call(&self, g: &Gen, f: ExpId, nargs: usize, te: &Env, tail: bool) -> bool {
-        match (g.this, self.c.arena.exp_at(f)) {
+        match (g.this, self.exp_at(f)) {
             (Some((t, _)), Exp::Var(n)) => tail && *n == t.name && find(te, *n) == Some(t.loc) && t.added + nargs == t.params,
             _ => false,
         }
@@ -579,7 +589,7 @@ impl Compiler<'_> {
         if self.c.facts.changed(x) {
             return true;
         }
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             // Join points only: no closure made, and their calls are jumps.
             Exp::Letrec { bindings, body } if tail && (0..bindings.len()).all(|i| self.r_join_ok(&bindings, body, i)) => {
                 let mut inner = e.clone();
@@ -629,10 +639,10 @@ impl Compiler<'_> {
                 let args_collect = args.iter().any(|y| self.r_collects(*y, e, this, false));
                 // A loop: a call of the procedure itself, in tail position.
                 let loop_call = tail
-                    && (matches!((this, self.c.arena.exp_at(fun)), (Some(t), Exp::Var(n))
+                    && (matches!((this, self.exp_at(fun)), (Some(t), Exp::Var(n))
                     if *n == t.name && t.added + args.len() == t.params)
-                        || matches!(self.c.arena.exp_at(fun), Exp::Var(n) if find(e, *n) == Some(Loc::Loop)));
-                let inline = match self.c.arena.exp_at(self.r_operator(fun)) {
+                        || matches!(self.exp_at(fun), Exp::Var(n) if find(e, *n) == Some(Loc::Loop)));
+                let inline = match self.exp_at(self.r_operator(fun)) {
                     Exp::Var(n) if self.where_is(e, *n).is_none() => {
                         let name = self.name(*n).to_string();
                         matches!(
@@ -647,6 +657,11 @@ impl Compiler<'_> {
                 let leaves = self.tail_calls_leave && tail && args.len() < REGS && self.r_plain_callee(fun, args.len(), e) && !self.r_collects(fun, e, this, false);
                 args_collect || !(loop_call || inline || leaves || self.r_call_is_free(fun, args.len(), e, tail))
             }
+            // `(with #%fx n)`: as the standard `n` as a value.
+            Exp::With { body, .. } if self.r_fx_name(x).is_some() => match *self.exp_at(body) {
+                Exp::Var(n) => Self::has_standard_value(self.name(n)) && (!tail || self.name(n) == "list"),
+                _ => true,
+            },
             // A `with` only loads fields (`r_with`): as its body.
             Exp::With { body, .. } => {
                 let mut inner = e.clone();
@@ -664,7 +679,7 @@ impl Compiler<'_> {
         if self.assume.is_none() {
             return false;
         }
-        let Exp::Var(name) = *self.c.arena.exp_at(fun) else { return false };
+        let Exp::Var(name) = *self.exp_at(fun) else { return false };
         if !matches!(self.where_is(e, name), Some(Loc::Global(_))) || self.inlining.contains(&name) {
             return false;
         }
@@ -686,7 +701,7 @@ impl Compiler<'_> {
     /// standard operation, an inlined or specialized global's, or a lifted
     /// procedure's, each compiled its own way.
     fn r_plain_callee(&self, fun: ExpId, n: usize, e: &Env) -> bool {
-        let Exp::Var(name) = *self.c.arena.exp_at(fun) else { return true };
+        let Exp::Var(name) = *self.exp_at(fun) else { return true };
         match self.where_is(e, name) {
             None | Some(Loc::Lifted(_) | Loc::Loop | Loc::Pending(_)) => false,
             Some(Loc::Global(_)) => {
@@ -699,7 +714,7 @@ impl Compiler<'_> {
     /// Whether `x` is a variable or a constant: evaluated in `RESULT` alone,
     /// with no effect, so it may wait until its value is needed.
     fn r_simple(&self, x: ExpId) -> bool {
-        let plain = match self.c.arena.exp_at(x) {
+        let plain = match self.exp_at(x) {
             // Not a name a standard operation has, which may be one made a
             // value, a closure.
             Exp::Var(n) => !Self::has_standard_value(self.name(*n)),
@@ -750,9 +765,17 @@ impl Compiler<'_> {
             g.done(tail);
             return Some(());
         }
-        match self.c.arena.exp_at(x).clone() {
+        // `(with #%fx n)` where `n` is shadowed: the standard `n`, as a name
+        // bound nowhere is.
+        let standard = self.r_fx_name(x);
+        let node = match standard {
+            Some(n) => Exp::Var(n),
+            None => self.exp_at(x).clone(),
+        };
+        match node {
             Exp::Var(n) => {
-                match self.r_where(env, n) {
+                let place = if standard.is_some() { None } else { self.r_where(env, n) };
+                match place {
                     Some(RLoc::Reg(k)) => g.op("reg", &[Gen::n(k)]),
                     Some(RLoc::Slot(s)) => g.op("stack", &[Gen::n(s)]),
                     Some(RLoc::Free(i)) => g.op("lexical", &[Gen::n(i)]),
@@ -913,7 +936,7 @@ impl Compiler<'_> {
                 g.done(tail);
             }
             Exp::RLambda { region, lambda } => {
-                let Exp::Lambda { params, body } = self.c.arena.exp_at(lambda).clone() else { unreachable!("parsed") };
+                let Exp::Lambda { params, body } = self.exp_at(lambda).clone() else { unreachable!("parsed") };
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
                 self.r_lambda(g, &ps, body, env, te, None, Some(region), false)?;
                 g.done(tail);
@@ -1213,7 +1236,7 @@ impl Compiler<'_> {
         // leaf, else a frame slot), then each into its parameter's place,
         // and a jump. (Before the procedure's own loop: a join point may
         // have its name.)
-        if let Exp::Var(n) = *self.c.arena.exp_at(f)
+        if let Exp::Var(n) = *self.exp_at(f)
             && let Some(RLoc::Join(j)) = self.r_where(env, n)
         {
             let (params, label) = g.joins[j].clone();
@@ -1253,13 +1276,13 @@ impl Compiler<'_> {
             return self.r_loop(g, args, env, te);
         }
         if let (Some(sp), Some((at, start))) = (self.spec.clone(), g.spec) {
-            let is_param = |c: &Self, env: &[(Sym, RLoc)], x: ExpId| matches!(*c.c.arena.exp_at(x), Exp::Var(n) if n == sp.param_name && c.r_where(env, n) == Some(at));
+            let is_param = |c: &Self, env: &[(Sym, RLoc)], x: ExpId| matches!(*c.exp_at(x), Exp::Var(n) if n == sp.param_name && c.r_where(env, n) == Some(at));
             if is_param(self, env, f) && args.len() == sp.arity {
                 return self.r_spec_lambda(g, &sp, at, args, env, te, tail);
             }
             // Its own name is its own global here: in an inlined body, or
             // the lambda's, the parameter is not in scope.
-            if matches!(*self.c.arena.exp_at(f), Exp::Var(n) if n == sp.name && matches!(self.r_where(env, n), Some(RLoc::Global(_))))
+            if matches!(*self.exp_at(f), Exp::Var(n) if n == sp.name && matches!(self.r_where(env, n), Some(RLoc::Global(_))))
                 && args.len() == sp.n
                 && is_param(self, env, args[sp.param])
             {
@@ -1271,7 +1294,7 @@ impl Compiler<'_> {
         if let Some((name, _, n, start)) = g.own
             && self.inlining.is_empty()
             && args.len() == n
-            && let Exp::Var(m) = *self.c.arena.exp_at(f)
+            && let Exp::Var(m) = *self.exp_at(f)
             && m == name
             && let Some(RLoc::Global(cell)) = self.r_where(env, m)
         {
@@ -1292,7 +1315,7 @@ impl Compiler<'_> {
                     // not a constant, deeper than here: that one, and then
                     // the constants' sum at once. Integers are exact, so the
                     // order they are added in cannot matter.
-                    let adds = |c: &Self, e: ExpId| match c.c.arena.exp_at(e) {
+                    let adds = |c: &Self, e: ExpId| match c.exp_at(e) {
                         Exp::App { fun, args } => args.len() == 2 && matches!(c.r_standard_name(env, *fun).as_deref(), Some("+" | "-")),
                         _ => false,
                     };
@@ -1318,7 +1341,7 @@ impl Compiler<'_> {
                     // the operation does not care which.
                     // (Asked only where it can matter, and a literal first:
                     // what is known is looked up, and that costs.)
-                    let literal = |c: &Self, e: ExpId| matches!(c.c.arena.exp_at(e), Exp::Int(_) | Exp::Bool(_) | Exp::Char(_));
+                    let literal = |c: &Self, e: ExpId| matches!(c.exp_at(e), Exp::Int(_) | Exp::Bool(_) | Exp::Char(_));
                     let free = |c: &mut Self, e: ExpId| c.r_simple(e) || c.r_const(env, e).is_some();
                     if swap && !free(self, x) && !free(self, y) {
                         self.r_binary_swapped(g, r, x, y, env, te)?;
@@ -1455,7 +1478,7 @@ impl Compiler<'_> {
         }
         // A lifted procedure's call: the names it would have captured,
         // then the arguments, into REG1…REGn; its closure, a constant.
-        if let Exp::Var(n) = *self.c.arena.exp_at(f)
+        if let Exp::Var(n) = *self.exp_at(f)
             && let Some(RLoc::Lifted(k)) = self.r_where(env, n)
         {
             let mut all: Vec<Arg> = self.lifts[k].added.iter().map(|a| Arg::Name(*a)).collect();
@@ -1498,7 +1521,7 @@ impl Compiler<'_> {
         match self.planned_call(x) {
             Some(called) => {
                 let k = called.inline?;
-                let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+                let Exp::Var(name) = *self.exp_at(f) else { return None };
                 let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
                 Some((k, cell))
             }
@@ -1511,7 +1534,7 @@ impl Compiler<'_> {
         match self.planned_call(x) {
             Some(called) => {
                 let (k, lam) = called.special?;
-                let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+                let Exp::Var(name) = *self.exp_at(f) else { return None };
                 let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
                 Some((k, cell, lam))
             }
@@ -1520,7 +1543,7 @@ impl Compiler<'_> {
     }
 
     fn r_inlined(&self, env: &[(Sym, RLoc)], f: ExpId, n: usize) -> O<(usize, Value)> {
-        let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+        let Exp::Var(name) = *self.exp_at(f) else { return None };
         let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
         if self.inlining.contains(&name) {
             return None;
@@ -1535,7 +1558,7 @@ impl Compiler<'_> {
     /// at least one such argument, and not unrolled more than
     /// `UNROLL_LIMIT` deep here (`TODO.md` §44).
     fn r_unrolled(&mut self, env: &[(Sym, RLoc)], f: ExpId, args: &[ExpId]) -> O<(usize, Value, Vec<Option<(Value, Option<Value>)>>)> {
-        let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+        let Exp::Var(name) = *self.exp_at(f) else { return None };
         let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
         let k = self.unrolls.iter().position(|i| i.name == name && i.params.len() == args.len() && self.sees(i.genv_len))?;
         if self.inlining.iter().filter(|n| **n == name).count() >= super::UNROLL_LIMIT {
@@ -1547,7 +1570,7 @@ impl Compiler<'_> {
             known.push(match self.r_const(env, *a) {
                 Some(v) if list(&v) => Some((v, None)),
                 Some(_) => None,
-                None => match *self.c.arena.exp_at(*a) {
+                None => match *self.exp_at(*a) {
                     Exp::Var(n) => match self.r_where(env, n) {
                         Some(RLoc::Global(g)) => self.const_globals.get(&g.raw()).copied().filter(list).map(|v| (v, Some(g))),
                         _ => None,
@@ -1751,11 +1774,11 @@ impl Compiler<'_> {
         if self.spec.is_some() {
             return None;
         }
-        let Exp::Var(name) = *self.c.arena.exp_at(f) else { return None };
+        let Exp::Var(name) = *self.exp_at(f) else { return None };
         let Some(RLoc::Global(cell)) = self.r_where(env, name) else { return None };
         let k = self.specials.iter().position(|s| s.name == name && s.params.len() == args.len() && self.sees(s.genv_len))?;
         let lam = args[self.specials[k].param];
-        match self.c.arena.exp_at(lam) {
+        match self.exp_at(lam) {
             Exp::Lambda { params, body } if params.len() == self.specials[k].arity && self.inline_room(*body, super::INLINE_LIMIT) >= 0 => {
                 Some((k, cell, lam))
             }
@@ -1771,7 +1794,7 @@ impl Compiler<'_> {
     #[allow(clippy::too_many_arguments)]
     fn r_specialize(&mut self, g: &mut Gen, k: usize, cell: Value, lam: ExpId, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         let (regs, slots) = (g.next_reg, g.next_slot);
-        let Exp::Lambda { params, body } = self.c.arena.exp_at(lam).clone() else { return None };
+        let Exp::Lambda { params, body } = self.exp_at(lam).clone() else { return None };
         let lam_params: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
         // The copy for the procedure, the lambda, what it captures and the
         // globals it sees, made with the form's words as the plan says
@@ -2030,7 +2053,7 @@ impl Compiler<'_> {
     /// no more than once.
     fn r_branch_on(&mut self, g: &mut Gen, x: ExpId, when: bool, label: usize, env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
         let truth = |v: Value| v != Value::FALSE;
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             Exp::The { exp, .. } => return self.r_branch_on(g, exp, when, label, env, te),
             Exp::App { fun, args } if args.len() == 1 && self.r_standard_name(env, fun).as_deref() == Some("not") => {
                 return self.r_branch_on(g, args[0], !when, label, env, te);
@@ -2096,7 +2119,7 @@ impl Compiler<'_> {
         {
             return (None, v.as_fixnum());
         }
-        let split = match self.c.arena.exp_at(x).clone() {
+        let split = match self.exp_at(x).clone() {
             Exp::App { fun, args } => match self.r_standard_name(env, fun) {
                 Some(name) => self.r_split_app(env, &name, &args),
                 None => None,
@@ -2204,7 +2227,7 @@ impl Compiler<'_> {
 
     /// Where `x` is, if it is a variable.
     fn r_var(&self, env: &[(Sym, RLoc)], x: ExpId) -> O<RLoc> {
-        match self.c.arena.exp_at(x) {
+        match self.exp_at(x) {
             Exp::Var(n) if !self.c.facts.changed(x) => self.r_where(env, *n),
             _ => None,
         }
@@ -2233,7 +2256,7 @@ impl Compiler<'_> {
     /// constants, made now, once. (Frozen, and FX-26 has no
     /// `eq?`, so no run can tell it from one it made itself.)
     fn r_const(&mut self, env: &[(Sym, RLoc)], x: ExpId) -> O<Value> {
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             Exp::Int(k) => Some(Value::fixnum(k)),
             Exp::Bool(b) => Some(Value::boolean(b)),
             Exp::Char(c) => Some(Value::char(c)),
@@ -2300,7 +2323,7 @@ impl Compiler<'_> {
     /// slot or free value) or literal constant (an integer, boolean,
     /// character, symbol or `nil`); none if it is not such a test.
     fn r_test_key(&mut self, env: &[(Sym, RLoc)], test: ExpId) -> O<(String, Vec<(u8, u64)>)> {
-        let Exp::App { fun, args } = self.c.arena.exp_at(test).clone() else { return None };
+        let Exp::App { fun, args } = self.exp_at(test).clone() else { return None };
         let name = self.r_standard_name(env, fun)?;
         if !matches!(name.as_str(), "<" | ">" | "<=" | ">=" | "=" | "eq?" | "symbol=?" | "char=?" | "null?" | "pair?") {
             return None;

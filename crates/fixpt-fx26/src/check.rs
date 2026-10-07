@@ -257,6 +257,11 @@ pub struct NodeFacts {
     /// compilers may make once, as constant data, where it is made of
     /// literals (`TODO.md` §44).
     pub frozen_defines: HashSet<ExpId>,
+    /// Each `(with #%fx n)` where `n` is the standard binding anyway, with
+    /// its body, the variable `n`: the compilers read it as that `n`
+    /// (`Compiler::exp_at`), as the FX-26 compiler, given the fact -502,
+    /// does (`c-plain-fx`; `TODO.md` §46).
+    pub fx_plain: HashMap<ExpId, ExpId>,
     /// Each `with`'s module's values its body names, each with its
     /// position in the module, in order: what lowering and the compilers
     /// bind.
@@ -279,6 +284,7 @@ impl NodeFacts {
         self.converted.retain(|e, _| e.0 < first);
         self.apply_shares.retain(|e| e.0 < first);
         self.frozen_defines.retain(|e| e.0 < first);
+        self.fx_plain.retain(|e, _| e.0 < first);
     }
 
     /// What the compilers give `%fx26-convert` for `e`'s conversion: its
@@ -800,6 +806,20 @@ impl Checker {
     /// The standard binding of `s`'s type, whatever binds `s` since.
     pub(crate) fn standard_type(&self, s: Sym) -> Option<TyId> {
         self.env[..self.standard_len].iter().rposition(|(n, _)| *n == s).map(|i| self.env[i].1)
+    }
+
+    /// Notes `e`, a `(with #%fx n)` where nothing shadows `n`, as the plain
+    /// `n` it is (`fx_plain`, the fact -502), for the compilers, which read
+    /// it so (`Compiler::exp_at`); once, by the application it is the
+    /// operator of, or else by the `with`, as `k-note-fx-plain` does.
+    pub(crate) fn plain_fx(&mut self, e: ExpId) {
+        if let Exp::With { module, body } = *self.arena.exp_at(e)
+            && self.is_fx_module(module)
+            && let Exp::Var(n) = *self.arena.exp_at(body)
+            && self.is_standard(n)
+        {
+            self.facts.fx_plain.insert(e, body);
+        }
     }
 
     /// The standard name `e` refers to, if it refers to one: a variable the

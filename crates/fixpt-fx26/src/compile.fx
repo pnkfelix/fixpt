@@ -122,6 +122,10 @@
 ;; Each definition's value that is a list nothing writes (the fact -501,
 ;; `k-note-frozen-define`), by where it starts: where it ends.
 (define c-frozen-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
+;; Each `(with #%fx n)` that is the plain `n` (the fact -502, `k-synth-fx`).
+(define c-plain-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
+(define c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int) bool)
+  (lambda (a b) (= (car (table-ref (get c-plain-table) a c-no-conversion)) b)))
 ;; Whether the definition's value from `a` to `b` is such a list.
 (define c-frozen-define-at (subr (maxeff (read @globals) (read @k)) (int int) bool)
   (lambda (a b) (= (car (table-ref (get c-frozen-table) a c-no-conversion)) b)))
@@ -488,6 +492,7 @@
             (cond ((>= n 0) (table-set! (get c-fact-table) a (the c-span (cons b n))))
                   ((= n -500) (table-set! (get c-shares-table) a (the c-span (cons b 0))))
                   ((= n -501) (table-set! (get c-frozen-table) a (the c-span (cons b 0))))
+                  ((= n -502) (table-set! (get c-plain-table) a (the c-span (cons b 0))))
                   ;; A conversion, -1000 - code (`k-convert-at`).
                   ((<= n -1000)
                    (table-set! (get c-convert-table) a (the c-span (cons b (- -1000 n)))))
@@ -517,6 +522,7 @@
       (set c-convert-table (make-table c-int-hash c-int=?))
       (set c-shares-table (make-table c-int-hash c-int=?))
       (set c-frozen-table (make-table c-int-hash c-int=?))
+      (set c-plain-table (make-table c-int-hash c-int=?))
       (set c-summary-table (make-table c-int-hash c-int=?))
       (set c-join-memo (make-table c-int-hash c-int=?))
       (set c-spec-made (make-table c-int-hash c-int=?))
@@ -608,8 +614,10 @@
         (e-module (items a b) (c-free-items items (c-module-bound items bound) acc))
         ;; The module, then the body, the module's values bound in it.
         (e-with (m body a b)
-          (let ((ns (c-with-at a b)) (acc (if (c-member? bound m) acc (c-adjoin acc m))))
-            (c-free body (if (null? ns) bound (c-names (car ns) bound)) acc)))
+          (if (string=? (symbol->string m) "#%fx")
+              acc
+              (let ((ns (c-with-at a b)) (acc (if (c-member? bound m) acc (c-adjoin acc m))))
+                (c-free body (if (null? ns) bound (c-names (car ns) bound)) acc))))
         (else y acc))))
   (c-free-items (subr c-walks (mod-items syms syms) syms)
     (lambda (items bound acc)
@@ -882,6 +890,8 @@
 (define c-conversion-at (with compile-module c-conversion-at))
 (define c-apply-shares-at (with compile-module c-apply-shares-at))
 (define c-frozen-define-at (with compile-module c-frozen-define-at))
+(define c-plain-table (with compile-module c-plain-table))
+(define c-plain-fx-at (with compile-module c-plain-fx-at))
 (define c-field-at (with compile-module c-field-at))
 (define c-with-at (with compile-module c-with-at))
 (define c-with-places-at (with compile-module c-with-places-at))

@@ -479,6 +479,12 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
             let (a, b) = place(*e);
             (a, b, -501)
         }))
+        // And each `(with #%fx n)` that is the plain `n`, as -502
+        // (`k-synth-fx`).
+        .chain(c.facts.fx_plain.keys().map(|e| {
+            let (a, b) = place(*e);
+            (a, b, -502)
+        }))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     // And each `with`'s module's values it names, and their positions, by

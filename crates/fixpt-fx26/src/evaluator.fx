@@ -699,13 +699,16 @@
         (e-module (items a b) (eval-module items e))
         ;; `with`: the module's values its body names, by position, bound by
         ;; their names (all of them, if the checker did not say which).
+        ;; `(with #%fx n)`: the standard `n`, whatever binds `n` here.
         (e-with (m body a b)
-          (let ((used (ev-with-in (get ev-withs) a b)))
-            (eval body
-                  (if (null? used)
-                      (bind-module (lookup e m) e)
-                      (bind-module-at (lookup e m) (extract (car used) 1) (extract (car used) 2)
-                                      e))))))))
+          (if (k-fx-module? m)
+              (tagcase body (e-var (n c d) (standard n)) (else y (efail "`(with #%fx name)`")))
+              (let ((used (ev-with-in (get ev-withs) a b)))
+                (eval body
+                      (if (null? used)
+                          (bind-module (lookup e m) e)
+                          (bind-module-at (lookup e m) (extract (car used) 1) (extract (car used) 2)
+                                          e)))))))))
   ;; A module's items, as a `letrec*`'s (`DONE.md` §37): every name first,
   ;; holding #u; then each item's values, in order, in the scope of all.
   (eval-module (subr (maxeff (read @globals) evals spin) (mod-items env) val)

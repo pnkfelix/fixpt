@@ -69,6 +69,7 @@ fn the_parsers_agree_on_real_programs() {
         include_str!("programs/modules/select.fx"),
         include_str!("programs/modules/transparent.fx"),
         include_str!("programs/run/case.fx"),
+        include_str!("programs/run/standard-refs.fx"),
         include_str!("programs/sizes/fresh-temporaries.fx"),
         fixpt_fx26::TABLE,
     ] {

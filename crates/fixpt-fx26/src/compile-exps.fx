@@ -370,12 +370,21 @@
   (lambda (c n tail)
     (if tail (c-op1 c routine-ttailcall (wcell-int n)) (c-op1 c routine-tcall (wcell-int n)))))
 
+;; The name `(with m body)` is the standard binding of, if `m` is `#%fx`
+;; (where nothing shadows it, the checker made it the plain name), else "".
+(define c-fx-name (subr (read @globals) (symbol exp) string)
+  (lambda (m body)
+    (tagcase body
+      (e-var (n a b) (if (string=? (symbol->string m) "#%fx") (symbol->string n) ""))
+      (else y ""))))
 ;; The standard operation `f` names, if it is a name bound nowhere else;
 ;; else "".
 (define c-standard-name (subr c-walks (exp cenv) string)
   (lambda (f e)
     (tagcase f
       (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) ""))
+      ;; `(with #%fx n)` where `n` is shadowed: the standard `n`.
+      (e-with (m body a b) (c-fx-name m body))
       (else y ""))))
 
 ;; The module in slot `depth`'s fields at positions `at`, pushed.
@@ -575,7 +584,11 @@
   (c-with (subr (maxeff compiles spin) (symbol exp int int cenv int code bool) unit)
     (lambda (m body a b e depth c tail)
       (let ((ns (c-with-at a b)) (ps (c-with-places-at a b)) (l (c-where e m)))
-        (cond ((or (null? ns) (null? ps)) (c-fail "a `with` the checker did not see"))
+        (cond ((not (string=? (c-fx-name m body) ""))
+               (let ((n (c-fx-name m body)))
+                 (begin (if (std-nil-name? n) (c-lit c (wcell-nil)) (c-standard-value n c))
+                        (c-done c tail))))
+              ((or (null? ns) (null? ps)) (c-fail "a `with` the checker did not see"))
               ((null? l) (c-fail "a `with` of an unbound module"))
               (else
                (let ((inner (c-with-fields (car ns) (car ps) (car l) e depth 0 c)))
@@ -879,6 +892,7 @@
 (define-type c-inlinables (select compile-exps-module c-inlinables))
 (define c-own-of (with compile-exps-module c-own-of))
 (define c-standard-name (with compile-exps-module c-standard-name))
+(define c-fx-name (with compile-exps-module c-fx-name))
 (define c-module-slots (with compile-exps-module c-module-slots))
 (define c-module-own (with compile-exps-module c-module-own))
 (define c-own-scope (with compile-exps-module c-own-scope))

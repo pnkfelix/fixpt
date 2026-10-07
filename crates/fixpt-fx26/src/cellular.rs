@@ -284,6 +284,17 @@ const UNROLL_LIMIT: usize = 16;
 type R<T> = Result<T, String>;
 
 impl<'a> Compiler<'a> {
+    /// The expression `x` is, as the compilers read it: a `(with #%fx n)`
+    /// the checker found plain (`fx_plain`, the fact -502) is its `n`, the
+    /// variable of its body, as the FX-26 compiler makes it (`c-plain-fx`,
+    /// `TODO.md` §46). Every read of the tree here is through this.
+    pub(crate) fn exp_at(&self, x: ExpId) -> &'a Exp {
+        match self.c.facts.fx_plain.get(&x) {
+            Some(body) => self.c.arena.exp_at(*body),
+            None => self.c.arena.exp_at(x),
+        }
+    }
+
     pub fn new(heap: &'a mut Heap, c: &'a Checker, text: &str) -> Compiler<'a> {
         let mut char_at = vec![0; text.len() + 1];
         let mut n = 0;
@@ -459,7 +470,7 @@ impl<'a> Compiler<'a> {
             b.extend_from_slice(bound);
             b
         };
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             // A module's items see all of them, as a `letrec*`'s.
             Exp::Module(items) => {
                 let mut names = Vec::new();
@@ -488,6 +499,8 @@ impl<'a> Compiler<'a> {
                     }
                 }
             }
+            // `(with #%fx n)`, the standard `n`: nothing free.
+            Exp::With { module, .. } if self.c.is_fx_module(module) => {}
             // The module, then the body, the module's values bound in it.
             Exp::With { module, body } => {
                 if !bound.contains(&module) {
@@ -624,7 +637,20 @@ impl<'a> Compiler<'a> {
     }
 
     fn exp_as_is(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
+            // `(with #%fx n)` where `n` is shadowed (where it is not, the
+            // checker made it the plain `n`): the standard `n`.
+            Exp::With { module, body } if self.c.is_fx_module(module) => {
+                let Exp::Var(n) = *self.exp_at(body) else { return Err("`(with #%fx name)`".into()) };
+                match self.name(n) {
+                    "nil" | "no-pair" => self.lit(code, Value::NULL),
+                    name => {
+                        let name = name.to_string();
+                        self.standard_value(&name, code)?;
+                    }
+                }
+                self.done(code, tail);
+            }
             Exp::Var(n) => {
                 match self.where_is(e, n) {
                     Some(l) => self.load(code, l),
@@ -674,7 +700,7 @@ impl<'a> Compiler<'a> {
                 self.done(code, tail);
             }
             Exp::RLambda { region, lambda } => {
-                let Exp::Lambda { params, body } = self.c.arena.exp_at(lambda).clone() else { unreachable!("parsed") };
+                let Exp::Lambda { params, body } = self.exp_at(lambda).clone() else { unreachable!("parsed") };
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
                 self.lambda(&ps, body, e, depth, code, None, Some(region))?;
                 self.done(code, tail);
@@ -1083,8 +1109,8 @@ impl<'a> Compiler<'a> {
     /// `f` is, behind the same guard, the global holding `f`'s closure
     /// (`TODO.md` §38). Members that name others are called.
     fn reexport_inline(&mut self, name: Sym, exp: ExpId) {
-        let Exp::With { module, body } = *self.c.arena.exp_at(exp) else { return };
-        let Exp::Var(f) = *self.c.arena.exp_at(body) else { return };
+        let Exp::With { module, body } = *self.exp_at(exp) else { return };
+        let Exp::Var(f) = *self.exp_at(body) else { return };
         let Some((_, genv_len, ms)) = self.modules.iter().find(|(m, _, _)| *m == module) else { return };
         let Some((_, _, params, body)) = ms.iter().find(|(n, _, _, _)| *n == f) else { return };
         let (params, body, genv_len) = (params.clone(), *body, *genv_len);
@@ -1113,7 +1139,7 @@ impl<'a> Compiler<'a> {
     fn lambda_of(&self, mut x: ExpId) -> Option<(Vec<Sym>, ExpId, Option<ExpId>)> {
         let mut region = None;
         loop {
-            match self.c.arena.exp_at(x) {
+            match self.exp_at(x) {
                 Exp::PLambda { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => x = *body,
                 Exp::RLambda { region: r, lambda } => {
                     region = Some(*r);
@@ -1148,7 +1174,7 @@ impl<'a> Compiler<'a> {
             return n;
         }
         let all = |xs: &[ExpId], n: i64| xs.iter().fold(n, |n, a| if n < 0 { n } else { self.room(*a, n, withs) });
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             Exp::With { body, .. } if withs => self.room(body, n, withs),
             Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } | Exp::Module(_) | Exp::With { .. } => -1,
             Exp::App { fun, args } => all(&args, self.room(fun, n, withs)),
@@ -1173,17 +1199,17 @@ impl<'a> Compiler<'a> {
     /// arity it is called with (every call the same), or none.
     fn call_only(&self, x: ExpId, p: Sym, f: Sym, k: usize, n: usize, arity: &mut Option<usize>) -> bool {
         let all = |xs: &[ExpId], arity: &mut Option<usize>| xs.iter().all(|a| self.call_only(*a, p, f, k, n, arity));
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             // Not compiled yet (M3): said of no module.
             Exp::Module(_) | Exp::With { .. } => false,
             Exp::Var(m) => m != p,
-            Exp::App { fun, args } => match *self.c.arena.exp_at(fun) {
+            Exp::App { fun, args } => match *self.exp_at(fun) {
                 Exp::Var(m) if m == p => {
                     let same = arity.is_none_or(|a| a == args.len());
                     *arity = Some(args.len());
                     same && all(&args, arity)
                 }
-                Exp::Var(m) if m == f && args.len() == n && matches!(*self.c.arena.exp_at(args[k]), Exp::Var(q) if q == p) => {
+                Exp::Var(m) if m == f && args.len() == n && matches!(*self.exp_at(args[k]), Exp::Var(q) if q == p) => {
                     args.iter().enumerate().all(|(i, a)| i == k || self.call_only(*a, p, f, k, n, arity))
                 }
                 _ => self.call_only(fun, p, f, k, n, arity) && all(&args, arity),
@@ -1217,13 +1243,13 @@ impl<'a> Compiler<'a> {
     /// any position and in lambdas inside too: so it is never a value.
     fn called_only(&self, x: ExpId, f: Sym, n: usize) -> bool {
         let all = |xs: &[ExpId]| xs.iter().all(|a| self.called_only(*a, f, n));
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             // Not compiled yet (M3): said of no module.
             Exp::Module(_) | Exp::With { .. } => false,
             Exp::Var(m) => m != f,
             Exp::App { fun, args } => {
                 all(&args)
-                    && match self.c.arena.exp_at(fun) {
+                    && match self.exp_at(fun) {
                         Exp::Var(m) if *m == f => args.len() == n,
                         _ => self.called_only(fun, f, n),
                     }
@@ -1387,14 +1413,14 @@ impl<'a> Compiler<'a> {
     /// position, which the compiler makes a loop.
     fn loops_only(&self, x: ExpId, f: Sym, n: usize, tail: bool) -> bool {
         let all = |xs: &[ExpId]| xs.iter().all(|a| self.loops_only(*a, f, n, false));
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             // Not compiled yet (M3): said of no module.
             Exp::Module(_) | Exp::With { .. } => false,
             Exp::Var(m) => m != f,
             Exp::Lambda { params, body } => params.iter().any(|(p, _)| *p == f) || !self.mentions(body, f),
             Exp::App { fun, args } => {
                 all(&args)
-                    && match self.c.arena.exp_at(fun) {
+                    && match self.exp_at(fun) {
                         Exp::Var(m) if *m == f => tail && args.len() == n,
                         _ => self.loops_only(fun, f, n, false),
                     }
@@ -1513,7 +1539,7 @@ impl<'a> Compiler<'a> {
 
     #[allow(clippy::too_many_arguments)]
     fn app(&mut self, x: ExpId, f: ExpId, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
-        if let (true, Some(t), Exp::Var(n)) = (tail, self.this, self.c.arena.exp_at(f)) {
+        if let (true, Some(t), Exp::Var(n)) = (tail, self.this, self.exp_at(f)) {
             if *n == t.name && find(e, *n) == Some(t.loc) && t.added + args.len() == t.params {
                 // A loop: the arguments into the parameters' slots (those a
                 // lifting added passed on as they are), the rest of the
@@ -1531,7 +1557,7 @@ impl<'a> Compiler<'a> {
         }
         // A lifted procedure's call: the names it would have captured, then
         // the arguments, then its closure.
-        if let Exp::Var(n) = *self.c.arena.exp_at(f)
+        if let Exp::Var(n) = *self.exp_at(f)
             && let Some(Loc::Lifted(k)) = self.where_is(e, n)
         {
             let added = self.lifts[k].added.clone();
@@ -1544,8 +1570,12 @@ impl<'a> Compiler<'a> {
             self.op1(code, if tail { "ttailcall" } else { "tcall" }, Value::fixnum((added.len() + n) as i64));
             return Ok(());
         }
-        let standard = match self.c.arena.exp_at(f) {
-            Exp::Var(n) if self.where_is(e, *n).is_none() => Some(self.name(*n).to_string()),
+        let standard = match *self.exp_at(f) {
+            Exp::Var(n) if self.where_is(e, n).is_none() => Some(self.name(n).to_string()),
+            Exp::With { module, body } if self.c.is_fx_module(module) => match *self.exp_at(body) {
+                Exp::Var(n) => Some(self.name(n).to_string()),
+                _ => None,
+            },
             _ => None,
         };
         match standard {
@@ -1693,7 +1723,7 @@ impl<'a> Compiler<'a> {
     /// the globals it saw, and named for the procedure and the lambda; its
     /// twin, made with the others, is the specialized one.
     fn make_copy(&mut self, k: usize, at: (u32, u32, u32), c: procs::CopyAt) -> R<()> {
-        let Exp::Lambda { params, body } = self.c.arena.exp_at(c.lam).clone() else { return Ok(()) };
+        let Exp::Lambda { params, body } = self.exp_at(c.lam).clone() else { return Ok(()) };
         let sp = &self.specials[k];
         let span = self.c.arena.span_of(body);
         let key = (sp.word.raw(), span.start, span.end, c.fv.clone(), c.genv);
@@ -2029,7 +2059,7 @@ impl<'a> Compiler<'a> {
     /// A literal, under ascriptions: what a module's member may be to be
     /// folded.
     fn literal_of(&self, x: ExpId) -> Option<Value> {
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             Exp::Int(k) => Some(Value::fixnum(k)),
             Exp::Bool(b) => Some(Value::boolean(b)),
             Exp::Char(c) => Some(Value::char(c)),
@@ -2048,13 +2078,13 @@ impl<'a> Compiler<'a> {
         if self.c.facts.frozen_defines.contains(&x) {
             return self.const_list(x);
         }
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             Exp::Var(n) => match self.where_is(&Vec::new(), n) {
                 Some(Loc::Global(g)) => self.const_globals.get(&g.raw()).copied(),
                 _ => None,
             },
             Exp::With { module, body } => {
-                let Exp::Var(f) = *self.c.arena.exp_at(body) else { return None };
+                let Exp::Var(f) = *self.exp_at(body) else { return None };
                 let Some(Loc::Global(g)) = self.where_is(&Vec::new(), module) else { return None };
                 self.module_consts.get(&g.raw())?.iter().find(|(n, _)| *n == f).map(|(_, v)| *v)
             }
@@ -2081,7 +2111,7 @@ impl<'a> Compiler<'a> {
         if let Some(v) = self.literal_of(x) {
             return Some(v);
         }
-        match self.c.arena.exp_at(x).clone() {
+        match self.exp_at(x).clone() {
             Exp::Symbol(s) => {
                 let name = self.c.interner.name(s).to_string();
                 Some(self.heap.intern(&name))
@@ -2098,7 +2128,7 @@ impl<'a> Compiler<'a> {
                 }
             }
             Exp::App { fun, args } => {
-                let Exp::Var(f) = *self.c.arena.exp_at(fun) else { return None };
+                let Exp::Var(f) = *self.exp_at(fun) else { return None };
                 if env.iter().any(|(m, _)| *m == f) {
                     return None;
                 }
@@ -2135,7 +2165,7 @@ impl<'a> Compiler<'a> {
             self.const_globals.insert(g.raw(), v);
         }
         self.module_consts.remove(&g.raw());
-        if let Exp::Module(items) = self.c.arena.exp_at(exp).clone() {
+        if let Exp::Module(items) = self.exp_at(exp).clone() {
             let lits: Vec<(Sym, Value)> = items
                 .iter()
                 .filter_map(|item| match item {
@@ -2220,7 +2250,7 @@ impl<'a> Compiler<'a> {
                         _ => Vec::new(),
                     };
                     let g = if !recursive {
-                        let is_module = matches!(self.c.arena.exp_at(*exp), Exp::Module(_));
+                        let is_module = matches!(self.exp_at(*exp), Exp::Module(_));
                         if is_module {
                             self.module_members = Some(Vec::new());
                         }

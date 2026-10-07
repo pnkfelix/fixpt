@@ -1338,19 +1338,22 @@ not write, so it captures nothing (`programs/sizes/fresh-temporaries.fx`;
 not under `run/`, which the FX-26 evaluator runs too: it has no
 `length-is?`, `acyclic?` or `nat?` yet, and `evaluator.fx` is at 992
 lines, so they wait on a split).
-**Left:** the names an expansion *calls* (`=`, `symbol=?`, `length-is?`,
-`certify-length`, `%vlambda`, …) can be shadowed or redefined:
-`(let ((= (lambda ((a int) (b int)) #t))) (case 2 ((1) 'one) (else
-'other)))` answers `one`. The plan: one reserved name, `#%fx`, a module of
-the standard bindings at their types, generated from the standard table,
-which no form may bind or define but any may use; the expansions call
-`(with #%fx =)`; every rule keyed on "the standard binding of `n`" (the
-checkers' `is_standard`, as in `certify-length`'s; the compilers'
-primitives) takes `(with #%fx n)` as that, with the code for `case.fx`
-the same as now to the instruction. With it, an audit of every rule keyed
-on a name, that each asks `is_standard` too; and of the `wcell-*` and
-`wglobal-*` words and `%vlambda`, the front end's machinery, which any
-program may call today.
+**Done (2026-10-07): the names an expansion calls.** They could be
+shadowed or redefined (`(let ((= (lambda ((a int) (b int)) #t))) (case 2
+((1) 'one) (else 'other)))` answered `one`). Now every expansion calls
+`(with #%fx name)`, the standard binding whatever binds `name` there
+(`docs/fx26.md`, "`#%fx`"): both readers read `#%fx` (no other `#%`), both
+checkers type it and refuse it bound, every rule keyed on a standard name
+asks `standard_ref`/`k-std-op`, which accepts it, and where nothing shadows
+`name` both checkers note it plain (fact -502) and both compilers read it
+as the plain `name` from that fact alone (`Compiler::exp_at`,
+`c-plain-fx`; the tree is not rewritten), so `case.fx` compiles to the
+same code to the cell. Shadowed, the lowering, both
+compilers' stack and register code, and the FX-26 evaluator give the
+standard operation (`programs/run/standard-refs.fx`, every machine). The
+audit of name-keyed rules found F15 and F16 (`soundness-findings.md`).
+**Left:** a polymorphic value through `#%fx` is not instantiated where a
+type is expected (§48 would settle `nil`'s).
 
 **Prior art (the user's pointer):** Clinger, "Rapid Case Dispatch in
 Scheme", Scheme Workshop 2006 (`docs/research/papers/case-dispatch/`,
@@ -1397,3 +1400,23 @@ so the operations can be first class again:
 - Meanwhile, every new rule that finds a standard operation by name must
   either only add facts (an alias then loses precision, never gains) or
   join the second-class list; the audit in F15's note is the template.
+
+## 48. `nil` of a type of its own (the user's, 2026-10-07)
+
+`nil` is `(poly ((r region) (t type)) (listof t r))`, and a polymorphic
+value is instantiated only where a type is expected of it; elsewhere a
+program `proj`s it, or wraps it in `the`, at every use that the checker
+cannot solve (an argument given before the one that fixes `t`, a `let`
+of it, a branch of an `if` checked first). Instead: a singleton type, say
+`null`, not polymorphic, of `nil` alone, a subtype of every `(listof T R)`
+(and of `(pairof T1 T2 R)`'s "or none" while that is the absent pair, Q7
+making `pairof` non-nil). Subtyping then does what instantiation does now,
+everywhere a list is expected, and a `let` of `nil` or an `if` with `nil`
+in one branch joins to the other branch's list type.
+- Joins: `(if c nil xs)` is `xs`'s type; `(if c nil nil)` is `null`.
+- Inference: a parameter whose argument is `nil` alone stays `null`, not a
+  list; the checkers may widen at the binder's use.
+- Both checkers; the lowering and the compilers need nothing (the value is
+  the same); `(with #%fx nil)` stops needing instantiation (§46).
+- Ties to Q7 (unions of atoms): `null` is the one-value atom type that
+  unions like `(union symbol null)` would be built from.

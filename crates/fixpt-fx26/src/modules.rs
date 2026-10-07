@@ -257,6 +257,10 @@ impl Checker {
             let Some(t) = t else {
                 return Err(FxError::at(span, "`(with #%fx name)` names one standard binding"));
             };
+            // As an operator, noted by the application (`synth_app`).
+            if self.operator_at != Some(e) {
+                self.plain_fx(e);
+            }
             return Ok((t, Effect::pure()));
         }
         let Some(mt) = self.lookup(m) else {

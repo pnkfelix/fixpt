@@ -460,6 +460,13 @@ impl<'a> Reader<'a> {
                 self.read_atom()
             }
             '0'..='9' if self.profile.datum_labels => self.read_label(start),
+            '%' if self.profile.fx_module => {
+                let word = self.take_while(|c, r| !r.is_delimiter(c));
+                if word != "%fx" {
+                    return Err(ReadError::at(self.span_from(start), format!("unknown `#` syntax: `#{word}`")));
+                }
+                Ok(Syntax::symbol(self.span_from(start), self.interner.intern("#%fx")))
+            }
             _ => {
                 self.bump();
                 Err(ReadError::at(self.span_from(start), format!("unknown `#` syntax: `#{c}`")))

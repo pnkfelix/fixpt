@@ -102,8 +102,10 @@
                 (k-unseen-else els bound o)))
             (x-module (items a b) (k-unseen-module items bound rs))
             (x-with (m body a b)
-              (let ((o (k-unseen (x-var m a b) bound rs)))
-                (k-unseen body (k-names-onto (k-with-names a b) bound) o)))))))
+              (if (k-fx-module? m)
+                  rs
+                  (let ((o (k-unseen (x-var m a b) bound rs)))
+                    (k-unseen body (k-names-onto (k-with-names a b) bound) o))))))))
   ;; The same walk of a module's items, every item's names bound, as a
   ;; `letrec*`'s.
   (k-unseen-module (subr (maxeff kstate spin) (k-items k-names k-regions) k-regions)

@@ -478,7 +478,7 @@
              (eq (cond ((= k 0) '=) ((= k 1) 'char=?) ((= k 2) 'string=?)
                        ((= k 3) 'symbol=?) (else 'bool=?)))
              (lit (if (= k 3) (e-sym (syn-head d) da db) (parse-exp d))))
-        (e-app (e-var eq da db) (list (e-var key da db) lit) da db))))
+        (e-app (standard-ref eq da db) (list (e-var key da db) lit) da db))))
   (parse-bloblet (subr (maxeff parses spin) (symbol syns-a int int) exp)
     (lambda (op args a b)
       (let ((n (len args)))

@@ -431,8 +431,11 @@
             (k-free-else els bound o)))
         (x-module (items a b) (k-free-module items bound out))
         ;; The module, and the body, which sees its values once checked.
-        (x-with (m body a b) (k-free-into body (k-names-onto (k-with-names a b) bound)
-                                          (k-note m bound out))))))
+        ;; `(with #%fx n)`, the standard `n`: nothing free.
+        (x-with (m body a b)
+          (if (k-fx-module? m)
+              out
+              (k-free-into body (k-names-onto (k-with-names a b) bound) (k-note m bound out)))))))
   ;; A module's free variables, onto `out`: each item's, every item's names
   ;; bound, as a `letrec*`'s (`check-modorder.fx`).
   (k-free-module (subr kmakes (k-items k-names k-names) k-names)
