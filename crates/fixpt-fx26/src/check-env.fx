@@ -231,9 +231,10 @@
 (define k-summary (subr (read @globals) (k-eff) int)
   (lambda (e) (cond ((null? e) 0) ((k-reads-only? e) 1) ((k-disrupts? e) 3) (else 2))))
 
-;; Each `with` checked, where it is, and its module's values' names, newest
-;; first: a `with`'s body sees them, once checking has found them.
-(define-type k-with-noted (productof (1 int) (2 int) (3 k-names)))
+;; Each `with` checked, where it is, and its module's values its body names,
+;; with their positions in the module, newest first: a `with`'s body sees
+;; them, once checking has found them; a re-export, of one value, binds one.
+(define-type k-with-noted (productof (1 int) (2 int) (3 k-names) (4 k-ids)))
 (define-type k-with-list (listof k-with-noted acyclic))
 (define k-with-vals (ref k-with-list @t) (new nil))
 (define k-with-names-in (subr (maxeff (read @globals) (read @t)) (k-with-list int int) k-names)

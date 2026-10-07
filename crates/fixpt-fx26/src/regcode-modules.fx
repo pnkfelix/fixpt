@@ -56,19 +56,19 @@
             (rl-free (i) (r-opn g rop-lexical i))
             (rl-global (c) (r-op1 g rop-global (wcell-global c)))
             (else y (r-decline)))))))
-;; Module `m`'s values `ns`, by position from field `i`, each into its slot
-;; of `at`: the scopes with them.
-(define r-with-fields (subr rcompiles (rgen symbol syms rints int r-scopes) r-scopes)
-  (lambda (g m ns at i sc)
-    (if (null? ns)
+;; Module `m`'s values `ns`, at positions `ps`, each into its slot of `at`:
+;; the scopes with them.
+(define r-with-fields (subr rcompiles (rgen symbol syms k-ids rints r-scopes) r-scopes)
+  (lambda (g m ns ps at sc)
+    (if (or (null? ns) (null? ps))
         sc
         (begin
           (r-module-value g m (car sc))
-          (r-opn g rop-field (+ i 2))
+          (r-opn g rop-field (+ (car ps) 2))
           (r-opn g rop-setstk (car at))
           (let ((inner (the r-scopes (cons (r-bind (car ns) (rl-slot (car at)) (car sc))
                                            (r-local (cdr sc) (car ns))))))
-            (r-with-fields g m (cdr ns) (cdr at) (+ i 1) inner))))))
+            (r-with-fields g m (cdr ns) (cdr ps) (cdr at) inner))))))
 ;; A frame slot for each of `ns`.
 (define r-slots-for (subr (maxeff emits spin) (rgen syms) rints)
   (lambda (g ns)

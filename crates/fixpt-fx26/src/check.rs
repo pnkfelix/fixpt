@@ -249,8 +249,10 @@ pub struct NodeFacts {
     /// procedure may have that list itself, since nothing can write it.
     /// Every other `apply` copies its list.
     pub apply_shares: HashSet<ExpId>,
-    /// Each `with`'s module's values, in order: lowering binds them.
-    pub with_vals: HashMap<ExpId, Vec<Sym>>,
+    /// Each `with`'s module's values its body names, each with its
+    /// position in the module, in order: what lowering and the compilers
+    /// bind.
+    pub with_vals: HashMap<ExpId, Vec<(Sym, usize)>>,
     /// Modules given where a type with fewer values, or the same in
     /// another order, is wanted: for each value the wanted type has, its
     /// position in the module given. Made into a module of that layout.
@@ -1286,7 +1288,7 @@ impl Checker {
                     out.push(module);
                 }
                 let depth = bound.len();
-                bound.extend(self.facts.with_vals.get(&e).into_iter().flatten().copied());
+                bound.extend(self.facts.with_vals.get(&e).into_iter().flatten().map(|(n, _)| *n));
                 self.free_into(body, bound, out);
                 bound.truncate(depth);
             }

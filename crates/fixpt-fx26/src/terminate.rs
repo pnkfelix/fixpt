@@ -356,7 +356,7 @@ impl Walk<'_> {
                 if let Some(m) = self.member(module) {
                     self.escapes.get_or_insert((self.current, m));
                 }
-                let names: Vec<Sym> = self.c.facts.with_vals.get(&e).cloned().unwrap_or_default();
+                let names: Vec<Sym> = self.c.facts.with_vals.get(&e).into_iter().flatten().map(|(n, _)| *n).collect();
                 let depth = self.scope.len();
                 self.scope.extend(names.into_iter().map(|n| (n, Vec::new())));
                 self.walk(body);

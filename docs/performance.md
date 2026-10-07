@@ -2443,3 +2443,29 @@ REPL, `okasaki.fx` (370 lines), best of runs:
 
 The output of 20 loads is the same. The suite 1:40 → 1:23; the Emacs
 mode's tests 4.2 → 1.1 s.
+
+## A `with` binds only what its body names (2026-10-07)
+
+Making every front-end file a module re-exports each name other files use
+as `(define x (with m x))`. A `with` bound every value of its module, in
+both checkers (each value's type put in scope) and in both compilers and
+the lowering (each value's field loaded into a slot), to use one: a
+file's re-exports cost the square of its module's width, and the
+generated `layout.fx`, 161 names, made it plain (the self-compile 1.549 →
+1.615 s). Now the checkers record, for each `with`, only the module's
+values free in its body, each with its position (`Facts::with_vals`,
+`k-with-vals`), and everything after binds just those. A re-export is one
+field. The self-compile, per phase (probe, back to back against the
+generated files made modules):
+
+| phase   | before                       | after                        |
+| ------- | ---------------------------- | ---------------------------- |
+| read    | 0.118 s                      | 0.124 s                      |
+| parse   | 0.013 s                      | 0.012 s                      |
+| check   | 1.188 s, 38 GCs, 15.9 M cop. | 1.042 s, 36 GCs, 4.8 M cop.  |
+| compile | 0.292 s, 48 GCs, 50.3 M wds. | 0.272 s, 37 GCs, 38.2 M wds. |
+| total   | 1.611 s                      | 1.450 s                      |
+
+Below the 1.549 s from before the day's module work began. The suite
+2:00 → 1:26. The evaluator written in FX-26 still binds a `with`'s whole
+module (`bind-module`); it is not on the self-compile's path.

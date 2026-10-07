@@ -1029,16 +1029,16 @@
             (begin (r-make-frozen g 37 (r-slots-oldest vals nil) env te)
                    (set (extract g nslot) slots)
                    (r-done g tail))))))
-  ;; `with`: the module's values, by position, kept in frame slots; then the
-  ;; body. Declined in a leaf.
+  ;; `with`: the module's values the body names, by position, kept in frame
+  ;; slots; then the body. Declined in a leaf.
   (r-with (subr rcompiles (rgen symbol exp int int renv cenv bool) unit)
     (lambda (g m body a b env te tail)
-      (let ((ns (c-with-at a b)))
-        (if (or (extract g leaf) (null? ns))
+      (let ((ns (c-with-at a b)) (ps (c-with-places-at a b)))
+        (if (or (extract g leaf) (null? ns) (null? ps))
             (r-decline)
             (let* ((slots (get (extract g nslot)))
                    (at (r-slots-for g (car ns)))
-                   (sc (r-with-fields g m (car ns) at 0 (the r-scopes (cons env te)))))
+                   (sc (r-with-fields g m (car ns) (car ps) at (the r-scopes (cons env te)))))
               (begin (r-exp g body (car sc) (cdr sc) tail) (set (extract g nslot) slots)))))))
   (r-module-or-with (subr rcompiles (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)

@@ -475,19 +475,22 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         }))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    // And each `with`'s module's values' names, by where it is
-    // (`checked-withs!`): the checker's record, which the compiler reads.
+    // And each `with`'s module's values it names, and their positions, by
+    // where it is (`checked-withs!`): the checker's record, which the
+    // compiler reads.
     let mut withs = scheme.make(|_| Value::NULL);
     for (e, names) in &c.facts.with_vals {
         let (wa, wb) = place(*e);
-        let mut ns = scheme.make(|_| Value::NULL);
-        for n in names.iter().rev() {
+        let (mut ns, mut is) = (scheme.make(|_| Value::NULL), scheme.make(|_| Value::NULL));
+        for (n, i) in names.iter().rev() {
             let sym = scheme.make(|m| m.heap().intern(c.interner.name(*n)));
             ns = scheme.call_global("cons", &[sym, ns]).map_err(|e| fail(e.to_string()))?;
+            let at = scheme.make(|_| Value::fixnum(*i as i64));
+            is = scheme.call_global("cons", &[at, is]).map_err(|e| fail(e.to_string()))?;
         }
         let (a, b) = (scheme.make(|_| Value::fixnum(wa)), scheme.make(|_| Value::fixnum(wb)));
         let tag = scheme.make(|_| Value::fixnum(37));
-        let one = scheme.call_global("%make-frozen", &[tag, a, b, ns]).map_err(|e| fail(e.to_string()))?;
+        let one = scheme.call_global("%make-frozen", &[tag, a, b, ns, is]).map_err(|e| fail(e.to_string()))?;
         withs = scheme.call_global("cons", &[one, withs]).map_err(|e| fail(e.to_string()))?;
     }
     scheme.call_global(&format!("{READER_PREFIX}checked-withs!"), &[withs]).map_err(|e| fail(e.to_string()))?;

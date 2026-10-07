@@ -603,11 +603,13 @@ impl Lowerer<'_> {
                 self.locals.truncate(depth);
                 out
             }
-            // `with`: the module's values, by position, as locals.
+            // `with`: the module's values the body names, by position, as
+            // locals.
             Exp::With { module, body } => {
-                let names = self.c.facts.with_vals.get(&e).cloned().unwrap_or_default();
+                let used = self.c.facts.with_vals.get(&e).cloned().unwrap_or_default();
                 let m = self.var(module);
-                let bs: Vec<String> = names.iter().enumerate().map(|(i, n)| format!("({} (%bloblet-ref {m} {}))", self.local(*n), i + 2)).collect();
+                let bs: Vec<String> = used.iter().map(|(n, i)| format!("({} (%bloblet-ref {m} {}))", self.local(*n), i + 2)).collect();
+                let names: Vec<Sym> = used.iter().map(|(n, _)| *n).collect();
                 format!("(let ({}) {})", bs.join(" "), self.body(&names, body))
             }
             Exp::Extract(x, _) => {

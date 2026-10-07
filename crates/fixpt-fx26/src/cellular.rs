@@ -462,7 +462,7 @@ impl<'a> Compiler<'a> {
                 if !bound.contains(&module) {
                     adjoin(acc, module);
                 }
-                let names = self.c.facts.with_vals.get(&x).cloned().unwrap_or_default();
+                let names: Vec<Sym> = self.c.facts.with_vals.get(&x).into_iter().flatten().map(|(n, _)| *n).collect();
                 self.free(body, &with(bound, &names), acc);
             }
             Exp::Var(n) => {
@@ -772,15 +772,16 @@ impl<'a> Compiler<'a> {
                 self.unbind(code, depth, made, tail);
                 self.module_members = members;
             }
-            // `with`: the module's values, by position, in slots.
+            // `with`: the module's values the body names, by position, in
+            // slots.
             Exp::With { module, body } => {
                 let names = self.c.facts.with_vals.get(&x).cloned().ok_or("a `with` the checker did not see")?;
                 let m = self.where_is(e, module).ok_or("a `with` of an unbound module")?;
                 let mut inner = e.clone();
-                for (i, n) in names.iter().enumerate() {
+                for (k, (n, i)) in names.iter().enumerate() {
                     self.load(code, m);
-                    self.field(code, i as i64 + 2);
-                    inner.push((*n, Loc::Slot(depth + i)));
+                    self.field(code, *i as i64 + 2);
+                    inner.push((*n, Loc::Slot(depth + k)));
                 }
                 self.exp(body, &inner, depth + names.len(), code, tail)?;
                 self.unbind(code, depth, names.len(), tail);

@@ -1079,8 +1079,8 @@ impl Compiler<'_> {
         Some(())
     }
 
-    /// `with`: the module's values, by position, kept in frame slots; then
-    /// the body.
+    /// `with`: the module's values the body names, by position, kept in
+    /// frame slots; then the body.
     #[allow(clippy::too_many_arguments)]
     fn r_with(&mut self, g: &mut Gen, x: ExpId, module: Sym, body: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         if g.leaf {
@@ -1089,7 +1089,7 @@ impl Compiler<'_> {
         let names = self.c.facts.with_vals.get(&x)?.clone();
         let (depth, tdepth, slots) = (env.len(), te.len(), g.next_slot);
         let at: Vec<usize> = names.iter().map(|_| g.slot()).collect();
-        for (i, n) in names.iter().enumerate() {
+        for (k, (n, i)) in names.iter().enumerate() {
             match self.r_where(env, module)? {
                 RLoc::Reg(k) => g.op("reg", &[Gen::n(k)]),
                 RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
@@ -1097,9 +1097,9 @@ impl Compiler<'_> {
                 RLoc::Global(c) => g.op("global", &[c]),
                 _ => return self.decline("a `with` of a module not in a place"),
             }
-            g.op("field", &[Value::fixnum(i as i64 + 2)]);
-            g.op("setstk", &[Gen::n(at[i])]);
-            env.push((*n, RLoc::Slot(at[i])));
+            g.op("field", &[Value::fixnum(*i as i64 + 2)]);
+            g.op("setstk", &[Gen::n(at[k])]);
+            env.push((*n, RLoc::Slot(at[k])));
             te.push((*n, Loc::Slot(usize::MAX)));
         }
         self.r_exp(g, body, env, te, tail)?;

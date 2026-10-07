@@ -230,11 +230,9 @@ before everything else, known holes before proofs.
   hooks are left between files (the compilers' by a middle phase,
   `TODO.md` §41; the checker's by regrouping each knot into one file or
   module). `regcode-core.fx` is over the size limit by the user's
-  decision, to be revisited. Open: a re-export, `(define x (with m x))`,
-  binds every value of its module, so a file's re-exports cost the square
-  of its size (the self-compile 1.549 -> 1.615 s for the generated
-  files); a `with` binding only what its body uses would fix it. Found on
-  the way, fixed: a re-exported type printed whole at each use (check
+  decision, to be revisited. A `with` binds only what its body names, so
+  a re-export is one field (the self-compile 1.611 -> 1.450 s,
+  `docs/performance.md`). Found on the way, fixed: a re-exported type printed whole at each use (check
   0.91 s -> 28 s); types and values named apart in modules; printing a
   module's type quadratic in its components (check 1.42 -> 1.09 s).
 - E. **Emacs** (the user's, 2026-10-05): queue Q14. Step 1 done:

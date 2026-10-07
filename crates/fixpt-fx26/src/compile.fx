@@ -148,6 +148,17 @@
 ;; if the checker did not see it.
 (define c-with-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) c-with-names)
   (lambda (a b) (c-with-in (get c-withs) a b)))
+;; Their positions in the module, likewise.
+(define c-with-places-in
+  (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-with-list int int) (listof k-ids @k))
+  (lambda (ws a b)
+    (cond ((null? ws) nil)
+          ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b))
+           (the (listof k-ids @k) (cons (extract (car ws) 4) nil)))
+          (else (c-with-places-in (cdr ws) a b)))))
+(define c-with-places-at
+  (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) (listof k-ids @k))
+  (lambda (a b) (c-with-places-in (get c-withs) a b)))
 ;; The positions of the values a module reshaped from `a` to `b` keeps, in
 ;; a list of one; none if it is not reshaped.
 (define c-reshape-in
@@ -849,6 +860,7 @@
 (define c-apply-shares-at (with compile-module c-apply-shares-at))
 (define c-field-at (with compile-module c-field-at))
 (define c-with-at (with compile-module c-with-at))
+(define c-with-places-at (with compile-module c-with-places-at))
 (define c-reshape-at (with compile-module c-reshape-at))
 (define c-changed? (with compile-module c-changed?))
 (define c-place-name (with compile-module c-place-name))

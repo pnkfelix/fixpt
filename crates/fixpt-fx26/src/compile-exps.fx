@@ -394,13 +394,13 @@
           (begin (c-op1 c routine-slot (wcell-int (car ss))) (+ n 1))))))
 ;; A `with`'s module, at `l`, its values `ns` from field `i` on, each into
 ;; the next slot from `depth`: `e` with them bound.
-(define c-with-fields (subr (maxeff compiles spin) (syms loc cenv int int code) cenv)
-  (lambda (ns l e depth i c)
-    (if (null? ns)
+(define c-with-fields (subr (maxeff compiles spin) (syms k-ids loc cenv int int code) cenv)
+  (lambda (ns ps l e depth k c)
+    (if (or (null? ns) (null? ps))
         e
-        (begin (c-load c l) (c-field c (+ i 2))
-               (let ((inner (c-extend (car ns) (at-slot (+ depth i)) e)))
-                 (c-with-fields (cdr ns) l inner depth (+ i 1) c))))))
+        (begin (c-load c l) (c-field c (+ (car ps) 2))
+               (let ((inner (c-extend (car ns) (at-slot (+ depth k)) e)))
+                 (c-with-fields (cdr ns) (cdr ps) l inner depth (+ k 1) c))))))
 
 (define-rec
   (c-exps (subr (maxeff compiles spin) (exps cenv int code) int)
@@ -574,11 +574,11 @@
   ;; the body.
   (c-with (subr (maxeff compiles spin) (symbol exp int int cenv int code bool) unit)
     (lambda (m body a b e depth c tail)
-      (let ((ns (c-with-at a b)) (l (c-where e m)))
-        (cond ((null? ns) (c-fail "a `with` the checker did not see"))
+      (let ((ns (c-with-at a b)) (ps (c-with-places-at a b)) (l (c-where e m)))
+        (cond ((or (null? ns) (null? ps)) (c-fail "a `with` the checker did not see"))
               ((null? l) (c-fail "a `with` of an unbound module"))
               (else
-               (let ((inner (c-with-fields (car ns) (car l) e depth 0 c)))
+               (let ((inner (c-with-fields (car ns) (car ps) (car l) e depth 0 c)))
                  (begin (c-exp body inner (+ depth (c-length (car ns))) c tail)
                         (c-unbind c depth (c-length (car ns)) tail))))))))
   (c-begin (subr (maxeff compiles spin) (exps cenv int code bool) unit)

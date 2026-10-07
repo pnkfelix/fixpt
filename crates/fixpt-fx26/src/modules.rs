@@ -240,7 +240,9 @@ impl Checker {
     }
 
     /// `(with m body)`: the body with `m`'s values in scope, by name, at
-    /// their types for `m`.
+    /// their types for `m`: those it names, each with its position in `m`
+    /// (`Facts::with_vals`), so that a `with` of one of a wide module's
+    /// values, as a re-export is, binds one.
     pub(crate) fn synth_with(&mut self, e: ExpId, m: Sym, body: ExpId) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let Some(mt) = self.lookup(m) else {
@@ -249,7 +251,10 @@ impl Checker {
         let Ty::Module { vals, .. } = self.arena.get(self.arena.resolve(mt)).clone() else {
             return Err(FxError::at(span, format!("`with` opens a module, and `{}` is a {}", self.interner.name(m), self.show_ty(mt))));
         };
-        self.facts.with_vals.insert(e, vals.iter().map(|(n, _)| *n).collect());
+        let free = self.free_vars(body);
+        let used: Vec<(usize, (Sym, TyId))> = vals.iter().copied().enumerate().filter(|(_, (n, _))| free.contains(n)).collect();
+        self.facts.with_vals.insert(e, used.iter().map(|(i, (n, _))| (*n, *i)).collect());
+        let vals: Vec<(Sym, TyId)> = used.into_iter().map(|(_, v)| v).collect();
         let naming = self.naming_effect(m, mt);
         let (t, be) = self.in_scope(&vals, |c| c.synth(body))?;
         let eff = self.mask(e, &naming.union(&be), t);

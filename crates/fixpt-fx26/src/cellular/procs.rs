@@ -212,7 +212,7 @@ impl Compiler<'_> {
             Exp::With { module: _, body } => {
                 let names = self.c.facts.with_vals.get(&x).cloned().unwrap_or_default();
                 let mut inner = e.clone();
-                inner.extend(names.iter().map(|n| (*n, SLOT)));
+                inner.extend(names.iter().map(|(n, _)| (*n, SLOT)));
                 self.plan_exp(body, &inner, tail, plan);
             }
             Exp::Begin(items) => {
