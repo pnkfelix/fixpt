@@ -414,6 +414,15 @@ fn standard_refs_answer_natively() {
     assert_eq!((r.direct, r.rust.as_str()), (Ok("123456".into()), "123456"), "{}", r.code);
 }
 
+/// `case`s of many data, searched by halving (`programs/run/case-tree.fx`):
+/// the same natively and on the Rust machine.
+#[test]
+fn case_trees_answer_natively() {
+    let defs = include_str!("programs/run/case-tree.fx").trim_end().trim_end_matches("(score)");
+    let r = run(defs, "score", &[], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("(78 630 820 1890 210 234)".into()), "(78 630 820 1890 210 234)"), "{}", r.code);
+}
+
 /// A module's member folded through a `with`, then the module redefined
 /// (`TODO.md` §42): its global written again, the guard fails, and the
 /// plain version reads the new module's member.

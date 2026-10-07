@@ -2579,3 +2579,29 @@ one cause at a time:
 
 What is left is spread out: the call-outs' own cost, string building for
 each form's printed type (`k-globals-shown`), the sort of regions by name.
+
+## `case` by halving (2026-10-07)
+
+A large `case` is expanded into searches by halving (`TODO.md` §46): the
+clause from the key (an integer) or its hash (a string's or symbol's, taken
+once), then, unless each clause has one datum and the `else` is one atom,
+the body from the clause's index. The thresholds come from 2 million
+dispatches on the register machine, the same data as a `cond`:
+
+| key     |  n | `cond` ms | `case` ms |
+| ------- | -: | --------: | --------: |
+| integer |  8 |      12.1 |      10.5 |
+| integer | 32 |      21.2 |      13.4 |
+| symbol  | 16 |      12.2 |      12.1 |
+| symbol  | 32 |      24.3 |      20.7 |
+| symbol  | 64 |      53.3 |      21.8 |
+| string  | 16 |      52.6 |      36.0 |
+| string  | 32 |      96.4 |      38.8 |
+
+With the index's second search, small cases lost (integers at 8, symbols
+at 32), so it starts later: 32 integers, 64 symbols. Characters stay a
+chain: `char->integer` is a call-out, `char=?` one instruction. On the way,
+`string-hash` stopped copying its string (60 -> under 10 ns a call), and the
+character and string operations that make nothing joined
+`never_collects`, so register code calls them without a frame. The front
+end itself: as before (its few large `case`s are not where it spends).

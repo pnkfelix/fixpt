@@ -1330,6 +1330,22 @@ handled. **Left:** the dispatch, as a recognition of comparison chains on
 one variable in the compilers, which helps a hand-written `cond` as much;
 then the front end's own `cond`s on a symbol rewritten as `case`.
 
+**Dispatch (2026-10-07).** A `case` of many data is two searches by
+halving, made when it is expanded (both parsers, the same trees): the
+clause's index from the data sorted by the integer, or by the key's hash
+computed once (`string-hash`, `symbol-name-hash`, their values known at
+parse time from the same functions, `fixpt_heap::heap::string_hash_of`,
+`symbol_hash_of`), leaves of three or fewer testing the key itself (so a
+collision is only slower); then the body from the index. With a clause per
+datum and an `else` of one atom, each leaf gives its body and the `else`,
+with no second search. From how many data, measured natively (register
+code, 2M dispatches, against the same `cond`): integers 8 (32 with an
+index), symbols 32 (64), strings 16; characters never (`char->integer` a
+call-out against `char=?` one instruction). At 64 symbols 53 -> 22 ms, at
+32 strings 96 -> 39 ms, at 32 integers 21 -> 13 ms. The FX-26 evaluator
+learned `string-hash` and `symbol-name-hash`. Test
+`programs/run/case-tree.fx`, both forms of each kind, every machine.
+
 **Front end rewritten (2026-10-07).** Every `cond` in the front end that
 compares one variable with literals is a `case` (the generated
 `standard.fx` and `native-layout.fx` from their generators): 63 whole, 11

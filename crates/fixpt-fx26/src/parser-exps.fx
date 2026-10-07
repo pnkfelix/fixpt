@@ -178,6 +178,122 @@
 ;; `(or t rest)`, spanning a clause.
 (define case-or (subr (read @globals) (exp exp int int) exp)
   (lambda (t rest ca cb) (e-if t (e-bool #t ca cb) rest ca cb)))
+;; A `case`'s data by halving (`TODO.md` §46): each datum's test, the
+;; value it sorts by, and its clause.
+(define-type case-entry (productof (1 exp) (2 int) (3 int)))
+(define-type case-entries (listof case-entry acyclic))
+;; The fewest data a `case` searches by halving, by kind (the Rust parser's
+;; `CASE_TREE_*`, measured): integers, strings, symbols; never characters.
+;; Where the leaves give an index for a second search (`direct` false),
+;; integers and symbols pay only from more.
+(define case-tree-from (subr pure (int bool) int)
+  (lambda (k direct)
+    (case k ((0) (if direct 8 32)) ((2) 16) ((3) (if direct 32 64)) (else 1000000000))))
+;; The kind of the clauses' first datum, -1 if there is none.
+(define case-clauses-kind (subr (maxeff parses spin) (syns-a) int)
+  (lambda (clauses)
+    (if (null? (cdr clauses))
+        -1
+        (case-kind (car (syn-items (car (syn-items (car clauses) "c")) "data"))))))
+(define case-data-count (subr (maxeff parses spin) (syns-a) int)
+  (lambda (clauses)
+    (if (null? (cdr clauses))
+        0
+        (+ (len (syn-items (car (syn-items (car clauses) "c")) "data"))
+           (case-data-count (cdr clauses))))))
+;; Whether every datum has a sort value: integers only if fixnums.
+(define case-all-keyed? (subr (maxeff parses spin) (int syns-a) bool)
+  (lambda (k clauses)
+    (or (not (= k 0)) (null? (cdr clauses))
+        (and (case-fixnums? (syn-items (car (syn-items (car clauses) "c")) "data"))
+             (case-all-keyed? k (cdr clauses))))))
+(define case-fixnums? (subr (maxeff (read @globals) spin) (syns-a) bool)
+  (lambda (ds) (or (null? ds) (and (datum-int? (syn->datum (car ds))) (case-fixnums? (cdr ds))))))
+;; What datum `d`, of kind `k`, sorts by: the integer, or the runtime's hash.
+(define case-sort-key (subr (read @globals) (int syn) int)
+  (lambda (k d)
+    (let ((x (syn->datum d)))
+      (case k
+        ((0) (datum-int-value x))
+        ((2) (string-hash (datum-string-value x)))
+        (else (symbol-name-hash (datum->symbol x)))))))
+;; `e` into `sorted`, after those of no greater value: a stable sort.
+(define case-insert (subr (read @globals) (case-entry case-entries) case-entries)
+  (lambda (e sorted)
+    (if (or (null? sorted) (< (extract e 2) (extract (car sorted) 2)))
+        (the case-entries (cons e sorted))
+        (the case-entries (cons (car sorted) (case-insert e (cdr sorted)))))))
+(define case-sort (subr (read @globals) (case-entries case-entries) case-entries)
+  (lambda (es sorted) (if (null? es) sorted (case-sort (cdr es) (case-insert (car es) sorted)))))
+(define case-entries-length (subr (read @globals) (case-entries) int)
+  (lambda (es) (if (null? es) 0 (+ 1 (case-entries-length (cdr es))))))
+(define case-exps-length (subr (read @globals) (exp-list) int)
+  (lambda (es) (if (null? es) 0 (+ 1 (case-exps-length (cdr es))))))
+(define case-key-at (subr (maxeff (read @globals) spin) (case-entries int) int)
+  (lambda (es i) (if (= i 0) (extract (car es) 2) (case-key-at (cdr es) (- i 1)))))
+(define case-take (subr (read @globals) (case-entries int) case-entries)
+  (lambda (es k) (if (= k 0) nil (the case-entries (cons (car es) (case-take (cdr es) (- k 1)))))))
+(define case-drop (subr (read @globals) (case-entries int) case-entries)
+  (lambda (es k) (if (= k 0) es (case-drop (cdr es) (- k 1)))))
+;; Where to halve `n` sorted entries: nearest the middle, between unequal
+;; values (0 if none), as the Rust parser's `case_index`.
+(define case-mid-up (subr (maxeff (read @globals) spin) (case-entries int int) int)
+  (lambda (es mid n)
+    (if (and (< mid n) (> mid 0) (= (case-key-at es mid) (case-key-at es (- mid 1))))
+        (case-mid-up es (+ mid 1) n)
+        mid)))
+(define case-mid-down (subr (maxeff (read @globals) spin) (case-entries int) int)
+  (lambda (es mid)
+    (if (and (> mid 0) (= (case-key-at es mid) (case-key-at es (- mid 1))))
+        (case-mid-down es (- mid 1))
+        mid)))
+(define case-mid (subr (maxeff (read @globals) spin) (case-entries int) int)
+  (lambda (es n)
+    (let ((up (case-mid-up es (quotient n 2) n)))
+      (if (= up n) (case-mid-down es (quotient n 2)) up))))
+;; A `case`'s `else` clause, if its body is one atom: in a list of one.
+(define case-atom-else (subr (maxeff parses spin) (syn) syns-a)
+  (lambda (c)
+    (let ((parts (cdr (syn-items c "a case clause"))))
+      (if (and (not (null? parts)) (null? (cdr parts)))
+          (tagcase (car parts) (atom (d x y) parts) (else z nil))
+          nil))))
+;; The entries' tests in turn, each giving its clause (or, `bodies` given,
+;; its body); `m` (or `els`) for none.
+(define case-leaf (subr (maxeff parses spin) (case-entries int exp-list exp int int) exp)
+  (lambda (es m bodies els a b)
+    (cond ((and (null? es) (null? bodies)) (e-int m a b))
+          ((null? es) els)
+          (else
+           (let ((then (if (null? bodies)
+                           (e-int (extract (car es) 3) a b)
+                           (case-body-at bodies (extract (car es) 3)))))
+             (e-if (extract (car es) 1) then (case-leaf (cdr es) m bodies els a b) a b))))))
+;; The clause index of sorted entries, `by` halved against their values.
+(define case-index
+  (subr (maxeff parses spin) (exp case-entries int int exp-list exp int int) exp)
+  (lambda (by es n m bodies els a b)
+    (if (<= n 3)
+        (case-leaf es m bodies els a b)
+        (let ((mid (case-mid es n)))
+          (if (= mid 0)
+              (case-leaf es m bodies els a b)
+              (e-if (e-app (standard-ref '< a b) (list by (e-int (case-key-at es mid) a b)) a b)
+                    (case-index by (case-take es mid) mid m bodies els a b)
+                    (case-index by (case-drop es mid) (- n mid) m bodies els a b)
+                    a b))))))
+;; The body of index `lo`..`hi` that `i` names, by halving.
+(define case-pick (subr (maxeff parses spin) (exp exp-list int int int int) exp)
+  (lambda (i bodies lo hi a b)
+    (if (= lo hi)
+        (case-body-at bodies lo)
+        (let ((mid (quotient (+ (+ lo hi) 1) 2)))
+          (e-if (e-app (standard-ref '< a b) (list i (e-int mid a b)) a b)
+                (case-pick i bodies lo (- mid 1) a b)
+                (case-pick i bodies mid hi a b)
+                a b)))))
+(define case-body-at (subr (maxeff (read @globals) spin) (exp-list int) exp)
+  (lambda (es i) (if (= i 0) (car es) (case-body-at (cdr es) (- i 1)))))
 ;; Whether a `case`, `xs` its key and clauses, compares its key as it is:
 ;; a variable (not `#t`, `#f` or `#u`), with a clause before the `else`.
 (define case-direct? (subr (read @globals) (syns-a) bool)
@@ -455,11 +571,66 @@
                       (if (case-direct? xs)
                           ;; A variable, which nothing assigns: compared as it is.
                           (begin (case-clauses (cdr xs) nil)
-                                 (parse-case-arms (e-var (syn-head kx) ka kb) (cdr xs)))
+                                 (parse-case-body (e-var (syn-head kx) ka kb) xs a b))
                           (let ((key (parse-exp kx)) (k (fresh-name "%case-key" xs)))
                             (case-clauses (cdr xs) nil)
-                            (e-let (one-let k key) (parse-case-arms (e-var k ka kb) (cdr xs))
+                            (e-let (one-let k key) (parse-case-body (e-var k ka kb) xs a b)
                                    a b)))))))))
+  ;; A chain of tests, or, for many data of a kind that pays (`case-tree-from`)
+  ;; all with a sort value, two searches (`case-tree`): as the Rust parser's.
+  (parse-case-body (subr (maxeff parses spin) (exp syns-a int int) exp)
+    (lambda (kv xs a b)
+      (let* ((clauses (cdr xs)) (k (case-clauses-kind clauses)) (n (case-data-count clauses))
+             (direct (and (not (null? (case-atom-else (case-last clauses))))
+                          (= n (- (len clauses) 1)))))
+        (if (and (>= n (case-tree-from k direct)) (case-all-keyed? k clauses))
+            (case-tree kv xs (case-entries kv k clauses 0) k a b)
+            (parse-case-arms kv clauses)))))
+  ;; Each datum of the clauses before the `else`: its test, sort value, clause.
+  (case-entries (subr (maxeff parses spin) (exp int syns-a int) case-entries)
+    (lambda (kv k clauses c)
+      (if (null? (cdr clauses))
+          nil
+          (case-entries-of kv k (syn-items (car (syn-items (car clauses) "c")) "data") c
+                           (case-entries kv k (cdr clauses) (+ c 1))))))
+  (case-entries-of (subr (maxeff parses spin) (exp int syns-a int case-entries) case-entries)
+    (lambda (kv k data c rest)
+      (if (null? data)
+          rest
+          (let ((d (car data)))
+            (the case-entries
+              (cons (product (1 (case-test kv d)) (2 (case-sort-key k d)) (3 c))
+                    (case-entries-of kv k (cdr data) c rest)))))))
+  ;; The clause's index by halving the sorted data, then its body by halving
+  ;; the indices (`case_tree` in the Rust parser).
+  (case-tree (subr (maxeff parses spin) (exp syns-a case-entries int int int) exp)
+    (lambda (kv xs es k a b)
+      (let* ((sorted (case-sort es nil))
+             (bodies (case-bodies (cdr xs)))
+             (m (- (case-exps-length bodies) 1))
+             (hash (fresh-name "%case-hash" xs))
+             (index (fresh-name "%case-index" xs))
+             (by (if (= k 0) kv (e-var hash a b)))
+             (n (case-entries-length sorted))
+             (els (case-atom-else (case-last (cdr xs))))
+             (tree (if (and (not (null? els)) (= n m))
+                       ;; A clause per datum, an `else` of one atom: bodies at the leaves.
+                       (case-index by sorted n m bodies (case-body-at bodies m) a b)
+                       (let ((found (case-index by sorted n m nil (e-unit a b) a b)))
+                         (e-let (one-let index found) (case-pick (e-var index a b) bodies 0 m a b)
+                                a b)))))
+        (if (= k 0)
+            tree
+            (let ((op (if (= k 2) 'string-hash 'symbol-name-hash)))
+              (e-let (one-let hash (e-app (standard-ref op a b) (list kv) a b)) tree a b))))))
+  ;; Each clause's body, first to last, the `else`'s last.
+  (case-bodies (subr (maxeff parses spin) (syns-a) exp-list)
+    (lambda (clauses)
+      (if (null? clauses)
+          nil
+          (let* ((c (car clauses)) (parts (syn-items c "a case clause"))
+                 (body (parse-body (cdr parts) (syn-start c) (syn-end c))))
+            (the exp-list (cons body (case-bodies (cdr clauses))))))))
   (parse-case-arms (subr (maxeff parses spin) (exp syns-a) exp)
     (lambda (k clauses)
       (let* ((c (car clauses)) (parts (syn-items c "a case clause"))

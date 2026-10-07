@@ -170,7 +170,7 @@
 ;; What the ports wrote themselves, as `ev-std-prim` does them.
 (define std-primitive-names string
   (string-append " remainder zero? max min bool=? char<? char<=? char>? char>=? char-upcase "
-                 "string<? string<=? string>? string>=? error "))
+                 "string<? string<=? string>? string>=? error string-hash symbol-name-hash "))
 ;; `f64`'s, as `ev-f64-prim` does them.
 (define f64-primitive-names string
   (k-cat4 " f64+ f64- f64* f64/ f64-min f64-max f64-atan2 f64-expt f64< f64<= f64> f64>= f64= "
@@ -185,7 +185,6 @@
           (k-cat3 "int->f32 f32->int f32->string f32->f64 f64->f32 int->string "
                   "make-flatarray flatarray-ref flatarray-set! flatarray-length "
                   "i32-flat u32-flat i64-flat u64-flat f32-flat f64-flat ")))
-;; `f32`'s, as `ev-f32-prim` does them.
 
 ;; Whether `needle` occurs in `hay` from position `i` on.
 (define occurs? (subr (maxeff (read @globals) spin) (string string int) bool)
@@ -312,27 +311,28 @@
 ;; machines have them: each by the standard operation of the same name.
 (define* ev-std-prim (subr (maxeff evals spin) (string vals) val)
   (lambda (n xs)
-    (let ((is (lambda ((s string)) (string=? n s)))
-          (c2 (lambda ((f (subr pure (char char) bool)))
+    (let ((c2 (lambda ((f (subr pure (char char) bool)))
                 (v-bool (f (as-char (arg xs 0)) (as-char (arg xs 1))))))
           (s2 (lambda ((f (subr pure (string string) bool)))
                 (v-bool (f (as-str (arg xs 0)) (as-str (arg xs 1)))))))
-      (cond ((is "remainder") (int2 xs (lambda (a b) (remainder a b))))
-            ((is "zero?") (v-bool (zero? (as-int (arg xs 0)))))
-            ((is "max") (int2 xs (lambda (a b) (max a b))))
-            ((is "min") (int2 xs (lambda (a b) (min a b))))
-            ((is "bool=?") (v-bool (bool=? (as-bool (arg xs 0)) (as-bool (arg xs 1)))))
-            ((is "char<?") (c2 (lambda (a b) (char<? a b))))
-            ((is "char<=?") (c2 (lambda (a b) (char<=? a b))))
-            ((is "char>?") (c2 (lambda (a b) (char>? a b))))
-            ((is "char>=?") (c2 (lambda (a b) (char>=? a b))))
-            ((is "char-upcase") (v-char (char-upcase (as-char (arg xs 0)))))
-            ((is "string<?") (s2 (lambda (a b) (string<? a b))))
-            ((is "string<=?") (s2 (lambda (a b) (string<=? a b))))
-            ((is "string>?") (s2 (lambda (a b) (string>? a b))))
-            ((is "string>=?") (s2 (lambda (a b) (string>=? a b))))
-            ((is "error") (efail (as-str (arg xs 0))))
-            (else (efail (string-append "not in the evaluator yet: " n)))))))
+      (case n (("remainder") (int2 xs (lambda (a b) (remainder a b))))
+              (("zero?") (v-bool (zero? (as-int (arg xs 0)))))
+              (("max") (int2 xs (lambda (a b) (max a b))))
+              (("min") (int2 xs (lambda (a b) (min a b))))
+              (("bool=?") (v-bool (bool=? (as-bool (arg xs 0)) (as-bool (arg xs 1)))))
+              (("char<?") (c2 (lambda (a b) (char<? a b))))
+              (("char<=?") (c2 (lambda (a b) (char<=? a b))))
+              (("char>?") (c2 (lambda (a b) (char>? a b))))
+              (("char>=?") (c2 (lambda (a b) (char>=? a b))))
+              (("char-upcase") (v-char (char-upcase (as-char (arg xs 0)))))
+              (("string<?") (s2 (lambda (a b) (string<? a b))))
+              (("string<=?") (s2 (lambda (a b) (string<=? a b))))
+              (("string>?") (s2 (lambda (a b) (string>? a b))))
+              (("string>=?") (s2 (lambda (a b) (string>=? a b))))
+              (("error") (efail (as-str (arg xs 0))))
+              (("string-hash") (v-int (string-hash (as-str (arg xs 0)))))
+              (("symbol-name-hash") (v-int (symbol-name-hash (as-sym (arg xs 0)))))
+              (else (efail (string-append "not in the evaluator yet: " n)))))))
 ;; Flat arrays: here, arrays of their values; a layout, its number.
 (define* ev-flat-prim (subr (maxeff evals spin) (string vals) val)
   (lambda (n xs)

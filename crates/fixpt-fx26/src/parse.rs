@@ -1590,6 +1590,17 @@ impl Checker {
             .expect("a name")
     }
 
+/// The fewest data a `case` searches by halving rather than in turn, by
+/// kind: measured natively, register code (`TODO.md` §46). Characters never:
+/// `char->integer` is a call-out, and every `char=?` a single instruction.
+const CASE_TREE_INTS: usize = 8;
+const CASE_TREE_STRINGS: usize = 16;
+const CASE_TREE_SYMBOLS: usize = 32;
+/// The same where the leaves give an index, which a second search takes to
+/// a body: integers and symbols then pay only from more data.
+const CASE_TREE_INTS_INDEXED: usize = 32;
+const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
+
     /// `(case key ((datum …) e …) … (else e …))` on atoms (`TODO.md` §46):
     /// `(let ((%case-key key)) …)` and a chain of `if`s, each datum compared
     /// by its kind's equality: `=` on integers, `char=?`, `string=?`,
@@ -1617,6 +1628,9 @@ impl Checker {
         };
         let (mut kind, mut seen) = (None, std::collections::HashSet::new());
         let mut arms = Vec::new();
+        // Each datum's test, the value a tree sorts it by (if it has one)
+        // and its clause, for `case_tree`.
+        let mut entries: Vec<(ExpId, Option<i64>, usize)> = Vec::new();
         for c in init {
             let parts = self.items(c, "a case clause")?.to_vec();
             let [data, body @ ..] = &parts[..] else {
@@ -1637,7 +1651,9 @@ impl Checker {
                 }
                 let f = self.standard_ref_at(d.span, eq);
                 let a = self.arena.exp(key_span, Exp::Var(tmp));
-                tests.push(self.arena.exp(d.span, Exp::App { fun: f, args: vec![a, lit] }));
+                let test = self.arena.exp(d.span, Exp::App { fun: f, args: vec![a, lit] });
+                tests.push(test);
+                entries.push((test, self.case_sort_key(k, d), arms.len()));
             }
             arms.push((c.span, tests, body.to_vec()));
         }
@@ -1647,6 +1663,32 @@ impl Checker {
             thens.push(self.parse_body(*cspan, body)?);
         }
         let mut out = self.parse_body(last.span, &parts[1..])?;
+        // A clause per datum and an `else` of one atom: each leaf gives its
+        // body, the `else` made again at each, with no index to search.
+        let atom_else = matches!(&parts[1..], [x] if !matches!(x.datum, Datum::List { .. } | Datum::Vector(_)));
+        let direct = (atom_else && entries.len() == arms.len()).then(|| (last.span, parts[1].clone()));
+        let tree_from = match (kind, direct.is_some()) {
+            (Some(0), true) => Self::CASE_TREE_INTS,
+            (Some(0), false) => Self::CASE_TREE_INTS_INDEXED,
+            (Some(2), _) => Self::CASE_TREE_STRINGS,
+            (Some(3), true) => Self::CASE_TREE_SYMBOLS,
+            (Some(3), false) => Self::CASE_TREE_SYMBOLS_INDEXED,
+            _ => usize::MAX,
+        };
+        if entries.len() >= tree_from && entries.iter().all(|e| e.1.is_some()) {
+            let mut bodies = thens;
+            bodies.push(out);
+            let hash = match kind {
+                Some(2) => Some("string-hash"),
+                Some(3) => Some("symbol-name-hash"),
+                _ => None,
+            };
+            let tree = self.case_tree(span, items, hash, key_span, tmp, entries, bodies, direct)?;
+            return Ok(match key {
+                Some(key) => self.arena.exp(span, Exp::Let { bindings: vec![(tmp, key)], body: tree }),
+                None => tree,
+            });
+        }
         for ((cspan, tests, _), then) in arms.into_iter().zip(thens).rev() {
             let mut tests = tests.into_iter().rev();
             let mut test = tests.next().expect("a datum");
@@ -1660,6 +1702,120 @@ impl Checker {
             Some(key) => self.arena.exp(span, Exp::Let { bindings: vec![(tmp, key)], body: out }),
             None => out,
         })
+    }
+
+    /// What a `case` tree sorts datum `d`, of kind `k`, by: an integer's
+    /// value (a fixnum's), a string's or a symbol's hash, as the runtime
+    /// computes them (`%string-hash`, `%symbol-hash`); none otherwise.
+    fn case_sort_key(&self, k: u8, d: &Syntax) -> Option<i64> {
+        match (k, &d.datum) {
+            (0, Datum::Number(fixpt_read::Num::Int(n))) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => Some(*n),
+            (2, Datum::Str(t)) => Some(fixpt_heap::heap::string_hash_of(t)),
+            (3, Datum::Symbol(x)) => Some(fixpt_heap::heap::symbol_hash_of(self.name(*x))),
+            _ => None,
+        }
+    }
+
+    /// A `case` of many data as two searches (`TODO.md` §46, Clinger's
+    /// "Rapid Case Dispatch"): the clause's index found by halving the data
+    /// sorted (by the integer, or by a hash of the key computed once), each
+    /// leaf of three or fewer data their tests, in order; then the body by
+    /// halving the indices, `bodies` the clauses' and the `else`'s last.
+    #[allow(clippy::too_many_arguments)]
+    fn case_tree(
+        &mut self,
+        span: fixpt_read::Span,
+        items: &[Syntax],
+        hash_op: Option<&str>,
+        key_span: fixpt_read::Span,
+        key: Sym,
+        mut entries: Vec<(ExpId, Option<i64>, usize)>,
+        bodies: Vec<ExpId>,
+        direct: Option<(fixpt_read::Span, Syntax)>,
+    ) -> R<ExpId> {
+        entries.sort_by_key(|e| e.1);
+        let m = bodies.len() - 1;
+        let (hash, index) = (self.fresh_name("%case-hash", items), self.fresh_name("%case-index", items));
+        let (by, by_span) = if hash_op.is_some() { (hash, span) } else { (key, key_span) };
+        let tree = match &direct {
+            Some(els) => {
+                let leaves = CaseLeaves::Bodies(&bodies, els);
+                self.case_index(span, by, by_span, &entries, m, &leaves)?
+            }
+            None => {
+                let found = self.case_index(span, by, by_span, &entries, m, &CaseLeaves::Index)?;
+                let chosen = self.case_bodies(span, index, &bodies, 0, m);
+                self.arena.exp(span, Exp::Let { bindings: vec![(index, found)], body: chosen })
+            }
+        };
+        let Some(op) = hash_op else { return Ok(tree) };
+        let f = self.standard_ref_at(span, op);
+        let k = self.arena.exp(key_span, Exp::Var(key));
+        let h = self.arena.exp(span, Exp::App { fun: f, args: vec![k] });
+        Ok(self.arena.exp(span, Exp::Let { bindings: vec![(hash, h)], body: tree }))
+    }
+
+    /// The clause index of `entries` (sorted, each its test and sort value),
+    /// `m` for none: `by` (the key, or its hash) halved against the sort
+    /// values; three or fewer, or all of one value, their tests in turn.
+    fn case_index(
+        &mut self,
+        span: fixpt_read::Span,
+        by: Sym,
+        by_span: fixpt_read::Span,
+        entries: &[(ExpId, Option<i64>, usize)],
+        m: usize,
+        leaves: &CaseLeaves,
+    ) -> R<ExpId> {
+        let n = entries.len();
+        let key_of = |i: usize| entries[i].1.expect("sorted by a value");
+        // A split between unequal values, nearest the middle.
+        let mut mid = n / 2;
+        while mid < n && mid > 0 && key_of(mid) == key_of(mid - 1) {
+            mid += 1;
+        }
+        if mid == n {
+            mid = n / 2;
+            while mid > 0 && key_of(mid) == key_of(mid - 1) {
+                mid -= 1;
+            }
+        }
+        if n <= 3 || mid == 0 {
+            let mut out = match leaves {
+                CaseLeaves::Index => self.arena.exp(span, Exp::Int(m as i64)),
+                CaseLeaves::Bodies(_, (els_span, els)) => self.parse_body(*els_span, std::slice::from_ref(els))?,
+            };
+            for (test, _, c) in entries.iter().rev() {
+                let then = match leaves {
+                    CaseLeaves::Index => self.arena.exp(span, Exp::Int(*c as i64)),
+                    CaseLeaves::Bodies(bodies, _) => bodies[*c],
+                };
+                out = self.arena.exp(span, Exp::If { test: *test, then, els: out });
+            }
+            return Ok(out);
+        }
+        let less = self.standard_ref_at(span, "<");
+        let v = self.arena.exp(by_span, Exp::Var(by));
+        let pivot = self.arena.exp(span, Exp::Int(key_of(mid)));
+        let test = self.arena.exp(span, Exp::App { fun: less, args: vec![v, pivot] });
+        let then = self.case_index(span, by, by_span, &entries[..mid], m, leaves)?;
+        let els = self.case_index(span, by, by_span, &entries[mid..], m, leaves)?;
+        Ok(self.arena.exp(span, Exp::If { test, then, els }))
+    }
+
+    /// The body of index `lo`..=`hi` that `index` names, by halving.
+    fn case_bodies(&mut self, span: fixpt_read::Span, index: Sym, bodies: &[ExpId], lo: usize, hi: usize) -> ExpId {
+        if lo == hi {
+            return bodies[lo];
+        }
+        let mid = (lo + hi).div_ceil(2);
+        let less = self.standard_ref_at(span, "<");
+        let i = self.arena.exp(span, Exp::Var(index));
+        let pivot = self.arena.exp(span, Exp::Int(mid as i64));
+        let test = self.arena.exp(span, Exp::App { fun: less, args: vec![i, pivot] });
+        let then = self.case_bodies(span, index, bodies, lo, mid - 1);
+        let els = self.case_bodies(span, index, bodies, mid, hi);
+        self.arena.exp(span, Exp::If { test, then, els })
     }
 
     /// A `case` datum: its kind, its kind's equality, its literal, and a
@@ -2182,4 +2338,12 @@ impl Checker {
             }
         }
     }
+}
+
+/// What a `case` tree's leaves give: the clause's index, for a second
+/// search to choose its body by; or, a datum to a clause and an `else` of
+/// one atom, the body itself, the `else` (its syntax) made at each leaf.
+enum CaseLeaves<'a> {
+    Index,
+    Bodies(&'a [ExpId], &'a (fixpt_read::Span, Syntax)),
 }

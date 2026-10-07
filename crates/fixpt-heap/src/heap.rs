@@ -1254,7 +1254,7 @@ impl Heap {
         let s = self.make_string(name);
         let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
         self.obj_set(sym, 0, s);
-        self.obj_set(sym, 1, Value::fixnum(fnv1a(name) as i64 & i64::MAX));
+        self.obj_set(sym, 1, Value::fixnum(symbol_hash_of(name)));
         let slot = self.globals.len();
         self.globals.push(Value::UNBOUND);
         self.obj_set(sym, 2, Value::fixnum(slot as i64));
@@ -2056,6 +2056,23 @@ fn map_refs(words: &mut [u64], f: impl Fn(Value) -> Value) {
             scan += 2;
         }
     }
+}
+
+/// The hash `intern` keeps in symbol `name` (`%symbol-hash`), as a
+/// fixnum: what a compiler may know of it from the name alone.
+pub fn symbol_hash_of(name: &str) -> i64 {
+    Value::fixnum(fnv1a(name) as i64 & i64::MAX).as_fixnum()
+}
+
+/// `%string-hash` of a string of `text`: FNV-1a of its code points, shifted
+/// into a fixnum (`Heap::string_fnv`).
+pub fn string_hash_of(text: &str) -> i64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for c in text.chars() {
+        h ^= c as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    (h >> 4) as i64
 }
 
 fn fnv1a(s: &str) -> u64 {

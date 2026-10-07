@@ -95,6 +95,12 @@ fn standard_refs_see_past_shadowing() {
     assert_eq!(run(include_str!("programs/run/standard-refs.fx")), "123456");
 }
 
+/// `case`s of many data, searched by halving (`programs/run/case-tree.fx`).
+#[test]
+fn case_trees_dispatch() {
+    assert_eq!(run(include_str!("programs/run/case-tree.fx")), "(78 630 820 1890 210 234)");
+}
+
 /// `f64` literals and operations, lowered (`programs/run/floats.fx`).
 #[test]
 fn floats_run() {
