@@ -1005,4 +1005,18 @@ a procedure body (a path, the user's: to generalize to when it occurs).
 What the reads are instead: procedures, at calls. Check reads `k-resolve`
 9.6 M times, `k-get` 5.2 M, `k-has-id?` 3.3 M: a call of a global through
 its cell, a check that it holds a closure, and the call. That is PLAN's
-"the rest of known calls", worth more than this.
+"the rest of known calls", worth more than this. (No: natively a global's
+procedure is already bound to its code when its machine code is made,
+`global_value`'s `Field::Code`, so those calls are direct; the counts
+were the stack code's on the Rust machine. Lesson recorded: predict a
+compiler's gain from the native code, not from an interpreter's counts.)
+
+Measured natively (2026-10-07), the best case for folding: a loop of 10^9
+iterations whose only work is adding a constant, `(+ acc k)` against
+`(+ acc 3)`, under `--calling-convention native`: 0.564, 0.559 s against
+0.556, 0.558 s, under 1%. The global costs four instructions an
+iteration (a load of the cell, of its value, a tag test, a move), none
+on the loop's dependence chain, so the processor overlaps them with the
+loop's own. Folding would save code, not time: not built. Worth looking
+at again only if a constant's folding would decide a test or remove a
+branch in hot code (immediates alone do not pay), or for code size.
