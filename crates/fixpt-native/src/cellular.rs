@@ -1087,7 +1087,7 @@ pub fn fx26_module() -> String {
         }
     }
     out.push_str("      (else #f))))\n");
-    out
+    fixpt_heap::layout::fx26_as_module("native-layout-module", &out)
 }
 
 // Invariants the generated code bakes in.

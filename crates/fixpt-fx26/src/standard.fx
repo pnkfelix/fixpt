@@ -2,6 +2,9 @@
 ;;; table of standard names; `FIXPT_BLESS=1 cargo test -p fixpt-fx26 --test layout`
 ;;; rewrites it.
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define standard-module (module
 ;; The runtime primitive a standard operation runs as, `%fx26-identity`
 ;; if it is the identity, or the empty string if neither.
 (define standard-primitive (subr pure (string) string)
@@ -297,4 +300,6 @@
       ((string=? n "wglobal=?") "eq?")
       ((string=? n "runtime-primitive") "%runtime-primitive")
       ((string=? n "runtime-primitive-arity") "%runtime-primitive-arity")
-      (else ""))))
+      (else ""))))))
+
+(define standard-primitive (with standard-module standard-primitive))

@@ -370,7 +370,7 @@ pub fn standard_fx26_module() -> String {
         }
     }
     out.push_str("      (else \"\"))))\n");
-    out
+    fixpt_heap::layout::fx26_as_module("standard-module", &out)
 }
 
 /// The Scheme names of a program's top-level definitions.
