@@ -1570,11 +1570,33 @@ Left:
   only against the limit less 32 KB (the next procedure's frame flushes
   it): about 680 control frames with no procedure frame between would
   overflow the stack.
-- **Return addresses as addresses**: a chunk keeps a frame's return
-  address, and a continuation where it resumes, as fixnums of addresses.
-  The code area does not move, so they stay right while the process runs;
-  a heap image holding a native continuation would need them as offsets
-  from the frame's code bloblet (Larceny's `HC_RETOFFSET`).
+- **Return addresses as addresses, for images** (the user's question,
+  2026-10-07): a chunk keeps a frame's return address, and a native
+  continuation where it resumes (`Pos.pc`), as fixnums of addresses. The
+  code area does not move, so they stay right while the process runs; a
+  heap image that carries native code would need them as offsets.
+  - Today nothing is unsafe: an image refuses any heap with native code
+    in it (`Heap::image_parts` asserts the code area empty), a native
+    continuation's included, by a panic. Making that an error saying why
+    is a small change, wanted sooner or not (the user's to say).
+  - Larceny converts at every flush and every restore
+    (`src/Rts/Sys/stack.c:159`, `retaddr - (codeaddr + 4)`; and
+    `stk_restore_frame`, `stack.c:236-249`, `(codeaddr + 4) + retoffs`,
+    from the procedure in the frame's `REG0` slot; a slot of 0 keeps the
+    address raw, for code that never moves). Its code vectors are
+    bytevectors in a moving heap, so it must: a raw address would go stale
+    at the next collection.
+  - fixpt's code does not move, so only an image needs offsets. The plan
+    (the user's choice): convert when the image is made, walking every
+    chunk and native continuation, and back when it is loaded; nothing on
+    the flush and restore paths. Each procedure frame keeps its code
+    bloblet in a slot, the base for its offset. To decide then: the frames
+    with none (a 16-byte stub's, whose return is into its caller's code; a
+    prompt's landing, into its owner's; the run's outermost, into the
+    machine's trampoline, which is not the heap's), as Larceny's `REG0 = 0`
+    frames are.
+  - Part of the same change as images carrying the code area at all
+    (`docs/object-model.md`, "A collected code area").
 - **"Never collects"**: the overflow allocates (never collecting; the next
   call-out that may collects); an inference of procedures that never
   collect (discussed with `never_collects`) must count a frame-making entry
