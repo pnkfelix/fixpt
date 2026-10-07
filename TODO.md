@@ -1512,6 +1512,43 @@ The copying stack cache is done (`DONE.md` §52; `docs/research/
 deep-recursion.md`): native code recurses as deep as its heap allows (up
 to `FIXPT_NATIVE_STACK_MAX`, 2^28 words by default). Left:
 
+- **What the stack costs the collector, measured (2026-10-07).** Unlike
+  Larceny, which flushes the stack at every collection, minor or major
+  (`src/Rts/Sys/nursery.c:211-216`), so its collector never walks one,
+  fixpt's collections take the native frames as roots, each by its stack
+  map; and an overflow's chunks go to the nursery, to be copied again when
+  promoted (the user's two questions). `(dive D 200000)`: a recursion `D`
+  deep that allocates nothing, then 200 000 lists of 100 made and dropped
+  at its bottom, about 38 minor collections (`direct.rs`, a scratch test,
+  not kept; default cache, 2^25 words):
+
+  | depth `D` | total ms | minor ms each | M words flushed, then copied by minors |
+  | --------: | -------: | ------------: | -------------------------------------: |
+  |        10 |       41 |          0.03 |                                      0 |
+  |   100 000 |      100 |          0.13 |                                      0 |
+  | 1 000 000 |      732 |          1.39 |                                      0 |
+  | 3 000 000 |    2 118 |          4.31 |                                      0 |
+  | 4 500 000 |      458 |          2.01 |                             33.6, 33.6 |
+  | 8 000 000 |    2 935 |          7.59 |                             33.6, 33.6 |
+
+  - The collector's scan of the frames: about 1.4 ns a frame a minor
+    collection (Cheng, Harper and Lee's problem).
+  - Gathering them, before it: about 17 ns a frame a collection, most of
+    the total (at 1M deep, ~650 of 732 ms). `native_frames` builds a
+    `Vec` of runs per frame (`traced`) and a slice per run, every
+    collection: `malloc` and `free` lead the profile, `collect_minor`
+    well behind. A quick win whatever the design: hand the collector the
+    runs without a `Vec` per frame.
+  - Flushing beats scanning even copied twice: 4.5M deep (one overflow,
+    33.6M words flushed, then all of it copied by one minor collection)
+    took 458 ms; 3M deep, all in the cache, 2 118.
+  - So the copying cache pays both costs Larceny's design avoids: frames
+    in the cache scanned at every collection, frames past it copied
+    twice. Larceny pays instead an underflow per frame returned to after
+    each collection. That, in place in the nursery, is the next step;
+    keeping this design would need the chunks put in the old space (cards
+    marked), a much smaller cache or Cheng's watermark, and the gathering
+    fixed.
 - **In place, in the nursery** (Larceny's, the user's direction): the stack
   at the nursery's top, its pointer the heap's limit; a flush rewriting
   frames where they are, as chunks of the chain (§53 makes a frame one
