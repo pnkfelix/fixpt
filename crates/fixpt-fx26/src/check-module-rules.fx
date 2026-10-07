@@ -6,6 +6,9 @@
 
 ;;; ------------------------------------------------------------ module
 
+;; A module (`TODO.md` §34: the front end into modules, a file at a time);
+;; what other files use re-exported after it.
+(define check-module-rules-module (module
 ;; `n`'s innermost binding, now of type `t`.
 (define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (table-set! (get k-env) n (cons t (cdr (table-ref (get k-env) n nil))))))
@@ -144,9 +147,22 @@
   (lambda (ps)
     (if (null? ps)
         #u
-        (begin (k-bind (extract (car ps) 1) (extract (car ps) 2)) (k-bind-parts (cdr ps))))))
+        (begin (k-bind (extract (car ps) 1) (extract (car ps) 2)) (k-bind-parts (cdr ps))))))))
 
-
-;;; ------------------------------------------------------------ subtyping
-
-
+(define k-rebind-top (with check-module-rules-module k-rebind-top))
+(define k-saying (with check-module-rules-module k-saying))
+(define k-star-mistake (with check-module-rules-module k-star-mistake))
+(define-type k-made (select check-module-rules-module k-made))
+(define k-made-of (with check-module-rules-module k-made-of))
+(define k-mod-bindings (with check-module-rules-module k-mod-bindings))
+(define k-mod-bind (with check-module-rules-module k-mod-bind))
+(define-type k-ends (select check-module-rules-module k-ends))
+(define k-ends-with (with check-module-rules-module k-ends-with))
+(define k-group-end (with check-module-rules-module k-group-end))
+(define k-other-member (with check-module-rules-module k-other-member))
+(define-type k-eff-ty (select check-module-rules-module k-eff-ty))
+(define-type k-mod-checked (select check-module-rules-module k-mod-checked))
+(define k-mod-vals (with check-module-rules-module k-mod-vals))
+(define k-vals-known (with check-module-rules-module k-vals-known))
+(define k-comp-names (with check-module-rules-module k-comp-names))
+(define k-bind-parts (with check-module-rules-module k-bind-parts))
