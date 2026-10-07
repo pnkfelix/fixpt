@@ -2605,3 +2605,27 @@ chain: `char->integer` is a call-out, `char=?` one instruction. On the way,
 character and string operations that make nothing joined
 `never_collects`, so register code calls them without a frame. The front
 end itself: as before (its few large `case`s are not where it spends).
+`never_collects`, so register code calls them without a frame. The front
+end itself: as before (its few large `case`s are not where it spends).
+
+## Effects kept in hash order (2026-10-07)
+
+An effect is a sorted list of atoms, merged on every union, so comparing
+two atoms was a quarter of peval's `fx check`: two ranks, then a region's
+rank, then its name or number, each a call. Now each atom has one integer,
+`k-atom-ord`: its kind, its region's kind and its number from the high bits
+down. Atoms whose integers differ are compared in one test; a tie is two
+names (constant regions, globals), ordered by their stored symbol hashes
+(`k-name-hash-cmp`; by text only on a hash collision), or an effect
+application, by its arguments. The order is no longer alphabetical, which
+only showing an effect needed: `k-globals-shown` sorts the names in
+`(globals ...)` as it prints them. Measured back to back, best of 20:
+
+| `fx check`, peval | ms    | GCs |
+| ----------------- | ----: | --: |
+| by name           | 20.55 |   6 |
+| by `k-atom-ord`   | 18.72 |   4 |
+
+Atom ordering (`k-atom-cmp`, `k-merge`) is now about 6% of the phase's
+samples, from about 25%. The rest of the gap to the Rust checker (12.7 ms)
+is spread across the checker's register code and its call-outs.

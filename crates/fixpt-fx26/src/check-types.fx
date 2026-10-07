@@ -617,17 +617,60 @@
           (sz-lin (j us)
             (let ((c (k-int-cmp k j)))
               (if (= c 0) (k-terms-cmp ts us) c))))))))
-;; Atoms in order: by rank; then by region, or by variable, an effect
-;; application by what it was given after its variable.
+;; Where an atom is in the order effects are kept in, in one integer: its
+;; kind, its region's kind, and a number (a variable's, a fresh region's, a
+;; frozen place's), from the high bits down (`TODO.md`, effects by key).
+;; Names (constant regions, globals) tie here, and are ordered by their
+;; hashes (`k-name-hash-cmp`): the order is not alphabetical, which only
+;; showing an effect needs (`k-globals-shown`).
+(define k-region-ord (subr pure (k-region) int)
+  (lambda (r)
+    (tagcase r
+      (r-const (n) 0)
+      (r-fresh (i n) (+ 4503599627370496 i))
+      (r-var (v) (+ 9007199254740992 (+ v 1099511627776)))
+      (r-frozen (p f) (+ 13510798882111488 (+ (* 2 (+ p 1099511627776)) (if f 1 0))))
+      (r-heap () 18014398509481984)
+      (r-global (g) 22517998136852480)
+      (r-globals () 27021597764222976))))
+(define k-atom-ord (subr pure (k-atom) int)
+  (lambda (a)
+    (tagcase a
+      (a-read (r) (k-region-ord r))
+      (a-write (r) (+ 72057594037927936 (k-region-ord r)))
+      (a-alloc (r) (+ 144115188075855872 (k-region-ord r)))
+      (a-goto (r) (+ 216172782113783808 (k-region-ord r)))
+      (a-comefrom (r) (+ 288230376151711744 (k-region-ord r)))
+      (a-await (r) (+ 360287970189639680 (k-region-ord r)))
+      (a-spin () 432345564227567616)
+      (a-var (v) (+ 504403158265495552 (+ v 1099511627776)))
+      (a-app (v ds) (+ 576460752303423488 (+ v 1099511627776))))))
+;; Two names by their stored hashes; by their text only if those are equal.
+(define k-name-hash-cmp (subr pure (symbol symbol) int)
+  (lambda (n m)
+    (if (symbol=? n m)
+        0
+        (let ((h (symbol-name-hash n)) (g (symbol-name-hash m)))
+          (cond ((< h g) -1) ((< g h) 1) (else (symbol-compare n m)))))))
+;; Two regions whose `k-region-ord` is the same: names by `k-name-hash-cmp`.
+(define k-region-tie (subr pure (k-region k-region) int)
+  (lambda (r s)
+    (tagcase r
+      (r-const (n) (tagcase s (r-const (m) (k-name-hash-cmp n m)) (else y 0)))
+      (r-global (g) (tagcase s (r-global (h) (k-name-hash-cmp g h)) (else y 0)))
+      (else y 0))))
+;; Atoms in order: by `k-atom-ord`, one comparison of integers; a tie, by the
+;; names of their regions, or an effect application's by what it was given.
 (define-rec
   (k-atom-cmp (subr (maxeff (read @globals) spin) (k-atom k-atom) int)
     (lambda (a b)
-      (let ((c (k-int-cmp (k-atom-rank a) (k-atom-rank b))))
-        (cond ((not (= c 0)) c)
-              ((k-has-region? a) (k-region-cmp (k-atom-region a) (k-atom-region b)))
+      (let ((x (k-atom-ord a)) (y (k-atom-ord b)))
+        (cond ((< x y) -1)
+              ((< y x) 1)
               (else
-               (let ((d (k-int-cmp (k-atom-key a) (k-atom-key b))))
-                 (if (= d 0) (k-eargs-cmp (k-atom-args a) (k-atom-args b)) d)))))))
+               (tagcase a
+                 (a-app (v ds) (k-eargs-cmp ds (k-atom-args b)))
+                 (else z (k-region-tie (k-atom-region a) (k-atom-region b)))))))))
   (k-eargs-cmp (subr (maxeff (read @globals) spin) (k-descs k-descs) int)
     (lambda (xs ys)
       (cond ((null? xs) (if (null? ys) 0 -1))

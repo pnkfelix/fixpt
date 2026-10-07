@@ -1487,6 +1487,8 @@ with the hash or order passed as tables' are (dictionary passing):
   so it can be frozen into a place.
 - Then: the hand-made ones above replaced, and §43's remaining searches
   (`c-find`, `r-where`, `c-member?`) looked at again.
+- Later (the user's, not yet): reader syntax for table and set literals,
+  made once as constant data, as §51's quoted lists would be.
 
 ## 51. Quoted list literals, with their shape (the user's, 2026-10-07)
 

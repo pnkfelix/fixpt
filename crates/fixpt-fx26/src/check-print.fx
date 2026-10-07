@@ -77,17 +77,33 @@
 ;; ` g`, for the binding of global `g`; nothing for any other region.
 (define k-global-shown (subr (read @globals) (k-region) string)
   (lambda (r) (tagcase r (r-global (g) (string-append " " (symbol->string g))) (else y ""))))
-;; The names of the globals `e` reads (`op` 0) or writes (1), in order, each
-;; after a space.
+;; The names of the globals `e` reads (`op` 0) or writes (1), each after a
+;; space, in the order of their text: effects are kept in their hashes'
+;; order (`k-atom-cmp`), and put in this one only to be shown.
 (define k-globals-shown (subr kreads (k-eff int) string)
-  (lambda (e op)
+  (lambda (e op) (k-names-spaced (k-global-names e op nil))))
+(define k-global-names (subr kreads (k-eff int k-names) k-names)
+  (lambda (e op acc)
     (if (null? e)
+        acc
+        (k-global-names (cdr e) op
+                        (tagcase (car e)
+                          (a-read (r) (if (= op 0) (k-global-name-into r acc) acc))
+                          (a-write (r) (if (= op 1) (k-global-name-into r acc) acc))
+                          (else y acc))))))
+(define k-global-name-into (subr (read @globals) (k-region k-names) k-names)
+  (lambda (r acc) (tagcase r (r-global (g) (k-name-insert g acc)) (else y acc))))
+;; `g` into `xs`, kept in the order of the names' text.
+(define k-name-insert (subr (read @globals) (symbol k-names) k-names)
+  (lambda (g xs)
+    (if (or (null? xs) (< (symbol-compare g (car xs)) 0))
+        (the k-names (cons g xs))
+        (the k-names (cons (car xs) (k-name-insert g (cdr xs)))))))
+(define k-names-spaced (subr (read @globals) (k-names) string)
+  (lambda (xs)
+    (if (null? xs)
         ""
-        (let ((g (tagcase (car e)
-                   (a-read (r) (if (= op 0) (k-global-shown r) ""))
-                   (a-write (r) (if (= op 1) (k-global-shown r) ""))
-                   (else y ""))))
-          (string-append g (k-globals-shown (cdr e) op))))))
+        (string-append (string-append " " (symbol->string (car xs))) (k-names-spaced (cdr xs))))))
 (define k-one-global? (subr pure (k-atom) bool)
   (lambda (a)
     (tagcase a
