@@ -620,7 +620,7 @@ pub fn set_load_base(dir: Option<std::path::PathBuf>) {
 }
 
 /// The positions of one module file and the next apart, in the parser
-/// written in FX-26 (`parser-load.fx`'s `load-base`).
+/// written in FX-26 (`parser-exps.fx`'s `load-base`).
 const LOAD_BASE_STEP: i64 = 1_000_000_000;
 
 /// Each `(load-module "path")` in `forms`, in order: where it starts, and

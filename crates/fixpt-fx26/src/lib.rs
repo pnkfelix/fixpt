@@ -28,9 +28,10 @@ pub const PARSER: &str = include_str!("parser.fx");
 /// The parser's top-level forms, and a program of them.
 pub const PARSER_TOP: &str = include_str!("parser-top.fx");
 
-/// The parser's `load-module` (`docs/research/first-class-modules.md`, M7),
-/// written in FX-26: the files a program names, as the driver read them.
-pub const PARSER_LOAD: &str = include_str!("parser-load.fx");
+/// The parser's expressions, and its `load-module`
+/// (`docs/research/first-class-modules.md`, M7): the files a program names,
+/// as the driver read them. After [`PARSER`], before [`PARSER_TOP`].
+pub const PARSER_EXPS: &str = include_str!("parser-exps.fx");
 
 /// The evaluator written in FX-26, which runs the parser's trees.
 pub const EVALUATOR: &str = include_str!("evaluator.fx");
@@ -134,8 +135,8 @@ pub fn front_end() -> String {
 pub const FRONT_END_FILES: [(&str, &str); 52] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
+    ("parser-exps.fx", PARSER_EXPS),
     ("parser-top.fx", PARSER_TOP),
-    ("parser-load.fx", PARSER_LOAD),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
     CHECKER_FILES[1],

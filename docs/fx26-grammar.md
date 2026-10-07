@@ -5,7 +5,7 @@ A reference grammar for FX-26 as the front ends accept it today
 (`crates/fixpt-fx26/src/parse.rs` for types and expressions,
 `kinds.rs` for description functions, `modules.rs` for what a module's
 types are checked as, `top.rs` for top-level forms). The parser written in
-FX-26 (`parser.fx`, `parser-load.fx`) agrees with it on the forms below,
+FX-26 (`parser.fx`, `parser-exps.fx`) agrees with it on the forms below,
 bar a few corners at the edges. `docs/fx26.md` says what the forms mean.
 
 It is not context-free, and does not try to be. FX-26 is read as
