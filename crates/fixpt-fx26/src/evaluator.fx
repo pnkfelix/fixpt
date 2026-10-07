@@ -423,6 +423,20 @@
           ((and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
            (the ev-at (cons (extract (car rs) 3) nil)))
           (else (ev-reshape-in (cdr rs) a b)))))
+;; Each `with` the checker saw (`k-with-vals`), as `run-checked` was given
+;; them: where it is, and the module's values its body names, with their
+;; positions.
+(define ev-withs (ref k-with-list @v) (new nil))
+;; Those of the `with` from `a` to `b`, in a list of one; none if the checker
+;; did not see it (a program run unchecked, `run-program`).
+(define-type ev-with-at (listof (productof (1 k-names) (2 k-ids)) @v))
+(define ev-with-in
+  (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (k-with-list int int) ev-with-at)
+  (lambda (ws a b)
+    (cond ((null? ws) nil)
+          ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b))
+           (the ev-with-at (cons (product (1 (extract (car ws) 3)) (2 (extract (car ws) 4))) nil)))
+          (else (ev-with-in (cdr ws) a b)))))
 (define nth-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
   (lambda (fs i)
     (cond ((null? fs) (efail "no such field"))
@@ -465,6 +479,19 @@
                (lambda (fs e)
                  (if (null? fs) e (go (cdr fs) (extend (car (car fs)) (cdr (car fs)) e))))))
       (tagcase m (v-product (fs) (go fs e)) (else x (efail-expected "a module"))))))
+;; Module `m`'s values at positions `ps`, bound in `e` by names `ns`.
+(define bind-module-at (subr (maxeff evals spin) (val k-names k-ids env) env)
+  (lambda (m ns ps e)
+    (tagcase m
+      (v-product (fs)
+        (letrec ((go (subr (maxeff (read @globals) evals spin) (k-names k-ids env) env)
+                   (lambda (ns ps e)
+                     (if (or (null? ns) (null? ps))
+                         e
+                         (let ((v (cdr (nth-field fs (car ps)))))
+                           (go (cdr ns) (cdr ps) (extend (car ns) v e)))))))
+          (go ns ps e)))
+      (else x (efail-expected "a module")))))
 ;; An abstract type `n`'s conversions' names.
 (define conversion-names (subr (read @globals) (string) names)
   (lambda (n)
@@ -670,8 +697,15 @@
         ;; A module: a product of its values, in order, each labelled by its
         ;; name; its abstract types' conversions the identity.
         (e-module (items a b) (eval-module items e))
-        ;; `with`: the module's values, by position, bound by their names.
-        (e-with (m body a b) (eval body (bind-module (lookup e m) e))))))
+        ;; `with`: the module's values its body names, by position, bound by
+        ;; their names (all of them, if the checker did not say which).
+        (e-with (m body a b)
+          (let ((used (ev-with-in (get ev-withs) a b)))
+            (eval body
+                  (if (null? used)
+                      (bind-module (lookup e m) e)
+                      (bind-module-at (lookup e m) (extract (car used) 1) (extract (car used) 2)
+                                      e))))))))
   ;; A module's items, as a `letrec*`'s (`DONE.md` §37): every name first,
   ;; holding #u; then each item's values, in order, in the scope of all.
   (eval-module (subr (maxeff (read @globals) evals spin) (mod-items env) val)
@@ -923,21 +957,21 @@
           (else x (k-cat3 head " . " (show-val-in tail (- fuel 1)))))))))
 
 ;; A whole program begins with no globals, and no names kept.
-(define ev-begin! (subr stores (k-reshape-list) unit)
-  (lambda (rs) (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs))))
+(define ev-begin! (subr stores (k-reshape-list k-with-list) unit)
+  (lambda (rs ws) (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs) (set ev-withs ws))))
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), run; its value shown, or
 ;; its error. A whole program, as each is.
 (define run-checked (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
   (lambda (runs)
-    (tagcase (begin (ev-begin! (get k-reshapes)) (eval-runs runs))
+    (tagcase (begin (ev-begin! (get k-reshapes) (get k-with-vals)) (eval-runs runs))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
   (lambda (tops)
-    (tagcase (begin (ev-begin! nil) (eval-program tops))
+    (tagcase (begin (ev-begin! nil nil) (eval-program tops))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))))
 

@@ -2467,5 +2467,7 @@ generated files made modules):
 | total   | 1.611 s                      | 1.450 s                      |
 
 Below the 1.549 s from before the day's module work began. The suite
-2:00 → 1:26. The evaluator written in FX-26 still binds a `with`'s whole
-module (`bind-module`); it is not on the self-compile's path.
+2:00 → 1:26. The evaluator written in FX-26 does the same since: it is
+given the checker's record with the reshapes (`ev-begin!`), and binds a
+`with`'s whole module only where there is none (`run-program`, a program
+run unchecked).
