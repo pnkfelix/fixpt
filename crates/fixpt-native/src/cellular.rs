@@ -1149,8 +1149,10 @@ pub(crate) extern "C" fn pure_call(st: *mut State, p: u64, x: u64, y: u64) -> Pu
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let def = &fixpt_runtime::PRIMITIVES[p as usize];
     let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return fail(format!("`{}` needs an engine", def.name)) };
-    let mut args = if def.min == 1 { vec![Value(x)] } else { vec![Value(x), Value(y)] };
-    let out = match f(rt, &mut args) {
+    // On the stack: a call per primitive run, no allocation for it.
+    let mut buf = [Value(x), Value(y)];
+    let args = if def.min == 1 { &mut buf[..1] } else { &mut buf[..] };
+    let out = match f(rt, args) {
         Ok(v) => PureOut { v: v.raw(), failed: 0 },
         Err(t) => fail(fixpt_engine::cellular::describe(rt, t.obj)),
     };
@@ -1361,8 +1363,18 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     // The top is at `dsp`; the arguments go deepest first.
     // SAFETY: as above.
     let word = |a: u64| unsafe { Value(*(a as *const u64)) };
-    let mut args: Vec<Value> = (0..count).rev().map(|i| word(st.dsp + 8 * i as u64)).collect();
-    let v = f(rt, &mut args).map_err(|t| Trap::Prim(fixpt_engine::cellular::describe(rt, t.obj)))?;
+    // On the stack, for as many as most primitives take.
+    let (mut buf, mut many) = ([Value::NULL; 8], Vec::new());
+    let args: &mut [Value] = if count <= buf.len() {
+        for (k, i) in (0..count).rev().enumerate() {
+            buf[k] = word(st.dsp + 8 * i as u64);
+        }
+        &mut buf[..count]
+    } else {
+        many.extend((0..count).rev().map(|i| word(st.dsp + 8 * i as u64)));
+        &mut many[..]
+    };
+    let v = f(rt, args).map_err(|t| Trap::Prim(fixpt_engine::cellular::describe(rt, t.obj)))?;
     st.dsp = st.dsp + 8 * count as u64 - 8;
     // SAFETY: the slot the arguments had, or one checked above.
     unsafe { *(st.dsp as *mut u64) = v.raw() };

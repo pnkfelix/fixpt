@@ -531,7 +531,7 @@
             (let ((t (k-lookup s)))
               (cond
                ;; `nil` is a `nlist` of no elements, or of some.
-               ((and (string=? (symbol->string s) "nil") (>= t 0) (k-named-has? (get k-std) s t)
+               ((and (string=? (symbol->string s) "nil") (>= t 0) (k-std-binding? s t)
                      (k-may-be-empty? et))
                 nil)
                ((and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #t) (else y #f)))
@@ -954,7 +954,7 @@
                         (x-var (n c d)
                           (if (and (k-second-class? n) (not (k-operator? n a b)))
                               (k-fail (k-named-only n) a b)
-                              (k-find (get k-std) n)))
+                              (k-std-type n)))
                         (else y -1))))
                (if (< t 0)
                    (k-fail "`(with #%fx name)` names one standard binding" a b)

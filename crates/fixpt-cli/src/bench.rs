@@ -461,12 +461,16 @@ fn fx_session() -> Result<Fx26Session, String> {
 /// One program's compile row: each phase timed alone.
 fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native: bool) -> Result<Vec<String>, String> {
     let ms = |t: f64| format!("{:.2}", 1e3 * t);
-    let t_check = time(runs, || {
+    // `FIXPT_BENCH_ONLY=PHASE` (a column's name, `fx check`): that phase
+    // run `runs` times, every other once, for a profiler to sample one.
+    let only = std::env::var("FIXPT_BENCH_ONLY").ok();
+    let r = |p: &str| if only.as_deref().is_none_or(|o| o == p) { runs } else { 1 };
+    let t_check = time(r("check"), || {
         let _ = checked(text);
     });
     let (c, tops) = checked(text)?;
     let tops_rs = &tops;
-    let t_lower = time(runs, || {
+    let t_lower = time(r("lower"), || {
         let mut g = fixpt_fx26::lower::Globals::with_prefix("fx:");
         for t in &tops {
             let _ = fixpt_fx26::session::lower_top(&c, &mut g, t);
@@ -478,7 +482,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
     let (t_words, t_arm, t_regs) = s.scheme.scope(|sc| -> Result<(f64, f64, f64), String> {
         let (mut t_words, mut made) = (f64::INFINITY, Err(String::new()));
         let w = sc.make(|m| {
-            for _ in 0..runs {
+            for _ in 0..r("words") {
                 let start = Instant::now();
                 let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
                 comp.registers = true;
@@ -493,14 +497,14 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
             let w = m.get(w);
             let heap: &fixpt_heap::Heap = m.heap();
             let words = fixpt_fx26::syn::cell_words_reachable(heap, w);
-            t_arm = time(runs, || {
+            t_arm = time(r("arm64"), || {
                 for &x in &words {
                     if let Err(e) = fixpt_native::cellular::assemble_word(heap, x, [0, 0]) {
                         failed = Err(e);
                     }
                 }
             });
-            t_regs = time(runs, || {
+            t_regs = time(r("registers"), || {
                 if let Err(e) = assemble_registers(heap, w) {
                     failed = Err(e);
                 }
@@ -510,18 +514,18 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         failed?;
         Ok((t_words, t_arm, t_regs))
     })?;
-    let t_native = if native { native_compile_time(text, runs) } else { None };
+    let t_native = if native { native_compile_time(text, r("native")) } else { None };
     // The pieces written in FX-26, as the REPL runs them: the reader
     // lowered, on the bytecode engine; the rest as the front end's register
     // code. Each phase starts from what the one before made.
     let (fx_read, fx_parse, fx_check, fx_words, fx_arm) = fx.scheme.scope(|sc| -> Result<_, String> {
         let file = FileId(0);
         let msg = |e: fixpt_fx26::FxError| e.message;
-        let (fx_read, syns) = fx_phase(sc, runs, |sc| fixpt_fx26::syn::read_to_syns(sc, file, text).map_err(msg))?;
-        let (fx_parse, tops) = fx_phase(sc, runs, |sc| fixpt_fx26::syn::parse_syns(sc, file, text, syns).map_err(msg))?;
+        let (fx_read, syns) = fx_phase(sc, r("fx read"), |sc| fixpt_fx26::syn::read_to_syns(sc, file, text).map_err(msg))?;
+        let (fx_parse, tops) = fx_phase(sc, r("fx parse"), |sc| fixpt_fx26::syn::parse_syns(sc, file, text, syns).map_err(msg))?;
         let standard = fixpt_fx26::syn::read_standard(sc).map_err(msg)?;
         let reader = |n: &str| format!("{}{n}", fixpt_fx26::session::READER_PREFIX);
-        let (fx_check, ()) = fx_phase(sc, runs, |sc| {
+        let (fx_check, ()) = fx_phase(sc, r("fx check"), |sc| {
             let r = sc.call_global(&reader("check-program"), &[standard, tops]).map_err(|e| e.to_string())?;
             let tag = sc.view(|v| v.get(r).field(2).and_then(|t| t.symbol_name()).unwrap_or_default());
             if tag == "k-ok" { Ok(()) } else { Err("the checker written in FX-26 finds it wrong".to_string()) }
@@ -529,7 +533,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         let facts = fixpt_fx26::syn::rust_facts(sc, file, text).map_err(msg)?;
         let on = sc.make(|_| Value::TRUE);
         sc.call_global(&reader("compile-registers!"), &[on]).map_err(|e| e.to_string())?;
-        let fx_words = fx_phase(sc, runs, |sc| {
+        let fx_words = fx_phase(sc, r("fx words"), |sc| {
             let made = fixpt_fx26::syn::compile_trees_to_word(sc, file, tops, facts).map_err(msg)?;
             made.map(|_| ()).map_err(|e| format!("the compiler written in FX-26: {e}"))
         });
@@ -543,7 +547,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
             comp.registers = true;
             comp.program(&tops_rs).unwrap_or(Value::FALSE)
         });
-        let (fx_arm, ()) = fx_phase(sc, runs, |sc| fixpt_fx26::syn::assemble_reachable_by_fx26(sc, w, &mut |_, _, _, _| Ok(())))?;
+        let (fx_arm, ()) = fx_phase(sc, r("fx arm64"), |sc| fixpt_fx26::syn::assemble_reachable_by_fx26(sc, w, &mut |_, _, _, _| Ok(())))?;
         Ok((fx_read, fx_parse, fx_check, fx_words, fx_arm))
     })?;
     let work = [fx_read.1, fx_parse.1, fx_check.1, fx_words.1, fx_arm.1].iter().fold((0, 0), |a, w| (a.0 + w.0, a.1 + w.1));

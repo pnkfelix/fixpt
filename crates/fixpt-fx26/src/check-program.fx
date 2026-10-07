@@ -26,7 +26,9 @@
 (define-type k-olds (listof (pairof symbol int acyclic) acyclic))
 ;; `n`, of type `t`, bound as a standard binding.
 (define k-bind-std (subr (maxeff kstate spin) (symbol int) unit)
-  (lambda (n t) (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std))))))
+  (lambda (n t)
+    (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std)))
+           (table-set! (get k-std-table) n t))))
 ;; The initial environment: `(name type)` for each binding.
 (define k-standard (subr (maxeff checks spin) (syns-a) unit)
   (lambda (entries)

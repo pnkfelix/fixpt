@@ -2547,3 +2547,35 @@ apart from the other constants, so asking is a table lookup (a list of
 every constant global, searched per argument, was the first try). The
 front end compiled by FX-26, `fx words`: 265.4 / 261.5 → 273.5 / 265.3 ms,
 with the front end itself 1.2% longer.
+
+## `fx check` on peval: strings, `modulo`, call-outs (2026-10-07)
+
+Profiled with `sample` (`FIXPT_SYMBOLS`, `fixpt-symbolize`) on
+`FIXPT_BENCH_ONLY="fx check" fixpt bench --runs 150 --tables compile
+scheme-bench/peval.fx`, which repeats that one phase (every other once).
+Peval's `fx check` went from 56.2 ms to 19.7 ms (the Rust checker: 13.1),
+one cause at a time:
+
+| change                                                                  | `fx check` |
+| ----------------------------------------------------------------------- | ---------: |
+| before                                                                  |    56.2 ms |
+| strings compared in the heap, not copied to Rust `String`s              |       39.2 |
+| `string-append` and string making a word at a time                      |       33.6 |
+| `k-region=?` structural, `symbol=?` before `symbol-compare`             |       25.3 |
+| the standard bindings a table (`k-std-table`), not a 400-long list       |       22.8 |
+| `modulo`, `quotient`, `remainder` of fixnums with no bignum             |       21.1 |
+| a primitive's arguments on the stack, not in a `Vec`                    |       19.7 |
+
+- `symbol-compare` (regions ordered by name, `k-region-cmp`) was 42% of
+  the phase: each call made two Rust `String`s from the heap's strings,
+  compared them, and freed them. `Heap::string_cmp` compares the code
+  points in place, two to a word.
+- `k-region=?` asked the order for equality; equal names are the
+  comparison's slowest case. Now it compares the symbols.
+- Every table lookup computed its bucket with `modulo`, which made two
+  bignums of fixnum operands.
+- Each primitive call through `pure_call` or `prim` allocated its
+  argument vector; `fx arm64` fell from 38 to 17 ms with it.
+
+What is left is spread out: the call-outs' own cost, string building for
+each form's printed type (`k-globals-shown`), the sort of regions by name.

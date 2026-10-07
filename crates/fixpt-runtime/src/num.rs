@@ -210,14 +210,36 @@ impl N {
     }
 
     pub fn quotient(&self, other: &N) -> Result<N, NumError> {
+        if let (N::Fix(a), N::Fix(b)) = (self, other)
+            && *b != 0
+        {
+            // Fixnums: no overflow but `MIN / -1`, which `checked_div` gives
+            // to the general path.
+            if let Some(q) = a.checked_div(*b) {
+                return Ok(N::Fix(q));
+            }
+        }
         self.int_div(other, |a, b| a / b)
     }
     pub fn remainder(&self, other: &N) -> Result<N, NumError> {
+        if let (N::Fix(a), N::Fix(b)) = (self, other)
+            && *b != 0
+            && let Some(r) = a.checked_rem(*b)
+        {
+            return Ok(N::Fix(r));
+        }
         self.int_div(other, |a, b| a % b)
     }
     /// `modulo` takes the sign of the divisor; `remainder` takes the sign of
     /// the dividend. Conflating them is a classic source of off-by-a-modulus.
     pub fn modulo(&self, other: &N) -> Result<N, NumError> {
+        // Two fixnums with no bignum made (a table's bucket, every lookup).
+        if let (N::Fix(a), N::Fix(b)) = (self, other)
+            && *b != 0
+            && let Some(r) = a.checked_rem(*b)
+        {
+            return Ok(N::Fix(if r != 0 && (r < 0) != (*b < 0) { r + b } else { r }));
+        }
         self.int_div(other, |a, b| a.mod_floor(&b))
     }
 

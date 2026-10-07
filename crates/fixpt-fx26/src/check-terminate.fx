@@ -71,7 +71,11 @@
 (define k-sc-op (subr (maxeff kreads (alloc @t) spin) (kx k-tscope) string)
   (lambda (f sc)
     (tagcase (k-under f)
-      (x-var (s a b) (if (k-sc-named-in? (get k-std) sc s (k-lookup s)) (symbol->string s) ""))
+      (x-var (s a b)
+        (let ((t (k-lookup s)))
+          (if (and (k-std-binding? s t) (not (k-sc-in? sc s)) (k-sc-nonmember? s))
+              (symbol->string s)
+              "")))
       (else y ""))))
 ;; Whether `op` is `a` or `b`.
 (define k-op-either? (subr pure (string string string) bool)
@@ -660,7 +664,7 @@
       (else y nil))))
 ;; Whether `s` names the standard binding of that name.
 (define k-std? (subr (maxeff kreads spin) (symbol) bool)
-  (lambda (s) (let ((t (k-lookup s))) (and (>= t 0) (k-named-has? (get k-std) s t)))))
+  (lambda (s) (k-std-binding? s (k-lookup s))))
 ;; Whether `t` is a natural, of a size or not.
 (define k-nat-ty? (subr (maxeff kreads spin) (int) bool)
   (lambda (t) (tagcase (k-get (k-resolve t)) (ty-nat (z) #t) (else y #f))))

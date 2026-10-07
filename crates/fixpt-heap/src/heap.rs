@@ -699,13 +699,33 @@ impl Heap {
     }
 
     pub fn string_from_chars(&mut self, chars: &[char]) -> Value {
-        let words = 1 + chars.len().div_ceil(2);
+        let points: Vec<u32> = chars.iter().map(|c| *c as u32).collect();
+        self.string_from_points(&points)
+    }
+
+    /// A string of code points `ps`, written a word, two of them, at a time,
+    /// its body found once.
+    pub fn string_from_points(&mut self, ps: &[u32]) -> Value {
+        let words = 1 + ps.len().div_ceil(2);
         let o = self.alloc(ObjType::String, words, Value::fixnum(0));
-        self.obj_set_word(o, 0, chars.len() as u64);
-        for (i, c) in chars.iter().enumerate() {
-            self.string_set(o, i, *c);
+        let base = self.payload_base(o);
+        self.set_word(base, ps.len() as u64);
+        for (k, pair) in ps.chunks(2).enumerate() {
+            let hi = pair.get(1).map_or(0, |c| (*c as u64) << 32);
+            self.set_word(base + 1 + k, pair[0] as u64 | hi);
         }
         o
+    }
+
+    /// String `o`'s code points onto `out`, its body found once.
+    pub fn string_points_into(&self, o: Value, out: &mut Vec<u32>) {
+        let base = self.payload_base(o);
+        let n = self.word(base) as usize;
+        out.reserve(n);
+        for i in 0..n {
+            let w = self.word(base + 1 + i / 2);
+            out.push(if i.is_multiple_of(2) { w as u32 } else { (w >> 32) as u32 });
+        }
     }
 
     #[inline]
@@ -735,10 +755,35 @@ impl Heap {
         };
         self.obj_set_word(o, wi, w);
     }
+    /// Strings `a` and `b` compared code point by code point, as their
+    /// Rust `String`s compare (code-point order is UTF-8's byte order),
+    /// with nothing copied: two code points to a word, the first low.
+    pub fn string_cmp(&self, a: Value, b: Value) -> std::cmp::Ordering {
+        // Each body found once, not at every word.
+        let (pa, pb) = (self.payload_base(a), self.payload_base(b));
+        let (n, m) = (self.word(pa) as usize, self.word(pb) as usize);
+        for k in 0..n.min(m).div_ceil(2) {
+            let (x, y) = (self.word(pa + 1 + k), self.word(pb + 1 + k));
+            if x != y {
+                // The first code point that differs, low half first; a
+                // word past either string's end differs only where both
+                // have characters.
+                let (xl, yl) = (x & 0xffff_ffff, y & 0xffff_ffff);
+                if xl != yl {
+                    return xl.cmp(&yl);
+                }
+                if 2 * k + 1 < n.min(m) {
+                    return (x >> 32).cmp(&(y >> 32));
+                }
+            }
+        }
+        n.cmp(&m)
+    }
+
     pub fn string_to_rust(&self, o: Value) -> String {
-        (0..self.string_len(o))
-            .map(|i| self.string_ref(o, i))
-            .collect()
+        let mut ps = Vec::new();
+        self.string_points_into(o, &mut ps);
+        ps.into_iter().map(|c| char::from_u32(c).expect("string holds valid code points")).collect()
     }
 
     pub fn make_bytevector(&mut self, bytes: &[u8]) -> Value {
@@ -1229,7 +1274,12 @@ impl Heap {
             .map(|&i| self.symbols[i as usize])
     }
 
-    pub fn symbol_name(&self, sym: Value) -> String {
+    /// Two symbols' names compared, as `string_cmp`, with nothing copied.
+    pub fn symbol_cmp(&self, a: Value, b: Value) -> std::cmp::Ordering {
+        debug_assert!(self.is_a(a, ObjType::Symbol) && self.is_a(b, ObjType::Symbol));
+        self.string_cmp(self.fixed(a, 3, 0), self.fixed(b, 3, 0))
+    }
+        pub fn symbol_name(&self, sym: Value) -> String {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
         self.string_to_rust(self.fixed(sym, 3, 0))
     }

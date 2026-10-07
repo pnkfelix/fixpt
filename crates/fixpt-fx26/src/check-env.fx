@@ -98,7 +98,7 @@
     (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
       (cond ((or (null? st) (not (null? (k-broken-why s)))) -1)
             ((or (< mark 0) (> (k-bound-since (get k-trail) s (- (get k-depth) mark)) 0)) (car st))
-            (else (k-find (get k-std) s))))))
+            (else (k-std-type s))))))
 ;; The same, broken or not.
 (define k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))

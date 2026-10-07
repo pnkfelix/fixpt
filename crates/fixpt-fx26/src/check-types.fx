@@ -442,6 +442,14 @@
 (define-type k-named (listof (pairof symbol int @t) acyclic))
 (define k-recursive (ref k-named @t) (new nil))
 (define k-std (ref k-named @t) (new nil))
+;; The same, a table: each standard name's binding, newest (`k-bind-std`).
+(define k-std-table (ref (table symbol int @t) @t) (new (make-table symbol-hash symbol=?)))
+;; The standard binding of `s`, -1 if none.
+(define k-std-type (subr (maxeff (read @globals) (read @t)) (symbol) int)
+  (lambda (s) (table-ref (get k-std-table) s -1)))
+;; Whether binding `t` of `s` is the standard one.
+(define k-std-binding? (subr (maxeff (read @globals) (read @t)) (symbol int) bool)
+  (lambda (s t) (and (>= t 0) (= (k-std-type s) t))))
 ;; Every `define-generative`, newest first: its name, parameters, their
 ;; variance (0 covariant, 1 contravariant, 2 invariant), and representation.
 (define-type k-gen (productof (1 symbol) (2 k-binders) (3 k-ids) (4 int)))
@@ -526,12 +534,15 @@
     (tagcase r
       (r-const (n) 0) (r-fresh (i n) 1) (r-var (v) 2) (r-frozen (p f) 3) (r-heap () 4)
       (r-global (g) 5) (r-globals () 6))))
+;; Two names in order: the same symbol at once, else by their text.
+(define k-name-cmp (subr pure (symbol symbol) int)
+  (lambda (n m) (if (symbol=? n m) 0 (symbol-compare n m))))
 (define k-region-cmp (subr (maxeff (read @globals) spin) (k-region k-region) int)
   (lambda (r s)
     (let ((c (k-int-cmp (k-region-rank r) (k-region-rank s))))
       (if (= c 0)
           (tagcase r
-            (r-const (n) (tagcase s (r-const (m) (symbol-compare n m)) (else y 0)))
+            (r-const (n) (tagcase s (r-const (m) (k-name-cmp n m)) (else y 0)))
             (r-fresh (i n) (tagcase s (r-fresh (j m) (k-int-cmp i j)) (else y 0)))
             (r-var (v) (tagcase s (r-var (w) (k-int-cmp v w)) (else y 0)))
             (r-frozen (p f)
@@ -539,11 +550,21 @@
                 (r-frozen (q g) (let ((c (k-int-cmp p q))) (if (= c 0) (k-bool-cmp f g) c)))
                 (else y 0)))
             (r-heap () 0)
-            (r-global (g) (tagcase s (r-global (h) (symbol-compare g h)) (else y 0)))
+            (r-global (g) (tagcase s (r-global (h) (k-name-cmp g h)) (else y 0)))
             (r-globals () 0))
           c))))
+;; The same as `(= (k-region-cmp r s) 0)`, the names compared as symbols:
+;; one comparison, where the order compares their names.
 (define k-region=? (subr (maxeff (read @globals) spin) (k-region k-region) bool)
-  (lambda (r s) (= (k-region-cmp r s) 0)))
+  (lambda (r s)
+    (tagcase r
+      (r-const (n) (tagcase s (r-const (m) (symbol=? n m)) (else y #f)))
+      (r-fresh (i n) (tagcase s (r-fresh (j m) (= i j)) (else y #f)))
+      (r-var (v) (tagcase s (r-var (w) (= v w)) (else y #f)))
+      (r-frozen (p f) (tagcase s (r-frozen (q g) (and (= p q) (bool=? f g))) (else y #f)))
+      (r-heap () (tagcase s (r-heap () #t) (else y #f)))
+      (r-global (g) (tagcase s (r-global (h) (symbol=? g h)) (else y #f)))
+      (r-globals () (tagcase s (r-globals () #t) (else y #f))))))
 
 (define k-atom-rank (subr pure (k-atom) int)
   (lambda (a)
@@ -792,6 +813,9 @@
 (define-type k-named (select check-types-module k-named))
 (define k-recursive (with check-types-module k-recursive))
 (define k-std (with check-types-module k-std))
+(define k-std-table (with check-types-module k-std-table))
+(define k-std-type (with check-types-module k-std-type))
+(define k-std-binding? (with check-types-module k-std-binding?))
 (define-type k-gen (select check-types-module k-gen))
 (define k-gens (with check-types-module k-gens))
 (define k-ngens (with check-types-module k-ngens))

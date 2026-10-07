@@ -602,6 +602,17 @@ fn compare_chain(
     Ok(Value::TRUE)
 }
 
+/// Strings `a` and `b` compared in the heap (`Heap::string_cmp`), each
+/// checked a string first.
+fn string_cmp(rt: &mut Runtime, a: Value, b: Value) -> Outcome<std::cmp::Ordering> {
+    for s in [a, b] {
+        if !rt.heap.is_a(s, ObjType::String) {
+            return rt.type_error("a string", s);
+        }
+    }
+    Ok(rt.heap.string_cmp(a, b))
+}
+
 fn get_string(rt: &mut Runtime, v: Value) -> Outcome<String> {
     if rt.heap.is_a(v, ObjType::String) {
         return Ok(rt.heap.string_to_rust(v));
@@ -871,9 +882,13 @@ prims! {
         Ok(rt.heap.string_from_chars(&chars))
     });
     "string-append", 0, None, simple!(|rt, a| {
-        let mut out = String::new();
-        for v in a.iter().copied() { out.push_str(&get_string(rt, v)?); }
-        Ok(rt.heap.make_string(&out))
+        // The code points straight from the heap, then one string made.
+        let mut out = Vec::new();
+        for v in a.iter().copied() {
+            if !rt.heap.is_a(v, ObjType::String) { return rt.type_error("a string", v); }
+            rt.heap.string_points_into(v, &mut out);
+        }
+        Ok(rt.heap.string_from_points(&out))
     });
     "string->list", 1, Some(1), simple!(|rt, a| {
         let s = get_string(rt, a[0])?;
@@ -1392,15 +1407,14 @@ prims! {
     // FX-26's `string-compare`: -1, 0 or 1, as `a[0]` comes before, is, or
     // comes after `a[1]`, character by character.
     "%fx26-string-compare", 2, Some(2), simple!(|rt, a| {
-        let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?);
-        Ok(Value::fixnum(x.cmp(&y) as i64))
+        Ok(Value::fixnum(string_cmp(rt, a[0], a[1])? as i64))
     });
     // FX-26's `symbol-compare`: the same, of two symbols' names.
     "%fx26-symbol-compare", 2, Some(2), simple!(|rt, a| {
         for s in [a[0], a[1]] {
             if !rt.heap.is_a(s, ObjType::Symbol) { return rt.type_error("a symbol", s); }
         }
-        Ok(Value::fixnum(rt.heap.symbol_name(a[0]).cmp(&rt.heap.symbol_name(a[1])) as i64))
+        Ok(Value::fixnum(rt.heap.symbol_cmp(a[0], a[1]) as i64))
     });
     // FX-26's `string-search`: where `a[1]` first occurs in `a[0]` at or
     // after character `a[2]`, in characters; or -1.
@@ -1434,10 +1448,10 @@ prims! {
     "%fx26-char<=?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_char(rt, a[0])?, get_char(rt, a[1])?); Ok(Value::boolean(x <= y)) });
     "%fx26-char>?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_char(rt, a[0])?, get_char(rt, a[1])?); Ok(Value::boolean(x > y)) });
     "%fx26-char>=?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_char(rt, a[0])?, get_char(rt, a[1])?); Ok(Value::boolean(x >= y)) });
-    "%fx26-string<?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?); Ok(Value::boolean(x < y)) });
-    "%fx26-string<=?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?); Ok(Value::boolean(x <= y)) });
-    "%fx26-string>?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?); Ok(Value::boolean(x > y)) });
-    "%fx26-string>=?", 2, Some(2), simple!(|rt, a| { let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?); Ok(Value::boolean(x >= y)) });
+    "%fx26-string<?", 2, Some(2), simple!(|rt, a| { let o = string_cmp(rt, a[0], a[1])?; Ok(Value::boolean(o < std::cmp::Ordering::Equal)) });
+    "%fx26-string<=?", 2, Some(2), simple!(|rt, a| { let o = string_cmp(rt, a[0], a[1])?; Ok(Value::boolean(o <= std::cmp::Ordering::Equal)) });
+    "%fx26-string>?", 2, Some(2), simple!(|rt, a| { let o = string_cmp(rt, a[0], a[1])?; Ok(Value::boolean(o > std::cmp::Ordering::Equal)) });
+    "%fx26-string>=?", 2, Some(2), simple!(|rt, a| { let o = string_cmp(rt, a[0], a[1])?; Ok(Value::boolean(o >= std::cmp::Ordering::Equal)) });
     // `(error message)`: the run fails, with the message.
     "%fx26-error", 1, Some(1), simple!(|rt, a| { let m = get_string(rt, a[0])?; rt.fail(&m, &[]) });
     // Two lists, the first copied (a cycle in it is an error, not a loop).
@@ -2012,9 +2026,7 @@ fn string_chain(
     ok: impl Fn(std::cmp::Ordering) -> bool,
 ) -> Outcome<Value> {
     for i in 0..args.len().saturating_sub(1) {
-        let a = get_string(rt, args[i])?;
-        let b = get_string(rt, args[i + 1])?;
-        if !ok(a.cmp(&b)) {
+        if !ok(string_cmp(rt, args[i], args[i + 1])?) {
             return Ok(Value::FALSE);
         }
     }

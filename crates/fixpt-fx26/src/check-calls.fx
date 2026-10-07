@@ -161,11 +161,11 @@
     (tagcase x
       (x-var (s a b)
         (let ((t (k-lookup s)))
-          (if (and (>= t 0) (k-named-has? (get k-std) s t)) (symbol->string s) "")))
+          (if (k-std-binding? s t) (symbol->string s) "")))
       (x-with (m body a b)
         (tagcase body
           (x-var (n c d)
-            (if (and (k-fx-module? m) (>= (k-find (get k-std) n) 0)) (symbol->string n) ""))
+            (if (and (k-fx-module? m) (>= (k-std-type n) 0)) (symbol->string n) ""))
           (else y "")))
       (else y ""))))
 ;; Whether `f` names a known procedure.
@@ -194,7 +194,7 @@
              (or (k-receiver-captures? ft)
                  (not (and (not (null? args)) (null? (cdr args)) (k-escape-only? (car args))))))
             ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
-            ((and (>= t 0) (or (k-known? (car s)) (k-named-has? (get k-std) (car s) t))) #f)
+            ((and (>= t 0) (or (k-known? (car s)) (k-std-binding? (car s) t))) #f)
             ((not (string=? std "")) #f)
             ((k-lambda? (k-under f)) #f)
             (else (k-cyclic? ft))))))))

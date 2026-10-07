@@ -229,6 +229,7 @@
       (set k-known (make-table symbol-hash symbol=?))
       (set k-global (make-table symbol-hash symbol=?))
       (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?))
+      (set k-std-table (make-table symbol-hash symbol=?))
       (set k-trail nil) (set k-depth 0))))
 ;; Forget the lemmas, and the facts learned of data and sizes.
 (define k-reset-facts (subr kstate () unit)
