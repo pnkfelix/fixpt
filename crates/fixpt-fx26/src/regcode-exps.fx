@@ -270,7 +270,11 @@
 ;; While a body's fast version is compiled (`r-register-code`): whether, and
 ;; the globals it assumes hold what they held and what that was, newest
 ;; first, each once.
-(define-type r-assumption (pairof wglobal tword @k))
+;; What a fast version assumes a global holds: a closure of a word (for a
+;; call inlined, specialized, or of itself); or a constant's value, the same
+;; word (`TODO.md` §42).
+(define-datatype rguard (rg-word tword) (rg-value wcell))
+(define-type r-assumption (pairof wglobal rguard @k))
 (define-type r-assumptions (listof r-assumption acyclic))
 (define r-assuming (ref bool @k) (new #f))
 ;; While deciding whether a body is a leaf: whether a plain call in tail
@@ -287,7 +291,8 @@
 ;; That global `cell` holds a closure of `word`, assumed: noted.
 (define r-note-assumed (subr emits (wglobal tword) unit)
   (lambda (cell word)
-    (set r-assumed (the r-assumptions (cons (the r-assumption (cons cell word)) (get r-assumed))))))
+    (set r-assumed (the r-assumptions (cons (the r-assumption (cons cell (rg-word word)))
+                                            (get r-assumed))))))
 ;; Whether the body being compiled is its fast version, which assumes what
 ;; the guard would test: if so, the assumption noted, for its guard at the
 ;; start.
@@ -340,11 +345,50 @@
   (lambda (xs at plain-at rest)
     (if (null? xs)
         rest
-        (cons (wcell-int rop-global-guard)
-              (cons (wcell-global (car (car xs)))
-                    (cons (wcell-word (cdr (car xs)))
-                          (cons (wcell-int (- plain-at (+ at 4)))
-                                (r-guard-cells (cdr xs) (+ at 4) plain-at rest))))))))
+        (let ((rest (the wcells (cons (wcell-int (- plain-at (+ at 4)))
+                                      (r-guard-cells (cdr xs) (+ at 4) plain-at rest))))
+              (c (wcell-global (car (car xs)))))
+          (tagcase (cdr (car xs))
+            (rg-word (w)
+              (the wcells (cons (wcell-int rop-global-guard) (cons c (cons (wcell-word w) rest)))))
+            (rg-value (v)
+              (the wcells (cons (wcell-int rop-value-guard) (cons c (cons v rest))))))))))
+;; The names `e` binds, in order.
+(define r-cenv-names (subr rbuilds (cenv) syms)
+  (lambda (e) (if (null? e) nil (cons (car (car e)) (r-cenv-names (cdr e))))))
+;; The constant globals `body` names, in its free names' order (`c-free`),
+;; each cell and value: what a fast version folds, assuming each holds its
+;; value still. As the Rust compiler's `r_consts_named`.
+(define r-consts-named (subr rbuilds (exp cenv) r-const-list)
+  (lambda (body inner)
+    (letrec ((go (subr rbuilds (syms r-const-list) r-const-list)
+                   (lambda (ns acc)
+                     (if (null? ns)
+                         (r-rev-consts-list acc nil)
+                         (let ((l (c-where (the cenv nil) (car ns))))
+                           (go (cdr ns)
+                               (if (null? l)
+                                   acc
+                                   (tagcase (car l)
+                                     (at-global (g)
+                                       (let ((k (r-const-in (get r-const-globals) g)))
+                                         (if (or (null? k) (not (null? (r-const-in acc g))))
+                                             acc
+                                             (the r-const-list (cons (cons g (car k)) acc)))))
+                                     (else y acc)))))))))
+      (go (c-free body (r-cenv-names inner) nil) nil))))
+(define r-rev-consts-list (subr rbuilds (r-const-list r-const-list) r-const-list)
+  (lambda (xs acc)
+    (if (null? xs) acc (r-rev-consts-list (cdr xs) (the r-const-list (cons (car xs) acc))))))
+;; Constants `cs` as assumptions, newest first: onto `acc`, the last first.
+(define r-consts-assumed (subr rbuilds (r-const-list r-assumptions) r-assumptions)
+  (lambda (cs acc)
+    (if (null? cs)
+        acc
+        (r-consts-assumed (cdr cs)
+                          (let ((v (rg-value (r-const-cell (cdr (car cs))))))
+                            (the r-assumptions
+                              (cons (the r-assumption (cons (car (car cs)) v)) acc)))))))
 ;; The one of `c-inlines` that `n`, taking `k` arguments, names, if any.
 (define r-inline-named
   (subr (maxeff rreads (alloc @k)) ((listof c-inline acyclic) symbol int) (listof c-inline acyclic))
@@ -868,6 +912,8 @@
 (define r-rev-assumptions (with regcode-exps-module r-rev-assumptions))
 (define r-assumptions-length (with regcode-exps-module r-assumptions-length))
 (define r-guard-cells (with regcode-exps-module r-guard-cells))
+(define r-consts-named (with regcode-exps-module r-consts-named))
+(define r-consts-assumed (with regcode-exps-module r-consts-assumed))
 (define r-standard-value (with regcode-exps-module r-standard-value))
 (define r-inlined (with regcode-exps-module r-inlined))
 (define r-collects (with regcode-exps-module r-collects))

@@ -480,6 +480,7 @@ pub mod regcode {
         ("prim1", 1, "RESULT := runtime primitive p applied to RESULT: one that never collects (`fixpt_runtime::never_collects`), so that no register need be in the frame"),
         ("prim2", 2, "RESULT := such a primitive p applied to RESULT and REGk"),
         ("prim2imm", 2, "RESULT := such a primitive p applied to RESULT and x"),
+        ("value-guard", 3, "unless global cell g holds value v, the same word (a constant a fast version folded, `TODO.md` §42: an immediate, or an object by identity), skip the third operand's count of cells, counted after it; RESULT kept"),
     ];
 
     pub const fn op(name: &str) -> usize {

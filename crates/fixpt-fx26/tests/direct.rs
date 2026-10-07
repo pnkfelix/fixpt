@@ -384,6 +384,22 @@ fn array_elements_in_and_out_of_range() {
     assert!(matches!(&r.direct, Err(m) if m.contains("field")), "{:?} (the Rust machine: {})\n{}", r.direct, r.rust, r.code);
 }
 
+/// A constant folded in a fast version, then redefined (`TODO.md` §42):
+/// each definition at the same type assigns its global, so when the machine
+/// code is made the cell no longer holds what the fast version assumed, its
+/// `value-guard` fails, and the plain version sees the value there is now.
+#[test]
+fn a_folded_constant_redefined_is_seen() {
+    let step = "(define k int 3)\n(define flag bool #t)\n\
+                (define* step (subr pure (int) int) (lambda (x) (if flag (+ x k) (- x k))))\n";
+    let r = run(step, "step", &[4], FUEL);
+    assert_eq!(r.direct, Ok("7".into()), "{}", r.code);
+    let r = run(&format!("{step}(define k int 5)\n"), "step", &[4], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("9".into()), "9"), "{}", r.code);
+    let r = run(&format!("{step}(define k int 5)\n(define flag bool #f)\n"), "step", &[4], FUEL);
+    assert_eq!((r.direct, r.rust.as_str()), (Ok("-1".into()), "-1"), "{}", r.code);
+}
+
 /// A pair written, by the runtime's `set-car!`, called out.
 #[test]
 fn a_pair_written() {

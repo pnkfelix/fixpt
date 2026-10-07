@@ -1002,7 +1002,7 @@ impl Compiling<'_> {
             starts.push(i);
             let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
             match op {
-                "branch" | "branchf" | "brancht" | "global-guard" => {
+                "branch" | "branchf" | "brancht" | "global-guard" | "value-guard" => {
                     let to = i as i64 + 1 + n as i64 + cells[i + n].as_fixnum();
                     target[to as usize] = true;
                     if to <= i as i64 {
@@ -1034,7 +1034,7 @@ impl Compiling<'_> {
                 match op {
                     "save" => cur = true,
                     "pop" => cur = false,
-                    "branch" | "branchf" | "brancht" | "global-guard" => {
+                    "branch" | "branchf" | "brancht" | "global-guard" | "value-guard" => {
                         let to = (i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize;
                         known[to].get_or_insert(cur);
                     }
@@ -1083,7 +1083,7 @@ impl Compiling<'_> {
                 match op {
                     "return" | "tailinvoke" => {}
                     "branch" => succ[si].push(to()),
-                    "branchf" | "brancht" | "global-guard" => succ[si].extend([si + 1, to()]),
+                    "branchf" | "brancht" | "global-guard" | "value-guard" => succ[si].extend([si + 1, to()]),
                     _ if si + 1 < ns => succ[si].push(si + 1),
                     _ => {}
                 }
@@ -1306,6 +1306,27 @@ impl Compiling<'_> {
                         let l = edge(&mut a, si - 1, to);
                         a.to(l, Fix::If(Cond::Ne));
                         a.bind(held);
+                    }
+                }
+                // Decided here as `global-guard` is, where the cell holds the
+                // constant when this code is made: nothing; else the test,
+                // of the same word: an immediate in place, an object from
+                // this code's fields, which a collection keeps up to date.
+                "value-guard" => {
+                    let (cell, v, to) = (o(0), o(1), (i as i64 + 4 + o(2).as_fixnum()) as usize);
+                    if self.heap.bloblet_slot(cell, 2) != v {
+                        let fc = self.field(p, Field::Cell(cell));
+                        ldr_field(&mut a, X9, fc);
+                        a.e(ldur(X11, X9, field_off(2)));
+                        if v.is_bloblet() || v.is_pair() {
+                            let fv = self.field(p, Field::Const(v));
+                            ldr_field(&mut a, X16, fv);
+                        } else {
+                            a.es(&mov_imm64(X16, v.raw()));
+                        }
+                        a.e(cmp(X11, X16));
+                        let l = edge(&mut a, si - 1, to);
+                        a.to(l, Fix::If(Cond::Ne));
                     }
                 }
                 "setglbl" => {

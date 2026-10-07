@@ -88,6 +88,13 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
                 branches.push((i, i as i64 + 4 + o(2).as_fixnum()));
                 o(0).is_bloblet() && heap.is_cellular_word(o(1))
             }
+            "value-guard" => {
+                if !o(2).is_fixnum() {
+                    return Err(format!("cell {i}: a guard's offset is a fixnum"));
+                }
+                branches.push((i, i as i64 + 4 + o(2).as_fixnum()));
+                o(0).is_bloblet()
+            }
             _ => true,
         };
         if !ok {

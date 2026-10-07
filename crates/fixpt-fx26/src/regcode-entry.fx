@@ -229,10 +229,16 @@
 (define r-fast-code (subr rcompiles (exp-params exp cenv rthis rowner) wcells)
   (lambda (ps body inner this own)
     (let* ((outer-assuming (get r-assuming)) (outer-assumed (get r-assumed))
-           (fast (begin (set r-assuming #t) (set r-assumed (the r-assumptions nil))
+           (outer-consts (get r-consts-now))
+           ;; The constants it names folded, assumed first.
+           (consts (r-consts-named body inner))
+           (fast (begin (set r-assuming #t)
+                        (set r-assumed (r-consts-assumed consts (the r-assumptions nil)))
+                        (set r-consts-now consts)
                         (r-register-body ps body inner this own)))
            (assumptions (r-rev-assumptions (get r-assumed) (the r-assumptions nil))))
       (begin
+        (set r-consts-now outer-consts)
         (set r-assuming outer-assuming)
         (set r-assumed outer-assumed)
         (if (or (null? assumptions) (not (r-pays? fast)))

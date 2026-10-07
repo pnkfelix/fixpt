@@ -200,6 +200,10 @@
 (define rop-prim1 int 31)
 (define rop-prim2 int 32)  ; 2: RESULT := such a primitive p applied to RESULT and REGk
 (define rop-prim2imm int 33)  ; 2: RESULT := such a primitive p applied to RESULT and x
+;; 3: unless global cell g holds value v, the same word (a constant a fast version folded, `TODO.md`
+;; §42: an immediate, or an object by identity), skip the third operand's count of cells, counted
+;; after it; RESULT kept
+(define rop-value-guard int 34)
 (define register-regs int 8)))
 
 (define tag-fixnum (with layout-module tag-fixnum))
@@ -362,4 +366,5 @@
 (define rop-prim1 (with layout-module rop-prim1))
 (define rop-prim2 (with layout-module rop-prim2))
 (define rop-prim2imm (with layout-module rop-prim2imm))
+(define rop-value-guard (with layout-module rop-value-guard))
 (define register-regs (with layout-module register-regs))

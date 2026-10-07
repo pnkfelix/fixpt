@@ -439,3 +439,20 @@ fn a_reexported_module_member_is_inlined() {
         assert!(code.contains("global-guard inc"), "{who}:\n{code}");
     }
 }
+
+/// Constants folded in a fast version (`TODO.md` §42): `step` names `k`
+/// and `flag`, defined as literals, so its fast version assumes them, a
+/// `value-guard` each at its start, its test decided (the `else` gone) and
+/// its sum an immediate; the plain version reads the globals.
+#[test]
+fn constants_are_folded_behind_value_guards() {
+    let out = shown(
+        "(define k int 3)\n(define flag bool #t)\n\
+         (define* step (subr pure (int) int) (lambda (x) (if flag (+ x k) (- x k))))\n",
+    );
+    let step = out.split("\nword step").nth(1).expect("step");
+    let step = step.split("its register code").nth(1).expect("its register code");
+    for want in ["value-guard flag", "value-guard k", "op2imm int-add 3", "global k"] {
+        assert!(step.contains(want), "{want}:\n{step}");
+    }
+}

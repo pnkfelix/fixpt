@@ -591,7 +591,7 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
     let mut j = 0;
     while j < cells.len() {
         let (name, n, _) = OPS[cells[j].as_fixnum() as usize];
-        if matches!(name, "branch" | "branchf" | "brancht" | "global-guard") {
+        if matches!(name, "branch" | "branchf" | "brancht" | "global-guard" | "value-guard") {
             let to = j as i64 + 1 + n as i64 + cells[j + n].as_fixnum();
             if to <= j as i64 {
                 loop_heads[to as usize] = true;
@@ -952,6 +952,15 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 a.e(cmp(X12, X16));
                 a.b_cond(Cond::Ne, labels[to]);
                 a.bind(held);
+            }
+            // The global's value against the constant a fast version folded.
+            "value-guard" => {
+                let to = (i as i64 + 4 + o(2).as_fixnum()) as usize;
+                a.cell(X16, f(0), fields);
+                a.e(ldur(X11, X16, field_off(2)));
+                a.cell(X16, f(1), fields);
+                a.e(cmp(X11, X16));
+                a.b_cond(Cond::Ne, labels[to]);
             }
             other => return Err(format!("`{other}` in register code")),
         }

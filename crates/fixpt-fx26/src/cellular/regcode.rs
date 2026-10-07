@@ -235,8 +235,12 @@ impl Compiler<'_> {
     /// compiling it twice compiles nothing else twice.
     pub(super) fn register_code(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>) -> O<Vec<Value>> {
         if self.summary_of(body) < 3 && self.inline_room(body, i64::MAX / 2) >= 0 && self.r_fast_may_pay(params, body, inner, this, own) {
-            let (assumed, declined) = (self.assume.replace(Vec::new()), self.declined.take());
+            // The constants it names folded, assumed first.
+            let consts = self.r_consts_named(body, inner);
+            let (assumed, declined) = (self.assume.replace(consts.clone()), self.declined.take());
+            let outer_consts = std::mem::replace(&mut self.consts_now, consts);
             let fast = self.register_body(params, body, inner, this, own);
+            self.consts_now = outer_consts;
             let assumptions = std::mem::replace(&mut self.assume, assumed).unwrap_or_default();
             self.declined = declined;
             // Worth it where the fast version is a leaf, or loops where the
@@ -252,7 +256,9 @@ impl Compiler<'_> {
                 let mut cells = fast[..2].to_vec();
                 for (k, (cell, word)) in assumptions.iter().enumerate() {
                     let at = 2 + 4 * k as i64;
-                    cells.extend([Value::fixnum(op("global-guard") as i64), *cell, *word, Value::fixnum(plain_at - (at + 4))]);
+                    // A word's closure, or a constant's value.
+                    let guard = if self.heap.is_cellular_word(*word) { "global-guard" } else { "value-guard" };
+                    cells.extend([Value::fixnum(op(guard) as i64), *cell, *word, Value::fixnum(plain_at - (at + 4))]);
                 }
                 cells.extend_from_slice(&fast[2..]);
                 cells.extend_from_slice(&plain[2..]);
@@ -391,9 +397,32 @@ impl Compiler<'_> {
 
     fn r_where(&self, env: &[(Sym, RLoc)], n: Sym) -> O<RLoc> {
         env.iter().rev().find(|(m, _)| *m == n).map(|(_, l)| *l).or_else(|| match self.where_is(&Vec::new(), n) {
-            Some(Loc::Global(g)) => Some(RLoc::Global(g)),
+            // A constant a fast version folds (`register_code`).
+            Some(Loc::Global(g)) => Some(match self.consts_now.iter().find(|(c, _)| *c == g) {
+                Some((_, v)) => RLoc::Const(*v),
+                None => RLoc::Global(g),
+            }),
             _ => None,
         })
+    }
+
+    /// The constant globals `body` names, in its free names' order
+    /// (`free`), each cell and value: what a fast version folds, assuming
+    /// each holds its value still (`TODO.md` §42).
+    fn r_consts_named(&self, body: ExpId, inner: &Env) -> Vec<(Value, Value)> {
+        let bound: Vec<Sym> = inner.iter().map(|(n, _)| *n).collect();
+        let mut free = Vec::new();
+        self.free(body, &bound, &mut free);
+        let mut out: Vec<(Value, Value)> = Vec::new();
+        for n in free {
+            if let Some(Loc::Global(g)) = self.where_is(&Vec::new(), n)
+                && let Some(v) = self.const_globals.get(&g.raw())
+                && !out.iter().any(|(c, _)| *c == g)
+            {
+                out.push((g, *v));
+            }
+        }
+        out
     }
 
     /// Whether `name`, applied to `n` arguments, is a standard operation

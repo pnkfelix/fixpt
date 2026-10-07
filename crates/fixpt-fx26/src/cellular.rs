@@ -9,7 +9,7 @@
 //! `tailcall`. A variable is resolved once: to a slot, a free value, a
 //! global's cell, or, for `letrec`'s, a box in a slot or free value.
 
-use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, TyId};
+use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, ModItem, TyId};
 use std::collections::HashMap;
 use crate::check::Checker;
 use crate::top::Top;
@@ -180,6 +180,15 @@ pub struct Compiler<'a> {
     spec_copies: HashMap<(u64, u32, u32, Vec<Sym>, Option<usize>), Value>,
     /// While a procedure specialized at a lambda is compiled: which.
     spec: Option<Spec>,
+    /// The globals defined as constants (`TODO.md` §42), by their cells: a
+    /// literal, a re-export of a module's literal member, or another such
+    /// global; and each module's literal members. A fast version folds
+    /// those it names, behind a `value-guard` each (`register_code`).
+    const_globals: HashMap<u64, Value>,
+    module_consts: HashMap<Sym, Vec<(Sym, Value)>>,
+    /// While a fast version is compiled: the constant globals it folds,
+    /// each cell and value (`r_where`).
+    consts_now: Vec<(Value, Value)>,
     /// Each standard operation's word as a value, made once (step 4): the
     /// stack code's, which register code uses too.
     standard_words: HashMap<String, Value>,
@@ -298,6 +307,9 @@ impl<'a> Compiler<'a> {
             spec: None,
             twins: Vec::new(),
             standard_words: HashMap::new(),
+            const_globals: HashMap::new(),
+            module_consts: HashMap::new(),
+            consts_now: Vec::new(),
             word_name: None,
             scope_name: None,
             bind_name: None,
@@ -1987,6 +1999,57 @@ impl<'a> Compiler<'a> {
         g
     }
 
+    /// A literal, under ascriptions: what a module's member may be to be
+    /// folded.
+    fn literal_of(&self, x: ExpId) -> Option<Value> {
+        match self.c.arena.exp_at(x).clone() {
+            Exp::Int(k) => Some(Value::fixnum(k)),
+            Exp::Bool(b) => Some(Value::boolean(b)),
+            Exp::Char(c) => Some(Value::char(c)),
+            Exp::The { exp: body, .. } | Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.literal_of(body),
+            _ => None,
+        }
+    }
+
+    /// The constant a top-level definition's expression is, if it is one: a
+    /// literal; a constant global; a re-export of a module's literal member.
+    fn const_of(&self, x: ExpId) -> Option<Value> {
+        if let Some(v) = self.literal_of(x) {
+            return Some(v);
+        }
+        match self.c.arena.exp_at(x).clone() {
+            Exp::Var(n) => match self.where_is(&Vec::new(), n) {
+                Some(Loc::Global(g)) => self.const_globals.get(&g.raw()).copied(),
+                _ => None,
+            },
+            Exp::With { module, body } => {
+                let Exp::Var(f) = *self.c.arena.exp_at(body) else { return None };
+                self.module_consts.get(&module)?.iter().find(|(n, _)| *n == f).map(|(_, v)| *v)
+            }
+            _ => None,
+        }
+    }
+
+    /// After top-level definition `name` of `exp` set global `g`: whether
+    /// `g` is a constant now, and, if `exp` is a module, its literal members.
+    fn note_constant(&mut self, name: Sym, g: Value, exp: ExpId) {
+        self.const_globals.remove(&g.raw());
+        if let Some(v) = self.const_of(exp) {
+            self.const_globals.insert(g.raw(), v);
+        }
+        self.module_consts.remove(&name);
+        if let Exp::Module(items) = self.c.arena.exp_at(exp).clone() {
+            let lits: Vec<(Sym, Value)> = items
+                .iter()
+                .filter_map(|item| match item {
+                    ModItem::Val { name, init, .. } => self.literal_of(*init).map(|v| (*name, v)),
+                    _ => None,
+                })
+                .collect();
+            self.module_consts.insert(name, lits);
+        }
+    }
+
     /// The global a definition of `n` sets: the one `n` has, if the
     /// definition assigns it (`Top`'s `assigns`); else a new one.
     fn global_for(&mut self, n: Sym, assigns: bool) -> Value {
@@ -2032,9 +2095,11 @@ impl<'a> Compiler<'a> {
                         let g = self.global_for(*name, *assigns);
                         // After its global, which forgets what the name was.
                         self.reexport_inline(*name, *exp);
+                        self.note_constant(*name, g, *exp);
                         g
                     } else {
                         let g = self.global_for(*name, *assigns);
+                        self.note_constant(*name, g, *exp);
                         if let Some((_, _, None)) = self.lambda_of(*exp) {
                             self.defining = Some(*name);
                             self.name_word_for(*name);
@@ -2082,6 +2147,9 @@ impl<'a> Compiler<'a> {
                         self.op(&mut code, "drop");
                     }
                     let gs: Vec<Value> = bindings.iter().map(|(n, _, _)| self.global_for(*n, *assigns)).collect();
+                    for ((n, _, e), g) in bindings.iter().zip(&gs) {
+                        self.note_constant(*n, *g, *e);
+                    }
                     for ((n, _, e), g) in bindings.iter().zip(gs) {
                         if let Some((_, _, None)) = self.lambda_of(*e) {
                             self.name_word_for(*n);

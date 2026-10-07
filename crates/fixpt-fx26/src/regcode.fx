@@ -57,6 +57,24 @@
 ;; know one: a sum or product of constants is made while compiling, once.
 (define-datatype rconst (rc-int int) (rc-bool bool) (rc-char char) (rc-nil) (rc-data wcell))
 (define-type rconsts (listof rconst @k))
+;; The globals defined as constants (`TODO.md` §42), each cell and value,
+;; newest first; each module's literal members, by the module's name; and,
+;; while a fast version is compiled, the constants it folds, each behind a
+;; `value-guard` (`r-fast-code`). As the Rust compiler's `const_globals`,
+;; `module_consts` and `consts_now`.
+(define-type r-const-global (pairof wglobal rconst @k))
+(define-type r-const-list (listof r-const-global @k))
+(define r-const-globals (ref r-const-list @k) (new nil))
+(define-type r-member-const (pairof symbol rconst @k))
+(define-type r-module-const (pairof symbol (listof r-member-const @k) @k))
+(define r-module-consts (ref (listof r-module-const @k) @k) (new nil))
+(define r-consts-now (ref r-const-list @k) (new nil))
+;; Global `g`'s constant in `cs`, in a list; none if it has none.
+(define r-const-in (subr rbuilds (r-const-list wglobal) rconsts)
+  (lambda (cs g)
+    (cond ((null? cs) nil)
+          ((wglobal=? (car (car cs)) g) (the rconsts (cons (cdr (car cs)) nil)))
+          (else (r-const-in (cdr cs) g)))))
 
 (define-datatype rloc
   (rl-reg int)
@@ -217,7 +235,12 @@
     (let ((l (c-where (the cenv nil) n)))
       (if (null? l)
           nil
-          (tagcase (car l) (at-global (g) (the rlocs (cons (rl-global g) nil))) (else y nil))))))
+          (tagcase (car l)
+            ;; A constant a fast version folds (`r-fast-code`).
+            (at-global (g)
+              (let ((k (r-const-in (get r-consts-now) g)))
+                (the rlocs (cons (if (null? k) (rl-global g) (rl-const (car k))) nil))))
+            (else y nil))))))
 (define r-where (subr rbuilds (renv symbol) rlocs)
   (lambda (env n)
     (cond ((null? env) (r-global-loc n))
@@ -762,6 +785,13 @@
 (define r-done (with regcode-module r-done))
 (define r-assemble (with regcode-module r-assemble))
 (define r-where (with regcode-module r-where))
+(define-type r-const-global (select regcode-module r-const-global))
+(define-type r-const-list (select regcode-module r-const-list))
+(define r-const-globals (with regcode-module r-const-globals))
+(define-type r-member-const (select regcode-module r-member-const))
+(define r-module-consts (with regcode-module r-module-consts))
+(define r-consts-now (with regcode-module r-consts-now))
+(define r-const-in (with regcode-module r-const-in))
 (define r-bind (with regcode-module r-bind))
 (define r-var-loc (with regcode-module r-var-loc))
 (define r-plain-var-loc (with regcode-module r-plain-var-loc))
@@ -840,3 +870,8 @@
 (define s-apply (with regcode-module s-apply))
 (define s-list (with regcode-module s-list))
 (define s-none (with regcode-module s-none))
+(define-type rconsts (select regcode-module rconsts))
+(define-type r-module-const (select regcode-module r-module-const))
+(define rc-int (with regcode-module rc-int))
+(define rc-bool (with regcode-module rc-bool))
+(define rc-char (with regcode-module rc-char))

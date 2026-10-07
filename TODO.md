@@ -1020,3 +1020,21 @@ on the loop's dependence chain, so the processor overlaps them with the
 loop's own. Folding would save code, not time: not built. Worth looking
 at again only if a constant's folding would decide a test or remove a
 branch in hot code (immediates alone do not pay), or for code size.
+
+Built after all (2026-10-07, the user's: "the reason to constant fold is
+because of the *other* optimizations it unlocks downstream"): a fast
+version folds the constant globals its body names (`r_consts_named`;
+`r-consts-named`), each behind a `value-guard` at its start, the
+assumption the inlining guards make for closures, here of the same word
+(an immediate, or an object by identity, so it scales to constants that
+are objects); everything downstream then sees a constant (`RLoc::Const`,
+`rl-const`): tests decided, branches gone, immediates, constant arguments
+to inlined calls. Both compilers; every machine runs `value-guard`, and
+the native compiler drops it where the cell holds the value when the
+code is made. Left: the REPL folds nothing yet (each form is compiled
+apart, and the session would have to tell the compiler the constants, as
+it tells it inlining candidates); globals reached by a path; constants
+that are objects (only immediates are noted as constants so far). And
+the fast versions themselves are rare in the front end (2 procedures
+fold a constant), being kept only for leaves and loops whose effect
+allows: what folding unlocks there depends on that policy.
