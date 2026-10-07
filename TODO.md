@@ -964,3 +964,29 @@ explicitly (the module and leaf-call code take `r-exp`, `r-exp-as-is`,
 core); the same as a functor module (M5) over the core's procedures; or
 split the core group at a seam (calls, inlining and specialization,
 ~300 lines) with the recursion passed across it.
+
+## 42. Constant globals folded where they are used (the user's, 2026-10-06)
+
+Neither compiler folds a global defined as a constant: every use of
+`tag-pair` or `n-base` (`layout.fx`, `native-layout.fx`), and of any
+program's `(define k int 5)`, is a `global` load, in stack code and in
+register code alike, because a global may be redefined. Checked: a
+top-level `(define tag-a int 5)` and a module member re-exported as
+`(define tag-b (with m tag-b))` compile to the same `global` load, so
+making the generated files modules changes nothing here, but neither is
+folded.
+
+What would let them fold, types first (no new syntax): a global the
+checker sees defined once as a literal (or a constant expression of
+literals and such globals) and never assigned, whose definition no later
+form redefines. The front end is checked whole, so for it that is known
+at compile time; a REPL session is not, and a redefinition there must
+still be seen, as inlined calls see one now: behind a guard on the
+global, or by recompiling what folded it.
+
+To decide with the user: whether redefining such a constant should stay
+allowed (and pay a guard, or a recompile), or be refused for globals
+defined by a module (`layout-module` and its kin), where nothing outside
+the module can assign them. Measure first: how many `global` loads of
+constants the self-compile and the native compiler run, and what folding
+them saves.
