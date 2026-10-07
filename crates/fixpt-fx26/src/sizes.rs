@@ -229,8 +229,9 @@ impl Checker {
     pub(crate) fn natural_by_itself(&self, e: ExpId) -> bool {
         match self.arena.exp_at(e) {
             Exp::Int(_) | Exp::Var(_) => true,
-            Exp::App { fun, .. } => matches!(self.arena.exp_at(*fun),
-                Exp::Var(op) if matches!(self.interner.name(*op), "+" | "-" | "length" | "string-length" | "array-length") && self.is_standard(*op)),
+            Exp::App { fun, .. } => self
+                .standard_ref(*fun)
+                .is_some_and(|op| matches!(self.interner.name(op), "+" | "-" | "length" | "string-length" | "array-length")),
             _ => false,
         }
     }
@@ -260,12 +261,9 @@ impl Checker {
             return none;
         }
         let Exp::App { fun, args } = self.arena.exp_at(test) else { return none };
-        let Exp::Var(op) = self.arena.exp_at(*fun) else { return none };
-        if !self.is_standard(*op) {
-            return none;
-        }
+        let Some(op) = self.standard_ref(*fun) else { return none };
         let ge = |lin: Size| vec![SizeFact { lin, eq: false }];
-        match (self.interner.name(*op), &args[..]) {
+        match (self.interner.name(op), &args[..]) {
             ("not", [x]) => {
                 let (t, e) = self.test_facts(*x);
                 (e, t)

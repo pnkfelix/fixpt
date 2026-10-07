@@ -62,7 +62,9 @@ fn c2_cwcc_has_the_papers_type() {
                (subr (maxeff (comefrom r) e) ((subr e ((subr (goto r) (t) void)) t)) t))))",
         )
         .expect("a type");
-    let got = c.check_str("cwcc").expect("bound").ty;
+    // Its binding's: `cwcc` is named only to call it (F15).
+    let name = c.interner.intern("cwcc");
+    let got = c.type_of_name(name).expect("bound");
     assert!(c.subtype(got, want) && c.subtype(want, got), "{}", c.show_ty(got));
 }
 

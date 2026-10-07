@@ -249,6 +249,7 @@
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
       (set k-with-vals nil) (set k-module-vars nil) (set k-select-map nil) (set k-reshapes nil)
       (set k-hide-mark -1) (set k-param-map nil) (set k-effect-selects nil)
+      (set k-operator (product (1 '||) (2 -1) (3 -1)))
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
       (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       ;; 10 to 15; `void` 16, `k-void`.

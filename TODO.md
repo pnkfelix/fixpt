@@ -1375,3 +1375,25 @@ compute it from the datum. One function shared by the heap and the
 compilers keeps the two the same, with no copy to keep in sync. FX-26 is
 typed, so the dispatch on the type is not needed: the key's type is the
 data's kind.
+
+## 47. Second-class `cwcc` and `certify-*`: revisit (the user's, 2026-10-07)
+
+F15 and F16 (`docs/research/soundness-findings.md`) were closed by making
+`cwcc`, `certify-length`, `certify-acyclic` and `certify-nat` second class:
+named only as a call's operator, past `proj` and `the`, so that every call
+meets the rule that finds it by name. That is a restriction, not a typing:
+the rules still rest on a name, not on anything a type says. Come back to
+it, and ask whether the types themselves can carry what the rules check,
+so the operations can be first class again:
+- `cwcc`: F3 and F9's question is whether the receiver's continuation can
+  outlive the call. An effect or a region on the continuation's type (it
+  escapes only into storage the type names) would let a `cwcc` passed as a
+  value be checked where it is called through any name.
+- `certify-*`: a certificate is a fact about one variable at one place.
+  A type that only a test can produce (a refinement, `(nat s)` as the
+  result of `nat?`'s true branch, or a token type a test hands to its
+  branch) would make the certify operations ordinary functions of that
+  token.
+- Meanwhile, every new rule that finds a standard operation by name must
+  either only add facts (an alias then loses precision, never gains) or
+  join the second-class list; the audit in F15's note is the template.

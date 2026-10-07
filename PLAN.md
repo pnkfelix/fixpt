@@ -37,7 +37,7 @@ are in the last section, "Log: the glance's details", and in
   conventions. Both checkers agree on 25 test programs; Okasaki's `STACK`
   as written (`tests/programs/higher-kinds/okasaki-stack.fx`).
 - **Soundness** (`docs/research/soundness*.md`): a formal core with
-  progress and preservation proved, control included; holes F1–F14 and A2
+  progress and preservation proved, control included; holes F1–F16 and A2
   found and fixed.
 - **M13, the compilers** (`docs/performance.md`): the Rust compiler to
   cellular words; register code (the MacScheme machine); guarded inlining,

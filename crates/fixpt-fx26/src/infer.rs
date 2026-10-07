@@ -384,9 +384,8 @@ impl Checker {
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         // `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where
         // `length-is?` has just found it so; nowhere else.
-        if let Exp::Var(op) = self.arena.exp_at(fun)
-            && self.interner.name(*op) == "certify-length"
-            && self.is_standard(*op)
+        if let Some(op) = self.standard_ref(fun)
+            && self.interner.name(op) == "certify-length"
         {
             let span = self.arena.span_of(e);
             let found = match &args[..] {
@@ -410,14 +409,13 @@ impl Checker {
             return Ok((self.arena.ty(Ty::NList { elem, size: k, region }), eff));
         }
         // `+` and `-` of naturals: a natural, of a size when both are known.
-        if let Exp::Var(op) = self.arena.exp_at(fun)
-            && let name @ ("+" | "-") = self.interner.name(*op)
-            && self.is_standard(*op)
+        if let Some(op) = self.standard_ref(fun)
+            && let name @ ("+" | "-") = self.interner.name(op)
             && let [a, b] = args
         {
             let name = name.to_string();
             // Still the standard operation, for the lowering to integrate.
-            self.facts.standard_operator.insert(e, *op);
+            self.facts.standard_operator.insert(e, op);
             let mut eff = Effect::pure();
             let mut sizes = Vec::new();
             for x in [*a, *b] {
@@ -446,9 +444,8 @@ impl Checker {
         // `cons` onto a `nlist`: one more element. Where a `nlist` is expected,
         // the tail is checked as one shorter; otherwise, a tail that is a
         // variable of `nlist` type gives a `nlist` one longer.
-        if let Exp::Var(op) = self.arena.exp_at(fun)
-            && self.interner.name(*op) == "cons"
-            && self.is_standard(*op)
+        if let Some(op) = self.standard_ref(fun)
+            && self.interner.name(op) == "cons"
             && let [x, tail] = args
         {
             let want = expected.map(|t| self.arena.get(self.arena.resolve(t)).clone());
@@ -472,9 +469,8 @@ impl Checker {
         }
         // `(certify-nat v)`: `v`'s value as a `nat`, where `nat?` has just
         // found `v` no less than 0; nowhere else.
-        if let Exp::Var(op) = self.arena.exp_at(fun)
-            && self.interner.name(*op) == "certify-nat"
-            && self.is_standard(*op)
+        if let Some(op) = self.standard_ref(fun)
+            && self.interner.name(op) == "certify-nat"
         {
             let span = self.arena.span_of(e);
             let v = match &args[..] {
@@ -493,9 +489,8 @@ impl Checker {
         }
         // `(certify-acyclic v)`: `v`'s value at `acyclic`, where `acyclic?`
         // has just found `v` acyclic; nowhere else.
-        if let Exp::Var(op) = self.arena.exp_at(fun)
-            && self.interner.name(*op) == "certify-acyclic"
-            && self.is_standard(*op)
+        if let Some(op) = self.standard_ref(fun)
+            && self.interner.name(op) == "certify-acyclic"
         {
             let span = self.arena.span_of(e);
             let v = match &args[..] {
@@ -515,12 +510,17 @@ impl Checker {
             return Ok((self.finitized(t), eff));
         }
         let span = self.arena.span_of(e);
-        if let Exp::Var(s) = self.arena.exp_at(fun)
-            && self.is_standard(*s)
-        {
-            self.facts.standard_operator.insert(e, *s);
+        if let Some(s) = self.standard_ref(fun) {
+            self.facts.standard_operator.insert(e, s);
         }
-        let (mut ft, fe) = self.synth(fun)?;
+        let mut op = fun;
+        while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(op) {
+            op = *body;
+        }
+        let outer = self.operator_at.replace(op);
+        let synthesised = self.synth(fun);
+        self.operator_at = outer;
+        let (mut ft, fe) = synthesised?;
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         if matches!(self.arena.get(ft), Ty::Poly { .. }) {
             let (inst, cached) = self.instantiate(ft, args, expected, span)?;
@@ -605,14 +605,17 @@ impl Checker {
     /// (`no_knot`), so latent effects can be trusted.
     fn may_spin(&self, fun: ExpId, ft: TyId, args: &[ExpId]) -> bool {
         let binding = self.callee_binding(fun);
+        let mut op = fun;
+        while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(op) {
+            op = *body;
+        }
+        let standard = self.standard_ref(op);
         // A continuation called after `cwcc` has returned comes back to it
         // again, as often as it is called: recursion with no procedure at
         // all (`docs/research/soundness-findings.md`, F3). Only one that
         // cannot outlive the call, so can only leave it, needs no `spin`.
-        if let Some((s, _)) = binding
-            && self.interner.name(s) == "cwcc"
-            && self.is_standard(s)
-        {
+        // `cwcc` is named nowhere else (F15), so every call of it is here.
+        if standard.is_some_and(|s| self.interner.name(s) == "cwcc") {
             // And the receiver must capture no continuation: one captured
             // inside it could hold a call of `k`, and be run after `cwcc`
             // has returned (F9). A capture shows as a `comefrom` in the
@@ -631,6 +634,9 @@ impl Checker {
             if at.is_some_and(|i| self.known.contains(&(b.0, i))) || self.is_standard(b.0) {
                 return false;
             }
+        }
+        if standard.is_some() {
+            return false;
         }
         // A `lambda` applied where it is written is known code too.
         let mut f = fun;

@@ -39,6 +39,8 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 | F12  | fixed (2026-09-29): `u64->int`, `i64->int` and `quotient` gave a bignum `int`, which compiled code took for a fixnum (the register machine added one as a pointer). Failed "integer overflow" at first; since 2026-09-30 every machine takes bignum `int`s                                                                                                                                                                                                    |
 | F13  | fixed (2026-09-30): `acyclic?` and `length-is?`, typed `pure` over any `data`, hid a read of data frozen into a place; a closure walking arena data escaped the arena and, called later, walked what another arena put there (a frozen one-element list reported cyclic, every path). A `data` binder is now data at a place, `(t data p)`, or in the heap; both read `(const p)`. Both checkers. Tests `regions/acyclic-walk-escapes.fx`, `tests/regions.rs` |
 | F14  | fixed (2026-10-07): native code (`direct.rs`) bound a global's procedure, called or used as a value, to its code as compiled, and dropped a `global-guard` or `value-guard` the cell met then; kept past a `define*` of that global (a closure kept from before, recursing), it ran the old one where every other machine runs the new. Each now tests the cell when it runs. Test `native/redefined.fx`                                                      |
+| F15  | fixed (2026-10-07): `cwcc` bound to another name, `(let ((callcc cwcc)) …)`, was called past F3's rule, which looked for the name `cwcc` at the call: a `pure` procedure looped forever. `cwcc` and the `certify-*` operations are now named only as a call's operator (past `proj` and `the`), so every call of them meets its rule. Both checkers. Tests `control/cwcc-alias.fx`, `second_class_operations_are_named_only_to_call`                          |
+| F16  | fixed (2026-10-07): the same for `certify-nat`: `(let ((cn certify-nat)) (cn -3))` was a `nat`. The same fix. Test `sizes/certify-nat-alias.fx`                                                                                                                                                                                                                                                                                                               |
 
 **Re-verification of F1–F7, A2, A3 against d83face** (fresh offline build,
 2026-09-27). F1: the name-shadowing probe (`known.fx`) is now rejected
@@ -530,6 +532,48 @@ the read is of heap-frozen data and dropped, so heap uses are still
 `p` is solved from `t`, the one place its frozen parts are in, or `heap`.
 `certify-acyclic` and `certify-length` read nothing and take data anywhere.
 Both checkers (`is_data_at`, `data_places`; `check-data.fx`).
+
+## F15, F16 — a rule keyed on a name, called through another
+
+Found 2026-10-07, auditing which rules for standard operations rest on
+more than types, when the user asked what `#%fx` (`TODO.md` §46) would
+expose.
+
+Four standard operations are checked at each call by a rule that finds
+them by name: `cwcc` (F3, F9: the call says `spin` unless the receiver's
+continuation can only leave), `certify-length`, `certify-acyclic` and
+`certify-nat` (only on a variable a test has just confirmed). Each rule
+looked for the name, the standard binding, as the call's operator. Bound to
+another name, the operation was called with no rule at all:
+
+```
+(define loop (subr pure () int)
+  (lambda ()
+    (let ((c (the (icell (subr (goto @k) (int) void) @c) (make-icell)))
+          (callcc cwcc))
+      (begin
+        ((proj (proj (proj callcc @k) int) (write @c))
+          (lambda ((k (subr (goto @k) (int) void))) (begin (icell-put! c k) 0)))
+        ((icell-get c) 0)))))
+```
+
+checked `pure` in both checkers and ran past the step limit: F3's loop
+again (F15). And `(let ((cn certify-nat)) (cn -3))` was a `nat` (F16).
+`certify-length` and `certify-acyclic` are typed as the identity, so an
+alias of them gained nothing. Shadowing (a local `cwcc`) and redefinition
+were already safe: the rules ask that the name be the standard binding.
+
+**Fix.** The four are named only as a call's operator, past `proj` and
+`the`; anywhere else both checkers refuse the name ("named only to call
+it"), so every call of them is one their rule sees. No program used them
+otherwise. The other rules keyed on a standard name (`nil`, `+`, `-` and
+`cons` at sizes; the tests `length-is?`, `acyclic?`, `nat?`) only add
+facts or precision, so an alias loses those and gains nothing. An alias
+of `apply` keeps F11's copy: the lowering's `apply` copies its list (a
+`vlambda` that keeps its list, the caller then making it cyclic, still
+walks two elements), and the compilers refuse `apply` as a value. Tests
+`control/cwcc-alias.fx`, `sizes/certify-nat-alias.fx`,
+`second_class_operations_are_named_only_to_call`.
 
 ## Assumptions the proof makes
 

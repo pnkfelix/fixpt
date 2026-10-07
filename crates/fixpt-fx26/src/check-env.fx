@@ -109,6 +109,35 @@
       (if (null? why)
           (k-cat3 "unbound variable `" n "`")
           (k-cat5 "`" n "` is broken, " (car why) ": define it again to use it")))))
+;; The operator of the application being checked, past any `proj` or
+;; `the`, by name and place: where a second-class standard operation may be
+;; named (F15, F16).
+(define-type k-op-mark (productof (1 symbol) (2 int) (3 int)))
+(define k-operator (ref k-op-mark @t) (new (product (1 '||) (2 -1) (3 -1))))
+;; The standard operations a rule checks at each call, by their name there:
+;; named only as a call's operator, so that no other name, and no procedure
+;; given one, can call them unchecked.
+(define k-second-class? (subr pure (symbol) bool)
+  (lambda (s)
+    (let ((n (symbol->string s)))
+      (or (string=? n "cwcc") (string=? n "certify-length") (string=? n "certify-acyclic")
+          (string=? n "certify-nat")))))
+(define k-operator? (subr (maxeff (read @globals) (read @t)) (symbol int int) bool)
+  (lambda (s a b)
+    (let ((o (get k-operator)))
+      (and (symbol=? (extract o 1) s) (= (extract o 2) a) (= (extract o 3) b)))))
+(define k-named-only (subr pure (symbol) string)
+  (lambda (s)
+    (string-append (string-append "`" (symbol->string s))
+                   "` is named only to call it: its calls are checked where it is named")))
+;; An operator's mark: its variable's name and place, past `proj` and `the`.
+(define k-operator-mark (subr spin (kx) k-op-mark)
+  (lambda (f)
+    (tagcase f
+      (x-var (s a b) (product (1 s) (2 a) (3 b)))
+      (x-proj (body ds a b) (k-operator-mark body))
+      (x-the (t e a b) (k-operator-mark e))
+      (else y (product (1 '||) (2 -1) (3 -1))))))
 ;; A flag, off, for a new innermost binding of `s`.
 (define k-push-flag (subr (maxeff kstate spin) (k-flags symbol) unit)
   (lambda (flags s)
@@ -321,6 +350,12 @@
 (define k-lookup (with check-env-module k-lookup))
 (define k-lookup-raw (with check-env-module k-lookup-raw))
 (define k-unbound (with check-env-module k-unbound))
+(define-type k-op-mark (select check-env-module k-op-mark))
+(define k-operator (with check-env-module k-operator))
+(define k-second-class? (with check-env-module k-second-class?))
+(define k-operator? (with check-env-module k-operator?))
+(define k-named-only (with check-env-module k-named-only))
+(define k-operator-mark (with check-env-module k-operator-mark))
 (define k-bind (with check-env-module k-bind))
 (define k-mark (with check-env-module k-mark))
 (define k-unbind-to (with check-env-module k-unbind-to))

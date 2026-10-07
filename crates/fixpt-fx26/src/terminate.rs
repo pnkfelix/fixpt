@@ -268,6 +268,9 @@ impl Walk<'_> {
     fn is_op(&self, e: ExpId, name: &str) -> bool {
         match self.c.arena.exp_at(strip(self.c, e)) {
             Exp::Var(s) => self.c.interner.name(*s) == name && self.bound(*s).is_none() && self.c.is_standard(*s),
+            Exp::With { module, .. } if self.c.is_fx_module(*module) => {
+                self.c.standard_ref(strip(self.c, e)).is_some_and(|s| self.c.interner.name(s) == name)
+            }
             _ => false,
         }
     }
@@ -276,6 +279,9 @@ impl Walk<'_> {
         match self.c.arena.exp_at(strip(self.c, e)) {
             Exp::Var(s) if self.bound(*s).is_none() && self.members.iter().all(|m| m != s) && self.c.is_standard(*s) => {
                 Some(self.c.interner.name(*s))
+            }
+            Exp::With { module, .. } if self.c.is_fx_module(*module) => {
+                self.c.standard_ref(strip(self.c, e)).map(|s| self.c.interner.name(s))
             }
             _ => None,
         }

@@ -237,6 +237,21 @@ fn the_front_end_compiled_checks_alike() {
     assert!(s.scheme.is_bound("fx26-native:check-program"), "the compiled front end was used");
 }
 
+/// `cwcc` and the `certify-*` operations, whose rules are checked at each
+/// call where they are named, are named nowhere else: bound to another name,
+/// a call escaped its rule (F15: a `pure` loop through `cwcc`; F16: `(cn -3)`
+/// a `nat`). Both checkers agree (`every_test_program`).
+#[test]
+fn second_class_operations_are_named_only_to_call() {
+    for program in [include_str!("programs/control/cwcc-alias.fx"), include_str!("programs/sizes/certify-nat-alias.fx")] {
+        let err = rust_check(program).expect_err("refused");
+        assert!(err.0.contains("is named only to call it"), "{err:?}");
+    }
+    for ok in ["(cwcc (lambda ((k (subr (goto @k) (int) void))) 1))", "((proj (proj (proj cwcc @k) int) pure) (lambda ((k (subr (goto @k) (int) void))) 1))"] {
+        rust_check(ok).unwrap_or_else(|e| panic!("{ok}: {e:?}"));
+    }
+}
+
 /// The size programs that say, on their first line, that they are
 /// `Rejected` or `Accepted` are so, by the Rust checker (the FX-26 one
 /// agrees, `every_test_program`).

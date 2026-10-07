@@ -171,6 +171,9 @@ pub struct Checker {
     pub(crate) fresh_regions: u32,
     /// How many entries of `env` are the initial environment's.
     pub(crate) standard_len: usize,
+    /// The operator of the application being checked, past any `proj` or
+    /// `the`: where a second-class standard operation may be named.
+    pub(crate) operator_at: Option<ExpId>,
     /// How many description names the standard environment has.
     pub(crate) standard_dscope: usize,
     /// While a module read from a file is checked (`load-module`, M7): the
@@ -403,6 +406,7 @@ impl Checker {
             conv_default: conv,
             fresh_regions: 0,
             standard_len: 0,
+            operator_at: None,
             standard_dscope: 0,
             hidden: None,
             loaded: HashMap::new(),
@@ -774,9 +778,50 @@ impl Checker {
         self.env.iter().rposition(|(n, _)| *n == s).is_some_and(|i| i < self.standard_len)
     }
 
+    /// The standard operations a rule checks at each call, by their name
+    /// there: named only as a call's operator, so that no other name, and
+    /// no procedure given one, can call them unchecked (F15, F16).
+    pub(crate) fn second_class(&self, s: Sym) -> bool {
+        matches!(self.interner.name(s), "cwcc" | "certify-length" | "certify-acyclic" | "certify-nat")
+    }
+
+    pub(crate) fn named_only_to_call(&self, span: fixpt_read::Span, s: Sym) -> FxError {
+        let n = self.interner.name(s);
+        FxError::at(span, format!("`{n}` is named only to call it: its calls are checked where it is named"))
+    }
+
+    /// Whether `m` is `#%fx`, the module of the standard bindings, which
+    /// nothing binds: `(with #%fx n)` is the standard `n` wherever it is,
+    /// shadowed or redefined (`TODO.md` §46).
+    pub(crate) fn is_fx_module(&self, m: Sym) -> bool {
+        self.interner.name(m) == "#%fx"
+    }
+
+    /// The standard binding of `s`'s type, whatever binds `s` since.
+    pub(crate) fn standard_type(&self, s: Sym) -> Option<TyId> {
+        self.env[..self.standard_len].iter().rposition(|(n, _)| *n == s).map(|i| self.env[i].1)
+    }
+
+    /// The standard name `e` refers to, if it refers to one: a variable the
+    /// initial environment binds where it is used, or `(with #%fx n)`.
+    /// Every rule for a standard operation asks this.
+    pub(crate) fn standard_ref(&self, e: ExpId) -> Option<Sym> {
+        match self.arena.exp_at(e) {
+            Exp::Var(s) if self.is_standard(*s) => Some(*s),
+            Exp::With { module, body } if self.is_fx_module(*module) => match self.arena.exp_at(*body) {
+                Exp::Var(n) if self.standard_type(*n).is_some() => Some(*n),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn synth_node(&mut self, e: ExpId) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         match self.arena.exp_at(e).clone() {
+            Exp::Var(s) if self.second_class(s) && self.is_standard(s) && self.operator_at != Some(e) => {
+                Err(self.named_only_to_call(span, s))
+            }
             Exp::Var(s) => match self.lookup(s) {
                 Some(t) => Ok((t, self.naming_effect(s, t))),
                 None => match self.broken_why(s) {
@@ -1289,6 +1334,8 @@ impl Checker {
             }
             // The names the module gives, once it is checked; before, none,
             // so that what may be its values counts as free.
+            // The standard `n`: nothing free.
+            Exp::With { module, .. } if self.is_fx_module(module) => {}
             Exp::With { module, body } => {
                 if !bound.contains(&module) && !out.contains(&module) {
                     out.push(module);
@@ -1605,8 +1652,9 @@ impl Checker {
         while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
             f = *body;
         }
-        match (self.arena.exp_at(f), &args[..]) {
-            (Exp::Var(op), [a]) if self.interner.name(*op) == name && self.is_standard(*op) => match self.arena.exp_at(*a) {
+        let op = self.standard_ref(f)?;
+        match &args[..] {
+            [a] if self.interner.name(op) == name => match self.arena.exp_at(*a) {
                 Exp::Var(v) => Some((*v, self.env.iter().rposition(|(n, _)| n == v)?)),
                 _ => None,
             },
@@ -1618,8 +1666,9 @@ impl Checker {
     /// and the length, as a size.
     pub(crate) fn length_test(&self, test: ExpId) -> Option<(Sym, usize, Size)> {
         let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
-        match (self.arena.exp_at(*fun), &args[..]) {
-            (Exp::Var(op), [a, n]) if self.interner.name(*op) == "length-is?" && self.is_standard(*op) => self.length_arg(*a, *n),
+        let op = self.standard_ref(*fun)?;
+        match &args[..] {
+            [a, n] if self.interner.name(op) == "length-is?" => self.length_arg(*a, *n),
             _ => None,
         }
     }

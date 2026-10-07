@@ -245,6 +245,20 @@ impl Checker {
     /// values, as a re-export is, binds one.
     pub(crate) fn synth_with(&mut self, e: ExpId, m: Sym, body: ExpId) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
+        if self.is_fx_module(m) {
+            if self.lookup(m).is_some() {
+                return Err(FxError::at(span, "`#%fx` is the standard bindings' module, which nothing else may be"));
+            }
+            let t = match self.arena.exp_at(body) {
+                crate::ast::Exp::Var(n) if self.second_class(*n) && self.operator_at != Some(e) => return Err(self.named_only_to_call(span, *n)),
+                crate::ast::Exp::Var(n) => self.standard_type(*n),
+                _ => None,
+            };
+            let Some(t) = t else {
+                return Err(FxError::at(span, "`(with #%fx name)` names one standard binding"));
+            };
+            return Ok((t, Effect::pure()));
+        }
         let Some(mt) = self.lookup(m) else {
             return Err(FxError::at(span, format!("`{}` is not bound", self.interner.name(m))));
         };
