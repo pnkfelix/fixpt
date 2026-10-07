@@ -1138,3 +1138,13 @@ shows what is missing today: `(+ x 0)` kept, the second test kept, and
 `(* 3 2)` not folded even in the fast version that knows `k` (`*` is a
 primitive the folding does not know). What the survey cannot see is what
 inlining would expose once these are done; it counts what is there.
+
+`car` taken twice, timed (2026-10-07, the user's question: merge it where
+the pair cannot change?): an association list of 200 searched 20 000
+times, `(= (car (car xs)) k) (cdr (car xs))` against `(car xs)` bound
+once, three rounds in both orders, best of 9: natively 3.6 / 3.6, 3.6 /
+3.6, 3.5 / 3.5 ms; register code 3.7–5.1 ms either way, by order. No
+difference: the second `car` reads a word loaded a few instructions
+before, from L1, beside the comparison. Merging it would not need the
+pair immutable (nothing between the two reads writes anything, which the
+effect summaries say), but it is not worth building for time.
