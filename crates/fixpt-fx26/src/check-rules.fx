@@ -881,8 +881,9 @@
                             (k-made-of (extract made 1)
                                        (k-part-onto (car (extract it 2)) t (extract made 2))
                                        (extract made 3) (extract made 4))))
-                         ;; Typed lambdas are checked after the rest.
+                         ;; Typed lambdas are checked after the rest; early ones before.
                          ((k-lambda-item? it) made)
+                         ((>= (k-part-of (extract made 3) (car (extract it 2))) 0) made)
                          ((= k 2) (k-module-val it a b made))
                          (else made))))
             (k-module-items (cdr items) a b next)))))
@@ -899,10 +900,14 @@
              (stars (k-mod-star-lambdas items))
              (recs (k-mod-recs-lambdas ls))
              (hazards (k-mod-hazards items ls))
+             ;; Its modules as written first, for its lambdas' types to select from.
+             (early (k-mod-early items (k-early-modules items)
+                                 (lambda (it m) (k-module-val it a b m))
+                                 (k-made-of nil nil nil nil)))
              (bound-ds (k-mod-bindings ls a b))
              (bs (extract bound-ds 1))
              (bound (k-mod-bind bs ls))
-             (made (k-module-items items a b (k-made-of nil nil nil nil)))
+             (made (k-module-items items a b early))
              (es (k-mod-edges ls ls))
              (gs (k-mod-groups es bs bs))
              (checked (k-mod-check-lambdas bs ls gs nil (extract bound-ds 2)))

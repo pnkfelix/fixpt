@@ -35,6 +35,18 @@
 (define-type k-made (productof (1 k-parts) (2 k-parts) (3 k-parts) (4 k-eff)))
 (define k-made-of (subr (alloc @t) (k-parts k-parts k-parts k-eff) k-made)
   (lambda (abs ds vs e) (product (1 abs) (2 ds) (3 vs) (4 e))))
+;; Each of `items` that `early` names (`k-early-modules`), made by `f`, in
+;; order, onto `made`: checked before the typed lambdas are bound.
+(define k-mod-early
+  (subr (maxeff checks spin)
+        (k-items k-hazard-list (subr (maxeff checks spin) (k-item k-made) k-made) k-made)
+        k-made)
+  (lambda (items early f made)
+    (cond ((null? items) made)
+          ((and (= (extract (car items) 1) 2)
+                (not (null? (k-known-module early (car (extract (car items) 2))))))
+           (k-mod-early (cdr items) early f (f (car items) made)))
+          (else (k-mod-early (cdr items) early f made)))))
 ;; The bindings of lambdas `ls`, and the types written, resolved.
 (define-type k-mod-bound (productof (1 k-letrec-bs) (2 k-ids)))
 ;; Lambda `l`'s type `t`, resolved: a `define*`'s the type it is checked at
@@ -154,6 +166,7 @@
 (define k-star-mistake (with check-module-rules-module k-star-mistake))
 (define-type k-made (select check-module-rules-module k-made))
 (define k-made-of (with check-module-rules-module k-made-of))
+(define k-mod-early (with check-module-rules-module k-mod-early))
 (define k-mod-bindings (with check-module-rules-module k-mod-bindings))
 (define k-mod-bind (with check-module-rules-module k-mod-bind))
 (define-type k-ends (select check-module-rules-module k-ends))

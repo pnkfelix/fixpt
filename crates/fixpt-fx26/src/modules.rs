@@ -72,7 +72,26 @@ impl Checker {
         if let Some((n, _, init, _)) = lambdas.iter().find(|(_, _, init, i)| matches!(items[*i], ModItem::Rec(_)) && !self.is_lambda(*init)) {
             return Err(FxError::at(self.arena.span_of(*init), format!("`{}`, in a `define-rec`, is a `lambda`", self.interner.name(*n))));
         }
-        self.module_hazards(items, &lambdas)?;
+        let written = self.written_modules(items);
+        let outer = std::mem::replace(&mut self.hazard_modules, written);
+        let hazards = self.module_hazards(items, &lambdas);
+        self.hazard_modules = outer;
+        hazards?;
+        // An item whose value is a module as written, naming no item but such
+        // earlier ones (`early_modules`), checked first, so that the typed
+        // lambdas' types may select from it: `(define m (load-module "f"))`
+        // and `(define g (subr pure ((select m t)) int) …)`. Checking it first
+        // does not change when it is made.
+        let mut typed: Vec<(usize, Sym, TyId)> = Vec::new();
+        let early = self.early_modules(items);
+        for &i in &early {
+            let ModItem::Val { name, init, .. } = items[i] else { unreachable!("a value") };
+            let (t, ie) = self.synth(init)?;
+            eff = eff.union(&ie);
+            let bound = self.name_nat(name, t);
+            self.env.push((name, bound));
+            typed.push((i, name, t));
+        }
         // A `define*`'s type as written, and the type it is checked at first,
         // reading any global: what it reads is then found from its body.
         let star = |i: usize| matches!(items[i], ModItem::Val { infer: true, .. });
@@ -93,8 +112,10 @@ impl Checker {
             self.known.insert((*n, base + k));
         }
         // The values each item has, at its type, in written order.
-        let mut typed: Vec<(usize, Sym, TyId)> = Vec::new();
         for (i, item) in items.iter().enumerate() {
+            if early.contains(&i) {
+                continue;
+            }
             match item.clone() {
                 // Its representation seen only through its own conversions,
                 // which stay inside the module.

@@ -119,6 +119,75 @@
 (define k-mod-names-in (subr kmakes (kx k-places) k-names)
   (lambda (x ps) (k-places-among ps (k-free-vars x))))
 
+;;; ------------------------------------------------------------ modules as written
+
+;; The names of `items`' values: an abstract type's conversions stay inside.
+(define k-item-val-names (subr kallocs (k-items) k-names)
+  (lambda (items)
+    (cond ((null? items) nil)
+          ((or (= (extract (car items) 1) 2) (= (extract (car items) 1) 3))
+           (append (extract (car items) 2) (k-item-val-names (cdr items))))
+          (else (k-item-val-names (cdr items))))))
+(define-type k-names-or-none (listof k-names acyclic))
+;; The names known for `n` in `ks`, in a list of one; none if none are.
+(define k-known-module (subr kallocs (k-hazard-list symbol) k-names-or-none)
+  (lambda (ks n)
+    (cond ((null? ks) nil)
+          ((symbol=? (extract (car ks) 1) n) (the k-names-or-none (list (extract (car ks) 2))))
+          (else (k-known-module (cdr ks) n)))))
+;; The values' names of `x` if it is a module as written, in a list of one;
+;; none if it is not: a `module` (or a `load-module`'s), under any
+;; `plambda`, `proj`, `lambda` of no parameters or call of none, or an
+;; earlier such item's name, in `known`. As the Rust checker's
+;; `written_module`.
+(define k-written-module (subr (maxeff kallocs spin) (kx k-hazard-list) k-names-or-none)
+  (lambda (x known)
+    (tagcase x
+      (x-module (items a b) (the k-names-or-none (list (k-item-val-names items))))
+      (x-app (f args a b) (if (null? args) (k-written-module f known) nil))
+      (x-lambda (ps body a b) (if (null? ps) (k-written-module body known) nil))
+      (x-proj (body ds a b) (k-written-module body known))
+      (x-plambda (bs body a b) (k-written-module body known))
+      (x-var (n a b) (k-known-module known n))
+      (else y nil))))
+;; `n`, of values `ns`, onto `ks`.
+(define k-known-onto (subr kallocs (symbol k-names k-hazard-list) k-hazard-list)
+  (lambda (n ns ks) (the k-hazard-list (cons (product (1 n) (2 ns)) ks))))
+;; Each of `items`, from the first, whose value is a module as written, and
+;; its values' names, onto `known` (newest first).
+(define k-written-from (subr (maxeff kallocs spin) (k-items k-hazard-list) k-hazard-list)
+  (lambda (items known)
+    (if (null? items)
+        known
+        (let* ((it (car items))
+               (w (if (= (extract it 1) 2) (k-written-module (car (extract it 5)) known) nil)))
+          (k-written-from (cdr items)
+                          (if (null? w)
+                              known
+                              (k-known-onto (car (extract it 2)) (car w) known)))))))
+;; Whether each of `ns` is known in `ks`.
+(define k-all-known? (subr kallocs (k-names k-hazard-list) bool)
+  (lambda (ns ks)
+    (or (null? ns) (and (not (null? (k-known-module ks (car ns)))) (k-all-known? (cdr ns) ks)))))
+;; The items checked before a module's typed lambdas are bound, from the
+;; first, onto `known` (newest first): each with no type written whose value
+;; is a module as written naming no item of the module but earlier such ones.
+(define k-early-from (subr (maxeff kmakes spin) (k-items k-places k-hazard-list) k-hazard-list)
+  (lambda (items ps known)
+    (if (null? items)
+        known
+        (let* ((it (car items))
+               (val (and (= (extract it 1) 2) (null? (extract it 4))))
+               (w (if val (k-written-module (car (extract it 5)) known) nil))
+               (ok (and (not (null? w))
+                        (k-all-known? (k-mod-names-in (car (extract it 5)) ps) known))))
+          (k-early-from (cdr items) ps
+                        (if ok (k-known-onto (car (extract it 2)) (car w) known) known))))))
+;; Those items, by name, in written order. As the Rust checker's
+;; `early_modules`.
+(define k-early-modules (subr (maxeff kmakes spin) (k-items) k-hazard-list)
+  (lambda (items) (reverse (k-early-from items (k-mod-places items) nil))))
+
 ;;; ------------------------------------------------------------ hazards
 
 ;; What has been reached: each name, the one it was reached from, and
@@ -205,8 +274,15 @@
                                  (product (1 ps) (2 ls) (3 i) (4 x) (5 init))))
                 #u)
             (k-hazards-from (cdr items) (+ i 1) ps ls))))))
+;; Each earlier item that is a module as written binds its values' names
+;; in a `with` of it not checked yet (`k-with-bound`), so that `(define x
+;; (with m x))` re-exports `m`'s `x`.
 (define k-mod-hazards (subr (maxeff checks spin) (k-items k-mlams) unit)
-  (lambda (items ls) (k-hazards-from items 0 (k-mod-places items) ls)))
+  (lambda (items ls)
+    (let* ((outer (get k-hazard-mods))
+           (known (set k-hazard-mods (k-written-from items nil)))
+           (r (k-hazards-from items 0 (k-mod-places items) ls)))
+      (set k-hazard-mods outer))))
 
 ;;; ------------------------------------------------------------ groups
 
@@ -342,6 +418,8 @@
 (define k-mod-star-lambdas (with check-modorder-module k-mod-star-lambdas))
 (define k-place-of (with check-modorder-module k-place-of))
 (define k-mod-hazards (with check-modorder-module k-mod-hazards))
+(define k-early-modules (with check-modorder-module k-early-modules))
+(define k-known-module (with check-modorder-module k-known-module))
 (define k-mod-edges (with check-modorder-module k-mod-edges))
 (define-type k-groups (select check-modorder-module k-groups))
 (define k-mod-groups (with check-modorder-module k-mod-groups))

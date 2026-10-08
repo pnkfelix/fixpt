@@ -402,6 +402,17 @@
   (lambda (items bound)
     (if (null? items) bound (k-items-bound (cdr items) (k-item-bound (car items) bound)))))
 
+;; The names a `with` of `m` at `a`..`b` binds for its body, bound inside
+;; `bound`: its module's values the body names, once checked; before, if
+;; `m` is not bound inside, those of an earlier item of a module being
+;; ordered whose value is a module as written (`k-hazard-mods`).
+(define k-with-bound (subr kreads (symbol int int k-names) k-names)
+  (lambda (m a b bound)
+    (let ((ns (k-with-names a b)))
+      (if (and (null? ns) (not (k-has-name? bound m)))
+          (k-hazard-names-in (get k-hazard-mods) m)
+          ns))))
+
 (define-rec
   (k-free-list (subr kmakes (kxs k-names k-names) k-names)
     (lambda (xs bound out)
@@ -436,12 +447,14 @@
           (let ((o (k-free-arms arms bound (k-free-into s bound out))))
             (k-free-else els bound o)))
         (x-module (items a b) (k-free-module items bound out))
-        ;; The module, and the body, which sees its values once checked.
+        ;; The module, and the body, which sees its values once checked (or, an
+        ;; earlier item's of a module being ordered, `k-with-bound`).
         ;; `(with #%fx n)`, the standard `n`: nothing free.
         (x-with (m body a b)
           (if (k-fx-module? m)
               out
-              (k-free-into body (k-names-onto (k-with-names a b) bound) (k-note m bound out)))))))
+              (k-free-into body (k-names-onto (k-with-bound m a b bound) bound)
+                           (k-note m bound out)))))))
   ;; A module's free variables, onto `out`: each item's, every item's names
   ;; bound, as a `letrec*`'s (`check-modorder.fx`).
   (k-free-module (subr kmakes (k-items k-names k-names) k-names)

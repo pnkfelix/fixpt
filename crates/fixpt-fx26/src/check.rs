@@ -278,6 +278,10 @@ pub struct Checker {
     pub facts: NodeFacts,
     /// The regions `private-regions` made this program's own.
     pub private_regions: Vec<Region>,
+    /// While a module's order is checked (`crate::modorder`): each earlier
+    /// item whose value is a module as written, and that module's values,
+    /// which a `with` of it not yet checked binds.
+    pub(crate) hazard_modules: Vec<(Sym, Vec<Sym>)>,
     /// Mask at every expression, as the rules say. Off only to observe an
     /// effect *before* masking, which is what some of the paper's claims are
     /// about.
@@ -514,6 +518,7 @@ impl Checker {
             ahead_filled: Vec::new(),
             facts: NodeFacts::default(),
             private_regions: Vec::new(),
+            hazard_modules: Vec::new(),
             masking: true,
             broken: HashMap::new(),
             defs: Vec::new(),
@@ -1859,15 +1864,24 @@ impl Checker {
                 bound.truncate(depth);
             }
             // The names the module gives, once it is checked; before, none,
-            // so that what may be its values counts as free.
+            // so that what may be its values counts as free, unless the
+            // module is an earlier item of one being ordered, a module as
+            // written (`hazard_modules`).
             // The standard `n`: nothing free.
             Exp::With { module, .. } if self.is_fx_module(module) => {}
             Exp::With { module, body } => {
-                if !bound.contains(&module) && !out.contains(&module) {
+                let unbound = !bound.contains(&module);
+                if unbound && !out.contains(&module) {
                     out.push(module);
                 }
                 let depth = bound.len();
-                bound.extend(self.facts.with_vals.get(&e).into_iter().flatten().map(|(n, _)| *n));
+                match self.facts.with_vals.get(&e) {
+                    Some(vals) => bound.extend(vals.iter().map(|(n, _)| *n)),
+                    None if unbound => {
+                        bound.extend(self.hazard_modules.iter().filter(|(m, _)| *m == module).flat_map(|(_, ns)| ns.iter().copied()))
+                    }
+                    None => {}
+                }
                 self.free_into(body, bound, out);
                 bound.truncate(depth);
             }

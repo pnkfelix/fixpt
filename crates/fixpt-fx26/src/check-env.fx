@@ -294,6 +294,16 @@
           (else (k-with-names-in (cdr ws) a b)))))
 (define k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names)
   (lambda (a b) (k-with-names-in (get k-with-vals) a b)))
+;; While a module's order is checked (`check-modorder.fx`): each earlier
+;; item whose value is a module as written, and its values' names, which a
+;; `with` of it not checked yet binds.
+(define-type k-hazard-list (listof (productof (1 symbol) (2 k-names)) acyclic))
+(define k-hazard-mods (ref k-hazard-list @t) (new nil))
+(define k-hazard-names-in (subr (read @globals) (k-hazard-list symbol) k-names)
+  (lambda (hs m)
+    (cond ((null? hs) nil)
+          ((symbol=? (extract (car hs) 1) m) (extract (car hs) 2))
+          (else (k-hazard-names-in (cdr hs) m)))))
 ;; Each module given where a type of fewer values, or the same in another
 ;; order, is wanted (`k-reshape-at`): where, and for each value that type
 ;; has, its position in the module given. Made into a module of that layout.
@@ -403,6 +413,9 @@
 (define-type k-with-list (select check-env-module k-with-list))
 (define k-with-vals (with check-env-module k-with-vals))
 (define k-with-names (with check-env-module k-with-names))
+(define-type k-hazard-list (select check-env-module k-hazard-list))
+(define k-hazard-mods (with check-env-module k-hazard-mods))
+(define k-hazard-names-in (with check-env-module k-hazard-names-in))
 (define-type k-reshape-list (select check-env-module k-reshape-list))
 (define k-reshapes (with check-env-module k-reshapes))
 (define checked-reshapes! (with check-env-module checked-reshapes!))
