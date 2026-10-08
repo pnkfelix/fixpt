@@ -209,6 +209,17 @@ meet in one place, which M7 builds and Q9 later caches:
 - Its compiled form, later: the code that builds the module's product, its
   type, and a stamp; loaded without checking again when the stamp says the
   file and what it was checked against are unchanged.
+- **Two loads of one file are two modules** (the user's, 2026-10-08: not
+  yet Sheldon's rule, though not ruled out). Sheldon's two `(input "f")`s,
+  being textually identical, have the same `select`s, so the same abstract
+  types (LFP '90 §2.1.3), sound only while files never change. Here
+  `(define a (load-module "counter.fx"))` and `b` likewise give `a..t` and
+  `b..t`, distinct, and `with` opens only a module named by a variable.
+  Sharing is loading once and passing the module on (as `reader.fx` does
+  with the parser's): there is an outermost namespace, a REPL or a driver
+  module, to hold it. The user's reading of Sheldon's rule: it served a
+  system with no namespace outside its modules that still had to reason
+  about shared module state.
 
 ## Open questions
 

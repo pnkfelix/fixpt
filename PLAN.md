@@ -360,6 +360,15 @@ copy of the code per type.
 - Waiting on the user ("don't worry about those yet"): region `cons`
   inline natively (`lists-region`), cheaper captures. Deferred:
   `define-rec*`. Not scheduled: M10, a full native compiler.
+- Not yet, and not ruled out (the user's, 2026-10-08): Sheldon's rule
+  that two `(input "f")`s, textually identical, are one module, their
+  abstract types the same (LFP '90 §2.1.3, under "the illusion that the
+  file system is immutable"). Each `load-module` stays its own module,
+  its types named by the variable it is bound to; sharing is loading
+  once and passing the module on, in an outermost namespace (a REPL or a
+  driver module). The user's reading: the rule served a system with no
+  namespace outside its modules that still had to reason about shared
+  module state (`docs/research/first-class-modules.md`, M7).
 
 **Unknown**
 - Whether code free of `spin` always ends: T5 is conjectured, and false
