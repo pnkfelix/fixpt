@@ -87,6 +87,21 @@
 ;; `ts`, each `nil` the type `nil`: what other arms are, as in an `if`.
 (define k-nils-if-any (subr (maxeff kstate spin) (k-ids) k-ids)
   (lambda (ts) (if (null? ts) nil (cons (k-nil-if-any (car ts)) (k-nils-if-any (cdr ts))))))
+;; Branches' types, each `nil` the type `nil`, and, if one is, each pair one
+;; that may be `nil`: their join, if they have one, is then one of them.
+(define k-nil-pair (subr (maxeff kstate spin) (int) int)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t)) (ty-pair (a d r nl) (k-ty-new (ty-pair a d r #t))) (else y t))))
+(define k-nil-pairs (subr (maxeff kstate spin) (k-ids) k-ids)
+  (lambda (ts) (if (null? ts) nil (cons (k-nil-pair (car ts)) (k-nil-pairs (cdr ts))))))
+(define k-any-nil? (subr (maxeff kreads spin) (k-ids) bool)
+  (lambda (ts)
+    (and (not (null? ts))
+         (or (tagcase (k-get (k-resolve (car ts))) (ty-nil () #t) (else y #f))
+             (k-any-nil? (cdr ts))))))
+(define k-join-with-nil (subr (maxeff kstate spin) (k-ids) k-ids)
+  (lambda (ts0)
+    (let ((ts (k-nils-if-any ts0))) (if (k-any-nil? ts) (k-nil-pairs ts) ts))))
 ;; An `if`'s type, its branches a `tc` and a `td`: the greater; an error if neither is.
 (define k-join-known (subr (maxeff checks spin) (int int int int) int)
   (lambda (tc td a b)
@@ -97,9 +112,11 @@
           (else
            (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
 ;; The same, `nil`, beside another branch, what that is if `nil` is one
-;; (`TODO.md` §48); beside `nil`, the type `nil`.
+;; (`TODO.md` §48); beside `nil`, the type `nil`; beside a pair, the pair
+;; that may be `nil`.
 (define k-join-branches (subr (maxeff checks spin) (int int int int) int)
-  (lambda (tc td a b) (k-join-known (k-nil-if-any tc) (k-nil-if-any td) a b)))
+  (lambda (tc td a b)
+    (let ((ts (k-join-with-nil (list tc td)))) (k-join-known (car ts) (car (cdr ts)) a b))))
 ;; If `p` certifies a variable acyclic (`acyclic?`, `(acyclic i)`), it, as
 ;; the binding it is (none or one).
 (define k-acyclic-test (subr (maxeff kreads (alloc @t) spin) (kx) k-named)
@@ -481,6 +498,31 @@
               (product (1 (the k-parts (cons (car ps) (extract rest 1))))
                        (2 (the k-ids (cons i (extract rest 2)))))
               rest)))))
+;; A result `(pairof A v R)`, `v` solved to `nil` and nothing expected of
+;; it, has `v` a `(listof A R)` instead (`DONE.md` §48): the pair is new, so
+;; no alias sees its tail as `nil` alone, and `(cons 1 nil)` is a list. Each
+;; argument is checked against what its parameter then is.
+(define k-widen-nil-tail (subr (maxeff kstate spin) (int k-binders k-solved) unit)
+  (lambda (result kinds solved)
+    (tagcase (k-get (k-resolve result))
+      (ty-pair (h tl r nl)
+        (tagcase (k-get (k-resolve tl))
+          (ty-var (v) (if (k-binder-has? kinds v) (k-widen-tail-at v h r kinds solved) #u))
+          (else y #u)))
+      (else y #u))))
+(define k-widen-tail-at (subr (maxeff kstate spin) (int int k-region k-binders k-solved) unit)
+  (lambda (v h r kinds solved)
+    (let ((f (k-map-find (get solved) v)) (head (k-subst h (get solved))))
+      (if (and (not (null? f))
+               (tagcase (cdr (car f))
+                 (dt (t) (tagcase (k-get (k-resolve t)) (ty-nil () #t) (else y #f)))
+                 (else y #f))
+               (not (k-mentions-unknown-type? head kinds solved)))
+          (let* ((slot (k-slot)) (pair (k-ty-new (ty-pair head slot r #t))))
+            (begin
+              (k-set-link slot pair)
+              (set solved (cons (cons v (dt (k-subst slot (get solved)))) (get solved)))))
+          #u))))
 ;; Whether `et` is a `(nat z)` that natural literal `k` is one of.
 (define k-literal-within? (subr kreads (k-ty int) bool)
   (lambda (et k) (tagcase et (ty-nat (z) (k-size-le? (k-size-lit k) z)) (else w #f))))
@@ -495,7 +537,7 @@
   (lambda (x types expected)
     (if (>= expected 0)
         expected
-        (let* ((ts (k-nils-if-any types)) (found (k-upper-bound ts ts)))
+        (let* ((ts (k-join-with-nil types)) (found (k-upper-bound ts ts)))
           (if (< found 0)
               (let ((shown (k-join (k-show-list types k-printing-none) ", ")))
                 (k-fail-at (string-append "the arms are " shown) x))
@@ -578,6 +620,7 @@
 (define k-thunk-lambda? (with check-synth-module k-thunk-lambda?))
 (define k-poly-var-at (with check-synth-module k-poly-var-at))
 (define k-nil-told (with check-synth-module k-nil-told))
+(define k-widen-nil-tail (with check-synth-module k-widen-nil-tail))
 (define k-with-used (with check-synth-module k-with-used))
 (define k-as-expected (with check-synth-module k-as-expected))
 (define k-literal-within? (with check-synth-module k-literal-within?))

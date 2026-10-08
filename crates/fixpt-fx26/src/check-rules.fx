@@ -396,6 +396,7 @@
                     (k-inst-told args params 0 kinds solved done)
                     (k-inst-shapes args params 0 kinds solved (extract done 1))
                     (k-default-regions kinds solved)
+                    (if (< expected 0) (k-widen-nil-tail result kinds solved) #u)
                     (k-subst-checked kinds (k-finish kinds solved a b ft) inner a b))))))))
   ;; What the arguments are, except the ones that need to be told.
   (k-inst-asked (subr (maxeff checks spin) (kxs k-ids int k-binders k-solved k-done) unit)

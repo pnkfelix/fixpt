@@ -957,6 +957,9 @@ impl Checker {
         // before any binder it left unsolved.
         self.shape_errors(args, &params, &done, &u)?;
         self.default_regions(&mut u);
+        if expected.is_none() {
+            self.widen_nil_tail(result, &mut u);
+        }
         let map = self.finish(&u, span, ft)?;
         self.check_bounds(&u.kinds, &map, span)?;
         self.check_finite_sizes(&u.kinds, &map, inner, span)?;
@@ -1032,6 +1035,44 @@ impl Checker {
             }
             _ => false,
         }
+    }
+
+    /// A result `(pairof A v R)`, `v` solved to `nil` and nothing expected
+    /// of it, has `v` a `(listof A R)` instead (`DONE.md` §48): the pair is
+    /// new, so no alias sees its tail as `nil` alone, and `(cons 1 nil)` is
+    /// a list. Each argument is checked against what its parameter then is.
+    fn widen_nil_tail(&mut self, result: TyId, u: &mut Unknowns) {
+        let Ty::Pair(head, tail, region, _) = self.arena.get(self.arena.resolve(result)).clone() else { return };
+        let Ty::Var(v) = *self.arena.get(self.arena.resolve(tail)) else { return };
+        let Some(D::Type(t)) = u.solved.get(&v) else { return };
+        if !u.is_unknown(v) || !matches!(self.arena.get(self.arena.resolve(*t)), Ty::Nil) {
+            return;
+        }
+        let head = self.subst(head, &u.solved);
+        if self.mentions_unknown_type(head, u) {
+            return;
+        }
+        let slot = self.arena.ty(Ty::Link(None));
+        let pair = self.arena.ty(Ty::Pair(head, slot, region, true));
+        self.arena.set_link(slot, pair);
+        let list = self.subst(slot, &u.solved);
+        u.solved.insert(v, D::Type(list));
+    }
+
+    /// Branches' types, each `nil` (`nil_if_any`) the type `nil`, and, if
+    /// one is, each pair one that may be `nil`: their join, if they have one,
+    /// is then one of them.
+    pub(crate) fn join_with_nil(&mut self, ts: &[TyId]) -> Vec<TyId> {
+        let ts: Vec<TyId> = ts.iter().map(|t| self.nil_if_any(*t)).collect();
+        if !ts.iter().any(|t| matches!(self.arena.get(self.arena.resolve(*t)), Ty::Nil)) {
+            return ts;
+        }
+        ts.into_iter()
+            .map(|t| match self.arena.get(self.arena.resolve(t)).clone() {
+                Ty::Pair(a, b, r, false) => self.arena.ty(Ty::Pair(a, b, r, true)),
+                _ => t,
+            })
+            .collect()
     }
 
     /// `t`, or, if a list of any elements (`nil`), the type `nil`.

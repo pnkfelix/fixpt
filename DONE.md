@@ -842,18 +842,31 @@ in one branch joins to the other branch's list type.
   nothing says which list, it is of the type `nil`:
   - an argument whose parameter neither the expected result nor any other
     argument has solved, heard after all of them (`infer.rs`, the told
-    arguments; `k-nil-told`): `(null? nil)` is a `bool`, `(cons 1 nil)` a
-    `(pairof int nil R)`, `(cdr (cons 1 nil))` a `nil`. If the type `nil`
+    arguments; `k-nil-told`): `(null? nil)` is a `bool`. If the type `nil`
     still leaves the parameter unknown, the error is as before: `(car nil)`;
+  - widened at the binder's use (the user's choice, 2026-10-08): a call's
+    result `(pairof A v R)`, nothing expected of it, `v` solved to `nil`
+    and `A` known, has `v` a `(listof A R)` instead (`widen_nil_tail`,
+    `k-widen-nil-tail`), so `(cons 1 nil)` is a `(pairof int (listof int
+    R) R)`, a list. Sound because the pair is new: no alias sees its tail
+    as `nil` alone, which invariance (a pair can be written) otherwise
+    guards; and each argument is checked against its parameter as
+    re-solved. Not a subtyping rule: subtyping cannot know a value is new.
+    Where a type is expected, it decides: `(pairof int nil R)` expected,
+    the tail stays `nil`;
   - an `if`'s branches and a `tagcase`'s arms (`cond`, `case`, `typecase`
-    through them), each `nil` the type `nil` before the join
-    (`nil_if_any`, `k-nil-if-any`): `(if c nil xs)` is `xs`'s type, `(if c
-    nil nil)` a `nil`;
+    through them), each `nil` the type `nil` before the join, and, if one
+    is, each pair one that may be `nil` (`join_with_nil`,
+    `k-join-with-nil`): `(if c nil xs)` is `xs`'s type, `(if c nil nil)` a
+    `nil`, `(if c (cons 1 nil) nil)` a `(union nil (pairof int (listof int
+    R) R))`, which is `(listof int R)` unfolded once (shown so);
   - a `let` of `nil` stays polymorphic; each use of it is one of these.
-  - Not done: `(cons 1 nil)` is no list without a `the` (a
-    `(pairof int nil R)`'s tail is invariant, so it is not a `(listof int
-    R)`; widening at the binder's use is the open option above), and
-    `(with #%fx nil)` (§46).
+  - Not done: `(with #%fx nil)` (§46); `(list (cons 1 nil) nil)`, whose
+    element binder the first argument solves to a pair that `nil` is not
+    (a binder solved by the join of its arguments, not the first, would
+    do); and a `let` of a new pair, unannotated, puts it in a fresh region,
+    so `(let ((x (cons 1 nil))) x)` is no `(listof int @heap)` (any
+    allocation's, not `nil`'s).
   - Tests: `tests/bidirectional.rs`
     (`nil_is_of_the_type_nil_where_nothing_says_which_list`, and
     `a_type_nothing_determines_is_an_error` now with `(car nil)`).

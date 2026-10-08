@@ -104,13 +104,24 @@ fn a_type_nothing_determines_is_an_error() {
 fn nil_is_of_the_type_nil_where_nothing_says_which_list() {
     assert_eq!(check("(null? nil)"), "bool ! pure");
     assert_eq!(check("(let ((xs nil)) (null? xs))"), "bool ! pure");
-    assert_eq!(check("(cons 1 nil)"), "(pairof int nil @r.1) ! (alloc @r.1)");
-    assert_eq!(check("(cdr (cons 1 nil))"), "nil ! pure");
+    // A new pair's tail, `nil`, is widened to a list: `(cons 1 nil)` is a
+    // list, which may be written as one.
+    assert_eq!(check("(cons 1 nil)"), "(pairof int (listof int @r.1) @r.1) ! (alloc @r.1)");
+    assert_eq!(check("(cdr (cons 1 nil))"), "(listof int @r.1) ! (alloc @r.1)");
+    let written = "(let ((p (cons 1 nil))) (begin (set-cdr! p (cons 2 nil)) p))";
+    assert_eq!(check(written), "(pairof int (listof int @r.1) @r.1) ! (alloc @r.1)");
+    // Where a pair's tail is expected to be `nil`, it stays `nil`.
+    assert_eq!(check("(define p (pairof int nil @heap) (cons 1 nil)) (cdr p)"), "nil ! (maxeff (read @heap) (read (globals p)))");
     let xs = "(define xs (listof int @heap) (list 1 2)) (define c bool #t)";
     assert_eq!(check(&format!("{xs} (if c nil xs)")), "(listof int @heap) ! (read (globals c xs))");
     assert_eq!(check(&format!("{xs} (if c xs nil)")), "(listof int @heap) ! (read (globals c xs))");
     assert_eq!(check(&format!("{xs} (if c nil nil)")), "nil ! (read (globals c))");
     assert_eq!(check(&format!("{xs} (cond ((= 1 2) nil) (else xs))")), "(listof int @heap) ! (read (globals xs))");
+    // Beside a pair, `nil` makes the pair one that may be `nil`.
+    assert_eq!(
+        check(&format!("{xs} (if c (cons 1 nil) nil)")),
+        "(union nil (pairof int (listof int @r.1) @r.1)) ! (maxeff (alloc @r.1) (read (globals c)))"
+    );
 }
 
 /// The effect binder of a higher-order operator is the latent effect of the

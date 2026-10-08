@@ -1403,8 +1403,9 @@ impl Checker {
                 self.path_narrowed.truncate(narrowed.1);
                 let (b, be) = b?;
                 // `nil`, beside another branch, is what that is if `nil` is
-                // one (`TODO.md` §48); beside `nil`, the type `nil`.
-                let (a, b) = (self.nil_if_any(a), self.nil_if_any(b));
+                // one (`TODO.md` §48); beside `nil`, the type `nil`; beside
+                // a pair, the pair that may be `nil`.
+                let [a, b] = self.join_with_nil(&[a, b])[..] else { unreachable!() };
                 let t = if self.subtype(a, b) {
                     b
                 } else if self.subtype(b, a) {
@@ -3242,7 +3243,7 @@ impl Checker {
             Some(x) => x,
             None => {
                 // `nil` is what the other arms are, as in an `if`.
-                let types: Vec<TyId> = types.iter().map(|t| self.nil_if_any(*t)).collect();
+                let types = self.join_with_nil(&types);
                 let Some(t) = types.iter().copied().find(|t| types.clone().iter().all(|u| self.subtype(*u, *t))) else {
                     let shown: Vec<String> = types.iter().map(|t| self.show_ty(*t)).collect();
                     return Err(FxError::at(span, format!("the arms are {}", shown.join(", "))));
