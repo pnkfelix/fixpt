@@ -86,8 +86,8 @@ fn a_projection_is_inferred_from_the_arguments() {
 /// A binder the arguments do not fix comes from the expected type.
 #[test]
 fn a_projection_is_inferred_from_what_is_expected() {
-    let p = "(define empty (listof int @l) nil) ((proj (proj null? @l) int (listof int @l)) empty)";
-    assert_eq!(check(p), "bool ! (read (globals empty))");
+    let p = "(define empty (listof int @l) nil) ((proj (proj car @l) int (listof int @l)) empty)";
+    assert_eq!(check(p), "int ! (maxeff (read @l) (read (globals empty)))");
     assert_eq!(check("(null? (the (listof int @l) nil))"), "bool ! pure");
 }
 

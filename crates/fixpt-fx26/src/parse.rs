@@ -330,6 +330,10 @@ impl Checker {
             if name == "void" {
                 return Ok(self.void);
             }
+            // The empty list's own type (`docs/research/logical-types.md`, L1).
+            if name == "nil" && self.lookup_desc(sym).is_none() {
+                return Ok(self.arena.ty(Ty::Nil));
+            }
             if name == "nat" && self.lookup_desc(sym).is_none() {
                 return Ok(self.arena.ty(Ty::Nat(Size::Finite)));
             }
@@ -497,18 +501,17 @@ impl Checker {
                 let r = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::Pair(a, b, r, false)))
             }
-            // A union (`docs/research/logical-types.md`): so far only of
-            // `nil` and a pair, a pair that may be `nil`.
+            // A union of members of disjoint shapes at run time
+            // (`docs/research/logical-types.md`, L1), normalized.
             "union" => {
-                let pair = match &items[..] {
-                    [_, n, p] if n.as_symbol().is_some_and(|n| self.name(n) == "nil") => p,
-                    _ => return Err(FxError::at(s.span, "a union is, so far, `(union nil (pairof type type region))`")),
-                };
-                let p = self.parse_type(pair)?;
-                match self.arena.get(self.arena.resolve(p)).clone() {
-                    Ty::Pair(a, b, r, _) => Ok(self.arena.ty(Ty::Pair(a, b, r, true))),
-                    _ => Err(FxError::at(pair.span, "a union is, so far, `(union nil (pairof type type region))`")),
+                if items.len() < 3 {
+                    return Err(FxError::at(s.span, "`(union type type …)`"));
                 }
+                let mut members = Vec::new();
+                for m in &items[1..] {
+                    members.push(self.parse_type(m)?);
+                }
+                self.union_of(&members, s.span)
             }
             "dletrec" => self.parse_dletrec(s, &items),
             // `(mu name type)`: a recursive type, anonymous; the same as
@@ -658,8 +661,16 @@ impl Checker {
         result
     }
 
+    /// Whether the recursive type at `slot`, its knot tied, is built from
+    /// a constructor (`grounded_only`); and the unions read before it was,
+    /// checked now that their members are known.
+    pub(crate) fn grounded(&mut self, slot: TyId, span: fixpt_read::Span) -> R<()> {
+        self.grounded_only(slot, span)?;
+        self.check_pending_unions()
+    }
+
     /// A name defined as another name, round a loop, describes nothing.
-    pub(crate) fn grounded(&self, slot: TyId, span: fixpt_read::Span) -> R<()> {
+    fn grounded_only(&self, slot: TyId, span: fixpt_read::Span) -> R<()> {
         // A description function applied is no constructor either: what it
         // gives may be what it was given, so a cycle through applications
         // alone may be no type at all once the function is known (Rémy's
@@ -1274,6 +1285,7 @@ impl Checker {
             "begin" => self.parse_body(span, &items[1..]),
             "cond" => self.parse_cond(span, &items[1..]),
             "case" => self.parse_case(span, &items[1..]),
+            "typecase" => self.parse_typecase(span, &items),
             // `(acyclic e (x body) else)`: `(let ((%acyclic-value e)) (if
             // (acyclic? %acyclic-value) (let ((x (certify-acyclic
             // %acyclic-value))) body) else))`.
@@ -1574,6 +1586,73 @@ impl Checker {
         let body = self.arena.exp(span, Exp::Var(s));
         let module = self.interner.intern("#%fx");
         self.arena.exp(span, Exp::With { module, body })
+    }
+
+    /// `(typecase e (shape name body) … (else name body))` on a union's members
+    /// (`docs/research/logical-types.md`, L1): `(let ((%typecase-value e))
+    /// (if (int? %typecase-value) (let ((name %typecase-value)) body) …
+    /// else))`, each arm's test its shape's standard predicate, which narrows
+    /// the value for the arm and for those after it (a variable tested as it
+    /// is). The `else` is required, as `case`'s is.
+    fn parse_typecase(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let usage = "`(typecase expression (shape name body) … (else name body))`";
+        let [_, e, arms @ ..] = items else {
+            return Err(FxError::at(span, usage));
+        };
+        let Some((last, init)) = arms.split_last() else {
+            return Err(FxError::at(span, "a `typecase` needs at least an `else` clause"));
+        };
+        // A variable, which nothing assigns, is tested as it is, so that
+        // what each test narrows it to holds of it in the arms after; any
+        // other expression is bound once.
+        let direct = e.as_symbol().filter(|s| !matches!(self.name(*s), "#t" | "#f" | "#u"));
+        let (tmp, e) = match direct {
+            Some(s) => (s, None),
+            None => (self.fresh_name("%typecase-value", items), Some(self.parse_exp(e)?)),
+        };
+        let mut tests = Vec::new();
+        for arm in init {
+            let parts = self.items(arm, usage)?.to_vec();
+            let [shape, x, body] = &parts[..] else {
+                return Err(FxError::at(arm.span, usage));
+            };
+            let name = shape.as_symbol().map(|s| self.name(s).to_string());
+            let Some(pred) = name.and_then(|n| typecase_predicate(&n)) else {
+                let shapes: Vec<&str> = TYPECASE_SHAPES.iter().map(|(s, _)| *s).collect();
+                return Err(FxError::at(shape.span, format!("a shape `typecase` tests is one of {}", shapes.join(", "))));
+            };
+            let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
+            tests.push((pred, x, self.parse_exp(body)?));
+        }
+        // `(else body)`, or `(else name body)`, `name` the value as what
+        // the arms leave it.
+        let parts = self.items(last, usage)?.to_vec();
+        let else_usage = "a `typecase` must end with an `else` clause, `(else body)` or `(else name body)`";
+        let (head, name, body) = match &parts[..] {
+            [head, body] => (head, None, body),
+            [head, name, body] => (head, Some(name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?), body),
+            _ => return Err(FxError::at(last.span, else_usage)),
+        };
+        if head.as_symbol().map(|h| self.name(h)) != Some("else") {
+            return Err(FxError::at(last.span, else_usage));
+        }
+        let mut chain = self.parse_exp(body)?;
+        if let Some(x) = name {
+            let v = self.arena.exp(span, Exp::Var(tmp));
+            chain = self.arena.exp(span, Exp::Let { bindings: vec![(x, v)], body: chain });
+        }
+        for (pred, x, body) in tests.into_iter().rev() {
+            let f = self.standard_ref_at(span, pred);
+            let a = self.arena.exp(span, Exp::Var(tmp));
+            let test = self.arena.exp(span, Exp::App { fun: f, args: vec![a] });
+            let v = self.arena.exp(span, Exp::Var(tmp));
+            let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, v)], body });
+            chain = self.arena.exp(span, Exp::If { test, then, els: chain });
+        }
+        Ok(match e {
+            Some(e) => self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: chain }),
+            None => chain,
+        })
     }
 
     /// A name for an expansion's own variable that `forms` never mention:
@@ -2359,4 +2438,22 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
 enum CaseLeaves<'a> {
     Index,
     Bodies(&'a [ExpId], &'a (fixpt_read::Span, Syntax)),
+}
+
+/// The shapes `typecase` tests (`check::SHAPES`), each with its standard
+/// predicate: those that have one.
+const TYPECASE_SHAPES: &[(&str, &str)] = &[
+    ("int", "int?"),
+    ("char", "char?"),
+    ("bool", "bool?"),
+    ("nil", "null?"),
+    ("pair", "pair?"),
+    ("string", "string?"),
+    ("symbol", "symbol?"),
+    ("procedure", "procedure?"),
+    ("bloblet", "array?"),
+];
+
+fn typecase_predicate(shape: &str) -> Option<&'static str> {
+    TYPECASE_SHAPES.iter().find(|(s, _)| *s == shape).map(|(_, p)| *p)
 }

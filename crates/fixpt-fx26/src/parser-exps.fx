@@ -116,6 +116,21 @@
   (lambda (base forms i)
     (let ((n (string->symbol (if (= i 0) base (string-append base (int->string i))))))
       (if (syns-mention? n forms) (fresh-from base forms (+ i 1)) n))))
+;; The shapes `typecase` tests (`check.rs`'s `SHAPES`, those with a
+;; standard predicate), and the predicate of each; `||` if not one.
+(define typecase-predicate (subr (read @globals) (symbol) symbol)
+  (lambda (s)
+    (case s
+      ((int) 'int?) ((char) 'char?) ((bool) 'bool?) ((nil) 'null?) ((pair) 'pair?)
+      ((string) 'string?) ((symbol) 'symbol?) ((procedure) 'procedure?) ((bloblet) 'array?)
+      (else '||))))
+(define typecase-usage string "`(typecase expression (shape name body) … (else name body))`")
+(define typecase-needs-else string "a `typecase` needs at least an `else` clause")
+(define typecase-else string
+  "a `typecase` must end with an `else` clause, `(else body)` or `(else name body)`")
+(define typecase-shapes string
+  (string-append "a shape `typecase` tests is one of "
+                 "int, char, bool, nil, pair, string, symbol, procedure, bloblet"))
 ;; A `case` datum's kind (`TODO.md` §46): 0 an integer, 1 a character, 2
 ;; a string, 3 a symbol, 4 a boolean, and -1 none of these.
 (define case-kind (subr (read @globals) (syn) int)
@@ -380,6 +395,7 @@
         ((begin) (parse-body (cdr items) a b))
         ((cond) (parse-cond (cdr items) a b))
         ((case) (parse-case (cdr items) a b))
+        ((typecase) (parse-typecase items a b))
         ((confirm-length)
          (let ((usage "`(confirm-length expression length (name body) else)`"))
            (begin
@@ -556,6 +572,53 @@
             ((null? (cdr xs)) (parse-exp (car xs)))
             (else (let* ((x (parse-exp (car xs))) (rest (parse-or (cdr xs) a b)))
                     (e-if x (e-bool #t a b) rest a b))))))
+  ;; `(typecase e (shape name body) … (else name body))` on a union's members
+  ;; (`docs/research/logical-types.md`, L1): `(let ((%typecase-value e)) (if
+  ;; (int? %typecase-value) (let ((name %typecase-value)) body) … else))`,
+  ;; each arm's test its shape's standard predicate, which narrows the value
+  ;; for the arm and those after it. The `else` is required, as `case`'s is.
+  (parse-typecase (subr (maxeff parses spin) (syns-a int int) exp)
+    (lambda (items a b)
+      (cond ((< (len items) 2) (pfail-at typecase-usage a b))
+            ((null? (cdr (cdr items))) (pfail-at typecase-needs-else a b))
+            ;; A variable, which nothing assigns, is tested as it is, so
+            ;; that what each test narrows it to holds of it after.
+            ((case-direct? (cdr items))
+             (parse-typecase-arms (drop items 2) (syn-head (nth items 1)) a b))
+            (else
+             (let* ((e (parse-exp (nth items 1))) (tmp (fresh-name "%typecase-value" items)))
+               (e-let (one-let tmp e) (parse-typecase-arms (drop items 2) tmp a b) a b))))))
+  (parse-typecase-arms (subr (maxeff parses spin) (syns-a symbol int int) exp)
+    (lambda (arms tmp a b)
+      (if (null? (cdr arms))
+          ;; `(else body)`, or `(else name body)`, `name` the value as what
+          ;; the arms leave it.
+          (let* ((parts (syn-items (car arms) typecase-usage))
+                 (n (len parts))
+                 (shaped (if (or (= n 2) (= n 3)) #u (pfail typecase-else (car arms))))
+                 (name (if (= n 3)
+                           (if (syn-symbol? (nth parts 1))
+                               (syn-symbol (nth parts 1))
+                               (pfail "a name" (nth parts 1)))
+                           '||))
+                 (is-else (if (and (syn-symbol? (car parts))
+                                   (symbol=? (syn-symbol (car parts)) 'else))
+                              #u
+                              (pfail typecase-else (car arms))))
+                 (body (parse-exp (nth parts (- n 1)))))
+            (if (= n 3) (e-let (one-let name (e-var tmp a b)) body a b) body))
+          (let* ((parts (syn-items (car arms) typecase-usage))
+                 (shaped (if (= (len parts) 3) #u (pfail typecase-usage (car arms))))
+                 (shape (car parts))
+                 (pred (if (syn-symbol? shape) (typecase-predicate (syn-symbol shape)) '||))
+                 (known (if (symbol=? pred '||) (pfail typecase-shapes shape) #u))
+                 (x (if (syn-symbol? (nth parts 1))
+                        (syn-symbol (nth parts 1))
+                        (pfail "a name" (nth parts 1))))
+                 (body (parse-exp (nth parts 2)))
+                 (rest (parse-typecase-arms (cdr arms) tmp a b)))
+            (e-if (call-tmp pred tmp nil a b) (e-let (one-let x (e-var tmp a b)) body a b) rest
+                  a b)))))
   ;; `(case key ((datum …) e …) … (else e …))` on atoms (`TODO.md` §46):
   ;; `(let ((%case-key key)) …)` and nested `if`s, each datum compared by
   ;; its kind's equality. The data are of one kind and distinct, and the

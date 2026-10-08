@@ -451,12 +451,17 @@ impl Checker {
                     self.size_walk(x, pol, v, bad, seen);
                 }
             }
+            Ty::Union(ms) => {
+                for x in ms {
+                    self.size_walk(x, pol, v, bad, seen);
+                }
+            }
             Ty::Ref(x, _) | Ty::Array(x, _) | Ty::ICell(x, _) | Ty::MarkKey(x, _) => self.size_walk(x, Polarity::Inv, v, bad, seen),
             Ty::PromptTag { answer: x, payload: y, .. } | Ty::Composable { arg: x, answer: y, .. } => {
                 self.size_walk(x, Polarity::Inv, v, bad, seen);
                 self.size_walk(y, Polarity::Inv, v, bad, seen);
             }
-            Ty::Base(_) | Ty::Void | Ty::Var(_) | Ty::Place(_) | Ty::Link(_) => {}
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::Var(_) | Ty::Place(_) | Ty::Link(_) => {}
         }
     }
 

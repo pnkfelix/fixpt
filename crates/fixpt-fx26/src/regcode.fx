@@ -513,7 +513,9 @@
         "%fx26-flatarray-length" "char->integer" "integer->char" "string-length" "string-ref"
         "%string-hash" "%symbol-hash" "%fx26-string-compare" "%fx26-symbol-compare"
         "%fx26-string<?" "%fx26-string<=?" "%fx26-string>?" "%fx26-string>=?"
-        "%fx26-char<?" "%fx26-char<=?" "%fx26-char>?" "%fx26-char>=?")
+        "%fx26-char<?" "%fx26-char<=?" "%fx26-char>?" "%fx26-char>=?"
+        "null?" "pair?" "exact-integer?" "char?" "boolean?" "string?" "symbol?" "%fx26-procedure?"
+        "%fx26-array?")
        #t)
       (else (or (r-eqtable-quick? name) (r-fixed-width-op? name))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never

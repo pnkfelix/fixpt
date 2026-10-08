@@ -645,6 +645,8 @@
       (tagcase (k-get t)
         (ty-base (s) (symbol->string s))
         (ty-void () "void")
+        (ty-nil () "nil")
+        (ty-union (ms) (k-cat3 "(union " (k-join (k-show-list ms p) " ") ")"))
         (ty-var (v) (k-dvar-string v))
         (ty-link (x) "?")
         (ty-subr (e ps r cv) (k-show-subr e ps r cv p))

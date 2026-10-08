@@ -139,6 +139,8 @@
   (lambda (s)
     (let* ((n (syn-name s)) (sym (string->symbol n)) (base (k-find (get k-base) sym)))
       (cond ((string=? n "void") k-void)
+            ;; The empty list's own type (`docs/research/logical-types.md`, L1).
+            ((and (string=? n "nil") (null? (k-lookup-desc sym))) (k-ty-new (ty-nil)))
             ((and (string=? n "nat") (null? (k-lookup-desc sym)))
              (k-ty-new (ty-nat (sz-finite))))
             ((>= base 0) base)
@@ -310,19 +312,13 @@
         (begin (set k-dscope saved) body)))))
 ;; `(mu name type)`: a recursive type, anonymous; the same as `(dletrec
 ;; ((name type)) name)`.
-;; A union (`docs/research/logical-types.md`): so far only of `nil` and a
-;; pair, a pair that may be `nil`.
-(define k-union-shape string "a union is, so far, `(union nil (pairof type type region))`")
+;; A union of members of disjoint shapes at run time
+;; (`docs/research/logical-types.md`, L1), normalized.
 (define k-parse-union (subr (maxeff checks spin) (syn k-syns) int)
   (lambda (s items)
     (begin
-      (k-shape (and (= (k-length items) 3) (syn-symbol? (k-nth items 1))
-                    (string=? (syn-name (k-nth items 1)) "nil"))
-               k-union-shape s)
-      (let* ((pair (k-nth items 2)) (p (k-resolve (k-parse-type pair))))
-        (tagcase (k-get p)
-          (ty-pair (a b r nl) (k-ty-new (ty-pair a b r #t)))
-          (else y (k-fail k-union-shape (syn-start pair) (syn-end pair))))))))
+      (k-shape (>= (k-length items) 3) "`(union type type …)`" s)
+      (k-union-of (k-parse-types (cdr items)) (syn-start s) (syn-end s)))))
 (define k-parse-mu (subr (maxeff checks spin) (syn k-syns) int)
   (lambda (s items)
     (begin
@@ -887,6 +883,7 @@
       (ty-product (ps) (k-parts-onto ps nil))
       (ty-sum (ps) (k-parts-onto ps nil))
       (ty-bloblet (fs z r) fs)
+      (ty-union (ms) ms)
       (ty-named (g ds) (k-desc-kids ds))
       (ty-app (f ds) (the k-ids (cons f (k-desc-kids ds))))
       (ty-lam (bs x) (k-desc-kids (the k-descs (cons x nil))))

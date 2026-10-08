@@ -1,0 +1,27 @@
+;;; Unions (`docs/research/logical-types.md`, L1) on every machine: each
+;;; standard shape predicate on a value of each shape, `typecase`, and the
+;;; shapes that must not be taken for one another (a product, a sum or a
+;;; `ref` for an array; a float or a bignum for an `int`; `#u` a symbol).
+(define-type v (union int string bool char symbol (listof int @heap) (subr pure (int) int)
+                      (arrayof int @heap)))
+(define f (subr (read @heap) (v) int)
+  (lambda (x)
+    (cond ((int? x) x) ((string? x) (string-length x)) ((bool? x) (if x 1 0))
+          ((char? x) 2) ((symbol? x) 3) ((array? x) (array-ref x 0))
+          ((procedure? x) (x 5)) ((null? x) -1) (else (car x)))))
+(list (f 1) (f "ab") (f #t) (f #\a) (f 'q) (f (make-array 1 9)) (f (lambda ((n int)) (* n 100)))
+      (f nil) (f (cons 7 nil)))
+(define-type w (union int (listof int @heap) (subr pure (int) int)))
+(define g (subr (read @heap) (w) int)
+  (lambda (x) (typecase x (int n (+ n 1)) (procedure p (p 5)) (nil e -1) (else (car x)))))
+(list (g 1) (g (lambda ((n int)) (* n 10))) (g nil) (g (cons 7 nil)))
+(define-type p (productof (1 int) (2 int)))
+(define-type s (sumof (a int) (b bool)))
+(define ap (subr pure ((union p (arrayof int @heap))) int) (lambda (x) (if (array? x) 1 0)))
+(define as (subr pure ((union s (arrayof int @heap))) int) (lambda (x) (if (array? x) 1 0)))
+(define ar (subr pure ((union (ref int @heap) (arrayof int @heap))) int)
+  (lambda (x) (if (array? x) 1 0)))
+(define nums (subr pure ((union int f64 f32)) int) (lambda (x) (if (int? x) 1 0)))
+(define unit (subr pure ((union int unit)) int) (lambda (x) (if (symbol? x) 1 0)))
+(list (ap (product (1 1) (2 2))) (as (sum a 3)) (ar (new 0)) (ap (make-array 1 0))
+      (nums 2.5) (nums 100000000000000000000000) (unit #u) (unit 4))

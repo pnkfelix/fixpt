@@ -55,6 +55,7 @@
                 (ty-poly (bs body) (walk body))
                 (ty-product (ps) (k-storage-parts ps seen out))
                 (ty-sum (ps) (k-storage-parts ps seen out))
+                (ty-union (ms) (walks ms))
                 (ty-tag (a h e r) (begin (walk a) (walk h)))
                 (ty-comp (b a e r) (begin (walk b) (walk a)))
                 (ty-named (g ds) (begin (walk (extract (k-gen-of g) 4)) (walks (k-desc-types ds))))
@@ -153,6 +154,7 @@
                 (ty-bloblet (fs z r) (k-knot-list fs (if z kept (k-kept-add kept r)) seen))
                 (ty-product (ps) (k-knot-parts ps kept seen))
                 (ty-sum (ps) (k-knot-parts ps kept seen))
+                (ty-union (ms) (k-knot-list ms kept seen))
                 (ty-poly (bs body) (k-knot-in body kept seen))
                 ;; A procedure: kept where it is, it may not read there
                 ;; unsaid; what it takes and gives is kept nowhere yet.

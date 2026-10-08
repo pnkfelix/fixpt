@@ -101,12 +101,13 @@
 ;; acyclic is.
 (define k-fin-region (subr (read @globals) (k-region) k-region)
   (lambda (r) (tagcase r (r-frozen (p f) (r-frozen p #t)) (else y r))))
-;; Whether `k-finitize` rebuilds a node: a pair, product, sum or bloblet.
+;; Whether `k-finitize` rebuilds a node: a pair, product, sum, bloblet or
+;; union.
 (define k-finitizes? (subr pure (k-ty) bool)
   (lambda (n)
     (tagcase n
       (ty-pair (a b r nl) #t) (ty-product (ps) #t) (ty-sum (ps) #t) (ty-bloblet (fs z r) #t)
-      (else y #f))))
+      (ty-union (ms) #t) (else y #f))))
 (define-rec
   (k-finitize (subr (maxeff kstate spin) (int (ref k-pairs @t)) int)
     (lambda (t memo)
@@ -129,6 +130,7 @@
         (ty-product (ps) (ty-product (k-finitize-parts ps memo)))
         (ty-sum (ps) (ty-sum (k-finitize-parts ps memo)))
         (ty-bloblet (fs z r) (ty-bloblet (k-finitize-list fs memo) z (k-fin-region r)))
+        (ty-union (ms) (ty-union (k-finitize-list ms memo)))
         (else y (k-get t)))))
   (k-finitize-parts (subr (maxeff kstate spin) (k-parts (ref k-pairs @t)) k-parts)
     (lambda (ps memo)
@@ -221,6 +223,7 @@
                 (ty-bloblet (fs z r) (k-size-walk-list fs (if z pol 0) v seen))
                 (ty-product (ps) (k-size-walk-parts ps pol v seen))
                 (ty-sum (ps) (k-size-walk-parts ps pol v seen))
+                (ty-union (ms) (k-size-walk-list ms pol v seen))
                 (ty-ref (x r) (k-size-walk x 0 v seen))
                 (ty-array (x r) (k-size-walk x 0 v seen))
                 (ty-icell (x r) (k-size-walk x 0 v seen))
@@ -393,6 +396,8 @@
       ;; An application may become anything its function gives.
       (cond ((or (= p 2) (= p 24) (= a 1)) #f)
             ((= p 3) (null? (k-as-subr actual)))
+            ;; A union: only if what is given is of none of its shapes.
+            ((= p 26) (k-shapes-miss? pattern actual))
             ((and (= p 6) (= a 18)) #f)
             ;; A `nat` is an `int`.
             ((and (= p 0) (= a 19)) #f)
@@ -527,6 +532,7 @@
                   (ty-bloblet (fs z r) (or (reg r) (go (k-push-ids fs rest))))
                   (ty-product (ps) (go (k-push-parts ps rest)))
                   (ty-sum (ps) (go (k-push-parts ps rest)))
+                  (ty-union (ms) (go (k-push-ids ms rest)))
                   (ty-tag (x y e r)
                     (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-comp (x y e r)
@@ -563,6 +569,7 @@
                   (ty-bloblet (fs z r) (ws fs))
                   (ty-product (ps) (ws (k-push-parts ps nil)))
                   (ty-sum (ps) (ws (k-push-parts ps nil)))
+                  (ty-union (ms) (ws ms))
                   (ty-pair (a b r nl) (or (w a) (w b)))
                   (ty-tag (a b e r) (or (w a) (w b)))
                   (ty-comp (a b e r) (or (w a) (w b)))
@@ -689,10 +696,17 @@
             (begin
               (set trail (cons (cons p a) (get trail)))
               (let ((pt (k-get p)) (at (k-get a)))
-                (if (and (tagcase at (ty-void () #t) (else y #f))
-                         (not (tagcase pt (ty-var (v) (k-open? kinds solved v)) (else y #f))))
-                    #u
-                    (k-unify-node a pt at kinds solved trail))))))))
+                (cond ((and (tagcase at (ty-void () #t) (else y #f))
+                            (not (tagcase pt (ty-var (v) (k-open? kinds solved v)) (else y #f))))
+                       #u)
+                      ;; A union expected: the member whose shapes hold the
+                      ;; pattern's (a `cons` where a list or an `int` is
+                      ;; wanted, its pair).
+                      ((and (tagcase at (ty-union (aa) #t) (else y #f))
+                            (tagcase pt (ty-union (pp) #f) (ty-var (v) #f) (else y #t)))
+                       (let ((y (tagcase at (ty-union (aa) (k-member-holding p aa)) (else w -1))))
+                         (if (< y 0) #u (k-unify p y kinds solved trail))))
+                      (else (k-unify-node a pt at kinds solved trail)))))))))
   ;; Node `pt` matched against `a`, whose node is `at`, by their shapes.
   (k-unify-node (subr (maxeff kstate spin) (int k-ty k-ty k-binders k-solved k-trail) unit)
     (lambda (a pt at kinds solved trail)
@@ -744,6 +758,10 @@
             (tagcase at (ty-product (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
           (ty-sum (pp)
             (tagcase at (ty-sum (pa) (k-unify-parts pp pa kinds solved trail)) (else z #u)))
+          ;; Members by shape, which no two in a union share.
+          (ty-union (pp)
+            (let ((actual (tagcase at (ty-union (aa) aa) (else z (the k-ids (cons a nil))))))
+              (k-unify-members pp actual kinds solved trail)))
           (ty-bloblet (fp zp r)
             (tagcase at
               (ty-bloblet (fa za s)
@@ -801,6 +819,13 @@
           #u
           (begin (k-unify (car xs) (car ys) kinds solved trail)
                  (k-unify-lists (cdr xs) (cdr ys) kinds solved trail)))))
+  (k-unify-members (subr (maxeff kstate spin) (k-ids k-ids k-binders k-solved k-trail) unit)
+    (lambda (pp actual kinds solved trail)
+      (if (null? pp)
+          #u
+          (let ((y (k-same-shape-in (car pp) actual)))
+            (begin (if (>= y 0) (k-unify (car pp) y kinds solved trail) #u)
+                   (k-unify-members (cdr pp) actual kinds solved trail))))))
   (k-unify-parts (subr (maxeff kstate spin) (k-parts k-parts k-binders k-solved k-trail) unit)
     (lambda (pp pa kinds solved trail)
       (if (null? pp)
@@ -809,9 +834,23 @@
             (begin (if (>= y 0) (k-unify (extract (car pp) 2) y kinds solved trail) #u)
                    (k-unify-parts (cdr pp) pa kinds solved trail)))))))
 
-;; Instantiate a polymorphic value used, unapplied, where `expected` is
-;; wanted.
-(define k-instantiate-against (subr (maxeff checks spin) (int int int int) int)
+;; Whether `t` is a list, or a pair that may be `nil`, whose elements are
+;; a binder of its own: a type only the empty list has.
+(define k-list-of-any? (subr (maxeff kstate spin) (int) bool)
+  (lambda (t)
+    (let ((bo (k-binders-of t)))
+      (tagcase (k-get (extract bo 2))
+        (ty-pair (x d r nl)
+          (and nl (tagcase (k-get x) (ty-var (v) (k-binder-has? (extract bo 1) v)) (else y #f))))
+        (else y #f)))))
+;; The first of a union's members that is a pair (`nil?` false) or `nil`, or -1.
+(define k-member-like (subr (maxeff kreads spin) (k-ids bool) int)
+  (lambda (ms nil?)
+    (cond ((null? ms) -1)
+          ((tagcase (k-get (car ms)) (ty-pair (x d r nl) (not nil?)) (ty-nil () nil?) (else y #f))
+           (car ms))
+          (else (k-member-like (cdr ms) nil?)))))
+(define k-instantiate-plain (subr (maxeff checks spin) (int int int int) int)
   (lambda (t expected a b)
     (let* ((bo (k-binders-of t)) (kinds (extract bo 1)) (inner (extract bo 2))
            (solved (the k-solved (new nil))))
@@ -822,6 +861,28 @@
           (begin (k-check-bounds kinds m a b)
                  (k-check-finite-sizes kinds m inner a b)
                  (let ((inst (k-subst inner m))) (begin (k-no-knot inst a b) inst))))))))
+;; Instantiate a polymorphic value used, unapplied, where `expected` is
+;; wanted. A list of any elements (`nil`, `no-pair`) is the empty list, so
+;; `nil` where that is wanted, or a pair that may be `nil` but is no list
+;; (its tail another type), which only `nil` fits; where a union is, the
+;; union's pair if it has one, else its `nil`.
+(define k-instantiate-against (subr (maxeff checks spin) (int int int int) int)
+  (lambda (t expected a b)
+    (let ((e (k-resolve expected)))
+      (if (k-list-of-any? t)
+          (tagcase (k-get e)
+            (ty-nil () e)
+            (ty-pair (x tail r nl)
+              (if (and nl (not (= (k-resolve tail) e)))
+                  (k-ty-new (ty-nil))
+                  (k-instantiate-plain t e a b)))
+            (ty-union (ns)
+              (let ((p (k-member-like ns #f)) (n (k-member-like ns #t)))
+                (cond ((>= p 0) (k-instantiate-against t p a b))
+                      ((>= n 0) n)
+                      (else (k-instantiate-plain t e a b)))))
+            (else y (k-instantiate-plain t e a b)))
+          (k-instantiate-plain t e a b)))))
 (define k-plambda-matches? (subr kreads (kx k-ty) bool)
   (lambda (x et)
     (tagcase x

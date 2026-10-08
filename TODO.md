@@ -1454,8 +1454,10 @@ in one branch joins to the other branch's list type.
   unions like `(union symbol null)` would be built from.
 - Q7's first stage (2026-10-07) made `pairof` non-`nil` and spells "a
   pair, or none" `(union nil (pairof …))`, `nil` written as a type only
-  there so far. Its second stage, unions of disjoint shapes, needs `nil` as
-  a type of its own: this item is done with it.
+  there so far. Its second stage (2026-10-07) made `nil` a type of its own,
+  in unions and where a pair that may be `nil` is expected whose tail is
+  no list (instantiation gives the type `nil` there); the value `nil` is
+  still polymorphic everywhere else, so the joins and `let`s above remain.
 
 ## 49. `sexp-edit indent`: re-indent as fx26-mode does (the user's, 2026-10-07)
 
@@ -1606,3 +1608,74 @@ Left:
   collect (discussed with `never_collects`) must count a frame-making entry
   as allocating.
 
+
+## 54. Propositions in procedure types (the user's, 2026-10-07)
+
+What a test's result says of its arguments is not an effect (what a call
+does) but part of its type: Typed Racket's latent propositions (a
+function type `τ → σ ; ψ+ | ψ− ; o`, propositions where the result is true
+and where false, about an object such as parameter 1; Tobin-Hochstadt
+and Felleisen, ICFP 2010), TypeScript's `x is T`, Python's `TypeIs`; in
+refinement terms a refined `bool` that depends on an argument.
+
+FX-26 has several, each hard-coded in both checkers: `null?` (and Q7's
+shape predicates, `pair?`, `int?`, …) narrowing a variable; `<`, `=` and
+`null?` of a `nlist` giving size facts; `length-is?` and `acyclic?`
+certifying. One mechanism would take their place, the built-ins then
+ordinary standard types, and let a user's `item-null?` narrow too
+(`docs/research/logical-types.md`, question 5).
+- A form in `subr`'s result, say `(proves (then P) (else Q))`, `P` and `Q`
+  conjunctions of facts about parameters: a shape (`(shape 0 pair)`, cheap,
+  since union members' shapes are disjoint), a size relation (the linear
+  facts the checkers solve already), a certification.
+- A call on variables gives the facts for its branches; `not`, `and`, `or`
+  combine them as now (conjunctions only).
+- Checking a `lambda` against such a type: its body's own propositions
+  must imply the declared ones (what makes a user's predicate sound).
+- Subtyping: proving more fits asking less, covariantly, as a result does.
+- After Q7's stage 2, whose built-in predicates are the first instance.
+- Types on paths (the user's, 2026-10-07): what a proposition is about is
+  an object, as Typed Racket's are, a path from a variable — `(car x)`,
+  `(cdr (cdr x))`, `(extract p 1)` — not only a variable, so `(if (int?
+  (car x)) (+ (car x) 1) …)` narrows. Sound only where nothing between
+  the test and the use can change what the path reaches: through frozen
+  pairs, products, sums and immutable bindings, never a mutable pair, a
+  `ref` or an array (whose writes would have to forget what is known, as
+  `set!` would). A proposition in a procedure's type names its object by
+  parameter and path (`(shape (car 0) int)`).
+
+The user's word (2026-10-07): once stage 2 works, reframe its narrowing as
+explicit latent propositions in the predicates' standard types, a coherent
+type-signature model for the analysis; checking a `lambda` against such a
+type can wait.
+
+## 55. Bitwise operations in FX-26 (the user's, 2026-10-07)
+
+FX-26 has none: no `and`, `or`, `xor`, shifts on `int` (nor on the
+fixed widths, `i32` …, where they are most wanted). The FX-26 checker's
+union shapes (`check-unions.fx`) are lists of shape numbers for want of
+them, where `check.rs` has a bit mask.
+- Standard operations in both checkers, the evaluator, both compilers and
+  native code: `int-and`, `int-or`, `int-xor`, `int-not`, shifts
+  (arithmetic right, left), and per-width ones as the fixed-width names go
+  (`u32-and` …, `docs/fx26.md`, "Fixed widths").
+- Then the shapes as masks in `check-unions.fx`.
+- Right after Q7's stage 2.
+
+## 56. Shape predicates inline (Q7's stage 2, measured 2026-10-07)
+
+Of the shape predicates only `null?` compiles inline (`eq` with `nil`);
+`pair?`, `int?`, `procedure?` and the rest are primitive calls, call-outs
+from native code. Natively, 10M tests in a loop: `null?` 0.17 s, `pair?`
+0.30 s, `procedure?` 0.31 s, `int?` 0.33 s. `scheme-bench/lseq.fx` with
+its tail a union, `(union lseq gen)` taken apart by `typecase` on
+`procedure?` (as Larceny's `procedure?` does), takes 6.6 s against the
+sum's 4.0 s (back to back, `--calling-convention native`), over 89M
+`lseq-cdr` calls: 29 ns more each, though the union makes no sum per
+element. So the port stays a sum until:
+- a word operation testing a shape (tag, and for a bloblet its kind) in
+  each machine: the cellular machine, native words, `direct.rs`, register
+  code; and both compilers emitting it for the shape predicates;
+- then `lseq` converted (the conversion is in this item's history: the
+  types `(union nil (pairof int tail @heap))` and `(union lseq gen)`,
+  `nil` for `no-pair`, `typecase` with `(else rest rest)`), and measured.

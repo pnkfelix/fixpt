@@ -33,6 +33,9 @@ pub const PARSER_TOP: &str = include_str!("parser-top.fx");
 /// as the driver read them. After [`PARSER`], before [`PARSER_TOP`].
 pub const PARSER_EXPS: &str = include_str!("parser-exps.fx");
 
+/// The evaluator's primitives, by name. Before [`EVALUATOR`].
+pub const EVALUATOR_NAMES: &str = include_str!("evaluator-names.fx");
+
 /// The evaluator written in FX-26, which runs the parser's trees.
 pub const EVALUATOR: &str = include_str!("evaluator.fx");
 
@@ -87,14 +90,16 @@ pub const NATIVE_LAYOUT: &str = include_str!("native-layout.fx");
 pub const NATIVE: &str = include_str!("native.fx");
 
 /// The checker written in FX-26, over the parser's trees, in files of its
-/// parts, in order: types and effects, the environment, printing, reading
+/// parts, in order: types, effects, the environment, printing, unions, reading
 /// descriptions, resolving them, errors, modules' descriptions, subtyping,
 /// instantiation, termination and what tests say of sizes, the rules,
 /// modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 30] = [
+pub const CHECKER_FILES: [(&str, &str); 32] = [
     ("check-types.fx", include_str!("check-types.fx")),
+    ("check-effects.fx", include_str!("check-effects.fx")),
     ("check-env.fx", include_str!("check-env.fx")),
     ("check-print.fx", include_str!("check-print.fx")),
+    ("check-unions.fx", include_str!("check-unions.fx")),
     ("check-holds.fx", include_str!("check-holds.fx")),
     ("check-read.fx", include_str!("check-read.fx")),
     ("check-syntax.fx", include_str!("check-syntax.fx")),
@@ -133,7 +138,7 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 53] = [
+pub const FRONT_END_FILES: [(&str, &str); 56] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("parser-exps.fx", PARSER_EXPS),
@@ -169,6 +174,9 @@ pub const FRONT_END_FILES: [(&str, &str); 53] = [
     CHECKER_FILES[27],
     CHECKER_FILES[28],
     CHECKER_FILES[29],
+    CHECKER_FILES[30],
+    CHECKER_FILES[31],
+    ("evaluator-names.fx", EVALUATOR_NAMES),
     ("evaluator.fx", EVALUATOR),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),

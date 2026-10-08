@@ -40,6 +40,25 @@ pub const FLATLAYOUT: &str = "(flatlayout (t type)) int";
 /// safety's analyses (its regions), opaque to anything else; its elements
 /// raw at run time, as its layout says.
 pub const FLATARRAYOF: &str = "(flatarrayof (t type) (r region)) (arrayof t r)";
+/// The shapes a value may have at run time (`Checker::shape`), bit `i` the
+/// `i`th, each with the standard predicate that tests for it: what a
+/// union's members must differ in, and what narrows one.
+pub const SHAPES: &[(&str, &str)] = &[
+    ("int", "int?"),
+    ("f64", "f64?"),
+    ("f32", "f32?"),
+    ("char", "char?"),
+    ("bool", "bool?"),
+    ("nil", "null?"),
+    ("pair", "pair?"),
+    ("string", "string?"),
+    ("symbol", "symbol?"),
+    ("procedure", "procedure?"),
+    ("bloblet", "array?"),
+    ("box", "ref?"),
+    ("sum", "sum?"),
+    ("product", "product?"),
+];
 /// A kind of key that has identity (Q5), generative type 3: `k`, a mutable
 /// object at `r`, which only the standard dictionaries (`pair-identity` and
 /// kin) are made for; nothing at run time.
@@ -137,6 +156,9 @@ pub struct Checker {
     /// that may be `nil`, now one that is not). `docs/research/
     /// logical-types.md`, L0.
     pub(crate) narrowed: Vec<(Sym, usize, TyId)>,
+    /// Unions read with a member not yet known, a recursive type's own
+    /// name, and where: checked once it is (`Checker::union_of`).
+    pub(crate) pending_unions: Vec<(TyId, fixpt_read::Span)>,
     /// Whether `unify` is inside a pair's contents, which are invariant: a
     /// binder solved already takes what it meets there, if the two are
     /// related, since nothing else will check (`infer.rs`, `unify`).
@@ -410,6 +432,7 @@ impl Checker {
             certified_nats: Vec::new(),
             certified_lengths: Vec::new(),
             narrowed: Vec::new(),
+            pending_unions: Vec::new(),
             unify_exact: false,
             size_facts: Vec::new(),
             skolems: Vec::new(),
@@ -585,6 +608,140 @@ impl Checker {
         Some(self.env[i].1)
     }
 
+    /// The shapes a value of type `t` may have at run time, as bits
+    /// (`SHAPES`): what its tag says, and for a bloblet its kind. None if
+    /// they are not known (a variable, an abstract or generative type,
+    /// `datum`), which no union may have a member of.
+    pub(crate) fn shape(&self, t: TyId) -> Option<u32> {
+        self.shape_in(t, &mut Vec::new())
+    }
+
+    /// The same, `seen` the unions met on the way down: one met again is
+    /// its own member, whose shape is not known.
+    fn shape_in(&self, t: TyId, seen: &mut Vec<TyId>) -> Option<u32> {
+        let bit = |name: &str| SHAPES.iter().position(|(n, _)| *n == name).map(|i| 1u32 << i);
+        let t = self.arena.resolve(t);
+        match self.arena.get(t) {
+            Ty::Base(s) => match self.interner.name(*s) {
+                "int" | "i32" | "u32" | "i64" | "u64" => bit("int"),
+                "f64" => bit("f64"),
+                "f32" => bit("f32"),
+                "char" => bit("char"),
+                "bool" => bit("bool"),
+                "string" => bit("string"),
+                // `unit` is the symbol `#u` at run time.
+                "symbol" | "unit" => bit("symbol"),
+                _ => None,
+            },
+            Ty::Nat(_) => bit("int"),
+            Ty::Nil => bit("nil"),
+            Ty::Pair(_, _, _, nil) => Some(bit("pair")? | if *nil { bit("nil")? } else { 0 }),
+            Ty::NList { .. } => Some(bit("pair")? | bit("nil")?),
+            Ty::Subr { .. } | Ty::Composable { .. } => bit("procedure"),
+            // An array is a bloblet as `(bloblet …)` is, of the same kind.
+            Ty::Array(..) | Ty::Bloblet { .. } => bit("bloblet"),
+            Ty::Ref(..) => bit("box"),
+            Ty::Sum(_) => bit("sum"),
+            Ty::Product(_) => bit("product"),
+            Ty::Union(ms) => {
+                if seen.contains(&t) {
+                    return None;
+                }
+                seen.push(t);
+                let s = ms.iter().try_fold(0, |acc, m| Some(acc | self.shape_in(*m, seen)?));
+                seen.pop();
+                s
+            }
+            Ty::Void => Some(0),
+            _ => None,
+        }
+    }
+
+    /// The union of `members`, normalized: unions in it flattened, `nil` and
+    /// a pair that is not `nil` made the pair that may be, and one member
+    /// itself. Each member must have a known shape, and no two the same
+    /// (`docs/research/logical-types.md`, L1).
+    pub(crate) fn union_of(&mut self, members: &[TyId], span: fixpt_read::Span) -> R<TyId> {
+        let mut flat: Vec<TyId> = Vec::new();
+        for &m in members {
+            let m = self.arena.resolve(m);
+            match self.arena.get(m).clone() {
+                Ty::Union(ms) => flat.extend(ms.iter().map(|x| self.arena.resolve(*x))),
+                _ => flat.push(m),
+            }
+        }
+        // A member not yet known (a recursive type's own name, read before
+        // its definition is): the union checked once it is.
+        let open = |c: &Self, m: TyId| matches!(c.arena.get(c.arena.resolve(m)), Ty::Link(None));
+        let pending = flat.iter().any(|m| open(self, *m));
+        if !pending {
+            self.union_members_known(&flat, span)?;
+        }
+        // `nil` beside a pair: the pair that may be `nil`.
+        if let Some(n) = flat.iter().position(|m| matches!(self.arena.get(*m), Ty::Nil)) {
+            let pairs: Vec<usize> = (0..flat.len()).filter(|&i| matches!(self.arena.get(flat[i]), Ty::Pair(..))).collect();
+            if let [p] = pairs[..] {
+                if let Ty::Pair(a, b, r, false) = self.arena.get(flat[p]).clone() {
+                    flat[p] = self.arena.ty(Ty::Pair(a, b, r, true));
+                }
+                flat.remove(n);
+            }
+        }
+        if pending {
+            let u = self.arena.ty(Ty::Union(flat));
+            self.pending_unions.push((u, span));
+            return Ok(u);
+        }
+        self.union_members_differ(&flat, span)?;
+        match flat[..] {
+            [] => Ok(self.arena.ty(Ty::Void)),
+            [m] => Ok(m),
+            _ => Ok(self.arena.ty(Ty::Union(flat))),
+        }
+    }
+
+    fn union_members_known(&mut self, ms: &[TyId], span: fixpt_read::Span) -> R<()> {
+        for &m in ms {
+            if self.shape(m).is_none() {
+                return Err(FxError::at(span, format!("a {} cannot be in a union: its shape at run time is not known", self.show_ty(m))));
+            }
+        }
+        Ok(())
+    }
+
+    fn union_members_differ(&mut self, ms: &[TyId], span: fixpt_read::Span) -> R<()> {
+        for i in 0..ms.len() {
+            for j in i + 1..ms.len() {
+                if self.shape(ms[i]).unwrap_or(0) & self.shape(ms[j]).unwrap_or(0) != 0 {
+                    return Err(FxError::at(
+                        span,
+                        format!("a union's members must differ in shape at run time: a {} and a {} do not", self.show_ty(ms[i]), self.show_ty(ms[j])),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The unions read before what they name was (`pending_unions`), each
+    /// whose members are all known now checked as `union_of` would have.
+    pub(crate) fn check_pending_unions(&mut self) -> R<()> {
+        let open = |c: &Self, m: TyId| matches!(c.arena.get(c.arena.resolve(m)), Ty::Link(None));
+        let mut i = 0;
+        while i < self.pending_unions.len() {
+            let (u, span) = self.pending_unions[i];
+            let Ty::Union(ms) = self.arena.get(u).clone() else { unreachable!("a union") };
+            if ms.iter().any(|m| open(self, *m)) {
+                i += 1;
+                continue;
+            }
+            self.pending_unions.remove(i);
+            self.union_members_known(&ms, span)?;
+            self.union_members_differ(&ms, span)?;
+        }
+        Ok(())
+    }
+
     /// What `test` narrows, where it holds and where it does not: `(null?
     /// v)`, `v` a variable whose pairs may be `nil`, makes `v` a pair that
     /// is not where it does not hold. Through `not`, and through `and` and
@@ -611,11 +768,58 @@ impl Checker {
             let (t, e) = self.narrowings(x);
             return (e, t);
         }
-        let Some((v, i)) = self.certifying_test(test, "null?") else { return none };
+        let Some((mask, (v, i))) = SHAPES.iter().enumerate().find_map(|(k, (_, p))| Some((1u32 << k, self.certifying_test(test, p)?))) else {
+            return none;
+        };
         let t = self.arena.resolve(self.lookup(v).unwrap_or(self.env[i].1));
+        let (yes, no) = self.narrowed_by(t, mask);
+        let at = |t: Option<TyId>| t.map(|t| vec![(v, i, t)]).unwrap_or_default();
+        (at(yes), at(no))
+    }
+
+    /// Type `t` where a value of it is found of one of the shapes in `mask`,
+    /// and where not: a union's members of those shapes, and the rest; a
+    /// pair that may be `nil`, the pair that is not, where `null?` does not
+    /// hold or `pair?` does. Nothing else is narrowed (a list found `nil`
+    /// stays a list, which is what `cons` onto it wants).
+    pub(crate) fn narrowed_by(&mut self, t: TyId, mask: u32) -> (Option<TyId>, Option<TyId>) {
+        let nil = 1u32 << SHAPES.iter().position(|(n, _)| *n == "nil").expect("nil");
+        let pair = 1u32 << SHAPES.iter().position(|(n, _)| *n == "pair").expect("pair");
         match self.arena.get(t).clone() {
-            Ty::Pair(a, b, r, true) => (vec![], vec![(v, i, self.arena.ty(Ty::Pair(a, b, r, false)))]),
-            _ => none,
+            Ty::Pair(a, b, r, true) => {
+                let not_nil = self.arena.ty(Ty::Pair(a, b, r, false));
+                match mask {
+                    m if m == nil => (None, Some(not_nil)),
+                    m if m == pair => (Some(not_nil), None),
+                    _ => (None, None),
+                }
+            }
+            Ty::Union(ms) => {
+                let (mut inside, mut outside) = (Vec::new(), Vec::new());
+                for m in ms {
+                    // A pair that may be `nil` is two members here.
+                    let parts = match self.arena.get(self.arena.resolve(m)).clone() {
+                        Ty::Pair(a, b, r, true) if mask & (nil | pair) != 0 && mask & (nil | pair) != nil | pair => {
+                            vec![self.arena.ty(Ty::Nil), self.arena.ty(Ty::Pair(a, b, r, false))]
+                        }
+                        _ => vec![m],
+                    };
+                    for p in parts {
+                        let s = self.shape(p).unwrap_or(0);
+                        if s & mask == s {
+                            inside.push(p);
+                        } else if s & mask == 0 {
+                            outside.push(p);
+                        } else {
+                            inside.push(p);
+                            outside.push(p);
+                        }
+                    }
+                }
+                let span = fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0);
+                (self.union_of(&inside, span).ok(), self.union_of(&outside, span).ok())
+            }
+            _ => (None, None),
         }
     }
 
@@ -1320,11 +1524,12 @@ impl Checker {
                 continue;
             }
             match self.arena.get(t) {
-                Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Place(_) => {}
+                Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Place(_) => {}
                 Ty::Pair(a, b, _, _) => stack.extend([*a, *b]),
                 Ty::NList { elem: a, .. } | Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) => stack.push(*a),
                 Ty::Bloblet { fields, .. } => stack.extend(fields),
                 Ty::Product(ps) | Ty::Sum(ps) => stack.extend(ps.iter().map(|(_, x)| *x)),
+                Ty::Union(ms) => stack.extend(ms.iter().copied()),
                 _ => return false,
             }
         }
@@ -1485,7 +1690,12 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Union(ms) => {
+                for m in ms {
+                    self.regions_walk(m, seen, out);
+                }
+            }
             Ty::Link(Some(_)) => unreachable!("resolved"),
             // A description function applied, which cannot be looked into:
             // what it was given; a function, what its body names.
@@ -1614,6 +1824,7 @@ impl Checker {
             Ty::NList { elem, .. } => vec![elem],
             Ty::Poly { body, .. } => vec![body],
             Ty::Product(ps) | Ty::Sum(ps) => ps.into_iter().map(|(_, x)| x).collect(),
+            Ty::Union(ms) => ms,
             Ty::PromptTag { answer: a, payload: b, .. } | Ty::Composable { arg: a, answer: b, .. } => vec![a, b],
             Ty::Named { which, args } => [self.generatives[which as usize].rep]
                 .into_iter()
@@ -1663,9 +1874,10 @@ impl Checker {
         }
         let here = |q: Region| place.is_none_or(|p| q == Region::Heap || q == p);
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void => true,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil => true,
             Ty::Var(v) => self.arena.is_data_var(v) && here(self.data_var_place(v)),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.data_walk(*x, seen, place)),
+            Ty::Union(ms) => ms.iter().all(|x| self.data_walk(*x, seen, place)),
             Ty::Pair(a, b, r, _) => {
                 r.is_frozen() && here(Self::data_place(r)) && self.data_walk(a, seen, place) && self.data_walk(b, seen, place)
             }
@@ -1691,6 +1903,7 @@ impl Checker {
         match self.arena.get(t).clone() {
             Ty::Var(v) if self.arena.is_data_var(v) => note(self.data_var_place(v)),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().for_each(|(_, x)| self.data_places(*x, seen, out)),
+            Ty::Union(ms) => ms.iter().for_each(|x| self.data_places(*x, seen, out)),
             Ty::Pair(a, b, r, _) => {
                 note(Self::data_place(r));
                 self.data_places(a, seen, out);
@@ -1774,7 +1987,7 @@ impl Checker {
             r => r,
         };
         let ty = self.arena.get(t).clone();
-        if !matches!(ty, Ty::Pair(..) | Ty::Product(_) | Ty::Sum(_) | Ty::Bloblet { .. }) {
+        if !matches!(ty, Ty::Pair(..) | Ty::Product(_) | Ty::Sum(_) | Ty::Union(_) | Ty::Bloblet { .. }) {
             return t;
         }
         let slot = self.arena.ty(Ty::Link(None));
@@ -1783,6 +1996,7 @@ impl Checker {
             Ty::Pair(a, b, r, n) => Ty::Pair(self.finitize_memo(a, memo), self.finitize_memo(b, memo), fin(r), n),
             Ty::Product(ps) => Ty::Product(ps.into_iter().map(|(l, x)| (l, self.finitize_memo(x, memo))).collect()),
             Ty::Sum(ps) => Ty::Sum(ps.into_iter().map(|(l, x)| (l, self.finitize_memo(x, memo))).collect()),
+            Ty::Union(ms) => Ty::Union(ms.into_iter().map(|x| self.finitize_memo(x, memo)).collect()),
             Ty::Bloblet { fields, frozen, region } => Ty::Bloblet {
                 fields: fields.into_iter().map(|f| self.finitize_memo(f, memo)).collect(),
                 frozen,
@@ -1917,6 +2131,12 @@ impl Checker {
                     self.polarity(x, v, at, seen, found);
                 }
             }
+            // Immutable, as a sum: covariant in its members.
+            Ty::Union(ms) => {
+                for x in ms {
+                    self.polarity(x, v, at, seen, found);
+                }
+            }
             Ty::PromptTag { answer: a, payload: b, effect, region }
             | Ty::Composable { arg: a, answer: b, effect, region } => {
                 reg(region, found);
@@ -2015,6 +2235,7 @@ impl Checker {
                 fields.iter().find_map(|f| self.knot_in(*f, &k, seen))
             }
             Ty::Product(parts) | Ty::Sum(parts) => parts.iter().find_map(|(_, x)| self.knot_in(*x, kept, seen)),
+            Ty::Union(ms) => ms.iter().find_map(|x| self.knot_in(*x, kept, seen)),
             Ty::NList { elem, .. } => self.knot_in(elem, kept, seen),
             Ty::Poly { body, .. } => self.knot_in(body, kept, seen),
             // A procedure: kept where it is, it may not read there unsaid;
@@ -2079,6 +2300,7 @@ impl Checker {
                 Ty::NList { elem, .. } => (vec![], vec![*elem]),
                 Ty::Bloblet { fields, .. } => (vec![], fields.clone()),
                 Ty::Product(parts) | Ty::Sum(parts) => (vec![], parts.iter().map(|(_, t)| *t).collect()),
+                Ty::Union(ms) => (vec![], ms.clone()),
                 Ty::Named { which, args } => {
                     let mut kids = vec![self.generatives[*which as usize].rep];
                     for d in args {
@@ -2242,9 +2464,41 @@ impl Checker {
                 && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
                 && self.sub(qa, qb, env, st);
         }
+        // A union is below what each of its members is; a type is below a
+        // union if below a member, or, a pair that may be `nil`, if `nil`
+        // and the pair that is not are each below one.
+        if !matches!(ta, Ty::Void) {
+            if let Ty::Union(ms) = &ta {
+                return ms.clone().iter().all(|m| self.sub(*m, b, env, st));
+            }
+            if let Ty::Union(ns) = &tb {
+                let ns = ns.clone();
+                let below_one = |c: &mut Self, x: TyId, st: &mut SubState| {
+                    ns.iter().any(|n| {
+                        let saved = st.clone();
+                        let ok = c.sub(x, *n, env, st);
+                        if !ok {
+                            *st = saved;
+                        }
+                        ok
+                    })
+                };
+                if below_one(self, a, st) {
+                    return true;
+                }
+                if let Ty::Pair(x, y, r, true) = ta {
+                    let (nil, pair) = (self.arena.ty(Ty::Nil), self.arena.ty(Ty::Pair(x, y, r, false)));
+                    return below_one(self, nil, st) && below_one(self, pair, st);
+                }
+                return false;
+            }
+        }
         match (ta, tb) {
             // `void` is the bottom type: nothing is ever returned as one.
             (Ty::Void, _) => true,
+            // `nil` is the empty list, so any list of no elements.
+            (Ty::Nil, Ty::Nil) | (Ty::Nil, Ty::Pair(_, _, _, true)) => true,
+            (Ty::Nil, Ty::NList { size, .. }) => self.size_le(&Size::lit(0), &size),
             (Ty::Base(x), Ty::Base(y)) => x == y,
             // A natural is an integer; one of a known size, a natural.
             (Ty::Nat(_), Ty::Base(_)) => b == self.int,
@@ -2584,6 +2838,7 @@ impl Checker {
             Ty::MarkKey(t, r) => Ty::MarkKey(self.subst_memo(t, map, memo), region(r)),
             Ty::Product(parts) => Ty::Product(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),
             Ty::Sum(parts) => Ty::Sum(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),
+            Ty::Union(ms) => Ty::Union(ms.iter().map(|t| self.subst_memo(*t, map, memo)).collect()),
             Ty::Module { abs, descs, vals } => Ty::Module {
                 abs,
                 descs: descs.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect(),

@@ -164,6 +164,7 @@
         (ty-product (ps) (ty-product (k-subst-parts ps m memo)))
         (ty-sum (ps) (ty-sum (k-subst-parts ps m memo)))
         (ty-bloblet (fs z r) (ty-bloblet (subs fs) z (reg r)))
+        (ty-union (ms) (ty-union (subs ms)))
         (ty-named (g ds) (ty-named g (k-subst-descs ds m memo)))
         (ty-lam (bs body) (ty-lam bs (car (k-subst-descs (the k-descs (cons body nil)) m memo))))
         (ty-nlist (e z r) (ty-nlist (sub e) (k-subst-size z m) (reg r)))

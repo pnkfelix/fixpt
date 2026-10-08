@@ -130,21 +130,25 @@
 (define k-narrows-append (subr (read @globals) (k-narrows k-narrows) k-narrows)
   (lambda (xs ys)
     (if (null? xs) ys (the k-narrows (cons (car xs) (k-narrows-append (cdr xs) ys))))))
-(define k-null-narrowing (subr (maxeff kstate spin) (kx) k-narrowing)
-  (lambda (p)
-    (let ((v (k-certifying-test p "null?")) (none (the k-narrowing (cons nil nil))))
-      (if (null? v)
-          none
-          (let* ((n (car (car v))) (d (cdr (car v))) (looked (k-lookup n)))
-            (if (< looked 0)
-                none
-                (tagcase (k-get (k-resolve looked))
-                  (ty-pair (a b r nl)
-                    (if nl
-                        (let ((not-nil (k-ty-new (ty-pair a b r #f))))
-                          (cons nil (the k-narrows (cons (product (1 n) (2 d) (3 not-nil)) nil))))
-                        none))
-                  (else y none))))))))
+;; Variable `n` at depth `d` narrowed to `t`, unless `t` is -1.
+(define k-narrow-one (subr (alloc @t) (symbol int int) k-narrows)
+  (lambda (n d t) (if (< t 0) nil (the k-narrows (cons (product (1 n) (2 d) (3 t)) nil)))))
+;; What a test of a shape (`null?`, `pair?`, `int?`, …, `k-shape-predicate`)
+;; of a variable narrows it to, where it holds and where not
+;; (`k-narrowed-by`): the first shape, from `k`, whose predicate `p` is.
+(define k-shape-narrowing (subr (maxeff kstate spin) (kx int) k-narrowing)
+  (lambda (p k)
+    (if (>= k k-shape-count)
+        (the k-narrowing (cons nil nil))
+        (let ((v (k-certifying-test p (k-shape-predicate k))))
+          (if (null? v)
+              (k-shape-narrowing p (+ k 1))
+              (let* ((n (car (car v))) (d (cdr (car v))) (looked (k-lookup n)))
+                (if (< looked 0)
+                    (the k-narrowing (cons nil nil))
+                    (let ((split (k-narrowed-by (k-resolve looked) k)))
+                      (cons (k-narrow-one n d (extract split 1))
+                            (k-narrow-one n d (extract split 2)))))))))))
 (define k-narrowings (subr (maxeff kstate spin) (kx) k-narrowing)
   (lambda (p)
     (let ((none (the k-narrowing (cons nil nil))))
@@ -157,7 +161,7 @@
         (x-app (f args a b)
           (if (and (string=? (k-std-op f) "not") (k-sc-one-arg? args))
               (let ((ns (k-narrowings (car args)))) (cons (cdr ns) (car ns)))
-              (k-null-narrowing p)))
+              (k-shape-narrowing p 0)))
         (else y none)))))
 ;; What checking an `if`'s branches puts back as it goes: what was certified, the size
 ;; facts, and what was narrowed, before; what its test shows when it holds, and when not;

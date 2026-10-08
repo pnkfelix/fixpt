@@ -303,6 +303,7 @@
                   (ty-bloblet (fs z r) (begin (add r) (walks fs)))
                   (ty-product (ps) (k-regions-parts ps seen out))
                   (ty-sum (ps) (k-regions-parts ps seen out))
+                  (ty-union (ms) (walks ms))
                   (ty-nlist (e z r) (begin (add r) (walk e)))
                   (ty-module (abs ds vs)
                     (begin (k-regions-parts ds seen out) (k-regions-parts vs seen out)))
@@ -488,7 +489,7 @@
       (ty-bloblet (fs z r) 13) (ty-link (x) 14) (ty-icell (x r) 15) (ty-place (r) 16)
       (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19)
       (ty-module (abs ds vs) 20) (ty-select (m n) 21) (ty-param (k n) 22)
-      (ty-lam (bs x) 23) (ty-app (f ds) 24))))
+      (ty-lam (bs x) 23) (ty-app (f ds) 24) (ty-nil () 25) (ty-union (ms) 26))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.
 (define k-lemma-head? (subr (maxeff kreads spin) (k-binders int int) bool)

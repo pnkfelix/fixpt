@@ -162,6 +162,11 @@ impl Checker {
         let out = match self.arena.get(t).clone() {
             Ty::Base(s) => self.interner.name(s).to_string(),
             Ty::Void => "void".into(),
+            Ty::Nil => "nil".into(),
+            Ty::Union(ms) => {
+                let ms: Vec<String> = ms.iter().map(|m| self.show_ty_on(*m, path)).collect();
+                format!("(union {})", ms.join(" "))
+            }
             Ty::Var(v) => self.interner.name(self.arena.dvar_name(v)).to_string(),
             Ty::Link(None) => "?".into(),
             Ty::Link(Some(_)) => unreachable!("resolved"),

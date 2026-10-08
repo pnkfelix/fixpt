@@ -456,6 +456,11 @@ pub fn never_collects(name: &str) -> bool {
                 | "%fx26-string<?" | "%fx26-string<=?" | "%fx26-string>?" | "%fx26-string>=?"
                 | "%fx26-char<?" | "%fx26-char<=?" | "%fx26-char>?" | "%fx26-char>=?"
         )
+        // The shape predicates, which only look.
+        || matches!(
+            name,
+            "null?" | "pair?" | "exact-integer?" | "char?" | "boolean?" | "string?" | "symbol?" | "%fx26-procedure?" | "%fx26-array?"
+        )
         || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
@@ -638,6 +643,15 @@ fn get_char(rt: &mut Runtime, v: Value) -> Outcome<char> {
 }
 
 /// A procedure is a closure, a primitive object, or a continuation.
+/// Whether `v` is a procedure of FX-26's, made by any machine: Scheme's, or a
+/// cellular or native closure, or a continuation of either.
+fn fx26_procedure(rt: &Runtime, v: Value) -> bool {
+    use fixpt_heap::layout::kind;
+    is_procedure(rt, v)
+        || (v.is_bloblet()
+            && [kind("cellular-closure"), kind("native-closure"), kind("cellular-continuation")].contains(&rt.heap.bloblet_kind(v)))
+}
+
 pub fn is_procedure(rt: &Runtime, v: Value) -> bool {
     matches!(
         rt.heap.obj_type(v),
@@ -1520,6 +1534,10 @@ prims! {
     // FX-26's `nat?`: an integer no less than 0.
     "%fx26-nat?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_fixnum() && a[0].as_fixnum() >= 0)));
     "%fx26-unit-cell", 0, Some(0), simple!(|rt, _a| Ok(rt.heap.intern("#u")));
+    // FX-26's shape predicates beyond Scheme's (`fixpt-fx26`, `check::SHAPES`):
+    // a procedure of any machine's, and a plain bloblet, as an array is.
+    "%fx26-procedure?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(fx26_procedure(rt, a[0]))));
+    "%fx26-array?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == PLAIN_BLOBLET)));
     "%fx26-nil-cell", 0, Some(0), simple!(|_rt, _a| Ok(Value::NULL));
     // A constant sum or product, made while compiling (`wcell-sum`,
     // `wcell-product`): a sum of tag `a[0]` and value `a[1]`; a product of

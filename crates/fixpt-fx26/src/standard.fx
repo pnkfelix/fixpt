@@ -39,6 +39,7 @@
        (case n
          (("cons") "cons")
          (("rnew") "%region-new")
+         (("int?") "exact-integer?")
          (("f64+") "%fx26-f64+")
          (("f64-") "%fx26-f64-")
          (("f64*") "%fx26-f64*")
@@ -84,6 +85,9 @@
        (case n
          (("rcons") "%region-cons")
          (("null?") "null?")
+         (("pair?") "pair?")
+         (("char?") "char?")
+         (("bool?") "boolean?")
          (("f64<=") "%fx26-f64<=")
          (("f64>=") "%fx26-f64>=")
          (("f32<=") "%fx26-f32<=")
@@ -102,6 +106,7 @@
       ((6)
        (case n
          (("length") "length")
+         (("array?") "%fx26-array?")
          (("modulo") "modulo")
          (("i32-or") "%fx26-i32-or")
          (("u32-or") "%fx26-u32-or")
@@ -114,6 +119,8 @@
          (else "")))
       ((7)
        (case n
+         (("string?") "string?")
+         (("symbol?") "symbol?")
          (("f64-min") "%fx26-f64-min")
          (("f64-max") "%fx26-f64-max")
          (("f64-abs") "%fx26-f64-abs")
@@ -216,6 +223,7 @@
          (else "")))
       ((10)
        (case n
+         (("procedure?") "%fx26-procedure?")
          (("string-ref") "string-ref")
          (("datum-char") "%fx26-identity")
          (("datum-bool") "%fx26-identity")

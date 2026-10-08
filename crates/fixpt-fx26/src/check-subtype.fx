@@ -328,6 +328,11 @@
               (tagcase tt
                 (ty-pair (a2 b2 r2 n2) (and (bool=? n1 n2) (mr r1 r2) (mt a1 a2) (mt b1 b2)))
                 (else z (same))))
+            (ty-nil () (tagcase tt (ty-nil () #t) (else z (same))))
+            (ty-union (xs)
+              (tagcase tt
+                (ty-union (ys) (and (= (k-length xs) (k-length ys)) (k-match-list l xs ys m seen)))
+                (else z (same))))
             (ty-ref (x r) (tagcase tt (ty-ref (y q) (and (mr r q) (mt x y))) (else z (same))))
             (ty-array (x r) (tagcase tt (ty-array (y q) (and (mr r q) (mt x y))) (else z (same))))
             (ty-icell (x r) (tagcase tt (ty-icell (y q) (and (mr r q) (mt x y))) (else z (same))))
@@ -415,14 +420,51 @@
           ((and (not closed) (k-open-named? tb))
            (tagcase tb (ty-named (g ys) (k-sub a (k-unfold g ys) ea eb trail labels)) (else z #f)))
           (else (k-sub-shapes a b ta tb ea eb trail labels))))))
-  ;; `a ≤ b`, their nodes `ta` and `tb`, by their shapes.
+  ;; `a ≤ b`, their nodes `ta` and `tb`, by their shapes. A union is below
+  ;; what each of its members is; a type is below a union if below a
+  ;; member, or, a pair that may be `nil`, if `nil` and the pair that is
+  ;; not are each below one.
   (k-sub-shapes (subr (maxeff kstate spin) (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool)
+    (lambda (a b ta tb ea eb trail labels)
+      (tagcase ta
+        (ty-void () #t)
+        (ty-union (ms) (k-sub-all ms b ea eb trail labels))
+        (else z
+          (tagcase tb
+            (ty-union (ns)
+              (or (k-below-one a ns ea eb trail labels)
+                  (tagcase ta
+                    (ty-pair (x y r nl)
+                      (and nl (k-below-one (k-ty-new (ty-nil)) ns ea eb trail labels)
+                           (k-below-one (k-ty-new (ty-pair x y r #f)) ns ea eb trail labels)))
+                    (else w #f))))
+            (else w (k-sub-plain a b ta tb ea eb trail labels)))))))
+  (k-sub-all (subr (maxeff kstate spin) (k-ids int k-benv k-benv k-strail k-labels) bool)
+    (lambda (ms b ea eb trail labels)
+      (or (null? ms)
+          (and (k-sub (car ms) b ea eb trail labels) (k-sub-all (cdr ms) b ea eb trail labels)))))
+  ;; Whether `x` is below one of `ns`, what a failed try learnt forgotten.
+  (k-below-one (subr (maxeff kstate spin) (int k-ids k-benv k-benv k-strail k-labels) bool)
+    (lambda (x ns ea eb trail labels)
+      (and (not (null? ns))
+           (let ((st (get trail)) (sl (get labels)))
+             (or (k-sub x (car ns) ea eb trail labels)
+                 (begin (k-restore trail labels st sl)
+                        (k-below-one x (cdr ns) ea eb trail labels)))))))
+  (k-sub-plain (subr (maxeff kstate spin) (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool)
     (lambda (a b ta tb ea eb trail labels)
       (if (and (tagcase ta (ty-comp (x y e r) #t) (else z #f))
                (tagcase tb (ty-subr (e ps r cv) #t) (else z #f)))
           (k-sub-callable a b ea eb trail labels)
           (tagcase ta
             (ty-void () #t)
+            ;; `nil` is the empty list, so any list of no elements.
+            (ty-nil ()
+              (tagcase tb
+                (ty-nil () #t)
+                (ty-pair (y1 y2 s m) m)
+                (ty-nlist (y n s) (k-size-le? (k-size-lit 0) n))
+                (else z #f)))
             (ty-base (x) (tagcase tb (ty-base (y) (symbol=? x y)) (else z #f)))
             ;; A natural is an integer; one of a known size, a natural.
             (ty-nat (m)

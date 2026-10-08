@@ -251,6 +251,15 @@ pub enum Ty {
     /// The bottom type: the type of a call that never returns — to a
     /// continuation, here — and a subtype of every type.
     Void,
+    /// `nil`'s own type: the empty list alone, a member of unions
+    /// (`(union nil int)`), and below every pair that may be `nil`
+    /// (`docs/research/logical-types.md`, L1).
+    Nil,
+    /// `(union T …)`: a value of one of the members, whose shapes at run
+    /// time (`Checker::shape`) are disjoint, so that the shape says which.
+    /// Kept normalized: no member a union, and `nil` with a pair that is not
+    /// `nil` made the pair that may be (`Checker::union_of`).
+    Union(Vec<TyId>),
     Var(DVar),
     Subr { conv: Conv, effect: Effect, params: Vec<TyId>, result: TyId },
     Poly { binders: Vec<(DVar, Kind)>, body: TyId },

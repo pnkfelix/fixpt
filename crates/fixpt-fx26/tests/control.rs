@@ -180,7 +180,7 @@ fn the_marks_of_a_continuation_are_a_list() {
     c.bind("key", "(mark-key int @m)").expect("binds");
     let marks = "((proj (proj marks-of @m @p @l) int int int pure) k key)";
     assert_eq!(check(&mut c, marks), "(listof int @l) ! (maxeff (read @m) (alloc @l))");
-    let empty = "((proj (proj null? @l) int (listof int @l)) (proj nil @l int))";
+    let empty = "((proj null? (listof int @l)) (proj nil @l int))";
     assert_eq!(check(&mut c, empty), "bool ! pure");
 }
 

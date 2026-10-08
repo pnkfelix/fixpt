@@ -743,6 +743,7 @@ impl Checker {
                 Ty::Pair(a, b, _, _) => vec![(*a, false), (*b, false)],
                 Ty::Bloblet { fields, .. } => fields.iter().map(|f| (*f, false)).collect(),
                 Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| (*t, false)).collect(),
+                Ty::Union(ms) => ms.iter().map(|t| (*t, false)).collect(),
                 Ty::NList { elem, .. } => vec![(*elem, false)],
                 // Through its representation; what it was given, cautiously,
                 // as if taken as a parameter.
@@ -940,6 +941,31 @@ impl Checker {
     /// Instantiate a polymorphic value used, unapplied, where `expected` is
     /// wanted.
     pub(crate) fn instantiate_against(&mut self, t: TyId, expected: TyId, span: fixpt_read::Span) -> R<TyId> {
+        // A list of any elements (`nil`, `no-pair`) is the empty list, so
+        // `nil` where that is wanted, or a pair that may be `nil` but is no
+        // list (its tail another type), which only `nil` fits; where a union
+        // is, the union's pair if it has one, else its `nil`.
+        if self.list_of_any(t) {
+            let e = self.arena.resolve(expected);
+            match self.arena.get(e).clone() {
+                Ty::Nil => return Ok(e),
+                Ty::Pair(_, tail, _, true) if self.arena.resolve(tail) != e => return Ok(self.arena.ty(Ty::Nil)),
+                Ty::Union(ns) => {
+                    let is = |c: &Self, n: TyId, nil: bool| match c.arena.get(c.arena.resolve(n)) {
+                        Ty::Pair(..) => !nil,
+                        Ty::Nil => nil,
+                        _ => false,
+                    };
+                    if let Some(p) = ns.iter().find(|n| is(self, **n, false)) {
+                        return self.instantiate_against(t, *p, span);
+                    }
+                    if let Some(n) = ns.iter().find(|n| is(self, **n, true)) {
+                        return Ok(*n);
+                    }
+                }
+                _ => {}
+            }
+        }
         let (kinds, inner) = self.binders_of(t);
         let mut u = Unknowns { kinds, solved: HashMap::new() };
         self.unify(inner, expected, &mut u, &mut HashSet::new());
@@ -950,6 +976,18 @@ impl Checker {
         let inst = self.subst(inner, &map);
         self.no_knot(inst, span)?;
         Ok(inst)
+    }
+
+    /// Whether `t` is a list, or a pair that may be `nil`, whose elements are
+    /// a binder of its own: a type only the empty list has.
+    pub(crate) fn list_of_any(&self, t: TyId) -> bool {
+        let (kinds, inner) = self.binders_of(t);
+        match self.arena.get(self.arena.resolve(inner)) {
+            Ty::Pair(a, _, _, true) => {
+                matches!(self.arena.get(self.arena.resolve(*a)), Ty::Var(v) if kinds.iter().any(|(k, _)| k == v))
+            }
+            _ => false,
+        }
     }
 
     /// Give each region binder nothing has solved a fresh region of its own;
@@ -1157,6 +1195,11 @@ impl Checker {
         match (&p, &a) {
             // An application may become anything its function gives.
             (Ty::Var(_) | Ty::App { .. }, _) | (_, Ty::Void) => false,
+            // A union: only if what is given is of none of its shapes.
+            (Ty::Union(_), _) => match (self.shape(pattern), self.shape(actual)) {
+                (Some(w), Some(g)) => w & g == 0,
+                _ => false,
+            },
             (Ty::Subr { .. }, _) => a.as_subr().is_none(),
             // A `nlist` is a list.
             (Ty::Pair(..), Ty::NList { .. }) => false,
@@ -1223,6 +1266,10 @@ impl Checker {
                     stack.extend(parts.iter().map(|(_, t)| *t));
                     false
                 }
+                Ty::Union(ms) => {
+                    stack.extend(ms);
+                    false
+                }
                 Ty::Module { descs, vals, .. } => {
                     stack.extend(descs.iter().chain(&vals).map(|(_, t)| *t));
                     false
@@ -1233,7 +1280,7 @@ impl Checker {
                     stack.extend([x, y]);
                     region(r) || effect(&e)
                 }
-                Ty::Base(_) | Ty::Void | Ty::Link(_) => false,
+                Ty::Base(_) | Ty::Void | Ty::Nil | Ty::Link(_) => false,
                 Ty::Nat(size) => matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
                 Ty::NList { elem, size, region: r } => {
                     stack.push(elem);
@@ -1272,10 +1319,11 @@ impl Checker {
             Ty::Ref(a, _) | Ty::MarkKey(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) => self.walk_vars(a, seen, hit),
             Ty::Bloblet { fields, .. } => fields.iter().any(|f| self.walk_vars(*f, seen, hit)),
             Ty::Product(parts) | Ty::Sum(parts) => parts.iter().any(|(_, t)| self.walk_vars(*t, seen, hit)),
+            Ty::Union(ms) => ms.iter().any(|t| self.walk_vars(*t, seen, hit)),
             Ty::Pair(a, b, _, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
             Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) | D::Fun(x) if self.walk_vars(*x, seen, hit))),
             Ty::App { fun, args } => {
@@ -1326,6 +1374,14 @@ impl Checker {
                 }
                 Some(_) => {}
             },
+            // A union expected: the member whose shapes hold the pattern's
+            // (a `cons` where a list or an `int` is wanted, its pair).
+            (ref q, Ty::Union(aa)) if !matches!(q, Ty::Union(_)) => {
+                let Some(ps) = self.shape(p).filter(|s| *s != 0) else { return };
+                if let Some(y) = aa.iter().find(|y| self.shape(**y).is_some_and(|s| s & ps == ps)) {
+                    self.unify(p, *y, u, trail);
+                }
+            }
             (Ty::Subr { conv: pc, effect: pe, params: pp, result: pr }, at) => {
                 let Some((ae, ap, ar)) = at.as_subr() else { return };
                 if let Ty::Subr { conv: ac, .. } = at {
@@ -1354,6 +1410,18 @@ impl Checker {
                 self.unify(x1, y1, u, trail);
                 self.unify(x2, y2, u, trail);
                 self.unify_exact = outer;
+            }
+            // Members by shape, which no two in a union share.
+            (Ty::Union(pp), at) => {
+                let actual: Vec<TyId> = match at {
+                    Ty::Union(aa) => aa,
+                    _ => vec![a],
+                };
+                for x in &pp {
+                    if let Some(y) = actual.iter().find(|y| self.shape(**y).is_some() && self.shape(**y) == self.shape(*x)) {
+                        self.unify(*x, *y, u, trail);
+                    }
+                }
             }
             (Ty::Product(pp), Ty::Product(pa)) | (Ty::Sum(pp), Ty::Sum(pa)) => {
                 for (l, x) in &pp {

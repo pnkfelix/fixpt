@@ -153,9 +153,12 @@
     ;; gives may be what it was given, so a cycle through applications alone
     ;; may be no type at all once the function is known (Rémy's condition:
     ;; recursion only at the base kind; `check-kinds.fx`).
-    (if (k-through-apps? slot slot (the (ref k-ids @t) (new nil)))
-        (k-fail-ungrounded a b)
-        (k-grounded-from slot nil a b))))
+    (begin
+      (if (k-through-apps? slot slot (the (ref k-ids @t) (new nil)))
+          (k-fail-ungrounded a b)
+          (k-grounded-from slot nil a b))
+      ;; The unions read before it was, checked now their members are known.
+      (k-check-pending-unions))))
 (define k-dletrec-no-knot (subr (maxeff checks spin) (k-slots syn) unit)
   (lambda (ss s)
     (if (null? ss)

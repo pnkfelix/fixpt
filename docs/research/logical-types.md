@@ -588,6 +588,28 @@ contents, which are invariant, a binder solved already from the context
 takes what an argument says, where the two are related (`car` of a list's
 element where the context expects a pair that may be `nil`).
 
+**L1, as built (2026-10-07).** `(union T …)` of two members or more, of
+fourteen shapes (`check.rs`'s `SHAPES`: the tag, and for a bloblet its
+kind), normalized (flattened; `nil` beside a pair makes the pair that may
+be `nil`); a member of no known shape, or two sharing one, refused. A
+recursive type may run through a union: one read with a member not yet
+defined is checked once its knot is tied (both checkers, at `grounded`).
+Subtyping: a union is below what each member is below, a type below a
+union if below a member (a pair that may be `nil`, if `nil` and the pair
+are each below one). Inference: a union expected of a call's result
+solves it from the member whose shapes hold the result's; `nil` where a
+pair that may be `nil` is expected whose tail is no list is of the type
+`nil`. The shape predicates (`int?`, `char?`, `bool?`, `null?`, `pair?`,
+`string?`, `symbol?`, `procedure?`, `array?`) narrow a variable, splitting
+a union by its members' shapes, a pair that may be `nil` into `nil` and
+the pair; `typecase` is sugar over them, `else` required. In the FX-26
+checker shapes are lists of numbers, for want of bit operations (`TODO.md`
+§55). Not yet: the ports converted, since only `null?` is inline natively
+and `lseq` with a union takes 6.6 s against its sum's 4.0 s (`TODO.md`
+§56); predicates for `f64`, `f32`, `ref`, sums and products (their shapes
+are disjoint, but nothing tests for them); latent propositions in the
+predicates' own types (`TODO.md` §54, the user's next).
+
 ### 8.4 What not to do, and why
 
 - **General negation and a top type**: FX-26 values need not be

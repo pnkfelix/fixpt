@@ -89,6 +89,7 @@
               (ty-bloblet (fs z x) (k-writes-list fs r seen))
               (ty-product (ps) (k-writes-parts ps r seen))
               (ty-sum (ps) (k-writes-parts ps r seen))
+              (ty-union (ms) (k-writes-list ms r seen))
               (ty-nlist (e z x) (k-writes-in e r seen))
               (ty-named (g ds)
                 (begin (k-note-given ds r)

@@ -52,7 +52,17 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // The absent pair: `nil`, at any pair type, for "a pair, or none" (a
     // table's entry, say). `nil`'s type until 2026-09-29.
     ("no-pair", "(poly ((r region) (t1 type) (t2 type)) (union nil (pairof t1 t2 r)))"),
-    ("null?", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr pure ((union nil (pairof t1 t2 r))) bool)))"),
+    // The shape predicates (`check::SHAPES`): of any value, whether it has
+    // the shape, which narrows a union (`docs/research/logical-types.md`).
+    ("null?", "(poly ((t type)) (subr pure (t) bool))"),
+    ("pair?", "(poly ((t type)) (subr pure (t) bool))"),
+    ("int?", "(poly ((t type)) (subr pure (t) bool))"),
+    ("char?", "(poly ((t type)) (subr pure (t) bool))"),
+    ("bool?", "(poly ((t type)) (subr pure (t) bool))"),
+    ("string?", "(poly ((t type)) (subr pure (t) bool))"),
+    ("symbol?", "(poly ((t type)) (subr pure (t) bool))"),
+    ("procedure?", "(poly ((t type)) (subr pure (t) bool))"),
+    ("array?", "(poly ((t type)) (subr pure (t) bool))"),
     ("+", "(subr pure (int int) int)"),
     ("-", "(subr pure (int int) int)"),
     // A finite list's length, as a natural of its size.
