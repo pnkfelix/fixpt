@@ -94,8 +94,11 @@ fn symbols_are_values() {
     assert_eq!(run("(symbol=? 'a (string->symbol \"a\"))"), "#t");
     assert_eq!(run("(symbol->string 'Hello)"), "\"Hello\"");
     assert_eq!(run("'x"), "x");
-    let err = rejects("'(1 2)");
-    assert!(err.contains("only a symbol can be quoted"), "{err}");
+    // Any datum may be quoted (TODO §51); a bytevector not yet.
+    assert_eq!(check("'(1 2)"), "datum ! pure");
+    assert_eq!(run("'(1 (a . b) #(c))"), "(1 (a . b) #(c))");
+    let err = rejects("'#u8(1 2)");
+    assert!(err.contains("a bytevector cannot be quoted yet"), "{err}");
     // The same string hashes the same.
     assert_eq!(run("(= (string-hash \"abc\") (string-hash (string-append \"a\" \"bc\")))"), "#t");
 }

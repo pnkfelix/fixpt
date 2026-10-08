@@ -1505,7 +1505,20 @@ impl Checker {
             "tagcase" => self.parse_tagcase(span, &items[1..]),
             "quote" => match &items[..] {
                 [_, x] if x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
-                _ => Err(FxError::at(span, "only a symbol can be quoted: `'name`")),
+                [_, x] => {
+                    Self::no_bytevector(x)?;
+                    let built = self.quoted(x, None);
+                    self.parse_exp(&built)
+                }
+                _ => Err(FxError::at(span, "`(quote datum)`")),
+            },
+            "quasiquote" => match &items[..] {
+                [_, x] => {
+                    Self::no_bytevector(x)?;
+                    let built = self.quoted(x, Some(1));
+                    self.parse_exp(&built)
+                }
+                _ => Err(FxError::at(span, "`(quasiquote datum)`")),
             },
             form @ ("letregion" | "letfreeze" | "letrena" | "letreap") => {
                 let [_, name, body @ ..] = &items[..] else {
@@ -2545,6 +2558,127 @@ enum CaseLeaves<'a> {
 
 /// The shapes `typecase` tests (`check::SHAPES`), each with its standard
 /// predicate: those that have one.
+impl Checker {
+    /// What builds datum `x`, quoted (`depth` none) or quasiquoted at
+    /// `depth` (TODO §51): atoms as themselves, symbols quoted, `()` as
+    /// `nil`, lists as `cons`es, vectors and bytevectors from lists; a
+    /// list or vector in `(the datum …)`. Under `quasiquote`, `(unquote e)`
+    /// at depth 1 is `e`, and `(unquote-splicing e)` is `e` appended to
+    /// what follows; nested `quasiquote`s count depth as R7RS does. A
+    /// datum is immutable and acyclic, so building it anew each time differs
+    /// from Scheme's constant only in identity.
+    pub(crate) fn quoted(&mut self, x: &Syntax, depth: Option<u32>) -> Syntax {
+        let built = self.quoted_in(x, depth);
+        match &x.datum {
+            Datum::List { .. } | Datum::Vector(_) | Datum::Bytevector(_) if !matches!(self.unquoted(x, depth), Some(_)) => {
+                let the = self.named(x.span, "the");
+                let datum = self.named(x.span, "datum");
+                Syntax::list(x.span, vec![the, datum, built])
+            }
+            _ => built,
+        }
+    }
+
+    /// FX-26 has no way to read a bytevector's bytes, so the parser written
+    /// in it could not build a quoted one: refused in both, for now.
+    fn no_bytevector(x: &Syntax) -> R<()> {
+        match &x.datum {
+            Datum::Bytevector(_) => Err(FxError::at(x.span, "a bytevector cannot be quoted yet")),
+            Datum::List { items, tail } => {
+                items.iter().try_for_each(Self::no_bytevector)?;
+                tail.as_deref().map_or(Ok(()), Self::no_bytevector)
+            }
+            Datum::Vector(items) => items.iter().try_for_each(Self::no_bytevector),
+            _ => Ok(()),
+        }
+    }
+
+    fn named(&mut self, span: fixpt_read::Span, name: &str) -> Syntax {
+        let s = self.interner.intern(name);
+        Syntax::symbol(span, s)
+    }
+
+    fn call(&mut self, span: fixpt_read::Span, op: &str, mut args: Vec<Syntax>) -> Syntax {
+        let mut items = vec![self.named(span, op)];
+        items.append(&mut args);
+        Syntax::list(span, items)
+    }
+
+    /// `(form e)`, where `form` is `unquote` or `unquote-splicing`: `e`.
+    fn unquote_of<'a>(&self, x: &'a Syntax, form: &str) -> Option<&'a Syntax> {
+        match &x.datum {
+            Datum::List { items, tail: None } => match &items[..] {
+                [h, e] if h.as_symbol().is_some_and(|h| self.name(h) == form) => Some(e),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// `x`'s expression, if `x` is `(unquote e)` at depth 1.
+    fn unquoted<'a>(&self, x: &'a Syntax, depth: Option<u32>) -> Option<&'a Syntax> {
+        if depth == Some(1) { self.unquote_of(x, "unquote") } else { None }
+    }
+
+    fn quoted_in(&mut self, x: &Syntax, depth: Option<u32>) -> Syntax {
+        let span = x.span;
+        if let Some(e) = self.unquoted(x, depth) {
+            return e.clone();
+        }
+        match &x.datum {
+            Datum::Symbol(s) => match self.name(*s) {
+                // `#t` and `#f` are literals, as the FX-26 reader gives them.
+                "#t" | "#f" => x.clone(),
+                _ => {
+                    let q = self.named(span, "quote");
+                    Syntax::list(span, vec![q, x.clone()])
+                }
+            },
+            Datum::Nil => self.named(span, "nil"),
+            Datum::Bool(_) | Datum::Number(_) | Datum::Char(_) | Datum::Str(_) => x.clone(),
+            Datum::List { items, tail } => {
+                // A nested `quasiquote` deepens; an `unquote` (or
+                // `unquote-splicing`) not at depth 1 shallows.
+                let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h).to_string());
+                let inner = match (depth, head.as_deref()) {
+                    (Some(d), Some("quasiquote")) if items.len() == 2 => Some(d + 1),
+                    (Some(d), Some("unquote" | "unquote-splicing")) if items.len() == 2 && d > 1 => Some(d - 1),
+                    _ => depth,
+                };
+                let mut acc = match tail {
+                    Some(t) => self.quoted_in(t, depth),
+                    None => self.named(span, "nil"),
+                };
+                for (i, item) in items.iter().enumerate().rev() {
+                    let d = if i == 0 { depth } else { inner };
+                    if d == Some(1)
+                        && let Some(e) = self.unquote_of(item, "unquote-splicing")
+                    {
+                        let the = self.named(span, "the");
+                        let ty = {
+                            let (l, d, a) = (self.named(span, "listof"), self.named(span, "datum"), self.named(span, "acyclic"));
+                            Syntax::list(span, vec![l, d, a])
+                        };
+                        let rest = Syntax::list(span, vec![the, ty, acc]);
+                        acc = self.call(span, "append", vec![e.clone(), rest]);
+                        continue;
+                    }
+                    let q = self.quoted_in(item, d);
+                    acc = self.call(span, "cons", vec![q, acc]);
+                }
+                acc
+            }
+            Datum::Vector(items) => {
+                let list = Syntax::new(span, Datum::List { items: items.clone(), tail: None });
+                let l = self.quoted_in(&list, depth);
+                self.call(span, "datum-list->vector", vec![l])
+            }
+            // Refused before (`no_bytevector`).
+            Datum::Bytevector(_) => x.clone(),
+        }
+    }
+}
+
 const TYPECASE_SHAPES: &[(&str, &str)] = &[
     ("int", "int?"),
     ("char", "char?"),

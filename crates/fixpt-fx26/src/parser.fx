@@ -484,6 +484,69 @@
                  (ctors (dt-constructors used family? params (drop items 2) a b)))
             (cons (mk-form "define-type" (list head sum) a b) ctors))))))
 
+;; What builds datum `x`, quoted (`depth` -1) or quasiquoted at `depth`
+;; (TODO §51), as `Checker::quoted` builds it: atoms as themselves, symbols
+;; quoted, `()` as `nil`, lists as `cons`es, a vector from its list; a list
+;; or vector in `(the datum …)`. Under `quasiquote`, `(unquote e)` at depth
+;; 1 is `e`, and `(unquote-splicing e)` is `e` appended to what follows.
+(define quoted (subr parses (syn int) syn)
+  (lambda (x depth)
+    (let ((built (quoted-in x depth)) (a (syn-start x)) (b (syn-end x)))
+      (if (and (tagcase x (atom (d c e) #f) (lst (items d c e) (not (null? items))) (else y #t))
+               (null? (unquoted x depth)))
+          (mk-form "the" (list (mk-symbol "datum" a b) built) a b)
+          built))))
+;; `(form e)`: `e`, as a list of none or one.
+(define unquote-of (subr parses (syn string) syns-a)
+  (lambda (x form)
+    (tagcase x
+      (lst (items d a b)
+        (if (and (= (len items) 2) (string=? (syn-name (car items)) form)) (cdr items) nil))
+      (else y nil))))
+(define unquoted (subr parses (syn int) syns-a)
+  (lambda (x depth) (if (= depth 1) (unquote-of x "unquote") nil)))
+(define quoted-in (subr parses (syn int) syn)
+  (lambda (x depth)
+    (let ((u (unquoted x depth)) (a (syn-start x)) (b (syn-end x)))
+      (if (not (null? u))
+          (car u)
+          (tagcase x
+            (atom (d c e)
+              (cond ((not (symbol? d))
+                     (if (bytevector? d) (pfail "a bytevector cannot be quoted yet" x) x))
+                    ((or (symbol=? d sym-true) (symbol=? d sym-false)) x)
+                    (else (mk-form "quote" (list x) a b))))
+            (lst (items d c e) (quoted-items items (mk-symbol "nil" a b) depth a b))
+            (dotted (items tail d c e) (quoted-items items (quoted-in tail depth) depth a b))
+            (vec (items d c e)
+              (mk-form "datum-list->vector"
+                       (list (quoted-items items (mk-symbol "nil" a b) depth a b)) a b)))))))
+;; A list of `items`, then `end`, built: a nested `quasiquote` deepens, an
+;; `unquote` not at depth 1 shallows.
+(define quoted-items (subr parses (syns-a syn int int int) syn)
+  (lambda (items end depth a b)
+    (let* ((head (if (null? items) "" (syn-name (car items))))
+           (two (= (len items) 2))
+           (inner (cond ((< depth 0) depth)
+                        ((and two (string=? head "quasiquote")) (+ depth 1))
+                        ((and two (> depth 1)
+                              (or (string=? head "unquote") (string=? head "unquote-splicing")))
+                         (- depth 1))
+                        (else depth))))
+      (quoted-onto items end depth inner a b))))
+(define quoted-onto (subr parses (syns-a syn int int int int) syn)
+  (lambda (items end depth inner a b)
+    (if (null? items)
+        end
+        (let ((rest (quoted-onto (cdr items) end inner inner a b))
+              (spliced (if (= depth 1) (unquote-of (car items) "unquote-splicing") nil)))
+          (if (null? spliced)
+              (mk-form "cons" (list (quoted-in (car items) depth) rest) a b)
+              (let ((ty (mk-list (list (mk-symbol "listof" a b) (mk-symbol "datum" a b)
+                                       (mk-symbol "acyclic" a b))
+                                 a b)))
+                (mk-form "append" (list (car spliced) (mk-form "the" (list ty rest) a b)) a b)))))))
+
 
 ))
 
@@ -591,6 +654,7 @@
 (define param-head? (with parser-module param-head?))
 (define param-desc-item (with parser-module param-desc-item))
 (define mk-symbol (with parser-module mk-symbol))
+(define quoted (with parser-module quoted))
 (define rec-names (with parser-module rec-names))
 (define rec-types (with parser-module rec-types))
 (define rec-inits (with parser-module rec-inits))

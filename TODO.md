@@ -1500,6 +1500,12 @@ infer the precise category of the lattice (`docs/research/shapes.md`):
   `typecase`s. Natively: `deriv` 2.69 → 0.92 s, `dderiv` 3.38 → 1.65,
   `earley` 3.77 → 3.34, `peval` 7.18 → 6.77, answers the same; `parsing`
   8.1 → 8.3 (same allocation and collections: to look into).
+- **Progress (2026-10-08).** `quote` of any datum and `quasiquote`, with
+  `unquote` and `unquote-splicing` and R7RS depth, in both parsers: built
+  where written, as `cons`es in `(the datum …)` (`docs/fx26.md`,
+  "Datums"). Left: making a quoted datum once, as a frozen constant, and
+  folding `car`/`cdr` through it (§44's constant lists); a quoted
+  bytevector; and the lattice's categories, above.
 
 ## 52. Deep recursion in native code: what is left (the user's, 2026-10-07)
 
