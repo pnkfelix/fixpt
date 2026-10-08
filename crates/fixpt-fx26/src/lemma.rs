@@ -315,7 +315,7 @@ impl Checker {
             (Ty::Named { which: g, args: xs }, Ty::Named { which: h, args: ys }) => {
                 g == h && xs.iter().zip(&ys).all(|(x, y)| self.match_d(l, x, y, map, seen))
             }
-            (Ty::Nil, Ty::Nil) => true,
+            (Ty::Nil, Ty::Nil) | (Ty::False, Ty::False) => true,
             (Ty::Proving { then: t1, els: e1 }, Ty::Proving { then: t2, els: e2 }) => t1 == t2 && e1 == e2,
             (Ty::Union(xs), Ty::Union(ys)) => {
                 xs.len() == ys.len() && xs.iter().zip(&ys).all(|(x, y)| self.match_ty(l, *x, *y, map, seen))

@@ -50,6 +50,7 @@
         (ty-nat (z) 1)
         (ty-nil () 32)
         (ty-proving (t e) 16)
+        (ty-false () 16)
         (ty-pair (a b r nl) (if nl 96 64))
         (ty-nlist (e z r) 96)
         (ty-subr (e ps r cv) 512)
@@ -107,6 +108,15 @@
   (lambda (x ys)
     (let ((s (k-run-shape x)))
       (if (<= s 0) -1 (k-holding-in s ys)))))
+
+;; Whether `t` is `false`, or a union with it.
+(define k-false-member? (subr (maxeff kreads spin) (k-ids) bool)
+  (lambda (ms)
+    (and (not (null? ms))
+         (or (tagcase (k-get (car ms)) (ty-false () #t) (else y #f)) (k-false-member? (cdr ms))))))
+(define k-false-expected? (subr (maxeff kreads spin) (int) bool)
+  (lambda (t)
+    (tagcase (k-get t) (ty-false () #t) (ty-union (ms) (k-false-member? ms)) (else y #f))))
 
 ;; `ms`, resolved, a union among them its members.
 (define k-union-flat (subr (maxeff kreads (alloc @t) spin) (k-ids) k-ids)
@@ -289,6 +299,7 @@
 (define k-same-shape-in (with check-unions-module k-same-shape-in))
 (define k-member-holding (with check-unions-module k-member-holding))
 (define k-union-of (with check-unions-module k-union-of))
+(define k-false-expected? (with check-unions-module k-false-expected?))
 (define k-check-pending-unions (with check-unions-module k-check-pending-unions))
 (define-type k-split (select check-unions-module k-split))
 (define k-narrowed-by (with check-unions-module k-narrowed-by))

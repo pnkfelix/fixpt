@@ -666,6 +666,7 @@
         (ty-base (s) (symbol->string s))
         (ty-void () "void")
         (ty-nil () "nil")
+        (ty-false () "false")
         (ty-union (ms) (k-cat3 "(union " (k-join (k-show-list ms p) " ") ")"))
         (ty-proving (t e) (k-cat5 "(bool " (k-show-props "then" t) " " (k-show-props "else" e) ")"))
         (ty-var (v) (k-dvar-string v))

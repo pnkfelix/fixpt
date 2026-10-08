@@ -169,6 +169,7 @@ impl Checker {
             Ty::Base(s) => self.interner.name(s).to_string(),
             Ty::Void => "void".into(),
             Ty::Nil => "nil".into(),
+            Ty::False => "false".into(),
             Ty::Proving { then, els } => {
                 let side = |c: &Self, which: &str, ps: &[crate::ast::Prop]| {
                     let ps: Vec<String> = ps.iter().map(|p| c.show_prop(p)).collect();

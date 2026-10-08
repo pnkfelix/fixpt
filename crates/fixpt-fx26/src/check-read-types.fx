@@ -142,6 +142,7 @@
       (cond ((string=? n "void") k-void)
             ;; The empty list's own type (`docs/research/logical-types.md`, L1).
             ((and (string=? n "nil") (null? (k-lookup-desc sym))) (k-ty-new (ty-nil)))
+            ((and (string=? n "false") (null? (k-lookup-desc sym))) (k-ty-new (ty-false)))
             ((and (string=? n "nat") (null? (k-lookup-desc sym)))
              (k-ty-new (ty-nat (sz-finite))))
             ((>= base 0) base)

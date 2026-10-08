@@ -588,6 +588,12 @@ contents, which are invariant, a binder solved already from the context
 takes what an argument says, where the two are related (`car` of a list's
 element where the context expects a pair that may be `nil`).
 
+**L1's stage 3, as built (2026-10-07).** `false`, the type of `#f` alone,
+below `bool` and of its shape: a member of unions (`(union false int)`),
+which `bool?` narrows like any shape. `#f` synthesizes `bool`, as before
+(so a `ref` made with `#f` still takes `#t`), and checks as `false`
+where `false`, or a union with it, is expected.
+
 **L1, as built (2026-10-07).** `(union T …)` of two members or more, of
 fourteen shapes (`check.rs`'s `SHAPES`: the tag, and for a bloblet its
 kind), normalized (flattened; `nil` beside a pair makes the pair that may

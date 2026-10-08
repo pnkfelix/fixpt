@@ -264,6 +264,11 @@ pub enum Ty {
     /// (`(union nil int)`), and below every pair that may be `nil`
     /// (`docs/research/logical-types.md`, L1).
     Nil,
+    /// `false`: `#f` alone, below `bool`, of `bool`'s shape (a member of
+    /// unions, `(union false int)`; `docs/research/logical-types.md`, L1's
+    /// stage 3). `#f` is a `bool`, and checks as a `false` where one is
+    /// expected.
+    False,
     /// `(union T …)`: a value of one of the members, whose shapes at run
     /// time (`Checker::shape`) are disjoint, so that the shape says which.
     /// Kept normalized: no member a union, and `nil` with a pair that is not

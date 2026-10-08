@@ -610,7 +610,7 @@ impl Checker {
     /// The types `t` is made of, one level down.
     pub(crate) fn ty_kids(&self, t: TyId) -> Vec<TyId> {
         match self.arena.get(self.arena.resolve(t)) {
-            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::Proving { .. } | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::Link(_) => Vec::new(),
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::Link(_) => Vec::new(),
             Ty::Union(ms) => ms.clone(),
             Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).collect(),
             Ty::Poly { body, .. } => vec![*body],

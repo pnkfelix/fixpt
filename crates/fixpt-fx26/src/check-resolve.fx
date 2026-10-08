@@ -490,7 +490,7 @@
       (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19)
       (ty-module (abs ds vs) 20) (ty-select (m n) 21) (ty-param (k n) 22)
       (ty-lam (bs x) 23) (ty-app (f ds) 24) (ty-nil () 25) (ty-union (ms) 26)
-      (ty-proving (t e) 27))))
+      (ty-proving (t e) 27) (ty-false () 28))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.
 (define k-lemma-head? (subr (maxeff kreads spin) (k-binders int int) bool)

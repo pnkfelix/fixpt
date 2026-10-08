@@ -25,3 +25,7 @@
 (define unit (subr pure ((union int unit)) int) (lambda (x) (if (symbol? x) 1 0)))
 (list (ap (product (1 1) (2 2))) (as (sum a 3)) (ar (new 0)) (ap (make-array 1 0))
       (nums 2.5) (nums 100000000000000000000000) (unit #u) (unit 4))
+;; `false`, `#f` alone (stage 3): an int or none, `bool?` telling them apart.
+(define-type maybe-int (union false int))
+(define next (subr pure (maybe-int) int) (lambda (x) (typecase x (bool b 0) (else n (+ n 1)))))
+(list (next #f) (next 41))

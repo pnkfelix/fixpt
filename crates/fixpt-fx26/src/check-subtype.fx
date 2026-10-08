@@ -329,6 +329,7 @@
                 (ty-pair (a2 b2 r2 n2) (and (bool=? n1 n2) (mr r1 r2) (mt a1 a2) (mt b1 b2)))
                 (else z (same))))
             (ty-nil () (tagcase tt (ty-nil () #t) (else z (same))))
+            (ty-false () (tagcase tt (ty-false () #t) (else z (same))))
             (ty-proving (t1 e1)
               (tagcase tt
                 (ty-proving (t2 e2) (and (k-props=? t1 t2) (k-props=? e1 e2)))
@@ -462,6 +463,8 @@
           (k-sub-callable a b ea eb trail labels)
           (tagcase ta
             (ty-void () #t)
+            ;; `false` is `#f`, a `bool`.
+            (ty-false () (tagcase tb (ty-false () #t) (ty-base (y) (= b k-bool)) (else z #f)))
             ;; `nil` is the empty list, so any list of no elements.
             (ty-nil ()
               (tagcase tb

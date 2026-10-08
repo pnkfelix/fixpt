@@ -334,6 +334,10 @@ impl Checker {
             if name == "nil" && self.lookup_desc(sym).is_none() {
                 return Ok(self.arena.ty(Ty::Nil));
             }
+            // `#f`'s own type, below `bool` (L1's stage 3).
+            if name == "false" && self.lookup_desc(sym).is_none() {
+                return Ok(self.arena.ty(Ty::False));
+            }
             if name == "nat" && self.lookup_desc(sym).is_none() {
                 return Ok(self.arena.ty(Ty::Nat(Size::Finite)));
             }

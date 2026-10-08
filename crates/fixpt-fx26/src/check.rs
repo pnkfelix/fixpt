@@ -635,7 +635,7 @@ impl Checker {
             },
             Ty::Nat(_) => bit("int"),
             Ty::Nil => bit("nil"),
-            Ty::Proving { .. } => bit("bool"),
+            Ty::Proving { .. } | Ty::False => bit("bool"),
             Ty::Pair(_, _, _, nil) => Some(bit("pair")? | if *nil { bit("nil")? } else { 0 }),
             Ty::NList { .. } => Some(bit("pair")? | bit("nil")?),
             Ty::Subr { .. } | Ty::Composable { .. } => bit("procedure"),
@@ -1735,7 +1735,7 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Proving { .. } | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
             Ty::Union(ms) => {
                 for m in ms {
                     self.regions_walk(m, seen, out);
@@ -2543,6 +2543,9 @@ impl Checker {
             (Ty::Void, _) => true,
             // `nil` is the empty list, so any list of no elements.
             (Ty::Nil, Ty::Nil) | (Ty::Nil, Ty::Pair(_, _, _, true)) => true,
+            // `false` is `#f`, a `bool`.
+            (Ty::False, Ty::False) => true,
+            (Ty::False, Ty::Base(_)) => b == self.bool_,
             (Ty::Nil, Ty::NList { size, .. }) => self.size_le(&Size::lit(0), &size),
             (Ty::Base(x), Ty::Base(y)) => x == y,
             // What proves something is a `bool`; and what proves more is

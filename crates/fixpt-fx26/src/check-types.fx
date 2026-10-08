@@ -146,7 +146,9 @@
   ;; `(bool (then P …) (else Q …))`: a `bool` that proves the `P`s of its
   ;; procedure's arguments where true, the `Q`s where false; a procedure's
   ;; result only. A call's own type is `bool` (`k-call-te`).
-  (ty-proving k-props k-props))
+  (ty-proving k-props k-props)
+  ;; `false`: `#f` alone, below `bool`, of `bool`'s shape.
+  (ty-false))
 
 (define-type k-map (listof (pairof int k-desc @t) acyclic))
 
@@ -717,6 +719,7 @@
 (define ty-nil (with check-types-module ty-nil))
 (define ty-union (with check-types-module ty-union))
 (define ty-proving (with check-types-module ty-proving))
+(define ty-false (with check-types-module ty-false))
 (define ds-gen (with check-types-module ds-gen))
 (define ds-size (with check-types-module ds-size))
 (define ds-var (with check-types-module ds-var))

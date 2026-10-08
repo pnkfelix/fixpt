@@ -55,10 +55,21 @@ impl Checker {
         Ok(eff)
     }
 
+    /// Whether `t` is `false`, or a union with it.
+    fn false_expected(&self, t: TyId) -> bool {
+        let is = |c: &Self, t: TyId| matches!(c.arena.get(c.arena.resolve(t)), Ty::False);
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Union(ms) => ms.iter().any(|m| is(self, *m)),
+            _ => is(self, t),
+        }
+    }
+
     fn check_node(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
         let span = self.arena.span_of(e);
         let expected_ty = self.arena.get(expected).clone();
         match self.arena.exp_at(e).clone() {
+            // `#f` where `false` is expected, or a union with it.
+            Exp::Bool(false) if self.false_expected(expected) => Ok(Effect::pure()),
             // Against a `poly` type, anything but a `plambda` (or a `let`,
             // below, which passes the `poly` to its body) is checked with
             // the binders held abstract, as though it were wrapped in a
@@ -1291,7 +1302,7 @@ impl Checker {
                     stack.extend([x, y]);
                     region(r) || effect(&e)
                 }
-                Ty::Base(_) | Ty::Void | Ty::Nil | Ty::Proving { .. } | Ty::Link(_) => false,
+                Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Link(_) => false,
                 Ty::Nat(size) => matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
                 Ty::NList { elem, size, region: r } => {
                     stack.push(elem);
@@ -1334,7 +1345,7 @@ impl Checker {
             Ty::Pair(a, b, _, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Proving { .. } | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
             Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) | D::Fun(x) if self.walk_vars(*x, seen, hit))),
             Ty::App { fun, args } => {

@@ -461,7 +461,7 @@ impl Checker {
                 self.size_walk(x, Polarity::Inv, v, bad, seen);
                 self.size_walk(y, Polarity::Inv, v, bad, seen);
             }
-            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::Proving { .. } | Ty::Var(_) | Ty::Place(_) | Ty::Link(_) => {}
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Var(_) | Ty::Place(_) | Ty::Link(_) => {}
         }
     }
 
