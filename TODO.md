@@ -1737,3 +1737,44 @@ unfold them whole.
   first (by variance), and unfolds only if that does not decide.
 - Both checkers; the printing then needs no matching of a type against the
   families. Ties to the non-regular work (`docs/research/nonregular-*.md`).
+
+## 61. Fixed-width operations in the FX-26 evaluator (2026-10-08)
+
+`--fx26-run evaluate` has none of the fixed-width operations (`u32+`,
+`int->u32`, `i64<` …): `programs/sizes/fixed-width-literals.fx` fails
+there with "unbound variable `u32+`", while the lowering, cellular, native
+and register machines give 8. Found while testing `i32`/`u32` below `int`
+(a5f0979); it predates that. Add them to the evaluator's standard names
+(`evaluator-names.fx`), with the same wrapping as the runtime's, so every
+path runs a fixed-width program alike; then a test that runs one on the
+evaluator. No native speed at stake (the evaluator is a reference path),
+so only as much as agreement needs.
+
+## 62. Literals for `int->u32` and `int->i32` in existing sources (2026-10-08)
+
+Since a5f0979 a literal in range is an `i32` or `u32` where one is
+expected, so `(int->u32 16777619)` can be written `16777619`. The sources
+still convert by hand: `mllang-bench/fx/mlton/md5.fx` (69),
+`DLXSimulator.fx` (32), `psdes-random.fx` (5),
+`tests/programs/native/fixed-width-ops.fx` (10),
+`fixpt-cli/tests/programs/fixed-width.fx` (5), `native/flat-ints.fx` (1).
+Rewrite where the context expects the type (a `define` with its type, an
+argument to a `u32` operation), keeping a few `int->u32` calls in the
+tests that are about the conversion. Check first that compiled code is
+unchanged (a literal is folded either way; disassemble one to be sure),
+and that no line passes 100 columns or moves.
+
+## 63. `i64` and `u64` below `int`, with literals (2026-10-08)
+
+`i32` and `u32` are below `int` (a5f0979) because one is at run time the
+fixnum of its value. An `i64` or `u64` is the exact integer it stands for
+too (a bignum past 60 bits), so the same rule is sound: `i64`, `u64` ≤
+`int`, and a literal in range is one. What to settle first: native code
+keeps `i64`/`u64` raw in registers ("`i64` and `u64` raw in native
+registers", `docs/performance.md`), so a raw value used as an `int` must
+be boxed (or tagged as a fixnum when it fits) at that point; find where the
+compilers would need that conversion and whether the subsumption is
+already a coercion point. Both checkers (`fixed_range`,
+`k-literal-within?`, `k-base-below?`), then tests on every machine.
+Then fixed-width values could also count as sizes (`nat` terms), since
+each is an integer the checker knows the range of.
