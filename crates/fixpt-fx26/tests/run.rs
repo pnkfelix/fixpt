@@ -243,3 +243,9 @@ fn a_primitive_given_a_cyclic_list_fails_rather_than_loops() {
     let last = outs.last().expect("a value").clone().expect_err("fails");
     assert!(last.contains("proper list"), "{last}");
 }
+
+/// `(u32+ 4294967295 1)` wraps to 0, then `+` takes the `u32`s as `int`s.
+#[test]
+fn fixed_width_literals_run() {
+    assert_eq!(run(include_str!("programs/sizes/fixed-width-literals.fx")), "8");
+}

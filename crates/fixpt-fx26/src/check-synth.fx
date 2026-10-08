@@ -555,9 +555,18 @@
           (begin (k-expect x (k-instantiate-against t expected (k-start x) (k-end x)) expected)
                  (the (listof k-eff @t) (cons nil nil)))
           (the (listof k-eff @t) nil)))))
-;; Whether `et` is a `(nat z)` that natural literal `k` is one of.
+;; Whether `et` is a `(nat z)` that literal `k` is one of, or an `i32` or a
+;; `u32` whose range it is in.
 (define k-literal-within? (subr kreads (k-ty int) bool)
-  (lambda (et k) (tagcase et (ty-nat (z) (k-size-le? (k-size-lit k) z)) (else w #f))))
+  (lambda (et k)
+    (tagcase et
+      (ty-nat (z) (and (>= k 0) (k-size-le? (k-size-lit k) z)))
+      (ty-base (b)
+        (case (symbol->string b)
+          (("i32") (and (>= k -2147483648) (<= k 2147483647)))
+          (("u32") (and (>= k 0) (<= k 4294967295)))
+          (else #f)))
+      (else w #f))))
 ;; Whether `et` is a `nlist` of no elements, or of any number.
 (define k-may-be-empty? (subr kreads (k-ty) bool)
   (lambda (et)

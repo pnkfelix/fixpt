@@ -529,7 +529,7 @@
           ;; A natural literal is a `nat`, and a `(nat k)`.
           ;; `#f` where `false` is expected, or a union with it.
           (x-const (ty k xa xb)
-            (if (or (and (= ty k-int) (>= k 0) (k-literal-within? et k))
+            (if (or (and (= ty k-int) (k-literal-within? et k))
                     (and (= ty k-bool) (= k 0) (k-false-expected? expected)))
                 nil
                 (otherwise)))

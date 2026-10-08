@@ -164,6 +164,10 @@ impl Checker {
             }
             // A natural literal is a `nat`, and a `(nat k)`.
             Exp::Int(k) if k >= 0 && matches!(&expected_ty, Ty::Nat(s) if self.size_le(&Size::lit(k), s)) => Ok(Effect::pure()),
+            // A literal in an `i32`'s or a `u32`'s range is one.
+            Exp::Int(k) if matches!(&expected_ty, Ty::Base(b) if crate::check::fixed_range(self.interner.name(*b)).is_some_and(|(lo, hi)| (lo..=hi).contains(&k))) => {
+                Ok(Effect::pure())
+            }
             // `nil` is a `nlist` of no elements, or of some.
             Exp::Var(s)
                 if self.interner.name(s) == "nil"

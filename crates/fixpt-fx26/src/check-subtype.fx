@@ -8,6 +8,13 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-subtype-module (module
+;; Base `x` below base `y`: the same, or an `i32` or `u32`, the fixnum it
+;; stands for, below `int`. As the Rust checker's rule.
+(define k-base-below? (subr (read @globals) (symbol symbol) bool)
+  (lambda (x y)
+    (or (symbol=? x y)
+        (and (string=? (symbol->string y) "int")
+             (or (string=? (symbol->string x) "i32") (string=? (symbol->string x) "u32"))))))
 (define-type k-trail (ref k-pairs @t))
 ;; A subtype question's binder environment, for one side: each `poly`
 ;; binder in scope, by the name its pair of binders was given, so bodies are
@@ -472,7 +479,7 @@
                 (ty-pair (y1 y2 s m) m)
                 (ty-nlist (y n s) (k-size-le? (k-size-lit 0) n))
                 (else z #f)))
-            (ty-base (x) (tagcase tb (ty-base (y) (symbol=? x y)) (else z #f)))
+            (ty-base (x) (tagcase tb (ty-base (y) (k-base-below? x y)) (else z #f)))
             ;; What proves something is a `bool`; and what proves more is
             ;; below what proves less.
             (ty-proving (t1 e1)

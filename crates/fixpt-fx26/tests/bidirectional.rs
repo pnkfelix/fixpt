@@ -179,3 +179,14 @@ fn delimited_control_needs_no_projections() {
 fn cwcc_with_a_fresh_region_is_masked() {
     assert_eq!(check(include_str!("programs/bidirectional/cwcc.fx")), "int ! pure");
 }
+
+/// An `i32` or `u32` goes where an `int` is wanted, and a literal in its
+/// range is one (`programs/sizes/fixed-width-literals.fx`); one past it is
+/// refused.
+#[test]
+fn fixed_widths_are_ints_and_have_literals() {
+    let p = include_str!("programs/sizes/fixed-width-literals.fx");
+    assert_eq!(check(p), "int ! (read (globals bump x y))");
+    let err = rejects(include_str!("programs/sizes/fixed-width-literal-too-big.fx"));
+    assert!(err.contains("a u32 is expected here, and this is a int"), "{err}");
+}

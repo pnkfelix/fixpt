@@ -35,6 +35,16 @@ use std::collections::{HashMap, HashSet};
 pub const VSUBR: &str = "(vsubr (e effect +) (t type -) (r type +)) (subr e ((listof t acyclic)) r)";
 /// A flat array's element layout (Q6), generative type 1: what `t` is kept
 /// as, a number at run time; nothing sees inside it.
+/// The integers an `i32` or a `u32` holds, least and greatest: what a
+/// literal of one may be.
+pub(crate) fn fixed_range(name: &str) -> Option<(i64, i64)> {
+    match name {
+        "i32" => Some((i32::MIN as i64, i32::MAX as i64)),
+        "u32" => Some((0, u32::MAX as i64)),
+        _ => None,
+    }
+}
+
 /// A datum, what a reader reads: an atom, or a pair of datums, frozen and
 /// acyclic, or a vector or bytevector (TODO §51). The same text defines it
 /// in the checker written in FX-26 (`standard::standard_text`).
@@ -2742,7 +2752,10 @@ impl Checker {
             (Ty::False, Ty::False) => true,
             (Ty::False, Ty::Base(_)) => b == self.bool_,
             (Ty::Nil, Ty::NList { size, .. }) => self.size_le(&Size::lit(0), &size),
-            (Ty::Base(x), Ty::Base(y)) => x == y,
+            // An `i32` or `u32` is the fixnum it stands for: an `int`.
+            (Ty::Base(x), Ty::Base(y)) => {
+                x == y || (matches!(self.interner.name(x), "i32" | "u32") && self.interner.name(y) == "int")
+            }
             // What proves something is a `bool`; and what proves more is
             // below what proves less.
             (Ty::Proving { .. }, Ty::Base(_)) => b == self.bool_,
