@@ -38,7 +38,7 @@ impl Checker {
     }
 
     /// Each name `items` define, and the item defining it.
-    fn module_places(items: &[ModItem]) -> Vec<(Sym, usize)> {
+    pub(crate) fn module_places(items: &[ModItem]) -> Vec<(Sym, usize)> {
         let mut out = Vec::new();
         for (i, item) in items.iter().enumerate() {
             match item {

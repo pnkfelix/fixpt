@@ -99,8 +99,11 @@ impl Checker {
             })
             .collect();
         let outer = std::mem::replace(&mut self.hazard_modules, known);
+        let names = Self::module_places(items).into_iter().map(|(n, _)| n).collect();
+        let outer_items = std::mem::replace(&mut self.hazard_items, names);
         let hazards = self.module_hazards(items, &lambdas);
         self.hazard_modules = outer;
+        self.hazard_items = outer_items;
         hazards?;
         // A `define*`'s type as written, and the type it is checked at first,
         // reading any global: what it reads is then found from its body.

@@ -288,6 +288,11 @@ pub struct Checker {
     /// item whose value is a module as written, and that module's values,
     /// which a `with` of it not yet checked binds.
     pub(crate) hazard_modules: Vec<(Sym, Vec<Sym>)>,
+    /// While a module is ordered (`crate::modorder`), the names its items
+    /// define: a `with` of a module in scope that is none of them (a
+    /// `lambda`'s parameter, the module a converted file is given) binds
+    /// that module's values' names.
+    pub(crate) hazard_items: Vec<Sym>,
     /// Mask at every expression, as the rules say. Off only to observe an
     /// effect *before* masking, which is what some of the paper's claims are
     /// about.
@@ -531,6 +536,7 @@ impl Checker {
             ahead_filled: Vec::new(),
             facts: NodeFacts::default(),
             hazard_modules: Vec::new(),
+            hazard_items: Vec::new(),
             masking: true,
             broken: HashMap::new(),
             defs: Vec::new(),
@@ -1892,7 +1898,16 @@ impl Checker {
                 match self.facts.with_vals.get(&e) {
                     Some(vals) => bound.extend(vals.iter().map(|(n, _)| *n)),
                     None if unbound => {
-                        bound.extend(self.hazard_modules.iter().filter(|(m, _)| *m == module).flat_map(|(_, ns)| ns.iter().copied()))
+                        bound.extend(self.hazard_modules.iter().filter(|(m, _)| *m == module).flat_map(|(_, ns)| ns.iter().copied()));
+                        // A module in scope, not one of the items being
+                        // ordered: its values' names, known from its type.
+                        if !self.hazard_items.is_empty()
+                            && !self.hazard_items.contains(&module)
+                            && let Some(t) = self.lookup(module)
+                            && let Ty::Module { vals, .. } = self.arena.get(self.arena.resolve(t))
+                        {
+                            bound.extend(vals.iter().map(|(n, _)| *n));
+                        }
                     }
                     None => {}
                 }

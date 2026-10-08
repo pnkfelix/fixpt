@@ -252,12 +252,43 @@
                                  (product (1 ps) (2 ls) (3 i) (4 x) (5 init))))
                 #u)
             (k-hazards-from (cdr items) (+ i 1) ps ls))))))
+;; The names of parts `ps`, in order.
+(define k-part-names (subr kallocs (k-parts) k-names)
+  (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 1) (k-part-names (cdr ps))))))
+;; Names `ns`, onto `out`.
+(define k-names-onto (subr kallocs (k-names k-names) k-names)
+  (lambda (ns out) (if (null? ns) out (k-names-onto (cdr ns) (cons (car ns) out)))))
+;; The names free in `xs`, onto `out`.
+(define k-exps-free (subr (maxeff kmakes spin) (kxs k-names) k-names)
+  (lambda (xs out)
+    (if (null? xs) out (k-exps-free (cdr xs) (k-names-onto (k-free-vars (car xs)) out)))))
+;; The names free in `items`' values, then `out`'s.
+(define k-items-free (subr (maxeff kmakes spin) (k-items k-names) k-names)
+  (lambda (items out)
+    (if (null? items) out (k-items-free (cdr items) (k-exps-free (extract (car items) 5) out)))))
+;; Of names `ns`, those the items (`ps`) do not define that are modules in
+;; scope (a `lambda`'s parameter, the module a converted file is given),
+;; each with its values' names, onto `acc`: a `with` of one binds them (the
+;; Rust checker's `hazard_items`).
+(define k-outer-mods (subr (maxeff checks spin) (k-names k-places k-hazard-list) k-hazard-list)
+  (lambda (ns ps acc)
+    (if (null? ns)
+        acc
+        (let* ((n (car ns)) (t (if (>= (k-place-of ps n) 0) -1 (k-lookup n)))
+               (vs (if (< t 0)
+                       nil
+                       (tagcase (k-get (k-resolve t)) (ty-module (a d v) v) (else y nil)))))
+          (k-outer-mods (cdr ns) ps
+                        (if (null? vs) acc (cons (product (1 n) (2 (k-part-names vs))) acc)))))))
 ;; Each module checked first, of `known`, binds its values' names in a
 ;; `with` of it not checked yet (`k-with-bound`), so that `(define x (with m
-;; x))` re-exports `m`'s `x`.
+;; x))` re-exports `m`'s `x`; and so does each module in scope the items name
+;; and do not define (`k-outer-mods`).
 (define k-mod-hazards (subr (maxeff checks spin) (k-items k-mlams k-hazard-list) unit)
   (lambda (items ls known)
     (let* ((outer (get k-hazard-mods))
+           (ps (k-mod-places items))
+           (known (k-outer-mods (k-items-free items nil) ps known))
            (bound (set k-hazard-mods known))
            (r (k-hazards-from items 0 (k-mod-places items) ls)))
       (set k-hazard-mods outer))))

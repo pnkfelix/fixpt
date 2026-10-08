@@ -1817,4 +1817,17 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   types and effects (`k-ty`, `kstate`, `checks` ...), moved by a script
   that takes a module's type items out and imports what they use from the
   types files before it.
+- Phase 1: the types of `check-env`, `check-print`, `check-unions`,
+  `check-holds`, `check-read`, `check-syntax`, `check-subst`,
+  `check-generative` and `check-resolve` (2026-10-08), each in
+  `X-types.fx` (`check-effects`, `check-proving` and `check-read-descs`
+  have none). `check-read-types.fx`, which read descriptions, is renamed
+  `check-read-descs.fx`, so every types file is `X-types.fx`.
+- For phase 2 (2026-10-08): in a module, `(define x (with m x))` of a
+  module `m` in scope but not one of its items (a `lambda`'s parameter,
+  what a converted file is given) was refused as `x` using itself: the
+  order check knew a `with`'s names only for early items. Now a module
+  in scope binds its values' names there too, in both checkers
+  (`hazard_items`; `k-outer-mods`). Test: `modules/linked.fx`, a module
+  made of one it is given, typed by a signature from a file of them.
 
