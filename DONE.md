@@ -925,3 +925,25 @@ the front end is `front_end_error`'s: its message placed by
 message alone; loading failures there are `front_end_failure`'s, likewise.
 Test: `bootstrap.rs`, `an_error_in_the_front_end_is_placed_in_its_files`.
 
+## 61. Fixed-width operations in the FX-26 evaluator (2026-10-08)
+
+`--fx26-run evaluate` has none of the fixed-width operations (`u32+`,
+`int->u32`, `i64<` …): `programs/sizes/fixed-width-literals.fx` fails
+there with "unbound variable `u32+`", while the lowering, cellular, native
+and register machines give 8. Found while testing `i32`/`u32` below `int`
+(a5f0979); it predates that. Add them to the evaluator's table of
+primitives (`eval-prims.fx`, since the rewrite), with the same wrapping as the runtime's, so every
+path runs a fixed-width program alike; then a test that runs one on the
+evaluator. No native speed at stake (the evaluator is a reference path),
+so only as much as agreement needs.
+
+**Done (2026-10-08).** `eval-prims.fx`, `ev-width-prims!`: for each width,
+its 19 operations and `int->T`, `T->int`, as integers kept in the width's
+range, every result wrapped as the runtime's `Width::wrap` wraps it;
+`quotient` and `remainder` truncating, by zero "division by zero"; shifts
+by the count's low bits, right arithmetic. `native/fixed-width-ops.fx`
+(every operation at the edges of each type, by checksum) gives the same on
+the Rust, native and register machines, the lowering, `--fx26-run
+cellular` and the evaluator; it and `sizes/fixed-width-literals.fx` (8)
+are in `evaluator.rs`'s `test_programs`.
+

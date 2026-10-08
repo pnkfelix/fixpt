@@ -47,6 +47,10 @@ fn test_programs() {
         include_str!("programs/run/recursion.fx"),
         // `eq?`, which the evaluator has as the machines do.
         include_str!("programs/native/identity.fx"),
+        // The fixed widths, wrapped as the runtime wraps them (TODO.md §61):
+        // every operation, at the edges of each type.
+        include_str!("programs/sizes/fixed-width-literals.fx"),
+        include_str!("programs/native/fixed-width-ops.fx"),
     ] {
         both(p);
     }

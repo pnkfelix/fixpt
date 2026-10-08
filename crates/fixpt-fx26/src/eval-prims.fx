@@ -60,6 +60,58 @@
       (prim! 'arithmetic-shift (lambda (xs) (int2 xs (lambda (a b) (arithmetic-shift a b)))))
       (prim! 'int->string (lambda (xs) (int->string (as-int (ev-arg xs 0))))))))
 
+;;; ------------------------------------------------------------- fixed widths
+;;; `i32`, `u32`, `i64` and `u64` are integers here, each kept in its range,
+;;; as the runtime keeps them (`prim.rs`, `fixed_op`): every result wrapped.
+
+;; `x` wrapped to `bits` bits, two's complement if `signed` (`Width::wrap`).
+(define* fw-wrap (subr pure (int bool int) int)
+  (lambda (bits signed x)
+    (let ((low (bitwise-and x (- (arithmetic-shift 1 bits) 1))))
+      (if (and signed (>= low (arithmetic-shift 1 (- bits 1))))
+          (- low (arithmetic-shift 1 bits))
+          low))))
+(define* fw-2 (subr (maxeff evals spin) (vals int bool (subr pure (int int) int)) val)
+  (lambda (xs bits signed f)
+    (fw-wrap bits signed (f (as-int (ev-arg xs 0)) (as-int (ev-arg xs 1))))))
+;; `quotient` or `remainder`, which truncate as the runtime's do; by zero, a
+;; failure, as there.
+(define* fw-div (subr (maxeff evals spin) (vals int bool (subr pure (int int) int)) val)
+  (lambda (xs bits signed f)
+    (if (zero? (as-int (ev-arg xs 1))) (efail "division by zero") (fw-2 xs bits signed f))))
+;; A shift by the count's low bits; right, arithmetic (an unsigned value is
+;; not negative, so logical too).
+(define* fw-shift (subr (maxeff evals spin) (vals int bool bool) val)
+  (lambda (xs bits signed left)
+    (let ((x (as-int (ev-arg xs 0))) (k (bitwise-and (as-int (ev-arg xs 1)) (- bits 1))))
+      (fw-wrap bits signed (arithmetic-shift x (if left k (- 0 k)))))))
+;; The operation `op` of width `w`: `w` and `op` run together.
+(define* fw-name (subr (read @globals) (string string) symbol)
+  (lambda (w op) (string->symbol (string-append w op))))
+(define* ev-width-prims! (subr (maxeff stores spin) (string int bool) unit)
+  (lambda (w bits signed)
+    (let ((n (lambda ((op string)) (fw-name w op))))
+      (begin
+        (prim! (n "+") (lambda (xs) (fw-2 xs bits signed (lambda (a b) (+ a b)))))
+        (prim! (n "-") (lambda (xs) (fw-2 xs bits signed (lambda (a b) (- a b)))))
+        (prim! (n "*") (lambda (xs) (fw-2 xs bits signed (lambda (a b) (* a b)))))
+        (prim! (n "-quotient") (lambda (xs) (fw-div xs bits signed (lambda (a b) (quotient a b)))))
+        (prim! (n "-remainder")
+               (lambda (xs) (fw-div xs bits signed (lambda (a b) (remainder a b)))))
+        (prim! (n "-and") (lambda (xs) (fw-2 xs bits signed (lambda (a b) (bitwise-and a b)))))
+        (prim! (n "-or") (lambda (xs) (fw-2 xs bits signed (lambda (a b) (bitwise-ior a b)))))
+        (prim! (n "-xor") (lambda (xs) (fw-2 xs bits signed (lambda (a b) (bitwise-xor a b)))))
+        (prim! (n "<") (lambda (xs) (int-cmp xs (lambda (a b) (< a b)))))
+        (prim! (n "<=") (lambda (xs) (int-cmp xs (lambda (a b) (<= a b)))))
+        (prim! (n ">") (lambda (xs) (int-cmp xs (lambda (a b) (> a b)))))
+        (prim! (n ">=") (lambda (xs) (int-cmp xs (lambda (a b) (>= a b)))))
+        (prim! (n "=") (lambda (xs) (int-cmp xs (lambda (a b) (= a b)))))
+        (prim! (n "-shl") (lambda (xs) (fw-shift xs bits signed #t)))
+        (prim! (n "-shr") (lambda (xs) (fw-shift xs bits signed #f)))
+        (prim! (n "-not") (lambda (xs) (fw-wrap bits signed (bitwise-not (as-int (ev-arg xs 0))))))
+        (prim! (fw-name "int->" w) (lambda (xs) (fw-wrap bits signed (as-int (ev-arg xs 0)))))
+        (prim! (n "->int") (lambda (xs) (as-int (ev-arg xs 0))))))))
+
 ;;; ------------------------------------------------- characters, strings, symbols
 
 (define* ev-text-prims! (subr (maxeff stores spin) () unit)
@@ -341,7 +393,9 @@
 
 (define ev-prims-made unit
   (begin (ev-int-prims!) (ev-text-prims!) (ev-shape-prims!) (ev-data-prims!) (ev-f64-prims!)
-         (ev-f32-prims!) (ev-control-prims!)))
+         (ev-f32-prims!) (ev-control-prims!)
+         (ev-width-prims! "i32" 32 #t) (ev-width-prims! "u32" 32 #f)
+         (ev-width-prims! "i64" 64 #t) (ev-width-prims! "u64" 64 #f)))
 
 ;; A standard name's value: `nil`, or a primitive.
 (define* standard (subr (maxeff evals spin) (symbol) val)

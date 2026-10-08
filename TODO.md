@@ -1738,18 +1738,6 @@ unfold them whole.
 - Both checkers; the printing then needs no matching of a type against the
   families. Ties to the non-regular work (`docs/research/nonregular-*.md`).
 
-## 61. Fixed-width operations in the FX-26 evaluator (2026-10-08)
-
-`--fx26-run evaluate` has none of the fixed-width operations (`u32+`,
-`int->u32`, `i64<` …): `programs/sizes/fixed-width-literals.fx` fails
-there with "unbound variable `u32+`", while the lowering, cellular, native
-and register machines give 8. Found while testing `i32`/`u32` below `int`
-(a5f0979); it predates that. Add them to the evaluator's table of
-primitives (`eval-prims.fx`, since the rewrite), with the same wrapping as the runtime's, so every
-path runs a fixed-width program alike; then a test that runs one on the
-evaluator. No native speed at stake (the evaluator is a reference path),
-so only as much as agreement needs.
-
 ## 62. Literals for `int->u32` and `int->i32` in existing sources (2026-10-08)
 
 Since a5f0979 a literal in range is an `i32` or `u32` where one is
