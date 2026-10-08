@@ -336,6 +336,19 @@ impl Asm {
                     self.field_at(reg(j), j, total);
                 }
             }
+            // A mutable bloblet of no suffix (`%make-bloblet`, `REG1` its
+            // suffix's bytes, 0, else the call-out): its fields the rest of
+            // the registers, as `frozen`'s are, but writable (`TODO.md` §57).
+            "bloblet" => {
+                let total = count;
+                self.cbnz(1, slow);
+                self.bump_words(1 + total as u32, false, slow);
+                self.es(&mov_imm64(X15, make_header(fixpt_heap::layout::kind("bloblet"), total, 0)));
+                self.bloblet_at(total);
+                for j in 2..=count {
+                    self.field_at(reg(j), j, total);
+                }
+            }
             // `rnew`: a box in the region in `REG1`, holding `REG2`.
             "rnew" => {
                 self.bump_words(3, true, slow);
@@ -946,6 +959,7 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     ("prim", 1) if prim_named(k(o(0)), "%region-make-icell") => Some("ricell"),
                     ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),
                     ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-frozen") => Some("frozen"),
+                    ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-bloblet") => Some("bloblet"),
                     ("lambda", _) => Some("closure"),
                     _ => None,
                 };

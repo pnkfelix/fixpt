@@ -2145,6 +2145,38 @@ impl Compiling<'_> {
                         }
                         a.to(done, Fix::B);
                     }
+                    // A mutable bloblet of no suffix (`%make-bloblet`, `x1`
+                    // its suffix's bytes, 0, else the call-out), from the
+                    // free space as a pair is: its header, its fields from
+                    // `x2`…, its trailer (`TODO.md` §57).
+                    if let Callout::Prim { p, n } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "%make-bloblet"
+                        && (1..=fixpt_heap::layout::regcode::REGS).contains(&n)
+                    {
+                        let total = n;
+                        a.e(cmp_imm(1, 0));
+                        a.to(slow, Fix::If(Cond::Ne));
+                        a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
+                        a.e(ldr(X14, X13, 0));
+                        a.e(ldr(X15, ST, st_off(offset_of!(DState, alloc_limit))));
+                        a.e(add_imm(X16, X14, 1 + total as u32));
+                        a.e(cmp(X16, X15));
+                        a.to(slow, Fix::If(Cond::Hi));
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
+                        a.e(add_lsl(X11, X9, X14, 3));
+                        a.e(str(X16, X13, 0));
+                        let h = fixpt_heap::value::make_header(fixpt_heap::layout::kind("bloblet"), total, 0);
+                        a.es(&mov_imm64(X15, h));
+                        a.e(str(X15, X11, 0));
+                        for j in 2..=n {
+                            a.e(str(j as Reg, X11, 8 * (1 + total - j) as u32));
+                        }
+                        let t = fixpt_heap::layout::T_DISTANCE.put(fixpt_heap::value::TAG_TRAILER, total as u64);
+                        a.es(&mov_imm64(X15, t));
+                        a.e(str(X15, X11, 8 * total as u32));
+                        a.e(add_imm(RESULT, X11, (8 * (1 + total) + fixpt_heap::value::TAG_BLOBLET as usize) as u32));
+                        a.to(done, Fix::B);
+                    }
                     if let Callout::Cons = c {
                         a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
                         a.e(ldr(X14, X13, 0));
@@ -2175,6 +2207,35 @@ impl Compiling<'_> {
                         a.to(slow, Fix::If(Cond::Gt));
                         a.e(sub(X11, 1, 2));
                         a.e(ldur(RESULT, X11, -4));
+                        a.to(done, Fix::B);
+                    }
+                    // `%bloblet-set!`: `x3` into field `x2` (8k) of the
+                    // bloblet in `x1`, 2 ≤ k ≤ F, its fields not frozen, as
+                    // register code's `field!` does (`TODO.md` §57); else the
+                    // call-out, which refuses it or reports it.
+                    if let Callout::Prim { p, n: 3 } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "%bloblet-set!"
+                    {
+                        let tag = fixpt_heap::value::TAG_TRAILER as u32;
+                        a.e(ldur(X16, 1, field_off(1)));
+                        a.e(and_low(X13, X16, 3));
+                        a.e(cmp_imm(X13, tag));
+                        a.to(slow, Fix::If(Cond::Ne));
+                        a.e(cmp_imm(2, 16));
+                        a.to(slow, Fix::If(Cond::Lt));
+                        a.e(sub_imm(X16, X16, tag));
+                        a.e(cmp(2, X16));
+                        a.to(slow, Fix::If(Cond::Gt));
+                        // The header: F + 1 words before the suffix.
+                        a.e(sub(X11, 1, X16));
+                        a.e(ldur(X13, X11, -12));
+                        a.e(ubfx(X13, X13, fixpt_heap::layout::H_FIELDS_FROZEN.lo, 1));
+                        a.e(cmp_imm(X13, 0));
+                        a.to(slow, Fix::If(Cond::Ne));
+                        a.e(sub(X11, 1, 2));
+                        a.e(stur(3, X11, -4));
+                        a.es(&card_mark(X11, -4, ST, st_off(offset_of!(DState, cards)), X13, X16));
+                        a.es(&mov_imm64(RESULT, Value::UNSPECIFIED.raw()));
                         a.to(done, Fix::B);
                     }
                     // A native closure over REG1…REGn likewise, from the free

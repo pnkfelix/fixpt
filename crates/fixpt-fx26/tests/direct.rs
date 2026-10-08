@@ -287,6 +287,17 @@ fn fixed_width_operations_as_the_rust_machine_gives_them() {
     }
 }
 
+/// Mutable bloblets made and written in line (`TODO.md` §57,
+/// `programs/native/bloblet-tree.fx`): a tree built, its leaves replaced by
+/// younger nodes, summed; as the Rust machine gives it, collecting often too.
+#[test]
+fn mutable_bloblets_made_and_written_in_line() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/bloblet-tree"), "tree", &[10], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+}
+
 /// `i64` and `u64` raw in registers (`programs/native/raw-64.fx`): a loop's
 /// variable raw around it; one live across a call, boxed into the frame and
 /// unboxed again; ways meeting raw and boxed; bignums boxed on the way out;

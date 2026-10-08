@@ -33,12 +33,15 @@
 ;;; What the port changed, and why:
 ;;;
 ;;; - Nodes. The original's node is a record of four mutable fields, left,
-;;;   right, i and j, whose left and right are 0 in an empty node. FX-26 has
-;;;   no record type that a 0 (or #f) can stand in for, so a node here is
-;;;   three pairs, ((left . right) . (i . j)), and an empty node's children
-;;;   are nil. Pairs have no header, so a node is six words, as Larceny's
-;;;   record (header, record type, four fields) is; but three objects, not
-;;;   one. `(eq? longLivedTree '())` is `null?`.
+;;;   right, i and j, whose left and right are 0 in an empty node: here a
+;;;   bloblet of four fields, its children `(union int node)`, 0 in an empty
+;;;   node, one object as Larceny's record is (2026-10-07; until then three
+;;;   pairs, ((left . right) . (i . j)), an empty node's children nil, since
+;;;   FX-26 had no union of an int and a node: 1.18 s natively, the record
+;;;   0.60 once made in line, `DONE.md` §57). `populate` stores the new
+;;;   children it then fills, where the original reads them back out of the
+;;;   node, which would need a test of their shape. `(eq? longLivedTree
+;;;   '())` is `null?`.
 ;;; - The long-lived array. The original fills half of a vector of
 ;;;   kArraySize elements with the inexact reals 1/(i+1), and checks one of
 ;;;   them at the end; the reals are ballast, live data for the collector to
@@ -53,13 +56,13 @@
 ;;; - The displays (progress lines, "Failed") are left out: FX-26 has no
 ;;;   output. The result of the check is the value instead.
 
-(define-type node (union nil (pairof (pairof node node @heap) (pairof int int @heap) @heap)))
+(define-type node (bloblet (fields (union int node) (union int node) int int) @heap))
 
 (define make-empty-node (subr (alloc @heap) () node)
-  (lambda () (cons (cons (the node no-pair) (the node no-pair)) (cons 0 0))))
+  (lambda () (make-bloblet 0 0 0 0 0)))
 
 (define make-node (subr (alloc @heap) (node node) node)
-  (lambda (l r) (cons (cons l r) (cons 0 0))))
+  (lambda (l r) (make-bloblet 0 l r 0 0)))
 
 (define* expt2 (subr spin (int) int)
   (lambda (n) (if (= n 0) 1 (* 2 (expt2 (- n 1))))))
@@ -78,12 +81,12 @@
   (lambda (iDepth thisNode)
     (if (<= iDepth 0)
         #f
-        (let ((iDepth (- iDepth 1)))
+        (let ((iDepth (- iDepth 1)) (left (make-empty-node)) (right (make-empty-node)))
           (begin
-            (set-car! (car thisNode) (make-empty-node))
-            (set-cdr! (car thisNode) (make-empty-node))
-            (populate iDepth (car (car thisNode)))
-            (populate iDepth (cdr (car thisNode))))))))
+            (bloblet-set! thisNode 0 left)
+            (bloblet-set! thisNode 1 right)
+            (populate iDepth left)
+            (populate iDepth right))))))
 
 ;;  Build tree bottom-up
 (define* make-tree (subr (maxeff (alloc @heap) spin) (int) node)

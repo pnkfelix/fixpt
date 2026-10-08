@@ -789,3 +789,26 @@ Back to back with the build before, 10M tests in a loop: `procedure?`
 union program's harder cases (a primitive and a continuation as
 procedures, a bignum, an array with a large header).
 
+## 57. Mutable bloblets made and written in line, natively (2026-10-07)
+
+`make-bloblet` was `%make-bloblet`, a call-out with a frame around it, and
+under the native convention so was every `bloblet-set!`, where `cons` and
+frozen bloblets were made in line and register code wrote fields in line.
+Found converting `gcbench`'s node to Larceny's one record: 3.0 s against
+the three pairs' 1.3. Now a bloblet of no suffix is made from the free
+space in both native tiers (its header, fields and trailer, as
+`%make-frozen`'s are, but writable; any suffix calls out), and
+`direct.rs` writes a field in line as register code's `field!` does (the
+trailer's count bounding it, the header's frozen bit refusing it to the
+call-out, the card marked).
+
+Back to back with the build before, natively: `gcbench` with its node a
+bloblet, children `(union int node)`, 0.60 s against the pairs' 1.18 (and
+0.63 against 1.12 in register code), so `scheme-bench/gcbench.fx` is
+converted; and ports that make or write bloblets, unchanged: `conform`
+3.70 → 2.02, `hashtable0` 2.04 → 1.31, `maze` 1.33 → 0.98, `set` 1.47 →
+1.17; `bv2string`, `nboyer`, `sboyer` level. Their answers the same.
+Test: `mutable_bloblets_made_and_written_in_line` (`tests/direct.rs`,
+`programs/native/bloblet-tree.fx`), a tree built, its leaves replaced by
+younger nodes, summed, collecting every 7 allocations too.
+

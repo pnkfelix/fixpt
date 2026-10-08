@@ -44,7 +44,7 @@ lowered): `pi` now takes 0.6 s in all.
 | `equal`      | #t                                               | 7.7      | Larceny's `equal?` in the file; an `eqtable` per kind (2026-09-30)                     |
 | `fib`        | 102334155                                        | 3.3      |                                                                                        |
 | `fibc`       | 832040                                           | 31.0     | `cwcc`                                                                                 |
-| `gcbench`    | 0                                                | 9.4      | float ballast kept as small boxed ints                                                 |
+| `gcbench`    | 0                                                | 9.4      | node one record, children `(union int node)` (2026-10-07); float ballast as boxed ints |
 | `generator`  | (135 324 351)                                    | 9.7      |                                                                                        |
 | `graphs`     | 213829                                           | 13.6     | was 29.0 s, 1 procedure cellular (more than 8 values)                                  |
 | `hashtable0` | 102005                                           | 5.2      | measures a table written in FX-26                                                      |
