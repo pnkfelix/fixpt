@@ -476,6 +476,64 @@
   (lambda (p kinds solved done i r)
     (begin (k-unify p (extract r 1) kinds solved (k-new-trail))
            (k-arg-found done i (extract r 1) (extract r 2)))))
+;;; Bounds (`TODO.md` §66): an argument a type binder bounded only from
+;;; above (`check-bounds.fx`) is checked against says what it is.
+;; The last call checked against a type: where it is, and its own type there
+;; (the Rust checker's `checked_call`).
+(define-type k-call-checked (productof (1 int) (2 int) (3 int)))
+(define k-checked-call (ref k-call-checked @t) (new (product (1 -1) (2 -1) (3 -1))))
+;; Call `x`, found `r`, as `expected`: its effect, and its type noted.
+(define k-as-expected-call (subr (maxeff checks spin) (kx k-te int) k-eff)
+  (lambda (x r expected)
+    (let ((e (k-as-expected x r expected)))
+      (begin (set k-checked-call (product (1 (k-start x)) (2 (k-end x)) (3 (extract r 1)))) e))))
+;; `k-unify` of a call's `result` against what is `expected` of it: bounds
+;; from above.
+(define k-unify-above (subr (maxeff kstate spin) (int int k-binders k-solved) unit)
+  (lambda (result expected kinds solved)
+    (k-from-above (lambda () (k-unify result expected kinds solved (k-new-trail))))))
+;; The instance `kinds` solved make of `inner`, and `solved`'s bounds
+;; dropped.
+(define k-solved-instance (subr (maxeff checks spin) (k-binders k-solved int int int int) int)
+  (lambda (kinds solved a b ft inner)
+    (k-drop-bounds solved (k-subst-checked kinds (k-finish kinds solved a b ft) inner a b))))
+;; Whether `param` mentions a type binder only the expected type has bounded:
+;; one open once those binders' solutions are set aside.
+(define k-mentions-upper-only? (subr (maxeff kstate spin) (int k-binders k-solved) bool)
+  (lambda (param kinds solved)
+    (let ((without (the k-solved (new (k-map-but-upper-only solved (get solved))))))
+      (k-mentions-unknown-type? param kinds without))))
+;; Whether `x` is a variable of a type not polymorphic.
+(define k-mono-var? (subr (maxeff kreads spin) (kx) bool)
+  (lambda (x)
+    (tagcase x
+      (x-var (s a b)
+        (let ((t (k-lookup s)))
+          (and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #f) (else y #t)))))
+      (else y #f))))
+;; Argument `i`, `arg`, of parameter type `param`, `p` as solved so far:
+;; checked against `p`, its type and effect noted. Where `param` mentions a
+;; type binder only the expected type has bounded, what the argument is
+;; bounds it from below too (the Rust checker's `bounded_argument`): a
+;; variable says its own type, a call checked against `p` its own result
+;; there, and anything else, checked against `p`, is a `p`. `check` and
+;; `synth`, the rules'.
+(define k-bounded-arg
+  (subr (maxeff checks spin)
+        (kx int int k-binders k-solved k-done int (subr (maxeff checks spin) (kx int) k-eff)
+            (subr (maxeff checks spin) (kx) k-te))
+        unit)
+  (lambda (arg param p kinds solved done i check synth)
+    (cond ((not (k-mentions-upper-only? param kinds solved)) (k-arg-found done i p (check arg p)))
+          ((k-mono-var? arg) (k-arg-unified param kinds solved done i (synth arg)))
+          (else
+           (begin
+             (set k-checked-call (product (1 -1) (2 -1) (3 -1)))
+             (let* ((e (check arg p)) (c (get k-checked-call))
+                    (t (if (and (= (extract c 1) (k-start arg)) (= (extract c 2) (k-end arg)))
+                           (extract c 3)
+                           p)))
+               (begin (k-unify param t kinds solved (k-new-trail)) (k-arg-found done i t e))))))))
 ;; Variable `s`, of polymorphic type `t`, at `a`..`b`: `t` instantiated at
 ;; `p`, and the effect of naming `s`.
 (define k-poly-instance (subr (maxeff checks spin) (symbol int int int int) k-te)
@@ -661,6 +719,10 @@
 (define k-arg-unified (with check-synth-module k-arg-unified))
 (define k-thunk-lambda? (with check-synth-module k-thunk-lambda?))
 (define k-poly-var-at (with check-synth-module k-poly-var-at))
+(define k-as-expected-call (with check-synth-module k-as-expected-call))
+(define k-bounded-arg (with check-synth-module k-bounded-arg))
+(define k-unify-above (with check-synth-module k-unify-above))
+(define k-solved-instance (with check-synth-module k-solved-instance))
 (define k-nil-told (with check-synth-module k-nil-told))
 (define k-fx-poly-check (with check-synth-module k-fx-poly-check))
 (define k-widen-nil-tail (with check-synth-module k-widen-nil-tail))

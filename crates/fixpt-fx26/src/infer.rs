@@ -11,7 +11,8 @@
 //!   known type is expected. Its binders are solved by matching: the
 //!   parameter types against the arguments' types, and the result type
 //!   against what is expected (Pierce & Turner's *local type inference*,
-//!   specialised to FX's three kinds). A type binder must be solved, or it is
+//!   specialised to FX's three kinds: a type binder by bounds from both
+//!   sides, [`Bounds`]). A type binder must be solved, or it is
 //!   an error to say so. An effect binder nothing constrains is `pure`. A
 //!   region binder nothing constrains is a **fresh region**, one no other
 //!   value is in: sound, since a region only partitions the store, and it is
@@ -29,15 +30,40 @@ use std::collections::{HashMap, HashSet};
 /// An argument already synthesised: its type and effect.
 type Synthesised = Option<(TyId, Effect)>;
 
+/// What has been said of a type binder (`TODO.md` §66, Pierce and Turner's
+/// local type inference): at least `lower`, what the arguments are, joined;
+/// at most `upper`, what the context expects, met; and, where it stands
+/// inside something mutable, so invariant, `exact`. Where the bounds meet,
+/// or it is exact, it is known, and is used to tell the arguments still to
+/// be checked what they are; until then it is the exact type, else the
+/// lower bound, else the upper.
+#[derive(Clone, Default)]
+struct Bounds {
+    lower: Option<TyId>,
+    upper: Option<TyId>,
+    exact: Option<TyId>,
+}
+
 /// The solution so far for a projection's binders.
 struct Unknowns {
     kinds: Vec<(DVar, Kind)>,
     solved: HashMap<DVar, D>,
+    bounds: HashMap<DVar, Bounds>,
 }
 
 impl Unknowns {
+    fn new(kinds: Vec<(DVar, Kind)>) -> Unknowns {
+        Unknowns { kinds, solved: HashMap::new(), bounds: HashMap::new() }
+    }
+
     fn is_unknown(&self, v: DVar) -> bool {
         self.kinds.iter().any(|(u, _)| *u == v)
+    }
+
+    /// Whether type binder `v` is bounded only from above, by what the
+    /// context expects: no argument has said what it is.
+    fn upper_only(&self, v: DVar) -> bool {
+        self.bounds.get(&v).is_some_and(|b| b.exact.is_none() && b.lower.is_none() && b.upper.is_some())
     }
 }
 
@@ -134,6 +160,7 @@ impl Checker {
             Exp::App { fun, args } => {
                 let (t, eff) = self.synth_app(e, fun, &args, Some(expected))?;
                 self.expect(e, t, expected)?;
+                self.checked_call = Some((e, t));
                 Ok(eff)
             }
             Exp::Bloblet { op, args } => {
@@ -859,13 +886,17 @@ impl Checker {
         if params.len() != args.len() {
             return Err(FxError::at(span, format!("expected {} argument(s), got {}", params.len(), args.len())));
         }
-        let mut u = Unknowns { kinds, solved: HashMap::new() };
+        let mut u = Unknowns::new(kinds);
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         // What the whole is expected to be, first: it often fixes enough that
         // an argument can be told its type rather than asked — which is what
         // puts every pair of `(cons a (cons b nil))` in the expected region.
+        // It bounds the result's binders from above; inside a pair, an
+        // array or a reference, where they are invariant, it fixes them.
         if let Some(want) = expected {
+            let outer = std::mem::replace(&mut self.unify_upper, true);
             self.unify(result, want, &mut u, &mut HashSet::new());
+            self.unify_upper = outer;
         }
         // What the arguments are, except the ones that need to be told.
         for (i, a) in args.iter().enumerate() {
@@ -874,8 +905,7 @@ impl Checker {
             }
             let p = self.subst(params[i], &u.solved);
             if !self.mentions_any_unknown(p, &u) {
-                let eff = self.check(*a, p)?;
-                done[i] = Some((p, eff));
+                done[i] = Some(self.bounded_argument(*a, params[i], p, &mut u)?);
                 continue;
             }
             let (t, eff) = self.synth(*a)?;
@@ -990,7 +1020,7 @@ impl Checker {
         let (kinds, inner) = self.binders_of(ft);
         let (_, params, _) = self.arena.get(inner).as_subr()?;
         let want = *params.get(index)?;
-        let mut u = Unknowns { kinds, solved: HashMap::new() };
+        let mut u = Unknowns::new(kinds);
         for (i, a) in given {
             let Some(p) = params.get(*i) else { continue };
             if let Ok((t, _)) = self.synth(*a) {
@@ -1029,8 +1059,10 @@ impl Checker {
             }
         }
         let (kinds, inner) = self.binders_of(t);
-        let mut u = Unknowns { kinds, solved: HashMap::new() };
+        let mut u = Unknowns::new(kinds);
+        let outer = std::mem::replace(&mut self.unify_upper, true);
         self.unify(inner, expected, &mut u, &mut HashSet::new());
+        self.unify_upper = outer;
         self.default_regions(&mut u);
         let map = self.finish(&u, span, t)?;
         self.check_bounds(&u.kinds, &map, span)?;
@@ -1421,6 +1453,41 @@ impl Checker {
         false
     }
 
+    /// Whether `t` mentions a type binder only the expected type has
+    /// bounded, from above.
+    fn mentions_upper_only(&self, t: TyId, u: &Unknowns) -> bool {
+        let mut seen = HashSet::new();
+        self.walk_vars(t, &mut seen, &mut |v| u.upper_only(v))
+    }
+
+    /// Argument `a`, of parameter type `param`, which is `p` as solved so
+    /// far: checked against `p`, its type and effect. Where `param` mentions
+    /// a type binder only the expected type has bounded, what the argument
+    /// is bounds it from below too (`TODO.md` §66): a variable says its own
+    /// type, a call checked against `p` its own result there, and anything
+    /// else, checked against `p`, is a `p`.
+    fn bounded_argument(&mut self, a: ExpId, param: TyId, p: TyId, u: &mut Unknowns) -> R<(TyId, Effect)> {
+        if !self.mentions_upper_only(param, u) {
+            let eff = self.check(a, p)?;
+            return Ok((p, eff));
+        }
+        if let Exp::Var(s) = *self.arena.exp_at(a)
+            && self.lookup(s).is_some_and(|t| !matches!(self.arena.get(t), Ty::Poly { .. }))
+        {
+            let (t, eff) = self.synth(a)?;
+            self.unify(param, t, u, &mut HashSet::new());
+            return Ok((t, eff));
+        }
+        self.checked_call = None;
+        let eff = self.check(a, p)?;
+        let t = match self.checked_call.take() {
+            Some((e, t)) if e == a => t,
+            _ => p,
+        };
+        self.unify(param, t, u, &mut HashSet::new());
+        Ok((t, eff))
+    }
+
     fn mentions_unknown_type(&self, t: TyId, u: &Unknowns) -> bool {
         let mut seen = HashSet::new();
         self.walk_vars(t, &mut seen, &mut |v| u.is_unknown(v) && !u.solved.contains_key(&v))
@@ -1473,28 +1540,38 @@ impl Checker {
             return;
         }
         match (pt, at) {
-            (Ty::Var(v), _) if u.is_unknown(v) => match u.solved.get(&v) {
-                None => {
-                    u.solved.insert(v, D::Type(a));
+            (Ty::Var(v), _) if u.is_unknown(v) => {
+                if !matches!(u.solved.get(&v), None | Some(D::Type(_))) {
+                    return;
                 }
-                Some(D::Type(prev)) => {
-                    // The larger, where it stands for a whole argument; in
-                    // a pair's contents, which are invariant, what it meets
-                    // there (an argument's element over the expected
-                    // type's: a non-`nil` pair where the context says one
-                    // may be `nil`).
-                    let prev = *prev;
-                    let take = if self.unify_exact {
-                        prev != a && (self.subtype(a, prev) || self.subtype(prev, a))
-                    } else {
-                        !self.subtype(a, prev) && self.subtype(prev, a)
-                    };
-                    if take {
-                        u.solved.insert(v, D::Type(a));
-                    }
+                let mut b = u.bounds.get(&v).cloned().unwrap_or_default();
+                let related = |c: &mut Self, x: TyId, y: TyId| c.subtype(x, y) || c.subtype(y, x);
+                if self.unify_exact {
+                    // Invariant: what it meets there, where two are said
+                    // (an argument's element over the expected type's: a
+                    // non-`nil` pair where the context says one may be
+                    // `nil`).
+                    b.exact = Some(match b.exact {
+                        Some(prev) if prev == a || !related(self, a, prev) => prev,
+                        _ => a,
+                    });
+                } else if self.unify_upper {
+                    // At most both: the smaller.
+                    b.upper = Some(match b.upper {
+                        Some(prev) if !self.subtype(a, prev) => prev,
+                        _ => a,
+                    });
+                } else {
+                    // At least both: the larger.
+                    b.lower = Some(match b.lower {
+                        Some(prev) if self.subtype(a, prev) || !self.subtype(prev, a) => prev,
+                        _ => a,
+                    });
                 }
-                Some(_) => {}
-            },
+                let chosen = b.exact.or(b.lower).or(b.upper).expect("a bound");
+                u.solved.insert(v, D::Type(chosen));
+                u.bounds.insert(v, b);
+            }
             // A union expected: the member whose shapes hold the pattern's
             // (a `cons` where a list or an `int` is wanted, its pair).
             (ref q, Ty::Union(aa)) if !matches!(q, Ty::Union(_)) => {
@@ -1511,18 +1588,25 @@ impl Checker {
                 if pp.len() != ap.len() {
                     return;
                 }
+                // A parameter is contravariant: what bounds a binder from
+                // below there bounds it from above, and the other way.
+                self.unify_upper = !self.unify_upper;
                 for (x, y) in pp.iter().zip(&ap) {
                     self.unify(*x, *y, u, trail);
                 }
+                self.unify_upper = !self.unify_upper;
                 self.unify(pr, ar, u, trail);
                 self.unify_effect(&pe, &ae, u);
             }
+            // Mutable, so invariant, as a pair's contents are: what it meets.
             (Ty::Ref(x, r), Ty::Ref(y, s))
             | (Ty::MarkKey(x, r), Ty::MarkKey(y, s))
             | (Ty::Array(x, r), Ty::Array(y, s))
             | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 self.unify_region(r, s, u);
+                let outer = std::mem::replace(&mut self.unify_exact, true);
                 self.unify(x, y, u, trail);
+                self.unify_exact = outer;
             }
             (Ty::Place(r), Ty::Place(s)) => self.unify_region(r, s, u),
             (Ty::Pair(x1, x2, r, _), Ty::Pair(y1, y2, s, _)) => {

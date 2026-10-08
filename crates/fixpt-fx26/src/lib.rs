@@ -98,7 +98,7 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// descriptions, resolving them, errors, modules' descriptions, subtyping,
 /// instantiation, termination and what tests say of sizes, the rules,
 /// modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 33] = [
+pub const CHECKER_FILES: [(&str, &str); 34] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-effects.fx", include_str!("check-effects.fx")),
     ("check-env.fx", include_str!("check-env.fx")),
@@ -121,6 +121,7 @@ pub const CHECKER_FILES: [(&str, &str); 33] = [
     ("check-calls.fx", include_str!("check-calls.fx")),
     ("check-dependent.fx", include_str!("check-dependent.fx")),
     ("check-data.fx", include_str!("check-data.fx")),
+    ("check-bounds.fx", include_str!("check-bounds.fx")),
     ("check-infer.fx", include_str!("check-infer.fx")),
     ("check-close.fx", include_str!("check-close.fx")),
     ("check-terminate.fx", include_str!("check-terminate.fx")),
@@ -166,7 +167,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 55] = [
+pub const FRONT_END_FILES: [(&str, &str); 56] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -202,6 +203,7 @@ pub const FRONT_END_FILES: [(&str, &str); 55] = [
     CHECKER_FILES[30],
     CHECKER_FILES[31],
     CHECKER_FILES[32],
+    CHECKER_FILES[33],
     ("eval-values.fx", EVAL_VALUES),
     ("eval-prims.fx", EVAL_PRIMS),
     ("eval-core.fx", EVAL_CORE),

@@ -1799,3 +1799,19 @@ effects as variables too (an effect has the same lattice shape). First
 measure what it costs the front end's check, and collect the places where
 the front end writes `the` or `proj` only to steer instantiation, which
 this would remove.
+
+**Stage 1 done (2026-10-08): bounds in both checkers.** A type binder keeps
+a lower bound (the arguments, joined), an upper one (the expected result,
+met) and an exact one (inside a pair, array, reference, i-cell or mark key:
+invariant); a binder fixed, or whose bounds have met, tells the arguments
+still to be checked what they are, as the expected type did, and one
+bounded only from above lets an argument say what it is first (a variable
+its type, a call its own result checked against the bound). Polarity flips
+in a subroutine's parameters. `infer.rs`, `Bounds`; `check-bounds.fx`.
+Tests: `bidirectional/bounds.fx` (42), `bounds-apart.fx` (refused). Four
+refused programs changed their messages, in both checkers alike
+(`regions/knot-through-two-regions.fx` is refused by its list's element
+type now, before the knot rule, since the pair's contents fix it). Cost:
+none measured, the same front-end text checked by both checkers in
+2.45–2.50 s before and after. Left: stage 2, the annotations it makes
+unneeded.

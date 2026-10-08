@@ -383,11 +383,11 @@
         (if (null? callee)
             (k-fail-ty "not a subroutine, even once projected: " ft a b)
             (let ((params (extract (car callee) 2)) (result (extract (car callee) 3))
-                  (solved (the k-solved (new nil))))
+                  (solved (k-new-bounded-solved)))
               (if (not (= (k-length params) (k-length args)))
                   (k-fail-arg-count (k-length params) (k-length args) a b)
                   (begin
-                    (if (>= expected 0) (k-unify result expected kinds solved (k-new-trail)) #u)
+                    (if (>= expected 0) (k-unify-above result expected kinds solved) #u)
                     (k-inst-asked args params 0 kinds solved done)
                     (k-partial-pair-arg f (extract done 1) params kinds solved)
                     ;; A shape conflict is the error to report, before any
@@ -398,7 +398,7 @@
                     (k-inst-shapes args params 0 kinds solved (extract done 1))
                     (k-default-regions kinds solved)
                     (if (< expected 0) (k-widen-nil-tail result kinds solved) #u)
-                    (k-subst-checked kinds (k-finish kinds solved a b ft) inner a b))))))))
+                    (k-solved-instance kinds solved a b ft inner))))))))
   ;; What the arguments are, except the ones that need to be told.
   (k-inst-asked (subr (maxeff checks spin) (kxs k-ids int k-binders k-solved k-done) unit)
     (lambda (args params i kinds solved done)
@@ -409,7 +409,7 @@
                 #u
                 (let ((p (k-subst (car params) (get solved))))
                   (if (not (k-mentions-any-unknown? p kinds solved))
-                      (k-arg-found done i p (k-check (car args) p))
+                      (k-bounded-arg (car args) (car params) p kinds solved done i k-check k-synth)
                       (let ((r (k-synth (car args))))
                         (tagcase (k-get (extract r 1))
                           (ty-poly (bs body) #u)
@@ -509,7 +509,7 @@
             (if (null? (k-as-subr expected))
                 (otherwise)
                 (k-as-expected x (k-synth-rlambda x r l expected) expected)))
-          (x-app (f args xa xb) (k-as-expected x (k-synth-app x f args expected) expected))
+          (x-app (f args xa xb) (k-as-expected-call x (k-synth-app x f args expected) expected))
           (x-bloblet (op i args xa xb)
             (k-as-expected x (k-synth-bloblet x op i args expected) expected))
           (x-tagcase (s arms els xa xb) (extract (k-synth-tagcase x s arms els expected) 2))

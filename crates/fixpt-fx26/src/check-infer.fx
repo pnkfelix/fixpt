@@ -670,24 +670,17 @@
               (if (>= g 0) (k-solve solved v (df g)) #u))
             #u))
       (else y #u))))
-;; A type binder takes the actual type `a`; one already solved takes it
-;; only if it is strictly above what it was.
+;; What the actual type `a` says of type binder `v`, as its bounds keep it
+;; (`check-bounds.fx`): its solution now, if that changes.
 (define k-unify-var (subr (maxeff kstate spin) (int int k-binders k-solved) unit)
   (lambda (v a kinds solved)
     (if (k-unknown? kinds v)
-        (let ((f (k-map-find (get solved) v)))
-          (if (null? f)
-              (k-solve solved v (dt a))
-              (tagcase (cdr (car f))
-                ;; The larger, where it stands for a whole argument; in a
-                ;; pair's contents, what it meets there.
-                (dt (was)
-                  (if (if (get k-unify-exact)
-                          (and (not (= was a)) (or (k-subtype a was) (k-subtype was a)))
-                          (and (not (k-subtype a was)) (k-subtype was a)))
-                      (k-solve solved v (dt a))
-                      #u))
-                (else y #u))))
+        (let* ((f (k-map-find (get solved) v))
+               (was (if (null? f) -1 (tagcase (cdr (car f)) (dt (w) w) (else y -2)))))
+          (if (= was -2)
+              #u
+              (let ((t (k-bound-solution solved v a was)))
+                (if (< t 0) #u (k-solve solved v (dt t))))))
         #u)))
 (define-rec
   (k-unify (subr (maxeff kstate spin) (int int k-binders k-solved k-trail) unit)
@@ -719,7 +712,9 @@
                (ue (subr (maxeff kstate spin) (k-eff k-eff) unit)
                    (lambda (e f) (k-unify-effect e f kinds solved)))
                (uds (subr (maxeff kstate spin) (k-descs k-descs) unit)
-                    (lambda (xs ys) (k-unify-descs xs ys kinds solved trail))))
+                    (lambda (xs ys) (k-unify-descs xs ys kinds solved trail)))
+               (ux (subr (maxeff kstate spin) (int int) unit)
+                   (lambda (x y) (k-exactly (lambda () (k-unify x y kinds solved trail))))))
         (tagcase pt
           (ty-var (v) (k-unify-var v a kinds solved))
           (ty-subr (pe pp pr pc)
@@ -732,13 +727,15 @@
                    (let ((ap (extract (car c) 2)))
                      (if (not (= (k-length pp) (k-length ap)))
                          #u
-                         (begin (k-unify-lists pp ap kinds solved trail)
+                         ;; A parameter is contravariant: bounds the other way.
+                         (begin (k-flipped (lambda () (k-unify-lists pp ap kinds solved trail)))
                                 (u pr (extract (car c) 3))
                                 (ue pe (extract (car c) 1)))))))))
-          (ty-ref (x r) (tagcase at (ty-ref (y s) (begin (ur r s) (u x y))) (else z #u)))
-          (ty-markkey (x r) (tagcase at (ty-markkey (y s) (begin (ur r s) (u x y))) (else z #u)))
-          (ty-array (x r) (tagcase at (ty-array (y s) (begin (ur r s) (u x y))) (else z #u)))
-          (ty-icell (x r) (tagcase at (ty-icell (y s) (begin (ur r s) (u x y))) (else z #u)))
+          ;; Mutable, so invariant, as a pair's contents are: what it meets.
+          (ty-ref (x r) (tagcase at (ty-ref (y s) (begin (ur r s) (ux x y))) (else z #u)))
+          (ty-markkey (x r) (tagcase at (ty-markkey (y s) (begin (ur r s) (ux x y))) (else z #u)))
+          (ty-array (x r) (tagcase at (ty-array (y s) (begin (ur r s) (ux x y))) (else z #u)))
+          (ty-icell (x r) (tagcase at (ty-icell (y s) (begin (ur r s) (ux x y))) (else z #u)))
           (ty-place (r) (tagcase at (ty-place (s) (ur r s)) (else z #u)))
           (ty-pair (x1 x2 r nl)
             (tagcase at
@@ -855,14 +852,15 @@
 (define k-instantiate-plain (subr (maxeff checks spin) (int int int int) int)
   (lambda (t expected a b)
     (let* ((bo (k-binders-of t)) (kinds (extract bo 1)) (inner (extract bo 2))
-           (solved (the k-solved (new nil))))
+           (solved (k-new-bounded-solved)))
       (begin
-        (k-unify inner expected kinds solved (the k-trail (new nil)))
+        (k-from-above (lambda () (k-unify inner expected kinds solved (the k-trail (new nil)))))
         (k-default-regions kinds solved)
         (let ((m (k-finish kinds solved a b t)))
           (begin (k-check-bounds kinds m a b)
                  (k-check-finite-sizes kinds m inner a b)
-                 (let ((inst (k-subst inner m))) (begin (k-no-knot inst a b) inst))))))))
+                 (let ((inst (k-subst inner m)))
+                   (begin (k-no-knot inst a b) (k-drop-bounds solved inst)))))))))
 ;; Instantiate a polymorphic value used, unapplied, where `expected` is
 ;; wanted. A list of any elements (`nil`, `no-pair`) is the empty list, so
 ;; `nil` where that is wanted, or a pair that may be `nil` but is no list

@@ -211,6 +211,14 @@ pub struct Checker {
     /// binder solved already takes what it meets there, if the two are
     /// related, since nothing else will check (`infer.rs`, `unify`).
     pub(crate) unify_exact: bool,
+    /// Whether `unify` is bounding its binders from above: matching what is
+    /// expected of a call's result, flipped inside a subroutine's
+    /// parameters (`infer.rs`, `Bounds`).
+    pub(crate) unify_upper: bool,
+    /// A call checked against a type, and its own type there, the last one
+    /// checked: what an argument checked against an upper bound bounds its
+    /// binders by from below (`infer.rs`, `instantiate`).
+    pub(crate) checked_call: Option<(ExpId, TyId)>,
     /// The sizes given to `nat` variables of no known size, innermost last
     /// (`Checker::name_nat`).
     pub(crate) skolems: Vec<DVar>,
@@ -499,6 +507,8 @@ impl Checker {
             closure_depth: 0,
             pending_unions: Vec::new(),
             unify_exact: false,
+            unify_upper: false,
+            checked_call: None,
             size_facts: Vec::new(),
             skolems: Vec::new(),
             module_vars: HashSet::new(),
