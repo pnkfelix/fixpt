@@ -61,7 +61,9 @@ struct Lift {
 /// its body is, its parameters and its own name, and the names it captures.
 #[derive(Clone)]
 struct Made {
-    span: (u32, u32),
+    /// Its body's span: file, start and end (a `load-module`'s file has
+    /// positions of its own, which may be another's too).
+    span: (u32, u32, u32),
     params: Vec<Sym>,
     own: Option<Sym>,
     word: Value,
@@ -130,7 +132,7 @@ pub struct Compiler<'a> {
     /// members' (none if it is not lifted), so that its register code
     /// lifts it as its stack code did, with the same words.
     lifts: Vec<Lift>,
-    lifted: HashMap<(u32, u32), Option<Vec<usize>>>,
+    lifted: HashMap<(u32, u32, u32), Option<Vec<usize>>>,
     /// The parameters added to the lambda about to be compiled.
     lifting_added: usize,
     declined: Option<String>,
@@ -180,7 +182,7 @@ pub struct Compiler<'a> {
     plan_path: Vec<procs::Step>,
     /// The specialized copies made, by the procedure's word, the lambda's
     /// span, what it captures and the globals it sees (`r_specialize`).
-    spec_copies: HashMap<(u64, u32, u32, Vec<Sym>, Option<usize>), Value>,
+    spec_copies: HashMap<(u64, u32, u32, u32, Vec<Sym>, Option<usize>), Value>,
     /// While a procedure specialized at a lambda is compiled: which.
     spec: Option<Spec>,
     /// The globals defined as constants (`TODO.md` §42), by their cells: a
@@ -223,7 +225,7 @@ pub struct Compiler<'a> {
     /// the keys of the environment's `RLoc::Test`s.
     test_keys: Vec<(String, Vec<(u8, u64)>)>,
     /// Each expression's effect summary, by span, once asked.
-    summaries: Option<std::collections::HashMap<(u32, u32), u8>>,
+    summaries: Option<std::collections::HashMap<(u32, u32, u32), u8>>,
     /// The top-level definition whose body is being compiled: its name and
     /// arity.
     own_now: Option<(Sym, usize)>,
@@ -986,7 +988,7 @@ impl<'a> Compiler<'a> {
         let (w, fv) = made?;
         let span = self.c.arena.span_of(body);
         let own = own.filter(|f| !params.contains(f));
-        let made = Made { span: (span.start, span.end), params: params.to_vec(), own, word: w, fv: fv.clone() };
+        let made = Made { span: (span.file.0, span.start, span.end), params: params.to_vec(), own, word: w, fv: fv.clone() };
         if self.spec.is_none() {
             self.form_made.push(made.clone());
         }
@@ -1002,7 +1004,7 @@ impl<'a> Compiler<'a> {
         let own = own.filter(|f| !params.contains(f));
         // This body's own, first; then any the form's stack code made (a join
         // point's body, compiled in its letrec's procedure's register code).
-        let same = |m: &&Made| m.span == (span.start, span.end) && m.params == params && m.own == own && m.fv == fv;
+        let same = |m: &&Made| m.span == (span.file.0, span.start, span.end) && m.params == params && m.own == own && m.fv == fv;
         self.reuse.iter().find(same).or_else(|| self.form_made.iter().find(same)).map(|m| (m.word, fv))
     }
 
@@ -1073,11 +1075,13 @@ impl<'a> Compiler<'a> {
         let w = self.assemble(&body_code, &name)?;
         // For bisecting a fault: with `FIXPT_REG_RANGE=lo-hi,…`, only the
         // lambdas whose bodies start in those character ranges get register
-        // code.
+        // code; a body in a module's file (`load-module`) at its file number
+        // times 10,000,000 and its character there.
+        let at = if span.file.0 == 0 { start as u64 } else { span.file.0 as u64 * 10_000_000 + self.loaded_char_at(span) as u64 };
         let in_range = std::env::var("FIXPT_REG_RANGE").ok().map(|r| {
             r.split(',').any(|part| {
                 part.split_once('-')
-                    .and_then(|(lo, hi)| Some((lo.parse::<u32>().ok()?..hi.parse::<u32>().ok()?).contains(&start)))
+                    .and_then(|(lo, hi)| Some((lo.parse::<u64>().ok()?..hi.parse::<u64>().ok()?).contains(&at)))
                     .unwrap_or(false)
             })
         });
@@ -1287,7 +1291,7 @@ impl<'a> Compiler<'a> {
     /// the names it takes first.
     fn lift(&mut self, x: ExpId, bindings: &[(Sym, crate::ast::TyId, ExpId)], body: ExpId, e: &Env, tail: bool) -> R<Option<Vec<usize>>> {
         let span = self.c.arena.span_of(x);
-        let key = (span.start, span.end);
+        let key = (span.file.0, span.start, span.end);
         if let Some(done) = self.lifted.get(&key) {
             return Ok(done.clone());
         }
@@ -1732,7 +1736,7 @@ impl<'a> Compiler<'a> {
         let Exp::Lambda { params, body } = self.exp_at(c.lam).clone() else { return Ok(()) };
         let sp = &self.specials[k];
         let span = self.c.arena.span_of(body);
-        let key = (sp.word.raw(), span.start, span.end, c.fv.clone(), c.genv);
+        let key = (sp.word.raw(), span.file.0, span.start, span.end, c.fv.clone(), c.genv);
         if self.spec_copies.contains_key(&key) {
             return Ok(());
         }

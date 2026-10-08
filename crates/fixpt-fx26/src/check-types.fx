@@ -17,10 +17,7 @@
 ;;; type before its initialiser), so the first error is the same one.
 ;;;
 ;;; Compiled with the reader and the parser, as one program. Its store is
-;;; @t and its failures abort to a prompt in @z, both its own.
-
-
-(private-regions @t @z)
+;;; @t and its failures abort to a prompt in @z.
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
@@ -35,8 +32,8 @@
 
 ;;; ------------------------------------------------------------ descriptions
 
-;; A region: a constant `@name`, a fresh one (made by inference, a bloblet,
-;; or `private-regions`, which no program can name), or a binder.
+;; A region: a constant `@name`, a fresh one (made by inference or a
+;; bloblet, which no program can name), or a binder.
 ;; `(r-frozen p #f)` is `(const p)`, and `(r-frozen p #t)` `(acyclic p)`
 ;; (frozen data never written, only built, and so finite); in both, the
 ;; region of data frozen into place `p` (a
@@ -170,7 +167,6 @@
   (ds-abbrev (listof (productof (1 symbol) (2 int)) acyclic) syn)
   (ds-region k-region)
   (ds-eff k-eff)
-  (ds-private k-region)
   ;; A convention given for an abbreviation's convention parameter.
   (ds-conv k-conv)
   ;; A name for a description function: `define-type` of a `dlambda`, or a
@@ -766,7 +762,6 @@
 (define ds-abbrev (with check-types-module ds-abbrev))
 (define ds-region (with check-types-module ds-region))
 (define ds-eff (with check-types-module ds-eff))
-(define ds-private (with check-types-module ds-private))
 (define ds-conv (with check-types-module ds-conv))
 (define ds-fun (with check-types-module ds-fun))
 (define x-var (with check-types-module x-var))

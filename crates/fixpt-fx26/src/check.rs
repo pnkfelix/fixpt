@@ -276,8 +276,6 @@ pub struct Checker {
     pub(crate) ahead_filled: Vec<(TyId, fixpt_read::Span)>,
     /// What checking proved about each expression, for lowering to carry.
     pub facts: NodeFacts,
-    /// The regions `private-regions` made this program's own.
-    pub private_regions: Vec<Region>,
     /// While a module's order is checked (`crate::modorder`): each earlier
     /// item whose value is a module as written, and that module's values,
     /// which a `with` of it not yet checked binds.
@@ -517,7 +515,6 @@ impl Checker {
             ahead: Vec::new(),
             ahead_filled: Vec::new(),
             facts: NodeFacts::default(),
-            private_regions: Vec::new(),
             hazard_modules: Vec::new(),
             masking: true,
             broken: HashMap::new(),
@@ -1246,10 +1243,11 @@ impl Checker {
     /// else, 3 anything else that may also keep its continuation for later
     /// (`comefrom`), write a global, or do what an effect variable stands
     /// for, which a global's value may change across. Where two expressions
-    /// have one span, the greater. `check-types.fx`'s `checked-effects` says the
-    /// same.
-    pub fn effect_summaries(&self) -> HashMap<(u32, u32), u8> {
-        let mut out: HashMap<(u32, u32), u8> = HashMap::new();
+    /// have one span, the greater. By file, start and end: a `load-module`'s
+    /// file has positions of its own. `check-types.fx`'s `checked-effects`
+    /// says the same.
+    pub fn effect_summaries(&self) -> HashMap<(u32, u32, u32), u8> {
+        let mut out: HashMap<(u32, u32, u32), u8> = HashMap::new();
         for (e, eff) in &self.facts.effects {
             let s = if eff.is_pure() {
                 0
@@ -1261,7 +1259,7 @@ impl Checker {
                 2
             };
             let span = self.arena.span_of(*e);
-            let k = out.entry((span.start, span.end)).or_insert(s);
+            let k = out.entry((span.file.0, span.start, span.end)).or_insert(s);
             *k = (*k).max(s);
         }
         out

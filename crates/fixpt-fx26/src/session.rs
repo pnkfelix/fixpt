@@ -155,7 +155,7 @@ pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> String 
         _ => {}
     }
     match top {
-        Top::DefineType { .. } | Top::DefineTypeFamily { .. } | Top::DefineGenerative { .. } | Top::DefineEffect { .. } | Top::PrivateRegions { .. } => {
+        Top::DefineType { .. } | Top::DefineTypeFamily { .. } | Top::DefineGenerative { .. } | Top::DefineEffect { .. } => {
             String::new()
         }
         Top::Define { name, exp, recursive, .. } => {
@@ -228,7 +228,7 @@ pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
 /// compilers run as register code runs lowered. A tenth of the front end,
 /// and of its loading, which is most of a session's start.
 fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
-    let parser = crate::FRONT_END_FILES.iter().position(|(n, _)| *n == "parser-top.fx").expect("listed");
+    let parser = crate::FRONT_END_FILES.iter().position(|(n, _)| *n == "reader.fx").expect("listed");
     let text = crate::FRONT_END_FILES[..=parser].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
     load_lowered(scheme, &text)
 }

@@ -5,6 +5,20 @@ use fixpt_engine::Backend;
 use fixpt_fx26::session::{Fx26Session, load_eager_reader};
 use fixpt_read::FileId;
 
+/// What the front end's `load-module`s read, its module files built in,
+/// handed to the front end `pieces` are of (`loaded-files!`, the
+/// bootstrap's ninth piece), as a system call would: FX-26 code reads no
+/// files (`syn::loaded_files`).
+fn supply_loaded(sc: &mut fixpt_scheme::Session, pieces: fixpt_scheme::Handle, text: &str) {
+    let list = fixpt_fx26::syn::loaded_files(sc, FileId(0), text).expect("the module files read");
+    let set = sc.make(|m| {
+        let p = m.get(pieces);
+        m.heap().bloblet_slot(p, 10)
+    });
+    let args = sc.call_global("list", &[list]).expect("a list");
+    sc.call_global("%run-word", &[set, args]).expect("the files handed over");
+}
+
 /// The front end, compiled to one cellular word by the compiler written in
 /// FX-26 (run lowered to Scheme), with the Rust checker's facts.
 #[test]
@@ -126,6 +140,7 @@ fn fixpoint_as_register_code() {
         let none = sc.make(|_| Value::NULL);
         let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
+        supply_loaded(sc, pieces, &text);
         // Stage 2 with register code too, by the register compiler written
         // in FX-26 (`regcode.fx`): its twins the same as the Rust one's.
         let registers = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 9) });
@@ -186,6 +201,7 @@ fn fixpoint_on(machine: fixpt_runtime::RunWord) {
         let none = sc.make(|_| Value::NULL);
         let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
+        supply_loaded(sc, pieces, &text);
         lap("the compiled front end ran, giving the driver");
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
         let args = sc.call_global("list", &[std, prog]).expect("a list");
@@ -236,6 +252,7 @@ fn probe_stage2() {
         let none = sc.make(|_| Value::NULL);
         let pieces = sc.call_global("%run-word", &[stage1, none]).expect("runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
+        supply_loaded(sc, pieces, &text);
         let _ = fixpt_native::cellular::take_callout_counts();
         let _ = fixpt_native::cellular::take_callout_nanos();
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&target)));
@@ -520,6 +537,7 @@ fn fixpoint_with_words_compiled_by_fx26() {
         }
         lap(&format!("{} words, {instructions} instructions, compiled by FX-26 and placed", words.len()));
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
+        supply_loaded(sc, pieces, &text);
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
         let args = sc.call_global("list", &[std, prog]).expect("a list");
         let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
@@ -638,7 +656,10 @@ fn probe_profile_check() {
             sc.call_global("%run-word", &[f, list]).expect("runs")
         };
         let (read, parse, check) = (piece(sc, 2), piece(sc, 3), piece(sc, 4));
-        let (tx, st) = (sc.make(|m| m.heap().make_string(&text)), sc.make(|m| m.heap().make_string(&standard)));
+        // What is checked: the front end, or `PROBE_CHECK_FILE`.
+        let target = std::env::var("PROBE_CHECK_FILE").map(|f| std::fs::read_to_string(f).expect("reads")).unwrap_or_else(|_| text.clone());
+        supply_loaded(sc, pieces, &target);
+        let (tx, st) = (sc.make(|m| m.heap().make_string(&target)), sc.make(|m| m.heap().make_string(&standard)));
         let syns = run(sc, read, &[tx]);
         let syns = sc.make(|m| { let l = m.get(syns); m.heap().car(l) });
         let std = run(sc, read, &[st]);

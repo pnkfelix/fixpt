@@ -132,20 +132,6 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel:
     .unwrap_or_else(|e| NativeRun::Ran(Err(e)))
 }
 
-/// `private-regions` declared again, as by a file loaded again, binds the
-/// regions the program already has (TODO §30): `xs`, made before, is still
-/// a list `total`, defined after, takes. Compiled, so that the checker
-/// written in FX-26 agrees.
-#[test]
-fn private_regions_declared_again_are_the_same() {
-    for strategy in [Strategy::Lower, Strategy::Cellular] {
-        let mut s = session();
-        s.strategy = strategy;
-        let out = run(&mut s, include_str!("programs/redefine/private-again.fx"));
-        assert_eq!(out.last().map(|s| s.as_str()), Some("30"), "{strategy:?}: {out:?}");
-    }
-}
-
 /// With re-runs waiting, as at the REPL (TODO §29), compiled: `g` keeps
 /// the old `f` and is out of date, not run again by the compiler written
 /// in FX-26; `,rerun-outdated` runs it, once `f` takes an int again.

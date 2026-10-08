@@ -2034,6 +2034,12 @@ impl NativeMachine {
         // only through the state while the machine runs.
         unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };
         self.fuel_left = st.fuel;
+        // For finding a fault: with `FIXPT_TRAP_WHERE` set, the word and the
+        // closure running when the machine trapped.
+        if st.status != 0 && std::env::var_os("FIXPT_TRAP_WHERE").is_some() {
+            let show = |v: u64| fixpt_runtime::print::write_value(&rt.heap, Value(v));
+            eprintln!("; trapped in {} (closure {})", show(st.cur), show(st.clo));
+        }
         self.stacks.finish(&st)
     }
 }

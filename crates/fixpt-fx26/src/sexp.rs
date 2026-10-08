@@ -105,9 +105,6 @@ pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span) -
         Top::DefineType { .. } | Top::DefineTypeFamily { .. } => format!("(t-define-type _ _ {a} {b})"),
         Top::DefineGenerative { .. } => format!("(t-define-generative _ _ {a} {b})"),
         Top::DefineEffect { .. } => format!("(t-define-effect _ _ {a} {b})"),
-        Top::PrivateRegions { regions } => {
-            format!("(t-private-regions ({}) {a} {b})", vec!["_"; regions.len()].join(" "))
-        }
         Top::Exp(k) => format!("(t-exp {})", show_exp(c, chars, k.exp)),
     }
 }

@@ -7,23 +7,27 @@
 ;;; written in: the evaluator and the compiler do not need them, and the
 ;;; checker written in FX-26 (`check-*.fx`) reads them itself.
 ;;;
-;;; Compiled with the reader, as one program: `syn` is in the reader's region
-;;; @s, which only this program can name. The trees are `acyclic`: made by
-;;; `cons` straight into the frozen region, never written, so a walk of one
-;;; ends (`docs/fx26.md`, "Well-founded recursion"). A parse
-;;; that fails aborts to a prompt in @p; both are this program's own, so
+;;; A module file of the reader's regions and its own (`rp`), loading the
+;;; reader at those: `syn` is in the reader's region `rs`. The trees are
+;;; `acyclic`: made by `cons` straight into the frozen region, never written,
+;;; so a walk of one ends (`docs/fx26.md`, "Well-founded recursion"). A parse
+;;; that fails aborts to a prompt in `rp`; it touches no other region, so
 ;;; `parse-program` is licensed as the reader's entry points are.
-
-
-(private-regions @p)
-
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define parser-module (module
+(module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
+;; The reader, at these regions, and what this file uses of it.
+(define eager-reader-module ((proj (load-module "fx26:eager-reader.fx") rs re rm rc)))
+(define-type syn (select eager-reader-module syn))
+(define syn->datum (with eager-reader-module syn->datum))
+(define-type result (select eager-reader-module result))
+(define str3 (with eager-reader-module str3))
+(define atom (with eager-reader-module atom))
+(define lst (with eager-reader-module lst))
+(define dotted (with eager-reader-module dotted))
+(define vec (with eager-reader-module vec))
 ;; What a parse may do: read what was read and build a tree
 ;; (`tree-builds`), and give up.
-(define-effect tree-builds (maxeff (read @globals) (read @s) (alloc @s)))
-(define-effect parses (maxeff tree-builds (goto @p)))
+(define-effect tree-builds (maxeff (read @globals) (read rs) (alloc rs)))
+(define-effect parses (maxeff tree-builds (goto rp)))
 
 (define-type syns-a (listof syn acyclic))
 (define-type names (listof symbol acyclic))
@@ -91,7 +95,6 @@
   ;; `(define-generative head rep)`: read by the checker alone; its two
   ;; conversions follow it as definitions.
   (t-define-generative syn syn int int)
-  (t-private-regions syns-a int int)
   (t-exp exp))
 
 ;; The trees' lists: of expressions, a `lambda`'s parameters, a `letrec`'s
@@ -107,7 +110,7 @@
 
 (define-datatype presult (p-ok (listof top acyclic)) (p-err string int int))
 
-(define parse-tag (prompt-tag presult presult (maxeff tree-builds spin) @p)
+(define parse-tag (prompt-tag presult presult (maxeff tree-builds spin) rp)
   (make-continuation-prompt-tag))
 
 ;;; -------------------------------------------------------- looking at syn
@@ -146,7 +149,7 @@
 (define sym-false symbol (string->symbol "#f"))
 (define sym-unit symbol (string->symbol "#u"))
 ;; `()`, which reads as an empty list.
-(define syn-nil? (subr (read @s) (syn) bool)
+(define syn-nil? (subr (read rs) (syn) bool)
   (lambda (s) (tagcase s (lst (items d a b) (null? items)) (else x #f))))
 ;; A proper list's items; `what`, when it is not one.
 (define syn-items (subr parses (syn string) syns-a)
@@ -157,11 +160,11 @@
 (define syn-int (subr pure (syn) int)
   (lambda (s) (tagcase s (atom (d a b) (if (datum-int? d) d -1)) (else x -1))))
 
-(define len (subr (maxeff (read @globals) (read @s)) (syns-a) int)
+(define len (subr (maxeff (read @globals) (read rs)) (syns-a) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (len (cdr xs))))))
 (define nth (subr parses (syns-a int) syn)
   (lambda (xs i) (if (= i 0) (car xs) (nth (cdr xs) (- i 1)))))
-(define drop (subr (maxeff (read @globals) (read @s)) (syns-a int) syns-a)
+(define drop (subr (maxeff (read @globals) (read rs)) (syns-a int) syns-a)
   (lambda (xs i) (if (= i 0) xs (drop (cdr xs) (- i 1)))))
 
 ;; A label or tag: a name, or a positive integer, which is its digits.
@@ -171,7 +174,7 @@
           ((> (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else (pfail "a label is a name or a positive integer" s)))))
 
-(define keep (subr (maxeff (read @globals) (read @s)) (syns-a) syns-a)
+(define keep (subr (maxeff (read @globals) (read rs)) (syns-a) syns-a)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (keep (cdr xs))))))
 
 ;; `(tag x …)` with `n` items, or fail with `shape`.
@@ -182,9 +185,9 @@
 
 (define mk-symbol (subr (read @globals) (string int int) syn)
   (lambda (n a b) (atom (string->symbol n) a b)))
-(define syn-datums (subr (maxeff (read @globals) (read @s)) (syns-a) (listof datum acyclic))
+(define syn-datums (subr (maxeff (read @globals) (read rs)) (syns-a) (listof datum acyclic))
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
-(define mk-list (subr (maxeff (read @globals) (read @s)) (syns-a int int) syn)
+(define mk-list (subr (maxeff (read @globals) (read rs)) (syns-a int int) syn)
   (lambda (items a b) (lst items (syn-datums items) a b)))
 ;; A parameter: `name`, or `(name type)`.
 (define parse-param (subr parses (syn) (productof (1 symbol) (2 syns-a)))
@@ -216,23 +219,23 @@
 
 ;; A form's head, as `syn-head` gives it: `()` if it is not a list, or is
 ;; empty.
-(define form-head (subr (maxeff (read @globals) (read @s)) (syn) symbol)
+(define form-head (subr (maxeff (read @globals) (read rs)) (syn) symbol)
   (lambda (s)
     (tagcase s
       (lst (items d a b) (if (null? items) '|()| (syn-head (car items))))
       (else x '|()|))))
 ;; Whether `s` is a form headed `keyword`.
-(define form-of? (subr (maxeff (read @globals) (read @s)) (syn symbol) bool)
+(define form-of? (subr (maxeff (read @globals) (read rs)) (syn symbol) bool)
   (lambda (s keyword) (symbol=? (form-head s) keyword)))
 
-(define arm-else? (subr (maxeff (read @globals) (read @s)) (syn) bool)
+(define arm-else? (subr (maxeff (read @globals) (read rs)) (syn) bool)
   (lambda (c) (form-of? c 'else)))
 
 (define parse-names (subr parses (syns-a) names)
   (lambda (xs) (if (null? xs) nil (cons (syn-symbol (car xs)) (parse-names (cdr xs))))))
 
 ;; `(listof t acyclic)`, spanning `a`..`b`.
-(define mk-listof-acyclic (subr (maxeff (read @globals) (read @s)) (syn int int) syn)
+(define mk-listof-acyclic (subr (maxeff (read @globals) (read rs)) (syn int int) syn)
   (lambda (t a b)
     (let ((listof (mk-symbol "listof" a b)) (acyclic (mk-symbol "acyclic" a b)))
       (mk-list (list listof t acyclic) a b))))
@@ -262,7 +265,7 @@
                ((letreap) 2)
                (else 3))))
 ;; `(r p)`'s items, if a `letfreeze` binds that as `given`; else none.
-(define freeze-pair (subr (maxeff (read @globals) (read @s)) (symbol syn) syns-a)
+(define freeze-pair (subr (maxeff (read @globals) (read rs)) (symbol syn) syns-a)
   (lambda (head given)
     (tagcase given
       (lst (xs d a2 b2) (if (and (symbol=? head 'letfreeze) (= (len xs) 2)) xs (the syns-a nil)))
@@ -350,7 +353,7 @@
 (define mod-item-of (subr (read @globals) (int symbol syns-a exp-list) mod-item)
   (lambda (k name ts xs) (product (1 k) (2 (the names (cons name nil))) (3 ts) (4 xs))))
 ;; Whether a `define-type`'s head is `(d (p k) …)`: a name with parameters.
-(define param-head? (subr (maxeff (read @globals) (read @s)) (syn) bool)
+(define param-head? (subr (maxeff (read @globals) (read rs)) (syn) bool)
   (lambda (head)
     (tagcase head
       (lst (xs d a b) (and (not (null? xs)) (not (null? (cdr xs)))))
@@ -393,30 +396,30 @@
 ;;; (sum tag (product (1 %x1) …))))`. Where the form is: a program's, a
 ;;; module's, or a module file's, each parsing what it is made into.
 
-(define datatype? (subr (maxeff (read @globals) (read @s)) (syn) bool)
+(define datatype? (subr (maxeff (read @globals) (read rs)) (syn) bool)
   (lambda (s) (form-of? s 'define-datatype)))
 
 (define mk-int (subr (read @globals) (int int int) syn) (lambda (i a b) (atom i a b)))
 ;; `(keyword item …)`; `(subr pure (member …) result)`; and `(poly (binder
 ;; …) body)`: each spanning `a`..`b`.
-(define mk-form (subr (maxeff (read @globals) (read @s)) (string syns-a int int) syn)
+(define mk-form (subr (maxeff (read @globals) (read rs)) (string syns-a int int) syn)
   (lambda (keyword items a b) (mk-list (cons (mk-symbol keyword a b) items) a b)))
-(define mk-pure-subr (subr (maxeff (read @globals) (read @s)) (syns-a syn int int) syn)
+(define mk-pure-subr (subr (maxeff (read @globals) (read rs)) (syns-a syn int int) syn)
   (lambda (members result a b)
     (let ((pure (mk-symbol "pure" a b)) (args (mk-list members a b)))
       (mk-form "subr" (list pure args result) a b))))
-(define mk-poly (subr (maxeff (read @globals) (read @s)) (syns-a syn int int) syn)
+(define mk-poly (subr (maxeff (read @globals) (read rs)) (syns-a syn int int) syn)
   (lambda (binders body a b)
     (mk-form "poly" (list (mk-list binders a b) body) a b)))
 ;; A constructor's parameters, `%x1 …`, from `i`.
-(define dt-vars (subr (maxeff (read @globals) (read @s) (alloc @s)) (syns-a int int int) syns-a)
+(define dt-vars (subr (maxeff (read @globals) (read rs) (alloc rs)) (syns-a int int int) syns-a)
   (lambda (ms i a b)
     (if (null? ms)
         nil
         (let ((x (mk-symbol (string-append "%x" (int->string i)) a b)))
           (cons x (dt-vars (cdr ms) (+ i 1) a b))))))
 ;; `(1 m1) (2 m2) …`, from `i`.
-(define dt-labelled (subr (maxeff (read @globals) (read @s) (alloc @s)) (syns-a int int int) syns-a)
+(define dt-labelled (subr (maxeff (read @globals) (read rs) (alloc rs)) (syns-a int int int) syns-a)
   (lambda (ms i a b)
     (if (null? ms)
         nil
@@ -449,7 +452,8 @@
                (ty (if family? (mk-poly params mono a b) mono))
                (xs (dt-vars members 1 a b))
                (fields (mk-form "product" (dt-labelled xs 1 a b) a b))
-               (body (mk-form "sum" (list tag fields) a b))
+               ;; At its variant: no two constructors' bodies at one place.
+               (body (mk-form "sum" (list tag fields) (syn-start (car vs)) (syn-end (car vs))))
                (make (mk-form "lambda" (list (mk-list xs a b) body) a b))
                (ctor (mk-form "define" (list tag ty make) a b))
                (rest (dt-constructors used family? params (cdr vs) a b)))
@@ -618,114 +622,105 @@
                 (fx-call "append" (list (car spliced) (mk-form "the" (list ty rest) a b))
                          ia ib))))))))
 
-))
 
-(define-effect parses (select parser-module parses))
-(define-type syns-a (select parser-module syns-a))
-(define-type names (select parser-module names))
-(define-type exp (select parser-module exp))
-(define-type top (select parser-module top))
-(define-type exp-list (select parser-module exp-list))
-(define-type param-list (select parser-module param-list))
-(define-type top-list (select parser-module top-list))
-(define-type mod-item (select parser-module mod-item))
-(define-type mod-items (select parser-module mod-items))
-(define-type presult (select parser-module presult))
-(define parse-tag (with parser-module parse-tag))
-(define syn-start (with parser-module syn-start))
-(define syn-end (with parser-module syn-end))
-(define pfail (with parser-module pfail))
-(define pfail-at (with parser-module pfail-at))
-(define syn-symbol? (with parser-module syn-symbol?))
-(define syn-name (with parser-module syn-name))
-(define syn-head (with parser-module syn-head))
-(define syn-symbol (with parser-module syn-symbol))
-(define syn-items (with parser-module syn-items))
-(define syn-int (with parser-module syn-int))
-(define len (with parser-module len))
-(define nth (with parser-module nth))
-(define drop (with parser-module drop))
-(define label (with parser-module label))
-(define keep (with parser-module keep))
-(define arity (with parser-module arity))
-(define mk-list (with parser-module mk-list))
-(define form-head (with parser-module form-head))
-(define form-of? (with parser-module form-of?))
-(define big-literal (with parser-module big-literal))
-(define mod-item-of (with parser-module mod-item-of))
-(define datatype? (with parser-module datatype?))
-(define mk-pure-subr (with parser-module mk-pure-subr))
-(define mk-poly (with parser-module mk-poly))
-(define expand-datatype (with parser-module expand-datatype))
-(define e-var (with parser-module e-var))
-(define e-int (with parser-module e-int))
-(define e-bool (with parser-module e-bool))
-(define e-str (with parser-module e-str))
-(define e-char (with parser-module e-char))
-(define e-float (with parser-module e-float))
-(define e-sym (with parser-module e-sym))
-(define e-unit (with parser-module e-unit))
-(define e-lambda (with parser-module e-lambda))
-(define e-app (with parser-module e-app))
-(define e-plambda (with parser-module e-plambda))
-(define e-proj (with parser-module e-proj))
-(define e-if (with parser-module e-if))
-(define e-letrec (with parser-module e-letrec))
-(define e-let (with parser-module e-let))
-(define e-begin (with parser-module e-begin))
-(define e-prompt (with parser-module e-prompt))
-(define e-letregion (with parser-module e-letregion))
-(define e-rlambda (with parser-module e-rlambda))
-(define e-the (with parser-module e-the))
-(define e-convention (with parser-module e-convention))
-(define e-bloblet (with parser-module e-bloblet))
-(define e-product (with parser-module e-product))
-(define e-extract (with parser-module e-extract))
-(define e-sum (with parser-module e-sum))
-(define e-tagcase (with parser-module e-tagcase))
-(define e-module (with parser-module e-module))
-(define e-with (with parser-module e-with))
-(define t-define (with parser-module t-define))
-(define t-define-rec (with parser-module t-define-rec))
-(define t-define-type (with parser-module t-define-type))
-(define t-define-effect (with parser-module t-define-effect))
-(define t-define-generative (with parser-module t-define-generative))
-(define t-private-regions (with parser-module t-private-regions))
-(define t-exp (with parser-module t-exp))
-(define p-ok (with parser-module p-ok))
-(define p-err (with parser-module p-err))
-(define-type letrec-list (select parser-module letrec-list))
-(define-type let-list (select parser-module let-list))
-(define-type arm-list (select parser-module arm-list))
-(define sym-true (with parser-module sym-true))
-(define sym-false (with parser-module sym-false))
-(define sym-unit (with parser-module sym-unit))
-(define at-least (with parser-module at-least))
-(define vlambda-usage (with parser-module vlambda-usage))
-(define parse-vparam (with parser-module parse-vparam))
-(define region-form? (with parser-module region-form?))
-(define confirm-length-k (with parser-module confirm-length-k))
-(define bloblet-form? (with parser-module bloblet-form?))
-(define syn-string? (with parser-module syn-string?))
-(define syn-string (with parser-module syn-string))
-(define parse-params (with parser-module parse-params))
-(define freeze-pair (with parser-module freeze-pair))
-(define region-kind (with parser-module region-kind))
-(define region-name-error (with parser-module region-name-error))
-(define one-let (with parser-module one-let))
-(define call-tmp (with parser-module call-tmp))
-(define standard-ref (with parser-module standard-ref))
-(define field-index (with parser-module field-index))
-(define bloblet-untagged? (with parser-module bloblet-untagged?))
-(define arm-else? (with parser-module arm-else?))
-(define arm-names (with parser-module arm-names))
-(define identity-at (with parser-module identity-at))
-(define one-syn (with parser-module one-syn))
-(define param-head? (with parser-module param-head?))
-(define param-desc-item (with parser-module param-desc-item))
-(define mk-symbol (with parser-module mk-symbol))
-(define quoted (with parser-module quoted))
-(define rec-names (with parser-module rec-names))
-(define rec-types (with parser-module rec-types))
-(define rec-inits (with parser-module rec-inits))
-(define module-usage (with parser-module module-usage))
+
+;;; ------------------------------------------------------------ files loaded
+
+;; What the driver read for each `load-module`, by where the form starts:
+;; the file's base (0 if it could not be read or read), its path, why not
+;; (`cannot read …`, or where in it reading failed), its forms, and its
+;; text.
+(define-type loaded-file
+  (productof (1 int) (2 int) (3 string) (4 string) (5 syns-a) (6 string)))
+(define-type loaded-files (listof loaded-file acyclic))
+(define loaded (ref loaded-files rs) (new nil))
+;; For a driver: what the program's `load-module`s read.
+(define loaded-files! (subr (maxeff (read @globals) (write rs)) (loaded-files) unit)
+  (lambda (fs) (set loaded fs)))
+;; The positions of one file and the next apart.
+(define load-base int 1000000000)
+
+;; What was read for the `load-module` starting at `a`, in a list of one.
+(define loaded-at (subr (maxeff (read @globals) (read rs)) (loaded-files int) loaded-files)
+  (lambda (fs a)
+    (cond ((null? fs) nil)
+          ((= (extract (car fs) 1) a) (the loaded-files (cons (car fs) nil)))
+          (else (loaded-at (cdr fs) a)))))
+;; The file read at `base`, in a list of one.
+(define loaded-based (subr (maxeff (read @globals) (read rs)) (loaded-files int) loaded-files)
+  (lambda (fs base)
+    (cond ((null? fs) nil)
+          ((and (> base 0) (= (extract (car fs) 2) base)) (the loaded-files (cons (car fs) nil)))
+          (else (loaded-based (cdr fs) base)))))
+
+;; `s`, its positions moved by `base`.
+(define-rec
+  (syn-moved (subr (maxeff (read @globals) (read rs) (alloc rs) spin) (syn int) syn)
+    (lambda (s base)
+      (tagcase s
+        (atom (d a b) (atom d (+ a base) (+ b base)))
+        (lst (items d a b) (lst (syns-moved items base) d (+ a base) (+ b base)))
+        (dotted (items t d a b)
+          (dotted (syns-moved items base) (syn-moved t base) d (+ a base) (+ b base)))
+        (vec (items d a b) (vec (syns-moved items base) d (+ a base) (+ b base))))))
+  (syns-moved (subr (maxeff (read @globals) (read rs) (alloc rs) spin) (syns-a int) syns-a)
+    (lambda (xs base)
+      (if (null? xs) nil (cons (syn-moved (car xs) base) (syns-moved (cdr xs) base))))))
+
+;; Where position `at` of `text` is: `line:column`, each from 1.
+(define text-place (subr (maxeff (read @globals) spin) (string int) string)
+  (lambda (text at)
+    (letrec ((go (subr (maxeff (read @globals) spin) (int int int) string)
+               (lambda (i line col)
+                 (cond ((or (>= i at) (>= i (string-length text)))
+                        (str3 (int->string line) ":" (int->string col)))
+                       ((char=? (string-ref text i) #\newline) (go (+ i 1) (+ line 1) 1))
+                       (else (go (+ i 1) line (+ col 1)))))))
+      (go 0 1 1))))
+;; What an error `m` at `at`, in the file read at `base` (`fs`), says where
+;; the `load-module` is: the file, and where in it. As it is, if `at` is
+;; not in that file.
+(define in-loaded
+  (subr (maxeff (read @globals) (read rs) spin) (loaded-files int string int) string)
+  (lambda (fs base m at)
+    (let ((f (loaded-based fs base)))
+      (if (or (null? f) (< at base) (>= at (+ base load-base)))
+          m
+          (let ((path (extract (car f) 4)) (text (extract (car f) 6)))
+            (string-append (str3 "in `" path "`, ")
+                           (str3 (text-place text (- at base)) ": " m)))))))
+
+;; The items of a form that is a module.
+(define module-items-of (subr pure (top) mod-items)
+  (lambda (t)
+    (tagcase t
+      (t-exp (x) (tagcase x (e-module (items a b) items) (else y nil)))
+      (else y nil))))
+;; A module's item that says it was read from a file: its base, its path,
+;; and its parameters' binders (`loaded-params`), which it sees.
+(define loaded-mark (subr parses (int string syns-a) mod-item)
+  (lambda (base path ps)
+    (let ((bs (if (null? ps) (the syns-a nil) (syn-items (car ps) "`((name kind) …)`"))))
+      (mod-item-of base (string->symbol path) bs nil))))
+;; A module's item that says reading its file failed, and why: refused where
+;; the module is checked, as the Rust checker refuses it where it parses
+;; the form.
+(define loaded-error (subr (read @globals) (string) mod-items)
+  (lambda (m) (cons (mod-item-of -1 (string->symbol m) (the syns-a nil) nil) nil)))
+
+;; A module's file's parameters, if its first form is `(module-parameters
+;; ((name kind) …))`, in a list of one; none if not.
+(define loaded-params (subr parses (syns-a) syns-a)
+  (lambda (forms)
+    (if (and (not (null? forms)) (form-of? (car forms) 'module-parameters))
+        (let ((items (syn-items (car forms) "`(module-parameters ((name kind) …))`")))
+          (begin (arity items 2 "`(module-parameters ((name kind) …))`"
+                        (syn-start (car forms)) (syn-end (car forms)))
+                 (the syns-a (cons (nth items 1) nil))))
+        nil)))
+;; Module `m` read from a file of parameters `ps` (`loaded-params`), at
+;; `a`..`b`: a `plambda` over them of a `lambda` of none making it, so that
+;; whoever loads it gives them, and each call makes one. `m`, if none.
+(define* loaded-made (subr pure (syns-a exp int int) exp)
+  (lambda (ps m a b)
+    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a b) a b))))

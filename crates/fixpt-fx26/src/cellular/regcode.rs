@@ -289,7 +289,7 @@ impl Compiler<'_> {
         let span = self.c.arena.span_of(x);
         let c = self.c;
         let all = self.summaries.get_or_insert_with(|| c.effect_summaries());
-        all.get(&(span.start, span.end)).copied().unwrap_or(3)
+        all.get(&(span.file.0, span.start, span.end)).copied().unwrap_or(3)
     }
 
     /// A lambda's body in register code, not yet assembled. In a fast
@@ -394,7 +394,7 @@ impl Compiler<'_> {
             return None;
         }
         let span = self.c.arena.span_of(x);
-        self.lifted.get(&(span.start, span.end)).cloned().flatten()
+        self.lifted.get(&(span.file.0, span.start, span.end)).cloned().flatten()
     }
 
     fn r_where(&self, env: &[(Sym, RLoc)], n: Sym) -> O<RLoc> {
@@ -1800,7 +1800,7 @@ impl Compiler<'_> {
         // globals it sees, made with the form's words as the plan says
         // (`make_copy`).
         let span = self.c.arena.span_of(body);
-        let key = (self.specials[k].word.raw(), span.start, span.end, self.captured(&lam_params, body, te), self.genv_limit);
+        let key = (self.specials[k].word.raw(), span.file.0, span.start, span.end, self.captured(&lam_params, body, te), self.genv_limit);
         let Some(copy) = self.spec_copies.get(&key).copied() else {
             return self.decline("a copy the plan did not make");
         };

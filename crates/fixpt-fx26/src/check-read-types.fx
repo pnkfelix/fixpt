@@ -23,7 +23,7 @@
   (list 'lambda 'plambda 'proj 'if 'letrec 'let 'begin 'define 'define* 'define-type
         'define-generative 'subr 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write
         'alloc 'goto 'comefrom 'region 'effect 'type 'prompt 'prompt-tag 'composable 'mark-key
-        'listof 'cond 'else 'and 'or 'let* 'define-effect 'private-regions 'the 'bloblet 'fields
+        'listof 'cond 'else 'and 'or 'let* 'define-effect 'module-parameters 'the 'bloblet 'fields
         'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
         'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module
         'define-datatype 'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte

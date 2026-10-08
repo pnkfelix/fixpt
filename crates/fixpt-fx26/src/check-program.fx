@@ -55,29 +55,7 @@
       (ty-poly (bs body) (begin (k-push-binders bs) (k-bind-signature body)))
       (else y #u))))
 
-;; The region `private-regions` makes `name` stand for: the one it stands
-;; for already, if an earlier `private-regions` made it the program's own
-;; (a file loaded again is the same program, over the same regions);
-;; otherwise a fresh one.
-(define k-private-region (subr kstate (symbol) k-region)
-  (lambda (name)
-    (let ((d (k-lookup-desc name)))
-      (if (null? d)
-          (k-fresh-region (symbol->string name))
-          (tagcase (car d)
-            (ds-private (r) r)
-            (else x (k-fresh-region (symbol->string name))))))))
-(define k-private (subr checks (syns-a) unit)
-  (lambda (rs)
-    (if (null? rs)
-        #u
-        (let ((name (k-name-of (car rs) "expected a name")))
-          (if (not (k-at-name? (symbol->string name)))
-              (k-sfail "a region constant is written `@name`" (car rs))
-              (begin (k-push-desc name (ds-private (k-private-region name)))
-                     (k-private (cdr rs))))))))
-
-;; `define-type`, `define-effect` and `private-regions`.
+;; `define-type` and `define-effect`.
 ;;; ------------------------------------------------------------ proofs
 ;;; A definition whose declared type is `(proves …)` is a lemma once its
 ;;; body is a guarded structural identity (`src/lemma.rs`): it takes apart
@@ -396,7 +374,6 @@
         (let* ((n (k-name-of name "expected a name"))
                (e (k-parse-effect def)))
           (k-push-desc n (ds-eff e))))
-      (t-private-regions (rs a b) (k-private rs))
       (t-define-generative (head rep a b)
         (let* ((name (k-define-generative head rep))
                (g (- (get k-ngens) 1))

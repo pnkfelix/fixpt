@@ -22,9 +22,6 @@
 ;;; checker written in FX-26 records it (`checked-extracts`), and a program
 ;;; is compiled with what its check found.
 
-
-(private-regions @k @y)
-
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define compile-module (module

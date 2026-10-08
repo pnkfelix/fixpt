@@ -109,19 +109,19 @@
       (ty-pair (a b r nl) #t) (ty-product (ps) #t) (ty-sum (ps) #t) (ty-bloblet (fs z r) #t)
       (ty-union (ms) #t) (else y #f))))
 (define-rec
-  (k-finitize (subr (maxeff kstate spin) (int (ref k-pairs @t)) int)
+  (k-finitize (subr (maxeff kstate spin) (int k-smemo) int)
     (lambda (t memo)
-      (let* ((t (k-resolve t)) (done (k-memo-find (get memo) t)))
+      (let* ((t (k-resolve t)) (done (table-ref memo t -1)))
         (cond ((>= done 0) done)
               ((not (k-finitizes? (k-get t))) t)
               (else
                (let ((slot (k-slot)))
                  (begin
-                   (set memo (cons (cons t slot) (get memo)))
+                   (table-set! memo t slot)
                    (let ((new (k-finitize-node t memo)))
                      (begin (k-set-link slot (k-ty-new new)) slot)))))))))
   ;; Node `t`, its parts made acyclic, and its region if frozen.
-  (k-finitize-node (subr (maxeff kstate spin) (int (ref k-pairs @t)) k-ty)
+  (k-finitize-node (subr (maxeff kstate spin) (int k-smemo) k-ty)
     (lambda (t memo)
       (tagcase (k-get t)
         (ty-pair (a b r nl)
@@ -132,21 +132,21 @@
         (ty-bloblet (fs z r) (ty-bloblet (k-finitize-list fs memo) z (k-fin-region r)))
         (ty-union (ms) (ty-union (k-finitize-list ms memo)))
         (else y (k-get t)))))
-  (k-finitize-parts (subr (maxeff kstate spin) (k-parts (ref k-pairs @t)) k-parts)
+  (k-finitize-parts (subr (maxeff kstate spin) (k-parts k-smemo) k-parts)
     (lambda (ps memo)
       (if (null? ps)
           nil
           (let* ((x (k-finitize (extract (car ps) 2) memo))
                  (rest (k-finitize-parts (cdr ps) memo)))
             (cons (product (1 (extract (car ps) 1)) (2 x)) rest)))))
-  (k-finitize-list (subr (maxeff kstate spin) (k-ids (ref k-pairs @t)) k-ids)
+  (k-finitize-list (subr (maxeff kstate spin) (k-ids k-smemo) k-ids)
     (lambda (ts memo)
       (if (null? ts)
           nil
           (let* ((x (k-finitize (car ts) memo)) (rest (k-finitize-list (cdr ts) memo)))
             (cons x rest))))))
 (define k-finitized (subr (maxeff kstate spin) (int) int)
-  (lambda (t) (k-finitize t (the (ref k-pairs @t) (new nil)))))
+  (lambda (t) (k-finitize t (k-new-smemo))))
 ;; Which binding of `s` is in scope: how deep its name's stack is.
 (define k-binding-depth (subr (maxeff kreads spin) (symbol) int)
   (lambda (s) (k-length (table-ref (get k-env) s nil))))

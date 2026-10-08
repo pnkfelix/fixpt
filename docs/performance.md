@@ -2695,3 +2695,25 @@ clean words skipped, it is a small part now.
 (`dive`: a recursion that deep, then about 38 minor collections at its
 bottom; before stage 1, 732 and 2 935 ms.) The benchmarks: the same, back
 to back.
+
+## The reader and the parser as module files (2026-10-08)
+
+The reader and the parser became module files of their regions, made by
+`reader.fx` (`docs/fx26.md`, "A file is a module"). `fixpt bench
+--front-end`, the front end's row, before and after, in milliseconds:
+
+| phase     | before | after  |
+| --------- | ------:| ------:|
+| check     | 613.84 | 646.19 |
+| lower     |  31.21 |  32.36 |
+| words     |  79.68 |  79.94 |
+| fx read   | 139.93 | 158.05 |
+| fx parse  |  33.30 |  33.80 |
+| fx check  |   1032 |   6391 |
+| fx words  | 275.32 | 231.70 |
+| fx arm64  | 591.31 | 652.10 |
+
+`fx read` now reads the module files too. `fx check` is the cost of
+showing the instances' types, a megabyte each (`TODO.md` §64): 7,246 ms
+before two of the checker's lookups became tables. A session starts in
+0.18 s, from 0.15 s.

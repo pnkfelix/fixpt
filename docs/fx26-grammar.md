@@ -70,7 +70,6 @@ top-form   ::= definition
              | "(" "define-generative" "(" name gen-param+ ")" type ")"
              | "(" "define-datatype" dt-head variant+ ")"
              | "(" "define-effect" name effect ")"
-             | "(" "private-regions" region-constant* ")"
              | expression
 
 definition ::= "(" "define" name expression ")"
@@ -233,7 +232,7 @@ label      ::= name | positive-integer
 ### Regions and places
 
 ```
-region     ::= region-constant                     ; @name: private if `private-regions` said so
+region     ::= region-constant                     ; @name
              | "heap"
              | "const" | "acyclic"                 ; frozen data, anywhere
              | "(" "const" place ")"               ; frozen into place
@@ -366,7 +365,7 @@ bloblet-form ::= "(" "make-bloblet" expression expression* ")"           ; bytes
   lambda (a `define` with a type, or a `define-rec` member) may name any
   of them, but any other value, made as its item is, may not reach one
   not made yet, through the lambdas it names (refused, naming the chain).
-  Not `define*`, `define-effect`, `private-regions`, `define-datatype`, a
+  Not `define*`, `define-effect`, `define-datatype`, a
   type family `(define-type (f p) …)`, a bare expression, or a variance
   mark (`(a type +)`) on a `define-generative`'s parameter.
 - A module's `define-generative` makes `up-name` and `down-name` for the

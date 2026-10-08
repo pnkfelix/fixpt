@@ -435,7 +435,7 @@ fn value_uses(s: &Syntax, i: &Interner, bound: &mut Vec<String>, out: &mut Vec<(
             let name_of = |b: &Syntax| sym(b, i).or_else(|| items(b).first().and_then(|n| sym(n, i))).map(str::to_string);
             let depth = bound.len();
             match head {
-                "define-type" | "define-datatype" | "define-effect" | "define-generative" | "private-regions" | "quote" => {}
+                "define-type" | "define-datatype" | "define-effect" | "define-generative" | "module-parameters" | "quote" => {}
                 // `(define name type expression)`: the type is skipped.
                 "define" => {
                     if let Some(e) = its.last().filter(|_| its.len() >= 3) {

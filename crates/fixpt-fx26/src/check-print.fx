@@ -218,6 +218,60 @@
                   (cons (symbol->string n) nil)
                   (k-abbrev-in all (cdr ds) (+ i 1) t)))
             (else y (k-abbrev-in all (cdr ds) (+ i 1) t)))))))
+;; The `define-type`s of a scope by the type each resolves to, made once
+;; for a type shown (`k-show-ty`), so that each of its nodes finds its name
+;; in a tree, not by resolving every one in scope (`k-abbrev-in`, still for
+;; a name an inner one shadows): each node's key, scrambled from its type,
+;; the type, its name, and where in the scope it is; the innermost of each.
+(define-datatype k-atree (a-leaf) (a-node int int symbol int k-atree k-atree))
+(define-type k-atrees (listof k-atree acyclic))
+(define k-scramble (subr pure (int) int) (lambda (t) (remainder (* t 40503) 65521)))
+(define-rec
+  (k-atree-put (subr spin (k-atree int int symbol int) k-atree)
+    (lambda (tr h t n i)
+      (tagcase tr
+        (a-leaf () (a-node h t n i (a-leaf) (a-leaf)))
+        (a-node (h2 t2 n2 i2 l r)
+          (cond ((or (< h h2) (and (= h h2) (< t t2)))
+                 (a-node h2 t2 n2 i2 (k-atree-put l h t n i) r))
+                ((or (> h h2) (and (= h h2) (> t t2)))
+                 (a-node h2 t2 n2 i2 l (k-atree-put r h t n i)))
+                (else tr)))))))
+(define-type k-named-at (listof (productof (1 symbol) (2 int)) acyclic))
+(define-rec
+  (k-atree-get (subr (maxeff (read @globals) spin) (k-atree int int) k-named-at)
+    (lambda (tr h t)
+      (tagcase tr
+        (a-leaf () nil)
+        (a-node (h2 t2 n2 i2 l r)
+          (cond ((or (< h h2) (and (= h h2) (< t t2))) (k-atree-get l h t))
+                ((or (> h h2) (and (= h h2) (> t t2))) (k-atree-get r h t))
+                (else (the k-named-at (list (product (1 n2) (2 i2)))))))))))
+;; Every `define-type` of scope `ds`, from binding `i` on, into `tr`.
+(define k-atree-of (subr (maxeff kreads spin) (k-scope int k-atree) k-atree)
+  (lambda (ds i tr)
+    (if (null? ds)
+        tr
+        (tagcase (cdr (car ds))
+          (ds-rec (d)
+            (let ((t (k-resolve d)))
+              (k-atree-of (cdr ds) (+ i 1) (k-atree-put tr (k-scramble t) t (car (car ds)) i))))
+          (else y (k-atree-of (cdr ds) (+ i 1) tr))))))
+;; Scope `ds` from binding `i` on.
+(define k-scope-from (subr (read @globals) (k-scope int) k-scope)
+  (lambda (ds i) (if (or (<= i 0) (null? ds)) ds (k-scope-from (cdr ds) (- i 1)))))
+;; The name `define-type` gave `t`, as `k-abbrev-in` finds it, by tree `trs`
+;; if there is one.
+(define k-abbrev-by (subr kbuilds (k-atrees int) k-strings)
+  (lambda (trs t)
+    (let ((all (get k-dscope)))
+      (if (null? trs)
+          (k-abbrev-in all all 0 t)
+          (let ((f (k-atree-get (car trs) (k-scramble t) t)))
+            (cond ((null? f) nil)
+                  ((k-rec-named-within? all (extract (car f) 2) (extract (car f) 1))
+                   (let ((i (+ (extract (car f) 2) 1))) (k-abbrev-in all (k-scope-from all i) i t)))
+                  (else (the k-strings (list (symbol->string (extract (car f) 1)))))))))))
 ;; Binder `v` of kind `kind`: `(name kind)`, or `(name region bound)`.
 (define k-binder-show (subr kbuilds (int int) string)
   (lambda (v kind)
@@ -557,15 +611,17 @@
                        (k-show-abs (cdr ps))))))
 
 ;; Where a type is being shown: the path to it from the root, newest first,
-;; to name cycles by; and the names a `moduleof`'s descriptions give what
-;; they describe, in the components after them, newest first.
-(define-type k-printing (productof (1 k-ids) (2 k-parts)))
-(define k-printing-none k-printing (product (1 (the k-ids nil)) (2 (the k-parts nil))))
+;; to name cycles by; the names a `moduleof`'s descriptions give what they
+;; describe, in the components after them, newest first; and the scope's
+;; `define-type`s by type, in a list of one (`k-abbrev-by`), or none.
+(define-type k-printing (productof (1 k-ids) (2 k-parts) (3 k-atrees)))
+(define k-printing-none k-printing
+  (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 (the k-atrees nil))))
 ;; `p` with the names of descriptions `ds` too.
 (define k-printing-named (subr (maxeff (read @globals) (alloc @t)) (k-printing k-parts)
                                 k-printing)
   (lambda (p ds)
-    (product (1 (extract p 1)) (2 (k-parts-onto-front ds (extract p 2))))))
+    (product (1 (extract p 1)) (2 (k-parts-onto-front ds (extract p 2))) (3 (extract p 3)))))
 (define k-parts-onto-front (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts) k-parts)
   (lambda (ps acc)
     (if (null? ps) acc (k-parts-onto-front (cdr ps) (the k-parts (cons (car ps) acc))))))
@@ -621,7 +677,7 @@
     (lambda (t path)
       (let* ((t (k-resolve t))
              (named (k-part-named (extract path 2) t))
-             (name (if (null? named) (k-abbrev-in (get k-dscope) (get k-dscope) 0 t) named)))
+             (name (if (null? named) (k-abbrev-by (extract path 3) t) named)))
         (if (null? name) (k-show-body t path) (car name)))))
   (k-show-list (subr kbuilds (k-ids k-printing) k-strings)
     (lambda (ts path)
@@ -671,7 +727,8 @@
       (let ((ids (extract path 1)))
         (if (k-has-id? ids t)
             (string-append "%" (int->string (k-depth-of ids t)))
-            (let ((p (product (1 (the k-ids (cons t ids))) (2 (extract path 2)))))
+            (let ((p (product (1 (the k-ids (cons t ids))) (2 (extract path 2))
+                              (3 (extract path 3)))))
               (k-mu-wrap (string-append "%" (int->string (k-length (extract p 1))))
                          (k-show-node t p)))))))
   ;; What node `t` shows as, `p` the path to it from the root, newest
@@ -749,7 +806,7 @@
         (else y
           (let* ((r (k-resolve t))
                  (named (k-part-named (extract p 2) r))
-                 (name (if (null? named) (k-abbrev-in (get k-dscope) (get k-dscope) 0 r) named)))
+                 (name (if (null? named) (k-abbrev-by (extract p 3) r) named)))
             (if (or (null? name) (string=? (car name) (symbol->string n)))
                 (k-show-body r p)
                 (car name))))))))
@@ -760,7 +817,9 @@
 ;; A type. One `define-type` named prints as its name; any other recursive
 ;; type as `(mu %d …)`, `%d` naming the cycle.
 (define k-show-ty (subr kbuilds (int) string)
-  (lambda (t) (k-show-on t k-printing-none)))))
+  (lambda (t)
+    (let ((trs (the k-atrees (list (k-atree-of (get k-dscope) 0 (a-leaf))))))
+      (k-show-on t (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 trs))))))))
 
 (define k-dvar-string (with check-print-module k-dvar-string))
 (define k-region-show (with check-print-module k-region-show))

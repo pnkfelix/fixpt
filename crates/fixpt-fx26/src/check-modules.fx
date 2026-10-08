@@ -753,7 +753,7 @@
               ;; itself.
               (let* ((outer-keep (get k-subst-keep))
                      (kept (set k-subst-keep (k-select-clean t given)))
-                     (r (k-subst-memo t given (the (ref k-pairs @t) (new nil)))))
+                     (r (k-subst-memo t given (k-new-smemo))))
                 (begin (set k-subst-keep outer-keep)
                        (set k-select-map outer)
                        (k-check-apps r a b)

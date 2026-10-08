@@ -22,9 +22,6 @@
 ;;;
 ;;; Not yet: bloblets' frozen flags.
 
-
-(private-regions @v @x)
-
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define evaluator-module (module

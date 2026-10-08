@@ -1778,3 +1778,32 @@ already a coercion point. Both checkers (`fixed_range`,
 `k-literal-within?`, `k-base-below?`), then tests on every machine.
 Then fixed-width values could also count as sizes (`nat` terms), since
 each is an integer the checker knows the range of.
+
+## 64. The reader's module types, shown, are megabytes (2026-10-08)
+
+Since the reader and the parser are module files made by `reader.fx`, the
+front end's top level holds their instances: `make-reader`,
+`parser-top-module`, `parser-exps-module`, `parser-module`. Each one's type,
+as both checkers show it for the form's line, is about 1 MB (290 KB,
+540 KB, 946 KB, 948 KB), for two reasons. Each module holds the one below
+as a value, so each type holds the one below's whole type; the
+`parser-top` one holds `parser-exps`'s, and `parser`'s and the reader's
+again. And types the parser defines show written out (`(mu %4 (sumof
+(e-var …` inside `top`), not by name, though a small module's datatypes
+keep their names; perhaps because they mention `syn` through a `select`, and
+so are not noted closed (`k-closed-named`) and are copied by substitution.
+The checker written in FX-26 builds those strings by appending, so its
+check of the front end went from 1.0 s to 6.4 s (`fixpt bench --front-end`,
+"fx check"), most of it there (sampled: `Heap::string_points_into`); the
+Rust checker is barely slower (614 to 646 ms). Neither user programs nor
+session start are affected (0.15 to 0.18 s).
+- Find why those types lose their names (compare one before and after
+  `proj`), and keep them.
+- Hold less: an upper file needs only the instance just below as an item;
+  the rest it can reach through it (`(with pe (with p x))`), or the lower
+  file re-exports.
+- Done meanwhile, in the checker written in FX-26: substitution's and
+  `k-finitize`'s memos as hash tables, not lists (quadratic on a large
+  type), and a type's names found in a tree made once per type shown
+  (`k-atree`), not by resolving every `define-type` in scope at each node.
+

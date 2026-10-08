@@ -13,108 +13,121 @@
 ;;; multiple of `load-base`, so that what is said of a place in it can say
 ;;; which file and where.
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define parser-exps-module (module
-;; What the driver read for each `load-module`, by where the form starts:
-;; the file's base (0 if it could not be read or read), its path, why not
-;; (`cannot read …`, or where in it reading failed), its forms, and its
-;; text.
-(define-type loaded-file
-  (productof (1 int) (2 int) (3 string) (4 string) (5 syns-a) (6 string)))
-(define-type loaded-files (listof loaded-file acyclic))
-(define loaded (ref loaded-files @s) (new nil))
-;; For a driver: what the program's `load-module`s read.
-(define loaded-files! (subr (maxeff (read @globals) (write @s)) (loaded-files) unit)
-  (lambda (fs) (set loaded fs)))
-;; The positions of one file and the next apart.
-(define load-base int 1000000000)
-
-;; What was read for the `load-module` starting at `a`, in a list of one.
-(define loaded-at (subr (maxeff (read @globals) (read @s)) (loaded-files int) loaded-files)
-  (lambda (fs a)
-    (cond ((null? fs) nil)
-          ((= (extract (car fs) 1) a) (the loaded-files (cons (car fs) nil)))
-          (else (loaded-at (cdr fs) a)))))
-;; The file read at `base`, in a list of one.
-(define loaded-based (subr (maxeff (read @globals) (read @s)) (loaded-files int) loaded-files)
-  (lambda (fs base)
-    (cond ((null? fs) nil)
-          ((and (> base 0) (= (extract (car fs) 2) base)) (the loaded-files (cons (car fs) nil)))
-          (else (loaded-based (cdr fs) base)))))
-
-;; `s`, its positions moved by `base`.
-(define-rec
-  (syn-moved (subr (maxeff (read @globals) (read @s) (alloc @s) spin) (syn int) syn)
-    (lambda (s base)
-      (tagcase s
-        (atom (d a b) (atom d (+ a base) (+ b base)))
-        (lst (items d a b) (lst (syns-moved items base) d (+ a base) (+ b base)))
-        (dotted (items t d a b)
-          (dotted (syns-moved items base) (syn-moved t base) d (+ a base) (+ b base)))
-        (vec (items d a b) (vec (syns-moved items base) d (+ a base) (+ b base))))))
-  (syns-moved (subr (maxeff (read @globals) (read @s) (alloc @s) spin) (syns-a int) syns-a)
-    (lambda (xs base)
-      (if (null? xs) nil (cons (syn-moved (car xs) base) (syns-moved (cdr xs) base))))))
-
-;; Where position `at` of `text` is: `line:column`, each from 1.
-(define text-place (subr (maxeff (read @globals) spin) (string int) string)
-  (lambda (text at)
-    (letrec ((go (subr (maxeff (read @globals) spin) (int int int) string)
-               (lambda (i line col)
-                 (cond ((or (>= i at) (>= i (string-length text)))
-                        (str3 (int->string line) ":" (int->string col)))
-                       ((char=? (string-ref text i) #\newline) (go (+ i 1) (+ line 1) 1))
-                       (else (go (+ i 1) line (+ col 1)))))))
-      (go 0 1 1))))
-;; What an error `m` at `at`, in the file read at `base` (`fs`), says where
-;; the `load-module` is: the file, and where in it. As it is, if `at` is
-;; not in that file.
-(define in-loaded
-  (subr (maxeff (read @globals) (read @s) spin) (loaded-files int string int) string)
-  (lambda (fs base m at)
-    (let ((f (loaded-based fs base)))
-      (if (or (null? f) (< at base) (>= at (+ base load-base)))
-          m
-          (let ((path (extract (car f) 4)) (text (extract (car f) 6)))
-            (string-append (str3 "in `" path "`, ")
-                           (str3 (text-place text (- at base)) ": " m)))))))
-
-;; The items of a form that is a module.
-(define module-items-of (subr pure (top) mod-items)
-  (lambda (t)
-    (tagcase t
-      (t-exp (x) (tagcase x (e-module (items a b) items) (else y nil)))
-      (else y nil))))
-;; A module's item that says it was read from a file: its base, its path,
-;; and its parameters' binders (`loaded-params`), which it sees.
-(define loaded-mark (subr parses (int string syns-a) mod-item)
-  (lambda (base path ps)
-    (let ((bs (if (null? ps) (the syns-a nil) (syn-items (car ps) "`((name kind) …)`"))))
-      (mod-item-of base (string->symbol path) bs nil))))
-;; A module's item that says reading its file failed, and why: refused where
-;; the module is checked, as the Rust checker refuses it where it parses
-;; the form.
-(define loaded-error (subr (read @globals) (string) mod-items)
-  (lambda (m) (cons (mod-item-of -1 (string->symbol m) (the syns-a nil) nil) nil)))
-
-;; A module's file's parameters, if its first form is `(module-parameters
-;; ((name kind) …))`, in a list of one; none if not.
-(define loaded-params (subr parses (syns-a) syns-a)
-  (lambda (forms)
-    (if (and (not (null? forms)) (form-of? (car forms) 'module-parameters))
-        (let ((items (syn-items (car forms) "`(module-parameters ((name kind) …))`")))
-          (begin (arity items 2 "`(module-parameters ((name kind) …))`"
-                        (syn-start (car forms)) (syn-end (car forms)))
-                 (the syns-a (cons (nth items 1) nil))))
-        nil)))
-;; Module `m` read from a file of parameters `ps` (`loaded-params`), at
-;; `a`..`b`: a `plambda` over them of a `lambda` of none making it, so that
-;; whoever loads it gives them, and each call makes one. `m`, if none.
-(define* loaded-made (subr pure (syns-a exp int int) exp)
-  (lambda (ps m a b)
-    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a b) a b))))
-
+(module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
+;; The parser's first part at these regions, the reader in it, and what this
+;; file uses of them.
+(define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
+(define eager-reader-module (with parser-module eager-reader-module))
+(define-type data (select eager-reader-module data))
+(define-type syn (select eager-reader-module syn))
+(define syn->datum (with eager-reader-module syn->datum))
+(define str3 (with eager-reader-module str3))
+(define atom (with eager-reader-module atom))
+(define lst (with eager-reader-module lst))
+(define dotted (with eager-reader-module dotted))
+(define vec (with eager-reader-module vec))
+(define-effect parses (select parser-module parses))
+(define-type syns-a (select parser-module syns-a))
+(define-type exp (select parser-module exp))
+(define-type top (select parser-module top))
+(define-type exp-list (select parser-module exp-list))
+(define-type mod-item (select parser-module mod-item))
+(define-type mod-items (select parser-module mod-items))
+(define parse-tag (with parser-module parse-tag))
+(define syn-start (with parser-module syn-start))
+(define syn-end (with parser-module syn-end))
+(define pfail (with parser-module pfail))
+(define pfail-at (with parser-module pfail-at))
+(define syn-symbol? (with parser-module syn-symbol?))
+(define syn-name (with parser-module syn-name))
+(define syn-head (with parser-module syn-head))
+(define syn-symbol (with parser-module syn-symbol))
+(define syn-items (with parser-module syn-items))
+(define len (with parser-module len))
+(define nth (with parser-module nth))
+(define drop (with parser-module drop))
+(define label (with parser-module label))
+(define keep (with parser-module keep))
+(define arity (with parser-module arity))
+(define big-literal (with parser-module big-literal))
+(define mod-item-of (with parser-module mod-item-of))
+(define datatype? (with parser-module datatype?))
+(define expand-datatype (with parser-module expand-datatype))
+(define e-var (with parser-module e-var))
+(define e-int (with parser-module e-int))
+(define e-bool (with parser-module e-bool))
+(define e-str (with parser-module e-str))
+(define e-char (with parser-module e-char))
+(define e-float (with parser-module e-float))
+(define e-sym (with parser-module e-sym))
+(define e-unit (with parser-module e-unit))
+(define e-lambda (with parser-module e-lambda))
+(define e-app (with parser-module e-app))
+(define e-plambda (with parser-module e-plambda))
+(define e-proj (with parser-module e-proj))
+(define e-if (with parser-module e-if))
+(define e-letrec (with parser-module e-letrec))
+(define e-let (with parser-module e-let))
+(define e-begin (with parser-module e-begin))
+(define e-prompt (with parser-module e-prompt))
+(define e-letregion (with parser-module e-letregion))
+(define e-rlambda (with parser-module e-rlambda))
+(define e-the (with parser-module e-the))
+(define e-convention (with parser-module e-convention))
+(define e-bloblet (with parser-module e-bloblet))
+(define e-product (with parser-module e-product))
+(define e-extract (with parser-module e-extract))
+(define e-sum (with parser-module e-sum))
+(define e-tagcase (with parser-module e-tagcase))
+(define e-module (with parser-module e-module))
+(define e-with (with parser-module e-with))
+(define t-define (with parser-module t-define))
+(define t-exp (with parser-module t-exp))
+(define p-ok (with parser-module p-ok))
+(define p-err (with parser-module p-err))
+(define-type letrec-list (select parser-module letrec-list))
+(define-type let-list (select parser-module let-list))
+(define-type arm-list (select parser-module arm-list))
+(define sym-true (with parser-module sym-true))
+(define sym-false (with parser-module sym-false))
+(define sym-unit (with parser-module sym-unit))
+(define at-least (with parser-module at-least))
+(define vlambda-usage (with parser-module vlambda-usage))
+(define parse-vparam (with parser-module parse-vparam))
+(define region-form? (with parser-module region-form?))
+(define confirm-length-k (with parser-module confirm-length-k))
+(define bloblet-form? (with parser-module bloblet-form?))
+(define syn-string? (with parser-module syn-string?))
+(define syn-string (with parser-module syn-string))
+(define parse-params (with parser-module parse-params))
+(define freeze-pair (with parser-module freeze-pair))
+(define region-kind (with parser-module region-kind))
+(define region-name-error (with parser-module region-name-error))
+(define one-let (with parser-module one-let))
+(define call-tmp (with parser-module call-tmp))
+(define standard-ref (with parser-module standard-ref))
+(define field-index (with parser-module field-index))
+(define bloblet-untagged? (with parser-module bloblet-untagged?))
+(define arm-else? (with parser-module arm-else?))
+(define arm-names (with parser-module arm-names))
+(define identity-at (with parser-module identity-at))
+(define one-syn (with parser-module one-syn))
+(define param-head? (with parser-module param-head?))
+(define param-desc-item (with parser-module param-desc-item))
+(define mk-symbol (with parser-module mk-symbol))
+(define quoted (with parser-module quoted))
+(define rec-names (with parser-module rec-names))
+(define rec-types (with parser-module rec-types))
+(define rec-inits (with parser-module rec-inits))
+(define module-usage (with parser-module module-usage))
+(define loaded (with parser-module loaded))
+(define loaded-at (with parser-module loaded-at))
+(define syns-moved (with parser-module syns-moved))
+(define in-loaded (with parser-module in-loaded))
+(define loaded-mark (with parser-module loaded-mark))
+(define loaded-error (with parser-module loaded-error))
+(define loaded-params (with parser-module loaded-params))
+(define loaded-made (with parser-module loaded-made))
 ;;; ------------------------------------------------------------ expressions
 ;; Whether `s` mentions the name `n` anywhere, quoted or not.
 (define syn-mentions? (subr spin (symbol syn) bool)
@@ -898,13 +911,4 @@
               ((3)
                (let ((name (syn-symbol (nth items 1))))
                  (t-define name (the syns-a nil) (parse-exp (nth items 2)) a b)))
-              (else (pfail "`(define name type expression)` or `(define name expression)`" s))))))))
-
-(define loaded (with parser-exps-module loaded))
-(define loaded-files! (with parser-exps-module loaded-files!))
-(define load-base (with parser-exps-module load-base))
-(define in-loaded (with parser-exps-module in-loaded))
-(define parse-exp (with parser-exps-module parse-exp))
-(define parse-module-item (with parser-exps-module parse-module-item))
-(define parse-rec-bindings (with parser-exps-module parse-rec-bindings))
-(define parse-define (with parser-exps-module parse-define))
+              (else (pfail "`(define name type expression)` or `(define name expression)`" s))))))

@@ -521,7 +521,12 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
     let (fx_read, fx_parse, fx_check, fx_words, fx_arm) = fx.scheme.scope(|sc| -> Result<_, String> {
         let file = FileId(0);
         let msg = |e: fixpt_fx26::FxError| e.message;
-        let (fx_read, syns) = fx_phase(sc, r("fx read"), |sc| fixpt_fx26::syn::read_to_syns(sc, file, text).map_err(msg))?;
+        // Reading, the files its `load-module`s name too (the front end's
+        // module files built in), handed to the parser.
+        let (fx_read, syns) = fx_phase(sc, r("fx read"), |sc| {
+            fixpt_fx26::syn::supply_loaded(sc, file, text).map_err(msg)?;
+            fixpt_fx26::syn::read_to_syns(sc, file, text).map_err(msg)
+        })?;
         let (fx_parse, tops) = fx_phase(sc, r("fx parse"), |sc| fixpt_fx26::syn::parse_syns(sc, file, text, syns).map_err(msg))?;
         let standard = fixpt_fx26::syn::read_standard(sc).map_err(msg)?;
         let reader = |n: &str| format!("{}{n}", fixpt_fx26::session::READER_PREFIX);

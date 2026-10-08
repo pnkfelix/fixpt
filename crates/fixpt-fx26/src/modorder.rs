@@ -7,10 +7,10 @@
 //! lambdas it reaches, followed through them. A module breaking that is
 //! refused (`module_hazards`), naming the chain; nothing is reordered.
 //! What a value names is its free variables (`free_vars`; a `with` inside
-//! not checked yet binds none, unless its module is an earlier item whose
-//! value is a module as written, `written_modules`, so that `(define x
-//! (with m x))` re-exports `m`'s `x`), followed in the order of the items
-//! they name. The FX-26 checker's `k-mod-hazards` (`check-modorder.fx`) is this,
+//! not checked yet binds none, unless its module is an item checked before
+//! the rest, `early_modules`, whose values' names are then known, so that
+//! `(define x (with m x))` re-exports `m`'s `x`), followed in the order of
+//! the items they name. The FX-26 checker's `k-mod-hazards` (`check-modorder.fx`) is this,
 //! step for step.
 
 use crate::ast::{ExpId, ModItem, TyId};
@@ -51,60 +51,50 @@ impl Checker {
         out
     }
 
-    /// Each of `items` whose value is a module as written, and its values'
-    /// names: a `module` (or a `load-module`'s), under any `plambda`,
-    /// `proj`, `lambda` of no parameters or call of none, or an earlier
-    /// such item's name. An abstract type's conversions stay inside, so
-    /// are not among them. As the FX-26 checker's `k-written-modules`.
-    pub(crate) fn written_modules(&self, items: &[ModItem]) -> Vec<(Sym, Vec<Sym>)> {
-        let mut out: Vec<(Sym, Vec<Sym>)> = Vec::new();
-        for item in items {
-            if let ModItem::Val { name, init, .. } = item
-                && let Some(ns) = self.written_module(*init, &out)
-            {
-                out.push((*name, ns));
-            }
-        }
-        out
-    }
-
-    /// The items, in order, checked before a module's typed lambdas are
-    /// bound: each with no type written whose value is a module as written
-    /// (`written_module`) naming no item of the module but earlier such
-    /// ones. As the FX-26 checker's `k-early-modules`.
+    /// The items checked before a module's typed lambdas are bound, in
+    /// order: each with no type written whose value is a module as written
+    /// (`written_module`), naming no item of the module but earlier such
+    /// ones. Checked first, a module's values' names are known to a `with`
+    /// of it not checked yet (`hazard_modules`). As the FX-26 checker's
+    /// `k-early-modules`.
     pub(crate) fn early_modules(&self, items: &[ModItem]) -> Vec<usize> {
         let places = Self::module_places(items);
-        let (mut known, mut out): (Vec<(Sym, Vec<Sym>)>, Vec<usize>) = (Vec::new(), Vec::new());
+        let (mut names, mut out): (Vec<Sym>, Vec<usize>) = (Vec::new(), Vec::new());
         for (i, item) in items.iter().enumerate() {
             if let ModItem::Val { name, ty: None, init, .. } = item
-                && let Some(ns) = self.written_module(*init, &known)
-                && self.module_names_in(*init, &places).iter().all(|n| known.iter().any(|(k, _)| k == n))
+                && self.written_module(*init, &names)
+                && self.early_names_in(*init, &places).iter().all(|n| names.contains(n))
             {
-                known.push((*name, ns));
+                names.push(*name);
                 out.push(i);
             }
         }
         out
     }
 
-    fn written_module(&self, e: ExpId, known: &[(Sym, Vec<Sym>)]) -> Option<Vec<Sym>> {
+    /// Whether `e` is a module as written: a `module` (or a
+    /// `load-module`'s), under any `plambda`, `proj`, `lambda` of no
+    /// parameters or call of none; an earlier such item, of `early`; or a
+    /// value of one, `(with m x)`.
+    fn written_module(&self, e: ExpId, early: &[Sym]) -> bool {
         use crate::ast::Exp;
         match self.arena.exp_at(e) {
-            Exp::Module(items) => Some(
-                items
-                    .iter()
-                    .flat_map(|it| match it {
-                        ModItem::Val { name, .. } => vec![*name],
-                        ModItem::Rec(bs) => bs.iter().map(|(n, _, _)| *n).collect(),
-                        _ => Vec::new(),
-                    })
-                    .collect(),
-            ),
-            Exp::App { fun, args } if args.is_empty() => self.written_module(*fun, known),
-            Exp::Lambda { params, body } if params.is_empty() => self.written_module(*body, known),
-            Exp::Proj { body, .. } | Exp::PLambda { body, .. } => self.written_module(*body, known),
-            Exp::Var(x) => known.iter().find(|(n, _)| n == x).map(|(_, ns)| ns.clone()),
-            _ => None,
+            Exp::Module(_) => true,
+            Exp::App { fun, args } if args.is_empty() => self.written_module(*fun, early),
+            Exp::Lambda { params, body } if params.is_empty() => self.written_module(*body, early),
+            Exp::Proj { body, .. } | Exp::PLambda { body, .. } => self.written_module(*body, early),
+            Exp::Var(x) => early.contains(x),
+            Exp::With { module, body } => early.contains(module) && matches!(self.arena.exp_at(*body), Exp::Var(_)),
+            _ => false,
+        }
+    }
+
+    /// The names the module defines that a module as written `x` names: of
+    /// `(with m y)`, `m` only, `y` being `m`'s.
+    fn early_names_in(&self, x: ExpId, places: &[(Sym, usize)]) -> Vec<Sym> {
+        match self.arena.exp_at(x) {
+            crate::ast::Exp::With { module, .. } => places.iter().filter(|(n, _)| n == module).map(|(n, _)| *n).collect(),
+            _ => self.module_names_in(x, places),
         }
     }
 

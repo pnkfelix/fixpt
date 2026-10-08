@@ -899,11 +899,11 @@
              (ls (k-mod-lambdas items))
              (stars (k-mod-star-lambdas items))
              (recs (k-mod-recs-lambdas ls))
-             (hazards (k-mod-hazards items ls))
              ;; Its modules as written first, for its lambdas' types to select from.
              (early (k-mod-early items (k-early-modules items)
                                  (lambda (it m) (k-module-val it a b m))
                                  (k-made-of nil nil nil nil)))
+             (hazards (k-mod-hazards items ls (k-parts-modules (extract early 3))))
              (bound-ds (k-mod-bindings ls a b))
              (bs (extract bound-ds 1))
              (bound (k-mod-bind bs ls))

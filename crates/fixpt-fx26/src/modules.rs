@@ -72,14 +72,10 @@ impl Checker {
         if let Some((n, _, init, _)) = lambdas.iter().find(|(_, _, init, i)| matches!(items[*i], ModItem::Rec(_)) && !self.is_lambda(*init)) {
             return Err(FxError::at(self.arena.span_of(*init), format!("`{}`, in a `define-rec`, is a `lambda`", self.interner.name(*n))));
         }
-        let written = self.written_modules(items);
-        let outer = std::mem::replace(&mut self.hazard_modules, written);
-        let hazards = self.module_hazards(items, &lambdas);
-        self.hazard_modules = outer;
-        hazards?;
         // An item whose value is a module as written, naming no item but such
         // earlier ones (`early_modules`), checked first, so that the typed
-        // lambdas' types may select from it: `(define m (load-module "f"))`
+        // lambdas' types may select from it, and the order check knows its
+        // values: `(define m (load-module "f"))`
         // and `(define g (subr pure ((select m t)) int) …)`. Checking it first
         // does not change when it is made.
         let mut typed: Vec<(usize, Sym, TyId)> = Vec::new();
@@ -92,6 +88,19 @@ impl Checker {
             self.env.push((name, bound));
             typed.push((i, name, t));
         }
+        // Each of those a module, its values' names bound in a `with` of it
+        // not checked yet (`crate::modorder`).
+        let known = typed
+            .iter()
+            .filter_map(|(_, n, t)| match self.arena.get(self.arena.resolve(*t)) {
+                Ty::Module { vals, .. } => Some((*n, vals.iter().map(|(v, _)| *v).collect())),
+                _ => None,
+            })
+            .collect();
+        let outer = std::mem::replace(&mut self.hazard_modules, known);
+        let hazards = self.module_hazards(items, &lambdas);
+        self.hazard_modules = outer;
+        hazards?;
         // A `define*`'s type as written, and the type it is checked at first,
         // reading any global: what it reads is then found from its body.
         let star = |i: usize| matches!(items[i], ModItem::Val { infer: true, .. });

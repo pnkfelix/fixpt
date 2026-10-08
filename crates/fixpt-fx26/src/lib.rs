@@ -18,11 +18,12 @@
 
 pub mod ast;
 
-/// The eager reader, written in FX-26: see the file's own header.
+/// The eager reader, written in FX-26: see the file's own header. A module
+/// file of the reader's regions, built in ([`FRONT_END_MODULES`]).
 pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 
-/// The parser written in FX-26, which needs the reader's types: it is
-/// compiled with it, as one program ([`front_end`]).
+/// The parser written in FX-26, which needs the reader's types: a module
+/// file of the reader's regions and its own, loading the reader at them.
 pub const PARSER: &str = include_str!("parser.fx");
 
 /// The parser's top-level forms, and a program of them.
@@ -140,13 +141,33 @@ pub fn front_end() -> String {
     FRONT_END_FILES.iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n")
 }
 
+/// The reader and the parser made at the front end's regions, and what
+/// the rest of the front end uses of them, re-exported. The first of
+/// [`FRONT_END_FILES`].
+pub const READER: &str = include_str!("reader.fx");
+
+/// The module files built in, each loaded by the one after
+/// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
+/// [`READER`]: the reader and the parser, of the reader's regions.
+pub const FRONT_END_MODULES: [(&str, &str); 4] =
+    [("eager-reader.fx", EAGER_READER), ("parser.fx", PARSER), ("parser-exps.fx", PARSER_EXPS), ("parser-top.fx", PARSER_TOP)];
+
+/// A `load-module` path naming a module file built in, in
+/// [`FRONT_END_MODULES`]: this, then its name.
+pub const BUILT_IN_PREFIX: &str = "fx26:";
+
+/// The text of the module file built in that `path` names
+/// (`fx26:parser.fx`), if it names one.
+pub fn built_in_module(path: &str) -> Option<&'static str> {
+    let name = path.strip_prefix(BUILT_IN_PREFIX)?;
+    FRONT_END_MODULES.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
+}
+
 /// The front end's files, by name, in the order [`front_end`] joins them;
-/// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 58] = [
-    ("eager-reader.fx", EAGER_READER),
-    ("parser.fx", PARSER),
-    ("parser-exps.fx", PARSER_EXPS),
-    ("parser-top.fx", PARSER_TOP),
+/// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
+/// built in, [`FRONT_END_MODULES`], are loaded by the first.
+pub const FRONT_END_FILES: [(&str, &str); 55] = [
+    ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
     CHECKER_FILES[1],

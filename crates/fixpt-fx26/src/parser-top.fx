@@ -3,9 +3,50 @@
 
 ;;; ------------------------------------------------------------- top level
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define parser-top-module (module
+(module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
+;; The parser's other parts at these regions, the reader in them, and what
+;; this file uses of them.
+(define parser-exps-module ((proj (load-module "fx26:parser-exps.fx") rs re rm rc rp)))
+(define parser-module (with parser-exps-module parser-module))
+(define eager-reader-module (with parser-module eager-reader-module))
+(define-type syn (select eager-reader-module syn))
+(define lst (with eager-reader-module lst))
+(define-effect parses (select parser-module parses))
+(define-type syns-a (select parser-module syns-a))
+(define-type exp (select parser-module exp))
+(define-type top (select parser-module top))
+(define-type param-list (select parser-module param-list))
+(define-type top-list (select parser-module top-list))
+(define-type presult (select parser-module presult))
+(define parse-tag (with parser-module parse-tag))
+(define syn-start (with parser-module syn-start))
+(define syn-end (with parser-module syn-end))
+(define pfail (with parser-module pfail))
+(define syn-symbol? (with parser-module syn-symbol?))
+(define syn-symbol (with parser-module syn-symbol))
+(define syn-items (with parser-module syn-items))
+(define len (with parser-module len))
+(define nth (with parser-module nth))
+(define keep (with parser-module keep))
+(define mk-list (with parser-module mk-list))
+(define form-head (with parser-module form-head))
+(define form-of? (with parser-module form-of?))
+(define datatype? (with parser-module datatype?))
+(define mk-pure-subr (with parser-module mk-pure-subr))
+(define mk-poly (with parser-module mk-poly))
+(define expand-datatype (with parser-module expand-datatype))
+(define e-var (with parser-module e-var))
+(define e-lambda (with parser-module e-lambda))
+(define t-define (with parser-module t-define))
+(define t-define-rec (with parser-module t-define-rec))
+(define t-define-type (with parser-module t-define-type))
+(define t-define-effect (with parser-module t-define-effect))
+(define t-define-generative (with parser-module t-define-generative))
+(define t-exp (with parser-module t-exp))
+(define p-ok (with parser-module p-ok))
+(define parse-exp (with parser-exps-module parse-exp))
+(define parse-rec-bindings (with parser-exps-module parse-rec-bindings))
+(define parse-define (with parser-exps-module parse-define))
 (define parse-top (subr (maxeff parses spin) (syn) top)
   (lambda (s)
     (let ((head (form-head s)))
@@ -28,9 +69,6 @@
                     (if (= (len items) 3)
                         (t-define-effect (nth items 1) (nth items 2) (syn-start s) (syn-end s))
                         (pfail "`(define-effect name effect)`" s))))
-                 ((private-regions)
-                  (let ((regions (keep (cdr (syn-items s "private-regions")))))
-                    (t-private-regions regions (syn-start s) (syn-end s))))
                  (else (t-exp (parse-exp s)))))))
 
 (define append-tops (subr (read @globals) (top-list top-list) top-list)
@@ -39,7 +77,7 @@
 ;; `(define-generative head rep)`: the form, and its two conversions, each
 ;; the identity: `(define up-name (poly (param …) (subr pure (rep) (name p
 ;; …))) (lambda (x) x))`, and `down-name` the other way.
-(define generative? (subr (maxeff (read @globals) (read @s)) (syn) bool)
+(define generative? (subr (maxeff (read @globals) (read rs)) (syn) bool)
   (lambda (s) (form-of? s 'define-generative)))
 ;; A parameter as a binder, its variance left out.
 (define gen-binder (subr parses (syn int int) syn)
@@ -108,9 +146,7 @@
 
 ;; The entry point: a program's forms, as read, to trees or an error. The
 ;; prompt catches every failure, but its tag is a global whose type names
-;; @p, so the control effect stays in the type, as the reader's on @e do;
-;; @p is this program's own, so that is still licensed.
+;; `rp`, so the control effect stays in the type, as the reader's on `re` do;
+;; `rp` is one of the regions this module is given, so that is still licensed.
 (define parse-program (subr (maxeff (read @globals) parses spin) (syns-a) presult)
-  (lambda (forms) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r))))))
-
-(define parse-program (with parser-top-module parse-program))
+  (lambda (forms) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r))))

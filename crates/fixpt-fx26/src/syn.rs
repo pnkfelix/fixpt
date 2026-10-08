@@ -659,14 +659,23 @@ fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, St
 /// (`loaded-files!`): by where the form starts, the file's base (0 if it
 /// was not read), its path, why not, its forms and its text. A file read is
 /// a module's in order, as the Rust checker numbers them.
-fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
+pub fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let list = loaded_files(scheme, file, text)?;
+    scheme.call_global(&format!("{READER_PREFIX}loaded-files!"), &[list]).map_err(|e| fail(e.to_string()))?;
+    Ok(())
+}
+
+/// What `text`'s `load-module`s read, as [`supply_loaded`] hands it to the
+/// parser written in FX-26: for a driver that hands it to a front end of
+/// its own (`tests/bootstrap.rs`, whose front end reads the front end's
+/// built-in module files).
+pub fn loaded_files(scheme: &mut Session, file: FileId, text: &str) -> R<fixpt_scheme::Handle> {
     let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let mut list = scheme.make(|_| Value::NULL);
     let mut read = 0;
     supply_loaded_in(scheme, file, text, 0, base_dir, &mut read, &mut list)?;
-    scheme.call_global(&format!("{READER_PREFIX}loaded-files!"), &[list]).map_err(|e| fail(e.to_string()))?;
-    Ok(())
+    Ok(list)
 }
 
 /// [`supply_loaded`] for the `load-module`s of `text`, a program or a file
@@ -696,7 +705,12 @@ fn supply_loaded_in(
             Some(d) if std::path::Path::new(&path).is_relative() => d.join(&path),
             _ => std::path::PathBuf::from(&path),
         };
-        let (file_base, why, syns, ftext) = match std::fs::read_to_string(&at) {
+        // A module file built in (`fx26:…`) is its text, not a file's.
+        let contents = |at: &std::path::Path| match crate::built_in_module(&path) {
+            Some(t) => Ok(t.to_string()),
+            None => std::fs::read_to_string(at),
+        };
+        let (file_base, why, syns, ftext) = match contents(&at) {
             Err(e) => (0, format!("cannot read `{path}`: {e}"), scheme.make(|_| Value::NULL), String::new()),
             Ok(ftext) => match read_to_syns(scheme, FileId(1001 + *read), &ftext) {
                 Err(e) => {

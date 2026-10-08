@@ -7,12 +7,13 @@
 ;;; that file procedure for procedure, so the two can be read side by side;
 ;;; what differs is what the types make explicit.
 ;;;
-;;; * **Regions.** The reader's own lists and pairs are in @s, its prompt
-;;;   tag in @e and its mark key in @m, and all of them are private to this
-;;;   program (`private-regions`). Its control effects are on @e, and are
-;;;   never masked: a checkpoint is handed back to the caller. That is what
-;;;   the licence in `docs/fx26.md` is about — every effect here is on a
-;;;   region no other program can name.
+;;; * **Regions.** A module file of the reader's regions
+;;;   (`(module-parameters …)`), which whoever loads it gives: its own lists
+;;;   and pairs are in `rs`, its prompt tag in `re`, its mark key in `rm`,
+;;;   the lists it hands back in `rc`. Its control effects are on `re`, and
+;;;   are never masked: a checkpoint is handed back to the caller. That is
+;;;   what the licence in `docs/fx26.md` is about — every effect here is on
+;;;   one of those regions, and the reader cannot name any other.
 ;;; * **Data.** What is read is a `syn`: a datum, or a list of `syn`s, with
 ;;;   where it starts and ends, in characters. `eager-state-syntax` gives
 ;;;   those; `eager-state-data`, and the marks, give plain `datum`s, opaque
@@ -33,24 +34,19 @@
 
 ;;; ------------------------------------------------------------------ types
 
-;; The reader's own regions: its data, its prompt tag, its mark key, and the
-;; lists it hands back. Each is fresh for this program, and nothing outside
-;; it can name one — which is what licenses running it on every keystroke.
-
-(private-regions @s @e @m @c)
-
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define eager-reader-module (module
+;; The reader's regions: its data, its prompt tag, its mark key, and the
+;; lists it hands back. It touches no other (`licence.rs`), which is what
+;; licenses running it on every keystroke.
+(module-parameters ((rs region) (re region) (rm region) (rc region)))
 ;; What a reading procedure may do: allocate, read and write its own data,
 ;; mark, and suspend or fail through its prompt. A delimited parse does the
-;; same, less the control on @e (`parsing`); looking at the data only reads
+;; same, less the control on `re` (`parsing`); looking at the data only reads
 ;; it (`inspects`).
-(define-effect own-data (maxeff (alloc @s) (read @s) (write @s)))
-(define-effect marks (maxeff (write @m) (read @m)))
+(define-effect own-data (maxeff (alloc rs) (read rs) (write rs)))
+(define-effect marks (maxeff (write rm) (read rm)))
 (define-effect parsing (maxeff (read @globals) own-data marks))
-(define-effect reads (maxeff parsing (goto @e) (comefrom @e)))
-(define-effect inspects (maxeff (read @globals) (read @s)))
+(define-effect reads (maxeff parsing (goto re) (comefrom re)))
+(define-effect inspects (maxeff (read @globals) (read rs)))
 ;; What most of its procedures do: that, perhaps without end.
 (define-effect reading (maxeff reads spin))
 
@@ -75,68 +71,68 @@
       (lst (items d a b) d)
       (dotted (items tail d a b) d)
       (vec (items d a b) d))))
-(define syns->data (subr (maxeff (read @globals) (read @s) (alloc @s)) (syns) data)
+(define syns->data (subr (maxeff (read @globals) (read rs) (alloc rs)) (syns) data)
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syns->data (cdr xs))))))
 
 ;; What a feed returns: waiting for a character, or stopped at an error.
 ;; Fields: need?, the continuation (one, when waiting), and then, as a
 ;; `state-rest`, the position, the complete top-level data (newest first),
 ;; and the message.
-(define-type state-rest (pairof int (pairof syns string @s) @s))
+(define-type state-rest (pairof int (pairof syns string rs) rs))
 (define-type state
-  (dletrec ((st (pairof bool (pairof (listof k acyclic) state-rest @s) @s))
-            (k (composable char st (maxeff parsing spin) @e)))
+  (dletrec ((st (pairof bool (pairof (listof k acyclic) state-rest rs) rs))
+            (k (composable char st (maxeff parsing spin) re)))
     st))
-(define-type cont (composable char state (maxeff parsing spin) @e))
+(define-type cont (composable char state (maxeff parsing spin) re))
 
 ;; The lookahead character (none once a closing character is consumed), how
 ;; many characters have been consumed, the top-level data, and — after `#`
 ;; followed by something that is not a comment — the cursor after that
 ;; something, which the datum reader takes up.
-(define-type cursor (pairof chars (pairof int (pairof syns (listof cursor acyclic) @s) @s) @s))
+(define-type cursor (pairof chars (pairof int (pairof syns (listof cursor acyclic) rs) rs) rs))
 (define-type cursors (listof cursor acyclic))
 
 ;; What was read, and the cursor after it.
-(define-type result (pairof syn cursor @s))
+(define-type result (pairof syn cursor rs))
 ;; Some characters, and the cursor after them.
-(define-type word (pairof string cursor @s))
+(define-type word (pairof string cursor rs))
 
-(define eager-tag (prompt-tag state state (maxeff parsing spin) @e) (make-continuation-prompt-tag))
-(define eager-key (mark-key datum @m) (make-continuation-mark-key))
+(define eager-tag (prompt-tag state state (maxeff parsing spin) re) (make-continuation-prompt-tag))
+(define eager-key (mark-key datum rm) (make-continuation-mark-key))
 
 ;; Which dialect is being read: #f for Scheme, #t for FX-26 (the profile
 ;; `fixpt_read::SyntaxProfile::FX26`, which differs in two places: `#u` alone
 ;; is the unit value, and `[` and `]` are reserved). A mark rather than an
 ;; argument: it is set once, around the whole parse, and a checkpoint carries
 ;; it along, since the marks of a captured continuation are part of it.
-(define dialect-key (mark-key bool @m) (make-continuation-mark-key))
+(define dialect-key (mark-key bool rm) (make-continuation-mark-key))
 (define fx26? (subr reads () bool) (lambda () (first-mark dialect-key #f)))
 
 ;;; ------------------------------------------------------------- the states
 
-(define make-state (subr (alloc @s) (bool (listof cont acyclic) int syns string) state)
+(define make-state (subr (alloc rs) (bool (listof cont acyclic) int syns string) state)
   (lambda (need ks pos data message) (cons need (cons ks (cons pos (cons data message))))))
 ;; The state that waits for a character, to go on in `k`.
-(define waiting (subr (maxeff (alloc @s) (read (globals make-state))) (cont int syns) state)
+(define waiting (subr (maxeff (alloc rs) (read (globals make-state))) (cont int syns) state)
   (lambda (k pos data) (make-state #t (cons k nil) pos data "")))
-(define state-need? (subr (read @s) (state) bool) (lambda (st) (car st)))
-(define state-ks (subr (read @s) (state) (listof cont acyclic)) (lambda (st) (car (cdr st))))
-(define state-position (subr (read @s) (state) int) (lambda (st) (car (cdr (cdr st)))))
-(define state-data (subr (read @s) (state) syns) (lambda (st) (car (cdr (cdr (cdr st))))))
-(define state-message (subr (read @s) (state) string) (lambda (st) (cdr (cdr (cdr (cdr st))))))
+(define state-need? (subr (read rs) (state) bool) (lambda (st) (car st)))
+(define state-ks (subr (read rs) (state) (listof cont acyclic)) (lambda (st) (car (cdr st))))
+(define state-position (subr (read rs) (state) int) (lambda (st) (car (cdr (cdr st)))))
+(define state-data (subr (read rs) (state) syns) (lambda (st) (car (cdr (cdr (cdr st))))))
+(define state-message (subr (read rs) (state) string) (lambda (st) (cdr (cdr (cdr (cdr st))))))
 
 ;; Input given ahead (`eager-feed-string`): a string, and where in it the
 ;; next character is. While there is some, the reader takes its characters
 ;; from here and runs on; only when there is none left does it suspend.
 ;; The one thing kept in a variable, as in the Scheme reader, and only
 ;; while a feed runs, so that states stay values.
-(define ahead-text (ref string @s) (new ""))
-(define ahead-at (ref int @s) (new 0))
+(define ahead-text (ref string rs) (new ""))
+(define ahead-at (ref int rs) (new 0))
 ;; Where the text given ahead starts, as the reader counts positions (its
 ;; first character's), or -1 when there is none: each feed changes it (a
 ;; later text starts later), so an atom read while it stays the same is all
 ;; in one text, and is taken from it whole (`read-atom-from`).
-(define ahead-origin (ref int @s) (new -1))
+(define ahead-origin (ref int rs) (new -1))
 
 ;; The next character: the next one given ahead, or, if there is none,
 ;; suspend for it.
@@ -154,22 +150,22 @@
 
 ;;; ------------------------------------------------------------ the cursors
 
-(define make-cursor (subr (alloc @s) (chars int syns (listof cursor acyclic)) cursor)
+(define make-cursor (subr (alloc rs) (chars int syns (listof cursor acyclic)) cursor)
   (lambda (look pos data pending) (cons look (cons pos (cons data pending)))))
-(define cur-look (subr (read @s) (cursor) chars) (lambda (cur) (car cur)))
-(define cur-char (subr (read @s) (cursor) char) (lambda (cur) (car (car cur))))
-(define cur-pos (subr (read @s) (cursor) int) (lambda (cur) (car (cdr cur))))
-(define cur-data (subr (read @s) (cursor) syns) (lambda (cur) (car (cdr (cdr cur)))))
-(define cur-pending (subr (read @s) (cursor) cursors) (lambda (cur) (cdr (cdr (cdr cur)))))
+(define cur-look (subr (read rs) (cursor) chars) (lambda (cur) (car cur)))
+(define cur-char (subr (read rs) (cursor) char) (lambda (cur) (car (car cur))))
+(define cur-pos (subr (read rs) (cursor) int) (lambda (cur) (car (cdr cur))))
+(define cur-data (subr (read rs) (cursor) syns) (lambda (cur) (car (cdr (cdr cur)))))
+(define cur-pending (subr (read rs) (cursor) cursors) (lambda (cur) (cdr (cdr (cdr cur)))))
 (define hash-pending? (subr inspects (cursor) bool) (lambda (cur) (not (null? (cur-pending cur)))))
 ;; An atom `d` read from `start` to `cur`, and `cur`.
-(define atom-at (subr (maxeff (read @globals) (read @s) (alloc @s)) (datum int cursor) result)
+(define atom-at (subr (maxeff (read @globals) (read rs) (alloc rs)) (datum int cursor) result)
   (lambda (d start cur) (cons (atom d start (cur-pos cur)) cur)))
 
 ;; A cursor with `c` in hand at `pos`: what a loop that reads characters
 ;; itself, keeping only the last and where it is, makes when it is done,
 ;; one for a token rather than one for each character.
-(define cursor-at (subr (maxeff (alloc @s) (read (globals make-cursor))) (char int syns) cursor)
+(define cursor-at (subr (maxeff (alloc rs) (read (globals make-cursor))) (char int syns) cursor)
   (lambda (c pos data) (make-cursor (cons c nil) pos data nil)))
 ;; The cursor at the character after `pos`, read.
 (define next-at (subr reads (int syns) cursor)
@@ -189,7 +185,7 @@
         cur)))
 ;; The characters of `text` from `i` to `j`, newest first: an atom's so far,
 ;; listed once it cannot be taken whole.
-(define chars-back (subr (maxeff (read @globals) (alloc @s)) (string int int) chars)
+(define chars-back (subr (maxeff (read @globals) (alloc rs)) (string int int) chars)
   (lambda (text i j) (the chars (reverse (the chars (string->list (substring text i j)))))))
 ;; Past whitespace, the character at `pos` one: the cursor at the first
 ;; that is not.
@@ -306,21 +302,21 @@
 (define eager-state-position (subr inspects (state) int) (lambda (st) (state-position st)))
 (define eager-state-message (subr inspects (state) string) (lambda (st) (state-message st)))
 ;; The complete top-level data read so far, in order.
-(define eager-state-data (subr (maxeff (read @globals) (read @s) (alloc @s)) (state) data)
+(define eager-state-data (subr (maxeff (read @globals) (read rs) (alloc rs)) (state) data)
   (lambda (st) (syns->data (the syns (reverse (state-data st))))))
 ;; The same, with where each piece is.
-(define eager-state-syntax (subr (maxeff (read @globals) (read @s) (alloc @s)) (state) syns)
+(define eager-state-syntax (subr (maxeff (read @globals) (read rs) (alloc rs)) (state) syns)
   (lambda (st) (the syns (reverse (state-data st)))))
 
 ;; What a suspended parse is in the middle of, as its marks say, in the
-;; caller's region @c; what is asked of it.
-(define-type context (listof datum @c))
-(define-type closers (listof char @c))
-(define-effect in-context (maxeff (read @globals) (read @c) (alloc @c) spin))
-(define-effect asks (maxeff in-context (read @s) (read @m)))
+;; caller's region `rc`; what is asked of it.
+(define-type context (listof datum rc))
+(define-type closers (listof char rc))
+(define-effect in-context (maxeff (read @globals) (read rc) (alloc rc) spin))
+(define-effect asks (maxeff in-context (read rs) (read rm)))
 
 ;; What the suspended parse is in the middle of, innermost first.
-(define eager-context (subr (maxeff inspects (read @m) (alloc @c)) (state) context)
+(define eager-context (subr (maxeff inspects (read rm) (alloc rc)) (state) context)
   (lambda (st)
     (if (state-need? st)
         (marks-of (car (state-ks st)) eager-key)
@@ -334,7 +330,7 @@
 (define entry-ref (subr (read @globals) (datum int) datum)
   (lambda (e i) (if (= i 0) (car e) (entry-ref (cdr e) (- i 1)))))
 
-(define settled? (subr (maxeff (read @globals) (read @c) spin) (context) bool)
+(define settled? (subr (maxeff (read @globals) (read rc) spin) (context) bool)
   (lambda (ctx)
     (or (null? ctx)
         (and (either? (entry-name (car ctx)) "top" "comment")
@@ -548,15 +544,15 @@
 
 ;; The atom's characters from its start to `pos`, newest first, from the
 ;; text given ahead.
-(define atom-so-far (subr (maxeff (read @globals) (alloc @s)) (atom-in int) chars)
+(define atom-so-far (subr (maxeff (read @globals) (alloc rs)) (atom-in int) chars)
   (lambda (in pos)
     (let ((origin (extract in origin)))
       (chars-back (extract in text) (- (extract in start) origin) (- pos origin)))))
 ;; What an atom's loop has listed up to `pos`, in `mode` (`atom-loop`).
-(define atom-listed (subr (maxeff (read @globals) (alloc @s)) (atom-in int chars int) chars)
+(define atom-listed (subr (maxeff (read @globals) (alloc rs)) (atom-in int chars int) chars)
   (lambda (in pos acc mode) (if (= mode 0) (atom-so-far in pos) acc)))
 ;; The atom's text, up to `pos`.
-(define atom-text (subr (maxeff (read @globals) (alloc @s)) (atom-in int chars int) string)
+(define atom-text (subr (maxeff (read @globals) (alloc rs)) (atom-in int chars int) string)
   (lambda (in pos acc mode)
     (if (= mode 0)
         (let ((origin (extract in origin)))
@@ -809,7 +805,7 @@
 ;;; ------------------------------------------------------------- the driver
 
 ;; The cursor `after`, with `s` added to the top-level data.
-(define with-datum (subr (maxeff (read @globals) (read @s) (alloc @s)) (cursor syn) cursor)
+(define with-datum (subr (maxeff (read @globals) (read rs) (alloc rs)) (cursor syn) cursor)
   (lambda (after s) (make-cursor (cur-look after) (cur-pos after) (cons s (cur-data after)) nil)))
 (define read-top (subr reading (cursor) void)
   (lambda (cur)
@@ -835,50 +831,9 @@
 ;; after, or nothing if it does not read to the end (the driver says where,
 ;; from a reader that places errors). All of it in here, so that the front
 ;; end run as register code reads as register code (`read_to_syns`).
-(define read-text (subr (maxeff reading asks (read @s) (alloc @s)) (string) (listof syns acyclic))
+(define read-text (subr (maxeff reading asks (read rs) (alloc rs)) (string) (listof syns acyclic))
   (lambda (text)
     (let ((st (eager-feed (eager-feed-string (eager-start-fx26) text) (integer->char 10))))
       (if (string=? (symbol->string (eager-status st)) "complete")
           (list (eager-state-syntax st))
-          nil))))))
-
-(define-effect marks (select eager-reader-module marks))
-(define-effect parsing (select eager-reader-module parsing))
-(define-effect reads (select eager-reader-module reads))
-(define-effect reading (select eager-reader-module reading))
-(define-type chars (select eager-reader-module chars))
-(define-type data (select eager-reader-module data))
-(define-type syn (select eager-reader-module syn))
-(define-type syns (select eager-reader-module syns))
-(define syn->datum (with eager-reader-module syn->datum))
-(define-type state (select eager-reader-module state))
-(define-type cursor (select eager-reader-module cursor))
-(define-type result (select eager-reader-module result))
-(define-type word (select eager-reader-module word))
-(define waiting (with eager-reader-module waiting))
-(define advance (with eager-reader-module advance))
-(define need (with eager-reader-module need))
-(define fail (with eager-reader-module fail))
-(define entry (with eager-reader-module entry))
-(define str3 (with eager-reader-module str3))
-(define eager-feed (with eager-reader-module eager-feed))
-(define eager-feed-string (with eager-reader-module eager-feed-string))
-(define eager-state-kind (with eager-reader-module eager-state-kind))
-(define eager-state-position (with eager-reader-module eager-state-position))
-(define eager-state-message (with eager-reader-module eager-state-message))
-(define eager-state-data (with eager-reader-module eager-state-data))
-(define eager-state-syntax (with eager-reader-module eager-state-syntax))
-(define-type context (select eager-reader-module context))
-(define-type closers (select eager-reader-module closers))
-(define-effect asks (select eager-reader-module asks))
-(define eager-context (with eager-reader-module eager-context))
-(define eager-status (with eager-reader-module eager-status))
-(define hole? (with eager-reader-module hole?))
-(define eager-hole-closers (with eager-reader-module eager-hole-closers))
-(define eager-start (with eager-reader-module eager-start))
-(define eager-start-fx26 (with eager-reader-module eager-start-fx26))
-(define read-text (with eager-reader-module read-text))
-(define atom (with eager-reader-module atom))
-(define lst (with eager-reader-module lst))
-(define dotted (with eager-reader-module dotted))
-(define vec (with eager-reader-module vec))
+          nil))))

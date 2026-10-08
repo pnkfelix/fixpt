@@ -499,15 +499,16 @@ fn a_word_too_long_for_its_branches_runs() {
     }
 }
 
-/// `fixpt front-end-files`: the front end's files in the order it joins
-/// them, each with its lines and path, then the bootstrap's driver.
+/// `fixpt front-end-files`: the front end's module files built in, then its
+/// files in the order it joins them, each with its lines and path, then the
+/// bootstrap's driver.
 #[test]
 fn front_end_files_lists_what_the_front_end_is_made_of() {
     let out = Command::new(FIXPT).arg("front-end-files").output().expect("fixpt runs");
     let text = String::from_utf8_lossy(&out.stdout);
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines.len(), fixpt_fx26::FRONT_END_FILES.len() + 1, "{text}");
-    assert!(lines[0].ends_with("/eager-reader.fx"), "{text}");
+    assert_eq!(lines.len(), fixpt_fx26::FRONT_END_MODULES.len() + fixpt_fx26::FRONT_END_FILES.len() + 1, "{text}");
+    assert!(lines[0].contains("/eager-reader.fx "), "{text}");
     assert!(lines.last().is_some_and(|l| l.contains("/bootstrap.fx")), "{text}");
     for l in &lines {
         let path = l.split_whitespace().nth(1).expect("a path");

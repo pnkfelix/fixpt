@@ -17,10 +17,6 @@
 //!   every use.
 //! * `(define-effect name effect)` — an effect abbreviation, for the effect
 //!   a group of procedures share.
-//! * `(private-regions @r …)` — from here on, each `@r` is a fresh region no
-//!   other program can name: the program is instantiated at regions of its
-//!   own, as a `plambda` over them would be. What it does to them is masked
-//!   from everything outside it, by construction (`crate::licence`).
 //! * anything else is an expression, checked in the environment so far.
 
 use crate::ast::{Effect, Region, TyId};
@@ -51,8 +47,6 @@ pub enum Top {
     DefineGenerative { name: Sym },
     /// `(define-effect name …)`: an abbreviation for an effect.
     DefineEffect { name: Sym, effect: Effect },
-    /// `(private-regions @r …)`: the regions these names now stand for.
-    PrivateRegions { regions: Vec<crate::ast::Region> },
     /// An expression.
     Exp(Checked),
 }
@@ -477,7 +471,9 @@ impl Checker {
             if let Some(ps) = &family {
                 ty = list(vec![poly.clone(), list(ps.clone()), ty]);
             }
-            let body = list(vec![sum.clone(), tag.clone(), list(fields)]);
+            // At its variant: no two constructors' bodies at one place, as
+            // the compilers tell lambdas apart by where their bodies are.
+            let body = Syntax::list(v.span, vec![sum.clone(), tag.clone(), list(fields)]);
             ctors.push(list(vec![define.clone(), tag.clone(), ty, list(vec![lambda.clone(), list(params), body])]));
         }
         let head = match &family {
@@ -511,29 +507,6 @@ impl Checker {
                     return Err(e);
                 }
                 Ok(top)
-            }
-            Some("private-regions") => {
-                let mut regions = Vec::new();
-                for r in &items[1..] {
-                    let name = self.binder_name(r)?;
-                    if !self.interner.name(name).starts_with('@') {
-                        return Err(FxError::at(r.span, "a region constant is written `@name`"));
-                    }
-                    // Declared private again, as by a file loaded again: the
-                    // same program, over the same regions.
-                    let region = match self.lookup_desc(name) {
-                        Some(crate::parse::DScope::Private(r)) => r,
-                        _ => {
-                            let base = self.interner.name(name).to_string();
-                            let fresh = self.fresh_region_named(&base);
-                            self.private_regions.push(fresh);
-                            fresh
-                        }
-                    };
-                    self.dscope.push((name, crate::parse::DScope::Private(region)));
-                    regions.push(region);
-                }
-                Ok(Top::PrivateRegions { regions })
             }
             Some("define-effect") => {
                 let [_, name, def] = items else {
@@ -925,7 +898,7 @@ impl Checker {
             let items = f.as_proper_list().unwrap_or(&[]);
             let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
             match (head.as_deref(), items) {
-                (Some("define-type" | "define-generative" | "define-effect" | "private-regions"), _) => {
+                (Some("define-type" | "define-generative" | "define-effect"), _) => {
                     self.top(f)?;
                     done.push(true);
                 }
@@ -1013,7 +986,6 @@ impl Checker {
                     ("generative", format!("{head} = {}", self.show_ty(family.rep)))
                 }
                 DScope::Fun(t) => ("function", format!("{n} = {}", self.show_ty(*t))),
-                DScope::Private(_) => ("region", n.clone()),
                 DScope::Var(..) | DScope::Region(_) | DScope::SizeVal(_) | DScope::ConvVal(_) => continue,
             };
             out.push((*name, entry.0, entry.1));
@@ -1030,11 +1002,9 @@ impl Checker {
     /// description scope and the arena. The caller restores the interner.
     pub fn scratch<T>(&mut self, f: impl FnOnce(&mut Checker) -> T) -> T {
         let (env, dscope, arena) = (self.env.len(), self.dscope.len(), self.arena.mark());
-        let private = self.private_regions.len();
         let out = f(self);
         self.truncate_env(env);
         self.dscope.truncate(dscope);
-        self.private_regions.truncate(private);
         self.facts.forget_from(arena.exps());
         self.arena.reset(arena);
         out
@@ -1162,7 +1132,7 @@ pub const KEYWORDS: &[&str] = &[
     "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define*", "define-type", "define-generative",
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
-    "composable", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "private-regions", "the",
+    "composable", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "module-parameters", "the",
     "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet", "dlambda", "=>",

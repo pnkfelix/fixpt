@@ -11,10 +11,19 @@ use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 use fixpt_scheme::eager::{EagerReader, EagerStatus};
 
+/// The FX-26 reader made, a module file of its regions (`eager-reader.fx`),
+/// and its values in globals of their own names, as the front end
+/// re-exports them (`reader.fx`).
+fn reader_program() -> String {
+    let block = fixpt_fx26::READER.split(";; From `eager-reader.fx`.").nth(1).expect("the reader's block");
+    let block = block.split(";; From `parser.fx`.").next().expect("its end");
+    format!("(define eager-reader-module ((proj (load-module \"fx26:eager-reader.fx\") @s @e @m @c)))\n{block}")
+}
+
 /// A session with the FX-26 reader loaded, and the Scheme one beside it.
 fn session(backend: Backend) -> Fx26Session {
     let mut s = Fx26Session::with_backend(backend).expect("starts");
-    let loaded = s.run_program(fixpt_fx26::EAGER_READER).expect("the reader checks");
+    let loaded = s.run_program(&reader_program()).expect("the reader checks");
     loaded.expect("the reader loads");
     s.scheme.eval_str("<scheme-eager>", fixpt_scheme::eager::SOURCE).expect("the Scheme reader loads");
     s.scheme.eval_str("<helper>", include_str!("programs/eager/read-all.scm")).expect("the helper loads");

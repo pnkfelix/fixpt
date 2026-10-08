@@ -98,6 +98,12 @@
                     (else z (k-one (a-app v ds)))))
                 (else z (k-one (a-app v ds)))))
             (else y (k-one (a-app v ds))))))))
+;; What a substitution has made of each type it met: a table, by the type,
+;; since a module's type may be large (the reader's and the parser's are).
+(define-type k-smemo (table int int @t))
+(define k-int-hash (subr pure (int) int) (lambda (t) t))
+(define* k-new-smemo (subr (alloc @t) () k-smemo)
+  (lambda () (make-table k-int-hash (lambda (a b) (= a b)))))
 ;; What an application reduced gives as a type: a type, or else the
 ;; application `t` as it was.
 (define k-applied-type (subr pure (k-desc int) int)
@@ -153,12 +159,12 @@
           (set k-closed-named (cons (k-resolve slot) (get k-closed-named)))
           #u)
       slot)))
-(define k-subst-memo (subr (maxeff kstate spin) (int k-map (ref k-pairs @t)) int)
+(define k-subst-memo (subr (maxeff kstate spin) (int k-map k-smemo) int)
   (lambda (t m memo)
     (let* ((t (k-resolve t))
            (kept (or (and (>= (get k-subst-keep) 0) (= (k-keep-at t) (get k-subst-keep)))
                      (k-has-id? (get k-closed-named) t)))
-           (done (if kept t (k-memo-find (get memo) t))))
+           (done (if kept t (table-ref memo t -1))))
       (if (>= done 0)
           done
           (tagcase (k-get t)
@@ -175,17 +181,17 @@
             (ty-app (g ds)
               (let ((slot (k-slot)))
                 (begin
-                  (set memo (cons (cons t slot) (get memo)))
+                  (table-set! memo t slot)
                   (let* ((g2 (k-subst-memo g m memo)) (ds2 (k-subst-descs ds m memo)))
                     (begin (k-set-link slot (k-applied-type (k-apply-fun g2 ds2) t)) slot)))))
             (else y
               (let ((slot (k-slot)))
                 (begin
-                  (set memo (cons (cons t slot) (get memo)))
+                  (table-set! memo t slot)
                   (let ((id (k-ty-new (k-subst-node t m memo))))
                     (begin (k-set-link slot id) slot))))))))))
 ;; Node `t`, of a type other than a variable, with its parts substituted.
-(define k-subst-node (subr (maxeff kstate spin) (int k-map (ref k-pairs @t)) k-ty)
+(define k-subst-node (subr (maxeff kstate spin) (int k-map k-smemo) k-ty)
   (lambda (t m memo)
     (letrec ((sub (subr (maxeff kstate spin) (int) int)
                   (lambda (x) (k-subst-memo x m memo)))
@@ -220,7 +226,7 @@
           (let* ((ds2 (k-subst-parts ds m memo)) (vs2 (k-subst-parts vs m memo)))
             (ty-module abs ds2 vs2)))
         (else z (k-get t))))))
-(define k-subst-descs (subr (maxeff kstate spin) (k-descs k-map (ref k-pairs @t)) k-descs)
+(define k-subst-descs (subr (maxeff kstate spin) (k-descs k-map k-smemo) k-descs)
   (lambda (ds m memo)
     (if (null? ds)
         nil
@@ -233,13 +239,13 @@
                     (df (x) (df (k-subst-memo x m memo)))))
                (rest (k-subst-descs (cdr ds) m memo)))
           (cons d rest)))))
-(define k-subst-list (subr (maxeff kstate spin) (k-ids k-map (ref k-pairs @t)) k-ids)
+(define k-subst-list (subr (maxeff kstate spin) (k-ids k-map k-smemo) k-ids)
   (lambda (ts m memo)
     (if (null? ts)
         nil
         (let* ((x (k-subst-memo (car ts) m memo)) (rest (k-subst-list (cdr ts) m memo)))
           (cons x rest)))))
-(define k-subst-parts (subr (maxeff kstate spin) (k-parts k-map (ref k-pairs @t)) k-parts)
+(define k-subst-parts (subr (maxeff kstate spin) (k-parts k-map k-smemo) k-parts)
   (lambda (ps m memo)
     (if (null? ps)
         nil
@@ -254,7 +260,7 @@
   (lambda (t m)
     (let* ((keep (get k-subst-keep))
            (off (set k-subst-keep -1))
-           (r (k-subst-memo t m (the (ref k-pairs @t) (new nil)))))
+           (r (k-subst-memo t m (k-new-smemo))))
       (begin (set k-subst-keep keep) r))))
 ;; The description of kind `k` that names binder `v`.
 (define k-binder-desc (subr (maxeff kstate spin) (int int) k-desc)
@@ -270,7 +276,7 @@
     ;; Description `d` substituted into.
     (k-subst-desc (subr (maxeff kstate spin) (k-desc k-map) k-desc)
       (lambda (d m)
-        (car (k-subst-descs (the k-descs (cons d nil)) m (the (ref k-pairs @t) (new nil))))))
+        (car (k-subst-descs (the k-descs (cons d nil)) m (k-new-smemo)))))
     ;; Function `f` applied to `ds`: what a `dlambda` reduces to, or an
     ;; application that cannot be reduced. `ds` fit `f`'s kind, which the
     ;; caller has made sure of.
@@ -307,6 +313,8 @@
 (define k-subst-region (with check-subst-module k-subst-region))
 (define k-memo-find (with check-subst-module k-memo-find))
 (define k-subst-memo (with check-subst-module k-subst-memo))
+(define-type k-smemo (select check-subst-module k-smemo))
+(define k-new-smemo (with check-subst-module k-new-smemo))
 (define k-subst-descs (with check-subst-module k-subst-descs))
 (define k-subst (with check-subst-module k-subst))
 (define k-closed-named (with check-subst-module k-closed-named))

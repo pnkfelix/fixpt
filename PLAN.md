@@ -22,6 +22,12 @@ are in the last section, "Log: the glance's details", and in
   as its oracle and for comparison; only placing the code, and the
   runtime, are Rust. Retiring `native-compiled` (step 6, below) would
   retire this with it, or keep the cells' assembler for it.
+- **The reader and the parser as module files of their regions**
+  (2026-10-08, the user's): `(module-parameters ((r region) …))`, each file
+  loading the one before at its own, made by the front end's `reader.fx`;
+  licensed by their type (`parametric_licence`), not by `private-regions`,
+  which is gone. Its cost to the FX-26 checker on the front end is
+  `TODO.md` §64.
 - **FX-26's type system** (2026-09-27; `docs/fx26.md`): places and regions,
   `letfreeze`; `acyclic` data (named `finite` until 2026-09-28,
   `docs/research/acyclic-regions.md`); `spin` with size-change

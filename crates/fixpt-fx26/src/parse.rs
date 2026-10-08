@@ -36,9 +36,6 @@ pub enum DScope {
     Eff(crate::ast::Effect),
     /// A name bound by `define-generative`: the `n`th generative type.
     Generative(u32),
-    /// A region constant `private-regions` made the program's own: `@s` in
-    /// the program is this fresh region, which nothing else can name.
-    Private(Region),
     /// A name for a description function: `define-type` of a `dlambda`,
     /// or a type family's parameter of an arrow kind given one.
     Fun(TyId),
@@ -66,13 +63,9 @@ impl Checker {
         self.interner.name(s)
     }
 
-    /// The region `@name` stands for: the program's own, if `private-regions`
-    /// declared it, and otherwise the constant of that name.
+    /// The region `@name` stands for: the constant of that name.
     pub(crate) fn region_constant(&self, sym: Sym) -> Region {
-        match self.lookup_desc(sym) {
-            Some(DScope::Private(r)) => r,
-            _ => Region::Const(sym),
-        }
+        Region::Const(sym)
     }
 
     pub(crate) fn lookup_desc(&self, s: Sym) -> Option<DScope> {
@@ -2186,7 +2179,10 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             Some(d) if std::path::Path::new(path).is_relative() => d.join(path),
             _ => std::path::PathBuf::from(path),
         };
-        let text = std::fs::read_to_string(&at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?;
+        let text = match crate::built_in_module(path) {
+            Some(t) => t.to_string(),
+            None => std::fs::read_to_string(&at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?,
+        };
         self.files_read += 1;
         let file = fixpt_read::FileId(self.files_read + 1000);
         let at_file = |e: FxError, c: &Self| c.in_loaded(e, span, path, &text, file);

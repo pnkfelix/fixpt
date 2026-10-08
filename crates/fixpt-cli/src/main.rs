@@ -43,8 +43,9 @@ usage:
   fixpt image info FILE          describe a heap image
   fixpt image verify FILE        load a heap image and check its invariants
   fixpt bench [FILE...]          time FX-26 programs on each machine (`fixpt bench --help`)
-  fixpt front-end-files          the FX-26 front end's files, in the order it
-                                 joins them: lines (of the text built in) and path
+  fixpt front-end-files          the FX-26 front end's files: its module files
+                                 built in, then the rest in the order it joins
+                                 them: lines (of the text built in) and path
   fixpt help                     show this
 
 options:
@@ -271,8 +272,15 @@ fn run(args: &[String]) -> i32 {
             use std::io::Write;
             let dir = fixpt_fx26::SOURCE_DIR;
             let mut out = std::io::stdout().lock();
-            // A reader that stops early (`| head`) ends the listing.
-            let listed = fixpt_fx26::FRONT_END_FILES.iter().try_for_each(|(name, text)| writeln!(out, "{:>6} {dir}/{name}", text.lines().count()));
+            // A reader that stops early (`| head`) ends the listing. First
+            // the module files built in, each loaded by the next, the last
+            // by `reader.fx`.
+            let modules = fixpt_fx26::FRONT_END_MODULES.iter().try_for_each(|(name, text)| {
+                writeln!(out, "{:>6} {dir}/{name} (a module file, built in)", text.lines().count())
+            });
+            let listed = modules.and_then(|()| {
+                fixpt_fx26::FRONT_END_FILES.iter().try_for_each(|(name, text)| writeln!(out, "{:>6} {dir}/{name}", text.lines().count()))
+            });
             let _ = listed.and_then(|()| writeln!(out, "{:>6} {dir}/bootstrap.fx (the bootstrap's driver, after them)", fixpt_fx26::BOOTSTRAP.lines().count()));
             0
         }

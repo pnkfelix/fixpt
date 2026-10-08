@@ -571,7 +571,10 @@ fn effect_summaries_agree() {
             }
             char_at[program.len()] = n;
             let mut rust: HashMap<(u32, u32), i64> = HashMap::new();
-            for ((a, b), k) in c.effect_summaries() {
+            for ((f, a, b), k) in c.effect_summaries() {
+                if f != 0 {
+                    continue;
+                }
                 let e = rust.entry((char_at[a as usize], char_at[b as usize])).or_insert(k as i64);
                 *e = (*e).max(k as i64);
             }

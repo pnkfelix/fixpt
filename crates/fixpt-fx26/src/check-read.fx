@@ -147,12 +147,9 @@
     (if (null? rs)
         nil
         (k-insert (if read (a-read (car rs)) (a-write (car rs))) (k-atoms-on read (cdr rs))))))
-;; The region `@name` stands for: the program's own, if `private-regions`
-;; declared it, and otherwise the constant of that name.
+;; The region `@name` stands for: the constant of that name.
 (define k-region-constant (subr (maxeff kreads (alloc @t)) (symbol) k-region)
-  (lambda (sym)
-    (let ((d (k-lookup-desc sym)))
-      (if (null? d) (r-const sym) (tagcase (car d) (ds-private (r) r) (else x (r-const sym)))))))
+  (lambda (sym) (r-const sym)))
 ;; The region a name stands for.
 (define k-region-named (subr (maxeff checks spin) (syn) k-region)
   (lambda (s)
