@@ -8,13 +8,83 @@
 ;;; shadows the first, and code before it keeps the first, as the lowering
 ;;; to Scheme does (`lower::Globals`). Descriptions are not needed to run a
 ;;; program, so they are passed over.
+;;; Made by the conductor (`conductor.fx`), of the evaluator's values and
+;;; primitives, and the checker's environment and resolution.
+
+;; Its types, and the signatures of what it is given (`eval-types.fx`).
+(define eval-types (load-module "fx26:eval-types.fx"))
+(define-effect stores (select eval-types stores))
+(define-effect runs (select eval-types runs))
+(define-effect evals (select eval-types evals))
+(define-type val (select eval-types val))
+(define-type vals (select eval-types vals))
+(define-type vfields (select eval-types vfields))
+(define-type vcell (select eval-types vcell))
+(define-type env (select eval-types env))
+(define-type eresult (select eval-types eresult))
+(define-type ev-at (select eval-types ev-at))
+(define-type ev-with-at (select eval-types ev-with-at))
+(define-type vcells (select eval-types vcells))
+(define o-product (with eval-types o-product))
+(define o-sum (with eval-types o-sum))
+(define ev-ok (with eval-types ev-ok))
+(define ev-err (with eval-types ev-err))
+;; What it is given: the evaluator's values and primitives, and the
+;; checker's environment (`check-env.fx`) and resolution (`check-resolve.fx`).
+(define-type eval-values-sig (select eval-types eval-values-sig))
+(define-type eval-prims-sig (select eval-types eval-prims-sig))
+;; The types of the trees it runs, and of what the checker says of them.
+(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(define-type exp (select parser-types exp))
+(define-type exp-list (select parser-types exp-list))
+(define-type mod-items (select parser-types mod-items))
+(define-type names (select parser-types names))
+(define-type top (select parser-types top))
+(define check-env-types (load-module "fx26:check-env-types.fx"))
+(define-type k-reshape-list (select check-env-types k-reshape-list))
+(define-type k-with-list (select check-env-types k-with-list))
+(define-type check-env-sig (select check-env-types check-env-sig))
+(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(define-type exp-arms (select check-resolve-types exp-arms))
+(define-type exp-let-bs (select check-resolve-types exp-let-bs))
+(define-type exp-letrec-bs (select check-resolve-types exp-letrec-bs))
+(define-type k-run (select check-resolve-types k-run))
+(define-type check-resolve-sig (select check-resolve-types check-resolve-sig))
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-names (select check-types-types k-names))
+(define check-subst-types (load-module "fx26:check-subst-types.fx"))
+(define-type exp-params (select check-subst-types exp-params))
+
+(define make
+  (lambda ((values eval-values-sig) (prims eval-prims-sig)
+           (env check-env-sig) (resolve check-resolve-sig))
+    (module
+;; What it uses of the modules it is given.
+(define apply-val (with values apply-val))
+(define apply1 (with values apply1))
+(define as-bool (with values as-bool))
+(define as-fields (with values as-fields))
+(define as-other (with values as-other))
+(define as-tag (with values as-tag))
+(define efail (with values efail))
+(define efail-expected (with values efail-expected))
+(define eval-tag (with values eval-tag))
+(define show-val (with values show-val))
+(define the-unit (with values the-unit))
+(define ev-bloblet (with prims ev-bloblet))
+(define standard (with prims standard))
+(define k-fx-module? (with env k-fx-module?))
+(define k-reshapes (with env k-reshapes))
+(define k-with-vals (with env k-with-vals))
+(define exp-start (with resolve exp-start))
+(define exp-end (with resolve exp-end))
 
 ;; The global environment, newest first.
 (define genv (ref env @v) (new nil))
 
-;;; ------------------------------------------------------------ environments
-
 (define* cell (subr (alloc @v) (val) vcell) (lambda (v) (new v)))
+
 ;; `e` with `n` bound to a new cell holding `v`.
 (define* extend (subr (alloc @v) (symbol val env) env)
   (lambda (n v e) (cons (cons n (cell v)) e)))
@@ -24,6 +94,7 @@
     (cond ((null? e) (standard name))
           ((symbol=? (car (car e)) name) (get (cdr (car e))))
           (else (lookup (cdr e) name)))))
+
 (define* find-cell (subr (maxeff evals spin) (env symbol) vcell)
   (lambda (e n)
     (cond ((null? e) (efail "no such local"))
@@ -37,8 +108,6 @@
           ((or (null? ps) (null? xs)) (efail "the wrong number of arguments"))
           (else (cons (cons (extract (car ps) 1) (cell (car xs))) (bind (cdr ps) (cdr xs) e))))))
 
-;;; ------------------------------------------------------------ products
-
 (define* field-of (subr (maxeff evals spin) (val symbol) val)
   (lambda (p l)
     (letrec ((find (subr (maxeff evals spin) (vfields) val)
@@ -47,6 +116,7 @@
                        ((symbol=? (car (car fs)) l) (cdr (car fs)))
                        (else (find (cdr fs)))))))
       (find (as-fields p "a product")))))
+
 ;; An arm's names, bound to a product's fields in order.
 (define* bind-fields (subr (maxeff evals spin) (names val env) env)
   (lambda (ns p e)
@@ -56,44 +126,43 @@
                        ((or (null? ns) (null? fs)) (efail "the wrong number of fields"))
                        (else (go (cdr ns) (cdr fs) (extend (car ns) (cdr (car fs)) e)))))))
       (go ns (as-fields p "a product") e))))
+
 (define* nth-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
   (lambda (fs i)
     (cond ((null? fs) (efail "no such field"))
           ((= i 0) (car fs))
           (else (nth-field (cdr fs) (- i 1))))))
+
 ;; `fs` reversed, onto `acc`.
 (define* reverse-fields (subr (maxeff (read @v) (alloc @v) spin) (vfields vfields) vfields)
   (lambda (fs acc) (if (null? fs) acc (reverse-fields (cdr fs) (cons (car fs) acc)))))
 
-;;; ------------------------------------------------------------ modules
-
 ;; The modules to reshape (`k-reshapes`), as `run-checked` was given them.
 (define ev-reshapes (ref k-reshape-list @v) (new nil))
-;; The positions a module reshaped from `a` to `b` keeps, in a list of one;
-;; none if it is not reshaped.
-(define-type ev-at (listof k-ids @v))
+
 (define* ev-reshape-in (subr (maxeff (alloc @v) spin) (k-reshape-list int int) ev-at)
   (lambda (rs a b)
     (cond ((null? rs) nil)
           ((and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
            (the ev-at (cons (extract (car rs) 3) nil)))
           (else (ev-reshape-in (cdr rs) a b)))))
+
 ;; Each `with` the checker saw (`k-with-vals`), as `run-checked` was given
 ;; them: where it is, and the module's values its body names, with their
 ;; positions.
 (define ev-withs (ref k-with-list @v) (new nil))
-;; Those of the `with` from `a` to `b`, in a list of one; none if the checker
-;; did not see it (a program run unchecked, `run-program`).
-(define-type ev-with-at (listof (productof (1 k-names) (2 k-ids)) @v))
+
 (define* ev-with-in (subr (maxeff (alloc @v) spin) (k-with-list int int) ev-with-at)
   (lambda (ws a b)
     (cond ((null? ws) nil)
           ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b))
            (the ev-with-at (cons (product (1 (extract (car ws) 3)) (2 (extract (car ws) 4))) nil)))
           (else (ev-with-in (cdr ws) a b)))))
+
 ;; The fields of `fs` at positions `ks`, in order.
 (define* pick-fields (subr (maxeff evals spin) (vfields k-ids) vfields)
   (lambda (fs ks) (if (null? ks) nil (cons (nth-field fs (car ks)) (pick-fields fs (cdr ks))))))
+
 ;; Module `v` as `at` (in a list of one) reshapes it: its values at those
 ;; positions; as it is, if none.
 (define* reshape-val (subr (maxeff evals spin) (val ev-at) val)
@@ -102,6 +171,7 @@
         v
         (let ((fs (as-fields v "a module")))
           (o-product (pick-fields fs (car at)))))))
+
 ;; `e` with each of module `m`'s values bound to its name, in order.
 (define* bind-module (subr (maxeff evals spin) (val env) env)
   (lambda (m e)
@@ -109,6 +179,7 @@
                (lambda (fs e)
                  (if (null? fs) e (go (cdr fs) (extend (car (car fs)) (cdr (car fs)) e))))))
       (go (as-fields m "a module") e))))
+
 ;; Module `m`'s values at positions `ps`, bound in `e` by names `ns`.
 (define* bind-module-at (subr (maxeff evals spin) (val k-names k-ids env) env)
   (lambda (m ns ps e)
@@ -120,11 +191,13 @@
                        (let ((v (cdr (nth-field fs (car ps)))))
                          (go (cdr ns) (cdr ps) (extend (car ns) v e)))))))
         (go ns ps e)))))
+
 ;; An abstract type `n`'s conversions' names.
 (define* conversion-names (subr (read @globals) (string) names)
   (lambda (n)
     (the names (list (string->symbol (string-append "up-" n))
                      (string->symbol (string-append "down-" n))))))
+
 ;; The names a module's items define, in order.
 (define* module-names (subr (maxeff (alloc @v) spin) (mod-items) names)
   (lambda (items)
@@ -135,15 +208,18 @@
           (case k ((0) (append (conversion-names (symbol->string (car ns))) rest))
                   ((2 3) (append ns rest))
                   (else rest))))))
+
 ;; Each of `ns` bound in `e`, holding #u.
 (define* open-names (subr (maxeff (alloc @v) spin) (names env) env)
   (lambda (ns e) (if (null? ns) e (open-names (cdr ns) (extend (car ns) the-unit e)))))
+
 ;; The values of `ns`, in `e`, onto `vs`, newest first.
 (define* rec-values (subr (maxeff evals spin) (names env vfields) vfields)
   (lambda (ns e vs)
     (if (null? ns)
         vs
         (rec-values (cdr ns) e (cons (cons (car ns) (get (find-cell e (car ns)))) vs)))))
+
 ;; A module's values, from `e`, onto `vs`, newest first: its definitions'.
 (define* module-values (subr (maxeff evals spin) (mod-items env vfields) vfields)
   (lambda (items e vs)
@@ -152,10 +228,9 @@
         (let ((k (extract (car items) 1)))
           (module-values (cdr items) e
                          (if (or (= k 2) (= k 3)) (rec-values (extract (car items) 2) e vs) vs))))))
+
 (define* open-letrec (subr (maxeff (alloc @v) spin) (exp-letrec-bs env) env)
   (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (extend (extract (car bs) 1) the-unit e)))))
-
-;;; ------------------------------------------------------------ evaluating
 
 (define-rec
   (eval-all (subr (maxeff evals spin) ((listof exp acyclic) env) vals)
@@ -299,26 +374,29 @@
             (try arms)))
         (else y (efail-expected "a sum"))))))
 
-;;; ------------------------------------------------------------- programs
-
 ;; Names whose next definition keeps the cell they have: definitions that
 ;; assign their globals (`checked-tops`, under redefinition).
 (define ev-keep (ref (listof symbol acyclic) @v) (new nil))
+
 (define* ev-kept? (subr spin ((listof symbol acyclic) symbol) bool)
   (lambda (ks n) (and (not (null? ks)) (or (symbol=? (car ks) n) (ev-kept? (cdr ks) n)))))
+
 (define* ev-unkeep (subr spin ((listof symbol acyclic) symbol) (listof symbol acyclic))
   (lambda (ks n)
     (cond ((null? ks) ks)
           ((symbol=? (car ks) n) (ev-unkeep (cdr ks) n))
           (else (the (listof symbol acyclic) (cons (car ks) (ev-unkeep (cdr ks) n)))))))
+
 (define* ev-new-global (subr stores (symbol) vcell)
   (lambda (n) (let ((c (cell the-unit))) (begin (set genv (cons (cons n c) (get genv))) c))))
+
 ;; The cell global `n` has; a new one, if it has none.
 (define* ev-cell-of (subr (maxeff stores spin) (env symbol) vcell)
   (lambda (e n)
     (cond ((null? e) (ev-new-global n))
           ((symbol=? (car (car e)) n) (cdr (car e)))
           (else (ev-cell-of (cdr e) n)))))
+
 ;; The cell a definition of `n` sets: the one it has, if kept; else new.
 (define* push-global (subr (maxeff stores spin) (symbol) vcell)
   (lambda (n)
@@ -326,13 +404,12 @@
         (begin (set ev-keep (ev-unkeep (get ev-keep) n)) (ev-cell-of (get genv) n))
         (ev-new-global n))))
 
-;; The cells of a `define-rec`'s names, and its values put in them.
-(define-type vcells (listof vcell @v))
 (define* rec-cells (subr (maxeff stores spin) (exp-letrec-bs) vcells)
   (lambda (bs)
     (if (null? bs)
         nil
         (let ((c (push-global (extract (car bs) 1)))) (cons c (rec-cells (cdr bs)))))))
+
 (define* rec-fill (subr (maxeff evals spin) (exp-letrec-bs vcells) unit)
   (lambda (bs cells)
     (if (null? bs)
@@ -388,8 +465,10 @@
 ;; Name `n`, and a `define-rec`'s names, to keep their cells.
 (define* ev-keep! (subr (maxeff (read @v) (write @v) (alloc @v)) (symbol) unit)
   (lambda (n) (set ev-keep (the (listof symbol acyclic) (cons n (get ev-keep))))))
+
 (define* ev-keep-all (subr (maxeff (read @v) (write @v) (alloc @v) spin) (exp-letrec-bs) unit)
   (lambda (bs) (if (null? bs) #u (begin (ev-keep! (extract (car bs) 1)) (ev-keep-all (cdr bs))))))
+
 ;; Before a run that assigns its names' globals: each keeps its cell.
 (define* ev-keep-names (subr (maxeff (read @v) (write @v) (alloc @v) spin) (top) unit)
   (lambda (t)
@@ -417,6 +496,7 @@
 ;; A whole program begins with no globals, and no names kept.
 (define* ev-begin! (subr stores (k-reshape-list k-with-list) unit)
   (lambda (rs ws) (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs) (set ev-withs ws))))
+
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), run; its value shown, or
 ;; its error. A whole program, as each is.
@@ -425,9 +505,10 @@
     (tagcase (begin (ev-begin! (get k-reshapes) (get k-with-vals)) (eval-runs runs))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))
+
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
   (lambda (tops)
     (tagcase (begin (ev-begin! nil nil) (eval-program tops))
       (ev-ok (v) (show-val v))
-      (ev-err (m) (string-append "!! " m)))))
+      (ev-err (m) (string-append "!! " m))))))))

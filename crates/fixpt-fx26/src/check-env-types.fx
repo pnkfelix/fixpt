@@ -62,3 +62,13 @@
 ;; what each `(select $k n)` is, `(k n)` and the type; none otherwise.
 (define-type k-param-given (productof (1 int) (2 symbol) (3 int)))
 (define-type k-params-given (listof k-param-given acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What clients use of `check-env.fx`'s module (`TODO.md` §68): the
+;; evaluator's.
+(define-type check-env-sig
+  (moduleof
+   (val k-fx-module? (subr pure (symbol) bool))
+   (val k-reshapes (ref k-reshape-list @t))
+   (val k-with-vals (ref k-with-list @t))))

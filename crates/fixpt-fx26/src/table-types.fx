@@ -17,3 +17,21 @@
 ;; reading, writing and consing in the table's region.
 (define-type (rehashing (k type) (v type) (r region) (a type) (b type))
   (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) a b) unit))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What clients use of the `tables` module (`table.fx`, `TODO.md` §68): the
+;; evaluator's.
+(define-type tables-sig
+  (moduleof
+   (val std-nil-name? (subr pure (string) bool))
+   (val symbol-hash (subr pure (symbol) int))
+   (val make-table
+        (poly ((r region)) (poly ((k type) (v type))
+          (subr (alloc r) ((key-hash k) (key-same k)) (table k v r)))))
+   (val table-ref
+        (poly ((r region)) (poly ((k type) (v type))
+          (subr (maxeff (read @globals) (read r)) ((table k v r) k v) v))))
+   (val table-set!
+        (poly ((r region)) (poly ((k type) (v type))
+          (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) k v) unit))))))

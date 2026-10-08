@@ -788,10 +788,10 @@ fn probe_phases_as_register_code() {
 #[test]
 fn an_error_in_the_front_end_is_placed_in_its_files() {
     let before: usize =
-        fixpt_fx26::FRONT_END_FILES.iter().take_while(|(n, _)| *n != "eval-core.fx").map(|(_, t)| t.len() + 1).sum();
+        fixpt_fx26::FRONT_END_FILES.iter().take_while(|(n, _)| *n != "check-env.fx").map(|(_, t)| t.len() + 1).sum();
     let at = before as u32;
     let e = fixpt_fx26::FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), at, at + 1), "bad");
     let e = fixpt_fx26::front_end_error(e);
     assert_eq!(e.span.file, fixpt_fx26::FRONT_END_FILE);
-    assert_eq!(e.message, "the front end, eval-core.fx:1:1: bad");
+    assert_eq!(e.message, "the front end, check-env.fx:1:1: bad");
 }

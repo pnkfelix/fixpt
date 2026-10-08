@@ -1419,6 +1419,17 @@ impl Checker {
                         // annotation's are: a type a module re-exports may be
                         // inside it.
                         D::Type(x) => D::Type(self.resolve_selects(x, span)?),
+                        // An effect given, likewise: an effect a module
+                        // re-exports, `(select m e)`, may be in it.
+                        D::Effect(x) => {
+                            let unit = self.unit;
+                            let carrier = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: x, params: Vec::new(), result: unit });
+                            let resolved = self.resolve_selects(carrier, span)?;
+                            match self.arena.get(resolved).as_subr() {
+                                Some((x, _, _)) => D::Effect(x),
+                                None => unreachable!("a subroutine resolved is one"),
+                            }
+                        }
                         d => d,
                     };
                     if !self.d_fits(&d, *k) {

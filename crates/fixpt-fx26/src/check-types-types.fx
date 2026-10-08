@@ -238,3 +238,12 @@
 (define-type k-path-fact
   (productof (1 symbol) (2 int) (3 k-steps) (4 k-regions) (5 int) (6 int) (7 bool)))
 (define-type k-path-facts (listof k-path-fact acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What clients use of `check-types.fx`'s module (`TODO.md` §68): the
+;; evaluator's.
+(define-type check-types-sig
+  (moduleof
+   (val k-cat3 (subr pure (string string string) string))
+   (val k-cat5 (subr (read @globals) (string string string string string) string))))

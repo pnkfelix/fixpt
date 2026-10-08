@@ -1830,4 +1830,25 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   in scope binds its values' names there too, in both checkers
   (`hazard_items`; `k-outer-mods`). Test: `modules/linked.fx`, a module
   made of one it is given, typed by a signature from a file of them.
+- Phase 2, the pilot (2026-10-08): the evaluator. `eval-types.fx` holds
+  its types and the signatures of its own two modules as the others use
+  them; `eval-values.fx`, `eval-prims.fx` and `eval-core.fx` are module
+  files, each `make` over what it uses, typed by signatures beside the
+  types of the modules given (`check-types-sig`, `tables-sig`,
+  `check-env-sig`, `check-resolve-sig`); `conductor.fx`, last of the front
+  end, makes them in order, passing the top-level modules of the files
+  not converted yet, and names `run-checked` and `run-program` for Rust.
+  What it found:
+  - `evals` now says `spin`: what the evaluator is given is a module of
+    procedures over `val`, which a procedure may be given itself in, so a
+    call of an imported one is not known to end (`may_spin`, a recursive
+    type through a parameter). Honest for an evaluator; the checker's own
+    types have no procedures in them, so its modules will not feel it.
+  - A `proj` given an effect re-exported by `select`, `(proj f evals)`,
+    did not resolve it, in either checker: fixed (`check.rs`, `Proj`;
+    `check-expect.fx`, `k-select-fun`).
+  - A constructor imported from a types file, `(with eval-types o-unit)`,
+    is not known code, so a call of one may `spin` where its own module's
+    would not. Later, perhaps: an import of a known procedure from a
+    module as written is known.
 

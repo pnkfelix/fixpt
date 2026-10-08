@@ -1,40 +1,112 @@
 ;;; The FX-26 evaluator's primitives: each standard name the evaluator has,
 ;;; a procedure of the list of its arguments, in a table by its symbol.
 ;;; After `eval-values.fx`; `eval-core.fx` looks names up here.
+;;; Made by the conductor (`conductor.fx`), of the evaluator's values, the
+;;; tables and the checker's types module.
+
+;; Its types, and the signatures of what it is given (`eval-types.fx`).
+(define eval-types (load-module "fx26:eval-types.fx"))
+(define-effect stores (select eval-types stores))
+(define-effect evals (select eval-types evals))
+(define-type val (select eval-types val))
+(define-type vals (select eval-types vals))
+(define-type vproc (select eval-types vproc))
+(define-type vcell (select eval-types vcell))
+(define o-unit (with eval-types o-unit))
+(define o-product (with eval-types o-product))
+(define o-sum (with eval-types o-sum))
+(define o-icell (with eval-types o-icell))
+(define o-blob (with eval-types o-blob))
+(define o-tag (with eval-types o-tag))
+(define o-cont (with eval-types o-cont))
+(define o-esc (with eval-types o-esc))
+(define o-key (with eval-types o-key))
+;; What it is given: the evaluator's values, the tables (`table.fx`) and the
+;; checker's types module.
+(define-type eval-values-sig (select eval-types eval-values-sig))
+(define table-types (load-module "fx26:table-types.fx"))
+(define-type table (select table-types table))
+(define-type tables-sig (select table-types tables-sig))
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type check-types-sig (select check-types-types check-types-sig))
+
+(define make
+  (lambda ((values eval-values-sig) (tables tables-sig) (check-types check-types-sig))
+    (module
+;; What it uses of the modules it is given.
+(define apply-val (with values apply-val))
+(define apply1 (with values apply1))
+(define as-array (with values as-array))
+(define as-bool (with values as-bool))
+(define as-char (with values as-char))
+(define as-cont (with values as-cont))
+(define as-f32 (with values as-f32))
+(define as-f64 (with values as-f64))
+(define as-int (with values as-int))
+(define as-key (with values as-key))
+(define as-other (with values as-other))
+(define as-pair (with values as-pair))
+(define as-ref (with values as-ref))
+(define as-str (with values as-str))
+(define as-sym (with values as-sym))
+(define as-tag (with values as-tag))
+(define efail (with values efail))
+(define efail-expected (with values efail-expected))
+(define ev-arg (with values ev-arg))
+(define ev-eq? (with values ev-eq?))
+(define ev-intern (with values ev-intern))
+(define list->val (with values list->val))
+(define the-unit (with values the-unit))
+(define val->vals (with values val->vals))
+(define vals->val (with values vals->val))
+(define make-table (with tables make-table))
+(define std-nil-name? (with tables std-nil-name?))
+(define symbol-hash (with tables symbol-hash))
+(define table-ref (with tables table-ref))
+(define table-set! (with tables table-set!))
+(define k-cat3 (with check-types k-cat3))
 
 (define ev-prims (table symbol val @v) (make-table symbol-hash symbol=?))
+
 ;; Primitive `n` is `f`.
 (define* prim! (subr (maxeff stores spin) (symbol vproc) unit)
   (lambda (n f) (table-set! ev-prims n f)))
 
-;;; ------------------------------------------------------------- by shape
-
 (define* int2 (subr (maxeff evals spin) (vals (subr pure (int int) int)) val)
   (lambda (xs f) (f (as-int (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
+
 (define* int-cmp (subr (maxeff evals spin) (vals (subr pure (int int) bool)) val)
   (lambda (xs f) (f (as-int (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
+
 (define* char-cmp (subr (maxeff evals spin) (vals (subr pure (char char) bool)) val)
   (lambda (xs f) (f (as-char (ev-arg xs 0)) (as-char (ev-arg xs 1)))))
+
 (define* str-cmp (subr (maxeff evals spin) (vals (subr pure (string string) bool)) val)
   (lambda (xs f) (f (as-str (ev-arg xs 0)) (as-str (ev-arg xs 1)))))
+
 (define* f64-2 (subr (maxeff evals spin) (vals (subr pure (f64 f64) f64)) val)
   (lambda (xs f) (f (as-f64 (ev-arg xs 0)) (as-f64 (ev-arg xs 1)))))
+
 (define* f64-1 (subr (maxeff evals spin) (vals (subr pure (f64) f64)) val)
   (lambda (xs f) (f (as-f64 (ev-arg xs 0)))))
+
 (define* f64-cmp (subr (maxeff evals spin) (vals (subr pure (f64 f64) bool)) val)
   (lambda (xs f) (f (as-f64 (ev-arg xs 0)) (as-f64 (ev-arg xs 1)))))
+
 (define* f64-test (subr (maxeff evals spin) (vals (subr pure (f64) bool)) val)
   (lambda (xs f) (f (as-f64 (ev-arg xs 0)))))
+
 (define* f32-2 (subr (maxeff evals spin) (vals (subr pure (f32 f32) f32)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)) (as-f32 (ev-arg xs 1)))))
+
 (define* f32-1 (subr (maxeff evals spin) (vals (subr pure (f32) f32)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)))))
+
 (define* f32-cmp (subr (maxeff evals spin) (vals (subr pure (f32 f32) bool)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)) (as-f32 (ev-arg xs 1)))))
+
 (define* f32-test (subr (maxeff evals spin) (vals (subr pure (f32) bool)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)))))
-
-;;; ------------------------------------------------------------- integers
 
 (define* ev-int-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
@@ -60,10 +132,6 @@
       (prim! 'arithmetic-shift (lambda (xs) (int2 xs (lambda (a b) (arithmetic-shift a b)))))
       (prim! 'int->string (lambda (xs) (int->string (as-int (ev-arg xs 0))))))))
 
-;;; ------------------------------------------------------------- fixed widths
-;;; `i32`, `u32`, `i64` and `u64` are integers here, each kept in its range,
-;;; as the runtime keeps them (`prim.rs`, `fixed_op`): every result wrapped.
-
 ;; `x` wrapped to `bits` bits, two's complement if `signed` (`Width::wrap`).
 (define* fw-wrap (subr pure (int bool int) int)
   (lambda (bits signed x)
@@ -71,23 +139,28 @@
       (if (and signed (>= low (arithmetic-shift 1 (- bits 1))))
           (- low (arithmetic-shift 1 bits))
           low))))
+
 (define* fw-2 (subr (maxeff evals spin) (vals int bool (subr pure (int int) int)) val)
   (lambda (xs bits signed f)
     (fw-wrap bits signed (f (as-int (ev-arg xs 0)) (as-int (ev-arg xs 1))))))
+
 ;; `quotient` or `remainder`, which truncate as the runtime's do; by zero, a
 ;; failure, as there.
 (define* fw-div (subr (maxeff evals spin) (vals int bool (subr pure (int int) int)) val)
   (lambda (xs bits signed f)
     (if (zero? (as-int (ev-arg xs 1))) (efail "division by zero") (fw-2 xs bits signed f))))
+
 ;; A shift by the count's low bits; right, arithmetic (an unsigned value is
 ;; not negative, so logical too).
 (define* fw-shift (subr (maxeff evals spin) (vals int bool bool) val)
   (lambda (xs bits signed left)
     (let ((x (as-int (ev-arg xs 0))) (k (bitwise-and (as-int (ev-arg xs 1)) (- bits 1))))
       (fw-wrap bits signed (arithmetic-shift x (if left k (- 0 k)))))))
+
 ;; The operation `op` of width `w`: `w` and `op` run together.
 (define* fw-name (subr (read @globals) (string string) symbol)
   (lambda (w op) (string->symbol (string-append w op))))
+
 (define* ev-width-prims! (subr (maxeff stores spin) (string int bool) unit)
   (lambda (w bits signed)
     (let ((n (lambda ((op string)) (fw-name w op))))
@@ -111,8 +184,6 @@
         (prim! (n "-not") (lambda (xs) (fw-wrap bits signed (bitwise-not (as-int (ev-arg xs 0))))))
         (prim! (fw-name "int->" w) (lambda (xs) (fw-wrap bits signed (as-int (ev-arg xs 0)))))
         (prim! (n "->int") (lambda (xs) (as-int (ev-arg xs 0))))))))
-
-;;; ------------------------------------------------- characters, strings, symbols
 
 (define* ev-text-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
@@ -147,25 +218,26 @@
       (prim! 'error (lambda (xs) (efail (as-str (ev-arg xs 0)))))
       (prim! '%quote (lambda (xs) (ev-intern (ev-arg xs 0)))))))
 
-;;; ------------------------------------------------------------- shapes
-;;; As the machines say (`check::SHAPES`): unit is a symbol, a bloblet an
-;;; array, a continuation a procedure.
-
 (define* ev-symbol? (subr pure (val) bool)
   (lambda (v) (typecase v (symbol s #t) (sum o (tagcase o (o-unit () #t) (else y #f))) (else #f))))
+
 (define* ev-procedure? (subr pure (val) bool)
   (lambda (v)
     (typecase v
       (procedure p #t)
       (sum o (tagcase o (o-cont (k) #t) (o-esc (k) #t) (else y #f)))
       (else #f))))
+
 (define* ev-array? (subr pure (val) bool)
   (lambda (v)
     (typecase v (bloblet a #t) (sum o (tagcase o (o-blob (fs bs) #t) (else y #f))) (else #f))))
+
 (define* ev-sum? (subr pure (val) bool)
   (lambda (v) (typecase v (sum o (tagcase o (o-sum (t x) #t) (else y #f))) (else #f))))
+
 (define* ev-product? (subr pure (val) bool)
   (lambda (v) (typecase v (sum o (tagcase o (o-product (fs) #t) (else y #f))) (else #f))))
+
 (define* ev-shape-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
@@ -184,35 +256,41 @@
       (prim! 'sum? (lambda (xs) (ev-sum? (ev-arg xs 0))))
       (prim! 'product? (lambda (xs) (ev-product? (ev-arg xs 0)))))))
 
-;;; ------------------------------------------------- pairs, references, arrays
-
 ;; An i-cell: whether it is full, and its value.
 (define* as-icell (subr (maxeff evals spin) (val) (pairof (ref bool @v) vcell @v))
   (lambda (v)
     (tagcase (as-other v "an i-cell")
       (o-icell (full c) (cons full c))
       (else y (efail-expected "an i-cell")))))
-(define* ev-make-icell (subr (alloc @v) () val)
+
+(define* ev-make-icell (subr (maxeff (alloc @v) spin) () val)
   (lambda () (o-icell (new #f) (new the-unit))))
+
 (define* ev-icell-put! (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
     (let ((c (as-icell (ev-arg xs 0))))
       (if (get (car c))
           (efail "an i-cell written twice")
           (begin (set (cdr c) (ev-arg xs 1)) (set (car c) #t) the-unit)))))
+
 (define* ev-icell-get (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
     (let ((c (as-icell (ev-arg xs 0))))
       (if (get (car c)) (get (cdr c)) (efail "an i-cell read before it was written")))))
+
 (define* ev-array-set! (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
     (begin (array-set! (as-array (ev-arg xs 0)) (as-int (ev-arg xs 1)) (ev-arg xs 2)) the-unit)))
+
 (define* ev-set-car! (subr (maxeff evals spin) (vals) val)
   (lambda (xs) (begin (set-car! (as-pair (ev-arg xs 0)) (ev-arg xs 1)) the-unit)))
+
 (define* ev-set-cdr! (subr (maxeff evals spin) (vals) val)
   (lambda (xs) (begin (set-cdr! (as-pair (ev-arg xs 0)) (ev-arg xs 1)) the-unit)))
+
 (define* ev-make-array (subr (maxeff evals spin) (val val) val)
   (lambda (n x) (the (arrayof val @v) (make-array (as-int n) x))))
+
 (define* ev-data-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
@@ -248,13 +326,12 @@
       (prim! 'i64-flat (lambda (xs) 2)) (prim! 'u64-flat (lambda (xs) 3))
       (prim! 'f32-flat (lambda (xs) 4)) (prim! 'f64-flat (lambda (xs) 5)))))
 
-;;; ------------------------------------------------------------- floats
-
 ;; `string->f64`'s: a list of the number, or none.
 (define* ev-string->f64 (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
     (let ((l (string->f64 (as-str (ev-arg xs 0)))))
       (if (null? l) nil (cons (the val (car l)) (the val nil))))))
+
 (define* ev-f64-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
@@ -289,6 +366,7 @@
       (prim! 'f64->int (lambda (xs) (f64->int (as-f64 (ev-arg xs 0)))))
       (prim! 'f64->string (lambda (xs) (f64->string (as-f64 (ev-arg xs 0)))))
       (prim! 'string->f64 (lambda (xs) (ev-string->f64 xs))))))
+
 (define* ev-f32-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
@@ -315,27 +393,28 @@
       (prim! 'f32->f64 (lambda (xs) (f32->f64 (as-f32 (ev-arg xs 0)))))
       (prim! 'f64->f32 (lambda (xs) (f64->f32 (as-f64 (ev-arg xs 0))))))))
 
-;;; ------------------------------------------------------------- control
-;;; The program's control is the evaluator's, one level up, on @x.
-
 ;; `cwcc` of `f`, at @x, which nothing here would infer: the escape kept.
 (define* ev-cwcc (subr (maxeff evals spin) (val) val)
   (lambda (f)
     ((proj (proj (proj cwcc @x) val) (maxeff evals spin)) (lambda (k) (apply1 f (o-esc k))))))
+
 (define* ev-ccc (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
     (let ((f (ev-arg xs 0)))
       (call-with-composable-continuation
        (lambda (k) (apply1 f (o-cont k)))
        (as-tag (ev-arg xs 1))))))
+
 (define* ev-with-mark (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
     (let ((thunk (ev-arg xs 2)) (key (as-key (ev-arg xs 0))))
       (with-mark key (ev-arg xs 1) (lambda () (apply-val thunk (the vals nil)))))))
+
 ;; `apply`: `f` of the elements of a list value, which its procedure gets
 ;; as a list of its own (F11).
 (define* ev-apply (subr (maxeff evals spin) (vals) val)
   (lambda (xs) (apply-val (ev-arg xs 0) (val->vals (ev-arg xs 1)))))
+
 (define* ev-control-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
@@ -354,15 +433,15 @@
       (prim! 'marks-of
              (lambda (xs) (list->val (marks-of (as-cont (ev-arg xs 0)) (as-key (ev-arg xs 1)))))))))
 
-;;; ------------------------------------------------------------- bloblets
-
 ;; How many `xs` there are.
 (define* ev-vals-count (subr (maxeff (read @v) spin) (vals) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (ev-vals-count (cdr xs))))))
+
 ;; Elements `i` on of `a`, from `xs`.
 (define* ev-fill-array (subr (maxeff stores spin) ((arrayof val @v) vals int) unit)
   (lambda (a xs i)
     (if (null? xs) #u (begin (array-set! a i (car xs)) (ev-fill-array a (cdr xs) (+ i 1))))))
+
 ;; A bloblet of `n` bytes, its fields `xs`.
 (define* ev-make-bloblet (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
@@ -370,6 +449,7 @@
            (fs (the (arrayof val @v) (make-array (ev-vals-count fields) the-unit))))
       (begin (ev-fill-array fs fields 0)
              (o-blob fs (the (arrayof int @v) (make-array n 0)))))))
+
 ;; Bloblet operation `op`, at field `i`, of `xs`.
 (define* ev-bloblet (subr (maxeff evals spin) (symbol int vals) val)
   (lambda (op i xs)
@@ -389,8 +469,6 @@
              (else (array-length bs))))
          (else y (efail-expected "a bloblet")))))))
 
-;;; ------------------------------------------------------------- names
-
 (define ev-prims-made unit
   (begin (ev-int-prims!) (ev-text-prims!) (ev-shape-prims!) (ev-data-prims!) (ev-f64-prims!)
          (ev-f32-prims!) (ev-control-prims!)
@@ -403,4 +481,4 @@
     (if (std-nil-name? (symbol->string name))
         nil
         (let ((p (table-ref ev-prims name nil)))
-          (if (null? p) (efail (k-cat3 "unbound variable `" (symbol->string name) "`")) p)))))
+          (if (null? p) (efail (k-cat3 "unbound variable `" (symbol->string name) "`")) p))))))))

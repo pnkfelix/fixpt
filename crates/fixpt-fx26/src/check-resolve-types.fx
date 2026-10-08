@@ -40,3 +40,12 @@
 ;; definitions run again for a redefinition, each with whether it assigns
 ;; its names' globals rather than making new ones.
 (define-type k-run (productof (1 top) (2 bool)))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What clients use of `check-resolve.fx`'s module (`TODO.md` §68): the
+;; evaluator's.
+(define-type check-resolve-sig
+  (moduleof
+   (val exp-start (subr pure (exp) int))
+   (val exp-end (subr pure (exp) int))))

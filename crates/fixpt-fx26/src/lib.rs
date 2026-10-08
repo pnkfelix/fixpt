@@ -84,6 +84,14 @@ pub const EVAL_VALUES: &str = include_str!("eval-values.fx");
 pub const EVAL_PRIMS: &str = include_str!("eval-prims.fx");
 pub const EVAL_CORE: &str = include_str!("eval-core.fx");
 
+/// The evaluator's types and the signatures of its modules: a module file of
+/// no state (`TODO.md` §68).
+pub const EVAL_TYPES: &str = include_str!("eval-types.fx");
+
+/// The conductor: the front end's modules made and linked (`TODO.md` §68).
+/// Last of [`FRONT_END_FILES`].
+pub const CONDUCTOR: &str = include_str!("conductor.fx");
+
 /// The compiler from FX-26 to cellular words, written in FX-26.
 pub const COMPILER: &str = include_str!("compile.fx");
 
@@ -191,7 +199,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 17] = [
+pub const FRONT_END_MODULES: [(&str, &str); 21] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("check-resolve-types.fx", CHECK_RESOLVE_TYPES),
@@ -209,6 +217,10 @@ pub const FRONT_END_MODULES: [(&str, &str); 17] = [
     ("parser.fx", PARSER),
     ("parser-exps.fx", PARSER_EXPS),
     ("parser-top.fx", PARSER_TOP),
+    ("eval-types.fx", EVAL_TYPES),
+    ("eval-values.fx", EVAL_VALUES),
+    ("eval-prims.fx", EVAL_PRIMS),
+    ("eval-core.fx", EVAL_CORE),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -225,7 +237,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 56] = [
+pub const FRONT_END_FILES: [(&str, &str); 54] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -262,9 +274,6 @@ pub const FRONT_END_FILES: [(&str, &str); 56] = [
     CHECKER_FILES[31],
     CHECKER_FILES[32],
     CHECKER_FILES[33],
-    ("eval-values.fx", EVAL_VALUES),
-    ("eval-prims.fx", EVAL_PRIMS),
-    ("eval-core.fx", EVAL_CORE),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),
     ("compile.fx", COMPILER),
@@ -282,6 +291,7 @@ pub const FRONT_END_FILES: [(&str, &str); 56] = [
     ("arm64.fx", ARM64),
     ("native-layout.fx", NATIVE_LAYOUT),
     ("native.fx", NATIVE),
+    ("conductor.fx", CONDUCTOR),
 ];
 
 /// Where byte `at` of [`front_end`] (or of [`bootstrap_program`]) is, as
