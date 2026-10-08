@@ -6,13 +6,13 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-subst-module (module
-;; Pairs of integers.
-(define-type k-pairs (listof (pairof int int @t) acyclic))
-;; The same, of the parser's trees.
-(define-type exp-params (listof (productof (1 symbol) (2 syns-a)) acyclic))
-;; Looking at the checker's tables (`kreads`), and building more in their
-;; region.
-(define-effect kmakes (maxeff kreads (alloc @t)))
+;; Its types (`check-subst-types.fx`), and the names it uses of them.
+(define check-subst-types (load-module "fx26:check-subst-types.fx"))
+(define-type k-pairs (select check-subst-types k-pairs))
+(define-type exp-params (select check-subst-types exp-params))
+(define-effect kmakes (select check-subst-types kmakes))
+(define-type k-smemo (select check-subst-types k-smemo))
+
 (define k-gen-map (subr (maxeff (read @globals) (alloc @t)) (k-binders k-descs) k-map)
   (lambda (bs ds)
     (if (null? bs)
@@ -98,9 +98,6 @@
                     (else z (k-one (a-app v ds)))))
                 (else z (k-one (a-app v ds)))))
             (else y (k-one (a-app v ds))))))))
-;; What a substitution has made of each type it met: a table, by the type,
-;; since a module's type may be large (the reader's and the parser's are).
-(define-type k-smemo (table int int @t))
 (define k-int-hash (subr pure (int) int) (lambda (t) t))
 (define* k-new-smemo (subr (alloc @t) () k-smemo)
   (lambda () (make-table k-int-hash (lambda (a b) (= a b)))))

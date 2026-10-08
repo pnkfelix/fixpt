@@ -9,16 +9,20 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-resolve-module (module
-;; The parts of a resolved tree, as `kx`'s constructors hold them: a
-;; `lambda`'s parameters, a `letrec`'s and a `let`'s bindings (a product's
-;; fields are as a `let`'s), and a `tagcase`'s arms.
-(define-type k-typed-params (listof (productof (1 symbol) (2 k-ids)) acyclic))
-(define-type k-letrec-bs (listof (productof (1 symbol) (2 int) (3 kx)) acyclic))
-(define-type k-let-bs (listof (productof (1 symbol) (2 kx)) acyclic))
-(define-type k-arms (listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic))
-(define-type exp-letrec-bs (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
-(define-type exp-let-bs (listof (productof (1 symbol) (2 exp)) acyclic))
-(define-type exp-arms (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
+;; Its types (`check-resolve-types.fx`), and the names it uses of them.
+(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(define-type k-typed-params (select check-resolve-types k-typed-params))
+(define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
+(define-type k-let-bs (select check-resolve-types k-let-bs))
+(define-type k-arms (select check-resolve-types k-arms))
+(define-type exp-letrec-bs (select check-resolve-types exp-letrec-bs))
+(define-type exp-let-bs (select check-resolve-types exp-let-bs))
+(define-type exp-arms (select check-resolve-types exp-arms))
+(define-type k-callable (select check-resolve-types k-callable))
+(define-type k-region-lists (select check-resolve-types k-region-lists))
+(define-type k-def (select check-resolve-types k-def))
+(define-type k-run (select check-resolve-types k-run))
+
 
 (define k-start (subr pure (kx) int)
   (lambda (x)
@@ -122,12 +126,6 @@
 (define k-place-lives (subr kmakes (k-region) k-ids)
   (lambda (place) (tagcase place (r-var (p) (cons p (k-outer-of p))) (else y nil))))
 
-;;; ------------------------------------------------------------ callables
-
-;; What calling a value of type `t` does: its latent effect, parameters and
-;; result, as none or one. A composable continuation runs the rest of its
-;; prompt's body, with control effects on the tag's region.
-(define-type k-callable (productof (1 k-eff) (2 k-ids) (3 int)))
 (define k-as-subr (subr (maxeff kmakes spin) (int) (listof k-callable acyclic))
   (lambda (t)
     (tagcase (k-get t)
@@ -196,23 +194,13 @@
            (k-add-eff-regions (k-add-region rs (k-atom-region (car e))) (cdr e)))
           (else (k-add-eff-regions rs (cdr e))))))
 
-;; Every region mentioned in type `t`, following recursive types once.
-;; Kept once found, by type: a type does not change once built.
-(define-type k-region-lists (arrayof (listof k-regions acyclic) @t))
 (define k-regions-memo (ref k-region-lists @t) (new (make-array 512 nil)))
 
-;; A definition checked, as a redefinition finds it: the names it defines,
-;; its tree, and the globals it uses (its expressions' free variables).
-(define-type k-def (productof (1 k-names) (2 top) (3 k-names)))
 ;; The definitions checked so far, newest first, each the latest of its
 ;; names.
 (define k-defs (ref (listof k-def acyclic) @t) (new nil))
 ;; The free variables of the definition being checked, for `k-record`.
 (define k-last-uses (ref k-names @t) (new nil))
-;; What the program runs, newest first: each top-level form, and the
-;; definitions run again for a redefinition, each with whether it assigns
-;; its names' globals rather than making new ones.
-(define-type k-run (productof (1 top) (2 bool)))
 (define k-runs (ref (listof k-run acyclic) @t) (new nil))
 ;; For `k-reset`: forget the description variables, and what is known of
 ;; the regions and places among them.

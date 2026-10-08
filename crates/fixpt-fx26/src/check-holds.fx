@@ -6,8 +6,14 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-holds-module (module
-;; Regions storage is kept in, for `k-knot-in`.
-(define-type k-kept (listof k-region acyclic))
+;; Its types (`check-holds-types.fx`), and the names it uses of them.
+(define check-holds-types (load-module "fx26:check-holds-types.fx"))
+(define-type k-kept (select check-holds-types k-kept))
+(define-type k-knot (select check-holds-types k-knot))
+(define-type k-kept-seen (select check-holds-types k-kept-seen))
+(define-type k-kseen (select check-holds-types k-kseen))
+(define-type k-seen (select check-holds-types k-seen))
+
 ;; The types in description `d`, for analyses that look through what a
 ;; value holds: a type itself, or a `dlambda`'s body's (its parameters
 ;; standing for what it is given).
@@ -117,15 +123,8 @@
     (letrec ((within (subr (maxeff kreads spin) (k-kept k-kept) bool)
                (lambda (a b) (or (null? a) (and (k-kept-has? b (car a)) (within (cdr a) b))))))
       (and (within x y) (within y x)))))
-(define-type k-knot (listof (pairof k-region int @t) acyclic))
-;; The types a search for a knot has met, each with what it found kept.
-(define-type k-kept-seen (listof (pairof int k-kept @t) acyclic))
-;; By type: the kept sets met at it, as the Rust checker's set of pairs.
-(define-type k-kseen (table int k-kept-seen @t))
 (define k-id-hash (subr pure (int) int) (lambda (a) a))
 (define k-id=? (subr pure (int int) bool) (lambda (a b) (= a b)))
-;; The types a walk has met: whether `t` is one, and if not, it is now.
-(define-type k-seen (table int bool @t))
 (define k-new-seen (subr (maxeff (read @globals) (alloc @t)) () k-seen)
   (lambda () (make-table k-id-hash k-id=?)))
 (define k-seen? (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (k-seen int) bool)

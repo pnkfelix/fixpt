@@ -5,7 +5,7 @@
 ;;; its parameters is that function (eta), and a variable applied is an
 ;;; application, `ty-app`, equal only to one of the same function to equal
 ;;; descriptions. To an effect, an application is an atom, `a-app`.
-;;; Reading them is `check-read-types.fx`'s, with the rest of reading
+;;; Reading them is `check-read-descs.fx`'s, with the rest of reading
 ;;; types. Part of the checker, `check-types.fx` first.
 
 ;;; ------------------------------------------------------------ description functions

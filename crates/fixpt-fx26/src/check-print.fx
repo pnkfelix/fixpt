@@ -8,6 +8,18 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-print-module (module
+;; Its types (`check-print-types.fx`), and the names it uses of them.
+(define check-print-types (load-module "fx26:check-print-types.fx"))
+(define-type k-atree (select check-print-types k-atree))
+(define a-leaf (with check-print-types a-leaf))
+(define a-node (with check-print-types a-node))
+(define-type k-atrees (select check-print-types k-atrees))
+(define-type k-named-at (select check-print-types k-named-at))
+(define-type k-size-fact (select check-print-types k-size-fact))
+(define-type k-lins (select check-print-types k-lins))
+(define-type k-printing (select check-print-types k-printing))
+(define-effect kshows (select check-print-types kshows))
+
 ;; A description variable's name.
 (define k-dvar-string (subr kreads (int) string)
   (lambda (v) (symbol->string (k-dvar-name v))))
@@ -218,13 +230,6 @@
                   (cons (symbol->string n) nil)
                   (k-abbrev-in all (cdr ds) (+ i 1) t)))
             (else y (k-abbrev-in all (cdr ds) (+ i 1) t)))))))
-;; The `define-type`s of a scope by the type each resolves to, made once
-;; for a type shown (`k-show-ty`), so that each of its nodes finds its name
-;; in a tree, not by resolving every one in scope (`k-abbrev-in`, still for
-;; a name an inner one shadows): each node's key, scrambled from its type,
-;; the type, its name, and where in the scope it is; the innermost of each.
-(define-datatype k-atree (a-leaf) (a-node int int symbol int k-atree k-atree))
-(define-type k-atrees (listof k-atree acyclic))
 (define k-scramble (subr pure (int) int) (lambda (t) (remainder (* t 40503) 65521)))
 (define-rec
   (k-atree-put (subr spin (k-atree int int symbol int) k-atree)
@@ -237,7 +242,6 @@
                 ((or (> h h2) (and (= h h2) (> t t2)))
                  (a-node h2 t2 n2 i2 l (k-atree-put r h t n i)))
                 (else tr)))))))
-(define-type k-named-at (listof (productof (1 symbol) (2 int)) acyclic))
 (define-rec
   (k-atree-get (subr (maxeff (read @globals) spin) (k-atree int int) k-named-at)
     (lambda (tr h t)
@@ -364,9 +368,6 @@
         (let ((c (k-coef-of ts v)))
           (if (= c 0) s (k-size-add-scaled (k-size-add-scaled s (k-size-var v) (- 0 c)) by c))))
       (else y (sz-finite)))))
-;; What the branches being checked have learned about sizes: `lin = 0`
-;; (`#t`) or `lin ≥ 0`, newest first.
-(define-type k-size-fact (productof (1 k-size) (2 bool)))
 (define k-size-facts (ref (listof k-size-fact acyclic) @t) (new nil))
 ;; The terms from the first whose coefficient is 1 or -1 on.
 (define k-unit-terms (subr (read @globals) (k-terms) k-terms)
@@ -410,10 +411,6 @@
          (or (and (not (extract (car fs) 2))
                   (k-plainly-nonneg? (k-size-add-scaled a (k-reduced (extract (car fs) 1)) -1)))
              (k-nonneg-by-fact? a (cdr fs))))))
-;; Fourier–Motzkin, as the Rust checker's `refuted_below` (`src/sizes.rs`),
-;; step for step: whether the inequalities in scope, with every size a
-;; natural, leave no room for `a ≤ -1`.
-(define-type k-lins (listof k-size acyclic))
 ;; `gcd(a, b)` of naturals, Euclid's, counting down `fuel` (100 is more
 ;; steps than any pair of 64-bit numbers takes).
 (define k-gcd (subr (read @globals) (int int nat) int)
@@ -610,11 +607,6 @@
         (string-append (k-show-abs-one (extract (car ps) 1) (extract (car ps) 2))
                        (k-show-abs (cdr ps))))))
 
-;; Where a type is being shown: the path to it from the root, newest first,
-;; to name cycles by; the names a `moduleof`'s descriptions give what they
-;; describe, in the components after them, newest first; and the scope's
-;; `define-type`s by type, in a list of one (`k-abbrev-by`), or none.
-(define-type k-printing (productof (1 k-ids) (2 k-parts) (3 k-atrees)))
 (define k-printing-none k-printing
   (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 (the k-atrees nil))))
 ;; `p` with the names of descriptions `ds` too.
@@ -643,8 +635,6 @@
       ((0) "int") ((1) "f64") ((2) "f32") ((3) "char") ((4) "bool") ((5) "nil") ((6) "pair")
       ((7) "string") ((8) "symbol") ((9) "procedure") ((10) "bloblet") ((11) "box")
       ((12) "sum") (else "product"))))
-;; `(which P …)`, each `(shape i shape)` or `(not (shape i shape))`.
-(define-effect kshows (maxeff (read @globals) (read @t) (alloc @t) spin))
 ;; A proposition, and a size in one, as written.
 (define k-show-term (subr kshows (k-term) string)
   (lambda (t)

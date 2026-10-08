@@ -9,7 +9,13 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-read-module (module
-(define-type k-syns (listof syn acyclic))
+;; Its types (`check-read-types.fx`), and the names it uses of them.
+(define check-read-types (load-module "fx26:check-read-types.fx"))
+(define-type k-syns (select check-read-types k-syns))
+(define-type k-arrow-syns (select check-read-types k-arrow-syns))
+(define-type k-params (select check-read-types k-params))
+(define-type k-effect-sels (select check-read-types k-effect-sels))
+
 (define k-sfail (subr checks (string syn) void)
   (lambda (m s) (k-fail m (syn-start s) (syn-end s))))
 (define k-items (subr checks (syn string) k-syns)
@@ -49,9 +55,6 @@
   "a description function gives a type, an effect, or another description function")
 (define k-effect-fun-usage string
   "a description function to an effect takes regions, places, effects, sizes and conventions")
-;; `(=> (k1 … kn) k)` as written: its parameters' kinds and its result's, in
-;; a list of one; none if `s` is not of that shape, or takes nothing.
-(define-type k-arrow-syns (listof (pairof k-syns syn @t) acyclic))
 (define k-arrow-syntax (subr (maxeff kreads (read @s) (alloc @t) spin) (syn) k-arrow-syns)
   (lambda (s)
     (let ((items (tagcase s (lst (items d a b) items) (else x (the k-syns nil)))))
@@ -102,10 +105,6 @@
   (lambda (n k)
     (k-cat5 (k-quote n) " is a description function, of kind " (k-kind-text k)
             ": it is applied, " (k-quote (k-cat3 "(" n " …)")))))
-;; The parameters' names and kinds of a type form that is also a description
-;; function written alone, `listof`; none for any other name.
-;; A type family's parameters: each one's name and kind.
-(define-type k-params (listof (productof (1 symbol) (2 int)) acyclic))
 (define k-ctor-params (subr (read @globals) (string) (listof k-params acyclic))
   (lambda (n)
     (letrec ((one (subr (read @globals) (symbol int) k-params)
@@ -268,12 +267,6 @@
                (("await") (a-await r))
                (else (a-comefrom r)))))
 
-;;; ------------------------------------------------------------ effects selected
-
-;; Each `(select m e)` read as an effect: a variable of kind effect, one for
-;; each, which `k-resolve-selects` replaces by module `m`'s effect `e`
-;; (`check-modules.fx`), as the Rust checker's `effect_selects`.
-(define-type k-effect-sels (listof (productof (1 symbol) (2 symbol) (3 int)) acyclic))
 (define k-effect-selects (ref k-effect-sels @t) (new nil))
 ;; The entry for `(select m e)` in `ss`, or none.
 (define k-effect-sel-find (subr (maxeff (read @globals) (read @t)) (k-effect-sels symbol symbol)

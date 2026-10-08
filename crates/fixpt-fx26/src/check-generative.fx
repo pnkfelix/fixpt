@@ -7,7 +7,11 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-generative-module (module
-(define-type k-seen-pol (ref k-pairs @t))
+;; Its types (`check-generative-types.fx`), and the names it uses of them.
+(define check-generative-types (load-module "fx26:check-generative-types.fx"))
+(define-type k-seen-pol (select check-generative-types k-seen-pol))
+(define-type k-pols-found (select check-generative-types k-pols-found))
+
 ;; Where, in a generative type's representation, each of its parameters
 ;; appears: covariantly, contravariantly, or both (moved out of
 ;; `check-print.fx`, 2026-10-04).
@@ -15,8 +19,6 @@
   (lambda (xs t at)
     (and (not (null? xs))
          (or (and (= (car (car xs)) t) (= (cdr (car xs)) at)) (k-pol-seen? (cdr xs) t at)))))
-;; Where a walk for polarities puts each it finds.
-(define-type k-pols-found (ref k-ids @t))
 (define-rec
   (k-polarity (subr (maxeff kstate spin) (int int int k-seen-pol k-pols-found) unit)
     (lambda (t v at seen found)

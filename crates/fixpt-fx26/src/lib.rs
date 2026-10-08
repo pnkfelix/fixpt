@@ -27,6 +27,33 @@ pub const PARSER_TYPES: &str = include_str!("parser-types.fx");
 /// The types of `check-types.fx`: a module file of no state (`TODO.md` §68).
 pub const CHECK_TYPES_TYPES: &str = include_str!("check-types-types.fx");
 
+/// The types of `check-env.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_ENV_TYPES: &str = include_str!("check-env-types.fx");
+
+/// The types of `check-print.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_PRINT_TYPES: &str = include_str!("check-print-types.fx");
+
+/// The types of `check-unions.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_UNIONS_TYPES: &str = include_str!("check-unions-types.fx");
+
+/// The types of `check-holds.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_HOLDS_TYPES: &str = include_str!("check-holds-types.fx");
+
+/// The types of `check-read.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_READ_TYPES: &str = include_str!("check-read-types.fx");
+
+/// The types of `check-syntax.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_SYNTAX_TYPES: &str = include_str!("check-syntax-types.fx");
+
+/// The types of `check-subst.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_SUBST_TYPES: &str = include_str!("check-subst-types.fx");
+
+/// The types of `check-generative.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_GENERATIVE_TYPES: &str = include_str!("check-generative-types.fx");
+
+/// The types of `check-resolve.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_RESOLVE_TYPES: &str = include_str!("check-resolve-types.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -123,7 +150,7 @@ pub const CHECKER_FILES: [(&str, &str); 34] = [
     ("check-syntax.fx", include_str!("check-syntax.fx")),
     ("check-subst.fx", include_str!("check-subst.fx")),
     ("check-proving.fx", include_str!("check-proving.fx")),
-    ("check-read-types.fx", include_str!("check-read-types.fx")),
+    ("check-read-descs.fx", include_str!("check-read-descs.fx")),
     ("check-generative.fx", include_str!("check-generative.fx")),
     ("check-resolve.fx", include_str!("check-resolve.fx")),
     ("check-mask.fx", include_str!("check-mask.fx")),
@@ -164,9 +191,18 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 8] = [
+pub const FRONT_END_MODULES: [(&str, &str); 17] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
+    ("check-resolve-types.fx", CHECK_RESOLVE_TYPES),
+    ("check-generative-types.fx", CHECK_GENERATIVE_TYPES),
+    ("check-subst-types.fx", CHECK_SUBST_TYPES),
+    ("check-syntax-types.fx", CHECK_SYNTAX_TYPES),
+    ("check-read-types.fx", CHECK_READ_TYPES),
+    ("check-holds-types.fx", CHECK_HOLDS_TYPES),
+    ("check-unions-types.fx", CHECK_UNIONS_TYPES),
+    ("check-print-types.fx", CHECK_PRINT_TYPES),
+    ("check-env-types.fx", CHECK_ENV_TYPES),
     ("check-types-types.fx", CHECK_TYPES_TYPES),
     ("eager-reader.fx", EAGER_READER),
     ("parser-types.fx", PARSER_TYPES),

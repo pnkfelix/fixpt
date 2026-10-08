@@ -1,5 +1,5 @@
 ;;; The checker, in FX-26: what reading descriptions from their syntax into
-;;; the arena needs before it (`check-read-types.fx` reads them, by the
+;;; the arena needs before it (`check-read-descs.fx` reads them, by the
 ;;; pieces `check-read.fx` gives): regions, effects' atoms, labels, `dletrec`
 ;;; knots, `define-type`'s forward names. Part of the checker,
 ;;; `check-types.fx` first (PLAN.md §11, step 10).
@@ -7,6 +7,13 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-syntax-module (module
+;; Its types (`check-syntax-types.fx`), and the names it uses of them.
+(define check-syntax-types (load-module "fx26:check-syntax-types.fx"))
+(define-type k-slots (select check-syntax-types k-slots))
+(define-type k-family-knot (select check-syntax-types k-family-knot))
+(define-type k-ahead-slots (select check-syntax-types k-ahead-slots))
+(define-type k-filled (select check-syntax-types k-filled))
+
 (define-rec
   ;; `(head x)`: one atom on region `x`; or, `x` being globals, one for
   ;; each.
@@ -31,7 +38,6 @@
 
 (define k-shape (subr checks (bool string syn) unit)
   (lambda (ok shape s) (if ok #u (k-sfail shape s))))
-(define-type k-slots (listof (pairof int syn @t) acyclic))
 (define k-dletrec-slots (subr (maxeff checks spin) (k-syns) k-slots)
   (lambda (bs)
     (if (null? bs)
@@ -192,10 +198,6 @@
   (lambda (bs)
     (if (null? bs) #u (begin (k-push-desc (car (car bs)) (cdr (car bs))) (k-push-all (cdr bs))))))
 
-;; The type families being expanded, each with the descriptions given it
-;; and the slot its type will fill: a use inside with the same descriptions
-;; is that slot, a knot (regular recursion).
-(define-type k-family-knot (productof (1 symbol) (2 k-scope) (3 int)))
 (define k-knots (ref (listof k-family-knot acyclic) @t) (new nil))
 (define k-ds=? (subr (maxeff kreads spin) (k-ds k-ds) bool)
   (lambda (x y)
@@ -353,14 +355,6 @@
             (cons c (k-hyp-coercions (cdr hs) spin tail))))))
 )
 
-;; `(define-type name type)`: `name` stands for the type from here on, and
-;; may appear in its own definition.
-;; While a program's types are declared ahead (`k-ahead`): each
-;; abbreviation's slot, made before any is read so that they may name each
-;; other in any order; and those filled, with where, to check grounded once
-;; all are.
-(define-type k-ahead-slots (listof (pairof symbol int @t) acyclic))
-(define-type k-filled (listof (productof (1 int) (2 int) (3 int)) acyclic))
 (define k-ahead-names (ref k-ahead-slots @t) (new nil))
 (define k-ahead-filled (ref k-filled @t) (new nil))
 ;; `xs` less `name`'s entry.

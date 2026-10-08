@@ -6,6 +6,26 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-env-module (module
+;; Its types (`check-env-types.fx`), and the names it uses of them.
+(define check-env-types (load-module "fx26:check-env-types.fx"))
+(define-type k-bindings (select check-env-types k-bindings))
+(define-type k-stack (select check-env-types k-stack))
+(define-type k-flags (select check-env-types k-flags))
+(define-type k-break (select check-env-types k-break))
+(define-type k-op-mark (select check-env-types k-op-mark))
+(define-type k-scope (select check-env-types k-scope))
+(define-type k-fact (select check-env-types k-fact))
+(define-type k-facts (select check-env-types k-facts))
+(define-type k-with-noted (select check-env-types k-with-noted))
+(define-type k-with-list (select check-env-types k-with-list))
+(define-type k-hazard-list (select check-env-types k-hazard-list))
+(define-type k-reshaped (select check-env-types k-reshaped))
+(define-type k-reshape-list (select check-env-types k-reshape-list))
+(define-type k-selected (select check-env-types k-selected))
+(define-type k-selects (select check-env-types k-selects))
+(define-type k-param-given (select check-env-types k-param-given))
+(define-type k-params-given (select check-env-types k-params-given))
+
 ;; The base types, made first, in this order, so their indexes are known.
 (define k-int int 0)
 (define k-bool int 1)
@@ -21,29 +41,13 @@
     (let* ((s (string->symbol name)) (t (k-ty-new (ty-base s))))
       (set k-base (cons (cons s t) (get k-base))))))
 
-;; Bindings, as lists of them are passed around.
-(define-type k-bindings (listof (pairof symbol int @t) acyclic))
 (define k-find (subr (maxeff (read @globals) (read @t)) (k-bindings symbol) int)
   (lambda (bs s)
     (cond ((null? bs) -1) ((symbol=? (car (car bs)) s) (cdr (car bs))) (else (k-find (cdr bs) s)))))
 
-;; Value variables in scope: for each name, the types it is bound to,
-;; innermost first; and the names bound, newest first, so that a scope is
-;; left by unbinding back to a mark (`k-mark`, `k-unbind-to`). A lookup is
-;; a table's, not a walk down every binding in scope.
-(define-type k-stack (listof int acyclic))
 (define k-env (ref (table symbol k-stack @t) @t) (new (make-table symbol-hash symbol=?)))
 (define k-trail (ref k-names @t) (new nil))
 (define k-depth (ref int @t) (new 0))
-;; Whether each binding in `k-env` is of a known procedure: one a `define`,
-;; `letrec`, `define-rec`, or a `let` of a `lambda` made. A call of one runs
-;; code the checker has seen; a call of anything else might run a closure
-;; fetched from the store. By binding, in step with `k-env`, not by name and
-;; type, so a parameter that shadows one is not taken for it
-;; (`docs/research/soundness-findings.md`, F1).
-;; For each name, a flag for each of its bindings in `k-env`, innermost
-;; first.
-(define-type k-flags (ref (table symbol (listof bool acyclic) @t) @t))
 (define k-known k-flags (new (make-table symbol-hash symbol=?)))
 ;; Whether each binding in `k-env` is a global: one a top-level definition
 ;; made. Naming one reads it, `(read (globals g))`, when
@@ -61,11 +65,6 @@
 ;; For a driver: whether naming a global reads it.
 (define check-globals-effects! (subr (maxeff (read @globals) (write @t)) (bool) unit)
   (lambda (on) (set k-globals-effects on)))
-;; The type `s` is bound to, or -1.
-;; Globals broken by a redefinition (`k-defining`): the name, how many
-;; bindings it had then (so which one is broken), and why. A use of a broken
-;; binding is an error saying why, until the name is defined again.
-(define-type k-break (productof (1 symbol) (2 int) (3 string)))
 (define k-broken (ref (listof k-break acyclic) @t) (new nil))
 ;; How many bindings `s` has now.
 (define k-name-depth (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
@@ -120,10 +119,6 @@
       (if (null? why)
           (k-cat3 "unbound variable `" n "`")
           (k-cat5 "`" n "` is broken, " (car why) ": define it again to use it")))))
-;; The operator of the application being checked, past any `proj` or
-;; `the`, by name and place: where a second-class standard operation may be
-;; named (F15, F16).
-(define-type k-op-mark (productof (1 symbol) (2 int) (3 int)))
 (define k-operator (ref k-op-mark @t) (new (product (1 '||) (2 -1) (3 -1))))
 ;; The standard operations a rule checks at each call, by their name there:
 ;; named only as a call's operator, so that no other name, and no procedure
@@ -216,8 +211,6 @@
 (define k-fixed? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool)
   (lambda (n) (let ((st (table-ref (get k-fixed) n nil))) (and (not (null? st)) (car st)))))
 
-;; Description names in scope, innermost first.
-(define-type k-scope (listof (pairof symbol k-ds @t) acyclic))
 (define k-dscope (ref k-scope @t) (new nil))
 (define k-find-desc (subr (maxeff kreads (alloc @t)) (k-scope symbol) (listof k-ds acyclic))
   (lambda (ds s)
@@ -240,10 +233,6 @@
 ;; How deep in abbreviations' expansions reading is.
 (define k-expanding (ref int @t) (new 0))
 
-;; What checking proved that running needs: each `extract`'s field, by
-;; position, keyed by where the `extract` is. Only the product's type says.
-(define-type k-fact (productof (1 int) (2 int) (3 int)))
-(define-type k-facts (listof k-fact acyclic))
 (define k-extracts (ref k-facts @t) (new nil))
 ;; Each expression synthesized: where it starts and ends, and a summary of
 ;; its effect for a compiler, each a stronger claim on what the code may do
@@ -291,11 +280,6 @@
 (define k-summary (subr (read @globals) (k-eff) int)
   (lambda (e) (cond ((null? e) 0) ((k-reads-only? e) 1) ((k-disrupts? e) 3) (else 2))))
 
-;; Each `with` checked, where it is, and its module's values its body names,
-;; with their positions in the module, newest first: a `with`'s body sees
-;; them, once checking has found them; a re-export, of one value, binds one.
-(define-type k-with-noted (productof (1 int) (2 int) (3 k-names) (4 k-ids)))
-(define-type k-with-list (listof k-with-noted acyclic))
 (define k-with-vals (ref k-with-list @t) (new nil))
 (define k-with-names-in (subr (maxeff (read @globals) (read @t)) (k-with-list int int) k-names)
   (lambda (ws a b)
@@ -304,21 +288,12 @@
           (else (k-with-names-in (cdr ws) a b)))))
 (define k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names)
   (lambda (a b) (k-with-names-in (get k-with-vals) a b)))
-;; While a module's order is checked (`check-modorder.fx`): each earlier
-;; item whose value is a module as written, and its values' names, which a
-;; `with` of it not checked yet binds.
-(define-type k-hazard-list (listof (productof (1 symbol) (2 k-names)) acyclic))
 (define k-hazard-mods (ref k-hazard-list @t) (new nil))
 (define k-hazard-names-in (subr (read @globals) (k-hazard-list symbol) k-names)
   (lambda (hs m)
     (cond ((null? hs) nil)
           ((symbol=? (extract (car hs) 1) m) (extract (car hs) 2))
           (else (k-hazard-names-in (cdr hs) m)))))
-;; Each module given where a type of fewer values, or the same in another
-;; order, is wanted (`k-reshape-at`): where, and for each value that type
-;; has, its position in the module given. Made into a module of that layout.
-(define-type k-reshaped (productof (1 int) (2 int) (3 k-ids)))
-(define-type k-reshape-list (listof k-reshaped acyclic))
 (define k-reshapes (ref k-reshape-list @t) (new nil))
 ;; For a driver: the same as another checker found them.
 (define checked-reshapes! (subr (maxeff (read @globals) (write @t)) (k-reshape-list) unit)
@@ -330,10 +305,6 @@
 ;; The type variables made for modules' abstract types as each module was
 ;; bound (`k-name-module`): not forgotten, but kept from leaving.
 (define k-module-vars (ref k-ids @t) (new nil))
-;; While a type's `select`s are resolved (`k-resolve-selects`): what each
-;; is, `(m t)` and the type; none otherwise.
-(define-type k-selected (productof (1 symbol) (2 symbol) (3 int)))
-(define-type k-selects (listof k-selected acyclic))
 (define k-select-map (ref k-selects @t) (new nil))
 (define k-select-in (subr (maxeff (read @globals) (read @t)) (k-selects symbol symbol int) int)
   (lambda (ss m n t)
@@ -344,10 +315,6 @@
 ;; What `(select m n)`, node `t`, is while selects are resolved; else `t`.
 (define k-select-of (subr (maxeff (read @globals) (read @t)) (symbol symbol int) int)
   (lambda (m n t) (k-select-in (get k-select-map) m n t)))
-;; While a dependent procedure's parameters are given (`k-instantiate-params`):
-;; what each `(select $k n)` is, `(k n)` and the type; none otherwise.
-(define-type k-param-given (productof (1 int) (2 symbol) (3 int)))
-(define-type k-params-given (listof k-param-given acyclic))
 (define k-param-map (ref k-params-given @t) (new nil))
 (define k-param-in (subr (maxeff (read @globals) (read @t)) (k-params-given int symbol int) int)
   (lambda (ps k n t)

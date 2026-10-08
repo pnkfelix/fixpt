@@ -7,6 +7,12 @@
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-unions-module (module
+;; Its types (`check-unions-types.fx`), and the names it uses of them.
+(define check-unions-types (load-module "fx26:check-unions-types.fx"))
+(define-type k-pending (select check-unions-types k-pending))
+(define-type k-sides (select check-unions-types k-sides))
+(define-type k-split (select check-unions-types k-split))
+
 ;; The shapes, by number in `check.rs`'s `SHAPES` order: 0 int, 1 f64,
 ;; 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol, 9 procedure,
 ;; 10 bloblet, 11 box, 12 sum, 13 product, 14 vector, 15 bytevector. A
@@ -181,7 +187,6 @@
               (k-fail (k-cat5 "a union's members must differ in shape at run time: a "
                               (k-show-ty (car ms)) " and a " (k-show-ty o) " do not")
                       start end))))))
-(define-type k-pending (productof (1 int) (2 int) (3 int)))
 (define k-pendings-append
   (subr (maxeff (read @globals) (alloc @t)) (k-pendings k-pending) k-pendings)
   (lambda (ps p)
@@ -244,7 +249,6 @@
             (the k-ids (cons (k-ty-new (ty-nil)) (k-one-id (k-ty-new (ty-pair a b r #f)))))
             (k-one-id m)))
       (else y (k-one-id m)))))
-(define-type k-sides (pairof k-ids k-ids @t))
 ;; Members `ps` to the side where shape `k` is found, or not, or both.
 (define k-sort-parts (subr (maxeff kstate spin) (k-ids int k-sides) k-sides)
   (lambda (ps k acc)
@@ -266,12 +270,6 @@
   (lambda (ms k)
     (let ((sides (k-split-into ms k (cons nil nil))))
       (cons (k-reverse-ids (car sides) nil) (k-reverse-ids (cdr sides) nil)))))
-;; Type `t` where a value of it is found of shape `k`, and where not, -1
-;; for no narrowing: a union's members of that shape, and the rest; a pair
-;; that may be `nil`, the pair that is not, where `null?` does not hold or
-;; `pair?` does. Nothing else is narrowed (a list found `nil` stays a list,
-;; which is what `cons` onto it wants).
-(define-type k-split (productof (1 int) (2 int)))
 (define k-narrowed-by (subr (maxeff kstate spin) (int int) k-split)
   (lambda (t k)
     (let ((none (product (1 -1) (2 -1))))

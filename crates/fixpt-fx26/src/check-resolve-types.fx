@@ -1,0 +1,42 @@
+;;; The types of `check-resolve.fx`, its `check-resolve-module`: a module file of no
+;;; state, which it loads, and so may its clients (`TODO.md` §68); its
+;;; items in the order they were there.
+
+;; The types these use, from the files that define them.
+(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(define-type exp (select parser-types exp))
+(define-type names (select parser-types names))
+(define-type syn (select parser-types syn))
+(define-type top (select parser-types top))
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type k-eff (select check-types-types k-eff))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-names (select check-types-types k-names))
+(define-type k-regions (select check-types-types k-regions))
+(define-type kx (select check-types-types kx))
+;; The parts of a resolved tree, as `kx`'s constructors hold them: a
+;; `lambda`'s parameters, a `letrec`'s and a `let`'s bindings (a product's
+;; fields are as a `let`'s), and a `tagcase`'s arms.
+(define-type k-typed-params (listof (productof (1 symbol) (2 k-ids)) acyclic))
+(define-type k-letrec-bs (listof (productof (1 symbol) (2 int) (3 kx)) acyclic))
+(define-type k-let-bs (listof (productof (1 symbol) (2 kx)) acyclic))
+(define-type k-arms (listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic))
+(define-type exp-letrec-bs (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
+(define-type exp-let-bs (listof (productof (1 symbol) (2 exp)) acyclic))
+(define-type exp-arms (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
+;;; ------------------------------------------------------------ callables
+
+;; What calling a value of type `t` does: its latent effect, parameters and
+;; result, as none or one. A composable continuation runs the rest of its
+;; prompt's body, with control effects on the tag's region.
+(define-type k-callable (productof (1 k-eff) (2 k-ids) (3 int)))
+;; Every region mentioned in type `t`, following recursive types once.
+;; Kept once found, by type: a type does not change once built.
+(define-type k-region-lists (arrayof (listof k-regions acyclic) @t))
+;; A definition checked, as a redefinition finds it: the names it defines,
+;; its tree, and the globals it uses (its expressions' free variables).
+(define-type k-def (productof (1 k-names) (2 top) (3 k-names)))
+;; What the program runs, newest first: each top-level form, and the
+;; definitions run again for a redefinition, each with whether it assigns
+;; its names' globals rather than making new ones.
+(define-type k-run (productof (1 top) (2 bool)))
