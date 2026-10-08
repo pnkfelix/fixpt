@@ -124,6 +124,14 @@ fn nil_is_of_the_type_nil_where_nothing_says_which_list() {
     );
 }
 
+/// A message names `datum`, not its union written out (substitution keeps
+/// the standard `datum` itself).
+#[test]
+fn a_message_names_datum() {
+    let err = rejects("(define d datum 1) (define x int (car d))");
+    assert!(err.ends_with("a int is expected here, and this is a datum"), "{err}");
+}
+
 /// The effect binder of a higher-order operator is the latent effect of the
 /// subroutine passed to it.
 #[test]

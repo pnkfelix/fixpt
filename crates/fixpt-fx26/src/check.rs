@@ -138,6 +138,10 @@ pub struct Checker {
     char_: TyId,
     f64_: TyId,
     symbol: TyId,
+    /// The standard `datum` (`DATUM`), once defined: it mentions no
+    /// variable, so substitution leaves it itself, and it keeps its name
+    /// in what is shown.
+    datum: Option<TyId>,
     /// How deep in abbreviation expansions parsing is, to stop one that
     /// mentions itself.
     pub(crate) expanding: u32,
@@ -458,6 +462,7 @@ impl Checker {
             char_,
             f64_,
             symbol,
+            datum: None,
             expanding: 0,
             knots: Vec::new(),
             holes: None,
@@ -519,7 +524,8 @@ impl Checker {
         // bindings, whose types name it.
         let forms = c.read(DATUM).expect("reads");
         let datum = c.interner.intern("datum");
-        c.define_type(datum, &forms[0], forms[0].span).unwrap_or_else(|e| panic!("`DATUM` is wrong: {e}"));
+        let d = c.define_type(datum, &forms[0], forms[0].span).unwrap_or_else(|e| panic!("`DATUM` is wrong: {e}"));
+        c.datum = Some(c.arena.resolve(d));
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
         }
@@ -1288,6 +1294,16 @@ impl Checker {
         {
             self.facts.fx_plain.insert(e, body);
         }
+    }
+
+    /// The standard type of `(with module body)`, if `module` is `#%fx` and
+    /// `body` a standard name whose type is polymorphic.
+    pub(crate) fn fx_poly(&self, module: Sym, body: ExpId) -> Option<TyId> {
+        if !self.is_fx_module(module) {
+            return None;
+        }
+        let Exp::Var(n) = *self.arena.exp_at(body) else { return None };
+        self.standard_type(n).filter(|t| matches!(self.arena.get(*t), Ty::Poly { .. }))
     }
 
     /// The standard name `e` refers to, if it refers to one: a variable the
@@ -3006,6 +3022,9 @@ impl Checker {
         }
         if let Some(&n) = memo.get(&t) {
             return n;
+        }
+        if self.datum == Some(t) {
+            return t;
         }
         let ty = self.arena.get(t).clone();
         match ty {

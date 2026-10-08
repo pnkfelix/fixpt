@@ -496,6 +496,12 @@
                (null? (unquoted x depth)))
           (mk-form "the" (list (mk-symbol "datum" a b) built) a b)
           built))))
+;; `(with #%fx name)`: the standard `name`, whatever a program binds it to.
+(define fx-named (subr parses (string int int) syn)
+  (lambda (n a b) (mk-form "with" (list (mk-symbol "#%fx" a b) (mk-symbol n a b)) a b)))
+;; `((with #%fx op) arg …)`.
+(define fx-call (subr parses (string syns-a int int) syn)
+  (lambda (op args a b) (mk-list (cons (fx-named op a b) args) a b)))
 ;; `(form e)`: `e`, as a list of none or one.
 (define unquote-of (subr parses (syn string) syns-a)
   (lambda (x form)
@@ -516,11 +522,18 @@
                      (if (bytevector? d) (pfail "a bytevector cannot be quoted yet" x) x))
                     ((or (symbol=? d sym-true) (symbol=? d sym-false)) x)
                     (else (mk-form "quote" (list x) a b))))
-            (lst (items d c e) (quoted-items items (mk-symbol "nil" a b) depth a b))
+            ;; Each `with` made here at a place of its own (facts are kept
+            ;; by place): `nil` at the closing parenthesis, each `cons` at
+            ;; its item.
+            (lst (items d c e)
+              (if (null? items)
+                  (mk-symbol "nil" a b)
+                  (quoted-items items (fx-named "nil" (- b 1) b) depth a b)))
             (dotted (items tail d c e) (quoted-items items (quoted-in tail depth) depth a b))
             (vec (items d c e)
-              (mk-form "datum-list->vector"
-                       (list (quoted-items items (mk-symbol "nil" a b) depth a b)) a b)))))))
+              (fx-call "datum-list->vector"
+                       (list (quoted-items items (fx-named "nil" (- b 1) b) depth a b))
+                       a (+ a 2))))))))
 ;; A list of `items`, then `end`, built: a nested `quasiquote` deepens, an
 ;; `unquote` not at depth 1 shallows.
 (define quoted-items (subr parses (syns-a syn int int int) syn)
@@ -539,13 +552,15 @@
     (if (null? items)
         end
         (let ((rest (quoted-onto (cdr items) end inner inner a b))
-              (spliced (if (= depth 1) (unquote-of (car items) "unquote-splicing") nil)))
+              (spliced (if (= depth 1) (unquote-of (car items) "unquote-splicing") nil))
+              (ia (syn-start (car items))) (ib (syn-end (car items))))
           (if (null? spliced)
-              (mk-form "cons" (list (quoted-in (car items) depth) rest) a b)
+              (fx-call "cons" (list (quoted-in (car items) depth) rest) ia ib)
               (let ((ty (mk-list (list (mk-symbol "listof" a b) (mk-symbol "datum" a b)
                                        (mk-symbol "acyclic" a b))
                                  a b)))
-                (mk-form "append" (list (car spliced) (mk-form "the" (list ty rest) a b)) a b)))))))
+                (fx-call "append" (list (car spliced) (mk-form "the" (list ty rest) a b))
+                         ia ib)))))))
 
 
 ))

@@ -1384,9 +1384,10 @@ same code to the cell. Shadowed, the lowering, both
 compilers' stack and register code, and the FX-26 evaluator give the
 standard operation (`programs/run/standard-refs.fx`, every machine). The
 audit of name-keyed rules found F15 and F16 (`soundness-findings.md`).
-**Left:** a polymorphic value through `#%fx` is not instantiated where a
-type is expected, nor is `(with #%fx nil)` of the type `nil` where nothing
-says which list, as `nil` is (`DONE.md` §48).
+**Left:** `(with #%fx nil)` is not of the type `nil` where nothing says
+which list, as `nil` is (`DONE.md` §48). (Where a type is expected, a
+polymorphic value through `#%fx` is instantiated as the plain name is,
+since 2026-10-08, for `quote`'s sake.)
 
 **Prior art (the user's pointer):** Clinger, "Rapid Case Dispatch in
 Scheme", Scheme Workshop 2006 (`docs/research/papers/case-dispatch/`,

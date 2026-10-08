@@ -2564,7 +2564,9 @@ impl Checker {
     /// `nil`, lists as `cons`es, vectors and bytevectors from lists; a
     /// list or vector in `(the datum …)`. Under `quasiquote`, `(unquote e)`
     /// at depth 1 is `e`, and `(unquote-splicing e)` is `e` appended to
-    /// what follows; nested `quasiquote`s count depth as R7RS does. A
+    /// what follows; nested `quasiquote`s count depth as R7RS does. The
+    /// standard operations, through `#%fx`, so a program's own `cons` changes
+    /// nothing; a bare `'()` is the plain `nil`, an empty list of any type. A
     /// datum is immutable and acyclic, so building it anew each time differs
     /// from Scheme's constant only in identity.
     pub(crate) fn quoted(&mut self, x: &Syntax, depth: Option<u32>) -> Syntax {
@@ -2598,8 +2600,15 @@ impl Checker {
         Syntax::symbol(span, s)
     }
 
+    /// `(with #%fx name)`: the standard `name`, whatever a program binds it
+    /// to.
+    fn standard_named(&mut self, span: fixpt_read::Span, name: &str) -> Syntax {
+        let (with, fx, n) = (self.named(span, "with"), self.named(span, "#%fx"), self.named(span, name));
+        Syntax::list(span, vec![with, fx, n])
+    }
+
     fn call(&mut self, span: fixpt_read::Span, op: &str, mut args: Vec<Syntax>) -> Syntax {
-        let mut items = vec![self.named(span, op)];
+        let mut items = vec![self.standard_named(span, op)];
         items.append(&mut args);
         Syntax::list(span, items)
     }
@@ -2645,9 +2654,12 @@ impl Checker {
                     (Some(d), Some("unquote" | "unquote-splicing")) if items.len() == 2 && d > 1 => Some(d - 1),
                     _ => depth,
                 };
+                // Each `with` made here at a place of its own (the FX-26
+                // checker keys facts by place): `nil` at the closing
+                // parenthesis, each `cons` at its item.
                 let mut acc = match tail {
                     Some(t) => self.quoted_in(t, depth),
-                    None => self.named(span, "nil"),
+                    None => self.standard_named(fixpt_read::Span { start: span.end.saturating_sub(1), ..span }, "nil"),
                 };
                 for (i, item) in items.iter().enumerate().rev() {
                     let d = if i == 0 { depth } else { inner };
@@ -2660,18 +2672,19 @@ impl Checker {
                             Syntax::list(span, vec![l, d, a])
                         };
                         let rest = Syntax::list(span, vec![the, ty, acc]);
-                        acc = self.call(span, "append", vec![e.clone(), rest]);
+                        acc = self.call(item.span, "append", vec![e.clone(), rest]);
                         continue;
                     }
                     let q = self.quoted_in(item, d);
-                    acc = self.call(span, "cons", vec![q, acc]);
+                    acc = self.call(item.span, "cons", vec![q, acc]);
                 }
                 acc
             }
             Datum::Vector(items) => {
                 let list = Syntax::new(span, Datum::List { items: items.clone(), tail: None });
                 let l = self.quoted_in(&list, depth);
-                self.call(span, "datum-list->vector", vec![l])
+                // At the `#(`, apart from the list's own places.
+                self.call(fixpt_read::Span { end: span.start + 2, ..span }, "datum-list->vector", vec![l])
             }
             // Refused before (`no_bytevector`).
             Datum::Bytevector(_) => x.clone(),

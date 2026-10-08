@@ -172,6 +172,15 @@ impl Checker {
             {
                 Ok(Effect::pure())
             }
+            // A standard polymorphic value through `#%fx` (`(with #%fx
+            // nil)`), instantiated as the plain name is (`TODO.md` §46).
+            Exp::With { module, body } if self.fx_poly(module, body).is_some() => {
+                let t = self.fx_poly(module, body).expect("matched");
+                let inst = self.instantiate_against(t, expected, span)?;
+                self.expect(e, inst, expected)?;
+                self.plain_fx(e);
+                Ok(Effect::pure())
+            }
             Exp::Var(s) if self.lookup(s).is_some_and(|t| matches!(self.arena.get(t), Ty::Poly { .. })) => {
                 let t = self.lookup(s).expect("bound");
                 let inst = self.instantiate_against(t, expected, span)?;

@@ -545,6 +545,16 @@
               (k-set-link slot pair)
               (set solved (cons (cons v (dt (k-subst slot (get solved)))) (get solved)))))
           #u))))
+;; `(with m body)` checked as a `expected`, if `m` is `#%fx` and `body` a
+;; standard name of a polymorphic type: instantiated as the plain name is
+;; (`TODO.md` §46); its effect, in a list of one, or none.
+(define k-fx-poly-check (subr (maxeff checks spin) (kx symbol kx int) (listof k-eff @t))
+  (lambda (x m body expected)
+    (let ((t (tagcase body (x-var (n a b) (if (k-fx-module? m) (k-std-type n) -1)) (else y -1))))
+      (if (and (>= t 0) (tagcase (k-get t) (ty-poly (bs pb) #t) (else y #f)))
+          (begin (k-expect x (k-instantiate-against t expected (k-start x) (k-end x)) expected)
+                 (the (listof k-eff @t) (cons nil nil)))
+          (the (listof k-eff @t) nil)))))
 ;; Whether `et` is a `(nat z)` that natural literal `k` is one of.
 (define k-literal-within? (subr kreads (k-ty int) bool)
   (lambda (et k) (tagcase et (ty-nat (z) (k-size-le? (k-size-lit k) z)) (else w #f))))
@@ -643,6 +653,7 @@
 (define k-thunk-lambda? (with check-synth-module k-thunk-lambda?))
 (define k-poly-var-at (with check-synth-module k-poly-var-at))
 (define k-nil-told (with check-synth-module k-nil-told))
+(define k-fx-poly-check (with check-synth-module k-fx-poly-check))
 (define k-widen-nil-tail (with check-synth-module k-widen-nil-tail))
 (define k-with-used (with check-synth-module k-with-used))
 (define k-as-expected (with check-synth-module k-as-expected))
