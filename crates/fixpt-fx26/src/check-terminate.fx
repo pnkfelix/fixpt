@@ -103,6 +103,20 @@
 ;; generative type's conversion.
 (define k-ty-known (subr (maxeff kreads spin) (int) k-ty)
   (lambda (t) (if (< t 0) (ty-void) (k-get t))))
+;; A union's member that is a pair, of members `ms`; or -1.
+(define k-union-pair (subr (maxeff kreads spin) (k-ids) int)
+  (lambda (ms)
+    (cond ((null? ms) -1)
+          ((tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f)) (car ms))
+          (else (k-union-pair (cdr ms))))))
+;; The same of a value taken apart as a pair: of a union, its pair member,
+;; which any value `car` or `cdr` returns from is.
+(define k-ty-known-pair (subr (maxeff kreads spin) (int) k-ty)
+  (lambda (t)
+    (if (< t 0)
+        (ty-void)
+        (let ((u (k-get (k-resolve t))))
+          (tagcase u (ty-union (ms) (k-ty-known (k-union-pair ms))) (else y u))))))
 ;; `rest`, with a strict part of parameter `p`, of type `t` (-1 if not known).
 (define k-sc-smaller (subr kstate (int int k-trs) k-trs)
   (lambda (p t rest) (the k-trs (cons (tr-part p #t t) rest))))
@@ -149,7 +163,7 @@
         (let ((rest (k-sc-pair-parts (cdr ks) head)))
           (tagcase (car ks)
             (tr-part (p s t)
-              (tagcase (k-ty-known t)
+              (tagcase (k-ty-known-pair t)
                 ;; A `nlist`'s tail is a `nlist` too: the same type serves.
                 (ty-nlist (e z r) (k-sc-smaller p (if head e t) rest))
                 (ty-pair (x y r nl)

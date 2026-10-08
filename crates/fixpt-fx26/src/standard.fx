@@ -40,6 +40,7 @@
          (("cons") "cons")
          (("rnew") "%region-new")
          (("int?") "exact-integer?")
+         (("f64?") "%fx26-datum-f64?")
          (("f64+") "%fx26-f64+")
          (("f64-") "%fx26-f64-")
          (("f64*") "%fx26-f64*")
@@ -120,6 +121,7 @@
       ((7)
        (case n
          (("string?") "string?")
+         (("vector?") "vector?")
          (("symbol?") "symbol?")
          (("f64-min") "%fx26-f64-min")
          (("f64-max") "%fx26-f64-max")
@@ -246,6 +248,7 @@
        (case n
          (("rmake-array") "%region-make-array")
          (("rmake-icell") "%region-make-icell")
+         (("bytevector?") "bytevector?")
          (("f64-ceiling") "%fx26-f64-ceiling")
          (("f64-finite?") "%fx26-f64-finite?")
          (("f64->string") "%fx26-f64->string")

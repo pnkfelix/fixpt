@@ -29,6 +29,13 @@
   (lambda (n t)
     (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std)))
            (table-set! (get k-std-table) n t))))
+;; A standard binding, `(name type)`, or `datum`'s `(define-type name type)`
+;; (`check::DATUM`).
+(define k-standard-binding (subr (maxeff checks spin) (syns-a) unit)
+  (lambda (pair)
+    (if (and (syn-symbol? (car pair)) (string=? (syn-name (car pair)) "define-type"))
+        (begin (k-define-type (k-name-of (k-nth pair 1) "a name") (k-nth pair 2) 0 0) #u)
+        (k-bind-std (k-name-of (car pair) "a name") (k-parse-type (k-nth pair 1))))))
 ;; The initial environment: `(name type)` for each binding.
 (define k-standard (subr (maxeff checks spin) (syns-a) unit)
   (lambda (entries)
@@ -39,8 +46,7 @@
           ;; checker (`check::VSUBR`), with no `up-` or `down-`.
           (if (and (syn-symbol? (car pair)) (string=? (syn-name (car pair)) "define-generative"))
               (begin (k-define-generative (k-nth pair 1) (k-nth pair 2)) (k-standard (cdr entries)))
-              (let ((t (k-parse-type (k-nth pair 1))) (n (k-name-of (car pair) "a name")))
-                (begin (k-bind-std n t) (k-standard (cdr entries)))))))))
+              (begin (k-standard-binding pair) (k-standard (cdr entries))))))))
 
 ;; Put the binders of every `poly` at the top of `t` in scope for reading.
 (define k-bind-signature (subr (maxeff kstate spin) (int) unit)

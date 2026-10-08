@@ -35,6 +35,10 @@ use std::collections::{HashMap, HashSet};
 pub const VSUBR: &str = "(vsubr (e effect +) (t type -) (r type +)) (subr e ((listof t acyclic)) r)";
 /// A flat array's element layout (Q6), generative type 1: what `t` is kept
 /// as, a number at run time; nothing sees inside it.
+/// A datum, what a reader reads: an atom, or a pair of datums, frozen and
+/// acyclic, or a vector or bytevector (TODO §51). The same text defines it
+/// in the checker written in FX-26 (`standard::standard_text`).
+pub const DATUM: &str = "(union int f64 char bool string symbol nil (pairof datum datum acyclic) vector bytevector)";
 pub const FLATLAYOUT: &str = "(flatlayout (t type)) int";
 /// A flat array (`flatarrayof`, Q6), generative type 2: an array to
 /// safety's analyses (its regions), opaque to anything else; its elements
@@ -79,6 +83,8 @@ pub const SHAPES: &[(&str, &str)] = &[
     ("box", "ref?"),
     ("sum", "sum?"),
     ("product", "product?"),
+    ("vector", "vector?"),
+    ("bytevector", "bytevector?"),
 ];
 /// A kind of key that has identity (Q5), generative type 3: `k`, a mutable
 /// object at `r`, which only the standard dictionaries (`pair-identity` and
@@ -404,9 +410,10 @@ impl Checker {
         let string = basic("string");
         let unit = basic("unit");
         let char_ = basic("char");
-        // A Scheme datum, as a reader produces: opaque, and immutable, so
-        // building one is no effect.
-        basic("datum");
+        // Where the opaque `datum` was until `datum` became a union
+        // (`DATUM`): kept, unnamed, so that type ids agree with
+        // `check-types.fx`'s.
+        basic("%datum");
         // A symbol: interned, so compared by identity, and immutable.
         let symbol = basic("symbol");
         // Cellular code, for the compiler written in FX-26: a word (`tword`,
@@ -427,6 +434,12 @@ impl Checker {
         let f64_ = basic("f64");
         basic("f32");
         let void = arena.ty(Ty::Void);
+        // A Scheme vector and bytevector, as a reader makes them in a datum:
+        // opaque, each a shape of its own.
+        for name in ["vector", "bytevector"] {
+            let sym = interner.intern(name);
+            base.insert(sym, arena.ty(Ty::Base(sym)));
+        }
         let mut c = Checker {
             arena,
             interner,
@@ -502,6 +515,11 @@ impl Checker {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
+        // `datum`, what a reader reads (`docs/fx26.md`, "Datums"): before the
+        // bindings, whose types name it.
+        let forms = c.read(DATUM).expect("reads");
+        let datum = c.interner.intern("datum");
+        c.define_type(datum, &forms[0], forms[0].span).unwrap_or_else(|e| panic!("`DATUM` is wrong: {e}"));
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
         }
@@ -640,8 +658,8 @@ impl Checker {
 
     /// The shapes a value of type `t` may have at run time, as bits
     /// (`SHAPES`): what its tag says, and for a bloblet its kind. None if
-    /// they are not known (a variable, an abstract or generative type,
-    /// `datum`), which no union may have a member of.
+    /// they are not known (a variable, an abstract or generative type),
+    /// which no union may have a member of.
     pub(crate) fn shape(&self, t: TyId) -> Option<u32> {
         self.shape_in(t, &mut Vec::new())
     }
@@ -661,6 +679,8 @@ impl Checker {
                 "string" => bit("string"),
                 // `unit` is the symbol `#u` at run time.
                 "symbol" | "unit" => bit("symbol"),
+                "vector" => bit("vector"),
+                "bytevector" => bit("bytevector"),
                 _ => None,
             },
             Ty::Nat(_) => bit("int"),

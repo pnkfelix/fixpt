@@ -123,6 +123,7 @@
     (case s
       ((int) 'int?) ((char) 'char?) ((bool) 'bool?) ((nil) 'null?) ((pair) 'pair?)
       ((string) 'string?) ((symbol) 'symbol?) ((procedure) 'procedure?) ((bloblet) 'array?)
+      ((f64) 'f64?) ((vector) 'vector?) ((bytevector) 'bytevector?)
       (else '||))))
 (define typecase-usage string "`(typecase expression (shape name body) … (else name body))`")
 (define typecase-needs-else string "a `typecase` needs at least an `else` clause")

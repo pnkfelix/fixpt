@@ -253,11 +253,13 @@
       (set k-hide-mark -1) (set k-param-map nil) (set k-effect-selects nil)
       (set k-operator (product (1 '||) (2 -1) (3 -1)))
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")
-      (k-basic "datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
+      (k-basic "%datum") (k-basic "symbol") (k-basic "tword") (k-basic "wcell") (k-basic "wglobal")
       ;; 10 to 15; `void` 16, `k-void`.
       (k-basic "i32") (k-basic "u32") (k-basic "i64") (k-basic "u64")
       (k-basic "f64") (k-basic "f32")
       (k-ty-new (ty-void))
+      ;; 17 and 18, after `void`: as `check.rs` makes them.
+      (k-basic "vector") (k-basic "bytevector")
       #u)))
 (define n-copy-memo (subr (maxeff kreads (write @t) spin) (k-region-lists k-region-lists int) unit)
   (lambda (from to i)

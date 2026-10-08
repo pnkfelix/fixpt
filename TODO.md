@@ -1486,6 +1486,14 @@ infer the precise category of the lattice (`docs/research/shapes.md`):
   unions (§46): `flatomic ⊂ atomic`, `flatomic ⊂ flat`.
 - Both parsers, both checkers; the compilers make the datum once, as a
   frozen constant, and fold `car`/`cdr` through it as §44 does.
+- **Progress (2026-10-08).** `datum` is no longer opaque: a union, `(union
+  int f64 char bool string symbol nil (pairof datum datum acyclic) vector
+  bytevector)` (`check::DATUM`), in both checkers' standard environment,
+  with `vector` and `bytevector` new opaque shapes and `f64?`, `vector?`,
+  `bytevector?` new tests; `car`/`cdr` of a union's pair member count as
+  parts for termination. So a quoted list's type can be `datum` with no
+  new type. A cyclic counterpart (datum labels) would be the same union at
+  `const`. The `datum-` operations remain (retiring them next).
 
 ## 52. Deep recursion in native code: what is left (the user's, 2026-10-07)
 

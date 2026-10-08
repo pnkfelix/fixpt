@@ -60,6 +60,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("char?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 char)) (else (not (shape 0 char))))))"),
     ("bool?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bool)) (else (not (shape 0 bool))))))"),
     ("string?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 string)) (else (not (shape 0 string))))))"),
+    ("f64?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 f64)) (else (not (shape 0 f64))))))"),
+    ("vector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 vector)) (else (not (shape 0 vector))))))"),
+    ("bytevector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bytevector)) (else (not (shape 0 bytevector))))))"),
     ("symbol?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 symbol)) (else (not (shape 0 symbol))))))"),
     ("procedure?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 procedure)) (else (not (shape 0 procedure))))))"),
     ("array?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bloblet)) (else (not (shape 0 bloblet))))))"),
@@ -471,8 +474,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
 
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
-/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`: 0 to 4), then
-/// `(name type)` for each binding.
+/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`: 0 to 4), `datum`'s
+/// (`check::DATUM`), then `(name type)` for each binding.
 pub fn standard_text() -> String {
     let decl: String = [
         crate::check::VSUBR,
@@ -483,6 +486,7 @@ pub fn standard_text() -> String {
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))
-        .collect();
+        .collect::<String>()
+        + &format!("(define-type datum {})\n", crate::check::DATUM);
     decl + &ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect::<String>()
 }

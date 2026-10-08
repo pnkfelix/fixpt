@@ -2555,6 +2555,9 @@ const TYPECASE_SHAPES: &[(&str, &str)] = &[
     ("symbol", "symbol?"),
     ("procedure", "procedure?"),
     ("bloblet", "array?"),
+    ("f64", "f64?"),
+    ("vector", "vector?"),
+    ("bytevector", "bytevector?"),
 ];
 
 fn typecase_predicate(shape: &str) -> Option<&'static str> {

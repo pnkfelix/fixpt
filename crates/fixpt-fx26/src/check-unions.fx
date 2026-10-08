@@ -9,9 +9,9 @@
 (define check-unions-module (module
 ;; The shapes, by number in `check.rs`'s `SHAPES` order: 0 int, 1 f64,
 ;; 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol, 9 procedure,
-;; 10 bloblet, 11 box, 12 sum, 13 product. A type's shapes are a mask, bit
-;; `k` shape `k`'s, or -1 if they are not known.
-(define k-shape-count int 14)
+;; 10 bloblet, 11 box, 12 sum, 13 product, 14 vector, 15 bytevector. A
+;; type's shapes are a mask, bit `k` shape `k`'s, or -1 if they are not known.
+(define k-shape-count int 16)
 (define k-shape-nil int 5)
 (define k-shape-pair int 6)
 ;; The standard predicate that tests for shape `k`.
@@ -20,7 +20,7 @@
     (case k
       ((0) "int?") ((1) "f64?") ((2) "f32?") ((3) "char?") ((4) "bool?") ((5) "null?")
       ((6) "pair?") ((7) "string?") ((8) "symbol?") ((9) "procedure?") ((10) "array?")
-      ((11) "ref?") ((12) "sum?") (else "product?"))))
+      ((11) "ref?") ((12) "sum?") ((13) "product?") ((14) "vector?") (else "bytevector?"))))
 (define k-base-shape (subr (read @globals) (symbol) int)
   (lambda (s)
     (case (symbol->string s)
@@ -28,6 +28,7 @@
       (("string") 7)
       ;; `unit` is the symbol `#u` at run time.
       (("symbol" "unit") 8)
+      (("vector") 14) (("bytevector") 15)
       (else -1))))
 ;; Shape `k`'s bit, or -1 for none known.
 (define k-shape-bit (subr pure (int) int)
@@ -38,9 +39,9 @@
   (lambda (xs ys) (if (null? xs) ys (the k-ids (cons (car xs) (k-ids-append (cdr xs) ys))))))
 (define-rec
   ;; The shapes a value of type `t` may have at run time: what its tag
-  ;; says, and for a bloblet its kind. Not known for a variable, an
-  ;; abstract or generative type, `datum`: no union may have a member of
-  ;; one. `seen`, the unions met on the way down: one met again is its own
+  ;; says, and for a bloblet its kind. Not known for a variable, or an
+  ;; abstract or generative type: no union may have a member of one.
+  ;; `seen`, the unions met on the way down: one met again is its own
   ;; member, whose shape is not known.
   (k-run-shape-in (subr (maxeff kreads (alloc @t) spin) (int k-ids) int)
     (lambda (t0 seen)

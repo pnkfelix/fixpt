@@ -514,6 +514,12 @@ impl Walk<'_> {
                     .into_iter()
                     .filter_map(|k| {
                         let Tracked::Part { param, ty: Some(ty), .. } = k else { return None };
+                        // Of a union, its pair member: any value `car` or
+                        // `cdr` returns from is that.
+                        let ty = match arena.get(arena.resolve(ty)) {
+                            Ty::Union(ms) => *ms.iter().find(|m| matches!(arena.get(arena.resolve(**m)), Ty::Pair(..)))?,
+                            _ => ty,
+                        };
                         match arena.get(arena.resolve(ty)) {
                             Ty::Pair(a, b, Region::Frozen(_, true), _) => {
                                 Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *a } else { *b }) })
