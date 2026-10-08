@@ -1813,4 +1813,8 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   which the `tables` module loads. It found the FX printer showing a
   family in a nested module's type by its own name, `(desc bucket bucket)`,
   where the Rust one shows its `dlambda`: fixed (`k-show-comp`).
+- Phase 1: `check-types-types.fx` (2026-10-08), the checker's 45 core
+  types and effects (`k-ty`, `kstate`, `checks` ...), moved by a script
+  that takes a module's type items out and imports what they use from the
+  types files before it.
 

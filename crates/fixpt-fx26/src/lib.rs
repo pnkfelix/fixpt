@@ -24,6 +24,9 @@ pub mod ast;
 /// of no state (`TODO.md` §68).
 pub const PARSER_TYPES: &str = include_str!("parser-types.fx");
 
+/// The types of `check-types.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_TYPES_TYPES: &str = include_str!("check-types-types.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -161,9 +164,10 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 7] = [
+pub const FRONT_END_MODULES: [(&str, &str); 8] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
+    ("check-types-types.fx", CHECK_TYPES_TYPES),
     ("eager-reader.fx", EAGER_READER),
     ("parser-types.fx", PARSER_TYPES),
     ("parser.fx", PARSER),
