@@ -510,6 +510,91 @@ analysis (`let coerce : α exp → α′ exp = function …`), which is decision
   recursive datatype constructors", POPL 2003, and the `Vec` example's
   folklore form (E5).
 
+## GADTs and latent propositions: one idea about two things
+
+The user's question, 2026-10-08: is there a deeper connection between
+unions with Typed Racket's latent propositions (`docs/fx26.md`, "What a
+test proves is in its type") and GADTs, in the code and the static
+reasoning each enables; and if so, should their syntax be linked?
+
+**Both are hypothetical reasoning in a branch.** A test that comes out a
+certain way at run time adds an assumption, and the branch is checked
+under it: Γ, ψ ⊢ e. They differ in what ψ is about.
+
+| Feature                    | Prop. about       | Example ψ          | Refines by                   | Dies when          |
+| -------------------------- | ----------------- | ------------------ | ---------------------------- | ------------------ |
+| union, latent propositions | a value, a path   | `(shape 0 int)`    | meet: `val ∧ int`            | a write it reads   |
+| GADT `tagcase` arm         | a type variable   | `(= a int)`        | equation, `a` rigid          | never (types stay) |
+
+The difference in the third column is the variance story of E8. A meet
+on a value's own type is sound under subtyping, so narrowing needs no
+invariance. An equation on an index is substituted everywhere the index
+is used, both in and out, so the index must be invariant. The fourth
+column is the path rule's mutation condition. A type variable has none.
+
+**The link is a translation, not an analogy.** A GADT elaborates into a
+union of guarded existentials. That is Xi, Chen and Chen's "guarded
+recursive datatype constructors", and it is how GHC checks a match: each
+arm is an implication constraint (OutsideIn(X), Vytiniotis, Peyton Jones,
+Schrijvers and Sulzmann, JFP 2011; from memory). E1's `expr`, so read:
+
+```
+(expr a) ≅ (union (int-e int)                              given (= a int)
+                  (bool-e bool)                            given (= a bool)
+                  ∃b. (if-e (expr bool) (expr b) (expr b)) given (= a b)
+                  …)
+```
+
+Read the other way, a latent-proposition type is a GADT of two
+constructors with its evidence erased. `(bool (then P) (else Q))` is
+`(union (#t given P) (#f given Q))`, which is Agda's `Dec P` or Haskell's
+`data Dec p where Yes :: p => Dec p; No :: Not p => Dec p`. A shape
+predicate is a function returning a `Dec` whose payload is one bit. Both
+features let a run-time tag tell the checker something it could not know
+statically. A union's tag says what a value is. A GADT's says what a
+type is.
+
+TypeScript's discriminated unions sit between the two (from memory): a
+test of a tag field narrows the object's type, a path, but never a type
+parameter. Refining the parameter is exactly what N4 adds. FX-26 already
+has the half before it: after a `typecase` has excluded every other
+shape, the evaluator's `val` narrows to its `other` datatype, which
+`tagcase` then takes apart (`eval-values.fx`, 2026-10-08).
+
+### What to link, and what not
+
+1. **One language of propositions.** Latent propositions have atoms:
+   `(shape i S)`, `(acyclic i)`, `(nat i)`, `(length i j)`, and the size
+   comparisons `(< a b)`, `(<= a b)`, `(= a b)`. This note has `=> (expr
+   int)` on variants (N4) and `(proves P given Q)` for lemmas (decision 3).
+   These become one grammar. A type equation `(= a int)` is one more atom,
+   `given` is the keyword for "holds under" everywhere, and a variant's
+   `=> (expr int)` is sugar for `given (= a int)` on a variant of result
+   `(expr a)`, which is also how the checker would elaborate it. A
+   size-indexed variant's guard (E5, `vcons`: `(= n (+ m 1))`) is then
+   literally a size fact, of the kind `<` and `null?` already prove.
+2. **Parameters by name** (decided by the user, 2026-10-08). Latent
+   propositions name arguments by position (`(shape 0 int)`), while
+   guards name type variables. So a `subr` type may name its parameters,
+   `(subr pure ((x val)) (bool (then (shape x int))))`, and propositions
+   refer to them by name, as guards refer to binders. Numbered references
+   stay for unnamed parameters. Naming is also what a dependent `subr`
+   needs, so that a result's type can mention an argument (M5's functors
+   already bind one). `TODO.md` §65.
+3. **Two rules in the checkers, not one.** Meet-narrowing of values and
+   equational refinement of rigid variables keep separate soundness
+   conditions: mutation for the first, variance for the second. A shared
+   syntax is cheap. A shared rule would force one feature into the
+   other's constraints. They meet in one place: a guard that is a value
+   fact (a size from a field, `(nat i)`) is checked by the size rules,
+   which are the same whether a test or a constructor proved the fact.
+
+Sources, from memory and not rechecked: Tobin-Hochstadt and Felleisen,
+"Logical types for untyped languages", ICFP 2010 (latent propositions);
+Xi, Chen and Chen, POPL 2003 (guarded types); Vytiniotis et al., JFP 2011
+(implication constraints); Norell's Agda thesis, 2007, and the Agda
+standard library (`Dec`).
+
 ## Stages
 
 | Stage | Size | What                                                                                         |

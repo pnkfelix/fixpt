@@ -3063,9 +3063,10 @@ fn shape_fast(a: &mut Asm, name: &str, slow: Label) -> bool {
             flag(a, Cond::Eq);
             return true;
         }
-        "char?" => {
+        "char?" | "%fx26-f32?" => {
             a.e(and_low(X13, x, 8));
-            a.e(cmp_imm(X13, (Value::char('\0').raw() & 0xFF) as u32));
+            let tag = if name == "char?" { Value::char('\0') } else { Value::f32(0.0) };
+            a.e(cmp_imm(X13, (tag.raw() & 0xFF) as u32));
             flag(a, Cond::Eq);
             return true;
         }
@@ -3082,6 +3083,9 @@ fn shape_fast(a: &mut Asm, name: &str, slow: Label) -> bool {
         "symbol?" => &[kind("symbol")],
         "string?" => &[kind("string")],
         "%fx26-array?" => &[kind("bloblet")],
+        "%fx26-box?" => &[kind("box")],
+        "%fx26-sum?" => &[kind("sum")],
+        "%fx26-product?" => &[kind("product")],
         "%fx26-procedure?" => &[
             kind("closure"),
             kind("primitive"),

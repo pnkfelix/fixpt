@@ -2805,6 +2805,10 @@ const TYPECASE_SHAPES: &[(&str, &str)] = &[
     ("procedure", "procedure?"),
     ("bloblet", "array?"),
     ("f64", "f64?"),
+    ("f32", "f32?"),
+    ("box", "ref?"),
+    ("sum", "sum?"),
+    ("product", "product?"),
     ("vector", "vector?"),
     ("bytevector", "bytevector?"),
 ];

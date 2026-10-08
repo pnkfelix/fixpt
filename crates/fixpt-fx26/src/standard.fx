@@ -41,6 +41,9 @@
          (("rnew") "%region-new")
          (("int?") "exact-integer?")
          (("f64?") "%fx26-datum-f64?")
+         (("f32?") "%fx26-f32?")
+         (("ref?") "%fx26-box?")
+         (("sum?") "%fx26-sum?")
          (("f64+") "%fx26-f64+")
          (("f64-") "%fx26-f64-")
          (("f64*") "%fx26-f64*")
@@ -163,6 +166,7 @@
          (else "")))
       ((8)
        (case n
+         (("product?") "%fx26-product?")
          (("quotient") "%fx26-quotient")
          (("char-in?") "%fx26-char-in?")
          (("string=?") "string=?")

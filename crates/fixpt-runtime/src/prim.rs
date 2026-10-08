@@ -459,7 +459,19 @@ pub fn never_collects(name: &str) -> bool {
         // The shape predicates, which only look.
         || matches!(
             name,
-            "null?" | "pair?" | "exact-integer?" | "char?" | "boolean?" | "string?" | "symbol?" | "%fx26-procedure?" | "%fx26-array?"
+            "null?"
+                | "pair?"
+                | "exact-integer?"
+                | "char?"
+                | "boolean?"
+                | "string?"
+                | "symbol?"
+                | "%fx26-procedure?"
+                | "%fx26-array?"
+                | "%fx26-f32?"
+                | "%fx26-box?"
+                | "%fx26-sum?"
+                | "%fx26-product?"
         )
         || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
@@ -1592,6 +1604,10 @@ prims! {
     // a procedure of any machine's, and a plain bloblet, as an array is.
     "%fx26-procedure?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(fx26_procedure(rt, a[0]))));
     "%fx26-array?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == PLAIN_BLOBLET)));
+    "%fx26-f32?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_f32())));
+    "%fx26-box?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.is_a(a[0], ObjType::Box))));
+    "%fx26-sum?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == SUM_KIND)));
+    "%fx26-product?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == PRODUCT_KIND)));
     "%fx26-nil-cell", 0, Some(0), simple!(|_rt, _a| Ok(Value::NULL));
     // A constant sum or product, made while compiling (`wcell-sum`,
     // `wcell-product`): a sum of tag `a[0]` and value `a[1]`; a product of

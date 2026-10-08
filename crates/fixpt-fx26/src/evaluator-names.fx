@@ -19,7 +19,7 @@
 (define std-primitive-names string
   (k-cat4 " remainder zero? max min bool=? char<? char<=? char>? char>=? char-upcase "
           "string<? string<=? string>? string>=? error string-hash symbol-name-hash "
-          "pair? int? char? bool? string? symbol? procedure? array? %quote "
+          "pair? int? char? bool? string? symbol? procedure? array? f32? ref? sum? product? %quote "
           "bitwise-and bitwise-ior bitwise-xor bitwise-not arithmetic-shift "))
 ;; `f64`'s, as `ev-f64-prim` does them.
 (define f64-primitive-names string

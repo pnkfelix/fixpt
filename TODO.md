@@ -1778,3 +1778,15 @@ already a coercion point. Both checkers (`fixed_range`,
 `k-literal-within?`, `k-base-below?`), then tests on every machine.
 Then fixed-width values could also count as sizes (`nat` terms), since
 each is an integer the checker knows the range of.
+
+## 65. Named parameters in `subr` types (the user's, 2026-10-08)
+
+`(subr pure ((x val)) (bool (then (shape x int))))`: a `subr` type may name
+its parameters, and a latent proposition refers to them by name, as a GADT
+guard refers to a type variable (`docs/research/gadts.md`, "GADTs and latent
+propositions"). Numbered references stay for unnamed parameters. Both
+checkers, both printers (a named type prints its names), and the standard
+predicates' types rewritten to use names. Names are not part of the type's
+identity: `(subr pure ((x int)) int)` and `(subr pure (int) int)` are the
+same type.
+

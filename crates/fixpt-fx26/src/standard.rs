@@ -70,6 +70,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("symbol?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 symbol)) (else (not (shape 0 symbol))))))"),
     ("procedure?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 procedure)) (else (not (shape 0 procedure))))))"),
     ("array?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bloblet)) (else (not (shape 0 bloblet))))))"),
+    ("f32?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 f32)) (else (not (shape 0 f32))))))"),
+    ("ref?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 box)) (else (not (shape 0 box))))))"),
+    ("sum?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 sum)) (else (not (shape 0 sum))))))"),
+    ("product?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 product)) (else (not (shape 0 product))))))"),
     ("+", "(subr pure (int int) int)"),
     ("-", "(subr pure (int int) int)"),
     // A finite list's length, as a natural of its size.

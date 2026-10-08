@@ -1,0 +1,20 @@
+; Accepted: the shapes of an `f32`, a reference, a sum and a product, each
+; with its predicate and its `typecase` arm, which narrow a union of them.
+(define-datatype shape (circle int) (square int))
+(define-type v (union int f32 (ref int @r) shape (productof (w int) (h int))))
+(define* size (subr (read @r) (v) int)
+  (lambda (x)
+    (typecase x
+      (int n n)
+      (f32 y (f32->int y))
+      (box r (get r))
+      (sum s (tagcase s (circle (d) (* 3 d)) (square (d) (* d d))))
+      (else (* (extract x w) (extract x h))))))
+(define* tests (subr pure (v) int)
+  (lambda (x)
+    (+ (if (f32? x) 1 0)
+       (+ (if (ref? x) 10 0) (+ (if (sum? x) 100 (if (product? x) 1000 0)) 0)))))
+(define-type vs (listof v @r))
+(define* total (subr (maxeff (read @r) spin) (vs) int)
+  (lambda (xs) (if (null? xs) 0 (+ (+ (size (car xs)) (tests (car xs))) (total (cdr xs))))))
+(total (the vs (list 1 (f64->f32 2.0) (new 4) (circle 5) (square 6) (product (w 7) (h 8)))))

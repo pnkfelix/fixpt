@@ -224,13 +224,16 @@ impl Asm {
         use fixpt_heap::layout::kind;
         use fixpt_heap::value::{TAG_BLOBLET, TAG_HEADER, TAG_PAIR, TAG_TRAILER};
         let codes: Vec<u32> = match name {
-            "pair?" | "char?" | "null?" => {
+            "pair?" | "char?" | "%fx26-f32?" | "null?" => {
                 if name == "pair?" {
                     self.e(and_low(X13, src, 3));
                     self.e(cmp_imm(X13, TAG_PAIR as u32));
                 } else if name == "char?" {
                     self.e(and_low(X13, src, 8));
                     self.e(cmp_imm(X13, (Value::char('\0').raw() & 0xFF) as u32));
+                } else if name == "%fx26-f32?" {
+                    self.e(and_low(X13, src, 8));
+                    self.e(cmp_imm(X13, (Value::f32(0.0).raw() & 0xFF) as u32));
                 } else {
                     self.value(X13, Value::NULL);
                     self.e(cmp(src, X13));
@@ -253,6 +256,9 @@ impl Asm {
             "string?" => vec![kind("string")],
             "exact-integer?" => vec![kind("bignum")],
             "%fx26-array?" => vec![kind("bloblet")],
+            "%fx26-box?" => vec![kind("box")],
+            "%fx26-sum?" => vec![kind("sum")],
+            "%fx26-product?" => vec![kind("product")],
             "%fx26-procedure?" => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
                 .iter()
                 .map(|n| kind(n))
@@ -448,9 +454,10 @@ impl Asm {
                 self.value(X16, Value::FALSE);
                 self.e(csel(RESULT, X15, X16, Cond::Eq));
             }
-            "char?" => {
+            "char?" | "f32?" => {
                 self.e(and_low(X13, 1, 8));
-                self.e(cmp_imm(X13, (Value::char('\0').raw() & 0xFF) as u32));
+                let tag = if what == "char?" { Value::char('\0') } else { Value::f32(0.0) };
+                self.e(cmp_imm(X13, (tag.raw() & 0xFF) as u32));
                 self.value(X15, Value::TRUE);
                 self.value(X16, Value::FALSE);
                 self.e(csel(RESULT, X15, X16, Cond::Eq));
@@ -495,13 +502,16 @@ impl Asm {
             // The same of the shapes of FX-26's unions (`TODO.md` §56): an
             // exact integer, a fixnum or a bignum; a plain bloblet, an
             // array; a procedure, of any machine's.
-            "symbol?" | "string?" | "exact-integer?" | "array?" | "procedure?" => {
+            "symbol?" | "string?" | "exact-integer?" | "array?" | "box?" | "sum?" | "product?" | "procedure?" => {
                 use fixpt_heap::layout::kind;
                 let codes: Vec<u32> = match what {
                     "symbol?" => vec![kind("symbol")],
                     "string?" => vec![kind("string")],
                     "exact-integer?" => vec![kind("bignum")],
                     "array?" => vec![kind("bloblet")],
+                    "box?" => vec![kind("box")],
+                    "sum?" => vec![kind("sum")],
+                    "product?" => vec![kind("product")],
                     _ => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
                         .iter()
                         .map(|n| kind(n))
@@ -950,6 +960,10 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-bitwise-not") => Some("bit-not"),
                     ("prim", 1) if prim_named(k(o(0)), "exact-integer?") => Some("exact-integer?"),
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-array?") => Some("array?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-f32?") => Some("f32?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-box?") => Some("box?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-sum?") => Some("sum?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-product?") => Some("product?"),
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-procedure?") => Some("procedure?"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
                     ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),

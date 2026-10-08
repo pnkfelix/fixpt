@@ -502,7 +502,7 @@
         "%fx26-string<?" "%fx26-string<=?" "%fx26-string>?" "%fx26-string>=?"
         "%fx26-char<?" "%fx26-char<=?" "%fx26-char>?" "%fx26-char>=?"
         "null?" "pair?" "exact-integer?" "char?" "boolean?" "string?" "symbol?" "%fx26-procedure?"
-        "%fx26-array?")
+        "%fx26-array?" "%fx26-f32?" "%fx26-box?" "%fx26-sum?" "%fx26-product?")
        #t)
       (else (or (r-eqtable-quick? name) (r-fixed-width-op? name))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never
