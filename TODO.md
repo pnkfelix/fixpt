@@ -1744,8 +1744,8 @@ unfold them whole.
 `int->u32`, `i64<` …): `programs/sizes/fixed-width-literals.fx` fails
 there with "unbound variable `u32+`", while the lowering, cellular, native
 and register machines give 8. Found while testing `i32`/`u32` below `int`
-(a5f0979); it predates that. Add them to the evaluator's standard names
-(`evaluator-names.fx`), with the same wrapping as the runtime's, so every
+(a5f0979); it predates that. Add them to the evaluator's table of
+primitives (`eval-prims.fx`, since the rewrite), with the same wrapping as the runtime's, so every
 path runs a fixed-width program alike; then a test that runs one on the
 evaluator. No native speed at stake (the evaluator is a reference path),
 so only as much as agreement needs.
@@ -1789,4 +1789,36 @@ checkers, both printers (a named type prints its names), and the standard
 predicates' types rewritten to use names. Names are not part of the type's
 identity: `(subr pure ((x int)) int)` and `(subr pure (int) int)` are the
 same type.
+
+## 66. Local type inference: bounds from both sides (the user's, 2026-10-08)
+
+Found by the evaluator's rewrite: `(array-ref bs i)`, `bs` an `(arrayof int
+@v)`, checked where a `val` (a union with `int` in it) is expected, is
+refused. The expected result fixes `t := val` before the argument is seen,
+where synthesizing `t = int` from the argument and then subsuming `int ≤ val`
+would succeed (`eval-prims.fx` writes `(the int …)` for now). The user's
+idea: let each side contribute bounds, a lower bound from the arguments and
+an upper one from the expected type, narrowing until they meet, then check
+that a solution exists. That is Pierce and Turner's local type inference
+(TOPLAS 2000; from memory): gather `S ≤ t ≤ T` for each variable from the
+arguments and the expected result, then pick the least solution where `t`
+is covariant in the result, the greatest where contravariant, and refuse
+when it is invariant and the bounds differ. Here `(arrayof t)` is invariant,
+so the argument gives `int ≤ t ≤ int`, the result `t ≤ val`, and `t = int`
+solves both. Dolan's biunification (MLsub, POPL 2017; from memory) is the
+same flow of bounds, made principal. Both checkers, agreeing; regions and
+effects as variables too (an effect has the same lattice shape). First
+measure what it costs the front end's check, and collect the places where
+the front end writes `the` or `proj` only to steer instantiation, which
+this would remove.
+
+## 67. A front-end error reported at the user program's position (2026-10-08)
+
+While the rewritten evaluator was being written, an error in the front end
+(`eval-core.fx`, a recursive `define*` without `spin`) was reported as
+`crates/fixpt-fx26/tests/programs/unions/more-shapes.fx:21:1`, the program
+being run, not the front-end file and line. `--fx26-run evaluate` checks the
+front end and the program together; the front end's spans should name its
+own files (as the cellular span keys have since 5b46108). Reproduce by
+breaking a front-end file, then make the error name it.
 

@@ -555,6 +555,10 @@ from Rust. There is no divergence.
 
 ### M9. Primitives and operations as sums, not strings
 
+*(2026-10-08: the evaluator's part is done another way, by its rewrite:
+its primitives are host procedures in a table by symbol, `eval-prims.fx`,
+and `evaluator.fx`'s string dispatch is gone. The compilers' remains.)*
+
 **Now.** Primitives are looked up by string at run time:
 - **the evaluator** finds a primitive with `occurs?` in a string of names
   separated by spaces (`evaluator.fx:116-120`), then dispatches through a

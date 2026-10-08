@@ -94,13 +94,20 @@ are in the last section, "Log: the glance's details", and in
 
 **In progress**
 - **The evaluator written in FX-26, rewritten** (the user's, 2026-10-08):
-  as a Scheme evaluator in Scheme, its values the program's own where
-  FX-26 has their shape (a union), primitives in a table by symbol, into
-  new files, then flipped with the old kept to undo. A feedback loop on
-  the base library: it found four shapes without a predicate (added).
-  Decided with it: `subr` types name their parameters (`TODO.md` §65), so
-  latent propositions and GADT guards share one syntax
-  (`docs/research/gadts.md`, "GADTs and latent propositions").
+  still in FX-26, as a metacircular evaluator (`eval-values.fx`,
+  `eval-prims.fx`, `eval-core.fx`): its values the program's own where FX-26 has their
+  shape (a union, `other` a datatype for the rest), closures the host's
+  procedures, primitives in a table by symbol. Flipped in by
+  `lib.rs`'s `NEW_EVALUATOR`; the old files stay, to undo, until the
+  user accepts it. Every test program gives what the old one gave, and
+  the benchmarks it timed out on now finish, properly tail-recursive
+  (fib 3×, lists 18× faster). A feedback loop on the base library: it
+  found four shapes without a predicate (added), instantiation from the
+  expected type before the arguments (`TODO.md` §66), and a front-end
+  error placed in the user's file (§67). Decided with it: `subr` types
+  name their parameters (§65), so latent propositions and GADT guards
+  share one syntax (`docs/research/gadts.md`, "GADTs and latent
+  propositions").
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
   native frame's header word, a mask of its live slots); a card-marking

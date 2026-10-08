@@ -252,6 +252,23 @@ The first two columns are wall time less startup (0.00 s lowered, 0.11 s
 evaluated); `run` rather than the REPL, whose step limit stops the lowered
 programs at 20 million steps.
 
+The evaluator written in FX-26 was rewritten on 2026-10-08, still in FX-26, as a
+metacircular evaluator. Its values are the program's own where FX-26 has
+their shape, closures are the host's procedures, primitives sit in a
+table by symbol, and it is properly tail-recursive. `fixpt eval
+--fx26-run evaluate` on the bench programs, the whole process, old then
+new, back to back:
+
+| program  | old evaluator      | new evaluator |
+| -------- | ------------------ | ------------- |
+| fib      | 4.6 s              | 1.4 s         |
+| tak      | 3.2 s              | 0.6 s         |
+| captures | stack overflow     | 0.5 s         |
+| lists    | 79.1 s             | 4.0 s         |
+| closures | over 120 s         | 5.1 s         |
+| loop     | stack overflow     | 5.8 s         |
+| helpers  | stack overflow     | 5.3 s         |
+
 What it says:
 
 - **Compiled FX-26 on the native machines is as fast as hand-written
