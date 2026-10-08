@@ -1777,3 +1777,33 @@ checkers, both printers (a named type prints its names), and the standard
 predicates' types rewritten to use names. Names are not part of the type's
 identity: `(subr pure ((x int)) int)` and `(subr pure (int) int)` are the
 same type.
+
+## 68. The front end as modules linked by a conductor (the user's, 2026-10-08)
+
+The front end is 57 files joined into one program, each a `(define
+X-module (module …))` followed by a wall of top-level re-exports (1,733
+names), which later files use as globals. Instead: `conductor.fx` makes
+each module once and passes it the modules it depends on; a module names
+what it uses of them, at its top, `(define name (with dep name))`.
+
+Decided with the user (2026-10-08):
+1. **Types in files of their own.** A module's datatypes, type aliases and
+   effects move into `X-types.fx`, a module file of no state (of the
+   module's regions, if it has some). The module loads it, and so may any
+   client: loads of a stateless file are interchangeable, FX-26's types
+   being structural. Only stateful modules are made once and passed.
+2. **Signatures beside them.** A module's interface as its clients use it,
+   `(define-type X-sig (moduleof …))`, lives in its types file; width
+   subtyping (M4) lets it list only what the clients use. Several such
+   files, not one.
+3. **A converted module** is a module file defining `make`, a `lambda`
+   over its dependencies, each typed by a signature; the conductor applies
+   it. Converted from the last file backwards, so that each one's clients
+   are converted before it, and its wall goes; only the names Rust calls
+   stay at top level, re-exported by the conductor.
+
+Phase 1, the types out, one module at a time; phase 2, the conversion.
+
+- Phase 1: `eager-reader-types.fx` (2026-10-08), the reader's effects,
+  aliases and `syn`, which `eager-reader.fx` loads at its regions.
+
