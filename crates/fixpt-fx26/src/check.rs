@@ -105,7 +105,7 @@ pub struct Checker {
     pub(crate) base: HashMap<Sym, TyId>,
     pub(crate) void: TyId,
     pub(crate) int: TyId,
-    bool_: TyId,
+    pub(crate) bool_: TyId,
     string: TyId,
     unit: TyId,
     char_: TyId,
@@ -635,6 +635,7 @@ impl Checker {
             },
             Ty::Nat(_) => bit("int"),
             Ty::Nil => bit("nil"),
+            Ty::Proving { .. } => bit("bool"),
             Ty::Pair(_, _, _, nil) => Some(bit("pair")? | if *nil { bit("nil")? } else { 0 }),
             Ty::NList { .. } => Some(bit("pair")? | bit("nil")?),
             Ty::Subr { .. } | Ty::Composable { .. } => bit("procedure"),
@@ -768,13 +769,57 @@ impl Checker {
             let (t, e) = self.narrowings(x);
             return (e, t);
         }
-        let Some((mask, (v, i))) = SHAPES.iter().enumerate().find_map(|(k, (_, p))| Some((1u32 << k, self.certifying_test(test, p)?))) else {
+        // A test: what its callee's type says it proves (`Ty::Proving`), of
+        // those of its arguments that are variables.
+        let Some((then, els, args)) = self.latent_props(test) else {
             return none;
         };
-        let t = self.arena.resolve(self.lookup(v).unwrap_or(self.env[i].1));
-        let (yes, no) = self.narrowed_by(t, mask);
-        let at = |t: Option<TyId>| t.map(|t| vec![(v, i, t)]).unwrap_or_default();
-        (at(yes), at(no))
+        let yes = self.props_narrow(&then, &args);
+        let no = self.props_narrow(&els, &args);
+        (yes, no)
+    }
+
+    /// If `test` is a call of a procedure whose type's result is `(bool
+    /// …)`, what it proves where true and where false, and its arguments.
+    fn latent_props(&self, test: ExpId) -> Option<(Vec<crate::ast::Prop>, Vec<crate::ast::Prop>, Vec<ExpId>)> {
+        let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
+        let mut f = *fun;
+        while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
+            f = *body;
+        }
+        let t = match self.standard_ref(f) {
+            Some(op) => self.standard_type(op)?,
+            None => self.callee_binding(f)?.1,
+        };
+        let (_, inner) = self.binders_of(t);
+        let Ty::Subr { result, .. } = self.arena.get(self.arena.resolve(inner)) else { return None };
+        match self.arena.get(self.arena.resolve(*result)) {
+            Ty::Proving { then, els } => Some((then.clone(), els.clone(), args.clone())),
+            _ => None,
+        }
+    }
+
+    /// The variables among `args` narrowed by `props`, a conjunction: each
+    /// proposition of a variable's shape, in turn.
+    fn props_narrow(&mut self, props: &[crate::ast::Prop], args: &[ExpId]) -> Vec<(Sym, usize, TyId)> {
+        let mut out: Vec<(Sym, usize, TyId)> = Vec::new();
+        for p in props {
+            let Some(&a) = args.get(p.param) else { continue };
+            let Exp::Var(v) = *self.arena.exp_at(a) else { continue };
+            let Some(i) = self.env.iter().rposition(|(n, _)| *n == v) else { continue };
+            let k = out.iter().position(|(w, j, _)| *w == v && *j == i);
+            let t = match k {
+                Some(k) => out[k].2,
+                None => self.arena.resolve(self.lookup(v).unwrap_or(self.env[i].1)),
+            };
+            let (yes, no) = self.narrowed_by(t, 1u32 << p.shape);
+            let Some(t) = (if p.negated { no } else { yes }) else { continue };
+            match k {
+                Some(k) => out[k].2 = t,
+                None => out.push((v, i, t)),
+            }
+        }
+        out
     }
 
     /// Type `t` where a value of it is found of one of the shapes in `mask`,
@@ -1690,7 +1735,7 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Proving { .. } | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
             Ty::Union(ms) => {
                 for m in ms {
                     self.regions_walk(m, seen, out);
@@ -2500,6 +2545,12 @@ impl Checker {
             (Ty::Nil, Ty::Nil) | (Ty::Nil, Ty::Pair(_, _, _, true)) => true,
             (Ty::Nil, Ty::NList { size, .. }) => self.size_le(&Size::lit(0), &size),
             (Ty::Base(x), Ty::Base(y)) => x == y,
+            // What proves something is a `bool`; and what proves more is
+            // below what proves less.
+            (Ty::Proving { .. }, Ty::Base(_)) => b == self.bool_,
+            (Ty::Proving { then: t1, els: e1 }, Ty::Proving { then: t2, els: e2 }) => {
+                t2.iter().all(|p| t1.contains(p)) && e2.iter().all(|p| e1.contains(p))
+            }
             // A natural is an integer; one of a known size, a natural.
             (Ty::Nat(_), Ty::Base(_)) => b == self.int,
             (Ty::Nat(m), Ty::Nat(n)) => self.size_le(&m, &n),

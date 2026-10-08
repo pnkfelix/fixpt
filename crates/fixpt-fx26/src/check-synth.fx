@@ -130,25 +130,67 @@
 (define k-narrows-append (subr (read @globals) (k-narrows k-narrows) k-narrows)
   (lambda (xs ys)
     (if (null? xs) ys (the k-narrows (cons (car xs) (k-narrows-append (cdr xs) ys))))))
-;; Variable `n` at depth `d` narrowed to `t`, unless `t` is -1.
-(define k-narrow-one (subr (alloc @t) (symbol int int) k-narrows)
-  (lambda (n d t) (if (< t 0) nil (the k-narrows (cons (product (1 n) (2 d) (3 t)) nil)))))
-;; What a test of a shape (`null?`, `pair?`, `int?`, …, `k-shape-predicate`)
-;; of a variable narrows it to, where it holds and where not
-;; (`k-narrowed-by`): the first shape, from `k`, whose predicate `p` is.
-(define k-shape-narrowing (subr (maxeff kstate spin) (kx int) k-narrowing)
-  (lambda (p k)
-    (if (>= k k-shape-count)
-        (the k-narrowing (cons nil nil))
-        (let ((v (k-certifying-test p (k-shape-predicate k))))
+;; Argument `i` of `args`, if a variable, as the binding it is (none or one).
+(define k-arg-var (subr (maxeff kreads (alloc @t) spin) (kxs int) k-named)
+  (lambda (args i)
+    (cond ((null? args) nil)
+          ((> i 0) (k-arg-var (cdr args) (- i 1)))
+          (else (tagcase (car args)
+                  (x-var (v va vb) (the k-named (cons (cons v (k-binding-depth v)) nil)))
+                  (else y nil))))))
+;; The type `out` narrows variable `v` at depth `d` to, or -1.
+(define k-narrows-of (subr (maxeff kreads spin) (k-narrows symbol int) int)
+  (lambda (out v d)
+    (cond ((null? out) -1)
+          ((and (symbol=? (extract (car out) 1) v) (= (extract (car out) 2) d))
+           (extract (car out) 3))
+          (else (k-narrows-of (cdr out) v d)))))
+;; `out` with `v` at depth `d` narrowed to `t`, in place of what it had.
+(define k-narrows-put
+  (subr (maxeff (read @globals) (alloc @t) spin) (k-narrows symbol int int) k-narrows)
+  (lambda (out v d t)
+    (cond ((null? out) (the k-narrows (cons (product (1 v) (2 d) (3 t)) nil)))
+          ((and (symbol=? (extract (car out) 1) v) (= (extract (car out) 2) d))
+           (the k-narrows (cons (product (1 v) (2 d) (3 t)) (cdr out))))
+          (else (the k-narrows (cons (car out) (k-narrows-put (cdr out) v d t)))))))
+;; The variables among `args` narrowed by `props`, a conjunction: each
+;; proposition of a variable's shape, in turn.
+(define k-props-narrow (subr (maxeff kstate spin) (k-props kxs k-narrows) k-narrows)
+  (lambda (props args out)
+    (if (null? props)
+        out
+        (let* ((p (car props)) (v (k-arg-var args (extract p 1))))
           (if (null? v)
-              (k-shape-narrowing p (+ k 1))
-              (let* ((n (car (car v))) (d (cdr (car v))) (looked (k-lookup n)))
-                (if (< looked 0)
-                    (the k-narrowing (cons nil nil))
-                    (let ((split (k-narrowed-by (k-resolve looked) k)))
-                      (cons (k-narrow-one n d (extract split 1))
-                            (k-narrow-one n d (extract split 2)))))))))))
+              (k-props-narrow (cdr props) args out)
+              (let* ((n (car (car v))) (d (cdr (car v))) (had (k-narrows-of out n d))
+                     (t (if (>= had 0) had (k-lookup n))))
+                (if (< t 0)
+                    (k-props-narrow (cdr props) args out)
+                    (let* ((split (k-narrowed-by (k-resolve t) (extract p 2)))
+                           (to (if (extract p 3) (extract split 2) (extract split 1))))
+                      (k-props-narrow (cdr props) args
+                                      (if (< to 0) out (k-narrows-put out n d to)))))))))))
+;; A test: what its callee's type says it proves (`ty-proving`), of those of
+;; its arguments that are variables, where it holds and where not.
+(define k-latent-narrowing (subr (maxeff kstate spin) (kx) k-narrowing)
+  (lambda (p)
+    (let ((none (the k-narrowing (cons nil nil))))
+      (tagcase p
+        (x-app (f args a b)
+          (let* ((g (k-under f)) (op (k-std-op g))
+                 (t (if (string=? op "")
+                        (tagcase g (x-var (s sa sb) (k-lookup s)) (else y -1))
+                        (k-std-type (string->symbol op)))))
+            (if (< t 0)
+                none
+                (tagcase (k-get (extract (k-binders-of t) 2))
+                  (ty-subr (e ps r cv)
+                    (tagcase (k-get r)
+                      (ty-proving (th el)
+                        (cons (k-props-narrow th args nil) (k-props-narrow el args nil)))
+                      (else y none)))
+                  (else y none)))))
+        (else y none)))))
 (define k-narrowings (subr (maxeff kstate spin) (kx) k-narrowing)
   (lambda (p)
     (let ((none (the k-narrowing (cons nil nil))))
@@ -161,7 +203,7 @@
         (x-app (f args a b)
           (if (and (string=? (k-std-op f) "not") (k-sc-one-arg? args))
               (let ((ns (k-narrowings (car args)))) (cons (cdr ns) (car ns)))
-              (k-shape-narrowing p 0)))
+              (k-latent-narrowing p)))
         (else y none)))))
 ;; What checking an `if`'s branches puts back as it goes: what was certified, the size
 ;; facts, and what was narrowed, before; what its test shows when it holds, and when not;

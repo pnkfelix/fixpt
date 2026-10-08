@@ -213,7 +213,7 @@
           (("cons")
            (let ((r (k-nlist-cons x args expected)))
              (if (null? r) (k-synth-app-plain x f args expected) (car r))))
-          (else (k-synth-app-plain x f args expected))))))
+          (else (k-call-te (k-synth-app-plain x f args expected)))))))
   ;; `+` and `-` of naturals: a natural, of a size when both are known. Only
   ;; what has a type of its own is asked for it; anything else is told it
   ;; is an int, as for any call.

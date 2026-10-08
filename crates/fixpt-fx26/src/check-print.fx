@@ -580,6 +580,26 @@
 ;; `pair` shown, as a pair that may be `nil` if `nl`.
 (define k-or-nil (subr kbuilds (bool string) string)
   (lambda (nl pair) (if nl (k-cat3 "(union nil " pair ")") pair)))
+;; A shape's name (`check-unions.fx`'s numbers).
+(define k-shape-name (subr pure (int) string)
+  (lambda (k)
+    (case k
+      ((0) "int") ((1) "f64") ((2) "f32") ((3) "char") ((4) "bool") ((5) "nil") ((6) "pair")
+      ((7) "string") ((8) "symbol") ((9) "procedure") ((10) "bloblet") ((11) "box")
+      ((12) "sum") (else "product"))))
+;; `(which P …)`, each `(shape i shape)` or `(not (shape i shape))`.
+(define-effect kshows (maxeff (read @globals) (read @t) (alloc @t) spin))
+(define k-show-props-each (subr kshows (k-props) string)
+  (lambda (ps)
+    (if (null? ps)
+        ""
+        (let* ((p (car ps))
+               (n (int->string (extract p 1)))
+               (shape (k-cat5 "(shape " n " " (k-shape-name (extract p 2)) ")"))
+               (one (if (extract p 3) (k-cat3 "(not " shape ")") shape)))
+          (k-cat3 " " one (k-show-props-each (cdr ps)))))))
+(define k-show-props (subr kshows (string k-props) string)
+  (lambda (which ps) (k-cat4 "(" which (k-show-props-each ps) ")")))
 (define-rec
   (k-show-on (subr kbuilds (int k-printing) string)
     (lambda (t path)
@@ -647,6 +667,7 @@
         (ty-void () "void")
         (ty-nil () "nil")
         (ty-union (ms) (k-cat3 "(union " (k-join (k-show-list ms p) " ") ")"))
+        (ty-proving (t e) (k-cat5 "(bool " (k-show-props "then" t) " " (k-show-props "else" e) ")"))
         (ty-var (v) (k-dvar-string v))
         (ty-link (x) "?")
         (ty-subr (e ps r cv) (k-show-subr e ps r cv p))

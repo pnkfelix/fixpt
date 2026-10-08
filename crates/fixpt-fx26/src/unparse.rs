@@ -4,6 +4,12 @@ use crate::ast::{Atom, Effect, Region, Ty, TyId};
 use crate::check::Checker;
 
 impl Checker {
+    /// A proposition as written: `(shape 0 int)`, `(not (shape 0 int))`.
+    pub(crate) fn show_prop(&self, p: &crate::ast::Prop) -> String {
+        let shape = format!("(shape {} {})", p.param, crate::check::SHAPES[p.shape].0);
+        if p.negated { format!("(not {shape})") } else { shape }
+    }
+
     pub fn show_region(&self, r: Region) -> String {
         match r {
             Region::Const(s) => self.interner.name(s).to_string(),
@@ -163,6 +169,13 @@ impl Checker {
             Ty::Base(s) => self.interner.name(s).to_string(),
             Ty::Void => "void".into(),
             Ty::Nil => "nil".into(),
+            Ty::Proving { then, els } => {
+                let side = |c: &Self, which: &str, ps: &[crate::ast::Prop]| {
+                    let ps: Vec<String> = ps.iter().map(|p| c.show_prop(p)).collect();
+                    format!("({which}{})", ps.iter().map(|p| format!(" {p}")).collect::<String>())
+                };
+                format!("(bool {} {})", side(self, "then", &then), side(self, "else", &els))
+            }
             Ty::Union(ms) => {
                 let ms: Vec<String> = ms.iter().map(|m| self.show_ty_on(*m, path)).collect();
                 format!("(union {})", ms.join(" "))

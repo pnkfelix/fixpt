@@ -243,6 +243,15 @@ impl Effect {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct TyId(pub u32);
 
+/// A proposition about a procedure's argument: parameter `param`'s value
+/// is of shape `shape` (`check::SHAPES`'s number), or, `negated`, is not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Prop {
+    pub param: usize,
+    pub shape: usize,
+    pub negated: bool,
+}
+
 #[derive(Clone, Debug)]
 pub enum Ty {
     /// A type named in the initial environment: `int`, `bool`, `char`,
@@ -260,6 +269,12 @@ pub enum Ty {
     /// Kept normalized: no member a union, and `nil` with a pair that is not
     /// `nil` made the pair that may be (`Checker::union_of`).
     Union(Vec<TyId>),
+    /// `(bool (then P …) (else Q …))`: a `bool` that proves the `P`s of
+    /// its procedure's arguments where it is true and the `Q`s where false,
+    /// as a procedure's result only (Typed Racket's latent propositions;
+    /// `docs/research/logical-types.md`, L1; `TODO.md` §54). A call's own
+    /// type is `bool`; what it proves narrows the arguments it names.
+    Proving { then: Vec<Prop>, els: Vec<Prop> },
     Var(DVar),
     Subr { conv: Conv, effect: Effect, params: Vec<TyId>, result: TyId },
     Poly { binders: Vec<(DVar, Kind)>, body: TyId },

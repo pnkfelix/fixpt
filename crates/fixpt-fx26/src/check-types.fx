@@ -61,6 +61,9 @@
 (define-type k-vsub (listof (productof (1 k-eff) (2 int) (3 int)) acyclic))
 
 (define-type k-ids (listof int acyclic))
+;; Propositions about a procedure's arguments (`ty-proving`): parameter `1`'s
+;; value is of shape `2` (`check-unions.fx`), or, `3`, is not.
+(define-type k-props (listof (productof (1 int) (2 int) (3 bool)) acyclic))
 ;; A binder: a description variable and its kind, 0 region, 1 effect, 2 type.
 (define-type k-binders (listof (productof (1 int) (2 int)) acyclic))
 (define-type k-parts (listof (productof (1 symbol) (2 int)) acyclic))
@@ -139,7 +142,11 @@
   ;; `nil`, the empty list only; and `(union T …)`, its members of shapes
   ;; that differ at run time (`k-shape`; `logical-types.md`, L1).
   (ty-nil)
-  (ty-union k-ids))
+  (ty-union k-ids)
+  ;; `(bool (then P …) (else Q …))`: a `bool` that proves the `P`s of its
+  ;; procedure's arguments where true, the `Q`s where false; a procedure's
+  ;; result only. A call's own type is `bool` (`k-call-te`).
+  (ty-proving k-props k-props))
 
 (define-type k-map (listof (pairof int k-desc @t) acyclic))
 
@@ -550,6 +557,7 @@
 (define-type k-eff (select check-types-module k-eff))
 (define-type k-vsub (select check-types-module k-vsub))
 (define-type k-ids (select check-types-module k-ids))
+(define-type k-props (select check-types-module k-props))
 (define-type k-binders (select check-types-module k-binders))
 (define-type k-parts (select check-types-module k-parts))
 (define-type k-names (select check-types-module k-names))
@@ -708,6 +716,7 @@
 (define ty-app (with check-types-module ty-app))
 (define ty-nil (with check-types-module ty-nil))
 (define ty-union (with check-types-module ty-union))
+(define ty-proving (with check-types-module ty-proving))
 (define ds-gen (with check-types-module ds-gen))
 (define ds-size (with check-types-module ds-size))
 (define ds-var (with check-types-module ds-var))

@@ -17,7 +17,8 @@
 ;; parameter's name.
 (define k-type-forms k-names
   (list 'arrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu 'nat 'nlist
-        'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr 'sumof 'union))
+        'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr 'sumof 'bool
+        'union))
 (define k-keywords k-names
   (list 'lambda 'plambda 'proj 'if 'letrec 'let 'begin 'define 'define* 'define-type
         'define-generative 'subr 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write
@@ -211,6 +212,7 @@
       (case hd
         ((subr) (k-parse-subr s items))
         ((proves) (k-parse-proves-type s items))
+        ((bool) (k-sfail "`(bool …)` is a procedure's result, and only that" s))
         ((poly)
          (begin
            (k-shape (= n 3) "`(poly ((name kind) …) type)`" s)
@@ -962,15 +964,16 @@
           (let ((outer (get k-select-map)))
             (begin (set k-select-map sel)
                    (let ((r (k-subst t nil))) (begin (set k-select-map outer) r))))))))
-;; `names` with `n` last.
-(define k-names-snoc (subr (maxeff (read @globals) (alloc @t) spin) (k-names symbol) k-names)
-  (lambda (ns n) (if (null? ns) (cons n nil) (cons (car ns) (k-names-snoc (cdr ns) n)))))
 ;; A `subr` type's parameters `ps` (from those named `names`) and its
 ;; result `r`, read: their types, the result last.
 (define k-read-params-from (subr (maxeff checks spin) (k-syns syn k-names) k-ids)
   (lambda (ps r names)
     (if (null? ps)
-        (cons (k-select-params (k-parse-type r) names) nil)
+        ;; A test's result, `(bool …)`: here, and only here.
+        (let ((t (if (string=? (k-list-head r) "bool")
+                     (k-parse-proving r (k-length names))
+                     (k-parse-type r))))
+          (cons (k-select-params t names) nil))
         (let* ((named (k-param-name (car ps)))
                (written (if (null? named) (car ps) (k-nth (k-items (car ps) "a parameter") 1)))
                (t (k-select-params (k-parse-type written) names))

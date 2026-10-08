@@ -1624,7 +1624,7 @@ shape predicates, `pair?`, `int?`, …) narrowing a variable; `<`, `=` and
 certifying. One mechanism would take their place, the built-ins then
 ordinary standard types, and let a user's `item-null?` narrow too
 (`docs/research/logical-types.md`, question 5).
-- A form in `subr`'s result, say `(proves (then P) (else Q))`, `P` and `Q`
+- A form in `subr`'s result, `(bool (then P …) (else Q …))`, `P` and `Q`
   conjunctions of facts about parameters: a shape (`(shape 0 pair)`, cheap,
   since union members' shapes are disjoint), a size relation (the linear
   facts the checkers solve already), a certification.
@@ -1648,6 +1648,16 @@ The user's word (2026-10-07): once stage 2 works, reframe its narrowing as
 explicit latent propositions in the predicates' standard types, a coherent
 type-signature model for the analysis; checking a `lambda` against such a
 type can wait.
+
+Begun (2026-10-07), the shapes: a procedure's result may be `(bool (then P
+…) (else Q …))` (the user's dislike of `tests`; `proves` is the lemmas'),
+each proposition `(shape i S)` or `(not (shape i S))`; the shape
+predicates' standard types say what they prove, and both checkers narrow
+from the callee's type, not a table of names; a call's own type is
+`bool`. Left: the size facts (`<`, `=`, `null?` of a `nlist`) and the
+certifications (`length-is?`, `acyclic?`, `nat?`) as propositions too;
+checking a `lambda` against such a type (until then refused, its body a
+`bool`); paths, below.
 
 ## 56. Shape predicates inline (Q7's stage 2, measured 2026-10-07)
 

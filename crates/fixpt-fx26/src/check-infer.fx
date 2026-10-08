@@ -398,6 +398,8 @@
             ((= p 3) (null? (k-as-subr actual)))
             ;; A union: only if what is given is of none of its shapes.
             ((= p 26) (k-shapes-miss? pattern actual))
+            ;; A test's result is a `bool`.
+            ((and (= p 0) (= a 27)) #f)
             ((and (= p 6) (= a 18)) #f)
             ;; A `nat` is an `int`.
             ((and (= p 0) (= a 19)) #f)

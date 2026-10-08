@@ -600,15 +600,19 @@ are each below one). Inference: a union expected of a call's result
 solves it from the member whose shapes hold the result's; `nil` where a
 pair that may be `nil` is expected whose tail is no list is of the type
 `nil`. The shape predicates (`int?`, `char?`, `bool?`, `null?`, `pair?`,
-`string?`, `symbol?`, `procedure?`, `array?`) narrow a variable, splitting
+`string?`, `symbol?`, `procedure?`, `array?`) narrow a variable, as their
+types' latent propositions say (a result `(bool (then (shape 0 int))
+(else (not (shape 0 int))))`; the checkers read them from the callee's
+type, not its name; a call's own type is `bool`), splitting
 a union by its members' shapes, a pair that may be `nil` into `nil` and
 the pair; `typecase` is sugar over them, `else` required. Shapes are bit
 masks in both checkers (the FX-26 one's since `int` has bit operations,
 `DONE.md` §55). Not yet: the ports converted, since only `null?` is
 inline natively and `lseq` with a union takes 6.6 s against its sum's 4.0 s (`TODO.md`
 §56); predicates for `f64`, `f32`, `ref`, sums and products (their shapes
-are disjoint, but nothing tests for them); latent propositions in the
-predicates' own types (`TODO.md` §54, the user's next).
+are disjoint, but nothing tests for them); a `lambda` checked against a
+type proving something, size and certification propositions, and paths
+(`TODO.md` §54).
 
 ### 8.4 What not to do, and why
 

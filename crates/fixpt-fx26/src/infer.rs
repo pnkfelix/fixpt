@@ -388,6 +388,17 @@ impl Checker {
     /// polymorphic. `expected` is the type the application should have, when
     /// that is known; it helps solve the operator's binders.
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
+        let (t, eff) = self.synth_app_of(e, fun, args, expected)?;
+        // A test's call is a `bool`: what the test's type says it proves is
+        // of these arguments, here (`Checker::narrowings`), and nowhere else.
+        let t = match self.arena.get(self.arena.resolve(t)) {
+            Ty::Proving { .. } => self.bool_,
+            _ => t,
+        };
+        Ok((t, eff))
+    }
+
+    fn synth_app_of(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         // The operator `(with #%fx n)` noted plain where it is, by this rule
         // whether or not the rules below look at the operator itself.
         let mut op = fun;
@@ -706,7 +717,7 @@ impl Checker {
 
     /// The binding `f` names, under any projections and ascriptions: its
     /// name and type, if it is a variable.
-    fn callee_binding(&self, mut f: ExpId) -> Option<(Sym, TyId)> {
+    pub(crate) fn callee_binding(&self, mut f: ExpId) -> Option<(Sym, TyId)> {
         while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
             f = *body;
         }
@@ -778,7 +789,7 @@ impl Checker {
 
     /// The binders of `t`, through every nested `poly`, and the type under
     /// them all.
-    fn binders_of(&self, t: TyId) -> (Vec<(DVar, Kind)>, TyId) {
+    pub(crate) fn binders_of(&self, t: TyId) -> (Vec<(DVar, Kind)>, TyId) {
         let mut all = Vec::new();
         let mut t = self.arena.resolve(t);
         while let Ty::Poly { binders, body } = self.arena.get(t).clone() {
@@ -1203,8 +1214,8 @@ impl Checker {
             (Ty::Subr { .. }, _) => a.as_subr().is_none(),
             // A `nlist` is a list.
             (Ty::Pair(..), Ty::NList { .. }) => false,
-            // A `nat` is an `int`.
-            (Ty::Base(_), Ty::Nat(_)) => false,
+            // A `nat` is an `int`; a test's result, a `bool`.
+            (Ty::Base(_), Ty::Nat(_) | Ty::Proving { .. }) => false,
             _ => std::mem::discriminant(&p) != std::mem::discriminant(&a),
         }
     }
@@ -1280,7 +1291,7 @@ impl Checker {
                     stack.extend([x, y]);
                     region(r) || effect(&e)
                 }
-                Ty::Base(_) | Ty::Void | Ty::Nil | Ty::Link(_) => false,
+                Ty::Base(_) | Ty::Void | Ty::Nil | Ty::Proving { .. } | Ty::Link(_) => false,
                 Ty::Nat(size) => matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
                 Ty::NList { elem, size, region: r } => {
                     stack.push(elem);
@@ -1323,7 +1334,7 @@ impl Checker {
             Ty::Pair(a, b, _, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Proving { .. } | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
             Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) | D::Fun(x) if self.walk_vars(*x, seen, hit))),
             Ty::App { fun, args } => {

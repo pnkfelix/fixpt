@@ -58,7 +58,7 @@ pub enum FamilyArg {
 /// The heads of the type forms `parse_type_node` reads.
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "union",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union",
 ];
 
 impl Checker {
@@ -412,10 +412,15 @@ impl Checker {
                     params.push(self.select_params(t, &names));
                     names.push(name);
                 }
-                let result = self.parse_type(result)?;
+                // A test's result, `(bool …)`: here, and only here.
+                let result = match result.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()) {
+                    Some(h) if self.name(h) == "bool" => self.parse_proving(result, params.len())?,
+                    _ => self.parse_type(result)?,
+                };
                 let result = self.select_params(result, &names);
                 Ok(self.arena.ty(Ty::Subr { conv, effect, params, result }))
             }
+            "bool" => Err(FxError::at(s.span, "`(bool …)` is a procedure's result, and only that")),
             // `(proves (<= A B))`, or `(proves (poly (binder …) (<= A B)
             // (<= X Y) …))`: the type of a proof that `A ≤ B` (given each
             // `X ≤ Y`), a function from a coercion for each hypothesis and
@@ -1653,6 +1658,55 @@ impl Checker {
             Some(e) => self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: chain }),
             None => chain,
         })
+    }
+
+    /// `(bool (then P …) (else Q …))`, the result of a procedure of `n`
+    /// parameters: a `bool` that proves each `P` of its arguments where it is
+    /// true, each `Q` where false (`Ty::Proving`), a proposition `(shape i
+    /// shape)` or `(not (shape i shape))`, `i` a parameter's number from 0.
+    fn parse_proving(&mut self, s: &Syntax, n: usize) -> R<TyId> {
+        let usage = "`(bool (then proposition …) (else proposition …))`";
+        let items = self.items(s, usage)?.to_vec();
+        let [_, then, els] = &items[..] else {
+            return Err(FxError::at(s.span, usage));
+        };
+        let then = self.parse_props(then, "then", n)?;
+        let els = self.parse_props(els, "else", n)?;
+        Ok(self.arena.ty(Ty::Proving { then, els }))
+    }
+
+    fn parse_props(&mut self, s: &Syntax, which: &str, n: usize) -> R<Vec<crate::ast::Prop>> {
+        let usage = format!("`({which} proposition …)`");
+        let items = self.items(s, &usage)?.to_vec();
+        if items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) != Some(which) {
+            return Err(FxError::at(s.span, usage));
+        }
+        items[1..].iter().map(|p| self.parse_prop(p, n)).collect()
+    }
+
+    fn parse_prop(&mut self, p: &Syntax, n: usize) -> R<crate::ast::Prop> {
+        let usage = "a proposition, `(shape parameter shape)` or `(not (shape parameter shape))`";
+        let parts = self.items(p, usage)?.to_vec();
+        let head = |c: &Self, x: &Syntax| x.as_symbol().map(|h| c.name(h).to_string());
+        let (negated, form) = match &parts[..] {
+            [h, inner] if head(self, h).as_deref() == Some("not") => (true, inner.clone()),
+            _ => (false, p.clone()),
+        };
+        let parts = self.items(&form, usage)?.to_vec();
+        let [h, i, k] = &parts[..] else {
+            return Err(FxError::at(form.span, usage));
+        };
+        if head(self, h).as_deref() != Some("shape") {
+            return Err(FxError::at(form.span, usage));
+        }
+        let Some(param) = self.literal_int(i).filter(|i| *i >= 0 && (*i as usize) < n) else {
+            return Err(FxError::at(i.span, format!("a parameter's number, from 0 to {}", n as i64 - 1)));
+        };
+        let Some(shape) = head(self, k).and_then(|k| crate::check::SHAPES.iter().position(|(s, _)| *s == k)) else {
+            let shapes: Vec<&str> = crate::check::SHAPES.iter().map(|(s, _)| *s).collect();
+            return Err(FxError::at(k.span, format!("a shape, one of {}", shapes.join(", "))));
+        };
+        Ok(crate::ast::Prop { param: param as usize, shape, negated })
     }
 
     /// A name for an expansion's own variable that `forms` never mention:
