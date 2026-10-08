@@ -20,6 +20,10 @@ pub mod ast;
 
 /// The eager reader, written in FX-26: see the file's own header. A module
 /// file of the reader's regions, built in ([`FRONT_END_MODULES`]).
+/// The parser's types, of the reader's regions and its own: a module file
+/// of no state (`TODO.md` §68).
+pub const PARSER_TYPES: &str = include_str!("parser-types.fx");
+
 /// The eager reader's types, of its regions: a module file of no state,
 /// which the reader and any of its clients load (`TODO.md` §68).
 pub const EAGER_READER_TYPES: &str = include_str!("eager-reader-types.fx");
@@ -154,9 +158,10 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 5] = [
+pub const FRONT_END_MODULES: [(&str, &str); 6] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader.fx", EAGER_READER),
+    ("parser-types.fx", PARSER_TYPES),
     ("parser.fx", PARSER),
     ("parser-exps.fx", PARSER_EXPS),
     ("parser-top.fx", PARSER_TOP),

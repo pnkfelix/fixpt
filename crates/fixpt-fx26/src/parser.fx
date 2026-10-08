@@ -24,91 +24,62 @@
 (define lst (with eager-reader-module lst))
 (define dotted (with eager-reader-module dotted))
 (define vec (with eager-reader-module vec))
-;; What a parse may do: read what was read and build a tree
-;; (`tree-builds`), and give up.
-(define-effect tree-builds (maxeff (read @globals) (read rs) (alloc rs)))
-(define-effect parses (maxeff tree-builds (goto rp)))
-
-(define-type syns-a (listof syn acyclic))
-(define-type names (listof symbol acyclic))
-
-;;; ------------------------------------------------------------------ trees
-;;; Each node ends with where it starts and ends. A list of none or one
-;;; stands for something optional: a parameter's type, a tagcase's `else`.
-
-(define-datatype exp
-  (e-var symbol int int)
-  (e-int int int int)
-  (e-bool bool int int)
-  (e-str string int int)
-  (e-char char int int)
-  (e-float f64 int int)
-  (e-sym symbol int int)
-  (e-unit int int)
-  (e-lambda (listof (productof (1 symbol) (2 syns-a)) acyclic) exp int int)
-  (e-app exp (listof exp acyclic) int int)
-  (e-plambda syn exp int int)
-  (e-proj exp syns-a int int)
-  (e-if exp exp exp int int)
-  (e-letrec (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp int int)
-  (e-let (listof (productof (1 symbol) (2 exp)) acyclic) exp int int)
-  (e-begin (listof exp acyclic) int int)
-  (e-prompt exp exp exp int int)
-  ;; `(letregion name body …)`, `(letrena name body …)` or `(letreap name
-  ;; body …)`, or `(letfreeze name body …)`: what it makes besides the
-  ;; region (0 nothing, 1 an arena, 2 a reap, 3 nothing, its region's data
-  ;; frozen as it ends: `docs/research/places-and-regions.md`),
-  ;; the region variable's name, the place a `letfreeze` freezes into
-  ;; (`heap` unless given), and the body.
-  (e-letregion int symbol symbol exp int int)
-  ;; `(rlambda region (param …) body …)`: the region, and the `lambda`.
-  (e-rlambda exp exp int int)
-  (e-the syn exp int int)
-  ;; `(convention C expression)`: the procedure converted to `C`.
-  (e-convention syn exp int int)
-  ;; A bloblet form, by name, with its field index, or -1.
-  (e-bloblet symbol int (listof exp acyclic) int int)
-  (e-product (listof (productof (1 symbol) (2 exp)) acyclic) int int)
-  (e-extract exp symbol int int)
-  (e-sum symbol exp int int)
-  ;; Arms: the tag, whether it takes a product apart, the names, the body.
-  (e-tagcase exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic)
-             (listof (productof (1 symbol) (2 exp)) acyclic) int int)
-  ;; `(module item …)` (`docs/research/first-class-modules.md`): each item
-  ;; what it is (0 `define-generative`, 1 `define-type`, 2 `define`, 3
-  ;; `define-rec`), the names it defines, their types (a `define`'s, none or
-  ;; one), and its expressions: the values, or an abstract type's two
-  ;; conversions, each `(lambda (x) x)` spanning the item.
-  (e-module (listof (productof (1 int) (2 names) (3 syns-a) (4 (listof exp acyclic))) acyclic)
-            int int)
-  ;; `(with module body …)`: the body, with the module's values in scope.
-  (e-with symbol exp int int))
-
-;; A top-level form. A definition's type is a list of none or one; a
-;; `define*`'s, of it and the `define*`.
-(define-datatype top
-  (t-define symbol syns-a exp int int)
-  ;; `(define-rec (name type lambda) …)`: a top-level `letrec`.
-  (t-define-rec (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) int int)
-  (t-define-type syn syn int int)
-  (t-define-effect syn syn int int)
-  ;; `(define-generative head rep)`: read by the checker alone; its two
-  ;; conversions follow it as definitions.
-  (t-define-generative syn syn int int)
-  (t-exp exp))
-
-;; The trees' lists: of expressions, a `lambda`'s parameters, a `letrec`'s
-;; and a `let`'s bindings, a `tagcase`'s arms, and top-level forms.
-(define-type exp-list (listof exp acyclic))
-(define-type param-list (listof (productof (1 symbol) (2 syns-a)) acyclic))
-(define-type letrec-list (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
-(define-type let-list (listof (productof (1 symbol) (2 exp)) acyclic))
-(define-type arm-list (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
-(define-type top-list (listof top acyclic))
-(define-type mod-item (productof (1 int) (2 names) (3 syns-a) (4 exp-list)))
-(define-type mod-items (listof mod-item acyclic))
-
-(define-datatype presult (p-ok (listof top acyclic)) (p-err string int int))
+;; Its types, at these regions (`parser-types.fx`), and the names it uses
+;; of them.
+(define parser-types ((proj (load-module "fx26:parser-types.fx") rs re rm rc rp)))
+(define-effect tree-builds (select parser-types tree-builds))
+(define-effect parses (select parser-types parses))
+(define-type syns-a (select parser-types syns-a))
+(define-type names (select parser-types names))
+(define-type exp (select parser-types exp))
+(define-type top (select parser-types top))
+(define-type exp-list (select parser-types exp-list))
+(define-type param-list (select parser-types param-list))
+(define-type letrec-list (select parser-types letrec-list))
+(define-type let-list (select parser-types let-list))
+(define-type arm-list (select parser-types arm-list))
+(define-type top-list (select parser-types top-list))
+(define-type mod-item (select parser-types mod-item))
+(define-type mod-items (select parser-types mod-items))
+(define-type presult (select parser-types presult))
+(define-type loaded-file (select parser-types loaded-file))
+(define-type loaded-files (select parser-types loaded-files))
+(define e-var (with parser-types e-var))
+(define e-int (with parser-types e-int))
+(define e-bool (with parser-types e-bool))
+(define e-str (with parser-types e-str))
+(define e-char (with parser-types e-char))
+(define e-float (with parser-types e-float))
+(define e-sym (with parser-types e-sym))
+(define e-unit (with parser-types e-unit))
+(define e-lambda (with parser-types e-lambda))
+(define e-app (with parser-types e-app))
+(define e-plambda (with parser-types e-plambda))
+(define e-proj (with parser-types e-proj))
+(define e-if (with parser-types e-if))
+(define e-letrec (with parser-types e-letrec))
+(define e-let (with parser-types e-let))
+(define e-begin (with parser-types e-begin))
+(define e-prompt (with parser-types e-prompt))
+(define e-letregion (with parser-types e-letregion))
+(define e-rlambda (with parser-types e-rlambda))
+(define e-the (with parser-types e-the))
+(define e-convention (with parser-types e-convention))
+(define e-bloblet (with parser-types e-bloblet))
+(define e-product (with parser-types e-product))
+(define e-extract (with parser-types e-extract))
+(define e-sum (with parser-types e-sum))
+(define e-tagcase (with parser-types e-tagcase))
+(define e-module (with parser-types e-module))
+(define e-with (with parser-types e-with))
+(define t-define (with parser-types t-define))
+(define t-define-rec (with parser-types t-define-rec))
+(define t-define-type (with parser-types t-define-type))
+(define t-define-effect (with parser-types t-define-effect))
+(define t-define-generative (with parser-types t-define-generative))
+(define t-exp (with parser-types t-exp))
+(define p-ok (with parser-types p-ok))
+(define p-err (with parser-types p-err))
 
 (define parse-tag (prompt-tag presult presult (maxeff tree-builds spin) rp)
   (make-continuation-prompt-tag))
@@ -626,13 +597,6 @@
 
 ;;; ------------------------------------------------------------ files loaded
 
-;; What the driver read for each `load-module`, by where the form starts:
-;; the file's base (0 if it could not be read or read), its path, why not
-;; (`cannot read …`, or where in it reading failed), its forms, and its
-;; text.
-(define-type loaded-file
-  (productof (1 int) (2 int) (3 string) (4 string) (5 syns-a) (6 string)))
-(define-type loaded-files (listof loaded-file acyclic))
 (define loaded (ref loaded-files rs) (new nil))
 ;; For a driver: what the program's `load-module`s read.
 (define loaded-files! (subr (maxeff (read @globals) (write rs)) (loaded-files) unit)

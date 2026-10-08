@@ -1806,4 +1806,7 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
 
 - Phase 1: `eager-reader-types.fx` (2026-10-08), the reader's effects,
   aliases and `syn`, which `eager-reader.fx` loads at its regions.
+- Phase 1: `parser-types.fx` (2026-10-08), the parser's effects, `exp`,
+  `top`, `presult`, the trees' lists and the loaded files' types, loading
+  the reader's types (not the reader) for `syn`.
 
