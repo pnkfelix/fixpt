@@ -243,6 +243,15 @@ impl Effect {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct TyId(pub u32);
 
+/// A step of a path from a variable (`check::PathFact`): `car`, `cdr`, or
+/// a product's field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Step {
+    Car,
+    Cdr,
+    Field(Sym),
+}
+
 /// A proposition about a procedure's arguments (`Ty::Proving`), each named
 /// by its parameter's number from 0.
 #[derive(Clone, Debug, PartialEq, Eq)]

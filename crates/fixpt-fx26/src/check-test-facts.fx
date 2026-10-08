@@ -240,5 +240,6 @@
 (define k-operand-size (with check-test-facts-module k-operand-size))
 (define k-nat-arith-size (with check-test-facts-module k-nat-arith-size))
 (define k-latent-props (with check-test-facts-module k-latent-props))
+(define k-arg-at (with check-test-facts-module k-arg-at))
 (define k-latent-facts (with check-test-facts-module k-latent-facts))
 (define k-latent-cert (with check-test-facts-module k-latent-cert))

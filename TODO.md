@@ -1643,6 +1643,16 @@ ordinary standard types, and let a user's `item-null?` narrow too
   `ref` or an array (whose writes would have to forget what is known, as
   `set!` would). A proposition in a procedure's type names its object by
   parameter and path (`(shape (car 0) int)`).
+  Done (2026-10-08), by the effects rather than immutability alone (the
+  user's): a test's fact of a path from a variable (`car`, `cdr`,
+  `extract`) lasts, in the order of evaluation, until an effect writes a
+  region the path reads through, or one that may be it, or transfers
+  control; not in closures' bodies; through frozen data and products for
+  the branch. Sound under the concurrency rule written into
+  `docs/fx26.md`: only tasks whose effects do not interfere run
+  interleaved, and every suspension is a control effect. Not yet:
+  propositions in a procedure's type about its parameters' paths, `(shape
+  (car 0) int)`, which wait on checking a `lambda` against such a type.
 
 The user's word (2026-10-07): once stage 2 works, reframe its narrowing as
 explicit latent propositions in the predicates' standard types, a coherent
@@ -1661,4 +1671,4 @@ i j)`; `<`, `=`, `null?`, `acyclic?`, `nat?`, `length-is?` say theirs in
 their types, and both checkers read every test's facts from its callee's
 type, none from its name (`sizes/latent-alias.fx`: aliases at their types
 do as they do). Left: checking a `lambda` against such a type (until then
-refused, its body a `bool`); paths, below.
+refused, its body a `bool`). Paths done too (2026-10-08, below).

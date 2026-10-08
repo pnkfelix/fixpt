@@ -520,6 +520,19 @@
         (let ((rest (k-desc-types (cdr ds))))
           (tagcase (car ds) (dt (x) (the k-ids (cons x rest))) (else y rest))))))
 (define-type k-regions (listof k-region acyclic))
+;; A step of a path from a variable: `car`, `cdr`, a product's field.
+(define-datatype k-step (st-car) (st-cdr) (st-field symbol))
+(define-type k-steps (listof k-step acyclic))
+;; What tests have narrowed paths from variables to (`check.rs`'s
+;; `PathFact`), newest first: the variable, its binding's depth, the
+;; steps, the regions they read through, the type, the closure depth it
+;; was found at, and whether an effect since has ended it.
+(define-type k-path-fact
+  (productof (1 symbol) (2 int) (3 k-steps) (4 k-regions) (5 int) (6 int) (7 bool)))
+(define-type k-path-facts (listof k-path-fact acyclic))
+(define k-path-narrowed (ref k-path-facts @t) (new nil))
+;; How many closures' bodies are being checked.
+(define k-closure-depth (ref int @t) (new 0))
 (define k-desc-regions (subr (maxeff (read @globals) (alloc @t)) (k-descs) k-regions)
   (lambda (ds)
     (if (null? ds)
@@ -672,6 +685,15 @@
 (define k-gen-param? (with check-types-module k-gen-param?))
 (define k-desc-types (with check-types-module k-desc-types))
 (define-type k-regions (select check-types-module k-regions))
+(define-type k-step (select check-types-module k-step))
+(define-type k-steps (select check-types-module k-steps))
+(define-type k-path-fact (select check-types-module k-path-fact))
+(define-type k-path-facts (select check-types-module k-path-facts))
+(define k-path-narrowed (with check-types-module k-path-narrowed))
+(define k-closure-depth (with check-types-module k-closure-depth))
+(define st-car (with check-types-module st-car))
+(define st-cdr (with check-types-module st-cdr))
+(define st-field (with check-types-module st-field))
 (define k-desc-regions (with check-types-module k-desc-regions))
 (define k-gen-region? (with check-types-module k-gen-region?))
 (define k-spin-why (with check-types-module k-spin-why))

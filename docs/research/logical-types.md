@@ -626,7 +626,10 @@ record, a bloblet with children `(union int node)`, was slower, 1.3 → 3.0 s,
 sets' slots 1 to 4 always hold ints, which an `(arrayof (union false
 int))` would have to test at every read where Scheme tests none. Not yet: predicates for `f64`, `f32`, `ref`, sums and products (their shapes
 are disjoint, but nothing tests for them); a `lambda` checked against a
-type proving something, and paths (`TODO.md` §54). Size facts and
+type proving something (`TODO.md` §54). Paths narrow too since
+2026-10-08 (`docs/fx26.md`, "A test narrows a path too"): a fact of
+`(car x)` lasts until an effect may write a region the path reads through
+or transfers control, as the language's concurrency rule makes sound. Size facts and
 certifications are propositions too since 2026-10-08 (`(< a b)`, `(=
 (length 0) (lit 0))`, `(acyclic i)`, `(length i j)` …): no test's facts
 are read from its name any more, only from its type.

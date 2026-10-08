@@ -1245,6 +1245,14 @@ its own arena and suspends inside it (checked as refused, with
 | S7    | M    | CML events (`choose`, `wrap`, `with-nack`, `sync`) over wakers; then the actors note's A2–A5 on this loop                                                                                                                                                          | S1         |
 | S8    | M    | Preemption at fuel polls (Q2) for tasks whose effects do not interfere                                                                                                                                                                                             | S5, P5     |
 
+**A rule S8 must keep** (2026-10-08): the checkers now rely on it. Only
+tasks whose effects do not interfere may run interleaved but at their own
+suspension points, and every suspension point is a control effect, so that
+an expression's effect is all that can change what it reads while it runs:
+a test's narrowing of a path, `(car x)`, lasts until an effect that writes
+the path's regions or transfers control (`docs/fx26.md`, "Concurrency, as
+the effects say"). Preemption between tasks that interfere would break it.
+
 S0 and S4 need no language change and are the first to do.
 
 ### 6.4 What threads would change

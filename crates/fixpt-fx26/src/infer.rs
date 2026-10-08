@@ -52,6 +52,7 @@ impl Checker {
         let eff = self.check_node(e, expected)?;
         let eff = self.frozen(e, eff)?;
         self.facts.effects.insert(e, eff.clone());
+        self.kill_paths(&eff);
         Ok(eff)
     }
 
@@ -188,12 +189,13 @@ impl Checker {
                 let (yes, no) = self.test_facts(test);
                 let (narrow_yes, narrow_no) = self.narrowings(test);
                 let depth = self.size_facts.len();
-                let narrowed = self.narrowed.len();
+                let narrowed = (self.narrowed.len(), self.path_narrowed.len());
                 self.size_facts.extend(yes);
-                self.narrowed.extend(narrow_yes);
+                self.push_narrowings(narrow_yes);
                 let ae = self.check(then, expected);
                 self.size_facts.truncate(depth);
-                self.narrowed.truncate(narrowed);
+                self.narrowed.truncate(narrowed.0);
+                self.path_narrowed.truncate(narrowed.1);
                 if certified.is_some() {
                     self.certified.pop();
                 }
@@ -205,10 +207,11 @@ impl Checker {
                 }
                 let ae = ae?;
                 self.size_facts.extend(no);
-                self.narrowed.extend(narrow_no);
+                self.push_narrowings(narrow_no);
                 let be = self.check(els, expected);
                 self.size_facts.truncate(depth);
-                self.narrowed.truncate(narrowed);
+                self.narrowed.truncate(narrowed.0);
+                self.path_narrowed.truncate(narrowed.1);
                 let be = be?;
                 Ok(self.mask(e, &te.union(&ae).union(&be), expected))
             }
@@ -366,10 +369,14 @@ impl Checker {
         let result = result.map(|r| self.instantiate_params(r, &given));
         // The body's effect is masked *with the parameters in scope*: they
         // are free in the body, so what reaches them stays.
+        // A closure may run later, after any write: no path's fact holds in
+        // its body (`Checker::path_fact`).
+        self.closure_depth += 1;
         let r = match result {
             Some(want) => self.check(body, want).map(|eff| (want, self.mask(body, &eff, want))),
             None => self.synth(body).map(|(t, eff)| (t, self.mask(body, &eff, t))),
         };
+        self.closure_depth -= 1;
         self.truncate_env(depth);
         let span = self.arena.span_of(e);
         // What the result says of a parameter's types, it says as the
@@ -400,6 +407,8 @@ impl Checker {
     /// that is known; it helps solve the operator's binders.
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         let (t, eff) = self.synth_app_of(e, fun, args, expected)?;
+        // A path a fact in force narrows (`(car x)` …), its type there.
+        let t = self.path_typed(e, t);
         // A test's call is a `bool`: what the test's type says it proves is
         // of these arguments, here (`Checker::narrowings`), and nowhere else.
         let t = match self.arena.get(self.arena.resolve(t)) {

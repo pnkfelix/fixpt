@@ -40,6 +40,27 @@ pub const FLATLAYOUT: &str = "(flatlayout (t type)) int";
 /// safety's analyses (its regions), opaque to anything else; its elements
 /// raw at run time, as its layout says.
 pub const FLATARRAYOF: &str = "(flatarrayof (t type) (r region)) (arrayof t r)";
+/// A test's narrowing of a path from a variable, `root` at binding `at`
+/// (`TODO.md` §54): its steps, the regions they read through, its type
+/// there, the closure depth it was found at, and whether an effect since
+/// may have changed what it reads, a write to one of the regions or a
+/// transfer of control (`Checker::kill_paths`).
+#[derive(Clone, Debug)]
+pub(crate) struct PathFact {
+    pub root: Sym,
+    pub at: usize,
+    pub steps: Vec<crate::ast::Step>,
+    pub regions: Vec<Region>,
+    pub ty: TyId,
+    pub depth: usize,
+    pub dead: bool,
+}
+
+/// A narrowing: a variable, at its binding, the steps of a path from it
+/// (none for the variable itself), the regions they read through, and its
+/// type there.
+pub(crate) type Narrowed = (Sym, usize, Vec<crate::ast::Step>, Vec<Region>, TyId);
+
 /// The shapes a value may have at run time (`Checker::shape`), bit `i` the
 /// `i`th, each with the standard predicate that tests for it: what a
 /// union's members must differ in, and what narrows one.
@@ -156,6 +177,13 @@ pub struct Checker {
     /// that may be `nil`, now one that is not). `docs/research/
     /// logical-types.md`, L0.
     pub(crate) narrowed: Vec<(Sym, usize, TyId)>,
+    /// What tests have narrowed paths from variables to (`(car x)`,
+    /// `(extract p l)`; `TODO.md` §54), while nothing since may have changed
+    /// what they read (`Checker::kill_paths`).
+    pub(crate) path_narrowed: Vec<PathFact>,
+    /// How many closures' bodies are being checked: a path's fact holds
+    /// only in the body it was found in, since a closure may run later.
+    pub(crate) closure_depth: usize,
     /// Unions read with a member not yet known, a recursive type's own
     /// name, and where: checked once it is (`Checker::union_of`).
     pub(crate) pending_unions: Vec<(TyId, fixpt_read::Span)>,
@@ -432,6 +460,8 @@ impl Checker {
             certified_nats: Vec::new(),
             certified_lengths: Vec::new(),
             narrowed: Vec::new(),
+            path_narrowed: Vec::new(),
+            closure_depth: 0,
             pending_unions: Vec::new(),
             unify_exact: false,
             size_facts: Vec::new(),
@@ -748,7 +778,7 @@ impl Checker {
     /// is not where it does not hold. Through `not`, and through `and` and
     /// `or` (`(if a b #f)`, `(if a #t b)`) as `test_facts` goes: what both
     /// sides narrow where an `and` holds, or an `or` does not.
-    pub(crate) fn narrowings(&mut self, test: ExpId) -> (Vec<(Sym, usize, TyId)>, Vec<(Sym, usize, TyId)>) {
+    pub(crate) fn narrowings(&mut self, test: ExpId) -> (Vec<Narrowed>, Vec<Narrowed>) {
         let none = (vec![], vec![]);
         if let Exp::If { test: a, then, els } = self.arena.exp_at(test).clone() {
             let (ta, ea) = self.narrowings(a);
@@ -799,28 +829,147 @@ impl Checker {
         }
     }
 
-    /// The variables among `args` narrowed by `props`, a conjunction: each
-    /// proposition of a variable's shape, in turn.
-    fn props_narrow(&mut self, props: &[crate::ast::Prop], args: &[ExpId]) -> Vec<(Sym, usize, TyId)> {
-        let mut out: Vec<(Sym, usize, TyId)> = Vec::new();
+    /// The variables and paths among `args` narrowed by `props`, a
+    /// conjunction: each proposition of a shape, in turn.
+    fn props_narrow(&mut self, props: &[crate::ast::Prop], args: &[ExpId]) -> Vec<Narrowed> {
+        let mut out: Vec<Narrowed> = Vec::new();
         for p in props {
             let crate::ast::Prop::Shape { param, shape, negated } = *p else { continue };
             let Some(&a) = args.get(param) else { continue };
-            let Exp::Var(v) = *self.arena.exp_at(a) else { continue };
-            let Some(i) = self.env.iter().rposition(|(n, _)| *n == v) else { continue };
-            let k = out.iter().position(|(w, j, _)| *w == v && *j == i);
-            let t = match k {
-                Some(k) => out[k].2,
-                None => self.arena.resolve(self.lookup(v).unwrap_or(self.env[i].1)),
+            let Some((v, i, steps)) = self.path_of(a) else { continue };
+            let k = out.iter().position(|(w, j, s, _, _)| *w == v && *j == i && *s == steps);
+            let (t, regions) = match k {
+                Some(k) => (out[k].4, out[k].3.clone()),
+                None => match self.path_type(v, i, &steps) {
+                    Some(x) => x,
+                    None => continue,
+                },
             };
             let (yes, no) = self.narrowed_by(t, 1u32 << shape);
             let Some(t) = (if negated { no } else { yes }) else { continue };
             match k {
-                Some(k) => out[k].2 = t,
-                None => out.push((v, i, t)),
+                Some(k) => out[k].4 = t,
+                None => out.push((v, i, steps, regions, t)),
             }
         }
         out
+    }
+
+    /// `e` as a path from a variable: the variable, its binding, and the
+    /// steps, `car`s, `cdr`s and products' fields, none for the variable.
+    pub(crate) fn path_of(&self, e: ExpId) -> Option<(Sym, usize, Vec<crate::ast::Step>)> {
+        use crate::ast::Step;
+        match self.arena.exp_at(e) {
+            Exp::Var(v) => Some((*v, self.env.iter().rposition(|(n, _)| n == v)?, Vec::new())),
+            Exp::App { fun, args } if args.len() == 1 => {
+                let step = match self.standard_ref(*fun).map(|op| self.interner.name(op)) {
+                    Some("car") => Step::Car,
+                    Some("cdr") => Step::Cdr,
+                    _ => return None,
+                };
+                let (v, i, mut steps) = self.path_of(args[0])?;
+                steps.push(step);
+                Some((v, i, steps))
+            }
+            Exp::Extract(x, l) => {
+                let (v, i, mut steps) = self.path_of(*x)?;
+                steps.push(Step::Field(*l));
+                Some((v, i, steps))
+            }
+            _ => None,
+        }
+    }
+
+    /// The type of the path from `v`, at binding `i`, by `steps`, as the
+    /// types say and the facts in force narrow it, and the regions it reads
+    /// through: a pair's, for a `car` or `cdr`; none for a product's field,
+    /// which nothing writes.
+    fn path_type(&self, v: Sym, i: usize, steps: &[crate::ast::Step]) -> Option<(TyId, Vec<Region>)> {
+        use crate::ast::Step;
+        let mut t = self.arena.resolve(self.lookup(v).unwrap_or(self.env[i].1));
+        let mut regions = Vec::new();
+        for k in 0..steps.len() {
+            t = match (&steps[k], self.arena.get(t).clone()) {
+                (Step::Car, Ty::Pair(a, _, r, _)) => {
+                    regions.push(r);
+                    a
+                }
+                (Step::Cdr, Ty::Pair(_, b, r, _)) => {
+                    regions.push(r);
+                    b
+                }
+                (Step::Field(l), Ty::Product(ps)) => ps.iter().find(|(m, _)| m == l)?.1,
+                _ => return None,
+            };
+            t = self.arena.resolve(t);
+            if let Some(f) = self.path_fact(v, i, &steps[..=k]) {
+                t = self.arena.resolve(f.ty);
+            }
+        }
+        Some((t, regions))
+    }
+
+    /// The fact in force of the path from `v` at `i` by `steps`.
+    fn path_fact(&self, v: Sym, i: usize, steps: &[crate::ast::Step]) -> Option<&PathFact> {
+        self.path_narrowed
+            .iter()
+            .rev()
+            .find(|f| !f.dead && f.depth == self.closure_depth && f.root == v && f.at == i && f.steps == steps)
+    }
+
+    /// `e`'s type `t`, or, `e` a path a fact in force narrows, its type there.
+    pub(crate) fn path_typed(&self, e: ExpId, t: TyId) -> TyId {
+        if self.path_narrowed.is_empty() {
+            return t;
+        }
+        match self.path_of(e) {
+            Some((v, i, steps)) if !steps.is_empty() => self.path_fact(v, i, &steps).map_or(t, |f| f.ty),
+            _ => t,
+        }
+    }
+
+    /// Narrowings, of variables and of paths, put in force.
+    pub(crate) fn push_narrowings(&mut self, ns: Vec<Narrowed>) {
+        for (v, i, steps, regions, t) in ns {
+            if steps.is_empty() {
+                self.narrowed.push((v, i, t));
+            } else {
+                let depth = self.closure_depth;
+                self.path_narrowed.push(PathFact { root: v, at: i, steps, regions, ty: t, depth, dead: false });
+            }
+        }
+    }
+
+    /// What effect `eff`, of an expression just checked, ends of the paths'
+    /// facts (`TODO.md` §54): a write to a region a path reads through, or
+    /// to one that may be it (a region variable may be any region), and
+    /// any transfer of control or effect not known (`goto`, `comefrom`,
+    /// `await`, an effect variable), after which other code may have run.
+    /// A path through frozen data, or products' fields alone, is never
+    /// written. Effects are masked already: what they leave out, nothing
+    /// visible here reaches.
+    pub(crate) fn kill_paths(&mut self, eff: &Effect) {
+        if self.path_narrowed.iter().all(|f| f.dead) {
+            return;
+        }
+        let may_alias = |w: &Region, r: &Region| w == r || matches!(w, Region::Var(_)) || matches!(r, Region::Var(_));
+        // A closure's body, checked deeper, runs only when it is called,
+        // which is the call's effect, out here.
+        let depth = self.closure_depth;
+        for f in self.path_narrowed.iter_mut().filter(|f| !f.dead && f.depth == depth) {
+            let open: Vec<&Region> = f.regions.iter().filter(|r| !matches!(r, Region::Frozen(..))).collect();
+            if open.is_empty() {
+                continue;
+            }
+            let kills = eff.0.iter().any(|a| match a {
+                Atom::Write(w) => open.iter().any(|r| may_alias(w, r)),
+                Atom::Goto(_) | Atom::Comefrom(_) | Atom::Await(_) | Atom::Var(_) | Atom::App(_) => true,
+                _ => false,
+            });
+            if kills {
+                f.dead = true;
+            }
+        }
     }
 
     /// Type `t` where a value of it is found of one of the shapes in `mask`,
@@ -908,7 +1057,8 @@ impl Checker {
         let (t, eff) = self.synth_node(e)?;
         let eff = self.frozen(e, eff)?;
         self.facts.effects.insert(e, eff.clone());
-        Ok((t, eff))
+        self.kill_paths(&eff);
+        Ok((self.path_typed(e, t), eff))
     }
 
     /// A `letrec`: its group checked at the types declared, then its body,
@@ -1228,12 +1378,13 @@ impl Checker {
                 let (yes, no) = self.test_facts(test);
                 let (narrow_yes, narrow_no) = self.narrowings(test);
                 let depth = self.size_facts.len();
-                let narrowed = self.narrowed.len();
+                let narrowed = (self.narrowed.len(), self.path_narrowed.len());
                 self.size_facts.extend(yes);
-                self.narrowed.extend(narrow_yes);
+                self.push_narrowings(narrow_yes);
                 let a = self.synth(then);
                 self.size_facts.truncate(depth);
-                self.narrowed.truncate(narrowed);
+                self.narrowed.truncate(narrowed.0);
+                self.path_narrowed.truncate(narrowed.1);
                 if certified.is_some() {
                     self.certified.pop();
                 }
@@ -1245,10 +1396,11 @@ impl Checker {
                 }
                 let (a, ae) = a?;
                 self.size_facts.extend(no);
-                self.narrowed.extend(narrow_no);
+                self.push_narrowings(narrow_no);
                 let b = self.synth(els);
                 self.size_facts.truncate(depth);
-                self.narrowed.truncate(narrowed);
+                self.narrowed.truncate(narrowed.0);
+                self.path_narrowed.truncate(narrowed.1);
                 let (b, be) = b?;
                 let t = if self.subtype(a, b) {
                     b

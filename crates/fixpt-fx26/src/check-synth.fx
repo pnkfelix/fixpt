@@ -111,60 +111,160 @@
         (if (null? lens) #u (set k-certified-lengths (cons (car lens) (get k-certified-lengths))))
         (if (null? nats) #u (set k-certified-nats (cons (car nats) (get k-certified-nats))))))))
 ;; What `p` narrows where it holds (`car`) and where not (`cdr`): the Rust
-;; checker's `narrowings`. `(null? v)`, `v` a variable whose pairs may be
-;; `nil`, makes `v` a pair that is not where it does not hold; through
+;; checker's `narrowings`. Each narrowing (`check.rs`'s `Narrowed`): a
+;; variable, its binding's depth, the steps of a path from it (none for the
+;; variable), the regions they read through, and the type there. Through
 ;; `not`, and through `and` and `or` (`(if a b #f)`, `(if a #t b)`) as
 ;; `k-test-facts` goes.
-(define-type k-narrowing (pairof k-narrows k-narrows acyclic))
-(define k-narrows-append (subr (read @globals) (k-narrows k-narrows) k-narrows)
+(define-type k-nar (productof (1 symbol) (2 int) (3 k-steps) (4 k-regions) (5 int)))
+(define-type k-nars (listof k-nar acyclic))
+(define-type k-narrowing (pairof k-nars k-nars acyclic))
+(define k-nars-append (subr (read @globals) (k-nars k-nars) k-nars)
   (lambda (xs ys)
-    (if (null? xs) ys (the k-narrows (cons (car xs) (k-narrows-append (cdr xs) ys))))))
-;; Argument `i` of `args`, if a variable, as the binding it is (none or one).
-(define k-arg-var (subr (maxeff kreads (alloc @t) spin) (kxs int) k-named)
-  (lambda (args i)
-    (cond ((null? args) nil)
-          ((> i 0) (k-arg-var (cdr args) (- i 1)))
-          (else (tagcase (car args)
-                  (x-var (v va vb) (the k-named (cons (cons v (k-binding-depth v)) nil)))
-                  (else y nil))))))
-;; The type `out` narrows variable `v` at depth `d` to, or -1.
-(define k-narrows-of (subr (maxeff kreads spin) (k-narrows symbol int) int)
-  (lambda (out v d)
-    (cond ((null? out) -1)
-          ((and (symbol=? (extract (car out) 1) v) (= (extract (car out) 2) d))
-           (extract (car out) 3))
-          (else (k-narrows-of (cdr out) v d)))))
-;; `out` with `v` at depth `d` narrowed to `t`, in place of what it had.
-(define k-narrows-put
-  (subr (maxeff (read @globals) (alloc @t) spin) (k-narrows symbol int int) k-narrows)
-  (lambda (out v d t)
-    (cond ((null? out) (the k-narrows (cons (product (1 v) (2 d) (3 t)) nil)))
-          ((and (symbol=? (extract (car out) 1) v) (= (extract (car out) 2) d))
-           (the k-narrows (cons (product (1 v) (2 d) (3 t)) (cdr out))))
-          (else (the k-narrows (cons (car out) (k-narrows-put (cdr out) v d t)))))))
-;; The variables among `args` narrowed by `props`, a conjunction: each
-;; proposition of a variable's shape, in turn.
-(define k-props-narrow (subr (maxeff kstate spin) (k-props kxs k-narrows) k-narrows)
+    (if (null? xs) ys (the k-nars (cons (car xs) (k-nars-append (cdr xs) ys))))))
+(define k-step=? (subr (read @globals) (k-step k-step) bool)
+  (lambda (s u)
+    (tagcase s
+      (st-car () (tagcase u (st-car () #t) (else y #f)))
+      (st-cdr () (tagcase u (st-cdr () #t) (else y #f)))
+      (st-field (l) (tagcase u (st-field (m) (symbol=? l m)) (else y #f))))))
+(define k-steps=? (subr (read @globals) (k-steps k-steps) bool)
+  (lambda (xs ys)
+    (if (null? xs)
+        (null? ys)
+        (and (not (null? ys)) (k-step=? (car xs) (car ys)) (k-steps=? (cdr xs) (cdr ys))))))
+(define k-steps-snoc (subr (maxeff (read @globals) (alloc @t)) (k-steps k-step) k-steps)
+  (lambda (xs s)
+    (if (null? xs)
+        (the k-steps (cons s nil))
+        (the k-steps (cons (car xs) (k-steps-snoc (cdr xs) s))))))
+;; `x` as a path from a variable: the variable, its binding's depth, and
+;; the steps, `car`s, `cdr`s and products' fields (none or one).
+(define-type k-path (productof (1 symbol) (2 int) (3 k-steps)))
+(define-type k-paths (listof k-path acyclic))
+(define k-path-step (subr (maxeff (read @globals) (alloc @t)) (k-paths k-step) k-paths)
+  (lambda (ps s)
+    (if (null? ps)
+        (the k-paths nil)
+        (let* ((p (car ps)) (steps (k-steps-snoc (extract p 3) s)))
+          (the k-paths (cons (product (1 (extract p 1)) (2 (extract p 2)) (3 steps)) nil))))))
+(define k-path-of (subr (maxeff kreads (alloc @t) spin) (kx) k-paths)
+  (lambda (x)
+    (tagcase x
+      (x-var (v a b) (the k-paths (cons (product (1 v) (2 (k-binding-depth v)) (3 nil)) nil)))
+      (x-app (f args a b)
+        (let ((op (k-std-op f)))
+          (if (and (k-sc-one-arg? args) (or (string=? op "car") (string=? op "cdr")))
+              (k-path-step (k-path-of (car args)) (if (string=? op "car") (st-car) (st-cdr)))
+              (the k-paths nil))))
+      (x-extract (e l a b) (k-path-step (k-path-of e) (st-field l)))
+      (else y (the k-paths nil)))))
+;; The type the fact in force of the path from `v` at `d` by `steps` gives,
+;; or -1.
+(define k-path-fact-in (subr (maxeff kreads spin) (k-path-facts symbol int k-steps int) int)
+  (lambda (fs v d steps depth)
+    (cond ((null? fs) -1)
+          ((let ((f (car fs)))
+             (and (not (extract f 7)) (= (extract f 6) depth) (symbol=? (extract f 1) v)
+                  (= (extract f 2) d) (k-steps=? (extract f 3) steps)))
+           (extract (car fs) 5))
+          (else (k-path-fact-in (cdr fs) v d steps depth)))))
+(define k-path-fact-ty (subr (maxeff kreads spin) (symbol int k-steps) int)
+  (lambda (v d steps) (k-path-fact-in (get k-path-narrowed) v d steps (get k-closure-depth))))
+;; A type and the regions read to reach it (none or one).
+(define-type k-reached (listof (productof (1 int) (2 k-regions)) acyclic))
+(define k-reached-of (subr (alloc @t) (int k-regions) k-reached)
+  (lambda (t rs) (the k-reached (cons (product (1 t) (2 rs)) nil))))
+;; The path from `v` at `d`, `done` taken and `rest` to go, at type `t`
+;; having read through `rs`: as the types say and the facts in force
+;; narrow it (`check.rs`'s `path_type`).
+(define k-path-walk
+  (subr (maxeff kreads (alloc @t) spin) (symbol int k-steps k-steps int k-regions) k-reached)
+  (lambda (v d done rest t rs)
+    (if (null? rest)
+        (k-reached-of t rs)
+        (let* ((s (car rest))
+               (next (tagcase s
+                       (st-car ()
+                         (tagcase (k-get t)
+                           (ty-pair (a b r nl) (k-reached-of a (cons r rs)))
+                           (else y (the k-reached nil))))
+                       (st-cdr ()
+                         (tagcase (k-get t)
+                           (ty-pair (a b r nl) (k-reached-of b (cons r rs)))
+                           (else y (the k-reached nil))))
+                       (st-field (l)
+                         (tagcase (k-get t)
+                           (ty-product (ps)
+                             (let ((f (k-part-find ps l)))
+                               (if (< f 0) (the k-reached nil) (k-reached-of f rs))))
+                           (else y (the k-reached nil)))))))
+          (if (null? next)
+              (the k-reached nil)
+              (let* ((now (k-steps-snoc done s))
+                     (fact (k-path-fact-ty v d now))
+                     (t2 (k-resolve (if (>= fact 0) fact (extract (car next) 1)))))
+                (k-path-walk v d now (cdr rest) t2 (extract (car next) 2))))))))
+(define k-path-type (subr (maxeff kreads (alloc @t) spin) (symbol int k-steps) k-reached)
+  (lambda (v d steps)
+    (let ((t (k-lookup v)))
+      (if (< t 0) (the k-reached nil) (k-path-walk v d nil steps (k-resolve t) nil)))))
+;; `x`'s type `t`, or, `x` a path a fact in force narrows, its type there.
+(define k-path-ty (subr (maxeff kreads (alloc @t) spin) (kx int) int)
+  (lambda (x t)
+    (if (null? (get k-path-narrowed))
+        t
+        (let ((ps (k-path-of x)))
+          (if (or (null? ps) (null? (extract (car ps) 3)))
+              t
+              (let* ((p (car ps)) (f (k-path-fact-ty (extract p 1) (extract p 2) (extract p 3))))
+                (if (< f 0) t f)))))))
+(define k-path-te (subr (maxeff kreads (alloc @t) spin) (kx k-te) k-te)
+  (lambda (x te) (k-te (k-path-ty x (extract te 1)) (extract te 2))))
+;; What `out` narrows the path from `v` at `d` by `steps` to (none or one).
+(define k-nars-of (subr (maxeff kreads (alloc @t) spin) (k-nars symbol int k-steps) k-reached)
+  (lambda (out v d steps)
+    (cond ((null? out) (the k-reached nil))
+          ((let ((n (car out)))
+             (and (symbol=? (extract n 1) v) (= (extract n 2) d) (k-steps=? (extract n 3) steps)))
+           (k-reached-of (extract (car out) 5) (extract (car out) 4)))
+          (else (k-nars-of (cdr out) v d steps)))))
+;; `out` with that path narrowed to `t`, in place of what it had.
+(define k-nars-put
+  (subr (maxeff (read @globals) (alloc @t) spin) (k-nars symbol int k-steps k-regions int) k-nars)
+  (lambda (out v d steps rs t)
+    (let ((one (product (1 v) (2 d) (3 steps) (4 rs) (5 t))))
+      (cond ((null? out) (the k-nars (cons one nil)))
+            ((let ((n (car out)))
+               (and (symbol=? (extract n 1) v) (= (extract n 2) d) (k-steps=? (extract n 3) steps)))
+             (the k-nars (cons one (cdr out))))
+            (else (the k-nars (cons (car out) (k-nars-put (cdr out) v d steps rs t))))))))
+;; The variables and paths among `args` narrowed by `props`, a conjunction:
+;; each proposition of a shape, in turn.
+(define k-props-narrow (subr (maxeff kstate spin) (k-props kxs k-nars) k-nars)
   (lambda (props args out)
     (if (null? props)
         out
         (let* ((p (car props))
                (i (tagcase p (pr-shape (i k f) i) (else y -1)))
-               (v (if (< i 0) (the k-named nil) (k-arg-var args i))))
-          (if (null? v)
+               (x (if (< i 0) (the kxs nil) (k-arg-at args i)))
+               (path (if (null? x) (the k-paths nil) (k-path-of (car x)))))
+          (if (null? path)
               (k-props-narrow (cdr props) args out)
-              (let* ((n (car (car v))) (d (cdr (car v))) (had (k-narrows-of out n d))
-                     (t (if (>= had 0) had (k-lookup n))))
-                (if (< t 0)
+              (let* ((pt (car path)) (n (extract pt 1)) (d (extract pt 2)) (steps (extract pt 3))
+                     (had (k-nars-of out n d steps))
+                     (tr (if (null? had) (k-path-type n d steps) had)))
+                (if (null? tr)
                     (k-props-narrow (cdr props) args out)
                     (let* ((shape (tagcase p (pr-shape (i k f) k) (else y 0)))
                            (negated (tagcase p (pr-shape (i k f) f) (else y #f)))
-                           (split (k-narrowed-by (k-resolve t) shape))
+                           (split (k-narrowed-by (k-resolve (extract (car tr) 1)) shape))
                            (to (if negated (extract split 2) (extract split 1))))
-                      (k-props-narrow (cdr props) args
-                                      (if (< to 0) out (k-narrows-put out n d to)))))))))))
+                      (k-props-narrow
+                       (cdr props) args
+                       (if (< to 0) out (k-nars-put out n d steps (extract (car tr) 2) to)))))))))))
 ;; A test: what its callee's type says it proves (`ty-proving`), of those of
-;; its arguments that are variables, where it holds and where not.
+;; its arguments that are variables or paths, where it holds and where not.
 (define k-latent-narrowing (subr (maxeff kstate spin) (kx) k-narrowing)
   (lambda (p)
     (let ((l (k-latent-props p)))
@@ -179,19 +279,107 @@
       (tagcase p
         (x-if (q c d a b)
           (let ((nq (k-narrowings q)))
-            (cond ((k-bool-lit? c #t) (cons nil (k-narrows-append (cdr nq) (cdr (k-narrowings d)))))
-                  ((k-bool-lit? d #f) (cons (k-narrows-append (car nq) (car (k-narrowings c))) nil))
+            (cond ((k-bool-lit? c #t) (cons nil (k-nars-append (cdr nq) (cdr (k-narrowings d)))))
+                  ((k-bool-lit? d #f) (cons (k-nars-append (car nq) (car (k-narrowings c))) nil))
                   (else none))))
         (x-app (f args a b)
           (if (and (string=? (k-std-op f) "not") (k-sc-one-arg? args))
               (let ((ns (k-narrowings (car args)))) (cons (cdr ns) (car ns)))
               (k-latent-narrowing p)))
         (else y none)))))
+;; The variables' narrowings among `ns`, as `k-narrowed` keeps them.
+(define k-var-narrows (subr (maxeff (read @globals) (alloc @t)) (k-nars) k-narrows)
+  (lambda (ns)
+    (cond ((null? ns) nil)
+          ((null? (extract (car ns) 3))
+           (let ((n (car ns)))
+             (the k-narrows
+                  (cons (product (1 (extract n 1)) (2 (extract n 2)) (3 (extract n 5)))
+                        (k-var-narrows (cdr ns))))))
+          (else (k-var-narrows (cdr ns))))))
+;; The paths' narrowings among `ns` put in force, in turn.
+(define k-push-paths (subr kstate (k-nars) unit)
+  (lambda (ns)
+    (if (null? ns)
+        #u
+        (let ((n (car ns)))
+          (begin
+            (if (null? (extract n 3))
+                #u
+                (set k-path-narrowed
+                     (cons (product (1 (extract n 1)) (2 (extract n 2)) (3 (extract n 3))
+                                    (4 (extract n 4)) (5 (extract n 5))
+                                    (6 (get k-closure-depth)) (7 #f))
+                           (get k-path-narrowed))))
+            (k-push-paths (cdr ns)))))))
+;; Narrowings `ns` put in force, the variables' onto `saved`.
+(define k-put-narrowing (subr kstate (k-nars k-narrows) unit)
+  (lambda (ns saved)
+    (begin (set k-narrowed (k-narrows-append (k-var-narrows ns) saved)) (k-push-paths ns))))
+(define k-drop-facts (subr (read @globals) (k-path-facts int) k-path-facts)
+  (lambda (fs m) (if (or (<= m 0) (null? fs)) fs (k-drop-facts (cdr fs) (- m 1)))))
+;; The paths' facts cut back to the `n` oldest, as they are now (one an
+;; effect has ended since stays ended).
+(define k-cut-paths (subr kstate (int) unit)
+  (lambda (n)
+    (let ((fs (get k-path-narrowed)))
+      (set k-path-narrowed (k-drop-facts fs (- (k-length fs) n))))))
+(define k-narrows-append (subr (read @globals) (k-narrows k-narrows) k-narrows)
+  (lambda (xs ys)
+    (if (null? xs) ys (the k-narrows (cons (car xs) (k-narrows-append (cdr xs) ys))))))
+;; What effect `e`, of an expression just checked, ends of the paths' facts
+;; at this closure depth (`check.rs`'s `kill_paths`): a write to a region
+;; a path reads through, or to one that may be it (a region variable may be
+;; any region), and any transfer of control or effect not known. A path
+;; through frozen data, or products' fields alone, is never written.
+(define k-may-alias? (subr (maxeff (read @globals) spin) (k-region k-region) bool)
+  (lambda (w r)
+    (or (k-region=? w r)
+        (tagcase w (r-var (v) #t) (else y #f))
+        (tagcase r (r-var (v) #t) (else y #f)))))
+(define k-hits? (subr (maxeff (read @globals) spin) (k-region k-regions) bool)
+  (lambda (w rs)
+    (and (not (null? rs)) (or (k-may-alias? w (car rs)) (k-hits? w (cdr rs))))))
+(define k-open-regions (subr (maxeff (read @globals) (alloc @t)) (k-regions) k-regions)
+  (lambda (rs)
+    (cond ((null? rs) nil)
+          ((tagcase (car rs) (r-frozen (p f) #t) (else y #f)) (k-open-regions (cdr rs)))
+          (else (the k-regions (cons (car rs) (k-open-regions (cdr rs))))))))
+(define k-kills? (subr (maxeff (read @globals) spin) (k-eff k-regions) bool)
+  (lambda (e open)
+    (and (not (null? e))
+         (or (tagcase (car e)
+               (a-write (w) (k-hits? w open))
+               (a-goto (r) #t) (a-comefrom (r) #t) (a-await (r) #t) (a-var (v) #t)
+               (a-app (v ds) #t)
+               (else y #f))
+             (k-kills? (cdr e) open)))))
+(define k-kill-each
+  (subr (maxeff (read @globals) (alloc @t) spin) (k-path-facts k-eff int) k-path-facts)
+  (lambda (fs e depth)
+    (if (null? fs)
+        nil
+        (let* ((f (car fs))
+               (open (k-open-regions (extract f 4)))
+               (ends (and (not (extract f 7)) (= (extract f 6) depth) (not (null? open))
+                          (k-kills? e open)))
+               (g (if ends
+                      (product (1 (extract f 1)) (2 (extract f 2)) (3 (extract f 3))
+                               (4 (extract f 4)) (5 (extract f 5)) (6 (extract f 6)) (7 #t))
+                      f)))
+          (the k-path-facts (cons g (k-kill-each (cdr fs) e depth)))))))
+(define k-all-dead? (subr (read @globals) (k-path-facts) bool)
+  (lambda (fs) (or (null? fs) (and (extract (car fs) 7) (k-all-dead? (cdr fs))))))
+(define k-kill-paths (subr (maxeff kstate spin) (k-eff) unit)
+  (lambda (e)
+    (let ((fs (get k-path-narrowed)))
+      (if (k-all-dead? fs) #u (set k-path-narrowed (k-kill-each fs e (get k-closure-depth)))))))
 ;; What checking an `if`'s branches puts back as it goes: what was certified, the size
 ;; facts, and what was narrowed, before; what its test shows when it holds, and when not;
-;; and what it narrows so.
+;; what it narrows so; and how many paths' facts there were.
 (define-type k-tested
-  (productof (1 k-certs) (2 k-fact-list) (3 k-branch-facts) (4 k-narrows) (5 k-narrowing)))
+  (productof (1 k-certs) (2 k-fact-list) (3 k-branch-facts) (4 k-narrows) (5 k-narrowing)
+             (6 int)))
 ;; Before the branch where `p` holds: what it certifies, and the facts it shows, in force.
 (define k-enter-then (subr (maxeff kstate spin) (kx) k-tested)
   (lambda (p)
@@ -201,9 +389,10 @@
            (narrowing (k-narrowings p))
            (fsaved (get k-size-facts))
            (nsaved (get k-narrowed))
+           (psaved (k-length (get k-path-narrowed)))
            (fyes (set k-size-facts (k-with-facts (car facts) fsaved)))
-           (nyes (set k-narrowed (k-narrows-append (car narrowing) nsaved))))
-      (product (1 certs) (2 fsaved) (3 facts) (4 nsaved) (5 narrowing)))))
+           (nyes (k-put-narrowing (car narrowing) nsaved)))
+      (product (1 certs) (2 fsaved) (3 facts) (4 nsaved) (5 narrowing) (6 psaved)))))
 ;; After it, before the branch where `p` does not: nothing certified, and what `p` shows so.
 (define k-enter-else (subr kstate (k-tested) unit)
   (lambda (tested)
@@ -213,10 +402,13 @@
         (set k-certified-lengths (extract certs 2))
         (set k-certified-nats (extract certs 3))
         (set k-size-facts (k-with-facts (cdr (extract tested 3)) fsaved))
-        (set k-narrowed (k-narrows-append (cdr (extract tested 5)) (extract tested 4)))))))
+        (k-cut-paths (extract tested 6))
+        (k-put-narrowing (cdr (extract tested 5)) (extract tested 4))))))
 ;; After both: the facts, and what was narrowed, as they were.
 (define k-leave-test (subr kstate (k-tested) unit)
-  (lambda (t) (begin (set k-size-facts (extract t 2)) (set k-narrowed (extract t 4)))))
+  (lambda (t)
+    (begin (set k-size-facts (extract t 2)) (set k-narrowed (extract t 4))
+           (k-cut-paths (extract t 6)))))
 ;; Whether `args` are one variable, as the binding it is, among `cs`.
 (define k-certified-arg? (subr (maxeff kreads spin) (k-named kxs) bool)
   (lambda (cs args)
@@ -327,6 +519,8 @@
 (define k-new-subr (with check-synth-module k-new-subr))
 (define-type k-types-eff (select check-synth-module k-types-eff))
 (define k-projected (with check-synth-module k-projected))
+(define k-path-te (with check-synth-module k-path-te))
+(define k-kill-paths (with check-synth-module k-kill-paths))
 (define k-enter-then (with check-synth-module k-enter-then))
 (define k-enter-else (with check-synth-module k-enter-else))
 (define k-leave-test (with check-synth-module k-leave-test))
